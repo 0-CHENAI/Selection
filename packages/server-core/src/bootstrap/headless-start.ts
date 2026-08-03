@@ -1,6 +1,8 @@
-import { writeFileSync, readFileSync, unlinkSync, existsSync } from 'node:fs'
+import { writeFileSync, readFileSync, unlinkSync, existsSync, readlinkSync } from 'node:fs'
+import { execFileSync } from 'node:child_process'
 import { uptime as osUptime } from 'node:os'
-import { join } from 'node:path'
+import { join, basename } from 'node:path'
+import { lockHolderMatchesLock, parseTasklistImageName, type LockIdentity } from './lock-identity.ts'
 import { OAuthFlowStore } from '@craft-agent/shared/auth'
 import { ensureConfigDir, loadStoredConfig, saveConfig } from '@craft-agent/shared/config'
 import { CONFIG_DIR } from '@craft-agent/shared/config/paths'
@@ -121,10 +123,7 @@ export function generateServerToken(): string {
 
 const LOCK_FILE = join(CONFIG_DIR, '.server.lock')
 
-interface LockPayload {
-  pid: number
-  startedAt: number
-}
+type LockPayload = LockIdentity
 
 function isProcessAlive(pid: number): boolean {
   try {
@@ -133,6 +132,73 @@ function isProcessAlive(pid: number): boolean {
   } catch {
     return false
   }
+}
+
+const PROCESS_PROBE_OPTS: import('node:child_process').ExecFileSyncOptionsWithStringEncoding = {
+  encoding: 'utf-8', timeout: 2000, stdio: ['ignore', 'pipe', 'ignore'],
+}
+
+/**
+ * Best-effort read of a live PID's command line (POSIX) / tasklist row (Windows).
+ * Returns null when it can't be inspected (process gone, permission, platform
+ * quirk). Only used for LEGACY locks that predate `execName` — see
+ * lockHolderLooksLikeSameServer.
+ */
+function describeProcessCommand(pid: number): string | null {
+  try {
+    if (process.platform === 'win32') {
+      const out = execFileSync('tasklist', ['/FI', `PID eq ${pid}`, '/NH', '/FO', 'CSV'], PROCESS_PROBE_OPTS)
+      return out.trim() || null
+    }
+    const out = execFileSync('ps', ['-p', String(pid), '-o', 'command='], PROCESS_PROBE_OPTS)
+    return out.trim() || null
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Best-effort executable name (basename) of a live PID. Windows `tasklist` can
+ * only answer image names (never command lines); Linux prefers /proc/<pid>/exe
+ * because `ps -o comm=` truncates to 15 chars; macOS `ps -o comm=` returns the
+ * executable path. Returns null when uninspectable.
+ */
+function getLiveExecName(pid: number): string | null {
+  try {
+    if (process.platform === 'win32') {
+      const out = execFileSync('tasklist', ['/FI', `PID eq ${pid}`, '/NH', '/FO', 'CSV'], PROCESS_PROBE_OPTS)
+      return parseTasklistImageName(out)
+    }
+    if (process.platform === 'linux') {
+      try {
+        return basename(readlinkSync(`/proc/${pid}/exe`))
+      } catch { /* EACCES/gone — fall through to ps */ }
+    }
+    const out = execFileSync('ps', ['-p', String(pid), '-o', 'comm='], PROCESS_PROBE_OPTS).trim()
+    return out ? basename(out) : null
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Whether the process currently holding the lock's PID looks like the server
+ * that wrote the lock.
+ *
+ * After a reboot (or plain PID churn) a lock's still-alive PID can belong to an
+ * unrelated process (the reported case was macOS `swcd`), and a false "already
+ * running" silently and permanently bricks the app (#978). Locks record the
+ * writer's executable name since 0.11.3, so the check is name-to-name; legacy
+ * locks fall back to a craft-substring scan of the command line. Both fail OPEN
+ * (overwrite) when the process can't be inspected — decision logic + rationale
+ * live in lock-identity.ts.
+ */
+function lockHolderLooksLikeSameServer(lock: LockPayload): boolean {
+  return lockHolderMatchesLock(
+    lock,
+    lock.execName ? getLiveExecName(lock.pid) : null,
+    lock.execName ? null : describeProcessCommand(lock.pid)
+  )
 }
 
 /**
@@ -148,7 +214,8 @@ function parseLockContent(raw: string): LockPayload | null {
       const parsed = JSON.parse(trimmed) as Record<string, unknown>
       const pid = typeof parsed.pid === 'number' ? parsed.pid : NaN
       const startedAt = typeof parsed.startedAt === 'number' ? parsed.startedAt : 0
-      if (!isNaN(pid)) return { pid, startedAt }
+      const execName = typeof parsed.execName === 'string' && parsed.execName ? parsed.execName : undefined
+      if (!isNaN(pid)) return { pid, startedAt, execName }
     } catch { /* fall through to legacy parse */ }
   }
   // Legacy format: plain PID number
@@ -185,6 +252,12 @@ function acquireServerLock(logger: PlatformServices['logger']): void {
           // recycled the PID and the process is unrelated.
           if (isLockFromPreviousBoot(lock.startedAt)) {
             logger.warn(`[bootstrap] Lock PID ${lock.pid} is alive but lock predates current boot (stale due to PID reuse), overwriting`)
+          } else if (!lockHolderLooksLikeSameServer(lock)) {
+            // PID is alive but the process is not the server that wrote the lock —
+            // almost certainly a recycled PID (e.g. macOS swcd after a reboot).
+            // Overwrite instead of throwing, which would silently and permanently
+            // brick the app (#978).
+            logger.warn(`[bootstrap] Lock PID ${lock.pid} is alive but is not the lock's writer (recycled PID), overwriting`)
           } else {
             throw new Error(
               `Another server instance is already running (PID ${lock.pid}). ` +
@@ -204,7 +277,7 @@ function acquireServerLock(logger: PlatformServices['logger']): void {
     }
   }
 
-  const payload: LockPayload = { pid: process.pid, startedAt: Date.now() }
+  const payload: LockPayload = { pid: process.pid, startedAt: Date.now(), execName: basename(process.execPath) }
   writeFileSync(LOCK_FILE, JSON.stringify(payload), 'utf-8')
 
   // Safety net: release the lock on unexpected exits (SIGKILL, uncaught exceptions, etc.).

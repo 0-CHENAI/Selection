@@ -533,6 +533,11 @@ function getToolDisplayName(name: string): string {
     'set_session_status': 'Set Session Status',
     'get_session_info': 'Get Session Info',
     'list_sessions': 'List Sessions',
+    'archive_session': 'Archive Session',
+    'create_task': 'Create Task',
+    'list_background_tasks': 'List Background Tasks',
+    'send_agent_message': 'Send Agent Message',
+    'spawn_session': 'Spawn Session',
   }
 
   return displayNames[stripped] || stripped

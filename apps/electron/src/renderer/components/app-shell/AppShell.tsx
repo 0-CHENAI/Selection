@@ -43,6 +43,7 @@ import { cn } from "@/lib/utils"
 import { isMac } from "@/lib/platform"
 import { Button } from "@/components/ui/button"
 import { HeaderIconButton } from "@/components/ui/HeaderIconButton"
+import { resolveInheritedFilterParams, type FilterMode } from "./inherited-filter-params"
 import { Separator } from "@/components/ui/separator"
 import { Tooltip, TooltipTrigger, TooltipContent, DocumentFormattedMarkdownOverlay } from "@craft-agent/ui"
 import {
@@ -169,9 +170,6 @@ interface AppShellProps {
   /** Focused mode - hides sidebars, shows only the chat content */
   isFocusedMode?: boolean
 }
-
-/** Filter mode for tri-state filtering: include shows only matching, exclude hides matching */
-type FilterMode = 'include' | 'exclude'
 
 const altClickTooltipLabel = isMac ? '⌥ click to exclude' : 'Alt click to exclude'
 
@@ -2009,30 +2007,14 @@ function AppShellContent({
   }, [activeWorkspace?.id, navigate, t])
 
   /**
-   * Resolve the "inherit sole active filter" rule: if exactly one filter value
-   * is selected across statuses + labels + projects, return it as new-session
-   * params. Otherwise return null (fall back to workspace defaults).
+   * Resolve the "inherit sole active filter" rule for new sessions. Only
+   * include-mode filters are candidates — an excluded status/label/project must
+   * never be inherited (#970). See resolveInheritedFilterParams.
    */
-  const resolveInheritedNewSessionParams = useCallback((): { status?: string; label?: string; project?: string } | null => {
-    const statusCount = listFilter.size
-    const labelCount = labelFilter.size
-    const projectCount = projectFilter.size
-    const total = statusCount + labelCount + projectCount
-    if (total !== 1) return null
-    if (statusCount === 1) {
-      const [stateId] = [...listFilter.keys()]
-      return { status: stateId }
-    }
-    if (labelCount === 1) {
-      const [labelId] = [...labelFilter.keys()]
-      return { label: labelId }
-    }
-    if (projectCount === 1) {
-      const [projectId] = [...projectFilter.keys()]
-      return { project: projectId }
-    }
-    return null
-  }, [listFilter, labelFilter, projectFilter])
+  const resolveInheritedNewSessionParams = useCallback(
+    () => resolveInheritedFilterParams(listFilter, labelFilter, projectFilter),
+    [listFilter, labelFilter, projectFilter]
+  )
 
   // Create a new chat and select it
   const handleNewChat = useCallback((newPanel: boolean = false) => {

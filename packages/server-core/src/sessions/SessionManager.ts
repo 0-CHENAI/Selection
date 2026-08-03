@@ -100,6 +100,7 @@ import { ensureLabelsExist, ensureTaskItemLabel } from '@craft-agent/shared/labe
 import { loadStatusConfig } from '@craft-agent/shared/statuses/storage'
 import { AutomationSystem, createPromptHistoryEntry, appendAutomationHistoryEntry, type AutomationSystemMetadataSnapshot } from '@craft-agent/shared/automations'
 import { buildBackendRuntimeSignature, buildRestartRequiredSignature, filterAttachmentsForModelInput } from './runtime-config'
+import { validateArchiveTarget } from './archive-guards'
 
 // Import from server-core domain utilities
 import { sanitizeForTitle, shouldActivateBrowserOverlay, normalizeBrowserToolName, rollbackFailedBranchCreation, releaseBrowserOwnershipOnForcedStop } from '@craft-agent/server-core/domain'
@@ -4285,6 +4286,25 @@ export class SessionManager implements ISessionManager {
         setSessionStatusFn: async (sessionId: string | undefined, status: string) => {
           await this.setSessionStatus(sessionId ?? managed.id, status as SessionStatus)
         },
+        // archive_session — archive/unarchive ANOTHER session by ID. Scoped to the
+        // invoking session's workspace and blocked mid-turn (guard logic lives in
+        // archive-guards.ts so it is unit-testable); delegates to the existing
+        // archive/unarchive methods (which persist + emit events).
+        archiveSessionFn: async (sessionId: string, archived: boolean) => {
+          const target = this.sessions.get(sessionId)
+          const guardError = validateArchiveTarget(
+            target ? { workspaceId: target.workspace.id, isProcessing: target.isProcessing } : undefined,
+            managed.workspace.id,
+            sessionId,
+            archived
+          )
+          if (guardError) throw new Error(guardError)
+          if (archived) {
+            await this.archiveSession(sessionId)
+          } else {
+            await this.unarchiveSession(sessionId)
+          }
+        },
         // create_task — create a Task (board card + task.yaml + orchestrator session)
         // WITHOUT running it. Spec building happens here (not in session-tools-core,
         // which must stay dependency-free of @craft-agent/shared); the creation flow
@@ -4659,6 +4679,9 @@ export class SessionManager implements ISessionManager {
 
   async archiveSession(sessionId: string): Promise<void> {
     const managed = this.sessions.get(sessionId)
+    if (!managed) {
+      sessionLog.warn(`archiveSession: unknown session ${sessionId} — no-op`)
+    }
     if (managed) {
       managed.isArchived = true
       managed.archivedAt = Date.now()
@@ -4673,6 +4696,9 @@ export class SessionManager implements ISessionManager {
 
   async unarchiveSession(sessionId: string): Promise<void> {
     const managed = this.sessions.get(sessionId)
+    if (!managed) {
+      sessionLog.warn(`unarchiveSession: unknown session ${sessionId} — no-op`)
+    }
     if (managed) {
       managed.isArchived = false
       managed.archivedAt = undefined
@@ -6134,10 +6160,9 @@ export class SessionManager implements ISessionManager {
         sessionLog.info('Attachments:', attachments.length)
       }
 
-      // Skills mentioned via @mentions are handled by the SDK's Skill tool.
-      // The UI layer (extractBadges in mentions.ts) injects fully-qualified names
-      // in the rawText, and canUseTool in craft-agent.ts provides a fallback
-      // to qualify short names. No transformation needed here.
+      // Skills mentioned via @mentions are resolved by the UI layer (extractBadges
+      // in mentions.ts), which injects fully-qualified names in the rawText.
+      // No transformation needed here.
 
       // Ensure main process reads tool metadata from the correct session directory.
       // This must be set before each chat() call since multiple sessions share the process.

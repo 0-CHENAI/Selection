@@ -48,6 +48,21 @@ export const HANDLED_CHANNELS = [
 export function registerLlmConnectionsHandlers(server: RpcServer, deps: HandlerDeps): void {
   const { sessionManager } = deps
 
+  // Fire-and-forget model-list refresh after a credential change (setup, re-auth,
+  // validation). Re-auth can switch to an account with different model
+  // entitlements, so the cached list from the previous account must be replaced
+  // (#820). Never throws into the caller — a failed refresh must not fail the
+  // credential flow that triggered it.
+  const refreshModelsInBackground = (slug: string, context: string) => {
+    try {
+      getModelRefreshService().refreshNow(slug).catch(err => {
+        deps.platform.logger?.warn(`Model refresh after ${context} failed for ${slug}: ${err instanceof Error ? err.message : err}`)
+      })
+    } catch (err) {
+      deps.platform.logger?.warn(`Model refresh service unavailable after ${context} for ${slug}: ${err instanceof Error ? err.message : err}`)
+    }
+  }
+
   // Unified handler for LLM connection setup
   server.handle(RPC_CHANNELS.settings.SETUP_LLM_CONNECTION, async (_ctx, setup: LlmConnectionSetup): Promise<{ success: boolean; error?: string }> => {
     try {
@@ -523,9 +538,7 @@ export function registerLlmConnectionsHandlers(server: RpcServer, deps: HandlerD
       touchLlmConnection(slug)
 
       if (result.shouldRefreshModels) {
-        getModelRefreshService().refreshNow(slug).catch(err => {
-          deps.platform.logger?.warn(`Model refresh failed during validation: ${err instanceof Error ? err.message : err}`)
-        })
+        refreshModelsInBackground(slug, 'validation')
       }
 
       deps.platform.logger?.info(`LLM connection validated: ${slug}`)
@@ -689,6 +702,7 @@ export function registerLlmConnectionsHandlers(server: RpcServer, deps: HandlerD
 
       pendingChatGptFlows.delete(state)
       deps.platform.logger?.info(`[ChatGPT OAuth] Flow complete for ${flow.connectionSlug}`)
+      refreshModelsInBackground(flow.connectionSlug, 'ChatGPT auth')
       return { success: true }
     } catch (error) {
       pendingChatGptFlows.delete(state)
@@ -810,6 +824,7 @@ export function registerLlmConnectionsHandlers(server: RpcServer, deps: HandlerD
       })
 
       deps.platform.logger?.info('GitHub Copilot OAuth completed successfully')
+      refreshModelsInBackground(connectionSlug, 'Copilot auth')
       return { success: true }
     } catch (error) {
       copilotOAuthAbort = null

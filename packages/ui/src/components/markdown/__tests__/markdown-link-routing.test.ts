@@ -41,6 +41,20 @@ describe('resolveMarkdownLinkTarget', () => {
     })
   })
 
+  it('decodes a percent-encoded space in a BARE local file path (#944)', () => {
+    expect(resolveMarkdownLinkTarget('/Users/tester/My%20Docs/report%20final.pptx')).toEqual({
+      kind: 'file',
+      path: '/Users/tester/My Docs/report final.pptx',
+    })
+  })
+
+  it('leaves a bare path with an invalid percent-sequence untouched (#944)', () => {
+    expect(resolveMarkdownLinkTarget('/Users/tester/100%done/notes.md')).toEqual({
+      kind: 'file',
+      path: '/Users/tester/100%done/notes.md',
+    })
+  })
+
   it('normalizes windows drive-letter file URLs to local paths', () => {
     expect(resolveMarkdownLinkTarget('file:///C:/Users/Tester/Deck.pptx')).toEqual({
       kind: 'file',

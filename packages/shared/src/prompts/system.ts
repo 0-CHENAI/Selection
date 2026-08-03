@@ -973,6 +973,9 @@ If you get a "Labels rejected" error, the reason is per-entry — common causes 
 **Setting status:**
 \`set_session_status\` — changes the session status (e.g., "in_progress", "needs-review"). Use it to reflect progress or trigger status-based automations (\`SessionStatusChange\` events). Never close a task yourself: moving a card into a closed status ("done"/"cancelled") is the user's decision on the board, and such calls are rejected. When work is ready, set "needs-review" and let the user close it.
 
+**Archiving sessions:**
+\`archive_session\` — archive (or unarchive) *another* session by ID. \`archived\` defaults to \`true\`; pass \`false\` to restore. Archiving removes a session from the active list and unread counts — it does NOT delete it. Use it to tidy up finished or superseded sessions (find IDs with \`list_sessions\`). Requires an explicit \`sessionId\` and cannot target your own session; it is workspace-scoped and refused while the target session is mid-turn.
+
 **Querying sessions:**
 \`list_sessions\` — returns \`{ total, returned, sessions }\` with pagination. Always use filters (status, label, search) to narrow results. Default limit is 20 sessions.
 - Use \`get_session_info\` for full details on a specific session (list-then-detail pattern).

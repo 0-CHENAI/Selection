@@ -72,12 +72,42 @@ let __isUpdating = false
 // so the regular before-quit save site would see an empty array.
 let beforeUpdateQuitHook: (() => void) | null = null
 
+// Hook fired (awaited) immediately before quitAndInstall, AFTER the window
+// snapshot. index.ts uses it to flush sessions + release resources BEFORE the
+// installer quit, so before-quit no longer needs to preventDefault (which
+// cancelled Squirrel.Mac's quit and left the update downloaded-but-not-installed).
+let beforeUpdateInstallHook: (() => Promise<void>) | null = null
+
+// Hook fired when quitAndInstall throws AFTER beforeUpdateInstallHook already tore
+// the app down (sessions flushed, services disposed, lock released, isQuitting set).
+// The process cannot safely keep running at that point — index.ts uses this to
+// inform the user and relaunch into a fresh process instead of leaving a zombie
+// app whose next quit would skip the flush entirely (#891).
+let installQuitFailedHook: (() => void) | null = null
+
 /**
  * Register a callback to run inside installUpdate() before quitAndInstall.
  * Used by index.ts to snapshot multi-window state while windows are still alive.
  */
 export function setBeforeUpdateQuitHook(fn: () => void): void {
   beforeUpdateQuitHook = fn
+}
+
+/**
+ * Register an async callback run (awaited) inside installUpdate() right before
+ * quitAndInstall. index.ts uses it to run the full quit cleanup so the installer
+ * handoff isn't interrupted by the before-quit handler's preventDefault (#891).
+ */
+export function setBeforeUpdateInstallHook(fn: () => Promise<void>): void {
+  beforeUpdateInstallHook = fn
+}
+
+/**
+ * Register the recovery callback for a quitAndInstall failure that happens after
+ * the install cleanup hook already ran. index.ts relaunches the app from it.
+ */
+export function setInstallQuitFailedHook(fn: () => void): void {
+  installQuitFailedHook = fn
 }
 
 /**
@@ -415,6 +445,16 @@ export async function installUpdate(): Promise<void> {
     autoUpdateLog.error('beforeUpdateQuit hook failed', err)
   }
 
+  // Run the app's quit cleanup (session flush, timers, lock release) BEFORE the
+  // installer hands off. This lets the before-quit handler skip its own
+  // preventDefault-based cleanup, so Squirrel.Mac's quit runs to a real exit and
+  // the update actually installs (#891).
+  try {
+    await beforeUpdateInstallHook?.()
+  } catch (err) {
+    autoUpdateLog.error('beforeUpdateInstall cleanup hook failed', err)
+  }
+
   try {
     // isSilent=false shows the installer UI on Windows if needed (fallback)
     // isForceRunAfter=true ensures the app relaunches after install
@@ -424,6 +464,13 @@ export async function installUpdate(): Promise<void> {
     autoUpdateLog.error('quitAndInstall failed', error)
     updateInfo = { ...updateInfo, downloadState: 'error' }
     broadcastUpdateInfo()
+    // beforeUpdateInstallHook already tore the app down — recover via the
+    // registered relaunch hook instead of leaving a zombie process (#891).
+    try {
+      installQuitFailedHook?.()
+    } catch (hookErr) {
+      autoUpdateLog.error('installQuitFailed hook failed', hookErr)
+    }
     throw error
   }
 }

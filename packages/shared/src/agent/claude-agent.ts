@@ -21,6 +21,7 @@ import {
   resolveAuthEnvVars,
 } from '../config/llm-connections.ts';
 import type { McpClientPool } from '../mcp/mcp-pool.ts';
+import { proxyToolName } from '../mcp/proxy-tool-name.ts';
 import { loadPlanFromPath, type SessionConfig as Session } from '../sessions/storage.ts';
 import { loadProjectById, getProjectAssetsPath, listProjectAssets, getProjectMemoryPath, loadProjectMemory } from '../projects/storage.ts';
 import { DEFAULT_MODEL, isClaudeModel, isAdaptiveThinkingAlwaysOnModel, getDefaultSummarizationModel, getModelContextWindow } from '../config/models.ts';
@@ -440,7 +441,9 @@ function createSourceProxyServers(pool: McpClientPool): Record<string, ReturnTyp
     if (mcpTools.length === 0) continue;
 
     const proxyTools = mcpTools.map(mcpTool => {
-      const proxyName = `mcp__${slug}__${mcpTool.name}`;
+      // Must match the pool's dispatch-map key (mcp-pool.ts sanitizes dotted
+      // names), or pool.callTool(proxyName) would miss for dotted tools (#864).
+      const proxyName = proxyToolName(slug, mcpTool.name);
       return tool(
         mcpTool.name,
         mcpTool.description || `Tool from ${slug}`,
@@ -1583,12 +1586,10 @@ export class ClaudeAgent extends BaseAgent {
               }
             : {}),
         mcpServers,
-        // NOTE: This callback is NOT called by the SDK because we set `permissionMode: 'bypassPermissions'` above.
+        // No `canUseTool`: `permissionMode: 'bypassPermissions'` shadows it (SDK never calls it,
+        // and since SDK 0.3.198 the combination triggers a runtime warning on every query).
         // All permission logic is handled via the PreToolUse hook instead (see hooks.PreToolUse above).
         // Bash permission logic is in PreToolUse where it actually executes.
-        canUseTool: async (_toolName, input) => {
-          return { behavior: 'allow' as const, updatedInput: input as Record<string, unknown> };
-        },
         // Selectively disable tools - file tools are disabled (use MCP), web/code controlled by settings
         disallowedTools,
         // No plugins — skills are handled by BaseAgent.chat() via read-before-execute
