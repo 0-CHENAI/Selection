@@ -14,15 +14,13 @@ describe('models-pi filtering', () => {
     expect(ids.some(id => id.startsWith('pi/gpt-4'))).toBe(false);
   });
 
-  it('excludes deprecated Claude Opus 4.6 models from Anthropic catalogs', () => {
+  it('keeps Claude Opus 4.6 models in Anthropic catalogs', () => {
+    // TODO(opus-4.6-sunset): flip these back to exclusion when 4.6 is deprecated.
     const anthropicIds = getPiModelsForAuthProvider('anthropic').map(m => m.id);
-    expect(anthropicIds).not.toContain('pi/claude-opus-4-6');
-
-    const copilotIds = getPiModelsForAuthProvider('github-copilot').map(m => m.id);
-    expect(copilotIds).not.toContain('pi/claude-opus-4.6');
+    expect(anthropicIds).toContain('pi/claude-opus-4-6');
 
     const bedrockIds = getPiModelsForAuthProvider('amazon-bedrock').map(m => m.id);
-    expect(bedrockIds.some(id => id.includes('claude-opus-4-6'))).toBe(false);
+    expect(bedrockIds.some(id => id.includes('claude-opus-4-6'))).toBe(true);
   });
 
   it('includes DeepSeek in the Pi API key provider list with a human-readable label', () => {

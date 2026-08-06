@@ -28,11 +28,11 @@ describe('getDefaultModelsForConnection', () => {
     expect(typeof (first as any).id).toBe('string')
   })
 
-  it('pi with piAuthProvider returns filtered models without deprecated Opus 4.6', () => {
+  it('pi with piAuthProvider returns filtered models including Opus 4.6', () => {
     const models = getDefaultModelsForConnection('pi', 'anthropic')
     expect(models.length).toBeGreaterThan(0)
     const ids = models.map(m => typeof m === 'string' ? m : m.id)
-    expect(ids).not.toContain('pi/claude-opus-4-6')
+    expect(ids).toContain('pi/claude-opus-4-6')
     // All should have pi/ prefix in their id
     for (const id of ids) {
       expect(id.startsWith('pi/')).toBe(true)
@@ -154,10 +154,11 @@ describe('toBedrockNativeId', () => {
     expect(fromBedrockNativeId('global.anthropic.claude-sonnet-5')).toBe('claude-sonnet-5')
   })
 
-  it('normalizes deprecated Opus IDs to Opus 4.8 before mapping', () => {
-    expect(toBedrockNativeId('claude-opus-4-6')).toBe('us.anthropic.claude-opus-4-8')
-    expect(toBedrockNativeId('anthropic.claude-opus-4-6-v1')).toBe('us.anthropic.claude-opus-4-8')
-    expect(toBedrockNativeId('eu.anthropic.claude-opus-4-6-v1')).toBe('eu.anthropic.claude-opus-4-8')
+  it('normalizes deprecated Opus IDs to Opus 4.8 before mapping, keeping Opus 4.6', () => {
+    expect(toBedrockNativeId('claude-opus-4-5-20251101')).toBe('us.anthropic.claude-opus-4-8')
+    expect(toBedrockNativeId('claude-opus-4-6')).toBe('us.anthropic.claude-opus-4-6-v1')
+    expect(toBedrockNativeId('anthropic.claude-opus-4-6-v1')).toBe('us.anthropic.claude-opus-4-6-v1')
+    expect(toBedrockNativeId('eu.anthropic.claude-opus-4-6-v1')).toBe('eu.anthropic.claude-opus-4-6-v1')
   })
 
   it('maps base Bedrock IDs to US inference profile IDs', () => {
@@ -240,8 +241,8 @@ describe('fromBedrockNativeId', () => {
     expect(fromBedrockNativeId('claude-opus-4-8')).toBe('claude-opus-4-8')
   })
 
-  it('normalizes deprecated Opus native IDs back to Opus 4.8', () => {
-    expect(fromBedrockNativeId('us.anthropic.claude-opus-4-6-v1')).toBe('claude-opus-4-8')
+  it('maps Opus 4.6 native IDs back to the bare ID', () => {
+    expect(fromBedrockNativeId('us.anthropic.claude-opus-4-6-v1')).toBe('claude-opus-4-6')
   })
 })
 
@@ -255,9 +256,9 @@ describe('normalizeBedrockModelId', () => {
     expect(normalizeBedrockModelId('claude-opus-4-8')).toBe('us.anthropic.claude-opus-4-8')
   })
 
-  it('normalizes deprecated Opus IDs to Opus 4.8 native IDs', () => {
-    expect(normalizeBedrockModelId('pi/claude-opus-4-6')).toBe('us.anthropic.claude-opus-4-8')
-    expect(normalizeBedrockModelId('claude-opus-4-6', 'eu')).toBe('eu.anthropic.claude-opus-4-8')
+  it('maps Opus 4.6 IDs to their own native IDs', () => {
+    expect(normalizeBedrockModelId('pi/claude-opus-4-6')).toBe('us.anthropic.claude-opus-4-6-v1')
+    expect(normalizeBedrockModelId('claude-opus-4-6', 'eu')).toBe('eu.anthropic.claude-opus-4-6-v1')
   })
 
   it('maps base Bedrock IDs to US inference profile', () => {

@@ -8,7 +8,7 @@ afterEach(() => {
 });
 
 describe('anthropicDriver.fetchModels', () => {
-  it('filters deprecated Opus models from live startup refresh and prefers Opus 4.8 as default', async () => {
+  it('filters deprecated Opus 4.5 but keeps Opus 4.6, and prefers Opus 4.8 as default', async () => {
     globalThis.fetch = (async () => new Response(JSON.stringify({
       data: [
         { id: 'claude-opus-4-6', display_name: 'Claude Opus 4.6', created_at: '2026-01-01T00:00:00Z', type: 'model' },
@@ -38,11 +38,16 @@ describe('anthropicDriver.fetchModels', () => {
 
     expect(result.serverDefault).toBe('claude-opus-4-8');
     expect(result.models.map(m => m.id)).toEqual([
+      'claude-opus-4-6',
       'claude-opus-4-8',
       'claude-opus-4-7',
       'claude-sonnet-4-6',
     ]);
-    expect(result.models[0]!.name).toBe('Opus 4.8');
-    expect(result.models[0]!.contextWindow).toBe(1_000_000);
+    const opus48 = result.models.find(m => m.id === 'claude-opus-4-8')!;
+    expect(opus48.name).toBe('Opus 4.8');
+    expect(opus48.contextWindow).toBe(1_000_000);
+    const opus46 = result.models.find(m => m.id === 'claude-opus-4-6')!;
+    expect(opus46.name).toBe('Opus 4.6');
+    expect(opus46.contextWindow).toBe(200_000);
   });
 });
