@@ -3,12 +3,11 @@
  *
  * A "..." dropdown menu for panel headers with built-in Open in New Window action.
  * Pass page-specific menu items as children; they appear above the separator.
- * Optionally includes a "Learn More" link to documentation when helpFeature is provided.
  */
 
 import * as React from 'react'
 import { useTranslation } from 'react-i18next'
-import { MoreHorizontal, AppWindow, ExternalLink } from 'lucide-react'
+import { MoreHorizontal, AppWindow } from 'lucide-react'
 import { HeaderIconButton } from './HeaderIconButton'
 import {
   DropdownMenu,
@@ -19,18 +18,20 @@ import {
   StyledDropdownMenuItem,
   StyledDropdownMenuSeparator,
 } from './styled-dropdown'
-import { type DocFeature, getDocUrl } from '@craft-agent/shared/docs/doc-links'
 
 interface HeaderMenuProps {
   /** Route string for Open in New Window action */
   route: string
   /** Page-specific menu items (rendered before Open in New Window) */
   children?: React.ReactNode
-  /** Documentation feature - when provided, adds a "Learn More" link to docs */
-  helpFeature?: DocFeature
+  /**
+   * @deprecated External docs links removed. Kept optional so existing call
+   * sites compile without change; the prop is ignored.
+   */
+  helpFeature?: string
 }
 
-export function HeaderMenu({ route, children, helpFeature }: HeaderMenuProps) {
+export function HeaderMenu({ route, children }: HeaderMenuProps) {
   const { t } = useTranslation()
   const handleOpenInNewWindow = async () => {
     const separator = route.includes('?') ? '&' : '?'
@@ -41,10 +42,6 @@ export function HeaderMenu({ route, children, helpFeature }: HeaderMenuProps) {
       console.error('[HeaderMenu] openUrl failed:', error)
     }
   }
-
-  const handleLearnMore = helpFeature ? () => {
-    window.electronAPI?.openUrl(getDocUrl(helpFeature))
-  } : undefined
 
   return (
     <DropdownMenu>
@@ -58,15 +55,6 @@ export function HeaderMenu({ route, children, helpFeature }: HeaderMenuProps) {
           <AppWindow className="h-3.5 w-3.5" />
           <span className="flex-1">{t("sessionMenu.openInNewWindow")}</span>
         </StyledDropdownMenuItem>
-        {helpFeature && (
-          <>
-            <StyledDropdownMenuSeparator />
-            <StyledDropdownMenuItem onClick={handleLearnMore}>
-              <ExternalLink className="h-3.5 w-3.5" />
-              <span className="flex-1">{t("common.learnMore")}</span>
-            </StyledDropdownMenuItem>
-          </>
-        )}
       </StyledDropdownMenuContent>
     </DropdownMenu>
   )

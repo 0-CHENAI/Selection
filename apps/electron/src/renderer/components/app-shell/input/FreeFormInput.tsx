@@ -177,7 +177,7 @@ export interface FreeFormInputProps {
   /** Callback when source selection changes */
   onSourcesChange?: (slugs: string[]) => void
   // Skill selection (for @mentions)
-  /** Available skills for @mention autocomplete */
+  /** Available skills for / slash-command autocomplete */
   skills?: LoadedSkill[]
   // Label selection (for #labels)
   /** Available labels for #label autocomplete */
@@ -568,7 +568,6 @@ export function FreeFormInput({
   const [modelDropdownOpen, setModelDropdownOpen] = React.useState(false)
 
   // Input settings (loaded from config)
-  const [autoCapitalisation, setAutoCapitalisation] = React.useState(true)
   const [sendMessageKey, setSendMessageKey] = React.useState<'enter' | 'cmd-enter'>('enter')
   const [spellCheck, setSpellCheck] = React.useState(false)
 
@@ -577,12 +576,10 @@ export function FreeFormInput({
     const loadInputSettings = async () => {
       if (!window.electronAPI) return
       try {
-        const [autoCapEnabled, sendKey, spellCheckEnabled] = await Promise.all([
-          window.electronAPI.getAutoCapitalisation(),
+        const [sendKey, spellCheckEnabled] = await Promise.all([
           window.electronAPI.getSendMessageKey(),
           window.electronAPI.getSpellCheck(),
         ])
-        setAutoCapitalisation(autoCapEnabled)
         setSendMessageKey(sendKey ?? 'enter')
         setSpellCheck(spellCheckEnabled)
       } catch (error) {
@@ -927,13 +924,10 @@ export function FreeFormInput({
     return active
   }, [permissionMode])
 
-  // Handle slash command selection (mode/feature commands)
+  // Handle slash command selection (feature commands — modes use the badge UI / Shift+Tab)
   const handleSlashCommand = React.useCallback((commandId: SlashCommandId) => {
-    if (commandId === 'safe') onPermissionModeChange?.('safe')
-    else if (commandId === 'ask') onPermissionModeChange?.('ask')
-    else if (commandId === 'allow-all') onPermissionModeChange?.('allow-all')
-    else if (commandId === 'compact' && !isProcessing) onSubmit('/compact', undefined)
-  }, [onPermissionModeChange, isProcessing, onSubmit])
+    if (commandId === 'compact' && !isProcessing) onSubmit('/compact', undefined)
+  }, [isProcessing, onSubmit])
 
   // Handle folder selection from slash command menu
   const handleSlashFolderSelect = React.useCallback((path: string) => {
@@ -954,7 +948,7 @@ export function FreeFormInput({
     })
   }, [workspaceId])
 
-  // Inline slash command hook (modes, features, and folders)
+  // Inline slash command hook (skills, commands, folders — modes use the badge UI)
   const inlineSlash = useInlineSlashCommand({
     inputRef: richInputRef,
     onSelectCommand: handleSlashCommand,
@@ -962,33 +956,21 @@ export function FreeFormInput({
     activeCommands,
     recentFolders,
     homeDir,
-  })
-
-  // Handle mention selection (sources, skills, files)
-  const handleMentionSelect = React.useCallback((item: MentionItem) => {
-    // For sources: enable the source immediately
-    if (item.type === 'source' && item.source && onSourcesChange) {
-      const slug = item.source.config.slug
-      if (!optimisticSourceSlugs.includes(slug)) {
-        const newSlugs = [...optimisticSourceSlugs, slug]
-        setOptimisticSourceSlugs(newSlugs)
-        onSourcesChange(newSlugs)
-      }
-    }
-
-    // Files via @ mention in text are sufficient context for the agent.
-    // Skills also don't need special handling beyond text insertion.
-  }, [optimisticSourceSlugs, onSourcesChange])
-
-  // Inline mention hook (for skills, sources, and files)
-  const inlineMention = useInlineMention({
-    inputRef: richInputRef,
     skills,
-    sources,
-    basePath: workingDirectory,
-    onSelect: handleMentionSelect,
     // Use workspace slug (not UUID) for SDK skill qualification
     workspaceId: workspaceSlug,
+  })
+
+  // Handle mention selection (files only)
+  const handleMentionSelect = React.useCallback((_item: MentionItem) => {
+    // Files via @ mention in text are sufficient context for the agent.
+  }, [])
+
+  // Inline mention hook — files only (@). Skills are under `/`.
+  const inlineMention = useInlineMention({
+    inputRef: richInputRef,
+    basePath: workingDirectory,
+    onSelect: handleMentionSelect,
   })
 
   // Inline label menu hook (for #labels)
@@ -1456,31 +1438,15 @@ export function FreeFormInput({
     // Update inline label state (for #labels)
     inlineLabel.handleInputChange(nextValue, cursorPosition)
 
-    // Auto-capitalize first letter (but not for slash commands, @mentions, or #labels)
-    // Only if autoCapitalisation setting is enabled
-    let newValue = nextValue
-    if (autoCapitalisation && nextValue.length > 0 && nextValue.charAt(0) !== '/' && nextValue.charAt(0) !== '@' && nextValue.charAt(0) !== '#') {
-      const capitalizedFirst = nextValue.charAt(0).toUpperCase()
-      if (capitalizedFirst !== nextValue.charAt(0)) {
-        newValue = capitalizedFirst + nextValue.slice(1)
-        // Set cursor position BEFORE state update so it's used when useEffect syncs the value
-        richInputRef.current?.setSelectionRange(cursorPosition, cursorPosition)
-        setInput(newValue)
-        syncToParent(newValue)
-        return
-      }
-    }
-
     // Apply smart typography (-> to →, etc.)
     const typography = applySmartTypography(nextValue, cursorPosition)
     if (typography.replaced) {
-      newValue = typography.text
       // Set cursor position BEFORE state update so it's used when useEffect syncs the value
       richInputRef.current?.setSelectionRange(typography.cursor, typography.cursor)
-      setInput(newValue)
-      syncToParent(newValue)
+      setInput(typography.text)
+      syncToParent(typography.text)
     }
-  }, [inlineSlash, inlineMention, inlineLabel, syncToParent, autoCapitalisation])
+  }, [inlineSlash, inlineMention, inlineLabel, syncToParent])
 
   // Handle inline slash command selection (removes the /command text)
   const handleInlineSlashCommandSelect = React.useCallback((commandId: SlashCommandId) => {
@@ -1498,7 +1464,18 @@ export function FreeFormInput({
     richInputRef.current?.focus()
   }, [inlineSlash, syncToParent])
 
-  // Handle inline mention selection (inserts appropriate mention text)
+  // Handle inline slash skill selection (inserts [skill:…] mention)
+  const handleInlineSlashSkillSelect = React.useCallback((skill: LoadedSkill) => {
+    const { value: newValue, cursorPosition } = inlineSlash.handleSelectSkill(skill)
+    setInput(newValue)
+    syncToParent(newValue)
+    setTimeout(() => {
+      richInputRef.current?.focus()
+      richInputRef.current?.setSelectionRange(cursorPosition, cursorPosition)
+    }, 0)
+  }, [inlineSlash, syncToParent])
+
+  // Handle inline mention selection (inserts file/folder mention text)
   const handleInlineMentionSelect = React.useCallback((item: MentionItem) => {
     const { value: newValue, cursorPosition } = inlineMention.handleSelect(item)
     setInput(newValue)
@@ -1585,7 +1562,7 @@ export function FreeFormInput({
         onDragOver={handleDragOver}
         onDrop={handleDrop}
       >
-        {/* Inline Slash Command Autocomplete */}
+        {/* Inline Slash Command Autocomplete (skills, commands, folders) */}
         <InlineSlashCommand
           open={inlineSlash.isOpen}
           onOpenChange={(open) => !open && inlineSlash.close()}
@@ -1593,11 +1570,13 @@ export function FreeFormInput({
           activeCommands={activeCommands}
           onSelectCommand={handleInlineSlashCommandSelect}
           onSelectFolder={handleInlineSlashFolderSelect}
+          onSelectSkill={handleInlineSlashSkillSelect}
           filter={inlineSlash.filter}
           position={inlineSlash.position}
+          workspaceId={workspaceSlug}
         />
 
-        {/* Inline Mention Autocomplete (skills, sources, files) */}
+        {/* Inline Mention Autocomplete (files only) */}
         <InlineMentionMenu
           open={inlineMention.isOpen}
           onOpenChange={(open) => !open && inlineMention.close()}

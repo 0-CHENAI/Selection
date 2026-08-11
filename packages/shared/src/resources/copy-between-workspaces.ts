@@ -1,0 +1,308 @@
+/**
+ * Copy workspace resources (sources / skills) between local workspaces.
+ *
+ * Unlike export→import bundles, this is a direct filesystem copy that preserves
+ * headers, env stubs, auth state fields, and (optionally) credential-store secrets.
+ * Intended for single-user local transfers — not for portable/shareable bundles.
+ */
+
+import {
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  rmSync,
+  cpSync,
+  writeFileSync,
+  readFileSync,
+  renameSync,
+  statSync,
+} from 'fs'
+import { join, basename } from 'path'
+import { randomUUID } from 'crypto'
+import { getWorkspaceSourcesPath, getWorkspaceSkillsPath } from '../workspaces/storage.ts'
+import { getSourcePath } from '../sources/storage.ts'
+import { isBuiltinSource } from '../sources/builtin-sources.ts'
+import type { ResourceImportMode, ImportBucketResult, ResourceImportResult } from './types.ts'
+import type { FolderSourceConfig } from '../sources/types.ts'
+
+export interface CopyBetweenWorkspacesOptions {
+  fromRootPath: string
+  toRootPath: string
+  /** Credential scope keys = basename(workspace root) */
+  fromCredentialWorkspaceId: string
+  toCredentialWorkspaceId: string
+  /** Source slugs to copy, or 'all' */
+  sources?: string[] | 'all'
+  /** Skill slugs to copy, or 'all' */
+  skills?: string[] | 'all'
+  mode: ResourceImportMode
+  /** Copy credential-store secrets for sources (default true) */
+  includeCredentials?: boolean
+}
+
+export interface CopyBetweenWorkspacesDeps {
+  /**
+   * Copy all source credential types from one workspace scope to another for a slug.
+   * @returns true if at least one credential was copied
+   */
+  copySourceCredentials: (
+    fromWorkspaceId: string,
+    toWorkspaceId: string,
+    sourceSlug: string,
+  ) => Promise<boolean>
+  /** Clear all credential types for a source in a workspace (used on overwrite) */
+  clearSourceCredentials: (workspaceId: string, sourceSlug: string) => Promise<void>
+}
+
+function emptyBucket(): ImportBucketResult {
+  return { imported: [], skipped: [], failed: [], warnings: [] }
+}
+
+/**
+ * Reject path traversal and hidden/tmp directory names.
+ * Source/skill folder names must be single path segments.
+ */
+export function isSafeResourceSlug(slug: string): boolean {
+  if (!slug || slug.length > 200) return false
+  if (slug === '.' || slug === '..') return false
+  if (slug.startsWith('.')) return false
+  if (slug.includes('/') || slug.includes('\\') || slug.includes('\0')) return false
+  // Windows reserved / drive-like
+  if (/^[a-zA-Z]:/.test(slug)) return false
+  return true
+}
+
+function listSubdirs(dir: string): string[] {
+  if (!existsSync(dir)) return []
+  return readdirSync(dir, { withFileTypes: true })
+    .filter((e) => e.isDirectory() && isSafeResourceSlug(e.name))
+    .map((e) => e.name)
+}
+
+function resolveSelection(dir: string, selection: string[] | 'all'): string[] {
+  if (selection === 'all') return listSubdirs(dir)
+  return selection
+}
+
+function requiresAuth(config: FolderSourceConfig): boolean {
+  const authType = config.mcp?.authType || config.api?.authType
+  return Boolean(authType && authType !== 'none')
+}
+
+/**
+ * Adjust auth flags on the copied config.json so UI state matches credentials.
+ *
+ * - includeCredentials + store secrets landed → mark connected
+ * - credentials intentionally not copied + source requires auth → needs_auth
+ *   (avoids "connected" badge with no usable secrets)
+ * - otherwise leave filesystem copy as-is (e.g. header-only / no-auth sources)
+ */
+function applyAuthAfterCopy(
+  targetSourceDir: string,
+  includeCredentials: boolean,
+  hadCredentials: boolean,
+): void {
+  const configPath = join(targetSourceDir, 'config.json')
+  if (!existsSync(configPath)) return
+  try {
+    const config = JSON.parse(readFileSync(configPath, 'utf-8')) as FolderSourceConfig
+
+    if (includeCredentials && hadCredentials) {
+      config.isAuthenticated = true
+      config.connectionStatus = 'connected'
+      config.connectionError = undefined
+      writeFileSync(configPath, JSON.stringify(config, null, 2))
+      return
+    }
+
+    if (!includeCredentials && requiresAuth(config)) {
+      config.isAuthenticated = false
+      config.connectionStatus = 'needs_auth'
+      config.connectionError = undefined
+      writeFileSync(configPath, JSON.stringify(config, null, 2))
+    }
+  } catch {
+    // Non-fatal
+  }
+}
+
+function cleanupTmp(tmpDir: string): void {
+  try {
+    if (existsSync(tmpDir)) rmSync(tmpDir, { recursive: true, force: true })
+  } catch {
+    // ignore
+  }
+}
+
+/**
+ * Stage copy under a temp name, then rename into place so a failed copy
+ * cannot leave a half-written target (and overwrite keeps the old dir until stage succeeds).
+ */
+function stagedDirectoryCopy(fromPath: string, toPath: string, parentDir: string, slug: string): void {
+  const tmpDir = join(parentDir, `.tmp-copy-${slug}-${randomUUID().slice(0, 8)}`)
+  try {
+    cpSync(fromPath, tmpDir, { recursive: true })
+    if (existsSync(toPath)) {
+      rmSync(toPath, { recursive: true, force: true })
+    }
+    renameSync(tmpDir, toPath)
+  } catch (err) {
+    cleanupTmp(tmpDir)
+    throw err
+  }
+}
+
+/**
+ * Copy sources and skills between two local workspace roots.
+ */
+export async function copyBetweenWorkspaces(
+  options: CopyBetweenWorkspacesOptions,
+  deps: CopyBetweenWorkspacesDeps,
+): Promise<ResourceImportResult> {
+  const includeCredentials = options.includeCredentials !== false
+  const sourcesResult = options.sources !== undefined
+    ? await copySources(options, deps, includeCredentials)
+    : emptyBucket()
+  const skillsResult = options.skills !== undefined
+    ? copySkills(options)
+    : emptyBucket()
+
+  return {
+    sources: sourcesResult,
+    skills: skillsResult,
+    automations: emptyBucket(),
+  }
+}
+
+async function copySources(
+  options: CopyBetweenWorkspacesOptions,
+  deps: CopyBetweenWorkspacesDeps,
+  includeCredentials: boolean,
+): Promise<ImportBucketResult> {
+  const result = emptyBucket()
+  const fromDir = getWorkspaceSourcesPath(options.fromRootPath)
+  const toDir = getWorkspaceSourcesPath(options.toRootPath)
+  const slugs = resolveSelection(fromDir, options.sources!)
+
+  if (!existsSync(toDir)) {
+    mkdirSync(toDir, { recursive: true })
+  }
+
+  for (const slug of slugs) {
+    try {
+      if (!isSafeResourceSlug(slug)) {
+        result.failed.push({ id: slug, error: 'Invalid source slug' })
+        continue
+      }
+
+      if (isBuiltinSource(slug)) {
+        result.failed.push({ id: slug, error: 'Cannot copy builtin source slug' })
+        continue
+      }
+
+      const fromPath = getSourcePath(options.fromRootPath, slug)
+      if (!existsSync(fromPath)) {
+        result.failed.push({ id: slug, error: 'Source not found in source workspace' })
+        continue
+      }
+
+      // Guard against accidental file (not directory) at source path
+      if (!statSync(fromPath).isDirectory()) {
+        result.failed.push({ id: slug, error: 'Source path is not a directory' })
+        continue
+      }
+
+      const toPath = getSourcePath(options.toRootPath, slug)
+      const exists = existsSync(toPath)
+
+      if (exists && options.mode === 'skip') {
+        result.skipped.push(slug)
+        continue
+      }
+
+      // Clear target credentials before replacing (overwrite only; new copy has none)
+      if (exists) {
+        try {
+          await deps.clearSourceCredentials(options.toCredentialWorkspaceId, slug)
+        } catch (err) {
+          result.warnings.push(`Source '${slug}': failed to clear target credentials: ${err}`)
+        }
+      }
+
+      // Stage then rename — keeps previous target intact until stage succeeds
+      stagedDirectoryCopy(fromPath, toPath, toDir, slug)
+
+      let hadCreds = false
+      if (includeCredentials) {
+        try {
+          hadCreds = await deps.copySourceCredentials(
+            options.fromCredentialWorkspaceId,
+            options.toCredentialWorkspaceId,
+            slug,
+          )
+        } catch (err) {
+          result.warnings.push(`Source '${slug}': failed to copy credentials: ${err}`)
+        }
+      }
+
+      applyAuthAfterCopy(toPath, includeCredentials, hadCreds)
+      result.imported.push(slug)
+    } catch (err) {
+      result.failed.push({
+        id: slug,
+        error: err instanceof Error ? err.message : String(err),
+      })
+    }
+  }
+
+  return result
+}
+
+function copySkills(options: CopyBetweenWorkspacesOptions): ImportBucketResult {
+  const result = emptyBucket()
+  const fromDir = getWorkspaceSkillsPath(options.fromRootPath)
+  const toDir = getWorkspaceSkillsPath(options.toRootPath)
+  const slugs = resolveSelection(fromDir, options.skills!)
+
+  if (!existsSync(toDir)) {
+    mkdirSync(toDir, { recursive: true })
+  }
+
+  for (const slug of slugs) {
+    try {
+      if (!isSafeResourceSlug(slug)) {
+        result.failed.push({ id: slug, error: 'Invalid skill slug' })
+        continue
+      }
+
+      const fromPath = join(fromDir, slug)
+      if (!existsSync(fromPath)) {
+        result.failed.push({ id: slug, error: 'Skill not found in source workspace' })
+        continue
+      }
+
+      const toPath = join(toDir, slug)
+      const exists = existsSync(toPath)
+
+      if (exists && options.mode === 'skip') {
+        result.skipped.push(slug)
+        continue
+      }
+
+      stagedDirectoryCopy(fromPath, toPath, toDir, slug)
+      result.imported.push(slug)
+    } catch (err) {
+      result.failed.push({
+        id: slug,
+        error: err instanceof Error ? err.message : String(err),
+      })
+    }
+  }
+
+  return result
+}
+
+/** Credential scope id used by the source credential store for a workspace root. */
+export function credentialWorkspaceIdFromRoot(rootPath: string): string {
+  return basename(rootPath)
+}

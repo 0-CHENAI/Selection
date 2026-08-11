@@ -20,8 +20,6 @@ export const HANDLED_CHANNELS = [
   RPC_CHANNELS.drafts.SET,
   RPC_CHANNELS.drafts.DELETE,
   RPC_CHANNELS.drafts.GET_ALL,
-  RPC_CHANNELS.input.GET_AUTO_CAPITALISATION,
-  RPC_CHANNELS.input.SET_AUTO_CAPITALISATION,
   RPC_CHANNELS.input.GET_SEND_MESSAGE_KEY,
   RPC_CHANNELS.input.SET_SEND_MESSAGE_KEY,
   RPC_CHANNELS.input.GET_SPELL_CHECK,
@@ -226,18 +224,6 @@ export function registerSettingsHandlers(server: RpcServer, deps: HandlerDeps): 
   // ============================================================
   // Input Settings
   // ============================================================
-
-  // Get auto-capitalisation setting
-  server.handle(RPC_CHANNELS.input.GET_AUTO_CAPITALISATION, async () => {
-    const { getAutoCapitalisation } = await import('@craft-agent/shared/config/storage')
-    return getAutoCapitalisation()
-  })
-
-  // Set auto-capitalisation setting
-  server.handle(RPC_CHANNELS.input.SET_AUTO_CAPITALISATION, async (_ctx, enabled: boolean) => {
-    const { setAutoCapitalisation } = await import('@craft-agent/shared/config/storage')
-    setAutoCapitalisation(enabled)
-  })
 
   // Get send message key setting
   server.handle(RPC_CHANNELS.input.GET_SEND_MESSAGE_KEY, async () => {

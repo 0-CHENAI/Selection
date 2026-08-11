@@ -63,9 +63,9 @@ export type { LoadedSource, FolderSourceConfig, SourceConnectionStatus };
 import type { LoadedSkill, SkillMetadata } from '@craft-agent/shared/skills/types';
 export type { LoadedSkill, SkillMetadata };
 
-// Resource bundle types (cross-workspace export/import)
-import type { ExportResourcesOptions, ExportResult, ResourceImportMode, ResourceBundle, ResourceImportResult } from '@craft-agent/shared/resources';
-export type { ExportResourcesOptions, ExportResult, ResourceImportMode, ResourceBundle, ResourceImportResult };
+// Resource bundle types (cross-workspace export/import/copy)
+import type { ExportResourcesOptions, ExportResult, ResourceImportMode, ResourceBundle, ResourceImportResult, CopyResourcesOptions } from '@craft-agent/shared/resources';
+export type { ExportResourcesOptions, ExportResult, ResourceImportMode, ResourceBundle, ResourceImportResult, CopyResourcesOptions };
 
 // LLM connection types
 import type { LlmConnection, LlmConnectionWithStatus, LlmAuthType, LlmProviderType, NetworkProxySettings } from '@craft-agent/shared/config';
@@ -554,8 +554,7 @@ export interface ElectronAPI {
   setNotificationsEnabled(enabled: boolean): Promise<void>
 
   // Input settings
-  getAutoCapitalisation(): Promise<boolean>
-  setAutoCapitalisation(enabled: boolean): Promise<void>
+
   getSendMessageKey(): Promise<'enter' | 'cmd-enter'>
   setSendMessageKey(key: 'enter' | 'cmd-enter'): Promise<void>
   getSpellCheck(): Promise<boolean>
@@ -690,9 +689,11 @@ export interface ElectronAPI {
   // Language
   changeLanguage(lang: string): Promise<void>
 
-  // Resources (cross-workspace export/import)
+  // Resources (cross-workspace export/import/copy)
   exportResources(workspaceId: string, options: ExportResourcesOptions): Promise<ExportResult>
   importResources(workspaceId: string, bundle: ResourceBundle, mode: ResourceImportMode): Promise<ResourceImportResult>
+  /** Local filesystem copy (includes credentials by default). Local workspaces only. */
+  copyResourcesBetweenWorkspaces(fromWorkspaceId: string, toWorkspaceId: string, options: CopyResourcesOptions): Promise<ResourceImportResult>
 
   // Messaging gateway — workspaceId is taken from the client handshake (ctx.workspaceId)
   getMessagingConfig(): Promise<{

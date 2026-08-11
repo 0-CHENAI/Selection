@@ -1,7 +1,7 @@
 {
   "name": "@craft-agent/electron",
   "version": "0.11.4",
-  "description": "Electron desktop app for Craft Agents",
+  "description": "Electron desktop app for Selection",
   "main": "dist/main.cjs",
   "private": true,
   "author": {
@@ -57,6 +57,7 @@
     "cmdk": "^1.1.1",
     "electron-log": "^5.4.3",
     "electron-updater": "^6.8.0",
+    "generative-loaders": "^0.1.1",
     "i18next-browser-languagedetector": "^8.2.1",
     "jotai-family": "^1.0.1",
     "motion": "^12.23.26",

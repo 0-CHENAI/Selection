@@ -293,8 +293,7 @@ export const CHANNEL_MAP = {
   setNotificationsEnabled: invoke(RPC_CHANNELS.notification.SET_ENABLED),
 
   // Input settings
-  getAutoCapitalisation: invoke(RPC_CHANNELS.input.GET_AUTO_CAPITALISATION),
-  setAutoCapitalisation: invoke(RPC_CHANNELS.input.SET_AUTO_CAPITALISATION),
+
   getSendMessageKey: invoke(RPC_CHANNELS.input.GET_SEND_MESSAGE_KEY),
   setSendMessageKey: invoke(RPC_CHANNELS.input.SET_SEND_MESSAGE_KEY),
   getSpellCheck: invoke(RPC_CHANNELS.input.GET_SPELL_CHECK),
@@ -405,9 +404,10 @@ export const CHANNEL_MAP = {
   replayAutomation: invoke(RPC_CHANNELS.automations.REPLAY),
   onAutomationsChanged: listener(RPC_CHANNELS.automations.CHANGED),
 
-  // Resources (cross-workspace export/import)
+  // Resources (cross-workspace export/import/copy)
   exportResources: invoke(RPC_CHANNELS.resources.EXPORT),
   importResources: invoke(RPC_CHANNELS.resources.IMPORT),
+  copyResourcesBetweenWorkspaces: invoke(RPC_CHANNELS.resources.COPY_BETWEEN),
 
   // Messaging gateway
   getMessagingConfig: invoke(RPC_CHANNELS.messaging.GET_CONFIG),

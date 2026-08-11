@@ -5,7 +5,7 @@
  * Labels are stored at {workspaceRootPath}/labels/config.json
  *
  * Hierarchy: Labels form a nested JSON tree. IDs are simple slugs.
- * New workspaces are seeded with default labels (Development + Content groups).
+ * New workspaces are seeded with default Chinese labels (内容 group + 优先级).
  * Labels are visual by color only (colored circles in the UI).
  */
 
@@ -21,82 +21,136 @@ const LABEL_CONFIG_DIR = 'labels';
 const LABEL_CONFIG_FILE = 'labels/config.json';
 
 /**
- * Get default label configuration.
- * Provides a starter set of labels organized into two complementary color families:
- * - Development (blue family): Code, Bug, Automation
- * - Content (purple family): Writing, Research, Design
- * Plus flat valued labels: Priority (number), Project (string)
+ * Get default label configuration (Chinese display names).
  *
- * Children use hue-shifted shades of their parent color to show visual hierarchy.
+ * Starter set:
+ * - 内容 (purple family): 写作, 研究, 设计
+ * - 优先级 (number-valued)
+ *
+ * Removed from defaults: Development (+ Code/Bug/Automation), Project.
+ * Children use hue-shifted shades of their parent color for hierarchy.
  */
 export function getDefaultLabelConfig(): WorkspaceLabelConfig {
   return {
     version: 1,
     labels: [
       {
-        id: 'development',
-        name: 'Development',
-        color: { light: '#3B82F6', dark: '#60A5FA' },
-        children: [
-          {
-            id: 'code',
-            name: 'Code',
-            color: { light: '#4F46E5', dark: '#818CF8' }, // indigo shift
-          },
-          {
-            id: 'bug',
-            name: 'Bug',
-            color: { light: '#0EA5E9', dark: '#38BDF8' }, // sky shift
-          },
-          {
-            id: 'automation',
-            name: 'Automation',
-            color: { light: '#06B6D4', dark: '#22D3EE' }, // cyan shift
-          },
-        ],
-      },
-      {
         id: 'content',
-        name: 'Content',
+        name: '内容',
         color: { light: '#8B5CF6', dark: '#A78BFA' },
         children: [
           {
             id: 'writing',
-            name: 'Writing',
+            name: '写作',
             color: { light: '#7C3AED', dark: '#C4B5FD' }, // deeper violet
           },
           {
             id: 'research',
-            name: 'Research',
+            name: '研究',
             color: { light: '#A855F7', dark: '#C084FC' }, // lighter purple
           },
           {
             id: 'design',
-            name: 'Design',
+            name: '设计',
             color: { light: '#D946EF', dark: '#E879F9' }, // fuchsia shift
           },
         ],
       },
       {
         id: 'priority',
-        name: 'Priority',
+        name: '优先级',
         color: { light: '#F59E0B', dark: '#FBBF24' },
         valueType: 'number',
       },
-      {
-        id: 'project',
-        name: 'Project',
-        color: 'foreground/50',
-        valueType: 'string',
-      },
     ],
   };
+}
+
+/** Built-in seed labels that should always display Chinese names. */
+const SEED_LABEL_ZH_NAMES: Record<string, string> = {
+  content: '内容',
+  writing: '写作',
+  research: '研究',
+  design: '设计',
+  priority: '优先级',
+  // Legacy seed children (kept if user still has them under other parents)
+  code: '代码',
+  bug: '缺陷',
+  automation: '自动化',
+};
+
+/**
+ * Label IDs removed from the product defaults.
+ * Also matches by display name for user-created copies of the old seed.
+ */
+const REMOVED_SEED_LABEL_IDS = new Set([
+  'development',
+  'project',
+  'github-actions-monitor',
+  'github-actions',
+  'actions-monitor',
+]);
+
+const REMOVED_SEED_LABEL_NAMES = new Set([
+  'development',
+  'project',
+  'github actions monitor',
+  'github actions',
+  'actions monitor',
+]);
+
+/**
+ * Migrate legacy English seed labels → Chinese, and drop removed seed groups.
+ * Returns true when the config was modified and should be persisted.
+ *
+ * Safe for user-custom labels: only renames known seed IDs, only removes
+ * known legacy seed IDs/names.
+ */
+export function migrateDefaultLabelsToChinese(config: WorkspaceLabelConfig): boolean {
+  let changed = false;
+
+  const shouldRemove = (label: LabelConfig): boolean => {
+    if (REMOVED_SEED_LABEL_IDS.has(label.id)) return true;
+    if (REMOVED_SEED_LABEL_NAMES.has(label.name.trim().toLowerCase())) return true;
+    return false;
+  };
+
+  const walk = (labels: LabelConfig[]): LabelConfig[] => {
+    const next: LabelConfig[] = [];
+    for (const label of labels) {
+      if (shouldRemove(label)) {
+        changed = true;
+        continue;
+      }
+
+      const zhName = SEED_LABEL_ZH_NAMES[label.id];
+      if (zhName && label.name !== zhName) {
+        label.name = zhName;
+        changed = true;
+      }
+
+      if (label.children && label.children.length > 0) {
+        const children = walk(label.children);
+        if (children.length !== label.children.length) {
+          changed = true;
+        }
+        label.children = children.length > 0 ? children : undefined;
+      }
+
+      next.push(label);
+    }
+    return next;
+  };
+
+  config.labels = walk(config.labels);
+  return changed;
 }
 
 /**
  * Load workspace label configuration.
  * Returns empty config if no file exists or parsing fails.
  * Auto-migrates old Tailwind color format to EntityColor on first load.
+ * Migrates legacy English seed labels to Chinese and removes dropped seeds.
  */
 export function loadLabelConfig(workspaceRootPath: string): WorkspaceLabelConfig {
   const configPath = join(workspaceRootPath, LABEL_CONFIG_FILE);
@@ -115,9 +169,15 @@ export function loadLabelConfig(workspaceRootPath: string): WorkspaceLabelConfig
 
     // Auto-migrate old Tailwind class colors (e.g., "text-accent") to new EntityColor format.
     // If migration occurs, write the updated config back to disk.
-    const migrated = migrateLabelColors(config);
-    if (migrated) {
-      debug('[loadLabelConfig] Migrated old color format, writing back');
+    let dirty = migrateLabelColors(config);
+
+    // English seed labels → Chinese; drop Development / Project / GitHub Actions Monitor
+    if (migrateDefaultLabelsToChinese(config)) {
+      dirty = true;
+    }
+
+    if (dirty) {
+      debug('[loadLabelConfig] Migrated label config, writing back');
       saveLabelConfig(workspaceRootPath, config);
     }
 

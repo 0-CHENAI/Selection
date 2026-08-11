@@ -26,7 +26,6 @@ import {
   Copy,
   AppWindow,
   Columns2,
-  CloudUpload,
   RefreshCw,
   Tag,
   Send,
@@ -37,7 +36,7 @@ import { useMenuComponents } from '@/components/ui/menu-context'
 import { getStateColor, getStateIcon, type SessionStatusId } from '@/config/session-status-config'
 import type { SessionStatus } from '@/config/session-status-config'
 import type { LabelConfig } from '@craft-agent/shared/labels'
-import { LabelMenuItems, StatusMenuItems, ShareMenuItems } from './SessionMenuParts'
+import { LabelMenuItems, StatusMenuItems } from './SessionMenuParts'
 import { getFileManagerName } from '@/lib/platform'
 import type { SessionMeta } from '@/atoms/sessions'
 import { getSessionStatus, hasUnreadMeta, hasMessagesMeta } from '@/utils/session'
@@ -106,7 +105,6 @@ export function SessionMenu({
   const sessionId = item.id
   const isFlagged = item.isFlagged ?? false
   const isArchived = item.isArchived ?? false
-  const sharedUrl = item.sharedUrl
   const currentSessionStatus = getSessionStatus(item)
   const sessionLabels = item.labels ?? []
   const _hasMessages = hasMessagesMeta(item)
@@ -119,30 +117,6 @@ export function SessionMenu({
 
   return (
     <>
-      {/* Share/Shared based on shared state */}
-      {!sharedUrl ? (
-        <MenuItem onClick={actions.share}>
-          <CloudUpload className="h-3.5 w-3.5" />
-          <span className="flex-1">{t("sessionMenu.share")}</span>
-        </MenuItem>
-      ) : (
-        <Sub>
-          <SubTrigger className="pr-2">
-            <CloudUpload className="h-3.5 w-3.5" />
-            <span className="flex-1">{t("sessionMenu.shared")}</span>
-          </SubTrigger>
-          <SubContent>
-            <ShareMenuItems
-              onOpenInBrowser={actions.openSharedInBrowser}
-              onCopyLink={actions.copySharedLink}
-              onUpdateShare={actions.updateShare}
-              onRevokeShare={actions.revokeShare}
-              menu={{ MenuItem, Separator }}
-            />
-          </SubContent>
-        </Sub>
-      )}
-
       {/* Send to Workspace — visible when at least one other workspace exists */}
       {hasTransferTargets && onSendToWorkspace && (
         <MenuItem onClick={onSendToWorkspace}>

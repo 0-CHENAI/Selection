@@ -17,7 +17,6 @@ import { PanelHeader } from '@/components/app-shell/PanelHeader'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { HeaderMenu } from '@/components/ui/HeaderMenu'
 import { EditPopover, EditButton, getEditConfig } from '@/components/ui/EditPopover'
-import { getDocUrl } from '@craft-agent/shared/docs/doc-links'
 import { Loader2 } from 'lucide-react'
 import { useAppShellContext, useActiveWorkspace } from '@/context/AppShellContext'
 import { useLabels } from '@/hooks/useLabels'
@@ -79,15 +78,6 @@ export default function LabelsSettingsPage() {
                         </p>
                         <p>
                           {t("settings.labels.aboutText3")}
-                        </p>
-                        <p>
-                          <button
-                            type="button"
-                            onClick={() => window.electronAPI?.openUrl(getDocUrl('labels'))}
-                            className="text-foreground/70 hover:text-foreground underline underline-offset-2"
-                          >
-                            {t("chat.learnMore")}
-                          </button>
                         </p>
                       </div>
                     </SettingsCard>

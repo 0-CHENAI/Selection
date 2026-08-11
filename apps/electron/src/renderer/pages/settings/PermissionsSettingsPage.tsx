@@ -2,10 +2,10 @@
  * PermissionsSettingsPage
  *
  * Displays permissions configuration for Explore mode.
- * Shows both default patterns (from ~/.craft-agent/permissions/default.json)
+ * Shows both default patterns (from ~/.selection/permissions/default.json)
  * and custom workspace additions (from workspace permissions.json).
  *
- * Default patterns can be edited by the user in ~/.craft-agent/permissions/default.json.
+ * Default patterns can be edited by the user in ~/.selection/permissions/default.json.
  * Custom patterns can be edited via workspace permissions.json file.
  */
 
@@ -27,7 +27,6 @@ import {
   SettingsCard,
 } from '@/components/settings'
 import { EditPopover, EditButton, getEditConfig } from '@/components/ui/EditPopover'
-import { getDocUrl } from '@craft-agent/shared/docs/doc-links'
 import { routes } from '@/lib/navigate'
 import type { DetailsPageMeta } from '@/lib/navigation-registry'
 
@@ -37,7 +36,7 @@ export const meta: DetailsPageMeta = {
 }
 
 /**
- * Build default permissions data from ~/.craft-agent/permissions/default.json.
+ * Build default permissions data from ~/.selection/permissions/default.json.
  * These are the Explore mode patterns that can be customized by the user.
  * Patterns can include comments which are displayed in the table.
  *
@@ -141,7 +140,7 @@ export default function PermissionsSettingsPage() {
   const [defaultPermissionsPath, setDefaultPermissionsPath] = useState<string | null>(null)
   const [customConfig, setCustomConfig] = useState<PermissionsConfigFile | null>(null)
 
-  // Build default permissions data from ~/.craft-agent/permissions/default.json
+  // Build default permissions data from ~/.selection/permissions/default.json
   const defaultPermissionsData = useMemo(() => buildDefaultPermissionsData(defaultConfig), [defaultConfig])
 
   // Fallback labels for custom permissions (translated)
@@ -224,15 +223,6 @@ export default function PermissionsSettingsPage() {
                         </p>
                         <p>
                           {t("settings.permissions.aboutText2")}
-                        </p>
-                        <p>
-                          <button
-                            type="button"
-                            onClick={() => window.electronAPI?.openUrl(getDocUrl('permissions'))}
-                            className="text-foreground/70 hover:text-foreground underline underline-offset-2"
-                          >
-                            {t("common.learnMore")}
-                          </button>
                         </p>
                       </div>
                     </SettingsCard>

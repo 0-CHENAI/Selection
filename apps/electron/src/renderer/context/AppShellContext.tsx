@@ -115,7 +115,8 @@ export interface AppShellContextType {
 
   // Workspace
   onSelectWorkspace: (id: string, openInNewWindow?: boolean) => void | Promise<void>
-  onRefreshWorkspaces?: () => void
+  /** Reload the workspace list (e.g. after rename). Resolves when state is updated. */
+  onRefreshWorkspaces?: () => void | Promise<void>
 
   // App actions
   onOpenSettings: () => void

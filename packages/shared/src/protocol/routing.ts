@@ -135,8 +135,6 @@ export const LOCAL_ONLY_CHANNELS = new Set<string>([
   RPC_CHANNELS.notification.SET_ENABLED,
 
   // input — local input preferences
-  RPC_CHANNELS.input.GET_AUTO_CAPITALISATION,
-  RPC_CHANNELS.input.SET_AUTO_CAPITALISATION,
   RPC_CHANNELS.input.GET_SEND_MESSAGE_KEY,
   RPC_CHANNELS.input.SET_SEND_MESSAGE_KEY,
   RPC_CHANNELS.input.GET_SPELL_CHECK,
@@ -427,9 +425,10 @@ export const REMOTE_ELIGIBLE_CHANNELS = new Set<string>([
   // git — workspace filesystem
   RPC_CHANNELS.git.GET_BRANCH,
 
-  // resources — workspace resource export/import
+  // resources — workspace resource export/import/copy
   RPC_CHANNELS.resources.EXPORT,
   RPC_CHANNELS.resources.IMPORT,
+  RPC_CHANNELS.resources.COPY_BETWEEN,
 
   // messaging — gateway channels run on workspace server
   RPC_CHANNELS.messaging.WA_REGISTER,

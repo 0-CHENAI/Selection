@@ -1,7 +1,7 @@
 /**
  * Config Validate Handler
  *
- * Validates Craft Agent configuration files.
+ * Validates Selection configuration files.
  * Uses full validators if available (Claude), otherwise basic validation (Codex).
  */
 
@@ -18,6 +18,7 @@ import {
   mergeResults,
 } from '../validation.ts';
 import { getSourceConfigPath } from '../source-helpers.ts';
+import { CONFIG_DIR } from '@craft-agent/shared/config/paths'
 
 export interface ConfigValidateArgs {
   target: 'config' | 'sources' | 'statuses' | 'preferences' | 'permissions' | 'automations' | 'tool-icons' | 'all';
@@ -35,7 +36,7 @@ export async function handleConfigValidate(
   args: ConfigValidateArgs
 ): Promise<ToolResult> {
   const { target, sourceSlug } = args;
-  const craftAgentRoot = join(homedir(), '.craft-agent');
+  const craftAgentRoot = CONFIG_DIR;
 
   // If full validators available (Claude), use them
   if (ctx.validators) {

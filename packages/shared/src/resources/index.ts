@@ -9,6 +9,7 @@ export type {
   AutomationBundleEntry,
   ResourceImportMode,
   ExportResourcesOptions,
+  CopyResourcesOptions,
   ExportResult,
   ImportBucketResult,
   ResourceImportResult,
@@ -20,3 +21,14 @@ export {
   importResources,
   validateResourceBundle,
 } from './resource-bundle.ts'
+
+export type {
+  CopyBetweenWorkspacesOptions,
+  CopyBetweenWorkspacesDeps,
+} from './copy-between-workspaces.ts'
+
+export {
+  copyBetweenWorkspaces,
+  credentialWorkspaceIdFromRoot,
+  isSafeResourceSlug,
+} from './copy-between-workspaces.ts'

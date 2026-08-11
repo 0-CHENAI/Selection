@@ -43,6 +43,10 @@ import type {
   BridgeUpdateContext,
   RecoveryMessage,
 } from './backend/types.ts';
+import {
+  INTERRUPTION_SYSTEM_REMINDER,
+  sanitizeUserMessageForRetry,
+} from './user-message-sanitize.ts';
 import { AbortReason } from './backend/types.ts';
 import type { AuthRequest } from './session-scoped-tools.ts';
 import type { Workspace } from '../config/storage.ts';
@@ -245,7 +249,9 @@ export abstract class BaseAgent implements AgentBackend {
   }
 
   protected setCurrentTurnUserMessage(message: string | null): void {
-    this._currentTurnUserMessage = message;
+    // Capture user intent only — never model-only system-reminder / activation suffixes
+    this._currentTurnUserMessage =
+      message == null ? null : sanitizeUserMessageForRetry(message);
   }
 
   // ============================================================
@@ -1040,13 +1046,20 @@ ${formattedMessages}
 
     // Prepend read directive to the message so the model reads SKILL.md first.
     const directive = this.formatSkillDirective(skillPaths);
-    const messageParts = [branchSeedContext, transferredSessionContext, directive, cleanMessage].filter(Boolean);
-    const effectiveMessage = messageParts.join('\n\n');
+    // Strip any system-reminder that a caller accidentally embedded in `message`
+    // so retry capture and model injection stay separated.
+    const userFacingMessage = sanitizeUserMessageForRetry(cleanMessage);
+    const messageParts = [branchSeedContext, transferredSessionContext, directive, userFacingMessage].filter(Boolean);
+    let effectiveMessage = messageParts.join('\n\n');
 
-    // Capture the raw user message for source-activation auto-retry. `cleanMessage`
-    // has skill paths stripped but otherwise matches what the user typed — exactly
-    // what we want to resend when an activation forces a turn restart.
-    this.setCurrentTurnUserMessage(cleanMessage);
+    // Model-only interruption context — never stored/displayed as user content.
+    if (options?.previousResponseInterrupted) {
+      effectiveMessage = `${effectiveMessage}\n\n${INTERRUPTION_SYSTEM_REMINDER}`;
+    }
+
+    // Capture the raw user message for source-activation auto-retry. This is the
+    // user-facing text only (no system-reminder, no prior activation suffix).
+    this.setCurrentTurnUserMessage(userFacingMessage);
     try {
       yield* this.chatImpl(effectiveMessage, attachments, options);
     } finally {

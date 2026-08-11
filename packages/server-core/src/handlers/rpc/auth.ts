@@ -6,6 +6,7 @@ import { getCredentialManager } from '@craft-agent/shared/credentials'
 import type { RpcServer } from '@craft-agent/server-core/transport'
 import type { HandlerDeps } from '../handler-deps'
 import { requestClientConfirmDialog } from '@craft-agent/server-core/transport'
+import { CONFIG_DIR } from '@craft-agent/shared/config/paths'
 
 export const HANDLED_CHANNELS = [
   RPC_CHANNELS.auth.LOGOUT,
@@ -59,7 +60,7 @@ export function registerAuthHandlers(server: RpcServer, deps: HandlerDeps): void
       }
 
       // Delete the config file
-      const configPath = join(homedir(), '.craft-agent', 'config.json')
+      const configPath = join(CONFIG_DIR, 'config.json')
       await unlink(configPath).catch(() => {
         // Ignore if file doesn't exist
       })

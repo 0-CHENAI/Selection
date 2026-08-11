@@ -522,7 +522,9 @@ export const RichTextInput = React.forwardRef<RichTextInputHandle, RichTextInput
     const safeValue = React.useMemo(() => coerceInputText(value), [value])
     const divRef = React.useRef<HTMLDivElement>(null)
     const [isFocused, setIsFocused] = React.useState(false)
-    const isComposing = React.useRef(false)
+    // Ref for synchronous event checks; state so placeholder re-renders during IME.
+    const isComposingRef = React.useRef(false)
+    const [isComposing, setIsComposing] = React.useState(false)
     const lastValueRef = React.useRef(safeValue)
     const cursorPositionRef = React.useRef(0)
     const lastMentionSignatureRef = React.useRef('')
@@ -591,7 +593,7 @@ export const RichTextInput = React.forwardRef<RichTextInputHandle, RichTextInput
 
     // Handle input events
     const handleInput = React.useCallback(() => {
-      if (isComposing.current) return
+      if (isComposingRef.current) return
       if (!divRef.current) return
 
       const newText = getTextFromElement(divRef.current)
@@ -617,18 +619,22 @@ export const RichTextInput = React.forwardRef<RichTextInputHandle, RichTextInput
       onInput?.(newText, cursorPos)
     }, [onChange, onInput, skills, sources, skillSlugs, sourceSlugs, workspaceId])
 
-    // Handle composition (IME)
+    // Handle composition (IME). During composition the React `value` stays empty
+    // (we deliberately skip onChange), but the browser shows provisional text in
+    // the contenteditable — hide the placeholder overlay so it doesn't cover IME.
     const handleCompositionStart = React.useCallback(() => {
-      isComposing.current = true
+      isComposingRef.current = true
+      setIsComposing(true)
     }, [])
 
     const handleCompositionEnd = React.useCallback(() => {
-      isComposing.current = false
+      isComposingRef.current = false
+      setIsComposing(false)
       handleInput()
     }, [handleInput])
 
     const handleKeyDownInternal = React.useCallback((e: React.KeyboardEvent<HTMLDivElement>) => {
-      if (isEscapeDuringComposition(e, isComposing.current)) {
+      if (isEscapeDuringComposition(e, isComposingRef.current)) {
         e.stopPropagation()
         return
       }
@@ -757,14 +763,16 @@ export const RichTextInput = React.forwardRef<RichTextInputHandle, RichTextInput
       return () => document.removeEventListener('selectionchange', handleSelectionChange)
     }, [])
 
-    // Show placeholder when input is empty (regardless of focus state)
-    const showPlaceholder = !safeValue
+    // Show placeholder only when truly empty and not mid-IME composition.
+    // CJK IME keeps React value empty until compositionend; provisional text
+    // still lives in the contenteditable and must not sit under a placeholder.
+    const showPlaceholder = !safeValue && !isComposing
 
     // Normalize placeholder to array for RotatingPlaceholder
     const placeholderArray = React.useMemo(() => {
       if (!placeholder) return [t("chatInput.placeholder.typeMessage")]
       return Array.isArray(placeholder) ? placeholder : [placeholder]
-    }, [placeholder])
+    }, [placeholder, t])
 
     // Check if value contains any mentions (badges) to adjust line height
     const hasMentions = React.useMemo(() => {

@@ -9,6 +9,7 @@ import { EntityListEmptyScreen } from '@/components/ui/entity-list-empty'
 import { sourceSelection } from '@/hooks/useEntitySelection'
 import { SourceMenu } from './SourceMenu'
 import { SendResourceToWorkspaceDialog } from './SendResourceToWorkspaceDialog'
+import { CopyResourcesFromWorkspaceDialog } from './CopyResourcesFromWorkspaceDialog'
 import { useAppShellContext } from '@/context/AppShellContext'
 import { EditPopover, getEditConfig, type EditContextKey } from '@/components/ui/EditPopover'
 import type { LoadedSource, SourceConnectionStatus, SourceFilter } from '../../../shared/types'
@@ -57,11 +58,15 @@ export function SourcesListPanel({
   const { t } = useTranslation()
   const { workspaces, activeWorkspaceId } = useAppShellContext()
   const hasOtherWorkspaces = workspaces.length > 1
+  const hasOtherLocalWorkspaces = workspaces.some(
+    (w) => w.id !== activeWorkspaceId && !w.remoteServer,
+  )
 
   // Send to Workspace dialog state
   const [sendDialogOpen, setSendDialogOpen] = React.useState(false)
   const [sendResourceSlug, setSendResourceSlug] = React.useState<string | null>(null)
   const [sendResourceLabel, setSendResourceLabel] = React.useState('')
+  const [copyFromOpen, setCopyFromOpen] = React.useState(false)
 
   const filteredSources = React.useMemo(() => {
     if (!sourceFilter) return sources
@@ -94,20 +99,31 @@ export function SourcesListPanel({
           description={t('sourcesList.emptyDescription')}
           docKey="sources"
         >
-          {workspaceRootPath && (
-            <EditPopover
-              align="center"
-              trigger={
-                <button className="inline-flex items-center h-7 px-3 text-xs font-medium rounded-[8px] bg-background shadow-minimal hover:bg-foreground/[0.03] transition-colors">
-                  {t('sourcesList.addSource')}
-                </button>
-              }
-              {...getEditConfig(
-                sourceFilter?.kind === 'type' ? `add-source-${sourceFilter.sourceType}` as EditContextKey : 'add-source',
-                workspaceRootPath
-              )}
-            />
-          )}
+          <div className="flex flex-wrap items-center justify-center gap-2">
+            {workspaceRootPath && (
+              <EditPopover
+                align="center"
+                trigger={
+                  <button className="inline-flex items-center h-7 px-3 text-xs font-medium rounded-[8px] bg-background shadow-minimal hover:bg-foreground/[0.03] transition-colors">
+                    {t('sourcesList.addSource')}
+                  </button>
+                }
+                {...getEditConfig(
+                  sourceFilter?.kind === 'type' ? `add-source-${sourceFilter.sourceType}` as EditContextKey : 'add-source',
+                  workspaceRootPath
+                )}
+              />
+            )}
+            {hasOtherLocalWorkspaces && (
+              <button
+                type="button"
+                onClick={() => setCopyFromOpen(true)}
+                className="inline-flex items-center h-7 px-3 text-xs font-medium rounded-[8px] bg-background shadow-minimal hover:bg-foreground/[0.03] transition-colors"
+              >
+                {t('sourcesList.copyFromWorkspace')}
+              </button>
+            )}
+          </div>
         </EntityListEmptyScreen>
       }
       mapItem={(source) => {
@@ -159,6 +175,14 @@ export function SourcesListPanel({
         activeWorkspaceId={activeWorkspaceId}
       />
     )}
+
+    <CopyResourcesFromWorkspaceDialog
+      open={copyFromOpen}
+      onOpenChange={setCopyFromOpen}
+      workspaces={workspaces}
+      activeWorkspaceId={activeWorkspaceId}
+      resourceType="source"
+    />
     </>
   )
 }

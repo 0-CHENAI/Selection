@@ -299,6 +299,11 @@ export interface ChatOptions {
   isRetry?: boolean;
   /** Override thinking level for this message only */
   thinkingOverride?: ThinkingLevel;
+  /**
+   * When true, inject a model-only interruption reminder into the prompt.
+   * Must NOT be embedded in the stored/displayed user message content.
+   */
+  previousResponseInterrupted?: boolean;
 }
 
 /**

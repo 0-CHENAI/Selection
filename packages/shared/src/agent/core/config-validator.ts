@@ -27,26 +27,26 @@ const CONFIG_FILE_PATTERNS: { pattern: RegExp; type: ConfigFileType }[] = [
 ];
 
 /**
- * Craft Agent specific config files that have known schemas.
+ * Selection specific config files that have known schemas.
  */
 const CRAFT_AGENT_CONFIG_PATTERNS = [
   // Main config
-  /\.craft-agent\/config\.json$/,
+  /.(?:selection|craft-agent)\/config\.json$/,
   // Preferences
-  /\.craft-agent\/preferences\.json$/,
+  /.(?:selection|craft-agent)\/preferences\.json$/,
   // Source configs
-  /\.craft-agent\/workspaces\/[^/]+\/sources\/[^/]+\/config\.json$/,
+  /.(?:selection|craft-agent)\/workspaces\/[^/]+\/sources\/[^/]+\/config\.json$/,
   // Permissions
-  /\.craft-agent\/workspaces\/[^/]+\/permissions\.json$/,
-  /\.craft-agent\/permissions\/[^/]+\.json$/,
+  /.(?:selection|craft-agent)\/workspaces\/[^/]+\/permissions\.json$/,
+  /.(?:selection|craft-agent)\/permissions\/[^/]+\.json$/,
   // Theme
-  /\.craft-agent\/workspaces\/[^/]+\/theme\.json$/,
+  /.(?:selection|craft-agent)\/workspaces\/[^/]+\/theme\.json$/,
   // Statuses
-  /\.craft-agent\/workspaces\/[^/]+\/statuses\/config\.json$/,
+  /.(?:selection|craft-agent)\/workspaces\/[^/]+\/statuses\/config\.json$/,
   // Labels
-  /\.craft-agent\/workspaces\/[^/]+\/labels\.json$/,
+  /.(?:selection|craft-agent)\/workspaces\/[^/]+\/labels\.json$/,
   // Tool icons
-  /\.craft-agent\/tool-icons\/tool-icons\.json$/,
+  /.(?:selection|craft-agent)\/tool-icons\/tool-icons\.json$/,
 ];
 
 /**
@@ -98,10 +98,10 @@ export class ConfigValidator {
   }
 
   /**
-   * Check if a file path is a Craft Agent config file.
+   * Check if a file path is a Selection config file.
    *
    * @param filePath - Path to check
-   * @returns true if this is a Craft Agent config
+   * @returns true if this is a Selection config
    */
   isCraftAgentConfig(filePath: string): boolean {
     const normalizedPath = process.platform === 'win32'

@@ -1,5 +1,5 @@
 import * as React from 'react'
-import { motion, AnimatePresence, useMotionValue, useMotionValueEvent, animate } from 'motion/react'
+import { motion, AnimatePresence, useMotionValue, useMotionValueEvent, animate, useIsPresent } from 'motion/react'
 import { cn } from '@/lib/utils'
 import { FreeFormInput, type FreeFormInputProps } from './FreeFormInput'
 import { StructuredInput } from './StructuredInput'
@@ -23,6 +23,34 @@ interface InputContainerProps extends Omit<FreeFormInputProps, 'inputRef'> {
 // Animation timing - synced across height and opacity
 const TRANSITION_DURATION = 0.25
 const TRANSITION_EASE = [0.4, 0, 0.2, 1] as const
+
+/**
+ * Crossfade layer that disables pointer events while exiting.
+ * Without this, the outgoing freeform input stays stacked above the
+ * permission card for ~250ms and eats the first click (feels like
+ * "need to click Allow twice").
+ */
+function CrossfadeLayer({
+  className,
+  children,
+}: {
+  className?: string
+  children: React.ReactNode
+}) {
+  const isPresent = useIsPresent()
+  return (
+    <motion.div
+      className={className}
+      style={{ pointerEvents: isPresent ? 'auto' : 'none' }}
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      transition={{ duration: TRANSITION_DURATION, ease: TRANSITION_EASE }}
+    >
+      {children}
+    </motion.div>
+  )
+}
 
 // Fallback heights (used on first render before measurement)
 const FALLBACK_HEIGHTS: Record<InputMode | string, number> = {
@@ -271,18 +299,15 @@ export function InputContainer({
           ...(mode !== 'freeform' ? { maxHeight: structuredMaxHeight } : {}),
         }}
       >
-        {/* Crossfading content - freeform anchored to bottom (for auto-grow), others fill */}
+        {/* Crossfading content - freeform anchored to bottom (for auto-grow), others fill.
+            Exiting layers use pointer-events: none so they don't steal clicks. */}
         <AnimatePresence mode="sync" initial={false}>
-          <motion.div
+          <CrossfadeLayer
             key={contentKey}
             className={mode === 'freeform' ? "absolute bottom-0 left-0 right-0" : "absolute inset-0"}
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            transition={{ duration: TRANSITION_DURATION, ease: TRANSITION_EASE }}
           >
             {renderContent(false)}
-          </motion.div>
+          </CrossfadeLayer>
         </AnimatePresence>
       </motion.div>
 

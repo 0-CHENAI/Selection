@@ -15,6 +15,8 @@ import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { Clock } from 'lucide-react'
 import type { StoredAttachment, ContentBadge } from '@craft-agent/core'
 import { normalizePath } from '@craft-agent/core/utils'
+// Lightweight path — do NOT import @craft-agent/shared/agent (pulls bash-parser into Vite)
+import { sanitizeUserMessageForDisplay } from '@craft-agent/shared/agent/user-message-sanitize'
 import { cn } from '../../lib/utils'
 import { Markdown } from '../markdown'
 import { FileTypeIcon, getFileTypeLabel } from './attachment-helpers'
@@ -170,10 +172,11 @@ function InlineFileBadge({
   badge: ContentBadge
   onFileClick?: (path: string) => void
 }) {
-  // Strip .craft-agent workspace/session path prefix for cleaner tooltip display
+  // Strip config-dir workspace/session path prefix for cleaner tooltip display
   // e.g. "/Users/.../workspaces/{id}/sessions/{id}/plans/foo.md" → "plans/foo.md"
+  // Supports ~/.selection (current) and ~/.craft-agent (legacy).
   const rawPath = badge.filePath || badge.label
-  const tooltipPath = normalizePath(rawPath).replace(/^.*\.craft-agent\/workspaces\/[^/]+\/(sessions\/[^/]+\/)?/, '')
+  const tooltipPath = normalizePath(rawPath).replace(/^.*\.(?:selection|craft-agent)\/workspaces\/[^/]+\/(sessions\/[^/]+\/)?/, '')
   const isClickable = !!badge.filePath && !!onFileClick
 
   const badgeContent = (
@@ -408,6 +411,10 @@ export function UserMessageBubble({
     }
     displayContent = displayContent.trim()
   }
+
+  // Defense-in-depth: never show model-only system-reminder / activation markers
+  // even if a legacy path stored them in message.content.
+  displayContent = sanitizeUserMessageForDisplay(displayContent)
 
   return (
     <div className={cn("flex flex-col items-end gap-3 w-full", className)}>

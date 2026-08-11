@@ -416,12 +416,17 @@ export default function WorkspaceSettingsPage() {
                 title={t("settings.workspace.renameWorkspace")}
                 value={wsNameEditing}
                 onValueChange={setWsNameEditing}
-                onSubmit={() => {
+                onSubmit={async () => {
                   const newName = wsNameEditing.trim()
                   if (newName && newName !== wsName) {
+                    // Optimistically update local settings label
                     setWsName(newName)
-                    updateWorkspaceSetting('name', newName)
-                    onRefreshWorkspaces?.()
+                    // Must await the save before refreshing the workspace list,
+                    // otherwise the top-bar switcher still reads the previous name.
+                    const ok = await updateWorkspaceSetting('name', newName)
+                    if (ok) {
+                      await onRefreshWorkspaces?.()
+                    }
                   }
                   setRenameDialogOpen(false)
                 }}

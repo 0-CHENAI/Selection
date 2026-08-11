@@ -222,15 +222,19 @@ export function MarkdownSpreadsheetBlock({ code, className }: MarkdownSpreadshee
   const label = [parsed.filename, parsed.sheetName].filter(Boolean).join(' — ') || t('spreadsheet.defaultTitle')
   const fallback = <CodeBlock code={code} language="json" mode="full" className={className} />
 
+  // Vertical max-height scroll is avoided in chat (dual-scroll). Horizontal scroll
+  // remains for wide tables; optional maxHeight only for special call sites.
   const tableContent = (maxHeight?: boolean, scrollable?: boolean) => (
     <div
       ref={scrollable ? scrollRef : undefined}
-      className={cn(maxHeight && 'max-h-[400px]', 'overflow-y-auto')}
+      className={cn(
+        maxHeight ? 'max-h-[400px] overflow-y-auto' : 'overflow-y-visible',
+        'overflow-x-auto',
+      )}
       style={scrollable ? {
-        overflowX: 'auto',
         maskImage,
         WebkitMaskImage: maskImage,
-      } : { overflowX: 'auto' }}
+      } : undefined}
     >
       <table className="w-max min-w-full text-[13px]">
         {/* Column letter headers */}
@@ -296,8 +300,8 @@ export function MarkdownSpreadsheetBlock({ code, className }: MarkdownSpreadshee
           <span className="text-[12px] text-muted-foreground font-medium">{label}</span>
         </div>
 
-        {/* Table with max height and scroll fade */}
-        {tableContent(true, true)}
+        {/* Expand with content; horizontal scroll only (no nested vertical scroll in chat) */}
+        {tableContent(false, true)}
       </div>
 
       {/* Fullscreen overlay */}

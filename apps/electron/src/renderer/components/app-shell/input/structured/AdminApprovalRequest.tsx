@@ -36,11 +36,23 @@ export function AdminApprovalRequest({
 }: AdminApprovalRequestProps) {
   const { t } = useTranslation()
   const [rememberChoice, setRememberChoice] = React.useState(false)
+  const [responded, setResponded] = React.useState(false)
+  const respondedRef = React.useRef(false)
 
   const rememberForMinutes = request.rememberForMinutes ?? 10
 
   const handleApprove = () => {
+    if (respondedRef.current) return
+    respondedRef.current = true
+    setResponded(true)
     onApprove({ rememberForMinutes: rememberChoice ? rememberForMinutes : undefined })
+  }
+
+  const handleCancel = () => {
+    if (respondedRef.current) return
+    respondedRef.current = true
+    setResponded(true)
+    onCancel()
   }
 
   return (
@@ -83,6 +95,7 @@ export function AdminApprovalRequest({
           variant="default"
           className="h-7 gap-1.5 cursor-pointer"
           onClick={handleApprove}
+          disabled={responded}
         >
           <Check className="h-3.5 w-3.5" />
           Approve
@@ -92,7 +105,8 @@ export function AdminApprovalRequest({
           size="sm"
           variant="ghost"
           className="h-7 gap-1.5 text-destructive hover:text-destructive border border-dashed border-destructive/50 hover:bg-destructive/10 hover:border-destructive/70 active:bg-destructive/20"
-          onClick={onCancel}
+          onClick={handleCancel}
+          disabled={responded}
         >
           <X className="h-3.5 w-3.5" />
           Cancel

@@ -481,15 +481,18 @@ export function MarkdownDatatableBlock({ code, className }: MarkdownDatatableBlo
       </tr>
     ))
 
+  // Avoid nested vertical scroll in chat; keep horizontal scroll for wide tables.
   const tableContent = (maxHeight?: boolean, scrollable?: boolean) => (
     <div
       ref={scrollable ? scrollRef : undefined}
-      className={cn(maxHeight && 'max-h-[400px]', 'overflow-y-auto')}
+      className={cn(
+        maxHeight ? 'max-h-[400px] overflow-y-auto' : 'overflow-y-visible',
+        'overflow-x-auto',
+      )}
       style={scrollable ? {
-        overflowX: 'auto',
         maskImage,
         WebkitMaskImage: maskImage,
-      } : { overflowX: 'auto' }}
+      } : undefined}
     >
       <table className="w-max min-w-full text-[13px]">
         <thead>
@@ -692,8 +695,8 @@ export function MarkdownDatatableBlock({ code, className }: MarkdownDatatableBlo
           </span>
         </div>
 
-        {/* Table with max height and scroll fade */}
-        {tableContent(true, true)}
+        {/* Expand with content; horizontal scroll only (no nested vertical scroll in chat) */}
+        {tableContent(false, true)}
       </div>
 
       {/* Fullscreen overlay */}

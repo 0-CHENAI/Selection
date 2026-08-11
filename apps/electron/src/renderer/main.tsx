@@ -12,6 +12,8 @@ import { setupI18n, i18n } from '@craft-agent/shared/i18n'
 import { initReactI18next } from 'react-i18next'
 import LanguageDetector from 'i18next-browser-languagedetector'
 import './index.css'
+// generative-loaders styles for InlineLoader (thinking / preparing response)
+import 'generative-loaders/styles.css'
 
 // Initialize i18n before any React rendering
 setupI18n([LanguageDetector, initReactI18next])

@@ -1,7 +1,7 @@
 /**
  * TopBar - Persistent top bar above all panels (Slack-style)
  *
- * Layout: [Sidebar] [Menu] [Back] [Forward] [Workspace selector] ... [Browser strip] [+] [Help]
+ * Layout: [Sidebar] [Menu] [Back] [Forward] [Workspace selector] ... [Browser strip] [+]
  *
  * Fixed at top of window, 48px tall.
  * macOS: offset left to avoid stoplight controls.
@@ -20,7 +20,6 @@ import {
   DropdownMenuTrigger,
   StyledDropdownMenuContent,
   StyledDropdownMenuItem,
-  StyledDropdownMenuSeparator,
 } from "@/components/ui/styled-dropdown"
 import type { SettingsMenuItem } from "../../../shared/menu-schema"
 import { SquarePenRounded } from "../icons/SquarePenRounded"
@@ -29,7 +28,6 @@ import { BrowserTabStrip } from "../browser/BrowserTabStrip"
 import type { Workspace } from "../../../shared/types"
 import { WorkspaceSwitcher } from "./WorkspaceSwitcher"
 import { CompactWorkspaceSwitcher } from "./CompactWorkspaceSwitcher"
-import { getDocUrl } from "@craft-agent/shared/docs/doc-links"
 import { AppMenu } from "../AppMenu"
 
 const RIGHT_SLOT_FULL_BADGES_THRESHOLD = 420
@@ -221,7 +219,7 @@ export function TopBar({
         </div>
       </div>
 
-      {/* === RIGHT: Browser strip + add + help === */}
+      {/* === RIGHT: Browser strip + add panel === */}
       {!isCompact && (
       <div ref={rightSlotRef} className="flex min-w-0 shrink-0 items-center justify-end gap-1" style={{ paddingRight: 12 }}>
         <div className="min-w-0">
@@ -241,52 +239,6 @@ export function TopBar({
             <StyledDropdownMenuItem onClick={onAddBrowserPanel}>
               <Icons.Globe className="h-3.5 w-3.5" />
               {t("browser.newWindow")}
-            </StyledDropdownMenuItem>
-          </StyledDropdownMenuContent>
-        </DropdownMenu>
-
-        {/* Help button */}
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <TopBarButton aria-label={t("menu.helpAndDocs")} className="h-[26px] w-[26px] rounded-lg">
-              <Icons.HelpCircle className="h-4 w-4 text-foreground/50" strokeWidth={1.5} />
-            </TopBarButton>
-          </DropdownMenuTrigger>
-          <StyledDropdownMenuContent align="end" minWidth="min-w-48">
-            <StyledDropdownMenuItem onClick={() => window.electronAPI.openUrl(getDocUrl('sources'))}>
-              <Icons.DatabaseZap className="h-3.5 w-3.5" />
-              <span className="flex-1">{t("sidebar.sources")}</span>
-              <Icons.ExternalLink className="h-3 w-3 text-muted-foreground" />
-            </StyledDropdownMenuItem>
-            <StyledDropdownMenuItem onClick={() => window.electronAPI.openUrl(getDocUrl('skills'))}>
-              <Icons.Zap className="h-3.5 w-3.5" />
-              <span className="flex-1">{t("sidebar.skills")}</span>
-              <Icons.ExternalLink className="h-3 w-3 text-muted-foreground" />
-            </StyledDropdownMenuItem>
-            <StyledDropdownMenuItem onClick={() => window.electronAPI.openUrl(getDocUrl('statuses'))}>
-              <Icons.CheckCircle2 className="h-3.5 w-3.5" />
-              <span className="flex-1">{t("sidebar.statuses")}</span>
-              <Icons.ExternalLink className="h-3 w-3 text-muted-foreground" />
-            </StyledDropdownMenuItem>
-            <StyledDropdownMenuItem onClick={() => window.electronAPI.openUrl(getDocUrl('permissions'))}>
-              <Icons.Settings className="h-3.5 w-3.5" />
-              <span className="flex-1">{t("settings.permissions.title")}</span>
-              <Icons.ExternalLink className="h-3 w-3 text-muted-foreground" />
-            </StyledDropdownMenuItem>
-            <StyledDropdownMenuItem onClick={() => window.electronAPI.openUrl(getDocUrl('automations'))}>
-              <Icons.Webhook className="h-3.5 w-3.5" />
-              <span className="flex-1">{t("sidebar.automations")}</span>
-              <Icons.ExternalLink className="h-3 w-3 text-muted-foreground" />
-            </StyledDropdownMenuItem>
-            <StyledDropdownMenuItem onClick={() => window.electronAPI.openUrl(getDocUrl('messaging'))}>
-              <Icons.MessageSquare className="h-3.5 w-3.5" />
-              <span className="flex-1">{t("settings.messaging.title")}</span>
-              <Icons.ExternalLink className="h-3 w-3 text-muted-foreground" />
-            </StyledDropdownMenuItem>
-            <StyledDropdownMenuSeparator />
-            <StyledDropdownMenuItem onClick={() => window.electronAPI.openUrl('https://agents.craft.do/docs')}>
-              <Icons.ExternalLink className="h-3.5 w-3.5" />
-              <span className="flex-1">{t("menu.allDocumentation")}</span>
             </StyledDropdownMenuItem>
           </StyledDropdownMenuContent>
         </DropdownMenu>

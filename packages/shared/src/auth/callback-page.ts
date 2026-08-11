@@ -43,7 +43,7 @@ export function generateCallbackPage(options: {
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Craft - ${title}</title>
+  <title>Selection - ${title}</title>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -175,7 +175,7 @@ export function generateCallbackPage(options: {
       <div class="status">${statusMessage}</div>
     </div>
     <div class="hint">${isSuccess ? 'You can now return to the application.' : 'Please close this window and try again.'}</div>
-    ${deeplinkUrl ? `<a href="${deeplinkUrl}" class="return-link">Craft Agents</a>` : ''}
+    ${deeplinkUrl ? `<a href="${deeplinkUrl}" class="return-link">Selection</a>` : ''}
   </div>
   <script>${autoCloseScript}</script>
 </body>

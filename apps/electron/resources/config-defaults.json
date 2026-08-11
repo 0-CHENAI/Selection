@@ -1,10 +1,9 @@
 {
   "version": "1.0",
-  "description": "Default configuration values for Craft Agents",
+  "description": "Default configuration values for Selection",
   "defaults": {
     "notificationsEnabled": true,
     "colorTheme": "default",
-    "autoCapitalisation": true,
     "sendMessageKey": "enter",
     "spellCheck": false,
     "keepAwakeWhileRunning": false,
@@ -15,8 +14,8 @@
   },
   "workspaceDefaults": {
     "thinkingLevel": "think",
-    "permissionMode": "safe",
-    "cyclablePermissionModes": ["safe", "allow-all"],
+    "permissionMode": "ask",
+    "cyclablePermissionModes": ["safe", "ask", "allow-all"],
     "localMcpServers": {
       "enabled": true
     }

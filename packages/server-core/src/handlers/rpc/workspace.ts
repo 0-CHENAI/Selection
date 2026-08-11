@@ -7,6 +7,7 @@ import { perf } from '@craft-agent/shared/utils'
 import { pushTyped, type RpcServer } from '@craft-agent/server-core/transport'
 import type { HandlerDeps } from '../handler-deps'
 import { isValidWorkspaceRootPath } from '../../utils/path-validation'
+import { CONFIG_DIR } from '@craft-agent/shared/config/paths'
 
 export const CORE_HANDLED_CHANNELS = [
   RPC_CHANNELS.workspaces.GET,
@@ -60,7 +61,7 @@ export function registerWorkspaceCoreHandlers(server: RpcServer, deps: HandlerDe
 
   // Check if a workspace slug already exists (for validation before creation)
   server.handle(RPC_CHANNELS.workspaces.CHECK_SLUG, async (_ctx, slug: string) => {
-    const defaultWorkspacesDir = join(homedir(), '.craft-agent', 'workspaces')
+    const defaultWorkspacesDir = join(CONFIG_DIR, 'workspaces')
     const workspacePath = join(defaultWorkspacesDir, slug)
     const exists = existsSync(workspacePath)
     return { exists, path: workspacePath }

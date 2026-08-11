@@ -8,6 +8,8 @@ import {
   saveWorkspaceConfig,
   createWorkspaceAtPath,
   isValidWorkspace,
+  deleteWorkspaceFolderDetailed,
+  getDefaultWorkspacesDir,
 } from '../workspaces/storage.ts';
 import { findIconFile } from '../utils/icon.ts';
 import { extractWorkspaceSlugFromPath } from '../utils/workspace-slug.ts';
@@ -26,7 +28,7 @@ import { type ConfigDefaults } from './config-defaults-schema.ts';
 import { isValidThemeFile } from './validators.ts';
 
 // Re-export CONFIG_DIR for convenience (centralized in paths.ts)
-export { CONFIG_DIR } from './paths.ts';
+export { CONFIG_DIR, DEFAULT_CONFIG_DIR_NAME } from './paths.ts';
 
 // Re-export base types from core (single source of truth)
 export type {
@@ -68,7 +70,8 @@ export interface StoredConfig {
   // Auto-update
   dismissedUpdateVersion?: string;  // Version that user dismissed (skip notifications for this version)
   // Input settings
-  autoCapitalisation?: boolean;  // Auto-capitalize first letter when typing (default: true)
+  /** @deprecated Removed — kept optional so older configs still parse */
+  autoCapitalisation?: boolean;
   sendMessageKey?: 'enter' | 'cmd-enter';  // Key to send messages (default: 'enter')
   spellCheck?: boolean;  // Enable spell check in input (default: false)
   // Power settings
@@ -113,11 +116,10 @@ let configDefaultsSynced = false;
 /** Minimal config-defaults used when bundled assets aren't available (CI, standalone server). */
 const FALLBACK_CONFIG_DEFAULTS: ConfigDefaults = {
   version: '1.0',
-  description: 'Default configuration values for Craft Agents',
+  description: 'Default configuration values for Selection',
   defaults: {
     notificationsEnabled: true,
     colorTheme: 'default',
-    autoCapitalisation: true,
     sendMessageKey: 'enter',
     spellCheck: false,
     keepAwakeWhileRunning: false,
@@ -354,29 +356,6 @@ export function setNotificationsEnabled(enabled: boolean): void {
   const config = loadStoredConfig();
   if (!config) return;
   config.notificationsEnabled = enabled;
-  saveConfig(config);
-}
-
-/**
- * Get whether auto-capitalisation is enabled.
- * Defaults to true if not set.
- */
-export function getAutoCapitalisation(): boolean {
-  const config = loadStoredConfig();
-  if (config?.autoCapitalisation !== undefined) {
-    return config.autoCapitalisation;
-  }
-  const defaults = loadConfigDefaults();
-  return defaults.defaults.autoCapitalisation;
-}
-
-/**
- * Set whether auto-capitalisation is enabled.
- */
-export function setAutoCapitalisation(enabled: boolean): void {
-  const config = loadStoredConfig();
-  if (!config) return;
-  config.autoCapitalisation = enabled;
   saveConfig(config);
 }
 
@@ -818,6 +797,11 @@ export function addWorkspace(workspace: Omit<Workspace, 'id' | 'createdAt' | 'sl
   // Create workspace folder structure if it doesn't exist
   if (!isValidWorkspace(newWorkspace.rootPath)) {
     createWorkspaceAtPath(newWorkspace.rootPath, newWorkspace.name);
+  } else {
+    // Existing folder registered as workspace: ensure labels are present and
+    // migrated to Chinese defaults (drops Development / Project seed labels).
+    const { loadLabelConfig } = require('../labels/storage.ts') as typeof import('../labels/storage.ts');
+    loadLabelConfig(newWorkspace.rootPath);
   }
 
   config.workspaces.push(newWorkspace);
@@ -872,12 +856,25 @@ export function syncWorkspaces(): void {
   }
 }
 
+/**
+ * Remove a workspace from the global registry and delete its on-disk data.
+ *
+ * Disk layout note: workspace folders are typically named by slug
+ * (`~/.selection/workspaces/my-project`), while `workspaceId` is `ws_xxxxxxxx`.
+ * Deletion must use `workspace.rootPath`, not `workspaces/{id}`.
+ *
+ * Callers that hold runtime resources (ConfigWatcher, agents, messaging) should
+ * unload them *before* invoking this so file locks do not block deletion.
+ */
 export async function removeWorkspace(workspaceId: string): Promise<boolean> {
   const config = loadStoredConfig();
   if (!config) return false;
 
   const index = config.workspaces.findIndex(w => w.id === workspaceId);
   if (index === -1) return false;
+
+  // Capture before splicing out of the registry.
+  const rootPath = config.workspaces[index]!.rootPath;
 
   config.workspaces.splice(index, 1);
 
@@ -889,16 +886,32 @@ export async function removeWorkspace(workspaceId: string): Promise<boolean> {
   saveConfig(config);
 
   // Clean up credential store credentials for this workspace
-  const manager = getCredentialManager();
-  await manager.deleteWorkspaceCredentials(workspaceId);
+  try {
+    const manager = getCredentialManager();
+    await manager.deleteWorkspaceCredentials(workspaceId);
+  } catch (error) {
+    console.error(`[storage] Failed to delete credentials for workspace ${workspaceId}:`, error);
+  }
 
-  // Delete workspace data directory (sessions, plans, etc.)
-  const workspaceDataDir = join(WORKSPACES_DIR, workspaceId);
-  if (existsSync(workspaceDataDir)) {
+  // Delete the actual workspace folder (config, sessions, sources, skills, …)
+  if (rootPath) {
+    const result = deleteWorkspaceFolderDetailed(rootPath);
+    if (!result.deleted && !result.alreadyGone) {
+      console.error(
+        `[storage] Failed to delete workspace folder "${rootPath}": ${result.error ?? 'unknown error'}` +
+          (result.invalidated ? ' (invalidated config.json to prevent re-discovery)' : ''),
+      );
+    }
+  }
+
+  // Legacy path: older builds stored conversation/plan under workspaces/{workspaceId}
+  // (sibling of slug folders, not the same as rootPath).
+  const legacyDataDir = join(getDefaultWorkspacesDir(), workspaceId);
+  if (legacyDataDir && legacyDataDir !== rootPath && existsSync(legacyDataDir)) {
     try {
-      rmSync(workspaceDataDir, { recursive: true });
+      rmSync(legacyDataDir, { recursive: true, force: true });
     } catch (error) {
-      console.error(`[storage] Failed to delete workspace data directory: ${workspaceDataDir}`, error);
+      console.error(`[storage] Failed to delete legacy workspace data directory: ${legacyDataDir}`, error);
     }
   }
 

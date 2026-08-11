@@ -8,7 +8,7 @@ import { basename, dirname, join } from 'path'
 import { existsSync } from 'fs'
 import { readFile, writeFile, mkdir } from 'fs/promises'
 import { randomUUID } from 'node:crypto'
-import { type AgentEvent, setPermissionMode, hydratePreviousPermissionMode, getPermissionModeDiagnostics, type PermissionMode, unregisterSessionScopedToolCallbacks, mergeSessionScopedToolCallbacks, AbortReason, type AuthRequest, type AuthResult, type CredentialAuthRequest, type BrowserPaneFns, generateConversationSummary, resolveKeepBackgroundTasksAlive } from '@craft-agent/shared/agent'
+import { type AgentEvent, setPermissionMode, hydratePreviousPermissionMode, getPermissionModeDiagnostics, type PermissionMode, unregisterSessionScopedToolCallbacks, mergeSessionScopedToolCallbacks, AbortReason, type AuthRequest, type AuthResult, type CredentialAuthRequest, type BrowserPaneFns, generateConversationSummary, resolveKeepBackgroundTasksAlive, sanitizeUserMessageForRetry } from '@craft-agent/shared/agent'
 import {
   resolveSessionConnection,
   createBackendFromConnection,
@@ -561,7 +561,7 @@ async function getBrowserToolIconDataUrl(): Promise<string | undefined> {
   try {
     const iconCandidates = [
       join(getToolIconsDir(), BROWSER_TOOL_ICON_FILENAME),
-      // Dev fallback (before sync to ~/.craft-agent/tool-icons)
+      // Dev fallback (before sync to ~/.selection/tool-icons)
       join(process.cwd(), 'apps', 'electron', 'resources', 'tool-icons', BROWSER_TOOL_ICON_FILENAME),
       // Packaged fallback (app resources)
       join(process.resourcesPath, 'tool-icons', BROWSER_TOOL_ICON_FILENAME),
@@ -695,7 +695,7 @@ async function resolveToolDisplayMeta(
 
   // CLI tool icon resolution for Bash commands
   // Parses the command string to detect known tools (git, npm, docker, etc.)
-  // and resolves their brand icon from ~/.craft-agent/tool-icons/
+  // and resolves their brand icon from ~/.selection/tool-icons/
   if (toolName === 'Bash' && toolInput?.command) {
     try {
       const toolIconsDir = getToolIconsDir()
@@ -1550,6 +1550,56 @@ export class SessionManager implements ISessionManager {
     }
 
     return changed
+  }
+
+  /**
+   * Tear down runtime state for a workspace so its folder can be deleted:
+   * dispose in-memory sessions/agents, stop ConfigWatcher, dispose AutomationSystem.
+   * Does not remove the workspace from global config (caller does that).
+   */
+  async unloadWorkspace(workspaceId: string): Promise<void> {
+    const workspace = getWorkspaceByNameOrId(workspaceId)
+    const rootPath = workspace?.rootPath
+
+    const sessionIds = Array.from(this.sessions.values())
+      .filter((m) => m.workspace.id === workspaceId || (rootPath != null && m.workspace.rootPath === rootPath))
+      .map((m) => m.id)
+
+    for (const sessionId of sessionIds) {
+      try {
+        await this.deleteSession(sessionId)
+      } catch (error) {
+        sessionLog.warn(
+          `Failed to dispose session ${sessionId} while unloading workspace ${workspaceId}:`,
+          error,
+        )
+      }
+    }
+
+    if (rootPath) {
+      const watcher = this.configWatchers.get(rootPath)
+      if (watcher) {
+        try {
+          watcher.stop()
+        } catch (error) {
+          sessionLog.warn(`Failed to stop ConfigWatcher for ${rootPath}:`, error)
+        }
+        this.configWatchers.delete(rootPath)
+      }
+
+      const automationSystem = this.automationSystems.get(rootPath)
+      if (automationSystem) {
+        try {
+          automationSystem.dispose()
+        } catch (error) {
+          sessionLog.warn(`Failed to dispose AutomationSystem for ${rootPath}:`, error)
+        }
+        this.automationSystems.delete(rootPath)
+      }
+    }
+
+    this.activeViewingSession.delete(workspaceId)
+    sessionLog.info(`Unloaded workspace runtime: ${workspaceId}${rootPath ? ` (${rootPath})` : ''}`)
   }
 
   /**
@@ -6169,13 +6219,10 @@ export class SessionManager implements ISessionManager {
       const chatSessionDir = getSessionStoragePath(workspaceRootPath, sessionId)
       toolMetadataStore.setSessionDir(chatSessionDir)
 
-      // Inject interruption context so the LLM knows the previous turn was cut short.
-      // Uses <system-reminder> tags so the LLM treats it as transient system guidance
-      // rather than part of the user's message content. The original message is stored
-      // in session JSONL (line ~3952); this only affects the SDK's in-process context.
-      let effectiveMessage = message
+      // Interruption context is a model-only flag — never append to the stored
+      // user message string (that polluted transcripts + source-activation retries).
+      const previousResponseInterrupted = !!managed.wasInterrupted
       if (managed.wasInterrupted) {
-        effectiveMessage = `${message}\n\n<system-reminder>The previous assistant response was interrupted by the user and may be incomplete. Do not repeat or continue the interrupted response unless asked. Focus on the new message above.</system-reminder>`
         managed.wasInterrupted = false
       }
 
@@ -6201,7 +6248,9 @@ export class SessionManager implements ISessionManager {
       }
 
       sendSpan.mark('chat.starting')
-      const chatIterator = agent.chat(effectiveMessage, modelInputAttachments.attachments)
+      const chatIterator = agent.chat(message, modelInputAttachments.attachments, {
+        previousResponseInterrupted,
+      })
       sessionLog.info('Got chat iterator, starting iteration...')
 
       for await (const event of chatIterator) {
@@ -8290,12 +8339,15 @@ export class SessionManager implements ISessionManager {
 
         if (!managed) break
 
-        const originalMessage = event.originalMessage ?? ''
+        // Sanitize so a polluted originalMessage (legacy system-reminder embed)
+        // cannot re-enter the transcript on auto-retry.
+        const originalMessage = sanitizeUserMessageForRetry(event.originalMessage ?? '')
         if (!originalMessage.trim()) {
           sessionLog.warn(`Source "${event.sourceSlug}" activated for session ${sessionId}, but originalMessage was empty; skipping auto-retry`)
           break
         }
 
+        // Suffix is for the model (chain activations). UI strips it on display.
         const messageWithSuffix = `${originalMessage}\n\n[${event.sourceSlug} activated]`
         const messageCountAtSchedule = managed.messages.length
 
@@ -8521,7 +8573,7 @@ export class SessionManager implements ISessionManager {
     const session = await this.createSession(workspaceId, {
       name: sessionName,
       labels: resolvedLabels,
-      permissionMode: permissionMode || 'safe',
+      permissionMode: permissionMode || 'ask',
       enabledSourceSlugs: resolved?.sourceSlugs,
       llmConnection,
       model,

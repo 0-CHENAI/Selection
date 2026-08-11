@@ -100,6 +100,23 @@ export interface ExportResourcesOptions {
 }
 
 /**
+ * Options for local copy between workspaces (filesystem + optional credentials).
+ */
+export interface CopyResourcesOptions {
+  /** Source slugs to copy, or 'all' */
+  sources?: string[] | 'all'
+  /** Skill slugs to copy, or 'all' */
+  skills?: string[] | 'all'
+  /** Conflict mode when target already has the slug */
+  mode?: ResourceImportMode
+  /**
+   * Copy credential-store secrets for sources (default true).
+   * Only applies to local→local transfers.
+   */
+  includeCredentials?: boolean
+}
+
+/**
  * Result of a resource export.
  */
 export interface ExportResult {

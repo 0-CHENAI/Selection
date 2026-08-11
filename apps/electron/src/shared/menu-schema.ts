@@ -294,15 +294,8 @@ export const ROOT_MENU = {
  * sub-page (mobile). Excludes `keyboardShortcuts`, which is a `MenuItemAction`
  * and lives in `ROOT_MENU` so mobile can hoist it to the root list.
  */
-export const HELP_LINKS: MenuItemUrl[] = [
-  {
-    type: 'url',
-    id: 'helpAndDocs',
-    labelKey: 'menu.helpAndDocs',
-    url: 'https://agents.craft.do/docs',
-    icon: 'HelpCircle',
-  },
-]
+/** External docs links removed from the product UI (no remote docs for this fork). */
+export const HELP_LINKS: MenuItemUrl[] = []
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Debug menu (dev-only)

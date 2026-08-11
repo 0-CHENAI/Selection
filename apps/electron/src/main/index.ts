@@ -225,8 +225,8 @@ let messagingHandle: MessagingBootstrapHandle | null = null
 let pendingDeepLink: string | null = null
 
 // Set app name early (before app.whenReady) to ensure correct macOS menu bar title
-// Supports multi-instance dev: CRAFT_APP_NAME env var (e.g., "Craft Agents [1]")
-app.setName(process.env.CRAFT_APP_NAME || 'Craft Agents')
+// Supports multi-instance dev: CRAFT_APP_NAME env var (e.g., "Selection [1]")
+app.setName(process.env.CRAFT_APP_NAME || 'Selection')
 
 // Register as default protocol client for craftagents:// URLs
 // This must be done before app.whenReady() on some platforms
@@ -242,6 +242,7 @@ if (process.defaultApp) {
 
 // Apply network proxy settings early (Node-level only — Electron sessions require app.whenReady)
 import { applyConfiguredProxySettings } from './network-proxy'
+import { CONFIG_DIR } from '@craft-agent/shared/config/paths'
 void applyConfiguredProxySettings()
 
 // Accept self-signed / untrusted certificates when connecting to a user-configured remote server.
@@ -409,10 +410,10 @@ app.whenReady().then(async () => {
   // Ensure default permissions file exists (copies bundled default.json on first run)
   ensureDefaultPermissions()
 
-  // Seed tool icons to ~/.craft-agent/tool-icons/ (copies bundled SVGs on first run)
+  // Seed tool icons to ~/.selection/tool-icons/ (copies bundled SVGs on first run)
   ensureToolIcons()
 
-  // Seed preset themes to ~/.craft-agent/themes/ (copies bundled theme JSONs on first run)
+  // Seed preset themes to ~/.selection/themes/ (copies bundled theme JSONs on first run)
   ensurePresetThemes()
 
   // Register thumbnail:// protocol handler (scheme was registered earlier, before app.whenReady)
@@ -666,13 +667,13 @@ app.whenReady().then(async () => {
             sessionManager: sm,
             credentialManager: getCredentialManager(),
             getMessagingDir: (wsId: string) =>
-              join(homedir(), '.craft-agent', 'workspaces', wsId, 'messaging'),
+              join(CONFIG_DIR, 'workspaces', wsId, 'messaging'),
             getLegacyMessagingDir: (wsId: string) => {
               const ws = getWorkspaces().find((w) => w.id === wsId)
               return ws ? join(ws.rootPath, 'messaging') : undefined
             },
             // Route messaging diagnostics through the dedicated messaging log
-            // at ~/.craft-agent/logs/messaging-gateway.log.
+            // at ~/.selection/logs/messaging-gateway.log.
             logger: messagingGatewayLog,
             // WhatsApp worker runs under Electron's embedded Node via
             // ELECTRON_RUN_AS_NODE (WhatsAppAdapter defaults nodeBin to
@@ -765,10 +766,32 @@ app.whenReady().then(async () => {
 
       // IPC handlers — preload uses sendSync to get WS connection details
 
-      // Remove workspace from config (cleanup stale entries)
+      // Remove workspace: unload runtime (watchers/agents) then registry + disk folder
       ipcMain.handle('workspace:remove', async (_event, workspaceId: string) => {
+        if (typeof workspaceId !== 'string' || !workspaceId.trim()) {
+          return false
+        }
+        const id = workspaceId.trim()
+
+        // Release file watchers / agents before recursive delete (avoids EBUSY / locked files)
+        if (sessionManager) {
+          try {
+            await sessionManager.unloadWorkspace(id)
+          } catch (err) {
+            mainLog.warn(`[workspace:remove] unloadWorkspace failed for ${id}:`, err)
+          }
+        }
+
+        if (messagingHandle) {
+          try {
+            await messagingHandle.registry.removeWorkspace(id)
+          } catch (err) {
+            mainLog.warn(`[workspace:remove] messaging cleanup failed for ${id}:`, err)
+          }
+        }
+
         const { removeWorkspace: remove } = await import('@craft-agent/shared/config')
-        return remove(workspaceId)
+        return remove(id)
       })
 
       // Cross-server RPC — invoke a channel on an arbitrary remote server
@@ -1127,7 +1150,7 @@ app.whenReady().then(async () => {
         type: 'error',
         title: 'Update failed',
         message: 'The update could not be installed.',
-        detail: 'Craft Agents will restart now. The update will be retried on the next launch.',
+        detail: 'Selection will restart now. The update will be retried on the next launch.',
       })
       app.relaunch()
       app.exit(0)

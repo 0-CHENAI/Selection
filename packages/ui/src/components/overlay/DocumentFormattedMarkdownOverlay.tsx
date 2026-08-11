@@ -11,10 +11,12 @@
  * Uses FullscreenOverlayBase for portal, traffic lights, ESC handling, and header.
  */
 
+import { useMemo } from 'react'
 import { ListTodo } from 'lucide-react'
 import { Markdown } from '../markdown'
 import type { AnnotationV1 } from '@craft-agent/core'
 import type { ExternalOpenAnnotationRequest } from '../annotations/use-annotation-interaction-controller'
+import { markdownToPlainText } from '../chat/markdown-to-plain-text'
 import { FullscreenOverlayBase } from './FullscreenOverlayBase'
 import type { OverlayTypeBadge } from './FullscreenOverlayBaseHeader'
 import { AnnotatableMarkdownDocument } from './AnnotatableMarkdownDocument'
@@ -78,13 +80,16 @@ export function DocumentFormattedMarkdownOverlay({
   isStreaming = false,
   openAnnotationRequest,
 }: DocumentFormattedMarkdownOverlayProps) {
+  // Clipboard should match what users see (rendered text), not raw markdown source
+  const plainCopyContent = useMemo(() => markdownToPlainText(content), [content])
+
   return (
     <FullscreenOverlayBase
       isOpen={isOpen}
       onClose={onClose}
       filePath={filePath}
       typeBadge={typeBadge}
-      copyContent={content}
+      copyContent={plainCopyContent}
       error={error ? { label: 'Write Failed', message: error } : undefined}
     >
       {/* Content wrapper — min-h-full for vertical centering within FullscreenOverlayBase's scroll container.

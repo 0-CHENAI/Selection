@@ -298,8 +298,6 @@ export const mockElectronAPI = {
   },
 
   // FreeFormInput required mocks
-  getAutoCapitalisation: async () => false,
-
   getPendingPlanExecution: async (sessionId: string) => {
     console.log('[Playground] getPendingPlanExecution called:', sessionId)
     return null

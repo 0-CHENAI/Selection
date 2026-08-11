@@ -29,7 +29,7 @@ export interface WindowState {
   lastFocusedWorkspaceId?: string
 }
 
-const CONFIG_DIR = join(homedir(), '.craft-agent')
+import { CONFIG_DIR } from '@craft-agent/shared/config/paths'
 const WINDOW_STATE_FILE = join(CONFIG_DIR, 'window-state.json')
 
 /**

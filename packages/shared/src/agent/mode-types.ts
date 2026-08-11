@@ -256,11 +256,11 @@ export interface ModeConfig {
 /**
  * Minimal fallback configuration for safe mode.
  *
- * The actual patterns are loaded from ~/.craft-agent/permissions/default.json
+ * The actual patterns are loaded from ~/.selection/permissions/default.json
  * at runtime by PermissionsConfigCache. This fallback ensures the app works
  * even if the JSON file is missing or invalid.
  *
- * To customize allowed commands, edit ~/.craft-agent/permissions/default.json
+ * To customize allowed commands, edit ~/.selection/permissions/default.json
  */
 export const SAFE_MODE_CONFIG: ModeConfig = {
   // Tools that are always blocked (no read-only variant) - these are hardcoded
@@ -278,7 +278,7 @@ export const SAFE_MODE_CONFIG: ModeConfig = {
   blockedCommandHints: [],
   readOnlyMcpPatterns: [],
   allowedApiEndpoints: [],
-  displayName: 'Explore',
+  displayName: 'Read-only Explore',
   shortcutHint: 'SHIFT+TAB',
 };
 
@@ -302,9 +302,9 @@ export const PERMISSION_MODE_CONFIG: Record<PermissionMode, {
   };
 }> = {
   'safe': {
-    displayName: 'Explore',
-    shortName: 'Explore',
-    description: 'Read-only exploration. Blocks writes, never prompts.',
+    displayName: 'Read-only Explore',
+    shortName: 'Read-only',
+    description: 'Read-only exploration. Blocks all writes, never prompts.',
     // Compass icon from Lucide
     svgPath: 'M16.24 7.76l-1.804 5.411a2 2 0 0 1-1.265 1.265L7.76 16.24l1.804-5.411a2 2 0 0 1 1.265-1.265z M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20z',
     colorClass: {
@@ -315,8 +315,8 @@ export const PERMISSION_MODE_CONFIG: Record<PermissionMode, {
   },
   'ask': {
     displayName: 'Ask to Edit',
-    shortName: 'Ask',
-    description: 'Prompts before making edits.',
+    shortName: 'Ask to Edit',
+    description: 'Ask before making any edits.',
     // Info icon from Lucide
     svgPath: 'M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zM12 8v4m0 4h.01',
     colorClass: {
@@ -326,9 +326,9 @@ export const PERMISSION_MODE_CONFIG: Record<PermissionMode, {
     },
   },
   'allow-all': {
-    displayName: 'Execute',
-    shortName: 'Execute',
-    description: 'Automatic execution, no prompts.',
+    displayName: 'Full Takeover',
+    shortName: 'Full Takeover',
+    description: 'Full autonomous control. No prompts.',
     // Repeat icon from Lucide (loop)
     svgPath: 'm17 1 4 4-4 4M3 11V9a4 4 0 0 1 4-4h14M7 23l-4-4 4-4M21 13v2a4 4 0 0 1-4 4H3',
     colorClass: {

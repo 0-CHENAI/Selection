@@ -4,7 +4,6 @@
  * Input behavior settings that control how the chat input works.
  *
  * Settings:
- * - Auto Capitalisation (on/off)
  * - Spell Check (on/off)
  * - Send Message Key (Enter or ⌘+Enter)
  */
@@ -37,9 +36,6 @@ export const meta: DetailsPageMeta = {
 export default function InputSettingsPage() {
   const { t } = useTranslation()
 
-  // Auto-capitalisation state
-  const [autoCapitalisation, setAutoCapitalisation] = useState(true)
-
   // Spell check state (default off)
   const [spellCheck, setSpellCheck] = useState(false)
 
@@ -51,12 +47,10 @@ export default function InputSettingsPage() {
     const loadSettings = async () => {
       if (!window.electronAPI) return
       try {
-        const [autoCapEnabled, spellCheckEnabled, sendKey] = await Promise.all([
-          window.electronAPI.getAutoCapitalisation(),
+        const [spellCheckEnabled, sendKey] = await Promise.all([
           window.electronAPI.getSpellCheck(),
           window.electronAPI.getSendMessageKey(),
         ])
-        setAutoCapitalisation(autoCapEnabled)
         setSpellCheck(spellCheckEnabled)
         setSendMessageKey(sendKey)
       } catch (error) {
@@ -64,11 +58,6 @@ export default function InputSettingsPage() {
       }
     }
     loadSettings()
-  }, [])
-
-  const handleAutoCapitalisationChange = useCallback(async (enabled: boolean) => {
-    setAutoCapitalisation(enabled)
-    await window.electronAPI.setAutoCapitalisation(enabled)
   }, [])
 
   const handleSpellCheckChange = useCallback(async (enabled: boolean) => {
@@ -92,12 +81,6 @@ export default function InputSettingsPage() {
               {/* Typing Behavior */}
               <SettingsSection title={t("settings.input.typing")} description={t("settings.input.typingDesc")}>
                 <SettingsCard>
-                  <SettingsToggle
-                    label={t("settings.input.autoCapitalisation")}
-                    description={t("settings.input.autoCapitalisationDesc")}
-                    checked={autoCapitalisation}
-                    onCheckedChange={handleAutoCapitalisationChange}
-                  />
                   <SettingsToggle
                     label={t("settings.input.spellCheck")}
                     description={t("settings.input.spellCheckDesc")}

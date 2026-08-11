@@ -246,8 +246,12 @@ export async function downloadUv(config: BuildConfig): Promise<void> {
     mkdirSync(extractDir, { recursive: true });
 
     if (uvDownload.endsWith('.zip')) {
-      // Use PowerShell on Windows for consistent extraction support.
-      await $`powershell -NoProfile -ExecutionPolicy Bypass -Command "Expand-Archive -LiteralPath '${assetPath}' -DestinationPath '${extractDir}' -Force"`;
+      // Cross-compile host may not be Windows — use unzip on Unix, Expand-Archive on Windows.
+      if (process.platform === 'win32') {
+        await $`powershell -NoProfile -ExecutionPolicy Bypass -Command "Expand-Archive -LiteralPath '${assetPath}' -DestinationPath '${extractDir}' -Force"`;
+      } else {
+        await $`unzip -o ${assetPath} -d ${extractDir}`.quiet();
+      }
     } else {
       await $`tar -xzf ${assetPath} -C ${extractDir}`;
     }
@@ -736,10 +740,10 @@ export async function loadEnvFile(config: BuildConfig): Promise<void> {
 export function getArtifactName(platform: Platform, arch: Arch): string {
   switch (platform) {
     case 'darwin':
-      return `Craft-Agents-${arch}.dmg`;
+      return `Selection-${arch}.dmg`;
     case 'win32':
-      return `Craft-Agents-${arch}.exe`;
+      return `Selection-${arch}.exe`;
     case 'linux':
-      return `Craft-Agents-${arch}.AppImage`;
+      return `Selection-${arch}.AppImage`;
   }
 }

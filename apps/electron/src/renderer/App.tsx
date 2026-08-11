@@ -1828,9 +1828,11 @@ export default function App() {
     }
   }, [workspaces, handleSelectWorkspace])
 
-  // Handle workspace refresh (e.g., after icon upload)
-  const handleRefreshWorkspaces = useCallback(() => {
-    window.electronAPI.getWorkspaces().then(setWorkspaces)
+  // Handle workspace refresh (e.g., after icon upload / rename).
+  // Awaitable so callers (workspace rename) can wait for the top-bar list to update.
+  const handleRefreshWorkspaces = useCallback(async () => {
+    const ws = await window.electronAPI.getWorkspaces()
+    setWorkspaces(ws)
   }, [])
 
   // Handle cancel during onboarding

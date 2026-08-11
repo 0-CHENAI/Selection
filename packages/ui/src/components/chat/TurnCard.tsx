@@ -27,6 +27,10 @@ import {
 import { cn } from '../../lib/utils'
 import { Markdown } from '../markdown'
 import { Spinner } from '../ui/LoadingIndicator'
+import { GenerativeActivityIndicator } from './GenerativeActivityIndicator'
+import { markdownToPlainText } from './markdown-to-plain-text'
+import { BUFFER_CONFIG } from './stream-buffer'
+import { useStreamingReveal } from './useStreamingReveal'
 import { type IslandTransitionConfig } from '../ui'
 import { AnnotationIslandMenu } from '../annotations/AnnotationIslandMenu'
 import {
@@ -371,152 +375,6 @@ export interface TurnCardProps {
 // ============================================================================
 // Buffering Constants & Utilities
 // ============================================================================
-
-/**
- * Aggressive buffering configuration.
- * Waits until content is suspected to be meaningful "commentary" before showing.
- */
-const BUFFER_CONFIG = {
-  MIN_WORDS_STANDARD: 40,      // Base threshold for showing content
-  MIN_WORDS_CODE: 15,          // Code blocks show faster
-  MIN_WORDS_LIST: 20,          // Lists show faster
-  MIN_WORDS_QUESTION: 8,       // Questions from AI show faster
-  MIN_WORDS_HEADER: 12,        // Headers indicate structure
-  MIN_BUFFER_MS: 500,          // Always wait at least 500ms
-  MAX_BUFFER_MS: 2500,         // Never buffer longer than 2.5s
-  TIMEOUT_MIN_WORDS: 5,        // Show on timeout if at least this many words
-  HIGH_WORD_COUNT: 60,         // Show regardless of structure at this count
-  CONTENT_THROTTLE_MS: 300,    // Throttle content updates during streaming (perf optimization)
-} as const
-
-type BufferReason =
-  | 'complete'
-  | 'min_time'
-  | 'timeout'
-  | 'code_block'
-  | 'list'
-  | 'header'
-  | 'question'
-  | 'threshold_met'
-  | 'high_word_count'
-  | 'buffering'
-
-/** Count words in text */
-function countWords(text: string): number {
-  return text.trim().split(/\s+/).filter(w => w.length > 0).length
-}
-
-/** Detect code blocks (fenced) */
-function hasCodeBlock(text: string): boolean {
-  return /```/.test(text)
-}
-
-/** Detect markdown lists (bullet or numbered) */
-function hasList(text: string): boolean {
-  return /^\s*[-*•]\s/m.test(text) || /^\s*\d+\.\s/m.test(text)
-}
-
-/** Detect markdown headers */
-function hasHeader(text: string): boolean {
-  return /^#{1,4}\s/m.test(text)
-}
-
-/** Detect structural content (sentences, paragraphs, etc) */
-function hasStructure(text: string): boolean {
-  // Sentence ending (period, exclamation, question mark, colon)
-  if (/[.!?:]\s*$/.test(text.trimEnd())) return true
-  // Paragraph breaks
-  if (/\n\s*\n/.test(text)) return true
-  // Headers anywhere
-  if (/\n\s*#{1,4}\s/.test(text)) return true
-  // Code blocks
-  if (hasCodeBlock(text)) return true
-  return false
-}
-
-/** Detect if text ends with a question (AI asking for clarification) */
-function isQuestion(text: string): boolean {
-  return /\?\s*$/.test(text.trim())
-}
-
-/**
- * Determine if buffered content should be shown.
- * This is the core buffering decision function.
- *
- * @param text - The accumulated response text
- * @param isStreaming - Whether the response is still streaming
- * @param streamStartTime - When streaming started (for timeout calculation)
- * @returns Decision with reason for debugging
- */
-function shouldShowContent(
-  text: string,
-  isStreaming: boolean,
-  streamStartTime?: number
-): { shouldShow: boolean; reason: BufferReason; wordCount: number } {
-  const wordCount = countWords(text)
-
-  // Always show complete content immediately
-  if (!isStreaming) {
-    return { shouldShow: true, reason: 'complete', wordCount }
-  }
-
-  const elapsed = streamStartTime ? Date.now() - streamStartTime : 0
-
-  // Minimum buffer time - always wait at least 500ms
-  if (elapsed < BUFFER_CONFIG.MIN_BUFFER_MS) {
-    return { shouldShow: false, reason: 'min_time', wordCount }
-  }
-
-  // Maximum buffer time - force show after 2.5s if we have some content
-  if (elapsed > BUFFER_CONFIG.MAX_BUFFER_MS && wordCount >= BUFFER_CONFIG.TIMEOUT_MIN_WORDS) {
-    return { shouldShow: true, reason: 'timeout', wordCount }
-  }
-
-  // High-confidence patterns get expedited treatment
-
-  // Code blocks - developers want to see code early
-  if (hasCodeBlock(text) && wordCount >= BUFFER_CONFIG.MIN_WORDS_CODE) {
-    return { shouldShow: true, reason: 'code_block', wordCount }
-  }
-
-  // Headers indicate structured content
-  if (hasHeader(text) && wordCount >= BUFFER_CONFIG.MIN_WORDS_HEADER) {
-    return { shouldShow: true, reason: 'header', wordCount }
-  }
-
-  // Lists indicate structured content
-  if (hasList(text) && wordCount >= BUFFER_CONFIG.MIN_WORDS_LIST) {
-    return { shouldShow: true, reason: 'list', wordCount }
-  }
-
-  // Questions from AI (clarification) - show quickly
-  if (isQuestion(text) && wordCount >= BUFFER_CONFIG.MIN_WORDS_QUESTION) {
-    return { shouldShow: true, reason: 'question', wordCount }
-  }
-
-  // Standard threshold - 40 words with some structure
-  if (wordCount >= BUFFER_CONFIG.MIN_WORDS_STANDARD && hasStructure(text)) {
-    return { shouldShow: true, reason: 'threshold_met', wordCount }
-  }
-
-  // High word count - show regardless of structure
-  if (wordCount >= BUFFER_CONFIG.HIGH_WORD_COUNT) {
-    return { shouldShow: true, reason: 'high_word_count', wordCount }
-  }
-
-  return { shouldShow: false, reason: 'buffering', wordCount }
-}
-
-/**
- * Check if a response is currently in buffering state
- * Used by TurnCard to show subtle indicator instead of big card
- */
-function isResponseBuffering(response: ResponseContent | undefined): boolean {
-  if (!response) return false
-  if (!response.isStreaming) return false
-  const decision = shouldShowContent(response.text, response.isStreaming, response.streamStartTime)
-  return !decision.shouldShow
-}
 
 // ============================================================================
 // Helper Functions
@@ -1479,7 +1337,8 @@ function BranchDropdown({ onBranch }: BranchDropdownProps) {
   )
 }
 
-const MAX_HEIGHT = 540
+// Response cards expand with content and scroll with the outer chat list only.
+// Nested max-height + overflow-y-auto caused painful dual-scroll; do not reintroduce.
 
 function clearAnnotationMarks(root: HTMLElement): void {
   const annotatedInlineCodeNodes = root.querySelectorAll<HTMLElement>('code[data-ca-annotation-inline-code="true"]')
@@ -1641,14 +1500,12 @@ function applyTextHighlightRange(
  * - 'response': Buffered streaming response with smart content gating
  * - 'plan': Plan message with header and Accept Plan button
  *
- * Response variant implements smart buffering:
- * - Waits for 40+ words with structure OR
- * - High-confidence patterns (code blocks, headers, lists) with lower threshold OR
- * - Timeout after 2.5 seconds
+ * Response variant implements smart buffering (see stream-buffer.ts):
+ * - Short anti-flash min window, then CJK-aware unit thresholds
+ * - High-confidence patterns (code / headers / lists) show earlier
+ * - Max wait forces reveal; time gates re-check via useStreamingReveal timers
  *
- * Performance optimization: Uses throttled static snapshots instead of re-rendering
- * on every character. Content updates every 300ms during streaming, avoiding
- * expensive markdown parsing on every delta.
+ * Performance: markdown re-renders throttled (~50ms) while streaming.
  */
 export function ResponseCard({
   text,
@@ -1684,8 +1541,6 @@ export function ResponseCard({
   const [copied, setCopied] = useState(false)
   // Fullscreen state
   const [isFullscreen, setIsFullscreen] = useState(false)
-  // Dark mode detection - scroll fade only shown in dark mode
-  const [isDarkMode, setIsDarkMode] = useState(false)
   // Pending text selection waiting for explicit follow-up action
   const interaction = useAnnotationInteractionController()
   const {
@@ -1726,19 +1581,6 @@ export function ResponseCard({
   })
   const allowAnnotationIsland = annotationInteractionMode === 'interactive'
 
-  // Detect dark mode from document class and listen for changes
-  useEffect(() => {
-    const checkDarkMode = () => {
-      setIsDarkMode(document.documentElement.classList.contains('dark'))
-    }
-    checkDarkMode()
-
-    // Observe class changes on documentElement for theme switches
-    const observer = new MutationObserver(checkDarkMode)
-    observer.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] })
-    return () => observer.disconnect()
-  }, [])
-
   const closeSelectionMenu = useCallback(() => {
     closeAll()
   }, [closeAll])
@@ -1777,7 +1619,8 @@ export function ResponseCard({
 
   const handleCopy = useCallback(async () => {
     try {
-      await navigator.clipboard.writeText(text)
+      // Copy plain text — not markdown source (user expects what they see)
+      await navigator.clipboard.writeText(markdownToPlainText(text))
       setCopied(true)
       setTimeout(() => setCopied(false), 2000)
     } catch (err) {
@@ -2433,13 +2276,11 @@ export function ResponseCard({
     }
   }, [text, isStreaming])
 
-  // Calculate buffering decision based on current text (not displayed text)
-  const bufferDecision = useMemo(() => {
-    return shouldShowContent(text, isStreaming, streamStartTime)
-  }, [text, isStreaming, streamStartTime])
+  // Time-aware buffer gate (re-checks on min/max window even if tokens stall)
+  const reveal = useStreamingReveal(text, isStreaming, streamStartTime)
 
   const isCompleted = !isStreaming
-  const isBuffering = isStreaming && !bufferDecision.shouldShow
+  const isBuffering = isStreaming && !reveal.shouldShow
 
   // While buffering, return null - TurnCard will show a subtle indicator instead
   if (isBuffering) {
@@ -2483,21 +2324,13 @@ export function ResponseCard({
             </div>
           )}
 
-          {/* Scrollable content area with subtle fade at edges (dark mode only) */}
+          {/* Content expands fully — outer session list is the only vertical scroller */}
           <div
             ref={contentRef}
             data-search-root="response"
             onMouseDown={handleSelectionPointerDown}
             onMouseUp={handleTextSelection}
-            className="pl-[22px] pr-[16px] py-3 text-sm overflow-y-auto scrollbar-hover"
-            style={{
-              maxHeight: MAX_HEIGHT,
-              // Subtle fade at top and bottom edges (16px) - only in dark mode for better contrast
-              ...(isDarkMode && {
-                maskImage: 'linear-gradient(to bottom, transparent 0%, black 16px, black calc(100% - 16px), transparent 100%)',
-                WebkitMaskImage: 'linear-gradient(to bottom, transparent 0%, black 16px, black calc(100% - 16px), transparent 100%)',
-              }),
-            }}
+            className="pl-[22px] pr-[16px] py-3 text-sm"
           >
             <div ref={contentLayerRef} className="relative">
               <Markdown
@@ -2628,22 +2461,14 @@ export function ResponseCard({
   return (
     <>
       <div className="bg-background shadow-minimal rounded-[8px] overflow-hidden group">
-        {/* Content area - uses displayedText (throttled) for performance */}
-        {/* Subtle fade at top and bottom edges (dark mode only) */}
+        {/* Content expands fully — outer session list is the only vertical scroller */}
+        {/* Uses displayedText (throttled) for performance while streaming */}
         <div
           ref={contentRef}
           data-search-root="response"
           onMouseDown={handleSelectionPointerDown}
           onMouseUp={handleTextSelection}
-          className="pl-[22px] pr-4 py-3 text-sm overflow-y-auto scrollbar-hover"
-          style={{
-            maxHeight: MAX_HEIGHT,
-            // Subtle fade at top and bottom edges (16px) - only in dark mode for better contrast
-            ...(isDarkMode && {
-              maskImage: 'linear-gradient(to bottom, transparent 0%, black 16px, black calc(100% - 16px), transparent 100%)',
-              WebkitMaskImage: 'linear-gradient(to bottom, transparent 0%, black 16px, black calc(100% - 16px), transparent 100%)',
-            }),
-          }}
+          className="pl-[22px] pr-4 py-3 text-sm"
         >
           <div ref={contentLayerRef} className="relative">
             <Markdown
@@ -2802,6 +2627,8 @@ export const TurnCard = React.memo(function TurnCard({
   openAnnotationRequest,
   annotationInteractionMode = 'interactive',
 }: TurnCardProps) {
+  const { t } = useTranslation()
+
   // Derive the turn phase from props using the state machine.
   // This provides a single source of truth for lifecycle state,
   // replacing the old ad-hoc boolean combinations.
@@ -2869,12 +2696,13 @@ export const TurnCard = React.memo(function TurnCard({
   const expandedActivityGroups = externalExpandedActivityGroups ?? localExpandedActivityGroups
   const handleExpandedActivityGroupsChange = onExpandedActivityGroupsChange ?? setLocalExpandedActivityGroups
 
-  // Check if response is in buffering state
-  // No polling needed - parent updates trigger re-evaluation naturally
-  const isBuffering = useMemo(
-    () => isResponseBuffering(response),
-    [response]
+  // Time-aware buffer gate — must re-fire after MAX_BUFFER_MS even if stream stalls
+  const responseReveal = useStreamingReveal(
+    response?.text,
+    !!response?.isStreaming,
+    response?.streamStartTime,
   )
+  const isBuffering = !!response?.isStreaming && !responseReveal.shouldShow
 
 
   // Compute preview text with cross-fade animation
@@ -3027,19 +2855,11 @@ export const TurnCard = React.memo(function TurnCard({
                 }}
                 className="overflow-hidden"
               >
-                {/* Scrollable container when many activities - subtle background for scroll context */}
+                {/* Activities expand fully — no nested vertical scroll (outer chat scrolls) */}
                 {/* ml-[15px] positions the border-l under the chevron */}
                 <div
                   ref={activitiesContainerRef}
-                  className={cn(
-                    "pl-4 pr-2 py-0 space-y-0.5 border-l-2 border-muted ml-[13px]",
-                    sortedActivities.length > SIZE_CONFIG.maxVisibleActivities && "rounded-r-md overflow-y-auto scrollbar-hover py-1.5"
-                  )}
-                  style={{
-                    maxHeight: sortedActivities.length > SIZE_CONFIG.maxVisibleActivities
-                      ? SIZE_CONFIG.maxVisibleActivities * SIZE_CONFIG.activityRowHeight
-                      : undefined
-                  }}
+                  className="pl-4 pr-2 py-0 space-y-0.5 border-l-2 border-muted ml-[13px]"
                 >
                   <AnimatePresence mode="sync">
                   {/* Grouped view for Task subagents */}
@@ -3113,8 +2933,8 @@ export const TurnCard = React.memo(function TurnCard({
                       }}
                       className={cn("flex items-center gap-2 py-0.5 text-muted-foreground/70", SIZE_CONFIG.fontSize)}
                     >
-                      <Spinner className={SIZE_CONFIG.spinnerSize} />
-                      <span>{isBuffering ? 'Preparing response...' : 'Thinking...'}</span>
+                      <GenerativeActivityIndicator size={12} variant={isBuffering ? 'signal' : 'dot-pulse'} />
+                      <span>{isBuffering ? t('turnCard.preparingResponse') : t('turnCard.thinking')}</span>
                     </motion.div>
                   )}
                   </AnimatePresence>
@@ -3132,8 +2952,8 @@ export const TurnCard = React.memo(function TurnCard({
       {/* Standalone thinking indicator - when no activities but still working */}
       {!hasActivities && isThinking && !animateResponse && (
         <div className={cn("flex items-center gap-2 px-3 py-1.5 text-muted-foreground", SIZE_CONFIG.fontSize)}>
-          <Spinner className={SIZE_CONFIG.spinnerSize} />
-          <span>{isBuffering ? 'Preparing response...' : 'Thinking...'}</span>
+          <GenerativeActivityIndicator size={12} variant={isBuffering ? 'signal' : 'dot-pulse'} />
+          <span>{isBuffering ? t('turnCard.preparingResponse') : t('turnCard.thinking')}</span>
         </div>
       )}
 

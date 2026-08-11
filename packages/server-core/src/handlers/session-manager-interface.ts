@@ -242,6 +242,11 @@ export interface ISessionManager {
   getWorkspacesInfo(): WorkspaceInfo[]
   setupConfigWatcher(workspaceRootPath: string, workspaceId: string): void
   /**
+   * Release runtime resources for a workspace before its folder is deleted:
+   * in-memory sessions/agents, ConfigWatcher, AutomationSystem.
+   */
+  unloadWorkspace(workspaceId: string): Promise<void>
+  /**
    * Manually notify the ConfigWatcher of a file change.
    * Workaround for Bun's fs.watch on Linux not detecting atomic renames.
    */

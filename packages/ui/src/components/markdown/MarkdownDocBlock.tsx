@@ -151,8 +151,10 @@ export function MarkdownDocBlock({ code, className, onUrlClick, onFileClick }: M
 
         <div
           className={cn(
-            'relative px-3 py-2 overflow-auto',
-            isFullscreen ? 'max-h-[80vh]' : 'max-h-[400px]'
+            'relative px-3 py-2',
+            // Fullscreen overlay may cap height; inline chat cards expand with content
+            // to avoid nested vertical scroll against the session list.
+            isFullscreen ? 'max-h-[80vh] overflow-auto' : 'overflow-x-auto'
           )}
         >
           {activeContent !== undefined && (
@@ -172,15 +174,6 @@ export function MarkdownDocBlock({ code, className, onUrlClick, onFileClick }: M
 
           {activeContent === undefined && !loading && error && (
             <div className="py-6 text-center text-destructive/70 text-[13px]">{error}</div>
-          )}
-
-          {!isFullscreen && activeContent !== undefined && (
-            <div
-              className="absolute bottom-0 left-0 right-0 h-8 pointer-events-none"
-              style={{
-                background: 'linear-gradient(to bottom, transparent, var(--muted))',
-              }}
-            />
           )}
         </div>
       </div>

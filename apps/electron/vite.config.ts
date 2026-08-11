@@ -61,7 +61,13 @@ export default defineConfig({
   },
   optimizeDeps: {
     include: ['react', 'react-dom', 'jotai', 'pdfjs-dist'],
-    exclude: ['@craft-agent/ui'],
+    // bash-parser is Node-only (broken ESM entry deps); never pre-bundle for renderer
+    exclude: [
+      '@craft-agent/ui',
+      'bash-parser',
+      'iterable-transform-replace',
+      'transform-spread-iterable',
+    ],
     esbuildOptions: {
       supported: { 'top-level-await': true },
       target: 'esnext'

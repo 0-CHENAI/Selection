@@ -1,3 +1,4 @@
+import { useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { ShieldAlert, Check, X, RefreshCw } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -24,17 +25,27 @@ interface PermissionRequestProps {
  */
 export function PermissionRequest({ request, onResponse, unstyled = false }: PermissionRequestProps) {
   const { t } = useTranslation()
+  // Prevent double-submit while parent clears the pending queue asynchronously
+  const [responded, setResponded] = useState(false)
+  const respondedRef = useRef(false)
+
+  const respond = (response: PermissionResponse) => {
+    if (respondedRef.current) return
+    respondedRef.current = true
+    setResponded(true)
+    onResponse(response)
+  }
 
   const handleAllow = () => {
-    onResponse({ type: 'permission', allowed: true, alwaysAllow: false })
+    respond({ type: 'permission', allowed: true, alwaysAllow: false })
   }
 
   const handleAlwaysAllow = () => {
-    onResponse({ type: 'permission', allowed: true, alwaysAllow: true })
+    respond({ type: 'permission', allowed: true, alwaysAllow: true })
   }
 
   const handleDeny = () => {
-    onResponse({ type: 'permission', allowed: false, alwaysAllow: false })
+    respond({ type: 'permission', allowed: false, alwaysAllow: false })
   }
 
   return (
@@ -76,6 +87,7 @@ export function PermissionRequest({ request, onResponse, unstyled = false }: Per
           variant="default"
           className="h-7 gap-1.5"
           onClick={handleAllow}
+          disabled={responded}
           data-tutorial="permission-allow-button"
         >
           <Check className="h-3.5 w-3.5" />
@@ -86,6 +98,7 @@ export function PermissionRequest({ request, onResponse, unstyled = false }: Per
           variant="ghost"
           className="h-7 gap-1.5 border border-foreground/10 hover:bg-foreground/5 active:bg-foreground/10"
           onClick={handleAlwaysAllow}
+          disabled={responded}
         >
           <RefreshCw className="h-3.5 w-3.5" />
           Always Allow
@@ -95,6 +108,7 @@ export function PermissionRequest({ request, onResponse, unstyled = false }: Per
           variant="ghost"
           className="h-7 gap-1.5 text-destructive hover:text-destructive border border-dashed border-destructive/50 hover:bg-destructive/10 hover:border-destructive/70 active:bg-destructive/20"
           onClick={handleDeny}
+          disabled={responded}
         >
           <X className="h-3.5 w-3.5" />
           Deny

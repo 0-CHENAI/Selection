@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 /**
- * @craft-agent/server — standalone headless Craft Agent server.
+ * @craft-agent/server — standalone headless Selection server.
  *
  * Usage:
  *   CRAFT_SERVER_TOKEN=<secret> bun run packages/server/src/index.ts
@@ -48,6 +48,7 @@ import { SessionManager, setSessionPlatform, setSessionRuntimeHooks } from '@cra
 import { initModelRefreshService, setFetcherPlatform } from '@craft-agent/server-core/model-fetchers'
 import { setSearchPlatform, setImageProcessor } from '@craft-agent/server-core/services'
 import type { HandlerDeps } from '@craft-agent/server-core/handlers'
+import { CONFIG_DIR } from '@craft-agent/shared/config/paths'
 
 process.env.CRAFT_IS_PACKAGED ??= 'false'
 
@@ -211,7 +212,7 @@ const instance = await (async () => {
           sessionManager,
           credentialManager: getCredentialManager(),
           getMessagingDir: (wsId: string) =>
-            join(homedir(), '.craft-agent', 'workspaces', wsId, 'messaging'),
+            join(CONFIG_DIR, 'workspaces', wsId, 'messaging'),
           // Headless has no legacy messaging dir — workspaces start clean.
           whatsapp: {
             workerEntry: waWorkerEntry,

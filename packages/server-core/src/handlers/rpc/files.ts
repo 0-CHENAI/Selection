@@ -441,9 +441,23 @@ export function registerFilesHandlers(server: RpcServer, deps: HandlerDeps): voi
   // Parallel BFS walk that skips ignored directories BEFORE entering them,
   // avoiding reading node_modules/etc. contents entirely. Uses withFileTypes
   // to get entry types without separate stat calls.
+  //
+  // Ranking (higher first): exact name → name prefix → name contains → path
+  // contains. We walk more candidates than we return so a short query does not
+  // fill the budget with shallow weak matches and hide a better deeper hit.
   server.handle(RPC_CHANNELS.fs.SEARCH, async (_ctx, basePath: string, query: string) => {
     deps.platform.logger.info('[FS_SEARCH] called:', basePath, query)
     const MAX_RESULTS = 50
+    // Soft cap on how many candidates to score before early-stopping the walk.
+    // Higher than MAX_RESULTS so weak shallow matches can be displaced by
+    // stronger deeper ones (e.g. "app.tsx" when query is "app").
+    const MAX_CANDIDATES = 400
+    // Limit tree breadth for very short *ASCII* queries (1–2 chars) so we don't
+    // walk the entire monorepo. CJK characters are far more selective even at
+    // length 1, so allow a full-depth walk for non-ASCII queries.
+    const trimmedQuery = query.trim()
+    const isAsciiShort = /^[\x00-\x7F]{1,2}$/.test(trimmedQuery)
+    const MAX_DIRS = isAsciiShort ? 200 : 2000
 
     // Directories to never recurse into
     const SKIP_DIRS = new Set([
@@ -452,14 +466,89 @@ export function registerFilesHandlers(server: RpcServer, deps: HandlerDeps): voi
       '.idea', '.vscode', 'coverage', '.nyc_output', '.turbo', 'out',
     ])
 
-    const lowerQuery = query.toLowerCase()
-    const results: Array<{ name: string; path: string; type: 'file' | 'directory'; relativePath: string }> = []
+    const lowerQuery = query.trim().toLowerCase()
+
+    type Scored = {
+      name: string
+      path: string
+      type: 'file' | 'directory'
+      relativePath: string
+      score: number
+    }
+
+    // Empty query: seed the @ menu with a short alphabetical listing of the
+    // working directory so the popup is not blank before the user types.
+    // Prefer root-level entries; if the root is sparse, walk one level deeper.
+    if (!lowerQuery) {
+      const DEFAULT_LIMIT = 20
+      try {
+        const collectLevel = async (relDir: string) => {
+          const absDir = relDir ? join(basePath, relDir) : basePath
+          let entries: import('fs').Dirent[] = []
+          try {
+            entries = await readdir(absDir, { withFileTypes: true })
+          } catch {
+            return [] as Scored[]
+          }
+          const items: Scored[] = []
+          for (const entry of entries) {
+            const name = entry.name
+            if (name.startsWith('.') || SKIP_DIRS.has(name)) continue
+            const relativePath = relDir ? `${relDir}/${name}` : name
+            items.push({
+              name,
+              path: join(basePath, relativePath),
+              type: entry.isDirectory() ? 'directory' : 'file',
+              relativePath,
+              score: 0,
+            })
+          }
+          return items
+        }
+
+        let items = await collectLevel('')
+        // If root is mostly empty (or only a couple of dirs), add children of
+        // top-level directories so the menu has enough to show.
+        if (items.length < DEFAULT_LIMIT) {
+          const rootDirs = items.filter(i => i.type === 'directory').slice(0, 8)
+          const nested = await Promise.all(rootDirs.map(d => collectLevel(d.relativePath)))
+          items = items.concat(nested.flat())
+        }
+
+        items.sort((a, b) => {
+          // Files first for a denser "pick a file" feel, then A–Z by name
+          if (a.type !== b.type) return a.type === 'file' ? -1 : 1
+          return a.name.localeCompare(b.name, undefined, { sensitivity: 'base', numeric: true })
+        })
+
+        const results = items.slice(0, DEFAULT_LIMIT).map(({ score: _score, ...rest }) => rest)
+        deps.platform.logger.info('[FS_SEARCH] empty-query default listing:', results.length, 'results')
+        return results
+      } catch (err) {
+        deps.platform.logger.error('[FS_SEARCH] empty-query error:', err)
+        return []
+      }
+    }
+
+    /** 5 exact, 4 name-prefix, 3 name-contains, 2 path-contains, 0 no match */
+    const scoreMatch = (name: string, relativePath: string): number => {
+      const lowerName = name.toLowerCase()
+      const lowerRelative = relativePath.toLowerCase()
+      if (lowerName === lowerQuery) return 5
+      if (lowerName.startsWith(lowerQuery)) return 4
+      if (lowerName.includes(lowerQuery)) return 3
+      if (lowerRelative.includes(lowerQuery)) return 2
+      return 0
+    }
+
+    const candidates: Scored[] = []
+    let dirsVisited = 0
 
     try {
       // BFS queue: each entry is a relative path prefix ('' for root)
       let queue = ['']
 
-      while (queue.length > 0 && results.length < MAX_RESULTS) {
+      while (queue.length > 0 && candidates.length < MAX_CANDIDATES && dirsVisited < MAX_DIRS) {
         // Process current level: read all directories in parallel
         const nextQueue: string[] = []
 
@@ -476,10 +565,11 @@ export function registerFilesHandlers(server: RpcServer, deps: HandlerDeps): voi
         )
 
         for (const { relDir, entries } of dirResults) {
-          if (results.length >= MAX_RESULTS) break
+          if (candidates.length >= MAX_CANDIDATES || dirsVisited >= MAX_DIRS) break
+          dirsVisited++
 
           for (const entry of entries) {
-            if (results.length >= MAX_RESULTS) break
+            if (candidates.length >= MAX_CANDIDATES) break
 
             const name = entry.name
             // Skip hidden files/dirs and ignored directories
@@ -493,15 +583,14 @@ export function registerFilesHandlers(server: RpcServer, deps: HandlerDeps): voi
               nextQueue.push(relativePath)
             }
 
-            // Check if name or path matches the query
-            const lowerName = name.toLowerCase()
-            const lowerRelative = relativePath.toLowerCase()
-            if (lowerName.includes(lowerQuery) || lowerRelative.includes(lowerQuery)) {
-              results.push({
+            const score = scoreMatch(name, relativePath)
+            if (score > 0) {
+              candidates.push({
                 name,
                 path: join(basePath, relativePath),
                 type: isDir ? 'directory' : 'file',
                 relativePath,
+                score,
               })
             }
           }
@@ -510,13 +599,17 @@ export function registerFilesHandlers(server: RpcServer, deps: HandlerDeps): voi
         queue = nextQueue
       }
 
-      // Sort: directories first, then by name length (shorter = better match)
-      results.sort((a, b) => {
-        if (a.type !== b.type) return a.type === 'directory' ? -1 : 1
-        return a.name.length - b.name.length
+      // Prefer stronger matches, then shorter names, then files over dirs of equal score
+      candidates.sort((a, b) => {
+        if (b.score !== a.score) return b.score - a.score
+        if (a.name.length !== b.name.length) return a.name.length - b.name.length
+        if (a.type !== b.type) return a.type === 'file' ? -1 : 1
+        return a.name.localeCompare(b.name)
       })
 
-      deps.platform.logger.info('[FS_SEARCH] returning', results.length, 'results')
+      const results = candidates.slice(0, MAX_RESULTS).map(({ score: _score, ...rest }) => rest)
+
+      deps.platform.logger.info('[FS_SEARCH] returning', results.length, 'results of', candidates.length, 'candidates')
       return results
     } catch (err) {
       deps.platform.logger.error('[FS_SEARCH] error:', err)

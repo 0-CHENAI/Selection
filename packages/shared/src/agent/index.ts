@@ -101,7 +101,7 @@ export {
   loadRawSourcePermissions,
   saveWorkspacePermissions,
   saveSourcePermissions,
-  // App-level default permissions (at ~/.craft-agent/permissions/)
+  // App-level default permissions (at ~/.selection/permissions/)
   getAppPermissionsDir,
   ensureDefaultPermissions,
   loadDefaultPermissions,
@@ -163,6 +163,15 @@ export {
 
 // Export PowerShell validator root setter (for Electron startup on Windows)
 export { setPowerShellValidatorRoot } from './powershell-validator.ts';
+
+// User message sanitization (system-reminder / activation suffix stripping)
+export {
+  INTERRUPTION_SYSTEM_REMINDER,
+  stripSystemReminderBlocks,
+  stripSourceActivationSuffix,
+  sanitizeUserMessageForDisplay,
+  sanitizeUserMessageForRetry,
+} from './user-message-sanitize.ts';
 
 // WS2 keep-alive: shared flag resolver + pushable streaming-input utility.
 export {

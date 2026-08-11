@@ -127,7 +127,7 @@ export const UpdatePreferencesSchema = z.object({
   region: z.string().optional().describe("The user's state/region/province"),
   country: z.string().optional().describe("The user's country"),
   notes: z.string().optional().describe('Additional notes about the user that would be helpful to remember (preferences, context, etc.). Replaces any existing notes.'),
-  includeCoAuthoredBy: z.boolean().optional().describe("Whether to include 'Co-Authored-By: Craft Agent' trailer on git commits. Defaults to true."),
+  includeCoAuthoredBy: z.boolean().optional().describe("Whether to include 'Co-Authored-By: Selection' trailer on git commits. Defaults to true."),
 });
 
 export const TransformDataSchema = z.object({
@@ -260,7 +260,7 @@ The plan will be displayed to the user in a special formatted view.
 - The conversation will resume when the user responds (accept, modify, or reject the plan)
 - Do NOT include any text or tool calls after SubmitPlan - they will not be executed`,
 
-  config_validate: `Validate Craft Agent configuration files.
+  config_validate: `Validate Selection configuration files.
 
 Use this after editing configuration files to check for errors before they take effect.
 Returns structured validation results with errors, warnings, and suggestions.
@@ -470,7 +470,7 @@ Optional overrides: \`model\`, \`llmConnection\`, \`permissionMode\`, \`thinking
 The spawned session appears in the session list and runs fire-and-forget.
 Only use 'attachments' for existing file paths on disk — the tool reads them automatically.`,
 
-  send_developer_feedback: `Send freeform feedback to the Craft Agent development team.
+  send_developer_feedback: `Send freeform feedback to the Selection development team.
 
 Use this to share anything that would help improve the product — issues you hit, ideas for better tools, suggestions for improved workflows, or patterns you notice. Write in markdown with as much detail as possible. This is your direct line to the developers.`,
 
@@ -491,7 +491,7 @@ IMPORTANT: never move a task into a closed status (such as "done" or "cancelled"
 Archiving removes a session from the active list and unread counts — it does NOT delete it (pass archived=false to restore). Use it to tidy up finished or superseded sessions.
 Requires an explicit sessionId and cannot target your own session. Use list_sessions / get_session_info to find the target session's ID.`,
 
-  create_task: `Create a Craft Agents Task on the kanban board — writes tasks/<slug>/task.yaml and creates its orchestrator session. CREATION ONLY: the task lands in "todo" and is NOT run; starting it is the user's (or an automation's) decision.
+  create_task: `Create a Selection Task on the kanban board — writes tasks/<slug>/task.yaml and creates its orchestrator session. CREATION ONLY: the task lands in "todo" and is NOT run; starting it is the user's (or an automation's) decision.
 
 Provide title + description (the description becomes the task goal and the initial node prompt). Optional: acceptanceCriteria (verification rubric), sources / skills (workspace slugs), llmConnection + model, workingDirectory, projectId. When projectId is omitted, the task inherits the invoking session's project.
 

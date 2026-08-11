@@ -1,7 +1,7 @@
 # CLAUDE.md — `@craft-agent/shared`
 
 ## Purpose
-Core business logic package for Craft Agent:
+Core business logic package for Selection:
 - Agent backends and session-scoped tools
 - Sources, credentials, sessions, and config
 - Permission modes and validation
@@ -106,7 +106,7 @@ Keys use **flat dot-notation** with a category prefix:
 
 1. **Never call `i18n.t()` at module level** — store `labelKey` strings and resolve in components/functions.
 2. **Use i18next pluralization** (`_one`/`_other`), never manual `count === 1 ?` logic.
-3. **Keep brand names in English**: Craft, Craft Agents, Agents, Workspace, Claude, Anthropic, OpenAI, MCP, API, SDK.
+3. **Keep brand names in English**: Craft, Selection, Agents, Workspace, Claude, Anthropic, OpenAI, MCP, API, SDK.
 4. **Include `...` in the translation value** if the UI needs an ellipsis — don't append it in JSX.
 5. **Use `<Trans>` component** for translations containing HTML tags (e.g. `<strong>`).
 6. **Use `i18n.resolvedLanguage`** (not `i18n.language`) when comparing against supported language codes.
@@ -149,7 +149,7 @@ When resolving locale merge conflicts, run `bun run validate:ci` and trust the r
 The main-process i18n instance has **no detection plugin** (no `localStorage` in Node) and would otherwise reset to `fallbackLng: 'en'` on every restart. To keep main + renderer in sync across launches:
 
 - **Renderer** uses `i18next-browser-languagedetector` → `localStorage` (`i18nextLng`). Survives restart.
-- **Main** hydrates on startup from `preferences.uiLanguage` in `~/.craft-agent/preferences.json`. Maintained only by the `i18n:changeLanguage` IPC handler in `apps/electron/src/main/index.ts`.
+- **Main** hydrates on startup from `preferences.uiLanguage` in `~/.selection/preferences.json`. Maintained only by the `i18n:changeLanguage` IPC handler in `apps/electron/src/main/index.ts`.
 - **Renderer → main sync** happens on every Appearance change AND once at renderer startup (so a freshly-installed app immediately learns the persisted language).
 - The IPC handler validates the incoming code against `SUPPORTED_LANGUAGE_CODES` and `setPersistedUiLanguage()` no-ops if the value is unchanged — startup pushes don't churn the file or the config watcher.
 
