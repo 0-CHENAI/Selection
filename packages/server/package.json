@@ -1,6 +1,6 @@
 {
   "name": "@craft-agent/server",
-  "version": "0.11.4",
+  "version": "0.11.5",
   "description": "Standalone headless Selection server (Bun runtime)",
   "type": "module",
   "main": "src/index.ts",

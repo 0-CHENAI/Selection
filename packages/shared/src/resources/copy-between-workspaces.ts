@@ -22,6 +22,7 @@ import { randomUUID } from 'crypto'
 import { getWorkspaceSourcesPath, getWorkspaceSkillsPath } from '../workspaces/storage.ts'
 import { getSourcePath } from '../sources/storage.ts'
 import { isBuiltinSource } from '../sources/builtin-sources.ts'
+import { resolveFsPath } from '../utils/paths.ts'
 import type { ResourceImportMode, ImportBucketResult, ResourceImportResult } from './types.ts'
 import type { FolderSourceConfig } from '../sources/types.ts'
 
@@ -111,7 +112,7 @@ function applyAuthAfterCopy(
       config.isAuthenticated = true
       config.connectionStatus = 'connected'
       config.connectionError = undefined
-      writeFileSync(configPath, JSON.stringify(config, null, 2))
+      writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf-8')
       return
     }
 
@@ -119,7 +120,7 @@ function applyAuthAfterCopy(
       config.isAuthenticated = false
       config.connectionStatus = 'needs_auth'
       config.connectionError = undefined
-      writeFileSync(configPath, JSON.stringify(config, null, 2))
+      writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf-8')
     }
   } catch {
     // Non-fatal
@@ -159,12 +160,20 @@ export async function copyBetweenWorkspaces(
   options: CopyBetweenWorkspacesOptions,
   deps: CopyBetweenWorkspacesDeps,
 ): Promise<ResourceImportResult> {
-  const includeCredentials = options.includeCredentials !== false
-  const sourcesResult = options.sources !== undefined
-    ? await copySources(options, deps, includeCredentials)
+  // Resolve + NFC-normalize roots so Chinese folder paths work reliably on
+  // macOS (NFD filesystem) and when paths were stored with ~ / mixed seps.
+  const normalized: CopyBetweenWorkspacesOptions = {
+    ...options,
+    fromRootPath: resolveFsPath(options.fromRootPath),
+    toRootPath: resolveFsPath(options.toRootPath),
+  }
+
+  const includeCredentials = normalized.includeCredentials !== false
+  const sourcesResult = normalized.sources !== undefined
+    ? await copySources(normalized, deps, includeCredentials)
     : emptyBucket()
-  const skillsResult = options.skills !== undefined
-    ? copySkills(options)
+  const skillsResult = normalized.skills !== undefined
+    ? copySkills(normalized)
     : emptyBucket()
 
   return {

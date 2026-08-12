@@ -1,18 +1,19 @@
 import { useTranslation } from "react-i18next"
 import { cn } from "@/lib/utils"
-import { Key, Monitor } from "lucide-react"
+import { Globe, Key, Monitor } from "lucide-react"
 import { CraftAgentsSymbol } from "@/components/icons/CraftAgentsSymbol"
 import { StepFormLayout } from "./primitives"
-
-import claudeIcon from "@/assets/provider-icons/claude.svg"
-import openaiIcon from "@/assets/provider-icons/openai.svg"
-import copilotIcon from "@/assets/provider-icons/copilot.svg"
 
 /**
  * The high-level provider choice the user makes on first launch.
  * This maps to one or more ApiSetupMethods downstream.
  */
-export type ProviderChoice = 'claude' | 'chatgpt' | 'copilot' | 'api_key' | 'local'
+export type ProviderChoice = 'order' | 'api_key' | 'local'
+
+/** ORDER gateway base (Anthropic-compatible path — no /v1). */
+export const ORDER_BASE_URL = 'https://order.ai.jxepdi.top'
+/** ORDER OpenAI-compatible base URL (requires /v1). */
+export const ORDER_OPENAI_BASE_URL = 'https://order.ai.jxepdi.top/v1'
 
 interface ProviderOption {
   id: ProviderChoice
@@ -22,9 +23,7 @@ interface ProviderOption {
 }
 
 const PROVIDER_ICONS: Record<ProviderChoice, React.ReactNode> = {
-  claude: <img src={claudeIcon} alt="" className="size-5 rounded-[3px]" />,
-  chatgpt: <img src={openaiIcon} alt="" className="size-5 rounded-[3px]" />,
-  copilot: <img src={copilotIcon} alt="" className="size-5 rounded-[3px]" />,
+  order: <Globe className="size-5" />,
   api_key: <Key className="size-5" />,
   local: <Monitor className="size-5" />,
 }
@@ -39,7 +38,7 @@ interface ProviderSelectStepProps {
 /**
  * ProviderSelectStep — First screen after install.
  *
- * Welcomes the user and asks them to pick their subscription / auth method.
+ * Welcomes the user and asks them to pick their connection method.
  * Selecting a card immediately advances to the next step.
  */
 export function ProviderSelectStep({ onSelect, onSkip }: ProviderSelectStepProps) {
@@ -47,33 +46,21 @@ export function ProviderSelectStep({ onSelect, onSkip }: ProviderSelectStepProps
 
   const PROVIDER_OPTIONS: ProviderOption[] = [
     {
-      id: 'claude',
-      name: t("onboarding.providerSelect.claudeProMax"),
-      description: t("onboarding.providerSelect.claudeProMaxDesc"),
-      icon: PROVIDER_ICONS.claude,
-    },
-    {
-      id: 'chatgpt',
-      name: t("onboarding.providerSelect.codexChatGPT"),
-      description: t("onboarding.providerSelect.codexChatGPTDesc"),
-      icon: PROVIDER_ICONS.chatgpt,
-    },
-    {
-      id: 'copilot',
-      name: t("onboarding.providerSelect.githubCopilot"),
-      description: t("onboarding.providerSelect.githubCopilotDesc"),
-      icon: PROVIDER_ICONS.copilot,
+      id: 'order',
+      name: t("onboarding.providerSelect.order"),
+      description: t("onboarding.providerSelect.orderDesc"),
+      icon: PROVIDER_ICONS.order,
     },
     {
       id: 'api_key',
       name: t("onboarding.providerSelect.otherProvider"),
-      description: 'Anthropic, AWS Bedrock, OpenRouter, Google or any compatible provider.',
+      description: t("onboarding.providerSelect.otherProviderDesc"),
       icon: PROVIDER_ICONS.api_key,
     },
     {
       id: 'local',
       name: t("onboarding.providerSelect.localModel"),
-      description: 'Run models locally with Ollama.',
+      description: t("onboarding.providerSelect.localModelDesc"),
       icon: PROVIDER_ICONS.local,
     },
   ]

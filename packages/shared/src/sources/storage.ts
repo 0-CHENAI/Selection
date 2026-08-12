@@ -139,7 +139,7 @@ export function saveSourceConfig(
     };
   }
 
-  writeFileSync(join(dir, 'config.json'), JSON.stringify(storageConfig, null, 2));
+  writeFileSync(join(dir, 'config.json'), JSON.stringify(storageConfig, null, 2), 'utf-8');
 
   // Orphan-credential cleanup: when an API source is set to authType:'none',
   // any credential previously stored for this slug (e.g. from authType:'header')

@@ -6,7 +6,7 @@
  */
 
 import { homedir } from 'os';
-import { resolve, join, normalize, isAbsolute } from 'path';
+import { resolve, join, normalize, isAbsolute, relative } from 'path';
 import { existsSync } from 'fs';
 
 /**
@@ -124,6 +124,31 @@ export function isPortablePath(path: string): boolean {
  */
 export function normalizePath(path: string): string {
   return path.replace(/\\/g, '/');
+}
+
+/**
+ * Resolve a workspace/filesystem path for reliable I/O.
+ * - Expands ~ / $HOME
+ * - Resolves to absolute
+ * - Normalizes . / .. and separators
+ * - NFC unicode form so Chinese (and other non-ASCII) path segments compare
+ *   consistently across dialog pickers (often NFC) and macOS HFS/APFS (often NFD)
+ */
+export function resolveFsPath(inputPath: string, basePath?: string): string {
+  if (!inputPath) return inputPath;
+  return resolve(normalize(expandPath(inputPath, basePath))).normalize('NFC');
+}
+
+/**
+ * True if `child` is the same as or nested under `parent`.
+ * Unicode-safe (NFC) and works with mixed separators.
+ */
+export function isPathInside(parent: string, child: string): boolean {
+  if (!parent || !child) return false;
+  const parentRes = resolveFsPath(parent);
+  const childRes = resolveFsPath(child);
+  const rel = relative(parentRes, childRes);
+  return rel === '' || (!rel.startsWith('..') && !isAbsolute(rel));
 }
 
 /**

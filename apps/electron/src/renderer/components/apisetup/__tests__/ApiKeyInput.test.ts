@@ -153,4 +153,32 @@ describe('resolveCustomEndpointPayload', () => {
       piAuthProvider: undefined,
     })
   })
+
+  it('routes ORDER Anthropic preset to anthropic-messages', () => {
+    expect(resolveCustomEndpointPayload({
+      activePreset: 'order-anthropic',
+      baseUrl: 'https://order.ai.jxepdi.top',
+      customApi: 'openai-completions',
+      brandedOpenAiCompatPresets: BRANDED,
+      brandedAnthropicCompatPresets: new Set(['order-anthropic']),
+      fallbackPiAuthProvider: undefined,
+    })).toEqual({
+      customEndpoint: { api: 'anthropic-messages' },
+      piAuthProvider: 'anthropic',
+    })
+  })
+
+  it('routes ORDER OpenAI preset to openai-completions', () => {
+    expect(resolveCustomEndpointPayload({
+      activePreset: 'order-openai',
+      baseUrl: 'https://order.ai.jxepdi.top/v1',
+      customApi: 'anthropic-messages',
+      brandedOpenAiCompatPresets: new Set(['manifest', 'order-openai']),
+      brandedAnthropicCompatPresets: new Set(['order-anthropic']),
+      fallbackPiAuthProvider: undefined,
+    })).toEqual({
+      customEndpoint: { api: 'openai-completions' },
+      piAuthProvider: 'openai',
+    })
+  })
 })

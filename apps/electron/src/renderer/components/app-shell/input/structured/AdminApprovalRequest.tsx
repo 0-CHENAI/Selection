@@ -71,14 +71,16 @@ export function AdminApprovalRequest({
             <span>{t('chat.adminApprovalRequired')}</span>
           </div>
           <div className="text-xs leading-[18px] text-muted-foreground">
-            Installing <span className="font-medium text-foreground">{request.appName}</span> needs your Mac admin approval.
-            {request.requiresSystemPrompt ? " You’ll see your regular macOS password/Touch ID prompt." : ''}
+            {t('chat.adminNeedsApproval', { appName: request.appName })}
+            {request.requiresSystemPrompt ? ` ${t('chat.adminSystemPromptNote')}` : ''}
             <br />
-            <span className="font-medium text-foreground">Why:</span> {request.reason}
+            <span className="font-medium text-foreground">{t('chat.adminWhyLabel')}</span>{' '}
+            {request.reason}
             {request.impact && (
               <>
                 <br />
-                <span className="font-medium text-foreground">Impact:</span> {request.impact}
+                <span className="font-medium text-foreground">{t('chat.adminImpactLabel')}</span>{' '}
+                {request.impact}
               </>
             )}
           </div>
@@ -98,7 +100,7 @@ export function AdminApprovalRequest({
           disabled={responded}
         >
           <Check className="h-3.5 w-3.5" />
-          Approve
+          {t('chat.adminApprove')}
         </Button>
 
         <Button
@@ -109,7 +111,7 @@ export function AdminApprovalRequest({
           disabled={responded}
         >
           <X className="h-3.5 w-3.5" />
-          Cancel
+          {t('chat.adminCancel')}
         </Button>
 
         <div className="min-w-0 flex-1" />
@@ -118,10 +120,10 @@ export function AdminApprovalRequest({
           <Switch
             checked={rememberChoice}
             onCheckedChange={setRememberChoice}
-            aria-label={`Remember this exact command for ${rememberForMinutes} minutes`}
+            aria-label={t('chat.adminRememberAria', { minutes: rememberForMinutes })}
           />
           <Label className="text-[11px] text-muted-foreground cursor-pointer" onClick={() => setRememberChoice(!rememberChoice)}>
-            Remember for {rememberForMinutes} min
+            {t('chat.adminRememberFor', { minutes: rememberForMinutes })}
           </Label>
         </div>
       </div>

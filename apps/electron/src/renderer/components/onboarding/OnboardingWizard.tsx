@@ -84,8 +84,8 @@ interface OnboardingWizardProps {
  *
  * Manages the step-by-step flow for setting up Selection:
  * 1. Welcome
- * 2. Provider Select (Claude / ChatGPT / Copilot / API Key / Local)
- * 3. Credentials (API Key or OAuth) or Local Model
+ * 2. Provider Select (ORDER / API Key / Local)
+ * 3. Credentials (API Key) or Local Model
  * 4. Completion
  */
 export function OnboardingWizard({

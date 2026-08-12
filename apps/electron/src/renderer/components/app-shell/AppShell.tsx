@@ -17,6 +17,7 @@ import {
   X,
   Search,
   Plus,
+  Copy,
   Trash2,
   DatabaseZap,
   Zap,
@@ -1839,6 +1840,8 @@ function AppShellContent({
   // their request in the popover UI before opening a new chat window.
   // add-source variants: add-source (generic), add-source-api, add-source-mcp, add-source-local
   const [editPopoverOpen, setEditPopoverOpen] = useState<'statuses' | 'labels' | 'views' | 'add-source' | 'add-source-api' | 'add-source-mcp' | 'add-source-local' | 'add-skill' | 'add-label' | 'automation-config' | 'add-project' | null>(null)
+  const [copySkillsFromOpen, setCopySkillsFromOpen] = useState(false)
+  const [copySourcesFromOpen, setCopySourcesFromOpen] = useState(false)
 
   // Stores the Y position of the last right-clicked sidebar item so the EditPopover
   // appears near it rather than at a fixed location. Updated synchronously before
@@ -3368,32 +3371,50 @@ function AppShellContent({
                   )}
                   {/* Add Source button (only for sources mode) - uses filter-aware edit config */}
                   {isSourcesNavigation(navState) && activeWorkspace && (
-                    <EditPopover
-                      trigger={
+                    <>
+                      {workspaces.some((w) => w.id !== activeWorkspaceId && !w.remoteServer) && (
                         <HeaderIconButton
-                          icon={<Plus className="h-4 w-4" />}
-                          tooltip={t("sidebarMenu.addSource")}
-                          data-tutorial="add-source-button"
+                          icon={<Copy className="h-4 w-4" />}
+                          tooltip={t("sourcesList.copyFromWorkspace")}
+                          onClick={() => setCopySourcesFromOpen(true)}
                         />
-                      }
-                      {...getEditConfig(
-                        sourceFilter?.kind === 'type' ? `add-source-${sourceFilter.sourceType}` as EditContextKey : 'add-source',
-                        activeWorkspace.rootPath
                       )}
-                    />
+                      <EditPopover
+                        trigger={
+                          <HeaderIconButton
+                            icon={<Plus className="h-4 w-4" />}
+                            tooltip={t("sidebarMenu.addSource")}
+                            data-tutorial="add-source-button"
+                          />
+                        }
+                        {...getEditConfig(
+                          sourceFilter?.kind === 'type' ? `add-source-${sourceFilter.sourceType}` as EditContextKey : 'add-source',
+                          activeWorkspace.rootPath
+                        )}
+                      />
+                    </>
                   )}
                   {/* Add Skill button (only for skills mode) */}
                   {isSkillsNavigation(navState) && activeWorkspace && (
-                    <EditPopover
-                      trigger={
+                    <>
+                      {workspaces.some((w) => w.id !== activeWorkspaceId && !w.remoteServer) && (
                         <HeaderIconButton
-                          icon={<Plus className="h-4 w-4" />}
-                          tooltip={t("sidebarMenu.addSkill")}
-                          data-tutorial="add-skill-button"
+                          icon={<Copy className="h-4 w-4" />}
+                          tooltip={t("skillsList.copyFromWorkspace")}
+                          onClick={() => setCopySkillsFromOpen(true)}
                         />
-                      }
-                      {...getEditConfig('add-skill', activeWorkspace.rootPath)}
-                    />
+                      )}
+                      <EditPopover
+                        trigger={
+                          <HeaderIconButton
+                            icon={<Plus className="h-4 w-4" />}
+                            tooltip={t("sidebarMenu.addSkill")}
+                            data-tutorial="add-skill-button"
+                          />
+                        }
+                        {...getEditConfig('add-skill', activeWorkspace.rootPath)}
+                      />
+                    </>
                   )}
                   {/* Add Automation button (only for automations mode) */}
                   {isAutomationsNavigation(navState) && activeWorkspace && (
@@ -3429,6 +3450,8 @@ function AppShellContent({
                 onSourceClick={handleSourceSelect}
                 selectedSourceSlug={isSourcesNavigation(navState) && navState.details ? navState.details.sourceSlug : null}
                 localMcpEnabled={localMcpEnabled}
+                copyFromOpen={copySourcesFromOpen}
+                onCopyFromOpenChange={setCopySourcesFromOpen}
               />
             )}
             {isSkillsNavigation(navState) && activeWorkspaceId && (
@@ -3440,6 +3463,8 @@ function AppShellContent({
                 onSkillClick={handleSkillSelect}
                 onDeleteSkill={handleDeleteSkill}
                 selectedSkillSlug={isSkillsNavigation(navState) && navState.details?.type === 'skill' ? navState.details.skillSlug : null}
+                copyFromOpen={copySkillsFromOpen}
+                onCopyFromOpenChange={setCopySkillsFromOpen}
               />
             )}
             {isProjectsNavigation(navState) && activeWorkspaceId && (

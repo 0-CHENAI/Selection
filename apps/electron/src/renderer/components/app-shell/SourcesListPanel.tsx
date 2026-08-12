@@ -43,6 +43,9 @@ export interface SourcesListPanelProps {
   selectedSourceSlug?: string | null
   localMcpEnabled?: boolean
   className?: string
+  /** Controlled open state for copy-from-workspace dialog (header button) */
+  copyFromOpen?: boolean
+  onCopyFromOpenChange?: (open: boolean) => void
 }
 
 export function SourcesListPanel({
@@ -54,6 +57,8 @@ export function SourcesListPanel({
   selectedSourceSlug,
   localMcpEnabled = true,
   className,
+  copyFromOpen: copyFromOpenProp,
+  onCopyFromOpenChange,
 }: SourcesListPanelProps) {
   const { t } = useTranslation()
   const { workspaces, activeWorkspaceId } = useAppShellContext()
@@ -66,7 +71,9 @@ export function SourcesListPanel({
   const [sendDialogOpen, setSendDialogOpen] = React.useState(false)
   const [sendResourceSlug, setSendResourceSlug] = React.useState<string | null>(null)
   const [sendResourceLabel, setSendResourceLabel] = React.useState('')
-  const [copyFromOpen, setCopyFromOpen] = React.useState(false)
+  const [copyFromOpenInternal, setCopyFromOpenInternal] = React.useState(false)
+  const copyFromOpen = copyFromOpenProp ?? copyFromOpenInternal
+  const setCopyFromOpen = onCopyFromOpenChange ?? setCopyFromOpenInternal
 
   const filteredSources = React.useMemo(() => {
     if (!sourceFilter) return sources

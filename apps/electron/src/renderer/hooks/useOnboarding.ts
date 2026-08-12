@@ -16,6 +16,7 @@ import type {
   ApiSetupMethod,
 } from '@/components/onboarding'
 import type { ProviderChoice } from '@/components/onboarding/ProviderSelectStep'
+import { ORDER_BASE_URL } from '@/components/onboarding/ProviderSelectStep'
 import type { LocalModelSubmitData } from '@/components/onboarding/LocalModelStep'
 import type { ApiKeySubmitData } from '@/components/apisetup'
 import type { CustomEndpointConfig } from '@config/llm-connections'
@@ -51,6 +52,19 @@ interface UseOnboardingReturn {
 
   // Provider select (new flow)
   handleSelectProvider: (choice: ProviderChoice) => void
+
+  /**
+   * Prefill values for the credentials form (e.g. ORDER base URL after
+   * selecting ORDER on the welcome/provider screen).
+   */
+  credentialPrefill?: {
+    apiKey?: string
+    baseUrl?: string
+    connectionDefaultModel?: string
+    activePreset?: string
+    models?: string[]
+    customApi?: CustomEndpointConfig['api']
+  }
 
   // API Setup (legacy — kept for direct edit)
   handleSelectApiSetupMethod: (method: ApiSetupMethod) => void
@@ -633,36 +647,52 @@ export function useOnboarding({
     }
   }, [state.apiSetupMethod, saveAndValidateConnection, editingSlug, existingSlugs])
 
+  // Prefill for credentials form (ORDER gateway, edit mode, etc.)
+  const [credentialPrefill, setCredentialPrefill] = useState<UseOnboardingReturn['credentialPrefill']>(undefined)
+
   // Map ProviderChoice → ApiSetupMethod and navigate to the right step
   const handleSelectProvider = useCallback((choice: ProviderChoice) => {
-    const CHOICE_TO_METHOD: Record<Exclude<ProviderChoice, 'local'>, ApiSetupMethod> = {
-      claude: 'claude_oauth',
-      chatgpt: 'pi_chatgpt_oauth',
-      copilot: 'pi_copilot_oauth',
-      api_key: 'pi_api_key',
-    }
-
     if (choice === 'local') {
       // Local uses anthropic_api_key with custom endpoint (Ollama doesn't need an API key)
-      setState(s => ({ ...s, step: 'local-model', apiSetupMethod: 'anthropic_api_key', credentialStatus: 'idle', errorMessage: undefined }))
+      setCredentialPrefill(undefined)
+      setState(s => ({
+        ...s,
+        step: 'local-model',
+        apiSetupMethod: 'anthropic_api_key',
+        credentialStatus: 'idle',
+        errorMessage: undefined,
+      }))
       return
     }
 
-    const method = CHOICE_TO_METHOD[choice]
+    if (choice === 'order') {
+      // ORDER gateway: Anthropic-compatible root URL (no /v1); user can switch to
+      // ORDER (OpenAI) preset which uses https://order.ai.jxepdi.top/v1. API key required.
+      setCredentialPrefill({
+        activePreset: 'order-anthropic',
+        baseUrl: ORDER_BASE_URL,
+        customApi: 'anthropic-messages',
+      })
+      setState(s => ({
+        ...s,
+        apiSetupMethod: 'anthropic_api_key',
+        step: 'credentials',
+        credentialStatus: 'idle',
+        errorMessage: undefined,
+      }))
+      return
+    }
+
+    // Generic "other provider" → Pi API key flow (presets + custom)
+    setCredentialPrefill(undefined)
     setState(s => ({
       ...s,
-      apiSetupMethod: method,
+      apiSetupMethod: 'pi_api_key',
       step: 'credentials',
       credentialStatus: 'idle',
       errorMessage: undefined,
     }))
-
-    // OAuth methods start immediately
-    if (choice === 'claude' || choice === 'chatgpt' || choice === 'copilot') {
-      // Defer to next tick so state is updated before handleStartOAuth reads it
-      setTimeout(() => handleStartOAuth(method), 0)
-    }
-  }, [handleStartOAuth])
+  }, [])
 
   // Submit authorization code (second step of OAuth flow)
   const handleSubmitAuthCode = useCallback(async (code: string) => {
@@ -832,6 +862,7 @@ export function useOnboarding({
     handleContinue,
     handleBack,
     handleSelectProvider,
+    credentialPrefill,
     handleSelectApiSetupMethod,
     handleSubmitCredential,
     handleSubmitLocalModel,

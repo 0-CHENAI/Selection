@@ -240,12 +240,16 @@ export function getWorkspaceSummary(rootPath: string): WorkspaceSummary | null {
 // ============================================================
 
 /**
- * Generate URL-safe slug from name
+ * Generate filesystem-safe slug from name.
+ * Keeps Unicode letters/numbers (incl. Chinese) so workspace folders can use CJK names.
  */
 export function generateSlug(name: string): string {
   let slug = name
     .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
+    .trim()
+    .replace(/[\s_]+/g, '-')
+    .replace(/[^\p{L}\p{N}-]+/gu, '-')
+    .replace(/-+/g, '-')
     .replace(/^-|-$/g, '')
     .substring(0, 50);
 

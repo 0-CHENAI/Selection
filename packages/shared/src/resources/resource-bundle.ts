@@ -707,8 +707,8 @@ async function importSources(
       mkdirSync(tmpDir, { recursive: true })
 
       try {
-        // Write sanitized config.json
-        writeFileSync(join(tmpDir, 'config.json'), JSON.stringify(entry.config, null, 2))
+        // Write sanitized config.json (explicit UTF-8 for Chinese names/paths)
+        writeFileSync(join(tmpDir, 'config.json'), JSON.stringify(entry.config, null, 2), 'utf-8')
 
         // Restore all other files
         restoreFiles(tmpDir, entry.files)

@@ -36,7 +36,9 @@ export function readJsonFileSync<T = unknown>(filePath: string): T {
 export function atomicWriteFileSync(filePath: string, data: string): void {
   const tmpPath = filePath + '.tmp';
   try {
-    writeFileSync(tmpPath, data);
+    // Always write UTF-8 so Chinese (and other non-ASCII) content survives
+    // on Windows code pages and when the path itself contains non-ASCII.
+    writeFileSync(tmpPath, data, 'utf-8');
     renameSync(tmpPath, filePath);
   } catch (error) {
     // Clean up temp file if rename failed

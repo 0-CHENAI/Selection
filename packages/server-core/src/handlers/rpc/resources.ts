@@ -7,6 +7,7 @@
 import { RPC_CHANNELS } from '@craft-agent/shared/protocol'
 import { getWorkspaceByNameOrId } from '@craft-agent/shared/config'
 import { getCredentialManager, SOURCE_CREDENTIAL_TYPES } from '@craft-agent/shared/credentials'
+import { resolveFsPath } from '@craft-agent/shared/utils'
 import type { RpcServer } from '@craft-agent/server-core/transport'
 import type { HandlerDeps } from '../handler-deps'
 import type {
@@ -90,7 +91,8 @@ export function registerResourcesHandlers(server: RpcServer, deps: HandlerDeps):
       if (!workspace) throw new Error(`Workspace not found: ${workspaceId}`)
 
       const { exportResources } = await import('@craft-agent/shared/resources')
-      const result = exportResources(workspace.rootPath, options)
+      // NFC-resolve so Chinese folder paths are stable across picker / FS forms
+      const result = exportResources(resolveFsPath(workspace.rootPath), options)
 
       deps.platform.logger?.info(
         `RESOURCES_EXPORT: Exported from ${workspaceId}: ` +
@@ -114,7 +116,8 @@ export function registerResourcesHandlers(server: RpcServer, deps: HandlerDeps):
       const { importResources } = await import('@craft-agent/shared/resources')
       const credDeps = makeCredentialDeps()
 
-      const result = await importResources(workspace.rootPath, bundle, mode, {
+      const targetRoot = resolveFsPath(workspace.rootPath)
+      const result = await importResources(targetRoot, bundle, mode, {
         clearSourceCredentials: credDeps.clearSourceCredentials,
       })
 
@@ -129,7 +132,7 @@ export function registerResourcesHandlers(server: RpcServer, deps: HandlerDeps):
       // (Bun's fs.watch doesn't reliably detect atomic renames)
       notifyResourceImport(
         deps,
-        workspace.rootPath,
+        targetRoot,
         result,
         Boolean(bundle.resources.automations?.length),
       )
@@ -156,7 +159,11 @@ export function registerResourcesHandlers(server: RpcServer, deps: HandlerDeps):
         throw new Error('Local credential copy only works between local workspaces. Use export/import for remote targets.')
       }
 
-      if (fromWorkspace.rootPath === toWorkspace.rootPath) {
+      // Resolve + NFC before compare/copy so Chinese path segments match
+      const fromRoot = resolveFsPath(fromWorkspace.rootPath)
+      const toRoot = resolveFsPath(toWorkspace.rootPath)
+
+      if (fromRoot === toRoot) {
         throw new Error('Cannot copy a workspace onto itself')
       }
 
@@ -177,10 +184,10 @@ export function registerResourcesHandlers(server: RpcServer, deps: HandlerDeps):
 
       const result = await copyBetweenWorkspaces(
         {
-          fromRootPath: fromWorkspace.rootPath,
-          toRootPath: toWorkspace.rootPath,
-          fromCredentialWorkspaceId: credentialWorkspaceIdFromRoot(fromWorkspace.rootPath),
-          toCredentialWorkspaceId: credentialWorkspaceIdFromRoot(toWorkspace.rootPath),
+          fromRootPath: fromRoot,
+          toRootPath: toRoot,
+          fromCredentialWorkspaceId: credentialWorkspaceIdFromRoot(fromRoot),
+          toCredentialWorkspaceId: credentialWorkspaceIdFromRoot(toRoot),
           sources: options.sources,
           skills: options.skills,
           mode,
@@ -196,7 +203,7 @@ export function registerResourcesHandlers(server: RpcServer, deps: HandlerDeps):
         `skills=${result.skills.imported.length} imported, ${result.skills.skipped.length} skipped, ${result.skills.failed.length} failed`,
       )
 
-      notifyResourceImport(deps, toWorkspace.rootPath, result)
+      notifyResourceImport(deps, toRoot, result)
       return result
     },
   )

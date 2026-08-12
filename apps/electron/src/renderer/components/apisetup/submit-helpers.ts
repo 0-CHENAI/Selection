@@ -59,26 +59,42 @@ export function resolvePresetStateForBaseUrlChange(params: {
 /**
  * Resolve the customEndpoint + piAuthProvider payload at submit time.
  *
- * Three submit branches:
- *  - branded openai-compat preset (e.g. Manifest)  → pinned to openai-completions
- *  - generic custom preset with a base URL         → honors the protocol toggle
- *  - everything else                               → no customEndpoint, passthrough piAuth
+ * Submit branches:
+ *  - branded openai-compat preset (Manifest, ORDER OpenAI) → openai-completions
+ *  - branded anthropic-compat preset (ORDER Anthropic)     → anthropic-messages
+ *  - generic custom preset with a base URL                 → honors the protocol toggle
+ *  - everything else                                       → no customEndpoint, passthrough piAuth
  */
 export function resolveCustomEndpointPayload(params: {
   activePreset: PresetKey
   baseUrl: string
   customApi: CustomEndpointApi
   brandedOpenAiCompatPresets: ReadonlySet<string>
+  brandedAnthropicCompatPresets?: ReadonlySet<string>
   fallbackPiAuthProvider: string | undefined
 }): {
   customEndpoint: CustomEndpointConfig | undefined
   piAuthProvider: string | undefined
 } {
-  const { activePreset, baseUrl, customApi, brandedOpenAiCompatPresets, fallbackPiAuthProvider } = params
+  const {
+    activePreset,
+    baseUrl,
+    customApi,
+    brandedOpenAiCompatPresets,
+    brandedAnthropicCompatPresets,
+    fallbackPiAuthProvider,
+  } = params
 
   const isBrandedOpenAiCompat = brandedOpenAiCompatPresets.has(activePreset) && !!baseUrl
-  const isCustomEndpoint = (activePreset === 'custom' && !!baseUrl) || isBrandedOpenAiCompat
-  const effectiveApi: CustomEndpointApi = isBrandedOpenAiCompat ? 'openai-completions' : customApi
+  const isBrandedAnthropicCompat =
+    !!brandedAnthropicCompatPresets?.has(activePreset) && !!baseUrl
+  const isCustomEndpoint =
+    (activePreset === 'custom' && !!baseUrl) || isBrandedOpenAiCompat || isBrandedAnthropicCompat
+  const effectiveApi: CustomEndpointApi = isBrandedOpenAiCompat
+    ? 'openai-completions'
+    : isBrandedAnthropicCompat
+      ? 'anthropic-messages'
+      : customApi
 
   return {
     customEndpoint: isCustomEndpoint ? { api: effectiveApi } : undefined,

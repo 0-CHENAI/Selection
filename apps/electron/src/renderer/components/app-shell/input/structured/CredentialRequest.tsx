@@ -1,4 +1,5 @@
 import { useState, useCallback } from 'react'
+import { useTranslation } from 'react-i18next'
 import { Key, User, Lock, Eye, EyeOff, Check, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -24,6 +25,7 @@ interface CredentialRequestProps {
  * - query: API Key for query parameter auth
  */
 export function CredentialRequest({ request, onResponse, unstyled = false }: CredentialRequestProps) {
+  const { t } = useTranslation()
   const [value, setValue] = useState('')
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
@@ -287,7 +289,7 @@ export function CredentialRequest({ request, onResponse, unstyled = false }: Cre
             disabled={!isValid}
           >
             <Check className="h-3.5 w-3.5" />
-            Save
+            {t('common.save')}
           </Button>
           <Button
             type="button"
@@ -297,11 +299,11 @@ export function CredentialRequest({ request, onResponse, unstyled = false }: Cre
             onClick={handleCancel}
           >
             <X className="h-3.5 w-3.5" />
-            Cancel
+            {t('common.cancel')}
           </Button>
 
           <span className="min-w-0 flex-1 basis-full text-[10px] text-muted-foreground sm:basis-auto sm:text-right">
-            Credentials are encrypted at rest
+            {t('chat.credentialsEncryptedAtRest')}
           </span>
         </div>
       </form>

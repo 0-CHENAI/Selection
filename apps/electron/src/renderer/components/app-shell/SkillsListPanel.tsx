@@ -8,6 +8,7 @@ import { EntityListEmptyScreen } from '@/components/ui/entity-list-empty'
 import { skillSelection } from '@/hooks/useEntitySelection'
 import { SkillMenu } from './SkillMenu'
 import { SendResourceToWorkspaceDialog } from './SendResourceToWorkspaceDialog'
+import { CopyResourcesFromWorkspaceDialog } from './CopyResourcesFromWorkspaceDialog'
 import { EditPopover, getEditConfig } from '@/components/ui/EditPopover'
 import { useActiveWorkspace, useAppShellContext } from '@/context/AppShellContext'
 import { getFileManagerName } from '@/lib/platform'
@@ -21,6 +22,9 @@ export interface SkillsListPanelProps {
   workspaceId?: string
   workspaceRootPath?: string
   className?: string
+  /** Controlled open state for copy-from-workspace dialog (header button) */
+  copyFromOpen?: boolean
+  onCopyFromOpenChange?: (open: boolean) => void
 }
 
 export function SkillsListPanel({
@@ -31,17 +35,25 @@ export function SkillsListPanel({
   workspaceId,
   workspaceRootPath,
   className,
+  copyFromOpen: copyFromOpenProp,
+  onCopyFromOpenChange,
 }: SkillsListPanelProps) {
   const { t } = useTranslation()
   const activeWorkspace = useActiveWorkspace()
   const canRevealLocally = !activeWorkspace?.remoteServer
   const { workspaces, activeWorkspaceId } = useAppShellContext()
   const hasOtherWorkspaces = workspaces.length > 1
+  const hasOtherLocalWorkspaces = workspaces.some(
+    (w) => w.id !== activeWorkspaceId && !w.remoteServer,
+  )
 
   // Send to Workspace dialog state
   const [sendDialogOpen, setSendDialogOpen] = React.useState(false)
   const [sendResourceSlug, setSendResourceSlug] = React.useState<string | null>(null)
   const [sendResourceLabel, setSendResourceLabel] = React.useState('')
+  const [copyFromOpenInternal, setCopyFromOpenInternal] = React.useState(false)
+  const copyFromOpen = copyFromOpenProp ?? copyFromOpenInternal
+  const setCopyFromOpen = onCopyFromOpenChange ?? setCopyFromOpenInternal
 
   return (
     <>
@@ -60,17 +72,28 @@ export function SkillsListPanel({
           description={t('skillsList.emptyDescription')}
           docKey="skills"
         >
-          {workspaceRootPath && (
-            <EditPopover
-              align="center"
-              trigger={
-                <button className="inline-flex items-center h-7 px-3 text-xs font-medium rounded-[8px] bg-background shadow-minimal hover:bg-foreground/[0.03] transition-colors">
-                  {t('skillsList.addSkill')}
-                </button>
-              }
-              {...getEditConfig('add-skill', workspaceRootPath)}
-            />
-          )}
+          <div className="flex flex-wrap items-center justify-center gap-2">
+            {workspaceRootPath && (
+              <EditPopover
+                align="center"
+                trigger={
+                  <button className="inline-flex items-center h-7 px-3 text-xs font-medium rounded-[8px] bg-background shadow-minimal hover:bg-foreground/[0.03] transition-colors">
+                    {t('skillsList.addSkill')}
+                  </button>
+                }
+                {...getEditConfig('add-skill', workspaceRootPath)}
+              />
+            )}
+            {hasOtherLocalWorkspaces && (
+              <button
+                type="button"
+                onClick={() => setCopyFromOpen(true)}
+                className="inline-flex items-center h-7 px-3 text-xs font-medium rounded-[8px] bg-background shadow-minimal hover:bg-foreground/[0.03] transition-colors"
+              >
+                {t('skillsList.copyFromWorkspace')}
+              </button>
+            )}
+          </div>
         </EntityListEmptyScreen>
       }
       mapItem={(skill) => ({
@@ -128,6 +151,14 @@ export function SkillsListPanel({
         activeWorkspaceId={activeWorkspaceId}
       />
     )}
+
+    <CopyResourcesFromWorkspaceDialog
+      open={copyFromOpen}
+      onOpenChange={setCopyFromOpen}
+      workspaces={workspaces}
+      activeWorkspaceId={activeWorkspaceId}
+      resourceType="skill"
+    />
     </>
   )
 }

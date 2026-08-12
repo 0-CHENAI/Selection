@@ -1,8 +1,9 @@
-import { normalize, isAbsolute, sep } from 'path'
+import { normalize, isAbsolute } from 'path'
 import { homedir, tmpdir } from 'os'
 import { realpath } from 'fs/promises'
 import { getWorkspaceByNameOrId, type Workspace } from '@craft-agent/shared/config'
 import { loadWorkspaceConfig } from '@craft-agent/shared/workspaces'
+import { isPathInside, resolveFsPath } from '@craft-agent/shared/utils'
 import type { PlatformServices } from '../runtime/platform'
 
 /**
@@ -57,10 +58,10 @@ export function getWorkspaceAllowedDirs(workspaceId?: string | null): string[] {
   const workspace = getWorkspaceByNameOrId(workspaceId)
   if (!workspace) return []
 
-  const dirs: string[] = [workspace.rootPath]
+  const dirs: string[] = [resolveFsPath(workspace.rootPath)]
   const config = loadWorkspaceConfig(workspace.rootPath)
   if (config?.defaults?.workingDirectory) {
-    dirs.push(config.defaults.workingDirectory)
+    dirs.push(resolveFsPath(config.defaults.workingDirectory))
   }
   return dirs
 }
@@ -103,12 +104,8 @@ export async function validateFilePath(
     ...(additionalAllowedDirs ?? []),
   ].filter(Boolean)
 
-  // Check if the real path is within an allowed directory (cross-platform)
-  const isAllowed = allowedDirs.some(dir => {
-    const normalizedDir = normalize(dir)
-    const normalizedReal = normalize(realFilePath)
-    return normalizedReal.startsWith(normalizedDir + sep) || normalizedReal === normalizedDir
-  })
+  // Unicode-safe containment (handles Chinese paths + NFC/NFD differences on macOS)
+  const isAllowed = allowedDirs.some(dir => isPathInside(dir, realFilePath))
 
   if (!isAllowed) {
     throw new Error('Access denied: file path is outside allowed directories')

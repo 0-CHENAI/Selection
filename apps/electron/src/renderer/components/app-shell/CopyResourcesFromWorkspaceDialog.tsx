@@ -101,6 +101,8 @@ export function CopyResourcesFromWorkspaceDialog({
     }
   }, [resourceType, t])
 
+  const resourceKindKey = resourceType === 'source' ? 'sources' : 'skills'
+
   const items = resourceType === 'source'
     ? sources.map(s => ({ id: s.config.slug, label: s.config.name || s.config.slug, hint: s.config.type }))
     : skills.map(s => ({ id: s.slug, label: s.name, hint: 'skill' }))
@@ -205,8 +207,8 @@ export function CopyResourcesFromWorkspaceDialog({
           </DialogTitle>
           <DialogDescription>
             {step === 'pick-workspace'
-              ? t('copyFromWorkspace.pickWorkspaceDesc')
-              : t('copyFromWorkspace.pickResourcesDesc')}
+              ? t(`copyFromWorkspace.pickWorkspaceDesc.${resourceKindKey}`)
+              : t(`copyFromWorkspace.pickResourcesDesc.${resourceKindKey}`)}
           </DialogDescription>
         </DialogHeader>
 
@@ -274,7 +276,7 @@ export function CopyResourcesFromWorkspaceDialog({
                 </p>
               ) : items.length === 0 ? (
                 <p className="text-sm text-muted-foreground px-2 py-4 text-center">
-                  {t('copyFromWorkspace.emptyList')}
+                  {t(`copyFromWorkspace.emptyList.${resourceKindKey}`)}
                 </p>
               ) : (
                 items.map(item => {

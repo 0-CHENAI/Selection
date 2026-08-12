@@ -94,6 +94,9 @@ interface Preset {
 // Also used by Pi API key flow (same providers, routed via Pi SDK)
 const ANTHROPIC_PRESETS: Preset[] = [
   { key: 'anthropic', label: 'Anthropic', url: 'https://api.anthropic.com', placeholder: 'sk-ant-...' },
+  // ORDER gateway — Anthropic uses root URL; OpenAI-compat requires /v1 + key
+  { key: 'order-anthropic', label: 'ORDER (Anthropic)', url: 'https://order.ai.jxepdi.top', placeholder: 'Paste your ORDER key...' },
+  { key: 'order-openai', label: 'ORDER (OpenAI)', url: 'https://order.ai.jxepdi.top/v1', placeholder: 'Paste your ORDER key...' },
   { key: 'openai', label: 'OpenAI', url: 'https://api.openai.com/v1', placeholder: 'sk-...' },
   { key: 'openai-eu', label: 'OpenAI EU', url: 'https://eu.api.openai.com/v1', placeholder: 'sk-...' },
   { key: 'openai-us', label: 'OpenAI US', url: 'https://us.api.openai.com/v1', placeholder: 'sk-...' },
@@ -121,7 +124,12 @@ const ANTHROPIC_PRESETS: Preset[] = [
  * OpenAI-compatible protocol. They behave like 'custom' on submit (customEndpoint
  * gets pinned to openai-completions) but stay branded in the dropdown.
  */
-const OPENAI_COMPAT_CUSTOM_URL_PRESETS: ReadonlySet<string> = new Set(['manifest'])
+const OPENAI_COMPAT_CUSTOM_URL_PRESETS: ReadonlySet<string> = new Set(['manifest', 'order-openai'])
+
+/**
+ * Branded Anthropic-compatible gateways (ORDER Anthropic path has no /v1).
+ */
+const ANTHROPIC_COMPAT_CUSTOM_URL_PRESETS: ReadonlySet<string> = new Set(['order-anthropic'])
 
 // OpenAI provider presets - for Codex backend
 // Only direct OpenAI is supported; 3PP providers (OpenRouter, Vercel, Ollama) should be
@@ -201,7 +209,13 @@ export function ApiKeyInput({
     initialPreset !== 'custom' ? initialPreset : defaultPreset.key
   )
   const [connectionDefaultModel, setConnectionDefaultModel] = useState(initialValues?.connectionDefaultModel ?? '')
-  const [customApi, setCustomApi] = useState<CustomEndpointApi>(initialValues?.customApi ?? 'openai-completions')
+  const [customApi, setCustomApi] = useState<CustomEndpointApi>(() => {
+    if (initialValues?.customApi) return initialValues.customApi
+    if (initialPreset === 'order-anthropic' || ANTHROPIC_COMPAT_CUSTOM_URL_PRESETS.has(initialPreset)) {
+      return 'anthropic-messages'
+    }
+    return 'openai-completions'
+  })
   const [modelError, setModelError] = useState<string | null>(null)
 
   // Bedrock auth state
@@ -242,7 +256,14 @@ export function ApiKeyInput({
   // Fetch Pi SDK models when a provider is selected in pi_api_key flow.
   // Returns all models sorted by cost (expensive-first) for the searchable tier dropdowns.
   const loadPiModels = useCallback(async (provider: string) => {
-    if (!isPiApiKeyFlow || !provider || provider === 'custom' || DEFAULT_ENDPOINT_PROVIDERS.has(provider) || OPENAI_COMPAT_CUSTOM_URL_PRESETS.has(provider)) {
+    if (
+      !isPiApiKeyFlow
+      || !provider
+      || provider === 'custom'
+      || DEFAULT_ENDPOINT_PROVIDERS.has(provider)
+      || OPENAI_COMPAT_CUSTOM_URL_PRESETS.has(provider)
+      || ANTHROPIC_COMPAT_CUSTOM_URL_PRESETS.has(provider)
+    ) {
       setPiModels([])
       return
     }
@@ -271,7 +292,13 @@ export function ApiKeyInput({
   }, [activePreset, loadPiModels])
 
   // Whether to show 3 tier dropdowns instead of text input
-  const hasPiModels = isPiApiKeyFlow && piModels.length > 0 && !isDefaultProviderPreset && activePreset !== 'custom' && !isBedrock
+  const hasPiModels = isPiApiKeyFlow
+    && piModels.length > 0
+    && !isDefaultProviderPreset
+    && activePreset !== 'custom'
+    && !isBedrock
+    && !OPENAI_COMPAT_CUSTOM_URL_PRESETS.has(activePreset)
+    && !ANTHROPIC_COMPAT_CUSTOM_URL_PRESETS.has(activePreset)
 
   const handlePresetSelect = (preset: Preset) => {
     setActivePreset(preset.key)
@@ -282,6 +309,12 @@ export function ApiKeyInput({
       setBaseUrl('')
     } else {
       setBaseUrl(preset.url)
+    }
+    // Pin protocol for branded ORDER / Manifest-style gateways
+    if (ANTHROPIC_COMPAT_CUSTOM_URL_PRESETS.has(preset.key)) {
+      setCustomApi('anthropic-messages')
+    } else if (OPENAI_COMPAT_CUSTOM_URL_PRESETS.has(preset.key)) {
+      setCustomApi('openai-completions')
     }
     setModelError(null)
     // Pre-fill recommended model for Ollama; clear for all others
@@ -296,8 +329,16 @@ export function ApiKeyInput({
       setConnectionDefaultModel(COMPAT_KIMI_DEFAULTS)
     } else if (preset.key === 'manifest') {
       setConnectionDefaultModel('auto')
-    } else if (preset.key === 'custom' || OPENAI_COMPAT_CUSTOM_URL_PRESETS.has(preset.key)) {
-      setConnectionDefaultModel(providerType === 'openai' ? COMPAT_OPENAI_DEFAULTS : COMPAT_ANTHROPIC_DEFAULTS)
+    } else if (
+      preset.key === 'custom'
+      || OPENAI_COMPAT_CUSTOM_URL_PRESETS.has(preset.key)
+      || ANTHROPIC_COMPAT_CUSTOM_URL_PRESETS.has(preset.key)
+    ) {
+      setConnectionDefaultModel(
+        OPENAI_COMPAT_CUSTOM_URL_PRESETS.has(preset.key) || providerType === 'openai'
+          ? COMPAT_OPENAI_DEFAULTS
+          : COMPAT_ANTHROPIC_DEFAULTS,
+      )
     } else {
       setConnectionDefaultModel('')
     }
@@ -405,6 +446,7 @@ export function ApiKeyInput({
       baseUrl: effectiveBaseUrl,
       customApi,
       brandedOpenAiCompatPresets: OPENAI_COMPAT_CUSTOM_URL_PRESETS,
+      brandedAnthropicCompatPresets: ANTHROPIC_COMPAT_CUSTOM_URL_PRESETS,
       fallbackPiAuthProvider: effectivePiAuthProvider,
     })
 

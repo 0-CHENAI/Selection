@@ -8,8 +8,9 @@
  */
 
 import { existsSync, readdirSync, readFileSync, statSync, mkdirSync, writeFileSync } from 'fs'
-import { join, relative, dirname, sep } from 'path'
+import { join, relative, dirname, sep, resolve } from 'path'
 import { debug } from './debug.ts'
+import { isPathInside, resolveFsPath } from './paths.ts'
 
 /**
  * Maximum bundle size in bytes (~100MB).
@@ -175,6 +176,9 @@ export function collectDirectoryFiles(dir: string, options?: CollectOptions): Bu
  * @throws Error if any file fails path validation (path traversal, absolute path, etc.)
  */
 export function restoreFiles(targetDir: string, files: BundleFile[]): void {
+  // NFC-resolve so Chinese path segments match filesystem form consistently
+  const resolvedTarget = resolveFsPath(targetDir)
+
   for (const file of files) {
     const error = validateBundleFile(file)
     if (error) {
@@ -182,10 +186,10 @@ export function restoreFiles(targetDir: string, files: BundleFile[]): void {
     }
 
     const nativePath = fromPortableRelPath(file.relativePath)
-    const fullPath = join(targetDir, nativePath)
+    const fullPath = resolve(resolvedTarget, nativePath)
 
-    // Safety: ensure resolved path is inside target dir
-    if (!fullPath.startsWith(targetDir + sep) && fullPath !== targetDir) {
+    // Unicode-safe containment check (startsWith fails on trailing slashes / NFC-NFD)
+    if (!isPathInside(resolvedTarget, fullPath)) {
       throw new Error(`Path escapes target directory: ${file.relativePath}`)
     }
 
@@ -195,7 +199,7 @@ export function restoreFiles(targetDir: string, files: BundleFile[]): void {
       mkdirSync(parentDir, { recursive: true })
     }
 
-    // Decode and write
+    // Decode and write as raw bytes (preserves UTF-8 Chinese content)
     const content = Buffer.from(file.contentBase64, 'base64')
     writeFileSync(fullPath, content)
   }

@@ -218,6 +218,54 @@ describe('copyBetweenWorkspaces', () => {
     expect(existsSync(join(toRoot, 'skills', 'commit', 'SKILL.md'))).toBe(true)
   })
 
+  it('preserves Chinese content when target workspace path contains Chinese', async () => {
+    const cnTo = join(base, '目标中文工作区')
+    makeWorkspace(cnTo, [])
+    mkdirSync(join(fromRoot, 'sources', 'api-cn'), { recursive: true })
+    writeFileSync(
+      join(fromRoot, 'sources', 'api-cn', 'config.json'),
+      JSON.stringify({
+        id: 'x',
+        name: '范睿艺文献',
+        slug: 'api-cn',
+        type: 'mcp',
+        enabled: true,
+        mcp: { url: 'https://example.com', authType: 'none' },
+      }, null, 2),
+      'utf-8',
+    )
+    writeFileSync(join(fromRoot, 'sources', 'api-cn', 'guide.md'), '# 中文指南\n你好世界\n', 'utf-8')
+    mkdirSync(join(fromRoot, 'skills', 'skill-cn', '文档'), { recursive: true })
+    writeFileSync(
+      join(fromRoot, 'skills', 'skill-cn', 'SKILL.md'),
+      '---\nname: 中文技能\ndescription: 这是中文描述\n---\n\n正文中文内容\n',
+      'utf-8',
+    )
+    writeFileSync(join(fromRoot, 'skills', 'skill-cn', '文档', '说明.md'), '# 说明\n', 'utf-8')
+
+    const result = await copyBetweenWorkspaces(
+      {
+        fromRootPath: fromRoot,
+        toRootPath: cnTo,
+        fromCredentialWorkspaceId: 'from-ws',
+        toCredentialWorkspaceId: '目标中文工作区',
+        sources: ['api-cn'],
+        skills: ['skill-cn'],
+        mode: 'skip',
+        includeCredentials: false,
+      },
+      deps,
+    )
+
+    expect(result.sources.imported).toEqual(['api-cn'])
+    expect(result.skills.imported).toEqual(['skill-cn'])
+    const cfg = JSON.parse(readFileSync(join(cnTo, 'sources', 'api-cn', 'config.json'), 'utf-8'))
+    expect(cfg.name).toBe('范睿艺文献')
+    expect(readFileSync(join(cnTo, 'sources', 'api-cn', 'guide.md'), 'utf-8')).toContain('你好世界')
+    expect(readFileSync(join(cnTo, 'skills', 'skill-cn', 'SKILL.md'), 'utf-8')).toContain('中文技能')
+    expect(readFileSync(join(cnTo, 'skills', 'skill-cn', '文档', '说明.md'), 'utf-8')).toContain('说明')
+  })
+
   it('keeps previous target if staged copy would fail for missing source', async () => {
     makeWorkspace(toRoot, [{ slug: 'github', name: 'KeepMe' }])
     const result = await copyBetweenWorkspaces(
