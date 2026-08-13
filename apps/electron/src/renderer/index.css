@@ -383,6 +383,33 @@ html[data-scenic] {
   --background: oklch(0.2 0.005 270 / 0.55);
 }
 
+/* Bundled Selection brand face (copied into the installer). */
+@font-face {
+  font-family: "CATHALIE";
+  src: url("./assets/fonts/cathalie.otf") format("opentype");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+/* ORDER wordmark — Alumni Sans Pinstripe (single ultra-thin cut).
+   The face has no heavier weights; thicken hairlines with stroke so it stays
+   readable at card size without switching typefaces. */
+.font-order {
+  font-family: "Alumni Sans Pinstripe", sans-serif;
+  font-weight: 400;
+  font-style: normal;
+  -webkit-text-stroke: 0.7px currentColor;
+  paint-order: stroke fill;
+}
+
+/* Product name "Selection" — bundled CATHALIE, slightly larger than surrounding copy */
+.font-cathalie {
+  font-family: "CATHALIE", sans-serif;
+  font-weight: 400;
+  font-style: normal;
+}
+
 /* Inter Font - Opt-in via data-font="inter" attribute
    Loaded from Google Fonts in index.html with optical sizing (opsz) axis */
 html[data-font="inter"] {
@@ -443,6 +470,8 @@ html[data-font="inter"] {
   --font-sans: var(--font-sans);
   --font-mono: var(--font-mono);
   --font-serif: var(--font-serif);
+  /* ORDER wordmark — Google Fonts Alumni Sans Pinstripe */
+  --font-order: "Alumni Sans Pinstripe", sans-serif;
 
   /* === Z-INDEX SCALE === */
   --z-index-base: var(--z-base);

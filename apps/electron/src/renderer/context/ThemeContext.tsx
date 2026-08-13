@@ -14,6 +14,12 @@ import {
 export type ThemeMode = 'light' | 'dark' | 'system'
 export type FontFamily = 'inter' | 'system'
 
+const FONT_FAMILIES: readonly FontFamily[] = ['inter', 'system']
+
+function coerceFontFamily(value: unknown, fallback: FontFamily = 'system'): FontFamily {
+  return FONT_FAMILIES.includes(value as FontFamily) ? (value as FontFamily) : fallback
+}
+
 interface ThemeContextType {
   // Preferences (persisted at app level)
   mode: ThemeMode
@@ -130,7 +136,7 @@ export function ThemeProvider({
     }
     return defaultColorTheme // Will be updated by config.json effect
   })
-  const [font, setFontState] = useState<FontFamily>(stored?.font ?? defaultFont)
+  const [font, setFontState] = useState<FontFamily>(coerceFontFamily(stored?.font, defaultFont))
   const [systemPreference, setSystemPreference] = useState<'light' | 'dark'>(getSystemPreference)
   const [previewColorTheme, setPreviewColorTheme] = useState<string | null>(null)
 
@@ -417,7 +423,7 @@ export function ThemeProvider({
       isExternalUpdate.current = true
       setModeState(preferences.mode as ThemeMode)
       setColorThemeState(preferences.colorTheme)
-      setFontState(preferences.font as FontFamily)
+      setFontState(coerceFontFamily(preferences.font))
       // When syncing from another window, mark as user override since user explicitly changed theme
       saveTheme({
         mode: preferences.mode as ThemeMode,
