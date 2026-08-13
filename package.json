@@ -1,6 +1,6 @@
 {
   "name": "craft-agent",
-  "version": "0.11.5",
+  "version": "0.11.11",
   "license": "Apache-2.0",
   "description": "Selection — multi-session agent desktop app",
   "type": "module",
