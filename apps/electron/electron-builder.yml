@@ -72,6 +72,7 @@ files:
 
 extraMetadata:
   main: dist/main.cjs
+  productName: Selection
 
 # Auto-update: electron-updater fetches from this URL for update manifests (.yml files)
 publish:
@@ -87,6 +88,8 @@ mac:
   # macOS 26+ Liquid Glass: Tell macOS to look for icon in Assets.car
   # The value must match --app-icon used in actool (see afterPack.js)
   extendInfo:
+    CFBundleName: Selection
+    CFBundleDisplayName: Selection
     CFBundleIconName: AppIcon
     # Required for macOS to list the app under Privacy & Security > Local Network
     # and prompt for permission. Without it the app is silently denied LAN access
@@ -189,6 +192,8 @@ win:
 
 nsis:
   oneClick: true
+  shortcutName: Selection
+  uninstallDisplayName: Selection
   # Per-user install to %LOCALAPPDATA%\Programs\ (not Program Files).
   # Bun subprocess cannot read/write files in Program Files due to Windows permissions.
   perMachine: false

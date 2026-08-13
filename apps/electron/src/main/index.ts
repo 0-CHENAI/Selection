@@ -4,9 +4,12 @@ import { loadShellEnv } from './shell-env'
 loadShellEnv()
 
 import { app, BrowserWindow, dialog, ipcMain, nativeImage, nativeTheme, shell } from 'electron'
+import { applyAppIdentity } from './app-identity'
 import { createHash, randomUUID } from 'crypto'
 import { hostname, homedir } from 'os'
 import * as Sentry from '@sentry/electron/main'
+
+applyAppIdentity()
 
 // Initialize Sentry error tracking as early as possible after app import.
 // Only enabled in production (packaged) builds to avoid noise during development.
@@ -223,10 +226,6 @@ let messagingHandle: MessagingBootstrapHandle | null = null
 
 // Store pending deep link if app not ready yet (cold start)
 let pendingDeepLink: string | null = null
-
-// Set app name early (before app.whenReady) to ensure correct macOS menu bar title
-// Supports multi-instance dev: CRAFT_APP_NAME env var (e.g., "Selection [1]")
-app.setName(process.env.CRAFT_APP_NAME || 'Selection')
 
 // Register as default protocol client for craftagents:// URLs
 // This must be done before app.whenReady() on some platforms
