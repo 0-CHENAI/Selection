@@ -297,7 +297,7 @@ export function CompactSessionListFilter({
 
           {isSearching && results.states.length === 0 && results.labels.length === 0 && (
             <div className="px-4 py-6 text-center text-sm text-muted-foreground">
-              No matches
+              {t('sidebar.noMatches')}
             </div>
           )}
 

@@ -99,13 +99,22 @@ export function CredentialRequest({ request, onResponse, unstyled = false }: Cre
     }
   }, [isValid, handleSubmit, handleCancel])
 
-  // Get field labels
+  // Get field labels (localized fallbacks)
   const credentialLabel = request.labels?.credential ||
-    (request.mode === 'bearer' ? 'Bearer Token' : 'API Key')
-  const usernameLabel = request.labels?.username || 'Username'
-  const basePasswordLabel = request.labels?.password || 'Password'
-  const passwordLabel = getPasswordLabel(basePasswordLabel, passwordRequired)
-  const passwordPlaceholder = getPasswordPlaceholder(basePasswordLabel, passwordRequired)
+    (request.mode === 'bearer' ? t('chat.bearerToken') : t('chat.apiKey'))
+  const usernameLabel = request.labels?.username || t('chat.username')
+  const basePasswordLabel = request.labels?.password || t('chat.password')
+  const passwordLabel = getPasswordLabel(
+    basePasswordLabel,
+    passwordRequired,
+    ` (${t('common.optional')})`,
+  )
+  const passwordPlaceholder = getPasswordPlaceholder(
+    basePasswordLabel,
+    passwordRequired,
+    t('chat.enterValue', { label: basePasswordLabel }),
+    t('chat.passwordOptionalPlaceholder'),
+  )
 
   return (
     <div className={cn(
@@ -130,7 +139,7 @@ export function CredentialRequest({ request, onResponse, unstyled = false }: Cre
             <div className="flex-1 min-w-0 space-y-1">
               <div className="flex items-center gap-2">
                 <span className="text-sm font-medium text-foreground">
-                  Authentication Required
+                  {t('chat.authenticationRequired')}
                 </span>
                 <span className="text-xs text-muted-foreground">
                   ({request.sourceName})
@@ -162,7 +171,7 @@ export function CredentialRequest({ request, onResponse, unstyled = false }: Cre
                       onChange={(e) => setUsername(e.target.value)}
                       onKeyDown={handleKeyDown}
                       className="pl-9"
-                      placeholder={`Enter ${usernameLabel.toLowerCase()}`}
+                      placeholder={t('chat.enterValue', { label: usernameLabel })}
                       autoFocus
                     />
                   </div>
@@ -218,7 +227,7 @@ export function CredentialRequest({ request, onResponse, unstyled = false }: Cre
                         }))}
                         onKeyDown={handleKeyDown}
                         className="pl-9 pr-9"
-                        placeholder={`Enter ${headerName}`}
+                        placeholder={t('chat.enterValue', { label: headerName })}
                         autoFocus={index === 0}
                       />
                       <button
@@ -255,7 +264,7 @@ export function CredentialRequest({ request, onResponse, unstyled = false }: Cre
                     onChange={(e) => setValue(e.target.value)}
                     onKeyDown={handleKeyDown}
                     className="pl-9 pr-9"
-                    placeholder={`Enter ${credentialLabel.toLowerCase()}`}
+                    placeholder={t('chat.enterValue', { label: credentialLabel })}
                     autoFocus
                   />
                   <button

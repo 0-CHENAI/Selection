@@ -2317,7 +2317,7 @@ function MessageBubble({
         <div className="flex items-center gap-3 my-12 px-3">
           <div className="flex-1 h-px bg-border" />
           <span className="text-sm text-muted-foreground/70 select-none">
-            Conversation Compacted
+            {t('chat.conversationCompacted')}
           </span>
           <div className="flex-1 h-px bg-border" />
         </div>

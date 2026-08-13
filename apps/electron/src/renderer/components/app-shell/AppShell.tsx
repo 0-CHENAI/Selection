@@ -3185,7 +3185,7 @@ function AppShellContent({
                                 Supports keyboard navigation (ArrowUp/Down/Enter in input). */}
                             {filterDropdownResults.states.length === 0 && filterDropdownResults.labels.length === 0 ? (
                               <div className="px-3 py-4 text-center text-xs text-muted-foreground">
-                                No matching statuses or labels
+                                {t("sidebar.noMatchingStatusesOrLabels")}
                               </div>
                             ) : (
                               <div ref={filterDropdownListRef} className="max-h-[240px] overflow-y-auto py-1">
@@ -3193,7 +3193,7 @@ function AppShellContent({
                                 {filterDropdownResults.states.length > 0 && (
                                   <>
                                     <div className="px-3 pt-1.5 pb-1 text-[11px] font-medium text-muted-foreground/60 uppercase tracking-wider">
-                                      Statuses
+                                      {t("sidebar.statuses")}
                                     </div>
                                     {filterDropdownResults.states.map((state, index) => {
                                       const applyColor = state.iconColorable
@@ -3281,7 +3281,7 @@ function AppShellContent({
                                 {filterDropdownResults.labels.length > 0 && (
                                   <>
                                     <div className="px-3 pt-1.5 pb-1 text-[11px] font-medium text-muted-foreground/60 uppercase tracking-wider">
-                                      Labels
+                                      {t("sidebar.labels")}
                                     </div>
                                     {filterDropdownResults.labels.map((item, index) => {
                                       // Offset by state count for unified index
