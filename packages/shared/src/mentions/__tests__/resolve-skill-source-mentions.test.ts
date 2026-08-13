@@ -57,6 +57,11 @@ describe('resolveSkillMentions', () => {
       expect(resolveSkillMentions('[skill:my.workspace:commit] do this', skillNames))
         .toBe('[Mentioned skill: Git Commit (slug: commit)] do this')
     })
+
+    it('resolves Chinese workspace ID prefix', () => {
+      expect(resolveSkillMentions('[skill:巡察工作:commit] do this', skillNames))
+        .toBe('[Mentioned skill: Git Commit (slug: commit)] do this')
+    })
   })
 
   describe('sentence preservation (the bug this fixes)', () => {

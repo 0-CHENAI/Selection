@@ -40,6 +40,10 @@ describe('sanitizeForTitle', () => {
     it('strips skill with space in workspace ID', () => {
       expect(sanitizeForTitle('[skill:My Workspace:commit] fix the bug')).toBe('fix the bug')
     })
+
+    it('strips skill with Chinese workspace ID', () => {
+      expect(sanitizeForTitle('[skill:巡察工作:inspection-workflow] 开始巡察')).toBe('开始巡察')
+    })
   })
 
   describe('source mentions', () => {

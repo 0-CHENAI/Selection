@@ -227,7 +227,7 @@ function extractPreview(messages: StoredMessage[]): string | undefined {
   const sanitized = firstUserMessage.content
     .replace(/<edit_request>[\s\S]*?<\/edit_request>/g, '') // Strip entire edit_request blocks
     .replace(/<[^>]+>/g, '')     // Strip remaining XML/HTML tags
-    .replace(/\[skill:(?:[\w-]+:)?[\w-]+\]/g, '')   // Strip [skill:...] mentions
+    .replace(/\[skill:(?:[^:\]\[\n\r]+:)?[\w.-]+\]/g, '')   // Strip [skill:...] (Unicode workspace IDs)
     .replace(/\[source:[\w-]+\]/g, '')              // Strip [source:...] mentions
     .replace(/\[file:[^\]]+\]/g, '')                // Strip [file:...] mentions
     .replace(/\[folder:[^\]]+\]/g, '')              // Strip [folder:...] mentions
