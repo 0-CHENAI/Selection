@@ -4,9 +4,12 @@ node_modules
 # output
 out
 dist
+dist-packages/
 *.tgz
 .build
 apps/electron/release
+# Accidental Windows NUL device file created on some hosts
+nul
 apps/electron/resources/session-mcp-server/
 apps/electron/resources/pi-agent-server/
 

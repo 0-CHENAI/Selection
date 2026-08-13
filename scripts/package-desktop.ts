@@ -43,6 +43,8 @@ import {
   buildWhatsAppWorker,
   buildElectronApp,
   loadEnvFile,
+  curlDownload,
+  resignNativeBuildTools,
 } from './build/common'
 import { packageDarwin } from './build/darwin'
 import { packageWindows } from './build/win32'
@@ -138,7 +140,19 @@ async function ensureWindowsRipgrepInStaging(): Promise<void> {
   try {
     console.log(`Downloading Windows ripgrep ${version}...`)
     const zipPath = join(tmp, asset)
-    await $`curl -fsSL --retry 3 --retry-delay 2 -o ${zipPath} ${url}`
+    const cachedZip = join(ELECTRON_DIR, '.cache', 'downloads', asset)
+    if (existsSync(cachedZip)) {
+      console.log(`  Using cached ${cachedZip}`)
+      copyFileSync(cachedZip, zipPath)
+    } else {
+      await curlDownload(zipPath, [
+        url,
+        `https://npmmirror.com/mirrors/ripgrep-prebuilt/${version}/${asset}`,
+        `https://gitclone.com/github.com/microsoft/ripgrep-prebuilt/releases/download/${version}/${asset}`,
+      ])
+      mkdirSync(dirname(cachedZip), { recursive: true })
+      copyFileSync(zipPath, cachedZip)
+    }
     await $`unzip -o ${zipPath} -d ${tmp}`.quiet()
     // Archive may contain rg.exe at root or nested
     const findExe = (dir: string): string | null => {
@@ -188,7 +202,16 @@ async function copyRipgrepForTarget(config: BuildConfig): Promise<void> {
 async function prepareAndBuildApp(config: BuildConfig): Promise<void> {
   console.log(`\n========== Prepare ${config.platform}-${config.arch} ==========\n`)
   cleanBuildArtifacts(config)
-  await installDependencies(config)
+  // When cross-compiling from macOS/Linux, do NOT use Windows hoisted install —
+  // it can replace host-native esbuild with a broken/incompatible binary.
+  // Only use platform-specific install when the host matches the target.
+  if (process.platform === config.platform) {
+    await installDependencies(config)
+  } else {
+    console.log('Cross-compile host ≠ target: using normal bun install for host tooling...')
+    await $`cd ${ROOT_DIR} && bun install`.quiet()
+  }
+  resignNativeBuildTools(ROOT_DIR)
   await downloadBun(config)
   await downloadUv(config)
   await ensureSdkBinaryPackage(config.platform, config.arch)
@@ -200,7 +223,17 @@ async function prepareAndBuildApp(config: BuildConfig): Promise<void> {
   buildMcpServers(config)
   copySessionServer(config)
   copyPiAgentServer(config)
-  buildWhatsAppWorker(config)
+  try {
+    buildWhatsAppWorker(config)
+  } catch (err) {
+    // OOM on constrained hosts: reuse existing worker.cjs if present
+    const workerOut = join(ROOT_DIR, 'packages', 'messaging-whatsapp-worker', 'dist', 'worker.cjs')
+    if (existsSync(workerOut)) {
+      console.warn('buildWhatsAppWorker failed; reusing existing worker.cjs:', workerOut)
+    } else {
+      throw err
+    }
+  }
 
   await buildElectronApp(config)
 }

@@ -100,6 +100,27 @@ export async function verifySha256(filePath: string, expectedHash: string): Prom
 }
 
 /**
+ * curl a file, trying each URL until one succeeds.
+ * GitHub release-assets often fail with SSL_ERROR_SYSCALL on some networks;
+ * npmmirror / ghproxy are used as fallbacks.
+ */
+export async function curlDownload(dest: string, urls: string[]): Promise<string> {
+  const curlInsecure = process.env.CURL_INSECURE === '1' ? '-k' : '';
+  let lastError: unknown;
+  for (const url of urls) {
+    try {
+      console.log(`  Downloading ${url}...`);
+      await $`curl -fsSL ${curlInsecure} --retry 3 --retry-delay 2 --connect-timeout 20 -o ${dest} ${url}`;
+      return url;
+    } catch (err) {
+      lastError = err;
+      console.warn(`  Download failed, trying next mirror`);
+    }
+  }
+  throw lastError instanceof Error ? lastError : new Error(`Failed to download ${dest}`);
+}
+
+/**
  * Download and verify Bun binary
  * Uses curl for downloads (more reliable in CI than fetch + Bun.write)
  */
@@ -107,6 +128,13 @@ export async function downloadBun(config: BuildConfig): Promise<void> {
   const { platform, arch, electronDir } = config;
   const bunDownload = getBunDownloadName(platform, arch);
   const vendorDir = join(electronDir, 'vendor', 'bun');
+  const bunBinary = platform === 'win32' ? 'bun.exe' : 'bun';
+  const destPath = join(vendorDir, bunBinary);
+
+  if (existsSync(destPath)) {
+    console.log(`Bun already present at ${destPath}`);
+    return;
+  }
 
   console.log(`Downloading Bun ${BUN_VERSION} for ${platform}-${arch}...`);
 
@@ -118,19 +146,35 @@ export async function downloadBun(config: BuildConfig): Promise<void> {
   mkdirSync(tempDir, { recursive: true });
 
   try {
-    const zipUrl = `https://github.com/oven-sh/bun/releases/download/${BUN_VERSION}/${bunDownload}.zip`;
+    const zipName = `${bunDownload}.zip`;
+    const zipUrl = `https://github.com/oven-sh/bun/releases/download/${BUN_VERSION}/${zipName}`;
     const checksumUrl = `https://github.com/oven-sh/bun/releases/download/${BUN_VERSION}/SHASUMS256.txt`;
+    const zipMirrors = [
+      zipUrl,
+      `https://npmmirror.com/mirrors/bun/${BUN_VERSION}/${zipName}`,
+      `https://registry.npmmirror.com/-/binary/bun/${BUN_VERSION}/${zipName}`,
+    ];
+    const checksumMirrors = [
+      checksumUrl,
+      `https://npmmirror.com/mirrors/bun/${BUN_VERSION}/SHASUMS256.txt`,
+      `https://registry.npmmirror.com/-/binary/bun/${BUN_VERSION}/SHASUMS256.txt`,
+    ];
 
-    // Download files using curl (more reliable in CI than fetch + Bun.write)
-    const zipPath = join(tempDir, `${bunDownload}.zip`);
+    const zipPath = join(tempDir, zipName);
     const checksumPath = join(tempDir, 'SHASUMS256.txt');
-
-    console.log(`  Downloading ${zipUrl}...`);
-    await $`curl -fsSL --retry 3 --retry-delay 2 -o ${zipPath} ${zipUrl}`;
+    const cachedZip = join(electronDir, '.cache', 'downloads', zipName);
+    if (existsSync(cachedZip)) {
+      console.log(`  Using cached ${cachedZip}`);
+      copyFileSync(cachedZip, zipPath);
+    } else {
+      await curlDownload(zipPath, zipMirrors);
+      mkdirSync(dirname(cachedZip), { recursive: true });
+      copyFileSync(zipPath, cachedZip);
+    }
     console.log('  Download complete');
 
     console.log('  Downloading checksums...');
-    await $`curl -fsSL --retry 3 --retry-delay 2 -o ${checksumPath} ${checksumUrl}`;
+    await curlDownload(checksumPath, checksumMirrors);
 
     // Verify checksum
     console.log('  Verifying checksum...');
@@ -155,9 +199,7 @@ export async function downloadBun(config: BuildConfig): Promise<void> {
     await $`unzip -o ${zipPath} -d ${tempDir}`.quiet();
 
     // Copy binary
-    const bunBinary = platform === 'win32' ? 'bun.exe' : 'bun';
     const sourcePath = join(tempDir, bunDownload, bunBinary);
-    const destPath = join(vendorDir, bunBinary);
 
     copyFileSync(sourcePath, destPath);
 
@@ -225,10 +267,11 @@ export async function downloadUv(config: BuildConfig): Promise<void> {
     const extractDir = join(tempDir, 'extract');
 
     console.log(`  Downloading ${assetUrl}...`);
-    await $`curl -fsSL --retry 3 --retry-delay 2 -o ${assetPath} ${assetUrl}`;
+    const curlInsecure = process.env.CURL_INSECURE === '1' ? '-k' : '';
+    await $`curl -fsSL ${curlInsecure} --retry 3 --retry-delay 2 -o ${assetPath} ${assetUrl}`;
 
     console.log('  Downloading checksum...');
-    await $`curl -fsSL --retry 3 --retry-delay 2 -o ${checksumPath} ${checksumUrl}`;
+    await $`curl -fsSL ${curlInsecure} --retry 3 --retry-delay 2 -o ${checksumPath} ${checksumUrl}`;
 
     console.log('  Verifying checksum...');
     const checksumContent = await Bun.file(checksumPath).text();
@@ -298,6 +341,50 @@ export function cleanBuildArtifacts(config: BuildConfig): void {
  * Install dependencies
  * On Windows, uses hoisted linker to avoid .bun symlink directory
  */
+function collectEsbuildBinaries(dir: string, found: string[]): void {
+  if (!existsSync(dir)) return;
+  let entries;
+  try {
+    entries = readdirSync(dir, { withFileTypes: true });
+  } catch {
+    return;
+  }
+  for (const entry of entries) {
+    const full = join(dir, entry.name);
+    if (entry.isDirectory()) {
+      collectEsbuildBinaries(full, found);
+      continue;
+    }
+    if (entry.isFile() && entry.name === 'esbuild' && full.includes(`${join('bin', 'esbuild')}`)) {
+      found.push(full);
+    }
+  }
+}
+
+/**
+ * macOS 26+ kills ad-hoc/linker-signed Go binaries (esbuild) with
+ * `SIGKILL (Code Signature Invalid)`. Re-sign after bun install so local
+ * packaging can run. Vite vendors its own copy under node_modules/vite.
+ */
+export function resignNativeBuildTools(rootDir: string): void {
+  if (process.platform !== 'darwin') return;
+
+  const bins: string[] = [];
+  collectEsbuildBinaries(join(rootDir, 'node_modules'), bins);
+
+  for (const bin of bins) {
+    if (!existsSync(bin) || lstatSync(bin).isSymbolicLink()) continue;
+    try {
+      execSync(`codesign --force --sign - --timestamp=none ${JSON.stringify(bin)}`, {
+        stdio: 'pipe',
+      });
+      console.log(`Re-signed ${bin}`);
+    } catch (err) {
+      console.warn(`Failed to re-sign ${bin}:`, err instanceof Error ? err.message : err);
+    }
+  }
+}
+
 export async function installDependencies(config: BuildConfig): Promise<void> {
   const { rootDir, platform } = config;
 
