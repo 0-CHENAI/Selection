@@ -76,6 +76,13 @@ export {
   MarkdownSpreadsheetBlock,
   MarkdownImageBlock,
   ImageCardStack,
+  preprocessLinks,
+  detectLinks,
+  hasLinks,
+  isFilePathTarget,
+  resolveMarkdownLinkTarget,
+  classifyMarkdownLinkTarget,
+  decodeFilePath,
   type MarkdownProps,
   type RenderMode,
   TiptapMarkdownEditor,
@@ -86,6 +93,7 @@ export {
   type MarkdownImageBlockProps,
   type ImageCardStackProps,
   type ImageCardStackItem,
+  type ResolvedMarkdownLinkTarget,
 } from './components/markdown'
 
 // UI primitives
@@ -208,6 +216,7 @@ export {
   DocumentFormattedMarkdownOverlay,
   ImagePreviewOverlay,
   PDFPreviewOverlay,
+  HTMLPreviewOverlay,
   detectLanguage,
   detectLanguageFromPath,
   type CodePreviewOverlayProps,
@@ -221,6 +230,7 @@ export {
   type DocumentFormattedMarkdownOverlayProps,
   type ImagePreviewOverlayProps,
   type PDFPreviewOverlayProps,
+  type HTMLPreviewOverlayProps,
   ActivityCardsOverlay,
   type ActivityCardsOverlayProps,
 } from './components/overlay'

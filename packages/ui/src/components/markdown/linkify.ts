@@ -11,19 +11,16 @@ import { FILE_EXTENSIONS_PATTERN } from '../../lib/file-classification'
 // Initialize linkify-it with default settings (fuzzy URLs, emails enabled)
 const linkify = new LinkifyIt()
 
-// File path regex - detects absolute/home/explicit-relative/bare-relative paths with common extensions
-// Examples: /Users/foo.ts, ~/src/app.tsx, ./README.md, ../guide.md, apps/electron/src/main.ts
-// Extensions derived from file-classification.ts to stay in sync with preview support
-const FILE_PATH_REGEX_SOURCE = `(?:^|[\\s([\\{<])((?:/|~/|\\./|\\.\\./|[A-Za-z0-9_][\\w\\-./@%]*)[\\w\\-./@%]*\\.(?:${FILE_EXTENSIONS_PATTERN}))(?=[\\s)\\]}\\.,:;!?>]|$)`
-const FILE_PATH_REGEX = new RegExp(FILE_PATH_REGEX_SOURCE, 'gi')
-const FILE_PATH_PRETEST_REGEX = new RegExp(FILE_PATH_REGEX_SOURCE, 'i')
+// Path characters: letters (incl. CJK), digits, and typical path punctuation. No spaces.
+// Deliberately narrower than `[^\s)]*` so "see the file is config.json" is not one match.
+const PATH_CHARS = `[\\p{L}\\p{N}_\\-./@%\\\\]`
+const FILE_PREFIX = `(?:/|~/|\\./|\\.\\./|[A-Za-z]:[\\\\/])`
+const FILE_PATH_REGEX_SOURCE = `(?:^|[\\s([\\{<「『（])((?:${FILE_PREFIX}${PATH_CHARS}*|${PATH_CHARS}+)\\.(?:${FILE_EXTENSIONS_PATTERN}))(?=[\\s)\\]}\\.,:;!?>。、，；！？」』）]|$)`
+const FILE_PATH_REGEX = new RegExp(FILE_PATH_REGEX_SOURCE, 'giu')
+const FILE_PATH_PRETEST_REGEX = new RegExp(FILE_PATH_REGEX_SOURCE, 'iu')
 
-// File-path regex for markdown anchor targets (entire href/text value)
-// Used by Markdown.tsx click handler to route file links to onFileClick.
-const FILE_PATH_TARGET_REGEX = new RegExp(
-  `^(?!https?://|mailto:|ftp://|data:)(?:/|~/|\./|\.\./|[A-Za-z0-9_][\\w\\-./@%]*)[\\w\\-./@%]*\\.(?:${FILE_EXTENSIONS_PATTERN})$`,
-  'i'
-)
+const WEB_SCHEME_RE = /^(https?|mailto|ftp|data|blob|javascript|vbscript|about|chrome):/i
+const KNOWN_EXT_RE = new RegExp(`\\.(?:${FILE_EXTENSIONS_PATTERN})$`, 'i')
 
 interface DetectedLink {
   type: 'url' | 'email' | 'file'
@@ -164,11 +161,6 @@ export function detectLinks(text: string): DetectedLink[] {
     const pathOffset = fullMatch.indexOf(path)
     const start = fileMatch.index + pathOffset
 
-    // Check for overlaps with URL matches (URLs take precedence)
-    const pathRange = { start, end: start + path.length }
-    const overlapsUrl = links.some(link => rangesOverlap(pathRange, link))
-    if (overlapsUrl) continue
-
     links.push({
       type: 'file',
       text: path,
@@ -178,8 +170,18 @@ export function detectLinks(text: string): DetectedLink[] {
     })
   }
 
-  // Sort by position
-  return links.sort((a, b) => a.start - b.start)
+  // linkify-it treats "SKILL.md" as a fuzzy host (http://SKILL.md). A longer
+  // local path that contains that span (D:\…\SKILL.md) must win.
+  const files = links.filter((link) => link.type === 'file')
+  const others = links.filter((link) => link.type !== 'file')
+  const keptOthers = others.filter((link) =>
+    !files.some((file) => file.start <= link.start && file.end >= link.end),
+  )
+  const keptFiles = files.filter((file) =>
+    !keptOthers.some((link) => link.start <= file.start && link.end >= file.end),
+  )
+
+  return [...keptOthers, ...keptFiles].sort((a, b) => a.start - b.start)
 }
 
 /**
@@ -222,13 +224,35 @@ function stripPlaceholderLinks(text: string): string {
 }
 
 /**
- * Preprocess text to convert raw URLs and file paths into markdown links
- * Skips code blocks and already-linked content
+ * CommonMark treats an unquoted destination as ending at the first space.
+ * AI often writes `[报告](D:\巡察工作\my file.md)` which then is not a link.
+ * Wrap those destinations in `<>` so the click handler still receives the full path.
  */
+function wrapSpacedFileDestinations(text: string): string {
+  const codeRanges = findCodeRanges(text)
+  return text.replace(
+    /\[([^\]]*)\]\((?!<)([^)\n]*\s[^)\n]*)\)/g,
+    (full, label: string, dest: string, offset: number) => {
+      if (isInsideCode(offset, codeRanges)) return full
+      const trimmed = dest.trim()
+      if (!trimmed || /^(https?|mailto|ftp):/i.test(trimmed)) return full
+      // Destination with a markdown title: [text](path "title") — leave alone
+      if (/\s+['"]/.test(trimmed)) return full
+      // CommonMark <dest> cannot contain `>`
+      if (trimmed.includes('>')) return full
+      if (isFilePathTarget(trimmed) || /^[A-Za-z]:[\\/]/.test(trimmed) || /[\\/]/.test(trimmed)) {
+        return `[${label}](<${trimmed}>)`
+      }
+      return full
+    },
+  )
+}
+
 export function preprocessLinks(text: string): string {
   // First pass: strip markdown links with placeholder/fabricated URLs
   // (e.g., AI-generated `[commit](https://github.com/...)` → `\`commit\``)
   text = stripPlaceholderLinks(text)
+  text = wrapSpacedFileDestinations(text)
 
   // Quick check - if no potential links, return early
   if (!linkify.pretest(text) && !FILE_PATH_PRETEST_REGEX.test(text)) {
@@ -278,7 +302,32 @@ export function hasLinks(text: string): boolean {
 /**
  * Check whether a markdown anchor target should be treated as a local file path.
  * Used by click handlers to route local paths to onFileClick instead of onUrlClick.
+ *
+ * Must accept Windows drive paths and Unicode (Chinese) workspace segments.
+ * Must NOT treat `github.com/foo` or `https://…` as files.
  */
 export function isFilePathTarget(target: string): boolean {
-  return FILE_PATH_TARGET_REGEX.test(target.trim())
+  const raw = target.trim()
+  if (!raw || WEB_SCHEME_RE.test(raw) || /^file:/i.test(raw)) return false
+
+  const t = raw.includes('%')
+    ? (() => { try { return decodeURIComponent(raw) } catch { return raw } })()
+    : raw
+
+  if (/^[A-Za-z]:[\\/]/.test(t)) return true
+  if (t.startsWith('\\\\')) return true
+  if (t.startsWith('/') || t.startsWith('~/') || t.startsWith('./') || t.startsWith('../')) return true
+
+  const unixified = t.replace(/\\/g, '/')
+  const first = unixified.split('/')[0] || ''
+  // first segment looks like a hostname (example.com) → web, not a local file
+  if (/^[a-z0-9-]+(?:\.[a-z0-9-]+)+$/i.test(first) && !KNOWN_EXT_RE.test(first)) {
+    return false
+  }
+
+  if (KNOWN_EXT_RE.test(unixified)) return true
+  // Explicit markdown dest with path separators (folder or extensionless file)
+  if (unixified.includes('/')) return true
+
+  return false
 }

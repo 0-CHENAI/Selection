@@ -247,6 +247,53 @@ describe('detectLinks', () => {
     expect(links[0]!.type).toBe('file')
     expect(links[0]!.url).toBe('../README.md')
   })
+
+  it('detects Windows and Chinese workspace paths', () => {
+    const win = detectLinks('打开 D:\\selection\\巡察工作\\SKILL.md')
+    expect(win.some((l) => l.type === 'file' && l.url.includes('巡察工作'))).toBe(true)
+    const zh = detectLinks('见 巡察工作/skills/SKILL.md 说明')
+    expect(zh.some((l) => l.type === 'file' && l.url === '巡察工作/skills/SKILL.md')).toBe(true)
+  })
+
+  it('does not treat prose before a filename as part of the path', () => {
+    const links = detectLinks('see the file is config.json please')
+    const file = links.find((l) => l.type === 'file')
+    expect(file?.url).toBe('config.json')
+  })
+
+  it('lets a full Windows path win over a fuzzy SKILL.md host', () => {
+    const links = detectLinks('D:\\selection\\巡察工作\\skills\\SKILL.md')
+    const file = links.find((l) => l.type === 'file')
+    expect(file?.url).toBe('D:\\selection\\巡察工作\\skills\\SKILL.md')
+    expect(links.some((l) => l.type === 'url' && /SKILL\.md/i.test(l.url))).toBe(false)
+  })
+})
+
+describe('preprocessLinks — spaced Windows destinations', () => {
+  it('wraps an unquoted destination that contains spaces', () => {
+    const input = '[技能](D:\\selection\\巡察工作\\my file.md)'
+    expect(preprocessLinks(input)).toBe('[技能](<D:\\selection\\巡察工作\\my file.md>)')
+  })
+
+  it('does not wrap destinations that are already angle-bracketed', () => {
+    const input = '[技能](<D:\\selection\\巡察工作\\my file.md>)'
+    expect(preprocessLinks(input)).toBe(input)
+  })
+
+  it('does not wrap titled destinations', () => {
+    const input = '[技能](notes.md "title")'
+    expect(preprocessLinks(input)).toBe(input)
+  })
+
+  it('does not rewrite spaced destinations inside inline code', () => {
+    const input = '`[技能](D:\\selection\\my file.md)`'
+    expect(preprocessLinks(input)).toBe(input)
+  })
+
+  it('does not wrap destinations that contain >', () => {
+    const input = '[技能](D:\\selection\\a>b file.md)'
+    expect(preprocessLinks(input)).toBe(input)
+  })
 })
 
 describe('isFilePathTarget', () => {
@@ -272,5 +319,15 @@ describe('isFilePathTarget', () => {
 
   it('rejects non-file strings', () => {
     expect(isFilePathTarget('not a link at all')).toBe(false)
+  })
+
+  it('accepts Windows drive paths and Chinese relative paths', () => {
+    expect(isFilePathTarget('D:\\selection\\巡察工作\\a.md')).toBe(true)
+    expect(isFilePathTarget('巡察工作/skills/SKILL.md')).toBe(true)
+  })
+
+  it('still rejects host-like paths', () => {
+    expect(isFilePathTarget('github.com/foo/bar')).toBe(false)
+    expect(isFilePathTarget('order.ai.jxepdi.top/v1')).toBe(false)
   })
 })

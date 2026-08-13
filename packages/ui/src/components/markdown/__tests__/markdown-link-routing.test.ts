@@ -3,6 +3,7 @@ import * as React from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import ReactMarkdown, { defaultUrlTransform } from 'react-markdown'
 import { classifyMarkdownLinkTarget, resolveMarkdownLinkTarget } from '../link-target'
+import { preprocessLinks } from '../linkify'
 import { markdownUrlTransform } from '../url-transform'
 
 describe('resolveMarkdownLinkTarget', () => {
@@ -62,6 +63,48 @@ describe('resolveMarkdownLinkTarget', () => {
     })
   })
 
+  it('normalizes file://localhost/C:/… Windows URLs', () => {
+    expect(resolveMarkdownLinkTarget('file://localhost/C:/Users/Tester/Deck.pptx')).toEqual({
+      kind: 'file',
+      path: 'C:/Users/Tester/Deck.pptx',
+    })
+  })
+
+  it('normalizes file://D:/… (hostname-as-drive) Windows URLs', () => {
+    expect(resolveMarkdownLinkTarget('file://D:/selection/巡察工作/a.md')).toEqual({
+      kind: 'file',
+      path: 'D:/selection/巡察工作/a.md',
+    })
+  })
+
+  it('normalizes Windows file URLs that use backslashes', () => {
+    expect(resolveMarkdownLinkTarget('file:///D:\\selection\\巡察工作\\a.md')).toEqual({
+      kind: 'file',
+      path: 'D:/selection/巡察工作/a.md',
+    })
+  })
+
+  it('treats a bare Windows drive path as a file', () => {
+    expect(resolveMarkdownLinkTarget('D:\\selection\\巡察工作\\skills\\SKILL.md')).toEqual({
+      kind: 'file',
+      path: 'D:\\selection\\巡察工作\\skills\\SKILL.md',
+    })
+  })
+
+  it('treats a Chinese relative workspace path as a file', () => {
+    expect(resolveMarkdownLinkTarget('巡察工作/skills/inspection-workflow/SKILL.md')).toEqual({
+      kind: 'file',
+      path: '巡察工作/skills/inspection-workflow/SKILL.md',
+    })
+  })
+
+  it('decodes percent-encoded Chinese segments in a relative file path', () => {
+    expect(resolveMarkdownLinkTarget('skills/%E5%B7%A1%E5%AF%9F%E5%B7%A5%E4%BD%9C/SKILL.md')).toEqual({
+      kind: 'file',
+      path: 'skills/巡察工作/SKILL.md',
+    })
+  })
+
   it('resolves https links as url targets', () => {
     expect(resolveMarkdownLinkTarget('https://example.com/image.jpg')).toEqual({
       kind: 'url',
@@ -73,6 +116,27 @@ describe('resolveMarkdownLinkTarget', () => {
     expect(resolveMarkdownLinkTarget('mailto:test@example.com')).toEqual({
       kind: 'url',
       url: 'mailto:test@example.com',
+    })
+  })
+
+  it('treats fuzzy http://SKILL.md autolinks as local file names', () => {
+    expect(resolveMarkdownLinkTarget('http://SKILL.md')).toEqual({
+      kind: 'file',
+      path: 'SKILL.md',
+    })
+  })
+
+  it('does not treat a real hostname as a file', () => {
+    expect(resolveMarkdownLinkTarget('https://example.com')).toEqual({
+      kind: 'url',
+      url: 'https://example.com',
+    })
+  })
+
+  it('does not treat multi-label hosts as local files', () => {
+    expect(resolveMarkdownLinkTarget('http://jquery.min.js')).toEqual({
+      kind: 'url',
+      url: 'http://jquery.min.js',
     })
   })
 })
@@ -142,5 +206,69 @@ describe('classifyMarkdownLinkTarget', () => {
 
   it('classifies mailto links as url', () => {
     expect(classifyMarkdownLinkTarget('mailto:test@example.com')).toBe('url')
+  })
+})
+
+describe('generated markdown file-link pipeline', () => {
+  function rawHrefs(markdown: string): string[] {
+    const html = renderToStaticMarkup(React.createElement(ReactMarkdown, {
+      urlTransform: markdownUrlTransform,
+      components: {
+        a: ({ href, children }) => React.createElement('a', {
+          href: href ? defaultUrlTransform(href) || undefined : undefined,
+          'data-raw-href': href,
+        }, children),
+      },
+      children: preprocessLinks(markdown),
+    }))
+    return [...html.matchAll(/data-raw-href="([^"]*)"/g)].map((match) =>
+      match[1]!.replace(/&amp;/g, '&').replace(/&#x27;/g, "'"),
+    )
+  }
+
+  it('opens an explicit Windows + Chinese workspace path as a file', () => {
+    const hrefs = rawHrefs('[技能](D:\\selection\\巡察工作\\skills\\SKILL.md)')
+    expect(hrefs).toHaveLength(1)
+    expect(resolveMarkdownLinkTarget(hrefs[0]!)).toEqual({
+      kind: 'file',
+      path: 'D:\\selection\\巡察工作\\skills\\SKILL.md',
+    })
+  })
+
+  it('opens an unquoted destination that contains spaces', () => {
+    const hrefs = rawHrefs('[技能](D:\\selection\\巡察工作\\my file.md)')
+    expect(hrefs).toHaveLength(1)
+    expect(resolveMarkdownLinkTarget(hrefs[0]!)).toEqual({
+      kind: 'file',
+      path: 'D:\\selection\\巡察工作\\my file.md',
+    })
+  })
+
+  it('opens file://D:/ hostname-as-drive URLs as files', () => {
+    const hrefs = rawHrefs('[报告](file://D:/selection/巡察工作/a.md)')
+    expect(hrefs).toHaveLength(1)
+    expect(resolveMarkdownLinkTarget(hrefs[0]!)).toEqual({
+      kind: 'file',
+      path: 'D:/selection/巡察工作/a.md',
+    })
+  })
+
+  it('opens percent-encoded Chinese relative paths as files', () => {
+    const hrefs = rawHrefs('[技能](skills/%E5%B7%A1%E5%AF%9F%E5%B7%A5%E4%BD%9C/SKILL.md)')
+    expect(hrefs).toHaveLength(1)
+    expect(resolveMarkdownLinkTarget(hrefs[0]!)).toEqual({
+      kind: 'file',
+      path: 'skills/巡察工作/SKILL.md',
+    })
+  })
+
+  it('opens a bare Chinese workspace path after autolink', () => {
+    const hrefs = rawHrefs('见 巡察工作/skills/SKILL.md 说明')
+    expect(hrefs.some((href) => resolveMarkdownLinkTarget(href).kind === 'file')).toBe(true)
+    const file = hrefs.map((href) => resolveMarkdownLinkTarget(href)).find((target) => target.kind === 'file')
+    expect(file).toEqual({
+      kind: 'file',
+      path: '巡察工作/skills/SKILL.md',
+    })
   })
 })

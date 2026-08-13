@@ -19,7 +19,8 @@ import { toast } from 'sonner'
 import { PanelHeaderCenterButton } from '@/components/ui/PanelHeaderCenterButton'
 import { useAppShellContext, usePendingPermission, usePendingCredential, useSessionOptionsFor, useSession as useSessionData } from '@/context/AppShellContext'
 import { rendererPerf } from '@/lib/perf'
-import { isAbsolutePath } from '@/lib/drafts'
+import { resolveOpenableGeneratedFile } from '@/lib/generated-file-path'
+import { resolveMarkdownLinkTarget } from '@craft-agent/ui'
 import { navigate, routes } from '@/lib/navigate'
 import { coerceInputText } from '@/lib/input-text'
 import { deriveSessionMessagesLoadState, formatSessionLoadFailure } from '@/lib/session-load'
@@ -331,62 +332,30 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
 
   const handleOpenFile = React.useCallback(
     async (path: string) => {
-      // Resolve bare relative paths against session working directory,
-      // or workspace root as a fallback when workingDirectory is not set.
-      const resolved = (() => {
-        // Absolute paths (POSIX `/…`, Windows `C:\…`) and `~/…` are used as-is.
-        // Using a cross-platform check here fixes Windows preview failures where a
-        // `C:\…` path was wrongly treated as relative and re-prefixed with the
-        // workspace root, producing a doubled, non-existent path (#922/#875).
-        if (isAbsolutePath(path) || path.startsWith('~/')) return path
-
-        const baseDir = workingDirectory || activeWorkspace?.rootPath
-        if (!baseDir) return path
-
-        const cleanedBase = baseDir.replace(/\/+$/, '')
-        const cleanedPath = path.replace(/^\.\//, '')
-        return `${cleanedBase}/${cleanedPath}`
-      })()
-
-      // Smart fallback for missing files in AI output:
-      // if the exact path doesn't exist, search nearby for same basename
-      // (e.g. markdown/linkify.test.ts -> markdown/__tests__/linkify.test.ts).
-      if (isAbsolutePath(resolved)) {
-        // Backslash-aware so the fallback also runs for `C:\…` paths (#922)
-        const lastSlash = Math.max(resolved.lastIndexOf('/'), resolved.lastIndexOf('\\'))
-        if (lastSlash > 0 && lastSlash < resolved.length - 1) {
-          const parentDir = resolved.slice(0, lastSlash)
-          const fileName = resolved.slice(lastSlash + 1)
-          try {
-            const matches = await window.electronAPI.searchFiles(parentDir, fileName)
-            const files = matches.filter((m) => m.type === 'file' && m.name === fileName)
-            const exact = files.find((m) => m.path === resolved)
-            if (exact) {
-              onOpenFile(exact.path)
-              return
-            }
-
-            if (files.length === 1) {
-              onOpenFile(files[0].path)
-              toast.info(t('chat.openedClosestMatch', { path: files[0].relativePath }))
-              return
-            }
-          } catch {
-            // Search fallback is best-effort; proceed with original resolved path.
-          }
-        }
+      const baseDir = workingDirectory || activeWorkspace?.rootPath
+      const pick = await resolveOpenableGeneratedFile({
+        requestedPath: path,
+        baseDir,
+        searchFiles: (dir, query) => window.electronAPI.searchFiles(dir, query),
+      })
+      if (pick.closestMatchRelativePath) {
+        toast.info(t('chat.openedClosestMatch', { path: pick.closestMatchRelativePath }))
       }
-
-      onOpenFile(resolved)
+      onOpenFile(pick.path)
     },
-    [onOpenFile, workingDirectory, activeWorkspace?.rootPath]
+    [onOpenFile, workingDirectory, activeWorkspace?.rootPath, t]
   )
 
   const handleOpenUrl = React.useCallback(
     (url: string) => {
+      const resolved = resolveMarkdownLinkTarget(url)
+      if (resolved.kind === 'file') {
+        void handleOpenFile(resolved.path)
+        return
+      }
       onOpenUrl(url)
     },
-    [onOpenUrl]
+    [onOpenUrl, handleOpenFile]
   )
 
   // Perf: Mark when data is ready
