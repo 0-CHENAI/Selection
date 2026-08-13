@@ -7,7 +7,7 @@
  */
 
 /** Preview types that map to specific overlay components */
-export type FilePreviewType = 'image' | 'code' | 'markdown' | 'json' | 'text' | 'pdf'
+export type FilePreviewType = 'image' | 'code' | 'markdown' | 'json' | 'text' | 'pdf' | 'html'
 
 export interface FileClassification {
   /** The preview type, or null if no in-app preview is available */
@@ -35,7 +35,7 @@ const CODE_EXTENSIONS = new Set([
   'py', 'rb', 'rs', 'go', 'java', 'kt', 'swift',
   'c', 'cpp', 'h', 'hpp', 'cs',
   'css', 'scss', 'less',
-  'html', 'htm', 'xml', 'svg',  // SVG is also code-viewable, but image takes priority
+  'xml', 'svg',  // SVG is also code-viewable, but image takes priority
   'yaml', 'yml', 'toml',
   'sh', 'bash', 'zsh', 'fish',
   'sql', 'graphql',
@@ -44,6 +44,9 @@ const CODE_EXTENSIONS = new Set([
   'r', 'lua', 'perl', 'php',
   'vue', 'svelte', 'astro', 'prisma',
 ])
+
+/** HTML pages — rendered as a webpage in HTMLPreviewOverlay, not as source */
+const HTML_EXTENSIONS = new Set(['html', 'htm', 'xhtml'])
 
 /** Markdown files — rendered with the Markdown component */
 const MARKDOWN_EXTENSIONS = new Set(['md', 'mdx'])
@@ -85,7 +88,7 @@ const EXTERNAL_EXTENSIONS = new Set([
  * Handles compound extensions like .env.local by returning the last segment.
  */
 function getExtension(filePath: string): string {
-  const basename = filePath.split('/').pop() ?? filePath
+  const basename = filePath.split(/[/\\]/).pop() ?? filePath
   const dotIndex = basename.lastIndexOf('.')
   if (dotIndex === -1 || dotIndex === 0) return ''
   return basename.slice(dotIndex + 1).toLowerCase()
@@ -95,13 +98,14 @@ function getExtension(filePath: string): string {
  * Classify a file path by extension to determine preview capability.
  *
  * Priority order when an extension matches multiple sets (e.g. svg):
- * image > code > markdown > json > text > pdf
+ * image > html > markdown > json > code > text > pdf
  */
 export function classifyFile(filePath: string): FileClassification {
   const ext = getExtension(filePath)
   if (!ext) return { type: null, canPreview: false }
 
   if (IMAGE_EXTENSIONS.has(ext))    return { type: 'image', canPreview: true }
+  if (HTML_EXTENSIONS.has(ext))     return { type: 'html', canPreview: true }
   if (MARKDOWN_EXTENSIONS.has(ext)) return { type: 'markdown', canPreview: true }
   if (JSON_EXTENSIONS.has(ext))     return { type: 'json', canPreview: true }
   if (CODE_EXTENSIONS.has(ext))     return { type: 'code', canPreview: true }
@@ -118,6 +122,7 @@ export function classifyFile(filePath: string): FileClassification {
  */
 export const FILE_EXTENSIONS_PATTERN = [
   ...IMAGE_EXTENSIONS,
+  ...HTML_EXTENSIONS,
   ...CODE_EXTENSIONS,
   ...MARKDOWN_EXTENSIONS,
   ...JSON_EXTENSIONS,

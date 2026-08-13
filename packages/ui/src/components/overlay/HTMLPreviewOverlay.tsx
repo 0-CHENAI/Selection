@@ -18,18 +18,20 @@ import { CopyButton } from './CopyButton'
 import { ItemNavigator } from './ItemNavigator'
 
 /**
- * Inject `<base target="_top">` so link clicks navigate the top frame,
- * which Electron's will-navigate handler intercepts → system browser.
+ * Inject `<base target="_top">` so in-page links navigate the top frame
+ * (Electron then opens them in the system browser). Do not add a file://
+ * href — relative `../` would otherwise resolve into the local disk.
  */
 function injectBaseTarget(html: string): string {
   if (/<base\s/i.test(html)) return html
+  const tag = '<base target="_top">'
   if (/<head[^>]*>/i.test(html)) {
-    return html.replace(/(<head[^>]*>)/i, '$1<base target="_top">')
+    return html.replace(/(<head[^>]*>)/i, `$1${tag}`)
   }
   if (/<html[^>]*>/i.test(html)) {
-    return html.replace(/(<html[^>]*>)/i, '$1<head><base target="_top"></head>')
+    return html.replace(/(<html[^>]*>)/i, `$1<head>${tag}</head>`)
   }
-  return `<head><base target="_top"></head>${html}`
+  return `<head>${tag}</head>${html}`
 }
 
 interface PreviewItem {
@@ -54,6 +56,10 @@ export interface HTMLPreviewOverlayProps {
   initialIndex?: number
   /** Optional title for the overlay header */
   title?: string
+  /** File path — shows Open / Reveal badge when previewing a local HTML file */
+  filePath?: string
+  /** Read/load error to surface in the overlay banner */
+  error?: string
   /** Theme mode for dark/light styling */
   theme?: 'light' | 'dark'
 }
@@ -67,6 +73,8 @@ export function HTMLPreviewOverlay({
   onLoadContent,
   initialIndex = 0,
   title,
+  filePath,
+  error,
   theme,
 }: HTMLPreviewOverlayProps) {
   // Normalize: single html prop → single item, or use items array
@@ -131,28 +139,32 @@ export function HTMLPreviewOverlay({
 
   // Preprocess active HTML
   const processedHtml = React.useMemo(
-    () => activeContent ? injectBaseTarget(activeContent) : null,
-    [activeContent]
+    () => (activeContent ? injectBaseTarget(activeContent) : null),
+    [activeContent],
   )
 
-  // Read iframe content dimensions after it loads
+  // Read iframe content dimensions after it loads. Always mark a size so the
+  // iframe does not stay opacity:0 when measurement is blocked.
   const handleLoad = React.useCallback(() => {
     const iframe = iframeRef.current
     if (!iframe) return
     try {
       const doc = iframe.contentDocument
-      if (!doc?.body) return
-      doc.documentElement.style.overflow = 'hidden'
-      doc.body.style.overflow = 'hidden'
-      const origWidth = doc.body.style.width
-      doc.body.style.width = 'fit-content'
-      const naturalWidth = doc.body.scrollWidth
-      doc.body.style.width = origWidth
-      const height = doc.body.scrollHeight
-      setContentSize({ width: naturalWidth, height })
+      if (doc?.body) {
+        doc.documentElement.style.overflow = 'hidden'
+        doc.body.style.overflow = 'hidden'
+        const origWidth = doc.body.style.width
+        doc.body.style.width = 'fit-content'
+        const naturalWidth = doc.body.scrollWidth
+        doc.body.style.width = origWidth
+        const height = doc.body.scrollHeight
+        setContentSize({ width: naturalWidth, height })
+        return
+      }
     } catch {
-      // Cross-origin access denied
+      // Cross-origin or empty document — fall through to a visible default.
     }
+    setContentSize({ width: 800, height: 600 })
   }, [])
 
   const iframeHeight = contentSize
@@ -179,7 +191,9 @@ export function HTMLPreviewOverlay({
         label: 'HTML',
         variant: 'blue',
       }}
-      title={title || activeItem?.label || 'HTML Preview'}
+      filePath={filePath}
+      title={title || activeItem?.label || t('preview.htmlPreview')}
+      error={error ? { label: t('preview.htmlPreview'), message: error } : undefined}
       headerActions={headerActions}
     >
       <div className="px-6 pb-6">

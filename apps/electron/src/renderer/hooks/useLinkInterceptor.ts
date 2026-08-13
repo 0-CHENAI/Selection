@@ -62,6 +62,13 @@ interface TextPreview {
   error?: string
 }
 
+interface HtmlPreview {
+  type: 'html'
+  filePath: string
+  content: string | null
+  error?: string
+}
+
 export type FilePreviewState =
   | ImagePreview
   | PDFPreview
@@ -69,6 +76,7 @@ export type FilePreviewState =
   | MarkdownPreview
   | JSONPreview
   | TextPreview
+  | HtmlPreview
 
 // ── Hook options ───────────────────────────────────────────────────────────────
 // Callbacks injected by App.tsx so the hook doesn't depend on window.electronAPI directly.
@@ -237,6 +245,8 @@ function buildInitialTextState(type: FilePreviewType, path: string): FilePreview
       return { type: 'json', filePath: path, content: null }
     case 'text':
       return { type: 'text', filePath: path, content: null }
+    case 'html':
+      return { type: 'html', filePath: path, content: null }
     default:
       // Should never happen — image/pdf are handled before this function is called
       return { type: 'text', filePath: path, content: null }

@@ -68,6 +68,7 @@ import {
   PlatformProvider,
   ImagePreviewOverlay,
   PDFPreviewOverlay,
+  HTMLPreviewOverlay,
   CodePreviewOverlay,
   DocumentFormattedMarkdownOverlay,
   JSONPreviewOverlay,
@@ -2142,6 +2143,7 @@ function WindowCloseHandler() {
  * Handles all preview types from the link interceptor:
  * - image → ImagePreviewOverlay (binary, loaded via data URL)
  * - pdf → PDFPreviewOverlay (binary, embedded via Chromium viewer)
+ * - html → HTMLPreviewOverlay (rendered webpage, not source)
  * - code/text → CodePreviewOverlay (syntax highlighted)
  * - markdown → DocumentFormattedMarkdownOverlay
  * - json → JSONPreviewOverlay
@@ -2187,6 +2189,19 @@ function FilePreviewRenderer({
         />
       )
 
+    case 'html':
+      return (
+        <HTMLPreviewOverlay
+          isOpen
+          onClose={onClose}
+          filePath={state.filePath}
+          html={state.content ?? ''}
+          title={state.filePath.split(/[/\\]/).pop() || undefined}
+          error={state.error}
+          theme={theme}
+        />
+      )
+
     case 'code':
     case 'text':
       return (
@@ -2205,7 +2220,7 @@ function FilePreviewRenderer({
     case 'markdown': {
       // Show PLAN header for .md files in plans folder (handles both absolute and relative paths)
       const isPlanFile =
-        (state.filePath.includes('/plans/') || state.filePath.startsWith('plans/')) &&
+        (/[/\\]plans[/\\]/.test(state.filePath) || state.filePath.startsWith('plans/')) &&
         state.filePath.endsWith('.md')
       return (
         <DocumentFormattedMarkdownOverlay
