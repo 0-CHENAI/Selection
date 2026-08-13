@@ -131,12 +131,18 @@ export function normalizePath(path: string): string {
  * - Expands ~ / $HOME
  * - Resolves to absolute
  * - Normalizes . / .. and separators
- * - NFC unicode form so Chinese (and other non-ASCII) path segments compare
- *   consistently across dialog pickers (often NFC) and macOS HFS/APFS (often NFD)
+ * - On macOS only: NFC unicode form so Chinese path segments compare
+ *   consistently across dialog pickers (NFC) and APFS (often NFD).
+ *   Windows keeps the path as-is after resolve — forcing NFC there can
+ *   desync from the real on-disk folder name under Chinese parents.
  */
 export function resolveFsPath(inputPath: string, basePath?: string): string {
   if (!inputPath) return inputPath;
-  return resolve(normalize(expandPath(inputPath, basePath))).normalize('NFC');
+  const resolved = resolve(normalize(expandPath(inputPath, basePath)));
+  if (process.platform === 'darwin') {
+    return resolved.normalize('NFC');
+  }
+  return resolved;
 }
 
 /**

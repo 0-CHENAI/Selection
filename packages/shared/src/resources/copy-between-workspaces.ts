@@ -11,18 +11,16 @@ import {
   mkdirSync,
   readdirSync,
   rmSync,
-  cpSync,
   writeFileSync,
   readFileSync,
-  renameSync,
   statSync,
 } from 'fs'
 import { join, basename } from 'path'
-import { randomUUID } from 'crypto'
 import { getWorkspaceSourcesPath, getWorkspaceSkillsPath } from '../workspaces/storage.ts'
 import { getSourcePath } from '../sources/storage.ts'
 import { isBuiltinSource } from '../sources/builtin-sources.ts'
 import { resolveFsPath } from '../utils/paths.ts'
+import { stagedDirectoryReplace } from '../utils/fs-stage.ts'
 import type { ResourceImportMode, ImportBucketResult, ResourceImportResult } from './types.ts'
 import type { FolderSourceConfig } from '../sources/types.ts'
 
@@ -127,32 +125,6 @@ function applyAuthAfterCopy(
   }
 }
 
-function cleanupTmp(tmpDir: string): void {
-  try {
-    if (existsSync(tmpDir)) rmSync(tmpDir, { recursive: true, force: true })
-  } catch {
-    // ignore
-  }
-}
-
-/**
- * Stage copy under a temp name, then rename into place so a failed copy
- * cannot leave a half-written target (and overwrite keeps the old dir until stage succeeds).
- */
-function stagedDirectoryCopy(fromPath: string, toPath: string, parentDir: string, slug: string): void {
-  const tmpDir = join(parentDir, `.tmp-copy-${slug}-${randomUUID().slice(0, 8)}`)
-  try {
-    cpSync(fromPath, tmpDir, { recursive: true })
-    if (existsSync(toPath)) {
-      rmSync(toPath, { recursive: true, force: true })
-    }
-    renameSync(tmpDir, toPath)
-  } catch (err) {
-    cleanupTmp(tmpDir)
-    throw err
-  }
-}
-
 /**
  * Copy sources and skills between two local workspace roots.
  */
@@ -238,8 +210,8 @@ async function copySources(
         }
       }
 
-      // Stage then rename — keeps previous target intact until stage succeeds
-      stagedDirectoryCopy(fromPath, toPath, toDir, slug)
+      // Stage then rename (Windows-safe fallback for Chinese paths)
+      stagedDirectoryReplace(fromPath, toPath)
 
       let hadCreds = false
       if (includeCredentials) {
@@ -298,7 +270,8 @@ function copySkills(options: CopyBetweenWorkspacesOptions): ImportBucketResult {
         continue
       }
 
-      stagedDirectoryCopy(fromPath, toPath, toDir, slug)
+      // Stage then rename (Windows-safe fallback for Chinese paths)
+      stagedDirectoryReplace(fromPath, toPath)
       result.imported.push(slug)
     } catch (err) {
       result.failed.push({

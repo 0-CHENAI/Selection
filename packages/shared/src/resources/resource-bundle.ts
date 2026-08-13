@@ -16,6 +16,8 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync, renameSync, rmSync } from 'fs'
 import { join, basename } from 'path'
 import { randomUUID } from 'crypto'
+import { finalizeStagedDirectory, safeTempNameSegment } from '../utils/fs-stage.ts'
+import { resolveFsPath } from '../utils/paths.ts'
 import {
   type BundleFile,
   MAX_BUNDLE_SIZE_BYTES,
@@ -630,6 +632,8 @@ export async function importResources(
   mode: ResourceImportMode,
   deps: ResourceImportDeps,
 ): Promise<ResourceImportResult> {
+  // NFC-resolve so Chinese workspace folder paths are stable
+  workspaceRootPath = resolveFsPath(workspaceRootPath)
   // Validate bundle first
   const validation = validateResourceBundle(bundle)
   if (!validation.valid) {
@@ -702,8 +706,8 @@ async function importSources(
         continue
       }
 
-      // Stage: build in temp dir
-      const tmpDir = join(sourcesDir, `.tmp-${entry.slug}-${randomUUID().slice(0, 8)}`)
+      // Stage under short ASCII temp name (Windows + Chinese parent paths)
+      const tmpDir = join(sourcesDir, `.tmp-${safeTempNameSegment(entry.slug)}-${randomUUID().slice(0, 8)}`)
       mkdirSync(tmpDir, { recursive: true })
 
       try {
@@ -718,28 +722,25 @@ async function importSources(
         if (!validation.valid) {
           const msgs = validation.errors.map(e => `${e.path}: ${e.message}`).join(', ')
           result.failed.push({ id: entry.slug, error: `Invalid source config: ${msgs}` })
-          rmSync(tmpDir, { recursive: true })
+          rmSync(tmpDir, { recursive: true, force: true })
           continue
         }
 
-        // On overwrite: clear credentials + remove old dir
+        // On overwrite: clear credentials before replacing tree
         if (exists) {
-          // Clear all credential types for this slug
           try {
             await deps.clearSourceCredentials(workspaceId, entry.slug)
           } catch (err) {
             result.warnings.push(`Source '${entry.slug}': failed to clear credentials: ${err}`)
           }
-          rmSync(targetDir, { recursive: true })
         }
 
-        // Atomic replace: rename temp → target
-        renameSync(tmpDir, targetDir)
+        // Windows-safe finalize (rename with copy fallback)
+        finalizeStagedDirectory(tmpDir, targetDir)
         result.imported.push(entry.slug)
       } catch (err) {
-        // Clean up temp dir on failure
         if (existsSync(tmpDir)) {
-          rmSync(tmpDir, { recursive: true })
+          rmSync(tmpDir, { recursive: true, force: true })
         }
         throw err
       }
@@ -778,8 +779,8 @@ function importSkills(
         continue
       }
 
-      // Stage: build in temp dir
-      const tmpDir = join(skillsDir, `.tmp-${entry.slug}-${randomUUID().slice(0, 8)}`)
+      // Stage under short ASCII temp name (Windows + Chinese parent paths)
+      const tmpDir = join(skillsDir, `.tmp-${safeTempNameSegment(entry.slug)}-${randomUUID().slice(0, 8)}`)
       mkdirSync(tmpDir, { recursive: true })
 
       try {
@@ -789,22 +790,16 @@ function importSkills(
         // Validate: SKILL.md should exist
         if (!existsSync(join(tmpDir, 'SKILL.md'))) {
           result.failed.push({ id: entry.slug, error: 'SKILL.md missing after restore' })
-          rmSync(tmpDir, { recursive: true })
+          rmSync(tmpDir, { recursive: true, force: true })
           continue
         }
 
-        // On overwrite: remove old dir
-        if (exists) {
-          rmSync(targetDir, { recursive: true })
-        }
-
-        // Atomic replace: rename temp → target
-        renameSync(tmpDir, targetDir)
+        // Windows-safe finalize (rename with copy fallback)
+        finalizeStagedDirectory(tmpDir, targetDir)
         result.imported.push(entry.slug)
       } catch (err) {
-        // Clean up temp dir on failure
         if (existsSync(tmpDir)) {
-          rmSync(tmpDir, { recursive: true })
+          rmSync(tmpDir, { recursive: true, force: true })
         }
         throw err
       }
