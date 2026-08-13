@@ -1,7 +1,7 @@
 import { useTranslation } from "react-i18next"
 import { cn } from "@/lib/utils"
-import { Globe, Key, Monitor } from "lucide-react"
 import { CraftAgentsSymbol } from "@/components/icons/CraftAgentsSymbol"
+import { OrderWordmark } from "@/components/icons/OrderWordmark"
 import { StepFormLayout } from "./primitives"
 
 /**
@@ -19,13 +19,6 @@ interface ProviderOption {
   id: ProviderChoice
   name: string
   description: string
-  icon: React.ReactNode
-}
-
-const PROVIDER_ICONS: Record<ProviderChoice, React.ReactNode> = {
-  order: <Globe className="size-5" />,
-  api_key: <Key className="size-5" />,
-  local: <Monitor className="size-5" />,
 }
 
 interface ProviderSelectStepProps {
@@ -49,19 +42,16 @@ export function ProviderSelectStep({ onSelect, onSkip }: ProviderSelectStepProps
       id: 'order',
       name: t("onboarding.providerSelect.order"),
       description: t("onboarding.providerSelect.orderDesc"),
-      icon: PROVIDER_ICONS.order,
     },
     {
       id: 'api_key',
       name: t("onboarding.providerSelect.otherProvider"),
       description: t("onboarding.providerSelect.otherProviderDesc"),
-      icon: PROVIDER_ICONS.api_key,
     },
     {
       id: 'local',
       name: t("onboarding.providerSelect.localModel"),
       description: t("onboarding.providerSelect.localModelDesc"),
-      icon: PROVIDER_ICONS.local,
     },
   ]
 
@@ -76,31 +66,33 @@ export function ProviderSelectStep({ onSelect, onSkip }: ProviderSelectStepProps
       description={t("onboarding.providerSelect.description")}
     >
       <div className="space-y-2 sm:space-y-3">
-        {PROVIDER_OPTIONS.map((option) => (
-          <button
-            key={option.id}
-            onClick={() => onSelect(option.id)}
-            className={cn(
-              "flex w-full items-center gap-3 rounded-xl bg-foreground-2 p-3 text-left transition-all",
-              "sm:items-start sm:gap-4 sm:p-4",
-              "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-              "hover:bg-foreground/[0.02] shadow-minimal",
-            )}
-          >
-            {/* Icon */}
-            <div className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground">
-              {option.icon}
-            </div>
-
-            {/* Content */}
-            <div className="flex-1 min-w-0">
-              <span className="font-medium text-sm">{option.name}</span>
-              <p className="mt-0 hidden sm:block text-xs text-muted-foreground">
+        {PROVIDER_OPTIONS.map((option) => {
+          const isOrder = option.id === 'order'
+          return (
+            <button
+              key={option.id}
+              onClick={() => onSelect(option.id)}
+              className={cn(
+                "flex w-full flex-col items-start rounded-xl bg-foreground-2 text-left transition-all",
+                isOrder ? "px-4 py-3.5 sm:px-4 sm:py-3.5" : "p-3 sm:p-4",
+                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                "hover:bg-foreground/[0.02] shadow-minimal",
+              )}
+            >
+              {isOrder ? (
+                <OrderWordmark className="block text-[2.15rem] sm:text-[2.35rem] leading-[0.85]" />
+              ) : (
+                <span className="font-medium text-sm">{option.name}</span>
+              )}
+              <p className={cn(
+                "hidden sm:block text-xs text-muted-foreground",
+                isOrder ? "mt-2" : "mt-1",
+              )}>
                 {option.description}
               </p>
-            </div>
-          </button>
-        ))}
+            </button>
+          )
+        })}
       </div>
 
       {onSkip && (

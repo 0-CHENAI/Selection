@@ -10,6 +10,7 @@ import { useTranslation } from "react-i18next"
 import { Check, ExternalLink } from "lucide-react"
 import type { ApiSetupMethod } from "./APISetupStep"
 import { StepFormLayout, BackButton, ContinueButton } from "./primitives"
+import { OrderWordmark } from "@/components/icons/OrderWordmark"
 import {
   ApiKeyInput,
   type ApiKeyStatus,
@@ -282,7 +283,10 @@ export function CredentialsStep({
 
   return (
     <StepFormLayout
-      title={t("onboarding.credentials.apiConfiguration")}
+      iconElement={isOrderPrefill ? (
+        <OrderWordmark className="text-[4.7rem] leading-[0.85]" />
+      ) : undefined}
+      title={isOrderPrefill ? undefined : t("onboarding.credentials.apiConfiguration")}
       description={apiKeyDescription}
       actions={
         <>
@@ -303,6 +307,7 @@ export function CredentialsStep({
         errorMessage={errorMessage}
         onSubmit={onSubmit}
         providerType={providerType}
+        presetFilter={isOrderPrefill ? 'order' : undefined}
         initialValues={editInitialValues}
       />
     </StepFormLayout>

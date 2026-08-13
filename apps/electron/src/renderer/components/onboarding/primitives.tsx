@@ -1,6 +1,8 @@
+import { useTranslation } from "react-i18next"
 import { cn } from "@/lib/utils"
 import { Button, type ButtonProps } from "@/components/ui/button"
 import { Spinner } from "@craft-agent/ui"
+import { withSelectionMark } from "@/components/icons/SelectionWordmark"
 
 /* =============================================================================
    ONBOARDING PRIMITIVES
@@ -79,7 +81,7 @@ export function StepIcon({ children, variant = 'primary', className }: StepIconP
 
 interface StepHeaderProps {
   /** The main title */
-  title: string
+  title?: string
   /** Optional description below the title */
   description?: React.ReactNode
   /** Whether to center the text (default: true) */
@@ -100,9 +102,11 @@ export function StepHeader({
 }: StepHeaderProps) {
   return (
     <div className={cn(centered && "text-center", className)}>
-      <h1 className="step-title text-lg font-semibold tracking-tight">
-        {title}
-      </h1>
+      {title ? (
+        <h1 className="step-title text-lg font-semibold tracking-tight">
+          {withSelectionMark(title)}
+        </h1>
+      ) : null}
       {description && (
         <p className="step-description mt-2 text-sm max-w-sm text-muted-foreground">
           {description}
@@ -124,7 +128,7 @@ interface StepFormLayoutProps {
   /** Raw icon element to display without StepIcon wrapper (optional) */
   iconElement?: React.ReactNode
   /** Step title */
-  title: string
+  title?: string
   /** Step description */
   description?: React.ReactNode
   /** Action buttons at the bottom */
@@ -242,10 +246,11 @@ interface BackButtonProps extends Omit<ButtonProps, 'variant' | 'children'> {
 /**
  * BackButton - Consistent back/cancel button
  */
-export function BackButton({ children = 'Back', className, ...props }: BackButtonProps) {
+export function BackButton({ children, className, ...props }: BackButtonProps) {
+  const { t } = useTranslation()
   return (
     <Button variant="ghost" className={cn("flex-1 max-w-[320px] bg-foreground-2 shadow-minimal text-foreground hover:bg-foreground/5 rounded-lg", className)} {...props}>
-      {children}
+      {children ?? t("common.back")}
     </Button>
   )
 }
@@ -260,22 +265,23 @@ interface ContinueButtonProps extends Omit<ButtonProps, 'children'> {
  * ContinueButton - Consistent primary action button
  */
 export function ContinueButton({
-  children = 'Continue',
+  children,
   loading,
-  loadingText = 'Loading...',
+  loadingText,
   className,
   disabled,
   ...props
 }: ContinueButtonProps) {
+  const { t } = useTranslation()
   return (
     <Button className={cn("flex-1 max-w-[320px] bg-background shadow-minimal text-foreground hover:bg-foreground/5 rounded-lg", className)} disabled={disabled || loading} {...props}>
       {loading ? (
         <>
           <Spinner className="mr-2" />
-          {loadingText}
+          {loadingText ?? t("common.loading")}
         </>
       ) : (
-        children
+        children ?? t("common.continue")
       )}
     </Button>
   )
