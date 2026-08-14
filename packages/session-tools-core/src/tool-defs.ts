@@ -429,7 +429,7 @@ Examples:
 - \`scroll down 800\`
 - \`evaluate document.title\`
 - \`console 50 error\`
-- \`screenshot\` — raw screenshot
+- \`screenshot\` — raw screenshot (use when visual appearance matters)
 - \`screenshot --annotated\` — screenshot with @eN labels overlaid on interactive elements
 - \`screenshot-region 100 200 640 480\`
 - \`screenshot-region --ref @e12 --padding 8\`
