@@ -4,27 +4,7 @@
 
 import { Sun, Moon, X } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
-
-/**
- * CraftAgentLogo - The Selection "C" logo
- */
-function CraftAgentLogo({ className }: { className?: string }) {
-  return (
-    <svg
-      className={className}
-      viewBox="0 0 24 24"
-      fill="none"
-      xmlns="http://www.w3.org/2000/svg"
-    >
-      <g transform="translate(3.4502, 3)" fill="currentColor">
-        <path
-          d="M3.17890888,3.6 L3.17890888,0 L16,0 L16,3.6 L3.17890888,3.6 Z M9.642,7.2 L9.64218223,10.8 L0,10.8 L0,3.6 L16,3.6 L16,7.2 L9.642,7.2 Z M3.17890888,18 L3.178,14.4 L0,14.4 L0,10.8 L16,10.8 L16,18 L3.17890888,18 Z"
-          fillRule="nonzero"
-        />
-      </g>
-    </svg>
-  )
-}
+import { SelectionMark } from '@craft-agent/ui'
 
 interface HeaderProps {
   hasSession: boolean
@@ -44,7 +24,7 @@ export function Header({ hasSession, sessionTitle, isDark, onToggleTheme, onClea
         className="hover:opacity-80 transition-opacity"
         title="Selection"
       >
-        <CraftAgentLogo className="w-6 h-6 text-[#9570BE]" />
+        <SelectionMark className="w-6 h-6" />
       </a>
 
       {/* Session title - centered */}

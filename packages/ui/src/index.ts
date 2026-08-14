@@ -14,6 +14,8 @@
  * - PlatformProvider/usePlatform: Inject platform-specific actions
  */
 
+export { SelectionMark } from './components/SelectionMark'
+
 // Context
 export {
   PlatformProvider,

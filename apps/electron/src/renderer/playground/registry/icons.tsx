@@ -9,7 +9,7 @@ export const iconComponents: ComponentEntry[] = [
     id: 'craft-agents-logo',
     name: 'CraftAgentsLogo',
     category: 'Icons',
-    description: 'Full Selection branding logo with text',
+    description: 'Selection circular product mark',
     component: CraftAgentsLogo,
     props: [
       {
@@ -29,7 +29,7 @@ export const iconComponents: ComponentEntry[] = [
     id: 'craft-agents-symbol',
     name: 'CraftAgentsSymbol',
     category: 'Icons',
-    description: 'Selection "E" pixel art symbol icon (brand color: #9570BE)',
+    description: 'Selection circular product mark',
     component: CraftAgentsSymbol,
     props: [
       {
