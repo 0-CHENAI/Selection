@@ -39,4 +39,34 @@ describe('piDriver.buildRuntime custom endpoint models', () => {
       'plain-model',
     ]);
   });
+
+  it('does not persist inferred vision flags onto customModels', () => {
+    const runtime = piDriver.buildRuntime({
+      context: {
+        provider: 'pi',
+        authType: 'api_key',
+        resolvedModel: 'Opus',
+        capabilities: { needsHttpPoolServer: false },
+        connection: {
+          slug: 'custom-endpoint',
+          name: 'Custom Endpoint',
+          providerType: 'pi_compat',
+          authType: 'api_key_with_endpoint',
+          baseUrl: 'http://127.0.0.1:11111/v1',
+          customEndpoint: { api: 'openai-completions' },
+          models: ['Opus', 'Laufry'],
+          createdAt: Date.now(),
+        } as any,
+      },
+      coreConfig: {} as any,
+      hostRuntime: {} as any,
+      resolvedPaths: {
+        piServerPath: '/tmp/pi-agent-server.js',
+        interceptorBundlePath: '/tmp/interceptor.cjs',
+        nodeRuntimePath: '/usr/bin/node',
+      },
+    });
+
+    expect(runtime.customModels).toEqual(['Opus', 'Laufry']);
+  });
 });

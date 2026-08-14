@@ -28,6 +28,7 @@ import { DEFAULT_MODEL, isClaudeModel, isAdaptiveThinkingAlwaysOnModel, getDefau
 import { getCredentialManager } from '../credentials/index.ts';
 import { loadPreferences, formatPreferencesForPrompt, getCoAuthorPreference } from '../config/preferences.ts';
 import type { FileAttachment } from '../utils/files.ts';
+import { hydrateAttachmentBytes } from '../utils/files.ts';
 import type { LLMQueryRequest, LLMQueryResult } from './llm-tool.ts';
 import { consumeLlmQueryMessages } from './claude-llm-query.ts';
 import { debug } from '../utils/debug.ts';
@@ -2495,12 +2496,15 @@ This is a branched conversation. All prior messages in this conversation are par
 
     // Add attachments - images/PDFs are uploaded inline, text files are path-only
     // Text files are NOT embedded to prevent context overflow; agent uses Read tool
-    if (attachments) {
-      for (const attachment of attachments) {
-        // Add path info text block so the agent knows where the file is stored
-        // This enables the agent to use the Read tool to access text/office files
-        if (attachment.storedPath) {
-          let pathInfo = `[Attached file: ${attachment.name}]\n[Stored at: ${attachment.storedPath}]`;
+    const hydratedAttachments = hydrateAttachmentBytes(attachments) ?? attachments
+    if (hydratedAttachments) {
+      for (const attachment of hydratedAttachments) {
+        const stored = attachment.storedPath || attachment.path
+        const isImage = attachment.type === 'image' || attachment.mimeType?.startsWith('image/') === true
+        if (stored) {
+          let pathInfo = isImage && attachment.base64
+            ? `[Attached image: ${attachment.name}]\nThe image is included as visual input — look at it. Path: ${stored}`
+            : `[Attached file: ${attachment.name}]\n[Stored at: ${stored}]`;
           if (attachment.markdownPath) {
             pathInfo += `\n[Markdown version: ${attachment.markdownPath}]`;
           }
@@ -2511,7 +2515,7 @@ This is a branched conversation. All prior messages in this conversation are par
         }
 
         // Only images and PDFs are uploaded inline (agent cannot read these with Read tool)
-        if (attachment.type === 'image' && attachment.base64) {
+        if (isImage && attachment.base64) {
           const mediaType = this.mapImageMediaType(attachment.mimeType);
           if (mediaType) {
             contentBlocks.push({

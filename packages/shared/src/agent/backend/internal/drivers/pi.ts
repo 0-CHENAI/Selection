@@ -2,6 +2,7 @@ import type { ProviderDriver, DriverTestConnectionArgs } from '../driver-types.t
 import type { ModelDefinition } from '../../../../config/models.ts';
 import { getAllPiModels, getPiModelsForAuthProvider } from '../../../../config/models-pi.ts';
 import { getPiProviderBaseUrl } from '../../../../config/models-pi.ts';
+import { toCustomEndpointModelPayload } from '../../../../config/model-image-support.ts';
 
 // ── Copilot model types ────────────────────────────────────────────────
 type RawCopilotModel = {
@@ -235,20 +236,7 @@ export const piDriver: ProviderDriver = {
     piAuthProvider: providerOptions?.piAuthProvider || context.connection?.piAuthProvider,
     baseUrl: context.connection?.baseUrl,
     customEndpoint: context.connection?.customEndpoint,
-    customModels: context.connection?.models?.map(m => {
-      if (typeof m === 'string') return m;
-      const supportsImages = typeof m.supportsImages === 'boolean'
-        ? m.supportsImages
-        : undefined;
-      if (m.contextWindow || supportsImages !== undefined) {
-        return {
-          id: m.id,
-          ...(m.contextWindow ? { contextWindow: m.contextWindow } : {}),
-          ...(supportsImages !== undefined ? { supportsImages } : {}),
-        };
-      }
-      return m.id;
-    }),
+    customModels: context.connection?.models?.map(toCustomEndpointModelPayload),
   }),
   fetchModels: async ({ connection, credentials, timeoutMs }) => {
     // Copilot OAuth: fetch models directly from the Copilot API via HTTP.

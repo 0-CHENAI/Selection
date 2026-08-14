@@ -60,8 +60,8 @@ import { resolvePiModel, isDeniedMiniModelId, isModelNotFoundError } from './mod
 import { pickProviderAppropriateMiniModel } from './pick-mini-model.ts';
 import {
   buildCustomEndpointModelDef,
+  findCustomEndpointModelEntry,
   normalizeCustomEndpointModelEntry,
-  stripPiPrefix,
   type CustomEndpointModelEntry,
   type CustomEndpointModelOverrides,
 } from './custom-endpoint-models.ts';
@@ -459,7 +459,9 @@ function registerCustomEndpointModels(
     authHeader: true,
     models: allIds.map(id => buildCustomEndpointModelDef(
       id,
-      { supportsImages: initConfig?.customEndpoint?.supportsImages === true },
+      typeof initConfig?.customEndpoint?.supportsImages === 'boolean'
+        ? { supportsImages: initConfig.customEndpoint.supportsImages }
+        : undefined,
       customModelOverrides.get(id),
     )),
   });
@@ -1540,10 +1542,10 @@ async function handleUpdateRuntimeConfig(msg: RuntimeConfigUpdateMessage): Promi
     if (piSession && piModelRegistry) {
       let piModel = resolvePiModel(piModelRegistry, msg.model, initConfig.piAuth?.provider, shouldPreferCustomEndpoint());
       if (!piModel && initConfig.baseUrl?.trim() && initConfig.customEndpoint) {
-        const bareId = stripPiPrefix(msg.model);
-        registerCustomEndpointModels(piModelRegistry, initConfig.customEndpoint.api, initConfig.baseUrl.trim(), [{ id: bareId }]);
-        piModel = piModelRegistry.find('custom-endpoint', bareId) ?? undefined;
-        debugLog(`[runtime_config] Dynamically registered custom endpoint model: ${bareId}`);
+        const entry = findCustomEndpointModelEntry(msg.model, initConfig.customModels);
+        registerCustomEndpointModels(piModelRegistry, initConfig.customEndpoint.api, initConfig.baseUrl.trim(), [entry]);
+        piModel = piModelRegistry.find('custom-endpoint', entry.id) ?? undefined;
+        debugLog(`[runtime_config] Dynamically registered custom endpoint model: ${entry.id}`);
       }
 
       if (!piModel) {
@@ -1577,10 +1579,10 @@ async function handleSetModel(msg: Extract<InboundMessage, { type: 'set_model' }
   // Uses registerCustomEndpointModels which accumulates into the existing model set
   // (registerProvider replaces, so we track all IDs and re-register the full set).
   if (!piModel && initConfig?.baseUrl?.trim() && initConfig?.customEndpoint) {
-    const bareId = stripPiPrefix(msg.model);
-    registerCustomEndpointModels(piModelRegistry, initConfig.customEndpoint.api, initConfig.baseUrl!.trim(), [{ id: bareId }]);
-    piModel = piModelRegistry.find('custom-endpoint', bareId) ?? undefined;
-    debugLog(`[set_model] Dynamically registered custom endpoint model: ${bareId}`);
+    const entry = findCustomEndpointModelEntry(msg.model, initConfig.customModels);
+    registerCustomEndpointModels(piModelRegistry, initConfig.customEndpoint.api, initConfig.baseUrl!.trim(), [entry]);
+    piModel = piModelRegistry.find('custom-endpoint', entry.id) ?? undefined;
+    debugLog(`[set_model] Dynamically registered custom endpoint model: ${entry.id}`);
   }
 
   if (!piModel) {

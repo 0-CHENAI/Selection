@@ -78,7 +78,7 @@ import { listTaskSlugs, parseTaskSpec, uniqueTaskSlug } from '@craft-agent/share
 import { createTaskFromSpec, resolveCreateTaskProjectId } from '../tasks'
 import { ConfigWatcher, type ConfigWatcherCallbacks } from '@craft-agent/shared/config'
 import { getValidClaudeOAuthToken } from '@craft-agent/shared/auth'
-import { resolveAuthEnvVars } from '@craft-agent/shared/config'
+import { resolveAuthEnvVars, toCustomEndpointModelPayload } from '@craft-agent/shared/config'
 import { toolMetadataStore, getLastApiError } from '@craft-agent/shared/interceptor'
 import { isParentTaskTool } from '@craft-agent/shared/utils/toolNames'
 import { restoreFiles } from '@craft-agent/shared/utils/bundle-files'
@@ -86,7 +86,7 @@ import { getCredentialManager } from '@craft-agent/shared/credentials'
 import { CraftMcpClient, McpClientPool, McpPoolServer } from '@craft-agent/shared/mcp'
 import { type Session, type SessionEvent, type FileAttachment, type SendMessageOptions, type UnreadSummary, type RemoteSessionTransferPayload, type ImportRemoteSessionTransferResult, RPC_CHANNELS, generateMessageId } from '@craft-agent/shared/protocol'
 import { messageToStored, storedToMessage, type Message, type StoredAttachment, type ToolDisplayMeta, type TokenUsage } from '@craft-agent/core/types'
-import { formatPathsToRelative, formatToolInputPaths, perf, encodeIconToDataUrlAsync, getEmojiIcon, resetSummarizationClient, resolveToolIcon, readFileAttachment, selectSpreadMessages, normalizePath } from '@craft-agent/shared/utils'
+import { formatPathsToRelative, formatToolInputPaths, perf, encodeIconToDataUrlAsync, getEmojiIcon, resetSummarizationClient, resolveToolIcon, readFileAttachment, hydrateAttachmentBytes, selectSpreadMessages, normalizePath } from '@craft-agent/shared/utils'
 import { loadAllSkills, loadSkillBySlug, invalidateSkillsCache, type LoadedSkill } from '@craft-agent/shared/skills'
 import { invalidateContextFileCache } from '@craft-agent/shared/prompts/system'
 import { getToolIconsDir, getMiniModel } from '@craft-agent/shared/config'
@@ -3321,18 +3321,16 @@ export class SessionManager implements ISessionManager {
             baseUrl: connection.baseUrl,
             piAuthProvider: connection.piAuthProvider,
             customEndpoint: connection.customEndpoint,
-            customModels: connection.models?.map(model => {
-              if (typeof model === 'string') return model
-              const supportsImages = typeof model.supportsImages === 'boolean' ? model.supportsImages : undefined
-              if (model.contextWindow || supportsImages !== undefined) {
-                return {
-                  id: model.id,
-                  ...(model.contextWindow ? { contextWindow: model.contextWindow } : {}),
-                  ...(supportsImages !== undefined ? { supportsImages } : {}),
-                }
-              }
-              return model.id
-            }),
+            customModels: connection.models?.map((model) => (
+              typeof model === 'string'
+                ? toCustomEndpointModelPayload(model)
+                : toCustomEndpointModelPayload({
+                    id: model.id,
+                    name: model.name,
+                    contextWindow: model.contextWindow,
+                    supportsImages: model.supportsImages,
+                  })
+            )),
           } : undefined,
         })
       } catch (error) {
@@ -6236,6 +6234,7 @@ export class SessionManager implements ISessionManager {
         messageBackendContext.connection,
         messageBackendContext.resolvedModel,
       )
+      modelInputAttachments.attachments = hydrateAttachmentBytes(modelInputAttachments.attachments)
       if (modelInputAttachments.omittedImages.length > 0) {
         const omittedNames = modelInputAttachments.omittedImages.map(a => a.name).join(', ')
         sessionLog.info(`Omitting ${modelInputAttachments.omittedImages.length} image attachment(s) from model input for ${messageBackendContext.resolvedModel}: ${omittedNames}`)

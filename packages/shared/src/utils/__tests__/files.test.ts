@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Buffer } from 'node:buffer'
-import { getFileType, getMimeType, readFileAttachment } from '../files'
+import { getFileType, getMimeType, hydrateAttachmentBytes, readFileAttachment } from '../files'
 
 const cleanups: Array<() => void> = []
 
@@ -96,5 +96,68 @@ describe('readFileAttachment — audio fixture', () => {
     expect(att?.type).toBe('text')
     expect(att?.text).toBe('hello world')
     expect(att?.base64).toBeUndefined()
+  })
+})
+
+describe('hydrateAttachmentBytes', () => {
+  test('fills missing image base64 from storedPath', () => {
+    const dir = makeTmp()
+    const path = join(dir, 'shot.png')
+    const bytes = Buffer.from('fake-png-bytes')
+    writeFileSync(path, bytes)
+
+    const hydrated = hydrateAttachmentBytes([{
+      type: 'image',
+      path,
+      storedPath: path,
+      name: 'shot.png',
+      mimeType: 'image/png',
+      size: bytes.byteLength,
+    }])
+
+    expect(hydrated?.[0]?.base64).toBe(bytes.toString('base64'))
+  })
+
+  test('leaves attachments that already have base64 unchanged', () => {
+    const hydrated = hydrateAttachmentBytes([{
+      type: 'image',
+      path: '/tmp/shot.png',
+      name: 'shot.png',
+      mimeType: 'image/png',
+      size: 3,
+      base64: 'abc',
+    }])
+
+    expect(hydrated?.[0]?.base64).toBe('abc')
+  })
+
+  test('returns undefined for empty input', () => {
+    expect(hydrateAttachmentBytes(undefined)).toBeUndefined()
+  })
+
+  test('keeps a path-only image when the file is missing', () => {
+    const attachment = {
+      type: 'image' as const,
+      path: join(makeTmp(), 'missing.png'),
+      name: 'missing.png',
+      mimeType: 'image/png',
+      size: 1,
+    }
+    expect(hydrateAttachmentBytes([attachment])).toEqual([attachment])
+  })
+
+  test('keeps a path-only image when the file is over the size limit', () => {
+    const dir = makeTmp()
+    const path = join(dir, 'huge.png')
+    writeFileSync(path, Buffer.alloc(21 * 1024 * 1024))
+    const attachment = {
+      type: 'image' as const,
+      path,
+      storedPath: path,
+      name: 'huge.png',
+      mimeType: 'image/png',
+      size: 21 * 1024 * 1024,
+    }
+    expect(hydrateAttachmentBytes([attachment])).toEqual([attachment])
   })
 })

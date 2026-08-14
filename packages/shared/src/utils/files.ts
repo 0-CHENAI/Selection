@@ -350,8 +350,36 @@ export function getMimeType(filePath: string): string {
 }
 
 /**
- * Read a file and return attachment info
+ * Fill missing image/PDF base64 from disk so vision-capable models receive
+ * pixels instead of a path-only placeholder. Oversized or unreadable files
+ * stay path-only so they cannot abort the send.
  */
+export function hydrateAttachmentBytes(attachments: FileAttachment[] | undefined): FileAttachment[] | undefined {
+  if (!attachments?.length) return attachments
+  return attachments.map((attachment) => {
+    const needsBytes = !attachment.base64 && (
+      attachment.type === 'image'
+      || attachment.mimeType?.startsWith('image/') === true
+      || attachment.type === 'pdf'
+    )
+    if (!needsBytes) return attachment
+    const sourcePath = attachment.storedPath || attachment.path
+    if (!sourcePath) return attachment
+    try {
+      const loaded = readFileAttachment(sourcePath)
+      if (!loaded?.base64) return attachment
+      return {
+        ...attachment,
+        base64: loaded.base64,
+        mimeType: attachment.mimeType || loaded.mimeType,
+        size: loaded.size || attachment.size,
+      }
+    } catch {
+      return attachment
+    }
+  })
+}
+
 export function readFileAttachment(filePath: string): FileAttachment | null {
   try {
     const resolved = resolvePath(filePath);

@@ -88,4 +88,32 @@ describe('filterAttachmentsForModelInput', () => {
     expect(result.omittedImages).toEqual([imageAttachment])
     expect(result.attachments).toBeUndefined()
   })
+
+  it('keeps images when the runtime model ID is prefixed but the stored ID matches', () => {
+    const result = filterAttachmentsForModelInput(
+      [imageAttachment],
+      { ...baseCompat, models: [{ id: 'Opus', supportsImages: true } as never] },
+      'pi/Opus',
+    )
+
+    expect(result.omittedImages).toHaveLength(0)
+    expect(result.attachments).toEqual([imageAttachment])
+  })
+
+  it('omits images before hydrate for an explicit text-only model', () => {
+    const pathOnlyImage: FileAttachment = {
+      type: 'image',
+      path: '/tmp/missing.png',
+      name: 'missing.png',
+      mimeType: 'image/png',
+      size: 1,
+    }
+    const result = filterAttachmentsForModelInput(
+      [pathOnlyImage],
+      { ...baseCompat, models: [{ id: 'Opus', supportsImages: false } as never] },
+      'pi/Opus',
+    )
+    expect(result.omittedImages).toEqual([pathOnlyImage])
+    expect(result.attachments).toBeUndefined()
+  })
 })

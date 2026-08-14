@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'bun:test'
 import {
   buildCustomEndpointModelDef,
+  findCustomEndpointModelEntry,
   normalizeCustomEndpointModelEntry,
   stripPiPrefix,
 } from './custom-endpoint-models.ts'
@@ -9,6 +10,11 @@ describe('normalizeCustomEndpointModelEntry', () => {
   it('strips pi/ prefixes from string model IDs', () => {
     expect(stripPiPrefix('pi/my-model')).toBe('my-model')
     expect(normalizeCustomEndpointModelEntry('pi/my-model')).toEqual({ id: 'my-model' })
+  })
+
+  it('strips custom-endpoint/ prefixes from runtime IDs', () => {
+    expect(stripPiPrefix('custom-endpoint/Opus')).toBe('Opus')
+    expect(normalizeCustomEndpointModelEntry('custom-endpoint/Opus')).toEqual({ id: 'Opus' })
   })
 
   it('preserves per-model image support when enabled', () => {
@@ -64,5 +70,38 @@ describe('buildCustomEndpointModelDef', () => {
     const model = buildCustomEndpointModelDef('vision-model', undefined, { supportsImages: true, contextWindow: 262_144 })
     expect(model.input).toEqual(['text', 'image'])
     expect(model.contextWindow).toBe(262_144)
+  })
+
+  it('infers image input for well-known vision names when no flag is set', () => {
+    const model = buildCustomEndpointModelDef('Opus')
+    expect(model.input).toEqual(['text', 'image'])
+  })
+
+  it('lets a connection default of false beat the name heuristic', () => {
+    const model = buildCustomEndpointModelDef('Opus', { supportsImages: false })
+    expect(model.input).toEqual(['text'])
+  })
+})
+
+describe('findCustomEndpointModelEntry', () => {
+  it('preserves supportsImages from the stored catalog when the runtime ID is prefixed', () => {
+    expect(findCustomEndpointModelEntry('pi/Opus', [
+      { id: 'Opus', supportsImages: true },
+    ])).toEqual({
+      id: 'Opus',
+      supportsImages: true,
+    })
+  })
+
+  it('does not promote inferred vision onto the catalog entry', () => {
+    expect(findCustomEndpointModelEntry('custom-endpoint/Opus', ['Opus'])).toEqual({
+      id: 'Opus',
+    })
+  })
+
+  it('does not invent vision for unknown names', () => {
+    expect(findCustomEndpointModelEntry('pi/Laufry', ['Laufry'])).toEqual({
+      id: 'Laufry',
+    })
   })
 })

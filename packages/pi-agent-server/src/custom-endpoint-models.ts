@@ -1,3 +1,8 @@
+import {
+  inferModelSupportsImages,
+  normalizeConnectionModelId,
+} from '../../shared/src/config/model-image-support.ts'
+
 export type CustomEndpointInput = 'text' | 'image'
 
 export interface CustomEndpointModelDefaults {
@@ -19,9 +24,21 @@ export type CustomEndpointModelConfig = string | {
   supportsImages?: boolean
 }
 
-/** Strip bare model IDs (remove pi/ prefix if present). */
+/** Strip runtime provider prefixes so stored and live IDs compare as the same model. */
 export function stripPiPrefix(id: string): string {
-  return id.startsWith('pi/') ? id.slice(3) : id
+  return normalizeConnectionModelId(id)
+}
+
+export function findCustomEndpointModelEntry(
+  modelId: string,
+  customModels?: CustomEndpointModelConfig[],
+): CustomEndpointModelEntry {
+  const bareId = stripPiPrefix(modelId)
+  const match = customModels?.find((model) => {
+    const id = typeof model === 'string' ? model : model.id
+    return stripPiPrefix(id).toLowerCase() === bareId.toLowerCase()
+  })
+  return match ? normalizeCustomEndpointModelEntry(match) : { id: bareId }
 }
 
 /**
@@ -46,15 +63,17 @@ export function normalizeCustomEndpointModelEntry(model: CustomEndpointModelConf
 /**
  * Build a synthetic model definition for a custom endpoint.
  * Uses reasonable defaults for context window and max tokens since we can't
- * query the endpoint for its actual capabilities. Image support must be
- * explicitly enabled either at the connection level or per-model.
+ * query the endpoint for its actual capabilities. Image support:
+ *   per-model override ?? connection default ?? conservative name heuristic.
  */
 export function buildCustomEndpointModelDef(
   id: string,
   defaults?: CustomEndpointModelDefaults,
   overrides?: CustomEndpointModelOverrides,
 ) {
-  const supportsImages = overrides?.supportsImages ?? defaults?.supportsImages ?? false
+  const supportsImages = overrides?.supportsImages
+    ?? defaults?.supportsImages
+    ?? inferModelSupportsImages(id)
   const input: CustomEndpointInput[] = supportsImages ? ['text', 'image'] : ['text']
 
   return {
