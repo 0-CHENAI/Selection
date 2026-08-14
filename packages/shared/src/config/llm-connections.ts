@@ -16,6 +16,16 @@ import {
   ANTHROPIC_MODELS,
   normalizeDeprecatedModelId,
 } from './models';
+import {
+  connectionModelIdsMatch,
+  inferModelSupportsImages,
+} from './model-image-support';
+export {
+  connectionModelIdsMatch,
+  inferModelSupportsImages,
+  normalizeConnectionModelId,
+  toCustomEndpointModelPayload,
+} from './model-image-support';
 import type { CredentialManager } from '../credentials/manager.ts';
 
 // ============================================================
@@ -517,7 +527,7 @@ export function setModelSupportsImages(
 ): LlmConnection {
   if (!connection.models) return connection;
   const idOf = (m: ModelDefinition | string) => (typeof m === 'string' ? m : m.id);
-  const idx = connection.models.findIndex(m => idOf(m) === modelId);
+  const idx = connection.models.findIndex(m => connectionModelIdsMatch(idOf(m), modelId));
   if (idx === -1) return connection;
 
   const entry = connection.models[idx]!;
@@ -538,7 +548,10 @@ export function setModelSupportsImages(
  * by Pi's `buildCustomEndpointModelDef`:
  *   per-model `supportsImages` override
  *   ?? connection-level `customEndpoint.supportsImages` default
- *   ?? false
+ *   ?? conservative name heuristic (`inferModelSupportsImages`)
+ *
+ * Stored IDs (`Opus`) and runtime IDs (`pi/Opus`, `custom-endpoint/Opus`) compare
+ * as the same model so the flag still applies at send time.
  *
  * For non-`pi_compat` connections the renderer doesn't own the catalog — Pi SDK's
  * bundled provider definitions and Anthropic's API do. This helper conservatively
@@ -553,12 +566,16 @@ export function modelSupportsImages(
   if (!isCompatProvider(connection.providerType)) return true;
 
   const entry = connection.models?.find(m =>
-    (typeof m === 'string' ? m : m.id) === modelId,
+    connectionModelIdsMatch(typeof m === 'string' ? m : m.id, modelId),
   );
   if (entry && typeof entry !== 'string' && typeof entry.supportsImages === 'boolean') {
     return entry.supportsImages;
   }
-  return connection.customEndpoint?.supportsImages ?? false;
+  if (typeof connection.customEndpoint?.supportsImages === 'boolean') {
+    return connection.customEndpoint.supportsImages;
+  }
+  const entryName = entry && typeof entry !== 'string' ? entry.name : undefined
+  return inferModelSupportsImages(modelId, entryName);
 }
 
 /**

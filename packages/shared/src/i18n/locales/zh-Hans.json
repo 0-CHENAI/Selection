@@ -30,7 +30,7 @@
   "apiSetup.modelTier.fast": "快速",
   "apiSetup.modelTier.fastDesc": "摘要和工具",
   "apiSetup.noModels": "未找到模型",
-  "apiSetup.orderModelHint": "可多选。第一项为默认模型，最后一项用于摘要。",
+  "apiSetup.orderModelHint": "可多选。图像图标表示该模型可看图；第一项为默认，最后一项用于摘要。",
   "apiSetup.pasteAuthCode": "在此粘贴授权码",
   "apiSetup.pasteKey": "在此粘贴密钥…",
   "apiSetup.pasteOrderKey": "粘贴 ORDER 密钥…",

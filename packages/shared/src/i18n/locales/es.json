@@ -30,7 +30,7 @@
   "apiSetup.modelTier.fast": "Rápido",
   "apiSetup.modelTier.fastDesc": "resumen y utilidades",
   "apiSetup.noModels": "No se encontraron modelos",
-  "apiSetup.orderModelHint": "Selecciona uno o más. El primero es el predeterminado; el último se usa para resúmenes.",
+  "apiSetup.orderModelHint": "Selecciona modelos. El icono de imagen activa la entrada visual. El primero es el predeterminado; el último se usa para resúmenes.",
   "apiSetup.pasteAuthCode": "Pega tu código de autorización aquí",
   "apiSetup.pasteKey": "Pega tu clave aquí…",
   "apiSetup.pasteOrderKey": "Pega tu clave ORDER…",

@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import {
+  inferModelSupportsImages,
   modelsEndpoint,
   parseOpenAiModelsPayload,
   parseSelectedModels,
@@ -47,6 +48,37 @@ describe('parseOpenAiModelsPayload', () => {
     expect(parseOpenAiModelsPayload({
       data: [{ id: 'Opus' }, { id: 'Opus' }, { name: '' }, null],
     })).toEqual([{ id: 'Opus', name: 'Opus' }])
+  })
+
+  test('honors declared vision flags over the name heuristic', () => {
+    expect(parseOpenAiModelsPayload({
+      data: [
+        { id: 'Laufry', architecture: { input_modalities: ['text', 'image'] } },
+        { id: 'Opus', supports_vision: false },
+      ],
+    })).toEqual([
+      { id: 'Laufry', name: 'Laufry', supportsImages: true },
+      { id: 'Opus', name: 'Opus', supportsImages: false },
+    ])
+  })
+})
+
+describe('inferModelSupportsImages', () => {
+  test('treats Claude / GPT-4o style names as multimodal', () => {
+    expect(inferModelSupportsImages('Opus')).toBe(true)
+    expect(inferModelSupportsImages('claude-sonnet-4-6')).toBe(true)
+    expect(inferModelSupportsImages('gpt-4o-mini')).toBe(true)
+  })
+
+  test('leaves unknown ORDER names as text-only', () => {
+    expect(inferModelSupportsImages('Laufry')).toBe(false)
+    expect(inferModelSupportsImages('Maylo')).toBe(false)
+  })
+
+  test('does not match octopus, omnibox, or vllm as vision names', () => {
+    expect(inferModelSupportsImages('octopus')).toBe(false)
+    expect(inferModelSupportsImages('omnibox')).toBe(false)
+    expect(inferModelSupportsImages('foo-vllm')).toBe(false)
   })
 })
 

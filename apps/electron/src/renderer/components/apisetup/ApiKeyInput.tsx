@@ -33,6 +33,8 @@ import {
 import { RemoteModelsPicker } from "./RemoteModelsPicker"
 import {
   fetchOpenAiCompatibleModels,
+  inferModelSupportsImages,
+  parseSelectedModels,
   toggleSelectedModel,
   type RemoteModel,
 } from "./fetch-openai-models.ts"
@@ -43,11 +45,18 @@ export type ApiKeyStatus = 'idle' | 'validating' | 'success' | 'error'
 
 export type { CustomEndpointApi }
 
+export type SubmittedConnectionModel = string | {
+  id: string
+  name?: string
+  shortName?: string
+  supportsImages?: boolean
+}
+
 export interface ApiKeySubmitData {
   apiKey: string
   baseUrl?: string
   connectionDefaultModel?: string
-  models?: string[]
+  models?: SubmittedConnectionModel[]
   piAuthProvider?: string
   modelSelectionMode?: 'automaticallySyncedFromProvider' | 'userDefined3Tier'
   /** Custom endpoint protocol — set when user configures an arbitrary API endpoint */
@@ -86,6 +95,7 @@ export interface ApiKeyInputProps {
     connectionDefaultModel?: string
     activePreset?: string
     models?: string[]
+    modelImageCaps?: Record<string, boolean>
     /** Pre-fill the protocol toggle for custom endpoints */
     customApi?: CustomEndpointApi
   }
@@ -259,6 +269,9 @@ export function ApiKeyInput({
   const [remoteModelsError, setRemoteModelsError] = useState<string | null>(null)
   const [remoteModelsNonce, setRemoteModelsNonce] = useState(0)
   const remoteModelsAbortRef = useRef<AbortController | null>(null)
+  const [modelImageCaps, setModelImageCaps] = useState<Record<string, boolean>>(
+    () => ({ ...initialValues?.modelImageCaps }),
+  )
 
   const isDisabled = disabled || status === 'validating'
 
@@ -365,6 +378,15 @@ export function ApiKeyInput({
           if (controller.signal.aborted) return
           setRemoteModels(models)
           setRemoteModelsError(models.length === 0 ? t('apiSetup.noModels') : null)
+          setModelImageCaps((prev) => {
+            const next = { ...prev }
+            for (const model of models) {
+              if (next[model.id] === undefined && typeof model.supportsImages === 'boolean') {
+                next[model.id] = model.supportsImages
+              }
+            }
+            return next
+          })
         })
         .catch((err: unknown) => {
           if (controller.signal.aborted) return
@@ -525,6 +547,20 @@ export function ApiKeyInput({
     const effectiveBaseUrl = baseUrl.trim()
 
     const parsedModels = parseModelList(connectionDefaultModel)
+    const submittedModels = isOrderPreset
+      ? parsedModels.map((id) => {
+        const remote = remoteModels.find((model) => model.id === id)
+        const supportsImages = typeof modelImageCaps[id] === 'boolean'
+          ? modelImageCaps[id]
+          : remote?.supportsImages
+        return {
+          id,
+          name: remote?.name ?? id,
+          shortName: remote?.name ?? id,
+          ...(typeof supportsImages === 'boolean' ? { supportsImages } : {}),
+        }
+      })
+      : parsedModels
 
     const isUsingDefaultEndpoint = isDefaultProviderPreset || !effectiveBaseUrl
     const requiresModel = !isDefaultProviderPreset && !!effectiveBaseUrl
@@ -549,7 +585,7 @@ export function ApiKeyInput({
       apiKey: apiKey.trim(),
       baseUrl: isUsingDefaultEndpoint ? undefined : effectiveBaseUrl,
       connectionDefaultModel: parsedModels[0],
-      models: parsedModels.length > 0 ? parsedModels : undefined,
+      models: submittedModels.length > 0 ? submittedModels : undefined,
       piAuthProvider: resolvedPiAuthProvider,
       modelSelectionMode: isPiApiKeyFlow
         ? (parsedModels.length > 0 ? 'userDefined3Tier' : 'automaticallySyncedFromProvider')
@@ -956,6 +992,18 @@ export function ApiKeyInput({
           waitingForKey={apiKey.trim().length < 8}
           onToggle={(id) => {
             setConnectionDefaultModel((prev) => toggleSelectedModel(prev, id))
+            setModelError(null)
+          }}
+          imageCaps={modelImageCaps}
+          onToggleImages={(id) => {
+            const remote = remoteModels.find((model) => model.id === id)
+            const current = modelImageCaps[id]
+              ?? remote?.supportsImages
+              ?? inferModelSupportsImages(id, remote?.name)
+            setModelImageCaps((prev) => ({ ...prev, [id]: !current }))
+            setConnectionDefaultModel((prev) => (
+              parseSelectedModels(prev).includes(id) ? prev : toggleSelectedModel(prev, id)
+            ))
             setModelError(null)
           }}
           onRetry={() => setRemoteModelsNonce((n) => n + 1)}

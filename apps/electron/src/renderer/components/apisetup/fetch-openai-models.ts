@@ -3,9 +3,49 @@
  * Used by ORDER (and any branded gateway) after the user pastes an API key.
  */
 
+import { inferModelSupportsImages } from '../../../../../../packages/shared/src/config/model-image-support.ts'
+
+export { inferModelSupportsImages }
+
 export interface RemoteModel {
   id: string
   name: string
+  /** Declared catalog capability only. Undefined = unknown (infer at display/send time). */
+  supportsImages?: boolean
+}
+
+function modalitiesIncludeImage(value: unknown): boolean | undefined {
+  if (!Array.isArray(value)) return undefined
+  const items = value.map((entry) => String(entry).toLowerCase())
+  if (items.some((entry) => entry === 'image' || entry === 'vision')) return true
+  if (items.length > 0 && items.every((entry) => entry === 'text')) return false
+  return undefined
+}
+
+/** Read vision flags from common OpenAI-compatible / OpenRouter payloads. */
+export function readDeclaredSupportsImages(rec: Record<string, unknown>): boolean | undefined {
+  if (typeof rec.supports_vision === 'boolean') return rec.supports_vision
+  if (typeof rec.supportsVision === 'boolean') return rec.supportsVision
+  if (typeof rec.vision === 'boolean') return rec.vision
+
+  const caps = rec.capabilities
+  if (caps && typeof caps === 'object') {
+    const vision = (caps as { vision?: unknown }).vision
+    if (typeof vision === 'boolean') return vision
+  }
+
+  const arch = rec.architecture
+  if (arch && typeof arch === 'object') {
+    const a = arch as Record<string, unknown>
+    if (typeof a.modality === 'string') {
+      if (/image|vision/i.test(a.modality)) return true
+      if (a.modality.toLowerCase() === 'text') return false
+    }
+    const fromArch = modalitiesIncludeImage(a.input_modalities ?? a.inputModalities)
+    if (fromArch !== undefined) return fromArch
+  }
+
+  return modalitiesIncludeImage(rec.input_modalities ?? rec.inputModalities ?? rec.input)
 }
 
 /** Join base URL with /v1/models without doubling /v1. */
@@ -31,7 +71,12 @@ export function parseOpenAiModelsPayload(json: unknown): RemoteModel[] {
     if (!id || seen.has(id)) continue
     seen.add(id)
     const name = String(rec.display_name ?? rec.displayName ?? rec.name ?? id).trim() || id
-    models.push({ id, name })
+    const declared = readDeclaredSupportsImages(rec)
+    models.push({
+      id,
+      name,
+      ...(declared !== undefined ? { supportsImages: declared } : {}),
+    })
   }
   return models
 }

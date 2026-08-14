@@ -56,6 +56,18 @@ describe('setModelSupportsImages', () => {
     expect(updated.models![0]).toEqual({ id: 'foo', supportsImages: false } as never)
   })
 
+  it('matches a prefixed runtime ID against the stored model id', () => {
+    const conn: LlmConnection = { ...BASE, models: ['Opus'] }
+    const updated = setModelSupportsImages(conn, 'pi/Opus', true)
+
+    expect(updated.models![0]).toEqual({
+      id: 'Opus',
+      name: 'Opus',
+      shortName: 'Opus',
+      supportsImages: true,
+    } as never)
+  })
+
   it('returns the connection unchanged when modelId is not in models[]', () => {
     const conn: LlmConnection = { ...BASE, models: ['foo'] }
     const updated = setModelSupportsImages(conn, 'missing', true)

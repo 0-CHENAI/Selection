@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'bun:test'
-import { modelSupportsImages, type LlmConnection } from '../llm-connections.ts'
+import {
+  modelSupportsImages,
+  toCustomEndpointModelPayload,
+  type LlmConnection,
+} from '../llm-connections.ts'
 
 const BASE_COMPAT: LlmConnection = {
   slug: 'custom',
@@ -56,6 +60,72 @@ describe('modelSupportsImages — pi_compat precedence', () => {
       models: ['plain'],
     }
     expect(modelSupportsImages(conn, 'unknown')).toBe(true)
+  })
+
+  it('matches stored Opus against runtime pi/ and custom-endpoint/ IDs', () => {
+    const conn: LlmConnection = {
+      ...BASE_COMPAT,
+      models: [{ id: 'Opus', supportsImages: true } as never],
+    }
+    expect(modelSupportsImages(conn, 'pi/Opus')).toBe(true)
+    expect(modelSupportsImages(conn, 'custom-endpoint/Opus')).toBe(true)
+    expect(modelSupportsImages(conn, 'opus')).toBe(true)
+  })
+
+  it('honors an explicit false even when the runtime ID is prefixed', () => {
+    const conn: LlmConnection = {
+      ...BASE_COMPAT,
+      models: [{ id: 'Opus', supportsImages: false } as never],
+    }
+    expect(modelSupportsImages(conn, 'pi/Opus')).toBe(false)
+  })
+
+  it('infers vision for well-known names when no explicit flag is stored', () => {
+    const conn: LlmConnection = { ...BASE_COMPAT, models: ['Opus'] }
+    expect(modelSupportsImages(conn, 'pi/Opus')).toBe(true)
+  })
+
+  it('does not infer vision for unknown ORDER names', () => {
+    const conn: LlmConnection = { ...BASE_COMPAT, models: ['Laufry'] }
+    expect(modelSupportsImages(conn, 'Laufry')).toBe(false)
+  })
+
+  it('does not treat octopus, omnibox, or vllm names as vision', () => {
+    const conn: LlmConnection = { ...BASE_COMPAT, models: ['octopus', 'omnibox', 'foo-vllm'] }
+    expect(modelSupportsImages(conn, 'octopus')).toBe(false)
+    expect(modelSupportsImages(conn, 'omnibox')).toBe(false)
+    expect(modelSupportsImages(conn, 'foo-vllm')).toBe(false)
+  })
+})
+
+describe('toCustomEndpointModelPayload', () => {
+  it('leaves inferred vision names as a bare id so connection defaults stay authoritative', () => {
+    expect(toCustomEndpointModelPayload('Opus')).toBe('Opus')
+  })
+
+  it('leaves unknown names as a bare string', () => {
+    expect(toCustomEndpointModelPayload('Laufry')).toBe('Laufry')
+  })
+
+  it('forwards an explicit true', () => {
+    expect(toCustomEndpointModelPayload({ id: 'Opus', supportsImages: true })).toEqual({
+      id: 'Opus',
+      supportsImages: true,
+    })
+  })
+
+  it('preserves an explicit false over the name heuristic', () => {
+    expect(toCustomEndpointModelPayload({ id: 'Opus', supportsImages: false })).toEqual({
+      id: 'Opus',
+      supportsImages: false,
+    })
+  })
+
+  it('does not write inferred false when only a context window is present', () => {
+    expect(toCustomEndpointModelPayload({ id: 'Laufry', contextWindow: 200_000 })).toEqual({
+      id: 'Laufry',
+      contextWindow: 200_000,
+    })
   })
 })
 

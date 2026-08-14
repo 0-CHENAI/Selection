@@ -637,6 +637,7 @@ export default function AiSettingsPage() {
     connectionDefaultModel?: string
     activePreset?: string
     models?: string[]
+    modelImageCaps?: Record<string, boolean>
     customApi?: CustomEndpointApi
   } | undefined>(undefined)
   const setFullscreenOverlayOpen = useSetAtom(fullscreenOverlayOpenAtom)
@@ -834,6 +835,13 @@ export default function AiSettingsPage() {
       ?.map((m: string | ModelDefinition) => typeof m === 'string' ? m : m.id)
       .filter(Boolean)
 
+    const modelImageCaps = Object.fromEntries(
+      (connection.models ?? []).flatMap((entry) => {
+        if (typeof entry === 'string' || typeof entry.supportsImages !== 'boolean') return []
+        return [[entry.id, entry.supportsImages]] as Array<[string, boolean]>
+      }),
+    )
+
     const isCustomEndpointConnection = !!connection.customEndpoint && !!connection.baseUrl?.trim()
 
     setEditInitialValues({
@@ -842,6 +850,7 @@ export default function AiSettingsPage() {
       connectionDefaultModel: modelStr,
       activePreset: isCustomEndpointConnection ? 'custom' : (connection.piAuthProvider || undefined),
       models: modelIds,
+      modelImageCaps,
       customApi: connection.customEndpoint?.api,
     })
 

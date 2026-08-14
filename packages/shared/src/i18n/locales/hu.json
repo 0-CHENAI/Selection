@@ -30,7 +30,7 @@
   "apiSetup.modelTier.fast": "Gyors",
   "apiSetup.modelTier.fastDesc": "összefoglalás & segédeszköz",
   "apiSetup.noModels": "Nincs modell",
-  "apiSetup.orderModelHint": "Válassz egy vagy több modellt. Az első az alapértelmezett, az utolsó az összegzéshez.",
+  "apiSetup.orderModelHint": "Válassz modelleket. A kép ikon bekapcsolja a képbevitelt. Az első az alapértelmezett, az utolsó az összegzéshez.",
   "apiSetup.pasteAuthCode": "Ide illessze be az engedélyezési kódját",
   "apiSetup.pasteKey": "Illeszd be a kulcsot…",
   "apiSetup.pasteOrderKey": "Illeszd be az ORDER kulcsot…",

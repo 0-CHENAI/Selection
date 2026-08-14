@@ -30,7 +30,7 @@
   "apiSetup.modelTier.fast": "Fast",
   "apiSetup.modelTier.fastDesc": "summarization & utility",
   "apiSetup.noModels": "No models found",
-  "apiSetup.orderModelHint": "Select one or more models. The first is the default; the last is used for summarization.",
+  "apiSetup.orderModelHint": "Select models. Use the image icon if a model accepts pictures. First is default; last is used for summarization.",
   "apiSetup.pasteAuthCode": "Paste your authorization code here",
   "apiSetup.pasteKey": "Paste your key here...",
   "apiSetup.pasteOrderKey": "Paste your ORDER key...",

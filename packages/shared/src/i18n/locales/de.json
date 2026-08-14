@@ -30,7 +30,7 @@
   "apiSetup.modelTier.fast": "Schnell",
   "apiSetup.modelTier.fastDesc": "Zusammenfassung & Hilfsfunktionen",
   "apiSetup.noModels": "Keine Modelle gefunden",
-  "apiSetup.orderModelHint": "Ein oder mehrere Modelle wählen. Das erste ist Standard, das letzte für Zusammenfassungen.",
+  "apiSetup.orderModelHint": "Modelle wählen. Das Bildsymbol aktiviert Bildeingabe. Das erste ist Standard, das letzte für Zusammenfassungen.",
   "apiSetup.pasteAuthCode": "Autorisierungscode hier einfügen",
   "apiSetup.pasteKey": "Schlüssel hier einfügen…",
   "apiSetup.pasteOrderKey": "ORDER-Schlüssel einfügen…",

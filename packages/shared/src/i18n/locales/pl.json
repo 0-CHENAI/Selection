@@ -30,7 +30,7 @@
   "apiSetup.modelTier.fast": "Szybki",
   "apiSetup.modelTier.fastDesc": "podsumowania i narzędzia",
   "apiSetup.noModels": "Nie znaleziono modeli",
-  "apiSetup.orderModelHint": "Wybierz jeden lub więcej. Pierwszy jest domyślny, ostatni służy do streszczeń.",
+  "apiSetup.orderModelHint": "Wybierz modele. Ikona obrazu włącza wejście obrazu. Pierwszy jest domyślny, ostatni służy do streszczeń.",
   "apiSetup.pasteAuthCode": "Wklej tutaj swój kod autoryzacyjny",
   "apiSetup.pasteKey": "Wklej klucz tutaj…",
   "apiSetup.pasteOrderKey": "Wklej klucz ORDER…",

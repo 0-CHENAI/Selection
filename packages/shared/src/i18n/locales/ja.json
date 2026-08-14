@@ -30,7 +30,7 @@
   "apiSetup.modelTier.fast": "高速",
   "apiSetup.modelTier.fastDesc": "要約・ユーティリティ向け",
   "apiSetup.noModels": "モデルが見つかりません",
-  "apiSetup.orderModelHint": "複数選択できます。先頭がデフォルト、末尾は要約用です。",
+  "apiSetup.orderModelHint": "複数選択できます。画像アイコンで画像入力を有効化。先頭がデフォルト、末尾は要約用です。",
   "apiSetup.pasteAuthCode": "認証コードをここに貼り付けてください",
   "apiSetup.pasteKey": "キーを貼り付けてください…",
   "apiSetup.pasteOrderKey": "ORDER キーを貼り付けてください…",
