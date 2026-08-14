@@ -1,6 +1,6 @@
 {
   "name": "@craft-agent/server-core",
-  "version": "0.11.11",
+  "version": "1.0.0",
   "license": "Apache-2.0",
   "description": "Reusable headless server infrastructure for Selection",
   "type": "module",
