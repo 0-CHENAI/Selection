@@ -9,6 +9,7 @@ import {
   mkdirSync,
   rmSync,
   copyFileSync,
+  chmodSync,
   cpSync,
   lstatSync,
   readdirSync,
@@ -138,7 +139,10 @@ export async function verifySha256(filePath: string, expectedHash: string): Prom
  * npmmirror / ghproxy are used as fallbacks.
  */
 export async function curlDownload(dest: string, urls: string[]): Promise<string> {
-  const curlInsecure = process.env.CURL_INSECURE === '1' ? '-k' : '';
+  // Bun's shell passes an interpolated empty string as a real argv entry on
+  // Windows. curl then treats that entry as a blank option and exits with
+  // code 2, so use an empty array when the optional flag is disabled.
+  const curlInsecure = process.env.CURL_INSECURE === '1' ? ['-k'] : [];
   let lastError: unknown;
   for (const url of urls) {
     try {
@@ -238,7 +242,7 @@ export async function downloadBun(config: BuildConfig): Promise<void> {
 
     // Make executable on Unix
     if (platform !== 'win32') {
-      await $`chmod +x ${destPath}`.quiet();
+      chmodSync(destPath, 0o755);
     }
 
     console.log(`  Bun installed to ${destPath} ✓`);
@@ -339,7 +343,7 @@ export async function downloadUv(config: BuildConfig): Promise<void> {
 
     copyFileSync(extractedUv, targetPath);
     if (platform !== 'win32') {
-      await $`chmod +x ${targetPath}`.quiet();
+      chmodSync(targetPath, 0o755);
     }
 
     console.log(`  uv installed to ${targetPath} ✓`);
@@ -386,14 +390,18 @@ export async function downloadOfficecli(config: BuildConfig): Promise<void> {
     const releaseBase = `https://github.com/iOfficeAI/OfficeCLI/releases/download/${OFFICECLI_VERSION}`;
     const assetPath = join(tempDir, assetName);
 
-    await curlDownload(assetPath, [`${releaseBase}/${assetName}`]);
+    const releaseUrl = `${releaseBase}/${assetName}`;
+    await curlDownload(assetPath, [
+      releaseUrl,
+      `https://ghproxy.net/${releaseUrl}`,
+    ]);
     if (!(await verifySha256(assetPath, expectedHash))) {
       throw new Error(`officecli checksum verification failed for ${assetName}`);
     }
 
     copyFileSync(assetPath, targetPath);
     if (platform !== 'win32') {
-      await $`chmod +x ${targetPath}`.quiet();
+      chmodSync(targetPath, 0o755);
     }
     if (process.platform === 'darwin' && platform === 'darwin') {
       try {
