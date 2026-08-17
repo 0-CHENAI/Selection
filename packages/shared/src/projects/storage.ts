@@ -29,6 +29,7 @@ import type {
   ProjectAsset,
   LoadedProject,
   CreateProjectInput,
+  ProjectPromptContext,
 } from './types.ts';
 
 // ============================================================
@@ -222,6 +223,36 @@ export function loadProjectById(
 ): LoadedProject | null {
   const projects = loadWorkspaceProjects(workspaceRootPath);
   return projects.find((p) => p.config.id === projectId) ?? null;
+}
+
+/**
+ * Build the project prompt snapshot shared by every agent backend.
+ * `includeMemory=false` deliberately avoids even reading MEMORY.md.
+ */
+export function loadProjectPromptContext(
+  workspaceRootPath: string,
+  projectId: string,
+  includeMemory: boolean,
+): ProjectPromptContext | null {
+  const project = loadProjectById(workspaceRootPath, projectId);
+  if (!project) return null;
+
+  const slug = project.config.slug;
+  return {
+    name: project.config.name,
+    description: project.config.description,
+    details: project.config.details,
+    assetsPath: getProjectAssetsPath(workspaceRootPath, slug),
+    assets: listProjectAssets(workspaceRootPath, slug).map((asset) => ({
+      filename: asset.filename,
+      mimeType: asset.mimeType,
+      sizeBytes: asset.sizeBytes,
+    })),
+    ...(includeMemory ? {
+      memoryPath: getProjectMemoryPath(workspaceRootPath, slug),
+      memoryContent: loadProjectMemory(workspaceRootPath, slug) ?? undefined,
+    } : {}),
+  };
 }
 
 /**

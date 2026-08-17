@@ -11,6 +11,12 @@ declare const CRAFT_AGENT_CLI_VERSION: string | undefined;
 let customPathToClaudeCodeExecutable: string | null = null;
 let claudeConfigChecked = false;
 
+/** Claude SDK settings Selection always owns, independent of user/project config. */
+export const SELECTION_MANAGED_SETTINGS = {
+    autoMemoryEnabled: false,
+    autoDreamEnabled: false,
+} satisfies NonNullable<Options['managedSettings']>;
+
 // UTF-8 BOM character — Windows editors/processes sometimes prepend this to files.
 // JSON parsers reject BOM, but the file content after BOM may be valid JSON.
 const UTF8_BOM = '\uFEFF';
@@ -223,6 +229,10 @@ export function getDefaultOptions(envOverrides?: Record<string, string>): Partia
     ensureClaudeConfig();
 
     const env = buildClaudeSubprocessEnv(envOverrides);
+    // Selection owns the only learning-memory policy. Keep Claude SDK's
+    // implicit per-CWD memory/dream systems disabled so they cannot bypass a
+    // session's isolated mode via ~/.claude/projects/.../memory/.
+    const managedSettings = SELECTION_MANAGED_SETTINGS;
 
     // If custom path is set (e.g., for Electron packaged build), point the SDK at it.
     // This is the native `claude` binary, not a JS file.
@@ -230,6 +240,7 @@ export function getDefaultOptions(envOverrides?: Record<string, string>): Partia
         return {
             pathToClaudeCodeExecutable: customPathToClaudeCodeExecutable,
             env,
+            managedSettings,
         };
     }
 
@@ -240,6 +251,7 @@ export function getDefaultOptions(envOverrides?: Record<string, string>): Partia
         return {
             pathToClaudeCodeExecutable: join(baseDir, 'claude-agent-sdk', nativeBinaryName()),
             env,
+            managedSettings,
         };
     }
 
@@ -247,5 +259,5 @@ export function getDefaultOptions(envOverrides?: Record<string, string>): Partia
     // node_modules resolution from `sdk.mjs`. The matching platform package
     // (e.g. `@anthropic-ai/claude-agent-sdk-darwin-arm64`) is installed via
     // optionalDependencies.
-    return { env };
+    return { env, managedSettings };
 }

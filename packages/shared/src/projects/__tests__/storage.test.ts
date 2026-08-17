@@ -12,6 +12,7 @@ import {
   createProject,
   getProjectMemoryPath,
   loadProjectMemory,
+  loadProjectPromptContext,
   sanitizeAssetFilename,
 } from '../storage.ts';
 
@@ -85,5 +86,37 @@ describe('loadProjectMemory', () => {
     // Marker present and budget respected (marker included).
     expect(text).toContain(`truncated at ${maxTokens}-token cap`);
     expect(estimateTokensDensityAware(text)).toBeLessThanOrEqual(maxTokens);
+  });
+});
+
+describe('loadProjectPromptContext', () => {
+  it('keeps project context but does not read or expose memory in isolated mode', () => {
+    const project = createProject(workspaceRoot, {
+      name: 'Isolated Project',
+      description: 'Visible project description',
+      details: 'Visible project details',
+    });
+    writeFileSync(getProjectMemoryPath(workspaceRoot, project.slug), 'CANARY_ISOLATED_SECRET');
+
+    const isolated = loadProjectPromptContext(workspaceRoot, project.id, false);
+    expect(isolated).toMatchObject({
+      name: 'Isolated Project',
+      description: 'Visible project description',
+      details: 'Visible project details',
+    });
+    expect(isolated?.memoryPath).toBeUndefined();
+    expect(isolated?.memoryContent).toBeUndefined();
+  });
+
+  it('loads only the selected project memory in shared mode', () => {
+    const projectA = createProject(workspaceRoot, { name: 'Project A' });
+    const projectB = createProject(workspaceRoot, { name: 'Project B' });
+    writeFileSync(getProjectMemoryPath(workspaceRoot, projectA.slug), 'CANARY_PROJECT_A');
+    writeFileSync(getProjectMemoryPath(workspaceRoot, projectB.slug), 'CANARY_PROJECT_B');
+
+    const sharedA = loadProjectPromptContext(workspaceRoot, projectA.id, true);
+    expect(sharedA?.memoryContent).toContain('CANARY_PROJECT_A');
+    expect(sharedA?.memoryContent).not.toContain('CANARY_PROJECT_B');
+    expect(loadProjectPromptContext(workspaceRoot, 'missing-project', true)).toBeNull();
   });
 });

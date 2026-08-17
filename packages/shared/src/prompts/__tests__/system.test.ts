@@ -140,10 +140,29 @@ describe('formatProjectContextForPrompt', () => {
     // Single source of truth for working dir is <working_directory> in the user message.
   })
 
-  it('always renders the memory path; assets path is always present', () => {
+  it('renders the memory path and assets path for shared mode', () => {
     const block = formatProjectContextForPrompt(baseCtx())
     expect(block).toContain('<project_assets_path>/ws/projects/acme/assets</project_assets_path>')
     expect(block).toContain('<project_memory_path>/ws/projects/acme/MEMORY.md</project_memory_path>')
+  })
+
+  it('omits all automatic memory context and write guidance for isolated mode', () => {
+    const block = formatProjectContextForPrompt(baseCtx({
+      memoryPath: undefined,
+      memoryContent: undefined,
+      description: 'Project description survives isolation.',
+      details: 'Project details survive isolation.',
+      assets: [{ filename: 'spec.pdf', mimeType: 'application/pdf', sizeBytes: 2048 }],
+    }))
+
+    expect(block).not.toContain('<project_memory_path>')
+    expect(block).not.toContain('<project_memory>')
+    expect(block).not.toContain('MEMORY.md')
+    expect(block).not.toContain('record it')
+    expect(block).toContain('Project description survives isolation.')
+    expect(block).toContain('Project details survive isolation.')
+    expect(block).toContain('<project_assets_path>')
+    expect(block).toContain('spec.pdf')
   })
 
   it('renders an asset manifest when assets are present', () => {

@@ -29,6 +29,7 @@ export {
   // Load operations
   loadProject,
   loadProjectById,
+  loadProjectPromptContext,
   loadWorkspaceProjects,
   // Create/update/delete
   generateProjectSlug,

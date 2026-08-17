@@ -48,8 +48,9 @@ import { EventQueue } from './backend/event-queue.ts';
 // System prompt for Selection context
 import { getSystemPrompt } from '../prompts/system.ts';
 import { getCoAuthorPreference } from '../config/preferences.ts';
-import { loadProjectById, getProjectAssetsPath, listProjectAssets, getProjectMemoryPath, loadProjectMemory } from '../projects/storage.ts';
+import { loadProjectPromptContext } from '../projects/storage.ts';
 import type { ProjectPromptContext } from '../projects/types.ts';
+import { isSharedProjectMemoryEnabled } from '../sessions/types.ts';
 
 // Credential manager for token storage
 import { getCredentialManager } from '../credentials/manager.ts';
@@ -190,11 +191,13 @@ export class PiAgent extends BaseAgent {
   private lastSubprocessError: string | null = null;
   private subprocessErrorRepeatCount = 0;
   private static readonly MAX_IDENTICAL_SUBPROCESS_ERRORS = 3;
+  // Captured once per PiAgent instance so active sessions do not dynamically
+  // absorb MEMORY.md edits made by other sessions between turns.
+  private pinnedProjectContext: ProjectPromptContext | null | undefined;
 
   /**
    * Look up the bound project (if any) and return a snapshot for system-prompt injection.
-   * Mirrors ClaudeAgent.resolveProjectContext — safe to call on every turn since the
-   * project config file is small.
+   * Mirrors ClaudeAgent.resolveProjectContext.
    */
   private resolveProjectContext(): ProjectPromptContext | null {
     const projectId = this.config.session?.projectId;
@@ -202,26 +205,19 @@ export class PiAgent extends BaseAgent {
 
     try {
       const root = this.config.workspace.rootPath;
-      const project = loadProjectById(root, projectId);
-      if (!project) return null;
-      const slug = project.config.slug;
-      return {
-        name: project.config.name,
-        description: project.config.description,
-        details: project.config.details,
-        assetsPath: getProjectAssetsPath(root, slug),
-        assets: listProjectAssets(root, slug).map((a) => ({
-          filename: a.filename,
-          mimeType: a.mimeType,
-          sizeBytes: a.sizeBytes,
-        })),
-        memoryPath: getProjectMemoryPath(root, slug),
-        memoryContent: loadProjectMemory(root, slug) ?? undefined,
-      };
+      const includeMemory = isSharedProjectMemoryEnabled(this.config.session);
+      return loadProjectPromptContext(root, projectId, includeMemory);
     } catch (error) {
       this.debug(`[resolveProjectContext] Failed to load project ${projectId}: ${error instanceof Error ? error.message : error}`);
       return null;
     }
+  }
+
+  private getPinnedProjectContext(): ProjectPromptContext | null {
+    if (this.pinnedProjectContext === undefined) {
+      this.pinnedProjectContext = this.resolveProjectContext();
+    }
+    return this.pinnedProjectContext;
   }
 
   private resetSubprocessErrorDedup(): void {
@@ -2028,7 +2024,7 @@ export class PiAgent extends BaseAgent {
       }
 
       // Build system prompt
-      const projectContext = this.resolveProjectContext();
+      const projectContext = this.getPinnedProjectContext();
       const systemPrompt = getSystemPrompt(
         undefined, // pinnedPreferencesPrompt
         this.config.debugMode,

@@ -23,7 +23,8 @@ import {
 import type { McpClientPool } from '../mcp/mcp-pool.ts';
 import { proxyToolName } from '../mcp/proxy-tool-name.ts';
 import { loadPlanFromPath, type SessionConfig as Session } from '../sessions/storage.ts';
-import { loadProjectById, getProjectAssetsPath, listProjectAssets, getProjectMemoryPath, loadProjectMemory } from '../projects/storage.ts';
+import { isSharedProjectMemoryEnabled } from '../sessions/types.ts';
+import { loadProjectPromptContext } from '../projects/storage.ts';
 import { DEFAULT_MODEL, isClaudeModel, isAdaptiveThinkingAlwaysOnModel, getDefaultSummarizationModel, getModelContextWindow } from '../config/models.ts';
 import { getCredentialManager } from '../credentials/index.ts';
 import { loadPreferences, formatPreferencesForPrompt, getCoAuthorPreference } from '../config/preferences.ts';
@@ -696,22 +697,8 @@ export class ClaudeAgent extends BaseAgent {
     if (!projectId) return null;
 
     try {
-      const project = loadProjectById(this.workspaceRootPath, projectId);
-      if (!project) return null;
-      const slug = project.config.slug;
-      return {
-        name: project.config.name,
-        description: project.config.description,
-        details: project.config.details,
-        assetsPath: getProjectAssetsPath(this.workspaceRootPath, slug),
-        assets: listProjectAssets(this.workspaceRootPath, slug).map((a) => ({
-          filename: a.filename,
-          mimeType: a.mimeType,
-          sizeBytes: a.sizeBytes,
-        })),
-        memoryPath: getProjectMemoryPath(this.workspaceRootPath, slug),
-        memoryContent: loadProjectMemory(this.workspaceRootPath, slug) ?? undefined,
-      };
+      const includeMemory = isSharedProjectMemoryEnabled(this.config.session);
+      return loadProjectPromptContext(this.workspaceRootPath, projectId, includeMemory);
     } catch (error) {
       debug(`[resolveProjectContext] Failed to load project ${projectId}:`, error);
       return null;

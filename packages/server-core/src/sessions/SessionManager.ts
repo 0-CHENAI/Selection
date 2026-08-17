@@ -20,7 +20,7 @@ import {
   type BackendHostRuntimeContext,
   type PostInitResult,
 } from '@craft-agent/shared/agent/backend'
-import { getLlmConnection, getLlmConnections, getDefaultLlmConnection, getDefaultThinkingLevel, resetManagedAnthropicAuthEnvVars, resolveMidStreamBehavior, getPersistedUiLanguage, resolveTitleLanguageName } from '@craft-agent/shared/config'
+import { getLlmConnection, getLlmConnections, getDefaultLlmConnection, getDefaultThinkingLevel, getSharedProjectMemoryEnabled, resetManagedAnthropicAuthEnvVars, resolveMidStreamBehavior, getPersistedUiLanguage, resolveTitleLanguageName } from '@craft-agent/shared/config'
 import type { MidStreamBehavior } from '@craft-agent/shared/config'
 import { PrivilegedExecutionBroker } from '@craft-agent/server-core/services'
 import { isValidWorkingDirectory } from '../utils/path-validation'
@@ -72,6 +72,7 @@ import {
   type SessionStatus,
   type SessionHeader,
   pickSessionFields,
+  isSharedProjectMemoryEnabled,
 } from '@craft-agent/shared/sessions'
 import { loadWorkspaceSources, loadAllSources, getSourcesBySlugs, isSourceUsable, type LoadedSource, type McpServerConfig, getSourcesNeedingAuth, getSourceCredentialManager, getSourceServerBuilder, type SourceWithCredential, isApiOAuthProvider, hasRenewEndpoint, SERVER_BUILD_ERRORS, TokenRefreshManager, createTokenGetter } from '@craft-agent/shared/sources'
 import { listTaskSlugs, parseTaskSpec, uniqueTaskSlug } from '@craft-agent/shared/tasks'
@@ -863,6 +864,8 @@ interface ManagedSession {
   labels?: string[]
   // Workspace-scoped project binding (undefined = unbound)
   projectId?: string
+  // Snapshot of app-level shared project memory setting; missing means legacy shared
+  sharedProjectMemoryEnabled?: boolean
   // Parent session id — when set, this session is a subtask of the parent (undefined = top-level task)
   parentSessionId?: string
   // Kanban board column id ('todo' | 'in-progress' | 'done'); independent of sessionStatus
@@ -2955,6 +2958,9 @@ export class SessionManager implements ISessionManager {
       labels: options?.labels,
       isFlagged: options?.isFlagged,
       projectId: resolvedProjectId,
+      // Every newly created session snapshots the current setting. This also
+      // means branches do not inherit their parent's memory mode.
+      sharedProjectMemoryEnabled: getSharedProjectMemoryEnabled(),
       parentSessionId: options?.parentSessionId,
       taskSlug: options?.taskSlug,
       taskRunId: options?.taskRunId,
@@ -3432,10 +3438,11 @@ export class SessionManager implements ISessionManager {
       }
 
       // Set session directory for tool metadata cross-process sharing.
-      // The SDK subprocess reads CRAFT_SESSION_DIR to write tool-metadata.json;
-      // the main process reads it via toolMetadataStore.setSessionDir().
+      // The main process reads it via toolMetadataStore.setSessionDir(). The
+      // subprocess receives it later through per-agent envOverrides; never put
+      // this session-scoped value in process.env where concurrent sessions can
+      // overwrite it before a lazy subprocess spawn.
       const sessionDirForMetadata = getSessionStoragePath(managed.workspace.rootPath, managed.id)
-      process.env.CRAFT_SESSION_DIR = sessionDirForMetadata
       toolMetadataStore.setSessionDir(sessionDirForMetadata)
 
       // Set up agentReady promise so title generation can await agent creation
@@ -3471,6 +3478,7 @@ export class SessionManager implements ISessionManager {
       const miniModel = connection ? (getMiniModel(connection) ?? connection.defaultModel) : undefined
       const envOverrides: Record<string, string> = {
         CRAFT_WORKSPACE_PATH: managed.workspace.rootPath,
+        CRAFT_SESSION_DIR: sessionPath,
         // Pass mini model to SDK subprocess so built-in tools like WebFetch
         // use the correct model for summarization (instead of hardcoded Haiku)
         ...(miniModel ? { ANTHROPIC_DEFAULT_HAIKU_MODEL: miniModel } : {}),
@@ -3499,6 +3507,7 @@ export class SessionManager implements ISessionManager {
         permissionMode: managed.permissionMode,
         previousPermissionMode: managed.previousPermissionMode,
         projectId: managed.projectId,
+        sharedProjectMemoryEnabled: managed.sharedProjectMemoryEnabled,
       }
 
       const onSdkSessionIdUpdate = (sdkSessionId: string) => {
@@ -3673,7 +3682,15 @@ export class SessionManager implements ISessionManager {
         },
       }) as AgentInstance
 
-      sessionLog.info(`Created ${provider} agent for session ${managed.id} (model: ${backendContext.resolvedModel})${managed.sdkSessionId ? ' (resuming)' : ''}`)
+      sessionLog.info('Created agent', {
+        craftSessionId: managed.id,
+        backend: provider,
+        model: backendContext.resolvedModel,
+        memoryMode: isSharedProjectMemoryEnabled(managed) ? 'shared' : 'isolated',
+        projectBound: !!managed.projectId,
+        resume: !!managed.sdkSessionId,
+        branch: !!managed.branchFromMessageId,
+      })
 
       // ============================================================
       // Post-construction: debug callback, auth callback, postInit()
@@ -6222,7 +6239,11 @@ export class SessionManager implements ISessionManager {
     try {
       sessionLog.info('Starting chat for session:', sessionId)
       sessionLog.info('Workspace:', JSON.stringify(managed.workspace, null, 2))
-      sessionLog.info('Message:', message)
+      sessionLog.info('Message received', {
+        sessionId,
+        characterCount: message.length,
+        attachmentCount: attachments?.length ?? 0,
+      })
       sessionLog.info('Agent model:', agent.getModel())
       sessionLog.info('process.cwd():', process.cwd())
 
@@ -8986,6 +9007,9 @@ export class SessionManager implements ISessionManager {
       sessionStatus: header.sessionStatus,
       labels: header.labels,
       enabledSourceSlugs: header.enabledSourceSlugs,
+      // Preserve an explicit imported snapshot. A missing legacy field stays
+      // undefined and therefore retains the pre-upgrade shared behavior.
+      sharedProjectMemoryEnabled: header.sharedProjectMemoryEnabled,
       workingDirectory: header.workingDirectory,
       model: header.model,
       llmConnection: header.llmConnection,

@@ -26,4 +26,15 @@ describe('createManagedSession', () => {
 
     expect(managed.thinkingLevel).toBeUndefined()
   })
+
+  it('preserves explicit memory snapshots and legacy absence on restore', () => {
+    const isolated = createManagedSession({
+      id: 'session_isolated',
+      sharedProjectMemoryEnabled: false,
+    }, workspace as any)
+    const legacy = createManagedSession({ id: 'session_legacy_memory' }, workspace as any)
+
+    expect(isolated.sharedProjectMemoryEnabled).toBe(false)
+    expect(legacy.sharedProjectMemoryEnabled).toBeUndefined()
+  })
 })
