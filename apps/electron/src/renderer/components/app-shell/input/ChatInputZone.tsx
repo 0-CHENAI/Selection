@@ -24,6 +24,7 @@ interface ChatInputZoneProps {
   onLabelsChange?: (labels: string[]) => void
   sessionStatuses?: SessionStatus[]
   currentSessionStatus?: string
+  showSharedProjectMemory?: boolean
   onSessionStatusChange?: (stateId: string) => void
   className?: string
   inputProps: React.ComponentProps<typeof InputContainer>
@@ -44,6 +45,7 @@ export function ChatInputZone({
   onLabelsChange,
   sessionStatuses = [],
   currentSessionStatus = 'todo',
+  showSharedProjectMemory = false,
   onSessionStatusChange,
   className,
   inputProps,
@@ -96,6 +98,7 @@ export function ChatInputZone({
           onAutoOpenConsumed={() => setAutoOpenLabelId(null)}
           sessionStatuses={sessionStatuses}
           currentSessionStatus={currentSessionStatus}
+          showSharedProjectMemory={showSharedProjectMemory}
           onSessionStatusChange={onSessionStatusChange}
         />
       )}

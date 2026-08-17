@@ -1948,6 +1948,10 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
             onLabelsChange={onLabelsChange}
             sessionStatuses={sessionStatuses}
             currentSessionStatus={session.sessionStatus || 'todo'}
+            showSharedProjectMemory={
+              !!session.projectId &&
+              (session.sharedProjectMemoryEnabled === undefined || session.sharedProjectMemoryEnabled === true)
+            }
             onSessionStatusChange={onSessionStatusChange}
             inputProps={{
               placeholder,

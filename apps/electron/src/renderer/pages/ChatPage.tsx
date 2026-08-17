@@ -597,6 +597,8 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
         isFlagged: sessionMeta.isFlagged,
         workingDirectory: sessionMeta.workingDirectory,
         enabledSourceSlugs: sessionMeta.enabledSourceSlugs,
+        projectId: sessionMeta.projectId,
+        sharedProjectMemoryEnabled: sessionMeta.sharedProjectMemoryEnabled,
       }
 
       return (
