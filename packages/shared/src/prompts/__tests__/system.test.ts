@@ -37,16 +37,18 @@ describe('system prompt guidance', () => {
     expect(prompt).not.toContain('The subtask needs tools (Read, Bash, Grep)')
   })
 
-  it('prefers native Office document tools over skill and legacy CLIs', () => {
+  it('treats OfficeCLI as a native capability rather than a skill', () => {
     const prompt = getSystemPrompt(undefined, undefined, '/tmp/workspace', '/tmp/workspace')
 
     expect(prompt).toContain('**officecli**')
     expect(prompt).toContain('officecli create report.docx')
-    expect(prompt).toContain('Built-in (app-bundled, read-only)')
     expect(prompt).toContain('prefer officecli')
     expect(prompt).toContain('office_document_inspect')
     expect(prompt).toContain('office_document_edit')
     expect(prompt).toContain('Neither requires loading a skill')
+    expect(prompt).toContain('OfficeCLI is an internal runtime capability, not a skill')
+    expect(prompt).not.toContain('the `officecli` skill')
+    expect(prompt).not.toContain('Load the `officecli` skill')
   })
 })
 

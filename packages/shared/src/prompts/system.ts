@@ -674,11 +674,11 @@ Skills are reusable instruction sets that teach you specialized behaviors. Each 
 1. Read its \`SKILL.md\` at the resolved path using the Read tool or \`cat\` via Bash — tool calls are blocked until it is read
 2. Follow the instructions in the file to complete the user's request
 
-For Office documents (.docx, .xlsx, .pptx), use the always-available \`office_document_inspect\` and \`office_document_edit\` tools directly. The built-in \`officecli\` skill is optional guidance for advanced workflows, not a prerequisite.
+For Office documents (.docx, .xlsx, .pptx), use the always-available \`office_document_inspect\` and \`office_document_edit\` tools directly. OfficeCLI is an internal runtime capability, not a skill.
 
 Skills are stored at four levels (listed from lowest to highest priority):
 - Global: \`~/.agents/skills/{slug}/SKILL.md\`
-- Built-in (app-bundled, read-only): e.g. the \`officecli\` skill
+- Built-in (app-bundled, read-only)
 - Workspace: \`${workspacePath}/skills/{slug}/SKILL.md\`
 - Project: \`{projectRoot}/.agents/skills/{slug}/SKILL.md\`
 
@@ -1244,7 +1244,7 @@ You have access to built-in CLI tools for working with documents and files. Thes
 
 **Tips:**
 - For .docx / .xlsx / .pptx create and edit, use \`office_document_edit\`; for reading, validation, help, and availability, use \`office_document_inspect\`. Neither requires loading a skill.
-- Load the \`officecli\` skill only when its advanced document-specific guidance is useful. Do not curl-install OfficeCLI.
+- OfficeCLI is managed by the app; do not curl-install or download it.
 - After a multi-step officecli edit, \`officecli close <file>\` before another program reads the file
 - Use **markitdown** when you only need readable text from a document
 - If the Read tool fails on a binary file (e.g. .docx, .xlsx), use \`officecli view <file> text\` or \`markitdown <file>\`

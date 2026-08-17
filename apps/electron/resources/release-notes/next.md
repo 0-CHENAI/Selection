@@ -4,7 +4,7 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 
 ## Features
 
-- **Native Office document tools** — Word / Excel / PowerPoint inspection and editing now use an always-available, structured runtime backed by the bundled `officecli` binary. The skill remains optional guidance.
+- **Native Office document tools** — Word / Excel / PowerPoint inspection and editing now use an always-available, structured runtime backed by the bundled `officecli` binary, without exposing OfficeCLI as a skill.
 
 ## Improvements
 

@@ -474,7 +474,7 @@ Examples:
 
   office_document_inspect: `Inspect Word, Excel, and PowerPoint files through Selection's built-in OfficeCLI runtime.
 
-This tool is always registered and does not require loading the officecli skill. It accepts argument tokens, invokes the app-managed binary directly, and returns normalized JSON.
+This tool is always registered and does not require loading a skill. It accepts argument tokens, invokes the app-managed binary directly, and returns normalized JSON.
 
 Examples:
 - Check availability: { "command": "status" }
@@ -486,7 +486,7 @@ The read-only tool rejects output files, browser launching, and JSONL output. Us
 
   office_document_edit: `Create and modify Word, Excel, and PowerPoint files through Selection's built-in OfficeCLI runtime.
 
-This tool is always registered and does not require loading the officecli skill. Arguments are passed as separate tokens without a shell, and results use a stable JSON envelope. Batch calls must use batchCommands; resident and management commands are not accepted.
+This tool is always registered and does not require loading a skill. Arguments are passed as separate tokens without a shell, and results use a stable JSON envelope. Batch calls must use batchCommands; resident and management commands are not accepted.
 
 Examples:
 - Create: { "command": "create", "arguments": ["report.docx"] }

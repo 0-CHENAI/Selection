@@ -15,14 +15,13 @@
  * baseline count and validating relative to it.
  */
 import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync } from 'fs';
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync } from 'fs';
 import { homedir, tmpdir } from 'os';
 import { join } from 'path';
 import {
   loadAllSkills,
   loadWorkspaceSkills,
   loadSkill,
-  loadSkillBySlug,
   getBundledSkillsDir,
   skillExists,
   listSkillSlugs,
@@ -539,35 +538,10 @@ describe('loadAllSkills', () => {
   });
 });
 
-describe('bundled officecli skill', () => {
-  it('ships a parseable officecli SKILL.md', () => {
+describe('bundled skills', () => {
+  it('does not expose the internal OfficeCLI runtime as a skill', () => {
     const dir = getBundledSkillsDir();
-    expect(dir).toBeDefined();
-    expect(existsSync(join(dir!, 'officecli', 'SKILL.md'))).toBe(true);
-  });
-
-  it('does not instruct the model to curl-install officecli', () => {
-    const md = readFileSync(join(getBundledSkillsDir()!, 'officecli', 'SKILL.md'), 'utf8');
-    expect(md).toContain('officecli create');
-    expect(md).not.toContain('curl -fsSL');
-  });
-
-  it('is loadable from an empty workspace as the bundled copy', () => {
-    const skill = loadSkillBySlug(workspaceRoot, 'officecli');
-    expect(skill).not.toBeNull();
-    expect(skill!.slug).toBe('officecli');
-    expect(skill!.source).toBe('bundled');
-    expect(skill!.content).not.toContain('curl -fsSL');
-  });
-
-  it('is overridden by a workspace skill of the same slug', () => {
-    createSkill(join(workspaceRoot, 'skills'), 'officecli', {
-      name: 'Workspace Office',
-      description: 'Workspace override',
-    });
-    const skill = loadSkillBySlug(workspaceRoot, 'officecli');
-    expect(skill!.source).toBe('workspace');
-    expect(skill!.metadata.name).toBe('Workspace Office');
+    expect(dir && existsSync(join(dir, 'officecli', 'SKILL.md'))).toBeFalsy();
   });
 });
 

@@ -11,7 +11,7 @@
  * Run: bun scripts/copy-assets.ts
  */
 
-import { cpSync, copyFileSync } from 'fs';
+import { cpSync, copyFileSync, rmSync } from 'fs';
 import { join } from 'path';
 import { downloadOfficecliDesktopTargets } from '../../../scripts/build/common.ts';
 
@@ -23,7 +23,8 @@ await downloadOfficecliDesktopTargets({
   electronDir: join(import.meta.dir, '..'),
 })
 
-// Copy all resources (icons, themes, docs, permissions, tool-icons, etc.)
+// Replace resources so removed bundled assets do not survive incremental builds.
+rmSync('dist/resources', { recursive: true, force: true });
 cpSync('resources', 'dist/resources', { recursive: true });
 
 console.log('✓ Copied resources/ → dist/resources/');

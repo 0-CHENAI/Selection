@@ -200,6 +200,7 @@ function copyResources(): void {
   const srcDir = join(ELECTRON_DIR, "resources");
   const destDir = join(ELECTRON_DIR, "dist/resources");
   if (existsSync(srcDir)) {
+    rmSync(destDir, { recursive: true, force: true });
     cpSync(srcDir, destDir, { recursive: true, force: true });
     console.log("📦 Copied resources to dist");
   }
