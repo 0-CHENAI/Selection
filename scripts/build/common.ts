@@ -763,7 +763,11 @@ export function copyPiAgentServer(config: BuildConfig): void {
   if (existsSync(nativeSrc)) {
     mkdirSync(nativeDest, { recursive: true });
     cpSync(nativeSrc, nativeDest, { recursive: true });
-    const size = lstatSync(join(nativeSrc, readdirSync(nativeSrc)[0])).size;
+    const [nativeBinary] = readdirSync(nativeSrc);
+    if (!nativeBinary) {
+      throw new Error(`Koffi native binary directory is empty: ${nativeSrc}`);
+    }
+    const size = lstatSync(join(nativeSrc, nativeBinary)).size;
     console.log(`  Copied index.js + koffi/${targetDir} (${(size / 1024 / 1024).toFixed(1)}MB)`);
   } else {
     console.warn(`  Warning: koffi native binary not found for ${targetDir}`);
@@ -790,7 +794,7 @@ export function buildMcpServers(config: BuildConfig): void {
 
   execSync(
     `bun build ${join(sessionDir, 'src', 'index.ts')} --outfile ${sessionOut} --target node --format cjs`,
-    { cwd: rootDir, stdio: 'inherit', shell: true }
+    { cwd: rootDir, stdio: 'inherit' }
   );
 
   if (!existsSync(sessionOut)) {
@@ -806,7 +810,7 @@ export function buildMcpServers(config: BuildConfig): void {
     mkdirSync(join(piDir, 'dist'), { recursive: true });
     execSync(
       `bun build ${join(piDir, 'src', 'index.ts')} --outdir ${join(piDir, 'dist')} --target bun --format esm --external koffi`,
-      { cwd: rootDir, stdio: 'inherit', shell: true }
+      { cwd: rootDir, stdio: 'inherit' }
     );
     if (!existsSync(piOut)) {
       throw new Error(`Pi agent server output not found at ${piOut}`);
@@ -827,7 +831,7 @@ export function buildWhatsAppWorker(config: BuildConfig): void {
 
   console.log('Building WhatsApp worker...');
 
-  execSync('bun run build:wa-worker', { cwd: rootDir, stdio: 'inherit', shell: true });
+  execSync('bun run build:wa-worker', { cwd: rootDir, stdio: 'inherit' });
 
   if (!existsSync(workerOut)) {
     throw new Error(`WhatsApp worker output not found at ${workerOut}`);
