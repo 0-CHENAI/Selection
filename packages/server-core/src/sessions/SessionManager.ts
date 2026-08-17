@@ -67,6 +67,7 @@ import {
   type SessionBundle,
   type DispatchMode,
   type StoredSession,
+  type SessionConfig,
   type StoredMessage,
   type SessionMetadata,
   type SessionStatus,
@@ -1123,6 +1124,61 @@ export function createManagedSession(
 }
 
 /**
+ * Build the provider-facing session identity from one ManagedSession only.
+ * Keeping this as a pure projection makes the fresh-session isolation contract
+ * testable without starting an SDK subprocess.
+ */
+export function buildAgentSessionConfig(managed: ManagedSession): SessionConfig {
+  return {
+    id: managed.id,
+    workspaceRootPath: managed.workspace.rootPath,
+    sdkSessionId: managed.sdkSessionId,
+    branchFromSdkSessionId: managed.branchContextStrategy === 'sdk-fork' ? managed.branchFromSdkSessionId : undefined,
+    branchFromSessionPath: managed.branchContextStrategy === 'sdk-fork' ? managed.branchFromSessionPath : undefined,
+    branchFromSdkCwd: managed.branchContextStrategy === 'sdk-fork' ? managed.branchFromSdkCwd : undefined,
+    branchFromSdkTurnId: managed.branchContextStrategy === 'sdk-fork' ? managed.branchFromSdkTurnId : undefined,
+    branchFromMessageId: managed.branchFromMessageId,
+    createdAt: managed.lastMessageAt,
+    lastUsedAt: managed.lastMessageAt,
+    workingDirectory: managed.workingDirectory,
+    sdkCwd: managed.sdkCwd,
+    model: managed.model,
+    llmConnection: managed.llmConnection,
+    permissionMode: managed.permissionMode,
+    previousPermissionMode: managed.previousPermissionMode,
+    projectId: managed.projectId,
+    sharedProjectMemoryEnabled: managed.sharedProjectMemoryEnabled,
+  }
+}
+
+/** Select recovery context from exactly one Craft Session transcript. */
+export function selectSessionRecoveryMessages(messages: Message[]): Array<{ type: 'user' | 'assistant'; content: string }> {
+  return messages
+    .filter(m => m.role === 'user' || m.role === 'assistant')
+    .filter(m => !m.isIntermediate)
+    .slice(-6)
+    .map(m => ({
+      type: m.role as 'user' | 'assistant',
+      content: m.content,
+    }))
+}
+
+/** Return privacy-safe field names when a supposedly independent session is contaminated. */
+export function getIndependentSessionIsolationViolations(session: StoredSession): string[] {
+  const violations: string[] = []
+  if (session.sdkSessionId) violations.push('sdkSessionId')
+  if (session.branchFromMessageId) violations.push('branchFromMessageId')
+  if (session.branchFromSdkSessionId) violations.push('branchFromSdkSessionId')
+  if (session.branchFromSessionPath) violations.push('branchFromSessionPath')
+  if (session.branchFromSdkCwd) violations.push('branchFromSdkCwd')
+  if (session.branchFromSdkTurnId) violations.push('branchFromSdkTurnId')
+  if (session.transferredSessionSummary) violations.push('transferredSessionSummary')
+  if (session.transferredSessionSummaryApplied) violations.push('transferredSessionSummaryApplied')
+  if (session.messages.length > 0) violations.push('messages')
+  return violations
+}
+
+/**
  * Resolve supportsBranching for a managed session.
  * Prefers the live agent instance; falls back to true for all backends.
  */
@@ -1926,10 +1982,10 @@ export class SessionManager implements ISessionManager {
    * Reinitialize authentication environment variables.
    * Call this after onboarding or settings changes to pick up new credentials.
    *
-   * SECURITY NOTE: These env vars are propagated to the SDK subprocess via options.ts.
-   * Bun's automatic .env loading is disabled in the subprocess (--env-file=/dev/null)
-   * to prevent a user's project .env from injecting ANTHROPIC_API_KEY and overriding
-   * OAuth auth — Claude Code prioritizes API key over OAuth token when both are set.
+   * SECURITY NOTE: This host baseline supports default-connection services such
+   * as summarization. Claude chat subprocesses receive their own connection env
+   * from ClaudeAgent.postInit(), which removes conflicting inherited credentials.
+   * Bun's automatic .env loading is disabled in the subprocess (--env-file=/dev/null).
    * See: https://github.com/lukilabs/craft-agents-oss/issues/39
    */
   /**
@@ -2972,6 +3028,23 @@ export class SessionManager implements ISessionManager {
       enabledSourceSlugs: options?.enabledSourceSlugs,
     })
 
+    if (!validatedBranch) {
+      const freshStoredSession = loadStoredSession(workspaceRootPath, storedSession.id)
+      if (!freshStoredSession) {
+        deleteStoredSession(workspaceRootPath, storedSession.id)
+        throw new Error(`Could not verify independent session isolation for ${storedSession.id}`)
+      }
+      const violations = getIndependentSessionIsolationViolations(freshStoredSession)
+      if (violations.length > 0) {
+        deleteStoredSession(workspaceRootPath, storedSession.id)
+        sessionLog.error('Rejected contaminated independent session', {
+          craftSessionId: storedSession.id,
+          fields: violations,
+        })
+        throw new Error(`Independent session isolation check failed: ${violations.join(', ')}`)
+      }
+    }
+
     // Branch: copy messages from source session up to and including the branch point
     if (validatedBranch) {
       const branchedStored = loadStoredSession(workspaceRootPath, storedSession.id)
@@ -3489,26 +3562,7 @@ export class SessionManager implements ISessionManager {
       // Common session + callback config (identical for all backends)
       // ============================================================
 
-      const sessionConfig = {
-        id: managed.id,
-        workspaceRootPath: managed.workspace.rootPath,
-        sdkSessionId: managed.sdkSessionId,
-        branchFromSdkSessionId: managed.branchContextStrategy === 'sdk-fork' ? managed.branchFromSdkSessionId : undefined,
-        branchFromSessionPath: managed.branchContextStrategy === 'sdk-fork' ? managed.branchFromSessionPath : undefined,
-        branchFromSdkCwd: managed.branchContextStrategy === 'sdk-fork' ? managed.branchFromSdkCwd : undefined,
-        branchFromSdkTurnId: managed.branchContextStrategy === 'sdk-fork' ? managed.branchFromSdkTurnId : undefined,
-        branchFromMessageId: managed.branchFromMessageId,
-        createdAt: managed.lastMessageAt,
-        lastUsedAt: managed.lastMessageAt,
-        workingDirectory: managed.workingDirectory,
-        sdkCwd: managed.sdkCwd,
-        model: managed.model,
-        llmConnection: managed.llmConnection,
-        permissionMode: managed.permissionMode,
-        previousPermissionMode: managed.previousPermissionMode,
-        projectId: managed.projectId,
-        sharedProjectMemoryEnabled: managed.sharedProjectMemoryEnabled,
-      }
+      const sessionConfig = buildAgentSessionConfig(managed)
 
       const onSdkSessionIdUpdate = (sdkSessionId: string) => {
         managed.sdkSessionId = sdkSessionId
@@ -3543,14 +3597,7 @@ export class SessionManager implements ISessionManager {
       }
 
       const getRecoveryMessages = () => {
-        const relevantMessages = managed.messages
-          .filter(m => m.role === 'user' || m.role === 'assistant')
-          .filter(m => !m.isIntermediate)
-          .slice(-6)
-        return relevantMessages.map(m => ({
-          type: m.role as 'user' | 'assistant',
-          content: m.content,
-        }))
+        return selectSessionRecoveryMessages(managed.messages)
       }
 
       const getBranchFallbackMessages = () => {

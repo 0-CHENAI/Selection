@@ -38,6 +38,10 @@ interface DiagnosticConfig {
   providerType?: LlmProviderType;
   /** Base URL override (uses this instead of process.env.ANTHROPIC_BASE_URL) */
   baseUrl?: string;
+  /** Connection owned by the failing session. Falls back to the default only for legacy callers. */
+  connectionSlug?: string;
+  /** Session directory that owns the captured interceptor error. */
+  sessionDir?: string;
 }
 
 interface CheckResult {
@@ -61,8 +65,8 @@ async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, defaultVal
  *
  * Provider-agnostic: HTTP status codes are universal.
  */
-async function checkCapturedApiError(providerLabel: string): Promise<CheckResult> {
-  const apiError = getLastApiError();
+async function checkCapturedApiError(providerLabel: string, sessionDir?: string): Promise<CheckResult> {
+  const apiError = getLastApiError(sessionDir);
 
   if (!apiError) {
     return { ok: true, detail: '✓ API error: None captured' };
@@ -280,14 +284,17 @@ async function validateApiKeyWithAnthropic(apiKey: string, baseUrl?: string | nu
 }
 
 /** Check API key presence and validity */
-async function checkApiKey(providerLabel: string = 'Anthropic'): Promise<CheckResult> {
+async function checkApiKey(
+  providerLabel: string = 'Anthropic',
+  connectionSlug?: string,
+  explicitBaseUrl?: string,
+): Promise<CheckResult> {
   try {
-    // Resolve API key from the default LLM connection
-    const defaultConnSlug = getDefaultLlmConnection();
-    const connection = defaultConnSlug ? getLlmConnection(defaultConnSlug) : null;
+    const slug = connectionSlug ?? getDefaultLlmConnection();
+    const connection = slug ? getLlmConnection(slug) : null;
     const credManager = getCredentialManager();
-    const apiKey = defaultConnSlug ? await credManager.getLlmApiKey(defaultConnSlug) : null;
-    const baseUrl = connection?.baseUrl ?? null;
+    const apiKey = slug ? await credManager.getLlmApiKey(slug) : null;
+    const baseUrl = explicitBaseUrl ?? connection?.baseUrl ?? null;
 
     if (!apiKey) {
       return {
@@ -308,14 +315,16 @@ async function checkApiKey(providerLabel: string = 'Anthropic'): Promise<CheckRe
 }
 
 /** Check OAuth token presence */
-async function checkOAuthToken(providerLabel: string = 'Anthropic'): Promise<CheckResult> {
+async function checkOAuthToken(
+  providerLabel: string = 'Anthropic',
+  connectionSlug?: string,
+): Promise<CheckResult> {
   try {
-    // Resolve OAuth token from the default LLM connection
-    const defaultConnSlug = getDefaultLlmConnection();
+    const slug = connectionSlug ?? getDefaultLlmConnection();
     const credManager = getCredentialManager();
     let token: string | null = null;
-    if (defaultConnSlug) {
-      const oauth = await credManager.getLlmOAuth(defaultConnSlug);
+    if (slug) {
+      const oauth = await credManager.getLlmOAuth(slug);
       token = oauth?.accessToken || null;
     }
     if (!token) {
@@ -393,7 +402,7 @@ async function checkMcpConnectivity(mcpUrl: string): Promise<CheckResult> {
  * providers get the captured API error check plus the raw error details.
  */
 export async function runErrorDiagnostics(config: DiagnosticConfig): Promise<DiagnosticResult> {
-  const { authType, workspaceId, rawError, providerType, baseUrl } = config;
+  const { authType, workspaceId, rawError, providerType, baseUrl, connectionSlug, sessionDir } = config;
   const providerLabel = getProviderLabelFromType(providerType, baseUrl);
   const details: string[] = [];
   const defaultResult: CheckResult = { ok: true, detail: '? Check: Timeout' };
@@ -403,7 +412,7 @@ export async function runErrorDiagnostics(config: DiagnosticConfig): Promise<Dia
 
   // 0. FIRST: Check captured API error (most accurate source of truth)
   // This is provider-agnostic — HTTP status codes are universal.
-  checks.push(withTimeout(checkCapturedApiError(providerLabel), 1000, defaultResult));
+  checks.push(withTimeout(checkCapturedApiError(providerLabel, sessionDir), 1000, defaultResult));
 
   // Provider-specific checks: only run for Anthropic-based providers
   // Codex, Copilot, and Pi handle auth internally — no env-var-based checks apply.
@@ -415,12 +424,12 @@ export async function runErrorDiagnostics(config: DiagnosticConfig): Promise<Dia
 
     // 2. API key check with validation (only for api_key auth)
     if (authType === 'api_key') {
-      checks.push(withTimeout(checkApiKey(providerLabel), 5000, defaultResult));
+      checks.push(withTimeout(checkApiKey(providerLabel, connectionSlug, baseUrl), 5000, defaultResult));
     }
 
     // 3. OAuth token check (only for oauth_token auth)
     if (authType === 'oauth_token') {
-      checks.push(withTimeout(checkOAuthToken(providerLabel), 5000, defaultResult));
+      checks.push(withTimeout(checkOAuthToken(providerLabel, connectionSlug), 5000, defaultResult));
     }
   }
 

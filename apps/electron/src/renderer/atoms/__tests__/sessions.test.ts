@@ -11,6 +11,8 @@ import {
   refreshSessionsMetadataAtom,
   initializeSessionsAtom,
   replaceLoadedSessionAtom,
+  appendMessageAtom,
+  updateSessionAtom,
 } from '../sessions'
 
 function msg(id: string, role: Message['role'] = 'user'): Message {
@@ -261,5 +263,45 @@ describe('refreshSessionsMetadataAtom', () => {
 
     // IDs are set
     expect(store.get(sessionIdsAtom)).toHaveLength(2)
+  })
+})
+
+describe('independent renderer session isolation', () => {
+  it('never appends one session canary to a sibling session atom', () => {
+    const store = createStore()
+    store.set(replaceLoadedSessionAtom, makeSession({
+      id: 'session-a',
+      messages: [msg('a-existing')],
+    }))
+    store.set(replaceLoadedSessionAtom, makeSession({
+      id: 'session-b',
+      messages: [msg('b-existing')],
+    }))
+
+    store.set(appendMessageAtom, 'session-a', {
+      id: 'a-canary',
+      role: 'assistant',
+      content: 'CANARY_FROM_SESSION_A',
+      timestamp: 2,
+    })
+
+    expect(store.get(sessionAtomFamily('session-a'))?.messages.map(message => message.content)).toContain('CANARY_FROM_SESSION_A')
+    expect(store.get(sessionAtomFamily('session-b'))?.messages.map(message => message.content)).not.toContain('CANARY_FROM_SESSION_A')
+  })
+
+  it('keeps concurrent processing and metadata updates scoped by sessionId', () => {
+    const store = createStore()
+    store.set(initializeSessionsAtom, [
+      makeSession({ id: 'session-a', name: 'Session A', isProcessing: false }),
+      makeSession({ id: 'session-b', name: 'Session B', isProcessing: false }),
+    ])
+
+    store.set(updateSessionAtom, 'session-a', current => current ? { ...current, isProcessing: true } : current)
+    store.set(updateSessionAtom, 'session-b', current => current ? { ...current, name: 'Session B updated' } : current)
+
+    expect(store.get(sessionAtomFamily('session-a'))?.isProcessing).toBe(true)
+    expect(store.get(sessionAtomFamily('session-a'))?.name).toBe('Session A')
+    expect(store.get(sessionAtomFamily('session-b'))?.isProcessing).toBe(false)
+    expect(store.get(sessionAtomFamily('session-b'))?.name).toBe('Session B updated')
   })
 })

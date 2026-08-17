@@ -1,5 +1,5 @@
 import { query, createSdkMcpServer, tool, AbortError, type Query, type SDKMessage, type SDKUserMessage, type SDKAssistantMessageError, type Options } from '@anthropic-ai/claude-agent-sdk';
-import { getDefaultOptions, resetClaudeConfigCheck } from './options.ts';
+import { buildClaudeSessionEnvOverrides, getDefaultOptions, resetClaudeConfigCheck } from './options.ts';
 // Local type for SDK user message content blocks (text, image, document)
 // Replaces import from @anthropic-ai/sdk/resources — keeps SDK as agent-only dependency
 type ContentBlockParam =
@@ -16,10 +16,7 @@ import { mapClaudeSdkAssistantError, type ClaudeSdkApiError } from './claude-sdk
 import { runErrorDiagnostics } from './diagnostics.ts';
 import { loadStoredConfig, loadConfigDefaults, type Workspace, type AuthType, getDefaultLlmConnection, getLlmConnection } from '../config/storage.ts';
 import { getValidClaudeOAuthToken } from '../auth/state.ts';
-import {
-  clearClaudeBedrockRoutingEnvVars,
-  resolveAuthEnvVars,
-} from '../config/llm-connections.ts';
+import { resolveAuthEnvVars } from '../config/llm-connections.ts';
 import type { McpClientPool } from '../mcp/mcp-pool.ts';
 import { proxyToolName } from '../mcp/proxy-tool-name.ts';
 import { loadPlanFromPath, type SessionConfig as Session } from '../sessions/storage.ts';
@@ -229,6 +226,23 @@ export interface ClaudeAgentConfig {
   mcpPool?: McpClientPool;
   /** LLM connection slug for credential lookup in postInit(). */
   connectionSlug?: string;
+}
+
+export function buildClaudeResumeOptions(input: {
+  isRetry: boolean;
+  sessionId: string | null;
+  branchFromSdkSessionId: string | null;
+  branchFromSdkTurnId: string | null;
+}): Partial<Pick<Options, 'resume' | 'forkSession' | 'resumeSessionAt'>> {
+  if (input.isRetry) return {};
+  if (input.sessionId) return { resume: input.sessionId };
+  if (!input.branchFromSdkSessionId) return {};
+
+  return {
+    resume: input.branchFromSdkSessionId,
+    forkSession: true,
+    ...(input.branchFromSdkTurnId ? { resumeSessionAt: input.branchFromSdkTurnId } : {}),
+  };
 }
 
 // Permission request tracking
@@ -847,27 +861,29 @@ export class ClaudeAgent extends BaseAgent {
 
   /**
    * Post-construction auth setup.
-   * Fetches credentials and sets process.env before the SDK subprocess spawns.
-   * The subprocess spawns lazily on first chat(), so postInit() is early enough.
+   * Fetches credentials into per-session overrides before the SDK subprocess
+   * spawns. The host process environment is intentionally left untouched so
+   * concurrent sessions cannot replace each other's credentials or endpoint.
    */
   override async postInit(): Promise<PostInitResult> {
     const slug = this.config.connectionSlug;
     if (!slug) {
+      this.config.envOverrides = buildClaudeSessionEnvOverrides(this.config.envOverrides, {});
       return { authInjected: false, authWarning: 'No connection slug available', authWarningLevel: 'error' };
     }
 
     const connection = getLlmConnection(slug);
     if (!connection) {
+      this.config.envOverrides = buildClaudeSessionEnvOverrides(this.config.envOverrides, {});
       return { authInjected: false, authWarning: `Connection not found: ${slug}`, authWarningLevel: 'error' };
     }
 
-    // Clear all auth env vars first for clean state.
-    // Claude subprocesses must never inherit Bedrock-routing toggles from a
-    // previous connection or parent process environment.
-    delete process.env.ANTHROPIC_API_KEY;
-    delete process.env.CLAUDE_CODE_OAUTH_TOKEN;
-    delete process.env.ANTHROPIC_BASE_URL;
-    clearClaudeBedrockRoutingEnvVars();
+    const inheritProcessAuth = connection.authType === 'environment';
+    this.config.envOverrides = buildClaudeSessionEnvOverrides(
+      this.config.envOverrides,
+      {},
+      { inheritProcessAuth, miniModel: this.config.miniModel },
+    );
 
     // Resolve auth env vars via shared utility
     const manager = getCredentialManager();
@@ -877,18 +893,11 @@ export class ClaudeAgent extends BaseAgent {
       return { authInjected: false, authWarning: result.warning, authWarningLevel: 'error' };
     }
 
-    // Apply env vars to process.env (for SDK subprocess) and envOverrides (per-session isolation)
-    for (const [key, value] of Object.entries(result.envVars)) {
-      process.env[key] = value;
-    }
-
-    // Pass mini model to SDK subprocess so built-in tools like WebFetch
-    // use the correct summarization model (instead of hardcoded Haiku).
-    // This is critical for custom providers where the default Haiku model ID
-    // doesn't exist on the provider's endpoint.
-    if (this.config.miniModel) {
-      process.env.ANTHROPIC_DEFAULT_HAIKU_MODEL = this.config.miniModel;
-    }
+    this.config.envOverrides = buildClaudeSessionEnvOverrides(
+      this.config.envOverrides,
+      result.envVars,
+      { inheritProcessAuth, miniModel: this.config.miniModel },
+    );
 
     return { authInjected: true };
   }
@@ -1106,11 +1115,15 @@ export class ClaudeAgent extends BaseAgent {
       const model = this._model;
 
       // Log provider context for diagnostics (custom base URL = third-party provider)
-      const defaultConnSlug = getDefaultLlmConnection();
-      const defaultConn = defaultConnSlug ? getLlmConnection(defaultConnSlug) : null;
-      const activeBaseUrl = defaultConn?.baseUrl;
+      const activeConnectionSlug = this.config.connectionSlug ?? getDefaultLlmConnection();
+      const activeConnection = activeConnectionSlug ? getLlmConnection(activeConnectionSlug) : null;
+      const activeBaseUrl = this.config.envOverrides?.ANTHROPIC_BASE_URL ?? activeConnection?.baseUrl;
       if (activeBaseUrl) {
-        debug(`[chat] Custom provider: baseUrl=${activeBaseUrl}, model=${model}, hasApiKey=${!!process.env.ANTHROPIC_API_KEY}`);
+        const hasApiKey = Boolean(
+          this.config.envOverrides?.ANTHROPIC_API_KEY ||
+          (activeConnection?.authType === 'environment' && process.env.ANTHROPIC_API_KEY),
+        );
+        debug(`[chat] Custom provider: baseUrl=${activeBaseUrl}, model=${model}, hasApiKey=${hasApiKey}`);
       }
 
       const thinkingOptions = resolveClaudeThinkingOptions({
@@ -1544,17 +1557,12 @@ export class ClaudeAgent extends BaseAgent {
         // Continue from previous session if we have one (enables conversation history & auto compaction)
         // Skip resume on retry (after session expiry) to start fresh
         // For branched sessions: fork the parent session so the agent has full conversation context
-        ...(!_isRetry && this.sessionId
-          ? { resume: this.sessionId }
-          : !_isRetry && this.branchFromSdkSessionId
-            ? {
-                resume: this.branchFromSdkSessionId,
-                forkSession: true,
-                // Trim the forked conversation at the branch point so the model
-                // only sees messages up to where the user branched, not the full parent.
-                ...(this.branchFromSdkTurnId ? { resumeSessionAt: this.branchFromSdkTurnId } : {}),
-              }
-            : {}),
+        ...buildClaudeResumeOptions({
+          isRetry: _isRetry,
+          sessionId: this.sessionId,
+          branchFromSdkSessionId: this.branchFromSdkSessionId,
+          branchFromSdkTurnId: this.branchFromSdkTurnId,
+        }),
         mcpServers,
         // No `canUseTool`: `permissionMode: 'bypassPermissions'` shadows it (SDK never calls it,
         // and since SDK 0.3.198 the combination triggers a runtime warning on every query).
@@ -2237,10 +2245,9 @@ This is a branched conversation. All prior messages in this conversation are par
           debug('[SESSION_DEBUG] >>> TAKING PATH: Run diagnostics (not session expired)');
 
           // Run diagnostics to identify specific cause (2s timeout)
-          // Derive authType from the default LLM connection
-          const { getDefaultLlmConnection, getLlmConnection } = await import('../config/storage.ts');
-          const defaultConnSlug = getDefaultLlmConnection();
-          const connection = defaultConnSlug ? getLlmConnection(defaultConnSlug) : null;
+          // Diagnose against the connection and interceptor state owned by this session.
+          const connectionSlug = this.config.connectionSlug ?? getDefaultLlmConnection();
+          const connection = connectionSlug ? getLlmConnection(connectionSlug) : null;
           // Map connection authType to legacy AuthType format for diagnostics
           let diagnosticAuthType: AuthType | undefined;
           if (connection) {
@@ -2255,7 +2262,11 @@ This is a branched conversation. All prior messages in this conversation are par
             workspaceId: this.config.workspace?.id,
             rawError: stderrContext || rawErrorMsg,
             providerType: this.config.providerType || connection?.providerType,
-            baseUrl: connection?.baseUrl,
+            baseUrl: this.config.envOverrides?.ANTHROPIC_BASE_URL ?? connection?.baseUrl,
+            connectionSlug: connectionSlug ?? undefined,
+            sessionDir: this.config.session?.id
+              ? getSessionPath(this.workspaceRootPath, this.config.session.id)
+              : undefined,
           });
 
           debug('[SESSION_DEBUG] diagnostics.code:', diagnostics.code);
@@ -2614,8 +2625,9 @@ This is a branched conversation. All prior messages in this conversation are par
   }
 
   /**
-   * Pop a recent captured API error, preferring the session-scoped file.
-   * Falls back to the legacy global file for backward compatibility.
+   * Pop a recent captured API error owned by this session. A session-scoped
+   * miss must not fall back to process-global state because another concurrent
+   * session may currently own that file.
    */
   private getCapturedApiErrorForSession() {
     const sessionId = this.config.session?.id;
@@ -2624,7 +2636,7 @@ This is a branched conversation. All prior messages in this conversation are par
     }
 
     const sessionDir = getSessionPath(this.workspaceRootPath, sessionId);
-    return getLastApiError(sessionDir) ?? getLastApiError();
+    return getLastApiError(sessionDir);
   }
 
   /**

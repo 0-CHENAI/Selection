@@ -78,6 +78,7 @@ import { resolveSearchProvider } from './tools/search/resolve-provider.ts';
 import { createSearchTool } from './tools/search/create-search-tool.ts';
 import { allowCraftMetadataProperties, stripCraftMetadata } from './craft-metadata-schema.ts';
 import { applySystemPromptOverride } from './system-prompt-override.ts';
+import { resolvePiSessionPaths } from './session-paths.ts';
 
 // ============================================================
 // Types — JSONL Protocol
@@ -585,7 +586,7 @@ async function ensureSession(): Promise<AgentSession> {
   // Extension isolation: set agentDir to a temp directory under session path
   // to prevent loading global Pi extensions from ~/.pi/agent
   if (initConfig.sessionPath) {
-    const agentDir = initConfig.agentDir || join(initConfig.sessionPath, '.pi-agent');
+    const { agentDir, sessionDir } = resolvePiSessionPaths(initConfig.sessionPath, initConfig.agentDir);
     mkdirSync(agentDir, { recursive: true });
     sessionOptions.agentDir = agentDir;
 
@@ -593,7 +594,6 @@ async function ensureSession(): Promise<AgentSession> {
     // persist and resume its own session across subprocess restarts.
     // continueRecent() loads the existing session if one exists, otherwise
     // creates a new one — so this handles both first-run and resume.
-    const sessionDir = join(initConfig.sessionPath, '.pi-sessions');
     mkdirSync(sessionDir, { recursive: true });
 
     if (initConfig.branchFromSessionPath) {

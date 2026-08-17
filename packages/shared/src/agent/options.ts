@@ -17,6 +17,46 @@ export const SELECTION_MANAGED_SETTINGS = {
     autoDreamEnabled: false,
 } satisfies NonNullable<Options['managedSettings']>;
 
+const CLAUDE_SESSION_CREDENTIAL_ENV_KEYS = [
+    'ANTHROPIC_API_KEY',
+    'CLAUDE_CODE_OAUTH_TOKEN',
+] as const;
+
+const CLAUDE_SESSION_AUTH_ENV_KEYS = [
+    ...CLAUDE_SESSION_CREDENTIAL_ENV_KEYS,
+    'ANTHROPIC_BASE_URL',
+] as const;
+
+/** Internal marker consumed before spawning; never forwarded to the SDK. */
+export const CRAFT_MANAGED_ANTHROPIC_AUTH = 'CRAFT_MANAGED_ANTHROPIC_AUTH';
+
+/**
+ * Replace connection-specific Claude auth without mutating process.env.
+ * Environment-auth connections deliberately inherit the launch environment;
+ * every configured/keychain-backed connection instead starts from a clean set.
+ */
+export function buildClaudeSessionEnvOverrides(
+    existing: Record<string, string> | undefined,
+    authEnv: Record<string, string>,
+    options?: { inheritProcessAuth?: boolean; miniModel?: string },
+): Record<string, string> {
+    const next = { ...existing };
+    for (const key of CLAUDE_SESSION_AUTH_ENV_KEYS) {
+        delete next[key];
+    }
+    delete next[CRAFT_MANAGED_ANTHROPIC_AUTH];
+    delete next.ANTHROPIC_DEFAULT_HAIKU_MODEL;
+
+    if (!options?.inheritProcessAuth) {
+        next[CRAFT_MANAGED_ANTHROPIC_AUTH] = '1';
+    }
+    Object.assign(next, authEnv);
+    if (options?.miniModel) {
+        next.ANTHROPIC_DEFAULT_HAIKU_MODEL = options.miniModel;
+    }
+    return next;
+}
+
 // UTF-8 BOM character — Windows editors/processes sometimes prepend this to files.
 // JSON parsers reject BOM, but the file content after BOM may be valid JSON.
 const UTF8_BOM = '\uFEFF';
@@ -195,10 +235,19 @@ export function buildClaudeSubprocessEnv(
     const env: NodeJS.ProcessEnv = {
         ...process.env,
         ...getProxyEnvVars(),
-        ...envOverrides,
         // Propagate debug mode from argv flag OR existing env var
         CRAFT_DEBUG: (process.argv.includes('--debug') || process.env.CRAFT_DEBUG === '1') ? '1' : '0',
     };
+
+    const hasExplicitCredential = CLAUDE_SESSION_CREDENTIAL_ENV_KEYS
+        .some((key) => Object.prototype.hasOwnProperty.call(envOverrides, key));
+    if (envOverrides?.[CRAFT_MANAGED_ANTHROPIC_AUTH] === '1' || hasExplicitCredential) {
+        for (const key of CLAUDE_SESSION_AUTH_ENV_KEYS) {
+            delete env[key];
+        }
+    }
+    Object.assign(env, envOverrides);
+    delete env[CRAFT_MANAGED_ANTHROPIC_AUTH];
 
     // Windows: point the SDK's Bash tool at the user-configured Git Bash if set.
     // The SDK otherwise falls back to a hardcoded Program Files search that misses
