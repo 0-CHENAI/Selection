@@ -150,9 +150,14 @@ export function isPathInPlansDir(path: string, workspacePath: string, sessionId:
 /**
  * Convert shared ToolResult to SDK format
  */
-function convertResult(result: ToolResult): { content: Array<{ type: 'text'; text: string }>; isError?: boolean } {
+function convertResult(result: ToolResult): {
+  content: Array<{ type: 'text'; text: string }>;
+  structuredContent?: Record<string, unknown>;
+  isError?: boolean;
+} {
   return {
     content: result.content.map(c => ({ type: 'text' as const, text: c.text })),
+    ...(result.structuredContent ? { structuredContent: result.structuredContent } : {}),
     ...(result.isError ? { isError: true } : {}),
   };
 }
@@ -217,9 +222,10 @@ const TOOL_DESCRIPTIONS: Record<string, string> = {
 export function getSessionScopedTools(
   sessionId: string,
   workspaceRootPath: string,
-  workspaceId?: string
+  workspaceId?: string,
+  workingDirectory?: string,
 ): ReturnType<typeof createSdkMcpServer> {
-  const cacheKey = `${sessionId}::${workspaceRootPath}`;
+  const cacheKey = `${sessionId}::${workspaceRootPath}::${workingDirectory ?? ''}`;
 
   // Return cached tools if available, but always create a fresh MCP server wrapper
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -230,6 +236,7 @@ export function getSessionScopedTools(
       sessionId,
       workspacePath: workspaceRootPath,
       workspaceId: workspaceId || basename(workspaceRootPath) || '',
+      workingDirectory,
       onPlanSubmitted: (planPath: string) => {
         setLastPlanFilePath(sessionId, planPath);
         const callbacks = getSessionScopedToolCallbacks(sessionId);

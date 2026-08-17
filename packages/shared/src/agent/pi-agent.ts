@@ -1478,7 +1478,12 @@ export class PiAgent extends BaseAgent {
    * Cached per agent instance since the workspace/session don't change.
    */
   private getSessionToolContext(): SessionToolContext {
-    if (this._sessionToolContext) return this._sessionToolContext;
+    if (this._sessionToolContext) {
+      // The project directory can change while the agent stays alive. Keep the
+      // cached tool context in sync so relative Office paths follow the session.
+      this._sessionToolContext.workingDirectory = this.config.session?.workingDirectory;
+      return this._sessionToolContext;
+    }
 
     const sessionId = this.config.session?.id || '';
     const workspacePath = this.config.workspace.rootPath;
@@ -1488,6 +1493,7 @@ export class PiAgent extends BaseAgent {
       sessionId,
       workspacePath,
       workspaceId,
+      workingDirectory: this.config.session?.workingDirectory,
       onPlanSubmitted: (planPath: string) => {
         setLastPlanFilePath(sessionId, planPath);
         this.onPlanSubmitted?.(planPath);

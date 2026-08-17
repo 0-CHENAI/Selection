@@ -13,12 +13,13 @@
  * stderr and handles these callbacks.
  *
  * Usage:
- *   node session-mcp-server.js --session-id <id> --workspace-root <path> --plans-folder <path>
+ *   node session-mcp-server.js --session-id <id> --workspace-root <path> --plans-folder <path> [--working-directory <path>]
  *
  * Arguments:
  *   --session-id: Unique session identifier
  *   --workspace-root: Path to workspace folder (~/.selection/workspaces/{id})
  *   --plans-folder: Path to session's plans folder
+ *   --working-directory: Optional project working directory for relative tool paths
  */
 
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
@@ -57,6 +58,7 @@ interface SessionConfig {
   sessionId: string;
   workspaceRootPath: string;
   plansFolderPath: string;
+  workingDirectory?: string;
   callbackPort?: string;
 }
 
@@ -205,6 +207,7 @@ function createCodexContext(config: SessionConfig): SessionToolContext {
     plansFolderPath,
     sessionPath: sessionsDir,
     dataPath: sessionDataDir,
+    workingDirectory: config.workingDirectory ?? process.cwd(),
     callbacks,
     fs,
     loadSourceConfig: (sourceSlug: string): SourceConfig | null => {
@@ -265,6 +268,7 @@ function createSessionTools(includeDeveloperFeedback: boolean): Tool[] {
     name: def.name,
     description: def.description,
     inputSchema: def.inputSchema as Tool['inputSchema'],
+    ...(def.annotations ? { annotations: def.annotations } : {}),
   }));
 }
 
@@ -471,6 +475,7 @@ async function main() {
   let sessionId: string | undefined;
   let workspaceRootPath: string | undefined;
   let plansFolderPath: string | undefined;
+  let workingDirectory: string | undefined;
   let callbackPort: string | undefined;
 
   for (let i = 0; i < args.length; i++) {
@@ -483,6 +488,9 @@ async function main() {
     } else if (args[i] === '--plans-folder' && args[i + 1]) {
       plansFolderPath = args[i + 1];
       i++;
+    } else if (args[i] === '--working-directory' && args[i + 1]) {
+      workingDirectory = args[i + 1];
+      i++;
     } else if (args[i] === '--callback-port' && args[i + 1]) {
       callbackPort = args[i + 1];
       i++;
@@ -490,7 +498,7 @@ async function main() {
   }
 
   if (!sessionId || !workspaceRootPath || !plansFolderPath) {
-    console.error('Usage: session-mcp-server --session-id <id> --workspace-root <path> --plans-folder <path>');
+    console.error('Usage: session-mcp-server --session-id <id> --workspace-root <path> --plans-folder <path> [--working-directory <path>]');
     process.exit(1);
   }
 
@@ -498,6 +506,7 @@ async function main() {
     sessionId,
     workspaceRootPath,
     plansFolderPath,
+    workingDirectory,
     // CLI arg takes priority, env var as fallback (Copilot CLI may not forward env to subprocesses)
     callbackPort: callbackPort || process.env.CRAFT_LLM_CALLBACK_PORT,
   };

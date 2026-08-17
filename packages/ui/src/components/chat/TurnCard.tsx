@@ -396,6 +396,8 @@ function getToolDisplayName(name: string): string {
     'list_background_tasks': 'List Background Tasks',
     'send_agent_message': 'Send Agent Message',
     'spawn_session': 'Spawn Session',
+    'office_document_inspect': 'Inspect Office Document',
+    'office_document_edit': 'Edit Office Document',
   }
 
   return displayNames[stripped] || stripped

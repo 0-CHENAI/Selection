@@ -616,6 +616,8 @@ async function resolveToolDisplayMeta(
           'update_user_preferences': 'Update Preferences',
           'send_developer_feedback': 'Send Feedback',
           'browser_tool': 'Browser',
+          'office_document_inspect': 'Inspect Office Document',
+          'office_document_edit': 'Edit Office Document',
         },
         'craft-agents-docs': {
           'SearchCraftAgents': 'Search Docs',
@@ -745,6 +747,8 @@ async function resolveToolDisplayMeta(
     'NotebookEdit': 'Edit Notebook',
     'KillShell': 'Kill Shell',
     'TaskOutput': 'Task Output',
+    'office_document_inspect': 'Inspect Office Document',
+    'office_document_edit': 'Edit Office Document',
   }
 
   const nativeDisplayName = nativeToolNames[toolName]
