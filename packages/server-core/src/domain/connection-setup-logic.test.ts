@@ -5,6 +5,8 @@ import {
   setupTestRequiresApiKey,
   resolveCustomEndpointSetup,
   createBuiltInConnection,
+  validateModelList,
+  splitModelIdList,
 } from './connection-setup-logic'
 
 describe('validateSetupTestInput', () => {
@@ -143,5 +145,21 @@ describe('createBuiltInConnection seeds midStreamBehavior', () => {
     const conn = createBuiltInConnection('anthropic-api', 'http://localhost:11434/v1')
     expect(conn.providerType).toBe('pi_compat')
     expect(conn.midStreamBehavior).toBe('steer')
+  })
+})
+
+describe('validateModelList multi-select defaults', () => {
+  it('splits joined model lists', () => {
+    expect(splitModelIdList('Opus, Laufry')).toEqual(['Opus', 'Laufry'])
+    expect(splitModelIdList('Opus，Laufry')).toEqual(['Opus', 'Laufry'])
+  })
+
+  it('resolves a joined default to the first model that exists in the list', () => {
+    const result = validateModelList(
+      ['Opus', 'Laufry'],
+      'Opus, Laufry',
+    )
+    expect(result.valid).toBe(true)
+    expect(result.resolvedDefaultModel).toBe('Opus')
   })
 })

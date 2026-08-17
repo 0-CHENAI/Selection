@@ -12,6 +12,8 @@ import {
   getDefaultModelsForConnection,
   getDefaultModelForConnection,
   defaultMidStreamBehavior,
+  isOrderGatewayUrl,
+  ORDER_CONNECTION_NAME,
 } from '@craft-agent/shared/config'
 
 // ============================================================
@@ -224,6 +226,10 @@ export function createBuiltInConnection(slug: string, baseUrl?: string | null): 
     ? template.name(hasCustomEndpoint)
     : template.name
 
+  if (isOrderGatewayUrl(baseUrl)) {
+    name = ORDER_CONNECTION_NAME
+  }
+
   // Append suffix number to name for derived connections (e.g. 'anthropic-api-2' → 'Anthropic (API Key) 2')
   const suffixMatch = slug.match(/-(\d+)$/)
   if (suffixMatch && !BUILT_IN_CONNECTION_TEMPLATES[slug]) {
@@ -256,6 +262,14 @@ export function createBuiltInConnection(slug: string, baseUrl?: string | null): 
  * to fix a bug where Array.includes() compared strings against ModelDefinition
  * objects, always returning false for Pi connections.
  */
+/** Split a typed/joined model field. ASCII, fullwidth, and enumeration commas. */
+export function splitModelIdList(value: string): string[] {
+  return value
+    .split(/[,，、]/)
+    .map((entry) => entry.trim())
+    .filter(Boolean)
+}
+
 export function validateModelList(
   models: Array<ModelDefinition | string>,
   defaultModel: string | undefined,
@@ -267,6 +281,12 @@ export function validateModelList(
   const modelIds = models.map(m => typeof m === 'string' ? m : m.id)
 
   if (defaultModel && !modelIds.includes(defaultModel)) {
+    // Multi-select forms used to submit the joined string as the default
+    // ("Opus, Laufry"). Recover the first listed id that is actually in models.
+    const fromList = splitModelIdList(defaultModel).find((id) => modelIds.includes(id))
+    if (fromList) {
+      return { valid: true, resolvedDefaultModel: fromList }
+    }
     return {
       valid: false,
       error: `Default model "${defaultModel}" is not in the provided model list.`,

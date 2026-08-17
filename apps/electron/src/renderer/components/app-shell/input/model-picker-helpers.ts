@@ -1,7 +1,10 @@
 import {
+  connectionModelIdsMatch,
+  getModelsForProviderType,
   isLocalConnection,
   type LlmConnection,
 } from '@config/llm-connections'
+import type { ModelDefinition } from '@config/models'
 
 /**
  * Format token count for display (e.g., 1500 -> "1.5k", 200000 -> "200k").
@@ -23,6 +26,27 @@ export function formatTokenCount(tokens: number): string {
  */
 export function stripPiPrefixForDisplay(value: string): string {
   return value.startsWith('pi/') ? value.slice(3) : value
+}
+
+export function pickerModelId(model: ModelDefinition | string): string {
+  return typeof model === 'string' ? model : model.id
+}
+
+export function isPickerModelSelected(currentModel: string, modelId: string): boolean {
+  return connectionModelIdsMatch(currentModel, modelId)
+}
+
+/**
+ * Models shown in the chat picker. Compat connections never fall back to the
+ * Anthropic catalog — that would let users pick Claude IDs on ORDER/OpenAI.
+ */
+export function resolvePickerModels(
+  connection: Pick<LlmConnection, 'providerType' | 'models' | 'defaultModel' | 'piAuthProvider'> | null | undefined,
+): Array<ModelDefinition | string> {
+  if (!connection) return []
+  if (connection.models && connection.models.length > 0) return connection.models
+  if (connection.defaultModel) return [connection.defaultModel]
+  return getModelsForProviderType(connection.providerType, connection.piAuthProvider)
 }
 
 export type ConnectionGroup = [groupName: string, connections: LlmConnection[]]

@@ -45,6 +45,7 @@ import type { Workspace, AuthType } from '@craft-agent/core/types';
 // Import LLM connection types and constants
 import type { LlmConnection } from './llm-connections.ts';
 import { isValidProviderAuthCombination, getDefaultModelsForConnection, getDefaultModelForConnection, isPiProvider, toBedrockNativeId, type LlmProviderType } from './llm-connections.ts';
+import { isGenericCustomEndpointName, isOrderGatewayUrl, ORDER_CONNECTION_NAME } from './order-gateway.ts';
 import {
   getModelProvider,
   getModelById,
@@ -1656,6 +1657,11 @@ function backfillAllConnectionModels(config: StoredConfig): boolean {
     // Repair previously broken API-key migration first.
     if (shouldRepairPiApiKeyCodexProvider(connection)) {
       connection.piAuthProvider = 'openai';
+      changed = true;
+    }
+
+    if (isOrderGatewayUrl(connection.baseUrl) && isGenericCustomEndpointName(connection.name)) {
+      connection.name = ORDER_CONNECTION_NAME;
       changed = true;
     }
 

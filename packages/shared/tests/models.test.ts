@@ -11,6 +11,8 @@ import {
   ANTHROPIC_MODELS,
   getModelIdByShortName,
   normalizeDeprecatedModelId,
+  compactionTriggerTokens,
+  COMPACTION_RESERVE_TOKENS,
 } from '../src/config/models.ts';
 
 describe('isClaudeModel', () => {
@@ -137,5 +139,17 @@ describe('Sonnet registry', () => {
   it('maps Bedrock Sonnet 5 IDs back to the bare ID', () => {
     expect(getModelById('us.anthropic.claude-sonnet-5')?.id).toBe('claude-sonnet-5');
     expect(getModelById('anthropic.claude-sonnet-5')?.id).toBe('claude-sonnet-5');
+  });
+});
+
+describe('compactionTriggerTokens', () => {
+  it('reserves the Pi default 16k from the model window', () => {
+    expect(compactionTriggerTokens(131_072)).toBe(131_072 - COMPACTION_RESERVE_TOKENS);
+    expect(compactionTriggerTokens(1_000_000)).toBe(1_000_000 - COMPACTION_RESERVE_TOKENS);
+  });
+
+  it('never returns a non-positive trigger for a valid window', () => {
+    expect(compactionTriggerTokens(8_192)).toBe(1);
+    expect(compactionTriggerTokens(0)).toBe(0);
   });
 });

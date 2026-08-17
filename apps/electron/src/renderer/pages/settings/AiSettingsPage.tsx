@@ -9,14 +9,14 @@
  * Follows the Appearance settings pattern: app-level defaults + workspace overrides.
  */
 
-import { useState, useEffect, useCallback, useMemo } from 'react'
+import { useState, useEffect, useCallback, useMemo, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 import { PanelHeader } from '@/components/app-shell/PanelHeader'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Button } from '@/components/ui/button'
 import { HeaderMenu } from '@/components/ui/HeaderMenu'
 import { routes } from '@/lib/navigate'
-import { X, MoreHorizontal, Pencil, Trash2, Star, ChevronDown, ChevronRight, CheckCircle2, AlertTriangle, RefreshCcw, Settings2, MessageSquareMore, Zap, Clock, Check } from 'lucide-react'
+import { X, MoreHorizontal, Pencil, Trash2, Star, ChevronDown, ChevronRight, CheckCircle2, XCircle, AlertTriangle, RefreshCcw, Settings2, MessageSquareMore, Zap, Clock, Check } from 'lucide-react'
 import type { CredentialHealthStatus, CredentialHealthIssue } from '../../../shared/types'
 import { Spinner, FullscreenOverlayBase, Tooltip, TooltipTrigger, TooltipContent } from '@craft-agent/ui'
 import { useSetAtom } from 'jotai'
@@ -53,6 +53,7 @@ import { RenameDialog } from '@/components/ui/rename-dialog'
 import { useAppShellContext } from '@/context/AppShellContext'
 import { getModelShortName, type ModelDefinition } from '@config/models'
 import { getModelsForProviderType, resolveMidStreamBehavior, type CustomEndpointApi, type MidStreamBehavior } from '@config/llm-connections'
+import { displayLlmConnectionName, isOrderGatewayUrl, isOrderOpenAiUrl } from '@config/order-gateway'
 import { toast } from 'sonner'
 
 /**
@@ -212,11 +213,35 @@ function ConnectionRow({ connection, isLastConnection, onRenameClick, onDelete, 
   }, [connection.providerType, connection.type, connection.piAuthProvider, connection.baseUrl])
 
   // Build description with provider, default indicator, auth status, and validation state
-  const getDescription = () => {
-    // Show validation state if not idle
-    if (validationState === 'validating') return t("settings.ai.validating")
-    if (validationState === 'success') return t("settings.ai.connectionValid")
-    if (validationState === 'error') return validationError || t("settings.ai.validationFailed")
+  const getDescription = (): ReactNode => {
+    if (validationState === 'validating') {
+      return (
+        <span className="inline-flex items-center gap-1.5 min-w-0">
+          <Spinner className="h-3.5 w-3.5 shrink-0" />
+          <span className="truncate">{t("settings.ai.validating")}</span>
+        </span>
+      )
+    }
+    if (validationState === 'success') {
+      return (
+        <span className="inline-flex items-center gap-1.5 min-w-0 text-success">
+          <CheckCircle2 className="h-3.5 w-3.5 shrink-0" />
+          <span className="truncate">{t("settings.ai.connectionValid")}</span>
+        </span>
+      )
+    }
+    if (validationState === 'error') {
+      return (
+        <span className="inline-flex items-center gap-1.5 min-w-0 text-destructive">
+          <XCircle className="h-3.5 w-3.5 shrink-0" />
+          <span className="truncate">{validationError || t("settings.ai.validationFailed")}</span>
+        </span>
+      )
+    }
+
+    if (isOrderGatewayUrl(connection.baseUrl)) {
+      return t('settings.ai.orderConnectionDesc')
+    }
 
     const parts: string[] = []
 
@@ -235,9 +260,15 @@ function ConnectionRow({ connection, isLastConnection, onRenameClick, onDelete, 
         break
       }
       case 'pi_compat':
-        parts.push(connection.baseUrl?.toLowerCase().includes('manifest.build')
-          ? 'Manifest'
-          : 'Selection Backend Compatible')
+        if (isOrderGatewayUrl(connection.baseUrl)) {
+          parts.push(connection.customEndpoint?.api === 'openai-completions'
+            ? t('apiSetup.format.openaiCompatible')
+            : t('apiSetup.format.anthropicCompatible'))
+        } else {
+          parts.push(connection.baseUrl?.toLowerCase().includes('manifest.build')
+            ? 'Manifest'
+            : 'Selection Backend Compatible')
+        }
         break
       default: parts.push(provider || 'Unknown')
     }
@@ -282,7 +313,7 @@ function ConnectionRow({ connection, isLastConnection, onRenameClick, onDelete, 
         <div className="flex flex-col gap-0.5 min-w-0">
           <div className="flex items-center gap-1">
             <ConnectionIcon connection={connection} size={14} />
-            <span>{connection.name}</span>
+            <span>{displayLlmConnectionName(connection)}</span>
             {connection.isDefault && (
               <span className="inline-flex items-center h-5 px-2 text-[11px] font-medium rounded-[4px] bg-background shadow-minimal text-foreground/60">
                 {t("common.default")}
@@ -626,6 +657,7 @@ export default function AiSettingsPage() {
     activePreset?: string
     models?: string[]
     modelImageCaps?: Record<string, boolean>
+    modelContextWindows?: Record<string, number>
     customApi?: CustomEndpointApi
   } | undefined>(undefined)
   const setFullscreenOverlayOpen = useSetAtom(fullscreenOverlayOpenAtom)
@@ -812,15 +844,28 @@ export default function AiSettingsPage() {
       }),
     )
 
+    const modelContextWindows = Object.fromEntries(
+      (connection.models ?? []).flatMap((entry) => {
+        if (typeof entry === 'string' || typeof entry.contextWindow !== 'number' || entry.contextWindow <= 0) {
+          return []
+        }
+        return [[entry.id, entry.contextWindow]] as Array<[string, number]>
+      }),
+    )
+
     const isCustomEndpointConnection = !!connection.customEndpoint && !!connection.baseUrl?.trim()
+    const activePreset = isOrderGatewayUrl(connection.baseUrl)
+      ? (isOrderOpenAiUrl(connection.baseUrl) ? 'order-openai' : 'order-anthropic')
+      : isCustomEndpointConnection ? 'custom' : (connection.piAuthProvider || undefined)
 
     setEditInitialValues({
       apiKey,
       baseUrl: connection.baseUrl,
       connectionDefaultModel: modelStr,
-      activePreset: isCustomEndpointConnection ? 'custom' : (connection.piAuthProvider || undefined),
+      activePreset,
       models: modelIds,
       modelImageCaps,
+      modelContextWindows,
       customApi: connection.customEndpoint?.api,
     })
 
@@ -996,8 +1041,12 @@ export default function AiSettingsPage() {
                     onValueChange={handleSetDefaultConnection}
                     options={llmConnections.map((conn) => ({
                       value: conn.slug,
-                      label: conn.name,
-                      description: conn.providerType === 'anthropic' ? 'Anthropic API' :
+                      label: displayLlmConnectionName(conn),
+                      description: isOrderGatewayUrl(conn.baseUrl)
+                        ? (conn.customEndpoint?.api === 'openai-completions'
+                          ? t('apiSetup.format.openaiCompatible')
+                          : t('apiSetup.format.anthropicCompatible'))
+                        : conn.providerType === 'anthropic' ? 'Anthropic API' :
                                    conn.providerType === 'pi' ? 'Selection Backend' :
                                    conn.providerType === 'pi_compat' ? (conn.baseUrl?.toLowerCase().includes('manifest.build') ? 'Manifest' : 'Selection Backend Compatible') :
                                    conn.providerType || 'Unknown',

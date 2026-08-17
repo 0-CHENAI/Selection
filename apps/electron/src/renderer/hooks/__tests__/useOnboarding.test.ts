@@ -1,10 +1,14 @@
-import { describe, it, expect } from 'bun:test'
-import {
+import { describe, it, expect, mock } from 'bun:test'
+import type { ApiSetupMethod } from '@/components/onboarding'
+
+mock.module('pdfjs-dist/build/pdf.worker.min.mjs?url', () => ({ default: '' }))
+mock.module('pdfjs-dist', () => ({ GlobalWorkerOptions: { workerSrc: '' }, getDocument: () => ({}) }))
+
+const {
   resolveSlugForMethod,
   apiSetupMethodToConnectionSetup,
   BASE_SLUG_FOR_METHOD,
-} from '../useOnboarding'
-import type { ApiSetupMethod } from '@/components/onboarding'
+} = await import('../useOnboarding')
 
 // ============================================================
 // resolveSlugForMethod
@@ -60,6 +64,30 @@ describe('apiSetupMethodToConnectionSetup', () => {
     expect(setup.baseUrl).toBe('https://custom.api')
     expect(setup.defaultModel).toBe('claude-sonnet-4-6')
     expect(setup.models).toEqual(['model-a'])
+  })
+
+  it('ORDER multi-select persists both model objects and the first as default', () => {
+    const models = [
+      { id: 'Opus', name: 'Opus', shortName: 'Opus', supportsImages: true },
+      { id: 'Laufry', name: 'Laufry', shortName: 'Laufry' },
+    ]
+    const setup = apiSetupMethodToConnectionSetup(
+      'anthropic_api_key',
+      {
+        credential: 'sk-order',
+        baseUrl: 'https://order.ai.jxepdi.top',
+        connectionDefaultModel: 'Opus',
+        models,
+        customEndpoint: { api: 'anthropic-messages' },
+        modelSelectionMode: 'userDefined3Tier',
+      },
+      null,
+      new Set(),
+    )
+    expect(setup.defaultModel).toBe('Opus')
+    expect(setup.models).toEqual(models)
+    expect(setup.customEndpoint).toEqual({ api: 'anthropic-messages' })
+    expect(setup.modelSelectionMode).toBe('userDefined3Tier')
   })
 
   it('claude_oauth includes only credential', () => {

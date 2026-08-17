@@ -19,11 +19,13 @@ import {
 import {
   connectionModelIdsMatch,
   inferModelSupportsImages,
+  resolveCustomModelContextWindow,
 } from './model-image-support';
 export {
   connectionModelIdsMatch,
   inferModelSupportsImages,
   normalizeConnectionModelId,
+  resolveCustomModelContextWindow,
   toCustomEndpointModelPayload,
 } from './model-image-support';
 import type { CredentialManager } from '../credentials/manager.ts';
@@ -576,6 +578,17 @@ export function modelSupportsImages(
   }
   const entryName = entry && typeof entry !== 'string' ? entry.name : undefined
   return inferModelSupportsImages(modelId, entryName);
+}
+
+/**
+ * Per-model context window from the connection catalog (ORDER / custom endpoints).
+ * Registry-only `getModelContextWindow` does not know these IDs.
+ */
+export function resolveConnectionModelContextWindow(
+  connection: Pick<LlmConnection, 'models'> | null | undefined,
+  modelId: string,
+): number | undefined {
+  return resolveCustomModelContextWindow(connection?.models, modelId);
 }
 
 /**

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'bun:test'
 import {
   modelSupportsImages,
+  resolveConnectionModelContextWindow,
   toCustomEndpointModelPayload,
   type LlmConnection,
 } from '../llm-connections.ts'
@@ -85,9 +86,15 @@ describe('modelSupportsImages — pi_compat precedence', () => {
     expect(modelSupportsImages(conn, 'pi/Opus')).toBe(true)
   })
 
-  it('does not infer vision for unknown ORDER names', () => {
+  it('infers vision for ORDER Laufry when no explicit flag is stored', () => {
     const conn: LlmConnection = { ...BASE_COMPAT, models: ['Laufry'] }
-    expect(modelSupportsImages(conn, 'Laufry')).toBe(false)
+    expect(modelSupportsImages(conn, 'Laufry')).toBe(true)
+    expect(modelSupportsImages(conn, 'pi/Laufry')).toBe(true)
+  })
+
+  it('does not infer vision for unknown ORDER names', () => {
+    const conn: LlmConnection = { ...BASE_COMPAT, models: ['Maylo'] }
+    expect(modelSupportsImages(conn, 'Maylo')).toBe(false)
   })
 
   it('does not treat octopus, omnibox, or vllm names as vision', () => {
@@ -126,6 +133,23 @@ describe('toCustomEndpointModelPayload', () => {
       id: 'Laufry',
       contextWindow: 200_000,
     })
+  })
+})
+
+describe('resolveConnectionModelContextWindow', () => {
+  it('reads a stored catalog window and matches prefixed runtime IDs', () => {
+    const conn: LlmConnection = {
+      ...BASE_COMPAT,
+      models: [{ id: 'DeepSeek-V4-Flash', contextWindow: 262_144 } as never],
+    }
+    expect(resolveConnectionModelContextWindow(conn, 'custom-endpoint/DeepSeek-V4-Flash')).toBe(262_144)
+    expect(resolveConnectionModelContextWindow(conn, 'pi/DeepSeek-V4-Flash')).toBe(262_144)
+  })
+
+  it('returns undefined when the catalog has no window', () => {
+    const conn: LlmConnection = { ...BASE_COMPAT, models: ['Opus'] }
+    expect(resolveConnectionModelContextWindow(conn, 'Opus')).toBeUndefined()
+    expect(resolveConnectionModelContextWindow(null, 'Opus')).toBeUndefined()
   })
 })
 

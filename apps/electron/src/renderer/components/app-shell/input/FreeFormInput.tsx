@@ -10,7 +10,6 @@ import {
   ChevronDown,
   ChevronUp,
   AlertCircle,
-  Image as ImageIcon,
 } from 'lucide-react'
 import { Icon_Home, Spinner } from '@craft-agent/ui'
 
@@ -54,11 +53,12 @@ import { isMac } from '@/lib/platform'
 import { applySmartTypography } from '@/lib/smart-typography'
 import { AttachmentPreview } from '../AttachmentPreview'
 import { ImageSupportWarningBanner } from './ImageSupportWarningBanner'
-import { ANTHROPIC_MODELS, getModelShortName, getModelDisplayName, getModelContextWindow, type ModelDefinition } from '@config/models'
+import { getModelShortName, getModelDisplayName, getModelContextWindow, compactionTriggerTokens } from '@config/models'
 import {
   resolveEffectiveConnectionSlug,
   isCompatProvider,
   modelSupportsImages,
+  resolveConnectionModelContextWindow,
 } from '@config/llm-connections'
 import { useOptionalAppShellContext } from '@/context/AppShellContext'
 import { EditPopover, getEditConfig } from '@/components/ui/EditPopover'
@@ -88,9 +88,11 @@ import { CompactModelSelector } from './CompactModelSelector'
 import {
   formatTokenCount,
   groupConnectionsByProvider,
+  isPickerModelSelected,
+  pickerModelId,
+  resolvePickerModels,
   stripPiPrefixForDisplay,
 } from './model-picker-helpers'
-import { useModelVisionToggle } from './useModelVisionToggle'
 
 function formatFollowUpChipText(text: string, fallback: string, maxLength = 50): string {
   const normalized = text.replace(/\s+/g, ' ').trim()
@@ -327,70 +329,39 @@ export function FreeFormInput({
   const llmConnections = appShellCtx?.llmConnections ?? []
   const workspaceDefaultConnection = appShellCtx?.workspaceDefaultLlmConnection
 
-  // Derive connectionDefaultModel per-session from the effective connection.
-  // Only non-null for compat providers (custom endpoints with fixed models).
-  // Standard providers (anthropic, pi) → null → normal model picker.
-  const connectionDefaultModel = React.useMemo(() => {
-    const effectiveSlug = resolveEffectiveConnectionSlug(currentConnection, workspaceDefaultConnection, llmConnections)
-    const conn = llmConnections.find(c => c.slug === effectiveSlug)
-    if (!conn) return null
-    if (!isCompatProvider(conn.providerType)) return null
-    // Allow model switching when connection has multiple models
-    if (conn.models && conn.models.length > 1) return null
-    return conn.defaultModel ?? null
-  }, [currentConnection, workspaceDefaultConnection, llmConnections])
-
-  // Decide which of the four picker UIs to render. The `switcher` branch
-  // wins over `locked-single` so users with a single-model pi_compat default
-  // can still reach the connection list on a fresh session (#727).
   const pickerMode = derivePickerMode({
     connectionUnavailable,
-    connectionDefaultModel,
     isEmptySession,
     connectionCount: llmConnections.length,
   })
 
-  // Compute available models from the effective connection.
-  // All connections have models populated by backfillAllConnectionModels().
   const availableModels = React.useMemo(() => {
-    // Connection removed — don't fall through to another connection's models
     if (connectionUnavailable) return []
-
-    // Determine effective connection using the canonical fallback chain
     const effectiveSlug = resolveEffectiveConnectionSlug(currentConnection, workspaceDefaultConnection, llmConnections)
     const connection = llmConnections.find(c => c.slug === effectiveSlug)
-
-    if (!connection) {
-      return ANTHROPIC_MODELS // Safety net — shouldn't happen
-    }
-
-    return connection.models || ANTHROPIC_MODELS
+    return resolvePickerModels(connection)
   }, [llmConnections, currentConnection, workspaceDefaultConnection, connectionUnavailable])
 
   const availableThinkingLevels = THINKING_LEVELS
 
   // Disable thinking selector when the current model explicitly doesn't support it
   const thinkingDisabled = React.useMemo(() => {
-    const model = availableModels.find(m => typeof m !== 'string' && m.id === currentModel)
+    const model = availableModels.find(m =>
+      typeof m !== 'string' && isPickerModelSelected(currentModel, m.id),
+    )
     return typeof model !== 'string' && model?.supportsThinking === false
   }, [availableModels, currentModel])
 
-  // Get display name for current model (full name, not short name)
   const currentModelDisplayName = React.useMemo(() => {
-    const modelToDisplay = connectionDefaultModel ?? currentModel
     const model = availableModels.find(m =>
-      typeof m === 'string' ? m === modelToDisplay : m.id === modelToDisplay
+      isPickerModelSelected(currentModel, pickerModelId(m)),
     )
     if (!model) {
-      // Fallback: use helper function to format unknown model IDs nicely
-      return stripPiPrefixForDisplay(getModelDisplayName(modelToDisplay))
+      return stripPiPrefixForDisplay(getModelDisplayName(currentModel))
     }
     if (typeof model === 'string') return stripPiPrefixForDisplay(model)
-    // Defensive: partial entries (custom-endpoint user-config or vision-toggle
-    // promotions) may lack `name`. Fall back to the id so the trigger button
-    // never goes blank.
     return model.name ?? stripPiPrefixForDisplay(model.id)
-  }, [availableModels, currentModel, connectionDefaultModel])
+  }, [availableModels, currentModel])
 
   // Group connections by provider type for hierarchical dropdown.
   // Each provider (Anthropic, Pi) can have multiple connections (API Key, OAuth, etc.)
@@ -643,8 +614,6 @@ export function FreeFormInput({
     onInputChange?.('')
     prevInputValueRef.current = ''
   }, [onInputChange])
-
-  const handleToggleModelVision = useModelVisionToggle()
 
   const consumeInputDraftSnapshot = React.useCallback((): string => {
     const snapshot = input.trim()
@@ -1627,14 +1596,8 @@ export function FreeFormInput({
           />
         )}
 
-        {/* Pre-flight image-support warning — only for pi_compat connections
-            where the renderer can both detect text-only models and offer to
-            flip the per-model supportsImages override on the spot. */}
-        {showVisionWarning && effectiveConnectionDetails && (
-          <ImageSupportWarningBanner
-            modelName={currentModelDisplayName}
-            onEnable={() => handleToggleModelVision(effectiveConnectionDetails.slug, currentModel, true)}
-          />
+        {showVisionWarning && (
+          <ImageSupportWarningBanner modelName={currentModelDisplayName} />
         )}
 
         {/* Attachment Preview */}
@@ -2049,7 +2012,7 @@ export function FreeFormInput({
                       <>
                         {effectiveConnectionDetails && llmConnections.length > 1 && storage.get(storage.KEYS.showConnectionIcons, true) && <ConnectionIcon connection={effectiveConnectionDetails} size={14} showTooltip />}
                         {currentModelDisplayName}
-                        {pickerMode !== 'locked-single' && <ChevronDown className="h-3 w-3 opacity-50 shrink-0" />}
+                        <ChevronDown className="h-3 w-3 opacity-50 shrink-0" />
                       </>
                     )}
                   </button>
@@ -2069,66 +2032,6 @@ export function FreeFormInput({
                     {t('chat.connectionUnavailableDescription')}
                   </div>
                 </div>
-              ) : pickerMode === 'locked-single' && connectionDefaultModel ? (
-                (() => {
-                  // Single-model pi_compat connection on a non-empty session (or
-                  // when there's only one connection, so no switcher to show).
-                  // Model row is disabled (locked to this session); vision toggle
-                  // remains interactive.
-                  const showVisionToggle =
-                    !!effectiveConnectionDetails && isCompatProvider(effectiveConnectionDetails.providerType)
-                  const visionOn = showVisionToggle && modelSupportsImages(effectiveConnectionDetails!, connectionDefaultModel)
-                  return (
-                    <StyledDropdownMenuItem
-                      disabled
-                      className="flex items-center justify-between px-2 py-2 rounded-lg"
-                    >
-                      <div className="text-left">
-                        <div className="font-medium text-sm">{stripPiPrefixForDisplay(connectionDefaultModel)}</div>
-                        <div className="text-xs text-muted-foreground">{t('chat.connectionDefault')}</div>
-                      </div>
-                      <div className="flex items-center gap-1 ml-3 shrink-0">
-                        {showVisionToggle && effectiveConnectionDetails && (
-                          <Tooltip>
-                            <TooltipTrigger asChild>
-                              <span
-                                role="button"
-                                tabIndex={0}
-                                aria-label={visionOn
-                                  ? t('chat.modelPicker.supportsImagesOn')
-                                  : t('chat.modelPicker.supportsImagesOff')}
-                                className="inline-flex items-center justify-center p-1 rounded pointer-events-auto opacity-100 hover:bg-foreground/5 cursor-pointer"
-                                onClick={(e) => {
-                                  e.preventDefault()
-                                  e.stopPropagation()
-                                  handleToggleModelVision(effectiveConnectionDetails.slug, connectionDefaultModel, !visionOn)
-                                }}
-                                onKeyDown={(e) => {
-                                  if (e.key === 'Enter' || e.key === ' ') {
-                                    e.preventDefault()
-                                    e.stopPropagation()
-                                    handleToggleModelVision(effectiveConnectionDetails.slug, connectionDefaultModel, !visionOn)
-                                  }
-                                }}
-                              >
-                                <ImageIcon className={cn(
-                                  "h-3.5 w-3.5",
-                                  visionOn ? "text-foreground/70" : "text-foreground/30"
-                                )} />
-                              </span>
-                            </TooltipTrigger>
-                            <TooltipContent>
-                              {visionOn
-                                ? t('chat.modelPicker.supportsImagesOn')
-                                : t('chat.modelPicker.supportsImagesOff')}
-                            </TooltipContent>
-                          </Tooltip>
-                        )}
-                        <Check className="h-3 w-3 text-foreground" />
-                      </div>
-                    </StyledDropdownMenuItem>
-                  )
-                })()
               ) : pickerMode === 'switcher' ? (
                 /* Hierarchical view: Provider → Connection → Models (empty session with multiple connections — lets the user switch BEFORE the first message locks the connection) */
                 connectionsByProvider.map(([providerName, connections], index) => (
@@ -2162,15 +2065,12 @@ export function FreeFormInput({
                           </StyledDropdownMenuSubTrigger>
                           {isAuthenticated && (
                             <StyledDropdownMenuSubContent className="min-w-[220px]">
-                              {/* Show models for this connection - use provider-specific models as fallback */}
-                              {(conn.models || ANTHROPIC_MODELS).map((model) => {
-                                const modelId = typeof model === 'string' ? model : model.id
+                              {resolvePickerModels(conn).map((model) => {
+                                const modelId = pickerModelId(model)
                                 const modelName = typeof model === 'string'
                                   ? stripPiPrefixForDisplay(getModelShortName(model))
                                   : (model.name ?? stripPiPrefixForDisplay(model.id))
-                                const isSelectedModel = isCurrentConnection && currentModel === modelId
-                                const showVisionToggle = isCompatProvider(conn.providerType)
-                                const visionOn = showVisionToggle && modelSupportsImages(conn, modelId)
+                                const isSelectedModel = isCurrentConnection && isPickerModelSelected(currentModel, modelId)
                                 return (
                                   <StyledDropdownMenuItem
                                     key={modelId}
@@ -2185,47 +2085,9 @@ export function FreeFormInput({
                                     className="flex items-center justify-between px-2 py-2 rounded-lg cursor-pointer"
                                   >
                                     <div className="font-medium text-sm">{modelName}</div>
-                                    <div className="flex items-center gap-1 ml-3 shrink-0">
-                                      {showVisionToggle && (
-                                        <Tooltip>
-                                          <TooltipTrigger asChild>
-                                            <span
-                                              role="button"
-                                              tabIndex={0}
-                                              aria-label={visionOn
-                                                ? t('chat.modelPicker.supportsImagesOn')
-                                                : t('chat.modelPicker.supportsImagesOff')}
-                                              className="inline-flex items-center justify-center p-1 rounded hover:bg-foreground/5 cursor-pointer"
-                                              onClick={(e) => {
-                                                e.preventDefault()
-                                                e.stopPropagation()
-                                                handleToggleModelVision(conn.slug, modelId, !visionOn)
-                                              }}
-                                              onKeyDown={(e) => {
-                                                if (e.key === 'Enter' || e.key === ' ') {
-                                                  e.preventDefault()
-                                                  e.stopPropagation()
-                                                  handleToggleModelVision(conn.slug, modelId, !visionOn)
-                                                }
-                                              }}
-                                            >
-                                              <ImageIcon className={cn(
-                                                "h-3.5 w-3.5",
-                                                visionOn ? "text-foreground/70" : "text-foreground/30"
-                                              )} />
-                                            </span>
-                                          </TooltipTrigger>
-                                          <TooltipContent>
-                                            {visionOn
-                                              ? t('chat.modelPicker.supportsImagesOn')
-                                              : t('chat.modelPicker.supportsImagesOff')}
-                                          </TooltipContent>
-                                        </Tooltip>
-                                      )}
-                                      {isSelectedModel && (
-                                        <Check className="h-3 w-3 text-foreground" />
-                                      )}
-                                    </div>
+                                    {isSelectedModel && (
+                                      <Check className="h-3 w-3 text-foreground ml-3 shrink-0" />
+                                    )}
                                   </StyledDropdownMenuItem>
                                 )
                               })}
@@ -2253,16 +2115,13 @@ export function FreeFormInput({
                   )}
                   {/* Model options based on effective connection's provider type */}
                   {availableModels.map((model) => {
-                    const modelId = typeof model === 'string' ? model : model.id
+                    const modelId = pickerModelId(model)
                     const modelName = typeof model === 'string'
                       ? stripPiPrefixForDisplay(getModelShortName(model))
                       : (model.name ?? stripPiPrefixForDisplay(model.id))
-                    const isSelected = currentModel === modelId
+                    const isSelected = isPickerModelSelected(currentModel, modelId)
                     const descriptionKey = typeof model !== 'string' && 'descriptionKey' in model ? (model.descriptionKey as string) : undefined
                     const description = descriptionKey ? t(descriptionKey) : (typeof model !== 'string' && 'description' in model ? (model.description as string) : '')
-                    const showVisionToggle =
-                      !!effectiveConnectionDetails && isCompatProvider(effectiveConnectionDetails.providerType)
-                    const visionOn = showVisionToggle && modelSupportsImages(effectiveConnectionDetails!, modelId)
                     return (
                       <StyledDropdownMenuItem
                         key={modelId}
@@ -2275,47 +2134,9 @@ export function FreeFormInput({
                             <div className="text-xs text-muted-foreground">{description}</div>
                           )}
                         </div>
-                        <div className="flex items-center gap-1 ml-3 shrink-0">
-                          {showVisionToggle && effectiveConnectionDetails && (
-                            <Tooltip>
-                              <TooltipTrigger asChild>
-                                <span
-                                  role="button"
-                                  tabIndex={0}
-                                  aria-label={visionOn
-                                    ? t('chat.modelPicker.supportsImagesOn')
-                                    : t('chat.modelPicker.supportsImagesOff')}
-                                  className="inline-flex items-center justify-center p-1 rounded hover:bg-foreground/5 cursor-pointer"
-                                  onClick={(e) => {
-                                    e.preventDefault()
-                                    e.stopPropagation()
-                                    handleToggleModelVision(effectiveConnectionDetails.slug, modelId, !visionOn)
-                                  }}
-                                  onKeyDown={(e) => {
-                                    if (e.key === 'Enter' || e.key === ' ') {
-                                      e.preventDefault()
-                                      e.stopPropagation()
-                                      handleToggleModelVision(effectiveConnectionDetails.slug, modelId, !visionOn)
-                                    }
-                                  }}
-                                >
-                                  <ImageIcon className={cn(
-                                    "h-3.5 w-3.5",
-                                    visionOn ? "text-foreground/70" : "text-foreground/30"
-                                  )} />
-                                </span>
-                              </TooltipTrigger>
-                              <TooltipContent>
-                                {visionOn
-                                  ? t('chat.modelPicker.supportsImagesOn')
-                                  : t('chat.modelPicker.supportsImagesOff')}
-                              </TooltipContent>
-                            </Tooltip>
-                          )}
-                          {isSelected && (
-                            <Check className="h-3 w-3 text-foreground" />
-                          )}
-                        </div>
+                        {isSelected && (
+                          <Check className="h-3 w-3 text-foreground ml-3 shrink-0" />
+                        )}
                       </StyledDropdownMenuItem>
                     )
                   })}
@@ -2382,13 +2203,21 @@ export function FreeFormInput({
 
           {/* 5.5 Context Usage Warning Badge - shows when approaching auto-compaction threshold */}
           {(() => {
-            // Calculate usage percentage based on compaction threshold (~77.5% of context window),
-            // not the full context window - this gives users meaningful warnings before compaction kicks in.
-            // SDK triggers compaction at ~155k tokens for a 200k context window.
-            // Falls back to known per-model context window when SDK hasn't reported usage yet.
-            const effectiveContextWindow = contextStatus?.contextWindow || getModelContextWindow(currentModel)
+            // Warn against the same trigger the backend uses:
+            // Pi / custom endpoints compact at contextWindow - 16k (output reserve);
+            // Anthropic still uses ~77.5% of the window (~155k of 200k).
+            const catalogWindow = resolveConnectionModelContextWindow(effectiveConnectionDetails, currentModel)
+            const effectiveContextWindow = contextStatus?.contextWindow
+              || catalogWindow
+              || getModelContextWindow(currentModel)
+            const usePiReserve = !!effectiveConnectionDetails && (
+              isCompatProvider(effectiveConnectionDetails.providerType)
+              || effectiveConnectionDetails.providerType === 'pi'
+            )
             const compactionThreshold = effectiveContextWindow
-              ? Math.round(effectiveContextWindow * 0.775)
+              ? (usePiReserve
+                ? compactionTriggerTokens(effectiveContextWindow)
+                : Math.round(effectiveContextWindow * 0.775))
               : null
             const usagePercent = contextStatus?.inputTokens && compactionThreshold
               ? Math.min(99, Math.round((contextStatus.inputTokens / compactionThreshold) * 100))

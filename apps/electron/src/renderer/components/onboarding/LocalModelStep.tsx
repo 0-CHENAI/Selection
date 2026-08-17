@@ -27,7 +27,7 @@ interface LocalModelStepProps {
 
 function parseModelList(value: string): string[] {
   return value
-    .split(',')
+    .split(/[,，、]/)
     .map((entry) => entry.trim())
     .filter(Boolean)
 }

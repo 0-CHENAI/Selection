@@ -180,6 +180,55 @@ async function fetchCopilotModels(
   throw new Error('No Copilot models available from any source.');
 }
 
+function customEndpointModelsUrl(baseUrl: string): string {
+  const base = baseUrl.trim().replace(/\/+$/, '');
+  if (!base) return '';
+  return /\/v1$/i.test(base) ? `${base}/models` : `${base}/v1/models`;
+}
+
+/**
+ * Custom-endpoint setup should prove the key + URL, not that a specific model
+ * can complete 16 tokens on the Anthropic Messages API. ORDER lists
+ * DeepSeek-V4-Flash (reasoning / OpenAI-shaped) next to Claude-class names;
+ * probing `/v1/messages` with that id is a false failure.
+ */
+async function testCustomEndpointAccess(
+  apiKey: string,
+  baseUrl: string,
+  timeoutMs: number,
+): Promise<{ success: boolean; error?: string }> {
+  const url = customEndpointModelsUrl(baseUrl);
+  if (!url) {
+    return { success: false, error: 'Could not determine API endpoint for provider' };
+  }
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(url, {
+      method: 'GET',
+      signal: controller.signal,
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        'x-api-key': apiKey,
+        Accept: 'application/json',
+      },
+    });
+
+    if (res.ok) return { success: true };
+
+    const text = await res.text().catch(() => '');
+    return { success: false, error: `${res.status} ${text}`.slice(0, 500) };
+  } catch (err) {
+    if ((err as Error).name === 'AbortError') {
+      return { success: false, error: 'Connection test timed out' };
+    }
+    return { success: false, error: (err as Error).message };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 /**
  * Lightweight direct HTTP test for Pi providers that expose an Anthropic-compatible
  * messages endpoint. Avoids spawning a full Pi subprocess (which can exceed the
@@ -262,6 +311,16 @@ export const piDriver: ProviderDriver = {
     return { models };
   },
   testConnection: async (args: DriverTestConnectionArgs): Promise<{ success: boolean; error?: string } | null> => {
+    const firstId = args.model.split(/[,，、]/)[0]?.trim() || args.model;
+    const customApi = args.connection?.customEndpoint?.api;
+    if (customApi) {
+      const baseUrl = args.baseUrl?.trim();
+      if (!baseUrl) {
+        return { success: false, error: 'Could not determine API endpoint for provider' };
+      }
+      return testCustomEndpointAccess(args.apiKey, baseUrl, args.timeoutMs);
+    }
+
     const piAuthProvider = args.connection?.piAuthProvider;
     if (!piAuthProvider) {
       // No provider hint — fall back to generic subprocess path
@@ -276,7 +335,7 @@ export const piDriver: ProviderDriver = {
     try {
       const { getModels } = await import('@earendil-works/pi-ai/compat');
       const models = getModels(piAuthProvider as Parameters<typeof getModels>[0]);
-      const requestedId = args.model.startsWith('pi/') ? args.model.slice(3) : args.model;
+      const requestedId = firstId.startsWith('pi/') ? firstId.slice(3) : firstId;
       const match = models.find(m => m.id === requestedId) || models[0];
       if (match) {
         modelApi = (match as { api?: string }).api;
@@ -295,7 +354,7 @@ export const piDriver: ProviderDriver = {
     }
 
     // Strip Pi SDK's 'pi/' prefix — Anthropic-compatible endpoints only accept bare model IDs
-    let bareModel = args.model.startsWith('pi/') ? args.model.slice(3) : args.model;
+    let bareModel = firstId.startsWith('pi/') ? firstId.slice(3) : firstId;
     // MiniMax CN API doesn't accept the 'MiniMax-' prefix on model names
     if (piAuthProvider === 'minimax-cn' && bareModel.startsWith('MiniMax-')) {
       bareModel = bareModel.slice('MiniMax-'.length);

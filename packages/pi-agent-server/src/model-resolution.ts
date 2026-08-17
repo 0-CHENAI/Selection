@@ -7,6 +7,21 @@ export { isDeniedMiniModelId } from '../../shared/src/config/llm-connections.ts'
 // Re-export the PiModel type used by callers
 type PiModel<T = any> = ReturnType<PiModelRegistry['find']>;
 
+function findCustomEndpointModel(
+  modelRegistry: PiModelRegistry,
+  modelId: string,
+): PiModel | undefined {
+  const exact = modelRegistry.find('custom-endpoint', modelId);
+  if (exact) return exact;
+
+  const lower = modelId.toLowerCase();
+  return modelRegistry.getAll().find((model) => {
+    const provider = (model as { provider?: string }).provider;
+    if (provider !== 'custom-endpoint') return false;
+    return model.id.toLowerCase() === lower || model.name.toLowerCase() === lower;
+  });
+}
+
 /**
  * Resolve a Pi SDK model from the registry, with optional custom-endpoint precedence.
  *
@@ -25,9 +40,11 @@ export function resolvePiModel(
   // Strip Craft's pi/ prefix — Pi SDK uses bare model IDs (e.g. "claude-sonnet-4-6")
   const bareId = modelId.startsWith('pi/') ? modelId.slice(3) : modelId;
 
-  // Custom-endpoint takes precedence when configured
+  // Custom-endpoint takes precedence when configured.
+  // Case-insensitive: ORDER ids like DeepSeek-V4-Flash must not miss the
+  // registered custom model and fall through to Pi's official DeepSeek catalog.
   if (preferCustomEndpoint) {
-    const custom = modelRegistry.find('custom-endpoint', bareId);
+    const custom = findCustomEndpointModel(modelRegistry, bareId);
     if (custom) return custom;
   }
 
@@ -65,7 +82,9 @@ export function resolvePiModel(
   for (const provider of providers) {
     // Skip providers incompatible with the authenticated provider
     if (piAuthProvider && provider !== piAuthProvider && provider !== 'custom-endpoint') continue;
-    const model = modelRegistry.find(provider, bareId);
+    const model = provider === 'custom-endpoint'
+      ? findCustomEndpointModel(modelRegistry, bareId)
+      : modelRegistry.find(provider, bareId);
     if (model) return model;
   }
 

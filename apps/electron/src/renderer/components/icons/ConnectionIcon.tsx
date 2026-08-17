@@ -14,6 +14,7 @@
 import { Brain } from 'lucide-react'
 import { getProviderIcon } from '@/lib/provider-icons'
 import { getModelDisplayName } from '@config/models'
+import { isOrderGatewayUrl } from '@config/order-gateway'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@craft-agent/ui'
 import type { LlmConnectionWithStatus } from '../../../shared/types'
 
@@ -29,6 +30,9 @@ interface ConnectionIconProps {
 }
 
 export function ConnectionIcon({ connection, size = 16, className = '', showTooltip = false }: ConnectionIconProps) {
+  // ORDER is wordmark-only — no invented or letterform icon beside the name.
+  if (isOrderGatewayUrl(connection.baseUrl)) return null
+
   const providerIcon = getProviderIcon(
     connection.providerType || connection.type || '',
     connection.baseUrl,
@@ -41,7 +45,7 @@ export function ConnectionIcon({ connection, size = 16, className = '', showTool
       alt=""
       width={size}
       height={size}
-      className={`rounded-[3px] flex-shrink-0 ${className}`}
+      className={`rounded-[3px] flex-shrink-0 object-contain ${className}`}
       style={{ width: size, height: size }}
     />
   ) : (

@@ -8,7 +8,7 @@ import {
   validateStoredBackendConnection,
 } from '@craft-agent/shared/agent/backend'
 import { getModelRefreshService } from '@craft-agent/server-core/model-fetchers'
-import { parseTestConnectionError, createBuiltInConnection, validateModelList, piAuthProviderDisplayName, validateSetupTestInput, setupTestRequiresApiKey, resolveCustomEndpointSetup } from '@craft-agent/server-core/domain'
+import { parseTestConnectionError, createBuiltInConnection, validateModelList, splitModelIdList, piAuthProviderDisplayName, validateSetupTestInput, setupTestRequiresApiKey, resolveCustomEndpointSetup } from '@craft-agent/server-core/domain'
 import { getWorkspaceOrThrow, buildBackendHostRuntimeContext } from '@craft-agent/server-core/handlers'
 import { pushTyped, type RpcServer } from '@craft-agent/server-core/transport'
 import type { HandlerDeps } from '../handler-deps'
@@ -139,6 +139,9 @@ export function registerLlmConnectionsHandlers(server: RpcServer, deps: HandlerD
         if (isNewConnection && !updates.name && setup.baseUrl?.toLowerCase().includes('manifest.build')) {
           updates.name = 'Manifest'
         }
+        if (isNewConnection && !updates.name && setup.baseUrl?.toLowerCase().includes('order.ai.jxepdi.top')) {
+          updates.name = 'ORDER'
+        }
       } else if (setup.baseUrl !== undefined) {
         // Base URL was explicitly updated without custom protocol config.
         // Treat this as non-custom mode and clear stale custom endpoint metadata.
@@ -256,10 +259,23 @@ export function registerLlmConnectionsHandlers(server: RpcServer, deps: HandlerD
       if (isNewConnection) {
         const added = addLlmConnection(pendingConnection)
         if (!added) {
-          deps.platform.logger?.error(`Failed to persist LLM connection: ${setup.slug} (config may be inaccessible)`)
-          return { success: false, error: 'Failed to save connection. Check server logs for details.' }
+          // Slug already exists (retry after a previous persist, or existingSlugs
+          // was stale). Treat as an update so ORDER edit/resubmit does not fail.
+          const existing = getLlmConnection(setup.slug)
+          if (existing) {
+            const updated = updateLlmConnection(setup.slug, updates)
+            if (!updated) {
+              deps.platform.logger?.error(`Failed to update existing LLM connection: ${setup.slug}`)
+              return { success: false, error: 'Failed to update connection. Check server logs for details.' }
+            }
+            deps.platform.logger?.info(`Updated existing LLM connection after add collision: ${setup.slug}`)
+          } else {
+            deps.platform.logger?.error(`Failed to persist LLM connection: ${setup.slug} (config may be inaccessible)`)
+            return { success: false, error: 'Failed to save connection. Check server logs for details.' }
+          }
+        } else {
+          deps.platform.logger?.info(`Created LLM connection: ${setup.slug}`)
         }
-        deps.platform.logger?.info(`Created LLM connection: ${setup.slug}`)
       } else if (Object.keys(updates).length > 0) {
         const updated = updateLlmConnection(setup.slug, updates)
         if (!updated) {
@@ -315,8 +331,16 @@ export function registerLlmConnectionsHandlers(server: RpcServer, deps: HandlerD
 
       // Reinitialize auth for the connection that was just created/updated,
       // not the global default (which may be a different connection).
-      await sessionManager.reinitializeAuth(setup.slug)
-      deps.platform.logger?.info('Reinitialized auth after LLM connection setup')
+      // Fail-soft: the connection is already on disk. A thrown auth refresh
+      // must not surface as "Failed to save connection" on the next submit.
+      try {
+        await sessionManager.reinitializeAuth(setup.slug)
+        deps.platform.logger?.info('Reinitialized auth after LLM connection setup')
+      } catch (err) {
+        deps.platform.logger?.warn(
+          `Auth reinit after setup failed for ${setup.slug}: ${err instanceof Error ? err.message : err}`,
+        )
+      }
 
       // Clear "Setup later" flag now that user has configured a provider
       setSetupDeferred(false)
@@ -350,7 +374,8 @@ export function registerLlmConnectionsHandlers(server: RpcServer, deps: HandlerD
 
     const startedAt = Date.now()
     try {
-      const testModel = model || getDefaultModelForConnection(provider, piAuthProvider)
+      const testModel = splitModelIdList(model ?? '')[0]
+        || getDefaultModelForConnection(provider, piAuthProvider)
       deps.platform.logger?.info(`[testLlmConnectionSetup] Resolved model: ${testModel}`)
       const result = await testBackendConnection({
         provider,
@@ -450,11 +475,7 @@ export function registerLlmConnectionsHandlers(server: RpcServer, deps: HandlerD
     const manager = getCredentialManager()
     const key = await manager.getLlmApiKey(slug)
     if (!key) return null
-    // Show provider prefix (first 7 chars) + last 4 chars, mask the middle
-    if (key.length > 15) {
-      return key.slice(0, 7) + '••••••••' + key.slice(-4)
-    }
-    return '••••••••'
+    return key
   })
 
   // Save (create or update) an LLM connection

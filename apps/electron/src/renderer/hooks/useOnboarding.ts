@@ -63,6 +63,8 @@ interface UseOnboardingReturn {
     connectionDefaultModel?: string
     activePreset?: string
     models?: string[]
+    modelImageCaps?: Record<string, boolean>
+    modelContextWindows?: Record<string, number>
     customApi?: CustomEndpointConfig['api']
   }
 
@@ -135,6 +137,17 @@ export function resolveSlugForMethod(
 }
 
 // Map ApiSetupMethod to LlmConnectionSetup for the new unified connection system
+function firstTokenFromModelList(value: string | undefined): string | undefined {
+  if (!value?.trim()) return undefined
+  return value.split(/[,，、]/).map((entry) => entry.trim()).filter(Boolean)[0]
+}
+
+function firstSetupTestModel(data: Pick<ApiKeySubmitData, 'models' | 'connectionDefaultModel'>): string | undefined {
+  const first = data.models?.[0]
+  const raw = typeof first === 'string' ? first : first?.id
+  return firstTokenFromModelList(raw) ?? firstTokenFromModelList(data.connectionDefaultModel)
+}
+
 function isLoopbackEndpoint(baseUrl?: string): boolean {
   if (!baseUrl?.trim()) return false
   try {
@@ -177,6 +190,7 @@ export function apiSetupMethodToConnectionSetup(
         defaultModel: options.connectionDefaultModel,
         models: options.models,
         customEndpoint: options.customEndpoint,
+        modelSelectionMode: options.modelSelectionMode,
       }
     case 'claude_oauth':
       return {
@@ -430,7 +444,7 @@ export function useOnboarding({
           piAuthProvider: data.piAuthProvider,
           modelSelectionMode: data.modelSelectionMode,
           customEndpoint: data.customEndpoint,
-        })
+        }, undefined, editingSlug, true)
         if (saved) {
           setState(s => ({ ...s, credentialStatus: 'success', step: 'complete' }))
         } else {
@@ -470,7 +484,7 @@ export function useOnboarding({
         provider: setupTestProvider,
         apiKey: data.apiKey,
         baseUrl: data.baseUrl,
-        model: typeof data.models?.[0] === 'string' ? data.models[0] : data.models?.[0]?.id,
+        model: firstSetupTestModel(data),
         piAuthProvider: data.piAuthProvider,
         customEndpoint: data.customEndpoint,
       })
@@ -484,14 +498,20 @@ export function useOnboarding({
         return
       }
 
-      const saved = await handleSaveConfig(data.apiKey, {
-        baseUrl: data.baseUrl,
-        connectionDefaultModel: data.connectionDefaultModel,
-        models: data.models,
-        piAuthProvider: data.piAuthProvider,
-        modelSelectionMode: data.modelSelectionMode,
-        customEndpoint: data.customEndpoint,
-      })
+      const saved = await handleSaveConfig(
+        data.apiKey,
+        {
+          baseUrl: data.baseUrl,
+          connectionDefaultModel: data.connectionDefaultModel,
+          models: data.models,
+          piAuthProvider: data.piAuthProvider,
+          modelSelectionMode: data.modelSelectionMode,
+          customEndpoint: data.customEndpoint,
+        },
+        undefined,
+        editingSlug ?? undefined,
+        !!editingSlug,
+      )
 
       if (saved) {
         setState(s => ({
@@ -510,7 +530,7 @@ export function useOnboarding({
         errorMessage: error instanceof Error ? error.message : 'Validation failed',
       }))
     }
-  }, [handleSaveConfig, state.apiSetupMethod])
+  }, [handleSaveConfig, state.apiSetupMethod, editingSlug])
 
   // Save config, validate the connection, and update state accordingly.
   // Shared by all OAuth flows after tokens are captured.

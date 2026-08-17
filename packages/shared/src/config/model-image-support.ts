@@ -28,12 +28,18 @@ export function connectionModelIdsMatch(a: string, b: string): boolean {
 const VISION_TOKEN = /(?:^|[^a-z0-9])(?:opus|sonnet|haiku|claude|gemini|pixtral|internvl|omni|multimodal|vision|llama-4|gemma-3|gpt-4o|gpt-4\.1|gpt-4-turbo|gpt-5|qwen-vl|qwen2\.5-vl|qwen2-vl)(?:[^a-z0-9]|$)/
 const VL_AFFIX = /(?:^|[.-])vl(?:[^a-z]|$)/
 
+/** ORDER catalog names that take images but do not look like common vision models. */
+const ORDER_VISION_IDS = new Set(['laufry'])
+
 /**
  * Conservative name heuristic when the catalog does not declare capabilities.
  * Unknown ORDER names stay false unless the user enables images explicitly.
  */
 export function inferModelSupportsImages(id: string, name?: string): boolean {
-  const haystack = `${normalizeConnectionModelId(id)} ${name ?? ''}`.toLowerCase()
+  const bare = normalizeConnectionModelId(id).toLowerCase()
+  const display = (name ?? '').trim().toLowerCase()
+  if (ORDER_VISION_IDS.has(bare) || (display && ORDER_VISION_IDS.has(display))) return true
+  const haystack = `${bare} ${display}`
   return VISION_TOKEN.test(haystack) || VL_AFFIX.test(haystack)
 }
 
@@ -75,4 +81,20 @@ export function toCustomEndpointModelPayload(
     }
   }
   return id
+}
+
+/** Stored catalog window for a custom-endpoint model, if one was persisted. */
+export function resolveCustomModelContextWindow(
+  models: Array<string | { id: string; contextWindow?: number }> | undefined,
+  modelId: string,
+): number | undefined {
+  if (!models?.length || !modelId) return undefined
+  const match = models.find((model) => {
+    const id = typeof model === 'string' ? model : model.id
+    return connectionModelIdsMatch(id, modelId)
+  })
+  if (!match || typeof match === 'string') return undefined
+  const window = match.contextWindow
+  if (typeof window !== 'number' || !Number.isFinite(window) || window <= 0) return undefined
+  return Math.floor(window)
 }

@@ -62,8 +62,8 @@ export function normalizeCustomEndpointModelEntry(model: CustomEndpointModelConf
 
 /**
  * Build a synthetic model definition for a custom endpoint.
- * Uses reasonable defaults for context window and max tokens since we can't
- * query the endpoint for its actual capabilities. Image support:
+ * Context window comes from the stored catalog when present, otherwise 128k.
+ * Image support:
  *   per-model override ?? connection default ?? conservative name heuristic.
  */
 export function buildCustomEndpointModelDef(

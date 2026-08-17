@@ -35,6 +35,7 @@ import type { ThinkingLevel } from './thinking-levels.ts';
 
 // Import models from centralized registry
 import { getModelById } from '../config/models.ts';
+import { resolveCustomModelContextWindow } from '../config/model-image-support.ts';
 
 // BaseAgent provides common functionality
 import { BaseAgent } from './base-agent.ts';
@@ -350,15 +351,18 @@ export class PiAgent extends BaseAgent {
 
   constructor(config: BackendConfig) {
     const resolvedModel = config.model || '';
-    const modelDef = getModelById(resolvedModel);
-    super(config, resolvedModel, modelDef?.contextWindow);
+    const contextWindow = resolveCustomModelContextWindow(
+      getBackendRuntime(config).customModels,
+      resolvedModel,
+    ) ?? getModelById(resolvedModel)?.contextWindow;
+    super(config, resolvedModel, contextWindow);
 
     this._supportsBranching = true;
 
     this.piSessionId = config.session?.sdkSessionId || null;
     this.adapter = new PiEventAdapter();
-    if (modelDef?.contextWindow) {
-      this.adapter.setContextWindow(modelDef.contextWindow);
+    if (contextWindow) {
+      this.adapter.setContextWindow(contextWindow);
     }
     if (config.miniModel) {
       this.adapter.setMiniModel(config.miniModel);
@@ -2215,6 +2219,7 @@ export class PiAgent extends BaseAgent {
       },
     };
     this._model = update.model;
+    this.applyCatalogContextWindow(update.model);
 
     if (!this.subprocess) {
       this.debug(`Runtime config updated locally (no subprocess): ${previousModel} → ${update.model}`);
@@ -2231,9 +2236,20 @@ export class PiAgent extends BaseAgent {
     return updated;
   }
 
+  private applyCatalogContextWindow(modelId: string): void {
+    const contextWindow = resolveCustomModelContextWindow(
+      getBackendRuntime(this.config).customModels,
+      modelId,
+    ) ?? getModelById(modelId)?.contextWindow;
+    if (!contextWindow) return;
+    this.usageTracker.setContextWindow(contextWindow);
+    this.adapter.setContextWindow(contextWindow);
+  }
+
   override setModel(model: string): void {
     const previousModel = this.getModel();
     super.setModel(model);
+    this.applyCatalogContextWindow(model);
     // Forward to subprocess so it uses the new model on next turn
     if (this.subprocess) {
       this.debug(`Forwarding model change to subprocess: ${previousModel} → ${model}`);

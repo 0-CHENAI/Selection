@@ -42,6 +42,8 @@ interface CredentialsStepProps {
     connectionDefaultModel?: string
     activePreset?: string
     models?: string[]
+    modelImageCaps?: Record<string, boolean>
+    modelContextWindows?: Record<string, number>
     customApi?: CustomEndpointApi
   }
 }

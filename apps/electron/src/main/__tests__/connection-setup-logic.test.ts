@@ -65,6 +65,24 @@ describe('validateModelList', () => {
     const result = validateModelList([], 'anything')
     expect(result.valid).toBe(true)
   })
+
+  it('recovers a comma-joined default to the first listed model id', () => {
+    const result = validateModelList(
+      [
+        { id: 'Opus', name: 'Opus', shortName: 'Opus', description: '', provider: 'pi', contextWindow: 0 },
+        { id: 'Laufry', name: 'Laufry', shortName: 'Laufry', description: '', provider: 'pi', contextWindow: 0 },
+      ],
+      'Opus, Laufry',
+    )
+    expect(result.valid).toBe(true)
+    expect(result.resolvedDefaultModel).toBe('Opus')
+  })
+
+  it('recovers a fullwidth-comma default used in zh model lists', () => {
+    const result = validateModelList(['Opus', 'Laufry'], 'Opus，Laufry')
+    expect(result.valid).toBe(true)
+    expect(result.resolvedDefaultModel).toBe('Opus')
+  })
 })
 
 // ============================================================
@@ -85,6 +103,12 @@ describe('createBuiltInConnection', () => {
     expect(conn.providerType).toBe('pi_compat')
     expect(conn.authType).toBe('api_key_with_endpoint')
     expect(conn.name).toBe('Custom Anthropic-Compatible')
+  })
+
+  it('names ORDER gateway connections ORDER instead of Custom Anthropic-Compatible', () => {
+    const conn = createBuiltInConnection('anthropic-api', 'https://order.ai.jxepdi.top')
+    expect(conn.providerType).toBe('pi_compat')
+    expect(conn.name).toBe('ORDER')
   })
 
   it('creates claude-max with oauth', () => {

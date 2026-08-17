@@ -5,7 +5,7 @@ import { Check, ChevronDown, Image as ImageIcon, Loader2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Label } from '@/components/ui/label'
 import type { RemoteModel } from './fetch-openai-models.ts'
-import { inferModelSupportsImages, parseSelectedModels } from './fetch-openai-models.ts'
+import { parseSelectedModels, resolveRemoteModelSupportsImages } from './fetch-openai-models.ts'
 
 interface RemoteModelsPickerProps {
   models: RemoteModel[]
@@ -17,7 +17,7 @@ interface RemoteModelsPickerProps {
   waitingForKey?: boolean
   onToggle: (id: string) => void
   imageCaps?: Record<string, boolean>
-  onToggleImages?: (id: string) => void
+  onToggleImage?: (id: string) => void
   onRetry?: () => void
 }
 
@@ -31,7 +31,7 @@ export function RemoteModelsPicker({
   waitingForKey,
   onToggle,
   imageCaps,
-  onToggleImages,
+  onToggleImage,
   onRetry,
 }: RemoteModelsPickerProps) {
   const { t } = useTranslation()
@@ -127,17 +127,14 @@ export function RemoteModelsPicker({
                 ) : (
                   filtered.map((model) => {
                     const isOn = selectedSet.has(model.id)
-                    const imagesOn = imageCaps?.[model.id]
-                      ?? model.supportsImages
-                      ?? inferModelSupportsImages(model.id, model.name)
+                    const hasVision = resolveRemoteModelSupportsImages(model, imageCaps?.[model.id])
                     return (
                       <CommandPrimitive.Item
                         key={model.id}
                         value={model.id}
                         onSelect={() => {
+                          // Stay open so multiple ORDER models can be checked.
                           onToggle(model.id)
-                          setOpen(false)
-                          setFilter('')
                         }}
                         className={cn(
                           'flex cursor-pointer select-none items-center justify-between gap-3 rounded-[6px] px-3 py-2 text-[13px]',
@@ -146,32 +143,31 @@ export function RemoteModelsPicker({
                       >
                         <span className="truncate">{model.name}</span>
                         <span className="flex shrink-0 items-center gap-2">
-                          {onToggleImages && (
-                            <button
-                              type="button"
-                              aria-label={imagesOn
-                                ? t('chat.modelPicker.supportsImagesOn')
-                                : t('chat.modelPicker.supportsImagesOff')}
-                              title={imagesOn
-                                ? t('chat.modelPicker.supportsImagesOn')
-                                : t('chat.modelPicker.supportsImagesOff')}
-                              onPointerDown={(event) => {
-                                event.preventDefault()
-                                event.stopPropagation()
-                              }}
-                              onClick={(event) => {
-                                event.preventDefault()
-                                event.stopPropagation()
-                                onToggleImages(model.id)
-                              }}
-                              className={cn(
-                                'rounded p-0.5',
-                                imagesOn ? 'text-foreground/70' : 'text-foreground/30',
-                              )}
-                            >
-                              <ImageIcon className="size-3.5" />
-                            </button>
-                          )}
+                          <button
+                            type="button"
+                            aria-pressed={hasVision}
+                            aria-label={hasVision
+                              ? t('chat.modelPicker.supportsImagesOn')
+                              : t('chat.modelPicker.supportsImagesOff')}
+                            title={hasVision
+                              ? t('chat.modelPicker.supportsImagesOn')
+                              : t('chat.modelPicker.supportsImagesOff')}
+                            className={cn(
+                              'inline-flex h-5 items-center gap-1 rounded-full px-1.5 text-[10px] font-medium',
+                              hasVision
+                                ? 'bg-success/12 text-success'
+                                : 'bg-foreground/5 text-foreground/35 hover:bg-foreground/8',
+                            )}
+                            onPointerDown={(event) => event.stopPropagation()}
+                            onClick={(event) => {
+                              event.preventDefault()
+                              event.stopPropagation()
+                              onToggleImage?.(model.id)
+                            }}
+                          >
+                            <ImageIcon className="size-3 shrink-0" />
+                            {t('apiSetup.multimodal')}
+                          </button>
                           <Check className={cn('size-3', isOn ? 'opacity-100' : 'opacity-0')} />
                         </span>
                       </CommandPrimitive.Item>

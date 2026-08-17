@@ -10,6 +10,9 @@ import type { LlmConnection } from '@craft-agent/shared/config/llm-connections'
 import {
   formatTokenCount,
   groupConnectionsByProvider,
+  isPickerModelSelected,
+  pickerModelId,
+  resolvePickerModels,
   stripPiPrefixForDisplay,
 } from '../model-picker-helpers'
 
@@ -151,5 +154,39 @@ describe('groupConnectionsByProvider', () => {
       ['Local', ['ollama']],
       ['Selection Backend', ['or', 'p']],
     ])
+  })
+})
+
+describe('resolvePickerModels', () => {
+  test('returns empty when there is no connection', () => {
+    expect(resolvePickerModels(null)).toEqual([])
+    expect(resolvePickerModels(undefined)).toEqual([])
+  })
+
+  test('uses the connection catalog when present', () => {
+    const models = [{ id: 'Opus' }, { id: 'Laufry' }]
+    expect(resolvePickerModels(conn('order', 'pi_compat', { models }))).toEqual(models)
+  })
+
+  test('falls back to defaultModel for a compat connection with an empty catalog', () => {
+    expect(resolvePickerModels(conn('order', 'pi_compat', { defaultModel: 'Opus', models: [] }))).toEqual(['Opus'])
+  })
+
+  test('does not invent Anthropic models for a compat connection', () => {
+    expect(resolvePickerModels(conn('order', 'pi_compat'))).toEqual([])
+  })
+
+  test('uses the Anthropic registry when an Anthropic connection has no models', () => {
+    const models = resolvePickerModels(conn('anth', 'anthropic'))
+    expect(models.length).toBeGreaterThan(0)
+    expect(pickerModelId(models[0]!)).toMatch(/claude|sonnet|opus|haiku/i)
+  })
+})
+
+describe('isPickerModelSelected', () => {
+  test('matches stored IDs against runtime pi/ prefixes', () => {
+    expect(isPickerModelSelected('pi/Opus', 'Opus')).toBe(true)
+    expect(isPickerModelSelected('Opus', 'pi/Opus')).toBe(true)
+    expect(isPickerModelSelected('Opus', 'Laufry')).toBe(false)
   })
 })

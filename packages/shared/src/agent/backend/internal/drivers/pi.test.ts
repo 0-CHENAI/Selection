@@ -70,3 +70,70 @@ describe('piDriver.buildRuntime custom endpoint models', () => {
     expect(runtime.customModels).toEqual(['Opus', 'Laufry']);
   });
 });
+
+describe('piDriver.testConnection custom endpoints', () => {
+  it('probes GET /v1/models instead of posting /v1/messages for ORDER-style gateways', async () => {
+    const originalFetch = globalThis.fetch;
+    const urls: string[] = [];
+    globalThis.fetch = (async (input: Parameters<typeof fetch>[0]) => {
+      urls.push(String(input));
+      return new Response(JSON.stringify({ data: [{ id: 'DeepSeek-V4-Flash' }] }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    }) as typeof fetch;
+
+    try {
+      const result = await piDriver.testConnection!({
+        provider: 'pi',
+        apiKey: 'sk-test',
+        model: 'DeepSeek-V4-Flash',
+        baseUrl: 'https://order.ai.jxepdi.top',
+        timeoutMs: 5_000,
+        connection: {
+          providerType: 'pi_compat',
+          customEndpoint: { api: 'anthropic-messages' },
+          piAuthProvider: 'anthropic',
+        },
+        hostRuntime: {} as never,
+        resolvedPaths: {} as never,
+      });
+
+      expect(result).toEqual({ success: true });
+      expect(urls).toEqual(['https://order.ai.jxepdi.top/v1/models']);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('does not double /v1 when the ORDER OpenAI base already ends with /v1', async () => {
+    const originalFetch = globalThis.fetch;
+    const urls: string[] = [];
+    globalThis.fetch = (async (input: Parameters<typeof fetch>[0]) => {
+      urls.push(String(input));
+      return new Response(JSON.stringify({ data: [] }), { status: 200 });
+    }) as typeof fetch;
+
+    try {
+      const result = await piDriver.testConnection!({
+        provider: 'pi',
+        apiKey: 'sk-test',
+        model: 'DeepSeek-V4-Flash',
+        baseUrl: 'https://order.ai.jxepdi.top/v1',
+        timeoutMs: 5_000,
+        connection: {
+          providerType: 'pi_compat',
+          customEndpoint: { api: 'openai-completions' },
+          piAuthProvider: 'openai',
+        },
+        hostRuntime: {} as never,
+        resolvedPaths: {} as never,
+      });
+
+      expect(result).toEqual({ success: true });
+      expect(urls).toEqual(['https://order.ai.jxepdi.top/v1/models']);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+});

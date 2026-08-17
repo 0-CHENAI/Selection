@@ -44,6 +44,16 @@ const textAttachment: FileAttachment = {
 }
 
 describe('buildBackendRuntimeSignature', () => {
+  it('changes when a custom endpoint model context window changes', () => {
+    const withoutWindow = sig(baseCompat)
+    const withWindow = sig({
+      ...baseCompat,
+      models: [{ id: 'gemma', supportsImages: true, contextWindow: 262_144 } as never],
+    })
+
+    expect(withWindow).not.toBe(withoutWindow)
+  })
+
   it('changes when a custom endpoint model image override changes', () => {
     const enabled = sig(baseCompat)
     const disabled = sig({

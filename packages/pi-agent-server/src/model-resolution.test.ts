@@ -48,6 +48,18 @@ describe('resolvePiModel', () => {
       expect(result!.provider).toBe('anthropic');
     });
 
+    it('matches ORDER DeepSeek-V4-Flash case-insensitively on custom-endpoint', () => {
+      const registry = createMockRegistry({
+        'custom-endpoint': [{ id: 'DeepSeek-V4-Flash', name: 'DeepSeek-V4-Flash', provider: 'custom-endpoint' }],
+        deepseek: [{ id: 'deepseek-v4-flash', name: 'DeepSeek V4 Flash', provider: 'deepseek' }],
+      });
+
+      const result = resolvePiModel(registry, 'deepseek-v4-flash', 'openai', true);
+      expect(result).toBeDefined();
+      expect(result!.provider).toBe('custom-endpoint');
+      expect(result!.id).toBe('DeepSeek-V4-Flash');
+    });
+
     it('falls through to piAuthProvider when preferCustomEndpoint=true but model not in custom-endpoint', () => {
       const registry = createMockRegistry({
         'custom-endpoint': [],

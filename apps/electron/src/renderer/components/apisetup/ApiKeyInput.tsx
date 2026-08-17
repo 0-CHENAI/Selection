@@ -33,8 +33,8 @@ import {
 import { RemoteModelsPicker } from "./RemoteModelsPicker"
 import {
   fetchOpenAiCompatibleModels,
-  inferModelSupportsImages,
   parseSelectedModels,
+  resolveRemoteModelSupportsImages,
   toggleSelectedModel,
   type RemoteModel,
 } from "./fetch-openai-models.ts"
@@ -50,6 +50,7 @@ export type SubmittedConnectionModel = string | {
   name?: string
   shortName?: string
   supportsImages?: boolean
+  contextWindow?: number
 }
 
 export interface ApiKeySubmitData {
@@ -96,6 +97,7 @@ export interface ApiKeyInputProps {
     activePreset?: string
     models?: string[]
     modelImageCaps?: Record<string, boolean>
+    modelContextWindows?: Record<string, number>
     /** Pre-fill the protocol toggle for custom endpoints */
     customApi?: CustomEndpointApi
   }
@@ -200,10 +202,7 @@ function getPresetForUrl(url: string, presets: Preset[]): PresetKey {
 }
 
 function parseModelList(value: string): string[] {
-  return value
-    .split(',')
-    .map((entry) => entry.trim())
-    .filter(Boolean)
+  return parseSelectedModels(value)
 }
 
 // ============================================================
@@ -230,7 +229,7 @@ export function ApiKeyInput({
 
   const { t } = useTranslation()
   const [apiKey, setApiKey] = useState(initialValues?.apiKey ?? '')
-  const [showValue, setShowValue] = useState(false)
+  const [showValue, setShowValue] = useState(!!initialValues?.apiKey)
   const [baseUrl, setBaseUrl] = useState(initialValues?.baseUrl ?? defaultPreset.url)
   const [activePreset, setActivePreset] = useState<PresetKey>(initialPreset)
   const [lastNonCustomPreset, setLastNonCustomPreset] = useState<PresetKey | null>(
@@ -550,14 +549,17 @@ export function ApiKeyInput({
     const submittedModels = isOrderPreset
       ? parsedModels.map((id) => {
         const remote = remoteModels.find((model) => model.id === id)
-        const supportsImages = typeof modelImageCaps[id] === 'boolean'
-          ? modelImageCaps[id]
-          : remote?.supportsImages
+        const supportsImages = resolveRemoteModelSupportsImages(
+          remote ?? { id, name: id },
+          modelImageCaps[id],
+        )
+        const contextWindow = remote?.contextWindow ?? initialValues?.modelContextWindows?.[id]
         return {
           id,
           name: remote?.name ?? id,
           shortName: remote?.name ?? id,
-          ...(typeof supportsImages === 'boolean' ? { supportsImages } : {}),
+          supportsImages,
+          ...(contextWindow ? { contextWindow } : {}),
         }
       })
       : parsedModels
@@ -589,7 +591,7 @@ export function ApiKeyInput({
       piAuthProvider: resolvedPiAuthProvider,
       modelSelectionMode: isPiApiKeyFlow
         ? (parsedModels.length > 0 ? 'userDefined3Tier' : 'automaticallySyncedFromProvider')
-        : undefined,
+        : (isOrderPreset && parsedModels.length > 0 ? 'userDefined3Tier' : undefined),
       customEndpoint,
     })
   }
@@ -995,16 +997,15 @@ export function ApiKeyInput({
             setModelError(null)
           }}
           imageCaps={modelImageCaps}
-          onToggleImages={(id) => {
-            const remote = remoteModels.find((model) => model.id === id)
-            const current = modelImageCaps[id]
-              ?? remote?.supportsImages
-              ?? inferModelSupportsImages(id, remote?.name)
-            setModelImageCaps((prev) => ({ ...prev, [id]: !current }))
-            setConnectionDefaultModel((prev) => (
-              parseSelectedModels(prev).includes(id) ? prev : toggleSelectedModel(prev, id)
-            ))
-            setModelError(null)
+          onToggleImage={(id) => {
+            setModelImageCaps((prev) => {
+              const remote = remoteModels.find((model) => model.id === id)
+              const current = resolveRemoteModelSupportsImages(
+                remote ?? { id, name: id },
+                prev[id],
+              )
+              return { ...prev, [id]: !current }
+            })
           }}
           onRetry={() => setRemoteModelsNonce((n) => n + 1)}
         />

@@ -104,4 +104,13 @@ describe('findCustomEndpointModelEntry', () => {
       id: 'Laufry',
     })
   })
+
+  it('preserves a stored catalog context window when the runtime ID is prefixed', () => {
+    expect(findCustomEndpointModelEntry('custom-endpoint/DeepSeek-V4-Flash', [
+      { id: 'DeepSeek-V4-Flash', contextWindow: 262_144 },
+    ])).toEqual({
+      id: 'DeepSeek-V4-Flash',
+      contextWindow: 262_144,
+    })
+  })
 })

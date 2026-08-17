@@ -1,9 +1,11 @@
 import { describe, expect, test } from 'bun:test'
 import {
+  firstSelectedModelId,
   inferModelSupportsImages,
   modelsEndpoint,
   parseOpenAiModelsPayload,
   parseSelectedModels,
+  resolveRemoteModelSupportsImages,
   toggleSelectedModel,
 } from '../fetch-openai-models.ts'
 
@@ -61,6 +63,50 @@ describe('parseOpenAiModelsPayload', () => {
       { id: 'Opus', name: 'Opus', supportsImages: false },
     ])
   })
+
+  test('reads catalog context windows from common field names', () => {
+    expect(parseOpenAiModelsPayload({
+      data: [
+        { id: 'Opus', context_window: 200_000 },
+        { id: 'Laufry', context_length: '131072' },
+        { id: 'Maylo', model_info: { max_input_tokens: 262_144 } },
+        { id: 'tiny', context_window: 16 },
+      ],
+    })).toEqual([
+      { id: 'Opus', name: 'Opus', contextWindow: 200_000 },
+      { id: 'Laufry', name: 'Laufry', contextWindow: 131_072 },
+      { id: 'Maylo', name: 'Maylo', contextWindow: 262_144 },
+      { id: 'tiny', name: 'tiny' },
+    ])
+  })
+
+  test('reads LiteLLM model_info and OpenAI modalities arrays', () => {
+    expect(parseOpenAiModelsPayload({
+      data: [
+        { id: 'Maylo', model_info: { supports_vision: true } },
+        { id: 'text-1', modalities: ['text'] },
+        { id: 'vision-1', modalities: [{ type: 'text' }, { type: 'image_url' }] },
+      ],
+    })).toEqual([
+      { id: 'Maylo', name: 'Maylo', supportsImages: true },
+      { id: 'text-1', name: 'text-1', supportsImages: false },
+      { id: 'vision-1', name: 'vision-1', supportsImages: true },
+    ])
+  })
+})
+
+describe('resolveRemoteModelSupportsImages', () => {
+  test('uses catalog or user override, never the model name', () => {
+    expect(resolveRemoteModelSupportsImages({ id: 'Opus', name: 'Opus' })).toBe(false)
+    expect(resolveRemoteModelSupportsImages({ id: 'Laufry', name: 'Laufry' })).toBe(false)
+    expect(resolveRemoteModelSupportsImages({ id: 'Laufry', name: 'Laufry', supportsImages: true })).toBe(true)
+    expect(resolveRemoteModelSupportsImages({ id: 'Opus', name: 'Opus', supportsImages: false })).toBe(false)
+  })
+
+  test('user override wins over catalog', () => {
+    expect(resolveRemoteModelSupportsImages({ id: 'Laufry', name: 'Laufry' }, true)).toBe(true)
+    expect(resolveRemoteModelSupportsImages({ id: 'Opus', name: 'Opus', supportsImages: true }, false)).toBe(false)
+  })
 })
 
 describe('inferModelSupportsImages', () => {
@@ -70,8 +116,12 @@ describe('inferModelSupportsImages', () => {
     expect(inferModelSupportsImages('gpt-4o-mini')).toBe(true)
   })
 
+  test('treats ORDER Laufry as multimodal even without a catalog flag', () => {
+    expect(inferModelSupportsImages('Laufry')).toBe(true)
+    expect(inferModelSupportsImages('pi/Laufry')).toBe(true)
+  })
+
   test('leaves unknown ORDER names as text-only', () => {
-    expect(inferModelSupportsImages('Laufry')).toBe(false)
     expect(inferModelSupportsImages('Maylo')).toBe(false)
   })
 
@@ -89,5 +139,15 @@ describe('toggleSelectedModel', () => {
     const twice = toggleSelectedModel(once, 'Laufry')
     expect(parseSelectedModels(twice)).toEqual(['Opus', 'Laufry'])
     expect(parseSelectedModels(toggleSelectedModel(twice, 'Opus'))).toEqual(['Laufry'])
+  })
+
+  test('splits fullwidth and enumeration commas used in zh placeholders', () => {
+    expect(parseSelectedModels('Opus，Laufry、Maylo')).toEqual(['Opus', 'Laufry', 'Maylo'])
+  })
+
+  test('firstSelectedModelId never returns a joined list', () => {
+    expect(firstSelectedModelId('Opus, Laufry')).toBe('Opus')
+    expect(firstSelectedModelId('Opus，Laufry')).toBe('Opus')
+    expect(firstSelectedModelId('')).toBeUndefined()
   })
 })

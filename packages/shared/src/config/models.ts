@@ -335,6 +335,23 @@ export function getModelContextWindow(modelId: string): number | undefined {
 }
 
 /**
+ * Pi SDK auto-compacts when usage exceeds `contextWindow - reserveTokens`.
+ * Default reserve is 16_384 (room for the model's reply).
+ */
+export const COMPACTION_RESERVE_TOKENS = 16_384;
+
+export function compactionTriggerTokens(
+  contextWindow: number,
+  reserveTokens: number = COMPACTION_RESERVE_TOKENS,
+): number {
+  if (!Number.isFinite(contextWindow) || contextWindow <= 0) return 0;
+  const reserve = Number.isFinite(reserveTokens) && reserveTokens > 0
+    ? reserveTokens
+    : COMPACTION_RESERVE_TOKENS;
+  return Math.max(1, contextWindow - reserve);
+}
+
+/**
  * Check if model is an Opus model (for cache TTL decisions).
  */
 export function isOpusModel(modelId: string): boolean {
