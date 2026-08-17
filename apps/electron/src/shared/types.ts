@@ -644,6 +644,8 @@ export interface ElectronAPI {
   setDefaultLlmConnection(slug: string): Promise<{ success: boolean; error?: string }>
   getDefaultThinkingLevel(): Promise<ThinkingLevel>
   setDefaultThinkingLevel(level: ThinkingLevel): Promise<{ success: boolean; error?: string }>
+  getSharedProjectMemoryEnabled(): Promise<boolean>
+  setSharedProjectMemoryEnabled(enabled: boolean): Promise<{ success: boolean; error?: string }>
   setWorkspaceDefaultLlmConnection(workspaceId: string, slug: string | null): Promise<{ success: boolean; error?: string }>
 
   // Projects (workspace-scoped)

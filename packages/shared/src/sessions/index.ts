@@ -21,7 +21,7 @@ export type {
 } from './types.ts';
 
 // Field constants
-export { SESSION_PERSISTENT_FIELDS } from './types.ts';
+export { SESSION_PERSISTENT_FIELDS, isSharedProjectMemoryEnabled } from './types.ts';
 
 // Storage functions
 export {
@@ -126,5 +126,4 @@ export {
   validateBundle,
   MAX_BUNDLE_SIZE_BYTES,
 } from './bundle.ts';
-
 

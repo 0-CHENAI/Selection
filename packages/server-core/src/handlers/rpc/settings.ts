@@ -1,7 +1,7 @@
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs'
 import { dirname } from 'path'
 import { RPC_CHANNELS } from '@craft-agent/shared/protocol'
-import { getPreferencesPath, getSessionDraft, setSessionDraft, deleteSessionDraft, getAllSessionDrafts, getWorkspaceByNameOrId, getDefaultThinkingLevel, setDefaultThinkingLevel } from '@craft-agent/shared/config'
+import { getPreferencesPath, getSessionDraft, setSessionDraft, deleteSessionDraft, getAllSessionDrafts, getWorkspaceByNameOrId, getDefaultThinkingLevel, setDefaultThinkingLevel, getSharedProjectMemoryEnabled, setSharedProjectMemoryEnabled } from '@craft-agent/shared/config'
 import { isValidThinkingLevel, normalizeThinkingLevel, THINKING_LEVEL_IDS } from '@craft-agent/shared/agent/thinking-levels'
 
 const VALID_THINKING_LEVELS_LIST = THINKING_LEVEL_IDS.map(id => `'${id}'`).join(', ')
@@ -31,6 +31,8 @@ export const HANDLED_CHANNELS = [
   RPC_CHANNELS.sessions.SET_MODEL,
   RPC_CHANNELS.settings.GET_DEFAULT_THINKING_LEVEL,
   RPC_CHANNELS.settings.SET_DEFAULT_THINKING_LEVEL,
+  RPC_CHANNELS.settings.GET_SHARED_PROJECT_MEMORY_ENABLED,
+  RPC_CHANNELS.settings.SET_SHARED_PROJECT_MEMORY_ENABLED,
   RPC_CHANNELS.tools.GET_BROWSER_TOOL_ENABLED,
   RPC_CHANNELS.tools.SET_BROWSER_TOOL_ENABLED,
   RPC_CHANNELS.settings.GET_NETWORK_PROXY,
@@ -53,6 +55,20 @@ export function registerSettingsHandlers(server: RpcServer, deps: HandlerDeps): 
     const success = setDefaultThinkingLevel(level)
     if (!success) {
       throw new Error('Failed to persist default thinking level')
+    }
+    return { success: true }
+  })
+
+  server.handle(RPC_CHANNELS.settings.GET_SHARED_PROJECT_MEMORY_ENABLED, async () => {
+    return getSharedProjectMemoryEnabled()
+  })
+
+  server.handle(RPC_CHANNELS.settings.SET_SHARED_PROJECT_MEMORY_ENABLED, async (_ctx, enabled: boolean) => {
+    if (typeof enabled !== 'boolean') {
+      throw new Error('Shared project memory setting must be a boolean')
+    }
+    if (!setSharedProjectMemoryEnabled(enabled)) {
+      throw new Error('Failed to persist shared project memory setting')
     }
     return { success: true }
   })

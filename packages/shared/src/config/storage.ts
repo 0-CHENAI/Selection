@@ -60,6 +60,7 @@ export interface StoredConfig {
   llmConnections?: LlmConnection[];
   defaultLlmConnection?: string;  // Slug of default connection for new sessions
   defaultThinkingLevel?: ThinkingLevel;  // App-level default thinking level for new sessions
+  sharedProjectMemoryEnabled?: boolean;  // Snapshot source for new sessions (default: false)
 
   workspaces: Workspace[];
   activeWorkspaceId: string | null;
@@ -119,6 +120,7 @@ const FALLBACK_CONFIG_DEFAULTS: ConfigDefaults = {
     sendMessageKey: 'enter',
     spellCheck: false,
     keepAwakeWhileRunning: false,
+    sharedProjectMemoryEnabled: false,
     richToolDescriptions: true,
     browserToolEnabled: true,
     allowRemoteEvaluate: true,
@@ -679,7 +681,10 @@ export async function switchWorkspaceAtomic(workspaceId: string): Promise<{ work
   if (!workspace) return null;
 
   // Get or create the latest session for this workspace
-  const session = await getOrCreateLatestSession(workspace.rootPath);
+  const session = await getOrCreateLatestSession(
+    workspace.rootPath,
+    getSharedProjectMemoryEnabled(),
+  );
 
   // Update active workspace in config
   config.activeWorkspaceId = workspaceId;
@@ -2890,6 +2895,29 @@ export function setDefaultThinkingLevel(level: ThinkingLevel): boolean {
   if (!config) return false;
 
   config.defaultThinkingLevel = level;
+  saveConfig(config);
+  return true;
+}
+
+/**
+ * Whether newly created sessions should share their bound project's MEMORY.md.
+ * Missing stored values use the bundled default (false), while legacy session
+ * compatibility is handled separately when reading each session snapshot.
+ */
+export function getSharedProjectMemoryEnabled(): boolean {
+  const config = loadStoredConfig();
+  if (typeof config?.sharedProjectMemoryEnabled === 'boolean') {
+    return config.sharedProjectMemoryEnabled;
+  }
+  return loadConfigDefaults().defaults.sharedProjectMemoryEnabled ?? false;
+}
+
+/** Persist the app-level project memory setting used by future sessions. */
+export function setSharedProjectMemoryEnabled(enabled: boolean): boolean {
+  const config = loadStoredConfig();
+  if (!config) return false;
+
+  config.sharedProjectMemoryEnabled = enabled;
   saveConfig(config);
   return true;
 }

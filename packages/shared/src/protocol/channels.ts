@@ -220,6 +220,8 @@ export const RPC_CHANNELS = {
     TEST_LLM_CONNECTION_SETUP: 'settings:testLlmConnectionSetup',
     GET_DEFAULT_THINKING_LEVEL: 'settings:getDefaultThinkingLevel',
     SET_DEFAULT_THINKING_LEVEL: 'settings:setDefaultThinkingLevel',
+    GET_SHARED_PROJECT_MEMORY_ENABLED: 'settings:getSharedProjectMemoryEnabled',
+    SET_SHARED_PROJECT_MEMORY_ENABLED: 'settings:setSharedProjectMemoryEnabled',
     GET_NETWORK_PROXY: 'settings:getNetworkProxy',
     SET_NETWORK_PROXY: 'settings:setNetworkProxy',
     GET_SERVER_CONFIG: 'settings:getServerConfig',

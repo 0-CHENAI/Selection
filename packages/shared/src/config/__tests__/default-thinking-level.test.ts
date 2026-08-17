@@ -47,6 +47,7 @@ function setupWorkspaceConfigDir() {
         sendMessageKey: 'enter',
         spellCheck: false,
         keepAwakeWhileRunning: false,
+        sharedProjectMemoryEnabled: false,
         richToolDescriptions: true,
       },
       workspaceDefaults: {
@@ -66,7 +67,7 @@ function runEval(configDir: string, code: string): string {
   const run = Bun.spawnSync([
     process.execPath,
     '--eval',
-    `import { getDefaultThinkingLevel, setDefaultThinkingLevel } from '${STORAGE_MODULE_PATH}'; ${code}`,
+    `import { getDefaultThinkingLevel, setDefaultThinkingLevel, getSharedProjectMemoryEnabled, setSharedProjectMemoryEnabled } from '${STORAGE_MODULE_PATH}'; ${code}`,
   ], {
     env: { ...process.env, CRAFT_CONFIG_DIR: configDir },
     stdout: 'pipe',
@@ -121,5 +122,32 @@ describe('default thinking level storage', () => {
 
     const output = runEval(configDir, "console.log(String(getDefaultThinkingLevel()))")
     expect(output).toBe('medium')
+  })
+})
+
+describe('shared project memory storage', () => {
+  it('defaults to disabled when the stored config has no field', () => {
+    const { configDir } = setupWorkspaceConfigDir()
+    const output = runEval(configDir, 'console.log(String(getSharedProjectMemoryEnabled()))')
+    expect(output).toBe('false')
+  })
+
+  it('persists and round-trips the app setting', () => {
+    const { configDir, configPath } = setupWorkspaceConfigDir()
+    runEval(configDir, 'setSharedProjectMemoryEnabled(true)')
+
+    const persisted = JSON.parse(readFileSync(configPath, 'utf-8'))
+    expect(persisted.sharedProjectMemoryEnabled).toBe(true)
+    expect(runEval(configDir, 'console.log(String(getSharedProjectMemoryEnabled()))')).toBe('true')
+  })
+
+  it('stays disabled when an older defaults file has no memory field', () => {
+    const { configDir } = setupWorkspaceConfigDir()
+    const defaultsPath = join(configDir, 'config-defaults.json')
+    const defaults = JSON.parse(readFileSync(defaultsPath, 'utf-8'))
+    delete defaults.defaults.sharedProjectMemoryEnabled
+    writeFileSync(defaultsPath, JSON.stringify(defaults, null, 2), 'utf-8')
+
+    expect(runEval(configDir, 'console.log(String(getSharedProjectMemoryEnabled()))')).toBe('false')
   })
 })

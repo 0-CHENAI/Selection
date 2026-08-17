@@ -17,6 +17,7 @@ export interface ConfigDefaults {
     sendMessageKey: 'enter' | 'cmd-enter';
     spellCheck: boolean;
     keepAwakeWhileRunning: boolean;
+    sharedProjectMemoryEnabled: boolean;
     richToolDescriptions: boolean;
     browserToolEnabled: boolean;
     /**

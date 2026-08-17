@@ -34,6 +34,7 @@ export const SESSION_PERSISTENT_FIELDS = [
   'lastReadMessageId', 'hasUnread',
   // Config
   'enabledSourceSlugs', 'permissionMode', 'previousPermissionMode', 'workingDirectory',
+  'sharedProjectMemoryEnabled',
   // Model/Connection
   'model', 'llmConnection', 'connectionLocked', 'thinkingLevel',
   // Sharing
@@ -210,6 +211,11 @@ export interface SessionConfig {
   triggeredBy?: { automationName?: string; event?: string; timestamp?: number };
   /** Workspace-scoped project id this session belongs to (undefined = unbound). */
   projectId?: string;
+  /**
+   * Snapshot of the app setting at creation time. Missing means a legacy
+   * session and is intentionally interpreted as shared for upgrade safety.
+   */
+  sharedProjectMemoryEnabled?: boolean;
   /** Parent session id — when set, this session is a subtask of the parent (undefined = top-level task). */
   parentSessionId?: string;
   /** Kanban board column id ('todo' | 'in-progress' | 'done'). Drag-to-move target; independent of sessionStatus. */
@@ -317,6 +323,8 @@ export interface SessionHeader {
   triggeredBy?: { automationName?: string; event?: string; timestamp?: number };
   /** Workspace-scoped project id this session belongs to (undefined = unbound). */
   projectId?: string;
+  /** Per-session shared project memory snapshot; missing means legacy shared. */
+  sharedProjectMemoryEnabled?: boolean;
   /** Parent session id — when set, this session is a subtask of the parent (undefined = top-level task). */
   parentSessionId?: string;
   /** Kanban board column id ('todo' | 'in-progress' | 'done'). Drag-to-move target; independent of sessionStatus. */
@@ -413,6 +421,8 @@ export interface SessionMetadata {
   branchFromMessageId?: string;
   /** Workspace-scoped project id this session belongs to (undefined = unbound). */
   projectId?: string;
+  /** Per-session shared project memory snapshot; missing means legacy shared. */
+  sharedProjectMemoryEnabled?: boolean;
   /** Parent session id — when set, this session is a subtask of the parent (undefined = top-level task). */
   parentSessionId?: string;
   /** Kanban board column id ('todo' | 'in-progress' | 'done'). Drag-to-move target; independent of sessionStatus. */
@@ -427,4 +437,15 @@ export interface SessionMetadata {
   taskNodeCount?: number;
   /** Tasks Conductor: generate-time draft orchestrator. Hidden from the board until adopted (promoted) by createTask. */
   taskDraft?: boolean;
+}
+
+/** Resolve the persisted memory mode while preserving pre-migration behavior. */
+export function isSharedProjectMemoryEnabled(
+  session: Pick<SessionConfig, 'sharedProjectMemoryEnabled'> | null | undefined,
+): boolean {
+  const value = (session as { sharedProjectMemoryEnabled?: unknown } | null | undefined)
+    ?.sharedProjectMemoryEnabled;
+  // Only a genuinely missing legacy field keeps the old shared behavior.
+  // Corrupt/imported non-boolean values fail closed to isolated.
+  return value === undefined ? true : value === true;
 }

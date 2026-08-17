@@ -188,6 +188,7 @@ export async function createSession(
     labels?: string[];
     isFlagged?: boolean;
     projectId?: string;
+    sharedProjectMemoryEnabled?: boolean;
     parentSessionId?: string;
     taskSlug?: string;
     taskRunId?: string;
@@ -225,6 +226,10 @@ export async function createSession(
     labels: options?.labels,
     isFlagged: options?.isFlagged,
     projectId: options?.projectId,
+    // Lower-level callers that do not supply the app setting still get the
+    // privacy-safe default. Legacy compatibility applies only when reading
+    // sessions that already lack the field on disk.
+    sharedProjectMemoryEnabled: options?.sharedProjectMemoryEnabled ?? false,
     parentSessionId: options?.parentSessionId,
     taskSlug: options?.taskSlug,
     taskRunId: options?.taskRunId,
@@ -268,6 +273,7 @@ export async function getOrCreateSessionById(
       lastUsedAt: existing.lastUsedAt,
       sdkCwd: existing.sdkCwd,
       workingDirectory: existing.workingDirectory,
+      sharedProjectMemoryEnabled: existing.sharedProjectMemoryEnabled,
     };
   }
 
@@ -287,6 +293,7 @@ export async function getOrCreateSessionById(
     sdkCwd,
     createdAt: now,
     lastUsedAt: now,
+    sharedProjectMemoryEnabled: false,
   };
 
   const storedSession: StoredSession = {
@@ -479,7 +486,10 @@ export async function clearSessionMessages(workspaceRootPath: string, sessionId:
  * Get or create the latest session for a workspace
  * Uses listActiveSessions to exclude archived sessions
  */
-export async function getOrCreateLatestSession(workspaceRootPath: string): Promise<SessionConfig> {
+export async function getOrCreateLatestSession(
+  workspaceRootPath: string,
+  sharedProjectMemoryEnabled = false,
+): Promise<SessionConfig> {
   const sessions = listActiveSessions(workspaceRootPath);
   if (sessions.length > 0 && sessions[0]) {
     const latest = sessions[0];
@@ -490,9 +500,10 @@ export async function getOrCreateLatestSession(workspaceRootPath: string): Promi
       name: latest.name,
       createdAt: latest.createdAt,
       lastUsedAt: latest.lastUsedAt,
+      sharedProjectMemoryEnabled: latest.sharedProjectMemoryEnabled,
     };
   }
-  return createSession(workspaceRootPath);
+  return createSession(workspaceRootPath, { sharedProjectMemoryEnabled });
 }
 
 // ============================================================
