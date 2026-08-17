@@ -323,7 +323,12 @@ Push-Location $ElectronDir
 try {
     bun scripts/copy-assets.ts
     if ($LASTEXITCODE -ne 0) { throw "Asset copy failed" }
-    Write-Host "  Assets copied" -ForegroundColor Green
+    $OfficeCliExe = Join-Path $ElectronDir "resources\bin\win32-x64\officecli.exe"
+    if (-not (Test-Path $OfficeCliExe)) {
+        throw "officecli.exe missing after asset copy: $OfficeCliExe"
+    }
+    Unblock-File -Path $OfficeCliExe -ErrorAction SilentlyContinue
+    Write-Host "  Assets copied (officecli.exe present)" -ForegroundColor Green
 } finally {
     Pop-Location
 }

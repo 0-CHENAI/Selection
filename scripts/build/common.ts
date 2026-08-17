@@ -43,6 +43,39 @@ export const BUN_VERSION = 'bun-v1.3.9';
 export const UV_VERSION = '0.10.6';
 
 /**
+ * OfficeCLI version to bundle (GitHub release tag).
+ * https://github.com/iOfficeAI/OfficeCLI/releases
+ */
+export const OFFICECLI_VERSION = 'v1.0.144';
+
+const OFFICECLI_ASSET: Record<string, string> = {
+  'darwin-arm64': 'officecli-mac-arm64',
+  'darwin-x64': 'officecli-mac-x64',
+  'linux-x64': 'officecli-linux-x64',
+  'linux-arm64': 'officecli-linux-arm64',
+  'win32-x64': 'officecli-win-x64.exe',
+  'win32-arm64': 'officecli-win-arm64.exe',
+};
+
+/** Release checksums are pinned with the version so cached assets are verified too. */
+export const OFFICECLI_SHA256: Record<string, string> = {
+  'darwin-arm64': '04757163428c5bde8d91e8f838517818e74722157722ca5f3877b6716b77bd45',
+  'darwin-x64': '366100643d757b0da24829422897ca74768a894b5ecd1a471a1336f8e2a0787d',
+  'linux-x64': '32ef7a21a54a4ca6c9806bf5e9f3d32bfb1291017329c55044cb2aac71822eb8',
+  'linux-arm64': '56ec2c3114b66f6490888b6778cbb8413a65911a26cacc7207f29e13424966da',
+  'win32-x64': 'e780cc6a5385f84b4d54d71b0c179904ed534125ec33fe39b1a8711fa80e387e',
+  'win32-arm64': '0adb928d118e237b108077dadca9e272c236cd378c699712a41adda697047860',
+};
+
+/** Desktop installers that must ship officecli even when built on another host. */
+export const OFFICECLI_DESKTOP_TARGETS: Array<{ platform: Platform; arch: Arch }> = [
+  { platform: 'darwin', arch: 'arm64' },
+  { platform: 'darwin', arch: 'x64' },
+  { platform: 'win32', arch: 'x64' },
+  { platform: 'linux', arch: 'x64' },
+];
+
+/**
  * Get platform key for resources/bin folder naming.
  */
 export function getPlatformKey(platform: Platform, arch: Arch): string {
@@ -312,6 +345,84 @@ export async function downloadUv(config: BuildConfig): Promise<void> {
     console.log(`  uv installed to ${targetPath} ✓`);
   } finally {
     rmSync(tempDir, { recursive: true, force: true });
+  }
+}
+
+/**
+ * Download and verify the OfficeCLI binary into
+ * resources/bin/<platform-arch>/officecli(.exe).
+ */
+export async function downloadOfficecli(config: BuildConfig): Promise<void> {
+  const { platform, arch, electronDir } = config;
+  const platformKey = getPlatformKey(platform, arch);
+  const assetName = OFFICECLI_ASSET[platformKey];
+  const expectedHash = OFFICECLI_SHA256[platformKey];
+  if (!assetName || !expectedHash) {
+    throw new Error(`No OfficeCLI build for ${platformKey}`);
+  }
+
+  const destName = platform === 'win32' ? 'officecli.exe' : 'officecli';
+  const targetDir = join(electronDir, 'resources', 'bin', platformKey);
+  const targetPath = join(targetDir, destName);
+  const stampPath = join(targetDir, 'officecli.version');
+
+  if (existsSync(targetPath) && existsSync(stampPath)) {
+    const stamped = (await Bun.file(stampPath).text()).trim();
+    if (stamped === OFFICECLI_VERSION && await verifySha256(targetPath, expectedHash)) {
+      console.log(`officecli ${OFFICECLI_VERSION} already present at ${targetPath}`);
+      return;
+    }
+    console.warn(`Cached officecli failed version or checksum verification at ${targetPath}; downloading again.`);
+  }
+
+  console.log(`Downloading officecli ${OFFICECLI_VERSION} for ${platformKey}...`);
+  mkdirSync(targetDir, { recursive: true });
+
+  const tempDir = join(electronDir, '.officecli-download-temp');
+  rmSync(tempDir, { recursive: true, force: true });
+  mkdirSync(tempDir, { recursive: true });
+
+  try {
+    const releaseBase = `https://github.com/iOfficeAI/OfficeCLI/releases/download/${OFFICECLI_VERSION}`;
+    const assetPath = join(tempDir, assetName);
+
+    await curlDownload(assetPath, [`${releaseBase}/${assetName}`]);
+    if (!(await verifySha256(assetPath, expectedHash))) {
+      throw new Error(`officecli checksum verification failed for ${assetName}`);
+    }
+
+    copyFileSync(assetPath, targetPath);
+    if (platform !== 'win32') {
+      await $`chmod +x ${targetPath}`.quiet();
+    }
+    if (process.platform === 'darwin' && platform === 'darwin') {
+      try {
+        await $`xattr -dr com.apple.quarantine ${targetPath}`.quiet();
+      } catch {
+        // No quarantine xattr is fine
+      }
+    }
+    if (process.platform === 'win32') {
+      const escaped = targetPath.replace(/'/g, "''");
+      try {
+        await $`powershell -NoProfile -ExecutionPolicy Bypass -Command "Unblock-File -LiteralPath '${escaped}'"`.quiet();
+      } catch {
+        // Unblock is best-effort; MOTW may already be absent
+      }
+    }
+    await Bun.write(stampPath, `${OFFICECLI_VERSION}\n`);
+    console.log(`  officecli installed to ${targetPath} ✓`);
+  } finally {
+    rmSync(tempDir, { recursive: true, force: true });
+  }
+}
+
+/** Fetch every desktop officecli binary so Mac/Windows installers can be built from either host. */
+export async function downloadOfficecliDesktopTargets(
+  base: Omit<BuildConfig, 'platform' | 'arch'>,
+): Promise<void> {
+  for (const target of OFFICECLI_DESKTOP_TARGETS) {
+    await downloadOfficecli({ ...base, ...target });
   }
 }
 

@@ -11,8 +11,17 @@
  * Run: bun scripts/copy-assets.ts
  */
 
-import { cpSync, copyFileSync, mkdirSync } from 'fs';
+import { cpSync, copyFileSync } from 'fs';
 import { join } from 'path';
+import { downloadOfficecliDesktopTargets } from '../../../scripts/build/common.ts';
+
+await downloadOfficecliDesktopTargets({
+  upload: false,
+  uploadLatest: false,
+  uploadScript: false,
+  rootDir: join(import.meta.dir, '..', '..', '..'),
+  electronDir: join(import.meta.dir, '..'),
+})
 
 // Copy all resources (icons, themes, docs, permissions, tool-icons, etc.)
 cpSync('resources', 'dist/resources', { recursive: true });

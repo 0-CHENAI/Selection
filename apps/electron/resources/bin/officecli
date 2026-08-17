@@ -1,0 +1,35 @@
+#!/bin/sh
+# Selection wrapper — prefer the app-bundled binary, never curl-install.
+if [ -n "$CRAFT_OFFICECLI" ] && [ -f "$CRAFT_OFFICECLI" ]; then
+  exec "$CRAFT_OFFICECLI" "$@"
+fi
+
+DIR=$(CDPATH= cd -- "$(dirname "$0")" && pwd)
+UNAME=$(uname -s 2>/dev/null || echo unknown)
+MACHINE=$(uname -m 2>/dev/null || echo unknown)
+
+case "$UNAME" in
+  Darwin)
+    ARCH=x64
+    [ "$MACHINE" = "arm64" ] && ARCH=arm64
+    CAND="$DIR/darwin-$ARCH/officecli"
+    ;;
+  Linux)
+    ARCH=x64
+    [ "$MACHINE" = "aarch64" ] || [ "$MACHINE" = "arm64" ] && ARCH=arm64
+    CAND="$DIR/linux-$ARCH/officecli"
+    ;;
+  MINGW*|MSYS*|CYGWIN*|Windows_NT)
+    CAND="$DIR/win32-x64/officecli.exe"
+    ;;
+  *)
+    CAND=""
+    ;;
+esac
+
+if [ -n "$CAND" ] && [ -f "$CAND" ]; then
+  exec "$CAND" "$@"
+fi
+
+echo "officecli is not bundled in this Selection build. Rebuild the app or set CRAFT_OFFICECLI." >&2
+exit 127

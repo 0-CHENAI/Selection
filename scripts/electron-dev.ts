@@ -7,7 +7,7 @@ import { spawn, type Subprocess } from "bun";
 import { existsSync, rmSync, cpSync, readFileSync, statSync, mkdirSync } from "fs";
 import { join, basename } from "path";
 import * as esbuild from "esbuild";
-import { downloadUv, type Platform, type Arch } from "./build/common";
+import { downloadOfficecli, downloadUv, type Platform, type Arch } from "./build/common";
 
 const ROOT_DIR = join(import.meta.dir, "..");
 const ELECTRON_DIR = join(ROOT_DIR, "apps/electron");
@@ -50,6 +50,18 @@ function resolveBuildArch(): Arch {
   throw new Error(`Unsupported architecture for uv bootstrap: ${process.arch}`);
 }
 
+function currentBuildConfig() {
+  return {
+    platform: resolveBuildPlatform(),
+    arch: resolveBuildArch(),
+    upload: false,
+    uploadLatest: false,
+    uploadScript: false,
+    rootDir: ROOT_DIR,
+    electronDir: ELECTRON_DIR,
+  };
+}
+
 async function ensureBundledUvForCurrentPlatform(): Promise<void> {
   const platform = resolveBuildPlatform();
   const arch = resolveBuildArch();
@@ -63,15 +75,11 @@ async function ensureBundledUvForCurrentPlatform(): Promise<void> {
   }
 
   console.log(`⬇️  Bundled uv missing, bootstrapping ${platformKey}...`);
-  await downloadUv({
-    platform,
-    arch,
-    upload: false,
-    uploadLatest: false,
-    uploadScript: false,
-    rootDir: ROOT_DIR,
-    electronDir: ELECTRON_DIR,
-  });
+  await downloadUv(currentBuildConfig());
+}
+
+async function ensureBundledOfficecliForCurrentPlatform(): Promise<void> {
+  await downloadOfficecli(currentBuildConfig());
 }
 
 // Multi-instance detection (matches detect-instance.sh logic)
@@ -428,6 +436,7 @@ async function main(): Promise<void> {
   }
 
   await ensureBundledUvForCurrentPlatform();
+  await ensureBundledOfficecliForCurrentPlatform();
 
   copyResources();
 

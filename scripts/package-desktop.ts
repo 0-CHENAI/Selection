@@ -32,6 +32,7 @@ import {
   cleanBuildArtifacts,
   installDependencies,
   downloadBun,
+  downloadOfficecli,
   downloadUv,
   copySDK,
   verifySDKCopy,
@@ -214,6 +215,7 @@ async function prepareAndBuildApp(config: BuildConfig): Promise<void> {
   resignNativeBuildTools(ROOT_DIR)
   await downloadBun(config)
   await downloadUv(config)
+  await downloadOfficecli(config)
   await ensureSdkBinaryPackage(config.platform, config.arch)
   copySDK(config)
   verifySDKCopy(config)

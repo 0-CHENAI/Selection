@@ -53,6 +53,7 @@ import {
   BUN_VERSION,
   UV_VERSION,
   downloadBun,
+  downloadOfficecli,
   downloadUv,
   buildMcpServers,
   getPlatformKey,
@@ -223,6 +224,38 @@ async function downloadUvForServer(config: ServerBuildConfig): Promise<void> {
   copyFileSync(electronUvPath, uvDest);
   await $`chmod +x ${uvDest}`.quiet();
   console.log(`  uv binary installed (${(lstatSync(uvDest).size / 1024 / 1024).toFixed(1)} MB)`);
+}
+
+async function downloadOfficecliForServer(config: ServerBuildConfig): Promise<void> {
+  const { platform, arch, outputDir } = config;
+  const destName = platform === 'win32' ? 'officecli.exe' : 'officecli';
+  const destPath = join(outputDir, 'resources', 'bin', destName);
+  const platformKey = getPlatformKey(platform, arch);
+  const electronPath = join(config.electronDir, 'resources', 'bin', platformKey, destName);
+
+  const buildConfig: BuildConfig = {
+    platform,
+    arch,
+    upload: false,
+    uploadLatest: false,
+    uploadScript: false,
+    rootDir: config.rootDir,
+    electronDir: config.electronDir,
+  };
+  // Always enter the shared downloader: it verifies cached binaries against
+  // the pinned checksum before server packaging.
+  await downloadOfficecli(buildConfig);
+
+  if (!existsSync(electronPath)) {
+    throw new Error(`officecli binary not found after download at ${electronPath}`);
+  }
+
+  mkdirSync(join(outputDir, 'resources', 'bin'), { recursive: true });
+  copyFileSync(electronPath, destPath);
+  if (platform !== 'win32') {
+    await $`chmod +x ${destPath}`.quiet();
+  }
+  console.log(`  officecli binary installed (${(lstatSync(destPath).size / 1024 / 1024).toFixed(1)} MB)`);
 }
 
 // ---------------------------------------------------------------------------
@@ -841,6 +874,7 @@ async function main(): Promise<void> {
   // Step 3: Download uv
   console.log(`\n[3/8] Downloading uv ${UV_VERSION}...`);
   await downloadUvForServer(config);
+  await downloadOfficecliForServer(config);
 
   // Step 4: Build MCP servers
   console.log('\n[4/8] Building MCP servers...');

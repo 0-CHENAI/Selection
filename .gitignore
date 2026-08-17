@@ -58,6 +58,12 @@ __pycache__/
 # Lock files from other package managers
 pnpm-lock.yaml
 
+# Fetched OfficeCLI binaries (pinned by OFFICECLI_VERSION in scripts/build/common.ts)
+apps/electron/resources/bin/*/officecli
+apps/electron/resources/bin/*/officecli.exe
+apps/electron/resources/bin/*/officecli.version
+apps/electron/.officecli-download-temp/
+
 # Craft Agent local data (sessions, credentials, config)
 .craft-agent/
 

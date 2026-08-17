@@ -188,6 +188,15 @@ if (isDebugMode) {
   // - uvPlatformDir exposes raw `uv` for direct shell usage / debugging
   process.env.PATH = `${binDir}${delimiter}${uvPlatformDir}${delimiter}${process.env.PATH}`
 
+  const officecliBinary = join(uvPlatformDir, process.platform === 'win32' ? 'officecli.exe' : 'officecli')
+  if (existsSync(officecliBinary)) {
+    process.env.CRAFT_OFFICECLI = officecliBinary
+  } else {
+    mainLog.warn('Bundled officecli binary missing; Word/Excel/PowerPoint edits via officecli will fail.', {
+      expectedOfficecliPath: officecliBinary,
+    })
+  }
+
   if (!bundledUvExists) {
     mainLog.warn('Bundled uv binary missing, CLI document tools may fail unless uv is available on PATH.', {
       expectedUvPath: uvBinary,

@@ -230,6 +230,17 @@ export {
   getToolDefsAsJsonSchema,
 } from './tool-defs.ts';
 
+export {
+  officecliBinaryName,
+  resolveOfficecliBinary,
+  resolveOfficecliRuntime,
+} from './runtime/officecli.ts';
+export type {
+  OfficecliBinarySource,
+  ResolvedOfficecliBinary,
+  ResolveOfficecliOptions,
+} from './runtime/officecli.ts';
+
 export type {
   SessionToolExecutionMode,
   SessionToolSafeMode,
