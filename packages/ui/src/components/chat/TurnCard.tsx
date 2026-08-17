@@ -23,6 +23,7 @@ import {
   Pencil,
   FilePenLine,
   GitBranch,
+  RefreshCw,
 } from 'lucide-react'
 import { cn } from '../../lib/utils'
 import { Markdown } from '../markdown'
@@ -354,6 +355,8 @@ export interface TurnCardProps {
   compactMode?: boolean
   /** Callback to branch the session from a specific message */
   onBranch?: (messageId: string, options?: { newPanel?: boolean }) => void
+  /** Callback to regenerate the last assistant response */
+  onRegenerate?: () => void
   /** Callback to add an annotation to a response message */
   onAddAnnotation?: (messageId: string, annotation: AnnotationV1) => void
   /** Callback to remove a persisted annotation from a response message */
@@ -1279,6 +1282,8 @@ export interface ResponseCardProps {
   compactMode?: boolean
   /** Callback to branch the session from this response */
   onBranch?: (options?: { newPanel?: boolean }) => void
+  /** Callback to regenerate this response from the last user prompt */
+  onRegenerate?: () => void
   /** Callback to add annotation from selected text */
   onAddAnnotation?: (messageId: string, annotation: AnnotationV1) => void
   /** Callback to remove persisted annotation */
@@ -1526,6 +1531,7 @@ export function ResponseCard({
   showAcceptPlan = true,
   compactMode = false,
   onBranch,
+  onRegenerate,
   onAddAnnotation,
   onRemoveAnnotation,
   onUpdateAnnotation,
@@ -2355,6 +2361,19 @@ export function ResponseCard({
             )}>
               {/* Left side - Copy, View as Markdown, Annotation hint */}
               <div className="flex items-center gap-3">
+                {onRegenerate && (
+                  <button
+                    onClick={onRegenerate}
+                    className={cn(
+                      "turn-action-btn flex items-center gap-1.5 transition-colors select-none",
+                      "text-muted-foreground hover:text-foreground",
+                      "focus:outline-none focus-visible:underline"
+                    )}
+                  >
+                    <RefreshCw className={SIZE_CONFIG.iconSize} />
+                    <span>{t("chat.regenerate")}</span>
+                  </button>
+                )}
                 <button
                   onClick={handleCopy}
                   className={cn(
@@ -2419,6 +2438,26 @@ export function ResponseCard({
               Uses a bottom-sheet drawer to match the CompactPermissionModeSelector
               / CompactModelSelector pattern. Guarded by isLastResponse so older
               plans don't render an empty strip with a hidden-but-focusable button. */}
+          {compactMode && onRegenerate && !isStreaming && (
+            <div
+              className={cn(
+                "pl-3 pr-2 py-1.5 border-t border-border/30 flex items-center bg-muted/20",
+                SIZE_CONFIG.fontSize
+              )}
+            >
+              <button
+                onClick={onRegenerate}
+                className={cn(
+                  "turn-action-btn flex items-center gap-1.5 transition-colors select-none",
+                  "text-muted-foreground hover:text-foreground",
+                  "focus:outline-none focus-visible:underline"
+                )}
+              >
+                <RefreshCw className={SIZE_CONFIG.iconSize} />
+                <span>{t("chat.regenerate")}</span>
+              </button>
+            </div>
+          )}
           {compactMode && isPlan && showAcceptPlan && isLastResponse && onAccept && onAcceptWithCompact && (
             <div
               className={cn(
@@ -2620,6 +2659,7 @@ export const TurnCard = React.memo(function TurnCard({
   animateResponse = false,
   compactMode = false,
   onBranch,
+  onRegenerate,
   onAddAnnotation,
   onRemoveAnnotation,
   onUpdateAnnotation,
@@ -2981,6 +3021,7 @@ export const TurnCard = React.memo(function TurnCard({
             isLastResponse={isLastResponse && index === planActivities.length - 1}
             compactMode={compactMode}
             onBranch={onBranch ? (options?: { newPanel?: boolean }) => onBranch(planActivity.messageId ?? planActivity.id, options) : undefined}
+            onRegenerate={onRegenerate}
             sendMessageKey={sendMessageKey}
             hasActiveFollowUpAnnotations={hasActiveFollowUpAnnotations}
             openAnnotationRequest={openAnnotationRequest}
@@ -3020,6 +3061,7 @@ export const TurnCard = React.memo(function TurnCard({
                 isLastResponse={isLastResponse}
                 compactMode={compactMode}
                 onBranch={onBranch && response.messageId ? (options?: { newPanel?: boolean }) => onBranch(response.messageId!, options) : undefined}
+                onRegenerate={onRegenerate}
                 sendMessageKey={sendMessageKey}
                 hasActiveFollowUpAnnotations={hasActiveFollowUpAnnotations}
                 openAnnotationRequest={openAnnotationRequest}
@@ -3052,6 +3094,7 @@ export const TurnCard = React.memo(function TurnCard({
             isLastResponse={isLastResponse}
             compactMode={compactMode}
             onBranch={onBranch && response.messageId ? (options?: { newPanel?: boolean }) => onBranch(response.messageId!, options) : undefined}
+            onRegenerate={onRegenerate}
             sendMessageKey={sendMessageKey}
             hasActiveFollowUpAnnotations={hasActiveFollowUpAnnotations}
             openAnnotationRequest={openAnnotationRequest}

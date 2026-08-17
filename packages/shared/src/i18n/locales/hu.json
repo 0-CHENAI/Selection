@@ -284,6 +284,8 @@
   "chat.processing.zooming": "Zoom...",
   "chat.queuedBadge": "Várakozik",
   "chat.recentWorkingDirectories": "Legutóbbi munkakönyvtárak",
+  "chat.regenerate": "Újragenerálás",
+  "chat.regenerateFailed": "Nem sikerült újragenerálni a választ",
   "chat.renameSession": "Munkamenet átnevezése",
   "chat.scrollUpForEarlier": "Görgess fel a korábbi üzenetekért (még {{count}})",
   "chat.selectedText": "Kijelölt szöveg",

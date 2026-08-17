@@ -43,6 +43,7 @@ import {
   handleSessionModelChanged,
   handleConnectionChanged,
   handleUserMessage,
+  handleMessagesTruncated,
   handleMessageAnnotationsUpdated,
   handleSessionShared,
   handleSessionUnshared,
@@ -221,6 +222,9 @@ export function processEvent(
 
     case 'usage_update':
       return handleUsageUpdate(state, event)
+
+    case 'messages_truncated':
+      return handleMessagesTruncated(state, event)
 
     default: {
       // Unknown event type - return state unchanged but as new reference

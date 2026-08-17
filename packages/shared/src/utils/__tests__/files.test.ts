@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Buffer } from 'node:buffer'
-import { getFileType, getMimeType, hydrateAttachmentBytes, readFileAttachment } from '../files'
+import { fileAttachmentsFromStored, getFileType, getMimeType, hydrateAttachmentBytes, readFileAttachment, resolveRegenerateAttachments } from '../files'
 
 const cleanups: Array<() => void> = []
 
@@ -96,6 +96,64 @@ describe('readFileAttachment — audio fixture', () => {
     expect(att?.type).toBe('text')
     expect(att?.text).toBe('hello world')
     expect(att?.base64).toBeUndefined()
+  })
+})
+
+describe('fileAttachmentsFromStored', () => {
+  test('rebuilds path-based FileAttachments and prefers resized base64', () => {
+    const rebuilt = fileAttachmentsFromStored([{
+      type: 'image',
+      name: 'shot.png',
+      mimeType: 'image/png',
+      size: 12,
+      storedPath: '/tmp/session/shot.png',
+      resizedBase64: 'resized',
+    }])
+
+    expect(rebuilt).toEqual([{
+      type: 'image',
+      path: '/tmp/session/shot.png',
+      name: 'shot.png',
+      mimeType: 'image/png',
+      size: 12,
+      base64: 'resized',
+      storedPath: '/tmp/session/shot.png',
+      markdownPath: undefined,
+    }])
+  })
+
+  test('returns undefined when nothing was persisted', () => {
+    expect(fileAttachmentsFromStored(undefined)).toBeUndefined()
+    expect(fileAttachmentsFromStored([])).toBeUndefined()
+  })
+})
+
+describe('resolveRegenerateAttachments', () => {
+  const stored = [{
+    type: 'image' as const,
+    name: 'shot.png',
+    mimeType: 'image/png',
+    size: 12,
+    storedPath: '/tmp/session/shot.png',
+  }]
+  const lastSent = [{
+    type: 'image' as const,
+    path: '/tmp/original.png',
+    name: 'shot.png',
+    mimeType: 'image/png',
+    size: 12,
+    base64: 'live',
+  }]
+
+  test('keeps in-memory attachments when the prompt still matches', () => {
+    expect(resolveRegenerateAttachments('describe this', lastSent, 'describe this', stored)).toEqual(lastSent)
+  })
+
+  test('rebuilds from stored paths after restart or prompt mismatch', () => {
+    expect(resolveRegenerateAttachments(undefined, undefined, 'describe this', stored)?.[0]?.path)
+      .toBe('/tmp/session/shot.png')
+    expect(resolveRegenerateAttachments('other', lastSent, 'describe this', stored)?.[0]?.path)
+      .toBe('/tmp/session/shot.png')
   })
 })
 

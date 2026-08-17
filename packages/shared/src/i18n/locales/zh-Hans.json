@@ -284,6 +284,8 @@
   "chat.processing.zooming": "疾驰中…",
   "chat.queuedBadge": "已排队",
   "chat.recentWorkingDirectories": "最近工作目录",
+  "chat.regenerate": "重新生成",
+  "chat.regenerateFailed": "无法重新生成该回复",
   "chat.renameSession": "重命名会话",
   "chat.scrollUpForEarlier": "向上滚动查看更早的消息 (还有 {{count}} 条)",
   "chat.selectedText": "选中文本",

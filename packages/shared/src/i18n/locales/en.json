@@ -284,6 +284,8 @@
   "chat.processing.zooming": "Zooming...",
   "chat.queuedBadge": "Queued",
   "chat.recentWorkingDirectories": "Recent Working Directories",
+  "chat.regenerate": "Regenerate",
+  "chat.regenerateFailed": "Couldn't regenerate that reply",
   "chat.renameSession": "Rename Session",
   "chat.scrollUpForEarlier": "Scroll up for earlier messages ({{count}} more)",
   "chat.selectedText": "Selected text",

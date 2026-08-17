@@ -511,6 +511,12 @@ export interface UsageUpdateEvent {
   }
 }
 
+export interface MessagesTruncatedEvent {
+  type: 'messages_truncated'
+  sessionId: string
+  keepThroughMessageId: string
+}
+
 /**
  * Union of all agent events
  */
@@ -559,6 +565,7 @@ export type AgentEvent =
   | AuthCompletedEvent
   | SourceActivatedEvent
   | UsageUpdateEvent
+  | MessagesTruncatedEvent
 
 /**
  * Side effects that need to be handled outside the pure processor

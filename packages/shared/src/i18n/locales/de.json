@@ -284,6 +284,8 @@
   "chat.processing.zooming": "Rast...",
   "chat.queuedBadge": "In Warteschlange",
   "chat.recentWorkingDirectories": "Zuletzt verwendete Arbeitsverzeichnisse",
+  "chat.regenerate": "Neu erzeugen",
+  "chat.regenerateFailed": "Antwort konnte nicht neu erzeugt werden",
   "chat.renameSession": "Sitzung umbenennen",
   "chat.scrollUpForEarlier": "Nach oben scrollen für ältere Nachrichten ({{count}} weitere)",
   "chat.selectedText": "Ausgewählter Text",

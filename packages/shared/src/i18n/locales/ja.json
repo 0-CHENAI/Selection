@@ -284,6 +284,8 @@
   "chat.processing.zooming": "ズーム中...",
   "chat.queuedBadge": "キュー待機中",
   "chat.recentWorkingDirectories": "最近の作業ディレクトリ",
+  "chat.regenerate": "再生成",
+  "chat.regenerateFailed": "応答を再生成できませんでした",
   "chat.renameSession": "セッション名を変更",
   "chat.scrollUpForEarlier": "上にスクロールして以前のメッセージを表示 (あと {{count}} 件)",
   "chat.selectedText": "選択テキスト",

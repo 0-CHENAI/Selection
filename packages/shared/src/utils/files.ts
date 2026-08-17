@@ -349,6 +349,53 @@ export function getMimeType(filePath: string): string {
   return 'application/octet-stream';
 }
 
+/** Persisted attachment fields needed to rebuild a model-input FileAttachment. */
+export interface StoredAttachmentSource {
+  type: FileAttachment['type']
+  name: string
+  mimeType: string
+  size: number
+  storedPath: string
+  markdownPath?: string
+  resizedBase64?: string
+}
+
+/**
+ * Rebuild FileAttachments from persisted session metadata so regenerate/retry
+ * can still send image bytes after lastSentAttachments is gone (app restart).
+ */
+export function fileAttachmentsFromStored(
+  stored: StoredAttachmentSource[] | undefined,
+): FileAttachment[] | undefined {
+  if (!stored?.length) return undefined
+  return stored.map((attachment) => ({
+    type: attachment.type,
+    path: attachment.storedPath,
+    name: attachment.name,
+    mimeType: attachment.mimeType,
+    size: attachment.size,
+    base64: attachment.resizedBase64,
+    storedPath: attachment.storedPath,
+    markdownPath: attachment.markdownPath,
+  }))
+}
+
+/**
+ * Prefer the in-memory send payload when it still matches this prompt;
+ * otherwise rebuild from persisted attachment paths.
+ */
+export function resolveRegenerateAttachments(
+  lastSentMessage: string | undefined,
+  lastSentAttachments: FileAttachment[] | undefined,
+  content: string,
+  storedAttachments: StoredAttachmentSource[] | undefined,
+): FileAttachment[] | undefined {
+  if (lastSentMessage === content && lastSentAttachments?.length) {
+    return lastSentAttachments
+  }
+  return fileAttachmentsFromStored(storedAttachments)
+}
+
 /**
  * Fill missing image/PDF base64 from disk so vision-capable models receive
  * pixels instead of a path-only placeholder. Oversized or unreadable files

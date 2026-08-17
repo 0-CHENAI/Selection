@@ -86,7 +86,7 @@ import { getCredentialManager } from '@craft-agent/shared/credentials'
 import { CraftMcpClient, McpClientPool, McpPoolServer } from '@craft-agent/shared/mcp'
 import { type Session, type SessionEvent, type FileAttachment, type SendMessageOptions, type UnreadSummary, type RemoteSessionTransferPayload, type ImportRemoteSessionTransferResult, RPC_CHANNELS, generateMessageId } from '@craft-agent/shared/protocol'
 import { messageToStored, storedToMessage, type Message, type StoredAttachment, type ToolDisplayMeta, type TokenUsage } from '@craft-agent/core/types'
-import { formatPathsToRelative, formatToolInputPaths, perf, encodeIconToDataUrlAsync, getEmojiIcon, resetSummarizationClient, resolveToolIcon, readFileAttachment, hydrateAttachmentBytes, selectSpreadMessages, normalizePath } from '@craft-agent/shared/utils'
+import { formatPathsToRelative, formatToolInputPaths, perf, encodeIconToDataUrlAsync, getEmojiIcon, resetSummarizationClient, resolveToolIcon, readFileAttachment, hydrateAttachmentBytes, resolveRegenerateAttachments, selectSpreadMessages, normalizePath } from '@craft-agent/shared/utils'
 import { loadAllSkills, loadSkillBySlug, invalidateSkillsCache, type LoadedSkill } from '@craft-agent/shared/skills'
 import { invalidateContextFileCache } from '@craft-agent/shared/prompts/system'
 import { getToolIconsDir, getMiniModel } from '@craft-agent/shared/config'
@@ -972,6 +972,9 @@ interface ManagedSession {
   branchFromSdkTurnId?: string
   // One-shot flag for seeded branch mode - set true after first turn seed injection.
   branchSeedApplied?: boolean
+  // One-shot: after regenerate, inject prior turns into a fresh backend session.
+  regenerateSeedPending?: boolean
+  regenerateSeedApplied?: boolean
   // One-shot hidden summary injected on the first turn after a remote transfer.
   transferredSessionSummary?: string
   // Whether the transferred-session summary has already been injected.
@@ -3553,6 +3556,18 @@ export class SessionManager implements ISessionManager {
       }
 
       const getBranchSeedMessages = () => {
+        if (managed.regenerateSeedPending && !managed.regenerateSeedApplied) {
+          const seedMessages = managed.messages
+            .filter(m => m.role === 'user' || m.role === 'assistant')
+            .filter(m => !m.isIntermediate)
+          const lastUserIndex = seedMessages.findLastIndex(m => m.role === 'user')
+          const prior = lastUserIndex > 0 ? seedMessages.slice(0, lastUserIndex) : []
+          return prior.map(m => ({
+            type: m.role as 'user' | 'assistant',
+            content: m.content,
+          }))
+        }
+
         if (managed.branchContextStrategy !== 'seeded-fresh-session') return []
         if (managed.branchSeedApplied) return []
 
@@ -3567,6 +3582,12 @@ export class SessionManager implements ISessionManager {
       }
 
       const markBranchSeedApplied = () => {
+        if (managed.regenerateSeedPending && !managed.regenerateSeedApplied) {
+          managed.regenerateSeedApplied = true
+          managed.regenerateSeedPending = false
+          sessionLog.info('Regenerate seed context applied', { sessionId: managed.id })
+          return
+        }
         if (managed.branchContextStrategy !== 'seeded-fresh-session') return
         if (managed.branchSeedApplied) return
         managed.branchSeedApplied = true
@@ -6438,6 +6459,77 @@ export class SessionManager implements ISessionManager {
         this.onProcessingStopped(sessionId, 'interrupted')
       }
     }
+  }
+
+  /**
+   * Drop the last assistant turn and rerun the last user prompt.
+   * Used by the response-card regenerate control.
+   */
+  async regenerateLastResponse(sessionId: string): Promise<{ success: true }> {
+    const managed = this.sessions.get(sessionId)
+    if (!managed) {
+      throw new Error(`Session ${sessionId} not found`)
+    }
+    if (managed.isProcessing) {
+      throw new Error('Cannot regenerate while a response is still generating')
+    }
+
+    await this.ensureMessagesLoaded(managed)
+
+    const lastUserIdx = managed.messages.findLastIndex(m => m.role === 'user')
+    if (lastUserIdx === -1) {
+      throw new Error('No user message to regenerate from')
+    }
+    if (lastUserIdx === managed.messages.length - 1) {
+      throw new Error('Nothing to regenerate')
+    }
+
+    const userMessage = managed.messages[lastUserIdx]!
+    const content = userMessage.content
+    const storedAttachments = userMessage.attachments ?? managed.lastSentStoredAttachments
+    const attachments = resolveRegenerateAttachments(
+      managed.lastSentMessage,
+      managed.lastSentAttachments,
+      content,
+      storedAttachments,
+    )
+    const options = managed.lastSentOptions
+
+    managed.messages = managed.messages.slice(0, lastUserIdx + 1)
+    this.persistSession(managed)
+    await this.flushSession(managed.id)
+
+    this.sendEvent({
+      type: 'messages_truncated',
+      sessionId,
+      keepThroughMessageId: userMessage.id,
+    }, managed.workspace.id)
+
+    managed.sdkSessionId = undefined
+    managed.regenerateSeedPending = true
+    managed.regenerateSeedApplied = false
+    this.persistSession(managed)
+    await this.disposeManagedAgentRuntime(managed, 'regenerate last response')
+
+    setImmediate(() => {
+      this.sendMessage(
+        sessionId,
+        content,
+        attachments,
+        storedAttachments,
+        options,
+        userMessage.id,
+      ).catch((error) => {
+        sessionLog.error(`regenerateLastResponse send failed for ${sessionId}:`, error)
+        this.sendEvent({
+          type: 'error',
+          sessionId,
+          error: error instanceof Error ? error.message : 'Failed to regenerate',
+        }, managed.workspace.id)
+      })
+    })
+
+    return { success: true }
   }
 
   async cancelProcessing(sessionId: string, silent = false): Promise<void> {

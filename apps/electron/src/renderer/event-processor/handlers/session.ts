@@ -41,6 +41,7 @@ import type {
   AuthRequestEvent,
   AuthCompletedEvent,
   UsageUpdateEvent,
+  MessagesTruncatedEvent,
   Effect,
 } from '../types'
 import type { Message } from '../../../shared/types'
@@ -990,6 +991,34 @@ export function handleUsageUpdate(
         tokenUsage: updatedTokenUsage,
       },
       streaming,
+    },
+    effects: [],
+  }
+}
+
+/** Keep transcript through the last user prompt after regenerate. */
+export function handleMessagesTruncated(
+  state: SessionState,
+  event: MessagesTruncatedEvent,
+): ProcessResult {
+  const { session } = state
+  let keepIdx = session.messages.findIndex(m => m.id === event.keepThroughMessageId)
+  // Renderer keeps the optimistic user-message id; after regenerate the
+  // backend id may not match. Fall back to the last user prompt.
+  if (keepIdx === -1) {
+    keepIdx = session.messages.findLastIndex(m => m.role === 'user' && !m.hidden)
+  }
+  if (keepIdx === -1) {
+    return { state, effects: [] }
+  }
+
+  return {
+    state: {
+      session: {
+        ...session,
+        messages: session.messages.slice(0, keepIdx + 1),
+      },
+      streaming: null,
     },
     effects: [],
   }

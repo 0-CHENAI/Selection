@@ -118,6 +118,7 @@ export interface ISessionManager {
     onAck?: (messageId: string) => void,
     rpcContext?: { callerClientId?: string },
   ): Promise<void>
+  regenerateLastResponse(sessionId: string): Promise<{ success: true }>
   cancelProcessing(sessionId: string, silent?: boolean): Promise<void>
   killShell(sessionId: string, shellId: string): Promise<{ success: boolean; error?: string }>
   getTaskOutput(taskId: string): Promise<string | null>

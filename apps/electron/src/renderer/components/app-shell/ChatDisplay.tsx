@@ -1728,6 +1728,27 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
                         compactMode={compactMode}
                         sendMessageKey={sendMessageKey}
                         openAnnotationRequest={openAnnotationRequest}
+                        onRegenerate={isLastResponse && !turn.isStreaming && !session?.isProcessing
+                          ? async () => {
+                            if (!session) return
+                            const lastUser = session.messages.findLast(m => m.role === 'user' && !m.hidden)
+                            try {
+                              await window.electronAPI.sessionCommand(session.id, { type: 'regenerate' })
+                            } catch (error) {
+                              const detail = error instanceof Error ? error.message : String(error)
+                              // Vite/HMR can refresh the UI while the main process
+                              // is still on an older handler without `regenerate`.
+                              // Text-only resend would drop images, so skip it.
+                              if (lastUser && !lastUser.attachments?.length && /unknown session command/i.test(detail)) {
+                                onSendMessage(lastUser.content)
+                                return
+                              }
+                              toast.error(t('chat.regenerateFailed'), {
+                                description: detail || undefined,
+                              })
+                            }
+                          }
+                          : undefined}
                         onBranch={session?.supportsBranching ? async (messageId: string, options?: { newPanel?: boolean }) => {
                           if (!session) return
                           try {
