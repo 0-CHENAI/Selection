@@ -36,7 +36,7 @@ import {
 } from '../../config/cli-domains.ts';
 import { FEATURE_FLAGS } from '../../feature-flags.ts';
 import { AGENTS_PLUGIN_NAME } from '../../skills/types.ts';
-import { GLOBAL_AGENT_SKILLS_DIR, PROJECT_AGENT_SKILLS_DIR } from '../../skills/storage.ts';
+import { GLOBAL_AGENT_SKILLS_DIR, PROJECT_AGENT_SKILLS_DIR, getBundledSkillsDir } from '../../skills/storage.ts';
 import {
   shouldAllowToolInMode,
   isApiEndpointAllowed,
@@ -201,6 +201,7 @@ export function expandToolPaths(
  *   1. Workspace: {workspaceRoot}/skills/{slug}/ → plugin name from plugin.json
  *   2. Project:   {workingDir}/.agents/skills/{slug}/ → plugin name = ".agents"
  *   3. Global:    ~/.agents/skills/{slug}/ → plugin name = ".agents"
+ *   4. Bundled:   app resources/skills/{slug}/ → plugin name = ".agents"
  *
  * This function resolves the bare slug to the correct plugin prefix by checking
  * which directory actually contains the skill. It also handles re-qualifying
@@ -261,7 +262,7 @@ function resolveSkillPlugin(
   workspaceRootPath: string,
   workingDirectory?: string,
 ): string {
-  // Priority order matches loadAllSkills: project (highest) > workspace > global (lowest)
+  // Priority order matches loadAllSkills: project > workspace > bundled > global
 
   // 1. Project: {workingDir}/.agents/skills/{slug}/SKILL.md
   if (workingDirectory && existsSync(join(workingDirectory, PROJECT_AGENT_SKILLS_DIR, bareSlug, 'SKILL.md'))) {
@@ -273,7 +274,13 @@ function resolveSkillPlugin(
     return `${workspaceSlug}:${bareSlug}`;
   }
 
-  // 3. Global: ~/.agents/skills/{slug}/SKILL.md
+  // 3. Bundled: app resources/skills/{slug}/SKILL.md
+  const bundledDir = getBundledSkillsDir();
+  if (bundledDir && existsSync(join(bundledDir, bareSlug, 'SKILL.md'))) {
+    return `${AGENTS_PLUGIN_NAME}:${bareSlug}`;
+  }
+
+  // 4. Global: ~/.agents/skills/{slug}/SKILL.md
   if (existsSync(join(GLOBAL_AGENT_SKILLS_DIR, bareSlug, 'SKILL.md'))) {
     return `${AGENTS_PLUGIN_NAME}:${bareSlug}`;
   }

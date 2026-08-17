@@ -80,6 +80,7 @@ mock.module('../../../skills/types.ts', () => ({
 mock.module('../../../skills/storage.ts', () => ({
   GLOBAL_AGENT_SKILLS_DIR: '/Users/test/.agents/skills',
   PROJECT_AGENT_SKILLS_DIR: '.agents/skills',
+  getBundledSkillsDir: () => undefined,
 }));
 
 let mockCraftAgentsCliFlag = false;

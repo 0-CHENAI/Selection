@@ -1382,7 +1382,7 @@ function AppShellContent({
   const [workspaceUnreadMap, setWorkspaceUnreadMap] = useState<Record<string, boolean>>({})
 
   // Reload skills when active session's workingDirectory changes (for project-level skills)
-  // Skills are loaded from: global (~/.agents/skills/), workspace, and project ({workingDirectory}/.agents/skills/)
+  // Skills are loaded from: bundled, global (~/.agents/skills/), workspace, and project ({workingDirectory}/.agents/skills/)
   const activeSessionWorkingDirectory = session.selected
     ? sessionMetaMap.get(session.selected)?.workingDirectory
     : undefined

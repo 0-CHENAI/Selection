@@ -135,7 +135,7 @@ export { AbortReason, type RecoveryMessage };
 /** File extensions that can be converted to readable text by CLI tools. */
 const CONVERTIBLE_FILE_HINTS: Record<string, string> = {
   pdf: 'markitdown or pdf-tool extract',
-  docx: 'markitdown', xlsx: 'markitdown or xlsx-tool read', pptx: 'markitdown or pptx-tool extract',
+  docx: 'officecli view <file> text or markitdown', xlsx: 'officecli view <file> text or markitdown', pptx: 'officecli view <file> text or markitdown',
   doc: 'markitdown', xls: 'markitdown', ppt: 'markitdown',
   msg: 'markitdown', eml: 'markitdown', rtf: 'markitdown',
   ics: 'ical-tool read',

@@ -160,7 +160,11 @@ export default function SkillInfoPage({ skillSlug, workspaceId, workingDirectory
             canShowInFinder={canRevealLocally}
             onDelete={canDeleteSkill ? handleDelete : undefined}
             canDelete={canDeleteSkill}
-            deleteLabel={canDeleteSkill ? t('skillInfo.deleteSkill') : t('skillInfo.managedByProject')}
+            deleteLabel={canDeleteSkill
+              ? t('skillInfo.deleteSkill')
+              : skill?.source === 'bundled'
+                ? t('skillInfo.managedByApp')
+                : t('skillInfo.managedByProject')}
           />
         }
       />
@@ -178,15 +182,16 @@ export default function SkillInfoPage({ skillSlug, workspaceId, workingDirectory
           <Info_Section
             title={t('skillInfo.metadata')}
             actions={
-              // EditPopover for AI-assisted metadata editing (name, description in frontmatter)
-              <EditPopover
-                trigger={<EditButton />}
-                {...getEditConfig('skill-metadata', skill.path)}
-                secondaryAction={{
-                  label: t('common.editFile'),
-                  filePath: `${skill.path}/SKILL.md`,
-                }}
-              />
+              skill.source === 'bundled' ? undefined : (
+                <EditPopover
+                  trigger={<EditButton />}
+                  {...getEditConfig('skill-metadata', skill.path)}
+                  secondaryAction={{
+                    label: t('common.editFile'),
+                    filePath: `${skill.path}/SKILL.md`,
+                  }}
+                />
+              )
             }
           >
             <Info_Table>
@@ -198,6 +203,7 @@ export default function SkillInfoPage({ skillSlug, workspaceId, workingDirectory
               <Info_Table.Row label={t('common.source')}>
                 {skill.source === 'project' ? t('skillInfo.sourceProject') :
                  skill.source === 'global' ? t('skillInfo.sourceGlobal') :
+                 skill.source === 'bundled' ? t('skillInfo.sourceBundled') :
                  t('skillInfo.sourceWorkspace')}
               </Info_Table.Row>
               <Info_Table.Row label={t('common.location')}>
@@ -258,15 +264,16 @@ export default function SkillInfoPage({ skillSlug, workspaceId, workingDirectory
           <Info_Section
             title={t('skillInfo.instructions')}
             actions={
-              // EditPopover for AI-assisted editing with "Edit File" as secondary action
-              <EditPopover
-                trigger={<EditButton />}
-                {...getEditConfig('skill-instructions', skill.path)}
-                secondaryAction={{
-                  label: t('common.editFile'),
-                  filePath: `${skill.path}/SKILL.md`,
-                }}
-              />
+              skill.source === 'bundled' ? undefined : (
+                <EditPopover
+                  trigger={<EditButton />}
+                  {...getEditConfig('skill-instructions', skill.path)}
+                  secondaryAction={{
+                    label: t('common.editFile'),
+                    filePath: `${skill.path}/SKILL.md`,
+                  }}
+                />
+              )
             }
           >
             <Info_Markdown maxHeight={540} fullscreen>

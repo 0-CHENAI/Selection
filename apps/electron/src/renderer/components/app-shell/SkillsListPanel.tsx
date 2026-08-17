@@ -106,6 +106,11 @@ export function SkillsListPanel({
                 {t('skillsList.projectBadge')}
               </span>
             )}
+            {skill.source === 'bundled' && (
+              <span className="shrink-0 text-[10px] px-1.5 py-0.5 rounded-full bg-foreground/5 text-muted-foreground">
+                {t('skillsList.bundledBadge')}
+              </span>
+            )}
             <span className="truncate">{skill.metadata.description}</span>
           </span>
         ),
@@ -128,7 +133,11 @@ export function SkillsListPanel({
             canShowInFinder={canRevealLocally}
             onDelete={skill.source === 'workspace' ? () => onDeleteSkill(skill.slug) : undefined}
             canDelete={skill.source === 'workspace'}
-            deleteLabel={skill.source === 'workspace' ? t('skillsList.deleteSkill') : t('skillsList.managedByProject')}
+            deleteLabel={skill.source === 'workspace'
+              ? t('skillsList.deleteSkill')
+              : skill.source === 'bundled'
+                ? t('skillsList.managedByApp')
+                : t('skillsList.managedByProject')}
             onSendToWorkspace={hasOtherWorkspaces && skill.source === 'workspace' ? () => {
               setSendResourceSlug(skill.slug)
               setSendResourceLabel(skill.metadata.name)

@@ -87,7 +87,11 @@ export function registerSkillsHandlers(server: RpcServer, deps: HandlerDeps): vo
     const workspace = getWorkspaceByNameOrId(workspaceId)
     if (!workspace) throw new Error('Workspace not found')
 
-    const { deleteSkill } = await import('@craft-agent/shared/skills')
+    const { deleteSkill, loadSkillBySlug } = await import('@craft-agent/shared/skills')
+    const existing = loadSkillBySlug(workspace.rootPath, skillSlug)
+    if (existing?.source === 'bundled') {
+      throw new Error('Cannot delete a built-in skill')
+    }
     deleteSkill(workspace.rootPath, skillSlug)
     deps.platform.logger?.info(`Deleted skill: ${skillSlug}`)
   })

@@ -674,8 +674,11 @@ Skills are reusable instruction sets that teach you specialized behaviors. Each 
 1. Read its \`SKILL.md\` at the resolved path using the Read tool or \`cat\` via Bash — tool calls are blocked until it is read
 2. Follow the instructions in the file to complete the user's request
 
-Skills are stored at three levels (checked in order):
+For Office documents (.docx, .xlsx, .pptx), use the always-available \`office_document_inspect\` and \`office_document_edit\` tools directly. The built-in \`officecli\` skill is optional guidance for advanced workflows, not a prerequisite.
+
+Skills are stored at four levels (listed from lowest to highest priority):
 - Global: \`~/.agents/skills/{slug}/SKILL.md\`
+- Built-in (app-bundled, read-only): e.g. the \`officecli\` skill
 - Workspace: \`${workspacePath}/skills/{slug}/SKILL.md\`
 - Project: \`{projectRoot}/.agents/skills/{slug}/SKILL.md\`
 
@@ -1229,20 +1232,25 @@ You have access to built-in CLI tools for working with documents and files. Thes
 
 | Tool | Description | Example |
 |------|-------------|---------|
+| **officecli** | Compatibility CLI for Word/Excel/PowerPoint. Prefer the native Office document tools in agent sessions. | \`officecli create report.docx\` |
 | **markitdown** | Convert any document to Markdown | \`markitdown report.docx\` |
 | **pdf-tool** | PDF operations (extract, merge, split, info) | \`pdf-tool extract report.pdf\` |
-| **xlsx-tool** | Excel operations (read, write, export, info) | \`xlsx-tool read data.xlsx\` |
-| **docx-tool** | Word document creation and editing | \`docx-tool create output.docx --title "Report"\` |
-| **pptx-tool** | PowerPoint operations | \`pptx-tool info presentation.pptx\` |
+| **xlsx-tool** | Legacy Excel helper — prefer officecli for create/edit | \`xlsx-tool read data.xlsx\` |
+| **docx-tool** | Legacy Word helper — prefer officecli | \`docx-tool create output.docx --title "Report"\` |
+| **pptx-tool** | Legacy PowerPoint helper — prefer officecli | \`pptx-tool info presentation.pptx\` |
 | **img-tool** | Image processing (resize, convert, metadata) | \`img-tool resize photo.jpg --width 800\` |
 | **doc-diff** | Compare two documents | \`doc-diff old.docx new.docx\` |
 | **ical-tool** | Calendar file operations | \`ical-tool read calendar.ics\` |
 
 **Tips:**
-- Use **markitdown** as the universal converter — it handles .docx, .xlsx, .pptx, .pdf, .html, .ipynb, and more
-- If the Read tool fails on a binary file (e.g. .docx, .xlsx), use \`markitdown <file>\` to convert it to readable text
+- For .docx / .xlsx / .pptx create and edit, use \`office_document_edit\`; for reading, validation, help, and availability, use \`office_document_inspect\`. Neither requires loading a skill.
+- Load the \`officecli\` skill only when its advanced document-specific guidance is useful. Do not curl-install OfficeCLI.
+- After a multi-step officecli edit, \`officecli close <file>\` before another program reads the file
+- Use **markitdown** when you only need readable text from a document
+- If the Read tool fails on a binary file (e.g. .docx, .xlsx), use \`officecli view <file> text\` or \`markitdown <file>\`
 - All tools support \`--help\` for full usage information
 - All tools support \`-o <file>\` to write output to a file instead of stdout
+- PDF export is not included in the bundled officecli binary
 
 ## Tool Metadata
 

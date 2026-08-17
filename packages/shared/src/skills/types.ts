@@ -29,7 +29,7 @@ export interface SkillMetadata {
 }
 
 /** Source of a loaded skill */
-export type SkillSource = 'global' | 'workspace' | 'project';
+export type SkillSource = 'bundled' | 'global' | 'workspace' | 'project';
 
 /**
  * Plugin name for project-level and global skills.

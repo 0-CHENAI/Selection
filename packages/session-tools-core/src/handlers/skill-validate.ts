@@ -2,7 +2,7 @@
  * Skill Validate Handler
  *
  * Validates a skill's SKILL.md file for correct format and required fields.
- * Resolves skills from all three tiers: project > workspace > global.
+ * Resolves skills from all tiers: project > workspace > bundled > global.
  *
  * The handler resolves the session's workingDirectory on demand from the
  * persisted session.jsonl header — no construction-time propagation needed.
@@ -20,13 +20,14 @@ import {
   validateSkillContent,
   formatValidationResult,
 } from '../validation.ts';
+import { getBundledSkillsDir } from '@craft-agent/shared/skills';
 
 export interface SkillValidateArgs {
   skillSlug: string;
 }
 
 /**
- * Resolve the SKILL.md path by checking all three tiers (project > workspace > global).
+ * Resolve the SKILL.md path by checking project > workspace > bundled > global.
  * Returns the first match, or null if not found anywhere.
  */
 function resolveSkillMdPath(
@@ -48,7 +49,16 @@ function resolveSkillMdPath(
     return { path: workspacePath, tier: 'workspace' };
   }
 
-  // 3. Global-level (lowest priority): ~/.agents/skills/{slug}/SKILL.md
+  // 3. Bundled (overrides global for shipped slugs)
+  const bundledDir = getBundledSkillsDir();
+  if (bundledDir) {
+    const bundledPath = join(bundledDir, slug, 'SKILL.md');
+    if (ctx.fs.exists(bundledPath)) {
+      return { path: bundledPath, tier: 'bundled' };
+    }
+  }
+
+  // 4. Global-level: ~/.agents/skills/{slug}/SKILL.md
   const globalPath = join(homedir(), '.agents', 'skills', slug, 'SKILL.md');
   if (ctx.fs.exists(globalPath)) {
     return { path: globalPath, tier: 'global' };
@@ -62,7 +72,7 @@ function resolveSkillMdPath(
  *
  * 1. Validate slug format
  * 2. Resolve workingDirectory from ctx or session header (graceful fallback)
- * 3. Resolve SKILL.md from all three tiers (project > workspace > global)
+ * 3. Resolve SKILL.md from all tiers (project > workspace > bundled > global)
  * 4. Read and validate content (frontmatter + body)
  * 5. Return validation result with warnings if project tier was skipped
  */
@@ -85,12 +95,14 @@ export async function handleSkillValidate(
   const workingDirectory = ctx.workingDirectory
     ?? resolveSessionWorkingDirectory(ctx.workspacePath, ctx.sessionId);
 
-  // Resolve SKILL.md from all three tiers
+  // Resolve SKILL.md from all tiers
   const resolved = resolveSkillMdPath(ctx, skillSlug, workingDirectory);
   if (!resolved) {
+    const bundledDir = getBundledSkillsDir();
     const searchedPaths = [
       workingDirectory ? `  - ${join(workingDirectory, '.agents', 'skills', skillSlug, 'SKILL.md')} (project)` : null,
       `  - ${join(ctx.workspacePath, 'skills', skillSlug, 'SKILL.md')} (workspace)`,
+      bundledDir ? `  - ${join(bundledDir, skillSlug, 'SKILL.md')} (bundled)` : null,
       `  - ${join(homedir(), '.agents', 'skills', skillSlug, 'SKILL.md')} (global)`,
     ].filter(Boolean).join('\n');
 
