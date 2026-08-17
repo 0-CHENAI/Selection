@@ -193,10 +193,11 @@ win:
       to: messaging-whatsapp-worker/worker.cjs
 
 nsis:
-  oneClick: true
+  oneClick: false
+  allowToChangeInstallationDirectory: true
   shortcutName: Selection
   uninstallDisplayName: Selection
-  # Per-user install to %LOCALAPPDATA%\Programs\ (not Program Files).
+  # Default stays per-user (%LOCALAPPDATA%\Programs), not Program Files.
   # Bun subprocess cannot read/write files in Program Files due to Windows permissions.
   perMachine: false
   deleteAppDataOnUninstall: true

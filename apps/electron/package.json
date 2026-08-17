@@ -1,7 +1,7 @@
 {
   "name": "@craft-agent/electron",
   "productName": "Selection",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Electron desktop app for Selection",
   "main": "dist/main.cjs",
   "private": true,
