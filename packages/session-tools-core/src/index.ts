@@ -169,6 +169,9 @@ export {
   handleRenderTemplate,
   // Send Developer Feedback
   handleSendDeveloperFeedback,
+  // Office documents
+  handleOfficeDocumentInspect,
+  handleOfficeDocumentEdit,
 } from './handlers/index.ts';
 
 export type {
@@ -187,6 +190,11 @@ export type {
   ScriptSandboxArgs,
   RenderTemplateArgs,
   SendDeveloperFeedbackArgs,
+  OfficeDocumentInspectArgs,
+  OfficeDocumentEditArgs,
+  OfficeDocumentInspectCommand,
+  OfficeDocumentEditCommand,
+  OfficeDocumentResultPayload,
 } from './handlers/index.ts';
 
 // Tool definitions — single source of truth
@@ -204,6 +212,8 @@ export {
   TransformDataSchema,
   ScriptSandboxSchema,
   RenderTemplateSchema,
+  OfficeDocumentInspectSchema,
+  OfficeDocumentEditSchema,
   // Browser tool schema
   BrowserToolSchema,
   // Developer feedback schema

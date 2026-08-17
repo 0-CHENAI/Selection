@@ -63,6 +63,16 @@ export type { RenderTemplateArgs } from './render-template.ts';
 export { handleSendDeveloperFeedback } from './send-developer-feedback.ts';
 export type { SendDeveloperFeedbackArgs } from './send-developer-feedback.ts';
 
+// Office documents
+export { handleOfficeDocumentInspect, handleOfficeDocumentEdit } from './office-document.ts';
+export type {
+  OfficeDocumentInspectArgs,
+  OfficeDocumentEditArgs,
+  OfficeDocumentInspectCommand,
+  OfficeDocumentEditCommand,
+  OfficeDocumentResultPayload,
+} from './office-document.ts';
+
 // Session Self-Management
 export { handleSetSessionLabels } from './set-session-labels.ts';
 export type { SetSessionLabelsArgs } from './set-session-labels.ts';

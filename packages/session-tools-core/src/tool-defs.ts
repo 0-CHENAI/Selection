@@ -43,6 +43,10 @@ import { handleCreateTask } from './handlers/create-task.ts';
 import { handleArchiveSession } from './handlers/archive-session.ts';
 import { handleSendAgentMessage } from './handlers/send-agent-message.ts';
 import { handleListMessagingChannels, handleUnbindMessagingChannel } from './handlers/messaging.ts';
+import {
+  handleOfficeDocumentEdit,
+  handleOfficeDocumentInspect,
+} from './handlers/office-document.ts';
 
 // ============================================================
 // Canonical Zod Schemas
@@ -161,6 +165,28 @@ export const BrowserToolSchema = z.object({
     z.string(),
     z.array(z.string()),
   ]).describe('Browser command as a string (e.g., "click @e1") or array (e.g., ["evaluate", "var x = 1; x + 2"]). Array mode preserves semicolons and whitespace in arguments.'),
+});
+
+export const OfficeDocumentInspectSchema = z.object({
+  command: z.enum(['status', 'help', 'view', 'get', 'query', 'validate', 'dump', 'raw'])
+    .describe('Read-only OfficeCLI command. Use status to check availability and version.'),
+  arguments: z.array(z.string()).optional()
+    .describe('Argument tokens passed after the command. Do not include shell quoting or a full command string.'),
+  timeoutMs: z.number().int().min(1).max(300000).optional()
+    .describe('Execution timeout in milliseconds. Defaults to 120000; maximum 300000.'),
+});
+
+export const OfficeDocumentEditSchema = z.object({
+  command: z.enum([
+    'create', 'set', 'add', 'remove', 'move', 'swap', 'refresh',
+    'raw-set', 'add-part', 'batch', 'import', 'merge',
+  ]).describe('Mutating OfficeCLI command.'),
+  arguments: z.array(z.string()).optional()
+    .describe('Argument tokens passed after the command. Do not include shell quoting or a full command string.'),
+  batchCommands: z.array(z.record(z.string(), z.unknown())).optional()
+    .describe('Structured commands for batch. Required when command is batch and invalid for other commands.'),
+  timeoutMs: z.number().int().min(1).max(300000).optional()
+    .describe('Execution timeout in milliseconds. Defaults to 120000; maximum 300000.'),
 });
 
 export const SpawnSessionSchema = z.object({
@@ -446,6 +472,29 @@ Examples:
 - \`close\` — close and destroy the browser window
 - \`hide\` — hide the window while preserving state`,
 
+  office_document_inspect: `Inspect Word, Excel, and PowerPoint files through Selection's built-in OfficeCLI runtime.
+
+This tool is always registered and does not require loading the officecli skill. It accepts argument tokens, invokes the app-managed binary directly, and returns normalized JSON.
+
+Examples:
+- Check availability: { "command": "status" }
+- Read a document: { "command": "view", "arguments": ["report.docx", "text"] }
+- Validate a workbook: { "command": "validate", "arguments": ["data.xlsx"] }
+- Get help: { "command": "help", "arguments": ["docx", "paragraph"] }
+
+The read-only tool rejects output files, browser launching, and JSONL output. Use office_document_edit for mutations.`,
+
+  office_document_edit: `Create and modify Word, Excel, and PowerPoint files through Selection's built-in OfficeCLI runtime.
+
+This tool is always registered and does not require loading the officecli skill. Arguments are passed as separate tokens without a shell, and results use a stable JSON envelope. Batch calls must use batchCommands; resident and management commands are not accepted.
+
+Examples:
+- Create: { "command": "create", "arguments": ["report.docx"] }
+- Add paragraph: { "command": "add", "arguments": ["report.docx", "/body", "--type", "paragraph", "--prop", "text=Summary"] }
+- Batch edit: { "command": "batch", "arguments": ["data.xlsx"], "batchCommands": [{ "command": "set", "path": "/Sheet1/A1", "props": { "value": "Done" } }] }
+
+Use office_document_inspect to read or validate the result.`,
+
   call_llm: `Invoke a secondary LLM for focused subtasks. Use for:
 - Cost optimization: use a smaller model for simple tasks (summarization, classification)
 - Structured output: JSON schema compliance via prompt instructions
@@ -597,6 +646,8 @@ export const SESSION_TOOL_DEFS: SessionToolDef[] = [
   // Browser tool (backend-specific — requires BrowserPaneManager in Electron)
   // Single CLI-like tool that handles all browser actions via command string.
   { name: 'browser_tool', description: TOOL_DESCRIPTIONS.browser_tool, inputSchema: BrowserToolSchema, executionMode: 'backend', safeMode: 'allow', handler: null },
+  { name: 'office_document_inspect', description: TOOL_DESCRIPTIONS.office_document_inspect, inputSchema: OfficeDocumentInspectSchema, executionMode: 'registry', safeMode: 'allow', readOnly: true, handler: handleOfficeDocumentInspect },
+  { name: 'office_document_edit', description: TOOL_DESCRIPTIONS.office_document_edit, inputSchema: OfficeDocumentEditSchema, executionMode: 'registry', safeMode: 'block', handler: handleOfficeDocumentEdit },
   // Session self-management tools (registry — use context callbacks to reach SessionManager)
   { name: 'set_session_labels', description: TOOL_DESCRIPTIONS.set_session_labels, inputSchema: SetSessionLabelsSchema, executionMode: 'registry', safeMode: 'block', handler: handleSetSessionLabels },
   { name: 'set_session_status', description: TOOL_DESCRIPTIONS.set_session_status, inputSchema: SetSessionStatusSchema, executionMode: 'registry', safeMode: 'block', handler: handleSetSessionStatus },
@@ -729,6 +780,7 @@ export interface JsonSchemaToolDef {
   name: string;
   description: string;
   inputSchema: Record<string, unknown>;
+  annotations?: { readOnlyHint: true };
 }
 
 /**
@@ -756,6 +808,7 @@ export function getToolDefsAsJsonSchema(opts?: {
       name: prefix + def.name,
       description: def.description,
       inputSchema: jsonSchema,
+      ...(def.readOnly ? { annotations: { readOnlyHint: true as const } } : {}),
     };
   });
 }
