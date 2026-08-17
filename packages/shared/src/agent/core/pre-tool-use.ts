@@ -47,7 +47,6 @@ import {
 } from '../mode-manager.ts';
 import { permissionsConfigCache, type PermissionsContext } from '../permissions-config.ts';
 import type { PrerequisiteCheckResult } from './prerequisite-manager.ts';
-import { rewriteBashWithRtk } from './rtk-rewrite.ts';
 
 // ============================================================
 // TYPES
@@ -643,8 +642,6 @@ export interface PreToolUseInput {
   prerequisiteManager?: PrerequisiteManagerLike;
   /** Backend metadata (e.g. Pi forwards intent / displayName via input.metadata) */
   backendMetadata?: { intent?: string; displayName?: string };
-  /** RTK Bash-rewrite context (undefined when toggle is off or rtk binary missing) */
-  rtkContext?: import('./rtk-rewrite.ts').RtkContext;
   /** Debug callback */
   onDebug?: (message: string) => void;
 }
@@ -858,25 +855,6 @@ export function runPreToolUseChecks(ctx: PreToolUseInput): PreToolUseCheckResult
   if (metadataResult.modified) {
     currentInput = metadataResult.input;
     wasModified = true;
-  }
-
-  // 5g. RTK Bash rewrite (last input transform — flows into both 'modify' and 'prompt' results).
-  // Permission decisions above and the ask-mode prompt below operate on the
-  // ORIGINAL `input` parameter, so the LLM still believes it ran the original
-  // command and our permission system gates the original command — only the
-  // SDK's actual execution sees the rewritten form.
-  if (ctx.rtkContext?.enabled && ctx.rtkContext.path) {
-    const rtkResult = rewriteBashWithRtk(
-      toolName,
-      currentInput,
-      ctx.rtkContext.path,
-      ctx.rtkContext.exclude,
-      onDebug,
-    );
-    if (rtkResult.modified) {
-      currentInput = rtkResult.input;
-      wasModified = true;
-    }
   }
 
   // ============================================================

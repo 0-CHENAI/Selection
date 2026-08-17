@@ -324,18 +324,6 @@ export const RPC_CHANNELS = {
     GET_BROWSER_TOOL_ENABLED: 'tools:getBrowserToolEnabled',
     SET_BROWSER_TOOL_ENABLED: 'tools:setBrowserToolEnabled',
   },
-  caching: {
-    GET_EXTENDED_PROMPT_CACHE: 'caching:getExtendedPromptCache',
-    SET_EXTENDED_PROMPT_CACHE: 'caching:setExtendedPromptCache',
-    GET_ENABLE_1M_CONTEXT: 'caching:getEnable1MContext',
-    SET_ENABLE_1M_CONTEXT: 'caching:setEnable1MContext',
-  },
-  rtk: {
-    GET_ENABLED: 'rtk:getEnabled',
-    SET_ENABLED: 'rtk:setEnabled',
-    GET_STATUS: 'rtk:getStatus',
-    GET_GAIN: 'rtk:getGain',
-  },
   badge: {
     REFRESH: 'badge:refresh',
     SET_ICON: 'badge:setIcon',

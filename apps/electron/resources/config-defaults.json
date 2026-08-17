@@ -8,7 +8,6 @@
     "spellCheck": false,
     "keepAwakeWhileRunning": false,
     "richToolDescriptions": true,
-    "extendedPromptCache": false,
     "browserToolEnabled": true,
     "allowRemoteEvaluate": true
   },

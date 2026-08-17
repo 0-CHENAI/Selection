@@ -18,7 +18,6 @@ export interface ConfigDefaults {
     spellCheck: boolean;
     keepAwakeWhileRunning: boolean;
     richToolDescriptions: boolean;
-    extendedPromptCache: boolean;
     browserToolEnabled: boolean;
     /**
      * Allow remote agents to call `browser_tool evaluate <expression>`.

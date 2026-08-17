@@ -6,7 +6,7 @@
  * - toolMetadataStore (file-based cross-process sharing)
  * - LastApiError (error capture for error handler)
  * - Logging utilities
- * - Config reading (richToolDescriptions, extendedPromptCache settings)
+ * - Config reading (richToolDescriptions)
  */
 
 import { existsSync, readFileSync, writeFileSync, renameSync, unlinkSync, appendFileSync, mkdirSync, statSync } from 'node:fs';
@@ -127,28 +127,6 @@ export function isRichToolDescriptionsEnabled(): boolean {
     return config.richToolDescriptions as boolean;
   }
   return true;
-}
-
-/**
- * Check if extended prompt cache (1h TTL) is enabled.
- * When enabled, the interceptor upgrades all cache_control blocks from 5m to 1h TTL.
- * Defaults to false if config is unreadable or field is not set.
- */
-export function isExtendedPromptCacheEnabled(): boolean {
-  const config = getInterceptorConfig();
-  return config?.extendedPromptCache === true;
-}
-
-/**
- * Check if 1M context window is enabled.
- * When disabled, the interceptor strips the context-1m beta header.
- * Defaults to false — the 1M beta requires Anthropic Tier 4+, so it's opt-in
- * to avoid 400 "Invalid Request" on lower-tier API keys (issue #567).
- * Must stay in sync with getEnable1MContext() in config/storage.ts.
- */
-export function is1MContextEnabled(): boolean {
-  const config = getInterceptorConfig();
-  return config?.enable1MContext === true;
 }
 
 // ============================================================================
