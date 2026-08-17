@@ -13,8 +13,7 @@ import {
   statSync,
 } from 'fs';
 import { homedir } from 'os';
-import { dirname, join } from 'path';
-import { fileURLToPath } from 'url';
+import { join } from 'path';
 import matter from 'gray-matter';
 import type { LoadedSkill, SkillMetadata, SkillSource } from './types.ts';
 import { getWorkspaceSkillsPath } from '../workspaces/storage.ts';
@@ -44,20 +43,11 @@ export function getBundledSkillsDir(): string | undefined {
   const fromAssets = getBundledAssetsDir('skills');
   if (fromAssets) return fromAssets;
 
-  const candidates: string[] = [
+  const candidates = [
     join(process.cwd(), 'apps', 'electron', 'resources', 'skills'),
     join(process.cwd(), 'resources', 'skills'),
     join(process.cwd(), '..', '..', 'apps', 'electron', 'resources', 'skills'),
   ];
-  try {
-    candidates.push(join(
-      dirname(fileURLToPath(import.meta.url)),
-      '..', '..', '..', '..',
-      'apps', 'electron', 'resources', 'skills',
-    ));
-  } catch {
-    // import.meta.url is unavailable in some bundles
-  }
   return candidates.find(dir => existsSync(dir));
 }
 

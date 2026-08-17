@@ -5,4 +5,4 @@ export {
   type OfficecliBinarySource,
   type ResolvedOfficecliBinary,
   type ResolveOfficecliOptions,
-} from '@craft-agent/session-tools-core';
+} from '@craft-agent/session-tools-core/runtime/officecli';
