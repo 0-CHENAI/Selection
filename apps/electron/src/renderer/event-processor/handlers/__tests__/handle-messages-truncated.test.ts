@@ -13,6 +13,7 @@ describe('handleMessagesTruncated', () => {
           { id: 'u2', role: 'user', content: 'again', timestamp: 3 },
           { id: 'a2', role: 'assistant', content: 'ok', timestamp: 4 },
         ],
+        currentStatus: { message: 'Thinking…' },
       },
       streaming: { content: 'partial' },
     } as SessionState
@@ -25,6 +26,8 @@ describe('handleMessagesTruncated', () => {
 
     expect(result.state.session.messages.map(m => m.id)).toEqual(['u1', 'a1', 'u2'])
     expect(result.state.streaming).toBeNull()
+    expect(result.state.session.isProcessing).toBe(true)
+    expect(result.state.session.currentStatus).toBeUndefined()
   })
 
   it('falls back to the last user prompt when the keep id is the backend id', () => {
@@ -47,6 +50,7 @@ describe('handleMessagesTruncated', () => {
 
     expect(result.state.session.messages.map(m => m.id)).toEqual(['optimistic-u2'])
     expect(result.state.streaming).toBeNull()
+    expect(result.state.session.isProcessing).toBe(true)
   })
 
   it('leaves state unchanged when there is no user prompt to keep', () => {

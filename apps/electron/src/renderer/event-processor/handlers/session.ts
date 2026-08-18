@@ -1017,6 +1017,11 @@ export function handleMessagesTruncated(
       session: {
         ...session,
         messages: session.messages.slice(0, keepIdx + 1),
+        // Regenerating reuses the existing user prompt and skips `user_message`,
+        // which is the event that normally sets isProcessing. Enter the same
+        // running state as a fresh send so the input shows Stop immediately.
+        isProcessing: true,
+        currentStatus: undefined,
       },
       streaming: null,
     },

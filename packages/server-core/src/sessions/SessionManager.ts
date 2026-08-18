@@ -5940,6 +5940,9 @@ export class SessionManager implements ISessionManager {
     if (!managed) {
       throw new Error(`Session ${sessionId} not found`)
     }
+    // Captured before any await so a Stop during regenerate dispose / agent
+    // create can invalidate this call (cancel bumps processingGeneration).
+    const generationAtEntry = managed.processingGeneration
     this.setLastMessageClientId(sessionId, rpcContext?.callerClientId)
 
     // Source-activation auto-retry dedup (craft-agents-oss#804). When the server
@@ -5971,7 +5974,10 @@ export class SessionManager implements ISessionManager {
     // - 'queue': hold the message untouched; the current turn keeps running
     //   to natural completion; replay as a new turn afterwards. NO call to
     //   `agent.redirect()`, NO forceAbort, NO interruption.
-    if (managed.isProcessing) {
+    // Regenerating (and similar replays) call sendMessage with the existing
+    // user-message id while isProcessing is already true so the UI can show
+    // Stop immediately. That is a new turn, not a mid-stream steer/queue.
+    if (managed.isProcessing && !existingMessageId) {
       const connection = resolveSessionConnection(managed.llmConnection, undefined)
       // Fallback to 'steer' when no connection is resolvable — preserves
       // today's exact behavior (call redirect, take whatever it returns).
@@ -6149,6 +6155,10 @@ export class SessionManager implements ISessionManager {
       sessionLog.warn(`Auto-label evaluation failed for session ${sessionId}:`, e)
     }
 
+    if (managed.stopRequested || managed.processingGeneration !== generationAtEntry) {
+      return
+    }
+
     managed.lastMessageAt = Date.now()
     this.setProcessing(managed, true)
     managed.streamingText = ''
@@ -6276,6 +6286,17 @@ export class SessionManager implements ISessionManager {
         error: msg,
       }, managed.workspace.id)
       await this.onProcessingStopped(sessionId, 'error')
+      return
+    }
+    if (managed.stopRequested || !managed.isProcessing || managed.processingGeneration !== myGeneration) {
+      sendSpan.mark('agent.cancelled')
+      sendSpan.end()
+      if (managed.agent) {
+        managed.agent.forceAbort(AbortReason.UserStop)
+      }
+      if (managed.isProcessing && managed.processingGeneration === myGeneration) {
+        await this.onProcessingStopped(sessionId, 'interrupted')
+      }
       return
     }
     sendSpan.mark('agent.ready')
@@ -6565,62 +6586,93 @@ export class SessionManager implements ISessionManager {
       throw new Error('Cannot regenerate while a response is still generating')
     }
 
-    await this.ensureMessagesLoaded(managed)
+    // Claim the running state before any await so a second click cannot race
+    // in, and so Stop works while the previous agent is being disposed.
+    this.setProcessing(managed, true)
+    let announced = false
 
-    const lastUserIdx = managed.messages.findLastIndex(m => m.role === 'user')
-    if (lastUserIdx === -1) {
-      throw new Error('No user message to regenerate from')
-    }
-    if (lastUserIdx === managed.messages.length - 1) {
-      throw new Error('Nothing to regenerate')
-    }
+    try {
+      await this.ensureMessagesLoaded(managed)
 
-    const userMessage = managed.messages[lastUserIdx]!
-    const content = userMessage.content
-    const storedAttachments = userMessage.attachments ?? managed.lastSentStoredAttachments
-    const attachments = resolveRegenerateAttachments(
-      managed.lastSentMessage,
-      managed.lastSentAttachments,
-      content,
-      storedAttachments,
-    )
-    const options = managed.lastSentOptions
+      const lastUserIdx = managed.messages.findLastIndex(m => m.role === 'user')
+      if (lastUserIdx === -1) {
+        throw new Error('No user message to regenerate from')
+      }
+      if (lastUserIdx === managed.messages.length - 1) {
+        throw new Error('Nothing to regenerate')
+      }
 
-    managed.messages = managed.messages.slice(0, lastUserIdx + 1)
-    this.persistSession(managed)
-    await this.flushSession(managed.id)
-
-    this.sendEvent({
-      type: 'messages_truncated',
-      sessionId,
-      keepThroughMessageId: userMessage.id,
-    }, managed.workspace.id)
-
-    managed.sdkSessionId = undefined
-    managed.regenerateSeedPending = true
-    managed.regenerateSeedApplied = false
-    this.persistSession(managed)
-    await this.disposeManagedAgentRuntime(managed, 'regenerate last response')
-
-    setImmediate(() => {
-      this.sendMessage(
-        sessionId,
+      const userMessage = managed.messages[lastUserIdx]!
+      const content = userMessage.content
+      const storedAttachments = userMessage.attachments ?? managed.lastSentStoredAttachments
+      const attachments = resolveRegenerateAttachments(
+        managed.lastSentMessage,
+        managed.lastSentAttachments,
         content,
-        attachments,
         storedAttachments,
-        options,
-        userMessage.id,
-      ).catch((error) => {
-        sessionLog.error(`regenerateLastResponse send failed for ${sessionId}:`, error)
+      )
+      const options = managed.lastSentOptions
+
+      managed.messages = managed.messages.slice(0, lastUserIdx + 1)
+      this.persistSession(managed)
+      await this.flushSession(managed.id)
+
+      this.sendEvent({
+        type: 'messages_truncated',
+        sessionId,
+        keepThroughMessageId: userMessage.id,
+      }, managed.workspace.id)
+      announced = true
+
+      managed.sdkSessionId = undefined
+      managed.regenerateSeedPending = true
+      managed.regenerateSeedApplied = false
+      this.persistSession(managed)
+      await this.disposeManagedAgentRuntime(managed, 'regenerate last response')
+
+      setImmediate(() => {
+        if (managed.stopRequested || !managed.isProcessing) {
+          if (managed.isProcessing) {
+            void this.onProcessingStopped(sessionId, 'interrupted')
+          }
+          return
+        }
+        this.sendMessage(
+          sessionId,
+          content,
+          attachments,
+          storedAttachments,
+          options,
+          userMessage.id,
+        ).catch((error) => {
+          sessionLog.error(`regenerateLastResponse send failed for ${sessionId}:`, error)
+          this.sendEvent({
+            type: 'error',
+            sessionId,
+            error: error instanceof Error ? error.message : 'Failed to regenerate',
+          }, managed.workspace.id)
+          if (managed.isProcessing) {
+            void this.onProcessingStopped(sessionId, 'error')
+          }
+        })
+      })
+
+      return { success: true }
+    } catch (error) {
+      if (announced) {
         this.sendEvent({
           type: 'error',
           sessionId,
           error: error instanceof Error ? error.message : 'Failed to regenerate',
         }, managed.workspace.id)
-      })
-    })
-
-    return { success: true }
+        if (managed.isProcessing) {
+          await this.onProcessingStopped(sessionId, 'error')
+        }
+      } else {
+        this.setProcessing(managed, false)
+      }
+      throw error
+    }
   }
 
   async cancelProcessing(sessionId: string, silent = false): Promise<void> {
@@ -6656,7 +6708,10 @@ export class SessionManager implements ISessionManager {
     // telling the LLM the previous response was cut short
     managed.wasInterrupted = true
 
-    // Force-abort via Query.close() - sends soft interrupt to the backend
+    // Force-abort via Query.close() - sends soft interrupt to the backend.
+    // Regenerating may still be disposing the previous agent; Stop must still
+    // finish the run so the input does not stay stuck on the stop button.
+    const hadAgent = !!managed.agent
     if (managed.agent) {
       managed.agent.forceAbort(AbortReason.UserStop)
     }
@@ -6686,6 +6741,15 @@ export class SessionManager implements ISessionManager {
         // Include queued texts so the UI can restore them to the input field
         ...(queuedTexts.length > 0 ? { queuedMessages: queuedTexts } : {}),
       }, managed.workspace.id)
+    }
+
+    // Regenerating can be stopped before sendMessage has created an agent.
+    // Bump generation first so an in-flight sendMessage cannot restart the
+    // turn after we clear isProcessing / stopRequested.
+    if (!hadAgent) {
+      managed.processingGeneration++
+      await this.onProcessingStopped(sessionId, 'interrupted')
+      return
     }
 
     // Safety timeout: if event loop doesn't complete within 5 seconds, force cleanup
