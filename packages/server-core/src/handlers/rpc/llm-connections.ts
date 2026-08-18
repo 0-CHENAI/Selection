@@ -1,5 +1,5 @@
 import { RPC_CHANNELS, type LlmConnectionSetup } from '@craft-agent/shared/protocol'
-import { getLlmConnections, getLlmConnection, addLlmConnection, updateLlmConnection, deleteLlmConnection, getDefaultLlmConnection, setDefaultLlmConnection, touchLlmConnection, isCompatProvider, isAnthropicProvider, getDefaultModelsForConnection, getDefaultModelForConnection, type LlmConnection, type LlmConnectionWithStatus, toBedrockNativeId, deriveBedrockRegionPrefix } from '@craft-agent/shared/config'
+import { getLlmConnections, getLlmConnection, addLlmConnection, updateLlmConnection, deleteLlmConnection, getDefaultLlmConnection, setDefaultLlmConnection, touchLlmConnection, isCompatProvider, isUnsupportedLlmConnection, UNSUPPORTED_LLM_CONNECTION_MESSAGE, getDefaultModelsForConnection, getDefaultModelForConnection, type LlmConnection, type LlmConnectionWithStatus, toBedrockNativeId, deriveBedrockRegionPrefix } from '@craft-agent/shared/config'
 import { getCredentialManager } from '@craft-agent/shared/credentials'
 import { setSetupDeferred } from '@craft-agent/shared/config/storage'
 import {
@@ -89,22 +89,9 @@ export function registerLlmConnectionsHandlers(server: RpcServer, deps: HandlerD
       if (setup.baseUrl !== undefined) {
         updates.baseUrl = setup.baseUrl?.trim() || undefined
 
-        // Only mutate providerType for API key connections (not OAuth connections)
-        if (isAnthropicProvider(connection.providerType) && connection.authType !== 'oauth') {
-          if (hasConfiguredBaseUrl) {
-            updates.providerType = 'pi_compat'
-            updates.authType = 'api_key_with_endpoint'
-            updates.customEndpoint = { api: 'anthropic-messages' }
-          } else {
-            updates.providerType = 'anthropic'
-            updates.authType = 'api_key'
-            updates.models = getDefaultModelsForConnection('anthropic')
-            updates.defaultModel = getDefaultModelForConnection('anthropic')
-          }
-        }
-
-        // Pi API key flow: store baseUrl on the connection (Pi SDK doesn't use it yet,
-        // but it's persisted for future backend support)
+        // Leftover official Anthropic connections are no longer a writable
+        // product path. Do not recreate anthropic / anthropic-messages here;
+        // SETUP rejects unsupported pending connections below.
 
       }
 
@@ -254,6 +241,10 @@ export function registerLlmConnectionsHandlers(server: RpcServer, deps: HandlerD
 
       if (isCompatProvider(pendingConnection.providerType) && !pendingConnection.defaultModel) {
         return { success: false, error: 'Default model is required for compatible endpoints.' }
+      }
+
+      if (isUnsupportedLlmConnection(pendingConnection)) {
+        return { success: false, error: UNSUPPORTED_LLM_CONNECTION_MESSAGE }
       }
 
       if (isNewConnection) {
@@ -482,6 +473,24 @@ export function registerLlmConnectionsHandlers(server: RpcServer, deps: HandlerD
   // If connection.slug exists and is found, updates it; otherwise creates new
   server.handle(RPC_CHANNELS.llmConnections.SAVE, async (_ctx, connection: LlmConnection): Promise<{ success: boolean; error?: string }> => {
     try {
+      if (isUnsupportedLlmConnection(connection)) {
+        const existingLeftover = getLlmConnection(connection.slug)
+        // Leftover Anthropic connections stay on disk. Allow a display-name
+        // rename so Settings can still clean them up; reject every other write.
+        if (!existingLeftover || !isUnsupportedLlmConnection(existingLeftover)) {
+          return { success: false, error: UNSUPPORTED_LLM_CONNECTION_MESSAGE }
+        }
+        const name = connection.name.trim()
+        if (!name) {
+          return { success: false, error: 'Connection name is required' }
+        }
+        const renamed = updateLlmConnection(connection.slug, { name })
+        if (!renamed) {
+          return { success: false, error: 'Failed to update connection' }
+        }
+        deps.platform.logger?.info(`Leftover LLM connection renamed: ${connection.slug}`)
+        return { success: true }
+      }
       // Check if this is an update or create
       const existing = getLlmConnection(connection.slug)
       if (existing) {
@@ -578,6 +587,10 @@ export function registerLlmConnectionsHandlers(server: RpcServer, deps: HandlerD
   // Set global default LLM connection
   server.handle(RPC_CHANNELS.llmConnections.SET_DEFAULT, async (_ctx, slug: string): Promise<{ success: boolean; error?: string }> => {
     try {
+      const connection = getLlmConnection(slug)
+      if (connection && isUnsupportedLlmConnection(connection)) {
+        return { success: false, error: UNSUPPORTED_LLM_CONNECTION_MESSAGE }
+      }
       const success = setDefaultLlmConnection(slug)
       if (success) {
         deps.platform.logger?.info(`Global default LLM connection set to: ${slug}`)
@@ -601,6 +614,9 @@ export function registerLlmConnectionsHandlers(server: RpcServer, deps: HandlerD
         const connection = getLlmConnection(slug)
         if (!connection) {
           return { success: false, error: 'Connection not found' }
+        }
+        if (isUnsupportedLlmConnection(connection)) {
+          return { success: false, error: UNSUPPORTED_LLM_CONNECTION_MESSAGE }
         }
       }
 

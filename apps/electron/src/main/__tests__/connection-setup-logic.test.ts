@@ -90,31 +90,10 @@ describe('validateModelList', () => {
 // ============================================================
 
 describe('createBuiltInConnection', () => {
-  it('creates anthropic-api with correct defaults', () => {
-    const conn = createBuiltInConnection('anthropic-api')
-    expect(conn.slug).toBe('anthropic-api')
-    expect(conn.providerType).toBe('anthropic')
-    expect(conn.authType).toBe('api_key')
-    expect(conn.name).toBe('Anthropic (API Key)')
-  })
-
-  it('creates anthropic-api with baseUrl as compat provider', () => {
-    const conn = createBuiltInConnection('anthropic-api', 'https://custom.endpoint.com')
-    expect(conn.providerType).toBe('pi_compat')
-    expect(conn.authType).toBe('api_key_with_endpoint')
-    expect(conn.name).toBe('Custom Anthropic-Compatible')
-  })
-
-  it('names ORDER gateway connections ORDER instead of Custom Anthropic-Compatible', () => {
-    const conn = createBuiltInConnection('anthropic-api', 'https://order.ai.jxepdi.top')
-    expect(conn.providerType).toBe('pi_compat')
-    expect(conn.name).toBe('ORDER')
-  })
-
-  it('creates claude-max with oauth', () => {
-    const conn = createBuiltInConnection('claude-max')
-    expect(conn.providerType).toBe('anthropic')
-    expect(conn.authType).toBe('oauth')
+  it('rejects leftover Anthropic built-in slugs', () => {
+    expect(() => createBuiltInConnection('anthropic-api')).toThrow('Unknown built-in connection slug')
+    expect(() => createBuiltInConnection('claude-max')).toThrow('Unknown built-in connection slug')
+    expect(() => createBuiltInConnection('anthropic-api-2')).toThrow('Unknown built-in connection slug')
   })
 
   it('creates pi-api-key with pi provider', () => {
@@ -122,13 +101,6 @@ describe('createBuiltInConnection', () => {
     expect(conn.providerType).toBe('pi')
     expect(conn.authType).toBe('api_key')
     expect(conn.modelSelectionMode).toBe('automaticallySyncedFromProvider')
-  })
-
-  it('handles numeric suffix slugs (anthropic-api-2) by deriving from base template', () => {
-    const conn = createBuiltInConnection('anthropic-api-2')
-    expect(conn.slug).toBe('anthropic-api-2')
-    expect(conn.providerType).toBe('anthropic')
-    expect(conn.name).toBe('Anthropic (API Key) 2')
   })
 
   it('handles numeric suffix slugs (pi-api-key-3)', () => {
@@ -142,7 +114,7 @@ describe('createBuiltInConnection', () => {
   })
 
   it('always sets createdAt', () => {
-    const conn = createBuiltInConnection('anthropic-api')
+    const conn = createBuiltInConnection('pi-api-key')
     expect(conn.createdAt).toBeGreaterThan(0)
   })
 
@@ -182,12 +154,12 @@ describe('validateSetupTestInput', () => {
     expect(result.valid).toBe(true)
   })
 
-  it('accepts anthropic custom endpoint without piAuthProvider', () => {
+  it('rejects leftover Anthropic setup tests', () => {
     const result = validateSetupTestInput({
       provider: 'anthropic',
       baseUrl: 'https://custom.endpoint.com',
     })
-    expect(result.valid).toBe(true)
+    expect(result.valid).toBe(false)
   })
 })
 

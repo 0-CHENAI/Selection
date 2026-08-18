@@ -29,6 +29,17 @@ describe('validateSetupTestInput', () => {
       piAuthProvider: 'openai',
     })).toEqual({ valid: true })
   })
+
+  it('rejects leftover Anthropic provider and Pi+Anthropic auth', () => {
+    expect(validateSetupTestInput({
+      provider: 'anthropic',
+      baseUrl: 'https://api.anthropic.com',
+    }).valid).toBe(false)
+    expect(validateSetupTestInput({
+      provider: 'pi',
+      piAuthProvider: 'anthropic',
+    }).valid).toBe(false)
+  })
 })
 
 describe('setup test API key requirements', () => {
@@ -75,14 +86,14 @@ describe('resolveCustomEndpointSetup', () => {
     expect(result.name).toBeUndefined()
   })
 
-  it('uses the anthropic provider hint for anthropic-messages protocol', () => {
+  it('forces OpenAI Compatible routing even when the leftover anthropic-messages protocol is passed', () => {
     const result = resolveCustomEndpointSetup({
       baseUrl: 'http://127.0.0.1:8080',
       credential: 'sk-ant-local',
       customEndpointApi: 'anthropic-messages',
     })
 
-    expect(result).toEqual({ authType: 'api_key_with_endpoint', piAuthProvider: 'anthropic' })
+    expect(result).toEqual({ authType: 'api_key_with_endpoint', piAuthProvider: 'openai' })
   })
 
   it('treats remote endpoints with a credential as keyed custom endpoints', () => {
@@ -117,16 +128,9 @@ describe('resolveCustomEndpointSetup', () => {
 // per-connection submenu in Settings → AI shows a checkmark on the right item
 // out of the box (no read-time fallback needed for fresh connections).
 describe('createBuiltInConnection seeds midStreamBehavior', () => {
-  it("Anthropic API key → 'queue' (Claude's emulated steer is fragile)", () => {
-    const conn = createBuiltInConnection('anthropic-api')
-    expect(conn.providerType).toBe('anthropic')
-    expect(conn.midStreamBehavior).toBe('queue')
-  })
-
-  it("Claude Max OAuth → 'queue' (still uses Claude SDK)", () => {
-    const conn = createBuiltInConnection('claude-max')
-    expect(conn.providerType).toBe('anthropic')
-    expect(conn.midStreamBehavior).toBe('queue')
+  it('rejects leftover Anthropic built-in slugs', () => {
+    expect(() => createBuiltInConnection('anthropic-api')).toThrow('Unknown built-in connection slug')
+    expect(() => createBuiltInConnection('claude-max')).toThrow('Unknown built-in connection slug')
   })
 
   it("ChatGPT Plus → 'steer' (Pi backend, native polite steer)", () => {
@@ -141,11 +145,6 @@ describe('createBuiltInConnection seeds midStreamBehavior', () => {
     expect(conn.midStreamBehavior).toBe('steer')
   })
 
-  it("anthropic-api with custom endpoint becomes pi_compat → 'steer'", () => {
-    const conn = createBuiltInConnection('anthropic-api', 'http://localhost:11434/v1')
-    expect(conn.providerType).toBe('pi_compat')
-    expect(conn.midStreamBehavior).toBe('steer')
-  })
 })
 
 describe('validateModelList multi-select defaults', () => {

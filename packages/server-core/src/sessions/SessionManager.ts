@@ -15,7 +15,6 @@ import {
   resolveBackendContext,
   createBackendFromResolvedContext,
   cleanupSourceRuntimeArtifacts,
-  providerTypeToAgentProvider,
   type AgentBackend,
   type BackendHostRuntimeContext,
   type PostInitResult,
@@ -79,7 +78,7 @@ import { loadWorkspaceSources, loadAllSources, getSourcesBySlugs, isSourceUsable
 import { listTaskSlugs, parseTaskSpec, uniqueTaskSlug } from '@craft-agent/shared/tasks'
 import { createTaskFromSpec, resolveCreateTaskProjectId } from '../tasks'
 import { ConfigWatcher, type ConfigWatcherCallbacks } from '@craft-agent/shared/config'
-import { getValidClaudeOAuthToken } from '@craft-agent/shared/auth'
+import { isUnsupportedLlmConnection, UNSUPPORTED_LLM_CONNECTION_MESSAGE } from '@craft-agent/shared/config'
 import { resolveAuthEnvVars, toCustomEndpointModelPayload } from '@craft-agent/shared/config'
 import { toolMetadataStore, getLastApiError } from '@craft-agent/shared/interceptor'
 import { isParentTaskTool } from '@craft-agent/shared/utils/toolNames'
@@ -2015,10 +2014,15 @@ export class SessionManager implements ISessionManager {
         return
       }
 
+      if (isUnsupportedLlmConnection(connection)) {
+        sessionLog.warn(`Skipping auth env for unsupported connection ${slug}: ${UNSUPPORTED_LLM_CONNECTION_MESSAGE}`)
+        resetSummarizationClient()
+        return
+      }
+
       sessionLog.info(`Reinitializing auth for connection: ${slug} (${connection.authType})`)
 
-      // Resolve auth env vars via shared utility (provider-agnostic)
-      const result = await resolveAuthEnvVars(connection, slug!, manager, getValidClaudeOAuthToken)
+      const result = await resolveAuthEnvVars(connection, slug!, manager, async () => ({ accessToken: null }))
 
       if (!result.success) {
         sessionLog.error(`Auth resolution failed for ${slug}: ${result.warning}`)
@@ -3474,6 +3478,9 @@ export class SessionManager implements ISessionManager {
       managedModel: managed.model,
     })
     const connection = backendContext.connection
+    if (connection && isUnsupportedLlmConnection(connection)) {
+      throw new Error(UNSUPPORTED_LLM_CONNECTION_MESSAGE)
+    }
     const sigInput = {
       connection,
       provider: backendContext.provider,
@@ -3507,7 +3514,7 @@ export class SessionManager implements ISessionManager {
       if (connection) {
         sessionLog.info(`Using LLM connection "${connection.slug}" (${connection.providerType}) for session ${managed.id}`)
       } else {
-        sessionLog.warn(`No LLM connection found for session ${managed.id}, using default anthropic provider`)
+        sessionLog.warn(`No LLM connection found for session ${managed.id}, using default pi provider`)
       }
 
       // Set session directory for tool metadata cross-process sharing.
@@ -6254,7 +6261,23 @@ export class SessionManager implements ISessionManager {
     // Get or create the agent (lazy loading). Its internal cold-session build at
     // ~L2956 now sees fresh tokens (or correctly-needs_auth failed sources, since
     // ensureFreshToken mirrors the disk write to source.config in-memory).
-    const agent = await this.getOrCreateAgent(managed)
+    let agent: AgentInstance
+    try {
+      agent = await this.getOrCreateAgent(managed)
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error)
+      sessionLog.error(`Failed to create agent for session ${sessionId}:`, error)
+      sendSpan.mark('agent.create_failed')
+      sendSpan.setMetadata('error', msg)
+      sendSpan.end()
+      this.sendEvent({
+        type: 'error',
+        sessionId,
+        error: msg,
+      }, managed.workspace.id)
+      await this.onProcessingStopped(sessionId, 'error')
+      return
+    }
     sendSpan.mark('agent.ready')
 
     // Always set all sources for context (even if none are enabled), including built-ins
@@ -8853,6 +8876,11 @@ export class SessionManager implements ISessionManager {
     const envOverrides: Record<string, string> = {
       CRAFT_WORKSPACE_PATH: workspaceRootPath,
       ...(miniModel ? { ANTHROPIC_DEFAULT_HAIKU_MODEL: miniModel } : {}),
+    }
+
+    if (backendContext.connection && isUnsupportedLlmConnection(backendContext.connection)) {
+      sessionLog.warn(`[dispatch] Skipping remote transfer summary for ${managed.id}: leftover Anthropic connection`)
+      return null
     }
 
     const agent = createBackendFromResolvedContext({
