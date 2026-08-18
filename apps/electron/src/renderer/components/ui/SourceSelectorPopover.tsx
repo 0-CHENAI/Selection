@@ -58,7 +58,7 @@ export function SourceSelectorPopover({
         >
           <div className="shrink-0 text-muted-foreground flex items-center">
             {source.config.slug
-              ? <SourceAvatar source={source} size="sm" />
+              ? <SourceAvatar source={source} size="sm" chromeless />
               : <DatabaseZap className="h-4 w-4" />}
           </div>
           <TitleSlug className="flex-1" title={resolveSourceTitle(source)} slug={source.config.slug} />

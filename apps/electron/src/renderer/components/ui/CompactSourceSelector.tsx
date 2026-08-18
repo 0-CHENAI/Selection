@@ -99,7 +99,7 @@ export function CompactSourceSelector({
                 >
                   <div className="shrink-0 flex items-center">
                     {source.config.slug
-                      ? <SourceAvatar source={source} size="md" />
+                      ? <SourceAvatar source={source} size="md" chromeless />
                       : <DatabaseZap className="h-5 w-5 text-foreground/60" />}
                   </div>
                   <TitleSlug

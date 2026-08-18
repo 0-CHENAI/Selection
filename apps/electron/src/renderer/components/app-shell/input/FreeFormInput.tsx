@@ -1798,10 +1798,10 @@ export function FreeFormInput({
                             {displaySources.map((source, index) => (
                               <div
                                 key={source.config.slug}
-                                className={cn("relative h-5 w-5 rounded-[4px] bg-background shadow-minimal flex items-center justify-center", index > 0 && "-ml-1")}
+                                className={cn("relative h-5 w-5 flex items-center justify-center", index > 0 && "-ml-1")}
                                 style={{ zIndex: index + 1 }}
                               >
-                                <SourceAvatar source={source} size="xs" />
+                                <SourceAvatar source={source} size="xs" chromeless />
                               </div>
                             ))}
                             {remainingCount > 0 && (
@@ -1900,10 +1900,10 @@ export function FreeFormInput({
                             {displaySources.map((source, index) => (
                               <div
                                 key={source.config.slug}
-                                className={cn("relative h-5 w-5 rounded-[4px] bg-background shadow-minimal flex items-center justify-center", index > 0 && "-ml-1")}
+                                className={cn("relative h-5 w-5 flex items-center justify-center", index > 0 && "-ml-1")}
                                 style={{ zIndex: index + 1 }}
                               >
-                                <SourceAvatar source={source} size="xs" />
+                                <SourceAvatar source={source} size="xs" chromeless />
                               </div>
                             ))}
                             {remainingCount > 0 && (
