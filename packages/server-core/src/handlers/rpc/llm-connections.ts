@@ -8,7 +8,7 @@ import {
   validateStoredBackendConnection,
 } from '@craft-agent/shared/agent/backend'
 import { getModelRefreshService } from '@craft-agent/server-core/model-fetchers'
-import { parseTestConnectionError, createBuiltInConnection, validateModelList, splitModelIdList, piAuthProviderDisplayName, validateSetupTestInput, setupTestRequiresApiKey, resolveCustomEndpointSetup } from '@craft-agent/server-core/domain'
+import { parseTestConnectionError, createBuiltInConnection, validateModelList, splitModelIdList, piAuthProviderDisplayName, validateSetupTestInput, setupTestRequiresApiKey, resolveCustomEndpointSetup, persistableLlmSetupCredential } from '@craft-agent/server-core/domain'
 import { getWorkspaceOrThrow, buildBackendHostRuntimeContext } from '@craft-agent/server-core/handlers'
 import { pushTyped, type RpcServer } from '@craft-agent/server-core/transport'
 import type { HandlerDeps } from '../handler-deps'
@@ -84,6 +84,7 @@ export function registerLlmConnectionsHandlers(server: RpcServer, deps: HandlerD
         isNewConnection = true
       }
 
+      const persistableCredential = persistableLlmSetupCredential(setup.credential)
       const updates: Partial<LlmConnection> = {}
       const hasConfiguredBaseUrl = !!setup.baseUrl?.trim()
       if (setup.baseUrl !== undefined) {
@@ -115,11 +116,14 @@ export function registerLlmConnectionsHandlers(server: RpcServer, deps: HandlerD
         updates.providerType = 'pi_compat'
         const branch = resolveCustomEndpointSetup({
           baseUrl: setup.baseUrl ?? undefined,
-          credential: setup.credential ?? undefined,
+          credential: persistableCredential ?? undefined,
           customEndpointApi: customEndpoint.api,
+          preserveExistingCredential: !isNewConnection && connection.authType !== 'none',
         })
         updates.authType = branch.authType
-        if (branch.name !== undefined) updates.name = branch.name
+        // Only stamp the default "Local Model" name on first create — a later
+        // edit without a key must not rename a user-titled loopback connection.
+        if (isNewConnection && branch.name !== undefined) updates.name = branch.name
         if (branch.piAuthProvider !== undefined) updates.piAuthProvider = branch.piAuthProvider
 
         // Brand-name override on first setup only (user-renamed connections aren't clobbered on re-save).
@@ -276,23 +280,26 @@ export function registerLlmConnectionsHandlers(server: RpcServer, deps: HandlerD
         deps.platform.logger?.info(`Updated LLM connection settings: ${setup.slug}`)
       }
 
-      // Store credential if provided (skip masked placeholders from GET_API_KEY)
-      const isMasked = setup.credential?.includes('••')
-      if (setup.credential && !isMasked) {
+      // Store credential if provided. Empty / whitespace / masked GET_API_KEY
+      // placeholders must not overwrite a previously saved key (#6).
+      if (persistableCredential) {
         const authType = pendingConnection.authType
         if (authType === 'oauth') {
-          await manager.setLlmOAuth(setup.slug, { accessToken: setup.credential })
+          await manager.setLlmOAuth(setup.slug, { accessToken: persistableCredential })
           deps.platform.logger?.info('Saved OAuth access token to LLM connection')
         } else {
-          await manager.setLlmApiKey(setup.slug, setup.credential)
+          await manager.setLlmApiKey(setup.slug, persistableCredential)
           deps.platform.logger?.info('Saved API key to LLM connection')
         }
       }
 
       // Pi+Bedrock IAM credentials — stored separately from API keys
-      if (setup.iamCredentials) {
+      const iam = setup.iamCredentials
+      if (iam?.accessKeyId?.trim() && iam.secretAccessKey?.trim()) {
         await manager.setLlmIamCredentials(setup.slug, {
-          ...setup.iamCredentials,
+          ...iam,
+          accessKeyId: iam.accessKeyId.trim(),
+          secretAccessKey: iam.secretAccessKey.trim(),
           region: setup.awsRegion,
         })
         deps.platform.logger?.info('Saved IAM credentials to LLM connection')

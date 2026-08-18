@@ -717,6 +717,10 @@ export default function AiSettingsPage() {
   // Helpers to open/close the fullscreen API setup overlay
   const openApiSetup = useCallback((connectionSlug?: string) => {
     setEditingConnectionSlug(connectionSlug || null)
+    if (!connectionSlug) {
+      setIsDirectEdit(false)
+      setEditInitialValues(undefined)
+    }
     setShowApiSetup(true)
     setFullscreenOverlayOpen(true)
   }, [setFullscreenOverlayOpen])
@@ -750,6 +754,11 @@ export default function AiSettingsPage() {
     existingSlugs,
   })
 
+  const startNewApiSetup = useCallback(() => {
+    apiSetupOnboarding.reset()
+    openApiSetup()
+  }, [apiSetupOnboarding, openApiSetup])
+
   const handleApiSetupFinish = useCallback(() => {
     closeApiSetup()
     refreshLlmConnections?.()
@@ -775,9 +784,9 @@ export default function AiSettingsPage() {
     if (defaultConn) {
       openApiSetup(defaultConn.slug)
     } else {
-      openApiSetup()
+      startNewApiSetup()
     }
-  }, [llmConnections, openApiSetup])
+  }, [llmConnections, openApiSetup, startNewApiSetup])
 
   // Connection action handlers
   const handleRenameClick = useCallback((connection: LlmConnectionWithStatus) => {
@@ -1143,7 +1152,7 @@ export default function AiSettingsPage() {
                 </SettingsCard>
                 <div className="pt-0">
                   <button
-                    onClick={() => openApiSetup()}
+                    onClick={startNewApiSetup}
                     className="inline-flex items-center h-8 px-3 text-sm rounded-lg bg-background shadow-minimal hover:bg-foreground/[0.02] transition-colors"
                   >
                     {t("settings.ai.addConnection")}

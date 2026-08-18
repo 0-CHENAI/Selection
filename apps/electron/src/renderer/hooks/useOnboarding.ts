@@ -405,7 +405,7 @@ export function useOnboarding({
           iamCredentials: data.iamCredentials,
           awsRegion: data.awsRegion,
           bedrockAuthMethod: data.bedrockAuthMethod,
-        })
+        }, undefined, editingSlug ?? undefined, !!editingSlug)
         if (saved) {
           setState(s => ({ ...s, credentialStatus: 'success', step: 'complete' }))
         } else {
@@ -691,7 +691,7 @@ export function useOnboarding({
         connectionDefaultModel: data.model,
         models: data.models,
         customEndpoint: { api: 'openai-completions' },
-      })
+      }, undefined, editingSlug ?? undefined, !!editingSlug)
 
       if (saved) {
         setState(s => ({ ...s, credentialStatus: 'success', step: 'complete' }))
@@ -705,7 +705,7 @@ export function useOnboarding({
         errorMessage: error instanceof Error ? error.message : 'Failed to save configuration',
       }))
     }
-  }, [handleSaveConfig])
+  }, [handleSaveConfig, editingSlug])
 
   // Cancel OAuth flow
   const handleCancelOAuth = useCallback(async () => {
