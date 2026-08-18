@@ -544,7 +544,7 @@ export class CredentialManager {
    */
   private async hasLlmApiKeyCredential(connectionSlug: string): Promise<boolean> {
     const apiKey = await this.getLlmApiKey(connectionSlug);
-    return !!apiKey;
+    return !!apiKey?.trim();
   }
 
   /**

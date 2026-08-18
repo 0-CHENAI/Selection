@@ -4,6 +4,7 @@ import {
   isLoopbackBaseUrl,
   setupTestRequiresApiKey,
   resolveCustomEndpointSetup,
+  persistableLlmSetupCredential,
   createBuiltInConnection,
   validateModelList,
   splitModelIdList,
@@ -122,6 +123,23 @@ describe('resolveCustomEndpointSetup', () => {
       customEndpointApi: 'openai-completions',
     })).toEqual({ authType: 'api_key_with_endpoint', piAuthProvider: 'openai' })
   })
+
+  it('treats whitespace-only credential as missing (not keyed)', () => {
+    expect(resolveCustomEndpointSetup({
+      baseUrl: 'http://localhost:11434/v1',
+      credential: '   ',
+      customEndpointApi: 'openai-completions',
+    })).toEqual({ authType: 'none', name: 'Local Model' })
+  })
+
+  it('keeps a keyed loopback connection keyed when the form omits the API key', () => {
+    expect(resolveCustomEndpointSetup({
+      baseUrl: 'http://127.0.0.1:11111/v1',
+      credential: undefined,
+      customEndpointApi: 'openai-completions',
+      preserveExistingCredential: true,
+    })).toEqual({ authType: 'api_key_with_endpoint', piAuthProvider: 'openai' })
+  })
 })
 
 // New connections must persist a per-provider midStreamBehavior default so the
@@ -145,6 +163,19 @@ describe('createBuiltInConnection seeds midStreamBehavior', () => {
     expect(conn.midStreamBehavior).toBe('steer')
   })
 
+})
+
+describe('persistableLlmSetupCredential', () => {
+  it('returns a trimmed real key', () => {
+    expect(persistableLlmSetupCredential('  sk-live  ')).toBe('sk-live')
+  })
+
+  it('rejects empty, whitespace, and masked placeholders so existing keys stay put', () => {
+    expect(persistableLlmSetupCredential(undefined)).toBeNull()
+    expect(persistableLlmSetupCredential('')).toBeNull()
+    expect(persistableLlmSetupCredential('   ')).toBeNull()
+    expect(persistableLlmSetupCredential('sk-••••••••abcd')).toBeNull()
+  })
 })
 
 describe('validateModelList multi-select defaults', () => {

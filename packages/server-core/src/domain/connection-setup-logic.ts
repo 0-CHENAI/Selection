@@ -102,6 +102,17 @@ export function setupTestRequiresApiKey(baseUrl?: string): boolean {
 }
 
 /**
+ * SETUP must not persist empty, whitespace, or masked GET_API_KEY placeholders.
+ * Returning null means "leave the stored credential unchanged".
+ */
+export function persistableLlmSetupCredential(credential: string | undefined): string | null {
+  const trimmed = credential?.trim() ?? ''
+  if (!trimmed) return null
+  if (trimmed.includes('••')) return null
+  return trimmed
+}
+
+/**
  * Decide how a custom OpenAI/Anthropic-compatible endpoint should be persisted.
  *
  * - Loopback URL with no credential → keyless local model (Ollama, LM Studio).
@@ -109,6 +120,8 @@ export function setupTestRequiresApiKey(baseUrl?: string): boolean {
  *   must be treated like a remote custom endpoint so `piAuthProvider` is set, otherwise
  *   `getPiAuth()` returns null at runtime and chat requests fail with 401 (#636).
  * - Remote URL → always keyed with provider hint for the correct icon.
+ * - Edit/re-save with no new credential must not downgrade a keyed connection to
+ *   keyless; an omitted key means "keep the stored one" (#6).
  *
  * Pure: caller spreads the result into the connection updates patch.
  */
@@ -116,12 +129,15 @@ export function resolveCustomEndpointSetup(input: {
   baseUrl: string | undefined
   credential: string | undefined
   customEndpointApi: CustomEndpointApi
+  /** Existing keyed connection: missing form credential must not become keyless. */
+  preserveExistingCredential?: boolean
 }): {
   authType: Extract<LlmConnection['authType'], 'none' | 'api_key_with_endpoint'>
   name?: 'Local Model'
   piAuthProvider?: 'openai' | 'anthropic'
 } {
-  const isKeylessLoopback = isLoopbackBaseUrl(input.baseUrl) && !input.credential
+  const persistable = persistableLlmSetupCredential(input.credential)
+  const isKeylessLoopback = isLoopbackBaseUrl(input.baseUrl) && !persistable && !input.preserveExistingCredential
   if (isKeylessLoopback) {
     return { authType: 'none', name: 'Local Model' }
   }
