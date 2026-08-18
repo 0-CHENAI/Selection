@@ -44,6 +44,13 @@ describe('system prompt guidance', () => {
     expect(prompt).toContain('Name sources and skills as title + slug')
   })
 
+  it('keeps Codex tool-naming guidance aligned with title + slug speech', () => {
+    const prompt = getSystemPrompt(undefined, undefined, '/tmp/workspace', '/tmp/workspace', undefined, 'Codex')
+
+    expect(prompt).toContain('user-facing replies still use `{title} ({slug})`')
+    expect(prompt).not.toContain('user-facing replies still use the display title')
+  })
+
   it('treats OfficeCLI as a native capability rather than a skill', () => {
     const prompt = getSystemPrompt(undefined, undefined, '/tmp/workspace', '/tmp/workspace')
 

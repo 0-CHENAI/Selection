@@ -23,6 +23,8 @@ export interface SkillsListPanelProps {
   selectedSkillSlug?: string | null
   workspaceId?: string
   workspaceRootPath?: string
+  /** Session working directory — needed to rename project-level skills */
+  workingDirectory?: string
   className?: string
   /** Controlled open state for copy-from-workspace dialog (header button) */
   copyFromOpen?: boolean
@@ -36,6 +38,7 @@ export function SkillsListPanel({
   selectedSkillSlug,
   workspaceId,
   workspaceRootPath,
+  workingDirectory,
   className,
   copyFromOpen: copyFromOpenProp,
   onCopyFromOpenChange,
@@ -56,7 +59,7 @@ export function SkillsListPanel({
   const [copyFromOpenInternal, setCopyFromOpenInternal] = React.useState(false)
   const copyFromOpen = copyFromOpenProp ?? copyFromOpenInternal
   const setCopyFromOpen = onCopyFromOpenChange ?? setCopyFromOpenInternal
-  const rename = useDisplayTitleRename('skill', workspaceId ?? activeWorkspaceId)
+  const rename = useDisplayTitleRename('skill', workspaceId ?? activeWorkspaceId, workingDirectory)
 
   return (
     <>
