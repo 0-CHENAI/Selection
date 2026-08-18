@@ -36,6 +36,8 @@ interface SourceAvatarProps {
   showStatus?: boolean
   /** Additional className overrides */
   className?: string
+  /** Render without background, ring, or rounded container chrome. */
+  chromeless?: boolean
 }
 
 // ============================================================================
@@ -143,7 +145,7 @@ function useFaviconFallback(
 // Component
 // ============================================================================
 
-export function SourceAvatar({ source, size = 'md', fluid, showStatus, className }: SourceAvatarProps) {
+export function SourceAvatar({ source, size = 'md', fluid, showStatus, className, chromeless }: SourceAvatarProps) {
   const icon = useEntityIcon({
     workspaceId: source.workspaceId,
     entityType: 'source',
@@ -170,6 +172,7 @@ export function SourceAvatar({ source, size = 'md', fluid, showStatus, className
       alt={resolveSourceTitle(source)}
       className={className}
       containerClassName={fluid ? 'h-full w-full' : undefined}
+      chromeless={chromeless}
     />
   )
 

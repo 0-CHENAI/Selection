@@ -178,7 +178,13 @@ function FieldRow({ label, children }: { label: string; children: React.ReactNod
  * Overlapping avatar stack for the selector triggers — mirrors the chat input's
  * source badge (first three avatars, then a "+N" chip).
  */
-function AvatarStack({ avatars }: { avatars: React.ReactNode[] }) {
+function AvatarStack({
+  avatars,
+  chromeless = false,
+}: {
+  avatars: React.ReactNode[]
+  chromeless?: boolean
+}) {
   const display = avatars.slice(0, 3)
   const remaining = avatars.length - 3
   return (
@@ -187,7 +193,8 @@ function AvatarStack({ avatars }: { avatars: React.ReactNode[] }) {
         <div
           key={i}
           className={cn(
-            'relative flex h-5 w-5 items-center justify-center rounded-[4px] bg-background shadow-minimal',
+            'relative flex h-5 w-5 items-center justify-center',
+            !chromeless && 'rounded-[4px] bg-background shadow-minimal',
             i > 0 && '-ml-1',
           )}
           style={{ zIndex: i + 1 }}
@@ -197,7 +204,10 @@ function AvatarStack({ avatars }: { avatars: React.ReactNode[] }) {
       ))}
       {remaining > 0 && (
         <div
-          className="-ml-1 flex h-5 w-5 items-center justify-center rounded-[4px] bg-background text-[8px] font-medium text-muted-foreground shadow-minimal"
+          className={cn(
+            '-ml-1 flex h-5 w-5 items-center justify-center text-[8px] font-medium text-muted-foreground',
+            !chromeless && 'rounded-[4px] bg-background shadow-minimal',
+          )}
           style={{ zIndex: display.length + 1 }}
         >
           +{remaining}
@@ -246,7 +256,12 @@ function SourcesField({
         {selected.length === 0 ? (
           <DatabaseZap className="h-4 w-4 shrink-0 text-foreground/40" strokeWidth={2} />
         ) : (
-          <AvatarStack avatars={selected.map((s) => <SourceAvatar key={s.config.slug} source={s} size="xs" />)} />
+          <AvatarStack
+            chromeless
+            avatars={selected.map((s) => (
+              <SourceAvatar key={s.config.slug} source={s} size="xs" chromeless />
+            ))}
+          />
         )}
         <span className={cn('min-w-0 flex-1 truncate text-left', values.length === 0 && 'text-foreground/50')}>{label}</span>
       </SelectButton>
