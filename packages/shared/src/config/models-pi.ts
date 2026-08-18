@@ -157,6 +157,7 @@ const PI_PROVIDER_DISPLAY: Partial<Record<string, { label: string; placeholder: 
  * Providers to EXCLUDE from the Pi API key dropdown.
  */
 const PI_EXCLUDED_PROVIDERS: Set<string> = new Set([
+  'anthropic',
   'github-copilot',
   'openai-codex',
   'google-vertex',
@@ -189,7 +190,7 @@ export function getPiApiKeyProviders(): PiProviderInfo[] {
       };
     })
     .sort((a, b) => {
-      const priority = ['anthropic', 'google', 'openai'];
+      const priority = ['google', 'openai'];
       const ai = priority.indexOf(a.key);
       const bi = priority.indexOf(b.key);
       if (ai !== -1 && bi !== -1) return ai - bi;

@@ -52,12 +52,12 @@ describe('resolvePiAuthProviderForSubmit', () => {
     expect(resolvePiAuthProviderForSubmit('custom', 'openai')).toBe('openai')
   })
 
-  it('defaults custom endpoint mode to anthropic routing when none was selected yet', () => {
-    expect(resolvePiAuthProviderForSubmit('custom', null)).toBe('anthropic')
+  it('defaults custom endpoint mode to openai routing when none was selected yet', () => {
+    expect(resolvePiAuthProviderForSubmit('custom', null)).toBe('openai')
   })
 
   it('passes through non-custom presets unchanged', () => {
-    expect(resolvePiAuthProviderForSubmit('google', 'anthropic')).toBe('google')
+    expect(resolvePiAuthProviderForSubmit('google', 'openai')).toBe('google')
   })
 })
 
@@ -67,7 +67,7 @@ describe('resolvePresetStateForBaseUrlChange', () => {
       matchedPreset: 'openrouter',
       activePreset: 'custom',
       activePresetHasEmptyUrl: true,
-      lastNonCustomPreset: 'anthropic',
+      lastNonCustomPreset: 'openai',
     })).toEqual({
       activePreset: 'openrouter',
       lastNonCustomPreset: 'openrouter',
@@ -115,7 +115,7 @@ describe('resolveCustomEndpointPayload', () => {
     })
   })
 
-  it('honors the protocol toggle for the generic custom preset', () => {
+  it('forces OpenAI Compatible for the generic custom preset', () => {
     expect(resolveCustomEndpointPayload({
       activePreset: 'custom',
       baseUrl: 'https://my-endpoint.example.com',
@@ -123,8 +123,8 @@ describe('resolveCustomEndpointPayload', () => {
       brandedOpenAiCompatPresets: BRANDED,
       fallbackPiAuthProvider: undefined,
     })).toEqual({
-      customEndpoint: { api: 'anthropic-messages' },
-      piAuthProvider: 'anthropic',
+      customEndpoint: { api: 'openai-completions' },
+      piAuthProvider: 'openai',
     })
   })
 
@@ -154,7 +154,7 @@ describe('resolveCustomEndpointPayload', () => {
     })
   })
 
-  it('routes ORDER Anthropic preset to anthropic-messages', () => {
+  it('does not create a custom endpoint for leftover ORDER Anthropic presets', () => {
     expect(resolveCustomEndpointPayload({
       activePreset: 'order-anthropic',
       baseUrl: 'https://order.ai.jxepdi.top',
@@ -163,8 +163,8 @@ describe('resolveCustomEndpointPayload', () => {
       brandedAnthropicCompatPresets: new Set(['order-anthropic']),
       fallbackPiAuthProvider: undefined,
     })).toEqual({
-      customEndpoint: { api: 'anthropic-messages' },
-      piAuthProvider: 'anthropic',
+      customEndpoint: undefined,
+      piAuthProvider: undefined,
     })
   })
 

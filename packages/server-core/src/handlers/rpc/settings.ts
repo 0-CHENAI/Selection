@@ -1,7 +1,7 @@
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs'
 import { dirname } from 'path'
 import { RPC_CHANNELS } from '@craft-agent/shared/protocol'
-import { getPreferencesPath, getSessionDraft, setSessionDraft, deleteSessionDraft, getAllSessionDrafts, getWorkspaceByNameOrId, getDefaultThinkingLevel, setDefaultThinkingLevel, getSharedProjectMemoryEnabled, setSharedProjectMemoryEnabled } from '@craft-agent/shared/config'
+import { getPreferencesPath, getSessionDraft, setSessionDraft, deleteSessionDraft, getAllSessionDrafts, getWorkspaceByNameOrId, getDefaultThinkingLevel, setDefaultThinkingLevel, getSharedProjectMemoryEnabled, setSharedProjectMemoryEnabled, isUnsupportedLlmConnection, UNSUPPORTED_LLM_CONNECTION_MESSAGE } from '@craft-agent/shared/config'
 import { isValidThinkingLevel, normalizeThinkingLevel, THINKING_LEVEL_IDS } from '@craft-agent/shared/agent/thinking-levels'
 
 const VALID_THINKING_LEVELS_LIST = THINKING_LEVEL_IDS.map(id => `'${id}'`).join(', ')
@@ -143,8 +143,12 @@ export function registerSettingsHandlers(server: RpcServer, deps: HandlerDeps): 
     // Validate defaultLlmConnection exists before saving
     if (key === 'defaultLlmConnection' && normalizedValue !== undefined && normalizedValue !== null) {
       const { getLlmConnection } = await import('@craft-agent/shared/config/storage')
-      if (!getLlmConnection(normalizedValue as string)) {
+      const connection = getLlmConnection(normalizedValue as string)
+      if (!connection) {
         throw new Error(`LLM connection "${normalizedValue}" not found`)
+      }
+      if (isUnsupportedLlmConnection(connection)) {
+        throw new Error(UNSUPPORTED_LLM_CONNECTION_MESSAGE)
       }
     }
 

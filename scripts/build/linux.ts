@@ -3,32 +3,9 @@
  */
 
 import { $ } from 'bun';
-import { existsSync, renameSync, statSync } from 'fs';
+import { existsSync, renameSync } from 'fs';
 import { join } from 'path';
-import type { Arch, BuildConfig } from './common';
-
-/**
- * Verify SDK native binary is bundled in the packaged Linux app.
- * Since SDK 0.2.113 the SDK ships a per-platform native binary instead of cli.js.
- */
-export function verifyPackagedSDK(unpackedPath: string, _arch: Arch): void {
-  const appPath = join(unpackedPath, 'resources', 'app');
-  const binaryPath = join(
-    appPath,
-    'node_modules', '@anthropic-ai', 'claude-agent-sdk-binary', 'claude',
-  );
-
-  if (!existsSync(binaryPath)) {
-    throw new Error(`CRITICAL: SDK native binary not bundled! Expected at: ${binaryPath}`);
-  }
-
-  const stats = statSync(binaryPath);
-  if (stats.size < 50_000_000) {
-    throw new Error(`CRITICAL: SDK native binary too small (${stats.size} bytes, expected ~210 MB)`);
-  }
-
-  console.log(`  SDK bundled: claude binary is ${(stats.size / 1024 / 1024).toFixed(1)} MB`);
-}
+import type { BuildConfig } from './common';
 
 /**
  * Package the Linux app with electron-builder
@@ -40,15 +17,6 @@ export async function packageLinux(config: BuildConfig): Promise<string> {
 
   // Run electron-builder
   await $`cd ${electronDir} && npx electron-builder --linux --${arch}`;
-
-  // Verify SDK is bundled in the unpacked app before checking artifacts
-  const unpackedPath = join(electronDir, 'release', 'linux-unpacked');
-  if (existsSync(unpackedPath)) {
-    console.log('Verifying SDK in packaged app...');
-    verifyPackagedSDK(unpackedPath, arch);
-  } else {
-    console.warn('  linux-unpacked not found, skipping SDK verification');
-  }
 
   // electron-builder uses different arch names: x86_64 for x64, aarch64 for arm64
   const linuxArch = arch === 'x64' ? 'x86_64' : 'aarch64';

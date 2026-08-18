@@ -34,8 +34,6 @@ import {
   downloadBun,
   downloadOfficecli,
   downloadUv,
-  copySDK,
-  verifySDKCopy,
   copyRipgrep,
   copyInterceptor,
   buildMcpServers,
@@ -70,50 +68,6 @@ function makeConfig(platform: Platform, arch: Arch): BuildConfig {
     uploadScript: false,
     rootDir: ROOT_DIR,
     electronDir: ELECTRON_DIR,
-  }
-}
-
-/**
- * Fetch a platform-specific claude-agent-sdk binary package into root node_modules
- * when cross-compiling (host arch/platform differs from target).
- */
-async function ensureSdkBinaryPackage(platform: Platform, arch: Arch): Promise<void> {
-  const pkg =
-    platform === 'darwin'
-      ? `claude-agent-sdk-darwin-${arch}`
-      : platform === 'win32'
-        ? `claude-agent-sdk-win32-${arch}`
-        : `claude-agent-sdk-linux-${arch}`
-
-  const dest = join(ROOT_DIR, 'node_modules', '@anthropic-ai', pkg)
-  if (existsSync(dest) && readdirSync(dest).length > 0) {
-    console.log(`SDK binary package already present: ${pkg}`)
-    return
-  }
-
-  const packageJson = await Bun.file(join(ROOT_DIR, 'package.json')).json() as {
-    dependencies?: Record<string, string>
-  }
-  const version = packageJson.dependencies?.['@anthropic-ai/claude-agent-sdk']
-  if (!version) {
-    throw new Error('Could not resolve @anthropic-ai/claude-agent-sdk version from package.json')
-  }
-
-  console.log(`Fetching @anthropic-ai/${pkg}@${version} for target ${platform}-${arch}...`)
-  const tmp = join(ELECTRON_DIR, `.sdk-fetch-${pkg}`)
-  rmSync(tmp, { recursive: true, force: true })
-  mkdirSync(tmp, { recursive: true })
-
-  try {
-    await $`cd ${tmp} && npm pack @anthropic-ai/${pkg}@${version}`.quiet()
-    const tarball = readdirSync(tmp).find((f) => f.endsWith('.tgz'))
-    if (!tarball) throw new Error(`npm pack produced no tarball for ${pkg}`)
-    await $`cd ${tmp} && tar -xzf ${tarball}`.quiet()
-    mkdirSync(dest, { recursive: true })
-    cpSync(join(tmp, 'package'), dest, { recursive: true })
-    console.log(`  Staged ${pkg} → ${dest}`)
-  } finally {
-    rmSync(tmp, { recursive: true, force: true })
   }
 }
 
@@ -216,9 +170,6 @@ async function prepareAndBuildApp(config: BuildConfig): Promise<void> {
   await downloadBun(config)
   await downloadUv(config)
   await downloadOfficecli(config)
-  await ensureSdkBinaryPackage(config.platform, config.arch)
-  copySDK(config)
-  verifySDKCopy(config)
   await copyRipgrepForTarget(config)
 
   copyInterceptor(config)

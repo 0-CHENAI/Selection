@@ -124,53 +124,6 @@ describe('resolveRipgrepPath', () => {
   });
 });
 
-describe('resolveClaudeBinaryPath (native binary, SDK ≥ 0.2.113)', () => {
-  const tmpBase = join(tmpdir(), `claude-bin-resolver-test-${Date.now()}`);
-
-  afterEach(() => {
-    try { rmSync(tmpBase, { recursive: true, force: true }); } catch {}
-  });
-
-  it('finds the per-platform native binary in the optional-dep package', () => {
-    const appRoot = join(tmpBase, 'app');
-    const arch = process.arch === 'arm64' ? 'arm64' : 'x64';
-    const platformPkg = process.platform === 'win32'
-      ? `claude-agent-sdk-win32-${arch}`
-      : process.platform === 'darwin'
-        ? `claude-agent-sdk-darwin-${arch}`
-        : `claude-agent-sdk-linux-${arch}`;
-    const binaryName = process.platform === 'win32' ? 'claude.exe' : 'claude';
-    const binDir = join(appRoot, 'node_modules', '@anthropic-ai', platformPkg);
-    mkdirSync(binDir, { recursive: true });
-    const binPath = join(binDir, binaryName);
-    writeFileSync(binPath, '#!/bin/sh\n');
-    chmodSync(binPath, 0o755);
-
-    const hostRuntime: BackendHostRuntimeContext = {
-      appRootPath: appRoot,
-      resourcesPath: appRoot,
-      isPackaged: true,
-    };
-
-    const paths = resolveBackendRuntimePaths(hostRuntime);
-    expect(paths.claudeCliPath).toBe(binPath);
-  });
-
-  it('returns undefined when the platform package is missing', () => {
-    const appRoot = join(tmpBase, 'no-binary');
-    mkdirSync(appRoot, { recursive: true });
-
-    const hostRuntime: BackendHostRuntimeContext = {
-      appRootPath: appRoot,
-      resourcesPath: appRoot,
-      isPackaged: true,
-    };
-
-    const paths = resolveBackendRuntimePaths(hostRuntime);
-    expect(paths.claudeCliPath).toBeUndefined();
-  });
-});
-
 describe('resolveInterceptorBundlePath dev-mode source preference', () => {
   const tmpBase = join(tmpdir(), `interceptor-resolver-test-${Date.now()}`);
 

@@ -17,6 +17,7 @@ import {
   getLlmConnection,
   updateLlmConnection,
   isCompatProvider,
+  isUnsupportedLlmConnection,
   getModelsForProviderType,
 } from '@craft-agent/shared/config'
 import { MODEL_FETCHERS } from './registry'
@@ -75,6 +76,11 @@ class ModelRefreshService {
 
     // Skip compat providers — users configure models manually
     if (isCompatProvider(connection.providerType)) {
+      return
+    }
+
+    if (isUnsupportedLlmConnection(connection)) {
+      handlerLog.warn(`Model refresh: skipping unsupported connection ${slug}`)
       return
     }
 
@@ -158,7 +164,7 @@ class ModelRefreshService {
     const connections = getLlmConnections()
 
     for (const conn of connections) {
-      if (isCompatProvider(conn.providerType)) continue
+      if (isCompatProvider(conn.providerType) || isUnsupportedLlmConnection(conn)) continue
 
       const providerType = conn.providerType as FetchableProvider
       const fetcher = this.fetchers[providerType]
@@ -202,7 +208,7 @@ class ModelRefreshService {
 
     // Ensure periodic timer is running
     const connection = getLlmConnection(slug)
-    if (!connection || isCompatProvider(connection.providerType)) return
+    if (!connection || isCompatProvider(connection.providerType) || isUnsupportedLlmConnection(connection)) return
 
     const providerType = connection.providerType as FetchableProvider
     const fetcher = this.fetchers[providerType]

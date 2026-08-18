@@ -48,35 +48,13 @@ apps/electron/
 
 ## Key Learnings & Gotchas
 
-### 1. SDK Path Resolution (CRITICAL)
+### 1. Runtime Path Resolution
 
-The Claude Agent SDK (`@anthropic-ai/claude-agent-sdk`) spawns a native `claude` binary from a per-platform optional dependency (`@anthropic-ai/claude-agent-sdk-{platform}-{arch}`). Packaged Electron builds must point the SDK at the staged binary because normal optional-dependency resolution does not work inside the packaged resource layout.
+Pi is the only agent runtime. Packaged Electron builds still resolve the Pi agent server, interceptor, ripgrep, and bundled Bun from `packages/shared/src/agent/backend/internal/runtime-resolver.ts`. The Claude Agent SDK native binary is no longer staged or shipped.
 
-**Runtime resolution:** `packages/shared/src/agent/backend/internal/runtime-resolver.ts` probes the build-script alias first:
+### 2. Authentication
 
-```text
-node_modules/@anthropic-ai/claude-agent-sdk-binary/{claude,claude.exe}
-```
-
-and falls back to the real per-arch package in dev. Once resolved, `applyAnthropicRuntimeBootstrap()` calls `setPathToClaudeCodeExecutable(path)` before any Claude agents are created.
-
-### 2. Authentication Environment Setup (CRITICAL)
-
-The SDK requires authentication environment variables to be set BEFORE creating agents. The Electron app must do this explicitly during initialization.
-
-```typescript
-import { getAuthState } from '../../../src/auth/state'
-
-// In initialize():
-const authState = await getAuthState()
-const { billing } = authState
-
-if (billing.type === 'oauth_token' && billing.claudeOAuthToken) {
-  process.env.CLAUDE_CODE_OAUTH_TOKEN = billing.claudeOAuthToken
-} else if (billing.apiKey) {
-  process.env.ANTHROPIC_API_KEY = billing.apiKey
-}
-```
+Pi connections resolve credentials from the encrypted credential store at session start. Leftover Anthropic / Claude Max / `anthropic-messages` connections are marked unavailable and do not inject `ANTHROPIC_*` or `CLAUDE_CODE_OAUTH_TOKEN`.
 
 ### 3. AgentEvent Type Mismatches
 

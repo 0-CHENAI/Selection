@@ -302,15 +302,7 @@ function getElectronEnv(): Record<string, string> {
 
 // Externals for the main-process bundle.
 // - `electron`: the runtime, not bundleable.
-// - `@anthropic-ai/claude-agent-sdk`: SDK 0.3.x is pure ESM and calls
-//   `createRequire(import.meta.url)` at module-init; esbuild's CJS bundling
-//   leaves the synthesized `import_meta.url` undefined and the bundled
-//   main.cjs throws ERR_INVALID_ARG_VALUE on load. Externalize so Node loads
-//   the SDK natively as ESM. Electron 39 = Node 22.x supports `require()` of
-//   TLA-free ESM, so the runtime `require('@anthropic-ai/claude-agent-sdk')`
-//   resolves correctly. Mirror of the same flag in `scripts/electron-build-main.ts`
-//   and `apps/electron/package.json` build:main.
-const MAIN_BUNDLE_EXTERNALS = ["electron", "@anthropic-ai/claude-agent-sdk"];
+const MAIN_BUNDLE_EXTERNALS = ["electron"];
 
 // Run a one-shot esbuild using the JavaScript API
 async function runEsbuild(

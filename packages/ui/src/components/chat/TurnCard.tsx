@@ -2975,7 +2975,7 @@ export const TurnCard = React.memo(function TurnCard({
                       }}
                       className={cn("flex items-center gap-2 py-0.5 text-muted-foreground/70", SIZE_CONFIG.fontSize)}
                     >
-                      <GenerativeActivityIndicator size={12} variant={isBuffering ? 'signal' : 'dot-pulse'} />
+                      <GenerativeActivityIndicator size={12} variant={isBuffering ? 'signal' : 'orbit'} />
                       <span>{isBuffering ? t('turnCard.preparingResponse') : t('turnCard.thinking')}</span>
                     </motion.div>
                   )}
@@ -2994,7 +2994,7 @@ export const TurnCard = React.memo(function TurnCard({
       {/* Standalone thinking indicator - when no activities but still working */}
       {!hasActivities && isThinking && !animateResponse && (
         <div className={cn("flex items-center gap-2 px-3 py-1.5 text-muted-foreground", SIZE_CONFIG.fontSize)}>
-          <GenerativeActivityIndicator size={12} variant={isBuffering ? 'signal' : 'dot-pulse'} />
+          <GenerativeActivityIndicator size={12} variant={isBuffering ? 'signal' : 'orbit'} />
           <span>{isBuffering ? t('turnCard.preparingResponse') : t('turnCard.thinking')}</span>
         </div>
       )}

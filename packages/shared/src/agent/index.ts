@@ -1,16 +1,12 @@
-// Export ClaudeAgent (renamed from CraftAgent) and backward-compatible aliases
-export * from './claude-agent.ts';
 export * from './conversation-summary.ts';
+export type { AgentEvent } from '@craft-agent/core/types';
 
 // Export PiAgent for direct use
 export { PiAgent, PiBackend } from './pi-agent.ts';
 export * from './errors.ts';
-export * from './options.ts';
 
 // Export session-scoped-tools - tools scoped to a specific session
 export {
-  // Session-scoped tools provider
-  getSessionScopedTools,
   cleanupSessionScopedTools,
   // Plan file management
   getSessionPlansDir,

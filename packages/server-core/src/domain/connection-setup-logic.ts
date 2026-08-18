@@ -30,7 +30,7 @@ export function parseTestConnectionError(msg: string): string {
     return 'Cannot connect to API server. Check the URL and ensure the server is running.'
   }
   if (lower.includes('no api key found for')) {
-    return 'Provider mismatch during setup. Select a provider preset in Selection Backend API Key mode, or use Anthropic API Key mode for arbitrary compatible endpoints.'
+    return 'Provider mismatch during setup. Select a provider preset in Selection Backend API Key mode, or use an OpenAI Compatible custom endpoint.'
   }
   if (lower.includes('401') || lower.includes('unauthorized') || lower.includes('authentication')) {
     return 'Invalid API key'
@@ -59,11 +59,17 @@ export function validateSetupTestInput(params: {
   baseUrl?: string
   piAuthProvider?: string
 }): { valid: true } | { valid: false; error: string } {
+  if (params.provider === 'anthropic' || params.piAuthProvider === 'anthropic') {
+    return {
+      valid: false,
+      error: 'Anthropic connections are no longer supported. Use OpenAI Compatible or another Selection Backend provider.',
+    }
+  }
   const hasCustomEndpoint = !!params.baseUrl?.trim()
   if (params.provider === 'pi' && hasCustomEndpoint && !params.piAuthProvider) {
     return {
       valid: false,
-      error: 'Custom endpoint in Selection Backend mode requires selecting a provider preset. For arbitrary Anthropic-compatible endpoints, use Anthropic API Key mode.',
+      error: 'Custom endpoint requires selecting a provider preset or using OpenAI Compatible protocol.',
     }
   }
 
@@ -121,7 +127,7 @@ export function resolveCustomEndpointSetup(input: {
   }
   return {
     authType: 'api_key_with_endpoint',
-    piAuthProvider: input.customEndpointApi === 'anthropic-messages' ? 'anthropic' : 'openai',
+    piAuthProvider: 'openai',
   }
 }
 
@@ -139,16 +145,6 @@ export const BUILT_IN_CONNECTION_TEMPLATES: Record<string, {
   authType: LlmConnection['authType'] | ((hasCustomEndpoint: boolean) => LlmConnection['authType'])
   piAuthProvider?: string
 }> = {
-  'anthropic-api': {
-    name: (h) => h ? 'Custom Anthropic-Compatible' : 'Anthropic (API Key)',
-    providerType: (h) => h ? 'pi_compat' : 'anthropic',
-    authType: (h) => h ? 'api_key_with_endpoint' : 'api_key',
-  },
-  'claude-max': {
-    name: 'Claude Max',
-    providerType: 'anthropic',
-    authType: 'oauth',
-  },
   'chatgpt-plus': {
     name: 'ChatGPT Plus',
     providerType: 'pi',

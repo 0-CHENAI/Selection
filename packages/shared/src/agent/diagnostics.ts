@@ -9,7 +9,7 @@
 import { getLastApiError } from '../interceptor-common.ts';
 import { type AuthType, getDefaultLlmConnection, getLlmConnection } from '../config/storage.ts';
 import { getCredentialManager } from '../credentials/index.ts';
-import { validateAnthropicConnection } from '../config/llm-validation.ts';
+import { isUnsupportedLlmConnection, UNSUPPORTED_LLM_CONNECTION_MESSAGE } from '../config/llm-connections.ts';
 import type { LlmProviderType } from '../config/llm-connections.ts';
 import { isAnthropicProvider } from '../config/llm-connections.ts';
 
@@ -222,79 +222,26 @@ async function checkWorkspaceToken(_workspaceId: string): Promise<CheckResult> {
   return { ok: true, detail: '✓ Workspace token: Present' };
 }
 
-/**
- * Validate an API key by making a minimal query through the Claude Agent SDK.
- * Uses validateAnthropicConnection() which runs query() with maxTurns:1.
- */
-async function validateApiKeyWithAnthropic(apiKey: string, baseUrl?: string | null, providerLabel: string = 'Anthropic'): Promise<CheckResult> {
-  try {
-    const { getDefaultSummarizationModel } = await import('../config/models.ts');
-    const model = getDefaultSummarizationModel();
-
-    const result = await validateAnthropicConnection({
-      model,
-      apiKey,
-      baseUrl: baseUrl || undefined,
-    });
-
-    if (result.success) {
-      return {
-        ok: true,
-        detail: '✓ API key: Valid',
-      };
-    }
-
-    const errorMsg = result.error || 'Unknown error';
-    const lowerMsg = errorMsg.toLowerCase();
-
-    // 401 = Invalid key
-    if (lowerMsg.includes('401') || lowerMsg.includes('authentication') || lowerMsg.includes('unauthorized')) {
-      return {
-        ok: false,
-        detail: '✗ API key: Invalid or expired',
-        failCode: 'invalid_credentials',
-        failTitle: 'Invalid API Key',
-        failMessage: `Your ${providerLabel} API key is invalid or has expired. Please update it in settings.`,
-      };
-    }
-
-    // 403 = Key valid but no permission
-    if (lowerMsg.includes('403') || lowerMsg.includes('permission') || lowerMsg.includes('forbidden')) {
-      return {
-        ok: false,
-        detail: '✗ API key: Insufficient permissions',
-        failCode: 'invalid_credentials',
-        failTitle: 'API Key Permission Error',
-        failMessage: `Your API key does not have permission to access the ${providerLabel} API. Check your dashboard.`,
-      };
-    }
-
-    // Other errors - don't fail diagnostics, just note them
-    return {
-      ok: true,
-      detail: `✓ API key: Validation skipped (${errorMsg.slice(0, 50)})`,
-    };
-  } catch (error) {
-    const msg = error instanceof Error ? error.message : String(error);
-    return {
-      ok: true,
-      detail: `✓ API key: Validation skipped (${msg.slice(0, 50)})`,
-    };
-  }
-}
-
-/** Check API key presence and validity */
+/** Check API key presence. Live Anthropic SDK validation was removed. */
 async function checkApiKey(
   providerLabel: string = 'Anthropic',
   connectionSlug?: string,
-  explicitBaseUrl?: string,
+  _explicitBaseUrl?: string,
 ): Promise<CheckResult> {
   try {
     const slug = connectionSlug ?? getDefaultLlmConnection();
     const connection = slug ? getLlmConnection(slug) : null;
+    if (connection && isUnsupportedLlmConnection(connection)) {
+      return {
+        ok: false,
+        detail: `✗ Connection: ${UNSUPPORTED_LLM_CONNECTION_MESSAGE}`,
+        failCode: 'invalid_credentials',
+        failTitle: 'Connection No Longer Supported',
+        failMessage: UNSUPPORTED_LLM_CONNECTION_MESSAGE,
+      };
+    }
     const credManager = getCredentialManager();
     const apiKey = slug ? await credManager.getLlmApiKey(slug) : null;
-    const baseUrl = explicitBaseUrl ?? connection?.baseUrl ?? null;
 
     if (!apiKey) {
       return {
@@ -306,8 +253,7 @@ async function checkApiKey(
       };
     }
 
-    // Actually validate the key works
-    return await validateApiKeyWithAnthropic(apiKey, baseUrl, providerLabel);
+    return { ok: true, detail: '✓ API key: Present' };
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error);
     return { ok: true, detail: `✓ API key: Check failed (${msg})` };
@@ -414,9 +360,19 @@ export async function runErrorDiagnostics(config: DiagnosticConfig): Promise<Dia
   // This is provider-agnostic — HTTP status codes are universal.
   checks.push(withTimeout(checkCapturedApiError(providerLabel, sessionDir), 1000, defaultResult));
 
-  // Provider-specific checks: only run for Anthropic-based providers
-  // Codex, Copilot, and Pi handle auth internally — no env-var-based checks apply.
-  const isAnthropic = !providerType || isAnthropicProvider(providerType);
+  const connection = connectionSlug ? getLlmConnection(connectionSlug) : null;
+  const isUnsupported = connection ? isUnsupportedLlmConnection(connection) : false;
+  const isAnthropic = !isUnsupported && (!providerType || isAnthropicProvider(providerType));
+
+  if (isUnsupported) {
+    checks.push(Promise.resolve({
+      ok: false,
+      detail: `✗ Connection: ${UNSUPPORTED_LLM_CONNECTION_MESSAGE}`,
+      failCode: 'invalid_credentials' as const,
+      failTitle: 'Connection No Longer Supported',
+      failMessage: UNSUPPORTED_LLM_CONNECTION_MESSAGE,
+    }));
+  }
 
   if (isAnthropic) {
     // 1. API endpoint availability check (uses explicit baseUrl or env var)
