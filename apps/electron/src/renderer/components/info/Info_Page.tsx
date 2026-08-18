@@ -7,7 +7,7 @@
 
 import * as React from 'react'
 import { useTranslation } from 'react-i18next'
-import { AlertCircle } from 'lucide-react'
+import { AlertCircle, Pencil } from 'lucide-react'
 import { PanelHeader, type PanelHeaderProps } from '@/components/app-shell/PanelHeader'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Spinner } from '@craft-agent/ui'
@@ -36,6 +36,8 @@ export interface Info_PageHeroProps {
   title?: string
   /** Tagline/description text below title */
   tagline?: string | null
+  /** Makes the title a rename control */
+  onTitleClick?: () => void
   className?: string
 }
 
@@ -115,7 +117,8 @@ function Info_PageHeader({ className, ...props }: Info_PageHeaderProps) {
   return <PanelHeader className={className} {...props} />
 }
 
-function Info_PageHero({ avatar, title, tagline, className }: Info_PageHeroProps) {
+function Info_PageHero({ avatar, title, tagline, onTitleClick, className }: Info_PageHeroProps) {
+  const { t } = useTranslation()
   return (
     <div className={cn('flex items-start gap-3', className)}>
       <div className="h-[32px] w-[32px] shrink-0 mt-[2px] rounded-[4px] ring-1 ring-border/30 overflow-hidden">
@@ -123,9 +126,23 @@ function Info_PageHero({ avatar, title, tagline, className }: Info_PageHeroProps
       </div>
       <div className="flex-1 min-w-0">
         {title && (
-          <h2 className="text-base font-semibold text-foreground leading-tight">
-            {title}
-          </h2>
+          onTitleClick ? (
+            <button
+              type="button"
+              onClick={onTitleClick}
+              aria-label={t('common.rename')}
+              className="group flex items-center gap-1.5 max-w-full text-left"
+            >
+              <span className="text-base font-semibold text-foreground leading-tight truncate">
+                {title}
+              </span>
+              <Pencil className="h-3.5 w-3.5 shrink-0 text-muted-foreground group-hover:text-foreground" />
+            </button>
+          ) : (
+            <h2 className="text-base font-semibold text-foreground leading-tight">
+              {title}
+            </h2>
+          )
         )}
         {tagline && (
           <p className={cn('text-sm text-foreground/60 leading-snug line-clamp-1', title ? 'mt-0.5' : 'mt-0')}>

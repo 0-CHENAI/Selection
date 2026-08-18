@@ -12,6 +12,8 @@ import { SendResourceToWorkspaceDialog } from './SendResourceToWorkspaceDialog'
 import { CopyResourcesFromWorkspaceDialog } from './CopyResourcesFromWorkspaceDialog'
 import { useAppShellContext } from '@/context/AppShellContext'
 import { EditPopover, getEditConfig, type EditContextKey } from '@/components/ui/EditPopover'
+import { useDisplayTitleRename } from '@/hooks/useDisplayTitleRename'
+import { resolveSourceTitle } from '@craft-agent/shared/display-titles'
 import type { LoadedSource, SourceConnectionStatus, SourceFilter } from '../../../shared/types'
 
 const SOURCE_TYPE_CONFIG: Record<string, { labelKey: string; colorClass: string }> = {
@@ -74,6 +76,7 @@ export function SourcesListPanel({
   const [copyFromOpenInternal, setCopyFromOpenInternal] = React.useState(false)
   const copyFromOpen = copyFromOpenProp ?? copyFromOpenInternal
   const setCopyFromOpen = onCopyFromOpenChange ?? setCopyFromOpenInternal
+  const rename = useDisplayTitleRename('source', activeWorkspaceId)
 
   const filteredSources = React.useMemo(() => {
     if (!sourceFilter) return sources
@@ -138,9 +141,10 @@ export function SourcesListPanel({
         const typeConfig = SOURCE_TYPE_CONFIG[source.config.type]
         const statusConfig = SOURCE_STATUS_CONFIG[connectionStatus]
         const subtitle = source.config.tagline || source.config.provider || ''
+        const title = resolveSourceTitle(source)
         return {
           icon: <SourceAvatar source={source} size="sm" />,
-          title: source.config.name,
+          title,
           badges: (
             <>
               {typeConfig && <EntityListBadge colorClass={typeConfig.colorClass}>{t(typeConfig.labelKey)}</EntityListBadge>}
@@ -155,13 +159,17 @@ export function SourcesListPanel({
           menu: (
             <SourceMenu
               sourceSlug={source.config.slug}
-              sourceName={source.config.name}
+              sourceName={title}
               onOpenInNewWindow={() => window.electronAPI.openUrl(`craftagents://sources/source/${source.config.slug}?window=focused`)}
               onShowInFinder={() => window.electronAPI.showInFolder(source.folderPath)}
+              onRename={() => rename.start(source.config.slug, {
+                displayTitle: source.displayTitle,
+                defaultTitle: source.config.name,
+              })}
               onDelete={() => onDeleteSource(source.config.slug)}
               onSendToWorkspace={hasOtherWorkspaces ? () => {
                 setSendResourceSlug(source.config.slug)
-                setSendResourceLabel(source.config.name)
+                setSendResourceLabel(title)
                 setSendDialogOpen(true)
               } : undefined}
             />
@@ -190,6 +198,7 @@ export function SourcesListPanel({
       activeWorkspaceId={activeWorkspaceId}
       resourceType="source"
     />
+    {rename.dialog}
     </>
   )
 }

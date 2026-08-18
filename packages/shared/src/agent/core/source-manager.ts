@@ -13,6 +13,7 @@
  */
 
 import { join } from 'node:path';
+import { formatSourceRef } from '../../display-titles.ts';
 import type { LoadedSource } from '../../sources/types.ts';
 import { sourceNeedsAuthentication } from '../../sources/credential-manager.ts';
 import type { SourceManagerConfig } from './types.ts';
@@ -190,8 +191,10 @@ export class SourceManager {
     // Active sources line - include warning for sources with failed builds
     if (activeSlugs.length > 0) {
       const activeWithStatus = activeSlugs.map((slug) => {
+        const source = this.allSources.find((s) => s.config.slug === slug);
+        const label = source ? formatSourceRef(source) : slug;
         const hasWorkingTools = this.activeSlugs.has(slug);
-        return hasWorkingTools ? slug : `${slug} (no tools)`;
+        return hasWorkingTools ? label : `${label} (no tools)`;
       });
       parts.push(`Active: ${activeWithStatus.join(', ')}`);
     } else {
@@ -206,7 +209,7 @@ export class SourceManager {
           : sourceNeedsAuthentication(s)
             ? 'needs auth'
             : 'inactive';
-        return `${s.config.slug} (${reason})`;
+        return `${formatSourceRef(s)} (${reason})`;
       });
       parts.push(`Inactive: ${inactiveList.join(', ')}`);
     }
@@ -229,7 +232,7 @@ export class SourceManager {
       let hasGuides = false;
       for (const s of unseenSources) {
         const tagline = s.config.tagline || s.config.provider;
-        parts.push(`- ${s.config.slug}: ${tagline}`);
+        parts.push(`- ${formatSourceRef(s)}: ${tagline}`);
         // Add guide path for sources that have guides (excluding internal sources)
         if (s.guide?.raw && !GUIDE_EXEMPT_SLUGS.has(s.config.slug)) {
           parts.push(`  Guide: ${join(s.folderPath, 'guide.md')}`);

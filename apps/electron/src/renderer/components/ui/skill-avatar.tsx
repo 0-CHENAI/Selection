@@ -10,6 +10,7 @@ import { EntityIcon } from '@/components/ui/entity-icon'
 import { useEntityIcon } from '@/lib/icon-cache'
 import type { IconSize } from '@craft-agent/shared/icons'
 import type { LoadedSkill } from '../../../shared/types'
+import { resolveSkillTitle } from '@craft-agent/shared/display-titles'
 
 interface SkillAvatarProps {
   /** LoadedSkill object */
@@ -38,7 +39,7 @@ export function SkillAvatar({ skill, size = 'md', fluid, className, workspaceId 
       icon={icon}
       size={size}
       fallbackIcon={Zap}
-      alt={skill.metadata.name}
+      alt={resolveSkillTitle(skill)}
       className={className}
       containerClassName={fluid ? 'h-full w-full' : undefined}
     />

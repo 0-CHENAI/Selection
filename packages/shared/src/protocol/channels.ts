@@ -255,6 +255,7 @@ export const RPC_CHANNELS = {
     CHANGED: 'sources:changed',
     GET_PERMISSIONS: 'sources:getPermissions',
     GET_MCP_TOOLS: 'sources:getMcpTools',
+    SET_DISPLAY_TITLE: 'sources:setDisplayTitle',
   },
   oauth: {
     START: 'oauth:start',
@@ -280,6 +281,7 @@ export const RPC_CHANNELS = {
     OPEN_EDITOR: 'skills:openEditor',
     OPEN_FINDER: 'skills:openFinder',
     CHANGED: 'skills:changed',
+    SET_DISPLAY_TITLE: 'skills:setDisplayTitle',
   },
   statuses: {
     LIST: 'statuses:list',

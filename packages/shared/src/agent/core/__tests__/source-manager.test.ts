@@ -213,6 +213,18 @@ describe('SourceManager', () => {
 
       expect(formatted).toContain('github (no tools)');
     });
+
+    it('should show display titles next to slugs', () => {
+      sourceManager.setAllSources([
+        { ...createMockSource('cortex', { enabled: true, tagline: 'Knowledge base' }), displayTitle: '知识库' },
+      ]);
+      sourceManager.updateActiveState([], [], []);
+
+      const formatted = sourceManager.formatSourceState();
+
+      expect(formatted).toContain('知识库 [cortex] (inactive)');
+      expect(formatted).toContain('- 知识库 [cortex]: Knowledge base');
+    });
   });
 
   describe('Authentication Utilities', () => {

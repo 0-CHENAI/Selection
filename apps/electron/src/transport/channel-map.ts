@@ -230,6 +230,7 @@ export const CHANNEL_MAP = {
   getDefaultPermissionsConfig: invoke(RPC_CHANNELS.permissions.GET_DEFAULTS),
   onDefaultPermissionsChanged: listener(RPC_CHANNELS.permissions.DEFAULTS_CHANGED),
   getMcpTools: invoke(RPC_CHANNELS.sources.GET_MCP_TOOLS),
+  setSourceDisplayTitle: invoke(RPC_CHANNELS.sources.SET_DISPLAY_TITLE),
 
   // Session content search
   searchSessionContent: invoke(RPC_CHANNELS.sessions.SEARCH_CONTENT),
@@ -246,6 +247,7 @@ export const CHANNEL_MAP = {
   deleteSkill: invoke(RPC_CHANNELS.skills.DELETE),
   openSkillInEditor: invoke(RPC_CHANNELS.skills.OPEN_EDITOR),
   openSkillInFinder: invoke(RPC_CHANNELS.skills.OPEN_FINDER),
+  setSkillDisplayTitle: invoke(RPC_CHANNELS.skills.SET_DISPLAY_TITLE),
   onSkillsChanged: listener(RPC_CHANNELS.skills.CHANGED),
 
   // Statuses

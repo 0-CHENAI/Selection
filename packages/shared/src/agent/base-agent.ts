@@ -27,6 +27,7 @@ import type { LoadedSource } from '../sources/types.ts';
 import { buildCallLlmRequest, type LLMQueryRequest, type LLMQueryResult } from './llm-tool.ts';
 import { getLlmConnections, getDefaultLlmConnection } from '../config/storage.ts';
 import { loadAllSources } from '../sources/storage.ts';
+import { resolveSourceTitle } from '../display-titles.ts';
 import type { ApiServerConfig } from '../mcp/mcp-pool.ts';
 
 import type {
@@ -1232,7 +1233,7 @@ ${formattedMessages}
       })),
       sources: allSources.map(s => ({
         slug: s.config.slug,
-        name: s.config.name,
+        name: resolveSourceTitle(s),
         type: s.config.type,
         enabled: activeSlugs.has(s.config.slug),
       })),

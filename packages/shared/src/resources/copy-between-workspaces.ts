@@ -16,6 +16,8 @@ import {
   statSync,
 } from 'fs'
 import { join, basename } from 'path'
+import { copyDisplayTitle } from '../display-titles-storage.ts'
+import type { DisplayTitleKind } from '../display-titles.ts'
 import { getWorkspaceSourcesPath, getWorkspaceSkillsPath } from '../workspaces/storage.ts'
 import { getSourcePath } from '../sources/storage.ts'
 import { isBuiltinSource } from '../sources/builtin-sources.ts'
@@ -55,6 +57,21 @@ export interface CopyBetweenWorkspacesDeps {
 
 function emptyBucket(): ImportBucketResult {
   return { imported: [], skipped: [], failed: [], warnings: [] }
+}
+
+function tryCopyDisplayTitle(
+  fromRoot: string,
+  toRoot: string,
+  kind: DisplayTitleKind,
+  id: string,
+  result: ImportBucketResult,
+): void {
+  try {
+    copyDisplayTitle(fromRoot, toRoot, kind, id)
+  } catch (err) {
+    const label = kind === 'sources' ? 'Source' : 'Skill'
+    result.warnings.push(`${label} '${id}': failed to copy display title: ${err}`)
+  }
 }
 
 /**
@@ -228,6 +245,7 @@ async function copySources(
 
       applyAuthAfterCopy(toPath, includeCredentials, hadCreds)
       result.imported.push(slug)
+      tryCopyDisplayTitle(options.fromRootPath, options.toRootPath, 'sources', slug, result)
     } catch (err) {
       result.failed.push({
         id: slug,
@@ -273,6 +291,7 @@ function copySkills(options: CopyBetweenWorkspacesOptions): ImportBucketResult {
       // Stage then rename (Windows-safe fallback for Chinese paths)
       stagedDirectoryReplace(fromPath, toPath)
       result.imported.push(slug)
+      tryCopyDisplayTitle(options.fromRootPath, options.toRootPath, 'skills', slug, result)
     } catch (err) {
       result.failed.push({
         id: slug,

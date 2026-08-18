@@ -21,6 +21,7 @@ import { WorkspaceAvatar } from '@/components/ui/workspace-avatar'
 import { useWorkspaceIcons } from '@/hooks/useWorkspaceIcon'
 import { cn } from '@/lib/utils'
 import type { Workspace, LoadedSource, ResourceImportMode } from '../../../shared/types'
+import { resolveSkillTitle, resolveSourceTitle } from '@craft-agent/shared/display-titles'
 
 export interface CopyResourcesFromWorkspaceDialogProps {
   open: boolean
@@ -84,7 +85,7 @@ export function CopyResourcesFromWorkspaceDialog({
           .filter((s) => s.source === 'workspace')
           .map((s) => ({
             slug: s.slug,
-            name: s.metadata?.name || s.slug,
+            name: resolveSkillTitle(s),
           }))
           .filter((s) => s.slug)
         setSkills(normalized)
@@ -104,7 +105,7 @@ export function CopyResourcesFromWorkspaceDialog({
   const resourceKindKey = resourceType === 'source' ? 'sources' : 'skills'
 
   const items = resourceType === 'source'
-    ? sources.map(s => ({ id: s.config.slug, label: s.config.name || s.config.slug, hint: s.config.type }))
+    ? sources.map(s => ({ id: s.config.slug, label: resolveSourceTitle(s) || s.config.slug, hint: s.config.type }))
     : skills.map(s => ({ id: s.slug, label: s.name, hint: 'skill' }))
 
   const toggle = (id: string) => {

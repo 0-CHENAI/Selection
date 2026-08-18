@@ -198,6 +198,60 @@ describe('copyBetweenWorkspaces', () => {
     expect(result.sources.failed[0]!.error).toContain('Invalid')
   })
 
+  it('copies display titles with sources and skills', async () => {
+    const skillDir = join(fromRoot, 'skills', 'commit')
+    mkdirSync(skillDir, { recursive: true })
+    writeFileSync(join(skillDir, 'SKILL.md'), '---\nname: Commit\n---\nbody')
+    writeFileSync(join(fromRoot, 'display-titles.json'), JSON.stringify({
+      sources: { github: '工作 GitHub' },
+      skills: { commit: '提交助手' },
+    }))
+
+    const result = await copyBetweenWorkspaces(
+      {
+        fromRootPath: fromRoot,
+        toRootPath: toRoot,
+        fromCredentialWorkspaceId: 'from-ws',
+        toCredentialWorkspaceId: 'to-ws',
+        sources: ['github'],
+        skills: ['commit'],
+        mode: 'skip',
+        includeCredentials: false,
+      },
+      deps,
+    )
+
+    expect(result.sources.imported).toEqual(['github'])
+    expect(result.skills.imported).toEqual(['commit'])
+    const overlay = JSON.parse(readFileSync(join(toRoot, 'display-titles.json'), 'utf-8'))
+    expect(overlay.sources.github).toBe('工作 GitHub')
+    expect(overlay.skills.commit).toBe('提交助手')
+  })
+
+  it('clears the target display title when overwrite source has no alias', async () => {
+    makeWorkspace(toRoot, [{ slug: 'github', name: 'Existing' }])
+    writeFileSync(join(toRoot, 'display-titles.json'), JSON.stringify({
+      sources: { github: '旧别名' },
+      skills: {},
+    }))
+
+    const result = await copyBetweenWorkspaces(
+      {
+        fromRootPath: fromRoot,
+        toRootPath: toRoot,
+        fromCredentialWorkspaceId: 'from-ws',
+        toCredentialWorkspaceId: 'to-ws',
+        sources: ['github'],
+        mode: 'overwrite',
+        includeCredentials: false,
+      },
+      deps,
+    )
+
+    expect(result.sources.imported).toEqual(['github'])
+    expect(existsSync(join(toRoot, 'display-titles.json'))).toBe(false)
+  })
+
   it('copies skills', async () => {
     const skillDir = join(fromRoot, 'skills', 'commit')
     mkdirSync(skillDir, { recursive: true })

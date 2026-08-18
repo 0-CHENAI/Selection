@@ -7,6 +7,7 @@ import * as React from 'react'
 import { cn } from '@/lib/utils'
 import { SkillAvatar } from '@/components/ui/skill-avatar'
 import type { LoadedSkill } from '../../../shared/types'
+import { matchesTitleSearch, resolveSkillTitle } from '@craft-agent/shared/display-titles'
 
 // ============================================================================
 // Types
@@ -40,9 +41,7 @@ function filterSkills(skills: LoadedSkill[], filter: string): LoadedSkill[] {
   if (!filter) return skills
   const lowerFilter = filter.toLowerCase()
   return skills.filter(
-    skill =>
-      skill.slug.toLowerCase().includes(lowerFilter) ||
-      skill.metadata.name.toLowerCase().includes(lowerFilter)
+    skill => matchesTitleSearch(lowerFilter, resolveSkillTitle(skill), skill.metadata.name, skill.slug)
   )
 }
 
@@ -150,7 +149,7 @@ export function InlineSkillMention({
                 <SkillAvatar skill={skill} size="sm" workspaceId={workspaceId} />
               </div>
               <div className="flex-1 min-w-0">
-                <div className="font-medium truncate">{skill.metadata.name}</div>
+                <div className="font-medium truncate">{resolveSkillTitle(skill)}</div>
                 {skill.metadata.description && (
                   <div className="text-[11px] text-foreground/50 truncate">
                     {skill.metadata.description}

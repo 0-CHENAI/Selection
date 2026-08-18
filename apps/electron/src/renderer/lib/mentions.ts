@@ -12,6 +12,7 @@ import type { ContentBadge } from '@craft-agent/core'
 import type { MentionItemType } from '@/components/ui/mention-menu'
 import type { LoadedSkill, LoadedSource } from '../../shared/types'
 import { AGENTS_PLUGIN_NAME } from '@craft-agent/shared/skills/types'
+import { resolveSkillTitle, resolveSourceTitle } from '@craft-agent/shared/display-titles'
 import { getSourceIconSync, getSkillIconSync } from './icon-cache'
 
 // Import and re-export parsing functions from shared (pure string operations, no renderer deps)
@@ -218,13 +219,13 @@ export function extractBadges(
 
     if (match.type === 'skill') {
       const skill = skillsBySlug.get(match.id)
-      label = skill?.metadata.name || match.id
+      label = skill ? resolveSkillTitle(skill) : match.id
 
       // Get cached icon as data URL (preserves mime type for SVG, PNG, etc.)
       iconDataUrl = getSkillIconSync(workspaceId, match.id) ?? undefined
     } else if (match.type === 'source') {
       const source = sourcesBySlug.get(match.id)
-      label = source?.config.name || match.id
+      label = source ? resolveSourceTitle(source) : match.id
 
       // Get cached icon as data URL (preserves mime type for SVG, PNG, etc.)
       iconDataUrl = getSourceIconSync(workspaceId, match.id) ?? undefined

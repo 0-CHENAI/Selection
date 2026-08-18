@@ -24,6 +24,8 @@
     "./config": "./src/config/index.ts",
     "./config/paths": "./src/config/paths.ts",
     "./config/types": "./src/config/types.ts",
+    "./display-titles": "./src/display-titles.ts",
+    "./display-titles/storage": "./src/display-titles-storage.ts",
     "./docs": "./src/docs/index.ts",
     "./docs/doc-links": "./src/docs/doc-links.ts",
     "./credentials": "./src/credentials/index.ts",

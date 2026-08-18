@@ -29,6 +29,7 @@ import { ServerDirectoryBrowser } from '@/components/ServerDirectoryBrowser'
 import { PERMISSION_MODE_CONFIG } from '@craft-agent/shared/agent/mode-types'
 import type { DetailsPageMeta } from '@/lib/navigation-registry'
 import { SourceAvatar } from '@/components/ui/source-avatar'
+import { resolveSourceTitle } from '@craft-agent/shared/display-titles'
 import { toast } from 'sonner'
 
 import {
@@ -503,7 +504,7 @@ export default function WorkspaceSettingsPage() {
                       label={
                         <span className="inline-flex items-center gap-2">
                           <SourceAvatar source={source} size="xs" />
-                          {source.config.name}
+                          {resolveSourceTitle(source)}
                         </span>
                       }
                       description={source.config.tagline}

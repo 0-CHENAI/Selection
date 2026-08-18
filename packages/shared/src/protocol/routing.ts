@@ -345,6 +345,7 @@ export const REMOTE_ELIGIBLE_CHANNELS = new Set<string>([
   RPC_CHANNELS.sources.CHANGED,
   RPC_CHANNELS.sources.GET_PERMISSIONS,
   RPC_CHANNELS.sources.GET_MCP_TOOLS,
+  RPC_CHANNELS.sources.SET_DISPLAY_TITLE,
 
   // oauth — OAuth state management
   RPC_CHANNELS.oauth.START,
@@ -368,6 +369,7 @@ export const REMOTE_ELIGIBLE_CHANNELS = new Set<string>([
   RPC_CHANNELS.skills.GET_FILES,
   RPC_CHANNELS.skills.DELETE,
   RPC_CHANNELS.skills.CHANGED,
+  RPC_CHANNELS.skills.SET_DISPLAY_TITLE,
 
   // statuses — workspace metadata
   RPC_CHANNELS.statuses.LIST,

@@ -12,6 +12,8 @@ import { AlertCircle } from 'lucide-react'
 import { EditPopover, EditButton, getEditConfig } from '@/components/ui/EditPopover'
 import { SourceAvatar } from '@/components/ui/source-avatar'
 import { SourceMenu } from '@/components/app-shell/SourceMenu'
+import { DisplayTitleField, useDisplayTitleRename } from '@/hooks/useDisplayTitleRename'
+import { resolveSourceTitle } from '@craft-agent/shared/display-titles'
 import { cn } from '@/lib/utils'
 import { routes, navigate } from '@/lib/navigate'
 import { useNavigation } from '@/contexts/NavigationContext'
@@ -339,7 +341,7 @@ export default function SourceInfoPage({ sourceSlug, workspaceId, onDelete }: So
     if (!source) return
     try {
       await window.electronAPI.deleteSource(workspaceId, sourceSlug)
-      toast.success(t('sourceInfo.deletedSource', { name: source.config.name }))
+      toast.success(t('sourceInfo.deletedSource', { name: resolveSourceTitle(source) }))
       navigateToSource() // Navigate to source list, preserving filter
       onDelete?.()
     } catch (err) {
@@ -354,10 +356,15 @@ export default function SourceInfoPage({ sourceSlug, workspaceId, onDelete }: So
     window.electronAPI.openUrl(`craftagents://sources/source/${sourceSlug}?window=focused`)
   }, [sourceSlug])
 
-  // Get source name for header
-  const sourceName = source?.config.name || sourceSlug
+  const sourceName = source ? resolveSourceTitle(source) : sourceSlug
+  const rename = useDisplayTitleRename('source', workspaceId)
+  const renameTarget = source && {
+    displayTitle: source.displayTitle,
+    defaultTitle: source.config.name,
+  }
 
   return (
+    <>
     <Info_Page
       loading={loading}
       error={error ?? undefined}
@@ -371,6 +378,7 @@ export default function SourceInfoPage({ sourceSlug, workspaceId, onDelete }: So
             sourceName={sourceName}
             onOpenInNewWindow={handleOpenInNewWindow}
             onShowInFinder={handleOpenSourceFolder}
+            onRename={() => source && renameTarget && rename.start(source.config.slug, renameTarget)}
             onDelete={handleDelete}
           />
         }
@@ -381,8 +389,9 @@ export default function SourceInfoPage({ sourceSlug, workspaceId, onDelete }: So
           {/* Hero: Avatar, title, and tagline */}
           <Info_Page.Hero
             avatar={<SourceAvatar source={source} fluid />}
-            title={source.config.name}
+            title={resolveSourceTitle(source)}
             tagline={source.config.tagline}
+            onTitleClick={() => renameTarget && rename.start(source.config.slug, renameTarget)}
           />
 
           {/* Disabled Warning */}
@@ -421,6 +430,14 @@ export default function SourceInfoPage({ sourceSlug, workspaceId, onDelete }: So
                 </div>
               )}
             >
+              <Info_Table.Row label={t('displayTitle.label')}>
+                <DisplayTitleField
+                  customTitle={source.displayTitle}
+                  onRename={() => renameTarget && rename.start(source.config.slug, renameTarget)}
+                />
+              </Info_Table.Row>
+              <Info_Table.Row label={t('common.originalName')} value={source.config.name} />
+              <Info_Table.Row label={t('common.slug')} value={source.config.slug} />
               <Info_Table.Row label={t('common.type')} value={source.config.type.toUpperCase()} />
               {sourceUrl && (
                 <Info_Table.Row label={t('common.url')}>
@@ -528,5 +545,7 @@ export default function SourceInfoPage({ sourceSlug, workspaceId, onDelete }: So
         </Info_Page.Content>
       )}
     </Info_Page>
+    {rename.dialog}
+    </>
   )
 }

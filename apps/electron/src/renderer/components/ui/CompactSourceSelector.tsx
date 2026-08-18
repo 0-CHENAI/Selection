@@ -10,6 +10,7 @@ import {
   DrawerHeader,
   DrawerTitle,
 } from '@/components/ui/drawer'
+import { matchesTitleSearch, resolveSourceTitle } from '@craft-agent/shared/display-titles'
 import type { LoadedSource } from '../../../shared/types'
 
 export interface CompactSourceSelectorProps {
@@ -46,7 +47,9 @@ export function CompactSourceSelector({
   const filteredSources = React.useMemo(() => {
     const q = filter.trim().toLowerCase()
     if (!q) return sources
-    return sources.filter((source) => source.config.name.toLowerCase().includes(q))
+    return sources.filter((source) =>
+      matchesTitleSearch(q, resolveSourceTitle(source), source.config.name, source.config.slug),
+    )
   }, [sources, filter])
 
   return (
@@ -99,7 +102,7 @@ export function CompactSourceSelector({
                       : <DatabaseZap className="h-5 w-5 text-foreground/60" />}
                   </div>
                   <div className="flex-1 min-w-0 text-sm font-medium truncate">
-                    {source.config.name}
+                    {resolveSourceTitle(source)}
                   </div>
                   <div
                     className={cn(

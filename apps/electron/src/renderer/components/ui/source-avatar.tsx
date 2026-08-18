@@ -15,6 +15,7 @@ import { EntityIcon, type IconComponent } from '@/components/ui/entity-icon'
 import { useEntityIcon, logoUrlCache } from '@/lib/icon-cache'
 import { McpIcon } from '@/components/icons/McpIcon'
 import type { LoadedSource } from '@craft-agent/shared/sources/types'
+import { resolveSourceTitle } from '@craft-agent/shared/display-titles'
 import type { IconSize, ResolvedEntityIcon } from '@craft-agent/shared/icons'
 import { SourceStatusIndicator, deriveConnectionStatus } from './source-status-indicator'
 
@@ -166,7 +167,7 @@ export function SourceAvatar({ source, size = 'md', fluid, showStatus, className
       icon={finalIcon}
       size={size}
       fallbackIcon={FallbackIcon}
-      alt={source.config.name}
+      alt={resolveSourceTitle(source)}
       className={className}
       containerClassName={fluid ? 'h-full w-full' : undefined}
     />

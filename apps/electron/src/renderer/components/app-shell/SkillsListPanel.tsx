@@ -12,6 +12,8 @@ import { CopyResourcesFromWorkspaceDialog } from './CopyResourcesFromWorkspaceDi
 import { EditPopover, getEditConfig } from '@/components/ui/EditPopover'
 import { useActiveWorkspace, useAppShellContext } from '@/context/AppShellContext'
 import { getFileManagerName } from '@/lib/platform'
+import { useDisplayTitleRename } from '@/hooks/useDisplayTitleRename'
+import { resolveSkillTitle } from '@craft-agent/shared/display-titles'
 import type { LoadedSkill } from '../../../shared/types'
 
 export interface SkillsListPanelProps {
@@ -54,6 +56,7 @@ export function SkillsListPanel({
   const [copyFromOpenInternal, setCopyFromOpenInternal] = React.useState(false)
   const copyFromOpen = copyFromOpenProp ?? copyFromOpenInternal
   const setCopyFromOpen = onCopyFromOpenChange ?? setCopyFromOpenInternal
+  const rename = useDisplayTitleRename('skill', workspaceId ?? activeWorkspaceId)
 
   return (
     <>
@@ -96,56 +99,63 @@ export function SkillsListPanel({
           </div>
         </EntityListEmptyScreen>
       }
-      mapItem={(skill) => ({
-        icon: <SkillAvatar skill={skill} size="sm" workspaceId={workspaceId} />,
-        title: skill.metadata.name,
-        badges: (
-          <span className="flex items-center gap-1.5 min-w-0">
-            {skill.source === 'project' && (
-              <span className="shrink-0 text-[10px] px-1.5 py-0.5 rounded-full bg-foreground/5 text-muted-foreground">
-                {t('skillsList.projectBadge')}
-              </span>
-            )}
-            {skill.source === 'bundled' && (
-              <span className="shrink-0 text-[10px] px-1.5 py-0.5 rounded-full bg-foreground/5 text-muted-foreground">
-                {t('skillsList.bundledBadge')}
-              </span>
-            )}
-            <span className="truncate">{skill.metadata.description}</span>
-          </span>
-        ),
-        menu: (
-          <SkillMenu
-            skillSlug={skill.slug}
-            skillName={skill.metadata.name}
-            onOpenInNewWindow={() => window.electronAPI.openUrl(`craftagents://skills/skill/${skill.slug}?window=focused`)}
-            onShowInFinder={async () => {
-              if (!canRevealLocally) return
-              try {
-                await window.electronAPI.showInFolder(skill.path)
-              } catch (err) {
-                const message = err instanceof Error ? err.message : String(err)
-                toast.error(t('toast.failedToReveal', { fileManager: getFileManagerName() }), {
-                  description: message,
-                })
-              }
-            }}
-            canShowInFinder={canRevealLocally}
-            onDelete={skill.source === 'workspace' ? () => onDeleteSkill(skill.slug) : undefined}
-            canDelete={skill.source === 'workspace'}
-            deleteLabel={skill.source === 'workspace'
-              ? t('skillsList.deleteSkill')
-              : skill.source === 'bundled'
-                ? t('skillsList.managedByApp')
-                : t('skillsList.managedByProject')}
-            onSendToWorkspace={hasOtherWorkspaces && skill.source === 'workspace' ? () => {
-              setSendResourceSlug(skill.slug)
-              setSendResourceLabel(skill.metadata.name)
-              setSendDialogOpen(true)
-            } : undefined}
-          />
-        ),
-      })}
+      mapItem={(skill) => {
+        const title = resolveSkillTitle(skill)
+        return {
+          icon: <SkillAvatar skill={skill} size="sm" workspaceId={workspaceId} />,
+          title,
+          badges: (
+            <span className="flex items-center gap-1.5 min-w-0">
+              {skill.source === 'project' && (
+                <span className="shrink-0 text-[10px] px-1.5 py-0.5 rounded-full bg-foreground/5 text-muted-foreground">
+                  {t('skillsList.projectBadge')}
+                </span>
+              )}
+              {skill.source === 'bundled' && (
+                <span className="shrink-0 text-[10px] px-1.5 py-0.5 rounded-full bg-foreground/5 text-muted-foreground">
+                  {t('skillsList.bundledBadge')}
+                </span>
+              )}
+              <span className="truncate">{skill.metadata.description}</span>
+            </span>
+          ),
+          menu: (
+            <SkillMenu
+              skillSlug={skill.slug}
+              skillName={title}
+              onRename={() => rename.start(skill.slug, {
+                displayTitle: skill.displayTitle,
+                defaultTitle: skill.metadata.name,
+              })}
+              onOpenInNewWindow={() => window.electronAPI.openUrl(`craftagents://skills/skill/${skill.slug}?window=focused`)}
+              onShowInFinder={async () => {
+                if (!canRevealLocally) return
+                try {
+                  await window.electronAPI.showInFolder(skill.path)
+                } catch (err) {
+                  const message = err instanceof Error ? err.message : String(err)
+                  toast.error(t('toast.failedToReveal', { fileManager: getFileManagerName() }), {
+                    description: message,
+                  })
+                }
+              }}
+              canShowInFinder={canRevealLocally}
+              onDelete={skill.source === 'workspace' ? () => onDeleteSkill(skill.slug) : undefined}
+              canDelete={skill.source === 'workspace'}
+              deleteLabel={skill.source === 'workspace'
+                ? t('skillsList.deleteSkill')
+                : skill.source === 'bundled'
+                  ? t('skillsList.managedByApp')
+                  : t('skillsList.managedByProject')}
+              onSendToWorkspace={hasOtherWorkspaces && skill.source === 'workspace' ? () => {
+                setSendResourceSlug(skill.slug)
+                setSendResourceLabel(title)
+                setSendDialogOpen(true)
+              } : undefined}
+            />
+          ),
+        }
+      }}
     />
 
     {/* Send to Workspace dialog */}
@@ -168,6 +178,7 @@ export function SkillsListPanel({
       activeWorkspaceId={activeWorkspaceId}
       resourceType="skill"
     />
+    {rename.dialog}
     </>
   )
 }
