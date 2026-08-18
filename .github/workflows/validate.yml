@@ -25,6 +25,11 @@ jobs:
         with:
           bun-version: "1.3.10"
 
+      - name: Install uv
+        uses: astral-sh/setup-uv@v9
+        with:
+          enable-cache: false
+
       - name: Reject Windows-illegal filenames
         run: |
           BAD=$(git ls-files | grep -E '[<>:"|?*]' || true)
