@@ -6593,6 +6593,9 @@ export class SessionManager implements ISessionManager {
 
     try {
       await this.ensureMessagesLoaded(managed)
+      if (managed.stopRequested || !managed.isProcessing) {
+        return { success: true }
+      }
 
       const lastUserIdx = managed.messages.findLastIndex(m => m.role === 'user')
       if (lastUserIdx === -1) {
@@ -6616,6 +6619,9 @@ export class SessionManager implements ISessionManager {
       managed.messages = managed.messages.slice(0, lastUserIdx + 1)
       this.persistSession(managed)
       await this.flushSession(managed.id)
+      if (managed.stopRequested || !managed.isProcessing) {
+        return { success: true }
+      }
 
       this.sendEvent({
         type: 'messages_truncated',

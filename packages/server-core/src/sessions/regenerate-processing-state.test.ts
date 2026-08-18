@@ -152,4 +152,27 @@ describe('regenerate processing state (#17)', () => {
     expect(managed.processingGeneration).toBe(generationAfterStop)
     expect(managed.messages.filter(m => m.role === 'user')).toHaveLength(1)
   })
+
+  it('does not emit truncate after Stop wins during message load', async () => {
+    const sessionId = 'regen-stop-before-truncate'
+    const managed = buildSession(sessionId)
+    managed.messages = [
+      { id: 'u1', role: 'user', content: 'hi', timestamp: 1 },
+      { id: 'a1', role: 'assistant', content: 'hello', timestamp: 2 },
+    ]
+
+    const smInternal = sm as unknown as {
+      ensureMessagesLoaded: (session: typeof managed) => Promise<void>
+    }
+    const originalLoad = smInternal.ensureMessagesLoaded.bind(sm)
+    smInternal.ensureMessagesLoaded = async (session) => {
+      await originalLoad(session)
+      await sm.cancelProcessing(sessionId)
+    }
+
+    await expect(sm.regenerateLastResponse(sessionId)).resolves.toEqual({ success: true })
+    expect(managed.isProcessing).toBe(false)
+    expect(managed.messages.some(m => m.id === 'a1')).toBe(true)
+    expect(managed.messages.some(m => m.role === 'info' && m.content === 'Response interrupted')).toBe(true)
+  })
 })
