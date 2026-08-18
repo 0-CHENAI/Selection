@@ -16,7 +16,9 @@ export async function packageDarwin(config: BuildConfig): Promise<string> {
   console.log('Packaging app with electron-builder...');
 
   // Set up environment for electron-builder
-  process.env.CSC_IDENTITY_AUTO_DISCOVERY = 'true';
+  // CI explicitly disables identity discovery to produce unsigned test builds.
+  // Preserve that choice while keeping local/release discovery enabled by default.
+  process.env.CSC_IDENTITY_AUTO_DISCOVERY ??= 'true';
 
   // Build electron-builder arguments
   const builderArgs = ['--mac', `--${arch}`];

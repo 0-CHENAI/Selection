@@ -1,0 +1,111 @@
+name: Package Desktop Installers
+
+on:
+  push:
+    branches:
+      - main
+      - test
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  package-macos-arm64:
+    name: Package macOS ARM64
+    runs-on: macos-15
+    timeout-minutes: 120
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.3.10"
+
+      - name: Cache build downloads
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.bun/install/cache
+            apps/electron/.cache/downloads
+          key: desktop-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('bun.lock') }}
+          restore-keys: |
+            desktop-${{ runner.os }}-${{ runner.arch }}-
+
+      - name: Package macOS ARM64 installers
+        env:
+          CRAFT_DEV_RUNTIME: "1"
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+        run: bun run scripts/package-desktop.ts --mac-only
+
+      - name: Create macOS checksums
+        working-directory: dist-packages
+        run: shasum -a 256 Selection-arm64.dmg Selection-arm64.zip > SHA256SUMS-macos-arm64.txt
+
+      - name: Upload macOS ARM64 installers
+        uses: actions/upload-artifact@v6
+        with:
+          name: selection-macos-arm64-${{ github.ref_name }}-${{ github.run_number }}
+          path: |
+            dist-packages/Selection-arm64.dmg
+            dist-packages/Selection-arm64.zip
+            dist-packages/SHA256SUMS-macos-arm64.txt
+            dist-packages/build-summary.json
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 0
+
+  package-windows-x64:
+    name: Package Windows x64
+    runs-on: windows-2025
+    timeout-minutes: 120
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.3.10"
+
+      - name: Cache build downloads
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.bun/install/cache
+            apps/electron/.cache/downloads
+          key: desktop-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('bun.lock') }}
+          restore-keys: |
+            desktop-${{ runner.os }}-${{ runner.arch }}-
+
+      - name: Package Windows x64 installer
+        env:
+          CRAFT_DEV_RUNTIME: "1"
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+        run: bun run scripts/package-desktop.ts --win-only
+
+      - name: Create Windows checksum
+        shell: pwsh
+        run: |
+          $installer = "dist-packages/Selection-x64.exe"
+          if (-not (Test-Path -LiteralPath $installer)) {
+            throw "Missing Windows installer: $installer"
+          }
+          $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $installer).Hash.ToLowerInvariant()
+          "$hash  Selection-x64.exe" | Set-Content -Encoding ascii dist-packages/SHA256SUMS-windows-x64.txt
+
+      - name: Upload Windows x64 installer
+        uses: actions/upload-artifact@v6
+        with:
+          name: selection-windows-x64-${{ github.ref_name }}-${{ github.run_number }}
+          path: |
+            dist-packages/Selection-x64.exe
+            dist-packages/SHA256SUMS-windows-x64.txt
+            dist-packages/build-summary.json
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 0
