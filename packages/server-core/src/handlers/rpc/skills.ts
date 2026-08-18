@@ -2,7 +2,8 @@ import { join } from 'path'
 import { existsSync, readdirSync, statSync } from 'fs'
 import { RPC_CHANNELS, type SkillFile } from '@craft-agent/shared/protocol'
 import { getWorkspaceByNameOrId } from '@craft-agent/shared/config'
-import type { RpcServer } from '@craft-agent/server-core/transport'
+import { setDisplayTitle } from '@craft-agent/shared/display-titles/storage'
+import { pushTyped, type RpcServer } from '@craft-agent/server-core/transport'
 import type { HandlerDeps } from '../handler-deps'
 
 export const HANDLED_CHANNELS = [
@@ -11,6 +12,7 @@ export const HANDLED_CHANNELS = [
   RPC_CHANNELS.skills.DELETE,
   RPC_CHANNELS.skills.OPEN_EDITOR,
   RPC_CHANNELS.skills.OPEN_FINDER,
+  RPC_CHANNELS.skills.SET_DISPLAY_TITLE,
 ] as const
 
 export function registerSkillsHandlers(server: RpcServer, deps: HandlerDeps): void {
@@ -94,6 +96,21 @@ export function registerSkillsHandlers(server: RpcServer, deps: HandlerDeps): vo
     }
     deleteSkill(workspace.rootPath, skillSlug)
     deps.platform.logger?.info(`Deleted skill: ${skillSlug}`)
+  })
+
+  server.handle(RPC_CHANNELS.skills.SET_DISPLAY_TITLE, async (_ctx, workspaceId: string, skillSlug: string, title: string, workingDirectory?: string) => {
+    const workspace = getWorkspaceByNameOrId(workspaceId)
+    if (!workspace) throw new Error('Workspace not found')
+    const effectiveWorkingDir = workingDirectory && existsSync(workingDirectory)
+      ? workingDirectory
+      : undefined
+    const { loadAllSkills, loadSkillBySlug } = await import('@craft-agent/shared/skills')
+    const existing = loadSkillBySlug(workspace.rootPath, skillSlug, effectiveWorkingDir)
+    if (!existing) throw new Error('Skill not found')
+    const displayTitle = setDisplayTitle(workspace.rootPath, 'skills', skillSlug, title, existing.metadata.name)
+    const skills = loadAllSkills(workspace.rootPath, effectiveWorkingDir)
+    pushTyped(server, RPC_CHANNELS.skills.CHANGED, { to: 'workspace', workspaceId }, workspaceId, skills)
+    return { displayTitle }
   })
 
   // Open skill SKILL.md in editor

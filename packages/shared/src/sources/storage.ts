@@ -27,6 +27,7 @@ import { getWorkspaceSourcesPath } from '../workspaces/storage.ts';
 // getSourceCredentialManager is only referenced lazily inside saveSourceConfig,
 // not at module-eval time.
 import { getSourceCredentialManager } from './credential-manager.ts';
+import { clearDisplayTitle, getDisplayTitle } from '../display-titles-storage.ts';
 import {
   validateIconValue,
   findIconFile,
@@ -348,6 +349,8 @@ export function loadSource(workspaceRootPath: string, sourceSlug: string): Loade
   // Pre-compute icon path for renderer (avoids fs access in browser)
   const iconPath = findIconFile(folderPath);
 
+  const displayTitle = getDisplayTitle(workspaceRootPath, 'sources', sourceSlug);
+
   return {
     config,
     guide: loadSourceGuide(workspaceRootPath, sourceSlug),
@@ -355,6 +358,7 @@ export function loadSource(workspaceRootPath: string, sourceSlug: string): Loade
     workspaceRootPath,
     workspaceId,
     iconPath,
+    ...(displayTitle ? { displayTitle } : {}),
   };
 }
 
@@ -599,6 +603,7 @@ export function deleteSource(workspaceRootPath: string, sourceSlug: string): voi
   if (existsSync(dir)) {
     rmSync(dir, { recursive: true });
   }
+  clearDisplayTitle(workspaceRootPath, 'sources', sourceSlug);
 }
 
 /**

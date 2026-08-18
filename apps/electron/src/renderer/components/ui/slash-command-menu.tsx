@@ -7,6 +7,7 @@ import { cn } from '@/lib/utils'
 import { PERMISSION_MODE_CONFIG, PERMISSION_MODE_ORDER, type PermissionMode } from '@craft-agent/shared/agent/modes'
 import { AGENTS_PLUGIN_NAME } from '@craft-agent/shared/skills/types'
 import type { LoadedSkill } from '../../../shared/types'
+import { resolveSkillTitle } from '@craft-agent/shared/display-titles'
 import { SkillAvatar } from '@/components/ui/skill-avatar'
 
 // ============================================================================
@@ -170,7 +171,8 @@ function filterSections(sections: SlashSection[], filter: string): SlashSection[
       items: section.items.filter(item =>
         item.label.toLowerCase().includes(lowerFilter) ||
         item.id.toLowerCase().includes(lowerFilter) ||
-        item.description?.toLowerCase().includes(lowerFilter)
+        item.description?.toLowerCase().includes(lowerFilter) ||
+        (isSkill(item) && item.skill.metadata.name.toLowerCase().includes(lowerFilter))
       ),
     }))
     .filter(section => section.items.length > 0)
@@ -639,7 +641,7 @@ export function useInlineSlashCommand({
         items: skills.map(skill => ({
           id: skill.slug,
           type: 'skill' as const,
-          label: skill.metadata.name,
+          label: resolveSkillTitle(skill),
           description: skill.metadata.description || '',
           skill,
         })),

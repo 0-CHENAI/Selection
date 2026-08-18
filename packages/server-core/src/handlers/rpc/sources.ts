@@ -1,9 +1,10 @@
 import { RPC_CHANNELS } from '@craft-agent/shared/protocol'
 import { getWorkspaceByNameOrId } from '@craft-agent/shared/config'
 import { loadWorkspaceSources } from '@craft-agent/shared/sources'
+import { setDisplayTitle } from '@craft-agent/shared/display-titles/storage'
 import { safeJsonParse } from '@craft-agent/shared/utils/files'
 import { getCredentialManager } from '@craft-agent/shared/credentials'
-import type { RpcServer } from '@craft-agent/server-core/transport'
+import { pushTyped, type RpcServer } from '@craft-agent/server-core/transport'
 import type { HandlerDeps } from '../handler-deps'
 
 export const HANDLED_CHANNELS = [
@@ -16,6 +17,7 @@ export const HANDLED_CHANNELS = [
   RPC_CHANNELS.workspace.GET_PERMISSIONS,
   RPC_CHANNELS.permissions.GET_DEFAULTS,
   RPC_CHANNELS.sources.GET_MCP_TOOLS,
+  RPC_CHANNELS.sources.SET_DISPLAY_TITLE,
 ] as const
 
 export function registerSourcesHandlers(server: RpcServer, deps: HandlerDeps): void {
@@ -61,6 +63,18 @@ export function registerSourcesHandlers(server: RpcServer, deps: HandlerDeps): v
       config.defaults.enabledSourceSlugs = config.defaults.enabledSourceSlugs.filter(s => s !== sourceSlug)
       saveWorkspaceConfig(workspace.rootPath, config)
     }
+  })
+
+  server.handle(RPC_CHANNELS.sources.SET_DISPLAY_TITLE, async (_ctx, workspaceId: string, sourceSlug: string, title: string) => {
+    const workspace = getWorkspaceByNameOrId(workspaceId)
+    if (!workspace) throw new Error(`Workspace not found: ${workspaceId}`)
+    const { loadSource } = await import('@craft-agent/shared/sources')
+    const source = loadSource(workspace.rootPath, sourceSlug)
+    if (!source) throw new Error('Source not found')
+    const displayTitle = setDisplayTitle(workspace.rootPath, 'sources', sourceSlug, title, source.config.name)
+    const sources = loadWorkspaceSources(workspace.rootPath)
+    pushTyped(server, RPC_CHANNELS.sources.CHANGED, { to: 'workspace', workspaceId }, workspaceId, sources)
+    return { displayTitle }
   })
 
   // Start OAuth flow for a source (DEPRECATED — use oauth:start + performOAuth client-side)

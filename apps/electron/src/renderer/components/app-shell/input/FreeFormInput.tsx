@@ -72,6 +72,7 @@ import { derivePickerMode } from './picker-mode'
 import type { FileAttachment, LoadedSource, LoadedSkill } from '../../../../shared/types'
 import type { PermissionMode } from '@craft-agent/shared/agent/modes'
 import { type ThinkingLevel, THINKING_LEVELS, getThinkingLevelNameKey } from '@craft-agent/shared/agent/thinking-levels'
+import { resolveSourceTitle } from '@craft-agent/shared/display-titles'
 import { useEscapeInterrupt } from '@/context/EscapeInterruptContext'
 import { hasOpenOverlay } from '@/lib/overlay-detection'
 import { ToolbarStatusSlot } from './ToolbarStatusSlot'
@@ -1822,7 +1823,7 @@ export function FreeFormInput({
                     ? t("chat.sourcesTooltip")
                     : (() => {
                         const enabledSources = sources.filter(s => optimisticSourceSlugs.includes(s.config.slug))
-                        if (enabledSources.length === 1) return enabledSources[0].config.name
+                        if (enabledSources.length === 1) return resolveSourceTitle(enabledSources[0])
                         return t("chat.sourcesCount", { count: enabledSources.length })
                       })()
                 }
@@ -1924,8 +1925,8 @@ export function FreeFormInput({
                     ? t("chat.chooseSources")
                     : (() => {
                         const enabledSources = sources.filter(s => optimisticSourceSlugs.includes(s.config.slug))
-                        if (enabledSources.length === 1) return enabledSources[0].config.name
-                        if (enabledSources.length === 2) return enabledSources.map(s => s.config.name).join(', ')
+                        if (enabledSources.length === 1) return resolveSourceTitle(enabledSources[0])
+                        if (enabledSources.length === 2) return enabledSources.map(s => resolveSourceTitle(s)).join(', ')
                         return t("chat.sourcesCount", { count: enabledSources.length })
                       })()
                 }

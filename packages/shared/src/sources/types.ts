@@ -525,6 +525,12 @@ export interface LoadedSource {
    * Computed during source loading so renderer doesn't need filesystem access.
    */
   iconPath?: string;
+
+  /**
+   * Workspace-scoped display alias. Does not change config.name or slug.
+   * Absent when the user has not set a custom title.
+   */
+  displayTitle?: string;
 }
 
 /**

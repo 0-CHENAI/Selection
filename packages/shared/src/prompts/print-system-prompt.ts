@@ -112,11 +112,11 @@ printAnnotation('Contains: sessionId, permissionMode, modeTransition/modeChanged
 
 // 3. Source State (example - can't call formatSourceState without agent instance)
 const exampleSourceState = `<sources>
-Active: linear, github
-Inactive: slack (inactive), notion (needs auth)
+Active: Linear (slug: linear), GitHub (slug: github)
+Inactive: Slack (slug: slack, inactive), Notion (slug: notion, needs auth)
 
 New:
-- linear: Project and issue tracking for software teams
+- Linear (slug: linear): Project and issue tracking for software teams
 
 <source_issue source="notion">
 Authentication required. Use the source_oauth_trigger tool to authenticate.
@@ -176,8 +176,8 @@ const completeUserMessage = `${getDateTimeContext()}
 ${sessionState}
 
 <sources>
-Active: linear
-Inactive: slack (inactive)
+Active: Linear (slug: linear)
+Inactive: Slack (slug: slack, inactive)
 </sources>
 
 <workspace_capabilities>

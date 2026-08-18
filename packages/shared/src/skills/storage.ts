@@ -16,6 +16,7 @@ import { homedir } from 'os';
 import { join } from 'path';
 import matter from 'gray-matter';
 import type { LoadedSkill, SkillMetadata, SkillSource } from './types.ts';
+import { clearDisplayTitle, loadDisplayTitles } from '../display-titles-storage.ts';
 import { getWorkspaceSkillsPath } from '../workspaces/storage.ts';
 import { getBundledAssetsDir } from '../utils/paths.ts';
 import {
@@ -186,6 +187,18 @@ function loadSkillsFromDir(skillsDir: string, source: SkillSource): LoadedSkill[
   return skills;
 }
 
+function withSkillDisplayTitles(workspaceRoot: string, skills: LoadedSkill[]): LoadedSkill[] {
+  const titles = loadDisplayTitles(workspaceRoot).skills;
+  return skills.map((skill) => {
+    const displayTitle = titles[skill.slug];
+    return displayTitle ? { ...skill, displayTitle } : skill;
+  });
+}
+
+function withSkillDisplayTitle(workspaceRoot: string, skill: LoadedSkill): LoadedSkill {
+  return withSkillDisplayTitles(workspaceRoot, [skill])[0]!;
+}
+
 /**
  * Load a single skill from a workspace
  * @param workspaceRoot - Absolute path to workspace root
@@ -193,7 +206,8 @@ function loadSkillsFromDir(skillsDir: string, source: SkillSource): LoadedSkill[
  */
 export function loadSkill(workspaceRoot: string, slug: string): LoadedSkill | null {
   const skillsDir = getWorkspaceSkillsPath(workspaceRoot);
-  return loadSkillFromDir(skillsDir, slug, 'workspace');
+  const skill = loadSkillFromDir(skillsDir, slug, 'workspace');
+  return skill ? withSkillDisplayTitle(workspaceRoot, skill) : null;
 }
 
 /**
@@ -234,7 +248,7 @@ export function loadAllSkills(workspaceRoot: string, projectRoot?: string): Load
   const now = Date.now();
   const cached = skillsCache.get(cacheKey);
   if (cached && now - cached.ts < SKILLS_CACHE_TTL) {
-    return cached.skills;
+    return withSkillDisplayTitles(workspaceRoot, cached.skills);
   }
 
   const skillsBySlug = new Map<string, LoadedSkill>();
@@ -268,7 +282,7 @@ export function loadAllSkills(workspaceRoot: string, projectRoot?: string): Load
 
   const result = Array.from(skillsBySlug.values());
   skillsCache.set(cacheKey, { skills: result, ts: now });
-  return result;
+  return withSkillDisplayTitles(workspaceRoot, result);
 }
 
 /**
@@ -280,25 +294,32 @@ export function loadAllSkills(workspaceRoot: string, projectRoot?: string): Load
  * @param projectRoot - Optional project root for project-level skills
  */
 export function loadSkillBySlug(workspaceRoot: string, slug: string, projectRoot?: string): LoadedSkill | null {
+  let skill: LoadedSkill | null = null;
+
   // Highest priority: project-level
   if (projectRoot) {
     const projectSkillsDir = join(projectRoot, PROJECT_AGENT_SKILLS_DIR);
-    const skill = loadSkillFromDir(projectSkillsDir, slug, 'project');
-    if (skill) return skill;
+    skill = loadSkillFromDir(projectSkillsDir, slug, 'project');
   }
 
   // Medium priority: workspace
-  const workspaceSkill = loadSkillFromDir(getWorkspaceSkillsPath(workspaceRoot), slug, 'workspace');
-  if (workspaceSkill) return workspaceSkill;
-
-  // App-bundled overrides global for shipped slugs
-  const bundledDir = getBundledSkillsDir();
-  if (bundledDir) {
-    const bundledSkill = loadSkillFromDir(bundledDir, slug, 'bundled');
-    if (bundledSkill) return bundledSkill;
+  if (!skill) {
+    skill = loadSkillFromDir(getWorkspaceSkillsPath(workspaceRoot), slug, 'workspace');
   }
 
-  return loadSkillFromDir(GLOBAL_AGENT_SKILLS_DIR, slug, 'global');
+  // App-bundled overrides global for shipped slugs
+  if (!skill) {
+    const bundledDir = getBundledSkillsDir();
+    if (bundledDir) {
+      skill = loadSkillFromDir(bundledDir, slug, 'bundled');
+    }
+  }
+
+  if (!skill) {
+    skill = loadSkillFromDir(GLOBAL_AGENT_SKILLS_DIR, slug, 'global');
+  }
+
+  return skill ? withSkillDisplayTitle(workspaceRoot, skill) : null;
 }
 
 /**
@@ -336,6 +357,7 @@ export function deleteSkill(workspaceRoot: string, slug: string): boolean {
 
   try {
     rmSync(skillDir, { recursive: true });
+    clearDisplayTitle(workspaceRoot, 'skills', slug);
     return true;
   } catch {
     return false;

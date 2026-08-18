@@ -56,4 +56,9 @@ export interface LoadedSkill {
   path: string;
   /** Where this skill was loaded from */
   source: SkillSource;
+  /**
+   * Workspace-scoped display alias. Does not change metadata.name or slug.
+   * Absent when the user has not set a custom title.
+   */
+  displayTitle?: string;
 }

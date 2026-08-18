@@ -28,6 +28,7 @@ import { SourceSelectorPopover } from '@/components/ui/SourceSelectorPopover'
 import { SkillSelectorPopover } from '@/components/ui/SkillSelectorPopover'
 import { WorkingDirectorySelector } from '../input/WorkingDirectorySelector'
 import type { LoadedSource, LoadedSkill } from '../../../../shared/types'
+import { resolveSkillTitle, resolveSourceTitle } from '@craft-agent/shared/display-titles'
 
 // Client-side fallback for async generate: a touch longer than the server's GENERATE_TIMEOUT_MS
 // (180s) so the orchestrator's own timeout + result push can land before we give up locally.
@@ -228,7 +229,7 @@ function SourcesField({
   const selected = values
     .map((slug) => sources.find((s) => s.config.slug === slug))
     .filter((s): s is LoadedSource => Boolean(s))
-  const firstName = selected[0]?.config.name ?? values[0]
+  const firstName = selected[0] ? resolveSourceTitle(selected[0]) : values[0]
   const label =
     values.length === 0 ? t('tasks.noneSelected') : values.length === 1 ? firstName : `${firstName} +${values.length - 1}`
   const toggle = (slug: string) =>
@@ -284,7 +285,7 @@ function SkillsField({
   const selected = values
     .map((slug) => skills.find((s) => s.slug === slug))
     .filter((s): s is LoadedSkill => Boolean(s))
-  const firstName = selected[0]?.metadata.name ?? values[0]
+  const firstName = selected[0] ? resolveSkillTitle(selected[0]) : values[0]
   const label =
     values.length === 0 ? t('tasks.noneSelected') : values.length === 1 ? firstName : `${firstName} +${values.length - 1}`
   const toggle = (slug: string) =>

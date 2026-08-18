@@ -12,6 +12,7 @@ import {
 } from '@/lib/icon-cache'
 import type { LoadedSkill, LoadedSource } from '../../../shared/types'
 import type { MentionItemType } from './mention-menu'
+import { resolveSkillTitle, resolveSourceTitle } from '@craft-agent/shared/display-titles'
 
 // ============================================================================
 // Types
@@ -397,10 +398,10 @@ function textToHTML(
 
     if (match.type === 'skill') {
       skill = skills.find(s => s.slug === match.id)
-      label = skill?.metadata.name || match.id
+      label = skill ? resolveSkillTitle(skill) : match.id
     } else if (match.type === 'source') {
       source = sources.find(s => s.config.slug === match.id)
-      label = source?.config.name || match.id
+      label = source ? resolveSourceTitle(source) : match.id
     } else if (match.type === 'file') {
       // Show filename as badge label, full path as tooltip
       label = match.id.split('/').pop() || match.id

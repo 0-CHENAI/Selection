@@ -14,6 +14,8 @@ import { EditPopover, EditButton, getEditConfig } from '@/components/ui/EditPopo
 import { toast } from 'sonner'
 import { SkillMenu } from '@/components/app-shell/SkillMenu'
 import { SkillAvatar } from '@/components/ui/skill-avatar'
+import { DisplayTitleField, useDisplayTitleRename } from '@/hooks/useDisplayTitleRename'
+import { resolveSkillTitle } from '@craft-agent/shared/display-titles'
 import { routes, navigate } from '@/lib/navigate'
 import { useActiveWorkspace } from '@/context/AppShellContext'
 import { getFileManagerName } from '@/lib/platform'
@@ -103,7 +105,7 @@ export default function SkillInfoPage({ skillSlug, workspaceId, workingDirectory
     try {
       if (skill.source !== 'workspace') return
       await window.electronAPI.deleteSkill(workspaceId, skillSlug)
-      toast.success(t('skillInfo.deletedSkill', { name: skill.metadata.name }))
+      toast.success(t('skillInfo.deletedSkill', { name: resolveSkillTitle(skill) }))
       navigate(routes.view.skills())
     } catch (err) {
       toast.error(t('skillInfo.failedToDelete'), {
@@ -117,9 +119,13 @@ export default function SkillInfoPage({ skillSlug, workspaceId, workingDirectory
     window.electronAPI.openUrl(`craftagents://skills/skill/${skillSlug}?window=focused`)
   }, [skillSlug])
 
-  // Get skill name for header
-  const skillName = skill?.metadata.name || skillSlug
+  const skillName = skill ? resolveSkillTitle(skill) : skillSlug
   const canDeleteSkill = skill?.source === 'workspace'
+  const rename = useDisplayTitleRename('skill', workspaceId, workingDirectory)
+  const renameTarget = skill && {
+    displayTitle: skill.displayTitle,
+    defaultTitle: skill.metadata.name,
+  }
 
   // Format path to show just the skill-relative portion (skills/{slug}/)
   const formatPath = (path: string) => {
@@ -144,6 +150,7 @@ export default function SkillInfoPage({ skillSlug, workspaceId, workingDirectory
   }
 
   return (
+    <>
     <Info_Page
       loading={loading}
       error={error ?? undefined}
@@ -157,6 +164,7 @@ export default function SkillInfoPage({ skillSlug, workspaceId, workingDirectory
             skillName={skillName}
             onOpenInNewWindow={handleOpenInNewWindow}
             onShowInFinder={handleOpenInFinder}
+            onRename={() => skill && renameTarget && rename.start(skill.slug, renameTarget)}
             canShowInFinder={canRevealLocally}
             onDelete={canDeleteSkill ? handleDelete : undefined}
             canDelete={canDeleteSkill}
@@ -174,8 +182,9 @@ export default function SkillInfoPage({ skillSlug, workspaceId, workingDirectory
           {/* Hero: Avatar, title, and description */}
           <Info_Page.Hero
             avatar={<SkillAvatar skill={skill} fluid workspaceId={workspaceId} />}
-            title={skill.metadata.name}
+            title={resolveSkillTitle(skill)}
             tagline={skill.metadata.description}
+            onTitleClick={() => renameTarget && rename.start(skill.slug, renameTarget)}
           />
 
           {/* Metadata */}
@@ -195,8 +204,14 @@ export default function SkillInfoPage({ skillSlug, workspaceId, workingDirectory
             }
           >
             <Info_Table>
+              <Info_Table.Row label={t('displayTitle.label')}>
+                <DisplayTitleField
+                  customTitle={skill.displayTitle}
+                  onRename={() => renameTarget && rename.start(skill.slug, renameTarget)}
+                />
+              </Info_Table.Row>
+              <Info_Table.Row label={t('common.originalName')}>{skill.metadata.name}</Info_Table.Row>
               <Info_Table.Row label={t('common.slug')} value={skill.slug} />
-              <Info_Table.Row label={t('common.name')}>{skill.metadata.name}</Info_Table.Row>
               <Info_Table.Row label={t('common.description')}>
                 {skill.metadata.description}
               </Info_Table.Row>
@@ -284,5 +299,7 @@ export default function SkillInfoPage({ skillSlug, workspaceId, workingDirectory
         </Info_Page.Content>
       )}
     </Info_Page>
+    {rename.dialog}
+    </>
   )
 }

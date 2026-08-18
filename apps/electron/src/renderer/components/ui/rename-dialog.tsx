@@ -19,6 +19,9 @@ interface RenameDialogProps {
   onValueChange: (value: string) => void
   onSubmit: () => void | Promise<void>
   placeholder?: string
+  description?: string
+  allowEmpty?: boolean
+  maxLength?: number
 }
 
 export function RenameDialog({
@@ -29,6 +32,9 @@ export function RenameDialog({
   onValueChange,
   onSubmit,
   placeholder,
+  description,
+  allowEmpty = false,
+  maxLength,
 }: RenameDialogProps) {
   const { t } = useTranslation()
   const effectivePlaceholder = placeholder ?? t("common.enterName")
@@ -44,13 +50,16 @@ export function RenameDialog({
       setIsSubmitting(false)
       const timer = setTimeout(() => {
         inputRef.current?.focus()
+        inputRef.current?.select()
       }, 0)
       return () => clearTimeout(timer)
     }
   }, [open])
 
+  const canSubmit = allowEmpty || Boolean(value.trim())
+
   const handleSubmit = async () => {
-    if (!value.trim() || isSubmitting) return
+    if (!canSubmit || isSubmitting) return
     setIsSubmitting(true)
     try {
       await onSubmit()
@@ -71,18 +80,22 @@ export function RenameDialog({
             value={value}
             onChange={(e) => onValueChange(e.target.value)}
             placeholder={effectivePlaceholder}
+            maxLength={maxLength}
             onKeyDown={(e) => {
               if (e.key === "Enter") {
                 handleSubmit()
               }
             }}
           />
+          {description && (
+            <p className="mt-2 text-xs text-muted-foreground">{description}</p>
+          )}
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)} disabled={isSubmitting}>
             {t("common.cancel")}
           </Button>
-          <Button onClick={handleSubmit} disabled={!value.trim() || isSubmitting}>
+          <Button onClick={handleSubmit} disabled={!canSubmit || isSubmitting}>
             {t("common.save")}
           </Button>
         </DialogFooter>
