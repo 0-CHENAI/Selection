@@ -300,8 +300,8 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
 
   // Check if session's locked connection has been removed
   const connectionUnavailable = React.useMemo(() =>
-    isSessionConnectionUnavailable(session?.llmConnection, llmConnections),
-    [session?.llmConnection, llmConnections]
+    isSessionConnectionUnavailable(session?.llmConnection, llmConnections, workspaceDefaultLlmConnection),
+    [session?.llmConnection, llmConnections, workspaceDefaultLlmConnection]
   )
 
   // Effective model for this session (session-specific or global fallback)

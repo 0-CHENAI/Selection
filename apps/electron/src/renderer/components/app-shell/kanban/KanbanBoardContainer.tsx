@@ -14,7 +14,7 @@ import { getSessionTitle } from '@/utils/session'
 import { routes } from '@/lib/navigate'
 import { resolveTaskScopeLabelId } from '@craft-agent/shared/labels'
 import { DEFAULT_MODEL, getModelShortName } from '@config/models'
-import { getDefaultModelsForConnection, type LlmConnectionWithStatus } from '@config/llm-connections'
+import { getDefaultModelsForConnection, isUnsupportedLlmConnection, type LlmConnectionWithStatus } from '@config/llm-connections'
 import type { SessionStatus } from '@/config/session-status-config'
 import type { KanbanColumnDef } from '@craft-agent/shared/projects/types'
 import { KanbanBoard } from './KanbanBoard'
@@ -67,6 +67,7 @@ function buildModelCatalog(connections: LlmConnectionWithStatus[]): {
 
   for (const conn of connections) {
     if (!conn.isAuthenticated) continue
+    if (isUnsupportedLlmConnection(conn)) continue
     const rawModels = conn.models?.length
       ? conn.models
       : getDefaultModelsForConnection(conn.providerType, conn.piAuthProvider)

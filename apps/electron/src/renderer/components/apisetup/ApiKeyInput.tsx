@@ -110,12 +110,8 @@ interface Preset {
   placeholder?: string
 }
 
-// Anthropic provider presets - for Claude Code backend
-// Also used by Pi API key flow (same providers, routed via Pi SDK)
+// Pi API key presets (OpenAI Compatible + first-party Pi providers).
 const ANTHROPIC_PRESETS: Preset[] = [
-  { key: 'anthropic', label: 'Anthropic', url: 'https://api.anthropic.com', placeholder: 'sk-ant-...' },
-  // ORDER gateway — Anthropic uses root URL; OpenAI-compat requires /v1 + key
-  { key: 'order-anthropic', label: 'ORDER (Anthropic)', url: 'https://order.ai.jxepdi.top', placeholder: 'Paste your ORDER key...' },
   { key: 'order-openai', label: 'ORDER (OpenAI)', url: 'https://order.ai.jxepdi.top/v1', placeholder: 'Paste your ORDER key...' },
   { key: 'openai', label: 'OpenAI', url: 'https://api.openai.com/v1', placeholder: 'sk-...' },
   { key: 'openai-eu', label: 'OpenAI EU', url: 'https://eu.api.openai.com/v1', placeholder: 'sk-...' },
@@ -149,7 +145,7 @@ const OPENAI_COMPAT_CUSTOM_URL_PRESETS: ReadonlySet<string> = new Set(['manifest
 /**
  * Branded Anthropic-compatible gateways (ORDER Anthropic path has no /v1).
  */
-const ANTHROPIC_COMPAT_CUSTOM_URL_PRESETS: ReadonlySet<string> = new Set(['order-anthropic'])
+const ANTHROPIC_COMPAT_CUSTOM_URL_PRESETS: ReadonlySet<string> = new Set()
 
 // OpenAI provider presets - for Codex backend
 // Only direct OpenAI is supported; 3PP providers (OpenRouter, Vercel, Ollama) should be
@@ -179,7 +175,6 @@ const COMPAT_MINIMAX_DEFAULTS = 'MiniMax-M2.5, MiniMax-M2.5-highspeed'
 const COMPAT_KIMI_DEFAULTS = 'k2p5, kimi-k2-thinking'
 
 const ORDER_PRESETS: Preset[] = [
-  { key: 'order-anthropic', label: 'ORDER (Anthropic)', url: 'https://order.ai.jxepdi.top', placeholder: 'Paste your ORDER key...' },
   { key: 'order-openai', label: 'ORDER (OpenAI)', url: 'https://order.ai.jxepdi.top/v1', placeholder: 'Paste your ORDER key...' },
 ]
 
@@ -215,7 +210,7 @@ export function ApiKeyInput({
   onSubmit,
   formId = "api-key-form",
   disabled,
-  providerType = 'anthropic',
+  providerType = 'pi_api_key',
   presetFilter,
   initialValues,
 }: ApiKeyInputProps) {
@@ -237,10 +232,7 @@ export function ApiKeyInput({
   )
   const [connectionDefaultModel, setConnectionDefaultModel] = useState(initialValues?.connectionDefaultModel ?? '')
   const [customApi, setCustomApi] = useState<CustomEndpointApi>(() => {
-    if (initialValues?.customApi) return initialValues.customApi
-    if (initialPreset === 'order-anthropic' || ANTHROPIC_COMPAT_CUSTOM_URL_PRESETS.has(initialPreset)) {
-      return 'anthropic-messages'
-    }
+    if (initialValues?.customApi === 'openai-completions') return initialValues.customApi
     return 'openai-completions'
   })
   const [modelError, setModelError] = useState<string | null>(null)
@@ -275,7 +267,7 @@ export function ApiKeyInput({
   const isDisabled = disabled || status === 'validating'
 
   const isPiApiKeyFlow = providerType === 'pi_api_key'
-  const isOrderPreset = activePreset === 'order-anthropic' || activePreset === 'order-openai'
+  const isOrderPreset = activePreset === 'order-openai'
   const isBedrock = activePreset === 'amazon-bedrock'
   // Hide endpoint/model fields for providers with well-known endpoints handled by the SDK
   const DEFAULT_ENDPOINT_PROVIDERS = new Set(['anthropic', 'openai', 'pi', 'google'])
@@ -284,7 +276,7 @@ export function ApiKeyInput({
   // Provider-specific placeholders from the active preset
   const activePresetObj = presets.find(p => p.key === activePreset)
   const apiKeyPlaceholder =
-    activePreset === 'order-anthropic' || activePreset === 'order-openai'
+    activePreset === 'order-openai'
       ? t('apiSetup.pasteOrderKey')
       : (activePresetObj?.placeholder && !activePresetObj.placeholder.toLowerCase().startsWith('paste')
         ? activePresetObj.placeholder
@@ -294,11 +286,6 @@ export function ApiKeyInput({
         : t('apiSetup.pasteKey'))
 
   const presetDisplayLabel = (preset: Preset) => {
-    if (preset.key === 'order-anthropic') {
-      return presetFilter === 'order'
-        ? t('apiSetup.format.anthropicCompatible')
-        : t('apiSetup.preset.orderAnthropic')
-    }
     if (preset.key === 'order-openai') {
       return presetFilter === 'order'
         ? t('apiSetup.format.openaiCompatible')
@@ -424,9 +411,7 @@ export function ApiKeyInput({
       setBaseUrl(preset.url)
     }
     // Pin protocol for branded ORDER / Manifest-style gateways
-    if (ANTHROPIC_COMPAT_CUSTOM_URL_PRESETS.has(preset.key)) {
-      setCustomApi('anthropic-messages')
-    } else if (OPENAI_COMPAT_CUSTOM_URL_PRESETS.has(preset.key)) {
+    if (OPENAI_COMPAT_CUSTOM_URL_PRESETS.has(preset.key) || preset.key === 'custom') {
       setCustomApi('openai-completions')
     }
     setModelError(null)
@@ -442,7 +427,7 @@ export function ApiKeyInput({
       setConnectionDefaultModel(COMPAT_KIMI_DEFAULTS)
     } else if (preset.key === 'manifest') {
       setConnectionDefaultModel('auto')
-    } else if (preset.key === 'order-anthropic' || preset.key === 'order-openai') {
+    } else if (preset.key === 'order-openai') {
       // Same hint for both ORDER endpoints — user fills Opus / Laufry / Maylo etc.
       setConnectionDefaultModel('')
     } else if (
@@ -640,34 +625,7 @@ export function ApiKeyInput({
         </div>
       </div>)}
 
-      {/* ORDER: protocol as two buttons, URL not exposed */}
-      {presetFilter === 'order' ? (
-        <div className="space-y-2">
-          <Label>{t('apiSetup.endpoint')}</Label>
-          <div className={cn(
-            "flex rounded-md shadow-minimal overflow-hidden",
-            "bg-foreground-2",
-            isDisabled && "opacity-50 pointer-events-none",
-          )}>
-            {ORDER_PRESETS.map((preset) => (
-              <button
-                key={preset.key}
-                type="button"
-                disabled={isDisabled}
-                onClick={() => handlePresetSelect(preset)}
-                className={cn(
-                  "flex-1 py-1.5 text-[12px] font-medium transition-colors",
-                  activePreset === preset.key
-                    ? "bg-background text-foreground shadow-minimal"
-                    : "text-foreground/50 hover:text-foreground/70",
-                )}
-              >
-                {presetDisplayLabel(preset)}
-              </button>
-            ))}
-          </div>
-        </div>
-      ) : presets.length > 1 && (
+      {presetFilter !== 'order' && presets.length > 1 && (
       <div className="space-y-2">
         <div className="flex items-center justify-between">
           <Label htmlFor="base-url">{t('apiSetup.endpoint')}</Label>
@@ -711,41 +669,6 @@ export function ApiKeyInput({
           </div>
         )}
       </div>
-      )}
-
-      {/* Protocol Toggle — visible as soon as Custom preset is selected */}
-      {activePreset === 'custom' && !isDefaultProviderPreset && (
-        <div className="space-y-2">
-          <Label>{t('apiSetup.protocol')}</Label>
-          <div className={cn(
-            "flex rounded-md shadow-minimal overflow-hidden",
-            "bg-foreground-2",
-            isDisabled && "opacity-50 pointer-events-none"
-          )}>
-            {([
-              { value: 'openai-completions' as const, label: t('apiSetup.format.openaiCompatible') },
-              { value: 'anthropic-messages' as const, label: t('apiSetup.format.anthropicCompatible') },
-            ]).map(({ value, label }) => (
-              <button
-                key={value}
-                type="button"
-                disabled={isDisabled}
-                onClick={() => setCustomApi(value)}
-                className={cn(
-                  "flex-1 py-1.5 text-[12px] font-medium transition-colors",
-                  customApi === value
-                    ? "bg-background text-foreground shadow-minimal"
-                    : "text-foreground/50 hover:text-foreground/70"
-                )}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
-          <p className="text-xs text-foreground/30">
-            {t('apiSetup.protocolHint')}
-          </p>
-        </div>
       )}
 
       {/* Bedrock Auth Section */}
@@ -1031,7 +954,7 @@ export function ApiKeyInput({
                 setModelError(null)
               }}
               placeholder={
-                activePreset === 'order-anthropic' || activePreset === 'order-openai'
+                activePreset === 'order-openai'
                   ? t('apiSetup.modelListPlaceholderOrder')
                   : t('apiSetup.modelListPlaceholder')
               }

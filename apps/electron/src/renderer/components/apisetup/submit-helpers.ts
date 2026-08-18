@@ -18,10 +18,10 @@ export function resolvePiAuthProviderForSubmit(
 ): string | undefined {
   if (activePreset === 'custom') {
     // Pi SDK needs a provider hint for auth header formatting even when
-    // the URL is user-provided — default to anthropic as the safest baseline.
+    // the URL is user-provided — default to openai for OpenAI Compatible.
     const resolved = lastNonCustomPreset && lastNonCustomPreset !== 'custom'
       ? lastNonCustomPreset
-      : 'anthropic'
+      : 'openai'
     return PI_AUTH_PROVIDER_ALIASES[resolved] ?? resolved
   }
 
@@ -61,8 +61,7 @@ export function resolvePresetStateForBaseUrlChange(params: {
  *
  * Submit branches:
  *  - branded openai-compat preset (Manifest, ORDER OpenAI) → openai-completions
- *  - branded anthropic-compat preset (ORDER Anthropic)     → anthropic-messages
- *  - generic custom preset with a base URL                 → honors the protocol toggle
+ *  - generic custom preset with a base URL                 → openai-completions
  *  - everything else                                       → no customEndpoint, passthrough piAuth
  */
 export function resolveCustomEndpointPayload(params: {
@@ -86,20 +85,13 @@ export function resolveCustomEndpointPayload(params: {
   } = params
 
   const isBrandedOpenAiCompat = brandedOpenAiCompatPresets.has(activePreset) && !!baseUrl
-  const isBrandedAnthropicCompat =
-    !!brandedAnthropicCompatPresets?.has(activePreset) && !!baseUrl
   const isCustomEndpoint =
-    (activePreset === 'custom' && !!baseUrl) || isBrandedOpenAiCompat || isBrandedAnthropicCompat
-  const effectiveApi: CustomEndpointApi = isBrandedOpenAiCompat
-    ? 'openai-completions'
-    : isBrandedAnthropicCompat
-      ? 'anthropic-messages'
-      : customApi
+    (activePreset === 'custom' && !!baseUrl) || isBrandedOpenAiCompat
 
   return {
-    customEndpoint: isCustomEndpoint ? { api: effectiveApi } : undefined,
+    customEndpoint: isCustomEndpoint ? { api: 'openai-completions' } : undefined,
     piAuthProvider: isCustomEndpoint
-      ? (effectiveApi === 'anthropic-messages' ? 'anthropic' : 'openai')
+      ? 'openai'
       : fallbackPiAuthProvider,
   }
 }

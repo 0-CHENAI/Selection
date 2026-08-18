@@ -5,8 +5,8 @@
  * Flow:
  * 1. Welcome
  * 2. Git Bash (Windows only, if not found)
- * 3. API Setup (API Key / Claude OAuth)
- * 4. Credentials (API Key or Claude OAuth)
+ * 3. API Setup (ChatGPT / Copilot / API Key)
+ * 4. Credentials
  * 5. Complete
  */
 import { useState, useCallback, useEffect } from 'react'
@@ -16,7 +16,7 @@ import type {
   ApiSetupMethod,
 } from '@/components/onboarding'
 import type { ProviderChoice } from '@/components/onboarding/ProviderSelectStep'
-import { ORDER_BASE_URL } from '@/components/onboarding/ProviderSelectStep'
+import { ORDER_OPENAI_BASE_URL } from '@/components/onboarding/ProviderSelectStep'
 import type { LocalModelSubmitData } from '@/components/onboarding/LocalModelStep'
 import type { ApiKeySubmitData } from '@/components/apisetup'
 import type { CustomEndpointConfig } from '@config/llm-connections'
@@ -78,7 +78,6 @@ interface UseOnboardingReturn {
   handleSubmitLocalModel: (data: LocalModelSubmitData) => void
   handleStartOAuth: (methodOverride?: ApiSetupMethod, connectionSlugOverride?: string) => void
 
-  // Claude OAuth (two-step flow)
   isWaitingForCode: boolean
   handleSubmitAuthCode: (code: string) => void
   handleCancelOAuth: () => void
@@ -108,8 +107,6 @@ interface UseOnboardingReturn {
 
 // Base slug for each setup method (used as template key in ipc.ts)
 export const BASE_SLUG_FOR_METHOD: Record<ApiSetupMethod, string> = {
-  anthropic_api_key: 'anthropic-api',
-  claude_oauth: 'claude-max',
   pi_chatgpt_oauth: 'chatgpt-plus',
   pi_copilot_oauth: 'github-copilot',
   pi_api_key: 'pi-api-key',
@@ -182,22 +179,6 @@ export function apiSetupMethodToConnectionSetup(
   const slug = resolveSlugForMethod(method, editingSlug, existingSlugs)
 
   switch (method) {
-    case 'anthropic_api_key':
-      return {
-        slug,
-        credential: options.credential,
-        baseUrl: options.baseUrl,
-        defaultModel: options.connectionDefaultModel,
-        models: options.models,
-        customEndpoint: options.customEndpoint,
-        modelSelectionMode: options.modelSelectionMode,
-      }
-    case 'claude_oauth':
-      return {
-        slug,
-        credential: options.credential,
-        oauthIdentity: options.oauthIdentity,
-      }
     case 'pi_chatgpt_oauth':
     case 'pi_copilot_oauth':
       return {
@@ -412,8 +393,6 @@ export function useOnboarding({
   const handleSubmitCredential = useCallback(async (data: ApiKeySubmitData) => {
     setState(s => ({ ...s, credentialStatus: 'validating', errorMessage: undefined }))
 
-    const isPiApiKeyFlow = state.apiSetupMethod === 'pi_api_key'
-
     try {
       // Bedrock (Pi+amazon-bedrock) — skip API key validation and connection test
       if (data.bedrockAuthMethod) {
@@ -457,29 +436,18 @@ export function useOnboarding({
       // - Local/loopback custom endpoints may be keyless (e.g. Ollama)
       // - Non-local endpoints require an API key
       const isLoopbackCustomEndpoint = isLoopbackEndpoint(data.baseUrl)
-      if (isPiApiKeyFlow) {
-        if (!data.apiKey.trim() && !isLoopbackCustomEndpoint) {
-          setState(s => ({
-            ...s,
-            credentialStatus: 'error',
-            errorMessage: 'Please enter a valid API key',
-          }))
-          return
-        }
-      } else {
-        if (!data.apiKey.trim() && !isLoopbackCustomEndpoint) {
-          setState(s => ({
-            ...s,
-            credentialStatus: 'error',
-            errorMessage: 'Please enter a valid API key',
-          }))
-          return
-        }
+      if (!data.apiKey.trim() && !isLoopbackCustomEndpoint) {
+        setState(s => ({
+          ...s,
+          credentialStatus: 'error',
+          errorMessage: 'Please enter a valid API key',
+        }))
+        return
       }
 
       // Validate connection by spawning a lightweight subprocess test.
       // Custom endpoint protocol routes through PiAgent at runtime, so test with Pi too.
-      const setupTestProvider = data.customEndpoint ? 'pi' : (isPiApiKeyFlow ? 'pi' : 'anthropic')
+      const setupTestProvider = 'pi'
       const testResult = await window.electronAPI.testLlmConnectionSetup({
         provider: setupTestProvider,
         apiKey: data.apiKey,
@@ -634,30 +602,11 @@ export function useOnboarding({
         return
       }
 
-      // Claude OAuth (two-step flow - opens browser, user copies code)
-      // Remaining method must be claude_oauth
-      if (effectiveMethod !== 'claude_oauth') {
-        setState(s => ({
-          ...s,
-          credentialStatus: 'error',
-          errorMessage: 'This connection uses API keys, not OAuth.',
-        }))
-        return
-      }
-
-      const result = await window.electronAPI.startClaudeOAuth()
-
-      if (result.success) {
-        // Browser opened successfully, now waiting for user to copy the code
-        setIsWaitingForCode(true)
-        setState(s => ({ ...s, credentialStatus: 'idle' }))
-      } else {
-        setState(s => ({
-          ...s,
-          credentialStatus: 'error',
-          errorMessage: result.error || 'Failed to start OAuth',
-        }))
-      }
+      setState(s => ({
+        ...s,
+        credentialStatus: 'error',
+        errorMessage: 'This connection uses API keys, not OAuth.',
+      }))
     } catch (error) {
       setState(s => ({
         ...s,
@@ -673,12 +622,11 @@ export function useOnboarding({
   // Map ProviderChoice → ApiSetupMethod and navigate to the right step
   const handleSelectProvider = useCallback((choice: ProviderChoice) => {
     if (choice === 'local') {
-      // Local uses anthropic_api_key with custom endpoint (Ollama doesn't need an API key)
       setCredentialPrefill(undefined)
       setState(s => ({
         ...s,
         step: 'local-model',
-        apiSetupMethod: 'anthropic_api_key',
+        apiSetupMethod: 'pi_api_key',
         credentialStatus: 'idle',
         errorMessage: undefined,
       }))
@@ -686,16 +634,14 @@ export function useOnboarding({
     }
 
     if (choice === 'order') {
-      // ORDER gateway: Anthropic-compatible root URL (no /v1); user can switch to
-      // ORDER (OpenAI) preset which uses https://order.ai.jxepdi.top/v1. API key required.
       setCredentialPrefill({
-        activePreset: 'order-anthropic',
-        baseUrl: ORDER_BASE_URL,
-        customApi: 'anthropic-messages',
+        activePreset: 'order-openai',
+        baseUrl: ORDER_OPENAI_BASE_URL,
+        customApi: 'openai-completions',
       })
       setState(s => ({
         ...s,
-        apiSetupMethod: 'anthropic_api_key',
+        apiSetupMethod: 'pi_api_key',
         step: 'credentials',
         credentialStatus: 'idle',
         errorMessage: undefined,
@@ -727,27 +673,11 @@ export function useOnboarding({
 
     setState(s => ({ ...s, credentialStatus: 'validating', errorMessage: undefined }))
 
-    try {
-      const connectionSlug = apiSetupMethodToConnectionSetup('claude_oauth', {}, editingSlug, existingSlugs).slug
-      const result = await window.electronAPI.exchangeClaudeCode(code.trim(), connectionSlug)
-
-      if (result.success && result.token) {
-        setIsWaitingForCode(false)
-        await saveAndValidateConnection(connectionSlug, 'claude_oauth', result.token, !!editingSlug, result.identity)
-      } else {
-        setState(s => ({
-          ...s,
-          credentialStatus: 'error',
-          errorMessage: result.error || 'Failed to exchange code',
-        }))
-      }
-    } catch (error) {
-      setState(s => ({
-        ...s,
-        credentialStatus: 'error',
-        errorMessage: error instanceof Error ? error.message : 'Failed to exchange code',
-      }))
-    }
+    setState(s => ({
+      ...s,
+      credentialStatus: 'error',
+      errorMessage: 'Claude OAuth is no longer supported.',
+    }))
   }, [saveAndValidateConnection, editingSlug, existingSlugs])
 
   // Submit local model configuration (Ollama or any OpenAI-compatible local server)
@@ -755,7 +685,7 @@ export function useOnboarding({
     setState(s => ({ ...s, credentialStatus: 'validating', errorMessage: undefined }))
 
     try {
-      // apiSetupMethod was set to 'anthropic_api_key' when entering local-model step
+      // apiSetupMethod was set to 'pi_api_key' when entering local-model step
       const saved = await handleSaveConfig(undefined, {
         baseUrl: data.baseUrl,
         connectionDefaultModel: data.model,

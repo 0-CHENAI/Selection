@@ -149,7 +149,7 @@ export function parseArgs(argv: string[]): CliArgs {
   if (!url) url = process.env.CRAFT_SERVER_URL ?? ''
   if (!token) token = process.env.CRAFT_SERVER_TOKEN ?? ''
   if (!tlsCa) tlsCa = process.env.CRAFT_TLS_CA
-  if (!provider) provider = process.env.LLM_PROVIDER ?? 'anthropic'
+  if (!provider) provider = process.env.LLM_PROVIDER ?? 'openai'
   if (!model) model = process.env.LLM_MODEL ?? ''
   if (!apiKey) apiKey = process.env.LLM_API_KEY ?? ''
   if (!baseUrl) baseUrl = process.env.LLM_BASE_URL ?? ''
@@ -555,7 +555,7 @@ export function resolveApiKey(provider: string, explicit: string): string {
 }
 
 export function shouldSetupLlmConnection(existingConnectionCount: number, args: Pick<CliArgs, 'provider' | 'baseUrl'>): boolean {
-  return existingConnectionCount === 0 || !!args.baseUrl || args.provider !== 'anthropic'
+  return existingConnectionCount === 0 || !!args.baseUrl || args.provider !== 'openai'
 }
 
 async function setupLlmConnection(
@@ -563,6 +563,11 @@ async function setupLlmConnection(
   args: CliArgs,
 ): Promise<{ connectionSlug: string }> {
   const { provider, baseUrl } = args
+  if (provider === 'anthropic') {
+    throw new Error(
+      'Anthropic is no longer supported. Use --provider openai (or another Selection Backend provider), and --base-url for OpenAI Compatible endpoints.',
+    )
+  }
   const key = resolveApiKey(provider, args.apiKey)
   const connectionSlug = `${provider}-cli`
 
@@ -578,12 +583,9 @@ async function setupLlmConnection(
     authType = 'api_key_with_endpoint'
     setupPayload.baseUrl = baseUrl
     setupPayload.customEndpoint = {
-      api: provider === 'anthropic' ? 'anthropic-messages' : 'openai-completions',
+      api: 'openai-completions',
     }
-    setupPayload.defaultModel = provider === 'anthropic' ? 'claude-sonnet-4-6' : 'gpt-4o'
-  } else if (provider === 'anthropic') {
-    providerType = 'anthropic'
-    authType = 'api_key'
+    setupPayload.defaultModel = 'gpt-4o'
   } else if (provider === 'amazon-bedrock') {
     // Bedrock uses IAM credentials, not a single API key
     const accessKeyId = process.env.AWS_ACCESS_KEY_ID
@@ -819,7 +821,7 @@ export interface ValidateContext {
   baseUrl?: string
   /** API key override (from --api-key) */
   apiKey?: string
-  /** Provider hint (from --provider, default 'anthropic') */
+  /** Provider hint (from --provider, default 'openai') */
   provider?: string
   workspaceId?: string
   workspaceRootPath?: string
@@ -1075,7 +1077,10 @@ export function getValidateSteps(): ValidateStep[] {
 
         // Custom endpoint: always create/update when --base-url is provided
         if (ctx.baseUrl) {
-          const provider = ctx.provider || 'anthropic'
+          const provider = ctx.provider || 'openai'
+          if (provider === 'anthropic') {
+            return '0 connections (Anthropic is no longer supported)'
+          }
           let key = ''
           try {
             key = resolveApiKey(provider, ctx.apiKey || '')
@@ -1083,7 +1088,6 @@ export function getValidateSteps(): ValidateStep[] {
             return `0 connections (${error instanceof Error ? error.message : 'missing API key'})`
           }
           const slug = `${provider}-cli`
-          const isAnthropicApi = provider === 'anthropic'
           await client.invoke('LLM_Connection:save', {
             slug,
             name: `${getProviderDisplayName(provider)} (Custom Endpoint)`,
@@ -1095,8 +1099,8 @@ export function getValidateSteps(): ValidateStep[] {
             slug,
             credential: key,
             baseUrl: ctx.baseUrl,
-            customEndpoint: { api: isAnthropicApi ? 'anthropic-messages' : 'openai-completions' },
-            defaultModel: isAnthropicApi ? 'claude-sonnet-4-6' : 'gpt-4o',
+            customEndpoint: { api: 'openai-completions' },
+            defaultModel: 'gpt-4o',
           }) as { success: boolean; error?: string }
           if (!result?.success) return `setup failed: ${result?.error ?? 'unknown'}`
           await client.invoke('LLM_Connection:setDefault', slug)
@@ -1133,7 +1137,10 @@ export function getValidateSteps(): ValidateStep[] {
           return `${r?.length ?? 0} existing + Bedrock IAM (${region})`
         }
 
-        const provider = ctx.provider || 'anthropic'
+        const provider = ctx.provider || 'openai'
+        if (provider === 'anthropic') {
+          return '0 connections (Anthropic is no longer supported)'
+        }
         if (!shouldSetupLlmConnection(r?.length ?? 0, { provider, baseUrl: ctx.baseUrl ?? '' })) {
           return `${r.length} connections`
         }
@@ -1145,7 +1152,7 @@ export function getValidateSteps(): ValidateStep[] {
           return `0 connections (${error instanceof Error ? error.message : 'missing API key'})`
         }
         const slug = `${provider}-cli`
-        const providerType = provider === 'anthropic' ? 'anthropic' : 'pi'
+        const providerType = 'pi'
         const authType = 'api_key'
         await client.invoke('LLM_Connection:save', {
           slug,
@@ -1154,9 +1161,7 @@ export function getValidateSteps(): ValidateStep[] {
           authType,
           createdAt: Date.now(),
         })
-        const setupPayload = provider === 'anthropic'
-          ? { slug, credential: key }
-          : { slug, credential: key, piAuthProvider: provider }
+        const setupPayload = { slug, credential: key, piAuthProvider: provider }
         const result = await client.invoke('settings:setupLlmConnection', setupPayload) as { success: boolean; error?: string }
         if (!result?.success) return `setup failed: ${result?.error ?? 'unknown'}`
         await client.invoke('LLM_Connection:setDefault', slug)
@@ -1904,8 +1909,8 @@ Connection:
   --json                 Raw JSON output for scripting
 
 LLM Configuration (for 'run' command):
-  --provider <name>      LLM provider (default: anthropic, or $LLM_PROVIDER)
-                         Supported: anthropic, openai, google, openrouter, groq, mistral, deepseek, xai, ...
+  --provider <name>      LLM provider (default: openai, or $LLM_PROVIDER)
+                         Supported: openai, google, openrouter, groq, mistral, deepseek, xai, ...
   --model <id>           Model to use (or $LLM_MODEL)
   --api-key <key>        API key (or $LLM_API_KEY, or provider-specific e.g. $OPENAI_API_KEY)
   --base-url <url>       Custom API endpoint (or $LLM_BASE_URL)

@@ -52,7 +52,7 @@ import { OnboardingWizard, type ApiSetupMethod } from '@/components/onboarding'
 import { RenameDialog } from '@/components/ui/rename-dialog'
 import { useAppShellContext } from '@/context/AppShellContext'
 import { getModelShortName, type ModelDefinition } from '@config/models'
-import { getModelsForProviderType, resolveMidStreamBehavior, type CustomEndpointApi, type MidStreamBehavior } from '@config/llm-connections'
+import { getModelsForProviderType, isUnsupportedLlmConnection, resolveMidStreamBehavior, type CustomEndpointApi, type MidStreamBehavior } from '@config/llm-connections'
 import { displayLlmConnectionName, isOrderGatewayUrl, isOrderOpenAiUrl } from '@config/order-gateway'
 import { toast } from 'sonner'
 
@@ -187,9 +187,10 @@ interface ConnectionRowProps {
   validationError?: string
   /** True when another OAuth connection resolves to the same Anthropic account (issue #838) */
   isDuplicateAccount?: boolean
+  unsupported?: boolean
 }
 
-function ConnectionRow({ connection, isLastConnection, onRenameClick, onDelete, onSetDefault, onValidate, onReauthenticate, onEdit, onSetMidStreamBehavior, validationState, validationError, isDuplicateAccount }: ConnectionRowProps) {
+function ConnectionRow({ connection, isLastConnection, onRenameClick, onDelete, onSetDefault, onValidate, onReauthenticate, onEdit, onSetMidStreamBehavior, validationState, validationError, isDuplicateAccount, unsupported }: ConnectionRowProps) {
   const { t } = useTranslation()
   const [menuOpen, setMenuOpen] = useState(false)
   const [piBaseUrl, setPiBaseUrl] = useState<string | undefined>(undefined)
@@ -239,6 +240,10 @@ function ConnectionRow({ connection, isLastConnection, onRenameClick, onDelete, 
       )
     }
 
+    if (unsupported) {
+      return t('settings.ai.unsupportedConnectionDesc')
+    }
+
     if (isOrderGatewayUrl(connection.baseUrl)) {
       return t('settings.ai.orderConnectionDesc')
     }
@@ -261,9 +266,7 @@ function ConnectionRow({ connection, isLastConnection, onRenameClick, onDelete, 
       }
       case 'pi_compat':
         if (isOrderGatewayUrl(connection.baseUrl)) {
-          parts.push(connection.customEndpoint?.api === 'openai-completions'
-            ? t('apiSetup.format.openaiCompatible')
-            : t('apiSetup.format.anthropicCompatible'))
+          parts.push(t('apiSetup.format.openaiCompatible'))
         } else {
           parts.push(connection.baseUrl?.toLowerCase().includes('manifest.build')
             ? 'Manifest'
@@ -319,6 +322,11 @@ function ConnectionRow({ connection, isLastConnection, onRenameClick, onDelete, 
                 {t("common.default")}
               </span>
             )}
+            {unsupported && (
+              <span className="inline-flex items-center h-5 px-2 text-[11px] font-medium rounded-[4px] bg-background shadow-minimal text-foreground/60">
+                {t("settings.ai.unsupportedConnection")}
+              </span>
+            )}
             {isDuplicateAccount && (
               <Tooltip>
                 <TooltipTrigger asChild>
@@ -351,13 +359,13 @@ function ConnectionRow({ connection, isLastConnection, onRenameClick, onDelete, 
             <Pencil className="h-3.5 w-3.5" />
             <span>{t("common.rename")}</span>
           </StyledDropdownMenuItem>
-          {!connection.isDefault && (
+          {!unsupported && !connection.isDefault && (
             <StyledDropdownMenuItem onClick={onSetDefault}>
               <Star className="h-3.5 w-3.5" />
               <span>{t("settings.ai.setAsDefault")}</span>
             </StyledDropdownMenuItem>
           )}
-          {connection.authType === 'oauth' ? (
+          {!unsupported && (connection.authType === 'oauth' ? (
             <StyledDropdownMenuItem onClick={() => runAfterMenuClose(onReauthenticate)}>
               <RefreshCcw className="h-3.5 w-3.5" />
               <span>{t("settings.ai.reAuthenticate")}</span>
@@ -367,7 +375,8 @@ function ConnectionRow({ connection, isLastConnection, onRenameClick, onDelete, 
               <Settings2 className="h-3.5 w-3.5" />
               <span>{t("common.edit")}</span>
             </StyledDropdownMenuItem>
-          )}
+          ))}
+          {!unsupported && (
           <StyledDropdownMenuItem
             onClick={onValidate}
             disabled={validationState === 'validating'}
@@ -375,7 +384,8 @@ function ConnectionRow({ connection, isLastConnection, onRenameClick, onDelete, 
             <CheckCircle2 className="h-3.5 w-3.5" />
             <span>{t("settings.ai.validateConnection")}</span>
           </StyledDropdownMenuItem>
-          {(() => {
+          )}
+          {!unsupported && (() => {
             const currentBehavior = resolveMidStreamBehavior(connection)
             return (
               <DropdownMenuSub>
@@ -584,11 +594,10 @@ function WorkspaceOverrideCard({ workspace, llmConnections, onSettingsChange }: 
                 onValueChange={handleConnectionChange}
                 options={[
                   { value: 'global', label: t("settings.ai.useDefault"), description: t("settings.ai.inheritFromApp") },
-                  ...llmConnections.map((conn) => ({
+                  ...llmConnections.filter((conn) => !isUnsupportedLlmConnection(conn)).map((conn) => ({
                     value: conn.slug,
                     label: conn.name,
-                    description: conn.providerType === 'anthropic' ? 'Anthropic' :
-                                 conn.providerType === 'pi' ? 'Selection Backend' :
+                    description: conn.providerType === 'pi' ? 'Selection Backend' :
                                  conn.providerType || 'Unknown',
                   })),
                 ]}
@@ -635,7 +644,7 @@ function WorkspaceOverrideCard({ workspace, llmConnections, onSettingsChange }: 
 function getApiKeyMethodForConnection(conn: LlmConnectionWithStatus): ApiSetupMethod {
   const provider = conn.providerType || conn.type
   if (provider === 'pi' || provider === 'pi_compat') return 'pi_api_key'
-  return 'anthropic_api_key'
+  return 'pi_api_key'
 }
 
 // ============================================
@@ -796,29 +805,37 @@ export default function AiSettingsPage() {
           refreshLlmConnections?.()
         } else {
           console.error('Failed to rename connection:', result.error)
+          toast.error(result.error || t("settings.ai.unsupportedConnectionDesc"))
         }
       }
     } catch (error) {
       console.error('Failed to rename connection:', error)
+      toast.error(t("settings.ai.unsupportedConnectionDesc"))
     }
     setRenameDialogOpen(false)
     setRenamingConnection(null)
     setRenameValue('')
-  }, [renamingConnection, renameValue, refreshLlmConnections])
+  }, [renamingConnection, renameValue, refreshLlmConnections, t])
 
   const handleReauthenticateConnection = useCallback((connection: LlmConnectionWithStatus) => {
+    if (isUnsupportedLlmConnection(connection)) {
+      toast.error(t("settings.ai.unsupportedConnectionDesc"))
+      return
+    }
     openApiSetup(connection.slug)
     apiSetupOnboarding.reset()
 
     if (connection.authType === 'oauth') {
-      const method = connection.providerType === 'pi'
-                   ? (connection.piAuthProvider === 'github-copilot' ? 'pi_copilot_oauth' : 'pi_chatgpt_oauth')
-                   : 'claude_oauth'
+      const method = connection.piAuthProvider === 'github-copilot' ? 'pi_copilot_oauth' : 'pi_chatgpt_oauth'
       apiSetupOnboarding.handleStartOAuth(method, connection.slug)
     }
-  }, [apiSetupOnboarding, openApiSetup])
+  }, [apiSetupOnboarding, openApiSetup, t])
 
   const handleEditConnection = useCallback(async (connection: LlmConnectionWithStatus) => {
+    if (isUnsupportedLlmConnection(connection)) {
+      toast.error(t("settings.ai.unsupportedConnectionDesc"))
+      return
+    }
     // Fetch stored API key (best-effort — if IPC not available yet, skip pre-fill)
     let apiKey: string | undefined
     try {
@@ -855,7 +872,7 @@ export default function AiSettingsPage() {
 
     const isCustomEndpointConnection = !!connection.customEndpoint && !!connection.baseUrl?.trim()
     const activePreset = isOrderGatewayUrl(connection.baseUrl)
-      ? (isOrderOpenAiUrl(connection.baseUrl) ? 'order-openai' : 'order-anthropic')
+      ? (isOrderOpenAiUrl(connection.baseUrl) ? 'order-openai' : 'custom')
       : isCustomEndpointConnection ? 'custom' : (connection.piAuthProvider || undefined)
 
     setEditInitialValues({
@@ -874,7 +891,7 @@ export default function AiSettingsPage() {
     setIsDirectEdit(true)
     const method = getApiKeyMethodForConnection(connection)
     apiSetupOnboarding.jumpToCredentials(method)
-  }, [apiSetupOnboarding, openApiSetup])
+  }, [apiSetupOnboarding, openApiSetup, t])
 
   const handleDeleteConnection = useCallback(async (slug: string) => {
     if (!window.electronAPI) return
@@ -933,12 +950,13 @@ export default function AiSettingsPage() {
       if (result.success) {
         refreshLlmConnections?.()
       } else {
+        toast.error(result.error || t("settings.ai.unsupportedConnectionDesc"))
         console.error('Failed to set default connection:', result.error)
       }
     } catch (error) {
       console.error('Failed to set default connection:', error)
     }
-  }, [refreshLlmConnections])
+  }, [refreshLlmConnections, t])
 
   // Update a connection's mid-stream send behavior (steer vs queue).
   // Uses the same saveLlmConnection RPC as other connection edits.
@@ -1039,15 +1057,12 @@ export default function AiSettingsPage() {
                     description={t("settings.ai.connectionDesc")}
                     value={defaultConnection?.slug || ''}
                     onValueChange={handleSetDefaultConnection}
-                    options={llmConnections.map((conn) => ({
+                    options={llmConnections.filter((conn) => !isUnsupportedLlmConnection(conn)).map((conn) => ({
                       value: conn.slug,
                       label: displayLlmConnectionName(conn),
                       description: isOrderGatewayUrl(conn.baseUrl)
-                        ? (conn.customEndpoint?.api === 'openai-completions'
-                          ? t('apiSetup.format.openaiCompatible')
-                          : t('apiSetup.format.anthropicCompatible'))
-                        : conn.providerType === 'anthropic' ? 'Anthropic API' :
-                                   conn.providerType === 'pi' ? 'Selection Backend' :
+                        ? t('apiSetup.format.openaiCompatible')
+                        : conn.providerType === 'pi' ? 'Selection Backend' :
                                    conn.providerType === 'pi_compat' ? (conn.baseUrl?.toLowerCase().includes('manifest.build') ? 'Manifest' : 'Selection Backend Compatible') :
                                    conn.providerType || 'Unknown',
                     }))}
@@ -1121,6 +1136,7 @@ export default function AiSettingsPage() {
                         validationState={validationStates[conn.slug]?.state || 'idle'}
                         validationError={validationStates[conn.slug]?.error}
                         isDuplicateAccount={!!conn.oauthAccountUuid && duplicateAccountUuids.has(conn.oauthAccountUuid)}
+                        unsupported={isUnsupportedLlmConnection(conn)}
                       />
                     ))
                   )}

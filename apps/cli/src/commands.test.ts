@@ -255,12 +255,12 @@ describe('shouldSetupLlmConnection', () => {
     expect(shouldSetupLlmConnection(2, { provider: 'deepseek', baseUrl: '' })).toBe(true)
   })
 
-  it('skips setup for the default anthropic provider when connections already exist', () => {
-    expect(shouldSetupLlmConnection(2, { provider: 'anthropic', baseUrl: '' })).toBe(false)
+  it('skips setup for the default openai provider when connections already exist', () => {
+    expect(shouldSetupLlmConnection(2, { provider: 'openai', baseUrl: '' })).toBe(false)
   })
 
   it('forces setup for custom endpoints', () => {
-    expect(shouldSetupLlmConnection(2, { provider: 'anthropic', baseUrl: 'https://api.example.com' })).toBe(true)
+    expect(shouldSetupLlmConnection(2, { provider: 'openai', baseUrl: 'https://api.example.com' })).toBe(true)
   })
 })
 

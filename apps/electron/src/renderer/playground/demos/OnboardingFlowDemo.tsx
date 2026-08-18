@@ -20,7 +20,7 @@ type DemoStep = 'welcome' | 'provider-select' | 'credentials' | 'local-model' | 
 
 /** Map ProviderChoice → ApiSetupMethod for the credentials step */
 const CHOICE_TO_METHOD: Record<Exclude<ProviderChoice, 'local'>, ApiSetupMethod> = {
-  order: 'anthropic_api_key',
+  order: 'pi_api_key',
   api_key: 'pi_api_key',
 }
 

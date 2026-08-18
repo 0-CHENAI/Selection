@@ -101,26 +101,20 @@ describe('groupConnectionsByProvider', () => {
     expect(groupConnectionsByProvider([])).toEqual([])
   })
 
-  test('groups anthropic providers into "Anthropic"', () => {
+  test('omits leftover Anthropic connections from the picker', () => {
     const a = conn('a', 'anthropic')
     const b = conn('b', 'anthropic')
-    const result = groupConnectionsByProvider([a, b])
-    expect(result).toEqual([['Anthropic', [a, b]]])
+    const piConn = conn('pi-1', 'pi')
+    expect(groupConnectionsByProvider([a, b])).toEqual([])
+    expect(groupConnectionsByProvider([piConn, a])).toEqual([['Selection Backend', [piConn]]])
   })
 
   test('preserves intra-group order', () => {
-    const a = conn('first', 'anthropic')
-    const b = conn('second', 'anthropic')
-    const c = conn('third', 'anthropic')
+    const a = conn('first', 'pi')
+    const b = conn('second', 'pi')
+    const c = conn('third', 'pi')
     const result = groupConnectionsByProvider([a, b, c])
     expect(result[0][1].map(c => c.slug)).toEqual(['first', 'second', 'third'])
-  })
-
-  test('places "Anthropic" group before pi groups (display order)', () => {
-    const piConn = conn('pi-1', 'pi')
-    const anth = conn('anthropic-1', 'anthropic')
-    const result = groupConnectionsByProvider([piConn, anth])
-    expect(result.map(([k]) => k)).toEqual(['Anthropic', 'Selection Backend'])
   })
 
   test('"pi_compat" with localhost baseUrl goes to "Local"', () => {
@@ -136,21 +130,19 @@ describe('groupConnectionsByProvider', () => {
   })
 
   test('drops empty groups from the output', () => {
-    const a = conn('a', 'anthropic')
+    const a = conn('a', 'pi')
     const result = groupConnectionsByProvider([a])
-    // Only "Anthropic" appears; "Local" and "Selection Backend" are dropped.
     expect(result.length).toBe(1)
-    expect(result[0][0]).toBe('Anthropic')
+    expect(result[0][0]).toBe('Selection Backend')
   })
 
-  test('full mixed input — anthropic + local + remote pi_compat + pi', () => {
+  test('full mixed input — leftover anthropic is dropped, local + remote remain', () => {
     const anth = conn('a', 'anthropic')
     const local = conn('ollama', 'pi_compat', { baseUrl: 'http://127.0.0.1:1234' })
     const remote = conn('or', 'pi_compat', { baseUrl: 'https://openrouter.ai' })
     const pi = conn('p', 'pi')
     const result = groupConnectionsByProvider([anth, local, remote, pi])
     expect(result.map(([k, conns]) => [k, conns.map(c => c.slug)])).toEqual([
-      ['Anthropic', ['a']],
       ['Local', ['ollama']],
       ['Selection Backend', ['or', 'p']],
     ])

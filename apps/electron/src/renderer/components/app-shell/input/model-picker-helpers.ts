@@ -2,6 +2,7 @@ import {
   connectionModelIdsMatch,
   getModelsForProviderType,
   isLocalConnection,
+  isUnsupportedLlmConnection,
   type LlmConnection,
 } from '@config/llm-connections'
 import type { ModelDefinition } from '@config/models'
@@ -53,25 +54,23 @@ export type ConnectionGroup = [groupName: string, connections: LlmConnection[]]
 
 /**
  * Group connections by provider type for hierarchical picker rendering.
- * Each provider section can contain multiple connections (API Key, OAuth, …).
- * Order is significant for UI: Anthropic, Local, Selection Backend.
+ * Leftover Anthropic connections are omitted so they cannot be selected
+ * for new sessions; locked sessions still surface via the unavailable banner.
+ * Order is significant for UI: Local, Selection Backend.
  * Empty groups are dropped.
  */
 export function groupConnectionsByProvider<T extends LlmConnection>(
   connections: readonly T[],
 ): Array<[string, T[]]> {
   const groups: Record<string, T[]> = {
-    'Anthropic': [],
     'Local': [],
     'Selection Backend': [],
   }
   for (const conn of connections) {
-    const provider = conn.providerType || 'anthropic'
-    if (provider === 'anthropic') {
-      groups['Anthropic'].push(conn)
-    } else if (provider === 'pi_compat' && isLocalConnection(conn)) {
+    if (isUnsupportedLlmConnection(conn)) continue
+    if (conn.providerType === 'pi_compat' && isLocalConnection(conn)) {
       groups['Local'].push(conn)
-    } else if (provider === 'pi' || provider === 'pi_compat') {
+    } else if (conn.providerType === 'pi' || conn.providerType === 'pi_compat') {
       groups['Selection Backend'].push(conn)
     }
   }
