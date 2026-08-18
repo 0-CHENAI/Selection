@@ -113,52 +113,7 @@ unzip -o "$TEMP_DIR/${BUN_DOWNLOAD}.zip" -d "$TEMP_DIR"
 cp "$TEMP_DIR/${BUN_DOWNLOAD}/bun" "$ELECTRON_DIR/vendor/bun/"
 chmod +x "$ELECTRON_DIR/vendor/bun/bun"
 
-# 4. Copy SDK from root node_modules (monorepo hoisting).
-# Since SDK 0.2.113: thin core + per-platform binary package.
-# See apps/electron/scripts/build-dmg.sh for the full rationale.
-SDK_SOURCE="$ROOT_DIR/node_modules/@anthropic-ai/claude-agent-sdk"
-require_path "$SDK_SOURCE" "SDK core" "Run 'bun install' from the repository root first."
-echo "Copying SDK core..."
-mkdir -p "$ELECTRON_DIR/node_modules/@anthropic-ai"
-rm -rf "$ELECTRON_DIR/node_modules/@anthropic-ai/claude-agent-sdk"
-cp -r "$SDK_SOURCE" "$ELECTRON_DIR/node_modules/@anthropic-ai/"
-
-# 4a. Resolve the target arch's binary package (cross-fetch from npm if absent).
-SDK_BIN_PKG="claude-agent-sdk-linux-${ARCH}"
-SDK_BIN_SOURCE="$ROOT_DIR/node_modules/@anthropic-ai/${SDK_BIN_PKG}"
-if [ ! -d "$SDK_BIN_SOURCE" ]; then
-    echo "Cross-arch build: ${SDK_BIN_PKG} not in node_modules — fetching from npm..."
-    SDK_VERSION=$(node -p "require('$ROOT_DIR/package.json').dependencies['@anthropic-ai/claude-agent-sdk']" | tr -d '"')
-    PKG_TMP=$(mktemp -d)
-    trap "rm -rf $PKG_TMP" RETURN
-    (
-        cd "$PKG_TMP"
-        npm pack "@anthropic-ai/${SDK_BIN_PKG}@${SDK_VERSION}" >/dev/null
-        TARBALL=$(ls anthropic-ai-*.tgz | head -1)
-        tar -xzf "$TARBALL"
-    )
-    mkdir -p "$SDK_BIN_SOURCE"
-    cp -r "$PKG_TMP/package/." "$SDK_BIN_SOURCE/"
-fi
-
-require_path "$SDK_BIN_SOURCE" "SDK native binary package (${SDK_BIN_PKG})" \
-  "Run 'bun install' from the repository root, or check your network for the npm cross-fetch."
-
-echo "Staging SDK native binary as claude-agent-sdk-binary alias..."
-ALIAS_DEST="$ELECTRON_DIR/node_modules/@anthropic-ai/claude-agent-sdk-binary"
-rm -rf "$ALIAS_DEST"
-mkdir -p "$ALIAS_DEST"
-cp -r "$SDK_BIN_SOURCE/." "$ALIAS_DEST/"
-chmod +x "$ALIAS_DEST/claude"
-
-BIN_SIZE=$(stat -c%s "$ALIAS_DEST/claude")
-if [ "$BIN_SIZE" -lt 50000000 ]; then
-    echo "ERROR: claude binary at $ALIAS_DEST/claude is only ${BIN_SIZE} bytes (expected ~210 MB)"
-    exit 1
-fi
-echo "  Native binary: $((BIN_SIZE / 1024 / 1024)) MB"
-
-# 5. Copy ripgrep (sourced from @vscode/ripgrep since 0.2.113).
+# 4. Copy ripgrep for the search service.
 RG_SOURCE="$ROOT_DIR/node_modules/@vscode/ripgrep"
 require_path "$RG_SOURCE" "@vscode/ripgrep" "Run 'bun install' and 'bun pm trust @vscode/ripgrep' first."
 require_path "$RG_SOURCE/bin/rg" "ripgrep binary" "@vscode/ripgrep postinstall did not run."
