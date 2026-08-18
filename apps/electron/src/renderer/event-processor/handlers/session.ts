@@ -104,6 +104,7 @@ export function handleComplete(
         messages: updatedMessages,
         isProcessing: false,
         currentStatus: undefined,  // Clear any lingering status
+        processingStartedAt: undefined,
         // Update tokenUsage from complete event (for real-time context counter updates)
         tokenUsage: event.tokenUsage ?? session.tokenUsage,
         // Update hasUnread flag from main process (state machine for NEW badge)
@@ -146,6 +147,7 @@ export function handleError(
         messages: [...messagesWithFailedTools, errorMessage],
         isProcessing: false,
         currentStatus: undefined,  // Clear any lingering status
+        processingStartedAt: undefined,
       },
       streaming: null,
     },
@@ -197,6 +199,7 @@ export function handleTypedError(
         messages: [...messagesWithFailedTools, errorMessage],
         isProcessing: false,
         currentStatus: undefined,  // Clear any lingering status
+        processingStartedAt: undefined,
       },
       streaming: null,
     },
@@ -351,6 +354,7 @@ export function handleInterrupted(
         isProcessing: false,
         messages,
         currentStatus: undefined,  // Clear any lingering status
+        processingStartedAt: undefined,
       },
       streaming: null,
     },
@@ -588,6 +592,9 @@ export function handleUserMessage(
         lastMessageRole: 'user',  // Clear plan badge when user responds
         // Set isProcessing when message is accepted/processing (enables multi-window sync)
         isProcessing: status === 'accepted' || status === 'processing',
+        processingStartedAt: (status === 'accepted' || status === 'processing')
+          ? session.processingStartedAt ?? Date.now()
+          : undefined,
       },
       streaming,
     },
@@ -913,6 +920,7 @@ export function handleAuthRequest(
       session: {
         ...appendMessage(session, event.message),
         isProcessing: false,  // Agent execution is paused
+        processingStartedAt: undefined,
       },
       streaming: null,  // Clear any streaming state
     },
@@ -1022,6 +1030,10 @@ export function handleMessagesTruncated(
         // running state as a fresh send so the input shows Stop immediately.
         isProcessing: true,
         currentStatus: undefined,
+        // Reuse the original user-message timestamp for history, but start the
+        // elapsed-time clock from this regenerate so the indicator does not
+        // show time since the first send (e.g. 130:34).
+        processingStartedAt: Date.now(),
       },
       streaming: null,
     },

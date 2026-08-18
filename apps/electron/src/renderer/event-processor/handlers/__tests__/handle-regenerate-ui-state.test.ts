@@ -37,6 +37,7 @@ describe('regenerate UI state (#17)', () => {
     expect(next.state.session.messages.map(m => m.id)).toEqual(['u1'])
     expect(next.state.session.isProcessing).toBe(true)
     expect(next.state.session.currentStatus).toBeUndefined()
+    expect(next.state.session.processingStartedAt).toBeGreaterThan(1)
     expect(next.state.streaming).toBeNull()
   })
 
@@ -55,6 +56,7 @@ describe('regenerate UI state (#17)', () => {
     })
 
     expect(next.state.session.isProcessing).toBe(true)
+    expect(next.state.session.processingStartedAt).toBe(afterTruncate.state.session.processingStartedAt)
   })
 
   it('returns to idle after regenerate completes', () => {
@@ -70,6 +72,7 @@ describe('regenerate UI state (#17)', () => {
     })
 
     expect(next.state.session.isProcessing).toBe(false)
+    expect(next.state.session.processingStartedAt).toBeUndefined()
     expect(next.state.streaming).toBeNull()
   })
 
@@ -87,6 +90,7 @@ describe('regenerate UI state (#17)', () => {
     })
 
     expect(next.state.session.isProcessing).toBe(false)
+    expect(next.state.session.processingStartedAt).toBeUndefined()
     expect(next.state.session.messages.some(m => m.role === 'error')).toBe(true)
   })
 
@@ -104,6 +108,25 @@ describe('regenerate UI state (#17)', () => {
     })
 
     expect(next.state.session.isProcessing).toBe(false)
+    expect(next.state.session.processingStartedAt).toBeUndefined()
     expect(next.state.session.messages.map(m => m.id)).toEqual(['u1', 'info-1'])
+  })
+
+  it('clears the elapsed-time clock when a mid-stream user_message is only queued', () => {
+    const running = handleMessagesTruncated(makeState(), {
+      type: 'messages_truncated',
+      sessionId: 'session-1',
+      keepThroughMessageId: 'u1',
+    })
+
+    const next = handleUserMessage(running.state, {
+      type: 'user_message',
+      sessionId: 'session-1',
+      message: { id: 'u2', role: 'user', content: 'later', timestamp: 4 } as SessionState['session']['messages'][number],
+      status: 'queued',
+    })
+
+    expect(next.state.session.isProcessing).toBe(false)
+    expect(next.state.session.processingStartedAt).toBeUndefined()
   })
 })
