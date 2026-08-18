@@ -592,6 +592,9 @@ export function handleUserMessage(
         lastMessageRole: 'user',  // Clear plan badge when user responds
         // Set isProcessing when message is accepted/processing (enables multi-window sync)
         isProcessing: status === 'accepted' || status === 'processing',
+        processingStartedAt: (status === 'accepted' || status === 'processing')
+          ? session.processingStartedAt ?? Date.now()
+          : undefined,
       },
       streaming,
     },
