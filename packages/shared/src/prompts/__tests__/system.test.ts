@@ -37,6 +37,13 @@ describe('system prompt guidance', () => {
     expect(prompt).not.toContain('The subtask needs tools (Read, Bash, Grep)')
   })
 
+  it('tells the model to speak source titles rather than slugs', () => {
+    const prompt = getSystemPrompt(undefined, undefined, '/tmp/workspace', '/tmp/workspace')
+
+    expect(prompt).toContain('Identify each source as `{title} ({slug})`')
+    expect(prompt).toContain('Name sources and skills as title + slug')
+  })
+
   it('treats OfficeCLI as a native capability rather than a skill', () => {
     const prompt = getSystemPrompt(undefined, undefined, '/tmp/workspace', '/tmp/workspace')
 

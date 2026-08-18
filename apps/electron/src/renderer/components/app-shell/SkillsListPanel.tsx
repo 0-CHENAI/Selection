@@ -106,6 +106,7 @@ export function SkillsListPanel({
           title,
           badges: (
             <span className="flex items-center gap-1.5 min-w-0">
+              <span className="shrink-0 font-mono text-[10px] text-muted-foreground">{skill.slug}</span>
               {skill.source === 'project' && (
                 <span className="shrink-0 text-[10px] px-1.5 py-0.5 rounded-full bg-foreground/5 text-muted-foreground">
                   {t('skillsList.projectBadge')}

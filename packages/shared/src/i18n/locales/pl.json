@@ -486,7 +486,7 @@
   "diff.enableBackground": "Włącz podświetlanie tła",
   "diff.switchToSplit": "Przełącz na widok podzielony",
   "diff.switchToUnified": "Przełącz na widok zunifikowany",
-  "displayTitle.hint": "Zostaw puste, aby przywrócić nazwę domyślną",
+  "displayTitle.hint": "Zostaw puste, aby przywrócić nazwę domyślną. Przy kilku podobnych źródłach użyj wyróżniającego się tytułu; identyfikator pozostaje unikalny.",
   "displayTitle.label": "Tytuł wyświetlany",
   "displayTitle.renameSkill": "Zmień nazwę umiejętności",
   "displayTitle.renameSource": "Zmień nazwę źródła",

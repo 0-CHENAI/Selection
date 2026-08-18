@@ -50,16 +50,18 @@ export function resolveSkillTitle(skill: {
   return skill.displayTitle?.trim() || skill.metadata.name
 }
 
-/** Agent-facing label: keep the slug callable, show the alias when present. */
-export function formatSourceRef(source: {
-  displayTitle?: string
-  config: { name: string; slug: string }
-}): string {
-  const alias = source.displayTitle?.trim()
-  if (alias && alias !== source.config.slug) {
-    return `${alias} [${source.config.slug}]`
-  }
-  return source.config.slug
+/** Agent-facing label: lead with the user-facing title, keep slug machine-readable. */
+export function formatSourceRef(
+  source: {
+    displayTitle?: string
+    config: { name: string; slug: string }
+  },
+  extra?: string,
+): string {
+  const title = resolveSourceTitle(source)
+  const parts = [`slug: ${source.config.slug}`]
+  if (extra) parts.push(extra)
+  return `${title} (${parts.join(', ')})`
 }
 
 export function matchesTitleSearch(query: string, ...fields: Array<string | undefined>): boolean {

@@ -150,6 +150,7 @@ export function InlineSkillMention({
               </div>
               <div className="flex-1 min-w-0">
                 <div className="font-medium truncate">{resolveSkillTitle(skill)}</div>
+                <div className="text-[11px] text-foreground/50 truncate font-mono">{skill.slug}</div>
                 {skill.metadata.description && (
                   <div className="text-[11px] text-foreground/50 truncate">
                     {skill.metadata.description}

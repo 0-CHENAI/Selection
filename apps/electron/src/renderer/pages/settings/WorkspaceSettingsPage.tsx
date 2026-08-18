@@ -507,7 +507,7 @@ export default function WorkspaceSettingsPage() {
                           {resolveSourceTitle(source)}
                         </span>
                       }
-                      description={source.config.tagline}
+                      description={[source.config.slug, source.config.tagline].filter(Boolean).join(' · ')}
                       checked={enabledSourceSlugs.includes(source.config.slug)}
                       onCheckedChange={(checked) => handleSourceToggle(source.config.slug, checked)}
                     />

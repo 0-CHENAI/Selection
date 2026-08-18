@@ -105,8 +105,8 @@ export function CopyResourcesFromWorkspaceDialog({
   const resourceKindKey = resourceType === 'source' ? 'sources' : 'skills'
 
   const items = resourceType === 'source'
-    ? sources.map(s => ({ id: s.config.slug, label: resolveSourceTitle(s) || s.config.slug, hint: s.config.type }))
-    : skills.map(s => ({ id: s.slug, label: s.name, hint: 'skill' }))
+    ? sources.map(s => ({ id: s.config.slug, label: resolveSourceTitle(s) || s.config.slug, hint: s.config.slug }))
+    : skills.map(s => ({ id: s.slug, label: s.name, hint: s.slug }))
 
   const toggle = (id: string) => {
     setSelected(prev => {

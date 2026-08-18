@@ -486,7 +486,7 @@
   "diff.enableBackground": "Enable background highlighting",
   "diff.switchToSplit": "Switch to split view",
   "diff.switchToUnified": "Switch to unified view",
-  "displayTitle.hint": "Leave empty to restore the default name",
+  "displayTitle.hint": "Leave empty to restore the default name. Use a distinctive title when several sources share a vendor; the identifier stays unique.",
   "displayTitle.label": "Display title",
   "displayTitle.renameSkill": "Rename skill",
   "displayTitle.renameSource": "Rename source",

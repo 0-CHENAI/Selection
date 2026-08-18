@@ -486,7 +486,7 @@
   "diff.enableBackground": "Activar resaltado de fondo",
   "diff.switchToSplit": "Cambiar a vista dividida",
   "diff.switchToUnified": "Cambiar a vista unificada",
-  "displayTitle.hint": "Déjalo vacío para restaurar el nombre predeterminado",
+  "displayTitle.hint": "Déjalo vacío para restaurar el nombre predeterminado. Si hay varios orígenes parecidos, usa un título distintivo; el identificador sigue siendo único.",
   "displayTitle.label": "Título para mostrar",
   "displayTitle.renameSkill": "Renombrar skill",
   "displayTitle.renameSource": "Renombrar origen",

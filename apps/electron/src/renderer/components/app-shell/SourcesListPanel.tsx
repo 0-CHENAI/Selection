@@ -153,6 +153,7 @@ export function SourcesListPanel({
                   {t(statusConfig.labelKey)}
                 </EntityListBadge>
               )}
+              <span className="shrink-0 font-mono text-[10px] text-muted-foreground">{source.config.slug}</span>
               {subtitle && <span className="truncate">{subtitle}</span>}
             </>
           ),

@@ -4,6 +4,7 @@ import { FilterableSelectPopover } from '@craft-agent/ui'
 
 import { cn } from '@/lib/utils'
 import { SkillAvatar } from '@/components/ui/skill-avatar'
+import { TitleSlug } from '@/components/ui/title-slug'
 import { resolveSkillTitle, skillTitleSearchText } from '@craft-agent/shared/display-titles'
 import type { LoadedSkill } from '../../../shared/types'
 
@@ -67,7 +68,7 @@ export function SkillSelectorPopover({
           <div className="shrink-0 text-muted-foreground flex items-center">
             <SkillAvatar skill={skill} size="sm" workspaceId={workspaceId} />
           </div>
-          <div className="flex-1 min-w-0 truncate">{resolveSkillTitle(skill)}</div>
+          <TitleSlug className="flex-1" title={resolveSkillTitle(skill)} slug={skill.slug} />
           <div
             className={cn(
               'shrink-0 h-4 w-4 rounded-full bg-current flex items-center justify-center',

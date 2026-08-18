@@ -4,6 +4,7 @@ import { FilterableSelectPopover } from '@craft-agent/ui'
 
 import { cn } from '@/lib/utils'
 import { SourceAvatar } from '@/components/ui/source-avatar'
+import { TitleSlug } from '@/components/ui/title-slug'
 import { resolveSourceTitle, sourceTitleSearchText } from '@craft-agent/shared/display-titles'
 import type { LoadedSource } from '../../../shared/types'
 
@@ -60,7 +61,7 @@ export function SourceSelectorPopover({
               ? <SourceAvatar source={source} size="sm" />
               : <DatabaseZap className="h-4 w-4" />}
           </div>
-          <div className="flex-1 min-w-0 truncate">{resolveSourceTitle(source)}</div>
+          <TitleSlug className="flex-1" title={resolveSourceTitle(source)} slug={source.config.slug} />
           <div
             className={cn(
               'shrink-0 h-4 w-4 rounded-full bg-current flex items-center justify-center',

@@ -209,15 +209,19 @@ describe('display title overlay', () => {
 })
 
 describe('formatSourceRef', () => {
-  it('keeps the slug when there is no alias', () => {
-    expect(formatSourceRef({ config: { name: 'Cortex', slug: 'cortex' } })).toBe('cortex')
+  it('leads with the original name when there is no alias', () => {
+    expect(formatSourceRef({ config: { name: 'Cortex', slug: 'cortex' } })).toBe('Cortex (slug: cortex)')
   })
 
-  it('shows the display title next to the slug', () => {
+  it('leads with the display title and keeps the slug labeled', () => {
     expect(formatSourceRef({
       displayTitle: '知识库',
       config: { name: 'Cortex', slug: 'cortex' },
-    })).toBe('知识库 [cortex]')
+    })).toBe('知识库 (slug: cortex)')
+    expect(formatSourceRef({
+      displayTitle: '知识库',
+      config: { name: 'Cortex', slug: 'cortex' },
+    }, 'inactive')).toBe('知识库 (slug: cortex, inactive)')
   })
 })
 

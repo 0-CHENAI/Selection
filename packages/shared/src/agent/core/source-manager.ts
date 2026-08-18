@@ -194,7 +194,9 @@ export class SourceManager {
         const source = this.allSources.find((s) => s.config.slug === slug);
         const label = source ? formatSourceRef(source) : slug;
         const hasWorkingTools = this.activeSlugs.has(slug);
-        return hasWorkingTools ? label : `${label} (no tools)`;
+        return source && !hasWorkingTools
+          ? formatSourceRef(source, 'no tools')
+          : label;
       });
       parts.push(`Active: ${activeWithStatus.join(', ')}`);
     } else {
@@ -209,7 +211,7 @@ export class SourceManager {
           : sourceNeedsAuthentication(s)
             ? 'needs auth'
             : 'inactive';
-        return `${formatSourceRef(s)} (${reason})`;
+        return formatSourceRef(s, reason);
       });
       parts.push(`Inactive: ${inactiveList.join(', ')}`);
     }

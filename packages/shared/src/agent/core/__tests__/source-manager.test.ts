@@ -183,8 +183,8 @@ describe('SourceManager', () => {
 
       expect(formatted).toContain('<sources>');
       expect(formatted).toContain('</sources>');
-      expect(formatted).toContain('Active: github');
-      expect(formatted).toContain('slack (inactive)');
+      expect(formatted).toContain('Active: Github (slug: github)');
+      expect(formatted).toContain('Slack (slug: slack, inactive)');
     });
 
     it('should show "Active: none" when no sources are active', () => {
@@ -211,7 +211,7 @@ describe('SourceManager', () => {
 
       const formatted = sourceManager.formatSourceState();
 
-      expect(formatted).toContain('github (no tools)');
+      expect(formatted).toContain('Github (slug: github, no tools)');
     });
 
     it('should show display titles next to slugs', () => {
@@ -222,8 +222,8 @@ describe('SourceManager', () => {
 
       const formatted = sourceManager.formatSourceState();
 
-      expect(formatted).toContain('知识库 [cortex] (inactive)');
-      expect(formatted).toContain('- 知识库 [cortex]: Knowledge base');
+      expect(formatted).toContain('知识库 (slug: cortex, inactive)');
+      expect(formatted).toContain('- 知识库 (slug: cortex): Knowledge base');
     });
   });
 

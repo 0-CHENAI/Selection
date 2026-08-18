@@ -486,7 +486,7 @@
   "diff.enableBackground": "启用背景高亮",
   "diff.switchToSplit": "切换到分栏视图",
   "diff.switchToUnified": "切换到统一视图",
-  "displayTitle.hint": "留空则恢复默认名称",
+  "displayTitle.hint": "留空则恢复默认名称。有多个相似来源时请起容易区分的标题；标识符始终唯一。",
   "displayTitle.label": "显示标题",
   "displayTitle.renameSkill": "重命名技能",
   "displayTitle.renameSource": "重命名数据源",

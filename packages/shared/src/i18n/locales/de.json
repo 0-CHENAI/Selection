@@ -486,7 +486,7 @@
   "diff.enableBackground": "Hintergrundhervorhebung aktivieren",
   "diff.switchToSplit": "Zur geteilten Ansicht wechseln",
   "diff.switchToUnified": "Zur einheitlichen Ansicht wechseln",
-  "displayTitle.hint": "Leer lassen, um den Standardnamen wiederherzustellen",
+  "displayTitle.hint": "Leer lassen, um den Standardnamen wiederherzustellen. Bei mehreren ähnlichen Quellen einen eindeutigen Titel wählen; die Kennung bleibt eindeutig.",
   "displayTitle.label": "Anzeigename",
   "displayTitle.renameSkill": "Skill umbenennen",
   "displayTitle.renameSource": "Quelle umbenennen",
