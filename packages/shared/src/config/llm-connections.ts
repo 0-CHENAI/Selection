@@ -441,13 +441,28 @@ export function isCompatProvider(providerType: LlmProviderType): boolean {
 }
 
 /**
- * Check if a provider type uses the Anthropic Claude Agent SDK.
- * Only direct Anthropic API connections use the Claude SDK.
- * @param providerType - Provider type to check
- * @returns true if this provider uses the Anthropic SDK
+ * Check if a provider type is a leftover Anthropic official connection.
+ * These are no longer a supported product path (Pi + OpenAI Compatible only).
  */
 export function isAnthropicProvider(providerType: LlmProviderType): boolean {
   return providerType === 'anthropic';
+}
+
+export const UNSUPPORTED_LLM_CONNECTION_MESSAGE =
+  'This connection is no longer supported. Reconfigure it with OpenAI Compatible or another Selection Backend provider.';
+
+/**
+ * Connections that must not create a backend or stay selectable after the
+ * Anthropic runtime was removed: official Anthropic, Pi-routed Anthropic keys,
+ * and custom endpoints that speak anthropic-messages.
+ */
+export function isUnsupportedLlmConnection(
+  connection: Pick<LlmConnection, 'providerType' | 'piAuthProvider' | 'customEndpoint'>,
+): boolean {
+  if (connection.providerType === 'anthropic') return true;
+  if (connection.providerType === 'pi' && connection.piAuthProvider === 'anthropic') return true;
+  if (connection.customEndpoint?.api === 'anthropic-messages') return true;
+  return false;
 }
 
 /**
@@ -485,7 +500,7 @@ export function isPiProvider(providerType: LlmProviderType): boolean {
  *   downside to defaulting to immediate steering.
  */
 export function defaultMidStreamBehavior(providerType: LlmProviderType): MidStreamBehavior {
-  return providerType === 'anthropic' ? 'queue' : 'steer';
+  return providerType === 'pi' || providerType === 'pi_compat' ? 'steer' : 'queue';
 }
 
 /**
@@ -713,33 +728,72 @@ export function getDefaultModelForConnection(providerType: LlmProviderType, piAu
  * @param connections        - All available connections (with status metadata)
  * @returns The resolved slug, or undefined when no connections exist
  */
+type ConnectionSlugResolveInput = Pick<LlmConnectionWithStatus, 'slug' | 'isDefault'> &
+  Partial<Pick<LlmConnection, 'providerType' | 'piAuthProvider' | 'customEndpoint'>>
+
+function isListedConnectionUnsupported(
+  conn: Partial<Pick<LlmConnection, 'providerType' | 'piAuthProvider' | 'customEndpoint'>>,
+): boolean {
+  return !!conn.providerType && isUnsupportedLlmConnection({
+    providerType: conn.providerType,
+    piAuthProvider: conn.piAuthProvider,
+    customEndpoint: conn.customEndpoint,
+  })
+}
+
 export function resolveEffectiveConnectionSlug(
   sessionConnection: string | undefined,
   workspaceDefault: string | undefined,
-  connections: Pick<LlmConnectionWithStatus, 'slug' | 'isDefault'>[],
+  connections: ConnectionSlugResolveInput[],
 ): string | undefined {
-  return sessionConnection
-    ?? workspaceDefault
-    ?? connections.find(c => c.isDefault)?.slug
-    ?? connections[0]?.slug
+  // A locked session connection is never rewritten — unavailable UI depends on
+  // seeing the original slug even when it is leftover Anthropic.
+  if (sessionConnection) return sessionConnection
+
+  if (workspaceDefault) {
+    const workspaceConn = connections.find(c => c.slug === workspaceDefault)
+    if (!workspaceConn || !isListedConnectionUnsupported(workspaceConn)) {
+      return workspaceDefault
+    }
+  }
+
+  const flaggedDefault = connections.find(c => c.isDefault)
+  if (flaggedDefault && !isListedConnectionUnsupported(flaggedDefault)) {
+    return flaggedDefault.slug
+  }
+
+  return connections.find(c => !isListedConnectionUnsupported(c))?.slug
 }
 
 /**
- * Check if a session's locked connection is unavailable (deleted/removed).
- * Returns true only when a session has an explicit llmConnection that doesn't
- * match any current connection. Sessions without a stored connection (using
- * the fallback chain) are never "unavailable".
+ * Check if a session cannot send because its effective connection is gone or
+ * leftover Anthropic. Locked sessions stay pinned to their stored slug.
+ * Unlocked sessions use the fallback chain, skipping unsupported leftovers.
  *
  * @param sessionConnection - Per-session connection slug (session.llmConnection)
  * @param connections - All available connections
- * @returns true if the session's connection no longer exists
+ * @param workspaceDefault - Workspace-level default connection slug
+ * @returns true if the session cannot use a supported connection
  */
 export function isSessionConnectionUnavailable(
   sessionConnection: string | undefined,
-  connections: Pick<LlmConnectionWithStatus, 'slug'>[],
+  connections: ConnectionSlugResolveInput[],
+  workspaceDefault?: string,
 ): boolean {
-  if (!sessionConnection) return false
-  return !connections.some(c => c.slug === sessionConnection)
+  if (sessionConnection) {
+    const locked = connections.find(c => c.slug === sessionConnection)
+    if (!locked) return true
+    return isListedConnectionUnsupported(locked)
+  }
+
+  const slug = resolveEffectiveConnectionSlug(undefined, workspaceDefault, connections)
+  if (slug) {
+    const conn = connections.find(c => c.slug === slug)
+    if (!conn) return false
+    return isListedConnectionUnsupported(conn)
+  }
+
+  return connections.some(c => isListedConnectionUnsupported(c))
 }
 
 /**
@@ -1019,13 +1073,8 @@ export interface ResolvedAuthEnvVars {
 /**
  * Resolve authentication environment variables for an LLM connection.
  *
- * Provider-agnostic: switches on providerType to determine which env vars
- * to set and how to retrieve credentials. Shared by:
- * - `SessionManager.reinitializeAuth()` (maintains the host/default baseline)
- * - `ClaudeAgent.postInit()` (applies only to per-session envOverrides)
- *
- * Providers that handle auth internally (openai, copilot, pi) return
- * empty envVars — their auth is managed in postInit() via native mechanisms.
+ * Leftover Anthropic connections return unsupported and inject nothing.
+ * Pi / OpenAI Compatible handle credentials inside the runtime.
  *
  * @param connection - The LLM connection config
  * @param connectionSlug - Connection slug for credential lookup
@@ -1035,58 +1084,17 @@ export interface ResolvedAuthEnvVars {
  */
 export async function resolveAuthEnvVars(
   connection: LlmConnection,
-  connectionSlug: string,
-  credentialManager: CredentialManager,
-  getValidOAuthToken: (slug: string) => Promise<{ accessToken?: string | null }>,
+  _connectionSlug: string,
+  _credentialManager: CredentialManager,
+  _getValidOAuthToken: (slug: string) => Promise<{ accessToken?: string | null }>,
 ): Promise<ResolvedAuthEnvVars> {
   const envVars: Record<string, string> = {};
 
-  // Only Anthropic-SDK-based providers use env var auth
-  // OpenAI (Codex), Copilot, and Pi handle auth internally in their postInit()
-  if (!isAnthropicProvider(connection.providerType)) {
-    return { envVars, success: true };
+  if (isUnsupportedLlmConnection(connection)) {
+    return { envVars, success: false, warning: UNSUPPORTED_LLM_CONNECTION_MESSAGE };
   }
 
-  // Set base URL if configured
-  if (connection.baseUrl) {
-    envVars.ANTHROPIC_BASE_URL = connection.baseUrl;
-  }
-
-  const authType = connection.authType;
-
-  if (authType === 'api_key' || authType === 'api_key_with_endpoint' || authType === 'bearer_token') {
-    const apiKey = await credentialManager.getLlmApiKey(connectionSlug);
-    if (apiKey) {
-      envVars.ANTHROPIC_API_KEY = apiKey;
-    } else if (connection.baseUrl) {
-      // Keyless provider (e.g. Ollama)
-      envVars.ANTHROPIC_API_KEY = 'not-needed';
-    } else {
-      return { envVars, success: false, warning: `No API key found for: ${connectionSlug}` };
-    }
-  } else if (authType === 'oauth') {
-    if (connection.providerType === 'anthropic') {
-      // Anthropic OAuth uses getValidClaudeOAuthToken which handles token refresh
-      const tokenResult = await getValidOAuthToken(connectionSlug);
-      if (tokenResult.accessToken) {
-        envVars.CLAUDE_CODE_OAUTH_TOKEN = tokenResult.accessToken;
-      } else {
-        return { envVars, success: false, warning: `Failed to get OAuth token for: ${connectionSlug}` };
-      }
-    } else {
-      // Fallback OAuth path (should not be reached after legacy migration)
-      const llmOAuth = await credentialManager.getLlmOAuth(connectionSlug);
-      if (llmOAuth?.accessToken) {
-        envVars.CLAUDE_CODE_OAUTH_TOKEN = llmOAuth.accessToken;
-      } else {
-        return { envVars, success: false, warning: `No OAuth token found for: ${connectionSlug}` };
-      }
-    }
-  } else if (authType === 'environment') {
-    // Environment auth — credentials come from process.env, nothing to inject
-    return { envVars, success: true };
-  }
-
+  // Pi / OpenAI Compatible handle credentials inside the runtime.
   return { envVars, success: true };
 }
 

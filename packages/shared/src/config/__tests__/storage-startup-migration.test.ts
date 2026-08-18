@@ -572,3 +572,130 @@ describe('legacy Opus migration to default Opus (integration)', () => {
     expect(modelIdsOf(connection)).toEqual(['pi/us.anthropic.claude-opus-4-6-v1', 'pi/us.anthropic.claude-sonnet-4-6'])
   })
 })
+
+describe('leftover Anthropic connections are not rewritten onto Pi', () => {
+  it('keeps official Anthropic, Pi+Anthropic, and anthropic-messages connections as-is', () => {
+    const { configDir, workspaceRoot, configPath } = setupWorkspaceConfigDir()
+
+    writeRootConfig(configPath, workspaceRoot, [
+      {
+        slug: 'anthropic-api',
+        name: 'Anthropic (API Key)',
+        providerType: 'anthropic',
+        authType: 'api_key',
+        createdAt: Date.now(),
+        models: ['claude-sonnet-4-6'],
+        defaultModel: 'claude-sonnet-4-6',
+      },
+      {
+        slug: 'claude-max',
+        name: 'Claude Max',
+        providerType: 'anthropic',
+        authType: 'oauth',
+        createdAt: Date.now(),
+      },
+      {
+        slug: 'pi-anthropic',
+        name: 'Selection Backend (Anthropic)',
+        providerType: 'pi',
+        authType: 'api_key',
+        piAuthProvider: 'anthropic',
+        createdAt: Date.now(),
+      },
+      {
+        slug: 'compat-messages',
+        name: 'Custom Anthropic Messages',
+        providerType: 'pi_compat',
+        authType: 'api_key_with_endpoint',
+        customEndpoint: { api: 'anthropic-messages' },
+        baseUrl: 'https://example.com',
+        createdAt: Date.now(),
+      },
+    ])
+
+    runMigration(configDir)
+
+    const config = JSON.parse(readFileSync(configPath, 'utf-8')) as {
+      llmConnections: Array<Record<string, unknown>>
+    }
+
+    expect(findConnection(configPath, 'anthropic-api').providerType).toBe('anthropic')
+    expect(findConnection(configPath, 'anthropic-api').piAuthProvider).toBeUndefined()
+    expect(findConnection(configPath, 'claude-max').providerType).toBe('anthropic')
+    expect(findConnection(configPath, 'claude-max').authType).toBe('oauth')
+    expect(findConnection(configPath, 'pi-anthropic').providerType).toBe('pi')
+    expect(findConnection(configPath, 'pi-anthropic').piAuthProvider).toBe('anthropic')
+    expect(findConnection(configPath, 'compat-messages').providerType).toBe('pi_compat')
+    expect(findConnection(configPath, 'compat-messages').customEndpoint).toEqual({ api: 'anthropic-messages' })
+    expect(config.llmConnections).toHaveLength(4)
+  })
+
+  it('moves the global default off leftover Anthropic when a supported connection exists', () => {
+    const { configDir, workspaceRoot, configPath } = setupWorkspaceConfigDir()
+
+    writeFileSync(
+      configPath,
+      JSON.stringify(
+        {
+          workspaces: [
+            {
+              id: 'ws-1',
+              name: 'My Workspace',
+              rootPath: workspaceRoot,
+              createdAt: Date.now(),
+            },
+          ],
+          activeWorkspaceId: 'ws-1',
+          activeSessionId: null,
+          defaultLlmConnection: 'anthropic-api',
+          llmConnections: [
+            {
+              slug: 'anthropic-api',
+              name: 'Anthropic (API Key)',
+              providerType: 'anthropic',
+              authType: 'api_key',
+              createdAt: Date.now(),
+            },
+            {
+              slug: 'openai',
+              name: 'OpenAI',
+              providerType: 'pi',
+              authType: 'api_key',
+              piAuthProvider: 'openai',
+              createdAt: Date.now(),
+            },
+          ],
+        },
+        null,
+        2,
+      ),
+      'utf-8',
+    )
+
+    const run = Bun.spawnSync([
+      process.execPath,
+      '--eval',
+      `import '${PI_RESOLVER_SETUP_PATH}'; import { migrateLegacyLlmConnectionsConfig, migrateOrphanedDefaultConnections } from '${STORAGE_MODULE_PATH}'; migrateLegacyLlmConnectionsConfig(); migrateOrphanedDefaultConnections();`,
+    ], {
+      env: {
+        ...process.env,
+        CRAFT_CONFIG_DIR: configDir,
+      },
+      stdout: 'pipe',
+      stderr: 'pipe',
+    })
+    if (run.exitCode !== 0) {
+      throw new Error(
+        `migration subprocess failed (exit ${run.exitCode})\nstdout:\n${run.stdout.toString()}\nstderr:\n${run.stderr.toString()}`,
+      )
+    }
+
+    const config = JSON.parse(readFileSync(configPath, 'utf-8')) as {
+      defaultLlmConnection?: string
+      llmConnections: Array<Record<string, unknown>>
+    }
+    expect(findConnection(configPath, 'anthropic-api').providerType).toBe('anthropic')
+    expect(config.defaultLlmConnection).toBe('openai')
+    expect(config.llmConnections).toHaveLength(2)
+  })
+})

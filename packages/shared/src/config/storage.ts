@@ -44,7 +44,7 @@ import type { Workspace, AuthType } from '@craft-agent/core/types';
 
 // Import LLM connection types and constants
 import type { LlmConnection } from './llm-connections.ts';
-import { isValidProviderAuthCombination, getDefaultModelsForConnection, getDefaultModelForConnection, isPiProvider, toBedrockNativeId, type LlmProviderType } from './llm-connections.ts';
+import { isValidProviderAuthCombination, getDefaultModelsForConnection, getDefaultModelForConnection, isPiProvider, isUnsupportedLlmConnection, toBedrockNativeId, type LlmProviderType } from './llm-connections.ts';
 import { isGenericCustomEndpointName, isOrderGatewayUrl, ORDER_CONNECTION_NAME } from './order-gateway.ts';
 import {
   getModelProvider,
@@ -2529,10 +2529,10 @@ export function migrateOrphanedDefaultConnections(): void {
     for (const ws of workspaces) {
       const wsConfig = loadWorkspaceConfig(ws.rootPath);
       if (wsConfig?.defaults?.defaultLlmConnection) {
-        const exists = config.llmConnections.some(
+        const wsDefault = config.llmConnections.find(
           c => c.slug === wsConfig.defaults!.defaultLlmConnection
         );
-        if (!exists) {
+        if (!wsDefault || isUnsupportedLlmConnection(wsDefault)) {
           delete wsConfig.defaults.defaultLlmConnection;
           saveWorkspaceConfig(ws.rootPath, wsConfig);
         }
@@ -2552,18 +2552,26 @@ export function migrateOrphanedDefaultConnections(): void {
  * Called internally by write operations to fix inconsistent state.
  * This is NOT called on read - reads never modify config.
  */
+function firstSupportedLlmConnectionSlug(connections: LlmConnection[]): string | undefined {
+  return connections.find(c => !isUnsupportedLlmConnection(c))?.slug;
+}
+
 function ensureDefaultLlmConnection(config: StoredConfig): boolean {
   if (!config.llmConnections || config.llmConnections.length === 0) {
     return false;
   }
 
-  const defaultExists = config.llmConnections.some(c => c.slug === config.defaultLlmConnection);
-  if (!config.defaultLlmConnection || !defaultExists) {
-    config.defaultLlmConnection = config.llmConnections[0]!.slug;
-    return true;
+  const current = config.llmConnections.find(c => c.slug === config.defaultLlmConnection);
+  if (current && !isUnsupportedLlmConnection(current)) {
+    return false;
   }
 
-  return false;
+  const next = firstSupportedLlmConnectionSlug(config.llmConnections);
+  if (next === config.defaultLlmConnection) {
+    return false;
+  }
+  config.defaultLlmConnection = next;
+  return true;
 }
 
 /**
@@ -2660,6 +2668,8 @@ export function getLlmConnection(slug: string): LlmConnection | null {
  * @returns true if added, false if slug already exists
  */
 export function addLlmConnection(connection: LlmConnection): boolean {
+  if (isUnsupportedLlmConnection(connection)) return false;
+
   const config = loadStoredConfig();
   if (!config) return false;
 
@@ -2800,7 +2810,7 @@ export function deleteLlmConnection(slug: string): boolean {
 
   // If deleted connection was the default, reset to first remaining or clear
   if (config.defaultLlmConnection === slug) {
-    config.defaultLlmConnection = connections.length > 0 ? connections[0]!.slug : undefined;
+    config.defaultLlmConnection = firstSupportedLlmConnectionSlug(connections);
   }
 
   saveConfig(config);
@@ -2845,7 +2855,13 @@ export function getDefaultLlmConnection(): string | null {
     return null;
   }
 
-  return config.defaultLlmConnection || config.llmConnections[0]?.slug || null;
+  const preferred = config.defaultLlmConnection
+    ? config.llmConnections.find(c => c.slug === config.defaultLlmConnection)
+    : undefined;
+  if (preferred && !isUnsupportedLlmConnection(preferred)) {
+    return preferred.slug;
+  }
+  return firstSupportedLlmConnectionSlug(config.llmConnections) ?? null;
 }
 
 /**
@@ -2862,8 +2878,8 @@ export function setDefaultLlmConnection(slug: string): boolean {
     return false;
   }
 
-  // Verify connection exists
-  if (!config.llmConnections.some(c => c.slug === slug)) {
+  const connection = config.llmConnections.find(c => c.slug === slug);
+  if (!connection || isUnsupportedLlmConnection(connection)) {
     return false;
   }
 
