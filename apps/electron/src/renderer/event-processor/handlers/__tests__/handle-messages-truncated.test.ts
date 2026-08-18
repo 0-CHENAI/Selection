@@ -28,6 +28,7 @@ describe('handleMessagesTruncated', () => {
     expect(result.state.streaming).toBeNull()
     expect(result.state.session.isProcessing).toBe(true)
     expect(result.state.session.currentStatus).toBeUndefined()
+    expect(result.state.session.processingStartedAt).toBeGreaterThan(0)
   })
 
   it('falls back to the last user prompt when the keep id is the backend id', () => {

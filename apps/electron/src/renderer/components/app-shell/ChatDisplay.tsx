@@ -1917,11 +1917,13 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
                 </AnimatePresence>
                 {/* Processing Indicator - always visible while processing */}
                 {session.isProcessing && (() => {
-                  // Find the last user message timestamp for accurate elapsed time
+                  // Prefer the turn-start clock. Regenerating reuses the original
+                  // user-message timestamp, which would otherwise keep counting
+                  // from the first send.
                   const lastUserMsg = [...session.messages].reverse().find(m => m.role === 'user')
                   return (
                     <ProcessingIndicator
-                      startTime={lastUserMsg?.timestamp}
+                      startTime={session.processingStartedAt ?? lastUserMsg?.timestamp}
                       statusMessage={session.currentStatus?.message}
                     />
                   )

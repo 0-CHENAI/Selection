@@ -83,6 +83,8 @@ export interface Session {
     message: string
     statusType?: string
   }
+  /** Renderer-only: when the current generating turn started (elapsed-time clock). */
+  processingStartedAt?: number
   createdAt?: number
   messageCount?: number
   tokenUsage?: {

@@ -119,6 +119,7 @@ export function extractSessionMeta(session: Session): SessionMeta {
   const {
     messages: _msgs, sessionFolderPath: _sf, supportsBranching: _sb,
     workspaceName: _wn, thinkingLevel: _tl, currentStatus: _cs,
+    processingStartedAt: _ps,
     isAsyncOperationOngoing, isRegeneratingTitle,
     messageCount, lastFinalMessageId: sessionLastFinal,
     ...sessionFields
