@@ -233,6 +233,22 @@ describe('Full flow: Source config → ApiConfig → Headers', () => {
     expect(headers['DD-APPLICATION-KEY']).toBeUndefined();
   });
 
+  test('API servers are wrapped as { type: sdk, instance } for the MCP pool', async () => {
+    const source = createMockSource({
+      api: {
+        baseUrl: 'https://api.example.com/',
+        authType: 'none',
+      },
+    });
+
+    const result = await builder.buildAll([{ source, credential: null }]);
+    const wrapped = result.apiServers['test-source'];
+
+    expect(wrapped).toBeDefined();
+    expect(wrapped?.type).toBe('sdk');
+    expect(wrapped?.instance).toBeDefined();
+  });
+
   test('Single header source still works (backward compatibility)', () => {
     const source = createMockSource({
       api: {

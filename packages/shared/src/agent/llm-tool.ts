@@ -14,7 +14,6 @@
  * All calls are delegated to the agent backend's queryLlm() implementation.
  */
 
-import { tool } from '@anthropic-ai/claude-agent-sdk';
 import { z } from 'zod';
 
 // Tool result type - matches what the SDK expects
@@ -560,43 +559,16 @@ export function createLLMTool(options: LLMToolOptions) {
   // sessionId captured in closure for potential future use (logging, rate limiting per session)
   const { sessionId: _sessionId } = options;
 
-  return tool(
-    'call_llm',
-    `Invoke a secondary LLM for focused subtasks. Use for:
-- Cost optimization: use a smaller model for simple tasks (summarization, classification)
-- Structured output: JSON schema compliance via native backend support
-- Parallel processing: call multiple times in one message - all run simultaneously
-- Context isolation: process content without polluting main context
-
-Put text/content directly in the 'prompt' parameter. Do NOT pass inline text via attachments.
-Only use 'attachments' for existing file paths on disk - the tool loads file content automatically.
-For large files (>2000 lines), use {path, startLine, endLine} to select a portion.`,
-    {
-      prompt: z.string().min(1, 'Prompt cannot be empty')
-        .describe('Instructions for the LLM'),
-
-      attachments: z.array(AttachmentSchema).max(MAX_ATTACHMENTS).optional()
-        .describe(`File paths on disk (max ${MAX_ATTACHMENTS}). NOT for inline text — put text in prompt instead. Use {path, startLine, endLine} for large files.`),
-
-      model: z.string().optional()
-        .describe('Model ID or short name (e.g., "haiku", "sonnet"). Defaults to a fast model.'),
-
-      systemPrompt: z.string().optional()
-        .describe('Optional system prompt'),
-
-      maxTokens: z.number().int().min(1).max(64000).optional()
-        .describe('Max output tokens (1-64000). Defaults to 4096'),
-
-      temperature: z.number().min(0).max(1).optional()
-        .describe('Sampling temperature 0-1'),
-
-      outputFormat: z.enum(['summary', 'classification', 'extraction', 'analysis', 'comparison', 'validation']).optional()
-        .describe('Predefined output format'),
-
-      outputSchema: OutputSchemaParam.optional()
-        .describe('Custom JSON Schema for structured output'),
-    },
-    async (args) => {
+  const handler = async (args: {
+    prompt: string
+    attachments?: Array<string | { path: string; startLine?: number; endLine?: number }>
+    model?: string
+    systemPrompt?: string
+    maxTokens?: number
+    temperature?: number
+    outputFormat?: 'summary' | 'classification' | 'extraction' | 'analysis' | 'comparison' | 'validation'
+    outputSchema?: { type: 'object'; properties: Record<string, unknown>; required?: string[] }
+  }) => {
       // ========================================
       // VALIDATION PHASE
       // ========================================
@@ -719,7 +691,10 @@ For large files (>2000 lines), use {path, startLine, endLine} to select a portio
         }
         throw error;
       }
-    },
-    { annotations: { readOnlyHint: true } }
-  );
+    };
+
+  return {
+    name: 'call_llm',
+    handler,
+  };
 }
