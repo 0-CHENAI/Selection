@@ -156,7 +156,7 @@ describe('resolvePickerModels', () => {
   })
 
   test('uses the connection catalog when present', () => {
-    const models = [{ id: 'Opus' }, { id: 'Laufry' }]
+    const models = ['Opus', 'Laufry']
     expect(resolvePickerModels(conn('order', 'pi_compat', { models }))).toEqual(models)
   })
 

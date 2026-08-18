@@ -6,10 +6,10 @@
  * (e.g. "Thinking…") should carry the status; pass `label` only when standalone.
  */
 
-import { InlineLoader } from 'generative-loaders'
+import { InlineLoader, type InlineLoaderVariant } from 'generative-loaders'
 import { cn } from '../../lib/utils'
 
-export type GenerativeActivityVariant = 'dot-pulse' | 'orbit' | 'signal' | 'spark'
+export type GenerativeActivityVariant = InlineLoaderVariant
 
 export interface GenerativeActivityIndicatorProps {
   className?: string
@@ -23,7 +23,7 @@ export interface GenerativeActivityIndicatorProps {
 export function GenerativeActivityIndicator({
   className,
   size = 12,
-  variant = 'dot-pulse',
+  variant = 'orbit',
   label,
 }: GenerativeActivityIndicatorProps) {
   return (
