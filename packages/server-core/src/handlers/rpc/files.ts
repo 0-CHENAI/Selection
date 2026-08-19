@@ -10,7 +10,6 @@ import { getSessionAttachmentsPath, validateSessionId } from '@craft-agent/share
 import { getWorkspaceByNameOrId } from '@craft-agent/shared/config'
 import { resizeImageForAPI, inspectImageBuffer } from '@craft-agent/server-core/services'
 import { sanitizeFilename, validateFilePath, getWorkspaceAllowedDirs } from '@craft-agent/server-core/handlers'
-import { MarkItDown } from 'markitdown-js'
 import type { RpcServer } from '@craft-agent/server-core/transport'
 import type { HandlerDeps } from '../handler-deps'
 import { requestClientOpenFileDialog } from '@craft-agent/server-core/transport'
@@ -210,7 +209,7 @@ export function registerFilesHandlers(server: RpcServer, deps: HandlerDeps): voi
     }
   })
 
-  // Store an attachment to disk and generate thumbnail/markdown conversion
+  // Store an attachment to disk and generate image thumbnails when applicable.
   // This is the core of the persistent file attachment system
   server.handle(RPC_CHANNELS.file.STORE_ATTACHMENT, async (ctx, sessionId: string, attachment: FileAttachment): Promise<StoredAttachment> => {
     // Track files we've written for cleanup on error
@@ -363,49 +362,33 @@ export function registerFilesHandlers(server: RpcServer, deps: HandlerDeps): voi
         throw new Error('Attachment has no content (neither base64 nor text)')
       }
 
-      // 2. Generate thumbnail (images only — PDFs/Office get icon fallback)
+      // 2. Generate thumbnails for real images only. PDFs and Office files use
+      // their UI icon fallback without attempting an image decode.
       let thumbnailPath: string | undefined
       let thumbnailBase64: string | undefined
-      const thumbFileName = `${id}_thumb.png`
-      const thumbPath = join(attachmentsDir, thumbFileName)
-      try {
-        const pngBuffer = await deps.platform.imageProcessor.process(storedPath, {
-          resize: { width: 200, height: 200 },
-          format: 'png',
-        })
-        await writeFile(thumbPath, pngBuffer)
-        thumbnailPath = thumbPath
-        thumbnailBase64 = pngBuffer.toString('base64')
-        filesToCleanup.push(thumbPath)
-      } catch (thumbError) {
-        // Thumbnail generation failed (non-image or corrupt) — icon fallback
-        deps.platform.logger.info('Thumbnail generation failed (using fallback):', thumbError instanceof Error ? thumbError.message : thumbError)
-      }
-
-      // 3. Convert Office files to markdown (for sending to Claude)
-      // This is required for Office files - Claude can't read raw Office binary
-      let markdownPath: string | undefined
-      if (attachment.type === 'office') {
-        const mdFileName = `${id}_${safeName}.md`
-        const mdPath = join(attachmentsDir, mdFileName)
+      if (attachment.type === 'image') {
+        const thumbFileName = `${id}_thumb.png`
+        const thumbPath = join(attachmentsDir, thumbFileName)
         try {
-          const markitdown = new MarkItDown()
-          const result = await markitdown.convert(storedPath)
-          if (!result || !result.textContent) {
-            throw new Error('Conversion returned empty result')
-          }
-          await writeFile(mdPath, result.textContent, 'utf-8')
-          markdownPath = mdPath
-          filesToCleanup.push(mdPath)
-          deps.platform.logger.info(`Converted Office file to markdown: ${mdPath}`)
-        } catch (convertError) {
-          // Conversion failed - throw so user knows the file can't be processed
-          // Claude can't read raw Office binary, so a failed conversion = unusable file
-          const errorMsg = convertError instanceof Error ? convertError.message : String(convertError)
-          deps.platform.logger.error('Office to markdown conversion failed:', errorMsg)
-          throw new Error(`Failed to convert "${attachment.name}" to readable format: ${errorMsg}`)
+          const pngBuffer = await deps.platform.imageProcessor.process(storedPath, {
+            resize: { width: 200, height: 200 },
+            format: 'png',
+          })
+          await writeFile(thumbPath, pngBuffer)
+          thumbnailPath = thumbPath
+          thumbnailBase64 = pngBuffer.toString('base64')
+          filesToCleanup.push(thumbPath)
+        } catch (thumbError) {
+          // Corrupt or unsupported images use the standard icon fallback.
+          deps.platform.logger.info('Image thumbnail generation failed (using fallback):', thumbError instanceof Error ? thumbError.message : thumbError)
         }
       }
+
+      // Office documents are inspected through the always-available native
+      // Office session tool. Do not eagerly generate a Markdown sidecar here:
+      // it adds upload latency and previously caused the model to bypass the
+      // structured Office path. If the native runtime reports an unsupported
+      // document, the agent can invoke markitdown against storedPath on demand.
 
       // Return StoredAttachment metadata
       // Include wasResized flag so UI can show notification
@@ -420,7 +403,6 @@ export function registerFilesHandlers(server: RpcServer, deps: HandlerDeps): voi
         storedPath,
         thumbnailPath,
         thumbnailBase64,
-        markdownPath,
         wasResized,
         resizedBase64, // Only set when wasResized=true, used for Claude API
       }

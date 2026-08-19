@@ -57,7 +57,7 @@ export interface FileAttachment {
   size: number;
   /** Path where file is stored in session attachments folder (set by Electron app) */
   storedPath?: string;
-  /** Path to converted markdown version (for office files) */
+  /** Legacy converted Markdown path. Modern Office files no longer generate or expose this sidecar. */
   markdownPath?: string;
 }
 
@@ -88,7 +88,7 @@ const TEXT_EXTENSIONS = new Set([
   '.csv', '.log', '.conf', '.ini', '.cfg',
 ]);
 
-// Office file extensions (will be converted to markdown via markitdown-js)
+// Office file extensions (stored as binary and handled by native Office tools)
 const OFFICE_EXTENSIONS: Record<string, string> = {
   '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
   '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',

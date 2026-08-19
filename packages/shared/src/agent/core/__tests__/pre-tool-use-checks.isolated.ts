@@ -190,7 +190,7 @@ describe('runPreToolUseChecks', () => {
       expect(result.type).toBe('block');
       if (result.type === 'block') {
         expect(result.reason).toContain('Bash is not allowed in Explore mode');
-        expect(result.reason).toContain('Effective mode: Explore');
+        expect(result.reason).toContain('Effective mode: Read-only Explore');
         expect(result.reason).toContain('Last mode change: user at 2026-02-28T18:00:00.000Z (modeVersion=7)');
       }
     });
@@ -438,6 +438,21 @@ describe('runPreToolUseChecks', () => {
 
       expect(result.type).toBe('allow');
     });
+
+    it.each(['report.docx', 'forecast.xlsx', 'roadmap.pptx'])(
+      'routes generic reads of %s through the native Office tools',
+      (filePath) => {
+        const result = runPreToolUseChecks(createInput({
+          toolName: 'Read',
+          input: { file_path: `/test/workspace/${filePath}` },
+        }));
+
+        expect(result.type).toBe('block');
+        if (result.type === 'block') {
+          expect(result.reason).toContain('office_document_inspect');
+        }
+      },
+    );
 
     it('strips _intent and _displayName metadata', () => {
       const result = runPreToolUseChecks(createInput({
@@ -808,7 +823,7 @@ describe('runPreToolUseChecks', () => {
       expect(result.type).toBe('block');
       if (result.type === 'block') {
         expect(result.reason).toContain('Not allowed');
-        expect(result.reason).toContain('Effective mode: Explore');
+        expect(result.reason).toContain('Effective mode: Read-only Explore');
       }
     });
 
