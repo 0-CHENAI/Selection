@@ -1,5 +1,26 @@
+import React from 'react'
 import { describe, it, expect } from 'bun:test'
-import { isEscapeDuringComposition } from '../rich-text-input'
+import { renderToStaticMarkup } from 'react-dom/server'
+import { isEscapeDuringComposition, RichTextInput } from '../rich-text-input'
+
+describe('RichTextInput IME attributes', () => {
+  it('keeps browser first-letter processing disabled', () => {
+    const html = renderToStaticMarkup(
+      React.createElement(RichTextInput, {
+        value: '',
+        onChange: () => {},
+        placeholder: 'Message',
+        autoCapitalize: 'sentences',
+        autoCorrect: 'on',
+      })
+    )
+
+    expect(html).toContain('autoCapitalize="none"')
+    expect(html).toContain('autoCorrect="off"')
+    expect(html).not.toContain('autoCapitalize="sentences"')
+    expect(html).not.toContain('autoCorrect="on"')
+  })
+})
 
 describe('isEscapeDuringComposition', () => {
   it('returns true for Escape when local composition ref is active', () => {
