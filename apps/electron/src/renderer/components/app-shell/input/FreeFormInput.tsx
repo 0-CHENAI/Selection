@@ -79,6 +79,7 @@ import { ToolbarStatusSlot } from './ToolbarStatusSlot'
 import { buildPlanApprovalMessage } from '../plan-approval-message'
 import { shouldHandleScopedInputEvent, shouldRecallPromptOnArrowUp } from './input-event-guards'
 import { clearPendingFocusForSession, consumePendingFocusForSession } from './focus-input-events'
+import { restoreComposerFocus } from './restore-composer-focus'
 import {
   getRecentWorkingDirs,
   addRecentWorkingDir,
@@ -584,6 +585,20 @@ export function FreeFormInput({
   const internalInputRef = React.useRef<RichTextInputHandle>(null)
   const richInputRef = externalInputRef || internalInputRef
 
+  const focusComposerAfterPicker = React.useCallback(() => {
+    if (!disabled) restoreComposerFocus(richInputRef)
+  }, [disabled, richInputRef])
+
+  const handleSourceDropdownOpenChange = React.useCallback((open: boolean) => {
+    setSourceDropdownOpen(open)
+    if (!open) focusComposerAfterPicker()
+  }, [focusComposerAfterPicker])
+
+  const handleModelDropdownOpenChange = React.useCallback((open: boolean) => {
+    setModelDropdownOpen(open)
+    if (!open) focusComposerAfterPicker()
+  }, [focusComposerAfterPicker])
+
   // Track last caret position for focus restoration (e.g., after permission mode popover closes)
   const lastCaretPositionRef = React.useRef<number | null>(null)
 
@@ -1029,6 +1044,11 @@ export function FreeFormInput({
   // File attachment handlers
   const handleAttachClick = () => {
     if (disabled) return
+    // The native file dialog does not manage focus like a Radix overlay. Blur
+    // the toolbar trigger now so its focus-triggered tooltip cannot linger.
+    if (document.activeElement instanceof HTMLElement) {
+      document.activeElement.blur()
+    }
     fileInputRef.current?.click()
   }
 
@@ -1037,6 +1057,9 @@ export function FreeFormInput({
     if (!files || files.length === 0) return
 
     const fileList = Array.from(files)
+    // Restore typing immediately; attachment decoding may continue in the
+    // background for large files.
+    focusComposerAfterPicker()
     setLoadingCount(prev => prev + fileList.length)
 
     for (const file of fileList) {
@@ -1046,6 +1069,15 @@ export function FreeFormInput({
     // Reset input so re-selecting the same file triggers onChange again
     e.target.value = ''
   }
+
+  React.useEffect(() => {
+    const fileInput = fileInputRef.current
+    if (!fileInput) return
+
+    const handleCancel = () => focusComposerAfterPicker()
+    fileInput.addEventListener('cancel', handleCancel)
+    return () => fileInput.removeEventListener('cancel', handleCancel)
+  }, [focusComposerAfterPicker])
 
   const handleRemoveAttachment = (index: number) => {
     setAttachments(prev => prev.filter((_, i) => i !== index))
@@ -1832,12 +1864,12 @@ export function FreeFormInput({
                 showChevron={false}
                 isOpen={sourceDropdownOpen}
                 disabled={disabled}
-                onClick={() => setSourceDropdownOpen(prev => !prev)}
+                onClick={() => handleSourceDropdownOpenChange(!sourceDropdownOpen)}
                 tooltip={t("chat.sourcesTooltip")}
               />
               <CompactSourceSelector
                 open={sourceDropdownOpen}
-                onOpenChange={setSourceDropdownOpen}
+                onOpenChange={handleSourceDropdownOpenChange}
                 sources={sources}
                 selectedSlugs={optimisticSourceSlugs}
                 onToggleSlug={(slug) => {
@@ -1936,13 +1968,13 @@ export function FreeFormInput({
                 isOpen={sourceDropdownOpen}
                 disabled={disabled}
                 data-tutorial="source-selector-button"
-                onClick={() => setSourceDropdownOpen(prev => !prev)}
+                onClick={() => handleSourceDropdownOpenChange(!sourceDropdownOpen)}
                 tooltip={t("chat.sourcesTooltip")}
               />
 
               <SourceSelectorPopover
                 open={sourceDropdownOpen}
-                onOpenChange={setSourceDropdownOpen}
+                onOpenChange={handleSourceDropdownOpenChange}
                 anchorRef={sourceButtonRef}
                 sources={sources}
                 selectedSlugs={optimisticSourceSlugs}
@@ -1992,7 +2024,7 @@ export function FreeFormInput({
           <div className="flex items-center shrink-0">
           {/* 5. Model/Connection Selector - Hidden in compact mode (EditPopover embedding) */}
           {!compactMode && (
-          <DropdownMenu open={modelDropdownOpen} onOpenChange={setModelDropdownOpen}>
+          <DropdownMenu open={modelDropdownOpen} onOpenChange={handleModelDropdownOpenChange}>
             <Tooltip>
               <TooltipTrigger asChild>
                 <DropdownMenuTrigger asChild>
