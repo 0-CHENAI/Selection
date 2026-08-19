@@ -16,7 +16,10 @@ import { homedir } from 'os';
 import { existsSync, realpathSync } from 'fs';
 import { debug } from '../utils/debug.ts';
 import { dirname, isAbsolute, relative, resolve } from 'path';
-import { getSessionSafeAllowedToolNames } from '@craft-agent/session-tools-core';
+import {
+  getSessionSafeAllowedToolNames,
+  SESSION_TOOL_NAMES,
+} from '@craft-agent/session-tools-core';
 import { FEATURE_FLAGS } from '../feature-flags.ts';
 import { isBrowserToolNameOrAlias } from './browser-tool-names.ts';
 import type { PermissionsContext, MergedPermissionsConfig } from './permissions-config.ts';
@@ -1999,6 +2002,25 @@ export function shouldAllowToolInMode(
     return {
       allowed: false,
       reason: getBlockReasonWithConfig(toolName, config)
+    };
+  }
+
+  // Pi exposes selected session tools (currently the native Office tools)
+  // under their canonical names instead of MCP-prefixed aliases. Apply the
+  // same metadata-driven policy so canonical edit calls cannot bypass safe
+  // mode while canonical inspect calls remain read-only.
+  if (SESSION_TOOL_NAMES.has(toolName)) {
+    const safeAllowedSessionTools = getSessionSafeAllowedToolNames({
+      includeDeveloperFeedback: FEATURE_FLAGS.developerFeedback,
+    });
+
+    if (safeAllowedSessionTools.has(toolName)) {
+      return { allowed: true };
+    }
+
+    return {
+      allowed: false,
+      reason: `Session tool "${toolName}" can modify state and is blocked in ${config.displayName}. Switch to Ask or Allow All mode (${config.shortcutHint}) to continue.`,
     };
   }
 

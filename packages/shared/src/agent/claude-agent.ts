@@ -132,7 +132,6 @@ export { AbortReason, type RecoveryMessage };
 /** File extensions that can be converted to readable text by CLI tools. */
 const CONVERTIBLE_FILE_HINTS: Record<string, string> = {
   pdf: 'markitdown or pdf-tool extract',
-  docx: 'officecli view <file> text or markitdown', xlsx: 'officecli view <file> text or markitdown', pptx: 'officecli view <file> text or markitdown',
   doc: 'markitdown', xls: 'markitdown', ppt: 'markitdown',
   msg: 'markitdown', eml: 'markitdown', rtf: 'markitdown',
   ics: 'ical-tool read',
@@ -2428,14 +2427,17 @@ This is a branched conversation. All prior messages in this conversation are par
 
     parts.push(...contextParts);
 
-    // Add file attachments with stored path info (agent uses Read tool to access content)
+    // Add file attachments with stored path info. Office files must use the
+    // registered native tools and never advertise a legacy Markdown sidecar.
     // Text files are NOT embedded inline to prevent context overflow from large files
     if (attachments) {
       for (const attachment of attachments) {
         if (attachment.storedPath) {
-          let pathInfo = `[Attached file: ${attachment.name}]`;
-          pathInfo += `\n[Stored at: ${attachment.storedPath}]`;
-          if (attachment.markdownPath) {
+          const isOffice = attachment.type === 'office' || /\.(?:docx|xlsx|pptx)$/i.test(attachment.name);
+          let pathInfo = isOffice
+            ? `[Attached Office document: ${attachment.name}]\n[Stored at: ${attachment.storedPath}]\n[Inspect with native tool: mcp__session__office_document_inspect]\n[Modify with native tool: mcp__session__office_document_edit]`
+            : `[Attached file: ${attachment.name}]\n[Stored at: ${attachment.storedPath}]`;
+          if (!isOffice && attachment.markdownPath) {
             pathInfo += `\n[Markdown version: ${attachment.markdownPath}]`;
           }
           parts.push(pathInfo);
@@ -2483,11 +2485,14 @@ This is a branched conversation. All prior messages in this conversation are par
       for (const attachment of hydratedAttachments) {
         const stored = attachment.storedPath || attachment.path
         const isImage = attachment.type === 'image' || attachment.mimeType?.startsWith('image/') === true
+        const isOffice = attachment.type === 'office' || /\.(?:docx|xlsx|pptx)$/i.test(attachment.name)
         if (stored) {
-          let pathInfo = isImage && attachment.base64
+          let pathInfo = isOffice
+            ? `[Attached Office document: ${attachment.name}]\n[Stored at: ${stored}]\n[Inspect with native tool: mcp__session__office_document_inspect]\n[Modify with native tool: mcp__session__office_document_edit]`
+            : isImage && attachment.base64
             ? `[Attached image: ${attachment.name}]\nThe image is included as visual input — look at it. Path: ${stored}`
             : `[Attached file: ${attachment.name}]\n[Stored at: ${stored}]`;
-          if (attachment.markdownPath) {
+          if (!isOffice && attachment.markdownPath) {
             pathInfo += `\n[Markdown version: ${attachment.markdownPath}]`;
           }
           contentBlocks.push({

@@ -1277,7 +1277,7 @@ export default function App() {
       let processedAttachments: FileAttachment[] | undefined
 
       if (attachments?.length) {
-        // Store each attachment to disk (generates thumbnails, converts Office→markdown)
+        // Store each attachment to disk and generate image thumbnails.
         // Use allSettled so one failure doesn't kill all attachments
         const storeResults = await Promise.allSettled(
           attachments.map(a => window.electronAPI.storeAttachment(sessionId, a))
@@ -1314,30 +1314,27 @@ export default function App() {
           }))
         }
 
-        // Step 2: Create processed attachments for Claude
-        // - Office files: Convert to text with markdown content
-        // - Others: Use original FileAttachment
-        // - All: Include storedPath so agent knows where files are stored
+        // Step 2: Add persistent attachment metadata for the agent.
+        // - Preserve the original FileAttachment
+        // - Include storedPath so native document tools can inspect Office files
         // - Resized images: Use resizedBase64 instead of original large base64
-        processedAttachments = await Promise.all(
-          successfulAttachments.map(async (att, i) => {
-            const stored = storedAttachments?.[i]
-            if (!stored) {
-              console.error(`Missing stored attachment at index ${i}`)
-              return att // Fall back to original
-            }
-            // Include storedPath and markdownPath for all attachment types
-            // Agent will use Read tool to access text/office files via these paths
-            // If image was resized, use the resized base64 for Claude API
-            return {
-              ...att,
-              storedPath: stored.storedPath,
-              markdownPath: stored.markdownPath,
-              // Use resized base64 if available (for images that exceeded size limits)
-              base64: stored.resizedBase64 ?? att.base64,
-            }
-          })
-        )
+        processedAttachments = successfulAttachments.map((att, i) => {
+          const stored = storedAttachments?.[i]
+          if (!stored) {
+            console.error(`Missing stored attachment at index ${i}`)
+            return att // Fall back to original
+          }
+          // Never forward a Markdown sidecar for Office documents. This also
+          // protects mixed-version development sessions where an older main
+          // process may still return the legacy markdownPath field.
+          // If image was resized, use the resized base64 for the model API.
+          return {
+            ...att,
+            storedPath: stored.storedPath,
+            markdownPath: stored.type === 'office' ? undefined : stored.markdownPath,
+            base64: stored.resizedBase64 ?? att.base64,
+          }
+        })
       }
 
       // Step 3: Extract badges from mentions (sources/skills) with embedded icons

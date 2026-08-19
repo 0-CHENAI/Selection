@@ -68,7 +68,13 @@ import {
 import { attachSessionSelfManagementBindings } from './session-self-management-bindings.ts';
 
 // Session tool proxy definitions (for registering with subprocess)
-import { getSessionToolProxyDefs, SESSION_TOOL_NAMES } from './backend/pi/session-tool-defs.ts';
+import {
+  getSessionToolProxyDefs,
+  PI_OFFICE_DOCUMENT_EDIT_TOOL,
+  PI_OFFICE_DOCUMENT_INSPECT_TOOL,
+  PI_OFFICE_TOOL_ROUTING_PROMPT,
+  SESSION_TOOL_NAMES,
+} from './backend/pi/session-tool-defs.ts';
 
 // Session tool registry (for executing proxy tool calls)
 import {
@@ -1450,8 +1456,8 @@ export class PiAgent extends BaseAgent {
     toolName: string,
     args: Record<string, unknown>
   ): Promise<{ content: string; isError: boolean }> {
-    // Session-scoped tools — strip mcp__session__ prefix added by the Pi SDK
-    // registration (tools are registered as mcp__session__SubmitPlan, etc.)
+    // Session-scoped tools may be MCP-prefixed or canonical (native Office).
+    // Normalize the prefix before dispatching to the canonical registry.
     const strippedName = toolName.startsWith('mcp__session__')
       ? toolName.slice('mcp__session__'.length)
       : toolName;
@@ -2087,6 +2093,17 @@ export class PiAgent extends BaseAgent {
           attachmentParts.push(`[Attached image: ${att.name}]\n[Stored at: ${att.storedPath || att.path}]`);
         } else if (att.mimeType === 'application/pdf' && att.storedPath) {
           attachmentParts.push(`[Attached PDF: ${att.name}]\n[Stored at: ${att.storedPath}]`);
+        } else if (att.type === 'office' && att.storedPath) {
+          // Office uploads retain the original binary for native inspection.
+          // Do not advertise a legacy Markdown sidecar from older sessions:
+          // that path made the model bypass the native tools on its first read.
+          attachmentParts.push(
+            `[Attached Office document: ${att.name}]\n` +
+            `[Stored at: ${att.storedPath}]\n` +
+            `[Inspect with: ${PI_OFFICE_DOCUMENT_INSPECT_TOOL}]\n` +
+            `[Modify with: ${PI_OFFICE_DOCUMENT_EDIT_TOOL}]\n` +
+            `[Do not read the generated Markdown sidecar unless the native Office tool reports that the document is unsupported.]`,
+          );
         } else if (att.storedPath) {
           let pathInfo = `[Attached file: ${att.name}]\n[Stored at: ${att.storedPath}]`;
           if (att.markdownPath) {
@@ -2103,6 +2120,7 @@ export class PiAgent extends BaseAgent {
       // does (buildTextPrompt / buildSDKUserMessage append context to the tail).
       const fullSystemPrompt = [
         systemPrompt,
+        PI_OFFICE_TOOL_ROUTING_PROMPT,
         ...stableParts,
       ].filter(Boolean).join('\n\n');
 
