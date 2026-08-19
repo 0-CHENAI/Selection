@@ -109,3 +109,72 @@ jobs:
           if-no-files-found: error
           retention-days: 14
           compression-level: 0
+
+  publish-release:
+    name: Publish desktop release
+    if: github.ref_name == github.event.repository.default_branch || github.ref_name == 'test'
+    needs:
+      - package-macos-arm64
+      - package-windows-x64
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Download macOS ARM64 installers
+        uses: actions/download-artifact@v8
+        with:
+          name: selection-macos-arm64-${{ github.ref_name }}-${{ github.run_number }}
+          path: downloaded/macos-arm64
+
+      - name: Download Windows x64 installer
+        uses: actions/download-artifact@v8
+        with:
+          name: selection-windows-x64-${{ github.ref_name }}-${{ github.run_number }}
+          path: downloaded/windows-x64
+
+      - name: Prepare release assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p release-assets
+          cp downloaded/macos-arm64/Selection-arm64.dmg release-assets/
+          cp downloaded/macos-arm64/Selection-arm64.zip release-assets/
+          cp downloaded/macos-arm64/SHA256SUMS-macos-arm64.txt release-assets/
+          cp downloaded/macos-arm64/build-summary.json release-assets/build-summary-macos-arm64.json
+          cp downloaded/windows-x64/Selection-x64.exe release-assets/
+          cp downloaded/windows-x64/SHA256SUMS-windows-x64.txt release-assets/
+          cp downloaded/windows-x64/build-summary.json release-assets/build-summary-windows-x64.json
+
+      - name: Publish GitHub Release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          app_version=$(jq -r '.version' apps/electron/package.json)
+          if [[ "${GITHUB_REF_NAME}" == "test" ]]; then
+            release_tag="v${app_version}-beta${GITHUB_RUN_NUMBER}"
+            release_title="Selection v${app_version} beta ${GITHUB_RUN_NUMBER}"
+            release_flags=(--prerelease --latest=false)
+          else
+            release_tag="v${app_version}"
+            release_title="Selection v${app_version}"
+            release_flags=()
+          fi
+          run_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          release_notes=$(printf 'Automated desktop build from `%s` (`%s`).\n\n[GitHub Actions run](%s)' \
+            "${GITHUB_REF_NAME}" "${GITHUB_SHA}" "${run_url}")
+
+          if gh release view "${release_tag}" >/dev/null 2>&1; then
+            gh release upload "${release_tag}" release-assets/* --clobber
+          else
+            gh release create "${release_tag}" release-assets/* \
+              --target "${GITHUB_SHA}" \
+              --title "${release_title}" \
+              --notes "${release_notes}" \
+              "${release_flags[@]}"
+          fi
