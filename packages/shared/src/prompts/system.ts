@@ -1240,16 +1240,16 @@ Each item needs a \`src\` (absolute path) and an optional \`label\` (shown in th
 
 ## Document Tools
 
-You have access to built-in CLI tools for working with documents and files. These tools are always available via Bash:
+For modern Office documents, use the registered native Office document tools. Other document CLI tools are available via Bash:
 
 | Tool | Description | Example |
 |------|-------------|---------|
-| **officecli** | Compatibility CLI for Word/Excel/PowerPoint. Prefer the native Office document tools in agent sessions. | \`officecli create report.docx\` |
-| **markitdown** | Convert any document to Markdown | \`markitdown report.docx\` |
+| **officecli** | Internal managed runtime for the native Office document tools; do not invoke it directly through Bash. | Use \`office_document_inspect\` or \`office_document_edit\` |
+| **markitdown** | Fallback conversion to Markdown; not the default reader for .docx/.xlsx/.pptx | \`markitdown report.pdf\` |
 | **pdf-tool** | PDF operations (extract, merge, split, info) | \`pdf-tool extract report.pdf\` |
-| **xlsx-tool** | Legacy Excel helper — prefer officecli for create/edit | \`xlsx-tool read data.xlsx\` |
-| **docx-tool** | Legacy Word helper — prefer officecli | \`docx-tool create output.docx --title "Report"\` |
-| **pptx-tool** | Legacy PowerPoint helper — prefer officecli | \`pptx-tool info presentation.pptx\` |
+| **xlsx-tool** | Legacy Excel helper; do not use for modern .xlsx files | See tool help for legacy formats |
+| **docx-tool** | Legacy Word helper; do not use for modern .docx files | See tool help for legacy formats |
+| **pptx-tool** | Legacy PowerPoint helper; do not use for modern .pptx files | See tool help for legacy formats |
 | **img-tool** | Image processing (resize, convert, metadata) | \`img-tool resize photo.jpg --width 800\` |
 | **doc-diff** | Compare two documents | \`doc-diff old.docx new.docx\` |
 | **ical-tool** | Calendar file operations | \`ical-tool read calendar.ics\` |
@@ -1257,9 +1257,8 @@ You have access to built-in CLI tools for working with documents and files. Thes
 **Tips:**
 - For .docx / .xlsx / .pptx create and edit, use \`office_document_edit\`; for reading, validation, help, and availability, use \`office_document_inspect\`. Neither requires loading a skill.
 - OfficeCLI is managed by the app; do not curl-install or download it.
-- After a multi-step officecli edit, \`officecli close <file>\` before another program reads the file
-- Use **markitdown** when you only need readable text from a document
-- If the Read tool fails on a binary file (e.g. .docx, .xlsx), use \`officecli view <file> text\` or \`markitdown <file>\`
+- Use **markitdown** only when the user explicitly requests Markdown conversion, or after the native Office inspect tool reports that the document is unsupported or unavailable. Do not read an automatically generated \`.docx.md\`, \`.xlsx.md\`, or \`.pptx.md\` sidecar first.
+- If native Office inspection reports an unsupported document, use \`markitdown <file> # selection-office-native-fallback\` only as a read-only text fallback; do not use that fallback for edits.
 - All tools support \`--help\` for full usage information
 - All tools support \`-o <file>\` to write output to a file instead of stdout
 - PDF export is not included in the bundled officecli binary

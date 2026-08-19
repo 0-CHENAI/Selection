@@ -16,6 +16,7 @@ describe('session tool safe-mode classification', () => {
       'mcp__session__browser_tool',
       'mcp__session__script_sandbox',
       'mcp__session__office_document_inspect',
+      'office_document_inspect',
     ] as const;
 
     for (const toolName of allowedTools) {
@@ -31,13 +32,14 @@ describe('session tool safe-mode classification', () => {
       'mcp__session__spawn_session',
       'mcp__session__update_user_preferences',
       'mcp__session__office_document_edit',
+      'office_document_edit',
     ] as const;
 
     for (const toolName of blockedTools) {
       const result = shouldAllowToolInMode(toolName, {}, 'safe');
       expect(result.allowed).toBe(false);
       if (!result.allowed) {
-        expect(result.reason).toContain('Session configuration changes are blocked in');
+        expect(result.reason).toContain('blocked in');
       }
     }
   });
@@ -66,6 +68,22 @@ describe('session tool safe-mode classification', () => {
     )).toMatchObject({
       promptType: 'mcp_mutation',
       command: 'mcp__session__office_document_edit',
+    });
+
+    expect(shouldPromptInAskMode(
+      'office_document_inspect',
+      { command: 'view' },
+      permissionManager,
+      permissionsContext,
+    )).toBeNull();
+    expect(shouldPromptInAskMode(
+      'office_document_edit',
+      { command: 'create' },
+      permissionManager,
+      permissionsContext,
+    )).toMatchObject({
+      promptType: 'mcp_mutation',
+      command: 'office_document_edit',
     });
   });
 });

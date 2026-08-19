@@ -13,7 +13,8 @@
  * 2. Source blocking: Block tools from inactive MCP sources
  * 3. Prerequisite check: Block source tools until guide.md is read
  * 4. call_llm detection: Intercept mcp__session__call_llm
- * 5. Input transforms: Path expansion, config validation, skill qualification, metadata stripping
+ * 5. Input transforms and routing guards: Path expansion, native Office routing,
+ *    config validation, skill qualification, metadata stripping
  * 6. Ask-mode prompt decision: Determine if user approval is needed
  */
 
@@ -35,6 +36,7 @@ import {
   type CliDomainNamespace,
 } from '../../config/cli-domains.ts';
 import { FEATURE_FLAGS } from '../../feature-flags.ts';
+import { SESSION_TOOL_NAMES } from '@craft-agent/session-tools-core';
 import { AGENTS_PLUGIN_NAME } from '../../skills/types.ts';
 import { GLOBAL_AGENT_SKILLS_DIR, PROJECT_AGENT_SKILLS_DIR, getBundledSkillsDir } from '../../skills/storage.ts';
 import {
@@ -578,6 +580,87 @@ export function getConfigDomainBashRedirect(
 }
 
 // ============================================================
+// NATIVE OFFICE ROUTING
+// ============================================================
+
+const OFFICE_FILE_PATH_PATTERN = /\.(?:docx|xlsx|pptx)$/i;
+const OFFICE_MARKDOWN_SIDECAR_PATTERN = /\.(?:docx|xlsx|pptx)\.md$/i;
+const OFFICE_PATH_IN_COMMAND_PATTERN = /\.(?:docx|xlsx|pptx)(?:\.md)?(?=$|[\s"';&|])/i;
+const OFFICE_CONTENT_FILE_TOOLS = new Set(['Read', 'Write', 'Edit', 'MultiEdit']);
+const OFFICE_DIRECT_CLI_PATTERN = /(?:^|[\s"';&|\\/])(?:officecli|docx-tool|xlsx-tool|pptx-tool)(?:\.exe)?(?=$|[\s"';&|])/i;
+const MARKITDOWN_CLI_PATTERN = /(?:^|[\s"';&|\\/])markitdown(?:\.exe)?(?=$|[\s"';&|])/i;
+const OFFICE_MARKDOWN_FALLBACK_MARKER = 'selection-office-native-fallback';
+
+function getToolFilePath(input: Record<string, unknown>): string | null {
+  if (typeof input.file_path === 'string') return input.file_path;
+  if (typeof input.path === 'string') return input.path;
+  return null;
+}
+
+function buildNativeOfficeRoutingMessage(context: string): string {
+  return [
+    context,
+    'Use the native Office tools instead:',
+    '- Read, inspect, query, dump, help, or validate: office_document_inspect',
+    '- Create or modify: office_document_edit',
+    'Do not use Read, Write, Edit, a generated .docx.md/.xlsx.md/.pptx.md sidecar, direct officecli Bash, legacy *-tool commands, or markitdown as the default Office path.',
+    `Only when the user explicitly requests Markdown conversion or the native inspect tool reports the operation unsupported may markitdown be retried with the command comment marker "# ${OFFICE_MARKDOWN_FALLBACK_MARKER}".`,
+  ].join('\n');
+}
+
+/**
+ * Keep Office document content processing on the registered, app-managed tools.
+ * Ordinary filesystem operations such as cp/mv/rename are intentionally allowed.
+ */
+export function getNativeOfficeToolRedirect(
+  toolName: string,
+  input: Record<string, unknown>,
+): { message: string } | null {
+  const canonicalToolName = toolName.startsWith('mcp__session__')
+    ? toolName.slice('mcp__session__'.length)
+    : toolName;
+
+  if (canonicalToolName === 'office_document_inspect' || canonicalToolName === 'office_document_edit') {
+    return null;
+  }
+
+  const filePath = getToolFilePath(input);
+  if (filePath && OFFICE_CONTENT_FILE_TOOLS.has(toolName) && OFFICE_FILE_PATH_PATTERN.test(filePath)) {
+    return {
+      message: buildNativeOfficeRoutingMessage(
+        `Direct ${toolName} content access to Office file "${filePath}" is blocked.`,
+      ),
+    };
+  }
+
+  if (filePath && toolName === 'Read' && OFFICE_MARKDOWN_SIDECAR_PATTERN.test(filePath)) {
+    return {
+      message: buildNativeOfficeRoutingMessage(
+        `Reading the legacy Markdown sidecar "${filePath}" is blocked because the original Office file must be inspected natively.`,
+      ),
+    };
+  }
+
+  if (toolName === 'Bash') {
+    const command = typeof input.command === 'string' ? input.command : '';
+    const operatesOnOfficeFile = OFFICE_PATH_IN_COMMAND_PATTERN.test(command);
+    const isMarkedMarkdownFallback = command.toLowerCase().includes(OFFICE_MARKDOWN_FALLBACK_MARKER);
+    const usesDirectOfficeCli = OFFICE_DIRECT_CLI_PATTERN.test(command);
+    const usesMarkitdown = MARKITDOWN_CLI_PATTERN.test(command);
+
+    if (operatesOnOfficeFile && (usesDirectOfficeCli || (usesMarkitdown && !isMarkedMarkdownFallback))) {
+      return {
+        message: buildNativeOfficeRoutingMessage(
+          'Shell-based Office content processing is blocked until the registered native Office tool is used.',
+        ),
+      };
+    }
+  }
+
+  return null;
+}
+
+// ============================================================
 // CENTRALIZED PRETOOLUSE PIPELINE
 // ============================================================
 
@@ -683,7 +766,7 @@ const FILE_WRITE_TOOLS = new Set(['Write', 'Edit', 'MultiEdit', 'NotebookEdit'])
  * 2. Source blocking (inactive MCP sources)
  * 3. Prerequisite check (guide.md before source tools)
  * 4. call_llm interception
- * 5. Input transforms (paths, config validation, skills, metadata)
+ * 5. Input transforms and routing guards (paths, Office, config, skills, metadata)
  * 6. Ask-mode prompt decision
  *
  * @returns A discriminated union that the agent translates to its SDK format
@@ -813,7 +896,13 @@ export function runPreToolUseChecks(ctx: PreToolUseInput): PreToolUseCheckResult
     wasModified = true;
   }
 
-  // 5b. Config-domain Bash guard (block direct labels/automations path operations unless using craft-agent)
+  // 5b. Native Office routing guard
+  const nativeOfficeRedirect = getNativeOfficeToolRedirect(toolName, currentInput);
+  if (nativeOfficeRedirect) {
+    return { type: 'block', reason: nativeOfficeRedirect.message };
+  }
+
+  // 5c. Config-domain Bash guard (block direct labels/automations path operations unless using craft-agent)
   if (FEATURE_FLAGS.craftAgentsCli && toolName === 'Bash') {
     const configDomainBashRedirect = getConfigDomainBashRedirect(currentInput, workspaceRootPath, workingDirectory);
     if (configDomainBashRedirect) {
@@ -821,13 +910,13 @@ export function runPreToolUseChecks(ctx: PreToolUseInput): PreToolUseCheckResult
     }
   }
 
-  // 5c. Config file validation
+  // 5d. Config file validation
   const configResult = validateConfigWrite(toolName, currentInput, workspaceRootPath, onDebug);
   if (!configResult.valid) {
     return { type: 'block', reason: configResult.error! };
   }
 
-  // 5d. Config file CLI redirect (labels + automations)
+  // 5e. Config file CLI redirect (labels + automations)
   if (FEATURE_FLAGS.craftAgentsCli) {
     const cliRedirect = getConfigCliRedirect(toolName, currentInput, workspaceRootPath, workingDirectory);
     if (cliRedirect) {
@@ -835,7 +924,7 @@ export function runPreToolUseChecks(ctx: PreToolUseInput): PreToolUseCheckResult
     }
   }
 
-  // 5e. Skill qualification
+  // 5f. Skill qualification
   if (toolName === 'Skill') {
     const skillResult = qualifySkillName(
       currentInput,
@@ -850,7 +939,7 @@ export function runPreToolUseChecks(ctx: PreToolUseInput): PreToolUseCheckResult
     }
   }
 
-  // 5f. Metadata stripping
+  // 5g. Metadata stripping
   const metadataResult = stripToolMetadata(toolName, currentInput, onDebug);
   if (metadataResult.modified) {
     currentInput = metadataResult.input;
@@ -1066,6 +1155,27 @@ export function shouldPromptInAskMode(
       description: `Execute: ${command}`,
       command,
     };
+  }
+
+  // --- Canonical session-tool mutations ---
+  // Pi registers the native Office tools by their public canonical names.
+  // Preserve the same ask-mode behavior as their MCP-prefixed counterparts.
+  if (SESSION_TOOL_NAMES.has(toolName)) {
+    const safeModeResult = shouldAllowToolInMode(
+      toolName, input, 'safe', { plansFolderPath }
+    );
+    if (!safeModeResult.allowed) {
+      if (permissionManager.isCommandWhitelisted(toolName)) {
+        onDebug?.(`Auto-allowing "${toolName}" (previously approved)`);
+        return null;
+      }
+      return {
+        promptType: 'mcp_mutation',
+        description: `Session tool: ${toolName}`,
+        command: toolName,
+      };
+    }
+    return null;
   }
 
   // --- MCP mutations ---
