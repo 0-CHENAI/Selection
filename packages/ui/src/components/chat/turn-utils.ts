@@ -188,6 +188,44 @@ export function shouldShowThinkingIndicator(phase: TurnPhase, isBuffering: boole
   return phase === 'pending' || phase === 'awaiting' || (phase === 'streaming' && isBuffering)
 }
 
+/**
+ * Select the newest semantic progress text while a turn is doing work.
+ *
+ * The completed title remains stable, and final response streaming has its own
+ * label. Timestamps are authoritative because live activities can briefly be
+ * received out of array order; array order only breaks timestamp ties.
+ */
+export function getActiveTurnPreview(
+  activities: ActivityItem[],
+  phase: TurnPhase,
+): string | undefined {
+  if (phase === 'complete' || phase === 'streaming') return undefined
+
+  let latest: { text: string; timestamp: number; index: number } | undefined
+
+  activities.forEach((activity, index) => {
+    const activityContent = (
+      activity.type === 'intermediate'
+      || activity.type === 'thinking'
+      || activity.type === 'status'
+    )
+      ? activity.content?.trim()
+      : undefined
+    const text = activityContent || activity.intent?.trim()
+    if (!text) return
+
+    if (
+      !latest
+      || activity.timestamp > latest.timestamp
+      || (activity.timestamp === latest.timestamp && index > latest.index)
+    ) {
+      latest = { text, timestamp: activity.timestamp, index }
+    }
+  })
+
+  return latest?.text
+}
+
 // ============================================================================
 // Helper Functions
 // ============================================================================
