@@ -1,6 +1,7 @@
 import { existsSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
-import { dirname, join, resolve } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
+import { homedir } from 'node:os';
 import type { BackendHostRuntimeContext } from '../types.ts';
 
 export interface ResolvedBackendRuntimePaths {
@@ -51,17 +52,37 @@ function resolveBundledRuntimePath(hostRuntime: BackendHostRuntimeContext): stri
   const bunPath = join(bunBasePath, 'vendor', 'bun', bunBinary);
   if (existsSync(bunPath)) return bunPath;
 
+  // Packaged apps must use the runtime shipped with the application.
+  if (hostRuntime.isPackaged) return undefined;
+
+  // Dev launches may inherit a minimal PATH. Resolve the standard Bun
+  // installation locations before relying on an external command locator.
+  const configuredBun = firstExistingPath([
+    process.env.CRAFT_BUN,
+    process.env.BUN_INSTALL ? join(process.env.BUN_INSTALL, 'bin', bunBinary) : undefined,
+    join(homedir(), '.bun', 'bin', bunBinary),
+  ].filter((candidate): candidate is string => !!candidate));
+  if (configuredBun) return configuredBun;
+
   // Non-packaged (headless server, dev mode): fall back to system bun via PATH.
   // Packaged apps must ship their own bundled bun — never resolve from PATH
   // to avoid picking up an incompatible system install.
-  if (!hostRuntime.isPackaged) {
-    try {
-      const whichCmd = process.platform === 'win32' ? 'where' : 'which';
-      const systemBun = execFileSync(whichCmd, ['bun'], { encoding: 'utf-8' }).trim();
-      if (systemBun && existsSync(systemBun)) return systemBun;
-    } catch { /* system bun not found */ }
-  }
+  try {
+    const whichCmd = process.platform === 'win32'
+      ? join(process.env.SystemRoot ?? process.env.WINDIR ?? 'C:\\Windows', 'System32', 'where.exe')
+      : 'which';
+    const systemBun = execFileSync(whichCmd, ['bun'], { encoding: 'utf-8' })
+      .split(/\r?\n/)
+      .map(line => line.trim())
+      .find(Boolean);
+    if (systemBun && existsSync(systemBun)) return systemBun;
+  } catch { /* system bun not found */ }
   return undefined;
+}
+
+function processJavaScriptRuntimePath(): string | undefined {
+  const executable = basename(process.execPath).toLowerCase();
+  return /^(bun|node)(\.exe)?$/.test(executable) ? process.execPath : undefined;
 }
 
 function resolveInterceptorBundlePath(hostRuntime: BackendHostRuntimeContext): string | undefined {
@@ -140,7 +161,11 @@ export function resolveBackendRuntimePaths(hostRuntime: BackendHostRuntimeContex
     sessionServerPath: resolveServerPath(hostRuntime, 'session-mcp-server'),
     bridgeServerPath: resolveServerPath(hostRuntime, 'bridge-mcp-server'),
     piServerPath: resolveServerPath(hostRuntime, 'pi-agent-server'),
-    nodeRuntimePath: hostRuntime.nodeRuntimePath || bundledRuntimePath || process.execPath,
+    // Never silently use electron.exe as a JavaScript runtime. Without
+    // ELECTRON_RUN_AS_NODE it treats the Pi server file as an Electron app.
+    nodeRuntimePath: hostRuntime.nodeRuntimePath
+      || bundledRuntimePath
+      || (!hostRuntime.isPackaged ? processJavaScriptRuntimePath() : undefined),
     bundledRuntimePath,
   };
 }

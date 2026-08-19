@@ -133,9 +133,18 @@ async function killProcessOnPort(port: string): Promise<void> {
 
   try {
     if (isWindows) {
-      // Windows: use netstat to find PID, then taskkill
+      // Some Windows PowerShell environments omit System32 from PATH. Resolve
+      // the system tools explicitly so stale Vite processes are still cleaned
+      // up before strictPort starts the new dev server.
+      const systemRoot = process.env.SystemRoot || process.env.WINDIR || "C:\\Windows";
+      const netstatPath = join(systemRoot, "System32", "netstat.exe");
+      const taskkillPath = join(systemRoot, "System32", "taskkill.exe");
+      if (!existsSync(netstatPath) || !existsSync(taskkillPath)) {
+        throw new Error("Windows netstat.exe or taskkill.exe was not found");
+      }
+
       const netstat = spawn({
-        cmd: ["cmd", "/c", `netstat -ano | findstr :${port}`],
+        cmd: [netstatPath, "-ano", "-p", "TCP"],
         stdout: "pipe",
         stderr: "pipe",
       });
@@ -147,6 +156,8 @@ async function killProcessOnPort(port: string): Promise<void> {
       for (const line of output.split("\n")) {
         const parts = line.trim().split(/\s+/);
         if (parts.length >= 5) {
+          const localEndpoint = parts[1] || "";
+          if (!localEndpoint.endsWith(`:${port}`)) continue;
           const pid = parts[parts.length - 1];
           if (pid && /^\d+$/.test(pid) && pid !== "0") {
             pids.add(pid);
@@ -157,11 +168,15 @@ async function killProcessOnPort(port: string): Promise<void> {
       // Kill each PID
       for (const pid of pids) {
         const kill = spawn({
-          cmd: ["taskkill", "/PID", pid, "/F"],
+          cmd: [taskkillPath, "/PID", pid, "/T", "/F"],
           stdout: "pipe",
           stderr: "pipe",
         });
-        await kill.exited;
+        const exitCode = await kill.exited;
+        if (exitCode !== 0) {
+          const error = await new Response(kill.stderr).text();
+          throw new Error(`Failed to stop PID ${pid} on port ${port}: ${error.trim()}`);
+        }
       }
 
       if (pids.size > 0) {
@@ -181,8 +196,8 @@ async function killProcessOnPort(port: string): Promise<void> {
         console.log(`🔪 Killed process(es) on port ${port}`);
       }
     }
-  } catch {
-    // Ignore errors - port may not be in use
+  } catch (error) {
+    console.warn(`Unable to clean port ${port}:`, error instanceof Error ? error.message : error);
   }
 }
 
