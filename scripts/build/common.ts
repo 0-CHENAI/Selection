@@ -133,33 +133,75 @@ export async function verifySha256(filePath: string, expectedHash: string): Prom
   return hash.toLowerCase() === expectedHash.toLowerCase();
 }
 
+const DOWNLOAD_TIMEOUT_MS = 120_000;
+
 /**
- * curl a file, trying each URL until one succeeds.
- * GitHub release-assets often fail with SSL_ERROR_SYSCALL on some networks;
- * npmmirror / ghproxy are used as fallbacks.
+ * Download a file with Bun's built-in fetch implementation.
+ * This is the fallback on Windows installations where PowerShell exposes a
+ * `curl` alias but no curl.exe exists for child processes.
+ */
+async function fetchDownload(dest: string, url: string): Promise<void> {
+  const response = await fetch(url, {
+    redirect: 'follow',
+    signal: AbortSignal.timeout(DOWNLOAD_TIMEOUT_MS),
+    tls: process.env.CURL_INSECURE === '1'
+      ? { rejectUnauthorized: false }
+      : undefined,
+  });
+
+  if (!response.ok) {
+    await response.body?.cancel();
+    throw new Error(`Download failed with HTTP ${response.status}: ${url}`);
+  }
+
+  await Bun.write(dest, response);
+}
+
+/**
+ * Download a file, trying each URL until one succeeds.
+ * Uses curl when a real executable is available and otherwise falls back to
+ * Bun fetch. The historical export name is retained for build-script API
+ * compatibility.
  */
 export async function curlDownload(dest: string, urls: string[]): Promise<string> {
-  // Bun's shell passes an interpolated empty string as a real argv entry on
-  // Windows. curl then treats that entry as a blank option and exits with
-  // code 2, so use an empty array when the optional flag is disabled.
+  const curlPath = Bun.which('curl');
   const curlInsecure = process.env.CURL_INSECURE === '1' ? ['-k'] : [];
   let lastError: unknown;
+
   for (const url of urls) {
-    try {
-      console.log(`  Downloading ${url}...`);
-      await $`curl -fsSL ${curlInsecure} --retry 3 --retry-delay 2 --connect-timeout 20 -o ${dest} ${url}`;
-      return url;
-    } catch (err) {
-      lastError = err;
-      console.warn(`  Download failed, trying next mirror`);
+    console.log(`  Downloading ${url}...`);
+
+    if (curlPath) {
+      try {
+        await $`${curlPath} -fsSL ${curlInsecure} --retry 3 --retry-delay 2 --connect-timeout 20 -o ${dest} ${url}`;
+        return url;
+      } catch (err) {
+        lastError = err;
+      }
+    } else {
+      for (let attempt = 1; attempt <= 3; attempt += 1) {
+        try {
+          await fetchDownload(dest, url);
+          return url;
+        } catch (err) {
+          lastError = err;
+          if (attempt < 3) {
+            console.warn(`  Download attempt ${attempt} failed, retrying...`);
+            await Bun.sleep(2_000);
+          }
+        }
+      }
     }
+
+    console.warn('  Download failed, trying next mirror');
   }
+
   throw lastError instanceof Error ? lastError : new Error(`Failed to download ${dest}`);
 }
 
 /**
  * Download and verify Bun binary
- * Uses curl for downloads (more reliable in CI than fetch + Bun.write)
+ * Uses the shared downloader so local Windows builds do not require curl.exe.
  */
 export async function downloadBun(config: BuildConfig): Promise<void> {
   const { platform, arch, electronDir } = config;
@@ -233,7 +275,7 @@ export async function downloadBun(config: BuildConfig): Promise<void> {
 
     // Extract
     console.log('  Extracting...');
-    await $`unzip -o ${zipPath} -d ${tempDir}`.quiet();
+    await extractArchive(zipPath, tempDir);
 
     // Copy binary
     const sourcePath = join(tempDir, bunDownload, bunBinary);
@@ -270,6 +312,52 @@ function findFileRecursive(root: string, fileName: string): string | null {
   return null;
 }
 
+function windowsSystemExecutable(fileName: string): string | null {
+  const windowsRoot = process.env.SystemRoot ?? process.env.WINDIR;
+  if (!windowsRoot) return null;
+
+  const executable = join(windowsRoot, 'System32', fileName);
+  return existsSync(executable) ? executable : null;
+}
+
+async function runExecutable(executable: string, args: string[]): Promise<void> {
+  const child = Bun.spawn([executable, ...args], {
+    stdout: 'inherit',
+    stderr: 'inherit',
+  });
+  const exitCode = await child.exited;
+  if (exitCode !== 0) {
+    throw new Error(`${executable} exited with code ${exitCode}`);
+  }
+}
+
+async function extractArchive(archivePath: string, destination: string): Promise<void> {
+  if (process.platform === 'win32') {
+    // Bun's shell can run with a restricted PATH even when Windows system
+    // tools exist. Resolve bsdtar by absolute path so ZIP and tar.gz archives
+    // work without requiring PowerShell, unzip, or a PATH modification.
+    const tar = Bun.which('tar.exe')
+      ?? Bun.which('tar')
+      ?? windowsSystemExecutable('tar.exe');
+    if (!tar) {
+      throw new Error('Unable to extract archive: Windows tar.exe was not found');
+    }
+    await runExecutable(tar, ['-xf', archivePath, '-C', destination]);
+    return;
+  }
+
+  const executableName = archivePath.endsWith('.zip') ? 'unzip' : 'tar';
+  const executable = Bun.which(executableName);
+  if (!executable) {
+    throw new Error(`Unable to extract archive: ${executableName} was not found`);
+  }
+
+  const args = archivePath.endsWith('.zip')
+    ? ['-o', archivePath, '-d', destination]
+    : ['-xzf', archivePath, '-C', destination];
+  await runExecutable(executable, args);
+}
+
 /**
  * Download and verify uv binary, then install it to resources/bin/<platform-arch>/uv(.exe).
  */
@@ -303,12 +391,10 @@ export async function downloadUv(config: BuildConfig): Promise<void> {
     const checksumPath = join(tempDir, `${uvDownload}.sha256`);
     const extractDir = join(tempDir, 'extract');
 
-    console.log(`  Downloading ${assetUrl}...`);
-    const curlInsecure = process.env.CURL_INSECURE === '1' ? '-k' : '';
-    await $`curl -fsSL ${curlInsecure} --retry 3 --retry-delay 2 -o ${assetPath} ${assetUrl}`;
+    await curlDownload(assetPath, [assetUrl]);
 
     console.log('  Downloading checksum...');
-    await $`curl -fsSL ${curlInsecure} --retry 3 --retry-delay 2 -o ${checksumPath} ${checksumUrl}`;
+    await curlDownload(checksumPath, [checksumUrl]);
 
     console.log('  Verifying checksum...');
     const checksumContent = await Bun.file(checksumPath).text();
@@ -325,16 +411,7 @@ export async function downloadUv(config: BuildConfig): Promise<void> {
 
     mkdirSync(extractDir, { recursive: true });
 
-    if (uvDownload.endsWith('.zip')) {
-      // Cross-compile host may not be Windows — use unzip on Unix, Expand-Archive on Windows.
-      if (process.platform === 'win32') {
-        await $`powershell -NoProfile -ExecutionPolicy Bypass -Command "Expand-Archive -LiteralPath '${assetPath}' -DestinationPath '${extractDir}' -Force"`;
-      } else {
-        await $`unzip -o ${assetPath} -d ${extractDir}`.quiet();
-      }
-    } else {
-      await $`tar -xzf ${assetPath} -C ${extractDir}`;
-    }
+    await extractArchive(assetPath, extractDir);
 
     const extractedUv = findFileRecursive(extractDir, uvBinaryName);
     if (!extractedUv) {

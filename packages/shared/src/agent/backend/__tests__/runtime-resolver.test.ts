@@ -13,6 +13,57 @@ import { resolveBackendRuntimePaths } from '../internal/runtime-resolver.ts';
 import { resolveBackendHostTooling } from '../factory.ts';
 import type { BackendHostRuntimeContext } from '../types.ts';
 
+describe('resolve Bun runtime in dev mode', () => {
+  const tmpBase = join(tmpdir(), `bun-resolver-test-${Date.now()}`);
+  const originalCraftBun = process.env.CRAFT_BUN;
+  const originalBunInstall = process.env.BUN_INSTALL;
+  const originalPath = process.env.PATH;
+
+  afterEach(() => {
+    try { rmSync(tmpBase, { recursive: true, force: true }); } catch {}
+    if (originalCraftBun === undefined) delete process.env.CRAFT_BUN;
+    else process.env.CRAFT_BUN = originalCraftBun;
+    if (originalBunInstall === undefined) delete process.env.BUN_INSTALL;
+    else process.env.BUN_INSTALL = originalBunInstall;
+    if (originalPath === undefined) delete process.env.PATH;
+    else process.env.PATH = originalPath;
+  });
+
+  it('uses BUN_INSTALL even when PATH does not contain Windows system tools', () => {
+    const bunBinary = process.platform === 'win32' ? 'bun.exe' : 'bun';
+    const bunInstall = join(tmpBase, 'bun-install');
+    const bunPath = join(bunInstall, 'bin', bunBinary);
+    mkdirSync(join(bunInstall, 'bin'), { recursive: true });
+    writeFileSync(bunPath, 'stub');
+    process.env.BUN_INSTALL = bunInstall;
+    delete process.env.CRAFT_BUN;
+    process.env.PATH = '';
+
+    const paths = resolveBackendRuntimePaths({
+      appRootPath: join(tmpBase, 'app'),
+      resourcesPath: join(tmpBase, 'resources'),
+      isPackaged: false,
+    });
+
+    expect(paths.nodeRuntimePath).toBe(bunPath);
+  });
+
+  it('prefers an explicit CRAFT_BUN runtime override', () => {
+    const bunPath = join(tmpBase, process.platform === 'win32' ? 'custom-bun.exe' : 'custom-bun');
+    mkdirSync(tmpBase, { recursive: true });
+    writeFileSync(bunPath, 'stub');
+    process.env.CRAFT_BUN = bunPath;
+
+    const paths = resolveBackendRuntimePaths({
+      appRootPath: join(tmpBase, 'app'),
+      resourcesPath: join(tmpBase, 'resources'),
+      isPackaged: false,
+    });
+
+    expect(paths.nodeRuntimePath).toBe(bunPath);
+  });
+});
+
 describe('resolveServerPath fallback', () => {
   const tmpBase = join(tmpdir(), `resolver-test-${Date.now()}`);
 
