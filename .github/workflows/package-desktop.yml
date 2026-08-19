@@ -176,5 +176,6 @@ jobs:
               --target "${GITHUB_SHA}" \
               --title "${release_title}" \
               --notes "${release_notes}" \
+              --generate-notes \
               "${release_flags[@]}"
           fi
