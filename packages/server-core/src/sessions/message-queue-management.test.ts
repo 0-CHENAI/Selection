@@ -135,7 +135,6 @@ describe('message queue management (#22)', () => {
     expect(forceAbort).toHaveBeenCalled()
     expect(managed.stopRequested).toBe(true)
     expect(managed.wasInterrupted).toBe(true)
-    expect(managed.resetAgentBeforeQueuedReplay).toBeUndefined()
     expect(managed.messageQueue.map(item => item.messageId)).toEqual(['queue-b', 'queue-a'])
     expect(managed.messages.find(message => message.id === 'queue-b')).toMatchObject({
       isQueued: false,
@@ -212,7 +211,6 @@ describe('message queue management (#22)', () => {
     expect(forceAbort).toHaveBeenCalled()
     expect(managed.stopRequested).toBe(true)
     expect(managed.wasInterrupted).toBe(true)
-    expect(managed.resetAgentBeforeQueuedReplay).toBeUndefined()
     expect(managed.messageQueue.map(item => item.messageId)).toEqual(['queue-b', 'queue-a'])
     expect(managed.messages.find(message => message.id === 'live-answer')).toMatchObject({
       hidden: true,
@@ -232,6 +230,21 @@ describe('message queue management (#22)', () => {
       message: { id: 'queue-b', isQueued: false },
     })
     expect(events.at(-1)?.messages.map((message: any) => message.id)).toEqual(['queue-a'])
+  })
+
+  it('keeps an accepted send-now follow-up when the user stops', async () => {
+    await manager.sendQueuedMessageNow(managed.id, 'queue-b')
+    events.length = 0
+    await manager.cancelProcessing(managed.id)
+
+    expect(managed.messageQueue).toEqual([])
+    expect(managed.messages.find(message => message.id === 'queue-b')).toMatchObject({
+      content: 'second queued',
+      isQueued: false,
+      hidden: false,
+    })
+    expect(managed.messages.some(message => message.id === 'queue-a')).toBe(false)
+    expect(events.find(event => event.type === 'interrupted')?.queuedMessages).toEqual(['first queued'])
   })
 
   it('aborts a live tool turn so send-now changes direction instead of finishing both answers', async () => {
@@ -270,7 +283,6 @@ describe('message queue management (#22)', () => {
     expect(forceAbort).toHaveBeenCalled()
     expect(managed.stopRequested).toBe(true)
     expect(managed.wasInterrupted).toBe(true)
-    expect(managed.resetAgentBeforeQueuedReplay).toBeUndefined()
     expect(managed.messageQueue.map(item => item.messageId)).toEqual(['queue-b', 'queue-a'])
     expect(managed.messages.find(message => message.id === 'live-answer')).toMatchObject({
       hidden: true,

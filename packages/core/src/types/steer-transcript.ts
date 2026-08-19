@@ -27,19 +27,19 @@ export function applySteerTranscriptBoundary(
   now: () => number = Date.now,
 ): Message[] {
   let lastAnchorIndex = -1
-  for (let i = 0; i < messages.length; i++) {
-    const candidate = messages[i]
+  for (const [index, candidate] of messages.entries()) {
+    if (!candidate) continue
     if (candidate.role !== 'user' || candidate.hidden || candidate.isQueued) continue
     if (isSteerFollowUp(candidate, incomingIds)) continue
     if (candidate.queueId) continue
-    lastAnchorIndex = i
+    lastAnchorIndex = index
   }
 
   const kept: Message[] = []
   const generationChain: Message[] = []
   let incoming: Message | undefined
-  for (let i = 0; i < messages.length; i++) {
-    const candidate = messages[i]
+  for (const [index, candidate] of messages.entries()) {
+    if (!candidate) continue
     if (isSteerFollowUp(candidate, incomingIds)) {
       incoming = candidate
       continue
@@ -48,7 +48,7 @@ export function applySteerTranscriptBoundary(
       kept.push(candidate)
       continue
     }
-    if (i <= lastAnchorIndex) {
+    if (index <= lastAnchorIndex) {
       kept.push(candidate)
       continue
     }

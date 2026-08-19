@@ -6845,13 +6845,16 @@ export class SessionManager implements ISessionManager {
 
     sessionLog.info('Cancelling processing for session:', sessionId, silent ? '(silent)' : '')
 
-    // Collect queued message text for input restoration before clearing
-    const queuedTexts = managed.messageQueue.map(q => q.message)
-
-    // Collect queued message IDs so we can remove them from the messages array
-    // (they were added when sendMessage was called during processing)
+    // Composer items go back to the input. Send-now / steer follow-ups are
+    // already in the transcript (`isQueued === false`) and must stay there.
+    const stillQueuedEntries = managed.messageQueue.filter((entry) => {
+      if (!entry.messageId) return true
+      const message = managed.messages.find(candidate => candidate.id === entry.messageId)
+      return !(message && message.isQueued === false && !message.hidden)
+    })
+    const queuedTexts = stillQueuedEntries.map(entry => entry.message)
     const queuedMessageIds = new Set(
-      managed.messageQueue.map(q => q.messageId).filter((id): id is string => !!id)
+      stillQueuedEntries.map(entry => entry.messageId).filter((id): id is string => !!id)
     )
 
     // Clear queue - user explicitly stopped, don't process queued messages
