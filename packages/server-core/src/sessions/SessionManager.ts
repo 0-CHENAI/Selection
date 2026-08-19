@@ -1325,6 +1325,13 @@ export class SessionManager implements ISessionManager {
    * subprocess can race the resulting `chat` against the still-pending update.
    */
   private agentRefreshLocks: Map<string, Promise<void>> = new Map()
+  /**
+   * Per-session source update currently being applied. Regenerate must wait for
+   * this work before it snapshots/rebuilds the backend runtime; otherwise a
+   * rapid "enable source -> regenerate" sequence can rebuild from the previous
+   * MCP selection while setSessionSources is still connecting the new source.
+   */
+  private sessionSourceUpdateLocks: Map<string, Promise<void>> = new Map()
   /** Monotonic clock to ensure strictly increasing message timestamps */
   private lastTimestamp = 0
 
@@ -5187,6 +5194,24 @@ export class SessionManager implements ISessionManager {
    * Otherwise, servers will be built fresh on next message.
    */
   async setSessionSources(sessionId: string, sourceSlugs: string[]): Promise<void> {
+    const previous = this.sessionSourceUpdateLocks.get(sessionId)
+    const update = (async () => {
+      // Preserve command order when the user changes the selection repeatedly.
+      await previous?.catch(() => undefined)
+      await this.applySessionSources(sessionId, sourceSlugs)
+    })()
+    this.sessionSourceUpdateLocks.set(sessionId, update)
+
+    try {
+      await update
+    } finally {
+      if (this.sessionSourceUpdateLocks.get(sessionId) === update) {
+        this.sessionSourceUpdateLocks.delete(sessionId)
+      }
+    }
+  }
+
+  private async applySessionSources(sessionId: string, sourceSlugs: string[]): Promise<void> {
     const managed = this.sessions.get(sessionId)
     if (!managed) {
       throw new Error(`Session not found: ${sessionId}`)
@@ -6581,6 +6606,11 @@ export class SessionManager implements ISessionManager {
    * Used by the response-card regenerate control.
    */
   async regenerateLastResponse(sessionId: string): Promise<{ success: true }> {
+    // Source selection changes perform asynchronous MCP connection/pool work.
+    // Observe all changes requested before regenerate so the fresh runtime is
+    // never created from the previous tool snapshot.
+    await this.sessionSourceUpdateLocks.get(sessionId)?.catch(() => undefined)
+
     const managed = this.sessions.get(sessionId)
     if (!managed) {
       throw new Error(`Session ${sessionId} not found`)

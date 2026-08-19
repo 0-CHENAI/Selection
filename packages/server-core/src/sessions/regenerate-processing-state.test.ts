@@ -69,6 +69,77 @@ describe('regenerate processing state (#17)', () => {
     expect(managed.isProcessing).toBe(true)
   })
 
+  it('waits for an in-flight source update before rebuilding the response', async () => {
+    const sessionId = 'regen-source-refresh'
+    const managed = buildSession(sessionId)
+    managed.messages = [
+      { id: 'u1', role: 'user', content: 'search the knowledge base', timestamp: 1 },
+      { id: 'a1', role: 'assistant', content: 'old answer', timestamp: 2 },
+    ]
+
+    let releaseSourceUpdate!: () => void
+    const sourceUpdate = new Promise<void>(resolve => {
+      releaseSourceUpdate = () => {
+        managed.enabledSourceSlugs = ['new-knowledge-base']
+        resolve()
+      }
+    })
+    const smInternal = sm as unknown as {
+      sessionSourceUpdateLocks: Map<string, Promise<void>>
+      sendMessage: SessionManager['sendMessage']
+    }
+    smInternal.sessionSourceUpdateLocks.set(sessionId, sourceUpdate)
+
+    let sourcesAtReplay: string[] | undefined
+    smInternal.sendMessage = (async () => {
+      sourcesAtReplay = [...(managed.enabledSourceSlugs ?? [])]
+      managed.isProcessing = false
+    }) as SessionManager['sendMessage']
+
+    const regenerate = sm.regenerateLastResponse(sessionId)
+    await flushImmediate(1)
+
+    // The old response remains visible until the source mutation is committed.
+    expect(managed.messages.map(message => message.id)).toEqual(['u1', 'a1'])
+    expect(sourcesAtReplay).toBeUndefined()
+
+    releaseSourceUpdate()
+    await regenerate
+    await flushImmediate(1)
+
+    expect(managed.messages.map(message => message.id)).toEqual(['u1'])
+    expect(sourcesAtReplay).toEqual(['new-knowledge-base'])
+  })
+
+  it('applies rapid source selections in request order', async () => {
+    const sessionId = 'source-update-order'
+    buildSession(sessionId)
+
+    let releaseFirst!: () => void
+    const firstBlocked = new Promise<void>(resolve => {
+      releaseFirst = resolve
+    })
+    const applied: string[][] = []
+    const smInternal = sm as unknown as {
+      applySessionSources: (id: string, sourceSlugs: string[]) => Promise<void>
+    }
+    smInternal.applySessionSources = async (_id, sourceSlugs) => {
+      applied.push(sourceSlugs)
+      if (sourceSlugs[0] === 'first') await firstBlocked
+    }
+
+    const first = sm.setSessionSources(sessionId, ['first'])
+    const second = sm.setSessionSources(sessionId, ['second'])
+    await flushImmediate(1)
+
+    expect(applied).toEqual([['first']])
+
+    releaseFirst()
+    await Promise.all([first, second])
+
+    expect(applied).toEqual([['first'], ['second']])
+  })
+
   it('clears running state when validation fails before truncate', async () => {
     const sessionId = 'regen-nothing'
     const managed = buildSession(sessionId)
