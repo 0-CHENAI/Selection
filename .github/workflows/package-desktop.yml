@@ -112,7 +112,7 @@ jobs:
 
   publish-release:
     name: Publish desktop release
-    if: github.ref_name == github.event.repository.default_branch
+    if: github.ref_name == github.event.repository.default_branch || github.ref_name == 'test'
     needs:
       - package-macos-arm64
       - package-windows-x64
@@ -156,8 +156,15 @@ jobs:
         run: |
           set -euo pipefail
           app_version=$(jq -r '.version' apps/electron/package.json)
-          release_tag="v${app_version}-build.${GITHUB_RUN_NUMBER}"
-          release_title="Selection v${app_version} build ${GITHUB_RUN_NUMBER}"
+          if [[ "${GITHUB_REF_NAME}" == "test" ]]; then
+            release_tag="v${app_version}-beta${GITHUB_RUN_NUMBER}"
+            release_title="Selection v${app_version} beta ${GITHUB_RUN_NUMBER}"
+            release_flags=(--prerelease --latest=false)
+          else
+            release_tag="v${app_version}"
+            release_title="Selection v${app_version}"
+            release_flags=()
+          fi
           run_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
           release_notes=$(printf 'Automated desktop build from `%s` (`%s`).\n\n[GitHub Actions run](%s)' \
             "${GITHUB_REF_NAME}" "${GITHUB_SHA}" "${run_url}")
@@ -169,6 +176,5 @@ jobs:
               --target "${GITHUB_SHA}" \
               --title "${release_title}" \
               --notes "${release_notes}" \
-              --prerelease \
-              --latest=false
+              "${release_flags[@]}"
           fi
