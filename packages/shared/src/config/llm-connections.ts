@@ -495,9 +495,9 @@ export function isPiProvider(providerType: LlmProviderType): boolean {
  *   has a real failure mode — if no tool fires before the turn ends, the steer
  *   becomes `steer_undelivered` and gets re-queued anyway, paying for the
  *   original turn's tokens for nothing. Default to queue for predictability.
- * - 'pi' / 'pi_compat' → 'steer': Pi's native `.steer()` is non-destructive
- *   (delivers after the current tool finishes, keeps full context). No
- *   downside to defaulting to immediate steering.
+ * - 'pi' / 'pi_compat' → 'steer': interrupt the live query and replay the
+ *   follow-up as a new turn. Native `.steer()` waits for the current tool
+ *   and then finishes the original answer, which produces two cards.
  */
 export function defaultMidStreamBehavior(providerType: LlmProviderType): MidStreamBehavior {
   return providerType === 'pi' || providerType === 'pi_compat' ? 'steer' : 'queue';

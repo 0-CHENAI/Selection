@@ -8,7 +8,7 @@ import type { Message, StoredMessage } from './message.ts';
  * - isPending
  */
 export function messageToStored(msg: Message): StoredMessage {
-  const { role, isStreaming, isPending, ...rest } = msg;
+  const { role, isStreaming, isPending, queueId, ...rest } = msg;
   return { ...rest, type: role } as StoredMessage;
 }
 

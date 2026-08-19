@@ -2351,8 +2351,12 @@ export class PiAgent extends BaseAgent {
    * queued tools, and continues with full context intact.
    * Events flow through the existing generator — no abort needed.
    */
+  override canRedirect(): boolean {
+    return this._isProcessing && !!this.subprocess;
+  }
+
   override redirect(message: string): boolean {
-    if (!this._isProcessing || !this.subprocess) {
+    if (!this.canRedirect()) {
       // Not streaming or no subprocess — fall back to abort
       this.forceAbort(AbortReason.Redirect);
       return false;

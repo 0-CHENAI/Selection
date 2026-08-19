@@ -1270,7 +1270,9 @@ export default function App() {
       // Capture pre-send processing state so we can flag mid-stream sends
       // for the queued badge (#616 follow-up — covers Pi steer path which
       // returns status 'accepted', not 'queued').
-      const sendingMidStream = store.get(sessionAtomFamily(sessionId))?.isProcessing === true
+      const sessionSnapshot = store.get(sessionAtomFamily(sessionId))
+      const sendingMidStream = sessionSnapshot?.isProcessing === true
+      const optionSnapshot = sessionOptions.get(sessionId)
 
       // Step 1: Store attachments and get persistent metadata
       let storedAttachments: StoredAttachment[] | undefined
@@ -1384,12 +1386,9 @@ export default function App() {
 
       // Step 5: Create user message with StoredAttachments (for UI display)
       // Mark as isPending for optimistic UI — will be confirmed by user_message
-      // event. Flag mid-stream sends as queued so the bubble renders with the
-      // dashed-draft treatment immediately. Applies to both backends:
-      // Pi steers (server emits status: 'accepted' but the renderer preserves
-      // isQueued through that update) and Claude queues (server emits 'queued'
-      // which confirms it). Cleared by 'processing' status or when the current
-      // turn ends.
+      // event. Flag mid-stream sends as queued so the bubble starts in the
+      // composer. Steer/send-now later emits 'accepted' and promotes it into
+      // the transcript; queue mode emits 'queued' and keeps it in the composer.
       const userMessage: Message = {
         id: generateMessageId(),
         role: 'user',
@@ -1405,7 +1404,8 @@ export default function App() {
       updateSessionById(sessionId, (s) => ({
         messages: [...s.messages, userMessage],
         isProcessing: true,
-        lastMessageAt: Date.now()
+        // Queued content is composer state, not a committed transcript turn.
+        lastMessageAt: sendingMidStream ? s.lastMessageAt : Date.now()
       }))
 
       // Step 6: Send to Claude with processed attachments + stored attachments for persistence
@@ -1413,6 +1413,13 @@ export default function App() {
         skillSlugs,
         badges: badges.length > 0 ? badges : undefined,
         optimisticMessageId: userMessage.id,
+        queueContext: sendingMidStream ? {
+          sourceSlugs: [...(sessionSnapshot?.enabledSourceSlugs ?? [])],
+          model: sessionSnapshot?.model ?? null,
+          llmConnection: sessionSnapshot?.llmConnection ?? null,
+          thinkingLevel: optionSnapshot?.thinkingLevel ?? 'medium',
+          permissionMode: optionSnapshot?.permissionMode ?? 'ask',
+        } : undefined,
       })
     } catch (error) {
       console.error('Failed to send message:', error)
@@ -1429,7 +1436,7 @@ export default function App() {
         ]
       }))
     }
-  }, [sessionOptions, updateSessionById, skills, sources, windowWorkspaceId])
+  }, [sessionOptions, updateSessionById, skills, sources, store, windowWorkspaceSlug])
 
   /**
    * Unified handler for all session option changes.

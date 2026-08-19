@@ -25,6 +25,7 @@ export type {
 export type {
   MessageRole,
   ToolStatus,
+  QueuedMessageContext,
   ToolDisplayMeta,
   AttachmentType,
   MessageAttachment,
@@ -53,6 +54,12 @@ export type {
   AuthStatus,
 } from './message.ts';
 export { generateMessageId } from './message.ts';
+export {
+  applySteerTranscriptBoundary,
+  isOpenResponseBody,
+  isSteerFollowUp,
+  isThoughtChainMessage,
+} from './steer-transcript.ts';
 
 // Message persistence mappers
 export { messageToStored, storedToMessage } from './message-mapper.ts';
@@ -64,4 +71,3 @@ export type {
   SessionProcessingStatus,
   ActiveSessionInfo,
 } from './server.ts';
-

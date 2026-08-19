@@ -12,7 +12,9 @@ import {
   findAssistantMessage,
   updateMessageAt,
   appendMessage,
-  generateMessageId
+  generateMessageId,
+  timestampAfterVisibleUser,
+  isSuppressedTurn,
 } from '../helpers'
 
 /**
@@ -26,6 +28,10 @@ export function handleTextDelta(
   event: TextDeltaEvent
 ): SessionState {
   const { session, streaming } = state
+
+  if (isSuppressedTurn(session, event.turnId)) {
+    return { session, streaming: null }
+  }
 
   // Accumulate in streaming state
   const newStreaming: StreamingState = streaming
@@ -57,7 +63,7 @@ export function handleTextDelta(
     id: generateMessageId(),
     role: 'assistant',
     content: event.delta,
-    timestamp: Date.now(),
+    timestamp: timestampAfterVisibleUser(session.messages),
     isStreaming: true,
     isPending: true,
     turnId: event.turnId,
@@ -81,6 +87,10 @@ export function handleTextComplete(
   event: TextCompleteEvent
 ): SessionState {
   const { session, streaming } = state
+
+  if (isSuppressedTurn(session, event.turnId)) {
+    return { session, streaming: null }
+  }
 
   // Find message by turnId (try streaming first, then any assistant)
   let msgIndex = findStreamingMessage(session.messages, event.turnId)
@@ -106,6 +116,10 @@ export function handleTextComplete(
     // Fallback chain: SDK event text → accumulated streaming content → existing message content.
     // Guards against SDK quirks or race conditions where event.text arrives empty.
     const resolvedContent = event.text || streaming?.content || existingMsg?.content || ''
+    const nextTimestamp = timestampAfterVisibleUser(
+      session.messages,
+      event.timestamp ?? existingMsg.timestamp,
+    )
     const updatedSession = updateMessageAt(session, msgIndex, {
       // Replace temporary renderer-generated ID with authoritative main-process ID
       // so branchFromMessageId always resolves against persisted session.jsonl.
@@ -116,9 +130,7 @@ export function handleTextComplete(
       isIntermediate: event.isIntermediate,
       turnId: event.turnId,
       parentToolUseId: event.parentToolUseId,
-      // Overwrite text_delta's Date.now() with main process monotonic timestamp
-      // This ensures reload order matches live order
-      ...(event.timestamp ? { timestamp: event.timestamp } : {}),
+      timestamp: nextTimestamp,
     }, shouldUpdateTimestamp)
     return { session: updatedSession, streaming: null }
   }
@@ -130,7 +142,7 @@ export function handleTextComplete(
     id: event.messageId ?? generateMessageId(),
     role: 'assistant',
     content: event.text || streaming?.content || '',
-    timestamp: event.timestamp ?? Date.now(),
+    timestamp: timestampAfterVisibleUser(session.messages, event.timestamp ?? Date.now()),
     isStreaming: false,
     isPending: false,
     isIntermediate: event.isIntermediate,

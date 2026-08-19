@@ -1389,6 +1389,13 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
     return groupMessagesByTurn(session.messages, { isSessionProcessing: session.isProcessing })
   }, [session?.messages, session?.isProcessing])
 
+  const queuedMessages = React.useMemo(
+    () => session?.messages.filter(message =>
+      message.role === 'user' && message.isQueued && !message.hidden,
+    ) ?? [],
+    [session?.messages],
+  )
+
   // Keep ref in sync for scroll handler
   totalTurnCountRef.current = allTurns.length
 
@@ -1485,7 +1492,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
   const skipScrollToBottom = isSessionSwitchForScroll && isSearchActive
   const hasUnrenderedLoadedMessages = !messagesLoading
     && turns.length === 0
-    && ((session?.messages?.length ?? 0) > 0 || (session?.messageCount ?? 0) > 0)
+    && session?.messages.some(message => !message.hidden && !message.isQueued)
 
   return (
     <div ref={zoneRef} className="flex h-full flex-col min-w-0" data-focus-zone="chat">
@@ -1920,7 +1927,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
                   // Prefer the turn-start clock. Regenerating reuses the original
                   // user-message timestamp, which would otherwise keep counting
                   // from the first send.
-                  const lastUserMsg = [...session.messages].reverse().find(m => m.role === 'user')
+                  const lastUserMsg = [...session.messages].reverse().find(m => m.role === 'user' && !m.isQueued)
                   return (
                     <ProcessingIndicator
                       startTime={session.processingStartedAt ?? lastUserMsg?.timestamp}
@@ -1955,6 +1962,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
               (session.sharedProjectMemoryEnabled === undefined || session.sharedProjectMemoryEnabled === true)
             }
             onSessionStatusChange={onSessionStatusChange}
+            queuedMessages={queuedMessages}
             inputProps={{
               placeholder,
               disabled: isInputDisabled,

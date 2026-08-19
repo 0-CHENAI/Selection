@@ -12,7 +12,8 @@ import {
   findToolMessage,
   updateMessageAt,
   appendMessage,
-  generateMessageId
+  generateMessageId,
+  timestampAfterVisibleUser,
 } from '../helpers'
 
 /**
@@ -48,7 +49,7 @@ export function handleToolStart(
     id: generateMessageId(),
     role: 'tool',
     content: '',
-    timestamp: event.timestamp ?? Date.now(),
+    timestamp: timestampAfterVisibleUser(session.messages, event.timestamp ?? Date.now()),
     toolUseId: event.toolUseId,
     toolName: event.toolName,
     toolInput: event.toolInput,
@@ -149,7 +150,7 @@ export function handleToolResult(
     id: generateMessageId(),
     role: 'tool',
     content: '',
-    timestamp: event.timestamp ?? Date.now(),
+    timestamp: timestampAfterVisibleUser(session.messages, event.timestamp ?? Date.now()),
     toolUseId: event.toolUseId,
     toolName: event.toolName,
     toolResult: event.result,
@@ -265,7 +266,7 @@ export function handleTaskCompleted(
   const { session, streaming } = state
 
   // Find the tool message by taskId (set when task_backgrounded was processed)
-  const toolIndex = session.messages.findIndex(m => m.taskId === event.taskId)
+  const toolIndex = session.messages.findIndex(m => m.taskId === event.taskId && !m.hidden)
 
   if (toolIndex !== -1) {
     const updatedSession = updateMessageAt(session, toolIndex, {

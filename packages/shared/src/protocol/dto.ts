@@ -13,6 +13,7 @@ import type {
   ToolDisplayMeta,
   AnnotationV1,
   PermissionRequest as BasePermissionRequest,
+  QueuedMessageContext,
 } from '@craft-agent/core/types'
 import type { PermissionMode } from '../agent/mode-types'
 import type { ThinkingLevel } from '../agent/thinking-levels'
@@ -85,6 +86,12 @@ export interface Session {
   }
   /** Renderer-only: when the current generating turn started (elapsed-time clock). */
   processingStartedAt?: number
+  /**
+   * Renderer-only: turnIds from a live text stream we just aborted.
+   * Leftover text_delta / text_complete events with these ids must not
+   * create a new assistant bubble under the follow-up.
+   */
+  suppressedTurnIds?: string[]
   createdAt?: number
   messageCount?: number
   tokenUsage?: {
@@ -405,6 +412,7 @@ export type SessionEvent =
   | { type: 'workflow_agent_completed'; sessionId: string; workflowId: string; agentId: string; turnId?: string }
   | { type: 'shell_killed'; sessionId: string; shellId: string }
   | { type: 'user_message'; sessionId: string; message: Message; status: 'accepted' | 'queued' | 'processing'; optimisticMessageId?: string }
+  | { type: 'queue_changed'; sessionId: string; messages: Message[] }
   | { type: 'session_flagged'; sessionId: string }
   | { type: 'session_unflagged'; sessionId: string }
   | { type: 'session_archived'; sessionId: string }
@@ -429,6 +437,8 @@ export interface SendMessageOptions {
   skillSlugs?: string[]
   badges?: ContentBadge[]
   optimisticMessageId?: string
+  /** Session-scoped options frozen when a mid-stream message is queued. */
+  queueContext?: QueuedMessageContext
   /**
    * When true, the message drives a turn (reaches the model) but is marked
    * `hidden` on the persisted `Message` so it never renders as a transcript
@@ -473,6 +483,10 @@ export type SessionCommand =
   | { type: 'addAnnotation'; messageId: string; annotation: AnnotationV1 }
   | { type: 'removeAnnotation'; messageId: string; annotationId: string }
   | { type: 'updateAnnotation'; messageId: string; annotationId: string; patch: Partial<AnnotationV1> }
+  | { type: 'updateQueuedMessage'; messageId: string; content: string }
+  | { type: 'deleteQueuedMessage'; messageId: string }
+  | { type: 'reorderQueuedMessages'; messageIds: string[] }
+  | { type: 'sendQueuedMessageNow'; messageId: string }
   | { type: 'regenerate' }
 
 export interface NewChatActionParams {

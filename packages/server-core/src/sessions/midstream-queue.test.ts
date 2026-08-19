@@ -90,7 +90,7 @@ describe('mid-stream queue runtime invariants', () => {
     const sendMessage = mock(async () => {})
     ;(sm as unknown as { sendMessage: typeof sendMessage }).sendMessage = sendMessage
 
-    ;(sm as unknown as { processNextQueuedMessage: (id: string) => void })
+    await (sm as unknown as { processNextQueuedMessage: (id: string) => Promise<void> })
       .processNextQueuedMessage(sessionId)
     await new Promise<void>(resolve => setImmediate(resolve))
 

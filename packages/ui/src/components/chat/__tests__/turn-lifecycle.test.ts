@@ -469,3 +469,118 @@ describe('hidden messages', () => {
     expect((userTurns[0] as { message: Message }).message.content).toBe('real user question')
   })
 })
+
+describe('pending follow-up replies', () => {
+  it('keeps a pending reply as the response after tools, not a thought row', () => {
+    resetCounters()
+    const user = createUserMessage('查看结构')
+    const tool = createToolMessage('completed', 'Read')
+    tool.timestamp = user.timestamp + 5
+    const pending: Message = {
+      id: 'pending-reply',
+      role: 'assistant',
+      content: '报告分为三部分',
+      timestamp: user.timestamp + 10,
+      isStreaming: true,
+      isPending: true,
+    }
+
+    const turns = groupMessagesByTurn([user, tool, pending])
+    const assistant = turns[1]
+    expect(assistant?.type).toBe('assistant')
+    if (assistant?.type === 'assistant') {
+      expect(assistant.activities).toHaveLength(1)
+      expect(assistant.response?.text).toBe('报告分为三部分')
+      expect(assistant.response?.isStreaming).toBe(true)
+    }
+  })
+
+  it('keeps a pending reply as the response when only intermediate thought exists', () => {
+    resetCounters()
+    const user = createUserMessage('用html')
+    const thought: Message = {
+      id: 'thought',
+      role: 'assistant',
+      content: '先整理章节',
+      timestamp: user.timestamp + 5,
+      isIntermediate: true,
+    }
+    const pending: Message = {
+      id: 'pending-reply',
+      role: 'assistant',
+      content: '<table>',
+      timestamp: user.timestamp + 10,
+      isStreaming: true,
+      isPending: true,
+    }
+
+    const turns = groupMessagesByTurn([user, thought, pending])
+    const assistant = turns[1]
+    expect(assistant?.type).toBe('assistant')
+    if (assistant?.type === 'assistant') {
+      expect(assistant.activities.map(activity => activity.content)).toEqual(['先整理章节'])
+      expect(assistant.response?.text).toBe('<table>')
+      expect(assistant.response?.isStreaming).toBe(true)
+    }
+  })
+
+  it('shows pending text after a user message as a streaming response, not a thought row', () => {
+    resetCounters()
+    const user = createUserMessage('请使用列表展示')
+    const pending: Message = {
+      id: 'pending-reply',
+      role: 'assistant',
+      content: '好的，下面列出文稿的所有章节及其子项：',
+      timestamp: user.timestamp + 10,
+      isStreaming: true,
+      isPending: true,
+    }
+
+    const turns = groupMessagesByTurn([user, pending])
+    expect(turns.map(turn => turn.type)).toEqual(['user', 'assistant'])
+    const assistant = turns[1]
+    expect(assistant?.type).toBe('assistant')
+    if (assistant?.type === 'assistant') {
+      expect(assistant.activities).toEqual([])
+      expect(assistant.response?.text).toBe('好的，下面列出文稿的所有章节及其子项：')
+      expect(assistant.response?.isStreaming).toBe(true)
+    }
+  })
+})
+
+describe('queued messages', () => {
+  it('keeps queued user content out of the transcript until replay starts', () => {
+    resetCounters()
+
+    const activeUser = createUserMessage('current task')
+    const queuedUser: Message = {
+      ...createUserMessage('later task'),
+      isQueued: true,
+    }
+
+    const turns = groupMessagesByTurn([activeUser, queuedUser])
+    const userTurns = turns.filter(turn => turn.type === 'user')
+
+    expect(userTurns).toHaveLength(1)
+    expect((userTurns[0] as { message: Message }).message.content).toBe('current task')
+  })
+
+  it('keeps a replayed user message as a hard boundary even when turn ids are reused', () => {
+    resetCounters()
+
+    const firstUser = createUserMessage('first')
+    const firstTool = createToolMessage('completed', 'Read', 'shared-turn')
+    const replayedUser = createUserMessage('send now')
+    const replayedTool = createToolMessage('completed', 'Read', 'shared-turn')
+    firstUser.timestamp = 1
+    firstTool.timestamp = 2
+    replayedUser.timestamp = 3
+    replayedTool.timestamp = 4
+
+    const turns = groupMessagesByTurn([firstUser, firstTool, replayedUser, replayedTool])
+    const assistantTurns = turns.filter(turn => turn.type === 'assistant')
+
+    expect(turns.map(turn => turn.type)).toEqual(['user', 'assistant', 'user', 'assistant'])
+    expect(assistantTurns.map(turn => turn.activities.length)).toEqual([1, 1])
+  })
+})
