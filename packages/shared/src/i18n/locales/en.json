@@ -1669,6 +1669,8 @@
   "toast.messagingRateLimited": "Too many pairing code requests. Please wait a moment and try again.",
   "toast.messagingTelegramLockedDown": "Telegram bot locked down to allowed users",
   "toast.messagingTelegramUnlocked": "Telegram bot unlocked — anyone can DM it again",
+  "toast.parentStoppedChildrenRunning_one": "Stopped this session. {{count}} child session is still running — open or stop it from the list.",
+  "toast.parentStoppedChildrenRunning_other": "Stopped this session. {{count}} child sessions are still running — open or stop them from the list.",
   "toast.pathCopied": "Path copied to clipboard",
   "toast.patternCopied": "Pattern copied to clipboard",
   "toast.reconnectFailed": "Reconnect failed",

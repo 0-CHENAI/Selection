@@ -22,6 +22,7 @@ export interface ActiveTasksBarProps {
   sessionId: string
   /** Callback when kill button is clicked */
   onKillTask?: (taskId: string) => void
+  onOpenSession?: (sessionId: string) => void
   /** Callback to insert message into input field */
   onInsertMessage?: (text: string) => void
   /** Callback to show terminal output overlay */
@@ -35,7 +36,7 @@ export interface ActiveTasksBarProps {
  * Styled to match ActiveOptionBadges for visual consistency
  * Only renders when there are active tasks
  */
-export function ActiveTasksBar({ tasks, sessionId, onKillTask, onInsertMessage, onShowTerminalOverlay, className }: ActiveTasksBarProps) {
+export function ActiveTasksBar({ tasks, sessionId, onKillTask, onOpenSession, onInsertMessage, onShowTerminalOverlay, className }: ActiveTasksBarProps) {
   const setTasks = useSetAtom(backgroundTasksAtomFamily(sessionId))
 
   // Stop an unconfirmed chip from spinning forever without pretending the task
@@ -59,6 +60,7 @@ export function ActiveTasksBar({ tasks, sessionId, onKillTask, onInsertMessage, 
           task={task}
           sessionId={sessionId}
           onKillTask={onKillTask || (() => {})}
+          onOpenSession={onOpenSession}
           onInsertMessage={onInsertMessage}
           onShowTerminalOverlay={onShowTerminalOverlay}
           className={className}

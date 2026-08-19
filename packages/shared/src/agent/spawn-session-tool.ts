@@ -6,10 +6,25 @@
  *
  * Two modes:
  * - help=true: Returns available connections, models, and sources
- * - Default: Creates a session and sends the prompt (fire-and-forget)
+ * - Default: Creates a first-class child session. mode=background (default)
+ *   returns immediately and wakes the parent on completion; mode=wait
+ *   blocks until the child finishes (or times out).
  */
 
-import type { SpawnSessionResult, SpawnSessionHelpResult } from './base-agent.ts';
+import type { SpawnSessionMode, SpawnSessionResult, SpawnSessionHelpResult } from './base-agent.ts';
+
+export const DEFAULT_SPAWN_SESSION_MODE: SpawnSessionMode = 'background';
+export const DEFAULT_SPAWN_WAIT_TIMEOUT_MS = 15 * 60 * 1000;
+export const MAX_SPAWN_WAIT_TIMEOUT_MS = 30 * 60 * 1000;
+
+export function resolveSpawnSessionMode(raw: unknown): SpawnSessionMode {
+  return raw === 'wait' ? 'wait' : DEFAULT_SPAWN_SESSION_MODE;
+}
+
+export function resolveSpawnWaitTimeoutMs(raw: unknown): number {
+  const n = typeof raw === 'number' && Number.isFinite(raw) ? raw : DEFAULT_SPAWN_WAIT_TIMEOUT_MS;
+  return Math.min(Math.max(1, Math.floor(n)), MAX_SPAWN_WAIT_TIMEOUT_MS);
+}
 
 export type SpawnSessionFn = (input: Record<string, unknown>) => Promise<SpawnSessionResult | SpawnSessionHelpResult>;
 

@@ -126,6 +126,8 @@ export interface ISessionManager {
   cancelProcessing(sessionId: string, silent?: boolean): Promise<void>
   killShell(sessionId: string, shellId: string): Promise<{ success: boolean; error?: string }>
   getTaskOutput(taskId: string): Promise<string | null>
+  /** Install the workspace TaskRunner lookup used by the run_task session tool. */
+  setTaskRunnerLookup(lookup: (workspaceId: string) => import('../tasks').TaskRunner): void
 
   // --- Tasks Conductor seams (in-process; not renderer events, not agent-facing) ---
   /**

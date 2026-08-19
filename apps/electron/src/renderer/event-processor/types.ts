@@ -264,6 +264,8 @@ export interface InterruptedEvent {
   message?: Message
   /** Messages that were queued but not processed — should be restored to input field */
   queuedMessages?: string[]
+  /** spawn_session children still running after this session stopped (not cancelled). */
+  runningChildCount?: number
 }
 
 /**
@@ -585,6 +587,7 @@ export type Effect =
   | { type: 'permission_mode_changed'; sessionId: string; permissionMode: PermissionMode; previousPermissionMode?: PermissionMode; transitionDisplay?: string; modeVersion?: number; changedAt?: string; changedBy?: 'user' | 'system' | 'restore' | 'automation' | 'unknown' }
   | { type: 'restore_input'; text: string }
   | { type: 'toast_error'; message: string }
+  | { type: 'toast_running_children'; count: number }
 
 /**
  * Result of processing an event

@@ -117,6 +117,11 @@ export {
   BaseAgent,
   // Mini agent configuration (centralized for all backends)
   type MiniAgentConfig,
+  type SpawnSessionMode,
+  type SpawnSessionResultStatus,
+  type SpawnSessionRequest,
+  type SpawnSessionResult,
+  type SpawnSessionHelpResult,
   MINI_AGENT_TOOLS,
   MINI_AGENT_MCP_KEYS,
 } from './base-agent.ts';
@@ -168,6 +173,15 @@ export {
   sanitizeUserMessageForDisplay,
   sanitizeUserMessageForRetry,
 } from './user-message-sanitize.ts';
+
+export {
+  DEFAULT_SPAWN_SESSION_MODE,
+  DEFAULT_SPAWN_WAIT_TIMEOUT_MS,
+  MAX_SPAWN_WAIT_TIMEOUT_MS,
+  resolveSpawnSessionMode,
+  resolveSpawnWaitTimeoutMs,
+  createSpawnSessionTool,
+} from './spawn-session-tool.ts';
 
 // WS2 keep-alive: shared flag resolver + pushable streaming-input utility.
 export {

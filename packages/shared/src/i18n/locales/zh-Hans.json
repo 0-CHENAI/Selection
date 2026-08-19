@@ -1669,6 +1669,8 @@
   "toast.messagingRateLimited": "配对码请求过于频繁，请稍候再试。",
   "toast.messagingTelegramLockedDown": "Telegram 机器人已限定为允许的用户",
   "toast.messagingTelegramUnlocked": "Telegram 机器人已解锁 — 任何人都可以再次给它发私信",
+  "toast.parentStoppedChildrenRunning_one": "已停止本会话，还有 {{count}} 个子会话在跑，可在列表里打开或停止它们。",
+  "toast.parentStoppedChildrenRunning_other": "已停止本会话，还有 {{count}} 个子会话在跑，可在列表里打开或停止它们。",
   "toast.pathCopied": "路径已复制到剪贴板",
   "toast.patternCopied": "模式已复制到剪贴板",
   "toast.reconnectFailed": "重新连接失败",

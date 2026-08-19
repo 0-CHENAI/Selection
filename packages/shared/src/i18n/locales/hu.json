@@ -1669,6 +1669,8 @@
   "toast.messagingRateLimited": "Túl sok párosítási kód igénylés. Várj egy pillanatot, majd próbáld újra.",
   "toast.messagingTelegramLockedDown": "A Telegram bot az engedélyezett felhasználókra korlátozva",
   "toast.messagingTelegramUnlocked": "A Telegram bot feloldva — bárki újra írhat neki",
+  "toast.parentStoppedChildrenRunning_one": "A munkamenet leállt. Még {{count}} gyermek munkamenet fut — nyisd meg vagy állítsd le a listából.",
+  "toast.parentStoppedChildrenRunning_other": "A munkamenet leállt. Még {{count}} gyermek munkamenet fut — nyisd meg vagy állítsd le őket a listából.",
   "toast.pathCopied": "Elérési út másolva a vágólapra",
   "toast.patternCopied": "Minta másolva a vágólapra",
   "toast.reconnectFailed": "Újracsatlakozás sikertelen",

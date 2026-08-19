@@ -43,7 +43,7 @@ import { Tooltip, TooltipTrigger, TooltipContent } from '../tooltip'
 import { parseDiffFromFile, type FileContents } from '@pierre/diffs'
 import { getDiffStats, getUnifiedDiffStats } from '../code-viewer'
 import { TurnCardActionsMenu } from './TurnCardActionsMenu'
-import { computeLastChildSet, groupActivitiesByParent, isActivityGroup, formatDuration, formatTokens, deriveTurnPhase, shouldShowThinkingIndicator, type ActivityGroup, type AssistantTurn } from './turn-utils'
+import { computeLastChildSet, groupActivitiesByParent, isActivityGroup, formatDuration, formatOrchestrationToolSummary, formatTokens, deriveTurnPhase, shouldShowThinkingIndicator, type ActivityGroup, type AssistantTurn } from './turn-utils'
 import { extractAnnotationSelectedText } from './follow-up-helpers'
 import {
   formatAnnotationFollowUpTooltipText,
@@ -396,6 +396,8 @@ function getToolDisplayName(name: string): string {
     'list_sessions': 'List Sessions',
     'archive_session': 'Archive Session',
     'create_task': 'Create Task',
+    'run_task': 'Run Task',
+    'get_task_results': 'Get Task Results',
     'list_background_tasks': 'List Background Tasks',
     'send_agent_message': 'Send Agent Message',
     'spawn_session': 'Spawn Session',
@@ -876,6 +878,7 @@ function ActivityRow({ activity, onOpenDetails, isLastChild, sessionFolderPath, 
   const diffStats = computeEditWriteDiffStats(activity.toolName, activity.toolInput)
   const isComplete = activity.status === 'completed' || activity.status === 'error'
   const isBackgrounded = activity.status === 'backgrounded'
+  const orchestrationSummary = formatOrchestrationToolSummary(activity.toolName, activity.content)
 
   // For backgrounded tasks, show task/shell ID and elapsed time
   const backgroundInfo = isBackgrounded
@@ -943,6 +946,12 @@ function ActivityRow({ activity, onOpenDetails, isLastChild, sessionFolderPath, 
                     <span className="opacity-50">{inputSummary}</span>
                   </>
                 )}
+              </span>
+            )}
+            {orchestrationSummary && (
+              <span className="truncate min-w-0 max-w-[420px]">
+                <span className="opacity-60"> · </span>
+                <span>{orchestrationSummary}</span>
               </span>
             )}
           </>
@@ -1031,6 +1040,12 @@ function ActivityRow({ activity, onOpenDetails, isLastChild, sessionFolderPath, 
                 <span className="opacity-50">{inputSummary}</span>
               </>
             )}
+          </span>
+        )}
+        {!isMcpOrApiTool && orchestrationSummary && (
+          <span className="truncate min-w-0 max-w-[420px]">
+            <span className="opacity-60"> · </span>
+            <span>{orchestrationSummary}</span>
           </span>
         )}
         {/* Background task info (task/shell ID + elapsed time) */}

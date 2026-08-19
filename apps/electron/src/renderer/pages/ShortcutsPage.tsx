@@ -45,13 +45,6 @@ function useComponentSpecificSections(): ShortcutSection[] {
       ],
     },
     {
-      title: t('shortcuts.agentTree'),
-      shortcuts: [
-        { keys: ['←'], description: t('shortcuts.collapseFolder') },
-        { keys: ['→'], description: t('shortcuts.expandFolder') },
-      ],
-    },
-    {
       title: t('shortcuts.chatInput'),
       shortcuts: [
         { keys: ['Enter'], description: t('shortcuts.sendMessage') },
