@@ -407,6 +407,13 @@ export interface AgentBackend {
   redirect(message: string): boolean;
 
   /**
+   * Whether {@link redirect} can inject into the live turn without aborting.
+   * Pi returns true while a subprocess query is running. Backends that only
+   * implement redirect-as-abort should leave this unimplemented / false.
+   */
+  canRedirect?(): boolean;
+
+  /**
    * Run a simple text completion using the backend's auth infrastructure.
    * Used for connection testing, title generation, and summarization.
    */

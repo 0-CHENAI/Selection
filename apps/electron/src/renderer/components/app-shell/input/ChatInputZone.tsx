@@ -5,9 +5,11 @@ import { flattenLabels, type LabelConfig } from '@craft-agent/shared/labels'
 import type { PermissionMode } from '@craft-agent/shared/agent/modes'
 import type { SessionStatus } from '@/config/session-status-config'
 import type { BackgroundTask } from '../ActiveTasksBar'
+import type { Message } from '../../../../shared/types'
 import { ActiveOptionBadges } from '../ActiveOptionBadges'
 import { InputContainer } from './InputContainer'
 import { InputErrorBoundary } from './InputErrorBoundary'
+import { QueuedMessagePanel } from './QueuedMessagePanel'
 
 interface ChatInputZoneProps {
   compactMode?: boolean
@@ -27,6 +29,7 @@ interface ChatInputZoneProps {
   showSharedProjectMemory?: boolean
   onSessionStatusChange?: (stateId: string) => void
   className?: string
+  queuedMessages?: Message[]
   inputProps: React.ComponentProps<typeof InputContainer>
 }
 
@@ -48,6 +51,7 @@ export function ChatInputZone({
   showSharedProjectMemory = false,
   onSessionStatusChange,
   className,
+  queuedMessages = [],
   inputProps,
 }: ChatInputZoneProps) {
   const [autoOpenLabelId, setAutoOpenLabelId] = React.useState<string | null>(null)
@@ -102,6 +106,12 @@ export function ChatInputZone({
           onSessionStatusChange={onSessionStatusChange}
         />
       )}
+
+      <QueuedMessagePanel
+        sessionId={sessionId}
+        messages={queuedMessages}
+        compactMode={compactMode}
+      />
 
       <InputErrorBoundary
         sessionId={sessionId}

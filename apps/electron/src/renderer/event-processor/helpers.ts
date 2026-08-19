@@ -7,6 +7,30 @@
 
 import type { Message, Session } from '../../shared/types'
 
+export {
+  applySteerTranscriptBoundary,
+  isOpenResponseBody,
+  isSteerFollowUp,
+  isThoughtChainMessage,
+} from '@craft-agent/core/types'
+
+export function collectOpenAssistantTurnIds(
+  messages: Message[],
+  streamingTurnId?: string,
+): string[] {
+  const ids = new Set<string>()
+  if (streamingTurnId) ids.add(streamingTurnId)
+  for (const message of messages) {
+    if (message.role !== 'assistant' || message.hidden || !message.turnId) continue
+    if (message.isStreaming || message.isPending) ids.add(message.turnId)
+  }
+  return [...ids]
+}
+
+export function isSuppressedTurn(session: Pick<Session, 'suppressedTurnIds'>, turnId?: string): boolean {
+  return !!turnId && !!session.suppressedTurnIds?.includes(turnId)
+}
+
 let messageIdCounter = 0
 
 /**
@@ -14,6 +38,27 @@ let messageIdCounter = 0
  */
 export function generateMessageId(): string {
   return `msg-${Date.now()}-${++messageIdCounter}`
+}
+
+/**
+ * New tokens and tool rows must sort after the latest visible transcript
+ * item. Otherwise a follow-up can land after the previous card, or a new
+ * thought step can jump above the question that triggered it.
+ */
+export function timestampAfterVisibleUser(messages: Message[], fallback = Date.now()): number {
+  let latestVisible = 0
+  for (const message of messages) {
+    if (message.hidden || message.isQueued) continue
+    if (
+      message.role === 'user'
+      || message.role === 'assistant'
+      || message.role === 'tool'
+      || message.role === 'status'
+    ) {
+      latestVisible = Math.max(latestVisible, message.timestamp)
+    }
+  }
+  return Math.max(fallback, latestVisible + 1)
 }
 
 /**
@@ -41,13 +86,13 @@ export function findStreamingMessage(
 ): number {
   if (turnId) {
     const index = messages.findIndex(m =>
-      m.role === 'assistant' && m.turnId === turnId && m.isStreaming
+      m.role === 'assistant' && m.turnId === turnId && m.isStreaming && !m.hidden
     )
     if (index !== -1) return index
   }
   // Fallback: find last streaming assistant message
   for (let i = messages.length - 1; i >= 0; i--) {
-    if (messages[i].role === 'assistant' && messages[i].isStreaming) {
+    if (messages[i].role === 'assistant' && messages[i].isStreaming && !messages[i].hidden) {
       return i
     }
   }
@@ -63,13 +108,13 @@ export function findAssistantMessage(
 ): number {
   if (turnId) {
     const index = messages.findIndex(m =>
-      m.role === 'assistant' && m.turnId === turnId
+      m.role === 'assistant' && m.turnId === turnId && !m.hidden
     )
     if (index !== -1) return index
   }
   // Fallback: find last streaming assistant message
   for (let i = messages.length - 1; i >= 0; i--) {
-    if (messages[i].role === 'assistant' && messages[i].isStreaming) {
+    if (messages[i].role === 'assistant' && messages[i].isStreaming && !messages[i].hidden) {
       return i
     }
   }
@@ -83,7 +128,7 @@ export function findToolMessage(
   messages: Message[],
   toolUseId: string
 ): number {
-  return messages.findIndex(m => m.toolUseId === toolUseId)
+  return messages.findIndex(m => m.toolUseId === toolUseId && !m.hidden)
 }
 
 /**

@@ -82,6 +82,14 @@ function createFullMessage(): Message {
     authEmail: 'user@test.com',
     authWorkspace: 'test-workspace',
     isQueued: false,
+    queuedSkillSlugs: ['workspace:review'],
+    queuedContext: {
+      sourceSlugs: ['knowledge'],
+      model: 'model-a',
+      llmConnection: 'connection-a',
+      thinkingLevel: 'high',
+      permissionMode: 'ask',
+    },
   }
 }
 
@@ -126,7 +134,7 @@ describe('messageToStored/storedToMessage round-trip', () => {
       'authStatus', 'authCredentialMode', 'authHeaderName', 'authHeaderNames',
       'authLabels', 'authDescription', 'authHint', 'authSourceUrl',
       'authPasswordRequired', 'authError', 'authEmail', 'authWorkspace',
-      'isQueued',
+      'isQueued', 'queuedSkillSlugs', 'queuedContext',
     ].sort()
 
     expect(storedKeys).toEqual(expectedKeys)
@@ -187,6 +195,8 @@ describe('messageToStored/storedToMessage round-trip', () => {
     expect(restored.authEmail).toBe(original.authEmail)
     expect(restored.authWorkspace).toBe(original.authWorkspace)
     expect(restored.isQueued).toBe(original.isQueued)
+    expect(restored.queuedSkillSlugs).toEqual(original.queuedSkillSlugs)
+    expect(restored.queuedContext).toEqual(original.queuedContext)
   })
 
   it('role ↔ type mapping works for each MessageRole', () => {
@@ -203,12 +213,13 @@ describe('messageToStored/storedToMessage round-trip', () => {
   })
 
   it('transient fields are excluded from StoredMessage', () => {
-    const msg = createFullMessage()
+    const msg = { ...createFullMessage(), queueId: 'canonical-queue-id' }
     const stored = messageToStored(msg)
 
     // These are intentionally transient — NOT persisted
     expect(stored).not.toHaveProperty('isStreaming')
     expect(stored).not.toHaveProperty('isPending')
+    expect(stored).not.toHaveProperty('queueId')
 
     // infoLevel IS persisted for info-message severity restoration after reload
     expect(stored.infoLevel).toBe(msg.infoLevel)

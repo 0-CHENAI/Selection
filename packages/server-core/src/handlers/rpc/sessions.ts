@@ -379,6 +379,14 @@ export function registerSessionsHandlers(server: RpcServer, deps: HandlerDeps): 
         return sessionManager.removeMessageAnnotation(sessionId, command.messageId, command.annotationId)
       case 'updateAnnotation':
         return sessionManager.updateMessageAnnotation(sessionId, command.messageId, command.annotationId, command.patch)
+      case 'updateQueuedMessage':
+        return sessionManager.updateQueuedMessage(sessionId, command.messageId, command.content)
+      case 'deleteQueuedMessage':
+        return sessionManager.deleteQueuedMessage(sessionId, command.messageId)
+      case 'reorderQueuedMessages':
+        return sessionManager.reorderQueuedMessages(sessionId, command.messageIds)
+      case 'sendQueuedMessageNow':
+        return sessionManager.sendQueuedMessageNow(sessionId, command.messageId)
       case 'regenerate':
         return sessionManager.regenerateLastResponse(sessionId)
       default: {

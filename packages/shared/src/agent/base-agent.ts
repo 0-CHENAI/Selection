@@ -1118,6 +1118,10 @@ ${formattedMessages}
     return false;
   }
 
+  canRedirect(): boolean {
+    return false;
+  }
+
   /**
    * Check if currently processing a query.
    */

@@ -43,6 +43,7 @@ import {
   handleSessionModelChanged,
   handleConnectionChanged,
   handleUserMessage,
+  handleQueueChanged,
   handleMessagesTruncated,
   handleMessageAnnotationsUpdated,
   handleSessionShared,
@@ -199,6 +200,9 @@ export function processEvent(
 
     case 'user_message':
       return handleUserMessage(state, event)
+
+    case 'queue_changed':
+      return handleQueueChanged(state, event)
 
     case 'message_annotations_updated':
       return handleMessageAnnotationsUpdated(state, event)

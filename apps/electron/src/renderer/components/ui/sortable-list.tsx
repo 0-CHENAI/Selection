@@ -32,6 +32,7 @@ import {
   verticalListSortingStrategy,
   useSortable,
   arrayMove,
+  sortableKeyboardCoordinates,
 } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
 
@@ -106,19 +107,29 @@ export interface SortableItemData {
   id: string
 }
 
+export type SortableDragHandleProps = React.ComponentPropsWithoutRef<'button'> & {
+  ref: React.Ref<HTMLButtonElement>
+}
+
 interface SortableListProps<T extends SortableItemData> {
   /** Array of items to render (must have unique `id` fields) */
   items: T[]
   /** Called with the new ordered array after a drop */
   onReorder: (items: T[]) => void
   /** Render function for each item. `isDragging` is true when this item is the ghost. */
-  renderItem: (item: T, isDragging: boolean) => React.ReactNode
+  renderItem: (
+    item: T,
+    isDragging: boolean,
+    dragHandleProps?: SortableDragHandleProps,
+  ) => React.ReactNode
   /** Render the drag overlay content (floating clone). Falls back to renderItem. */
   renderOverlay?: (item: T) => React.ReactNode
   /** Show DragOverlay clone while dragging (default: true) */
   showOverlay?: boolean
   /** Additional className for the list container */
   className?: string
+  /** Attach drag listeners only to the handle props passed to renderItem. */
+  handleOnly?: boolean
 }
 
 // ============================================================
@@ -132,6 +143,7 @@ export function SortableList<T extends SortableItemData>({
   renderOverlay,
   showOverlay = true,
   className,
+  handleOnly = false,
 }: SortableListProps<T>) {
   const [activeId, setActiveId] = React.useState<string | null>(null)
 
@@ -140,7 +152,7 @@ export function SortableList<T extends SortableItemData>({
     useSensor(SmartPointerSensor, {
       activationConstraint: { distance: 5 },
     }),
-    useSensor(KeyboardSensor)
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
   )
 
   const activeItem = React.useMemo(
@@ -187,8 +199,9 @@ export function SortableList<T extends SortableItemData>({
               id={item.id}
               isDragActive={activeId === item.id}
               hideWhileDragging={showOverlay}
+              handleOnly={handleOnly}
             >
-              {renderItem(item, activeId === item.id)}
+              {(dragHandleProps) => renderItem(item, activeId === item.id, dragHandleProps)}
             </SortableItemWrapper>
           ))}
         </div>
@@ -208,7 +221,7 @@ export function SortableList<T extends SortableItemData>({
                 boxShadow: '0 0 0 1px rgba(63, 63, 68, 0.05), 0px 15px 15px 0 rgba(34, 33, 81, 0.25)',
               }}
             >
-              {(renderOverlay ?? renderItem)(activeItem, false)}
+              {renderOverlay ? renderOverlay(activeItem) : renderItem(activeItem, false)}
             </div>
           ) : null}
         </DragOverlay>
@@ -225,14 +238,16 @@ interface SortableItemWrapperProps {
   id: string
   isDragActive: boolean
   hideWhileDragging: boolean
-  children: React.ReactNode
+  handleOnly: boolean
+  children: (dragHandleProps: SortableDragHandleProps) => React.ReactNode
 }
 
-function SortableItemWrapper({ id, isDragActive, hideWhileDragging, children }: SortableItemWrapperProps) {
+function SortableItemWrapper({ id, isDragActive, hideWhileDragging, handleOnly, children }: SortableItemWrapperProps) {
   const {
     attributes,
     listeners,
     setNodeRef,
+    setActivatorNodeRef,
     transform,
     transition,
     isDragging,
@@ -243,17 +258,23 @@ function SortableItemWrapper({ id, isDragActive, hideWhileDragging, children }: 
     transition,
     // Hide ghost only when DragOverlay is enabled
     opacity: isDragging && hideWhileDragging ? 0 : 1,
-    cursor: isDragActive ? 'grabbing' : 'grab',
+    ...(!handleOnly ? { cursor: isDragActive ? 'grabbing' : 'grab' } : {}),
   }
+
+  const dragHandleProps = {
+    ref: setActivatorNodeRef,
+    ...attributes,
+    ...listeners,
+  } as SortableDragHandleProps
 
   return (
     <div
       ref={setNodeRef}
       style={style}
-      {...attributes}
-      {...listeners}
+      {...(!handleOnly ? attributes : {})}
+      {...(!handleOnly ? listeners : {})}
     >
-      {children}
+      {children(dragHandleProps)}
     </div>
   )
 }

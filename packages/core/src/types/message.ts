@@ -46,6 +46,15 @@ export type AuthStatus = 'pending' | 'completed' | 'cancelled' | 'failed';
  */
 export type ToolStatus = 'pending' | 'executing' | 'completed' | 'error' | 'backgrounded';
 
+/** Session-scoped options frozen with a queued user message. */
+export interface QueuedMessageContext {
+  sourceSlugs: string[];
+  model: string | null;
+  llmConnection: string | null;
+  thinkingLevel: string;
+  permissionMode: string;
+}
+
 /**
  * Tool display metadata - embedded at storage time for viewer compatibility
  * Icons are base64-encoded to work in both Electron and web viewer
@@ -285,6 +294,12 @@ export interface Message {
   isPending?: boolean;
   // Queued: user message that is waiting to be processed (sent during ongoing response)
   isQueued?: boolean;
+  /** Canonical backend id for an optimistic queued message. Runtime-only. */
+  queueId?: string;
+  /** Skill selection captured when this queued message was submitted. */
+  queuedSkillSlugs?: string[];
+  /** Session options captured when this message entered the queue. */
+  queuedContext?: QueuedMessageContext;
   // Intermediate text (commentary between tool calls, not final response)
   isIntermediate?: boolean;
   // Hidden: a system-generated message that must reach the model (it drives a
@@ -416,6 +431,10 @@ export interface StoredMessage {
   authWorkspace?: string;
   // Queued: user message that is waiting to be processed (persisted for recovery)
   isQueued?: boolean;
+  /** Skill selection captured when this queued message was submitted. */
+  queuedSkillSlugs?: string[];
+  /** Session options captured when this message entered the queue. */
+  queuedContext?: QueuedMessageContext;
 }
 
 /**

@@ -86,7 +86,7 @@ import { restoreFiles } from '@craft-agent/shared/utils/bundle-files'
 import { getCredentialManager } from '@craft-agent/shared/credentials'
 import { CraftMcpClient, McpClientPool, McpPoolServer } from '@craft-agent/shared/mcp'
 import { type Session, type SessionEvent, type FileAttachment, type SendMessageOptions, type UnreadSummary, type RemoteSessionTransferPayload, type ImportRemoteSessionTransferResult, RPC_CHANNELS, generateMessageId } from '@craft-agent/shared/protocol'
-import { messageToStored, storedToMessage, type Message, type StoredAttachment, type ToolDisplayMeta, type TokenUsage } from '@craft-agent/core/types'
+import { applySteerTranscriptBoundary, messageToStored, storedToMessage, type Message, type StoredAttachment, type ToolDisplayMeta, type TokenUsage } from '@craft-agent/core/types'
 import { formatPathsToRelative, formatToolInputPaths, perf, encodeIconToDataUrlAsync, getEmojiIcon, resetSummarizationClient, resolveToolIcon, readFileAttachment, hydrateAttachmentBytes, resolveRegenerateAttachments, selectSpreadMessages, normalizePath } from '@craft-agent/shared/utils'
 import { loadAllSkills, loadSkillBySlug, invalidateSkillsCache, type LoadedSkill } from '@craft-agent/shared/skills'
 import { invalidateContextFileCache } from '@craft-agent/shared/prompts/system'
@@ -94,6 +94,7 @@ import { getToolIconsDir, getMiniModel } from '@craft-agent/shared/config'
 import { getDefaultSummarizationModel } from '@craft-agent/shared/config/models'
 import type { SummarizeCallback } from '@craft-agent/shared/sources'
 import { type ThinkingLevel, DEFAULT_THINKING_LEVEL, normalizeThinkingLevel } from '@craft-agent/shared/agent/thinking-levels'
+import { parsePermissionMode } from '@craft-agent/shared/agent/mode-types'
 import { evaluateAutoLabels } from '@craft-agent/shared/labels/auto'
 import { listLabels, loadLabelConfig } from '@craft-agent/shared/labels/storage'
 import { extractLabelId, resolveSessionLabels, findTaskItemLabelId } from '@craft-agent/shared/labels'
@@ -2204,12 +2205,16 @@ export class SessionManager implements ISessionManager {
             messageId: msg.id,
             attachments: undefined,
             storedAttachments: msg.attachments,
-            options: undefined,
+            options: {
+              badges: msg.badges,
+              skillSlugs: msg.queuedSkillSlugs,
+              queueContext: msg.queuedContext,
+            },
           })
         }
         if (!managed.isProcessing && managed.messageQueue.length > 0) {
           setImmediate(() => {
-            this.processNextQueuedMessage(managed.id)
+            void this.processNextQueuedMessage(managed.id)
           })
         }
       }
@@ -2684,14 +2689,18 @@ export class SessionManager implements ISessionManager {
             messageId: msg.id,
             attachments: undefined,  // Attachments already stored on disk
             storedAttachments: msg.attachments,
-            options: undefined,
+            options: {
+              badges: msg.badges,
+              skillSlugs: msg.queuedSkillSlugs,
+              queueContext: msg.queuedContext,
+            },
           })
         }
         // Process queue when session becomes active (will be triggered by first message or interaction)
         // Use setImmediate to avoid blocking the load and allow session state to settle
         if (!managed.isProcessing && managed.messageQueue.length > 0) {
           setImmediate(() => {
-            this.processNextQueuedMessage(managed.id)
+            void this.processNextQueuedMessage(managed.id)
           })
         }
       }
@@ -5964,36 +5973,29 @@ export class SessionManager implements ISessionManager {
     await this.ensureMessagesLoaded(managed)
 
     // If currently processing, behavior depends on the connection's
-    // `midStreamBehavior` (resolved via {@link resolveMidStreamBehavior},
-    // defaults to provider-appropriate value):
+    // `midStreamBehavior` (resolved via {@link resolveMidStreamBehavior}):
     //
-    // - 'steer': try to deliver into the in-flight turn. Pi steers natively;
-    //   Claude emulates via PreToolUse hook. If `redirect()` returns false
-    //   (Claude with no live query, or backend can't steer), the backend has
-    //   already called forceAbort(Redirect) and we queue for replay.
-    // - 'queue': hold the message untouched; the current turn keeps running
-    //   to natural completion; replay as a new turn afterwards. NO call to
-    //   `agent.redirect()`, NO forceAbort, NO interruption.
-    // Regenerating (and similar replays) call sendMessage with the existing
-    // user-message id while isProcessing is already true so the UI can show
-    // Stop immediately. That is a new turn, not a mid-stream steer/queue.
+    // - 'steer': change direction now. Soft-abort the live query and replay
+    //   the follow-up as a new turn. Do not call `redirect()` (it waits for
+    //   the current tool, then lets the original answer finish) and do not
+    //   dispose the agent.
+    // - 'queue': hold the message; the current turn runs to completion;
+    //   replay afterwards. No abort.
+    // Hidden system nudges never abort a live user turn.
+    // Regenerating calls sendMessage with existingMessageId while
+    // isProcessing is already true — that is a new turn, not mid-stream.
     if (managed.isProcessing && !existingMessageId) {
       const connection = resolveSessionConnection(managed.llmConnection, undefined)
-      // Fallback to 'steer' when no connection is resolvable — preserves
-      // today's exact behavior (call redirect, take whatever it returns).
-      const behavior = connection ? resolveMidStreamBehavior(connection) : 'steer'
-
+      const behavior = options?.hidden
+        ? 'queue'
+        : (connection ? resolveMidStreamBehavior(connection) : 'steer')
+      const shouldInterrupt = behavior === 'steer'
       const agent = managed.agent
-      let steered = false
-      if (behavior === 'steer') {
-        steered = agent?.redirect(message) ?? false
-      }
-      // For 'queue': skip redirect entirely. The current turn is undisturbed.
 
       sessionLog.info('mid-stream send', {
         sessionId,
         behavior,
-        steered,
+        shouldInterrupt,
         queueLengthBefore: managed.messageQueue.length,
         backend: agent ? agent.constructor.name : 'none',
         connectionSlug: connection?.slug,
@@ -6007,36 +6009,30 @@ export class SessionManager implements ISessionManager {
         timestamp: this.monotonic(),
         attachments: storedAttachments,
         badges: options?.badges,
+        isQueued: !shouldInterrupt,
+        queuedSkillSlugs: shouldInterrupt ? undefined : options?.skillSlugs,
+        queuedContext: shouldInterrupt ? undefined : options?.queueContext,
         // Hidden system-generated messages reach the model but never render as a
         // transcript bubble (e.g. background-task-completion nudge).
         ...(options?.hidden ? { hidden: true } : {}),
       }
       managed.messages.push(userMessage)
 
-      const delivery = resolveMidStreamDeliveryOutcome(behavior, steered)
-
-      // Emit to UI — 'accepted' iff a steer succeeded; 'queued' otherwise
-      // (covers both queue-direct and queue-after-abort paths).
       this.sendEvent({
         type: 'user_message',
         sessionId,
         message: userMessage,
-        status: delivery.shouldQueue ? 'queued' : 'accepted',
+        status: shouldInterrupt ? 'accepted' : 'queued',
         optimisticMessageId: options?.optimisticMessageId
       }, managed.workspace.id)
 
-      if (delivery.shouldQueue) {
-        // Push for FIFO replay on next onProcessingStopped tick. Same shape
-        // for both queue-direct (current turn still running) and
-        // queue-after-abort (backend already aborted) — the replay path in
-        // processNextQueuedMessage is identical.
-        managed.messageQueue.push({ message, attachments, storedAttachments, options, messageId: userMessage.id, optimisticMessageId: options?.optimisticMessageId })
-        // Only claim interruption when a steer attempt actually aborted the
-        // in-flight turn. In 'queue' mode the current turn runs to natural
-        // completion, so the replayed turn must NOT inject the "previous response
-        // was interrupted" reminder (it would falsely tell the model its own
-        // complete answer was cut off → confusion).
-        if (delivery.wasInterrupted) managed.wasInterrupted = true
+      managed.messageQueue.push({ message, attachments, storedAttachments, options, messageId: userMessage.id, optimisticMessageId: options?.optimisticMessageId })
+      if (shouldInterrupt) {
+        managed.wasInterrupted = true
+        this.collapseOpenTurnBeforeSteer(managed, userMessage.id)
+        // Soft-abort so leftover tokens stop. Replay uses existingMessageId.
+        managed.stopRequested = true
+        agent?.forceAbort(AbortReason.Redirect)
       }
 
       this.persistSession(managed)
@@ -6445,13 +6441,20 @@ export class SessionManager implements ISessionManager {
           // Check if we got an assistant response in this turn
           // If not, the SDK may have hit context limits or other issues
           const lastAssistantMsg = [...managed.messages].reverse().find(m =>
-            m.role === 'assistant' && !m.isIntermediate
+            m.role === 'assistant' && !m.isIntermediate && !m.hidden
           )
-          const lastUserMsg = [...managed.messages].reverse().find(m => m.role === 'user')
+          const lastUserMsg = [...managed.messages].reverse().find(m =>
+            m.role === 'user' && !m.hidden && !m.isQueued
+          )
 
           // If the last user message is newer than any assistant response, we got no reply
-          // This can happen due to context overflow or API issues
-          if (lastUserMsg && (!lastAssistantMsg || lastUserMsg.timestamp > lastAssistantMsg.timestamp)) {
+          // This can happen due to context overflow or API issues. Skip when a
+          // follow-up is waiting to replay after we aborted a live text stream.
+          if (
+            managed.messageQueue.length === 0
+            && lastUserMsg
+            && (!lastAssistantMsg || lastUserMsg.timestamp > lastAssistantMsg.timestamp)
+          ) {
             sessionLog.warn(`Session ${sessionId} completed without assistant response - possible context overflow or API issue`)
 
             // Check if there's a captured API error that explains the silent failure.
@@ -6679,6 +6682,159 @@ export class SessionManager implements ISessionManager {
       }
       throw error
     }
+  }
+
+  private getVisibleQueuedMessages(managed: ManagedSession): Message[] {
+    return managed.messageQueue.flatMap((entry) => {
+      if (!entry.messageId) return []
+      const message = managed.messages.find(candidate => candidate.id === entry.messageId)
+      return message && !message.hidden && message.isQueued ? [message] : []
+    })
+  }
+
+  private interruptLiveGenerationForQueuedFollowUp(managed: ManagedSession, messageId: string): void {
+    this.collapseOpenTurnBeforeSteer(managed, messageId)
+    managed.wasInterrupted = true
+    // Soft-abort so leftover tokens stop. Keep the agent; replay uses
+    // existingMessageId after onProcessingStopped drains the queue.
+    managed.stopRequested = true
+    managed.agent?.forceAbort(AbortReason.Redirect)
+  }
+
+  /**
+   * Place a mid-stream follow-up under the original prompt and move the open
+   * thought chain below it so numbering continues in one turn.
+   */
+  private collapseOpenTurnBeforeSteer(managed: ManagedSession, incomingUserId: string): void {
+    managed.messages = applySteerTranscriptBoundary(
+      managed.messages,
+      new Set([incomingUserId]),
+      () => this.monotonic(),
+    )
+  }
+
+  private emitQueueChanged(managed: ManagedSession): void {
+    this.sendEvent({
+      type: 'queue_changed',
+      sessionId: managed.id,
+      messages: this.getVisibleQueuedMessages(managed),
+    }, managed.workspace.id)
+  }
+
+  private reorderQueuedMessageSlots(managed: ManagedSession): void {
+    const orderedMessages = this.getVisibleQueuedMessages(managed)
+    let nextVisibleIndex = 0
+    managed.messages = managed.messages.map((message) => {
+      if (!(message.role === 'user' && message.isQueued && !message.hidden)) return message
+      return orderedMessages[nextVisibleIndex++] ?? message
+    })
+  }
+
+  private async persistQueueState(managed: ManagedSession): Promise<void> {
+    this.persistSession(managed)
+    await this.flushSession(managed.id)
+    this.emitQueueChanged(managed)
+  }
+
+  async updateQueuedMessage(sessionId: string, messageId: string, content: string): Promise<void> {
+    const managed = this.sessions.get(sessionId)
+    if (!managed) throw new Error('Session not found')
+    await this.ensureMessagesLoaded(managed)
+
+    const nextContent = content.trim()
+    if (!nextContent) throw new Error('Queued message cannot be empty')
+
+    const entry = managed.messageQueue.find(candidate => candidate.messageId === messageId)
+    const message = managed.messages.find(candidate => candidate.id === messageId && candidate.isQueued)
+    if (!entry || !message || message.hidden) throw new Error('Queued message not found')
+
+    entry.message = nextContent
+    message.content = nextContent
+    await this.persistQueueState(managed)
+  }
+
+  async deleteQueuedMessage(sessionId: string, messageId: string): Promise<void> {
+    const managed = this.sessions.get(sessionId)
+    if (!managed) throw new Error('Session not found')
+    await this.ensureMessagesLoaded(managed)
+
+    const queueIndex = managed.messageQueue.findIndex(candidate => candidate.messageId === messageId)
+    const message = managed.messages.find(candidate => candidate.id === messageId && candidate.isQueued)
+    if (queueIndex < 0 || !message || message.hidden) throw new Error('Queued message not found')
+
+    managed.messageQueue.splice(queueIndex, 1)
+    managed.messages = managed.messages.filter(candidate => candidate.id !== messageId)
+    await this.persistQueueState(managed)
+  }
+
+  async reorderQueuedMessages(sessionId: string, messageIds: string[]): Promise<void> {
+    const managed = this.sessions.get(sessionId)
+    if (!managed) throw new Error('Session not found')
+    await this.ensureMessagesLoaded(managed)
+
+    const currentIds = this.getVisibleQueuedMessages(managed).map(message => message.id)
+    const requestedIds = new Set(messageIds)
+    if (
+      requestedIds.size !== messageIds.length ||
+      messageIds.length !== currentIds.length ||
+      currentIds.some(id => !requestedIds.has(id))
+    ) {
+      throw new Error('Queued message order is stale')
+    }
+
+    const entriesById = new Map(
+      managed.messageQueue
+        .filter(entry => entry.messageId && requestedIds.has(entry.messageId))
+        .map(entry => [entry.messageId!, entry]),
+    )
+    let nextVisibleIndex = 0
+    managed.messageQueue = managed.messageQueue.map((entry) => {
+      if (!entry.messageId || !requestedIds.has(entry.messageId)) return entry
+      return entriesById.get(messageIds[nextVisibleIndex++]!)!
+    })
+    this.reorderQueuedMessageSlots(managed)
+    await this.persistQueueState(managed)
+  }
+
+  async sendQueuedMessageNow(sessionId: string, messageId: string): Promise<void> {
+    const managed = this.sessions.get(sessionId)
+    if (!managed) throw new Error('Session not found')
+    await this.ensureMessagesLoaded(managed)
+
+    const queueIndex = managed.messageQueue.findIndex(candidate => candidate.messageId === messageId)
+    const message = managed.messages.find(candidate => candidate.id === messageId && candidate.isQueued)
+    if (queueIndex < 0 || !message || message.hidden) throw new Error('Queued message not found')
+
+    const [selected] = managed.messageQueue.splice(queueIndex, 1)
+    managed.messageQueue.unshift(selected!)
+    this.reorderQueuedMessageSlots(managed)
+
+    if (!managed.isProcessing) {
+      await this.persistQueueState(managed)
+      await this.processNextQueuedMessage(sessionId)
+      return
+    }
+
+    // Send-now always changes direction: soft-abort the live query and
+    // replay this item. Do not persist the in-memory reorder first — that
+    // would flash the item back into the composer queue.
+    message.isQueued = false
+    message.queuedSkillSlugs = undefined
+    message.queuedContext = undefined
+    this.interruptLiveGenerationForQueuedFollowUp(managed, message.id)
+    const promoted = managed.messages.find(candidate =>
+      candidate.id === message.id || candidate.queueId === message.id,
+    ) ?? message
+    this.persistSession(managed)
+    await this.flushSession(managed.id)
+    this.sendEvent({
+      type: 'user_message',
+      sessionId,
+      message: promoted,
+      status: 'accepted',
+      optimisticMessageId: selected!.optimisticMessageId,
+    }, managed.workspace.id)
+    this.emitQueueChanged(managed)
   }
 
   async cancelProcessing(sessionId: string, silent = false): Promise<void> {
@@ -6977,7 +7133,7 @@ export class SessionManager implements ISessionManager {
     // 5. Check queue and process or complete
     if (managed.messageQueue.length > 0) {
       // Has queued messages - process next
-      this.processNextQueuedMessage(sessionId)
+      void this.processNextQueuedMessage(sessionId)
     } else {
       // Session is truly done — release browser ownership.
       // The window stays alive (hidden) and becomes reusable by future sessions.
@@ -7032,11 +7188,69 @@ export class SessionManager implements ISessionManager {
    * Process the next message in the queue.
    * Called by onProcessingStopped when queue has messages.
    */
-  private processNextQueuedMessage(sessionId: string): void {
+  private async applyQueuedMessageContext(
+    managed: ManagedSession,
+    context: SendMessageOptions['queueContext'],
+  ): Promise<void> {
+    if (!context) return
+
+    if (managed.enabledSourceSlugs?.join('\0') !== context.sourceSlugs.join('\0')) {
+      await this.setSessionSources(managed.id, [...context.sourceSlugs])
+    }
+
+    const nextModel = context.model ?? undefined
+    const canRestoreConnection = !managed.connectionLocked && !!context.llmConnection
+    const connectionChanged = canRestoreConnection && managed.llmConnection !== context.llmConnection
+    if (managed.model !== nextModel || connectionChanged) {
+      await this.updateSessionModel(
+        managed.id,
+        managed.workspace.id,
+        context.model,
+        context.llmConnection ?? undefined,
+      )
+    }
+
+    const nextThinkingLevel = normalizeThinkingLevel(context.thinkingLevel)
+    if (nextThinkingLevel && managed.thinkingLevel !== nextThinkingLevel) {
+      this.setSessionThinkingLevel(managed.id, nextThinkingLevel)
+    }
+
+    const nextPermissionMode = parsePermissionMode(context.permissionMode)
+    if (nextPermissionMode && managed.permissionMode !== nextPermissionMode) {
+      this.setSessionPermissionMode(managed.id, nextPermissionMode)
+    }
+  }
+
+  private async processNextQueuedMessage(sessionId: string): Promise<void> {
     const managed = this.sessions.get(sessionId)
     if (!managed || managed.messageQueue.length === 0) return
 
-    const next = managed.messageQueue.shift()!
+    const next = managed.messageQueue[0]!
+    try {
+      await this.applyQueuedMessageContext(managed, next.options?.queueContext)
+    } catch (error) {
+      sessionLog.error('Failed to restore queued message context; leaving item queued', {
+        sessionId,
+        messageId: next.messageId,
+        error: error instanceof Error ? error.message : String(error),
+      })
+      this.sendEvent({
+        type: 'typed_error',
+        sessionId,
+        error: {
+          code: 'queued_message_replay_failed',
+          title: 'Queued message context could not be restored',
+          message: 'The queued message was kept in the composer. Retry it, edit it, or remove it from the queue.',
+          actions: [{ key: 'r', label: 'Retry', action: 'retry' }],
+          canRetry: true,
+          originalError: error instanceof Error ? error.message : String(error),
+        },
+      }, managed.workspace.id)
+      return
+    }
+    const queuedIndex = managed.messageQueue.indexOf(next)
+    if (queuedIndex < 0) return
+    managed.messageQueue.splice(queuedIndex, 1)
     sessionLog.info('replay queued', {
       sessionId,
       messageId: next.messageId,
@@ -7047,13 +7261,21 @@ export class SessionManager implements ISessionManager {
     if (next.messageId) {
       const existingMessage = managed.messages.find(m => m.id === next.messageId)
       if (existingMessage) {
+        // Already-accepted send-now follow-ups keep the collapse order
+        // (question → follow-up → thought chain). Re-stamping would jump
+        // the question below the thought rows.
+        const alreadyInTranscript = existingMessage.isQueued === false && !existingMessage.hidden
         // Clear isQueued flag and persist - prevents re-queueing if crash during processing
         existingMessage.isQueued = false
-        // Re-stamp so this replayed message sorts AFTER the previous turn's
+        existingMessage.queuedSkillSlugs = undefined
+        existingMessage.queuedContext = undefined
+        // Re-stamp so a still-queued replay sorts AFTER the previous turn's
         // finalized assistant reply. It was created mid-stream (an earlier
         // timestamp) while queued; groupMessagesByTurn sorts by timestamp, so
         // without this the prior turn's completed response would render BELOW it.
-        existingMessage.timestamp = this.monotonic()
+        if (!alreadyInTranscript) {
+          existingMessage.timestamp = this.monotonic()
+        }
         this.persistSession(managed)
 
         this.sendEvent({

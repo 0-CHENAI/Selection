@@ -358,11 +358,9 @@ export interface GroupTurnsOptions {
  * means final response.
  */
 export function groupMessagesByTurn(messages: Message[], options: GroupTurnsOptions = {}): Turn[] {
-  // Drop hidden messages before grouping. These are system-generated nudges that
-  // must reach the model (they drive a turn) but must never render as a bubble —
-  // e.g. the WS2 background-task-completion nudge that wakes an idle session. The
-  // assistant response they trigger has its own turnId and still renders normally.
-  const visibleMessages = messages.filter(m => !m.hidden)
+  // Drop hidden and queued messages before grouping. Queued user content belongs
+  // to the composer queue until replay starts; it is not yet a transcript turn.
+  const visibleMessages = messages.filter(m => !m.hidden && !m.isQueued)
   // Sort by timestamp for correct chronological order
   // This ensures correct turn grouping even if messages are added out of order during streaming
   const sortedMessages = [...visibleMessages].sort((a, b) => a.timestamp - b.timestamp)
@@ -573,10 +571,10 @@ export function groupMessagesByTurn(messages: Message[], options: GroupTurnsOpti
 
     // Assistant messages are the response part of a turn
     if (message.role === 'assistant') {
-      // Intermediate messages OR pending messages (don't know yet) are activities, not responses
-      // Pending: streaming text where we don't yet know if it's intermediate - treat as intermediate
-      // until text_complete arrives with the definitive isIntermediate flag
-      if (message.isIntermediate || message.isPending) {
+      // Only explicit intermediate text is a thought-row. Pending tokens are
+      // the streaming reply — after a Read/tool step they must not become a
+      // gray activity bar that restates the same markdown.
+      if (message.isIntermediate) {
         if (!currentTurn) {
           // Start a new turn for this intermediate message
           currentTurn = {

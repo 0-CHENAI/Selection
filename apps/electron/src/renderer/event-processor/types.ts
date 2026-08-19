@@ -436,6 +436,13 @@ export interface UserMessageEvent {
   optimisticMessageId?: string
 }
 
+/** Canonical visible queue state after an edit, delete, or reorder. */
+export interface QueueChangedEvent {
+  type: 'queue_changed'
+  sessionId: string
+  messages: Message[]
+}
+
 /**
  * Message annotation update event
  */
@@ -558,6 +565,7 @@ export type AgentEvent =
   | TaskCompletedEvent
   | WorkflowAgentCompletedEvent
   | UserMessageEvent
+  | QueueChangedEvent
   | MessageAnnotationsUpdatedEvent
   | SessionSharedEvent
   | SessionUnsharedEvent

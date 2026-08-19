@@ -112,7 +112,7 @@ describe('regenerate UI state (#17)', () => {
     expect(next.state.session.messages.map(m => m.id)).toEqual(['u1', 'info-1'])
   })
 
-  it('clears the elapsed-time clock when a mid-stream user_message is only queued', () => {
+  it('preserves the active turn clock when a mid-stream user_message is queued', () => {
     const running = handleMessagesTruncated(makeState(), {
       type: 'messages_truncated',
       sessionId: 'session-1',
@@ -126,7 +126,7 @@ describe('regenerate UI state (#17)', () => {
       status: 'queued',
     })
 
-    expect(next.state.session.isProcessing).toBe(false)
-    expect(next.state.session.processingStartedAt).toBeUndefined()
+    expect(next.state.session.isProcessing).toBe(true)
+    expect(next.state.session.processingStartedAt).toBe(running.state.session.processingStartedAt)
   })
 })
