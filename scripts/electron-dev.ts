@@ -352,7 +352,7 @@ async function runEsbuild(
 async function buildPiAgentServer(): Promise<{ success: boolean; error?: string }> {
   try {
     const proc = spawn({
-      cmd: ["bun", "build", "src/index.ts", "--outdir=dist", "--target=bun", "--format=esm"],
+      cmd: ["bun", "run", "build"],
       cwd: PI_AGENT_SERVER_DIR,
       stdout: "pipe",
       stderr: "pipe",

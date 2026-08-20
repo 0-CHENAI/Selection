@@ -14,6 +14,7 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 ## Bug Fixes
 
 - **Stale Task/subagent prompt guidance** — system prompt and tool docs no longer tell the model to use the removed Claude Task / Workflow tools (#35).
+- **Windows image reads restored** — packaged Pi sessions now ship the Photon WASM runtime required by the built-in `read` tool, so local PNG/JPEG images reach vision-capable models instead of being incorrectly reported as too large (#39).
 
 ## Breaking Changes
 
