@@ -36,19 +36,33 @@ export const OFFICE_BUDGET_EXHAUSTED_MESSAGE =
 export const OFFICE_BUDGET_EXHAUSTED_SUGGESTION =
   'Stop inspecting. Reply with the file path, completed work, and what this backend could not verify (TOC page numbers, visual style).';
 
-export const OFFICE_WORKFLOW_PROMPT = `Office document workflow (follow this; do not explore):
-- Generate: create a blank file, then write the structure in one batch (headings, paragraphs, tables, TOC fields). Fill a template with merge. Do not draft long Markdown and add it paragraph by paragraph. If an element is unclear, call help docx heading or help docx add paragraph — do not dump XML.
-- Read: start with view outline or view text --max-lines 80. Use get or query only for a single node.
+export const OFFICE_MAX_INLINE_BATCH_COMMANDS = 30;
+export const OFFICE_MAX_INLINE_BATCH_CHARS = 16_000;
+export const OFFICE_MAX_INLINE_ARGUMENTS_CHARS = 8_000;
+export const OFFICE_MAX_BATCH_FILE_BYTES = 2_000_000;
+
+export const OFFICE_PAYLOAD_TOO_LARGE_SUGGESTION =
+  'Do not retry the same payload. Write the command array as JSON, then call batch with batchCommandsFile; or split into smaller in-limit batches.';
+
+const OFFICE_WORKFLOW_GENERATE_RULES = `- Generate (small/medium): create a blank file, then one inline batch (headings, paragraphs, tables, TOC fields) within ${OFFICE_MAX_INLINE_BATCH_COMMANDS} commands and ${OFFICE_MAX_INLINE_BATCH_CHARS} characters. Fill a template with merge. Do not draft long Markdown and add it paragraph by paragraph. If an element is unclear, call help docx heading or help docx add paragraph — do not dump XML.
+- Generate (large): prefer multiple in-limit batches over one giant tool call. If the command array fits in one Write but not in batchCommands, Write a .json file in the working directory, then batch with batchCommandsFile. Do not put multi-page text in batchCommands or --prop. If a tool call fails because the payload is too large or arguments were truncated, do not retry the same payload — write a smaller file or split into smaller batches.`;
+
+const OFFICE_WORKFLOW_INSPECT_RULES = `- Read: start with view outline or view text --max-lines 80. Use get or query only for a single node.
 - Validate: after generating, at most one validate (OpenXML schema only). If the body is present and schema passes, deliver.
 - Do not: treat dump as a reader — dump only prepares a replayable batch. raw is a last resort. Do not switch inspect commands to re-prove the same fact. view issues field_not_evaluated is common off Windows — state the limit and deliver; do not refresh or dump again.
 - refresh: DOCX TOC/page numbers update only with Word + Windows. If that is unavailable, tell the user to open the file in Word and update fields, then stop.
 - Closing reply: file path, what is done, what this backend could not verify (TOC page numbers, visual style), and one Word step for the user.`;
 
+export const OFFICE_WORKFLOW_PROMPT = `Office document workflow (follow this; do not explore):
+${OFFICE_WORKFLOW_GENERATE_RULES}
+${OFFICE_WORKFLOW_INSPECT_RULES}`;
+
 export const OFFICE_DOCUMENT_INSPECT_DESCRIPTION = `Inspect Word, Excel, and PowerPoint files through Selection's built-in OfficeCLI runtime.
 
 This tool is always registered and does not require loading a skill. It accepts argument tokens, invokes the app-managed binary directly, and returns normalized JSON.
 
-${OFFICE_WORKFLOW_PROMPT}
+Office document workflow (follow this; do not explore):
+${OFFICE_WORKFLOW_INSPECT_RULES}
 
 Examples:
 - Check availability: { "command": "status" }
@@ -60,14 +74,15 @@ The read-only tool rejects output files, browser launching, and JSONL output. Us
 
 export const OFFICE_DOCUMENT_EDIT_DESCRIPTION = `Create and modify Word, Excel, and PowerPoint files through Selection's built-in OfficeCLI runtime.
 
-This tool is always registered and does not require loading a skill. Arguments are passed as separate tokens without a shell, and results use a stable JSON envelope. Batch calls must use batchCommands; resident and management commands are not accepted.
+This tool is always registered and does not require loading a skill. Arguments are passed as separate tokens without a shell, and results use a stable JSON envelope. Batch calls must use exactly one of batchCommands (small/medium, max ${OFFICE_MAX_INLINE_BATCH_COMMANDS} commands / ${OFFICE_MAX_INLINE_BATCH_CHARS} characters) or batchCommandsFile (large JSON written first). Resident and management commands are not accepted.
 
 ${OFFICE_WORKFLOW_PROMPT}
 
 Examples:
 - Create: { "command": "create", "arguments": ["report.docx"] }
 - Add paragraph: { "command": "add", "arguments": ["report.docx", "/body", "--type", "paragraph", "--prop", "text=Summary"] }
-- Batch edit: { "command": "batch", "arguments": ["data.xlsx"], "batchCommands": [{ "command": "set", "path": "/Sheet1/A1", "props": { "value": "Done" } }] }
+- Small batch: { "command": "batch", "arguments": ["data.xlsx"], "batchCommands": [{ "command": "set", "path": "/Sheet1/A1", "props": { "value": "Done" } }] }
+- Large batch: Write commands.json first, then { "command": "batch", "arguments": ["report.docx"], "batchCommandsFile": "commands.json" }
 
 After a successful edit, at most one focused office_document_inspect (outline, short text, or a single validate), then deliver. Do not keep validating the result.`;
 

@@ -1,8 +1,10 @@
 import { spawn } from 'node:child_process';
 import type { ChildProcessWithoutNullStreams, SpawnOptionsWithoutStdio } from 'node:child_process';
+import { extname, resolve } from 'node:path';
 import type { SessionToolContext } from '../context.ts';
 import type { ToolResult } from '../types.ts';
 import { createSanitizedEnv } from '../runtime/sandbox-env.ts';
+import { isPathWithinDirectory } from '../runtime/path-security.ts';
 import { resolveOfficecliRuntime } from '../runtime/officecli.ts';
 import {
   OFFICE_ALREADY_CHECKED_MESSAGE,
@@ -10,6 +12,11 @@ import {
   OFFICE_BUDGET_EXHAUSTED_MESSAGE,
   OFFICE_BUDGET_EXHAUSTED_SUGGESTION,
   OFFICE_INSPECT_BUDGET_LIMIT,
+  OFFICE_MAX_BATCH_FILE_BYTES,
+  OFFICE_MAX_INLINE_ARGUMENTS_CHARS,
+  OFFICE_MAX_INLINE_BATCH_CHARS,
+  OFFICE_MAX_INLINE_BATCH_COMMANDS,
+  OFFICE_PAYLOAD_TOO_LARGE_SUGGESTION,
   OFFICE_REFRESH_NON_WINDOWS_NOTE,
   OFFICE_TRUNCATED_PREVIEW_CHARS,
   OFFICE_TRUNCATION_SUGGESTION,
@@ -55,6 +62,7 @@ export interface OfficeDocumentEditArgs {
   command: OfficeDocumentEditCommand;
   arguments?: string[];
   batchCommands?: Array<Record<string, unknown>>;
+  batchCommandsFile?: string;
   timeoutMs?: number;
 }
 
@@ -324,6 +332,79 @@ function invalidArguments(command: string, message: string): ToolResult {
   });
 }
 
+function payloadTooLarge(command: string, message: string): ToolResult {
+  return toolResult({
+    ok: false,
+    availability: 'available',
+    command,
+    durationMs: 0,
+    error: {
+      code: 'payload_too_large',
+      message,
+      suggestion: OFFICE_PAYLOAD_TOO_LARGE_SUGGESTION,
+    },
+  });
+}
+
+function forbiddenBatchItem(
+  items: Array<Record<string, unknown>>,
+): Record<string, unknown> | undefined {
+  return items.find(item => {
+    return [item.command, item.op].some(nestedCommand => (
+      typeof nestedCommand === 'string'
+      && BATCH_FORBIDDEN_COMMANDS.has(nestedCommand.trim().toLowerCase())
+    ));
+  });
+}
+
+function parseBatchCommandList(text: string): Array<Record<string, unknown>> | string {
+  try {
+    const parsed = JSON.parse(text);
+    if (!Array.isArray(parsed) || parsed.some(item => !item || typeof item !== 'object' || Array.isArray(item))) {
+      return 'batchCommandsFile must contain a JSON array of command objects.';
+    }
+    return parsed as Array<Record<string, unknown>>;
+  } catch (error) {
+    return `batchCommandsFile is not valid JSON: ${error instanceof Error ? error.message : String(error)}`;
+  }
+}
+
+function resolveBatchCommandsFilePath(
+  ctx: SessionToolContext,
+  rawPath: string,
+  cwd: string,
+): { path: string } | ToolResult {
+  const trimmed = rawPath.trim();
+  if (!trimmed) {
+    return invalidArguments('batch', 'batchCommandsFile must be a non-empty path.');
+  }
+  const resolved = resolve(cwd, trimmed);
+  if (extname(resolved).toLowerCase() !== '.json') {
+    return invalidArguments('batch', 'batchCommandsFile must be a .json file.');
+  }
+  const allowedRoots = [cwd, ctx.workspacePath].filter(Boolean);
+  if (!allowedRoots.some(root => isPathWithinDirectory(resolved, root))) {
+    return invalidArguments(
+      'batch',
+      'batchCommandsFile must be inside the working directory or workspace.',
+    );
+  }
+  if (!ctx.fs.exists(resolved)) {
+    return invalidArguments('batch', `batchCommandsFile not found: ${trimmed}`);
+  }
+  const stats = ctx.fs.stat(resolved);
+  if (stats.isDirectory()) {
+    return invalidArguments('batch', 'batchCommandsFile must be a .json file, not a directory.');
+  }
+  if (stats.size > OFFICE_MAX_BATCH_FILE_BYTES) {
+    return payloadTooLarge(
+      'batch',
+      `batchCommandsFile exceeds the ${OFFICE_MAX_BATCH_FILE_BYTES} byte limit.`,
+    );
+  }
+  return { path: resolved };
+}
+
 function normalizeTimeout(timeoutMs: number | undefined): number {
   return Math.min(Math.max(timeoutMs ?? DEFAULT_TIMEOUT_MS, 1), MAX_TIMEOUT_MS);
 }
@@ -378,6 +459,13 @@ function validateInvocation(
     || record.batchCommands.some(item => !item || typeof item !== 'object' || Array.isArray(item))
   )) {
     return invalidArguments(command, 'batchCommands must be an array of command objects.');
+  }
+
+  if (record.batchCommandsFile !== undefined && (
+    typeof record.batchCommandsFile !== 'string'
+    || record.batchCommandsFile.trim().length === 0
+  )) {
+    return invalidArguments(command, 'batchCommandsFile must be a non-empty path.');
   }
 
   return undefined;
@@ -496,38 +584,101 @@ async function executeOfficecli(
   }
 
   const batchCommands = 'batchCommands' in args ? args.batchCommands : undefined;
+  const batchCommandsFile = 'batchCommandsFile' in args ? args.batchCommandsFile : undefined;
   if (batchCommands && args.command !== 'batch') {
     return invalidArguments(args.command, 'batchCommands is only valid when command is batch.');
   }
+  if (batchCommandsFile && args.command !== 'batch') {
+    return invalidArguments(args.command, 'batchCommandsFile is only valid when command is batch.');
+  }
+  const joinedArguments = commandArgs.join(' ');
+  if (joinedArguments.length > OFFICE_MAX_INLINE_ARGUMENTS_CHARS) {
+    return payloadTooLarge(
+      args.command,
+      `arguments exceed the ${OFFICE_MAX_INLINE_ARGUMENTS_CHARS} character inline limit.`,
+    );
+  }
   if (args.command === 'batch') {
-    if (!batchCommands) {
-      return invalidArguments(args.command, 'batch requires batchCommands.');
-    }
     if (commandArgs.some(arg => matchesFlag(arg, BATCH_INPUT_FLAGS))) {
-      return invalidArguments(args.command, 'Use batchCommands instead of --commands or --input.');
-    }
-    const forbiddenItem = batchCommands.find(item => {
-      return [item.command, item.op].some(nestedCommand => (
-        typeof nestedCommand === 'string'
-        && BATCH_FORBIDDEN_COMMANDS.has(nestedCommand.trim().toLowerCase())
-      ));
-    });
-    if (forbiddenItem) {
-      const nestedCommand = typeof forbiddenItem.command === 'string'
-        ? forbiddenItem.command
-        : forbiddenItem.op;
       return invalidArguments(
         args.command,
-        `Batch command '${String(nestedCommand)}' is not allowed.`,
+        'Use batchCommands or batchCommandsFile instead of --commands or --input.',
       );
     }
-    try {
-      commandArgs.push('--commands', JSON.stringify(batchCommands));
-    } catch (error) {
+    const hasInline = Array.isArray(batchCommands) && batchCommands.length > 0;
+    const hasFile = typeof batchCommandsFile === 'string' && batchCommandsFile.trim().length > 0;
+    if (hasInline === hasFile) {
       return invalidArguments(
         args.command,
-        `batchCommands could not be serialized: ${error instanceof Error ? error.message : String(error)}`,
+        'batch requires exactly one of batchCommands or batchCommandsFile.',
       );
+    }
+    if (hasFile) {
+      const resolved = resolveBatchCommandsFilePath(ctx, batchCommandsFile!, cwd);
+      if (!('path' in resolved)) return resolved;
+      let fileText: string;
+      try {
+        fileText = ctx.fs.readFile(resolved.path);
+      } catch (error) {
+        return invalidArguments(
+          args.command,
+          `batchCommandsFile could not be read: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+      if (Buffer.byteLength(fileText, 'utf8') > OFFICE_MAX_BATCH_FILE_BYTES) {
+        return payloadTooLarge(
+          args.command,
+          `batchCommandsFile exceeds the ${OFFICE_MAX_BATCH_FILE_BYTES} byte limit.`,
+        );
+      }
+      const parsed = parseBatchCommandList(fileText);
+      if (typeof parsed === 'string') {
+        return invalidArguments(args.command, parsed);
+      }
+      if (parsed.length === 0) {
+        return invalidArguments(args.command, 'batchCommandsFile must contain at least one command.');
+      }
+      const forbiddenItem = forbiddenBatchItem(parsed);
+      if (forbiddenItem) {
+        const nestedCommand = typeof forbiddenItem.command === 'string'
+          ? forbiddenItem.command
+          : forbiddenItem.op;
+        return invalidArguments(
+          args.command,
+          `Batch command '${String(nestedCommand)}' is not allowed.`,
+        );
+      }
+      commandArgs.push('--input', resolved.path);
+    } else {
+      const forbiddenItem = forbiddenBatchItem(batchCommands!);
+      if (forbiddenItem) {
+        const nestedCommand = typeof forbiddenItem.command === 'string'
+          ? forbiddenItem.command
+          : forbiddenItem.op;
+        return invalidArguments(
+          args.command,
+          `Batch command '${String(nestedCommand)}' is not allowed.`,
+        );
+      }
+      let serialized: string;
+      try {
+        serialized = JSON.stringify(batchCommands);
+      } catch (error) {
+        return invalidArguments(
+          args.command,
+          `batchCommands could not be serialized: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+      if (
+        batchCommands!.length > OFFICE_MAX_INLINE_BATCH_COMMANDS
+        || serialized.length > OFFICE_MAX_INLINE_BATCH_CHARS
+      ) {
+        return payloadTooLarge(
+          args.command,
+          `batchCommands exceed the inline limit of ${OFFICE_MAX_INLINE_BATCH_COMMANDS} commands or ${OFFICE_MAX_INLINE_BATCH_CHARS} characters.`,
+        );
+      }
+      commandArgs.push('--commands', serialized);
     }
   }
 

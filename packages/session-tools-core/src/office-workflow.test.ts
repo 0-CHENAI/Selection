@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'bun:test';
 import {
+  OFFICE_DOCUMENT_EDIT_DESCRIPTION,
+  OFFICE_DOCUMENT_INSPECT_DESCRIPTION,
+  OFFICE_MAX_INLINE_ARGUMENTS_CHARS,
+  OFFICE_MAX_INLINE_BATCH_CHARS,
+  OFFICE_MAX_INLINE_BATCH_COMMANDS,
+  OFFICE_WORKFLOW_PROMPT,
   isOfficeBudgetResettingEdit,
   isOfficeDocxPath,
   officeInspectFingerprint,
@@ -27,5 +33,19 @@ describe('Office workflow helpers', () => {
     expect(isOfficeBudgetResettingEdit('refresh')).toBe(false);
     expect(isOfficeDocxPath('report.DOCX')).toBe(true);
     expect(isOfficeDocxPath('data.xlsx')).toBe(false);
+  });
+
+  it('keeps generate payload rules on edit/system copy and inspect-only rules on inspect', () => {
+    expect(OFFICE_WORKFLOW_PROMPT).toContain('batchCommandsFile');
+    expect(OFFICE_WORKFLOW_PROMPT).toContain(String(OFFICE_MAX_INLINE_BATCH_COMMANDS));
+    expect(OFFICE_WORKFLOW_PROMPT).toContain(String(OFFICE_MAX_INLINE_BATCH_CHARS));
+    expect(OFFICE_WORKFLOW_PROMPT).toContain('multiple in-limit batches');
+    expect(OFFICE_DOCUMENT_EDIT_DESCRIPTION).toContain('batchCommandsFile');
+    expect(OFFICE_DOCUMENT_EDIT_DESCRIPTION).toContain(String(OFFICE_MAX_INLINE_BATCH_COMMANDS));
+    expect(OFFICE_DOCUMENT_INSPECT_DESCRIPTION).toContain('view outline');
+    expect(OFFICE_DOCUMENT_INSPECT_DESCRIPTION).toContain('at most one validate');
+    expect(OFFICE_DOCUMENT_INSPECT_DESCRIPTION).not.toContain('batchCommandsFile');
+    expect(OFFICE_DOCUMENT_INSPECT_DESCRIPTION).not.toContain('Generate (large)');
+    expect(OFFICE_MAX_INLINE_ARGUMENTS_CHARS).toBe(8_000);
   });
 });

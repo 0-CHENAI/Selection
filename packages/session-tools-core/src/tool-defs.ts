@@ -52,6 +52,9 @@ import {
 import {
   OFFICE_DOCUMENT_EDIT_DESCRIPTION,
   OFFICE_DOCUMENT_INSPECT_DESCRIPTION,
+  OFFICE_MAX_INLINE_ARGUMENTS_CHARS,
+  OFFICE_MAX_INLINE_BATCH_CHARS,
+  OFFICE_MAX_INLINE_BATCH_COMMANDS,
 } from './office-workflow.ts';
 
 // ============================================================
@@ -188,9 +191,11 @@ export const OfficeDocumentEditSchema = z.object({
     'raw-set', 'add-part', 'batch', 'import', 'merge',
   ]).describe('Mutating OfficeCLI command.'),
   arguments: z.array(z.string()).optional()
-    .describe('Argument tokens passed after the command. Do not include shell quoting or a full command string.'),
+    .describe(`Argument tokens passed after the command. Do not include shell quoting or a full command string. Joined arguments must stay within ${OFFICE_MAX_INLINE_ARGUMENTS_CHARS} characters; put larger text in a working-directory .json file and use batchCommandsFile.`),
   batchCommands: z.array(z.record(z.string(), z.unknown())).optional()
-    .describe('Structured commands for batch. Required when command is batch and invalid for other commands.'),
+    .describe(`Structured commands for a small/medium batch. Use this or batchCommandsFile, not both. Invalid for non-batch commands. Maximum ${OFFICE_MAX_INLINE_BATCH_COMMANDS} commands and ${OFFICE_MAX_INLINE_BATCH_CHARS} serialized characters.`),
+  batchCommandsFile: z.string().optional()
+    .describe('Path to a .json array of batch commands in the working directory or workspace, written with the Write tool first. Required alternative to batchCommands for large payloads. Do not pass --input or --commands in arguments.'),
   timeoutMs: z.number().int().min(1).max(300000).optional()
     .describe('Execution timeout in milliseconds. Defaults to 120000; maximum 300000.'),
 });
