@@ -223,13 +223,18 @@ import type {
   ImportRemoteSessionTransferResult,
 } from '@craft-agent/shared/protocol'
 
-/** Options for the native save-file dialog (file:saveDialog). */
+/** Options for the native save-file dialog (file:saveDialog). Dialog-only: returns the chosen path. */
 export interface SaveFileDialogOptions {
   title?: string
   defaultPath?: string
   filters?: Array<{ name: string; extensions: string[] }>
-  /** Text content written to the chosen path (UTF-8) */
-  content: string
+}
+
+/** Summary of a workspace bundle, for import confirmation UI (no payload) */
+export interface WorkspaceBundleSummary {
+  name: string
+  exportedAt: number
+  counts: { sources: number; skills: number; automations: number; sessions: number }
 }
 
 export interface ElectronAPI {
@@ -298,10 +303,12 @@ export interface ElectronAPI {
   createWorkspace(folderPath: string, name: string, remoteServer?: { url: string; token: string; remoteWorkspaceId: string }): Promise<Workspace>
   checkWorkspaceSlug(slug: string): Promise<{ exists: boolean; path: string }>
   updateWorkspaceRemoteServer(workspaceId: string, remoteServer: { url: string; token: string; remoteWorkspaceId: string }): Promise<{ success: boolean }>
-  /** Export an entire workspace to a portable bundle (credentials stripped) */
-  exportWorkspaceBundle(workspaceId: string, options?: ExportWorkspaceOptions): Promise<{ bundle: WorkspaceBundle; warnings: string[] }>
-  /** Import a workspace bundle as a new workspace; returns the import result plus the registered workspace */
-  importWorkspaceBundle(bundle: WorkspaceBundle, options?: ImportWorkspaceOptions & { parentDir?: string }): Promise<WorkspaceImportResult & { workspace: Workspace }>
+  /** Export an entire workspace to a bundle file at outputPath (credentials stripped) */
+  exportWorkspaceBundle(workspaceId: string, options: ExportWorkspaceOptions & { outputPath: string }): Promise<{ filePath: string; warnings: string[] }>
+  /** Validate a user-picked bundle file and return a summary for confirmation UI */
+  inspectWorkspaceBundle(path: string): Promise<WorkspaceBundleSummary>
+  /** Import a workspace bundle file as a new workspace; returns the import result plus the registered workspace */
+  importWorkspaceBundle(source: { path: string }, options?: ImportWorkspaceOptions): Promise<WorkspaceImportResult & { workspace: Workspace }>
 
   // Server-level workspace operations (for thin client / remote workspace discovery)
   getServerWorkspaces(): Promise<WorkspaceInfo[]>
@@ -345,7 +352,7 @@ export interface ElectronAPI {
   /** Read an image file as a size-bounded preview data URL for lightweight thumbnail rendering. */
   readFilePreviewDataUrl(path: string, maxSize?: number): Promise<string>
   openFileDialog(): Promise<string[]>
-  /** Show a native save dialog and write text content to the chosen path. */
+  /** Show a native save dialog and return the chosen path (dialog-only, no file write). */
   saveFileDialog(options: SaveFileDialogOptions): Promise<{ canceled: boolean; filePath?: string }>
   readFileAttachment(path: string): Promise<FileAttachment | null>
   /** Re-read a user-attached file by absolute path (bypasses workspace-dir validation).

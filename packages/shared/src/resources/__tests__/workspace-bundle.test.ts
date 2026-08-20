@@ -90,8 +90,16 @@ function createTestStatusesAndLabels(wsDir: string): void {
   writeFileSync(join(wsDir, 'labels', 'config.json'), JSON.stringify({ labels: [] }))
 }
 
-function createTestSession(wsDir: string, sessionId: string): void {
-  const sessionDir = join(wsDir, 'sessions', sessionId)
+function makeBundleFile(path: string, content: string) {
+  const buf = Buffer.from(content)
+  return {
+    relativePath: path,
+    contentBase64: buf.toString('base64'),
+    size: buf.length,
+  }
+}
+
+function createTestSession(wsDir: string, sessionId: string): void {  const sessionDir = join(wsDir, 'sessions', sessionId)
   mkdirSync(join(sessionDir, 'attachments'), { recursive: true })
 
   const header = { id: sessionId, createdAt: 1000, workspaceRootPath: '/old/machine/path' }
@@ -223,6 +231,38 @@ describe('workspace-bundle', () => {
       bundle.sessions = [{ id: '../evil', files: [] }]
       expect(validateWorkspaceBundle(bundle).valid).toBe(false)
     })
+
+    it('rejects top-level files that would overwrite config or inject nested paths', () => {
+      const wsDir = createTestWorkspace(tmpDir)
+      const { bundle } = exportWorkspace(wsDir)
+
+      const injected = [
+        { ...bundle, files: [makeBundleFile('config.json', '{}')] },
+        { ...bundle, files: [makeBundleFile('sources/evil/config.json', '{}')] },
+        { ...bundle, files: [makeBundleFile('automations.json', '{}')] },
+        { ...bundle, files: [makeBundleFile('events.jsonl', '{}')] },
+      ]
+      for (const b of injected) {
+        expect(validateWorkspaceBundle(b).valid).toBe(false)
+      }
+    })
+
+    it('rejects malformed config.defaults field types', () => {
+      const wsDir = createTestWorkspace(tmpDir)
+      const { bundle } = exportWorkspace(wsDir)
+
+      const bad1 = JSON.parse(JSON.stringify(bundle))
+      bad1.config.defaults.workingDirectory = 123
+      expect(validateWorkspaceBundle(bad1).valid).toBe(false)
+
+      const bad2 = JSON.parse(JSON.stringify(bundle))
+      bad2.config.defaults.enabledSourceSlugs = 'not-an-array'
+      expect(validateWorkspaceBundle(bad2).valid).toBe(false)
+
+      const bad3 = JSON.parse(JSON.stringify(bundle))
+      bad3.config.defaults.permissionMode = 'yolo'
+      expect(validateWorkspaceBundle(bad3).valid).toBe(false)
+    })
   })
 
   // ============================================================
@@ -330,6 +370,103 @@ describe('workspace-bundle', () => {
       await expect(
         importWorkspace(targetParent, { kind: 'nope' } as unknown as WorkspaceBundle),
       ).rejects.toThrow('Invalid workspace bundle')
+    })
+
+    it('rolls back the created folder when import fails mid-way', async () => {
+      const wsDir = createTestWorkspace(tmpDir)
+      const { bundle } = exportWorkspace(wsDir)
+
+      // A NUL byte in relativePath passes validateBundleFile (no check for it)
+      // but makes writeFileSync throw during restore — simulating a mid-import IO failure
+      bundle.statuses = [makeBundleFile('bad\0name', 'x')]
+
+      const targetParent = join(tmpDir, 'target')
+      await expect(importWorkspace(targetParent, bundle)).rejects.toThrow()
+
+      // No leftover workspace folder (which would be auto-discovered as valid)
+      const { readdirSync } = await import('fs')
+      expect(existsSync(targetParent) ? readdirSync(targetParent) : []).toEqual([])
+    })
+  })
+
+  // ============================================================
+  // Privacy / portability
+  // ============================================================
+
+  describe('privacy', () => {
+    it('strips machine-local defaults on export', () => {
+      const wsDir = createTestWorkspace(tmpDir)
+      const config = JSON.parse(readFileSync(join(wsDir, 'config.json'), 'utf-8'))
+      config.defaults.workingDirectory = join(tmpDir, 'some', 'local', 'path')
+      config.defaults.defaultLlmConnection = 'my-local-conn'
+      writeFileSync(join(wsDir, 'config.json'), JSON.stringify(config, null, 2))
+
+      const { bundle, warnings } = exportWorkspace(wsDir)
+      expect(bundle.config.defaults?.workingDirectory).toBeUndefined()
+      expect(bundle.config.defaults?.defaultLlmConnection).toBeUndefined()
+      expect(warnings.some(w => w.includes('workingDirectory'))).toBe(true)
+      expect(warnings.some(w => w.includes('defaultLlmConnection'))).toBe(true)
+    })
+  })
+
+  // ============================================================
+  // Session header rewrite edge cases
+  // ============================================================
+
+  describe('session header rewrite', () => {
+    it('rewrites workspaceRootPath for a single-line session.jsonl', async () => {
+      const wsDir = createTestWorkspace(tmpDir)
+      const sessionDir = join(wsDir, 'sessions', 'sess-single')
+      mkdirSync(sessionDir, { recursive: true })
+      // Header only, no trailing newline
+      writeFileSync(
+        join(sessionDir, 'session.jsonl'),
+        JSON.stringify({ id: 'sess-single', createdAt: 1, workspaceRootPath: '/old/path' }),
+      )
+
+      const { bundle } = exportWorkspace(wsDir, { includeSessions: true })
+      const targetParent = join(tmpDir, 'target')
+      const result = await importWorkspace(targetParent, bundle)
+
+      const restored = readFileSync(
+        join(result.workspacePath, 'sessions', 'sess-single', 'session.jsonl'),
+        'utf-8',
+      )
+      expect(JSON.parse(restored).workspaceRootPath).toBe(result.workspacePath)
+    })
+  })
+
+  // ============================================================
+  // readWorkspaceBundleFile
+  // ============================================================
+
+  describe('readWorkspaceBundleFile', () => {
+    it('round-trips a real export', async () => {
+      const wsDir = createTestWorkspace(tmpDir)
+      createTestSource(wsDir, 'my-api')
+      const { bundle } = exportWorkspace(wsDir)
+
+      const file = join(tmpDir, 'bundle.json')
+      writeFileSync(file, JSON.stringify(bundle))
+
+      const { readWorkspaceBundleFile, summarizeWorkspaceBundle } = await import('../workspace-bundle')
+      const loaded = readWorkspaceBundleFile(file)
+      expect(loaded.config.name).toBe('Test Workspace')
+
+      const summary = summarizeWorkspaceBundle(loaded)
+      expect(summary.counts).toEqual({ sources: 1, skills: 0, automations: 0, sessions: 0 })
+    })
+
+    it('rejects non-JSON and structurally invalid files', async () => {
+      const { readWorkspaceBundleFile } = await import('../workspace-bundle')
+
+      const notJson = join(tmpDir, 'bad.json')
+      writeFileSync(notJson, 'not json {')
+      expect(() => readWorkspaceBundleFile(notJson)).toThrow('not valid JSON')
+
+      const wrongKind = join(tmpDir, 'wrong.json')
+      writeFileSync(wrongKind, JSON.stringify({ kind: 'session-bundle' }))
+      expect(() => readWorkspaceBundleFile(wrongKind)).toThrow('Invalid workspace bundle')
     })
   })
 })

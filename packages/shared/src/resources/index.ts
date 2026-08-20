@@ -37,6 +37,8 @@ export {
   WORKSPACE_BUNDLE_KIND,
   exportWorkspace,
   importWorkspace,
+  readWorkspaceBundleFile,
+  summarizeWorkspaceBundle,
   validateWorkspaceBundle,
 } from './workspace-bundle.ts'
 

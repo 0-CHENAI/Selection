@@ -340,6 +340,7 @@ const EXPECTED_CHANNELS: string[] = [
   'workspaces:exportBundle',
   'workspaces:get',
   'workspaces:importBundle',
+  'workspaces:inspectBundle',
   'workspaces:updateRemote',
 ]
 

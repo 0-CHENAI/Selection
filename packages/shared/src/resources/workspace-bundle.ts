@@ -16,7 +16,7 @@
  * name collides) — it never merges into an existing workspace.
  */
 
-import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'fs'
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'fs'
 import { join, basename } from 'path'
 import { randomUUID } from 'crypto'
 import {
@@ -176,6 +176,21 @@ export function exportWorkspace(
 
   const { id: _id, createdAt: _createdAt, updatedAt: _updatedAt, ...portableConfig } = config
 
+  // Strip machine-local settings that are meaningless or harmful on another host:
+  // - workingDirectory was expanded to an absolute path on export (leaks the
+  //   exporter's home layout; points nowhere on the target machine)
+  // - defaultLlmConnection references a connection that only exists locally
+  if (portableConfig.defaults) {
+    if (portableConfig.defaults.workingDirectory !== undefined) {
+      delete portableConfig.defaults.workingDirectory
+      warnings.push('Stripped defaults.workingDirectory (machine-local path)')
+    }
+    if (portableConfig.defaults.defaultLlmConnection !== undefined) {
+      delete portableConfig.defaults.defaultLlmConnection
+      warnings.push('Stripped defaults.defaultLlmConnection (machine-local reference)')
+    }
+  }
+
   const bundle: WorkspaceBundle = {
     version: 1,
     kind: WORKSPACE_BUNDLE_KIND,
@@ -188,8 +203,14 @@ export function exportWorkspace(
     sessions,
   }
 
-  if (Buffer.byteLength(JSON.stringify(bundle)) > MAX_BUNDLE_SIZE_BYTES) {
-    warnings.push(`Bundle exceeds ${MAX_BUNDLE_SIZE_BYTES / 1024 / 1024}MB size limit`)
+  // Hard limit: an oversized bundle would be rejected by our own importer,
+  // so exporting it anyway would produce a file nobody can use.
+  const bundleSize = Buffer.byteLength(JSON.stringify(bundle))
+  if (bundleSize > MAX_BUNDLE_SIZE_BYTES) {
+    throw new Error(
+      `Workspace bundle exceeds the ${MAX_BUNDLE_SIZE_BYTES / 1024 / 1024}MB size limit ` +
+      `(actual: ${Math.ceil(bundleSize / 1024 / 1024)}MB). Try exporting without sessions.`,
+    )
   }
 
   return { bundle, warnings }
@@ -267,8 +288,12 @@ export function validateWorkspaceBundle(bundle: unknown): { valid: boolean; erro
 
   if (!b.config || typeof b.config !== 'object') {
     errors.push('Missing or invalid config')
-  } else if (typeof (b.config as Record<string, unknown>).name !== 'string') {
-    errors.push('config.name must be a string')
+  } else {
+    const cfg = b.config as Record<string, unknown>
+    if (typeof cfg.name !== 'string') {
+      errors.push('config.name must be a string')
+    }
+    errors.push(...validatePortableDefaults(cfg.defaults))
   }
 
   if (!b.resources || typeof b.resources !== 'object') {
@@ -294,6 +319,20 @@ export function validateWorkspaceBundle(bundle: unknown): { valid: boolean; erro
       continue
     }
     validateFiles(value as BundleFile[], field, errors)
+  }
+
+  // Top-level `files` must stay top-level: a nested path would let a bundle
+  // overwrite the sanitized config.json or inject sources/automations that
+  // bypass validation and sanitization.
+  if (Array.isArray(b.files)) {
+    for (const file of b.files as BundleFile[]) {
+      if (!file || typeof file.relativePath !== 'string') continue
+      if (file.relativePath.includes('/')) {
+        errors.push(`files: only top-level files allowed, got '${file.relativePath}'`)
+      } else if (SKIP_TOP_LEVEL_FILES.has(file.relativePath)) {
+        errors.push(`files: '${file.relativePath}' is a reserved name and cannot be imported this way`)
+      }
+    }
   }
 
   if (b.sessions !== undefined) {
@@ -359,6 +398,30 @@ function validateFiles(files: BundleFile[], prefix: string, errors: string[]): v
   }
 }
 
+/** Shallow type checks for the portable workspace defaults (catches malformed bundles early) */
+function validatePortableDefaults(defaults: unknown): string[] {
+  if (defaults === undefined) return []
+  if (!defaults || typeof defaults !== 'object' || Array.isArray(defaults)) {
+    return ['config.defaults must be an object']
+  }
+  const errors: string[] = []
+  const d = defaults as Record<string, unknown>
+  for (const key of ['model', 'workingDirectory', 'defaultLlmConnection', 'colorTheme'] as const) {
+    if (d[key] !== undefined && typeof d[key] !== 'string') {
+      errors.push(`config.defaults.${key} must be a string`)
+    }
+  }
+  if (d.permissionMode !== undefined && !['safe', 'ask', 'allow-all'].includes(d.permissionMode as string)) {
+    errors.push(`config.defaults.permissionMode must be one of safe/ask/allow-all`)
+  }
+  if (d.enabledSourceSlugs !== undefined) {
+    if (!Array.isArray(d.enabledSourceSlugs) || d.enabledSourceSlugs.some(s => typeof s !== 'string')) {
+      errors.push('config.defaults.enabledSourceSlugs must be a string array')
+    }
+  }
+  return errors
+}
+
 // ============================================================
 // Import
 // ============================================================
@@ -400,42 +463,49 @@ export async function importWorkspace(
 
   mkdirSync(workspacePath, { recursive: true })
 
-  // config.json — fresh identity, slug follows the actual folder name
-  const config: WorkspaceConfig = {
-    ...bundle.config,
-    id: workspaceId,
-    name,
-    slug: basename(workspacePath),
-    createdAt: now,
-    updatedAt: now,
+  try {
+    // config.json — fresh identity, slug follows the actual folder name
+    const config: WorkspaceConfig = {
+      ...bundle.config,
+      id: workspaceId,
+      name,
+      slug: basename(workspacePath),
+      createdAt: now,
+      updatedAt: now,
+    }
+    saveWorkspaceConfig(workspacePath, config)
+
+    // statuses/ and labels/
+    if (bundle.statuses.length > 0) {
+      restoreFiles(join(workspacePath, 'statuses'), bundle.statuses)
+    }
+    if (bundle.labels.length > 0) {
+      restoreFiles(join(workspacePath, 'labels'), bundle.labels)
+    }
+
+    // Loose top-level files (theme.json, views.json, ...)
+    if (bundle.files.length > 0) {
+      restoreFiles(workspacePath, bundle.files)
+    }
+
+    // Sources / skills / automations (fresh workspace → overwrite mode, no conflicts)
+    const resources = await importResources(
+      workspacePath,
+      { version: 1, exportedAt: bundle.exportedAt, resources: bundle.resources },
+      'overwrite',
+      deps,
+    )
+
+    // Sessions as raw file trees
+    const sessions = restoreSessions(workspacePath, bundle.sessions ?? [], warnings)
+
+    return { workspacePath, workspaceId, resources, sessions, warnings }
+  } catch (err) {
+    // Roll back: a partially imported folder with a config.json would be
+    // auto-discovered as a valid workspace on next launch.
+    rmSync(workspacePath, { recursive: true, force: true })
+    throw err
   }
-  saveWorkspaceConfig(workspacePath, config)
-
-  // statuses/ and labels/
-  if (bundle.statuses.length > 0) {
-    restoreFiles(join(workspacePath, 'statuses'), bundle.statuses)
-  }
-  if (bundle.labels.length > 0) {
-    restoreFiles(join(workspacePath, 'labels'), bundle.labels)
-  }
-
-  // Loose top-level files (theme.json, views.json, ...)
-  if (bundle.files.length > 0) {
-    restoreFiles(workspacePath, bundle.files)
-  }
-
-  // Sources / skills / automations (fresh workspace → overwrite mode, no conflicts)
-  const resources = await importResources(
-    workspacePath,
-    { version: 1, exportedAt: bundle.exportedAt, resources: bundle.resources },
-    'overwrite',
-    deps,
-  )
-
-  // Sessions as raw file trees
-  const sessions = restoreSessions(workspacePath, bundle.sessions ?? [], warnings)
-
-  return { workspacePath, workspaceId, resources, sessions, warnings }
 }
 
 function restoreSessions(
@@ -481,13 +551,63 @@ function rewriteSessionWorkspacePath(
   try {
     const raw = readFileSync(sessionFile, 'utf-8')
     const newlineIndex = raw.indexOf('\n')
-    if (newlineIndex === -1) return
-    const firstLine = raw.slice(0, newlineIndex)
+    // A session created and immediately exported can consist of only the header line
+    const firstLine = newlineIndex === -1 ? raw : raw.slice(0, newlineIndex)
+    const rest = newlineIndex === -1 ? '\n' : raw.slice(newlineIndex)
     const header = JSON.parse(firstLine) as Record<string, unknown>
     if (typeof header.workspaceRootPath !== 'string') return
     header.workspaceRootPath = workspacePath
-    writeFileSync(sessionFile, JSON.stringify(header) + raw.slice(newlineIndex), 'utf-8')
+    writeFileSync(sessionFile, JSON.stringify(header) + rest, 'utf-8')
   } catch (err) {
     warnings.push(`Session '${sessionId}': could not rewrite workspaceRootPath (${err})`)
+  }
+}
+
+// ============================================================
+// File-based read (for IPC handlers: path comes from a user-picked dialog)
+// ============================================================
+
+/**
+ * Read, size-check, parse and validate a workspace bundle from disk.
+ * Throws with a descriptive message on any failure.
+ */
+export function readWorkspaceBundleFile(path: string): WorkspaceBundle {
+  const size = statSync(path).size
+  if (size > MAX_BUNDLE_SIZE_BYTES) {
+    throw new Error(
+      `Bundle file exceeds the ${MAX_BUNDLE_SIZE_BYTES / 1024 / 1024}MB size limit ` +
+      `(actual: ${Math.ceil(size / 1024 / 1024)}MB)`,
+    )
+  }
+
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(readFileSync(path, 'utf-8'))
+  } catch (err) {
+    throw new Error(`Bundle file is not valid JSON: ${err instanceof Error ? err.message : err}`)
+  }
+
+  const validation = validateWorkspaceBundle(parsed)
+  if (!validation.valid) {
+    throw new Error(`Invalid workspace bundle: ${validation.errors.join('; ')}`)
+  }
+  return parsed as WorkspaceBundle
+}
+
+/** Lightweight summary for confirmation dialogs (counts only, no payload) */
+export function summarizeWorkspaceBundle(bundle: WorkspaceBundle): {
+  name: string
+  exportedAt: number
+  counts: { sources: number; skills: number; automations: number; sessions: number }
+} {
+  return {
+    name: bundle.config.name,
+    exportedAt: bundle.exportedAt,
+    counts: {
+      sources: bundle.resources.sources?.length ?? 0,
+      skills: bundle.resources.skills?.length ?? 0,
+      automations: bundle.resources.automations?.length ?? 0,
+      sessions: bundle.sessions?.length ?? 0,
+    },
   }
 }

@@ -1,13 +1,14 @@
 /**
  * WorkspaceTransferDialogs — Export / import an entire workspace as a bundle file.
  *
- * ExportWorkspaceDialog: confirm the export scope (sessions are opt-in), call
- * exportWorkspaceBundle, then write the JSON via the native save dialog
- * (file:saveDialog). Credentials are stripped by the exporter.
+ * ExportWorkspaceDialog: confirm the export scope (sessions are opt-in), pick a
+ * target path via the native save dialog (file:saveDialog, dialog-only), then
+ * exportWorkspaceBundle writes the bundle server-side — the payload never
+ * round-trips through the renderer. Credentials are stripped by the exporter.
  *
- * ImportWorkspaceDialog: shows a bundle summary with an optional rename, then
- * calls importWorkspaceBundle — the handler runs full bundle validation and
- * always creates a NEW workspace (never merges).
+ * ImportWorkspaceDialog: shows the bundle summary (from workspaces:inspectBundle)
+ * with an optional rename, then calls importWorkspaceBundle with the file path.
+ * The handler runs full validation and always creates a NEW workspace.
  */
 
 import * as React from 'react'
@@ -26,7 +27,7 @@ import {
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { useRegisterModal } from '@/context/ModalContext'
-import type { WorkspaceBundle } from '../../../shared/types'
+import type { WorkspaceBundleSummary } from '../../../shared/types'
 
 // ============================================================
 // Export
@@ -36,9 +37,11 @@ export interface ExportWorkspaceDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   workspaceId: string | null
+  /** Used for the default file name */
+  workspaceSlug: string
 }
 
-export function ExportWorkspaceDialog({ open, onOpenChange, workspaceId }: ExportWorkspaceDialogProps) {
+export function ExportWorkspaceDialog({ open, onOpenChange, workspaceId, workspaceSlug }: ExportWorkspaceDialogProps) {
   const { t } = useTranslation()
   const [includeSessions, setIncludeSessions] = useState(false)
   const [isExporting, setIsExporting] = useState(false)
@@ -59,39 +62,40 @@ export function ExportWorkspaceDialog({ open, onOpenChange, workspaceId }: Expor
     if (!workspaceId || !window.electronAPI) return
 
     setIsExporting(true)
-    const toastId = toast.loading(t('workspaceTransfer.exporting'))
     try {
-      const { bundle, warnings } = await window.electronAPI.exportWorkspaceBundle(workspaceId, { includeSessions })
-
+      // Pick the target path first; a cancel here has zero side effects
       const saveResult = await window.electronAPI.saveFileDialog({
         title: t('workspaceTransfer.exportTitle'),
-        defaultPath: `${bundle.config.slug || 'workspace'}-workspace.json`,
+        defaultPath: `${workspaceSlug || 'workspace'}-workspace.json`,
         filters: [{ name: 'JSON', extensions: ['json'] }],
-        content: JSON.stringify(bundle, null, 2),
       })
+      if (saveResult.canceled || !saveResult.filePath) return // keep the dialog open so the user can retry
 
-      if (saveResult.canceled) {
-        toast.dismiss(toastId)
-        return // keep the dialog open so the user can retry
-      }
-
-      toast.success(t('workspaceTransfer.exported'), {
-        id: toastId,
-        description: saveResult.filePath,
-      })
-      if (warnings.length > 0) {
-        toast.warning(t('workspaceTransfer.exportWarnings', { count: warnings.length }), {
-          description: warnings.join('\n'),
+      const toastId = toast.loading(t('workspaceTransfer.exporting'))
+      try {
+        const { filePath, warnings } = await window.electronAPI.exportWorkspaceBundle(workspaceId, {
+          includeSessions,
+          outputPath: saveResult.filePath,
         })
+
+        toast.success(t('workspaceTransfer.exported'), {
+          id: toastId,
+          description: filePath,
+        })
+        if (warnings.length > 0) {
+          toast.warning(t('workspaceTransfer.exportWarnings', { count: warnings.length }), {
+            description: warnings.join('\n'),
+          })
+        }
+        onOpenChange(false)
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Unknown error'
+        toast.error(t('workspaceTransfer.exportFailed'), { id: toastId, description: message })
       }
-      onOpenChange(false)
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'Unknown error'
-      toast.error(t('workspaceTransfer.exportFailed'), { id: toastId, description: message })
     } finally {
       setIsExporting(false)
     }
-  }, [workspaceId, includeSessions, onOpenChange, t])
+  }, [workspaceId, workspaceSlug, includeSessions, onOpenChange, t])
 
   return (
     <Dialog open={open} onOpenChange={(isOpen) => {
@@ -147,11 +151,14 @@ export function ExportWorkspaceDialog({ open, onOpenChange, workspaceId }: Expor
 export interface ImportWorkspaceDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
-  bundle: WorkspaceBundle | null
+  /** Absolute path of the bundle file picked via the open dialog */
+  bundlePath: string | null
+  /** Summary from workspaces:inspectBundle (validated server-side) */
+  summary: WorkspaceBundleSummary | null
   onImported?: () => void
 }
 
-export function ImportWorkspaceDialog({ open, onOpenChange, bundle, onImported }: ImportWorkspaceDialogProps) {
+export function ImportWorkspaceDialog({ open, onOpenChange, bundlePath, summary, onImported }: ImportWorkspaceDialogProps) {
   const { t } = useTranslation()
   const [name, setName] = useState('')
   const [isImporting, setIsImporting] = useState(false)
@@ -164,17 +171,20 @@ export function ImportWorkspaceDialog({ open, onOpenChange, bundle, onImported }
   // Reset transient state each time the dialog opens
   useEffect(() => {
     if (!open) return
-    setName(bundle?.config.name ?? '')
+    setName(summary?.name ?? '')
     setIsImporting(false)
-  }, [open, bundle])
+  }, [open, summary])
 
   const handleImport = useCallback(async () => {
-    if (!bundle || !window.electronAPI) return
+    if (!bundlePath || !window.electronAPI) return
 
     setIsImporting(true)
     const toastId = toast.loading(t('workspaceTransfer.importing'))
     try {
-      const result = await window.electronAPI.importWorkspaceBundle(bundle, { name: name.trim() || undefined })
+      const result = await window.electronAPI.importWorkspaceBundle(
+        { path: bundlePath },
+        { name: name.trim() || undefined },
+      )
 
       const sources = result.resources.sources.imported.length
       const skills = result.resources.skills.imported.length
@@ -204,16 +214,11 @@ export function ImportWorkspaceDialog({ open, onOpenChange, bundle, onImported }
     } finally {
       setIsImporting(false)
     }
-  }, [bundle, name, onOpenChange, onImported, t])
+  }, [bundlePath, name, onOpenChange, onImported, t])
 
-  const counts = bundle
-    ? {
-        sources: bundle.resources.sources?.length ?? 0,
-        skills: bundle.resources.skills?.length ?? 0,
-        automations: bundle.resources.automations?.length ?? 0,
-        sessions: bundle.sessions?.length ?? 0,
-      }
-    : null
+  const exportedAtText = summary && Number.isFinite(summary.exportedAt)
+    ? new Date(summary.exportedAt).toLocaleString()
+    : '—'
 
   return (
     <Dialog open={open} onOpenChange={(isOpen) => {
@@ -232,20 +237,20 @@ export function ImportWorkspaceDialog({ open, onOpenChange, bundle, onImported }
           </DialogDescription>
         </DialogHeader>
 
-        {bundle && counts && (
+        {summary && (
           <div className="flex flex-col gap-3 py-1">
             <div className="rounded-md bg-foreground/[0.03] px-3 py-2 text-xs space-y-1">
               <div className="flex justify-between gap-4">
                 <span className="text-muted-foreground">{t('workspaceTransfer.summaryName')}</span>
-                <span className="truncate">{bundle.config.name}</span>
+                <span className="truncate">{summary.name}</span>
               </div>
               <div className="flex justify-between gap-4">
                 <span className="text-muted-foreground">{t('workspaceTransfer.summaryExportedAt')}</span>
-                <span>{new Date(bundle.exportedAt).toLocaleString()}</span>
+                <span>{exportedAtText}</span>
               </div>
               <div className="flex justify-between gap-4">
                 <span className="text-muted-foreground shrink-0">{t('workspaceTransfer.summaryContents')}</span>
-                <span className="text-right">{t('workspaceTransfer.summaryCounts', counts)}</span>
+                <span className="text-right">{t('workspaceTransfer.summaryCounts', summary.counts)}</span>
               </div>
             </div>
 
@@ -254,7 +259,7 @@ export function ImportWorkspaceDialog({ open, onOpenChange, bundle, onImported }
               <Input
                 value={name}
                 onChange={(e) => setName(e.target.value)}
-                placeholder={bundle.config.name}
+                placeholder={summary.name}
                 disabled={isImporting}
               />
             </div>
@@ -273,7 +278,7 @@ export function ImportWorkspaceDialog({ open, onOpenChange, bundle, onImported }
           >
             {t('common.cancel')}
           </Button>
-          <Button onClick={handleImport} disabled={!bundle || isImporting}>
+          <Button onClick={handleImport} disabled={!bundlePath || isImporting}>
             {isImporting ? t('workspaceTransfer.importing') : t('workspaceTransfer.importBtn')}
           </Button>
         </DialogFooter>

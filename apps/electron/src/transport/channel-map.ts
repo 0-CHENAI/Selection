@@ -65,6 +65,7 @@ export const CHANNEL_MAP = {
   updateWorkspaceRemoteServer: invoke(RPC_CHANNELS.workspaces.UPDATE_REMOTE),
   exportWorkspaceBundle: invoke(RPC_CHANNELS.workspaces.EXPORT_BUNDLE),
   importWorkspaceBundle: invoke(RPC_CHANNELS.workspaces.IMPORT_BUNDLE),
+  inspectWorkspaceBundle: invoke(RPC_CHANNELS.workspaces.INSPECT_BUNDLE),
   testRemoteConnection: invoke(RPC_CHANNELS.remote.TEST_CONNECTION),
 
   // Server-level workspace operations (REMOTE_ELIGIBLE)

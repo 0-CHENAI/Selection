@@ -23,7 +23,7 @@ import { cn } from '@/lib/utils'
 import { routes } from '@/lib/navigate'
 import { Spinner } from '@craft-agent/ui'
 import { RenameDialog } from '@/components/ui/rename-dialog'
-import type { PermissionMode, WorkspaceSettings, LoadedSource, WorkspaceBundle } from '../../../shared/types'
+import type { PermissionMode, WorkspaceSettings, LoadedSource, WorkspaceBundleSummary } from '../../../shared/types'
 import { useDirectoryPicker } from '@/hooks/useDirectoryPicker'
 import { ServerDirectoryBrowser } from '@/components/ServerDirectoryBrowser'
 import { PERMISSION_MODE_CONFIG } from '@craft-agent/shared/agent/mode-types'
@@ -72,7 +72,13 @@ export default function WorkspaceSettingsPage() {
   // Workspace transfer (export/import) state
   const [exportDialogOpen, setExportDialogOpen] = useState(false)
   const [importDialogOpen, setImportDialogOpen] = useState(false)
-  const [importBundle, setImportBundle] = useState<WorkspaceBundle | null>(null)
+  const [importBundlePath, setImportBundlePath] = useState<string | null>(null)
+  const [importSummary, setImportSummary] = useState<WorkspaceBundleSummary | null>(null)
+  const [isPickingBundle, setIsPickingBundle] = useState(false)
+
+  // Whether the active workspace is remote (export/import operate on local folders only)
+  const activeWorkspace = appShellContext.workspaces.find(w => w.id === activeWorkspaceId)
+  const isRemoteWorkspace = !!activeWorkspace?.remoteServer
 
   // Default sources state
   const [availableSources, setAvailableSources] = useState<LoadedSource[]>([])
@@ -289,33 +295,29 @@ export default function WorkspaceSettingsPage() {
     [updateWorkspaceSetting]
   )
 
-  // Pick a workspace bundle file and open the import confirmation dialog.
-  // The kind check below is a lightweight pre-flight only — the import handler
-  // runs full validateWorkspaceBundle and rejects invalid bundles.
+  // Pick a workspace bundle file, inspect it server-side (full validation)
+  // and open the confirmation dialog with the summary.
   const handleImportClick = useCallback(async () => {
-    if (!window.electronAPI) return
+    if (!window.electronAPI || isPickingBundle) return
 
+    setIsPickingBundle(true)
     try {
       const paths = await window.electronAPI.openFileDialog()
       if (paths.length === 0) return
 
-      const content = await window.electronAPI.readFile(paths[0])
-      const parsed = JSON.parse(content)
-      if (
-        parsed?.kind !== 'selection-workspace-bundle' ||
-        parsed?.version !== 1 ||
-        typeof parsed?.config?.name !== 'string'
-      ) {
-        toast.error(t('workspaceTransfer.invalidBundle'))
-        return
-      }
-      setImportBundle(parsed as WorkspaceBundle)
+      const path = paths[0]!
+      // Full validation happens here; invalid bundles throw with details
+      const summary = await window.electronAPI.inspectWorkspaceBundle(path)
+      setImportBundlePath(path)
+      setImportSummary(summary)
       setImportDialogOpen(true)
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unknown error'
-      toast.error(t('workspaceTransfer.importFailed'), { description: message })
+      toast.error(t('workspaceTransfer.invalidBundle'), { description: message })
+    } finally {
+      setIsPickingBundle(false)
     }
-  }, [t])
+  }, [t, isPickingBundle])
 
   const handleSourceToggle = useCallback(
     async (slug: string, checked: boolean) => {
@@ -469,7 +471,8 @@ export default function WorkspaceSettingsPage() {
               />
             </SettingsSection>
 
-            {/* Export / Import */}
+            {/* Export / Import (local workspaces only) */}
+            {!isRemoteWorkspace && (
             <SettingsSection title={t("workspaceTransfer.section")}>
               <SettingsCard>
                 <SettingsRow
@@ -492,7 +495,8 @@ export default function WorkspaceSettingsPage() {
                     <button
                       type="button"
                       onClick={handleImportClick}
-                      className="inline-flex items-center h-8 px-3 text-sm rounded-lg bg-background shadow-minimal hover:bg-foreground/[0.02] transition-colors"
+                      disabled={isPickingBundle}
+                      className="inline-flex items-center h-8 px-3 text-sm rounded-lg bg-background shadow-minimal hover:bg-foreground/[0.02] transition-colors disabled:opacity-50"
                     >
                       {t("workspaceTransfer.importBtn")}
                     </button>
@@ -500,6 +504,7 @@ export default function WorkspaceSettingsPage() {
                 />
               </SettingsCard>
             </SettingsSection>
+            )}
 
             {/* Permissions */}
             <SettingsSection title={t("settings.workspace.permissionsSection")}>
@@ -635,11 +640,20 @@ export default function WorkspaceSettingsPage() {
         open={exportDialogOpen}
         onOpenChange={setExportDialogOpen}
         workspaceId={activeWorkspaceId}
+        workspaceSlug={activeWorkspace?.slug ?? ''}
       />
       <ImportWorkspaceDialog
         open={importDialogOpen}
-        onOpenChange={setImportDialogOpen}
-        bundle={importBundle}
+        onOpenChange={(isOpen) => {
+          setImportDialogOpen(isOpen)
+          if (!isOpen) {
+            // Release the summary once the dialog closes
+            setImportBundlePath(null)
+            setImportSummary(null)
+          }
+        }}
+        bundlePath={importBundlePath}
+        summary={importSummary}
         onImported={onRefreshWorkspaces}
       />
     </div>

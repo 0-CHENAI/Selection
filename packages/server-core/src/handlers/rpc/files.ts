@@ -132,14 +132,14 @@ export function registerFilesHandlers(server: RpcServer, deps: HandlerDeps): voi
     return result.canceled ? [] : result.filePaths
   })
 
-  // Open native save dialog and write text content to the chosen path (routed to client)
-  server.handle(RPC_CHANNELS.file.SAVE_DIALOG, async (ctx, spec: SaveFileDialogSpec & { content: string }) => {
-    const { content, ...dialogSpec } = spec
-    const result = await requestClientSaveFileDialog(server, ctx.clientId, dialogSpec)
+  // Open native save dialog and return the chosen path (routed to client).
+  // Dialog-only by design: file content never round-trips through here —
+  // callers pass the returned path to the handler that produces the file.
+  server.handle(RPC_CHANNELS.file.SAVE_DIALOG, async (ctx, spec: SaveFileDialogSpec) => {
+    const result = await requestClientSaveFileDialog(server, ctx.clientId, spec)
     if (result.canceled || !result.filePath) {
       return { canceled: true as const }
     }
-    await writeFile(result.filePath, content, 'utf-8')
     return { canceled: false as const, filePath: result.filePath }
   })
 
