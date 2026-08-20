@@ -48,6 +48,7 @@ import {
   groupActivitiesByParent,
   isActivityGroup,
   formatDuration,
+  formatOrchestrationToolSummary,
   formatTokens,
   deriveTurnPhase,
   getActiveTurnPreview,
@@ -408,6 +409,8 @@ function getToolDisplayName(name: string): string {
     'list_sessions': 'List Sessions',
     'archive_session': 'Archive Session',
     'create_task': 'Create Task',
+    'run_task': 'Run Task',
+    'get_task_results': 'Get Task Results',
     'list_background_tasks': 'List Background Tasks',
     'send_agent_message': 'Send Agent Message',
     'spawn_session': 'Spawn Session',
@@ -881,6 +884,7 @@ function ActivityRow({ activity, onOpenDetails, isLastChild, sessionFolderPath, 
   const diffStats = computeEditWriteDiffStats(activity.toolName, activity.toolInput)
   const isComplete = activity.status === 'completed' || activity.status === 'error'
   const isBackgrounded = activity.status === 'backgrounded'
+  const orchestrationSummary = formatOrchestrationToolSummary(activity.toolName, activity.content)
 
   // For backgrounded tasks, show task/shell ID and elapsed time
   const backgroundInfo = isBackgrounded
@@ -948,6 +952,12 @@ function ActivityRow({ activity, onOpenDetails, isLastChild, sessionFolderPath, 
                     <span className="opacity-50">{inputSummary}</span>
                   </>
                 )}
+              </span>
+            )}
+            {orchestrationSummary && (
+              <span className="truncate min-w-0 max-w-[420px]">
+                <span className="opacity-60"> · </span>
+                <span>{orchestrationSummary}</span>
               </span>
             )}
           </>
@@ -1036,6 +1046,12 @@ function ActivityRow({ activity, onOpenDetails, isLastChild, sessionFolderPath, 
                 <span className="opacity-50">{inputSummary}</span>
               </>
             )}
+          </span>
+        )}
+        {!isMcpOrApiTool && orchestrationSummary && (
+          <span className="truncate min-w-0 max-w-[420px]">
+            <span className="opacity-60"> · </span>
+            <span>{orchestrationSummary}</span>
           </span>
         )}
         {/* Background task info (task/shell ID + elapsed time) */}

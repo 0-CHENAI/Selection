@@ -910,6 +910,12 @@ export default function App() {
             toast.error(effect.message, { duration: 5000 })
             break
           }
+          case 'toast_running_children': {
+            toast.info(t('toast.parentStoppedChildrenRunning', { count: effect.count }), {
+              duration: 6000,
+            })
+            break
+          }
         }
       }
 
@@ -1087,6 +1093,7 @@ export default function App() {
     syncSessionOptionsFromSession,
     applyPermissionModeState,
     reconcilePermissionModeState,
+    t,
   ])
 
   // Transport reconnect recovery — refresh session metadata plus active/processing

@@ -1002,6 +1002,51 @@ export function computeLastChildSet(activities: ActivityItem[]): Set<string> {
 // Formatting Helpers
 // ============================================================================
 
+const ORCHESTRATION_TOOL_NAMES = new Set(['spawn_session', 'run_task'])
+const ORCHESTRATION_FINAL_TEXT_MAX = 120
+
+function parseOrchestrationResult(content: string): Record<string, unknown> | null {
+  try {
+    const value = JSON.parse(content.trim()) as unknown
+    if (value && typeof value === 'object' && !Array.isArray(value)) {
+      return value as Record<string, unknown>
+    }
+  } catch {
+    return null
+  }
+  return null
+}
+
+function truncateOneLine(text: string, max: number): string {
+  const oneLine = text.replace(/\s+/g, ' ').trim()
+  if (oneLine.length <= max) return oneLine
+  return `${oneLine.slice(0, max - 1).trimEnd()}…`
+}
+
+/** Thin status + id + conclusion line for spawn_session / run_task JSON results. */
+export function formatOrchestrationToolSummary(
+  toolName: string | undefined,
+  content: string | undefined,
+): string | null {
+  if (!toolName || !content) return null
+  const name = toolName.replace(/^mcp__[^_]+__/, '')
+  if (!ORCHESTRATION_TOOL_NAMES.has(name)) return null
+
+  const parsed = parseOrchestrationResult(content)
+  if (!parsed) return null
+
+  const status = typeof parsed.status === 'string' ? parsed.status : null
+  const id = name === 'run_task'
+    ? (typeof parsed.runId === 'string' ? parsed.runId : null)
+    : (typeof parsed.sessionId === 'string' ? parsed.sessionId : null)
+  const finalText = typeof parsed.finalText === 'string'
+    ? truncateOneLine(parsed.finalText, ORCHESTRATION_FINAL_TEXT_MAX)
+    : null
+
+  const parts = [status, id, finalText].filter((part): part is string => Boolean(part))
+  return parts.length > 0 ? parts.join(' · ') : null
+}
+
 /**
  * Format duration in milliseconds to human-readable string.
  * @example formatDuration(1234) => "1.2s"

@@ -348,6 +348,12 @@ export interface SessionToolContext {
    */
   createTask?(input: CreateTaskInput): Promise<CreateTaskResult>;
 
+  /** Start a Conductor run for an existing board task. Injected by SessionManager. */
+  runTask?(input: RunTaskInput): Promise<RunTaskResult>;
+
+  /** Read a Conductor run's verdict and node outputs from disk. Injected by SessionManager. */
+  getTaskResults?(slug: string, runId?: string): Promise<TaskResultsPayload>;
+
   // ============================================================
   // Inter-Session Messaging
   // ============================================================
@@ -484,6 +490,52 @@ export interface CreateTaskResult {
   warnings: string[];
 }
 
+/** Input for run_task — starts an existing board task's Conductor DAG. */
+export interface RunTaskInput {
+  slug?: string;
+  orchestratorSessionId?: string;
+  params?: Record<string, unknown>;
+  waitForCompletion?: boolean;
+}
+
+export interface RunTaskNodeState {
+  id: string;
+  state: string;
+  sessionId?: string;
+}
+
+/** Result of run_task. */
+export interface RunTaskResult {
+  slug: string;
+  runId: string;
+  status: string;
+  nodeCount: number;
+  nodes: RunTaskNodeState[];
+}
+
+export interface GetTaskResultsInput {
+  slug: string;
+  runId?: string;
+}
+
+export interface TaskResultsPayload {
+  slug: string;
+  runId: string | null;
+  runIds: string[];
+  verdict?: { result: 'pass' | 'fail' | 'unparsed'; reason?: string; nodes?: string[] };
+  verdicts?: { result: 'pass' | 'fail' | 'unparsed'; reason?: string; nodes?: string[] }[];
+  repair?: { used: number; max: number };
+  runStatus?: string;
+  acceptanceCriteria?: string;
+  nodes: Array<{
+    id: string;
+    title: string;
+    state: string;
+    sessionId?: string;
+    output?: string;
+  }>;
+}
+
 export interface SessionInfo {
   id: string;
   name: string;
@@ -493,6 +545,7 @@ export interface SessionInfo {
   createdAt: number;
   updatedAt?: number;
   workingDirectory?: string;
+  projectId?: string;
   llmConnection?: string;
   model?: string;
   isActive: boolean;
@@ -557,6 +610,8 @@ export interface BackgroundTaskInfo {
   elapsedSeconds: number;
   /** ms timestamp when the task reached a terminal/orphaned status, if any */
   completedAt?: number;
+  /** Present for first-class spawn_session children. */
+  source?: 'spawn_session';
 }
 
 // ============================================================

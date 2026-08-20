@@ -362,6 +362,13 @@ export function handleInterrupted(
     })
   }
 
+  if (isUserInitiated && typeof event.runningChildCount === 'number' && event.runningChildCount > 0) {
+    effects.push({
+      type: 'toast_running_children',
+      count: event.runningChildCount,
+    })
+  }
+
   return {
     state: {
       session: {

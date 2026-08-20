@@ -55,6 +55,8 @@ export interface ActiveOptionBadgesProps {
   sessionFolderPath?: string
   /** Callback when kill button is clicked on a task */
   onKillTask?: (taskId: string) => void
+  /** Open a first-class child session from a spawn_session chip */
+  onOpenSession?: (sessionId: string) => void
   /** Callback to insert message into input field */
   onInsertMessage?: (text: string) => void
   /** Callback to show a task's output in a terminal overlay (optional) */
@@ -98,6 +100,7 @@ export function ActiveOptionBadges({
   sessionId,
   sessionFolderPath,
   onKillTask,
+  onOpenSession,
   onInsertMessage,
   onShowTerminalOverlay,
   sessionLabels = [],
@@ -164,6 +167,7 @@ export function ActiveOptionBadges({
             tasks={tasks}
             sessionId={sessionId}
             onKillTask={onKillTask}
+            onOpenSession={onOpenSession}
             onInsertMessage={onInsertMessage}
             onShowTerminalOverlay={onShowTerminalOverlay}
           />

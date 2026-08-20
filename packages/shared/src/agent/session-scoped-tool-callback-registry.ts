@@ -87,6 +87,13 @@ export interface SessionScopedToolCallbacks {
   createTaskFn?: (
     input: import('@craft-agent/session-tools-core').CreateTaskInput
   ) => Promise<import('@craft-agent/session-tools-core').CreateTaskResult>;
+  runTaskFn?: (
+    input: import('@craft-agent/session-tools-core').RunTaskInput
+  ) => Promise<import('@craft-agent/session-tools-core').RunTaskResult>;
+  getTaskResultsFn?: (
+    slug: string,
+    runId?: string
+  ) => Promise<import('@craft-agent/session-tools-core').TaskResultsPayload>;
 }
 
 // Registry of callbacks keyed by sessionId

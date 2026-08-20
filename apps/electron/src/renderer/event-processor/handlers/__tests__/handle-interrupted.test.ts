@@ -60,6 +60,23 @@ describe('handleInterrupted (#616)', () => {
       expect(next.effects).toEqual([])
       expect(next.state.session.messages.map(m => m.id)).toContain('info-1')
     })
+
+    it('toasts when running spawn children remain', () => {
+      const state = makeState([
+        { id: 'msg-1', role: 'user', content: 'first' },
+      ])
+      const event: InterruptedEvent = {
+        type: 'interrupted',
+        sessionId: 'session-1',
+        message: { id: 'info-1', role: 'info', content: 'Response interrupted', timestamp: 0 } as any,
+        runningChildCount: 2,
+      }
+
+      const next = handleInterrupted(state, event)
+      expect(next.effects).toEqual([
+        { type: 'toast_running_children', count: 2 },
+      ])
+    })
   })
 
   describe('silent redirect (event.message absent)', () => {
@@ -84,6 +101,21 @@ describe('handleInterrupted (#616)', () => {
       // no info bubble appended
       expect(ids).not.toContain('info-1')
       // critically: no restore_input effect — backend will auto-replay
+      expect(next.effects).toEqual([])
+      expect(next.state.session.isProcessing).toBe(false)
+    })
+
+    it('does not toast about children on a silent redirect', () => {
+      const state = makeState([
+        { id: 'msg-1', role: 'user', content: 'first' },
+      ])
+      const event: InterruptedEvent = {
+        type: 'interrupted',
+        sessionId: 'session-1',
+        runningChildCount: 2,
+      }
+
+      const next = handleInterrupted(state, event)
       expect(next.effects).toEqual([])
       // isProcessing still gets cleared
       expect(next.state.session.isProcessing).toBe(false)

@@ -61,6 +61,21 @@ describe('spawn_session thinkingLevel forwarding', () => {
     expect(captured[0]?.thinkingLevel).toBeUndefined();
   });
 
+  it('defaults mode to background and forwards wait plus timeoutMs', async () => {
+    await agent.invokeSpawn({ prompt: 'hi' });
+    expect(captured[0]?.mode).toBe('background');
+    expect(captured[0]?.timeoutMs).toBe(15 * 60 * 1000);
+
+    const { agent: waitAgent, captured: waitCaptured } = setup();
+    await waitAgent.invokeSpawn({ prompt: 'hi', mode: 'wait', timeoutMs: 1_000 });
+    expect(waitCaptured[0]?.mode).toBe('wait');
+    expect(waitCaptured[0]?.timeoutMs).toBe(1_000);
+
+    const { agent: cappedAgent, captured: capped } = setup();
+    await cappedAgent.invokeSpawn({ prompt: 'hi', mode: 'wait', timeoutMs: 99_999_999 });
+    expect(capped[0]?.timeoutMs).toBe(30 * 60 * 1000);
+  });
+
   it('does not drop thinkingLevel when other optional fields are also set', async () => {
     await agent.invokeSpawn({
       prompt: 'hi',

@@ -1669,6 +1669,8 @@
   "toast.messagingRateLimited": "ペアリングコードのリクエストが多すぎます。少し待ってから再度お試しください。",
   "toast.messagingTelegramLockedDown": "Telegramボットを許可されたユーザーに制限しました",
   "toast.messagingTelegramUnlocked": "Telegramボットのロックを解除しました — 誰でも再びDMできます",
+  "toast.parentStoppedChildrenRunning_one": "このセッションを停止しました。子セッションが {{count}} 件まだ実行中です。リストから開くか停止できます。",
+  "toast.parentStoppedChildrenRunning_other": "このセッションを停止しました。子セッションが {{count}} 件まだ実行中です。リストから開くか停止できます。",
   "toast.pathCopied": "パスをクリップボードにコピーしました",
   "toast.patternCopied": "パターンをクリップボードにコピーしました",
   "toast.reconnectFailed": "再接続に失敗しました",

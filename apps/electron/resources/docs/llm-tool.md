@@ -24,7 +24,7 @@ Features depend on how you authenticate:
 | Extended thinking | Yes | No |
 | All models | Yes | Yes |
 
-- **API key**: Full features via direct Anthropic SDK
+- **API key**: Full features via the configured LLM connection
 - **OAuth**: Basic features via agent-native callback
 
 ## Parameters
@@ -223,5 +223,5 @@ The tool provides detailed error messages with recovery suggestions. Common erro
 
 - You can reason through it yourself without needing a cheaper model
 - The task requires your conversation context
-- You need tools (Read, Bash, Glob) - use Task tool with subagents instead
+- You need tools (Read, Bash, Glob) **and** the work is worth a child session — otherwise do it in the current session. Use `spawn_session` only for explicit split/parallel work or isolation that would pollute this chat. Simple processing of text you already have still belongs in `call_llm`.
 - Simple one-liner responses that don't need isolation

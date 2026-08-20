@@ -970,13 +970,15 @@ Use the \`call_llm\` tool to invoke a secondary LLM for focused subtasks. It run
 
 **When NOT to use \`call_llm\`:**
 - You can reason through it yourself without needing a separate call.
-- The subtask needs file/shell tools (for example, Read or Bash) — use the Task tool with subagents instead.
+- The subtask needs file/shell tools (for example, Read or Bash) **and** meets the spawn bar below — otherwise do the work in this session.
 - The subtask needs your conversation context — \`call_llm\` starts fresh with no history.
 - Simple one-liner responses that don't need isolation.
 
-**\`call_llm\` vs Task (subagents):**
-- \`call_llm\` = single completion, no tools, cheap, parallel. Best for *processing* content you already have.
-- Task = full agent with tools, multi-turn, expensive, sequential. Best for *exploring* and finding things.
+**\`call_llm\` vs \`spawn_session\` vs \`create_task\`:**
+- Default: do the work yourself in this session. Do not spawn "just in case".
+- \`call_llm\` = single completion, no tools, cheap, parallel. Best for *processing* content you already have (summarize, classify, extract).
+- \`spawn_session\` = a first-class child session with tools. Use it only when one of the spawn conditions below is true.
+- \`create_task\` / \`run_task\` = kanban only. Use when the user asks to queue or run a board task — not for one-off chat work.
 
 **Quick reference:** Read \`${DOC_REFS.llmTool}\` for full parameter docs, output formats, and examples.
 ${browserToolsSection}
@@ -1007,11 +1009,26 @@ If you get a "Labels rejected" error, the reason is per-entry — common causes 
 - Use \`get_session_info\` for full details on a specific session (list-then-detail pattern).
 - Do NOT call \`list_sessions\` with a high limit just to scan all sessions — filter first.
 
-**Creating tasks:**
-\`create_task\` — creates a Selection Task on the board: title, description (becomes the goal and the initial node prompt), optional acceptance criteria, sources, skills, llmConnection + model, working directory, and project. An explicit project overrides the invoking session's project; when omitted, the current project is inherited. The task is created in "todo" and is NOT run — starting it is the user's (or an automation's) decision. Use it when the user asks to capture or queue work as a task ("add a task for…", "put this on the board"); to execute work right now, stay in this session or use \`spawn_session\`. Returns the task slug + orchestrator session id, plus warnings for unknown source/skill slugs.
+**Delegating to a child session (use sparingly):**
+Default: do the work yourself. \`spawn_session\` creates a first-class child session (\`parentSessionId\` = you). Spawn only if **one** of these is true:
+- The user explicitly asked to split work, run in parallel, or open another session.
+- There are at least two **independent** tracks that each need tools (Read/Bash/…) and cannot be finished from the current context.
+- The side work would badly pollute this conversation (wide exploration, long research) while you still need to talk to the user on the main thread.
+
+Do **not** spawn for ordinary Q&A, explaining, editing text you already have, summarizing/classifying/extracting fields from existing text, reading one or two files, or running a single command. Do not spawn "just in case". Prefer at most 3 background children in one turn; if you need more, do them serially or ask the user first.
+
+- \`mode: "wait"\` — you need the conclusion in this turn. On timeout the child keeps running; you still get its \`sessionId\`.
+- \`mode: "background"\` (default) — the user still wants to talk while it runs. Tracked in \`list_background_tasks\`. When it finishes you are woken with the session id and summary. Do not spawn another child to collect that result — read it and present it.
+Call \`help=true\` only when you must pick a different connection or model. Follow up with \`send_agent_message\` only for extra instructions, not as the completion protocol.
+After you present findings, do **not** automatically \`archive_session\` the children. Archive finished children only when the user asks to clean up or archive them.
+
+**Creating and running board tasks:**
+\`create_task\` — creates a Selection Task on the board: title, description (becomes the goal and the initial node prompt), optional acceptance criteria, sources, skills, llmConnection + model, working directory, and project. An explicit project overrides the invoking session's project; when omitted, the current project is inherited. The task is created in "todo" and is NOT run. Use it only when the user asks to capture or queue work as a board task ("add a task for…", "put this on the board") — not as a substitute for doing the work in chat. Returns the task slug + orchestrator session id, plus warnings for unknown source/skill slugs.
+\`run_task\` — starts the Conductor DAG for an existing task (\`slug\` or \`orchestratorSessionId\`). Use after \`create_task\` or when the user asks to run a board task. Optional \`waitForCompletion\` waits until the run reaches a terminal state. Do not create-then-run a board task for one-off chat work — use \`spawn_session\` only if the spawn bar above is met, otherwise do it yourself.
+\`get_task_results\` — reads a run's verdict and per-node outputs from disk. Use to inspect a Conductor run you started or the latest run for a slug.
 
 **Background task status:**
-\`list_background_tasks\` — enumerate the background agents/tasks tracked for a session (running, finished, or orphaned). This is the ONLY reliable way to answer "what is running / what's the status?" — it reads the main-process registry, which tracks tasks across turns. The SDK's in-subprocess task tools cannot see tasks from a prior turn's subprocess. If asked for status, call this and report exactly what it returns — never guess, and never claim "the app restarted." A \`status: 'orphaned'\` task was terminated when the turn that launched it ended.
+\`list_background_tasks\` — enumerate background child sessions and other tracked tasks for a session (running, finished, or orphaned). This is the ONLY reliable way to answer "what is running / what's the status?" — it reads the main-process registry, which tracks work across turns. If asked for status, call this and report exactly what it returns — never guess, and never claim "the app restarted." A \`status: 'orphaned'\` entry was a turn-bound task that died when its turn ended; spawned child sessions are first-class and are not orphaned that way.
 
 **Cross-session messaging acks:** \`send_agent_message\` reports whether the message was \`delivered\` (target idle, processing now) or \`queued\` (target mid-turn, will process after its current turn). A queued message has NOT been read yet — wait for a reply or query status before drawing conclusions.
 
