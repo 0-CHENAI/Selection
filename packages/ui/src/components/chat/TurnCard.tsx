@@ -43,7 +43,20 @@ import { Tooltip, TooltipTrigger, TooltipContent } from '../tooltip'
 import { parseDiffFromFile, type FileContents } from '@pierre/diffs'
 import { getDiffStats, getUnifiedDiffStats } from '../code-viewer'
 import { TurnCardActionsMenu } from './TurnCardActionsMenu'
-import { computeLastChildSet, groupActivitiesByParent, isActivityGroup, formatDuration, formatOrchestrationToolSummary, formatTokens, deriveTurnPhase, shouldShowThinkingIndicator, type ActivityGroup, type AssistantTurn } from './turn-utils'
+import {
+  computeLastChildSet,
+  groupActivitiesByParent,
+  isActivityGroup,
+  formatDuration,
+  formatOrchestrationToolSummary,
+  formatTokens,
+  deriveTurnPhase,
+  getActiveTurnPreview,
+  shouldShowThinkingIndicator,
+  type ActivityGroup,
+  type AssistantTurn,
+  type TurnPhase,
+} from './turn-utils'
 import { extractAnnotationSelectedText } from './follow-up-helpers'
 import {
   formatAnnotationFollowUpTooltipText,
@@ -579,11 +592,18 @@ function formatToolDisplay(
 /** Get the primary preview text for collapsed state */
 function getPreviewText(
   activities: ActivityItem[],
-  intent?: string,
-  isStreaming?: boolean,
-  hasResponse?: boolean,
-  isComplete?: boolean
+  intent: string | undefined,
+  turnPhase: TurnPhase,
 ): string {
+  // Final response streaming is the newest user-visible phase.
+  if (turnPhase === 'streaming') return i18n.t('turnCard.responding')
+
+  // During an active turn, prefer the newest thinking/tool intent over the
+  // turn-level intent captured when the turn was first created. The latter is
+  // intentionally stable and otherwise leaves the title stuck on step one.
+  const latestActivePreview = getActiveTurnPreview(activities, turnPhase)
+  if (latestActivePreview) return latestActivePreview
+
   // If we have an explicit intent, use it
   if (intent) return intent
 
@@ -591,24 +611,10 @@ function getPreviewText(
   const activityWithIntent = activities.find(a => a.intent)
   if (activityWithIntent?.intent) return activityWithIntent.intent
 
-  // Check if we're in responding state
-  if (isStreaming && hasResponse) return i18n.t('turnCard.responding')
-
   // Find running Task tools and show their description
   const runningTask = activities.find(a => isParentTaskTool(a.toolName ?? '') && a.status === 'running')
   if (runningTask?.toolInput?.description) {
     return runningTask.toolInput.description as string
-  }
-
-  // While still streaming, show the latest intermediate message content
-  // This gives visibility into what the LLM is "thinking"
-  if (isStreaming && !isComplete) {
-    const latestIntermediate = [...activities]
-      .reverse()
-      .find(a => a.type === 'intermediate' && a.content)
-    if (latestIntermediate?.content) {
-      return latestIntermediate.content
-    }
   }
 
   // Get running and completed tools (not intermediate messages)
@@ -633,7 +639,7 @@ function getPreviewText(
   }
 
   // When complete, show summary (badge already shows count)
-  if (isComplete || (!isStreaming && activities.length > 0)) {
+  if (turnPhase === 'complete' || turnPhase === 'awaiting') {
     const errorSuffix = errorCount > 0
       ? i18n.t('turnCard.errorCount', { count: errorCount })
       : ''
@@ -2650,7 +2656,6 @@ export const TurnCard = React.memo(function TurnCard({
   activities,
   response,
   intent,
-  isStreaming,
   isComplete,
   defaultExpanded = false,
   isExpanded: externalIsExpanded,
@@ -2764,8 +2769,8 @@ export const TurnCard = React.memo(function TurnCard({
 
   // Compute preview text with cross-fade animation
   const previewText = useMemo(
-    () => getPreviewText(activities, intent, isStreaming, !!response, isComplete),
-    [activities, intent, isStreaming, response, isComplete]
+    () => getPreviewText(activities, intent, turnPhase),
+    [activities, intent, turnPhase]
   )
 
   // Sort activities by timestamp for correct chronological order
