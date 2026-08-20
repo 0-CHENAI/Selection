@@ -23,13 +23,18 @@ class PptxToolSmokeTests(unittest.TestCase):
         return run_tool("pptx-tool", *args, env=self.env)
 
     def test_create_info_extract(self) -> None:
+        source = self.tmpdir / "slides.md"
+        source.write_text(
+            "# Slide One\nHello slide\n---\n# Slide Two\nWorld",
+            encoding="utf-8",
+        )
         deck = self.tmpdir / "deck.pptx"
         create = self.run_tool(
             "create",
             "--title",
             "Smoke Deck",
-            "--text",
-            "# Slide One\nHello slide\n---\n# Slide Two\nWorld",
+            "--from-file",
+            str(source),
             "-o",
             str(deck),
         )
