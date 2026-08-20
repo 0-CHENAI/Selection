@@ -9,7 +9,7 @@
     "pi-agent-server": "./dist/index.js"
   },
   "scripts": {
-    "build": "bun build src/index.ts --outdir=dist --target=bun --format=esm --external koffi && bun run scripts/copy-runtime-assets.ts",
+    "build": "bun build src/index.ts --outdir=dist --target=bun --format=esm --external koffi && bun build src/tools/read/image-resize-worker.ts --outfile=dist/image-resize-worker.js --target=bun --format=esm && bun run scripts/copy-runtime-assets.ts",
     "typecheck": "tsc --noEmit -p tsconfig.typecheck.json",
     "validate": "bun run typecheck && bun run build"
   },
@@ -17,6 +17,7 @@
     "@earendil-works/pi-coding-agent": "0.80.6",
     "@earendil-works/pi-agent-core": "0.80.6",
     "@earendil-works/pi-ai": "0.80.6",
+    "@silvia-odwyer/photon-node": "0.3.4",
     "duck-duck-scrape": "^2.2.7",
     "@sinclair/typebox": "^0.34.0",
     "node-html-parser": "^6.1.0",

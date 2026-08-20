@@ -10,11 +10,12 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 ## Improvements
 
 - **Conservative multi-agent use** — default to doing the work in the current session; child sessions are only for explicit parallel or isolation work. Stopping a parent does not cancel children, but shows how many are still running.
+- **Clearer, adaptive image resizing** — oversized Pi `read` images now retain up to a 2560px long edge, search JPEG quality 70–85 and reduce dimensions according to actual encoded size in a background Worker, preserving fine text and line detail while keeping the existing 4.5 MB guard (#42, #43).
 
 ## Bug Fixes
 
 - **Stale Task/subagent prompt guidance** — system prompt and tool docs no longer tell the model to use the removed Claude Task / Workflow tools (#35).
-- **Windows image reads restored** — packaged Pi sessions now ship the Photon WASM runtime required by the built-in `read` tool, so local PNG/JPEG images reach vision-capable models instead of being incorrectly reported as too large (#39).
+- **Windows image reads restored** — packaged Pi sessions now ship the Photon WASM runtime required by the built-in `read` tool; small PNG/JPEG/GIF/WebP files bypass image processing, oversized images are resized, and runtime, decoding, conversion, resize, and size-limit failures are reported separately instead of all appearing as a size error (#39).
 
 ## Breaking Changes
 
