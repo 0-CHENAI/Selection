@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test'
-import { appendRestoredInput, coerceInputText } from '../input-text'
+import { appendRestoredInput, coerceInputText, getRestorableStoppedPrompt } from '../input-text'
 
 describe('coerceInputText', () => {
   it('preserves plain strings', () => {
@@ -48,5 +48,29 @@ describe('appendRestoredInput', () => {
 
   it('coerces malformed (non-string) persisted draft values defensively', () => {
     expect(appendRestoredInput({ text: 'draft' } as unknown as string, 'msg')).toBe('draft\n\nmsg')
+  })
+})
+
+describe('getRestorableStoppedPrompt', () => {
+  it('returns the latest visible prompt from the active user turn', () => {
+    expect(getRestorableStoppedPrompt([
+      { role: 'user', content: 'first' },
+      { role: 'assistant', content: 'reply' },
+      { role: 'user', content: 'latest' },
+    ])).toBe('latest')
+  })
+
+  it('does not restore an older prompt when the active turn is a hidden continuation', () => {
+    expect(getRestorableStoppedPrompt([
+      { role: 'user', content: 'already submitted' },
+      { role: 'user', content: 'internal retry', hidden: true },
+    ])).toBe('')
+  })
+
+  it('ignores queued composer messages because the backend restores them', () => {
+    expect(getRestorableStoppedPrompt([
+      { role: 'user', content: 'active prompt' },
+      { role: 'user', content: 'queued draft', isQueued: true },
+    ])).toBe('active prompt')
   })
 })
