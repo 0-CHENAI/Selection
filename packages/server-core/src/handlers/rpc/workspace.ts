@@ -14,6 +14,8 @@ export const CORE_HANDLED_CHANNELS = [
   RPC_CHANNELS.workspaces.CREATE,
   RPC_CHANNELS.workspaces.CHECK_SLUG,
   RPC_CHANNELS.workspaces.UPDATE_REMOTE,
+  RPC_CHANNELS.workspaces.EXPORT_BUNDLE,
+  RPC_CHANNELS.workspaces.IMPORT_BUNDLE,
   RPC_CHANNELS.window.GET_WORKSPACE,
   RPC_CHANNELS.window.GET_MODE,
   RPC_CHANNELS.window.SWITCH_WORKSPACE,
@@ -73,6 +75,61 @@ export function registerWorkspaceCoreHandlers(server: RpcServer, deps: HandlerDe
     deps.platform.logger.info(`Updated remote server for workspace ${workspaceId}: ${remoteServer.url}`)
     return { success: true }
   })
+
+  // Export an entire workspace to a portable bundle (config, resources, statuses,
+  // labels, loose files, optionally sessions). Credentials are stripped.
+  server.handle(
+    RPC_CHANNELS.workspaces.EXPORT_BUNDLE,
+    async (_ctx, workspaceId: string, options?: { includeSessions?: boolean }) => {
+      const workspace = getWorkspaceByNameOrId(workspaceId)
+      if (!workspace) throw new Error(`Workspace not found: ${workspaceId}`)
+
+      const { exportWorkspace } = await import('@craft-agent/shared/resources')
+      const result = exportWorkspace(workspace.rootPath, options ?? {})
+
+      deps.platform.logger.info(
+        `WORKSPACE_EXPORT: ${workspaceId}: ` +
+        `${result.bundle.resources.sources?.length ?? 0} sources, ` +
+        `${result.bundle.resources.skills?.length ?? 0} skills, ` +
+        `${result.bundle.resources.automations?.length ?? 0} automations, ` +
+        `${result.bundle.sessions?.length ?? 0} sessions` +
+        (result.warnings.length > 0 ? ` (${result.warnings.length} warnings)` : ''),
+      )
+
+      return result
+    },
+  )
+
+  // Import a workspace bundle as a NEW workspace and register it in local config.
+  server.handle(
+    RPC_CHANNELS.workspaces.IMPORT_BUNDLE,
+    async (
+      _ctx,
+      bundle: import('@craft-agent/shared/resources').WorkspaceBundle,
+      options?: { name?: string; parentDir?: string },
+    ) => {
+      const { importWorkspace } = await import('@craft-agent/shared/resources')
+      const parentDir = options?.parentDir ?? join(CONFIG_DIR, 'workspaces')
+      const result = await importWorkspace(parentDir, bundle, { name: options?.name })
+
+      // Register the new workspace in the local config (dedupes by rootPath)
+      const registered = addWorkspace({
+        name: options?.name ?? bundle.config.name,
+        rootPath: result.workspacePath,
+      })
+
+      deps.platform.logger.info(
+        `WORKSPACE_IMPORT: created "${registered.name}" at ${result.workspacePath}: ` +
+        `sources=${result.resources.sources.imported.length}, ` +
+        `skills=${result.resources.skills.imported.length}, ` +
+        `automations=${result.resources.automations.imported.length}, ` +
+        `sessions=${result.sessions.imported.length}` +
+        (result.warnings.length > 0 ? ` (${result.warnings.length} warnings)` : ''),
+      )
+
+      return { ...result, workspace: registered }
+    },
+  )
 
   // Get workspace ID for the calling window
   server.handle(RPC_CHANNELS.window.GET_WORKSPACE, (ctx) => {

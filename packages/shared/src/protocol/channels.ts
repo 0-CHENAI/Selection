@@ -77,6 +77,8 @@ export const RPC_CHANNELS = {
     CREATE: 'workspaces:create',
     CHECK_SLUG: 'workspaces:checkSlug',
     UPDATE_REMOTE: 'workspaces:updateRemote',
+    EXPORT_BUNDLE: 'workspaces:exportBundle',
+    IMPORT_BUNDLE: 'workspaces:importBundle',
   },
   window: {
     GET_WORKSPACE: 'window:getWorkspace',

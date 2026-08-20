@@ -64,8 +64,8 @@ import type { LoadedSkill, SkillMetadata } from '@craft-agent/shared/skills/type
 export type { LoadedSkill, SkillMetadata };
 
 // Resource bundle types (cross-workspace export/import/copy)
-import type { ExportResourcesOptions, ExportResult, ResourceImportMode, ResourceBundle, ResourceImportResult, CopyResourcesOptions } from '@craft-agent/shared/resources';
-export type { ExportResourcesOptions, ExportResult, ResourceImportMode, ResourceBundle, ResourceImportResult, CopyResourcesOptions };
+import type { ExportResourcesOptions, ExportResult, ResourceImportMode, ResourceBundle, ResourceImportResult, CopyResourcesOptions, WorkspaceBundle, WorkspaceImportResult, ExportWorkspaceOptions, ImportWorkspaceOptions } from '@craft-agent/shared/resources';
+export type { ExportResourcesOptions, ExportResult, ResourceImportMode, ResourceBundle, ResourceImportResult, CopyResourcesOptions, WorkspaceBundle, WorkspaceImportResult, ExportWorkspaceOptions, ImportWorkspaceOptions };
 
 // LLM connection types
 import type { LlmConnection, LlmConnectionWithStatus, LlmAuthType, LlmProviderType, NetworkProxySettings } from '@craft-agent/shared/config';
@@ -289,6 +289,10 @@ export interface ElectronAPI {
   createWorkspace(folderPath: string, name: string, remoteServer?: { url: string; token: string; remoteWorkspaceId: string }): Promise<Workspace>
   checkWorkspaceSlug(slug: string): Promise<{ exists: boolean; path: string }>
   updateWorkspaceRemoteServer(workspaceId: string, remoteServer: { url: string; token: string; remoteWorkspaceId: string }): Promise<{ success: boolean }>
+  /** Export an entire workspace to a portable bundle (credentials stripped) */
+  exportWorkspaceBundle(workspaceId: string, options?: ExportWorkspaceOptions): Promise<{ bundle: WorkspaceBundle; warnings: string[] }>
+  /** Import a workspace bundle as a new workspace; returns the import result plus the registered workspace */
+  importWorkspaceBundle(bundle: WorkspaceBundle, options?: ImportWorkspaceOptions & { parentDir?: string }): Promise<WorkspaceImportResult & { workspace: Workspace }>
 
   // Server-level workspace operations (for thin client / remote workspace discovery)
   getServerWorkspaces(): Promise<WorkspaceInfo[]>
