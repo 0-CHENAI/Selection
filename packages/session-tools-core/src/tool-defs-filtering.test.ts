@@ -1,5 +1,10 @@
 import { describe, it, expect } from 'bun:test';
 import {
+  OFFICE_MAX_INLINE_ARGUMENTS_CHARS,
+  OFFICE_MAX_INLINE_BATCH_CHARS,
+  OFFICE_MAX_INLINE_BATCH_COMMANDS,
+} from './office-workflow.ts';
+import {
   SESSION_TOOL_DEFS,
   getSessionToolDefs,
   getSessionToolNames,
@@ -102,5 +107,20 @@ describe('session tool filtering helpers', () => {
     expect(blockedPrefixed.has('mcp__session__source_oauth_trigger')).toBe(true);
     expect(blockedPrefixed.has('mcp__session__spawn_session')).toBe(true);
     expect(blockedPrefixed.has('mcp__session__office_document_edit')).toBe(true);
+  });
+
+  it('publishes inline Office batch limits on the edit schema', () => {
+    const defs = getToolDefsAsJsonSchema({ includeDeveloperFeedback: false });
+    const edit = defs.find(def => def.name === 'office_document_edit');
+    const inspect = defs.find(def => def.name === 'office_document_inspect');
+    const properties = (edit?.inputSchema as { properties?: Record<string, { description?: string }> }).properties ?? {};
+
+    expect(properties.arguments?.description).toContain(String(OFFICE_MAX_INLINE_ARGUMENTS_CHARS));
+    expect(properties.batchCommands?.description).toContain(String(OFFICE_MAX_INLINE_BATCH_COMMANDS));
+    expect(properties.batchCommands?.description).toContain(String(OFFICE_MAX_INLINE_BATCH_CHARS));
+    expect(properties.batchCommandsFile?.description).toContain('Write');
+    expect(edit?.description).toContain('batchCommandsFile');
+    expect(inspect?.description).toContain('view outline');
+    expect(inspect?.description).not.toContain('batchCommandsFile');
   });
 });

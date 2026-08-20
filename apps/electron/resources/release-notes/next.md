@@ -14,6 +14,7 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 
 ## Bug Fixes
 
+- **Office edits stay within the model output budget** — large Word / Excel / PowerPoint writes go through a JSON `batchCommandsFile` instead of a single huge tool-call payload. Inline `batchCommands` and long `--prop` arguments are capped; oversized calls are rejected with a “do not retry the same payload” hint so the model splits the work or writes a file first (#48).
 - **Office generation no longer loops on inspect** — creating or editing Word / Excel / PowerPoint files now follows a bounded native OfficeCLI workflow (create + batch, one focused read, optional schema validate). Dump/raw are not default readers, truncated inspects return a short next-step envelope, DOCX refresh states the Word + Windows limit, and repeated inspects on the same file stop after a session budget instead of staying on Thinking… (#49).
 - **Stale Task/subagent prompt guidance** — system prompt and tool docs no longer tell the model to use the removed Claude Task / Workflow tools (#35).
 - **Windows image reads restored** — packaged Pi sessions now ship the Photon WASM runtime required by the built-in `read` tool; small PNG/JPEG/GIF/WebP files bypass image processing, oversized images are resized, and runtime, decoding, conversion, resize, and size-limit failures are reported separately instead of all appearing as a size error (#39).

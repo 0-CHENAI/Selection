@@ -13,6 +13,11 @@ import {
 } from './office-document.ts';
 import {
   OFFICE_INSPECT_BUDGET_LIMIT,
+  OFFICE_MAX_BATCH_FILE_BYTES,
+  OFFICE_MAX_INLINE_ARGUMENTS_CHARS,
+  OFFICE_MAX_INLINE_BATCH_CHARS,
+  OFFICE_MAX_INLINE_BATCH_COMMANDS,
+  OFFICE_PAYLOAD_TOO_LARGE_SUGGESTION,
   OFFICE_REFRESH_NON_WINDOWS_NOTE,
   OFFICE_TRUNCATED_PREVIEW_CHARS,
   OFFICE_TRUNCATION_SUGGESTION,
@@ -46,6 +51,28 @@ function context(): SessionToolContext {
 
 function payload(result: Awaited<ReturnType<typeof executeOfficecliForTest>>) {
   return result.structuredContent!;
+}
+
+function contextWithFiles(
+  files: Record<string, string>,
+  sizes: Record<string, number> = {},
+): SessionToolContext {
+  const base = context();
+  return {
+    ...base,
+    fs: {
+      ...base.fs,
+      exists: path => path in files || base.fs.exists(path),
+      readFile: path => {
+        if (path in files) return files[path]!;
+        return base.fs.readFile(path);
+      },
+      stat: path => ({
+        size: sizes[path] ?? files[path]?.length ?? 0,
+        isDirectory: () => false,
+      }),
+    },
+  };
 }
 
 function successDeps(): OfficecliExecutionDependencies {
@@ -273,6 +300,208 @@ describe('Office document native tool execution', () => {
       batchCommands: [{ op: 'watch', file: 'data.xlsx' }],
     }, 'edit', deps);
     expect(payload(legacyResidentCommand).error).toMatchObject({ code: 'invalid_arguments' });
+    expect(called).toBe(false);
+  });
+
+  it('passes a validated batchCommandsFile to OfficeCLI as --input', async () => {
+    const calls: string[][] = [];
+    const commands = [{ command: 'set', path: '/Sheet1/A1', props: { value: 'Done' } }];
+    const filePath = join('/project', 'commands.json');
+    const result = await executeOfficecliForTest(contextWithFiles({
+      [filePath]: JSON.stringify(commands),
+    }), {
+      command: 'batch',
+      arguments: ['data.xlsx'],
+      batchCommandsFile: 'commands.json',
+    }, 'edit', {
+      resolveRuntime: () => ({ path: '/managed/officecli', source: 'environment' }),
+      runProcess: async (_binary, args) => {
+        calls.push(args);
+        return args[0] === '--version'
+          ? { stdout: '1.0.144', stderr: '', exitCode: 0, timedOut: false, truncated: false }
+          : { stdout: '{"success":true,"data":"ok"}', stderr: '', exitCode: 0, timedOut: false, truncated: false };
+      },
+    });
+
+    expect(payload(result).ok).toBe(true);
+    expect(calls[1]).toEqual(['batch', 'data.xlsx', '--input', filePath, '--json']);
+  });
+
+  it('rejects batchCommandsFile that is outside the workspace, not JSON, or too large', async () => {
+    let called = false;
+    const deps: OfficecliExecutionDependencies = {
+      resolveRuntime: () => ({ path: '/managed/officecli', source: 'environment' }),
+      runProcess: async () => {
+        called = true;
+        throw new Error('must not run');
+      },
+    };
+    const escaped = await executeOfficecliForTest(context(), {
+      command: 'batch',
+      arguments: ['data.xlsx'],
+      batchCommandsFile: '../../etc/secret.json',
+    }, 'edit', deps);
+    const notJson = await executeOfficecliForTest(context(), {
+      command: 'batch',
+      arguments: ['data.xlsx'],
+      batchCommandsFile: 'commands.txt',
+    }, 'edit', deps);
+    const invalidJson = await executeOfficecliForTest(contextWithFiles({
+      [join('/project', 'commands.json')]: '{not-json',
+    }), {
+      command: 'batch',
+      arguments: ['data.xlsx'],
+      batchCommandsFile: 'commands.json',
+    }, 'edit', deps);
+    const notArray = await executeOfficecliForTest(contextWithFiles({
+      [join('/project', 'commands.json')]: JSON.stringify({ command: 'set' }),
+    }), {
+      command: 'batch',
+      arguments: ['data.xlsx'],
+      batchCommandsFile: 'commands.json',
+    }, 'edit', deps);
+    const oversized = await executeOfficecliForTest(contextWithFiles(
+      { [join('/project', 'commands.json')]: '[]' },
+      { [join('/project', 'commands.json')]: OFFICE_MAX_BATCH_FILE_BYTES + 1 },
+    ), {
+      command: 'batch',
+      arguments: ['data.xlsx'],
+      batchCommandsFile: 'commands.json',
+    }, 'edit', deps);
+    const forbidden = await executeOfficecliForTest(contextWithFiles({
+      [join('/project', 'commands.json')]: JSON.stringify([{ command: 'open', file: 'data.xlsx' }]),
+    }), {
+      command: 'batch',
+      arguments: ['data.xlsx'],
+      batchCommandsFile: 'commands.json',
+    }, 'edit', deps);
+    const directoryCtx = contextWithFiles({ [join('/project', 'commands.json')]: '[]' });
+    directoryCtx.fs.stat = () => ({ size: 0, isDirectory: () => true });
+    const directory = await executeOfficecliForTest(directoryCtx, {
+      command: 'batch',
+      arguments: ['data.xlsx'],
+      batchCommandsFile: 'commands.json',
+    }, 'edit', deps);
+    const emptyFile = await executeOfficecliForTest(contextWithFiles({
+      [join('/project', 'commands.json')]: '[]',
+    }), {
+      command: 'batch',
+      arguments: ['data.xlsx'],
+      batchCommandsFile: 'commands.json',
+    }, 'edit', deps);
+    const oversizedContent = await executeOfficecliForTest(contextWithFiles(
+      { [join('/project', 'commands.json')]: 'x'.repeat(OFFICE_MAX_BATCH_FILE_BYTES + 1) },
+      { [join('/project', 'commands.json')]: 32 },
+    ), {
+      command: 'batch',
+      arguments: ['data.xlsx'],
+      batchCommandsFile: 'commands.json',
+    }, 'edit', deps);
+    const missingCtx = context();
+    missingCtx.fs.exists = () => false;
+    const missingFile = await executeOfficecliForTest(missingCtx, {
+      command: 'batch',
+      arguments: ['data.xlsx'],
+      batchCommandsFile: 'commands.json',
+    }, 'edit', deps);
+
+    expect(payload(escaped).error).toMatchObject({ code: 'invalid_arguments' });
+    expect(payload(notJson).error).toMatchObject({ code: 'invalid_arguments' });
+    expect(payload(invalidJson).error).toMatchObject({ code: 'invalid_arguments' });
+    expect(payload(notArray).error).toMatchObject({ code: 'invalid_arguments' });
+    expect(payload(oversized)).toMatchObject({
+      error: {
+        code: 'payload_too_large',
+        suggestion: OFFICE_PAYLOAD_TOO_LARGE_SUGGESTION,
+      },
+    });
+    expect(payload(forbidden).error).toMatchObject({ code: 'invalid_arguments' });
+    expect(payload(directory).error).toMatchObject({ code: 'invalid_arguments' });
+    expect(payload(emptyFile).error).toMatchObject({ code: 'invalid_arguments' });
+    expect(payload(oversizedContent).error).toMatchObject({ code: 'payload_too_large' });
+    expect(payload(missingFile).error).toMatchObject({ code: 'invalid_arguments' });
+    expect(called).toBe(false);
+  });
+
+  it('requires exactly one of batchCommands or batchCommandsFile', async () => {
+    let called = false;
+    const deps: OfficecliExecutionDependencies = {
+      resolveRuntime: () => ({ path: '/managed/officecli', source: 'environment' }),
+      runProcess: async () => {
+        called = true;
+        throw new Error('must not run');
+      },
+    };
+    const missing = await executeOfficecliForTest(context(), {
+      command: 'batch',
+      arguments: ['data.xlsx'],
+    }, 'edit', deps);
+    const emptyInline = await executeOfficecliForTest(context(), {
+      command: 'batch',
+      arguments: ['data.xlsx'],
+      batchCommands: [],
+    }, 'edit', deps);
+    const both = await executeOfficecliForTest(context(), {
+      command: 'batch',
+      arguments: ['data.xlsx'],
+      batchCommands: [{ command: 'set', path: '/Sheet1/A1', props: { value: 'Done' } }],
+      batchCommandsFile: 'commands.json',
+    }, 'edit', deps);
+
+    expect(payload(missing).error).toMatchObject({ code: 'invalid_arguments' });
+    expect(payload(emptyInline).error).toMatchObject({ code: 'invalid_arguments' });
+    expect(payload(both).error).toMatchObject({ code: 'invalid_arguments' });
+    expect(called).toBe(false);
+  });
+
+  it('rejects oversized inline batchCommands and arguments', async () => {
+    let called = false;
+    const deps: OfficecliExecutionDependencies = {
+      resolveRuntime: () => ({ path: '/managed/officecli', source: 'environment' }),
+      runProcess: async () => {
+        called = true;
+        throw new Error('must not run');
+      },
+    };
+    const tooMany = await executeOfficecliForTest(context(), {
+      command: 'batch',
+      arguments: ['data.xlsx'],
+      batchCommands: Array.from({ length: OFFICE_MAX_INLINE_BATCH_COMMANDS + 1 }, (_, index) => ({
+        command: 'set',
+        path: `/Sheet1/A${index + 1}`,
+        props: { value: 'x' },
+      })),
+    }, 'edit', deps);
+    const tooWide = await executeOfficecliForTest(context(), {
+      command: 'batch',
+      arguments: ['data.xlsx'],
+      batchCommands: [{
+        command: 'add',
+        parent: '/body',
+        type: 'paragraph',
+        props: { text: '字'.repeat(OFFICE_MAX_INLINE_BATCH_CHARS) },
+      }],
+    }, 'edit', deps);
+    const hugeProp = await executeOfficecliForTest(context(), {
+      command: 'add',
+      arguments: ['report.docx', '/body', '--type', 'paragraph', `--prop`, `text=${'字'.repeat(OFFICE_MAX_INLINE_ARGUMENTS_CHARS)}`],
+    }, 'edit', deps);
+    const hugeBatchArgs = await executeOfficecliForTest(context(), {
+      command: 'batch',
+      arguments: ['report.docx', `--prop`, `text=${'字'.repeat(OFFICE_MAX_INLINE_ARGUMENTS_CHARS)}`],
+      batchCommands: [{ command: 'set', path: '/Sheet1/A1', props: { value: 'Done' } }],
+    }, 'edit', deps);
+
+    expect(payload(tooMany)).toMatchObject({
+      error: {
+        code: 'payload_too_large',
+        suggestion: OFFICE_PAYLOAD_TOO_LARGE_SUGGESTION,
+      },
+    });
+    expect(payload(tooWide).error).toMatchObject({ code: 'payload_too_large' });
+    expect(payload(hugeProp).error).toMatchObject({ code: 'payload_too_large' });
+    expect(payload(hugeBatchArgs).error).toMatchObject({ code: 'payload_too_large' });
+    expect(JSON.stringify(payload(tooMany))).toContain('batchCommandsFile');
     expect(called).toBe(false);
   });
 
