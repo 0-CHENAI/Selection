@@ -576,6 +576,11 @@ export function FreeFormInput({
   }, [])
 
   const dragCounterRef = React.useRef(0)
+  // A submit can be triggered twice in the same browser task (for example by
+  // an Enter handler and a scoped submit event before React commits the input
+  // clear). Hold a synchronous one-tick lock so one user action produces one
+  // send RPC while preserving intentional rapid follow-ups after the commit.
+  const submitLockRef = React.useRef(false)
   const containerRef = React.useRef<HTMLDivElement>(null)
   const sourceButtonRef = React.useRef<HTMLButtonElement>(null)
   const fileInputRef = React.useRef<HTMLInputElement>(null)
@@ -1200,10 +1205,12 @@ export function FreeFormInput({
   // Submit message - backend handles queueing and interruption
   const submitMessage = React.useCallback(() => {
     const hasContent = input.trim() || attachments.length > 0 || followUpItems.length > 0
-    if (!hasContent || disabled) return false
+    if (!hasContent || disabled || submitLockRef.current) return false
 
     // Tutorial may disable sending to guide user through specific steps
     if (disableSend) return false
+
+    submitLockRef.current = true
 
     // Parse all @mentions (skills, sources, folders)
     const skillSlugs = skills.map(s => s.slug)
@@ -1221,11 +1228,16 @@ export function FreeFormInput({
 
     const attachmentSnapshot = attachments
 
-    onSubmit(
-      input.trim(),
-      attachmentSnapshot.length > 0 ? attachmentSnapshot : undefined,
-      mentions.skills.length > 0 ? mentions.skills : undefined
-    )
+    try {
+      onSubmit(
+        input.trim(),
+        attachmentSnapshot.length > 0 ? attachmentSnapshot : undefined,
+        mentions.skills.length > 0 ? mentions.skills : undefined
+      )
+    } catch (error) {
+      submitLockRef.current = false
+      throw error
+    }
     setInput('')
     setAttachments([])
     // Clear draft immediately (cancel any pending debounced sync)
@@ -1233,6 +1245,13 @@ export function FreeFormInput({
     onInputChange?.('')
     onAttachmentsChange?.([])
     prevInputValueRef.current = ''
+
+    // Release after the current browser task. Unlike requestAnimationFrame,
+    // this still runs while the window is backgrounded, so the composer cannot
+    // remain permanently locked when a submit happens just before hiding it.
+    queueMicrotask(() => {
+      submitLockRef.current = false
+    })
 
     // Restore focus after state updates
     requestAnimationFrame(() => {

@@ -5959,18 +5959,67 @@ export class SessionManager implements ISessionManager {
     // duplicate that arrives from a legacy renderer still running the client-side
     // auto_retry. The first matching caller wins (server timer or legacy RPC,
     // whichever arrives first), subsequent matching calls within the deadline drop.
+    const pendingAutoRetry = managed.autoRetryPending
+    const isPendingAutoRetry = !!pendingAutoRetry
+      && message === pendingAutoRetry.content
+      && Date.now() < pendingAutoRetry.deadlineMs
     if (claimAutoRetryPending(managed, message) === 'drop') {
       sessionLog.info(`sendMessage: dropped duplicate source-activation retry for ${sessionId}`)
+      const existingRetry = [...managed.messages].reverse().find(candidate =>
+        candidate.role === 'user' && candidate.hidden && candidate.content === message
+      )
+      if (existingRetry) onAck?.(existingRetry.id)
       return
     }
-
-    // Clear any pending plan execution state when a new user message is sent.
-    // This acts as a safety valve - if the user moves on, we don't want to
-    // auto-execute an old plan later.
-    await clearStoredPendingPlanExecution(managed.workspace.rootPath, sessionId)
+    // Source-activation retries are internal continuation prompts. A legacy
+    // renderer can win the mixed-version race and submit the retry before the
+    // server timer does, so force the matched payload hidden at this single
+    // authoritative entry point instead of relying only on the timer options.
+    if (isPendingAutoRetry && !options?.hidden) {
+      options = { ...options, hidden: true }
+    }
 
     // Ensure messages are loaded before we try to add new ones
     await this.ensureMessagesLoaded(managed)
+
+    // Treat the renderer-generated ID as an idempotency key. Transport
+    // reconnects and duplicated submit events may replay the same RPC after
+    // the first call has already been persisted. The key is stored on the
+    // message, so this also survives a server restart between attempts.
+    const clientMessageId = options?.optimisticMessageId
+    const acknowledgeExistingClientMessage = (): boolean => {
+      if (existingMessageId || !clientMessageId) return false
+      const existingClientMessage = managed.messages.find(candidate =>
+        candidate.role === 'user' && candidate.clientMessageId === clientMessageId
+      )
+      if (existingClientMessage) {
+        // Reusing an idempotency key for a different payload is a client bug.
+        // Reject it explicitly instead of silently losing the newer message.
+        if (existingClientMessage.content !== message) {
+          throw new Error(`Client message ID ${clientMessageId} was reused with different content`)
+        }
+        sessionLog.info('sendMessage: acknowledged duplicate client submission', {
+          sessionId,
+          clientMessageId,
+          messageId: existingClientMessage.id,
+        })
+        onAck?.(existingClientMessage.id)
+        return true
+      }
+      return false
+    }
+    if (acknowledgeExistingClientMessage()) return
+
+    // Clear any pending plan execution state when a genuinely new user message
+    // is sent. This runs after the idempotency gate so replaying an already
+    // accepted RPC cannot mutate unrelated pending state.
+    await clearStoredPendingPlanExecution(managed.workspace.rootPath, sessionId)
+
+    // The clear above yields. Two concurrent RPCs can therefore both pass the
+    // first lookup before either has appended its message. Re-check immediately
+    // before the synchronous append to make the idempotency gate atomic within
+    // this process. One call appends; every later continuation observes it.
+    if (acknowledgeExistingClientMessage()) return
 
     // If currently processing, behavior depends on the connection's
     // `midStreamBehavior` (resolved via {@link resolveMidStreamBehavior}):
@@ -6004,6 +6053,7 @@ export class SessionManager implements ISessionManager {
       // Create user message for UI
       const userMessage: Message = {
         id: generateMessageId(),
+        clientMessageId,
         role: 'user',
         content: message,
         timestamp: this.monotonic(),
@@ -6057,6 +6107,7 @@ export class SessionManager implements ISessionManager {
       // Create new message
       userMessage = {
         id: generateMessageId(),
+        clientMessageId,
         role: 'user',
         content: message,
         timestamp: this.monotonic(),
@@ -6852,7 +6903,17 @@ export class SessionManager implements ISessionManager {
       const message = managed.messages.find(candidate => candidate.id === entry.messageId)
       return !(message && message.isQueued === false && !message.hidden)
     })
-    const queuedTexts = stillQueuedEntries.map(entry => entry.message)
+    // Hidden system nudges (including source-activation retries) are internal
+    // continuation prompts. Discard them on Stop; never leak them into the
+    // user's draft where a resend would create a visible duplicate loop.
+    const queuedTexts = stillQueuedEntries
+      .filter((entry) => {
+        const queuedMessage = entry.messageId
+          ? managed.messages.find(candidate => candidate.id === entry.messageId)
+          : undefined
+        return !entry.options?.hidden && !queuedMessage?.hidden
+      })
+      .map(entry => entry.message)
     const queuedMessageIds = new Set(
       stillQueuedEntries.map(entry => entry.messageId).filter((id): id is string => !!id)
     )
@@ -8827,7 +8888,8 @@ export class SessionManager implements ISessionManager {
           break
         }
 
-        // Suffix is for the model (chain activations). UI strips it on display.
+        // Suffix is for the model (chain activations). The entire continuation
+        // is hidden so it cannot appear as another user-authored turn.
         const messageWithSuffix = `${originalMessage}\n\n[${event.sourceSlug} activated]`
         const messageCountAtSchedule = managed.messages.length
 
@@ -8857,7 +8919,7 @@ export class SessionManager implements ISessionManager {
           // so a legacy renderer's duplicate RPC arriving ~50ms later gets dropped.
           // The pending slot is cleared by the deadline check in sendMessage, by the
           // next matching sendMessage that drops as a duplicate, or by session deletion.
-          this.sendMessage(sessionId, messageWithSuffix).catch(err => {
+          this.sendMessage(sessionId, messageWithSuffix, undefined, undefined, { hidden: true }).catch(err => {
             sessionLog.error(`Auto-retry sendMessage failed for ${sessionId}:`, err)
           })
         }, 100)

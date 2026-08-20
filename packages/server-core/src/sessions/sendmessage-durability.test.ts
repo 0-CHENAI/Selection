@@ -111,4 +111,111 @@ describe('sendMessage durability', () => {
     expect(ackedMessageId).not.toBeNull()
     expect(onDiskAtAck).toBe(true)
   })
+
+  it('deduplicates a replayed normal send by its persisted client message id', async () => {
+    const sessionId = 'idempotent-normal'
+    const managed = buildSession(sessionId)
+    const ackedIds: string[] = []
+    const options = { optimisticMessageId: 'client-message-1' }
+
+    await sm.sendMessage(
+      sessionId,
+      'send once',
+      undefined,
+      undefined,
+      options,
+      undefined,
+      undefined,
+      messageId => ackedIds.push(messageId),
+    ).catch(() => { /* expected post-ack agent-init failure */ })
+
+    await sm.sendMessage(
+      sessionId,
+      'send once',
+      undefined,
+      undefined,
+      options,
+      undefined,
+      undefined,
+      messageId => ackedIds.push(messageId),
+    )
+
+    const userMessages = managed.messages.filter(message => message.role === 'user')
+    expect(userMessages).toHaveLength(1)
+    expect(userMessages[0]?.clientMessageId).toBe('client-message-1')
+    expect(ackedIds).toHaveLength(2)
+    expect(ackedIds[1]).toBe(ackedIds[0])
+
+    const path = getSessionFilePath(tmpRoot, sessionId)
+    const storedMessages = readFileSync(path, 'utf-8')
+      .trim()
+      .split('\n')
+      .slice(1)
+      .map(line => JSON.parse(line) as { clientMessageId?: string })
+    expect(storedMessages[0]?.clientMessageId).toBe('client-message-1')
+  })
+
+  it('deduplicates a replayed mid-stream send before adding a second queue entry', async () => {
+    const sessionId = 'idempotent-midstream'
+    const managed = buildSession(sessionId)
+    managed.isProcessing = true
+    const ackedIds: string[] = []
+    const options = { optimisticMessageId: 'client-message-queued' }
+
+    for (let attempt = 0; attempt < 2; attempt++) {
+      await sm.sendMessage(
+        sessionId,
+        'queued once',
+        undefined,
+        undefined,
+        options,
+        undefined,
+        undefined,
+        messageId => ackedIds.push(messageId),
+      )
+    }
+
+    expect(managed.messages.filter(message => message.role === 'user')).toHaveLength(1)
+    expect(managed.messageQueue).toHaveLength(1)
+    expect(ackedIds).toHaveLength(2)
+    expect(ackedIds[1]).toBe(ackedIds[0])
+  })
+
+  it('deduplicates concurrent sends before either RPC has finished', async () => {
+    const sessionId = 'idempotent-concurrent'
+    const managed = buildSession(sessionId)
+    managed.isProcessing = true
+    const ackedIds: string[] = []
+    const options = { optimisticMessageId: 'client-message-concurrent' }
+
+    await Promise.all(Array.from({ length: 2 }, () => sm.sendMessage(
+      sessionId,
+      'send concurrently once',
+      undefined,
+      undefined,
+      options,
+      undefined,
+      undefined,
+      messageId => ackedIds.push(messageId),
+    )))
+
+    expect(managed.messages.filter(message => message.role === 'user')).toHaveLength(1)
+    expect(managed.messageQueue).toHaveLength(1)
+    expect(ackedIds).toHaveLength(2)
+    expect(new Set(ackedIds).size).toBe(1)
+  })
+
+  it('rejects reuse of a client message id for different content', async () => {
+    const sessionId = 'idempotent-conflict'
+    const managed = buildSession(sessionId)
+    managed.isProcessing = true
+    const options = { optimisticMessageId: 'client-message-conflict' }
+
+    await sm.sendMessage(sessionId, 'original', undefined, undefined, options)
+
+    await expect(sm.sendMessage(sessionId, 'different', undefined, undefined, options))
+      .rejects.toThrow('was reused with different content')
+    expect(managed.messages.filter(message => message.role === 'user')).toHaveLength(1)
+    expect(managed.messageQueue).toHaveLength(1)
+  })
 })

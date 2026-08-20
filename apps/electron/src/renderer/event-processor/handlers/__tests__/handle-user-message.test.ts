@@ -54,6 +54,114 @@ describe('handleUserMessage queued replay', () => {
     expect(message.isQueued).toBe(false)
   })
 
+  it('reconciles a replayed event with a persisted client message id instead of appending a duplicate', () => {
+    const state = makeState([
+      {
+        id: 'backend-user-1',
+        clientMessageId: 'optimistic-user-1',
+        role: 'user',
+        content: 'retry connection test',
+        timestamp: 100,
+        isPending: true,
+      },
+    ])
+    const event: UserMessageEvent = {
+      type: 'user_message',
+      sessionId: 'session-1',
+      message: {
+        id: 'backend-user-1',
+        clientMessageId: 'optimistic-user-1',
+        role: 'user',
+        content: 'retry connection test',
+        timestamp: 10_000,
+      },
+      status: 'accepted',
+      optimisticMessageId: 'optimistic-user-1',
+    }
+
+    const next = handleUserMessage(state, event)
+
+    expect(next.state.session.messages).toHaveLength(1)
+    expect(next.state.session.messages[0]).toMatchObject({
+      id: 'backend-user-1',
+      clientMessageId: 'optimistic-user-1',
+      isPending: false,
+    })
+  })
+
+  it('does not collapse a visible reply when accepting a hidden system continuation', () => {
+    const state: SessionState = {
+      session: {
+        ...makeState([]).session,
+        messages: [
+          { id: 'user', role: 'user', content: 'question', timestamp: 100 },
+          {
+            id: 'answer',
+            role: 'assistant',
+            content: 'visible partial answer',
+            timestamp: 200,
+            isStreaming: true,
+            isPending: true,
+            turnId: 'visible-turn',
+          },
+        ],
+      } as any,
+      streaming: { content: 'visible partial answer', turnId: 'visible-turn' },
+    }
+
+    const next = handleUserMessage(state, {
+      type: 'user_message',
+      sessionId: 'session-1',
+      message: {
+        id: 'hidden-continuation',
+        role: 'user',
+        content: 'question\n\n[source activated]',
+        timestamp: 300,
+        hidden: true,
+      },
+      status: 'accepted',
+    })
+
+    expect(next.state.session.messages.find(message => message.id === 'answer')?.hidden).not.toBe(true)
+    expect(next.state.streaming).toEqual(state.streaming)
+    expect(next.state.session.suppressedTurnIds).toBeUndefined()
+    expect(next.state.session.lastMessageAt).toBe(0)
+  })
+
+  it('hides a matching optimistic bubble when the backend classifies it as an internal continuation', () => {
+    const state = makeState([
+      {
+        id: 'optimistic-hidden-retry',
+        role: 'user',
+        content: 'question\n\n[source activated]',
+        timestamp: 100,
+        isPending: true,
+      },
+    ])
+
+    const next = handleUserMessage(state, {
+      type: 'user_message',
+      sessionId: 'session-1',
+      message: {
+        id: 'backend-hidden-retry',
+        role: 'user',
+        content: 'question\n\n[source activated]',
+        timestamp: 200,
+        hidden: true,
+      },
+      status: 'accepted',
+      optimisticMessageId: 'optimistic-hidden-retry',
+    })
+
+    expect(next.state.session.messages).toHaveLength(1)
+    expect(next.state.session.messages[0]).toMatchObject({
+      id: 'optimistic-hidden-retry',
+      hidden: true,
+      isPending: false,
+    })
+    expect(next.state.session.lastMessageAt).toBe(0)
+  })
+
   it('applies the canonical timestamp when native steer accepts a queued item', () => {
     const state = makeState([
       {
