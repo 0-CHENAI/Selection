@@ -100,6 +100,7 @@ export const RPC_CHANNELS = {
     READ_PREVIEW_DATA_URL: 'file:readPreviewDataUrl',
     READ_BINARY: 'file:readBinary',
     OPEN_DIALOG: 'file:openDialog',
+    SAVE_DIALOG: 'file:saveDialog',
     READ_ATTACHMENT: 'file:readAttachment',
     READ_USER_ATTACHMENT: 'file:readUserAttachment',
     STORE_ATTACHMENT: 'file:storeAttachment',

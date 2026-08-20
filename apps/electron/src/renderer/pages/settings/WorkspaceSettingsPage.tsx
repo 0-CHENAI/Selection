@@ -23,7 +23,7 @@ import { cn } from '@/lib/utils'
 import { routes } from '@/lib/navigate'
 import { Spinner } from '@craft-agent/ui'
 import { RenameDialog } from '@/components/ui/rename-dialog'
-import type { PermissionMode, WorkspaceSettings, LoadedSource } from '../../../shared/types'
+import type { PermissionMode, WorkspaceSettings, LoadedSource, WorkspaceBundle } from '../../../shared/types'
 import { useDirectoryPicker } from '@/hooks/useDirectoryPicker'
 import { ServerDirectoryBrowser } from '@/components/ServerDirectoryBrowser'
 import { PERMISSION_MODE_CONFIG } from '@craft-agent/shared/agent/mode-types'
@@ -31,6 +31,7 @@ import type { DetailsPageMeta } from '@/lib/navigation-registry'
 import { SourceAvatar } from '@/components/ui/source-avatar'
 import { resolveSourceTitle } from '@craft-agent/shared/display-titles'
 import { toast } from 'sonner'
+import { ExportWorkspaceDialog, ImportWorkspaceDialog } from '@/components/workspace/WorkspaceTransferDialogs'
 
 import {
   SettingsSection,
@@ -67,6 +68,11 @@ export default function WorkspaceSettingsPage() {
   const [workingDirectory, setWorkingDirectory] = useState('')
   const [localMcpEnabled, setLocalMcpEnabled] = useState(true)
   const [isLoadingWorkspace, setIsLoadingWorkspace] = useState(true)
+
+  // Workspace transfer (export/import) state
+  const [exportDialogOpen, setExportDialogOpen] = useState(false)
+  const [importDialogOpen, setImportDialogOpen] = useState(false)
+  const [importBundle, setImportBundle] = useState<WorkspaceBundle | null>(null)
 
   // Default sources state
   const [availableSources, setAvailableSources] = useState<LoadedSource[]>([])
@@ -283,6 +289,34 @@ export default function WorkspaceSettingsPage() {
     [updateWorkspaceSetting]
   )
 
+  // Pick a workspace bundle file and open the import confirmation dialog.
+  // The kind check below is a lightweight pre-flight only — the import handler
+  // runs full validateWorkspaceBundle and rejects invalid bundles.
+  const handleImportClick = useCallback(async () => {
+    if (!window.electronAPI) return
+
+    try {
+      const paths = await window.electronAPI.openFileDialog()
+      if (paths.length === 0) return
+
+      const content = await window.electronAPI.readFile(paths[0])
+      const parsed = JSON.parse(content)
+      if (
+        parsed?.kind !== 'selection-workspace-bundle' ||
+        parsed?.version !== 1 ||
+        typeof parsed?.config?.name !== 'string'
+      ) {
+        toast.error(t('workspaceTransfer.invalidBundle'))
+        return
+      }
+      setImportBundle(parsed as WorkspaceBundle)
+      setImportDialogOpen(true)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unknown error'
+      toast.error(t('workspaceTransfer.importFailed'), { description: message })
+    }
+  }, [t])
+
   const handleSourceToggle = useCallback(
     async (slug: string, checked: boolean) => {
       const newSlugs = checked
@@ -435,6 +469,38 @@ export default function WorkspaceSettingsPage() {
               />
             </SettingsSection>
 
+            {/* Export / Import */}
+            <SettingsSection title={t("workspaceTransfer.section")}>
+              <SettingsCard>
+                <SettingsRow
+                  label={t("workspaceTransfer.exportRow")}
+                  description={t("workspaceTransfer.exportRowDesc")}
+                  action={
+                    <button
+                      type="button"
+                      onClick={() => setExportDialogOpen(true)}
+                      className="inline-flex items-center h-8 px-3 text-sm rounded-lg bg-background shadow-minimal hover:bg-foreground/[0.02] transition-colors"
+                    >
+                      {t("workspaceTransfer.exportBtn")}
+                    </button>
+                  }
+                />
+                <SettingsRow
+                  label={t("workspaceTransfer.importRow")}
+                  description={t("workspaceTransfer.importRowDesc")}
+                  action={
+                    <button
+                      type="button"
+                      onClick={handleImportClick}
+                      className="inline-flex items-center h-8 px-3 text-sm rounded-lg bg-background shadow-minimal hover:bg-foreground/[0.02] transition-colors"
+                    >
+                      {t("workspaceTransfer.importBtn")}
+                    </button>
+                  }
+                />
+              </SettingsCard>
+            </SettingsSection>
+
             {/* Permissions */}
             <SettingsSection title={t("settings.workspace.permissionsSection")}>
               <SettingsCard>
@@ -564,6 +630,17 @@ export default function WorkspaceSettingsPage() {
         onSelect={confirmWdBrowser}
         onCancel={cancelWdBrowser}
         initialPath={workingDirectory || undefined}
+      />
+      <ExportWorkspaceDialog
+        open={exportDialogOpen}
+        onOpenChange={setExportDialogOpen}
+        workspaceId={activeWorkspaceId}
+      />
+      <ImportWorkspaceDialog
+        open={importDialogOpen}
+        onOpenChange={setImportDialogOpen}
+        bundle={importBundle}
+        onImported={onRefreshWorkspaces}
       />
     </div>
   )

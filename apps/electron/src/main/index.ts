@@ -558,6 +558,13 @@ app.whenReady().then(async () => {
       const result = await dialog.showOpenDialog(win, spec)
       return { canceled: result.canceled, filePaths: result.filePaths }
     })
+    ipcMain.handle('__dialog:showSaveDialog', async (event, spec) => {
+      const win = BrowserWindow.fromWebContents(event.sender)
+        || BrowserWindow.getFocusedWindow()
+        || BrowserWindow.getAllWindows()[0]
+      const result = await dialog.showSaveDialog(win, spec)
+      return { canceled: result.canceled, filePath: result.filePath }
+    })
 
     if (!isClientOnly) {
       // Restore persisted Git Bash path on Windows (must happen before any SDK subprocess spawn)

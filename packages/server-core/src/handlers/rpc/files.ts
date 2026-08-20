@@ -12,7 +12,7 @@ import { resizeImageForAPI, inspectImageBuffer } from '@craft-agent/server-core/
 import { sanitizeFilename, validateFilePath, getWorkspaceAllowedDirs } from '@craft-agent/server-core/handlers'
 import type { RpcServer } from '@craft-agent/server-core/transport'
 import type { HandlerDeps } from '../handler-deps'
-import { requestClientOpenFileDialog } from '@craft-agent/server-core/transport'
+import { requestClientOpenFileDialog, requestClientSaveFileDialog, type SaveFileDialogSpec } from '@craft-agent/server-core/transport'
 
 export const HANDLED_CHANNELS = [
   RPC_CHANNELS.file.READ,
@@ -20,6 +20,7 @@ export const HANDLED_CHANNELS = [
   RPC_CHANNELS.file.READ_PREVIEW_DATA_URL,
   RPC_CHANNELS.file.READ_BINARY,
   RPC_CHANNELS.file.OPEN_DIALOG,
+  RPC_CHANNELS.file.SAVE_DIALOG,
   RPC_CHANNELS.file.READ_ATTACHMENT,
   RPC_CHANNELS.file.READ_USER_ATTACHMENT,
   RPC_CHANNELS.file.STORE_ATTACHMENT,
@@ -129,6 +130,17 @@ export function registerFilesHandlers(server: RpcServer, deps: HandlerDeps): voi
       ]
     })
     return result.canceled ? [] : result.filePaths
+  })
+
+  // Open native save dialog and write text content to the chosen path (routed to client)
+  server.handle(RPC_CHANNELS.file.SAVE_DIALOG, async (ctx, spec: SaveFileDialogSpec & { content: string }) => {
+    const { content, ...dialogSpec } = spec
+    const result = await requestClientSaveFileDialog(server, ctx.clientId, dialogSpec)
+    if (result.canceled || !result.filePath) {
+      return { canceled: true as const }
+    }
+    await writeFile(result.filePath, content, 'utf-8')
+    return { canceled: false as const, filePath: result.filePath }
   })
 
   // Read file and return as FileAttachment with Quick Look thumbnail

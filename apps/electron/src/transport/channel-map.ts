@@ -89,6 +89,7 @@ export const CHANNEL_MAP = {
   readFilePreviewDataUrl: invoke(RPC_CHANNELS.file.READ_PREVIEW_DATA_URL),
   readFileBinary: invoke(RPC_CHANNELS.file.READ_BINARY),
   openFileDialog: invoke(RPC_CHANNELS.file.OPEN_DIALOG),
+  saveFileDialog: invoke(RPC_CHANNELS.file.SAVE_DIALOG),
   readFileAttachment: invoke(RPC_CHANNELS.file.READ_ATTACHMENT),
   readUserAttachment: invoke(RPC_CHANNELS.file.READ_USER_ATTACHMENT),
   storeAttachment: invoke(RPC_CHANNELS.file.STORE_ATTACHMENT),

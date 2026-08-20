@@ -223,6 +223,15 @@ import type {
   ImportRemoteSessionTransferResult,
 } from '@craft-agent/shared/protocol'
 
+/** Options for the native save-file dialog (file:saveDialog). */
+export interface SaveFileDialogOptions {
+  title?: string
+  defaultPath?: string
+  filters?: Array<{ name: string; extensions: string[] }>
+  /** Text content written to the chosen path (UTF-8) */
+  content: string
+}
+
 export interface ElectronAPI {
   // Session management
   getSessions(): Promise<Session[]>
@@ -336,6 +345,8 @@ export interface ElectronAPI {
   /** Read an image file as a size-bounded preview data URL for lightweight thumbnail rendering. */
   readFilePreviewDataUrl(path: string, maxSize?: number): Promise<string>
   openFileDialog(): Promise<string[]>
+  /** Show a native save dialog and write text content to the chosen path. */
+  saveFileDialog(options: SaveFileDialogOptions): Promise<{ canceled: boolean; filePath?: string }>
   readFileAttachment(path: string): Promise<FileAttachment | null>
   /** Re-read a user-attached file by absolute path (bypasses workspace-dir validation).
    *  Used only by draft hydration for paths the user explicitly picked via OS dialog / drag. */

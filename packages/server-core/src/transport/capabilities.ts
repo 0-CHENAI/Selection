@@ -22,6 +22,9 @@ export const CLIENT_CONFIRM_DIALOG = 'client:confirmDialog'
 /** Capability: show a native file/folder picker on the client. */
 export const CLIENT_OPEN_FILE_DIALOG = 'client:openFileDialog'
 
+/** Capability: show a native save-file dialog on the client. */
+export const CLIENT_SAVE_FILE_DIALOG = 'client:saveFileDialog'
+
 /** Capability: drive a local `BrowserPaneManager` instance for a remote agent. */
 export const CLIENT_BROWSER_INVOKE = 'client:browser:invoke'
 
@@ -32,6 +35,7 @@ export const LOCAL_CLIENT_CAPABILITIES: readonly string[] = [
   CLIENT_SHOW_IN_FOLDER,
   CLIENT_CONFIRM_DIALOG,
   CLIENT_OPEN_FILE_DIALOG,
+  CLIENT_SAVE_FILE_DIALOG,
   CLIENT_BROWSER_INVOKE,
 ]
 
@@ -132,6 +136,25 @@ export async function requestClientOpenFileDialog(
   spec: FileDialogSpec,
 ): Promise<{ canceled: boolean; filePaths: string[] }> {
   return await server.invokeClient(clientId, CLIENT_OPEN_FILE_DIALOG, spec)
+}
+
+/** Spec for a save-file dialog (maps to Electron's SaveDialogOptions). */
+export interface SaveFileDialogSpec {
+  title?: string
+  defaultPath?: string
+  filters?: Array<{ name: string; extensions: string[] }>
+}
+
+/**
+ * Ask the client to show a native save-file dialog.
+ * Returns the chosen target (canceled + filePath).
+ */
+export async function requestClientSaveFileDialog(
+  server: RpcServer,
+  clientId: string,
+  spec: SaveFileDialogSpec,
+): Promise<{ canceled: boolean; filePath?: string }> {
+  return await server.invokeClient(clientId, CLIENT_SAVE_FILE_DIALOG, spec)
 }
 
 /**
