@@ -4,6 +4,22 @@ import type { SessionToolContext } from '../context.ts';
 import type { ToolResult } from '../types.ts';
 import { createSanitizedEnv } from '../runtime/sandbox-env.ts';
 import { resolveOfficecliRuntime } from '../runtime/officecli.ts';
+import {
+  OFFICE_ALREADY_CHECKED_MESSAGE,
+  OFFICE_ALREADY_CHECKED_SUGGESTION,
+  OFFICE_BUDGET_EXHAUSTED_MESSAGE,
+  OFFICE_BUDGET_EXHAUSTED_SUGGESTION,
+  OFFICE_INSPECT_BUDGET_LIMIT,
+  OFFICE_REFRESH_NON_WINDOWS_NOTE,
+  OFFICE_TRUNCATED_PREVIEW_CHARS,
+  OFFICE_TRUNCATION_SUGGESTION,
+  isOfficeBudgetResettingEdit,
+  isOfficeDocxPath,
+  isOfficeInspectCountedCommand,
+  officeInspectBudgetKey,
+  officeInspectFingerprint,
+  resolveOfficeDocumentPath,
+} from '../office-workflow.ts';
 
 export type OfficeDocumentInspectCommand =
   | 'status'
@@ -60,6 +76,7 @@ export interface OfficecliExecutionDependencies {
   resolveRuntime?: typeof resolveOfficecliRuntime;
   runProcess?: OfficecliProcessRunner;
   now?: () => number;
+  platform?: NodeJS.Platform;
 }
 
 interface OfficeDocumentError {
@@ -78,6 +95,11 @@ export interface OfficeDocumentResultPayload extends Record<string, unknown> {
   durationMs: number;
   data?: unknown;
   truncated?: boolean;
+  preview?: string;
+  suggestion?: string;
+  platformNote?: string;
+  code?: string;
+  message?: string;
   error?: OfficeDocumentError;
 }
 
@@ -99,6 +121,129 @@ const BATCH_FORBIDDEN_COMMANDS = new Set([
   'watch', 'unwatch', 'open', 'close', 'save',
 ]);
 const versionCache = new Map<string, string>();
+
+interface InspectBudgetState {
+  count: number;
+  fingerprints: Set<string>;
+}
+
+const inspectBudget = new Map<string, InspectBudgetState>();
+
+export function clearOfficeInspectBudget(): void {
+  inspectBudget.clear();
+}
+
+function inspectBudgetState(key: string): InspectBudgetState {
+  const existing = inspectBudget.get(key);
+  if (existing) return existing;
+  const created: InspectBudgetState = { count: 0, fingerprints: new Set() };
+  inspectBudget.set(key, created);
+  return created;
+}
+
+function inspectPolicyResult(
+  command: string,
+  code: 'already_checked' | 'verification_budget_exhausted',
+  message: string,
+  suggestion: string,
+): ToolResult {
+  return toolResult({
+    ok: true,
+    availability: 'available',
+    command,
+    durationMs: 0,
+    code,
+    message,
+    suggestion,
+  });
+}
+
+function inspectBudgetShortCircuit(
+  sessionId: string,
+  command: string,
+  argumentList: string[] | undefined,
+  cwd: string,
+): ToolResult | undefined {
+  if (!isOfficeInspectCountedCommand(command)) return undefined;
+  const filePath = resolveOfficeDocumentPath(argumentList, cwd);
+  if (!filePath) return undefined;
+  const key = officeInspectBudgetKey(sessionId, filePath);
+  const fingerprint = officeInspectFingerprint(command, argumentList, cwd);
+  const state = inspectBudgetState(key);
+  if (state.fingerprints.has(fingerprint)) {
+    return inspectPolicyResult(
+      command,
+      'already_checked',
+      OFFICE_ALREADY_CHECKED_MESSAGE,
+      OFFICE_ALREADY_CHECKED_SUGGESTION,
+    );
+  }
+  if (state.count >= OFFICE_INSPECT_BUDGET_LIMIT) {
+    return inspectPolicyResult(
+      command,
+      'verification_budget_exhausted',
+      OFFICE_BUDGET_EXHAUSTED_MESSAGE,
+      OFFICE_BUDGET_EXHAUSTED_SUGGESTION,
+    );
+  }
+  return undefined;
+}
+
+function recordInspectUse(
+  sessionId: string,
+  command: string,
+  argumentList: string[] | undefined,
+  cwd: string,
+): void {
+  if (!isOfficeInspectCountedCommand(command)) return;
+  const filePath = resolveOfficeDocumentPath(argumentList, cwd);
+  if (!filePath) return;
+  const state = inspectBudgetState(officeInspectBudgetKey(sessionId, filePath));
+  state.fingerprints.add(officeInspectFingerprint(command, argumentList, cwd));
+  state.count += 1;
+}
+
+function resetInspectBudgetForFile(
+  sessionId: string,
+  argumentList: string[] | undefined,
+  cwd: string,
+): void {
+  const filePath = resolveOfficeDocumentPath(argumentList, cwd);
+  if (!filePath) return;
+  inspectBudget.delete(officeInspectBudgetKey(sessionId, filePath));
+}
+
+function truncatedPreview(data: unknown, rawStdout?: string): string {
+  if (typeof data === 'string' && data.length > 0) return data;
+  if (data !== undefined) {
+    try {
+      const serialized = JSON.stringify(data);
+      if (serialized && serialized !== '{}') return serialized;
+    } catch {
+      // Fall through to raw stdout.
+    }
+  }
+  return rawStdout ?? '';
+}
+
+function applyResultEnvelope(
+  payload: OfficeDocumentResultPayload,
+  platform: NodeJS.Platform,
+  rawStdout?: string,
+  filePath?: string,
+): OfficeDocumentResultPayload {
+  const next: OfficeDocumentResultPayload = { ...payload };
+  if (next.truncated) {
+    const source = truncatedPreview(next.data, rawStdout);
+    delete next.data;
+    next.preview = source.slice(0, OFFICE_TRUNCATED_PREVIEW_CHARS);
+    next.suggestion = OFFICE_TRUNCATION_SUGGESTION;
+  }
+  if (next.command === 'refresh' && platform !== 'win32' && isOfficeDocxPath(filePath)) {
+    next.platformNote = OFFICE_REFRESH_NON_WINDOWS_NOTE;
+  }
+  return next;
+}
 
 function appendBounded(current: string, chunk: string): { text: string; truncated: boolean } {
   if (current.length >= MAX_OUTPUT_CHARS) {
@@ -329,6 +474,13 @@ async function executeOfficecli(
   mode: 'inspect' | 'edit',
   dependencies: OfficecliExecutionDependencies = {},
 ): Promise<ToolResult> {
+  const platform = dependencies.platform ?? process.platform;
+  const cwd = chooseWorkingDirectory(ctx);
+  const filePath = resolveOfficeDocumentPath(args.arguments, cwd);
+  const emit = (payload: OfficeDocumentResultPayload, rawStdout?: string) => (
+    toolResult(applyResultEnvelope(payload, platform, rawStdout, filePath))
+  );
+
   const validationError = validateInvocation(args, mode);
   if (validationError) return validationError;
 
@@ -379,10 +531,15 @@ async function executeOfficecli(
     }
   }
 
+  if (mode === 'inspect') {
+    const blocked = inspectBudgetShortCircuit(ctx.sessionId, args.command, args.arguments, cwd);
+    if (blocked) return blocked;
+  }
+
   const resolveRuntime = dependencies.resolveRuntime ?? resolveOfficecliRuntime;
   const runtime = resolveRuntime();
   if (!runtime) {
-    return toolResult({
+    return emit({
       ok: false,
       availability: 'unavailable',
       command: args.command,
@@ -397,7 +554,6 @@ async function executeOfficecli(
 
   const runner = dependencies.runProcess ?? runOfficecliProcess;
   const now = dependencies.now ?? Date.now;
-  const cwd = chooseWorkingDirectory(ctx);
   const timeoutMs = normalizeTimeout(args.timeoutMs);
   const startedAt = now();
   const version = await getVersion(
@@ -410,7 +566,7 @@ async function executeOfficecli(
   if (args.command === 'status') {
     const durationMs = Math.max(0, now() - startedAt);
     if (!version) {
-      return toolResult({
+      return emit({
         ok: false,
         availability: 'unavailable',
         command: 'status',
@@ -422,7 +578,7 @@ async function executeOfficecli(
         },
       });
     }
-    return toolResult({
+    return emit({
       ok: true,
       availability: 'available',
       version,
@@ -444,7 +600,7 @@ async function executeOfficecli(
   const elapsedBeforeCommand = Math.max(0, now() - startedAt);
   const commandTimeoutMs = timeoutMs - elapsedBeforeCommand;
   if (commandTimeoutMs <= 0) {
-    return toolResult({
+    return emit({
       ok: false,
       availability: 'available',
       version,
@@ -457,6 +613,16 @@ async function executeOfficecli(
       },
     });
   }
+
+  const finishInspect = (result: ToolResult, ok: boolean): ToolResult => {
+    if (mode === 'inspect') {
+      if (ok) recordInspectUse(ctx.sessionId, args.command, args.arguments, cwd);
+    } else if (ok && isOfficeBudgetResettingEdit(args.command)) {
+      resetInspectBudgetForFile(ctx.sessionId, args.arguments, cwd);
+    }
+    return result;
+  };
+
   try {
     const result = await runner(runtime.path, cliArgs, {
       cwd,
@@ -465,7 +631,7 @@ async function executeOfficecli(
     });
     const durationMs = Math.max(0, now() - startedAt);
     if (result.timedOut) {
-      return toolResult({
+      return finishInspect(emit({
         ok: false,
         availability: 'available',
         version,
@@ -478,7 +644,7 @@ async function executeOfficecli(
           message: `OfficeCLI exceeded the ${timeoutMs}ms timeout.`,
           suggestion: 'Retry with a narrower operation or a larger timeoutMs value.',
         },
-      });
+      }, result.stdout), false);
     }
 
     const parsed = parseJson(result.stdout);
@@ -486,7 +652,7 @@ async function executeOfficecli(
     const ok = result.exitCode === 0 && upstreamSuccess !== false;
     if (!ok) {
       const fallback = result.stderr.trim() || result.stdout.trim();
-      return toolResult({
+      return finishInspect(emit({
         ok: false,
         availability: 'available',
         version,
@@ -495,10 +661,10 @@ async function executeOfficecli(
         durationMs,
         truncated: result.truncated || undefined,
         error: normalizedUpstreamError(parsed, fallback),
-      });
+      }, result.stdout), false);
     }
 
-    return toolResult({
+    return finishInspect(emit({
       ok: true,
       availability: 'available',
       version,
@@ -507,9 +673,9 @@ async function executeOfficecli(
       durationMs,
       data: parsed && 'data' in parsed ? parsed.data : parsed ?? result.stdout.trim(),
       truncated: result.truncated || undefined,
-    });
+    }, result.stdout), true);
   } catch (error) {
-    return toolResult({
+    return finishInspect(emit({
       ok: false,
       availability: 'available',
       version,
@@ -519,7 +685,7 @@ async function executeOfficecli(
         code: 'execution_failed',
         message: error instanceof Error ? error.message : String(error),
       },
-    });
+    }), false);
   }
 }
 

@@ -601,7 +601,7 @@ function buildNativeOfficeRoutingMessage(context: string): string {
   return [
     context,
     'Use the native Office tools instead:',
-    '- Read, inspect, query, dump, help, or validate: office_document_inspect',
+    '- Read, inspect, query, help, or validate: office_document_inspect',
     '- Create or modify: office_document_edit',
     'Do not use Read, Write, Edit, a generated .docx.md/.xlsx.md/.pptx.md sidecar, direct officecli Bash, legacy *-tool commands, or markitdown as the default Office path.',
     `Only when the user explicitly requests Markdown conversion or the native inspect tool reports the operation unsupported may markitdown be retried with the command comment marker "# ${OFFICE_MARKDOWN_FALLBACK_MARKER}".`,

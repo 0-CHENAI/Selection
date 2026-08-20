@@ -5,11 +5,18 @@ import { join } from 'node:path';
 import type { SessionToolContext } from '../context.ts';
 import {
   clearOfficecliVersionCache,
+  clearOfficeInspectBudget,
   executeOfficecliForTest,
   handleOfficeDocumentEdit,
   handleOfficeDocumentInspect,
   type OfficecliExecutionDependencies,
 } from './office-document.ts';
+import {
+  OFFICE_INSPECT_BUDGET_LIMIT,
+  OFFICE_REFRESH_NON_WINDOWS_NOTE,
+  OFFICE_TRUNCATED_PREVIEW_CHARS,
+  OFFICE_TRUNCATION_SUGGESTION,
+} from '../office-workflow.ts';
 import { resolveOfficecliBinary } from '../runtime/officecli.ts';
 
 function context(): SessionToolContext {
@@ -41,8 +48,18 @@ function payload(result: Awaited<ReturnType<typeof executeOfficecliForTest>>) {
   return result.structuredContent!;
 }
 
+function successDeps(): OfficecliExecutionDependencies {
+  return {
+    resolveRuntime: () => ({ path: '/managed/officecli', source: 'environment' }),
+    runProcess: async (_binary, args) => args[0] === '--version'
+      ? { stdout: '1.0.144', stderr: '', exitCode: 0, timedOut: false, truncated: false }
+      : { stdout: '{"success":true,"data":"ok"}', stderr: '', exitCode: 0, timedOut: false, truncated: false },
+  };
+}
+
 beforeEach(() => {
   clearOfficecliVersionCache();
+  clearOfficeInspectBudget();
 });
 
 describe('Office document native tool execution', () => {
@@ -295,7 +312,7 @@ describe('Office document native tool execution', () => {
       error: { code: 'officecli_unavailable' },
     });
 
-    const timeout = await executeOfficecliForTest(context(), { command: 'validate', arguments: ['a.docx'] }, 'inspect', {
+    const timeout = await executeOfficecliForTest(context(), { command: 'validate', arguments: ['timeout.docx'] }, 'inspect', {
       resolveRuntime: () => ({ path: '/managed/timeout', source: 'environment' }),
       runProcess: async (_binary, args) => args[0] === '--version'
         ? { stdout: '1.0.144', stderr: '', exitCode: 0, timedOut: false, truncated: false }
@@ -303,7 +320,7 @@ describe('Office document native tool execution', () => {
     });
     expect(payload(timeout).error).toMatchObject({ code: 'timeout' });
 
-    const failed = await executeOfficecliForTest(context(), { command: 'validate', arguments: ['a.docx'] }, 'inspect', {
+    const failed = await executeOfficecliForTest(context(), { command: 'validate', arguments: ['failure.docx'] }, 'inspect', {
       resolveRuntime: () => ({ path: '/managed/failure', source: 'environment' }),
       runProcess: async (_binary, args) => {
         if (args[0] === '--version') {
@@ -336,8 +353,209 @@ describe('Office document native tool execution', () => {
         ? { stdout: '1.0.144', stderr: '', exitCode: 0, timedOut: false, truncated: false }
         : { stdout: 'x'.repeat(100_000), stderr: '', exitCode: 0, timedOut: false, truncated: true },
     });
-    expect(payload(truncated)).toMatchObject({ ok: true, truncated: true });
-    expect((payload(truncated).data as string).length).toBe(100_000);
+    const truncatedPayload = payload(truncated);
+    const truncatedText = truncated.content[0]?.type === 'text' ? truncated.content[0].text : '';
+    expect(truncatedPayload).toMatchObject({
+      ok: true,
+      truncated: true,
+      suggestion: OFFICE_TRUNCATION_SUGGESTION,
+    });
+    expect(truncatedPayload.data).toBeUndefined();
+    expect(typeof truncatedPayload.preview).toBe('string');
+    expect((truncatedPayload.preview as string).length).toBe(OFFICE_TRUNCATED_PREVIEW_CHARS);
+    expect(truncatedText).toContain('view outline');
+    expect(truncatedText.length).toBeLessThan(5_000);
+    expect(JSON.stringify(truncatedPayload).length).toBeLessThan(5_000);
+  });
+
+  it('includes the Word+Windows note only for non-Windows DOCX refresh', async () => {
+    const docx = await executeOfficecliForTest(context(), {
+      command: 'refresh',
+      arguments: ['report.docx'],
+    }, 'edit', {
+      ...successDeps(),
+      platform: 'darwin',
+    });
+    const workbook = await executeOfficecliForTest(context(), {
+      command: 'refresh',
+      arguments: ['data.xlsx'],
+    }, 'edit', {
+      ...successDeps(),
+      platform: 'darwin',
+    });
+
+    const text = docx.content[0]?.type === 'text' ? docx.content[0].text : '';
+    expect(payload(docx)).toMatchObject({
+      ok: true,
+      platformNote: OFFICE_REFRESH_NON_WINDOWS_NOTE,
+    });
+    expect(text).toContain('Word + Windows');
+    expect(payload(workbook).platformNote).toBeUndefined();
+  });
+
+  it('does not rerun OfficeCLI for the same inspect fingerprint', async () => {
+    let commandRuns = 0;
+    const deps: OfficecliExecutionDependencies = {
+      resolveRuntime: () => ({ path: '/managed/officecli', source: 'environment' }),
+      runProcess: async (_binary, args) => {
+        if (args[0] === '--version') {
+          return { stdout: '1.0.144', stderr: '', exitCode: 0, timedOut: false, truncated: false };
+        }
+        commandRuns += 1;
+        return { stdout: '{"success":true,"data":"ok"}', stderr: '', exitCode: 0, timedOut: false, truncated: false };
+      },
+    };
+
+    const first = await executeOfficecliForTest(context(), {
+      command: 'view',
+      arguments: ['report.docx', 'outline'],
+    }, 'inspect', deps);
+    const second = await executeOfficecliForTest(context(), {
+      command: 'view',
+      arguments: ['./report.docx', 'outline'],
+    }, 'inspect', deps);
+
+    expect(payload(first).ok).toBe(true);
+    expect(commandRuns).toBe(1);
+    expect(second.isError).toBe(false);
+    expect(payload(second)).toMatchObject({
+      ok: true,
+      code: 'already_checked',
+    });
+
+    const absolute = await executeOfficecliForTest(context(), {
+      command: 'view',
+      arguments: ['/project/report.docx', 'outline'],
+    }, 'inspect', deps);
+    expect(payload(absolute)).toMatchObject({ ok: true, code: 'already_checked' });
+    expect(commandRuns).toBe(1);
+  });
+
+  it('allows retrying a failed inspect and does not spend budget on it', async () => {
+    let commandRuns = 0;
+    const deps: OfficecliExecutionDependencies = {
+      resolveRuntime: () => ({ path: '/managed/officecli', source: 'environment' }),
+      runProcess: async (_binary, args) => {
+        if (args[0] === '--version') {
+          return { stdout: '1.0.144', stderr: '', exitCode: 0, timedOut: false, truncated: false };
+        }
+        commandRuns += 1;
+        if (commandRuns === 1) {
+          return { stdout: '', stderr: '', exitCode: null, timedOut: true, truncated: false };
+        }
+        return { stdout: '{"success":true,"data":"ok"}', stderr: '', exitCode: 0, timedOut: false, truncated: false };
+      },
+    };
+
+    const timedOut = await executeOfficecliForTest(context(), {
+      command: 'view',
+      arguments: ['report.docx', 'outline'],
+    }, 'inspect', deps);
+    const retried = await executeOfficecliForTest(context(), {
+      command: 'view',
+      arguments: ['report.docx', 'outline'],
+    }, 'inspect', deps);
+
+    expect(payload(timedOut).error).toMatchObject({ code: 'timeout' });
+    expect(payload(retried).ok).toBe(true);
+    expect(commandRuns).toBe(2);
+  });
+
+  it('stops counted inspects after the session budget and ignores status/help', async () => {
+    let commandRuns = 0;
+    const deps: OfficecliExecutionDependencies = {
+      resolveRuntime: () => ({ path: '/managed/officecli', source: 'environment' }),
+      runProcess: async (_binary, args) => {
+        if (args[0] === '--version') {
+          return { stdout: '1.0.144', stderr: '', exitCode: 0, timedOut: false, truncated: false };
+        }
+        commandRuns += 1;
+        return { stdout: '{"success":true,"data":"ok"}', stderr: '', exitCode: 0, timedOut: false, truncated: false };
+      },
+    };
+
+    for (let i = 0; i < 3; i++) {
+      const help = await executeOfficecliForTest(context(), {
+        command: 'help',
+        arguments: ['docx', 'heading'],
+      }, 'inspect', deps);
+      expect(payload(help).ok).toBe(true);
+    }
+
+    const inspects = [
+      ['view', ['report.docx', 'outline']],
+      ['view', ['report.docx', 'text']],
+      ['validate', ['report.docx']],
+      ['get', ['report.docx', '/body']],
+    ] as const;
+
+    for (const [command, arguments_] of inspects) {
+      const result = await executeOfficecliForTest(context(), {
+        command,
+        arguments: [...arguments_],
+      }, 'inspect', deps);
+      expect(payload(result).ok).toBe(true);
+    }
+    expect(inspects.length).toBe(OFFICE_INSPECT_BUDGET_LIMIT);
+
+    const exhausted = await executeOfficecliForTest(context(), {
+      command: 'query',
+      arguments: ['report.docx', '/body'],
+    }, 'inspect', deps);
+
+    expect(exhausted.isError).toBe(false);
+    expect(payload(exhausted)).toMatchObject({
+      ok: true,
+      code: 'verification_budget_exhausted',
+    });
+    expect(commandRuns).toBe(3 + OFFICE_INSPECT_BUDGET_LIMIT);
+  });
+
+  it('resets the inspect budget after a successful edit', async () => {
+    const deps = successDeps();
+    const inspects = [
+      ['view', ['report.docx', 'outline']],
+      ['view', ['report.docx', 'text']],
+      ['validate', ['report.docx']],
+      ['dump', ['report.docx']],
+    ] as const;
+
+    for (const [command, arguments_] of inspects) {
+      await executeOfficecliForTest(context(), {
+        command,
+        arguments: [...arguments_],
+      }, 'inspect', deps);
+    }
+
+    const blocked = await executeOfficecliForTest(context(), {
+      command: 'raw',
+      arguments: ['report.docx'],
+    }, 'inspect', deps);
+    expect(payload(blocked)).toMatchObject({ ok: true, code: 'verification_budget_exhausted' });
+
+    const refresh = await executeOfficecliForTest(context(), {
+      command: 'refresh',
+      arguments: ['report.docx'],
+    }, 'edit', deps);
+    expect(payload(refresh).ok).toBe(true);
+
+    const stillBlocked = await executeOfficecliForTest(context(), {
+      command: 'raw',
+      arguments: ['report.docx'],
+    }, 'inspect', deps);
+    expect(payload(stillBlocked)).toMatchObject({ ok: true, code: 'verification_budget_exhausted' });
+
+    const edit = await executeOfficecliForTest(context(), {
+      command: 'add',
+      arguments: ['report.docx', '/body', '--type', 'paragraph', '--prop', 'text=Summary'],
+    }, 'edit', deps);
+    expect(payload(edit).ok).toBe(true);
+
+    const afterEdit = await executeOfficecliForTest(context(), {
+      command: 'view',
+      arguments: ['report.docx', 'outline'],
+    }, 'inspect', deps);
+    expect(payload(afterEdit).ok).toBe(true);
   });
 
   it('creates, edits, and reads docx, xlsx, and pptx through native handlers', async () => {

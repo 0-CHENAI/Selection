@@ -64,7 +64,11 @@ export { handleSendDeveloperFeedback } from './send-developer-feedback.ts';
 export type { SendDeveloperFeedbackArgs } from './send-developer-feedback.ts';
 
 // Office documents
-export { handleOfficeDocumentInspect, handleOfficeDocumentEdit } from './office-document.ts';
+export {
+  handleOfficeDocumentInspect,
+  handleOfficeDocumentEdit,
+  clearOfficeInspectBudget,
+} from './office-document.ts';
 export type {
   OfficeDocumentInspectArgs,
   OfficeDocumentEditArgs,
