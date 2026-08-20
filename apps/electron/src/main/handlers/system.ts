@@ -6,7 +6,11 @@ import { RPC_CHANNELS } from '@craft-agent/shared/protocol'
 import { getGitBashPath, setGitBashPath, clearGitBashPath } from '@craft-agent/shared/config'
 import { classifyExternalUrl, formatBlockedUrlError } from '@craft-agent/shared/utils/url-safety'
 import { isUsableGitBashPath, validateGitBashPath } from '@craft-agent/server-core/services'
-import { validateFilePath, getWorkspaceAllowedDirs } from '@craft-agent/server-core/handlers'
+import {
+  normalizeAccessibleFilePath,
+  resolveWorkspaceIdForFileAccess,
+  validateWorkspaceFilePath,
+} from '@craft-agent/server-core/handlers'
 import type { RpcServer } from '@craft-agent/server-core/transport'
 import type { HandlerDeps } from './handler-deps'
 import {
@@ -236,10 +240,11 @@ export function registerSystemCoreHandlers(server: RpcServer, deps: HandlerDeps)
 
   server.handle(RPC_CHANNELS.shell.OPEN_FILE, async (ctx, path: string) => {
     try {
-      const expanded = path.startsWith('~') ? path.replace(/^~/, homedir()) : path
-      const absolutePath = resolve(expanded)
-      const workspaceId = ctx.workspaceId ?? deps.windowManager?.getWorkspaceForWindow(ctx.webContentsId!)
-      const safePath = await validateFilePath(absolutePath, getWorkspaceAllowedDirs(workspaceId))
+      const expanded = normalizeAccessibleFilePath(path)
+      const withHome = expanded.startsWith('~') ? expanded.replace(/^~/, homedir()) : expanded
+      const absolutePath = resolve(withHome)
+      const workspaceId = resolveWorkspaceIdForFileAccess(ctx, windowManager)
+      const safePath = await validateWorkspaceFilePath(absolutePath, workspaceId)
       const result = await requestClientOpenPath(server, ctx.clientId, safePath)
       if (result.error) throw new Error(result.error)
     } catch (error) {
@@ -251,10 +256,11 @@ export function registerSystemCoreHandlers(server: RpcServer, deps: HandlerDeps)
 
   server.handle(RPC_CHANNELS.shell.SHOW_IN_FOLDER, async (ctx, path: string) => {
     try {
-      const expanded = path.startsWith('~') ? path.replace(/^~/, homedir()) : path
-      const absolutePath = resolve(expanded)
-      const workspaceId = ctx.workspaceId ?? deps.windowManager?.getWorkspaceForWindow(ctx.webContentsId!)
-      const safePath = await validateFilePath(absolutePath, getWorkspaceAllowedDirs(workspaceId))
+      const expanded = normalizeAccessibleFilePath(path)
+      const withHome = expanded.startsWith('~') ? expanded.replace(/^~/, homedir()) : expanded
+      const absolutePath = resolve(withHome)
+      const workspaceId = resolveWorkspaceIdForFileAccess(ctx, windowManager)
+      const safePath = await validateWorkspaceFilePath(absolutePath, workspaceId)
       await requestClientShowInFolder(server, ctx.clientId, safePath)
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unknown error'
