@@ -537,7 +537,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
   const followUpOpenNonceRef = React.useRef(0)
 
   // Navigation for session branching
-  const { navigate } = useNavigation()
+  const { navigate, navigateToSession } = useNavigation()
 
   // Get isDark from useTheme hook for overlay theme
   // This accounts for scenic themes (like Haze) that force dark mode
@@ -1951,6 +1951,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
             sessionId={session.id}
             sessionFolderPath={sessionFolderPath}
             onKillTask={(taskId) => killTask(taskId, backgroundTasks.find(t => t.id === taskId)?.type === 'shell' ? 'shell' : 'agent')}
+            onOpenSession={navigateToSession}
             onInsertMessage={onInputChange}
             sessionLabels={session.labels}
             labels={labels}

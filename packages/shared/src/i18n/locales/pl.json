@@ -1669,6 +1669,8 @@
   "toast.messagingRateLimited": "Zbyt wiele żądań kodu parowania. Poczekaj chwilę i spróbuj ponownie.",
   "toast.messagingTelegramLockedDown": "Bot Telegram ograniczony do dozwolonych użytkowników",
   "toast.messagingTelegramUnlocked": "Bot Telegram odblokowany — każdy może znów wysłać do niego DM",
+  "toast.parentStoppedChildrenRunning_one": "Zatrzymano tę sesję. Nadal działa {{count}} sesja podrzędna — otwórz ją lub zatrzymaj na liście.",
+  "toast.parentStoppedChildrenRunning_other": "Zatrzymano tę sesję. Nadal działa {{count}} sesji podrzędnych — otwórz je lub zatrzymaj na liście.",
   "toast.pathCopied": "Ścieżka skopiowana do schowka",
   "toast.patternCopied": "Wzorzec skopiowany do schowka",
   "toast.reconnectFailed": "Ponowne połączenie nie powiodło się",

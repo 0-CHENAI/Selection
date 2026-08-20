@@ -20,6 +20,7 @@ interface ChatInputZoneProps {
   sessionId: string
   sessionFolderPath?: string
   onKillTask?: (taskId: string) => void
+  onOpenSession?: (sessionId: string) => void
   onInsertMessage?: (text: string) => void
   sessionLabels?: string[]
   labels?: LabelConfig[]
@@ -42,6 +43,7 @@ export function ChatInputZone({
   sessionId,
   sessionFolderPath,
   onKillTask,
+  onOpenSession,
   onInsertMessage,
   sessionLabels = [],
   labels = [],
@@ -90,6 +92,7 @@ export function ChatInputZone({
           sessionId={sessionId}
           sessionFolderPath={sessionFolderPath}
           onKillTask={onKillTask}
+          onOpenSession={onOpenSession}
           onInsertMessage={onInsertMessage ?? inputProps.onInputChange}
           sessionLabels={sessionLabels}
           labels={labels}

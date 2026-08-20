@@ -1669,6 +1669,8 @@
   "toast.messagingRateLimited": "Demasiadas solicitudes de código de emparejamiento. Espera un momento e inténtalo de nuevo.",
   "toast.messagingTelegramLockedDown": "Bot de Telegram restringido a usuarios permitidos",
   "toast.messagingTelegramUnlocked": "Bot de Telegram desbloqueado — cualquiera puede enviarle DM otra vez",
+  "toast.parentStoppedChildrenRunning_one": "Se detuvo esta sesión. Aún hay {{count}} sesión hija en ejecución: ábrela o deténla desde la lista.",
+  "toast.parentStoppedChildrenRunning_other": "Se detuvo esta sesión. Aún hay {{count}} sesiones hijas en ejecución: ábrelas o deténlas desde la lista.",
   "toast.pathCopied": "Ruta copiada al portapapeles",
   "toast.patternCopied": "Patrón copiado al portapapeles",
   "toast.reconnectFailed": "No se pudo reconectar",

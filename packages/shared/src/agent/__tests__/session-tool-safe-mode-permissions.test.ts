@@ -16,6 +16,7 @@ describe('session tool safe-mode classification', () => {
       'mcp__session__browser_tool',
       'mcp__session__script_sandbox',
       'mcp__session__office_document_inspect',
+      'mcp__session__get_task_results',
       'office_document_inspect',
     ] as const;
 
@@ -30,6 +31,7 @@ describe('session tool safe-mode classification', () => {
       'mcp__session__source_oauth_trigger',
       'mcp__session__source_credential_prompt',
       'mcp__session__spawn_session',
+      'mcp__session__run_task',
       'mcp__session__update_user_preferences',
       'mcp__session__office_document_edit',
       'office_document_edit',

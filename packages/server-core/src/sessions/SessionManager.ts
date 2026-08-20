@@ -8,7 +8,7 @@ import { basename, dirname, join } from 'path'
 import { existsSync } from 'fs'
 import { readFile, writeFile, mkdir } from 'fs/promises'
 import { randomUUID } from 'node:crypto'
-import { type AgentEvent, setPermissionMode, hydratePreviousPermissionMode, getPermissionModeDiagnostics, type PermissionMode, unregisterSessionScopedToolCallbacks, mergeSessionScopedToolCallbacks, AbortReason, type AuthRequest, type AuthResult, type CredentialAuthRequest, type BrowserPaneFns, generateConversationSummary, resolveKeepBackgroundTasksAlive, sanitizeUserMessageForRetry } from '@craft-agent/shared/agent'
+import { type AgentEvent, setPermissionMode, hydratePreviousPermissionMode, getPermissionModeDiagnostics, type PermissionMode, unregisterSessionScopedToolCallbacks, mergeSessionScopedToolCallbacks, AbortReason, type AuthRequest, type AuthResult, type CredentialAuthRequest, type BrowserPaneFns, generateConversationSummary, resolveKeepBackgroundTasksAlive, sanitizeUserMessageForRetry, resolveSpawnWaitTimeoutMs, type SpawnSessionRequest, type SpawnSessionResult } from '@craft-agent/shared/agent'
 import {
   resolveSessionConnection,
   createBackendFromConnection,
@@ -75,8 +75,17 @@ import {
   isSharedProjectMemoryEnabled,
 } from '@craft-agent/shared/sessions'
 import { loadWorkspaceSources, loadAllSources, getSourcesBySlugs, isSourceUsable, type LoadedSource, type McpServerConfig, getSourcesNeedingAuth, getSourceCredentialManager, getSourceServerBuilder, type SourceWithCredential, isApiOAuthProvider, hasRenewEndpoint, SERVER_BUILD_ERRORS, TokenRefreshManager, createTokenGetter } from '@craft-agent/shared/sources'
-import { listTaskSlugs, parseTaskSpec, uniqueTaskSlug } from '@craft-agent/shared/tasks'
-import { createTaskFromSpec, resolveCreateTaskProjectId } from '../tasks'
+import { listTaskSlugs, parseTaskSpec, uniqueTaskSlug, loadTaskResults } from '@craft-agent/shared/tasks'
+import { createTaskFromSpec, resolveCreateTaskProjectId, type TaskRunner } from '../tasks'
+import {
+  buildBackgroundTaskNudge,
+  mapCompletionReasonToTaskStatus,
+  countRunningSpawnChildren,
+  shouldDeferSpawnWake,
+  shouldOrphanBackgroundTask,
+  shouldWakeOnTaskCompleted,
+  waitForChildSessionCompletion,
+} from './spawn-session-orchestration.ts'
 import { ConfigWatcher, type ConfigWatcherCallbacks } from '@craft-agent/shared/config'
 import { isUnsupportedLlmConnection, UNSUPPORTED_LLM_CONNECTION_MESSAGE } from '@craft-agent/shared/config'
 import { resolveAuthEnvVars, toCustomEndpointModelPayload } from '@craft-agent/shared/config'
@@ -800,6 +809,10 @@ interface RunningBackgroundTask {
   workflowId?: string
   /** Count of workflow sub-agents completed so far (Workflow tasks only). */
   agentsCompleted?: number
+  /** spawn_session children are first-class sessions and must not be orphaned at parent turn end. */
+  source?: 'spawn_session'
+  /** Child finished while the parent turn was still running — wake after the parent goes idle. */
+  needsIdleWake?: boolean
 }
 
 interface ManagedSession {
@@ -1316,6 +1329,8 @@ export class SessionManager implements ISessionManager {
    * can never disagree about whether keep-alive is on.
    */
   private readonly keepBackgroundTasksAlive: boolean = resolveKeepBackgroundTasksAlive()
+  private taskRunnerLookup?: (workspaceId: string) => TaskRunner
+  private spawnCompletionUnsub?: () => void
   /**
    * Per-session in-flight runtime-refresh promise. Ensures `updateRuntimeConfig`
    * (or a dispose) cannot overlap with another refresh OR with a send-path
@@ -2076,6 +2091,10 @@ export class SessionManager implements ISessionManager {
 
       // Load existing sessions from disk
       this.loadSessionsFromDisk()
+
+      this.spawnCompletionUnsub ??= this.onSessionComplete((evt) => {
+        this.surfaceSpawnedSessionCompletion(evt)
+      })
 
       // Signal that initialization is complete — IPC handlers waiting on initGate will proceed
       this.initGate.markReady()
@@ -4379,63 +4398,12 @@ export class SessionManager implements ISessionManager {
         // The UI calls window.electronAPI.performOAuth() when user clicks "Sign in".
       }
 
+      this.spawnCompletionUnsub ??= this.onSessionComplete((evt) => {
+        this.surfaceSpawnedSessionCompletion(evt)
+      })
+
       // Wire up onSpawnSession to create independent sessions from agent tool calls
-      managed.agent.onSpawnSession = async (request) => {
-        sessionLog.info(`Spawn session request from session ${managed.id}:`, request.name || '(unnamed)')
-
-        const session = await this.createSession(managed.workspace.id, {
-          name: request.name,
-          llmConnection: request.llmConnection ?? managed.llmConnection,
-          model: request.model ?? managed.model,
-          enabledSourceSlugs: request.enabledSourceSlugs ?? managed.enabledSourceSlugs,
-          permissionMode: request.permissionMode ?? managed.permissionMode,
-          thinkingLevel: request.thinkingLevel ?? managed.thinkingLevel,
-          labels: request.labels ?? managed.labels,
-          workingDirectory: request.workingDirectory,
-          projectId: request.projectId ?? managed.projectId,
-          // Spawned sessions become subtasks of the spawning session.
-          parentSessionId: managed.id,
-        })
-
-        // Build FileAttachment[] from paths (if any)
-        let fileAttachments: FileAttachment[] | undefined
-        if (request.attachments?.length) {
-          const attachments: FileAttachment[] = []
-          for (const a of request.attachments) {
-            try {
-              const extraDirs = getWorkspaceAllowedDirs(managed.workspace.id)
-              if (request.workingDirectory) extraDirs.push(request.workingDirectory)
-              const safePath = await validateFilePath(a.path, extraDirs)
-              const attachment = readFileAttachment(safePath)
-              if (attachment) {
-                if (a.name) attachment.name = a.name
-                attachments.push(attachment)
-              } else {
-                sessionLog.warn(`Spawn session: attachment not found: ${a.path}`)
-              }
-            } catch (error) {
-              const message = error instanceof Error ? error.message : String(error)
-              sessionLog.warn(`Spawn session: blocked attachment path ${a.path}: ${message}`)
-            }
-          }
-          if (attachments.length > 0) fileAttachments = attachments
-        }
-
-        // (session_created is emitted by createSession above.)
-
-        // Fire and forget — send the message but don't await completion
-        this.sendMessage(session.id, request.prompt, fileAttachments).catch(err => {
-          sessionLog.error(`Failed to send message to spawned session ${session.id}:`, err)
-        })
-
-        return {
-          sessionId: session.id,
-          name: session.name || request.name || session.id,
-          status: 'started' as const,
-          connection: session.llmConnection,
-          model: session.model,
-        }
-      }
+      managed.agent.onSpawnSession = (request) => this.spawnSessionFromTool(managed, request)
 
       // Wire up session self-management tools (set_session_labels, set_session_status, etc.)
       mergeSessionScopedToolCallbacks(managed.id, {
@@ -4515,6 +4483,8 @@ export class SessionManager implements ISessionManager {
           const created = await createTaskFromSpec(this, ws.id, ws.rootPath, parsed.data)
           return { ...created, warnings: [...warnings, ...created.warnings] }
         },
+        runTaskFn: async (input) => this.runTaskFromTool(managed.workspace.id, input),
+        getTaskResultsFn: async (slug, runId) => loadTaskResults(managed.workspace.rootPath, slug, runId),
         getSessionInfoFn: (sessionId?: string) => {
           const targetId = sessionId ?? managed.id
           const session = this.sessions.get(targetId)
@@ -4596,6 +4566,7 @@ export class SessionManager implements ISessionManager {
               startTime: t.startTime,
               elapsedSeconds: t.elapsedSeconds ?? wallElapsed,
               completedAt: t.completedAt,
+              ...(t.source ? { source: t.source } : {}),
             }
           })
         },
@@ -6911,6 +6882,14 @@ export class SessionManager implements ISessionManager {
       managed.agent.forceAbort(AbortReason.UserStop)
     }
 
+    // Parent stop does not cancel first-class spawn_session children; tell the UI how many remain.
+    const runningChildCount = countRunningSpawnChildren({
+      registry: managed.backgroundTaskRegistry.values(),
+      parentId: sessionId,
+      sessions: this.sessions.values(),
+    })
+    const runningChildPayload = !silent && runningChildCount > 0 ? { runningChildCount } : {}
+
     // Only show "Response interrupted" message when user explicitly clicked Stop
     // Silent mode is used when redirecting (sending new message while processing)
     if (!silent) {
@@ -6927,6 +6906,7 @@ export class SessionManager implements ISessionManager {
         message: interruptedMessage,
         // Include queued texts so the UI can restore them to the input field
         ...(queuedTexts.length > 0 ? { queuedMessages: queuedTexts } : {}),
+        ...runningChildPayload,
       }, managed.workspace.id)
     } else {
       // Still send interrupted event but without the message (for UI state update)
@@ -7211,6 +7191,9 @@ export class SessionManager implements ISessionManager {
           : undefined,
         tokenUsage: managed.tokenUsage,
       })
+      // spawn_session completions that arrived mid-turn never reached the model
+      // (the tool already returned `started`). Wake now that the parent is idle.
+      this.flushDeferredSpawnWakes(managed)
     }
 
     // 6. Always persist
@@ -7469,7 +7452,7 @@ export class SessionManager implements ISessionManager {
     const now = Date.now()
     let orphaned = 0
     for (const info of managed.backgroundTaskRegistry.values()) {
-      if (info.status === 'running') {
+      if (shouldOrphanBackgroundTask(info, this.keepBackgroundTasksAlive)) {
         info.status = 'orphaned'
         info.completedAt = now
         orphaned++
@@ -7494,6 +7477,208 @@ export class SessionManager implements ISessionManager {
     return Array.from(managed.backgroundTaskRegistry.values())
       .map((t) => ({ ...t }))
       .sort((a, b) => b.startTime - a.startTime)
+  }
+
+  setTaskRunnerLookup(lookup: (workspaceId: string) => TaskRunner): void {
+    this.taskRunnerLookup = lookup
+  }
+
+  /**
+   * Create a first-class child session for spawn_session (wait or background).
+   * Extracted so SessionManager tests can exercise the contract without booting an agent.
+   */
+  private async spawnSessionFromTool(
+    managed: ManagedSession,
+    request: SpawnSessionRequest,
+  ): Promise<SpawnSessionResult> {
+    sessionLog.info(`Spawn session request from session ${managed.id}:`, request.name || '(unnamed)')
+
+    const session = await this.createSession(managed.workspace.id, {
+      name: request.name,
+      llmConnection: request.llmConnection ?? managed.llmConnection,
+      model: request.model ?? managed.model,
+      enabledSourceSlugs: request.enabledSourceSlugs ?? managed.enabledSourceSlugs,
+      permissionMode: request.permissionMode ?? managed.permissionMode,
+      thinkingLevel: request.thinkingLevel ?? managed.thinkingLevel,
+      labels: request.labels ?? managed.labels,
+      workingDirectory: request.workingDirectory,
+      projectId: request.projectId ?? managed.projectId,
+      // Spawned sessions become subtasks of the spawning session.
+      parentSessionId: managed.id,
+    })
+
+    // Build FileAttachment[] from paths (if any)
+    let fileAttachments: FileAttachment[] | undefined
+    if (request.attachments?.length) {
+      const attachments: FileAttachment[] = []
+      for (const a of request.attachments) {
+        try {
+          const extraDirs = getWorkspaceAllowedDirs(managed.workspace.id)
+          if (request.workingDirectory) extraDirs.push(request.workingDirectory)
+          const safePath = await validateFilePath(a.path, extraDirs)
+          const attachment = readFileAttachment(safePath)
+          if (attachment) {
+            if (a.name) attachment.name = a.name
+            attachments.push(attachment)
+          } else {
+            sessionLog.warn(`Spawn session: attachment not found: ${a.path}`)
+          }
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error)
+          sessionLog.warn(`Spawn session: blocked attachment path ${a.path}: ${message}`)
+        }
+      }
+      if (attachments.length > 0) fileAttachments = attachments
+    }
+
+    const mode = request.mode === 'wait' ? 'wait' : 'background'
+    const baseResult = {
+      sessionId: session.id,
+      name: session.name || request.name || session.id,
+      connection: session.llmConnection,
+      model: session.model,
+    }
+
+    if (mode === 'wait') {
+      const parentGeneration = managed.processingGeneration
+      let settleWait: ((result: { status: 'failed'; finalText?: string }) => void) | undefined
+      const outcomeP = waitForChildSessionCompletion({
+        childSessionId: session.id,
+        timeoutMs: resolveSpawnWaitTimeoutMs(request.timeoutMs),
+        isParentInterrupted: () =>
+          managed.stopRequested === true || managed.processingGeneration !== parentGeneration,
+        subscribe: (listener) => this.onSessionComplete(listener),
+        onAttach: (settle) => { settleWait = settle },
+      })
+      this.sendMessage(session.id, request.prompt, fileAttachments).catch(err => {
+        sessionLog.error(`Failed to send message to spawned session ${session.id}:`, err)
+        settleWait?.({
+          status: 'failed',
+          finalText: err instanceof Error ? err.message : String(err),
+        })
+      })
+      const outcome = await outcomeP
+      return {
+        ...baseResult,
+        status: outcome.status,
+        ...(outcome.finalText ? { finalText: outcome.finalText } : {}),
+      }
+    }
+
+    const intent = (request.name?.trim() || request.prompt.trim().slice(0, 80)) || session.id
+    await this.processEvent(managed, {
+      type: 'task_backgrounded',
+      toolUseId: `spawn:${session.id}`,
+      taskId: session.id,
+      intent,
+    })
+    const registered = managed.backgroundTaskRegistry.get(session.id)
+    if (registered) registered.source = 'spawn_session'
+
+    this.sendMessage(session.id, request.prompt, fileAttachments).catch(err => {
+      sessionLog.error(`Failed to send message to spawned session ${session.id}:`, err)
+      void this.processEvent(managed, {
+        type: 'task_completed',
+        taskId: session.id,
+        status: 'failed',
+        summary: err instanceof Error ? err.message : String(err),
+      })
+    })
+
+    return {
+      ...baseResult,
+      status: 'started',
+    }
+  }
+
+  private flushDeferredSpawnWakes(managed: ManagedSession): void {
+    for (const info of managed.backgroundTaskRegistry.values()) {
+      if (!info.needsIdleWake || info.source !== 'spawn_session' || info.status === 'running') continue
+      info.needsIdleWake = false
+      const stored = managed.backgroundTaskOutputs.get(info.taskId)
+      const nudge = buildBackgroundTaskNudge({
+        status: info.status,
+        taskId: info.taskId,
+        intent: info.intent,
+        summary: stored?.summary,
+        outputFile: stored?.outputFile || undefined,
+      })
+      sessionLog.info(`[bg-lifecycle] flushing deferred spawn wake to idle session`, {
+        sessionId: managed.id,
+        taskId: info.taskId,
+        status: info.status,
+      })
+      void this.sendMessage(managed.id, nudge, [], [], { hidden: true }).catch((err) => {
+        sessionLog.error(`[bg-lifecycle] failed to surface completed task ${info.taskId}:`, err)
+      })
+    }
+  }
+
+  private surfaceSpawnedSessionCompletion(evt: SessionCompletionEvent): void {
+    const child = this.sessions.get(evt.sessionId)
+    const parentId = child?.parentSessionId
+    if (!child || !parentId) return
+    const parent = this.sessions.get(parentId)
+    if (!parent) return
+    const running = parent.backgroundTaskRegistry.get(child.id)
+    if (!running || running.source !== 'spawn_session' || running.status !== 'running') return
+    void this.processEvent(parent, {
+      type: 'task_completed',
+      taskId: child.id,
+      status: mapCompletionReasonToTaskStatus(evt.reason),
+      summary: evt.finalText,
+    })
+  }
+
+  private findTaskOrchestratorSessionId(workspaceId: string, slug: string): string | undefined {
+    for (const session of this.sessions.values()) {
+      if (
+        session.workspace.id === workspaceId
+        && session.taskSlug === slug
+        && !session.parentSessionId
+        && !session.taskDraft
+      ) {
+        return session.id
+      }
+    }
+    return undefined
+  }
+
+  private async runTaskFromTool(
+    workspaceId: string,
+    input: { slug?: string; orchestratorSessionId?: string; params?: Record<string, unknown>; waitForCompletion?: boolean },
+  ) {
+    const runner = this.taskRunnerLookup?.(workspaceId)
+    if (!runner) {
+      throw new Error('run_task is not available — the Tasks Conductor is not wired for this workspace.')
+    }
+
+    let slug = input.slug
+    let orchestratorSessionId = input.orchestratorSessionId
+    if (!slug && orchestratorSessionId) {
+      slug = this.sessions.get(orchestratorSessionId)?.taskSlug
+    }
+    if (!slug) {
+      throw new Error('Could not resolve a task slug. Pass slug or a task orchestrator session id.')
+    }
+    if (!orchestratorSessionId) {
+      orchestratorSessionId = this.findTaskOrchestratorSessionId(workspaceId, slug)
+    }
+
+    const snapshot = runner.run(slug, {
+      orchestratorSessionId,
+      params: input.params,
+    })
+    const settled = input.waitForCompletion
+      ? await runner.waitUntilSettled(slug, snapshot.runId)
+      : snapshot
+    return {
+      slug: settled.slug,
+      runId: settled.runId,
+      status: settled.status,
+      nodeCount: settled.nodes.filter((n) => n.state !== 'skipped').length,
+      nodes: settled.nodes.map((n) => ({ id: n.id, state: n.state, sessionId: n.sessionId })),
+    }
   }
 
   /**
@@ -7523,6 +7708,9 @@ export class SessionManager implements ISessionManager {
     }
 
     sessionLog.info(`Found output for task ${taskId}: file=${info.outputFile}, status=${info.status}`)
+    if (!info.outputFile) {
+      return info.summary || null
+    }
     try {
       const content = await readFile(info.outputFile, 'utf-8')
       // Delete after successful read to prevent memory leak
@@ -8789,21 +8977,29 @@ export class SessionManager implements ISessionManager {
         // the terminal notification reaches the agent through the live stream, so
         // we skip then. Gated on keep-alive because only that mode delivers this
         // event between turns; guarded against duplicate notifications.
-        if (managed && this.keepBackgroundTasksAlive && !managed.isProcessing && !wasAlreadyTerminal) {
-          const taskIntent = managed.backgroundTaskRegistry.get(event.taskId)?.intent
+        const completedEntry = managed?.backgroundTaskRegistry.get(event.taskId)
+        if (completedEntry && shouldDeferSpawnWake({
+          isProcessing: managed?.isProcessing ?? false,
+          wasAlreadyTerminal,
+          source: completedEntry.source,
+        })) {
+          completedEntry.needsIdleWake = true
+        }
+        if (managed && shouldWakeOnTaskCompleted({
+          isProcessing: managed.isProcessing,
+          wasAlreadyTerminal,
+          keepAlive: this.keepBackgroundTasksAlive,
+          source: completedEntry?.source,
+        })) {
+          const taskIntent = completedEntry?.intent
           const outputFile = event.outputFile || managed.backgroundTaskOutputs.get(event.taskId)?.outputFile
-          const label = taskIntent ? `"${taskIntent}"` : `task ${event.taskId}`
-          const nudge = event.status === 'completed'
-            ? [
-                `[background-task-completed] The background agent you launched (${label}) has finished.`,
-                outputFile ? `Its full output is saved at: ${outputFile}` : '',
-                `Read that output file and present the results to the user now. Do NOT spawn another background agent — just read the file and summarize the findings inline.`,
-              ].filter(Boolean).join('\n')
-            : [
-                `[background-task-${event.status}] The background agent you launched (${label}) ended with status "${event.status}".`,
-                outputFile ? `Any partial output is at: ${outputFile}.` : '',
-                `Briefly let the user know it did not complete successfully. Do NOT spawn another background agent.`,
-              ].filter(Boolean).join('\n')
+          const nudge = buildBackgroundTaskNudge({
+            status: event.status,
+            taskId: event.taskId,
+            intent: taskIntent,
+            summary: event.summary,
+            outputFile: outputFile || undefined,
+          })
           sessionLog.info(`[bg-lifecycle] surfacing completed background task to idle session`, {
             sessionId,
             taskId: event.taskId,
@@ -9558,6 +9754,8 @@ export class SessionManager implements ISessionManager {
    * Should be called on app shutdown to prevent resource leaks.
    */
   cleanup(): void {
+    this.spawnCompletionUnsub?.()
+    this.spawnCompletionUnsub = undefined
     sessionLog.info('Cleaning up resources...')
 
     // Stop all ConfigWatchers (file system watchers)

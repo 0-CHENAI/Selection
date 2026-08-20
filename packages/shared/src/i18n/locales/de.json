@@ -1669,6 +1669,8 @@
   "toast.messagingRateLimited": "Zu viele Pairing-Code-Anfragen. Bitte warte kurz und versuche es erneut.",
   "toast.messagingTelegramLockedDown": "Telegram-Bot auf erlaubte Nutzer beschränkt",
   "toast.messagingTelegramUnlocked": "Telegram-Bot entsperrt — jeder kann ihn wieder per DM erreichen",
+  "toast.parentStoppedChildrenRunning_one": "Diese Sitzung wurde gestoppt. {{count}} Untersitzung läuft noch — öffnen oder stoppen Sie sie in der Liste.",
+  "toast.parentStoppedChildrenRunning_other": "Diese Sitzung wurde gestoppt. {{count}} Untersitzungen laufen noch — öffnen oder stoppen Sie sie in der Liste.",
   "toast.pathCopied": "Pfad in die Zwischenablage kopiert",
   "toast.patternCopied": "Muster in die Zwischenablage kopiert",
   "toast.reconnectFailed": "Wiederverbindung fehlgeschlagen",

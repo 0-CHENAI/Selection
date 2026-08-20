@@ -40,6 +40,8 @@ import { handleGetSessionInfo } from './handlers/get-session-info.ts';
 import { handleListSessions } from './handlers/list-sessions.ts';
 import { handleListBackgroundTasks } from './handlers/list-background-tasks.ts';
 import { handleCreateTask } from './handlers/create-task.ts';
+import { handleRunTask } from './handlers/run-task.ts';
+import { handleGetTaskResults } from './handlers/get-task-results.ts';
 import { handleArchiveSession } from './handlers/archive-session.ts';
 import { handleSendAgentMessage } from './handlers/send-agent-message.ts';
 import { handleListMessagingChannels, handleUnbindMessagingChannel } from './handlers/messaging.ts';
@@ -201,6 +203,10 @@ export const SpawnSessionSchema = z.object({
     .describe('Reasoning level for the new session. Silently ignored on non-reasoning models (e.g. gpt-4o, gemini-2.5-flash). Omit to inherit the workspace default.'),
   labels: z.array(z.string()).optional().describe('Labels for the new session'),
   workingDirectory: z.string().optional().describe('Working directory for the new session'),
+  mode: z.enum(['wait', 'background']).optional()
+    .describe('wait: block until the child finishes and return finalText. background (default): return sessionId immediately and notify when done.'),
+  timeoutMs: z.number().int().positive().optional()
+    .describe('Wait-mode timeout in milliseconds (default 900000, max 1800000). The child keeps running after timeout.'),
   attachments: z.array(z.object({
     path: z.string().describe('Absolute file path on disk'),
     name: z.string().optional().describe('Display name (defaults to file basename)'),
@@ -237,6 +243,18 @@ export const CreateTaskSchema = z.object({
   model: z.string().optional().describe('Model ID for the task sessions (workspace default when omitted)'),
   workingDirectory: z.string().optional().describe('Working directory for the task sessions'),
   projectId: z.string().optional().describe("Project ID to bind the task to (defaults to the invoking session's project)"),
+});
+
+export const RunTaskSchema = z.object({
+  slug: z.string().optional().describe('Task slug to run. Required unless orchestratorSessionId is set.'),
+  orchestratorSessionId: z.string().optional().describe('Orchestrator session id (from create_task). Used to find the slug when omitted.'),
+  params: z.record(z.string(), z.unknown()).optional().describe('Optional task params forwarded to TaskRunner'),
+  waitForCompletion: z.boolean().optional().describe('If true, wait until the run reaches a terminal state (default false)'),
+});
+
+export const GetTaskResultsSchema = z.object({
+  slug: z.string().describe('Task slug to inspect'),
+  runId: z.string().optional().describe('Specific run id. Omit to read the latest run.'),
 });
 
 export const ListSessionsSchema = z.object({
@@ -505,18 +523,23 @@ Put text/content directly in the 'prompt' parameter. Do NOT pass inline text via
 Only use 'attachments' for existing file paths on disk - the tool loads file content automatically.
 For large files (>2000 lines), use {path, startLine, endLine} to select a portion.`,
 
-  spawn_session: `Create a new session that runs independently with its own prompt, connection, model, and sources.
+  spawn_session: `Create a first-class child session that runs independently with its own prompt, connection, model, and sources.
 
-Use this to delegate tasks to parallel sessions — research, analysis, drafts, or any work that benefits from separate context.
+Default: do the work in this session. Spawn only when the user asked to split/parallelize, you have two or more independent tool-heavy tracks, or the side work would pollute this conversation. Do not spawn for ordinary Q&A, editing existing text, summarizing/classifying/extracting fields from text you already have, reading a file or two, a single command, or "just in case". Prefer at most 3 background children in one turn.
 
-Call with help=true first to discover available connections, models, and sources.
-When spawning, the 'prompt' parameter is required.
+When spawning, the 'prompt' parameter is required. Call help=true only if you need to pick a different connection or model.
+
+mode:
+- "wait": block until the child finishes and return its finalText. Use when you need the conclusion in this turn.
+- "background" (default): return sessionId immediately; the child is tracked and you are notified when it finishes. Do not spawn another child to collect that result.
+
+Optional timeoutMs applies only to wait (default 15 minutes, max 30). On timeout the child keeps running.
 
 Optional overrides: \`model\`, \`llmConnection\`, \`permissionMode\`, \`thinkingLevel\`, \`enabledSourceSlugs\`, \`labels\`, \`workingDirectory\`. Omitted fields inherit from the spawning session or the workspace default.
 
-\`thinkingLevel\` is silently ignored on non-reasoning models (e.g. gpt-4o, gemini-2.5-flash) — the SDK drops the reasoning param rather than erroring. Use it when you want to force deeper reasoning on a supported model, or set it to \`off\` when spawning a session that doesn't need to think.
+\`thinkingLevel\` is silently ignored on non-reasoning models (e.g. gpt-4o, gemini-2.5-flash).
 
-The spawned session appears in the session list and runs fire-and-forget.
+The child appears in the session list (parentSessionId = this session).
 Only use 'attachments' for existing file paths on disk — the tool reads them automatically.`,
 
   send_developer_feedback: `Send freeform feedback to the Selection development team.
@@ -540,11 +563,23 @@ IMPORTANT: never move a task into a closed status (such as "done" or "cancelled"
 Archiving removes a session from the active list and unread counts — it does NOT delete it (pass archived=false to restore). Use it to tidy up finished or superseded sessions.
 Requires an explicit sessionId and cannot target your own session. Use list_sessions / get_session_info to find the target session's ID.`,
 
-  create_task: `Create a Selection Task on the kanban board — writes tasks/<slug>/task.yaml and creates its orchestrator session. CREATION ONLY: the task lands in "todo" and is NOT run; starting it is the user's (or an automation's) decision.
+  create_task: `Create a Selection Task on the kanban board — writes tasks/<slug>/task.yaml and creates its orchestrator session. CREATION ONLY: the task lands in "todo" and is NOT run.
 
 Provide title + description (the description becomes the task goal and the initial node prompt). Optional: acceptanceCriteria (verification rubric), sources / skills (workspace slugs), llmConnection + model, workingDirectory, projectId. When projectId is omitted, the task inherits the invoking session's project.
 
-Returns { slug, orchestratorSessionId, taskLabelId, warnings } — unknown source/skill slugs are reported as warnings, not errors. Use it when the user asks to capture or queue work as a task; to execute work right now, use the current session or spawn_session instead.`,
+Returns { slug, orchestratorSessionId, taskLabelId, warnings } — unknown source/skill slugs are reported as warnings, not errors. Use it only when the user asks to capture or queue work as a board task. Do not create a board task for one-off chat work. To execute immediately in chat, do the work yourself or (if the spawn bar is met) use spawn_session. To start this board task's Conductor DAG, call run_task with the returned slug.`,
+
+  run_task: `Start the Conductor DAG for an existing Selection Task on the kanban board.
+
+Provide slug (from create_task or the board) and/or orchestratorSessionId. Optional params are forwarded to the runner. waitForCompletion (default false) waits until the run is completed, failed, or stopped.
+
+Returns { slug, runId, status, nodeCount, nodes }. This does not create a task — use create_task first. Use only when the user asked to run a board task. Chat-time one-off work should be done in this session, or with spawn_session if the spawn bar is met — not create-then-run.`,
+
+  get_task_results: `Read a Conductor run's verdict and per-node outputs from disk.
+
+Provide slug. Optional runId selects a specific run; omit to read the latest. Works after restart — it does not require an in-memory run.
+
+Returns { slug, runId, runIds, verdict, verdicts, repair, runStatus, nodes }.`,
 
   get_session_info: `Get metadata about the current session or a specific session by ID.
 
@@ -556,16 +591,15 @@ Call with no arguments to introspect your own session state.`,
 Use filters (status, label, search) to narrow results instead of fetching everything. Default limit is 20 sessions.
 Use get_session_info for full details on a specific session (list-then-detail pattern).`,
 
-  list_background_tasks: `List background agents/tasks tracked for a session (running, finished, or orphaned).
+  list_background_tasks: `List background child sessions and other tracked tasks for a session (running, finished, or orphaned).
 
 This is the authoritative way to answer a "what background work is running / what's the status?" question.
-It reads the main-process registry, which tracks tasks ACROSS turns — unlike the SDK's in-subprocess task tools,
-which only see tasks launched in the current subprocess and lose visibility of tasks from prior turns.
+It reads the main-process registry, which tracks work across turns — including spawn_session children started in earlier turns.
 
 Status meanings:
 - running: backgrounded and not yet reported finished.
 - completed / failed / stopped: a terminal notification was received.
-- orphaned: the turn that launched the task ended before it finished, so it was terminated with that turn's subprocess.
+- orphaned: a turn-bound task ended with its turn. First-class spawned child sessions are not orphaned this way.
 
 Never guess or claim "the app restarted" — report exactly what this tool returns. Omit sessionId for the current session.`,
 
@@ -653,6 +687,8 @@ export const SESSION_TOOL_DEFS: SessionToolDef[] = [
   { name: 'set_session_status', description: TOOL_DESCRIPTIONS.set_session_status, inputSchema: SetSessionStatusSchema, executionMode: 'registry', safeMode: 'block', handler: handleSetSessionStatus },
   { name: 'archive_session', description: TOOL_DESCRIPTIONS.archive_session, inputSchema: ArchiveSessionSchema, executionMode: 'registry', safeMode: 'block', handler: handleArchiveSession },
   { name: 'create_task', description: TOOL_DESCRIPTIONS.create_task, inputSchema: CreateTaskSchema, executionMode: 'registry', safeMode: 'block', handler: handleCreateTask },
+  { name: 'run_task', description: TOOL_DESCRIPTIONS.run_task, inputSchema: RunTaskSchema, executionMode: 'registry', safeMode: 'block', handler: handleRunTask },
+  { name: 'get_task_results', description: TOOL_DESCRIPTIONS.get_task_results, inputSchema: GetTaskResultsSchema, executionMode: 'registry', safeMode: 'allow', readOnly: true, handler: handleGetTaskResults },
   { name: 'get_session_info', description: TOOL_DESCRIPTIONS.get_session_info, inputSchema: GetSessionInfoSchema, executionMode: 'registry', safeMode: 'allow', readOnly: true, handler: handleGetSessionInfo },
   { name: 'list_sessions', description: TOOL_DESCRIPTIONS.list_sessions, inputSchema: ListSessionsSchema, executionMode: 'registry', safeMode: 'allow', readOnly: true, handler: handleListSessions },
   { name: 'list_background_tasks', description: TOOL_DESCRIPTIONS.list_background_tasks, inputSchema: ListBackgroundTasksSchema, executionMode: 'registry', safeMode: 'allow', readOnly: true, handler: handleListBackgroundTasks },

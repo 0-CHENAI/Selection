@@ -87,9 +87,9 @@ describe('background task completion surfacing (idle keep-alive)', () => {
     expect(calls[0]!.msg).toContain('background-task-completed')
     expect(calls[0]!.msg).toContain("Look up today's AI news")
     expect(calls[0]!.msg).toContain('/tmp/tasks/task_1.output')
-    expect(calls[0]!.msg).toContain('present the results')
-    // Loop guard: the nudge must tell the agent not to re-spawn a background agent.
-    expect(calls[0]!.msg).toContain('Do NOT spawn another background agent')
+    expect(calls[0]!.msg).toContain('present the findings')
+    // Loop guard: the nudge must tell the agent not to re-spawn a background session.
+    expect(calls[0]!.msg).toContain('Do NOT spawn another background session')
     // Must be hidden so it never renders as a user-authored transcript bubble.
     expect(calls[0]!.hidden).toBe(true)
   })
@@ -103,6 +103,32 @@ describe('background task completion surfacing (idle keep-alive)', () => {
     await fireTaskCompleted(sessionId, { type: 'task_completed', taskId: 'task_2', status: 'completed' })
 
     expect(calls).toEqual([])
+  })
+
+  it('surfaces spawn_session children even when keep-alive is OFF', async () => {
+    const sessionId = 'spawn-keepalive-off'
+    buildSession(sessionId, { keepAlive: false, processing: false })
+    const managed = (sm as unknown as { sessions: Map<string, { backgroundTaskRegistry: Map<string, unknown> }> }).sessions.get(sessionId)!
+    managed.backgroundTaskRegistry.set('child-1', {
+      taskId: 'child-1',
+      startTime: Date.now(),
+      status: 'running',
+      source: 'spawn_session',
+      intent: 'Explore auth',
+    })
+    const calls = spyOnSendMessage()
+
+    await fireTaskCompleted(sessionId, {
+      type: 'task_completed',
+      taskId: 'child-1',
+      status: 'completed',
+      summary: 'Found login.ts',
+    })
+
+    expect(calls.length).toBe(1)
+    expect(calls[0]!.msg).toContain('Session ID: child-1')
+    expect(calls[0]!.msg).toContain('Found login.ts')
+    expect(calls[0]!.hidden).toBe(true)
   })
 
   it('does NOT surface when keep-alive is OFF', async () => {

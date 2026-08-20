@@ -842,4 +842,104 @@ describe('TaskRunner (Conductor)', () => {
 
     expect(host.nodeCounts).toContainEqual({ sessionId: 'orch', count: 3 });
   });
+
+  it('skips non-session node kinds and only dispatches session nodes', async () => {
+    saveTaskSpec(
+      root,
+      specOf({
+        id: 'kinds',
+        title: 'Kinds',
+        goal: 'g',
+        nodes: [
+          { id: 'a', prompt: 'a' },
+          { id: 'gate', kind: 'approval', prompt: 'ignored' },
+          { id: 'b', depends_on: ['a'], prompt: 'b' },
+        ],
+      }),
+    );
+    const runner = makeRunner();
+    runner.run('kinds', { runId: 'r1', orchestratorSessionId: 'orch', verifyOnComplete: false });
+    await tick();
+
+    expect(host.dispatchedNames()).toEqual(['a']);
+    expect(runner.getRunState('kinds', 'r1')!.nodes.find((n) => n.id === 'gate')!.state).toBe('skipped');
+    expect(host.nodeCounts).toContainEqual({ sessionId: 'orch', count: 2 });
+
+    host.complete('a');
+    await tick();
+    host.complete('b');
+    await tick();
+
+    expect(host.dispatchedNames()).toEqual(['a', 'b']);
+    expect(runner.getRunState('kinds', 'r1')!.status).toBe('completed');
+  });
+
+  it('treats skipped nodes as satisfied dependencies', async () => {
+    saveTaskSpec(
+      root,
+      specOf({
+        id: 'skip-dep',
+        title: 'Skip dep',
+        goal: 'g',
+        nodes: [
+          { id: 'gate', kind: 'approval', prompt: 'ignored' },
+          { id: 'work', depends_on: ['gate'], prompt: 'work' },
+        ],
+      }),
+    );
+    const runner = makeRunner();
+    runner.run('skip-dep', { runId: 'r1', orchestratorSessionId: 'orch', verifyOnComplete: false });
+    await tick();
+
+    expect(host.dispatchedNames()).toEqual(['work']);
+    host.complete('work');
+    await tick();
+    expect(runner.getRunState('skip-dep', 'r1')!.status).toBe('completed');
+  });
+
+  it('dispatches orchestrator-kind nodes (v1 escape hatch)', async () => {
+    saveTaskSpec(
+      root,
+      specOf({
+        id: 'orch-kind',
+        title: 'Orch kind',
+        goal: 'g',
+        nodes: [{ id: 'lead', kind: 'orchestrator', prompt: 'coordinate' }],
+      }),
+    );
+    const runner = makeRunner();
+    runner.run('orch-kind', { runId: 'r1', verifyOnComplete: false });
+    await tick();
+    expect(host.dispatchedNames()).toEqual(['lead']);
+    host.complete('lead');
+    await tick();
+    expect(runner.getRunState('orch-kind', 'r1')!.status).toBe('completed');
+  });
+
+  it('does not dispatch deferred kinds when resuming a hydrated run', async () => {
+    saveTaskSpec(
+      root,
+      specOf({
+        id: 'resume-skip',
+        title: 'Resume skip',
+        goal: 'g',
+        nodes: [
+          { id: 'work', prompt: 'work' },
+          { id: 'gate', kind: 'route', prompt: 'ignored' },
+        ],
+      }),
+    );
+    const r1 = makeRunner();
+    r1.run('resume-skip', { runId: 'r1', verifyOnComplete: false });
+    await tick();
+    r1.pause('resume-skip', 'r1');
+
+    const host2 = new MockHost();
+    const r2 = new TaskRunner({ host: host2, workspaceId: 'ws', workspaceRoot: root, now: () => '2026-06-07T00:00:00.000Z' });
+    r2.resume('resume-skip', 'r1');
+    await tick();
+
+    expect(host2.dispatchedNames()).toEqual(['work']);
+    expect(r2.getRunState('resume-skip', 'r1')!.nodes.find((n) => n.id === 'gate')!.state).toBe('skipped');
+  });
 });

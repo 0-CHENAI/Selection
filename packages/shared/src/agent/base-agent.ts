@@ -19,6 +19,7 @@ import { join } from 'node:path';
 import type { AgentEvent } from '@craft-agent/core/types';
 import type { FileAttachment } from '../utils/files.ts';
 import { expandPath } from '../utils/paths.ts';
+import { resolveSpawnSessionMode, resolveSpawnWaitTimeoutMs } from './spawn-session-tool.ts';
 import { buildTransferredSessionContext } from './conversation-summary.ts';
 import type { ThinkingLevel } from './thinking-levels.ts';
 import { DEFAULT_THINKING_LEVEL, normalizeThinkingLevel } from './thinking-levels.ts';
@@ -95,6 +96,9 @@ export interface MiniAgentConfig {
 // Spawn Session Types
 // ============================================================
 
+export type SpawnSessionMode = 'wait' | 'background';
+export type SpawnSessionResultStatus = 'started' | 'completed' | 'failed' | 'interrupted' | 'timeout';
+
 export interface SpawnSessionRequest {
   prompt: string;
   name?: string;
@@ -107,15 +111,21 @@ export interface SpawnSessionRequest {
   workingDirectory?: string;
   /** Workspace project id to bind the spawned session to */
   projectId?: string;
+  /** wait = block for finalText; background (default) = notify on complete */
+  mode?: SpawnSessionMode;
+  /** Wait-mode timeout in ms. Clamped to 30 minutes. */
+  timeoutMs?: number;
   attachments?: Array<{ path: string; name?: string }>;
 }
 
 export interface SpawnSessionResult {
   sessionId: string;
   name: string;
-  status: 'started';
+  status: SpawnSessionResultStatus;
   connection?: string;
   model?: string;
+  /** Present in wait mode when the child produced a final assistant message. */
+  finalText?: string;
 }
 
 export interface SpawnSessionHelpResult {
@@ -1211,6 +1221,8 @@ ${formattedMessages}
         ? expandPath(input.workingDirectory)
         : undefined,
       projectId: input.projectId as string | undefined,
+      mode: resolveSpawnSessionMode(input.mode),
+      timeoutMs: resolveSpawnWaitTimeoutMs(input.timeoutMs),
       attachments: input.attachments as SpawnSessionRequest['attachments'],
     };
 

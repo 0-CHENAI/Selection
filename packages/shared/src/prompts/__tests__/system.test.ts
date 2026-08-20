@@ -37,6 +37,21 @@ describe('system prompt guidance', () => {
     expect(prompt).not.toContain('The subtask needs tools (Read, Bash, Grep)')
   })
 
+  it('does not advertise a Task/subagent/Workflow tool', () => {
+    const prompt = getSystemPrompt(undefined, undefined, '/tmp/workspace', '/tmp/workspace')
+
+    expect(prompt).not.toContain('Task tool with subagents')
+    expect(prompt).not.toContain('call_llm vs Task (subagents)')
+    expect(prompt).toContain('meets the spawn bar below')
+    expect(prompt).toContain('Default: do the work yourself in this session')
+    expect(prompt).toContain('Do not spawn "just in case"')
+    expect(prompt).toContain('summarizing/classifying/extracting fields from existing text')
+    expect(prompt).toContain('Prefer at most 3 background children in one turn')
+    expect(prompt).toContain('Do not spawn another child to collect that result')
+    expect(prompt).toContain('do **not** automatically `archive_session`')
+    expect(prompt).toContain('`run_task`')
+  })
+
   it('tells the model to speak source titles rather than slugs', () => {
     const prompt = getSystemPrompt(undefined, undefined, '/tmp/workspace', '/tmp/workspace')
 
