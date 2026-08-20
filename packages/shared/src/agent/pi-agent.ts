@@ -574,6 +574,8 @@ export class PiAgent extends BaseAgent {
       branchFromSdkSessionId: this.config.session?.branchFromSdkSessionId,
       branchFromSessionPath: this.config.session?.branchFromSessionPath,
       branchFromSdkTurnId: this.config.session?.branchFromSdkTurnId,
+      resumeSdkSessionId: this.config.session?.sdkSessionId,
+      forceFreshSession: this.config.session?.forceFreshSdkSession,
     });
 
     // Wait for subprocess to report ready

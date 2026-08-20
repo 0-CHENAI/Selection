@@ -524,6 +524,20 @@ export interface MessagesTruncatedEvent {
   type: 'messages_truncated'
   sessionId: string
   keepThroughMessageId: string
+  runId?: string
+}
+
+export interface RegenerateStartedEvent {
+  type: 'regenerate_started'
+  sessionId: string
+  runId: string
+}
+
+export interface MessagesRestoredEvent {
+  type: 'messages_restored'
+  sessionId: string
+  messages: Message[]
+  runId: string
 }
 
 /**
@@ -575,7 +589,9 @@ export type AgentEvent =
   | AuthCompletedEvent
   | SourceActivatedEvent
   | UsageUpdateEvent
+  | RegenerateStartedEvent
   | MessagesTruncatedEvent
+  | MessagesRestoredEvent
 
 /**
  * Side effects that need to be handled outside the pure processor

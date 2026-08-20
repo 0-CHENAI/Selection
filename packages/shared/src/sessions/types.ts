@@ -203,6 +203,8 @@ export interface SessionConfig {
    * - Pi: session entry ID (used with SessionManager.branch(anchor))
    */
   branchFromSdkTurnId?: string;
+  /** Force the provider to create a new native session instead of resuming recent history. */
+  forceFreshSdkSession?: boolean;
   /** One-shot hidden summary injected on the first turn after a remote transfer. */
   transferredSessionSummary?: string;
   /** Whether the transferred-session summary has already been injected. */

@@ -431,7 +431,9 @@ export type SessionEvent =
   | { type: 'usage_update'; sessionId: string; tokenUsage: { inputTokens: number; contextWindow?: number } }
   | { type: 'message_annotations_updated'; sessionId: string; messageId: string; annotations: AnnotationV1[] }
   | { type: 'working_directory_error'; sessionId: string; error: string }
-  | { type: 'messages_truncated'; sessionId: string; keepThroughMessageId: string }
+  | { type: 'regenerate_started'; sessionId: string; runId: string }
+  | { type: 'messages_truncated'; sessionId: string; keepThroughMessageId: string; runId?: string }
+  | { type: 'messages_restored'; sessionId: string; messages: Message[]; runId: string }
 
 export interface SendMessageOptions {
   skillSlugs?: string[]

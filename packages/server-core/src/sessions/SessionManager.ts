@@ -992,6 +992,23 @@ interface ManagedSession {
   // One-shot: after regenerate, inject prior turns into a fresh backend session.
   regenerateSeedPending?: boolean
   regenerateSeedApplied?: boolean
+  // Force the next provider runtime to start a new native session. Used when
+  // regenerate has no safe provider-native anchor before the target user turn.
+  forceFreshSdkSession?: boolean
+  // Runtime-only transaction. Persistence keeps originalMessages until a
+  // non-empty replacement commits; failures restore this snapshot.
+  regenerateTransaction?: {
+    runId: string
+    keepThroughMessageId: string
+    rendererTruncated: boolean
+    originalMessages: Message[]
+    originalSdkSessionId?: string
+    originalBranchContextStrategy?: 'sdk-fork' | 'seeded-fresh-session'
+    originalBranchFromSdkSessionId?: string
+    originalBranchFromSessionPath?: string
+    originalBranchFromSdkCwd?: string
+    originalBranchFromSdkTurnId?: string
+  }
   // One-shot hidden summary injected on the first turn after a remote transfer.
   transferredSessionSummary?: string
   // Whether the transferred-session summary has already been injected.
@@ -1150,6 +1167,7 @@ export function buildAgentSessionConfig(managed: ManagedSession): SessionConfig 
     branchFromSessionPath: managed.branchContextStrategy === 'sdk-fork' ? managed.branchFromSessionPath : undefined,
     branchFromSdkCwd: managed.branchContextStrategy === 'sdk-fork' ? managed.branchFromSdkCwd : undefined,
     branchFromSdkTurnId: managed.branchContextStrategy === 'sdk-fork' ? managed.branchFromSdkTurnId : undefined,
+    forceFreshSdkSession: managed.forceFreshSdkSession,
     branchFromMessageId: managed.branchFromMessageId,
     createdAt: managed.lastMessageAt,
     lastUsedAt: managed.lastMessageAt,
@@ -2255,12 +2273,25 @@ export class SessionManager implements ISessionManager {
     try {
       // Filter out transient status messages (progress indicators like "Compacting...")
       // Error messages are now persisted with rich fields for diagnostics
-      const persistableMessages = managed.messages.filter(m =>
+      const messagesForPersistence = managed.regenerateTransaction?.originalMessages ?? managed.messages
+      const persistableMessages = messagesForPersistence.filter(m =>
         m.role !== 'status'
       )
+      const persistentFields = pickSessionFields(managed)
+      const regenerateTransaction = managed.regenerateTransaction
+      if (regenerateTransaction) {
+        // Keep the last committed native history identity on disk until the
+        // replacement response commits. A crash during regenerate must reopen
+        // the old transcript and its matching Pi session, never a half-run.
+        persistentFields.sdkSessionId = regenerateTransaction.originalSdkSessionId
+        persistentFields.branchFromSdkSessionId = regenerateTransaction.originalBranchFromSdkSessionId
+        persistentFields.branchFromSessionPath = regenerateTransaction.originalBranchFromSessionPath
+        persistentFields.branchFromSdkCwd = regenerateTransaction.originalBranchFromSdkCwd
+        persistentFields.branchFromSdkTurnId = regenerateTransaction.originalBranchFromSdkTurnId
+      }
 
       const storedSession: StoredSession = {
-        ...pickSessionFields(managed),
+        ...persistentFields,
         workspaceRootPath: managed.workspace.rootPath,
         createdAt: managed.createdAt ?? Date.now(),
         lastUsedAt: Date.now(),
@@ -3608,6 +3639,7 @@ export class SessionManager implements ISessionManager {
 
       const onSdkSessionIdUpdate = (sdkSessionId: string) => {
         managed.sdkSessionId = sdkSessionId
+        managed.forceFreshSdkSession = false
         // Retire branch-only fork metadata now that child session is established
         if (managed.branchFromSdkSessionId) {
           sessionLog.info(`Branch fork established for ${managed.id}: child=${sdkSessionId}, retiring parent fork metadata (parent=${managed.branchFromSdkSessionId})`)
@@ -6378,6 +6410,7 @@ export class SessionManager implements ISessionManager {
       const chatIterator = agent.chat(message, modelInputAttachments.attachments, {
         previousResponseInterrupted,
       })
+      this.announceRegenerateReplacement(managed)
       sessionLog.info('Got chat iterator, starting iteration...')
 
       for await (const event of chatIterator) {
@@ -6496,7 +6529,7 @@ export class SessionManager implements ISessionManager {
 
           sendSpan.mark('chat.complete')
           sendSpan.end()
-          this.onProcessingStopped(sessionId, 'complete')
+          await this.onProcessingStopped(sessionId, 'complete')
           return  // Exit function, skip finally block (onProcessingStopped handles cleanup)
         }
 
@@ -6513,7 +6546,7 @@ export class SessionManager implements ISessionManager {
         sendSpan.end()
       } else if (managed.stopRequested) {
         sessionLog.info('Chat loop completed after stop request - events drained successfully')
-        this.onProcessingStopped(sessionId, 'interrupted')
+        await this.onProcessingStopped(sessionId, 'interrupted')
       } else {
         sessionLog.info('Chat loop exited unexpectedly')
       }
@@ -6538,7 +6571,7 @@ export class SessionManager implements ISessionManager {
         // by setting isProcessing = false directly. All other abort reasons route
         // through onProcessingStopped for queue draining.
         if (reason === AbortReason.UserStop || reason === AbortReason.Redirect || reason === undefined) {
-          this.onProcessingStopped(sessionId, 'interrupted')
+          await this.onProcessingStopped(sessionId, 'interrupted')
         }
       } else {
         sessionLog.error('Error in chat:', error)
@@ -6557,7 +6590,7 @@ export class SessionManager implements ISessionManager {
           error: error instanceof Error ? error.message : 'Unknown error'
         }, managed.workspace.id)
         // Handle error via centralized handler
-        this.onProcessingStopped(sessionId, 'error')
+        await this.onProcessingStopped(sessionId, 'error')
       }
     } finally {
       // Only handle cleanup for unexpected exits (loop break without complete event)
@@ -6567,7 +6600,7 @@ export class SessionManager implements ISessionManager {
         sessionLog.info('Finally block cleanup - unexpected exit')
         sendSpan.mark('chat.unexpected_exit')
         sendSpan.end()
-        this.onProcessingStopped(sessionId, 'interrupted')
+        await this.onProcessingStopped(sessionId, 'interrupted')
       }
     }
   }
@@ -6620,23 +6653,67 @@ export class SessionManager implements ISessionManager {
       )
       const options = managed.lastSentOptions
 
-      managed.messages = managed.messages.slice(0, lastUserIdx + 1)
+      const originalMessages = managed.messages
+      const previousAssistant = originalMessages
+        .slice(0, lastUserIdx)
+        .findLast(message => message.role === 'assistant' && !message.isIntermediate && !message.hidden)
+      const sessionPath = getSessionStoragePath(managed.workspace.rootPath, sessionId)
+      const previousPiAnchor = previousAssistant
+        ? await getPiTurnAnchor(sessionPath, previousAssistant.id)
+        : undefined
+      if (managed.stopRequested || !managed.isProcessing) {
+        return { success: true }
+      }
+
+      const runId = randomUUID()
+      managed.regenerateTransaction = {
+        runId,
+        keepThroughMessageId: userMessage.id,
+        rendererTruncated: false,
+        originalMessages,
+        originalSdkSessionId: managed.sdkSessionId,
+        originalBranchContextStrategy: managed.branchContextStrategy,
+        originalBranchFromSdkSessionId: managed.branchFromSdkSessionId,
+        originalBranchFromSessionPath: managed.branchFromSessionPath,
+        originalBranchFromSdkCwd: managed.branchFromSdkCwd,
+        originalBranchFromSdkTurnId: managed.branchFromSdkTurnId,
+      }
+
+      managed.messages = originalMessages.slice(0, lastUserIdx + 1)
       this.persistSession(managed)
       await this.flushSession(managed.id)
       if (managed.stopRequested || !managed.isProcessing) {
         return { success: true }
       }
 
-      this.sendEvent({
-        type: 'messages_truncated',
-        sessionId,
-        keepThroughMessageId: userMessage.id,
-      }, managed.workspace.id)
+      this.sendEvent({ type: 'regenerate_started', sessionId, runId }, managed.workspace.id)
       announced = true
 
       managed.sdkSessionId = undefined
-      managed.regenerateSeedPending = true
-      managed.regenerateSeedApplied = false
+      if (previousPiAnchor && managed.regenerateTransaction.originalSdkSessionId) {
+        // Fork the exact current Pi session at the assistant turn immediately
+        // before the target user prompt. The target prompt is then sent once by
+        // sendMessage; the replaced assistant turn never enters native context.
+        managed.branchContextStrategy = 'sdk-fork'
+        managed.branchFromSdkSessionId = managed.regenerateTransaction.originalSdkSessionId
+        managed.branchFromSessionPath = sessionPath
+        managed.branchFromSdkCwd = managed.sdkCwd
+        managed.branchFromSdkTurnId = previousPiAnchor
+        managed.forceFreshSdkSession = false
+        managed.regenerateSeedPending = false
+        managed.regenerateSeedApplied = false
+      } else {
+        // First response (or legacy session without a Pi anchor): never call
+        // continueRecent(). Start fresh and inject only turns before the target
+        // user prompt through the existing one-shot branch seed path.
+        managed.branchFromSdkSessionId = undefined
+        managed.branchFromSessionPath = undefined
+        managed.branchFromSdkCwd = undefined
+        managed.branchFromSdkTurnId = undefined
+        managed.forceFreshSdkSession = true
+        managed.regenerateSeedPending = true
+        managed.regenerateSeedApplied = false
+      }
       this.persistSession(managed)
       await this.disposeManagedAgentRuntime(managed, 'regenerate last response')
 
@@ -6669,7 +6746,16 @@ export class SessionManager implements ISessionManager {
 
       return { success: true }
     } catch (error) {
-      if (announced) {
+      if (managed.regenerateTransaction) {
+        if (announced) {
+          this.sendEvent({
+            type: 'error',
+            sessionId,
+            error: error instanceof Error ? error.message : 'Failed to regenerate',
+          }, managed.workspace.id)
+        }
+        await this.onProcessingStopped(sessionId, 'error')
+      } else if (announced) {
         this.sendEvent({
           type: 'error',
           sessionId,
@@ -6691,6 +6777,18 @@ export class SessionManager implements ISessionManager {
       const message = managed.messages.find(candidate => candidate.id === entry.messageId)
       return message && !message.hidden && message.isQueued ? [message] : []
     })
+  }
+
+  private announceRegenerateReplacement(managed: ManagedSession): void {
+    const transaction = managed.regenerateTransaction
+    if (!transaction || transaction.rendererTruncated) return
+    transaction.rendererTruncated = true
+    this.sendEvent({
+      type: 'messages_truncated',
+      sessionId: managed.id,
+      keepThroughMessageId: transaction.keepThroughMessageId,
+      runId: transaction.runId,
+    }, managed.workspace.id)
   }
 
   private interruptLiveGenerationForQueuedFollowUp(managed: ManagedSession, messageId: string): void {
@@ -7060,6 +7158,80 @@ export class SessionManager implements ISessionManager {
     }
   }
 
+  private async settleRegenerateTransaction(
+    managed: ManagedSession,
+    reason: 'complete' | 'interrupted' | 'error' | 'timeout',
+  ): Promise<{ reason: 'complete' | 'interrupted' | 'error' | 'timeout'; rolledBack: boolean }> {
+    const transaction = managed.regenerateTransaction
+    if (!transaction) return { reason, rolledBack: false }
+
+    const keepIdx = managed.messages.findIndex(message => message.id === transaction.keepThroughMessageId)
+    const replacementMessages = keepIdx >= 0 ? managed.messages.slice(keepIdx + 1) : []
+    const hasNonEmptyFinalResponse = replacementMessages.some(message =>
+      message.role === 'assistant'
+      && !message.isIntermediate
+      && !message.hidden
+      && message.content.trim().length > 0
+    )
+
+    if (reason === 'complete' && hasNonEmptyFinalResponse) {
+      managed.regenerateTransaction = undefined
+      managed.forceFreshSdkSession = false
+      managed.regenerateSeedPending = false
+      managed.regenerateSeedApplied = false
+      managed.branchContextStrategy = transaction.originalBranchContextStrategy
+      managed.branchFromSdkSessionId = undefined
+      managed.branchFromSessionPath = undefined
+      managed.branchFromSdkCwd = undefined
+      managed.branchFromSdkTurnId = undefined
+      sessionLog.info('Regenerate transaction committed', {
+        sessionId: managed.id,
+        runId: transaction.runId,
+      })
+      return { reason, rolledBack: false }
+    }
+
+    await this.disposeManagedAgentRuntime(managed, 'regenerate rollback')
+
+    const originalIds = new Set(transaction.originalMessages.map(message => message.id))
+    const diagnostics = replacementMessages.filter(message =>
+      (message.role === 'error' || message.role === 'info') && !originalIds.has(message.id)
+    )
+    managed.messages = [...transaction.originalMessages, ...diagnostics]
+    managed.streamingText = ''
+    managed.sdkSessionId = transaction.originalSdkSessionId
+    managed.branchContextStrategy = transaction.originalBranchContextStrategy
+    managed.branchFromSdkSessionId = transaction.originalBranchFromSdkSessionId
+    managed.branchFromSessionPath = transaction.originalBranchFromSessionPath
+    managed.branchFromSdkCwd = transaction.originalBranchFromSdkCwd
+    managed.branchFromSdkTurnId = transaction.originalBranchFromSdkTurnId
+    managed.forceFreshSdkSession = false
+    managed.regenerateSeedPending = false
+    managed.regenerateSeedApplied = false
+    managed.regenerateTransaction = undefined
+
+    const settledReason = reason === 'complete' ? 'error' : reason
+    if (reason === 'complete') {
+      this.sendEvent({
+        type: 'error',
+        sessionId: managed.id,
+        error: 'Regeneration completed without a response. The previous response was restored.',
+      }, managed.workspace.id)
+    }
+    this.sendEvent({
+      type: 'messages_restored',
+      sessionId: managed.id,
+      messages: transaction.originalMessages,
+      runId: transaction.runId,
+    }, managed.workspace.id)
+    sessionLog.info('Regenerate transaction rolled back', {
+      sessionId: managed.id,
+      runId: transaction.runId,
+      reason: settledReason,
+    })
+    return { reason: settledReason, rolledBack: true }
+  }
+
   /**
    * Central handler for when processing stops (any reason).
    * Single source of truth for cleanup and queue processing.
@@ -7074,7 +7246,10 @@ export class SessionManager implements ISessionManager {
     const managed = this.sessions.get(sessionId)
     if (!managed) return
 
-    sessionLog.info(`Processing stopped for session ${sessionId}: ${reason}`)
+    const regenerateOutcome = await this.settleRegenerateTransaction(managed, reason)
+    const completionReason = regenerateOutcome.reason
+
+    sessionLog.info(`Processing stopped for session ${sessionId}: ${completionReason}`)
 
     // 1. Cleanup state
     this.setProcessing(managed, false)
@@ -7113,7 +7288,7 @@ export class SessionManager implements ISessionManager {
     const currentFinalMessageId = this.getLastFinalAssistantMessageId(managed.messages)
     const didReceiveNewFinalMessage = !!currentFinalMessageId && currentFinalMessageId !== turnStartFinalMessageId
 
-    if (reason === 'complete' && didReceiveNewFinalMessage) {
+    if (completionReason === 'complete' && didReceiveNewFinalMessage && !regenerateOutcome.rolledBack) {
       if (isViewing) {
         // User is watching - mark as read immediately
         await this.markSessionRead(sessionId)
@@ -7130,7 +7305,7 @@ export class SessionManager implements ISessionManager {
     // 3. Auto-complete mini agent sessions to avoid session list clutter
     //    Mini agents are spawned from EditPopovers for quick config edits
     //    and should automatically move to 'done' when finished
-    if (reason === 'complete' && managed.systemPromptPreset === 'mini' && managed.sessionStatus !== 'done') {
+    if (completionReason === 'complete' && managed.systemPromptPreset === 'mini' && managed.sessionStatus !== 'done') {
       sessionLog.info(`Auto-completing mini agent session ${sessionId}`)
       await this.setSessionStatus(sessionId, 'done')
     }
@@ -7184,7 +7359,7 @@ export class SessionManager implements ISessionManager {
       this.emitSessionComplete({
         sessionId,
         workspaceId: managed.workspace.id,
-        reason,
+        reason: completionReason,
         finalMessageId: currentFinalMessageId,
         finalText: currentFinalMessageId
           ? managed.messages.find(m => m.id === currentFinalMessageId)?.content
