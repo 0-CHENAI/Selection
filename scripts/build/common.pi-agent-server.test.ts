@@ -8,7 +8,7 @@ import {
   writeFileSync,
 } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
 import { copyPiAgentServerRuntimeAssets } from '../../packages/pi-agent-server/scripts/copy-runtime-assets.ts'
 import { copyPiAgentServer, verifyMcpServersExist, type BuildConfig } from './common.ts'
 
@@ -36,6 +36,7 @@ function createFixture(): { rootDir: string; electronDir: string; config: BuildC
   }
 
   writeFileSync(join(piDistDir, 'index.js'), 'console.log("pi")')
+  writeFileSync(join(piDistDir, 'image-resize-worker.js'), 'console.log("worker")')
   writeFileSync(join(photonPackageDir, 'photon_rs_bg.wasm'), 'wasm-fixture')
   writeFileSync(join(koffiDir, 'package.json'), '{}')
   writeFileSync(join(koffiDir, 'index.js'), '')
@@ -58,7 +59,14 @@ function createFixture(): { rootDir: string; electronDir: string; config: BuildC
 }
 
 describe('Pi Agent Server image runtime packaging', () => {
-  it('copies Photon WASM through the build and desktop packaging chain', () => {
+  it('uses the package build in the server image so Worker and WASM are included', () => {
+    const dockerfile = readFileSync(resolve(import.meta.dir, '..', '..', 'Dockerfile.server'), 'utf8')
+
+    expect(dockerfile).toContain('cd packages/pi-agent-server && bun run build')
+    expect(dockerfile).not.toContain('--outfile packages/pi-agent-server/dist/index.js')
+  })
+
+  it('copies the image Worker and Photon WASM through the desktop packaging chain', () => {
     const { rootDir, electronDir, config } = createFixture()
     const piDistDir = join(rootDir, 'packages', 'pi-agent-server', 'dist')
 
@@ -71,7 +79,15 @@ describe('Pi Agent Server image runtime packaging', () => {
       'pi-agent-server',
       'photon_rs_bg.wasm',
     )
+    const packagedWorker = join(
+      electronDir,
+      'resources',
+      'pi-agent-server',
+      'image-resize-worker.js',
+    )
     expect(existsSync(packagedWasm)).toBe(true)
+    expect(existsSync(packagedWorker)).toBe(true)
+    expect(readFileSync(packagedWorker, 'utf-8')).toContain('worker')
     expect(readFileSync(packagedWasm, 'utf-8')).toBe('wasm-fixture')
     expect(() => verifyMcpServersExist(config)).not.toThrow()
   })
@@ -86,5 +102,21 @@ describe('Pi Agent Server image runtime packaging', () => {
         join(rootDir, 'packages', 'pi-agent-server', 'dist'),
       ),
     ).toThrow('Photon WASM not found')
+  })
+
+  it('fails the build when the image resize Worker is missing', () => {
+    const { rootDir } = createFixture()
+    const piDistDir = join(rootDir, 'packages', 'pi-agent-server', 'dist')
+    rmSync(join(piDistDir, 'image-resize-worker.js'))
+
+    expect(() => copyPiAgentServerRuntimeAssets(rootDir, piDistDir)).toThrow(
+      'image resize Worker not found',
+    )
+  })
+
+  it('keeps Pi Agent Server optional when its bundle is not present', () => {
+    const { config } = createFixture()
+
+    expect(() => verifyMcpServersExist(config)).not.toThrow()
   })
 })

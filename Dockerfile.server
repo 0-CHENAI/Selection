@@ -76,11 +76,11 @@ RUN bun install --frozen-lockfile
 # Copy source
 COPY . .
 
-# Build MCP helper servers (bundled CJS — required by runtime-resolver.ts)
+# Build the session helper and the complete Pi runtime. The Pi package build
+# also emits its image Worker and copies the adjacent Photon WASM asset.
 RUN bun build packages/session-mcp-server/src/index.ts \
       --outfile packages/session-mcp-server/dist/index.js --target node --format cjs && \
-    bun build packages/pi-agent-server/src/index.ts \
-      --outfile packages/pi-agent-server/dist/index.js --target node --format cjs
+    cd packages/pi-agent-server && bun run build
 
 # Build the WhatsApp worker bundle (CJS, Node target — Bun cannot run it).
 RUN bun run scripts/build-wa-worker.ts

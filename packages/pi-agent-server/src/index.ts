@@ -26,7 +26,6 @@ import {
   SessionManager as PiSessionManager,
   AuthStorage as PiAuthStorage,
   ModelRegistry as PiModelRegistry,
-  createReadToolDefinition,
   createBashToolDefinition,
   createEditToolDefinition,
   createWriteToolDefinition,
@@ -80,6 +79,7 @@ import { allowCraftMetadataProperties, stripCraftMetadata } from './craft-metada
 import { applySystemPromptOverride } from './system-prompt-override.ts';
 import { resolvePiSessionPaths } from './session-paths.ts';
 import { createPiSessionManager } from './pi-session-manager.ts';
+import { createSelectionReadToolDefinition } from './tools/read/create-read-tool.ts';
 
 // ============================================================
 // Types — JSONL Protocol
@@ -549,7 +549,7 @@ async function ensureSession(): Promise<AgentSession> {
   //   - Do NOT pass tool *objects* to `tools` — `allowedToolNames = new Set(options.tools)`
   //     then `.has(name)` returns false for every string lookup → zero tools active.
   const builtinDefs = [
-    createReadToolDefinition(cwd),
+    createSelectionReadToolDefinition(cwd),
     createBashToolDefinition(cwd),
     createEditToolDefinition(cwd),
     createWriteToolDefinition(cwd),
