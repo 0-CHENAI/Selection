@@ -32,3 +32,18 @@ export {
   credentialWorkspaceIdFromRoot,
   isSafeResourceSlug,
 } from './copy-between-workspaces.ts'
+
+export {
+  WORKSPACE_BUNDLE_KIND,
+  exportWorkspace,
+  importWorkspace,
+  validateWorkspaceBundle,
+} from './workspace-bundle.ts'
+
+export type {
+  WorkspaceBundle,
+  WorkspaceSessionEntry,
+  ExportWorkspaceOptions,
+  ImportWorkspaceOptions,
+  WorkspaceImportResult,
+} from './workspace-bundle.ts'
