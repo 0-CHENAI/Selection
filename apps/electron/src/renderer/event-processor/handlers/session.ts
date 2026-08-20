@@ -553,6 +553,7 @@ export function handleUserMessage(
     m.role === 'user' && m.isQueued && (
       m.id === message.id ||
       (event.optimisticMessageId && m.id === event.optimisticMessageId) ||
+      (event.optimisticMessageId && m.clientMessageId === event.optimisticMessageId) ||
       m.queueId === message.id
     ),
   )
@@ -570,7 +571,9 @@ export function handleUserMessage(
         || candidate.role === 'status'
       ),
     )
-  const collapsesOpenTurn = status === 'accepted' && hasOpenGeneration && (
+  // Hidden system continuations may drive another model turn, but they are not
+  // user-authored redirects and must never suppress/collapse the visible reply.
+  const collapsesOpenTurn = !message.hidden && status === 'accepted' && hasOpenGeneration && (
     !!existingQueued
     || session.messages.some(candidate =>
       candidate.role === 'assistant' && !candidate.hidden && (candidate.isStreaming || candidate.isPending),
@@ -588,6 +591,7 @@ export function handleUserMessage(
     m.role === 'user' && (
       m.id === message.id ||
       (event.optimisticMessageId && m.id === event.optimisticMessageId) ||
+      (event.optimisticMessageId && m.clientMessageId === event.optimisticMessageId) ||
       m.queueId === message.id ||
       (m.content === message.content && Math.abs(m.timestamp - message.timestamp) < 5000)
     )
@@ -615,6 +619,8 @@ export function handleUserMessage(
           ]),
         ]
       : session.suppressedTurnIds
+  const isHiddenUserMessage = !!message.hidden
+    || (existingIndex >= 0 && !!boundaryMessages[existingIndex]?.hidden)
 
   let updatedMessages: Message[]
 
@@ -654,6 +660,11 @@ export function handleUserMessage(
             : {}),
           isPending: false,
           isQueued: status === 'queued',
+          clientMessageId: message.clientMessageId ?? m.clientMessageId,
+          // Backend visibility is canonical. This is essential when a legacy
+          // renderer optimistically inserted an auto-retry as a visible bubble
+          // before the server identified it as an internal continuation.
+          hidden: message.hidden ?? m.hidden,
           ...(status === 'queued'
             ? { queueId: message.id }
             : existingQueued
@@ -682,7 +693,7 @@ export function handleUserMessage(
         messages: updatedMessages,
         // A queued item belongs to the composer, so it must not affect session
         // ordering, preview role, or transcript-derived badges before replay.
-        ...(status !== 'queued' && {
+        ...(status !== 'queued' && !isHiddenUserMessage && {
           lastMessageAt: Date.now(),
           lastMessageRole: 'user' as const,
         }),

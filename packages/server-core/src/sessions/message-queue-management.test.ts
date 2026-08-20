@@ -247,6 +247,30 @@ describe('message queue management (#22)', () => {
     expect(events.find(event => event.type === 'interrupted')?.queuedMessages).toEqual(['first queued'])
   })
 
+  it('discards hidden queued continuations on Stop without restoring them to the draft', async () => {
+    managed.messages.push({
+      id: 'hidden-retry',
+      role: 'user',
+      content: 'current task\n\n[bid-playbook activated]',
+      timestamp: 4,
+      isQueued: true,
+      hidden: true,
+    })
+    managed.messageQueue.push({
+      message: 'current task\n\n[bid-playbook activated]',
+      messageId: 'hidden-retry',
+      options: { hidden: true },
+    })
+
+    await manager.cancelProcessing(managed.id)
+
+    expect(managed.messages.some(message => message.id === 'hidden-retry')).toBe(false)
+    expect(events.find(event => event.type === 'interrupted')?.queuedMessages).toEqual([
+      'first queued',
+      'second queued',
+    ])
+  })
+
   it('aborts a live tool turn so send-now changes direction instead of finishing both answers', async () => {
     const redirect = mock(() => true)
     const forceAbort = mock(() => {})

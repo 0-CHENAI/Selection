@@ -17,7 +17,7 @@ import { toast } from "sonner"
 
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { cn } from "@/lib/utils"
-import { coerceInputText, appendRestoredInput } from "@/lib/input-text"
+import { appendRestoredInput, getRestorableStoppedPrompt } from "@/lib/input-text"
 import { Markdown, CollapsibleMarkdownProvider, StreamingMarkdown, type RenderMode } from "@/components/markdown"
 import { AnimatedCollapsibleContent } from "@/components/ui/collapsible"
 import {
@@ -1305,8 +1305,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
     // Exclude isQueued messages — those are restored separately by the backend
     // `restore_input` effect (App.tsx) and would otherwise double up here.
     if (!silent) {
-      const lastUserMsg = [...session.messages].reverse().find(m => m.role === 'user' && !m.isQueued)
-      const restoredText = coerceInputText(lastUserMsg?.content)
+      const restoredText = getRestorableStoppedPrompt(session.messages)
       if (restoredText) {
         onInputChange?.(appendRestoredInput(inputValue, restoredText))
       }

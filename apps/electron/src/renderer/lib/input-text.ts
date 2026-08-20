@@ -33,3 +33,25 @@ export function appendRestoredInput(existing: string | undefined, restored: stri
   if (!restoredText) return existingText
   return existingText ? `${existingText}\n\n${restoredText}` : restoredText
 }
+
+interface StoppedPromptCandidate {
+  role: string
+  content: unknown
+  isQueued?: boolean
+  hidden?: boolean
+}
+
+/**
+ * Return the prompt that an explicit Stop should put back in the composer.
+ *
+ * A hidden non-queued user message means the active turn is an internal
+ * continuation. In that case we intentionally return nothing instead of
+ * skipping backward and restoring an older, already-submitted user prompt.
+ */
+export function getRestorableStoppedPrompt(messages: readonly StoppedPromptCandidate[]): string {
+  const latestUserMessage = messages.findLast(message =>
+    message.role === 'user' && !message.isQueued
+  )
+  if (!latestUserMessage || latestUserMessage.hidden) return ''
+  return coerceInputText(latestUserMessage.content)
+}

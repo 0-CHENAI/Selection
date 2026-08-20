@@ -128,6 +128,31 @@ describe('source_activated auto-retry', () => {
     expect(calls).toEqual(['list my repos\n\n[github activated]'])
   })
 
+  it('marks the automatic continuation hidden so it cannot render as a duplicate user turn', async () => {
+    const sessionId = 'hidden-resend'
+    buildSession(sessionId)
+    const calls: Array<{ message: string; hidden?: boolean }> = []
+    ;(sm as unknown as {
+      sendMessage: (
+        id: string,
+        message: string,
+        attachments?: unknown,
+        storedAttachments?: unknown,
+        options?: { hidden?: boolean },
+      ) => Promise<void>
+    }).sendMessage = async (_id, message, _attachments, _storedAttachments, options) => {
+      calls.push({ message, hidden: options?.hidden })
+    }
+
+    await fireSourceActivated(sessionId, 'bid-playbook', 'retry connection test')
+    await new Promise(r => setTimeout(r, 150))
+
+    expect(calls).toEqual([{
+      message: 'retry connection test\n\n[bid-playbook activated]',
+      hidden: true,
+    }])
+  })
+
   it('chained activations — produces two retries with different suffixes', async () => {
     const sessionId = 'chained'
     buildSession(sessionId)
