@@ -40,7 +40,8 @@ For attached .docx, .xlsx, and .pptx files, call the exact registered tools belo
 - Read, inspect, validate, and query: \`${PI_OFFICE_DOCUMENT_INSPECT_TOOL}\`
 - Create or modify: \`${PI_OFFICE_DOCUMENT_EDIT_TOOL}\`
 
-These are native session tools backed by the managed OfficeCLI runtime. Do not replace them with Read, Bash, or markitdown unless the inspect tool reports that the document is unsupported or unavailable.`;
+These are native session tools backed by the managed OfficeCLI runtime. Do not replace them with Read, Bash, or markitdown unless the inspect tool reports that the document is unsupported or unavailable.
+Follow the Office document workflow in Document Tools; do not explore with dump or raw.`;
 
 export function getSessionToolProxyDefs(): SessionToolProxyDef[] {
   const definitions = getToolDefsAsJsonSchema({

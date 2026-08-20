@@ -177,6 +177,7 @@ export {
   // Office documents
   handleOfficeDocumentInspect,
   handleOfficeDocumentEdit,
+  clearOfficeInspectBudget,
 } from './handlers/index.ts';
 
 export type {
@@ -244,6 +245,26 @@ export {
   // JSON Schema converter
   getToolDefsAsJsonSchema,
 } from './tool-defs.ts';
+
+export {
+  OFFICE_WORKFLOW_PROMPT,
+  OFFICE_DOCUMENT_INSPECT_DESCRIPTION,
+  OFFICE_DOCUMENT_EDIT_DESCRIPTION,
+  OFFICE_INSPECT_BUDGET_LIMIT,
+  OFFICE_INSPECT_COUNTED_COMMANDS,
+  OFFICE_TRUNCATED_PREVIEW_CHARS,
+  OFFICE_TRUNCATION_SUGGESTION,
+  OFFICE_REFRESH_NON_WINDOWS_NOTE,
+  isOfficeInspectCountedCommand,
+  isOfficeBudgetResettingEdit,
+  isOfficeDocxPath,
+  normalizeOfficeArgument,
+  normalizeOfficeInspectArguments,
+  extractOfficeDocumentPath,
+  resolveOfficeDocumentPath,
+  officeInspectFingerprint,
+  officeInspectBudgetKey,
+} from './office-workflow.ts';
 
 export {
   officecliBinaryName,

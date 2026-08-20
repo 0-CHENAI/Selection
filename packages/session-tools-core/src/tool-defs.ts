@@ -49,6 +49,10 @@ import {
   handleOfficeDocumentEdit,
   handleOfficeDocumentInspect,
 } from './handlers/office-document.ts';
+import {
+  OFFICE_DOCUMENT_EDIT_DESCRIPTION,
+  OFFICE_DOCUMENT_INSPECT_DESCRIPTION,
+} from './office-workflow.ts';
 
 // ============================================================
 // Canonical Zod Schemas
@@ -490,28 +494,9 @@ Examples:
 - \`close\` — close and destroy the browser window
 - \`hide\` — hide the window while preserving state`,
 
-  office_document_inspect: `Inspect Word, Excel, and PowerPoint files through Selection's built-in OfficeCLI runtime.
+  office_document_inspect: OFFICE_DOCUMENT_INSPECT_DESCRIPTION,
 
-This tool is always registered and does not require loading a skill. It accepts argument tokens, invokes the app-managed binary directly, and returns normalized JSON.
-
-Examples:
-- Check availability: { "command": "status" }
-- Read a document: { "command": "view", "arguments": ["report.docx", "text"] }
-- Validate a workbook: { "command": "validate", "arguments": ["data.xlsx"] }
-- Get help: { "command": "help", "arguments": ["docx", "paragraph"] }
-
-The read-only tool rejects output files, browser launching, and JSONL output. Use office_document_edit for mutations.`,
-
-  office_document_edit: `Create and modify Word, Excel, and PowerPoint files through Selection's built-in OfficeCLI runtime.
-
-This tool is always registered and does not require loading a skill. Arguments are passed as separate tokens without a shell, and results use a stable JSON envelope. Batch calls must use batchCommands; resident and management commands are not accepted.
-
-Examples:
-- Create: { "command": "create", "arguments": ["report.docx"] }
-- Add paragraph: { "command": "add", "arguments": ["report.docx", "/body", "--type", "paragraph", "--prop", "text=Summary"] }
-- Batch edit: { "command": "batch", "arguments": ["data.xlsx"], "batchCommands": [{ "command": "set", "path": "/Sheet1/A1", "props": { "value": "Done" } }] }
-
-Use office_document_inspect to read or validate the result.`,
+  office_document_edit: OFFICE_DOCUMENT_EDIT_DESCRIPTION,
 
   call_llm: `Invoke a secondary LLM for focused subtasks. Use for:
 - Cost optimization: use a smaller model for simple tasks (summarization, classification)

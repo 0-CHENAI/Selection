@@ -21,6 +21,9 @@ describe('Pi Office tool routing', () => {
     expect(PI_OFFICE_TOOL_ROUTING_PROMPT).toContain(PI_OFFICE_DOCUMENT_INSPECT_TOOL);
     expect(PI_OFFICE_TOOL_ROUTING_PROMPT).toContain(PI_OFFICE_DOCUMENT_EDIT_TOOL);
     expect(PI_OFFICE_TOOL_ROUTING_PROMPT).toContain('native session tools');
+    expect(PI_OFFICE_TOOL_ROUTING_PROMPT).toContain('Office document workflow');
+    expect(PI_OFFICE_TOOL_ROUTING_PROMPT).toContain('Document Tools');
+    expect(PI_OFFICE_TOOL_ROUTING_PROMPT).not.toContain('write the structure in one batch');
   });
 
   it('routes Office attachments before the generic Markdown-sidecar branch', () => {

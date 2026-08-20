@@ -1,3 +1,4 @@
+import { OFFICE_WORKFLOW_PROMPT } from '@craft-agent/session-tools-core';
 import { formatPreferencesForPrompt, getCoAuthorPreference } from '../config/preferences.ts';
 import { getBrowserToolEnabled } from '../config/storage.ts';
 import { debug } from '../utils/debug.ts';
@@ -1273,6 +1274,9 @@ For modern Office documents, use the registered native Office document tools. Ot
 
 **Tips:**
 - For .docx / .xlsx / .pptx create and edit, use \`office_document_edit\`; for reading, validation, help, and availability, use \`office_document_inspect\`. Neither requires loading a skill.
+
+${OFFICE_WORKFLOW_PROMPT}
+
 - OfficeCLI is managed by the app; do not curl-install or download it.
 - Use **markitdown** only when the user explicitly requests Markdown conversion, or after the native Office inspect tool reports that the document is unsupported or unavailable. Do not read an automatically generated \`.docx.md\`, \`.xlsx.md\`, or \`.pptx.md\` sidecar first.
 - If native Office inspection reports an unsupported document, use \`markitdown <file> # selection-office-native-fallback\` only as a read-only text fallback; do not use that fallback for edits.
