@@ -61,7 +61,13 @@ beforeAll(async () => {
   const photonSourceDir = join(rootDir, 'node_modules', '@silvia-odwyer', 'photon-node')
   const isolateBundle = (bundlePath: string): string => {
     const bundle = readFileSync(bundlePath, 'utf8')
-    const isolated = bundle.split(photonSourceDir).join('/missing-build-machine/photon-node')
+    // Bun embeds absolute paths inside JavaScript string literals. On Windows the
+    // separators are escaped in bundle source, so match the JSON-encoded string
+    // contents rather than the runtime path value.
+    const embeddedPhotonSourceDir = JSON.stringify(photonSourceDir).slice(1, -1)
+    const isolated = bundle
+      .split(embeddedPhotonSourceDir)
+      .join('/missing-build-machine/photon-node')
     if (isolated === bundle) throw new Error(`Photon source path was not embedded in ${bundlePath}`)
     return isolated
   }
