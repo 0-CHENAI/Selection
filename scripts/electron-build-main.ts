@@ -228,15 +228,8 @@ async function buildPiAgentServer(): Promise<void> {
   // is ESM-only. --target=node --format=cjs leaves ESM deps as external require()
   // calls that fail at runtime since there are no node_modules relative to dist/.
   const proc = spawn({
-    cmd: [
-      "bun", "build",
-      join(PI_AGENT_SERVER_DIR, "src/index.ts"),
-      "--outfile", PI_AGENT_SERVER_OUTPUT,
-      "--target", "bun",
-      "--format", "esm",
-      "--external", "koffi",
-    ],
-    cwd: ROOT_DIR,
+    cmd: ["bun", "run", "build"],
+    cwd: PI_AGENT_SERVER_DIR,
     stdout: "inherit",
     stderr: "inherit",
   });
