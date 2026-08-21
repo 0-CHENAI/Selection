@@ -5,7 +5,7 @@ import { useTranslation } from 'react-i18next'
 import type { ToolDisplayMeta, AnnotationV1 } from '@craft-agent/core'
 import { normalizePath, pathStartsWith, stripPathPrefix } from '@craft-agent/core/utils'
 import { isParentTaskTool } from '@craft-agent/shared/utils/toolNames'
-import { motion, AnimatePresence } from 'motion/react'
+import { motion, AnimatePresence, useReducedMotion } from 'motion/react'
 import {
   ChevronRight,
   CheckCircle2,
@@ -52,6 +52,7 @@ import {
   formatTokens,
   deriveTurnPhase,
   getActiveTurnPreview,
+  isVisibleCommentaryCard,
   shouldShowThinkingIndicator,
   type ActivityGroup,
   type AssistantTurn,
@@ -292,6 +293,11 @@ export interface ResponseContent {
   messageId?: string
   /** Persisted annotations attached to the response message */
   annotations?: AnnotationV1[]
+  /**
+   * Tool-bound commentary occupying the response card until a real final
+   * reply arrives. Keeps the streamed body readable when the next tool starts.
+   */
+  isCommentary?: boolean
 }
 
 // ============================================================================
@@ -723,15 +729,18 @@ export function ActivityStatusIcon({
     }
   }
 
+  const reduceMotion = useReducedMotion()
+  const iconTransition = { duration: reduceMotion ? 0 : 0.2, ease: "easeOut" as const }
+
   // Wrap in AnimatePresence for crossfade between states
   return (
     <AnimatePresence mode="wait" initial={false}>
       <motion.div
         key={status}
-        initial={{ opacity: 0, scale: 0.8 }}
+        initial={reduceMotion ? false : { opacity: 0, scale: 0.8 }}
         animate={{ opacity: 1, scale: 1 }}
-        exit={{ opacity: 0, scale: 0.8 }}
-        transition={{ duration: 0.2, ease: "easeOut" }}
+        exit={reduceMotion ? undefined : { opacity: 0, scale: 0.8 }}
+        transition={iconTransition}
         className="shrink-0"
       >
         {renderIcon()}
@@ -785,7 +794,8 @@ function ActivityRow({ activity, onOpenDetails, isLastChild, sessionFolderPath, 
         <TreeViewConnector depth={depth} isLastChild={isLastChild} />
         <div
           className={cn(
-            "group/row flex items-center gap-2 py-0.5 text-foreground/75 flex-1 min-w-0",
+            "group/row flex gap-2 py-0.5 text-foreground/75 flex-1 min-w-0",
+            isThinking ? "items-center" : "items-start",
             SIZE_CONFIG.fontSize
           )}
           onClick={onOpenDetails && isComplete ? onOpenDetails : undefined}
@@ -795,9 +805,13 @@ function ActivityRow({ activity, onOpenDetails, isLastChild, sessionFolderPath, 
               <Spinner className={SIZE_CONFIG.spinnerSize} />
             </div>
           ) : (
-            <MessageCircleDashed className={cn(SIZE_CONFIG.iconSize, "shrink-0")} />
+            <MessageCircleDashed className={cn(SIZE_CONFIG.iconSize, "shrink-0 mt-0.5")} />
           )}
-          <span className={cn("truncate flex-1", onOpenDetails && isComplete && "group-hover/row:underline")}>{displayContent}</span>
+          <span className={cn(
+            "flex-1 min-w-0",
+            isThinking ? "truncate" : "whitespace-pre-wrap break-words line-clamp-4",
+            onOpenDetails && isComplete && "group-hover/row:underline"
+          )}>{displayContent}</span>
           {/* Open details button */}
           {onOpenDetails && isComplete && (
             <div
@@ -1115,6 +1129,7 @@ interface ActivityGroupRowProps {
  * Provides visual containment and collapsible children.
  */
 function ActivityGroupRow({ group, expandedGroups: externalExpandedGroups, onExpandedGroupsChange, onOpenActivityDetails, animationIndex = 0, sessionFolderPath, displayMode = 'detailed' }: ActivityGroupRowProps) {
+  const reduceMotion = useReducedMotion()
   // Use local state if no controlled state provided
   const [localExpandedGroups, setLocalExpandedGroups] = useState<Set<string>>(new Set())
   const expandedGroups = externalExpandedGroups ?? localExpandedGroups
@@ -1140,9 +1155,12 @@ function ActivityGroupRow({ group, expandedGroups: externalExpandedGroups, onExp
 
   return (
     <motion.div
-      initial={{ opacity: 0, x: -8 }}
+      initial={reduceMotion ? false : { opacity: 0, x: -8 }}
       animate={{ opacity: 1, x: 0 }}
-      transition={{ delay: animationIndex < SIZE_CONFIG.staggeredAnimationLimit ? animationIndex * 0.03 : 0.3 }}
+      transition={{
+        delay: reduceMotion ? 0 : (animationIndex < SIZE_CONFIG.staggeredAnimationLimit ? animationIndex * 0.03 : 0.3),
+        duration: reduceMotion ? 0 : undefined,
+      }}
       className="space-y-0.5"
     >
       {/* Task header row - no left padding, chevron aligned with activity row icons */}
@@ -1158,7 +1176,7 @@ function ActivityGroupRow({ group, expandedGroups: externalExpandedGroups, onExp
         <motion.div
           initial={false}
           animate={{ rotate: isExpanded ? 90 : 0 }}
-          transition={{ duration: 0.15, ease: 'easeOut' }}
+          transition={{ duration: reduceMotion ? 0 : 0.15, ease: 'easeOut' }}
           className={cn(SIZE_CONFIG.iconSize, "flex items-center justify-center shrink-0")}
         >
           <ChevronRight className={SIZE_CONFIG.iconSize} />
@@ -1230,12 +1248,12 @@ function ActivityGroupRow({ group, expandedGroups: externalExpandedGroups, onExp
       <AnimatePresence initial={false}>
         {isExpanded && group.children.length > 0 && (
           <motion.div
-            initial={{ height: 0, opacity: 0 }}
+            initial={reduceMotion ? false : { height: 0, opacity: 0 }}
             animate={{ height: 'auto', opacity: 1 }}
-            exit={{ height: 0, opacity: 0 }}
+            exit={reduceMotion ? undefined : { height: 0, opacity: 0 }}
             transition={{
-              height: { duration: 0.2, ease: [0.4, 0, 0.2, 1] },
-              opacity: { duration: 0.15 }
+              height: { duration: reduceMotion ? 0 : 0.2, ease: [0.4, 0, 0.2, 1] },
+              opacity: { duration: reduceMotion ? 0 : 0.15 }
             }}
             className="overflow-hidden"
           >
@@ -1243,9 +1261,9 @@ function ActivityGroupRow({ group, expandedGroups: externalExpandedGroups, onExp
               {group.children.map((child, idx) => (
                 <motion.div
                   key={child.id}
-                  initial={{ opacity: 0, x: -4 }}
+                  initial={reduceMotion ? false : { opacity: 0, x: -4 }}
                   animate={{ opacity: 1, x: 0 }}
-                  transition={{ delay: idx * 0.02 }}
+                  transition={{ delay: reduceMotion ? 0 : idx * 0.02, duration: reduceMotion ? 0 : undefined }}
                   className="ml-[-4px]"
                 >
                   <ActivityRow
@@ -1321,6 +1339,8 @@ export interface ResponseCardProps {
   openAnnotationRequest?: OpenAnnotationRequest | null
   /** Annotation interaction mode (viewer uses tooltip-only to suppress the island) */
   annotationInteractionMode?: AnnotationInteractionMode
+  /** Tool-bound commentary — keep the body readable, hide final-reply actions */
+  isCommentary?: boolean
 }
 
 interface BranchDropdownProps {
@@ -1561,6 +1581,7 @@ export function ResponseCard({
   hasActiveFollowUpAnnotations = false,
   openAnnotationRequest,
   annotationInteractionMode = 'interactive',
+  isCommentary = false,
 }: ResponseCardProps) {
   const { t } = useTranslation()
   // Throttled content for display - updates every CONTENT_THROTTLE_MS during streaming
@@ -2382,7 +2403,7 @@ export function ResponseCard({
             )}>
               {/* Left side - Copy, View as Markdown, Annotation hint */}
               <div className="flex items-center gap-3">
-                {onRegenerate && (
+                {onRegenerate && !isCommentary && (
                   <button
                     onClick={onRegenerate}
                     className={cn(
@@ -2450,7 +2471,7 @@ export function ResponseCard({
                     />
                   </div>
                 )}
-                {onBranch && <BranchDropdown onBranch={onBranch} />}
+                {onBranch && !isCommentary && <BranchDropdown onBranch={onBranch} />}
               </div>
             </div>
           )}
@@ -2459,7 +2480,7 @@ export function ResponseCard({
               Uses a bottom-sheet drawer to match the CompactPermissionModeSelector
               / CompactModelSelector pattern. Guarded by isLastResponse so older
               plans don't render an empty strip with a hidden-but-focusable button. */}
-          {compactMode && onRegenerate && !isStreaming && (
+          {compactMode && onRegenerate && !isStreaming && !isCommentary && (
             <div
               className={cn(
                 "pl-3 pr-2 py-1.5 border-t border-border/30 flex items-center bg-muted/20",
@@ -2690,6 +2711,8 @@ export const TurnCard = React.memo(function TurnCard({
   annotationInteractionMode = 'interactive',
 }: TurnCardProps) {
   const { t } = useTranslation()
+  const reduceMotion = useReducedMotion()
+  const showCommentary = isVisibleCommentaryCard(response, isComplete)
 
   // Derive the turn phase from props using the state machine.
   // This provides a single source of truth for lifecycle state,
@@ -2867,7 +2890,7 @@ export const TurnCard = React.memo(function TurnCard({
             <motion.div
               initial={false}
               animate={{ rotate: isExpanded ? 90 : 0 }}
-              transition={{ duration: 0.15, ease: 'easeOut' }}
+              transition={{ duration: reduceMotion ? 0 : 0.15, ease: 'easeOut' }}
               className={cn(SIZE_CONFIG.iconSize, "flex items-center justify-center shrink-0")}
             >
               <ChevronRight className={SIZE_CONFIG.iconSize} />
@@ -2883,10 +2906,10 @@ export const TurnCard = React.memo(function TurnCard({
               <AnimatePresence initial={false}>
                 <motion.span
                   key={previewText}
-                  initial={{ opacity: 0 }}
+                  initial={reduceMotion ? false : { opacity: 0 }}
                   animate={{ opacity: 1 }}
-                  exit={{ opacity: 0 }}
-                  transition={{ duration: 0.2 }}
+                  exit={reduceMotion ? undefined : { opacity: 0 }}
+                  transition={{ duration: reduceMotion ? 0 : 0.2 }}
                   className="absolute inset-0 truncate"
                 >
                   {previewText}
@@ -2908,12 +2931,12 @@ export const TurnCard = React.memo(function TurnCard({
           <AnimatePresence initial={false}>
             {isExpanded && (
               <motion.div
-                initial={{ height: 0, opacity: 0 }}
+                initial={reduceMotion ? false : { height: 0, opacity: 0 }}
                 animate={{ height: 'auto', opacity: 1 }}
-                exit={{ height: 0, opacity: 0 }}
+                exit={reduceMotion ? undefined : { height: 0, opacity: 0 }}
                 transition={{
-                  height: { duration: 0.25, ease: [0.4, 0, 0.2, 1] },
-                  opacity: { duration: 0.15 }
+                  height: { duration: reduceMotion ? 0 : 0.25, ease: [0.4, 0, 0.2, 1] },
+                  opacity: { duration: reduceMotion ? 0 : 0.15 }
                 }}
                 className="overflow-hidden"
               >
@@ -2942,12 +2965,17 @@ export const TurnCard = React.memo(function TurnCard({
                         <motion.div
                           key={item.id}
                           initial={
-                            hasUserToggled.current || hasMounted.current
-                              ? { opacity: 0, x: -8 }
-                              : false
+                            reduceMotion || !(hasUserToggled.current || hasMounted.current)
+                              ? false
+                              : { opacity: 0, x: -8 }
                           }
                           animate={{ opacity: 1, x: 0 }}
-                          transition={{ delay: hasUserToggled.current ? (index < SIZE_CONFIG.staggeredAnimationLimit ? index * 0.03 : SIZE_CONFIG.staggeredAnimationLimit * 0.03) : 0 }}
+                          transition={{
+                            delay: reduceMotion || !hasUserToggled.current
+                              ? 0
+                              : (index < SIZE_CONFIG.staggeredAnimationLimit ? index * 0.03 : SIZE_CONFIG.staggeredAnimationLimit * 0.03),
+                            duration: reduceMotion ? 0 : undefined,
+                          }}
                         >
                           <ActivityRow
                             activity={item}
@@ -2964,13 +2992,18 @@ export const TurnCard = React.memo(function TurnCard({
                       <motion.div
                         key={activity.id}
                         initial={
-                          hasUserToggled.current || hasMounted.current
-                            ? { opacity: 0, x: -8 }
-                            : false
+                          reduceMotion || !(hasUserToggled.current || hasMounted.current)
+                            ? false
+                            : { opacity: 0, x: -8 }
                         }
                         animate={{ opacity: 1, x: 0 }}
                         // Only animate on user toggle, not initial mount
-                        transition={{ delay: hasUserToggled.current ? (index < SIZE_CONFIG.staggeredAnimationLimit ? index * 0.03 : SIZE_CONFIG.staggeredAnimationLimit * 0.03) : 0 }}
+                        transition={{
+                          delay: reduceMotion || !hasUserToggled.current
+                            ? 0
+                            : (index < SIZE_CONFIG.staggeredAnimationLimit ? index * 0.03 : SIZE_CONFIG.staggeredAnimationLimit * 0.03),
+                          duration: reduceMotion ? 0 : undefined,
+                        }}
                       >
                         <ActivityRow
                           activity={activity}
@@ -2986,11 +3019,11 @@ export const TurnCard = React.memo(function TurnCard({
                   {isThinking && !animateResponse && (
                     <motion.div
                       key="thinking"
-                      initial={{ opacity: 0, x: -8 }}
+                      initial={reduceMotion ? false : { opacity: 0, x: -8 }}
                       animate={{ opacity: 1, x: 0 }}
                       transition={{
-                        delay: Math.min(sortedActivities.length, SIZE_CONFIG.staggeredAnimationLimit) * 0.03,
-                        duration: 0.3,
+                        delay: reduceMotion ? 0 : Math.min(sortedActivities.length, SIZE_CONFIG.staggeredAnimationLimit) * 0.03,
+                        duration: reduceMotion ? 0 : 0.3,
                         ease: "easeOut"
                       }}
                       className={cn("flex items-center gap-2 py-0.5 text-muted-foreground/70", SIZE_CONFIG.fontSize)}
@@ -3056,9 +3089,9 @@ export const TurnCard = React.memo(function TurnCard({
         <AnimatePresence>
           {response && !isBuffering && (
             <motion.div
-              initial={{ opacity: 0, y: 8 }}
+              initial={reduceMotion ? false : { opacity: 0, y: 8 }}
               animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.3, ease: "easeOut" }}
+              transition={{ duration: reduceMotion ? 0 : 0.3, ease: "easeOut" }}
               className={cn("select-text", hasActivities && "mt-2")}
             >
               <ResponseCard
@@ -3080,6 +3113,7 @@ export const TurnCard = React.memo(function TurnCard({
                 onAcceptWithCompact={onAcceptPlanWithCompact}
                 isLastResponse={isLastResponse}
                 compactMode={compactMode}
+                isCommentary={showCommentary}
                 onBranch={onBranch && response.messageId ? (options?: { newPanel?: boolean }) => onBranch(response.messageId!, options) : undefined}
                 onRegenerate={onRegenerate}
                 sendMessageKey={sendMessageKey}
@@ -3113,6 +3147,7 @@ export const TurnCard = React.memo(function TurnCard({
             onAcceptWithCompact={onAcceptPlanWithCompact}
             isLastResponse={isLastResponse}
             compactMode={compactMode}
+            isCommentary={showCommentary}
             onBranch={onBranch && response.messageId ? (options?: { newPanel?: boolean }) => onBranch(response.messageId!, options) : undefined}
             onRegenerate={onRegenerate}
             sendMessageKey={sendMessageKey}
