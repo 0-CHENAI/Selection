@@ -1559,31 +1559,11 @@ export class PiAgent extends BaseAgent {
 
       // spawn_session uses the shared pre-execution pipeline from BaseAgent
       if (toolName === 'spawn_session') {
-        if (!args.help) {
-          this.emitAutomationEvent('SubagentStart', {
-            hook_event_name: 'SubagentStart',
-            agent_type: typeof args.mode === 'string' ? args.mode : 'session',
-          });
-        }
         try {
           const result = await this.preExecuteSpawnSession(args);
-          if (!args.help && result && typeof result === 'object' && 'sessionId' in result) {
-            this.emitAutomationEvent('SubagentStop', {
-              hook_event_name: 'SubagentStop',
-              agent_id: result.sessionId,
-              agent_type: typeof args.mode === 'string' ? args.mode : 'session',
-            });
-          }
           return { content: JSON.stringify(result, null, 2), isError: false };
         } catch (error) {
           const msg = error instanceof Error ? error.message : String(error);
-          if (!args.help) {
-            this.emitAutomationEvent('SubagentStop', {
-              hook_event_name: 'SubagentStop',
-              agent_type: typeof args.mode === 'string' ? args.mode : 'session',
-              error: msg,
-            });
-          }
           return { content: `spawn_session failed: ${msg}`, isError: true };
         }
       }

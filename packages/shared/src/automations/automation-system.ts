@@ -15,6 +15,7 @@
  * - SessionManager uses ~30 lines instead of ~300
  */
 
+import { randomUUID } from 'node:crypto';
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { resolveAutomationsConfigPath, generateShortId } from './resolve-config-path.ts';
@@ -478,15 +479,20 @@ export class AutomationSystem implements AutomationsConfigProvider {
   // ============================================================================
 
   /**
-   * Match Agent Events and dispatch Prompt / Webhook actions.
+   * Match Agent Events and schedule Prompt / Webhook actions.
    * Never throws — automations must not interrupt the source Pi session.
-   * Prompt dispatch is scheduling only; callers must not wait for the new session.
+   * Returns the number of matchers that passed matcher/conditions, including
+   * those later suppressed or rate-limited. Prompt session creation and webhook
+   * HTTP are not awaited, so PreToolUse cannot stall the current tool.
    */
   async executeAgentEvent(event: AgentEvent, input: SdkAutomationInput, signal?: AbortSignal): Promise<number> {
     try {
       if (!this.config || this.disposed || signal?.aborted) return 0;
 
-      const eventId = input.event_id ?? `${event}:${input.source_session_id ?? ''}:${input.tool_use_id ?? Date.now()}`;
+      const matchers = this.config.automations[event];
+      if (!matchers?.length) return 0;
+
+      const eventId = input.event_id ?? randomUUID();
       const duplicate = this.agentEventGuards.shouldAcceptEvent(eventId);
       if (duplicate) {
         log.debug(`[AutomationSystem] ${event} ${duplicate}: ${eventId}`);
@@ -497,14 +503,6 @@ export class AutomationSystem implements AutomationsConfigProvider {
         input.triggered_by_automation === true,
         input.automation_depth ?? 0,
       );
-      if (recursion) {
-        log.debug(`[AutomationSystem] ${event} suppressed (${recursion})`);
-        await this.recordGuardHistory(event, input, 'unknown', 'suppressed', `Suppressed: ${recursion}`);
-        return 0;
-      }
-
-      const matchers = this.config.automations[event];
-      if (!matchers?.length) return 0;
 
       const accepted: AutomationMatcher[] = [];
       let matchedCount = 0;
@@ -514,6 +512,12 @@ export class AutomationSystem implements AutomationsConfigProvider {
         matchedCount++;
 
         const matcherId = matcher.id ?? 'unknown';
+        if (recursion) {
+          log.debug(`[AutomationSystem] ${event} matcher ${matcherId} ${recursion}`);
+          await this.recordGuardHistory(event, input, matcherId, 'suppressed', `Suppressed: ${recursion}`);
+          continue;
+        }
+
         const limited = this.agentEventGuards.shouldAcceptMatcher(this.options.workspaceId, event, matcherId);
         if (limited) {
           log.debug(`[AutomationSystem] ${event} matcher ${matcherId} ${limited}`);
@@ -546,18 +550,26 @@ export class AutomationSystem implements AutomationsConfigProvider {
         }
 
         if (scheduled.length > 0) {
-          try {
-            await this.promptHandler.dispatchSdkEvent(event, input, scheduled);
-          } finally {
-            for (const _ of scheduled) {
-              this.agentEventGuards.releasePromptSlot();
-            }
-          }
+          void this.promptHandler.dispatchSdkEvent(event, input, scheduled)
+            .catch(error => {
+              const err = error instanceof Error ? error : new Error(String(error));
+              log.debug(`[AutomationSystem] Prompt dispatch ${event} failed: ${err.message}`);
+              this.options.onError?.(event, err);
+            })
+            .finally(() => {
+              for (const _ of scheduled) {
+                this.agentEventGuards.releasePromptSlot();
+              }
+            });
         }
       }
 
       if (webhookMatchers.length > 0 && this.webhookHandler) {
-        await this.webhookHandler.dispatchSdkEvent(event, input, webhookMatchers);
+        void this.webhookHandler.dispatchSdkEvent(event, input, webhookMatchers).catch(error => {
+          const err = error instanceof Error ? error : new Error(String(error));
+          log.debug(`[AutomationSystem] Webhook dispatch ${event} failed: ${err.message}`);
+          this.options.onError?.(event, err);
+        });
       }
 
       return matchedCount;

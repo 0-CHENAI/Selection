@@ -109,7 +109,7 @@ import { listLabels, loadLabelConfig } from '@craft-agent/shared/labels/storage'
 import { extractLabelId, resolveSessionLabels, findTaskItemLabelId } from '@craft-agent/shared/labels'
 import { ensureLabelsExist, ensureTaskItemLabel } from '@craft-agent/shared/labels/crud'
 import { loadStatusConfig } from '@craft-agent/shared/statuses/storage'
-import { AutomationSystem, createPromptHistoryEntry, appendAutomationHistoryEntry, type AutomationSystemMetadataSnapshot } from '@craft-agent/shared/automations'
+import { AutomationSystem, createPromptHistoryEntry, appendAutomationHistoryEntry, enrichAgentEventInput, type AutomationSystemMetadataSnapshot, type AgentEvent as AutomationAgentEvent, type SdkAutomationInput } from '@craft-agent/shared/automations'
 import { buildBackendRuntimeSignature, buildRestartRequiredSignature, filterAttachmentsForModelInput } from './runtime-config'
 import { validateArchiveTarget } from './archive-guards'
 
@@ -7739,6 +7739,33 @@ export class SessionManager implements ISessionManager {
   }
 
   /**
+   * Fire a Pi Agent Event from session-layer orchestration (spawn_session).
+   * Failures stay isolated — delegation must not break the parent session.
+   */
+  private emitSessionAgentEvent(
+    managed: ManagedSession,
+    event: AutomationAgentEvent,
+    input: SdkAutomationInput,
+  ): void {
+    const system = this.automationSystems.get(managed.workspace.rootPath)
+    if (!system) return
+    const enriched = enrichAgentEventInput(event, input, {
+      workspaceId: managed.workspace.id,
+      sessionId: managed.id,
+      sessionName: managed.name,
+      triggeredByAutomation: !!managed.triggeredBy,
+      automationDepth: managed.triggeredBy?.automationDepth ?? 0,
+    })
+    void system.executeAgentEvent(event, enriched).catch(error => {
+      sessionLog.warn('[Automations] session-layer agent event failed', {
+        event,
+        sessionId: managed.id,
+        error: error instanceof Error ? error.message : String(error),
+      })
+    })
+  }
+
+  /**
    * Create a first-class child session for spawn_session (wait or background).
    * Extracted so SessionManager tests can exercise the contract without booting an agent.
    */
@@ -7794,6 +7821,12 @@ export class SessionManager implements ISessionManager {
       model: session.model,
     }
 
+    this.emitSessionAgentEvent(managed, 'SubagentStart', {
+      hook_event_name: 'SubagentStart',
+      agent_id: session.id,
+      agent_type: 'spawn_session',
+    })
+
     if (mode === 'wait') {
       const parentGeneration = managed.processingGeneration
       let settleWait: ((result: { status: 'failed'; finalText?: string }) => void) | undefined
@@ -7813,6 +7846,12 @@ export class SessionManager implements ISessionManager {
         })
       })
       const outcome = await outcomeP
+      this.emitSessionAgentEvent(managed, 'SubagentStop', {
+        hook_event_name: 'SubagentStop',
+        agent_id: session.id,
+        agent_type: 'spawn_session',
+        ...(outcome.status === 'failed' && outcome.finalText ? { error: outcome.finalText } : {}),
+      })
       return {
         ...baseResult,
         status: outcome.status,
@@ -9214,6 +9253,15 @@ export class SessionManager implements ISessionManager {
             taskId: event.taskId,
             status: event.status,
           })
+
+          if (!wasAlreadyTerminal && priorEntry?.source === 'spawn_session') {
+            this.emitSessionAgentEvent(managed, 'SubagentStop', {
+              hook_event_name: 'SubagentStop',
+              agent_id: event.taskId,
+              agent_type: 'spawn_session',
+              ...(event.status === 'failed' && event.summary ? { error: event.summary } : {}),
+            })
+          }
 
           this.evictStaleBackgroundTasks(managed)
         }
