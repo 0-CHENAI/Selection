@@ -26,6 +26,7 @@ function createFullMessage(): Message {
     toolUseId: 'tu-123',
     toolInput: { file_path: '/test.ts' },
     toolResult: 'File contents...',
+    toolResultContent: [{ type: 'image', data: 'dG9vbC1pbWFnZQ==', mimeType: 'image/png' }],
     toolStatus: 'completed',
     toolDuration: 1500,
     toolIntent: 'Reading test file',
@@ -220,6 +221,8 @@ describe('messageToStored/storedToMessage round-trip', () => {
     expect(stored).not.toHaveProperty('isStreaming')
     expect(stored).not.toHaveProperty('isPending')
     expect(stored).not.toHaveProperty('queueId')
+    expect(stored).not.toHaveProperty('toolResultContent')
+    expect(JSON.stringify(stored)).not.toContain('dG9vbC1pbWFnZQ==')
 
     // infoLevel IS persisted for info-message severity restoration after reload
     expect(stored.infoLevel).toBe(msg.infoLevel)
@@ -227,6 +230,7 @@ describe('messageToStored/storedToMessage round-trip', () => {
     const storedKeys = Object.keys(stored)
     expect(storedKeys).not.toContain('isStreaming')
     expect(storedKeys).not.toContain('isPending')
+    expect(storedKeys).not.toContain('toolResultContent')
     expect(storedKeys).toContain('infoLevel')
   })
 

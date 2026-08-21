@@ -6,9 +6,11 @@ import type { Message, StoredMessage } from './message.ts';
  * Excludes transient runtime-only fields:
  * - isStreaming
  * - isPending
+ * - queueId
+ * - toolResultContent (may contain large inline image Base64)
  */
 export function messageToStored(msg: Message): StoredMessage {
-  const { role, isStreaming, isPending, queueId, ...rest } = msg;
+  const { role, isStreaming, isPending, queueId, toolResultContent, ...rest } = msg;
   return { ...rest, type: role } as StoredMessage;
 }
 

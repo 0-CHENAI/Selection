@@ -26,6 +26,7 @@ describe('native Office PreToolUse routing', () => {
     'xlsx-tool read forecast.xlsx',
     'pptx-tool info roadmap.pptx',
     'markitdown Report.docx',
+    'doc-diff old.docx new.docx',
   ])('blocks shell-based Office content processing: %s', (command) => {
     expect(getNativeOfficeToolRedirect('Bash', { command })).not.toBeNull();
   });
@@ -36,6 +37,12 @@ describe('native Office PreToolUse routing', () => {
     './officecli-mac-arm64 --version',
     'officecli-linux-x64 update',
     '"$CRAFT_OFFICECLI" help all --json',
+      '${CRAFT_OFFICECLI:-officecli} status',
+      '$env:CRAFT_OFFICECLI status',
+      '${env:CRAFT_OFFICECLI} status',
+      '%CRAFT_OFFICECLI% status',
+      '$(command -v officecli) status',
+    '`which officecli` status',
   ])('blocks direct OfficeCLI even when no document path appears: %s', (command) => {
     expect(getNativeOfficeToolRedirect('Bash', { command })).not.toBeNull();
   });
@@ -81,5 +88,6 @@ describe('native Office PreToolUse routing', () => {
   it('does not affect non-Office files', () => {
     expect(getNativeOfficeToolRedirect('Read', { file_path: 'notes.md' })).toBeNull();
     expect(getNativeOfficeToolRedirect('Bash', { command: 'markitdown notes.pdf' })).toBeNull();
+    expect(getNativeOfficeToolRedirect('Bash', { command: 'doc-diff old.md new.md' })).toBeNull();
   });
 });

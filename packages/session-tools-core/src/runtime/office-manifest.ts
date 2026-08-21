@@ -58,6 +58,17 @@ function loadManifest(path: string): OfficecliManifest {
       && typeof asset.url === 'string'
       && /^[0-9a-f]{64}$/.test(asset.sha256)
     ));
+  const compatibilityKeys = Object.keys(parsed.compatibilityRecipes ?? {});
+  const importRecipe = parsed.compatibilityRecipes?.importViaAtomicBatch;
+  const compatibilityValid = compatibilityKeys.every(key => key === 'importViaAtomicBatch')
+    && (!importRecipe || (
+      importRecipe.enabled === true
+      && Number.isInteger(importRecipe.maxSourceBytes)
+      && importRecipe.maxSourceBytes > 0
+      && importRecipe.maxSourceBytes <= 50_000_000
+      && typeof importRecipe.reason === 'string'
+      && importRecipe.reason.trim().length >= 20
+    ));
   if (
     parsed.manifestVersion !== 1
     || !/^\d+\.\d+\.\d+$/.test(parsed.version)
@@ -67,6 +78,7 @@ function loadManifest(path: string): OfficecliManifest {
     || !assetsValid
     || !parsed.guides
     || !policyValid
+    || !compatibilityValid
     || !Array.isArray(parsed.externalDependencies)
   ) {
     throw new Error(`Invalid OfficeCLI manifest: ${path}`);

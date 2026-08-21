@@ -286,6 +286,7 @@ function messageToActivity(message: Message, existingActivities: ActivityItem[] 
     toolUseId: message.toolUseId,  // For parent-child matching
     toolInput: message.toolInput,
     content: message.toolResult || message.content,
+    toolResultContent: message.toolResultContent,
     intent: message.toolIntent,
     displayName: message.toolDisplayName,  // LLM-generated human-friendly name
     toolDisplayMeta: message.toolDisplayMeta,  // Embedded metadata with base64 icon for viewer

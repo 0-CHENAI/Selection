@@ -1,7 +1,10 @@
-import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
 import { describe, expect, it } from 'bun:test';
 import {
+  extractExternalDependencies,
+  validateOfficecliReleaseAssetUrl,
   validateManifestFiles,
   type OfficecliManifest,
 } from './sync-officecli.ts';
@@ -25,5 +28,99 @@ describe('OfficeCLI sync governance', () => {
     const mismatchedTag = manifest();
     mismatchedTag.tag = 'v1.0.999';
     expect(() => validateManifestFiles(mismatchedTag)).toThrow('version/tag mismatch');
+  });
+
+  it('validates release asset ownership before downloading', () => {
+    const reviewed = manifest();
+    const asset = reviewed.assets['linux-x64']!;
+    expect(() => validateOfficecliReleaseAssetUrl(reviewed.tag, asset.name, asset.url)).not.toThrow();
+    expect(() => validateOfficecliReleaseAssetUrl(
+      reviewed.tag,
+      asset.name,
+      `${asset.url}?download=1`,
+    )).toThrow('exact reviewed GitHub release path');
+    expect(() => validateOfficecliReleaseAssetUrl(
+      reviewed.tag,
+      asset.name,
+      asset.url.replace('/iOfficeAI/', '/lookalike/'),
+    )).toThrow('exact reviewed GitHub release path');
+  });
+
+  it('rejects incomplete guide catalogs and unreviewed dependency declarations', () => {
+    const missingGuide = manifest();
+    delete (missingGuide.guides as Partial<OfficecliManifest['guides']>).word;
+    expect(() => validateManifestFiles(missingGuide)).toThrow('guide catalog mismatch');
+
+    const extraDependency = manifest();
+    extraDependency.externalDependencies.push({
+      id: 'unreviewed-renderer',
+      version: '1.0.0',
+      license: 'MIT',
+      networkRequiredFor: ['render'],
+      fallback: 'none',
+      hosts: ['cdn.jsdelivr.net'],
+    });
+    expect(() => validateManifestFiles(extraDependency)).toThrow('Unreviewed OfficeCLI external dependencies');
+  });
+
+  it('requires compatibility recipes to remain explicit and reviewed', () => {
+    const invalidImportRecipe = manifest();
+    invalidImportRecipe.compatibilityRecipes!.importViaAtomicBatch!.maxSourceBytes = 0;
+    expect(() => validateManifestFiles(invalidImportRecipe)).toThrow('Invalid OfficeCLI import compatibility recipe');
+
+    const unknownRecipe = manifest() as OfficecliManifest & {
+      compatibilityRecipes: Record<string, unknown>;
+    };
+    unknownRecipe.compatibilityRecipes.unreviewedWriter = { enabled: true };
+    expect(() => validateManifestFiles(unknownRecipe)).toThrow('Unreviewed OfficeCLI compatibility recipes');
+  });
+
+  it('reads dependency versions from the exact case-sensitive upstream source layout', () => {
+    const root = mkdtempSync(join(tmpdir(), 'selection-officecli-source-layout-'));
+    try {
+      const core = join(root, 'src', 'officecli', 'Core');
+      mkdirSync(join(core, 'Diagram'), { recursive: true });
+      writeFileSync(join(core, 'KatexAssets.cs'), 'public const string Version = "1.2.3";');
+      writeFileSync(join(core, 'ThreeAssets.cs'), 'public const string Version = "4.5.6";');
+      writeFileSync(
+        join(core, 'Diagram', 'MermaidImageRenderer.cs'),
+        'private const string MermaidVersion = "7";\nprivate const string ElkVersion = "8.9";',
+      );
+
+      expect(extractExternalDependencies(root).map(item => [item.id, item.version])).toEqual([
+        ['katex', '1.2.3'],
+        ['three', '4.5.6'],
+        ['mermaid', '7'],
+        ['mermaid-layout-elk', '8.9'],
+      ]);
+      expect(() => extractExternalDependencies(join(root, 'missing'))).toThrow('src/officecli');
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('keeps legacy Office wrappers out of packages, permissions, and validation', () => {
+    const repositoryRoot = resolve(import.meta.dir, '..');
+    const governedFiles = [
+      'apps/electron/electron-builder.yml',
+      'apps/electron/resources/permissions/default.json',
+      'package.json',
+    ].map(path => readFileSync(join(repositoryRoot, path), 'utf8'));
+    for (const legacyTool of ['docx-tool', 'xlsx-tool', 'pptx-tool']) {
+      for (const content of governedFiles) expect(content).not.toContain(legacyTool);
+    }
+    for (const legacyResource of [
+      'apps/electron/resources/bin/docx-tool',
+      'apps/electron/resources/bin/docx-tool.cmd',
+      'apps/electron/resources/bin/xlsx-tool',
+      'apps/electron/resources/bin/xlsx-tool.cmd',
+      'apps/electron/resources/bin/pptx-tool',
+      'apps/electron/resources/bin/pptx-tool.cmd',
+      'apps/electron/resources/scripts/docx_tool.py',
+      'apps/electron/resources/scripts/xlsx_tool.py',
+      'apps/electron/resources/scripts/pptx_tool.py',
+    ]) {
+      expect(existsSync(join(repositoryRoot, legacyResource))).toBe(false);
+    }
   });
 });

@@ -2,25 +2,29 @@ import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import {
   chmodSync,
   existsSync,
+  linkSync,
   mkdirSync,
   mkdtempSync,
+  readFileSync,
   rmSync,
   symlinkSync,
   realpathSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
 import { createNodeFileSystem, type SessionToolContext } from '../context.ts';
 import type { OfficeResultEnvelope } from '../office-types.ts';
 import {
   clearOfficeRuntimeState,
   executeOfficeCommand,
+  flushOfficeResidentLease,
   releaseOfficeRuntimeSession,
   wasOfficeArtifactMutatedBySession,
   type OfficecliProcessResult,
   type OfficeCoordinatorDependencies,
 } from '../runtime/office-coordinator.ts';
+import { handleOfficeDocumentEdit, handleOfficeDocumentInspect } from './office-document.ts';
 import { resolveOfficecliResources } from '../runtime/office-manifest.ts';
 
 const resources = resolveOfficecliResources({
@@ -126,7 +130,11 @@ function envelope(result: Awaited<ReturnType<typeof executeOfficeCommand>>): Off
 }
 
 function commandCalls(calls: RecordedCall[]): RecordedCall[] {
-  return calls.filter(call => !['--version', '--output-schema-crc'].includes(call.args[0] ?? ''));
+  return calls.filter(call => !['--version', '--output-schema-crc', 'open', 'save', 'close'].includes(call.args[0] ?? ''));
+}
+
+function lifecycleCalls(calls: RecordedCall[]): RecordedCall[] {
+  return calls.filter(call => ['open', 'save', 'close'].includes(call.args[0] ?? ''));
 }
 
 beforeEach(() => clearOfficeRuntimeState());
@@ -176,10 +184,10 @@ describe('Office Runtime Coordinator', () => {
     expect(commandCalls(calls)[0]?.env).toMatchObject({
       OFFICECLI_SKIP_UPDATE: '1',
       OFFICECLI_NO_AUTO_INSTALL: '1',
-      OFFICECLI_NO_AUTO_RESIDENT: '1',
-      OFFICECLI_RESIDENT_FLUSH: 'each',
       NO_COLOR: '1',
     });
+    expect(commandCalls(calls)[0]?.env?.OFFICECLI_NO_AUTO_RESIDENT).toBeUndefined();
+    expect(lifecycleCalls(calls)[0]?.args).toEqual(['open', realpathSync.native(file), '--json']);
     expect(existsSync(sentinel)).toBe(false);
   });
 
@@ -208,13 +216,38 @@ describe('Office Runtime Coordinator', () => {
       { argv: ['open', file], mode: 'edit' as const, code: 'management_command_forbidden' },
       { argv: ['future-write', file], mode: 'edit' as const, code: 'command_not_editable' },
       { argv: ['view', file, 'screenshot'], mode: 'inspect' as const, code: 'render_requires_preview' },
-      { argv: ['dump', file, '/', '--out', 'dump.json'], mode: 'inspect' as const, code: 'read_output_forbidden' },
+      { argv: ['dump', file, '/', '--out', 'dump.json'], mode: 'inspect' as const, code: 'inspect_artifact_outside_office_dir' },
     ];
 
     for (const testCase of cases) {
       const result = await executeOfficeCommand(f.ctx, testCase, deps);
       expect(result.envelope.error?.code).toBe(testCase.code);
     }
+    expect(calls).toHaveLength(0);
+  });
+
+  it('rejects non-native command casing and whitespace before policy or path handling', async () => {
+    const f = fixture();
+    const output = join(f.working, 'wrongly-normalized.docx');
+    const { deps, calls } = dependencies();
+
+    const uppercase = await executeOfficeCommand(f.ctx, {
+      argv: ['Create', output],
+      mode: 'edit',
+    }, deps);
+    const padded = await executeOfficeCommand(f.ctx, {
+      argv: [' create ', output],
+      mode: 'edit',
+    }, deps);
+    const prefixed = await executeOfficeCommand(f.ctx, {
+      argv: [' OfficeCLI ', 'create', output],
+      mode: 'edit',
+    }, deps);
+
+    expect(uppercase.envelope.error?.code).toBe('invalid_command_token');
+    expect(padded.envelope.error?.code).toBe('invalid_command_token');
+    expect(prefixed.envelope.error?.code).toBe('binary_prefix_forbidden');
+    expect(existsSync(output)).toBe(false);
     expect(calls).toHaveLength(0);
   });
 
@@ -302,17 +335,72 @@ describe('Office Runtime Coordinator', () => {
     const f = fixture();
     const output = join(f.working, '新目录', '多层', 'new file.docx');
     const existing = officeFile(join(f.working, 'existing.docx'));
+    const directoryTarget = join(f.working, 'directory.docx');
+    mkdirSync(directoryTarget);
     const { deps, calls } = dependencies();
 
     const created = await executeOfficeCommand(f.ctx, { argv: ['create', output], mode: 'edit' }, deps);
     const refused = await executeOfficeCommand(f.ctx, { argv: ['create', existing], mode: 'edit' }, deps);
     const forced = await executeOfficeCommand(f.ctx, { argv: ['create', existing, '--force'], mode: 'edit' }, deps);
+    const forcedDirectory = await executeOfficeCommand(f.ctx, {
+      argv: ['create', directoryTarget, '--force'], mode: 'edit',
+    }, deps);
 
     expect(created.envelope.ok).toBe(true);
     expect(existsSync(dirname(output))).toBe(true);
     expect(refused.envelope.error?.code).toBe('output_exists');
     expect(forced.envelope.ok).toBe(true);
+    expect(forcedDirectory.envelope.error?.code).toBe('output_target_not_file');
     expect(commandCalls(calls).map(call => call.args)).toContainEqual(['create', existing, '--force', '--json']);
+  });
+
+  it('normalizes typed create outputs before authorization and rejects ambiguous or corrupting document paths', async () => {
+    const f = fixture();
+    const outsideRoot = mkdtempSync(join(tmpdir(), 'selection-office-create-outside-'));
+    roots.push(outsideRoot);
+    const { deps, calls } = dependencies();
+    const requested = join(f.working, 'typed-output');
+
+    const created = await executeOfficeCommand(f.ctx, {
+      argv: ['create', requested, '--type', 'docx'],
+      mode: 'edit',
+    }, deps);
+    const escaped = await executeOfficeCommand(f.ctx, {
+      argv: ['create', join(outsideRoot, 'escaped'), '--type', 'pptx'],
+      mode: 'edit',
+    }, deps);
+    const mismatchedCreate = await executeOfficeCommand(f.ctx, {
+      argv: ['create', join(f.working, 'wrong.docx'), '--type', 'pptx'],
+      mode: 'edit',
+    }, deps);
+    const template = officeFile(join(f.working, 'template.docx'));
+    const mismatchedMerge = await executeOfficeCommand(f.ctx, {
+      argv: ['merge', template, join(f.working, 'corrupt.xlsx'), '--data', '{}'],
+      mode: 'edit',
+    }, deps);
+    const inPlaceMerge = await executeOfficeCommand(f.ctx, {
+      argv: ['merge', template, template, '--data', '{}', '--force'],
+      mode: 'edit',
+    }, deps);
+    const hardlinkedTemplate = join(f.working, 'template-alias.docx');
+    linkSync(template, hardlinkedTemplate);
+    const hardlinkMerge = await executeOfficeCommand(f.ctx, {
+      argv: ['merge', template, hardlinkedTemplate, '--data', '{}', '--force'],
+      mode: 'edit',
+    }, deps);
+
+    expect(created.envelope).toMatchObject({
+      ok: true,
+      documentPath: join(realpathSync.native(f.working), 'typed-output.docx'),
+      artifactRevision: 1,
+    });
+    expect(commandCalls(calls)[0]?.args).toEqual(['create', `${requested}.docx`, '--type', 'docx', '--json']);
+    expect(escaped.envelope.error).toMatchObject({ code: 'path_outside_allowed_roots', category: 'permission' });
+    expect(mismatchedCreate.envelope.error?.code).toBe('document_type_mismatch');
+    expect(mismatchedMerge.envelope.error?.code).toBe('document_type_mismatch');
+    expect(inPlaceMerge.envelope.error?.code).toBe('output_conflicts_with_input');
+    expect(hardlinkMerge.envelope.error?.code).toBe('output_conflicts_with_input');
+    expect(commandCalls(calls)).toHaveLength(1);
   });
 
   it('revision-caches exact successful reads without a global inspect budget', async () => {
@@ -442,6 +530,10 @@ describe('Office Runtime Coordinator', () => {
     const outsideRoot = mkdtempSync(join(tmpdir(), 'selection-office-batch-outside-'));
     roots.push(outsideRoot);
     const outsideImage = officeFile(join(outsideRoot, 'outside.png'));
+    const escapedBatchFile = join(f.working, 'escaped-batch.json');
+    writeFileSync(escapedBatchFile, JSON.stringify([{
+      command: 'add', parent: '/body', type: 'picture', props: { src: outsideImage },
+    }]));
     const { deps } = dependencies();
 
     const ambiguous = await executeOfficeCommand(f.ctx, {
@@ -459,16 +551,38 @@ describe('Office Runtime Coordinator', () => {
       batch: { commands: ['{"command":"plugins"}'] },
       mode: 'edit',
     }, deps);
+    const ambiguousVerb = await executeOfficeCommand(f.ctx, {
+      argv: ['batch', file],
+      batch: { commands: ['{"command":"get","op":"add","parent":"/body","type":"p"}'] },
+      mode: 'edit',
+    }, deps);
     const escaped = await executeOfficeCommand(f.ctx, {
       argv: ['batch', file],
-      batch: { commands: [JSON.stringify({ command: 'add', props: { src: outsideImage } })] },
+      batch: { commands: [JSON.stringify({
+        command: 'add', parent: '/body', type: 'picture', props: { src: outsideImage },
+      })] },
+      mode: 'edit',
+    }, deps);
+    const escapedFromFile = await executeOfficeCommand(f.ctx, {
+      argv: ['batch', file],
+      batch: { file: escapedBatchFile },
+      mode: 'edit',
+    }, deps);
+    const escapedWithUpstreamCasing = await executeOfficeCommand(f.ctx, {
+      argv: ['batch', file],
+      batch: { commands: [JSON.stringify({
+        Command: 'add', Parent: '/body', Type: 'picture', Props: { src: outsideImage },
+      })] },
       mode: 'edit',
     }, deps);
 
     expect(ambiguous.envelope.error?.code).toBe('batch_source_required');
     expect(unknown.envelope.error?.code).toBe('forbidden_batch_command');
     expect(management.envelope.error?.code).toBe('forbidden_batch_command');
+    expect(ambiguousVerb.envelope.error?.code).toBe('ambiguous_batch_command');
     expect(escaped.envelope.error?.code).toBe('path_outside_allowed_roots');
+    expect(escapedFromFile.envelope.error?.code).toBe('path_outside_allowed_roots');
+    expect(escapedWithUpstreamCasing.envelope.error?.code).toBe('path_outside_allowed_roots');
   });
 
   it('uses the pinned nested batch grammar and keeps rendering in preview', async () => {
@@ -504,6 +618,140 @@ describe('Office Runtime Coordinator', () => {
     expect(commandCalls(calls)).toHaveLength(1);
   });
 
+  it('authorizes every native property that can read a local resource without misclassifying semantic values', async () => {
+    const f = fixture();
+    const document = officeFile(join(f.working, 'resources.docx'));
+    const workbook = officeFile(join(f.working, 'resources.xlsx'));
+    const deck = officeFile(join(f.working, 'resources.pptx'));
+    const insideMarkdown = officeFile(join(f.working, 'inside.md'), '# Inside');
+    const outsideRoot = mkdtempSync(join(tmpdir(), 'selection-office-resource-outside-'));
+    roots.push(outsideRoot);
+    const outsideMarkdown = officeFile(join(outsideRoot, 'secret.md'), '# Secret');
+    const outsideImage = officeFile(join(outsideRoot, 'secret.png'));
+    const outsideCsv = officeFile(join(outsideRoot, 'secret.csv'), 'name,value\nsecret,1');
+    const { deps, calls } = dependencies();
+
+    const markdown = await executeOfficeCommand(f.ctx, {
+      argv: ['add', document, '/body', '--type', 'markdown', '--prop', `path=${outsideMarkdown}`],
+      mode: 'edit',
+    }, deps);
+    const pictureFallback = await executeOfficeCommand(f.ctx, {
+      argv: [
+        'add', document, '/body', '--type', 'picture',
+        '--prop', `src=${insideMarkdown}`, '--prop', `fallback=${outsideImage}`,
+      ],
+      mode: 'edit',
+    }, deps);
+    const tableCsv = await executeOfficeCommand(f.ctx, {
+      argv: ['add', document, '/body', '--type', 'table', '--prop', `data=${outsideCsv}`],
+      mode: 'edit',
+    }, deps);
+    const background = await executeOfficeCommand(f.ctx, {
+      argv: ['set', deck, '/slide[1]', '--prop', `background=image:${outsideImage}`],
+      mode: 'edit',
+    }, deps);
+    const batchOleIcon = await executeOfficeCommand(f.ctx, {
+      argv: ['batch', deck],
+      batch: { commands: [JSON.stringify({
+        command: 'add', parent: '/slide[1]', type: 'ole',
+        props: { src: insideMarkdown, icon: outsideImage },
+      })] },
+      mode: 'edit',
+    }, deps);
+
+    // These are native semantic values, not filesystem inputs. The previous
+    // name-only validator rejected all three before OfficeCLI could run them.
+    const pivotSource = await executeOfficeCommand(f.ctx, {
+      argv: ['add', workbook, '/Sheet1', '--type', 'pivottable', '--prop', 'src=Sheet1!A1:D10'],
+      mode: 'edit',
+    }, deps);
+    const pivotSourceUpdate = await executeOfficeCommand(f.ctx, {
+      argv: ['set', workbook, '/Sheet1/pivottable[1]', '--prop', 'src=Sheet1!A1:E20'],
+      mode: 'edit',
+    }, deps);
+    const batchPivotSourceUpdate = await executeOfficeCommand(f.ctx, {
+      argv: ['batch', workbook],
+      batch: { commands: [JSON.stringify({
+        command: 'set', path: '/Sheet1/pivottable[1]', props: { src: 'Sheet1!A1:F30' },
+      })] },
+      mode: 'edit',
+    }, deps);
+    const diagramPoster = await executeOfficeCommand(f.ctx, {
+      argv: [
+        'add', deck, '/slide[1]', '--type', 'diagram',
+        '--prop', 'mermaid=flowchart LR; A-->B', '--prop', 'poster=true',
+      ],
+      mode: 'edit',
+    }, deps);
+    const clearImageFill = await executeOfficeCommand(f.ctx, {
+      argv: ['set', deck, '/slide[1]/shape[1]', '--prop', 'image=none'],
+      mode: 'edit',
+    }, deps);
+    const motionPath = await executeOfficeCommand(f.ctx, {
+      argv: ['set', deck, '/slide[1]/shape[1]/animation[1]', '--prop', 'path=line'],
+      mode: 'edit',
+    }, deps);
+    const batchMotionPath = await executeOfficeCommand(f.ctx, {
+      argv: ['batch', deck],
+      batch: { commands: [JSON.stringify({
+        command: 'set', path: '/slide[1]/shape[1]/animation[1]', props: { path: 'custom', d: 'M 0 0 L 0.5 0 E' },
+      })] },
+      mode: 'edit',
+    }, deps);
+
+    const escapedSetInputs = await Promise.all([
+      executeOfficeCommand(f.ctx, {
+        argv: ['set', document, '/body/p[1]/r[1]', '--prop', `src=${outsideImage}`],
+        mode: 'edit',
+      }, deps),
+      executeOfficeCommand(f.ctx, {
+        argv: ['set', workbook, '/Sheet1/ole[1]', '--prop', `path=${outsideMarkdown}`],
+        mode: 'edit',
+      }, deps),
+      executeOfficeCommand(f.ctx, {
+        argv: ['set', workbook, '/Sheet1/A1', '--prop', `image=${outsideImage}`],
+        mode: 'edit',
+      }, deps),
+      executeOfficeCommand(f.ctx, {
+        argv: ['set', deck, '/slide[1]/picture[1]', '--prop', `src=${outsideImage}`],
+        mode: 'edit',
+      }, deps),
+      executeOfficeCommand(f.ctx, {
+        argv: ['set', deck, '/slide[1]/video[1]', '--prop', `poster=${outsideImage}`],
+        mode: 'edit',
+      }, deps),
+      executeOfficeCommand(f.ctx, {
+        argv: ['set', deck, '/slide[1]/zoom[1]', '--prop', `cover=${outsideImage}`],
+        mode: 'edit',
+      }, deps),
+      executeOfficeCommand(f.ctx, {
+        argv: ['set', deck, '/slide[1]/shape[1]', '--prop', `imagefill=${outsideImage}`],
+        mode: 'edit',
+      }, deps),
+    ]);
+
+    for (const rejected of [markdown, pictureFallback, tableCsv, background, batchOleIcon]) {
+      expect(rejected.envelope.error).toMatchObject({
+        code: 'path_outside_allowed_roots',
+        category: 'permission',
+      });
+    }
+    expect(pivotSource.envelope.ok).toBe(true);
+    expect(pivotSourceUpdate.envelope.ok).toBe(true);
+    expect(batchPivotSourceUpdate.envelope.ok).toBe(true);
+    expect(diagramPoster.envelope.ok).toBe(true);
+    expect(clearImageFill.envelope.ok).toBe(true);
+    expect(motionPath.envelope.ok).toBe(true);
+    expect(batchMotionPath.envelope.ok).toBe(true);
+    for (const rejected of escapedSetInputs) {
+      expect(rejected.envelope.error).toMatchObject({
+        code: 'path_outside_allowed_roots',
+        category: 'permission',
+      });
+    }
+    expect(commandCalls(calls)).toHaveLength(7);
+  });
+
   it('requires Morph 3D model paths to be authorized, existing, and valid GLB files', async () => {
     const f = fixture();
     const deck = officeFile(join(f.working, 'morph.pptx'));
@@ -527,12 +775,16 @@ describe('Office Runtime Coordinator', () => {
       })] },
       mode: 'edit',
     }, deps);
+    const aliasAccepted = await executeOfficeCommand(f.ctx, {
+      argv: ['add', deck, '/slide[1]', '--type', 'model3d', '--prop', `src=${valid}`],
+      mode: 'edit',
+    }, deps);
     const malformed = await executeOfficeCommand(f.ctx, {
-      argv: ['add', deck, '/slide[1]', '--type', '3dmodel', '--prop', `path=${invalid}`],
+      argv: ['add', deck, '/slide[1]', '--type', 'model', '--prop', `path=${invalid}`],
       mode: 'edit',
     }, deps);
     const escaped = await executeOfficeCommand(f.ctx, {
-      argv: ['add', deck, '/slide[1]', '--type', '3dmodel', '--prop', `path=${outside}`],
+      argv: ['add', deck, '/slide[1]', '--type', 'glb', '--prop', `src=${outside}`],
       mode: 'edit',
     }, deps);
     const remote = await executeOfficeCommand(f.ctx, {
@@ -541,16 +793,20 @@ describe('Office Runtime Coordinator', () => {
     }, deps);
 
     expect(accepted.envelope.ok).toBe(true);
+    expect(aliasAccepted.envelope.ok).toBe(true);
     expect(malformed.envelope.error?.code).toBe('invalid_morph_glb');
     expect(escaped.envelope.error?.code).toBe('path_outside_allowed_roots');
-    expect(remote.envelope.error?.code).toBe('file_not_found');
-    expect(commandCalls(calls)).toHaveLength(1);
+    expect(remote.envelope.error?.code).toBe('remote_morph_glb_forbidden');
+    expect(commandCalls(calls)).toHaveLength(2);
   });
 
   it('validates import and merge input files before invoking OfficeCLI', async () => {
     const f = fixture();
     const workbook = officeFile(join(f.working, 'book.xlsx'));
+    const document = officeFile(join(f.working, 'book.docx'));
+    const csv = officeFile(join(f.working, 'data.csv'), 'name,value\nSelection,1\n');
     const template = officeFile(join(f.working, 'template.docx'));
+    const missingDataOutput = join(f.working, 'must-not-exist', 'output.docx');
     const { deps } = dependencies();
 
     const missingCsv = await executeOfficeCommand(f.ctx, {
@@ -561,8 +817,28 @@ describe('Office Runtime Coordinator', () => {
       argv: ['import', workbook, '/Sheet1', '--stdin'],
       mode: 'edit',
     }, deps);
+    const ambiguousSource = await executeOfficeCommand(f.ctx, {
+      argv: ['import', workbook, '/Sheet1', csv, '--file', csv],
+      mode: 'edit',
+    }, deps);
+    const invalidFormat = await executeOfficeCommand(f.ctx, {
+      argv: ['import', workbook, '/Sheet1', csv, '--format', 'xml'],
+      mode: 'edit',
+    }, deps);
+    const invalidStartCell = await executeOfficeCommand(f.ctx, {
+      argv: ['import', workbook, '/Sheet1', csv, '--start-cell', 'XFE1'],
+      mode: 'edit',
+    }, deps);
+    const unknownArgument = await executeOfficeCommand(f.ctx, {
+      argv: ['import', workbook, '/Sheet1', csv, '--unknown', 'ignored'],
+      mode: 'edit',
+    }, deps);
+    const wrongTarget = await executeOfficeCommand(f.ctx, {
+      argv: ['import', document, '/Sheet1', csv],
+      mode: 'edit',
+    }, deps);
     const missingData = await executeOfficeCommand(f.ctx, {
-      argv: ['merge', template, 'output.docx', '--data', 'missing.json'],
+      argv: ['merge', template, missingDataOutput, '--data', 'missing.json'],
       mode: 'edit',
     }, deps);
     const inlineData = await executeOfficeCommand(f.ctx, {
@@ -572,8 +848,72 @@ describe('Office Runtime Coordinator', () => {
 
     expect(missingCsv.envelope.error?.code).toBe('file_not_found');
     expect(stdin.envelope.error?.code).toBe('stdin_not_supported');
+    expect(ambiguousSource.envelope.error?.code).toBe('ambiguous_import_source');
+    expect(invalidFormat.envelope.error?.code).toBe('invalid_import_format');
+    expect(invalidStartCell.envelope.error?.code).toBe('invalid_import_start_cell');
+    expect(unknownArgument.envelope.error?.code).toBe('invalid_import_argument');
+    expect(wrongTarget.envelope.error?.code).toBe('import_requires_xlsx');
     expect(missingData.envelope.error?.code).toBe('file_not_found');
+    expect(existsSync(dirname(missingDataOutput))).toBe(false);
     expect(inlineData.envelope.ok).toBe(true);
+  });
+
+  it('recovers a manifest-reviewed false-success import through one atomic OfficeCLI batch', async () => {
+    const f = fixture();
+    const workbook = officeFile(join(f.working, 'import.xlsx'));
+    const csv = officeFile(
+      join(f.working, 'quoted data.csv'),
+      '\uFEFF季度,"收入,净额"\r\nQ1,42000\r\nQ2,45000\r\n',
+    );
+    let recipePath: string | undefined;
+    let recipe: Array<Record<string, unknown>> = [];
+    const { deps, calls } = dependencies(args => {
+      if (args[0] === 'open' || args[0] === 'save' || args[0] === 'close') {
+        return processResult('{"success":true}');
+      }
+      if (args[0] === 'import') {
+        return processResult('{"success":true,"data":{"imported":true}}');
+      }
+      if (args[0] === 'get') {
+        return processResult('{"success":true,"data":{"path":"/Sheet1/B2","children":[]}}');
+      }
+      expect(args[0]).toBe('batch');
+      recipePath = args[args.indexOf('--input') + 1];
+      recipe = JSON.parse(readFileSync(recipePath!, 'utf8')) as Array<Record<string, unknown>>;
+      writeFileSync(workbook, 'mutated-by-officecli-batch');
+      return processResult(JSON.stringify({
+        success: true,
+        data: { summary: { total: recipe.length, succeeded: recipe.length, failed: 0 } },
+      }));
+    });
+
+    const result = await executeOfficeCommand(f.ctx, {
+      argv: ['import', workbook, '/Sheet1', '--header', '--start-cell', 'B2', csv],
+      mode: 'edit',
+    }, deps);
+
+    expect(result.envelope).toMatchObject({
+      ok: true,
+      backend: 'officecli-batch-recipe',
+      artifactRevision: 2,
+      data: {
+        import: { rows: 3, columns: 2, startCell: 'B2', header: true },
+      },
+      warnings: [expect.objectContaining({ code: 'reviewed_import_recipe_applied' })],
+    });
+    expect(result.envelope.command[0]).toBe('batch');
+    expect(recipe).toEqual([
+      { command: 'set', path: '/Sheet1/B2', props: { value: '季度' } },
+      { command: 'set', path: '/Sheet1/C2', props: { value: '收入,净额' } },
+      { command: 'set', path: '/Sheet1/B3', props: { value: 'Q1' } },
+      { command: 'set', path: '/Sheet1/C3', props: { value: '42000' } },
+      { command: 'set', path: '/Sheet1/B4', props: { value: 'Q2' } },
+      { command: 'set', path: '/Sheet1/C4', props: { value: '45000' } },
+      { command: 'set', path: '/Sheet1', props: { freeze: 'A3', autoFilter: 'B2:C4' } },
+    ]);
+    expect(recipePath).toBeDefined();
+    expect(existsSync(recipePath!)).toBe(false);
+    expect(commandCalls(calls).map(call => call.args[0])).toEqual(['import', 'get', 'batch']);
   });
 
   it('reports permission, timeout, and runtime-manifest mismatch as structured errors', async () => {
@@ -623,5 +963,251 @@ describe('Office Runtime Coordinator', () => {
     chmodSync(readOnly, 0o755);
     expect(['output_parent_not_writable', 'output_directory_create_failed'])
       .toContain(result.envelope.error?.code ?? '');
+  });
+
+  it('keeps agent lifecycle argv forbidden while the lease channel can save', async () => {
+    const f = fixture();
+    const file = officeFile(join(f.working, 'lease.docx'));
+    const { deps, calls } = dependencies();
+
+    const agent = await executeOfficeCommand(f.ctx, { argv: ['save', file], mode: 'edit' }, deps);
+    const lease = await executeOfficeCommand(f.ctx, {
+      argv: ['save', file],
+      mode: 'internal',
+      allowLifecycle: true,
+    }, deps);
+
+    expect(agent.envelope.error?.code).toBe('management_command_forbidden');
+    expect(lease.envelope.ok).toBe(true);
+    expect(lifecycleCalls(calls).some(call => call.args[0] === 'save')).toBe(true);
+  });
+
+  it('retries once without resident after a file_busy failure', async () => {
+    const f = fixture();
+    const file = officeFile(join(f.working, 'busy.docx'));
+    let gets = 0;
+    const { deps, calls } = dependencies(args => {
+      if (args[0] === 'get') {
+        gets += 1;
+        if (gets === 1) {
+          return processResult(
+            '{"success":false,"error":{"code":"file_busy","message":"Workbook is locked"}}',
+            { exitCode: 1 },
+          );
+        }
+      }
+      return processResult('{"success":true,"data":{"ok":true}}');
+    });
+
+    const result = await executeOfficeCommand(f.ctx, { argv: ['get', file, '/'], mode: 'inspect' }, deps);
+
+    expect(result.envelope.ok).toBe(true);
+    const getsCalls = commandCalls(calls).filter(call => call.args[0] === 'get');
+    expect(getsCalls).toHaveLength(2);
+    expect(getsCalls[1]?.env?.OFFICECLI_NO_AUTO_RESIDENT).toBe('1');
+    expect(lifecycleCalls(calls).some(call => call.args[0] === 'close')).toBe(true);
+  });
+
+  it('does not retry a timed-out mutation, to avoid applying it twice', async () => {
+    const f = fixture();
+    const file = officeFile(join(f.working, 'timeout.docx'));
+    const { deps, calls } = dependencies(args => {
+      if (args[0] === 'set') return processResult('', { timedOut: true, exitCode: null });
+      return processResult('{"success":true}');
+    });
+
+    const result = await executeOfficeCommand(f.ctx, {
+      argv: ['set', file, '/body/p[1]', '--prop', 'text=once'],
+      mode: 'edit',
+      mutation: true,
+    }, deps);
+
+    expect(result.envelope.error?.code).toBe('timeout');
+    expect(commandCalls(calls).filter(call => call.args[0] === 'set')).toHaveLength(1);
+  });
+
+  it('opens a document once per session and closes the lease on release', async () => {
+    const f = fixture();
+    const file = officeFile(join(f.working, 'hot.docx'));
+    const { deps, calls } = dependencies();
+
+    await executeOfficeCommand(f.ctx, {
+      argv: ['set', file, '/body/p[1]', '--prop', 'text=one'],
+      mode: 'edit',
+      mutation: true,
+    }, deps);
+    await executeOfficeCommand(f.ctx, {
+      argv: ['set', file, '/body/p[1]', '--prop', 'text=two'],
+      mode: 'edit',
+      mutation: true,
+    }, deps);
+
+    expect(lifecycleCalls(calls).filter(call => call.args[0] === 'open')).toHaveLength(1);
+    await releaseOfficeRuntimeSession(f.ctx.sessionId);
+    expect(lifecycleCalls(calls).filter(call => call.args[0] === 'close')).toHaveLength(1);
+  });
+
+  it('flushes the resident lease before inspect html artifacts', async () => {
+    const f = fixture();
+    const file = officeFile(join(f.working, 'preview.docx'));
+    const { deps, calls } = dependencies();
+
+    await executeOfficeCommand(f.ctx, {
+      argv: ['set', file, '/body/p[1]', '--prop', 'text=draft'],
+      mode: 'edit',
+      mutation: true,
+    }, deps);
+    await flushOfficeResidentLease(f.ctx, file, deps);
+    const html = await executeOfficeCommand(f.ctx, {
+      argv: ['view', file, 'html'],
+      mode: 'inspect',
+    }, deps);
+
+    expect(html.envelope.ok).toBe(true);
+    expect(lifecycleCalls(calls).some(call => call.args[0] === 'save')).toBe(true);
+    expect(html.envelope.command).toContain('--out');
+    expect(String(html.envelope.command[html.envelope.command.indexOf('--out') + 1])).toContain(join('data', 'office'));
+
+    const relative = await flushOfficeResidentLease(f.ctx, basename(file), deps);
+    expect(relative?.envelope.ok).toBe(true);
+    expect(lifecycleCalls(calls).filter(call => call.args[0] === 'save').length).toBeGreaterThan(1);
+  });
+
+  it('uses native import when the probe finds persisted cells', async () => {
+    const f = fixture();
+    const workbook = officeFile(join(f.working, 'native.xlsx'));
+    const csv = officeFile(join(f.working, 'native.csv'), '季度,收入\nQ1,1\n');
+    const { deps, calls } = dependencies(args => {
+      if (args[0] === 'get') {
+        return processResult(JSON.stringify({ success: true, data: { value: '季度' } }));
+      }
+      return processResult('{"success":true,"data":{"imported":true}}');
+    });
+
+    const result = await executeOfficeCommand(f.ctx, {
+      argv: ['import', workbook, '/Sheet1', '--header', csv],
+      mode: 'edit',
+    }, deps);
+
+    expect(result.envelope).toMatchObject({ ok: true, backend: 'officecli' });
+    expect(commandCalls(calls).map(call => call.args[0])).toEqual(['import', 'get']);
+  });
+
+  it('does not treat get path metadata as persisted import content', async () => {
+    const f = fixture();
+    const workbook = officeFile(join(f.working, 'false-positive.xlsx'));
+    const csv = officeFile(join(f.working, 'path-header.csv'), 'path,value\nfoo,1\n');
+    const { deps, calls } = dependencies(args => {
+      if (args[0] === 'get') {
+        return processResult(JSON.stringify({ success: true, data: { path: '/Sheet1/A1', children: [] } }));
+      }
+      if (args[0] === 'batch') return processResult('{"success":true,"data":{"ok":true}}');
+      return processResult('{"success":true,"data":{"imported":true}}');
+    });
+
+    const result = await executeOfficeCommand(f.ctx, {
+      argv: ['import', workbook, '/Sheet1', '--header', csv],
+      mode: 'edit',
+    }, deps);
+
+    expect(result.envelope.backend).toBe('officecli-batch-recipe');
+    expect(commandCalls(calls).map(call => call.args[0])).toEqual(['import', 'get', 'batch']);
+  });
+
+  it('imports JSON object arrays through the reviewed recipe when native is empty', async () => {
+    const f = fixture();
+    const workbook = officeFile(join(f.working, 'json.xlsx'));
+    const json = officeFile(
+      join(f.working, 'rows.json'),
+      JSON.stringify([{ 季度: 'Q1', 收入: 42 }, { 季度: 'Q2', 收入: 45 }]),
+    );
+    let recipe: Array<Record<string, unknown>> = [];
+    const { deps } = dependencies(args => {
+      if (args[0] === 'get') return processResult('{"success":true,"data":{"children":[]}}');
+      if (args[0] === 'batch') {
+        recipe = JSON.parse(readFileSync(args[args.indexOf('--input') + 1]!, 'utf8')) as Array<Record<string, unknown>>;
+      }
+      return processResult('{"success":true,"data":{"ok":true}}');
+    });
+
+    const result = await executeOfficeCommand(f.ctx, {
+      argv: ['import', workbook, '/Sheet1', '--header', '--format', 'json', json],
+      mode: 'edit',
+    }, deps);
+
+    expect(result.envelope).toMatchObject({
+      ok: true,
+      backend: 'officecli-batch-recipe',
+      data: { import: { format: 'json', rows: 3, columns: 2, header: true } },
+    });
+    expect(recipe[0]).toEqual({ command: 'set', path: '/Sheet1/A1', props: { value: '季度' } });
+    expect(recipe.at(-1)).toMatchObject({ command: 'set', path: '/Sheet1', props: { freeze: 'A2' } });
+  });
+
+  it('writes dump/view html under data/office and still blocks screenshot', async () => {
+    const f = fixture();
+    const file = officeFile(join(f.working, 'artifacts.docx'));
+    const { deps } = dependencies();
+    const dump = await executeOfficeCommand(f.ctx, { argv: ['dump', file, '/'], mode: 'inspect' }, deps);
+    const html = await executeOfficeCommand(f.ctx, { argv: ['view', file, 'html'], mode: 'inspect' }, deps);
+    const screenshot = await executeOfficeCommand(f.ctx, {
+      argv: ['view', file, 'screenshot'],
+      mode: 'inspect',
+    }, deps);
+    const escaped = await executeOfficeCommand(f.ctx, {
+      argv: ['dump', file, '/', '--out', join(f.working, 'outside.json')],
+      mode: 'inspect',
+    }, deps);
+
+    expect(dump.envelope.ok).toBe(true);
+    expect(String(dump.envelope.command[dump.envelope.command.indexOf('--out') + 1])).toContain(join('data', 'office'));
+    expect(html.envelope.ok).toBe(true);
+    expect(screenshot.envelope.error?.code).toBe('render_requires_preview');
+    expect(escaped.envelope.error?.code).toBe('inspect_artifact_outside_office_dir');
+  });
+
+  it('expands edit.recipe.clone into an atomic morph batch', async () => {
+    const f = fixture();
+    const file = officeFile(join(f.working, 'morph.pptx'));
+    const { deps, calls } = dependencies();
+
+    const result = await handleOfficeDocumentEdit(f.ctx, {
+      recipe: { name: 'clone', file, fromSlide: 1, toSlide: 2 },
+    }, deps);
+
+    expect(result.isError).toBe(false);
+    const batch = commandCalls(calls).find(call => call.args[0] === 'batch');
+    expect(JSON.parse(String(batch?.args[(batch?.args.indexOf('--commands') ?? -1) + 1]))).toEqual([
+      { command: 'add', parent: '/', from: '/slide[1]' },
+      { command: 'set', path: '/slide[2]', props: { transition: 'morph' } },
+    ]);
+  });
+
+  it('runs inspect.recipe.verify against slide get JSON', async () => {
+    const f = fixture();
+    const file = officeFile(join(f.working, 'verify.pptx'));
+    const { deps } = dependencies(args => {
+      if (args[0] === 'get' && String(args[2]).includes('slide[2]')) {
+        return processResult(JSON.stringify({
+          success: true,
+          data: { type: 'slide', format: { transition: 'morph' }, children: [] },
+        }));
+      }
+      return processResult(JSON.stringify({
+        success: true,
+        data: { type: 'slide', format: { transition: 'fade' }, children: [] },
+      }));
+    });
+
+    const result = await handleOfficeDocumentInspect(f.ctx, {
+      recipe: { name: 'verify', file, slide: 2 },
+    }, deps);
+    const payload = result.structuredContent as OfficeResultEnvelope;
+
+    expect(payload.ok).toBe(true);
+    expect(payload.data).toMatchObject({
+      recipe: 'verify',
+      verification: { ok: true },
+    });
   });
 });

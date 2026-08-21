@@ -587,8 +587,10 @@ const OFFICE_FILE_PATH_PATTERN = /\.(?:docx|xlsx|pptx)$/i;
 const OFFICE_MARKDOWN_SIDECAR_PATTERN = /\.(?:docx|xlsx|pptx)\.md$/i;
 const OFFICE_PATH_IN_COMMAND_PATTERN = /\.(?:docx|xlsx|pptx)(?:\.md)?(?=$|[\s"';&|])/i;
 const OFFICE_CONTENT_FILE_TOOLS = new Set(['Read', 'Write', 'Edit', 'MultiEdit']);
-const OFFICE_DIRECT_CLI_PATTERN = /(?:^|[\s"';&|\\/])(?:\$\{?CRAFT_OFFICECLI\}?|officecli(?:-(?:linux|mac|win)-(?:x64|arm64))?|docx-tool|xlsx-tool|pptx-tool)(?:\.exe)?(?=$|[\s"';&|])/i;
+const OFFICE_RUNTIME_ENV_PATTERN = /(?:\$(?:\{)?(?:env:)?CRAFT_OFFICECLI(?=$|[^A-Z0-9_])|%CRAFT_OFFICECLI%)/i;
+const OFFICE_DIRECT_CLI_PATTERN = /(?:^|[\s"';&|\\/`($])(?:officecli(?:-(?:linux|mac|win)-(?:x64|arm64))?|docx-tool|xlsx-tool|pptx-tool)(?:\.exe)?(?=$|[\s"';&|`)}])/i;
 const MARKITDOWN_CLI_PATTERN = /(?:^|[\s"';&|\\/])markitdown(?:\.exe)?(?=$|[\s"';&|])/i;
+const DOC_DIFF_CLI_PATTERN = /(?:^|[\s"';&|\\/])doc-diff(?:\.exe)?(?=$|[\s"';&|])/i;
 const OFFICE_MARKDOWN_FALLBACK_MARKER = 'selection-office-native-fallback';
 const OFFICE_NATIVE_TOOL_NAMES = new Set([
   'office_document_inspect',
@@ -655,10 +657,15 @@ export function getNativeOfficeToolRedirect(
     const command = typeof input.command === 'string' ? input.command : '';
     const operatesOnOfficeFile = OFFICE_PATH_IN_COMMAND_PATTERN.test(command);
     const isMarkedMarkdownFallback = command.toLowerCase().includes(OFFICE_MARKDOWN_FALLBACK_MARKER);
-    const usesDirectOfficeCli = OFFICE_DIRECT_CLI_PATTERN.test(command);
+    const usesDirectOfficeCli = OFFICE_RUNTIME_ENV_PATTERN.test(command) || OFFICE_DIRECT_CLI_PATTERN.test(command);
     const usesMarkitdown = MARKITDOWN_CLI_PATTERN.test(command);
+    const usesDocDiff = DOC_DIFF_CLI_PATTERN.test(command);
 
-    if (usesDirectOfficeCli || (operatesOnOfficeFile && usesMarkitdown && !isMarkedMarkdownFallback)) {
+    if (
+      usesDirectOfficeCli
+      || (operatesOnOfficeFile && usesDocDiff)
+      || (operatesOnOfficeFile && usesMarkitdown && !isMarkedMarkdownFallback)
+    ) {
       return {
         message: buildNativeOfficeRoutingMessage(
           'Shell-based Office content processing is blocked until the registered native Office tool is used.',

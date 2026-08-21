@@ -13,19 +13,23 @@ export {
 export const OFFICE_WORKFLOW_PROMPT = `Office document workflow:
 - OfficeCLI is the only Office execution engine. Use the five built-in Office tools; never run officecli, legacy Office CLIs, scripts, or binary file edits through Bash/Read/Write.
 - Pass native tokens as argv and omit the leading officecli binary name. Tokens are sent directly to the reviewed bundled binary without a shell.
-- For a complex Word, Excel, PowerPoint, form, paper, dashboard, financial-model, pitch, or Morph task, progressively load only the relevant internal guide topic with office_document_guide.
-- Use office_document_inspect for status/help/view/get/query/validate/dump/raw. Successful identical reads are revision-cached; change the request after an error instead of repeating it.
-- Use office_document_edit for create/edit/import/merge/refresh/batch. Existing outputs require explicit --force. Batch is atomic unless --best-effort is explicitly present.
+- When a property name is uncertain, call office_document_inspect argv: ['help', format, element] before guessing.
+- For a complex Word, Excel, PowerPoint, form, paper, dashboard, financial-model, pitch, or Morph task, progressively load only the relevant internal guide topic with office_document_guide before editing.
+- Use office_document_inspect for status/help/view/get/query/validate/dump/raw. dump and view html write session data/office artifacts for Read. Successful identical reads are revision-cached; change the request after an error instead of repeating it.
+- Use office_document_edit for create/edit/import/merge/refresh/batch. Existing outputs require explicit --force. A turn with more than about 10 structural or cell edits must use batch (inline or batch.file), not dozens of single set calls. Batch is atomic unless --best-effort is explicitly present.
+- After a batch, run view issues plus view html (or office_document_preview.render).
+- Morph clone/ghost/clean-accumulation and verify/final-check go through the recipe field; do not invent shell or Python helpers.
+- Resident, watch, and finalize are managed by Selection. Never pass open, save, or close in argv.
 - Use office_document_preview.render for visual evidence. Only office_document_preview.start may open or focus the Selection BrowserPane.
 - Finish deliverables with office_document_finalize. deliveryReady means Selection's machine gates passed for the latest revision; it is not Microsoft Office human visual approval.`;
 
 export const OFFICE_DOCUMENT_INSPECT_DESCRIPTION = `Read Office documents through Selection's reviewed OfficeCLI runtime.
 
-Input is { argv: string[], timeoutMs? }. argv starts with one read-only verb: status, help, view, get, query, validate, dump, raw, or get-marks. Do not include the officecli prefix or shell quoting. Rendering output, browser launch, management, resident, installation, upgrade, MCP, plugin, and unknown commands are blocked. Repeated successful calls are cached by artifact revision; after three identical failures Selection returns loop_prevented.`;
+Input is { argv?: string[], recipe?, timeoutMs? }. Provide exactly one of argv or recipe. argv starts with one read-only verb: status, help, view, get, query, validate, dump, raw, or get-marks. dump and view html may write artifacts under session data/office/. Do not include the officecli prefix or shell quoting. Screenshot, browser launch, management, installation, upgrade, MCP, plugin, and unknown commands are blocked. recipe.verify / recipe.final-check run read-only Morph checks. Repeated successful calls are cached by artifact revision; after three identical failures Selection returns loop_prevented.`;
 
 export const OFFICE_DOCUMENT_EDIT_DESCRIPTION = `Create or modify Office documents through Selection's reviewed OfficeCLI runtime.
 
-Input is { argv: string[], batch?, timeoutMs? }. argv starts with create, set, add, remove, move, swap, refresh, raw-set, add-part, batch, import, or merge. Arguments are native tokens passed with spawn(binary, argv), never a shell string. Existing create/merge outputs require --force. For batch, provide exactly one of batch.commands (JSON object strings; maximum ${OFFICE_MAX_INLINE_BATCH_COMMANDS} commands / ${OFFICE_MAX_INLINE_BATCH_CHARS} serialized characters) or batch.file (JSON array; maximum ${OFFICE_MAX_BATCH_FILE_BYTES} bytes). Batch is atomic by default; --best-effort is the only partial-success mode.`;
+Input is { argv?: string[], recipe?, batch?, timeoutMs? }. Provide exactly one of argv or recipe. argv starts with create, set, add, remove, move, swap, refresh, raw-set, add-part, batch, import, or merge. Arguments are native tokens passed with spawn(binary, argv), never a shell string. Existing create/merge outputs require --force. For batch, provide exactly one of batch.commands (JSON object strings; maximum ${OFFICE_MAX_INLINE_BATCH_COMMANDS} commands / ${OFFICE_MAX_INLINE_BATCH_CHARS} serialized characters) or batch.file (JSON array; maximum ${OFFICE_MAX_BATCH_FILE_BYTES} bytes). Batch is atomic by default; --best-effort is the only partial-success mode. recipe.clone / recipe.ghost / recipe.clean-accumulation expand to one audited atomic batch.`;
 
 export const OFFICE_DOCUMENT_GUIDE_DESCRIPTION = `Progressively load Selection's hidden, version-pinned official OfficeCLI guidance.
 
