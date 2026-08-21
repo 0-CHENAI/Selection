@@ -15,6 +15,7 @@ import {
   FileCode,
   Copy,
   Play,
+  Search,
   Power,
   PowerOff,
   Send,
@@ -27,6 +28,7 @@ export interface AutomationMenuProps {
   enabled: boolean
   onToggleEnabled?: () => void
   onTest?: () => void
+  onSimulateMatch?: () => void
   onDuplicate?: () => void
   onEditJson?: () => void
   onDelete?: () => void
@@ -40,6 +42,7 @@ export function AutomationMenu({
   enabled,
   onToggleEnabled,
   onTest,
+  onSimulateMatch,
   onDuplicate,
   onEditJson,
   onDelete,
@@ -67,6 +70,13 @@ export function AutomationMenu({
         <MenuItem onClick={onTest}>
           <Play className="h-3.5 w-3.5" />
           <span className="flex-1">{t('automations.runTest')}</span>
+        </MenuItem>
+      )}
+
+      {onSimulateMatch && (
+        <MenuItem onClick={onSimulateMatch}>
+          <Search className="h-3.5 w-3.5" />
+          <span className="flex-1">{t('automations.matchSimulate')}</span>
         </MenuItem>
       )}
 

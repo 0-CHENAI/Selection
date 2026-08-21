@@ -57,7 +57,8 @@ export type AutomationHistoryStatus =
   | 'succeeded'
   | 'failed'
   | 'rate-limited'
-  | 'suppressed';
+  | 'suppressed'
+  | 'blocked';
 
 // ============================================================================
 // Action Definitions
@@ -76,6 +77,21 @@ export interface PromptAction {
    * When omitted, falls back to the workspace default (then DEFAULT_THINKING_LEVEL).
    */
   thinkingLevel?: ThinkingLevel;
+  /**
+   * When true, wait until the spawned session completes (via onSessionComplete).
+   * Defaults to false (fire-and-forget for Agent Events).
+   */
+  waitForCompletion?: boolean;
+  /**
+   * When true, write the spawned session's result back to the source session.
+   * Implies waitForCompletion.
+   */
+  reportBack?: boolean;
+  /**
+   * Wait timeout in milliseconds when waitForCompletion or reportBack is set.
+   * Default 5 minutes; maximum 30 minutes.
+   */
+  timeoutMs?: number;
 }
 
 /** HTTP method for webhook actions */
@@ -108,7 +124,28 @@ export interface WebhookAction {
   auth?: WebhookAuth;
 }
 
-export type AutomationAction = PromptAction | WebhookAction;
+/**
+ * Synchronous PreToolUse decision. Tighten-only: can block or modify a tool
+ * after the built-in permission pipeline has already allowed/modified it.
+ * `allow` is intentionally omitted — not intercepting already means allow.
+ */
+export interface DecisionAction {
+  type: 'decision';
+  decision: 'block' | 'modify';
+  reason?: string;
+  updatedInput?: Record<string, unknown>;
+}
+
+export type AutomationAction = PromptAction | WebhookAction | DecisionAction;
+
+/** Result of a synchronous PreToolUse automation decision. */
+export interface ToolDecisionResult {
+  decision: 'block' | 'modify';
+  reason?: string;
+  updatedInput?: Record<string, unknown>;
+  matcherId: string;
+  automationName?: string;
+}
 
 // ============================================================================
 // Condition Types
@@ -138,7 +175,7 @@ export interface StateCondition {
   from?: unknown;
   /** Transition: new value (mapped via TRANSITION_FIELDS) */
   to?: unknown;
-  /** Array membership check */
+  /** Array membership, or substring match when the field is a string */
   contains?: string;
   /** Negation: matches anything except this value */
   not_value?: unknown;
@@ -188,6 +225,11 @@ export interface AutomationMatcher {
    *   - The bot lacks "Manage Topics" permission in the supergroup
    */
   telegramTopic?: string;
+  /**
+   * Per-matcher automation depth cap (1–5). Defaults to MAX_AUTOMATION_DEPTH (3).
+   * An event at `depth >= maxDepth` is suppressed.
+   */
+  maxDepth?: number;
   actions: AutomationAction[];
 }
 
@@ -269,9 +311,15 @@ export interface PendingPrompt {
   telegramTopic?: string;
   /** When false, SessionManager returns after dispatching the prompt (Agent Events). */
   waitForCompletion?: boolean;
+  /** When true, write the spawned session's result back to the source session. */
+  reportBack?: boolean;
+  /** Wait timeout in milliseconds when waitForCompletion or reportBack is set. */
+  timeoutMs?: number;
   /** Agent Event that produced this prompt, when applicable */
   sourceEvent?: AgentEvent;
   sourceSessionId?: string;
+  /** Root session of the automation chain (for chain-level spawn caps). */
+  rootSessionId?: string;
   automationDepth?: number;
 }
 
@@ -308,6 +356,8 @@ export interface SdkAutomationInput {
   workspace_id?: string;
   source_session_id?: string;
   source_session_name?: string;
+  /** Root session of the automation chain (depth-0 source). */
+  source_root_session_id?: string;
   source_backend?: 'pi';
   automation_depth?: number;
   triggered_by_automation?: boolean;

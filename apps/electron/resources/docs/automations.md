@@ -2,9 +2,7 @@
 
 This guide explains how to configure automations in Selection to automate workflows based on events.
 
-> **CLI-first workflow (recommended):** Use `craft-agent automation ...` commands instead of editing JSON directly.
-> - `craft-agent automation --help`
-> - Canonical command reference: [craft-cli.md](./craft-cli.md)
+> **CLI:** `craft-agent automation ...` is planned. Until it ships, edit `automations.json` in the app (Automations page → Edit File) or by hand. See [craft-cli.md](./craft-cli.md).
 
 ## What Are Automations?
 
@@ -22,22 +20,9 @@ Automations are configured in `automations.json` at the root of your workspace:
 ~/.selection/workspaces/{workspaceId}/automations.json
 ```
 
-## Recommended CLI Commands
+## Recommended workflow
 
-```bash
-craft-agent automation list
-craft-agent automation get <id>
-craft-agent automation create --event UserPromptSubmit --prompt "..."
-craft-agent automation update <id> --json '{...}'
-craft-agent automation enable <id>
-craft-agent automation disable <id>
-craft-agent automation duplicate <id>
-craft-agent automation history [<id>] --limit 20
-craft-agent automation last-executed <id>
-craft-agent automation test <id> --match "..."
-craft-agent automation lint
-craft-agent automation validate
-```
+Edit `automations.json` in the Automations UI, then use **Run Test** (executes actions) or **Simulate match** (dry-run matcher/conditions only). `craft-agent automation` CLI commands are planned and not implemented yet.
 
 ## Basic Structure
 
@@ -76,9 +61,9 @@ craft-agent automation validate
 
 ### Agent Events (produced by the Pi runtime)
 
-These fire during a real Pi session. Matching Prompt and Webhook actions run after matcher and conditions pass. Prompt actions create an **independent** session and do not wait for that session to finish — they also cannot block or modify the current tool.
+These fire during a real Pi session. Matching Prompt and Webhook actions run after matcher and conditions pass. Prompt actions create an **independent** session. By default they are fire-and-forget (`waitForCompletion: false`). Set `waitForCompletion` or `reportBack` to wait for that session to finish (default timeout 5 minutes, max 30 minutes). A `decision` action on `PreToolUse` can **tighten** an already-allowed tool (block or modify only — there is no `allow`).
 
-`Run Test` only exercises the configured actions. It does not simulate a Pi event and is not proof that the live Agent Event path works.
+`Run Test` only exercises configured prompt/webhook actions. **Simulate match** dry-runs matcher + conditions against a sample payload without executing actions.
 
 | Event | Trigger | Match Value |
 |-------|---------|-------------|
@@ -114,6 +99,9 @@ Send a prompt to Selection (creates a new session for scheduled prompts).
 | `prompt` | string | Required | Prompt text to send |
 | `llmConnection` | string | Workspace default | LLM connection slug (configured in AI Settings) |
 | `model` | string | Workspace default | Model ID for the created session |
+| `waitForCompletion` | boolean | `false` on Agent Events | Wait until the spawned session completes |
+| `reportBack` | boolean | `false` | Write the result back to the source session (implies wait) |
+| `timeoutMs` | number | `300000` | Wait timeout (1–1800000 ms) |
 
 **Features:**
 - Use `@mentions` to reference sources or skills
@@ -131,6 +119,48 @@ Send a prompt to Selection (creates a new session for scheduled prompts).
 ```
 
 The `llmConnection` value is the slug of an LLM connection configured in AI Settings. The `model` value is a model ID supported by the provider. If either is invalid or not found, it gracefully falls back to the workspace default. Both can be used independently or together.
+
+When `reportBack` is true, the spawned session must complete successfully. If the source session is still in a turn, Selection waits for that turn to finish, then sends a new user message prefixed with `[Automation "<name>" result]`. It will not steer or queue into a live turn. If the source is gone or does not become idle in time, history records `failed` (`source session unavailable`). `Stop` is the most reliable event for reportBack.
+
+```json
+{
+  "type": "prompt",
+  "prompt": "Summarize the last tool result: $CRAFT_TOOL_RESPONSE",
+  "waitForCompletion": true,
+  "reportBack": true,
+  "timeoutMs": 120000
+}
+```
+
+### Decision Actions (PreToolUse only)
+
+Tighten-only synchronous intervention after built-in permission checks have already allowed or modified the tool. There is no `allow` — not matching already means allow. `block` wins over `modify` when multiple matchers hit. Decision evaluation is pure-sync (no I/O, no rate-limit bus). A block does **not** emit the PreToolUse observation event.
+
+```json
+{
+  "type": "decision",
+  "decision": "block",
+  "reason": "rm -rf is not allowed"
+}
+```
+
+```json
+{
+  "type": "decision",
+  "decision": "modify",
+  "reason": "force a safer command",
+  "updatedInput": { "command": "echo blocked" }
+}
+```
+
+| Property | Type | Default | Description |
+|----------|------|---------|-------------|
+| `type` | `"decision"` | Required | Action type |
+| `decision` | `"block"` \| `"modify"` | Required | Tighten the tool call |
+| `reason` | string | - | Shown in the block message / history |
+| `updatedInput` | object | Required for `modify` | Fields merged into the tool input |
+
+Use `conditions` with dotted paths to inspect tool input, e.g. `{ "condition": "state", "field": "tool_input.command", "contains": "rm -rf" }`. `contains` matches array membership or a string substring.
 
 ### Webhook Actions
 
@@ -229,6 +259,20 @@ These are automatically set by the automation system based on the triggering eve
 | `$CRAFT_SESSION_ID` | Session ID | Events with session context |
 | `$CRAFT_SESSION_NAME` | Session name | Events with session context |
 | `$CRAFT_WORKSPACE_ID` | Workspace ID | All events |
+| `$CRAFT_SOURCE_SESSION_ID` | Session that produced the Agent Event | Agent Events |
+| `$CRAFT_SOURCE_SESSION_NAME` | Name of the source session | Agent Events |
+| `$CRAFT_SOURCE_BACKEND` | Always `pi` | Agent Events |
+| `$CRAFT_EVENT_ID` | Dedup id for this Agent Event | Agent Events |
+| `$CRAFT_AUTOMATION_DEPTH` | Current chain depth (0 = user session) | Agent Events |
+| `$CRAFT_TOOL_NAME` | Tool name | `PreToolUse`, `PostToolUse`, `PostToolUseFailure`, `PermissionRequest` |
+| `$CRAFT_TOOL_INPUT` | JSON tool input (sanitized) | Tool events |
+| `$CRAFT_TOOL_RESPONSE` | Tool result text (sanitized) | `PostToolUse` |
+| `$CRAFT_ERROR` | Failure message | `PostToolUseFailure` |
+| `$CRAFT_PROMPT` | Submitted user prompt | `UserPromptSubmit` |
+| `$CRAFT_STOP_REASON` | `complete` / `abort` / `error` | `Stop` |
+| `$CRAFT_SOURCE` | `startup` or `resume` | `SessionStart` |
+| `$CRAFT_AGENT_TYPE` | Spawned agent type | `SubagentStart`, `SubagentStop` |
+| `$CRAFT_COMPACT_TRIGGER` | Compact trigger | `PreCompact` |
 
 **Per-event variables:**
 
@@ -398,11 +442,11 @@ Check fields from the event payload. Useful for filtering on specific transition
 
 | Property | Type | Description |
 |----------|------|-------------|
-| `field` | string | Payload field name (e.g., `permissionMode`, `sessionStatus`, `labels`, `isFlagged`) |
+| `field` | string | Payload field name or dotted path (e.g., `labels`, `tool_input.command`) |
 | `value` | any | Exact match |
 | `from` | any | Previous value (for transition events) |
 | `to` | any | New value (for transition events) |
-| `contains` | string | Array membership check (e.g., check if a label is present) |
+| `contains` | string | Array membership, or substring match when the field is a string |
 | `not_value` | any | Matches anything except this value |
 
 **Transition fields:** For `permissionMode` and `sessionStatus`, `from`/`to` automatically resolve to the correct payload keys (`oldMode`/`newMode`, `oldState`/`newState`).
@@ -482,6 +526,20 @@ Prompt actions can specify labels that will be applied to the session they creat
 ```
 
 This creates a session with the "Scheduled" and "morning-briefing" labels applied automatically.
+
+## Automation chain depth
+
+Agent Event automations may spawn further automations up to depth **3** by default (was 1). Set `maxDepth` (1–5) on a matcher to tighten or slightly raise that cap for that rule. Depth is counted from the original user session (`0`). A sliding window also caps **10** spawned automation sessions per root session per 60 seconds.
+
+```json
+{
+  "matcher": "^Stop$",
+  "maxDepth": 2,
+  "actions": [
+    { "type": "prompt", "prompt": "Review the previous automation result", "reportBack": true }
+  ]
+}
+```
 
 ## Telegram Topic Routing
 

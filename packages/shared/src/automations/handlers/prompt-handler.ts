@@ -162,9 +162,12 @@ export class PromptHandler implements AutomationHandler {
           model: action.model,
           thinkingLevel: action.thinkingLevel,
           telegramTopic: finalTopic,
-          waitForCompletion: false,
+          waitForCompletion: action.waitForCompletion === true || action.reportBack === true,
+          reportBack: action.reportBack === true,
+          timeoutMs: action.timeoutMs,
           sourceEvent: event,
           sourceSessionId: input.source_session_id,
+          rootSessionId: input.source_root_session_id ?? input.source_session_id,
           automationDepth: (input.automation_depth ?? 0) + 1,
         });
       }

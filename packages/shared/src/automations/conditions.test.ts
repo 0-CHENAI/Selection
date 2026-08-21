@@ -216,7 +216,7 @@ describe('evaluateConditions', () => {
       });
     });
 
-    describe('contains (array membership)', () => {
+    describe('contains (array membership or substring)', () => {
       it('should pass when array contains value', () => {
         const conditions: AutomationCondition[] = [
           { condition: 'state', field: 'labels', contains: 'urgent' },
@@ -231,11 +231,37 @@ describe('evaluateConditions', () => {
         expect(evaluateConditions(conditions, ctx({ labels: ['low', 'bug'] }))).toBe(false);
       });
 
-      it('should fail when field is not an array', () => {
+      it('should pass when a string field contains the substring', () => {
         const conditions: AutomationCondition[] = [
           { condition: 'state', field: 'labels', contains: 'urgent' },
         ];
-        expect(evaluateConditions(conditions, ctx({ labels: 'urgent' }))).toBe(false);
+        expect(evaluateConditions(conditions, ctx({ labels: 'urgent' }))).toBe(true);
+      });
+
+      it('should match dotted paths and command substrings', () => {
+        const conditions: AutomationCondition[] = [
+          { condition: 'state', field: 'tool_input.command', contains: 'rm -rf' },
+        ];
+        expect(evaluateConditions(conditions, ctx({
+          tool_input: { command: 'rm -rf /tmp/foo' },
+        }))).toBe(true);
+        expect(evaluateConditions(conditions, ctx({
+          tool_input: { command: 'ls /tmp' },
+        }))).toBe(false);
+      });
+
+      it('should not follow prototype-polluting paths', () => {
+        const conditions: AutomationCondition[] = [
+          { condition: 'state', field: '__proto__.polluted', contains: 'x' },
+        ];
+        expect(evaluateConditions(conditions, ctx({ labels: ['urgent'] }))).toBe(false);
+      });
+
+      it('should fail when field is neither array nor string', () => {
+        const conditions: AutomationCondition[] = [
+          { condition: 'state', field: 'labels', contains: 'urgent' },
+        ];
+        expect(evaluateConditions(conditions, ctx({ labels: 12 }))).toBe(false);
       });
     });
 

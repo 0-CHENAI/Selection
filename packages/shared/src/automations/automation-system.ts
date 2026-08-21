@@ -23,14 +23,35 @@ import { appendAutomationHistoryEntry, compactAutomationHistorySync } from './hi
 import { createLogger } from '../utils/debug.ts';
 import { WorkspaceEventBus, type EventPayloadMap } from './event-bus.ts';
 import { PromptHandler, EventLogHandler, WebhookHandler, type AutomationsConfigProvider } from './handlers/index.ts';
-import { type AutomationsConfig, type AutomationEvent, type AutomationMatcher, type PendingPrompt, type WebhookActionResult, type AppEvent, type AgentEvent, type SdkAutomationCallbackMatcher, type SdkAutomationInput, type AutomationHistoryStatus } from './types.ts';
+import { AGENT_EVENTS, type AutomationsConfig, type AutomationEvent, type AutomationMatcher, type PendingPrompt, type WebhookActionResult, type AppEvent, type AgentEvent, type SdkAutomationCallbackMatcher, type SdkAutomationInput, type AutomationHistoryStatus, type DecisionAction, type ToolDecisionResult } from './types.ts';
 import { validateAutomationsConfig } from './validation.ts';
-import { matcherMatchesSdk } from './utils.ts';
-import { AgentEventGuards } from './agent-event-guards.ts';
+import { expandEnvVars, matcherMatches, matcherMatchesSdk } from './utils.ts';
+import { AgentEventGuards, MAX_AUTOMATION_DEPTH } from './agent-event-guards.ts';
 import { createPromptHistoryEntry } from './webhook-utils.ts';
+import { buildEnvFromSdkInput } from './sdk-bridge.ts';
+import { deriveAutomationName } from './name-utils.ts';
 import { SchedulerService, type SchedulerTickPayload } from '../scheduler/scheduler-service.ts';
 
 const log = createLogger('automation-system');
+
+export interface AgentEventMatchPreview {
+  matcherId: string;
+  name: string;
+  event: AutomationEvent;
+}
+
+function expandUnknown(value: unknown, env: Record<string, string>): unknown {
+  if (typeof value === 'string') return expandEnvVars(value, env);
+  if (Array.isArray(value)) return value.map((item) => expandUnknown(item, env));
+  if (value && typeof value === 'object') {
+    const out: Record<string, unknown> = {};
+    for (const [key, nested] of Object.entries(value as Record<string, unknown>)) {
+      out[key] = expandUnknown(nested, env);
+    }
+    return out;
+  }
+  return value;
+}
 
 // Re-export SessionMetadataSnapshot from types (single source of truth)
 export type { SessionMetadataSnapshot } from './types.ts';
@@ -499,19 +520,20 @@ export class AutomationSystem implements AutomationsConfigProvider {
         return 0;
       }
 
-      const recursion = this.agentEventGuards.shouldAcceptDepth(
-        input.triggered_by_automation === true,
-        input.automation_depth ?? 0,
-      );
-
       const accepted: AutomationMatcher[] = [];
       let matchedCount = 0;
+      const eventDepth = input.automation_depth ?? 0;
+      const rootSessionId = input.source_root_session_id ?? input.source_session_id;
 
       for (const matcher of matchers) {
         if (!matcherMatchesSdk(matcher, event, input)) continue;
         matchedCount++;
 
         const matcherId = matcher.id ?? 'unknown';
+        const recursion = this.agentEventGuards.shouldAcceptDepth(
+          eventDepth,
+          matcher.maxDepth ?? MAX_AUTOMATION_DEPTH,
+        );
         if (recursion) {
           log.debug(`[AutomationSystem] ${event} matcher ${matcherId} ${recursion}`);
           await this.recordGuardHistory(event, input, matcherId, 'suppressed', `Suppressed: ${recursion}`);
@@ -543,6 +565,18 @@ export class AutomationSystem implements AutomationsConfigProvider {
               matcher.id ?? 'unknown',
               'rate-limited',
               'Rate-limited: prompt concurrency',
+            );
+            continue;
+          }
+          const chainLimit = this.agentEventGuards.shouldAcceptChainSpawn(rootSessionId);
+          if (chainLimit) {
+            this.agentEventGuards.releasePromptSlot();
+            await this.recordGuardHistory(
+              event,
+              input,
+              matcher.id ?? 'unknown',
+              'suppressed',
+              `Suppressed: ${chainLimit}`,
             );
             continue;
           }
@@ -599,6 +633,90 @@ export class AutomationSystem implements AutomationsConfigProvider {
       }));
     } catch (e) {
       log.debug(`[AutomationSystem] Failed to write guard history: ${e}`);
+    }
+  }
+
+  /**
+   * Pure-sync PreToolUse decision. No I/O, no guards, no history.
+   * First matching `block` wins; otherwise first matching `modify`.
+   */
+  evaluateToolDecision(input: SdkAutomationInput): ToolDecisionResult | null {
+    if (!this.config || this.disposed) return null;
+    if ((input.hook_event_name || 'PreToolUse') !== 'PreToolUse') return null;
+
+    const matchers = this.config.automations.PreToolUse;
+    if (!matchers?.length) return null;
+
+    const env = buildEnvFromSdkInput('PreToolUse', input);
+    let firstModify: ToolDecisionResult | null = null;
+
+    for (const matcher of matchers) {
+      if (matcher.enabled === false) continue;
+      const decisionAction = matcher.actions.find((a): a is DecisionAction => a.type === 'decision');
+      if (!decisionAction) continue;
+      if (!matcherMatchesSdk(matcher, 'PreToolUse', input)) continue;
+
+      const result: ToolDecisionResult = {
+        decision: decisionAction.decision,
+        matcherId: matcher.id ?? 'unknown',
+        automationName: deriveAutomationName('PreToolUse', matcher),
+        reason: decisionAction.reason ? expandEnvVars(decisionAction.reason, env) : undefined,
+        updatedInput: decisionAction.updatedInput
+          ? expandUnknown(decisionAction.updatedInput, env) as Record<string, unknown>
+          : undefined,
+      };
+
+      if (result.decision === 'block') return result;
+      firstModify ??= result;
+    }
+
+    return firstModify;
+  }
+
+  /**
+   * Dry-run matcher evaluation: which matchers would fire for this event+payload.
+   * No guards, no actions, no history.
+   */
+  matchAgentEvent(event: AutomationEvent, input: SdkAutomationInput): AgentEventMatchPreview[] {
+    if (!this.config || this.disposed) return [];
+    const matchers = this.config.automations[event];
+    if (!matchers?.length) return [];
+
+    const hits: AgentEventMatchPreview[] = [];
+    const isAgentEvent = (AGENT_EVENTS as readonly string[]).includes(event);
+    for (const matcher of matchers) {
+      const matched = isAgentEvent
+        ? matcherMatchesSdk(matcher, event as AgentEvent, input)
+        : matcherMatches(matcher, event, input as unknown as Record<string, unknown>);
+      if (!matched) continue;
+      hits.push({
+        matcherId: matcher.id ?? 'unknown',
+        name: deriveAutomationName(event, matcher),
+        event,
+      });
+    }
+    return hits;
+  }
+
+  async recordDecisionHistory(opts: {
+    matcherId: string;
+    event: AgentEvent;
+    sourceSessionId?: string;
+    reason?: string;
+    status?: AutomationHistoryStatus;
+  }): Promise<void> {
+    try {
+      await appendAutomationHistoryEntry(this.options.workspaceRootPath, createPromptHistoryEntry({
+        matcherId: opts.matcherId,
+        ok: false,
+        status: opts.status ?? 'blocked',
+        event: opts.event,
+        sourceSessionId: opts.sourceSessionId,
+        error: opts.reason,
+        reason: opts.reason,
+      }));
+    } catch (e) {
+      log.debug(`[AutomationSystem] Failed to write decision history: ${e}`);
     }
   }
 

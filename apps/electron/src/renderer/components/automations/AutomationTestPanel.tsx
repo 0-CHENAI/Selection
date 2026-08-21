@@ -35,7 +35,7 @@ export function AutomationTestPanel({ result, className }: AutomationTestPanelPr
     return (
       <Info_Alert variant="success" icon={<CheckCircle2 className="h-4 w-4" />} className={className}>
         <Info_Alert.Title>
-          {t('automations.testPassed')}
+          {result.mode === 'match' ? t('automations.matchSimulateResult') : t('automations.testPassed')}
           {result.duration != null && (
             <span className="ml-2 text-xs font-normal text-muted-foreground">
               {result.duration}ms
@@ -43,7 +43,11 @@ export function AutomationTestPanel({ result, className }: AutomationTestPanelPr
           )}
         </Info_Alert.Title>
         <Info_Alert.Description>
-          {t('automations.runTestHint')}
+          {result.mode === 'match'
+            ? (result.matches && result.matches.length > 0
+              ? result.matches.map(m => m.name).join(', ')
+              : t('automations.matchSimulateNone'))
+            : t('automations.runTestHint')}
         </Info_Alert.Description>
       </Info_Alert>
     )

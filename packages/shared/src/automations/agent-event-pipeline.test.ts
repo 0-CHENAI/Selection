@@ -189,6 +189,35 @@ describe('Agent Event pipeline', () => {
     await system.dispose();
   });
 
+  it('allows a mid-chain automation when depth is below the cap', async () => {
+    writeConfig({
+      UserPromptSubmit: [
+        { id: 'relay01', actions: [{ type: 'prompt', prompt: 'relay' }] },
+      ],
+    });
+
+    const prompts: PendingPrompt[] = [];
+    const system = new AutomationSystem({
+      workspaceRootPath: tempDir,
+      workspaceId: 'ws-1',
+      onPromptsReady: pending => { prompts.push(...pending); },
+    });
+
+    const matched = await system.executeAgentEvent('UserPromptSubmit', {
+      hook_event_name: 'UserPromptSubmit',
+      prompt: 'hi',
+      event_id: 'evt-relay',
+      triggered_by_automation: true,
+      automation_depth: 2,
+      source_session_id: 'auto-sess',
+    });
+
+    expect(matched).toBe(1);
+    expect(prompts).toHaveLength(1);
+    expect(prompts[0]?.waitForCompletion).toBe(false);
+    await system.dispose();
+  });
+
   it('suppresses recursive automations from automation-created sessions', async () => {
     writeConfig({
       UserPromptSubmit: [
@@ -311,6 +340,7 @@ describe('Agent Event envelope and guards', () => {
     expect(input.event_id).toBeTruthy();
     expect(input.source_backend).toBe('pi');
     expect(input.source_session_id).toBe('s1');
+    expect(input.source_root_session_id).toBe('s1');
     expect(input.tool_input?.Authorization).toBe('[redacted]');
     expect(String(input.tool_input?.blob)).toContain('[truncated]');
   });
@@ -325,6 +355,27 @@ describe('Agent Event envelope and guards', () => {
     expect((sanitized.tool_input?.nested as Record<string, unknown>).cookie).toBe('[redacted]');
     expect(sanitized.tool_response).toContain('[redacted]');
     expect(sanitized.tool_response).not.toContain('leak');
+  });
+
+  it('accepts depth below the cap and rejects at the cap', () => {
+    const guards = new AgentEventGuards();
+    expect(guards.shouldAcceptDepth(0)).toBeNull();
+    expect(guards.shouldAcceptDepth(2)).toBeNull();
+    expect(guards.shouldAcceptDepth(3)).toBe('recursion');
+    expect(guards.shouldAcceptDepth(1, 1)).toBe('recursion');
+    guards.dispose();
+  });
+
+  it('caps chain spawns from the same root session', () => {
+    const guards = new AgentEventGuards();
+    let limited = 0;
+    for (let i = 0; i < 12; i++) {
+      if (guards.shouldAcceptChainSpawn('root-1')) limited++;
+    }
+    expect(limited).toBeGreaterThan(0);
+    expect(guards.shouldAcceptChainSpawn('root-2')).toBeNull();
+    expect(guards.shouldAcceptChainSpawn(undefined)).toBeNull();
+    guards.dispose();
   });
 
   it('rate-limits the same matcher', () => {

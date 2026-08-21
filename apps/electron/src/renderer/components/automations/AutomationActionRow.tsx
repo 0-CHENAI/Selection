@@ -12,8 +12,8 @@ import { useTranslation } from 'react-i18next'
 import { cn } from '@/lib/utils'
 import { Badge } from '@/components/ui/badge'
 import { THINKING_LEVELS } from '@craft-agent/shared/agent/thinking-levels'
-import type { AutomationAction, PromptAction } from './types'
-import { ActionTypeIcon } from './ActionTypeIcon'
+import type { AutomationAction, DecisionAction, PromptAction } from './types'
+import { ActionTypeIcon, DecisionActionIcon } from './ActionTypeIcon'
 import { DEFAULT_WEBHOOK_METHOD } from './constants'
 
 export interface AutomationActionRowProps {
@@ -37,6 +37,16 @@ function PromptText({ text, t }: { text: string; t: (key: string) => string }) {
           <span key={i}>{part}</span>
         )
       )}
+    </span>
+  )
+}
+
+function DecisionText({ action, t }: { action: DecisionAction; t: (key: string) => string }) {
+  const label = action.decision === 'block' ? t('automations.decisionBlock') : t('automations.decisionModify')
+  return (
+    <span className="text-sm break-words">
+      <span className="font-medium">{label}</span>
+      {action.reason ? <span className="text-foreground/70"> — {action.reason}</span> : null}
     </span>
   )
 }
@@ -106,6 +116,7 @@ function PromptActionBadges({ action, t }: { action: PromptAction; t: (key: stri
 export function AutomationActionRow({ action, index, className }: AutomationActionRowProps) {
   const { t } = useTranslation()
   const isWebhook = action.type === 'webhook'
+  const isDecision = action.type === 'decision'
 
   return (
     <div className={cn('flex items-start gap-3 px-4 py-3', className)}>
@@ -114,13 +125,19 @@ export function AutomationActionRow({ action, index, className }: AutomationActi
         <span className="text-xs text-muted-foreground tabular-nums w-4 text-right">
           {index + 1}.
         </span>
-        <ActionTypeIcon type={action.type} className="h-3.5 w-3.5" />
+        {isDecision ? (
+          <DecisionActionIcon decision={action.decision} className="h-3.5 w-3.5" />
+        ) : (
+          <ActionTypeIcon type={action.type} className="h-3.5 w-3.5" />
+        )}
       </div>
 
       {/* Content */}
       <div className="flex-1 min-w-0">
         {isWebhook ? (
           <WebhookText action={action} />
+        ) : isDecision ? (
+          <DecisionText action={action} t={t} />
         ) : (
           <>
             <PromptText text={action.prompt} t={t} />

@@ -182,6 +182,8 @@ craft-agent skill delete commit-helper
 <!-- cli:automation:start -->
 ## Automation
 
+`craft-agent automation` is **planned** and not implemented yet. Until it ships, edit `automations.json` from the Automations UI (Edit File / Run Test / Simulate match). See [automations.md](./automations.md).
+
 Manage workspace automations stored in `automations.json`.
 
 ### Commands

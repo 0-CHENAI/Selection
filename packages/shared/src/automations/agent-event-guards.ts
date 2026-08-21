@@ -1,22 +1,27 @@
 /**
- * Recursion, dedup, rate-limit, and prompt-concurrency guards for Agent Events.
- * Failures are recorded as suppressed / rate-limited rather than dropped silently.
+ * Recursion, dedup, rate-limit, chain-spawn, and prompt-concurrency guards
+ * for Agent Events. Failures are recorded as suppressed / rate-limited
+ * rather than dropped silently.
  */
 
-export const MAX_AUTOMATION_DEPTH = 1;
+export const MAX_AUTOMATION_DEPTH = 3;
 export const AGENT_EVENT_MATCHER_RATE_PER_MIN = 20;
 export const MAX_CONCURRENT_PROMPT_AUTOMATIONS = 8;
 export const AGENT_EVENT_DEDUP_TTL_MS = 5 * 60_000;
+export const MAX_CHAIN_SPAWNS_PER_WINDOW = 10;
+export const CHAIN_SPAWN_WINDOW_MS = 60_000;
 
 export type AgentEventGuardReason =
   | 'duplicate'
   | 'recursion'
   | 'rate-limited'
-  | 'concurrency';
+  | 'concurrency'
+  | 'chain-limit';
 
 export class AgentEventGuards {
   private readonly seenEvents = new Map<string, number>();
   private readonly matcherWindows = new Map<string, number[]>();
+  private readonly chainWindows = new Map<string, number[]>();
   private inflightPrompts = 0;
 
   shouldAcceptEvent(eventId: string, now = Date.now()): AgentEventGuardReason | null {
@@ -29,8 +34,8 @@ export class AgentEventGuards {
     return null;
   }
 
-  shouldAcceptDepth(triggeredByAutomation: boolean, depth: number): AgentEventGuardReason | null {
-    if (triggeredByAutomation || depth >= MAX_AUTOMATION_DEPTH) {
+  shouldAcceptDepth(depth: number, maxDepth = MAX_AUTOMATION_DEPTH): AgentEventGuardReason | null {
+    if (depth >= maxDepth) {
       return 'recursion';
     }
     return null;
@@ -49,6 +54,23 @@ export class AgentEventGuards {
     return null;
   }
 
+  /**
+   * Sliding-window cap on automation sessions spawned from one root session.
+   * Call only when a prompt session is about to be scheduled.
+   */
+  shouldAcceptChainSpawn(rootSessionId: string | undefined, now = Date.now()): AgentEventGuardReason | null {
+    if (!rootSessionId) return null;
+    const windowStart = now - CHAIN_SPAWN_WINDOW_MS;
+    const timestamps = (this.chainWindows.get(rootSessionId) ?? []).filter(ts => ts > windowStart);
+    if (timestamps.length >= MAX_CHAIN_SPAWNS_PER_WINDOW) {
+      this.chainWindows.set(rootSessionId, timestamps);
+      return 'chain-limit';
+    }
+    timestamps.push(now);
+    this.chainWindows.set(rootSessionId, timestamps);
+    return null;
+  }
+
   tryAcquirePromptSlot(): boolean {
     if (this.inflightPrompts >= MAX_CONCURRENT_PROMPT_AUTOMATIONS) {
       return false;
@@ -64,6 +86,7 @@ export class AgentEventGuards {
   dispose(): void {
     this.seenEvents.clear();
     this.matcherWindows.clear();
+    this.chainWindows.clear();
     this.inflightPrompts = 0;
   }
 

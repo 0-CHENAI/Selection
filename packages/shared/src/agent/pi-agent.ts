@@ -1222,6 +1222,45 @@ export class PiAgent extends BaseAgent {
   }
 
   /**
+   * Tighten-only PreToolUse automation. Fail-open: exceptions leave the
+   * built-in allow/modify result unchanged.
+   */
+  private applyAutomationToolDecision(
+    toolName: string,
+    input: Record<string, unknown>,
+    toolCallId: string | undefined,
+    sessionId: string,
+  ): { type: 'block'; reason: string } | { type: 'continue'; input: Record<string, unknown>; modified: boolean } {
+    try {
+      const decision = this.automationSystem?.evaluateToolDecision({
+        hook_event_name: 'PreToolUse',
+        tool_name: toolName,
+        tool_input: input,
+        tool_use_id: toolCallId,
+      });
+      if (decision?.decision === 'block') {
+        const label = decision.automationName ?? decision.matcherId;
+        const reason = decision.reason
+          ? `Blocked by automation "${label}": ${decision.reason}`
+          : `Blocked by automation "${label}"`;
+        void this.automationSystem?.recordDecisionHistory({
+          matcherId: decision.matcherId,
+          event: 'PreToolUse',
+          sourceSessionId: sessionId,
+          reason,
+        });
+        return { type: 'block', reason };
+      }
+      if (decision?.decision === 'modify' && decision.updatedInput && Object.keys(decision.updatedInput).length > 0) {
+        return { type: 'continue', input: { ...input, ...decision.updatedInput }, modified: true };
+      }
+    } catch (err) {
+      this.debug(`Automation tool decision failed: ${err}`);
+    }
+    return { type: 'continue', input, modified: false };
+  }
+
+  /**
    * Handle a pre_tool_use_request from the subprocess.
    * Runs the centralized permission pipeline and sends the decision back.
    */
@@ -1247,14 +1286,6 @@ export class PiAgent extends BaseAgent {
       });
       this.debug(`Captured pre-tool metadata for ${toolName} (${toolCallId}, sessionId=${debugSessionId}): intent=${!!preIntent}, displayName=${!!preDisplayName}`);
     }
-
-    // Fire PreToolUse automation event — await so automations run before tool executes
-    await this.emitAutomationEvent('PreToolUse', {
-      hook_event_name: 'PreToolUse',
-      tool_name: toolName,
-      tool_input: input,
-      tool_use_id: toolCallId,
-    });
 
     const rootPath = this.config.workspace.rootPath ?? this.workingDirectory;
     const workspaceSlug = extractWorkspaceSlug(rootPath, this.config.workspace.id);
@@ -1284,27 +1315,56 @@ export class PiAgent extends BaseAgent {
       onDebug: (msg) => this.debug(`PreToolUse(sessionId=${sessionId}): ${msg}`),
     });
 
+    const emitPreToolUse = async (toolInput: Record<string, unknown>) => {
+      await this.emitAutomationEvent('PreToolUse', {
+        hook_event_name: 'PreToolUse',
+        tool_name: toolName,
+        tool_input: toolInput,
+        tool_use_id: toolCallId,
+      });
+    };
+
+    const sendPermissionBlock = (reason: string) => {
+      const diagnostics = getPermissionModeDiagnostics(sessionId);
+      this.debug(`__PERMISSION_BLOCK__${JSON.stringify({
+        sessionId,
+        toolName,
+        effectiveMode: diagnostics.permissionMode,
+        modeVersion: diagnostics.modeVersion,
+        changedBy: diagnostics.lastChangedBy,
+        changedAt: diagnostics.lastChangedAt,
+        reason,
+      })}`);
+      this.send({ type: 'pre_tool_use_response', requestId, action: 'block', reason });
+    };
+
+    const finishAllowedTool = async (candidateInput: Record<string, unknown>, alreadyModified: boolean) => {
+      const decided = this.applyAutomationToolDecision(toolName, candidateInput, toolCallId, sessionId);
+      if (decided.type === 'block') {
+        sendPermissionBlock(decided.reason);
+        return;
+      }
+      await emitPreToolUse(decided.input);
+      if (decided.modified || alreadyModified) {
+        this.send({ type: 'pre_tool_use_response', requestId, action: 'modify', input: decided.input });
+      } else {
+        this.send({ type: 'pre_tool_use_response', requestId, action: 'allow' });
+      }
+    };
+
     switch (checkResult.type) {
       case 'allow':
-        this.send({ type: 'pre_tool_use_response', requestId, action: 'allow' });
+        await finishAllowedTool(input, false);
         return;
 
       case 'modify':
-        this.send({ type: 'pre_tool_use_response', requestId, action: 'modify', input: checkResult.input });
+        await finishAllowedTool(checkResult.input, true);
         return;
 
       case 'block': {
-        const diagnostics = getPermissionModeDiagnostics(sessionId);
-        this.debug(`__PERMISSION_BLOCK__${JSON.stringify({
-          sessionId,
-          toolName,
-          effectiveMode: diagnostics.permissionMode,
-          modeVersion: diagnostics.modeVersion,
-          changedBy: diagnostics.lastChangedBy,
-          changedAt: diagnostics.lastChangedAt,
-          reason: checkResult.reason,
-        })}`);
-        this.send({ type: 'pre_tool_use_response', requestId, action: 'block', reason: checkResult.reason });
+        // Built-in permission block: keep the #62 observation event.
+        await emitPreToolUse(input);
+        sendPermissionBlock(checkResult.reason);
         return;
       }
 
@@ -1356,12 +1416,13 @@ export class PiAgent extends BaseAgent {
           onDebug: (msg) => this.debug(`PreToolUse(sessionId=${sessionId}): ${msg}`),
         });
 
-        if (postResult.type === 'modify') {
-          this.send({ type: 'pre_tool_use_response', requestId, action: 'modify', input: postResult.input });
-        } else if (postResult.type === 'block') {
-          this.send({ type: 'pre_tool_use_response', requestId, action: 'block', reason: postResult.reason });
+        if (postResult.type === 'block') {
+          await emitPreToolUse(input);
+          sendPermissionBlock(postResult.reason);
+        } else if (postResult.type === 'modify') {
+          await finishAllowedTool(postResult.input, true);
         } else {
-          this.send({ type: 'pre_tool_use_response', requestId, action: 'allow' });
+          await finishAllowedTool(input, false);
         }
         return;
       }
@@ -1369,17 +1430,14 @@ export class PiAgent extends BaseAgent {
       case 'call_llm_intercept':
       case 'spawn_session_intercept':
         // These tools are proxy tools handled via tool_execute_request — just allow
+        await emitPreToolUse(input);
         this.send({ type: 'pre_tool_use_response', requestId, action: 'allow' });
         return;
 
       case 'prompt': {
         if (!this.onPermissionRequest) {
-          // No permission handler — allow
-          if (checkResult.modifiedInput) {
-            this.send({ type: 'pre_tool_use_response', requestId, action: 'modify', input: checkResult.modifiedInput });
-          } else {
-            this.send({ type: 'pre_tool_use_response', requestId, action: 'allow' });
-          }
+          // No permission handler — allow, then tighten via automations
+          await finishAllowedTool(checkResult.modifiedInput ?? input, !!checkResult.modifiedInput);
           return;
         }
 
@@ -1422,11 +1480,7 @@ export class PiAgent extends BaseAgent {
           return;
         }
 
-        if (checkResult.modifiedInput) {
-          this.send({ type: 'pre_tool_use_response', requestId, action: 'modify', input: checkResult.modifiedInput });
-        } else {
-          this.send({ type: 'pre_tool_use_response', requestId, action: 'allow' });
-        }
+        await finishAllowedTool(checkResult.modifiedInput ?? input, !!checkResult.modifiedInput);
         return;
       }
     }

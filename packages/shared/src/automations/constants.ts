@@ -13,6 +13,15 @@ export const DEFAULT_WEBHOOK_METHOD = 'POST';
 /** Maximum length for string fields written to automations-history.jsonl (error, responseBody, prompt). */
 export const HISTORY_FIELD_MAX_LENGTH = 2000;
 
+/** Default wait for prompt actions with waitForCompletion / reportBack. */
+export const DEFAULT_PROMPT_WAIT_TIMEOUT_MS = 5 * 60_000;
+
+/** Hard cap for prompt waitForCompletion timeout. */
+export const MAX_PROMPT_WAIT_TIMEOUT_MS = 30 * 60_000;
+
+/** Truncation for finalText recorded on wait/reportBack history entries. */
+export const PROMPT_HISTORY_FINAL_TEXT_MAX_LENGTH = 500;
+
 /** Max history entries retained per automation ID. */
 export const AUTOMATION_HISTORY_MAX_RUNS_PER_MATCHER = 20;
 

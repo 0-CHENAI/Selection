@@ -37,6 +37,7 @@ export interface AutomationInfoPageProps {
   testResult?: TestResult
   onToggleEnabled?: () => void
   onTest?: () => void
+  onSimulateMatch?: () => void
   onDuplicate?: () => void
   onDelete?: () => void
   onReplay?: (automationId: string, event: string) => void
@@ -49,6 +50,7 @@ export function AutomationInfoPage({
   testResult,
   onToggleEnabled,
   onTest,
+  onSimulateMatch,
   onDuplicate,
   onDelete,
   onReplay,
@@ -96,6 +98,7 @@ export function AutomationInfoPage({
             enabled={automation.enabled}
             onToggleEnabled={onToggleEnabled}
             onTest={onTest}
+            onSimulateMatch={onSimulateMatch}
             onDuplicate={onDuplicate}
             onDelete={onDelete}
           />

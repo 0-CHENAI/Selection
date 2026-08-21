@@ -29,6 +29,12 @@ export function deriveAutomationName(event: string, matcher: AutomationMatcher):
     return label.length > 40 ? label.slice(0, 40) + '...' : label;
   }
 
+  if (firstAction.type === 'decision') {
+    return firstAction.decision === 'block' ? 'Block tool' : 'Modify tool input';
+  }
+
+  if (firstAction.type !== 'prompt') return event;
+
   // Extract @skill/@source mention
   const mentionMatch = firstAction.prompt.match(/@(\S+)/);
   if (mentionMatch) return `${mentionMatch[1]} prompt`;
