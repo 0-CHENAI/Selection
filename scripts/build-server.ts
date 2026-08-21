@@ -118,8 +118,8 @@ function assembleResources(config: ServerBuildConfig): void {
   const srcResources = join(electronDir, 'resources');
   const destResources = join(outputDir, 'resources');
 
-  console.log('  Copying docs, themes, permissions, tool-icons...');
-  for (const dir of ['docs', 'themes', 'permissions', 'tool-icons']) {
+  console.log('  Copying docs, themes, permissions, tool-icons, officecli resources...');
+  for (const dir of ['docs', 'themes', 'permissions', 'tool-icons', 'officecli']) {
     const src = join(srcResources, dir);
     if (existsSync(src)) {
       cpSync(src, join(destResources, dir), { recursive: true });

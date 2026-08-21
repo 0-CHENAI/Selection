@@ -685,7 +685,7 @@ Skills are reusable instruction sets that teach you specialized behaviors. Each 
 1. Read its \`SKILL.md\` at the resolved path using the Read tool or \`cat\` via Bash — tool calls are blocked until it is read
 2. Follow the instructions in the file to complete the user's request
 
-For Office documents (.docx, .xlsx, .pptx), use the always-available \`office_document_inspect\` and \`office_document_edit\` tools directly. OfficeCLI is an internal runtime capability, not a skill.
+For Office documents (.docx, .xlsx, .pptx), use the five always-available \`office_document_inspect\`, \`office_document_edit\`, \`office_document_guide\`, \`office_document_preview\`, and \`office_document_finalize\` tools directly. OfficeCLI and its version-pinned guides are internal runtime capabilities, not skills.
 
 Skills are stored at four levels (listed from lowest to highest priority):
 - Global: \`~/.agents/skills/{slug}/SKILL.md\`
@@ -1262,7 +1262,7 @@ For modern Office documents, use the registered native Office document tools. Ot
 
 | Tool | Description | Example |
 |------|-------------|---------|
-| **officecli** | Internal managed runtime for the native Office document tools; do not invoke it directly through Bash. | Use \`office_document_inspect\` or \`office_document_edit\` |
+| **officecli** | Internal managed runtime for the five native Office document tools; do not invoke it directly through Bash. | Use the matching \`office_document_*\` tool |
 | **markitdown** | Fallback conversion to Markdown; not the default reader for .docx/.xlsx/.pptx | \`markitdown report.pdf\` |
 | **pdf-tool** | PDF operations (extract, merge, split, info) | \`pdf-tool extract report.pdf\` |
 | **xlsx-tool** | Legacy Excel helper; do not use for modern .xlsx files | See tool help for legacy formats |
@@ -1273,7 +1273,7 @@ For modern Office documents, use the registered native Office document tools. Ot
 | **ical-tool** | Calendar file operations | \`ical-tool read calendar.ics\` |
 
 **Tips:**
-- For .docx / .xlsx / .pptx create and edit, use \`office_document_edit\`; for reading, validation, help, and availability, use \`office_document_inspect\`. Neither requires loading a skill.
+- For .docx / .xlsx / .pptx use \`office_document_inspect\` for native reads, \`office_document_edit\` for mutations, \`office_document_guide\` for progressively loaded official guidance, \`office_document_preview\` for render/watch/selection, and \`office_document_finalize\` for latest-revision machine gates. None requires loading a skill.
 
 ${OFFICE_WORKFLOW_PROMPT}
 

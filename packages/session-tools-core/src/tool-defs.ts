@@ -49,10 +49,15 @@ import {
   handleOfficeDocumentEdit,
   handleOfficeDocumentInspect,
 } from './handlers/office-document.ts';
+import { handleOfficeDocumentGuide } from './handlers/office-guide.ts';
+import { handleOfficeDocumentPreview } from './handlers/office-preview.ts';
+import { handleOfficeDocumentFinalize } from './handlers/office-finalize.ts';
 import {
   OFFICE_DOCUMENT_EDIT_DESCRIPTION,
+  OFFICE_DOCUMENT_FINALIZE_DESCRIPTION,
+  OFFICE_DOCUMENT_GUIDE_DESCRIPTION,
   OFFICE_DOCUMENT_INSPECT_DESCRIPTION,
-  OFFICE_MAX_INLINE_ARGUMENTS_CHARS,
+  OFFICE_DOCUMENT_PREVIEW_DESCRIPTION,
   OFFICE_MAX_INLINE_BATCH_CHARS,
   OFFICE_MAX_INLINE_BATCH_COMMANDS,
 } from './office-workflow.ts';
@@ -177,27 +182,65 @@ export const BrowserToolSchema = z.object({
 });
 
 export const OfficeDocumentInspectSchema = z.object({
-  command: z.enum(['status', 'help', 'view', 'get', 'query', 'validate', 'dump', 'raw'])
-    .describe('Read-only OfficeCLI command. Use status to check availability and version.'),
-  arguments: z.array(z.string()).optional()
-    .describe('Argument tokens passed after the command. Do not include shell quoting or a full command string.'),
+  argv: z.array(z.string()).min(1)
+    .describe('Native tokens after the officecli binary name. Start with status/help/view/get/query/validate/dump/raw/get-marks. Never include a shell string or the officecli prefix.'),
   timeoutMs: z.number().int().min(1).max(300000).optional()
     .describe('Execution timeout in milliseconds. Defaults to 120000; maximum 300000.'),
 });
 
 export const OfficeDocumentEditSchema = z.object({
-  command: z.enum([
-    'create', 'set', 'add', 'remove', 'move', 'swap', 'refresh',
-    'raw-set', 'add-part', 'batch', 'import', 'merge',
-  ]).describe('Mutating OfficeCLI command.'),
-  arguments: z.array(z.string()).optional()
-    .describe(`Argument tokens passed after the command. Do not include shell quoting or a full command string. Joined arguments must stay within ${OFFICE_MAX_INLINE_ARGUMENTS_CHARS} characters; put larger text in a working-directory .json file and use batchCommandsFile.`),
-  batchCommands: z.array(z.record(z.string(), z.unknown())).optional()
-    .describe(`Structured commands for a small/medium batch. Use this or batchCommandsFile, not both. Invalid for non-batch commands. Maximum ${OFFICE_MAX_INLINE_BATCH_COMMANDS} commands and ${OFFICE_MAX_INLINE_BATCH_CHARS} serialized characters.`),
-  batchCommandsFile: z.string().optional()
-    .describe('Path to a .json array of batch commands in the working directory or workspace, written with the Write tool first. Required alternative to batchCommands for large payloads. Do not pass --input or --commands in arguments.'),
+  argv: z.array(z.string()).min(1)
+    .describe('Native OfficeCLI tokens. Start with create/set/add/remove/move/swap/refresh/raw-set/add-part/batch/import/merge. Never include a shell string or the officecli prefix.'),
+  batch: z.object({
+    commands: z.array(z.string()).max(OFFICE_MAX_INLINE_BATCH_COMMANDS).optional()
+      .describe(`Each string is one JSON command object. Maximum ${OFFICE_MAX_INLINE_BATCH_COMMANDS} commands and ${OFFICE_MAX_INLINE_BATCH_CHARS} serialized characters.`),
+    file: z.string().optional()
+      .describe('Path to a .json array of native batch command objects. Mutually exclusive with commands.'),
+  }).optional().describe('Only valid when argv[0] is batch; provide exactly one of commands or file.'),
   timeoutMs: z.number().int().min(1).max(300000).optional()
     .describe('Execution timeout in milliseconds. Defaults to 120000; maximum 300000.'),
+});
+
+export const OfficeDocumentGuideSchema = z.object({
+  guide: z.enum([
+    'word', 'excel', 'pptx', 'academic-paper', 'financial-model',
+    'data-dashboard', 'pitch-deck', 'word-form', 'morph-ppt', 'morph-ppt-3d',
+  ]),
+  topic: z.string().optional().describe('One heading/topic to load progressively. Mutually exclusive with referencePath.'),
+  referencePath: z.string().optional().describe('One allowlisted vendored reference path, or an authorized .glb for morph-ppt-3d. Mutually exclusive with topic.'),
+});
+
+const OfficePreviewFileSchema = z.object({ file: z.string().min(1) });
+export const OfficeDocumentPreviewSchema = z.discriminatedUnion('action', [
+  OfficePreviewFileSchema.extend({
+    action: z.literal('render'),
+    page: z.string().optional().describe('Single page/slide or range such as 1 or 1-5.'),
+    range: z.string().optional().describe('Element data-path or Excel cell range to crop.'),
+    grid: z.union([z.number().int().positive(), z.literal('auto')]).optional().describe('Contact-sheet columns or auto.'),
+    renderer: z.enum(['auto', 'html', 'native']).optional(),
+    timeoutMs: z.number().int().min(1).max(300000).optional(),
+  }),
+  OfficePreviewFileSchema.extend({ action: z.literal('start') }),
+  OfficePreviewFileSchema.extend({ action: z.literal('status') }),
+  OfficePreviewFileSchema.extend({ action: z.literal('stop') }),
+  OfficePreviewFileSchema.extend({ action: z.literal('goto'), path: z.string().min(1) }),
+  OfficePreviewFileSchema.extend({ action: z.literal('selection') }),
+  OfficePreviewFileSchema.extend({
+    action: z.literal('mark'),
+    path: z.string().min(1),
+    props: z.record(z.string(), z.union([z.string(), z.number(), z.boolean()])).optional(),
+  }),
+  OfficePreviewFileSchema.extend({
+    action: z.literal('unmark'),
+    path: z.string().optional(),
+    all: z.boolean().optional(),
+  }),
+  OfficePreviewFileSchema.extend({ action: z.literal('get_marks') }),
+]);
+
+export const OfficeDocumentFinalizeSchema = z.object({
+  file: z.string().min(1),
+  profile: z.enum(['standard', 'strict']).optional(),
 });
 
 export const SpawnSessionSchema = z.object({
@@ -503,6 +546,12 @@ Examples:
 
   office_document_edit: OFFICE_DOCUMENT_EDIT_DESCRIPTION,
 
+  office_document_guide: OFFICE_DOCUMENT_GUIDE_DESCRIPTION,
+
+  office_document_preview: OFFICE_DOCUMENT_PREVIEW_DESCRIPTION,
+
+  office_document_finalize: OFFICE_DOCUMENT_FINALIZE_DESCRIPTION,
+
   call_llm: `Invoke a secondary LLM for focused subtasks. Use for:
 - Cost optimization: use a smaller model for simple tasks (summarization, classification)
 - Structured output: JSON schema compliance via prompt instructions
@@ -623,7 +672,7 @@ export type SessionToolSafeMode = 'allow' | 'block';
 interface SessionToolDefBase {
   name: string;
   description: string;
-  inputSchema: z.ZodObject<z.ZodRawShape>;
+  inputSchema: z.ZodTypeAny;
   /** Whether this tool is allowed in Explore/Safe mode. */
   safeMode: SessionToolSafeMode;
   /** Whether this tool only reads data (no side effects). Enables parallel execution in backends that support it. */
@@ -672,6 +721,9 @@ export const SESSION_TOOL_DEFS: SessionToolDef[] = [
   { name: 'browser_tool', description: TOOL_DESCRIPTIONS.browser_tool, inputSchema: BrowserToolSchema, executionMode: 'backend', safeMode: 'allow', handler: null },
   { name: 'office_document_inspect', description: TOOL_DESCRIPTIONS.office_document_inspect, inputSchema: OfficeDocumentInspectSchema, executionMode: 'registry', safeMode: 'allow', readOnly: true, handler: handleOfficeDocumentInspect },
   { name: 'office_document_edit', description: TOOL_DESCRIPTIONS.office_document_edit, inputSchema: OfficeDocumentEditSchema, executionMode: 'registry', safeMode: 'block', handler: handleOfficeDocumentEdit },
+  { name: 'office_document_guide', description: TOOL_DESCRIPTIONS.office_document_guide, inputSchema: OfficeDocumentGuideSchema, executionMode: 'registry', safeMode: 'allow', readOnly: true, handler: handleOfficeDocumentGuide },
+  { name: 'office_document_preview', description: TOOL_DESCRIPTIONS.office_document_preview, inputSchema: OfficeDocumentPreviewSchema, executionMode: 'registry', safeMode: 'allow', handler: handleOfficeDocumentPreview },
+  { name: 'office_document_finalize', description: TOOL_DESCRIPTIONS.office_document_finalize, inputSchema: OfficeDocumentFinalizeSchema, executionMode: 'registry', safeMode: 'allow', readOnly: true, handler: handleOfficeDocumentFinalize },
   // Session self-management tools (registry — use context callbacks to reach SessionManager)
   { name: 'set_session_labels', description: TOOL_DESCRIPTIONS.set_session_labels, inputSchema: SetSessionLabelsSchema, executionMode: 'registry', safeMode: 'block', handler: handleSetSessionLabels },
   { name: 'set_session_status', description: TOOL_DESCRIPTIONS.set_session_status, inputSchema: SetSessionStatusSchema, executionMode: 'registry', safeMode: 'block', handler: handleSetSessionStatus },

@@ -99,6 +99,11 @@
     "build": "bun run scripts/build.ts",
     "release": "bun run scripts/release.ts",
     "check-version": "bun run scripts/check-version.ts",
+    "officecli:check": "bun scripts/sync-officecli.ts --check --download-runtime",
+    "officecli:prepare": "bun scripts/sync-officecli.ts --prepare-runtime",
+    "officecli:sync": "bun scripts/sync-officecli.ts --update",
+    "officecli:benchmark:check": "bun scripts/check-officecli-benchmark.ts",
+    "test:officecli:integration": "bun test packages/session-tools-core/src/integration/officecli-real.integration.test.ts",
     "oss:sync": "bun run scripts/oss-sync.ts",
     "prepare": "husky"
   },

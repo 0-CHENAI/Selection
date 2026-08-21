@@ -10,6 +10,9 @@ describe('native Office PreToolUse routing', () => {
       const redirect = getNativeOfficeToolRedirect(toolName, { file_path: filePath });
       expect(redirect?.message).toContain('office_document_inspect');
       expect(redirect?.message).toContain('office_document_edit');
+      expect(redirect?.message).toContain('office_document_guide');
+      expect(redirect?.message).toContain('office_document_preview');
+      expect(redirect?.message).toContain('office_document_finalize');
     }
   });
 
@@ -24,6 +27,16 @@ describe('native Office PreToolUse routing', () => {
     'pptx-tool info roadmap.pptx',
     'markitdown Report.docx',
   ])('blocks shell-based Office content processing: %s', (command) => {
+    expect(getNativeOfficeToolRedirect('Bash', { command })).not.toBeNull();
+  });
+
+  it.each([
+    'officecli status',
+    'officecli install',
+    './officecli-mac-arm64 --version',
+    'officecli-linux-x64 update',
+    '"$CRAFT_OFFICECLI" help all --json',
+  ])('blocks direct OfficeCLI even when no document path appears: %s', (command) => {
     expect(getNativeOfficeToolRedirect('Bash', { command })).not.toBeNull();
   });
 
@@ -50,8 +63,14 @@ describe('native Office PreToolUse routing', () => {
   it.each([
     'office_document_inspect',
     'office_document_edit',
+    'office_document_guide',
+    'office_document_preview',
+    'office_document_finalize',
     'mcp__session__office_document_inspect',
     'mcp__session__office_document_edit',
+    'mcp__session__office_document_guide',
+    'mcp__session__office_document_preview',
+    'mcp__session__office_document_finalize',
   ])('allows native Office tool %s', (toolName) => {
     expect(getNativeOfficeToolRedirect(toolName, {
       command: 'view',

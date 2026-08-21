@@ -72,7 +72,10 @@ import { attachSessionSelfManagementBindings } from './session-self-management-b
 import {
   getSessionToolProxyDefs,
   PI_OFFICE_DOCUMENT_EDIT_TOOL,
+  PI_OFFICE_DOCUMENT_FINALIZE_TOOL,
+  PI_OFFICE_DOCUMENT_GUIDE_TOOL,
   PI_OFFICE_DOCUMENT_INSPECT_TOOL,
+  PI_OFFICE_DOCUMENT_PREVIEW_TOOL,
   PI_OFFICE_TOOL_ROUTING_PROMPT,
   SESSION_TOOL_NAMES,
 } from './backend/pi/session-tool-defs.ts';
@@ -81,6 +84,7 @@ import {
 import {
   SESSION_BACKEND_TOOL_NAMES,
   SESSION_TOOL_REGISTRY,
+  type ToolContent as SessionToolContent,
   type ToolResult as SessionToolResult,
 } from '@craft-agent/session-tools-core';
 import { createClaudeContext, type SessionToolContext } from './claude-context.ts';
@@ -123,6 +127,11 @@ export const PI_BACKEND_SESSION_TOOL_NAMES = new Set<string>([
   'spawn_session',
   'browser_tool',
 ]);
+
+type ProxyToolExecutionResult = {
+  content: string | SessionToolContent[];
+  isError: boolean;
+};
 
 /**
  * Map a transport `err.code` to an agent-facing string for `browser_tool` failures.
@@ -268,7 +277,7 @@ export class PiAgent extends BaseAgent {
 
   // Pending tool executions (correlation map for subprocess tool_execute_request -> main process -> tool_execute_response)
   private pendingToolExecutions: Map<string, {
-    resolve: (result: { content: string; isError: boolean }) => void;
+    resolve: (result: ProxyToolExecutionResult) => void;
     reject: (error: Error) => void;
   }> = new Map();
 
@@ -1428,7 +1437,7 @@ export class PiAgent extends BaseAgent {
    * Routes proxy tool calls (MCP, API, session) to the appropriate handler.
    *
    * The subprocess expects responses in the format:
-   *   { content: string; isError: boolean }
+   *   { content: string | ToolContent[]; isError: boolean }
    */
   private async handleToolExecuteRequest(request: {
     requestId: string;
@@ -1473,12 +1482,12 @@ export class PiAgent extends BaseAgent {
    * - mcp__* tools -> MCP server proxy (TODO)
    * - api_* tools -> API source proxy (TODO)
    *
-   * Returns { content: string; isError: boolean } matching subprocess protocol.
+   * Returns a text-only or multimodal result matching the subprocess protocol.
    */
   private async routeToolCall(
     toolName: string,
     args: Record<string, unknown>
-  ): Promise<{ content: string; isError: boolean }> {
+  ): Promise<ProxyToolExecutionResult> {
     // Session-scoped tools may be MCP-prefixed or canonical (native Office).
     // Normalize the prefix before dispatching to the canonical registry.
     const strippedName = toolName.startsWith('mcp__session__')
@@ -1544,7 +1553,7 @@ export class PiAgent extends BaseAgent {
   private async executeSessionTool(
     toolName: string,
     args: Record<string, unknown>,
-  ): Promise<{ content: string; isError: boolean }> {
+  ): Promise<ProxyToolExecutionResult> {
     try {
       // call_llm uses the shared pre-execution pipeline from BaseAgent
       if (toolName === 'call_llm') {
@@ -1634,9 +1643,10 @@ export class PiAgent extends BaseAgent {
       const ctx = this.getSessionToolContext();
       const result: SessionToolResult = await def.handler(ctx, args);
 
-      // Convert ToolResult to subprocess response format
-      const text = result.content.map(c => c.text).join('\n');
-      return { content: text, isError: !!result.isError };
+      // Preserve MCP-compatible text/image blocks all the way into Pi's model
+      // context. The first block is always text, so older string-only event/UI
+      // consumers still receive the structured envelope and artifact paths.
+      return { content: result.content, isError: !!result.isError };
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
       this.debug(`Session tool ${toolName} failed: ${msg}`);
@@ -2134,6 +2144,9 @@ export class PiAgent extends BaseAgent {
             `[Stored at: ${att.storedPath}]\n` +
             `[Inspect with: ${PI_OFFICE_DOCUMENT_INSPECT_TOOL}]\n` +
             `[Modify with: ${PI_OFFICE_DOCUMENT_EDIT_TOOL}]\n` +
+            `[Load task guidance with: ${PI_OFFICE_DOCUMENT_GUIDE_TOOL}]\n` +
+            `[Render or interact with preview using: ${PI_OFFICE_DOCUMENT_PREVIEW_TOOL}]\n` +
+            `[Finalize the current revision with: ${PI_OFFICE_DOCUMENT_FINALIZE_TOOL}]\n` +
             `[Do not read the generated Markdown sidecar unless the native Office tool reports that the document is unsupported.]`,
           );
         } else if (att.storedPath) {

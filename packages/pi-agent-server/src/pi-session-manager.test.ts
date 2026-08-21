@@ -1,10 +1,10 @@
 import { afterEach, describe, expect, it } from 'bun:test'
-import { mkdtempSync, mkdirSync, rmSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { SessionManager as PiSessionManager } from '@earendil-works/pi-coding-agent'
 import type { AssistantMessage, Message } from '@earendil-works/pi-ai'
-import { createPiSessionManager } from './pi-session-manager.ts'
+import { createPiSessionManager, sanitizePiMessageForPersistence } from './pi-session-manager.ts'
 
 const roots: string[] = []
 
@@ -125,5 +125,43 @@ describe('Pi regenerate session isolation (#13)', () => {
 
     expect(resumed.getSessionId()).toBe(original.getSessionId())
     expect(textFromContext(resumed)).toEqual(['ORIGINAL_PROMPT', 'ORIGINAL_ASSISTANT'])
+  })
+})
+
+describe('Pi tool image persistence', () => {
+  it('keeps the live image block but omits Base64 from session JSONL', () => {
+    const root = tempRoot()
+    const sessionDir = join(root, 'session-images', '.pi-sessions')
+    mkdirSync(sessionDir, { recursive: true })
+
+    const imageData = 'aW1hZ2UtYnl0ZXMtdGhhdC1tdXN0LW5vdC1iZS1wZXJzaXN0ZWQ='
+    const toolResult: Message = {
+      role: 'toolResult',
+      toolCallId: 'office-render-1',
+      toolName: 'office_document_preview',
+      content: [
+        { type: 'text', text: 'Artifact: /tmp/session/data/office/page-1.png' },
+        { type: 'image', data: imageData, mimeType: 'image/png' },
+      ],
+      isError: false,
+      timestamp: 1,
+    }
+
+    const sanitized = sanitizePiMessageForPersistence(toolResult)
+    expect(sanitized).not.toBe(toolResult)
+    expect(JSON.stringify(sanitized)).not.toContain(imageData)
+    expect(JSON.stringify(toolResult)).toContain(imageData)
+
+    const manager = createPiSessionManager({ cwd: root, sessionDir, forceFreshSession: true })
+    manager.appendMessage(assistant('Calling preview', 0))
+    manager.appendMessage(toolResult)
+
+    const sessionFile = manager.getSessionFile()
+    expect(sessionFile).toBeTruthy()
+    const persisted = readFileSync(sessionFile!, 'utf8')
+    expect(persisted).toContain('/tmp/session/data/office/page-1.png')
+    expect(persisted).toContain('Inline tool image omitted from session JSONL')
+    expect(persisted).not.toContain(imageData)
+    expect(JSON.stringify(toolResult)).toContain(imageData)
   })
 })

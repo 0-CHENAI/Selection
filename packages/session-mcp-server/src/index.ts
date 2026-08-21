@@ -207,7 +207,7 @@ function createCodexContext(config: SessionConfig): SessionToolContext {
     plansFolderPath,
     sessionPath: sessionsDir,
     dataPath: sessionDataDir,
-    workingDirectory: config.workingDirectory ?? process.cwd(),
+    workingDirectory: config.workingDirectory,
     callbacks,
     fs,
     loadSourceConfig: (sourceSlug: string): SourceConfig | null => {

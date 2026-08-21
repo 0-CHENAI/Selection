@@ -67,15 +67,22 @@ export type { SendDeveloperFeedbackArgs } from './send-developer-feedback.ts';
 export {
   handleOfficeDocumentInspect,
   handleOfficeDocumentEdit,
-  clearOfficeInspectBudget,
 } from './office-document.ts';
 export type {
   OfficeDocumentInspectArgs,
   OfficeDocumentEditArgs,
-  OfficeDocumentInspectCommand,
-  OfficeDocumentEditCommand,
-  OfficeDocumentResultPayload,
 } from './office-document.ts';
+export { handleOfficeDocumentGuide, clearOfficeGuideCache, releaseOfficeGuideSession } from './office-guide.ts';
+export type { OfficeDocumentGuideArgs } from './office-guide.ts';
+export {
+  handleOfficeDocumentPreview,
+  renderOfficeDocument,
+  releaseOfficePreviewSession,
+  clearOfficePreviewState,
+} from './office-preview.ts';
+export type { OfficeDocumentPreviewArgs } from './office-preview.ts';
+export { handleOfficeDocumentFinalize } from './office-finalize.ts';
+export type { OfficeDocumentFinalizeArgs } from './office-finalize.ts';
 
 // Session Self-Management
 export { handleSetSessionLabels } from './set-session-labels.ts';

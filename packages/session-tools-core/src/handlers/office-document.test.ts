@@ -1,861 +1,627 @@
-import { beforeEach, describe, expect, it } from 'bun:test';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
+  symlinkSync,
+  realpathSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import type { SessionToolContext } from '../context.ts';
+import { dirname, join, resolve } from 'node:path';
+import { createNodeFileSystem, type SessionToolContext } from '../context.ts';
+import type { OfficeResultEnvelope } from '../office-types.ts';
 import {
-  clearOfficecliVersionCache,
-  clearOfficeInspectBudget,
-  executeOfficecliForTest,
-  handleOfficeDocumentEdit,
-  handleOfficeDocumentInspect,
-  type OfficecliExecutionDependencies,
-} from './office-document.ts';
-import {
-  OFFICE_INSPECT_BUDGET_LIMIT,
-  OFFICE_MAX_BATCH_FILE_BYTES,
-  OFFICE_MAX_INLINE_ARGUMENTS_CHARS,
-  OFFICE_MAX_INLINE_BATCH_CHARS,
-  OFFICE_MAX_INLINE_BATCH_COMMANDS,
-  OFFICE_PAYLOAD_TOO_LARGE_SUGGESTION,
-  OFFICE_REFRESH_NON_WINDOWS_NOTE,
-  OFFICE_TRUNCATED_PREVIEW_CHARS,
-  OFFICE_TRUNCATION_SUGGESTION,
-} from '../office-workflow.ts';
-import { resolveOfficecliBinary } from '../runtime/officecli.ts';
+  clearOfficeRuntimeState,
+  executeOfficeCommand,
+  releaseOfficeRuntimeSession,
+  wasOfficeArtifactMutatedBySession,
+  type OfficecliProcessResult,
+  type OfficeCoordinatorDependencies,
+} from '../runtime/office-coordinator.ts';
+import { resolveOfficecliResources } from '../runtime/office-manifest.ts';
 
-function context(): SessionToolContext {
-  return {
-    sessionId: 'session-1',
-    workspacePath: '/workspace',
-    workingDirectory: '/project',
-    get sourcesPath() { return '/workspace/sources'; },
-    get skillsPath() { return '/workspace/skills'; },
-    plansFolderPath: '/workspace/plans',
-    callbacks: {
-      onPlanSubmitted: () => {},
-      onAuthRequest: () => {},
-    },
-    fs: {
-      exists: () => true,
-      readFile: () => '',
-      readFileBuffer: () => Buffer.alloc(0),
-      writeFile: () => {},
-      isDirectory: path => path === '/project' || path === process.cwd(),
-      readdir: () => [],
-      stat: () => ({ size: 0, isDirectory: () => false }),
-    },
+const resources = resolveOfficecliResources({
+  explicitRoot: resolve(import.meta.dir, '../../../../apps/electron/resources/officecli'),
+});
+if (!resources) throw new Error('OfficeCLI test resources are missing');
+const expectedRuntimeSha256 = resources.manifest.assets[`${process.platform}-${process.arch}`]?.sha256;
+if (!expectedRuntimeSha256) throw new Error(`OfficeCLI test asset is missing for ${process.platform}-${process.arch}`);
+
+const roots: string[] = [];
+
+interface Fixture {
+  root: string;
+  workspace: string;
+  session: string;
+  working: string;
+  ctx: SessionToolContext;
+}
+
+interface RecordedCall {
+  binary: string;
+  args: string[];
+  cwd?: string;
+  env?: NodeJS.ProcessEnv;
+  timeoutMs: number;
+}
+
+function fixture(options: { workingDirectory?: string | null; sessionId?: string } = {}): Fixture {
+  const root = mkdtempSync(join(tmpdir(), 'selection-office-runtime-'));
+  roots.push(root);
+  const workspace = join(root, 'workspace');
+  const session = join(workspace, 'sessions', options.sessionId ?? 'session-1');
+  const working = join(workspace, '项目 with spaces');
+  mkdirSync(join(session, 'data'), { recursive: true });
+  mkdirSync(working, { recursive: true });
+  const ctx: SessionToolContext = {
+    sessionId: options.sessionId ?? 'session-1',
+    workspacePath: workspace,
+    sessionPath: session,
+    dataPath: join(session, 'data'),
+    ...(options.workingDirectory !== null
+      ? { workingDirectory: options.workingDirectory ?? working }
+      : {}),
+    get sourcesPath() { return join(workspace, 'sources'); },
+    get skillsPath() { return join(workspace, 'skills'); },
+    plansFolderPath: join(session, 'plans'),
+    callbacks: { onPlanSubmitted: () => {}, onAuthRequest: () => {} },
+    fs: createNodeFileSystem(),
     loadSourceConfig: () => null,
   };
+  return { root, workspace, session, working, ctx };
 }
 
-function payload(result: Awaited<ReturnType<typeof executeOfficecliForTest>>) {
-  return result.structuredContent!;
+function officeFile(path: string, contents = 'fixture'): string {
+  mkdirSync(dirname(path), { recursive: true });
+  writeFileSync(path, contents);
+  return path;
 }
 
-function contextWithFiles(
-  files: Record<string, string>,
-  sizes: Record<string, number> = {},
-): SessionToolContext {
-  const base = context();
+function processResult(
+  stdout: string,
+  overrides: Partial<OfficecliProcessResult> = {},
+): OfficecliProcessResult {
   return {
-    ...base,
-    fs: {
-      ...base.fs,
-      exists: path => path in files || base.fs.exists(path),
-      readFile: path => {
-        if (path in files) return files[path]!;
-        return base.fs.readFile(path);
+    stdout,
+    stderr: '',
+    exitCode: 0,
+    timedOut: false,
+    truncated: false,
+    ...overrides,
+  };
+}
+
+function dependencies(
+  execute: (args: string[]) => OfficecliProcessResult | Promise<OfficecliProcessResult> = () =>
+    processResult('{"success":true,"data":{"value":"ok"}}'),
+): { deps: OfficeCoordinatorDependencies; calls: RecordedCall[] } {
+  const calls: RecordedCall[] = [];
+  return {
+    calls,
+    deps: {
+      resolveResources: () => resources,
+      resolveRuntime: () => ({ path: '/selection-managed/officecli', source: 'environment' }),
+      hashRuntime: async () => expectedRuntimeSha256!,
+      runProcess: async (binary, args, options) => {
+        calls.push({
+          binary,
+          args: [...args],
+          cwd: options.cwd as string | undefined,
+          env: options.env,
+          timeoutMs: options.timeoutMs,
+        });
+        if (args.length === 1 && args[0] === '--version') return processResult('1.0.144\n');
+        if (args.length === 1 && args[0] === '--output-schema-crc') return processResult('b2b0b395\n');
+        return execute(args);
       },
-      stat: path => ({
-        size: sizes[path] ?? files[path]?.length ?? 0,
-        isDirectory: () => false,
-      }),
     },
   };
 }
 
-function successDeps(): OfficecliExecutionDependencies {
-  return {
-    resolveRuntime: () => ({ path: '/managed/officecli', source: 'environment' }),
-    runProcess: async (_binary, args) => args[0] === '--version'
-      ? { stdout: '1.0.144', stderr: '', exitCode: 0, timedOut: false, truncated: false }
-      : { stdout: '{"success":true,"data":"ok"}', stderr: '', exitCode: 0, timedOut: false, truncated: false },
-  };
+function envelope(result: Awaited<ReturnType<typeof executeOfficeCommand>>): OfficeResultEnvelope {
+  return result.envelope;
 }
 
-beforeEach(() => {
-  clearOfficecliVersionCache();
-  clearOfficeInspectBudget();
+function commandCalls(calls: RecordedCall[]): RecordedCall[] {
+  return calls.filter(call => !['--version', '--output-schema-crc'].includes(call.args[0] ?? ''));
+}
+
+beforeEach(() => clearOfficeRuntimeState());
+
+afterEach(() => {
+  for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
 
-describe('Office document native tool execution', () => {
-  it('returns a structured availability status and version', async () => {
-    const calls: string[][] = [];
-    const deps: OfficecliExecutionDependencies = {
-      resolveRuntime: () => ({ path: '/managed/officecli', source: 'environment' }),
-      runProcess: async (_binary, args) => {
-        calls.push(args);
-        return { stdout: '1.0.144\n', stderr: '', exitCode: 0, timedOut: false, truncated: false };
-      },
-    };
+describe('Office Runtime Coordinator', () => {
+  it('validates the pinned version/schema once and reports truthful status cache hits', async () => {
+    const f = fixture();
+    const { deps, calls } = dependencies();
 
-    const result = await executeOfficecliForTest(context(), { command: 'status' }, 'inspect', deps);
+    const first = await executeOfficeCommand(f.ctx, { argv: ['status'], mode: 'inspect' }, deps);
+    const second = await executeOfficeCommand(f.ctx, { argv: ['status'], mode: 'inspect' }, deps);
 
-    expect(result.isError).toBe(false);
-    expect(payload(result)).toMatchObject({
+    expect(envelope(first)).toMatchObject({
       ok: true,
-      availability: 'available',
       version: '1.0.144',
-      command: 'status',
+      schemaCrc: 'b2b0b395',
+      command: ['status'],
+      cwd: realpathSync.native(f.working),
+      cacheHit: false,
     });
-    expect(calls).toEqual([['--version']]);
+    expect(envelope(second).cacheHit).toBe(true);
+    expect(calls.map(call => call.args)).toEqual([
+      ['--version'],
+      ['--output-schema-crc'],
+    ]);
   });
 
-  it('passes argument tokens without a shell and normalizes successful JSON', async () => {
-    const calls: Array<{ args: string[]; cwd?: string; env?: NodeJS.ProcessEnv }> = [];
-    const deps: OfficecliExecutionDependencies = {
-      resolveRuntime: () => ({ path: '/managed/officecli', source: 'environment' }),
-      runProcess: async (_binary, args, options) => {
-        calls.push({ args, cwd: options.cwd as string, env: options.env });
-        if (args[0] === '--version') {
-          return { stdout: '1.0.144', stderr: '', exitCode: 0, timedOut: false, truncated: false };
-        }
-        return {
-          stdout: JSON.stringify({ success: true, data: { text: 'hello' } }),
-          stderr: '',
-          exitCode: 0,
-          timedOut: false,
-          truncated: false,
-        };
-      },
-      now: (() => {
-        let value = 100;
-        return () => value += 5;
-      })(),
-    };
+  it('passes Chinese, spaces, and shell metacharacters as native argv tokens', async () => {
+    const f = fixture();
+    const file = officeFile(join(f.working, '报告 name.docx'));
+    const sentinel = join(f.working, 'must-not-exist');
+    const pathToken = `/body/p[1];$(touch ${sentinel})`;
+    const { deps, calls } = dependencies();
 
-    const result = await executeOfficecliForTest(context(), {
-      command: 'view',
-      arguments: ['report name.docx', 'text'],
-    }, 'inspect', deps);
+    const result = await executeOfficeCommand(f.ctx, {
+      argv: ['get', file, pathToken],
+      mode: 'inspect',
+    }, deps);
 
-    expect(calls[1]?.args).toEqual(['view', 'report name.docx', 'text', '--json']);
-    expect(calls[1]?.cwd).toBe('/project');
-    expect(calls[1]?.env?.OFFICECLI_NO_AUTO_RESIDENT).toBe('1');
-    expect(payload(result)).toMatchObject({ ok: true, data: { text: 'hello' }, durationMs: 10 });
+    expect(result.envelope.ok).toBe(true);
+    expect(commandCalls(calls)[0]?.args).toEqual(['get', file, pathToken, '--json']);
+    expect(commandCalls(calls)[0]?.cwd).toBe(realpathSync.native(f.working));
+    expect(commandCalls(calls)[0]?.env).toMatchObject({
+      OFFICECLI_SKIP_UPDATE: '1',
+      OFFICECLI_NO_AUTO_INSTALL: '1',
+      OFFICECLI_NO_AUTO_RESIDENT: '1',
+      OFFICECLI_RESIDENT_FLUSH: 'each',
+      NO_COLOR: '1',
+    });
+    expect(existsSync(sentinel)).toBe(false);
   });
 
-  it('preserves structured OfficeCLI errors', async () => {
-    const deps: OfficecliExecutionDependencies = {
-      resolveRuntime: () => ({ path: '/managed/officecli', source: 'environment' }),
-      runProcess: async (_binary, args) => args[0] === '--version'
-        ? { stdout: '1.0.144', stderr: '', exitCode: 0, timedOut: false, truncated: false }
-        : {
-          stdout: JSON.stringify({
-            success: false,
-            error: {
-              error: 'File not found: missing.docx',
-              code: 'file_not_found',
-              suggestion: 'Check the file path.',
-              help: 'officecli create <path>',
-            },
-          }),
-          stderr: '',
-          exitCode: 1,
-          timedOut: false,
-          truncated: false,
-        },
-    };
+  it('uses workingDirectory, then sessionPath, and never falls back to process.cwd()', async () => {
+    const noExplicit = fixture({ workingDirectory: null });
+    const { deps } = dependencies();
+    const fallback = await executeOfficeCommand(noExplicit.ctx, { argv: ['status'], mode: 'inspect' }, deps);
+    expect(fallback.envelope.cwd).toBe(realpathSync.native(noExplicit.session));
 
-    const result = await executeOfficecliForTest(context(), {
-      command: 'view',
-      arguments: ['missing.docx', 'text'],
-    }, 'inspect', deps);
-
-    expect(result.isError).toBe(true);
-    expect(payload(result).error).toEqual({
-      code: 'file_not_found',
-      message: 'File not found: missing.docx',
-      suggestion: 'Check the file path.',
-      help: 'officecli create <path>',
-    });
-  });
-
-  it('rejects side-effect flags before starting OfficeCLI', async () => {
-    let called = false;
-    const result = await executeOfficecliForTest(context(), {
-      command: 'view',
-      arguments: ['report.docx', 'html', '--out=report.html'],
-    }, 'inspect', {
-      resolveRuntime: () => ({ path: '/managed/officecli', source: 'environment' }),
-      runProcess: async () => {
-        called = true;
-        throw new Error('must not run');
-      },
-    });
-
-    expect(called).toBe(false);
-    expect(payload(result)).toMatchObject({
+    clearOfficeRuntimeState();
+    const invalid = fixture({ workingDirectory: join(noExplicit.root, 'missing') });
+    const failed = await executeOfficeCommand(invalid.ctx, { argv: ['status'], mode: 'inspect' }, deps);
+    expect(failed.envelope).toMatchObject({
       ok: false,
-      error: { code: 'invalid_arguments' },
+      error: { code: 'working_directory_not_found', category: 'path' },
     });
+    expect(failed.envelope.cwd).not.toBe(process.cwd());
   });
 
-  it('rejects every inspect option that can write files', async () => {
-    let called = false;
-    const deps: OfficecliExecutionDependencies = {
-      resolveRuntime: () => ({ path: '/managed/officecli', source: 'environment' }),
-      runProcess: async () => {
-        called = true;
-        throw new Error('must not run');
-      },
-    };
+  it('blocks management, lifecycle, unknown, and inspect-render commands before execution', async () => {
+    const f = fixture();
+    const file = officeFile(join(f.working, 'report.docx'));
+    const { deps, calls } = dependencies();
+    const cases = [
+      { argv: ['install'], mode: 'inspect' as const, code: 'management_command_forbidden' },
+      { argv: ['open', file], mode: 'edit' as const, code: 'management_command_forbidden' },
+      { argv: ['future-write', file], mode: 'edit' as const, code: 'command_not_editable' },
+      { argv: ['view', file, 'screenshot'], mode: 'inspect' as const, code: 'render_requires_preview' },
+      { argv: ['dump', file, '/', '--out', 'dump.json'], mode: 'inspect' as const, code: 'read_output_forbidden' },
+    ];
 
-    for (const arguments_ of [
-      ['report.docx', '/body/p[1]', '--save', 'image.png'],
-      ['report.docx', '/body/p[1]', '--save=image.png'],
-      ['report.docx', '/', '-ooutput.json'],
-    ]) {
-      const result = await executeOfficecliForTest(context(), {
-        command: 'get',
-        arguments: arguments_,
-      }, 'inspect', deps);
-      expect(payload(result).error).toMatchObject({ code: 'invalid_arguments' });
+    for (const testCase of cases) {
+      const result = await executeOfficeCommand(f.ctx, testCase, deps);
+      expect(result.envelope.error?.code).toBe(testCase.code);
     }
-    expect(called).toBe(false);
+    expect(calls).toHaveLength(0);
   });
 
-  it('validates the runtime command and status arguments before execution', async () => {
-    let called = false;
-    const deps: OfficecliExecutionDependencies = {
-      resolveRuntime: () => ({ path: '/managed/officecli', source: 'environment' }),
-      runProcess: async () => {
-        called = true;
-        throw new Error('must not run');
-      },
-    };
-
-    const managementCommand = await executeOfficecliForTest(context(), {
-      command: 'install',
-    } as never, 'inspect', deps);
-    expect(payload(managementCommand).error).toMatchObject({ code: 'invalid_arguments' });
-
-    const statusWithArguments = await executeOfficecliForTest(context(), {
-      command: 'status',
-      arguments: ['--help'],
-    }, 'inspect', deps);
-    expect(payload(statusWithArguments).error).toMatchObject({ code: 'invalid_arguments' });
-    expect(called).toBe(false);
-  });
-
-  it('serializes structured batch commands', async () => {
-    const calls: string[][] = [];
-    const deps: OfficecliExecutionDependencies = {
-      resolveRuntime: () => ({ path: '/managed/officecli', source: 'environment' }),
-      runProcess: async (_binary, args) => {
-        calls.push(args);
-        return args[0] === '--version'
-          ? { stdout: '1.0.144', stderr: '', exitCode: 0, timedOut: false, truncated: false }
-          : { stdout: '{"success":true,"data":"ok"}', stderr: '', exitCode: 0, timedOut: false, truncated: false };
-      },
-    };
-    const commands = [{ command: 'set', path: '/Sheet1/A1', props: { value: 'Done' } }];
-
-    await executeOfficecliForTest(context(), {
-      command: 'batch',
-      arguments: ['data.xlsx'],
-      batchCommands: commands,
-    }, 'edit', deps);
-
-    expect(calls[1]).toEqual(['batch', 'data.xlsx', '--commands', JSON.stringify(commands), '--json']);
-  });
-
-  it('requires structured batch input and rejects resident or management commands inside it', async () => {
-    let called = false;
-    const deps: OfficecliExecutionDependencies = {
-      resolveRuntime: () => ({ path: '/managed/officecli', source: 'environment' }),
-      runProcess: async () => {
-        called = true;
-        throw new Error('must not run');
-      },
-    };
-
-    const externalInput = await executeOfficecliForTest(context(), {
-      command: 'batch',
-      arguments: ['data.xlsx', '--input', 'commands.json'],
-    }, 'edit', deps);
-    expect(payload(externalInput).error).toMatchObject({ code: 'invalid_arguments' });
-
-    const residentCommand = await executeOfficecliForTest(context(), {
-      command: 'batch',
-      arguments: ['data.xlsx'],
-      batchCommands: [{ command: 'open', file: 'data.xlsx' }],
-    }, 'edit', deps);
-    expect(payload(residentCommand).error).toMatchObject({ code: 'invalid_arguments' });
-
-    const legacyResidentCommand = await executeOfficecliForTest(context(), {
-      command: 'batch',
-      arguments: ['data.xlsx'],
-      batchCommands: [{ op: 'watch', file: 'data.xlsx' }],
-    }, 'edit', deps);
-    expect(payload(legacyResidentCommand).error).toMatchObject({ code: 'invalid_arguments' });
-    expect(called).toBe(false);
-  });
-
-  it('passes a validated batchCommandsFile to OfficeCLI as --input', async () => {
-    const calls: string[][] = [];
-    const commands = [{ command: 'set', path: '/Sheet1/A1', props: { value: 'Done' } }];
-    const filePath = join('/project', 'commands.json');
-    const result = await executeOfficecliForTest(contextWithFiles({
-      [filePath]: JSON.stringify(commands),
-    }), {
-      command: 'batch',
-      arguments: ['data.xlsx'],
-      batchCommandsFile: 'commands.json',
-    }, 'edit', {
-      resolveRuntime: () => ({ path: '/managed/officecli', source: 'environment' }),
-      runProcess: async (_binary, args) => {
-        calls.push(args);
-        return args[0] === '--version'
-          ? { stdout: '1.0.144', stderr: '', exitCode: 0, timedOut: false, truncated: false }
-          : { stdout: '{"success":true,"data":"ok"}', stderr: '', exitCode: 0, timedOut: false, truncated: false };
-      },
-    });
-
-    expect(payload(result).ok).toBe(true);
-    expect(calls[1]).toEqual(['batch', 'data.xlsx', '--input', filePath, '--json']);
-  });
-
-  it('rejects batchCommandsFile that is outside the workspace, not JSON, or too large', async () => {
-    let called = false;
-    const deps: OfficecliExecutionDependencies = {
-      resolveRuntime: () => ({ path: '/managed/officecli', source: 'environment' }),
-      runProcess: async () => {
-        called = true;
-        throw new Error('must not run');
-      },
-    };
-    const escaped = await executeOfficecliForTest(context(), {
-      command: 'batch',
-      arguments: ['data.xlsx'],
-      batchCommandsFile: '../../etc/secret.json',
-    }, 'edit', deps);
-    const notJson = await executeOfficecliForTest(context(), {
-      command: 'batch',
-      arguments: ['data.xlsx'],
-      batchCommandsFile: 'commands.txt',
-    }, 'edit', deps);
-    const invalidJson = await executeOfficecliForTest(contextWithFiles({
-      [join('/project', 'commands.json')]: '{not-json',
-    }), {
-      command: 'batch',
-      arguments: ['data.xlsx'],
-      batchCommandsFile: 'commands.json',
-    }, 'edit', deps);
-    const notArray = await executeOfficecliForTest(contextWithFiles({
-      [join('/project', 'commands.json')]: JSON.stringify({ command: 'set' }),
-    }), {
-      command: 'batch',
-      arguments: ['data.xlsx'],
-      batchCommandsFile: 'commands.json',
-    }, 'edit', deps);
-    const oversized = await executeOfficecliForTest(contextWithFiles(
-      { [join('/project', 'commands.json')]: '[]' },
-      { [join('/project', 'commands.json')]: OFFICE_MAX_BATCH_FILE_BYTES + 1 },
-    ), {
-      command: 'batch',
-      arguments: ['data.xlsx'],
-      batchCommandsFile: 'commands.json',
-    }, 'edit', deps);
-    const forbidden = await executeOfficecliForTest(contextWithFiles({
-      [join('/project', 'commands.json')]: JSON.stringify([{ command: 'open', file: 'data.xlsx' }]),
-    }), {
-      command: 'batch',
-      arguments: ['data.xlsx'],
-      batchCommandsFile: 'commands.json',
-    }, 'edit', deps);
-    const directoryCtx = contextWithFiles({ [join('/project', 'commands.json')]: '[]' });
-    directoryCtx.fs.stat = () => ({ size: 0, isDirectory: () => true });
-    const directory = await executeOfficecliForTest(directoryCtx, {
-      command: 'batch',
-      arguments: ['data.xlsx'],
-      batchCommandsFile: 'commands.json',
-    }, 'edit', deps);
-    const emptyFile = await executeOfficecliForTest(contextWithFiles({
-      [join('/project', 'commands.json')]: '[]',
-    }), {
-      command: 'batch',
-      arguments: ['data.xlsx'],
-      batchCommandsFile: 'commands.json',
-    }, 'edit', deps);
-    const oversizedContent = await executeOfficecliForTest(contextWithFiles(
-      { [join('/project', 'commands.json')]: 'x'.repeat(OFFICE_MAX_BATCH_FILE_BYTES + 1) },
-      { [join('/project', 'commands.json')]: 32 },
-    ), {
-      command: 'batch',
-      arguments: ['data.xlsx'],
-      batchCommandsFile: 'commands.json',
-    }, 'edit', deps);
-    const missingCtx = context();
-    missingCtx.fs.exists = () => false;
-    const missingFile = await executeOfficecliForTest(missingCtx, {
-      command: 'batch',
-      arguments: ['data.xlsx'],
-      batchCommandsFile: 'commands.json',
-    }, 'edit', deps);
-
-    expect(payload(escaped).error).toMatchObject({ code: 'invalid_arguments' });
-    expect(payload(notJson).error).toMatchObject({ code: 'invalid_arguments' });
-    expect(payload(invalidJson).error).toMatchObject({ code: 'invalid_arguments' });
-    expect(payload(notArray).error).toMatchObject({ code: 'invalid_arguments' });
-    expect(payload(oversized)).toMatchObject({
-      error: {
-        code: 'payload_too_large',
-        suggestion: OFFICE_PAYLOAD_TOO_LARGE_SUGGESTION,
-      },
-    });
-    expect(payload(forbidden).error).toMatchObject({ code: 'invalid_arguments' });
-    expect(payload(directory).error).toMatchObject({ code: 'invalid_arguments' });
-    expect(payload(emptyFile).error).toMatchObject({ code: 'invalid_arguments' });
-    expect(payload(oversizedContent).error).toMatchObject({ code: 'payload_too_large' });
-    expect(payload(missingFile).error).toMatchObject({ code: 'invalid_arguments' });
-    expect(called).toBe(false);
-  });
-
-  it('requires exactly one of batchCommands or batchCommandsFile', async () => {
-    let called = false;
-    const deps: OfficecliExecutionDependencies = {
-      resolveRuntime: () => ({ path: '/managed/officecli', source: 'environment' }),
-      runProcess: async () => {
-        called = true;
-        throw new Error('must not run');
-      },
-    };
-    const missing = await executeOfficecliForTest(context(), {
-      command: 'batch',
-      arguments: ['data.xlsx'],
-    }, 'edit', deps);
-    const emptyInline = await executeOfficecliForTest(context(), {
-      command: 'batch',
-      arguments: ['data.xlsx'],
-      batchCommands: [],
-    }, 'edit', deps);
-    const both = await executeOfficecliForTest(context(), {
-      command: 'batch',
-      arguments: ['data.xlsx'],
-      batchCommands: [{ command: 'set', path: '/Sheet1/A1', props: { value: 'Done' } }],
-      batchCommandsFile: 'commands.json',
-    }, 'edit', deps);
-
-    expect(payload(missing).error).toMatchObject({ code: 'invalid_arguments' });
-    expect(payload(emptyInline).error).toMatchObject({ code: 'invalid_arguments' });
-    expect(payload(both).error).toMatchObject({ code: 'invalid_arguments' });
-    expect(called).toBe(false);
-  });
-
-  it('rejects oversized inline batchCommands and arguments', async () => {
-    let called = false;
-    const deps: OfficecliExecutionDependencies = {
-      resolveRuntime: () => ({ path: '/managed/officecli', source: 'environment' }),
-      runProcess: async () => {
-        called = true;
-        throw new Error('must not run');
-      },
-    };
-    const tooMany = await executeOfficecliForTest(context(), {
-      command: 'batch',
-      arguments: ['data.xlsx'],
-      batchCommands: Array.from({ length: OFFICE_MAX_INLINE_BATCH_COMMANDS + 1 }, (_, index) => ({
-        command: 'set',
-        path: `/Sheet1/A${index + 1}`,
-        props: { value: 'x' },
-      })),
-    }, 'edit', deps);
-    const tooWide = await executeOfficecliForTest(context(), {
-      command: 'batch',
-      arguments: ['data.xlsx'],
-      batchCommands: [{
-        command: 'add',
-        parent: '/body',
-        type: 'paragraph',
-        props: { text: '字'.repeat(OFFICE_MAX_INLINE_BATCH_CHARS) },
-      }],
-    }, 'edit', deps);
-    const hugeProp = await executeOfficecliForTest(context(), {
-      command: 'add',
-      arguments: ['report.docx', '/body', '--type', 'paragraph', `--prop`, `text=${'字'.repeat(OFFICE_MAX_INLINE_ARGUMENTS_CHARS)}`],
-    }, 'edit', deps);
-    const hugeBatchArgs = await executeOfficecliForTest(context(), {
-      command: 'batch',
-      arguments: ['report.docx', `--prop`, `text=${'字'.repeat(OFFICE_MAX_INLINE_ARGUMENTS_CHARS)}`],
-      batchCommands: [{ command: 'set', path: '/Sheet1/A1', props: { value: 'Done' } }],
-    }, 'edit', deps);
-
-    expect(payload(tooMany)).toMatchObject({
-      error: {
-        code: 'payload_too_large',
-        suggestion: OFFICE_PAYLOAD_TOO_LARGE_SUGGESTION,
-      },
-    });
-    expect(payload(tooWide).error).toMatchObject({ code: 'payload_too_large' });
-    expect(payload(hugeProp).error).toMatchObject({ code: 'payload_too_large' });
-    expect(payload(hugeBatchArgs).error).toMatchObject({ code: 'payload_too_large' });
-    expect(JSON.stringify(payload(tooMany))).toContain('batchCommandsFile');
-    expect(called).toBe(false);
-  });
-
-  it('applies timeoutMs to the whole invocation including version detection', async () => {
-    const timeouts: number[] = [];
-    let clock = 0;
-    const deps: OfficecliExecutionDependencies = {
-      resolveRuntime: () => ({ path: '/managed/officecli', source: 'environment' }),
-      runProcess: async (_binary, args, options) => {
-        timeouts.push(options.timeoutMs);
-        if (args[0] === '--version') {
-          clock = 20;
-          return { stdout: '1.0.144', stderr: '', exitCode: 0, timedOut: false, truncated: false };
-        }
-        clock = 80;
-        return { stdout: '{"success":true,"data":"ok"}', stderr: '', exitCode: 0, timedOut: false, truncated: false };
-      },
-      now: () => clock,
-    };
-
-    const result = await executeOfficecliForTest(context(), {
-      command: 'validate',
-      arguments: ['report.docx'],
-      timeoutMs: 100,
-    }, 'inspect', deps);
-
-    expect(timeouts).toEqual([100, 80]);
-    expect(payload(result)).toMatchObject({ ok: true, durationMs: 80 });
-  });
-
-  it('returns stable unavailable, timeout, and process errors', async () => {
-    const unavailable = await executeOfficecliForTest(context(), { command: 'status' }, 'inspect', {
-      resolveRuntime: () => undefined,
-    });
-    expect(payload(unavailable)).toMatchObject({
-      availability: 'unavailable',
-      error: { code: 'officecli_unavailable' },
-    });
-
-    const timeout = await executeOfficecliForTest(context(), { command: 'validate', arguments: ['timeout.docx'] }, 'inspect', {
-      resolveRuntime: () => ({ path: '/managed/timeout', source: 'environment' }),
-      runProcess: async (_binary, args) => args[0] === '--version'
-        ? { stdout: '1.0.144', stderr: '', exitCode: 0, timedOut: false, truncated: false }
-        : { stdout: '', stderr: '', exitCode: null, timedOut: true, truncated: false },
-    });
-    expect(payload(timeout).error).toMatchObject({ code: 'timeout' });
-
-    const failed = await executeOfficecliForTest(context(), { command: 'validate', arguments: ['failure.docx'] }, 'inspect', {
-      resolveRuntime: () => ({ path: '/managed/failure', source: 'environment' }),
-      runProcess: async (_binary, args) => {
-        if (args[0] === '--version') {
-          return { stdout: '1.0.144', stderr: '', exitCode: 0, timedOut: false, truncated: false };
-        }
-        throw new Error('spawn EACCES');
-      },
-    });
-    expect(payload(failed).error).toEqual({ code: 'execution_failed', message: 'spawn EACCES' });
-  });
-
-  it('classifies non-JSON argument failures and marks truncated output', async () => {
-    const invalid = await executeOfficecliForTest(context(), {
-      command: 'query',
-      arguments: ['a.docx'],
-    }, 'inspect', {
-      resolveRuntime: () => ({ path: '/managed/invalid', source: 'environment' }),
-      runProcess: async (_binary, args) => args[0] === '--version'
-        ? { stdout: '1.0.144', stderr: '', exitCode: 0, timedOut: false, truncated: false }
-        : { stdout: '', stderr: 'Required argument missing: selector', exitCode: 1, timedOut: false, truncated: false },
-    });
-    expect(payload(invalid).error).toMatchObject({ code: 'invalid_arguments' });
-
-    const truncated = await executeOfficecliForTest(context(), {
-      command: 'view',
-      arguments: ['a.docx', 'text'],
-    }, 'inspect', {
-      resolveRuntime: () => ({ path: '/managed/truncated', source: 'environment' }),
-      runProcess: async (_binary, args) => args[0] === '--version'
-        ? { stdout: '1.0.144', stderr: '', exitCode: 0, timedOut: false, truncated: false }
-        : { stdout: 'x'.repeat(100_000), stderr: '', exitCode: 0, timedOut: false, truncated: true },
-    });
-    const truncatedPayload = payload(truncated);
-    const truncatedText = truncated.content[0]?.type === 'text' ? truncated.content[0].text : '';
-    expect(truncatedPayload).toMatchObject({
-      ok: true,
-      truncated: true,
-      suggestion: OFFICE_TRUNCATION_SUGGESTION,
-    });
-    expect(truncatedPayload.data).toBeUndefined();
-    expect(typeof truncatedPayload.preview).toBe('string');
-    expect((truncatedPayload.preview as string).length).toBe(OFFICE_TRUNCATED_PREVIEW_CHARS);
-    expect(truncatedText).toContain('view outline');
-    expect(truncatedText.length).toBeLessThan(5_000);
-    expect(JSON.stringify(truncatedPayload).length).toBeLessThan(5_000);
-  });
-
-  it('includes the Word+Windows note only for non-Windows DOCX refresh', async () => {
-    const docx = await executeOfficecliForTest(context(), {
-      command: 'refresh',
-      arguments: ['report.docx'],
-    }, 'edit', {
-      ...successDeps(),
-      platform: 'darwin',
-    });
-    const workbook = await executeOfficecliForTest(context(), {
-      command: 'refresh',
-      arguments: ['data.xlsx'],
-    }, 'edit', {
-      ...successDeps(),
-      platform: 'darwin',
-    });
-
-    const text = docx.content[0]?.type === 'text' ? docx.content[0].text : '';
-    expect(payload(docx)).toMatchObject({
-      ok: true,
-      platformNote: OFFICE_REFRESH_NON_WINDOWS_NOTE,
-    });
-    expect(text).toContain('Word + Windows');
-    expect(payload(workbook).platformNote).toBeUndefined();
-  });
-
-  it('does not rerun OfficeCLI for the same inspect fingerprint', async () => {
-    let commandRuns = 0;
-    const deps: OfficecliExecutionDependencies = {
-      resolveRuntime: () => ({ path: '/managed/officecli', source: 'environment' }),
-      runProcess: async (_binary, args) => {
-        if (args[0] === '--version') {
-          return { stdout: '1.0.144', stderr: '', exitCode: 0, timedOut: false, truncated: false };
-        }
-        commandRuns += 1;
-        return { stdout: '{"success":true,"data":"ok"}', stderr: '', exitCode: 0, timedOut: false, truncated: false };
-      },
-    };
-
-    const first = await executeOfficecliForTest(context(), {
-      command: 'view',
-      arguments: ['report.docx', 'outline'],
-    }, 'inspect', deps);
-    const second = await executeOfficecliForTest(context(), {
-      command: 'view',
-      arguments: ['./report.docx', 'outline'],
-    }, 'inspect', deps);
-
-    expect(payload(first).ok).toBe(true);
-    expect(commandRuns).toBe(1);
-    expect(second.isError).toBe(false);
-    expect(payload(second)).toMatchObject({
-      ok: true,
-      code: 'already_checked',
-    });
-
-    const absolute = await executeOfficecliForTest(context(), {
-      command: 'view',
-      arguments: ['/project/report.docx', 'outline'],
-    }, 'inspect', deps);
-    expect(payload(absolute)).toMatchObject({ ok: true, code: 'already_checked' });
-    expect(commandRuns).toBe(1);
-  });
-
-  it('allows retrying a failed inspect and does not spend budget on it', async () => {
-    let commandRuns = 0;
-    const deps: OfficecliExecutionDependencies = {
-      resolveRuntime: () => ({ path: '/managed/officecli', source: 'environment' }),
-      runProcess: async (_binary, args) => {
-        if (args[0] === '--version') {
-          return { stdout: '1.0.144', stderr: '', exitCode: 0, timedOut: false, truncated: false };
-        }
-        commandRuns += 1;
-        if (commandRuns === 1) {
-          return { stdout: '', stderr: '', exitCode: null, timedOut: true, truncated: false };
-        }
-        return { stdout: '{"success":true,"data":"ok"}', stderr: '', exitCode: 0, timedOut: false, truncated: false };
-      },
-    };
-
-    const timedOut = await executeOfficecliForTest(context(), {
-      command: 'view',
-      arguments: ['report.docx', 'outline'],
-    }, 'inspect', deps);
-    const retried = await executeOfficecliForTest(context(), {
-      command: 'view',
-      arguments: ['report.docx', 'outline'],
-    }, 'inspect', deps);
-
-    expect(payload(timedOut).error).toMatchObject({ code: 'timeout' });
-    expect(payload(retried).ok).toBe(true);
-    expect(commandRuns).toBe(2);
-  });
-
-  it('stops counted inspects after the session budget and ignores status/help', async () => {
-    let commandRuns = 0;
-    const deps: OfficecliExecutionDependencies = {
-      resolveRuntime: () => ({ path: '/managed/officecli', source: 'environment' }),
-      runProcess: async (_binary, args) => {
-        if (args[0] === '--version') {
-          return { stdout: '1.0.144', stderr: '', exitCode: 0, timedOut: false, truncated: false };
-        }
-        commandRuns += 1;
-        return { stdout: '{"success":true,"data":"ok"}', stderr: '', exitCode: 0, timedOut: false, truncated: false };
-      },
-    };
-
-    for (let i = 0; i < 3; i++) {
-      const help = await executeOfficecliForTest(context(), {
-        command: 'help',
-        arguments: ['docx', 'heading'],
-      }, 'inspect', deps);
-      expect(payload(help).ok).toBe(true);
-    }
-
-    const inspects = [
-      ['view', ['report.docx', 'outline']],
-      ['view', ['report.docx', 'text']],
-      ['validate', ['report.docx']],
-      ['get', ['report.docx', '/body']],
-    ] as const;
-
-    for (const [command, arguments_] of inspects) {
-      const result = await executeOfficecliForTest(context(), {
-        command,
-        arguments: [...arguments_],
-      }, 'inspect', deps);
-      expect(payload(result).ok).toBe(true);
-    }
-    expect(inspects.length).toBe(OFFICE_INSPECT_BUDGET_LIMIT);
-
-    const exhausted = await executeOfficecliForTest(context(), {
-      command: 'query',
-      arguments: ['report.docx', '/body'],
-    }, 'inspect', deps);
-
-    expect(exhausted.isError).toBe(false);
-    expect(payload(exhausted)).toMatchObject({
-      ok: true,
-      code: 'verification_budget_exhausted',
-    });
-    expect(commandRuns).toBe(3 + OFFICE_INSPECT_BUDGET_LIMIT);
-  });
-
-  it('resets the inspect budget after a successful edit', async () => {
-    const deps = successDeps();
-    const inspects = [
-      ['view', ['report.docx', 'outline']],
-      ['view', ['report.docx', 'text']],
-      ['validate', ['report.docx']],
-      ['dump', ['report.docx']],
-    ] as const;
-
-    for (const [command, arguments_] of inspects) {
-      await executeOfficecliForTest(context(), {
-        command,
-        arguments: [...arguments_],
-      }, 'inspect', deps);
-    }
-
-    const blocked = await executeOfficecliForTest(context(), {
-      command: 'raw',
-      arguments: ['report.docx'],
-    }, 'inspect', deps);
-    expect(payload(blocked)).toMatchObject({ ok: true, code: 'verification_budget_exhausted' });
-
-    const refresh = await executeOfficecliForTest(context(), {
-      command: 'refresh',
-      arguments: ['report.docx'],
-    }, 'edit', deps);
-    expect(payload(refresh).ok).toBe(true);
-
-    const stillBlocked = await executeOfficecliForTest(context(), {
-      command: 'raw',
-      arguments: ['report.docx'],
-    }, 'inspect', deps);
-    expect(payload(stillBlocked)).toMatchObject({ ok: true, code: 'verification_budget_exhausted' });
-
-    const edit = await executeOfficecliForTest(context(), {
-      command: 'add',
-      arguments: ['report.docx', '/body', '--type', 'paragraph', '--prop', 'text=Summary'],
-    }, 'edit', deps);
-    expect(payload(edit).ok).toBe(true);
-
-    const afterEdit = await executeOfficecliForTest(context(), {
-      command: 'view',
-      arguments: ['report.docx', 'outline'],
-    }, 'inspect', deps);
-    expect(payload(afterEdit).ok).toBe(true);
-  });
-
-  it('creates, edits, and reads docx, xlsx, and pptx through native handlers', async () => {
-    if (!resolveOfficecliBinary()) return;
-
-    const root = mkdtempSync(join(tmpdir(), 'office-native-smoke-'));
-    const workDir = join(root, '巡察工作');
-    mkdirSync(workDir, { recursive: true });
-    const realContext: SessionToolContext = {
-      ...context(),
-      workingDirectory: workDir,
-      fs: {
-        exists: existsSync,
-        readFile: path => readFileSync(path, 'utf8'),
-        readFileBuffer: path => readFileSync(path),
-        writeFile: (path, content) => writeFileSync(path, content, 'utf8'),
-        isDirectory: path => existsSync(path) && statSync(path).isDirectory(),
-        readdir: readdirSync,
-        stat: path => {
-          const stats = statSync(path);
-          return { size: stats.size, isDirectory: () => stats.isDirectory() };
+  it('hard-blocks management commands even if a tampered manifest misclassifies them', async () => {
+    const f = fixture();
+    const { deps, calls } = dependencies();
+    deps.resolveResources = () => ({
+      ...resources,
+      manifest: {
+        ...resources.manifest,
+        commandPolicy: {
+          ...resources.manifest.commandPolicy,
+          read: [...resources.manifest.commandPolicy.read, 'install'],
+          admin: resources.manifest.commandPolicy.admin.filter(command => command !== 'install'),
         },
       },
-    };
+    });
 
-    try {
-      const createDocx = await handleOfficeDocumentEdit(realContext, {
-        command: 'create',
-        arguments: ['报告.docx'],
-      });
-      expect(payload(createDocx).ok).toBe(true);
-      await handleOfficeDocumentEdit(realContext, {
-        command: 'add',
-        arguments: ['报告.docx', '/body', '--type', 'paragraph', '--prop', 'text=巡察工作摘要'],
-      });
-      const docx = await handleOfficeDocumentInspect(realContext, {
-        command: 'view',
-        arguments: ['报告.docx', 'text'],
-      });
-      expect(JSON.stringify(payload(docx).data)).toContain('巡察工作摘要');
+    const result = await executeOfficeCommand(f.ctx, { argv: ['install'], mode: 'inspect' }, deps);
 
-      await handleOfficeDocumentEdit(realContext, {
-        command: 'create',
-        arguments: ['数据.xlsx'],
-      });
-      await handleOfficeDocumentEdit(realContext, {
-        command: 'batch',
-        arguments: ['数据.xlsx'],
-        batchCommands: [{ command: 'set', path: '/Sheet1/A1', props: { value: '姓名' } }],
-      });
-      const xlsx = await handleOfficeDocumentInspect(realContext, {
-        command: 'view',
-        arguments: ['数据.xlsx', 'text'],
-      });
-      expect(JSON.stringify(payload(xlsx).data)).toContain('姓名');
+    expect(result.envelope.error?.code).toBe('management_command_forbidden');
+    expect(calls).toHaveLength(0);
+  });
 
-      await handleOfficeDocumentEdit(realContext, {
-        command: 'create',
-        arguments: ['汇报.pptx'],
-      });
-      await handleOfficeDocumentEdit(realContext, {
-        command: 'add',
-        arguments: ['汇报.pptx', '/', '--type', 'slide', '--prop', 'title=巡察汇报'],
-      });
-      const pptx = await handleOfficeDocumentInspect(realContext, {
-        command: 'view',
-        arguments: ['汇报.pptx', 'text'],
-      });
-      expect(JSON.stringify(payload(pptx).data)).toContain('巡察汇报');
-    } finally {
-      rmSync(root, { recursive: true, force: true });
+  it('rejects an unreviewed runtime checksum before reading executable metadata', async () => {
+    const f = fixture();
+    const { deps, calls } = dependencies();
+    deps.hashRuntime = async () => '0'.repeat(64);
+
+    const result = await executeOfficeCommand(f.ctx, { argv: ['status'], mode: 'inspect' }, deps);
+
+    expect(result.envelope).toMatchObject({
+      ok: false,
+      error: { code: 'runtime_checksum_mismatch', category: 'dependency' },
+      data: { actualSha256: '0'.repeat(64), expectedSha256: expectedRuntimeSha256 },
+    });
+    expect(calls).toHaveLength(0);
+  });
+
+  it('translates the stable get-marks inspect alias to native watch marks grammar', async () => {
+    const f = fixture();
+    const file = officeFile(join(f.working, 'marked deck.pptx'));
+    const { deps, calls } = dependencies();
+
+    const result = await executeOfficeCommand(f.ctx, {
+      argv: ['get-marks', file],
+      mode: 'inspect',
+    }, deps);
+
+    expect(result.envelope.ok).toBe(true);
+    expect(commandCalls(calls)[0]?.args).toEqual(['watch', file, 'marks', file, '--json']);
+    expect(result.envelope.command).toEqual(['watch', file, 'marks', file, '--json']);
+  });
+
+  it('enforces missing, outside, symlink-escaped, parent-file, and long paths', async () => {
+    const f = fixture();
+    const outsideRoot = mkdtempSync(join(tmpdir(), 'selection-office-outside-'));
+    roots.push(outsideRoot);
+    const outside = officeFile(join(outsideRoot, 'outside.docx'));
+    const link = join(f.working, 'escaped.docx');
+    symlinkSync(outside, link);
+    const parentFile = officeFile(join(f.working, 'not-a-directory'));
+    const { deps } = dependencies();
+
+    const missing = await executeOfficeCommand(f.ctx, { argv: ['get', 'missing.docx', '/'], mode: 'inspect' }, deps);
+    const escaped = await executeOfficeCommand(f.ctx, { argv: ['get', link, '/'], mode: 'inspect' }, deps);
+    const outsideResult = await executeOfficeCommand(f.ctx, { argv: ['get', outside, '/'], mode: 'inspect' }, deps);
+    const parentResult = await executeOfficeCommand(f.ctx, {
+      argv: ['create', join(parentFile, 'new.docx')],
+      mode: 'edit',
+    }, deps);
+    const longResult = await executeOfficeCommand(f.ctx, {
+      argv: ['create', join(f.working, `${'a'.repeat(4100)}.docx`)],
+      mode: 'edit',
+    }, deps);
+
+    expect(missing.envelope.error?.code).toBe('file_not_found');
+    expect(escaped.envelope.error?.code).toBe('path_outside_allowed_roots');
+    expect(outsideResult.envelope.error?.code).toBe('path_outside_allowed_roots');
+    expect(parentResult.envelope.error?.code).toBe('output_parent_is_file');
+    expect(longResult.envelope.error?.code).toBe('path_too_long');
+  });
+
+  it('creates authorized nested output directories and requires --force for existing outputs', async () => {
+    const f = fixture();
+    const output = join(f.working, '新目录', '多层', 'new file.docx');
+    const existing = officeFile(join(f.working, 'existing.docx'));
+    const { deps, calls } = dependencies();
+
+    const created = await executeOfficeCommand(f.ctx, { argv: ['create', output], mode: 'edit' }, deps);
+    const refused = await executeOfficeCommand(f.ctx, { argv: ['create', existing], mode: 'edit' }, deps);
+    const forced = await executeOfficeCommand(f.ctx, { argv: ['create', existing, '--force'], mode: 'edit' }, deps);
+
+    expect(created.envelope.ok).toBe(true);
+    expect(existsSync(dirname(output))).toBe(true);
+    expect(refused.envelope.error?.code).toBe('output_exists');
+    expect(forced.envelope.ok).toBe(true);
+    expect(commandCalls(calls).map(call => call.args)).toContainEqual(['create', existing, '--force', '--json']);
+  });
+
+  it('revision-caches exact successful reads without a global inspect budget', async () => {
+    const f = fixture();
+    const file = officeFile(join(f.working, 'many-reads.docx'));
+    const { deps, calls } = dependencies();
+
+    for (let index = 0; index < 8; index += 1) {
+      const result = await executeOfficeCommand(f.ctx, {
+        argv: ['get', file, `/body/p[${index + 1}]`],
+        mode: 'inspect',
+        cacheable: true,
+      }, deps);
+      expect(result.envelope.ok).toBe(true);
     }
-  }, 30_000);
+    const cached = await executeOfficeCommand(f.ctx, {
+      argv: ['get', file, '/body/p[1]'],
+      mode: 'inspect',
+      cacheable: true,
+    }, deps);
+
+    expect(cached.envelope.cacheHit).toBe(true);
+    expect(commandCalls(calls)).toHaveLength(8);
+  });
+
+  it('returns the real upstream failure three times, then loop_prevented', async () => {
+    const f = fixture();
+    const file = officeFile(join(f.working, 'broken.docx'));
+    const { deps, calls } = dependencies(() => processResult(
+      '{"success":false,"error":{"code":"bad_path","message":"Unknown document path"}}',
+      { exitCode: 1 },
+    ));
+    const results = [];
+    for (let index = 0; index < 4; index += 1) {
+      results.push(await executeOfficeCommand(f.ctx, {
+        argv: ['get', file, '/bad'],
+        mode: 'inspect',
+      }, deps));
+    }
+
+    expect(results.slice(0, 3).map(result => result.envelope.error?.upstreamCode))
+      .toEqual(['bad_path', 'bad_path', 'bad_path']);
+    expect(results[3]?.envelope.error?.code).toBe('loop_prevented');
+    expect(results[3]?.envelope.ok).toBe(false);
+    expect(commandCalls(calls)).toHaveLength(3);
+  });
+
+  it('invalidates read cache and increments revision after mutation', async () => {
+    const f = fixture();
+    const file = officeFile(join(f.working, 'revision.docx'));
+    const { deps, calls } = dependencies(args => processResult(JSON.stringify({
+      success: true,
+      data: args[0] === 'refresh' ? { backend: 'libreoffice-native' } : { value: 'ok' },
+    })));
+
+    const before = await executeOfficeCommand(f.ctx, { argv: ['get', file, '/'], mode: 'inspect' }, deps);
+    const cached = await executeOfficeCommand(f.ctx, { argv: ['get', file, '/'], mode: 'inspect' }, deps);
+    const edit = await executeOfficeCommand(f.ctx, {
+      argv: ['set', file, '/body/p[1]', '--prop', 'text=changed'],
+      mode: 'edit',
+      mutation: true,
+    }, deps);
+    const after = await executeOfficeCommand(f.ctx, { argv: ['get', file, '/'], mode: 'inspect' }, deps);
+    const refresh = await executeOfficeCommand(f.ctx, { argv: ['refresh', file], mode: 'edit' }, deps);
+
+    expect(cached.envelope.cacheHit).toBe(true);
+    expect(edit.envelope.artifactRevision).toBeGreaterThan(before.envelope.artifactRevision ?? 0);
+    expect(after.envelope.cacheHit).toBe(false);
+    expect(refresh.envelope.backend).toBe('libreoffice-native');
+    expect(refresh.envelope.warnings.some(warning => /Windows only/i.test(warning.message))).toBe(false);
+    expect(commandCalls(calls).filter(call => call.args[0] === 'get')).toHaveLength(2);
+  });
+
+  it('releases session-scoped read, failure, and mutation state on session teardown', async () => {
+    const f = fixture({ sessionId: 'release-runtime' });
+    const file = officeFile(join(f.working, 'release.docx'));
+    const { deps, calls } = dependencies();
+
+    await executeOfficeCommand(f.ctx, {
+      argv: ['set', file, '/body/p[1]', '--prop', 'text=changed'], mode: 'edit', mutation: true,
+    }, deps);
+    await executeOfficeCommand(f.ctx, { argv: ['get', file, '/'], mode: 'inspect' }, deps);
+    const cached = await executeOfficeCommand(f.ctx, { argv: ['get', file, '/'], mode: 'inspect' }, deps);
+    expect(cached.envelope.cacheHit).toBe(true);
+
+    releaseOfficeRuntimeSession(f.ctx.sessionId);
+    expect(wasOfficeArtifactMutatedBySession(f.ctx.sessionId, file)).toBe(false);
+    const afterRelease = await executeOfficeCommand(f.ctx, { argv: ['get', file, '/'], mode: 'inspect' }, deps);
+
+    expect(afterRelease.envelope.cacheHit).toBe(false);
+    expect(commandCalls(calls).filter(call => call.args[0] === 'get')).toHaveLength(2);
+  });
+
+  it('accepts structured atomic batch input, dump meta, and explicit best effort', async () => {
+    const f = fixture();
+    const file = officeFile(join(f.working, 'model.xlsx'));
+    const image = officeFile(join(f.working, 'logo.png'));
+    const { deps, calls } = dependencies();
+    const commands = [
+      JSON.stringify({ command: 'meta', dumpVersion: 1 }),
+      JSON.stringify({ command: 'add', parent: '/Sheet1', type: 'image', props: { src: image } }),
+    ];
+
+    const atomic = await executeOfficeCommand(f.ctx, {
+      argv: ['batch', file],
+      batch: { commands },
+      mode: 'edit',
+    }, deps);
+    const bestEffort = await executeOfficeCommand(f.ctx, {
+      argv: ['batch', file, '--best-effort'],
+      batch: { commands: [JSON.stringify({ command: 'get', path: '/Sheet1/A1' })] },
+      mode: 'edit',
+    }, deps);
+    const firstArgs = commandCalls(calls)[0]?.args ?? [];
+
+    expect(atomic.envelope.ok).toBe(true);
+    expect(firstArgs).not.toContain('--best-effort');
+    expect(firstArgs[firstArgs.indexOf('--commands') + 1])
+      .toBe(JSON.stringify(commands.map(command => JSON.parse(command))));
+    expect(bestEffort.envelope.ok).toBe(true);
+    expect(commandCalls(calls)[1]?.args).toContain('--best-effort');
+  });
+
+  it('rejects ambiguous, unknown, management, and escaped batch sources', async () => {
+    const f = fixture();
+    const file = officeFile(join(f.working, 'batch.docx'));
+    const outsideRoot = mkdtempSync(join(tmpdir(), 'selection-office-batch-outside-'));
+    roots.push(outsideRoot);
+    const outsideImage = officeFile(join(outsideRoot, 'outside.png'));
+    const { deps } = dependencies();
+
+    const ambiguous = await executeOfficeCommand(f.ctx, {
+      argv: ['batch', file],
+      batch: { commands: ['{"command":"get","path":"/"}'], file: 'commands.json' },
+      mode: 'edit',
+    }, deps);
+    const unknown = await executeOfficeCommand(f.ctx, {
+      argv: ['batch', file],
+      batch: { commands: ['{"command":"future-write"}'] },
+      mode: 'edit',
+    }, deps);
+    const management = await executeOfficeCommand(f.ctx, {
+      argv: ['batch', file],
+      batch: { commands: ['{"command":"plugins"}'] },
+      mode: 'edit',
+    }, deps);
+    const escaped = await executeOfficeCommand(f.ctx, {
+      argv: ['batch', file],
+      batch: { commands: [JSON.stringify({ command: 'add', props: { src: outsideImage } })] },
+      mode: 'edit',
+    }, deps);
+
+    expect(ambiguous.envelope.error?.code).toBe('batch_source_required');
+    expect(unknown.envelope.error?.code).toBe('forbidden_batch_command');
+    expect(management.envelope.error?.code).toBe('forbidden_batch_command');
+    expect(escaped.envelope.error?.code).toBe('path_outside_allowed_roots');
+  });
+
+  it('uses the pinned nested batch grammar and keeps rendering in preview', async () => {
+    const f = fixture();
+    const file = officeFile(join(f.working, 'batch.pptx'));
+    const { deps, calls } = dependencies();
+
+    const aliasAccepted = await executeOfficeCommand(f.ctx, {
+      argv: ['batch', file],
+      batch: { commands: [JSON.stringify({ op: 'get', path: '/' })] },
+      mode: 'edit',
+    }, deps);
+    const unsupportedRoot = await executeOfficeCommand(f.ctx, {
+      argv: ['batch', file],
+      batch: { commands: [JSON.stringify({ command: 'merge', path: '/' })] },
+      mode: 'edit',
+    }, deps);
+    const hiddenField = await executeOfficeCommand(f.ctx, {
+      argv: ['batch', file],
+      batch: { commands: [JSON.stringify({ command: 'get', path: '/', browser: true })] },
+      mode: 'edit',
+    }, deps);
+    const render = await executeOfficeCommand(f.ctx, {
+      argv: ['batch', file],
+      batch: { commands: [JSON.stringify({ command: 'view', mode: 'html' })] },
+      mode: 'edit',
+    }, deps);
+
+    expect(aliasAccepted.envelope.ok).toBe(true);
+    expect(unsupportedRoot.envelope.error?.code).toBe('forbidden_batch_command');
+    expect(hiddenField.envelope.error?.code).toBe('unknown_batch_field');
+    expect(render.envelope.error?.code).toBe('batch_render_requires_preview');
+    expect(commandCalls(calls)).toHaveLength(1);
+  });
+
+  it('requires Morph 3D model paths to be authorized, existing, and valid GLB files', async () => {
+    const f = fixture();
+    const deck = officeFile(join(f.working, 'morph.pptx'));
+    const valid = join(f.working, 'sun.glb');
+    const invalid = officeFile(join(f.working, 'invalid.glb'), 'not a glb file');
+    const validHeader = Buffer.alloc(12);
+    validHeader.write('glTF', 0, 'ascii');
+    validHeader.writeUInt32LE(2, 4);
+    validHeader.writeUInt32LE(validHeader.length, 8);
+    writeFileSync(valid, validHeader);
+    const outsideRoot = mkdtempSync(join(tmpdir(), 'selection-office-glb-outside-'));
+    roots.push(outsideRoot);
+    const outside = join(outsideRoot, 'outside.glb');
+    writeFileSync(outside, validHeader);
+    const { deps, calls } = dependencies();
+
+    const accepted = await executeOfficeCommand(f.ctx, {
+      argv: ['batch', deck],
+      batch: { commands: [JSON.stringify({
+        command: 'add', parent: '/slide[1]', type: '3dmodel', props: { path: valid, name: 'sun' },
+      })] },
+      mode: 'edit',
+    }, deps);
+    const malformed = await executeOfficeCommand(f.ctx, {
+      argv: ['add', deck, '/slide[1]', '--type', '3dmodel', '--prop', `path=${invalid}`],
+      mode: 'edit',
+    }, deps);
+    const escaped = await executeOfficeCommand(f.ctx, {
+      argv: ['add', deck, '/slide[1]', '--type', '3dmodel', '--prop', `path=${outside}`],
+      mode: 'edit',
+    }, deps);
+    const remote = await executeOfficeCommand(f.ctx, {
+      argv: ['add', deck, '/slide[1]', '--type', '3dmodel', '--prop', 'path=https://example.com/model.glb'],
+      mode: 'edit',
+    }, deps);
+
+    expect(accepted.envelope.ok).toBe(true);
+    expect(malformed.envelope.error?.code).toBe('invalid_morph_glb');
+    expect(escaped.envelope.error?.code).toBe('path_outside_allowed_roots');
+    expect(remote.envelope.error?.code).toBe('file_not_found');
+    expect(commandCalls(calls)).toHaveLength(1);
+  });
+
+  it('validates import and merge input files before invoking OfficeCLI', async () => {
+    const f = fixture();
+    const workbook = officeFile(join(f.working, 'book.xlsx'));
+    const template = officeFile(join(f.working, 'template.docx'));
+    const { deps } = dependencies();
+
+    const missingCsv = await executeOfficeCommand(f.ctx, {
+      argv: ['import', workbook, '/Sheet1', 'missing.csv'],
+      mode: 'edit',
+    }, deps);
+    const stdin = await executeOfficeCommand(f.ctx, {
+      argv: ['import', workbook, '/Sheet1', '--stdin'],
+      mode: 'edit',
+    }, deps);
+    const missingData = await executeOfficeCommand(f.ctx, {
+      argv: ['merge', template, 'output.docx', '--data', 'missing.json'],
+      mode: 'edit',
+    }, deps);
+    const inlineData = await executeOfficeCommand(f.ctx, {
+      argv: ['merge', template, 'output.docx', '--data', '{"name":"Selection"}'],
+      mode: 'edit',
+    }, deps);
+
+    expect(missingCsv.envelope.error?.code).toBe('file_not_found');
+    expect(stdin.envelope.error?.code).toBe('stdin_not_supported');
+    expect(missingData.envelope.error?.code).toBe('file_not_found');
+    expect(inlineData.envelope.ok).toBe(true);
+  });
+
+  it('reports permission, timeout, and runtime-manifest mismatch as structured errors', async () => {
+    const f = fixture();
+    const file = officeFile(join(f.working, 'errors.docx'));
+
+    const deniedDeps = dependencies(() => processResult(
+      '{"success":false,"error":{"code":"access_denied","message":"Permission denied"}}',
+      { exitCode: 1 },
+    )).deps;
+    const denied = await executeOfficeCommand(f.ctx, { argv: ['get', file, '/'], mode: 'inspect' }, deniedDeps);
+    expect(denied.envelope.error).toMatchObject({ category: 'permission', upstreamCode: 'access_denied' });
+
+    clearOfficeRuntimeState();
+    const timeoutDeps = dependencies(() => processResult('', { timedOut: true, exitCode: null })).deps;
+    const timeout = await executeOfficeCommand(f.ctx, {
+      argv: ['get', file, '/'], mode: 'inspect', timeoutMs: 10_000,
+    }, timeoutDeps);
+    expect(timeout.envelope.error).toMatchObject({ code: 'timeout', category: 'timeout', retriable: true });
+
+    clearOfficeRuntimeState();
+    const { deps } = dependencies();
+    deps.runProcess = async (_binary, args) => {
+      if (args[0] === '--version') return processResult('1.0.999');
+      if (args[0] === '--output-schema-crc') return processResult('aaaaaaaa');
+      return processResult('{}');
+    };
+    const mismatch = await executeOfficeCommand(f.ctx, { argv: ['status'], mode: 'inspect' }, deps);
+    expect(mismatch.envelope).toMatchObject({
+      ok: false,
+      error: { code: 'runtime_manifest_mismatch', category: 'dependency' },
+      data: { actualVersion: '1.0.999', actualSchemaCrc: 'aaaaaaaa' },
+    });
+  });
+
+  it('reports an unwritable output ancestor where the platform exposes mode permissions', async () => {
+    if (process.platform === 'win32') return;
+    const f = fixture();
+    const readOnly = join(f.working, 'readonly');
+    mkdirSync(readOnly);
+    chmodSync(readOnly, 0o555);
+    const { deps } = dependencies();
+    const result = await executeOfficeCommand(f.ctx, {
+      argv: ['create', join(readOnly, 'nested', 'output.docx')],
+      mode: 'edit',
+    }, deps);
+    chmodSync(readOnly, 0o755);
+    expect(['output_parent_not_writable', 'output_directory_create_failed'])
+      .toContain(result.envelope.error?.code ?? '');
+  });
 });

@@ -33,6 +33,8 @@ export type {
 
   // Tool result types
   TextContent,
+  ImageContent,
+  ToolContent,
   ToolResult,
 
   // Developer feedback
@@ -53,6 +55,18 @@ export type {
   SourceConfig,
   ConnectionStatus,
 } from './types.ts';
+
+export type {
+  OfficeErrorCategory,
+  OfficeStructuredError,
+  StructuredWarning,
+  ArtifactRef,
+  FinalizationCheck,
+  FinalizationEvidence,
+  OfficeResultEnvelope,
+  OfficeGuideName,
+  OfficecliManifest,
+} from './office-types.ts';
 
 // Response helpers
 export {
@@ -177,7 +191,11 @@ export {
   // Office documents
   handleOfficeDocumentInspect,
   handleOfficeDocumentEdit,
-  clearOfficeInspectBudget,
+  handleOfficeDocumentGuide,
+  handleOfficeDocumentPreview,
+  handleOfficeDocumentFinalize,
+  releaseOfficePreviewSession,
+  releaseOfficeGuideSession,
 } from './handlers/index.ts';
 
 export type {
@@ -198,9 +216,9 @@ export type {
   SendDeveloperFeedbackArgs,
   OfficeDocumentInspectArgs,
   OfficeDocumentEditArgs,
-  OfficeDocumentInspectCommand,
-  OfficeDocumentEditCommand,
-  OfficeDocumentResultPayload,
+  OfficeDocumentGuideArgs,
+  OfficeDocumentPreviewArgs,
+  OfficeDocumentFinalizeArgs,
 } from './handlers/index.ts';
 
 // Tool definitions — single source of truth
@@ -220,6 +238,9 @@ export {
   RenderTemplateSchema,
   OfficeDocumentInspectSchema,
   OfficeDocumentEditSchema,
+  OfficeDocumentGuideSchema,
+  OfficeDocumentPreviewSchema,
+  OfficeDocumentFinalizeSchema,
   // Browser tool schema
   BrowserToolSchema,
   // Developer feedback schema
@@ -250,25 +271,12 @@ export {
   OFFICE_WORKFLOW_PROMPT,
   OFFICE_DOCUMENT_INSPECT_DESCRIPTION,
   OFFICE_DOCUMENT_EDIT_DESCRIPTION,
-  OFFICE_INSPECT_BUDGET_LIMIT,
-  OFFICE_INSPECT_COUNTED_COMMANDS,
-  OFFICE_TRUNCATED_PREVIEW_CHARS,
-  OFFICE_TRUNCATION_SUGGESTION,
-  OFFICE_REFRESH_NON_WINDOWS_NOTE,
+  OFFICE_DOCUMENT_GUIDE_DESCRIPTION,
+  OFFICE_DOCUMENT_PREVIEW_DESCRIPTION,
+  OFFICE_DOCUMENT_FINALIZE_DESCRIPTION,
   OFFICE_MAX_INLINE_BATCH_COMMANDS,
   OFFICE_MAX_INLINE_BATCH_CHARS,
-  OFFICE_MAX_INLINE_ARGUMENTS_CHARS,
   OFFICE_MAX_BATCH_FILE_BYTES,
-  OFFICE_PAYLOAD_TOO_LARGE_SUGGESTION,
-  isOfficeInspectCountedCommand,
-  isOfficeBudgetResettingEdit,
-  isOfficeDocxPath,
-  normalizeOfficeArgument,
-  normalizeOfficeInspectArguments,
-  extractOfficeDocumentPath,
-  resolveOfficeDocumentPath,
-  officeInspectFingerprint,
-  officeInspectBudgetKey,
 } from './office-workflow.ts';
 
 export {
@@ -276,6 +284,21 @@ export {
   resolveOfficecliBinary,
   resolveOfficecliRuntime,
 } from './runtime/officecli.ts';
+
+export {
+  resolveOfficecliResources,
+  clearOfficecliManifestCache,
+} from './runtime/office-manifest.ts';
+
+export {
+  buildOfficeEnvironment,
+  chooseOfficeWorkingDirectory,
+  executeOfficeCommand,
+  getOfficeArtifactRevision,
+  wasOfficeArtifactMutatedBySession,
+  releaseOfficeRuntimeSession,
+  clearOfficeRuntimeState,
+} from './runtime/office-coordinator.ts';
 export type {
   OfficecliBinarySource,
   ResolvedOfficecliBinary,
