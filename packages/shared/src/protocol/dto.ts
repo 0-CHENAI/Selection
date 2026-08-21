@@ -801,6 +801,25 @@ export interface TestAutomationPayload {
   labels?: string[]
   /** Forwarded from the matcher; routes test-run sessions into a Telegram topic when paired. */
   telegramTopic?: string
+  /** When true, only evaluate matcher/conditions — do not execute actions. */
+  dryRun?: boolean
+  /** Agent/app event name used for dry-run matching. */
+  event?: string
+  /** Sample Agent Event payload for dry-run matching. */
+  sample?: {
+    tool_name?: string
+    tool_input?: Record<string, unknown>
+    prompt?: string
+    stop_reason?: string
+    source?: string
+    agent_type?: string
+  }
+}
+
+export interface TestAutomationMatch {
+  matcherId: string
+  name: string
+  event: string
 }
 
 export type TestAutomationActionResult =
@@ -809,6 +828,7 @@ export type TestAutomationActionResult =
 
 export interface TestAutomationResult {
   actions: TestAutomationActionResult[]
+  matches?: TestAutomationMatch[]
 }
 
 // ---------------------------------------------------------------------------

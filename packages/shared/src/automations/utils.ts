@@ -192,10 +192,22 @@ export function matcherMatches(matcher: AutomationMatcher, event: AutomationEven
 /**
  * SDK agent-event adapter for canonical matcher evaluation.
  */
+/**
+ * Project an Agent Event payload so state conditions can read camelCase
+ * aliases (`toolName`, `toolInput`) and dotted paths (`tool_input.command`).
+ */
+export function projectAgentEventPayload(input: SdkAutomationInput): Record<string, unknown> {
+  return {
+    ...(input as unknown as Record<string, unknown>),
+    toolName: input.tool_name,
+    toolInput: input.tool_input,
+  };
+}
+
 export function matcherMatchesSdk(matcher: AutomationMatcher, event: AgentEvent, input: SdkAutomationInput): boolean {
   return matcherMatchesWithContext(matcher, event, {
     matchValue: getMatchValueForSdkInput(event, input),
-    payload: input as unknown as Record<string, unknown>,
+    payload: projectAgentEventPayload(input),
     matcherTimezone: matcher.timezone,
   });
 }

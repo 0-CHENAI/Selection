@@ -282,7 +282,7 @@ export interface ISessionManager {
    */
   refreshConnectionRuntime(connectionSlug: string): Promise<void>
   completeAuthRequest(sessionId: string, result: AuthResult): Promise<void>
-  executePromptAutomation(input: ExecutePromptAutomationInput): Promise<{ sessionId: string }>
+  executePromptAutomation(input: ExecutePromptAutomationInput): Promise<ExecutePromptAutomationResult>
 
   /**
    * Install a callback invoked from `executePromptAutomation` after a session
@@ -329,7 +329,18 @@ export interface ExecutePromptAutomationInput {
    * still streams live and run errors are logged. Defaults to awaiting completion.
    */
   waitForCompletion?: boolean
+  reportBack?: boolean
+  timeoutMs?: number
   sourceEvent?: string
   sourceSessionId?: string
+  rootSessionId?: string
   automationDepth?: number
+}
+
+export interface ExecutePromptAutomationResult {
+  sessionId: string
+  waitReason?: 'complete' | 'interrupted' | 'error' | 'timeout'
+  finalText?: string
+  durationMs?: number
+  reportBackError?: string
 }

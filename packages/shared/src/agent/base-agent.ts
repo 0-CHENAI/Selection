@@ -420,6 +420,8 @@ export abstract class BaseAgent implements AgentBackend {
         sessionName: this.config.automationContext?.sourceSessionName,
         triggeredByAutomation: this.config.automationContext?.triggeredByAutomation,
         automationDepth: this.config.automationContext?.automationDepth,
+        rootSessionId: this.config.automationContext?.rootSessionId
+          ?? this.config.automationContext?.sourceSessionId,
       });
       await this.automationSystem?.executeAgentEvent(event, enriched, signal);
     } catch (err) {

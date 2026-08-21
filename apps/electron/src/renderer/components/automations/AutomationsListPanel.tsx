@@ -59,6 +59,7 @@ interface AutomationItemProps {
   onDelete: () => void
   onToggleEnabled: () => void
   onTest: () => void
+  onSimulateMatch?: () => void
   onDuplicate: () => void
   onSendToWorkspace?: () => void
 }
@@ -75,6 +76,7 @@ function AutomationItem({
   onDelete,
   onToggleEnabled,
   onTest,
+  onSimulateMatch,
   onDuplicate,
   onSendToWorkspace,
 }: AutomationItemProps) {
@@ -146,6 +148,7 @@ function AutomationItem({
           enabled={automation.enabled}
           onToggleEnabled={onToggleEnabled}
           onTest={onTest}
+          onSimulateMatch={onSimulateMatch}
           onDuplicate={onDuplicate}
           onDelete={onDelete}
           onSendToWorkspace={onSendToWorkspace}
@@ -167,6 +170,7 @@ export interface AutomationsListPanelProps {
   onDeleteAutomation?: (automationId: string) => void
   onToggleAutomation?: (automationId: string) => void
   onTestAutomation?: (automationId: string) => void
+  onSimulateMatchAutomation?: (automationId: string) => void
   onDuplicateAutomation?: (automationId: string) => void
   selectedAutomationId?: string | null
   workspaceRootPath?: string
@@ -180,6 +184,7 @@ export function AutomationsListPanel({
   onDeleteAutomation,
   onToggleAutomation,
   onTestAutomation,
+  onSimulateMatchAutomation,
   onDuplicateAutomation,
   selectedAutomationId,
   workspaceRootPath,
@@ -326,6 +331,7 @@ export function AutomationsListPanel({
                   onDelete={() => onDeleteAutomation?.(automation.id)}
                   onToggleEnabled={() => onToggleAutomation?.(automation.id)}
                   onTest={() => onTestAutomation?.(automation.id)}
+                  onSimulateMatch={() => onSimulateMatchAutomation?.(automation.id)}
                   onDuplicate={() => onDuplicateAutomation?.(automation.id)}
                   onSendToWorkspace={hasOtherWorkspaces ? () => {
                     setSendResourceId(automation.id)

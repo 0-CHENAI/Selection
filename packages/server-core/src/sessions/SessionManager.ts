@@ -1,6 +1,6 @@
 import type { EventSink, RpcServer } from '@craft-agent/server-core/transport'
 import { CLIENT_BROWSER_INVOKE } from '@craft-agent/server-core/transport'
-import type { ISessionManager, IBrowserPaneManager, ExecutePromptAutomationInput } from '@craft-agent/server-core/handlers'
+import type { ISessionManager, IBrowserPaneManager, ExecutePromptAutomationInput, ExecutePromptAutomationResult } from '@craft-agent/server-core/handlers'
 import { RemoteBrowserPaneManager } from './RemoteBrowserPaneManager'
 import { validateFilePath, getWorkspaceAllowedDirs } from '@craft-agent/server-core/handlers'
 import { createScopedLogger, CONSOLE_LOGGER, type PlatformServices, type Logger } from '@craft-agent/server-core/runtime'
@@ -109,7 +109,8 @@ import { listLabels, loadLabelConfig } from '@craft-agent/shared/labels/storage'
 import { extractLabelId, resolveSessionLabels, findTaskItemLabelId } from '@craft-agent/shared/labels'
 import { ensureLabelsExist, ensureTaskItemLabel } from '@craft-agent/shared/labels/crud'
 import { loadStatusConfig } from '@craft-agent/shared/statuses/storage'
-import { AutomationSystem, createPromptHistoryEntry, appendAutomationHistoryEntry, enrichAgentEventInput, type AutomationSystemMetadataSnapshot, type AgentEvent as AutomationAgentEvent, type SdkAutomationInput } from '@craft-agent/shared/automations'
+import { AutomationSystem, createPromptHistoryEntry, appendAutomationHistoryEntry, enrichAgentEventInput, DEFAULT_PROMPT_WAIT_TIMEOUT_MS, MAX_PROMPT_WAIT_TIMEOUT_MS, type AutomationSystemMetadataSnapshot, type AgentEvent as AutomationAgentEvent, type SdkAutomationInput, type PendingPrompt } from '@craft-agent/shared/automations'
+import { waitForAutomationSessionCompletion } from './wait-automation-session.ts'
 import { buildBackendRuntimeSignature, buildRestartRequiredSignature, filterAttachmentsForModelInput } from './runtime-config'
 import { validateArchiveTarget } from './archive-guards'
 
@@ -1028,6 +1029,7 @@ interface ManagedSession {
     timestamp?: number
     sourceSessionId?: string
     automationDepth?: number
+    rootSessionId?: string
   }
   // Promise that resolves when the agent instance is ready (for title gen to await)
   agentReady?: Promise<void>
@@ -1876,52 +1878,16 @@ export class SessionManager implements ISessionManager {
         workspaceId,
         enableScheduler: true,
         onPromptsReady: async (prompts) => {
-          // Execute prompt automations by creating new sessions
-          const settled = await Promise.allSettled(
-            prompts.map((pending) =>
-              this.executePromptAutomation({
-                workspaceId,
-                workspaceRootPath,
-                prompt: pending.prompt,
-                labels: pending.labels,
-                permissionMode: pending.permissionMode,
-                mentions: pending.mentions,
-                llmConnection: pending.llmConnection,
-                model: pending.model,
-                thinkingLevel: pending.thinkingLevel,
-                automationName: pending.automationName,
-                telegramTopic: pending.telegramTopic,
-                waitForCompletion: pending.waitForCompletion,
-                sourceEvent: pending.sourceEvent,
-                sourceSessionId: pending.sourceSessionId,
-                automationDepth: pending.automationDepth,
-              })
-            )
-          )
-
-          // Write enriched history entries (with session IDs and prompt summaries)
-          for (const [idx, result] of settled.entries()) {
-            const pending = prompts[idx]
-            if (!pending.matcherId) continue
-
-            const entry = createPromptHistoryEntry({
-              matcherId: pending.matcherId,
-              ok: result.status === 'fulfilled',
-              sessionId: result.status === 'fulfilled' ? result.value.sessionId : undefined,
-              prompt: pending.prompt,
-              error: result.status === 'rejected' ? String(result.reason) : undefined,
-              status: result.status === 'fulfilled' ? 'succeeded' : 'failed',
-              event: pending.sourceEvent,
-              sourceSessionId: pending.sourceSessionId,
-            })
-
-            appendAutomationHistoryEntry(workspaceRootPath, entry).catch(e => sessionLog.warn('[Automations] Failed to write history:', e))
-
-            if (result.status === 'rejected') {
-              sessionLog.error(`[Automations] Failed to execute prompt action ${idx + 1}:`, result.reason)
-            } else {
-              sessionLog.info(`[Automations] Created session ${result.value.sessionId} from prompt action`)
-            }
+          const immediate = prompts.filter((pending) => pending.waitForCompletion !== true && pending.reportBack !== true)
+          const deferred = prompts.filter((pending) => pending.waitForCompletion === true || pending.reportBack === true)
+          // Release Agent Event prompt slots as soon as fire-and-forget
+          // sessions are dispatched. Wait/reportBack must not hold the
+          // concurrency cap for up to 30 minutes.
+          if (immediate.length > 0) {
+            await this.runPendingPromptAutomations(workspaceId, workspaceRootPath, immediate)
+          }
+          if (deferred.length > 0) {
+            void this.runPendingPromptAutomations(workspaceId, workspaceRootPath, deferred)
           }
         },
         onError: (event, error) => {
@@ -3794,6 +3760,7 @@ export class SessionManager implements ISessionManager {
           automationDepth: managed.triggeredBy?.automationDepth ?? 0,
           sourceSessionId: managed.triggeredBy?.sourceSessionId,
           sourceSessionName: managed.name,
+          rootSessionId: managed.triggeredBy?.rootSessionId ?? managed.triggeredBy?.sourceSessionId,
         },
         systemPromptPreset: managed.systemPromptPreset,
         debugMode: _platform?.isDebugMode ? { enabled: true, logFilePath: _platform.getLogFilePath?.() } : undefined,
@@ -7771,6 +7738,7 @@ export class SessionManager implements ISessionManager {
       sessionName: managed.name,
       triggeredByAutomation: !!managed.triggeredBy,
       automationDepth: managed.triggeredBy?.automationDepth ?? 0,
+      rootSessionId: managed.triggeredBy?.rootSessionId ?? managed.triggeredBy?.sourceSessionId,
     })
     void system.executeAgentEvent(event, enriched).catch(error => {
       sessionLog.warn('[Automations] session-layer agent event failed', {
@@ -9550,6 +9518,71 @@ export class SessionManager implements ISessionManager {
     }
   }
 
+  private async runPendingPromptAutomations(
+    workspaceId: string,
+    workspaceRootPath: string,
+    prompts: PendingPrompt[],
+  ): Promise<void> {
+    const settled = await Promise.allSettled(
+      prompts.map((pending) =>
+        this.executePromptAutomation({
+          workspaceId,
+          workspaceRootPath,
+          prompt: pending.prompt,
+          labels: pending.labels,
+          permissionMode: pending.permissionMode,
+          mentions: pending.mentions,
+          llmConnection: pending.llmConnection,
+          model: pending.model,
+          thinkingLevel: pending.thinkingLevel,
+          automationName: pending.automationName,
+          telegramTopic: pending.telegramTopic,
+          waitForCompletion: pending.waitForCompletion,
+          reportBack: pending.reportBack,
+          timeoutMs: pending.timeoutMs,
+          sourceEvent: pending.sourceEvent,
+          sourceSessionId: pending.sourceSessionId,
+          rootSessionId: pending.rootSessionId,
+          automationDepth: pending.automationDepth,
+        })
+      )
+    )
+
+    for (const [idx, result] of settled.entries()) {
+      const pending = prompts[idx]
+      if (!pending?.matcherId) continue
+
+      const value = result.status === 'fulfilled' ? result.value : undefined
+      const waitFailed = value?.waitReason === 'timeout' || value?.waitReason === 'interrupted' || value?.waitReason === 'error'
+      const reportFailed = Boolean(value?.reportBackError)
+      const ok = result.status === 'fulfilled' && !waitFailed && !reportFailed
+      const error = result.status === 'rejected'
+        ? String(result.reason)
+        : value?.reportBackError ?? (waitFailed ? value?.waitReason : undefined)
+      const entry = createPromptHistoryEntry({
+        matcherId: pending.matcherId,
+        ok,
+        sessionId: value?.sessionId,
+        prompt: pending.prompt,
+        error,
+        status: ok ? 'succeeded' : 'failed',
+        event: pending.sourceEvent,
+        sourceSessionId: pending.sourceSessionId,
+        reason: value?.waitReason,
+        finalText: value?.finalText,
+        durationMs: value?.durationMs,
+      })
+
+      appendAutomationHistoryEntry(workspaceRootPath, entry).catch(e => sessionLog.warn('[Automations] Failed to write history:', e))
+
+      if (result.status === 'rejected') {
+        sessionLog.error(`[Automations] Failed to execute prompt action ${idx + 1}:`, result.reason)
+      } else {
+        sessionLog.info(`[Automations] Created session ${result.value.sessionId} from prompt action`)
+      }
+    }
+  }
+
   /**
    * Execute a prompt automation by creating a new session and sending the prompt.
    *
@@ -9560,7 +9593,7 @@ export class SessionManager implements ISessionManager {
    */
   async executePromptAutomation(
     input: ExecutePromptAutomationInput,
-  ): Promise<{ sessionId: string }> {
+  ): Promise<ExecutePromptAutomationResult> {
     const {
       workspaceId,
       workspaceRootPath,
@@ -9574,8 +9607,11 @@ export class SessionManager implements ISessionManager {
       automationName,
       telegramTopic,
       waitForCompletion,
+      reportBack,
+      timeoutMs,
       sourceEvent,
       sourceSessionId,
+      rootSessionId,
       automationDepth,
     } = input
 
@@ -9620,6 +9656,7 @@ export class SessionManager implements ISessionManager {
         timestamp: Date.now(),
         sourceSessionId,
         automationDepth: automationDepth ?? (sourceEvent ? 1 : undefined),
+        rootSessionId: rootSessionId ?? sourceSessionId,
       }
       this.persistSession(managed)
     }
@@ -9653,7 +9690,8 @@ export class SessionManager implements ISessionManager {
     // until the entire turn (including tool calls) finishes and trips the 30s
     // client timeout (craft-agents-oss#943). The session streams live either
     // way; a background failure surfaces in the session UI and is logged here.
-    if (waitForCompletion === false) {
+    const shouldWait = waitForCompletion === true || reportBack === true
+    if (waitForCompletion === false && !shouldWait) {
       void this.sendMessage(session.id, prompt, undefined, undefined, {
         skillSlugs: resolved?.skillSlugs,
       }).catch((err) => {
@@ -9665,11 +9703,106 @@ export class SessionManager implements ISessionManager {
       return { sessionId: session.id }
     }
 
-    await this.sendMessage(session.id, prompt, undefined, undefined, {
-      skillSlugs: resolved?.skillSlugs,
+    if (!shouldWait) {
+      await this.sendMessage(session.id, prompt, undefined, undefined, {
+        skillSlugs: resolved?.skillSlugs,
+      })
+      return { sessionId: session.id }
+    }
+
+    const clampedTimeout = Math.min(
+      Math.max(timeoutMs ?? DEFAULT_PROMPT_WAIT_TIMEOUT_MS, 1),
+      MAX_PROMPT_WAIT_TIMEOUT_MS,
+    )
+    const startedAt = Date.now()
+    const waitPromise = waitForAutomationSessionCompletion({
+      sessionId: session.id,
+      timeoutMs: clampedTimeout,
+      subscribe: (listener) => this.onSessionComplete(listener),
     })
 
-    return { sessionId: session.id }
+    const sendResult = this.sendMessage(session.id, prompt, undefined, undefined, {
+      skillSlugs: resolved?.skillSlugs,
+    }).then(
+      () => 'sent' as const,
+      (err) => {
+        sessionLog.error('[Automations] sendMessage failed while waiting for completion', {
+          sessionId: session.id,
+          error: err instanceof Error ? err.message : String(err),
+        })
+        return 'failed' as const
+      },
+    )
+
+    const outcome = await Promise.race([
+      waitPromise,
+      sendResult.then((result) => {
+        if (result === 'failed') return { reason: 'error' as const }
+        return waitPromise
+      }),
+    ])
+    const durationMs = Date.now() - startedAt
+    let reportBackError: string | undefined
+
+    if (reportBack === true) {
+      reportBackError = await this.deliverAutomationReportBack({
+        sourceSessionId,
+        automationName,
+        finalText: outcome.finalText,
+        waitReason: outcome.reason,
+        idleTimeoutMs: Math.min(Math.max(clampedTimeout - (Date.now() - startedAt), 1), 60_000),
+      })
+    }
+
+    return {
+      sessionId: session.id,
+      waitReason: outcome.reason,
+      finalText: outcome.finalText,
+      durationMs,
+      reportBackError,
+    }
+  }
+
+  /**
+   * Write an automation result into the source session only when it is idle.
+   * Never call sendMessage while the source is processing — that steers or
+   * queues into the live user turn.
+   */
+  private async deliverAutomationReportBack(opts: {
+    sourceSessionId?: string
+    automationName?: string
+    finalText?: string
+    waitReason?: ExecutePromptAutomationResult['waitReason']
+    idleTimeoutMs: number
+  }): Promise<string | undefined> {
+    if (opts.waitReason !== 'complete') return undefined
+    if (!opts.sourceSessionId) return 'source session unavailable'
+
+    let source = this.sessions.get(opts.sourceSessionId)
+    if (!source) return 'source session unavailable'
+
+    if (source.isProcessing) {
+      const idle = await waitForAutomationSessionCompletion({
+        sessionId: opts.sourceSessionId,
+        timeoutMs: opts.idleTimeoutMs,
+        subscribe: (listener) => this.onSessionComplete(listener),
+      })
+      if (idle.reason === 'timeout') return 'source session unavailable'
+      source = this.sessions.get(opts.sourceSessionId)
+      if (!source || source.isProcessing) return 'source session unavailable'
+    }
+
+    const name = opts.automationName || 'automation'
+    const body = [
+      `[Automation "${name}" result]`,
+      opts.finalText?.trim() || '(no output)',
+    ].join('\n\n')
+    try {
+      await this.sendMessage(opts.sourceSessionId, body)
+      return undefined
+    } catch {
+      return 'source session unavailable'
+    }
   }
 
   /**

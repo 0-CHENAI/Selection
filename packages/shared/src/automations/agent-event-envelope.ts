@@ -13,6 +13,7 @@ export interface AgentEventSourceContext {
   sessionName?: string;
   triggeredByAutomation?: boolean;
   automationDepth?: number;
+  rootSessionId?: string;
 }
 
 export function enrichAgentEventInput(
@@ -30,6 +31,7 @@ export function enrichAgentEventInput(
     workspace_id: input.workspace_id ?? source.workspaceId,
     source_session_id: input.source_session_id ?? source.sessionId,
     source_session_name: input.source_session_name ?? source.sessionName,
+    source_root_session_id: input.source_root_session_id ?? source.rootSessionId ?? source.sessionId,
     source_backend: 'pi',
     automation_depth: input.automation_depth ?? depth,
     triggered_by_automation: input.triggered_by_automation ?? triggered,

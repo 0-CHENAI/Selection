@@ -206,6 +206,7 @@ export interface CoreBackendConfig {
     automationDepth: number;
     sourceSessionId?: string;
     sourceSessionName?: string;
+    rootSessionId?: string;
   };
 
   /**

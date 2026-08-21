@@ -341,6 +341,59 @@ describe('validation', () => {
       expect(result.warnings.some(w => w.message.includes('No automations configured'))).toBe(true);
     });
 
+    it('should reject decision actions outside PreToolUse', () => {
+      const json = JSON.stringify({
+        automations: {
+          Stop: [{
+            actions: [{ type: 'decision', decision: 'block', reason: 'no' }],
+          }],
+        },
+      });
+      const result = validateAutomationsContent(json);
+      expect(result.valid).toBe(false);
+      expect(result.errors.some(e => e.message.includes('PreToolUse'))).toBe(true);
+    });
+
+    it('should reject modify decisions without updatedInput', () => {
+      const json = JSON.stringify({
+        automations: {
+          PreToolUse: [{
+            matcher: '^Bash$',
+            actions: [{ type: 'decision', decision: 'modify' }],
+          }],
+        },
+      });
+      const result = validateAutomationsContent(json);
+      expect(result.valid).toBe(false);
+      expect(result.errors.some(e => e.message.includes('updatedInput'))).toBe(true);
+    });
+
+    it('should accept a PreToolUse block decision', () => {
+      const json = JSON.stringify({
+        automations: {
+          PreToolUse: [{
+            matcher: '^Bash$',
+            actions: [{ type: 'decision', decision: 'block', reason: 'dangerous' }],
+          }],
+        },
+      });
+      const result = validateAutomationsContent(json);
+      expect(result.valid).toBe(true);
+    });
+
+    it('should warn when reportBack is used on an app event', () => {
+      const json = JSON.stringify({
+        automations: {
+          LabelAdd: [{
+            actions: [{ type: 'prompt', prompt: 'hello', reportBack: true }],
+          }],
+        },
+      });
+      const result = validateAutomationsContent(json);
+      expect(result.valid).toBe(true);
+      expect(result.warnings.some(w => w.message.includes('reportBack'))).toBe(true);
+    });
+
     it('should warn when cron is used on non-SchedulerTick event', () => {
       const json = JSON.stringify({
         automations: {

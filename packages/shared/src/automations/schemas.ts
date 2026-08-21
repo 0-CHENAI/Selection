@@ -9,6 +9,7 @@ import { z } from 'zod';
 import type { ValidationIssue } from '../config/validators.ts';
 import { APP_EVENTS, AGENT_EVENTS } from './types.ts';
 import { THINKING_LEVEL_IDS, normalizeThinkingLevel } from '../agent/thinking-levels.ts';
+import { MAX_PROMPT_WAIT_TIMEOUT_MS } from './constants.ts';
 
 // ============================================================================
 // Zod Schemas
@@ -27,6 +28,16 @@ export const PromptActionSchema = z.object({
   llmConnection: z.string().min(1).optional(),
   model: z.string().min(1).optional(),
   thinkingLevel: ThinkingLevelInputSchema,
+  waitForCompletion: z.boolean().optional(),
+  reportBack: z.boolean().optional(),
+  timeoutMs: z.number().int().min(1).max(MAX_PROMPT_WAIT_TIMEOUT_MS).optional(),
+});
+
+export const DecisionActionSchema = z.object({
+  type: z.literal('decision'),
+  decision: z.enum(['block', 'modify']),
+  reason: z.string().optional(),
+  updatedInput: z.record(z.string(), z.unknown()).optional(),
 });
 
 export const WebhookActionSchema = z.object({
@@ -63,10 +74,11 @@ export const WebhookActionSchema = z.object({
   ]).optional(),
 });
 
-/** Accepts prompt and webhook actions strictly; passes through legacy/unknown action types without erroring */
+/** Accepts prompt, webhook, and decision actions strictly; passes through legacy/unknown action types without erroring */
 export const ActionDefinitionSchema = z.union([
   PromptActionSchema,
   WebhookActionSchema,
+  DecisionActionSchema,
   z.object({ type: z.string() }).passthrough(),
 ]);
 
@@ -150,6 +162,7 @@ export const AutomationMatcherSchema = z.object({
   // Telegram forum-topic name (1–128 chars). Silently ignored at runtime when
   // no supergroup is paired or the Telegram adapter is not connected.
   telegramTopic: z.string().min(1).max(128).optional(),
+  maxDepth: z.number().int().min(1).max(5).optional(),
   actions: z.array(ActionDefinitionSchema).min(1, 'At least one action required'),
 });
 
