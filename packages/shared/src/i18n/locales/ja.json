@@ -120,6 +120,7 @@
   "automations.pausedTitle": "一時停止中",
   "automations.retry": "再試行",
   "automations.runTest": "テストを実行",
+  "automations.runTestHint": "アクションのみテストします。実際のエージェントイベントは発生しません。",
   "automations.searchPlaceholder": "オートメーションを検索...",
   "automations.sectionIf": "条件",
   "automations.sectionIfDescription": "アクション実行前に満たす必要がある条件",

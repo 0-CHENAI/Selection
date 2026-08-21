@@ -89,7 +89,6 @@ export interface EventPayloadMap {
   PreToolUse: GenericEventPayload;
   PostToolUse: GenericEventPayload;
   PostToolUseFailure: GenericEventPayload;
-  Notification: GenericEventPayload;
   UserPromptSubmit: GenericEventPayload;
   SessionStart: GenericEventPayload;
   SessionEnd: GenericEventPayload;

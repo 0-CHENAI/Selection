@@ -108,6 +108,11 @@ export function AutomationCard({
                 {t('automations.runTest')}
               </button>
             )}
+            {onTest && (
+              <span className="text-[10px] text-muted-foreground">
+                {t('automations.runTestHint')}
+              </span>
+            )}
           </div>
         </div>
       )}

@@ -65,6 +65,7 @@ import { PrerequisiteManager } from './core/prerequisite-manager.ts';
 // Automation system for agent events
 import type { AutomationSystem } from '../automations/automation-system.ts';
 import type { AgentEvent as AutomationAgentEvent, SdkAutomationInput } from '../automations/types.ts';
+import { enrichAgentEventInput } from '../automations/agent-event-envelope.ts';
 import { getSessionPlansPath, getSessionDataPath, getSessionPath } from '../sessions/storage.ts';
 import { getMiniAgentSystemPrompt } from '../prompts/system.ts';
 import { buildTitlePrompt, buildRegenerateTitlePrompt, validateTitle } from '../utils/title-generator.ts';
@@ -413,7 +414,14 @@ export abstract class BaseAgent implements AgentBackend {
    */
   protected async emitAutomationEvent(event: AutomationAgentEvent, input: SdkAutomationInput, signal?: AbortSignal): Promise<void> {
     try {
-      await this.automationSystem?.executeAgentEvent(event, input, signal);
+      const enriched = enrichAgentEventInput(event, input, {
+        workspaceId: this.config.workspace.id,
+        sessionId: this.config.session?.id ?? this._sessionId,
+        sessionName: this.config.automationContext?.sourceSessionName,
+        triggeredByAutomation: this.config.automationContext?.triggeredByAutomation,
+        automationDepth: this.config.automationContext?.automationDepth,
+      });
+      await this.automationSystem?.executeAgentEvent(event, enriched, signal);
     } catch (err) {
       this.debug(`Automation event ${event} failed: ${err}`);
     }

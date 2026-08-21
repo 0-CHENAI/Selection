@@ -466,6 +466,7 @@ describe('AutomationSystem', () => {
         automations: {
           PreToolUse: [
             {
+              id: 'abc123',
               matcher: '^Bash$',
               conditions: [{ condition: 'state', field: 'hook_event_name', value: 'PreToolUse' }],
               actions: [{ type: 'prompt', prompt: 'check this' }],
@@ -474,9 +475,13 @@ describe('AutomationSystem', () => {
         },
       }));
 
+      const prompts: unknown[] = [];
       const system = new AutomationSystem({
         workspaceRootPath: tempDir,
         workspaceId: 'test-workspace',
+        onPromptsReady: (pending) => {
+          prompts.push(...pending);
+        },
       });
 
       const matched = await system.executeAgentEvent('PreToolUse', {
@@ -486,6 +491,7 @@ describe('AutomationSystem', () => {
       });
 
       expect(matched).toBe(1);
+      expect(prompts).toHaveLength(1);
       await system.dispose();
     });
 

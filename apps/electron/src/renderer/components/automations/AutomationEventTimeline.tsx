@@ -8,7 +8,7 @@
 
 import { useState, useCallback } from 'react'
 import { useTranslation } from 'react-i18next'
-import { CheckCircle2, XCircle, ShieldAlert, ChevronDown, Copy, Check } from 'lucide-react'
+import { CheckCircle2, XCircle, ShieldAlert, ChevronDown, Copy, Check, Timer, Ban, CircleDot, Loader2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useNavigation } from '@/contexts/NavigationContext'
 import { type ExecutionEntry, type ExecutionStatus } from './types'
@@ -20,8 +20,13 @@ import { formatShortRelativeTime } from './utils'
 
 const statusConfig: Record<ExecutionStatus, { icon: React.ElementType; classes: string }> = {
   success: { icon: CheckCircle2, classes: 'text-success' },
-  error:   { icon: XCircle,      classes: 'text-destructive' },
-  blocked: { icon: ShieldAlert,   classes: 'text-warning' },
+  error: { icon: XCircle, classes: 'text-destructive' },
+  blocked: { icon: ShieldAlert, classes: 'text-warning' },
+  matched: { icon: CircleDot, classes: 'text-muted-foreground' },
+  scheduled: { icon: Timer, classes: 'text-muted-foreground' },
+  running: { icon: Loader2, classes: 'text-muted-foreground' },
+  'rate-limited': { icon: Timer, classes: 'text-warning' },
+  suppressed: { icon: Ban, classes: 'text-warning' },
 }
 
 function formatStatusCode(code: number, t: (key: string) => string): string {

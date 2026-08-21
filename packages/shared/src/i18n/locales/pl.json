@@ -120,6 +120,7 @@
   "automations.pausedTitle": "Wstrzymana",
   "automations.retry": "Spróbuj ponownie",
   "automations.runTest": "Uruchom test",
+  "automations.runTestHint": "Testuje tylko akcje — nie wyzwala prawdziwego zdarzenia agenta.",
   "automations.searchPlaceholder": "Szukaj automatyzacji...",
   "automations.sectionIf": "Jeśli",
   "automations.sectionIfDescription": "Warunki, które muszą być spełnione przed uruchomieniem akcji",

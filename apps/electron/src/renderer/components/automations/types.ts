@@ -33,7 +33,6 @@ export type AgentEvent =
   | 'PreToolUse'
   | 'PostToolUse'
   | 'PostToolUseFailure'
-  | 'Notification'
   | 'UserPromptSubmit'
   | 'SessionStart'
   | 'SessionEnd'
@@ -52,7 +51,7 @@ export const APP_EVENTS: AppEvent[] = [
 ]
 
 export const AGENT_EVENTS: AgentEvent[] = [
-  'PreToolUse', 'PostToolUse', 'PostToolUseFailure', 'Notification',
+  'PreToolUse', 'PostToolUse', 'PostToolUseFailure',
   'UserPromptSubmit', 'SessionStart', 'SessionEnd', 'Stop',
   'SubagentStart', 'SubagentStop', 'PreCompact', 'PermissionRequest', 'Setup'
 ]
@@ -254,7 +253,15 @@ export const AUTOMATION_TYPE_TO_FILTER_KIND: Record<string, AutomationFilterKind
 // Execution History
 // ============================================================================
 
-export type ExecutionStatus = 'success' | 'error' | 'blocked'
+export type ExecutionStatus =
+  | 'success'
+  | 'error'
+  | 'blocked'
+  | 'matched'
+  | 'scheduled'
+  | 'running'
+  | 'rate-limited'
+  | 'suppressed'
 
 export interface WebhookDetails {
   method: string
@@ -317,7 +324,6 @@ export const EVENT_DISPLAY_NAMES: Record<AutomationTrigger, string> = {
   PreToolUse:           'Before Tool Runs',
   PostToolUse:          'After Tool Runs',
   PostToolUseFailure:   'When Tool Fails',
-  Notification:         'Notification',
   UserPromptSubmit:     'Message Sent',
   SessionStart:         'Session Started',
   SessionEnd:           'Session Ended',
@@ -517,7 +523,7 @@ export function getEventCategory(event: AutomationTrigger): EventCategory {
     case 'PostToolUseFailure':
       return 'agent-error'
     case 'SessionStart':
-    case 'Notification':
+    case 'PermissionRequest':
       return 'session'
     default:
       return 'other'

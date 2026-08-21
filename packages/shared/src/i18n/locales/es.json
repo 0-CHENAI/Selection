@@ -120,6 +120,7 @@
   "automations.pausedTitle": "En pausa",
   "automations.retry": "Reintentar",
   "automations.runTest": "Ejecutar prueba",
+  "automations.runTestHint": "Solo prueba las acciones; no dispara un evento de agente real.",
   "automations.searchPlaceholder": "Buscar automatizaciones...",
   "automations.sectionIf": "Si",
   "automations.sectionIfDescription": "Condiciones que deben cumplirse antes de ejecutar las acciones",

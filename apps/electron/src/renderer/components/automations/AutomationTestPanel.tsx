@@ -42,6 +42,9 @@ export function AutomationTestPanel({ result, className }: AutomationTestPanelPr
             </span>
           )}
         </Info_Alert.Title>
+        <Info_Alert.Description>
+          {t('automations.runTestHint')}
+        </Info_Alert.Description>
       </Info_Alert>
     )
   }

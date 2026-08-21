@@ -18,13 +18,15 @@
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { resolveAutomationsConfigPath, generateShortId } from './resolve-config-path.ts';
-import { compactAutomationHistorySync } from './history-store.ts';
+import { appendAutomationHistoryEntry, compactAutomationHistorySync } from './history-store.ts';
 import { createLogger } from '../utils/debug.ts';
 import { WorkspaceEventBus, type EventPayloadMap } from './event-bus.ts';
 import { PromptHandler, EventLogHandler, WebhookHandler, type AutomationsConfigProvider } from './handlers/index.ts';
-import { type AutomationsConfig, type AutomationEvent, type AutomationMatcher, type PendingPrompt, type WebhookActionResult, type AppEvent, type AgentEvent, type SdkAutomationCallbackMatcher, type SdkAutomationInput } from './types.ts';
+import { type AutomationsConfig, type AutomationEvent, type AutomationMatcher, type PendingPrompt, type WebhookActionResult, type AppEvent, type AgentEvent, type SdkAutomationCallbackMatcher, type SdkAutomationInput, type AutomationHistoryStatus } from './types.ts';
 import { validateAutomationsConfig } from './validation.ts';
 import { matcherMatchesSdk } from './utils.ts';
+import { AgentEventGuards } from './agent-event-guards.ts';
+import { createPromptHistoryEntry } from './webhook-utils.ts';
 import { SchedulerService, type SchedulerTickPayload } from '../scheduler/scheduler-service.ts';
 
 const log = createLogger('automation-system');
@@ -49,7 +51,7 @@ export interface AutomationSystemOptions {
   /** Whether to start the scheduler service (default: false) */
   enableScheduler?: boolean;
   /** Called when prompts are ready to be executed */
-  onPromptsReady?: (prompts: PendingPrompt[]) => void;
+  onPromptsReady?: (prompts: PendingPrompt[]) => void | Promise<void>;
   /** Called when webhook results are available */
   onWebhookResults?: (results: WebhookActionResult[]) => void;
   /** Called when an error occurs during automation execution */
@@ -75,6 +77,7 @@ export class AutomationSystem implements AutomationsConfigProvider {
 
   // Session metadata tracking (moved from SessionManager)
   private readonly lastKnownMetadata: Map<string, SessionMetadataSnapshot> = new Map();
+  private readonly agentEventGuards = new AgentEventGuards();
 
   constructor(options: AutomationSystemOptions) {
     this.options = options;
@@ -475,38 +478,116 @@ export class AutomationSystem implements AutomationsConfigProvider {
   // ============================================================================
 
   /**
-   * Execute agent event automations directly (without going through the Claude SDK).
-   * This is the backend-agnostic entry point for non-Claude backends (Codex, Copilot, Pi)
-   * to fire agent events from automations.json.
-   *
-   * For each matching automation matcher, builds env vars and evaluates matching.
-   * Command execution has been removed — all automation actions now go through prompt-based
-   * execution (creating agent sessions via PromptHandler).
-   * Catches all errors — automations must never break the agent flow.
-   *
-   * @param signal - Optional AbortSignal for cancelling automation execution on abort
-   * @returns Number of matched matchers (for diagnostics/testing)
+   * Match Agent Events and dispatch Prompt / Webhook actions.
+   * Never throws — automations must not interrupt the source Pi session.
+   * Prompt dispatch is scheduling only; callers must not wait for the new session.
    */
   async executeAgentEvent(event: AgentEvent, input: SdkAutomationInput, signal?: AbortSignal): Promise<number> {
-    if (!this.config) return 0;
+    try {
+      if (!this.config || this.disposed || signal?.aborted) return 0;
 
-    const matchers = this.config.automations[event];
-    if (!matchers?.length) return 0;
+      const eventId = input.event_id ?? `${event}:${input.source_session_id ?? ''}:${input.tool_use_id ?? Date.now()}`;
+      const duplicate = this.agentEventGuards.shouldAcceptEvent(eventId);
+      if (duplicate) {
+        log.debug(`[AutomationSystem] ${event} ${duplicate}: ${eventId}`);
+        return 0;
+      }
 
-    let matchedCount = 0;
+      const recursion = this.agentEventGuards.shouldAcceptDepth(
+        input.triggered_by_automation === true,
+        input.automation_depth ?? 0,
+      );
+      if (recursion) {
+        log.debug(`[AutomationSystem] ${event} suppressed (${recursion})`);
+        await this.recordGuardHistory(event, input, 'unknown', 'suppressed', `Suppressed: ${recursion}`);
+        return 0;
+      }
 
-    for (const matcher of matchers) {
-      if (!matcherMatchesSdk(matcher, event, input)) continue;
+      const matchers = this.config.automations[event];
+      if (!matchers?.length) return 0;
 
-      matchedCount++;
+      const accepted: AutomationMatcher[] = [];
+      let matchedCount = 0;
 
-      // Note: Command execution has been removed. Prompt-based execution for
-      // non-Claude backends is not yet implemented. This method currently only
-      // validates matching (including condition gating) — actual execution is a no-op.
-      log.debug(`[AutomationSystem] Matched ${event} automation (prompt-based execution pending)`);
+      for (const matcher of matchers) {
+        if (!matcherMatchesSdk(matcher, event, input)) continue;
+        matchedCount++;
+
+        const matcherId = matcher.id ?? 'unknown';
+        const limited = this.agentEventGuards.shouldAcceptMatcher(this.options.workspaceId, event, matcherId);
+        if (limited) {
+          log.debug(`[AutomationSystem] ${event} matcher ${matcherId} ${limited}`);
+          await this.recordGuardHistory(event, input, matcherId, 'rate-limited', `Rate-limited: ${limited}`);
+          continue;
+        }
+
+        accepted.push(matcher);
+      }
+
+      if (accepted.length === 0) return matchedCount;
+
+      const promptMatchers = accepted.filter(m => m.actions.some(a => a.type === 'prompt'));
+      const webhookMatchers = accepted.filter(m => m.actions.some(a => a.type === 'webhook'));
+
+      if (promptMatchers.length > 0 && this.promptHandler) {
+        const scheduled: AutomationMatcher[] = [];
+        for (const matcher of promptMatchers) {
+          if (!this.agentEventGuards.tryAcquirePromptSlot()) {
+            await this.recordGuardHistory(
+              event,
+              input,
+              matcher.id ?? 'unknown',
+              'rate-limited',
+              'Rate-limited: prompt concurrency',
+            );
+            continue;
+          }
+          scheduled.push(matcher);
+        }
+
+        if (scheduled.length > 0) {
+          try {
+            await this.promptHandler.dispatchSdkEvent(event, input, scheduled);
+          } finally {
+            for (const _ of scheduled) {
+              this.agentEventGuards.releasePromptSlot();
+            }
+          }
+        }
+      }
+
+      if (webhookMatchers.length > 0 && this.webhookHandler) {
+        await this.webhookHandler.dispatchSdkEvent(event, input, webhookMatchers);
+      }
+
+      return matchedCount;
+    } catch (error) {
+      const err = error instanceof Error ? error : new Error(String(error));
+      log.debug(`[AutomationSystem] executeAgentEvent ${event} failed: ${err.message}`);
+      this.options.onError?.(event, err);
+      return 0;
     }
+  }
 
-    return matchedCount;
+  private async recordGuardHistory(
+    event: AgentEvent,
+    input: SdkAutomationInput,
+    matcherId: string,
+    status: AutomationHistoryStatus,
+    error: string,
+  ): Promise<void> {
+    try {
+      await appendAutomationHistoryEntry(this.options.workspaceRootPath, createPromptHistoryEntry({
+        matcherId,
+        ok: false,
+        status,
+        event,
+        sourceSessionId: input.source_session_id,
+        error,
+      }));
+    } catch (e) {
+      log.debug(`[AutomationSystem] Failed to write guard history: ${e}`);
+    }
   }
 
   // ============================================================================
@@ -514,11 +595,7 @@ export class AutomationSystem implements AutomationsConfigProvider {
   // ============================================================================
 
   /**
-   * Build SDK hook callbacks from automations.json definitions.
-   *
-   * Command execution has been removed — all automation actions now go through prompt-based
-   * execution (creating agent sessions via PromptHandler). Agent event automations are not
-   * currently supported via prompts, so this returns empty.
+   * Claude SDK hooks are not used. The Pi runtime calls executeAgentEvent() directly.
    */
   buildSdkHooks(): Partial<Record<AgentEvent, SdkAutomationCallbackMatcher[]>> {
     return {};
@@ -556,6 +633,7 @@ export class AutomationSystem implements AutomationsConfigProvider {
 
     // Clear metadata
     this.lastKnownMetadata.clear();
+    this.agentEventGuards.dispose();
 
     this.disposed = true;
     log.debug(`[AutomationSystem] Disposed`);

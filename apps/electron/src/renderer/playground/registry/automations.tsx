@@ -114,7 +114,7 @@ function AutomationAvatarGallery() {
     'SchedulerTick', 'LabelAdd', 'LabelRemove', 'LabelConfigChange',
     'PermissionModeChange', 'FlagChange', 'TodoStateChange',
     'PreToolUse', 'PostToolUse', 'PostToolUseFailure',
-    'Notification', 'UserPromptSubmit', 'SessionStart', 'SessionEnd',
+    'UserPromptSubmit', 'SessionStart', 'SessionEnd',
     'Stop', 'SubagentStart', 'SubagentStop', 'PreCompact',
     'PermissionRequest', 'Setup',
   ]

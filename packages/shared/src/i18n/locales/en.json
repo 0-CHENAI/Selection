@@ -120,6 +120,7 @@
   "automations.pausedTitle": "Paused",
   "automations.retry": "Retry",
   "automations.runTest": "Run Test",
+  "automations.runTestHint": "Tests the actions only — it does not fire a real Agent Event.",
   "automations.searchPlaceholder": "Search automations...",
   "automations.sectionIf": "If",
   "automations.sectionIfDescription": "Conditions that must pass before actions run",

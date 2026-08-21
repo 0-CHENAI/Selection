@@ -120,6 +120,7 @@
   "automations.pausedTitle": "Szüneteltetve",
   "automations.retry": "Újrapróbálás",
   "automations.runTest": "Teszt futtatása",
+  "automations.runTestHint": "Csak a műveleteket teszteli — nem indít valódi ügynök-eseményt.",
   "automations.searchPlaceholder": "Automatizálások keresése...",
   "automations.sectionIf": "Ha",
   "automations.sectionIfDescription": "Feltételek, amelyeknek teljesülniük kell a műveletek futtatása előtt",
