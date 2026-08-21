@@ -21,12 +21,11 @@ export type AppEvent =
   | 'SessionStatusChange'
   | 'SchedulerTick';
 
-/** Agent events - passed to Claude SDK */
+/** Agent events produced by the Pi runtime and executed by AutomationSystem */
 export type AgentEvent =
   | 'PreToolUse'
   | 'PostToolUse'
   | 'PostToolUseFailure'
-  | 'Notification'
   | 'UserPromptSubmit'
   | 'SessionStart'
   | 'SessionEnd'
@@ -45,10 +44,20 @@ export const APP_EVENTS: AppEvent[] = [
 ];
 
 export const AGENT_EVENTS: AgentEvent[] = [
-  'PreToolUse', 'PostToolUse', 'PostToolUseFailure', 'Notification',
+  'PreToolUse', 'PostToolUse', 'PostToolUseFailure',
   'UserPromptSubmit', 'SessionStart', 'SessionEnd', 'Stop',
   'SubagentStart', 'SubagentStop', 'PreCompact', 'PermissionRequest', 'Setup'
 ];
+
+/** Execution-history status for App and Agent actions */
+export type AutomationHistoryStatus =
+  | 'matched'
+  | 'scheduled'
+  | 'running'
+  | 'succeeded'
+  | 'failed'
+  | 'rate-limited'
+  | 'suppressed';
 
 // ============================================================================
 // Action Definitions
@@ -258,6 +267,12 @@ export interface PendingPrompt {
   thinkingLevel?: ThinkingLevel;
   /** Forum-topic name to bind the new session to (Telegram supergroup, when paired). */
   telegramTopic?: string;
+  /** When false, SessionManager returns after dispatching the prompt (Agent Events). */
+  waitForCompletion?: boolean;
+  /** Agent Event that produced this prompt, when applicable */
+  sourceEvent?: AgentEvent;
+  sourceSessionId?: string;
+  automationDepth?: number;
 }
 
 export interface AutomationResult {
@@ -288,6 +303,14 @@ export type AutomationsValidationResult = {
  */
 export interface SdkAutomationInput {
   hook_event_name: string;
+  // Envelope
+  event_id?: string;
+  workspace_id?: string;
+  source_session_id?: string;
+  source_session_name?: string;
+  source_backend?: 'pi';
+  automation_depth?: number;
+  triggered_by_automation?: boolean;
   // Tool events
   tool_name?: string;
   tool_input?: Record<string, unknown>;
@@ -301,9 +324,11 @@ export interface SdkAutomationInput {
   agent_type?: string;
   // User prompt events
   prompt?: string;
-  // Notification events
+  // Compact / stop / permission extras
   message?: string;
   title?: string;
+  compact_trigger?: 'manual' | 'auto';
+  stop_reason?: 'complete' | 'abort' | 'error';
   // Error events
   error?: string;
 }

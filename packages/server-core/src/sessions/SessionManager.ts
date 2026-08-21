@@ -1016,7 +1016,13 @@ interface ManagedSession {
   // Token refresh manager for OAuth token refresh with rate limiting
   tokenRefreshManager: TokenRefreshManager
   // Metadata for sessions created by automations
-  triggeredBy?: { automationName?: string; event?: string; timestamp?: number }
+  triggeredBy?: {
+    automationName?: string
+    event?: string
+    timestamp?: number
+    sourceSessionId?: string
+    automationDepth?: number
+  }
   // Promise that resolves when the agent instance is ready (for title gen to await)
   agentReady?: Promise<void>
   agentReadyResolve?: () => void
@@ -1879,6 +1885,10 @@ export class SessionManager implements ISessionManager {
                 thinkingLevel: pending.thinkingLevel,
                 automationName: pending.automationName,
                 telegramTopic: pending.telegramTopic,
+                waitForCompletion: pending.waitForCompletion,
+                sourceEvent: pending.sourceEvent,
+                sourceSessionId: pending.sourceSessionId,
+                automationDepth: pending.automationDepth,
               })
             )
           )
@@ -1894,6 +1904,9 @@ export class SessionManager implements ISessionManager {
               sessionId: result.status === 'fulfilled' ? result.value.sessionId : undefined,
               prompt: pending.prompt,
               error: result.status === 'rejected' ? String(result.reason) : undefined,
+              status: result.status === 'fulfilled' ? 'succeeded' : 'failed',
+              event: pending.sourceEvent,
+              sourceSessionId: pending.sourceSessionId,
             })
 
             appendAutomationHistoryEntry(workspaceRootPath, entry).catch(e => sessionLog.warn('[Automations] Failed to write history:', e))
@@ -3770,6 +3783,12 @@ export class SessionManager implements ISessionManager {
         isHeadless: !AGENT_FLAGS.defaultModesEnabled,
         skipConfigWatcher: true, // Server owns workspace-level ConfigWatcher — don't duplicate in agents
         automationSystem: this.automationSystems.get(managed.workspace.rootPath),
+        automationContext: {
+          triggeredByAutomation: !!managed.triggeredBy,
+          automationDepth: managed.triggeredBy?.automationDepth ?? 0,
+          sourceSessionId: managed.triggeredBy?.sourceSessionId,
+          sourceSessionName: managed.name,
+        },
         systemPromptPreset: managed.systemPromptPreset,
         debugMode: _platform?.isDebugMode ? { enabled: true, logFilePath: _platform.getLogFilePath?.() } : undefined,
         // Image resize callback — prevents oversized images from entering conversation history
@@ -9490,6 +9509,9 @@ export class SessionManager implements ISessionManager {
       automationName,
       telegramTopic,
       waitForCompletion,
+      sourceEvent,
+      sourceSessionId,
+      automationDepth,
     } = input
 
     // Warn if llmConnection was specified but doesn't resolve
@@ -9527,7 +9549,13 @@ export class SessionManager implements ISessionManager {
     // and the session is identifiable as automation-initiated after reload
     const managed = this.sessions.get(session.id)
     if (managed) {
-      managed.triggeredBy = { automationName, timestamp: Date.now() }
+      managed.triggeredBy = {
+        automationName,
+        event: sourceEvent,
+        timestamp: Date.now(),
+        sourceSessionId,
+        automationDepth: automationDepth ?? (sourceEvent ? 1 : undefined),
+      }
       this.persistSession(managed)
     }
 

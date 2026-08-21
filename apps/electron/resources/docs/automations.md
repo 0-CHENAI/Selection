@@ -74,23 +74,26 @@ craft-agent automation validate
 
 > **Note:** `TodoStateChange` is a deprecated alias for `SessionStatusChange`. Existing configs using the old name will continue to work but will show a deprecation warning during validation.
 
-### Agent Events (passed to Claude SDK)
+### Agent Events (produced by the Pi runtime)
+
+These fire during a real Pi session. Matching Prompt and Webhook actions run after matcher and conditions pass. Prompt actions create an **independent** session and do not wait for that session to finish — they also cannot block or modify the current tool.
+
+`Run Test` only exercises the configured actions. It does not simulate a Pi event and is not proof that the live Agent Event path works.
 
 | Event | Trigger | Match Value |
 |-------|---------|-------------|
 | `PreToolUse` | Before a tool executes | Tool name |
 | `PostToolUse` | After a tool executes successfully | Tool name |
 | `PostToolUseFailure` | After a tool execution fails | Tool name |
-| `Notification` | Notification received | - |
 | `UserPromptSubmit` | User submits a prompt | - |
-| `SessionStart` | Session starts | - |
-| `SessionEnd` | Session ends | - |
-| `Stop` | Agent stops | - |
-| `SubagentStart` | Subagent spawned | - |
-| `SubagentStop` | Subagent completes | - |
-| `PreCompact` | Before context compaction | - |
-| `PermissionRequest` | Permission requested | - |
-| `Setup` | Initial setup | - |
+| `SessionStart` | Pi session is ready | Source (`startup` / `resume`) |
+| `SessionEnd` | Session is destroyed | - |
+| `Stop` | Agent turn stops (complete, abort, or error) | - |
+| `SubagentStart` | `spawn_session` delegation starts | Agent type |
+| `SubagentStop` | `spawn_session` delegation finishes | Agent type |
+| `PreCompact` | Before manual or automatic compaction | - |
+| `PermissionRequest` | User is asked to approve a tool | Tool name |
+| `Setup` | Pi subprocess initialized and tools registered | - |
 
 ## Action Types
 

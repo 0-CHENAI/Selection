@@ -210,7 +210,13 @@ export interface SessionConfig {
   /** Whether the transferred-session summary has already been injected. */
   transferredSessionSummaryApplied?: boolean;
   /** Metadata for sessions created by automations */
-  triggeredBy?: { automationName?: string; event?: string; timestamp?: number };
+  triggeredBy?: {
+    automationName?: string;
+    event?: string;
+    timestamp?: number;
+    sourceSessionId?: string;
+    automationDepth?: number;
+  };
   /** Workspace-scoped project id this session belongs to (undefined = unbound). */
   projectId?: string;
   /**
@@ -322,7 +328,13 @@ export interface SessionHeader {
   /** Whether the transferred-session summary has already been injected. */
   transferredSessionSummaryApplied?: boolean;
   /** Metadata for sessions created by automations */
-  triggeredBy?: { automationName?: string; event?: string; timestamp?: number };
+  triggeredBy?: {
+    automationName?: string;
+    event?: string;
+    timestamp?: number;
+    sourceSessionId?: string;
+    automationDepth?: number;
+  };
   /** Workspace-scoped project id this session belongs to (undefined = unbound). */
   projectId?: string;
   /** Per-session shared project memory snapshot; missing means legacy shared. */

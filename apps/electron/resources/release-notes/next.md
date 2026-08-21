@@ -4,6 +4,7 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 
 ## Features
 
+- **Agent Event automations now run on Pi** — matching Prompt and Webhook actions execute when a real Pi session fires events (tools, prompts, lifecycle, permissions, compaction, and `spawn_session`). New sessions are independent and non-blocking; recursion, rate limits, and oversized/secret tool data are recorded instead of dropped. `Notification` was removed because Pi has no corresponding event. Run Test still only exercises actions (#62).
 - **Native Office document tools** — Word / Excel / PowerPoint inspection and editing now use an always-available, structured runtime backed by the bundled `officecli` binary, without exposing OfficeCLI as a skill.
 - **Pi-only session orchestration** — `spawn_session` can wait for a child session's conclusion or run it in the background and wake the parent when it finishes. Board tasks can be started from chat with `run_task` / `get_task_results`. Replaces the removed Claude Agent SDK Task/Workflow tools (#35).
 

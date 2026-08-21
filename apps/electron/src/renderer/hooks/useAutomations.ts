@@ -14,7 +14,24 @@ import { useTranslation } from 'react-i18next'
 import { useSetAtom } from 'jotai'
 import { toast } from 'sonner'
 import { automationsAtom } from '@/atoms/automations'
-import { parseAutomationsConfig, type AutomationListItem, type TestResult, type ExecutionEntry } from '@/components/automations/types'
+import { parseAutomationsConfig, type AutomationListItem, type TestResult, type ExecutionEntry, type ExecutionStatus } from '@/components/automations/types'
+
+function mapAutomationHistoryStatus(ok: boolean, status?: string): ExecutionStatus {
+  switch (status) {
+    case 'succeeded':
+      return 'success'
+    case 'failed':
+      return 'error'
+    case 'matched':
+    case 'scheduled':
+    case 'running':
+    case 'rate-limited':
+    case 'suppressed':
+      return status
+    default:
+      return ok ? 'success' : 'error'
+  }
+}
 
 async function loadAutomationsFromServer(workspaceId: string): Promise<AutomationListItem[]> {
   const json = await window.electronAPI.getAutomations(workspaceId)
@@ -167,7 +184,7 @@ export function useAutomations(
         id: `${e.id}-${e.ts}`,
         automationId: e.id,
         event: automation?.event ?? 'LabelAdd',
-        status: e.ok ? 'success' as const : 'error' as const,
+        status: mapAutomationHistoryStatus(e.ok, (e as { status?: string }).status),
         duration: e.webhook?.durationMs ?? 0,
         timestamp: e.ts,
         sessionId: e.sessionId,

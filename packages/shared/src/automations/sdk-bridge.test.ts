@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect } from 'bun:test';
-import { buildEnvFromSdkInput } from './sdk-bridge.ts';
+import { buildEnvFromSdkInput, buildWebhookEnvFromSdkInput } from './sdk-bridge.ts';
 import type { SdkAutomationInput } from './types.ts';
 
 function input(overrides: Partial<SdkAutomationInput> = {}): SdkAutomationInput {
@@ -100,20 +100,6 @@ describe('sdk-bridge', () => {
       });
     });
 
-    describe('Notification', () => {
-      it('should sanitize message and title', () => {
-        const env = buildEnvFromSdkInput('Notification', input({
-          message: 'Test `message`',
-          title: 'Test `title`',
-        }));
-        expect(env.CRAFT_MESSAGE).toBeDefined();
-        expect(env.CRAFT_TITLE).toBeDefined();
-        // Backticks should be escaped
-        expect(env.CRAFT_MESSAGE).toContain('\\`');
-        expect(env.CRAFT_TITLE).toContain('\\`');
-      });
-    });
-
     describe('unknown/default events', () => {
       it('should return minimal env for events with no specific mappings', () => {
         const env = buildEnvFromSdkInput('Stop' as any, input());
@@ -139,6 +125,28 @@ describe('sdk-bridge', () => {
         // tool_name is internal, should be passed through as-is
         expect(env.CRAFT_TOOL_NAME).toBe('Bash');
       });
+    });
+  });
+
+  describe('buildWebhookEnvFromSdkInput', () => {
+    it('does not leak process.env except CRAFT_WH_* secrets', () => {
+      const previous = process.env.CRAFT_WH_TEST_SECRET;
+      process.env.CRAFT_WH_TEST_SECRET = 'hook-secret';
+      try {
+        const env = buildWebhookEnvFromSdkInput('PreToolUse', input({
+          tool_name: 'Bash',
+          source_session_id: 'sess-1',
+        }));
+        expect(env.CRAFT_EVENT).toBe('PreToolUse');
+        expect(env.CRAFT_TOOL_NAME).toBe('Bash');
+        expect(env.CRAFT_SOURCE_SESSION_ID).toBe('sess-1');
+        expect(env.CRAFT_WH_TEST_SECRET).toBe('hook-secret');
+        expect(env.PATH).toBeUndefined();
+        expect(env.HOME).toBeUndefined();
+      } finally {
+        if (previous == null) delete process.env.CRAFT_WH_TEST_SECRET;
+        else process.env.CRAFT_WH_TEST_SECRET = previous;
+      }
     });
   });
 });

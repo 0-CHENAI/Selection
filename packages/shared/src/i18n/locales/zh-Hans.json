@@ -120,6 +120,7 @@
   "automations.pausedTitle": "已暂停",
   "automations.retry": "重试",
   "automations.runTest": "运行测试",
+  "automations.runTestHint": "只测试动作，不会产生真实的智能体事件。",
   "automations.searchPlaceholder": "搜索自动化…",
   "automations.sectionIf": "如果",
   "automations.sectionIfDescription": "操作运行前必须通过的条件",

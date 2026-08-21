@@ -298,6 +298,12 @@ export class PiAgent extends BaseAgent {
     reject: (error: Error) => void;
   }> = new Map();
 
+  private setupEmitted = false;
+  private sessionStartEmitted = false;
+  private sessionEndEmitted = false;
+  private stopEmitted = false;
+  private preCompactEmitted = false;
+
   // Pending auto-compaction toggle requests
   private pendingAutoCompactionToggles: Map<string, {
     resolve: (enabled: boolean) => void;
@@ -621,6 +627,7 @@ export class PiAgent extends BaseAgent {
 
     // If pool has source tools, register them with the subprocess.
     this.registerPoolToolsWithSubprocess();
+    this.emitLifecycleReadyOnce();
   }
 
   /**
@@ -1172,11 +1179,23 @@ export class PiAgent extends BaseAgent {
         this.emitAutomationEvent(hookEvent, {
           hook_event_name: hookEvent,
           tool_name: agentEvent.toolName ?? (event.toolName as string) ?? 'unknown',
-          tool_input: agentEvent.input,
+          tool_input: (agentEvent.input as Record<string, unknown> | undefined),
+          tool_use_id: (event.toolCallId as string | undefined),
           ...(agentEvent.isError
             ? { error: typeof agentEvent.result === 'string' ? agentEvent.result : undefined }
             : { tool_response: typeof agentEvent.result === 'string' ? agentEvent.result : undefined }),
         });
+      }
+
+      if (agentEvent.type === 'info' && typeof agentEvent.message === 'string' && agentEvent.message.includes('Compacting') && !this.preCompactEmitted) {
+        this.preCompactEmitted = true;
+        this.emitAutomationEvent('PreCompact', {
+          hook_event_name: 'PreCompact',
+          compact_trigger: 'auto',
+        });
+      }
+      if (agentEvent.type === 'info' && typeof agentEvent.message === 'string' && agentEvent.message.startsWith('Compacted')) {
+        this.preCompactEmitted = false;
       }
 
       this.eventQueue.enqueue(agentEvent);
@@ -1225,6 +1244,7 @@ export class PiAgent extends BaseAgent {
       hook_event_name: 'PreToolUse',
       tool_name: toolName,
       tool_input: input,
+      tool_use_id: toolCallId,
     });
 
     const rootPath = this.config.workspace.rootPath ?? this.workingDirectory;
@@ -1363,6 +1383,11 @@ export class PiAgent extends BaseAgent {
             resolve,
             toolName,
           });
+        });
+
+        this.emitAutomationEvent('PermissionRequest', {
+          hook_event_name: 'PermissionRequest',
+          tool_name: toolName,
         });
 
         this.onPermissionRequest({
@@ -1534,11 +1559,31 @@ export class PiAgent extends BaseAgent {
 
       // spawn_session uses the shared pre-execution pipeline from BaseAgent
       if (toolName === 'spawn_session') {
+        if (!args.help) {
+          this.emitAutomationEvent('SubagentStart', {
+            hook_event_name: 'SubagentStart',
+            agent_type: typeof args.mode === 'string' ? args.mode : 'session',
+          });
+        }
         try {
           const result = await this.preExecuteSpawnSession(args);
+          if (!args.help && result && typeof result === 'object' && 'sessionId' in result) {
+            this.emitAutomationEvent('SubagentStop', {
+              hook_event_name: 'SubagentStop',
+              agent_id: result.sessionId,
+              agent_type: typeof args.mode === 'string' ? args.mode : 'session',
+            });
+          }
           return { content: JSON.stringify(result, null, 2), isError: false };
         } catch (error) {
           const msg = error instanceof Error ? error.message : String(error);
+          if (!args.help) {
+            this.emitAutomationEvent('SubagentStop', {
+              hook_event_name: 'SubagentStop',
+              agent_type: typeof args.mode === 'string' ? args.mode : 'session',
+              error: msg,
+            });
+          }
           return { content: `spawn_session failed: ${msg}`, isError: true };
         }
       }
@@ -1751,6 +1796,7 @@ export class PiAgent extends BaseAgent {
         message: `Pi subprocess exited unexpectedly (${exitReason})`,
       });
       this.eventQueue.complete();
+      this.emitStopOnce('error');
     }
 
     // Reject pending mini completions with error (not null) so callers
@@ -1834,6 +1880,13 @@ export class PiAgent extends BaseAgent {
    * Ask subprocess to compact the active session context.
    */
   private async requestCompact(customInstructions?: string): Promise<{ summary: string; firstKeptEntryId: string; tokensBefore: number } | null> {
+    if (!this.preCompactEmitted) {
+      this.preCompactEmitted = true;
+      this.emitAutomationEvent('PreCompact', {
+        hook_event_name: 'PreCompact',
+        compact_trigger: 'manual',
+      });
+    }
     await this.ensureSubprocess();
 
     const id = `compact-${++this.rpcIdCounter}`;
@@ -1971,6 +2024,7 @@ export class PiAgent extends BaseAgent {
     // Reset state for new turn
     this._isProcessing = true;
     this.abortReason = undefined;
+    this.stopEmitted = false;
     this.eventQueue.reset();
     this.currentUserMessage = message;
     this.adapter.startTurn();
@@ -2202,6 +2256,7 @@ export class PiAgent extends BaseAgent {
       yield { type: 'complete' };
     } finally {
       this._isProcessing = false;
+      this.emitStopOnce('complete');
     }
   }
 
@@ -2318,9 +2373,35 @@ export class PiAgent extends BaseAgent {
     return this._isProcessing;
   }
 
+  private emitLifecycleReadyOnce(): void {
+    if (!this.setupEmitted) {
+      this.setupEmitted = true;
+      this.emitAutomationEvent('Setup', { hook_event_name: 'Setup', source: 'startup' });
+    }
+    if (!this.sessionStartEmitted) {
+      this.sessionStartEmitted = true;
+      this.emitAutomationEvent('SessionStart', {
+        hook_event_name: 'SessionStart',
+        source: this.config.session?.sdkSessionId ? 'resume' : 'startup',
+        model: this._model,
+      });
+    }
+  }
+
+  private emitStopOnce(reason: 'complete' | 'abort' | 'error'): void {
+    if (this.stopEmitted) return;
+    this.stopEmitted = true;
+    this.emitAutomationEvent('Stop', { hook_event_name: 'Stop', stop_reason: reason });
+  }
+
+  private emitSessionEndOnce(): void {
+    if (this.sessionEndEmitted) return;
+    this.sessionEndEmitted = true;
+    this.emitAutomationEvent('SessionEnd', { hook_event_name: 'SessionEnd' });
+  }
+
   async abort(reason?: string): Promise<void> {
-    // Fire Stop hook event (fire-and-forget)
-    this.emitAutomationEvent('Stop', { hook_event_name: 'Stop' });
+    this.emitStopOnce('abort');
 
     // Deny all pending permissions
     for (const [, pending] of this.pendingPermissions) {
@@ -2337,8 +2418,7 @@ export class PiAgent extends BaseAgent {
   }
 
   forceAbort(reason: AbortReason): void {
-    // Fire Stop hook event (fire-and-forget)
-    this.emitAutomationEvent('Stop', { hook_event_name: 'Stop' });
+    this.emitStopOnce('abort');
 
     this.abortReason = reason;
     this._isProcessing = false;
@@ -2418,6 +2498,7 @@ export class PiAgent extends BaseAgent {
   }
 
   destroy(): void {
+    this.emitSessionEndOnce();
     this.stopConfigWatcher();
 
     // Unregister session-scoped tool callbacks

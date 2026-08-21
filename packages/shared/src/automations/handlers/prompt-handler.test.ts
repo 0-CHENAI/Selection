@@ -171,7 +171,7 @@ describe('PromptHandler', () => {
     });
   });
 
-  describe('agent events are ignored', () => {
+  describe('agent events on the bus are ignored', () => {
     it('should not process prompts for PreToolUse (agent event)', async () => {
       const onPromptsReady = jest.fn();
       const configProvider = createMockConfigProvider({

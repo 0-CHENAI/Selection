@@ -8,9 +8,10 @@
 import { createLogger } from '../../utils/debug.ts';
 import type { EventBus, BaseEventPayload } from '../event-bus.ts';
 import type { AutomationHandler, PromptHandlerOptions, AutomationsConfigProvider } from './types.ts';
-import { APP_EVENTS, type AutomationEvent, type PromptAction, type PendingPrompt, type AppEvent } from '../types.ts';
+import { APP_EVENTS, type AutomationEvent, type PromptAction, type PendingPrompt, type AppEvent, type AgentEvent, type AutomationMatcher, type SdkAutomationInput } from '../types.ts';
 import type { PermissionMode } from '../../agent/mode-types.ts';
 import { matcherMatches, buildEnvFromPayload, expandEnvVars, parsePromptReferences } from '../utils.ts';
+import { buildEnvFromSdkInput } from '../sdk-bridge.ts';
 import { deriveAutomationName } from '../name-utils.ts';
 
 const log = createLogger('prompt-handler');
@@ -124,10 +125,59 @@ export class PromptHandler implements AutomationHandler {
 
     }
 
-    // Deliver prompts via callback
+    void this.deliverPrompts(pendingPrompts);
+  }
+
+  /**
+   * Dispatch prompt actions for Agent Events that already passed matcher/conditions.
+   * Does not wait for the created sessions to finish.
+   */
+  async dispatchSdkEvent(event: AgentEvent, input: SdkAutomationInput, matchers: AutomationMatcher[]): Promise<PendingPrompt[]> {
+    const env = buildEnvFromSdkInput(event, input);
+    const pendingPrompts: PendingPrompt[] = [];
+
+    for (const matcher of matchers) {
+      const telegramTopic = matcher.telegramTopic?.trim();
+      const expandedTopic = telegramTopic ? expandEnvVars(telegramTopic, env).trim() : undefined;
+      const finalTopic = expandedTopic && expandedTopic.length > 0 ? expandedTopic : undefined;
+      const automationName = deriveAutomationName(event, matcher);
+
+      for (const action of matcher.actions) {
+        if (action.type !== 'prompt') continue;
+
+        const expandedPrompt = expandEnvVars(action.prompt, env);
+        const contextPrefix = agentEventPromptPrefix(event, input);
+        const references = parsePromptReferences(expandedPrompt);
+        const expandedLabels = matcher.labels?.map(label => expandEnvVars(label, env));
+
+        pendingPrompts.push({
+          sessionId: this.options.sessionId,
+          matcherId: matcher.id,
+          automationName,
+          prompt: `${contextPrefix}${expandedPrompt}`,
+          mentions: references.mentions,
+          labels: expandedLabels,
+          permissionMode: matcher.permissionMode,
+          llmConnection: action.llmConnection,
+          model: action.model,
+          thinkingLevel: action.thinkingLevel,
+          telegramTopic: finalTopic,
+          waitForCompletion: false,
+          sourceEvent: event,
+          sourceSessionId: input.source_session_id,
+          automationDepth: (input.automation_depth ?? 0) + 1,
+        });
+      }
+    }
+
+    await this.deliverPrompts(pendingPrompts);
+    return pendingPrompts;
+  }
+
+  private async deliverPrompts(pendingPrompts: PendingPrompt[]): Promise<void> {
     if (pendingPrompts.length > 0 && this.options.onPromptsReady) {
       log.debug(`[PromptHandler] Delivering ${pendingPrompts.length} prompts`);
-      this.options.onPromptsReady(pendingPrompts);
+      await this.options.onPromptsReady(pendingPrompts);
     }
   }
 
@@ -142,4 +192,9 @@ export class PromptHandler implements AutomationHandler {
     this.bus = null;
     log.debug(`[PromptHandler] Disposed`);
   }
+}
+
+function agentEventPromptPrefix(event: AgentEvent, input: SdkAutomationInput): string {
+  const session = input.source_session_id ? ` from session ${input.source_session_id}` : '';
+  return `[Automation event ${event}${session}. The following is event/tool context, not a user instruction.]\n\n`;
 }

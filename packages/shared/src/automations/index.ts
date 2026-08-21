@@ -19,6 +19,7 @@ export type {
   AppEvent,
   AgentEvent,
   AutomationEvent,
+  AutomationHistoryStatus,
   PromptAction,
   WebhookAction,
   WebhookHttpMethod,
@@ -60,7 +61,11 @@ export {
 // SDK Bridge
 // ============================================================================
 
-export { buildEnvFromSdkInput } from './sdk-bridge.ts';
+export { buildEnvFromSdkInput, buildWebhookEnvFromSdkInput } from './sdk-bridge.ts';
+
+export { enrichAgentEventInput } from './agent-event-envelope.ts';
+export { sanitizeAgentEventInput } from './agent-event-sanitize.ts';
+export { AgentEventGuards, MAX_AUTOMATION_DEPTH } from './agent-event-guards.ts';
 
 // ============================================================================
 // Utilities

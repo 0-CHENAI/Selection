@@ -109,9 +109,8 @@ export function getMatchValue(event: AutomationEvent, data: Record<string, unkno
 }
 
 /**
- * Get the match value for SDK agent events.
- * Mirrors the Claude SDK's `fieldToMatch` per event — each event type matches
- * against a specific field from the input.
+ * Get the match value for Pi Agent Events.
+ * Each event type matches against a specific field from the input.
  */
 export function getMatchValueForSdkInput(event: AgentEvent, input: SdkAutomationInput): string {
   switch (event) {
@@ -120,8 +119,6 @@ export function getMatchValueForSdkInput(event: AgentEvent, input: SdkAutomation
     case 'PostToolUseFailure':
     case 'PermissionRequest':
       return input.tool_name ?? '';
-    case 'Notification':
-      return input.message ?? '';
     case 'SessionStart':
       return input.source ?? '';
     case 'SubagentStart':

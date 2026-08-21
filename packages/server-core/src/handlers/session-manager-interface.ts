@@ -329,4 +329,7 @@ export interface ExecutePromptAutomationInput {
    * still streams live and run errors are logged. Defaults to awaiting completion.
    */
   waitForCompletion?: boolean
+  sourceEvent?: string
+  sourceSessionId?: string
+  automationDepth?: number
 }
