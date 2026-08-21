@@ -130,7 +130,7 @@ export type TurnPhase =
  *
  * Priority order (first match wins):
  * 1. complete - turn.isComplete is true
- * 2. streaming - response exists and is streaming (final response)
+ * 2. streaming - response exists and is streaming (final or pending tokens)
  * 3. tool_active - any TOOL activity has status 'running'
  * 4. awaiting - has activities but no tools running (the gap!)
  * 5. pending - no activities yet
@@ -138,6 +138,8 @@ export type TurnPhase =
  * Note: Only `type: 'tool'` activities count for tool_active phase.
  * Intermediate text (type: 'intermediate') and status activities (type: 'status')
  * with 'running' status do NOT trigger tool_active - they show "Thinking..." instead.
+ * Completed commentary may occupy `turn.response` (isCommentary) so the body
+ * card stays readable while tools continue; that does not count as streaming.
  */
 export function deriveTurnPhase(turn: AssistantTurn): TurnPhase {
   // Complete takes precedence - turn is definitively done
@@ -145,8 +147,7 @@ export function deriveTurnPhase(turn: AssistantTurn): TurnPhase {
     return 'complete'
   }
 
-  // Check if final response is streaming
-  // Note: turn.response only exists for final responses, not intermediate text
+  // Streaming tokens — pending reply or still-open commentary
   if (turn.response && turn.response.isStreaming) {
     return 'streaming'
   }
@@ -168,6 +169,28 @@ export function deriveTurnPhase(turn: AssistantTurn): TurnPhase {
 
   // No activities yet - turn is pending first action
   return 'pending'
+}
+
+/**
+ * Commentary occupies the response card while the turn is still working.
+ * Once the turn completes, the same body is the visible final reply.
+ */
+export function isVisibleCommentaryCard(
+  response: AssistantTurn['response'],
+  isComplete: boolean,
+): boolean {
+  return !!response?.isCommentary && !isComplete
+}
+
+/** The live card already shows this intermediate body — don't also insert a row. */
+export function isMirroredCommentaryActivity(
+  activity: Pick<ActivityItem, 'type' | 'id'>,
+  response: AssistantTurn['response'],
+  isComplete: boolean,
+): boolean {
+  return activity.type === 'intermediate'
+    && isVisibleCommentaryCard(response, isComplete)
+    && activity.id === response?.messageId
 }
 
 /**
@@ -457,6 +480,11 @@ export function groupMessagesByTurn(messages: Message[], options: GroupTurnsOpti
         }
       }
 
+      // Completed turns treat leftover commentary as the visible final body.
+      if (currentTurn.isComplete && currentTurn.response?.isCommentary) {
+        currentTurn.response = { ...currentTurn.response, isCommentary: false }
+      }
+
       turns.push(currentTurn)
       currentTurn = null
     }
@@ -645,6 +673,27 @@ export function groupMessagesByTurn(messages: Message[], options: GroupTurnsOpti
           intermediateActivity.depth = 0
         }
         currentTurn.activities.push(intermediateActivity)
+
+        // Keep the latest commentary on the response card until a real
+        // (non-intermediate) reply arrives. Pending tokens already live on
+        // turn.response; dropping that slot on text_complete is what made the
+        // body card vanish the moment the next tool started.
+        const currentResponse = currentTurn.response
+        const retainCommentaryCard = !currentResponse
+          || currentResponse.isCommentary
+          || currentResponse.messageId === message.id
+        // Empty complete must not wipe a body the user is already reading.
+        if (retainCommentaryCard && message.content.trim()) {
+          const stillStreaming = !!(message.isPending || message.isStreaming)
+          currentTurn.response = {
+            text: message.content,
+            isStreaming: stillStreaming,
+            streamStartTime: stillStreaming ? message.timestamp : undefined,
+            messageId: message.id,
+            annotations: message.annotations,
+            isCommentary: true,
+          }
+        }
 
         // Update turn streaming state based on this message
         // If message is no longer pending/streaming, update turn state accordingly

@@ -5,7 +5,7 @@ import { useTranslation } from 'react-i18next'
 import type { ToolDisplayMeta, AnnotationV1 } from '@craft-agent/core'
 import { normalizePath, pathStartsWith, stripPathPrefix } from '@craft-agent/core/utils'
 import { isParentTaskTool } from '@craft-agent/shared/utils/toolNames'
-import { motion, AnimatePresence } from 'motion/react'
+import { motion, AnimatePresence, useReducedMotion } from 'motion/react'
 import {
   ChevronRight,
   CheckCircle2,
@@ -52,6 +52,8 @@ import {
   formatTokens,
   deriveTurnPhase,
   getActiveTurnPreview,
+  isVisibleCommentaryCard,
+  isMirroredCommentaryActivity,
   shouldShowThinkingIndicator,
   type ActivityGroup,
   type AssistantTurn,
@@ -292,6 +294,11 @@ export interface ResponseContent {
   messageId?: string
   /** Persisted annotations attached to the response message */
   annotations?: AnnotationV1[]
+  /**
+   * Tool-bound commentary occupying the response card until a real final
+   * reply arrives. Keeps the streamed body readable when the next tool starts.
+   */
+  isCommentary?: boolean
 }
 
 // ============================================================================
@@ -669,6 +676,9 @@ export function ActivityStatusIcon({
   /** Custom icon from tool metadata - emoji or data URL (base64) */
   customIcon?: string
 }) {
+  const reduceMotion = useReducedMotion()
+  const iconTransition = { duration: reduceMotion ? 0 : 0.2, ease: "easeOut" as const }
+
   // Render the appropriate icon based on status
   const renderIcon = () => {
     // For completed status with custom icon, use it instead of checkmark
@@ -728,10 +738,10 @@ export function ActivityStatusIcon({
     <AnimatePresence mode="wait" initial={false}>
       <motion.div
         key={status}
-        initial={{ opacity: 0, scale: 0.8 }}
+        initial={reduceMotion ? false : { opacity: 0, scale: 0.8 }}
         animate={{ opacity: 1, scale: 1 }}
-        exit={{ opacity: 0, scale: 0.8 }}
-        transition={{ duration: 0.2, ease: "easeOut" }}
+        exit={reduceMotion ? undefined : { opacity: 0, scale: 0.8 }}
+        transition={iconTransition}
         className="shrink-0"
       >
         {renderIcon()}
@@ -1115,6 +1125,7 @@ interface ActivityGroupRowProps {
  * Provides visual containment and collapsible children.
  */
 function ActivityGroupRow({ group, expandedGroups: externalExpandedGroups, onExpandedGroupsChange, onOpenActivityDetails, animationIndex = 0, sessionFolderPath, displayMode = 'detailed' }: ActivityGroupRowProps) {
+  const reduceMotion = useReducedMotion()
   // Use local state if no controlled state provided
   const [localExpandedGroups, setLocalExpandedGroups] = useState<Set<string>>(new Set())
   const expandedGroups = externalExpandedGroups ?? localExpandedGroups
@@ -1140,9 +1151,12 @@ function ActivityGroupRow({ group, expandedGroups: externalExpandedGroups, onExp
 
   return (
     <motion.div
-      initial={{ opacity: 0, x: -8 }}
+      initial={reduceMotion ? false : { opacity: 0, x: -8 }}
       animate={{ opacity: 1, x: 0 }}
-      transition={{ delay: animationIndex < SIZE_CONFIG.staggeredAnimationLimit ? animationIndex * 0.03 : 0.3 }}
+      transition={{
+        delay: reduceMotion ? 0 : (animationIndex < SIZE_CONFIG.staggeredAnimationLimit ? animationIndex * 0.03 : 0.3),
+        duration: reduceMotion ? 0 : undefined,
+      }}
       className="space-y-0.5"
     >
       {/* Task header row - no left padding, chevron aligned with activity row icons */}
@@ -1158,7 +1172,7 @@ function ActivityGroupRow({ group, expandedGroups: externalExpandedGroups, onExp
         <motion.div
           initial={false}
           animate={{ rotate: isExpanded ? 90 : 0 }}
-          transition={{ duration: 0.15, ease: 'easeOut' }}
+          transition={{ duration: reduceMotion ? 0 : 0.15, ease: 'easeOut' }}
           className={cn(SIZE_CONFIG.iconSize, "flex items-center justify-center shrink-0")}
         >
           <ChevronRight className={SIZE_CONFIG.iconSize} />
@@ -1230,12 +1244,12 @@ function ActivityGroupRow({ group, expandedGroups: externalExpandedGroups, onExp
       <AnimatePresence initial={false}>
         {isExpanded && group.children.length > 0 && (
           <motion.div
-            initial={{ height: 0, opacity: 0 }}
+            initial={reduceMotion ? false : { height: 0, opacity: 0 }}
             animate={{ height: 'auto', opacity: 1 }}
-            exit={{ height: 0, opacity: 0 }}
+            exit={reduceMotion ? undefined : { height: 0, opacity: 0 }}
             transition={{
-              height: { duration: 0.2, ease: [0.4, 0, 0.2, 1] },
-              opacity: { duration: 0.15 }
+              height: { duration: reduceMotion ? 0 : 0.2, ease: [0.4, 0, 0.2, 1] },
+              opacity: { duration: reduceMotion ? 0 : 0.15 }
             }}
             className="overflow-hidden"
           >
@@ -1243,9 +1257,9 @@ function ActivityGroupRow({ group, expandedGroups: externalExpandedGroups, onExp
               {group.children.map((child, idx) => (
                 <motion.div
                   key={child.id}
-                  initial={{ opacity: 0, x: -4 }}
+                  initial={reduceMotion ? false : { opacity: 0, x: -4 }}
                   animate={{ opacity: 1, x: 0 }}
-                  transition={{ delay: idx * 0.02 }}
+                  transition={{ delay: reduceMotion ? 0 : idx * 0.02, duration: reduceMotion ? 0 : undefined }}
                   className="ml-[-4px]"
                 >
                   <ActivityRow
@@ -1321,6 +1335,8 @@ export interface ResponseCardProps {
   openAnnotationRequest?: OpenAnnotationRequest | null
   /** Annotation interaction mode (viewer uses tooltip-only to suppress the island) */
   annotationInteractionMode?: AnnotationInteractionMode
+  /** Tool-bound commentary — keep the body readable, hide final-reply actions */
+  isCommentary?: boolean
 }
 
 interface BranchDropdownProps {
@@ -1561,6 +1577,7 @@ export function ResponseCard({
   hasActiveFollowUpAnnotations = false,
   openAnnotationRequest,
   annotationInteractionMode = 'interactive',
+  isCommentary = false,
 }: ResponseCardProps) {
   const { t } = useTranslation()
   // Throttled content for display - updates every CONTENT_THROTTLE_MS during streaming
@@ -2310,6 +2327,10 @@ export function ResponseCard({
 
   const isCompleted = !isStreaming
   const isBuffering = isStreaming && !reveal.shouldShow
+  const bodyText = isStreaming ? displayedText : text
+  // Commentary must stay on the live card tree. Switching to the completed
+  // chrome remounts markdown and pops a final-reply footer the moment tools start.
+  const showCompletedChrome = (isCompleted && !isCommentary) || variant === 'plan'
 
   // While buffering, return null - TurnCard will show a subtle indicator instead
   if (isBuffering) {
@@ -2317,7 +2338,7 @@ export function ResponseCard({
   }
 
   // Completed response or plan - show with max height and footer
-  if (isCompleted || variant === 'plan') {
+  if (showCompletedChrome) {
     const isPlan = variant === 'plan'
 
     return (
@@ -2382,7 +2403,7 @@ export function ResponseCard({
             )}>
               {/* Left side - Copy, View as Markdown, Annotation hint */}
               <div className="flex items-center gap-3">
-                {onRegenerate && (
+                {onRegenerate && !isCommentary && (
                   <button
                     onClick={onRegenerate}
                     className={cn(
@@ -2450,7 +2471,7 @@ export function ResponseCard({
                     />
                   </div>
                 )}
-                {onBranch && <BranchDropdown onBranch={onBranch} />}
+                {onBranch && !isCommentary && <BranchDropdown onBranch={onBranch} />}
               </div>
             </div>
           )}
@@ -2459,7 +2480,7 @@ export function ResponseCard({
               Uses a bottom-sheet drawer to match the CompactPermissionModeSelector
               / CompactModelSelector pattern. Guarded by isLastResponse so older
               plans don't render an empty strip with a hidden-but-focusable button. */}
-          {compactMode && onRegenerate && !isStreaming && (
+          {compactMode && onRegenerate && !isStreaming && !isCommentary && (
             <div
               className={cn(
                 "pl-3 pr-2 py-1.5 border-t border-border/30 flex items-center bg-muted/20",
@@ -2538,7 +2559,7 @@ export function ResponseCard({
               onUrlClick={onOpenUrl}
               onFileClick={onOpenFile}
             >
-              {displayedText}
+              {bodyText}
             </Markdown>
             {annotationOverlayLayer}
           </div>
@@ -2546,7 +2567,7 @@ export function ResponseCard({
 
         {/* Desktop streaming footer; compact mode renders nothing here
             (the Accept-Plan footer only applies to completed plans). */}
-        {!compactMode && (
+        {!compactMode && isStreaming && (
           <div className={cn("px-4 py-2 border-t border-border/30 flex items-center bg-muted/20", SIZE_CONFIG.fontSize)}>
             <div className="flex items-center gap-2 text-muted-foreground">
               <Spinner className={SIZE_CONFIG.spinnerSize} />
@@ -2690,6 +2711,8 @@ export const TurnCard = React.memo(function TurnCard({
   annotationInteractionMode = 'interactive',
 }: TurnCardProps) {
   const { t } = useTranslation()
+  const reduceMotion = useReducedMotion()
+  const showCommentary = isVisibleCommentaryCard(response, isComplete)
 
   // Derive the turn phase from props using the state machine.
   // This provides a single source of truth for lifecycle state,
@@ -2791,24 +2814,34 @@ export const TurnCard = React.memo(function TurnCard({
     [allSortedActivities]
   )
 
+  // The live commentary card already shows this body. Hiding the mirrored
+  // row keeps the work chain from inserting a duplicate line (or appearing
+  // at all) until a tool or older commentary actually needs a row.
+  const visibleActivities = useMemo(
+    () => sortedActivities.filter(
+      activity => !isMirroredCommentaryActivity(activity, response, isComplete),
+    ),
+    [sortedActivities, response, isComplete],
+  )
+
   // Check if we have any Task subagents - if so, use grouped view
   const hasTaskSubagents = useMemo(
-    () => sortedActivities.some(a => isParentTaskTool(a.toolName ?? '')),
-    [sortedActivities]
+    () => visibleActivities.some(a => isParentTaskTool(a.toolName ?? '')),
+    [visibleActivities]
   )
 
   // Group activities by parent Task for better visualization
   // Only group if there are Task subagents, otherwise keep flat for simpler view
   const groupedActivities = useMemo(
-    () => hasTaskSubagents ? groupActivitiesByParent(sortedActivities) : null,
-    [sortedActivities, hasTaskSubagents]
+    () => hasTaskSubagents ? groupActivitiesByParent(visibleActivities) : null,
+    [visibleActivities, hasTaskSubagents]
   )
 
   // Pre-compute which activities are last children - O(n) instead of O(n²) per-render check
   // Only used for flat view (non-grouped)
   const lastChildSet = useMemo(
-    () => !hasTaskSubagents ? computeLastChildSet(sortedActivities) : new Set<string>(),
-    [sortedActivities, hasTaskSubagents]
+    () => !hasTaskSubagents ? computeLastChildSet(visibleActivities) : new Set<string>(),
+    [visibleActivities, hasTaskSubagents]
   )
 
   // Don't render if nothing to show and turn is complete
@@ -2839,8 +2872,8 @@ export const TurnCard = React.memo(function TurnCard({
     return null
   }
 
-  // Only count non-plan activities for the collapsible section
-  const hasActivities = sortedActivities.length > 0
+  // Only count rows the user will actually see in the collapsible section
+  const hasActivities = visibleActivities.length > 0
 
   // Determine if thinking indicator should show using the phase-based state machine.
   // This properly handles the "gap" state (awaiting) between tool completion and next action,
@@ -2867,7 +2900,7 @@ export const TurnCard = React.memo(function TurnCard({
             <motion.div
               initial={false}
               animate={{ rotate: isExpanded ? 90 : 0 }}
-              transition={{ duration: 0.15, ease: 'easeOut' }}
+              transition={{ duration: reduceMotion ? 0 : 0.15, ease: 'easeOut' }}
               className={cn(SIZE_CONFIG.iconSize, "flex items-center justify-center shrink-0")}
             >
               <ChevronRight className={SIZE_CONFIG.iconSize} />
@@ -2875,7 +2908,7 @@ export const TurnCard = React.memo(function TurnCard({
 
             {/* Step count badge */}
             <span className="-ml-0.5 shrink-0 px-1.5 py-0.5 rounded-[4px] bg-background shadow-minimal text-[10px] font-medium tabular-nums">
-              {activities.length}
+              {visibleActivities.length}
             </span>
 
             {/* Preview text with crossfade + inline failure count */}
@@ -2883,10 +2916,10 @@ export const TurnCard = React.memo(function TurnCard({
               <AnimatePresence initial={false}>
                 <motion.span
                   key={previewText}
-                  initial={{ opacity: 0 }}
+                  initial={reduceMotion ? false : { opacity: 0 }}
                   animate={{ opacity: 1 }}
-                  exit={{ opacity: 0 }}
-                  transition={{ duration: 0.2 }}
+                  exit={reduceMotion ? undefined : { opacity: 0 }}
+                  transition={{ duration: reduceMotion ? 0 : 0.2 }}
                   className="absolute inset-0 truncate"
                 >
                   {previewText}
@@ -2908,12 +2941,12 @@ export const TurnCard = React.memo(function TurnCard({
           <AnimatePresence initial={false}>
             {isExpanded && (
               <motion.div
-                initial={{ height: 0, opacity: 0 }}
+                initial={reduceMotion ? false : { height: 0, opacity: 0 }}
                 animate={{ height: 'auto', opacity: 1 }}
-                exit={{ height: 0, opacity: 0 }}
+                exit={reduceMotion ? undefined : { height: 0, opacity: 0 }}
                 transition={{
-                  height: { duration: 0.25, ease: [0.4, 0, 0.2, 1] },
-                  opacity: { duration: 0.15 }
+                  height: { duration: reduceMotion ? 0 : 0.25, ease: [0.4, 0, 0.2, 1] },
+                  opacity: { duration: reduceMotion ? 0 : 0.15 }
                 }}
                 className="overflow-hidden"
               >
@@ -2942,12 +2975,17 @@ export const TurnCard = React.memo(function TurnCard({
                         <motion.div
                           key={item.id}
                           initial={
-                            hasUserToggled.current || hasMounted.current
-                              ? { opacity: 0, x: -8 }
-                              : false
+                            reduceMotion || !(hasUserToggled.current || hasMounted.current)
+                              ? false
+                              : { opacity: 0, x: -8 }
                           }
                           animate={{ opacity: 1, x: 0 }}
-                          transition={{ delay: hasUserToggled.current ? (index < SIZE_CONFIG.staggeredAnimationLimit ? index * 0.03 : SIZE_CONFIG.staggeredAnimationLimit * 0.03) : 0 }}
+                          transition={{
+                            delay: reduceMotion || !hasUserToggled.current
+                              ? 0
+                              : (index < SIZE_CONFIG.staggeredAnimationLimit ? index * 0.03 : SIZE_CONFIG.staggeredAnimationLimit * 0.03),
+                            duration: reduceMotion ? 0 : undefined,
+                          }}
                         >
                           <ActivityRow
                             activity={item}
@@ -2960,17 +2998,22 @@ export const TurnCard = React.memo(function TurnCard({
                     ))
                   ) : (
                     /* Flat view for simple tool calls */
-                    sortedActivities.map((activity, index) => (
+                    visibleActivities.map((activity, index) => (
                       <motion.div
                         key={activity.id}
                         initial={
-                          hasUserToggled.current || hasMounted.current
-                            ? { opacity: 0, x: -8 }
-                            : false
+                          reduceMotion || !(hasUserToggled.current || hasMounted.current)
+                            ? false
+                            : { opacity: 0, x: -8 }
                         }
                         animate={{ opacity: 1, x: 0 }}
                         // Only animate on user toggle, not initial mount
-                        transition={{ delay: hasUserToggled.current ? (index < SIZE_CONFIG.staggeredAnimationLimit ? index * 0.03 : SIZE_CONFIG.staggeredAnimationLimit * 0.03) : 0 }}
+                        transition={{
+                          delay: reduceMotion || !hasUserToggled.current
+                            ? 0
+                            : (index < SIZE_CONFIG.staggeredAnimationLimit ? index * 0.03 : SIZE_CONFIG.staggeredAnimationLimit * 0.03),
+                          duration: reduceMotion ? 0 : undefined,
+                        }}
                       >
                         <ActivityRow
                           activity={activity}
@@ -2986,11 +3029,11 @@ export const TurnCard = React.memo(function TurnCard({
                   {isThinking && !animateResponse && (
                     <motion.div
                       key="thinking"
-                      initial={{ opacity: 0, x: -8 }}
+                      initial={reduceMotion ? false : { opacity: 0, x: -8 }}
                       animate={{ opacity: 1, x: 0 }}
                       transition={{
-                        delay: Math.min(sortedActivities.length, SIZE_CONFIG.staggeredAnimationLimit) * 0.03,
-                        duration: 0.3,
+                        delay: reduceMotion ? 0 : Math.min(visibleActivities.length, SIZE_CONFIG.staggeredAnimationLimit) * 0.03,
+                        duration: reduceMotion ? 0 : 0.3,
                         ease: "easeOut"
                       }}
                       className={cn("flex items-center gap-2 py-0.5 text-muted-foreground/70", SIZE_CONFIG.fontSize)}
@@ -3056,9 +3099,9 @@ export const TurnCard = React.memo(function TurnCard({
         <AnimatePresence>
           {response && !isBuffering && (
             <motion.div
-              initial={{ opacity: 0, y: 8 }}
+              initial={reduceMotion ? false : { opacity: 0, y: 8 }}
               animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.3, ease: "easeOut" }}
+              transition={{ duration: reduceMotion ? 0 : 0.3, ease: "easeOut" }}
               className={cn("select-text", hasActivities && "mt-2")}
             >
               <ResponseCard
@@ -3080,6 +3123,7 @@ export const TurnCard = React.memo(function TurnCard({
                 onAcceptWithCompact={onAcceptPlanWithCompact}
                 isLastResponse={isLastResponse}
                 compactMode={compactMode}
+                isCommentary={showCommentary}
                 onBranch={onBranch && response.messageId ? (options?: { newPanel?: boolean }) => onBranch(response.messageId!, options) : undefined}
                 onRegenerate={onRegenerate}
                 sendMessageKey={sendMessageKey}
@@ -3113,6 +3157,7 @@ export const TurnCard = React.memo(function TurnCard({
             onAcceptWithCompact={onAcceptPlanWithCompact}
             isLastResponse={isLastResponse}
             compactMode={compactMode}
+            isCommentary={showCommentary}
             onBranch={onBranch && response.messageId ? (options?: { newPanel?: boolean }) => onBranch(response.messageId!, options) : undefined}
             onRegenerate={onRegenerate}
             sendMessageKey={sendMessageKey}
