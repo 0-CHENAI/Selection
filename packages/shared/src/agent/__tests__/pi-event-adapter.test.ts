@@ -844,8 +844,65 @@ describe('PiEventAdapter', () => {
         toolUseId: 'call_1',
         toolName: 'Read',
         result: 'file contents',
+        content: [{ type: 'text', text: 'file contents' }],
         isError: false,
       });
+    });
+
+    it('preserves live image blocks without folding Base64 into the text result', () => {
+      collect(adapter.adaptEvent({ type: 'turn_start' } as any));
+      collect(adapter.adaptEvent({
+        type: 'tool_execution_start', toolCallId: 'call_image', toolName: 'office_document_preview', args: {},
+      } as any));
+
+      const events = collect(adapter.adaptEvent({
+        type: 'tool_execution_end',
+        toolCallId: 'call_image',
+        result: { content: [
+          { type: 'text', text: '{"artifacts":[{"path":"data/office/preview.png"}]}' },
+          { type: 'image', data: 'aW1hZ2U=', mimeType: 'image/png' },
+        ] },
+        isError: false,
+      } as any));
+
+      expect(events[0]).toMatchObject({
+        type: 'tool_result',
+        result: '{"artifacts":[{"path":"data/office/preview.png"}]}',
+        content: [
+          { type: 'text', text: '{"artifacts":[{"path":"data/office/preview.png"}]}' },
+          { type: 'image', data: 'aW1hZ2U=', mimeType: 'image/png' },
+        ],
+      });
+      expect(events[0].result).not.toContain('aW1hZ2U=');
+    });
+
+    it('preserves final images when partial text output was already streamed', () => {
+      collect(adapter.adaptEvent({ type: 'turn_start' } as any));
+      collect(adapter.adaptEvent({
+        type: 'tool_execution_start', toolCallId: 'call_partial_image', toolName: 'office_document_preview', args: {},
+      } as any));
+      collect(adapter.adaptEvent({
+        type: 'tool_execution_update',
+        toolCallId: 'call_partial_image',
+        partialResult: { content: [{ type: 'text', text: '{"artifacts":[' }] },
+      } as any));
+
+      const events = collect(adapter.adaptEvent({
+        type: 'tool_execution_end',
+        toolCallId: 'call_partial_image',
+        result: { content: [
+          { type: 'text', text: '{"artifacts":[{"path":"data/office/preview.png"}]}' },
+          { type: 'image', data: 'ZmluYWwtaW1hZ2U=', mimeType: 'image/png' },
+        ] },
+        isError: false,
+      } as any));
+
+      expect(events[0]).toMatchObject({
+        type: 'tool_result',
+        result: '{"artifacts":[',
+        content: [{ type: 'image', data: 'ZmluYWwtaW1hZ2U=', mimeType: 'image/png' }],
+      });
+      expect(events[0].result).not.toContain('ZmluYWwtaW1hZ2U=');
     });
 
     it('should handle string result in tool_execution_end', () => {

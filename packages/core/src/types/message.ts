@@ -571,6 +571,11 @@ export interface AgentEventUsage {
   contextWindow?: number;
 }
 
+/** Live multimodal tool-result blocks. Image payloads are never persisted in Selection session JSONL. */
+export type AgentToolResultContent =
+  | { type: 'text'; text: string }
+  | { type: 'image'; data: string; mimeType: string };
+
 /**
  * Events emitted by CraftAgent during chat
  * turnId: Correlation ID from the API's message.id, groups all events in an assistant turn
@@ -582,7 +587,7 @@ export type AgentEvent =
   | { type: 'text_complete'; text: string; isIntermediate?: boolean; turnId?: string; parentToolUseId?: string; sdkMessageId?: string }
   | { type: 'pi_turn_anchor'; sdkMessageId: string; sdkTurnAnchor: string }
   | { type: 'tool_start'; toolName: string; toolUseId: string; input: Record<string, unknown>; intent?: string; displayName?: string; turnId?: string; parentToolUseId?: string; toolDisplayMeta?: ToolDisplayMeta }
-  | { type: 'tool_result'; toolUseId: string; toolName?: string; result: string; isError: boolean; input?: Record<string, unknown>; turnId?: string; parentToolUseId?: string }
+  | { type: 'tool_result'; toolUseId: string; toolName?: string; result: string; content?: AgentToolResultContent[]; isError: boolean; input?: Record<string, unknown>; turnId?: string; parentToolUseId?: string }
   | {
       type: 'permission_request';
       requestId: string;

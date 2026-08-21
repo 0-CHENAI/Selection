@@ -35,6 +35,9 @@ jobs:
           restore-keys: |
             desktop-${{ runner.os }}-${{ runner.arch }}-
 
+      - name: Verify pinned OfficeCLI runtime and internal resources
+        run: bun run officecli:check
+
       - name: Package macOS ARM64 installers
         env:
           CRAFT_DEV_RUNTIME: "1"
@@ -81,6 +84,9 @@ jobs:
           key: desktop-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('bun.lock') }}
           restore-keys: |
             desktop-${{ runner.os }}-${{ runner.arch }}-
+
+      - name: Verify pinned OfficeCLI runtime and internal resources
+        run: bun run officecli:check
 
       - name: Package Windows x64 installer
         env:

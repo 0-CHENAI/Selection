@@ -43,6 +43,7 @@ export type {
   StoredMessage,
   TokenUsage,
   AgentEventUsage,
+  AgentToolResultContent,
   RecoveryAction,
   ErrorCode,
   TypedError,

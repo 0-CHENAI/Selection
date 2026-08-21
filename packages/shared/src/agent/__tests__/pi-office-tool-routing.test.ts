@@ -5,7 +5,10 @@ import { join } from 'node:path';
 import {
   getSessionToolProxyDefs,
   PI_OFFICE_DOCUMENT_EDIT_TOOL,
+  PI_OFFICE_DOCUMENT_FINALIZE_TOOL,
+  PI_OFFICE_DOCUMENT_GUIDE_TOOL,
   PI_OFFICE_DOCUMENT_INSPECT_TOOL,
+  PI_OFFICE_DOCUMENT_PREVIEW_TOOL,
   PI_OFFICE_TOOL_ROUTING_PROMPT,
 } from '../backend/pi/session-tool-defs.ts';
 
@@ -13,13 +16,19 @@ describe('Pi Office tool routing', () => {
   it('names the exact registered proxy tools in the Pi routing prompt', () => {
     const registeredNames = new Set(getSessionToolProxyDefs().map(def => def.name));
 
-    expect(registeredNames.has(PI_OFFICE_DOCUMENT_INSPECT_TOOL)).toBe(true);
-    expect(registeredNames.has(PI_OFFICE_DOCUMENT_EDIT_TOOL)).toBe(true);
-    expect(registeredNames.has(`mcp__session__${PI_OFFICE_DOCUMENT_INSPECT_TOOL}`)).toBe(false);
-    expect(registeredNames.has(`mcp__session__${PI_OFFICE_DOCUMENT_EDIT_TOOL}`)).toBe(false);
+    const officeTools = [
+      PI_OFFICE_DOCUMENT_INSPECT_TOOL,
+      PI_OFFICE_DOCUMENT_EDIT_TOOL,
+      PI_OFFICE_DOCUMENT_GUIDE_TOOL,
+      PI_OFFICE_DOCUMENT_PREVIEW_TOOL,
+      PI_OFFICE_DOCUMENT_FINALIZE_TOOL,
+    ];
+    for (const toolName of officeTools) {
+      expect(registeredNames.has(toolName)).toBe(true);
+      expect(registeredNames.has(`mcp__session__${toolName}`)).toBe(false);
+      expect(PI_OFFICE_TOOL_ROUTING_PROMPT).toContain(toolName);
+    }
     expect(registeredNames.has('mcp__session__call_llm')).toBe(true);
-    expect(PI_OFFICE_TOOL_ROUTING_PROMPT).toContain(PI_OFFICE_DOCUMENT_INSPECT_TOOL);
-    expect(PI_OFFICE_TOOL_ROUTING_PROMPT).toContain(PI_OFFICE_DOCUMENT_EDIT_TOOL);
     expect(PI_OFFICE_TOOL_ROUTING_PROMPT).toContain('native session tools');
     expect(PI_OFFICE_TOOL_ROUTING_PROMPT).toContain('Office document workflow');
     expect(PI_OFFICE_TOOL_ROUTING_PROMPT).toContain('Document Tools');
@@ -38,6 +47,9 @@ describe('Pi Office tool routing', () => {
     const officeBranch = source.slice(officeBranchStart, genericBranchStart);
     expect(officeBranch).toContain('PI_OFFICE_DOCUMENT_INSPECT_TOOL');
     expect(officeBranch).toContain('PI_OFFICE_DOCUMENT_EDIT_TOOL');
+    expect(officeBranch).toContain('PI_OFFICE_DOCUMENT_GUIDE_TOOL');
+    expect(officeBranch).toContain('PI_OFFICE_DOCUMENT_PREVIEW_TOOL');
+    expect(officeBranch).toContain('PI_OFFICE_DOCUMENT_FINALIZE_TOOL');
     expect(officeBranch).not.toContain('att.markdownPath');
     expect(normalizedSource).toContain('systemPrompt,\n        PI_OFFICE_TOOL_ROUTING_PROMPT,');
   });

@@ -22,6 +22,7 @@ import { BaseEventAdapter } from '../base-event-adapter.ts';
 import { PI_TOOL_NAME_MAP } from './constants.ts';
 import { toolMetadataStore } from '../../../interceptor-common.ts';
 import { parseError } from '../../errors.ts';
+import { normalizeToolResultContent } from '../../tool-matching.ts';
 
 /**
  * Pi SDK auto-compaction race signature — the AbortController crash described
@@ -509,6 +510,13 @@ export class PiEventAdapter extends BaseEventAdapter {
 
         const isError = event.isError;
         let result: string;
+        const normalizedContent = blockReason ? undefined : normalizeToolResultContent(event.result);
+        const finalImages = accumulatedOutput
+          ? normalizedContent?.filter(part => part.type === 'image')
+          : undefined;
+        const content = accumulatedOutput
+          ? finalImages && finalImages.length > 0 ? finalImages : undefined
+          : normalizedContent;
 
         if (accumulatedOutput) {
           result = accumulatedOutput;
@@ -525,11 +533,11 @@ export class PiEventAdapter extends BaseEventAdapter {
         // Check if this was classified as a file read
         const readInfo = this.consumeReadCommand(toolCallId);
         if (readInfo) {
-          yield this.createToolResult(toolCallId, 'Read', result, isError);
+          yield this.createToolResult(toolCallId, 'Read', result, isError, undefined, content);
           break;
         }
 
-        yield this.createToolResult(toolCallId, resolvedToolName, result, isError);
+        yield this.createToolResult(toolCallId, resolvedToolName, result, isError, undefined, content);
         break;
       }
 

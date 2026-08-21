@@ -629,6 +629,9 @@ async function resolveToolDisplayMeta(
           'browser_tool': 'Browser',
           'office_document_inspect': 'Inspect Office Document',
           'office_document_edit': 'Edit Office Document',
+          'office_document_guide': 'Load Office Guide',
+          'office_document_preview': 'Preview Office Document',
+          'office_document_finalize': 'Finalize Office Document',
         },
         'craft-agents-docs': {
           'SearchCraftAgents': 'Search Docs',
@@ -760,6 +763,9 @@ async function resolveToolDisplayMeta(
     'TaskOutput': 'Task Output',
     'office_document_inspect': 'Inspect Office Document',
     'office_document_edit': 'Edit Office Document',
+    'office_document_guide': 'Load Office Guide',
+    'office_document_preview': 'Preview Office Document',
+    'office_document_finalize': 'Finalize Office Document',
   }
 
   const nativeDisplayName = nativeToolNames[toolName]
@@ -3972,6 +3978,16 @@ export class SessionManager implements ISessionManager {
 
         sessionLog.info('[browser-pane] BPF registering browserPaneFns', { sessionId: sid })
         mergeSessionScopedToolCallbacks(sid, {
+          openOfficePreviewFn: async (url) => {
+            const parsed = new URL(url)
+            const loopbackHosts = new Set(['localhost', '127.0.0.1', '[::1]', '::1'])
+            if (parsed.protocol !== 'http:' || !loopbackHosts.has(parsed.hostname) || !parsed.port) {
+              throw new Error(`Refusing non-loopback Office preview URL: ${url}`)
+            }
+            const instanceId = await bpm.focusBoundForSessionAsync(sid, { workspaceId })
+            const navigated = await bpm.navigate(instanceId, parsed.toString())
+            return { instanceId, url: navigated.url }
+          },
           browserPaneFns: {
             openPanel: async (options) => {
               const instanceId = options?.background
@@ -8938,6 +8954,7 @@ export class SessionManager implements ISessionManager {
             toolUseId: event.toolUseId,
             toolName: toolName,
             result: formattedResult,
+            ...(event.content && event.content.length > 0 ? { content: event.content } : {}),
             turnId: event.turnId,
             parentToolUseId,
             isError: inferredError,

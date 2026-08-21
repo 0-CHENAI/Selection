@@ -587,9 +587,16 @@ const OFFICE_FILE_PATH_PATTERN = /\.(?:docx|xlsx|pptx)$/i;
 const OFFICE_MARKDOWN_SIDECAR_PATTERN = /\.(?:docx|xlsx|pptx)\.md$/i;
 const OFFICE_PATH_IN_COMMAND_PATTERN = /\.(?:docx|xlsx|pptx)(?:\.md)?(?=$|[\s"';&|])/i;
 const OFFICE_CONTENT_FILE_TOOLS = new Set(['Read', 'Write', 'Edit', 'MultiEdit']);
-const OFFICE_DIRECT_CLI_PATTERN = /(?:^|[\s"';&|\\/])(?:officecli|docx-tool|xlsx-tool|pptx-tool)(?:\.exe)?(?=$|[\s"';&|])/i;
+const OFFICE_DIRECT_CLI_PATTERN = /(?:^|[\s"';&|\\/])(?:\$\{?CRAFT_OFFICECLI\}?|officecli(?:-(?:linux|mac|win)-(?:x64|arm64))?|docx-tool|xlsx-tool|pptx-tool)(?:\.exe)?(?=$|[\s"';&|])/i;
 const MARKITDOWN_CLI_PATTERN = /(?:^|[\s"';&|\\/])markitdown(?:\.exe)?(?=$|[\s"';&|])/i;
 const OFFICE_MARKDOWN_FALLBACK_MARKER = 'selection-office-native-fallback';
+const OFFICE_NATIVE_TOOL_NAMES = new Set([
+  'office_document_inspect',
+  'office_document_edit',
+  'office_document_guide',
+  'office_document_preview',
+  'office_document_finalize',
+]);
 
 function getToolFilePath(input: Record<string, unknown>): string | null {
   if (typeof input.file_path === 'string') return input.file_path;
@@ -603,6 +610,9 @@ function buildNativeOfficeRoutingMessage(context: string): string {
     'Use the native Office tools instead:',
     '- Read, inspect, query, help, or validate: office_document_inspect',
     '- Create or modify: office_document_edit',
+    '- Load hidden version-pinned guidance: office_document_guide',
+    '- Render or use an explicitly requested interactive preview: office_document_preview',
+    '- Run current-revision delivery gates: office_document_finalize',
     'Do not use Read, Write, Edit, a generated .docx.md/.xlsx.md/.pptx.md sidecar, direct officecli Bash, legacy *-tool commands, or markitdown as the default Office path.',
     `Only when the user explicitly requests Markdown conversion or the native inspect tool reports the operation unsupported may markitdown be retried with the command comment marker "# ${OFFICE_MARKDOWN_FALLBACK_MARKER}".`,
   ].join('\n');
@@ -620,7 +630,7 @@ export function getNativeOfficeToolRedirect(
     ? toolName.slice('mcp__session__'.length)
     : toolName;
 
-  if (canonicalToolName === 'office_document_inspect' || canonicalToolName === 'office_document_edit') {
+  if (OFFICE_NATIVE_TOOL_NAMES.has(canonicalToolName)) {
     return null;
   }
 
@@ -648,7 +658,7 @@ export function getNativeOfficeToolRedirect(
     const usesDirectOfficeCli = OFFICE_DIRECT_CLI_PATTERN.test(command);
     const usesMarkitdown = MARKITDOWN_CLI_PATTERN.test(command);
 
-    if (operatesOnOfficeFile && (usesDirectOfficeCli || (usesMarkitdown && !isMarkedMarkdownFallback))) {
+    if (usesDirectOfficeCli || (operatesOnOfficeFile && usesMarkitdown && !isMarkedMarkdownFallback)) {
       return {
         message: buildNativeOfficeRoutingMessage(
           'Shell-based Office content processing is blocked until the registered native Office tool is used.',

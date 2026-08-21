@@ -43,7 +43,10 @@ import type {
 } from '@earendil-works/pi-coding-agent';
 
 // Pi AI types
-import type { TextContent as PiTextContent } from '@earendil-works/pi-ai';
+import type {
+  ImageContent as PiImageContent,
+  TextContent as PiTextContent,
+} from '@earendil-works/pi-ai';
 
 // Pre-register the Bedrock provider module so the Pi SDK doesn't attempt a
 // dynamic import of "./amazon-bedrock.js" — which fails in the bundled output
@@ -133,12 +136,25 @@ interface RuntimeConfigUpdateMessage {
   customModels?: Array<string | { id: string; contextWindow?: number; supportsImages?: boolean }>;
 }
 
+type ProxyToolContent = PiTextContent | PiImageContent;
+
+interface ProxyToolExecutionResult {
+  content: string | ProxyToolContent[];
+  isError: boolean;
+}
+
+function normalizeProxyToolContent(content: ProxyToolExecutionResult['content']): ProxyToolContent[] {
+  return typeof content === 'string'
+    ? [{ type: 'text', text: content }]
+    : content;
+}
+
 /** Messages from main process (stdin) */
 type InboundMessage =
   | InitMessage
   | { type: 'prompt'; id: string; message: string; systemPrompt: string; images?: Array<{ type: 'image'; data: string; mimeType: string }> }
   | { type: 'register_tools'; tools: ProxyToolDef[] }
-  | { type: 'tool_execute_response'; requestId: string; result: { content: string; isError: boolean } }
+  | { type: 'tool_execute_response'; requestId: string; result: ProxyToolExecutionResult }
   | { type: 'pre_tool_use_response'; requestId: string; action: 'allow' | 'block' | 'modify'; input?: Record<string, unknown>; reason?: string }
   | { type: 'abort' }
   | { type: 'mini_completion'; id: string; prompt: string }
@@ -254,7 +270,7 @@ let currentUserMessage = '';
 
 // Pending promises for async handshakes
 const pendingPreToolUse = new Map<string, { resolve: (response: { action: string; input?: Record<string, unknown>; reason?: string }) => void }>();
-const pendingToolExecutions = new Map<string, { resolve: (result: { content: string; isError: boolean }) => void }>();
+const pendingToolExecutions = new Map<string, { resolve: (result: ProxyToolExecutionResult) => void }>();
 
 // Pending session MCP tool calls for completion detection
 const pendingSessionToolCalls = new Map<string, { toolName: string; arguments: Record<string, unknown> }>();
@@ -267,7 +283,7 @@ let proxyToolDefs: ProxyToolDef[] = [];
 // to the main process in parallel on message_end (before executeToolCalls iterates sequentially).
 // Each proxy tool's execute() then hits the cache instead of sending a new request.
 const PREFETCHABLE_TOOLS = new Set(['call_llm']);
-const prefetchCache = new Map<string, Promise<{ content: string; isError: boolean }>>();
+const prefetchCache = new Map<string, Promise<ProxyToolExecutionResult>>();
 
 function isPrefetchableTool(toolName: string): boolean {
   const stripped = toolName.replace(/^(mcp__session__|session__)/, '');
@@ -817,7 +833,7 @@ function buildProxyTools(): ToolDefinition<any, any>[] {
         debugLog(`Prefetch cache hit for ${def.name} (toolCallId: ${toolCallId})`);
         const result = await prefetched;
         return {
-          content: [{ type: 'text', text: result.content }],
+          content: normalizeProxyToolContent(result.content),
           details: result.isError ? { isError: true } : undefined,
         };
       }
@@ -837,12 +853,12 @@ function buildProxyTools(): ToolDefinition<any, any>[] {
         args: approvedInput,
       });
 
-      const result = await new Promise<{ content: string; isError: boolean }>((resolve) => {
+      const result = await new Promise<ProxyToolExecutionResult>((resolve) => {
         pendingToolExecutions.set(requestId, { resolve });
       });
 
       return {
-        content: [{ type: 'text', text: result.content }],
+        content: normalizeProxyToolContent(result.content),
         details: result.isError ? { isError: true } : undefined,
       };
     },
@@ -1151,7 +1167,7 @@ function handleSessionEvent(event: AgentSessionEvent): void {
           debugLog(`Prefetching ${prefetchableToolCalls.length} parallel ${prefetchableToolCalls[0]?.name} calls`);
           for (const tc of prefetchableToolCalls) {
             const requestId = `prefetch-${tc.id}`;
-            const promise = new Promise<{ content: string; isError: boolean }>((resolve) => {
+            const promise = new Promise<ProxyToolExecutionResult>((resolve) => {
               pendingToolExecutions.set(requestId, { resolve });
             });
             send({

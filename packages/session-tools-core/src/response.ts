@@ -57,8 +57,12 @@ export function textContent(text: string): TextContent {
  * Create a multi-block response (e.g., for multiple sections)
  */
 export function multiBlockResponse(texts: string[], isError?: boolean): ToolResult {
+  const [first = '', ...rest] = texts;
   return {
-    content: texts.map(text => ({ type: 'text' as const, text })),
+    content: [
+      { type: 'text', text: first },
+      ...rest.map(text => ({ type: 'text' as const, text })),
+    ],
     structuredContent: {},
     isError,
   };

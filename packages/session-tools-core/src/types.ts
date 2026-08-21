@@ -175,11 +175,21 @@ export interface TextContent {
   text: string;
 }
 
+/** Image content block compatible with MCP and agent SDK tool results. */
+export interface ImageContent {
+  type: 'image';
+  data: string;
+  mimeType: string;
+}
+
+export type ToolContent = TextContent | ImageContent;
+
 /**
  * Standard tool result type compatible with both SDK and MCP patterns
  */
 export interface ToolResult {
-  content: TextContent[];
+  /** The first block is always text so string-only clients retain a stable envelope. */
+  content: [TextContent, ...ToolContent[]];
   /**
    * Optional structured payload for MCP clients.
    * Keep this as an object (not null) for compatibility with strict tool_result parsers.

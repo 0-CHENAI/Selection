@@ -1,0 +1,77 @@
+name: OfficeCLI Upgrade Draft
+
+on:
+  schedule:
+    - cron: "23 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: officecli-upgrade-draft
+  cancel-in-progress: false
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout default branch
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.3.10"
+
+      - name: Synchronize latest stable OfficeCLI release
+        id: sync
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: bun scripts/sync-officecli.ts --update --allow-unclassified
+
+      - name: Detect reviewed resource changes
+        id: changes
+        shell: bash
+        run: |
+          if git diff --quiet -- apps/electron/resources/officecli; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Publish or refresh draft upgrade PR
+        if: steps.changes.outputs.changed == 'true'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          OFFICECLI_VERSION: ${{ steps.sync.outputs.version }}
+        run: |
+          set -euo pipefail
+          branch="codex/officecli-upgrade-v${OFFICECLI_VERSION}"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch origin "refs/heads/${branch}:refs/remotes/origin/${branch}" || true
+          git checkout -B "$branch"
+          git add apps/electron/resources/officecli
+          git commit -m "构建：同步 OfficeCLI v${OFFICECLI_VERSION}"
+          git push --force-with-lease origin "HEAD:${branch}"
+
+          title="构建：升级 OfficeCLI 至 v${OFFICECLI_VERSION}"
+          body_file="apps/electron/resources/officecli/officecli-upgrade-report.md"
+          pr_number=$(gh pr list --state open --head "$branch" --json number --jq '.[0].number // empty')
+          if [[ -n "$pr_number" ]]; then
+            gh pr edit "$pr_number" --title "$title" --body-file "$body_file"
+            gh pr ready "$pr_number" --undo || true
+          else
+            gh pr create --draft --base "${{ github.event.repository.default_branch }}" --head "$branch" --title "$title" --body-file "$body_file"
+          fi
+
+      - name: Enforce reviewed command and resource policy
+        if: steps.changes.outputs.changed == 'true'
+        run: bun scripts/sync-officecli.ts --check --download-runtime

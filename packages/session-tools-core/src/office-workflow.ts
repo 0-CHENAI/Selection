@@ -1,152 +1,40 @@
-/**
- * Office document workflow — single source of playbook copy, tool
- * descriptions, inspect-budget constants, and file fingerprints.
- */
+import {
+  OFFICE_MAX_BATCH_FILE_BYTES,
+  OFFICE_MAX_INLINE_BATCH_CHARS,
+  OFFICE_MAX_INLINE_BATCH_COMMANDS,
+} from './runtime/office-coordinator.ts';
 
-import { isAbsolute, join, normalize } from 'node:path';
+export {
+  OFFICE_MAX_BATCH_FILE_BYTES,
+  OFFICE_MAX_INLINE_BATCH_CHARS,
+  OFFICE_MAX_INLINE_BATCH_COMMANDS,
+};
 
-export const OFFICE_INSPECT_BUDGET_LIMIT = 4;
+export const OFFICE_WORKFLOW_PROMPT = `Office document workflow:
+- OfficeCLI is the only Office execution engine. Use the five built-in Office tools; never run officecli, legacy Office CLIs, scripts, or binary file edits through Bash/Read/Write.
+- Pass native tokens as argv and omit the leading officecli binary name. Tokens are sent directly to the reviewed bundled binary without a shell.
+- For a complex Word, Excel, PowerPoint, form, paper, dashboard, financial-model, pitch, or Morph task, progressively load only the relevant internal guide topic with office_document_guide.
+- Use office_document_inspect for status/help/view/get/query/validate/dump/raw. Successful identical reads are revision-cached; change the request after an error instead of repeating it.
+- Use office_document_edit for create/edit/import/merge/refresh/batch. Existing outputs require explicit --force. Batch is atomic unless --best-effort is explicitly present.
+- Use office_document_preview.render for visual evidence. Only office_document_preview.start may open or focus the Selection BrowserPane.
+- Finish deliverables with office_document_finalize. deliveryReady means Selection's machine gates passed for the latest revision; it is not Microsoft Office human visual approval.`;
 
-const OFFICE_BUDGET_RESETTING_EDIT_COMMANDS: ReadonlySet<string> = new Set([
-  'create', 'set', 'add', 'remove', 'move', 'swap',
-  'raw-set', 'add-part', 'batch', 'import', 'merge',
-]);
+export const OFFICE_DOCUMENT_INSPECT_DESCRIPTION = `Read Office documents through Selection's reviewed OfficeCLI runtime.
 
-export const OFFICE_INSPECT_COUNTED_COMMANDS: ReadonlySet<string> = new Set([
-  'view', 'get', 'query', 'validate', 'dump', 'raw',
-]);
+Input is { argv: string[], timeoutMs? }. argv starts with one read-only verb: status, help, view, get, query, validate, dump, raw, or get-marks. Do not include the officecli prefix or shell quoting. Rendering output, browser launch, management, resident, installation, upgrade, MCP, plugin, and unknown commands are blocked. Repeated successful calls are cached by artifact revision; after three identical failures Selection returns loop_prevented.`;
 
-export const OFFICE_TRUNCATED_PREVIEW_CHARS = 800;
+export const OFFICE_DOCUMENT_EDIT_DESCRIPTION = `Create or modify Office documents through Selection's reviewed OfficeCLI runtime.
 
-export const OFFICE_TRUNCATION_SUGGESTION =
-  'Output was truncated. Use view outline, query, or get for a narrower read. Do not dump or raw the whole tree.';
+Input is { argv: string[], batch?, timeoutMs? }. argv starts with create, set, add, remove, move, swap, refresh, raw-set, add-part, batch, import, or merge. Arguments are native tokens passed with spawn(binary, argv), never a shell string. Existing create/merge outputs require --force. For batch, provide exactly one of batch.commands (JSON object strings; maximum ${OFFICE_MAX_INLINE_BATCH_COMMANDS} commands / ${OFFICE_MAX_INLINE_BATCH_CHARS} serialized characters) or batch.file (JSON array; maximum ${OFFICE_MAX_BATCH_FILE_BYTES} bytes). Batch is atomic by default; --best-effort is the only partial-success mode.`;
 
-export const OFFICE_REFRESH_NON_WINDOWS_NOTE =
-  'DOCX refresh requires Word + Windows. If TOC or field values remain placeholders, deliver the file and ask the user to update fields in Word.';
+export const OFFICE_DOCUMENT_GUIDE_DESCRIPTION = `Progressively load Selection's hidden, version-pinned official OfficeCLI guidance.
 
-export const OFFICE_ALREADY_CHECKED_MESSAGE =
-  'This inspect command was already run for this file. Deliver from the previous result.';
+Choose one guide. With no topic/referencePath, returns a compact heading catalog. topic returns only matching sections plus compact inherited base-guide context. referencePath loads one allowlisted vendored reference asset. Internal execution rules are always prepended and cannot be overridden by user Skills. Guides never appear in Skill lists.`;
 
-export const OFFICE_ALREADY_CHECKED_SUGGESTION =
-  'Do not retry the same inspect or switch commands to re-prove the same fact. Deliver the file path, what is done, and any platform limits.';
+export const OFFICE_DOCUMENT_PREVIEW_DESCRIPTION = `Render or interact with an Office document preview.
 
-export const OFFICE_BUDGET_EXHAUSTED_MESSAGE =
-  'Inspect budget exhausted for this file. Deliver now.';
+render creates page/range/contact-sheet artifacts and returns a bounded inline image without opening a window. start is the only action allowed to open/focus Selection BrowserPane and starts or reuses a loopback watch. status/stop manage the session reference; goto/selection/mark/unmark/get_marks operate on that watch. Preview marks are transient and never mutate the document.`;
 
-export const OFFICE_BUDGET_EXHAUSTED_SUGGESTION =
-  'Stop inspecting. Reply with the file path, completed work, and what this backend could not verify (TOC page numbers, visual style).';
+export const OFFICE_DOCUMENT_FINALIZE_DESCRIPTION = `Run revision-bound machine delivery gates for a Word, Excel, or PowerPoint file.
 
-export const OFFICE_MAX_INLINE_BATCH_COMMANDS = 30;
-export const OFFICE_MAX_INLINE_BATCH_CHARS = 16_000;
-export const OFFICE_MAX_INLINE_ARGUMENTS_CHARS = 8_000;
-export const OFFICE_MAX_BATCH_FILE_BYTES = 2_000_000;
-
-export const OFFICE_PAYLOAD_TOO_LARGE_SUGGESTION =
-  'Do not retry the same payload. Write the command array as JSON, then call batch with batchCommandsFile; or split into smaller in-limit batches.';
-
-const OFFICE_WORKFLOW_GENERATE_RULES = `- Generate (small/medium): create a blank file, then one inline batch (headings, paragraphs, tables, TOC fields) within ${OFFICE_MAX_INLINE_BATCH_COMMANDS} commands and ${OFFICE_MAX_INLINE_BATCH_CHARS} characters. Fill a template with merge. Do not draft long Markdown and add it paragraph by paragraph. If an element is unclear, call help docx heading or help docx add paragraph — do not dump XML.
-- Generate (large): prefer multiple in-limit batches over one giant tool call. If the command array fits in one Write but not in batchCommands, Write a .json file in the working directory, then batch with batchCommandsFile. Do not put multi-page text in batchCommands or --prop. If a tool call fails because the payload is too large or arguments were truncated, do not retry the same payload — write a smaller file or split into smaller batches.`;
-
-const OFFICE_WORKFLOW_INSPECT_RULES = `- Read: start with view outline or view text --max-lines 80. Use get or query only for a single node.
-- Validate: after generating, at most one validate (OpenXML schema only). If the body is present and schema passes, deliver.
-- Do not: treat dump as a reader — dump only prepares a replayable batch. raw is a last resort. Do not switch inspect commands to re-prove the same fact. view issues field_not_evaluated is common off Windows — state the limit and deliver; do not refresh or dump again.
-- refresh: DOCX TOC/page numbers update only with Word + Windows. If that is unavailable, tell the user to open the file in Word and update fields, then stop.
-- Closing reply: file path, what is done, what this backend could not verify (TOC page numbers, visual style), and one Word step for the user.`;
-
-export const OFFICE_WORKFLOW_PROMPT = `Office document workflow (follow this; do not explore):
-${OFFICE_WORKFLOW_GENERATE_RULES}
-${OFFICE_WORKFLOW_INSPECT_RULES}`;
-
-export const OFFICE_DOCUMENT_INSPECT_DESCRIPTION = `Inspect Word, Excel, and PowerPoint files through Selection's built-in OfficeCLI runtime.
-
-This tool is always registered and does not require loading a skill. It accepts argument tokens, invokes the app-managed binary directly, and returns normalized JSON.
-
-Office document workflow (follow this; do not explore):
-${OFFICE_WORKFLOW_INSPECT_RULES}
-
-Examples:
-- Check availability: { "command": "status" }
-- Read a document: { "command": "view", "arguments": ["report.docx", "outline"] }
-- Validate a workbook: { "command": "validate", "arguments": ["data.xlsx"] }
-- Get help: { "command": "help", "arguments": ["docx", "heading"] }
-
-The read-only tool rejects output files, browser launching, and JSONL output. Use office_document_edit for mutations.`;
-
-export const OFFICE_DOCUMENT_EDIT_DESCRIPTION = `Create and modify Word, Excel, and PowerPoint files through Selection's built-in OfficeCLI runtime.
-
-This tool is always registered and does not require loading a skill. Arguments are passed as separate tokens without a shell, and results use a stable JSON envelope. Batch calls must use exactly one of batchCommands (small/medium, max ${OFFICE_MAX_INLINE_BATCH_COMMANDS} commands / ${OFFICE_MAX_INLINE_BATCH_CHARS} characters) or batchCommandsFile (large JSON written first). Resident and management commands are not accepted.
-
-${OFFICE_WORKFLOW_PROMPT}
-
-Examples:
-- Create: { "command": "create", "arguments": ["report.docx"] }
-- Add paragraph: { "command": "add", "arguments": ["report.docx", "/body", "--type", "paragraph", "--prop", "text=Summary"] }
-- Small batch: { "command": "batch", "arguments": ["data.xlsx"], "batchCommands": [{ "command": "set", "path": "/Sheet1/A1", "props": { "value": "Done" } }] }
-- Large batch: Write commands.json first, then { "command": "batch", "arguments": ["report.docx"], "batchCommandsFile": "commands.json" }
-
-After a successful edit, at most one focused office_document_inspect (outline, short text, or a single validate), then deliver. Do not keep validating the result.`;
-
-export function isOfficeInspectCountedCommand(command: string): boolean {
-  return OFFICE_INSPECT_COUNTED_COMMANDS.has(command);
-}
-
-export function isOfficeBudgetResettingEdit(command: string): boolean {
-  return OFFICE_BUDGET_RESETTING_EDIT_COMMANDS.has(command);
-}
-
-export function isOfficeDocxPath(filePath: string | undefined): boolean {
-  return typeof filePath === 'string' && /\.docx$/i.test(filePath);
-}
-
-export function normalizeOfficeArgument(argument: string): string {
-  const trimmed = argument.trim();
-  if (trimmed.startsWith('-')) return trimmed;
-  return normalize(trimmed).replaceAll('\\', '/');
-}
-
-function looksLikeOfficeDocumentPath(argument: string): boolean {
-  return /\.(?:docx|xlsx|pptx)$/i.test(argument);
-}
-
-export function resolveOfficeDocumentPath(
-  argumentList: string[] | undefined,
-  cwd?: string,
-): string | undefined {
-  const pathArg = (argumentList ?? []).find(argument => {
-    const trimmed = argument.trim();
-    return trimmed.length > 0 && !trimmed.startsWith('-') && looksLikeOfficeDocumentPath(trimmed);
-  });
-  if (pathArg === undefined) return undefined;
-  const normalized = normalizeOfficeArgument(pathArg);
-  if (!cwd || isAbsolute(normalized)) return normalized;
-  return normalizeOfficeArgument(join(cwd, normalized));
-}
-
-export function extractOfficeDocumentPath(argumentList: string[] | undefined): string | undefined {
-  return resolveOfficeDocumentPath(argumentList);
-}
-
-export function normalizeOfficeInspectArguments(
-  argumentList: string[] | undefined,
-  cwd?: string,
-): string[] {
-  return (argumentList ?? []).map(argument => {
-    const trimmed = argument.trim();
-    if (trimmed.length === 0 || trimmed.startsWith('-') || !looksLikeOfficeDocumentPath(trimmed)) {
-      return normalizeOfficeArgument(argument);
-    }
-    return resolveOfficeDocumentPath([argument], cwd) ?? normalizeOfficeArgument(argument);
-  });
-}
-
-export function officeInspectFingerprint(
-  command: string,
-  argumentList: string[] | undefined,
-  cwd?: string,
-): string {
-  return `${command}\0${JSON.stringify(normalizeOfficeInspectArguments(argumentList, cwd))}`;
-}
-
-export function officeInspectBudgetKey(sessionId: string, filePath: string): string {
-  return `${sessionId}\0${filePath}`;
-}
+flushes Selection-owned runtime state, confirms the file is present and openable, runs OfficeCLI validate and format-specific issue/content checks, then renders final visual evidence. Files changed in this session default to strict; external read-only files default to standard. deliveryReady is true only when every blocking check corresponds to the current artifact revision. This does not claim Microsoft Office human visual approval.`;

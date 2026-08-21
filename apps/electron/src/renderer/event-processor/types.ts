@@ -6,6 +6,7 @@
  */
 
 import type { Session, Message, PermissionRequest, CredentialRequest, TypedError, PermissionMode, SessionStatus, AuthRequest, ToolDisplayMeta } from '../../shared/types'
+import type { AgentToolResultContent } from '@craft-agent/core/types'
 
 /**
  * Streaming state for a session - replaces streamingTextRef
@@ -79,6 +80,8 @@ export interface ToolResultEvent {
   toolUseId: string
   toolName?: string
   result: string
+  /** Live-only multimodal blocks; handlers intentionally do not persist Base64. */
+  content?: AgentToolResultContent[]
   isError?: boolean
   turnId?: string
   parentToolUseId?: string
