@@ -155,28 +155,33 @@ function textFileHash(path: string): string {
   return sha256(readFileSync(path, 'utf8').replace(/\r\n/g, '\n').replace(/\r/g, '\n'));
 }
 
-export function commandSchemaContract(snapshot: CommandSnapshot): {
-  version: string;
-  schemaCrc: string;
-  generatedFrom: CommandSnapshot['generatedFrom'];
-  helpAllEntries: number;
-  rootCommands: string[];
-  flags: Record<string, string[]>;
-} {
-  return {
-    version: snapshot.version,
-    schemaCrc: snapshot.schemaCrc,
-    generatedFrom: snapshot.generatedFrom,
-    helpAllEntries: snapshot.helpAllEntries,
-    rootCommands: snapshot.rootCommands,
-    flags: Object.fromEntries(
-      Object.entries(snapshot.commands).map(([name, command]) => [name, command.flags]),
-    ),
-  };
+function lowerFlags(flags: string[] | undefined): string[] {
+  return [...new Set((flags ?? []).map(flag => flag.toLowerCase()))].sort();
 }
 
-export function commandSchemaContractsEqual(left: CommandSnapshot, right: CommandSnapshot): boolean {
-  return JSON.stringify(commandSchemaContract(left)) === JSON.stringify(commandSchemaContract(right));
+export function commandSchemaContractIssues(actual: CommandSnapshot, reviewed: CommandSnapshot): string[] {
+  const issues: string[] = [];
+  if (actual.version !== reviewed.version) issues.push(`version ${actual.version} != ${reviewed.version}`);
+  if (actual.schemaCrc !== reviewed.schemaCrc) issues.push(`schemaCrc ${actual.schemaCrc} != ${reviewed.schemaCrc}`);
+  if (actual.generatedFrom !== reviewed.generatedFrom) issues.push('generatedFrom mismatch');
+
+  const actualCommands = [...actual.rootCommands].sort();
+  const reviewedCommands = [...reviewed.rootCommands].sort();
+  const missingCommands = reviewedCommands.filter(command => !actualCommands.includes(command));
+  const extraCommands = actualCommands.filter(command => !reviewedCommands.includes(command));
+  if (missingCommands.length > 0) issues.push(`missing commands: ${missingCommands.join(', ')}`);
+  if (extraCommands.length > 0) issues.push(`extra commands: ${extraCommands.join(', ')}`);
+
+  for (const name of reviewedCommands) {
+    const missingFlags = lowerFlags(reviewed.commands[name]?.flags)
+      .filter(flag => !lowerFlags(actual.commands[name]?.flags).includes(flag));
+    if (missingFlags.length > 0) issues.push(`${name} missing flags: ${missingFlags.join(', ')}`);
+  }
+  return issues;
+}
+
+export function commandSchemaContractsEqual(actual: CommandSnapshot, reviewed: CommandSnapshot): boolean {
+  return commandSchemaContractIssues(actual, reviewed).length === 0;
 }
 
 function json<T>(path: string): T {
@@ -224,7 +229,16 @@ function directoryHash(root: string): string {
 }
 
 async function run(binary: string, args: string[]): Promise<string> {
-  const proc = Bun.spawn([binary, ...args], { stdout: 'pipe', stderr: 'pipe', env: process.env });
+  const proc = Bun.spawn([binary, ...args], {
+    stdout: 'pipe',
+    stderr: 'pipe',
+    env: {
+      ...process.env,
+      DOTNET_SYSTEM_GLOBALIZATION_INVARIANT: '1',
+      LANG: 'C',
+      LC_ALL: 'C',
+    },
+  });
   const [stdout, stderr, exitCode] = await Promise.all([
     new Response(proc.stdout).text(),
     new Response(proc.stderr).text(),
@@ -731,9 +745,10 @@ async function check(downloadRuntime: boolean): Promise<void> {
     if (binary) {
       const snapshot = await buildCommandSnapshot(binary);
       const reviewed = json<CommandSnapshot>(join(officeRoot, manifest.commandSchema!.file));
-      if (!commandSchemaContractsEqual(snapshot, reviewed)) {
+      const contractIssues = commandSchemaContractIssues(snapshot, reviewed);
+      if (contractIssues.length > 0) {
         throw new Error(
-          'Reviewed command schema contract differs from the current platform binary (version, schemaCrc, commands, or flags)',
+          `Reviewed command schema contract differs from the current platform binary: ${contractIssues.join('; ')}`,
         );
       }
       const key = `${process.platform}-${process.arch}`;

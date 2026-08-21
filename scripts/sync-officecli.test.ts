@@ -50,7 +50,22 @@ describe('OfficeCLI sync governance', () => {
         ]),
       ),
     };
-    const driftedFlags: CommandSnapshot = {
+    const extraPlatformFlags: CommandSnapshot = {
+      ...reviewed,
+      helpAllEntries: reviewed.helpAllEntries + 10,
+      commands: {
+        ...reviewed.commands,
+        get: { ...reviewed.commands.get!, flags: [...reviewed.commands.get!.flags, '--Native'] },
+      },
+    };
+    const missingReviewedFlags: CommandSnapshot = {
+      ...reviewed,
+      commands: {
+        ...reviewed.commands,
+        get: { ...reviewed.commands.get!, flags: reviewed.commands.get!.flags.filter(flag => flag !== '--json') },
+      },
+    };
+    const driftedReviewedFlags: CommandSnapshot = {
       ...reviewed,
       commands: {
         ...reviewed.commands,
@@ -59,7 +74,9 @@ describe('OfficeCLI sync governance', () => {
     };
 
     expect(commandSchemaContractsEqual(reviewed, sameContractDifferentHelp)).toBe(true);
-    expect(commandSchemaContractsEqual(reviewed, driftedFlags)).toBe(false);
+    expect(commandSchemaContractsEqual(extraPlatformFlags, reviewed)).toBe(true);
+    expect(commandSchemaContractsEqual(missingReviewedFlags, reviewed)).toBe(false);
+    expect(commandSchemaContractsEqual(reviewed, driftedReviewedFlags)).toBe(false);
   });
 
   it('rejects lookalike release URLs and version/tag drift', () => {
