@@ -172,16 +172,6 @@ export function deriveTurnPhase(turn: AssistantTurn): TurnPhase {
 }
 
 /**
- * Determines if the "Thinking..." indicator should be shown.
- *
- * The thinking indicator appears when the turn is active but there's
- * nothing visible to show the user (no running tools, no streaming response).
- * This covers both the initial pending state and the gap after tools complete.
- *
- * @param phase - The current turn phase
- * @param isBuffering - Whether response text is still being buffered
- */
-/**
  * Commentary occupies the response card while the turn is still working.
  * Once the turn completes, the same body is the visible final reply.
  */
@@ -192,6 +182,27 @@ export function isVisibleCommentaryCard(
   return !!response?.isCommentary && !isComplete
 }
 
+/** The live card already shows this intermediate body — don't also insert a row. */
+export function isMirroredCommentaryActivity(
+  activity: Pick<ActivityItem, 'type' | 'id'>,
+  response: AssistantTurn['response'],
+  isComplete: boolean,
+): boolean {
+  return activity.type === 'intermediate'
+    && isVisibleCommentaryCard(response, isComplete)
+    && activity.id === response?.messageId
+}
+
+/**
+ * Determines if the "Thinking..." indicator should be shown.
+ *
+ * The thinking indicator appears when the turn is active but there's
+ * nothing visible to show the user (no running tools, no streaming response).
+ * This covers both the initial pending state and the gap after tools complete.
+ *
+ * @param phase - The current turn phase
+ * @param isBuffering - Whether response text is still being buffered
+ */
 export function shouldShowThinkingIndicator(phase: TurnPhase, isBuffering: boolean): boolean {
   // Show thinking indicator during:
   // - pending: waiting for first activity
@@ -671,7 +682,8 @@ export function groupMessagesByTurn(messages: Message[], options: GroupTurnsOpti
         const retainCommentaryCard = !currentResponse
           || currentResponse.isCommentary
           || currentResponse.messageId === message.id
-        if (retainCommentaryCard) {
+        // Empty complete must not wipe a body the user is already reading.
+        if (retainCommentaryCard && message.content.trim()) {
           const stillStreaming = !!(message.isPending || message.isStreaming)
           currentTurn.response = {
             text: message.content,

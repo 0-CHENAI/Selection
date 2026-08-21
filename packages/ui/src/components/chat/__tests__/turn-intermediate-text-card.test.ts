@@ -11,6 +11,7 @@ import type { Message } from '@craft-agent/core'
 import {
   deriveTurnPhase,
   groupMessagesByTurn,
+  isMirroredCommentaryActivity,
   isVisibleCommentaryCard,
   type AssistantTurn,
 } from '../turn-utils'
@@ -203,5 +204,47 @@ describe('isVisibleCommentaryCard', () => {
     expect(isVisibleCommentaryCard(response, true)).toBe(false)
     expect(isVisibleCommentaryCard({ ...response, isCommentary: false }, false)).toBe(false)
     expect(isVisibleCommentaryCard(undefined, false)).toBe(false)
+  })
+})
+
+describe('work-chain row visibility', () => {
+  it('hides the mirrored commentary row until a tool needs the work chain', () => {
+    const pending = pendingAssistant('msg-body', '先说明接下来要读哪个文件。', 10)
+    const beforeTools = assistantTurn(groupMessagesByTurn([
+      user('帮我改文档'),
+      completeIntermediate(pending),
+    ]))
+    const commentaryRow = beforeTools.activities.find(activity => activity.id === 'msg-body')
+    expect(commentaryRow).toBeDefined()
+    expect(isMirroredCommentaryActivity(commentaryRow!, beforeTools.response, beforeTools.isComplete)).toBe(true)
+
+    const withTool = assistantTurn(groupMessagesByTurn([
+      user('帮我改文档'),
+      completeIntermediate(pending),
+      tool('running', 20),
+    ]))
+    const stillMirrored = withTool.activities.find(activity => activity.id === 'msg-body')
+    const toolRow = withTool.activities.find(activity => activity.type === 'tool')
+    expect(isMirroredCommentaryActivity(stillMirrored!, withTool.response, withTool.isComplete)).toBe(true)
+    expect(isMirroredCommentaryActivity(toolRow!, withTool.response, withTool.isComplete)).toBe(false)
+  })
+
+  it('empty intermediate text does not wipe a readable card', () => {
+    const pending = pendingAssistant('msg-body', '先说明接下来要读哪个文件。', 10)
+    const empty = {
+      ...completeIntermediate(pending),
+      id: 'msg-empty',
+      content: '   ',
+      timestamp: 15,
+    }
+    const turn = assistantTurn(groupMessagesByTurn([
+      user('帮我改文档'),
+      completeIntermediate(pending),
+      empty,
+    ]))
+
+    expect(turn.response?.text).toBe('先说明接下来要读哪个文件。')
+    expect(turn.response?.messageId).toBe('msg-body')
+    expect(isVisibleCommentaryCard(turn.response, turn.isComplete)).toBe(true)
   })
 })

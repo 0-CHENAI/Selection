@@ -53,6 +53,7 @@ import {
   deriveTurnPhase,
   getActiveTurnPreview,
   isVisibleCommentaryCard,
+  isMirroredCommentaryActivity,
   shouldShowThinkingIndicator,
   type ActivityGroup,
   type AssistantTurn,
@@ -675,6 +676,9 @@ export function ActivityStatusIcon({
   /** Custom icon from tool metadata - emoji or data URL (base64) */
   customIcon?: string
 }) {
+  const reduceMotion = useReducedMotion()
+  const iconTransition = { duration: reduceMotion ? 0 : 0.2, ease: "easeOut" as const }
+
   // Render the appropriate icon based on status
   const renderIcon = () => {
     // For completed status with custom icon, use it instead of checkmark
@@ -728,9 +732,6 @@ export function ActivityStatusIcon({
         return <XCircle className={cn(SIZE_CONFIG.iconSize, "shrink-0 text-destructive")} />
     }
   }
-
-  const reduceMotion = useReducedMotion()
-  const iconTransition = { duration: reduceMotion ? 0 : 0.2, ease: "easeOut" as const }
 
   // Wrap in AnimatePresence for crossfade between states
   return (
@@ -794,8 +795,7 @@ function ActivityRow({ activity, onOpenDetails, isLastChild, sessionFolderPath, 
         <TreeViewConnector depth={depth} isLastChild={isLastChild} />
         <div
           className={cn(
-            "group/row flex gap-2 py-0.5 text-foreground/75 flex-1 min-w-0",
-            isThinking ? "items-center" : "items-start",
+            "group/row flex items-center gap-2 py-0.5 text-foreground/75 flex-1 min-w-0",
             SIZE_CONFIG.fontSize
           )}
           onClick={onOpenDetails && isComplete ? onOpenDetails : undefined}
@@ -805,13 +805,9 @@ function ActivityRow({ activity, onOpenDetails, isLastChild, sessionFolderPath, 
               <Spinner className={SIZE_CONFIG.spinnerSize} />
             </div>
           ) : (
-            <MessageCircleDashed className={cn(SIZE_CONFIG.iconSize, "shrink-0 mt-0.5")} />
+            <MessageCircleDashed className={cn(SIZE_CONFIG.iconSize, "shrink-0")} />
           )}
-          <span className={cn(
-            "flex-1 min-w-0",
-            isThinking ? "truncate" : "whitespace-pre-wrap break-words line-clamp-4",
-            onOpenDetails && isComplete && "group-hover/row:underline"
-          )}>{displayContent}</span>
+          <span className={cn("truncate flex-1", onOpenDetails && isComplete && "group-hover/row:underline")}>{displayContent}</span>
           {/* Open details button */}
           {onOpenDetails && isComplete && (
             <div
@@ -2331,6 +2327,10 @@ export function ResponseCard({
 
   const isCompleted = !isStreaming
   const isBuffering = isStreaming && !reveal.shouldShow
+  const bodyText = isStreaming ? displayedText : text
+  // Commentary must stay on the live card tree. Switching to the completed
+  // chrome remounts markdown and pops a final-reply footer the moment tools start.
+  const showCompletedChrome = (isCompleted && !isCommentary) || variant === 'plan'
 
   // While buffering, return null - TurnCard will show a subtle indicator instead
   if (isBuffering) {
@@ -2338,7 +2338,7 @@ export function ResponseCard({
   }
 
   // Completed response or plan - show with max height and footer
-  if (isCompleted || variant === 'plan') {
+  if (showCompletedChrome) {
     const isPlan = variant === 'plan'
 
     return (
@@ -2559,7 +2559,7 @@ export function ResponseCard({
               onUrlClick={onOpenUrl}
               onFileClick={onOpenFile}
             >
-              {displayedText}
+              {bodyText}
             </Markdown>
             {annotationOverlayLayer}
           </div>
@@ -2567,7 +2567,7 @@ export function ResponseCard({
 
         {/* Desktop streaming footer; compact mode renders nothing here
             (the Accept-Plan footer only applies to completed plans). */}
-        {!compactMode && (
+        {!compactMode && isStreaming && (
           <div className={cn("px-4 py-2 border-t border-border/30 flex items-center bg-muted/20", SIZE_CONFIG.fontSize)}>
             <div className="flex items-center gap-2 text-muted-foreground">
               <Spinner className={SIZE_CONFIG.spinnerSize} />
@@ -2814,24 +2814,34 @@ export const TurnCard = React.memo(function TurnCard({
     [allSortedActivities]
   )
 
+  // The live commentary card already shows this body. Hiding the mirrored
+  // row keeps the work chain from inserting a duplicate line (or appearing
+  // at all) until a tool or older commentary actually needs a row.
+  const visibleActivities = useMemo(
+    () => sortedActivities.filter(
+      activity => !isMirroredCommentaryActivity(activity, response, isComplete),
+    ),
+    [sortedActivities, response, isComplete],
+  )
+
   // Check if we have any Task subagents - if so, use grouped view
   const hasTaskSubagents = useMemo(
-    () => sortedActivities.some(a => isParentTaskTool(a.toolName ?? '')),
-    [sortedActivities]
+    () => visibleActivities.some(a => isParentTaskTool(a.toolName ?? '')),
+    [visibleActivities]
   )
 
   // Group activities by parent Task for better visualization
   // Only group if there are Task subagents, otherwise keep flat for simpler view
   const groupedActivities = useMemo(
-    () => hasTaskSubagents ? groupActivitiesByParent(sortedActivities) : null,
-    [sortedActivities, hasTaskSubagents]
+    () => hasTaskSubagents ? groupActivitiesByParent(visibleActivities) : null,
+    [visibleActivities, hasTaskSubagents]
   )
 
   // Pre-compute which activities are last children - O(n) instead of O(n²) per-render check
   // Only used for flat view (non-grouped)
   const lastChildSet = useMemo(
-    () => !hasTaskSubagents ? computeLastChildSet(sortedActivities) : new Set<string>(),
-    [sortedActivities, hasTaskSubagents]
+    () => !hasTaskSubagents ? computeLastChildSet(visibleActivities) : new Set<string>(),
+    [visibleActivities, hasTaskSubagents]
   )
 
   // Don't render if nothing to show and turn is complete
@@ -2862,8 +2872,8 @@ export const TurnCard = React.memo(function TurnCard({
     return null
   }
 
-  // Only count non-plan activities for the collapsible section
-  const hasActivities = sortedActivities.length > 0
+  // Only count rows the user will actually see in the collapsible section
+  const hasActivities = visibleActivities.length > 0
 
   // Determine if thinking indicator should show using the phase-based state machine.
   // This properly handles the "gap" state (awaiting) between tool completion and next action,
@@ -2898,7 +2908,7 @@ export const TurnCard = React.memo(function TurnCard({
 
             {/* Step count badge */}
             <span className="-ml-0.5 shrink-0 px-1.5 py-0.5 rounded-[4px] bg-background shadow-minimal text-[10px] font-medium tabular-nums">
-              {activities.length}
+              {visibleActivities.length}
             </span>
 
             {/* Preview text with crossfade + inline failure count */}
@@ -2988,7 +2998,7 @@ export const TurnCard = React.memo(function TurnCard({
                     ))
                   ) : (
                     /* Flat view for simple tool calls */
-                    sortedActivities.map((activity, index) => (
+                    visibleActivities.map((activity, index) => (
                       <motion.div
                         key={activity.id}
                         initial={
@@ -3022,7 +3032,7 @@ export const TurnCard = React.memo(function TurnCard({
                       initial={reduceMotion ? false : { opacity: 0, x: -8 }}
                       animate={{ opacity: 1, x: 0 }}
                       transition={{
-                        delay: reduceMotion ? 0 : Math.min(sortedActivities.length, SIZE_CONFIG.staggeredAnimationLimit) * 0.03,
+                        delay: reduceMotion ? 0 : Math.min(visibleActivities.length, SIZE_CONFIG.staggeredAnimationLimit) * 0.03,
                         duration: reduceMotion ? 0 : 0.3,
                         ease: "easeOut"
                       }}
