@@ -57,6 +57,7 @@ function loadManifest(path: string): OfficecliManifest {
       && typeof asset.name === 'string'
       && typeof asset.url === 'string'
       && /^[0-9a-f]{64}$/.test(asset.sha256)
+      && (asset.schemaCrc === undefined || /^[0-9a-f]{8}$/.test(asset.schemaCrc))
     ));
   const compatibilityKeys = Object.keys(parsed.compatibilityRecipes ?? {});
   const importRecipe = parsed.compatibilityRecipes?.importViaAtomicBatch;
@@ -127,4 +128,11 @@ export function resolveOfficecliResources(
 
 export function clearOfficecliManifestCache(): void {
   manifestCache.clear();
+}
+
+export function reviewedOfficecliSchemaCrc(
+  manifest: OfficecliManifest,
+  platformKey = `${process.platform}-${process.arch}`,
+): string {
+  return manifest.assets[platformKey]?.schemaCrc ?? manifest.schemaCrc;
 }

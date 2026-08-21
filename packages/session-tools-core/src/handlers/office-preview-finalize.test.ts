@@ -18,7 +18,7 @@ import {
   clearOfficeRuntimeState,
   type OfficeCoordinatorDependencies,
 } from '../runtime/office-coordinator.ts';
-import { resolveOfficecliResources } from '../runtime/office-manifest.ts';
+import { resolveOfficecliResources, reviewedOfficecliSchemaCrc } from '../runtime/office-manifest.ts';
 import { handleOfficeDocumentFinalize as handleOfficeDocumentFinalizeImpl } from './office-finalize.ts';
 import {
   clearOfficePreviewState,
@@ -35,6 +35,7 @@ const resources = resolveOfficecliResources({
 if (!resources) throw new Error('OfficeCLI test resources are missing');
 const expectedRuntimeSha256 = resources.manifest.assets[`${process.platform}-${process.arch}`]?.sha256;
 if (!expectedRuntimeSha256) throw new Error(`OfficeCLI test asset is missing for ${process.platform}-${process.arch}`);
+const expectedSchemaCrc = reviewedOfficecliSchemaCrc(resources.manifest);
 const TEST_DEPENDENCIES: OfficeCoordinatorDependencies = {
   hashRuntime: async () => expectedRuntimeSha256!,
 };
@@ -55,7 +56,7 @@ const path = require('node:path');
 const args = process.argv.slice(2);
 const reply = (value, code = 0) => { process.stdout.write(JSON.stringify(value)); process.exit(code); };
 if (args[0] === '--version') { process.stdout.write('1.0.144\\n'); process.exit(0); }
-if (args[0] === '--output-schema-crc') { process.stdout.write('b2b0b395\\n'); process.exit(0); }
+if (args[0] === '--output-schema-crc') { process.stdout.write('${expectedSchemaCrc}\\n'); process.exit(0); }
 if (args[0] === 'watch' && args[2] === '--port') {
   const publish = () => process.stdout.write('Watch: http://127.0.0.1:45678\\n');
   if ((args[1] || '').includes('slow-watch')) setTimeout(publish, 100);

@@ -28,7 +28,7 @@ import {
   isPathWithinDirectoryForCreation,
 } from './path-security.ts';
 import { resolveOfficecliRuntime } from './officecli.ts';
-import { resolveOfficecliResources } from './office-manifest.ts';
+import { resolveOfficecliResources, reviewedOfficecliSchemaCrc } from './office-manifest.ts';
 import { validateMorphGlb } from './office-recipes.ts';
 import {
   attachOfficeResidentSession,
@@ -2057,7 +2057,7 @@ export async function executeOfficeCommand(
       };
     }
     expectedVersion = resources.manifest.version;
-    expectedSchema = resources.manifest.schemaCrc;
+    expectedSchema = reviewedOfficecliSchemaCrc(resources.manifest, `${process.platform}-${process.arch}`);
     classifyAndValidateCommand(argv, request.mode, resources.manifest.commandPolicy, request.allowLifecycle);
     argv = translateLogicalArgv(argv);
     argv = normalizeOfficeDocumentArgv(argv);

@@ -90,6 +90,7 @@ export interface OfficecliManifestAsset {
   name: string;
   url: string;
   sha256: string;
+  schemaCrc?: string;
 }
 
 export interface OfficecliManifestGuide {

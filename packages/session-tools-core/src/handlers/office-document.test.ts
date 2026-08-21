@@ -25,7 +25,7 @@ import {
   type OfficeCoordinatorDependencies,
 } from '../runtime/office-coordinator.ts';
 import { handleOfficeDocumentEdit, handleOfficeDocumentInspect } from './office-document.ts';
-import { resolveOfficecliResources } from '../runtime/office-manifest.ts';
+import { resolveOfficecliResources, reviewedOfficecliSchemaCrc } from '../runtime/office-manifest.ts';
 
 const resources = resolveOfficecliResources({
   explicitRoot: resolve(import.meta.dir, '../../../../apps/electron/resources/officecli'),
@@ -33,6 +33,7 @@ const resources = resolveOfficecliResources({
 if (!resources) throw new Error('OfficeCLI test resources are missing');
 const expectedRuntimeSha256 = resources.manifest.assets[`${process.platform}-${process.arch}`]?.sha256;
 if (!expectedRuntimeSha256) throw new Error(`OfficeCLI test asset is missing for ${process.platform}-${process.arch}`);
+const expectedSchemaCrc = reviewedOfficecliSchemaCrc(resources.manifest);
 
 const roots: string[] = [];
 
@@ -118,7 +119,7 @@ function dependencies(
           timeoutMs: options.timeoutMs,
         });
         if (args.length === 1 && args[0] === '--version') return processResult('1.0.144\n');
-        if (args.length === 1 && args[0] === '--output-schema-crc') return processResult('b2b0b395\n');
+        if (args.length === 1 && args[0] === '--output-schema-crc') return processResult(`${expectedSchemaCrc}\n`);
         return execute(args);
       },
     },
@@ -154,7 +155,7 @@ describe('Office Runtime Coordinator', () => {
     expect(envelope(first)).toMatchObject({
       ok: true,
       version: '1.0.144',
-      schemaCrc: 'b2b0b395',
+      schemaCrc: expectedSchemaCrc,
       command: ['status'],
       cwd: realpathSync.native(f.working),
       cacheHit: false,
