@@ -181,16 +181,58 @@ export const BrowserToolSchema = z.object({
   ]).describe('Browser command as a string (e.g., "click @e1") or array (e.g., ["evaluate", "var x = 1; x + 2"]). Array mode preserves semicolons and whitespace in arguments.'),
 });
 
+const OfficeInspectRecipeSchema = z.discriminatedUnion('name', [
+  z.object({
+    name: z.literal('verify'),
+    file: z.string().min(1),
+    slide: z.number().int().positive(),
+    previousSlide: z.number().int().positive().optional(),
+  }),
+  z.object({
+    name: z.literal('final-check'),
+    file: z.string().min(1),
+  }),
+]);
+
+const OfficeEditRecipeSchema = z.discriminatedUnion('name', [
+  z.object({
+    name: z.literal('clone'),
+    file: z.string().min(1),
+    fromSlide: z.number().int().positive(),
+    toSlide: z.number().int().positive(),
+  }),
+  z.object({
+    name: z.literal('ghost'),
+    file: z.string().min(1),
+    slide: z.number().int().positive(),
+    shapeIndexes: z.array(z.number().int().positive()).min(1),
+  }),
+  z.object({
+    name: z.literal('clean-accumulation'),
+    file: z.string().min(1),
+    queryData: z.unknown(),
+    threshold: z.number().int().min(0).max(500).optional(),
+  }),
+]);
+
 export const OfficeDocumentInspectSchema = z.object({
-  argv: z.array(z.string()).min(1)
+  argv: z.array(z.string()).min(1).optional()
     .describe('Native tokens after the officecli binary name. Start with status/help/view/get/query/validate/dump/raw/get-marks. Never include a shell string or the officecli prefix.'),
+  recipe: OfficeInspectRecipeSchema.optional()
+    .describe('Read-only Morph recipe: verify or final-check. Mutually exclusive with argv.'),
   timeoutMs: z.number().int().min(1).max(300000).optional()
     .describe('Execution timeout in milliseconds. Defaults to 120000; maximum 300000.'),
+}).superRefine((value, ctx) => {
+  if (Boolean(value.argv?.length) === Boolean(value.recipe)) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'Provide exactly one of argv or recipe.' });
+  }
 });
 
 export const OfficeDocumentEditSchema = z.object({
-  argv: z.array(z.string()).min(1)
+  argv: z.array(z.string()).min(1).optional()
     .describe('Native OfficeCLI tokens. Start with create/set/add/remove/move/swap/refresh/raw-set/add-part/batch/import/merge. Never include a shell string or the officecli prefix.'),
+  recipe: OfficeEditRecipeSchema.optional()
+    .describe('Executable Morph recipe: clone, ghost, or clean-accumulation. Mutually exclusive with argv.'),
   batch: z.object({
     commands: z.array(z.string()).max(OFFICE_MAX_INLINE_BATCH_COMMANDS).optional()
       .describe(`Each string is one JSON command object. Maximum ${OFFICE_MAX_INLINE_BATCH_COMMANDS} commands and ${OFFICE_MAX_INLINE_BATCH_CHARS} serialized characters.`),
@@ -199,6 +241,10 @@ export const OfficeDocumentEditSchema = z.object({
   }).optional().describe('Only valid when argv[0] is batch; provide exactly one of commands or file.'),
   timeoutMs: z.number().int().min(1).max(300000).optional()
     .describe('Execution timeout in milliseconds. Defaults to 120000; maximum 300000.'),
+}).superRefine((value, ctx) => {
+  if (Boolean(value.argv?.length) === Boolean(value.recipe)) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'Provide exactly one of argv or recipe.' });
+  }
 });
 
 export const OfficeDocumentGuideSchema = z.object({
@@ -214,9 +260,10 @@ const OfficePreviewFileSchema = z.object({ file: z.string().min(1) });
 export const OfficeDocumentPreviewSchema = z.discriminatedUnion('action', [
   OfficePreviewFileSchema.extend({
     action: z.literal('render'),
-    page: z.string().optional().describe('Single page/slide or range such as 1 or 1-5.'),
-    range: z.string().optional().describe('Element data-path or Excel cell range to crop.'),
-    grid: z.union([z.number().int().positive(), z.literal('auto')]).optional().describe('Contact-sheet columns or auto.'),
+    page: z.string().min(1).optional().describe('Single page/slide or page range such as 1 or 1-5.'),
+    range: z.string().min(1).optional().describe('Element data-path or Excel cell range to crop.'),
+    grid: z.union([z.number().int().positive(), z.literal('auto')]).optional()
+      .describe('Word/PowerPoint contact-sheet columns or auto. Do not combine with page/range; Excel does not support grid.'),
     renderer: z.enum(['auto', 'html', 'native']).optional(),
     timeoutMs: z.number().int().min(1).max(300000).optional(),
   }),

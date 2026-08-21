@@ -1258,18 +1258,15 @@ Each item needs a \`src\` (absolute path) and an optional \`label\` (shown in th
 
 ## Document Tools
 
-For modern Office documents, use the registered native Office document tools. Other document CLI tools are available via Bash:
+For modern Office documents, use the registered native Office document tools. The non-Office document CLI tools below are available via Bash:
 
 | Tool | Description | Example |
 |------|-------------|---------|
 | **officecli** | Internal managed runtime for the five native Office document tools; do not invoke it directly through Bash. | Use the matching \`office_document_*\` tool |
 | **markitdown** | Fallback conversion to Markdown; not the default reader for .docx/.xlsx/.pptx | \`markitdown report.pdf\` |
 | **pdf-tool** | PDF operations (extract, merge, split, info) | \`pdf-tool extract report.pdf\` |
-| **xlsx-tool** | Legacy Excel helper; do not use for modern .xlsx files | See tool help for legacy formats |
-| **docx-tool** | Legacy Word helper; do not use for modern .docx files | See tool help for legacy formats |
-| **pptx-tool** | Legacy PowerPoint helper; do not use for modern .pptx files | See tool help for legacy formats |
 | **img-tool** | Image processing (resize, convert, metadata) | \`img-tool resize photo.jpg --width 800\` |
-| **doc-diff** | Compare two documents | \`doc-diff old.docx new.docx\` |
+| **doc-diff** | Compare plain-text documents; Office binaries must use native inspect | \`doc-diff old.md new.md\` |
 | **ical-tool** | Calendar file operations | \`ical-tool read calendar.ics\` |
 
 **Tips:**
@@ -1280,8 +1277,7 @@ ${OFFICE_WORKFLOW_PROMPT}
 - OfficeCLI is managed by the app; do not curl-install or download it.
 - Use **markitdown** only when the user explicitly requests Markdown conversion, or after the native Office inspect tool reports that the document is unsupported or unavailable. Do not read an automatically generated \`.docx.md\`, \`.xlsx.md\`, or \`.pptx.md\` sidecar first.
 - If native Office inspection reports an unsupported document, use \`markitdown <file> # selection-office-native-fallback\` only as a read-only text fallback; do not use that fallback for edits.
-- All tools support \`--help\` for full usage information
-- All tools support \`-o <file>\` to write output to a file instead of stdout
+- Consult each non-Office CLI's \`--help\` before relying on optional flags such as \`-o\`.
 - PDF export is not included in the bundled officecli binary
 
 ## Tool Metadata

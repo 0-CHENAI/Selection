@@ -101,6 +101,10 @@ export function handleToolResult(
     // Update existing tool message
     let updatedSession = updateMessageAt(session, toolIndex, {
       toolResult: event.result,
+      // A tool_result is authoritative for this execution. Explicitly clear
+      // live multimodal blocks when a replacement event has none, otherwise a
+      // prior preview can remain attached to a newer text-only result.
+      toolResultContent: event.content && event.content.length > 0 ? event.content : undefined,
       toolStatus: newToolStatus,
       isError: effectiveIsError,
       errorCode: isPersistedOutput ? 'response_too_large' : undefined,
@@ -154,6 +158,7 @@ export function handleToolResult(
     toolUseId: event.toolUseId,
     toolName: event.toolName,
     toolResult: event.result,
+    ...(event.content && event.content.length > 0 ? { toolResultContent: event.content } : {}),
     toolStatus: effectiveIsError ? 'error' : 'completed',
     isError: effectiveIsError,
     errorCode: isPersistedOutput ? 'response_too_large' : undefined,

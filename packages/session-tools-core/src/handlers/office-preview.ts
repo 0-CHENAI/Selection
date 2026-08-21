@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process';
 import type { ChildProcessWithoutNullStreams } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, realpathSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, realpathSync, statSync, writeFileSync } from 'node:fs';
 import { basename, extname, isAbsolute, join, resolve } from 'node:path';
 import sharp from 'sharp';
 import type { SessionToolContext } from '../context.ts';
@@ -11,7 +11,9 @@ import {
   buildOfficeEnvironment,
   chooseOfficeWorkingDirectory,
   executeOfficeCommand,
+  flushOfficeResidentLease,
   getOfficeArtifactRevision,
+  officeSessionArtifactDirectory,
   officeToolResult,
   type OfficeCoordinatorDependencies,
 } from '../runtime/office-coordinator.ts';
@@ -60,10 +62,20 @@ interface RenderedPreview {
 }
 
 const watches = new Map<string, WatchRecord>();
+const watchStartPromises = new Map<string, Promise<WatchRecord>>();
+const sessionWatchStartPromises = new Map<string, Promise<ToolResult>>();
+const watchStartWaiterCounts = new Map<string, number>();
+const pendingWatchChildren = new Map<string, ChildProcessWithoutNullStreams>();
+const previewSessionEpochs = new Map<string, number>();
+let previewStateGeneration = 0;
 const WATCH_START_TIMEOUT_MS = 20_000;
 const MAX_INLINE_IMAGE_BYTES = Math.floor(4.5 * 1024 * 1024);
+const MAX_HTML_DEPENDENCY_PROBE_BYTES = 20 * 1024 * 1024;
 const INLINE_IMAGE_LONG_EDGE = 1600;
 const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]', '::1']);
+const PREVIEW_ACTIONS = new Set([
+  'render', 'start', 'status', 'stop', 'goto', 'selection', 'mark', 'unmark', 'get_marks',
+]);
 
 export type OfficeRenderDependencyState =
   | 'not-required'
@@ -158,7 +170,12 @@ function parseWatchUrl(text: string): string | undefined {
   return match?.[0];
 }
 
-async function spawnWatch(binary: string, file: string, cwd: string): Promise<StartedWatch> {
+async function spawnWatch(
+  binary: string,
+  file: string,
+  cwd: string,
+  onSpawn: (child: ChildProcessWithoutNullStreams) => void,
+): Promise<StartedWatch> {
   return new Promise((resolvePromise, reject) => {
     const child = spawn(binary, ['watch', file, '--port', '0'], {
       cwd,
@@ -166,6 +183,7 @@ async function spawnWatch(binary: string, file: string, cwd: string): Promise<St
       stdio: ['pipe', 'pipe', 'pipe'],
       windowsHide: true,
     });
+    onSpawn(child);
     child.stdin.end();
     let stdout = '';
     let stderr = '';
@@ -198,7 +216,13 @@ async function spawnWatch(binary: string, file: string, cwd: string): Promise<St
       stderr = (stderr + chunk.toString()).slice(-20_000);
       const rawUrl = parseWatchUrl(stderr);
       if (rawUrl && /another watch process/i.test(stderr)) {
-        try { finish({ url: assertLoopbackUrl(rawUrl), owned: false }); }
+        try {
+          finish({ url: assertLoopbackUrl(rawUrl), owned: false });
+          // This is only the probe process Selection just spawned; the
+          // already-running external watch is a different process and must be
+          // preserved. Do not leave the probe orphaned after reusing its URL.
+          if (child.exitCode === null) child.kill('SIGTERM');
+        }
         catch (error) { fail(error instanceof Error ? error : new Error(String(error))); }
       }
     });
@@ -216,6 +240,39 @@ function attachWatchLifecycle(record: WatchRecord): void {
   record.child.on('close', () => {
     if (watches.get(record.file)?.child === record.child) watches.delete(record.file);
   });
+}
+
+async function createWatchRecord(binary: string, file: string, cwd: string): Promise<WatchRecord> {
+  const generation = previewStateGeneration;
+  let pendingChild: ChildProcessWithoutNullStreams | undefined;
+  const pending = (async () => {
+    const started = await spawnWatch(binary, file, cwd, child => {
+      pendingChild = child;
+      pendingWatchChildren.set(file, child);
+    });
+    if (generation !== previewStateGeneration) {
+      if (started.child?.exitCode === null) started.child.kill('SIGKILL');
+      throw new Error('Office preview state was cleared while the watch was starting.');
+    }
+    const record: WatchRecord = {
+      file,
+      url: started.url,
+      owned: started.owned,
+      child: started.child,
+      sessions: new Set(),
+      startedAt: Date.now(),
+    };
+    watches.set(file, record);
+    attachWatchLifecycle(record);
+    return record;
+  })();
+  watchStartPromises.set(file, pending);
+  try {
+    return await pending;
+  } finally {
+    if (watchStartPromises.get(file) === pending) watchStartPromises.delete(file);
+    if (pendingChild && pendingWatchChildren.get(file) === pendingChild) pendingWatchChildren.delete(file);
+  }
 }
 
 function stopOwnedWatch(record: WatchRecord, force = false): void {
@@ -245,11 +302,7 @@ async function validatedDocument(
 }
 
 function officeArtifactDirectory(ctx: SessionToolContext, cwd: string): string {
-  const root = ctx.dataPath
-    ?? (ctx.sessionPath ? join(ctx.sessionPath, 'data') : join(ctx.workspacePath || cwd, 'data'));
-  const directory = join(root, 'office');
-  mkdirSync(directory, { recursive: true });
-  return directory;
+  return officeSessionArtifactDirectory(ctx, cwd);
 }
 
 async function createInlinePreview(
@@ -393,15 +446,29 @@ async function probeHtmlDependencies(
       },
     };
   }
-  const externalDependencies = detectOfficeHtmlDependencies(readFileSync(htmlPath, 'utf8'));
+  const htmlSize = statSync(htmlPath).size;
   const revision = getOfficeArtifactRevision(outcome.envelope.documentPath);
   const artifact: ArtifactRef = {
     kind: 'html',
     path: htmlPath,
     mimeType: 'text/html',
-    sizeBytes: statSync(htmlPath).size,
+    sizeBytes: htmlSize,
     artifactRevision: revision,
   };
+  if (htmlSize > MAX_HTML_DEPENDENCY_PROBE_BYTES) {
+    return {
+      state: 'unknown',
+      dependencies: [],
+      artifact,
+      warning: {
+        code: 'render_dependency_probe_too_large',
+        message: `The generated HTML exceeds the ${MAX_HTML_DEPENDENCY_PROBE_BYTES}-byte dependency scan limit.`,
+        severity: 'medium',
+        recovery: 'Use native rendering or inspect the saved HTML artifact before strict delivery.',
+      },
+    };
+  }
+  const externalDependencies = detectOfficeHtmlDependencies(readFileSync(htmlPath, 'utf8'));
   if (externalDependencies.length === 0) {
     return { state: 'self-contained', dependencies: externalDependencies, artifact };
   }
@@ -437,6 +504,49 @@ export async function renderOfficeDocument(
   dependencies: OfficeCoordinatorDependencies = {},
 ): Promise<RenderedPreview> {
   const startedAt = Date.now();
+  if (!args || typeof args.file !== 'string' || !args.file.trim()) {
+    const result = previewError(ctx, ['preview', 'render'], 'invalid_preview_input', 'input', 'Render requires a non-empty Office document path.');
+    return { toolResult: result, envelope: result.structuredContent as OfficeResultEnvelope };
+  }
+  if (args.page !== undefined && (typeof args.page !== 'string' || !args.page.trim())) {
+    const result = previewError(ctx, ['preview', 'render', args.file], 'invalid_page_selector', 'input', 'page must be a non-empty page/slide selector.');
+    return { toolResult: result, envelope: result.structuredContent as OfficeResultEnvelope };
+  }
+  if (args.range !== undefined && (typeof args.range !== 'string' || !args.range.trim())) {
+    const result = previewError(ctx, ['preview', 'render', args.file], 'invalid_range_selector', 'input', 'range must be a non-empty element path or Excel range.');
+    return { toolResult: result, envelope: result.structuredContent as OfficeResultEnvelope };
+  }
+  if (args.grid !== undefined && args.grid !== 'auto' && (!Number.isInteger(args.grid) || args.grid <= 0)) {
+    const result = previewError(ctx, ['preview', 'render', args.file], 'invalid_grid', 'input', 'grid must be "auto" or a positive integer column count.');
+    return { toolResult: result, envelope: result.structuredContent as OfficeResultEnvelope };
+  }
+  if (args.grid !== undefined && (args.page !== undefined || args.range !== undefined)) {
+    const result = previewError(
+      ctx,
+      ['preview', 'render', args.file],
+      'render_selector_conflict',
+      'input',
+      'grid creates a whole-document contact sheet and cannot be combined with page or range.',
+      'Use grid alone for a contact sheet, or omit grid for a focused page/range render.',
+    );
+    return { toolResult: result, envelope: result.structuredContent as OfficeResultEnvelope };
+  }
+  if (args.renderer !== undefined && !['auto', 'html', 'native'].includes(args.renderer)) {
+    const result = previewError(ctx, ['preview', 'render', args.file], 'invalid_renderer', 'input', 'renderer must be auto, html, or native.');
+    return { toolResult: result, envelope: result.structuredContent as OfficeResultEnvelope };
+  }
+  const extension = extname(args.file).toLowerCase();
+  if (args.grid !== undefined && extension === '.xlsx') {
+    const result = previewError(
+      ctx,
+      ['preview', 'render', args.file],
+      'xlsx_contact_sheet_unsupported',
+      'unsupported',
+      'OfficeCLI contact-sheet rendering is available for Word and PowerPoint, not Excel workbooks.',
+      'Render a focused Excel sheet or cell range without grid.',
+    );
+    return { toolResult: result, envelope: result.structuredContent as OfficeResultEnvelope };
+  }
   let cwd: string;
   try {
     cwd = chooseOfficeWorkingDirectory(ctx);
@@ -445,11 +555,11 @@ export async function renderOfficeDocument(
     return { toolResult: result, envelope: result.structuredContent as OfficeResultEnvelope };
   }
   const directory = officeArtifactDirectory(ctx, cwd);
+  await flushOfficeResidentLease(ctx, args.file, dependencies);
   const id = randomUUID();
   const safeStem = basename(args.file, extname(args.file)).replace(/[^a-zA-Z0-9._-]+/g, '-').slice(0, 80) || 'document';
   const fullImagePath = join(directory, `${safeStem}-${id}.png`);
   const requested = args.renderer ?? 'auto';
-  const extension = extname(args.file).toLowerCase();
   let backend: 'html' | 'native' = requested === 'native' ? 'native' : 'html';
   let outcome;
   const fallbacks: StructuredWarning[] = [];
@@ -481,36 +591,25 @@ export async function renderOfficeDocument(
     backend = requested === 'native' ? 'native' : 'html';
     outcome = await executeRenderAttempt(ctx, args, backend, fullImagePath, dependencies);
   }
-  const dependencyProbe = backend === 'html'
+  const dependencyProbe = outcome.envelope.ok && backend === 'html'
     ? await probeHtmlDependencies(ctx, args, directory, safeStem, id, dependencies)
     : { state: 'not-required' as const, dependencies: [] };
+  const actualBackend = outcome.envelope.backend ?? backend;
   if (!outcome.envelope.ok) {
-    if (dependencyProbe.state === 'degraded') {
-      const envelope: OfficeResultEnvelope = {
-        ...outcome.envelope,
-        ok: false,
-        command: ['preview', 'render', ...outcome.envelope.command],
-        backend,
-        data: {
-          render: {
-            backend,
-            dependencyState: dependencyProbe.state,
-            externalDependencies: dependencyProbe.dependencies,
-          },
+    const envelope: OfficeResultEnvelope = {
+      ...outcome.envelope,
+      command: ['preview', 'render', ...outcome.envelope.command],
+      backend: actualBackend,
+      data: {
+        render: {
+          backend: actualBackend,
+          dependencyState: dependencyProbe.state,
+          externalDependencies: dependencyProbe.dependencies,
         },
-        warnings: [...outcome.envelope.warnings, ...fallbacks, ...(dependencyProbe.warning ? [dependencyProbe.warning] : [])],
-        artifacts: [...outcome.envelope.artifacts, ...(dependencyProbe.artifact ? [dependencyProbe.artifact] : [])],
-        error: {
-          code: 'dependency_unavailable',
-          category: 'dependency',
-          message: 'Offline HTML rendering could not produce a complete preview because the document requires external runtime assets.',
-          retriable: true,
-          recovery: 'Reconnect for the reviewed HTML assets or use a supported native renderer.',
-        },
-      };
-      return { toolResult: officeToolResult(envelope), envelope };
-    }
-    return { toolResult: officeToolResult(outcome.envelope), envelope: outcome.envelope };
+      },
+      warnings: [...outcome.envelope.warnings, ...fallbacks],
+    };
+    return { toolResult: officeToolResult(envelope), envelope };
   }
   if (!existsSync(fullImagePath) || !statSync(fullImagePath).isFile()) {
     const result = previewError(
@@ -548,7 +647,7 @@ export async function renderOfficeDocument(
       ...outcome.envelope,
       command: ['preview', 'render', ...outcome.envelope.command],
       durationMs: Math.max(0, Date.now() - startedAt),
-      backend,
+      backend: actualBackend,
       warnings: [
         ...outcome.envelope.warnings,
         ...fallbacks,
@@ -563,7 +662,7 @@ export async function renderOfficeDocument(
       ],
       data: {
         render: {
-          backend,
+          backend: actualBackend,
           dependencyState: dependencyProbe.state,
           externalDependencies: dependencyProbe.dependencies,
           page: args.page,
@@ -631,6 +730,16 @@ export async function handleOfficeDocumentPreview(
 ): Promise<ToolResult> {
   if (!args || typeof args !== 'object' || typeof args.action !== 'string' || typeof args.file !== 'string' || !args.file.trim()) {
     return previewError(ctx, ['preview'], 'invalid_preview_input', 'input', 'Preview requires an action and non-empty file path.');
+  }
+  if (!PREVIEW_ACTIONS.has(args.action)) {
+    return previewError(
+      ctx,
+      ['preview', args.action, args.file],
+      'unknown_preview_action',
+      'input',
+      `Unknown preview action: ${args.action}`,
+      'Use render, start, status, stop, goto, selection, mark, unmark, or get_marks.',
+    );
   }
   if (args.action === 'render') return (await renderOfficeDocument(ctx, args, dependencies)).toolResult;
   let cwd: string;
@@ -702,68 +811,133 @@ export async function handleOfficeDocumentPreview(
       file,
     );
   }
+  const openOfficePreview = ctx.openOfficePreview;
   if (args.action === 'start') {
-    const validation = await validatedDocument(ctx, args.file, dependencies);
-    if (!validation.envelope.ok || !validation.binary || !validation.envelope.documentPath) {
-      return officeToolResult(validation.envelope);
-    }
-    const canonical = validation.envelope.documentPath;
-    let record = watches.get(canonical);
-    if (record && !(await externalWatchAlive(record))) {
-      watches.delete(canonical);
-      record = undefined;
-    }
-    if (!record) {
+    const sessionStartKey = `${ctx.sessionId}\0${file}`;
+    const activeSessionStart = sessionWatchStartPromises.get(sessionStartKey);
+    if (activeSessionStart) return activeSessionStart;
+
+    const sessionStart = (async (): Promise<ToolResult> => {
+      const sessionEpoch = previewSessionEpochs.get(ctx.sessionId) ?? 0;
+      const stateGeneration = previewStateGeneration;
+      const validation = await validatedDocument(ctx, args.file, dependencies);
+      if (!validation.envelope.ok || !validation.binary || !validation.envelope.documentPath) {
+        return officeToolResult(validation.envelope);
+      }
+      const canonical = validation.envelope.documentPath;
+      await flushOfficeResidentLease(ctx, canonical, dependencies);
+      const invalidatedStart = (phase: string): ToolResult | undefined => {
+        if (previewStateGeneration !== stateGeneration) {
+          return previewError(
+            ctx,
+            ['preview', 'start', args.file],
+            'preview_state_cleared',
+            'conflict',
+            `Selection cleared Office preview state while ${phase}.`,
+            'Start the preview again after the application is ready.',
+            canonical,
+          );
+        }
+        if ((previewSessionEpochs.get(ctx.sessionId) ?? 0) !== sessionEpoch) {
+          return previewError(
+            ctx,
+            ['preview', 'start', args.file],
+            'preview_session_released',
+            'conflict',
+            `The session ended while ${phase}, so Selection discarded the pending watch reference.`,
+            'Start the preview again from an active session.',
+            canonical,
+          );
+        }
+        return undefined;
+      };
+      const invalidAfterValidation = invalidatedStart('validating the Office document');
+      if (invalidAfterValidation) return invalidAfterValidation;
+      watchStartWaiterCounts.set(canonical, (watchStartWaiterCounts.get(canonical) ?? 0) + 1);
+      let record: WatchRecord | undefined;
       try {
-        const started = await spawnWatch(validation.binary, canonical, validation.cwd);
-        record = {
-          file: canonical,
-          url: started.url,
-          owned: started.owned,
-          child: started.child,
-          sessions: new Set(),
-          startedAt: Date.now(),
-        };
-        watches.set(canonical, record);
-        attachWatchLifecycle(record);
-      } catch (error) {
-        return previewError(
-          ctx,
-          ['preview', 'start', args.file],
-          'watch_start_failed',
-          'runtime',
-          error instanceof Error ? error.message : String(error),
-          'Use preview.render if a live watch is not required.',
-          canonical,
-        );
+        record = watches.get(canonical);
+        let reused = Boolean(record);
+        if (record && !(await externalWatchAlive(record))) {
+          watches.delete(canonical);
+          record = undefined;
+          reused = false;
+        }
+        if (!record) {
+          try {
+            const pending = watchStartPromises.get(canonical);
+            reused = Boolean(pending);
+            record = pending
+              ? await pending
+              : await createWatchRecord(validation.binary, canonical, validation.cwd);
+            reused ||= !record.owned;
+          } catch (error) {
+            return previewError(
+              ctx,
+              ['preview', 'start', args.file],
+              'watch_start_failed',
+              'runtime',
+              error instanceof Error ? error.message : String(error),
+              'Use preview.render if a live watch is not required.',
+              canonical,
+            );
+          }
+        }
+        const invalidAfterWatch = invalidatedStart('the OfficeCLI watch was starting');
+        if (invalidAfterWatch) return invalidAfterWatch;
+        const alreadyReferenced = record.sessions.has(ctx.sessionId);
+        record.sessions.add(ctx.sessionId);
+        try {
+          const opened = await openOfficePreview(assertLoopbackUrl(record.url));
+          const invalidAfterOpen = invalidatedStart('Selection was opening the Office preview');
+          if (invalidAfterOpen) {
+            record.sessions.delete(ctx.sessionId);
+            return invalidAfterOpen;
+          }
+          return interactiveEnvelope(ctx, 'start', args.file, {
+            running: true,
+            reused: reused || alreadyReferenced,
+            ownedBySelection: record.owned,
+            url: record.url,
+            browser: opened,
+            sessionReferences: record.sessions.size,
+          }, validation.envelope);
+        } catch (error) {
+          if (!alreadyReferenced) record.sessions.delete(ctx.sessionId);
+          const invalidAfterFailure = invalidatedStart('Selection was opening the Office preview');
+          if (invalidAfterFailure) return invalidAfterFailure;
+          return previewError(
+            ctx,
+            ['preview', 'start', args.file],
+            'browser_pane_open_failed',
+            'runtime',
+            `Watch started but BrowserPane could not open it: ${error instanceof Error ? error.message : String(error)}`,
+            undefined,
+            canonical,
+          );
+        }
+      } finally {
+        const activeWaiters = watchStartWaiterCounts.get(canonical) ?? 1;
+        if (activeWaiters <= 1) watchStartWaiterCounts.delete(canonical);
+        else watchStartWaiterCounts.set(canonical, activeWaiters - 1);
+        if (
+          activeWaiters <= 1
+          && record?.owned
+          && record.sessions.size === 0
+          && watches.get(canonical) === record
+        ) {
+          watches.delete(canonical);
+          stopOwnedWatch(record);
+        }
       }
-    }
-    record.sessions.add(ctx.sessionId);
+    })();
+    sessionWatchStartPromises.set(sessionStartKey, sessionStart);
     try {
-      const opened = await ctx.openOfficePreview(assertLoopbackUrl(record.url));
-      return interactiveEnvelope(ctx, 'start', args.file, {
-        running: true,
-        reused: record.sessions.size > 1 || !record.owned,
-        ownedBySelection: record.owned,
-        url: record.url,
-        browser: opened,
-        sessionReferences: record.sessions.size,
-      }, validation.envelope);
-    } catch (error) {
-      record.sessions.delete(ctx.sessionId);
-      if (record.sessions.size === 0 && record.owned) {
-        watches.delete(record.file);
-        stopOwnedWatch(record);
+      return await sessionStart;
+    } finally {
+      if (sessionWatchStartPromises.get(sessionStartKey) === sessionStart) {
+        sessionWatchStartPromises.delete(sessionStartKey);
       }
-      return previewError(
-        ctx,
-        ['preview', 'start', args.file],
-        'browser_pane_open_failed',
-        'runtime',
-        `Watch started but BrowserPane could not open it: ${error instanceof Error ? error.message : String(error)}`,
-        undefined,
-        canonical,
-      );
     }
   }
   const record = watches.get(file);
@@ -829,6 +1003,7 @@ export async function handleOfficeDocumentPreview(
 }
 
 export function releaseOfficePreviewSession(sessionId: string): void {
+  previewSessionEpochs.set(sessionId, (previewSessionEpochs.get(sessionId) ?? 0) + 1);
   for (const [file, record] of watches) {
     record.sessions.delete(sessionId);
     if (record.sessions.size > 0) continue;
@@ -838,8 +1013,17 @@ export function releaseOfficePreviewSession(sessionId: string): void {
 }
 
 export function clearOfficePreviewState(force = false): void {
+  previewStateGeneration += 1;
+  for (const child of pendingWatchChildren.values()) {
+    if (child.exitCode === null) child.kill('SIGKILL');
+  }
+  pendingWatchChildren.clear();
   for (const record of watches.values()) stopOwnedWatch(record, force);
   watches.clear();
+  watchStartPromises.clear();
+  sessionWatchStartPromises.clear();
+  watchStartWaiterCounts.clear();
+  previewSessionEpochs.clear();
 }
 
 process.once('exit', () => clearOfficePreviewState(true));

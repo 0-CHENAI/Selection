@@ -131,6 +131,13 @@ export interface OfficecliManifest {
     lifecycle: string[];
     admin: string[];
   };
+  compatibilityRecipes?: {
+    importViaAtomicBatch?: {
+      enabled: boolean;
+      maxSourceBytes: number;
+      reason: string;
+    };
+  };
   commandSchema?: {
     file: string;
     sha256: string;

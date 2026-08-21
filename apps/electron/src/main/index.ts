@@ -184,7 +184,7 @@ if (isDebugMode) {
   process.env.CRAFT_CLI_DOC_PATH = process.env.CRAFT_COMMANDS_DOC_PATH
   process.env.CRAFT_AGENT_VERSION = app.getVersion()
   // Prepend both generic wrappers dir and platform uv dir:
-  // - binDir exposes wrapper commands (pdf-tool, docx-tool, ...)
+  // - binDir exposes non-Office wrapper commands (pdf-tool, img-tool, ...)
   // - uvPlatformDir exposes raw `uv` for direct shell usage / debugging
   process.env.PATH = `${binDir}${delimiter}${uvPlatformDir}${delimiter}${process.env.PATH}`
 

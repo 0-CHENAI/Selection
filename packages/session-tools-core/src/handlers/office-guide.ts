@@ -4,9 +4,11 @@ import { extname, isAbsolute, relative, resolve } from 'node:path';
 import type { SessionToolContext } from '../context.ts';
 import type {
   ArtifactRef,
+  OfficeErrorCategory,
   OfficecliManifestGuide,
   OfficeGuideName,
   OfficeResultEnvelope,
+  StructuredWarning,
 } from '../office-types.ts';
 import type { ToolResult } from '../types.ts';
 import { chooseOfficeWorkingDirectory, officeToolResult } from '../runtime/office-coordinator.ts';
@@ -28,13 +30,17 @@ interface HeadingSection {
 }
 
 const loadedGuideSections = new Set<string>();
-const verifiedGuideResources = new Set<string>();
+const verifiedGuideResources = new Map<string, string>();
 const SAFE_REFERENCE_EXTENSIONS = new Set(['.md', '.pptx']);
 const MAX_GUIDE_SECTION_CHARS = 40_000;
+const MAX_GUIDE_REFERENCE_CHARS = 40_000;
 
 const SELECTION_EXECUTION_CONTRACT = `## Selection execution contract (immutable)
 
 - Examples below omit the \`officecli\` prefix. Pass each native token through the appropriate Selection Office tool's \`argv\` array; never invoke a shell.
+- When a property name is uncertain, call \`office_document_inspect\` with \`argv: ['help', format, element]\` before guessing.
+- A turn with more than about 10 structural or cell edits must use \`batch\` (inline or \`batch.file\`). After a batch, run \`view issues\` plus \`view html\` or \`office_document_preview.render\`.
+- Morph clone/ghost/clean-accumulation and verify/final-check must use the \`recipe\` field. Do not invent shell or Python helpers.
 - Selection owns binary installation, updates, command classification, paths, resident/watch lifecycle, rendering, and finalization. Do not call install/update/skills/load_skill/mcp/plugins/config/open/save/close.
 - Only \`office_document_preview.start\` may open or focus the BrowserPane. Ordinary work and finalization use inline render evidence.
 - Existing outputs require explicit \`--force\`; mutation goes through \`office_document_edit\`; preview marks are not document edits.
@@ -65,6 +71,33 @@ function guideResourceHash(root: string): string {
     digest.update('\0');
   }
   return digest.digest('hex');
+}
+
+function guideResourceFingerprint(root: string): string {
+  const digest = createHash('sha256');
+  const visit = (directory: string) => {
+    for (const entry of readdirSync(directory).sort()) {
+      const path = resolve(directory, entry);
+      const stats = lstatSync(path);
+      if (stats.isSymbolicLink()) throw new Error(`Symbolic links are forbidden in pinned guide resources: ${path}`);
+      digest.update(relative(root, path));
+      digest.update(`\0${stats.size}:${stats.mtimeMs}:${stats.ctimeMs}\0`);
+      if (stats.isDirectory()) visit(path);
+    }
+  };
+  visit(root);
+  return digest.digest('hex');
+}
+
+function verifyPinnedGuideResource(root: string, expectedHash: string, guide: OfficeGuideName): void {
+  const verificationKey = `${root}\0${expectedHash}`;
+  const fingerprint = guideResourceFingerprint(root);
+  if (verifiedGuideResources.get(verificationKey) === fingerprint) return;
+  const actualHash = guideResourceHash(root);
+  if (actualHash !== expectedHash) {
+    throw new Error(`Pinned guide resource hash mismatch for ${guide}.`);
+  }
+  verifiedGuideResources.set(verificationKey, fingerprint);
 }
 
 function stripFrontmatter(markdown: string): string {
@@ -103,7 +136,7 @@ function replaceUnsafeMorphScriptBlocks(markdown: string): string {
     while (end < lines.length && !/^\s*```\s*$/.test(lines[end] ?? '')) end += 1;
     const block = lines.slice(index, Math.min(end + 1, lines.length)).join('\n');
     if (/(?:morph-helpers\.(?:py|sh)|\bsubprocess\b|\bcurl\b|\birm\b|python3?\s+-c)/i.test(block)) {
-      result.push('> [Selection execution note] Upstream shell/Python helper code is intentionally not shipped or executable. Use the validated TypeScript Morph recipes returned in `recipes`, then call the Selection Office tools.');
+      result.push('> [Selection execution note] Upstream shell/Python helper code is intentionally not shipped or executable. Use the validated TypeScript Morph recipes via office_document_edit.recipe or office_document_inspect.recipe; do not invent shell or Python helpers.');
     } else {
       result.push(...lines.slice(index, Math.min(end + 1, lines.length)));
     }
@@ -211,7 +244,7 @@ function errorEnvelope(
   cwd: string,
   command: string[],
   code: string,
-  category: 'input' | 'path' | 'permission' | 'dependency' | 'unsupported',
+  category: OfficeErrorCategory,
   message: string,
   recovery?: string,
 ): OfficeResultEnvelope {
@@ -225,7 +258,13 @@ function errorEnvelope(
     warnings: [],
     cacheHit: false,
     artifacts: [],
-    error: { code, category, message, retriable: false, ...(recovery ? { recovery } : {}) },
+    error: {
+      code,
+      category,
+      message,
+      retriable: category === 'runtime' || category === 'timeout',
+      ...(recovery ? { recovery } : {}),
+    },
   };
 }
 
@@ -237,8 +276,14 @@ function inheritedGuideContent(
 ): Array<Record<string, unknown>> {
   return inherits.map(base => {
     const definition = manifestGuides[base];
-    const path = resolve(versionRoot, 'skills', definition.directory, definition.entry);
-    const markdown = sanitizeOfficialContent(readFileSync(path, 'utf8'), base);
+    const root = resolve(versionRoot, 'skills', definition.directory);
+    const path = resolve(root, definition.entry);
+    verifyPinnedGuideResource(root, definition.resourceHash, base);
+    const buffer = readFileSync(path);
+    if (hash(buffer) !== definition.contentHash) {
+      throw new Error(`Pinned inherited guide entry hash mismatch for ${base}.`);
+    }
+    const markdown = sanitizeOfficialContent(buffer.toString('utf8'), base);
     if (topic) {
       const match = topicContent(markdown, topic);
       if (match.content) return { guide: base, matched: match.matched, content: match.content };
@@ -254,17 +299,41 @@ export async function handleOfficeDocumentGuide(
   const startedAt = Date.now();
   let cwd = ctx.workspacePath;
   const command = ['guide', typeof args?.guide === 'string' ? args.guide : '(unknown)'];
-  const resources = resolveOfficecliResources();
-  const version = resources?.manifest.version ?? 'unknown';
-  const schemaCrc = resources?.manifest.schemaCrc ?? 'unknown';
+  let version = 'unknown';
+  let schemaCrc = 'unknown';
+  if (
+    !args
+    || typeof args !== 'object'
+    || typeof args.guide !== 'string'
+    || args.guide.trim().length === 0
+    || (args.topic !== undefined && typeof args.topic !== 'string')
+    || (args.referencePath !== undefined && typeof args.referencePath !== 'string')
+  ) {
+    return officeToolResult(errorEnvelope(
+      version, schemaCrc, cwd, command, 'invalid_guide_input', 'input',
+      'guide must be a non-empty guide name; topic and referencePath must be strings when provided.',
+    ));
+  }
   try {
     cwd = chooseOfficeWorkingDirectory(ctx);
+    let resources: ReturnType<typeof resolveOfficecliResources>;
+    try {
+      resources = resolveOfficecliResources();
+    } catch (error) {
+      return officeToolResult(errorEnvelope(
+        version, schemaCrc, cwd, command, 'officecli_manifest_invalid', 'dependency',
+        error instanceof Error ? error.message : String(error),
+        'Reinstall Selection or rebuild the audited OfficeCLI resource bundle.',
+      ));
+    }
     if (!resources) {
       return officeToolResult(errorEnvelope(
         version, schemaCrc, cwd, command, 'officecli_resources_unavailable', 'dependency',
         'The bundled OfficeCLI guide resources are unavailable.',
       ));
     }
+    version = resources.manifest.version;
+    schemaCrc = resources.manifest.schemaCrc;
     const definition = resources.manifest.guides[args.guide];
     if (!definition) {
       return officeToolResult(errorEnvelope(
@@ -287,17 +356,14 @@ export async function handleOfficeDocumentGuide(
         `Pinned guide entry is missing: ${entryPath}`,
       ));
     }
-    const resourceVerificationKey = `${guideRoot}\0${definition.resourceHash}`;
-    if (!verifiedGuideResources.has(resourceVerificationKey)) {
-      const actualResourceHash = guideResourceHash(guideRoot);
-      if (actualResourceHash !== definition.resourceHash) {
-        return officeToolResult(errorEnvelope(
-          version, schemaCrc, cwd, command, 'guide_resource_hash_mismatch', 'dependency',
-          `Pinned guide resource hash mismatch for ${args.guide}.`,
-          'Rebuild Selection from an audited OfficeCLI upgrade PR.',
-        ));
-      }
-      verifiedGuideResources.add(resourceVerificationKey);
+    try {
+      verifyPinnedGuideResource(guideRoot, definition.resourceHash, args.guide);
+    } catch (error) {
+      return officeToolResult(errorEnvelope(
+        version, schemaCrc, cwd, command, 'guide_resource_hash_mismatch', 'dependency',
+        error instanceof Error ? error.message : String(error),
+        'Rebuild Selection from an audited OfficeCLI upgrade PR.',
+      ));
     }
     const entryBuffer = readFileSync(entryPath);
     const actualHash = hash(entryBuffer);
@@ -311,25 +377,22 @@ export async function handleOfficeDocumentGuide(
 
     let data: Record<string, unknown>;
     const artifacts: ArtifactRef[] = [];
+    const warnings: StructuredWarning[] = [];
     let contentHash = definition.contentHash;
     let cacheSelector = `catalog:${definition.resourceHash}`;
     if (hasReference) {
       const requested = args.referencePath!.trim();
       let reference: string;
-      if (isAbsolute(requested)) {
-        if (args.guide !== 'morph-ppt-3d' || extname(requested).toLowerCase() !== '.glb') {
-          return officeToolResult(errorEnvelope(
-            version, schemaCrc, cwd, command, 'external_reference_forbidden', 'permission',
-            'Absolute referencePath is only allowed for a validated Morph 3D .glb inside the session/workspace.',
-          ));
-        }
-        const lexicalReference = resolve(requested);
+      const isWorkspaceGlb = args.guide === 'morph-ppt-3d' && extname(requested).toLowerCase() === '.glb';
+      if (isWorkspaceGlb) {
+        const resolvedReference = resolve(isAbsolute(requested) ? requested : resolve(cwd, requested));
+        const lexicalReference = resolvedReference;
         reference = existsSync(lexicalReference)
           ? realpathSync.native(lexicalReference)
           : lexicalReference;
         const allowedRoots = [cwd, ctx.sessionPath, ctx.workspacePath]
-          .filter((value): value is string => Boolean(value))
-          .map(root => existsSync(root) ? realpathSync.native(resolve(root)) : resolve(root));
+          .filter((value): value is string => Boolean(value && existsSync(value)))
+          .map(root => realpathSync.native(resolve(root)));
         if (!allowedRoots.some(root => isPathWithinDirectory(reference, root))) {
           return officeToolResult(errorEnvelope(
             version, schemaCrc, cwd, command, 'reference_outside_allowed_roots', 'permission',
@@ -343,6 +406,12 @@ export async function handleOfficeDocumentGuide(
           ));
         }
       } else {
+        if (isAbsolute(requested)) {
+          return officeToolResult(errorEnvelope(
+            version, schemaCrc, cwd, command, 'external_reference_forbidden', 'permission',
+            'Absolute referencePath is only allowed for a validated Morph 3D .glb inside the session/workspace.',
+          ));
+        }
         reference = resolve(guideRoot, requested);
         if (!isPathWithinDirectory(reference, guideRoot)) {
           return officeToolResult(errorEnvelope(
@@ -380,12 +449,23 @@ export async function handleOfficeDocumentGuide(
       }
       const buffer = readFileSync(reference);
       contentHash = hash(buffer);
-      cacheSelector = `reference:${relative(guideRoot, reference)}:${contentHash}`;
+      cacheSelector = `${isWorkspaceGlb ? `workspace-glb:${reference}` : `reference:${relative(guideRoot, reference)}`}:${contentHash}`;
       artifacts.push(pathArtifact(reference));
+      const sanitizedReference = extname(reference).toLowerCase() === '.md'
+        ? sanitizeOfficialContent(buffer.toString('utf8'), args.guide)
+        : undefined;
+      if (sanitizedReference && sanitizedReference.length > MAX_GUIDE_REFERENCE_CHARS) {
+        warnings.push({
+          code: 'guide_reference_truncated',
+          message: `The Markdown reference exceeds ${MAX_GUIDE_REFERENCE_CHARS} characters; Selection returned a bounded excerpt and preserved the complete artifact.`,
+          severity: 'medium',
+          recovery: 'Request a narrower topic or open the returned artifact when the complete reference is required.',
+        });
+      }
       data = {
         referencePath: reference,
-        ...(extname(reference).toLowerCase() === '.md'
-          ? { content: `${SELECTION_EXECUTION_CONTRACT}\n\n${sanitizeOfficialContent(buffer.toString('utf8'), args.guide)}` }
+        ...(sanitizedReference !== undefined
+          ? { content: `${SELECTION_EXECUTION_CONTRACT}\n\n${sanitizedReference.slice(0, MAX_GUIDE_REFERENCE_CHARS)}` }
           : { content: SELECTION_EXECUTION_CONTRACT }),
       };
     } else {
@@ -400,16 +480,26 @@ export async function handleOfficeDocumentGuide(
           ));
         }
         cacheSelector = `topic:${normalizeSearch(args.topic!)}:${definition.resourceHash}`;
-        data = {
-          topic: args.topic!.trim(),
-          matchedSections: selected.matched,
-          content: `${SELECTION_EXECUTION_CONTRACT}\n\n${selected.content}`,
-          inherited: inheritedGuideContent(
+        let inherited: Array<Record<string, unknown>>;
+        try {
+          inherited = inheritedGuideContent(
             resources.versionRoot,
             resources.manifest.guides,
             definition.inherits,
             args.topic!.trim(),
-          ),
+          );
+        } catch (error) {
+          return officeToolResult(errorEnvelope(
+            version, schemaCrc, cwd, command, 'inherited_guide_integrity_error', 'dependency',
+            error instanceof Error ? error.message : String(error),
+            'Reinstall Selection or rebuild the audited OfficeCLI resource bundle.',
+          ));
+        }
+        data = {
+          topic: args.topic!.trim(),
+          matchedSections: selected.matched,
+          content: `${SELECTION_EXECUTION_CONTRACT}\n\n${selected.content}`,
+          inherited,
         };
       } else {
         data = {
@@ -448,14 +538,34 @@ export async function handleOfficeDocumentGuide(
         alreadyLoaded,
         ...data,
       },
-      warnings: [],
+      warnings,
       cacheHit: alreadyLoaded,
       artifacts,
     };
     return officeToolResult(envelope);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    return officeToolResult(errorEnvelope(version, schemaCrc, cwd, command, 'guide_runtime_error', 'dependency', message));
+    if (error && typeof error === 'object') {
+      const record = error as Partial<{
+        code: string;
+        category: OfficeErrorCategory;
+        message: string;
+        recovery: string;
+      }>;
+      if (record.code && record.category && record.message) {
+        return officeToolResult(errorEnvelope(
+          version,
+          schemaCrc,
+          cwd,
+          command,
+          record.code,
+          record.category,
+          record.message,
+          record.recovery,
+        ));
+      }
+    }
+    return officeToolResult(errorEnvelope(version, schemaCrc, cwd, command, 'guide_runtime_error', 'runtime', message));
   }
 }
 

@@ -44,6 +44,9 @@ export interface OfficecliManifest {
   };
   assets: Record<string, { name: string; url: string; sha256: string }>;
   commandPolicy: Record<'read' | 'edit' | 'preview' | 'lifecycle' | 'admin', string[]>;
+  compatibilityRecipes?: {
+    importViaAtomicBatch?: { enabled: boolean; maxSourceBytes: number; reason: string };
+  };
   commandSchema?: { file: string; sha256: string; unclassifiedCommands: string[]; staleClassifications: string[] };
   guideIndex?: { file: string; sha256: string };
   externalDependencies: Array<{
@@ -57,7 +60,7 @@ export interface OfficecliManifest {
   guides: Record<GuideName, ManifestGuide>;
 }
 
-interface CommandSnapshot {
+export interface CommandSnapshot {
   version: string;
   schemaCrc: string;
   generatedFrom: 'reviewed-release-binary';
@@ -83,7 +86,6 @@ interface GithubRelease {
   draft: boolean;
   prerelease: boolean;
   assets: Array<{ name: string; browser_download_url: string }>;
-  tarball_url: string;
 }
 
 const repoRoot = resolve(import.meta.dir, '..');
@@ -118,6 +120,28 @@ const POLICY_ONLY_COMMANDS = new Set([
 const REQUIRED_ADMIN_COMMANDS = new Set(['install', 'update', 'skills', 'load_skill', 'mcp', 'plugins', 'config']);
 const REVIEWED_EXTERNAL_HOSTS = new Set(['d.officecli.ai', 'cdn.jsdelivr.net']);
 const REQUIRED_EXTERNAL_DEPENDENCIES = new Set(['katex', 'three', 'mermaid', 'mermaid-layout-elk']);
+const REVIEWED_DOWNLOAD_HOSTS = new Set(['github.com', 'codeload.github.com']);
+
+export function validateOfficecliReleaseAssetUrl(tag: string, name: string, rawUrl: string): void {
+  let url: URL;
+  try {
+    url = new URL(rawUrl);
+  } catch {
+    throw new Error(`OfficeCLI release asset URL is invalid for ${name}: ${rawUrl}`);
+  }
+  const expectedPath = `/iOfficeAI/OfficeCLI/releases/download/${tag}/${name}`;
+  if (
+    url.protocol !== 'https:'
+    || url.hostname !== 'github.com'
+    || url.username
+    || url.password
+    || url.search
+    || url.hash
+    || url.pathname !== expectedPath
+  ) {
+    throw new Error(`OfficeCLI release asset URL is not the exact reviewed GitHub release path for ${name}: ${rawUrl}`);
+  }
+}
 
 function sha256(value: Buffer | string): string {
   return createHash('sha256').update(value).digest('hex');
@@ -127,6 +151,39 @@ function fileHash(path: string): string {
   return sha256(readFileSync(path));
 }
 
+function textFileHash(path: string): string {
+  return sha256(readFileSync(path, 'utf8').replace(/\r\n/g, '\n').replace(/\r/g, '\n'));
+}
+
+function lowerFlags(flags: string[] | undefined): string[] {
+  return [...new Set((flags ?? []).map(flag => flag.toLowerCase()))].sort();
+}
+
+export function commandSchemaContractIssues(actual: CommandSnapshot, reviewed: CommandSnapshot): string[] {
+  const issues: string[] = [];
+  if (actual.version !== reviewed.version) issues.push(`version ${actual.version} != ${reviewed.version}`);
+  if (actual.schemaCrc !== reviewed.schemaCrc) issues.push(`schemaCrc ${actual.schemaCrc} != ${reviewed.schemaCrc}`);
+  if (actual.generatedFrom !== reviewed.generatedFrom) issues.push('generatedFrom mismatch');
+
+  const actualCommands = [...actual.rootCommands].sort();
+  const reviewedCommands = [...reviewed.rootCommands].sort();
+  const missingCommands = reviewedCommands.filter(command => !actualCommands.includes(command));
+  const extraCommands = actualCommands.filter(command => !reviewedCommands.includes(command));
+  if (missingCommands.length > 0) issues.push(`missing commands: ${missingCommands.join(', ')}`);
+  if (extraCommands.length > 0) issues.push(`extra commands: ${extraCommands.join(', ')}`);
+
+  for (const name of reviewedCommands) {
+    const missingFlags = lowerFlags(reviewed.commands[name]?.flags)
+      .filter(flag => !lowerFlags(actual.commands[name]?.flags).includes(flag));
+    if (missingFlags.length > 0) issues.push(`${name} missing flags: ${missingFlags.join(', ')}`);
+  }
+  return issues;
+}
+
+export function commandSchemaContractsEqual(actual: CommandSnapshot, reviewed: CommandSnapshot): boolean {
+  return commandSchemaContractIssues(actual, reviewed).length === 0;
+}
+
 function json<T>(path: string): T {
   return JSON.parse(readFileSync(path, 'utf8')) as T;
 }
@@ -134,6 +191,10 @@ function json<T>(path: string): T {
 function writeJson(path: string, value: unknown): void {
   mkdirSync(dirname(path), { recursive: true });
   writeFileSync(path, `${JSON.stringify(value, null, 2)}\n`);
+}
+
+export function posixRelPath(root: string, path: string): string {
+  return relative(root, path).replace(/\\/g, '/');
 }
 
 function filesRecursively(root: string): string[] {
@@ -155,8 +216,11 @@ function filesRecursively(root: string): string[] {
 
 function directoryHash(root: string): string {
   const digest = createHash('sha256');
-  for (const path of filesRecursively(root)) {
-    digest.update(relative(root, path));
+  const entries = filesRecursively(root)
+    .map(path => ({ path, rel: posixRelPath(root, path) }))
+    .sort((left, right) => (left.rel < right.rel ? -1 : left.rel > right.rel ? 1 : 0));
+  for (const { path, rel } of entries) {
+    digest.update(rel);
     digest.update('\0');
     digest.update(readFileSync(path));
     digest.update('\0');
@@ -165,7 +229,16 @@ function directoryHash(root: string): string {
 }
 
 async function run(binary: string, args: string[]): Promise<string> {
-  const proc = Bun.spawn([binary, ...args], { stdout: 'pipe', stderr: 'pipe', env: process.env });
+  const proc = Bun.spawn([binary, ...args], {
+    stdout: 'pipe',
+    stderr: 'pipe',
+    env: {
+      ...process.env,
+      DOTNET_SYSTEM_GLOBALIZATION_INVARIANT: '1',
+      LANG: 'C',
+      LC_ALL: 'C',
+    },
+  });
   const [stdout, stderr, exitCode] = await Promise.all([
     new Response(proc.stdout).text(),
     new Response(proc.stderr).text(),
@@ -239,11 +312,13 @@ function buildGuideIndex(manifest: OfficecliManifest, versionRoot: string): Guid
       directory: definition.directory,
       entry: definition.entry,
       headings: headings(readFileSync(entry, 'utf8')),
-      files: filesRecursively(root).map(path => ({
-        path: relative(root, path),
-        sha256: fileHash(path),
-        sizeBytes: lstatSync(path).size,
-      })),
+      files: filesRecursively(root)
+        .map(path => ({
+          path: posixRelPath(root, path),
+          sha256: fileHash(path),
+          sizeBytes: lstatSync(path).size,
+        }))
+        .sort((left, right) => (left.path < right.path ? -1 : left.path > right.path ? 1 : 0)),
     };
   }
   return { version: manifest.version, guides };
@@ -261,7 +336,10 @@ function classificationDiff(manifest: OfficecliManifest, snapshot: CommandSnapsh
   };
 }
 
-export function validateManifestFiles(manifest: OfficecliManifest): void {
+export function validateManifestFiles(
+  manifest: OfficecliManifest,
+  options: { allowCommandPolicyDrift?: boolean } = {},
+): void {
   if (manifest.manifestVersion !== 1) throw new Error(`Unsupported OfficeCLI manifest version: ${manifest.manifestVersion}`);
   if (!/^\d+\.\d+\.\d+$/.test(manifest.version) || manifest.tag !== `v${manifest.version}`) {
     throw new Error(`Manifest version/tag mismatch: ${manifest.version}/${manifest.tag}`);
@@ -273,6 +351,21 @@ export function validateManifestFiles(manifest: OfficecliManifest): void {
   const versionRoot = join(officeRoot, manifest.version);
   if (!existsSync(versionRoot)) throw new Error(`Missing vendored OfficeCLI resources: ${versionRoot}`);
   const skillsRoot = join(versionRoot, 'skills');
+  const guideNames = Object.keys(manifest.guides).sort();
+  const expectedGuideNames = Object.keys(GUIDE_LAYOUT).sort();
+  if (JSON.stringify(guideNames) !== JSON.stringify(expectedGuideNames)) {
+    throw new Error(`OfficeCLI guide catalog mismatch: ${guideNames.join(', ')}`);
+  }
+  for (const [name, expected] of Object.entries(GUIDE_LAYOUT)) {
+    const actual = manifest.guides[name as GuideName];
+    if (
+      actual.directory !== expected.directory
+      || actual.entry !== expected.entry
+      || JSON.stringify(actual.inherits) !== JSON.stringify(expected.inherits)
+    ) {
+      throw new Error(`OfficeCLI guide layout mismatch for ${name}`);
+    }
+  }
   const expectedGuideDirectories = new Set(Object.values(manifest.guides).map(guide => guide.directory));
   for (const entry of readdirSync(skillsRoot)) {
     const path = join(skillsRoot, entry);
@@ -287,28 +380,38 @@ export function validateManifestFiles(manifest: OfficecliManifest): void {
     if (!asset) throw new Error(`Missing platform asset in manifest: ${key}`);
     if (asset.name !== REQUIRED_PLATFORM_ASSETS[key]) throw new Error(`Unexpected asset name for ${key}: ${asset.name}`);
     if (!/^[0-9a-f]{64}$/.test(asset.sha256)) throw new Error(`Invalid SHA256 for ${key}`);
-    const assetUrl = new URL(asset.url);
-    const expectedPath = `/iOfficeAI/OfficeCLI/releases/download/${manifest.tag}/${asset.name}`;
-    if (
-      assetUrl.protocol !== 'https:'
-      || assetUrl.hostname !== 'github.com'
-      || assetUrl.username
-      || assetUrl.password
-      || assetUrl.search
-      || assetUrl.hash
-      || assetUrl.pathname !== expectedPath
-    ) {
-      throw new Error(`Asset URL is not the exact reviewed GitHub release path for ${key}: ${asset.url}`);
-    }
+    validateOfficecliReleaseAssetUrl(manifest.tag, asset.name, asset.url);
   }
   const unexpectedAssetKeys = Object.keys(manifest.assets).filter(key => !REQUIRED_PLATFORM_ASSETS[key]);
   if (unexpectedAssetKeys.length > 0) throw new Error(`Unexpected platform assets: ${unexpectedAssetKeys.join(', ')}`);
   for (const command of REQUIRED_ADMIN_COMMANDS) {
     if (!manifest.commandPolicy.admin.includes(command)) throw new Error(`Required management command is not blocked: ${command}`);
   }
-  const dependencyIds = new Set(manifest.externalDependencies?.map(dependency => dependency.id) ?? []);
+  const compatibilityKeys = Object.keys(manifest.compatibilityRecipes ?? {});
+  const unknownCompatibilityRecipes = compatibilityKeys.filter(key => key !== 'importViaAtomicBatch');
+  if (unknownCompatibilityRecipes.length > 0) {
+    throw new Error(`Unreviewed OfficeCLI compatibility recipes: ${unknownCompatibilityRecipes.join(', ')}`);
+  }
+  const importRecipe = manifest.compatibilityRecipes?.importViaAtomicBatch;
+  if (importRecipe && (
+    importRecipe.enabled !== true
+    || !Number.isInteger(importRecipe.maxSourceBytes)
+    || importRecipe.maxSourceBytes <= 0
+    || importRecipe.maxSourceBytes > 50_000_000
+    || typeof importRecipe.reason !== 'string'
+    || importRecipe.reason.trim().length < 20
+  )) {
+    throw new Error('Invalid OfficeCLI import compatibility recipe declaration');
+  }
+  const dependencyIdList = manifest.externalDependencies?.map(dependency => dependency.id) ?? [];
+  const dependencyIds = new Set(dependencyIdList);
+  if (dependencyIds.size !== dependencyIdList.length) throw new Error('Duplicate OfficeCLI external dependency declarations');
   for (const id of REQUIRED_EXTERNAL_DEPENDENCIES) {
     if (!dependencyIds.has(id)) throw new Error(`Missing reviewed external dependency: ${id}`);
+  }
+  const unexpectedDependencies = [...dependencyIds].filter(id => !REQUIRED_EXTERNAL_DEPENDENCIES.has(id));
+  if (unexpectedDependencies.length > 0) {
+    throw new Error(`Unreviewed OfficeCLI external dependencies: ${unexpectedDependencies.join(', ')}`);
   }
   for (const dependency of manifest.externalDependencies ?? []) {
     if (!dependency.version || !dependency.license || !dependency.fallback || dependency.networkRequiredFor.length === 0) {
@@ -324,10 +427,16 @@ export function validateManifestFiles(manifest: OfficecliManifest): void {
       if (edit.has(command)) throw new Error(`Write command classification overlaps ${category}: ${command}`);
     }
   }
+  if (
+    manifest.license.licenseFile !== `${manifest.version}/LICENSE`
+    || manifest.license.noticeFile !== `${manifest.version}/NOTICE`
+  ) {
+    throw new Error('OfficeCLI license paths must stay inside the pinned version directory');
+  }
   const licensePath = join(officeRoot, manifest.license.licenseFile);
   const noticePath = join(officeRoot, manifest.license.noticeFile);
-  if (fileHash(licensePath) !== manifest.license.licenseSha256) throw new Error('LICENSE hash mismatch');
-  if (fileHash(noticePath) !== manifest.license.noticeSha256) throw new Error('NOTICE hash mismatch');
+  if (textFileHash(licensePath) !== manifest.license.licenseSha256) throw new Error('LICENSE hash mismatch');
+  if (textFileHash(noticePath) !== manifest.license.noticeSha256) throw new Error('NOTICE hash mismatch');
   for (const [name, definition] of Object.entries(manifest.guides)) {
     const root = join(versionRoot, 'skills', definition.directory);
     const entry = join(root, definition.entry);
@@ -339,6 +448,12 @@ export function validateManifestFiles(manifest: OfficecliManifest): void {
     }
   }
   if (!manifest.commandSchema || !manifest.guideIndex) throw new Error('Manifest is missing commandSchema/guideIndex governance records');
+  if (
+    manifest.commandSchema.file !== `${manifest.version}/command-schema.json`
+    || manifest.guideIndex.file !== `${manifest.version}/guide-index.json`
+  ) {
+    throw new Error('OfficeCLI governance files must stay inside the pinned version directory');
+  }
   const commandPath = join(officeRoot, manifest.commandSchema.file);
   const guidePath = join(officeRoot, manifest.guideIndex.file);
   if (fileHash(commandPath) !== manifest.commandSchema.sha256) throw new Error('command-schema.json hash mismatch');
@@ -351,8 +466,10 @@ export function validateManifestFiles(manifest: OfficecliManifest): void {
   if (JSON.stringify(diff.staleClassifications) !== JSON.stringify(manifest.commandSchema.staleClassifications)) {
     throw new Error('Manifest staleClassifications does not match command snapshot');
   }
-  if (diff.unclassifiedCommands.length > 0) throw new Error(`Unclassified OfficeCLI commands: ${diff.unclassifiedCommands.join(', ')}`);
-  if (diff.staleClassifications.length > 0) throw new Error(`Stale OfficeCLI command classifications: ${diff.staleClassifications.join(', ')}`);
+  if (!options.allowCommandPolicyDrift) {
+    if (diff.unclassifiedCommands.length > 0) throw new Error(`Unclassified OfficeCLI commands: ${diff.unclassifiedCommands.join(', ')}`);
+    if (diff.staleClassifications.length > 0) throw new Error(`Stale OfficeCLI command classifications: ${diff.staleClassifications.join(', ')}`);
+  }
   const guideIndex = json<GuideIndex>(guidePath);
   if (JSON.stringify(guideIndex) !== JSON.stringify(buildGuideIndex(manifest, versionRoot))) {
     throw new Error('guide-index.json is stale');
@@ -367,8 +484,19 @@ function localRuntimePath(): string | undefined {
 }
 
 async function download(url: string, path: string): Promise<void> {
+  const parsed = new URL(url);
+  if (
+    parsed.protocol !== 'https:'
+    || !REVIEWED_DOWNLOAD_HOSTS.has(parsed.hostname)
+    || parsed.username
+    || parsed.password
+  ) {
+    throw new Error(`OfficeCLI download URL is outside the reviewed GitHub hosts: ${url}`);
+  }
   const headers: Record<string, string> = { 'User-Agent': 'Selection-OfficeCLI-Sync' };
-  if (process.env.GITHUB_TOKEN) headers.Authorization = `Bearer ${process.env.GITHUB_TOKEN}`;
+  if (process.env.GITHUB_TOKEN && parsed.hostname === 'github.com') {
+    headers.Authorization = `Bearer ${process.env.GITHUB_TOKEN}`;
+  }
   const response = await fetch(url, { headers, redirect: 'follow' });
   if (!response.ok) throw new Error(`Download failed (${response.status}): ${url}`);
   mkdirSync(dirname(path), { recursive: true });
@@ -376,6 +504,10 @@ async function download(url: string, path: string): Promise<void> {
 }
 
 async function githubJson<T>(url: string): Promise<T> {
+  const parsed = new URL(url);
+  if (parsed.protocol !== 'https:' || parsed.hostname !== 'api.github.com' || parsed.username || parsed.password) {
+    throw new Error(`GitHub API URL is outside api.github.com: ${url}`);
+  }
   const headers: Record<string, string> = {
     Accept: 'application/vnd.github+json',
     'User-Agent': 'Selection-OfficeCLI-Sync',
@@ -395,6 +527,7 @@ async function tagCommit(tag: string): Promise<string> {
     object = (await githubJson<{ object: { type: string; sha: string; url: string } }>(object.url)).object;
   }
   if (object.type !== 'commit') throw new Error(`Tag ${tag} does not resolve to a commit`);
+  if (!/^[0-9a-f]{40}$/i.test(object.sha)) throw new Error(`Tag ${tag} resolved to an invalid commit SHA: ${object.sha}`);
   return object.sha;
 }
 
@@ -402,7 +535,10 @@ function parseChecksumFile(contents: string): Map<string, string> {
   const values = new Map<string, string>();
   for (const line of contents.split(/\r?\n/)) {
     const match = /^([0-9a-f]{64})\s+\*?(.+?)\s*$/i.exec(line);
-    if (match) values.set(match[2]!, match[1]!.toLowerCase());
+    if (!match) continue;
+    const name = match[2]!;
+    if (values.has(name)) throw new Error(`Duplicate checksum entry: ${name}`);
+    values.set(name, match[1]!.toLowerCase());
   }
   return values;
 }
@@ -435,10 +571,13 @@ function sourceConstant(sourceRoot: string, relativePath: string, name: string):
   return match[1];
 }
 
-function extractExternalDependencies(sourceRoot: string): OfficecliManifest['externalDependencies'] {
-  const katex = sourceConstant(sourceRoot, 'src/OfficeCLI/Core/KatexAssets.cs', 'Version');
-  const three = sourceConstant(sourceRoot, 'src/OfficeCLI/Core/ThreeAssets.cs', 'Version');
-  const mermaidSource = 'src/OfficeCLI/Core/Diagram/MermaidImageRenderer.cs';
+export function extractExternalDependencies(sourceRoot: string): OfficecliManifest['externalDependencies'] {
+  // Git paths are case-sensitive in the Linux-only upgrade workflow. The
+  // upstream project directory is `src/officecli`, even though its namespace
+  // and product name use the `OfficeCLI` casing.
+  const katex = sourceConstant(sourceRoot, 'src/officecli/Core/KatexAssets.cs', 'Version');
+  const three = sourceConstant(sourceRoot, 'src/officecli/Core/ThreeAssets.cs', 'Version');
+  const mermaidSource = 'src/officecli/Core/Diagram/MermaidImageRenderer.cs';
   const mermaid = sourceConstant(sourceRoot, mermaidSource, 'MermaidVersion');
   const elk = sourceConstant(sourceRoot, mermaidSource, 'ElkVersion');
   return [
@@ -550,6 +689,12 @@ ${JSON.stringify(platformDiff, null, 2)}
 ${JSON.stringify(dependencyChanges, null, 2)}
 \`\`\`
 
+## 需要复验的兼容 Recipe
+
+\`\`\`json
+${JSON.stringify(manifest.compatibilityRecipes ?? {}, null, 2)}
+\`\`\`
+
 > 此报告只用于人工审查。运行时自更新保持禁用，draft PR 不会自动合并。
 `;
 }
@@ -600,8 +745,11 @@ async function check(downloadRuntime: boolean): Promise<void> {
     if (binary) {
       const snapshot = await buildCommandSnapshot(binary);
       const reviewed = json<CommandSnapshot>(join(officeRoot, manifest.commandSchema!.file));
-      if (JSON.stringify(snapshot) !== JSON.stringify(reviewed)) {
-        throw new Error('Reviewed command schema differs from the current platform binary');
+      const contractIssues = commandSchemaContractIssues(snapshot, reviewed);
+      if (contractIssues.length > 0) {
+        throw new Error(
+          `Reviewed command schema contract differs from the current platform binary: ${contractIssues.join('; ')}`,
+        );
       }
       const key = `${process.platform}-${process.arch}`;
       const expected = manifest.assets[key]?.sha256;
@@ -622,7 +770,37 @@ async function prepareRuntime(): Promise<void> {
   const name = process.platform === 'win32' ? 'officecli.exe' : 'officecli';
   const destination = join(repoRoot, 'apps/electron/resources/bin', key, name);
   if (!existsSync(destination) || fileHash(destination) !== asset.sha256) {
-    await download(asset.url, destination);
+    validateOfficecliReleaseAssetUrl(manifest.tag, asset.name, asset.url);
+    mkdirSync(dirname(destination), { recursive: true });
+    const suffix = `${process.pid}-${Date.now()}`;
+    const staged = `${destination}.download-${suffix}`;
+    const backup = `${destination}.backup-${suffix}`;
+    let backedUp = false;
+    let installed = false;
+    try {
+      await download(asset.url, staged);
+      if (fileHash(staged) !== asset.sha256) throw new Error(`Downloaded ${key} asset SHA256 mismatch`);
+      if (process.platform !== 'win32') chmodSync(staged, 0o755);
+      if (existsSync(destination)) {
+        renameSync(destination, backup);
+        backedUp = true;
+      }
+      renameSync(staged, destination);
+      installed = true;
+      if (fileHash(destination) !== asset.sha256) throw new Error(`Prepared ${key} asset SHA256 mismatch`);
+      if (backedUp) rmSync(backup, { force: true });
+    } catch (error) {
+      try {
+        if (existsSync(staged)) rmSync(staged, { force: true });
+        if (installed && existsSync(destination)) rmSync(destination, { force: true });
+        if (backedUp && existsSync(backup)) {
+          renameSync(backup, destination);
+        }
+      } catch (rollbackError) {
+        throw new AggregateError([error, rollbackError], 'OfficeCLI runtime preparation failed and rollback was incomplete');
+      }
+      throw error;
+    }
   }
   if (fileHash(destination) !== asset.sha256) throw new Error(`Prepared ${key} asset SHA256 mismatch`);
   if (process.platform !== 'win32') chmodSync(destination, 0o755);
@@ -648,6 +826,7 @@ async function update(allowUnclassified: boolean): Promise<void> {
   try {
     const checksumAsset = release.assets.find(asset => asset.name === 'SHA256SUMS');
     if (!checksumAsset) throw new Error('Release is missing SHA256SUMS');
+    validateOfficecliReleaseAssetUrl(release.tag_name, checksumAsset.name, checksumAsset.browser_download_url);
     const checksumPath = join(temp, 'SHA256SUMS');
     await download(checksumAsset.browser_download_url, checksumPath);
     const checksums = parseChecksumFile(readFileSync(checksumPath, 'utf8'));
@@ -656,6 +835,7 @@ async function update(allowUnclassified: boolean): Promise<void> {
       const releaseAsset = release.assets.find(asset => asset.name === name);
       const checksum = checksums.get(name);
       if (!releaseAsset || !checksum) throw new Error(`Release is missing platform asset or checksum: ${name}`);
+      validateOfficecliReleaseAssetUrl(release.tag_name, name, releaseAsset.browser_download_url);
       assets[key] = { name, url: releaseAsset.browser_download_url, sha256: checksum };
     }
     const linuxBinary = join(temp, REQUIRED_PLATFORM_ASSETS['linux-x64']);
@@ -705,6 +885,7 @@ async function update(allowUnclassified: boolean): Promise<void> {
       },
       assets,
       commandPolicy: oldManifest.commandPolicy,
+      compatibilityRecipes: oldManifest.compatibilityRecipes,
       externalDependencies: extractExternalDependencies(sourceRoot),
       guides,
     };
@@ -727,6 +908,8 @@ async function update(allowUnclassified: boolean): Promise<void> {
 
     const destination = join(officeRoot, version);
     const backup = join(officeRoot, `.backup-${version}-${Date.now()}`);
+    const previousManifest = readFileSync(manifestPath);
+    const previousReport = existsSync(reportPath) ? readFileSync(reportPath) : undefined;
     let backedUp = false;
     try {
       if (existsSync(destination)) {
@@ -736,10 +919,18 @@ async function update(allowUnclassified: boolean): Promise<void> {
       cpSync(stagedVersion, destination, { recursive: true });
       writeJson(manifestPath, manifest);
       writeFileSync(reportPath, report);
+      validateManifestFiles(manifest, { allowCommandPolicyDrift: allowUnclassified });
       if (backedUp) rmSync(backup, { recursive: true, force: true });
     } catch (error) {
-      if (existsSync(destination)) rmSync(destination, { recursive: true, force: true });
-      if (backedUp && existsSync(backup)) renameSync(backup, destination);
+      try {
+        if (existsSync(destination)) rmSync(destination, { recursive: true, force: true });
+        if (backedUp && existsSync(backup)) renameSync(backup, destination);
+        writeFileSync(manifestPath, previousManifest);
+        if (previousReport !== undefined) writeFileSync(reportPath, previousReport);
+        else rmSync(reportPath, { force: true });
+      } catch (rollbackError) {
+        throw new AggregateError([error, rollbackError], 'OfficeCLI update failed and rollback was incomplete');
+      }
       throw error;
     }
     console.log(`OfficeCLI ${version} resources synchronized. Policy review: ${JSON.stringify(diff)}`);

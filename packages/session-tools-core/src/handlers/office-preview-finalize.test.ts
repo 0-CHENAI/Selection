@@ -57,11 +57,22 @@ const reply = (value, code = 0) => { process.stdout.write(JSON.stringify(value))
 if (args[0] === '--version') { process.stdout.write('1.0.144\\n'); process.exit(0); }
 if (args[0] === '--output-schema-crc') { process.stdout.write('b2b0b395\\n'); process.exit(0); }
 if (args[0] === 'watch' && args[2] === '--port') {
-  process.stdout.write('Watch: http://127.0.0.1:45678\\n');
+  const publish = () => process.stdout.write('Watch: http://127.0.0.1:45678\\n');
+  if ((args[1] || '').includes('slow-watch')) setTimeout(publish, 100);
+  else publish();
   setInterval(() => {}, 1000);
   return;
 }
 const file = args[1] || '';
+if (args[0] === 'save' && file.includes('flush-fail')) {
+  reply({ success: false, error: { code: 'save_failed', message: 'disk full' } }, 1);
+}
+if (args[0] === 'open' || args[0] === 'save' || args[0] === 'close') {
+  if (args[0] === 'save' && file && fs.existsSync(file)) {
+    fs.writeFileSync(file, fs.readFileSync(file));
+  }
+  reply({ success: true, data: { lease: args[0] } });
+}
 if (args[0] === 'validate' && file.includes('invalid')) {
   reply({ success: false, error: { code: 'validation_failed', message: 'OpenXML validation failed' } }, 1);
 }
@@ -98,11 +109,14 @@ if (args[0] === 'view' && args[2] === 'screenshot') {
   if (renderer === 'native') {
     reply({ success: false, error: { code: 'native_unavailable', message: 'Native renderer unavailable' } }, 1);
   }
+  if (file.includes('all-renderers-fail')) {
+    reply({ success: false, error: { code: 'html_unavailable', message: 'HTML renderer unavailable' } }, 1);
+  }
   const output = args[args.indexOf('--out') + 1];
   fs.mkdirSync(path.dirname(output), { recursive: true });
   fs.writeFileSync(output, Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=', 'base64'));
   if (file.includes('changes-during-finalize')) fs.appendFileSync(file, 'changed');
-  reply({ success: true, data: { rendered: true } });
+  reply({ success: true, data: { rendered: true, backend: file.includes('actual-backend') ? 'fake-html-engine' : undefined } });
 }
 if (args[0] === 'validate') reply({ success: true, data: 'Validation passed' });
 if (args[0] === 'get') reply({ success: true, data: { path: args[2], children: [] } });
@@ -213,6 +227,48 @@ describe('office_document_preview', () => {
     expect(result.content[0].text).toContain('```image-preview');
   });
 
+  it('rejects contradictory contact-sheet selectors and unsupported Excel grids before execution', async () => {
+    const w = workspace();
+    const ctx = context(w, 'invalid-render-session');
+    const deck = document(w, 'deck.pptx');
+    const workbook = document(w, 'book.xlsx');
+
+    const conflict = envelope(await handleOfficeDocumentPreview(ctx, {
+      action: 'render', file: deck, page: '1', grid: 'auto',
+    }));
+    const unsupported = envelope(await handleOfficeDocumentPreview(ctx, {
+      action: 'render', file: workbook, grid: 3,
+    }));
+
+    expect(conflict).toMatchObject({
+      ok: false,
+      error: { code: 'render_selector_conflict', category: 'input' },
+      artifacts: [],
+    });
+    expect(unsupported).toMatchObject({
+      ok: false,
+      error: { code: 'xlsx_contact_sheet_unsupported', category: 'unsupported' },
+      artifacts: [],
+    });
+    expect(existsSync(join(ctx.dataPath!, 'office'))).toBe(false);
+  });
+
+  it('authorizes the input document before creating the Office artifact directory', async () => {
+    const w = workspace();
+    const ctx = context(w, 'missing-render-session');
+
+    const missing = envelope(await handleOfficeDocumentPreview(ctx, {
+      action: 'render', file: join(w.working, 'missing.docx'), renderer: 'html',
+    }));
+
+    expect(missing).toMatchObject({
+      ok: false,
+      error: { code: 'file_not_found', category: 'path' },
+      artifacts: [],
+    });
+    expect(existsSync(join(ctx.dataPath!, 'office'))).toBe(false);
+  });
+
   it('records native failure and truthful HTML fallback for auto rendering', async () => {
     const w = workspace();
     const ctx = context(w, 'fallback-session');
@@ -221,6 +277,25 @@ describe('office_document_preview', () => {
 
     expect(envelope(result).backend).toBe('html');
     expect(envelope(result).warnings).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: 'native_renderer_unavailable' }),
+    ]));
+
+    const actualFile = document(w, 'actual-backend.pptx');
+    const actual = envelope(await handleOfficeDocumentPreview(ctx, {
+      action: 'render', file: actualFile, renderer: 'html',
+    }));
+    expect(actual.backend).toBe('fake-html-engine');
+    expect(actual.data).toMatchObject({ render: { backend: 'fake-html-engine' } });
+
+    const failedFile = document(w, 'all-renderers-fail.pptx');
+    const failed = envelope(await handleOfficeDocumentPreview(ctx, { action: 'render', file: failedFile }));
+    expect(failed.error).toMatchObject({
+      code: 'dependency_unavailable',
+      category: 'dependency',
+      upstreamCode: 'html_unavailable',
+    });
+    expect(failed.backend).toBe('html');
+    expect(failed.warnings).toEqual(expect.arrayContaining([
       expect.objectContaining({ code: 'native_renderer_unavailable' }),
     ]));
   });
@@ -282,6 +357,132 @@ describe('office_document_preview', () => {
     expect(envelope(first).backend).toBe('officecli-watch');
   });
 
+  it('single-flights concurrent watch starts and preserves an existing reference when reopening the pane fails', async () => {
+    const w = workspace();
+    const file = document(w, 'watch-race.pptx');
+    const firstCtx = context(w, 'watch-race-a', async url => ({ url }));
+    const secondCtx = context(w, 'watch-race-b', async url => ({ url }));
+
+    const [first, second] = await Promise.all([
+      handleOfficeDocumentPreview(firstCtx, { action: 'start', file }),
+      handleOfficeDocumentPreview(secondCtx, { action: 'start', file }),
+    ]);
+    const firstStatus = envelope(await handleOfficeDocumentPreview(firstCtx, { action: 'status', file }));
+    const secondStatus = envelope(await handleOfficeDocumentPreview(secondCtx, { action: 'status', file }));
+
+    expect(envelope(first).data).toMatchObject({ running: true });
+    expect(envelope(second).data).toMatchObject({ running: true });
+    expect(firstStatus.data).toMatchObject({
+      running: true,
+      currentSessionReferenced: true,
+      sessionReferences: 2,
+    });
+    expect(secondStatus.data).toMatchObject({
+      running: true,
+      currentSessionReferenced: true,
+      sessionReferences: 2,
+    });
+
+    let reopenCount = 0;
+    const reopenCtx = context(w, 'watch-race-a', async url => {
+      reopenCount += 1;
+      if (reopenCount === 1) throw new Error('pane unavailable');
+      return { url };
+    });
+    const failedReopen = envelope(await handleOfficeDocumentPreview(reopenCtx, { action: 'start', file }));
+    const afterFailure = envelope(await handleOfficeDocumentPreview(firstCtx, { action: 'status', file }));
+
+    expect(failedReopen.error?.code).toBe('browser_pane_open_failed');
+    expect(afterFailure.data).toMatchObject({
+      running: true,
+      currentSessionReferenced: true,
+      sessionReferences: 2,
+    });
+
+    await handleOfficeDocumentPreview(firstCtx, { action: 'stop', file });
+    await handleOfficeDocumentPreview(secondCtx, { action: 'stop', file });
+  });
+
+  it('single-flights duplicate starts from the same session through BrowserPane acquisition', async () => {
+    const w = workspace();
+    const file = document(w, 'slow-watch-same-session.pptx');
+    let openCount = 0;
+    const ctx = context(w, 'same-session-watch-race', async url => {
+      openCount += 1;
+      return { url };
+    });
+
+    const [first, second] = await Promise.all([
+      handleOfficeDocumentPreview(ctx, { action: 'start', file }),
+      handleOfficeDocumentPreview(ctx, { action: 'start', file }),
+    ]);
+    const status = envelope(await handleOfficeDocumentPreview(ctx, { action: 'status', file }));
+
+    expect(envelope(first).ok).toBe(true);
+    expect(envelope(second).ok).toBe(true);
+    expect(openCount).toBe(1);
+    expect(status.data).toMatchObject({
+      running: true,
+      currentSessionReferenced: true,
+      sessionReferences: 1,
+    });
+
+    await handleOfficeDocumentPreview(ctx, { action: 'stop', file });
+  });
+
+  it('does not attach a released session while preserving another waiter on the shared watch start', async () => {
+    const w = workspace();
+    const file = document(w, 'slow-watch.pptx');
+    const releasedCtx = context(w, 'released-during-start', async url => ({ url }));
+    const survivorCtx = context(w, 'survives-shared-start', async url => ({ url }));
+
+    const releasedPending = handleOfficeDocumentPreview(releasedCtx, { action: 'start', file });
+    const survivorPending = handleOfficeDocumentPreview(survivorCtx, { action: 'start', file });
+    releaseOfficePreviewSession(releasedCtx.sessionId);
+    const [released, survivor] = await Promise.all([releasedPending, survivorPending]);
+    const releasedStatus = envelope(await handleOfficeDocumentPreview(releasedCtx, { action: 'status', file }));
+    const survivorStatus = envelope(await handleOfficeDocumentPreview(survivorCtx, { action: 'status', file }));
+
+    expect(envelope(released).error?.code).toBe('preview_session_released');
+    expect(envelope(survivor).ok).toBe(true);
+    expect(releasedStatus.data).toMatchObject({
+      running: true,
+      currentSessionReferenced: false,
+      sessionReferences: 1,
+    });
+    expect(survivorStatus.data).toMatchObject({
+      running: true,
+      currentSessionReferenced: true,
+      sessionReferences: 1,
+    });
+
+    await handleOfficeDocumentPreview(survivorCtx, { action: 'stop', file });
+  });
+
+  it('does not report a stale start after preview state is cleared during BrowserPane acquisition', async () => {
+    const w = workspace();
+    const file = document(w, 'clear-during-browser-open.pptx');
+    let announceOpen!: () => void;
+    let finishOpen!: () => void;
+    const opening = new Promise<void>(resolvePromise => { announceOpen = resolvePromise; });
+    const opened = new Promise<void>(resolvePromise => { finishOpen = resolvePromise; });
+    const ctx = context(w, 'clear-during-browser-open', async url => {
+      announceOpen();
+      await opened;
+      return { url };
+    });
+
+    const pending = handleOfficeDocumentPreview(ctx, { action: 'start', file });
+    await opening;
+    clearOfficePreviewState(true);
+    finishOpen();
+    const result = envelope(await pending);
+    const status = envelope(await handleOfficeDocumentPreview(ctx, { action: 'status', file }));
+
+    expect(result.error?.code).toBe('preview_state_cleared');
+    expect(status.data).toEqual({ running: false });
+  });
+
   it('does not leak or mutate a watch through an unreferenced or out-of-scope session path', async () => {
     const w = workspace();
     const open = async (url: string) => ({ url });
@@ -323,6 +524,19 @@ describe('office_document_preview', () => {
     expect(envelope(status).data).toEqual({ running: false });
   });
 
+  it('rejects an unknown preview action before reporting desktop capability', async () => {
+    const w = workspace();
+    const ctx = context(w, 'unknown-preview-action');
+    const file = document(w, 'unknown.docx');
+
+    const result = envelope(await handleOfficeDocumentPreview(ctx, {
+      action: 'launch' as never,
+      file,
+    }));
+
+    expect(result.error).toMatchObject({ code: 'unknown_preview_action', category: 'input' });
+  });
+
   it('releases Selection-owned watches when a session ends', async () => {
     const w = workspace();
     const ctx = context(w, 'release-session', async url => ({ url }));
@@ -335,6 +549,23 @@ describe('office_document_preview', () => {
 });
 
 describe('office_document_finalize', () => {
+  it('rejects an invalid profile instead of silently weakening it to standard', async () => {
+    const w = workspace();
+    const ctx = context(w, 'invalid-finalize-profile');
+    const file = document(w, 'profile.docx');
+
+    const result = envelope(await handleOfficeDocumentFinalize(ctx, {
+      file,
+      profile: 'relaxed' as never,
+    }));
+
+    expect(result).toMatchObject({
+      ok: false,
+      deliveryReady: false,
+      error: { code: 'invalid_finalize_profile', category: 'input' },
+    });
+  });
+
   it('blocks strict delivery but keeps offline HTML degradation non-blocking under standard', async () => {
     const w = workspace();
     const ctx = context(w, 'offline-finalize');
@@ -375,8 +606,22 @@ describe('office_document_finalize', () => {
     const result = await handleOfficeDocumentFinalize(ctx, { file });
     const payload = envelope(result);
 
-    expect(payload).toMatchObject({ ok: true, deliveryReady: true, backend: 'html' });
+    expect(payload).toMatchObject({
+      ok: true,
+      deliveryReady: true,
+      backend: 'html',
+    });
+    expect(payload.data).toEqual(expect.objectContaining({
+      residentFlush: 'selection_lease_saved',
+    }));
     expect(payload.evidence).toMatchObject({ profile: 'strict', artifactRevision: payload.artifactRevision });
+    expect(payload.evidence?.checks.find(check => check.name === 'artifact_revision_current')).toMatchObject({
+      ok: true,
+      data: expect.objectContaining({
+        revisionAtStart: payload.artifactRevision,
+        revisionAtEnd: payload.artifactRevision,
+      }),
+    });
     expect(payload.evidence?.checks.every(check => !check.blocking || check.ok)).toBe(true);
     expect(payload.data).toMatchObject({
       gate: 'machine',
@@ -432,6 +677,26 @@ describe('office_document_finalize', () => {
     expect(envelope(result).evidence?.profile).toBe('standard');
     expect(after.equals(before)).toBe(true);
     expect(envelope(result).command).not.toContain('refresh');
+  });
+
+  it('blocks finalization when the resident lease cannot be flushed', async () => {
+    const w = workspace();
+    const ctx = context(w, 'finalize-flush-fail');
+    const file = document(w, 'flush-fail.docx');
+    await executeOfficeCommand(ctx, {
+      argv: ['set', file, '/body/p[1]', '--prop', 'text=draft'],
+      mode: 'edit',
+      mutation: true,
+    }, TEST_DEPENDENCIES);
+
+    const result = envelope(await handleOfficeDocumentFinalize(ctx, { file, profile: 'strict' }));
+
+    expect(result).toMatchObject({
+      ok: false,
+      deliveryReady: false,
+      data: { residentFlush: 'selection_lease_flush_failed' },
+    });
+    expect(result.evidence?.checks.some(check => check.name === 'resident_flush' && check.ok === false)).toBe(true);
   });
 
   it('blocks a structurally valid but empty Office package at the key-content gate', async () => {

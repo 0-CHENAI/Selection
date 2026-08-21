@@ -174,15 +174,34 @@ describe('office_document_guide', () => {
     symlinkSync(outside, symlinkEscape);
 
     const accepted = await handleOfficeDocumentGuide(ctx, { guide: 'morph-ppt-3d', referencePath: valid });
+    const relativeAccepted = await handleOfficeDocumentGuide(ctx, { guide: 'morph-ppt-3d', referencePath: 'scene.glb' });
     const badHeader = await handleOfficeDocumentGuide(ctx, { guide: 'morph-ppt-3d', referencePath: invalid });
     const escaped = await handleOfficeDocumentGuide(ctx, { guide: 'morph-ppt-3d', referencePath: outside });
     const symlinkEscaped = await handleOfficeDocumentGuide(ctx, { guide: 'morph-ppt-3d', referencePath: symlinkEscape });
 
     expect(envelope(accepted).ok).toBe(true);
+    expect(envelope(relativeAccepted).ok).toBe(true);
+    expect(envelope(relativeAccepted).artifacts[0]?.path).toBe(realpathSync.native(valid));
     expect(envelope(accepted).artifacts[0]).toMatchObject({ path: realpathSync.native(valid), mimeType: 'model/gltf-binary' });
     expect(envelope(badHeader).error?.code).toBe('invalid_glb');
     expect(envelope(escaped).error?.code).toBe('reference_outside_allowed_roots');
     expect(envelope(symlinkEscaped).error?.code).toBe('reference_outside_allowed_roots');
+  });
+
+  it('bounds large Markdown references while preserving the complete artifact', async () => {
+    const { ctx } = context();
+    const result = await handleOfficeDocumentGuide(ctx, {
+      guide: 'pitch-deck',
+      referencePath: 'SKILL.md',
+    });
+    const payloadData = data(result);
+
+    expect(envelope(result).ok).toBe(true);
+    expect(String(payloadData.content).length).toBeLessThan(42_000);
+    expect(envelope(result).warnings).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: 'guide_reference_truncated' }),
+    ]));
+    expect(envelope(result).artifacts[0]?.sizeBytes).toBeGreaterThan(40_000);
   });
 
   it('rejects conflicting selectors and unknown topics with actionable errors', async () => {
@@ -198,6 +217,30 @@ describe('office_document_guide', () => {
     expect(envelope(missing).error).toMatchObject({
       code: 'guide_topic_not_found',
       recovery: expect.stringContaining('compact catalog'),
+    });
+  });
+
+  it('classifies malformed runtime input as an input error', async () => {
+    const { ctx } = context();
+    const result = await handleOfficeDocumentGuide(ctx, undefined as never);
+
+    expect(envelope(result).error).toMatchObject({
+      code: 'invalid_guide_input',
+      category: 'input',
+      retriable: false,
+    });
+  });
+
+  it('preserves working-directory path errors instead of misclassifying them as dependencies', async () => {
+    const { ctx, root } = context();
+    ctx.workingDirectory = join(root, 'missing-working-directory');
+
+    const result = await handleOfficeDocumentGuide(ctx, { guide: 'word' });
+
+    expect(envelope(result).error).toMatchObject({
+      code: 'working_directory_not_found',
+      category: 'path',
+      retriable: false,
     });
   });
 });

@@ -2,7 +2,7 @@ import * as React from 'react'
 import { useMemo, useEffect, useRef, useCallback, useState } from 'react'
 import i18n from 'i18next'
 import { useTranslation } from 'react-i18next'
-import type { ToolDisplayMeta, AnnotationV1 } from '@craft-agent/core'
+import type { ToolDisplayMeta, AnnotationV1, AgentToolResultContent } from '@craft-agent/core'
 import { normalizePath, pathStartsWith, stripPathPrefix } from '@craft-agent/core/utils'
 import { isParentTaskTool } from '@craft-agent/shared/utils/toolNames'
 import { motion, AnimatePresence, useReducedMotion } from 'motion/react'
@@ -264,6 +264,8 @@ export interface ActivityItem {
   toolUseId?: string  // For matching parent-child relationships
   toolInput?: Record<string, unknown>
   content?: string
+  /** Live-only text/image blocks from a tool result. */
+  toolResultContent?: AgentToolResultContent[]
   intent?: string
   /** Optional backing message id (used by plan activities for branching/annotations) */
   messageId?: string
@@ -1415,7 +1417,7 @@ function clearAnnotationMarks(root: HTMLElement): void {
   annotatedInlineCodeNodes.forEach((codeNode) => {
     codeNode.removeAttribute('data-ca-annotation-inline-code')
     codeNode.style.backgroundColor = ''
-    codeNode.style.boxShadow = ''
+    codeNode.style.removeProperty('box-shadow')
   })
 
   const marks = root.querySelectorAll('span[data-ca-annotation-id]')

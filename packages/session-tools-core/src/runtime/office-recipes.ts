@@ -197,31 +197,31 @@ export function buildMorphCleanAccumulationCommands(queryData: unknown, threshol
 export const OFFICE_MORPH_RECIPES: readonly OfficeMorphRecipe[] = [
   {
     name: 'clone',
-    implementation: 'buildMorphCloneCommands(fromSlide, toSlide) returns validated add/set objects for one atomic office_document_edit batch.',
+    implementation: 'office_document_edit.recipe.clone expands buildMorphCloneCommands(fromSlide, toSlide) into one atomic batch.',
     mutatesDocument: true,
     requiresExplicitEditPermission: true,
   },
   {
     name: 'ghost',
-    implementation: 'buildMorphGhostCommands(slide, shapeIndexes) returns validated x=36cm set objects; never execute morph-helpers.py or morph-helpers.sh.',
+    implementation: 'office_document_edit.recipe.ghost expands buildMorphGhostCommands(slide, shapeIndexes) into one atomic batch; never invent shell or Python helpers.',
     mutatesDocument: true,
     requiresExplicitEditPermission: true,
   },
   {
     name: 'verify',
-    implementation: 'verifyMorphSlide(current, previous, previousSlide) analyzes get JSON for transition, unghosted actors, and adjacent duplicate content.',
+    implementation: 'office_document_inspect.recipe.verify runs get + verifyMorphSlide for transition, unghosted actors, and adjacent duplicate content.',
     mutatesDocument: false,
     requiresExplicitEditPermission: false,
   },
   {
     name: 'final-check',
-    implementation: 'verify every slide with verifyMorphSlide, apply checkMorphGhostAccumulation to query shape[x>=34cm], then preview.render and strict finalize.',
+    implementation: 'office_document_inspect.recipe.final-check verifies every slide, then checkMorphGhostAccumulation on query shape[x>=34cm].',
     mutatesDocument: false,
     requiresExplicitEditPermission: false,
   },
   {
     name: 'clean-accumulation',
-    implementation: 'buildMorphCleanAccumulationCommands(queryData, threshold) accepts exact authorized query paths and returns reviewed remove objects for an explicitly permissioned atomic edit batch.',
+    implementation: 'office_document_edit.recipe.clean-accumulation expands buildMorphCleanAccumulationCommands(queryData, threshold) into one explicitly permissioned atomic batch.',
     mutatesDocument: true,
     requiresExplicitEditPermission: true,
   },

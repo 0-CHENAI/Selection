@@ -10,6 +10,7 @@ import type {
 import type { ToolResult } from '../types.ts';
 import {
   executeOfficeCommand,
+  flushOfficeResidentLease,
   getOfficeArtifactRevision,
   officeToolResult,
   wasOfficeArtifactMutatedBySession,
@@ -134,6 +135,26 @@ export async function handleOfficeDocumentFinalize(
       error: { code: 'file_required', category: 'input', message: 'finalize requires a non-empty file path.', retriable: false },
     });
   }
+  if (args.profile !== undefined && args.profile !== 'standard' && args.profile !== 'strict') {
+    return officeToolResult({
+      ok: false,
+      version: 'unknown',
+      schemaCrc: 'unknown',
+      command: ['finalize', args.file],
+      cwd: ctx.workingDirectory ?? ctx.sessionPath ?? ctx.workspacePath,
+      durationMs: 0,
+      warnings: [],
+      cacheHit: false,
+      artifacts: [],
+      deliveryReady: false,
+      error: {
+        code: 'invalid_finalize_profile',
+        category: 'input',
+        message: 'finalize profile must be standard or strict.',
+        retriable: false,
+      },
+    });
+  }
 
   // A root read is both a path/permission check and a real OfficeCLI openability check.
   const openable = await executeOfficeCommand(ctx, {
@@ -158,9 +179,38 @@ export async function handleOfficeDocumentFinalize(
     return officeToolResult(envelope);
   }
   const file = openable.envelope.documentPath;
-  const revisionAtStart = openable.envelope.artifactRevision ?? getOfficeArtifactRevision(file) ?? 1;
   const profile = args.profile
     ?? (wasOfficeArtifactMutatedBySession(ctx.sessionId, file) ? 'strict' : 'standard');
+  const flushed = await flushOfficeResidentLease(ctx, file, dependencies);
+  if (flushed && !flushed.envelope.ok) {
+    return officeToolResult({
+      ...flushed.envelope,
+      command: ['finalize', args.file, '--profile', profile],
+      documentPath: file,
+      deliveryReady: false,
+      data: {
+        gate: 'machine',
+        claim: 'machine_gates_blocked',
+        humanMicrosoftOfficeVisualApproval: false,
+        residentFlush: 'selection_lease_flush_failed',
+      },
+      evidence: {
+        file,
+        profile,
+        artifactRevision: openable.envelope.artifactRevision ?? getOfficeArtifactRevision(file) ?? 1,
+        generatedAt: new Date().toISOString(),
+        checks: [{
+          name: 'resident_flush',
+          ok: false,
+          blocking: true,
+          error: flushed.envelope.error,
+          warnings: flushed.envelope.warnings,
+        }],
+      },
+    });
+  }
+  const residentFlush = flushed ? 'selection_lease_saved' : 'standalone_no_open_lease';
+  const revisionAtStart = getOfficeArtifactRevision(file) ?? 1;
   const checks: FinalizationCheck[] = [];
   const warnings: StructuredWarning[] = [...openable.envelope.warnings];
 
@@ -333,7 +383,7 @@ export async function handleOfficeDocumentFinalize(
       gate: 'machine',
       claim: deliveryReady ? 'machine_gates_passed' : 'machine_gates_blocked',
       humanMicrosoftOfficeVisualApproval: false,
-      residentFlush: 'standalone_no_open_lease',
+      residentFlush,
     },
     backend: render.envelope.backend,
     warnings,

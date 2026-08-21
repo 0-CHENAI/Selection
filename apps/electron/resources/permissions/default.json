@@ -74,10 +74,6 @@
       "comment": "PDF read operations: extract text/pages, view info"
     },
     {
-      "pattern": "^xlsx-tool\\s+(read|info|export)\\b",
-      "comment": "Excel read operations: read cells, view info, export"
-    },
-    {
       "pattern": "^doc-diff\\b",
       "comment": "Document comparison (read-only)"
     },
@@ -86,19 +82,11 @@
       "comment": "Image read operations: view metadata/info"
     },
     {
-      "pattern": "^docx-tool\\s+(info|extract)\\b",
-      "comment": "Word read operations: view info, extract text"
-    },
-    {
-      "pattern": "^pptx-tool\\s+(info|extract)\\b",
-      "comment": "PowerPoint read operations: view info, extract text"
-    },
-    {
       "pattern": "^ical-tool\\s+(read|filter)\\b",
       "comment": "Calendar read operations: read events, filter by date"
     },
     {
-      "pattern": "^(pdf-tool|xlsx-tool|img-tool|docx-tool|pptx-tool|ical-tool)\\s*$",
+      "pattern": "^(pdf-tool|img-tool|ical-tool)\\s*$",
       "comment": "CLI tools: bare invocation (prints help)"
     },
     {

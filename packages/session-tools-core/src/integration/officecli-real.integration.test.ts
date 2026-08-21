@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createNodeFileSystem, type SessionToolContext } from '../context.ts';
@@ -11,7 +11,7 @@ import {
   releaseOfficePreviewSession,
 } from '../handlers/office-preview.ts';
 import type { OfficeResultEnvelope } from '../office-types.ts';
-import { clearOfficeRuntimeState } from '../runtime/office-coordinator.ts';
+import { clearOfficeRuntimeState, releaseOfficeRuntimeSession } from '../runtime/office-coordinator.ts';
 import { buildMorphCloneCommands } from '../runtime/office-recipes.ts';
 import type { ToolResult } from '../types.ts';
 
@@ -29,7 +29,16 @@ function envelope(result: ToolResult): OfficeResultEnvelope {
 
 function requireSuccess(result: ToolResult, label: string): OfficeResultEnvelope {
   const value = envelope(result);
-  expect(value.ok, `${label}: ${JSON.stringify(value.error ?? value.warnings)}`).toBe(true);
+  expect(value.ok, `${label}: ${JSON.stringify({
+    error: value.error,
+    warnings: value.warnings,
+    checks: value.evidence?.checks?.map(check => ({
+      name: check.name,
+      ok: check.ok,
+      blocking: check.blocking,
+      error: check.error,
+    })),
+  })}`).toBe(true);
   return value;
 }
 
@@ -66,13 +75,17 @@ beforeAll(() => {
   clearOfficePreviewState();
 });
 
-afterAll(() => {
+afterAll(async () => {
   if (!runIntegration) return;
-  releaseOfficePreviewSession(ctx.sessionId);
-  clearOfficePreviewState();
-  clearOfficeRuntimeState();
-  rmSync(root, { recursive: true, force: true });
-});
+  try {
+    releaseOfficePreviewSession(ctx.sessionId);
+    await releaseOfficeRuntimeSession(ctx.sessionId);
+  } finally {
+    clearOfficePreviewState();
+    clearOfficeRuntimeState();
+    rmSync(root, { recursive: true, force: true });
+  }
+}, 60_000);
 
 describe('real OfficeCLI 1.0.144 integration', () => {
   integrationIt('creates files in existing, missing, spaced, and non-ASCII directories (#60)', async () => {
@@ -90,6 +103,14 @@ describe('real OfficeCLI 1.0.144 integration', () => {
       expect(payload.command).toContain(output);
       expect(existsSync(join(working, output))).toBe(true);
     }
+
+    const typedOutput = '中文 目录/无扩展名输出';
+    const typed = requireSuccess(await handleOfficeDocumentEdit(ctx, {
+      argv: ['create', typedOutput, '--type', 'docx'],
+    }), `create ${typedOutput} --type docx`);
+    expect(typed.command).toContain(`${typedOutput}.docx`);
+    expect(typed.documentPath).toBe(join(realpathSync.native(working), `${typedOutput}.docx`));
+    expect(existsSync(join(working, `${typedOutput}.docx`))).toBe(true);
   }, 120_000);
 
   integrationIt('runs DOCX create → atomic batch → inspect → render → strict finalize', async () => {
@@ -118,6 +139,46 @@ describe('real OfficeCLI 1.0.144 integration', () => {
     const finalized = requireSuccess(await handleOfficeDocumentFinalize(ctx, { file, profile: 'strict' }), 'finalize docx');
     expect(finalized.deliveryReady).toBe(true);
     expect(finalized.evidence?.artifactRevision).toBe(finalized.artifactRevision);
+  }, 180_000);
+
+  integrationIt('runs native merge, atomic import recovery, and the real refresh capability', async () => {
+    const template = '能力覆盖/问候模板.docx';
+    const merged = '能力覆盖/问候 Selection.docx';
+    requireSuccess(await handleOfficeDocumentEdit(ctx, { argv: ['create', template] }), 'create merge template');
+    requireSuccess(await handleOfficeDocumentEdit(ctx, {
+      argv: ['add', template, '/body', '--type', 'paragraph', '--prop', 'text=您好，{{name}}！'],
+    }), 'add merge placeholder');
+    requireSuccess(await handleOfficeDocumentEdit(ctx, {
+      argv: ['merge', template, merged, '--data', '{"name":"Selection"}'],
+    }), 'merge docx template');
+    const mergedText = requireSuccess(
+      await handleOfficeDocumentInspect(ctx, { argv: ['view', merged, 'text'] }),
+      'inspect merged docx',
+    );
+    expect(JSON.stringify(mergedText.data)).toContain('Selection');
+
+    const workbook = '能力覆盖/导入数据.xlsx';
+    const csv = join(working, '能力覆盖', '季度 数据.csv');
+    writeFileSync(csv, '季度,收入\nQ1,42000\nQ2,45000\n');
+    requireSuccess(await handleOfficeDocumentEdit(ctx, { argv: ['create', workbook] }), 'create import workbook');
+    requireSuccess(await handleOfficeDocumentEdit(ctx, {
+      argv: ['import', workbook, '/Sheet1', csv, '--header'],
+    }), 'import csv');
+    const imported = requireSuccess(
+      await handleOfficeDocumentInspect(ctx, { argv: ['get', workbook, '/Sheet1/B3'] }),
+      'inspect imported cell',
+    );
+    expect(JSON.stringify(imported.data)).toContain('45000');
+
+    const refresh = envelope(await handleOfficeDocumentEdit(ctx, { argv: ['refresh', merged] }));
+    if (refresh.ok) {
+      expect(refresh.backend || JSON.stringify(refresh.data)).toBeTruthy();
+    } else {
+      expect(refresh.error).toBeDefined();
+      expect(['dependency', 'runtime']).toContain(refresh.error!.category);
+      expect(refresh.error?.message).toBeTruthy();
+      expect(refresh.error?.upstreamCode || refresh.stderr || refresh.warnings.length).toBeTruthy();
+    }
   }, 180_000);
 
   integrationIt('runs XLSX and PPTX native create/edit/inspect/render/finalize flows', async () => {
@@ -255,4 +316,72 @@ describe('real OfficeCLI 1.0.144 integration', () => {
     const stopped = requireSuccess(await handleOfficeDocumentPreview(ctx, { action: 'stop', file }), 'stop watch');
     expect(stopped.data).toMatchObject({ stopped: true, remainingSessionReferences: 0 });
   }, 240_000);
+
+  integrationIt('reads the latest resident edits without a model save and still finalizes', async () => {
+    const file = 'resident-lease.xlsx';
+    requireSuccess(await handleOfficeDocumentEdit(ctx, { argv: ['create', file] }), 'create resident workbook');
+    requireSuccess(await handleOfficeDocumentEdit(ctx, {
+      argv: ['set', file, '/Sheet1/A1', '--prop', 'value=一次'],
+    }), 'first resident set');
+    requireSuccess(await handleOfficeDocumentEdit(ctx, {
+      argv: ['set', file, '/Sheet1/A1', '--prop', 'value=二次'],
+    }), 'second resident set');
+    const latest = requireSuccess(await handleOfficeDocumentInspect(ctx, {
+      argv: ['get', file, '/Sheet1/A1'],
+    }), 'get after resident sets');
+    expect(JSON.stringify(latest.data)).toContain('二次');
+    expect(requireSuccess(await handleOfficeDocumentFinalize(ctx, { file, profile: 'strict' }), 'finalize resident').deliveryReady).toBe(true);
+  }, 180_000);
+
+  integrationIt('writes dump and html artifacts that Read can consume, and replays dump through batch.file', async () => {
+    const file = 'dump-replay.docx';
+    requireSuccess(await handleOfficeDocumentEdit(ctx, { argv: ['create', file] }), 'create dump doc');
+    requireSuccess(await handleOfficeDocumentEdit(ctx, {
+      argv: ['add', file, '/body', '--type', 'paragraph', '--prop', 'text=可回放正文'],
+    }), 'add dump paragraph');
+    const dump = requireSuccess(await handleOfficeDocumentInspect(ctx, {
+      argv: ['dump', file, '/'],
+    }), 'auto dump');
+    const dumpPath = dump.command[dump.command.indexOf('--out') + 1];
+    expect(typeof dumpPath).toBe('string');
+    expect(dumpPath).toContain(join('data', 'office'));
+    expect(existsSync(dumpPath!)).toBe(true);
+
+    const html = requireSuccess(await handleOfficeDocumentInspect(ctx, {
+      argv: ['view', file, 'html'],
+    }), 'view html artifact');
+    const htmlPath = html.command[html.command.indexOf('--out') + 1];
+    expect(typeof htmlPath).toBe('string');
+    expect(readFileSync(htmlPath!, 'utf8')).toContain('可回放正文');
+
+    const replay = 'dump-replay-copy.docx';
+    requireSuccess(await handleOfficeDocumentEdit(ctx, { argv: ['create', replay] }), 'create replay target');
+    const replayBatch = join(ctx.dataPath!, 'office', 'replay-batch.json');
+    writeFileSync(replayBatch, readFileSync(dumpPath!, 'utf8'));
+    const replayed = await handleOfficeDocumentEdit(ctx, {
+      argv: ['batch', replay],
+      batch: { file: replayBatch },
+    });
+    if (envelope(replayed).ok) {
+      const copied = requireSuccess(await handleOfficeDocumentInspect(ctx, {
+        argv: ['view', replay, 'text'],
+      }), 'replayed text');
+      expect(JSON.stringify(copied.data)).toContain('可回放正文');
+    }
+  }, 180_000);
+
+  integrationIt('clones a Morph slide through edit.recipe and keeps transition=morph', async () => {
+    const file = 'recipe-clone.pptx';
+    requireSuccess(await handleOfficeDocumentEdit(ctx, { argv: ['create', file] }), 'create recipe deck');
+    requireSuccess(await handleOfficeDocumentEdit(ctx, {
+      argv: ['add', file, '/', '--type', 'slide', '--prop', 'layout=blank'],
+    }), 'add first slide');
+    requireSuccess(await handleOfficeDocumentEdit(ctx, {
+      recipe: { name: 'clone', file, fromSlide: 1, toSlide: 2 },
+    }), 'recipe clone');
+    const second = requireSuccess(await handleOfficeDocumentInspect(ctx, {
+      argv: ['get', file, '/slide[2]'],
+    }), 'get cloned slide');
+    expect(JSON.stringify(second.data).toLowerCase()).toContain('morph');
+  }, 180_000);
 });

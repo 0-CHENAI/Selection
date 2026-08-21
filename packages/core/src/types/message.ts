@@ -274,6 +274,8 @@ export interface Message {
   toolUseId?: string;
   toolInput?: Record<string, unknown>;
   toolResult?: string;
+  /** Live-only multimodal tool output; excluded by messageToStored to keep Base64 out of JSONL. */
+  toolResultContent?: AgentToolResultContent[];
   toolStatus?: ToolStatus;
   toolDuration?: number;
   toolIntent?: string;
