@@ -188,6 +188,10 @@ function writeJson(path: string, value: unknown): void {
   writeFileSync(path, `${JSON.stringify(value, null, 2)}\n`);
 }
 
+export function posixRelPath(root: string, path: string): string {
+  return relative(root, path).replace(/\\/g, '/');
+}
+
 function filesRecursively(root: string): string[] {
   const files: string[] = [];
   const visit = (directory: string) => {
@@ -207,8 +211,11 @@ function filesRecursively(root: string): string[] {
 
 function directoryHash(root: string): string {
   const digest = createHash('sha256');
-  for (const path of filesRecursively(root)) {
-    digest.update(relative(root, path));
+  const entries = filesRecursively(root)
+    .map(path => ({ path, rel: posixRelPath(root, path) }))
+    .sort((left, right) => (left.rel < right.rel ? -1 : left.rel > right.rel ? 1 : 0));
+  for (const { path, rel } of entries) {
+    digest.update(rel);
     digest.update('\0');
     digest.update(readFileSync(path));
     digest.update('\0');
@@ -291,11 +298,13 @@ function buildGuideIndex(manifest: OfficecliManifest, versionRoot: string): Guid
       directory: definition.directory,
       entry: definition.entry,
       headings: headings(readFileSync(entry, 'utf8')),
-      files: filesRecursively(root).map(path => ({
-        path: relative(root, path),
-        sha256: fileHash(path),
-        sizeBytes: lstatSync(path).size,
-      })),
+      files: filesRecursively(root)
+        .map(path => ({
+          path: posixRelPath(root, path),
+          sha256: fileHash(path),
+          sizeBytes: lstatSync(path).size,
+        }))
+        .sort((left, right) => (left.path < right.path ? -1 : left.path > right.path ? 1 : 0)),
     };
   }
   return { version: manifest.version, guides };

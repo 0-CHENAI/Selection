@@ -5,6 +5,7 @@ import { describe, expect, it } from 'bun:test';
 import {
   commandSchemaContractsEqual,
   extractExternalDependencies,
+  posixRelPath,
   validateOfficecliReleaseAssetUrl,
   validateManifestFiles,
   type CommandSnapshot,
@@ -20,6 +21,18 @@ function manifest(): OfficecliManifest {
 describe('OfficeCLI sync governance', () => {
   it('accepts the complete reviewed manifest', () => {
     expect(() => validateManifestFiles(manifest())).not.toThrow();
+  });
+
+  it('hashes nested guide resources with posix relative paths', () => {
+    const root = mkdtempSync(join(tmpdir(), 'selection-officecli-posix-rel-'));
+    try {
+      mkdirSync(join(root, 'reference', 'styles'), { recursive: true });
+      writeFileSync(join(root, 'SKILL.md'), '# skill\n');
+      writeFileSync(join(root, 'reference', 'styles', 'theme.md'), '# theme\n');
+      expect(posixRelPath(root, join(root, 'reference', 'styles', 'theme.md'))).toBe('reference/styles/theme.md');
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 
   it('treats platform-specific help hashes as non-blocking when the command contract matches', () => {

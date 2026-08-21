@@ -85,7 +85,7 @@ afterAll(async () => {
     clearOfficeRuntimeState();
     rmSync(root, { recursive: true, force: true });
   }
-});
+}, 60_000);
 
 describe('real OfficeCLI 1.0.144 integration', () => {
   integrationIt('creates files in existing, missing, spaced, and non-ASCII directories (#60)', async () => {
