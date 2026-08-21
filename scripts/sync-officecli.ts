@@ -60,7 +60,7 @@ export interface OfficecliManifest {
   guides: Record<GuideName, ManifestGuide>;
 }
 
-interface CommandSnapshot {
+export interface CommandSnapshot {
   version: string;
   schemaCrc: string;
   generatedFrom: 'reviewed-release-binary';
@@ -149,6 +149,34 @@ function sha256(value: Buffer | string): string {
 
 function fileHash(path: string): string {
   return sha256(readFileSync(path));
+}
+
+function textFileHash(path: string): string {
+  return sha256(readFileSync(path, 'utf8').replace(/\r\n/g, '\n').replace(/\r/g, '\n'));
+}
+
+export function commandSchemaContract(snapshot: CommandSnapshot): {
+  version: string;
+  schemaCrc: string;
+  generatedFrom: CommandSnapshot['generatedFrom'];
+  helpAllEntries: number;
+  rootCommands: string[];
+  flags: Record<string, string[]>;
+} {
+  return {
+    version: snapshot.version,
+    schemaCrc: snapshot.schemaCrc,
+    generatedFrom: snapshot.generatedFrom,
+    helpAllEntries: snapshot.helpAllEntries,
+    rootCommands: snapshot.rootCommands,
+    flags: Object.fromEntries(
+      Object.entries(snapshot.commands).map(([name, command]) => [name, command.flags]),
+    ),
+  };
+}
+
+export function commandSchemaContractsEqual(left: CommandSnapshot, right: CommandSnapshot): boolean {
+  return JSON.stringify(commandSchemaContract(left)) === JSON.stringify(commandSchemaContract(right));
 }
 
 function json<T>(path: string): T {
@@ -384,8 +412,8 @@ export function validateManifestFiles(
   }
   const licensePath = join(officeRoot, manifest.license.licenseFile);
   const noticePath = join(officeRoot, manifest.license.noticeFile);
-  if (fileHash(licensePath) !== manifest.license.licenseSha256) throw new Error('LICENSE hash mismatch');
-  if (fileHash(noticePath) !== manifest.license.noticeSha256) throw new Error('NOTICE hash mismatch');
+  if (textFileHash(licensePath) !== manifest.license.licenseSha256) throw new Error('LICENSE hash mismatch');
+  if (textFileHash(noticePath) !== manifest.license.noticeSha256) throw new Error('NOTICE hash mismatch');
   for (const [name, definition] of Object.entries(manifest.guides)) {
     const root = join(versionRoot, 'skills', definition.directory);
     const entry = join(root, definition.entry);
@@ -694,8 +722,10 @@ async function check(downloadRuntime: boolean): Promise<void> {
     if (binary) {
       const snapshot = await buildCommandSnapshot(binary);
       const reviewed = json<CommandSnapshot>(join(officeRoot, manifest.commandSchema!.file));
-      if (JSON.stringify(snapshot) !== JSON.stringify(reviewed)) {
-        throw new Error('Reviewed command schema differs from the current platform binary');
+      if (!commandSchemaContractsEqual(snapshot, reviewed)) {
+        throw new Error(
+          'Reviewed command schema contract differs from the current platform binary (version, schemaCrc, commands, or flags)',
+        );
       }
       const key = `${process.platform}-${process.arch}`;
       const expected = manifest.assets[key]?.sha256;

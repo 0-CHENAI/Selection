@@ -210,7 +210,7 @@ export async function handleOfficeDocumentFinalize(
     });
   }
   const residentFlush = flushed ? 'selection_lease_saved' : 'standalone_no_open_lease';
-  const revisionAtStart = openable.envelope.artifactRevision ?? getOfficeArtifactRevision(file) ?? 1;
+  const revisionAtStart = getOfficeArtifactRevision(file) ?? 1;
   const checks: FinalizationCheck[] = [];
   const warnings: StructuredWarning[] = [...openable.envelope.warnings];
 

@@ -68,6 +68,9 @@ if (args[0] === 'save' && file.includes('flush-fail')) {
   reply({ success: false, error: { code: 'save_failed', message: 'disk full' } }, 1);
 }
 if (args[0] === 'open' || args[0] === 'save' || args[0] === 'close') {
+  if (args[0] === 'save' && file && fs.existsSync(file)) {
+    fs.writeFileSync(file, fs.readFileSync(file));
+  }
   reply({ success: true, data: { lease: args[0] } });
 }
 if (args[0] === 'validate' && file.includes('invalid')) {
@@ -612,6 +615,13 @@ describe('office_document_finalize', () => {
       residentFlush: 'selection_lease_saved',
     }));
     expect(payload.evidence).toMatchObject({ profile: 'strict', artifactRevision: payload.artifactRevision });
+    expect(payload.evidence?.checks.find(check => check.name === 'artifact_revision_current')).toMatchObject({
+      ok: true,
+      data: expect.objectContaining({
+        revisionAtStart: payload.artifactRevision,
+        revisionAtEnd: payload.artifactRevision,
+      }),
+    });
     expect(payload.evidence?.checks.every(check => !check.blocking || check.ok)).toBe(true);
     expect(payload.data).toMatchObject({
       gate: 'machine',

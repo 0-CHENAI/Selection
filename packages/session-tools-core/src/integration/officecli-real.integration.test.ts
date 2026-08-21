@@ -29,7 +29,16 @@ function envelope(result: ToolResult): OfficeResultEnvelope {
 
 function requireSuccess(result: ToolResult, label: string): OfficeResultEnvelope {
   const value = envelope(result);
-  expect(value.ok, `${label}: ${JSON.stringify(value.error ?? value.warnings)}`).toBe(true);
+  expect(value.ok, `${label}: ${JSON.stringify({
+    error: value.error,
+    warnings: value.warnings,
+    checks: value.evidence?.checks?.map(check => ({
+      name: check.name,
+      ok: check.ok,
+      blocking: check.blocking,
+      error: check.error,
+    })),
+  })}`).toBe(true);
   return value;
 }
 
@@ -66,13 +75,16 @@ beforeAll(() => {
   clearOfficePreviewState();
 });
 
-afterAll(() => {
+afterAll(async () => {
   if (!runIntegration) return;
-  releaseOfficePreviewSession(ctx.sessionId);
-  void releaseOfficeRuntimeSession(ctx.sessionId);
-  clearOfficePreviewState();
-  clearOfficeRuntimeState();
-  rmSync(root, { recursive: true, force: true });
+  try {
+    releaseOfficePreviewSession(ctx.sessionId);
+    await releaseOfficeRuntimeSession(ctx.sessionId);
+  } finally {
+    clearOfficePreviewState();
+    clearOfficeRuntimeState();
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 
 describe('real OfficeCLI 1.0.144 integration', () => {

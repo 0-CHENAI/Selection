@@ -1767,6 +1767,18 @@ export function getOfficeArtifactRevision(path: string | undefined): number | un
   return existing.revision;
 }
 
+function syncOfficeArtifactStat(path: string): number {
+  const canonical = existsSync(path) ? realpathSync.native(path) : resolve(path);
+  const currentKey = statKey(canonical);
+  const existing = artifactStates.get(canonical);
+  if (!existing) {
+    artifactStates.set(canonical, { revision: 1, statKey: currentKey });
+    return 1;
+  }
+  existing.statKey = currentKey;
+  return existing.revision;
+}
+
 function markMutation(path: string, sessionId: string): number {
   const canonical = existsSync(path) ? realpathSync.native(path) : resolve(path);
   const existing = artifactStates.get(canonical);
@@ -2471,7 +2483,9 @@ export async function executeOfficeCommand(
     const revision = documentPath
       ? mutates
         ? markMutation(documentPath, ctx.sessionId)
-        : getOfficeArtifactRevision(documentPath)
+        : argv[0] === 'save'
+          ? syncOfficeArtifactStat(documentPath)
+          : getOfficeArtifactRevision(documentPath)
       : undefined;
     const artifact = documentPath ? documentArtifact(documentPath, revision) : undefined;
     const inspectOut = inspectOutputPath(argv, cwd);

@@ -3,9 +3,11 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { describe, expect, it } from 'bun:test';
 import {
+  commandSchemaContractsEqual,
   extractExternalDependencies,
   validateOfficecliReleaseAssetUrl,
   validateManifestFiles,
+  type CommandSnapshot,
   type OfficecliManifest,
 } from './sync-officecli.ts';
 
@@ -18,6 +20,33 @@ function manifest(): OfficecliManifest {
 describe('OfficeCLI sync governance', () => {
   it('accepts the complete reviewed manifest', () => {
     expect(() => validateManifestFiles(manifest())).not.toThrow();
+  });
+
+  it('treats platform-specific help hashes as non-blocking when the command contract matches', () => {
+    const reviewed = JSON.parse(
+      readFileSync(resolve(import.meta.dir, '../apps/electron/resources/officecli/1.0.144/command-schema.json'), 'utf8'),
+    ) as CommandSnapshot;
+    const sameContractDifferentHelp: CommandSnapshot = {
+      ...reviewed,
+      rootHelpSha256: '0'.repeat(64),
+      helpAllSha256: '1'.repeat(64),
+      commands: Object.fromEntries(
+        Object.entries(reviewed.commands).map(([name, command]) => [
+          name,
+          { ...command, helpSha256: '2'.repeat(64) },
+        ]),
+      ),
+    };
+    const driftedFlags: CommandSnapshot = {
+      ...reviewed,
+      commands: {
+        ...reviewed.commands,
+        get: { ...reviewed.commands.get!, flags: [...reviewed.commands.get!.flags, '--unreviewed'] },
+      },
+    };
+
+    expect(commandSchemaContractsEqual(reviewed, sameContractDifferentHelp)).toBe(true);
+    expect(commandSchemaContractsEqual(reviewed, driftedFlags)).toBe(false);
   });
 
   it('rejects lookalike release URLs and version/tag drift', () => {

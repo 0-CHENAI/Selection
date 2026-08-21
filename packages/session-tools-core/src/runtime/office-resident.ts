@@ -128,6 +128,8 @@ export async function closeOfficeResidentLease(lease: OfficeResidentLease): Prom
         env: buildOfficeEnvironment(undefined, 'resident'),
         timeoutMs: 5_000,
       });
+    } catch {
+      // Best-effort close: a missing cwd or binary must not fail session teardown.
     } finally {
       lease.opened = false;
     }

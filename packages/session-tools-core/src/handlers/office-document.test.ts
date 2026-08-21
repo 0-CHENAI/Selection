@@ -982,6 +982,30 @@ describe('Office Runtime Coordinator', () => {
     expect(lifecycleCalls(calls).some(call => call.args[0] === 'save')).toBe(true);
   });
 
+  it('does not treat a resident save rewrite as a new artifact revision', async () => {
+    const f = fixture();
+    const file = officeFile(join(f.working, 'save-revision.docx'));
+    const { deps } = dependencies(args => {
+      if (args[0] === 'save') writeFileSync(file, readFileSync(file));
+      return processResult('{"success":true,"data":{"ok":true}}');
+    });
+
+    const before = await executeOfficeCommand(f.ctx, { argv: ['get', file, '/'], mode: 'inspect' }, deps);
+    const edit = await executeOfficeCommand(f.ctx, {
+      argv: ['set', file, '/body/p[1]', '--prop', 'text=changed'],
+      mode: 'edit',
+      mutation: true,
+    }, deps);
+    const saved = await executeOfficeCommand(f.ctx, {
+      argv: ['save', file],
+      mode: 'internal',
+      allowLifecycle: true,
+    }, deps);
+
+    expect(edit.envelope.artifactRevision).toBeGreaterThan(before.envelope.artifactRevision ?? 0);
+    expect(saved.envelope.artifactRevision).toBe(edit.envelope.artifactRevision);
+  });
+
   it('retries once without resident after a file_busy failure', async () => {
     const f = fixture();
     const file = officeFile(join(f.working, 'busy.docx'));
