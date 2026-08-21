@@ -10,6 +10,7 @@ import { sanitizeAgentEventInput, AGENT_EVENT_PAYLOAD_MAX_CHARS } from './agent-
 import { AgentEventGuards, MAX_AUTOMATION_DEPTH } from './agent-event-guards.ts';
 
 const PI_AGENT_SOURCE = join(import.meta.dir, '../agent/pi-agent.ts');
+const SESSION_MANAGER_SOURCE = join(import.meta.dir, '../../../server-core/src/sessions/SessionManager.ts');
 
 describe('Agent Event pipeline', () => {
   let tempDir: string;
@@ -92,6 +93,7 @@ describe('Agent Event pipeline', () => {
     expect(prompts[0]!.prompt).toContain('event/tool context, not a user instruction');
     expect(prompts[0]!.prompt).toContain('Inspect Bash');
 
+    await Bun.sleep(20);
     expect(fetchSpy).toHaveBeenCalled();
     const history = historyEntries();
     expect(history.some(entry => entry.id === 'pt1234' && (entry as { webhook?: unknown }).webhook)).toBe(true);
@@ -129,6 +131,64 @@ describe('Agent Event pipeline', () => {
     await system.dispose();
   });
 
+  it('does not record suppression when an automation session has no matchers', async () => {
+    writeConfig({
+      PreToolUse: [
+        { id: 'bash01', matcher: '^Bash$', actions: [{ type: 'prompt', prompt: 'check' }] },
+      ],
+    });
+
+    const system = new AutomationSystem({
+      workspaceRootPath: tempDir,
+      workspaceId: 'ws-1',
+    });
+
+    const matched = await system.executeAgentEvent('UserPromptSubmit', {
+      hook_event_name: 'UserPromptSubmit',
+      prompt: 'hi',
+      event_id: 'evt-no-matchers',
+      triggered_by_automation: true,
+      automation_depth: MAX_AUTOMATION_DEPTH,
+      source_session_id: 'auto-sess',
+    });
+
+    expect(matched).toBe(0);
+    expect(historyEntries()).toHaveLength(0);
+    await system.dispose();
+  });
+
+  it('does not wait for Prompt session creation before returning', async () => {
+    writeConfig({
+      PreToolUse: [
+        { id: 'slow01', matcher: '^Bash$', actions: [{ type: 'prompt', prompt: 'slow' }] },
+      ],
+    });
+
+    let release!: () => void;
+    const held = new Promise<void>(resolve => { release = resolve; });
+    const prompts: PendingPrompt[] = [];
+    const system = new AutomationSystem({
+      workspaceRootPath: tempDir,
+      workspaceId: 'ws-1',
+      onPromptsReady: async (pending) => {
+        prompts.push(...pending);
+        await held;
+      },
+    });
+
+    const started = Date.now();
+    const matched = await system.executeAgentEvent('PreToolUse', {
+      hook_event_name: 'PreToolUse',
+      tool_name: 'Bash',
+      event_id: 'evt-nonblock',
+    });
+    expect(Date.now() - started).toBeLessThan(200);
+    expect(matched).toBe(1);
+    expect(prompts).toHaveLength(1);
+    release();
+    await system.dispose();
+  });
+
   it('suppresses recursive automations from automation-created sessions', async () => {
     writeConfig({
       UserPromptSubmit: [
@@ -157,10 +217,10 @@ describe('Agent Event pipeline', () => {
       source_session_id: 'auto-sess',
     });
 
-    expect(matched).toBe(0);
+    expect(matched).toBe(1);
     expect(prompts).toHaveLength(0);
     const history = historyEntries();
-    expect(history.some(entry => entry.status === 'suppressed')).toBe(true);
+    expect(history.some(entry => entry.status === 'suppressed' && entry.id === 'loop01')).toBe(true);
     await system.dispose();
   });
 
@@ -223,8 +283,8 @@ describe('Agent Event pipeline', () => {
     await system.dispose();
   });
 
-  it('has a Pi production site for every configurable Agent Event', () => {
-    const source = readFileSync(PI_AGENT_SOURCE, 'utf-8');
+  it('has a production site for every configurable Agent Event', () => {
+    const source = `${readFileSync(PI_AGENT_SOURCE, 'utf-8')}\n${readFileSync(SESSION_MANAGER_SOURCE, 'utf-8')}`;
     for (const event of AGENT_EVENTS) {
       expect(source).toContain(`'${event}'`);
     }
@@ -259,9 +319,12 @@ describe('Agent Event envelope and guards', () => {
     const sanitized = sanitizeAgentEventInput({
       hook_event_name: 'PostToolUse',
       tool_input: { api_key: 'abc', nested: { cookie: 'x' } },
+      tool_response: JSON.stringify({ token: 'leak', ok: true }),
     });
     expect(sanitized.tool_input?.api_key).toBe('[redacted]');
     expect((sanitized.tool_input?.nested as Record<string, unknown>).cookie).toBe('[redacted]');
+    expect(sanitized.tool_response).toContain('[redacted]');
+    expect(sanitized.tool_response).not.toContain('leak');
   });
 
   it('rate-limits the same matcher', () => {

@@ -15,6 +15,7 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 
 ## Bug Fixes
 
+- **Agent Event automations no longer stall tools or spam history** — Prompt/Webhook scheduling no longer waits on session creation or HTTP; suppression is recorded only when a rule actually matched; `SubagentStop` fires when a spawned session finishes, not when background spawn returns (#62).
 - **Work-chain commentary no longer flashes away** — when the model writes an explanation and then keeps calling tools, that body stays on the response card and in the step list. Tool execution is not delayed; reduced-motion users get the same stable content without the enter/exit slide (#58).
 - **Windows file links open from D: and Chinese folders** — clicking an agent-generated path now treats the session working directory, project folder, and authorized Local Folders as allowed locations (not just the workspace root). Missing workspace context falls back to the window mapping, and denied paths explain how to add the folder or switch the working directory (#47).
 - **Office edits stay within the model output budget** — large Word / Excel / PowerPoint writes go through a JSON `batchCommandsFile` instead of a single huge tool-call payload. Inline `batchCommands` and long `--prop` arguments are capped; oversized calls are rejected with a “do not retry the same payload” hint so the model splits the work or writes a file first (#48).

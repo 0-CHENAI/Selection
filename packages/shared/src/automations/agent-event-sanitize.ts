@@ -35,6 +35,19 @@ function clipString(value: string | undefined): string | undefined {
     : value;
 }
 
+function sanitizePossiblyJsonString(value: string | undefined): string | undefined {
+  if (value == null) return value;
+  const trimmed = value.trim();
+  if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
+    try {
+      return clipString(JSON.stringify(redactValue(JSON.parse(trimmed))));
+    } catch {
+      // Fall through to plain clipping when the payload is not valid JSON.
+    }
+  }
+  return clipString(value);
+}
+
 export function sanitizeAgentEventInput(input: SdkAutomationInput): SdkAutomationInput {
   const toolInput = input.tool_input
     ? redactValue(input.tool_input) as Record<string, unknown>
@@ -43,7 +56,7 @@ export function sanitizeAgentEventInput(input: SdkAutomationInput): SdkAutomatio
   return {
     ...input,
     tool_input: toolInput,
-    tool_response: clipString(input.tool_response),
+    tool_response: sanitizePossiblyJsonString(input.tool_response),
     error: clipString(input.error),
     prompt: clipString(input.prompt),
     message: clipString(input.message),
