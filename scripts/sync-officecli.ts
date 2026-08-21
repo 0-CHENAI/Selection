@@ -42,7 +42,7 @@ export interface OfficecliManifest {
     noticeFile: string;
     noticeSha256: string;
   };
-  assets: Record<string, { name: string; url: string; sha256: string }>;
+  assets: Record<string, { name: string; url: string; sha256: string; schemaCrc?: string }>;
   commandPolicy: Record<'read' | 'edit' | 'preview' | 'lifecycle' | 'admin', string[]>;
   compatibilityRecipes?: {
     importViaAtomicBatch?: { enabled: boolean; maxSourceBytes: number; reason: string };
@@ -380,6 +380,9 @@ export function validateManifestFiles(
     if (!asset) throw new Error(`Missing platform asset in manifest: ${key}`);
     if (asset.name !== REQUIRED_PLATFORM_ASSETS[key]) throw new Error(`Unexpected asset name for ${key}: ${asset.name}`);
     if (!/^[0-9a-f]{64}$/.test(asset.sha256)) throw new Error(`Invalid SHA256 for ${key}`);
+    if (asset.schemaCrc !== undefined && !/^[0-9a-f]{8}$/.test(asset.schemaCrc)) {
+      throw new Error(`Invalid platform schema CRC for ${key}`);
+    }
     validateOfficecliReleaseAssetUrl(manifest.tag, asset.name, asset.url);
   }
   const unexpectedAssetKeys = Object.keys(manifest.assets).filter(key => !REQUIRED_PLATFORM_ASSETS[key]);
@@ -745,15 +748,19 @@ async function check(downloadRuntime: boolean): Promise<void> {
     if (binary) {
       const snapshot = await buildCommandSnapshot(binary);
       const reviewed = json<CommandSnapshot>(join(officeRoot, manifest.commandSchema!.file));
-      const contractIssues = commandSchemaContractIssues(snapshot, reviewed);
+      const platformKey = `${process.platform}-${process.arch}`;
+      const reviewedForPlatform: CommandSnapshot = {
+        ...reviewed,
+        schemaCrc: manifest.assets[platformKey]?.schemaCrc ?? reviewed.schemaCrc,
+      };
+      const contractIssues = commandSchemaContractIssues(snapshot, reviewedForPlatform);
       if (contractIssues.length > 0) {
         throw new Error(
           `Reviewed command schema contract differs from the current platform binary: ${contractIssues.join('; ')}`,
         );
       }
-      const key = `${process.platform}-${process.arch}`;
-      const expected = manifest.assets[key]?.sha256;
-      if (expected && fileHash(binary) !== expected) throw new Error(`Local ${key} binary hash differs from manifest`);
+      const expected = manifest.assets[platformKey]?.sha256;
+      if (expected && fileHash(binary) !== expected) throw new Error(`Local ${platformKey} binary hash differs from manifest`);
     }
   } finally {
     if (temp) rmSync(temp, { recursive: true, force: true });

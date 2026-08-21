@@ -23,6 +23,16 @@ describe('OfficeCLI sync governance', () => {
     expect(() => validateManifestFiles(manifest())).not.toThrow();
   });
 
+  it('records the reviewed Windows schema CRC without changing the default CRC', () => {
+    const reviewed = manifest();
+    expect(reviewed.schemaCrc).toBe('b2b0b395');
+    expect(reviewed.assets['win32-x64']?.schemaCrc).toBe('22d3fc61');
+
+    const invalid = manifest();
+    invalid.assets['win32-x64']!.schemaCrc = 'not-a-crc';
+    expect(() => validateManifestFiles(invalid)).toThrow('Invalid platform schema CRC');
+  });
+
   it('hashes nested guide resources with posix relative paths', () => {
     const root = mkdtempSync(join(tmpdir(), 'selection-officecli-posix-rel-'));
     try {
