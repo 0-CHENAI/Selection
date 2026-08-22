@@ -34,6 +34,7 @@ import {
   resolveOfficecliResources,
   reviewedOfficecliSchemaCrc,
 } from './office-manifest.ts';
+import { OFFICE_STANDARD_TASK_HINT } from '../office-standard-task.ts';
 import { validateMorphGlb } from './office-recipes.ts';
 import {
   attachOfficeResidentSession,
@@ -172,6 +173,58 @@ const artifactStates = new Map<string, ArtifactState>();
 const inspectCache = new Map<string, OfficeResultEnvelope>();
 const failureStates = new Map<string, FailureState>();
 const mutatedBySession = new Set<string>();
+const sessionStatusCache = new Map<string, OfficeResultEnvelope>();
+const sessionDocumentPaths = new Map<string, string>();
+
+const STATUS_ALREADY_PROVIDED: StructuredWarning = {
+  code: 'status_already_provided',
+  message: 'OfficeCLI status was already resolved for this session.',
+  recovery: 'Reuse envelope.cwd, envelope.documentPath, and the previous status payload.',
+  severity: 'low',
+};
+
+function attachSessionDocument(
+  envelope: OfficeResultEnvelope,
+  sessionId: string,
+  cwd: string,
+): OfficeResultEnvelope {
+  const lastDocumentPath = sessionDocumentPaths.get(sessionId);
+  const data = envelope.data && typeof envelope.data === 'object'
+    ? { ...envelope.data as Record<string, unknown> }
+    : {};
+  return {
+    ...envelope,
+    cwd,
+    documentPath: lastDocumentPath,
+    data: {
+      ...data,
+      workingDirectory: cwd,
+      lastDocumentPath,
+    },
+  };
+}
+
+function reusedStatusOutcome(
+  cached: OfficeResultEnvelope,
+  sessionId: string,
+  cwd: string,
+  durationMs: number,
+  binary: string,
+): OfficeExecutionOutcome {
+  return {
+    envelope: {
+      ...attachSessionDocument(cached, sessionId, cwd),
+      cacheHit: true,
+      durationMs,
+      warnings: [...cached.warnings, STATUS_ALREADY_PROVIDED],
+    },
+    stdout: cached.version,
+    stderr: '',
+    exitCode: 0,
+    cwd,
+    binary,
+  };
+}
 
 function boundedAppend(current: string, chunk: string): { text: string; truncated: boolean } {
   if (current.length >= MAX_OUTPUT_CHARS) return { text: current, truncated: true };
@@ -2133,6 +2186,18 @@ export async function executeOfficeCommand(
         stdout: '', stderr: '', exitCode: null, cwd, binary: runtime.path,
       };
     }
+    if (argv[0] === 'status') {
+      const cachedStatus = sessionStatusCache.get(ctx.sessionId);
+      if (cachedStatus) {
+        return reusedStatusOutcome(
+          cachedStatus,
+          ctx.sessionId,
+          cwd,
+          Math.max(0, now() - startedAt),
+          runtime.path,
+        );
+      }
+    }
     let integrity;
     try {
       integrity = await runtimeSha256(runtime.path, dependencies.hashRuntime ?? sha256File);
@@ -2177,7 +2242,6 @@ export async function executeOfficeCommand(
         stdout: '', stderr: '', exitCode: null, cwd, binary: runtime.path,
       };
     }
-    const metadataWasCached = metadataCache.has(integrity.cacheKey);
     const metadata = await runtimeMetadata(runtime.path, integrity.cacheKey, runner, cwd);
     if (!metadata) {
       return {
@@ -2222,25 +2286,28 @@ export async function executeOfficeCommand(
     }
 
     if (argv[0] === 'status') {
-      return {
-        envelope: {
-          ok: true,
-          version: metadata.version,
-          schemaCrc: metadata.schemaCrc,
-          command: ['status'],
-          cwd,
-          durationMs: Math.max(0, now() - startedAt),
-          data: {
-            source: runtime.source,
-            path: runtime.path,
-            platform: `${process.platform}-${process.arch}`,
-            tagCommit: resources.manifest.tagCommit,
-            sha256: integrity.sha256,
-          },
-          warnings: [],
-          cacheHit: metadataWasCached,
-          artifacts: [],
+      const envelope = attachSessionDocument({
+        ok: true,
+        version: metadata.version,
+        schemaCrc: metadata.schemaCrc,
+        command: ['status'],
+        cwd,
+        durationMs: Math.max(0, now() - startedAt),
+        data: {
+          source: runtime.source,
+          path: runtime.path,
+          platform: `${process.platform}-${process.arch}`,
+          tagCommit: resources.manifest.tagCommit,
+          sha256: integrity.sha256,
+          standardTask: OFFICE_STANDARD_TASK_HINT,
         },
+        warnings: [],
+        cacheHit: false,
+        artifacts: [],
+      }, ctx.sessionId, cwd);
+      sessionStatusCache.set(ctx.sessionId, envelope);
+      return {
+        envelope,
         stdout: metadata.version,
         stderr: '',
         exitCode: 0,
@@ -2272,7 +2339,22 @@ export async function executeOfficeCommand(
     const cached = shouldCache ? inspectCache.get(resultCacheKey) : undefined;
     if (cached) {
       return {
-        envelope: { ...cached, cacheHit: true, durationMs: Math.max(0, now() - startedAt) },
+        envelope: {
+          ...cached,
+          cacheHit: true,
+          durationMs: Math.max(0, now() - startedAt),
+          warnings: argv[0] === 'help'
+            ? [
+                ...cached.warnings,
+                {
+                  code: 'help_already_provided',
+                  message: 'This OfficeCLI help payload was already returned in this session.',
+                  recovery: 'Reuse the previous help result. Call help again only for a different format or element.',
+                  severity: 'low',
+                },
+              ]
+            : cached.warnings,
+        },
         stdout: '', stderr: '', exitCode: 0, cwd, binary: runtime.path,
       };
     }
@@ -2389,6 +2471,7 @@ export async function executeOfficeCommand(
             exitCode: nativeImport.exitCode,
           };
           if (shouldCache) inspectCache.set(resultCacheKey, envelope);
+          if (documentPath && mutates) sessionDocumentPaths.set(ctx.sessionId, documentPath);
           return { envelope, ...nativeImport, cwd, binary: runtime.path };
         }
       }
@@ -2553,6 +2636,7 @@ export async function executeOfficeCommand(
       exitCode: result.exitCode,
     };
     if (shouldCache) inspectCache.set(resultCacheKey, envelope);
+    if (documentPath && mutates) sessionDocumentPaths.set(ctx.sessionId, documentPath);
     return { envelope, ...result, cwd, binary: runtime.path };
   } catch (error) {
     const envelope = errorEnvelope(
@@ -2575,6 +2659,8 @@ export function clearOfficeRuntimeState(): void {
   inspectCache.clear();
   failureStates.clear();
   mutatedBySession.clear();
+  sessionStatusCache.clear();
+  sessionDocumentPaths.clear();
   clearOfficeResidentLeases();
 }
 
@@ -2589,5 +2675,7 @@ export function releaseOfficeRuntimeSession(sessionId: string): Promise<void> {
   for (const key of mutatedBySession) {
     if (key.startsWith(prefix)) mutatedBySession.delete(key);
   }
+  sessionStatusCache.delete(sessionId);
+  sessionDocumentPaths.delete(sessionId);
   return Promise.all(detachOfficeResidentSession(sessionId).map(closeOfficeResidentLease)).then(() => undefined);
 }

@@ -42,8 +42,8 @@ const MAX_GUIDE_REFERENCE_CHARS = 40_000;
 const SELECTION_EXECUTION_CONTRACT = `## Selection execution contract (immutable)
 
 - Examples below omit the \`officecli\` prefix. Pass each native token through the appropriate Selection Office tool's \`argv\` array; never invoke a shell.
-- When a property name is uncertain, call \`office_document_inspect\` with \`argv: ['help', format, element]\` before guessing.
-- A turn with more than about 10 structural or cell edits must use \`batch\` (inline or \`batch.file\`). After a batch, run \`view issues\` plus \`view html\` or \`office_document_preview.render\`.
+- When a property name is uncertain, call \`office_document_inspect\` with \`argv: ['help', format, element]\` once before guessing. Do not repeat identical help/status; reuse \`cacheHit\` payloads.
+- A turn with more than about 10 structural or cell edits must use \`batch\` (inline or \`batch.file\`). After a non-standard batch, run \`view issues\` plus \`view html\` or \`office_document_preview.render\`. Standard five-step create/batch/outline/preview/finalize tasks skip that extra inspect pair.
 - Morph clone/ghost/clean-accumulation and verify/final-check must use the \`recipe\` field. Do not invent shell or Python helpers.
 - Selection owns binary installation, updates, command classification, paths, resident/watch lifecycle, rendering, and finalization. Do not call install/update/skills/load_skill/mcp/plugins/config/open/save/close.
 - Only \`office_document_preview.start\` may open or focus the BrowserPane. Ordinary work and finalization use inline render evidence.
