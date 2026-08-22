@@ -1,4 +1,5 @@
 import { existsSync, readFileSync, statSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 
 export type OfficecliBinarySource =
@@ -155,10 +156,12 @@ export const BUNDLED_OFFICECLI_SKILL_SLUGS = [
 export type OfficeFormatSkillSlug = 'officecli-docx' | 'officecli-xlsx' | 'officecli-pptx';
 
 const OFFICE_FORMAT_SKILL_PATTERNS: Array<{ re: RegExp; slug: OfficeFormatSkillSlug }> = [
-  { re: /\.xlsx\b|\.xlsm\b/i, slug: 'officecli-xlsx' },
-  { re: /\.pptx\b/i, slug: 'officecli-pptx' },
-  { re: /\.docx\b/i, slug: 'officecli-docx' },
+  { re: /\.xlsx\b|\.xlsm\b|\bxlsx\b|\bxlsm\b|\bexcel\b|电子表格/i, slug: 'officecli-xlsx' },
+  { re: /\.pptx\b|\bpptx\b|\bppt\b|\bpowerpoint\b|幻灯片|演示文稿/i, slug: 'officecli-pptx' },
+  { re: /\.docx\b|\bdocx\b|\bword\b|word文档|word报告|微软\s*word/i, slug: 'officecli-docx' },
 ];
+
+const MISSING_BUNDLED_SKILL_RE = /(?:^|[\\/])officecli-(docx|xlsx|pptx)(?:[\\/]SKILL\.md)?$/i;
 
 function addOfficeFormatSkillSlugs(text: string, slugs: Set<OfficeFormatSkillSlug>): void {
   for (const { re, slug } of OFFICE_FORMAT_SKILL_PATTERNS) {
@@ -167,7 +170,8 @@ function addOfficeFormatSkillSlugs(text: string, slugs: Set<OfficeFormatSkillSlu
 }
 
 /**
- * Format skills to load when the user attaches or names an Office file.
+ * Format skills to load when the user attaches or names an Office file,
+ * or asks to create a Word / Excel / PowerPoint artifact.
  * Specialized skills (academic paper, morph, …) are not inferred.
  */
 export function collectOfficeFormatSkillSlugs(
@@ -187,6 +191,30 @@ export function collectOfficeFormatSkillSlugs(
   }
 
   return [...slugs];
+}
+
+function expandUserPath(filePath: string): string {
+  if (filePath === '~') return homedir();
+  if (filePath.startsWith('~/')) return join(homedir(), filePath.slice(2));
+  return filePath;
+}
+
+/**
+ * Models often guess `~/.agents/skills/officecli-docx/SKILL.md`.
+ * If that file is missing, send them to the packaged official skill.
+ */
+export function resolveMissingBundledOfficecliSkillRead(requestedPath: string): string | undefined {
+  const expanded = expandUserPath(requestedPath);
+  const match = expanded.match(MISSING_BUNDLED_SKILL_RE);
+  if (!match) return undefined;
+
+  const slug = `officecli-${match[1]!.toLowerCase()}`;
+  const skillsDir = getBundledOfficecliSkillsDir();
+  if (!skillsDir) return undefined;
+
+  const bundled = join(skillsDir, slug, 'SKILL.md');
+  if (!existsSync(bundled) || existsSync(expanded)) return undefined;
+  return bundled;
 }
 
 /**

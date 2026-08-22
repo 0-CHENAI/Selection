@@ -71,9 +71,10 @@ describe('system prompt guidance', () => {
 
     expect(prompt).toContain('**officecli**')
     expect(prompt).toContain('Already on PATH')
-    expect(prompt).toContain('[skill:officecli-docx]')
-    expect(prompt).toContain('[skill:officecli-xlsx]')
-    expect(prompt).toContain('[skill:officecli-pptx]')
+    expect(prompt).toContain('officecli-docx')
+    expect(prompt).toContain('officecli-xlsx')
+    expect(prompt).toContain('officecli-pptx')
+    expect(prompt).toContain('Do **not** Read `~/.agents/skills/officecli-docx`')
     expect(prompt).toContain('do not curl-install')
     expect(prompt).not.toContain('office_document_inspect')
     expect(prompt).not.toContain('office_document_edit')

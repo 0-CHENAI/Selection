@@ -12,6 +12,7 @@ import { formatBytes } from '../utils/binary-detection.ts';
 import { globSync } from 'glob';
 import os from 'os';
 import type { ProjectPromptContext } from '../projects/types.ts';
+import { getBundledOfficecliSkillsDir } from '../utils/officecli.ts';
 
 /** Maximum size of CLAUDE.md file to include (10KB) */
 const MAX_CONTEXT_FILE_SIZE = 10 * 1024;
@@ -538,6 +539,21 @@ rg -n "session|OAuth|\"level\":\"error\"" "${logFilePath}" | tail -n 50
 `;
 }
 
+function formatBundledOfficecliSkillGuidance(): string {
+  const dir = getBundledOfficecliSkillsDir();
+  const slugs = ['officecli-docx', 'officecli-xlsx', 'officecli-pptx'] as const;
+  if (!dir) {
+    return [
+      '- Word / .docx → `[skill:officecli-docx]`. Excel / .xlsx → `[skill:officecli-xlsx]`. PowerPoint / .pptx → `[skill:officecli-pptx]`.',
+      '- These built-in skills are **not** under `~/.agents/skills/officecli-*`. A user-installed `officecli` skill is not a substitute.',
+    ].join('\n');
+  }
+  return [
+    '- Read these exact built-in files. Do **not** Read `~/.agents/skills/officecli-docx` (or xlsx/pptx). A user-installed `officecli` skill is not a substitute:',
+    ...slugs.map((slug) => `  - ${slug}: \`${join(dir, slug, 'SKILL.md')}\``),
+  ].join('\n');
+}
+
 /**
  * Get the Selection environment marker for SDK JSONL detection.
  * This marker is embedded in the system prompt and allows us to identify
@@ -685,10 +701,11 @@ Skills are reusable instruction sets that teach you specialized behaviors. Each 
 2. Follow the instructions in the file to complete the user's request
 
 For Word / Excel / PowerPoint, load the matching built-in OfficeCLI skill, then run \`officecli\` via Bash. The binary is already on PATH; do not curl-install or download it.
+${formatBundledOfficecliSkillGuidance()}
 
 Skills are stored at four levels (listed from lowest to highest priority):
 - Global: \`~/.agents/skills/{slug}/SKILL.md\`
-- Built-in (app-bundled, read-only)
+- Built-in OfficeCLI: packaged under the app officecli resources (exact SKILL.md paths are in Document Tools). Do not Read \`~/.agents/skills/officecli-docx\`.
 - Workspace: \`${workspacePath}/skills/{slug}/SKILL.md\`
 - Project: \`{projectRoot}/.agents/skills/{slug}/SKILL.md\`
 
@@ -1270,7 +1287,7 @@ These CLI tools are available via Bash. OfficeCLI is bundled with Selection.
 
 **Office documents:**
 - Load the matching built-in skill, Read its \`SKILL.md\`, then follow that skill's Common Workflow and Delivery Gate with \`officecli\` via Bash.
-- Word / .docx → \`[skill:officecli-docx]\`. Excel / .xlsx → \`[skill:officecli-xlsx]\`. PowerPoint / .pptx → \`[skill:officecli-pptx]\`.
+${formatBundledOfficecliSkillGuidance()}
 - Specialized: \`officecli-academic-paper\`, \`officecli-financial-model\`, \`officecli-data-dashboard\`, \`officecli-pitch-deck\`, \`officecli-word-form\`, \`morph-ppt\`, \`morph-ppt-3d\`.
 - Official skill Setup sections that mention curl-install do not apply. \`officecli\` is packaged with Selection.
 - Use **markitdown** only when the user explicitly requests Markdown conversion, or when \`officecli\` reports the document unsupported. Do not read an automatically generated \`.docx.md\`, \`.xlsx.md\`, or \`.pptx.md\` sidecar first.

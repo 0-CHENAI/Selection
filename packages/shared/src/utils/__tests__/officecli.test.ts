@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'fs'
-import { tmpdir } from 'os'
+import { homedir, tmpdir } from 'os'
 import { join } from 'path'
 import { OFFICECLI_DESKTOP_TARGETS, OFFICECLI_SHA256 } from '../../../../../scripts/build/common.ts'
 import {
@@ -8,6 +8,7 @@ import {
   collectOfficeFormatSkillSlugs,
   getBundledOfficecliSkillsDir,
   officecliBinaryName,
+  resolveMissingBundledOfficecliSkillRead,
   resolveOfficecliBinary,
 } from '../officecli'
 
@@ -23,6 +24,21 @@ describe('collectOfficeFormatSkillSlugs', () => {
 
   it('does not infer from a request that only talks about a report', () => {
     expect(collectOfficeFormatSkillSlugs('写一份巡察报告')).toEqual([])
+  })
+
+  it('infers from Word / Excel / PowerPoint wording without a file path', () => {
+    expect(collectOfficeFormatSkillSlugs('把他形成word报告（带目录）')).toEqual(['officecli-docx'])
+    expect(collectOfficeFormatSkillSlugs('做成一份 Excel 表')).toEqual(['officecli-xlsx'])
+    expect(collectOfficeFormatSkillSlugs('做个 ppt 给董事会')).toEqual(['officecli-pptx'])
+  })
+
+  it('rewrites a missing guessed ~/.agents officecli-docx path to the bundled skill', () => {
+    const rewritten = resolveMissingBundledOfficecliSkillRead(
+      join(homedir(), '.agents', 'skills', 'officecli-docx', 'SKILL.md'),
+    )
+    const bundled = getBundledOfficecliSkillsDir()
+    expect(bundled).toBeTruthy()
+    expect(rewritten).toBe(join(bundled!, 'officecli-docx', 'SKILL.md'))
   })
 
   it('infers from Office attachments, defaulting typeless office files to docx', () => {

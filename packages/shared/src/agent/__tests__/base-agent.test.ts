@@ -284,5 +284,12 @@ describe('BaseAgent', () => {
       await collectEvents(agent.chat('写一份巡察报告'));
       expect(agent.chatCalls[0]?.message ?? '').not.toContain('officecli-docx');
     });
+
+    it('gates the built-in docx skill for a Word report request without a .docx path', async () => {
+      await collectEvents(agent.chat('把他形成word报告（带目录）'));
+      const sent = agent.chatCalls[0]?.message ?? '';
+      expect(sent).toContain('officecli-docx');
+      expect(sent).toContain('SKILL.md');
+    });
   });
 });

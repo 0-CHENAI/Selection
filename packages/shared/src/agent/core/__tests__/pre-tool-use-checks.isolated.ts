@@ -85,6 +85,13 @@ mock.module('../../../skills/storage.ts', () => ({
   resolveBundledSkillMdPath: () => undefined,
 }));
 
+mock.module('../../../utils/officecli.ts', () => ({
+  resolveMissingBundledOfficecliSkillRead: (requestedPath: string) =>
+    /officecli-docx/.test(requestedPath)
+      ? '/bundled/officecli/1.0.144/skills/officecli-docx/SKILL.md'
+      : undefined,
+}));
+
 let mockCraftAgentsCliFlag = false;
 mock.module('../../../feature-flags.ts', () => ({
   FEATURE_FLAGS: {
@@ -439,6 +446,18 @@ describe('runPreToolUseChecks', () => {
       }));
 
       expect(result.type).toBe('allow');
+    });
+
+    it('rewrites a missing guessed officecli-docx skill path to the bundled skill', () => {
+      const result = runPreToolUseChecks(createInput({
+        toolName: 'Read',
+        input: { file_path: '/Users/test/.agents/skills/officecli-docx/SKILL.md' },
+      }));
+
+      expect(result.type).toBe('modify');
+      if (result.type === 'modify') {
+        expect(result.input.file_path).toBe('/bundled/officecli/1.0.144/skills/officecli-docx/SKILL.md');
+      }
     });
 
     it.each(['report.docx', 'forecast.xlsx', 'roadmap.pptx'])(
