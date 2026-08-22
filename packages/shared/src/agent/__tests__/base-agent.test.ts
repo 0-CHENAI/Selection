@@ -259,4 +259,30 @@ describe('BaseAgent', () => {
       headlessAgent.destroy();
     });
   });
+
+  describe('OfficeCLI skill gate', () => {
+    it('prepends the built-in docx skill when the message names a .docx file', async () => {
+      await collectEvents(agent.chat('请改 巡察报告.docx'));
+      const sent = agent.chatCalls[0]?.message ?? '';
+      expect(sent).toContain('officecli-docx');
+      expect(sent).toContain('SKILL.md');
+      expect(sent).toContain('请改 巡察报告.docx');
+    });
+
+    it('gates xlsx from an Office attachment without a skill mention', async () => {
+      await collectEvents(agent.chat('看一下这份表', [{
+        type: 'office',
+        name: '数据.xlsx',
+        path: '/tmp/数据.xlsx',
+        mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        size: 12,
+      }]));
+      expect(agent.chatCalls[0]?.message).toContain('officecli-xlsx');
+    });
+
+    it('does not gate OfficeCLI when the user only asks for a report', async () => {
+      await collectEvents(agent.chat('写一份巡察报告'));
+      expect(agent.chatCalls[0]?.message ?? '').not.toContain('officecli-docx');
+    });
+  });
 });

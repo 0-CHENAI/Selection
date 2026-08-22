@@ -56,18 +56,6 @@ export type {
   ConnectionStatus,
 } from './types.ts';
 
-export type {
-  OfficeErrorCategory,
-  OfficeStructuredError,
-  StructuredWarning,
-  ArtifactRef,
-  FinalizationCheck,
-  FinalizationEvidence,
-  OfficeResultEnvelope,
-  OfficeGuideName,
-  OfficecliManifest,
-} from './office-types.ts';
-
 // Response helpers
 export {
   successResponse,
@@ -188,14 +176,6 @@ export {
   handleRenderTemplate,
   // Send Developer Feedback
   handleSendDeveloperFeedback,
-  // Office documents
-  handleOfficeDocumentInspect,
-  handleOfficeDocumentEdit,
-  handleOfficeDocumentGuide,
-  handleOfficeDocumentPreview,
-  handleOfficeDocumentFinalize,
-  releaseOfficePreviewSession,
-  releaseOfficeGuideSession,
 } from './handlers/index.ts';
 
 export type {
@@ -214,11 +194,6 @@ export type {
   ScriptSandboxArgs,
   RenderTemplateArgs,
   SendDeveloperFeedbackArgs,
-  OfficeDocumentInspectArgs,
-  OfficeDocumentEditArgs,
-  OfficeDocumentGuideArgs,
-  OfficeDocumentPreviewArgs,
-  OfficeDocumentFinalizeArgs,
 } from './handlers/index.ts';
 
 // Tool definitions — single source of truth
@@ -236,11 +211,6 @@ export {
   TransformDataSchema,
   ScriptSandboxSchema,
   RenderTemplateSchema,
-  OfficeDocumentInspectSchema,
-  OfficeDocumentEditSchema,
-  OfficeDocumentGuideSchema,
-  OfficeDocumentPreviewSchema,
-  OfficeDocumentFinalizeSchema,
   // Browser tool schema
   BrowserToolSchema,
   // Developer feedback schema
@@ -266,53 +236,6 @@ export {
   // JSON Schema converter
   getToolDefsAsJsonSchema,
 } from './tool-defs.ts';
-
-export {
-  OFFICE_STANDARD_TASK_HINT,
-  OFFICE_STANDARD_TASK_SEQUENCE,
-} from './office-standard-task.ts';
-
-export {
-  OFFICE_WORKFLOW_PROMPT,
-  OFFICE_DOCUMENT_INSPECT_DESCRIPTION,
-  OFFICE_DOCUMENT_EDIT_DESCRIPTION,
-  OFFICE_DOCUMENT_GUIDE_DESCRIPTION,
-  OFFICE_DOCUMENT_PREVIEW_DESCRIPTION,
-  OFFICE_DOCUMENT_FINALIZE_DESCRIPTION,
-  OFFICE_MAX_INLINE_BATCH_COMMANDS,
-  OFFICE_MAX_INLINE_BATCH_CHARS,
-  OFFICE_MAX_BATCH_FILE_BYTES,
-} from './office-workflow.ts';
-
-export {
-  officecliBinaryName,
-  resolveOfficecliBinary,
-  resolveOfficecliRuntime,
-} from './runtime/officecli.ts';
-
-export {
-  resolveOfficecliResources,
-  diagnoseOfficecliResourceFailure,
-  clearOfficecliManifestCache,
-} from './runtime/office-manifest.ts';
-
-export {
-  buildOfficeEnvironment,
-  chooseOfficeWorkingDirectory,
-  executeOfficeCommand,
-  flushOfficeResidentLease,
-  getOfficeArtifactRevision,
-  hasOpenOfficeResidentLease,
-  officeSessionArtifactDirectory,
-  wasOfficeArtifactMutatedBySession,
-  releaseOfficeRuntimeSession,
-  clearOfficeRuntimeState,
-} from './runtime/office-coordinator.ts';
-export type {
-  OfficecliBinarySource,
-  ResolvedOfficecliBinary,
-  ResolveOfficecliOptions,
-} from './runtime/officecli.ts';
 
 export type {
   SessionToolExecutionMode,

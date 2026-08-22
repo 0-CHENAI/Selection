@@ -15,15 +15,7 @@ describe('session tool safe-mode classification', () => {
       'mcp__session__call_llm',
       'mcp__session__browser_tool',
       'mcp__session__script_sandbox',
-      'mcp__session__office_document_inspect',
-      'mcp__session__office_document_guide',
-      'mcp__session__office_document_preview',
-      'mcp__session__office_document_finalize',
       'mcp__session__get_task_results',
-      'office_document_inspect',
-      'office_document_guide',
-      'office_document_preview',
-      'office_document_finalize',
     ] as const;
 
     for (const toolName of allowedTools) {
@@ -39,8 +31,6 @@ describe('session tool safe-mode classification', () => {
       'mcp__session__spawn_session',
       'mcp__session__run_task',
       'mcp__session__update_user_preferences',
-      'mcp__session__office_document_edit',
-      'office_document_edit',
     ] as const;
 
     for (const toolName of blockedTools) {
@@ -52,7 +42,7 @@ describe('session tool safe-mode classification', () => {
     }
   });
 
-  it('prompts for Office document edits but not inspections in ask mode', () => {
+  it('prompts for mutating session tools in ask mode', () => {
     const permissionManager: PermissionManagerLike = {
       isCommandWhitelisted: () => false,
       isDangerousCommand: () => false,
@@ -63,35 +53,19 @@ describe('session tool safe-mode classification', () => {
     const permissionsContext = { workspaceRootPath: '/workspace' };
 
     expect(shouldPromptInAskMode(
-      'mcp__session__office_document_inspect',
-      { command: 'view' },
+      'mcp__session__get_task_results',
+      { slug: 'demo' },
       permissionManager,
       permissionsContext,
     )).toBeNull();
     expect(shouldPromptInAskMode(
-      'mcp__session__office_document_edit',
-      { command: 'create' },
+      'mcp__session__run_task',
+      { slug: 'demo' },
       permissionManager,
       permissionsContext,
     )).toMatchObject({
       promptType: 'mcp_mutation',
-      command: 'mcp__session__office_document_edit',
-    });
-
-    expect(shouldPromptInAskMode(
-      'office_document_inspect',
-      { command: 'view' },
-      permissionManager,
-      permissionsContext,
-    )).toBeNull();
-    expect(shouldPromptInAskMode(
-      'office_document_edit',
-      { command: 'create' },
-      permissionManager,
-      permissionsContext,
-    )).toMatchObject({
-      promptType: 'mcp_mutation',
-      command: 'office_document_edit',
+      command: 'mcp__session__run_task',
     });
   });
 });

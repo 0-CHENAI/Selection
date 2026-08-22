@@ -97,7 +97,7 @@ import { CraftMcpClient, McpClientPool, McpPoolServer } from '@craft-agent/share
 import { type Session, type SessionEvent, type FileAttachment, type SendMessageOptions, type UnreadSummary, type RemoteSessionTransferPayload, type ImportRemoteSessionTransferResult, RPC_CHANNELS, generateMessageId } from '@craft-agent/shared/protocol'
 import { applySteerTranscriptBoundary, messageToStored, storedToMessage, type Message, type StoredAttachment, type ToolDisplayMeta, type TokenUsage } from '@craft-agent/core/types'
 import { formatPathsToRelative, formatToolInputPaths, perf, encodeIconToDataUrlAsync, getEmojiIcon, resetSummarizationClient, resolveToolIcon, readFileAttachment, resolveRegenerateAttachments, selectSpreadMessages, normalizePath } from '@craft-agent/shared/utils'
-import { loadAllSkills, loadSkillBySlug, invalidateSkillsCache, type LoadedSkill } from '@craft-agent/shared/skills'
+import { filterUserFacingSkills, loadAllSkills, loadSkillBySlug, invalidateSkillsCache, type LoadedSkill } from '@craft-agent/shared/skills'
 import { invalidateContextFileCache } from '@craft-agent/shared/prompts/system'
 import { getToolIconsDir, getMiniModel } from '@craft-agent/shared/config'
 import { getDefaultSummarizationModel } from '@craft-agent/shared/config/models'
@@ -629,11 +629,6 @@ async function resolveToolDisplayMeta(
           'update_user_preferences': 'Update Preferences',
           'send_developer_feedback': 'Send Feedback',
           'browser_tool': 'Browser',
-          'office_document_inspect': 'Inspect Office Document',
-          'office_document_edit': 'Edit Office Document',
-          'office_document_guide': 'Load Office Guide',
-          'office_document_preview': 'Preview Office Document',
-          'office_document_finalize': 'Finalize Office Document',
         },
         'craft-agents-docs': {
           'SearchCraftAgents': 'Search Docs',
@@ -763,11 +758,6 @@ async function resolveToolDisplayMeta(
     'NotebookEdit': 'Edit Notebook',
     'KillShell': 'Kill Shell',
     'TaskOutput': 'Task Output',
-    'office_document_inspect': 'Inspect Office Document',
-    'office_document_edit': 'Edit Office Document',
-    'office_document_guide': 'Load Office Guide',
-    'office_document_preview': 'Preview Office Document',
-    'office_document_finalize': 'Finalize Office Document',
   }
 
   const nativeDisplayName = nativeToolNames[toolName]
@@ -1959,10 +1949,11 @@ export class SessionManager implements ISessionManager {
     this.eventSink(RPC_CHANNELS.llmConnections.CHANGED, { to: 'all' })
   }
 
-  private broadcastSkillsChanged(workspaceId: string, skills: import('@craft-agent/shared/skills').LoadedSkill[]): void {
+  private broadcastSkillsChanged(workspaceId: string, skills: LoadedSkill[]): void {
     if (!this.eventSink) return
-    sessionLog.info(`Broadcasting skills changed (${skills.length} skills)`)
-    this.eventSink(RPC_CHANNELS.skills.CHANGED, { to: 'workspace', workspaceId }, workspaceId, skills)
+    const visible = filterUserFacingSkills(skills)
+    sessionLog.info(`Broadcasting skills changed (${visible.length} skills)`)
+    this.eventSink(RPC_CHANNELS.skills.CHANGED, { to: 'workspace', workspaceId }, workspaceId, visible)
   }
 
   private broadcastDefaultPermissionsChanged(): void {
@@ -3946,16 +3937,6 @@ export class SessionManager implements ISessionManager {
 
         sessionLog.info('[browser-pane] BPF registering browserPaneFns', { sessionId: sid })
         mergeSessionScopedToolCallbacks(sid, {
-          openOfficePreviewFn: async (url) => {
-            const parsed = new URL(url)
-            const loopbackHosts = new Set(['localhost', '127.0.0.1', '[::1]', '::1'])
-            if (parsed.protocol !== 'http:' || !loopbackHosts.has(parsed.hostname) || !parsed.port) {
-              throw new Error(`Refusing non-loopback Office preview URL: ${url}`)
-            }
-            const instanceId = await bpm.focusBoundForSessionAsync(sid, { workspaceId })
-            const navigated = await bpm.navigate(instanceId, parsed.toString())
-            return { instanceId, url: navigated.url }
-          },
           browserPaneFns: {
             openPanel: async (options) => {
               const instanceId = options?.background
@@ -4489,7 +4470,7 @@ export class SessionManager implements ISessionManager {
             if (missing.length) warnings.push(`Unknown sources (kept in the spec, but they don't exist in this workspace): ${missing.join(', ')}`)
           }
           if (input.skills?.length) {
-            // loadAllSkills matches dispatch-time [skill:slug] resolution (global + workspace).
+            // loadAllSkills matches dispatch-time [skill:slug] resolution (global, bundled, workspace).
             const available = new Set(loadAllSkills(ws.rootPath).map(s => s.slug))
             const missing = input.skills.filter(s => !available.has(s))
             if (missing.length) warnings.push(`Unknown skills (kept in the spec, but they don't exist in this workspace): ${missing.join(', ')}`)

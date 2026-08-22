@@ -45,22 +45,6 @@ import { handleGetTaskResults } from './handlers/get-task-results.ts';
 import { handleArchiveSession } from './handlers/archive-session.ts';
 import { handleSendAgentMessage } from './handlers/send-agent-message.ts';
 import { handleListMessagingChannels, handleUnbindMessagingChannel } from './handlers/messaging.ts';
-import {
-  handleOfficeDocumentEdit,
-  handleOfficeDocumentInspect,
-} from './handlers/office-document.ts';
-import { handleOfficeDocumentGuide } from './handlers/office-guide.ts';
-import { handleOfficeDocumentPreview } from './handlers/office-preview.ts';
-import { handleOfficeDocumentFinalize } from './handlers/office-finalize.ts';
-import {
-  OFFICE_DOCUMENT_EDIT_DESCRIPTION,
-  OFFICE_DOCUMENT_FINALIZE_DESCRIPTION,
-  OFFICE_DOCUMENT_GUIDE_DESCRIPTION,
-  OFFICE_DOCUMENT_INSPECT_DESCRIPTION,
-  OFFICE_DOCUMENT_PREVIEW_DESCRIPTION,
-  OFFICE_MAX_INLINE_BATCH_CHARS,
-  OFFICE_MAX_INLINE_BATCH_COMMANDS,
-} from './office-workflow.ts';
 
 // ============================================================
 // Canonical Zod Schemas
@@ -179,115 +163,6 @@ export const BrowserToolSchema = z.object({
     z.string(),
     z.array(z.string()),
   ]).describe('Browser command as a string (e.g., "click @e1") or array (e.g., ["evaluate", "var x = 1; x + 2"]). Array mode preserves semicolons and whitespace in arguments.'),
-});
-
-const OfficeInspectRecipeSchema = z.discriminatedUnion('name', [
-  z.object({
-    name: z.literal('verify'),
-    file: z.string().min(1),
-    slide: z.number().int().positive(),
-    previousSlide: z.number().int().positive().optional(),
-  }),
-  z.object({
-    name: z.literal('final-check'),
-    file: z.string().min(1),
-  }),
-]);
-
-const OfficeEditRecipeSchema = z.discriminatedUnion('name', [
-  z.object({
-    name: z.literal('clone'),
-    file: z.string().min(1),
-    fromSlide: z.number().int().positive(),
-    toSlide: z.number().int().positive(),
-  }),
-  z.object({
-    name: z.literal('ghost'),
-    file: z.string().min(1),
-    slide: z.number().int().positive(),
-    shapeIndexes: z.array(z.number().int().positive()).min(1),
-  }),
-  z.object({
-    name: z.literal('clean-accumulation'),
-    file: z.string().min(1),
-    queryData: z.unknown(),
-    threshold: z.number().int().min(0).max(500).optional(),
-  }),
-]);
-
-export const OfficeDocumentInspectSchema = z.object({
-  argv: z.array(z.string()).min(1).optional()
-    .describe('Native tokens after the officecli binary name. Start with status/help/view/get/query/validate/dump/raw/get-marks. Never include a shell string or the officecli prefix.'),
-  recipe: OfficeInspectRecipeSchema.optional()
-    .describe('Read-only Morph recipe: verify or final-check. Mutually exclusive with argv.'),
-  timeoutMs: z.number().int().min(1).max(300000).optional()
-    .describe('Execution timeout in milliseconds. Defaults to 120000; maximum 300000.'),
-}).superRefine((value, ctx) => {
-  if (Boolean(value.argv?.length) === Boolean(value.recipe)) {
-    ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'Provide exactly one of argv or recipe.' });
-  }
-});
-
-export const OfficeDocumentEditSchema = z.object({
-  argv: z.array(z.string()).min(1).optional()
-    .describe('Native OfficeCLI tokens. Start with create/set/add/remove/move/swap/refresh/raw-set/add-part/batch/import/merge. Never include a shell string or the officecli prefix.'),
-  recipe: OfficeEditRecipeSchema.optional()
-    .describe('Executable Morph recipe: clone, ghost, or clean-accumulation. Mutually exclusive with argv.'),
-  batch: z.object({
-    commands: z.array(z.string()).max(OFFICE_MAX_INLINE_BATCH_COMMANDS).optional()
-      .describe(`Each string is one JSON command object. Maximum ${OFFICE_MAX_INLINE_BATCH_COMMANDS} commands and ${OFFICE_MAX_INLINE_BATCH_CHARS} serialized characters.`),
-    file: z.string().optional()
-      .describe('Path to a .json array of native batch command objects. Mutually exclusive with commands.'),
-  }).optional().describe('Only valid when argv[0] is batch; provide exactly one of commands or file.'),
-  timeoutMs: z.number().int().min(1).max(300000).optional()
-    .describe('Execution timeout in milliseconds. Defaults to 120000; maximum 300000.'),
-}).superRefine((value, ctx) => {
-  if (Boolean(value.argv?.length) === Boolean(value.recipe)) {
-    ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'Provide exactly one of argv or recipe.' });
-  }
-});
-
-export const OfficeDocumentGuideSchema = z.object({
-  guide: z.enum([
-    'word', 'excel', 'pptx', 'academic-paper', 'financial-model',
-    'data-dashboard', 'pitch-deck', 'word-form', 'morph-ppt', 'morph-ppt-3d',
-  ]),
-  topic: z.string().optional().describe('One heading/topic to load progressively. Mutually exclusive with referencePath.'),
-  referencePath: z.string().optional().describe('One allowlisted vendored reference path, or an authorized .glb for morph-ppt-3d. Mutually exclusive with topic.'),
-});
-
-const OfficePreviewFileSchema = z.object({ file: z.string().min(1) });
-export const OfficeDocumentPreviewSchema = z.discriminatedUnion('action', [
-  OfficePreviewFileSchema.extend({
-    action: z.literal('render'),
-    page: z.string().min(1).optional().describe('Single page/slide or page range such as 1 or 1-5.'),
-    range: z.string().min(1).optional().describe('Element data-path or Excel cell range to crop.'),
-    grid: z.union([z.number().int().positive(), z.literal('auto')]).optional()
-      .describe('Word/PowerPoint contact-sheet columns or auto. Do not combine with page/range; Excel does not support grid.'),
-    renderer: z.enum(['auto', 'html', 'native']).optional(),
-    timeoutMs: z.number().int().min(1).max(300000).optional(),
-  }),
-  OfficePreviewFileSchema.extend({ action: z.literal('start') }),
-  OfficePreviewFileSchema.extend({ action: z.literal('status') }),
-  OfficePreviewFileSchema.extend({ action: z.literal('stop') }),
-  OfficePreviewFileSchema.extend({ action: z.literal('goto'), path: z.string().min(1) }),
-  OfficePreviewFileSchema.extend({ action: z.literal('selection') }),
-  OfficePreviewFileSchema.extend({
-    action: z.literal('mark'),
-    path: z.string().min(1),
-    props: z.record(z.string(), z.union([z.string(), z.number(), z.boolean()])).optional(),
-  }),
-  OfficePreviewFileSchema.extend({
-    action: z.literal('unmark'),
-    path: z.string().optional(),
-    all: z.boolean().optional(),
-  }),
-  OfficePreviewFileSchema.extend({ action: z.literal('get_marks') }),
-]);
-
-export const OfficeDocumentFinalizeSchema = z.object({
-  file: z.string().min(1),
-  profile: z.enum(['standard', 'strict']).optional(),
 });
 
 export const SpawnSessionSchema = z.object({
@@ -589,16 +464,6 @@ Examples:
 - \`close\` — close and destroy the browser window
 - \`hide\` — hide the window while preserving state`,
 
-  office_document_inspect: OFFICE_DOCUMENT_INSPECT_DESCRIPTION,
-
-  office_document_edit: OFFICE_DOCUMENT_EDIT_DESCRIPTION,
-
-  office_document_guide: OFFICE_DOCUMENT_GUIDE_DESCRIPTION,
-
-  office_document_preview: OFFICE_DOCUMENT_PREVIEW_DESCRIPTION,
-
-  office_document_finalize: OFFICE_DOCUMENT_FINALIZE_DESCRIPTION,
-
   call_llm: `Invoke a secondary LLM for focused subtasks. Use for:
 - Cost optimization: use a smaller model for simple tasks (summarization, classification)
 - Structured output: JSON schema compliance via prompt instructions
@@ -766,11 +631,6 @@ export const SESSION_TOOL_DEFS: SessionToolDef[] = [
   // Browser tool (backend-specific — requires BrowserPaneManager in Electron)
   // Single CLI-like tool that handles all browser actions via command string.
   { name: 'browser_tool', description: TOOL_DESCRIPTIONS.browser_tool, inputSchema: BrowserToolSchema, executionMode: 'backend', safeMode: 'allow', handler: null },
-  { name: 'office_document_inspect', description: TOOL_DESCRIPTIONS.office_document_inspect, inputSchema: OfficeDocumentInspectSchema, executionMode: 'registry', safeMode: 'allow', readOnly: true, handler: handleOfficeDocumentInspect },
-  { name: 'office_document_edit', description: TOOL_DESCRIPTIONS.office_document_edit, inputSchema: OfficeDocumentEditSchema, executionMode: 'registry', safeMode: 'block', handler: handleOfficeDocumentEdit },
-  { name: 'office_document_guide', description: TOOL_DESCRIPTIONS.office_document_guide, inputSchema: OfficeDocumentGuideSchema, executionMode: 'registry', safeMode: 'allow', readOnly: true, handler: handleOfficeDocumentGuide },
-  { name: 'office_document_preview', description: TOOL_DESCRIPTIONS.office_document_preview, inputSchema: OfficeDocumentPreviewSchema, executionMode: 'registry', safeMode: 'allow', handler: handleOfficeDocumentPreview },
-  { name: 'office_document_finalize', description: TOOL_DESCRIPTIONS.office_document_finalize, inputSchema: OfficeDocumentFinalizeSchema, executionMode: 'registry', safeMode: 'allow', readOnly: true, handler: handleOfficeDocumentFinalize },
   // Session self-management tools (registry — use context callbacks to reach SessionManager)
   { name: 'set_session_labels', description: TOOL_DESCRIPTIONS.set_session_labels, inputSchema: SetSessionLabelsSchema, executionMode: 'registry', safeMode: 'block', handler: handleSetSessionLabels },
   { name: 'set_session_status', description: TOOL_DESCRIPTIONS.set_session_status, inputSchema: SetSessionStatusSchema, executionMode: 'registry', safeMode: 'block', handler: handleSetSessionStatus },

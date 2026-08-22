@@ -71,12 +71,6 @@ import { attachSessionSelfManagementBindings } from './session-self-management-b
 // Session tool proxy definitions (for registering with subprocess)
 import {
   getSessionToolProxyDefs,
-  PI_OFFICE_DOCUMENT_EDIT_TOOL,
-  PI_OFFICE_DOCUMENT_FINALIZE_TOOL,
-  PI_OFFICE_DOCUMENT_GUIDE_TOOL,
-  PI_OFFICE_DOCUMENT_INSPECT_TOOL,
-  PI_OFFICE_DOCUMENT_PREVIEW_TOOL,
-  PI_OFFICE_TOOL_ROUTING_PROMPT,
   SESSION_TOOL_NAMES,
 } from './backend/pi/session-tool-defs.ts';
 
@@ -1542,7 +1536,7 @@ export class PiAgent extends BaseAgent {
     toolName: string,
     args: Record<string, unknown>
   ): Promise<ProxyToolExecutionResult> {
-    // Session-scoped tools may be MCP-prefixed or canonical (native Office).
+    // Session-scoped tools may be MCP-prefixed or canonical.
     // Normalize the prefix before dispatching to the canonical registry.
     const strippedName = toolName.startsWith('mcp__session__')
       ? toolName.slice('mcp__session__'.length)
@@ -2193,18 +2187,16 @@ export class PiAgent extends BaseAgent {
         } else if (att.mimeType === 'application/pdf' && att.storedPath) {
           attachmentParts.push(`[Attached PDF: ${att.name}]\n[Stored at: ${att.storedPath}]`);
         } else if (att.type === 'office' && att.storedPath) {
-          // Office uploads retain the original binary for native inspection.
-          // Do not advertise a legacy Markdown sidecar from older sessions:
-          // that path made the model bypass the native tools on its first read.
+          const lower = `${att.name} ${att.storedPath}`.toLowerCase();
+          const officeSkill = lower.includes('.xlsx')
+            ? 'officecli-xlsx'
+            : lower.includes('.pptx')
+              ? 'officecli-pptx'
+              : 'officecli-docx';
           attachmentParts.push(
             `[Attached Office document: ${att.name}]\n` +
             `[Stored at: ${att.storedPath}]\n` +
-            `[Inspect with: ${PI_OFFICE_DOCUMENT_INSPECT_TOOL}]\n` +
-            `[Modify with: ${PI_OFFICE_DOCUMENT_EDIT_TOOL}]\n` +
-            `[Load task guidance with: ${PI_OFFICE_DOCUMENT_GUIDE_TOOL}]\n` +
-            `[Render or interact with preview using: ${PI_OFFICE_DOCUMENT_PREVIEW_TOOL}]\n` +
-            `[Finalize the current revision with: ${PI_OFFICE_DOCUMENT_FINALIZE_TOOL}]\n` +
-            `[Do not read the generated Markdown sidecar unless the native Office tool reports that the document is unsupported.]`,
+            `[Load the built-in skill [skill:${officeSkill}], then inspect and edit with officecli via Bash. The binary is already on PATH; do not curl-install.]`,
           );
         } else if (att.storedPath) {
           let pathInfo = `[Attached file: ${att.name}]\n[Stored at: ${att.storedPath}]`;
@@ -2222,7 +2214,6 @@ export class PiAgent extends BaseAgent {
       // does (buildTextPrompt / buildSDKUserMessage append context to the tail).
       const fullSystemPrompt = [
         systemPrompt,
-        PI_OFFICE_TOOL_ROUTING_PROMPT,
         ...stableParts,
       ].filter(Boolean).join('\n\n');
 

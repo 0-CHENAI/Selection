@@ -22,11 +22,14 @@ import {
   loadAllSkills,
   loadWorkspaceSkills,
   loadSkill,
-  getBundledSkillsDir,
+  getBundledSkillDirectories,
+  filterUserFacingSkills,
+  loadSkillBySlug,
   skillExists,
   listSkillSlugs,
   deleteSkill,
 } from '../storage.ts';
+import { BUNDLED_OFFICECLI_SKILL_SLUGS } from '../../utils/officecli.ts';
 
 // ============================================================
 // Temp Directory Setup
@@ -539,9 +542,20 @@ describe('loadAllSkills', () => {
 });
 
 describe('bundled skills', () => {
-  it('does not expose the internal OfficeCLI runtime as a skill', () => {
-    const dir = getBundledSkillsDir();
-    expect(dir && existsSync(join(dir, 'officecli', 'SKILL.md'))).toBeFalsy();
+  it('exposes official OfficeCLI skills as built-in skills', () => {
+    const dirs = getBundledSkillDirectories();
+    expect(dirs.some(dir => existsSync(join(dir, 'officecli-docx', 'SKILL.md')))).toBe(true);
+
+    const skill = loadSkillBySlug(workspaceRoot, 'officecli-docx');
+    expect(skill).toBeTruthy();
+    expect(skill!.source).toBe('bundled');
+    expect(skill!.metadata.name).toBe('officecli-docx');
+
+    const all = loadAllSkills(workspaceRoot);
+    for (const slug of BUNDLED_OFFICECLI_SKILL_SLUGS) {
+      expect(all.some(item => item.slug === slug && item.source === 'bundled')).toBe(true);
+    }
+    expect(filterUserFacingSkills(all).some(item => item.source === 'bundled')).toBe(false);
   });
 });
 

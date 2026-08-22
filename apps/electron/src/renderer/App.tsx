@@ -1332,7 +1332,7 @@ export default function App() {
 
         // Step 2: Add persistent attachment metadata for the agent.
         // - Preserve the original FileAttachment
-        // - Include storedPath so native document tools can inspect Office files
+        // - Include storedPath so OfficeCLI skills can inspect Office files
         // - Resized images: Use resizedBase64 instead of original large base64
         processedAttachments = successfulAttachments.map((att, i) => {
           const stored = storedAttachments?.[i]

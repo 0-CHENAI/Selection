@@ -45,14 +45,6 @@ export function attachSessionSelfManagementBindings(
     enumerable: true,
   });
 
-  Object.defineProperty(context, 'openOfficePreview', {
-    get() {
-      return getSessionScopedToolCallbacks(sessionId)?.openOfficePreviewFn;
-    },
-    configurable: true,
-    enumerable: true,
-  });
-
   Object.defineProperty(context, 'setSessionStatus', {
     get() {
       return getSessionScopedToolCallbacks(sessionId)?.setSessionStatusFn;

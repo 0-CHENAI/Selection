@@ -2005,10 +2005,9 @@ export function shouldAllowToolInMode(
     };
   }
 
-  // Pi exposes selected session tools (currently the native Office tools)
-  // under their canonical names instead of MCP-prefixed aliases. Apply the
-  // same metadata-driven policy so canonical edit calls cannot bypass safe
-  // mode while canonical inspect calls remain read-only.
+  // Pi exposes selected session tools under their canonical names instead of
+  // MCP-prefixed aliases. Apply the same metadata-driven policy so canonical
+  // mutations cannot bypass safe mode while read-only tools remain allowed.
   if (SESSION_TOOL_NAMES.has(toolName)) {
     const safeAllowedSessionTools = getSessionSafeAllowedToolNames({
       includeDeveloperFeedback: FEATURE_FLAGS.developerFeedback,

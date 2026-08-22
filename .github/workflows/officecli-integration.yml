@@ -63,10 +63,9 @@ jobs:
       - name: Build packaged resource layout
         run: bun run electron:build:resources
 
-      # Packaged runtime (prepare/check/resources + create/inspect/HTML) is the merge gate.
-      # Strict finalize needs desktop Word/Excel/PowerPoint. Hosted windows-2025 does not
-      # install Office, so that step is skipped unless OFFICECLI_REQUIRE_STRICT_FINALIZE=1.
-      - name: Run real OfficeCLI integration suite
+      # Packaged binary + official bundled skills are the merge gate.
+      # Agents call officecli via Bash after reading the built-in skills.
+      - name: Run packaged OfficeCLI skill integration
         run: bun run test:officecli:integration
         env:
           CRAFT_RESOURCES_BASE: ${{ github.workspace }}/apps/electron/dist

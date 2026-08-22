@@ -81,6 +81,8 @@ mock.module('../../../skills/storage.ts', () => ({
   GLOBAL_AGENT_SKILLS_DIR: '/Users/test/.agents/skills',
   PROJECT_AGENT_SKILLS_DIR: '.agents/skills',
   getBundledSkillsDir: () => undefined,
+  getBundledSkillDirectories: () => [],
+  resolveBundledSkillMdPath: () => undefined,
 }));
 
 let mockCraftAgentsCliFlag = false;
@@ -440,17 +442,14 @@ describe('runPreToolUseChecks', () => {
     });
 
     it.each(['report.docx', 'forecast.xlsx', 'roadmap.pptx'])(
-      'routes generic reads of %s through the native Office tools',
+      'allows generic reads of %s so OfficeCLI skills can choose the reader',
       (filePath) => {
         const result = runPreToolUseChecks(createInput({
           toolName: 'Read',
           input: { file_path: `/test/workspace/${filePath}` },
         }));
 
-        expect(result.type).toBe('block');
-        if (result.type === 'block') {
-          expect(result.reason).toContain('office_document_inspect');
-        }
+        expect(result.type).toBe('allow');
       },
     );
 

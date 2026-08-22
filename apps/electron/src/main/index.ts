@@ -210,7 +210,7 @@ if (isDebugMode) {
   if (officecliResources) {
     process.env.CRAFT_OFFICECLI_RESOURCES = officecliResources
   } else {
-    mainLog.warn('Bundled officecli resources missing; Office document tools will degrade without crashing.', {
+    mainLog.warn('Bundled officecli resources missing; built-in OfficeCLI skills will not load.', {
       kind: app.isPackaged ? 'packaging_misconfigured' : 'resources_missing',
       expectedOfficecliResourcePaths: officecliResourceCandidates,
     })

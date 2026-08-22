@@ -22,10 +22,10 @@ describe('tool result multimodal content', () => {
       type: 'tool_result',
       sessionId: 'session-tool-image',
       toolUseId: 'tool-preview',
-      toolName: 'office_document_preview',
-      result: '{"artifacts":[{"path":"data/office/preview.png"}]}',
+      toolName: 'Read',
+      result: '{"artifacts":[{"path":"data/preview/preview.png"}]}',
       content: [
-        { type: 'text', text: '{"artifacts":[{"path":"data/office/preview.png"}]}' },
+        { type: 'text', text: '{"artifacts":[{"path":"data/preview/preview.png"}]}' },
         { type: 'image', data: 'aW1hZ2U=', mimeType: 'image/png' },
       ],
       isError: false,

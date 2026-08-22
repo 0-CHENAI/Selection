@@ -384,11 +384,10 @@ export function registerFilesHandlers(server: RpcServer, deps: HandlerDeps): voi
         }
       }
 
-      // Office documents are inspected through the always-available native
-      // Office session tool. Do not eagerly generate a Markdown sidecar here:
-      // it adds upload latency and previously caused the model to bypass the
-      // structured Office path. If the native runtime reports an unsupported
-      // document, the agent can invoke markitdown against storedPath on demand.
+      // Office documents stay as the original binary. Do not eagerly generate a
+      // Markdown sidecar here: it adds upload latency and previously caused the
+      // model to bypass officecli. If officecli reports the document
+      // unsupported, the agent can invoke markitdown against storedPath on demand.
 
       // Return StoredAttachment metadata
       // Include wasResized flag so UI can show notification

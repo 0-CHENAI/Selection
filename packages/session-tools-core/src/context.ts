@@ -418,12 +418,6 @@ export interface SessionToolContext {
    * Used by transform_data and render_template for output files.
    */
   dataPath?: string;
-
-  /**
-   * Desktop-only bridge used exclusively by office_document_preview.start.
-   * Headless/session-MCP contexts leave this undefined.
-   */
-  openOfficePreview?(url: string): Promise<{ url: string; instanceId?: string }>;
 }
 
 // ============================================================

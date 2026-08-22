@@ -18,6 +18,7 @@ import { join } from 'node:path';
 
 import type { AgentEvent } from '@craft-agent/core/types';
 import type { FileAttachment } from '../utils/files.ts';
+import { collectOfficeFormatSkillSlugs } from '../utils/officecli.ts';
 import { expandPath } from '../utils/paths.ts';
 import { resolveSpawnSessionMode, resolveSpawnWaitTimeoutMs } from './spawn-session-tool.ts';
 import { buildTransferredSessionContext } from './conversation-summary.ts';
@@ -951,12 +952,13 @@ ${formattedMessages}
    * must read them itself (enforced by PrerequisiteManager).
    *
    * @param message - The user message containing potential skill mentions
+   * @param attachments - Optional files; Office attachments also load the matching built-in skill
    * @returns Object with:
    *   - skillPaths: Map of slug → resolved SKILL.md absolute path
    *   - cleanMessage: Message with mentions stripped, or default directive
    *   - missingSkills: Array of skill slugs that were mentioned but not found
    */
-  protected extractSkillPaths(message: string): {
+  protected extractSkillPaths(message: string, attachments?: FileAttachment[]): {
     skillPaths: Map<string, string>;
     cleanMessage: string;
     missingSkills: string[];
@@ -976,17 +978,25 @@ ${formattedMessages}
 
     // Resolve SKILL.md paths for matched skills
     const skillPaths = new Map<string, string>();
-    for (const slug of parsed.skills) {
+    const resolveSlug = (slug: string) => {
       const skill = skills.find(s => s.slug === slug);
-      if (skill) {
-        const skillMdPath = join(skill.path, 'SKILL.md');
-        if (existsSync(skillMdPath)) {
-          skillPaths.set(slug, skillMdPath);
-          this.debug(`[extractSkillPaths] Resolved skill ${slug} → ${skillMdPath}`);
-        } else {
-          this.debug(`[extractSkillPaths] SKILL.md not found: ${skillMdPath}`);
-        }
+      if (!skill) return;
+      const skillMdPath = join(skill.path, 'SKILL.md');
+      if (existsSync(skillMdPath)) {
+        skillPaths.set(slug, skillMdPath);
+        this.debug(`[extractSkillPaths] Resolved skill ${slug} → ${skillMdPath}`);
+        return;
       }
+      this.debug(`[extractSkillPaths] SKILL.md not found: ${skillMdPath}`);
+    };
+
+    for (const slug of parsed.skills) {
+      resolveSlug(slug);
+    }
+
+    // Office files default to the matching built-in skill even without [skill:…]
+    for (const slug of collectOfficeFormatSkillSlugs(message, attachments)) {
+      if (!skillPaths.has(slug)) resolveSlug(slug);
     }
 
     // Resolve mentions to semantic markers (like file mentions) instead of stripping them.
@@ -1039,7 +1049,7 @@ ${formattedMessages}
     attachments?: FileAttachment[],
     options?: ChatOptions
   ): AsyncGenerator<AgentEvent> {
-    const { skillPaths, cleanMessage, missingSkills } = this.extractSkillPaths(message);
+    const { skillPaths, cleanMessage, missingSkills } = this.extractSkillPaths(message, attachments);
     if (missingSkills.length > 0) {
       yield { type: 'error', message: `Skill(s) not found: ${missingSkills.join(', ')}` };
       yield { type: 'complete' };

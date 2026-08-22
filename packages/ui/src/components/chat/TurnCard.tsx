@@ -32,7 +32,6 @@ import { GenerativeActivityIndicator } from './GenerativeActivityIndicator'
 import { markdownToPlainText } from './markdown-to-plain-text'
 import { BUFFER_CONFIG } from './stream-buffer'
 import { useStreamingReveal } from './useStreamingReveal'
-import { parseOfficeActivitySummary } from './office-activity-summary'
 import { type IslandTransitionConfig } from '../ui'
 import { AnnotationIslandMenu } from '../annotations/AnnotationIslandMenu'
 import {
@@ -424,11 +423,6 @@ function getToolDisplayName(name: string): string {
     'list_background_tasks': 'List Background Tasks',
     'send_agent_message': 'Send Agent Message',
     'spawn_session': 'Spawn Session',
-    'office_document_inspect': 'Inspect Office Document',
-    'office_document_edit': 'Edit Office Document',
-    'office_document_guide': 'Load Office Guide',
-    'office_document_preview': 'Preview Office Document',
-    'office_document_finalize': 'Finalize Office Document',
   }
 
   return displayNames[stripped] || stripped
@@ -901,19 +895,6 @@ function ActivityRow({ activity, onOpenDetails, isLastChild, sessionFolderPath, 
   const isComplete = activity.status === 'completed' || activity.status === 'error'
   const isBackgrounded = activity.status === 'backgrounded'
   const orchestrationSummary = formatOrchestrationToolSummary(activity.toolName, activity.content)
-  const officeSummary = parseOfficeActivitySummary(activity.toolName, activity.content)
-  const officeSummaryParts = officeSummary ? [
-    officeSummary.file,
-    officeSummary.backend,
-    officeSummary.durationMs !== undefined ? formatDuration(officeSummary.durationMs) : undefined,
-    officeSummary.warningCount > 0 ? `${officeSummary.warningCount} warning${officeSummary.warningCount === 1 ? '' : 's'}` : undefined,
-    officeSummary.deliveryReady === true
-      ? 'Machine gate passed'
-      : officeSummary.deliveryReady === false
-        ? 'Machine gate blocked'
-        : undefined,
-    officeSummary.previewReady ? 'Preview ready' : undefined,
-  ].filter((value): value is string => Boolean(value)) : []
 
   // For backgrounded tasks, show task/shell ID and elapsed time
   const backgroundInfo = isBackgrounded
@@ -1081,15 +1062,6 @@ function ActivityRow({ activity, onOpenDetails, isLastChild, sessionFolderPath, 
           <span className="truncate min-w-0 max-w-[420px]">
             <span className="opacity-60"> · </span>
             <span>{orchestrationSummary}</span>
-          </span>
-        )}
-        {officeSummaryParts.length > 0 && (
-          <span
-            className="truncate min-w-0 max-w-[560px] text-foreground/65"
-            title={officeSummaryParts.join(' · ')}
-          >
-            <span className="opacity-60"> · </span>
-            <span>{officeSummaryParts.join(' · ')}</span>
           </span>
         )}
         {/* Background task info (task/shell ID + elapsed time) */}

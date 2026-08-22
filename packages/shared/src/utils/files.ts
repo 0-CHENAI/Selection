@@ -88,7 +88,7 @@ const TEXT_EXTENSIONS = new Set([
   '.csv', '.log', '.conf', '.ini', '.cfg',
 ]);
 
-// Office file extensions (stored as binary and handled by native Office tools)
+// Office file extensions (stored as binary; agents use built-in OfficeCLI skills)
 const OFFICE_EXTENSIONS: Record<string, string> = {
   '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
   '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',

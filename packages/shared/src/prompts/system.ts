@@ -1,4 +1,3 @@
-import { OFFICE_WORKFLOW_PROMPT } from '@craft-agent/session-tools-core';
 import { formatPreferencesForPrompt, getCoAuthorPreference } from '../config/preferences.ts';
 import { getBrowserToolEnabled } from '../config/storage.ts';
 import { debug } from '../utils/debug.ts';
@@ -685,7 +684,7 @@ Skills are reusable instruction sets that teach you specialized behaviors. Each 
 1. Read its \`SKILL.md\` at the resolved path using the Read tool or \`cat\` via Bash — tool calls are blocked until it is read
 2. Follow the instructions in the file to complete the user's request
 
-For Office documents (.docx, .xlsx, .pptx), use the five always-available \`office_document_inspect\`, \`office_document_edit\`, \`office_document_guide\`, \`office_document_preview\`, and \`office_document_finalize\` tools directly. OfficeCLI and its version-pinned official skill guides are internal runtime capabilities, not user-installable Skills.
+For Word / Excel / PowerPoint, load the matching built-in OfficeCLI skill, then run \`officecli\` via Bash. The binary is already on PATH; do not curl-install or download it.
 
 Skills are stored at four levels (listed from lowest to highest priority):
 - Global: \`~/.agents/skills/{slug}/SKILL.md\`
@@ -1258,26 +1257,24 @@ Each item needs a \`src\` (absolute path) and an optional \`label\` (shown in th
 
 ## Document Tools
 
-For modern Office documents, use the registered native Office document tools. The non-Office document CLI tools below are available via Bash:
+These CLI tools are available via Bash. OfficeCLI is bundled with Selection.
 
 | Tool | Description | Example |
 |------|-------------|---------|
-| **officecli** | Internal managed runtime for the five native Office document tools; do not invoke it directly through Bash. | Use the matching \`office_document_*\` tool |
-| **markitdown** | Fallback conversion to Markdown; not the default reader for .docx/.xlsx/.pptx | \`markitdown report.pdf\` |
+| **officecli** | Bundled OfficeCLI for .docx / .xlsx / .pptx. Already on PATH. | \`officecli --version\` |
+| **markitdown** | Fallback conversion to Markdown | \`markitdown report.pdf\` |
 | **pdf-tool** | PDF operations (extract, merge, split, info) | \`pdf-tool extract report.pdf\` |
 | **img-tool** | Image processing (resize, convert, metadata) | \`img-tool resize photo.jpg --width 800\` |
-| **doc-diff** | Compare plain-text documents; Office binaries must use native inspect | \`doc-diff old.md new.md\` |
+| **doc-diff** | Compare plain-text documents | \`doc-diff old.md new.md\` |
 | **ical-tool** | Calendar file operations | \`ical-tool read calendar.ics\` |
 
-**Tips:**
-- For .docx / .xlsx / .pptx use \`office_document_inspect\` for native reads, \`office_document_edit\` for mutations, \`office_document_guide\` for official skill bootstrap and topics, \`office_document_preview\` for one visual pass, and \`office_document_finalize\` for the skill Delivery Gate. Do not load a user Skill named officecli.
-
-${OFFICE_WORKFLOW_PROMPT}
-
-- OfficeCLI is managed by the app; do not curl-install or download it.
-- Use **markitdown** only when the user explicitly requests Markdown conversion, or after the native Office inspect tool reports that the document is unsupported or unavailable. Do not read an automatically generated \`.docx.md\`, \`.xlsx.md\`, or \`.pptx.md\` sidecar first.
-- If native Office inspection reports an unsupported document, use \`markitdown <file> # selection-office-native-fallback\` only as a read-only text fallback; do not use that fallback for edits.
-- Consult each non-Office CLI's \`--help\` before relying on optional flags such as \`-o\`.
+**Office documents:**
+- Load the matching built-in skill, Read its \`SKILL.md\`, then follow that skill's Common Workflow and Delivery Gate with \`officecli\` via Bash.
+- Word / .docx → \`[skill:officecli-docx]\`. Excel / .xlsx → \`[skill:officecli-xlsx]\`. PowerPoint / .pptx → \`[skill:officecli-pptx]\`.
+- Specialized: \`officecli-academic-paper\`, \`officecli-financial-model\`, \`officecli-data-dashboard\`, \`officecli-pitch-deck\`, \`officecli-word-form\`, \`morph-ppt\`, \`morph-ppt-3d\`.
+- Official skill Setup sections that mention curl-install do not apply. \`officecli\` is packaged with Selection.
+- Use **markitdown** only when the user explicitly requests Markdown conversion, or when \`officecli\` reports the document unsupported. Do not read an automatically generated \`.docx.md\`, \`.xlsx.md\`, or \`.pptx.md\` sidecar first.
+- Consult each CLI's \`--help\` before relying on optional flags such as \`-o\`.
 - PDF export is not included in the bundled officecli binary
 
 ## Tool Metadata

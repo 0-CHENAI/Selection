@@ -63,27 +63,6 @@ export type { RenderTemplateArgs } from './render-template.ts';
 export { handleSendDeveloperFeedback } from './send-developer-feedback.ts';
 export type { SendDeveloperFeedbackArgs } from './send-developer-feedback.ts';
 
-// Office documents
-export {
-  handleOfficeDocumentInspect,
-  handleOfficeDocumentEdit,
-} from './office-document.ts';
-export type {
-  OfficeDocumentInspectArgs,
-  OfficeDocumentEditArgs,
-} from './office-document.ts';
-export { handleOfficeDocumentGuide, clearOfficeGuideCache, releaseOfficeGuideSession } from './office-guide.ts';
-export type { OfficeDocumentGuideArgs } from './office-guide.ts';
-export {
-  handleOfficeDocumentPreview,
-  renderOfficeDocument,
-  releaseOfficePreviewSession,
-  clearOfficePreviewState,
-} from './office-preview.ts';
-export type { OfficeDocumentPreviewArgs } from './office-preview.ts';
-export { handleOfficeDocumentFinalize } from './office-finalize.ts';
-export type { OfficeDocumentFinalizeArgs } from './office-finalize.ts';
-
 // Session Self-Management
 export { handleSetSessionLabels } from './set-session-labels.ts';
 export type { SetSessionLabelsArgs } from './set-session-labels.ts';

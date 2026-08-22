@@ -142,10 +142,10 @@ describe('Pi tool image persistence', () => {
     const imageData = 'aW1hZ2UtYnl0ZXMtdGhhdC1tdXN0LW5vdC1iZS1wZXJzaXN0ZWQ='
     const toolResult: Message = {
       role: 'toolResult',
-      toolCallId: 'office-render-1',
-      toolName: 'office_document_preview',
+      toolCallId: 'image-render-1',
+      toolName: 'Read',
       content: [
-        { type: 'text', text: 'Artifact: /tmp/session/data/office/page-1.png' },
+        { type: 'text', text: 'Artifact: /tmp/session/data/preview/page-1.png' },
         { type: 'image', data: imageData, mimeType: 'image/png' },
       ],
       isError: false,
@@ -164,7 +164,7 @@ describe('Pi tool image persistence', () => {
     const sessionFile = manager.getSessionFile()
     expect(sessionFile).toBeTruthy()
     const persisted = readFileSync(sessionFile!, 'utf8')
-    expect(persisted).toContain('/tmp/session/data/office/page-1.png')
+    expect(persisted).toContain('/tmp/session/data/preview/page-1.png')
     expect(persisted).toContain('Inline tool image omitted from session JSONL')
     expect(persisted).not.toContain(imageData)
     expect(JSON.stringify(toolResult)).toContain(imageData)
@@ -224,8 +224,8 @@ describe('Pi tool image persistence', () => {
 
     const placeholder = sanitizePiMessageForPersistence({
       role: 'toolResult',
-      toolCallId: 'office-1',
-      toolName: 'office_document_preview',
+      toolCallId: 'image-1',
+      toolName: 'Read',
       content: [
         { type: 'text', text: `Artifact: ${artifact}` },
         { type: 'image', data: 'should-not-remain', mimeType: 'image/png' },
@@ -252,8 +252,8 @@ describe('Pi tool image persistence', () => {
 
     const restored = rehydratePiToolImages({
       role: 'toolResult',
-      toolCallId: 'office-2',
-      toolName: 'office_document_preview',
+      toolCallId: 'image-2',
+      toolName: 'Read',
       content: [
         { type: 'text', text: `Artifact: ${secret}` },
         { type: 'text', text: '[Inline tool image omitted from session JSONL; use the artifact path and metadata in the text result.]' },
@@ -274,8 +274,8 @@ describe('Pi tool image persistence', () => {
 
     const restored = rehydratePiToolImages({
       role: 'toolResult',
-      toolCallId: 'office-3',
-      toolName: 'office_document_preview',
+      toolCallId: 'image-3',
+      toolName: 'Read',
       content: [
         { type: 'text', text: `Artifact: ${join(root, 'one.png')}\nArtifact: ${join(root, 'two.png')}` },
         { type: 'text', text: '[Inline tool image omitted from session JSONL; use the artifact path and metadata in the text result.]' },

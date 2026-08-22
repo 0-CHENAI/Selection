@@ -3,7 +3,37 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import { OFFICECLI_DESKTOP_TARGETS, OFFICECLI_SHA256 } from '../../../../../scripts/build/common.ts'
-import { officecliBinaryName, resolveOfficecliBinary } from '../officecli'
+import {
+  BUNDLED_OFFICECLI_SKILL_SLUGS,
+  collectOfficeFormatSkillSlugs,
+  getBundledOfficecliSkillsDir,
+  officecliBinaryName,
+  resolveOfficecliBinary,
+} from '../officecli'
+
+describe('collectOfficeFormatSkillSlugs', () => {
+  it('infers format skills from Office paths in the message', () => {
+    expect(collectOfficeFormatSkillSlugs('请改 巡察报告.docx')).toEqual(['officecli-docx'])
+    expect(collectOfficeFormatSkillSlugs('compare a.docx and b.xlsx')).toEqual([
+      'officecli-xlsx',
+      'officecli-docx',
+    ])
+    expect(collectOfficeFormatSkillSlugs('deck.pptx')).toEqual(['officecli-pptx'])
+  })
+
+  it('does not infer from a request that only talks about a report', () => {
+    expect(collectOfficeFormatSkillSlugs('写一份巡察报告')).toEqual([])
+  })
+
+  it('infers from Office attachments, defaulting typeless office files to docx', () => {
+    expect(collectOfficeFormatSkillSlugs('看一下', [
+      { type: 'office', name: '数据.xlsx', path: '/tmp/数据.xlsx' },
+    ])).toEqual(['officecli-xlsx'])
+    expect(collectOfficeFormatSkillSlugs('看一下', [
+      { type: 'office', name: '附件', storedPath: '/tmp/session/att-1' },
+    ])).toEqual(['officecli-docx'])
+  })
+})
 
 describe('resolveOfficecliBinary', () => {
   it('names the Windows executable with .exe', () => {
@@ -108,5 +138,13 @@ describe('bundled officecli smoke', () => {
     const result = Bun.spawnSync([binary, 'load_skill', 'word'], { stdout: 'pipe', stderr: 'pipe' })
     expect(result.exitCode).toBe(0)
     expect(result.stdout.toString()).toContain('docx')
+  })
+
+  it('resolves the bundled official skill directory', () => {
+    const skillsDir = getBundledOfficecliSkillsDir()
+    expect(skillsDir).toBeTruthy()
+    for (const slug of BUNDLED_OFFICECLI_SKILL_SLUGS) {
+      expect(existsSync(join(skillsDir!, slug, 'SKILL.md'))).toBe(true)
+    }
   })
 })

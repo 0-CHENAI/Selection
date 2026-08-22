@@ -13,12 +13,7 @@
 import type { LLMQueryRequest, LLMQueryResult } from './llm-tool.ts';
 import type { SpawnSessionFn } from './spawn-session-tool.ts';
 import type { BrowserPaneFns } from './browser-tools.ts';
-import {
-  releaseOfficeGuideSession,
-  releaseOfficePreviewSession,
-  releaseOfficeRuntimeSession,
-  type AuthRequest,
-} from '@craft-agent/session-tools-core';
+import type { AuthRequest } from '@craft-agent/session-tools-core';
 import { debug } from '../utils/debug.ts';
 
 /**
@@ -55,9 +50,6 @@ export interface SessionScopedToolCallbacks {
    * with the session's bound browser instance.
    */
   browserPaneFns?: BrowserPaneFns;
-
-  /** Desktop bridge used only by office_document_preview.start. */
-  openOfficePreviewFn?: (url: string) => Promise<{ url: string; instanceId?: string }>;
 
   /** Set labels on a session (defaults to current). */
   setSessionLabelsFn?: (sessionId: string | undefined, labels: string[]) => void | Promise<void>;
@@ -136,9 +128,6 @@ export function mergeSessionScopedToolCallbacks(
  * Unregister callbacks for a session
  */
 export function unregisterSessionScopedToolCallbacks(sessionId: string): void {
-  releaseOfficePreviewSession(sessionId);
-  releaseOfficeGuideSession(sessionId);
-  releaseOfficeRuntimeSession(sessionId);
   sessionScopedToolCallbackRegistry.delete(sessionId);
   debug('session-scoped-tools', `Unregistered callbacks for session ${sessionId}`);
 }

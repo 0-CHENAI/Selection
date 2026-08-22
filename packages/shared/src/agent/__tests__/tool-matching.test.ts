@@ -483,9 +483,9 @@ describe('extractToolResults', () => {
   })
 
   it('preserves MCP/Anthropic image blocks live while keeping Base64 out of the persisted result string', () => {
-    toolIndex.register('toolu_preview', 'mcp__session__office_document_preview', {})
+    toolIndex.register('toolu_preview', 'Read', {})
     const blocks: ContentBlock[] = [makeToolResultBlock('toolu_preview', [
-      { type: 'text', text: '{"artifacts":[{"path":"data/office/full.png"}]}' },
+      { type: 'text', text: '{"artifacts":[{"path":"data/preview/full.png"}]}' },
       { type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'cG5n' } },
     ])]
 
@@ -495,9 +495,9 @@ describe('extractToolResults', () => {
     if (!event || event.type !== 'tool_result') throw new Error('Expected one tool_result event')
     expect(event.result.includes('cG5n')).toBe(false)
     expect(event).toMatchObject({
-      result: expect.stringContaining('data/office/full.png'),
+      result: expect.stringContaining('data/preview/full.png'),
       content: [
-        { type: 'text', text: expect.stringContaining('data/office/full.png') },
+        { type: 'text', text: expect.stringContaining('data/preview/full.png') },
         { type: 'image', data: 'cG5n', mimeType: 'image/png' },
       ],
     })
