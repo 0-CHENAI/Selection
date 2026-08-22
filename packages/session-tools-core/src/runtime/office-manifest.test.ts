@@ -83,11 +83,12 @@ describe('resolveOfficeManifestModuleDirectory', () => {
 });
 
 describe('OfficeCLI resource resolution', () => {
-  it('still finds the development resources without env overrides', () => {
+  it('still finds the development resources from an explicit module directory', () => {
     const resolved = resolveOfficecliResources({
       env: {},
       cwd: join(tempRoot(), 'empty'),
       resourcesPath: null,
+      moduleDirectory: import.meta.dir,
     });
 
     expect(resolved?.root).toBe(realOfficecliRoot);
@@ -201,15 +202,15 @@ describe('OfficeCLI resource resolution', () => {
 describe('Windows packaged Office startup smoke', () => {
   it('loads a CJS bundle when import.meta.url is undefined', async () => {
     const outfile = join(tempRoot(), 'office-manifest.cjs');
-    await build({
+    const result = await build({
       entryPoints: [join(import.meta.dir, 'office-manifest.ts')],
       bundle: true,
       platform: 'node',
       format: 'cjs',
       outfile,
-      define: { 'import.meta.url': 'undefined' },
       logLevel: 'silent',
     });
+    expect(result.warnings.filter(warning => warning.id === 'empty-import-meta')).toEqual([]);
 
     expect(() => require(outfile)).not.toThrow();
     const bundled = require(outfile) as {
@@ -231,13 +232,12 @@ describe('Windows packaged Office startup smoke', () => {
 
   it('loads the Office runtime init chain as a packaged CJS main bundle', async () => {
     const outfile = join(tempRoot(), 'session-tools-core.cjs');
-    await build({
+    const result = await build({
       entryPoints: [join(import.meta.dir, '../index.ts')],
       bundle: true,
       platform: 'node',
       format: 'cjs',
       outfile,
-      define: { 'import.meta.url': 'undefined' },
       logLevel: 'silent',
       plugins: [{
         name: 'stub-optional-natives',
@@ -253,6 +253,7 @@ describe('Windows packaged Office startup smoke', () => {
         },
       }],
     });
+    expect(result.warnings.filter(warning => warning.id === 'empty-import-meta')).toEqual([]);
 
     const loaded = require(outfile) as {
       resolveOfficecliResources: typeof resolveOfficecliResources;

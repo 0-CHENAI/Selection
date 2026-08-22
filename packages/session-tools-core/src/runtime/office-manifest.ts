@@ -22,9 +22,9 @@ export interface OfficecliResourceFailure {
 }
 
 /**
- * Convert an ESM module URL into a directory. Never throws: Windows CJS
- * bundles often leave `import.meta.url` undefined, and passing that to
- * `fileURLToPath` crashes Electron during module init.
+ * Convert an ESM module URL into a directory. Never throws: CJS bundles
+ * leave `import.meta.url` empty, and this file must not read `import.meta`
+ * itself or esbuild warns / Electron crashes during module init.
  */
 export function resolveOfficeManifestModuleDirectory(importMetaUrl: unknown): string | undefined {
   if (typeof importMetaUrl !== 'string' || importMetaUrl.length === 0) return undefined;
@@ -34,8 +34,6 @@ export function resolveOfficeManifestModuleDirectory(importMetaUrl: unknown): st
     return undefined;
   }
 }
-
-const bundledModuleDirectory = resolveOfficeManifestModuleDirectory(import.meta.url);
 
 interface ManifestCacheEntry {
   mtimeMs: number;
@@ -58,7 +56,9 @@ export interface ResolveOfficecliResourcesOptions {
   cwd?: string;
   explicitRoot?: string;
   /**
-   * Override the directory derived from `import.meta.url`.
+   * Optional directory for source-relative `resources/officecli` candidates.
+   * Callers that still have a real ESM URL should pass
+   * `resolveOfficeManifestModuleDirectory(import.meta.url)`.
    * Pass `null` to skip that candidate (CJS / tests).
    */
   moduleDirectory?: string | null;
@@ -132,12 +132,10 @@ function processResourcesPath(): string | undefined {
 }
 
 function resolveModuleDirectory(options: ResolveOfficecliResourcesOptions): string | undefined {
-  if (options.moduleDirectory !== undefined) {
-    return typeof options.moduleDirectory === 'string' && options.moduleDirectory.length > 0
-      ? options.moduleDirectory
-      : undefined;
+  if (typeof options.moduleDirectory === 'string' && options.moduleDirectory.length > 0) {
+    return options.moduleDirectory;
   }
-  return bundledModuleDirectory;
+  return undefined;
 }
 
 function resolveResourcesPath(options: ResolveOfficecliResourcesOptions): string | undefined {
