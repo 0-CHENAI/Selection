@@ -389,7 +389,6 @@ export function FreeFormInput({
     return llmConnections.find(c => c.slug === effectiveConnection) ?? null
   }, [llmConnections, effectiveConnection])
 
-
   // Access sessionStatuses and onSessionStatusChange from context for the # menu state picker
   const sessionStatuses = appShellCtx?.sessionStatuses ?? []
   const onSessionStatusChange = appShellCtx?.onSessionStatusChange
@@ -439,6 +438,10 @@ export function FreeFormInput({
   // Sync TO parent on blur/submit (debounced persistence)
   const [input, setInput] = React.useState(() => coerceInputText(inputValue))
   const [attachments, setAttachments] = React.useState<FileAttachment[]>(attachmentsValue ?? [])
+  const showVisionWarning = attachments.some(a => a.type === 'image' || a.mimeType?.startsWith('image/'))
+    && !!effectiveConnectionDetails
+    && isCompatProvider(effectiveConnectionDetails.providerType)
+    && !modelSupportsImages(effectiveConnectionDetails, currentModel)
 
   // Ref to track current attachments for use in event handlers (avoids stale closure issues)
   const attachmentsRef = React.useRef<FileAttachment[]>([])
@@ -1237,7 +1240,7 @@ export function FreeFormInput({
   // Submit message - backend handles queueing and interruption
   const submitMessage = React.useCallback(() => {
     const hasContent = input.trim() || attachments.length > 0 || followUpItems.length > 0
-    if (!hasContent || disabled || submitLockRef.current) return false
+    if (!hasContent || disabled || submitLockRef.current || showVisionWarning) return false
 
     // Tutorial may disable sending to guide user through specific steps
     if (disableSend) return false
@@ -1291,7 +1294,7 @@ export function FreeFormInput({
     })
 
     return true
-  }, [input, attachments, followUpItems, disabled, disableSend, onInputChange, onAttachmentsChange, onSubmit, skills, sources, optimisticSourceSlugs, onSourcesChange, onWorkingDirectoryChange, homeDir])
+  }, [input, attachments, followUpItems, disabled, disableSend, showVisionWarning, onInputChange, onAttachmentsChange, onSubmit, skills, sources, optimisticSourceSlugs, onSourcesChange, onWorkingDirectoryChange, homeDir])
 
   // Listen for craft:submit-input events (simulate pressing the Send button)
   React.useEffect(() => {
@@ -1555,17 +1558,6 @@ export function FreeFormInput({
   }, [followUpLayoutKey])
 
   const hasContent = input.trim() || attachments.length > 0 || followUpItems.length > 0
-
-  // Pre-flight image-support check: warn when staged images would be silently
-  // stripped by Pi SDK because the active custom-endpoint model is text-only.
-  // Gate on pi_compat — built-in catalogs (anthropic/pi) are owned by the SDK
-  // and we can't repair them from the UI here.
-  const hasStagedImages = attachments.some(a => a.type === 'image' || a.mimeType?.startsWith('image/'))
-  const showVisionWarning =
-    hasStagedImages
-    && !!effectiveConnectionDetails
-    && isCompatProvider(effectiveConnectionDetails.providerType)
-    && !modelSupportsImages(effectiveConnectionDetails, currentModel)
 
   return (
     <form onSubmit={handleSubmit}>
@@ -2330,7 +2322,7 @@ export function FreeFormInput({
               size="icon"
               aria-label={t('shortcuts.sendMessage')}
               className="send-btn h-7 w-7 rounded-full shrink-0 ml-2"
-              disabled={!hasContent || disabled || disableSend}
+              disabled={!hasContent || disabled || disableSend || showVisionWarning}
               data-tutorial="send-button"
             >
               <ArrowUp className="h-4 w-4" />

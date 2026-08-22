@@ -1321,6 +1321,13 @@ export default function App() {
               timestamp: Date.now()
             }]
           }))
+          const failedImages = attachments.filter((attachment, i) =>
+            storeResults[i]?.status === 'rejected'
+            && (attachment.type === 'image' || attachment.mimeType?.startsWith('image/') === true)
+          )
+          if (failedImages.length > 0) {
+            return
+          }
         }
 
         // Step 2: Add persistent attachment metadata for the agent.

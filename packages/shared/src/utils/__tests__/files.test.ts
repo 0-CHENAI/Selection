@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Buffer } from 'node:buffer'
-import { fileAttachmentsFromStored, getFileType, getMimeType, hydrateAttachmentBytes, readFileAttachment, resolveRegenerateAttachments } from '../files'
+import { fileAttachmentsFromStored, getFileType, getMimeType, hydrateAttachmentBytes, imageAttachmentsMissingBytes, readFileAttachment, resolveRegenerateAttachments, withStoredImagePaths } from '../files'
 
 const cleanups: Array<() => void> = []
 
@@ -128,6 +128,47 @@ describe('fileAttachmentsFromStored', () => {
   })
 })
 
+describe('withStoredImagePaths', () => {
+  test('fills storedPath onto path-only live attachments', () => {
+    const merged = withStoredImagePaths(
+      [{
+        type: 'image',
+        path: '/tmp/original.png',
+        name: 'shot.png',
+        mimeType: 'image/png',
+        size: 12,
+      }],
+      [{
+        type: 'image',
+        name: 'shot.png',
+        mimeType: 'image/png',
+        size: 12,
+        storedPath: '/tmp/session/shot.png',
+      }],
+    )
+
+    expect(merged?.[0]?.storedPath).toBe('/tmp/session/shot.png')
+  })
+
+  test('leaves attachments that already have bytes unchanged', () => {
+    const live = [{
+      type: 'image' as const,
+      path: '/tmp/original.png',
+      name: 'shot.png',
+      mimeType: 'image/png',
+      size: 12,
+      base64: 'live',
+    }]
+    expect(withStoredImagePaths(live, [{
+      type: 'image',
+      name: 'shot.png',
+      mimeType: 'image/png',
+      size: 12,
+      storedPath: '/tmp/session/shot.png',
+    }])).toEqual(live)
+  })
+})
+
 describe('resolveRegenerateAttachments', () => {
   const stored = [{
     type: 'image' as const,
@@ -202,6 +243,21 @@ describe('hydrateAttachmentBytes', () => {
       size: 1,
     }
     expect(hydrateAttachmentBytes([attachment])).toEqual([attachment])
+  })
+
+  test('reports images that still lack bytes after hydrate', () => {
+    const attachment = {
+      type: 'image' as const,
+      path: join(makeTmp(), 'missing.png'),
+      name: 'missing.png',
+      mimeType: 'image/png',
+      size: 1,
+    }
+    expect(imageAttachmentsMissingBytes(hydrateAttachmentBytes([attachment]))).toEqual([attachment])
+    expect(imageAttachmentsMissingBytes([{
+      ...attachment,
+      base64: 'abc',
+    }])).toEqual([])
   })
 
   test('keeps a path-only image when the file is over the size limit', () => {

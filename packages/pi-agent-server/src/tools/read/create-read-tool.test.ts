@@ -106,6 +106,25 @@ describe('Selection Pi read tool', () => {
     expect(result.content.some(content => content.type === 'image')).toBe(true)
   })
 
+  it('does not return an image block for a text-only model', async () => {
+    const cwd = mkdtempSync(join(tmpdir(), 'selection-read-tool-'))
+    tempDirs.push(cwd)
+    writeFileSync(join(cwd, 'small.png'), png)
+    const tool = createSelectionReadToolDefinition(cwd)
+
+    const result = await tool.execute(
+      'read-non-vision',
+      { path: 'small.png' },
+      undefined,
+      undefined,
+      { model: { input: ['text'] } } as never,
+    )
+    const text = result.content.find(content => content.type === 'text')
+
+    expect(result.content.some(content => content.type === 'image')).toBe(false)
+    expect(text?.type === 'text' ? text.text : '').toContain('image_capability_mismatch')
+  })
+
   it('continues to delegate text files to the upstream read implementation', async () => {
     const cwd = mkdtempSync(join(tmpdir(), 'selection-read-tool-'))
     tempDirs.push(cwd)
