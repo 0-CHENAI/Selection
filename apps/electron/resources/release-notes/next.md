@@ -26,6 +26,7 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 - **Office generation no longer loops on inspect** — creating or editing Word / Excel / PowerPoint files now follows a bounded native OfficeCLI workflow (create + batch, one focused read, optional schema validate). Dump/raw are not default readers, truncated inspects return a short next-step envelope, successful same-revision reads are cached, and only the third identical failure is stopped as `loop_prevented` instead of imposing a global inspect budget (#49).
 - **Stale Task/subagent prompt guidance** — system prompt and tool docs no longer tell the model to use the removed Claude Task / Workflow tools (#35).
 - **Windows image reads restored** — packaged Pi sessions now ship the Photon WASM runtime required by the built-in `read` tool; small PNG/JPEG/GIF/WebP files bypass image processing, oversized images are resized, and runtime, decoding, conversion, resize, and size-limit failures are reported separately instead of all appearing as a size error (#39).
+- **Windows 10 light mode no longer grays the chrome** — Selection no longer uses Acrylic (a dark wash on Windows 10). Switching Appearance to Light updates the native window fill and stops overlaying a mismatch dim on the sidebar and title bar (#53).
 
 ## Breaking Changes
 

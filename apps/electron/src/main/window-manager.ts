@@ -8,33 +8,16 @@ import { getWorkspaceByNameOrId } from '@craft-agent/shared/config'
 import { classifyExternalUrl, formatBlockedUrlError } from '@craft-agent/shared/utils/url-safety'
 import { RPC_CHANNELS, type WindowCloseRequestSource } from '../shared/types'
 import type { SavedWindow } from './window-state'
+import {
+  getWindowsBackgroundMaterial,
+  isWindowsWindowDark,
+  nativeThemeSourceForMode,
+  parseWindowsBuildNumber,
+  resolveWindowsWindowBackground,
+} from './windows-background-material'
 
 // Vite dev server URL for hot reload
 const VITE_DEV_SERVER_URL = process.env.VITE_DEV_SERVER_URL
-
-/**
- * Get the appropriate background material for Windows transparency effects
- * - Windows 11 (build 22000+): Mica effect
- * - Windows 10 1809+ (build 17763+): Acrylic effect
- * - Older versions: No transparency
- */
-function getWindowsBackgroundMaterial(): 'mica' | 'acrylic' | undefined {
-  if (process.platform !== 'win32') return undefined
-
-  // os.release() returns "10.0.xxxxx" where xxxxx is the build number
-  const buildNumber = parseInt(release().split('.')[2] || '0', 10)
-
-  if (buildNumber >= 22000) {
-    windowLog.info('Windows 11 detected (build ' + buildNumber + '), using Mica')
-    return 'mica'
-  } else if (buildNumber >= 17763) {
-    windowLog.info('Windows 10 1809+ detected (build ' + buildNumber + '), using Acrylic')
-    return 'acrylic'
-  }
-
-  windowLog.info('Older Windows detected (build ' + buildNumber + '), no transparency')
-  return undefined
-}
 
 
 interface ManagedWindow {
@@ -62,6 +45,7 @@ export class WindowManager {
   private keyboardCloseIntents: Set<number> = new Set()  // webContents.id flagged by Cmd/Ctrl+W before close
   private keyboardCloseIntentTimeouts: Map<number, NodeJS.Timeout> = new Map()  // Auto-clear stale keyboard-close intents
   private isAppQuitting = false  // Skip layered close interception during app quit
+  private lastThemeMode: string | undefined
 
   /**
    * Set the event sink and client resolver for pushing events via the RPC server
@@ -222,7 +206,15 @@ export class WindowManager {
     // Platform-specific window options
     const isMac = process.platform === 'darwin'
     const isWindows = process.platform === 'win32'
-    const windowsBackgroundMaterial = getWindowsBackgroundMaterial()
+    const windowsBackgroundMaterial = getWindowsBackgroundMaterial(process.platform, release())
+    if (isWindows) {
+      const buildNumber = parseWindowsBuildNumber(release())
+      windowLog.info(
+        windowsBackgroundMaterial
+          ? `Windows 11 detected (build ${buildNumber}), using Mica`
+          : `Windows 10 detected (build ${buildNumber}), using a solid window fill (no Acrylic)`,
+      )
+    }
 
     const window = new BrowserWindow({
       width: windowWidth,
@@ -232,6 +224,13 @@ export class WindowManager {
       show: false, // Don't show until ready-to-show event (faster perceived startup)
       title: '',
       icon: iconExists ? iconPath : undefined,
+      ...(isWindows ? {
+        backgroundColor: resolveWindowsWindowBackground(
+          this.lastThemeMode
+            ? isWindowsWindowDark(this.lastThemeMode, nativeTheme.shouldUseDarkColors)
+            : nativeTheme.shouldUseDarkColors,
+        ),
+      } : {}),
       // macOS-specific: hidden title bar with inset traffic lights
       ...(isMac && {
         titleBarStyle: 'hiddenInset',
@@ -239,7 +238,7 @@ export class WindowManager {
         vibrancy: 'under-window',
         visualEffectState: 'active',
       }),
-      // Windows: use native frame with Mica/Acrylic transparency (Windows 10/11)
+      // Windows 11: native frame + Mica. Windows 10 Acrylic is skipped (#53).
       ...(isWindows && {
         frame: true, // Keep native frame for better UX
         autoHideMenuBar: true, // Menu is null on Windows, this is just for safety
@@ -516,8 +515,22 @@ export class WindowManager {
   }
 
   /**
-   * Get window by webContents.id (used by IPC handlers instead of BrowserWindow.fromId)
+   * Follow Appearance mode so Windows chrome (and Win11 Mica) is not stuck on a
+   * dark OS theme after the user switches the app to light (#53).
    */
+  applyThemeMode(mode: string): void {
+    this.lastThemeMode = mode
+    if (process.platform !== 'win32') return
+    nativeTheme.themeSource = nativeThemeSourceForMode(mode)
+    const backgroundColor = resolveWindowsWindowBackground(
+      isWindowsWindowDark(mode, nativeTheme.shouldUseDarkColors),
+    )
+    for (const { window } of this.getAllWindows()) {
+      if (!window.isDestroyed()) window.setBackgroundColor(backgroundColor)
+    }
+  }
+
+  /** Get window by webContents.id (used by IPC handlers instead of BrowserWindow.fromId) */
   getWindowByWebContentsId(wcId: number): BrowserWindow | null {
     const managed = this.windows.get(wcId)
     return managed?.window ?? null

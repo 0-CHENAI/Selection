@@ -305,8 +305,14 @@ export function registerWorkspaceCoreHandlers(server: RpcServer, deps: HandlerDe
   })
 
   // Broadcast theme preferences to all other windows (for cross-window sync)
-  server.handle(RPC_CHANNELS.theme.BROADCAST_PREFERENCES, async (ctx, preferences: { mode: string; colorTheme: string; font: string }) => {
-    pushTyped(server, RPC_CHANNELS.theme.PREFERENCES_CHANGED, { to: 'all' }, preferences)
+  server.handle(RPC_CHANNELS.theme.BROADCAST_PREFERENCES, async (ctx, preferences: { mode: string; colorTheme: string; font: string; chromeOnly?: boolean }) => {
+    windowManager?.applyThemeMode?.(preferences.mode)
+    if (preferences.chromeOnly) return
+    pushTyped(server, RPC_CHANNELS.theme.PREFERENCES_CHANGED, { to: 'all' }, {
+      mode: preferences.mode,
+      colorTheme: preferences.colorTheme,
+      font: preferences.font,
+    })
   })
 
   // Workspace-level theme overrides
