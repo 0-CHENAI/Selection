@@ -28,13 +28,22 @@ import {
   WORD_HEADING1_MIN_PT,
   hasHeadingSizeEvidence,
   isSkillFalsePositiveIssue,
+  outlineFormulaCount,
   placeholderLeakCount,
   skillHeadingGateRequired,
   skillPageRequired,
   skillTocRequired,
   undersizedHeading1Count,
 } from '../runtime/office-delivery-gates.ts';
-import { getCachedOfficePreview, renderOfficeDocument } from './office-preview.ts';
+import { officeModelFacingText } from '../runtime/office-model-text.ts';
+import {
+  cachedPreviewMatchesSkillVisual,
+  collectSpecializedSkillChecks,
+  formDocumentSkipsIssueGate,
+  skillContactSheetArgs,
+} from '../runtime/office-specialized-gates.ts';
+import { sessionLoadedOfficeGuides } from './office-guide.ts';
+import { getCachedOfficePreview, officeRenderingIsOffline, renderOfficeDocument } from './office-preview.ts';
 
 export interface OfficeDocumentFinalizeArgs {
   file: string;
@@ -112,14 +121,17 @@ function finalResultWithPreview(
   envelope: OfficeResultEnvelope,
   previewResult: ToolResult | undefined,
   previewPath: string | undefined,
+  attachImage: boolean,
 ): ToolResult {
-  const image = previewResult?.content.find(block => block.type === 'image');
+  const image = attachImage
+    ? previewResult?.content.find(block => block.type === 'image')
+    : undefined;
   const text = [
-    JSON.stringify(envelope, null, 2),
+    officeModelFacingText(envelope),
     ...(previewPath ? [
       '',
       '```image-preview',
-      JSON.stringify({ src: previewPath, title: `Office finalization evidence: ${envelope.documentPath}` }, null, 2),
+      JSON.stringify({ src: previewPath, title: `Office finalization evidence: ${envelope.documentPath}` }),
       '```',
     ] : []),
   ].join('\n');
@@ -471,7 +483,14 @@ export async function handleOfficeDocumentFinalize(
     }
   }
 
-  if (extension === '.xlsx') {
+  if (extension === '.xlsx' && contentOutcome.envelope.ok && outlineFormulaCount(contentOutcome.envelope.data) === 0) {
+    checks.push({
+      name: 'skill_excel_errors',
+      ok: true,
+      blocking: true,
+      data: { errorMatches: 0, selectors: [], skipped: 'no_formulas' },
+    });
+  } else if (extension === '.xlsx') {
     let errorMatches = 0;
     const selectors: string[] = [];
     for (const selector of EXCEL_ERROR_SELECTORS) {
@@ -507,21 +526,20 @@ export async function handleOfficeDocumentFinalize(
 
   if (extension === '.docx' && skillTocRequired(contentOutcome.envelope.data)) {
     const tocCheckOk = Boolean(compiledToc?.detected);
+    const tocWarning: StructuredWarning | undefined = tocCheckOk ? undefined : {
+      code: 'docx_toc_recommended',
+      message: 'Documents with 3+ heading sources should include a TOC field. Official word Delivery Gate 1–3 does not reject on TOC.',
+      severity: 'high',
+      recovery: 'Add --type toc after Heading1–3 sources exist. See word Table of Contents.',
+    };
     checks.push({
       name: 'skill_toc_field',
       ok: tocCheckOk,
-      blocking: true,
-      data: { headingMatches, detected: tocCheckOk },
-      ...(!tocCheckOk ? {
-        error: {
-          code: 'docx_toc_required',
-          category: 'conflict' as const,
-          message: 'Documents with 3+ heading sources must include a TOC field.',
-          retriable: true,
-          recovery: 'Add --type toc after Heading1–3 sources exist. See word Table of Contents.',
-        },
-      } : {}),
+      blocking: false,
+      data: { headingMatches, detected: tocCheckOk, officialGate: 'not_required' },
+      ...(tocWarning ? { warnings: [tocWarning] } : {}),
     });
+    if (tocWarning) warnings.push(tocWarning);
   }
   if (extension === '.docx' && skillPageRequired(contentOutcome.envelope.data)) {
     const pageOutcome = await executeOfficeCommand(ctx, {
@@ -553,18 +571,68 @@ export async function handleOfficeDocumentFinalize(
     warnings.push(...pageOutcome.envelope.warnings);
   }
 
-  const cachedPreview = getCachedOfficePreview(ctx.sessionId, file, revisionAtStart)
-    ?? getCachedOfficePreview(ctx.sessionId, args.file, revisionAtStart)
-    ?? getCachedOfficePreview(ctx.sessionId, file, revisionBeforeCompile)
-    ?? getCachedOfficePreview(ctx.sessionId, args.file, revisionBeforeCompile);
+  const specialized = await collectSpecializedSkillChecks({
+    extension,
+    text: textOutcome.envelope.data,
+    outline: contentOutcome.envelope.data,
+    loadedGuides: sessionLoadedOfficeGuides(ctx.sessionId),
+    query: async selector => {
+      const outcome = await executeOfficeCommand(ctx, {
+        argv: ['query', args.file, selector],
+        mode: 'internal',
+        mutation: false,
+        cacheable: false,
+      }, dependencies);
+      return { ok: outcome.envelope.ok, data: outcome.envelope.data };
+    },
+    get: async (path, options) => {
+      const argv = ['get', args.file, path];
+      if (options?.depth !== undefined) argv.push('--depth', String(options.depth));
+      const outcome = await executeOfficeCommand(ctx, {
+        argv,
+        mode: 'internal',
+        mutation: false,
+        cacheable: false,
+      }, dependencies);
+      return { ok: outcome.envelope.ok, data: outcome.envelope.data };
+    },
+  });
+  for (const check of specialized) {
+    if (check.warnings) warnings.push(...check.warnings);
+  }
+  if (formDocumentSkipsIssueGate(specialized)) {
+    const issuesCheck = checks.find(check => check.name === 'format_structure_content_issues');
+    if (issuesCheck) {
+      issuesCheck.ok = true;
+      issuesCheck.blocking = false;
+      issuesCheck.data = {
+        ...(issuesCheck.data && typeof issuesCheck.data === 'object' && !Array.isArray(issuesCheck.data)
+          ? issuesCheck.data
+          : {}),
+        skipped: 'word_form_skill',
+      };
+    }
+  }
+  checks.push(...specialized);
+
+  const intendedVisual = skillContactSheetArgs(extension, contentOutcome.envelope.data);
+  const cachedCandidates = [
+    getCachedOfficePreview(ctx.sessionId, file, revisionAtStart),
+    getCachedOfficePreview(ctx.sessionId, args.file, revisionAtStart),
+    getCachedOfficePreview(ctx.sessionId, file, revisionBeforeCompile),
+    getCachedOfficePreview(ctx.sessionId, args.file, revisionBeforeCompile),
+  ];
+  const cachedPreview = cachedCandidates.find(candidate => (
+    candidate && cachedPreviewMatchesSkillVisual(candidate.envelope.data, intendedVisual)
+  ));
   const render = cachedPreview
     ? { envelope: cachedPreview.envelope, toolResult: cachedPreview.toolResult, previewImagePath: cachedPreview.previewImagePath, fullImagePath: cachedPreview.fullImagePath }
     : await renderOfficeDocument(ctx, {
       action: 'render',
       file: args.file,
-      page: '1',
       renderer: 'auto',
-    }, dependencies);
+      ...intendedVisual,
+    }, dependencies, { probeDependencies: officeRenderingIsOffline() });
   const renderData = render.envelope.data && typeof render.envelope.data === 'object'
     ? (render.envelope.data as { render?: { dependencyState?: string } }).render
     : undefined;
@@ -666,5 +734,5 @@ export async function handleOfficeDocumentFinalize(
       },
     } : {}),
   };
-  return finalResultWithPreview(envelope, render.toolResult, render.previewImagePath);
+  return finalResultWithPreview(envelope, render.toolResult, render.previewImagePath, !cachedPreview);
 }

@@ -29,8 +29,11 @@ describe('Office workflow contract', () => {
     expect(OFFICE_WORKFLOW_PROMPT).toContain('office_document_guide');
     expect(OFFICE_WORKFLOW_PROMPT).toContain('Delivery Gate');
     expect(OFFICE_WORKFLOW_PROMPT).toContain('Reuse envelope.cwd and envelope.documentPath');
-    expect(OFFICE_WORKFLOW_PROMPT).toContain('more than about 10');
-    expect(OFFICE_WORKFLOW_PROMPT).toContain('view issues');
+    expect(OFFICE_WORKFLOW_PROMPT).toMatch(/more than about 10/i);
+    expect(OFFICE_WORKFLOW_PROMPT).toContain('at most one outline or view issues');
+    expect(OFFICE_WORKFLOW_PROMPT).toContain('Do not get after every add');
+    expect(OFFICE_WORKFLOW_PROMPT).toContain('Skill path');
+    expect(OFFICE_WORKFLOW_PROMPT).toContain('office_document_finalize is the official Delivery Gate');
     expect(OFFICE_WORKFLOW_PROMPT).toContain('Never pass open, save, or close');
     expect(OFFICE_WORKFLOW_PROMPT).not.toContain('must not call status or help');
     expect(OFFICE_WORKFLOW_PROMPT).not.toMatch(/five-step recipe|Standard reports do not need/i);
@@ -52,8 +55,6 @@ describe('Office workflow contract', () => {
     expect(OFFICE_DOCUMENT_FINALIZE_DESCRIPTION).toContain('not claim Microsoft Office human visual approval');
     expect(OFFICE_DOCUMENT_FINALIZE_DESCRIPTION).toContain('compiles a Word TOC field');
     expect(OFFICE_DOCUMENT_FINALIZE_DESCRIPTION).toContain('without querying TOC styles or launching a headless-browser refresh');
-    expect(OFFICE_DOCUMENT_FINALIZE_DESCRIPTION).toContain('Heading1 ≥ 18pt');
-    expect(OFFICE_DOCUMENT_FINALIZE_DESCRIPTION).toContain('Excel error cells');
     expect(OFFICE_DOCUMENT_FINALIZE_DESCRIPTION).toContain('updateFields=true');
     expect(OFFICE_DOCUMENT_FINALIZE_DESCRIPTION).toContain('Screenshot failure does not block delivery');
     expect(OFFICE_DOCUMENT_GUIDE_DESCRIPTION).toContain('skill bootstrap');

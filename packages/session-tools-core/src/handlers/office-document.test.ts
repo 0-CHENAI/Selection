@@ -1269,6 +1269,8 @@ describe('Office Runtime Coordinator', () => {
       content: expect.stringContaining('Requirements for Outputs'),
     }));
     expect(String((firstData.skillBootstrap as { content?: string }).content)).toContain('Delivery Gate');
+    expect(String((firstData.skillBootstrap as { content?: string }).content)).toContain('office_document_preview.render');
+    expect(String((firstData.skillBootstrap as { content?: string }).content)).not.toMatch(/After each structural op,\s*`get` it back/i);
     expect(secondData.skillBootstrap).toEqual({ alreadyLoaded: true, guide: 'word' });
   });
 

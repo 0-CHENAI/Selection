@@ -17,6 +17,7 @@ import {
   officeToolResult,
   type OfficeCoordinatorDependencies,
 } from '../runtime/office-coordinator.ts';
+import { officeModelFacingText } from '../runtime/office-model-text.ts';
 import { nativeTocRefreshAvailable } from '../runtime/office-docx-fields.ts';
 import { resolveOfficecliResources } from '../runtime/office-manifest.ts';
 import { isPathWithinDirectory, isPathWithinDirectoryForCreation } from '../runtime/path-security.ts';
@@ -387,10 +388,10 @@ function imageArtifact(
 
 function renderToolResult(envelope: OfficeResultEnvelope, previewPath: string, buffer: Buffer, mimeType: string): ToolResult {
   const text = [
-    JSON.stringify(envelope, null, 2),
+    officeModelFacingText(envelope),
     '',
     '```image-preview',
-    JSON.stringify({ src: previewPath, title: `Office preview: ${basename(envelope.documentPath ?? previewPath)}` }, null, 2),
+    JSON.stringify({ src: previewPath, title: `Office preview: ${basename(envelope.documentPath ?? previewPath)}` }),
     '```',
   ].join('\n');
   return {
@@ -565,6 +566,7 @@ export async function renderOfficeDocument(
   ctx: SessionToolContext,
   args: Extract<OfficeDocumentPreviewArgs, { action: 'render' }>,
   dependencies: OfficeCoordinatorDependencies = {},
+  options: { probeDependencies?: boolean } = {},
 ): Promise<RenderedPreview> {
   const startedAt = Date.now();
   if (!args || typeof args.file !== 'string' || !args.file.trim()) {
@@ -658,7 +660,11 @@ export async function renderOfficeDocument(
     backend = requested === 'native' ? 'native' : 'html';
     outcome = await executeRenderAttempt(ctx, args, backend, fullImagePath, dependencies);
   }
-  const dependencyProbe = outcome.envelope.ok && backend === 'html'
+  const shouldProbeDependencies = (options.probeDependencies ?? true)
+    && outcome.envelope.ok
+    && backend === 'html'
+    && extension !== '.xlsx';
+  const dependencyProbe = shouldProbeDependencies
     ? await probeHtmlDependencies(ctx, args, directory, safeStem, id, dependencies)
     : { state: 'not-required' as const, dependencies: [] };
   const actualBackend = outcome.envelope.backend ?? backend;

@@ -78,7 +78,7 @@ describe('office_document_guide', () => {
     expect(String((payloadData.bootstrap as { content?: string }).content)).toContain('Delivery Gate');
     expect(JSON.stringify(payloadData).length).toBeLessThan(40_000);
     expect(payloadData.executionContract).toContain('Selection execution contract');
-    expect(payloadData.executionContract).toContain('at most one');
+    expect(payloadData.executionContract).toContain('contact sheet');
     expect(payloadData.executionContract).toContain('load_skill');
     expect(payloadData.executionContract).not.toContain('After a non-standard batch');
     expect(payloadData.executionContract).toContain('/model3d[N]');
@@ -95,7 +95,7 @@ describe('office_document_guide', () => {
     const secondData = data(second);
 
     expect(envelope(first).ok).toBe(true);
-    expect(firstData.content).toContain('Selection execution contract');
+    expect(firstData.executionContract).toContain('Selection execution contract');
     expect(String(firstData.content).toLowerCase()).not.toContain('officecli view');
     expect(firstData.inherited).toEqual(expect.arrayContaining([expect.objectContaining({ guide: 'excel' })]));
     expect(envelope(second).cacheHit).toBe(true);
@@ -215,12 +215,20 @@ describe('office_document_guide', () => {
     const { ctx } = context();
     const workflow = data(await handleOfficeDocumentGuide(ctx, { guide: 'word', topic: 'Common Workflow' }));
     const bootstrap = data(await handleOfficeDocumentGuide(ctx, { guide: 'word' }));
-    const haystack = `${String(workflow.content)}\n${JSON.stringify(bootstrap.bootstrap)}`;
+    const haystack = [
+      String(workflow.content),
+      String(workflow.executionContract),
+      JSON.stringify(bootstrap.bootstrap),
+      String(bootstrap.executionContract),
+    ].join('\n');
 
     expect(haystack).toContain('Selection resident already owns');
     expect(haystack).toContain('office_document_guide');
+    expect(haystack).toContain('office_document_preview.render');
+    expect(haystack).toContain('office_document_finalize');
     expect(haystack).not.toContain('[Selection-managed operation omitted]');
     expect(haystack).not.toMatch(/officecli\s+open/i);
+    expect(haystack).not.toMatch(/After each structural op,\s*`get` it back/i);
     expect(haystack).not.toMatch(/\bload_skill\s+\w+/);
   });
 

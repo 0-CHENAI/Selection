@@ -43,7 +43,7 @@ const SELECTION_EXECUTION_CONTRACT = `## Selection execution contract (immutable
 
 - Examples below omit the \`officecli\` prefix. Pass each native token through the appropriate Selection Office tool's \`argv\` array; never invoke a shell.
 - When a property name is uncertain, call \`office_document_inspect\` with \`argv: ['help', format, element]\` once before guessing. Do not repeat identical help/status; reuse \`cacheHit\` payloads.
-- A turn with more than about 10 structural or cell edits must use \`batch\` (inline or \`batch.file\`). After a structural add, get that path or view outline before stacking more work. After a non-trivial batch, run \`view issues\`. Use at most one \`office_document_preview.render\` (page 1 by default; \`grid: auto\` only for pagination).
+- A turn with more than about 10 structural or cell edits must use \`batch\` (inline or \`batch.file\`). Follow the official skill path: one batch, then one outline or \`view issues\`. \`office_document_finalize\` is the Delivery Gate — do not repeat validate/issues/text/PAGE/specialized-gate queries unless it returns a blocking recovery. Visual evidence is the finalize contact sheet (\`grid: auto\` when the document has multiple pages or slides).
 - Morph clone/ghost/clean-accumulation and verify/final-check must use the \`recipe\` field. Do not invent shell or Python helpers.
 - Selection owns binary installation, updates, command classification, paths, resident/watch lifecycle, rendering, and finalization. Do not call install/update/skills/mcp/plugins/config/open/save/close. \`load_skill\` maps to \`office_document_guide\`.
 - Only \`office_document_preview.start\` may open or focus the BrowserPane.
@@ -268,7 +268,6 @@ function inheritedGuideContent(
     const requirements = extractNamedGuideSections(markdown, ['Requirements for Outputs']);
     return {
       guide: base,
-      catalog: compactCatalog(markdown).slice(0, 40),
       ...(requirements.content ? { matched: requirements.matched, content: requirements.content } : {}),
     };
   });
@@ -297,8 +296,8 @@ export function takeSkillBootstrapForCreate(
     return {
       guide,
       matchedSections: bootstrap.matched,
-      content: `${SELECTION_EXECUTION_CONTRACT}\n\n${bootstrap.content}`,
-      catalog: compactCatalog(markdown),
+      content: bootstrap.content,
+      executionContract: SELECTION_EXECUTION_CONTRACT,
     };
   } catch {
     return undefined;
@@ -481,8 +480,9 @@ export async function handleOfficeDocumentGuide(
       data = {
         referencePath: reference,
         ...(sanitizedReference !== undefined
-          ? { content: `${SELECTION_EXECUTION_CONTRACT}\n\n${sanitizedReference.slice(0, MAX_GUIDE_REFERENCE_CHARS)}` }
-          : { content: SELECTION_EXECUTION_CONTRACT }),
+          ? { content: sanitizedReference.slice(0, MAX_GUIDE_REFERENCE_CHARS) }
+          : {}),
+        executionContract: SELECTION_EXECUTION_CONTRACT,
       };
     } else {
       const markdown = sanitizeOfficialContent(entryBuffer.toString('utf8'), args.guide);
@@ -514,8 +514,9 @@ export async function handleOfficeDocumentGuide(
         data = {
           topic: args.topic!.trim(),
           matchedSections: selected.matched,
-          content: `${SELECTION_EXECUTION_CONTRACT}\n\n${selected.content}`,
+          content: selected.content,
           inherited,
+          executionContract: SELECTION_EXECUTION_CONTRACT,
         };
       } else {
         cacheSelector = `bootstrap:${definition.resourceHash}`;
@@ -538,7 +539,7 @@ export async function handleOfficeDocumentGuide(
         data = {
           bootstrap: {
             matchedSections: bootstrap.matched,
-            content: `${SELECTION_EXECUTION_CONTRACT}\n\n${bootstrap.content}`,
+            content: bootstrap.content,
           },
           catalog: compactCatalog(markdown),
           inherited,
@@ -616,4 +617,15 @@ export function releaseOfficeGuideSession(sessionId: string): void {
   for (const key of loadedGuideSections) {
     if (key.startsWith(prefix)) loadedGuideSections.delete(key);
   }
+}
+
+export function sessionLoadedOfficeGuides(sessionId: string): OfficeGuideName[] {
+  const prefix = `${sessionId}\0`;
+  const guides = new Set<OfficeGuideName>();
+  for (const key of loadedGuideSections) {
+    if (!key.startsWith(prefix)) continue;
+    const guide = key.slice(prefix.length).split('\0')[0];
+    if (guide) guides.add(guide as OfficeGuideName);
+  }
+  return [...guides];
 }

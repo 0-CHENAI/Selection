@@ -1,9 +1,8 @@
 export const OFFICE_STANDARD_TASK_SEQUENCE = [
   'skill-bootstrap',
   'create',
-  'incremental-edit',
+  'batch-build',
   'inspect-outline',
-  'qa-issues',
   'finalize',
 ] as const;
 

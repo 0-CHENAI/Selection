@@ -3,6 +3,7 @@ import {
   isSkillFalsePositiveIssue,
   placeholderLeakCount,
   skillHeadingGateRequired,
+  outlineFormulaCount,
   skillPageRequired,
   skillTocAndPageRequired,
   undersizedHeading1Count,
@@ -48,6 +49,10 @@ describe('office delivery gates', () => {
         format: { style: 'Heading1', size: '11pt' },
       }],
     })).toBe(1);
+    expect(outlineFormulaCount({
+      sheets: [{ name: 'Sheet1', formulas: 0 }, { name: 'Calc', formulas: 4 }],
+    })).toBe(4);
+    expect(outlineFormulaCount({ sheets: [{ name: 'Sheet1', rows: 2 }] })).toBe(0);
   });
 
   it('treats Word first-line indent findings as skill false positives', () => {

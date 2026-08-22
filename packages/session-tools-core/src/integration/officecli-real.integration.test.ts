@@ -255,10 +255,6 @@ describe('real OfficeCLI 1.0.144 integration', () => {
       },
     }), 'skill batch word');
     requireSuccess(await handleOfficeDocumentInspect(ctx, { argv: ['view', word, 'outline'] }), 'skill word outline');
-    requireSuccess(await handleOfficeDocumentInspect(ctx, { argv: ['view', word, 'issues', '--limit', '200'] }), 'skill word issues');
-    requireSuccess(await handleOfficeDocumentPreview(ctx, {
-      action: 'render', file: word, page: '1', renderer: 'html',
-    }), 'skill word preview');
     const wordFinal = requireSuccess(await handleOfficeDocumentFinalize(ctx, {
       file: word,
       profile: requireStrictFinalize ? 'strict' : 'standard',
@@ -268,9 +264,12 @@ describe('real OfficeCLI 1.0.144 integration', () => {
       blocking: false,
     });
     expect(wordFinal.evidence?.checks.find(check => check.name === 'skill_page_field')).toMatchObject({ ok: true });
+    expect(wordFinal.evidence?.checks.find(check => check.name === 'skill_toc_field')).toMatchObject({
+      ok: true,
+      blocking: false,
+    });
     expect(wordFinal.evidence?.checks.find(check => check.name === 'final_render')).toMatchObject({
       blocking: false,
-      data: expect.objectContaining({ reusedPreview: true }),
     });
     expect(JSON.stringify(wordFinal.warnings)).not.toMatch(/no match for style='TOC/i);
     const settings = requireSuccess(

@@ -133,7 +133,12 @@ if (args[0] === 'view' && args[2] === 'outline') {
   if (file.endsWith('.xlsx')) {
     reply({ success: true, data: { sheets: file.includes('empty')
       ? [{ name: 'Sheet1', rows: 0, cols: 0, formulas: 0, tables: 0, charts: 0, oleObjects: 0 }]
-      : [{ name: 'Sheet1', rows: 2, cols: 2, formulas: 1, tables: 0, charts: 0, oleObjects: 0 }] } });
+      : file.includes('dashboard')
+        ? [
+            { name: 'Dashboard', rows: 4, cols: 8, formulas: 3, tables: 0, charts: 1, oleObjects: 0 },
+            { name: 'Data', rows: 12, cols: 4, formulas: 0, tables: 0, charts: 0, oleObjects: 0 },
+          ]
+        : [{ name: 'Sheet1', rows: 2, cols: 2, formulas: file.includes('values-only') ? 0 : 1, tables: 0, charts: 0, oleObjects: 0 }] } });
   }
   reply({ success: true, data: { totalSlides: file.includes('empty') ? 0 : 2, slides: [] } });
 }
@@ -162,15 +167,27 @@ if (args[0] === 'view' && args[2] === 'screenshot') {
 }
 if (args[0] === 'validate') reply({ success: true, data: 'Validation passed' });
 if (args[0] === 'view' && args[2] === 'text') {
-  reply({ success: true, data: file.includes('brace-var')
-    ? 'Body {var} ipsum placeholder this slide layout'
-    : file.includes('leak')
-      ? 'Title $TITLE$ and {{placeholder}} <TODO> xxxx lorem {var}'
-      : file.includes('has-toc-refresh-fail')
-        ? 'Update field to see table of contents'
-        : file.includes('has-toc')
-          ? '目录\\n第一章 概述\\t2'
-          : 'Quarterly report body' });
+  reply({ success: true, data: file.includes('academic-cite')
+    ? 'See [1] and [2]. References. Figure 1'
+    : file.includes('form-sdt')
+      ? 'Name ______ TBD (fill in)'
+      : file.includes('hash-clip')
+        ? 'Revenue ###'
+        : file.includes('pitch-strip')
+          ? 'Raised  M ARR last quarter'
+          : file.includes('morph-price')
+            ? '!!actor-hero \${PRICE}'
+            : file.includes('empty-parens')
+              ? 'See () and [] leftovers'
+              : file.includes('brace-var')
+              ? 'Body {var} ipsum placeholder this slide layout'
+              : file.includes('leak')
+                ? 'Title $TITLE$ and {{placeholder}} <TODO> xxxx lorem {var}'
+                : file.includes('has-toc-refresh-fail')
+                  ? 'Update field to see table of contents'
+                  : file.includes('has-toc')
+                    ? '目录\\n第一章 概述\\t2'
+                    : 'Quarterly report body' });
 }
 if (args[0] === 'refresh') {
   if (file.includes('has-toc-refresh-fail')) {
@@ -182,9 +199,10 @@ if (args[0] === 'refresh') {
 if (args[0] === 'query') {
   const selector = args[2] || '';
   if (/cell:contains/i.test(selector)) {
-    const hit = file.includes('excel-error') && /#REF!|#DIV\\/0!|#VALUE!|#NAME\\?|#N\\/A/.test(selector);
+    const hit = (file.includes('excel-error') && /#REF!|#DIV\\/0!|#VALUE!|#NAME\\?|#N\\/A/.test(selector))
+      || (file.includes('imbalanced') && /IMBALANCED/.test(selector));
     reply({ success: true, data: hit
-      ? { matches: 1, results: [{ type: 'cell', text: '#REF!' }] }
+      ? { matches: 1, results: [{ type: 'cell', text: file.includes('imbalanced') ? 'IMBALANCED' : '#REF!' }] }
       : { matches: 0, results: [] } });
   }
   if (/field\[fieldType=page\]/i.test(selector)) {
@@ -207,6 +225,50 @@ if (args[0] === 'query') {
       ? { matches: 1, results: [{ type: 'paragraph', style: 'TOC1', text: '第一章\\t2' }] }
       : { matches: 0, results: [] } });
   }
+  if (/paragraph\[hangingIndent\]/.test(selector)) {
+    reply({ success: true, data: file.includes('academic-cite-ok')
+      ? { matches: 2, results: [{}, {}] }
+      : file.includes('academic-cite')
+        ? { matches: 1, results: [{}] }
+        : { matches: 0, results: [] } });
+  }
+  if (/field\[fieldType=seq\]/.test(selector)) {
+    reply({ success: true, data: file.includes('academic-cite-ok')
+      ? { matches: 1, results: [{ type: 'field', fieldType: 'seq' }] }
+      : { matches: 0, results: [] } });
+  }
+  if (selector === 'sdt') {
+    reply({ success: true, data: file.includes('form-sdt')
+      ? { matches: 1, results: [{ format: { type: 'text' } }] }
+      : { matches: 0, results: [] } });
+  }
+  if (selector === 'formfield') {
+    reply({ success: true, data: { matches: 0, results: [] } });
+  }
+  if (selector === 'field') {
+    reply({ success: true, data: { matches: 0, results: [] } });
+  }
+  if (selector === 'chart') {
+    reply({ success: true, data: file.includes('dashboard')
+      ? { matches: 1, results: [{ path: '/Dashboard/chart[1]', format: { seriesCount: 1, title: 'Revenue' }, children: [{ type: 'series', format: { name: 'Series1' } }] }] }
+      : { matches: 0, results: [] } });
+  }
+  if (selector === 'conditionalformatting' || selector === 'namedrange' || selector === 'sheet') {
+    reply({ success: true, data: selector === 'sheet' && file.includes('dashboard')
+      ? { matches: 2, results: [{ path: '/Dashboard', preview: 'Dashboard' }, { path: '/Data', preview: 'Data' }] }
+      : { matches: 0, results: [] } });
+  }
+  if (selector.includes('Dashboard!') && selector.includes('has(formula)')) {
+    reply({ success: true, data: file.includes('dashboard')
+      ? { matches: 3, results: [{}, {}, {}] }
+      : { matches: 0, results: [] } });
+  }
+  if (/shape:contains/.test(selector)) {
+    reply({ success: true, data: { matches: 0, results: [] } });
+  }
+  if (selector.includes('shape[x>=34cm]')) {
+    reply({ success: true, data: { matches: 0, results: [] } });
+  }
   reply({ success: true, data: { matches: 0, results: [] } });
 }
 if (args[0] === 'get' && (args[2] === '/toc' || args[2] === '/tableofcontents')) {
@@ -214,6 +276,12 @@ if (args[0] === 'get' && (args[2] === '/toc' || args[2] === '/tableofcontents'))
     reply({ success: true, data: { matches: 1, results: [{ path: '/toc', type: 'toc', text: 'TOC \\\\o "1-3" \\\\h \\\\u' }] } });
   }
   reply({ success: true, data: { matches: 0, results: [] } });
+}
+if (args[0] === 'get' && args[2] === '/workbook') {
+  reply({ success: true, data: { format: { activeTab: file.includes('dashboard') ? 1 : 0, 'calc.fullCalcOnLoad': false } } });
+}
+if (args[0] === 'get' && (args[2] || '').includes('/Dashboard/chart')) {
+  reply({ success: true, data: { results: [{ path: args[2], format: { seriesCount: 1, title: 'Revenue' }, children: [{ type: 'series', format: { name: 'Series1' } }] }] } });
 }
 if (args[0] === 'get') reply({ success: true, data: { path: args[2], children: [] } });
 reply({ success: true, data: { argv: args, backend: args[0] === 'refresh' ? 'fake-native' : undefined } });
@@ -1009,23 +1077,25 @@ describe('office_document_finalize', () => {
     });
     expect(result.error?.recovery).toContain('field=page');
     expect(officecliVerbs(file)).toContain('query');
-    expect(officecliVerbs(file)).toContain('screenshot');
-    expect(officecliVerbs(file)).not.toContain('screenshot-grid');
+    expect(officecliVerbs(file)).toContain('screenshot-grid');
   });
 
-  it('requires a TOC field when a Word document has three heading sources', async () => {
+  it('warns but does not block when a Word document has three heading sources and no TOC', async () => {
     const w = workspace();
     const ctx = context(w, 'finalize-toc-gate');
     const file = document(w, 'has-three-headings-has-page.docx');
     const result = envelope(await handleOfficeDocumentFinalize(ctx, { file, profile: 'strict' }));
     const toc = result.evidence?.checks.find(check => check.name === 'skill_toc_field');
 
-    expect(result.deliveryReady).toBe(false);
+    expect(result.deliveryReady).toBe(true);
     expect(toc).toMatchObject({
       ok: false,
-      blocking: true,
-      error: { code: 'docx_toc_required' },
+      blocking: false,
+      data: expect.objectContaining({ detected: false, officialGate: 'not_required' }),
     });
+    expect(result.warnings).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: 'docx_toc_recommended', severity: 'high' }),
+    ]));
   });
 
   it('passes skill TOC and PAGE gates when both fields exist', async () => {
@@ -1083,7 +1153,8 @@ describe('office_document_finalize', () => {
     const file = document(w, 'reuse-preview.docx');
     await handleOfficeDocumentPreview(ctx, { action: 'render', file, page: '1', renderer: 'html' });
     const before = officecliVerbs(file).filter(verb => verb.startsWith('screenshot')).length;
-    const result = envelope(await handleOfficeDocumentFinalize(ctx, { file, profile: 'standard' }));
+    const raw = await handleOfficeDocumentFinalize(ctx, { file, profile: 'standard' });
+    const result = envelope(raw);
     const after = officecliVerbs(file).filter(verb => verb.startsWith('screenshot'));
 
     expect(result.deliveryReady).toBe(true);
@@ -1092,6 +1163,8 @@ describe('office_document_finalize', () => {
     expect(result.evidence?.checks.find(check => check.name === 'final_render')?.data).toEqual(
       expect.objectContaining({ reusedPreview: true }),
     );
+    expect(raw.content.some(block => block.type === 'image')).toBe(false);
+    expect(raw.content[0]?.text).toContain('```image-preview');
   });
 
   it('filters word first-line-indent false positives out of the issue gate', async () => {
@@ -1139,6 +1212,20 @@ describe('office_document_finalize', () => {
     expect(result.evidence?.checks.find(check => check.name === 'skill_toc_field')).toBeUndefined();
   });
 
+  it('skips Excel error-cell queries when the outline has no formulas', async () => {
+    const w = workspace();
+    const ctx = context(w, 'finalize-values-only');
+    const file = document(w, 'values-only.xlsx');
+    const result = envelope(await handleOfficeDocumentFinalize(ctx, { file, profile: 'strict' }));
+
+    expect(result.deliveryReady).toBe(true);
+    expect(result.evidence?.checks.find(check => check.name === 'skill_excel_errors')).toMatchObject({
+      ok: true,
+      data: { skipped: 'no_formulas' },
+    });
+    expect(officecliVerbs(file)).not.toContain('query');
+  });
+
   it('blocks Excel workbooks that still contain formula error cells', async () => {
     const w = workspace();
     const ctx = context(w, 'finalize-excel-error');
@@ -1164,5 +1251,118 @@ describe('office_document_finalize', () => {
 
     expect(result.deliveryReady).toBe(true);
     expect(officecliVerbs(file).filter(verb => verb.startsWith('screenshot'))).toEqual(['screenshot']);
+  });
+
+  it('rejects academic citation and SEQ mismatches', async () => {
+    const w = workspace();
+    const ctx = context(w, 'finalize-academic');
+    const file = document(w, 'academic-cite.docx');
+    const result = envelope(await handleOfficeDocumentFinalize(ctx, { file, profile: 'strict' }));
+
+    expect(result.deliveryReady).toBe(false);
+    expect(result.evidence?.checks.find(check => check.name === 'skill_academic_citations')).toMatchObject({
+      ok: false,
+      blocking: true,
+      error: { code: 'academic_citation_roundtrip' },
+    });
+    expect(result.evidence?.checks.find(check => check.name === 'skill_academic_seq')).toMatchObject({
+      ok: false,
+      blocking: true,
+      error: { code: 'academic_seq_mismatch' },
+    });
+  });
+
+  it('rejects word-form identity, protection, and fill-in leaks', async () => {
+    const w = workspace();
+    const ctx = context(w, 'finalize-form');
+    const file = document(w, 'form-sdt.docx');
+    const result = envelope(await handleOfficeDocumentFinalize(ctx, { file, profile: 'strict' }));
+
+    expect(result.deliveryReady).toBe(false);
+    expect(result.evidence?.checks.find(check => check.name === 'skill_form_identity')).toMatchObject({
+      ok: false,
+      error: { code: 'word_form_sdt_identity' },
+    });
+    expect(result.evidence?.checks.find(check => check.name === 'skill_form_protection')).toMatchObject({
+      ok: false,
+      error: { code: 'word_form_protection' },
+    });
+    expect(result.evidence?.checks.find(check => check.name === 'skill_form_placeholder_leak')).toMatchObject({
+      ok: false,
+      error: { code: 'word_form_placeholder_leak' },
+    });
+  });
+
+  it('rejects financial imbalance cells and clipped ### values', async () => {
+    const w = workspace();
+    const ctx = context(w, 'finalize-financial');
+    const imbalanced = envelope(await handleOfficeDocumentFinalize(ctx, {
+      file: document(w, 'imbalanced.xlsx'),
+      profile: 'strict',
+    }));
+    const clipped = envelope(await handleOfficeDocumentFinalize(ctx, {
+      file: document(w, 'hash-clip.xlsx'),
+      profile: 'strict',
+    }));
+
+    expect(imbalanced.deliveryReady).toBe(false);
+    expect(imbalanced.evidence?.checks.find(check => check.name === 'skill_financial_integrity')).toMatchObject({
+      ok: false,
+      error: { code: 'xlsx_financial_imbalance' },
+    });
+    expect(clipped.deliveryReady).toBe(false);
+    expect(clipped.evidence?.checks.find(check => check.name === 'skill_excel_clipped_hash')).toMatchObject({
+      ok: false,
+      error: { code: 'xlsx_clipped_hash' },
+    });
+  });
+
+  it('rejects pitch $ strip signatures and morph price leaks', async () => {
+    const w = workspace();
+    const ctx = context(w, 'finalize-pitch-morph');
+    const pitchFile = document(w, 'pitch-strip.pptx');
+    const morphFile = document(w, 'morph-price.pptx');
+    const pitch = envelope(await handleOfficeDocumentFinalize(ctx, { file: pitchFile, profile: 'strict' }));
+    const morph = envelope(await handleOfficeDocumentFinalize(ctx, { file: morphFile, profile: 'strict' }));
+
+    expect(pitch.deliveryReady).toBe(false);
+    expect(pitch.evidence?.checks.find(check => check.name === 'skill_pitch_strip')).toMatchObject({
+      ok: false,
+      error: { code: 'pptx_pitch_dollar_strip' },
+    });
+    expect(morph.deliveryReady).toBe(false);
+    expect(morph.evidence?.checks.find(check => check.name === 'skill_morph_price_leak')).toMatchObject({
+      ok: false,
+      error: { code: 'pptx_morph_price_leak' },
+    });
+    expect(officecliVerbs(pitchFile)).toContain('screenshot-grid');
+  });
+
+  it('rejects leftover empty () / [] on PowerPoint and dashboard executable floors', async () => {
+    const w = workspace();
+    const ctx = context(w, 'finalize-remaining-gates');
+    const emptyParens = envelope(await handleOfficeDocumentFinalize(ctx, {
+      file: document(w, 'empty-parens.pptx'),
+      profile: 'strict',
+    }));
+    const dashboard = envelope(await handleOfficeDocumentFinalize(ctx, {
+      file: document(w, 'dashboard.xlsx'),
+      profile: 'strict',
+    }));
+
+    expect(emptyParens.deliveryReady).toBe(false);
+    expect(emptyParens.evidence?.checks.find(check => check.name === 'skill_pptx_empty_placeholder')).toMatchObject({
+      ok: false,
+      error: { code: 'pptx_empty_placeholder' },
+    });
+    expect(dashboard.deliveryReady).toBe(false);
+    expect(dashboard.evidence?.checks.find(check => check.name === 'skill_dashboard_series_names')).toMatchObject({
+      ok: false,
+      error: { code: 'xlsx_dashboard_series1' },
+    });
+    expect(dashboard.evidence?.checks.find(check => check.name === 'skill_dashboard_workbook')).toMatchObject({
+      ok: false,
+      error: { code: 'xlsx_dashboard_workbook' },
+    });
   });
 });

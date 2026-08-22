@@ -53,6 +53,15 @@ export function outlinePageCount(data: unknown): number {
   return 0;
 }
 
+export function outlineFormulaCount(data: unknown): number {
+  if (!isRecord(data) || !Array.isArray(data.sheets)) return 0;
+  return data.sheets.reduce((sum, sheet) => {
+    if (!isRecord(sheet)) return sum;
+    const formulas = sheet.formulas;
+    return sum + (typeof formulas === 'number' && Number.isFinite(formulas) ? Math.max(0, formulas) : 0);
+  }, 0);
+}
+
 export function isSkillFalsePositiveIssue(extension: string, issue: Record<string, unknown>): boolean {
   const message = `${typeof issue.message === 'string' ? issue.message : ''} ${typeof issue.path === 'string' ? issue.path : ''}`;
   if (extension === '.docx' && /first-line indent/i.test(message)) return true;

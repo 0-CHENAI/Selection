@@ -35,6 +35,7 @@ import {
   reviewedOfficecliSchemaCrc,
 } from './office-manifest.ts';
 import { OFFICE_STANDARD_TASK_HINT } from '../office-standard-task.ts';
+import { officeModelFacingText } from './office-model-text.ts';
 import { forbiddenCommandRecovery } from './office-skill-bootstrap.ts';
 import { validateMorphGlb } from './office-recipes.ts';
 import {
@@ -1968,7 +1969,7 @@ export function officeToolResult(
 ): ToolResult {
   return {
     content: [
-      { type: 'text', text: JSON.stringify(envelope, null, 2) },
+      { type: 'text', text: officeModelFacingText(envelope) },
       ...extraContent,
     ],
     structuredContent: envelope,
