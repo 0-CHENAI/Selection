@@ -23,6 +23,7 @@ import { AutomationMenu } from './AutomationMenu'
 import { BatchAutomationMenu } from './BatchAutomationMenu'
 import { AutomationAvatar } from './AutomationAvatar'
 import { SendResourceToWorkspaceDialog } from '@/components/app-shell/SendResourceToWorkspaceDialog'
+import { ResourceTransferDialog } from '@/components/resources/ResourceTransferDialog'
 import { useAppShellContext } from '@/context/AppShellContext'
 import { cn } from '@/lib/utils'
 import { automationSelection } from '@/hooks/useEntitySelection'
@@ -62,6 +63,7 @@ interface AutomationItemProps {
   onSimulateMatch?: () => void
   onDuplicate: () => void
   onSendToWorkspace?: () => void
+  onExport?: () => void
 }
 
 function AutomationItem({
@@ -79,6 +81,7 @@ function AutomationItem({
   onSimulateMatch,
   onDuplicate,
   onSendToWorkspace,
+  onExport,
 }: AutomationItemProps) {
   const { t } = useTranslation()
   const handleClick = useCallback((e: React.MouseEvent) => {
@@ -152,6 +155,7 @@ function AutomationItem({
           onDuplicate={onDuplicate}
           onDelete={onDelete}
           onSendToWorkspace={onSendToWorkspace}
+          onExport={onExport}
         />
       }
       contextMenuContent={isMultiSelectActive && isInMultiSelect ? <BatchAutomationMenu /> : undefined}
@@ -200,6 +204,7 @@ export function AutomationsListPanel({
   const [sendDialogOpen, setSendDialogOpen] = useState(false)
   const [sendResourceId, setSendResourceId] = useState<string | null>(null)
   const [sendResourceLabel, setSendResourceLabel] = useState('')
+  const [exportResourceId, setExportResourceId] = useState<string | null>(null)
 
   const {
     select: selectAutomation,
@@ -338,6 +343,7 @@ export function AutomationsListPanel({
                     setSendResourceLabel(automation.name)
                     setSendDialogOpen(true)
                   } : undefined}
+                  onExport={() => setExportResourceId(automation.id)}
                 />
               ))}
             </div>
@@ -355,6 +361,15 @@ export function AutomationsListPanel({
           resourceLabel={sendResourceLabel}
           workspaces={workspaces}
           activeWorkspaceId={activeWorkspaceId}
+        />
+      )}
+      {exportResourceId && activeWorkspaceId && (
+        <ResourceTransferDialog
+          open
+          mode="export"
+          workspaceId={activeWorkspaceId}
+          initialSelection={[{ type: 'automation', id: exportResourceId }]}
+          onOpenChange={(isOpen) => { if (!isOpen) setExportResourceId(null) }}
         />
       )}
     </div>

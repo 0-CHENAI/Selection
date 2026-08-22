@@ -23,6 +23,7 @@ mock.module('electron', () => ({
   },
   dialog: {
     showOpenDialog: async () => ({ canceled: true, filePaths: [] }),
+    showSaveDialog: async () => ({ canceled: true }),
     showMessageBox: async () => ({ response: 0 }),
   },
   shell: {
@@ -56,7 +57,7 @@ function createMockServer(): RpcServer {
 
 function createMockDeps(): HandlerDeps {
   return {
-    sessionManager: {} as HandlerDeps['sessionManager'],
+    sessionManager: { setTaskRunnerLookup: () => {} } as unknown as HandlerDeps['sessionManager'],
     platform: {
       appRootPath: '',
       resourcesPath: '',
@@ -129,11 +130,12 @@ async function getExpectedChannels(): Promise<Set<string>> {
   ])
 
   // GUI handler channels (remain in electron)
-  const [browser, guiSystem, guiWorkspace, guiSettings] = await Promise.all([
+  const [browser, guiSystem, guiWorkspace, guiSettings, guiResources] = await Promise.all([
     import('../browser'),
     import('../system'),
     import('../workspace'),
     import('../settings'),
+    import('../resources'),
   ])
 
   return new Set([
@@ -159,6 +161,7 @@ async function getExpectedChannels(): Promise<Set<string>> {
     ...guiSystem.GUI_HANDLED_CHANNELS,
     ...guiWorkspace.GUI_HANDLED_CHANNELS,
     ...guiSettings.GUI_HANDLED_CHANNELS,
+    ...guiResources.HANDLED_CHANNELS,
   ])
 }
 

@@ -20,6 +20,7 @@ import { EditPopover, EditButton, getEditConfig } from '@/components/ui/EditPopo
 import { useActiveWorkspace } from '@/context/AppShellContext'
 import { AutomationAvatar } from './AutomationAvatar'
 import { AutomationMenu } from './AutomationMenu'
+import { ResourceTransferDialog } from '@/components/resources/ResourceTransferDialog'
 import { AutomationActionRow } from './AutomationActionRow'
 import { AutomationTestPanel } from './AutomationTestPanel'
 import { AutomationEventTimeline } from './AutomationEventTimeline'
@@ -58,6 +59,7 @@ export function AutomationInfoPage({
 }: AutomationInfoPageProps) {
   const { t } = useTranslation()
   const workspace = useActiveWorkspace()
+  const [exportOpen, setExportOpen] = React.useState(false)
   const nextRuns = automation.cron ? computeNextRuns(automation.cron) : []
 
   // Lightweight per-mount fetch — mirrors the pattern used in MessagingSettingsPage.
@@ -88,6 +90,7 @@ export function AutomationInfoPage({
   ) : undefined
 
   return (
+    <>
     <Info_Page className={className}>
       <Info_Page.Header
         title={automation.name}
@@ -100,6 +103,7 @@ export function AutomationInfoPage({
             onTest={onTest}
             onSimulateMatch={onSimulateMatch}
             onDuplicate={onDuplicate}
+            onExport={() => setExportOpen(true)}
             onDelete={onDelete}
           />
         }
@@ -277,5 +281,15 @@ export function AutomationInfoPage({
         </Info_Section>
       </Info_Page.Content>
     </Info_Page>
+    {workspace?.id && (
+      <ResourceTransferDialog
+        open={exportOpen}
+        mode="export"
+        workspaceId={workspace.id}
+        initialSelection={[{ type: 'automation', id: automation.id }]}
+        onOpenChange={setExportOpen}
+      />
+    )}
+    </>
   )
 }

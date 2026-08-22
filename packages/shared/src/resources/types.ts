@@ -20,12 +20,16 @@ import type { AutomationMatcher } from '../automations/types.ts'
  * JSON envelope with base64-encoded files — same pattern as SessionBundle.
  */
 export interface ResourceBundle {
-  /** Bundle format version */
-  version: 1
+  /** Discriminator added in v2. Absent only on legacy v1 bundles. */
+  kind?: 'selection-resource-bundle'
+  /** Bundle format version. New exports always use v2. */
+  version: 1 | 2
   /** When the bundle was created (Unix timestamp ms) */
   exportedAt: number
   /** Informational: name of the workspace this was exported from */
   sourceWorkspace?: string
+  /** Informational Selection version that created the bundle. */
+  sourceVersion?: string
   /** The exported resources */
   resources: {
     sources?: SourceBundleEntry[]
@@ -33,6 +37,51 @@ export interface ResourceBundle {
     /** Per-automation entries (sanitized — webhook auth stripped) */
     automations?: AutomationBundleEntry[]
   }
+  /** Portable resource inventory, dependency graph, and credential redactions (v2). */
+  manifest?: ResourceBundleManifest
+  /** SHA-256 of canonical bundle JSON with this field omitted (v2). */
+  integrity?: ResourceBundleIntegrity
+}
+
+export type ResourceType = 'source' | 'skill' | 'automation'
+export type ResourceDependencyType = ResourceType | 'label' | 'llm-connection' | 'model'
+
+export interface ResourceRef {
+  type: ResourceType
+  id: string
+}
+
+export interface ResourceManifestItem extends ResourceRef {
+  name?: string
+  selected: boolean
+  autoAdded?: boolean
+}
+
+export interface ResourceDependency {
+  from: ResourceRef
+  to: { type: ResourceDependencyType; id: string }
+  reason: 'automation-mention' | 'skill-required-source' | 'label' | 'llm-connection' | 'model'
+  /** External dependencies are intentionally not serialized as resources. */
+  external?: boolean
+}
+
+export interface ResourceRedaction {
+  resource: ResourceRef
+  path: string
+  reason: 'credential' | 'secret-header' | 'secret-env' | 'secret-url' | 'runtime-state'
+  /** Safe identifier such as an environment-variable/header name. Never a value. */
+  requiredName?: string
+}
+
+export interface ResourceBundleManifest {
+  items: ResourceManifestItem[]
+  dependencies: ResourceDependency[]
+  redactions: ResourceRedaction[]
+}
+
+export interface ResourceBundleIntegrity {
+  algorithm: 'sha256'
+  digest: string
 }
 
 /**
@@ -86,6 +135,48 @@ export interface AutomationBundleEntry {
  * - 'overwrite': Replace existing resources with imported ones
  */
 export type ResourceImportMode = 'skip' | 'overwrite'
+export type ResourceImportAction = ResourceImportMode | 'rename'
+
+export interface ResourceImportDecision extends ResourceRef {
+  action: ResourceImportAction
+  /** Preview status observed by the client. Import rejects a changed target state. */
+  expectedStatus?: ResourceImportPreviewStatus
+  /** Hash of the conflicting target resource observed during preview. */
+  expectedTargetFingerprint?: string
+  /** Required for source/skill rename; optional generated ID override for automations. */
+  newId?: string
+  /** Optional display name override (primarily automations). */
+  newName?: string
+  /** Low-risk automations only. Defaults to false. */
+  enableAfterImport?: boolean
+}
+
+export interface ResourceImportPlan {
+  decisions: ResourceImportDecision[]
+}
+
+export type ResourceImportPreviewStatus = 'new' | 'identity-conflict' | 'name-conflict'
+
+export interface ResourceImportPreviewItem extends ResourceRef {
+  name?: string
+  status: ResourceImportPreviewStatus
+  /** Hash of the current conflict target, used to detect edits after preview. */
+  targetFingerprint?: string
+  suggestedId?: string
+  needsConfiguration: boolean
+  highRisk: boolean
+  missingDependencies: Array<{ type: ResourceDependencyType; id: string }>
+  warnings: string[]
+}
+
+export interface ResourceImportPreview {
+  valid: boolean
+  version: 1 | 2 | null
+  integrityVerified: boolean
+  errors: string[]
+  warnings: string[]
+  items: ResourceImportPreviewItem[]
+}
 
 /**
  * Options for resource export.
@@ -97,6 +188,10 @@ export interface ExportResourcesOptions {
   skills?: string[] | 'all'
   /** Automation IDs/names to export, 'all' for every automation, or true (= 'all') */
   automations?: boolean | string[] | 'all'
+  /** Include workspace source/skill dependencies referenced by selected resources. Default true. */
+  includeDependencies?: boolean
+  /** Informational application version written into a v2 bundle. */
+  sourceVersion?: string
 }
 
 /**

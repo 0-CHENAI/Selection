@@ -381,7 +381,12 @@ export const RPC_CHANNELS = {
   },
   resources: {
     EXPORT: 'resources:export',
+    PREVIEW_IMPORT: 'resources:previewImport',
     IMPORT: 'resources:import',
+    /** Native client file picker + bounded read. Never routed to a workspace server. */
+    OPEN_BUNDLE_FILE: 'resources:openBundleFile',
+    /** Native client save picker + atomic write. Never routed to a workspace server. */
+    SAVE_BUNDLE_FILE: 'resources:saveBundleFile',
     /** Local filesystem copy between workspaces (optional credentials) */
     COPY_BETWEEN: 'resources:copyBetweenWorkspaces',
   },

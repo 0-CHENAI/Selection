@@ -2228,7 +2228,7 @@ function AppShellContent({
       switch (automationFilter.automationType) {
         case 'scheduled': return t("sidebar.scheduled")
         case 'event': return t("sidebar.eventBased")
-        case 'agentic': return t("sidebar.agentic")
+        case 'agentic': return t("sidebar.agentEvents")
         default: return t("sidebar.allAutomations")
       }
     }
@@ -2621,7 +2621,7 @@ function AppShellContent({
                         },
                         {
                           id: "nav:automations:agentic",
-                          title: t("sidebar.agentic"),
+                          title: t("sidebar.agentEvents"),
                           label: String(automationTypeCounts.agentic),
                           icon: Bot,
                           variant: (automationFilter?.kind === 'type' && automationFilter.automationType === 'agentic') ? "default" : "ghost",

@@ -13,13 +13,16 @@ import type { HandlerDeps } from '../handler-deps'
 import type {
   ResourceBundle,
   ResourceImportMode,
+  ResourceImportPlan,
   ExportResourcesOptions,
   CopyResourcesOptions,
   ResourceImportResult,
+  ResourceImportPreview,
 } from '@craft-agent/shared/resources'
 
 export const HANDLED_CHANNELS = [
   RPC_CHANNELS.resources.EXPORT,
+  RPC_CHANNELS.resources.PREVIEW_IMPORT,
   RPC_CHANNELS.resources.IMPORT,
   RPC_CHANNELS.resources.COPY_BETWEEN,
 ] as const
@@ -92,7 +95,10 @@ export function registerResourcesHandlers(server: RpcServer, deps: HandlerDeps):
 
       const { exportResources } = await import('@craft-agent/shared/resources')
       // NFC-resolve so Chinese folder paths are stable across picker / FS forms
-      const result = exportResources(resolveFsPath(workspace.rootPath), options)
+      const result = exportResources(resolveFsPath(workspace.rootPath), {
+        ...options,
+        sourceVersion: options.sourceVersion ?? deps.platform.appVersion,
+      })
 
       deps.platform.logger?.info(
         `RESOURCES_EXPORT: Exported from ${workspaceId}: ` +
@@ -106,10 +112,26 @@ export function registerResourcesHandlers(server: RpcServer, deps: HandlerDeps):
     },
   )
 
+  server.handle(
+    RPC_CHANNELS.resources.PREVIEW_IMPORT,
+    async (_ctx, workspaceId: string, bundle: ResourceBundle): Promise<ResourceImportPreview> => {
+      const workspace = getWorkspaceByNameOrId(workspaceId)
+      if (!workspace) throw new Error(`Workspace not found: ${workspaceId}`)
+
+      const { previewResourceImport } = await import('@craft-agent/shared/resources')
+      return previewResourceImport(resolveFsPath(workspace.rootPath), bundle)
+    },
+  )
+
   // Import a resource bundle into a workspace
   server.handle(
     RPC_CHANNELS.resources.IMPORT,
-    async (_ctx, workspaceId: string, bundle: ResourceBundle, mode: ResourceImportMode) => {
+    async (
+      _ctx,
+      workspaceId: string,
+      bundle: ResourceBundle,
+      modeOrPlan: ResourceImportMode | ResourceImportPlan,
+    ) => {
       const workspace = getWorkspaceByNameOrId(workspaceId)
       if (!workspace) throw new Error(`Workspace not found: ${workspaceId}`)
 
@@ -117,12 +139,12 @@ export function registerResourcesHandlers(server: RpcServer, deps: HandlerDeps):
       const credDeps = makeCredentialDeps()
 
       const targetRoot = resolveFsPath(workspace.rootPath)
-      const result = await importResources(targetRoot, bundle, mode, {
+      const result = await importResources(targetRoot, bundle, modeOrPlan, {
         clearSourceCredentials: credDeps.clearSourceCredentials,
       })
 
       deps.platform.logger?.info(
-        `RESOURCES_IMPORT: Imported into ${workspaceId} (mode=${mode}): ` +
+        `RESOURCES_IMPORT: Imported into ${workspaceId} (mode=${typeof modeOrPlan === 'string' ? modeOrPlan : 'plan'}): ` +
         `sources=${result.sources.imported.length} imported, ${result.sources.skipped.length} skipped, ${result.sources.failed.length} failed; ` +
         `skills=${result.skills.imported.length} imported, ${result.skills.skipped.length} skipped, ${result.skills.failed.length} failed; ` +
         `automations=${result.automations.imported.length} imported, ${result.automations.skipped.length} skipped, ${result.automations.failed.length} failed`,

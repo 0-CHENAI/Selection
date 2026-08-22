@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'bun:test'
 import { mkdirSync, writeFileSync, rmSync, existsSync, readFileSync, readdirSync } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'
-import { exportResources, importResources, validateResourceBundle } from '../resource-bundle'
+import { exportResources, importResources, previewResourceImport, validateResourceBundle } from '../resource-bundle'
 import type { ResourceBundle, SourceBundleEntry, SkillBundleEntry, AutomationBundleEntry } from '../types'
 import type { FolderSourceConfig } from '../../sources/types'
 import type { AutomationMatcher } from '../../automations/types'
@@ -132,13 +132,15 @@ describe('resource-bundle', () => {
 
       const { bundle, warnings } = exportResources(wsDir, { sources: 'all' })
 
-      expect(bundle.version).toBe(1)
+      expect(bundle.version).toBe(2)
+      expect(bundle.kind).toBe('selection-resource-bundle')
+      expect(bundle.integrity?.algorithm).toBe('sha256')
       expect(bundle.resources.sources).toHaveLength(1)
 
       const source = bundle.resources.sources![0]!
       expect(source.slug).toBe('github')
       // Auth state should be reset
-      expect(source.config.isAuthenticated).toBe(false)
+      expect(source.config).toMatchObject({ isAuthenticated: false })
       expect(source.config.connectionStatus).toBe('needs_auth')
       expect(source.config.connectionError).toBeUndefined()
       expect(source.config.lastTestedAt).toBeUndefined()
@@ -161,9 +163,9 @@ describe('resource-bundle', () => {
 
       const config = bundle.resources.sources![0]!.config
       expect(config.api?.googleOAuthClientSecret).toBeUndefined()
-      expect(config.api?.defaultHeaders).toBeUndefined()
+      expect(config.api?.defaultHeaders).toEqual({ 'X-Custom': 'value' })
       expect(warnings.some(w => w.includes('googleOAuthClientSecret'))).toBe(true)
-      expect(warnings.some(w => w.includes('defaultHeaders'))).toBe(true)
+      expect(warnings.some(w => w.includes('defaultHeaders'))).toBe(false)
     })
 
     it('strips mcp.env and mcp.headers from source configs', () => {
@@ -184,7 +186,7 @@ describe('resource-bundle', () => {
       expect(config.mcp?.env).toBeUndefined()
       expect(config.mcp?.headers).toBeUndefined()
       expect(warnings.some(w => w.includes('mcp.env'))).toBe(true)
-      expect(warnings.some(w => w.includes('mcp.headers'))).toBe(true)
+      expect(bundle.manifest?.redactions.some(item => item.requiredName === 'Authorization')).toBe(true)
     })
 
     it('exports all non-hidden files from source folder', () => {
@@ -361,6 +363,31 @@ describe('resource-bundle', () => {
       expect(action.headers?.['Authorization']).toBe('Bearer $CRAFT_WH_TOKEN')
     })
 
+    it('strips webhook URL and body credentials while preserving CRAFT_WH variables', () => {
+      const wsDir = createTestWorkspace(tmpDir)
+      createTestAutomations(wsDir, {
+        UserPromptSubmit: [{
+          id: 'aaa111',
+          actions: [{
+            type: 'webhook',
+            url: 'https://user:password@example.com/hook?token=remove-me&mode=safe',
+            headers: { Authorization: 'Bearer ${CRAFT_WH_TOKEN}' },
+            body: { password: 'remove-me-body', notification: '${CRAFT_WH_MESSAGE}' },
+          }],
+        }],
+      })
+
+      const { bundle } = exportResources(wsDir, { automations: 'all' })
+      const action = bundle.resources.automations![0]!.matcher.actions[0] as any
+      const json = JSON.stringify(bundle)
+
+      expect(json).not.toContain('remove-me')
+      expect(action.url).not.toContain('user')
+      expect(action.url).not.toContain('token=')
+      expect(action.headers.Authorization).toBe('Bearer ${CRAFT_WH_TOKEN}')
+      expect(action.body.notification).toBe('${CRAFT_WH_MESSAGE}')
+    })
+
     it('automations: true is backward-compatible with "all"', () => {
       const wsDir = createTestWorkspace(tmpDir)
       createTestAutomations(wsDir, {
@@ -399,6 +426,77 @@ describe('resource-bundle', () => {
 
       expect(bundle.sourceWorkspace).toBe('Test Workspace')
     })
+
+    it('automatically includes automation and skill dependencies', () => {
+      const wsDir = createTestWorkspace(tmpDir)
+      createTestSource(wsDir, 'github')
+      createTestSkill(wsDir, 'review')
+      writeFileSync(join(wsDir, 'skills', 'review', 'SKILL.md'), `---
+name: Review
+description: Review a change
+requiredSources:
+  - github
+---
+Use the source.
+`)
+      createTestAutomations(wsDir, {
+        UserPromptSubmit: [{ id: 'abc123', name: 'Review request', actions: [{ type: 'prompt', prompt: '@review inspect this' }] }],
+      })
+
+      const { bundle } = exportResources(wsDir, { automations: ['abc123'] })
+
+      expect(bundle.resources.automations?.map(item => item.id)).toEqual(['abc123'])
+      expect(bundle.resources.skills?.map(item => item.slug)).toEqual(['review'])
+      expect(bundle.resources.sources?.map(item => item.slug)).toEqual(['github'])
+      expect(bundle.manifest?.items.filter(item => item.autoAdded).map(item => `${item.type}:${item.id}`).sort()).toEqual([
+        'skill:review',
+        'source:github',
+      ])
+    })
+
+    it('removes structured secrets, URL credentials, and unsafe skill files', () => {
+      const wsDir = createTestWorkspace(tmpDir)
+      createTestSource(wsDir, 'secure-mcp', {
+        type: 'mcp',
+        mcp: {
+          url: 'https://alice:password@mcp.example.com/path?api_key=do-not-export&safe=yes',
+          authType: 'bearer',
+          command: 'mcp-server',
+          args: ['serve', '--token', 'do-not-export-arg'],
+          env: { SERVICE_TOKEN: 'do-not-export-env' },
+          headers: { Authorization: 'Bearer do-not-export-header', 'X-Safe': 'yes' },
+        },
+      })
+      createTestSkill(wsDir, 'clean-skill', {
+        '.env.local': 'API_KEY=do-not-export-file',
+        'credentials.json': '{"token":"do-not-export-file"}',
+        'scripts/run.ts': 'export const ok = true',
+      })
+
+      const { bundle } = exportResources(wsDir, { sources: 'all', skills: 'all' })
+      const json = JSON.stringify(bundle)
+      const source = bundle.resources.sources![0]!
+      const skillPaths = bundle.resources.skills![0]!.files.map(file => file.relativePath)
+
+      expect(json).not.toContain('do-not-export')
+      expect(source.config.mcp?.url).not.toContain('alice')
+      expect(source.config.mcp?.url).not.toContain('api_key')
+      expect(source.config.mcp?.headers).toEqual({ 'X-Safe': 'yes' })
+      expect(source.config.mcp?.args).toEqual(['serve'])
+      expect(source.config.enabled).toBe(false)
+      expect(skillPaths).not.toContain('.env.local')
+      expect(skillPaths).not.toContain('credentials.json')
+      expect(skillPaths).toContain('scripts/run.ts')
+    })
+
+    it('stops export when a freeform file appears to contain a secret', () => {
+      const wsDir = createTestWorkspace(tmpDir)
+      createTestSkill(wsDir, 'unsafe', {
+        'scripts/config.ts': 'const token = "ghp_abcdefghijklmnopqrstuvwxyz123456"',
+      })
+
+      expect(() => exportResources(wsDir, { skills: ['unsafe'] })).toThrow('scripts/config.ts')
+    })
   })
 
   // ============================================================
@@ -434,9 +532,72 @@ describe('resource-bundle', () => {
     })
 
     it('rejects wrong version', () => {
-      const { valid, errors } = validateResourceBundle({ version: 2, exportedAt: 1, resources: {} })
+      const { valid, errors } = validateResourceBundle({ version: 99, exportedAt: 1, resources: {} })
       expect(valid).toBe(false)
       expect(errors.some(e => e.includes('version'))).toBe(true)
+    })
+
+    it('detects v2 bundle tampering through SHA-256 integrity', () => {
+      const wsDir = createTestWorkspace(tmpDir)
+      createTestSource(wsDir, 'github')
+      const { bundle } = exportResources(wsDir, { sources: 'all' })
+      bundle.resources.sources![0]!.config.name = 'Tampered'
+
+      const { valid, errors } = validateResourceBundle(bundle)
+      expect(valid).toBe(false)
+      expect(errors.some(error => error.includes('integrity'))).toBe(true)
+    })
+
+    it('rejects unknown bundle structure', () => {
+      const bundle = { version: 1, exportedAt: Date.now(), resources: {}, unexpected: true }
+      const { valid, errors } = validateResourceBundle(bundle)
+      expect(valid).toBe(false)
+      expect(errors.some(error => error.includes('Unknown bundle field'))).toBe(true)
+    })
+
+    it('rejects malformed nested manifest references', () => {
+      const wsDir = createTestWorkspace(tmpDir)
+      createTestSource(wsDir, 'github')
+      const { bundle } = exportResources(wsDir, { sources: ['github'] })
+      bundle.manifest!.dependencies.push({
+        from: { type: 'source', id: 'github', unexpected: true },
+        to: { type: 'label', id: 'review' },
+        reason: 'label',
+        external: true,
+      } as never)
+
+      const { valid, errors } = validateResourceBundle(bundle)
+      expect(valid).toBe(false)
+      expect(errors.some(error => error.includes("unknown field 'unexpected'"))).toBe(true)
+    })
+
+    it('rejects resource slugs that can escape the target directory', () => {
+      const bundle: ResourceBundle = {
+        version: 1,
+        exportedAt: Date.now(),
+        resources: {
+          skills: [{ slug: '../unsafe', files: [makeBundleFile('SKILL.md', '# Unsafe')] }],
+        },
+      }
+
+      expect(validateResourceBundle(bundle).valid).toBe(false)
+    })
+
+    it('rejects unknown automation actions', () => {
+      const bundle = {
+        version: 1,
+        exportedAt: Date.now(),
+        resources: {
+          automations: [{
+            id: 'abc123',
+            event: 'UserPromptSubmit',
+            matcher: { id: 'abc123', actions: [{ type: 'execute-arbitrary', command: 'oops' }] },
+          }],
+        },
+      }
+      const { valid, errors } = validateResourceBundle(bundle)
+      expect(valid).toBe(false)
+      expect(errors.some(error => error.includes('unknown action type'))).toBe(true)
     })
 
     it('rejects duplicate source slugs', () => {
@@ -627,6 +788,123 @@ describe('resource-bundle', () => {
     })
   })
 
+  describe('preview and planned import', () => {
+    it('previews legacy v1 bundles without claiming integrity verification', () => {
+      const wsDir = createTestWorkspace(tmpDir)
+      const bundle: ResourceBundle = {
+        version: 1,
+        exportedAt: Date.now(),
+        resources: {},
+      }
+
+      const preview = previewResourceImport(wsDir, bundle)
+      expect(preview.valid).toBe(true)
+      expect(preview.integrityVerified).toBe(false)
+      expect(preview.warnings.some(warning => warning.includes('v1'))).toBe(true)
+    })
+
+    it('renames conflicting resources and rewrites internal references', async () => {
+      const srcDir = createTestWorkspace(join(tmpDir, 'src-plan'))
+      createTestSource(srcDir, 'github')
+      createTestSkill(srcDir, 'review')
+      writeFileSync(join(srcDir, 'skills', 'review', 'SKILL.md'), `---
+name: Review
+description: Review a change
+requiredSources:
+  - github
+---
+Use the source.
+`)
+      createTestAutomations(srcDir, {
+        UserPromptSubmit: [{ id: 'abc123', name: 'Review request', actions: [{ type: 'prompt', prompt: '@review use @github' }] }],
+      })
+      const { bundle } = exportResources(srcDir, { automations: ['abc123'] })
+
+      const dstDir = createTestWorkspace(join(tmpDir, 'dst-plan'))
+      createTestSource(dstDir, 'github')
+      createTestSkill(dstDir, 'review')
+      createTestAutomations(dstDir, {
+        UserPromptSubmit: [{ id: 'abc123', name: 'Existing', actions: [{ type: 'prompt', prompt: 'existing' }] }],
+      })
+      const preview = previewResourceImport(dstDir, bundle)
+      expect(preview.items.map(item => `${item.type}:${item.status}`).sort()).toEqual([
+        'automation:identity-conflict',
+        'skill:identity-conflict',
+        'source:identity-conflict',
+      ])
+
+      const result = await importResources(dstDir, bundle, {
+        decisions: [
+          { type: 'source', id: 'github', action: 'rename', newId: 'github-copy', expectedStatus: 'identity-conflict' },
+          { type: 'skill', id: 'review', action: 'rename', newId: 'review-copy', expectedStatus: 'identity-conflict' },
+          { type: 'automation', id: 'abc123', action: 'rename', newId: 'def456', newName: 'Review copy', expectedStatus: 'identity-conflict' },
+        ],
+      }, noopDeps)
+
+      expect(result.sources.imported).toEqual(['github-copy'])
+      expect(result.skills.imported).toEqual(['review-copy'])
+      expect(result.automations.imported).toEqual(['Review copy'])
+      const skillMd = readFileSync(join(dstDir, 'skills', 'review-copy', 'SKILL.md'), 'utf8')
+      expect(skillMd).toContain('github-copy')
+      const config = JSON.parse(readFileSync(join(dstDir, 'automations.json'), 'utf8'))
+      const imported = config.automations.UserPromptSubmit.find((item: AutomationMatcher) => item.id === 'def456')
+      expect(imported.actions[0].prompt).toContain('@review-copy')
+      expect(imported.actions[0].prompt).toContain('@github-copy')
+      expect(imported.enabled).toBe(false)
+    })
+
+    it('rejects a target conflict that appeared after preview', async () => {
+      const srcDir = createTestWorkspace(join(tmpDir, 'src-race'))
+      createTestSource(srcDir, 'github')
+      const { bundle } = exportResources(srcDir, { sources: ['github'] })
+      const dstDir = createTestWorkspace(join(tmpDir, 'dst-race'))
+      const preview = previewResourceImport(dstDir, bundle)
+      expect(preview.items[0]?.status).toBe('new')
+
+      createTestSource(dstDir, 'github')
+      await expect(importResources(dstDir, bundle, {
+        decisions: [{ type: 'source', id: 'github', action: 'overwrite', expectedStatus: 'new' }],
+      }, noopDeps)).rejects.toThrow('Target changed after preview')
+    })
+
+    it('rejects an overwrite when the conflict target changed after preview', async () => {
+      const srcDir = createTestWorkspace(join(tmpDir, 'src-content-race'))
+      createTestSource(srcDir, 'github')
+      const { bundle } = exportResources(srcDir, { sources: ['github'] })
+      const dstDir = createTestWorkspace(join(tmpDir, 'dst-content-race'))
+      createTestSource(dstDir, 'github')
+      const item = previewResourceImport(dstDir, bundle).items[0]!
+      expect(item.targetFingerprint).toBeDefined()
+
+      writeFileSync(join(dstDir, 'sources', 'github', 'guide.md'), '# Concurrent edit')
+      await expect(importResources(dstDir, bundle, {
+        decisions: [{
+          type: 'source',
+          id: 'github',
+          action: 'overwrite',
+          expectedStatus: item.status,
+          expectedTargetFingerprint: item.targetFingerprint,
+        }],
+      }, noopDeps)).rejects.toThrow('Target changed after preview')
+    })
+
+    it('only enables an imported automation after an explicit low-risk decision', async () => {
+      const srcDir = createTestWorkspace(join(tmpDir, 'src-enable'))
+      createTestAutomations(srcDir, {
+        UserPromptSubmit: [{ id: 'abc123', name: 'Safe prompt', actions: [{ type: 'prompt', prompt: 'hello' }] }],
+      })
+      const { bundle } = exportResources(srcDir, { automations: 'all' })
+      const dstDir = createTestWorkspace(join(tmpDir, 'dst-enable'))
+
+      await importResources(dstDir, bundle, {
+        decisions: [{ type: 'automation', id: 'abc123', action: 'overwrite', expectedStatus: 'new', enableAfterImport: true }],
+      }, noopDeps)
+
+      const config = JSON.parse(readFileSync(join(dstDir, 'automations.json'), 'utf8'))
+      expect(config.automations.UserPromptSubmit[0].enabled).toBe(true)
+    })
+  })
+
   // ============================================================
   // Import
   // ============================================================
@@ -793,6 +1071,40 @@ describe('resource-bundle', () => {
 
       await importResources(wsDir, bundle, 'overwrite', deps)
       expect(cleared).toEqual(['creds-test'])
+    })
+
+    it('does not replace a source when old credentials cannot be cleared', async () => {
+      const wsDir = createTestWorkspace(tmpDir)
+      createTestSource(wsDir, 'creds-test')
+      const configPath = join(wsDir, 'sources', 'creds-test', 'config.json')
+      const originalConfig = readFileSync(configPath, 'utf8')
+      const bundle: ResourceBundle = {
+        version: 1,
+        exportedAt: Date.now(),
+        resources: {
+          sources: [{
+            slug: 'creds-test',
+            config: {
+              id: 'creds-test_new',
+              name: 'Replacement',
+              slug: 'creds-test',
+              enabled: true,
+              provider: 'custom',
+              type: 'api',
+              api: { baseUrl: 'https://new.example.com', authType: 'none' },
+            },
+            files: [],
+          }],
+        },
+      }
+
+      const result = await importResources(wsDir, bundle, 'overwrite', {
+        clearSourceCredentials: async () => { throw new Error('credential store unavailable') },
+      })
+
+      expect(result.sources.imported).toEqual([])
+      expect(result.sources.failed[0]?.error).toContain('could not be cleared')
+      expect(readFileSync(configPath, 'utf8')).toBe(originalConfig)
     })
 
     it('imports automations into workspace with no existing file', async () => {
