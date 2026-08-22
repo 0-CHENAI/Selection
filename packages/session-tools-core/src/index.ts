@@ -287,6 +287,7 @@ export {
 
 export {
   resolveOfficecliResources,
+  diagnoseOfficecliResourceFailure,
   clearOfficecliManifestCache,
 } from './runtime/office-manifest.ts';
 

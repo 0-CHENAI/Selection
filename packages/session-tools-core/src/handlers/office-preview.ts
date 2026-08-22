@@ -98,11 +98,15 @@ export function officeRenderingIsOffline(env: NodeJS.ProcessEnv = process.env): 
 }
 
 function manifestMetadata(): { version: string; schemaCrc: string } {
-  const resources = resolveOfficecliResources();
-  return {
-    version: resources?.manifest.version ?? 'unknown',
-    schemaCrc: resources?.manifest.schemaCrc ?? 'unknown',
-  };
+  try {
+    const resources = resolveOfficecliResources();
+    return {
+      version: resources?.manifest.version ?? 'unknown',
+      schemaCrc: resources?.manifest.schemaCrc ?? 'unknown',
+    };
+  } catch {
+    return { version: 'unknown', schemaCrc: 'unknown' };
+  }
 }
 
 function previewError(

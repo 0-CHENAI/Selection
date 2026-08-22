@@ -12,7 +12,11 @@ import type {
 } from '../office-types.ts';
 import type { ToolResult } from '../types.ts';
 import { chooseOfficeWorkingDirectory, officeToolResult } from '../runtime/office-coordinator.ts';
-import { resolveOfficecliResources } from '../runtime/office-manifest.ts';
+import {
+  diagnoseOfficecliResourceFailure,
+  logOfficecliResourceFailure,
+  resolveOfficecliResources,
+} from '../runtime/office-manifest.ts';
 import { OFFICE_MORPH_RECIPES, validateMorphGlb } from '../runtime/office-recipes.ts';
 import { isPathWithinDirectory } from '../runtime/path-security.ts';
 
@@ -327,9 +331,12 @@ export async function handleOfficeDocumentGuide(
       ));
     }
     if (!resources) {
+      const failure = diagnoseOfficecliResourceFailure();
+      logOfficecliResourceFailure(failure);
       return officeToolResult(errorEnvelope(
-        version, schemaCrc, cwd, command, 'officecli_resources_unavailable', 'dependency',
-        'The bundled OfficeCLI guide resources are unavailable.',
+        version, schemaCrc, cwd, command, failure.code, 'dependency',
+        failure.message,
+        failure.recovery,
       ));
     }
     version = resources.manifest.version;

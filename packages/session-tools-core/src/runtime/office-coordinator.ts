@@ -28,7 +28,12 @@ import {
   isPathWithinDirectoryForCreation,
 } from './path-security.ts';
 import { resolveOfficecliRuntime } from './officecli.ts';
-import { resolveOfficecliResources, reviewedOfficecliSchemaCrc } from './office-manifest.ts';
+import {
+  diagnoseOfficecliResourceFailure,
+  logOfficecliResourceFailure,
+  resolveOfficecliResources,
+  reviewedOfficecliSchemaCrc,
+} from './office-manifest.ts';
 import { validateMorphGlb } from './office-recipes.ts';
 import {
   attachOfficeResidentSession,
@@ -2038,8 +2043,10 @@ export async function executeOfficeCommand(
     validateArgv(request.argv, request.timeoutMs);
     argv = request.argv.map(token => token);
     cwd = chooseOfficeWorkingDirectory(ctx);
-    const resources = (dependencies.resolveResources ?? resolveOfficecliResources)();
-    if (!resources) {
+    let resources;
+    try {
+      resources = (dependencies.resolveResources ?? resolveOfficecliResources)();
+    } catch (error) {
       return {
         envelope: errorEnvelope(
           expectedVersion,
@@ -2047,10 +2054,29 @@ export async function executeOfficeCommand(
           argv,
           cwd,
           structuredError(
-            'officecli_resources_unavailable',
+            'officecli_manifest_invalid',
             'dependency',
-            'The bundled OfficeCLI manifest and internal guide resources could not be resolved.',
-            { recovery: 'Reinstall or rebuild Selection with resources/officecli.' },
+            error instanceof Error ? error.message : String(error),
+            { recovery: 'Reinstall Selection or rebuild the audited OfficeCLI resource bundle.' },
+          ),
+        ),
+        stdout: '', stderr: '', exitCode: null, cwd,
+      };
+    }
+    if (!resources) {
+      const failure = diagnoseOfficecliResourceFailure();
+      if (!dependencies.resolveResources) logOfficecliResourceFailure(failure);
+      return {
+        envelope: errorEnvelope(
+          expectedVersion,
+          expectedSchema,
+          argv,
+          cwd,
+          structuredError(
+            failure.code,
+            'dependency',
+            failure.message,
+            { recovery: failure.recovery },
           ),
         ),
         stdout: '', stderr: '', exitCode: null, cwd,

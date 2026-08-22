@@ -197,6 +197,25 @@ if (isDebugMode) {
     })
   }
 
+  const officecliResourceCandidates = [
+    join(resourcesBase, 'dist', 'resources', 'officecli'),
+    join(resourcesBase, 'resources', 'officecli'),
+  ]
+  const officecliResources = process.env.CRAFT_OFFICECLI_RESOURCES
+    && existsSync(join(process.env.CRAFT_OFFICECLI_RESOURCES, 'officecli-manifest.json'))
+    ? process.env.CRAFT_OFFICECLI_RESOURCES
+    : officecliResourceCandidates.find(candidate =>
+      existsSync(join(candidate, 'officecli-manifest.json')),
+    )
+  if (officecliResources) {
+    process.env.CRAFT_OFFICECLI_RESOURCES = officecliResources
+  } else {
+    mainLog.warn('Bundled officecli resources missing; Office document tools will degrade without crashing.', {
+      kind: app.isPackaged ? 'packaging_misconfigured' : 'resources_missing',
+      expectedOfficecliResourcePaths: officecliResourceCandidates,
+    })
+  }
+
   if (!bundledUvExists) {
     mainLog.warn('Bundled uv binary missing, CLI document tools may fail unless uv is available on PATH.', {
       expectedUvPath: uvBinary,
