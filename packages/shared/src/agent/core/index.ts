@@ -146,3 +146,10 @@ export type {
 
 // Re-export skill plugin constant (used by renderer for mention qualification)
 export { AGENTS_PLUGIN_NAME } from '../../skills/types.ts';
+
+// OfficeCLI execution budgets and privacy-safe per-turn counters
+export { OfficecliExecutionTracker } from './officecli-execution-tracker.ts';
+export type {
+  OfficecliExecutionDecision,
+  OfficecliExecutionSnapshot,
+} from './officecli-execution-tracker.ts';

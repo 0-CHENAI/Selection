@@ -2,59 +2,62 @@
 # Selection wrapper — prefer the app-bundled binary, never curl-install.
 # After create, or around heading / TOC writes, seed or repair Heading outlineLvl
 # so Word can compile the TOC. Do not mutate on open / refresh / view.
-if [ -n "$CRAFT_OFFICECLI" ] && [ -f "$CRAFT_OFFICECLI" ]; then
-  BIN=$CRAFT_OFFICECLI
+DIR=$(CDPATH= cd -- "$(dirname "$0")" && pwd)
+UNAME=$(uname -s 2>/dev/null || echo unknown)
+MACHINE=$(uname -m 2>/dev/null || echo unknown)
+
+case "$UNAME" in
+  Darwin)
+    ARCH=x64
+    [ "$MACHINE" = "arm64" ] && ARCH=arm64
+    CAND=$DIR/darwin-$ARCH/officecli
+    ;;
+  Linux)
+    ARCH=x64
+    [ "$MACHINE" = "aarch64" ] || [ "$MACHINE" = "arm64" ] && ARCH=arm64
+    CAND=$DIR/linux-$ARCH/officecli
+    ;;
+  MINGW*|MSYS*|CYGWIN*|Windows_NT)
+    CAND=$DIR/win32-x64/officecli.exe
+    ;;
+  *)
+    CAND=""
+    ;;
+esac
+
+if [ -n "$CAND" ] && [ -f "$CAND" ]; then
+  BIN=$CAND
 else
-  DIR=$(CDPATH= cd -- "$(dirname "$0")" && pwd)
-  UNAME=$(uname -s 2>/dev/null || echo unknown)
-  MACHINE=$(uname -m 2>/dev/null || echo unknown)
-
-  case "$UNAME" in
-    Darwin)
-      ARCH=x64
-      [ "$MACHINE" = "arm64" ] && ARCH=arm64
-      CAND=$DIR/darwin-$ARCH/officecli
-      ;;
-    Linux)
-      ARCH=x64
-      [ "$MACHINE" = "aarch64" ] || [ "$MACHINE" = "arm64" ] && ARCH=arm64
-      CAND=$DIR/linux-$ARCH/officecli
-      ;;
-    MINGW*|MSYS*|CYGWIN*|Windows_NT)
-      CAND=$DIR/win32-x64/officecli.exe
-      ;;
-    *)
-      CAND=""
-      ;;
-  esac
-
-  if [ -n "$CAND" ] && [ -f "$CAND" ]; then
-    BIN=$CAND
-  else
-    echo "officecli is not bundled in this Selection build. Rebuild the app or set CRAFT_OFFICECLI." >&2
-    exit 127
-  fi
+  echo "officecli is not bundled in this Selection build. Rebuild the app." >&2
+  exit 127
 fi
 
-DIR=$(CDPATH= cd -- "$(dirname "$0")" && pwd)
 ENSURE=$DIR/officecli-ensure-docx-styles
+SANITIZE=$DIR/../scripts/officecli-sanitize-metadata.js
+BUN_BIN=""
+if [ -x "$DIR/../../vendor/bun/bun" ]; then
+  BUN_BIN=$DIR/../../vendor/bun/bun
+fi
 
 verb=""
 docx=""
+office_file=""
 prev=""
 ensure_before=0
 ensure_after=0
 for arg in "$@"; do
   case "$arg" in
     --*|-* ) ;;
-    create)
+    create|batch|save|close|add|set|remove|move|swap)
       [ -z "$verb" ] && verb=$arg
-      ensure_after=1
-      ;;
-    add|set)
-      [ -z "$verb" ] && verb=$arg
+      [ "$arg" = "create" ] && ensure_after=1
       ;;
     *)
+      if [ -z "$office_file" ]; then
+        case "$arg" in
+          *.docx|*.DOCX|*.docm|*.DOCM|*.xlsx|*.XLSX|*.xlsm|*.XLSM|*.pptx|*.PPTX) office_file=$arg ;;
+        esac
+      fi
       if [ -z "$docx" ]; then
         case "$arg" in
           *.docx|*.DOCX|*.docm|*.DOCM) docx=$arg ;;
@@ -78,10 +81,31 @@ ensure_docx() {
   fi
 }
 
+sanitize_office_file() {
+  if [ -z "$office_file" ] || [ ! -f "$office_file" ]; then
+    echo "Selection could not verify the Office document after mutation." >&2
+    return 2
+  fi
+  if [ -z "$BUN_BIN" ] || [ ! -x "$BUN_BIN" ]; then
+    echo "Selection's bundled Bun runtime is unavailable; attribution verification failed closed." >&2
+    return 127
+  fi
+  if [ ! -f "$SANITIZE" ]; then
+    echo "Selection's OfficeCLI attribution verifier is unavailable; verification failed closed." >&2
+    return 127
+  fi
+  "$BUN_BIN" "$SANITIZE" "$office_file" "$@"
+  return $?
+}
+
 if [ "$verb" = "create" ]; then
   "$BIN" "$@"
   status=$?
   [ $status -eq 0 ] && ensure_docx
+  if [ $status -eq 0 ]; then
+    sanitize_office_file
+    status=$?
+  fi
   exit $status
 fi
 
@@ -90,7 +114,32 @@ if [ "$ensure_before" = 1 ] || [ "$ensure_after" = 1 ]; then
   "$BIN" "$@"
   status=$?
   [ $status -eq 0 ] && [ "$ensure_after" = 1 ] && ensure_docx
+  if [ $status -eq 0 ]; then
+    sanitize_office_file
+    status=$?
+  fi
   exit $status
 fi
+
+case "$verb" in
+  save|close)
+    "$BIN" "$@"
+    status=$?
+    if [ $status -eq 0 ]; then
+      sanitize_office_file --inspect-visible
+      status=$?
+    fi
+    exit $status
+    ;;
+  batch|add|set|remove|move|swap)
+    "$BIN" "$@"
+    status=$?
+    if [ $status -eq 0 ]; then
+      sanitize_office_file
+      status=$?
+    fi
+    exit $status
+    ;;
+esac
 
 exec "$BIN" "$@"

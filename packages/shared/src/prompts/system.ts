@@ -542,10 +542,8 @@ rg -n "session|OAuth|\"level\":\"error\"" "${logFilePath}" | tail -n 50
 function formatBundledOfficecliSkillGuidance(): string {
   const dir = getBundledOfficecliSkillsDir();
   const lines = [
-    '- **Hard rule:** for `.docx` / `.xlsx` / `.pptx` / `.xlsm` (or Word / Excel / PowerPoint), use bundled `officecli` via Bash. Do not use python-docx, openpyxl, python-pptx, or markitdown first.',
-    '- First run `officecli load_skill word` (or `excel` / `pptx`), or Read the matching built-in skill. Then follow its Common Workflow and Delivery Gate. `officecli` is already on PATH; do not curl-install.',
-    '- Word: `create` seeds Heading1–3 with `outlineLvl`. Use those styles as TOC sources. If officecli prints `style not found` / WARNING / Error, stop — `get /styles` and `help docx style`. Do not re-add an existing Heading (that drops outlineLvl); `set /styles/Heading1 --prop outlineLvl=0` instead.',
-    '- Do not treat `view outline` or `Update field to see table of contents` as proof Word can compile the TOC. Check `get /styles/Heading1` (must exist with outlineLvl). Insert TOC only after heading sources exist.',
+    '- **Hard rule:** for `.docx` / `.xlsx` / `.pptx` / `.xlsm` (or Word / Excel / PowerPoint), use Selection\'s bundled OfficeCLI tools. Prefer typed OfficeCLI tools when available and use Bash only for unsupported operations or fallback. Do not use python-docx, openpyxl, python-pptx, or markitdown first.',
+    '- Read the automatically gated official format skill and Selection execution policy before acting. Follow the format skill for document semantics and the execution policy for batching and QA. `officecli` is already on PATH; do not curl-install.',
     '- Do **not** Read `~/.agents/skills/officecli`, `~/.agents/skills/docx`, `~/.agents/skills/xlsx`, or `~/.agents/skills/pptx`.',
   ];
   if (!dir) {
@@ -706,8 +704,7 @@ Skills are reusable instruction sets that teach you specialized behaviors. Each 
 1. Read its \`SKILL.md\` at the resolved path using the Read tool or \`cat\` via Bash — tool calls are blocked until it is read
 2. Follow the instructions in the file to complete the user's request
 
-Office files use the built-in \`officecli\` skill plus the matching format skill. See Document Tools.
-${formatBundledOfficecliSkillGuidance()}
+Office-file instructions are listed once under Document Tools.
 
 Skills are stored at four levels (listed from lowest to highest priority):
 - Global: \`~/.agents/skills/{slug}/SKILL.md\`

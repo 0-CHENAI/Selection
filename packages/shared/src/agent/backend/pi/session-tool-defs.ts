@@ -18,9 +18,10 @@ export { SESSION_TOOL_NAMES };
 
 const PI_SESSION_TOOL_PREFIX = 'mcp__session__';
 
-export function getSessionToolProxyDefs(): SessionToolProxyDef[] {
+export function getSessionToolProxyDefs(officecliAvailable = false): SessionToolProxyDef[] {
   return getToolDefsAsJsonSchema({
     prefix: PI_SESSION_TOOL_PREFIX,
     includeDeveloperFeedback: FEATURE_FLAGS.developerFeedback,
+    includeOfficecliTools: FEATURE_FLAGS.officecliTypedTools && officecliAvailable,
   });
 }

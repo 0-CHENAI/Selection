@@ -138,6 +138,26 @@ export interface ValidatorInterface {
 }
 
 // ============================================================
+// OfficeCLI Runtime Interface
+// ============================================================
+
+/**
+ * App-owned OfficeCLI runtime capabilities supplied by each backend.
+ *
+ * The core handlers intentionally accept only an absolute binary path and a
+ * narrow style-preflight callback. This keeps process execution and input
+ * validation in session-tools-core without introducing a reverse dependency
+ * on @craft-agent/shared.
+ */
+export interface OfficecliRuntimeInterface {
+  /** Absolute path to the app-managed OfficeCLI binary. */
+  binaryPath: string;
+
+  /** Ensure Word's built-in heading styles have outline levels. */
+  ensureDocxOutlineStyles?(file: string): boolean | Promise<boolean>;
+}
+
+// ============================================================
 // Session Tool Context
 // ============================================================
 
@@ -170,6 +190,18 @@ export interface SessionToolContext {
 
   /** Working directory (project root) for the session, if set */
   workingDirectory?: string;
+
+  /** App-managed OfficeCLI runtime. Omitted when this build has no runtime. */
+  officecli?: OfficecliRuntimeInterface;
+
+  /** Current model's image-input capability. Unknown is intentionally omitted. */
+  supportsImages?: boolean;
+
+  /** Current session permission mode, when supplied by the backend. */
+  permissionMode?: string;
+
+  /** Trusted host-derived policy; model tool input cannot disable protection. */
+  officecliAttributionPolicy?: 'forbid' | 'allow-visible' | 'allow-metadata' | 'allow-all';
 
   // ============================================================
   // Callbacks (transport-agnostic)

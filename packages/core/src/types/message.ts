@@ -569,11 +569,14 @@ export interface PermissionRequest {
  * Note: This is a subset of TokenUsage - totalTokens/contextTokens are computed by consumers
  */
 export interface AgentEventUsage {
+  /** Provider-billed non-cached input tokens for this model call. */
   inputTokens: number;
   outputTokens: number;
   cacheReadTokens?: number;
   cacheCreationTokens?: number;
   costUsd?: number;
+  /** Full input context footprint when it differs from provider-billed input. */
+  contextTokens?: number;
   /** Model's context window size in tokens (from SDK modelUsage) */
   contextWindow?: number;
 }
@@ -621,7 +624,7 @@ export type AgentEvent =
   | { type: 'workflow_agent_completed'; workflowId: string; agentId: string; turnId?: string }
   | { type: 'shell_killed'; shellId: string; turnId?: string }
   | { type: 'source_activated'; sourceSlug: string; originalMessage: string }
-  | { type: 'usage_update'; usage: Pick<AgentEventUsage, 'inputTokens' | 'contextWindow'> }
+  | { type: 'usage_update'; usage: AgentEventUsage }
   | { type: 'steer_undelivered'; message: string };
 
 /**

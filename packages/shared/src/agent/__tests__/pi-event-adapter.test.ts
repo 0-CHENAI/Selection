@@ -256,6 +256,38 @@ describe('PiEventAdapter', () => {
       } as any));
       expect(events).toHaveLength(0);
     });
+
+    it('should preserve complete per-call usage in usage_update events', () => {
+      const events = collect(adapter.adaptEvent({
+        type: 'message_end',
+        message: {
+          role: 'assistant',
+          stopReason: 'stop',
+          content: 'Done',
+          usage: {
+            input: 200,
+            output: 30,
+            cacheRead: 150,
+            cacheWrite: 10,
+            totalTokens: 390,
+            cost: { input: 0.001, output: 0.002, cacheRead: 0.0001, cacheWrite: 0.0002, total: 0.0033 },
+          },
+        },
+      } as any));
+
+      expect(events.at(-1)).toEqual({
+        type: 'usage_update',
+        usage: {
+          inputTokens: 200,
+          outputTokens: 30,
+          cacheReadTokens: 150,
+          cacheCreationTokens: 10,
+          costUsd: 0.0033,
+          contextTokens: 350,
+          contextWindow: undefined,
+        },
+      });
+    });
   });
 
   // ============================================================
@@ -846,6 +878,33 @@ describe('PiEventAdapter', () => {
         result: 'file contents',
         content: [{ type: 'text', text: 'file contents' }],
         isError: false,
+      });
+    });
+
+    it('honors proxy-tool details.isError when the Pi SDK event flag is false', () => {
+      collect(adapter.adaptEvent({ type: 'turn_start' } as any));
+      collect(adapter.adaptEvent({
+        type: 'tool_execution_start',
+        toolCallId: 'call_proxy_error',
+        toolName: 'mcp__session__officecli_batch',
+        args: { file: 'missing.docx', operations: [] },
+      } as any));
+
+      const events = collect(adapter.adaptEvent({
+        type: 'tool_execution_end',
+        toolCallId: 'call_proxy_error',
+        result: {
+          content: [{ type: 'text', text: '[ERROR] target does not exist' }],
+          details: { isError: true },
+        },
+        isError: false,
+      } as any));
+
+      expect(events[0]).toMatchObject({
+        type: 'tool_result',
+        toolName: 'mcp__session__officecli_batch',
+        result: '[ERROR] target does not exist',
+        isError: true,
       });
     });
 

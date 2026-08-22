@@ -22,6 +22,7 @@ import type { McpClientPool } from '../../mcp/mcp-pool.ts';
 import type { Workspace } from '../../config/storage.ts';
 import type { SessionConfig as Session } from '../../sessions/storage.ts';
 import type { SourceManager } from '../core/source-manager.ts';
+import type { OfficecliExecutionCheckpoint } from '../core/officecli-execution-tracker.ts';
 
 // Import AbortReason and RecoveryMessage from core module (single source of truth)
 import { AbortReason, type RecoveryMessage } from '../core/index.ts';
@@ -303,6 +304,8 @@ export interface CoreBackendConfig {
 export interface ChatOptions {
   /** Retry flag (internal use for session recovery) */
   isRetry?: boolean;
+  /** Internal continuation of the same user-authored task (source/auth retry). */
+  continueUserTask?: boolean;
   /** Override thinking level for this message only */
   thinkingOverride?: ThinkingLevel;
   /**
@@ -310,6 +313,13 @@ export interface ChatOptions {
    * Must NOT be embedded in the stored/displayed user message content.
    */
   previousResponseInterrupted?: boolean;
+}
+
+/** Content-free orchestration checkpoint retained only across internal retries. */
+export interface OfficecliContinuationState {
+  execution: OfficecliExecutionCheckpoint;
+  modelWaitMs: number;
+  measuredModelCalls: number;
 }
 
 /**
@@ -364,6 +374,11 @@ export interface AgentBackend {
     attachments?: FileAttachment[],
     options?: ChatOptions
   ): AsyncGenerator<AgentEvent>;
+
+  /** Optional OfficeCLI budget checkpoint used when an auth retry recreates a backend. */
+  getOfficecliContinuationState?(): OfficecliContinuationState;
+  /** Restore the checkpoint before continuing the same user-authored task. */
+  restoreOfficecliContinuationState?(state: OfficecliContinuationState): void;
 
   /**
    * Abort current query (user stop or internal abort).

@@ -4,7 +4,7 @@
  */
 
 import { spawn, type Subprocess } from "bun";
-import { existsSync, rmSync, cpSync, readFileSync, statSync, mkdirSync } from "fs";
+import { chmodSync, existsSync, rmSync, cpSync, readFileSync, statSync, mkdirSync } from "fs";
 import { join, basename } from "path";
 import * as esbuild from "esbuild";
 import { downloadOfficecli, downloadUv, type Platform, type Arch } from "./build/common";
@@ -80,6 +80,16 @@ async function ensureBundledUvForCurrentPlatform(): Promise<void> {
 
 async function ensureBundledOfficecliForCurrentPlatform(): Promise<void> {
   await downloadOfficecli(currentBuildConfig());
+}
+
+function ensureTrustedBunForDev(): void {
+  const bunName = process.platform === "win32" ? "bun.exe" : "bun";
+  const bunPath = join(ELECTRON_DIR, "vendor", "bun", bunName);
+  if (existsSync(bunPath)) return;
+  mkdirSync(join(ELECTRON_DIR, "vendor", "bun"), { recursive: true });
+  cpSync(process.execPath, bunPath);
+  if (process.platform !== "win32") chmodSync(bunPath, 0o755);
+  console.log(`✅ Staged trusted Bun runtime for dev: ${bunPath}`);
 }
 
 // Multi-instance detection (matches detect-instance.sh logic)
@@ -445,6 +455,7 @@ async function main(): Promise<void> {
 
   await ensureBundledUvForCurrentPlatform();
   await ensureBundledOfficecliForCurrentPlatform();
+  ensureTrustedBunForDev();
 
   copyResources();
 

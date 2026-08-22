@@ -73,7 +73,7 @@ import { buildTitlePrompt, buildRegenerateTitlePrompt, validateTitle } from '../
 
 // Skill extraction for Codex/Copilot backends (Claude uses native SDK Skill tool)
 import { parseMentions, resolveSkillMentions, resolveSourceMentions, resolveFileMentions } from '../mentions/index.ts';
-import { loadAllSkills } from '../skills/storage.ts';
+import { loadAllSkills, resolveBundledSkillMdPath } from '../skills/storage.ts';
 
 // ============================================================
 // Mini Agent Configuration
@@ -989,16 +989,32 @@ ${formattedMessages}
       }
       this.debug(`[extractSkillPaths] SKILL.md not found: ${skillMdPath}`);
     };
+    const resolveBundledSlug = (slug: string) => {
+      const skillMdPath = resolveBundledSkillMdPath(slug);
+      if (skillMdPath) {
+        skillPaths.set(slug, skillMdPath);
+        this.debug(`[extractSkillPaths] Resolved locked bundled skill ${slug} → ${skillMdPath}`);
+        return;
+      }
+      this.debug(`[extractSkillPaths] Locked bundled SKILL.md not found for ${slug}`);
+    };
 
     for (const slug of parsed.skills) {
       resolveSlug(slug);
     }
 
-    // Office files: router first (HanaAgent `[Use skill: officecli]`), then format skill
+    // Explicit mentions resolve above. Automatic Office routing skips the generic
+    // router and reads the official format skill followed by Selection's execution
+    // policy, whose batching rules must win when the two instructions overlap.
     const officeFormatSlugs = collectOfficeFormatSkillSlugs(message, attachments);
-    if (officeFormatSlugs.length > 0) resolveSlug('officecli');
     for (const slug of officeFormatSlugs) {
-      if (!skillPaths.has(slug)) resolveSlug(slug);
+      // Automatic routing must not be shadowed by a same-slug project or
+      // workspace skill. Explicit user mentions above keep normal precedence.
+      if (!parsed.skills.includes(slug)) resolveBundledSlug(slug);
+    }
+    if (officeFormatSlugs.length > 0) {
+      skillPaths.delete('officecli-execution');
+      resolveBundledSlug('officecli-execution');
     }
 
     // Resolve mentions to semantic markers (like file mentions) instead of stripping them.
@@ -1033,10 +1049,7 @@ ${formattedMessages}
     const pathList = [...skillPaths.entries()]
       .map(([slug, path]) => `- ${path} (skill: ${slug})`)
       .join('\n');
-    const officeHint = skillPaths.has('officecli')
-      ? '\nFor Word / Excel / PowerPoint, prefer `officecli load_skill word` (or excel / pptx); Read the listed files if you do not run load_skill.'
-      : '';
-    return `Before proceeding with the user's request, you MUST read the following skill instruction files using the Read tool or \`cat\` via Bash:\n${pathList}\n\nDo not take any other action until you have read these files.${officeHint}`;
+    return `Before proceeding with the user's request, you MUST read the following skill instruction files using the Read tool or \`cat\` via Bash:\n${pathList}\n\nDo not take any other action until you have read these files.`;
   }
 
   // ============================================================

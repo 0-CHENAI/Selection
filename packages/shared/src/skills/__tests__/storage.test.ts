@@ -562,6 +562,12 @@ describe('bundled skills', () => {
     expect(router!.source).toBe('bundled');
     expect(all.find(item => item.slug === 'officecli')?.source).toBe('bundled');
     expect(filterUserFacingSkills(all).some(item => item.slug === 'officecli')).toBe(false);
+
+    const executionPolicy = loadSkillBySlug(workspaceRoot, 'officecli-execution');
+    expect(executionPolicy).toBeTruthy();
+    expect(executionPolicy!.source).toBe('bundled');
+    expect(all.find(item => item.slug === 'officecli-execution')?.source).toBe('bundled');
+    expect(filterUserFacingSkills(all).some(item => item.slug === 'officecli-execution')).toBe(false);
   });
 });
 

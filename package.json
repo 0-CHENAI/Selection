@@ -103,7 +103,7 @@
     "officecli:prepare": "bun scripts/sync-officecli.ts --prepare-runtime",
     "officecli:sync": "bun scripts/sync-officecli.ts --update",
     "officecli:benchmark:check": "bun scripts/check-officecli-benchmark.ts",
-    "test:officecli:integration": "bun test packages/shared/src/utils/__tests__/officecli-bundled.integration.test.ts",
+    "test:officecli:integration": "bun test packages/shared/src/utils/__tests__/officecli-bundled.integration.test.ts packages/session-tools-core/src/handlers/officecli-tools.integration.test.ts",
     "oss:sync": "bun run scripts/oss-sync.ts",
     "prepare": "husky"
   },

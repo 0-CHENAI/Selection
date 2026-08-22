@@ -5,6 +5,10 @@ on:
     paths:
       - "apps/electron/resources/officecli/**"
       - "apps/electron/resources/bin/**/officecli*"
+      - "apps/electron/resources/skills/officecli-execution/**"
+      - "apps/electron/resources/scripts/officecli-sanitize-metadata.*"
+      - "apps/electron/resources/scripts/officecli-wrapper.*"
+      - "apps/electron/electron-builder.yml"
       - "packages/session-tools-core/src/**"
       - "packages/core/src/**"
       - "packages/shared/src/**"
@@ -14,6 +18,7 @@ on:
       - "packages/session-mcp-server/src/**"
       - "scripts/build/common.ts"
       - "scripts/build-server.ts"
+      - "scripts/electron-dev.ts"
       - "scripts/sync-officecli.ts"
       - "package.json"
       - "bun.lock"
@@ -63,9 +68,15 @@ jobs:
       - name: Build packaged resource layout
         run: bun run electron:build:resources
 
+      - name: Stage trusted Bun runtime in packaged layout
+        shell: bash
+        run: |
+          bun -e 'import { chmodSync, copyFileSync, mkdirSync } from "node:fs"; import { dirname, join } from "node:path"; const target = join("apps/electron/dist/vendor/bun", process.platform === "win32" ? "bun.exe" : "bun"); mkdirSync(dirname(target), { recursive: true }); copyFileSync(process.execPath, target); if (process.platform !== "win32") chmodSync(target, 0o755);'
+
       # Packaged binary + official bundled skills are the merge gate.
       # Agents call officecli via Bash after reading the built-in skills.
       - name: Run packaged OfficeCLI skill integration
         run: bun run test:officecli:integration
         env:
           CRAFT_RESOURCES_BASE: ${{ github.workspace }}/apps/electron/dist
+          OFFICECLI_INTEGRATION: "1"

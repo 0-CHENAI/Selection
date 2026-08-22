@@ -1,0 +1,204 @@
+import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
+import { existsSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
+import type { SessionToolContext } from '../context.ts';
+import { handleOfficecliBatch } from './officecli-batch.ts';
+import { handleOfficecliQa } from './officecli-qa.ts';
+import { inspectOfficecliAttribution } from './officecli-metadata.ts';
+import { runOfficecli } from '../runtime/officecli-runtime.ts';
+
+const enabled = process.env.OFFICECLI_INTEGRATION === '1';
+const appRoot = process.env.CRAFT_RESOURCES_BASE ?? resolve(import.meta.dir, '../../../..');
+const resourcesBin = process.env.CRAFT_RESOURCES_BASE
+  ? join(process.env.CRAFT_RESOURCES_BASE, 'resources', 'bin')
+  : join(appRoot, 'apps', 'electron', 'resources', 'bin');
+const platformKey = `${process.platform}-${process.arch}`;
+const binaryName = process.platform === 'win32' ? 'officecli.exe' : 'officecli';
+const binary = process.env.CRAFT_OFFICECLI
+  ?? join(resourcesBin, platformKey, binaryName)
+  ?? '';
+const wrapper = join(resourcesBin, process.platform === 'win32' ? 'officecli.cmd' : 'officecli');
+const ensureStyles = join(resourcesBin, process.platform === 'win32'
+  ? 'officecli-ensure-docx-styles.cmd'
+  : 'officecli-ensure-docx-styles');
+
+function runWrapper(args: string[], options: { cwd: string; stdin?: string }) {
+  if (process.platform !== 'win32') return runOfficecli(wrapper, args, options);
+  const command = ['call', `"${wrapper}"`, ...args.map(arg => `"${arg.replaceAll('"', '""')}"`)].join(' ');
+  return runOfficecli(process.env.ComSpec ?? 'cmd.exe', ['/d', '/s', '/c', command], options);
+}
+
+function runEnsureStyles(target: string, cwd: string) {
+  if (process.platform !== 'win32') return runOfficecli(ensureStyles, [binary, target], { cwd });
+  const command = ['call', `"${ensureStyles}"`, `"${binary}"`, `"${target.replaceAll('"', '""')}"`].join(' ');
+  return runOfficecli(process.env.ComSpec ?? 'cmd.exe', ['/d', '/s', '/c', command], { cwd });
+}
+
+describe.skipIf(!enabled)('OfficeCLI typed tools integration', () => {
+  let root = '';
+  let file = '';
+  let context: SessionToolContext;
+
+  beforeAll(async () => {
+    if (!binary || !existsSync(binary)) throw new Error(`OfficeCLI runtime is missing: ${binary || 'unresolved'}`);
+    root = mkdtempSync(join(tmpdir(), 'selection-officecli-typed-integration-'));
+    const workingDirectory = join(root, '含 空格的目录');
+    mkdirSync(workingDirectory, { recursive: true });
+    file = join(workingDirectory, '批处理 ; $(touch OFFICECLI_SHELL_INJECTION).docx');
+    const created = await runOfficecli(binary, ['create', file, '--json'], { cwd: workingDirectory });
+    if (created.exitCode !== 0) throw new Error(created.stderr || created.stdout);
+    if (existsSync(join(workingDirectory, 'OFFICECLI_SHELL_INJECTION'))) {
+      throw new Error('OfficeCLI path was interpreted by a shell');
+    }
+
+    context = {
+      sessionId: 'officecli-integration',
+      workspacePath: workingDirectory,
+      get sourcesPath() { return join(workingDirectory, 'sources'); },
+      get skillsPath() { return join(workingDirectory, 'skills'); },
+      plansFolderPath: join(workingDirectory, 'plans'),
+      sessionPath: workingDirectory,
+      dataPath: join(workingDirectory, 'data'),
+      workingDirectory,
+      callbacks: { onPlanSubmitted() {}, onAuthRequest() {} },
+      fs: {} as SessionToolContext['fs'],
+      loadSourceConfig: () => null,
+      officecli: {
+        binaryPath: binary,
+        ensureDocxOutlineStyles: async (target: string) =>
+          (await runEnsureStyles(target, workingDirectory)).exitCode === 0,
+      },
+    };
+  });
+
+  afterAll(async () => {
+    if (file && context) {
+      await runOfficecli(binary, ['close', file, '--json'], { cwd: context.workingDirectory! });
+    }
+    if (root) rmSync(root, { recursive: true, force: true });
+  });
+
+  it('writes 100 ordered paragraphs in two atomic batches', async () => {
+    const operations = Array.from({ length: 100 }, (_, index) => ({
+      command: 'add' as const,
+      parent: '/body',
+      type: 'paragraph',
+      props: { text: `paragraph-${String(index).padStart(3, '0')}` },
+    }));
+
+    const first = await handleOfficecliBatch(context, { file, operations: operations.slice(0, 50) });
+    const second = await handleOfficecliBatch(context, { file, operations: operations.slice(50) });
+    expect(first.structuredContent).toMatchObject({ success: true, operationCount: 50, appliedCount: 50 });
+    expect(second.structuredContent).toMatchObject({ success: true, operationCount: 50, appliedCount: 50 });
+    expect(existsSync(join(context.workingDirectory!, 'OFFICECLI_SHELL_INJECTION'))).toBe(false);
+
+    const view = await runOfficecli(binary, ['view', file, 'text'], { cwd: context.workingDirectory! });
+    expect(view.exitCode).toBe(0);
+    expect(view.stdout.indexOf('paragraph-000')).toBeLessThan(view.stdout.indexOf('paragraph-099'));
+  }, 30_000);
+
+  it('rolls back the whole batch when one operation fails', async () => {
+    const result = await handleOfficecliBatch(context, {
+      file,
+      operations: [
+        { command: 'add', parent: '/body', type: 'paragraph', props: { text: 'ROLLBACK_SENTINEL' } },
+        { command: 'set', path: '/does-not-exist', props: { text: 'fail' } },
+      ],
+    });
+    expect(result.structuredContent).toMatchObject({
+      success: false,
+      appliedCount: 0,
+      rolledBack: true,
+      failedIndex: 1,
+    });
+
+    const view = await runOfficecli(binary, ['view', file, 'text'], { cwd: context.workingDirectory! });
+    expect(view.stdout).not.toContain('ROLLBACK_SENTINEL');
+  }, 30_000);
+
+  it('passes structural QA with Heading1–3, TOC, and a live PAGE field', async () => {
+    const setup = await handleOfficecliBatch(context, {
+      file,
+      operations: [
+        { command: 'add', parent: '/body', type: 'paragraph', props: { text: '一级标题', style: 'Heading1' } },
+        { command: 'add', parent: '/body', type: 'paragraph', props: { text: '二级标题', style: 'Heading2' } },
+        { command: 'add', parent: '/body', type: 'paragraph', props: { text: '三级标题', style: 'Heading3' } },
+        { command: 'add', parent: '/body', type: 'toc', props: { levels: '1-3', title: '目录', hyperlinks: true } },
+        { command: 'add', parent: '/', type: 'footer', props: { type: 'default', text: 'Page ', align: 'center' } },
+        { command: 'add', parent: '/footer[1]/p[1]', type: 'field', props: { fieldType: 'page' } },
+      ],
+    });
+    expect(setup.isError).toBe(false);
+    expect(inspectOfficecliAttribution(file)).toEqual({ clean: true, entries: [] });
+
+    const qa = await handleOfficecliQa({ ...context, supportsImages: false }, { file, mode: 'balanced' });
+    expect(qa.structuredContent).toMatchObject({
+      structuralStatus: 'passed',
+      visualStatus: 'skipped_no_vision',
+      requiresHumanVisualReview: true,
+    });
+    expect(qa.content).toHaveLength(1);
+  }, 30_000);
+
+  it('returns one real contact-sheet image for the same fixture when vision is supported', async () => {
+    const qa = await handleOfficecliQa({ ...context, supportsImages: true }, { file, mode: 'balanced' });
+    expect(qa.structuredContent).toMatchObject({
+      structuralStatus: 'passed',
+      visualStatus: 'checked',
+      requiresHumanVisualReview: false,
+    });
+    expect(qa.content).toHaveLength(2);
+    expect(qa.content[1]).toMatchObject({ type: 'image', mimeType: 'image/png' });
+  }, 60_000);
+
+  it('keeps the single Shell batch fallback attribution-free', async () => {
+    const fallbackFile = join(context.workingDirectory!, 'flag-off 批处理.docx');
+    const created = await runWrapper(['create', fallbackFile, '--json'], {
+      cwd: context.workingDirectory!,
+    });
+    expect(created.exitCode).toBe(0);
+
+    const batch = await runWrapper(['batch', fallbackFile, '--stop-on-error', '--json'], {
+      cwd: context.workingDirectory!,
+      stdin: JSON.stringify([
+        { command: 'add', parent: '/body', type: 'paragraph', props: { text: 'fallback-body' } },
+      ]),
+    });
+    expect(batch.exitCode).toBe(0);
+    expect(inspectOfficecliAttribution(fallbackFile)).toEqual({ clean: true, entries: [] });
+
+    const saved = await runWrapper(['save', fallbackFile, '--json'], {
+      cwd: context.workingDirectory!,
+    });
+    const closed = await runWrapper(['close', fallbackFile, '--json'], {
+      cwd: context.workingDirectory!,
+    });
+    expect(saved.exitCode).toBe(0);
+    expect(closed.exitCode).toBe(0);
+    expect(inspectOfficecliAttribution(fallbackFile)).toEqual({ clean: true, entries: [] });
+  }, 30_000);
+
+  it('blocks unrequested visible generator stamps on the flag-off Shell path', async () => {
+    const fallbackFile = join(context.workingDirectory!, 'flag-off visible attribution.docx');
+    const created = await runWrapper(['create', fallbackFile, '--json'], {
+      cwd: context.workingDirectory!,
+    });
+    expect(created.exitCode).toBe(0);
+
+    const stamped = await runWrapper(['batch', fallbackFile, '--stop-on-error', '--json'], {
+      cwd: context.workingDirectory!,
+      stdin: JSON.stringify([
+        { command: 'add', parent: '/body', type: 'paragraph', props: { text: '本文档由 OfficeCLI 自动生成' } },
+      ]),
+    });
+    expect(stamped.exitCode).toBe(0);
+    const saved = await runWrapper(['save', fallbackFile, '--json'], {
+      cwd: context.workingDirectory!,
+    });
+    expect(saved.exitCode).not.toBe(0);
+    expect(saved.stderr).toContain('Unrequested OfficeCLI generator attribution');
+    expect(inspectOfficecliAttribution(fallbackFile).clean).toBe(false);
+    await runOfficecli(binary, ['close', fallbackFile, '--json'], { cwd: context.workingDirectory! });
+  }, 30_000);
+});

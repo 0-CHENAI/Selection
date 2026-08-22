@@ -59,6 +59,17 @@ export function isEmbeddedServerEnabled(): boolean {
   return false;
 }
 
+/**
+ * Runtime-evaluated check for typed OfficeCLI batch and QA tools.
+ * Defaults to disabled until the MiniMax and large-model release benchmarks
+ * pass; callers still perform the runtime availability check before exposure.
+ */
+export function isOfficecliTypedToolsEnabled(): boolean {
+  const override = parseBooleanEnv(getEnv('CRAFT_FEATURE_OFFICECLI_TYPED_TOOLS'));
+  if (override !== undefined) return override;
+  return false;
+}
+
 export const FEATURE_FLAGS = {
   /** Enable Opus 4.7 fast mode (speed:"fast" + beta header). 6x pricing. */
   fastMode: false,
@@ -86,5 +97,12 @@ export const FEATURE_FLAGS = {
    */
   get embeddedServer(): boolean {
     return isEmbeddedServerEnabled();
+  },
+  /**
+   * Enable typed OfficeCLI batch and QA tools.
+   * Release-gated default is disabled. Override with CRAFT_FEATURE_OFFICECLI_TYPED_TOOLS=1|0.
+   */
+  get officecliTypedTools(): boolean {
+    return isOfficecliTypedToolsEnabled();
   },
 } as const;

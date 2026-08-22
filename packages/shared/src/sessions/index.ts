@@ -12,6 +12,10 @@
 export type {
   SessionStatus,
   SessionTokenUsage,
+  SessionModelCallUsage,
+  SessionTurnUsageSnapshot,
+  SessionTurnUsage,
+  OfficecliTaskUsage,
   StoredMessage,
   SessionConfig,
   StoredSession,
@@ -126,4 +130,3 @@ export {
   validateBundle,
   MAX_BUNDLE_SIZE_BYTES,
 } from './bundle.ts';
-

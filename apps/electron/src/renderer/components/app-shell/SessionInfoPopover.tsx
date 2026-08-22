@@ -6,6 +6,8 @@ import { Input } from '@/components/ui/input'
 import { useAppShellContext, useSession } from '@/context/AppShellContext'
 import { cn } from '@/lib/utils'
 import { SessionFilesSection } from '../right-sidebar/SessionFilesSection'
+import { formatTokenCount } from './input/model-picker-helpers'
+import { formatUsageCost, formatUsageDuration } from './session-usage-format'
 
 interface SessionInfoPopoverProps {
   sessionId: string
@@ -104,6 +106,12 @@ function SessionInfoPopoverContent({ sessionId, sessionFolderPath }: { sessionId
   const { onRenameSession } = useAppShellContext()
   const [name, setName] = React.useState('')
   const renameTimeoutRef = React.useRef<ReturnType<typeof setTimeout> | null>(null)
+  const usage = session?.tokenUsage
+  const lastTurn = usage?.lastTurn
+  const currentTurn = usage?.currentTurn
+  const displayedTurn = currentTurn ?? lastTurn
+  const lastCall = usage?.lastCall
+  const hasLegacyUsage = !displayedTurn && !!usage && usage.totalTokens > 0
 
   React.useEffect(() => {
     setName(session?.name || '')
@@ -148,6 +156,48 @@ function SessionInfoPopoverContent({ sessionId, sessionFolderPath }: { sessionId
           />
         </div>
       </div>
+      {(displayedTurn || hasLegacyUsage) && (
+        <div className="shrink-0 border-b border-border/50 p-3">
+          <div className="mb-2 text-xs font-medium text-muted-foreground select-none">
+            {t('chat.usage.title')}
+          </div>
+          {displayedTurn ? (
+            <>
+              <div className="mb-2 text-xs text-foreground/80">
+                {t(currentTurn ? 'chat.usage.currentTurn' : 'chat.usage.latestTurn')}
+              </div>
+              <dl className="grid grid-cols-3 gap-x-3 gap-y-2 text-xs">
+                <UsageStat label={t('chat.usage.modelCalls')} value={String(displayedTurn.modelCallCount)} />
+                <UsageStat label={t('chat.usage.duration')} value={formatUsageDuration(displayedTurn.wallClockMs)} />
+                <UsageStat label={t('chat.usage.cost')} value={formatUsageCost(displayedTurn.costUsd)} />
+                <UsageStat label={t('chat.usage.input')} value={formatTokenCount(displayedTurn.inputTokens)} />
+                <UsageStat label={t('chat.usage.output')} value={formatTokenCount(displayedTurn.outputTokens)} />
+                <UsageStat label={t('chat.usage.cacheRead')} value={formatTokenCount(displayedTurn.cacheReadTokens)} />
+              </dl>
+              {lastCall && (!currentTurn || currentTurn.modelCallCount > 0) && (
+                <div className="mt-2 border-t border-border/40 pt-2">
+                  <div className="mb-1 text-[11px] text-muted-foreground">{t('chat.usage.lastCall')}</div>
+                  <dl className="grid grid-cols-3 gap-x-3 text-xs">
+                    <UsageStat label={t('chat.usage.input')} value={formatTokenCount(lastCall.inputTokens)} />
+                    <UsageStat label={t('chat.usage.output')} value={formatTokenCount(lastCall.outputTokens)} />
+                    <UsageStat label={t('chat.usage.cacheRead')} value={formatTokenCount(lastCall.cacheReadTokens)} />
+                  </dl>
+                </div>
+              )}
+            </>
+          ) : usage ? (
+            <>
+              <div className="mb-2 text-xs text-foreground/80">{t('chat.usage.legacy')}</div>
+              <dl className="grid grid-cols-3 gap-x-3 text-xs">
+                <UsageStat label={t('chat.usage.input')} value={formatTokenCount(usage.inputTokens)} />
+                <UsageStat label={t('chat.usage.output')} value={formatTokenCount(usage.outputTokens)} />
+                <UsageStat label={t('chat.usage.cost')} value={formatUsageCost(usage.costUsd)} />
+              </dl>
+              <p className="mt-2 text-[11px] leading-4 text-muted-foreground">{t('chat.usage.legacyHint')}</p>
+            </>
+          ) : null}
+        </div>
+      )}
       <div className="flex-1 min-h-0 overflow-hidden">
         <SessionFilesSection
           sessionId={sessionId}
@@ -156,6 +206,15 @@ function SessionInfoPopoverContent({ sessionId, sessionFolderPath }: { sessionId
           className="h-full min-h-0"
         />
       </div>
+    </div>
+  )
+}
+
+function UsageStat({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="min-w-0">
+      <dt className="truncate text-muted-foreground">{label}</dt>
+      <dd className="mt-0.5 truncate font-mono text-foreground">{value}</dd>
     </div>
   )
 }

@@ -4,6 +4,8 @@ import {
   getSessionToolDefs,
   getSessionToolNames,
   getSessionToolRegistry,
+  getSessionSafeAllowedToolNames,
+  getSessionSafeBlockedToolNames,
 } from './tool-defs.ts';
 
 describe('session tool filtering helpers', () => {
@@ -32,9 +34,26 @@ describe('session tool filtering helpers', () => {
     }
   });
 
+  it('omits both typed OfficeCLI tools when the feature/runtime gate is closed', () => {
+    const disabled = getSessionToolNames({ includeOfficecliTools: false });
+    expect(disabled.has('officecli_batch')).toBe(false);
+    expect(disabled.has('officecli_qa')).toBe(false);
+
+    const enabled = getSessionToolNames({ includeOfficecliTools: true });
+    expect(enabled.has('officecli_batch')).toBe(true);
+    expect(enabled.has('officecli_qa')).toBe(true);
+  });
+
   it('all canonical session tools declare safeMode metadata', () => {
     for (const def of SESSION_TOOL_DEFS) {
       expect(def.safeMode === 'allow' || def.safeMode === 'block').toBe(true);
     }
+  });
+
+  it('keeps OfficeCLI research and QA available in Safe mode while blocking document writes', () => {
+    const allowed = getSessionSafeAllowedToolNames({ includeOfficecliTools: true });
+    const blocked = getSessionSafeBlockedToolNames({ includeOfficecliTools: true });
+    expect(allowed.has('officecli_qa')).toBe(true);
+    expect(blocked.has('officecli_batch')).toBe(true);
   });
 });

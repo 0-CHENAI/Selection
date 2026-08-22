@@ -97,6 +97,61 @@ export interface SessionTokenUsage {
   cacheCreationTokens?: number;
   /** Model's context window size in tokens (from SDK modelUsage) */
   contextWindow?: number;
+  /** Usage reported by the most recent individual model call. Absent on legacy sessions. */
+  lastCall?: SessionModelCallUsage;
+  /** Live aggregate for the user task that is currently processing. Runtime-only in normal operation. */
+  currentTurn?: SessionTurnUsageSnapshot;
+  /** Aggregate usage for the most recently completed user turn. Absent on legacy sessions. */
+  lastTurn?: SessionTurnUsage;
+  /** Privacy-safe OfficeCLI orchestration metrics for the most recently observed user task. */
+  lastOfficecliTask?: OfficecliTaskUsage;
+}
+
+/** No document text, command text, or file paths are permitted in this payload. */
+export interface OfficecliTaskUsage {
+  attemptedToolCalls: number;
+  toolCalls: number;
+  batchCalls: number;
+  batchOperations: number;
+  batchSizes: number[];
+  directMutations: number;
+  qaCalls: number;
+  qaModes: Record<string, number>;
+  visualStatuses: Record<string, number>;
+  blockedCalls: number;
+  replanTriggered: boolean;
+  fileCount: number;
+  executionMs: number;
+  modelWaitMs: number;
+  measuredModelCalls: number;
+  errorTypes: Record<string, number>;
+  failedOperationIndexes: number[];
+}
+
+/** Provider-normalized usage for one model invocation. */
+export interface SessionModelCallUsage {
+  inputTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+  cacheReadTokens: number;
+  cacheCreationTokens: number;
+  costUsd: number;
+}
+
+/** Provider-normalized aggregate snapshot for an in-progress user turn. */
+export interface SessionTurnUsageSnapshot extends SessionModelCallUsage {
+  modelCallCount: number;
+  wallClockMs: number;
+  startedAt: number;
+  updatedAt: number;
+}
+
+/** Provider-normalized aggregate for one user turn, including orchestration overhead. */
+export interface SessionTurnUsage extends SessionModelCallUsage {
+  modelCallCount: number;
+  wallClockMs: number;
+  startedAt: number;
+  completedAt: number;
 }
 
 /**

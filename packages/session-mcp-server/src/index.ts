@@ -32,8 +32,12 @@ import {
   type Tool,
 } from '@modelcontextprotocol/sdk/types.js';
 import { existsSync, readFileSync, readdirSync, statSync, writeFileSync, mkdirSync } from 'node:fs';
-import { join } from 'node:path';
-import { isDeveloperFeedbackEnabled } from '@craft-agent/shared/feature-flags';
+import { join, resolve } from 'node:path';
+import { FEATURE_FLAGS, isDeveloperFeedbackEnabled } from '@craft-agent/shared/feature-flags';
+import {
+  ensureDocxOutlineHeadingStyles,
+  resolveOfficecliBinary,
+} from '@craft-agent/shared/utils';
 // Import from session-tools-core
 import {
   type SessionToolContext,
@@ -45,6 +49,7 @@ import {
   // Registry
   getSessionToolRegistry,
   getToolDefsAsJsonSchema,
+  SESSION_SAFE_BLOCKED_TOOL_NAMES,
   // Helpers
   loadSourceConfig as loadSourceConfigFromHelpers,
   errorResponse,
@@ -60,9 +65,32 @@ interface SessionConfig {
   plansFolderPath: string;
   workingDirectory?: string;
   callbackPort?: string;
+  supportsImages?: boolean;
+  permissionMode?: string;
 }
 
 const CALLBACK_TOOL_TIMEOUT_MS = 120000;
+
+async function refreshOfficecliAttributionPolicy(ctx: SessionToolContext): Promise<void> {
+  const endpoint = process.env.CRAFT_OFFICECLI_POLICY_ENDPOINT;
+  const token = process.env.CRAFT_OFFICECLI_POLICY_TOKEN;
+  if (!endpoint || !token || !endpoint.startsWith('http://127.0.0.1:')) {
+    ctx.officecliAttributionPolicy = 'forbid';
+    return;
+  }
+  try {
+    const response = await fetch(endpoint, {
+      headers: { Authorization: `Bearer ${token}` },
+      signal: AbortSignal.timeout(2_000),
+    });
+    const body = await response.json() as { policy?: unknown };
+    ctx.officecliAttributionPolicy = response.ok && (
+      body.policy === 'allow-visible' || body.policy === 'allow-metadata' || body.policy === 'allow-all'
+    ) ? body.policy : 'forbid';
+  } catch {
+    ctx.officecliAttributionPolicy = 'forbid';
+  }
+}
 
 // ============================================================
 // Callback Communication
@@ -197,6 +225,19 @@ function createCodexContext(config: SessionConfig): SessionToolContext {
   // Session paths for transform_data / render_template
   const sessionsDir = join(workspaceRootPath, 'sessions', sessionId);
   const sessionDataDir = join(sessionsDir, 'data');
+  const trustedAppRoot = process.env.CRAFT_RESOURCES_BASE
+    ?? process.env.CRAFT_BUNDLED_ASSETS_ROOT
+    ?? process.env.CRAFT_RESOURCES_PATH
+    ?? resolve(import.meta.dir, '../../..');
+  const officecliResolution = {
+    cwd: trustedAppRoot,
+    appRootPath: trustedAppRoot,
+    ...(process.env.CRAFT_RESOURCES_BASE
+      ? { resourcesPath: join(process.env.CRAFT_RESOURCES_BASE, 'resources') }
+      : {}),
+    trustEnvironment: false,
+  } as const;
+  const officecliBinary = resolveOfficecliBinary(officecliResolution);
 
   // Build context
   return {
@@ -208,6 +249,18 @@ function createCodexContext(config: SessionConfig): SessionToolContext {
     sessionPath: sessionsDir,
     dataPath: sessionDataDir,
     workingDirectory: config.workingDirectory,
+    officecliAttributionPolicy: 'forbid' as const,
+    ...(config.permissionMode ? { permissionMode: config.permissionMode } : {}),
+    ...(officecliBinary ? {
+      officecli: {
+        binaryPath: officecliBinary,
+        ensureDocxOutlineStyles: (file: string) => ensureDocxOutlineHeadingStyles(file, {
+          ...officecliResolution,
+          binary: officecliBinary,
+        }),
+      },
+    } : {}),
+    ...(config.supportsImages !== undefined ? { supportsImages: config.supportsImages } : {}),
     callbacks,
     fs,
     loadSourceConfig: (sourceSlug: string): SourceConfig | null => {
@@ -261,9 +314,10 @@ function createCodexContext(config: SessionConfig): SessionToolContext {
 // Tool Definitions (from canonical registry)
 // ============================================================
 
-function createSessionTools(includeDeveloperFeedback: boolean): Tool[] {
+function createSessionTools(includeDeveloperFeedback: boolean, includeOfficecliTools: boolean): Tool[] {
   return getToolDefsAsJsonSchema({
     includeDeveloperFeedback,
+    includeOfficecliTools,
   }).map(def => ({
     name: def.name,
     description: def.description,
@@ -477,6 +531,8 @@ async function main() {
   let plansFolderPath: string | undefined;
   let workingDirectory: string | undefined;
   let callbackPort: string | undefined;
+  let supportsImages: boolean | undefined;
+  let permissionMode: string | undefined;
 
   for (let i = 0; i < args.length; i++) {
     if (args[i] === '--session-id' && args[i + 1]) {
@@ -494,6 +550,12 @@ async function main() {
     } else if (args[i] === '--callback-port' && args[i + 1]) {
       callbackPort = args[i + 1];
       i++;
+    } else if (args[i] === '--supports-images' && args[i + 1]) {
+      supportsImages = args[i + 1] === 'true' || args[i + 1] === '1';
+      i++;
+    } else if (args[i] === '--permission-mode' && args[i + 1]) {
+      permissionMode = args[i + 1];
+      i++;
     }
   }
 
@@ -507,15 +569,24 @@ async function main() {
     workspaceRootPath,
     plansFolderPath,
     workingDirectory,
+    permissionMode: permissionMode ?? process.env.CRAFT_PERMISSION_MODE,
     // CLI arg takes priority, env var as fallback (Copilot CLI may not forward env to subprocesses)
     callbackPort: callbackPort || process.env.CRAFT_LLM_CALLBACK_PORT,
+    supportsImages: supportsImages ?? (
+      process.env.CRAFT_MODEL_SUPPORTS_IMAGES === '1' || process.env.CRAFT_MODEL_SUPPORTS_IMAGES === 'true'
+        ? true
+        : process.env.CRAFT_MODEL_SUPPORTS_IMAGES === '0' || process.env.CRAFT_MODEL_SUPPORTS_IMAGES === 'false'
+          ? false
+          : undefined
+    ),
   };
 
   // Create the Codex context
   const ctx = createCodexContext(config);
 
   const includeDeveloperFeedback = isDeveloperFeedbackEnabled();
-  const sessionToolRegistry = getSessionToolRegistry({ includeDeveloperFeedback });
+  const includeOfficecliTools = FEATURE_FLAGS.officecliTypedTools && Boolean(ctx.officecli?.binaryPath);
+  const sessionToolRegistry = getSessionToolRegistry({ includeDeveloperFeedback, includeOfficecliTools });
 
   // Create MCP server
   const server = new Server(
@@ -535,7 +606,7 @@ async function main() {
 
   // Handle tool listing — session tools + docs upstream tools
   server.setRequestHandler(ListToolsRequestSchema, async () => ({
-    tools: [...createSessionTools(includeDeveloperFeedback), ...docsTools],
+    tools: [...createSessionTools(includeDeveloperFeedback, includeOfficecliTools), ...docsTools],
   }));
 
   // Handle tool calls — route via canonical registry, call_llm, or docs upstream
@@ -556,6 +627,12 @@ async function main() {
       // Check canonical session tool registry first (feature-filtered)
       const def = sessionToolRegistry.get(name);
       if (def?.handler) {
+        if (name === 'officecli_batch' || name === 'officecli_qa') {
+          await refreshOfficecliAttributionPolicy(ctx);
+        }
+        if (config.permissionMode === 'safe' && SESSION_SAFE_BLOCKED_TOOL_NAMES.has(name)) {
+          return errorResponse(`Tool '${name}' is blocked in Safe mode.`);
+        }
         return await def.handler(ctx, toolArgs);
       }
 
@@ -576,7 +653,7 @@ async function main() {
   const transport = new StdioServerTransport();
   await server.connect(transport);
 
-  console.error(`Session MCP Server started for session ${sessionId} (developerFeedback=${includeDeveloperFeedback})`);
+  console.error(`Session MCP Server started for session ${sessionId} (developerFeedback=${includeDeveloperFeedback}, officecliTypedTools=${includeOfficecliTools})`);
 }
 
 main().catch((error) => {

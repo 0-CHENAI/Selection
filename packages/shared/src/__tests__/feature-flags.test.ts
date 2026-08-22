@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from 'bun:test';
-import { isDevRuntime, isDeveloperFeedbackEnabled, isCraftAgentsCliEnabled, isEmbeddedServerEnabled } from '../feature-flags.ts';
+import { isDevRuntime, isDeveloperFeedbackEnabled, isCraftAgentsCliEnabled, isEmbeddedServerEnabled, isOfficecliTypedToolsEnabled } from '../feature-flags.ts';
 
 const ORIGINAL_ENV = {
   NODE_ENV: process.env.NODE_ENV,
@@ -7,6 +7,7 @@ const ORIGINAL_ENV = {
   CRAFT_FEATURE_DEVELOPER_FEEDBACK: process.env.CRAFT_FEATURE_DEVELOPER_FEEDBACK,
   CRAFT_FEATURE_CRAFT_AGENTS_CLI: process.env.CRAFT_FEATURE_CRAFT_AGENTS_CLI,
   CRAFT_FEATURE_EMBEDDED_SERVER: process.env.CRAFT_FEATURE_EMBEDDED_SERVER,
+  CRAFT_FEATURE_OFFICECLI_TYPED_TOOLS: process.env.CRAFT_FEATURE_OFFICECLI_TYPED_TOOLS,
 };
 
 afterEach(() => {
@@ -24,6 +25,9 @@ afterEach(() => {
 
   if (ORIGINAL_ENV.CRAFT_FEATURE_EMBEDDED_SERVER === undefined) delete process.env.CRAFT_FEATURE_EMBEDDED_SERVER;
   else process.env.CRAFT_FEATURE_EMBEDDED_SERVER = ORIGINAL_ENV.CRAFT_FEATURE_EMBEDDED_SERVER;
+
+  if (ORIGINAL_ENV.CRAFT_FEATURE_OFFICECLI_TYPED_TOOLS === undefined) delete process.env.CRAFT_FEATURE_OFFICECLI_TYPED_TOOLS;
+  else process.env.CRAFT_FEATURE_OFFICECLI_TYPED_TOOLS = ORIGINAL_ENV.CRAFT_FEATURE_OFFICECLI_TYPED_TOOLS;
 });
 
 describe('feature-flags runtime helpers', () => {
@@ -98,5 +102,14 @@ describe('feature-flags runtime helpers', () => {
     process.env.CRAFT_FEATURE_EMBEDDED_SERVER = '0';
 
     expect(isEmbeddedServerEnabled()).toBe(false);
+  });
+
+  it('isOfficecliTypedToolsEnabled stays release-gated by default and honors explicit overrides', () => {
+    delete process.env.CRAFT_FEATURE_OFFICECLI_TYPED_TOOLS;
+    expect(isOfficecliTypedToolsEnabled()).toBe(false);
+    process.env.CRAFT_FEATURE_OFFICECLI_TYPED_TOOLS = '0';
+    expect(isOfficecliTypedToolsEnabled()).toBe(false);
+    process.env.CRAFT_FEATURE_OFFICECLI_TYPED_TOOLS = '1';
+    expect(isOfficecliTypedToolsEnabled()).toBe(true);
   });
 });

@@ -71,6 +71,8 @@ import {
   type SessionMetadata,
   type SessionStatus,
   type SessionHeader,
+  type SessionTokenUsage,
+  type OfficecliTaskUsage,
   pickSessionFields,
   isSharedProjectMemoryEnabled,
 } from '@craft-agent/shared/sessions'
@@ -114,6 +116,13 @@ import { waitForAutomationSessionCompletion } from './wait-automation-session.ts
 import { createTypedError } from '@craft-agent/shared/agent/errors'
 import { buildBackendRuntimeSignature, buildRestartRequiredSignature, prepareModelImageAttachments } from './runtime-config'
 import { validateArchiveTarget } from './archive-guards'
+import {
+  createTurnUsageAccumulator,
+  finalizeTurnUsage,
+  recordModelCallUsage,
+  snapshotTurnUsage,
+  type TurnUsageAccumulator,
+} from './usage-accounting'
 
 // Import from server-core domain utilities
 import { sanitizeForTitle, shouldActivateBrowserOverlay, normalizeBrowserToolName, rollbackFailedBranchCreation, releaseBrowserOwnershipOnForcedStop } from '@craft-agent/server-core/domain'
@@ -848,17 +857,15 @@ interface ManagedSession {
   // SDK session ID for conversation continuity
   sdkSessionId?: string
   // Token usage for display
-  tokenUsage?: {
-    inputTokens: number
-    outputTokens: number
-    totalTokens: number
-    contextTokens: number
-    costUsd: number
-    cacheReadTokens?: number
-    cacheCreationTokens?: number
-    /** Model's context window size in tokens (from SDK modelUsage) */
-    contextWindow?: number
-  }
+  tokenUsage?: SessionTokenUsage
+  /** Runtime-only aggregate for the currently processing user turn. */
+  activeTurnUsage?: TurnUsageAccumulator
+  /** Usage accumulator retained across a source-activation continuation. */
+  pendingContinuationUsage?: TurnUsageAccumulator
+  /** Content-free OfficeCLI budget retained when an auth retry recreates the backend. */
+  pendingOfficecliContinuationState?: ReturnType<NonNullable<AgentBackend['getOfficecliContinuationState']>>
+  /** Whether the backend emitted per-call usage for this turn (prevents double-counting final usage). */
+  activeTurnSawUsageUpdate?: boolean
   // Session status (user-controlled) - determines open vs closed
   // Dynamic status ID referencing workspace status config
   sessionStatus?: string
@@ -1230,6 +1237,54 @@ function resolveSupportsBranching(managed: ManagedSession): boolean {
 const DEFAULT_TOKEN_USAGE = {
   inputTokens: 0, outputTokens: 0, totalTokens: 0,
   contextTokens: 0, costUsd: 0,
+}
+
+function parseOfficecliUsageMarker(message: string): OfficecliTaskUsage | null {
+  const marker = '__OFFICECLI_USAGE__'
+  const markerIndex = message.indexOf(marker)
+  if (markerIndex < 0) return null
+  try {
+    const raw = JSON.parse(message.slice(markerIndex + marker.length)) as Record<string, unknown>
+    const count = (key: string): number => {
+      const value = raw[key]
+      return typeof value === 'number' && Number.isFinite(value) ? Math.max(0, Math.floor(value)) : 0
+    }
+    const countMap = (key: string): Record<string, number> => {
+      const value = raw[key]
+      if (!value || typeof value !== 'object' || Array.isArray(value)) return {}
+      return Object.fromEntries(Object.entries(value as Record<string, unknown>)
+        .filter(([name, entry]) => /^[a-z0-9_-]{1,40}$/i.test(name) && typeof entry === 'number' && Number.isFinite(entry))
+        .map(([name, entry]) => [name, Math.max(0, Math.floor(entry as number))]))
+    }
+    const countArray = (key: string, maximum: number): number[] => {
+      const value = raw[key]
+      if (!Array.isArray(value)) return []
+      return value
+        .filter(entry => typeof entry === 'number' && Number.isInteger(entry) && entry >= 0 && entry <= maximum)
+        .slice(0, 100) as number[]
+    }
+    return {
+      attemptedToolCalls: count('attemptedToolCalls'),
+      toolCalls: count('toolCalls'),
+      batchCalls: count('batchCalls'),
+      batchOperations: count('batchOperations'),
+      batchSizes: countArray('batchSizes', 50),
+      directMutations: count('directMutations'),
+      qaCalls: count('qaCalls'),
+      qaModes: countMap('qaModes'),
+      visualStatuses: countMap('visualStatuses'),
+      blockedCalls: count('blockedCalls'),
+      replanTriggered: raw.replanTriggered === true,
+      fileCount: count('fileCount'),
+      executionMs: count('executionMs'),
+      modelWaitMs: count('modelWaitMs'),
+      measuredModelCalls: count('measuredModelCalls'),
+      errorTypes: countMap('errorTypes'),
+      failedOperationIndexes: countArray('failedOperationIndexes', 49),
+    }
+  } catch {
+    return null
+  }
 }
 
 /**
@@ -3787,6 +3842,11 @@ export class SessionManager implements ISessionManager {
         },
       }) as AgentInstance
 
+      if (managed.pendingOfficecliContinuationState && managed.agent.restoreOfficecliContinuationState) {
+        managed.agent.restoreOfficecliContinuationState(managed.pendingOfficecliContinuationState)
+        managed.pendingOfficecliContinuationState = undefined
+      }
+
       sessionLog.info('Created agent', {
         craftSessionId: managed.id,
         backend: provider,
@@ -3802,6 +3862,18 @@ export class SessionManager implements ISessionManager {
       // ============================================================
 
       managed.agent.onDebug = (msg: string) => {
+        const officecliUsage = parseOfficecliUsageMarker(msg)
+        if (officecliUsage) {
+          managed.tokenUsage = managed.tokenUsage ?? { ...DEFAULT_TOKEN_USAGE }
+          managed.tokenUsage.lastOfficecliTask = officecliUsage
+          this.persistSession(managed)
+          this.sendEvent({
+            type: 'usage_update',
+            sessionId: managed.id,
+            tokenUsage: managed.tokenUsage,
+          }, managed.workspace.id)
+          return
+        }
         const marker = '__PERMISSION_BLOCK__'
         if (msg.includes(marker)) {
           const idx = msg.indexOf(marker)
@@ -5998,6 +6070,7 @@ export class SessionManager implements ISessionManager {
     const isPendingAutoRetry = !!pendingAutoRetry
       && message === pendingAutoRetry.content
       && Date.now() < pendingAutoRetry.deadlineMs
+    const isUserTaskContinuation = _isAuthRetry === true || isPendingAutoRetry
     if (claimAutoRetryPending(managed, message) === 'drop') {
       sessionLog.info(`sendMessage: dropped duplicate source-activation retry for ${sessionId}`)
       const existingRetry = [...managed.messages].reverse().find(candidate =>
@@ -6246,6 +6319,25 @@ export class SessionManager implements ISessionManager {
     managed.streamingText = ''
     managed.processingGeneration++
     managed.turnStartFinalMessageId = this.getLastFinalAssistantMessageId(managed.messages)
+    if (isUserTaskContinuation) {
+      managed.activeTurnUsage = managed.activeTurnUsage
+        ?? managed.pendingContinuationUsage
+        ?? createTurnUsageAccumulator(Date.now())
+      managed.pendingContinuationUsage = undefined
+    } else {
+      managed.activeTurnUsage = createTurnUsageAccumulator(Date.now())
+      managed.pendingContinuationUsage = undefined
+    }
+    managed.activeTurnSawUsageUpdate = false
+    if (!managed.tokenUsage) {
+      managed.tokenUsage = { ...DEFAULT_TOKEN_USAGE }
+    }
+    managed.tokenUsage.currentTurn = snapshotTurnUsage(managed.activeTurnUsage, Date.now())
+    this.sendEvent({
+      type: 'usage_update',
+      sessionId: managed.id,
+      tokenUsage: managed.tokenUsage,
+    }, managed.workspace.id)
 
     // Reset auth retry flag for this new message (allows one retry per message)
     // IMPORTANT: Skip reset if this is an auth retry call - the flag is already true
@@ -6434,7 +6526,6 @@ export class SessionManager implements ISessionManager {
       // This must be set before each chat() call since multiple sessions share the process.
       const chatSessionDir = getSessionStoragePath(workspaceRootPath, sessionId)
       toolMetadataStore.setSessionDir(chatSessionDir)
-
       // Interruption context is a model-only flag — never append to the stored
       // user message string (that polluted transcripts + source-activation retries).
       const previousResponseInterrupted = !!managed.wasInterrupted
@@ -6503,6 +6594,7 @@ export class SessionManager implements ISessionManager {
       sendSpan.mark('chat.starting')
       const chatIterator = agent.chat(message, preparedImages.attachments, {
         previousResponseInterrupted,
+        continueUserTask: isUserTaskContinuation,
       })
       this.announceRegenerateReplacement(managed)
       sessionLog.info('Got chat iterator, starting iteration...')
@@ -7175,6 +7267,8 @@ export class SessionManager implements ISessionManager {
 
         // 2. Destroy the agent — the new agent's postInit() will refresh auth
         sessionLog.info(`[auth-retry] Destroying agent for session ${sessionId}`)
+        managed.pendingOfficecliContinuationState = managed.agent?.getOfficecliContinuationState?.()
+        managed.agent?.dispose()
         managed.agent = null
 
         // 3. Retry the message
@@ -7354,6 +7448,24 @@ export class SessionManager implements ISessionManager {
     const completionReason = regenerateOutcome.reason
 
     sessionLog.info(`Processing stopped for session ${sessionId}: ${completionReason}`)
+
+    if (managed.activeTurnUsage) {
+      const pendingSourceContinuation = managed.autoRetryPending
+      if (
+        pendingSourceContinuation &&
+        !pendingSourceContinuation.committed &&
+        Date.now() < pendingSourceContinuation.deadlineMs
+      ) {
+        managed.pendingContinuationUsage = managed.activeTurnUsage
+      }
+      if (!managed.tokenUsage) {
+        managed.tokenUsage = { ...DEFAULT_TOKEN_USAGE }
+      }
+      managed.tokenUsage.lastTurn = finalizeTurnUsage(managed.activeTurnUsage, Date.now())
+      delete managed.tokenUsage.currentTurn
+      managed.activeTurnUsage = undefined
+      managed.activeTurnSawUsageUpdate = undefined
+    }
 
     // 1. Cleanup state
     this.setProcessing(managed, false)
@@ -9039,10 +9151,7 @@ export class SessionManager implements ISessionManager {
             this.sendEvent({
               type: 'usage_update',
               sessionId,
-              tokenUsage: {
-                inputTokens: managed.tokenUsage.inputTokens,
-                contextWindow: managed.tokenUsage.contextWindow,
-              },
+              tokenUsage: managed.tokenUsage,
             }, workspaceId)
           }
         }
@@ -9434,9 +9543,18 @@ export class SessionManager implements ISessionManager {
               costUsd: 0,
             }
           }
+          // Backends that provide per-call usage_update events have already
+          // accounted for this final call. Legacy backends only provide the
+          // final complete event, so record it as a single-call turn.
+          if (!managed.activeTurnSawUsageUpdate && managed.activeTurnUsage) {
+            const recorded = recordModelCallUsage(managed.activeTurnUsage, event.usage)
+            managed.activeTurnUsage = recorded.accumulator
+            managed.tokenUsage.lastCall = recorded.lastCall
+            managed.tokenUsage.currentTurn = snapshotTurnUsage(recorded.accumulator, Date.now())
+          }
           // inputTokens = current context size (full conversation sent this turn), NOT accumulated
           // Each API call sends the full conversation history, so we use the latest value
-          managed.tokenUsage.inputTokens = event.usage.inputTokens
+          managed.tokenUsage.inputTokens = event.usage.contextTokens ?? event.usage.inputTokens
           // outputTokens and costUsd are accumulated across all turns (total session usage)
           managed.tokenUsage.outputTokens += event.usage.outputTokens
           managed.tokenUsage.totalTokens = managed.tokenUsage.inputTokens + managed.tokenUsage.outputTokens
@@ -9464,8 +9582,16 @@ export class SessionManager implements ISessionManager {
               costUsd: 0,
             }
           }
+          const recorded = recordModelCallUsage(
+            managed.activeTurnUsage ?? createTurnUsageAccumulator(Date.now()),
+            event.usage,
+          )
+          managed.activeTurnUsage = recorded.accumulator
+          managed.activeTurnSawUsageUpdate = true
+          managed.tokenUsage.lastCall = recorded.lastCall
+          managed.tokenUsage.currentTurn = snapshotTurnUsage(recorded.accumulator, Date.now())
           // Update only inputTokens (current context size) - other fields accumulate on complete
-          managed.tokenUsage.inputTokens = event.usage.inputTokens
+          managed.tokenUsage.inputTokens = event.usage.contextTokens ?? event.usage.inputTokens
           if (event.usage.contextWindow) {
             managed.tokenUsage.contextWindow = event.usage.contextWindow
           }
@@ -9474,10 +9600,7 @@ export class SessionManager implements ISessionManager {
           this.sendEvent({
             type: 'usage_update',
             sessionId: managed.id,
-            tokenUsage: {
-              inputTokens: event.usage.inputTokens,
-              contextWindow: event.usage.contextWindow,
-            },
+            tokenUsage: managed.tokenUsage,
           }, workspaceId)
         }
         break

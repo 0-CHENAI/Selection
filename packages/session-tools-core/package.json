@@ -14,6 +14,7 @@
   },
   "dependencies": {
     "beautiful-mermaid": "*",
+    "fflate": "^0.8.2",
     "sharp": "0.34.5",
     "zod": "^3.23.0",
     "zod-to-json-schema": "^3.25.0",

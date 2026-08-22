@@ -1,7 +1,7 @@
 import { spawnSync } from 'node:child_process';
-import { existsSync, readFileSync, statSync } from 'node:fs';
+import { existsSync, readFileSync, realpathSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { isAbsolute, join, relative, resolve } from 'node:path';
 import { getBundledAssetsDir } from './paths.ts';
 
 export type OfficecliBinarySource =
@@ -18,11 +18,52 @@ export interface ResolvedOfficecliBinary {
 export interface ResolveOfficecliOptions {
   env?: NodeJS.ProcessEnv;
   cwd?: string;
+  /** Trusted host roots supplied by the application shell. */
+  appRootPath?: string;
+  resourcesPath?: string;
+  /** Disable environment overrides when resolving a subprocess toolchain. */
+  trustEnvironment?: boolean;
   platform?: NodeJS.Platform;
   arch?: string;
 }
 
 const MANIFEST_NAME = 'officecli-manifest.json';
+
+export type OfficecliAttributionPolicy = 'forbid' | 'allow-visible' | 'allow-metadata' | 'allow-all';
+
+/**
+ * Derive a narrow attribution policy from the user's own turn text.
+ * Topic/edit requests never grant attribution; only explicit credit language,
+ * an exact generated-by stamp request, or an explicit preservation request do.
+ */
+export function getOfficecliAttributionPolicy(message: string): OfficecliAttributionPolicy {
+  if (!/office\s*cli/i.test(message)) return 'forbid';
+
+  const preservation = /(?:不要|请勿)(?:删除|移除|去除)[^。！？\n]{0,50}(?:(?:由|使用)\s*office\s*cli\s*(?:自动)?(?:生成|创建|制作)|office\s*cli\s*(?:归因|署名|生成器说明))|(?:保留|保持)[^。！？\n]{0,50}(?:(?:由|使用)\s*office\s*cli\s*(?:自动)?(?:生成|创建|制作)|office\s*cli\s*(?:归因|署名|生成器说明))|(?:do\s+not|don['’]t)\s+(?:remove|delete)[^.\n]{0,60}(?:(?:generated|created|made|powered)\s+(?:by|with)\s+office\s*cli|office\s*cli\s+attribution)|(?:retain|preserve|keep)[^.\n]{0,60}(?:(?:generated|created|made|powered)\s+(?:by|with)\s+office\s*cli|office\s*cli\s+attribution)/is.test(message);
+  const prohibition = /(?:不要|不得|禁止|别|请勿)[^。！？\n]{0,30}(?:写|添加|注明|标注|披露|署名|出现|保留)[^。！？\n]{0,40}office\s*cli|(?:删除|移除|去除)[^。！？\n]{0,40}(?:由|使用)?\s*office\s*cli|(?:do\s+not|don['’]t|never)\s+(?:add|include|show|state|write|put|credit|attribute|retain)[^.\n]{0,50}office\s*cli|(?:remove|omit|hide|without)[^.\n]{0,40}office\s*cli/is.test(message);
+  const metaQuestion = /(?:为什么|为何|怎么会|如何会|排查|检查|确认|是否已有|是否存在)[^。！？\n]{0,80}(?:由|使用)?\s*office\s*cli|(?:why|how|investigate|check|whether|already)[^.\n]{0,80}(?:generated|created|made|powered)?[^.\n]{0,20}office\s*cli/is.test(message);
+  if (!preservation && (prohibition || metaQuestion)) return 'forbid';
+
+  const exactStamp = /(?:由|使用)\s*office\s*cli\s*(?:自动)?(?:生成|创建|制作)|(?:generated|created|made|powered)\s+(?:by|with)\s+office\s*cli/i;
+  const creditNoun = /(?:归因|署名|披露|生成器(?:署名|说明|信息)?|工具署名)|(?:attribution|generator\s+credit|tool\s+credit|credit\s+office\s*cli|office\s*cli\s+credit|disclosure)/i;
+  const writeExactStamp = /(?:写|写上|写明|注明|标注|放入|加上|添加|保留|保持)[^。！？\n]{0,60}(?:由|使用)\s*office\s*cli\s*(?:自动)?(?:生成|创建|制作)|(?:put|write|add|include|retain|preserve|keep)[^.\n]{0,70}(?:generated|created|made|powered)\s+(?:by|with)\s+office\s*cli/is.test(message);
+  // Only creator/author is a supported metadata credit. Treat command examples,
+  // documentation prose, and broader app/custom properties as normal research
+  // content rather than trusted permission to preserve generator metadata.
+  const unsupportedMetadataTarget = /(?:lastmodifiedby|application\s+(?:property|metadata)|custom\s+propert)/i.test(message);
+  const metadataExample = /(?:示例|例子|介绍|说明如何|命令示例|technical\s+section|document\s+the\s+command|example|how\s+to)/i.test(message);
+  const metadataAssignment = !unsupportedMetadataTarget && !metadataExample && /(?:元数据|文档属性|创建者|作者字段|creator|author|document\s+metadata)[^。！？\n]{0,70}(?:写|设为|设置为|注明|标注|值为|to|as|=)[^。！？\n]{0,30}office\s*cli|(?:set|write|put)[^.\n]{0,40}(?:creator|author|document\s+metadata)[^.\n]{0,40}(?:to|as|=)[^.\n]{0,20}office\s*cli/is.test(message);
+  const explicitCredit = creditNoun.test(message) || writeExactStamp || preservation || metadataAssignment;
+  if (!explicitCredit || (!exactStamp.test(message) && !creditNoun.test(message) && !preservation && !metadataAssignment)) return 'forbid';
+
+  const metadata = /(?:元数据|文档属性|自定义属性|创建者|作者字段|creator|author|lastmodifiedby|application\s+(?:property|metadata)|custom\s+propert|document\s+metadata)/i.test(message);
+  const visible = /(?:正文|封面|页眉|页脚|文档中|报告中|body|cover|header|footer|visible)/i.test(message) || !metadata;
+  return visible && metadata ? 'allow-all' : metadata ? 'allow-metadata' : 'allow-visible';
+}
+
+export function isOfficecliAttributionExplicitlyRequested(message: string): boolean {
+  return getOfficecliAttributionPolicy(message) !== 'forbid';
+}
 
 export function officecliBinaryName(platform: NodeJS.Platform = process.platform): string {
   return platform === 'win32' ? 'officecli.exe' : 'officecli';
@@ -46,6 +87,26 @@ function isDirectory(path: string | undefined): path is string {
   }
 }
 
+function isFileWithin(path: string, roots: string[]): boolean {
+  if (!isFile(path)) return false;
+  try {
+    const target = realpathSync.native(path);
+    return roots.some(root => {
+      try {
+        if (!isDirectory(root)) return false;
+        const base = realpathSync.native(root);
+        const rel = relative(base, target);
+        return rel === '' || (!rel.startsWith('..') && !isAbsolute(rel));
+      } catch {
+        // One missing or unreadable trusted root must not invalidate the rest.
+        return false;
+      }
+    });
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Resolve the app-managed OfficeCLI binary without consulting the user's PATH.
  */
@@ -60,11 +121,11 @@ export function resolveOfficecliRuntime(
   const platformKey = `${platform}-${arch}`;
 
   const candidates: Array<ResolvedOfficecliBinary> = [];
-  if (env.CRAFT_OFFICECLI) {
+  if (options.trustEnvironment !== false && env.CRAFT_OFFICECLI) {
     candidates.push({ path: env.CRAFT_OFFICECLI, source: 'environment' });
   }
 
-  if (env.CRAFT_RESOURCES_BASE) {
+  if (options.trustEnvironment !== false && env.CRAFT_RESOURCES_BASE) {
     candidates.push(
       {
         path: join(env.CRAFT_RESOURCES_BASE, 'resources', 'bin', platformKey, name),
@@ -77,7 +138,7 @@ export function resolveOfficecliRuntime(
     );
   }
 
-  for (const root of [env.CRAFT_BUNDLED_ASSETS_ROOT, env.CRAFT_RESOURCES_PATH]) {
+  for (const root of options.trustEnvironment === false ? [] : [env.CRAFT_BUNDLED_ASSETS_ROOT, env.CRAFT_RESOURCES_PATH]) {
     if (!root) continue;
     candidates.push(
       { path: join(root, 'resources', 'bin', name), source: 'server-resources' },
@@ -87,23 +148,31 @@ export function resolveOfficecliRuntime(
     );
   }
 
-  candidates.push(
-    { path: join(cwd, 'resources', 'bin', platformKey, name), source: 'development' },
-    { path: join(cwd, 'resources', 'bin', name), source: 'development' },
-    { path: join(cwd, 'dist', 'resources', 'bin', platformKey, name), source: 'development' },
-    {
-      path: join(cwd, 'apps', 'electron', 'resources', 'bin', platformKey, name),
-      source: 'development',
-    },
-    {
-      path: join(cwd, '..', '..', 'apps', 'electron', 'resources', 'bin', platformKey, name),
-      source: 'development',
-    },
-  );
+  const trustedRoots = [options.resourcesPath, options.appRootPath].filter((value): value is string => !!value).map(root => resolve(root));
+  for (const root of trustedRoots) {
+    candidates.push(
+      { path: join(root, 'resources', 'bin', platformKey, name), source: 'electron-resources' },
+      { path: join(root, 'resources', 'bin', name), source: 'electron-resources' },
+      { path: join(root, 'bin', platformKey, name), source: 'electron-resources' },
+      { path: join(root, 'bin', name), source: 'electron-resources' },
+      { path: join(root, 'apps', 'electron', 'resources', 'bin', platformKey, name), source: 'development' },
+    );
+  }
+  if (trustedRoots.length === 0) {
+    candidates.push(
+      { path: join(cwd, 'resources', 'bin', platformKey, name), source: 'development' },
+      { path: join(cwd, 'resources', 'bin', name), source: 'development' },
+      { path: join(cwd, 'dist', 'resources', 'bin', platformKey, name), source: 'development' },
+      { path: join(cwd, 'apps', 'electron', 'resources', 'bin', platformKey, name), source: 'development' },
+      { path: join(cwd, '..', '..', 'apps', 'electron', 'resources', 'bin', platformKey, name), source: 'development' },
+    );
+  }
 
   return candidates
     .map(candidate => ({ ...candidate, path: resolve(cwd, candidate.path) }))
-    .find(candidate => isFile(candidate.path));
+    .find(candidate => trustedRoots.length > 0
+      ? isFileWithin(candidate.path, trustedRoots)
+      : isFile(candidate.path));
 }
 
 export function resolveOfficecliBinary(options?: ResolveOfficecliOptions): string | undefined {
@@ -453,12 +522,24 @@ export function ensureDocxOutlineHeadingStyles(
 /** Directory that contains the PATH `officecli` / `officecli.cmd` wrappers. */
 export function getOfficecliWrapperDir(options: ResolveOfficecliOptions = {}): string | undefined {
   const cwd = resolve(options.cwd ?? process.cwd());
-  const candidates = [
-    join(cwd, 'apps', 'electron', 'resources', 'bin'),
-    join(cwd, 'resources', 'bin'),
-    join(cwd, '..', '..', 'apps', 'electron', 'resources', 'bin'),
-  ];
+  const trustedRoots = [options.resourcesPath, options.appRootPath]
+    .filter((value): value is string => !!value)
+    .map(root => resolve(root));
+  const candidates = trustedRoots.length > 0
+    ? trustedRoots.flatMap(root => [
+        join(root, 'resources', 'bin'),
+        join(root, 'bin'),
+        join(root, 'apps', 'electron', 'resources', 'bin'),
+      ])
+    : [
+        join(cwd, 'apps', 'electron', 'resources', 'bin'),
+        join(cwd, 'resources', 'bin'),
+        join(cwd, '..', '..', 'apps', 'electron', 'resources', 'bin'),
+      ];
   return candidates.find(
-    dir => isFile(join(dir, 'officecli')) || isFile(join(dir, 'officecli.cmd')),
+    dir => {
+      const wrapper = process.platform === 'win32' ? join(dir, 'officecli.cmd') : join(dir, 'officecli');
+      return trustedRoots.length > 0 ? isFileWithin(wrapper, trustedRoots) : isFile(wrapper);
+    },
   );
 }
