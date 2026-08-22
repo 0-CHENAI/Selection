@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:f
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import type { SessionToolContext } from '../context.ts';
+import { ensureDocxOutlineHeadingStyles } from '@craft-agent/shared/utils';
 import { handleOfficecliBatch } from './officecli-batch.ts';
 import { handleOfficecliFinalize } from './officecli-finalize.ts';
 import { handleOfficecliQa } from './officecli-qa.ts';
@@ -20,20 +21,15 @@ const binary = process.env.CRAFT_OFFICECLI
   ?? join(resourcesBin, platformKey, binaryName)
   ?? '';
 const wrapper = join(resourcesBin, process.platform === 'win32' ? 'officecli.cmd' : 'officecli');
-const ensureStyles = join(resourcesBin, process.platform === 'win32'
-  ? 'officecli-ensure-docx-styles.cmd'
-  : 'officecli-ensure-docx-styles');
+const wrapperScript = join(resourcesBin, '..', 'scripts', 'officecli-wrapper.js');
+const bundledBun = join(resourcesBin, '..', '..', 'vendor', 'bun', process.platform === 'win32' ? 'bun.exe' : 'bun');
 
 function runWrapper(args: string[], options: { cwd: string; stdin?: string }) {
   if (process.platform !== 'win32') return runOfficecli(wrapper, args, options);
-  const command = ['call', `"${wrapper}"`, ...args.map(arg => `"${arg.replaceAll('"', '""')}"`)].join(' ');
-  return runOfficecli(process.env.ComSpec ?? 'cmd.exe', ['/d', '/s', '/c', command], options);
-}
-
-function runEnsureStyles(target: string, cwd: string) {
-  if (process.platform !== 'win32') return runOfficecli(ensureStyles, [binary, target], { cwd });
-  const command = ['call', `"${ensureStyles}"`, `"${binary}"`, `"${target.replaceAll('"', '""')}"`].join(' ');
-  return runOfficecli(process.env.ComSpec ?? 'cmd.exe', ['/d', '/s', '/c', command], { cwd });
+  // The .cmd shim only locates the reviewed Bun script and app binary. Invoke
+  // those exact packaged targets directly so the integration test does not add
+  // another shell-quoting layer around Unicode/space-containing paths.
+  return runOfficecli(bundledBun, [wrapperScript, binary, ...args], options);
 }
 
 describe.skipIf(!enabled)('OfficeCLI typed tools integration', () => {
@@ -67,8 +63,13 @@ describe.skipIf(!enabled)('OfficeCLI typed tools integration', () => {
       loadSourceConfig: () => null,
       officecli: {
         binaryPath: binary,
-        ensureDocxOutlineStyles: async (target: string) =>
-          (await runEnsureStyles(target, workingDirectory)).exitCode === 0,
+        ensureDocxOutlineStyles: (target: string) => ensureDocxOutlineHeadingStyles(target, {
+          cwd: appRoot,
+          appRootPath: appRoot,
+          resourcesPath: process.env.CRAFT_RESOURCES_BASE,
+          trustEnvironment: false,
+          binary,
+        }),
       },
     };
   });
@@ -255,7 +256,7 @@ describe.skipIf(!enabled)('OfficeCLI typed tools integration', () => {
     });
     expect(qa.content).toHaveLength(2);
     expect(qa.content[1]).toMatchObject({ type: 'image', mimeType: 'image/png' });
-  }, 60_000);
+  }, 90_000);
 
   it('preserves explicitly requested visible attribution through trusted typed finalization', async () => {
     const explicitFile = join(context.workingDirectory!, 'explicit attribution.docx');

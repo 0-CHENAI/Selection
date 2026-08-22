@@ -43,6 +43,7 @@ type JsonResult = {
 
 const QA_TOTAL_TIMEOUT_MS = 120_000;
 const QA_COMMAND_TIMEOUT_MS = 30_000;
+const QA_SCREENSHOT_TIMEOUT_MS = 60_000;
 const MAX_SCREENSHOT_BYTES = 25 * 1024 * 1024;
 
 function commandPassed(result: JsonResult): boolean {
@@ -168,10 +169,13 @@ export async function handleOfficecliQa(
     const cwd = ctx.workingDirectory ?? ctx.workspacePath;
     const deadline = Date.now() + QA_TOTAL_TIMEOUT_MS;
     const remainingTimeout = () => Math.max(1, Math.min(QA_COMMAND_TIMEOUT_MS, deadline - Date.now()));
-    const executeJson = async (commandArgs: string[]): Promise<JsonResult> => {
+    const executeJson = async (
+      commandArgs: string[],
+      commandTimeoutMs = QA_COMMAND_TIMEOUT_MS,
+    ): Promise<JsonResult> => {
       const process = await runOfficecli(officecli.binaryPath, [...commandArgs, '--json'], {
         cwd,
-        timeoutMs: remainingTimeout(),
+        timeoutMs: Math.max(1, Math.min(commandTimeoutMs, deadline - Date.now())),
       });
       return { process, json: parseOfficecliJson(process.stdout) };
     };
@@ -298,7 +302,7 @@ export async function handleOfficecliQa(
         const screenshot = await executeJson([
           'view', file, 'screenshot', '--grid', 'auto', '--render', 'auto', '--out', screenshotPath,
           ...(mode === 'strict' ? ['--screenshot-width', '2000', '--screenshot-height', '1600'] : []),
-        ]);
+        ], QA_SCREENSHOT_TIMEOUT_MS);
         if (
           commandPassed(screenshot) &&
           existsSync(screenshotPath) &&
