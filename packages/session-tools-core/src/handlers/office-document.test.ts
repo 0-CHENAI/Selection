@@ -25,6 +25,7 @@ import {
   type OfficeCoordinatorDependencies,
 } from '../runtime/office-coordinator.ts';
 import { handleOfficeDocumentEdit, handleOfficeDocumentInspect } from './office-document.ts';
+import { clearOfficeGuideCache } from './office-guide.ts';
 import { resolveOfficecliResources, reviewedOfficecliSchemaCrc } from '../runtime/office-manifest.ts';
 
 const resources = resolveOfficecliResources({
@@ -138,7 +139,10 @@ function lifecycleCalls(calls: RecordedCall[]): RecordedCall[] {
   return calls.filter(call => ['open', 'save', 'close'].includes(call.args[0] ?? ''));
 }
 
-beforeEach(() => clearOfficeRuntimeState());
+beforeEach(() => {
+  clearOfficeRuntimeState();
+  clearOfficeGuideCache();
+});
 
 afterEach(() => {
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
@@ -225,6 +229,24 @@ describe('Office Runtime Coordinator', () => {
       expect(result.envelope.error?.code).toBe(testCase.code);
     }
     expect(calls).toHaveLength(0);
+  });
+
+  it('points forbidden OfficeCLI commands at the matching five tools', async () => {
+    const f = fixture();
+    const file = officeFile(join(f.working, 'report.docx'));
+    const { deps } = dependencies();
+
+    const loadSkill = await executeOfficeCommand(f.ctx, { argv: ['load_skill', 'word'], mode: 'inspect' }, deps);
+    const open = await executeOfficeCommand(f.ctx, { argv: ['open', file], mode: 'edit' }, deps);
+
+    expect(loadSkill.envelope.error).toMatchObject({
+      code: 'management_command_forbidden',
+      recovery: expect.stringContaining('office_document_guide'),
+    });
+    expect(open.envelope.error).toMatchObject({
+      code: 'management_command_forbidden',
+      recovery: expect.stringContaining('office_document_inspect'),
+    });
   });
 
   it('rejects non-native command casing and whitespace before policy or path handling', async () => {
@@ -447,6 +469,39 @@ describe('Office Runtime Coordinator', () => {
     expect(results[3]?.envelope.error?.code).toBe('loop_prevented');
     expect(results[3]?.envelope.ok).toBe(false);
     expect(commandCalls(calls)).toHaveLength(3);
+  });
+
+  it('does not count timeout or dependency failures toward loop_prevented', async () => {
+    const f = fixture();
+    const timeoutFile = officeFile(join(f.working, 'timeout-loop.docx'));
+    const dependencyFile = officeFile(join(f.working, 'dependency-loop.docx'));
+    const timeoutDeps = dependencies(() => processResult('', { timedOut: true, exitCode: null }));
+    const dependencyDeps = dependencies(() => processResult(
+      '{"success":false,"error":{"code":"native_unavailable","message":"Native renderer unavailable"}}',
+      { exitCode: 1 },
+    ));
+
+    const timeouts = [];
+    const dependenciesFailed = [];
+    for (let index = 0; index < 4; index += 1) {
+      timeouts.push(await executeOfficeCommand(f.ctx, {
+        argv: ['get', timeoutFile, '/'],
+        mode: 'inspect',
+      }, timeoutDeps.deps));
+      dependenciesFailed.push(await executeOfficeCommand(f.ctx, {
+        argv: ['get', dependencyFile, '/'],
+        mode: 'inspect',
+      }, dependencyDeps.deps));
+    }
+
+    expect(timeouts.map(result => result.envelope.error?.code)).toEqual([
+      'timeout', 'timeout', 'timeout', 'timeout',
+    ]);
+    expect(dependenciesFailed.map(result => result.envelope.error?.code)).toEqual([
+      'dependency_unavailable', 'dependency_unavailable', 'dependency_unavailable', 'dependency_unavailable',
+    ]);
+    expect(commandCalls(timeoutDeps.calls).filter(call => call.args[0] === 'get').length).toBeGreaterThanOrEqual(4);
+    expect(commandCalls(dependencyDeps.calls).filter(call => call.args[0] === 'get').length).toBeGreaterThanOrEqual(4);
   });
 
   it('invalidates read cache and increments revision after mutation', async () => {
@@ -1189,6 +1244,32 @@ describe('Office Runtime Coordinator', () => {
     expect(html.envelope.ok).toBe(true);
     expect(screenshot.envelope.error?.code).toBe('render_requires_preview');
     expect(escaped.envelope.error?.code).toBe('inspect_artifact_outside_office_dir');
+  });
+
+  it('attaches a skill bootstrap on first create and marks later creates alreadyLoaded', async () => {
+    const f = fixture();
+    const firstFile = join(f.working, 'bootstrap.docx');
+    const secondFile = join(f.working, 'second.docx');
+    const { deps } = dependencies(args => {
+      if (args[0] === 'create' && typeof args[1] === 'string') {
+        mkdirSync(dirname(args[1]), { recursive: true });
+        writeFileSync(args[1], 'PK\u0003\u0004');
+      }
+      return processResult('{"success":true,"data":{"created":true}}');
+    });
+
+    const first = await handleOfficeDocumentEdit(f.ctx, { argv: ['create', firstFile] }, deps);
+    const second = await handleOfficeDocumentEdit(f.ctx, { argv: ['create', secondFile] }, deps);
+    const firstData = (first.structuredContent as OfficeResultEnvelope).data as Record<string, unknown>;
+    const secondData = (second.structuredContent as OfficeResultEnvelope).data as Record<string, unknown>;
+
+    expect(first.isError).toBe(false);
+    expect(firstData.skillBootstrap).toEqual(expect.objectContaining({
+      guide: 'word',
+      content: expect.stringContaining('Requirements for Outputs'),
+    }));
+    expect(String((firstData.skillBootstrap as { content?: string }).content)).toContain('Delivery Gate');
+    expect(secondData.skillBootstrap).toEqual({ alreadyLoaded: true, guide: 'word' });
   });
 
   it('expands edit.recipe.clone into an atomic morph batch', async () => {

@@ -16,7 +16,25 @@ import {
   wasOfficeArtifactMutatedBySession,
   type OfficeCoordinatorDependencies,
 } from '../runtime/office-coordinator.ts';
-import { renderOfficeDocument } from './office-preview.ts';
+import {
+  compileDocxTocIfPresent,
+  officeQueryMatchCount,
+  outlineHeadingSourceCount,
+  refineDeferredTocFromOutline,
+  type DocxTocCompileResult,
+} from '../runtime/office-docx-fields.ts';
+import {
+  EXCEL_ERROR_SELECTORS,
+  WORD_HEADING1_MIN_PT,
+  hasHeadingSizeEvidence,
+  isSkillFalsePositiveIssue,
+  placeholderLeakCount,
+  skillHeadingGateRequired,
+  skillPageRequired,
+  skillTocRequired,
+  undersizedHeading1Count,
+} from '../runtime/office-delivery-gates.ts';
+import { getCachedOfficePreview, renderOfficeDocument } from './office-preview.ts';
 
 export interface OfficeDocumentFinalizeArgs {
   file: string;
@@ -209,10 +227,50 @@ export async function handleOfficeDocumentFinalize(
       },
     });
   }
-  const residentFlush = flushed ? 'selection_lease_saved' : 'standalone_no_open_lease';
-  const revisionAtStart = getOfficeArtifactRevision(file) ?? 1;
+  let residentFlush = flushed ? 'selection_lease_saved' : 'standalone_no_open_lease';
   const checks: FinalizationCheck[] = [];
   const warnings: StructuredWarning[] = [...openable.envelope.warnings];
+  const revisionBeforeCompile = getOfficeArtifactRevision(file) ?? 1;
+  let compiledToc: DocxTocCompileResult | undefined;
+  if (extname(file).toLowerCase() === '.docx') {
+    compiledToc = await compileDocxTocIfPresent(ctx, file, dependencies);
+    if (compiledToc.mutated) {
+      const compiledFlush = await flushOfficeResidentLease(ctx, file, dependencies);
+      if (compiledFlush && !compiledFlush.envelope.ok) {
+        return officeToolResult({
+          ...compiledFlush.envelope,
+          command: ['finalize', args.file, '--profile', profile],
+          documentPath: file,
+          deliveryReady: false,
+          data: {
+            gate: 'machine',
+            claim: 'machine_gates_blocked',
+            humanMicrosoftOfficeVisualApproval: false,
+            residentFlush: 'selection_lease_flush_failed',
+          },
+          evidence: {
+            file,
+            profile,
+            artifactRevision: getOfficeArtifactRevision(file) ?? 1,
+            generatedAt: new Date().toISOString(),
+            checks: [
+              ...checks,
+              ...(compiledToc.check ? [compiledToc.check] : []),
+              {
+                name: 'resident_flush',
+                ok: false,
+                blocking: true,
+                error: compiledFlush.envelope.error,
+                warnings: compiledFlush.envelope.warnings,
+              },
+            ],
+          },
+        });
+      }
+      if (compiledFlush) residentFlush = 'selection_lease_saved';
+    }
+  }
+  const revisionAtStart = getOfficeArtifactRevision(file) ?? 1;
 
   let headerOk = false;
   let sizeBytes = 0;
@@ -264,9 +322,13 @@ export async function handleOfficeDocumentFinalize(
     mutation: false,
     cacheable: false,
   }, dependencies);
-  const issues = issueList(issuesOutcome.envelope.data);
+  const extension = extname(file).toLowerCase();
+  const issues = issueList(issuesOutcome.envelope.data)
+    .filter(issue => !isSkillFalsePositiveIssue(extension, issue));
   const highSeverityIssues = issues.filter(issue => issue.severity === 0);
-  const issuesOk = issuesOutcome.envelope.ok && highSeverityIssues.length === 0;
+  const issuesOk = issuesOutcome.envelope.ok && (
+    extension === '.pptx' ? issues.length === 0 : highSeverityIssues.length === 0
+  );
   const issuesBlocking = profile === 'strict';
   const issuesWarnings = issueWarnings(issues);
   checks.push({
@@ -283,7 +345,6 @@ export async function handleOfficeDocumentFinalize(
   });
   warnings.push(...issuesOutcome.envelope.warnings, ...issuesWarnings);
 
-  const extension = extname(file).toLowerCase();
   const contentOutcome = await executeOfficeCommand(ctx, {
     argv: ['view', args.file, 'outline'],
     mode: 'internal',
@@ -309,36 +370,237 @@ export async function handleOfficeDocumentFinalize(
     } : {}),
   } : checkFromOutcome('key_content_summary', contentOutcome, true));
   warnings.push(...contentOutcome.envelope.warnings);
+  if (compiledToc) {
+    const refined = refineDeferredTocFromOutline(compiledToc, contentOutcome.envelope.data);
+    warnings.push(...refined.warnings);
+    if (refined.check) checks.push(refined.check);
+  }
 
-  const render = await renderOfficeDocument(ctx, {
-    action: 'render',
-    file: args.file,
-    ...(extension === '.docx' || extension === '.pptx' ? { grid: 'auto' as const } : { page: '1' }),
-    renderer: 'auto',
+  const textOutcome = await executeOfficeCommand(ctx, {
+    argv: ['view', args.file, 'text'],
+    mode: 'internal',
+    mutation: false,
+    cacheable: false,
   }, dependencies);
+  const leakCount = textOutcome.envelope.ok ? placeholderLeakCount(textOutcome.envelope.data) : 0;
+  const leakOk = textOutcome.envelope.ok && leakCount === 0;
+  checks.push({
+    name: 'skill_placeholder_leak',
+    ok: leakOk,
+    blocking: true,
+    data: { leakCount },
+    warnings: textOutcome.envelope.warnings,
+    ...(!leakOk ? {
+      error: {
+        code: 'docx_placeholder_leak',
+        category: 'conflict' as const,
+        message: textOutcome.envelope.ok
+          ? `The document text still contains ${leakCount} placeholder or escaped-token leak(s).`
+          : textOutcome.envelope.error?.message ?? 'Could not scan document text for placeholder leaks.',
+        retriable: true,
+        recovery: 'Remove $var$, {var}, {{placeholders}}, <TODO>, xxxx, lorem/ipsum, placeholder, and literal \\$ \\t \\n. See the skill Delivery Gate.',
+      },
+    } : {}),
+  });
+  warnings.push(...textOutcome.envelope.warnings);
+
+  const headingMatches = outlineHeadingSourceCount(contentOutcome.envelope.data);
+  if (skillHeadingGateRequired(extension, contentOutcome.envelope.data) && headingMatches < 1) {
+    const headingBlocking = profile === 'strict';
+    checks.push({
+      name: 'skill_heading_sources',
+      ok: false,
+      blocking: headingBlocking,
+      data: { headingMatches },
+      ...(!headingBlocking ? {} : {
+        error: {
+          code: 'docx_heading_hierarchy_missing',
+          category: 'conflict' as const,
+          message: 'A non-trivial Word document must use Heading1–3 or outlineLvl, not only Normal paragraphs.',
+          retriable: true,
+          recovery: 'Change title-like paragraphs to Heading1–Heading3, then finalize again. See word Requirements for Outputs.',
+        },
+      }),
+    });
+    if (!headingBlocking) {
+      warnings.push({
+        code: 'docx_heading_hierarchy_missing',
+        message: 'A non-trivial Word document should use Heading1–3 or outlineLvl.',
+        severity: 'high',
+        recovery: 'Change title-like paragraphs to Heading1–Heading3.',
+      });
+    }
+  }
+
+  let headingSizeData = contentOutcome.envelope.data;
+  if (extension === '.docx' && headingMatches >= 1 && !hasHeadingSizeEvidence(headingSizeData)) {
+    const headingSizeOutcome = await executeOfficeCommand(ctx, {
+      argv: ['query', args.file, 'paragraph[style=Heading1]'],
+      mode: 'internal',
+      mutation: false,
+      cacheable: false,
+    }, dependencies);
+    if (headingSizeOutcome.envelope.ok) headingSizeData = headingSizeOutcome.envelope.data;
+  }
+  if (extension === '.docx' && hasHeadingSizeEvidence(headingSizeData)) {
+    const undersized = undersizedHeading1Count(headingSizeData);
+    const sizeOk = undersized === 0;
+    const sizeBlocking = profile === 'strict';
+    checks.push({
+      name: 'skill_heading_size',
+      ok: sizeOk,
+      blocking: sizeBlocking,
+      data: { undersized, minPt: WORD_HEADING1_MIN_PT },
+      ...(!sizeOk && sizeBlocking ? {
+        error: {
+          code: 'docx_heading_size_below_floor',
+          category: 'conflict' as const,
+          message: `Heading1 must be at least ${WORD_HEADING1_MIN_PT}pt. Found ${undersized} undersized title(s).`,
+          retriable: true,
+          recovery: `Set Heading1 size to ${WORD_HEADING1_MIN_PT}pt or larger. See word Requirements for Outputs.`,
+        },
+      } : {}),
+    });
+    if (!sizeOk && !sizeBlocking) {
+      warnings.push({
+        code: 'docx_heading_size_below_floor',
+        message: `Heading1 should be at least ${WORD_HEADING1_MIN_PT}pt.`,
+        severity: 'high',
+        recovery: `Set Heading1 size to ${WORD_HEADING1_MIN_PT}pt or larger.`,
+      });
+    }
+  }
+
+  if (extension === '.xlsx') {
+    let errorMatches = 0;
+    const selectors: string[] = [];
+    for (const selector of EXCEL_ERROR_SELECTORS) {
+      const errorOutcome = await executeOfficeCommand(ctx, {
+        argv: ['query', args.file, selector],
+        mode: 'internal',
+        mutation: false,
+        cacheable: false,
+      }, dependencies);
+      const matches = errorOutcome.envelope.ok ? officeQueryMatchCount(errorOutcome.envelope.data) : 0;
+      if (matches > 0) {
+        errorMatches += matches;
+        selectors.push(selector);
+      }
+    }
+    const errorsOk = errorMatches === 0;
+    checks.push({
+      name: 'skill_excel_errors',
+      ok: errorsOk,
+      blocking: true,
+      data: { errorMatches, selectors },
+      ...(!errorsOk ? {
+        error: {
+          code: 'xlsx_formula_error_cells',
+          category: 'conflict' as const,
+          message: `The workbook still contains ${errorMatches} Excel error cell(s).`,
+          retriable: true,
+          recovery: 'Fix #REF!, #DIV/0!, #VALUE!, #NAME?, and #N/A cells. See excel QA (Required).',
+        },
+      } : {}),
+    });
+  }
+
+  if (extension === '.docx' && skillTocRequired(contentOutcome.envelope.data)) {
+    const tocCheckOk = Boolean(compiledToc?.detected);
+    checks.push({
+      name: 'skill_toc_field',
+      ok: tocCheckOk,
+      blocking: true,
+      data: { headingMatches, detected: tocCheckOk },
+      ...(!tocCheckOk ? {
+        error: {
+          code: 'docx_toc_required',
+          category: 'conflict' as const,
+          message: 'Documents with 3+ heading sources must include a TOC field.',
+          retriable: true,
+          recovery: 'Add --type toc after Heading1–3 sources exist. See word Table of Contents.',
+        },
+      } : {}),
+    });
+  }
+  if (extension === '.docx' && skillPageRequired(contentOutcome.envelope.data)) {
+    const pageOutcome = await executeOfficeCommand(ctx, {
+      argv: ['query', args.file, 'field[fieldType=page]'],
+      mode: 'internal',
+      mutation: false,
+      cacheable: false,
+    }, dependencies);
+    const pageMatches = pageOutcome.envelope.ok
+      ? officeQueryMatchCount(pageOutcome.envelope.data)
+      : 0;
+    const pageOk = pageMatches > 0;
+    checks.push({
+      name: 'skill_page_field',
+      ok: pageOk,
+      blocking: true,
+      data: { matches: pageMatches },
+      warnings: pageOutcome.envelope.warnings,
+      ...(!pageOk ? {
+        error: {
+          code: 'docx_page_field_required',
+          category: 'conflict' as const,
+          message: 'Multi-page or heading-structured Word documents must include a live PAGE field in the header or footer.',
+          retriable: true,
+          recovery: 'Add a footer with --prop field=page. See word Delivery Gate 3.',
+        },
+      } : {}),
+    });
+    warnings.push(...pageOutcome.envelope.warnings);
+  }
+
+  const cachedPreview = getCachedOfficePreview(ctx.sessionId, file, revisionAtStart)
+    ?? getCachedOfficePreview(ctx.sessionId, args.file, revisionAtStart)
+    ?? getCachedOfficePreview(ctx.sessionId, file, revisionBeforeCompile)
+    ?? getCachedOfficePreview(ctx.sessionId, args.file, revisionBeforeCompile);
+  const render = cachedPreview
+    ? { envelope: cachedPreview.envelope, toolResult: cachedPreview.toolResult, previewImagePath: cachedPreview.previewImagePath, fullImagePath: cachedPreview.fullImagePath }
+    : await renderOfficeDocument(ctx, {
+      action: 'render',
+      file: args.file,
+      page: '1',
+      renderer: 'auto',
+    }, dependencies);
   const renderData = render.envelope.data && typeof render.envelope.data === 'object'
     ? (render.envelope.data as { render?: { dependencyState?: string } }).render
     : undefined;
   const dependencyDegraded = renderData?.dependencyState === 'degraded';
   const finalRenderOk = render.envelope.ok && !dependencyDegraded;
-  const finalRenderBlocking = !render.envelope.ok || profile === 'strict';
+  const visualWarning: StructuredWarning | undefined = finalRenderOk ? undefined : {
+    code: 'visual_not_verified',
+    message: dependencyDegraded
+      ? 'Final visual evidence is degraded because reviewed external assets are unavailable offline.'
+      : render.envelope.error?.message ?? 'Final visual evidence could not be rendered.',
+    severity: 'medium',
+    recovery: 'Open the document or rerun office_document_preview.render when you need a visual pass. Delivery is not blocked.',
+  };
   checks.push({
     name: 'final_render',
     ok: finalRenderOk,
-    blocking: finalRenderBlocking,
-    data: render.envelope.data,
-    warnings: render.envelope.warnings,
+    blocking: false,
+    data: {
+      ...(typeof render.envelope.data === 'object' && render.envelope.data && !Array.isArray(render.envelope.data)
+        ? render.envelope.data
+        : { render: render.envelope.data }),
+      reusedPreview: Boolean(cachedPreview),
+    },
+    warnings: [...render.envelope.warnings, ...(visualWarning ? [visualWarning] : [])],
     ...(!finalRenderOk ? {
       error: dependencyDegraded ? {
         code: 'dependency_unavailable',
         category: 'dependency' as const,
         message: 'The final HTML render is degraded because reviewed external assets are unavailable offline.',
         retriable: true,
-        recovery: 'Run finalization online or use a supported native renderer for current-revision evidence.',
+        recovery: 'Run a preview online or accept visual_not_verified. Screenshot failure does not block delivery.',
       } : render.envelope.error,
     } : {}),
   });
   warnings.push(...render.envelope.warnings);
+  if (visualWarning) warnings.push(visualWarning);
 
   const revisionAtEnd = getOfficeArtifactRevision(file) ?? revisionAtStart;
   const revisionCurrent = revisionAtEnd === revisionAtStart;
@@ -396,9 +658,11 @@ export async function handleOfficeDocumentFinalize(
       error: {
         code: 'finalization_blocked',
         category: 'conflict' as const,
-        message: 'One or more current-revision machine delivery gates failed.',
+        message: checks.find(check => check.blocking && !check.ok)?.error?.message
+          ?? 'One or more current-revision machine delivery gates failed.',
         retriable: true,
-        recovery: 'Repair the blocking checks, then finalize the latest revision again.',
+        recovery: checks.find(check => check.blocking && !check.ok)?.error?.recovery
+          ?? 'Repair the blocking checks, then finalize the latest revision again.',
       },
     } : {}),
   };

@@ -7,6 +7,7 @@ import {
   type OfficeBatchInput,
   type OfficeCoordinatorDependencies,
 } from '../runtime/office-coordinator.ts';
+import { takeSkillBootstrapForCreate } from './office-guide.ts';
 import {
   buildMorphCleanAccumulationCommands,
   buildMorphCloneCommands,
@@ -14,6 +15,7 @@ import {
   checkMorphGhostAccumulation,
   verifyMorphSlide,
 } from '../runtime/office-recipes.ts';
+import { guideNameForCreateArgv } from '../runtime/office-skill-bootstrap.ts';
 
 export interface OfficeInspectRecipe {
   name: 'verify' | 'final-check';
@@ -255,5 +257,18 @@ export async function handleOfficeDocumentEdit(
     cacheable: false,
     mutation: true,
   }, dependencies);
-  return officeToolResult(result.envelope);
+  const envelope = result.envelope;
+  if (envelope.ok && args.argv[0] === 'create') {
+    const guide = guideNameForCreateArgv(args.argv);
+    if (guide) {
+      const skillBootstrap = takeSkillBootstrapForCreate(ctx.sessionId, guide);
+      if (skillBootstrap) {
+        const data = envelope.data && typeof envelope.data === 'object' && !Array.isArray(envelope.data)
+          ? envelope.data as Record<string, unknown>
+          : { value: envelope.data };
+        return officeToolResult({ ...envelope, data: { ...data, skillBootstrap } });
+      }
+    }
+  }
+  return officeToolResult(envelope);
 }

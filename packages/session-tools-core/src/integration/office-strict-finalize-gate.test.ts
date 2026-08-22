@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import {
   shouldRequireStrictOfficeFinalize,
   windowsDesktopOfficeInstalled,
+  windowsDesktopWordInstalled,
 } from './office-strict-finalize-gate.ts';
 
 describe('OfficeCLI strict finalize merge gate', () => {
@@ -23,6 +24,17 @@ describe('OfficeCLI strict finalize merge gate', () => {
     expect(windowsDesktopOfficeInstalled(
       { ProgramFiles: 'C:\\Program Files' },
       path => path.endsWith(join('Microsoft Office', 'root', 'Office16', 'WINWORD.EXE')),
+    )).toBe(true);
+  });
+
+  it('does not treat Excel-only installs as Word for TOC refresh', () => {
+    expect(windowsDesktopWordInstalled(
+      { ProgramFiles: 'C:\\Program Files' },
+      path => path.endsWith(join('Microsoft Office', 'Office16', 'EXCEL.EXE')),
+    )).toBe(false);
+    expect(windowsDesktopWordInstalled(
+      { ProgramFiles: 'C:\\Program Files' },
+      path => path.endsWith(join('Microsoft Office', 'Office16', 'WINWORD.EXE')),
     )).toBe(true);
   });
 });

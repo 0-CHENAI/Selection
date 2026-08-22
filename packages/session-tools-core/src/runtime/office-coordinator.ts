@@ -35,6 +35,7 @@ import {
   reviewedOfficecliSchemaCrc,
 } from './office-manifest.ts';
 import { OFFICE_STANDARD_TASK_HINT } from '../office-standard-task.ts';
+import { forbiddenCommandRecovery } from './office-skill-bootstrap.ts';
 import { validateMorphGlb } from './office-recipes.ts';
 import {
   attachOfficeResidentSession,
@@ -150,6 +151,8 @@ export interface OfficeCoordinatorDependencies {
   runProcess?: OfficecliProcessRunner;
   hashRuntime?: (path: string) => Promise<string>;
   now?: () => number;
+  /** Test override. Production uses desktop Word on Windows only. */
+  nativeScreenshotAvailable?: boolean;
 }
 
 interface RuntimeMetadata {
@@ -1498,6 +1501,7 @@ function classifyAndValidateCommand(
       'management_command_forbidden',
       'unsupported',
       `OfficeCLI command '${command}' is managed by Selection and is never exposed to agents.`,
+      { recovery: forbiddenCommandRecovery(command) },
     );
   }
   const read = new Set(policy.read);
@@ -1510,6 +1514,7 @@ function classifyAndValidateCommand(
       'management_command_forbidden',
       'unsupported',
       `OfficeCLI command '${command}' is managed by Selection and is never exposed to agents.`,
+      { recovery: forbiddenCommandRecovery(command) },
     );
   }
   if (mode === 'inspect' && !read.has(command)) {
@@ -2570,12 +2575,14 @@ export async function executeOfficeCommand(
         await evictResidentLeaseForRetry(ctx, documentPath, runner, runtime.path, cwd);
         return executeOfficeCommand(ctx, { ...request, skipResident: true }, dependencies);
       }
-      const key = failureKey(ctx.sessionId, documentPath);
-      const previous = failureStates.get(key);
-      failureStates.set(key, {
-        fingerprint,
-        count: previous?.fingerprint === fingerprint ? previous.count + 1 : 1,
-      });
+      if (error.category !== 'timeout' && error.category !== 'dependency') {
+        const key = failureKey(ctx.sessionId, documentPath);
+        const previous = failureStates.get(key);
+        failureStates.set(key, {
+          fingerprint,
+          count: previous?.fingerprint === fingerprint ? previous.count + 1 : 1,
+        });
+      }
       const envelope: OfficeResultEnvelope = {
         ...errorEnvelope(metadata.version, metadata.schemaCrc, executionArgv, cwd, error, durationMs, documentPath),
         warnings,

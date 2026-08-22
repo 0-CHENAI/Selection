@@ -19,18 +19,18 @@ import {
 } from '../runtime/office-manifest.ts';
 import { OFFICE_MORPH_RECIPES, validateMorphGlb } from '../runtime/office-recipes.ts';
 import { isPathWithinDirectory } from '../runtime/path-security.ts';
+import {
+  extractNamedGuideSections,
+  extractSkillBootstrap,
+  guideSections,
+  normalizeGuideSearch,
+  rewriteOfficialSkillInvocations,
+} from '../runtime/office-skill-bootstrap.ts';
 
 export interface OfficeDocumentGuideArgs {
   guide: OfficeGuideName;
   topic?: string;
   referencePath?: string;
-}
-
-interface HeadingSection {
-  level: number;
-  title: string;
-  start: number;
-  end: number;
 }
 
 const loadedGuideSections = new Set<string>();
@@ -43,13 +43,13 @@ const SELECTION_EXECUTION_CONTRACT = `## Selection execution contract (immutable
 
 - Examples below omit the \`officecli\` prefix. Pass each native token through the appropriate Selection Office tool's \`argv\` array; never invoke a shell.
 - When a property name is uncertain, call \`office_document_inspect\` with \`argv: ['help', format, element]\` once before guessing. Do not repeat identical help/status; reuse \`cacheHit\` payloads.
-- A turn with more than about 10 structural or cell edits must use \`batch\` (inline or \`batch.file\`). After a non-standard batch, run \`view issues\` plus \`view html\` or \`office_document_preview.render\`. Standard five-step create/batch/outline/preview/finalize tasks skip that extra inspect pair.
+- A turn with more than about 10 structural or cell edits must use \`batch\` (inline or \`batch.file\`). After a structural add, get that path or view outline before stacking more work. After a non-trivial batch, run \`view issues\`. Use at most one \`office_document_preview.render\` (page 1 by default; \`grid: auto\` only for pagination).
 - Morph clone/ghost/clean-accumulation and verify/final-check must use the \`recipe\` field. Do not invent shell or Python helpers.
-- Selection owns binary installation, updates, command classification, paths, resident/watch lifecycle, rendering, and finalization. Do not call install/update/skills/load_skill/mcp/plugins/config/open/save/close.
-- Only \`office_document_preview.start\` may open or focus the BrowserPane. Ordinary work and finalization use inline render evidence.
+- Selection owns binary installation, updates, command classification, paths, resident/watch lifecycle, rendering, and finalization. Do not call install/update/skills/mcp/plugins/config/open/save/close. \`load_skill\` maps to \`office_document_guide\`.
+- Only \`office_document_preview.start\` may open or focus the BrowserPane.
 - Existing outputs require explicit \`--force\`; mutation goes through \`office_document_edit\`; preview marks are not document edits.
 - OfficeCLI 1.0.144 adds a 3D element with \`--type 3dmodel\`, but its canonical returned/query path is \`/model3d[N]\`; Selection normalizes outdated \`/3dmodel[N]\` guide examples accordingly.
-- \`deliveryReady\` means current-revision machine gates passed. It does not replace Microsoft Office human visual review.`;
+- \`deliveryReady\` means the official skill Delivery Gate passed for the current revision. It does not replace Microsoft Office human visual review.`;
 
 function hash(buffer: Buffer | string): string {
   return createHash('sha256').update(buffer).digest('hex');
@@ -154,12 +154,9 @@ function sanitizeOfficialContent(markdown: string, guide?: OfficeGuideName): str
   const withoutUnsafeMorphScripts = guide === 'morph-ppt' || guide === 'morph-ppt-3d'
     ? replaceUnsafeMorphScriptBlocks(withoutAdmin)
     : withoutAdmin;
-  return withoutUnsafeMorphScripts
-    // Setup/update/plugin instructions are upstream distribution concerns, not
-    // document-authoring guidance. Removing the whole section avoids placing
-    // an actionable curl/PowerShell installer below Selection's prohibition.
+  return rewriteOfficialSkillInvocations(withoutUnsafeMorphScripts)
     .replace(
-      /^.*(?:install\.sh|install\.ps1|\bofficecli(?:\.exe)?\s+(?:install|update|skills|load_skill|mcp|plugins|config|open|save|close)\b).*$/gim,
+      /^.*(?:install\.sh|install\.ps1|\bofficecli(?:\.exe)?\s+(?:install|update|skills|mcp|plugins|config)\b).*$/gim,
       '[Selection-managed operation omitted]',
     )
     .replace(/reference\/morph-helpers\.(?:py|sh)/gi, 'Selection TypeScript Morph recipes')
@@ -172,46 +169,22 @@ function sanitizeOfficialContent(markdown: string, guide?: OfficeGuideName): str
     .replace(/(^|[\s`'"(])(?:\.\/)?officecli\s+/gim, '$1');
 }
 
-function sections(markdown: string): HeadingSection[] {
-  const lines = markdown.split(/\r?\n/);
-  const headings: Array<Omit<HeadingSection, 'end'>> = [];
-  for (let index = 0; index < lines.length; index += 1) {
-    const match = /^(#{1,6})\s+(.+?)\s*$/.exec(lines[index] ?? '');
-    if (!match) continue;
-    headings.push({ level: match[1]!.length, title: match[2]!, start: index });
-  }
-  return headings.map((heading, index) => {
-    let end = lines.length;
-    for (let next = index + 1; next < headings.length; next += 1) {
-      if (headings[next]!.level <= heading.level) {
-        end = headings[next]!.start;
-        break;
-      }
-    }
-    return { ...heading, end };
-  });
-}
-
 function compactCatalog(markdown: string): Array<{ level: number; title: string }> {
-  return sections(markdown)
+  return guideSections(markdown)
     .filter(section => section.level <= 3)
     .slice(0, 200)
     .map(({ level, title }) => ({ level, title }));
 }
 
-function normalizeSearch(value: string): string {
-  return value.trim().toLocaleLowerCase().replace(/[\s_-]+/g, ' ');
-}
-
 function topicContent(markdown: string, topic: string): { matched: string[]; content: string } {
   const lines = markdown.split(/\r?\n/);
-  const needle = normalizeSearch(topic);
-  const allSections = sections(markdown);
-  let matches = allSections.filter(section => normalizeSearch(section.title).includes(needle));
+  const needle = normalizeGuideSearch(topic);
+  const allSections = guideSections(markdown);
+  let matches = allSections.filter(section => normalizeGuideSearch(section.title).includes(needle));
   if (matches.length === 0) {
     matches = allSections.filter(section => {
       const body = lines.slice(section.start, section.end).join('\n');
-      return normalizeSearch(body).includes(needle);
+      return normalizeGuideSearch(body).includes(needle);
     }).slice(0, 4);
   }
   // Do not duplicate a child section when its matching parent is already included.
@@ -292,8 +265,44 @@ function inheritedGuideContent(
       const match = topicContent(markdown, topic);
       if (match.content) return { guide: base, matched: match.matched, content: match.content };
     }
-    return { guide: base, catalog: compactCatalog(markdown).slice(0, 40) };
+    const requirements = extractNamedGuideSections(markdown, ['Requirements for Outputs']);
+    return {
+      guide: base,
+      catalog: compactCatalog(markdown).slice(0, 40),
+      ...(requirements.content ? { matched: requirements.matched, content: requirements.content } : {}),
+    };
   });
+}
+
+export function takeSkillBootstrapForCreate(
+  sessionId: string,
+  guide: OfficeGuideName,
+): Record<string, unknown> | undefined {
+  try {
+    const resources = resolveOfficecliResources();
+    const definition = resources?.manifest.guides[guide];
+    if (!resources || !definition) return undefined;
+    const cacheSelector = `bootstrap:${definition.resourceHash}`;
+    const loadedKey = `${sessionId}\0${guide}\0${cacheSelector}`;
+    if (loadedGuideSections.has(loadedKey)) {
+      return { alreadyLoaded: true, guide };
+    }
+    const guideRoot = resolve(resources.versionRoot, 'skills', definition.directory);
+    const entryPath = resolve(guideRoot, definition.entry);
+    if (!existsSync(entryPath)) return undefined;
+    verifyPinnedGuideResource(guideRoot, definition.resourceHash, guide);
+    const markdown = sanitizeOfficialContent(readFileSync(entryPath).toString('utf8'), guide);
+    const bootstrap = extractSkillBootstrap(markdown, guide);
+    loadedGuideSections.add(loadedKey);
+    return {
+      guide,
+      matchedSections: bootstrap.matched,
+      content: `${SELECTION_EXECUTION_CONTRACT}\n\n${bootstrap.content}`,
+      catalog: compactCatalog(markdown),
+    };
+  } catch {
+    return undefined;
+  }
 }
 
 export async function handleOfficeDocumentGuide(
@@ -486,7 +495,7 @@ export async function handleOfficeDocumentGuide(
             'Call the guide without topic to inspect its compact catalog.',
           ));
         }
-        cacheSelector = `topic:${normalizeSearch(args.topic!)}:${definition.resourceHash}`;
+        cacheSelector = `topic:${normalizeGuideSearch(args.topic!)}:${definition.resourceHash}`;
         let inherited: Array<Record<string, unknown>>;
         try {
           inherited = inheritedGuideContent(
@@ -509,9 +518,30 @@ export async function handleOfficeDocumentGuide(
           inherited,
         };
       } else {
+        cacheSelector = `bootstrap:${definition.resourceHash}`;
+        const bootstrap = extractSkillBootstrap(markdown, args.guide);
+        let inherited: Array<Record<string, unknown>>;
+        try {
+          inherited = inheritedGuideContent(
+            resources.versionRoot,
+            resources.manifest.guides,
+            definition.inherits,
+            undefined,
+          );
+        } catch (error) {
+          return officeToolResult(errorEnvelope(
+            version, schemaCrc, cwd, command, 'inherited_guide_integrity_error', 'dependency',
+            error instanceof Error ? error.message : String(error),
+            'Reinstall Selection or rebuild the audited OfficeCLI resource bundle.',
+          ));
+        }
         data = {
+          bootstrap: {
+            matchedSections: bootstrap.matched,
+            content: `${SELECTION_EXECUTION_CONTRACT}\n\n${bootstrap.content}`,
+          },
           catalog: compactCatalog(markdown),
-          inherited: definition.inherits.map(base => ({ guide: base })),
+          inherited,
           executionContract: SELECTION_EXECUTION_CONTRACT,
         };
       }

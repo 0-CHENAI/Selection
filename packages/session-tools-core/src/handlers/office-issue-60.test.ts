@@ -92,14 +92,13 @@ afterEach(() => {
 });
 
 describe('Issue #60 Office workflow reuse', () => {
-  it('injects a no-help standard recipe and path reuse rules', () => {
-    expect(OFFICE_WORKFLOW_PROMPT).toContain('must not call status or help');
+  it('injects a skill-bootstrap standard recipe and path reuse rules', () => {
+    expect(OFFICE_WORKFLOW_PROMPT).toContain('skill bootstrap');
     expect(OFFICE_WORKFLOW_PROMPT).toContain('Reuse envelope.cwd and envelope.documentPath');
-    expect(OFFICE_WORKFLOW_PROMPT).toContain('After a batch that is not the standard five-step recipe');
     expect(OFFICE_WORKFLOW_PROMPT).toContain('cacheHit');
-    expect(OFFICE_STANDARD_TASK_HINT.skipStatusAndHelp).toBe(true);
+    expect(OFFICE_STANDARD_TASK_HINT.skipStatusAndHelp).toBe(false);
     expect(OFFICE_STANDARD_TASK_HINT.sequence).toEqual([
-      'create', 'batch', 'inspect-outline', 'preview-render', 'finalize',
+      'skill-bootstrap', 'create', 'incremental-edit', 'inspect-outline', 'qa-issues', 'finalize',
     ]);
   });
 
@@ -272,7 +271,7 @@ describe('Issue #60 Office workflow reuse', () => {
     const recorded = {
       issue: 60,
       officecliVersion: resources.manifest.version,
-      note: 'Scripted engine workflows. Naive repeats status/help; optimized follows the injected standard recipe. preview.render and finalize are counted as the last two planned tools. Mock coordinator timings are not recorded because they are not representative wall-clock.',
+      note: 'Scripted engine workflows. Naive repeats status/help; optimized follows the injected skill-bootstrap recipe. inspect-outline and finalize are counted as the last two planned tools. Mock coordinator timings are not recorded because they are not representative wall-clock.',
       reductionGate: 0.6,
       tasks: tasks.map(task => ({
         format: task.format,

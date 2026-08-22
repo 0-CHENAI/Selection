@@ -4,6 +4,7 @@ import { join } from 'node:path';
 /** Click-to-run and MSI desktop Office layouts used by Word/Excel/PowerPoint. */
 const OFFICE_DIRECTORIES = ['Office16', 'Office15', join('root', 'Office16')] as const;
 const OFFICE_EXECUTABLES = ['WINWORD.EXE', 'EXCEL.EXE', 'POWERPNT.EXE'] as const;
+const WORD_EXECUTABLE = /(?:^|[\\/])WINWORD\.EXE$/i;
 
 export function windowsDesktopOfficeInstalled(
   env: NodeJS.ProcessEnv = process.env,
@@ -23,6 +24,14 @@ export function windowsDesktopOfficeInstalled(
     }
   }
   return false;
+}
+
+/** TOC COM refresh needs Word, not a machine that only has Excel or PowerPoint. */
+export function windowsDesktopWordInstalled(
+  env: NodeJS.ProcessEnv = process.env,
+  exists: (path: string) => boolean = existsSync,
+): boolean {
+  return windowsDesktopOfficeInstalled(env, path => WORD_EXECUTABLE.test(path) && exists(path));
 }
 
 /** Strict finalize needs desktop Office. Hosted windows-2025 does not install it. */

@@ -1,13 +1,14 @@
 export const OFFICE_STANDARD_TASK_SEQUENCE = [
+  'skill-bootstrap',
   'create',
-  'batch',
+  'incremental-edit',
   'inspect-outline',
-  'preview-render',
+  'qa-issues',
   'finalize',
 ] as const;
 
 export const OFFICE_STANDARD_TASK_HINT = Object.freeze({
-  skipStatusAndHelp: true,
+  skipStatusAndHelp: false,
   reuse: Object.freeze(['cwd', 'documentPath'] as const),
   sequence: OFFICE_STANDARD_TASK_SEQUENCE,
 });

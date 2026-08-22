@@ -72,9 +72,15 @@ describe('office_document_guide', () => {
       alreadyLoaded: false,
     });
     expect(Array.isArray(payloadData.catalog)).toBe(true);
+    expect(payloadData.bootstrap).toEqual(expect.objectContaining({
+      content: expect.stringContaining('Requirements for Outputs'),
+    }));
+    expect(String((payloadData.bootstrap as { content?: string }).content)).toContain('Delivery Gate');
     expect(JSON.stringify(payloadData).length).toBeLessThan(40_000);
     expect(payloadData.executionContract).toContain('Selection execution contract');
-    expect(payloadData.executionContract).toContain('After a non-standard batch');
+    expect(payloadData.executionContract).toContain('at most one');
+    expect(payloadData.executionContract).toContain('load_skill');
+    expect(payloadData.executionContract).not.toContain('After a non-standard batch');
     expect(payloadData.executionContract).toContain('/model3d[N]');
     expect(JSON.stringify(payloadData)).not.toContain('install.sh');
     expect(JSON.stringify(payloadData)).not.toContain('install.ps1');
@@ -203,6 +209,19 @@ describe('office_document_guide', () => {
       expect.objectContaining({ code: 'guide_reference_truncated' }),
     ]));
     expect(envelope(result).artifacts[0]?.sizeBytes).toBeGreaterThan(40_000);
+  });
+
+  it('rewrites official load_skill and resident commands instead of omitting them', async () => {
+    const { ctx } = context();
+    const workflow = data(await handleOfficeDocumentGuide(ctx, { guide: 'word', topic: 'Common Workflow' }));
+    const bootstrap = data(await handleOfficeDocumentGuide(ctx, { guide: 'word' }));
+    const haystack = `${String(workflow.content)}\n${JSON.stringify(bootstrap.bootstrap)}`;
+
+    expect(haystack).toContain('Selection resident already owns');
+    expect(haystack).toContain('office_document_guide');
+    expect(haystack).not.toContain('[Selection-managed operation omitted]');
+    expect(haystack).not.toMatch(/officecli\s+open/i);
+    expect(haystack).not.toMatch(/\bload_skill\s+\w+/);
   });
 
   it('rejects conflicting selectors and unknown topics with actionable errors', async () => {

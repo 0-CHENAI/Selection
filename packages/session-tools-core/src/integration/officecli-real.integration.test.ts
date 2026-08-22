@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { createNodeFileSystem, type SessionToolContext } from '../context.ts';
 import { handleOfficeDocumentEdit, handleOfficeDocumentInspect } from '../handlers/office-document.ts';
 import { handleOfficeDocumentFinalize } from '../handlers/office-finalize.ts';
+import { clearOfficeGuideCache } from '../handlers/office-guide.ts';
 import {
   clearOfficePreviewState,
   handleOfficeDocumentPreview,
@@ -49,6 +50,43 @@ async function maybeStrictFinalize(file: string, label: string): Promise<void> {
   const finalized = requireSuccess(await handleOfficeDocumentFinalize(ctx, { file, profile: 'strict' }), label);
   expect(finalized.deliveryReady).toBe(true);
   expect(finalized.evidence?.artifactRevision).toBe(finalized.artifactRevision);
+}
+
+async function finalizeDocxWithToc(file: string, label: string): Promise<void> {
+  const profile = requireStrictFinalize ? 'strict' : 'standard';
+  const finalized = requireSuccess(await handleOfficeDocumentFinalize(ctx, { file, profile }), label);
+  expect(finalized.deliveryReady).toBe(true);
+  const refreshCheck = finalized.evidence?.checks.find(check => check.name === 'docx_field_refresh');
+  expect(refreshCheck, `${label}: missing docx_field_refresh`).toBeDefined();
+  expect(refreshCheck?.blocking).toBe(false);
+  expect(JSON.stringify(finalized.warnings)).not.toMatch(/no match for style='TOC/i);
+  const text = requireSuccess(await handleOfficeDocumentInspect(ctx, { argv: ['view', file, 'text'] }), `${label} text`);
+  const haystack = JSON.stringify(text.data);
+  if (refreshCheck?.ok) {
+    expect(haystack).not.toContain('Update field to see table of contents');
+    expect(haystack).not.toContain('Error! No table of contents entries found');
+    const entries = requireSuccess(
+      await handleOfficeDocumentInspect(ctx, {
+        argv: ['query', file, 'paragraph[style=TOC1 or style=TOC2 or style=TOC3]'],
+      }),
+      `${label} toc entries`,
+    );
+    const matches = entries.data && typeof entries.data === 'object' && !Array.isArray(entries.data)
+      ? (entries.data as { matches?: number }).matches
+      : undefined;
+    expect(typeof matches === 'number' ? matches : 0).toBeGreaterThan(0);
+    return;
+  }
+  expect(refreshCheck?.data).toEqual(expect.objectContaining({
+    fallback: true,
+    updateFields: true,
+    status: expect.stringMatching(/^(deferred|empty|refresh_failed)$/),
+  }));
+  const settings = requireSuccess(
+    await handleOfficeDocumentInspect(ctx, { argv: ['get', file, '/settings'] }),
+    `${label} settings`,
+  );
+  expect(JSON.stringify(settings.data).toLowerCase()).toContain('updatefields');
 }
 
 function batchCommand(command: Record<string, unknown>): string {
@@ -134,7 +172,7 @@ describe('real OfficeCLI 1.0.144 integration', () => {
         commands: [
           batchCommand({ command: 'add', parent: '/body', type: 'paragraph', props: { text: '季度经营报告', style: 'Heading1', bold: 'true', size: '20pt' } }),
           batchCommand({ command: 'add', parent: '/body', type: 'toc', index: 0, props: { levels: '1-3', title: '目录', hyperlinks: 'true' } }),
-          batchCommand({ command: 'add', parent: '/body', type: 'paragraph', props: { text: '执行摘要', style: 'Heading1' } }),
+          batchCommand({ command: 'add', parent: '/body', type: 'paragraph', props: { text: '执行摘要', style: 'Heading1', size: '20pt' } }),
           batchCommand({ command: 'add', parent: '/body', type: 'paragraph', props: { text: '收入同比增长 18%，路径中的空格与中文保持完整。', style: 'Normal' } }),
           batchCommand({ command: 'add', parent: '/body', type: 'table', props: { rows: '2', cols: '3', width: '100%' } }),
           batchCommand({ command: 'set', path: '/body/tbl[1]/tr[1]', props: { header: 'true', c1: '季度', c2: '收入', c3: '增长' } }),
@@ -148,7 +186,7 @@ describe('real OfficeCLI 1.0.144 integration', () => {
       action: 'render', file, grid: 'auto', renderer: 'html',
     }), 'render docx');
     expect(preview.artifacts.some(artifact => artifact.kind === 'image')).toBe(true);
-    await maybeStrictFinalize(file, 'finalize docx');
+    await finalizeDocxWithToc(file, 'finalize docx');
   }, 180_000);
 
   integrationIt('runs native merge, atomic import recovery, and the real refresh capability', async () => {
@@ -190,6 +228,91 @@ describe('real OfficeCLI 1.0.144 integration', () => {
       expect(refresh.error?.upstreamCode || refresh.stderr || refresh.warnings.length).toBeTruthy();
     }
   }, 180_000);
+
+  integrationIt('runs official skill-path Word, PowerPoint, and Excel deliveries', async () => {
+    clearOfficeGuideCache();
+    const word = 'skill-path/小报告.docx';
+    const created = requireSuccess(await handleOfficeDocumentEdit(ctx, { argv: ['create', word] }), 'skill create word');
+    expect(created.data).toEqual(expect.objectContaining({
+      skillBootstrap: expect.objectContaining({
+        guide: 'word',
+        content: expect.stringContaining('Delivery Gate'),
+      }),
+    }));
+    requireSuccess(await handleOfficeDocumentEdit(ctx, {
+      argv: ['batch', word],
+      batch: {
+        commands: [
+          batchCommand({ command: 'add', parent: '/body', type: 'paragraph', props: { text: '季度经营报告', style: 'Heading1', size: '20pt' } }),
+          batchCommand({ command: 'add', parent: '/body', type: 'toc', index: 0, props: { levels: '1-3', title: '目录', hyperlinks: 'true' } }),
+          batchCommand({ command: 'add', parent: '/body', type: 'paragraph', props: { text: '执行摘要', style: 'Heading1', size: '20pt' } }),
+          batchCommand({ command: 'add', parent: '/body', type: 'paragraph', props: { text: '收入同比增长 18%。', style: 'Normal' } }),
+          batchCommand({ command: 'add', parent: '/body', type: 'paragraph', props: { text: '风险与展望', style: 'Heading2' } }),
+          batchCommand({ command: 'add', parent: '/body', type: 'paragraph', props: { text: '下季重点是交付稳定性。', style: 'Normal' } }),
+          batchCommand({ command: 'add', parent: '/body', type: 'paragraph', props: { text: '附录', style: 'Heading3' } }),
+          batchCommand({ command: 'add', parent: '/', type: 'footer', props: { type: 'default', align: 'center', size: '9pt', text: 'Page ', field: 'page' } }),
+        ],
+      },
+    }), 'skill batch word');
+    requireSuccess(await handleOfficeDocumentInspect(ctx, { argv: ['view', word, 'outline'] }), 'skill word outline');
+    requireSuccess(await handleOfficeDocumentInspect(ctx, { argv: ['view', word, 'issues', '--limit', '200'] }), 'skill word issues');
+    requireSuccess(await handleOfficeDocumentPreview(ctx, {
+      action: 'render', file: word, page: '1', renderer: 'html',
+    }), 'skill word preview');
+    const wordFinal = requireSuccess(await handleOfficeDocumentFinalize(ctx, {
+      file: word,
+      profile: requireStrictFinalize ? 'strict' : 'standard',
+    }), 'skill finalize word');
+    expect(wordFinal.deliveryReady).toBe(true);
+    expect(wordFinal.evidence?.checks.find(check => check.name === 'docx_field_refresh')).toMatchObject({
+      blocking: false,
+    });
+    expect(wordFinal.evidence?.checks.find(check => check.name === 'skill_page_field')).toMatchObject({ ok: true });
+    expect(wordFinal.evidence?.checks.find(check => check.name === 'final_render')).toMatchObject({
+      blocking: false,
+      data: expect.objectContaining({ reusedPreview: true }),
+    });
+    expect(JSON.stringify(wordFinal.warnings)).not.toMatch(/no match for style='TOC/i);
+    const settings = requireSuccess(
+      await handleOfficeDocumentInspect(ctx, { argv: ['get', word, '/settings'] }),
+      'skill word settings',
+    );
+    expect(JSON.stringify(settings.data).toLowerCase()).toContain('updatefields');
+
+    const deck = 'skill-path/三页 说明.pptx';
+    requireSuccess(await handleOfficeDocumentEdit(ctx, { argv: ['create', deck] }), 'skill create pptx');
+    requireSuccess(await handleOfficeDocumentEdit(ctx, {
+      argv: ['batch', deck],
+      batch: {
+        commands: [
+          batchCommand({ command: 'add', parent: '/', type: 'slide', props: { layout: 'blank', background: '1E2761' } }),
+          batchCommand({ command: 'add', parent: '/slide[1]', type: 'shape', props: { name: 'Title', text: '第一页', x: '2cm', y: '2cm', width: '28cm', height: '3cm', size: '40', bold: 'true', color: 'FFFFFF', fill: 'none' } }),
+          batchCommand({ command: 'add', parent: '/', type: 'slide', props: { layout: 'blank', background: 'FFFFFF' } }),
+          batchCommand({ command: 'add', parent: '/slide[2]', type: 'shape', props: { name: 'Title', text: '第二页', x: '2cm', y: '2cm', width: '28cm', height: '2cm', size: '32', bold: 'true', color: '1E2761', fill: 'none' } }),
+          batchCommand({ command: 'add', parent: '/', type: 'slide', props: { layout: 'blank', background: 'FFFFFF' } }),
+          batchCommand({ command: 'add', parent: '/slide[3]', type: 'shape', props: { name: 'Title', text: '第三页', x: '2cm', y: '2cm', width: '28cm', height: '2cm', size: '32', bold: 'true', color: '1E2761', fill: 'none' } }),
+        ],
+      },
+    }), 'skill batch pptx');
+    requireSuccess(await handleOfficeDocumentInspect(ctx, { argv: ['view', deck, 'outline'] }), 'skill pptx outline');
+    await maybeStrictFinalize(deck, 'skill finalize pptx');
+
+    const book = 'skill-path/一小表.xlsx';
+    requireSuccess(await handleOfficeDocumentEdit(ctx, { argv: ['create', book] }), 'skill create xlsx');
+    requireSuccess(await handleOfficeDocumentEdit(ctx, {
+      argv: ['batch', book],
+      batch: {
+        commands: [
+          batchCommand({ command: 'set', path: '/Sheet1/A1', props: { value: '项目', bold: 'true' } }),
+          batchCommand({ command: 'set', path: '/Sheet1/B1', props: { value: '数值', bold: 'true' } }),
+          batchCommand({ command: 'set', path: '/Sheet1/A2', props: { value: '收入' } }),
+          batchCommand({ command: 'set', path: '/Sheet1/B2', props: { value: '180', numFmt: '¥#,##0' } }),
+        ],
+      },
+    }), 'skill batch xlsx');
+    requireSuccess(await handleOfficeDocumentInspect(ctx, { argv: ['view', book, 'outline'] }), 'skill xlsx outline');
+    await maybeStrictFinalize(book, 'skill finalize xlsx');
+  }, 240_000);
 
   integrationIt('runs XLSX and PPTX native create/edit/inspect/render/finalize flows', async () => {
     const xlsx = '新建/多层/财务 模型.xlsx';

@@ -17,6 +17,7 @@ import {
   officeToolResult,
   type OfficeCoordinatorDependencies,
 } from '../runtime/office-coordinator.ts';
+import { nativeTocRefreshAvailable } from '../runtime/office-docx-fields.ts';
 import { resolveOfficecliResources } from '../runtime/office-manifest.ts';
 import { isPathWithinDirectory, isPathWithinDirectoryForCreation } from '../runtime/path-security.ts';
 
@@ -61,6 +62,17 @@ interface RenderedPreview {
   previewImagePath?: string;
 }
 
+export interface CachedOfficePreview {
+  documentPath: string;
+  revision: number;
+  envelope: OfficeResultEnvelope;
+  toolResult: ToolResult;
+  previewImagePath?: string;
+  fullImagePath?: string;
+}
+
+const previewRenders = new Map<string, CachedOfficePreview>();
+const htmlDependencyProbes = new Map<string, { revision: number; probe: HtmlDependencyProbe }>();
 const watches = new Map<string, WatchRecord>();
 const watchStartPromises = new Map<string, Promise<WatchRecord>>();
 const sessionWatchStartPromises = new Map<string, Promise<ToolResult>>();
@@ -419,6 +431,39 @@ interface HtmlDependencyProbe {
   warning?: StructuredWarning;
 }
 
+function previewCacheKey(sessionId: string, file: string): string {
+  return `${sessionId}\0${file}`;
+}
+
+export function getCachedOfficePreview(
+  sessionId: string,
+  file: string,
+  revision: number,
+): CachedOfficePreview | undefined {
+  const cached = previewRenders.get(previewCacheKey(sessionId, file));
+  if (!cached || cached.revision !== revision) return undefined;
+  return cached;
+}
+
+function rememberOfficePreview(
+  ctx: SessionToolContext,
+  file: string,
+  rendered: RenderedPreview,
+): void {
+  const documentPath = rendered.envelope.documentPath ?? file;
+  const revision = getOfficeArtifactRevision(documentPath) ?? 1;
+  const record: CachedOfficePreview = {
+    documentPath,
+    revision,
+    envelope: rendered.envelope,
+    toolResult: rendered.toolResult,
+    previewImagePath: rendered.previewImagePath,
+    fullImagePath: rendered.fullImagePath,
+  };
+  previewRenders.set(previewCacheKey(ctx.sessionId, file), record);
+  previewRenders.set(previewCacheKey(ctx.sessionId, documentPath), record);
+}
+
 async function probeHtmlDependencies(
   ctx: SessionToolContext,
   args: Extract<OfficeDocumentPreviewArgs, { action: 'render' }>,
@@ -427,6 +472,11 @@ async function probeHtmlDependencies(
   id: string,
   dependencies: OfficeCoordinatorDependencies,
 ): Promise<HtmlDependencyProbe> {
+  const revisionHint = getOfficeArtifactRevision(args.file);
+  if (revisionHint !== undefined) {
+    const cached = htmlDependencyProbes.get(previewCacheKey(ctx.sessionId, args.file));
+    if (cached && cached.revision === revisionHint) return cached.probe;
+  }
   const htmlPath = join(directory, `${safeStem}-${id}.html`);
   const argv = ['view', args.file, 'html'];
   if (args.page) argv.push('--page', args.page);
@@ -473,11 +523,20 @@ async function probeHtmlDependencies(
     };
   }
   const externalDependencies = detectOfficeHtmlDependencies(readFileSync(htmlPath, 'utf8'));
+  const remember = (probe: HtmlDependencyProbe): HtmlDependencyProbe => {
+    const keyRevision = getOfficeArtifactRevision(outcome.envelope.documentPath ?? args.file) ?? revisionHint ?? 0;
+    const record = { revision: keyRevision, probe };
+    htmlDependencyProbes.set(previewCacheKey(ctx.sessionId, args.file), record);
+    if (outcome.envelope.documentPath) {
+      htmlDependencyProbes.set(previewCacheKey(ctx.sessionId, outcome.envelope.documentPath), record);
+    }
+    return probe;
+  };
   if (externalDependencies.length === 0) {
-    return { state: 'self-contained', dependencies: externalDependencies, artifact };
+    return remember({ state: 'self-contained', dependencies: externalDependencies, artifact });
   }
   if (officeRenderingIsOffline()) {
-    return {
+    return remember({
       state: 'degraded',
       dependencies: externalDependencies,
       artifact,
@@ -487,9 +546,9 @@ async function probeHtmlDependencies(
         severity: 'high',
         recovery: 'Use a reviewed online render, use the native renderer where available, or remove the network-dependent content.',
       },
-    };
+    });
   }
-  return {
+  return remember({
     state: 'runtime-network-assets',
     dependencies: externalDependencies,
     artifact,
@@ -499,7 +558,7 @@ async function probeHtmlDependencies(
       severity: 'low',
       recovery: 'For offline delivery, verify a native render or accept the documented fallback behavior before finalization.',
     },
-  };
+  });
 }
 
 export async function renderOfficeDocument(
@@ -567,7 +626,8 @@ export async function renderOfficeDocument(
   let backend: 'html' | 'native' = requested === 'native' ? 'native' : 'html';
   let outcome;
   const fallbacks: StructuredWarning[] = [];
-  if (requested === 'auto' && extension !== '.xlsx') {
+  const nativeAvailable = dependencies.nativeScreenshotAvailable ?? nativeTocRefreshAvailable();
+  if (requested === 'auto' && extension !== '.xlsx' && nativeAvailable) {
     outcome = await executeRenderAttempt(ctx, args, 'native', fullImagePath, dependencies);
     if (outcome.envelope.ok) {
       backend = 'native';
@@ -580,6 +640,9 @@ export async function renderOfficeDocument(
       outcome = await executeRenderAttempt(ctx, args, 'html', fullImagePath, dependencies);
       backend = 'html';
     }
+  } else if (requested === 'auto') {
+    backend = 'html';
+    outcome = await executeRenderAttempt(ctx, args, 'html', fullImagePath, dependencies);
   } else {
     if (requested === 'native' && extension === '.xlsx') {
       const result = previewError(
@@ -677,12 +740,14 @@ export async function renderOfficeDocument(
         },
       },
     };
-    return {
+    const rendered = {
       toolResult: renderToolResult(envelope, inline.path, inline.buffer, inline.mimeType),
       envelope,
       fullImagePath,
       previewImagePath: inline.path,
     };
+    rememberOfficePreview(ctx, args.file, rendered);
+    return rendered;
   } catch (error) {
     const result = previewError(
       ctx,
@@ -1028,6 +1093,8 @@ export function clearOfficePreviewState(force = false): void {
   sessionWatchStartPromises.clear();
   watchStartWaiterCounts.clear();
   previewSessionEpochs.clear();
+  previewRenders.clear();
+  htmlDependencyProbes.clear();
 }
 
 process.once('exit', () => clearOfficePreviewState(true));

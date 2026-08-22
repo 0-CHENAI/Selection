@@ -19,6 +19,7 @@ import {
   type OfficeCoordinatorDependencies,
 } from '../runtime/office-coordinator.ts';
 import { resolveOfficecliResources, reviewedOfficecliSchemaCrc } from '../runtime/office-manifest.ts';
+import { compileDocxTocIfPresent } from '../runtime/office-docx-fields.ts';
 import { handleOfficeDocumentFinalize as handleOfficeDocumentFinalizeImpl } from './office-finalize.ts';
 import {
   clearOfficePreviewState,
@@ -65,6 +66,12 @@ if (args[0] === 'watch' && args[2] === '--port') {
   return;
 }
 const file = args[1] || '';
+if (file && !args[0].startsWith('--')) {
+  const label = args[0] === 'view' && args[2] === 'screenshot'
+    ? (args.includes('--grid') ? 'screenshot-grid' : 'screenshot')
+    : args[0];
+  try { fs.appendFileSync(file + '.officecli.log', label + '\\n'); } catch {}
+}
 if (args[0] === 'save' && file.includes('flush-fail')) {
   reply({ success: false, error: { code: 'save_failed', message: 'disk full' } }, 1);
 }
@@ -78,16 +85,50 @@ if (args[0] === 'validate' && file.includes('invalid')) {
   reply({ success: false, error: { code: 'validation_failed', message: 'OpenXML validation failed' } }, 1);
 }
 if (args[0] === 'view' && args[2] === 'issues') {
-  const issues = file.includes('issue')
-    ? [{ id: 'F0', severity: 0, path: '/body/p[1]', message: 'Blocking format defect' }]
-    : [];
+  const issues = file.includes('indent-false-positive')
+    ? [{ id: 'I1', severity: 0, path: '/body/p[1]', message: 'Cover title uses first-line indent' }]
+    : file.includes('issue')
+      ? [{ id: 'F0', severity: 0, path: '/body/p[1]', message: 'Blocking format defect' }]
+      : [];
   reply({ success: true, data: { count: issues.length, issues } });
 }
 if (args[0] === 'view' && args[2] === 'outline') {
   if (file.endsWith('.docx')) {
-    reply({ success: true, data: file.includes('empty')
-      ? { paragraphs: 0, tables: 0, images: 0, equations: 0, headings: [] }
-      : { paragraphs: 2, tables: 0, images: 0, equations: 0, headings: [] } });
+    const empty = file.includes('empty');
+    const threeHeadings = file.includes('has-three-headings');
+    const normalOnly = file.includes('normal-only');
+    const smallHeading = file.includes('small-heading');
+    const twoHeadingLong = file.includes('two-heading-long');
+    const tocHeading = { line: 1, text: '目录', style: 'TOCHeading', level: 1 };
+    const heading = { line: 3, text: '第一章', style: 'Heading1', level: 1 };
+    const headings = empty
+      ? []
+      : smallHeading
+        ? [{ line: 1, text: '标题', style: 'Heading1', level: 1 }]
+        : twoHeadingLong
+          ? [
+              { line: 1, text: '一', style: 'Heading1', level: 1 },
+              { line: 3, text: '二', style: 'Heading1', level: 1 },
+            ]
+          : file.includes('has-toc-no-headings')
+            ? [tocHeading]
+            : threeHeadings
+              ? [
+                  { line: 1, text: '概述', style: 'Heading1', level: 1 },
+                  { line: 2, text: '方法', style: 'Heading2', level: 2 },
+                  { line: 3, text: '结论', style: 'Heading3', level: 3 },
+                  ...(file.includes('has-toc') ? [tocHeading] : []),
+                ]
+              : file.includes('has-toc')
+                ? [tocHeading, heading]
+                : [];
+    reply({ success: true, data: {
+      paragraphs: empty ? 0 : (threeHeadings || normalOnly ? 6 : twoHeadingLong ? 10 : smallHeading ? 4 : 2),
+      tables: 0,
+      images: 0,
+      equations: 0,
+      headings,
+    } });
   }
   if (file.endsWith('.xlsx')) {
     reply({ success: true, data: { sheets: file.includes('empty')
@@ -120,6 +161,60 @@ if (args[0] === 'view' && args[2] === 'screenshot') {
   reply({ success: true, data: { rendered: true, backend: file.includes('actual-backend') ? 'fake-html-engine' : undefined } });
 }
 if (args[0] === 'validate') reply({ success: true, data: 'Validation passed' });
+if (args[0] === 'view' && args[2] === 'text') {
+  reply({ success: true, data: file.includes('brace-var')
+    ? 'Body {var} ipsum placeholder this slide layout'
+    : file.includes('leak')
+      ? 'Title $TITLE$ and {{placeholder}} <TODO> xxxx lorem {var}'
+      : file.includes('has-toc-refresh-fail')
+        ? 'Update field to see table of contents'
+        : file.includes('has-toc')
+          ? '目录\\n第一章 概述\\t2'
+          : 'Quarterly report body' });
+}
+if (args[0] === 'refresh') {
+  if (file.includes('has-toc-refresh-fail')) {
+    reply({ success: false, error: { code: 'refresh_failed', message: 'No field engine' } }, 1);
+  }
+  if (file && !file.includes('has-toc-no-headings')) fs.writeFileSync(file + '.refreshed', '1');
+  reply({ success: true, data: 'Refreshed: ' + file + ' (backend: word)' });
+}
+if (args[0] === 'query') {
+  const selector = args[2] || '';
+  if (/cell:contains/i.test(selector)) {
+    const hit = file.includes('excel-error') && /#REF!|#DIV\\/0!|#VALUE!|#NAME\\?|#N\\/A/.test(selector);
+    reply({ success: true, data: hit
+      ? { matches: 1, results: [{ type: 'cell', text: '#REF!' }] }
+      : { matches: 0, results: [] } });
+  }
+  if (/field\[fieldType=page\]/i.test(selector)) {
+    reply({ success: true, data: file.includes('has-page')
+      ? { matches: 1, results: [{ type: 'field', fieldType: 'page' }] }
+      : { matches: 0, results: [] } });
+  }
+  if (/Heading1|Heading2|Heading3/.test(selector)) {
+    reply({ success: true, data: file.includes('small-heading')
+      ? { matches: 1, results: [{ type: 'paragraph', style: 'Heading1', text: '标题', format: { style: 'Heading1', size: '11pt' } }] }
+      : file.includes('has-toc-no-headings')
+        ? { matches: 0, results: [] }
+        : file.includes('has-toc')
+          ? { matches: 2, results: [{ type: 'paragraph', style: 'Heading1', text: '第一章' }] }
+          : { matches: 0, results: [] } });
+  }
+  if (/TOC1|TOC2|TOC3/.test(selector)) {
+    const compiled = file.includes('has-toc-compiled') || (file && fs.existsSync(file + '.refreshed'));
+    reply({ success: true, data: compiled
+      ? { matches: 1, results: [{ type: 'paragraph', style: 'TOC1', text: '第一章\\t2' }] }
+      : { matches: 0, results: [] } });
+  }
+  reply({ success: true, data: { matches: 0, results: [] } });
+}
+if (args[0] === 'get' && (args[2] === '/toc' || args[2] === '/tableofcontents')) {
+  if (file.includes('has-toc')) {
+    reply({ success: true, data: { matches: 1, results: [{ path: '/toc', type: 'toc', text: 'TOC \\\\o "1-3" \\\\h \\\\u' }] } });
+  }
+  reply({ success: true, data: { matches: 0, results: [] } });
+}
 if (args[0] === 'get') reply({ success: true, data: { path: args[2], children: [] } });
 reply({ success: true, data: { argv: args, backend: args[0] === 'refresh' ? 'fake-native' : undefined } });
 `;
@@ -175,6 +270,12 @@ function document(testWorkspace: TestWorkspace, name: string): string {
 
 function envelope(result: { structuredContent?: Record<string, unknown> }): OfficeResultEnvelope {
   return result.structuredContent as OfficeResultEnvelope;
+}
+
+function officecliVerbs(file: string): string[] {
+  return existsSync(`${file}.officecli.log`)
+    ? readFileSync(`${file}.officecli.log`, 'utf8').trim().split('\n').filter(Boolean)
+    : [];
 }
 
 beforeEach(() => {
@@ -270,11 +371,12 @@ describe('office_document_preview', () => {
     expect(existsSync(join(ctx.dataPath!, 'office'))).toBe(false);
   });
 
-  it('records native failure and truthful HTML fallback for auto rendering', async () => {
+  it('records native failure and truthful HTML fallback when native screenshots are available', async () => {
     const w = workspace();
     const ctx = context(w, 'fallback-session');
+    const nativeDeps = { ...TEST_DEPENDENCIES, nativeScreenshotAvailable: true };
     const file = document(w, 'fallback.pptx');
-    const result = await handleOfficeDocumentPreview(ctx, { action: 'render', file, grid: 'auto' });
+    const result = await handleOfficeDocumentPreviewImpl(ctx, { action: 'render', file, grid: 'auto' }, nativeDeps);
 
     expect(envelope(result).backend).toBe('html');
     expect(envelope(result).warnings).toEqual(expect.arrayContaining([
@@ -289,7 +391,7 @@ describe('office_document_preview', () => {
     expect(actual.data).toMatchObject({ render: { backend: 'fake-html-engine' } });
 
     const failedFile = document(w, 'all-renderers-fail.pptx');
-    const failed = envelope(await handleOfficeDocumentPreview(ctx, { action: 'render', file: failedFile }));
+    const failed = envelope(await handleOfficeDocumentPreviewImpl(ctx, { action: 'render', file: failedFile }, nativeDeps));
     expect(failed.error).toMatchObject({
       code: 'dependency_unavailable',
       category: 'dependency',
@@ -299,6 +401,21 @@ describe('office_document_preview', () => {
     expect(failed.warnings).toEqual(expect.arrayContaining([
       expect.objectContaining({ code: 'native_renderer_unavailable' }),
     ]));
+  });
+
+  it('skips native screenshot attempts when desktop Word is unavailable', async () => {
+    const w = workspace();
+    const ctx = context(w, 'html-only-session');
+    const file = document(w, 'html-only.pptx');
+    const result = envelope(await handleOfficeDocumentPreviewImpl(ctx, {
+      action: 'render', file, grid: 'auto',
+    }, { ...TEST_DEPENDENCIES, nativeScreenshotAvailable: false }));
+
+    expect(result.backend).toBe('html');
+    expect(result.warnings ?? []).not.toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: 'native_renderer_unavailable' }),
+    ]));
+    expect(officecliVerbs(file).filter(verb => verb.startsWith('screenshot'))).toEqual(['screenshot-grid']);
   });
 
   it('marks network-backed HTML output as degraded in deterministic offline mode', async () => {
@@ -567,7 +684,7 @@ describe('office_document_finalize', () => {
     });
   });
 
-  it('blocks strict delivery but keeps offline HTML degradation non-blocking under standard', async () => {
+  it('keeps offline HTML degradation non-blocking under both profiles', async () => {
     const w = workspace();
     const ctx = context(w, 'offline-finalize');
     const file = document(w, 'equation.docx');
@@ -576,12 +693,15 @@ describe('office_document_finalize', () => {
     try {
       const strict = envelope(await handleOfficeDocumentFinalize(ctx, { file, profile: 'strict' }));
       const standard = envelope(await handleOfficeDocumentFinalize(ctx, { file, profile: 'standard' }));
-      expect(strict).toMatchObject({ ok: false, deliveryReady: false });
+      expect(strict).toMatchObject({ ok: true, deliveryReady: true });
       expect(strict.evidence?.checks.find(check => check.name === 'final_render')).toMatchObject({
         ok: false,
-        blocking: true,
+        blocking: false,
         error: { code: 'dependency_unavailable' },
       });
+      expect(strict.warnings).toEqual(expect.arrayContaining([
+        expect.objectContaining({ code: 'visual_not_verified' }),
+      ]));
       expect(standard).toMatchObject({ ok: true, deliveryReady: true });
       expect(standard.evidence?.checks.find(check => check.name === 'final_render')).toMatchObject({
         ok: false,
@@ -678,6 +798,133 @@ describe('office_document_finalize', () => {
     expect(envelope(result).evidence?.profile).toBe('standard');
     expect(after.equals(before)).toBe(true);
     expect(envelope(result).command).not.toContain('refresh');
+    expect(envelope(result).evidence?.checks.some(check => check.name === 'docx_field_refresh')).toBe(false);
+  });
+
+  it('does not compile fields on a Word file that has no TOC', async () => {
+    const w = workspace();
+    const ctx = context(w, 'finalize-no-toc');
+    const file = document(w, 'plain-report.docx');
+    const before = readFileSync(file);
+    const result = envelope(await handleOfficeDocumentFinalize(ctx, { file, profile: 'standard' }));
+
+    expect(result.deliveryReady).toBe(true);
+    expect(readFileSync(file).equals(before)).toBe(true);
+    expect(result.command).not.toContain('refresh');
+    expect(result.evidence?.checks.some(check => check.name === 'docx_field_refresh')).toBe(false);
+  });
+
+  it('defers TOC pagination when Word COM is unavailable instead of launching a browser', async () => {
+    const w = workspace();
+    const ctx = context(w, 'finalize-has-toc');
+    const file = document(w, 'has-toc.docx');
+    const result = envelope(await handleOfficeDocumentFinalize(ctx, { file, profile: 'standard' }));
+    const refreshCheck = result.evidence?.checks.find(check => check.name === 'docx_field_refresh');
+
+    expect(result.command[0]).toBe('finalize');
+    expect(result.command).not.toContain('refresh');
+    expect(result.deliveryReady).toBe(true);
+    expect(refreshCheck).toMatchObject({
+      ok: false,
+      blocking: false,
+      data: { status: 'deferred', action: 'defer_to_word', updateFields: true, fallback: true },
+    });
+    expect(result.warnings).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: 'docx_toc_deferred', severity: 'medium' }),
+    ]));
+    expect(result.warnings.some(warning => /no match for style='TOC/i.test(warning.message))).toBe(false);
+    expect(existsSync(`${file}.refreshed`)).toBe(false);
+    expect(officecliVerbs(file)).not.toContain('refresh');
+    expect(result.warnings.some(warning => /style='TOC/i.test(warning.message))).toBe(false);
+  });
+
+  it('does not treat leftover TOC entries as compiled when Word COM is unavailable', async () => {
+    const w = workspace();
+    const ctx = context(w, 'finalize-toc-stale');
+    const file = document(w, 'has-toc-compiled.docx');
+    const result = envelope(await handleOfficeDocumentFinalize(ctx, { file, profile: 'standard' }));
+    const refreshCheck = result.evidence?.checks.find(check => check.name === 'docx_field_refresh');
+
+    expect(result.deliveryReady).toBe(true);
+    expect(refreshCheck).toMatchObject({
+      ok: false,
+      data: { status: 'deferred', action: 'defer_to_word', compiled: false },
+    });
+    expect(existsSync(`${file}.refreshed`)).toBe(false);
+    expect(officecliVerbs(file)).not.toContain('refresh');
+    expect(result.warnings.some(warning => /style='TOC/i.test(warning.message))).toBe(false);
+  });
+
+  it('uses native Word refresh only when that backend is available', async () => {
+    const w = workspace();
+    const ctx = context(w, 'finalize-toc-native');
+    const file = document(w, 'has-toc.docx');
+    const compiled = await compileDocxTocIfPresent(ctx, file, TEST_DEPENDENCIES, {
+      nativeRefreshAvailable: true,
+    });
+
+    expect(compiled.check).toMatchObject({
+      ok: true,
+      data: { action: 'native_refresh', status: 'compiled', backend: 'word', compiled: true },
+    });
+    expect(existsSync(`${file}.refreshed`)).toBe(true);
+    expect(officecliVerbs(file)).toContain('refresh');
+    expect(officecliVerbs(file)).toContain('query');
+    expect(officecliVerbs(file)).toContain('set');
+  });
+
+  it('falls back to updateFields when native Word refresh fails without blocking delivery', async () => {
+    const w = workspace();
+    const ctx = context(w, 'finalize-toc-fail');
+    const file = document(w, 'has-toc-refresh-fail.docx');
+    const compiled = await compileDocxTocIfPresent(ctx, file, TEST_DEPENDENCIES, {
+      nativeRefreshAvailable: true,
+    });
+
+    expect(compiled.check).toMatchObject({
+      ok: false,
+      blocking: false,
+      data: { status: 'refresh_failed', updateFields: true, fallback: true },
+    });
+    expect(compiled.warnings).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: 'docx_toc_uncompiled', severity: 'high' }),
+    ]));
+    expect(JSON.stringify(compiled.warnings)).not.toMatch(/Windows only/i);
+  });
+
+  it('does not refresh a TOC that has no heading sources', async () => {
+    const w = workspace();
+    const ctx = context(w, 'finalize-toc-empty');
+    const file = document(w, 'has-toc-no-headings.docx');
+    const result = envelope(await handleOfficeDocumentFinalize(ctx, { file, profile: 'standard' }));
+    const refreshCheck = result.evidence?.checks.find(check => check.name === 'docx_field_refresh');
+
+    expect(result.deliveryReady).toBe(true);
+    expect(refreshCheck).toMatchObject({
+      ok: false,
+      blocking: false,
+      data: { compiled: false, status: 'empty', action: 'no_sources', fallback: true, updateFields: true, entryMatches: 0 },
+    });
+    expect(result.warnings).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: 'docx_toc_empty', severity: 'high' }),
+    ]));
+    expect(existsSync(`${file}.refreshed`)).toBe(false);
+    expect(officecliVerbs(file)).not.toContain('refresh');
+  });
+
+  it('lets Word COM decide emptiness instead of skipping refresh from a heading query', async () => {
+    const w = workspace();
+    const ctx = context(w, 'finalize-toc-native-empty');
+    const file = document(w, 'has-toc-no-headings.docx');
+    const compiled = await compileDocxTocIfPresent(ctx, file, TEST_DEPENDENCIES, {
+      nativeRefreshAvailable: true,
+    });
+
+    expect(compiled.check).toMatchObject({
+      ok: false,
+      data: { action: 'native_refresh', status: 'empty', compiled: false },
+    });
+    expect(officecliVerbs(file)).toContain('refresh');
   });
 
   it('blocks finalization when the resident lease cannot be flushed', async () => {
@@ -714,5 +961,208 @@ describe('office_document_finalize', () => {
       blocking: true,
       error: { code: 'empty_or_unrecognized_content' },
     });
+  });
+
+  it('rejects placeholder leaks at the skill Delivery Gate', async () => {
+    const w = workspace();
+    const ctx = context(w, 'finalize-leak');
+    const file = document(w, 'leak.docx');
+    const result = envelope(await handleOfficeDocumentFinalize(ctx, { file, profile: 'strict' }));
+    const leak = result.evidence?.checks.find(check => check.name === 'skill_placeholder_leak');
+
+    expect(result.deliveryReady).toBe(false);
+    expect(leak).toMatchObject({
+      ok: false,
+      blocking: true,
+      error: { code: 'docx_placeholder_leak' },
+    });
+    expect(result.error?.recovery).toContain('Delivery Gate');
+    expect(result.error?.recovery).toContain('{var}');
+  });
+
+  it('rejects official brace-form placeholder leaks', async () => {
+    const w = workspace();
+    const ctx = context(w, 'finalize-brace-var');
+    const file = document(w, 'brace-var.docx');
+    const result = envelope(await handleOfficeDocumentFinalize(ctx, { file, profile: 'strict' }));
+
+    expect(result.deliveryReady).toBe(false);
+    expect(result.evidence?.checks.find(check => check.name === 'skill_placeholder_leak')).toMatchObject({
+      ok: false,
+      blocking: true,
+      error: { code: 'docx_placeholder_leak' },
+    });
+  });
+
+  it('requires a PAGE field when a Word document has three heading sources', async () => {
+    const w = workspace();
+    const ctx = context(w, 'finalize-page-gate');
+    const file = document(w, 'has-three-headings-has-toc.docx');
+    const result = envelope(await handleOfficeDocumentFinalize(ctx, { file, profile: 'strict' }));
+    const page = result.evidence?.checks.find(check => check.name === 'skill_page_field');
+
+    expect(result.deliveryReady).toBe(false);
+    expect(page).toMatchObject({
+      ok: false,
+      blocking: true,
+      error: { code: 'docx_page_field_required' },
+    });
+    expect(result.error?.recovery).toContain('field=page');
+    expect(officecliVerbs(file)).toContain('query');
+    expect(officecliVerbs(file)).toContain('screenshot');
+    expect(officecliVerbs(file)).not.toContain('screenshot-grid');
+  });
+
+  it('requires a TOC field when a Word document has three heading sources', async () => {
+    const w = workspace();
+    const ctx = context(w, 'finalize-toc-gate');
+    const file = document(w, 'has-three-headings-has-page.docx');
+    const result = envelope(await handleOfficeDocumentFinalize(ctx, { file, profile: 'strict' }));
+    const toc = result.evidence?.checks.find(check => check.name === 'skill_toc_field');
+
+    expect(result.deliveryReady).toBe(false);
+    expect(toc).toMatchObject({
+      ok: false,
+      blocking: true,
+      error: { code: 'docx_toc_required' },
+    });
+  });
+
+  it('passes skill TOC and PAGE gates when both fields exist', async () => {
+    const w = workspace();
+    const ctx = context(w, 'finalize-skill-ready');
+    const file = document(w, 'has-three-headings-has-toc-has-page.docx');
+    const result = envelope(await handleOfficeDocumentFinalize(ctx, { file, profile: 'strict' }));
+
+    expect(result.deliveryReady).toBe(true);
+    expect(result.evidence?.checks.find(check => check.name === 'skill_toc_field')).toMatchObject({ ok: true });
+    expect(result.evidence?.checks.find(check => check.name === 'skill_page_field')).toMatchObject({ ok: true });
+    expect(result.evidence?.checks.find(check => check.name === 'final_render')).toMatchObject({
+      blocking: false,
+    });
+  });
+
+  it('treats heading-less Normal-only Word reports as a skill heading miss', async () => {
+    const w = workspace();
+    const ctx = context(w, 'finalize-normal-only');
+    const file = document(w, 'normal-only.docx');
+    const strict = envelope(await handleOfficeDocumentFinalize(ctx, { file, profile: 'strict' }));
+    const standard = envelope(await handleOfficeDocumentFinalize(ctx, { file, profile: 'standard' }));
+
+    expect(strict.deliveryReady).toBe(false);
+    expect(strict.evidence?.checks.find(check => check.name === 'skill_heading_sources')).toMatchObject({
+      ok: false,
+      blocking: true,
+      error: { code: 'docx_heading_hierarchy_missing' },
+    });
+    expect(standard.deliveryReady).toBe(true);
+    expect(standard.warnings).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: 'docx_heading_hierarchy_missing', severity: 'high' }),
+    ]));
+  });
+
+  it('does not block delivery when the screenshot fails', async () => {
+    const w = workspace();
+    const ctx = context(w, 'finalize-screenshot-fail');
+    const file = document(w, 'all-renderers-fail.docx');
+    const result = envelope(await handleOfficeDocumentFinalize(ctx, { file, profile: 'strict' }));
+
+    expect(result.deliveryReady).toBe(true);
+    expect(result.evidence?.checks.find(check => check.name === 'final_render')).toMatchObject({
+      ok: false,
+      blocking: false,
+    });
+    expect(result.warnings).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: 'visual_not_verified' }),
+    ]));
+  });
+
+  it('reuses a same-revision preview instead of taking a second screenshot', async () => {
+    const w = workspace();
+    const ctx = context(w, 'finalize-reuse-preview');
+    const file = document(w, 'reuse-preview.docx');
+    await handleOfficeDocumentPreview(ctx, { action: 'render', file, page: '1', renderer: 'html' });
+    const before = officecliVerbs(file).filter(verb => verb.startsWith('screenshot')).length;
+    const result = envelope(await handleOfficeDocumentFinalize(ctx, { file, profile: 'standard' }));
+    const after = officecliVerbs(file).filter(verb => verb.startsWith('screenshot'));
+
+    expect(result.deliveryReady).toBe(true);
+    expect(before).toBe(1);
+    expect(after).toEqual(['screenshot']);
+    expect(result.evidence?.checks.find(check => check.name === 'final_render')?.data).toEqual(
+      expect.objectContaining({ reusedPreview: true }),
+    );
+  });
+
+  it('filters word first-line-indent false positives out of the issue gate', async () => {
+    const w = workspace();
+    const ctx = context(w, 'finalize-indent-fp');
+    const file = document(w, 'indent-false-positive.docx');
+    const result = envelope(await handleOfficeDocumentFinalize(ctx, { file, profile: 'strict' }));
+    const issues = result.evidence?.checks.find(check => check.name === 'format_structure_content_issues');
+
+    expect(result.deliveryReady).toBe(true);
+    expect(issues).toMatchObject({ ok: true, data: { count: 0 } });
+  });
+
+  it('blocks undersized Heading1 when the official visual floor can be read', async () => {
+    const w = workspace();
+    const ctx = context(w, 'finalize-small-heading');
+    const file = document(w, 'small-heading.docx');
+    const strict = envelope(await handleOfficeDocumentFinalize(ctx, { file, profile: 'strict' }));
+    const standard = envelope(await handleOfficeDocumentFinalize(ctx, { file, profile: 'standard' }));
+
+    expect(strict.deliveryReady).toBe(false);
+    expect(strict.evidence?.checks.find(check => check.name === 'skill_heading_size')).toMatchObject({
+      ok: false,
+      blocking: true,
+      error: { code: 'docx_heading_size_below_floor' },
+    });
+    expect(standard.deliveryReady).toBe(true);
+    expect(standard.warnings).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: 'docx_heading_size_below_floor', severity: 'high' }),
+    ]));
+  });
+
+  it('requires a PAGE field on long Word documents even with fewer than three headings', async () => {
+    const w = workspace();
+    const ctx = context(w, 'finalize-long-page');
+    const file = document(w, 'two-heading-long.docx');
+    const result = envelope(await handleOfficeDocumentFinalize(ctx, { file, profile: 'strict' }));
+
+    expect(result.deliveryReady).toBe(false);
+    expect(result.evidence?.checks.find(check => check.name === 'skill_page_field')).toMatchObject({
+      ok: false,
+      blocking: true,
+      error: { code: 'docx_page_field_required' },
+    });
+    expect(result.evidence?.checks.find(check => check.name === 'skill_toc_field')).toBeUndefined();
+  });
+
+  it('blocks Excel workbooks that still contain formula error cells', async () => {
+    const w = workspace();
+    const ctx = context(w, 'finalize-excel-error');
+    const file = document(w, 'excel-error.xlsx');
+    const result = envelope(await handleOfficeDocumentFinalize(ctx, { file, profile: 'strict' }));
+
+    expect(result.deliveryReady).toBe(false);
+    expect(result.evidence?.checks.find(check => check.name === 'skill_excel_errors')).toMatchObject({
+      ok: false,
+      blocking: true,
+      error: { code: 'xlsx_formula_error_cells' },
+    });
+  });
+
+  it('takes one HTML screenshot during finalize when native rendering is unavailable', async () => {
+    const w = workspace();
+    const ctx = context(w, 'finalize-one-shot');
+    const file = document(w, 'plain-report.docx');
+    const result = envelope(await handleOfficeDocumentFinalizeImpl(ctx, { file, profile: 'standard' }, {
+      ...TEST_DEPENDENCIES,
+      nativeScreenshotAvailable: false,
+    }));
+
+    expect(result.deliveryReady).toBe(true);
+    expect(officecliVerbs(file).filter(verb => verb.startsWith('screenshot'))).toEqual(['screenshot']);
   });
 });

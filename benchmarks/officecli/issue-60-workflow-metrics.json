@@ -1,7 +1,7 @@
 {
   "issue": 60,
   "officecliVersion": "1.0.144",
-  "note": "Scripted engine workflows. Naive repeats status/help; optimized follows the injected standard recipe. preview.render and finalize are counted as the last two planned tools. Mock coordinator timings are not recorded because they are not representative wall-clock.",
+  "note": "Scripted engine workflows. Naive repeats status/help; optimized follows the injected skill-bootstrap recipe. inspect-outline and finalize are counted as the last two planned tools. Mock coordinator timings are not recorded because they are not representative wall-clock.",
   "reductionGate": 0.6,
   "tasks": [
     {
