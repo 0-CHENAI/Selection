@@ -53,6 +53,19 @@ describe('OfficecliExecutionTracker', () => {
     expect(tracker.snapshot().fileCount).toBe(2);
   });
 
+  it('does not let unrelated Office-looking strings redirect the per-file budget key', () => {
+    const tracker = new OfficecliExecutionTracker();
+    for (let index = 0; index < 8; index += 1) {
+      expect(tracker.inspect('Bash', {
+        command: `echo "decoy-${index}.docx"; officecli add "report.docx" /body --type paragraph`,
+      })).toEqual({ allowed: true });
+    }
+    expect(tracker.inspect('Bash', {
+      command: 'echo "ninth-decoy.docx"; officecli set "report.docx" /body/p[1] --props "{}"',
+    })).toMatchObject({ allowed: false, kind: 'direct_mutation_limit' });
+    expect(tracker.snapshot()).toMatchObject({ directMutations: 8, fileCount: 1 });
+  });
+
   it('counts a typed batch once and never as direct mutations', () => {
     const tracker = new OfficecliExecutionTracker();
     const operations = Array.from({ length: 50 }, () => ({ command: 'add' }));
@@ -67,6 +80,14 @@ describe('OfficecliExecutionTracker', () => {
       batchSizes: [50],
       directMutations: 0,
     });
+  });
+
+  it('counts trusted typed finalization as one OfficeCLI call', () => {
+    const tracker = new OfficecliExecutionTracker();
+    expect(tracker.inspect('mcp__session__officecli_finalize', {
+      file: 'report.docx',
+    })).toEqual({ allowed: true });
+    expect(tracker.snapshot()).toMatchObject({ toolCalls: 1, directMutations: 0, fileCount: 1 });
   });
 
   it('enforces the direct-mutation limit independently for each file', () => {

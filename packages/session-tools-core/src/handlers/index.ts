@@ -72,6 +72,8 @@ export type {
 } from './officecli-batch.ts';
 export { handleOfficecliQa } from './officecli-qa.ts';
 export type { OfficecliQaArgs, OfficecliQaResult } from './officecli-qa.ts';
+export { handleOfficecliFinalize } from './officecli-finalize.ts';
+export type { OfficecliFinalizeArgs, OfficecliFinalizeResult } from './officecli-finalize.ts';
 
 // Session Self-Management
 export { handleSetSessionLabels } from './set-session-labels.ts';

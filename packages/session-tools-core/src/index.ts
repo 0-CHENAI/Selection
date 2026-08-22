@@ -148,6 +148,14 @@ export type {
 
 export { createNodeFileSystem } from './context.ts';
 
+// OfficeCLI verification/runtime helpers used by first-party integration harnesses.
+export {
+  inspectOfficecliAttribution,
+  sanitizeOfficecliAttribution,
+  sanitizeOfficecliMetadata,
+} from './handlers/officecli-metadata.ts';
+export { parseOfficecliJson, runOfficecli } from './runtime/officecli-runtime.ts';
+
 // Handlers
 export {
   // SubmitPlan
@@ -180,6 +188,7 @@ export {
   // OfficeCLI
   handleOfficecliBatch,
   handleOfficecliQa,
+  handleOfficecliFinalize,
 } from './handlers/index.ts';
 
 export type {
@@ -203,6 +212,8 @@ export type {
   OfficecliOperation,
   OfficecliQaArgs,
   OfficecliQaResult,
+  OfficecliFinalizeArgs,
+  OfficecliFinalizeResult,
 } from './handlers/index.ts';
 
 // Tool definitions — single source of truth
@@ -222,6 +233,7 @@ export {
   RenderTemplateSchema,
   OfficecliBatchSchema,
   OfficecliQaSchema,
+  OfficecliFinalizeSchema,
   OfficecliOperationSchema,
   // Browser tool schema
   BrowserToolSchema,

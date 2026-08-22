@@ -35,4 +35,56 @@ describe('PiAgent OfficeCLI latency telemetry', () => {
     expect(internal.modelWaitMs).toBe(350)
     agent.destroy()
   })
+
+  it('preserves the budget for a continuation and resets it for a new user task', () => {
+    const agent = new PiAgent(createConfig())
+    const checkpoint = agent.getOfficecliContinuationState()
+    checkpoint.execution.attemptedToolCalls = 8
+    checkpoint.execution.toolCalls = 7
+    checkpoint.execution.directMutations = 6
+    checkpoint.modelWaitMs = 1234
+    checkpoint.measuredModelCalls = 5
+    agent.restoreOfficecliContinuationState(checkpoint)
+
+    const internal = agent as unknown as {
+      prepareOfficecliUserTask(continueUserTask: boolean): void
+    }
+    internal.prepareOfficecliUserTask(true)
+    expect(agent.getOfficecliContinuationState()).toMatchObject({
+      execution: { attemptedToolCalls: 8, toolCalls: 7, directMutations: 6 },
+      modelWaitMs: 1234,
+      measuredModelCalls: 5,
+    })
+
+    internal.prepareOfficecliUserTask(false)
+    expect(agent.getOfficecliContinuationState()).toMatchObject({
+      execution: { attemptedToolCalls: 0, toolCalls: 0, directMutations: 0 },
+      modelWaitMs: 0,
+      measuredModelCalls: 0,
+    })
+    agent.destroy()
+  })
+
+  it('includes trusted finalization latency in OfficeCLI execution telemetry', async () => {
+    const agent = new PiAgent(createConfig())
+    const internal = agent as unknown as {
+      handleSubprocessEvent(event: Record<string, unknown>): void
+    }
+    internal.handleSubprocessEvent({
+      type: 'tool_execution_start',
+      toolCallId: 'finalize-1',
+      toolName: 'mcp__session__officecli_finalize',
+      args: { file: 'report.docx' },
+    })
+    await Bun.sleep(5)
+    internal.handleSubprocessEvent({
+      type: 'tool_execution_end',
+      toolCallId: 'finalize-1',
+      toolName: 'mcp__session__officecli_finalize',
+      result: {},
+      isError: false,
+    })
+    expect(agent.getOfficecliContinuationState().execution.executionMs).toBeGreaterThan(0)
+    agent.destroy()
+  })
 })

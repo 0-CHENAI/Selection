@@ -3,6 +3,7 @@ import {
   createTurnUsageAccumulator,
   finalizeTurnUsage,
   normalizeModelCallUsage,
+  recordModelCallStart,
   recordModelCallUsage,
   snapshotTurnUsage,
 } from './usage-accounting'
@@ -87,5 +88,18 @@ describe('turn usage accounting', () => {
       costUsd: 0,
     })
     expect(finalizeTurnUsage(recorded.accumulator, 4_000).wallClockMs).toBe(0)
+  })
+
+  it('counts failed attempts without usage and does not double-count later usage', () => {
+    let turn = recordModelCallStart(createTurnUsageAccumulator(1_000))
+    turn = recordModelCallUsage(turn, {
+      inputTokens: 100,
+      outputTokens: 10,
+    }, { countModelCall: false }).accumulator
+    turn = recordModelCallStart(turn)
+
+    expect(turn.modelCallCount).toBe(2)
+    expect(turn.inputTokens).toBe(100)
+    expect(turn.outputTokens).toBe(10)
   })
 })

@@ -34,14 +34,16 @@ describe('session tool filtering helpers', () => {
     }
   });
 
-  it('omits both typed OfficeCLI tools when the feature/runtime gate is closed', () => {
+  it('omits all typed OfficeCLI tools when the feature/runtime gate is closed', () => {
     const disabled = getSessionToolNames({ includeOfficecliTools: false });
     expect(disabled.has('officecli_batch')).toBe(false);
     expect(disabled.has('officecli_qa')).toBe(false);
+    expect(disabled.has('officecli_finalize')).toBe(false);
 
     const enabled = getSessionToolNames({ includeOfficecliTools: true });
     expect(enabled.has('officecli_batch')).toBe(true);
     expect(enabled.has('officecli_qa')).toBe(true);
+    expect(enabled.has('officecli_finalize')).toBe(true);
   });
 
   it('all canonical session tools declare safeMode metadata', () => {
@@ -55,5 +57,6 @@ describe('session tool filtering helpers', () => {
     const blocked = getSessionSafeBlockedToolNames({ includeOfficecliTools: true });
     expect(allowed.has('officecli_qa')).toBe(true);
     expect(blocked.has('officecli_batch')).toBe(true);
+    expect(blocked.has('officecli_finalize')).toBe(true);
   });
 });

@@ -61,8 +61,8 @@ export function isEmbeddedServerEnabled(): boolean {
 
 /**
  * Runtime-evaluated check for typed OfficeCLI batch and QA tools.
- * Defaults to disabled until the MiniMax and large-model release benchmarks
- * pass; callers still perform the runtime availability check before exposure.
+ * Defaults to disabled until the canonical Hana/MiniMax release gate is stable;
+ * callers also perform the runtime availability check before exposure.
  */
 export function isOfficecliTypedToolsEnabled(): boolean {
   const override = parseBooleanEnv(getEnv('CRAFT_FEATURE_OFFICECLI_TYPED_TOOLS'));
@@ -100,7 +100,7 @@ export const FEATURE_FLAGS = {
   },
   /**
    * Enable typed OfficeCLI batch and QA tools.
-   * Release-gated default is disabled. Override with CRAFT_FEATURE_OFFICECLI_TYPED_TOOLS=1|0.
+   * Defaults to disabled. Override with CRAFT_FEATURE_OFFICECLI_TYPED_TOOLS=1|0.
    */
   get officecliTypedTools(): boolean {
     return isOfficecliTypedToolsEnabled();

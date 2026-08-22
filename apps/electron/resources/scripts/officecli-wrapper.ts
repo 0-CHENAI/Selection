@@ -7,7 +7,7 @@ import {
   ensureDocxOutlineHeadingStyles,
   findDocxArgInOfficecliArgs,
 } from '../../../../packages/shared/src/utils/officecli.ts';
-import { inspectOfficecliAttribution, sanitizeOfficecliMetadata } from '../../../../packages/session-tools-core/src/handlers/officecli-metadata.ts';
+import { inspectOfficecliAttribution, sanitizeOfficecliAttribution } from '../../../../packages/session-tools-core/src/handlers/officecli-metadata.ts';
 
 const binary = process.argv[2] ? resolve(process.argv[2]) : '';
 const args = process.argv.slice(3);
@@ -16,12 +16,18 @@ if (!binary || !existsSync(binary)) {
   process.exit(127);
 }
 
-const officeFile = args.find(arg =>
+const officeFiles = args.filter(arg =>
   !arg.startsWith('-') && ['.docx', '.docm', '.xlsx', '.xlsm', '.pptx'].includes(extname(arg).toLowerCase())
 );
 const docx = findDocxArgInOfficecliArgs(args);
 const timing = docxOutlineEnsureTiming(args);
-const verb = args.find(arg => /^(?:create|batch|save|close|add|set|remove|move|swap)$/i.test(arg))?.toLowerCase();
+const verb = args.find(arg => /^(?:create|batch|save|close|add|set|remove|move|swap|refresh|raw-set|add-part|import|merge)$/i.test(arg))?.toLowerCase();
+const officeFile = verb === 'merge' ? officeFiles[1] : officeFiles[0];
+
+if (verb && !officeFile) {
+  console.error('Selection could not identify the Office document before mutation.');
+  process.exit(2);
+}
 
 const ensureStyles = () => {
   if (!docx || !existsSync(docx)) return;
@@ -38,9 +44,24 @@ const exitCode = child.status ?? 1;
 if (exitCode !== 0) process.exit(exitCode);
 
 if (timing.after) ensureStyles();
-if (verb && officeFile && existsSync(officeFile)) {
+if (verb) {
+  if (!officeFile || !existsSync(officeFile)) {
+    console.error('Selection could not verify the Office document after mutation.');
+    process.exit(2);
+  }
+  if (verb !== 'close') {
+    const closed = spawnSync(binary, ['close', officeFile, '--json'], {
+      stdio: ['ignore', 'ignore', 'inherit'],
+      env: process.env,
+    });
+    if (closed.error) {
+      console.error(closed.error.message);
+      process.exit(1);
+    }
+    if ((closed.status ?? 1) !== 0) process.exit(closed.status ?? 1);
+  }
   try {
-    sanitizeOfficecliMetadata(officeFile);
+    sanitizeOfficecliAttribution(officeFile);
     if (verb === 'save' || verb === 'close') {
       const attribution = inspectOfficecliAttribution(officeFile);
       if (!attribution.clean) {

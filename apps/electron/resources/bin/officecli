@@ -48,7 +48,7 @@ ensure_after=0
 for arg in "$@"; do
   case "$arg" in
     --*|-* ) ;;
-    create|batch|save|close|add|set|remove|move|swap)
+    create|batch|save|close|add|set|remove|move|swap|refresh|raw-set|add-part|import|merge)
       [ -z "$verb" ] && verb=$arg
       [ "$arg" = "create" ] && ensure_after=1
       ;;
@@ -75,6 +75,41 @@ for arg in "$@"; do
   prev=$arg
 done
 
+# merge reads the first Office file as a template and writes the second one.
+# Attribution verification must target the output, not rewrite the template.
+if [ "$verb" = "merge" ]; then
+  office_file=""
+  office_file_index=0
+  for arg in "$@"; do
+    case "$arg" in
+      *.docx|*.DOCX|*.docm|*.DOCM|*.xlsx|*.XLSX|*.xlsm|*.XLSM|*.pptx|*.PPTX)
+        office_file_index=$((office_file_index + 1))
+        [ "$office_file_index" -eq 2 ] && office_file=$arg
+        ;;
+    esac
+  done
+fi
+
+# Mutation verification must be available before OfficeCLI touches the file.
+# Returning a failure only after create/add/batch has already committed is not
+# fail-closed and encourages an unsafe automatic retry.
+case "$verb" in
+  create|batch|save|close|add|set|remove|move|swap|refresh|raw-set|add-part|import|merge)
+    if [ -z "$office_file" ]; then
+      echo "Selection could not identify the Office document before mutation." >&2
+      exit 2
+    fi
+    if [ -z "$BUN_BIN" ] || [ ! -x "$BUN_BIN" ]; then
+      echo "Selection's bundled Bun runtime is unavailable; attribution verification failed closed before mutation." >&2
+      exit 127
+    fi
+    if [ ! -f "$SANITIZE" ]; then
+      echo "Selection's OfficeCLI attribution verifier is unavailable; verification failed closed before mutation." >&2
+      exit 127
+    fi
+    ;;
+esac
+
 ensure_docx() {
   if [ -n "$docx" ] && [ -f "$ENSURE" ] && [ -f "$docx" ]; then
     "$ENSURE" "$BIN" "$docx"
@@ -98,10 +133,20 @@ sanitize_office_file() {
   return $?
 }
 
+close_before_package_rewrite() {
+  [ "$verb" = "close" ] && return 0
+  "$BIN" close "$office_file" --json >/dev/null
+  return $?
+}
+
 if [ "$verb" = "create" ]; then
   "$BIN" "$@"
   status=$?
   [ $status -eq 0 ] && ensure_docx
+  if [ $status -eq 0 ]; then
+    close_before_package_rewrite
+    status=$?
+  fi
   if [ $status -eq 0 ]; then
     sanitize_office_file
     status=$?
@@ -115,6 +160,10 @@ if [ "$ensure_before" = 1 ] || [ "$ensure_after" = 1 ]; then
   status=$?
   [ $status -eq 0 ] && [ "$ensure_after" = 1 ] && ensure_docx
   if [ $status -eq 0 ]; then
+    close_before_package_rewrite
+    status=$?
+  fi
+  if [ $status -eq 0 ]; then
     sanitize_office_file
     status=$?
   fi
@@ -126,14 +175,22 @@ case "$verb" in
     "$BIN" "$@"
     status=$?
     if [ $status -eq 0 ]; then
+      close_before_package_rewrite
+      status=$?
+    fi
+    if [ $status -eq 0 ]; then
       sanitize_office_file --inspect-visible
       status=$?
     fi
     exit $status
     ;;
-  batch|add|set|remove|move|swap)
+  batch|add|set|remove|move|swap|refresh|raw-set|add-part|import|merge)
     "$BIN" "$@"
     status=$?
+    if [ $status -eq 0 ]; then
+      close_before_package_rewrite
+      status=$?
+    fi
     if [ $status -eq 0 ]; then
       sanitize_office_file
       status=$?

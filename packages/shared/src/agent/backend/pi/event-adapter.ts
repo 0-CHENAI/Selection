@@ -290,6 +290,7 @@ export class PiEventAdapter extends BaseEventAdapter {
       case 'turn_start':
         // Pi SDK turn_start has no ID, so generate one for event correlation
         this.currentTurnId = `pi-turn-${this.turnIndex}`;
+        yield { type: 'model_call_start' };
         break;
 
       case 'turn_end':

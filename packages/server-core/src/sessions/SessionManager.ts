@@ -119,6 +119,7 @@ import { validateArchiveTarget } from './archive-guards'
 import {
   createTurnUsageAccumulator,
   finalizeTurnUsage,
+  recordModelCallStart,
   recordModelCallUsage,
   snapshotTurnUsage,
   type TurnUsageAccumulator,
@@ -866,6 +867,8 @@ interface ManagedSession {
   pendingOfficecliContinuationState?: ReturnType<NonNullable<AgentBackend['getOfficecliContinuationState']>>
   /** Whether the backend emitted per-call usage for this turn (prevents double-counting final usage). */
   activeTurnSawUsageUpdate?: boolean
+  /** Whether the backend reports provider attempts independently of usage. */
+  activeTurnSawModelCallStart?: boolean
   // Session status (user-controlled) - determines open vs closed
   // Dynamic status ID referencing workspace status config
   sessionStatus?: string
@@ -6329,6 +6332,7 @@ export class SessionManager implements ISessionManager {
       managed.pendingContinuationUsage = undefined
     }
     managed.activeTurnSawUsageUpdate = false
+    managed.activeTurnSawModelCallStart = false
     if (!managed.tokenUsage) {
       managed.tokenUsage = { ...DEFAULT_TOKEN_USAGE }
     }
@@ -7465,6 +7469,7 @@ export class SessionManager implements ISessionManager {
       delete managed.tokenUsage.currentTurn
       managed.activeTurnUsage = undefined
       managed.activeTurnSawUsageUpdate = undefined
+      managed.activeTurnSawModelCallStart = undefined
     }
 
     // 1. Cleanup state
@@ -9547,7 +9552,9 @@ export class SessionManager implements ISessionManager {
           // accounted for this final call. Legacy backends only provide the
           // final complete event, so record it as a single-call turn.
           if (!managed.activeTurnSawUsageUpdate && managed.activeTurnUsage) {
-            const recorded = recordModelCallUsage(managed.activeTurnUsage, event.usage)
+            const recorded = recordModelCallUsage(managed.activeTurnUsage, event.usage, {
+              countModelCall: !managed.activeTurnSawModelCallStart,
+            })
             managed.activeTurnUsage = recorded.accumulator
             managed.tokenUsage.lastCall = recorded.lastCall
             managed.tokenUsage.currentTurn = snapshotTurnUsage(recorded.accumulator, Date.now())
@@ -9569,6 +9576,22 @@ export class SessionManager implements ISessionManager {
         }
         break
 
+      case 'model_call_start':
+        if (!managed.tokenUsage) {
+          managed.tokenUsage = { ...DEFAULT_TOKEN_USAGE }
+        }
+        managed.activeTurnUsage = recordModelCallStart(
+          managed.activeTurnUsage ?? createTurnUsageAccumulator(Date.now()),
+        )
+        managed.activeTurnSawModelCallStart = true
+        managed.tokenUsage.currentTurn = snapshotTurnUsage(managed.activeTurnUsage, Date.now())
+        this.sendEvent({
+          type: 'usage_update',
+          sessionId: managed.id,
+          tokenUsage: managed.tokenUsage,
+        }, workspaceId)
+        break
+
       case 'usage_update':
         // Real-time usage update for context display during processing
         // Update managed session's tokenUsage with latest context size
@@ -9585,6 +9608,7 @@ export class SessionManager implements ISessionManager {
           const recorded = recordModelCallUsage(
             managed.activeTurnUsage ?? createTurnUsageAccumulator(Date.now()),
             event.usage,
+            { countModelCall: !managed.activeTurnSawModelCallStart },
           )
           managed.activeTurnUsage = recorded.accumulator
           managed.activeTurnSawUsageUpdate = true

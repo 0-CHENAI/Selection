@@ -1,12 +1,13 @@
-import { extname } from 'node:path';
-import { existsSync } from 'node:fs';
+import { randomUUID } from 'node:crypto';
+import { dirname, extname, join } from 'node:path';
+import { chmodSync, copyFileSync, existsSync, renameSync, rmSync, statSync } from 'node:fs';
 import type { SessionToolContext } from '../context.ts';
 import type { ToolResult } from '../types.ts';
 import { errorResponse } from '../response.ts';
 import { resolveOfficecliDocumentPath } from './officecli-path.ts';
 import { parseOfficecliJson, runOfficecli, withOfficecliFileLock } from '../runtime/officecli-runtime.ts';
 import { OfficecliBatchSchema } from './officecli-schemas.ts';
-import { sanitizeOfficecliMetadata } from './officecli-metadata.ts';
+import { sanitizeOfficecliAttribution } from './officecli-metadata.ts';
 
 export type OfficecliOperation = {
   command: 'add' | 'set' | 'remove' | 'move' | 'swap' | 'get' | 'query';
@@ -39,6 +40,7 @@ export interface OfficecliBatchResult {
   /** True when the client could not determine whether the resident process committed the batch. */
   commitUnknown?: boolean;
   metadataSanitized?: boolean;
+  visibleBadgesRemoved?: number;
   errorType?: 'preflight' | 'commit_unknown' | 'metadata' | 'officecli' | 'process';
 }
 
@@ -109,6 +111,36 @@ export async function handleOfficecliBatch(
 
   return withOfficecliFileLock(file, async () => {
     let batchStarted = false;
+    let preflightBackup: string | undefined;
+    const snapshotBeforePreflight = () => {
+      preflightBackup = join(dirname(file), `.${randomUUID()}.officecli-preflight-backup`);
+      copyFileSync(file, preflightBackup);
+    };
+    const restorePreflightSnapshot = () => {
+      if (!preflightBackup) return;
+      const replacement = join(dirname(file), `.${randomUUID()}.officecli-preflight-restore`);
+      try {
+        copyFileSync(preflightBackup, replacement);
+        chmodSync(replacement, statSync(preflightBackup).mode & 0o7777);
+        renameSync(replacement, file);
+      } finally {
+        rmSync(replacement, { force: true });
+      }
+    };
+    const closeResidentBeforePackageRewrite = async () => {
+      const closed = await runOfficecli(
+        officecli.binaryPath,
+        ['close', file, '--json'],
+        { cwd: ctx.workingDirectory ?? ctx.workspacePath },
+      );
+      const json = parseOfficecliJson(closed.stdout);
+      if (
+        closed.timedOut || closed.outputTruncated || closed.stdinDeliveryFailed ||
+        closed.exitCode !== 0 || json?.success !== true
+      ) {
+        throw new Error(closed.stderr.trim() || 'OfficeCLI resident close could not be confirmed.');
+      }
+    };
     try {
       const extension = extname(file).toLowerCase();
       if (
@@ -116,8 +148,14 @@ export async function handleOfficecliBatch(
         needsDocxStylePreflight(args.operations) &&
         officecli.ensureDocxOutlineStyles
       ) {
+        // The style helper predates typed batches and can mutate the document.
+        // Snapshot first so a rejected/rolled-back batch is atomic from the
+        // caller's perspective, including this prerequisite repair.
+        snapshotBeforePreflight();
         const ready = await officecli.ensureDocxOutlineStyles(file);
         if (!ready) {
+          await closeResidentBeforePackageRewrite();
+          restorePreflightSnapshot();
           return structuredResponse({
             success: false,
             operationCount: args.operations.length,
@@ -154,28 +192,96 @@ export async function handleOfficecliBatch(
     const failed = results.find(result =>
       !!result && typeof result === 'object' && (result as Record<string, unknown>).success === false
     ) as Record<string, unknown> | undefined;
-    const rolledBack = summary?.atomicRolledBack === true;
-    const commitUnknown = processResult.timedOut || processResult.outputTruncated;
-    const success = !commitUnknown && processResult.exitCode === 0 && parsed?.success === true;
+    const rolledBack = parsed?.success === false && summary?.atomicRolledBack === true && !!failed;
+    const successfulResults = results.length === args.operations.length && results.every((result, index) =>
+      !!result && typeof result === 'object' &&
+      (result as Record<string, unknown>).success === true &&
+      (result as Record<string, unknown>).index === index
+    );
+    const summaryMatches = summary?.total === args.operations.length &&
+      summary?.succeeded === args.operations.length &&
+      summary?.failed === 0;
+    const successEnvelopeValid = parsed?.success === true && successfulResults && summaryMatches;
+    const transportUncertain = processResult.timedOut ||
+      processResult.outputTruncated ||
+      processResult.stdinDeliveryFailed;
+    const success = !transportUncertain && processResult.exitCode === 0 && successEnvelopeValid;
+    // Once execution starts, only a valid success envelope or explicit atomic
+    // rollback proves the document state. Every other outcome is unknown.
+    const commitUnknown = transportUncertain || (!success && !rolledBack);
     const appliedCount = success
       ? typeof summary?.succeeded === 'number' ? summary.succeeded : results.length
       : rolledBack ? 0 : typeof summary?.succeeded === 'number' ? summary.succeeded : 0;
     const error = success
       ? undefined
       : commitUnknown
-        ? 'OfficeCLI batch completion could not be confirmed because the process timed out or its output was truncated. Do not retry automatically; inspect the document state first.'
+        ? `OfficeCLI batch completion could not be confirmed${processResult.stdinDeliveryFailed
+            ? ' because the complete request was not delivered to stdin'
+            : processResult.timedOut
+              ? ' because the process timed out'
+              : processResult.outputTruncated
+                ? ' because process output was truncated'
+                : successEnvelopeValid
+                  ? ''
+                  : ' because the success/rollback envelope was incomplete or inconsistent'}. Do not retry automatically; inspect the document state first.`
         : typeof failed?.error === 'string'
           ? failed.error
           : processResult.stderr.trim() || 'OfficeCLI rejected the batch.';
 
-    let metadataSanitized = false;
-    if (success) {
+    if (!success && rolledBack && !transportUncertain && preflightBackup) {
       try {
-        metadataSanitized = sanitizeOfficecliMetadata(file, {
+        await closeResidentBeforePackageRewrite();
+        restorePreflightSnapshot();
+      } catch (restoreError) {
+        return structuredResponse({
+          success: false,
+          operationCount: args.operations.length,
+          appliedCount: 0,
+          rolledBack: false,
+          results,
+          ...(typeof failed?.index === 'number' ? { failedIndex: failed.index } : {}),
+          error: `OfficeCLI rolled back the batch, but Selection could not restore the preflight snapshot: ${restoreError instanceof Error ? restoreError.message : String(restoreError)}. Do not retry automatically; inspect the document state first.`,
+          durationMs: Date.now() - startedAt,
+          commitStatus: 'unknown',
+          commitUnknown: true,
+          errorType: 'commit_unknown',
+        }, true);
+      }
+    }
+
+    let metadataSanitized = false;
+    let visibleBadgesRemoved = 0;
+    if (success) {
+      // A resident batch can report success while its mutations still live only
+      // in memory. Sanitization atomically replaces the ZIP package; close the
+      // resident first so it cannot reload/overwrite that replacement later.
+      try {
+        await closeResidentBeforePackageRewrite();
+      } catch {
+        return structuredResponse({
+          success: false,
+          operationCount: args.operations.length,
+          appliedCount,
+          rolledBack: false,
+          results,
+          error: 'The batch succeeded in the OfficeCLI resident, but its flush/close could not be confirmed before package sanitization. Do not retry automatically; inspect the document state first.',
+          durationMs: Date.now() - startedAt,
+          commitStatus: 'unknown',
+          commitUnknown: true,
+          errorType: 'commit_unknown',
+        }, true);
+      }
+      try {
+        const sanitization = sanitizeOfficecliAttribution(file, {
+          allowVisibleAttribution:
+            ctx.officecliAttributionPolicy === 'allow-visible' ||
+            ctx.officecliAttributionPolicy === 'allow-all',
           allowMetadataAttribution:
             ctx.officecliAttributionPolicy === 'allow-metadata' ||
             ctx.officecliAttributionPolicy === 'allow-all',
-        }).changed;
+        });
+        metadataSanitized = sanitization.metadataChanged;
+        visibleBadgesRemoved = sanitization.removedVisibleBadges;
       } catch (metadataError) {
         return structuredResponse({
           success: false,
@@ -183,7 +289,7 @@ export async function handleOfficecliBatch(
           appliedCount,
           rolledBack: false,
           results,
-          error: `The atomic batch committed, but OfficeCLI attribution metadata could not be removed: ${metadataError instanceof Error ? metadataError.message : String(metadataError)}`,
+          error: `The atomic batch committed, but unrequested OfficeCLI attribution could not be removed: ${metadataError instanceof Error ? metadataError.message : String(metadataError)}`,
           durationMs: Date.now() - startedAt,
           commitStatus: 'committed',
           errorType: 'metadata',
@@ -202,10 +308,29 @@ export async function handleOfficecliBatch(
       durationMs: Date.now() - startedAt,
       commitStatus: success ? 'committed' : commitUnknown ? 'unknown' : rolledBack ? 'rolled_back' : 'unknown',
       ...(commitUnknown ? { commitUnknown: true } : {}),
-      ...(success ? { metadataSanitized } : {}),
+      ...(success ? { metadataSanitized, visibleBadgesRemoved } : {}),
       ...(!success ? { errorType: commitUnknown ? 'commit_unknown' as const : 'officecli' as const } : {}),
     }, !success);
     } catch (error) {
+      if (!batchStarted && preflightBackup) {
+        try {
+          await closeResidentBeforePackageRewrite();
+          restorePreflightSnapshot();
+        } catch (restoreError) {
+          return structuredResponse({
+            success: false,
+            operationCount: args.operations.length,
+            appliedCount: 0,
+            rolledBack: false,
+            results: [],
+            error: `The batch did not start, but Selection could not restore the style-preflight snapshot: ${restoreError instanceof Error ? restoreError.message : String(restoreError)}. Do not retry automatically; inspect the document state first.`,
+            durationMs: Date.now() - startedAt,
+            commitStatus: 'unknown',
+            commitUnknown: true,
+            errorType: 'commit_unknown',
+          }, true);
+        }
+      }
       return structuredResponse({
         success: false,
         operationCount: args.operations.length,
@@ -220,6 +345,8 @@ export async function handleOfficecliBatch(
         ...(batchStarted ? { commitUnknown: true } : {}),
         errorType: batchStarted ? 'commit_unknown' : 'preflight',
       }, true);
+    } finally {
+      if (preflightBackup) rmSync(preflightBackup, { force: true });
     }
   });
 }

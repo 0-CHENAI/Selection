@@ -37,6 +37,7 @@ describe('session tool safe-mode classification', () => {
       'mcp__session__run_task',
       'mcp__session__update_user_preferences',
       'mcp__session__officecli_batch',
+      'mcp__session__officecli_finalize',
     ] as const;
 
     for (const toolName of blockedTools) {

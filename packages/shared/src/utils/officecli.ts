@@ -45,18 +45,29 @@ export function getOfficecliAttributionPolicy(message: string): OfficecliAttribu
   if (!preservation && (prohibition || metaQuestion)) return 'forbid';
 
   const exactStamp = /(?:由|使用)\s*office\s*cli\s*(?:自动)?(?:生成|创建|制作)|(?:generated|created|made|powered)\s+(?:by|with)\s+office\s*cli/i;
-  const creditNoun = /(?:归因|署名|披露|生成器(?:署名|说明|信息)?|工具署名)|(?:attribution|generator\s+credit|tool\s+credit|credit\s+office\s*cli|office\s*cli\s+credit|disclosure)/i;
   const writeExactStamp = /(?:写|写上|写明|注明|标注|放入|加上|添加|保留|保持)[^。！？\n]{0,60}(?:由|使用)\s*office\s*cli\s*(?:自动)?(?:生成|创建|制作)|(?:put|write|add|include|retain|preserve|keep)[^.\n]{0,70}(?:generated|created|made|powered)\s+(?:by|with)\s+office\s*cli/is.test(message);
   // Only creator/author is a supported metadata credit. Treat command examples,
   // documentation prose, and broader app/custom properties as normal research
   // content rather than trusted permission to preserve generator metadata.
   const unsupportedMetadataTarget = /(?:lastmodifiedby|application\s+(?:property|metadata)|custom\s+propert)/i.test(message);
   const metadataExample = /(?:示例|例子|介绍|说明如何|命令示例|technical\s+section|document\s+the\s+command|example|how\s+to)/i.test(message);
-  const metadataAssignment = !unsupportedMetadataTarget && !metadataExample && /(?:元数据|文档属性|创建者|作者字段|creator|author|document\s+metadata)[^。！？\n]{0,70}(?:写|设为|设置为|注明|标注|值为|to|as|=)[^。！？\n]{0,30}office\s*cli|(?:set|write|put)[^.\n]{0,40}(?:creator|author|document\s+metadata)[^.\n]{0,40}(?:to|as|=)[^.\n]{0,20}office\s*cli/is.test(message);
-  const explicitCredit = creditNoun.test(message) || writeExactStamp || preservation || metadataAssignment;
-  if (!explicitCredit || (!exactStamp.test(message) && !creditNoun.test(message) && !preservation && !metadataAssignment)) return 'forbid';
+  const metadataAssignment = !unsupportedMetadataTarget && !metadataExample && /(?:创建者|(?:文档)?作者(?:栏|字段)?|creator|author)[^。！？\n]{0,70}(?:写|设为|设置为|注明|标注|值为|保留|保持|to|as|=)[^。！？\n]{0,30}office\s*cli|(?:set|write|put|retain|preserve|keep)[^.\n]{0,40}(?:creator|author)[^.\n]{0,40}(?:to|as|=)?[^.\n]{0,20}office\s*cli/is.test(message);
+  // A noun such as “归因机制” is a research topic, not authorization. Visible
+  // credit requires a direct credit/stamp action. Keep the research exclusion
+  // local to the action phrase so a separate explicit credit clause still wins.
+  const chineseCreditInstructionTopic = /(?:如何|怎么|怎样)[^。！？，,；;\n]{0,40}署名\s*(?:为|成|：|:)?\s*office\s*cli/is.test(message);
+  const directChineseVerbCredit = !chineseCreditInstructionTopic && /(?:请|要|需要|应当|把|将|在)?[^。！？\n]{0,30}署名\s*(?:为|成|：|:)?\s*office\s*cli/is.test(message);
+  const directChineseNounCredit = /(?:添加|加入|写上|写明|注明|标注|保留|保持)[^。！？\n]{0,40}(?:office\s*cli\s*(?:署名|归因说明|披露|生成器(?:署名|说明|信息)?|工具署名)|(?:署名|归因说明|披露|生成器(?:署名|说明|信息)?|工具署名)\s*(?:为|成|：|:)?\s*office\s*cli)(?!\s*(?:机制|分析|研究|章节|小节|专题|话题))/is.test(message);
+  const directChineseCredit = directChineseVerbCredit || directChineseNounCredit;
+  const englishCreditInstructionTopic = /(?:how|ways?\s+to)[^.\n]{0,60}(?:credit|attribute)[^.\n]{0,40}office\s*cli/is.test(message);
+  const directEnglishVerbCredit = !englishCreditInstructionTopic && /(?:credit|attribute)[^.\n]{0,40}office\s*cli/is.test(message);
+  const directEnglishNounCredit = /(?:add|include|write|put|retain|preserve|keep)(?![^.\n]{0,60}\b(?:section|chapter|topic|mechanism|analysis|research|design|overview|note|discussion|study)\b)[^.\n]{0,60}(?:office\s*cli\s*(?:attribution|credit|disclosure)|(?:attribution|credit|disclosure)[^.\n]{0,20}office\s*cli)(?!\s*(?:mechanism|analysis|research|design|section|chapter|topic)\b)/is.test(message);
+  const directEnglishCredit = directEnglishVerbCredit || directEnglishNounCredit;
+  const creditAssignment = directChineseCredit || directEnglishCredit;
+  const explicitCredit = creditAssignment || writeExactStamp || preservation || metadataAssignment;
+  if (!explicitCredit || (!exactStamp.test(message) && !creditAssignment && !preservation && !metadataAssignment)) return 'forbid';
 
-  const metadata = /(?:元数据|文档属性|自定义属性|创建者|作者字段|creator|author|lastmodifiedby|application\s+(?:property|metadata)|custom\s+propert|document\s+metadata)/i.test(message);
+  const metadata = metadataAssignment;
   const visible = /(?:正文|封面|页眉|页脚|文档中|报告中|body|cover|header|footer|visible)/i.test(message) || !metadata;
   return visible && metadata ? 'allow-all' : metadata ? 'allow-metadata' : 'allow-visible';
 }

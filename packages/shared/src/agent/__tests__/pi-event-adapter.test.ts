@@ -56,9 +56,8 @@ describe('PiEventAdapter', () => {
 
   describe('turn lifecycle', () => {
     it('should set currentTurnId on turn_start', () => {
-      // turn_start is handled internally — emits no events
       const events = collect(adapter.adaptEvent({ type: 'turn_start' } as any));
-      expect(events).toHaveLength(0);
+      expect(events).toEqual([{ type: 'model_call_start' }]);
     });
 
     it('should emit nothing on turn_end', () => {

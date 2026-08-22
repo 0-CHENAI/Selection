@@ -355,6 +355,7 @@ export function getSystemPrompt(
   backendName?: string,
   includeCoAuthoredBy?: boolean,
   projectContext?: ProjectPromptContext,
+  toolMetadataRequired: boolean = true,
 ): string {
   // Use mini agent prompt for quick edits (pass workspace root for config paths)
   if (preset === 'mini') {
@@ -379,7 +380,12 @@ export function getSystemPrompt(
   // Note: Date/time context is now added to user messages instead of system prompt
   // to enable prompt caching. The system prompt stays static and cacheable.
   // Safe Mode context is also in user messages for the same reason.
-  const basePrompt = getCraftAssistantPrompt(workspaceRootPath, backendName, resolvedIncludeCoAuthoredBy);
+  const basePrompt = getCraftAssistantPrompt(
+    workspaceRootPath,
+    backendName,
+    resolvedIncludeCoAuthoredBy,
+    toolMetadataRequired,
+  );
   const fullPrompt = `${basePrompt}${preferences}${projectBlock}${debugContext}${projectContextFiles}`;
 
   debug('[getSystemPrompt] full prompt length:', fullPrompt.length);
@@ -581,7 +587,12 @@ function getCraftAgentEnvironmentMarker(): string {
  * @param backendName - Backend name for "powered by X" text (default: 'Claude Code')
  * @param includeCoAuthoredBy - Whether to include the Co-Authored-By git trailer instruction (default: true)
  */
-function getCraftAssistantPrompt(workspaceRootPath?: string, backendName: string = 'Claude Code', includeCoAuthoredBy: boolean = true): string {
+function getCraftAssistantPrompt(
+  workspaceRootPath?: string,
+  backendName: string = 'Claude Code',
+  includeCoAuthoredBy: boolean = true,
+  toolMetadataRequired: boolean = true,
+): string {
   // Default to ${APP_ROOT}/workspaces/{id} if no path provided
   const workspacePath = workspaceRootPath || `${APP_ROOT}/workspaces/{id}`;
 
@@ -1296,14 +1307,16 @@ ${formatBundledOfficecliSkillGuidance()}
 - Consult each CLI's \`--help\` before relying on optional flags such as \`-o\`.
 - PDF export is not included in the bundled officecli binary
 
-## Tool Metadata
+${toolMetadataRequired ? `## Tool Metadata
 
 All MCP tools require two metadata fields (schema-enforced):
 
 - **\`_displayName\`** (required): Short name for the action (2-4 words), e.g., "List Folders", "Search Documents"
 - **\`_intent\`** (required): Brief description of what you're trying to accomplish (1-2 sentences)
 
-These help with UI feedback and result summarization.${FEATURE_FLAGS.developerFeedback ? `
+These help with UI feedback and result summarization.
+
+` : ''}${FEATURE_FLAGS.developerFeedback ? `
 
 ## Developer Feedback
 

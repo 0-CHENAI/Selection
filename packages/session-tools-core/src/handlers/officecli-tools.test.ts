@@ -1,13 +1,18 @@
 import { afterEach, describe, expect, it } from 'bun:test';
-import { chmodSync, mkdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, linkSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { strToU8, zipSync } from 'fflate';
+import { strFromU8, strToU8, unzipSync, zipSync } from 'fflate';
 import type { SessionToolContext } from '../context.ts';
-import { OfficecliBatchSchema, OfficecliOperationSchema } from '../tool-defs.ts';
+import { OfficecliBatchSchema, OfficecliFinalizeSchema, OfficecliOperationSchema } from '../tool-defs.ts';
 import { handleOfficecliBatch } from './officecli-batch.ts';
+import { handleOfficecliFinalize } from './officecli-finalize.ts';
 import { handleOfficecliQa } from './officecli-qa.ts';
-import { inspectOfficecliAttribution, sanitizeOfficecliMetadata } from './officecli-metadata.ts';
+import {
+  inspectOfficecliAttribution,
+  sanitizeOfficecliAttribution,
+  sanitizeOfficecliMetadata,
+} from './officecli-metadata.ts';
 import { runOfficecli, withOfficecliFileLock } from '../runtime/officecli-runtime.ts';
 
 const tempDirs: string[] = [];
@@ -37,7 +42,15 @@ function writeOfficeFixture(file: string, withAttribution = false): void {
 
 function makeFakeOfficecli(
   dir: string,
-  options: { renderFails?: boolean; issueCount?: number; corruptPng?: boolean; truncateBatchOutput?: boolean } = {},
+  options: {
+    renderFails?: boolean;
+    issueCount?: number;
+    corruptPng?: boolean;
+    truncateBatchOutput?: boolean;
+    omitRollbackProof?: boolean;
+    saveEnvelopeFails?: boolean;
+    closeEnvelopeFails?: boolean;
+  } = {},
 ): string {
   const binary = join(dir, 'fake-officecli');
   const source = `#!/usr/bin/env node
@@ -56,7 +69,7 @@ process.stdin.on('end', () => {
       index === failIndex ? { index, success: false, error: 'synthetic failure' } : { index, success: true, output: 'ok' }
     );
     const success = failIndex < 0;
-    console.log(JSON.stringify({ success, data: { results, summary: { total: operations.length, succeeded: success ? operations.length : failIndex, failed: success ? 0 : 1, atomicRolledBack: !success } } }));
+    console.log(JSON.stringify({ success, data: { results, summary: { total: operations.length, succeeded: success ? operations.length : failIndex, failed: success ? 0 : 1, ...(${options.omitRollbackProof ? 'true' : 'false'} ? {} : { atomicRolledBack: !success }) } } }));
     if (${options.truncateBatchOutput ? 'true' : 'false'}) process.stdout.write('x'.repeat(5 * 1024 * 1024));
     process.exitCode = success ? 0 : 1;
     return;
@@ -71,9 +84,11 @@ process.stdin.on('end', () => {
   if (command === 'view' && args[2] === 'screenshot') {
     if (${options.renderFails ? 'true' : 'false'}) { console.error('render failed'); process.exitCode = 1; return; }
     const out = args[args.indexOf('--out') + 1];
-    fs.writeFileSync(out, ${options.corruptPng ? "Buffer.from('not-a-png')" : "Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=', 'base64')"});
+    fs.writeFileSync(out, ${options.corruptPng ? "Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=', 'base64').subarray(0, 24)" : "Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=', 'base64')"});
     return console.log(JSON.stringify({ success: true, data: { path: out } }));
   }
+  if (command === 'save') return console.log(JSON.stringify({ success: !${options.saveEnvelopeFails ? 'true' : 'false'} }));
+  if (command === 'close') return console.log(JSON.stringify({ success: !${options.closeEnvelopeFails ? 'true' : 'false'} }));
   console.error('unsupported fake command');
   process.exitCode = 1;
 });
@@ -117,10 +132,58 @@ describe('OfficeCLI typed schemas', () => {
     expect(OfficecliOperationSchema.safeParse({ command: 'add', parent: '/body', props: { text: 'missing type' } }).success).toBe(false);
     expect(OfficecliOperationSchema.safeParse({ command: 'query', path: '/' }).success).toBe(false);
     expect(OfficecliOperationSchema.safeParse({ command: 'swap', path: '/body/p[1]' }).success).toBe(false);
+    expect(OfficecliOperationSchema.safeParse({
+      command: 'move', path: '/body/p[1]', to: '/body', before: '/body/p[2]',
+    }).success).toBe(false);
+    expect(OfficecliOperationSchema.safeParse({
+      command: 'get', path: '/', props: { text: 'ignored' }, selector: 'paragraph',
+    }).success).toBe(false);
+    expect(OfficecliOperationSchema.safeParse({
+      command: 'remove', path: '/body/p[1]', path2: '/body/p[2]',
+    }).success).toBe(false);
+  });
+
+  it('does not expose attribution policy as model-controlled finalize input', () => {
+    expect(OfficecliFinalizeSchema.safeParse({ file: 'test.docx' }).success).toBe(true);
+    expect(OfficecliFinalizeSchema.safeParse({
+      file: 'test.docx',
+      allowVisibleAttribution: true,
+    }).success).toBe(false);
   });
 });
 
 describe('OfficeCLI attribution inspection', () => {
+  it('rejects a ZIP entry whose declared uncompressed size exceeds the safety limit', () => {
+    const dir = makeTempDir();
+    const hostile = join(dir, 'oversized-entry.docx');
+    const archive = Buffer.from(zipSync({
+      'word/document.xml': strToU8('<w:document/>'),
+    }));
+    for (let index = 0; index <= archive.length - 4; index += 1) {
+      const signature = archive.readUInt32LE(index);
+      if (signature === 0x04034b50) archive.writeUInt32LE(64 * 1024 * 1024 + 1, index + 22);
+      if (signature === 0x02014b50) archive.writeUInt32LE(64 * 1024 * 1024 + 1, index + 24);
+    }
+    writeFileSync(hostile, archive);
+    expect(() => inspectOfficecliAttribution(hostile)).toThrow('64MB safety limit');
+    expect(() => sanitizeOfficecliAttribution(hostile)).toThrow('64MB safety limit');
+  });
+
+  it('rejects a ZIP package whose declared total uncompressed size exceeds the safety limit', () => {
+    const dir = makeTempDir();
+    const hostile = join(dir, 'oversized-total.docx');
+    const archive = Buffer.from(zipSync(Object.fromEntries(
+      Array.from({ length: 5 }, (_, index) => [`word/media/image-${index}.bin`, strToU8('x')]),
+    )));
+    for (let index = 0; index <= archive.length - 4; index += 1) {
+      const signature = archive.readUInt32LE(index);
+      if (signature === 0x04034b50) archive.writeUInt32LE(60 * 1024 * 1024, index + 22);
+      if (signature === 0x02014b50) archive.writeUInt32LE(60 * 1024 * 1024, index + 24);
+    }
+    writeFileSync(hostile, archive);
+    expect(() => inspectOfficecliAttribution(hostile)).toThrow('256MB total-uncompressed-size safety limit');
+  });
+
   it('allows topical OfficeCLI research in body and metadata', () => {
     const dir = makeTempDir();
     const topical = join(dir, 'topical.docx');
@@ -129,6 +192,110 @@ describe('OfficeCLI attribution inspection', () => {
       'docProps/core.xml': strToU8('<cp:coreProperties><dc:title>OfficeCLI 调研报告</dc:title><dc:creator>Chen</dc:creator></cp:coreProperties>'),
     }));
     expect(inspectOfficecliAttribution(topical)).toEqual({ clean: true, entries: [] });
+  });
+
+  it('allows research prose to quote and discuss the exact generator badge', () => {
+    const dir = makeTempDir();
+    const topical = join(dir, 'quoted-badge-research.docx');
+    writeFileSync(topical, zipSync({
+      'word/document.xml': strToU8([
+        '<w:document><w:body>',
+        '<w:p><w:r><w:t>常见异常是“本文档由 OfficeCLI 自动生成”出现在页脚，应在交付前清理。</w:t></w:r></w:p>',
+        '<w:p><w:r><w:t>示例原文：“使用OfficeCLI生成”。</w:t></w:r></w:p>',
+        '</w:body></w:document>',
+      ].join('')),
+    }));
+    expect(inspectOfficecliAttribution(topical)).toEqual({ clean: true, entries: [] });
+    expect(sanitizeOfficecliAttribution(topical)).toEqual({
+      changed: false,
+      metadataChanged: false,
+      visibleChanged: false,
+      removedVisibleBadges: 0,
+    });
+  });
+
+  it('preserves exact badge samples in Word quote and code paragraph styles', () => {
+    const dir = makeTempDir();
+    const topical = join(dir, 'styled-badge-samples.docx');
+    writeFileSync(topical, zipSync({
+      'word/document.xml': strToU8([
+        '<w:document><w:body>',
+        '<w:p><w:pPr><w:pStyle w:val="Quote"/></w:pPr><w:r><w:t>本文档由 OfficeCLI 自动生成</w:t></w:r></w:p>',
+        '<w:p><w:pPr><w:pStyle w:val="CodeBlock"/></w:pPr><w:r><w:t>使用OfficeCLI生成</w:t></w:r></w:p>',
+        '<w:p><w:r><w:t>本文档由 OfficeCLI 自动生成</w:t></w:r></w:p>',
+        '</w:body></w:document>',
+      ].join('')),
+    }));
+    expect(sanitizeOfficecliAttribution(topical)).toMatchObject({
+      changed: true,
+      visibleChanged: true,
+      removedVisibleBadges: 1,
+    });
+    const xml = strFromU8(unzipSync(new Uint8Array(readFileSync(topical)))['word/document.xml']!);
+    expect(xml).toContain('w:val="Quote"');
+    expect(xml).toContain('w:val="CodeBlock"');
+    expect(inspectOfficecliAttribution(topical)).toEqual({ clean: true, entries: [] });
+  });
+
+  it('does not let quote or code styles bypass header and footer attribution cleanup', () => {
+    const dir = makeTempDir();
+    const stamped = join(dir, 'styled-footer-badge.docx');
+    writeFileSync(stamped, zipSync({
+      'word/header1.xml': strToU8('<w:hdr><w:p><w:pPr><w:pStyle w:val="CodeBlock"/></w:pPr><w:r><w:t>使用OfficeCLI生成</w:t></w:r></w:p></w:hdr>'),
+      'word/footer1.xml': strToU8('<w:ftr><w:p><w:pPr><w:pStyle w:val="Quote"/></w:pPr><w:r><w:t>本文档由 OfficeCLI 自动生成</w:t></w:r></w:p></w:ftr>'),
+    }));
+    expect(inspectOfficecliAttribution(stamped)).toEqual({
+      clean: false,
+      entries: ['word/footer1.xml', 'word/header1.xml'],
+    });
+    expect(sanitizeOfficecliAttribution(stamped)).toMatchObject({
+      changed: true,
+      visibleChanged: true,
+      removedVisibleBadges: 2,
+    });
+    expect(inspectOfficecliAttribution(stamped)).toEqual({ clean: true, entries: [] });
+  });
+
+  it('deterministically removes an unrequested standalone badge while preserving discussion', () => {
+    const dir = makeTempDir();
+    const mixed = join(dir, 'mixed-attribution.docx');
+    writeFileSync(mixed, zipSync({
+      'word/document.xml': strToU8([
+        '<w:document><w:body>',
+        '<w:p><w:r><w:t>本文档由 </w:t></w:r><w:r><w:t>OfficeCLI 自动生成</w:t></w:r></w:p>',
+        '<w:p><w:r><w:t>本节讨论“本文档由 OfficeCLI 自动生成”为什么不应自动出现。</w:t></w:r></w:p>',
+        '</w:body></w:document>',
+      ].join('')),
+    }));
+    expect(sanitizeOfficecliAttribution(mixed)).toEqual({
+      changed: true,
+      metadataChanged: false,
+      visibleChanged: true,
+      removedVisibleBadges: 1,
+    });
+    expect(inspectOfficecliAttribution(mixed)).toEqual({ clean: true, entries: [] });
+  });
+
+  it('removes a standalone text-box badge without corrupting nested Word paragraphs', () => {
+    const dir = makeTempDir();
+    const nested = join(dir, 'nested-text-box-attribution.docx');
+    writeFileSync(nested, zipSync({
+      'word/document.xml': strToU8([
+        '<w:document><w:body>',
+        '<w:p><w:r><w:drawing><w:txbxContent>',
+        '<w:p><w:r><w:t>本文档由 OfficeCLI 自动生成</w:t></w:r></w:p>',
+        '</w:txbxContent></w:drawing></w:r></w:p>',
+        '<w:p><w:r><w:t>研究结论保留。</w:t></w:r></w:p>',
+        '</w:body></w:document>',
+      ].join('')),
+    }));
+    expect(sanitizeOfficecliAttribution(nested).removedVisibleBadges).toBe(1);
+    const documentXml = unzipSync(new Uint8Array(readFileSync(nested)))['word/document.xml'];
+    expect(documentXml).toBeDefined();
+    const xml = strFromU8(documentXml!);
+    expect(xml).toContain('<w:p><w:r><w:t>研究结论保留。</w:t></w:r></w:p>');
+    expect(xml).not.toContain('OfficeCLI 自动生成');
+    expect((xml.match(/<w:p\b/gu) ?? []).length).toBe((xml.match(/<\/w:p>/gu) ?? []).length);
   });
 
   it('rejects an unrequested body disclosure but permits it under trusted explicit intent', () => {
@@ -261,6 +428,58 @@ describe('OfficeCLI per-file execution lock', () => {
     await Promise.all([first, second]);
     expect(order).toEqual(['first:start', 'first:end', 'second:start', 'second:end']);
   });
+
+  it('serializes hard-link aliases of the same Office file', async () => {
+    const dir = makeTempDir();
+    const original = join(dir, 'report.docx');
+    const alias = join(dir, 'report-alias.docx');
+    writeOfficeFixture(original);
+    linkSync(original, alias);
+
+    const order: string[] = [];
+    let releaseFirst!: () => void;
+    const firstGate = new Promise<void>(resolve => { releaseFirst = resolve; });
+    const first = withOfficecliFileLock(original, async () => {
+      order.push('first:start');
+      await firstGate;
+      order.push('first:end');
+    });
+    const second = withOfficecliFileLock(alias, async () => {
+      order.push('second:start');
+    });
+    await Bun.sleep(10);
+    expect(order).toEqual(['first:start']);
+    releaseFirst();
+    await Promise.all([first, second]);
+    expect(order).toEqual(['first:start', 'first:end', 'second:start']);
+  });
+
+  it('keeps the stable path locked across an atomic inode replacement', async () => {
+    const dir = makeTempDir();
+    const file = join(dir, 'report.docx');
+    const replacement = join(dir, 'replacement.docx');
+    writeOfficeFixture(file);
+
+    const order: string[] = [];
+    let releaseFirst!: () => void;
+    const firstGate = new Promise<void>(resolve => { releaseFirst = resolve; });
+    const first = withOfficecliFileLock(file, async () => {
+      order.push('first:start');
+      writeOfficeFixture(replacement);
+      renameSync(replacement, file);
+      await firstGate;
+      order.push('first:end');
+    });
+    await Bun.sleep(10);
+    const second = withOfficecliFileLock(file, async () => {
+      order.push('second:start');
+    });
+    await Bun.sleep(10);
+    expect(order).toEqual(['first:start']);
+    releaseFirst();
+    await Promise.all([first, second]);
+    expect(order).toEqual(['first:start', 'first:end', 'second:start']);
+  });
 });
 
 describe('OfficeCLI process runtime', () => {
@@ -287,6 +506,37 @@ setTimeout(() => process.stdout.end(bytes.subarray(1)), 5);
     const result = await runOfficecli(binary, [], { cwd: dir, stdin: 'x'.repeat(1024 * 1024) });
     expect(result.exitCode).toBe(0);
     expect(result.timedOut).toBe(false);
+    // The kernel may accept the entire payload into the pipe before the child
+    // exits, so this race is intentionally not used as EPIPE evidence.
+    expect(typeof result.stdinDeliveryFailed).toBe('boolean');
+  });
+
+  it('reports EPIPE when the child closes its stdin before request delivery', async () => {
+    if (process.platform === 'win32') return;
+    const dir = makeTempDir();
+    const binary = join(dir, 'closed-stdin');
+    writeFileSync(binary, '#!/bin/sh\nexec 0<&-\nsleep 0.2\nprintf "ok\\n"\n');
+    chmodSync(binary, 0o755);
+    const result = await runOfficecli(binary, [], { cwd: dir, stdin: 'x'.repeat(1024 * 1024) });
+    expect(result.exitCode).toBe(0);
+    expect(result.stdinDeliveryFailed).toBe(true);
+    expect(result.stderr).toContain('EPIPE');
+  });
+
+  it('terminates the whole POSIX descendant tree on timeout', async () => {
+    if (process.platform === 'win32') return;
+    const dir = makeTempDir();
+    const marker = join(dir, 'grandchild-survived');
+    const binary = join(dir, 'process-tree');
+    writeFileSync(binary, `#!/bin/sh
+(sleep 0.4; printf survived > ${JSON.stringify(marker)}) &
+sleep 10
+`);
+    chmodSync(binary, 0o755);
+    const result = await runOfficecli(binary, [], { cwd: dir, timeoutMs: 100 });
+    expect(result.timedOut).toBe(true);
+    await Bun.sleep(600);
+    expect(existsSync(marker)).toBe(false);
   });
 });
 
@@ -366,10 +616,29 @@ describe('handleOfficecliBatch', () => {
     });
     expect(typeof result.structuredContent?.durationMs).toBe('number');
     expect(inspectOfficecliAttribution(join(dir, '含 空格.docx'))).toEqual({ clean: true, entries: [] });
-    const call = JSON.parse(await Bun.file(join(dir, 'calls.jsonl')).text());
+    const call = JSON.parse((await Bun.file(join(dir, 'calls.jsonl')).text()).trim().split('\n')[0]!);
     expect(call.args[0]).toBe('batch');
     expect(call.args).toContain('--stop-on-error');
     expect(call.stdinBytes).toBeGreaterThan(0);
+  });
+
+  it('removes an unrequested standalone badge immediately after a committed typed batch', async () => {
+    const dir = makeTempDir();
+    const binary = makeFakeOfficecli(dir);
+    const file = join(dir, 'badge.docx');
+    writeFileSync(file, zipSync({
+      '[Content_Types].xml': strToU8('<?xml version="1.0"?><Types/>'),
+      'word/document.xml': strToU8('<w:document><w:body><w:p><w:r><w:t>本文档由 OfficeCLI 自动生成</w:t></w:r></w:p></w:body></w:document>'),
+    }));
+    const result = await handleOfficecliBatch(makeContext(dir, binary), {
+      file: 'badge.docx',
+      operations: [{ command: 'get', path: '/' }],
+    });
+    expect(result.structuredContent).toMatchObject({
+      success: true,
+      visibleBadgesRemoved: 1,
+    });
+    expect(inspectOfficecliAttribution(file)).toEqual({ clean: true, entries: [] });
   });
 
   it('reports atomic rollback and failedIndex', async () => {
@@ -385,6 +654,73 @@ describe('handleOfficecliBatch', () => {
     });
     expect(result.isError).toBe(true);
     expect(result.structuredContent).toMatchObject({ success: false, appliedCount: 0, rolledBack: true, failedIndex: 1, errorType: 'officecli' });
+  });
+
+  it('restores style-preflight changes when OfficeCLI proves the batch rolled back', async () => {
+    const dir = makeTempDir();
+    const binary = makeFakeOfficecli(dir);
+    const file = join(dir, 'test.docx');
+    writeOfficeFixture(file);
+    const original = readFileSync(file);
+    const ctx = makeContext(dir, binary);
+    ctx.officecli!.ensureDocxOutlineStyles = target => {
+      writeFileSync(target, 'synthetic preflight mutation');
+      return true;
+    };
+    const result = await handleOfficecliBatch(ctx, {
+      file: 'test.docx',
+      operations: [
+        { command: 'add', parent: '/body', type: 'paragraph', props: { style: 'Heading1' } },
+        { command: 'set', path: '/missing', props: { fail: true } },
+      ],
+    });
+    expect(result.structuredContent).toMatchObject({
+      success: false,
+      rolledBack: true,
+      commitStatus: 'rolled_back',
+    });
+    expect(readFileSync(file).equals(original)).toBe(true);
+  });
+
+  it('marks a failed batch without rollback proof as commit_unknown', async () => {
+    const dir = makeTempDir();
+    const binary = makeFakeOfficecli(dir, { omitRollbackProof: true });
+    writeOfficeFixture(join(dir, 'test.docx'));
+    const result = await handleOfficecliBatch(makeContext(dir, binary), {
+      file: 'test.docx',
+      operations: [{ command: 'set', path: '/missing', props: { fail: true } }],
+    });
+    expect(result.structuredContent).toMatchObject({
+      success: false,
+      rolledBack: false,
+      commitStatus: 'unknown',
+      commitUnknown: true,
+      errorType: 'commit_unknown',
+    });
+    expect(result.content[0].text).toContain('Do not retry automatically');
+  });
+
+  it('rejects an inconsistent success result count after stdin was delivered', async () => {
+    const dir = makeTempDir();
+    const binary = join(dir, 'fake-inconsistent-officecli');
+    writeFileSync(binary, `#!/usr/bin/env node
+process.stdin.resume();
+process.stdin.on('end', () => {
+  console.log(JSON.stringify({ success: true, data: { results: [], summary: { succeeded: 1 } } }));
+});
+`);
+    chmodSync(binary, 0o755);
+    writeOfficeFixture(join(dir, 'test.docx'));
+    const result = await handleOfficecliBatch(makeContext(dir, binary), {
+      file: 'test.docx',
+      operations: [{ command: 'get', path: '/' }],
+    });
+    expect(result.structuredContent).toMatchObject({
+      success: false,
+      commitStatus: 'unknown',
+      commitUnknown: true,
+      errorType: 'commit_unknown',
+    });
   });
 
   it('marks truncated batch output as commit_unknown and forbids blind retry', async () => {
@@ -443,7 +779,10 @@ describe('handleOfficecliBatch', () => {
       errorType: 'preflight',
     });
     expect(result.structuredContent?.commitUnknown).toBeUndefined();
-    expect(await Bun.file(join(dir, 'calls.jsonl')).exists()).toBe(false);
+    const cleanupCalls = (await Bun.file(join(dir, 'calls.jsonl')).text())
+      .trim().split('\n').map(line => JSON.parse(line));
+    expect(cleanupCalls).toHaveLength(1);
+    expect(cleanupCalls[0]?.args[0]).toBe('close');
   });
 
   it('rejects payloads over 256KB before spawning', async () => {
@@ -530,5 +869,119 @@ describe('handleOfficecliQa', () => {
       requiresHumanVisualReview: true,
       errorType: 'command_error',
     });
+  });
+});
+
+describe('handleOfficecliFinalize', () => {
+  it('is blocked in Safe mode before save or close starts', async () => {
+    const dir = makeTempDir();
+    const binary = makeFakeOfficecli(dir);
+    writeOfficeFixture(join(dir, 'test.docx'));
+    const result = await handleOfficecliFinalize(
+      { ...makeContext(dir, binary), permissionMode: 'safe' },
+      { file: 'test.docx' },
+    );
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain('blocked in Safe mode');
+    expect(await Bun.file(join(dir, 'calls.jsonl')).exists()).toBe(false);
+  });
+
+  it('sanitizes unrequested badges and metadata, then saves and closes once', async () => {
+    const dir = makeTempDir();
+    const binary = makeFakeOfficecli(dir);
+    const file = join(dir, 'test.docx');
+    writeFileSync(file, zipSync({
+      '[Content_Types].xml': strToU8('<?xml version="1.0"?><Types/>'),
+      'word/document.xml': strToU8('<w:document><w:body><w:p><w:r><w:t>本文档由 OfficeCLI 自动生成</w:t></w:r></w:p></w:body></w:document>'),
+      'docProps/core.xml': strToU8('<cp:coreProperties><dc:creator>OfficeCLI</dc:creator></cp:coreProperties>'),
+    }));
+    const result = await handleOfficecliFinalize(makeContext(dir, binary), { file: 'test.docx' });
+    expect(result.structuredContent).toMatchObject({
+      success: true,
+      saved: true,
+      closed: true,
+      attributionClean: true,
+      metadataSanitized: true,
+      visibleBadgesRemoved: 1,
+    });
+    expect(inspectOfficecliAttribution(file)).toEqual({ clean: true, entries: [] });
+    const calls = (await Bun.file(join(dir, 'calls.jsonl')).text()).trim().split('\n').map(line => JSON.parse(line));
+    expect(calls.map(call => call.args[0])).toEqual(['save', 'close']);
+  });
+
+  it('rejects an exit-zero save whose JSON envelope reports failure', async () => {
+    const dir = makeTempDir();
+    const binary = makeFakeOfficecli(dir, { saveEnvelopeFails: true });
+    writeOfficeFixture(join(dir, 'test.docx'), true);
+    const result = await handleOfficecliFinalize(makeContext(dir, binary), { file: 'test.docx' });
+    expect(result.isError).toBe(true);
+    expect(result.structuredContent).toMatchObject({
+      success: false,
+      saved: false,
+      closed: false,
+      errorType: 'save',
+    });
+    const calls = (await Bun.file(join(dir, 'calls.jsonl')).text()).trim().split('\n').map(line => JSON.parse(line));
+    expect(calls.map(call => call.args[0])).toEqual(['save']);
+  });
+
+  it('closes before sanitizing and leaves the package untouched when close is unconfirmed', async () => {
+    const dir = makeTempDir();
+    const binary = makeFakeOfficecli(dir, { closeEnvelopeFails: true });
+    const file = join(dir, 'test.docx');
+    writeOfficeFixture(file, true);
+    const result = await handleOfficecliFinalize(makeContext(dir, binary), { file: 'test.docx' });
+    expect(result.isError).toBe(true);
+    expect(result.structuredContent).toMatchObject({
+      success: false,
+      saved: true,
+      closed: false,
+      metadataSanitized: false,
+      errorType: 'close',
+    });
+    expect(inspectOfficecliAttribution(file).clean).toBe(false);
+    const calls = (await Bun.file(join(dir, 'calls.jsonl')).text()).trim().split('\n').map(line => JSON.parse(line));
+    expect(calls.map(call => call.args[0])).toEqual(['save', 'close']);
+  });
+
+  it('preserves explicitly requested visible credit from trusted context only', async () => {
+    const dir = makeTempDir();
+    const binary = makeFakeOfficecli(dir);
+    const file = join(dir, 'explicit.docx');
+    writeFileSync(file, zipSync({
+      '[Content_Types].xml': strToU8('<?xml version="1.0"?><Types/>'),
+      'word/document.xml': strToU8('<w:document><w:body><w:p><w:r><w:t>本文档由 OfficeCLI 自动生成</w:t></w:r></w:p></w:body></w:document>'),
+    }));
+    const result = await handleOfficecliFinalize({
+      ...makeContext(dir, binary),
+      officecliAttributionPolicy: 'allow-visible',
+    }, { file: 'explicit.docx' });
+    expect(result.structuredContent).toMatchObject({
+      success: true,
+      attributionClean: true,
+      visibleBadgesRemoved: 0,
+    });
+    expect(inspectOfficecliAttribution(file, { allowVisibleAttribution: true })).toEqual({ clean: true, entries: [] });
+    expect(inspectOfficecliAttribution(file).clean).toBe(false);
+  });
+
+  it('preserves only explicitly requested creator metadata and strips other provenance', async () => {
+    const dir = makeTempDir();
+    const binary = makeFakeOfficecli(dir);
+    const file = join(dir, 'explicit-metadata.docx');
+    writeOfficeFixture(file, true);
+    const result = await handleOfficecliFinalize({
+      ...makeContext(dir, binary),
+      officecliAttributionPolicy: 'allow-metadata',
+    }, { file: 'explicit-metadata.docx' });
+    expect(result.structuredContent).toMatchObject({ success: true, attributionClean: true });
+    expect(inspectOfficecliAttribution(file, { allowMetadataAttribution: true }))
+      .toEqual({ clean: true, entries: [] });
+    expect(inspectOfficecliAttribution(file).entries).toEqual(['docProps/core.xml']);
+    const archive = unzipSync(new Uint8Array(readFileSync(file)));
+    expect(strFromU8(archive['docProps/core.xml']!)).toContain('<dc:creator>OfficeCLI</dc:creator>');
+    expect(strFromU8(archive['docProps/core.xml']!)).not.toContain('<cp:lastModifiedBy>OfficeCLI</cp:lastModifiedBy>');
+    expect(strFromU8(archive['docProps/app.xml']!)).not.toContain('OfficeCLI');
+    expect(strFromU8(archive['docProps/custom.xml']!)).not.toContain('OfficeCLI.Version');
   });
 });

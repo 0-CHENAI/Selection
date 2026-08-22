@@ -627,7 +627,7 @@ async function main() {
       // Check canonical session tool registry first (feature-filtered)
       const def = sessionToolRegistry.get(name);
       if (def?.handler) {
-        if (name === 'officecli_batch' || name === 'officecli_qa') {
+        if (name === 'officecli_batch' || name === 'officecli_qa' || name === 'officecli_finalize') {
           await refreshOfficecliAttributionPolicy(ctx);
         }
         if (config.permissionMode === 'safe' && SESSION_SAFE_BLOCKED_TOOL_NAMES.has(name)) {

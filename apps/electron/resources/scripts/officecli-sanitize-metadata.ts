@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 import { extname, resolve } from 'node:path';
-import { inspectOfficecliAttribution, sanitizeOfficecliMetadata } from '../../../../packages/session-tools-core/src/handlers/officecli-metadata.ts';
+import { inspectOfficecliAttribution, sanitizeOfficecliAttribution } from '../../../../packages/session-tools-core/src/handlers/officecli-metadata.ts';
 
 const file = process.argv[2] ? resolve(process.argv[2]) : '';
 const inspectVisible = process.argv.includes('--inspect-visible');
@@ -13,7 +13,7 @@ if (!file || !allowed.has(extname(file).toLowerCase())) {
 try {
   // Shell fallback is deliberately fail-closed. Explicit attribution is
   // preserved only by typed tools whose policy comes from trusted turn state.
-  sanitizeOfficecliMetadata(file);
+  sanitizeOfficecliAttribution(file);
   if (inspectVisible) {
     const attribution = inspectOfficecliAttribution(file);
     if (!attribution.clean) {

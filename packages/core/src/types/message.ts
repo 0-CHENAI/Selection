@@ -624,6 +624,8 @@ export type AgentEvent =
   | { type: 'workflow_agent_completed'; workflowId: string; agentId: string; turnId?: string }
   | { type: 'shell_killed'; shellId: string; turnId?: string }
   | { type: 'source_activated'; sourceSlug: string; originalMessage: string }
+  /** A provider request started. Emitted even when the call later fails before usage is returned. */
+  | { type: 'model_call_start' }
   | { type: 'usage_update'; usage: AgentEventUsage }
   | { type: 'steer_undelivered'; message: string };
 

@@ -54,10 +54,28 @@ function commandPassed(result: JsonResult): boolean {
 
 function isPng(buffer: Buffer): boolean {
   const signature = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
-  if (buffer.length < 24 || !buffer.subarray(0, signature.length).equals(signature)) return false;
-  const width = buffer.readUInt32BE(16);
-  const height = buffer.readUInt32BE(20);
-  return width > 0 && height > 0 && width <= 20_000 && height <= 20_000;
+  if (buffer.length < 33 || !buffer.subarray(0, signature.length).equals(signature)) return false;
+
+  let offset = signature.length;
+  let chunkIndex = 0;
+  let hasIdat = false;
+  while (offset <= buffer.length - 12) {
+    const length = buffer.readUInt32BE(offset);
+    if (length > buffer.length - offset - 12) return false;
+    const type = buffer.toString('ascii', offset + 4, offset + 8);
+    const chunkEnd = offset + 12 + length;
+    if (chunkIndex === 0) {
+      if (type !== 'IHDR' || length !== 13) return false;
+      const width = buffer.readUInt32BE(offset + 8);
+      const height = buffer.readUInt32BE(offset + 12);
+      if (width === 0 || height === 0 || width > 20_000 || height > 20_000) return false;
+    }
+    if (type === 'IDAT') hasIdat = true;
+    if (type === 'IEND') return length === 0 && hasIdat && chunkEnd === buffer.length;
+    offset = chunkEnd;
+    chunkIndex += 1;
+  }
+  return false;
 }
 
 function dataObject(result: JsonResult): Record<string, unknown> | undefined {

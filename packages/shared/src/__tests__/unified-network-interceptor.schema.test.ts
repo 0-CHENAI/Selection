@@ -7,12 +7,13 @@ let injectMetadataIntoToolSchema: typeof import('../unified-network-interceptor.
 let sanitizeEmptyTextCacheControl: typeof import('../unified-network-interceptor.ts').sanitizeEmptyTextCacheControl;
 let upgradePromptCacheTtl: typeof import('../unified-network-interceptor.ts').upgradePromptCacheTtl;
 let _resetConfigCacheForTesting: typeof import('../interceptor-common.ts')._resetConfigCacheForTesting;
+let supportsRichToolMetadataForModel: typeof import('../interceptor-common.ts').supportsRichToolMetadataForModel;
 
 describe('unified-network-interceptor schema metadata injection', () => {
   beforeAll(async () => {
     process.env.CRAFT_INTERCEPTOR_DISABLE_AUTO_INSTALL = '1';
     ({ injectMetadataIntoToolSchema, sanitizeEmptyTextCacheControl, upgradePromptCacheTtl } = await import('../unified-network-interceptor.ts'));
-    ({ _resetConfigCacheForTesting } = await import('../interceptor-common.ts'));
+    ({ _resetConfigCacheForTesting, supportsRichToolMetadataForModel } = await import('../interceptor-common.ts'));
   });
 
   it('injects metadata fields into empty/zero-arg schemas', () => {
@@ -54,6 +55,12 @@ describe('unified-network-interceptor schema metadata injection', () => {
     expect(result.required).toEqual(['_displayName', '_intent']);
     expect(result.properties._displayName).toEqual({ type: 'string', description: 'custom display name schema' });
     expect(result.properties._intent).toEqual({ type: 'string', description: 'custom intent schema' });
+  });
+
+  it('disables nonessential rich metadata for MiniMax-M3 only', () => {
+    expect(supportsRichToolMetadataForModel('pi/MiniMax-M3')).toBe(false);
+    expect(supportsRichToolMetadataForModel('MiniMax-M3')).toBe(false);
+    expect(supportsRichToolMetadataForModel('pi/gpt-5')).toBe(true);
   });
 });
 

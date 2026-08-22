@@ -14,8 +14,10 @@ const REPLAN_CALL_THRESHOLD = 20;
 const OFFICECLI_TOOL_ALIASES = new Set([
   'officecli_batch',
   'officecli_qa',
+  'officecli_finalize',
   'mcp__session__officecli_batch',
   'mcp__session__officecli_qa',
+  'mcp__session__officecli_finalize',
 ]);
 
 // Recognize both the reviewed PATH wrapper and the host-provided binary env
@@ -34,6 +36,23 @@ const POWERSHELL_ARGUMENT_BATCH_PATTERN = new RegExp(
 );
 const QUOTED_OFFICE_FILE_PATTERN = /["']([^"']+\.(?:docx|docm|xlsx|xlsm|pptx))["']/i;
 const UNQUOTED_OFFICE_FILE_PATTERN = /(?:^|\s)([^\s"']+\.(?:docx|docm|xlsx|xlsm|pptx))(?:\s|$)/i;
+
+function officeFileFromInvocation(command: string): string | undefined {
+  // Ignore unrelated Office-looking strings before the actual executable. For
+  // Start-Process, target extraction must begin at -ArgumentList rather than a
+  // preceding -WorkingDirectory or logging argument.
+  const startProcess = /\bStart-Process\b/i.test(command);
+  const argumentListIndex = startProcess ? command.search(/\b-ArgumentList\b/i) : -1;
+  let invocation = command;
+  if (argumentListIndex >= 0) {
+    invocation = command.slice(argumentListIndex);
+  } else {
+    const executable = OFFICECLI_COMMAND_PATTERN.exec(command);
+    if (executable) invocation = command.slice(executable.index);
+  }
+  return invocation.match(QUOTED_OFFICE_FILE_PATTERN)?.[1]
+    ?? invocation.match(UNQUOTED_OFFICE_FILE_PATTERN)?.[1];
+}
 
 /** Keep budget and latency classification aligned for every supported shell spelling. */
 export function isOfficecliShellCommand(command: string): boolean {
@@ -82,9 +101,7 @@ function fileKey(
 ): string {
   const raw = OFFICECLI_TOOL_ALIASES.has(toolName) && typeof input.file === 'string' && input.file.trim()
     ? input.file
-    : command?.match(QUOTED_OFFICE_FILE_PATTERN)?.[1]
-    ?? command?.match(UNQUOTED_OFFICE_FILE_PATTERN)?.[1]
-    ?? '__unknown_office_file__';
+    : (command ? officeFileFromInvocation(command) : undefined) ?? '__unknown_office_file__';
   if (raw === '__unknown_office_file__') return raw;
   const leadingCd = command?.match(/^\s*cd\s+(?:"([^"]+)"|'([^']+)'|([^\s;&|]+))\s*&&/i);
   const commandWorkingDirectory = leadingCd
@@ -229,9 +246,10 @@ export class OfficecliExecutionTracker {
     const command = commandFromInput(input);
     const isTypedBatch = toolName === 'officecli_batch' || toolName === 'mcp__session__officecli_batch';
     const isQa = toolName === 'officecli_qa' || toolName === 'mcp__session__officecli_qa';
+    const isFinalize = toolName === 'officecli_finalize' || toolName === 'mcp__session__officecli_finalize';
     const isOfficeBash = toolName === 'Bash' && command !== null && isOfficecliShellCommand(command);
 
-    if (!isTypedBatch && !isQa && !isOfficeBash) return { allowed: true };
+    if (!isTypedBatch && !isQa && !isFinalize && !isOfficeBash) return { allowed: true };
 
     const key = fileKey(toolName, input, command, workingDirectory);
     const directVerb = command?.match(DIRECT_MUTATION_PATTERN)?.[1]
@@ -243,6 +261,8 @@ export class OfficecliExecutionTracker {
       ? `batch:${key}:${Array.isArray(input.operations) ? input.operations.length : -1}`
       : isQa
         ? `qa:${key}:${input.mode === 'strict' ? 'strict' : 'balanced'}`
+        : isFinalize
+          ? `finalize:${key}`
         : `bash:${key}:${directVerb?.toLowerCase() ?? (isShellBatch ? 'batch' : 'other')}`;
     if (toolCallId) {
       const existing = this.decisionsByToolCallId.get(toolCallId);
@@ -277,7 +297,7 @@ export class OfficecliExecutionTracker {
         kind: 'replan_required',
         reason: [
           'OfficeCLI has reached 20 tool calls in the current user task.',
-          'Pause execution and replan once: consolidate independent mutations into officecli_batch, keep only dependency-sensitive structure operations separate, and finish with one balanced officecli_qa call.',
+          'Pause execution and replan once: consolidate independent mutations into officecli_batch, keep only dependency-sensitive structure operations separate, then finish with one balanced officecli_qa call and one officecli_finalize call.',
           'Advanced operations that cannot be batched remain available after this replan.',
         ].join(' '),
       });

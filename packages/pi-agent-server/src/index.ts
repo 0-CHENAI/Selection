@@ -27,6 +27,7 @@ import {
   SessionManager as PiSessionManager,
   AuthStorage as PiAuthStorage,
   ModelRegistry as PiModelRegistry,
+  SettingsManager as PiSettingsManager,
   createBashToolDefinition,
   createEditToolDefinition,
   createWriteToolDefinition,
@@ -81,12 +82,17 @@ import { createWebFetchTool } from './tools/web-fetch.ts';
 import { resolveSearchProvider } from './tools/search/resolve-provider.ts';
 import { createSearchTool } from './tools/search/create-search-tool.ts';
 import { allowCraftMetadataProperties, stripCraftMetadata } from './craft-metadata-schema.ts';
+import { createRecoveringArgumentPreparer } from './tool-argument-recovery.ts';
 import { applySystemPromptOverride } from './system-prompt-override.ts';
 import { resolvePiSessionPaths } from './session-paths.ts';
 import { createPiSessionManager } from './pi-session-manager.ts';
 import { createSelectionReadToolDefinition } from './tools/read/create-read-tool.ts';
 import { mergeSummarizedToolResult } from './tool-result-images.ts';
 import { describePromptImages } from '../../shared/src/utils/image-input.ts';
+import {
+  createOfficecliDeadlineStreamFn,
+  isOfficecliDocumentContext,
+} from './officecli-provider-timeout.ts';
 import {
   normalizeProxyToolExecutionEnd,
   proxyToolDetails,
@@ -601,7 +607,10 @@ async function ensureSession(): Promise<AgentSession> {
     createLsToolDefinition(cwd),
   ];
   const proxyTools = buildProxyTools();
-  const wrappedAll = wrapToolsWithHooks([...builtinDefs, ...webTools, ...proxyTools]);
+  // Pi sessions can switch models at runtime, while their registered tool schemas
+  // are fixed for the lifetime of the session. Keep the schemas provider-neutral
+  // and strict so a later model switch cannot leave stale metadata requirements.
+  const wrappedAll = wrapToolsWithHooks([...builtinDefs, ...webTools, ...proxyTools], false);
   const toolAllowlist = wrappedAll.map(t => t.name);
   debugLog(`Session tools: ${builtinDefs.length} builtin + ${webTools.length} web + ${proxyTools.length} proxy = ${wrappedAll.length} total`);
 
@@ -620,6 +629,7 @@ async function ensureSession(): Promise<AgentSession> {
     const { agentDir, sessionDir } = resolvePiSessionPaths(initConfig.sessionPath, initConfig.agentDir);
     mkdirSync(agentDir, { recursive: true });
     sessionOptions.agentDir = agentDir;
+    sessionOptions.settingsManager = PiSettingsManager.create(cwd, agentDir);
 
     // Session resume: use a per-Craft-session directory so the Pi SDK can
     // persist and resume its own session across subprocess restarts.
@@ -675,6 +685,12 @@ async function ensureSession(): Promise<AgentSession> {
 
   // Create the session — tools flow through customTools + allowlist (see comment above).
   const { session } = await createAgentSession(sessionOptions);
+  session.agent.streamFn = createOfficecliDeadlineStreamFn(
+    session.agent.streamFn,
+    isOfficecliDocumentContext,
+    undefined,
+    () => send({ type: 'event', event: { type: 'turn_start' } }),
+  );
   piSession = session;
 
   toolsChanged = false;
@@ -727,8 +743,11 @@ async function requestPreToolUseApproval(
   return response.action === 'modify' && response.input ? response.input : input;
 }
 
-function wrapToolsWithHooks(tools: ToolDefinition<any, any>[]): ToolDefinition<any, any>[] {
-  return tools.map(tool => wrapSingleTool(tool));
+function wrapToolsWithHooks(
+  tools: ToolDefinition<any, any>[],
+  allowRichMetadata: boolean,
+): ToolDefinition<any, any>[] {
+  return tools.map(tool => wrapSingleTool(tool, allowRichMetadata));
 }
 
 function makeErrorResult(message: string): AgentToolResult<any> {
@@ -738,9 +757,20 @@ function makeErrorResult(message: string): AgentToolResult<any> {
   };
 }
 
-function wrapSingleTool(tool: ToolDefinition<any, any>): ToolDefinition<any, any> {
+function wrapSingleTool(
+  tool: ToolDefinition<any, any>,
+  allowRichMetadata: boolean,
+): ToolDefinition<any, any> {
   const originalExecute = tool.execute;
-  const parameters = allowCraftMetadataProperties(tool.parameters);
+  const parameters = allowRichMetadata
+    ? allowCraftMetadataProperties(tool.parameters)
+    : tool.parameters;
+  const sdkToolName = PI_TOOL_NAME_MAP[tool.name] || tool.name;
+  const prepareArguments = createRecoveringArgumentPreparer(
+    sdkToolName,
+    tool.prepareArguments,
+    allowRichMetadata,
+  );
 
   const wrappedExecute: ToolDefinition<any, any>['execute'] = async (
     toolCallId,
@@ -749,7 +779,6 @@ function wrapSingleTool(tool: ToolDefinition<any, any>): ToolDefinition<any, any
     onUpdate,
     ctx,
   ) => {
-    const sdkToolName = PI_TOOL_NAME_MAP[tool.name] || tool.name;
     let inputObj: Record<string, unknown> = { ...(params as Record<string, unknown>) };
 
     // Extract intent before main process strips metadata (used for summarization)
@@ -822,6 +851,7 @@ function wrapSingleTool(tool: ToolDefinition<any, any>): ToolDefinition<any, any
   return {
     ...tool,
     parameters,
+    prepareArguments,
     execute: wrappedExecute,
   };
 }
@@ -1257,9 +1287,9 @@ async function handleInit(msg: Extract<InboundMessage, { type: 'init' }>): Promi
     }
     piSession.dispose();
     piSession = null;
-    moduleAuthStorage = null; // Reset so createAuthenticatedRegistry() creates fresh storage
     debugLog('Cleaned up existing session for re-init');
   }
+  moduleAuthStorage = null; // Reset so createAuthenticatedRegistry() creates fresh storage
 
   initConfig = msg;
 

@@ -1,5 +1,5 @@
 import { extname, resolve } from 'node:path';
-import { existsSync } from 'node:fs';
+import { existsSync, realpathSync } from 'node:fs';
 import type { SessionToolContext } from '../context.ts';
 import {
   isPathWithinDirectory,
@@ -26,7 +26,16 @@ export function resolveOfficecliDocumentPath(
     return { error: `Office file not found: ${file}` };
   }
 
-  const extension = extname(resolvedFile).toLowerCase();
+  let canonicalFile = resolvedFile;
+  if (existsSync(resolvedFile)) {
+    try {
+      canonicalFile = realpathSync.native(resolvedFile);
+    } catch {
+      return { error: 'Office file path could not be canonicalized.' };
+    }
+  }
+
+  const extension = extname(canonicalFile).toLowerCase();
   if (options.docxOnly) {
     if (extension !== '.docx' && extension !== '.docm') {
       return { error: 'officecli_qa currently supports only .docx and .docm files.' };
@@ -35,5 +44,5 @@ export function resolveOfficecliDocumentPath(
     return { error: 'file must be .docx, .docm, .xlsx, .xlsm, or .pptx.' };
   }
 
-  return { file: resolvedFile };
+  return { file: canonicalFile };
 }

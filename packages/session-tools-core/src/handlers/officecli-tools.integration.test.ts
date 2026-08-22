@@ -1,9 +1,10 @@
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
-import { existsSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import type { SessionToolContext } from '../context.ts';
 import { handleOfficecliBatch } from './officecli-batch.ts';
+import { handleOfficecliFinalize } from './officecli-finalize.ts';
 import { handleOfficecliQa } from './officecli-qa.ts';
 import { inspectOfficecliAttribution } from './officecli-metadata.ts';
 import { runOfficecli } from '../runtime/officecli-runtime.ts';
@@ -98,6 +99,41 @@ describe.skipIf(!enabled)('OfficeCLI typed tools integration', () => {
     expect(view.stdout.indexOf('paragraph-000')).toBeLessThan(view.stdout.indexOf('paragraph-099'));
   }, 30_000);
 
+  it('uses the same typed batch handler for XLSX and PPTX files', async () => {
+    const xlsx = join(context.workingDirectory!, '类型化 数据.xlsx');
+    const pptx = join(context.workingDirectory!, '类型化 汇报.pptx');
+    for (const target of [xlsx, pptx]) {
+      const created = await runOfficecli(binary, ['create', target, '--json'], {
+        cwd: context.workingDirectory!,
+      });
+      expect(created.exitCode).toBe(0);
+    }
+
+    const sheet = await handleOfficecliBatch(context, {
+      file: xlsx,
+      operations: [
+        { command: 'set', path: '/Sheet1/A1', props: { value: '姓名', bold: true } },
+        { command: 'set', path: '/Sheet1/A2', props: { value: '张三' } },
+      ],
+    });
+    const deck = await handleOfficecliBatch(context, {
+      file: pptx,
+      operations: [
+        { command: 'add', parent: '/', type: 'slide', props: { title: '巡察汇报' } },
+      ],
+    });
+    expect(sheet.structuredContent).toMatchObject({ success: true, appliedCount: 2 });
+    expect(deck.structuredContent).toMatchObject({ success: true, appliedCount: 1 });
+
+    const sheetText = await runOfficecli(binary, ['view', xlsx, 'text'], { cwd: context.workingDirectory! });
+    const deckText = await runOfficecli(binary, ['view', pptx, 'text'], { cwd: context.workingDirectory! });
+    expect(sheetText.stdout).toMatch(/姓名|张三/);
+    expect(deckText.stdout).toContain('巡察汇报');
+
+    await runOfficecli(binary, ['close', xlsx, '--json'], { cwd: context.workingDirectory! });
+    await runOfficecli(binary, ['close', pptx, '--json'], { cwd: context.workingDirectory! });
+  }, 30_000);
+
   it('rolls back the whole batch when one operation fails', async () => {
     const result = await handleOfficecliBatch(context, {
       file,
@@ -115,6 +151,75 @@ describe.skipIf(!enabled)('OfficeCLI typed tools integration', () => {
 
     const view = await runOfficecli(binary, ['view', file, 'text'], { cwd: context.workingDirectory! });
     expect(view.stdout).not.toContain('ROLLBACK_SENTINEL');
+  }, 30_000);
+
+  it('restores real DOCX style-preflight changes when the dependent batch rolls back', async () => {
+    const preflightFile = join(context.workingDirectory!, 'heading preflight rollback.docx');
+    const created = await runOfficecli(binary, ['create', preflightFile, '--json'], {
+      cwd: context.workingDirectory!,
+    });
+    expect(created.exitCode).toBe(0);
+    const before = readFileSync(preflightFile);
+
+    const result = await handleOfficecliBatch(context, {
+      file: preflightFile,
+      operations: [
+        { command: 'add', parent: '/body', type: 'paragraph', props: { text: 'ROLLBACK_HEADING', style: 'Heading1' } },
+        { command: 'set', path: '/does-not-exist', props: { text: 'fail' } },
+      ],
+    });
+    expect(result.structuredContent).toMatchObject({
+      success: false,
+      appliedCount: 0,
+      rolledBack: true,
+      commitStatus: 'rolled_back',
+    });
+    expect(readFileSync(preflightFile).equals(before)).toBe(true);
+
+    await runOfficecli(binary, ['close', preflightFile, '--json'], {
+      cwd: context.workingDirectory!,
+    });
+  }, 30_000);
+
+  it('preserves an earlier TOC when a later dependent batch rolls back and work resumes', async () => {
+    const target = join(context.workingDirectory!, 'toc survives later rollback.docx');
+    const created = await runOfficecli(binary, ['create', target, '--json'], {
+      cwd: context.workingDirectory!,
+    });
+    expect(created.exitCode).toBe(0);
+
+    const initial = await handleOfficecliBatch(context, {
+      file: target,
+      operations: [
+        { command: 'add', parent: '/body', type: 'paragraph', props: { text: '第一章', style: 'Heading1' } },
+        { command: 'add', parent: '/body', type: 'toc', props: { levels: '1-3', title: '目录', hyperlinks: true } },
+      ],
+    });
+    expect(initial.structuredContent).toMatchObject({ success: true });
+
+    const rejected = await handleOfficecliBatch(context, {
+      file: target,
+      operations: [
+        { command: 'add', parent: '/body', type: 'paragraph', props: { text: '第二章', style: 'Heading1' } },
+        { command: 'set', path: '/does-not-exist', props: { text: 'fail' } },
+      ],
+    });
+    expect(rejected.structuredContent).toMatchObject({ success: false, rolledBack: true });
+
+    const resumed = await handleOfficecliBatch(context, {
+      file: target,
+      operations: [
+        { command: 'add', parent: '/body', type: 'paragraph', props: { text: '恢复后的正文' } },
+      ],
+    });
+    expect(resumed.structuredContent).toMatchObject({ success: true });
+
+    const toc = await runOfficecli(binary, ['query', target, 'toc', '--json'], {
+      cwd: context.workingDirectory!,
+    });
+    expect(toc.exitCode).toBe(0);
+    expect(JSON.parse(toc.stdout).data.matches).toBeGreaterThan(0);
+    await runOfficecli(binary, ['close', target, '--json'], { cwd: context.workingDirectory! });
   }, 30_000);
 
   it('passes structural QA with Heading1–3, TOC, and a live PAGE field', async () => {
@@ -152,6 +257,43 @@ describe.skipIf(!enabled)('OfficeCLI typed tools integration', () => {
     expect(qa.content[1]).toMatchObject({ type: 'image', mimeType: 'image/png' });
   }, 60_000);
 
+  it('preserves explicitly requested visible attribution through trusted typed finalization', async () => {
+    const explicitFile = join(context.workingDirectory!, 'explicit attribution.docx');
+    const created = await runOfficecli(binary, ['create', explicitFile, '--json'], {
+      cwd: context.workingDirectory!,
+    });
+    expect(created.exitCode).toBe(0);
+
+    const batch = await handleOfficecliBatch({
+      ...context,
+      officecliAttributionPolicy: 'allow-visible',
+    }, {
+      file: explicitFile,
+      operations: [{
+        command: 'add',
+        parent: '/body',
+        type: 'paragraph',
+        props: { text: '本文档由 OfficeCLI 自动生成' },
+      }],
+    });
+    expect(batch.structuredContent).toMatchObject({ success: true });
+
+    const finalized = await handleOfficecliFinalize({
+      ...context,
+      officecliAttributionPolicy: 'allow-visible',
+    }, { file: explicitFile });
+    expect(finalized.structuredContent).toMatchObject({
+      success: true,
+      saved: true,
+      closed: true,
+      attributionClean: true,
+      visibleBadgesRemoved: 0,
+    });
+    expect(inspectOfficecliAttribution(explicitFile, { allowVisibleAttribution: true }))
+      .toEqual({ clean: true, entries: [] });
+    expect(inspectOfficecliAttribution(explicitFile).clean).toBe(false);
+  }, 30_000);
+
   it('keeps the single Shell batch fallback attribution-free', async () => {
     const fallbackFile = join(context.workingDirectory!, 'flag-off 批处理.docx');
     const created = await runWrapper(['create', fallbackFile, '--json'], {
@@ -179,7 +321,7 @@ describe.skipIf(!enabled)('OfficeCLI typed tools integration', () => {
     expect(inspectOfficecliAttribution(fallbackFile)).toEqual({ clean: true, entries: [] });
   }, 30_000);
 
-  it('blocks unrequested visible generator stamps on the flag-off Shell path', async () => {
+  it('removes unrequested visible generator stamps on the flag-off Shell path', async () => {
     const fallbackFile = join(context.workingDirectory!, 'flag-off visible attribution.docx');
     const created = await runWrapper(['create', fallbackFile, '--json'], {
       cwd: context.workingDirectory!,
@@ -193,12 +335,13 @@ describe.skipIf(!enabled)('OfficeCLI typed tools integration', () => {
       ]),
     });
     expect(stamped.exitCode).toBe(0);
+    expect(inspectOfficecliAttribution(fallbackFile)).toEqual({ clean: true, entries: [] });
     const saved = await runWrapper(['save', fallbackFile, '--json'], {
       cwd: context.workingDirectory!,
     });
-    expect(saved.exitCode).not.toBe(0);
-    expect(saved.stderr).toContain('Unrequested OfficeCLI generator attribution');
-    expect(inspectOfficecliAttribution(fallbackFile).clean).toBe(false);
-    await runOfficecli(binary, ['close', fallbackFile, '--json'], { cwd: context.workingDirectory! });
+    expect(saved.exitCode).toBe(0);
+    expect(inspectOfficecliAttribution(fallbackFile)).toEqual({ clean: true, entries: [] });
+    const closed = await runWrapper(['close', fallbackFile, '--json'], { cwd: context.workingDirectory! });
+    expect(closed.exitCode).toBe(0);
   }, 30_000);
 });

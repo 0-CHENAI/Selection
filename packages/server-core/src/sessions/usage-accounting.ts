@@ -43,8 +43,10 @@ export function normalizeModelCallUsage(usage: AgentEventUsage): SessionModelCal
 export function recordModelCallUsage(
   accumulator: TurnUsageAccumulator,
   usage: AgentEventUsage,
+  options: { countModelCall?: boolean } = {},
 ): { accumulator: TurnUsageAccumulator; lastCall: SessionModelCallUsage } {
   const lastCall = normalizeModelCallUsage(usage)
+  const countModelCall = options.countModelCall ?? true
   return {
     lastCall,
     accumulator: {
@@ -54,9 +56,17 @@ export function recordModelCallUsage(
       cacheReadTokens: accumulator.cacheReadTokens + lastCall.cacheReadTokens,
       cacheCreationTokens: accumulator.cacheCreationTokens + lastCall.cacheCreationTokens,
       costUsd: accumulator.costUsd + lastCall.costUsd,
-      modelCallCount: accumulator.modelCallCount + 1,
+      modelCallCount: accumulator.modelCallCount + (countModelCall ? 1 : 0),
       startedAt: accumulator.startedAt,
     },
+  }
+}
+
+/** Count an attempted provider call before usage exists. */
+export function recordModelCallStart(accumulator: TurnUsageAccumulator): TurnUsageAccumulator {
+  return {
+    ...accumulator,
+    modelCallCount: accumulator.modelCallCount + 1,
   }
 }
 

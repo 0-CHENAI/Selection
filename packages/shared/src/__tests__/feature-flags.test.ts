@@ -104,7 +104,7 @@ describe('feature-flags runtime helpers', () => {
     expect(isEmbeddedServerEnabled()).toBe(false);
   });
 
-  it('isOfficecliTypedToolsEnabled stays release-gated by default and honors explicit overrides', () => {
+  it('isOfficecliTypedToolsEnabled defaults off and honors explicit overrides', () => {
     delete process.env.CRAFT_FEATURE_OFFICECLI_TYPED_TOOLS;
     expect(isOfficecliTypedToolsEnabled()).toBe(false);
     process.env.CRAFT_FEATURE_OFFICECLI_TYPED_TOOLS = '0';

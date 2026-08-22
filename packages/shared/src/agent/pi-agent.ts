@@ -116,6 +116,7 @@ import {
   isOfficecliShellCommand,
   OfficecliExecutionTracker,
 } from './core/officecli-execution-tracker.ts';
+import { recoverKnownToolInputFromIntent } from './core/tool-input-recovery.ts';
 import { getBrowserToolEnabled } from '../config/storage.ts';
 
 // Workspace slug extraction for skill qualification
@@ -355,6 +356,7 @@ export class PiAgent extends BaseAgent {
   private readonly officecliExecutionTracker = new OfficecliExecutionTracker();
   private readonly officecliToolStarts = new Map<string, number>();
   private managedOfficecliShellAvailable = false;
+  private managedOfficecliBinaryPath?: string;
   private modelCallStartedAt: number | null = null;
   private modelWaitMs = 0;
   private measuredModelCalls = 0;
@@ -387,6 +389,17 @@ export class PiAgent extends BaseAgent {
     this.measuredModelCalls = Number.isFinite(state.measuredModelCalls)
       ? Math.max(0, Math.floor(state.measuredModelCalls))
       : 0;
+  }
+
+  /** Preserve budgets only for host-declared continuations of the same user task. */
+  private prepareOfficecliUserTask(continueUserTask: boolean): void {
+    if (!continueUserTask) {
+      this.officecliExecutionTracker.reset();
+      this.modelWaitMs = 0;
+      this.measuredModelCalls = 0;
+    }
+    this.officecliToolStarts.clear();
+    this.modelCallStartedAt = null;
   }
 
   // Pool reference for convenience (from this.config.mcpPool)
@@ -570,6 +583,10 @@ export class PiAgent extends BaseAgent {
     const officecliWrapperDir = getOfficecliWrapperDir(officecliResolution);
     const officecliBinary = resolveOfficecliBinary(officecliResolution);
     this.managedOfficecliShellAvailable = Boolean(officecliWrapperDir && officecliBinary);
+    this.managedOfficecliBinaryPath = this.managedOfficecliShellAvailable ? officecliBinary : undefined;
+    const officecliShellWrapper = this.managedOfficecliShellAvailable && officecliWrapperDir
+      ? join(officecliWrapperDir, process.platform === 'win32' ? 'officecli.cmd' : 'officecli')
+      : undefined;
     const inheritedPath = this.config.envOverrides?.PATH ?? process.env.PATH ?? '';
     const managedToolPath = officecliWrapperDir
       ? `${officecliWrapperDir}${inheritedPath ? `${delimiter}${inheritedPath}` : ''}`
@@ -588,9 +605,12 @@ export class PiAgent extends BaseAgent {
         // user-installed OfficeCLI. The wrapper then delegates to this exact
         // app-managed binary and sanitizes generator metadata after mutations.
         ...(managedToolPath ? { PATH: managedToolPath } : {}),
-        // Explicitly clear an inherited/session override when the reviewed
-        // binary cannot be resolved; never fail open to an arbitrary binary.
-        CRAFT_OFFICECLI: officecliBinary ?? '',
+        // Expose only the reviewed wrapper to the model subprocess. Publishing
+        // the platform binary here let `$CRAFT_OFFICECLI` bypass attribution
+        // verification even though plain `officecli` correctly resolved via PATH.
+        // Explicitly clear inherited/session overrides when the full reviewed
+        // toolchain cannot be resolved.
+        CRAFT_OFFICECLI: officecliShellWrapper ?? '',
         CRAFT_BUN: nodePath,
         // Pass session dir for cross-process toolMetadataStore
         ...(sessionDir ? { CRAFT_SESSION_DIR: sessionDir } : {}),
@@ -1227,7 +1247,7 @@ export class PiAgent extends BaseAgent {
       const toolCallId = event.toolCallId as string | undefined;
       const args = event.args as Record<string, unknown> | undefined;
       const command = args && typeof args.command === 'string' ? args.command : '';
-      const isTypedOfficecli = /(?:^|__)officecli_(?:batch|qa)$/i.test(toolName ?? '');
+      const isTypedOfficecli = /(?:^|__)officecli_(?:batch|qa|finalize)$/i.test(toolName ?? '');
       const isOfficecliBash = /bash$/i.test(toolName ?? '') && isOfficecliShellCommand(command);
       if (toolCallId && (isTypedOfficecli || isOfficecliBash)) {
         this.officecliToolStarts.set(toolCallId, Date.now());
@@ -1382,7 +1402,9 @@ export class PiAgent extends BaseAgent {
     toolCallId?: string;
     input: Record<string, unknown>;
   }): Promise<void> {
-    const { requestId, toolName, toolCallId, input } = req;
+    const { requestId, toolName, toolCallId } = req;
+    const input = recoverKnownToolInputFromIntent(toolName, req.input);
+    const inputWasRecovered = input !== req.input;
     const debugSessionId = this.config.session?.id || this._sessionId;
     this.debug(`PreToolUse request from subprocess: ${toolName} (${requestId}, sessionId=${debugSessionId})`);
 
@@ -1463,6 +1485,16 @@ export class PiAgent extends BaseAgent {
         sendPermissionBlock('Selection\'s app-managed OfficeCLI runtime is unavailable. Repair or reinstall the bundled runtime before running OfficeCLI shell commands.');
         return;
       }
+      if (shellCommand && this.managedOfficecliBinaryPath) {
+        const commandForComparison = process.platform === 'win32' ? shellCommand.toLowerCase() : shellCommand;
+        const binaryForComparison = process.platform === 'win32'
+          ? this.managedOfficecliBinaryPath.toLowerCase()
+          : this.managedOfficecliBinaryPath;
+        if (commandForComparison.includes(binaryForComparison)) {
+          sendPermissionBlock('Direct invocation of Selection\'s platform OfficeCLI binary is blocked because it bypasses attribution verification. Invoke `officecli` through the reviewed PATH wrapper instead.');
+          return;
+        }
+      }
       const officeDecision = this.officecliExecutionTracker.inspect(
         toolName,
         decided.input,
@@ -1484,7 +1516,7 @@ export class PiAgent extends BaseAgent {
 
     switch (checkResult.type) {
       case 'allow':
-        await finishAllowedTool(input, false);
+        await finishAllowedTool(input, inputWasRecovered);
         return;
 
       case 'modify':
@@ -2003,6 +2035,7 @@ export class PiAgent extends BaseAgent {
 
     this.subprocess = null;
     this.managedOfficecliShellAvailable = false;
+    this.managedOfficecliBinaryPath = undefined;
     this.readline = null;
     this.resetSubprocessErrorDedup();
     this.subprocessReady = null;
@@ -2248,13 +2281,7 @@ export class PiAgent extends BaseAgent {
     this.eventQueue.reset();
     this.currentUserMessage = message;
     this.adapter.startTurn();
-    if (!options?.continueUserTask) {
-      this.officecliExecutionTracker.reset();
-      this.modelWaitMs = 0;
-      this.measuredModelCalls = 0;
-    }
-    this.officecliToolStarts.clear();
-    this.modelCallStartedAt = null;
+    this.prepareOfficecliUserTask(options?.continueUserTask === true);
 
     // Fire UserPromptSubmit hook event (fire-and-forget)
     this.emitAutomationEvent('UserPromptSubmit', {
@@ -2328,6 +2355,10 @@ export class PiAgent extends BaseAgent {
         'Selection Backend', // backendName
         getCoAuthorPreference(), // respect user's includeCoAuthoredBy preference (#576)
         projectContext ?? undefined,
+        // Pi sessions support runtime model switching but cannot safely rebuild
+        // their registered tool schemas. Keep the prompt aligned with the strict,
+        // provider-neutral schemas registered by pi-agent-server.
+        false,
       );
 
       // Build context from sources
@@ -2815,6 +2846,7 @@ export class PiAgent extends BaseAgent {
       this.subprocess = null;
     }
     this.managedOfficecliShellAvailable = false;
+    this.managedOfficecliBinaryPath = undefined;
     this.subprocessReady = null;
     this.subprocessReadyResolve = null;
     this.callbackPort = 0;
@@ -2848,6 +2880,7 @@ export class PiAgent extends BaseAgent {
       this.subprocess = null;
     }
     this.managedOfficecliShellAvailable = false;
+    this.managedOfficecliBinaryPath = undefined;
 
     this.subprocessReady = null;
     this.subprocessReadyResolve = null;

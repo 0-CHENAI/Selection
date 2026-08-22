@@ -17,6 +17,24 @@ export const OfficecliOperationSchema = z.object({
   after: z.string().optional().describe('Sibling path after which a move inserts.'),
   path2: z.string().optional().describe('Required second path for swap.'),
 }).strict().superRefine((operation, ctx) => {
+  const allowedFields: Record<typeof operation.command, ReadonlySet<string>> = {
+    add: new Set(['parent', 'type', 'props']),
+    set: new Set(['path', 'props']),
+    remove: new Set(['path']),
+    move: new Set(['path', 'to', 'before', 'after']),
+    swap: new Set(['path', 'path2']),
+    get: new Set(['path']),
+    query: new Set(['selector']),
+  };
+  for (const field of ['parent', 'path', 'selector', 'type', 'props', 'to', 'before', 'after', 'path2'] as const) {
+    if (operation[field] !== undefined && !allowedFields[operation.command].has(field)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: [field],
+        message: `'${operation.command}' does not accept ${field}.`,
+      });
+    }
+  }
   const required = (field: keyof typeof operation, message: string) => {
     if (typeof operation[field] !== 'string' || !(operation[field] as string).trim()) {
       ctx.addIssue({ code: z.ZodIssueCode.custom, path: [field], message });
@@ -34,8 +52,9 @@ export const OfficecliOperationSchema = z.object({
       break;
     case 'move':
       required('path', "'move' requires path.");
-      if (![operation.to, operation.before, operation.after].some(value => typeof value === 'string' && value.trim())) {
-        ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['to'], message: "'move' requires one of to, before, or after." });
+      if ([operation.to, operation.before, operation.after]
+        .filter(value => typeof value === 'string' && value.trim()).length !== 1) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['to'], message: "'move' requires exactly one of to, before, or after." });
       }
       break;
     case 'swap':
@@ -58,4 +77,8 @@ export const OfficecliQaSchema = z.object({
   file: z.string().min(1).describe('Word document path, relative to the session working directory or absolute within it'),
   mode: z.enum(['balanced', 'strict']).optional()
     .describe('balanced is the default. strict is for print-ready or explicitly requested detailed review.'),
+}).strict();
+
+export const OfficecliFinalizeSchema = z.object({
+  file: z.string().min(1).describe('Office document path, relative to the session working directory or absolute within it'),
 }).strict();
