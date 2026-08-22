@@ -305,6 +305,7 @@
   "chat.regenerate": "Neu erzeugen",
   "chat.regenerateFailed": "Antwort konnte nicht neu erzeugt werden",
   "chat.renameSession": "Sitzung umbenennen",
+  "chat.scrollToBottom": "Zum Ende",
   "chat.scrollUpForEarlier": "Nach oben scrollen für ältere Nachrichten ({{count}} weitere)",
   "chat.selectedText": "Ausgewählter Text",
   "chat.session": "Sitzung",

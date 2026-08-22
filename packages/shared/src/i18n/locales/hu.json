@@ -305,6 +305,7 @@
   "chat.regenerate": "Újragenerálás",
   "chat.regenerateFailed": "Nem sikerült újragenerálni a választ",
   "chat.renameSession": "Munkamenet átnevezése",
+  "chat.scrollToBottom": "Ugrás az aljára",
   "chat.scrollUpForEarlier": "Görgess fel a korábbi üzenetekért (még {{count}})",
   "chat.selectedText": "Kijelölt szöveg",
   "chat.session": "Munkamenet",

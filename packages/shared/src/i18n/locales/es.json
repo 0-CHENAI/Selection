@@ -305,6 +305,7 @@
   "chat.regenerate": "Regenerar",
   "chat.regenerateFailed": "No se pudo regenerar la respuesta",
   "chat.renameSession": "Renombrar sesión",
+  "chat.scrollToBottom": "Volver al final",
   "chat.scrollUpForEarlier": "Sube para ver mensajes anteriores ({{count}} más)",
   "chat.selectedText": "Texto seleccionado",
   "chat.session": "Sesión",

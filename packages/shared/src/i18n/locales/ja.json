@@ -305,6 +305,7 @@
   "chat.regenerate": "再生成",
   "chat.regenerateFailed": "応答を再生成できませんでした",
   "chat.renameSession": "セッション名を変更",
+  "chat.scrollToBottom": "最下部に戻る",
   "chat.scrollUpForEarlier": "上にスクロールして以前のメッセージを表示 (あと {{count}} 件)",
   "chat.selectedText": "選択テキスト",
   "chat.session": "セッション",
