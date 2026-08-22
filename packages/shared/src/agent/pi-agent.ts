@@ -2196,7 +2196,7 @@ export class PiAgent extends BaseAgent {
           attachmentParts.push(
             `[Attached Office document: ${att.name}]\n` +
             `[Stored at: ${att.storedPath}]\n` +
-            `[Load the built-in skill [skill:${officeSkill}], then inspect and edit with officecli via Bash. The binary is already on PATH; do not curl-install.]`,
+            `[Load [skill:officecli] then [skill:${officeSkill}]. Run \`officecli load_skill word\` (or excel / pptx), then inspect and edit with officecli via Bash. Already on PATH; do not curl-install.]`,
           );
         } else if (att.storedPath) {
           let pathInfo = `[Attached file: ${att.name}]\n[Stored at: ${att.storedPath}]`;

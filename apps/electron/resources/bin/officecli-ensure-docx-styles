@@ -1,0 +1,24 @@
+#!/bin/sh
+# Seed Heading1–3 (outlineLvl) so Word TOC is not "未找到目录项".
+# Usage: officecli-ensure-docx-styles <binary> <file.docx>
+BIN=$1
+FILE=$2
+export OFFICECLI_NO_AUTO_RESIDENT=1
+if [ -z "$BIN" ] || [ -z "$FILE" ] || [ ! -f "$BIN" ] || [ ! -f "$FILE" ]; then
+  exit 0
+fi
+
+if "$BIN" get "$FILE" /styles/Heading1 >/dev/null 2>&1; then
+  exit 0
+fi
+
+seed() {
+  "$BIN" add "$FILE" /styles --type style "$@" >/dev/null 2>&1 || true
+}
+
+seed --prop id=Heading1 --prop type=paragraph --prop name=Heading1 --prop outlineLvl=0 --prop size=18pt --prop bold=true
+seed --prop id=Heading2 --prop type=paragraph --prop name=Heading2 --prop outlineLvl=1 --prop size=14pt --prop bold=true
+seed --prop id=Heading3 --prop type=paragraph --prop name=Heading3 --prop outlineLvl=2 --prop size=12pt --prop bold=true
+seed --prop id=Title --prop type=paragraph --prop name=Title --prop size=24pt --prop bold=true
+seed --prop id=TOCHeading --prop type=paragraph --prop name=TOCHeading --prop size=16pt --prop bold=true
+exit 0

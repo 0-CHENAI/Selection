@@ -43,6 +43,8 @@ files:
   - resources/bin/ical-tool.cmd
   - resources/bin/officecli
   - resources/bin/officecli.cmd
+  - resources/bin/officecli-ensure-docx-styles
+  - resources/bin/officecli-ensure-docx-styles.cmd
   # Include bundled uv binary (platform-specific, only the relevant one ships per build)
   - resources/bin/darwin-arm64/**/*
   - resources/bin/darwin-x64/**/*

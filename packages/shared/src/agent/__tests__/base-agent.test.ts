@@ -264,7 +264,8 @@ describe('BaseAgent', () => {
     it('prepends the built-in docx skill when the message names a .docx file', async () => {
       await collectEvents(agent.chat('请改 巡察报告.docx'));
       const sent = agent.chatCalls[0]?.message ?? '';
-      expect(sent).toContain('officecli-docx');
+      expect(sent).toContain('(skill: officecli)');
+      expect(sent).toContain('(skill: officecli-docx)');
       expect(sent).toContain('SKILL.md');
       expect(sent).toContain('请改 巡察报告.docx');
     });
@@ -277,18 +278,21 @@ describe('BaseAgent', () => {
         mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
         size: 12,
       }]));
-      expect(agent.chatCalls[0]?.message).toContain('officecli-xlsx');
+      expect(agent.chatCalls[0]?.message).toContain('(skill: officecli)');
+      expect(agent.chatCalls[0]?.message).toContain('(skill: officecli-xlsx)');
     });
 
     it('does not gate OfficeCLI when the user only asks for a report', async () => {
       await collectEvents(agent.chat('写一份巡察报告'));
+      expect(agent.chatCalls[0]?.message ?? '').not.toContain('(skill: officecli)');
       expect(agent.chatCalls[0]?.message ?? '').not.toContain('officecli-docx');
     });
 
     it('gates the built-in docx skill for a Word report request without a .docx path', async () => {
       await collectEvents(agent.chat('把他形成word报告（带目录）'));
       const sent = agent.chatCalls[0]?.message ?? '';
-      expect(sent).toContain('officecli-docx');
+      expect(sent).toContain('(skill: officecli)');
+      expect(sent).toContain('(skill: officecli-docx)');
       expect(sent).toContain('SKILL.md');
     });
   });

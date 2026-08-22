@@ -6,11 +6,15 @@ import { OFFICECLI_DESKTOP_TARGETS, OFFICECLI_SHA256 } from '../../../../../scri
 import {
   BUNDLED_OFFICECLI_SKILL_SLUGS,
   collectOfficeFormatSkillSlugs,
+  ensureDocxOutlineHeadingStyles,
+  findDocxArgInOfficecliArgs,
   getBundledOfficecliRouterSkillMd,
   getBundledOfficecliSkillsDir,
+  getOfficecliWrapperDir,
   officecliBinaryName,
   resolveBundledOfficecliSkillRead,
   resolveOfficecliBinary,
+  shouldEnsureDocxOutlineStyles,
 } from '../officecli'
 
 describe('collectOfficeFormatSkillSlugs', () => {
@@ -72,8 +76,12 @@ describe('resolveOfficecliBinary', () => {
     const cmd = readFileSync(join(binDir, 'officecli.cmd'), 'utf8')
     expect(sh).toContain('CRAFT_OFFICECLI')
     expect(sh).toContain('win32-x64/officecli.exe')
+    expect(sh).toContain('officecli-ensure-docx-styles')
     expect(cmd).toContain('CRAFT_OFFICECLI')
     expect(cmd).toContain('win32-x64\\officecli.exe')
+    expect(cmd).toContain('officecli-ensure-docx-styles.cmd')
+    expect(existsSync(join(binDir, 'officecli-ensure-docx-styles'))).toBe(true)
+    expect(existsSync(join(binDir, 'officecli-ensure-docx-styles.cmd'))).toBe(true)
   })
 
   it('fetches every supported desktop binary for installer builds', () => {
@@ -172,4 +180,118 @@ describe('bundled officecli smoke', () => {
       expect(existsSync(join(skillsDir!, slug, 'SKILL.md'))).toBe(true)
     }
   })
+})
+
+describe('docx outline heading seed', () => {
+  it('detects create / heading / TOC args that need styles.xml outlineLvl', () => {
+    expect(findDocxArgInOfficecliArgs(['create', '报告.docx'])).toBe('报告.docx')
+    expect(findDocxArgInOfficecliArgs(['create', 'sheet.xlsx'])).toBeUndefined()
+    expect(shouldEnsureDocxOutlineStyles(['create', 'a.docx'])).toBe(true)
+    expect(shouldEnsureDocxOutlineStyles(['open', 'a.docx'])).toBe(true)
+    expect(shouldEnsureDocxOutlineStyles(['refresh', 'a.docx'])).toBe(true)
+    expect(shouldEnsureDocxOutlineStyles(['add', 'a.docx', '/body', '--prop', 'style=Heading1'])).toBe(true)
+    expect(shouldEnsureDocxOutlineStyles(['add', 'a.docx', '--type', 'toc'])).toBe(true)
+    expect(shouldEnsureDocxOutlineStyles(['add', 'a.docx', '--type=toc'])).toBe(true)
+    expect(shouldEnsureDocxOutlineStyles(['add', 'a.docx', '/body', '--prop', 'text=摘要'])).toBe(false)
+    expect(shouldEnsureDocxOutlineStyles(['view', 'a.docx', 'text'])).toBe(false)
+    expect(shouldEnsureDocxOutlineStyles(['create', 'a.xlsx'])).toBe(false)
+  })
+
+  it('documents the official skill closed loop on the bundled router', () => {
+    const router = getBundledOfficecliRouterSkillMd()
+    expect(router).toBeTruthy()
+    const body = readFileSync(router!, 'utf8')
+    expect(body).toContain('officecli load_skill word')
+    expect(body).toContain('outlineLvl')
+    expect(body).toContain('style not found')
+  })
+
+  it('seeds Heading1–3 with outlineLvl after PATH wrapper create', () => {
+    const binary = resolveOfficecliBinary()
+    const wrapperDir = getOfficecliWrapperDir()
+    if (!binary || !wrapperDir) return
+
+    const wrapper = join(wrapperDir, 'officecli')
+    const root = mkdtempSync(join(tmpdir(), 'officecli-heading-'))
+    const docx = join(root, '方案.docx')
+    const env = {
+      ...process.env,
+      CRAFT_OFFICECLI: binary,
+      OFFICECLI_NO_AUTO_RESIDENT: '1',
+    }
+
+    const run = (argv: string[]) => {
+      const result = Bun.spawnSync(argv, { stdout: 'pipe', stderr: 'pipe', env })
+      return {
+        exitCode: result.exitCode,
+        output: `${result.stdout.toString()}${result.stderr.toString()}`,
+      }
+    }
+
+    try {
+      const rawCreate = run([binary, 'create', docx])
+      expect(rawCreate.exitCode).toBe(0)
+      expect(run([binary, 'get', docx, '/styles/Heading1']).exitCode).not.toBe(0)
+
+      expect(ensureDocxOutlineHeadingStyles(docx, { binary })).toBe(true)
+      expect(run([binary, 'get', docx, '/styles/Heading1']).exitCode).toBe(0)
+
+      const viaHelper = join(root, 'helper.docx')
+      expect(run([binary, 'create', viaHelper]).exitCode).toBe(0)
+      expect(ensureDocxOutlineHeadingStyles(viaHelper, { binary })).toBe(true)
+
+      const viaWrapper = join(root, 'wrapper.docx')
+      const created = run([wrapper, 'create', viaWrapper])
+      expect(created.exitCode).toBe(0)
+      expect(run([binary, 'get', viaWrapper, '/styles/Heading1']).exitCode).toBe(0)
+      expect(run([binary, 'get', viaWrapper, '/styles/Heading2']).exitCode).toBe(0)
+      expect(run([binary, 'get', viaWrapper, '/styles/Heading3']).exitCode).toBe(0)
+
+      const styles = Bun.spawnSync(['unzip', '-p', viaWrapper, 'word/styles.xml'], {
+        stdout: 'pipe',
+        stderr: 'pipe',
+      })
+      const xml = styles.stdout.toString()
+      expect(xml).toContain('Heading1')
+      expect(xml).toContain('Heading2')
+      expect(xml).toContain('Heading3')
+      expect(xml).toMatch(/w:val="0"/)
+      expect(xml).toContain('outlineLvl')
+
+      const addHeading = run([
+        wrapper,
+        'add',
+        viaWrapper,
+        '/body',
+        '--type',
+        'paragraph',
+        '--prop',
+        'text=一、背景',
+        '--prop',
+        'style=Heading1',
+      ])
+      expect(addHeading.exitCode).toBe(0)
+      expect(addHeading.output).not.toMatch(/style 'Heading1' not found/i)
+
+      const rawOnly = join(root, 'raw.docx')
+      expect(run([binary, 'create', rawOnly]).exitCode).toBe(0)
+      const addOnRaw = run([
+        wrapper,
+        'add',
+        rawOnly,
+        '/body',
+        '--type',
+        'paragraph',
+        '--prop',
+        'text=一、背景',
+        '--prop',
+        'style=Heading1',
+      ])
+      expect(addOnRaw.exitCode).toBe(0)
+      expect(addOnRaw.output).not.toMatch(/style 'Heading1' not found/i)
+      expect(run([binary, 'get', rawOnly, '/styles/Heading1']).exitCode).toBe(0)
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  }, 30_000)
 })

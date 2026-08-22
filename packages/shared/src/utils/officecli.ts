@@ -1,3 +1,4 @@
+import { spawnSync } from 'node:child_process';
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -273,4 +274,122 @@ export function getBundledOfficecliSkillsDir(options?: ResolveOfficecliOptions):
   } catch {
     return undefined;
   }
+}
+
+const DOCX_PATH_RE = /\.(docx|docm)$/i;
+const OFFICECLI_FLAG_RE = /^-/;
+const OFFICECLI_VERB_RE =
+  /^(create|add|set|open|refresh|save|close|view|get|query|validate|help|load_skill|dump|remove|batch)$/i;
+
+/** Built-in paragraph styles Word TOC (`TOC \\o "1-3"`) needs in styles.xml. */
+export const DOCX_OUTLINE_HEADING_SPECS = [
+  { id: 'Heading1', outlineLvl: 0, size: '18pt', bold: true },
+  { id: 'Heading2', outlineLvl: 1, size: '14pt', bold: true },
+  { id: 'Heading3', outlineLvl: 2, size: '12pt', bold: true },
+  { id: 'Title', size: '24pt', bold: true },
+  { id: 'TOCHeading', size: '16pt', bold: true },
+] as const;
+
+export function isOfficeDocxPath(value: string): boolean {
+  return DOCX_PATH_RE.test(value);
+}
+
+export function findDocxArgInOfficecliArgs(args: string[]): string | undefined {
+  return args.find(arg => !OFFICECLI_FLAG_RE.test(arg) && isOfficeDocxPath(arg));
+}
+
+function firstOfficecliVerb(args: string[]): string | undefined {
+  return args.find(arg => !OFFICECLI_FLAG_RE.test(arg) && OFFICECLI_VERB_RE.test(arg))?.toLowerCase();
+}
+
+/**
+ * PATH wrapper should seed Heading styles after create, or when a heading / TOC
+ * write (or open/refresh) touches a .docx. Matches HanaAgent's closed loop.
+ */
+export function shouldEnsureDocxOutlineStyles(args: string[]): boolean {
+  if (!findDocxArgInOfficecliArgs(args)) return false;
+  const verb = firstOfficecliVerb(args);
+  if (verb === 'create' || verb === 'open' || verb === 'refresh') return true;
+  if (verb !== 'add' && verb !== 'set') return false;
+
+  let prev = '';
+  for (const arg of args) {
+    if (
+      /style=Heading/i.test(arg) ||
+      /style=Title/i.test(arg) ||
+      /style=TOCHeading/i.test(arg) ||
+      /(?:^|[=\s])toc$/i.test(arg)
+    ) {
+      return true;
+    }
+    if (prev === '--type' && /^toc$/i.test(arg)) return true;
+    prev = arg;
+  }
+  return false;
+}
+
+function runOfficecli(binary: string, args: string[]): { exitCode: number; output: string } {
+  const result = spawnSync(binary, args, {
+    encoding: 'utf8',
+    env: { ...process.env, OFFICECLI_NO_AUTO_RESIDENT: '1' },
+  });
+  return {
+    exitCode: result.status ?? 1,
+    output: `${result.stdout ?? ''}${result.stderr ?? ''}`,
+  };
+}
+
+function headingStyleArgs(file: string, spec: (typeof DOCX_OUTLINE_HEADING_SPECS)[number]): string[] {
+  const args = [
+    'add',
+    file,
+    '/styles',
+    '--type',
+    'style',
+    '--prop',
+    `id=${spec.id}`,
+    '--prop',
+    'type=paragraph',
+    '--prop',
+    `name=${spec.id}`,
+  ];
+  if ('outlineLvl' in spec && spec.outlineLvl !== undefined) {
+    args.push('--prop', `outlineLvl=${spec.outlineLvl}`);
+  }
+  if ('size' in spec && spec.size) args.push('--prop', `size=${spec.size}`);
+  if ('bold' in spec && spec.bold) args.push('--prop', 'bold=true');
+  return args;
+}
+
+/**
+ * Word TOC uses outlineLvl from styles.xml, not pStyle names. officecli create
+ * only writes Normal; seed Heading1–3 (and Title / TOCHeading) when missing.
+ */
+export function ensureDocxOutlineHeadingStyles(
+  file: string,
+  options?: ResolveOfficecliOptions & { binary?: string },
+): boolean {
+  if (!existsSync(file) || !isOfficeDocxPath(file)) return false;
+  const binary = options?.binary ?? resolveOfficecliBinary(options);
+  if (!binary) return false;
+
+  if (runOfficecli(binary, ['get', file, '/styles/Heading1']).exitCode === 0) return true;
+
+  for (const spec of DOCX_OUTLINE_HEADING_SPECS) {
+    runOfficecli(binary, headingStyleArgs(file, spec));
+  }
+  return runOfficecli(binary, ['get', file, '/styles/Heading1']).exitCode === 0;
+}
+
+/** Directory that contains the PATH `officecli` / `officecli.cmd` wrappers. */
+export function getOfficecliWrapperDir(options: ResolveOfficecliOptions = {}): string | undefined {
+  const cwd = resolve(options.cwd ?? process.cwd());
+  const candidates = [
+    join(cwd, 'apps', 'electron', 'resources', 'bin'),
+    join(cwd, 'resources', 'bin'),
+    join(cwd, '..', '..', 'apps', 'electron', 'resources', 'bin'),
+  ];
+  return candidates.find(
+    dir => isFile(join(dir, 'officecli')) || isFile(join(dir, 'officecli.cmd')),
+  );
 }

@@ -1,35 +1,87 @@
 #!/bin/sh
 # Selection wrapper — prefer the app-bundled binary, never curl-install.
+# After create / heading / TOC / open / refresh on a .docx, seed Heading1–3
+# with outlineLvl so Word can compile the TOC (HanaAgent closed loop).
 if [ -n "$CRAFT_OFFICECLI" ] && [ -f "$CRAFT_OFFICECLI" ]; then
-  exec "$CRAFT_OFFICECLI" "$@"
+  BIN=$CRAFT_OFFICECLI
+else
+  DIR=$(CDPATH= cd -- "$(dirname "$0")" && pwd)
+  UNAME=$(uname -s 2>/dev/null || echo unknown)
+  MACHINE=$(uname -m 2>/dev/null || echo unknown)
+
+  case "$UNAME" in
+    Darwin)
+      ARCH=x64
+      [ "$MACHINE" = "arm64" ] && ARCH=arm64
+      CAND=$DIR/darwin-$ARCH/officecli
+      ;;
+    Linux)
+      ARCH=x64
+      [ "$MACHINE" = "aarch64" ] || [ "$MACHINE" = "arm64" ] && ARCH=arm64
+      CAND=$DIR/linux-$ARCH/officecli
+      ;;
+    MINGW*|MSYS*|CYGWIN*|Windows_NT)
+      CAND=$DIR/win32-x64/officecli.exe
+      ;;
+    *)
+      CAND=""
+      ;;
+  esac
+
+  if [ -n "$CAND" ] && [ -f "$CAND" ]; then
+    BIN=$CAND
+  else
+    echo "officecli is not bundled in this Selection build. Rebuild the app or set CRAFT_OFFICECLI." >&2
+    exit 127
+  fi
 fi
 
 DIR=$(CDPATH= cd -- "$(dirname "$0")" && pwd)
-UNAME=$(uname -s 2>/dev/null || echo unknown)
-MACHINE=$(uname -m 2>/dev/null || echo unknown)
+ENSURE=$DIR/officecli-ensure-docx-styles
 
-case "$UNAME" in
-  Darwin)
-    ARCH=x64
-    [ "$MACHINE" = "arm64" ] && ARCH=arm64
-    CAND="$DIR/darwin-$ARCH/officecli"
-    ;;
-  Linux)
-    ARCH=x64
-    [ "$MACHINE" = "aarch64" ] || [ "$MACHINE" = "arm64" ] && ARCH=arm64
-    CAND="$DIR/linux-$ARCH/officecli"
-    ;;
-  MINGW*|MSYS*|CYGWIN*|Windows_NT)
-    CAND="$DIR/win32-x64/officecli.exe"
-    ;;
-  *)
-    CAND=""
-    ;;
-esac
+verb=""
+docx=""
+prev=""
+need_ensure=0
+for arg in "$@"; do
+  case "$arg" in
+    --*|-* ) ;;
+    create|open|refresh)
+      [ -z "$verb" ] && verb=$arg
+      need_ensure=1
+      ;;
+    add|set)
+      [ -z "$verb" ] && verb=$arg
+      ;;
+    *)
+      if [ -z "$docx" ]; then
+        case "$arg" in
+          *.docx|*.DOCX|*.docm|*.DOCM) docx=$arg ;;
+        esac
+      fi
+      ;;
+  esac
+  case "$arg" in
+    *style=Heading*|*style=Title*|*style=TOCHeading*|--type=toc) need_ensure=1 ;;
+  esac
+  if [ "$prev" = "--type" ] && [ "$arg" = "toc" ]; then
+    need_ensure=1
+  fi
+  prev=$arg
+done
 
-if [ -n "$CAND" ] && [ -f "$CAND" ]; then
-  exec "$CAND" "$@"
+ensure_docx() {
+  if [ "$need_ensure" = 1 ] && [ -n "$docx" ] && [ -f "$ENSURE" ] && [ -f "$docx" ]; then
+    "$ENSURE" "$BIN" "$docx"
+  fi
+}
+
+if [ "$verb" = "create" ]; then
+  "$BIN" "$@"
+  status=$?
+  [ $status -eq 0 ] && ensure_docx
+  exit $status
 fi
 
-echo "officecli is not bundled in this Selection build. Rebuild the app or set CRAFT_OFFICECLI." >&2
-exit 127
+ensure_docx
+exec "$BIN" "$@"

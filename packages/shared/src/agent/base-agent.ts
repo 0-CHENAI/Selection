@@ -994,8 +994,10 @@ ${formattedMessages}
       resolveSlug(slug);
     }
 
-    // Office files default to the matching built-in skill even without [skill:…]
-    for (const slug of collectOfficeFormatSkillSlugs(message, attachments)) {
+    // Office files: router first (HanaAgent `[Use skill: officecli]`), then format skill
+    const officeFormatSlugs = collectOfficeFormatSkillSlugs(message, attachments);
+    if (officeFormatSlugs.length > 0) resolveSlug('officecli');
+    for (const slug of officeFormatSlugs) {
       if (!skillPaths.has(slug)) resolveSlug(slug);
     }
 
