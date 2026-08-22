@@ -12,7 +12,7 @@ import {
   Info,
   X,
 } from "lucide-react"
-import { motion, AnimatePresence } from "motion/react"
+import { motion, AnimatePresence, useReducedMotion } from "motion/react"
 import { toast } from "sonner"
 
 import { ScrollArea } from "@/components/ui/scroll-area"
@@ -75,6 +75,17 @@ import { CHAT_LAYOUT } from "@/config/layout"
 import { collectFileChangesFromActivities, getFirstFileChangeIdForActivity } from "@/lib/file-changes"
 import { resolveBranchNewPanelOption } from "./branching"
 import { handleErrorMessageAction } from "./error-message-actions"
+import {
+  forceStickToBottomState,
+  isAtBottom,
+  isProgrammaticScrollLocked,
+  programmaticScrollLockMs,
+  readScrollMetrics,
+  resolveStickToBottomState,
+  shouldApplyUserScroll,
+  shouldLoadEarlierTurns,
+  type ScrollMetrics,
+} from "./ChatDisplay.scroll-to-bottom"
 
 // ============================================================================
 // CSS Custom Highlight API helper
@@ -497,6 +508,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
   connectionUnavailable = false,
 }, ref) {
   const { t } = useTranslation()
+  const reduceMotion = useReducedMotion()
 
   // Panel focus state (for multi-panel auto-scroll behavior)
   const appShellContext = useAppShellContext()
@@ -507,12 +519,45 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
   const isInputDisabled = disabled
   const messagesEndRef = React.useRef<HTMLDivElement>(null)
   const scrollViewportRef = React.useRef<HTMLDivElement>(null)
-  const prevSessionIdRef = React.useRef<string | null>(null)
   // Reverse pagination: show last N turns initially, load more on scroll up
   const TURNS_PER_PAGE = 20
   const [visibleTurnCount, setVisibleTurnCount] = React.useState(TURNS_PER_PAGE)
   // Sticky-bottom: When true, auto-scroll on content changes. Toggled by user scroll behavior.
   const isStickToBottomRef = React.useRef(true)
+  const activeSessionId = session?.id ?? null
+  const sessionIdRef = React.useRef(activeSessionId)
+  sessionIdRef.current = activeSessionId
+  const [scrollToBottomUi, setScrollToBottomUi] = React.useState({ sessionId: activeSessionId, show: false })
+  const showScrollToBottom = scrollToBottomUi.show && scrollToBottomUi.sessionId === activeSessionId
+  const showScrollToBottomRef = React.useRef(false)
+  showScrollToBottomRef.current = showScrollToBottom
+  const ignoreScrollUnstickUntilRef = React.useRef(0)
+  const applyStickState = React.useCallback((
+    metrics: ScrollMetrics | null,
+    options?: { forceStick?: boolean; ignoreUnstickMs?: number },
+  ) => {
+    if (options?.ignoreUnstickMs != null) {
+      ignoreScrollUnstickUntilRef.current = Date.now() + options.ignoreUnstickMs
+    }
+    const next = options?.forceStick || !metrics
+      ? forceStickToBottomState()
+      : resolveStickToBottomState(metrics, showScrollToBottomRef.current)
+    isStickToBottomRef.current = next.isStickToBottom
+    showScrollToBottomRef.current = next.showButton
+    setScrollToBottomUi(prev => (
+      prev.sessionId === sessionIdRef.current && prev.show === next.showButton
+        ? prev
+        : { sessionId: sessionIdRef.current, show: next.showButton }
+    ))
+  }, [])
+  const scrollToLatest = React.useCallback((behavior: ScrollBehavior) => {
+    const resolved: ScrollBehavior = reduceMotion ? 'instant' : behavior
+    applyStickState(null, {
+      forceStick: true,
+      ignoreUnstickMs: programmaticScrollLockMs(resolved),
+    })
+    messagesEndRef.current?.scrollIntoView({ behavior: resolved })
+  }, [applyStickState, reduceMotion])
   // Mirror isFocusedPanel into a ref so the ResizeObserver closure reads the latest value
   const isFocusedPanelRef = React.useRef(isFocusedPanel)
   isFocusedPanelRef.current = isFocusedPanel
@@ -774,8 +819,13 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
         }
       }
       shouldScrollToMatchRef.current = false
+      requestAnimationFrame(() => {
+        const viewport = scrollViewportRef.current
+        if (!viewport) return
+        applyStickState(readScrollMetrics(viewport))
+      })
     }
-  }, [validMatches, currentMatchIndex, session?.id, visibleTurnCount])
+  }, [validMatches, currentMatchIndex, session?.id, visibleTurnCount, applyStickState])
 
   // ---------------------------------------------------------------------------
   // CSS Custom Highlight API — non-destructive text highlighting
@@ -1100,13 +1150,17 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
   const handleScroll = React.useCallback(() => {
     const viewport = scrollViewportRef.current
     if (!viewport) return
-    const { scrollTop, scrollHeight, clientHeight } = viewport
-    const distanceFromBottom = scrollHeight - scrollTop - clientHeight
-    // 20px threshold for "at bottom" detection
-    isStickToBottomRef.current = distanceFromBottom < 20
+    const metrics = readScrollMetrics(viewport)
+    const { scrollTop } = metrics
+    const atBottom = isAtBottom(metrics)
+    const now = Date.now()
+    if (atBottom) ignoreScrollUnstickUntilRef.current = 0
+    if (shouldApplyUserScroll(now, ignoreScrollUnstickUntilRef.current, atBottom)) {
+      applyStickState(metrics)
+    }
 
     // Load more turns when scrolling near top (within 100px)
-    if (scrollTop < 100) {
+    if (shouldLoadEarlierTurns(scrollTop, isProgrammaticScrollLocked(now, ignoreScrollUnstickUntilRef.current))) {
       setVisibleTurnCount(prev => {
         // Check if there are more turns to load
         const currentStartIndex = Math.max(0, totalTurnCountRef.current - prev)
@@ -1124,15 +1178,33 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
         return prev + TURNS_PER_PAGE
       })
     }
-  }, [])
+  }, [applyStickState])
 
   // Set up scroll event listener
   React.useEffect(() => {
     const viewport = scrollViewportRef.current
     if (!viewport) return
-    viewport.addEventListener('scroll', handleScroll)
-    return () => viewport.removeEventListener('scroll', handleScroll)
+    const cancelProgrammaticLock = () => {
+      ignoreScrollUnstickUntilRef.current = 0
+    }
+    viewport.addEventListener('scroll', handleScroll, { passive: true })
+    viewport.addEventListener('wheel', cancelProgrammaticLock, { passive: true })
+    viewport.addEventListener('touchstart', cancelProgrammaticLock, { passive: true })
+    return () => {
+      viewport.removeEventListener('scroll', handleScroll)
+      viewport.removeEventListener('wheel', cancelProgrammaticLock)
+      viewport.removeEventListener('touchstart', cancelProgrammaticLock)
+    }
   }, [handleScroll])
+
+  // Reset stick + pagination before paint so a new session cannot flash the button
+  React.useLayoutEffect(() => {
+    applyStickState(null, {
+      forceStick: true,
+      ignoreUnstickMs: programmaticScrollLockMs('instant'),
+    })
+    setVisibleTurnCount(TURNS_PER_PAGE)
+  }, [session?.id, applyStickState])
 
   // Auto-scroll using ResizeObserver for streaming content
   // Initial scroll is handled by ScrollOnMount (useLayoutEffect, before paint)
@@ -1140,21 +1212,13 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
     const viewport = scrollViewportRef.current
     if (!viewport) return
 
-    const isSessionSwitch = prevSessionIdRef.current !== session?.id
-    prevSessionIdRef.current = session?.id ?? null
-
-    // On session switch: reset UI state (scroll handled by ScrollOnMount)
-    if (isSessionSwitch) {
-      isStickToBottomRef.current = true
-      setVisibleTurnCount(TURNS_PER_PAGE)
-    }
-
     // Debounced scroll for streaming - waits for layout to settle
     let debounceTimer: ReturnType<typeof setTimeout> | null = null
 
     const resizeObserver = new ResizeObserver(() => {
       // Unfocused panels: always scroll to bottom instantly (user isn't reading them)
       if (!isFocusedPanelRef.current) {
+        applyStickState(null, { forceStick: true })
         messagesEndRef.current?.scrollIntoView({ behavior: 'instant' })
         return
       }
@@ -1181,7 +1245,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
       resizeObserver.disconnect()
       if (debounceTimer) clearTimeout(debounceTimer)
     }
-  }, [session?.id])
+  }, [session?.id, applyStickState])
 
   // Commit-time auto-scroll for new user messages.
   // This complements submit-time scrolling and covers cases where attachments delay
@@ -1210,14 +1274,10 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
     if (lastMessageRole !== 'user') return
 
     // Sending a message should always re-stick to bottom.
-    isStickToBottomRef.current = true
-
     requestAnimationFrame(() => {
-      messagesEndRef.current?.scrollIntoView({
-        behavior: isFocusedPanelRef.current ? 'smooth' : 'instant',
-      })
+      scrollToLatest(isFocusedPanelRef.current ? 'smooth' : 'instant')
     })
-  }, [session?.id, messageCount, lastMessageId, lastMessageRole])
+  }, [session?.id, messageCount, lastMessageId, lastMessageRole, scrollToLatest])
 
   // Handle message submission from InputContainer
   // Backend handles interruption and queueing if currently processing
@@ -1231,8 +1291,12 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
       : message
     const normalizedMessage = normalizeFollowUpsMarkdown(messageWithFollowUps)
 
-    // Force stick-to-bottom when user sends a message
-    isStickToBottomRef.current = true
+    // Force stick-to-bottom when user sends a message. Lock immediately so a
+    // resize from the new bubble cannot unstick before the rAF scroll starts.
+    applyStickState(null, {
+      forceStick: true,
+      ignoreUnstickMs: programmaticScrollLockMs(reduceMotion ? 'instant' : 'smooth'),
+    })
     onSendMessage(normalizedMessage, attachments, skillSlugs)
 
     // Persist sent marker on follow-up annotations so TurnCard can distinguish
@@ -1268,7 +1332,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
     // Immediately scroll to bottom after sending - use requestAnimationFrame
     // to ensure the DOM has updated with the new message
     requestAnimationFrame(() => {
-      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+      scrollToLatest('smooth')
     })
   }
 
@@ -1939,6 +2003,32 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
               </div>
               </ScrollArea>
             </div>
+            <AnimatePresence>
+              {showScrollToBottom && (
+                <motion.button
+                  key="scroll-to-bottom"
+                  type="button"
+                  data-testid="chat-scroll-to-bottom"
+                  initial={reduceMotion ? false : { opacity: 0, y: 8 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={reduceMotion ? { opacity: 0 } : { opacity: 0, y: 8 }}
+                  transition={{ duration: reduceMotion ? 0 : 0.15, ease: 'easeOut' }}
+                  onClick={() => scrollToLatest('smooth')}
+                  aria-label={t('chat.scrollToBottom')}
+                  title={t('chat.scrollToBottom')}
+                  className={cn(
+                    "absolute bottom-3 left-1/2 z-20 -translate-x-1/2",
+                    "inline-flex size-8 items-center justify-center rounded-full",
+                    "border border-foreground/10 bg-background/90 text-foreground/70",
+                    "shadow-minimal backdrop-blur-sm",
+                    "transition-colors hover:bg-background hover:text-foreground",
+                    "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50",
+                  )}
+                >
+                  <ChevronDown className="size-4" />
+                </motion.button>
+              )}
+            </AnimatePresence>
           </div>
 
           {/* === INPUT CONTAINER: FreeForm or Structured Input === */}
