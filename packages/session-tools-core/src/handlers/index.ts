@@ -63,16 +63,6 @@ export type { RenderTemplateArgs } from './render-template.ts';
 export { handleSendDeveloperFeedback } from './send-developer-feedback.ts';
 export type { SendDeveloperFeedbackArgs } from './send-developer-feedback.ts';
 
-// Office documents
-export { handleOfficeDocumentInspect, handleOfficeDocumentEdit } from './office-document.ts';
-export type {
-  OfficeDocumentInspectArgs,
-  OfficeDocumentEditArgs,
-  OfficeDocumentInspectCommand,
-  OfficeDocumentEditCommand,
-  OfficeDocumentResultPayload,
-} from './office-document.ts';
-
 // Session Self-Management
 export { handleSetSessionLabels } from './set-session-labels.ts';
 export type { SetSessionLabelsArgs } from './set-session-labels.ts';
@@ -86,5 +76,9 @@ export { handleListBackgroundTasks } from './list-background-tasks.ts';
 export type { ListBackgroundTasksArgs } from './list-background-tasks.ts';
 export { handleCreateTask } from './create-task.ts';
 export type { CreateTaskArgs } from './create-task.ts';
+export { handleRunTask } from './run-task.ts';
+export type { RunTaskArgs } from './run-task.ts';
+export { handleGetTaskResults } from './get-task-results.ts';
+export type { GetTaskResultsArgs } from './get-task-results.ts';
 export { handleArchiveSession } from './archive-session.ts';
 export type { ArchiveSessionArgs } from './archive-session.ts';

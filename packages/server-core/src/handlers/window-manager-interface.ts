@@ -20,4 +20,7 @@ export interface IWindowManager {
 
   /** Get all tracked windows for a workspace. */
   getAllWindowsForWorkspace(workspaceId: string): unknown[]
+
+  /** Apply the app Appearance mode to native window chrome (Windows). */
+  applyThemeMode?(mode: string): void
 }

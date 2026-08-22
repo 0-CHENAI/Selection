@@ -4,12 +4,6 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 
 ## Features
 
-- **Native Office document tools** — Word / Excel / PowerPoint inspection and editing now use an always-available, structured runtime backed by the bundled `officecli` binary, without exposing OfficeCLI as a skill.
-
 ## Improvements
 
 ## Bug Fixes
-
-## Breaking Changes
-
-- **Anthropic official API / Claude Max OAuth / `anthropic-messages` are no longer supported** — leftover connections stay on disk but cannot send, become the default, or be selected for new sessions. Reconfigure with OpenAI Compatible or another Selection Backend provider. The Claude Agent SDK runtime and native binary are removed.

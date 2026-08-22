@@ -13,8 +13,8 @@
  * 2. Source blocking: Block tools from inactive MCP sources
  * 3. Prerequisite check: Block source tools until guide.md is read
  * 4. call_llm detection: Intercept mcp__session__call_llm
- * 5. Input transforms and routing guards: Path expansion, native Office routing,
- *    config validation, skill qualification, metadata stripping
+ * 5. Input transforms: Path expansion, config validation, skill qualification,
+ *    metadata stripping
  * 6. Ask-mode prompt decision: Determine if user approval is needed
  */
 
@@ -22,6 +22,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { join, resolve } from 'node:path';
 import { expandPath } from '../../utils/paths.ts';
+import { resolveBundledOfficecliSkillRead } from '../../utils/officecli.ts';
 import {
   detectConfigFileType,
   detectAppConfigFileType,
@@ -38,7 +39,7 @@ import {
 import { FEATURE_FLAGS } from '../../feature-flags.ts';
 import { SESSION_TOOL_NAMES } from '@craft-agent/session-tools-core';
 import { AGENTS_PLUGIN_NAME } from '../../skills/types.ts';
-import { GLOBAL_AGENT_SKILLS_DIR, PROJECT_AGENT_SKILLS_DIR, getBundledSkillsDir } from '../../skills/storage.ts';
+import { GLOBAL_AGENT_SKILLS_DIR, PROJECT_AGENT_SKILLS_DIR, resolveBundledSkillMdPath } from '../../skills/storage.ts';
 import {
   shouldAllowToolInMode,
   isApiEndpointAllowed,
@@ -184,6 +185,16 @@ export function expandToolPaths(
     updatedInput = { ...(updatedInput || input), path: expandedPath };
   }
 
+  const withExpansions = updatedInput || input;
+  for (const key of ['file_path', 'path'] as const) {
+    const value = withExpansions[key];
+    if (typeof value !== 'string') continue;
+    const rewritten = resolveBundledOfficecliSkillRead(value);
+    if (!rewritten || rewritten === value) continue;
+    onDebug?.(`OfficeCLI skill path: ${value} → ${rewritten}`);
+    updatedInput = { ...(updatedInput || input), [key]: rewritten };
+  }
+
   return {
     modified: updatedInput !== null,
     input: updatedInput || input,
@@ -202,7 +213,7 @@ export function expandToolPaths(
  *   1. Workspace: {workspaceRoot}/skills/{slug}/ → plugin name from plugin.json
  *   2. Project:   {workingDir}/.agents/skills/{slug}/ → plugin name = ".agents"
  *   3. Global:    ~/.agents/skills/{slug}/ → plugin name = ".agents"
- *   4. Bundled:   app resources/skills/{slug}/ → plugin name = ".agents"
+ *   4. Bundled:   app resources/skills/{slug}/ or officecli/<version>/skills/{slug}/ → plugin name = ".agents"
  *
  * This function resolves the bare slug to the correct plugin prefix by checking
  * which directory actually contains the skill. It also handles re-qualifying
@@ -275,9 +286,8 @@ function resolveSkillPlugin(
     return `${workspaceSlug}:${bareSlug}`;
   }
 
-  // 3. Bundled: app resources/skills/{slug}/SKILL.md
-  const bundledDir = getBundledSkillsDir();
-  if (bundledDir && existsSync(join(bundledDir, bareSlug, 'SKILL.md'))) {
+  // 3. Bundled: app resources/skills/{slug}/SKILL.md or officecli official skills
+  if (resolveBundledSkillMdPath(bareSlug)) {
     return `${AGENTS_PLUGIN_NAME}:${bareSlug}`;
   }
 
@@ -580,87 +590,6 @@ export function getConfigDomainBashRedirect(
 }
 
 // ============================================================
-// NATIVE OFFICE ROUTING
-// ============================================================
-
-const OFFICE_FILE_PATH_PATTERN = /\.(?:docx|xlsx|pptx)$/i;
-const OFFICE_MARKDOWN_SIDECAR_PATTERN = /\.(?:docx|xlsx|pptx)\.md$/i;
-const OFFICE_PATH_IN_COMMAND_PATTERN = /\.(?:docx|xlsx|pptx)(?:\.md)?(?=$|[\s"';&|])/i;
-const OFFICE_CONTENT_FILE_TOOLS = new Set(['Read', 'Write', 'Edit', 'MultiEdit']);
-const OFFICE_DIRECT_CLI_PATTERN = /(?:^|[\s"';&|\\/])(?:officecli|docx-tool|xlsx-tool|pptx-tool)(?:\.exe)?(?=$|[\s"';&|])/i;
-const MARKITDOWN_CLI_PATTERN = /(?:^|[\s"';&|\\/])markitdown(?:\.exe)?(?=$|[\s"';&|])/i;
-const OFFICE_MARKDOWN_FALLBACK_MARKER = 'selection-office-native-fallback';
-
-function getToolFilePath(input: Record<string, unknown>): string | null {
-  if (typeof input.file_path === 'string') return input.file_path;
-  if (typeof input.path === 'string') return input.path;
-  return null;
-}
-
-function buildNativeOfficeRoutingMessage(context: string): string {
-  return [
-    context,
-    'Use the native Office tools instead:',
-    '- Read, inspect, query, dump, help, or validate: office_document_inspect',
-    '- Create or modify: office_document_edit',
-    'Do not use Read, Write, Edit, a generated .docx.md/.xlsx.md/.pptx.md sidecar, direct officecli Bash, legacy *-tool commands, or markitdown as the default Office path.',
-    `Only when the user explicitly requests Markdown conversion or the native inspect tool reports the operation unsupported may markitdown be retried with the command comment marker "# ${OFFICE_MARKDOWN_FALLBACK_MARKER}".`,
-  ].join('\n');
-}
-
-/**
- * Keep Office document content processing on the registered, app-managed tools.
- * Ordinary filesystem operations such as cp/mv/rename are intentionally allowed.
- */
-export function getNativeOfficeToolRedirect(
-  toolName: string,
-  input: Record<string, unknown>,
-): { message: string } | null {
-  const canonicalToolName = toolName.startsWith('mcp__session__')
-    ? toolName.slice('mcp__session__'.length)
-    : toolName;
-
-  if (canonicalToolName === 'office_document_inspect' || canonicalToolName === 'office_document_edit') {
-    return null;
-  }
-
-  const filePath = getToolFilePath(input);
-  if (filePath && OFFICE_CONTENT_FILE_TOOLS.has(toolName) && OFFICE_FILE_PATH_PATTERN.test(filePath)) {
-    return {
-      message: buildNativeOfficeRoutingMessage(
-        `Direct ${toolName} content access to Office file "${filePath}" is blocked.`,
-      ),
-    };
-  }
-
-  if (filePath && toolName === 'Read' && OFFICE_MARKDOWN_SIDECAR_PATTERN.test(filePath)) {
-    return {
-      message: buildNativeOfficeRoutingMessage(
-        `Reading the legacy Markdown sidecar "${filePath}" is blocked because the original Office file must be inspected natively.`,
-      ),
-    };
-  }
-
-  if (toolName === 'Bash') {
-    const command = typeof input.command === 'string' ? input.command : '';
-    const operatesOnOfficeFile = OFFICE_PATH_IN_COMMAND_PATTERN.test(command);
-    const isMarkedMarkdownFallback = command.toLowerCase().includes(OFFICE_MARKDOWN_FALLBACK_MARKER);
-    const usesDirectOfficeCli = OFFICE_DIRECT_CLI_PATTERN.test(command);
-    const usesMarkitdown = MARKITDOWN_CLI_PATTERN.test(command);
-
-    if (operatesOnOfficeFile && (usesDirectOfficeCli || (usesMarkitdown && !isMarkedMarkdownFallback))) {
-      return {
-        message: buildNativeOfficeRoutingMessage(
-          'Shell-based Office content processing is blocked until the registered native Office tool is used.',
-        ),
-      };
-    }
-  }
-
-  return null;
-}
-
-// ============================================================
 // CENTRALIZED PRETOOLUSE PIPELINE
 // ============================================================
 
@@ -894,12 +823,6 @@ export function runPreToolUseChecks(ctx: PreToolUseInput): PreToolUseCheckResult
   if (pathResult.modified) {
     currentInput = pathResult.input;
     wasModified = true;
-  }
-
-  // 5b. Native Office routing guard
-  const nativeOfficeRedirect = getNativeOfficeToolRedirect(toolName, currentInput);
-  if (nativeOfficeRedirect) {
-    return { type: 'block', reason: nativeOfficeRedirect.message };
   }
 
   // 5c. Config-domain Bash guard (block direct labels/automations path operations unless using craft-agent)
@@ -1158,7 +1081,7 @@ export function shouldPromptInAskMode(
   }
 
   // --- Canonical session-tool mutations ---
-  // Pi registers the native Office tools by their public canonical names.
+  // Pi may register session tools by their public canonical names.
   // Preserve the same ask-mode behavior as their MCP-prefixed counterparts.
   if (SESSION_TOOL_NAMES.has(toolName)) {
     const safeModeResult = shouldAllowToolInMode(

@@ -77,6 +77,7 @@ export function MainContentPanel({
     sessionStatuses,
     labels,
     onTestAutomation,
+    onSimulateMatchAutomation,
     onToggleAutomation,
     onDuplicateAutomation,
     onDeleteAutomation,
@@ -340,6 +341,7 @@ export function MainContentPanel({
               executions={executions}
               testResult={automationTestResults?.[automation.id]}
               onTest={onTestAutomation ? () => onTestAutomation(automation.id) : undefined}
+              onSimulateMatch={onSimulateMatchAutomation ? () => onSimulateMatchAutomation(automation.id) : undefined}
               onToggleEnabled={onToggleAutomation ? () => onToggleAutomation(automation.id) : undefined}
               onDuplicate={onDuplicateAutomation ? () => onDuplicateAutomation(automation.id) : undefined}
               onDelete={onDeleteAutomation ? () => onDeleteAutomation(automation.id) : undefined}

@@ -13,6 +13,7 @@ import {
   cpSync,
   lstatSync,
   readdirSync,
+  readFileSync,
 } from 'fs';
 import { join, dirname } from 'path';
 import { createHash } from 'crypto';
@@ -43,30 +44,27 @@ export const BUN_VERSION = 'bun-v1.3.9';
  */
 export const UV_VERSION = '0.10.6';
 
-/**
- * OfficeCLI version to bundle (GitHub release tag).
- * https://github.com/iOfficeAI/OfficeCLI/releases
- */
-export const OFFICECLI_VERSION = 'v1.0.144';
+interface OfficecliBuildManifest {
+  tag: string;
+  assets: Record<string, { name: string; url: string; sha256: string }>;
+}
 
-const OFFICECLI_ASSET: Record<string, string> = {
-  'darwin-arm64': 'officecli-mac-arm64',
-  'darwin-x64': 'officecli-mac-x64',
-  'linux-x64': 'officecli-linux-x64',
-  'linux-arm64': 'officecli-linux-arm64',
-  'win32-x64': 'officecli-win-x64.exe',
-  'win32-arm64': 'officecli-win-arm64.exe',
-};
+/** One reviewed manifest is the source of truth for runtime and build assets. */
+const OFFICECLI_MANIFEST = JSON.parse(readFileSync(
+  join(import.meta.dir, '../../apps/electron/resources/officecli/officecli-manifest.json'),
+  'utf8',
+)) as OfficecliBuildManifest;
 
-/** Release checksums are pinned with the version so cached assets are verified too. */
-export const OFFICECLI_SHA256: Record<string, string> = {
-  'darwin-arm64': '04757163428c5bde8d91e8f838517818e74722157722ca5f3877b6716b77bd45',
-  'darwin-x64': '366100643d757b0da24829422897ca74768a894b5ecd1a471a1336f8e2a0787d',
-  'linux-x64': '32ef7a21a54a4ca6c9806bf5e9f3d32bfb1291017329c55044cb2aac71822eb8',
-  'linux-arm64': '56ec2c3114b66f6490888b6778cbb8413a65911a26cacc7207f29e13424966da',
-  'win32-x64': 'e780cc6a5385f84b4d54d71b0c179904ed534125ec33fe39b1a8711fa80e387e',
-  'win32-arm64': '0adb928d118e237b108077dadca9e272c236cd378c699712a41adda697047860',
-};
+export const OFFICECLI_VERSION = OFFICECLI_MANIFEST.tag;
+const OFFICECLI_ASSET: Record<string, string> = Object.fromEntries(
+  Object.entries(OFFICECLI_MANIFEST.assets).map(([key, asset]) => [key, asset.name]),
+);
+const OFFICECLI_ASSET_URL: Record<string, string> = Object.fromEntries(
+  Object.entries(OFFICECLI_MANIFEST.assets).map(([key, asset]) => [key, asset.url]),
+);
+export const OFFICECLI_SHA256: Record<string, string> = Object.fromEntries(
+  Object.entries(OFFICECLI_MANIFEST.assets).map(([key, asset]) => [key, asset.sha256]),
+);
 
 /** Desktop installers that must ship officecli even when built on another host. */
 export const OFFICECLI_DESKTOP_TARGETS: Array<{ platform: Platform; arch: Arch }> = [
@@ -437,8 +435,9 @@ export async function downloadOfficecli(config: BuildConfig): Promise<void> {
   const { platform, arch, electronDir } = config;
   const platformKey = getPlatformKey(platform, arch);
   const assetName = OFFICECLI_ASSET[platformKey];
+  const releaseUrl = OFFICECLI_ASSET_URL[platformKey];
   const expectedHash = OFFICECLI_SHA256[platformKey];
-  if (!assetName || !expectedHash) {
+  if (!assetName || !releaseUrl || !expectedHash) {
     throw new Error(`No OfficeCLI build for ${platformKey}`);
   }
 
@@ -464,10 +463,7 @@ export async function downloadOfficecli(config: BuildConfig): Promise<void> {
   mkdirSync(tempDir, { recursive: true });
 
   try {
-    const releaseBase = `https://github.com/iOfficeAI/OfficeCLI/releases/download/${OFFICECLI_VERSION}`;
     const assetPath = join(tempDir, assetName);
-
-    const releaseUrl = `${releaseBase}/${assetName}`;
     await curlDownload(assetPath, [
       releaseUrl,
       `https://ghproxy.net/${releaseUrl}`,
@@ -710,26 +706,43 @@ function koffiPlatformDir(platform: Platform, arch: Arch): string {
 /**
  * Copy Pi Agent Server to packaged app resources.
  *
- * The bun build uses --external koffi so the bare import resolves through
- * node_modules at runtime. We copy the koffi npm package next to index.js
- * with only the target platform's native binary (~4MB instead of ~80MB).
+ * The bundle requires a dedicated image resize Worker and Photon WASM, and uses --external
+ * koffi so the bare import resolves through node_modules at runtime. We copy
+ * the Worker, WASM, and Koffi runtime next to index.js, limiting Koffi to the
+ * target platform's native binary (~4MB instead of ~80MB).
  */
 export function copyPiAgentServer(config: BuildConfig): void {
   const { rootDir, electronDir, platform, arch } = config;
 
   const piSourceDir = join(rootDir, 'packages', 'pi-agent-server', 'dist');
   const piDestDir = join(electronDir, 'resources', 'pi-agent-server');
+  const photonWasmName = 'photon_rs_bg.wasm';
+  const imageResizeWorkerName = 'image-resize-worker.js';
+  const photonWasmSource = join(piSourceDir, photonWasmName);
+  const imageResizeWorkerSource = join(piSourceDir, imageResizeWorkerName);
 
   if (!existsSync(join(piSourceDir, 'index.js'))) {
     console.warn(`Warning: Pi agent server not found at ${piSourceDir}/index.js. Pi SDK sessions will not work.`);
     return;
   }
+  if (!existsSync(photonWasmSource)) {
+    throw new Error(
+      `Pi Agent Server Photon WASM not found at ${photonWasmSource}. Run bun run build in packages/pi-agent-server.`,
+    );
+  }
+  if (!existsSync(imageResizeWorkerSource)) {
+    throw new Error(
+      `Pi Agent Server image resize Worker not found at ${imageResizeWorkerSource}. Run bun run build in packages/pi-agent-server.`,
+    );
+  }
 
   console.log('Copying Pi Agent Server...');
   mkdirSync(piDestDir, { recursive: true });
 
-  // 1. Copy index.js
+  // 1. Copy the bundle and its image-processing runtime.
   copyFileSync(join(piSourceDir, 'index.js'), join(piDestDir, 'index.js'));
+  copyFileSync(imageResizeWorkerSource, join(piDestDir, imageResizeWorkerName));
+  copyFileSync(photonWasmSource, join(piDestDir, photonWasmName));
 
   // 2. Copy koffi npm package (external import, resolved via node_modules at runtime)
   const koffiSource = join(rootDir, 'node_modules', 'koffi');
@@ -763,11 +776,11 @@ export function copyPiAgentServer(config: BuildConfig): void {
       throw new Error(`Koffi native binary directory is empty: ${nativeSrc}`);
     }
     const size = lstatSync(join(nativeSrc, nativeBinary)).size;
-    console.log(`  Copied index.js + koffi/${targetDir} (${(size / 1024 / 1024).toFixed(1)}MB)`);
+    console.log(`  Copied index.js + image Worker + Photon WASM + koffi/${targetDir} (${(size / 1024 / 1024).toFixed(1)}MB)`);
   } else {
     console.warn(`  Warning: koffi native binary not found for ${targetDir}`);
     cpSync(join(koffiSource, 'build'), join(koffiDest, 'build'), { recursive: true });
-    console.log('  Copied index.js + koffi (all platforms as fallback)');
+    console.log('  Copied index.js + image Worker + Photon WASM + koffi (all platforms as fallback)');
   }
 }
 
@@ -803,10 +816,7 @@ export function buildMcpServers(config: BuildConfig): void {
   // Optional: skip if package directory is missing (e.g., not synced to OSS).
   if (existsSync(join(piDir, 'src'))) {
     mkdirSync(join(piDir, 'dist'), { recursive: true });
-    execSync(
-      `bun build ${join(piDir, 'src', 'index.ts')} --outdir ${join(piDir, 'dist')} --target bun --format esm --external koffi`,
-      { cwd: rootDir, stdio: 'inherit' }
-    );
+    execSync('bun run build', { cwd: piDir, stdio: 'inherit' });
     if (!existsSync(piOut)) {
       throw new Error(`Pi agent server output not found at ${piOut}`);
     }
@@ -841,12 +851,21 @@ export function verifyMcpServersExist(config: BuildConfig): void {
 
   const sessionPath = join(electronDir, 'resources', 'session-mcp-server', 'index.js');
   const piPath = join(electronDir, 'resources', 'pi-agent-server', 'index.js');
+  const imageResizeWorkerPath = join(electronDir, 'resources', 'pi-agent-server', 'image-resize-worker.js');
+  const photonWasmPath = join(electronDir, 'resources', 'pi-agent-server', 'photon_rs_bg.wasm');
 
   if (!existsSync(sessionPath)) {
     throw new Error(`Session MCP server not found at ${sessionPath}`);
   }
   if (!existsSync(piPath)) {
     console.warn(`Warning: Pi agent server not found at ${piPath}. Pi SDK sessions will not work.`);
+    return;
+  }
+  if (!existsSync(photonWasmPath)) {
+    throw new Error(`Pi Agent Server Photon WASM not found at ${photonWasmPath}`);
+  }
+  if (!existsSync(imageResizeWorkerPath)) {
+    throw new Error(`Pi Agent Server image resize Worker not found at ${imageResizeWorkerPath}`);
   }
 }
 

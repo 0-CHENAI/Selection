@@ -166,6 +166,8 @@ export interface AppShellContextType {
   // Automation management
   /** Test an automation by ID — executes its actions and returns results */
   onTestAutomation?: (automationId: string) => void
+  /** Dry-run matcher evaluation for an automation by ID */
+  onSimulateMatchAutomation?: (automationId: string) => void
   /** Toggle an automation's enabled state by ID */
   onToggleAutomation?: (automationId: string) => void
   /** Duplicate an automation by ID — clones config with " Copy" suffix */

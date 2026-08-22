@@ -9,6 +9,7 @@ import { skillSelection } from '@/hooks/useEntitySelection'
 import { SkillMenu } from './SkillMenu'
 import { SendResourceToWorkspaceDialog } from './SendResourceToWorkspaceDialog'
 import { CopyResourcesFromWorkspaceDialog } from './CopyResourcesFromWorkspaceDialog'
+import { ResourceTransferDialog } from '@/components/resources/ResourceTransferDialog'
 import { EditPopover, getEditConfig } from '@/components/ui/EditPopover'
 import { useActiveWorkspace, useAppShellContext } from '@/context/AppShellContext'
 import { getFileManagerName } from '@/lib/platform'
@@ -57,6 +58,7 @@ export function SkillsListPanel({
   const [sendResourceSlug, setSendResourceSlug] = React.useState<string | null>(null)
   const [sendResourceLabel, setSendResourceLabel] = React.useState('')
   const [copyFromOpenInternal, setCopyFromOpenInternal] = React.useState(false)
+  const [exportResourceSlug, setExportResourceSlug] = React.useState<string | null>(null)
   const copyFromOpen = copyFromOpenProp ?? copyFromOpenInternal
   const setCopyFromOpen = onCopyFromOpenChange ?? setCopyFromOpenInternal
   const rename = useDisplayTitleRename('skill', workspaceId ?? activeWorkspaceId, workingDirectory)
@@ -156,6 +158,7 @@ export function SkillsListPanel({
                 setSendResourceLabel(title)
                 setSendDialogOpen(true)
               } : undefined}
+              onExport={skill.source === 'workspace' ? () => setExportResourceSlug(skill.slug) : undefined}
             />
           ),
         }
@@ -182,6 +185,15 @@ export function SkillsListPanel({
       activeWorkspaceId={activeWorkspaceId}
       resourceType="skill"
     />
+    {exportResourceSlug && activeWorkspaceId && (
+      <ResourceTransferDialog
+        open
+        mode="export"
+        workspaceId={activeWorkspaceId}
+        initialSelection={[{ type: 'skill', id: exportResourceSlug }]}
+        onOpenChange={(isOpen) => { if (!isOpen) setExportResourceSlug(null) }}
+      />
+    )}
     {rename.dialog}
     </>
   )

@@ -11,6 +11,7 @@ import type {
   TypedError,
   ContentBadge,
   ToolDisplayMeta,
+  AgentToolResultContent,
   AnnotationV1,
   PermissionRequest as BasePermissionRequest,
   QueuedMessageContext,
@@ -386,11 +387,11 @@ export type SessionEvent =
   | { type: 'text_delta'; sessionId: string; delta: string; turnId?: string }
   | { type: 'text_complete'; sessionId: string; text: string; isIntermediate?: boolean; turnId?: string; parentToolUseId?: string; timestamp?: number; messageId?: string }
   | { type: 'tool_start'; sessionId: string; toolName: string; toolUseId: string; toolInput: Record<string, unknown>; toolIntent?: string; toolDisplayName?: string; toolDisplayMeta?: ToolDisplayMeta; turnId?: string; parentToolUseId?: string; timestamp?: number }
-  | { type: 'tool_result'; sessionId: string; toolUseId: string; toolName: string; result: string; turnId?: string; parentToolUseId?: string; isError?: boolean; timestamp?: number }
+  | { type: 'tool_result'; sessionId: string; toolUseId: string; toolName: string; result: string; content?: AgentToolResultContent[]; turnId?: string; parentToolUseId?: string; isError?: boolean; timestamp?: number }
   | { type: 'error'; sessionId: string; error: string; timestamp?: number }
   | { type: 'typed_error'; sessionId: string; error: TypedError; timestamp?: number }
   | { type: 'complete'; sessionId: string; tokenUsage?: Session['tokenUsage']; hasUnread?: boolean; backgroundTasksAlive?: boolean }
-  | { type: 'interrupted'; sessionId: string; message?: Message; queuedMessages?: string[] }
+  | { type: 'interrupted'; sessionId: string; message?: Message; queuedMessages?: string[]; runningChildCount?: number }
   | { type: 'status'; sessionId: string; message: string; statusType?: 'compacting' }
   | { type: 'info'; sessionId: string; message: string; statusType?: 'compaction_complete'; level?: 'info' | 'warning' | 'error' | 'success'; timestamp?: number }
   | { type: 'title_generated'; sessionId: string; title: string }
@@ -431,7 +432,9 @@ export type SessionEvent =
   | { type: 'usage_update'; sessionId: string; tokenUsage: { inputTokens: number; contextWindow?: number } }
   | { type: 'message_annotations_updated'; sessionId: string; messageId: string; annotations: AnnotationV1[] }
   | { type: 'working_directory_error'; sessionId: string; error: string }
-  | { type: 'messages_truncated'; sessionId: string; keepThroughMessageId: string }
+  | { type: 'regenerate_started'; sessionId: string; runId: string }
+  | { type: 'messages_truncated'; sessionId: string; keepThroughMessageId: string; runId?: string }
+  | { type: 'messages_restored'; sessionId: string; messages: Message[]; runId: string }
 
 export interface SendMessageOptions {
   skillSlugs?: string[]
@@ -798,6 +801,25 @@ export interface TestAutomationPayload {
   labels?: string[]
   /** Forwarded from the matcher; routes test-run sessions into a Telegram topic when paired. */
   telegramTopic?: string
+  /** When true, only evaluate matcher/conditions — do not execute actions. */
+  dryRun?: boolean
+  /** Agent/app event name used for dry-run matching. */
+  event?: string
+  /** Sample Agent Event payload for dry-run matching. */
+  sample?: {
+    tool_name?: string
+    tool_input?: Record<string, unknown>
+    prompt?: string
+    stop_reason?: string
+    source?: string
+    agent_type?: string
+  }
+}
+
+export interface TestAutomationMatch {
+  matcherId: string
+  name: string
+  event: string
 }
 
 export type TestAutomationActionResult =
@@ -806,6 +828,7 @@ export type TestAutomationActionResult =
 
 export interface TestAutomationResult {
   actions: TestAutomationActionResult[]
+  matches?: TestAutomationMatch[]
 }
 
 // ---------------------------------------------------------------------------

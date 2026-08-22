@@ -43,6 +43,8 @@ import type {
   AuthCompletedEvent,
   UsageUpdateEvent,
   MessagesTruncatedEvent,
+  MessagesRestoredEvent,
+  RegenerateStartedEvent,
   Effect,
 } from '../types'
 import type { Message } from '../../../shared/types'
@@ -359,6 +361,13 @@ export function handleInterrupted(
     effects.push({
       type: 'restore_input',
       text: event.queuedMessages.join('\n\n'),
+    })
+  }
+
+  if (isUserInitiated && typeof event.runningChildCount === 'number' && event.runningChildCount > 0) {
+    effects.push({
+      type: 'toast_running_children',
+      count: event.runningChildCount,
     })
   }
 
@@ -1143,7 +1152,26 @@ export function handleUsageUpdate(
   }
 }
 
-/** Keep transcript through the last user prompt after regenerate. */
+/** Enter regenerate running state without discarding the committed response. */
+export function handleRegenerateStarted(
+  state: SessionState,
+  _event: RegenerateStartedEvent,
+): ProcessResult {
+  return {
+    state: {
+      session: {
+        ...state.session,
+        isProcessing: true,
+        currentStatus: undefined,
+        processingStartedAt: Date.now(),
+      },
+      streaming: null,
+    },
+    effects: [],
+  }
+}
+
+/** Keep transcript through the last user prompt once the new run is ready. */
 export function handleMessagesTruncated(
   state: SessionState,
   event: MessagesTruncatedEvent,
@@ -1173,6 +1201,31 @@ export function handleMessagesTruncated(
         // elapsed-time clock from this regenerate so the indicator does not
         // show time since the first send (e.g. 130:34).
         processingStartedAt: Date.now(),
+      },
+      streaming: null,
+    },
+    effects: [],
+  }
+}
+
+/** Restore the pre-regenerate transcript while retaining the surfaced error. */
+export function handleMessagesRestored(
+  state: SessionState,
+  event: MessagesRestoredEvent,
+): ProcessResult {
+  const restoredIds = new Set(event.messages.map(message => message.id))
+  const diagnostics = state.session.messages.filter(message =>
+    (message.role === 'error' || message.role === 'info') && !restoredIds.has(message.id)
+  )
+
+  return {
+    state: {
+      session: {
+        ...state.session,
+        messages: [...event.messages, ...diagnostics],
+        isProcessing: false,
+        currentStatus: undefined,
+        processingStartedAt: undefined,
       },
       streaming: null,
     },

@@ -12,6 +12,7 @@ import { formatBytes } from '../utils/binary-detection.ts';
 import { globSync } from 'glob';
 import os from 'os';
 import type { ProjectPromptContext } from '../projects/types.ts';
+import { getBundledOfficecliSkillsDir } from '../utils/officecli.ts';
 
 /** Maximum size of CLAUDE.md file to include (10KB) */
 const MAX_CONTEXT_FILE_SIZE = 10 * 1024;
@@ -538,6 +539,27 @@ rg -n "session|OAuth|\"level\":\"error\"" "${logFilePath}" | tail -n 50
 `;
 }
 
+function formatBundledOfficecliSkillGuidance(): string {
+  const dir = getBundledOfficecliSkillsDir();
+  const lines = [
+    '- **Hard rule:** for `.docx` / `.xlsx` / `.pptx` / `.xlsm` (or Word / Excel / PowerPoint), use bundled `officecli` via Bash. Do not use python-docx, openpyxl, python-pptx, or markitdown first.',
+    '- First run `officecli load_skill word` (or `excel` / `pptx`), or Read the matching built-in skill. Then follow its Common Workflow and Delivery Gate. `officecli` is already on PATH; do not curl-install.',
+    '- Word: `create` seeds Heading1–3 with `outlineLvl`. Use those styles as TOC sources. If officecli prints `style not found` / WARNING / Error, stop — `get /styles` and `help docx style`. Do not re-add an existing Heading (that drops outlineLvl); `set /styles/Heading1 --prop outlineLvl=0` instead.',
+    '- Do not treat `view outline` or `Update field to see table of contents` as proof Word can compile the TOC. Check `get /styles/Heading1` (must exist with outlineLvl). Insert TOC only after heading sources exist.',
+    '- Do **not** Read `~/.agents/skills/officecli`, `~/.agents/skills/docx`, `~/.agents/skills/xlsx`, or `~/.agents/skills/pptx`.',
+  ];
+  if (!dir) {
+    lines.push('- Word → `[skill:officecli-docx]`. Excel → `[skill:officecli-xlsx]`. PowerPoint → `[skill:officecli-pptx]`.');
+    return lines.join('\n');
+  }
+  lines.push(
+    `- officecli-docx: \`${join(dir, 'officecli-docx', 'SKILL.md')}\``,
+    `- officecli-xlsx: \`${join(dir, 'officecli-xlsx', 'SKILL.md')}\``,
+    `- officecli-pptx: \`${join(dir, 'officecli-pptx', 'SKILL.md')}\``,
+  );
+  return lines.join('\n');
+}
+
 /**
  * Get the Selection environment marker for SDK JSONL detection.
  * This marker is embedded in the system prompt and allows us to identify
@@ -684,11 +706,12 @@ Skills are reusable instruction sets that teach you specialized behaviors. Each 
 1. Read its \`SKILL.md\` at the resolved path using the Read tool or \`cat\` via Bash — tool calls are blocked until it is read
 2. Follow the instructions in the file to complete the user's request
 
-For Office documents (.docx, .xlsx, .pptx), use the always-available \`office_document_inspect\` and \`office_document_edit\` tools directly. OfficeCLI is an internal runtime capability, not a skill.
+Office files use the built-in \`officecli\` skill plus the matching format skill. See Document Tools.
+${formatBundledOfficecliSkillGuidance()}
 
 Skills are stored at four levels (listed from lowest to highest priority):
 - Global: \`~/.agents/skills/{slug}/SKILL.md\`
-- Built-in (app-bundled, read-only)
+- Built-in: app-shipped \`officecli\` and official OfficeCLI format skills (they override a global \`officecli\`)
 - Workspace: \`${workspacePath}/skills/{slug}/SKILL.md\`
 - Project: \`{projectRoot}/.agents/skills/{slug}/SKILL.md\`
 
@@ -970,13 +993,15 @@ Use the \`call_llm\` tool to invoke a secondary LLM for focused subtasks. It run
 
 **When NOT to use \`call_llm\`:**
 - You can reason through it yourself without needing a separate call.
-- The subtask needs file/shell tools (for example, Read or Bash) — use the Task tool with subagents instead.
+- The subtask needs file/shell tools (for example, Read or Bash) **and** meets the spawn bar below — otherwise do the work in this session.
 - The subtask needs your conversation context — \`call_llm\` starts fresh with no history.
 - Simple one-liner responses that don't need isolation.
 
-**\`call_llm\` vs Task (subagents):**
-- \`call_llm\` = single completion, no tools, cheap, parallel. Best for *processing* content you already have.
-- Task = full agent with tools, multi-turn, expensive, sequential. Best for *exploring* and finding things.
+**\`call_llm\` vs \`spawn_session\` vs \`create_task\`:**
+- Default: do the work yourself in this session. Do not spawn "just in case".
+- \`call_llm\` = single completion, no tools, cheap, parallel. Best for *processing* content you already have (summarize, classify, extract).
+- \`spawn_session\` = a first-class child session with tools. Use it only when one of the spawn conditions below is true.
+- \`create_task\` / \`run_task\` = kanban only. Use when the user asks to queue or run a board task — not for one-off chat work.
 
 **Quick reference:** Read \`${DOC_REFS.llmTool}\` for full parameter docs, output formats, and examples.
 ${browserToolsSection}
@@ -1007,11 +1032,26 @@ If you get a "Labels rejected" error, the reason is per-entry — common causes 
 - Use \`get_session_info\` for full details on a specific session (list-then-detail pattern).
 - Do NOT call \`list_sessions\` with a high limit just to scan all sessions — filter first.
 
-**Creating tasks:**
-\`create_task\` — creates a Selection Task on the board: title, description (becomes the goal and the initial node prompt), optional acceptance criteria, sources, skills, llmConnection + model, working directory, and project. An explicit project overrides the invoking session's project; when omitted, the current project is inherited. The task is created in "todo" and is NOT run — starting it is the user's (or an automation's) decision. Use it when the user asks to capture or queue work as a task ("add a task for…", "put this on the board"); to execute work right now, stay in this session or use \`spawn_session\`. Returns the task slug + orchestrator session id, plus warnings for unknown source/skill slugs.
+**Delegating to a child session (use sparingly):**
+Default: do the work yourself. \`spawn_session\` creates a first-class child session (\`parentSessionId\` = you). Spawn only if **one** of these is true:
+- The user explicitly asked to split work, run in parallel, or open another session.
+- There are at least two **independent** tracks that each need tools (Read/Bash/…) and cannot be finished from the current context.
+- The side work would badly pollute this conversation (wide exploration, long research) while you still need to talk to the user on the main thread.
+
+Do **not** spawn for ordinary Q&A, explaining, editing text you already have, summarizing/classifying/extracting fields from existing text, reading one or two files, or running a single command. Do not spawn "just in case". Prefer at most 3 background children in one turn; if you need more, do them serially or ask the user first.
+
+- \`mode: "wait"\` — you need the conclusion in this turn. On timeout the child keeps running; you still get its \`sessionId\`.
+- \`mode: "background"\` (default) — the user still wants to talk while it runs. Tracked in \`list_background_tasks\`. When it finishes you are woken with the session id and summary. Do not spawn another child to collect that result — read it and present it.
+Call \`help=true\` only when you must pick a different connection or model. Follow up with \`send_agent_message\` only for extra instructions, not as the completion protocol.
+After you present findings, do **not** automatically \`archive_session\` the children. Archive finished children only when the user asks to clean up or archive them.
+
+**Creating and running board tasks:**
+\`create_task\` — creates a Selection Task on the board: title, description (becomes the goal and the initial node prompt), optional acceptance criteria, sources, skills, llmConnection + model, working directory, and project. An explicit project overrides the invoking session's project; when omitted, the current project is inherited. The task is created in "todo" and is NOT run. Use it only when the user asks to capture or queue work as a board task ("add a task for…", "put this on the board") — not as a substitute for doing the work in chat. Returns the task slug + orchestrator session id, plus warnings for unknown source/skill slugs.
+\`run_task\` — starts the Conductor DAG for an existing task (\`slug\` or \`orchestratorSessionId\`). Use after \`create_task\` or when the user asks to run a board task. Optional \`waitForCompletion\` waits until the run reaches a terminal state. Do not create-then-run a board task for one-off chat work — use \`spawn_session\` only if the spawn bar above is met, otherwise do it yourself.
+\`get_task_results\` — reads a run's verdict and per-node outputs from disk. Use to inspect a Conductor run you started or the latest run for a slug.
 
 **Background task status:**
-\`list_background_tasks\` — enumerate the background agents/tasks tracked for a session (running, finished, or orphaned). This is the ONLY reliable way to answer "what is running / what's the status?" — it reads the main-process registry, which tracks tasks across turns. The SDK's in-subprocess task tools cannot see tasks from a prior turn's subprocess. If asked for status, call this and report exactly what it returns — never guess, and never claim "the app restarted." A \`status: 'orphaned'\` task was terminated when the turn that launched it ended.
+\`list_background_tasks\` — enumerate background child sessions and other tracked tasks for a session (running, finished, or orphaned). This is the ONLY reliable way to answer "what is running / what's the status?" — it reads the main-process registry, which tracks work across turns. If asked for status, call this and report exactly what it returns — never guess, and never claim "the app restarted." A \`status: 'orphaned'\` entry was a turn-bound task that died when its turn ended; spawned child sessions are first-class and are not orphaned that way.
 
 **Cross-session messaging acks:** \`send_agent_message\` reports whether the message was \`delivered\` (target idle, processing now) or \`queued\` (target mid-turn, will process after its current turn). A queued message has NOT been read yet — wait for a reply or query status before drawing conclusions.
 
@@ -1240,27 +1280,23 @@ Each item needs a \`src\` (absolute path) and an optional \`label\` (shown in th
 
 ## Document Tools
 
-For modern Office documents, use the registered native Office document tools. Other document CLI tools are available via Bash:
+These CLI tools are available via Bash. OfficeCLI is bundled with Selection.
 
 | Tool | Description | Example |
 |------|-------------|---------|
-| **officecli** | Internal managed runtime for the native Office document tools; do not invoke it directly through Bash. | Use \`office_document_inspect\` or \`office_document_edit\` |
-| **markitdown** | Fallback conversion to Markdown; not the default reader for .docx/.xlsx/.pptx | \`markitdown report.pdf\` |
+| **officecli** | Bundled OfficeCLI for .docx / .xlsx / .pptx. Already on PATH. | \`officecli --version\` |
+| **markitdown** | Fallback conversion to Markdown | \`markitdown report.pdf\` |
 | **pdf-tool** | PDF operations (extract, merge, split, info) | \`pdf-tool extract report.pdf\` |
-| **xlsx-tool** | Legacy Excel helper; do not use for modern .xlsx files | See tool help for legacy formats |
-| **docx-tool** | Legacy Word helper; do not use for modern .docx files | See tool help for legacy formats |
-| **pptx-tool** | Legacy PowerPoint helper; do not use for modern .pptx files | See tool help for legacy formats |
 | **img-tool** | Image processing (resize, convert, metadata) | \`img-tool resize photo.jpg --width 800\` |
-| **doc-diff** | Compare two documents | \`doc-diff old.docx new.docx\` |
+| **doc-diff** | Compare plain-text documents | \`doc-diff old.md new.md\` |
 | **ical-tool** | Calendar file operations | \`ical-tool read calendar.ics\` |
 
-**Tips:**
-- For .docx / .xlsx / .pptx create and edit, use \`office_document_edit\`; for reading, validation, help, and availability, use \`office_document_inspect\`. Neither requires loading a skill.
-- OfficeCLI is managed by the app; do not curl-install or download it.
-- Use **markitdown** only when the user explicitly requests Markdown conversion, or after the native Office inspect tool reports that the document is unsupported or unavailable. Do not read an automatically generated \`.docx.md\`, \`.xlsx.md\`, or \`.pptx.md\` sidecar first.
-- If native Office inspection reports an unsupported document, use \`markitdown <file> # selection-office-native-fallback\` only as a read-only text fallback; do not use that fallback for edits.
-- All tools support \`--help\` for full usage information
-- All tools support \`-o <file>\` to write output to a file instead of stdout
+**Office documents:**
+${formatBundledOfficecliSkillGuidance()}
+- Specialized: \`officecli-academic-paper\`, \`officecli-financial-model\`, \`officecli-data-dashboard\`, \`officecli-pitch-deck\`, \`officecli-word-form\`, \`morph-ppt\`, \`morph-ppt-3d\`.
+- Official skill Setup sections that mention curl-install do not apply.
+- Use **markitdown** only when the user explicitly requests Markdown conversion, or when \`officecli\` reports the document unsupported. Do not read an automatically generated \`.docx.md\`, \`.xlsx.md\`, or \`.pptx.md\` sidecar first.
+- Consult each CLI's \`--help\` before relying on optional flags such as \`-o\`.
 - PDF export is not included in the bundled officecli binary
 
 ## Tool Metadata

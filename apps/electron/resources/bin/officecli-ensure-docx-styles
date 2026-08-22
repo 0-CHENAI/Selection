@@ -1,0 +1,62 @@
+#!/bin/sh
+# Seed or repair Heading1–3 outlineLvl so Word TOC is not "未找到目录项".
+# Usage: officecli-ensure-docx-styles <binary> <file.docx>
+# Re-adding an existing Heading wipes outlineLvl — only add when missing; otherwise set.
+BIN=$1
+FILE=$2
+DIR=$(CDPATH= cd -- "$(dirname "$0")" && pwd)
+JSON=$DIR/officecli-ensure-docx-styles.json
+export OFFICECLI_NO_AUTO_RESIDENT=1
+if [ -z "$BIN" ] || [ -z "$FILE" ] || [ ! -f "$BIN" ] || [ ! -f "$FILE" ]; then
+  exit 0
+fi
+
+styles=$("$BIN" get "$FILE" /styles --depth 2 2>/dev/null || true)
+
+has_style() {
+  printf '%s\n' "$styles" | grep -q "styleId=$1"
+}
+
+has_outline() {
+  printf '%s\n' "$styles" | grep -A3 "styleId=$1" | grep -q "outlineLvl=$2"
+}
+
+if has_outline Heading1 0 && has_outline Heading2 1 && has_outline Heading3 2; then
+  exit 0
+fi
+
+if ! has_style Heading1 && [ -f "$JSON" ]; then
+  "$BIN" batch "$FILE" --best-effort --input "$JSON" >/dev/null 2>&1 || true
+  exit 0
+fi
+
+seed() {
+  "$BIN" add "$FILE" /styles --type style "$@" >/dev/null 2>&1 || true
+}
+
+set_ol() {
+  "$BIN" set "$FILE" "/styles/$1" --prop "outlineLvl=$2" >/dev/null 2>&1 || true
+}
+
+if ! has_style Heading1; then
+  seed --prop id=Heading1 --prop type=paragraph --prop name=Heading1 --prop outlineLvl=0 --prop size=18pt --prop bold=true
+elif ! has_outline Heading1 0; then
+  set_ol Heading1 0
+fi
+if ! has_style Heading2; then
+  seed --prop id=Heading2 --prop type=paragraph --prop name=Heading2 --prop outlineLvl=1 --prop size=14pt --prop bold=true
+elif ! has_outline Heading2 1; then
+  set_ol Heading2 1
+fi
+if ! has_style Heading3; then
+  seed --prop id=Heading3 --prop type=paragraph --prop name=Heading3 --prop outlineLvl=2 --prop size=12pt --prop bold=true
+elif ! has_outline Heading3 2; then
+  set_ol Heading3 2
+fi
+if ! has_style Title; then
+  seed --prop id=Title --prop type=paragraph --prop name=Title --prop size=24pt --prop bold=true
+fi
+if ! has_style TOCHeading; then
+  seed --prop id=TOCHeading --prop type=paragraph --prop name=TOCHeading --prop size=16pt --prop bold=true
+fi
+exit 0

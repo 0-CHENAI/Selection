@@ -14,7 +14,41 @@ import { useTranslation } from 'react-i18next'
 import { useSetAtom } from 'jotai'
 import { toast } from 'sonner'
 import { automationsAtom } from '@/atoms/automations'
-import { parseAutomationsConfig, type AutomationListItem, type TestResult, type ExecutionEntry } from '@/components/automations/types'
+import { parseAutomationsConfig, type AutomationConditionUI, type AutomationListItem, type TestResult, type ExecutionEntry, type ExecutionStatus } from '@/components/automations/types'
+
+function inferSimulateCommand(conditions: AutomationConditionUI[] | undefined): string | undefined {
+  if (!conditions) return undefined
+  for (const condition of conditions) {
+    if (condition.condition === 'state' && condition.contains && (
+      condition.field === 'tool_input.command' || condition.field === 'toolInput.command'
+    )) {
+      return condition.contains
+    }
+    if ((condition.condition === 'and' || condition.condition === 'or' || condition.condition === 'not') && condition.conditions) {
+      const nested = inferSimulateCommand(condition.conditions)
+      if (nested) return nested
+    }
+  }
+  return undefined
+}
+
+function mapAutomationHistoryStatus(ok: boolean, status?: string): ExecutionStatus {
+  switch (status) {
+    case 'succeeded':
+      return 'success'
+    case 'failed':
+      return 'error'
+    case 'matched':
+    case 'scheduled':
+    case 'running':
+    case 'rate-limited':
+    case 'suppressed':
+    case 'blocked':
+      return status
+    default:
+      return ok ? 'success' : 'error'
+  }
+}
 
 async function loadAutomationsFromServer(workspaceId: string): Promise<AutomationListItem[]> {
   const json = await window.electronAPI.getAutomations(workspaceId)
@@ -29,6 +63,7 @@ export interface UseAutomationsResult {
   pendingDeleteAutomation: AutomationListItem | undefined
   setAutomationPendingDelete: (id: string | null) => void
   handleTestAutomation: (automationId: string) => void
+  handleSimulateMatch: (automationId: string) => void
   handleToggleAutomation: (automationId: string) => void
   handleDuplicateAutomation: (automationId: string) => void
   handleDeleteAutomation: (automationId: string) => void
@@ -90,13 +125,27 @@ export function useAutomations(
     const automation = findAutomation(automationId)
     if (!automation || !activeWorkspaceId) return
 
+    const executable = automation.actions.filter((a): a is Extract<typeof a, { type: 'prompt' | 'webhook' }> => a.type === 'prompt' || a.type === 'webhook')
+    if (executable.length === 0) {
+      setAutomationTestResults(prev => ({
+        ...prev,
+        [automationId]: {
+          state: 'error',
+          stderr: automation.actions.some(a => a.type === 'decision')
+            ? 'Decision actions cannot be executed by Run Test. Use Simulate match.'
+            : 'No actions to execute',
+        },
+      }))
+      return
+    }
+
     setAutomationTestResults(prev => ({ ...prev, [automationId]: { state: 'running' } }))
 
     window.electronAPI.testAutomation({
       workspaceId: activeWorkspaceId,
       automationId: automation.id,
       automationName: automation.name,
-      actions: automation.actions,
+      actions: executable,
       permissionMode: automation.permissionMode,
       labels: automation.labels,
       telegramTopic: automation.telegramTopic,
@@ -120,6 +169,43 @@ export function useAutomations(
       }))
     }).catch((err: Error) => {
       setAutomationTestResults(prev => ({ ...prev, [automationId]: { state: 'error', stderr: err.message } }))
+    })
+  }, [findAutomation, activeWorkspaceId])
+
+  const handleSimulateMatch = useCallback((automationId: string) => {
+    const automation = findAutomation(automationId)
+    if (!automation || !activeWorkspaceId) return
+
+    setAutomationTestResults(prev => ({ ...prev, [automationId]: { state: 'running', mode: 'match' } }))
+
+    const exactTool = automation.matcher?.match(/^\^([A-Za-z][A-Za-z0-9_-]*)\$$/)?.[1]
+    window.electronAPI.testAutomation({
+      workspaceId: activeWorkspaceId,
+      automationId: automation.id,
+      automationName: automation.name,
+      actions: automation.actions.filter((a): a is Extract<typeof a, { type: 'prompt' | 'webhook' }> => a.type === 'prompt' || a.type === 'webhook'),
+      dryRun: true,
+      event: automation.event,
+      sample: {
+        tool_name: exactTool ?? 'Bash',
+        tool_input: { command: inferSimulateCommand(automation.conditions) ?? 'echo hi' },
+        prompt: 'test',
+        stop_reason: 'complete',
+        source: 'startup',
+        agent_type: 'session',
+      },
+    }).then((result) => {
+      const matches = result.matches ?? []
+      setAutomationTestResults(prev => ({
+        ...prev,
+        [automationId]: {
+          state: 'success',
+          mode: 'match',
+          matches,
+        },
+      }))
+    }).catch((err: Error) => {
+      setAutomationTestResults(prev => ({ ...prev, [automationId]: { state: 'error', mode: 'match', stderr: err.message } }))
     })
   }, [findAutomation, activeWorkspaceId])
 
@@ -167,8 +253,8 @@ export function useAutomations(
         id: `${e.id}-${e.ts}`,
         automationId: e.id,
         event: automation?.event ?? 'LabelAdd',
-        status: e.ok ? 'success' as const : 'error' as const,
-        duration: e.webhook?.durationMs ?? 0,
+        status: mapAutomationHistoryStatus(e.ok, (e as { status?: string }).status),
+        duration: e.webhook?.durationMs ?? (e as { durationMs?: number }).durationMs ?? 0,
         timestamp: e.ts,
         sessionId: e.sessionId,
         actionSummary: e.webhook
@@ -209,6 +295,7 @@ export function useAutomations(
     pendingDeleteAutomation,
     setAutomationPendingDelete,
     handleTestAutomation,
+    handleSimulateMatch,
     handleToggleAutomation,
     handleDuplicateAutomation,
     handleDeleteAutomation,

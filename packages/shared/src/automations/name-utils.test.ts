@@ -61,4 +61,13 @@ describe('deriveAutomationName', () => {
     };
     expect(deriveAutomationName('LabelAdd', matcher)).toBe('Custom Name');
   });
+
+  it('should name decision actions from the decision kind', () => {
+    expect(deriveAutomationName('PreToolUse', {
+      actions: [{ type: 'decision', decision: 'block', reason: 'nope' }],
+    })).toBe('Block tool');
+    expect(deriveAutomationName('PreToolUse', {
+      actions: [{ type: 'decision', decision: 'modify', updatedInput: { command: 'echo' } }],
+    })).toBe('Modify tool input');
+  });
 });

@@ -184,7 +184,7 @@ if (isDebugMode) {
   process.env.CRAFT_CLI_DOC_PATH = process.env.CRAFT_COMMANDS_DOC_PATH
   process.env.CRAFT_AGENT_VERSION = app.getVersion()
   // Prepend both generic wrappers dir and platform uv dir:
-  // - binDir exposes wrapper commands (pdf-tool, docx-tool, ...)
+  // - binDir exposes non-Office wrapper commands (pdf-tool, img-tool, ...)
   // - uvPlatformDir exposes raw `uv` for direct shell usage / debugging
   process.env.PATH = `${binDir}${delimiter}${uvPlatformDir}${delimiter}${process.env.PATH}`
 
@@ -194,6 +194,25 @@ if (isDebugMode) {
   } else {
     mainLog.warn('Bundled officecli binary missing; Word/Excel/PowerPoint edits via officecli will fail.', {
       expectedOfficecliPath: officecliBinary,
+    })
+  }
+
+  const officecliResourceCandidates = [
+    join(resourcesBase, 'dist', 'resources', 'officecli'),
+    join(resourcesBase, 'resources', 'officecli'),
+  ]
+  const officecliResources = process.env.CRAFT_OFFICECLI_RESOURCES
+    && existsSync(join(process.env.CRAFT_OFFICECLI_RESOURCES, 'officecli-manifest.json'))
+    ? process.env.CRAFT_OFFICECLI_RESOURCES
+    : officecliResourceCandidates.find(candidate =>
+      existsSync(join(candidate, 'officecli-manifest.json')),
+    )
+  if (officecliResources) {
+    process.env.CRAFT_OFFICECLI_RESOURCES = officecliResources
+  } else {
+    mainLog.warn('Bundled officecli resources missing; built-in OfficeCLI skills will not load.', {
+      kind: app.isPackaged ? 'packaging_misconfigured' : 'resources_missing',
+      expectedOfficecliResourcePaths: officecliResourceCandidates,
     })
   }
 

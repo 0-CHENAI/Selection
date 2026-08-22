@@ -23,7 +23,6 @@ import type {
   TaskValidationResultDto,
   TaskGetResult,
   TaskResultsDto,
-  TaskResultNodeDto,
 } from '@craft-agent/shared/protocol'
 import { getWorkspaceByNameOrId } from '@craft-agent/shared/config'
 import {
@@ -33,13 +32,7 @@ import {
   listTaskSlugs,
   buildGeneratorPrompt,
   buildRepairPrompt,
-  listRunIds,
-  readRunLog,
-  readNodeOutput,
-  readRunSpecSnapshot,
-  nodeTitle,
-  DEFAULT_REPAIR_ATTEMPTS,
-  MAX_REPAIR_ATTEMPTS_CAP,
+  loadTaskResults,
 } from '@craft-agent/shared/tasks'
 import { createLogger } from '@craft-agent/shared/utils'
 import { pushTyped, type RpcServer } from '@craft-agent/server-core/transport'
@@ -109,6 +102,8 @@ export function registerTasksHandlers(server: RpcServer, deps: HandlerDeps): voi
     }
     return runner
   }
+
+  deps.sessionManager.setTaskRunnerLookup((workspaceId) => runnerFor(workspaceId))
 
   // tasks:validate — lint/dry-run; no side effects.
   server.handle(RPC_CHANNELS.tasks.VALIDATE, async (_ctx, _workspaceId: string, yaml: string): Promise<TaskValidationResultDto> => {
@@ -354,81 +349,6 @@ export function registerTasksHandlers(server: RpcServer, deps: HandlerDeps): voi
   // Reads the durable artifacts (run-log.jsonl, nodes/<id>.json, per-run spec.json snapshot), so it
   // works after restart and without an active in-memory run — unlike tasks:get's run snapshot.
   server.handle(RPC_CHANNELS.tasks.GET_RESULTS, async (_ctx, workspaceId: string, slug: string, runId?: string): Promise<TaskResultsDto> => {
-    const root = workspaceOrThrow(workspaceId).rootPath
-    const runIds = listRunIds(root, slug)
-    const chosen = runId ?? runIds.at(-1) ?? null
-    if (!chosen) return { slug, runId: null, runIds, nodes: [] }
-
-    const log = readRunLog(root, slug, chosen)
-
-    // Node titles come from the run-time spec snapshot (so historical runs aren't relabeled by a
-    // later edit). Older runs predate snapshots → fall back to the run-log node ids.
-    const snapshot = readRunSpecSnapshot(root, slug, chosen)
-    const titleById = new Map<string, string>()
-    if (snapshot) for (const n of snapshot.nodes) titleById.set(n.id, nodeTitle(n))
-
-    // Fold the append-only log into the latest per-node state + session id, preserving first-seen
-    // order. node-spawned/node-finished both carry sessionId; the last one wins.
-    const byId = new Map<string, { id: string; state: string; sessionId?: string }>()
-    const ensure = (id: string) => {
-      let e = byId.get(id)
-      if (!e) { e = { id, state: 'pending' }; byId.set(id, e) }
-      return e
-    }
-    const verdicts: NonNullable<TaskResultsDto['verdicts']> = []
-    // Recover the terminal run status from the run-log's lifecycle markers (last one wins).
-    let runStatus: string | undefined
-    for (const entry of log) {
-      if (entry.kind === 'node-scheduled' || entry.kind === 'node-spawned') {
-        const e = ensure(entry.nodeId)
-        if (entry.kind === 'node-spawned') e.sessionId = entry.sessionId
-      } else if (entry.kind === 'node-finished') {
-        const e = ensure(entry.nodeId)
-        e.state = entry.state
-        if (entry.sessionId) e.sessionId = entry.sessionId
-      } else if (entry.kind === 'verdict') {
-        verdicts.push({
-          result: entry.result,
-          ...(entry.reason ? { reason: entry.reason } : {}),
-          ...(entry.nodes?.length ? { nodes: entry.nodes } : {}),
-        })
-      } else if (entry.kind === 'run-completed') {
-        runStatus = 'completed'
-      } else if (entry.kind === 'run-failed') {
-        runStatus = 'failed'
-      } else if (entry.kind === 'run-stopped') {
-        runStatus = 'stopped'
-      } else if (entry.kind === 'run-verifying') {
-        runStatus = 'verifying'
-      }
-    }
-
-    const nodes: TaskResultNodeDto[] = [...byId.values()].map((e) => {
-      const out = readNodeOutput(root, slug, chosen, e.id)
-      return {
-        id: e.id,
-        title: titleById.get(e.id) ?? e.id,
-        state: e.state,
-        ...(e.sessionId ? { sessionId: e.sessionId } : {}),
-        ...(out?.text ? { output: out.text } : {}),
-      }
-    })
-
-    // Repair accounting: each FAIL verdict consumed one repair attempt; the cap is the per-run
-    // snapshot's max_iterations clamped to the shared bound (default when omitted).
-    const repairUsed = verdicts.filter((v) => v.result === 'fail').length
-    const repairMax = Math.min(snapshot?.max_iterations ?? DEFAULT_REPAIR_ATTEMPTS, MAX_REPAIR_ATTEMPTS_CAP)
-
-    return {
-      slug,
-      runId: chosen,
-      runIds,
-      verdict: verdicts.at(-1),
-      verdicts,
-      repair: { used: repairUsed, max: repairMax },
-      ...(runStatus ? { runStatus } : {}),
-      ...(snapshot?.acceptance_criteria ? { acceptanceCriteria: snapshot.acceptance_criteria } : {}),
-      nodes,
-    }
+    return loadTaskResults(workspaceOrThrow(workspaceId).rootPath, slug, runId)
   })
 }

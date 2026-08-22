@@ -10,6 +10,7 @@ import {
   type ThemeFile,
   type ShikiThemeConfig,
 } from '@config/theme'
+import { isMac } from '@/lib/platform'
 
 export type ThemeMode = 'light' | 'dark' | 'system'
 export type FontFamily = 'inter' | 'system'
@@ -327,11 +328,13 @@ export function ThemeProvider({
 
     // Handle themeMismatch - set solid background when:
     // 1. Theme doesn't support current mode (e.g., dark-only Dracula in light mode), OR
-    // 2. Resolved mode differs from system preference (vibrancy mismatch)
+    // 2. macOS vibrancy still follows the OS while the app mode does not.
+    // Windows 10 has no light Acrylic; treating OS/app mismatch as a gray overlay
+    // is what washed out the sidebar and title bar in light mode (#53).
     const supportedModes = presetTheme?.supportedModes
     const currentMode = isDarkFromMode ? 'dark' : 'light'
     const themeModeUnsupported = supportedModes && supportedModes.length > 0 && !supportedModes.includes(currentMode)
-    const vibrancyMismatch = resolvedMode !== systemPreference
+    const vibrancyMismatch = isMac && resolvedMode !== systemPreference
 
     if (themeModeUnsupported || vibrancyMismatch) {
       root.dataset.themeMismatch = 'true'
@@ -413,6 +416,14 @@ export function ThemeProvider({
       mediaQuery.removeEventListener('change', handleMediaChange)
       cleanup?.()
     }
+  }, [])
+
+  // Align native Windows chrome with the stored Appearance mode without
+  // broadcasting a fake user override to every window (#53).
+  useEffect(() => {
+    window.electronAPI?.broadcastThemePreferences?.({ mode, colorTheme, font, chromeOnly: true })
+    // Only on mount — later changes go through the setters.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   // === Cross-window sync listener ===

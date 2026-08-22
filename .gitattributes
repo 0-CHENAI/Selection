@@ -1,0 +1,5 @@
+apps/electron/resources/officecli/**/*.json text eol=lf
+apps/electron/resources/officecli/**/*.md text eol=lf
+apps/electron/resources/officecli/**/LICENSE text eol=lf
+apps/electron/resources/officecli/**/NOTICE text eol=lf
+apps/electron/resources/officecli/**/*.pptx binary

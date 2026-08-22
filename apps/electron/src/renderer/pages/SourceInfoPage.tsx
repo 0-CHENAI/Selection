@@ -12,6 +12,7 @@ import { AlertCircle } from 'lucide-react'
 import { EditPopover, EditButton, getEditConfig } from '@/components/ui/EditPopover'
 import { SourceAvatar } from '@/components/ui/source-avatar'
 import { SourceMenu } from '@/components/app-shell/SourceMenu'
+import { ResourceTransferDialog } from '@/components/resources/ResourceTransferDialog'
 import { DisplayTitleField, useDisplayTitleRename } from '@/hooks/useDisplayTitleRename'
 import { resolveSourceTitle } from '@craft-agent/shared/display-titles'
 import { cn } from '@/lib/utils'
@@ -175,6 +176,7 @@ export default function SourceInfoPage({ sourceSlug, workspaceId, onDelete }: So
   const { navigateToSource } = useNavigation()
   const [source, setSource] = useState<LoadedSource | null>(null)
   const [loading, setLoading] = useState(true)
+  const [exportOpen, setExportOpen] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [permissionsConfig, setPermissionsConfig] = useState<PermissionsConfigFile | null>(null)
   const [mcpTools, setMcpTools] = useState<McpToolWithPermission[] | null>(null)
@@ -379,6 +381,7 @@ export default function SourceInfoPage({ sourceSlug, workspaceId, onDelete }: So
             onOpenInNewWindow={handleOpenInNewWindow}
             onShowInFinder={handleOpenSourceFolder}
             onRename={() => source && renameTarget && rename.start(source.config.slug, renameTarget)}
+            onExport={() => setExportOpen(true)}
             onDelete={handleDelete}
           />
         }
@@ -545,6 +548,13 @@ export default function SourceInfoPage({ sourceSlug, workspaceId, onDelete }: So
         </Info_Page.Content>
       )}
     </Info_Page>
+    <ResourceTransferDialog
+      open={exportOpen}
+      mode="export"
+      workspaceId={workspaceId}
+      initialSelection={[{ type: 'source', id: sourceSlug }]}
+      onOpenChange={setExportOpen}
+    />
     {rename.dialog}
     </>
   )

@@ -33,7 +33,6 @@ export type AgentEvent =
   | 'PreToolUse'
   | 'PostToolUse'
   | 'PostToolUseFailure'
-  | 'Notification'
   | 'UserPromptSubmit'
   | 'SessionStart'
   | 'SessionEnd'
@@ -52,7 +51,7 @@ export const APP_EVENTS: AppEvent[] = [
 ]
 
 export const AGENT_EVENTS: AgentEvent[] = [
-  'PreToolUse', 'PostToolUse', 'PostToolUseFailure', 'Notification',
+  'PreToolUse', 'PostToolUse', 'PostToolUseFailure',
   'UserPromptSubmit', 'SessionStart', 'SessionEnd', 'Stop',
   'SubagentStart', 'SubagentStop', 'PreCompact', 'PermissionRequest', 'Setup'
 ]
@@ -66,6 +65,16 @@ export interface PromptAction {
   model?: string
   /** Thinking level override for the spawned session */
   thinkingLevel?: ThinkingLevel
+  waitForCompletion?: boolean
+  reportBack?: boolean
+  timeoutMs?: number
+}
+
+export interface DecisionAction {
+  type: 'decision'
+  decision: 'block' | 'modify'
+  reason?: string
+  updatedInput?: Record<string, unknown>
 }
 
 export interface WebhookAction {
@@ -79,7 +88,7 @@ export interface WebhookAction {
   auth?: { type: 'basic'; username: string; password: string } | { type: 'bearer'; token: string }
 }
 
-export type AutomationAction = PromptAction | WebhookAction
+export type AutomationAction = PromptAction | WebhookAction | DecisionAction
 
 // ============================================================================
 // Conditions (mirrored from packages/shared/src/automations/types.ts)
@@ -254,7 +263,15 @@ export const AUTOMATION_TYPE_TO_FILTER_KIND: Record<string, AutomationFilterKind
 // Execution History
 // ============================================================================
 
-export type ExecutionStatus = 'success' | 'error' | 'blocked'
+export type ExecutionStatus =
+  | 'success'
+  | 'error'
+  | 'blocked'
+  | 'matched'
+  | 'scheduled'
+  | 'running'
+  | 'rate-limited'
+  | 'suppressed'
 
 export interface WebhookDetails {
   method: string
@@ -295,6 +312,8 @@ export interface TestResult {
   state: TestState
   stderr?: string
   duration?: number
+  mode?: 'actions' | 'match'
+  matches?: Array<{ matcherId: string; name: string; event: string }>
 }
 
 // ============================================================================
@@ -317,7 +336,6 @@ export const EVENT_DISPLAY_NAMES: Record<AutomationTrigger, string> = {
   PreToolUse:           'Before Tool Runs',
   PostToolUse:          'After Tool Runs',
   PostToolUseFailure:   'When Tool Fails',
-  Notification:         'Notification',
   UserPromptSubmit:     'Message Sent',
   SessionStart:         'Session Started',
   SessionEnd:           'Session Ended',
@@ -372,8 +390,9 @@ interface AutomationsConfigFile {
 }
 
 type RawAction =
-  | { type: 'prompt'; prompt: string; llmConnection?: string; model?: string; thinkingLevel?: ThinkingLevel }
+  | { type: 'prompt'; prompt: string; llmConnection?: string; model?: string; thinkingLevel?: ThinkingLevel; waitForCompletion?: boolean; reportBack?: boolean; timeoutMs?: number }
   | { type: 'webhook'; url: string; method?: string; headers?: Record<string, string>; bodyFormat?: 'json' | 'form' | 'raw'; body?: unknown; captureResponse?: boolean; auth?: WebhookAction['auth'] }
+  | { type: 'decision'; decision: 'block' | 'modify'; reason?: string; updatedInput?: Record<string, unknown> }
 
 interface AutomationsConfigMatcher {
   id?: string
@@ -399,6 +418,12 @@ function deriveAutomationName(event: string, matcher: AutomationsConfigMatcher):
     const label = `Webhook ${firstAction.method ?? DEFAULT_WEBHOOK_METHOD} ${firstAction.url}`
     return label.length > 40 ? label.slice(0, 40) + '...' : label
   }
+
+  if (firstAction.type === 'decision') {
+    return firstAction.decision === 'block' ? 'Block tool' : 'Modify tool input'
+  }
+
+  if (firstAction.type !== 'prompt') return getEventDisplayName(event as AutomationTrigger)
 
   // Extract @skill mentions or use first ~40 chars
   const mentionMatch = firstAction.prompt.match(/@(\S+)/)
@@ -457,7 +482,7 @@ export function parseAutomationsConfig(json: unknown): AutomationListItem[] {
       if (!rawActions || !Array.isArray(rawActions) || rawActions.length === 0) continue
 
       const actions: AutomationAction[] = rawActions
-        .filter((a): a is AutomationAction => a.type === 'prompt' || a.type === 'webhook')
+        .filter((a): a is AutomationAction => a.type === 'prompt' || a.type === 'webhook' || a.type === 'decision')
       if (actions.length === 0) continue
 
       const rawTopic = (matcher as { telegramTopic?: unknown }).telegramTopic
@@ -517,7 +542,6 @@ export function getEventCategory(event: AutomationTrigger): EventCategory {
     case 'PostToolUseFailure':
       return 'agent-error'
     case 'SessionStart':
-    case 'Notification':
       return 'session'
     default:
       return 'other'

@@ -6,9 +6,9 @@
  * env var expansion, and retry logic so the two code paths can't diverge.
  */
 
-import type { WebhookAction, WebhookActionResult } from './types.ts';
+import type { AutomationHistoryStatus, WebhookAction, WebhookActionResult } from './types.ts';
 import { expandEnvVars } from './utils.ts';
-import { DEFAULT_WEBHOOK_METHOD, HISTORY_FIELD_MAX_LENGTH } from './constants.ts';
+import { DEFAULT_WEBHOOK_METHOD, HISTORY_FIELD_MAX_LENGTH, PROMPT_HISTORY_FINAL_TEXT_MAX_LENGTH } from './constants.ts';
 
 /**
  * Redact a URL for safe logging. Webhook URLs may contain secrets
@@ -39,11 +39,17 @@ export function createWebhookHistoryEntry(opts: {
   attempts?: number;
   error?: string;
   responseBody?: string;
+  status?: AutomationHistoryStatus;
+  event?: string;
+  sourceSessionId?: string;
 }): Record<string, unknown> {
   return {
     id: opts.matcherId,
     ts: Date.now(),
     ok: opts.ok,
+    status: opts.status ?? (opts.ok ? 'succeeded' : 'failed'),
+    ...(opts.event ? { event: opts.event } : {}),
+    ...(opts.sourceSessionId ? { sourceSessionId: opts.sourceSessionId } : {}),
     webhook: {
       method: opts.method ?? DEFAULT_WEBHOOK_METHOD,
       url: redactUrl(opts.url),
@@ -65,14 +71,26 @@ export function createPromptHistoryEntry(opts: {
   sessionId?: string;
   prompt?: string;
   error?: string;
+  status?: AutomationHistoryStatus;
+  event?: string;
+  sourceSessionId?: string;
+  reason?: string;
+  finalText?: string;
+  durationMs?: number;
 }): Record<string, unknown> {
   return {
     id: opts.matcherId,
     ts: Date.now(),
     ok: opts.ok,
+    status: opts.status ?? (opts.ok ? 'succeeded' : 'failed'),
+    ...(opts.event ? { event: opts.event } : {}),
+    ...(opts.sourceSessionId ? { sourceSessionId: opts.sourceSessionId } : {}),
     ...(opts.sessionId ? { sessionId: opts.sessionId } : {}),
     ...(opts.prompt ? { prompt: opts.prompt.slice(0, HISTORY_FIELD_MAX_LENGTH) } : {}),
     ...(opts.error ? { error: opts.error.slice(0, HISTORY_FIELD_MAX_LENGTH) } : {}),
+    ...(opts.reason ? { reason: opts.reason } : {}),
+    ...(opts.finalText ? { finalText: opts.finalText.slice(0, PROMPT_HISTORY_FINAL_TEXT_MAX_LENGTH) } : {}),
+    ...(opts.durationMs !== undefined ? { durationMs: opts.durationMs } : {}),
   };
 }
 

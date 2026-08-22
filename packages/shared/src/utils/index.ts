@@ -1,5 +1,6 @@
 export * from './debug.ts';
 export * from './files.ts';
+export * from './image-input.ts';
 export * from './officecli.ts';
 export * from './open-url.ts';
 export * from './url-safety.ts';

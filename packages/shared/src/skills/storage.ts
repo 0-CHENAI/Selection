@@ -19,6 +19,7 @@ import type { LoadedSkill, SkillMetadata, SkillSource } from './types.ts';
 import { clearDisplayTitle, loadDisplayTitles } from '../display-titles-storage.ts';
 import { getWorkspaceSkillsPath } from '../workspaces/storage.ts';
 import { getBundledAssetsDir } from '../utils/paths.ts';
+import { getBundledOfficecliSkillsDir } from '../utils/officecli.ts';
 import {
   validateIconValue,
   findIconFile,
@@ -50,6 +51,40 @@ export function getBundledSkillsDir(): string | undefined {
     join(process.cwd(), '..', '..', 'apps', 'electron', 'resources', 'skills'),
   ];
   return candidates.find(dir => existsSync(dir));
+}
+
+/**
+ * Bundled skill directories: app-owned `resources/skills` plus version-pinned
+ * OfficeCLI official skills shipped under `resources/officecli/<version>/skills`.
+ */
+export function getBundledSkillDirectories(): string[] {
+  const dirs: string[] = [];
+  const appBundled = getBundledSkillsDir();
+  if (appBundled) dirs.push(appBundled);
+
+  const officecliSkills = getBundledOfficecliSkillsDir();
+  if (officecliSkills && officecliSkills !== appBundled) {
+    dirs.push(officecliSkills);
+  }
+  return dirs;
+}
+
+/** App-bundled skills stay callable by the agent but are omitted from the Skills UI. */
+export function isUserFacingSkill(skill: Pick<LoadedSkill, 'source'>): boolean {
+  return skill.source !== 'bundled';
+}
+
+export function filterUserFacingSkills<T extends Pick<LoadedSkill, 'source'>>(skills: T[]): T[] {
+  return skills.filter(isUserFacingSkill);
+}
+
+/** First bundled `SKILL.md` for a slug, including OfficeCLI official skills. */
+export function resolveBundledSkillMdPath(slug: string): string | undefined {
+  for (const dir of getBundledSkillDirectories()) {
+    const skillMd = join(dir, slug, 'SKILL.md');
+    if (existsSync(skillMd)) return skillMd;
+  }
+  return undefined;
 }
 
 /**
@@ -220,7 +255,7 @@ export function loadWorkspaceSkills(workspaceRoot: string): LoadedSkill[] {
 }
 
 // ── Skills cache ────────────────────────────────────────────────────────
-// loadAllSkills reads from up to 4 directories on every call (~100ms).
+// loadAllSkills reads from up to 5 directories on every call (~100ms).
 // The result rarely changes during a session, so we cache it per
 // (workspaceRoot, projectRoot) pair with a 5-minute safety TTL.
 
@@ -260,8 +295,7 @@ export function loadAllSkills(workspaceRoot: string, projectRoot?: string): Load
 
   // 2. Bundled skills override global so the app-owned copy (PATH, no curl-install)
   // wins over a same-slug skill dropped by another agent into ~/.agents.
-  const bundledDir = getBundledSkillsDir();
-  if (bundledDir) {
+  for (const bundledDir of getBundledSkillDirectories()) {
     for (const skill of loadSkillsFromDir(bundledDir, 'bundled')) {
       skillsBySlug.set(skill.slug, skill);
     }
@@ -309,9 +343,9 @@ export function loadSkillBySlug(workspaceRoot: string, slug: string, projectRoot
 
   // App-bundled overrides global for shipped slugs
   if (!skill) {
-    const bundledDir = getBundledSkillsDir();
-    if (bundledDir) {
+    for (const bundledDir of getBundledSkillDirectories()) {
       skill = loadSkillFromDir(bundledDir, slug, 'bundled');
+      if (skill) break;
     }
   }
 

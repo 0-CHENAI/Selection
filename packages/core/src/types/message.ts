@@ -274,6 +274,8 @@ export interface Message {
   toolUseId?: string;
   toolInput?: Record<string, unknown>;
   toolResult?: string;
+  /** Live-only multimodal tool output; excluded by messageToStored to keep Base64 out of JSONL. */
+  toolResultContent?: AgentToolResultContent[];
   toolStatus?: ToolStatus;
   toolDuration?: number;
   toolIntent?: string;
@@ -499,6 +501,11 @@ export type ErrorCode =
   | 'data_policy_error'      // OpenRouter data policy restriction
   | 'invalid_request'        // API rejected the request (e.g., bad image, invalid content)
   | 'image_too_large'        // Image exceeds API dimension/size limits
+  | 'image_capability_mismatch' // Current model/provider/endpoint does not accept image input
+  | 'image_bytes_unavailable'   // Image was attached/read but pixels could not be loaded for the request
+  | 'image_resource_expired'    // Stored image path is gone or no longer readable
+  | 'image_unsupported_format'  // Local decode/convert rejected the image format
+  | 'image_remote_rejected'     // Provider rejected the image after it was included in the payload
   | 'provider_error'         // AI provider experiencing issues (overloaded, unavailable)
   | 'queued_message_replay_failed'  // A message queued during an active turn could not be auto-replayed (#616)
   | 'sdk_binary_missing'     // SDK subprocess binary not present on disk (incomplete bundle)
@@ -571,6 +578,11 @@ export interface AgentEventUsage {
   contextWindow?: number;
 }
 
+/** Live multimodal tool-result blocks. Image payloads are never persisted in Selection session JSONL. */
+export type AgentToolResultContent =
+  | { type: 'text'; text: string }
+  | { type: 'image'; data: string; mimeType: string };
+
 /**
  * Events emitted by CraftAgent during chat
  * turnId: Correlation ID from the API's message.id, groups all events in an assistant turn
@@ -582,7 +594,7 @@ export type AgentEvent =
   | { type: 'text_complete'; text: string; isIntermediate?: boolean; turnId?: string; parentToolUseId?: string; sdkMessageId?: string }
   | { type: 'pi_turn_anchor'; sdkMessageId: string; sdkTurnAnchor: string }
   | { type: 'tool_start'; toolName: string; toolUseId: string; input: Record<string, unknown>; intent?: string; displayName?: string; turnId?: string; parentToolUseId?: string; toolDisplayMeta?: ToolDisplayMeta }
-  | { type: 'tool_result'; toolUseId: string; toolName?: string; result: string; isError: boolean; input?: Record<string, unknown>; turnId?: string; parentToolUseId?: string }
+  | { type: 'tool_result'; toolUseId: string; toolName?: string; result: string; content?: AgentToolResultContent[]; isError: boolean; input?: Record<string, unknown>; turnId?: string; parentToolUseId?: string }
   | {
       type: 'permission_request';
       requestId: string;

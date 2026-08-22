@@ -64,8 +64,8 @@ import type { LoadedSkill, SkillMetadata } from '@craft-agent/shared/skills/type
 export type { LoadedSkill, SkillMetadata };
 
 // Resource bundle types (cross-workspace export/import/copy)
-import type { ExportResourcesOptions, ExportResult, ResourceImportMode, ResourceBundle, ResourceImportResult, CopyResourcesOptions } from '@craft-agent/shared/resources';
-export type { ExportResourcesOptions, ExportResult, ResourceImportMode, ResourceBundle, ResourceImportResult, CopyResourcesOptions };
+import type { ExportResourcesOptions, ExportResult, ResourceType, ResourceImportAction, ResourceImportDecision, ResourceImportMode, ResourceImportPlan, ResourceImportPreview, ResourceBundle, ResourceImportResult, CopyResourcesOptions } from '@craft-agent/shared/resources';
+export type { ExportResourcesOptions, ExportResult, ResourceType, ResourceImportAction, ResourceImportDecision, ResourceImportMode, ResourceImportPlan, ResourceImportPreview, ResourceBundle, ResourceImportResult, CopyResourcesOptions };
 
 // LLM connection types
 import type { LlmConnection, LlmConnectionWithStatus, LlmAuthType, LlmProviderType, NetworkProxySettings } from '@craft-agent/shared/config';
@@ -587,7 +587,7 @@ export interface ElectronAPI {
   onNotificationNavigate(callback: (data: { workspaceId: string; sessionId: string }) => void): () => void
 
   // Theme preferences sync across windows
-  broadcastThemePreferences(preferences: { mode: string; colorTheme: string; font: string }): Promise<void>
+  broadcastThemePreferences(preferences: { mode: string; colorTheme: string; font: string; chromeOnly?: boolean }): Promise<void>
   onThemePreferencesChange(callback: (preferences: { mode: string; colorTheme: string; font: string }) => void): () => void
 
   // Workspace theme sync across windows
@@ -683,7 +683,10 @@ export interface ElectronAPI {
 
   // Resources (cross-workspace export/import/copy)
   exportResources(workspaceId: string, options: ExportResourcesOptions): Promise<ExportResult>
-  importResources(workspaceId: string, bundle: ResourceBundle, mode: ResourceImportMode): Promise<ResourceImportResult>
+  previewResourceImport(workspaceId: string, bundle: ResourceBundle): Promise<ResourceImportPreview>
+  importResources(workspaceId: string, bundle: ResourceBundle, modeOrPlan: ResourceImportMode | ResourceImportPlan): Promise<ResourceImportResult>
+  openResourceBundleFile(): Promise<{ canceled: boolean; fileName?: string; bundle?: ResourceBundle }>
+  saveResourceBundleFile(bundle: ResourceBundle, suggestedName: string): Promise<{ canceled: boolean; filePath?: string }>
   /** Local filesystem copy (includes credentials by default). Local workspaces only. */
   copyResourcesBetweenWorkspaces(fromWorkspaceId: string, toWorkspaceId: string, options: CopyResourcesOptions): Promise<ResourceImportResult>
 

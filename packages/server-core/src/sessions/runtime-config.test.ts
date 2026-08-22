@@ -1,7 +1,10 @@
-import { describe, expect, it } from 'bun:test'
+import { afterEach, describe, expect, it } from 'bun:test'
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import type { LlmConnection } from '@craft-agent/shared/config'
 import type { FileAttachment } from '@craft-agent/shared/protocol'
-import { buildBackendRuntimeSignature, filterAttachmentsForModelInput } from './runtime-config'
+import { buildBackendRuntimeSignature, filterAttachmentsForModelInput, prepareModelImageAttachments } from './runtime-config'
 
 const baseCompat: LlmConnection = {
   slug: 'local',
@@ -125,5 +128,121 @@ describe('filterAttachmentsForModelInput', () => {
     )
     expect(result.omittedImages).toEqual([pathOnlyImage])
     expect(result.attachments).toBeUndefined()
+  })
+})
+
+describe('prepareModelImageAttachments', () => {
+  const roots: string[] = []
+
+  afterEach(() => {
+    for (const root of roots.splice(0)) {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  function writeShot(): { path: string; bytes: Buffer } {
+    const dir = mkdtempSync(join(tmpdir(), 'image-prepare-'))
+    roots.push(dir)
+    const path = join(dir, 'shot.png')
+    const bytes = Buffer.from('stable-png-bytes')
+    writeFileSync(path, bytes)
+    return { path, bytes }
+  }
+
+  it('hydrates stored images and reports stable diagnostics without raw bytes', () => {
+    const { path, bytes } = writeShot()
+    const first = prepareModelImageAttachments({
+      storedAttachments: [{
+        type: 'image',
+        name: 'shot.png',
+        mimeType: 'image/png',
+        size: bytes.byteLength,
+        storedPath: path,
+      }],
+      connection: baseCompat,
+      modelId: 'gemma',
+    })
+
+    expect(first.ok).toBe(true)
+    if (!first.ok) return
+    expect(first.payloadImageCount).toBe(1)
+    expect(first.attachments?.[0]?.base64).toBe(bytes.toString('base64'))
+    expect(first.diagnostics[0]?.hasBytes).toBe(true)
+    expect(JSON.stringify(first.diagnostics)).not.toContain(bytes.toString('base64'))
+
+    for (let i = 0; i < 20; i++) {
+      const again = prepareModelImageAttachments({
+        storedAttachments: [{
+          type: 'image',
+          name: 'shot.png',
+          mimeType: 'image/png',
+          size: bytes.byteLength,
+          storedPath: path,
+        }],
+        connection: baseCompat,
+        modelId: 'gemma',
+      })
+      expect(again).toEqual(first)
+    }
+  })
+
+  it('blocks text-only models instead of silently dropping images', () => {
+    const result = prepareModelImageAttachments({
+      attachments: [imageAttachment],
+      connection: { ...baseCompat, models: [{ id: 'gemma', supportsImages: false } as never] },
+      modelId: 'gemma',
+    })
+
+    expect(result).toMatchObject({
+      ok: false,
+      code: 'image_capability_mismatch',
+      payloadImageCount: 0,
+    })
+  })
+
+  it('hydrates live path-only attachments from storedPath metadata', () => {
+    const { path, bytes } = writeShot()
+    const result = prepareModelImageAttachments({
+      attachments: [{
+        type: 'image',
+        path: join(tmpdir(), 'clipboard-original.png'),
+        name: 'shot.png',
+        mimeType: 'image/png',
+        size: bytes.byteLength,
+      }],
+      storedAttachments: [{
+        type: 'image',
+        name: 'shot.png',
+        mimeType: 'image/png',
+        size: bytes.byteLength,
+        storedPath: path,
+      }],
+      connection: baseCompat,
+      modelId: 'gemma',
+    })
+
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.attachments?.[0]?.base64).toBe(bytes.toString('base64'))
+  })
+
+  it('blocks missing stored files as resource_expired', () => {
+    const result = prepareModelImageAttachments({
+      storedAttachments: [{
+        type: 'image',
+        name: 'gone.png',
+        mimeType: 'image/png',
+        size: 12,
+        storedPath: join(tmpdir(), 'missing-image-input.png'),
+      }],
+      connection: baseCompat,
+      modelId: 'gemma',
+    })
+
+    expect(result).toMatchObject({
+      ok: false,
+      code: 'image_resource_expired',
+      payloadImageCount: 0,
+    })
   })
 })

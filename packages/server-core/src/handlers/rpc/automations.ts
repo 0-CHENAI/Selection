@@ -99,6 +99,30 @@ export function registerAutomationsHandlers(server: RpcServer, deps: HandlerDeps
     const workspace = getWorkspaceByNameOrId(payload.workspaceId)
     if (!workspace) throw new Error('Workspace not found')
 
+    if (payload.dryRun) {
+      const event = payload.event
+      if (!event) throw new Error('dryRun requires an event name')
+      const { AutomationSystem } = await import('@craft-agent/shared/automations')
+      const system = new AutomationSystem({
+        workspaceRootPath: workspace.rootPath,
+        workspaceId: payload.workspaceId,
+      })
+      try {
+        const matches = system.matchAgentEvent(event as import('@craft-agent/shared/automations').AgentEvent, {
+          hook_event_name: event,
+          tool_name: payload.sample?.tool_name,
+          tool_input: payload.sample?.tool_input,
+          prompt: payload.sample?.prompt,
+          stop_reason: payload.sample?.stop_reason as 'complete' | 'abort' | 'error' | undefined,
+          source: payload.sample?.source,
+          agent_type: payload.sample?.agent_type,
+        })
+        return { actions: [], matches } satisfies import('@craft-agent/shared/protocol').TestAutomationResult
+      } finally {
+        await system.dispose()
+      }
+    }
+
     const results: import('@craft-agent/shared/protocol').TestAutomationActionResult[] = []
     const { parsePromptReferences } = await import('@craft-agent/shared/automations')
     const { executeWebhookRequest, createWebhookHistoryEntry, createPromptHistoryEntry } = await import('@craft-agent/shared/automations/webhook-utils')

@@ -17,7 +17,7 @@
 import http from 'node:http';
 import { createInterface } from 'node:readline';
 import { join } from 'node:path';
-import { mkdirSync, readdirSync, statSync, existsSync } from 'node:fs';
+import { mkdirSync } from 'node:fs';
 import { homedir } from 'node:os';
 
 // Pi SDK
@@ -26,7 +26,6 @@ import {
   SessionManager as PiSessionManager,
   AuthStorage as PiAuthStorage,
   ModelRegistry as PiModelRegistry,
-  createReadToolDefinition,
   createBashToolDefinition,
   createEditToolDefinition,
   createWriteToolDefinition,
@@ -44,7 +43,10 @@ import type {
 } from '@earendil-works/pi-coding-agent';
 
 // Pi AI types
-import type { TextContent as PiTextContent } from '@earendil-works/pi-ai';
+import type {
+  ImageContent as PiImageContent,
+  TextContent as PiTextContent,
+} from '@earendil-works/pi-ai';
 
 // Pre-register the Bedrock provider module so the Pi SDK doesn't attempt a
 // dynamic import of "./amazon-bedrock.js" — which fails in the bundled output
@@ -79,6 +81,10 @@ import { createSearchTool } from './tools/search/create-search-tool.ts';
 import { allowCraftMetadataProperties, stripCraftMetadata } from './craft-metadata-schema.ts';
 import { applySystemPromptOverride } from './system-prompt-override.ts';
 import { resolvePiSessionPaths } from './session-paths.ts';
+import { createPiSessionManager } from './pi-session-manager.ts';
+import { createSelectionReadToolDefinition } from './tools/read/create-read-tool.ts';
+import { mergeSummarizedToolResult } from './tool-result-images.ts';
+import { describePromptImages } from '../../shared/src/utils/image-input.ts';
 
 // ============================================================
 // Types — JSONL Protocol
@@ -114,6 +120,8 @@ interface InitMessage {
   branchFromSdkSessionId?: string;
   branchFromSessionPath?: string;
   branchFromSdkTurnId?: string;
+  resumeSdkSessionId?: string;
+  forceFreshSession?: boolean;
   customEndpoint?: { api: CustomEndpointApi; supportsImages?: boolean };
   customModels?: Array<string | { id: string; contextWindow?: number; supportsImages?: boolean }>;
   piAuth?: { provider: string; credential: PiCredential };
@@ -130,12 +138,25 @@ interface RuntimeConfigUpdateMessage {
   customModels?: Array<string | { id: string; contextWindow?: number; supportsImages?: boolean }>;
 }
 
+type ProxyToolContent = PiTextContent | PiImageContent;
+
+interface ProxyToolExecutionResult {
+  content: string | ProxyToolContent[];
+  isError: boolean;
+}
+
+function normalizeProxyToolContent(content: ProxyToolExecutionResult['content']): ProxyToolContent[] {
+  return typeof content === 'string'
+    ? [{ type: 'text', text: content }]
+    : content;
+}
+
 /** Messages from main process (stdin) */
 type InboundMessage =
   | InitMessage
   | { type: 'prompt'; id: string; message: string; systemPrompt: string; images?: Array<{ type: 'image'; data: string; mimeType: string }> }
   | { type: 'register_tools'; tools: ProxyToolDef[] }
-  | { type: 'tool_execute_response'; requestId: string; result: { content: string; isError: boolean } }
+  | { type: 'tool_execute_response'; requestId: string; result: ProxyToolExecutionResult }
   | { type: 'pre_tool_use_response'; requestId: string; action: 'allow' | 'block' | 'modify'; input?: Record<string, unknown>; reason?: string }
   | { type: 'abort' }
   | { type: 'mini_completion'; id: string; prompt: string }
@@ -251,7 +272,7 @@ let currentUserMessage = '';
 
 // Pending promises for async handshakes
 const pendingPreToolUse = new Map<string, { resolve: (response: { action: string; input?: Record<string, unknown>; reason?: string }) => void }>();
-const pendingToolExecutions = new Map<string, { resolve: (result: { content: string; isError: boolean }) => void }>();
+const pendingToolExecutions = new Map<string, { resolve: (result: ProxyToolExecutionResult) => void }>();
 
 // Pending session MCP tool calls for completion detection
 const pendingSessionToolCalls = new Map<string, { toolName: string; arguments: Record<string, unknown> }>();
@@ -264,7 +285,7 @@ let proxyToolDefs: ProxyToolDef[] = [];
 // to the main process in parallel on message_end (before executeToolCalls iterates sequentially).
 // Each proxy tool's execute() then hits the cache instead of sending a new request.
 const PREFETCHABLE_TOOLS = new Set(['call_llm']);
-const prefetchCache = new Map<string, Promise<{ content: string; isError: boolean }>>();
+const prefetchCache = new Map<string, Promise<ProxyToolExecutionResult>>();
 
 function isPrefetchableTool(toolName: string): boolean {
   const stripped = toolName.replace(/^(mcp__session__|session__)/, '');
@@ -290,21 +311,6 @@ function send(msg: OutboundMessage): void {
 function debugLog(message: string): void {
   // Write debug messages to stderr so they don't interfere with JSONL protocol
   process.stderr.write(`[pi-server] ${message}\n`);
-}
-
-/** Find the most recent .jsonl session file in a directory. */
-function findMostRecentSessionFile(sessionDir: string): string | null {
-  if (!existsSync(sessionDir)) return null;
-  let best: { path: string; mtime: number } | null = null;
-  for (const entry of readdirSync(sessionDir)) {
-    if (!entry.endsWith('.jsonl')) continue;
-    const fullPath = join(sessionDir, entry);
-    const mtime = statSync(fullPath).mtimeMs;
-    if (!best || mtime > best.mtime) {
-      best = { path: fullPath, mtime };
-    }
-  }
-  return best?.path ?? null;
 }
 
 // ============================================================
@@ -561,7 +567,7 @@ async function ensureSession(): Promise<AgentSession> {
   //   - Do NOT pass tool *objects* to `tools` — `allowedToolNames = new Set(options.tools)`
   //     then `.has(name)` returns false for every string lookup → zero tools active.
   const builtinDefs = [
-    createReadToolDefinition(cwd),
+    createSelectionReadToolDefinition(cwd),
     createBashToolDefinition(cwd),
     createEditToolDefinition(cwd),
     createWriteToolDefinition(cwd),
@@ -592,38 +598,17 @@ async function ensureSession(): Promise<AgentSession> {
 
     // Session resume: use a per-Craft-session directory so the Pi SDK can
     // persist and resume its own session across subprocess restarts.
-    // continueRecent() loads the existing session if one exists, otherwise
-    // creates a new one — so this handles both first-run and resume.
     mkdirSync(sessionDir, { recursive: true });
 
-    if (initConfig.branchFromSessionPath) {
-      // Branching: fork from the parent session's Pi session file.
-      // Branches must not silently degrade to fresh sessions.
-      const parentPiSessionDir = join(initConfig.branchFromSessionPath, '.pi-sessions');
-      const parentPiSessionFile = findMostRecentSessionFile(parentPiSessionDir);
-      if (!parentPiSessionFile) {
-        throw new Error(`Pi branch preflight failed: no parent Pi session file found in ${parentPiSessionDir}`);
-      }
-
-      debugLog(`Forking Pi session from parent: ${parentPiSessionFile}`);
-      const forkedSessionManager = PiSessionManager.forkFrom(parentPiSessionFile, cwd, sessionDir);
-
-      // Strict branch cutoff: move leaf to the selected parent entry if provided.
-      // This is Pi's equivalent of Claude resumeSessionAt.
-      if (initConfig.branchFromSdkTurnId) {
-        const anchorId = initConfig.branchFromSdkTurnId;
-        const anchorEntry = forkedSessionManager.getEntry(anchorId);
-        if (!anchorEntry) {
-          throw new Error(`Pi branch preflight failed: branch anchor not found: ${anchorId}`);
-        }
-        forkedSessionManager.branch(anchorId);
-        debugLog(`Applied Pi branch cutoff at entry: ${anchorId}`);
-      }
-
-      sessionOptions.sessionManager = forkedSessionManager;
-    } else {
-      sessionOptions.sessionManager = PiSessionManager.continueRecent(cwd, sessionDir);
-    }
+    sessionOptions.sessionManager = createPiSessionManager({
+      cwd,
+      sessionDir,
+      resumeSdkSessionId: initConfig.resumeSdkSessionId,
+      branchFromSessionPath: initConfig.branchFromSessionPath,
+      branchFromSdkSessionId: initConfig.branchFromSdkSessionId,
+      branchFromSdkTurnId: initConfig.branchFromSdkTurnId,
+      forceFreshSession: initConfig.forceFreshSession,
+    });
 
   }
 
@@ -795,7 +780,7 @@ function wrapSingleTool(tool: ToolDefinition<any, any>): ToolDefinition<any, any
 
         if (largeResult) {
           return {
-            content: [{ type: 'text', text: largeResult.message }],
+            content: mergeSummarizedToolResult(largeResult.message, result.content),
             details: result.details,
           };
         }
@@ -850,7 +835,7 @@ function buildProxyTools(): ToolDefinition<any, any>[] {
         debugLog(`Prefetch cache hit for ${def.name} (toolCallId: ${toolCallId})`);
         const result = await prefetched;
         return {
-          content: [{ type: 'text', text: result.content }],
+          content: normalizeProxyToolContent(result.content),
           details: result.isError ? { isError: true } : undefined,
         };
       }
@@ -870,12 +855,12 @@ function buildProxyTools(): ToolDefinition<any, any>[] {
         args: approvedInput,
       });
 
-      const result = await new Promise<{ content: string; isError: boolean }>((resolve) => {
+      const result = await new Promise<ProxyToolExecutionResult>((resolve) => {
         pendingToolExecutions.set(requestId, { resolve });
       });
 
       return {
-        content: [{ type: 'text', text: result.content }],
+        content: normalizeProxyToolContent(result.content),
         details: result.isError ? { isError: true } : undefined,
       };
     },
@@ -1184,7 +1169,7 @@ function handleSessionEvent(event: AgentSessionEvent): void {
           debugLog(`Prefetching ${prefetchableToolCalls.length} parallel ${prefetchableToolCalls[0]?.name} calls`);
           for (const tc of prefetchableToolCalls) {
             const requestId = `prefetch-${tc.id}`;
-            const promise = new Promise<{ content: string; isError: boolean }>((resolve) => {
+            const promise = new Promise<ProxyToolExecutionResult>((resolve) => {
               pendingToolExecutions.set(requestId, { resolve });
             });
             send({
@@ -1332,10 +1317,19 @@ async function handlePrompt(msg: Extract<InboundMessage, { type: 'prompt' }>): P
     // Wait for any in-flight auto-compaction to avoid race (craft-agents-oss#464)
     await waitForCompaction(session);
 
+    const promptImages = msg.images && msg.images.length > 0 ? msg.images : undefined
+    if (promptImages) {
+      debugLog(`image-input ${JSON.stringify({
+        requestId: msg.id,
+        payloadImageCount: promptImages.length,
+        images: describePromptImages(promptImages),
+      })}`);
+    }
+
     // Fire prompt — use followUp when session is already streaming so the
     // message is queued instead of throwing "Agent is already processing".
     await session.prompt(msg.message, {
-      images: msg.images && msg.images.length > 0 ? msg.images : undefined,
+      images: promptImages,
       streamingBehavior: 'followUp',
     });
   } catch (error) {

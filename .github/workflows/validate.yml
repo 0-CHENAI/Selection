@@ -44,5 +44,8 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Verify pinned OfficeCLI runtime and internal resources
+        run: bun run officecli:check && bun run officecli:benchmark:check
+
       - name: Run validation suite
         run: bun run validate:ci

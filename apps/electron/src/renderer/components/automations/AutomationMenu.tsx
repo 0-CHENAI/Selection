@@ -15,9 +15,11 @@ import {
   FileCode,
   Copy,
   Play,
+  Search,
   Power,
   PowerOff,
   Send,
+  Download,
 } from 'lucide-react'
 import { useMenuComponents } from '@/components/ui/menu-context'
 
@@ -27,11 +29,13 @@ export interface AutomationMenuProps {
   enabled: boolean
   onToggleEnabled?: () => void
   onTest?: () => void
+  onSimulateMatch?: () => void
   onDuplicate?: () => void
   onEditJson?: () => void
   onDelete?: () => void
   /** Send to another workspace (omit to hide the option) */
   onSendToWorkspace?: () => void
+  onExport?: () => void
 }
 
 export function AutomationMenu({
@@ -40,10 +44,12 @@ export function AutomationMenu({
   enabled,
   onToggleEnabled,
   onTest,
+  onSimulateMatch,
   onDuplicate,
   onEditJson,
   onDelete,
   onSendToWorkspace,
+  onExport,
 }: AutomationMenuProps) {
   const { MenuItem, Separator } = useMenuComponents()
   const { t } = useTranslation()
@@ -70,6 +76,13 @@ export function AutomationMenu({
         </MenuItem>
       )}
 
+      {onSimulateMatch && (
+        <MenuItem onClick={onSimulateMatch}>
+          <Search className="h-3.5 w-3.5" />
+          <span className="flex-1">{t('automations.matchSimulate')}</span>
+        </MenuItem>
+      )}
+
       {/* Duplicate */}
       {onDuplicate && (
         <MenuItem onClick={onDuplicate}>
@@ -83,6 +96,14 @@ export function AutomationMenu({
         <MenuItem onClick={onSendToWorkspace}>
           <Send className="h-3.5 w-3.5" />
           <span className="flex-1">{t('sendToWorkspace.title')}</span>
+        </MenuItem>
+      )}
+
+
+      {onExport && (
+        <MenuItem onClick={onExport}>
+          <Download className="h-3.5 w-3.5" />
+          <span className="flex-1">{t('resourceTransfer.exportMenu')}</span>
         </MenuItem>
       )}
 

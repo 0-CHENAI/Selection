@@ -19,12 +19,15 @@ export type {
   AppEvent,
   AgentEvent,
   AutomationEvent,
+  AutomationHistoryStatus,
   PromptAction,
   WebhookAction,
   WebhookHttpMethod,
   WebhookBodyFormat,
   WebhookAuth,
   AutomationAction,
+  DecisionAction,
+  ToolDecisionResult,
   AutomationMatcher,
   AutomationsConfig,
   PromptReferences,
@@ -60,7 +63,11 @@ export {
 // SDK Bridge
 // ============================================================================
 
-export { buildEnvFromSdkInput } from './sdk-bridge.ts';
+export { buildEnvFromSdkInput, buildWebhookEnvFromSdkInput } from './sdk-bridge.ts';
+
+export { enrichAgentEventInput } from './agent-event-envelope.ts';
+export { sanitizeAgentEventInput } from './agent-event-sanitize.ts';
+export { AgentEventGuards, MAX_AUTOMATION_DEPTH, MAX_CHAIN_SPAWNS_PER_WINDOW } from './agent-event-guards.ts';
 
 // ============================================================================
 // Utilities
@@ -91,7 +98,7 @@ export { executeWebhookRequest, executeWithRetry, createWebhookHistoryEntry, cre
 export { RetryScheduler, type RetryQueueEntry, type RetrySchedulerOptions } from './retry-scheduler.ts';
 
 // Config constants
-export { AUTOMATIONS_CONFIG_FILE, AUTOMATIONS_HISTORY_FILE, AUTOMATIONS_RETRY_QUEUE_FILE, HISTORY_FIELD_MAX_LENGTH, AUTOMATION_HISTORY_MAX_RUNS_PER_MATCHER, AUTOMATION_HISTORY_MAX_ENTRIES } from './constants.ts';
+export { AUTOMATIONS_CONFIG_FILE, AUTOMATIONS_HISTORY_FILE, AUTOMATIONS_RETRY_QUEUE_FILE, HISTORY_FIELD_MAX_LENGTH, AUTOMATION_HISTORY_MAX_RUNS_PER_MATCHER, AUTOMATION_HISTORY_MAX_ENTRIES, DEFAULT_PROMPT_WAIT_TIMEOUT_MS, MAX_PROMPT_WAIT_TIMEOUT_MS, PROMPT_HISTORY_FINAL_TEXT_MAX_LENGTH } from './constants.ts';
 
 // History store
 export { appendAutomationHistoryEntry, compactAutomationHistory, compactAutomationHistorySync } from './history-store.ts';
@@ -123,6 +130,7 @@ export {
 export {
   AutomationSystem,
   type AutomationSystemOptions,
+  type AgentEventMatchPreview,
   type SessionMetadataSnapshot as AutomationSystemMetadataSnapshot,
 } from './automation-system.ts';
 

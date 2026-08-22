@@ -35,20 +35,17 @@ files:
   - resources/bin/markitdown.cmd
   - resources/bin/pdf-tool
   - resources/bin/pdf-tool.cmd
-  - resources/bin/xlsx-tool
-  - resources/bin/xlsx-tool.cmd
   - resources/bin/doc-diff
   - resources/bin/doc-diff.cmd
   - resources/bin/img-tool
   - resources/bin/img-tool.cmd
-  - resources/bin/docx-tool
-  - resources/bin/docx-tool.cmd
-  - resources/bin/pptx-tool
-  - resources/bin/pptx-tool.cmd
   - resources/bin/ical-tool
   - resources/bin/ical-tool.cmd
   - resources/bin/officecli
   - resources/bin/officecli.cmd
+  - resources/bin/officecli-ensure-docx-styles
+  - resources/bin/officecli-ensure-docx-styles.cmd
+  - resources/bin/officecli-ensure-docx-styles.json
   # Include bundled uv binary (platform-specific, only the relevant one ships per build)
   - resources/bin/darwin-arm64/**/*
   - resources/bin/darwin-x64/**/*

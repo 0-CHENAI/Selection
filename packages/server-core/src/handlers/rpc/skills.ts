@@ -29,8 +29,8 @@ export function registerSkillsHandlers(server: RpcServer, deps: HandlerDeps): vo
     const effectiveWorkingDir = workingDirectory && existsSync(workingDirectory)
       ? workingDirectory
       : undefined
-    const { loadAllSkills } = await import('@craft-agent/shared/skills')
-    const skills = loadAllSkills(workspace.rootPath, effectiveWorkingDir)
+    const { filterUserFacingSkills, loadAllSkills } = await import('@craft-agent/shared/skills')
+    const skills = filterUserFacingSkills(loadAllSkills(workspace.rootPath, effectiveWorkingDir))
     deps.platform.logger?.info(`SKILLS_GET: Loaded ${skills.length} skills from ${workspace.rootPath}`)
     return skills
   })
@@ -104,11 +104,11 @@ export function registerSkillsHandlers(server: RpcServer, deps: HandlerDeps): vo
     const effectiveWorkingDir = workingDirectory && existsSync(workingDirectory)
       ? workingDirectory
       : undefined
-    const { loadAllSkills, loadSkillBySlug } = await import('@craft-agent/shared/skills')
+    const { filterUserFacingSkills, loadAllSkills, loadSkillBySlug } = await import('@craft-agent/shared/skills')
     const existing = loadSkillBySlug(workspace.rootPath, skillSlug, effectiveWorkingDir)
     if (!existing) throw new Error('Skill not found')
     const displayTitle = setDisplayTitle(workspace.rootPath, 'skills', skillSlug, title, existing.metadata.name)
-    const skills = loadAllSkills(workspace.rootPath, effectiveWorkingDir)
+    const skills = filterUserFacingSkills(loadAllSkills(workspace.rootPath, effectiveWorkingDir))
     pushTyped(server, RPC_CHANNELS.skills.CHANGED, { to: 'workspace', workspaceId }, workspaceId, skills)
     return { displayTitle }
   })

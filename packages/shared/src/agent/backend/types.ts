@@ -200,6 +200,15 @@ export interface CoreBackendConfig {
   /** Workspace-level automation system for user-defined automations (automations.json) */
   automationSystem?: AutomationSystem;
 
+  /** Marks sessions created by Agent Event automations so they cannot recurse. */
+  automationContext?: {
+    triggeredByAutomation: boolean;
+    automationDepth: number;
+    sourceSessionId?: string;
+    sourceSessionName?: string;
+    rootSessionId?: string;
+  };
+
   /**
    * Per-session environment variable overrides for the SDK subprocess.
    * Spread after process.env in backend-specific option builders.

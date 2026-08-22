@@ -127,6 +127,11 @@ const MAX_UNPARSED_REASKS = 2;
 
 const INPUTS_REF_RE = /\$\{\s*inputs\.([a-zA-Z_][a-zA-Z0-9_]*)\s*\}/g;
 
+/** v1 executes session nodes plus the orchestrator escape hatch; control-flow kinds wait for P4. */
+function isExecutableTaskNode(node: TaskNode): boolean {
+  return node.kind === 'session' || node.kind === 'orchestrator';
+}
+
 /** Distributive Omit so the run-log discriminated union keeps its per-variant fields. */
 type DistributiveOmit<T, K extends keyof T> = T extends unknown ? Omit<T, K> : never;
 type RunLogEntryInput = DistributiveOmit<RunLogEntry, 't'>;
@@ -197,12 +202,19 @@ class ActiveRun {
     this.log({ kind: 'run-started', taskId: this.spec.id, runId: this.runId, orchestratorSessionId: this.opts.orchestratorSessionId });
     this.runStatus = 'running';
     // Move the task tile to the in-progress column for the duration of the run.
+    for (const node of this.spec.nodes) {
+      if (!isExecutableTaskNode(node)) {
+        const st = this.state.get(node.id)!;
+        st.state = 'skipped';
+        this.log({ kind: 'node-finished', nodeId: node.id, sessionId: '', state: 'skipped' });
+      }
+    }
     if (this.opts.orchestratorSessionId) {
       void this.deps.host.setKanbanColumn(this.opts.orchestratorSessionId, 'in-progress');
       void this.deps.host.setSessionStatus(this.opts.orchestratorSessionId, RUNNING_STATUS);
-      // Publish the full node count up front so the board's subtask progress denominator is stable,
-      // rather than growing as children are spawned lazily at dispatch.
-      void this.deps.host.setTaskNodeCount(this.opts.orchestratorSessionId, this.spec.nodes.length);
+      // Publish the executable node count so deferred kinds don't inflate the board.
+      const executableCount = this.spec.nodes.filter(isExecutableTaskNode).length;
+      void this.deps.host.setTaskNodeCount(this.opts.orchestratorSessionId, executableCount);
     }
     this.scheduleReady();
   }
@@ -314,6 +326,14 @@ class ActiveRun {
 
   private scheduleReady(): void {
     if (this.runStatus !== 'running') return;
+    // Resume/hydrate can leave deferred kinds pending; never dispatch them as sessions.
+    for (const node of this.spec.nodes) {
+      if (isExecutableTaskNode(node)) continue;
+      const st = this.state.get(node.id)!;
+      if (st.state !== 'pending') continue;
+      st.state = 'skipped';
+      this.log({ kind: 'node-finished', nodeId: node.id, sessionId: '', state: 'skipped' });
+    }
     for (const node of this.spec.nodes) {
       if (this.inFlight >= this.maxParallel) break;
       if (!this.isReady(node)) continue;
@@ -330,7 +350,8 @@ class ActiveRun {
   private isReady(node: TaskNode): boolean {
     if (this.state.get(node.id)!.state !== 'pending') return false;
     for (const dep of this.edges.get(node.id) ?? []) {
-      if (this.state.get(dep)?.state !== 'done') return false;
+      const depState = this.state.get(dep)?.state;
+      if (depState !== 'done' && depState !== 'skipped') return false;
     }
     return true;
   }

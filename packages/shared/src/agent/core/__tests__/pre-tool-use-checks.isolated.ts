@@ -81,6 +81,20 @@ mock.module('../../../skills/storage.ts', () => ({
   GLOBAL_AGENT_SKILLS_DIR: '/Users/test/.agents/skills',
   PROJECT_AGENT_SKILLS_DIR: '.agents/skills',
   getBundledSkillsDir: () => undefined,
+  getBundledSkillDirectories: () => [],
+  resolveBundledSkillMdPath: () => undefined,
+}));
+
+mock.module('../../../utils/officecli.ts', () => ({
+  resolveBundledOfficecliSkillRead: (requestedPath: string) => {
+    if (/officecli-docx|[/\\]docx[/\\]SKILL\.md/.test(requestedPath)) {
+      return '/bundled/officecli/1.0.144/skills/officecli-docx/SKILL.md';
+    }
+    if (/[/\\]officecli[/\\]SKILL\.md/.test(requestedPath) && !/officecli-/.test(requestedPath)) {
+      return '/bundled/skills/officecli/SKILL.md';
+    }
+    return undefined;
+  },
 }));
 
 let mockCraftAgentsCliFlag = false;
@@ -439,18 +453,44 @@ describe('runPreToolUseChecks', () => {
       expect(result.type).toBe('allow');
     });
 
+    it('rewrites guessed officecli and Anthropic docx skill paths to the bundled skills', () => {
+      const docx = runPreToolUseChecks(createInput({
+        toolName: 'Read',
+        input: { file_path: '/Users/test/.agents/skills/officecli-docx/SKILL.md' },
+      }));
+      expect(docx.type).toBe('modify');
+      if (docx.type === 'modify') {
+        expect(docx.input.file_path).toBe('/bundled/officecli/1.0.144/skills/officecli-docx/SKILL.md');
+      }
+
+      const catalog = runPreToolUseChecks(createInput({
+        toolName: 'Read',
+        input: { file_path: '/Users/test/.agents/skills/officecli/SKILL.md' },
+      }));
+      expect(catalog.type).toBe('modify');
+      if (catalog.type === 'modify') {
+        expect(catalog.input.file_path).toBe('/bundled/skills/officecli/SKILL.md');
+      }
+
+      const anthropic = runPreToolUseChecks(createInput({
+        toolName: 'Read',
+        input: { file_path: '/Users/test/.agents/skills/docx/SKILL.md' },
+      }));
+      expect(anthropic.type).toBe('modify');
+      if (anthropic.type === 'modify') {
+        expect(anthropic.input.file_path).toBe('/bundled/officecli/1.0.144/skills/officecli-docx/SKILL.md');
+      }
+    });
+
     it.each(['report.docx', 'forecast.xlsx', 'roadmap.pptx'])(
-      'routes generic reads of %s through the native Office tools',
+      'allows generic reads of %s so OfficeCLI skills can choose the reader',
       (filePath) => {
         const result = runPreToolUseChecks(createInput({
           toolName: 'Read',
           input: { file_path: `/test/workspace/${filePath}` },
         }));
 
-        expect(result.type).toBe('block');
-        if (result.type === 'block') {
-          expect(result.reason).toContain('office_document_inspect');
-        }
+        expect(result.type).toBe('allow');
       },
     );
 

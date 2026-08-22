@@ -37,6 +37,21 @@ describe('system prompt guidance', () => {
     expect(prompt).not.toContain('The subtask needs tools (Read, Bash, Grep)')
   })
 
+  it('does not advertise a Task/subagent/Workflow tool', () => {
+    const prompt = getSystemPrompt(undefined, undefined, '/tmp/workspace', '/tmp/workspace')
+
+    expect(prompt).not.toContain('Task tool with subagents')
+    expect(prompt).not.toContain('call_llm vs Task (subagents)')
+    expect(prompt).toContain('meets the spawn bar below')
+    expect(prompt).toContain('Default: do the work yourself in this session')
+    expect(prompt).toContain('Do not spawn "just in case"')
+    expect(prompt).toContain('summarizing/classifying/extracting fields from existing text')
+    expect(prompt).toContain('Prefer at most 3 background children in one turn')
+    expect(prompt).toContain('Do not spawn another child to collect that result')
+    expect(prompt).toContain('do **not** automatically `archive_session`')
+    expect(prompt).toContain('`run_task`')
+  })
+
   it('tells the model to speak source titles rather than slugs', () => {
     const prompt = getSystemPrompt(undefined, undefined, '/tmp/workspace', '/tmp/workspace')
 
@@ -51,23 +66,32 @@ describe('system prompt guidance', () => {
     expect(prompt).not.toContain('user-facing replies still use the display title')
   })
 
-  it('treats OfficeCLI as a native capability rather than a skill', () => {
+  it('treats OfficeCLI as a bundled skill plus Bash CLI', () => {
     const prompt = getSystemPrompt(undefined, undefined, '/tmp/workspace', '/tmp/workspace')
 
     expect(prompt).toContain('**officecli**')
-    expect(prompt).toContain('do not invoke it directly through Bash')
-    expect(prompt).not.toContain('officecli create report.docx')
-    expect(prompt).not.toContain('prefer officecli')
-    expect(prompt).toContain('office_document_inspect')
-    expect(prompt).toContain('office_document_edit')
-    expect(prompt).toContain('Neither requires loading a skill')
-    expect(prompt).toContain('OfficeCLI is an internal runtime capability, not a skill')
+    expect(prompt).toContain('Already on PATH')
+    expect(prompt).toContain('officecli-docx')
+    expect(prompt).toContain('officecli-xlsx')
+    expect(prompt).toContain('officecli-pptx')
+    expect(prompt).toContain('Do **not** Read `~/.agents/skills/officecli`')
+    expect(prompt).toContain('Hard rule')
+    expect(prompt).toContain('python-docx')
+    expect(prompt).toContain('do not curl-install')
+    expect(prompt).toContain('officecli load_skill word')
+    expect(prompt).toContain('style not found')
+    expect(prompt).toContain('outlineLvl')
+    expect(prompt).toContain('Do not re-add an existing Heading')
+    expect(prompt).not.toContain('office_document_inspect')
+    expect(prompt).not.toContain('office_document_edit')
+    expect(prompt).not.toContain('office_document_guide')
+    expect(prompt).not.toContain('office_document_preview')
+    expect(prompt).not.toContain('office_document_finalize')
+    expect(prompt).not.toContain('**xlsx-tool**')
+    expect(prompt).not.toContain('**docx-tool**')
+    expect(prompt).not.toContain('**pptx-tool**')
+    expect(prompt).toContain('doc-diff old.md new.md')
     expect(prompt).toContain('Do not read an automatically generated `.docx.md`')
-    expect(prompt).toContain('after the native Office inspect tool reports that the document is unsupported or unavailable')
-    expect(prompt).toContain('selection-office-native-fallback')
-    expect(prompt).not.toContain('Use **markitdown** when you only need readable text')
-    expect(prompt).not.toContain('the `officecli` skill')
-    expect(prompt).not.toContain('Load the `officecli` skill')
   })
 })
 

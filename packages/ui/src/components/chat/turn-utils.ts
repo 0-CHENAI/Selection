@@ -130,7 +130,7 @@ export type TurnPhase =
  *
  * Priority order (first match wins):
  * 1. complete - turn.isComplete is true
- * 2. streaming - response exists and is streaming (final response)
+ * 2. streaming - response exists and is streaming (final or pending tokens)
  * 3. tool_active - any TOOL activity has status 'running'
  * 4. awaiting - has activities but no tools running (the gap!)
  * 5. pending - no activities yet
@@ -138,6 +138,8 @@ export type TurnPhase =
  * Note: Only `type: 'tool'` activities count for tool_active phase.
  * Intermediate text (type: 'intermediate') and status activities (type: 'status')
  * with 'running' status do NOT trigger tool_active - they show "Thinking..." instead.
+ * Completed commentary may occupy `turn.response` (isCommentary) so the body
+ * card stays readable while tools continue; that does not count as streaming.
  */
 export function deriveTurnPhase(turn: AssistantTurn): TurnPhase {
   // Complete takes precedence - turn is definitively done
@@ -145,8 +147,7 @@ export function deriveTurnPhase(turn: AssistantTurn): TurnPhase {
     return 'complete'
   }
 
-  // Check if final response is streaming
-  // Note: turn.response only exists for final responses, not intermediate text
+  // Streaming tokens — pending reply or still-open commentary
   if (turn.response && turn.response.isStreaming) {
     return 'streaming'
   }
@@ -171,6 +172,28 @@ export function deriveTurnPhase(turn: AssistantTurn): TurnPhase {
 }
 
 /**
+ * Commentary occupies the response card while the turn is still working.
+ * Once the turn completes, the same body is the visible final reply.
+ */
+export function isVisibleCommentaryCard(
+  response: AssistantTurn['response'],
+  isComplete: boolean,
+): boolean {
+  return !!response?.isCommentary && !isComplete
+}
+
+/** The live card already shows this intermediate body — don't also insert a row. */
+export function isMirroredCommentaryActivity(
+  activity: Pick<ActivityItem, 'type' | 'id'>,
+  response: AssistantTurn['response'],
+  isComplete: boolean,
+): boolean {
+  return activity.type === 'intermediate'
+    && isVisibleCommentaryCard(response, isComplete)
+    && activity.id === response?.messageId
+}
+
+/**
  * Determines if the "Thinking..." indicator should be shown.
  *
  * The thinking indicator appears when the turn is active but there's
@@ -186,6 +209,44 @@ export function shouldShowThinkingIndicator(phase: TurnPhase, isBuffering: boole
   // - awaiting: gap between tool completion and next action
   // - streaming but buffering: text started but not ready to display
   return phase === 'pending' || phase === 'awaiting' || (phase === 'streaming' && isBuffering)
+}
+
+/**
+ * Select the newest semantic progress text while a turn is doing work.
+ *
+ * The completed title remains stable, and final response streaming has its own
+ * label. Timestamps are authoritative because live activities can briefly be
+ * received out of array order; array order only breaks timestamp ties.
+ */
+export function getActiveTurnPreview(
+  activities: ActivityItem[],
+  phase: TurnPhase,
+): string | undefined {
+  if (phase === 'complete' || phase === 'streaming') return undefined
+
+  let latest: { text: string; timestamp: number; index: number } | undefined
+
+  activities.forEach((activity, index) => {
+    const activityContent = (
+      activity.type === 'intermediate'
+      || activity.type === 'thinking'
+      || activity.type === 'status'
+    )
+      ? activity.content?.trim()
+      : undefined
+    const text = activityContent || activity.intent?.trim()
+    if (!text) return
+
+    if (
+      !latest
+      || activity.timestamp > latest.timestamp
+      || (activity.timestamp === latest.timestamp && index > latest.index)
+    ) {
+      latest = { text, timestamp: activity.timestamp, index }
+    }
+  })
+
+  return latest?.text
 }
 
 // ============================================================================
@@ -225,6 +286,7 @@ function messageToActivity(message: Message, existingActivities: ActivityItem[] 
     toolUseId: message.toolUseId,  // For parent-child matching
     toolInput: message.toolInput,
     content: message.toolResult || message.content,
+    toolResultContent: message.toolResultContent,
     intent: message.toolIntent,
     displayName: message.toolDisplayName,  // LLM-generated human-friendly name
     toolDisplayMeta: message.toolDisplayMeta,  // Embedded metadata with base64 icon for viewer
@@ -419,6 +481,11 @@ export function groupMessagesByTurn(messages: Message[], options: GroupTurnsOpti
         }
       }
 
+      // Completed turns treat leftover commentary as the visible final body.
+      if (currentTurn.isComplete && currentTurn.response?.isCommentary) {
+        currentTurn.response = { ...currentTurn.response, isCommentary: false }
+      }
+
       turns.push(currentTurn)
       currentTurn = null
     }
@@ -607,6 +674,27 @@ export function groupMessagesByTurn(messages: Message[], options: GroupTurnsOpti
           intermediateActivity.depth = 0
         }
         currentTurn.activities.push(intermediateActivity)
+
+        // Keep the latest commentary on the response card until a real
+        // (non-intermediate) reply arrives. Pending tokens already live on
+        // turn.response; dropping that slot on text_complete is what made the
+        // body card vanish the moment the next tool started.
+        const currentResponse = currentTurn.response
+        const retainCommentaryCard = !currentResponse
+          || currentResponse.isCommentary
+          || currentResponse.messageId === message.id
+        // Empty complete must not wipe a body the user is already reading.
+        if (retainCommentaryCard && message.content.trim()) {
+          const stillStreaming = !!(message.isPending || message.isStreaming)
+          currentTurn.response = {
+            text: message.content,
+            isStreaming: stillStreaming,
+            streamStartTime: stillStreaming ? message.timestamp : undefined,
+            messageId: message.id,
+            annotations: message.annotations,
+            isCommentary: true,
+          }
+        }
 
         // Update turn streaming state based on this message
         // If message is no longer pending/streaming, update turn state accordingly
@@ -963,6 +1051,51 @@ export function computeLastChildSet(activities: ActivityItem[]): Set<string> {
 // ============================================================================
 // Formatting Helpers
 // ============================================================================
+
+const ORCHESTRATION_TOOL_NAMES = new Set(['spawn_session', 'run_task'])
+const ORCHESTRATION_FINAL_TEXT_MAX = 120
+
+function parseOrchestrationResult(content: string): Record<string, unknown> | null {
+  try {
+    const value = JSON.parse(content.trim()) as unknown
+    if (value && typeof value === 'object' && !Array.isArray(value)) {
+      return value as Record<string, unknown>
+    }
+  } catch {
+    return null
+  }
+  return null
+}
+
+function truncateOneLine(text: string, max: number): string {
+  const oneLine = text.replace(/\s+/g, ' ').trim()
+  if (oneLine.length <= max) return oneLine
+  return `${oneLine.slice(0, max - 1).trimEnd()}…`
+}
+
+/** Thin status + id + conclusion line for spawn_session / run_task JSON results. */
+export function formatOrchestrationToolSummary(
+  toolName: string | undefined,
+  content: string | undefined,
+): string | null {
+  if (!toolName || !content) return null
+  const name = toolName.replace(/^mcp__[^_]+__/, '')
+  if (!ORCHESTRATION_TOOL_NAMES.has(name)) return null
+
+  const parsed = parseOrchestrationResult(content)
+  if (!parsed) return null
+
+  const status = typeof parsed.status === 'string' ? parsed.status : null
+  const id = name === 'run_task'
+    ? (typeof parsed.runId === 'string' ? parsed.runId : null)
+    : (typeof parsed.sessionId === 'string' ? parsed.sessionId : null)
+  const finalText = typeof parsed.finalText === 'string'
+    ? truncateOneLine(parsed.finalText, ORCHESTRATION_FINAL_TEXT_MAX)
+    : null
+
+  const parts = [status, id, finalText].filter((part): part is string => Boolean(part))
+  return parts.length > 0 ? parts.join(' · ') : null
+}
 
 /**
  * Format duration in milliseconds to human-readable string.

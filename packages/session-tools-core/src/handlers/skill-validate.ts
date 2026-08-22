@@ -20,7 +20,7 @@ import {
   validateSkillContent,
   formatValidationResult,
 } from '../validation.ts';
-import { getBundledSkillsDir } from '@craft-agent/shared/skills';
+import { getBundledSkillDirectories, resolveBundledSkillMdPath } from '@craft-agent/shared/skills';
 
 export interface SkillValidateArgs {
   skillSlug: string;
@@ -49,13 +49,10 @@ function resolveSkillMdPath(
     return { path: workspacePath, tier: 'workspace' };
   }
 
-  // 3. Bundled (overrides global for shipped slugs)
-  const bundledDir = getBundledSkillsDir();
-  if (bundledDir) {
-    const bundledPath = join(bundledDir, slug, 'SKILL.md');
-    if (ctx.fs.exists(bundledPath)) {
-      return { path: bundledPath, tier: 'bundled' };
-    }
+  // 3. Bundled (overrides global for shipped slugs, including OfficeCLI)
+  const bundledPath = resolveBundledSkillMdPath(slug);
+  if (bundledPath && ctx.fs.exists(bundledPath)) {
+    return { path: bundledPath, tier: 'bundled' };
   }
 
   // 4. Global-level: ~/.agents/skills/{slug}/SKILL.md
@@ -98,11 +95,13 @@ export async function handleSkillValidate(
   // Resolve SKILL.md from all tiers
   const resolved = resolveSkillMdPath(ctx, skillSlug, workingDirectory);
   if (!resolved) {
-    const bundledDir = getBundledSkillsDir();
+    const bundledPaths = getBundledSkillDirectories().map(
+      dir => `  - ${join(dir, skillSlug, 'SKILL.md')} (bundled)`,
+    );
     const searchedPaths = [
       workingDirectory ? `  - ${join(workingDirectory, '.agents', 'skills', skillSlug, 'SKILL.md')} (project)` : null,
       `  - ${join(ctx.workspacePath, 'skills', skillSlug, 'SKILL.md')} (workspace)`,
-      bundledDir ? `  - ${join(bundledDir, skillSlug, 'SKILL.md')} (bundled)` : null,
+      ...bundledPaths,
       `  - ${join(homedir(), '.agents', 'skills', skillSlug, 'SKILL.md')} (global)`,
     ].filter(Boolean).join('\n');
 

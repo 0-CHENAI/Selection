@@ -482,6 +482,27 @@ describe('extractToolResults', () => {
     })
   })
 
+  it('preserves MCP/Anthropic image blocks live while keeping Base64 out of the persisted result string', () => {
+    toolIndex.register('toolu_preview', 'Read', {})
+    const blocks: ContentBlock[] = [makeToolResultBlock('toolu_preview', [
+      { type: 'text', text: '{"artifacts":[{"path":"data/preview/full.png"}]}' },
+      { type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'cG5n' } },
+    ])]
+
+    const events = extractToolResults(blocks, null, undefined, toolIndex)
+    const event = events[0]
+    expect(event?.type).toBe('tool_result')
+    if (!event || event.type !== 'tool_result') throw new Error('Expected one tool_result event')
+    expect(event.result.includes('cG5n')).toBe(false)
+    expect(event).toMatchObject({
+      result: expect.stringContaining('data/preview/full.png'),
+      content: [
+        { type: 'text', text: expect.stringContaining('data/preview/full.png') },
+        { type: 'image', data: 'cG5n', mimeType: 'image/png' },
+      ],
+    })
+  })
+
   it('handles multiple tool_result blocks in one message', () => {
     toolIndex.register('toolu_1', 'Read', {})
     toolIndex.register('toolu_2', 'Grep', {})

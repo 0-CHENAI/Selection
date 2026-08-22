@@ -1,6 +1,6 @@
 import type { EventSink, RpcServer } from '@craft-agent/server-core/transport'
 import { CLIENT_BROWSER_INVOKE } from '@craft-agent/server-core/transport'
-import type { ISessionManager, IBrowserPaneManager, ExecutePromptAutomationInput } from '@craft-agent/server-core/handlers'
+import type { ISessionManager, IBrowserPaneManager, ExecutePromptAutomationInput, ExecutePromptAutomationResult } from '@craft-agent/server-core/handlers'
 import { RemoteBrowserPaneManager } from './RemoteBrowserPaneManager'
 import { validateFilePath, getWorkspaceAllowedDirs } from '@craft-agent/server-core/handlers'
 import { createScopedLogger, CONSOLE_LOGGER, type PlatformServices, type Logger } from '@craft-agent/server-core/runtime'
@@ -8,7 +8,7 @@ import { basename, dirname, join } from 'path'
 import { existsSync } from 'fs'
 import { readFile, writeFile, mkdir } from 'fs/promises'
 import { randomUUID } from 'node:crypto'
-import { type AgentEvent, setPermissionMode, hydratePreviousPermissionMode, getPermissionModeDiagnostics, type PermissionMode, unregisterSessionScopedToolCallbacks, mergeSessionScopedToolCallbacks, AbortReason, type AuthRequest, type AuthResult, type CredentialAuthRequest, type BrowserPaneFns, generateConversationSummary, resolveKeepBackgroundTasksAlive, sanitizeUserMessageForRetry } from '@craft-agent/shared/agent'
+import { type AgentEvent, setPermissionMode, hydratePreviousPermissionMode, getPermissionModeDiagnostics, type PermissionMode, unregisterSessionScopedToolCallbacks, mergeSessionScopedToolCallbacks, AbortReason, type AuthRequest, type AuthResult, type CredentialAuthRequest, type BrowserPaneFns, generateConversationSummary, resolveKeepBackgroundTasksAlive, sanitizeUserMessageForRetry, resolveSpawnWaitTimeoutMs, type SpawnSessionRequest, type SpawnSessionResult } from '@craft-agent/shared/agent'
 import {
   resolveSessionConnection,
   createBackendFromConnection,
@@ -75,8 +75,17 @@ import {
   isSharedProjectMemoryEnabled,
 } from '@craft-agent/shared/sessions'
 import { loadWorkspaceSources, loadAllSources, getSourcesBySlugs, isSourceUsable, type LoadedSource, type McpServerConfig, getSourcesNeedingAuth, getSourceCredentialManager, getSourceServerBuilder, type SourceWithCredential, isApiOAuthProvider, hasRenewEndpoint, SERVER_BUILD_ERRORS, TokenRefreshManager, createTokenGetter } from '@craft-agent/shared/sources'
-import { listTaskSlugs, parseTaskSpec, uniqueTaskSlug } from '@craft-agent/shared/tasks'
-import { createTaskFromSpec, resolveCreateTaskProjectId } from '../tasks'
+import { listTaskSlugs, parseTaskSpec, uniqueTaskSlug, loadTaskResults } from '@craft-agent/shared/tasks'
+import { createTaskFromSpec, resolveCreateTaskProjectId, type TaskRunner } from '../tasks'
+import {
+  buildBackgroundTaskNudge,
+  mapCompletionReasonToTaskStatus,
+  countRunningSpawnChildren,
+  shouldDeferSpawnWake,
+  shouldOrphanBackgroundTask,
+  shouldWakeOnTaskCompleted,
+  waitForChildSessionCompletion,
+} from './spawn-session-orchestration.ts'
 import { ConfigWatcher, type ConfigWatcherCallbacks } from '@craft-agent/shared/config'
 import { isUnsupportedLlmConnection, UNSUPPORTED_LLM_CONNECTION_MESSAGE } from '@craft-agent/shared/config'
 import { resolveAuthEnvVars, toCustomEndpointModelPayload } from '@craft-agent/shared/config'
@@ -87,8 +96,8 @@ import { getCredentialManager } from '@craft-agent/shared/credentials'
 import { CraftMcpClient, McpClientPool, McpPoolServer } from '@craft-agent/shared/mcp'
 import { type Session, type SessionEvent, type FileAttachment, type SendMessageOptions, type UnreadSummary, type RemoteSessionTransferPayload, type ImportRemoteSessionTransferResult, RPC_CHANNELS, generateMessageId } from '@craft-agent/shared/protocol'
 import { applySteerTranscriptBoundary, messageToStored, storedToMessage, type Message, type StoredAttachment, type ToolDisplayMeta, type TokenUsage } from '@craft-agent/core/types'
-import { formatPathsToRelative, formatToolInputPaths, perf, encodeIconToDataUrlAsync, getEmojiIcon, resetSummarizationClient, resolveToolIcon, readFileAttachment, hydrateAttachmentBytes, resolveRegenerateAttachments, selectSpreadMessages, normalizePath } from '@craft-agent/shared/utils'
-import { loadAllSkills, loadSkillBySlug, invalidateSkillsCache, type LoadedSkill } from '@craft-agent/shared/skills'
+import { formatPathsToRelative, formatToolInputPaths, perf, encodeIconToDataUrlAsync, getEmojiIcon, resetSummarizationClient, resolveToolIcon, readFileAttachment, resolveRegenerateAttachments, selectSpreadMessages, normalizePath } from '@craft-agent/shared/utils'
+import { filterUserFacingSkills, loadAllSkills, loadSkillBySlug, invalidateSkillsCache, type LoadedSkill } from '@craft-agent/shared/skills'
 import { invalidateContextFileCache } from '@craft-agent/shared/prompts/system'
 import { getToolIconsDir, getMiniModel } from '@craft-agent/shared/config'
 import { getDefaultSummarizationModel } from '@craft-agent/shared/config/models'
@@ -100,8 +109,10 @@ import { listLabels, loadLabelConfig } from '@craft-agent/shared/labels/storage'
 import { extractLabelId, resolveSessionLabels, findTaskItemLabelId } from '@craft-agent/shared/labels'
 import { ensureLabelsExist, ensureTaskItemLabel } from '@craft-agent/shared/labels/crud'
 import { loadStatusConfig } from '@craft-agent/shared/statuses/storage'
-import { AutomationSystem, createPromptHistoryEntry, appendAutomationHistoryEntry, type AutomationSystemMetadataSnapshot } from '@craft-agent/shared/automations'
-import { buildBackendRuntimeSignature, buildRestartRequiredSignature, filterAttachmentsForModelInput } from './runtime-config'
+import { AutomationSystem, createPromptHistoryEntry, appendAutomationHistoryEntry, enrichAgentEventInput, DEFAULT_PROMPT_WAIT_TIMEOUT_MS, MAX_PROMPT_WAIT_TIMEOUT_MS, type AutomationSystemMetadataSnapshot, type AgentEvent as AutomationAgentEvent, type SdkAutomationInput, type PendingPrompt } from '@craft-agent/shared/automations'
+import { waitForAutomationSessionCompletion } from './wait-automation-session.ts'
+import { createTypedError } from '@craft-agent/shared/agent/errors'
+import { buildBackendRuntimeSignature, buildRestartRequiredSignature, prepareModelImageAttachments } from './runtime-config'
 import { validateArchiveTarget } from './archive-guards'
 
 // Import from server-core domain utilities
@@ -618,8 +629,6 @@ async function resolveToolDisplayMeta(
           'update_user_preferences': 'Update Preferences',
           'send_developer_feedback': 'Send Feedback',
           'browser_tool': 'Browser',
-          'office_document_inspect': 'Inspect Office Document',
-          'office_document_edit': 'Edit Office Document',
         },
         'craft-agents-docs': {
           'SearchCraftAgents': 'Search Docs',
@@ -749,8 +758,6 @@ async function resolveToolDisplayMeta(
     'NotebookEdit': 'Edit Notebook',
     'KillShell': 'Kill Shell',
     'TaskOutput': 'Task Output',
-    'office_document_inspect': 'Inspect Office Document',
-    'office_document_edit': 'Edit Office Document',
   }
 
   const nativeDisplayName = nativeToolNames[toolName]
@@ -800,6 +807,10 @@ interface RunningBackgroundTask {
   workflowId?: string
   /** Count of workflow sub-agents completed so far (Workflow tasks only). */
   agentsCompleted?: number
+  /** spawn_session children are first-class sessions and must not be orphaned at parent turn end. */
+  source?: 'spawn_session'
+  /** Child finished while the parent turn was still running — wake after the parent goes idle. */
+  needsIdleWake?: boolean
 }
 
 interface ManagedSession {
@@ -892,9 +903,9 @@ interface ManagedSession {
   sharedId?: string
   // Model to use for this session (overrides global config if set)
   model?: string
-  // LLM connection slug for this session (locked after first message)
+  // LLM connection slug for this session
   llmConnection?: string
-  // Whether the connection is locked (cannot be changed after first agent creation)
+  // When true, workspace/global defaults and queued snapshots cannot retarget this session
   connectionLocked?: boolean
   // Thinking level for this session ('off', 'think', 'max')
   thinkingLevel?: ThinkingLevel
@@ -979,6 +990,23 @@ interface ManagedSession {
   // One-shot: after regenerate, inject prior turns into a fresh backend session.
   regenerateSeedPending?: boolean
   regenerateSeedApplied?: boolean
+  // Force the next provider runtime to start a new native session. Used when
+  // regenerate has no safe provider-native anchor before the target user turn.
+  forceFreshSdkSession?: boolean
+  // Runtime-only transaction. Persistence keeps originalMessages until a
+  // non-empty replacement commits; failures restore this snapshot.
+  regenerateTransaction?: {
+    runId: string
+    keepThroughMessageId: string
+    rendererTruncated: boolean
+    originalMessages: Message[]
+    originalSdkSessionId?: string
+    originalBranchContextStrategy?: 'sdk-fork' | 'seeded-fresh-session'
+    originalBranchFromSdkSessionId?: string
+    originalBranchFromSessionPath?: string
+    originalBranchFromSdkCwd?: string
+    originalBranchFromSdkTurnId?: string
+  }
   // One-shot hidden summary injected on the first turn after a remote transfer.
   transferredSessionSummary?: string
   // Whether the transferred-session summary has already been injected.
@@ -986,7 +1014,14 @@ interface ManagedSession {
   // Token refresh manager for OAuth token refresh with rate limiting
   tokenRefreshManager: TokenRefreshManager
   // Metadata for sessions created by automations
-  triggeredBy?: { automationName?: string; event?: string; timestamp?: number }
+  triggeredBy?: {
+    automationName?: string
+    event?: string
+    timestamp?: number
+    sourceSessionId?: string
+    automationDepth?: number
+    rootSessionId?: string
+  }
   // Promise that resolves when the agent instance is ready (for title gen to await)
   agentReady?: Promise<void>
   agentReadyResolve?: () => void
@@ -1137,6 +1172,7 @@ export function buildAgentSessionConfig(managed: ManagedSession): SessionConfig 
     branchFromSessionPath: managed.branchContextStrategy === 'sdk-fork' ? managed.branchFromSessionPath : undefined,
     branchFromSdkCwd: managed.branchContextStrategy === 'sdk-fork' ? managed.branchFromSdkCwd : undefined,
     branchFromSdkTurnId: managed.branchContextStrategy === 'sdk-fork' ? managed.branchFromSdkTurnId : undefined,
+    forceFreshSdkSession: managed.forceFreshSdkSession,
     branchFromMessageId: managed.branchFromMessageId,
     createdAt: managed.lastMessageAt,
     lastUsedAt: managed.lastMessageAt,
@@ -1316,6 +1352,8 @@ export class SessionManager implements ISessionManager {
    * can never disagree about whether keep-alive is on.
    */
   private readonly keepBackgroundTasksAlive: boolean = resolveKeepBackgroundTasksAlive()
+  private taskRunnerLookup?: (workspaceId: string) => TaskRunner
+  private spawnCompletionUnsub?: () => void
   /**
    * Per-session in-flight runtime-refresh promise. Ensures `updateRuntimeConfig`
    * (or a dispose) cannot overlap with another refresh OR with a send-path
@@ -1325,6 +1363,13 @@ export class SessionManager implements ISessionManager {
    * subprocess can race the resulting `chat` against the still-pending update.
    */
   private agentRefreshLocks: Map<string, Promise<void>> = new Map()
+  /**
+   * Per-session source update currently being applied. Regenerate must wait for
+   * this work before it snapshots/rebuilds the backend runtime; otherwise a
+   * rapid "enable source -> regenerate" sequence can rebuild from the previous
+   * MCP selection while setSessionSources is still connecting the new source.
+   */
+  private sessionSourceUpdateLocks: Map<string, Promise<void>> = new Map()
   /** Monotonic clock to ensure strictly increasing message timestamps */
   private lastTimestamp = 0
 
@@ -1824,45 +1869,16 @@ export class SessionManager implements ISessionManager {
         workspaceId,
         enableScheduler: true,
         onPromptsReady: async (prompts) => {
-          // Execute prompt automations by creating new sessions
-          const settled = await Promise.allSettled(
-            prompts.map((pending) =>
-              this.executePromptAutomation({
-                workspaceId,
-                workspaceRootPath,
-                prompt: pending.prompt,
-                labels: pending.labels,
-                permissionMode: pending.permissionMode,
-                mentions: pending.mentions,
-                llmConnection: pending.llmConnection,
-                model: pending.model,
-                thinkingLevel: pending.thinkingLevel,
-                automationName: pending.automationName,
-                telegramTopic: pending.telegramTopic,
-              })
-            )
-          )
-
-          // Write enriched history entries (with session IDs and prompt summaries)
-          for (const [idx, result] of settled.entries()) {
-            const pending = prompts[idx]
-            if (!pending.matcherId) continue
-
-            const entry = createPromptHistoryEntry({
-              matcherId: pending.matcherId,
-              ok: result.status === 'fulfilled',
-              sessionId: result.status === 'fulfilled' ? result.value.sessionId : undefined,
-              prompt: pending.prompt,
-              error: result.status === 'rejected' ? String(result.reason) : undefined,
-            })
-
-            appendAutomationHistoryEntry(workspaceRootPath, entry).catch(e => sessionLog.warn('[Automations] Failed to write history:', e))
-
-            if (result.status === 'rejected') {
-              sessionLog.error(`[Automations] Failed to execute prompt action ${idx + 1}:`, result.reason)
-            } else {
-              sessionLog.info(`[Automations] Created session ${result.value.sessionId} from prompt action`)
-            }
+          const immediate = prompts.filter((pending) => pending.waitForCompletion !== true && pending.reportBack !== true)
+          const deferred = prompts.filter((pending) => pending.waitForCompletion === true || pending.reportBack === true)
+          // Release Agent Event prompt slots as soon as fire-and-forget
+          // sessions are dispatched. Wait/reportBack must not hold the
+          // concurrency cap for up to 30 minutes.
+          if (immediate.length > 0) {
+            await this.runPendingPromptAutomations(workspaceId, workspaceRootPath, immediate)
+          }
+          if (deferred.length > 0) {
+            void this.runPendingPromptAutomations(workspaceId, workspaceRootPath, deferred)
           }
         },
         onError: (event, error) => {
@@ -1933,10 +1949,11 @@ export class SessionManager implements ISessionManager {
     this.eventSink(RPC_CHANNELS.llmConnections.CHANGED, { to: 'all' })
   }
 
-  private broadcastSkillsChanged(workspaceId: string, skills: import('@craft-agent/shared/skills').LoadedSkill[]): void {
+  private broadcastSkillsChanged(workspaceId: string, skills: LoadedSkill[]): void {
     if (!this.eventSink) return
-    sessionLog.info(`Broadcasting skills changed (${skills.length} skills)`)
-    this.eventSink(RPC_CHANNELS.skills.CHANGED, { to: 'workspace', workspaceId }, workspaceId, skills)
+    const visible = filterUserFacingSkills(skills)
+    sessionLog.info(`Broadcasting skills changed (${visible.length} skills)`)
+    this.eventSink(RPC_CHANNELS.skills.CHANGED, { to: 'workspace', workspaceId }, workspaceId, visible)
   }
 
   private broadcastDefaultPermissionsChanged(): void {
@@ -2069,6 +2086,10 @@ export class SessionManager implements ISessionManager {
 
       // Load existing sessions from disk
       this.loadSessionsFromDisk()
+
+      this.spawnCompletionUnsub ??= this.onSessionComplete((evt) => {
+        this.surfaceSpawnedSessionCompletion(evt)
+      })
 
       // Signal that initialization is complete — IPC handlers waiting on initGate will proceed
       this.initGate.markReady()
@@ -2229,12 +2250,25 @@ export class SessionManager implements ISessionManager {
     try {
       // Filter out transient status messages (progress indicators like "Compacting...")
       // Error messages are now persisted with rich fields for diagnostics
-      const persistableMessages = managed.messages.filter(m =>
+      const messagesForPersistence = managed.regenerateTransaction?.originalMessages ?? managed.messages
+      const persistableMessages = messagesForPersistence.filter(m =>
         m.role !== 'status'
       )
+      const persistentFields = pickSessionFields(managed)
+      const regenerateTransaction = managed.regenerateTransaction
+      if (regenerateTransaction) {
+        // Keep the last committed native history identity on disk until the
+        // replacement response commits. A crash during regenerate must reopen
+        // the old transcript and its matching Pi session, never a half-run.
+        persistentFields.sdkSessionId = regenerateTransaction.originalSdkSessionId
+        persistentFields.branchFromSdkSessionId = regenerateTransaction.originalBranchFromSdkSessionId
+        persistentFields.branchFromSessionPath = regenerateTransaction.originalBranchFromSessionPath
+        persistentFields.branchFromSdkCwd = regenerateTransaction.originalBranchFromSdkCwd
+        persistentFields.branchFromSdkTurnId = regenerateTransaction.originalBranchFromSdkTurnId
+      }
 
       const storedSession: StoredSession = {
-        ...pickSessionFields(managed),
+        ...persistentFields,
         workspaceRootPath: managed.workspace.rootPath,
         createdAt: managed.createdAt ?? Date.now(),
         lastUsedAt: Date.now(),
@@ -3469,7 +3503,7 @@ export class SessionManager implements ISessionManager {
    * Creates the appropriate backend agent based on LLM connection.
    *
    * Provider resolution order:
-   * 1. session.llmConnection (locked after first message)
+   * 1. session.llmConnection (locked against default inheritance after first use)
    * 2. workspace.defaults.defaultLlmConnection
    * 3. global defaultLlmConnection
    * 4. fallback: no connection configured
@@ -3502,8 +3536,8 @@ export class SessionManager implements ISessionManager {
     if (!managed.agent) {
       const end = perf.start('agent.create', { sessionId: managed.id })
 
-      // Lock the connection after first resolution
-      // This ensures the session always uses the same provider
+      // Lock after first resolution so later workspace/global default
+      // changes do not silently retarget this session. The picker can still switch.
       if (connection && !managed.connectionLocked) {
         managed.llmConnection = connection.slug
         managed.connectionLocked = true
@@ -3582,6 +3616,7 @@ export class SessionManager implements ISessionManager {
 
       const onSdkSessionIdUpdate = (sdkSessionId: string) => {
         managed.sdkSessionId = sdkSessionId
+        managed.forceFreshSdkSession = false
         // Retire branch-only fork metadata now that child session is established
         if (managed.branchFromSdkSessionId) {
           sessionLog.info(`Branch fork established for ${managed.id}: child=${sdkSessionId}, retiring parent fork metadata (parent=${managed.branchFromSdkSessionId})`)
@@ -3712,6 +3747,13 @@ export class SessionManager implements ISessionManager {
         isHeadless: !AGENT_FLAGS.defaultModesEnabled,
         skipConfigWatcher: true, // Server owns workspace-level ConfigWatcher — don't duplicate in agents
         automationSystem: this.automationSystems.get(managed.workspace.rootPath),
+        automationContext: {
+          triggeredByAutomation: !!managed.triggeredBy,
+          automationDepth: managed.triggeredBy?.automationDepth ?? 0,
+          sourceSessionId: managed.triggeredBy?.sourceSessionId,
+          sourceSessionName: managed.name,
+          rootSessionId: managed.triggeredBy?.rootSessionId ?? managed.triggeredBy?.sourceSessionId,
+        },
         systemPromptPreset: managed.systemPromptPreset,
         debugMode: _platform?.isDebugMode ? { enabled: true, logFilePath: _platform.getLogFilePath?.() } : undefined,
         // Image resize callback — prevents oversized images from entering conversation history
@@ -4372,63 +4414,12 @@ export class SessionManager implements ISessionManager {
         // The UI calls window.electronAPI.performOAuth() when user clicks "Sign in".
       }
 
+      this.spawnCompletionUnsub ??= this.onSessionComplete((evt) => {
+        this.surfaceSpawnedSessionCompletion(evt)
+      })
+
       // Wire up onSpawnSession to create independent sessions from agent tool calls
-      managed.agent.onSpawnSession = async (request) => {
-        sessionLog.info(`Spawn session request from session ${managed.id}:`, request.name || '(unnamed)')
-
-        const session = await this.createSession(managed.workspace.id, {
-          name: request.name,
-          llmConnection: request.llmConnection ?? managed.llmConnection,
-          model: request.model ?? managed.model,
-          enabledSourceSlugs: request.enabledSourceSlugs ?? managed.enabledSourceSlugs,
-          permissionMode: request.permissionMode ?? managed.permissionMode,
-          thinkingLevel: request.thinkingLevel ?? managed.thinkingLevel,
-          labels: request.labels ?? managed.labels,
-          workingDirectory: request.workingDirectory,
-          projectId: request.projectId ?? managed.projectId,
-          // Spawned sessions become subtasks of the spawning session.
-          parentSessionId: managed.id,
-        })
-
-        // Build FileAttachment[] from paths (if any)
-        let fileAttachments: FileAttachment[] | undefined
-        if (request.attachments?.length) {
-          const attachments: FileAttachment[] = []
-          for (const a of request.attachments) {
-            try {
-              const extraDirs = getWorkspaceAllowedDirs(managed.workspace.id)
-              if (request.workingDirectory) extraDirs.push(request.workingDirectory)
-              const safePath = await validateFilePath(a.path, extraDirs)
-              const attachment = readFileAttachment(safePath)
-              if (attachment) {
-                if (a.name) attachment.name = a.name
-                attachments.push(attachment)
-              } else {
-                sessionLog.warn(`Spawn session: attachment not found: ${a.path}`)
-              }
-            } catch (error) {
-              const message = error instanceof Error ? error.message : String(error)
-              sessionLog.warn(`Spawn session: blocked attachment path ${a.path}: ${message}`)
-            }
-          }
-          if (attachments.length > 0) fileAttachments = attachments
-        }
-
-        // (session_created is emitted by createSession above.)
-
-        // Fire and forget — send the message but don't await completion
-        this.sendMessage(session.id, request.prompt, fileAttachments).catch(err => {
-          sessionLog.error(`Failed to send message to spawned session ${session.id}:`, err)
-        })
-
-        return {
-          sessionId: session.id,
-          name: session.name || request.name || session.id,
-          status: 'started' as const,
-          connection: session.llmConnection,
-          model: session.model,
-        }
-      }
+      managed.agent.onSpawnSession = (request) => this.spawnSessionFromTool(managed, request)
 
       // Wire up session self-management tools (set_session_labels, set_session_status, etc.)
       mergeSessionScopedToolCallbacks(managed.id, {
@@ -4479,7 +4470,7 @@ export class SessionManager implements ISessionManager {
             if (missing.length) warnings.push(`Unknown sources (kept in the spec, but they don't exist in this workspace): ${missing.join(', ')}`)
           }
           if (input.skills?.length) {
-            // loadAllSkills matches dispatch-time [skill:slug] resolution (global + workspace).
+            // loadAllSkills matches dispatch-time [skill:slug] resolution (global, bundled, workspace).
             const available = new Set(loadAllSkills(ws.rootPath).map(s => s.slug))
             const missing = input.skills.filter(s => !available.has(s))
             if (missing.length) warnings.push(`Unknown skills (kept in the spec, but they don't exist in this workspace): ${missing.join(', ')}`)
@@ -4508,6 +4499,8 @@ export class SessionManager implements ISessionManager {
           const created = await createTaskFromSpec(this, ws.id, ws.rootPath, parsed.data)
           return { ...created, warnings: [...warnings, ...created.warnings] }
         },
+        runTaskFn: async (input) => this.runTaskFromTool(managed.workspace.id, input),
+        getTaskResultsFn: async (slug, runId) => loadTaskResults(managed.workspace.rootPath, slug, runId),
         getSessionInfoFn: (sessionId?: string) => {
           const targetId = sessionId ?? managed.id
           const session = this.sessions.get(targetId)
@@ -4589,6 +4582,7 @@ export class SessionManager implements ISessionManager {
               startTime: t.startTime,
               elapsedSeconds: t.elapsedSeconds ?? wallElapsed,
               completedAt: t.completedAt,
+              ...(t.source ? { source: t.source } : {}),
             }
           })
         },
@@ -4883,8 +4877,8 @@ export class SessionManager implements ISessionManager {
 
   /**
    * Set the LLM connection for a session.
-   * Can only be changed before the first message is sent (connection is locked after).
-   * This determines which LLM provider/backend will be used for this session.
+   * User-initiated switches are allowed after the first message; connectionLocked
+   * only blocks workspace-default / queued-snapshot inheritance.
    */
   async setSessionConnection(sessionId: string, connectionSlug: string): Promise<void> {
     const managed = this.sessions.get(sessionId)
@@ -4893,21 +4887,20 @@ export class SessionManager implements ISessionManager {
       throw new Error(`Session ${sessionId} not found`)
     }
 
-    // Only allow changing connection before first message (session hasn't started)
-    if (managed.messages && managed.messages.length > 0) {
-      sessionLog.warn(`setSessionConnection: cannot change connection after session has started (${sessionId})`)
-      throw new Error('Cannot change connection after session has started')
-    }
-
-    // Validate connection exists
-    const { getLlmConnection } = await import('@craft-agent/shared/config/storage')
     const connection = getLlmConnection(connectionSlug)
     if (!connection) {
       sessionLog.warn(`setSessionConnection: connection "${connectionSlug}" not found`)
       throw new Error(`LLM connection "${connectionSlug}" not found`)
     }
+    if (isUnsupportedLlmConnection(connection)) {
+      sessionLog.warn(`setSessionConnection: connection "${connectionSlug}" is no longer supported`)
+      throw new Error(UNSUPPORTED_LLM_CONNECTION_MESSAGE)
+    }
+
+    if (managed.llmConnection === connectionSlug) return
 
     managed.llmConnection = connectionSlug
+    managed.connectionLocked = true
     // Persist in-memory state directly to avoid race with pending queue writes
     this.persistSession(managed)
     await this.flushSession(managed.id)
@@ -4920,6 +4913,10 @@ export class SessionManager implements ISessionManager {
       connectionSlug,
       supportsBranching: resolveSupportsBranching(managed),
     }, managed.workspace.id)
+
+    if (managed.agent) {
+      await this.tryRefreshAgentRuntime(managed, 'user connection switch')
+    }
   }
 
   // ============================================
@@ -5187,6 +5184,24 @@ export class SessionManager implements ISessionManager {
    * Otherwise, servers will be built fresh on next message.
    */
   async setSessionSources(sessionId: string, sourceSlugs: string[]): Promise<void> {
+    const previous = this.sessionSourceUpdateLocks.get(sessionId)
+    const update = (async () => {
+      // Preserve command order when the user changes the selection repeatedly.
+      await previous?.catch(() => undefined)
+      await this.applySessionSources(sessionId, sourceSlugs)
+    })()
+    this.sessionSourceUpdateLocks.set(sessionId, update)
+
+    try {
+      await update
+    } finally {
+      if (this.sessionSourceUpdateLocks.get(sessionId) === update) {
+        this.sessionSourceUpdateLocks.delete(sessionId)
+      }
+    }
+  }
+
+  private async applySessionSources(sessionId: string, sourceSlugs: string[]): Promise<void> {
     const managed = this.sessions.get(sessionId)
     if (!managed) {
       throw new Error(`Session not found: ${sessionId}`)
@@ -5597,30 +5612,50 @@ export class SessionManager implements ISessionManager {
   /**
    * Update the model for a session
    * Pass null to clear the session-specific model (will use global config)
-   * @param connection - Optional LLM connection slug (only applied if not already locked)
+   * @param connection - Optional LLM connection slug (applied on user-initiated picker changes)
    */
   async updateSessionModel(sessionId: string, workspaceId: string, model: string | null, connection?: string): Promise<void> {
     sessionLog.info(`[updateSessionModel] sessionId=${sessionId}, model=${model}, connection=${connection}`)
     const managed = this.sessions.get(sessionId)
     if (managed) {
       managed.model = model ?? undefined
-      // Also update connection if provided and not already locked
-      if (connection && !managed.connectionLocked) {
-        managed.llmConnection = connection
+      const previousConnection = managed.llmConnection
+      let connectionChanged = false
+      if (connection && connection !== managed.llmConnection) {
+        const nextConnection = getLlmConnection(connection)
+        if (!nextConnection) {
+          sessionLog.warn(`updateSessionModel: connection "${connection}" not found`)
+        } else if (isUnsupportedLlmConnection(nextConnection)) {
+          sessionLog.warn(`updateSessionModel: connection "${connection}" is no longer supported`)
+        } else {
+          managed.llmConnection = connection
+          managed.connectionLocked = true
+          connectionChanged = true
+        }
       }
-      // Persist to disk (include connection if it was updated)
       const updates: { model?: string; llmConnection?: string } = { model: model ?? undefined }
-      if (connection && !managed.connectionLocked) {
-        updates.llmConnection = connection
+      if (connectionChanged) {
+        updates.llmConnection = managed.llmConnection
       }
       await updateSessionMetadata(managed.workspace.rootPath, sessionId, updates)
+      if (connectionChanged) {
+        this.sendEvent({
+          type: 'connection_changed',
+          sessionId,
+          connectionSlug: managed.llmConnection!,
+          supportsBranching: resolveSupportsBranching(managed),
+        }, managed.workspace.id)
+        if (managed.agent) {
+          await this.tryRefreshAgentRuntime(managed, 'user connection switch')
+        }
+      }
       // Update agent model if it already exists (takes effect on next query)
       if (managed.agent) {
         // Fallback chain: session model > workspace default > connection default
         const wsConfig = loadWorkspaceConfig(managed.workspace.rootPath)
         const sessionConn = resolveSessionConnection(managed.llmConnection, wsConfig?.defaults?.defaultLlmConnection)
         const effectiveModel = model ?? wsConfig?.defaults?.model ?? sessionConn?.defaultModel!
-        sessionLog.info(`[updateSessionModel] Calling agent.setModel(${effectiveModel}) [agent exists=${!!managed.agent}, connectionLocked=${managed.connectionLocked}]`)
+        sessionLog.info(`[updateSessionModel] Calling agent.setModel(${effectiveModel}) [agent exists=${!!managed.agent}, previousConnection=${previousConnection}, connectionLocked=${managed.connectionLocked}]`)
         managed.agent.setModel(effectiveModel)
       } else {
         sessionLog.info(`[updateSessionModel] No agent yet, model will apply on next agent creation`)
@@ -6412,27 +6447,64 @@ export class SessionManager implements ISessionManager {
         workspaceDefaultConnectionSlug: loadWorkspaceConfig(workspaceRootPath)?.defaults?.defaultLlmConnection,
         managedModel: managed.model,
       })
-      const modelInputAttachments = filterAttachmentsForModelInput(
+      const preparedImages = prepareModelImageAttachments({
         attachments,
-        messageBackendContext.connection,
-        messageBackendContext.resolvedModel,
-      )
-      modelInputAttachments.attachments = hydrateAttachmentBytes(modelInputAttachments.attachments)
-      if (modelInputAttachments.omittedImages.length > 0) {
-        const omittedNames = modelInputAttachments.omittedImages.map(a => a.name).join(', ')
-        sessionLog.info(`Omitting ${modelInputAttachments.omittedImages.length} image attachment(s) from model input for ${messageBackendContext.resolvedModel}: ${omittedNames}`)
+        storedAttachments,
+        connection: messageBackendContext.connection,
+        modelId: messageBackendContext.resolvedModel,
+      })
+      const imageInputRequestId = `${sessionId}:${userMessage.id}`
+      sessionLog.info('image-input', {
+        requestId: imageInputRequestId,
+        model: messageBackendContext.resolvedModel,
+        provider: messageBackendContext.connection?.providerType,
+        payloadImageCount: preparedImages.payloadImageCount,
+        images: preparedImages.diagnostics,
+        ...(preparedImages.ok ? {} : { code: preparedImages.code }),
+      })
+      if (!preparedImages.ok) {
+        const typedError = createTypedError(preparedImages.code, {
+          message: preparedImages.message,
+          details: preparedImages.diagnostics.map(image =>
+            `${image.name} mime=${image.mimeType ?? 'unknown'} bytes=${image.byteLength ?? 0} sha256=${image.sha256 ?? 'none'} hasBytes=${image.hasBytes}`,
+          ),
+        })
+        const errorMessage: Message = {
+          id: generateMessageId(),
+          role: 'error',
+          content: `${typedError.title}: ${typedError.message}`,
+          timestamp: this.monotonic(),
+          errorCode: typedError.code,
+          errorTitle: typedError.title,
+          errorDetails: typedError.details,
+          errorCanRetry: typedError.canRetry,
+        }
+        managed.messages.push(errorMessage)
+        this.persistSession(managed)
         this.sendEvent({
-          type: 'info',
+          type: 'typed_error',
           sessionId,
-          message: `Image attachment${modelInputAttachments.omittedImages.length === 1 ? '' : 's'} not sent because image input is disabled for ${messageBackendContext.resolvedModel}.`,
-          level: 'warning',
+          error: {
+            code: typedError.code,
+            title: typedError.title,
+            message: typedError.message,
+            actions: typedError.actions,
+            canRetry: typedError.canRetry,
+            details: typedError.details,
+          },
+          timestamp: errorMessage.timestamp,
         }, managed.workspace.id)
+        sendSpan.mark('image-input.blocked')
+        sendSpan.end()
+        await this.onProcessingStopped(sessionId, 'error')
+        return
       }
 
       sendSpan.mark('chat.starting')
-      const chatIterator = agent.chat(message, modelInputAttachments.attachments, {
+      const chatIterator = agent.chat(message, preparedImages.attachments, {
         previousResponseInterrupted,
       })
+      this.announceRegenerateReplacement(managed)
       sessionLog.info('Got chat iterator, starting iteration...')
 
       for await (const event of chatIterator) {
@@ -6551,7 +6623,7 @@ export class SessionManager implements ISessionManager {
 
           sendSpan.mark('chat.complete')
           sendSpan.end()
-          this.onProcessingStopped(sessionId, 'complete')
+          await this.onProcessingStopped(sessionId, 'complete')
           return  // Exit function, skip finally block (onProcessingStopped handles cleanup)
         }
 
@@ -6568,7 +6640,7 @@ export class SessionManager implements ISessionManager {
         sendSpan.end()
       } else if (managed.stopRequested) {
         sessionLog.info('Chat loop completed after stop request - events drained successfully')
-        this.onProcessingStopped(sessionId, 'interrupted')
+        await this.onProcessingStopped(sessionId, 'interrupted')
       } else {
         sessionLog.info('Chat loop exited unexpectedly')
       }
@@ -6593,7 +6665,7 @@ export class SessionManager implements ISessionManager {
         // by setting isProcessing = false directly. All other abort reasons route
         // through onProcessingStopped for queue draining.
         if (reason === AbortReason.UserStop || reason === AbortReason.Redirect || reason === undefined) {
-          this.onProcessingStopped(sessionId, 'interrupted')
+          await this.onProcessingStopped(sessionId, 'interrupted')
         }
       } else {
         sessionLog.error('Error in chat:', error)
@@ -6612,7 +6684,7 @@ export class SessionManager implements ISessionManager {
           error: error instanceof Error ? error.message : 'Unknown error'
         }, managed.workspace.id)
         // Handle error via centralized handler
-        this.onProcessingStopped(sessionId, 'error')
+        await this.onProcessingStopped(sessionId, 'error')
       }
     } finally {
       // Only handle cleanup for unexpected exits (loop break without complete event)
@@ -6622,7 +6694,7 @@ export class SessionManager implements ISessionManager {
         sessionLog.info('Finally block cleanup - unexpected exit')
         sendSpan.mark('chat.unexpected_exit')
         sendSpan.end()
-        this.onProcessingStopped(sessionId, 'interrupted')
+        await this.onProcessingStopped(sessionId, 'interrupted')
       }
     }
   }
@@ -6632,6 +6704,11 @@ export class SessionManager implements ISessionManager {
    * Used by the response-card regenerate control.
    */
   async regenerateLastResponse(sessionId: string): Promise<{ success: true }> {
+    // Source selection changes perform asynchronous MCP connection/pool work.
+    // Observe all changes requested before regenerate so the fresh runtime is
+    // never created from the previous tool snapshot.
+    await this.sessionSourceUpdateLocks.get(sessionId)?.catch(() => undefined)
+
     const managed = this.sessions.get(sessionId)
     if (!managed) {
       throw new Error(`Session ${sessionId} not found`)
@@ -6670,23 +6747,67 @@ export class SessionManager implements ISessionManager {
       )
       const options = managed.lastSentOptions
 
-      managed.messages = managed.messages.slice(0, lastUserIdx + 1)
+      const originalMessages = managed.messages
+      const previousAssistant = originalMessages
+        .slice(0, lastUserIdx)
+        .findLast(message => message.role === 'assistant' && !message.isIntermediate && !message.hidden)
+      const sessionPath = getSessionStoragePath(managed.workspace.rootPath, sessionId)
+      const previousPiAnchor = previousAssistant
+        ? await getPiTurnAnchor(sessionPath, previousAssistant.id)
+        : undefined
+      if (managed.stopRequested || !managed.isProcessing) {
+        return { success: true }
+      }
+
+      const runId = randomUUID()
+      managed.regenerateTransaction = {
+        runId,
+        keepThroughMessageId: userMessage.id,
+        rendererTruncated: false,
+        originalMessages,
+        originalSdkSessionId: managed.sdkSessionId,
+        originalBranchContextStrategy: managed.branchContextStrategy,
+        originalBranchFromSdkSessionId: managed.branchFromSdkSessionId,
+        originalBranchFromSessionPath: managed.branchFromSessionPath,
+        originalBranchFromSdkCwd: managed.branchFromSdkCwd,
+        originalBranchFromSdkTurnId: managed.branchFromSdkTurnId,
+      }
+
+      managed.messages = originalMessages.slice(0, lastUserIdx + 1)
       this.persistSession(managed)
       await this.flushSession(managed.id)
       if (managed.stopRequested || !managed.isProcessing) {
         return { success: true }
       }
 
-      this.sendEvent({
-        type: 'messages_truncated',
-        sessionId,
-        keepThroughMessageId: userMessage.id,
-      }, managed.workspace.id)
+      this.sendEvent({ type: 'regenerate_started', sessionId, runId }, managed.workspace.id)
       announced = true
 
       managed.sdkSessionId = undefined
-      managed.regenerateSeedPending = true
-      managed.regenerateSeedApplied = false
+      if (previousPiAnchor && managed.regenerateTransaction.originalSdkSessionId) {
+        // Fork the exact current Pi session at the assistant turn immediately
+        // before the target user prompt. The target prompt is then sent once by
+        // sendMessage; the replaced assistant turn never enters native context.
+        managed.branchContextStrategy = 'sdk-fork'
+        managed.branchFromSdkSessionId = managed.regenerateTransaction.originalSdkSessionId
+        managed.branchFromSessionPath = sessionPath
+        managed.branchFromSdkCwd = managed.sdkCwd
+        managed.branchFromSdkTurnId = previousPiAnchor
+        managed.forceFreshSdkSession = false
+        managed.regenerateSeedPending = false
+        managed.regenerateSeedApplied = false
+      } else {
+        // First response (or legacy session without a Pi anchor): never call
+        // continueRecent(). Start fresh and inject only turns before the target
+        // user prompt through the existing one-shot branch seed path.
+        managed.branchFromSdkSessionId = undefined
+        managed.branchFromSessionPath = undefined
+        managed.branchFromSdkCwd = undefined
+        managed.branchFromSdkTurnId = undefined
+        managed.forceFreshSdkSession = true
+        managed.regenerateSeedPending = true
+        managed.regenerateSeedApplied = false
+      }
       this.persistSession(managed)
       await this.disposeManagedAgentRuntime(managed, 'regenerate last response')
 
@@ -6719,7 +6840,16 @@ export class SessionManager implements ISessionManager {
 
       return { success: true }
     } catch (error) {
-      if (announced) {
+      if (managed.regenerateTransaction) {
+        if (announced) {
+          this.sendEvent({
+            type: 'error',
+            sessionId,
+            error: error instanceof Error ? error.message : 'Failed to regenerate',
+          }, managed.workspace.id)
+        }
+        await this.onProcessingStopped(sessionId, 'error')
+      } else if (announced) {
         this.sendEvent({
           type: 'error',
           sessionId,
@@ -6741,6 +6871,18 @@ export class SessionManager implements ISessionManager {
       const message = managed.messages.find(candidate => candidate.id === entry.messageId)
       return message && !message.hidden && message.isQueued ? [message] : []
     })
+  }
+
+  private announceRegenerateReplacement(managed: ManagedSession): void {
+    const transaction = managed.regenerateTransaction
+    if (!transaction || transaction.rendererTruncated) return
+    transaction.rendererTruncated = true
+    this.sendEvent({
+      type: 'messages_truncated',
+      sessionId: managed.id,
+      keepThroughMessageId: transaction.keepThroughMessageId,
+      runId: transaction.runId,
+    }, managed.workspace.id)
   }
 
   private interruptLiveGenerationForQueuedFollowUp(managed: ManagedSession, messageId: string): void {
@@ -6942,6 +7084,14 @@ export class SessionManager implements ISessionManager {
       managed.agent.forceAbort(AbortReason.UserStop)
     }
 
+    // Parent stop does not cancel first-class spawn_session children; tell the UI how many remain.
+    const runningChildCount = countRunningSpawnChildren({
+      registry: managed.backgroundTaskRegistry.values(),
+      parentId: sessionId,
+      sessions: this.sessions.values(),
+    })
+    const runningChildPayload = !silent && runningChildCount > 0 ? { runningChildCount } : {}
+
     // Only show "Response interrupted" message when user explicitly clicked Stop
     // Silent mode is used when redirecting (sending new message while processing)
     if (!silent) {
@@ -6958,6 +7108,7 @@ export class SessionManager implements ISessionManager {
         message: interruptedMessage,
         // Include queued texts so the UI can restore them to the input field
         ...(queuedTexts.length > 0 ? { queuedMessages: queuedTexts } : {}),
+        ...runningChildPayload,
       }, managed.workspace.id)
     } else {
       // Still send interrupted event but without the message (for UI state update)
@@ -7111,6 +7262,80 @@ export class SessionManager implements ISessionManager {
     }
   }
 
+  private async settleRegenerateTransaction(
+    managed: ManagedSession,
+    reason: 'complete' | 'interrupted' | 'error' | 'timeout',
+  ): Promise<{ reason: 'complete' | 'interrupted' | 'error' | 'timeout'; rolledBack: boolean }> {
+    const transaction = managed.regenerateTransaction
+    if (!transaction) return { reason, rolledBack: false }
+
+    const keepIdx = managed.messages.findIndex(message => message.id === transaction.keepThroughMessageId)
+    const replacementMessages = keepIdx >= 0 ? managed.messages.slice(keepIdx + 1) : []
+    const hasNonEmptyFinalResponse = replacementMessages.some(message =>
+      message.role === 'assistant'
+      && !message.isIntermediate
+      && !message.hidden
+      && message.content.trim().length > 0
+    )
+
+    if (reason === 'complete' && hasNonEmptyFinalResponse) {
+      managed.regenerateTransaction = undefined
+      managed.forceFreshSdkSession = false
+      managed.regenerateSeedPending = false
+      managed.regenerateSeedApplied = false
+      managed.branchContextStrategy = transaction.originalBranchContextStrategy
+      managed.branchFromSdkSessionId = undefined
+      managed.branchFromSessionPath = undefined
+      managed.branchFromSdkCwd = undefined
+      managed.branchFromSdkTurnId = undefined
+      sessionLog.info('Regenerate transaction committed', {
+        sessionId: managed.id,
+        runId: transaction.runId,
+      })
+      return { reason, rolledBack: false }
+    }
+
+    await this.disposeManagedAgentRuntime(managed, 'regenerate rollback')
+
+    const originalIds = new Set(transaction.originalMessages.map(message => message.id))
+    const diagnostics = replacementMessages.filter(message =>
+      (message.role === 'error' || message.role === 'info') && !originalIds.has(message.id)
+    )
+    managed.messages = [...transaction.originalMessages, ...diagnostics]
+    managed.streamingText = ''
+    managed.sdkSessionId = transaction.originalSdkSessionId
+    managed.branchContextStrategy = transaction.originalBranchContextStrategy
+    managed.branchFromSdkSessionId = transaction.originalBranchFromSdkSessionId
+    managed.branchFromSessionPath = transaction.originalBranchFromSessionPath
+    managed.branchFromSdkCwd = transaction.originalBranchFromSdkCwd
+    managed.branchFromSdkTurnId = transaction.originalBranchFromSdkTurnId
+    managed.forceFreshSdkSession = false
+    managed.regenerateSeedPending = false
+    managed.regenerateSeedApplied = false
+    managed.regenerateTransaction = undefined
+
+    const settledReason = reason === 'complete' ? 'error' : reason
+    if (reason === 'complete') {
+      this.sendEvent({
+        type: 'error',
+        sessionId: managed.id,
+        error: 'Regeneration completed without a response. The previous response was restored.',
+      }, managed.workspace.id)
+    }
+    this.sendEvent({
+      type: 'messages_restored',
+      sessionId: managed.id,
+      messages: transaction.originalMessages,
+      runId: transaction.runId,
+    }, managed.workspace.id)
+    sessionLog.info('Regenerate transaction rolled back', {
+      sessionId: managed.id,
+      runId: transaction.runId,
+      reason: settledReason,
+    })
+    return { reason: settledReason, rolledBack: true }
+  }
+
   /**
    * Central handler for when processing stops (any reason).
    * Single source of truth for cleanup and queue processing.
@@ -7125,7 +7350,10 @@ export class SessionManager implements ISessionManager {
     const managed = this.sessions.get(sessionId)
     if (!managed) return
 
-    sessionLog.info(`Processing stopped for session ${sessionId}: ${reason}`)
+    const regenerateOutcome = await this.settleRegenerateTransaction(managed, reason)
+    const completionReason = regenerateOutcome.reason
+
+    sessionLog.info(`Processing stopped for session ${sessionId}: ${completionReason}`)
 
     // 1. Cleanup state
     this.setProcessing(managed, false)
@@ -7164,7 +7392,7 @@ export class SessionManager implements ISessionManager {
     const currentFinalMessageId = this.getLastFinalAssistantMessageId(managed.messages)
     const didReceiveNewFinalMessage = !!currentFinalMessageId && currentFinalMessageId !== turnStartFinalMessageId
 
-    if (reason === 'complete' && didReceiveNewFinalMessage) {
+    if (completionReason === 'complete' && didReceiveNewFinalMessage && !regenerateOutcome.rolledBack) {
       if (isViewing) {
         // User is watching - mark as read immediately
         await this.markSessionRead(sessionId)
@@ -7181,7 +7409,7 @@ export class SessionManager implements ISessionManager {
     // 3. Auto-complete mini agent sessions to avoid session list clutter
     //    Mini agents are spawned from EditPopovers for quick config edits
     //    and should automatically move to 'done' when finished
-    if (reason === 'complete' && managed.systemPromptPreset === 'mini' && managed.sessionStatus !== 'done') {
+    if (completionReason === 'complete' && managed.systemPromptPreset === 'mini' && managed.sessionStatus !== 'done') {
       sessionLog.info(`Auto-completing mini agent session ${sessionId}`)
       await this.setSessionStatus(sessionId, 'done')
     }
@@ -7235,13 +7463,16 @@ export class SessionManager implements ISessionManager {
       this.emitSessionComplete({
         sessionId,
         workspaceId: managed.workspace.id,
-        reason,
+        reason: completionReason,
         finalMessageId: currentFinalMessageId,
         finalText: currentFinalMessageId
           ? managed.messages.find(m => m.id === currentFinalMessageId)?.content
           : undefined,
         tokenUsage: managed.tokenUsage,
       })
+      // spawn_session completions that arrived mid-turn never reached the model
+      // (the tool already returned `started`). Wake now that the parent is idle.
+      this.flushDeferredSpawnWakes(managed)
     }
 
     // 6. Always persist
@@ -7500,7 +7731,7 @@ export class SessionManager implements ISessionManager {
     const now = Date.now()
     let orphaned = 0
     for (const info of managed.backgroundTaskRegistry.values()) {
-      if (info.status === 'running') {
+      if (shouldOrphanBackgroundTask(info, this.keepBackgroundTasksAlive)) {
         info.status = 'orphaned'
         info.completedAt = now
         orphaned++
@@ -7525,6 +7756,248 @@ export class SessionManager implements ISessionManager {
     return Array.from(managed.backgroundTaskRegistry.values())
       .map((t) => ({ ...t }))
       .sort((a, b) => b.startTime - a.startTime)
+  }
+
+  setTaskRunnerLookup(lookup: (workspaceId: string) => TaskRunner): void {
+    this.taskRunnerLookup = lookup
+  }
+
+  /**
+   * Fire a Pi Agent Event from session-layer orchestration (spawn_session).
+   * Failures stay isolated — delegation must not break the parent session.
+   */
+  private emitSessionAgentEvent(
+    managed: ManagedSession,
+    event: AutomationAgentEvent,
+    input: SdkAutomationInput,
+  ): void {
+    const system = this.automationSystems.get(managed.workspace.rootPath)
+    if (!system) return
+    const enriched = enrichAgentEventInput(event, input, {
+      workspaceId: managed.workspace.id,
+      sessionId: managed.id,
+      sessionName: managed.name,
+      triggeredByAutomation: !!managed.triggeredBy,
+      automationDepth: managed.triggeredBy?.automationDepth ?? 0,
+      rootSessionId: managed.triggeredBy?.rootSessionId ?? managed.triggeredBy?.sourceSessionId,
+    })
+    void system.executeAgentEvent(event, enriched).catch(error => {
+      sessionLog.warn('[Automations] session-layer agent event failed', {
+        event,
+        sessionId: managed.id,
+        error: error instanceof Error ? error.message : String(error),
+      })
+    })
+  }
+
+  /**
+   * Create a first-class child session for spawn_session (wait or background).
+   * Extracted so SessionManager tests can exercise the contract without booting an agent.
+   */
+  private async spawnSessionFromTool(
+    managed: ManagedSession,
+    request: SpawnSessionRequest,
+  ): Promise<SpawnSessionResult> {
+    sessionLog.info(`Spawn session request from session ${managed.id}:`, request.name || '(unnamed)')
+
+    const session = await this.createSession(managed.workspace.id, {
+      name: request.name,
+      llmConnection: request.llmConnection ?? managed.llmConnection,
+      model: request.model ?? managed.model,
+      enabledSourceSlugs: request.enabledSourceSlugs ?? managed.enabledSourceSlugs,
+      permissionMode: request.permissionMode ?? managed.permissionMode,
+      thinkingLevel: request.thinkingLevel ?? managed.thinkingLevel,
+      labels: request.labels ?? managed.labels,
+      workingDirectory: request.workingDirectory,
+      projectId: request.projectId ?? managed.projectId,
+      // Spawned sessions become subtasks of the spawning session.
+      parentSessionId: managed.id,
+    })
+
+    // Build FileAttachment[] from paths (if any)
+    let fileAttachments: FileAttachment[] | undefined
+    if (request.attachments?.length) {
+      const attachments: FileAttachment[] = []
+      for (const a of request.attachments) {
+        try {
+          const extraDirs = getWorkspaceAllowedDirs(managed.workspace.id)
+          if (request.workingDirectory) extraDirs.push(request.workingDirectory)
+          const safePath = await validateFilePath(a.path, extraDirs)
+          const attachment = readFileAttachment(safePath)
+          if (attachment) {
+            if (a.name) attachment.name = a.name
+            attachments.push(attachment)
+          } else {
+            sessionLog.warn(`Spawn session: attachment not found: ${a.path}`)
+          }
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error)
+          sessionLog.warn(`Spawn session: blocked attachment path ${a.path}: ${message}`)
+        }
+      }
+      if (attachments.length > 0) fileAttachments = attachments
+    }
+
+    const mode = request.mode === 'wait' ? 'wait' : 'background'
+    const baseResult = {
+      sessionId: session.id,
+      name: session.name || request.name || session.id,
+      connection: session.llmConnection,
+      model: session.model,
+    }
+
+    this.emitSessionAgentEvent(managed, 'SubagentStart', {
+      hook_event_name: 'SubagentStart',
+      agent_id: session.id,
+      agent_type: 'spawn_session',
+    })
+
+    if (mode === 'wait') {
+      const parentGeneration = managed.processingGeneration
+      let settleWait: ((result: { status: 'failed'; finalText?: string }) => void) | undefined
+      const outcomeP = waitForChildSessionCompletion({
+        childSessionId: session.id,
+        timeoutMs: resolveSpawnWaitTimeoutMs(request.timeoutMs),
+        isParentInterrupted: () =>
+          managed.stopRequested === true || managed.processingGeneration !== parentGeneration,
+        subscribe: (listener) => this.onSessionComplete(listener),
+        onAttach: (settle) => { settleWait = settle },
+      })
+      this.sendMessage(session.id, request.prompt, fileAttachments).catch(err => {
+        sessionLog.error(`Failed to send message to spawned session ${session.id}:`, err)
+        settleWait?.({
+          status: 'failed',
+          finalText: err instanceof Error ? err.message : String(err),
+        })
+      })
+      const outcome = await outcomeP
+      this.emitSessionAgentEvent(managed, 'SubagentStop', {
+        hook_event_name: 'SubagentStop',
+        agent_id: session.id,
+        agent_type: 'spawn_session',
+        ...(outcome.status === 'failed' && outcome.finalText ? { error: outcome.finalText } : {}),
+      })
+      return {
+        ...baseResult,
+        status: outcome.status,
+        ...(outcome.finalText ? { finalText: outcome.finalText } : {}),
+      }
+    }
+
+    const intent = (request.name?.trim() || request.prompt.trim().slice(0, 80)) || session.id
+    await this.processEvent(managed, {
+      type: 'task_backgrounded',
+      toolUseId: `spawn:${session.id}`,
+      taskId: session.id,
+      intent,
+    })
+    const registered = managed.backgroundTaskRegistry.get(session.id)
+    if (registered) registered.source = 'spawn_session'
+
+    this.sendMessage(session.id, request.prompt, fileAttachments).catch(err => {
+      sessionLog.error(`Failed to send message to spawned session ${session.id}:`, err)
+      void this.processEvent(managed, {
+        type: 'task_completed',
+        taskId: session.id,
+        status: 'failed',
+        summary: err instanceof Error ? err.message : String(err),
+      })
+    })
+
+    return {
+      ...baseResult,
+      status: 'started',
+    }
+  }
+
+  private flushDeferredSpawnWakes(managed: ManagedSession): void {
+    for (const info of managed.backgroundTaskRegistry.values()) {
+      if (!info.needsIdleWake || info.source !== 'spawn_session' || info.status === 'running') continue
+      info.needsIdleWake = false
+      const stored = managed.backgroundTaskOutputs.get(info.taskId)
+      const nudge = buildBackgroundTaskNudge({
+        status: info.status,
+        taskId: info.taskId,
+        intent: info.intent,
+        summary: stored?.summary,
+        outputFile: stored?.outputFile || undefined,
+      })
+      sessionLog.info(`[bg-lifecycle] flushing deferred spawn wake to idle session`, {
+        sessionId: managed.id,
+        taskId: info.taskId,
+        status: info.status,
+      })
+      void this.sendMessage(managed.id, nudge, [], [], { hidden: true }).catch((err) => {
+        sessionLog.error(`[bg-lifecycle] failed to surface completed task ${info.taskId}:`, err)
+      })
+    }
+  }
+
+  private surfaceSpawnedSessionCompletion(evt: SessionCompletionEvent): void {
+    const child = this.sessions.get(evt.sessionId)
+    const parentId = child?.parentSessionId
+    if (!child || !parentId) return
+    const parent = this.sessions.get(parentId)
+    if (!parent) return
+    const running = parent.backgroundTaskRegistry.get(child.id)
+    if (!running || running.source !== 'spawn_session' || running.status !== 'running') return
+    void this.processEvent(parent, {
+      type: 'task_completed',
+      taskId: child.id,
+      status: mapCompletionReasonToTaskStatus(evt.reason),
+      summary: evt.finalText,
+    })
+  }
+
+  private findTaskOrchestratorSessionId(workspaceId: string, slug: string): string | undefined {
+    for (const session of this.sessions.values()) {
+      if (
+        session.workspace.id === workspaceId
+        && session.taskSlug === slug
+        && !session.parentSessionId
+        && !session.taskDraft
+      ) {
+        return session.id
+      }
+    }
+    return undefined
+  }
+
+  private async runTaskFromTool(
+    workspaceId: string,
+    input: { slug?: string; orchestratorSessionId?: string; params?: Record<string, unknown>; waitForCompletion?: boolean },
+  ) {
+    const runner = this.taskRunnerLookup?.(workspaceId)
+    if (!runner) {
+      throw new Error('run_task is not available — the Tasks Conductor is not wired for this workspace.')
+    }
+
+    let slug = input.slug
+    let orchestratorSessionId = input.orchestratorSessionId
+    if (!slug && orchestratorSessionId) {
+      slug = this.sessions.get(orchestratorSessionId)?.taskSlug
+    }
+    if (!slug) {
+      throw new Error('Could not resolve a task slug. Pass slug or a task orchestrator session id.')
+    }
+    if (!orchestratorSessionId) {
+      orchestratorSessionId = this.findTaskOrchestratorSessionId(workspaceId, slug)
+    }
+
+    const snapshot = runner.run(slug, {
+      orchestratorSessionId,
+      params: input.params,
+    })
+    const settled = input.waitForCompletion
+      ? await runner.waitUntilSettled(slug, snapshot.runId)
+      : snapshot
+    return {
+      slug: settled.slug,
+      runId: settled.runId,
+      status: settled.status,
+      nodeCount: settled.nodes.filter((n) => n.state !== 'skipped').length,
+      nodes: settled.nodes.map((n) => ({ id: n.id, state: n.state, sessionId: n.sessionId })),
+    }
   }
 
   /**
@@ -7554,6 +8027,9 @@ export class SessionManager implements ISessionManager {
     }
 
     sessionLog.info(`Found output for task ${taskId}: file=${info.outputFile}, status=${info.status}`)
+    if (!info.outputFile) {
+      return info.summary || null
+    }
     try {
       const content = await readFile(info.outputFile, 'utf-8')
       // Delete after successful read to prevent memory leak
@@ -8487,6 +8963,7 @@ export class SessionManager implements ISessionManager {
             toolUseId: event.toolUseId,
             toolName: toolName,
             result: formattedResult,
+            ...(event.content && event.content.length > 0 ? { content: event.content } : {}),
             turnId: event.turnId,
             parentToolUseId,
             isError: inferredError,
@@ -8803,6 +9280,15 @@ export class SessionManager implements ISessionManager {
             status: event.status,
           })
 
+          if (!wasAlreadyTerminal && priorEntry?.source === 'spawn_session') {
+            this.emitSessionAgentEvent(managed, 'SubagentStop', {
+              hook_event_name: 'SubagentStop',
+              agent_id: event.taskId,
+              agent_type: 'spawn_session',
+              ...(event.status === 'failed' && event.summary ? { error: event.summary } : {}),
+            })
+          }
+
           this.evictStaleBackgroundTasks(managed)
         }
         // Forward to renderer for UI update
@@ -8820,21 +9306,29 @@ export class SessionManager implements ISessionManager {
         // the terminal notification reaches the agent through the live stream, so
         // we skip then. Gated on keep-alive because only that mode delivers this
         // event between turns; guarded against duplicate notifications.
-        if (managed && this.keepBackgroundTasksAlive && !managed.isProcessing && !wasAlreadyTerminal) {
-          const taskIntent = managed.backgroundTaskRegistry.get(event.taskId)?.intent
+        const completedEntry = managed?.backgroundTaskRegistry.get(event.taskId)
+        if (completedEntry && shouldDeferSpawnWake({
+          isProcessing: managed?.isProcessing ?? false,
+          wasAlreadyTerminal,
+          source: completedEntry.source,
+        })) {
+          completedEntry.needsIdleWake = true
+        }
+        if (managed && shouldWakeOnTaskCompleted({
+          isProcessing: managed.isProcessing,
+          wasAlreadyTerminal,
+          keepAlive: this.keepBackgroundTasksAlive,
+          source: completedEntry?.source,
+        })) {
+          const taskIntent = completedEntry?.intent
           const outputFile = event.outputFile || managed.backgroundTaskOutputs.get(event.taskId)?.outputFile
-          const label = taskIntent ? `"${taskIntent}"` : `task ${event.taskId}`
-          const nudge = event.status === 'completed'
-            ? [
-                `[background-task-completed] The background agent you launched (${label}) has finished.`,
-                outputFile ? `Its full output is saved at: ${outputFile}` : '',
-                `Read that output file and present the results to the user now. Do NOT spawn another background agent — just read the file and summarize the findings inline.`,
-              ].filter(Boolean).join('\n')
-            : [
-                `[background-task-${event.status}] The background agent you launched (${label}) ended with status "${event.status}".`,
-                outputFile ? `Any partial output is at: ${outputFile}.` : '',
-                `Briefly let the user know it did not complete successfully. Do NOT spawn another background agent.`,
-              ].filter(Boolean).join('\n')
+          const nudge = buildBackgroundTaskNudge({
+            status: event.status,
+            taskId: event.taskId,
+            intent: taskIntent,
+            summary: event.summary,
+            outputFile: outputFile || undefined,
+          })
           sessionLog.info(`[bg-lifecycle] surfacing completed background task to idle session`, {
             sessionId,
             taskId: event.taskId,
@@ -9065,6 +9559,71 @@ export class SessionManager implements ISessionManager {
     }
   }
 
+  private async runPendingPromptAutomations(
+    workspaceId: string,
+    workspaceRootPath: string,
+    prompts: PendingPrompt[],
+  ): Promise<void> {
+    const settled = await Promise.allSettled(
+      prompts.map((pending) =>
+        this.executePromptAutomation({
+          workspaceId,
+          workspaceRootPath,
+          prompt: pending.prompt,
+          labels: pending.labels,
+          permissionMode: pending.permissionMode,
+          mentions: pending.mentions,
+          llmConnection: pending.llmConnection,
+          model: pending.model,
+          thinkingLevel: pending.thinkingLevel,
+          automationName: pending.automationName,
+          telegramTopic: pending.telegramTopic,
+          waitForCompletion: pending.waitForCompletion,
+          reportBack: pending.reportBack,
+          timeoutMs: pending.timeoutMs,
+          sourceEvent: pending.sourceEvent,
+          sourceSessionId: pending.sourceSessionId,
+          rootSessionId: pending.rootSessionId,
+          automationDepth: pending.automationDepth,
+        })
+      )
+    )
+
+    for (const [idx, result] of settled.entries()) {
+      const pending = prompts[idx]
+      if (!pending?.matcherId) continue
+
+      const value = result.status === 'fulfilled' ? result.value : undefined
+      const waitFailed = value?.waitReason === 'timeout' || value?.waitReason === 'interrupted' || value?.waitReason === 'error'
+      const reportFailed = Boolean(value?.reportBackError)
+      const ok = result.status === 'fulfilled' && !waitFailed && !reportFailed
+      const error = result.status === 'rejected'
+        ? String(result.reason)
+        : value?.reportBackError ?? (waitFailed ? value?.waitReason : undefined)
+      const entry = createPromptHistoryEntry({
+        matcherId: pending.matcherId,
+        ok,
+        sessionId: value?.sessionId,
+        prompt: pending.prompt,
+        error,
+        status: ok ? 'succeeded' : 'failed',
+        event: pending.sourceEvent,
+        sourceSessionId: pending.sourceSessionId,
+        reason: value?.waitReason,
+        finalText: value?.finalText,
+        durationMs: value?.durationMs,
+      })
+
+      appendAutomationHistoryEntry(workspaceRootPath, entry).catch(e => sessionLog.warn('[Automations] Failed to write history:', e))
+
+      if (result.status === 'rejected') {
+        sessionLog.error(`[Automations] Failed to execute prompt action ${idx + 1}:`, result.reason)
+      } else {
+        sessionLog.info(`[Automations] Created session ${result.value.sessionId} from prompt action`)
+      }
+    }
+  }
+
   /**
    * Execute a prompt automation by creating a new session and sending the prompt.
    *
@@ -9075,7 +9634,7 @@ export class SessionManager implements ISessionManager {
    */
   async executePromptAutomation(
     input: ExecutePromptAutomationInput,
-  ): Promise<{ sessionId: string }> {
+  ): Promise<ExecutePromptAutomationResult> {
     const {
       workspaceId,
       workspaceRootPath,
@@ -9089,6 +9648,12 @@ export class SessionManager implements ISessionManager {
       automationName,
       telegramTopic,
       waitForCompletion,
+      reportBack,
+      timeoutMs,
+      sourceEvent,
+      sourceSessionId,
+      rootSessionId,
+      automationDepth,
     } = input
 
     // Warn if llmConnection was specified but doesn't resolve
@@ -9126,7 +9691,14 @@ export class SessionManager implements ISessionManager {
     // and the session is identifiable as automation-initiated after reload
     const managed = this.sessions.get(session.id)
     if (managed) {
-      managed.triggeredBy = { automationName, timestamp: Date.now() }
+      managed.triggeredBy = {
+        automationName,
+        event: sourceEvent,
+        timestamp: Date.now(),
+        sourceSessionId,
+        automationDepth: automationDepth ?? (sourceEvent ? 1 : undefined),
+        rootSessionId: rootSessionId ?? sourceSessionId,
+      }
       this.persistSession(managed)
     }
 
@@ -9159,7 +9731,8 @@ export class SessionManager implements ISessionManager {
     // until the entire turn (including tool calls) finishes and trips the 30s
     // client timeout (craft-agents-oss#943). The session streams live either
     // way; a background failure surfaces in the session UI and is logged here.
-    if (waitForCompletion === false) {
+    const shouldWait = waitForCompletion === true || reportBack === true
+    if (waitForCompletion === false && !shouldWait) {
       void this.sendMessage(session.id, prompt, undefined, undefined, {
         skillSlugs: resolved?.skillSlugs,
       }).catch((err) => {
@@ -9171,11 +9744,106 @@ export class SessionManager implements ISessionManager {
       return { sessionId: session.id }
     }
 
-    await this.sendMessage(session.id, prompt, undefined, undefined, {
-      skillSlugs: resolved?.skillSlugs,
+    if (!shouldWait) {
+      await this.sendMessage(session.id, prompt, undefined, undefined, {
+        skillSlugs: resolved?.skillSlugs,
+      })
+      return { sessionId: session.id }
+    }
+
+    const clampedTimeout = Math.min(
+      Math.max(timeoutMs ?? DEFAULT_PROMPT_WAIT_TIMEOUT_MS, 1),
+      MAX_PROMPT_WAIT_TIMEOUT_MS,
+    )
+    const startedAt = Date.now()
+    const waitPromise = waitForAutomationSessionCompletion({
+      sessionId: session.id,
+      timeoutMs: clampedTimeout,
+      subscribe: (listener) => this.onSessionComplete(listener),
     })
 
-    return { sessionId: session.id }
+    const sendResult = this.sendMessage(session.id, prompt, undefined, undefined, {
+      skillSlugs: resolved?.skillSlugs,
+    }).then(
+      () => 'sent' as const,
+      (err) => {
+        sessionLog.error('[Automations] sendMessage failed while waiting for completion', {
+          sessionId: session.id,
+          error: err instanceof Error ? err.message : String(err),
+        })
+        return 'failed' as const
+      },
+    )
+
+    const outcome = await Promise.race([
+      waitPromise,
+      sendResult.then((result) => {
+        if (result === 'failed') return { reason: 'error' as const }
+        return waitPromise
+      }),
+    ])
+    const durationMs = Date.now() - startedAt
+    let reportBackError: string | undefined
+
+    if (reportBack === true) {
+      reportBackError = await this.deliverAutomationReportBack({
+        sourceSessionId,
+        automationName,
+        finalText: outcome.finalText,
+        waitReason: outcome.reason,
+        idleTimeoutMs: Math.min(Math.max(clampedTimeout - (Date.now() - startedAt), 1), 60_000),
+      })
+    }
+
+    return {
+      sessionId: session.id,
+      waitReason: outcome.reason,
+      finalText: outcome.finalText,
+      durationMs,
+      reportBackError,
+    }
+  }
+
+  /**
+   * Write an automation result into the source session only when it is idle.
+   * Never call sendMessage while the source is processing — that steers or
+   * queues into the live user turn.
+   */
+  private async deliverAutomationReportBack(opts: {
+    sourceSessionId?: string
+    automationName?: string
+    finalText?: string
+    waitReason?: ExecutePromptAutomationResult['waitReason']
+    idleTimeoutMs: number
+  }): Promise<string | undefined> {
+    if (opts.waitReason !== 'complete') return undefined
+    if (!opts.sourceSessionId) return 'source session unavailable'
+
+    let source = this.sessions.get(opts.sourceSessionId)
+    if (!source) return 'source session unavailable'
+
+    if (source.isProcessing) {
+      const idle = await waitForAutomationSessionCompletion({
+        sessionId: opts.sourceSessionId,
+        timeoutMs: opts.idleTimeoutMs,
+        subscribe: (listener) => this.onSessionComplete(listener),
+      })
+      if (idle.reason === 'timeout') return 'source session unavailable'
+      source = this.sessions.get(opts.sourceSessionId)
+      if (!source || source.isProcessing) return 'source session unavailable'
+    }
+
+    const name = opts.automationName || 'automation'
+    const body = [
+      `[Automation "${name}" result]`,
+      opts.finalText?.trim() || '(no output)',
+    ].join('\n\n')
+    try {
+      await this.sendMessage(opts.sourceSessionId, body)
+      return undefined
+    } catch {
+      return 'source session unavailable'
+    }
   }
 
   /**
@@ -9590,6 +10258,8 @@ export class SessionManager implements ISessionManager {
    * Should be called on app shutdown to prevent resource leaks.
    */
   cleanup(): void {
+    this.spawnCompletionUnsub?.()
+    this.spawnCompletionUnsub = undefined
     sessionLog.info('Cleaning up resources...')
 
     // Stop all ConfigWatchers (file system watchers)

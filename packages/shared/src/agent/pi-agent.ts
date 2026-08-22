@@ -17,7 +17,7 @@ import { spawn, type ChildProcess } from 'node:child_process';
 import { createInterface, type Interface as ReadlineInterface } from 'node:readline';
 import type { AgentEvent } from '@craft-agent/core/types';
 import type { FileAttachment } from '../utils/files.ts';
-import { hydrateAttachmentBytes } from '../utils/files.ts';
+import { hydrateAttachmentBytes, imageAttachmentsMissingBytes } from '../utils/files.ts';
 import { getProxyEnvVars } from '../config/proxy-env.ts';
 
 import type {
@@ -71,9 +71,6 @@ import { attachSessionSelfManagementBindings } from './session-self-management-b
 // Session tool proxy definitions (for registering with subprocess)
 import {
   getSessionToolProxyDefs,
-  PI_OFFICE_DOCUMENT_EDIT_TOOL,
-  PI_OFFICE_DOCUMENT_INSPECT_TOOL,
-  PI_OFFICE_TOOL_ROUTING_PROMPT,
   SESSION_TOOL_NAMES,
 } from './backend/pi/session-tool-defs.ts';
 
@@ -81,6 +78,7 @@ import {
 import {
   SESSION_BACKEND_TOOL_NAMES,
   SESSION_TOOL_REGISTRY,
+  type ToolContent as SessionToolContent,
   type ToolResult as SessionToolResult,
 } from '@craft-agent/session-tools-core';
 import { createClaudeContext, type SessionToolContext } from './claude-context.ts';
@@ -123,6 +121,11 @@ export const PI_BACKEND_SESSION_TOOL_NAMES = new Set<string>([
   'spawn_session',
   'browser_tool',
 ]);
+
+type ProxyToolExecutionResult = {
+  content: string | SessionToolContent[];
+  isError: boolean;
+};
 
 /**
  * Map a transport `err.code` to an agent-facing string for `browser_tool` failures.
@@ -268,7 +271,7 @@ export class PiAgent extends BaseAgent {
 
   // Pending tool executions (correlation map for subprocess tool_execute_request -> main process -> tool_execute_response)
   private pendingToolExecutions: Map<string, {
-    resolve: (result: { content: string; isError: boolean }) => void;
+    resolve: (result: ProxyToolExecutionResult) => void;
     reject: (error: Error) => void;
   }> = new Map();
 
@@ -297,6 +300,12 @@ export class PiAgent extends BaseAgent {
     resolve: (result: { summary: string; firstKeptEntryId: string; tokensBefore: number } | null) => void;
     reject: (error: Error) => void;
   }> = new Map();
+
+  private setupEmitted = false;
+  private sessionStartEmitted = false;
+  private sessionEndEmitted = false;
+  private stopEmitted = false;
+  private preCompactEmitted = false;
 
   // Pending auto-compaction toggle requests
   private pendingAutoCompactionToggles: Map<string, {
@@ -574,6 +583,8 @@ export class PiAgent extends BaseAgent {
       branchFromSdkSessionId: this.config.session?.branchFromSdkSessionId,
       branchFromSessionPath: this.config.session?.branchFromSessionPath,
       branchFromSdkTurnId: this.config.session?.branchFromSdkTurnId,
+      resumeSdkSessionId: this.config.session?.sdkSessionId,
+      forceFreshSession: this.config.session?.forceFreshSdkSession,
     });
 
     // Wait for subprocess to report ready
@@ -619,6 +630,7 @@ export class PiAgent extends BaseAgent {
 
     // If pool has source tools, register them with the subprocess.
     this.registerPoolToolsWithSubprocess();
+    this.emitLifecycleReadyOnce();
   }
 
   /**
@@ -1170,11 +1182,23 @@ export class PiAgent extends BaseAgent {
         this.emitAutomationEvent(hookEvent, {
           hook_event_name: hookEvent,
           tool_name: agentEvent.toolName ?? (event.toolName as string) ?? 'unknown',
-          tool_input: agentEvent.input,
+          tool_input: (agentEvent.input as Record<string, unknown> | undefined),
+          tool_use_id: (event.toolCallId as string | undefined),
           ...(agentEvent.isError
             ? { error: typeof agentEvent.result === 'string' ? agentEvent.result : undefined }
             : { tool_response: typeof agentEvent.result === 'string' ? agentEvent.result : undefined }),
         });
+      }
+
+      if (agentEvent.type === 'info' && typeof agentEvent.message === 'string' && agentEvent.message.includes('Compacting') && !this.preCompactEmitted) {
+        this.preCompactEmitted = true;
+        this.emitAutomationEvent('PreCompact', {
+          hook_event_name: 'PreCompact',
+          compact_trigger: 'auto',
+        });
+      }
+      if (agentEvent.type === 'info' && typeof agentEvent.message === 'string' && agentEvent.message.startsWith('Compacted')) {
+        this.preCompactEmitted = false;
       }
 
       this.eventQueue.enqueue(agentEvent);
@@ -1189,6 +1213,45 @@ export class PiAgent extends BaseAgent {
     if (this.adapter.shouldCompleteQueue(eventType === 'agent_end')) {
       this.eventQueue.complete();
     }
+  }
+
+  /**
+   * Tighten-only PreToolUse automation. Fail-open: exceptions leave the
+   * built-in allow/modify result unchanged.
+   */
+  private applyAutomationToolDecision(
+    toolName: string,
+    input: Record<string, unknown>,
+    toolCallId: string | undefined,
+    sessionId: string,
+  ): { type: 'block'; reason: string } | { type: 'continue'; input: Record<string, unknown>; modified: boolean } {
+    try {
+      const decision = this.automationSystem?.evaluateToolDecision({
+        hook_event_name: 'PreToolUse',
+        tool_name: toolName,
+        tool_input: input,
+        tool_use_id: toolCallId,
+      });
+      if (decision?.decision === 'block') {
+        const label = decision.automationName ?? decision.matcherId;
+        const reason = decision.reason
+          ? `Blocked by automation "${label}": ${decision.reason}`
+          : `Blocked by automation "${label}"`;
+        void this.automationSystem?.recordDecisionHistory({
+          matcherId: decision.matcherId,
+          event: 'PreToolUse',
+          sourceSessionId: sessionId,
+          reason,
+        });
+        return { type: 'block', reason };
+      }
+      if (decision?.decision === 'modify' && decision.updatedInput && Object.keys(decision.updatedInput).length > 0) {
+        return { type: 'continue', input: { ...input, ...decision.updatedInput }, modified: true };
+      }
+    } catch (err) {
+      this.debug(`Automation tool decision failed: ${err}`);
+    }
+    return { type: 'continue', input, modified: false };
   }
 
   /**
@@ -1218,13 +1281,6 @@ export class PiAgent extends BaseAgent {
       this.debug(`Captured pre-tool metadata for ${toolName} (${toolCallId}, sessionId=${debugSessionId}): intent=${!!preIntent}, displayName=${!!preDisplayName}`);
     }
 
-    // Fire PreToolUse automation event — await so automations run before tool executes
-    await this.emitAutomationEvent('PreToolUse', {
-      hook_event_name: 'PreToolUse',
-      tool_name: toolName,
-      tool_input: input,
-    });
-
     const rootPath = this.config.workspace.rootPath ?? this.workingDirectory;
     const workspaceSlug = extractWorkspaceSlug(rootPath, this.config.workspace.id);
     const sessionId = this.config.session?.id || this._sessionId;
@@ -1253,27 +1309,56 @@ export class PiAgent extends BaseAgent {
       onDebug: (msg) => this.debug(`PreToolUse(sessionId=${sessionId}): ${msg}`),
     });
 
+    const emitPreToolUse = async (toolInput: Record<string, unknown>) => {
+      await this.emitAutomationEvent('PreToolUse', {
+        hook_event_name: 'PreToolUse',
+        tool_name: toolName,
+        tool_input: toolInput,
+        tool_use_id: toolCallId,
+      });
+    };
+
+    const sendPermissionBlock = (reason: string) => {
+      const diagnostics = getPermissionModeDiagnostics(sessionId);
+      this.debug(`__PERMISSION_BLOCK__${JSON.stringify({
+        sessionId,
+        toolName,
+        effectiveMode: diagnostics.permissionMode,
+        modeVersion: diagnostics.modeVersion,
+        changedBy: diagnostics.lastChangedBy,
+        changedAt: diagnostics.lastChangedAt,
+        reason,
+      })}`);
+      this.send({ type: 'pre_tool_use_response', requestId, action: 'block', reason });
+    };
+
+    const finishAllowedTool = async (candidateInput: Record<string, unknown>, alreadyModified: boolean) => {
+      const decided = this.applyAutomationToolDecision(toolName, candidateInput, toolCallId, sessionId);
+      if (decided.type === 'block') {
+        sendPermissionBlock(decided.reason);
+        return;
+      }
+      await emitPreToolUse(decided.input);
+      if (decided.modified || alreadyModified) {
+        this.send({ type: 'pre_tool_use_response', requestId, action: 'modify', input: decided.input });
+      } else {
+        this.send({ type: 'pre_tool_use_response', requestId, action: 'allow' });
+      }
+    };
+
     switch (checkResult.type) {
       case 'allow':
-        this.send({ type: 'pre_tool_use_response', requestId, action: 'allow' });
+        await finishAllowedTool(input, false);
         return;
 
       case 'modify':
-        this.send({ type: 'pre_tool_use_response', requestId, action: 'modify', input: checkResult.input });
+        await finishAllowedTool(checkResult.input, true);
         return;
 
       case 'block': {
-        const diagnostics = getPermissionModeDiagnostics(sessionId);
-        this.debug(`__PERMISSION_BLOCK__${JSON.stringify({
-          sessionId,
-          toolName,
-          effectiveMode: diagnostics.permissionMode,
-          modeVersion: diagnostics.modeVersion,
-          changedBy: diagnostics.lastChangedBy,
-          changedAt: diagnostics.lastChangedAt,
-          reason: checkResult.reason,
-        })}`);
-        this.send({ type: 'pre_tool_use_response', requestId, action: 'block', reason: checkResult.reason });
+        // Built-in permission block: keep the #62 observation event.
+        await emitPreToolUse(input);
+        sendPermissionBlock(checkResult.reason);
         return;
       }
 
@@ -1325,12 +1410,13 @@ export class PiAgent extends BaseAgent {
           onDebug: (msg) => this.debug(`PreToolUse(sessionId=${sessionId}): ${msg}`),
         });
 
-        if (postResult.type === 'modify') {
-          this.send({ type: 'pre_tool_use_response', requestId, action: 'modify', input: postResult.input });
-        } else if (postResult.type === 'block') {
-          this.send({ type: 'pre_tool_use_response', requestId, action: 'block', reason: postResult.reason });
+        if (postResult.type === 'block') {
+          await emitPreToolUse(input);
+          sendPermissionBlock(postResult.reason);
+        } else if (postResult.type === 'modify') {
+          await finishAllowedTool(postResult.input, true);
         } else {
-          this.send({ type: 'pre_tool_use_response', requestId, action: 'allow' });
+          await finishAllowedTool(input, false);
         }
         return;
       }
@@ -1338,17 +1424,14 @@ export class PiAgent extends BaseAgent {
       case 'call_llm_intercept':
       case 'spawn_session_intercept':
         // These tools are proxy tools handled via tool_execute_request — just allow
+        await emitPreToolUse(input);
         this.send({ type: 'pre_tool_use_response', requestId, action: 'allow' });
         return;
 
       case 'prompt': {
         if (!this.onPermissionRequest) {
-          // No permission handler — allow
-          if (checkResult.modifiedInput) {
-            this.send({ type: 'pre_tool_use_response', requestId, action: 'modify', input: checkResult.modifiedInput });
-          } else {
-            this.send({ type: 'pre_tool_use_response', requestId, action: 'allow' });
-          }
+          // No permission handler — allow, then tighten via automations
+          await finishAllowedTool(checkResult.modifiedInput ?? input, !!checkResult.modifiedInput);
           return;
         }
 
@@ -1361,6 +1444,11 @@ export class PiAgent extends BaseAgent {
             resolve,
             toolName,
           });
+        });
+
+        this.emitAutomationEvent('PermissionRequest', {
+          hook_event_name: 'PermissionRequest',
+          tool_name: toolName,
         });
 
         this.onPermissionRequest({
@@ -1386,11 +1474,7 @@ export class PiAgent extends BaseAgent {
           return;
         }
 
-        if (checkResult.modifiedInput) {
-          this.send({ type: 'pre_tool_use_response', requestId, action: 'modify', input: checkResult.modifiedInput });
-        } else {
-          this.send({ type: 'pre_tool_use_response', requestId, action: 'allow' });
-        }
+        await finishAllowedTool(checkResult.modifiedInput ?? input, !!checkResult.modifiedInput);
         return;
       }
     }
@@ -1401,7 +1485,7 @@ export class PiAgent extends BaseAgent {
    * Routes proxy tool calls (MCP, API, session) to the appropriate handler.
    *
    * The subprocess expects responses in the format:
-   *   { content: string; isError: boolean }
+   *   { content: string | ToolContent[]; isError: boolean }
    */
   private async handleToolExecuteRequest(request: {
     requestId: string;
@@ -1446,13 +1530,13 @@ export class PiAgent extends BaseAgent {
    * - mcp__* tools -> MCP server proxy (TODO)
    * - api_* tools -> API source proxy (TODO)
    *
-   * Returns { content: string; isError: boolean } matching subprocess protocol.
+   * Returns a text-only or multimodal result matching the subprocess protocol.
    */
   private async routeToolCall(
     toolName: string,
     args: Record<string, unknown>
-  ): Promise<{ content: string; isError: boolean }> {
-    // Session-scoped tools may be MCP-prefixed or canonical (native Office).
+  ): Promise<ProxyToolExecutionResult> {
+    // Session-scoped tools may be MCP-prefixed or canonical.
     // Normalize the prefix before dispatching to the canonical registry.
     const strippedName = toolName.startsWith('mcp__session__')
       ? toolName.slice('mcp__session__'.length)
@@ -1517,7 +1601,7 @@ export class PiAgent extends BaseAgent {
   private async executeSessionTool(
     toolName: string,
     args: Record<string, unknown>,
-  ): Promise<{ content: string; isError: boolean }> {
+  ): Promise<ProxyToolExecutionResult> {
     try {
       // call_llm uses the shared pre-execution pipeline from BaseAgent
       if (toolName === 'call_llm') {
@@ -1607,9 +1691,10 @@ export class PiAgent extends BaseAgent {
       const ctx = this.getSessionToolContext();
       const result: SessionToolResult = await def.handler(ctx, args);
 
-      // Convert ToolResult to subprocess response format
-      const text = result.content.map(c => c.text).join('\n');
-      return { content: text, isError: !!result.isError };
+      // Preserve MCP-compatible text/image blocks all the way into Pi's model
+      // context. The first block is always text, so older string-only event/UI
+      // consumers still receive the structured envelope and artifact paths.
+      return { content: result.content, isError: !!result.isError };
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
       this.debug(`Session tool ${toolName} failed: ${msg}`);
@@ -1749,6 +1834,7 @@ export class PiAgent extends BaseAgent {
         message: `Pi subprocess exited unexpectedly (${exitReason})`,
       });
       this.eventQueue.complete();
+      this.emitStopOnce('error');
     }
 
     // Reject pending mini completions with error (not null) so callers
@@ -1832,6 +1918,13 @@ export class PiAgent extends BaseAgent {
    * Ask subprocess to compact the active session context.
    */
   private async requestCompact(customInstructions?: string): Promise<{ summary: string; firstKeptEntryId: string; tokensBefore: number } | null> {
+    if (!this.preCompactEmitted) {
+      this.preCompactEmitted = true;
+      this.emitAutomationEvent('PreCompact', {
+        hook_event_name: 'PreCompact',
+        compact_trigger: 'manual',
+      });
+    }
     await this.ensureSubprocess();
 
     const id = `compact-${++this.rpcIdCounter}`;
@@ -1969,6 +2062,7 @@ export class PiAgent extends BaseAgent {
     // Reset state for new turn
     this._isProcessing = true;
     this.abortReason = undefined;
+    this.stopEmitted = false;
     this.eventQueue.reset();
     this.currentUserMessage = message;
     this.adapter.startTurn();
@@ -2073,6 +2167,11 @@ export class PiAgent extends BaseAgent {
       const attachmentParts: string[] = [];
       const images: Array<{ type: string; data: string; mimeType: string }> = [];
       const hydratedAttachments = hydrateAttachmentBytes(attachments) || [];
+      const missingImages = imageAttachmentsMissingBytes(hydratedAttachments);
+      if (missingImages.length > 0) {
+        const names = missingImages.map(att => att.name).join(', ');
+        throw new Error(`image_bytes_unavailable: Image bytes could not be loaded for the model request: ${names}.`);
+      }
       for (const att of hydratedAttachments) {
         const isImage = att.type === 'image' || att.mimeType?.startsWith('image/') === true
         if (isImage && att.base64) {
@@ -2085,20 +2184,19 @@ export class PiAgent extends BaseAgent {
           if (stored) {
             attachmentParts.push(`[Attached image: ${att.name}]\nThe image is included as visual input — look at it. Path: ${stored}`);
           }
-        } else if (isImage && (att.storedPath || att.path)) {
-          attachmentParts.push(`[Attached image: ${att.name}]\n[Stored at: ${att.storedPath || att.path}]`);
         } else if (att.mimeType === 'application/pdf' && att.storedPath) {
           attachmentParts.push(`[Attached PDF: ${att.name}]\n[Stored at: ${att.storedPath}]`);
         } else if (att.type === 'office' && att.storedPath) {
-          // Office uploads retain the original binary for native inspection.
-          // Do not advertise a legacy Markdown sidecar from older sessions:
-          // that path made the model bypass the native tools on its first read.
+          const lower = `${att.name} ${att.storedPath}`.toLowerCase();
+          const officeSkill = lower.includes('.xlsx')
+            ? 'officecli-xlsx'
+            : lower.includes('.pptx')
+              ? 'officecli-pptx'
+              : 'officecli-docx';
           attachmentParts.push(
             `[Attached Office document: ${att.name}]\n` +
             `[Stored at: ${att.storedPath}]\n` +
-            `[Inspect with: ${PI_OFFICE_DOCUMENT_INSPECT_TOOL}]\n` +
-            `[Modify with: ${PI_OFFICE_DOCUMENT_EDIT_TOOL}]\n` +
-            `[Do not read the generated Markdown sidecar unless the native Office tool reports that the document is unsupported.]`,
+            `[Load [skill:officecli] then [skill:${officeSkill}]. Run \`officecli load_skill word\` (or excel / pptx), then inspect and edit with officecli via Bash. Already on PATH; do not curl-install.]`,
           );
         } else if (att.storedPath) {
           let pathInfo = `[Attached file: ${att.name}]\n[Stored at: ${att.storedPath}]`;
@@ -2116,7 +2214,6 @@ export class PiAgent extends BaseAgent {
       // does (buildTextPrompt / buildSDKUserMessage append context to the tail).
       const fullSystemPrompt = [
         systemPrompt,
-        PI_OFFICE_TOOL_ROUTING_PROMPT,
         ...stableParts,
       ].filter(Boolean).join('\n\n');
 
@@ -2200,6 +2297,7 @@ export class PiAgent extends BaseAgent {
       yield { type: 'complete' };
     } finally {
       this._isProcessing = false;
+      this.emitStopOnce('complete');
     }
   }
 
@@ -2316,9 +2414,35 @@ export class PiAgent extends BaseAgent {
     return this._isProcessing;
   }
 
+  private emitLifecycleReadyOnce(): void {
+    if (!this.setupEmitted) {
+      this.setupEmitted = true;
+      this.emitAutomationEvent('Setup', { hook_event_name: 'Setup', source: 'startup' });
+    }
+    if (!this.sessionStartEmitted) {
+      this.sessionStartEmitted = true;
+      this.emitAutomationEvent('SessionStart', {
+        hook_event_name: 'SessionStart',
+        source: this.config.session?.sdkSessionId ? 'resume' : 'startup',
+        model: this._model,
+      });
+    }
+  }
+
+  private emitStopOnce(reason: 'complete' | 'abort' | 'error'): void {
+    if (this.stopEmitted) return;
+    this.stopEmitted = true;
+    this.emitAutomationEvent('Stop', { hook_event_name: 'Stop', stop_reason: reason });
+  }
+
+  private emitSessionEndOnce(): void {
+    if (this.sessionEndEmitted) return;
+    this.sessionEndEmitted = true;
+    this.emitAutomationEvent('SessionEnd', { hook_event_name: 'SessionEnd' });
+  }
+
   async abort(reason?: string): Promise<void> {
-    // Fire Stop hook event (fire-and-forget)
-    this.emitAutomationEvent('Stop', { hook_event_name: 'Stop' });
+    this.emitStopOnce('abort');
 
     // Deny all pending permissions
     for (const [, pending] of this.pendingPermissions) {
@@ -2335,8 +2459,7 @@ export class PiAgent extends BaseAgent {
   }
 
   forceAbort(reason: AbortReason): void {
-    // Fire Stop hook event (fire-and-forget)
-    this.emitAutomationEvent('Stop', { hook_event_name: 'Stop' });
+    this.emitStopOnce('abort');
 
     this.abortReason = reason;
     this._isProcessing = false;
@@ -2416,6 +2539,7 @@ export class PiAgent extends BaseAgent {
   }
 
   destroy(): void {
+    this.emitSessionEndOnce();
     this.stopConfigWatcher();
 
     // Unregister session-scoped tool callbacks

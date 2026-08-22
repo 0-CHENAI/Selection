@@ -23,6 +23,7 @@ import { AutomationMenu } from './AutomationMenu'
 import { BatchAutomationMenu } from './BatchAutomationMenu'
 import { AutomationAvatar } from './AutomationAvatar'
 import { SendResourceToWorkspaceDialog } from '@/components/app-shell/SendResourceToWorkspaceDialog'
+import { ResourceTransferDialog } from '@/components/resources/ResourceTransferDialog'
 import { useAppShellContext } from '@/context/AppShellContext'
 import { cn } from '@/lib/utils'
 import { automationSelection } from '@/hooks/useEntitySelection'
@@ -59,8 +60,10 @@ interface AutomationItemProps {
   onDelete: () => void
   onToggleEnabled: () => void
   onTest: () => void
+  onSimulateMatch?: () => void
   onDuplicate: () => void
   onSendToWorkspace?: () => void
+  onExport?: () => void
 }
 
 function AutomationItem({
@@ -75,8 +78,10 @@ function AutomationItem({
   onDelete,
   onToggleEnabled,
   onTest,
+  onSimulateMatch,
   onDuplicate,
   onSendToWorkspace,
+  onExport,
 }: AutomationItemProps) {
   const { t } = useTranslation()
   const handleClick = useCallback((e: React.MouseEvent) => {
@@ -146,9 +151,11 @@ function AutomationItem({
           enabled={automation.enabled}
           onToggleEnabled={onToggleEnabled}
           onTest={onTest}
+          onSimulateMatch={onSimulateMatch}
           onDuplicate={onDuplicate}
           onDelete={onDelete}
           onSendToWorkspace={onSendToWorkspace}
+          onExport={onExport}
         />
       }
       contextMenuContent={isMultiSelectActive && isInMultiSelect ? <BatchAutomationMenu /> : undefined}
@@ -167,6 +174,7 @@ export interface AutomationsListPanelProps {
   onDeleteAutomation?: (automationId: string) => void
   onToggleAutomation?: (automationId: string) => void
   onTestAutomation?: (automationId: string) => void
+  onSimulateMatchAutomation?: (automationId: string) => void
   onDuplicateAutomation?: (automationId: string) => void
   selectedAutomationId?: string | null
   workspaceRootPath?: string
@@ -180,6 +188,7 @@ export function AutomationsListPanel({
   onDeleteAutomation,
   onToggleAutomation,
   onTestAutomation,
+  onSimulateMatchAutomation,
   onDuplicateAutomation,
   selectedAutomationId,
   workspaceRootPath,
@@ -195,6 +204,7 @@ export function AutomationsListPanel({
   const [sendDialogOpen, setSendDialogOpen] = useState(false)
   const [sendResourceId, setSendResourceId] = useState<string | null>(null)
   const [sendResourceLabel, setSendResourceLabel] = useState('')
+  const [exportResourceId, setExportResourceId] = useState<string | null>(null)
 
   const {
     select: selectAutomation,
@@ -326,12 +336,14 @@ export function AutomationsListPanel({
                   onDelete={() => onDeleteAutomation?.(automation.id)}
                   onToggleEnabled={() => onToggleAutomation?.(automation.id)}
                   onTest={() => onTestAutomation?.(automation.id)}
+                  onSimulateMatch={() => onSimulateMatchAutomation?.(automation.id)}
                   onDuplicate={() => onDuplicateAutomation?.(automation.id)}
                   onSendToWorkspace={hasOtherWorkspaces ? () => {
                     setSendResourceId(automation.id)
                     setSendResourceLabel(automation.name)
                     setSendDialogOpen(true)
                   } : undefined}
+                  onExport={() => setExportResourceId(automation.id)}
                 />
               ))}
             </div>
@@ -349,6 +361,15 @@ export function AutomationsListPanel({
           resourceLabel={sendResourceLabel}
           workspaces={workspaces}
           activeWorkspaceId={activeWorkspaceId}
+        />
+      )}
+      {exportResourceId && activeWorkspaceId && (
+        <ResourceTransferDialog
+          open
+          mode="export"
+          workspaceId={activeWorkspaceId}
+          initialSelection={[{ type: 'automation', id: exportResourceId }]}
+          onOpenChange={(isOpen) => { if (!isOpen) setExportResourceId(null) }}
         />
       )}
     </div>

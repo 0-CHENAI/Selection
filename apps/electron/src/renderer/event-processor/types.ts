@@ -6,6 +6,7 @@
  */
 
 import type { Session, Message, PermissionRequest, CredentialRequest, TypedError, PermissionMode, SessionStatus, AuthRequest, ToolDisplayMeta } from '../../shared/types'
+import type { AgentToolResultContent } from '@craft-agent/core/types'
 
 /**
  * Streaming state for a session - replaces streamingTextRef
@@ -79,6 +80,8 @@ export interface ToolResultEvent {
   toolUseId: string
   toolName?: string
   result: string
+  /** Live-only multimodal blocks; handlers intentionally do not persist Base64. */
+  content?: AgentToolResultContent[]
   isError?: boolean
   turnId?: string
   parentToolUseId?: string
@@ -264,6 +267,8 @@ export interface InterruptedEvent {
   message?: Message
   /** Messages that were queued but not processed — should be restored to input field */
   queuedMessages?: string[]
+  /** spawn_session children still running after this session stopped (not cancelled). */
+  runningChildCount?: number
 }
 
 /**
@@ -522,6 +527,20 @@ export interface MessagesTruncatedEvent {
   type: 'messages_truncated'
   sessionId: string
   keepThroughMessageId: string
+  runId?: string
+}
+
+export interface RegenerateStartedEvent {
+  type: 'regenerate_started'
+  sessionId: string
+  runId: string
+}
+
+export interface MessagesRestoredEvent {
+  type: 'messages_restored'
+  sessionId: string
+  messages: Message[]
+  runId: string
 }
 
 /**
@@ -573,7 +592,9 @@ export type AgentEvent =
   | AuthCompletedEvent
   | SourceActivatedEvent
   | UsageUpdateEvent
+  | RegenerateStartedEvent
   | MessagesTruncatedEvent
+  | MessagesRestoredEvent
 
 /**
  * Side effects that need to be handled outside the pure processor
@@ -585,6 +606,7 @@ export type Effect =
   | { type: 'permission_mode_changed'; sessionId: string; permissionMode: PermissionMode; previousPermissionMode?: PermissionMode; transitionDisplay?: string; modeVersion?: number; changedAt?: string; changedBy?: 'user' | 'system' | 'restore' | 'automation' | 'unknown' }
   | { type: 'restore_input'; text: string }
   | { type: 'toast_error'; message: string }
+  | { type: 'toast_running_children'; count: number }
 
 /**
  * Result of processing an event

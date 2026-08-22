@@ -141,6 +141,22 @@ export function attachSessionSelfManagementBindings(
     enumerable: true,
   });
 
+  Object.defineProperty(context, 'runTask', {
+    get() {
+      return getSessionScopedToolCallbacks(sessionId)?.runTaskFn;
+    },
+    configurable: true,
+    enumerable: true,
+  });
+
+  Object.defineProperty(context, 'getTaskResults', {
+    get() {
+      return getSessionScopedToolCallbacks(sessionId)?.getTaskResultsFn;
+    },
+    configurable: true,
+    enumerable: true,
+  });
+
   // getSessionInfo needs wrapping to default sid → sessionId
   Object.defineProperty(context, 'getSessionInfo', {
     get() {

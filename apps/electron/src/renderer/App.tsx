@@ -910,6 +910,12 @@ export default function App() {
             toast.error(effect.message, { duration: 5000 })
             break
           }
+          case 'toast_running_children': {
+            toast.info(t('toast.parentStoppedChildrenRunning', { count: effect.count }), {
+              duration: 6000,
+            })
+            break
+          }
         }
       }
 
@@ -1087,6 +1093,7 @@ export default function App() {
     syncSessionOptionsFromSession,
     applyPermissionModeState,
     reconcilePermissionModeState,
+    t,
   ])
 
   // Transport reconnect recovery — refresh session metadata plus active/processing
@@ -1314,11 +1321,18 @@ export default function App() {
               timestamp: Date.now()
             }]
           }))
+          const failedImages = attachments.filter((attachment, i) =>
+            storeResults[i]?.status === 'rejected'
+            && (attachment.type === 'image' || attachment.mimeType?.startsWith('image/') === true)
+          )
+          if (failedImages.length > 0) {
+            return
+          }
         }
 
         // Step 2: Add persistent attachment metadata for the agent.
         // - Preserve the original FileAttachment
-        // - Include storedPath so native document tools can inspect Office files
+        // - Include storedPath so OfficeCLI skills can inspect Office files
         // - Resized images: Use resizedBase64 instead of original large base64
         processedAttachments = successfulAttachments.map((att, i) => {
           const stored = storedAttachments?.[i]

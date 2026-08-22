@@ -543,8 +543,11 @@ const EDIT_CONFIGS: Record<EditContextKey, (location: string) => EditConfig> = {
       filePath: `${location}/automations.json`,
       context:
         'The user is editing automations.json which configures automations. ' +
-        'Structure: { version: 2, automations: { EventName: [{ name?, matcher?, cron?, timezone?, permissionMode?, labels?, actions: [...] }] } }. ' +
-        'Each event maps to an array of matcher entries. Each matcher has an actions array ({ type: "prompt", prompt }). ' +
+        'Structure: { version: 2, automations: { EventName: [{ name?, matcher?, cron?, timezone?, permissionMode?, labels?, conditions?, maxDepth?, telegramTopic?, actions: [...] }] } }. ' +
+        'Each event maps to an array of matcher entries. Actions may be: ' +
+        '{ type: "prompt", prompt, waitForCompletion?, reportBack?, timeoutMs?, llmConnection?, model?, thinkingLevel? }, ' +
+        '{ type: "webhook", url, method?, headers?, body?, bodyFormat?, auth?, captureResponse? }, or ' +
+        '{ type: "decision", decision: "block"|"modify", reason?, updatedInput? } (PreToolUse only; tighten-only, no allow). ' +
         'Read ~/.craft-agent/docs/automations.md for full format reference. ' +
         'After editing, confirm clearly what changed.',
     },

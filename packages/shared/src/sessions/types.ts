@@ -151,9 +151,9 @@ export interface SessionConfig {
   sharedId?: string;
   /** Model to use for this session (overrides global config if set) */
   model?: string;
-  /** LLM connection slug for this session (locked after first message) */
+  /** LLM connection slug for this session */
   llmConnection?: string;
-  /** Whether the connection is locked (cannot be changed after first agent creation) */
+  /** When true, workspace/global defaults and queued snapshots cannot retarget this session */
   connectionLocked?: boolean;
   /** Thinking level for this session ('off', 'think', 'max') */
   thinkingLevel?: ThinkingLevel;
@@ -203,12 +203,20 @@ export interface SessionConfig {
    * - Pi: session entry ID (used with SessionManager.branch(anchor))
    */
   branchFromSdkTurnId?: string;
+  /** Force the provider to create a new native session instead of resuming recent history. */
+  forceFreshSdkSession?: boolean;
   /** One-shot hidden summary injected on the first turn after a remote transfer. */
   transferredSessionSummary?: string;
   /** Whether the transferred-session summary has already been injected. */
   transferredSessionSummaryApplied?: boolean;
   /** Metadata for sessions created by automations */
-  triggeredBy?: { automationName?: string; event?: string; timestamp?: number };
+  triggeredBy?: {
+    automationName?: string;
+    event?: string;
+    timestamp?: number;
+    sourceSessionId?: string;
+    automationDepth?: number;
+  };
   /** Workspace-scoped project id this session belongs to (undefined = unbound). */
   projectId?: string;
   /**
@@ -288,9 +296,9 @@ export interface SessionHeader {
   sharedId?: string;
   /** Model to use for this session (overrides global config if set) */
   model?: string;
-  /** LLM connection slug for this session (locked after first message) */
+  /** LLM connection slug for this session */
   llmConnection?: string;
-  /** Whether the connection is locked (cannot be changed after first agent creation) */
+  /** When true, workspace/global defaults and queued snapshots cannot retarget this session */
   connectionLocked?: boolean;
   /** Thinking level for this session ('off', 'think', 'max') */
   thinkingLevel?: ThinkingLevel;
@@ -320,7 +328,13 @@ export interface SessionHeader {
   /** Whether the transferred-session summary has already been injected. */
   transferredSessionSummaryApplied?: boolean;
   /** Metadata for sessions created by automations */
-  triggeredBy?: { automationName?: string; event?: string; timestamp?: number };
+  triggeredBy?: {
+    automationName?: string;
+    event?: string;
+    timestamp?: number;
+    sourceSessionId?: string;
+    automationDepth?: number;
+  };
   /** Workspace-scoped project id this session belongs to (undefined = unbound). */
   projectId?: string;
   /** Per-session shared project memory snapshot; missing means legacy shared. */
@@ -393,9 +407,9 @@ export interface SessionMetadata {
   lastMessageRole?: 'user' | 'assistant' | 'plan' | 'tool' | 'error';
   /** Model to use for this session (overrides global config if set) */
   model?: string;
-  /** LLM connection slug for this session (locked after first message) */
+  /** LLM connection slug for this session */
   llmConnection?: string;
-  /** Whether the connection is locked (cannot be changed after first agent creation) */
+  /** When true, workspace/global defaults and queued snapshots cannot retarget this session */
   connectionLocked?: boolean;
   /** Thinking level for this session ('off', 'think', 'max') */
   thinkingLevel?: ThinkingLevel;

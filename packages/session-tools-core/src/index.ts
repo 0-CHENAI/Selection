@@ -33,6 +33,8 @@ export type {
 
   // Tool result types
   TextContent,
+  ImageContent,
+  ToolContent,
   ToolResult,
 
   // Developer feedback
@@ -136,6 +138,11 @@ export type {
   ResolvedStatusResult,
   CreateTaskInput,
   CreateTaskResult,
+  RunTaskInput,
+  RunTaskResult,
+  RunTaskNodeState,
+  GetTaskResultsInput,
+  TaskResultsPayload,
 } from './context.ts';
 
 export { createNodeFileSystem } from './context.ts';
@@ -169,9 +176,6 @@ export {
   handleRenderTemplate,
   // Send Developer Feedback
   handleSendDeveloperFeedback,
-  // Office documents
-  handleOfficeDocumentInspect,
-  handleOfficeDocumentEdit,
 } from './handlers/index.ts';
 
 export type {
@@ -190,11 +194,6 @@ export type {
   ScriptSandboxArgs,
   RenderTemplateArgs,
   SendDeveloperFeedbackArgs,
-  OfficeDocumentInspectArgs,
-  OfficeDocumentEditArgs,
-  OfficeDocumentInspectCommand,
-  OfficeDocumentEditCommand,
-  OfficeDocumentResultPayload,
 } from './handlers/index.ts';
 
 // Tool definitions — single source of truth
@@ -212,8 +211,6 @@ export {
   TransformDataSchema,
   ScriptSandboxSchema,
   RenderTemplateSchema,
-  OfficeDocumentInspectSchema,
-  OfficeDocumentEditSchema,
   // Browser tool schema
   BrowserToolSchema,
   // Developer feedback schema
@@ -239,17 +236,6 @@ export {
   // JSON Schema converter
   getToolDefsAsJsonSchema,
 } from './tool-defs.ts';
-
-export {
-  officecliBinaryName,
-  resolveOfficecliBinary,
-  resolveOfficecliRuntime,
-} from './runtime/officecli.ts';
-export type {
-  OfficecliBinarySource,
-  ResolvedOfficecliBinary,
-  ResolveOfficecliOptions,
-} from './runtime/officecli.ts';
 
 export type {
   SessionToolExecutionMode,

@@ -18,7 +18,9 @@ import { join } from 'node:path';
 
 import type { AgentEvent } from '@craft-agent/core/types';
 import type { FileAttachment } from '../utils/files.ts';
+import { collectOfficeFormatSkillSlugs } from '../utils/officecli.ts';
 import { expandPath } from '../utils/paths.ts';
+import { resolveSpawnSessionMode, resolveSpawnWaitTimeoutMs } from './spawn-session-tool.ts';
 import { buildTransferredSessionContext } from './conversation-summary.ts';
 import type { ThinkingLevel } from './thinking-levels.ts';
 import { DEFAULT_THINKING_LEVEL, normalizeThinkingLevel } from './thinking-levels.ts';
@@ -64,6 +66,7 @@ import { PrerequisiteManager } from './core/prerequisite-manager.ts';
 // Automation system for agent events
 import type { AutomationSystem } from '../automations/automation-system.ts';
 import type { AgentEvent as AutomationAgentEvent, SdkAutomationInput } from '../automations/types.ts';
+import { enrichAgentEventInput } from '../automations/agent-event-envelope.ts';
 import { getSessionPlansPath, getSessionDataPath, getSessionPath } from '../sessions/storage.ts';
 import { getMiniAgentSystemPrompt } from '../prompts/system.ts';
 import { buildTitlePrompt, buildRegenerateTitlePrompt, validateTitle } from '../utils/title-generator.ts';
@@ -95,6 +98,9 @@ export interface MiniAgentConfig {
 // Spawn Session Types
 // ============================================================
 
+export type SpawnSessionMode = 'wait' | 'background';
+export type SpawnSessionResultStatus = 'started' | 'completed' | 'failed' | 'interrupted' | 'timeout';
+
 export interface SpawnSessionRequest {
   prompt: string;
   name?: string;
@@ -107,15 +113,21 @@ export interface SpawnSessionRequest {
   workingDirectory?: string;
   /** Workspace project id to bind the spawned session to */
   projectId?: string;
+  /** wait = block for finalText; background (default) = notify on complete */
+  mode?: SpawnSessionMode;
+  /** Wait-mode timeout in ms. Clamped to 30 minutes. */
+  timeoutMs?: number;
   attachments?: Array<{ path: string; name?: string }>;
 }
 
 export interface SpawnSessionResult {
   sessionId: string;
   name: string;
-  status: 'started';
+  status: SpawnSessionResultStatus;
   connection?: string;
   model?: string;
+  /** Present in wait mode when the child produced a final assistant message. */
+  finalText?: string;
 }
 
 export interface SpawnSessionHelpResult {
@@ -403,7 +415,16 @@ export abstract class BaseAgent implements AgentBackend {
    */
   protected async emitAutomationEvent(event: AutomationAgentEvent, input: SdkAutomationInput, signal?: AbortSignal): Promise<void> {
     try {
-      await this.automationSystem?.executeAgentEvent(event, input, signal);
+      const enriched = enrichAgentEventInput(event, input, {
+        workspaceId: this.config.workspace.id,
+        sessionId: this.config.session?.id ?? this._sessionId,
+        sessionName: this.config.automationContext?.sourceSessionName,
+        triggeredByAutomation: this.config.automationContext?.triggeredByAutomation,
+        automationDepth: this.config.automationContext?.automationDepth,
+        rootSessionId: this.config.automationContext?.rootSessionId
+          ?? this.config.automationContext?.sourceSessionId,
+      });
+      await this.automationSystem?.executeAgentEvent(event, enriched, signal);
     } catch (err) {
       this.debug(`Automation event ${event} failed: ${err}`);
     }
@@ -931,12 +952,13 @@ ${formattedMessages}
    * must read them itself (enforced by PrerequisiteManager).
    *
    * @param message - The user message containing potential skill mentions
+   * @param attachments - Optional files; Office attachments also load the matching built-in skill
    * @returns Object with:
    *   - skillPaths: Map of slug → resolved SKILL.md absolute path
    *   - cleanMessage: Message with mentions stripped, or default directive
    *   - missingSkills: Array of skill slugs that were mentioned but not found
    */
-  protected extractSkillPaths(message: string): {
+  protected extractSkillPaths(message: string, attachments?: FileAttachment[]): {
     skillPaths: Map<string, string>;
     cleanMessage: string;
     missingSkills: string[];
@@ -956,17 +978,27 @@ ${formattedMessages}
 
     // Resolve SKILL.md paths for matched skills
     const skillPaths = new Map<string, string>();
-    for (const slug of parsed.skills) {
+    const resolveSlug = (slug: string) => {
       const skill = skills.find(s => s.slug === slug);
-      if (skill) {
-        const skillMdPath = join(skill.path, 'SKILL.md');
-        if (existsSync(skillMdPath)) {
-          skillPaths.set(slug, skillMdPath);
-          this.debug(`[extractSkillPaths] Resolved skill ${slug} → ${skillMdPath}`);
-        } else {
-          this.debug(`[extractSkillPaths] SKILL.md not found: ${skillMdPath}`);
-        }
+      if (!skill) return;
+      const skillMdPath = join(skill.path, 'SKILL.md');
+      if (existsSync(skillMdPath)) {
+        skillPaths.set(slug, skillMdPath);
+        this.debug(`[extractSkillPaths] Resolved skill ${slug} → ${skillMdPath}`);
+        return;
       }
+      this.debug(`[extractSkillPaths] SKILL.md not found: ${skillMdPath}`);
+    };
+
+    for (const slug of parsed.skills) {
+      resolveSlug(slug);
+    }
+
+    // Office files: router first (HanaAgent `[Use skill: officecli]`), then format skill
+    const officeFormatSlugs = collectOfficeFormatSkillSlugs(message, attachments);
+    if (officeFormatSlugs.length > 0) resolveSlug('officecli');
+    for (const slug of officeFormatSlugs) {
+      if (!skillPaths.has(slug)) resolveSlug(slug);
     }
 
     // Resolve mentions to semantic markers (like file mentions) instead of stripping them.
@@ -1001,7 +1033,10 @@ ${formattedMessages}
     const pathList = [...skillPaths.entries()]
       .map(([slug, path]) => `- ${path} (skill: ${slug})`)
       .join('\n');
-    return `Before proceeding with the user's request, you MUST read the following skill instruction files using the Read tool or \`cat\` via Bash:\n${pathList}\n\nDo not take any other action until you have read these files.`;
+    const officeHint = skillPaths.has('officecli')
+      ? '\nFor Word / Excel / PowerPoint, prefer `officecli load_skill word` (or excel / pptx); Read the listed files if you do not run load_skill.'
+      : '';
+    return `Before proceeding with the user's request, you MUST read the following skill instruction files using the Read tool or \`cat\` via Bash:\n${pathList}\n\nDo not take any other action until you have read these files.${officeHint}`;
   }
 
   // ============================================================
@@ -1019,7 +1054,7 @@ ${formattedMessages}
     attachments?: FileAttachment[],
     options?: ChatOptions
   ): AsyncGenerator<AgentEvent> {
-    const { skillPaths, cleanMessage, missingSkills } = this.extractSkillPaths(message);
+    const { skillPaths, cleanMessage, missingSkills } = this.extractSkillPaths(message, attachments);
     if (missingSkills.length > 0) {
       yield { type: 'error', message: `Skill(s) not found: ${missingSkills.join(', ')}` };
       yield { type: 'complete' };
@@ -1211,6 +1246,8 @@ ${formattedMessages}
         ? expandPath(input.workingDirectory)
         : undefined,
       projectId: input.projectId as string | undefined,
+      mode: resolveSpawnSessionMode(input.mode),
+      timeoutMs: resolveSpawnWaitTimeoutMs(input.timeoutMs),
       attachments: input.attachments as SpawnSessionRequest['attachments'],
     };
 

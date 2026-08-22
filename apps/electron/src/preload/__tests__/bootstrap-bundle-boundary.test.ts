@@ -20,6 +20,6 @@ describe('bootstrap preload bundle boundary', () => {
     const inputs = Object.keys(result.metafile.inputs);
     expect(inputs.some(path => path.includes('@anthropic-ai/claude-agent-sdk'))).toBe(false);
     expect(inputs.some(path => path.endsWith('packages/session-tools-core/src/index.ts'))).toBe(false);
-    expect(inputs.some(path => path.endsWith('packages/session-tools-core/src/runtime/officecli.ts'))).toBe(true);
+    expect(inputs.some(path => path.includes('packages/session-tools-core/'))).toBe(false);
   });
 });

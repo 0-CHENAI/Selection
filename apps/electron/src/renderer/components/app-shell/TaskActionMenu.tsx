@@ -48,6 +48,7 @@ export interface TaskActionMenuProps {
   sessionId: string
   /** Callback when kill button is clicked */
   onKillTask: (taskId: string) => void
+  onOpenSession?: (sessionId: string) => void
   /** Callback to insert message into input field */
   onInsertMessage?: (text: string) => void
   /** Callback to show terminal output overlay */
@@ -64,7 +65,7 @@ export interface TaskActionMenuProps {
  * - Dismiss: Hides the renderer-only chip without stopping the task
  * - Stop Task: Kills shell tasks (agent tasks show warning)
  */
-export function TaskActionMenu({ task, sessionId, onKillTask, onInsertMessage, onShowTerminalOverlay, className }: TaskActionMenuProps) {
+export function TaskActionMenu({ task, sessionId, onKillTask, onOpenSession, onInsertMessage, onShowTerminalOverlay, className }: TaskActionMenuProps) {
   const { t } = useTranslation()
   const [open, setOpen] = React.useState(false)
   const setTasks = useSetAtom(backgroundTasksAtomFamily(sessionId))
@@ -172,26 +173,17 @@ export function TaskActionMenu({ task, sessionId, onKillTask, onInsertMessage, o
     stale: t('common.unknown'),
   }
 
+  const canOpenSession = Boolean(onOpenSession && task.type === 'agent')
   const chipTitle = task.status === 'orphaned'
     ? t('chat.taskOrphanedHint', 'This background task was terminated when its turn ended.')
     : task.status === 'stale'
       ? t('chat.taskStaleHint')
-      : t("chat.clickForTaskActions")
+      : canOpenSession
+        ? t('tasks.openSession')
+        : t("chat.clickForTaskActions")
 
-  return (
-    <DropdownMenu open={open} onOpenChange={setOpen}>
-      <DropdownMenuTrigger asChild>
-        <button
-          type="button"
-          className={cn(
-            "h-[30px] pl-2.5 pr-2 text-xs font-medium rounded-[8px]",
-            "flex items-center gap-1.5 shrink-0 select-none",
-            "transition-all shadow-minimal cursor-pointer",
-            statusTint,
-            className
-          )}
-          title={chipTitle}
-        >
+  const chipBody = (
+    <>
           {/* Status icon */}
           <div className="flex items-center justify-center shrink-0">
             <StatusIcon />
@@ -239,13 +231,55 @@ export function TaskActionMenu({ task, sessionId, onKillTask, onInsertMessage, o
               {statusLabel[task.status] ?? task.status}
             </span>
           )}
+    </>
+  )
 
-          {/* Dropdown indicator */}
-          <ChevronDown className="h-3.5 w-3.5 opacity-60 ml-auto" />
+  return (
+    <div
+      className={cn(
+        "h-[30px] pl-2.5 pr-1 text-xs font-medium rounded-[8px]",
+        "flex items-center gap-1 shrink-0 select-none",
+        "transition-all shadow-minimal",
+        statusTint,
+        className
+      )}
+    >
+      <button
+        type="button"
+        className="flex items-center gap-1.5 min-w-0 cursor-pointer"
+        title={chipTitle}
+        onClick={() => {
+          if (canOpenSession && onOpenSession) {
+            onOpenSession(task.id)
+            return
+          }
+          setOpen(true)
+        }}
+      >
+        {chipBody}
+      </button>
+    <DropdownMenu open={open} onOpenChange={setOpen}>
+      <DropdownMenuTrigger asChild>
+        <button
+          type="button"
+          className="h-full px-1 flex items-center cursor-pointer"
+          title={t("chat.clickForTaskActions")}
+        >
+          <ChevronDown className="h-3.5 w-3.5 opacity-60" />
         </button>
       </DropdownMenuTrigger>
       <StyledDropdownMenuContent align="start" sideOffset={4}>
         {/* View Output - Primary action */}
+        {canOpenSession && onOpenSession && (
+          <StyledDropdownMenuItem onClick={() => {
+            onOpenSession(task.id)
+            setOpen(false)
+          }}>
+            <ArrowUpRight />
+            {t('tasks.openSession')}
+          </StyledDropdownMenuItem>
+        )}
+
         <StyledDropdownMenuItem onClick={handleViewOutput}>
           <ArrowUpRight />
           {t('chat.viewOutput')}
@@ -269,5 +303,6 @@ export function TaskActionMenu({ task, sessionId, onKillTask, onInsertMessage, o
         )}
       </StyledDropdownMenuContent>
     </DropdownMenu>
+    </div>
   )
 }

@@ -45,6 +45,8 @@ import {
   handleUserMessage,
   handleQueueChanged,
   handleMessagesTruncated,
+  handleMessagesRestored,
+  handleRegenerateStarted,
   handleMessageAnnotationsUpdated,
   handleSessionShared,
   handleSessionUnshared,
@@ -227,8 +229,14 @@ export function processEvent(
     case 'usage_update':
       return handleUsageUpdate(state, event)
 
+    case 'regenerate_started':
+      return handleRegenerateStarted(state, event)
+
     case 'messages_truncated':
       return handleMessagesTruncated(state, event)
+
+    case 'messages_restored':
+      return handleMessagesRestored(state, event)
 
     default: {
       // Unknown event type - return state unchanged but as new reference

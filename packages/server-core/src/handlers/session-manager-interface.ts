@@ -126,6 +126,8 @@ export interface ISessionManager {
   cancelProcessing(sessionId: string, silent?: boolean): Promise<void>
   killShell(sessionId: string, shellId: string): Promise<{ success: boolean; error?: string }>
   getTaskOutput(taskId: string): Promise<string | null>
+  /** Install the workspace TaskRunner lookup used by the run_task session tool. */
+  setTaskRunnerLookup(lookup: (workspaceId: string) => import('../tasks').TaskRunner): void
 
   // --- Tasks Conductor seams (in-process; not renderer events, not agent-facing) ---
   /**
@@ -280,7 +282,7 @@ export interface ISessionManager {
    */
   refreshConnectionRuntime(connectionSlug: string): Promise<void>
   completeAuthRequest(sessionId: string, result: AuthResult): Promise<void>
-  executePromptAutomation(input: ExecutePromptAutomationInput): Promise<{ sessionId: string }>
+  executePromptAutomation(input: ExecutePromptAutomationInput): Promise<ExecutePromptAutomationResult>
 
   /**
    * Install a callback invoked from `executePromptAutomation` after a session
@@ -327,4 +329,18 @@ export interface ExecutePromptAutomationInput {
    * still streams live and run errors are logged. Defaults to awaiting completion.
    */
   waitForCompletion?: boolean
+  reportBack?: boolean
+  timeoutMs?: number
+  sourceEvent?: string
+  sourceSessionId?: string
+  rootSessionId?: string
+  automationDepth?: number
+}
+
+export interface ExecutePromptAutomationResult {
+  sessionId: string
+  waitReason?: 'complete' | 'interrupted' | 'error' | 'timeout'
+  finalText?: string
+  durationMs?: number
+  reportBackError?: string
 }
