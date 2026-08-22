@@ -541,17 +541,21 @@ rg -n "session|OAuth|\"level\":\"error\"" "${logFilePath}" | tail -n 50
 
 function formatBundledOfficecliSkillGuidance(): string {
   const dir = getBundledOfficecliSkillsDir();
-  const slugs = ['officecli-docx', 'officecli-xlsx', 'officecli-pptx'] as const;
+  const lines = [
+    '- **Hard rule:** for `.docx` / `.xlsx` / `.pptx` / `.xlsm` (or Word / Excel / PowerPoint), use bundled `officecli` via Bash. Do not use python-docx, openpyxl, python-pptx, or markitdown first.',
+    '- First Read the matching built-in skill, then follow its Common Workflow and Delivery Gate. `officecli` is already on PATH; do not curl-install.',
+    '- Do **not** Read `~/.agents/skills/officecli`, `~/.agents/skills/docx`, `~/.agents/skills/xlsx`, or `~/.agents/skills/pptx`.',
+  ];
   if (!dir) {
-    return [
-      '- Word / .docx → `[skill:officecli-docx]`. Excel / .xlsx → `[skill:officecli-xlsx]`. PowerPoint / .pptx → `[skill:officecli-pptx]`.',
-      '- These built-in skills are **not** under `~/.agents/skills/officecli-*`. A user-installed `officecli` skill is not a substitute.',
-    ].join('\n');
+    lines.push('- Word → `[skill:officecli-docx]`. Excel → `[skill:officecli-xlsx]`. PowerPoint → `[skill:officecli-pptx]`.');
+    return lines.join('\n');
   }
-  return [
-    '- Read these exact built-in files. Do **not** Read `~/.agents/skills/officecli-docx` (or xlsx/pptx). A user-installed `officecli` skill is not a substitute:',
-    ...slugs.map((slug) => `  - ${slug}: \`${join(dir, slug, 'SKILL.md')}\``),
-  ].join('\n');
+  lines.push(
+    `- officecli-docx: \`${join(dir, 'officecli-docx', 'SKILL.md')}\``,
+    `- officecli-xlsx: \`${join(dir, 'officecli-xlsx', 'SKILL.md')}\``,
+    `- officecli-pptx: \`${join(dir, 'officecli-pptx', 'SKILL.md')}\``,
+  );
+  return lines.join('\n');
 }
 
 /**
@@ -700,12 +704,12 @@ Skills are reusable instruction sets that teach you specialized behaviors. Each 
 1. Read its \`SKILL.md\` at the resolved path using the Read tool or \`cat\` via Bash — tool calls are blocked until it is read
 2. Follow the instructions in the file to complete the user's request
 
-For Word / Excel / PowerPoint, load the matching built-in OfficeCLI skill, then run \`officecli\` via Bash. The binary is already on PATH; do not curl-install or download it.
+Office files use the built-in \`officecli\` skill plus the matching format skill. See Document Tools.
 ${formatBundledOfficecliSkillGuidance()}
 
 Skills are stored at four levels (listed from lowest to highest priority):
 - Global: \`~/.agents/skills/{slug}/SKILL.md\`
-- Built-in OfficeCLI: packaged under the app officecli resources (exact SKILL.md paths are in Document Tools). Do not Read \`~/.agents/skills/officecli-docx\`.
+- Built-in: app-shipped \`officecli\` and official OfficeCLI format skills (they override a global \`officecli\`)
 - Workspace: \`${workspacePath}/skills/{slug}/SKILL.md\`
 - Project: \`{projectRoot}/.agents/skills/{slug}/SKILL.md\`
 
@@ -1286,10 +1290,9 @@ These CLI tools are available via Bash. OfficeCLI is bundled with Selection.
 | **ical-tool** | Calendar file operations | \`ical-tool read calendar.ics\` |
 
 **Office documents:**
-- Load the matching built-in skill, Read its \`SKILL.md\`, then follow that skill's Common Workflow and Delivery Gate with \`officecli\` via Bash.
 ${formatBundledOfficecliSkillGuidance()}
 - Specialized: \`officecli-academic-paper\`, \`officecli-financial-model\`, \`officecli-data-dashboard\`, \`officecli-pitch-deck\`, \`officecli-word-form\`, \`morph-ppt\`, \`morph-ppt-3d\`.
-- Official skill Setup sections that mention curl-install do not apply. \`officecli\` is packaged with Selection.
+- Official skill Setup sections that mention curl-install do not apply.
 - Use **markitdown** only when the user explicitly requests Markdown conversion, or when \`officecli\` reports the document unsupported. Do not read an automatically generated \`.docx.md\`, \`.xlsx.md\`, or \`.pptx.md\` sidecar first.
 - Consult each CLI's \`--help\` before relying on optional flags such as \`-o\`.
 - PDF export is not included in the bundled officecli binary

@@ -556,6 +556,12 @@ describe('bundled skills', () => {
       expect(all.some(item => item.slug === slug && item.source === 'bundled')).toBe(true);
     }
     expect(filterUserFacingSkills(all).some(item => item.source === 'bundled')).toBe(false);
+
+    const router = loadSkillBySlug(workspaceRoot, 'officecli');
+    expect(router).toBeTruthy();
+    expect(router!.source).toBe('bundled');
+    expect(all.find(item => item.slug === 'officecli')?.source).toBe('bundled');
+    expect(filterUserFacingSkills(all).some(item => item.slug === 'officecli')).toBe(false);
   });
 });
 

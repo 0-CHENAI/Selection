@@ -22,7 +22,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { join, resolve } from 'node:path';
 import { expandPath } from '../../utils/paths.ts';
-import { resolveMissingBundledOfficecliSkillRead } from '../../utils/officecli.ts';
+import { resolveBundledOfficecliSkillRead } from '../../utils/officecli.ts';
 import {
   detectConfigFileType,
   detectAppConfigFileType,
@@ -189,7 +189,7 @@ export function expandToolPaths(
   for (const key of ['file_path', 'path'] as const) {
     const value = withExpansions[key];
     if (typeof value !== 'string') continue;
-    const rewritten = resolveMissingBundledOfficecliSkillRead(value);
+    const rewritten = resolveBundledOfficecliSkillRead(value);
     if (!rewritten || rewritten === value) continue;
     onDebug?.(`OfficeCLI skill path: ${value} → ${rewritten}`);
     updatedInput = { ...(updatedInput || input), [key]: rewritten };

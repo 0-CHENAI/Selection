@@ -12,7 +12,7 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 
 ## Improvements
 
-- **Built-in OfficeCLI skills load from the packaged path** — asking for a Word / Excel / PowerPoint document now attaches the official skill even without a `.docx` filename. A guessed `~/.agents/skills/officecli-docx` Read is rewritten to the bundled SKILL.md. A user-installed `officecli` skill is not treated as a substitute.
+- **Built-in `officecli` skill overrides `~/.agents`** — Office files (`.docx` / `.xlsx` / `.pptx`) must use the packaged `officecli` CLI. A global `officecli` or Anthropic `docx` / `xlsx` / `pptx` Read is rewritten to the built-in skill. The official format skills still supply the Delivery Gate.
 - **Model picker keeps every added provider selectable** — after the first message, the chat model menu still lists all configured connections and their models. Switching provider recreates the session backend on the next turn. Workspace defaults still do not silently retarget a session that already chose a connection.
 - **Conservative multi-agent use** — default to doing the work in the current session; child sessions are only for explicit parallel or isolation work. Stopping a parent does not cancel children, but shows how many are still running.
 - **Clearer, adaptive image resizing** — oversized Pi `read` images now retain up to a 2560px long edge, search JPEG quality 70–85 and reduce dimensions according to actual encoded size in a background Worker, preserving fine text and line detail while keeping the existing 4.5 MB guard (#42, #43).

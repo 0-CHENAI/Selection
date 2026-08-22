@@ -1,6 +1,7 @@
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
+import { getBundledAssetsDir } from './paths.ts';
 
 export type OfficecliBinarySource =
   | 'environment'
@@ -161,7 +162,8 @@ const OFFICE_FORMAT_SKILL_PATTERNS: Array<{ re: RegExp; slug: OfficeFormatSkillS
   { re: /\.docx\b|\bdocx\b|\bword\b|word文档|word报告|微软\s*word/i, slug: 'officecli-docx' },
 ];
 
-const MISSING_BUNDLED_SKILL_RE = /(?:^|[\\/])officecli-(docx|xlsx|pptx)(?:[\\/]SKILL\.md)?$/i;
+const AGENTS_OFFICE_SKILL_RE =
+  /(?:^|[\\/])\.agents[\\/]skills[\\/](officecli-(?:docx|xlsx|pptx)|officecli|docx|xlsx|pptx)(?:[\\/]SKILL\.md)?$/i;
 
 function addOfficeFormatSkillSlugs(text: string, slugs: Set<OfficeFormatSkillSlug>): void {
   for (const { re, slug } of OFFICE_FORMAT_SKILL_PATTERNS) {
@@ -199,22 +201,61 @@ function expandUserPath(filePath: string): string {
   return filePath;
 }
 
-/**
- * Models often guess `~/.agents/skills/officecli-docx/SKILL.md`.
- * If that file is missing, send them to the packaged official skill.
- */
-export function resolveMissingBundledOfficecliSkillRead(requestedPath: string): string | undefined {
-  const expanded = expandUserPath(requestedPath);
-  const match = expanded.match(MISSING_BUNDLED_SKILL_RE);
-  if (!match) return undefined;
+function getAppBundledSkillsDir(): string | undefined {
+  const fromAssets = getBundledAssetsDir('skills');
+  if (fromAssets) return fromAssets;
+  const candidates = [
+    join(process.cwd(), 'apps', 'electron', 'resources', 'skills'),
+    join(process.cwd(), 'resources', 'skills'),
+    join(process.cwd(), '..', '..', 'apps', 'electron', 'resources', 'skills'),
+  ];
+  return candidates.find(dir => isDirectory(dir));
+}
 
-  const slug = `officecli-${match[1]!.toLowerCase()}`;
+/** App-owned `officecli` router skill. Overrides `~/.agents/skills/officecli`. */
+export function getBundledOfficecliRouterSkillMd(): string | undefined {
+  const dir = getAppBundledSkillsDir();
+  if (!dir) return undefined;
+  const skillMd = join(dir, 'officecli', 'SKILL.md');
+  return isFile(skillMd) ? skillMd : undefined;
+}
+
+function bundledSkillMdForAgentsSlug(slug: string): string | undefined {
+  if (slug === 'officecli') return getBundledOfficecliRouterSkillMd();
+
+  const formatSlug: OfficeFormatSkillSlug | undefined =
+    slug === 'docx' || slug === 'officecli-docx'
+      ? 'officecli-docx'
+      : slug === 'xlsx' || slug === 'officecli-xlsx'
+        ? 'officecli-xlsx'
+        : slug === 'pptx' || slug === 'officecli-pptx'
+          ? 'officecli-pptx'
+          : undefined;
+  if (!formatSlug) return undefined;
+
   const skillsDir = getBundledOfficecliSkillsDir();
   if (!skillsDir) return undefined;
+  const bundled = join(skillsDir, formatSlug, 'SKILL.md');
+  return isFile(bundled) ? bundled : undefined;
+}
 
-  const bundled = join(skillsDir, slug, 'SKILL.md');
-  if (!existsSync(bundled) || existsSync(expanded)) return undefined;
+/**
+ * Send Reads of `~/.agents/skills/officecli` (and docx/xlsx/pptx) to the
+ * bundled skill, even when the global file exists.
+ */
+export function resolveBundledOfficecliSkillRead(requestedPath: string): string | undefined {
+  const expanded = expandUserPath(requestedPath);
+  const match = expanded.match(AGENTS_OFFICE_SKILL_RE);
+  if (!match) return undefined;
+
+  const bundled = bundledSkillMdForAgentsSlug(match[1]!.toLowerCase());
+  if (!bundled || resolve(expanded) === resolve(bundled)) return undefined;
   return bundled;
+}
+
+/** @deprecated Use resolveBundledOfficecliSkillRead */
+export function resolveMissingBundledOfficecliSkillRead(requestedPath: string): string | undefined {
+  return resolveBundledOfficecliSkillRead(requestedPath);
 }
 
 /**

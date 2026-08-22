@@ -86,10 +86,15 @@ mock.module('../../../skills/storage.ts', () => ({
 }));
 
 mock.module('../../../utils/officecli.ts', () => ({
-  resolveMissingBundledOfficecliSkillRead: (requestedPath: string) =>
-    /officecli-docx/.test(requestedPath)
-      ? '/bundled/officecli/1.0.144/skills/officecli-docx/SKILL.md'
-      : undefined,
+  resolveBundledOfficecliSkillRead: (requestedPath: string) => {
+    if (/officecli-docx|[/\\]docx[/\\]SKILL\.md/.test(requestedPath)) {
+      return '/bundled/officecli/1.0.144/skills/officecli-docx/SKILL.md';
+    }
+    if (/[/\\]officecli[/\\]SKILL\.md/.test(requestedPath) && !/officecli-/.test(requestedPath)) {
+      return '/bundled/skills/officecli/SKILL.md';
+    }
+    return undefined;
+  },
 }));
 
 let mockCraftAgentsCliFlag = false;
@@ -448,15 +453,32 @@ describe('runPreToolUseChecks', () => {
       expect(result.type).toBe('allow');
     });
 
-    it('rewrites a missing guessed officecli-docx skill path to the bundled skill', () => {
-      const result = runPreToolUseChecks(createInput({
+    it('rewrites guessed officecli and Anthropic docx skill paths to the bundled skills', () => {
+      const docx = runPreToolUseChecks(createInput({
         toolName: 'Read',
         input: { file_path: '/Users/test/.agents/skills/officecli-docx/SKILL.md' },
       }));
+      expect(docx.type).toBe('modify');
+      if (docx.type === 'modify') {
+        expect(docx.input.file_path).toBe('/bundled/officecli/1.0.144/skills/officecli-docx/SKILL.md');
+      }
 
-      expect(result.type).toBe('modify');
-      if (result.type === 'modify') {
-        expect(result.input.file_path).toBe('/bundled/officecli/1.0.144/skills/officecli-docx/SKILL.md');
+      const catalog = runPreToolUseChecks(createInput({
+        toolName: 'Read',
+        input: { file_path: '/Users/test/.agents/skills/officecli/SKILL.md' },
+      }));
+      expect(catalog.type).toBe('modify');
+      if (catalog.type === 'modify') {
+        expect(catalog.input.file_path).toBe('/bundled/skills/officecli/SKILL.md');
+      }
+
+      const anthropic = runPreToolUseChecks(createInput({
+        toolName: 'Read',
+        input: { file_path: '/Users/test/.agents/skills/docx/SKILL.md' },
+      }));
+      expect(anthropic.type).toBe('modify');
+      if (anthropic.type === 'modify') {
+        expect(anthropic.input.file_path).toBe('/bundled/officecli/1.0.144/skills/officecli-docx/SKILL.md');
       }
     });
 

@@ -6,9 +6,10 @@ import { OFFICECLI_DESKTOP_TARGETS, OFFICECLI_SHA256 } from '../../../../../scri
 import {
   BUNDLED_OFFICECLI_SKILL_SLUGS,
   collectOfficeFormatSkillSlugs,
+  getBundledOfficecliRouterSkillMd,
   getBundledOfficecliSkillsDir,
   officecliBinaryName,
-  resolveMissingBundledOfficecliSkillRead,
+  resolveBundledOfficecliSkillRead,
   resolveOfficecliBinary,
 } from '../officecli'
 
@@ -32,13 +33,21 @@ describe('collectOfficeFormatSkillSlugs', () => {
     expect(collectOfficeFormatSkillSlugs('做个 ppt 给董事会')).toEqual(['officecli-pptx'])
   })
 
-  it('rewrites a missing guessed ~/.agents officecli-docx path to the bundled skill', () => {
-    const rewritten = resolveMissingBundledOfficecliSkillRead(
-      join(homedir(), '.agents', 'skills', 'officecli-docx', 'SKILL.md'),
-    )
+  it('rewrites ~/.agents officecli / docx paths to the bundled skills even if they exist', () => {
     const bundled = getBundledOfficecliSkillsDir()
+    const router = getBundledOfficecliRouterSkillMd()
     expect(bundled).toBeTruthy()
-    expect(rewritten).toBe(join(bundled!, 'officecli-docx', 'SKILL.md'))
+    expect(router).toBeTruthy()
+    expect(resolveBundledOfficecliSkillRead(
+      join(homedir(), '.agents', 'skills', 'officecli-docx', 'SKILL.md'),
+    )).toBe(join(bundled!, 'officecli-docx', 'SKILL.md'))
+    expect(resolveBundledOfficecliSkillRead(
+      join(homedir(), '.agents', 'skills', 'officecli', 'SKILL.md'),
+    )).toBe(router)
+    expect(resolveBundledOfficecliSkillRead(
+      join(homedir(), '.agents', 'skills', 'docx', 'SKILL.md'),
+    )).toBe(join(bundled!, 'officecli-docx', 'SKILL.md'))
+    expect(resolveBundledOfficecliSkillRead(join(bundled!, 'officecli-docx', 'SKILL.md'))).toBeUndefined()
   })
 
   it('infers from Office attachments, defaulting typeless office files to docx', () => {
