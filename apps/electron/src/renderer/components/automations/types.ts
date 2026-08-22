@@ -542,7 +542,6 @@ export function getEventCategory(event: AutomationTrigger): EventCategory {
     case 'PostToolUseFailure':
       return 'agent-error'
     case 'SessionStart':
-    case 'PermissionRequest':
       return 'session'
     default:
       return 'other'

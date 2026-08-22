@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'bun:test'
-import { parseAutomationsConfig } from '../types'
+import { getEventCategory, parseAutomationsConfig } from '../types'
 
 describe('parseAutomationsConfig', () => {
   it('returns [] for null input', () => {
@@ -209,5 +209,13 @@ describe('parseAutomationsConfig', () => {
     expect(items[0].matcher).toBe('urgent')
     expect(items[0].permissionMode).toBe('ask')
     expect(items[0].labels).toEqual(['important'])
+  })
+})
+
+describe('getEventCategory', () => {
+  it('classifies PermissionRequest as permission, not a duplicate session case', () => {
+    expect(getEventCategory('PermissionRequest')).toBe('permission')
+    expect(getEventCategory('PermissionModeChange')).toBe('permission')
+    expect(getEventCategory('SessionStart')).toBe('session')
   })
 })
