@@ -7,10 +7,9 @@
  *
  * Precedence (highest first):
  *   1. unavailable     — current connection is gone / error state
- *   2. switcher        — empty session AND multiple connections configured
- *                        (lets the user pick a different connection BEFORE
- *                        the first message locks the session to one)
- *   3. flat            — list models for the active connection
+ *   2. switcher        — multiple connections configured (any session state)
+ *                        so every added provider's models stay selectable
+ *   3. flat            — list models for the only / active connection
  *
  * Multimodal capability is configured in Settings, not in this picker.
  */
@@ -19,14 +18,12 @@ export type PickerMode = 'unavailable' | 'switcher' | 'flat'
 
 export interface PickerModeInput {
   connectionUnavailable: boolean
-  /** True when the session has no messages yet. */
-  isEmptySession: boolean
   /** Total number of configured connections in the workspace. */
   connectionCount: number
 }
 
 export function derivePickerMode(input: PickerModeInput): PickerMode {
   if (input.connectionUnavailable) return 'unavailable'
-  if (input.isEmptySession && input.connectionCount > 1) return 'switcher'
+  if (input.connectionCount > 1) return 'switcher'
   return 'flat'
 }

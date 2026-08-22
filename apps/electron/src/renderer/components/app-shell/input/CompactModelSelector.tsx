@@ -64,7 +64,6 @@ export function CompactModelSelector({
   onConnectionChange,
   thinkingLevel = 'medium',
   onThinkingLevelChange,
-  isEmptySession = false,
   connectionUnavailable = false,
   contextStatus,
 }: CompactModelSelectorProps) {
@@ -89,7 +88,6 @@ export function CompactModelSelector({
 
   const pickerMode = derivePickerMode({
     connectionUnavailable,
-    isEmptySession,
     connectionCount: llmConnections.length,
   })
 
@@ -124,10 +122,14 @@ export function CompactModelSelector({
     llmConnections.length > 1 &&
     storage.get(storage.KEYS.showConnectionIcons, true)
 
-  // Reset accordion state when the drawer closes so re-open shows top-level switcher.
+  // Collapse on close; re-open on the current connection so mid-session switches stay one tap away.
   React.useEffect(() => {
-    if (!open) setExpandedConnection(null)
-  }, [open])
+    if (!open) {
+      setExpandedConnection(null)
+      return
+    }
+    if (effectiveConnection) setExpandedConnection(effectiveConnection)
+  }, [open, effectiveConnection])
 
   const handlePickFlatModel = React.useCallback(
     (modelId: string) => {

@@ -333,7 +333,6 @@ export function FreeFormInput({
 
   const pickerMode = derivePickerMode({
     connectionUnavailable,
-    isEmptySession,
     connectionCount: llmConnections.length,
   })
 
@@ -2077,7 +2076,7 @@ export function FreeFormInput({
                   </div>
                 </div>
               ) : pickerMode === 'switcher' ? (
-                /* Hierarchical view: Provider → Connection → Models (empty session with multiple connections — lets the user switch BEFORE the first message locks the connection) */
+                /* Hierarchical view: Provider → Connection → Models (every added provider stays selectable) */
                 connectionsByProvider.map(([providerName, connections], index) => (
                   <React.Fragment key={providerName}>
                     {/* Provider group label */}
