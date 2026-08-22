@@ -69,3 +69,20 @@ describe('parseError tool-support classification', () => {
     }
   })
 })
+
+describe('parseError image-input classification', () => {
+  it('maps distinct image failure prefixes to distinct codes', () => {
+    expect(parseError(new Error('image_capability_mismatch: text-only model')).code)
+      .toBe('image_capability_mismatch')
+    expect(parseError(new Error('image_bytes_unavailable: shot.png')).code)
+      .toBe('image_bytes_unavailable')
+    expect(parseError(new Error('image_resource_expired: stored file gone')).code)
+      .toBe('image_resource_expired')
+    expect(parseError(new Error('unsupported image format')).code)
+      .toBe('image_unsupported_format')
+    expect(parseError(new Error('unable to process image')).code)
+      .toBe('image_remote_rejected')
+    expect(parseError(new Error('The image of the rejected proposal was saved')).code)
+      .not.toBe('image_remote_rejected')
+  })
+})

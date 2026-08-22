@@ -211,6 +211,44 @@ const ERROR_DEFINITIONS: Record<ErrorCode, Omit<AgentError, 'code' | 'originalEr
     actions: [],
     canRetry: false,
   },
+  image_capability_mismatch: {
+    title: 'Model Does Not Accept Images',
+    message: 'This model is not configured for image input. The message was not sent as text-only.',
+    actions: [
+      { key: 's', label: 'Change model or enable Multimodal', command: '/settings', action: 'settings' },
+    ],
+    canRetry: false,
+  },
+  image_bytes_unavailable: {
+    title: 'Image Could Not Be Read',
+    message: 'The image was attached, but its bytes could not be loaded for the model request.',
+    actions: [
+      { key: 'r', label: 'Retry', action: 'retry' },
+    ],
+    canRetry: true,
+  },
+  image_resource_expired: {
+    title: 'Image No Longer Available',
+    message: 'The stored image file is missing or no longer readable. Re-attach the image and try again.',
+    actions: [
+      { key: 'r', label: 'Retry', action: 'retry' },
+    ],
+    canRetry: true,
+  },
+  image_unsupported_format: {
+    title: 'Unsupported Image Format',
+    message: 'This image format could not be decoded or converted for the model.',
+    actions: [],
+    canRetry: false,
+  },
+  image_remote_rejected: {
+    title: 'Provider Rejected the Image',
+    message: 'The model provider rejected the image after it was included in the request.',
+    actions: [
+      { key: 'r', label: 'Retry', action: 'retry' },
+    ],
+    canRetry: true,
+  },
   provider_error: {
     title: 'AI Provider Error',
     message: 'The AI provider is experiencing issues. This usually resolves on its own — retry in a moment.',
@@ -367,6 +405,18 @@ function buildProxyErrorMessage(errorMessage: string, fullErrorText: string): st
   return `Received an unexpected HTML error page${suffix} instead of a JSON API response. This is usually caused by a proxy, firewall, or captive portal intercepting the request. Check your proxy settings in Settings > Network.`;
 }
 
+export function createTypedError(
+  code: ErrorCode,
+  overrides?: Partial<Omit<AgentError, 'code'>>,
+): AgentError {
+  const definition = ERROR_DEFINITIONS[code]!
+  return {
+    code,
+    ...definition,
+    ...overrides,
+  }
+}
+
 /**
  * Parse an error and return a typed AgentError with user-friendly info
  */
@@ -434,6 +484,24 @@ export function parseError(
     (lowerMessage.includes('exceed') || lowerMessage.includes('too large'))
   ) {
     code = 'image_too_large';
+  } else if (lowerMessage.includes('image_capability_mismatch')) {
+    code = 'image_capability_mismatch';
+  } else if (lowerMessage.includes('image_resource_expired')) {
+    code = 'image_resource_expired';
+  } else if (lowerMessage.includes('image_bytes_unavailable')) {
+    code = 'image_bytes_unavailable';
+  } else if (
+    lowerMessage.includes('image_unsupported_format')
+    || lowerMessage.includes('unsupported image format')
+    || lowerMessage.includes('could not decode image')
+  ) {
+    code = 'image_unsupported_format';
+  } else if (
+    lowerMessage.includes('image_remote_rejected')
+    || lowerMessage.includes('could not process image')
+    || lowerMessage.includes('unable to process image')
+  ) {
+    code = 'image_remote_rejected';
   } else if (lowerMessage.includes('exited with code') || lowerMessage.includes('process exited')) {
     // SDK subprocess crashed - likely auth/setup issue
     // Check if the error contains more specific info

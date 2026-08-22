@@ -501,6 +501,11 @@ export type ErrorCode =
   | 'data_policy_error'      // OpenRouter data policy restriction
   | 'invalid_request'        // API rejected the request (e.g., bad image, invalid content)
   | 'image_too_large'        // Image exceeds API dimension/size limits
+  | 'image_capability_mismatch' // Current model/provider/endpoint does not accept image input
+  | 'image_bytes_unavailable'   // Image was attached/read but pixels could not be loaded for the request
+  | 'image_resource_expired'    // Stored image path is gone or no longer readable
+  | 'image_unsupported_format'  // Local decode/convert rejected the image format
+  | 'image_remote_rejected'     // Provider rejected the image after it was included in the payload
   | 'provider_error'         // AI provider experiencing issues (overloaded, unavailable)
   | 'queued_message_replay_failed'  // A message queued during an active turn could not be auto-replayed (#616)
   | 'sdk_binary_missing'     // SDK subprocess binary not present on disk (incomplete bundle)

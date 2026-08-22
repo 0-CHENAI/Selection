@@ -17,7 +17,7 @@ import { spawn, type ChildProcess } from 'node:child_process';
 import { createInterface, type Interface as ReadlineInterface } from 'node:readline';
 import type { AgentEvent } from '@craft-agent/core/types';
 import type { FileAttachment } from '../utils/files.ts';
-import { hydrateAttachmentBytes } from '../utils/files.ts';
+import { hydrateAttachmentBytes, imageAttachmentsMissingBytes } from '../utils/files.ts';
 import { getProxyEnvVars } from '../config/proxy-env.ts';
 
 import type {
@@ -2173,6 +2173,11 @@ export class PiAgent extends BaseAgent {
       const attachmentParts: string[] = [];
       const images: Array<{ type: string; data: string; mimeType: string }> = [];
       const hydratedAttachments = hydrateAttachmentBytes(attachments) || [];
+      const missingImages = imageAttachmentsMissingBytes(hydratedAttachments);
+      if (missingImages.length > 0) {
+        const names = missingImages.map(att => att.name).join(', ');
+        throw new Error(`image_bytes_unavailable: Image bytes could not be loaded for the model request: ${names}.`);
+      }
       for (const att of hydratedAttachments) {
         const isImage = att.type === 'image' || att.mimeType?.startsWith('image/') === true
         if (isImage && att.base64) {
@@ -2185,8 +2190,6 @@ export class PiAgent extends BaseAgent {
           if (stored) {
             attachmentParts.push(`[Attached image: ${att.name}]\nThe image is included as visual input — look at it. Path: ${stored}`);
           }
-        } else if (isImage && (att.storedPath || att.path)) {
-          attachmentParts.push(`[Attached image: ${att.name}]\n[Stored at: ${att.storedPath || att.path}]`);
         } else if (att.mimeType === 'application/pdf' && att.storedPath) {
           attachmentParts.push(`[Attached PDF: ${att.name}]\n[Stored at: ${att.storedPath}]`);
         } else if (att.type === 'office' && att.storedPath) {

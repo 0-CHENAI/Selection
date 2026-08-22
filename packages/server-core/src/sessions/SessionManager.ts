@@ -96,7 +96,7 @@ import { getCredentialManager } from '@craft-agent/shared/credentials'
 import { CraftMcpClient, McpClientPool, McpPoolServer } from '@craft-agent/shared/mcp'
 import { type Session, type SessionEvent, type FileAttachment, type SendMessageOptions, type UnreadSummary, type RemoteSessionTransferPayload, type ImportRemoteSessionTransferResult, RPC_CHANNELS, generateMessageId } from '@craft-agent/shared/protocol'
 import { applySteerTranscriptBoundary, messageToStored, storedToMessage, type Message, type StoredAttachment, type ToolDisplayMeta, type TokenUsage } from '@craft-agent/core/types'
-import { formatPathsToRelative, formatToolInputPaths, perf, encodeIconToDataUrlAsync, getEmojiIcon, resetSummarizationClient, resolveToolIcon, readFileAttachment, hydrateAttachmentBytes, resolveRegenerateAttachments, selectSpreadMessages, normalizePath } from '@craft-agent/shared/utils'
+import { formatPathsToRelative, formatToolInputPaths, perf, encodeIconToDataUrlAsync, getEmojiIcon, resetSummarizationClient, resolveToolIcon, readFileAttachment, resolveRegenerateAttachments, selectSpreadMessages, normalizePath } from '@craft-agent/shared/utils'
 import { loadAllSkills, loadSkillBySlug, invalidateSkillsCache, type LoadedSkill } from '@craft-agent/shared/skills'
 import { invalidateContextFileCache } from '@craft-agent/shared/prompts/system'
 import { getToolIconsDir, getMiniModel } from '@craft-agent/shared/config'
@@ -111,7 +111,8 @@ import { ensureLabelsExist, ensureTaskItemLabel } from '@craft-agent/shared/labe
 import { loadStatusConfig } from '@craft-agent/shared/statuses/storage'
 import { AutomationSystem, createPromptHistoryEntry, appendAutomationHistoryEntry, enrichAgentEventInput, DEFAULT_PROMPT_WAIT_TIMEOUT_MS, MAX_PROMPT_WAIT_TIMEOUT_MS, type AutomationSystemMetadataSnapshot, type AgentEvent as AutomationAgentEvent, type SdkAutomationInput, type PendingPrompt } from '@craft-agent/shared/automations'
 import { waitForAutomationSessionCompletion } from './wait-automation-session.ts'
-import { buildBackendRuntimeSignature, buildRestartRequiredSignature, filterAttachmentsForModelInput } from './runtime-config'
+import { createTypedError } from '@craft-agent/shared/agent/errors'
+import { buildBackendRuntimeSignature, buildRestartRequiredSignature, prepareModelImageAttachments } from './runtime-config'
 import { validateArchiveTarget } from './archive-guards'
 
 // Import from server-core domain utilities
@@ -6442,25 +6443,61 @@ export class SessionManager implements ISessionManager {
         workspaceDefaultConnectionSlug: loadWorkspaceConfig(workspaceRootPath)?.defaults?.defaultLlmConnection,
         managedModel: managed.model,
       })
-      const modelInputAttachments = filterAttachmentsForModelInput(
+      const preparedImages = prepareModelImageAttachments({
         attachments,
-        messageBackendContext.connection,
-        messageBackendContext.resolvedModel,
-      )
-      modelInputAttachments.attachments = hydrateAttachmentBytes(modelInputAttachments.attachments)
-      if (modelInputAttachments.omittedImages.length > 0) {
-        const omittedNames = modelInputAttachments.omittedImages.map(a => a.name).join(', ')
-        sessionLog.info(`Omitting ${modelInputAttachments.omittedImages.length} image attachment(s) from model input for ${messageBackendContext.resolvedModel}: ${omittedNames}`)
+        storedAttachments,
+        connection: messageBackendContext.connection,
+        modelId: messageBackendContext.resolvedModel,
+      })
+      const imageInputRequestId = `${sessionId}:${userMessage.id}`
+      sessionLog.info('image-input', {
+        requestId: imageInputRequestId,
+        model: messageBackendContext.resolvedModel,
+        provider: messageBackendContext.connection?.providerType,
+        payloadImageCount: preparedImages.payloadImageCount,
+        images: preparedImages.diagnostics,
+        ...(preparedImages.ok ? {} : { code: preparedImages.code }),
+      })
+      if (!preparedImages.ok) {
+        const typedError = createTypedError(preparedImages.code, {
+          message: preparedImages.message,
+          details: preparedImages.diagnostics.map(image =>
+            `${image.name} mime=${image.mimeType ?? 'unknown'} bytes=${image.byteLength ?? 0} sha256=${image.sha256 ?? 'none'} hasBytes=${image.hasBytes}`,
+          ),
+        })
+        const errorMessage: Message = {
+          id: generateMessageId(),
+          role: 'error',
+          content: `${typedError.title}: ${typedError.message}`,
+          timestamp: this.monotonic(),
+          errorCode: typedError.code,
+          errorTitle: typedError.title,
+          errorDetails: typedError.details,
+          errorCanRetry: typedError.canRetry,
+        }
+        managed.messages.push(errorMessage)
+        this.persistSession(managed)
         this.sendEvent({
-          type: 'info',
+          type: 'typed_error',
           sessionId,
-          message: `Image attachment${modelInputAttachments.omittedImages.length === 1 ? '' : 's'} not sent because image input is disabled for ${messageBackendContext.resolvedModel}.`,
-          level: 'warning',
+          error: {
+            code: typedError.code,
+            title: typedError.title,
+            message: typedError.message,
+            actions: typedError.actions,
+            canRetry: typedError.canRetry,
+            details: typedError.details,
+          },
+          timestamp: errorMessage.timestamp,
         }, managed.workspace.id)
+        sendSpan.mark('image-input.blocked')
+        sendSpan.end()
+        await this.onProcessingStopped(sessionId, 'error')
+        return
       }
 
       sendSpan.mark('chat.starting')
-      const chatIterator = agent.chat(message, modelInputAttachments.attachments, {
+      const chatIterator = agent.chat(message, preparedImages.attachments, {
         previousResponseInterrupted,
       })
       this.announceRegenerateReplacement(managed)

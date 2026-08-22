@@ -83,6 +83,8 @@ import { applySystemPromptOverride } from './system-prompt-override.ts';
 import { resolvePiSessionPaths } from './session-paths.ts';
 import { createPiSessionManager } from './pi-session-manager.ts';
 import { createSelectionReadToolDefinition } from './tools/read/create-read-tool.ts';
+import { mergeSummarizedToolResult } from './tool-result-images.ts';
+import { describePromptImages } from '../../shared/src/utils/image-input.ts';
 
 // ============================================================
 // Types — JSONL Protocol
@@ -778,7 +780,7 @@ function wrapSingleTool(tool: ToolDefinition<any, any>): ToolDefinition<any, any
 
         if (largeResult) {
           return {
-            content: [{ type: 'text', text: largeResult.message }],
+            content: mergeSummarizedToolResult(largeResult.message, result.content),
             details: result.details,
           };
         }
@@ -1315,10 +1317,19 @@ async function handlePrompt(msg: Extract<InboundMessage, { type: 'prompt' }>): P
     // Wait for any in-flight auto-compaction to avoid race (craft-agents-oss#464)
     await waitForCompaction(session);
 
+    const promptImages = msg.images && msg.images.length > 0 ? msg.images : undefined
+    if (promptImages) {
+      debugLog(`image-input ${JSON.stringify({
+        requestId: msg.id,
+        payloadImageCount: promptImages.length,
+        images: describePromptImages(promptImages),
+      })}`);
+    }
+
     // Fire prompt — use followUp when session is already streaming so the
     // message is queued instead of throwing "Agent is already processing".
     await session.prompt(msg.message, {
-      images: msg.images && msg.images.length > 0 ? msg.images : undefined,
+      images: promptImages,
       streamingBehavior: 'followUp',
     });
   } catch (error) {

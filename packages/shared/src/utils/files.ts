@@ -397,9 +397,35 @@ export function resolveRegenerateAttachments(
 }
 
 /**
+ * Prefer live attachments, but restore `storedPath` from session metadata
+ * when regenerate/retry kept an in-memory object that only has the original path.
+ */
+export function withStoredImagePaths(
+  attachments: FileAttachment[] | undefined,
+  stored: StoredAttachmentSource[] | undefined,
+): FileAttachment[] | undefined {
+  if (!attachments?.length) return fileAttachmentsFromStored(stored)
+  if (!stored?.length) return attachments
+  return attachments.map((attachment, index) => {
+    const isImage = attachment.type === 'image' || attachment.mimeType?.startsWith('image/') === true
+    if (!isImage || attachment.base64 || attachment.storedPath) return attachment
+    const byIndex = stored[index]
+    const match = byIndex?.type === 'image' && byIndex.storedPath
+      ? byIndex
+      : stored.find(item => item.type === 'image' && item.name === attachment.name && !!item.storedPath)
+    if (!match?.storedPath) return attachment
+    return {
+      ...attachment,
+      storedPath: match.storedPath,
+      path: attachment.path || match.storedPath,
+    }
+  })
+}
+
+/**
  * Fill missing image/PDF base64 from disk so vision-capable models receive
  * pixels instead of a path-only placeholder. Oversized or unreadable files
- * stay path-only so they cannot abort the send.
+ * stay path-only; callers must treat remaining path-only images as a send failure.
  */
 export function hydrateAttachmentBytes(attachments: FileAttachment[] | undefined): FileAttachment[] | undefined {
   if (!attachments?.length) return attachments
@@ -425,6 +451,15 @@ export function hydrateAttachmentBytes(attachments: FileAttachment[] | undefined
       return attachment
     }
   })
+}
+
+export function imageAttachmentsMissingBytes(
+  attachments: FileAttachment[] | undefined,
+): FileAttachment[] {
+  return (attachments ?? []).filter(attachment =>
+    (attachment.type === 'image' || attachment.mimeType?.startsWith('image/') === true)
+    && !attachment.base64,
+  )
 }
 
 export function readFileAttachment(filePath: string): FileAttachment | null {

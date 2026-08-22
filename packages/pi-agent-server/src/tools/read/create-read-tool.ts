@@ -64,9 +64,7 @@ export function createSelectionReadToolDefinition(
       )
 
       const context = args[4] as { model?: { input?: string[] } } | undefined
-      const nonVisionNote = context?.model?.input?.includes('image') === false
-        ? '[Current model does not support images. The image will be omitted from this request.]'
-        : undefined
+      const visionSupported = context?.model?.input?.includes('image') !== false
 
       if (!processed.ok) {
         return {
@@ -75,8 +73,24 @@ export function createSelectionReadToolDefinition(
             text: [
               `Read image file [${image.mimeType}]`,
               processed.message,
-              nonVisionNote,
+              visionSupported
+                ? undefined
+                : 'image_capability_mismatch: Current model does not accept image input. The image was not included in this request.',
             ].filter(Boolean).join('\n'),
+          }],
+          details: undefined,
+        }
+      }
+
+      if (!visionSupported) {
+        return {
+          content: [{
+            type: 'text',
+            text: [
+              `Read image file [${processed.mimeType}]`,
+              'image_capability_mismatch: Current model does not accept image input. The image was not included in this request.',
+              ...processed.hints,
+            ].join('\n'),
           }],
           details: undefined,
         }
@@ -89,8 +103,7 @@ export function createSelectionReadToolDefinition(
             text: [
               `Read image file [${processed.mimeType}]`,
               ...processed.hints,
-              nonVisionNote,
-            ].filter(Boolean).join('\n'),
+            ].join('\n'),
           },
           {
             type: 'image',
