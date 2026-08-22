@@ -281,6 +281,8 @@ const OFFICECLI_FLAG_RE = /^-/;
 const OFFICECLI_VERB_RE =
   /^(create|add|set|open|refresh|save|close|view|get|query|validate|help|load_skill|dump|remove|batch)$/i;
 
+export const OFFICECLI_ENSURE_DOCX_STYLES_JSON = 'officecli-ensure-docx-styles.json';
+
 /** Built-in paragraph styles Word TOC (`TOC \\o "1-3"`) needs in styles.xml. */
 export const DOCX_OUTLINE_HEADING_SPECS = [
   { id: 'Heading1', outlineLvl: 0, size: '18pt', bold: true },
@@ -302,16 +304,26 @@ function firstOfficecliVerb(args: string[]): string | undefined {
   return args.find(arg => !OFFICECLI_FLAG_RE.test(arg) && OFFICECLI_VERB_RE.test(arg))?.toLowerCase();
 }
 
-/**
- * PATH wrapper should seed Heading styles after create, or when a heading / TOC
- * write (or open/refresh) touches a .docx. Matches HanaAgent's closed loop.
- */
-export function shouldEnsureDocxOutlineStyles(args: string[]): boolean {
-  if (!findDocxArgInOfficecliArgs(args)) return false;
-  const verb = firstOfficecliVerb(args);
-  if (verb === 'create' || verb === 'open' || verb === 'refresh') return true;
-  if (verb !== 'add' && verb !== 'set') return false;
+export interface DocxOutlineEnsureTiming {
+  before: boolean;
+  after: boolean;
+}
 
+/**
+ * When the PATH wrapper should seed or repair Heading outlineLvl.
+ * create / style-id writes: after (re-add wipes outlineLvl).
+ * paragraph Heading / TOC writes: before (style must exist).
+ * open / refresh / view: never — those must not mutate the file.
+ */
+export function docxOutlineEnsureTiming(args: string[]): DocxOutlineEnsureTiming {
+  const none = { before: false, after: false };
+  if (!findDocxArgInOfficecliArgs(args)) return none;
+  const verb = firstOfficecliVerb(args);
+  if (verb === 'create') return { before: false, after: true };
+  if (verb !== 'add' && verb !== 'set') return none;
+
+  let before = false;
+  let after = false;
   let prev = '';
   for (const arg of args) {
     if (
@@ -320,12 +332,40 @@ export function shouldEnsureDocxOutlineStyles(args: string[]): boolean {
       /style=TOCHeading/i.test(arg) ||
       /(?:^|[=\s])toc$/i.test(arg)
     ) {
-      return true;
+      before = true;
     }
-    if (prev === '--type' && /^toc$/i.test(arg)) return true;
+    if (/id=Heading/i.test(arg) || /id=Title/i.test(arg) || /id=TOCHeading/i.test(arg)) {
+      after = true;
+    }
+    if (prev === '--type' && /^toc$/i.test(arg)) before = true;
     prev = arg;
   }
-  return false;
+  return { before, after };
+}
+
+export function shouldEnsureDocxOutlineStyles(args: string[]): boolean {
+  const timing = docxOutlineEnsureTiming(args);
+  return timing.before || timing.after;
+}
+
+function listingHasStyleId(listing: string, id: string): boolean {
+  return new RegExp(`styleId=${id}\\b`).test(listing);
+}
+
+/** `get /styles --depth 2` lists each style, then its pPr outlineLvl on a nearby line. */
+export function styleListingHasOutlineLvl(listing: string, id: string, level: number): boolean {
+  const lines = listing.split(/\r?\n/);
+  const index = lines.findIndex(line => new RegExp(`styleId=${id}\\b`).test(line));
+  if (index < 0) return false;
+  return lines.slice(index, index + 4).some(line => line.includes(`outlineLvl=${level}`));
+}
+
+export function docxStylesListingHasOutlineHeadings(listing: string): boolean {
+  return (
+    styleListingHasOutlineLvl(listing, 'Heading1', 0) &&
+    styleListingHasOutlineLvl(listing, 'Heading2', 1) &&
+    styleListingHasOutlineLvl(listing, 'Heading3', 2)
+  );
 }
 
 function runOfficecli(binary: string, args: string[]): { exitCode: number; output: string } {
@@ -361,9 +401,16 @@ function headingStyleArgs(file: string, spec: (typeof DOCX_OUTLINE_HEADING_SPECS
   return args;
 }
 
+function getEnsureStylesBatchPath(options?: ResolveOfficecliOptions): string | undefined {
+  const dir = getOfficecliWrapperDir(options);
+  if (!dir) return undefined;
+  const json = join(dir, OFFICECLI_ENSURE_DOCX_STYLES_JSON);
+  return isFile(json) ? json : undefined;
+}
+
 /**
  * Word TOC uses outlineLvl from styles.xml, not pStyle names. officecli create
- * only writes Normal; seed Heading1–3 (and Title / TOCHeading) when missing.
+ * only writes Normal. Re-adding Heading drops outlineLvl — add only when missing.
  */
 export function ensureDocxOutlineHeadingStyles(
   file: string,
@@ -373,12 +420,34 @@ export function ensureDocxOutlineHeadingStyles(
   const binary = options?.binary ?? resolveOfficecliBinary(options);
   if (!binary) return false;
 
-  if (runOfficecli(binary, ['get', file, '/styles/Heading1']).exitCode === 0) return true;
+  const readListing = () => runOfficecli(binary, ['get', file, '/styles', '--depth', '2']).output;
+  const listing = readListing();
+  if (docxStylesListingHasOutlineHeadings(listing)) return true;
+
+  if (!listingHasStyleId(listing, 'Heading1')) {
+    const batch = getEnsureStylesBatchPath(options);
+    if (batch) {
+      runOfficecli(binary, ['batch', file, '--best-effort', '--input', batch]);
+    } else {
+      for (const spec of DOCX_OUTLINE_HEADING_SPECS) {
+        runOfficecli(binary, headingStyleArgs(file, spec));
+      }
+    }
+    return docxStylesListingHasOutlineHeadings(readListing());
+  }
 
   for (const spec of DOCX_OUTLINE_HEADING_SPECS) {
-    runOfficecli(binary, headingStyleArgs(file, spec));
+    if (!listingHasStyleId(listing, spec.id)) {
+      runOfficecli(binary, headingStyleArgs(file, spec));
+    } else if (
+      'outlineLvl' in spec &&
+      spec.outlineLvl !== undefined &&
+      !styleListingHasOutlineLvl(listing, spec.id, spec.outlineLvl)
+    ) {
+      runOfficecli(binary, ['set', file, `/styles/${spec.id}`, '--prop', `outlineLvl=${spec.outlineLvl}`]);
+    }
   }
-  return runOfficecli(binary, ['get', file, '/styles/Heading1']).exitCode === 0;
+  return docxStylesListingHasOutlineHeadings(readListing());
 }
 
 /** Directory that contains the PATH `officecli` / `officecli.cmd` wrappers. */

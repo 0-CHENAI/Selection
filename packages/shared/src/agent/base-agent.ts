@@ -1033,7 +1033,10 @@ ${formattedMessages}
     const pathList = [...skillPaths.entries()]
       .map(([slug, path]) => `- ${path} (skill: ${slug})`)
       .join('\n');
-    return `Before proceeding with the user's request, you MUST read the following skill instruction files using the Read tool or \`cat\` via Bash:\n${pathList}\n\nDo not take any other action until you have read these files.`;
+    const officeHint = skillPaths.has('officecli')
+      ? '\nFor Word / Excel / PowerPoint, prefer `officecli load_skill word` (or excel / pptx); Read the listed files if you do not run load_skill.'
+      : '';
+    return `Before proceeding with the user's request, you MUST read the following skill instruction files using the Read tool or \`cat\` via Bash:\n${pathList}\n\nDo not take any other action until you have read these files.${officeHint}`;
   }
 
   // ============================================================

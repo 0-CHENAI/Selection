@@ -5,7 +5,10 @@ import { join } from 'path'
 import { OFFICECLI_DESKTOP_TARGETS, OFFICECLI_SHA256 } from '../../../../../scripts/build/common.ts'
 import {
   BUNDLED_OFFICECLI_SKILL_SLUGS,
+  OFFICECLI_ENSURE_DOCX_STYLES_JSON,
   collectOfficeFormatSkillSlugs,
+  docxOutlineEnsureTiming,
+  docxStylesListingHasOutlineHeadings,
   ensureDocxOutlineHeadingStyles,
   findDocxArgInOfficecliArgs,
   getBundledOfficecliRouterSkillMd,
@@ -15,6 +18,7 @@ import {
   resolveBundledOfficecliSkillRead,
   resolveOfficecliBinary,
   shouldEnsureDocxOutlineStyles,
+  styleListingHasOutlineLvl,
 } from '../officecli'
 
 describe('collectOfficeFormatSkillSlugs', () => {
@@ -82,6 +86,7 @@ describe('resolveOfficecliBinary', () => {
     expect(cmd).toContain('officecli-ensure-docx-styles.cmd')
     expect(existsSync(join(binDir, 'officecli-ensure-docx-styles'))).toBe(true)
     expect(existsSync(join(binDir, 'officecli-ensure-docx-styles.cmd'))).toBe(true)
+    expect(existsSync(join(binDir, OFFICECLI_ENSURE_DOCX_STYLES_JSON))).toBe(true)
   })
 
   it('fetches every supported desktop binary for installer builds', () => {
@@ -183,18 +188,48 @@ describe('bundled officecli smoke', () => {
 })
 
 describe('docx outline heading seed', () => {
-  it('detects create / heading / TOC args that need styles.xml outlineLvl', () => {
+  it('detects create / heading / TOC writes and ignores open / view', () => {
     expect(findDocxArgInOfficecliArgs(['create', '报告.docx'])).toBe('报告.docx')
     expect(findDocxArgInOfficecliArgs(['create', 'sheet.xlsx'])).toBeUndefined()
-    expect(shouldEnsureDocxOutlineStyles(['create', 'a.docx'])).toBe(true)
-    expect(shouldEnsureDocxOutlineStyles(['open', 'a.docx'])).toBe(true)
-    expect(shouldEnsureDocxOutlineStyles(['refresh', 'a.docx'])).toBe(true)
-    expect(shouldEnsureDocxOutlineStyles(['add', 'a.docx', '/body', '--prop', 'style=Heading1'])).toBe(true)
+    expect(docxOutlineEnsureTiming(['create', 'a.docx'])).toEqual({ before: false, after: true })
+    expect(docxOutlineEnsureTiming(['open', 'a.docx'])).toEqual({ before: false, after: false })
+    expect(docxOutlineEnsureTiming(['refresh', 'a.docx'])).toEqual({ before: false, after: false })
+    expect(docxOutlineEnsureTiming(['view', 'a.docx', 'text'])).toEqual({ before: false, after: false })
+    expect(docxOutlineEnsureTiming(['add', 'a.docx', '/body', '--prop', 'style=Heading1'])).toEqual({
+      before: true,
+      after: false,
+    })
+    expect(docxOutlineEnsureTiming(['add', 'a.docx', '/styles', '--type', 'style', '--prop', 'id=Heading1'])).toEqual({
+      before: false,
+      after: true,
+    })
     expect(shouldEnsureDocxOutlineStyles(['add', 'a.docx', '--type', 'toc'])).toBe(true)
     expect(shouldEnsureDocxOutlineStyles(['add', 'a.docx', '--type=toc'])).toBe(true)
     expect(shouldEnsureDocxOutlineStyles(['add', 'a.docx', '/body', '--prop', 'text=摘要'])).toBe(false)
-    expect(shouldEnsureDocxOutlineStyles(['view', 'a.docx', 'text'])).toBe(false)
     expect(shouldEnsureDocxOutlineStyles(['create', 'a.xlsx'])).toBe(false)
+  })
+
+  it('requires outlineLvl on the matching Heading block, not a later style', () => {
+    const listing = [
+      '/styles/style[2] (style) type=paragraph styleId=Heading1 name=Heading1',
+      '/styles/style[2]/name[1] (name) val=Heading1',
+      '/styles/style[2]/rPr[1] (rPr) children=2 sz=36',
+      '/styles/style[3] (style) type=paragraph styleId=Heading2 name=Heading2',
+      '/styles/style[3]/pPr[1] (pPr) children=1 outlineLvl=1',
+    ].join('\n')
+    expect(styleListingHasOutlineLvl(listing, 'Heading1', 0)).toBe(false)
+    expect(styleListingHasOutlineLvl(listing, 'Heading2', 1)).toBe(true)
+    expect(docxStylesListingHasOutlineHeadings(listing)).toBe(false)
+
+    const complete = [
+      '/styles/style[2] (style) type=paragraph styleId=Heading1 name=Heading1',
+      '/styles/style[2]/pPr[1] (pPr) children=1 outlineLvl=0',
+      '/styles/style[3] (style) type=paragraph styleId=Heading2 name=Heading2',
+      '/styles/style[3]/pPr[1] (pPr) children=1 outlineLvl=1',
+      '/styles/style[4] (style) type=paragraph styleId=Heading3 name=Heading3',
+      '/styles/style[4]/pPr[1] (pPr) children=1 outlineLvl=2',
+    ].join('\n')
+    expect(docxStylesListingHasOutlineHeadings(complete)).toBe(true)
   })
 
   it('documents the official skill closed loop on the bundled router', () => {
@@ -204,16 +239,16 @@ describe('docx outline heading seed', () => {
     expect(body).toContain('officecli load_skill word')
     expect(body).toContain('outlineLvl')
     expect(body).toContain('style not found')
+    expect(body).toContain('Do not `add` an existing Heading style')
   })
 
-  it('seeds Heading1–3 with outlineLvl after PATH wrapper create', () => {
+  it('seeds on wrapper create and repairs Heading1 that exists without outlineLvl', () => {
     const binary = resolveOfficecliBinary()
     const wrapperDir = getOfficecliWrapperDir()
     if (!binary || !wrapperDir) return
 
     const wrapper = join(wrapperDir, 'officecli')
     const root = mkdtempSync(join(tmpdir(), 'officecli-heading-'))
-    const docx = join(root, '方案.docx')
     const env = {
       ...process.env,
       CRAFT_OFFICECLI: binary,
@@ -229,67 +264,50 @@ describe('docx outline heading seed', () => {
     }
 
     try {
-      const rawCreate = run([binary, 'create', docx])
-      expect(rawCreate.exitCode).toBe(0)
-      expect(run([binary, 'get', docx, '/styles/Heading1']).exitCode).not.toBe(0)
+      const raw = join(root, 'raw.docx')
+      expect(run([binary, 'create', raw]).exitCode).toBe(0)
+      expect(run([binary, 'get', raw, '/styles/Heading1']).exitCode).not.toBe(0)
+      expect(run([wrapper, 'view', raw, 'text']).exitCode).toBe(0)
+      expect(run([binary, 'get', raw, '/styles/Heading1']).exitCode).not.toBe(0)
 
-      expect(ensureDocxOutlineHeadingStyles(docx, { binary })).toBe(true)
-      expect(run([binary, 'get', docx, '/styles/Heading1']).exitCode).toBe(0)
-
-      const viaHelper = join(root, 'helper.docx')
-      expect(run([binary, 'create', viaHelper]).exitCode).toBe(0)
-      expect(ensureDocxOutlineHeadingStyles(viaHelper, { binary })).toBe(true)
+      run([
+        binary, 'add', raw, '/styles', '--type', 'style',
+        '--prop', 'id=Heading1', '--prop', 'type=paragraph',
+        '--prop', 'name=Heading1', '--prop', 'size=16pt',
+      ])
+      const beforeRepair = run([binary, 'get', raw, '/styles/Heading1'])
+      expect(beforeRepair.exitCode).toBe(0)
+      expect(beforeRepair.output).not.toMatch(/outlineLvl=/)
+      expect(ensureDocxOutlineHeadingStyles(raw, { binary })).toBe(true)
+      const repaired = run([binary, 'get', raw, '/styles/Heading1'])
+      expect(repaired.output).toMatch(/outlineLvl=0/)
+      expect(repaired.output).toMatch(/size=16pt/)
 
       const viaWrapper = join(root, 'wrapper.docx')
-      const created = run([wrapper, 'create', viaWrapper])
-      expect(created.exitCode).toBe(0)
-      expect(run([binary, 'get', viaWrapper, '/styles/Heading1']).exitCode).toBe(0)
-      expect(run([binary, 'get', viaWrapper, '/styles/Heading2']).exitCode).toBe(0)
-      expect(run([binary, 'get', viaWrapper, '/styles/Heading3']).exitCode).toBe(0)
+      expect(run([wrapper, 'create', viaWrapper]).exitCode).toBe(0)
+      const listing = run([binary, 'get', viaWrapper, '/styles', '--depth', '2'])
+      expect(docxStylesListingHasOutlineHeadings(listing.output)).toBe(true)
 
-      const styles = Bun.spawnSync(['unzip', '-p', viaWrapper, 'word/styles.xml'], {
-        stdout: 'pipe',
-        stderr: 'pipe',
-      })
-      const xml = styles.stdout.toString()
-      expect(xml).toContain('Heading1')
-      expect(xml).toContain('Heading2')
-      expect(xml).toContain('Heading3')
-      expect(xml).toMatch(/w:val="0"/)
-      expect(xml).toContain('outlineLvl')
-
-      const addHeading = run([
-        wrapper,
-        'add',
-        viaWrapper,
-        '/body',
-        '--type',
-        'paragraph',
-        '--prop',
-        'text=一、背景',
-        '--prop',
-        'style=Heading1',
+      run([
+        binary, 'add', viaWrapper, '/styles', '--type', 'style',
+        '--prop', 'id=Heading1', '--prop', 'type=paragraph',
+        '--prop', 'name=Heading1', '--prop', 'size=16pt',
       ])
-      expect(addHeading.exitCode).toBe(0)
-      expect(addHeading.output).not.toMatch(/style 'Heading1' not found/i)
-
-      const rawOnly = join(root, 'raw.docx')
-      expect(run([binary, 'create', rawOnly]).exitCode).toBe(0)
-      const addOnRaw = run([
-        wrapper,
-        'add',
-        rawOnly,
-        '/body',
-        '--type',
-        'paragraph',
-        '--prop',
-        'text=一、背景',
-        '--prop',
-        'style=Heading1',
+      expect(run([binary, 'get', viaWrapper, '/styles/Heading1']).output).not.toMatch(/outlineLvl=/)
+      const addAfterWipe = run([
+        wrapper, 'add', viaWrapper, '/styles', '--type', 'style',
+        '--prop', 'id=Heading1', '--prop', 'type=paragraph',
+        '--prop', 'name=Heading1', '--prop', 'size=16pt',
       ])
-      expect(addOnRaw.exitCode).toBe(0)
-      expect(addOnRaw.output).not.toMatch(/style 'Heading1' not found/i)
-      expect(run([binary, 'get', rawOnly, '/styles/Heading1']).exitCode).toBe(0)
+      expect(addAfterWipe.exitCode).toBe(0)
+      expect(run([binary, 'get', viaWrapper, '/styles/Heading1']).output).toMatch(/outlineLvl=0/)
+
+      const headingAdd = run([
+        wrapper, 'add', viaWrapper, '/body', '--type', 'paragraph',
+        '--prop', 'text=一、背景', '--prop', 'style=Heading1',
+      ])
+      expect(headingAdd.exitCode).toBe(0)
+      expect(headingAdd.output).not.toMatch(/style 'Heading1' not found/i)
     } finally {
       rmSync(root, { recursive: true, force: true })
     }

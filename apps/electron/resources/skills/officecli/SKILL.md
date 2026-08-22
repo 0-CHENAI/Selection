@@ -32,7 +32,7 @@ Specialized work uses `officecli-academic-paper`, `officecli-financial-model`, `
 1. `load_skill` / Read the format skill.
 2. `create` / `open`, then `get /styles` if anything looks thin.
 3. Headings first (`style=Heading1` / `Heading2` / `Heading3`), then `--type toc`.
-4. If a command prints `WARNING` / `style not found` / `Error`, stop. Run `get /styles` and `officecli help docx style`. Fix styles before more content.
+4. If a command prints `WARNING` / `style not found` / `Error`, stop. Run `get /styles` and `officecli help docx style`. Fix styles before more content. Do not `add` an existing Heading style — that drops `outlineLvl`. Use `set /styles/Heading1 --prop outlineLvl=0`.
 5. `view outline` showing Heading1 is not enough. Confirm `get /styles/Heading1`.
 6. `Update field to see table of contents` is not delivery. Set `updateFields=true`. Do not claim Word page numbers are ready on Mac.
 7. Run the format skill's Delivery Gate (`view issues`, `view html`, live PAGE / notes / column widths as that skill requires). Do not stop after `validate`.
@@ -42,4 +42,5 @@ Specialized work uses `officecli-academic-paper`, `officecli-financial-model`, `
 - Do not Read `~/.agents/skills/officecli` or `~/.agents/skills/docx` / `xlsx` / `pptx`. Those are not this skill.
 - Do not use python-docx, openpyxl, python-pptx, or markitdown first.
 - Do not ignore `style 'Heading1' not found in styles part`.
+- Do not re-add Heading1–3 if they already exist.
 - Do not insert a TOC before heading sources exist.

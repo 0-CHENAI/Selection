@@ -81,6 +81,7 @@ describe('system prompt guidance', () => {
     expect(prompt).toContain('officecli load_skill word')
     expect(prompt).toContain('style not found')
     expect(prompt).toContain('outlineLvl')
+    expect(prompt).toContain('Do not re-add an existing Heading')
     expect(prompt).not.toContain('office_document_inspect')
     expect(prompt).not.toContain('office_document_edit')
     expect(prompt).not.toContain('office_document_guide')

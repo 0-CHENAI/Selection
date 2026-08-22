@@ -266,6 +266,7 @@ describe('BaseAgent', () => {
       const sent = agent.chatCalls[0]?.message ?? '';
       expect(sent).toContain('(skill: officecli)');
       expect(sent).toContain('(skill: officecli-docx)');
+      expect(sent).toContain('officecli load_skill word');
       expect(sent).toContain('SKILL.md');
       expect(sent).toContain('请改 巡察报告.docx');
     });

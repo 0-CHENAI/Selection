@@ -1,7 +1,7 @@
 #!/bin/sh
 # Selection wrapper — prefer the app-bundled binary, never curl-install.
-# After create / heading / TOC / open / refresh on a .docx, seed Heading1–3
-# with outlineLvl so Word can compile the TOC (HanaAgent closed loop).
+# After create, or around heading / TOC writes, seed or repair Heading outlineLvl
+# so Word can compile the TOC. Do not mutate on open / refresh / view.
 if [ -n "$CRAFT_OFFICECLI" ] && [ -f "$CRAFT_OFFICECLI" ]; then
   BIN=$CRAFT_OFFICECLI
 else
@@ -42,13 +42,14 @@ ENSURE=$DIR/officecli-ensure-docx-styles
 verb=""
 docx=""
 prev=""
-need_ensure=0
+ensure_before=0
+ensure_after=0
 for arg in "$@"; do
   case "$arg" in
     --*|-* ) ;;
-    create|open|refresh)
+    create)
       [ -z "$verb" ] && verb=$arg
-      need_ensure=1
+      ensure_after=1
       ;;
     add|set)
       [ -z "$verb" ] && verb=$arg
@@ -62,16 +63,17 @@ for arg in "$@"; do
       ;;
   esac
   case "$arg" in
-    *style=Heading*|*style=Title*|*style=TOCHeading*|--type=toc) need_ensure=1 ;;
+    *style=Heading*|*style=Title*|*style=TOCHeading*|--type=toc) ensure_before=1 ;;
+    *id=Heading*|*id=Title*|*id=TOCHeading*) ensure_after=1 ;;
   esac
   if [ "$prev" = "--type" ] && [ "$arg" = "toc" ]; then
-    need_ensure=1
+    ensure_before=1
   fi
   prev=$arg
 done
 
 ensure_docx() {
-  if [ "$need_ensure" = 1 ] && [ -n "$docx" ] && [ -f "$ENSURE" ] && [ -f "$docx" ]; then
+  if [ -n "$docx" ] && [ -f "$ENSURE" ] && [ -f "$docx" ]; then
     "$ENSURE" "$BIN" "$docx"
   fi
 }
@@ -83,5 +85,12 @@ if [ "$verb" = "create" ]; then
   exit $status
 fi
 
-ensure_docx
+if [ "$ensure_before" = 1 ] || [ "$ensure_after" = 1 ]; then
+  [ "$ensure_before" = 1 ] && ensure_docx
+  "$BIN" "$@"
+  status=$?
+  [ $status -eq 0 ] && [ "$ensure_after" = 1 ] && ensure_docx
+  exit $status
+fi
+
 exec "$BIN" "$@"

@@ -45,6 +45,7 @@ files:
   - resources/bin/officecli.cmd
   - resources/bin/officecli-ensure-docx-styles
   - resources/bin/officecli-ensure-docx-styles.cmd
+  - resources/bin/officecli-ensure-docx-styles.json
   # Include bundled uv binary (platform-specific, only the relevant one ships per build)
   - resources/bin/darwin-arm64/**/*
   - resources/bin/darwin-x64/**/*
