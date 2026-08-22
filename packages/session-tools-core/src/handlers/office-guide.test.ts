@@ -74,6 +74,7 @@ describe('office_document_guide', () => {
     expect(Array.isArray(payloadData.catalog)).toBe(true);
     expect(JSON.stringify(payloadData).length).toBeLessThan(40_000);
     expect(payloadData.executionContract).toContain('Selection execution contract');
+    expect(payloadData.executionContract).toContain('After a non-standard batch');
     expect(payloadData.executionContract).toContain('/model3d[N]');
     expect(JSON.stringify(payloadData)).not.toContain('install.sh');
     expect(JSON.stringify(payloadData)).not.toContain('install.ps1');

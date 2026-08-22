@@ -14,9 +14,11 @@ import type { OfficeResultEnvelope } from '../office-types.ts';
 import { clearOfficeRuntimeState, releaseOfficeRuntimeSession } from '../runtime/office-coordinator.ts';
 import { buildMorphCloneCommands } from '../runtime/office-recipes.ts';
 import type { ToolResult } from '../types.ts';
+import { shouldRequireStrictOfficeFinalize } from './office-strict-finalize-gate.ts';
 
 const runIntegration = process.env.OFFICECLI_INTEGRATION === '1';
 const integrationIt = runIntegration ? it : it.skip;
+const requireStrictFinalize = shouldRequireStrictOfficeFinalize();
 
 let root = '';
 let working = '';
@@ -42,12 +44,22 @@ function requireSuccess(result: ToolResult, label: string): OfficeResultEnvelope
   return value;
 }
 
+async function maybeStrictFinalize(file: string, label: string): Promise<void> {
+  if (!requireStrictFinalize) return;
+  const finalized = requireSuccess(await handleOfficeDocumentFinalize(ctx, { file, profile: 'strict' }), label);
+  expect(finalized.deliveryReady).toBe(true);
+  expect(finalized.evidence?.artifactRevision).toBe(finalized.artifactRevision);
+}
+
 function batchCommand(command: Record<string, unknown>): string {
   return JSON.stringify(command);
 }
 
 beforeAll(() => {
   if (!runIntegration) return;
+  if (!requireStrictFinalize) {
+    console.warn('[officecli] skipping strict finalize; Windows desktop Office is not installed. Set OFFICECLI_REQUIRE_STRICT_FINALIZE=1 to force it.');
+  }
   root = mkdtempSync(join(tmpdir(), 'selection-officecli-real-'));
   const workspace = join(root, 'workspace');
   const sessionPath = join(workspace, 'sessions', 'officecli-integration');
@@ -136,9 +148,7 @@ describe('real OfficeCLI 1.0.144 integration', () => {
       action: 'render', file, grid: 'auto', renderer: 'html',
     }), 'render docx');
     expect(preview.artifacts.some(artifact => artifact.kind === 'image')).toBe(true);
-    const finalized = requireSuccess(await handleOfficeDocumentFinalize(ctx, { file, profile: 'strict' }), 'finalize docx');
-    expect(finalized.deliveryReady).toBe(true);
-    expect(finalized.evidence?.artifactRevision).toBe(finalized.artifactRevision);
+    await maybeStrictFinalize(file, 'finalize docx');
   }, 180_000);
 
   integrationIt('runs native merge, atomic import recovery, and the real refresh capability', async () => {
@@ -211,7 +221,7 @@ describe('real OfficeCLI 1.0.144 integration', () => {
     expect(JSON.stringify(crossSheet.data)).toContain('Sheet1!B4');
     expect(JSON.stringify(crossSheet.data)).not.toContain('\\\\!');
     requireSuccess(await handleOfficeDocumentPreview(ctx, { action: 'render', file: xlsx, page: '1', renderer: 'html' }), 'render xlsx');
-    expect(requireSuccess(await handleOfficeDocumentFinalize(ctx, { file: xlsx, profile: 'strict' }), 'finalize xlsx').deliveryReady).toBe(true);
+    await maybeStrictFinalize(xlsx, 'finalize xlsx');
 
     const pptx = 'folder with spaces/产品 路线图.pptx';
     requireSuccess(await handleOfficeDocumentEdit(ctx, { argv: ['create', pptx] }), 'create pptx');
@@ -231,7 +241,7 @@ describe('real OfficeCLI 1.0.144 integration', () => {
     requireSuccess(await handleOfficeDocumentInspect(ctx, { argv: ['get', pptx, '/slide[2]'] }), 'inspect cloned morph slide');
     requireSuccess(await handleOfficeDocumentInspect(ctx, { argv: ['view', pptx, 'outline'] }), 'inspect pptx outline');
     requireSuccess(await handleOfficeDocumentPreview(ctx, { action: 'render', file: pptx, grid: 'auto', renderer: 'html' }), 'render pptx');
-    expect(requireSuccess(await handleOfficeDocumentFinalize(ctx, { file: pptx, profile: 'strict' }), 'finalize pptx').deliveryReady).toBe(true);
+    await maybeStrictFinalize(pptx, 'finalize pptx');
   }, 240_000);
 
   integrationIt('embeds the pinned GLB fixture across Morph slides and reports HTML dependency evidence', async () => {
@@ -279,10 +289,7 @@ describe('real OfficeCLI 1.0.144 integration', () => {
         externalDependencies: expect.arrayContaining(['three']),
       },
     });
-    expect(requireSuccess(
-      await handleOfficeDocumentFinalize(ctx, { file, profile: 'strict' }),
-      'finalize Morph 3D deck',
-    ).deliveryReady).toBe(true);
+    await maybeStrictFinalize(file, 'finalize Morph 3D deck');
   }, 360_000);
 
   integrationIt('runs watch → selection → mark → edit → finalize and releases the owned watch', async () => {
@@ -312,7 +319,7 @@ describe('real OfficeCLI 1.0.144 integration', () => {
     requireSuccess(await handleOfficeDocumentEdit(ctx, {
       argv: ['set', file, selectedPath!, '--prop', 'color=1E2761'],
     }), 'edit selected path');
-    expect(requireSuccess(await handleOfficeDocumentFinalize(ctx, { file, profile: 'strict' }), 'finalize after selection edit').deliveryReady).toBe(true);
+    await maybeStrictFinalize(file, 'finalize after selection edit');
     const stopped = requireSuccess(await handleOfficeDocumentPreview(ctx, { action: 'stop', file }), 'stop watch');
     expect(stopped.data).toMatchObject({ stopped: true, remainingSessionReferences: 0 });
   }, 240_000);
@@ -330,7 +337,7 @@ describe('real OfficeCLI 1.0.144 integration', () => {
       argv: ['get', file, '/Sheet1/A1'],
     }), 'get after resident sets');
     expect(JSON.stringify(latest.data)).toContain('二次');
-    expect(requireSuccess(await handleOfficeDocumentFinalize(ctx, { file, profile: 'strict' }), 'finalize resident').deliveryReady).toBe(true);
+    await maybeStrictFinalize(file, 'finalize resident');
   }, 180_000);
 
   integrationIt('writes dump and html artifacts that Read can consume, and replays dump through batch.file', async () => {

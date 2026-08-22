@@ -268,6 +268,11 @@ export {
 } from './tool-defs.ts';
 
 export {
+  OFFICE_STANDARD_TASK_HINT,
+  OFFICE_STANDARD_TASK_SEQUENCE,
+} from './office-standard-task.ts';
+
+export {
   OFFICE_WORKFLOW_PROMPT,
   OFFICE_DOCUMENT_INSPECT_DESCRIPTION,
   OFFICE_DOCUMENT_EDIT_DESCRIPTION,

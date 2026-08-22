@@ -25,7 +25,10 @@ describe('Office workflow contract', () => {
     expect(OFFICE_WORKFLOW_PROMPT).toContain('OfficeCLI is the only Office execution engine');
     expect(OFFICE_WORKFLOW_PROMPT).toContain('argv');
     expect(OFFICE_WORKFLOW_PROMPT).toContain("argv: ['help', format, element]");
+    expect(OFFICE_WORKFLOW_PROMPT).toContain('must not call status or help');
+    expect(OFFICE_WORKFLOW_PROMPT).toContain('Reuse envelope.cwd and envelope.documentPath');
     expect(OFFICE_WORKFLOW_PROMPT).toContain('more than about 10');
+    expect(OFFICE_WORKFLOW_PROMPT).toContain('After a batch that is not the standard five-step recipe');
     expect(OFFICE_WORKFLOW_PROMPT).toContain('view issues');
     expect(OFFICE_WORKFLOW_PROMPT).toContain('Never pass open, save, or close');
     expect(OFFICE_WORKFLOW_PROMPT).not.toMatch(/four inspect|最多四次|Windows only/i);
