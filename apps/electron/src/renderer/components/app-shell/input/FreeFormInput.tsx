@@ -389,11 +389,6 @@ export function FreeFormInput({
     return llmConnections.find(c => c.slug === effectiveConnection) ?? null
   }, [llmConnections, effectiveConnection])
 
-  const showVisionWarning = attachments.some(a => a.type === 'image' || a.mimeType?.startsWith('image/'))
-    && !!effectiveConnectionDetails
-    && isCompatProvider(effectiveConnectionDetails.providerType)
-    && !modelSupportsImages(effectiveConnectionDetails, currentModel)
-
   // Access sessionStatuses and onSessionStatusChange from context for the # menu state picker
   const sessionStatuses = appShellCtx?.sessionStatuses ?? []
   const onSessionStatusChange = appShellCtx?.onSessionStatusChange
@@ -443,6 +438,10 @@ export function FreeFormInput({
   // Sync TO parent on blur/submit (debounced persistence)
   const [input, setInput] = React.useState(() => coerceInputText(inputValue))
   const [attachments, setAttachments] = React.useState<FileAttachment[]>(attachmentsValue ?? [])
+  const showVisionWarning = attachments.some(a => a.type === 'image' || a.mimeType?.startsWith('image/'))
+    && !!effectiveConnectionDetails
+    && isCompatProvider(effectiveConnectionDetails.providerType)
+    && !modelSupportsImages(effectiveConnectionDetails, currentModel)
 
   // Ref to track current attachments for use in event handlers (avoids stale closure issues)
   const attachmentsRef = React.useRef<FileAttachment[]>([])
