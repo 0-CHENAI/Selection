@@ -40,6 +40,8 @@ export const LOCAL_ONLY_CHANNELS = new Set<string>([
 
   // file — native file dialog
   RPC_CHANNELS.file.OPEN_DIALOG,
+  RPC_CHANNELS.resources.OPEN_BUNDLE_FILE,
+  RPC_CHANNELS.resources.SAVE_BUNDLE_FILE,
   // file — draft hydration for user-attached paths. Paths in drafts.json were captured
   // via webUtils.getPathForFile in the renderer, so they point at the user's local machine
   // — even when the workspace itself lives on a remote server. Routing this REMOTE_ELIGIBLE
@@ -419,6 +421,7 @@ export const REMOTE_ELIGIBLE_CHANNELS = new Set<string>([
 
   // resources — workspace resource export/import/copy
   RPC_CHANNELS.resources.EXPORT,
+  RPC_CHANNELS.resources.PREVIEW_IMPORT,
   RPC_CHANNELS.resources.IMPORT,
   RPC_CHANNELS.resources.COPY_BETWEEN,
 

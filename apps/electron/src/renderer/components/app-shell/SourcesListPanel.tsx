@@ -10,6 +10,7 @@ import { sourceSelection } from '@/hooks/useEntitySelection'
 import { SourceMenu } from './SourceMenu'
 import { SendResourceToWorkspaceDialog } from './SendResourceToWorkspaceDialog'
 import { CopyResourcesFromWorkspaceDialog } from './CopyResourcesFromWorkspaceDialog'
+import { ResourceTransferDialog } from '@/components/resources/ResourceTransferDialog'
 import { useAppShellContext } from '@/context/AppShellContext'
 import { EditPopover, getEditConfig, type EditContextKey } from '@/components/ui/EditPopover'
 import { useDisplayTitleRename } from '@/hooks/useDisplayTitleRename'
@@ -74,6 +75,7 @@ export function SourcesListPanel({
   const [sendResourceSlug, setSendResourceSlug] = React.useState<string | null>(null)
   const [sendResourceLabel, setSendResourceLabel] = React.useState('')
   const [copyFromOpenInternal, setCopyFromOpenInternal] = React.useState(false)
+  const [exportResourceSlug, setExportResourceSlug] = React.useState<string | null>(null)
   const copyFromOpen = copyFromOpenProp ?? copyFromOpenInternal
   const setCopyFromOpen = onCopyFromOpenChange ?? setCopyFromOpenInternal
   const rename = useDisplayTitleRename('source', activeWorkspaceId)
@@ -173,6 +175,7 @@ export function SourcesListPanel({
                 setSendResourceLabel(title)
                 setSendDialogOpen(true)
               } : undefined}
+              onExport={() => setExportResourceSlug(source.config.slug)}
             />
           ),
         }
@@ -199,6 +202,15 @@ export function SourcesListPanel({
       activeWorkspaceId={activeWorkspaceId}
       resourceType="source"
     />
+    {exportResourceSlug && activeWorkspaceId && (
+      <ResourceTransferDialog
+        open
+        mode="export"
+        workspaceId={activeWorkspaceId}
+        initialSelection={[{ type: 'source', id: exportResourceSlug }]}
+        onOpenChange={(isOpen) => { if (!isOpen) setExportResourceSlug(null) }}
+      />
+    )}
     {rename.dialog}
     </>
   )

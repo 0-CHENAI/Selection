@@ -13,6 +13,7 @@ import { Check, X, Minus } from 'lucide-react'
 import { EditPopover, EditButton, getEditConfig } from '@/components/ui/EditPopover'
 import { toast } from 'sonner'
 import { SkillMenu } from '@/components/app-shell/SkillMenu'
+import { ResourceTransferDialog } from '@/components/resources/ResourceTransferDialog'
 import { SkillAvatar } from '@/components/ui/skill-avatar'
 import { DisplayTitleField, useDisplayTitleRename } from '@/hooks/useDisplayTitleRename'
 import { resolveSkillTitle } from '@craft-agent/shared/display-titles'
@@ -37,6 +38,7 @@ export default function SkillInfoPage({ skillSlug, workspaceId, workingDirectory
   const { t } = useTranslation()
   const [skill, setSkill] = useState<LoadedSkill | null>(null)
   const [loading, setLoading] = useState(true)
+  const [exportOpen, setExportOpen] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const activeWorkspace = useActiveWorkspace()
   const canRevealLocally = !activeWorkspace?.remoteServer
@@ -165,6 +167,7 @@ export default function SkillInfoPage({ skillSlug, workspaceId, workingDirectory
             onOpenInNewWindow={handleOpenInNewWindow}
             onShowInFinder={handleOpenInFinder}
             onRename={() => skill && renameTarget && rename.start(skill.slug, renameTarget)}
+            onExport={skill?.source === 'workspace' ? () => setExportOpen(true) : undefined}
             canShowInFinder={canRevealLocally}
             onDelete={canDeleteSkill ? handleDelete : undefined}
             canDelete={canDeleteSkill}
@@ -299,6 +302,13 @@ export default function SkillInfoPage({ skillSlug, workspaceId, workingDirectory
         </Info_Page.Content>
       )}
     </Info_Page>
+    <ResourceTransferDialog
+      open={exportOpen}
+      mode="export"
+      workspaceId={workspaceId}
+      initialSelection={[{ type: 'skill', id: skillSlug }]}
+      onOpenChange={setExportOpen}
+    />
     {rename.dialog}
     </>
   )

@@ -22,6 +22,7 @@ import {
   AppWindow,
   Send,
   Pencil,
+  Download,
 } from 'lucide-react'
 import { useMenuComponents } from '@/components/ui/menu-context'
 import { getFileManagerName } from '@/lib/platform'
@@ -39,6 +40,7 @@ export interface SourceMenuProps {
   onSendToWorkspace?: () => void
   /** Rename the display title without changing the source slug */
   onRename?: () => void
+  onExport?: () => void
 }
 
 /**
@@ -53,6 +55,7 @@ export function SourceMenu({
   onDelete,
   onSendToWorkspace,
   onRename,
+  onExport,
 }: SourceMenuProps) {
   const { t } = useTranslation()
 
@@ -85,6 +88,13 @@ export function SourceMenu({
         <MenuItem onClick={onSendToWorkspace}>
           <Send className="h-3.5 w-3.5" />
           <span className="flex-1">{t("sessionMenu.sendToWorkspace")}</span>
+        </MenuItem>
+      )}
+
+      {onExport && (
+        <MenuItem onClick={onExport}>
+          <Download className="h-3.5 w-3.5" />
+          <span className="flex-1">{t('resourceTransfer.exportMenu')}</span>
         </MenuItem>
       )}
 

@@ -31,6 +31,7 @@ import type { DetailsPageMeta } from '@/lib/navigation-registry'
 import { SourceAvatar } from '@/components/ui/source-avatar'
 import { resolveSourceTitle } from '@craft-agent/shared/display-titles'
 import { toast } from 'sonner'
+import { ResourceTransferDialog } from '@/components/resources/ResourceTransferDialog'
 
 import {
   SettingsSection,
@@ -67,6 +68,7 @@ export default function WorkspaceSettingsPage() {
   const [workingDirectory, setWorkingDirectory] = useState('')
   const [localMcpEnabled, setLocalMcpEnabled] = useState(true)
   const [isLoadingWorkspace, setIsLoadingWorkspace] = useState(true)
+  const [resourceTransferMode, setResourceTransferMode] = useState<'export' | 'import' | null>(null)
 
   // Default sources state
   const [availableSources, setAvailableSources] = useState<LoadedSource[]>([])
@@ -435,6 +437,40 @@ export default function WorkspaceSettingsPage() {
               />
             </SettingsSection>
 
+            <SettingsSection
+              title={t('settings.workspace.resourceTransfer')}
+              description={t('settings.workspace.resourceTransferDesc')}
+            >
+              <SettingsCard>
+                <SettingsRow
+                  label={t('settings.workspace.exportResources')}
+                  description={t('settings.workspace.exportResourcesDesc')}
+                  action={
+                    <button
+                      type="button"
+                      onClick={() => setResourceTransferMode('export')}
+                      className="inline-flex items-center h-8 px-3 text-sm rounded-lg bg-background shadow-minimal hover:bg-foreground/[0.02] transition-colors"
+                    >
+                      {t('common.export')}
+                    </button>
+                  }
+                />
+                <SettingsRow
+                  label={t('settings.workspace.importResources')}
+                  description={t('settings.workspace.importResourcesDesc')}
+                  action={
+                    <button
+                      type="button"
+                      onClick={() => setResourceTransferMode('import')}
+                      className="inline-flex items-center h-8 px-3 text-sm rounded-lg bg-background shadow-minimal hover:bg-foreground/[0.02] transition-colors"
+                    >
+                      {t('common.import')}
+                    </button>
+                  }
+                />
+              </SettingsCard>
+            </SettingsSection>
+
             {/* Permissions */}
             <SettingsSection title={t("settings.workspace.permissionsSection")}>
               <SettingsCard>
@@ -565,6 +601,15 @@ export default function WorkspaceSettingsPage() {
         onCancel={cancelWdBrowser}
         initialPath={workingDirectory || undefined}
       />
+      {resourceTransferMode && (
+        <ResourceTransferDialog
+          open
+          mode={resourceTransferMode}
+          workspaceId={activeWorkspaceId}
+          workspaceName={wsName}
+          onOpenChange={(isOpen) => { if (!isOpen) setResourceTransferMode(null) }}
+        />
+      )}
     </div>
   )
 }

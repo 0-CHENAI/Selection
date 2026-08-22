@@ -8,6 +8,20 @@ export type {
   SkillBundleEntry,
   AutomationBundleEntry,
   ResourceImportMode,
+  ResourceImportAction,
+  ResourceImportDecision,
+  ResourceImportPlan,
+  ResourceImportPreview,
+  ResourceImportPreviewItem,
+  ResourceImportPreviewStatus,
+  ResourceType,
+  ResourceDependencyType,
+  ResourceRef,
+  ResourceManifestItem,
+  ResourceDependency,
+  ResourceRedaction,
+  ResourceBundleManifest,
+  ResourceBundleIntegrity,
   ExportResourcesOptions,
   CopyResourcesOptions,
   ExportResult,
@@ -20,6 +34,7 @@ export {
   exportResources,
   importResources,
   validateResourceBundle,
+  previewResourceImport,
 } from './resource-bundle.ts'
 
 export type {
