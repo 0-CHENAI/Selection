@@ -14,7 +14,7 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 
 ## Bug Fixes
 
-- **Office generation survives long model thinking** — Word / Excel / PowerPoint turns no longer abort a live high-thinking stream (for example 0x Alpha planning a report) after 120 seconds of hidden reasoning. The idle deadline resets on thinking, text, and tool deltas; a silent stall still fails after two bounded attempts.
+- **Office generation waits like a long agent job** — Word / Excel / PowerPoint turns no longer share a 10-minute wait budget across every model call, and a live high-thinking stream is not killed after 120 seconds of hidden reasoning. The product only idle-timeouts a silent stall, keeps a 5-minute HTTP idle floor, retries 429/5xx before failing, and treats leftover deadline errors as retryable provider failures. Stopping the turn no longer looks like a provider outage.
 
 - **Folder and file pickers wait while you browse** — choosing a working directory, attaching files, or confirming a native dialog no longer fails after 30 seconds.
 

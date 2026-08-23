@@ -478,6 +478,13 @@ export function parseError(
     }
   } else if (lowerMessage.includes('429') || lowerMessage.includes('rate limit') || lowerMessage.includes('too many requests')) {
     code = 'rate_limited';
+  } else if (
+    lowerMessage.includes('officecli document')
+    && !lowerMessage.includes('was aborted')
+  ) {
+    // Stall / idle-deadline after the stream wrapper already retried.
+    // User-initiated abort stays unclassified so SessionManager can ignore it.
+    code = 'provider_error';
   } else if (lowerMessage.includes('500') || lowerMessage.includes('502') || lowerMessage.includes('503') || lowerMessage.includes('504') || lowerMessage.includes('internal server error') || lowerMessage.includes('service unavailable')) {
     code = 'service_error';
   } else if (lowerMessage.includes('network') || lowerMessage.includes('econnrefused') || lowerMessage.includes('enotfound') || lowerMessage.includes('fetch failed') || lowerMessage.includes('connection')) {

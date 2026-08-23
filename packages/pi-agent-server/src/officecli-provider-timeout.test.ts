@@ -5,16 +5,17 @@ import {
   createOfficecliDeadlineStreamFn,
   isOfficecliDocumentContext,
   isOfficecliDocumentTask,
+  isOfficecliRetryableProviderError,
   providerRetrySettingsForTask,
 } from './officecli-provider-timeout.ts';
 
 describe('OfficeCLI provider timeout policy', () => {
   const baseline = { timeoutMs: undefined, maxRetries: undefined, maxRetryDelayMs: 60_000 };
 
-  it('disables SDK retries when the bounded Office stream policy is active', () => {
+  it('raises the HTTP idle floor for Office document turns', () => {
     expect(isOfficecliDocumentTask('...\n# OfficeCLI execution policy\n...')).toBe(true);
     expect(providerRetrySettingsForTask('...\n# OfficeCLI execution policy\n...', baseline)).toEqual({
-      timeoutMs: 120_000,
+      timeoutMs: 300_000,
       maxRetries: 0,
       maxRetryDelayMs: 5_000,
     });
@@ -39,12 +40,12 @@ describe('OfficeCLI provider timeout policy', () => {
     })).toBe(true);
   });
 
-  it('preserves stricter user settings and leaves unrelated tasks unchanged', () => {
+  it('does not inherit a shorter idle timeout than the Office floor', () => {
     expect(providerRetrySettingsForTask('# OfficeCLI execution policy', {
       timeoutMs: 30_000,
       maxRetries: 2,
       maxRetryDelayMs: 2_000,
-    })).toEqual({ timeoutMs: 30_000, maxRetries: 0, maxRetryDelayMs: 2_000 });
+    })).toEqual({ timeoutMs: 300_000, maxRetries: 0, maxRetryDelayMs: 2_000 });
     expect(providerRetrySettingsForTask('ordinary long-form research', baseline)).toEqual(baseline);
   });
 
@@ -65,9 +66,9 @@ describe('OfficeCLI provider timeout policy', () => {
     );
     const result = await (await wrapped(model, { messages: [] })).result();
     expect(result.stopReason).toBe('aborted');
-    expect(result.errorMessage).toContain('10ms deadline twice');
-    expect(attempts).toBe(2);
-    expect(retryAttempts).toEqual([2]);
+    expect(result.errorMessage).toContain('10ms deadline');
+    expect(attempts).toBe(3);
+    expect(retryAttempts).toEqual([2, 3]);
 
     active = false;
     const completed = createAssistantMessageEventStream();
@@ -255,10 +256,10 @@ describe('OfficeCLI provider timeout policy', () => {
     expect((await (await wrapped(model, { messages: [] })).result()).stopReason).toBe('aborted');
     await Bun.sleep(40);
     expect(nextCalls).toBe(0);
-    expect(returnCalls).toBe(2);
+    expect(returnCalls).toBe(3);
   });
 
-  it('caps cumulative model wait for one user task and resets on the next user turn', async () => {
+  it('gives the next model call a fresh idle budget after a stall', async () => {
     const model = { id: 'test', api: 'openai-completions', provider: 'test' } as Model<any>;
     let attempts = 0;
     const wrapped = createOfficecliDeadlineStreamFn(
@@ -268,21 +269,72 @@ describe('OfficeCLI provider timeout policy', () => {
       },
       () => true,
       10,
-      undefined,
-      15,
     );
-    const firstContext = { messages: [{ role: 'user', content: '# OfficeCLI execution policy', timestamp: 1 }] } as any;
-    const first = await (await wrapped(model, firstContext)).result();
+    const context = { messages: [{ role: 'user', content: '# OfficeCLI execution policy', timestamp: 1 }] } as any;
+    const first = await (await wrapped(model, context)).result();
     expect(first.stopReason).toBe('aborted');
-    expect(first.errorMessage).toContain('cumulative model-wait budget');
-    expect(attempts).toBe(2);
+    expect(first.errorMessage).toContain('10ms deadline');
+    expect(attempts).toBe(3);
 
-    const second = await (await wrapped(model, firstContext)).result();
-    expect(second.errorMessage).toContain('cumulative model-wait budget');
-    expect(attempts).toBe(2);
+    const second = await (await wrapped(model, context)).result();
+    expect(second.stopReason).toBe('aborted');
+    expect(attempts).toBe(6);
+  });
 
-    const nextContext = { messages: [{ role: 'user', content: '# OfficeCLI execution policy', timestamp: 2 }] } as any;
-    await (await wrapped(model, nextContext)).result();
-    expect(attempts).toBe(4);
+  it('retries a rate-limited attempt that produced no visible output', async () => {
+    const model = { id: 'test', api: 'openai-completions', provider: 'test' } as Model<any>;
+    const message = {
+      role: 'assistant', content: [], api: model.api, provider: model.provider, model: model.id,
+      usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
+      stopReason: 'stop', timestamp: Date.now(),
+    } as const;
+    let attempts = 0;
+    const wrapped = createOfficecliDeadlineStreamFn(() => {
+      attempts += 1;
+      const stream = createAssistantMessageEventStream();
+      if (attempts < 3) {
+        stream.push({
+          type: 'error',
+          reason: 'error',
+          error: { ...message, stopReason: 'error', errorMessage: '429 Too many requests - rate limit exceeded' },
+        });
+      } else {
+        stream.push({ type: 'text_start', contentIndex: 0, partial: message });
+        stream.push({ type: 'text_delta', contentIndex: 0, delta: 'ok', partial: message });
+        stream.push({ type: 'text_end', contentIndex: 0, content: 'ok', partial: message });
+        stream.push({ type: 'done', reason: 'stop', message });
+      }
+      return stream;
+    }, () => true, 50, undefined, 1);
+
+    const result = await (await wrapped(model, { messages: [] })).result();
+    expect(result.stopReason).toBe('stop');
+    expect(attempts).toBe(3);
+  });
+
+  it('does not treat millisecond values as HTTP 500', () => {
+    expect(isOfficecliRetryableProviderError('timeout after 15000ms')).toBe(false);
+    expect(isOfficecliRetryableProviderError('429 Too many requests')).toBe(true);
+    expect(isOfficecliRetryableProviderError('HTTP 503 overloaded')).toBe(true);
+    expect(isOfficecliRetryableProviderError('OfficeCLI document model stream ended without a terminal event')).toBe(true);
+  });
+
+  it('does not inherit a shorter provider HTTP idle timeout', async () => {
+    const model = { id: 'test', api: 'openai-completions', provider: 'test' } as Model<any>;
+    const message = {
+      role: 'assistant', content: [], api: model.api, provider: model.provider, model: model.id,
+      usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
+      stopReason: 'stop', timestamp: Date.now(),
+    } as const;
+    let seenTimeout: number | undefined;
+    const wrapped = createOfficecliDeadlineStreamFn((_model, _context, options) => {
+      seenTimeout = options?.timeoutMs;
+      const stream = createAssistantMessageEventStream();
+      stream.push({ type: 'done', reason: 'stop', message });
+      return stream;
+    }, () => true, 300_000);
+
+    await (await wrapped(model, { messages: [] }, { timeoutMs: 30_000 })).result();
+    expect(seenTimeout).toBe(300_000);
   });
 });

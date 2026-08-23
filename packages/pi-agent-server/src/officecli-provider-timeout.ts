@@ -14,11 +14,11 @@ export interface ProviderRetrySettings {
   maxRetryDelayMs: number;
 }
 
-const OFFICECLI_MODEL_REQUEST_TIMEOUT_MS = 120_000;
+const OFFICECLI_MODEL_REQUEST_TIMEOUT_MS = 300_000;
 
-export const OFFICECLI_MODEL_STREAM_DEADLINE_MS = 120_000;
-export const OFFICECLI_MODEL_TASK_WAIT_BUDGET_MS = 600_000;
-const OFFICECLI_MODEL_STREAM_MAX_ATTEMPTS = 2;
+export const OFFICECLI_MODEL_STREAM_DEADLINE_MS = 300_000;
+const OFFICECLI_MODEL_STREAM_MAX_ATTEMPTS = 3;
+const OFFICECLI_RETRYABLE_PROVIDER_DELAY_MS = 2_000;
 const OFFICECLI_MODEL_STREAM_MAX_EVENTS = 100_000;
 const OFFICECLI_MODEL_STREAM_MAX_DELTA_CHARS = 8 * 1024 * 1024;
 
@@ -50,9 +50,8 @@ export function isOfficecliDocumentContext(context: Context): boolean {
 }
 
 /**
- * Bound a single provider request for Office generation so one stalled call
- * cannot consume the entire task wait budget. Other tasks retain the user's
- * original Pi settings.
+ * Document turns need a longer HTTP idle floor than ordinary chat. The
+ * stream wrapper owns stall retries, so the SDK does not stack extra ones.
  */
 export function providerRetrySettingsForTask(
   systemPrompt: string | undefined,
@@ -60,12 +59,23 @@ export function providerRetrySettingsForTask(
 ): ProviderRetrySettings {
   if (!isOfficecliDocumentTask(systemPrompt)) return { ...baseline };
   return {
-    timeoutMs: Math.min(baseline.timeoutMs ?? OFFICECLI_MODEL_REQUEST_TIMEOUT_MS, OFFICECLI_MODEL_REQUEST_TIMEOUT_MS),
-    // The absolute stream wrapper owns the bounded retries so provider SDK
-    // retries cannot multiply the wall-clock budget invisibly.
+    timeoutMs: Math.max(baseline.timeoutMs ?? OFFICECLI_MODEL_REQUEST_TIMEOUT_MS, OFFICECLI_MODEL_REQUEST_TIMEOUT_MS),
     maxRetries: 0,
     maxRetryDelayMs: Math.min(baseline.maxRetryDelayMs, 5_000),
   };
+}
+
+export function isOfficecliRetryableProviderError(message: string | undefined): boolean {
+  if (!message) return false;
+  const lower = message.toLowerCase();
+  return lower.includes('rate limit')
+    || lower.includes('too many requests')
+    || lower.includes('overloaded')
+    || lower.includes('temporarily unavailable')
+    || lower.includes('internal server error')
+    || lower.includes('ended without a terminal event')
+    || /\b429\b/.test(lower)
+    || /\b50[0-4]\b/.test(lower);
 }
 
 function emptyUsage(): AssistantMessage['usage'] {
@@ -81,6 +91,7 @@ function emptyUsage(): AssistantMessage['usage'] {
 
 /** Hidden reasoning and visible tokens both count as progress for the idle clock. */
 function isOfficecliProgressEvent(event: AssistantMessageEvent): boolean {
+  if (event.type === 'thinking_start' || event.type === 'thinking_end') return true;
   if (!('delta' in event) || typeof event.delta !== 'string' || event.delta.length === 0) {
     return false;
   }
@@ -112,62 +123,28 @@ function deadlineErrorMessage(
 
 /**
  * Idle-out a stalled Office provider stream. Thinking / text / tool deltas
- * reset the clock so a high-thinking model can plan a document for several
- * minutes. A provider that goes silent still dies after deadlineMs, and the
- * cumulative task budget still caps total wait.
+ * reset the clock so a high-thinking model can plan a document for as long
+ * as it is still working. A silent stall or a 429/5xx with no visible
+ * output is retried; a progressing stream is never killed by a turn budget.
  */
 export function createOfficecliDeadlineStreamFn(
   baseStreamFn: StreamFn,
   isActive: (context: Context) => boolean,
   deadlineMs = OFFICECLI_MODEL_STREAM_DEADLINE_MS,
   onRetryAttempt?: (attempt: number) => void,
-  taskWaitBudgetMs = OFFICECLI_MODEL_TASK_WAIT_BUDGET_MS,
+  retryDelayMs = OFFICECLI_RETRYABLE_PROVIDER_DELAY_MS,
 ): StreamFn {
-  let activeUserTurnKey: string | undefined;
-  let taskWaitUsedMs = 0;
-
   return (model, context, options) => {
     if (!isActive(context)) return baseStreamFn(model, context, options);
-
-    let latestUserIndex = -1;
-    let latestUserTimestamp = 0;
-    for (let index = context.messages.length - 1; index >= 0; index -= 1) {
-      const message = context.messages[index]!;
-      if (message.role !== 'user') continue;
-      latestUserIndex = index;
-      latestUserTimestamp = message.timestamp;
-      break;
-    }
-    const userTurnKey = `${latestUserIndex}:${latestUserTimestamp}`;
-    if (userTurnKey !== activeUserTurnKey) {
-      activeUserTurnKey = userTurnKey;
-      taskWaitUsedMs = 0;
-    }
 
     const output = createAssistantMessageEventStream();
     const upstreamSignal = options?.signal;
     let latestPartial: AssistantMessage | undefined;
 
     void (async () => {
-      // Retry only when a timed-out attempt emitted no events. Once visible
-      // stream state exists it cannot be retracted safely, so that attempt ends
-      // with a bounded error instead of mixing two assistant responses.
+      // Retry only when a timed-out or transient attempt emitted no visible
+      // output. Once stream state exists it cannot be retracted safely.
       for (let attempt = 1; attempt <= OFFICECLI_MODEL_STREAM_MAX_ATTEMPTS; attempt += 1) {
-        const taskWaitRemainingMs = taskWaitBudgetMs - taskWaitUsedMs;
-        if (taskWaitRemainingMs <= 0) {
-          output.push({
-            type: 'error',
-            reason: 'aborted',
-            error: deadlineErrorMessage(
-              model,
-              latestPartial,
-              taskWaitBudgetMs,
-              'aborted',
-              `OfficeCLI document task exhausted its ${taskWaitBudgetMs}ms cumulative model-wait budget`,
-            ),
-          });
-          return;
-        }
         if (upstreamSignal?.aborted) {
           output.push({
             type: 'error',
@@ -183,8 +160,7 @@ export function createOfficecliDeadlineStreamFn(
           return;
         }
         if (attempt > 1) onRetryAttempt?.(attempt);
-        const attemptStartedAt = Date.now();
-        const attemptDeadlineMs = Math.max(1, Math.min(deadlineMs, taskWaitRemainingMs));
+        const attemptDeadlineMs = Math.max(1, deadlineMs);
 
         const controller = new AbortController();
         let emittedDurableEvent = false;
@@ -201,16 +177,13 @@ export function createOfficecliDeadlineStreamFn(
         const resetIdleTimer = () => {
           if (interruptSettled || abandoned) return;
           if (timer) clearTimeout(timer);
-          const elapsedMs = Date.now() - attemptStartedAt;
-          const remainingBudgetMs = taskWaitBudgetMs - taskWaitUsedMs - elapsedMs;
-          const waitMs = Math.max(1, Math.min(attemptDeadlineMs, remainingBudgetMs));
           timer = setTimeout(() => {
             if (interruptSettled) return;
             abandoned = true;
             interruptSettled = true;
             controller.abort(new Error('OfficeCLI model stream deadline exceeded'));
             settleInterrupt?.('deadline');
-          }, waitMs);
+          }, attemptDeadlineMs);
         };
         const interrupted = new Promise<'deadline' | 'upstream'>(resolve => {
           settleInterrupt = resolve;
@@ -238,7 +211,7 @@ export function createOfficecliDeadlineStreamFn(
             const boundedOptions: SimpleStreamOptions = {
               ...options,
               signal: controller.signal,
-              timeoutMs: Math.min(options?.timeoutMs ?? attemptDeadlineMs, attemptDeadlineMs),
+              timeoutMs: attemptDeadlineMs,
               maxRetries: 0,
               maxRetryDelayMs: Math.min(options?.maxRetryDelayMs ?? 5_000, 5_000),
             };
@@ -303,7 +276,6 @@ export function createOfficecliDeadlineStreamFn(
 
         const attemptPromise = consumeAttempt();
         const outcome = await Promise.race([attemptPromise, interrupted]);
-        taskWaitUsedMs += Math.max(0, Date.now() - attemptStartedAt);
         if (timer) clearTimeout(timer);
         if (abortFromUpstream) upstreamSignal?.removeEventListener('abort', abortFromUpstream);
 
@@ -339,9 +311,7 @@ export function createOfficecliDeadlineStreamFn(
           // A provider may start a hidden thinking block and then stall. Those
           // buffered events were never forwarded, so a fresh attempt cannot
           // leave two assistant messages in downstream context.
-          if (!emittedDurableEvent &&
-              attempt < OFFICECLI_MODEL_STREAM_MAX_ATTEMPTS &&
-              taskWaitUsedMs < taskWaitBudgetMs) continue;
+          if (!emittedDurableEvent && attempt < OFFICECLI_MODEL_STREAM_MAX_ATTEMPTS) continue;
           output.push({
             type: 'error',
             reason: 'aborted',
@@ -352,9 +322,7 @@ export function createOfficecliDeadlineStreamFn(
               'aborted',
               emittedDurableEvent
                 ? `OfficeCLI document model request exceeded the ${deadlineMs}ms deadline after streaming began`
-                : taskWaitUsedMs >= taskWaitBudgetMs
-                  ? `OfficeCLI document task exhausted its ${taskWaitBudgetMs}ms cumulative model-wait budget`
-                  : `OfficeCLI document model request exceeded the ${deadlineMs}ms deadline twice`,
+                : `OfficeCLI document model request exceeded the ${deadlineMs}ms deadline`,
             ),
           });
           return;
@@ -362,6 +330,16 @@ export function createOfficecliDeadlineStreamFn(
 
         if (outcome.kind === 'complete') {
           return;
+        }
+
+        const providerError = outcome.error instanceof Error ? outcome.error.message : String(outcome.error);
+        if (
+          !emittedDurableEvent
+          && attempt < OFFICECLI_MODEL_STREAM_MAX_ATTEMPTS
+          && isOfficecliRetryableProviderError(providerError)
+        ) {
+          await new Promise(resolve => setTimeout(resolve, retryDelayMs));
+          continue;
         }
 
         output.push({
@@ -372,7 +350,7 @@ export function createOfficecliDeadlineStreamFn(
             latestPartial,
             deadlineMs,
             controller.signal.aborted ? 'aborted' : 'error',
-            outcome.error instanceof Error ? outcome.error.message : String(outcome.error),
+            providerError,
           ),
         });
         return;

@@ -617,7 +617,21 @@ describe('PiEventAdapter', () => {
       expect(events[0].error.code).toBe('rate_limited');
     });
 
-    it('should emit error for OfficeCLI deadline aborts', () => {
+    it('should not emit error when the user stops an OfficeCLI turn', () => {
+      collect(adapter.adaptEvent({ type: 'turn_start' } as any));
+      const events = collect(adapter.adaptEvent({
+        type: 'message_end',
+        message: {
+          role: 'assistant',
+          stopReason: 'aborted',
+          errorMessage: 'OfficeCLI document model request was aborted',
+        },
+      } as any));
+
+      expect(events.every(event => event.type !== 'error' && event.type !== 'typed_error')).toBe(true);
+    });
+
+    it('should emit typed_error for OfficeCLI deadline aborts', () => {
       const events = collect(adapter.adaptEvent({
         type: 'message_end',
         message: {
@@ -629,8 +643,11 @@ describe('PiEventAdapter', () => {
 
       expect(events).toHaveLength(1);
       expect(events[0]).toMatchObject({
-        type: 'error',
-        message: 'OfficeCLI document model request exceeded the 90000ms deadline twice',
+        type: 'typed_error',
+        error: {
+          code: 'provider_error',
+          canRetry: true,
+        },
       });
     });
 

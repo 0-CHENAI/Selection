@@ -70,6 +70,19 @@ describe('parseError tool-support classification', () => {
   })
 })
 
+describe('parseError OfficeCLI document stalls', () => {
+  it('maps deadline / budget failures to a retryable provider error', () => {
+    const parsed = parseError(new Error('OfficeCLI document model request exceeded the 300000ms deadline'))
+    expect(parsed.code).toBe('provider_error')
+    expect(parsed.canRetry).toBe(true)
+  })
+
+  it('does not classify a user Stop as a provider failure', () => {
+    const parsed = parseError(new Error('OfficeCLI document model request was aborted'))
+    expect(parsed.code).toBe('unknown_error')
+  })
+})
+
 describe('parseError OpenRouter availability', () => {
   it('maps no-endpoints 404s to invalid_model with the model id', () => {
     const parsed = parseError(new Error('404: {"message":"No endpoints found for ai21/jamba-large-1.7.","code":404}'))
