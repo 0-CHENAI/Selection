@@ -170,7 +170,7 @@ export function CompactModelSelector({
   })
 
   const liveOpenRouterModels = useLiveOpenRouterModels(
-    !connectionUnavailable && llmConnections.some((connection) => isOpenRouterConnection(connection)),
+    !connectionUnavailable && isOpenRouterConnection(effectiveConnectionDetails),
   )
 
   const availableModels = React.useMemo(() => {

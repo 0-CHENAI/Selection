@@ -61,7 +61,7 @@ setBedrockProviderModule(bedrockProviderModule);
 
 // Model resolution (extracted for testability + custom-endpoint precedence)
 import { resolvePiModel, isDeniedMiniModelId, isModelNotFoundError } from './model-resolution.ts';
-import { pickProviderAppropriateMiniModel } from './pick-mini-model.ts';
+import { pickProviderAppropriateMiniModel, resolveUtilityModelId } from './pick-mini-model.ts';
 import {
   buildCustomEndpointModelDef,
   findCustomEndpointModelEntry,
@@ -983,37 +983,56 @@ async function queryLlm(request: LLMQueryRequest): Promise<LLMQueryResult> {
 
   debugLog('[queryLlm] Starting');
 
-  // Pick mini model. If the configured miniModel uses a different provider than
-  // what the user authenticated with (e.g. gemini-2.5-pro when only anthropic
-  // credentials exist), fall back to the default summarization model which uses
-  // the same provider family.
-  let model = request.model ?? initConfig.miniModel ?? getDefaultSummarizationModel();
-
   // Create authenticated registry upfront — used by both the provider guard and the ephemeral session.
   const { authStorage, modelRegistry } = createAuthenticatedRegistry();
 
   const piAuthProvider = initConfig.piAuth?.provider;
+  let model: string
 
-  // If piAuth is set, ensure the mini model uses the same provider.
-  // Pi SDK will fail with "No API key found" if the model requires a different provider.
-  // Exception: 'custom-endpoint' provider is always compatible because it has its own
-  // API key configured via resolveCustomEndpointApiKey() and doesn't use authStorage.
-  if (initConfig.piAuth) {
-    const authProvider = initConfig.piAuth.provider;
-    const bareModel = model.startsWith('pi/') ? model.slice(3) : model;
-    const resolved = resolveSessionPiModel(modelRegistry, bareModel);
-    const resolvedProvider = (resolved as any)?.provider;
-    const isCompatible = resolvedProvider === authProvider || resolvedProvider === 'custom-endpoint';
-    if (!resolved || !isCompatible || isDeniedMiniModelId(model, piAuthProvider)) {
-      // Anthropic: keep Haiku (the cheap/fast mini). For every other provider
-      // Haiku is unresolvable, so walk PI_PREFERRED_DEFAULTS for a model that
-      // actually works under the user's auth.
-      const providerDefault = authProvider === 'anthropic'
-        ? undefined
-        : pickProviderAppropriateMiniModel(authProvider, modelRegistry, shouldPreferCustomEndpoint());
-      const fallback = providerDefault ?? getDefaultSummarizationModel();
-      debugLog(`[queryLlm] Model ${bareModel} incompatible with ${authProvider} (resolved: ${resolvedProvider}), falling back to ${fallback}`);
-      model = fallback;
+  // Custom endpoints must not fall through to the OpenAI/Anthropic catalogs.
+  // Those requests never reach the local worker, so the UI looks stalled.
+  if (shouldPreferCustomEndpoint()) {
+    const customModel = resolveUtilityModelId({
+      requestModel: request.model,
+      miniModel: initConfig.miniModel,
+      sessionModel: initConfig.model,
+      customModels: initConfig.customModels,
+      piAuthProvider,
+      preferCustomEndpoint: true,
+      registry: modelRegistry,
+    });
+    if (!customModel) {
+      throw new Error('Could not resolve a custom-endpoint model for utility completion');
+    }
+    model = customModel;
+  } else {
+    // Pick mini model. If the configured miniModel uses a different provider than
+    // what the user authenticated with (e.g. gemini-2.5-pro when only anthropic
+    // credentials exist), fall back to the default summarization model which uses
+    // the same provider family.
+    model = request.model ?? initConfig.miniModel ?? getDefaultSummarizationModel();
+
+    // If piAuth is set, ensure the mini model uses the same provider.
+    // Pi SDK will fail with "No API key found" if the model requires a different provider.
+    // Exception: 'custom-endpoint' provider is always compatible because it has its own
+    // API key configured via resolveCustomEndpointApiKey() and doesn't use authStorage.
+    if (initConfig.piAuth) {
+      const authProvider = initConfig.piAuth.provider;
+      const bareModel = model.startsWith('pi/') ? model.slice(3) : model;
+      const resolved = resolveSessionPiModel(modelRegistry, bareModel);
+      const resolvedProvider = (resolved as any)?.provider;
+      const isCompatible = resolvedProvider === authProvider || resolvedProvider === 'custom-endpoint';
+      if (!resolved || !isCompatible || isDeniedMiniModelId(model, piAuthProvider)) {
+        // Anthropic: keep Haiku (the cheap/fast mini). For every other provider
+        // Haiku is unresolvable, so walk PI_PREFERRED_DEFAULTS for a model that
+        // actually works under the user's auth.
+        const providerDefault = authProvider === 'anthropic'
+          ? undefined
+          : pickProviderAppropriateMiniModel(authProvider, modelRegistry, false);
+        const fallback = providerDefault ?? getDefaultSummarizationModel();
+        debugLog(`[queryLlm] Model ${bareModel} incompatible with ${authProvider} (resolved: ${resolvedProvider}), falling back to ${fallback}`);
+        model = fallback;
+      }
     }
   }
 
@@ -1119,13 +1138,20 @@ async function queryLlm(request: LLMQueryRequest): Promise<LLMQueryResult> {
     }
   };
 
-  const fallbackCandidates = [
-    // Removed 'pi/gpt-5.1-codex-mini' (#596) — stale on several OpenAI catalogs.
-    // The connection-configured miniModel is still tried via `initConfig.miniModel`.
-    'pi/gpt-5-mini',
-    initConfig.miniModel,
-    getDefaultSummarizationModel(),
-  ].filter((candidate): candidate is string => !!candidate && !isDeniedMiniModelId(candidate, piAuthProvider));
+  // Custom endpoints stay on custom-endpoint. Catalog fallbacks (gpt-5-mini,
+  // Haiku) would send the retry somewhere else and leave the local worker idle.
+  const fallbackCandidates = shouldPreferCustomEndpoint()
+    ? [initConfig.model, initConfig.miniModel].filter(
+        (candidate): candidate is string =>
+          !!candidate && !isDeniedMiniModelId(candidate, piAuthProvider),
+      )
+    : [
+        // Removed 'pi/gpt-5.1-codex-mini' (#596) — stale on several OpenAI catalogs.
+        // The connection-configured miniModel is still tried via `initConfig.miniModel`.
+        'pi/gpt-5-mini',
+        initConfig.miniModel,
+        getDefaultSummarizationModel(),
+      ].filter((candidate): candidate is string => !!candidate && !isDeniedMiniModelId(candidate, piAuthProvider));
 
   const triedModels = new Set<string>();
   let currentModel = model;
@@ -1148,8 +1174,11 @@ async function queryLlm(request: LLMQueryRequest): Promise<LLMQueryResult> {
         try {
           const resolved = resolvePiModel(modelRegistry, candidate, initConfig!.piAuth?.provider, shouldPreferCustomEndpoint());
           if (!resolved) return false;
+          const rp = (resolved as { provider?: string }).provider;
+          if (shouldPreferCustomEndpoint()) {
+            return rp === 'custom-endpoint';
+          }
           if (initConfig!.piAuth) {
-            const rp = (resolved as any).provider;
             if (rp !== initConfig!.piAuth.provider && rp !== 'custom-endpoint') {
               return false;
             }

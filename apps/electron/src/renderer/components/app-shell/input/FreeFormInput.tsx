@@ -406,21 +406,24 @@ export function FreeFormInput({
     connectionCount: llmConnections.length,
   })
 
+  const effectiveConnection = resolveEffectiveConnectionSlug(currentConnection, workspaceDefaultConnection, llmConnections)
+  const effectiveConnectionDetails = React.useMemo(() => {
+    if (!effectiveConnection) return null
+    return llmConnections.find(c => c.slug === effectiveConnection) ?? null
+  }, [llmConnections, effectiveConnection])
+
   const liveOpenRouterModels = useLiveOpenRouterModels(
-    !connectionUnavailable && llmConnections.some((connection) => isOpenRouterConnection(connection)),
+    !connectionUnavailable && isOpenRouterConnection(effectiveConnectionDetails),
   )
 
   const availableModels = React.useMemo(() => {
     if (connectionUnavailable) return []
-    const effectiveSlug = resolveEffectiveConnectionSlug(currentConnection, workspaceDefaultConnection, llmConnections)
-    const connection = llmConnections.find(c => c.slug === effectiveSlug)
-    return resolvePickerModelsWithLive(connection, liveOpenRouterModels)
-  }, [llmConnections, currentConnection, workspaceDefaultConnection, connectionUnavailable, liveOpenRouterModels])
+    return resolvePickerModelsWithLive(effectiveConnectionDetails, liveOpenRouterModels)
+  }, [effectiveConnectionDetails, connectionUnavailable, liveOpenRouterModels])
 
   const pinnedModelIds = React.useMemo(() => {
-    const effectiveSlug = resolveEffectiveConnectionSlug(currentConnection, workspaceDefaultConnection, llmConnections)
-    return connectionPinnedModelIds(llmConnections.find(c => c.slug === effectiveSlug))
-  }, [llmConnections, currentConnection, workspaceDefaultConnection])
+    return connectionPinnedModelIds(effectiveConnectionDetails)
+  }, [effectiveConnectionDetails])
 
   const availableThinkingLevels = THINKING_LEVELS
 
@@ -455,17 +458,6 @@ export function FreeFormInput({
     if (!currentConnection) return null
     return llmConnections.find(c => c.slug === currentConnection) ?? null
   }, [llmConnections, currentConnection])
-
-  // Effective connection: canonical fallback chain (session → workspace default → global default → first)
-  const effectiveConnection = resolveEffectiveConnectionSlug(currentConnection, workspaceDefaultConnection, llmConnections)
-
-  // Effective connection details (with fallbacks) for model list
-  // Unlike currentConnectionDetails which is null when no explicit connection is set,
-  // this resolves to the actual connection being used (including workspace default)
-  const effectiveConnectionDetails = React.useMemo(() => {
-    if (!effectiveConnection) return null
-    return llmConnections.find(c => c.slug === effectiveConnection) ?? null
-  }, [llmConnections, effectiveConnection])
 
   // Access sessionStatuses and onSessionStatusChange from context for the # menu state picker
   const sessionStatuses = appShellCtx?.sessionStatuses ?? []

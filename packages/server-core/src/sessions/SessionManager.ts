@@ -19,7 +19,7 @@ import {
   type BackendHostRuntimeContext,
   type PostInitResult,
 } from '@craft-agent/shared/agent/backend'
-import { getLlmConnection, getLlmConnections, getDefaultLlmConnection, getDefaultThinkingLevel, getSharedProjectMemoryEnabled, resetManagedAnthropicAuthEnvVars, resolveMidStreamBehavior, getPersistedUiLanguage, resolveTitleLanguageName } from '@craft-agent/shared/config'
+import { getLlmConnection, getLlmConnections, getDefaultLlmConnection, getDefaultThinkingLevel, getSharedProjectMemoryEnabled, resetManagedAnthropicAuthEnvVars, resolveMidStreamBehavior, getPersistedUiLanguage, resolveTitleLanguageName, isCompatProvider } from '@craft-agent/shared/config'
 import type { MidStreamBehavior } from '@craft-agent/shared/config'
 import { PrivilegedExecutionBroker } from '@craft-agent/server-core/services'
 import { isValidWorkingDirectory } from '../utils/path-validation'
@@ -1035,6 +1035,8 @@ interface ManagedSession {
   // Promise that resolves when the agent instance is ready (for title gen to await)
   agentReady?: Promise<void>
   agentReadyResolve?: () => void
+  /** First-turn AI title. Custom endpoints wait until idle; cloud generates after the agent is ready. */
+  pendingAiTitlePrompt?: string
   // Per-session env overrides for SDK subprocess (e.g., ANTHROPIC_BASE_URL).
   // Stored on managed session so it persists across agent recreations (auth-retry, etc.)
   envOverrides?: Record<string, string>
@@ -6252,11 +6254,12 @@ export class SessionManager implements ISessionManager {
         optimisticMessageId: options?.optimisticMessageId
       }, managed.workspace.id)
 
-      // If this is the first user message and no title exists, set one immediately
+      // If this is the first visible user message and no title exists, set one immediately
       // AI generation will enhance it later, but we always have a title from the start
       // Automation sessions (triggeredBy set) already have a title and skip AI generation entirely
-      const isFirstUserMessage = managed.messages.filter(m => m.role === 'user').length === 1
-      if (isFirstUserMessage && !managed.name && !managed.triggeredBy) {
+      // Hidden nudges must not become the session title.
+      const visibleUserCount = managed.messages.filter(m => m.role === 'user' && !m.hidden).length
+      if (visibleUserCount === 1 && !options?.hidden && !managed.name && !managed.triggeredBy) {
         // Replace bracket mentions with their display labels (e.g. [skill:ws:commit] -> "Commit")
         // so titles show human-readable names instead of raw IDs
         let titleSource = message
@@ -6280,9 +6283,10 @@ export class SessionManager implements ISessionManager {
           title: initialTitle,
         }, managed.workspace.id)
 
-        // Generate AI title asynchronously using agent's SDK
-        // (waits briefly for agent creation if needed)
-        this.generateTitle(managed, message)
+        // Cloud: flush after the agent is ready (same process, no temp
+        // subprocess). Custom endpoints: wait until the session is idle so
+        // we do not steal the local worker.
+        managed.pendingAiTitlePrompt = message
       }
     }
 
@@ -6478,6 +6482,9 @@ export class SessionManager implements ISessionManager {
       return
     }
     sendSpan.mark('agent.ready')
+    if (!this.sessionUsesCustomEndpoint(managed)) {
+      this.flushPendingAiTitle(managed)
+    }
 
     // Always set all sources for context (even if none are enabled), including built-ins
     const allSources = loadAllSources(workspaceRootPath)
@@ -7590,6 +7597,8 @@ export class SessionManager implements ISessionManager {
       // spawn_session completions that arrived mid-turn never reached the model
       // (the tool already returned `started`). Wake now that the parent is idle.
       this.flushDeferredSpawnWakes(managed)
+
+      this.flushPendingAiTitle(managed)
     }
 
     // 6. Always persist
@@ -8682,56 +8691,34 @@ export class SessionManager implements ISessionManager {
     }
   }
 
+  private sessionUsesCustomEndpoint(managed: ManagedSession): boolean {
+    const connection = (managed.llmConnection ? getLlmConnection(managed.llmConnection) : null)
+      ?? getDefaultLlmConnection()
+    return !!connection && isCompatProvider(connection.providerType)
+  }
+
+  private flushPendingAiTitle(managed: ManagedSession): void {
+    const pendingTitle = managed.pendingAiTitlePrompt
+    if (!pendingTitle) return
+    managed.pendingAiTitlePrompt = undefined
+    void this.generateTitle(managed, pendingTitle)
+  }
+
   /**
    * Generate an AI title for a session from the user's first message.
-   * Uses the agent's generateTitle() method which handles provider-specific SDK calls.
-   * If no agent exists, creates a temporary one using the session's connection.
+   * Uses the live session agent only. A temporary subprocess used to race the
+   * first prompt and leave the local backend idle.
    */
   private async generateTitle(managed: ManagedSession, userMessage: string): Promise<void> {
     sessionLog.info(`[generateTitle] Starting for session ${managed.id}`)
 
-    // Use existing agent or create temporary one
-    let agent: AgentInstance | null = managed.agent
-    let isTemporary = false
-
-    // Wait briefly for agent to be created (it's created concurrently)
-    if (!agent) {
-      let attempts = 0
-      while (!managed.agent && attempts < 10) {
-        await new Promise(resolve => setTimeout(resolve, 100))
-        attempts++
-      }
-      agent = managed.agent
+    if (managed.agentReady) {
+      await managed.agentReady.catch(() => undefined)
     }
 
-    // If still no agent, create a temporary one using the session's connection
-    if (!agent && managed.llmConnection) {
-      try {
-        const connection = getLlmConnection(managed.llmConnection)
-
-        agent = createBackendFromConnection(managed.llmConnection, {
-          workspace: managed.workspace,
-          miniModel: connection ? (getMiniModel(connection) ?? connection.defaultModel) : undefined,
-          session: {
-            id: `title-${managed.id}`,
-            workspaceRootPath: managed.workspace.rootPath,
-            llmConnection: managed.llmConnection,
-            createdAt: Date.now(),
-            lastUsedAt: Date.now(),
-          },
-          isHeadless: true,
-        }, buildBackendHostRuntimeContext()) as AgentInstance
-        await agent.postInit()
-        isTemporary = true
-        sessionLog.info(`[generateTitle] Created temporary agent for session ${managed.id}`)
-      } catch (error) {
-        sessionLog.error(`[generateTitle] Failed to create temporary agent:`, error)
-        return
-      }
-    }
-
+    const agent = managed.agent
     if (!agent) {
-      sessionLog.warn(`[generateTitle] No agent and no connection for session ${managed.id}`)
+      sessionLog.warn(`[generateTitle] No agent for session ${managed.id}; keeping the placeholder title`)
       return
     }
 
@@ -8775,11 +8762,6 @@ export class SessionManager implements ISessionManager {
             canRetry: true,
           }
         }, managed.workspace.id)
-      }
-    } finally {
-      // Clean up temporary agent
-      if (isTemporary && agent) {
-        agent.destroy()
       }
     }
   }

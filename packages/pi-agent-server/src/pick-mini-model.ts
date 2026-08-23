@@ -3,6 +3,62 @@ import { resolvePiModel, isDeniedMiniModelId } from './model-resolution.ts';
 import { PI_PREFERRED_DEFAULTS } from '../../shared/src/config/llm-connections.ts';
 
 /**
+ * Choose a utility-completion model (title, summarization, call_llm default).
+ *
+ * Custom endpoints must stay on `custom-endpoint`. Falling through to the
+ * OpenAI catalog (gpt-5.6-sol, …) sends the request somewhere else, so the
+ * local backend sits idle while Selection looks stalled.
+ */
+export function resolveUtilityModelId(args: {
+  requestModel?: string
+  miniModel?: string
+  sessionModel?: string
+  customModels?: Array<string | { id: string }>
+  piAuthProvider?: string
+  preferCustomEndpoint: boolean
+  registry: PiModelRegistry
+}): string | undefined {
+  const candidates: string[] = [];
+  const push = (id?: string) => {
+    const trimmed = id?.trim();
+    if (!trimmed || candidates.includes(trimmed)) return;
+    if (isDeniedMiniModelId(trimmed, args.piAuthProvider)) return;
+    candidates.push(trimmed);
+  };
+  // Session model before mini: on custom endpoints the "cheap" mini may be
+  // a different worker than the one the user is watching.
+  push(args.requestModel);
+  push(args.sessionModel);
+  push(args.miniModel);
+  for (const model of args.customModels ?? []) {
+    push(typeof model === 'string' ? model : model.id);
+  }
+
+  for (const candidate of candidates) {
+    const resolved = resolvePiModel(
+      args.registry,
+      candidate,
+      args.piAuthProvider,
+      args.preferCustomEndpoint,
+    );
+    if (!resolved) continue;
+    const provider = (resolved as { provider?: string }).provider;
+    if (args.preferCustomEndpoint) {
+      if (provider === 'custom-endpoint') return candidate;
+      continue;
+    }
+    if (
+      !args.piAuthProvider
+      || provider === args.piAuthProvider
+      || provider === 'custom-endpoint'
+    ) {
+      return candidate;
+    }
+  }
+  return undefined;
+}
+
+/**
  * Pick an auth-provider-appropriate default mini model.
  *
  * `getDefaultSummarizationModel()` returns `claude-haiku-4-5`, which only resolves
