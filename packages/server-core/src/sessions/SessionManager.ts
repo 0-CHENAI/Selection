@@ -19,11 +19,12 @@ import {
   type BackendHostRuntimeContext,
   type PostInitResult,
 } from '@craft-agent/shared/agent/backend'
-import { getLlmConnection, getLlmConnections, getDefaultLlmConnection, getDefaultThinkingLevel, getSharedProjectMemoryEnabled, resetManagedAnthropicAuthEnvVars, resolveMidStreamBehavior, getPersistedUiLanguage, resolveTitleLanguageName, isCompatProvider } from '@craft-agent/shared/config'
+import { getLlmConnection, getLlmConnections, getDefaultLlmConnection, getDefaultThinkingLevel, getSharedProjectMemoryEnabled, resetManagedAnthropicAuthEnvVars, resolveMidStreamBehavior, getPersistedUiLanguage, resolveTitleLanguageName } from '@craft-agent/shared/config'
 import type { MidStreamBehavior } from '@craft-agent/shared/config'
 import { PrivilegedExecutionBroker } from '@craft-agent/server-core/services'
 import { isValidWorkingDirectory } from '../utils/path-validation'
 import { InitGate } from '@craft-agent/server-core/domain'
+import { shouldFlushFirstTurnAiTitle, shouldQueueFirstTurnAiTitle } from './first-turn-title'
 import { i18n } from '@craft-agent/shared/i18n'
 import {
   getWorkspaces,
@@ -1035,7 +1036,7 @@ interface ManagedSession {
   // Promise that resolves when the agent instance is ready (for title gen to await)
   agentReady?: Promise<void>
   agentReadyResolve?: () => void
-  /** First-turn AI title. Custom endpoints wait until idle; cloud generates after the agent is ready. */
+  /** First-turn AI title. Generated after the session is idle so it cannot race the first prompt. */
   pendingAiTitlePrompt?: string
   // Per-session env overrides for SDK subprocess (e.g., ANTHROPIC_BASE_URL).
   // Stored on managed session so it persists across agent recreations (auth-retry, etc.)
@@ -6259,7 +6260,12 @@ export class SessionManager implements ISessionManager {
       // Automation sessions (triggeredBy set) already have a title and skip AI generation entirely
       // Hidden nudges must not become the session title.
       const visibleUserCount = managed.messages.filter(m => m.role === 'user' && !m.hidden).length
-      if (visibleUserCount === 1 && !options?.hidden && !managed.name && !managed.triggeredBy) {
+      if (shouldQueueFirstTurnAiTitle({
+        visibleUserCount,
+        isHidden: !!options?.hidden,
+        hasExistingName: !!managed.name,
+        isAutomation: !!managed.triggeredBy,
+      })) {
         // Replace bracket mentions with their display labels (e.g. [skill:ws:commit] -> "Commit")
         // so titles show human-readable names instead of raw IDs
         let titleSource = message
@@ -6283,9 +6289,8 @@ export class SessionManager implements ISessionManager {
           title: initialTitle,
         }, managed.workspace.id)
 
-        // Cloud: flush after the agent is ready (same process, no temp
-        // subprocess). Custom endpoints: wait until the session is idle so
-        // we do not steal the local worker.
+        // Wait until this turn finishes. Generating now races the first
+        // prompt on the live agent's mini-completion channel (#46).
         managed.pendingAiTitlePrompt = message
       }
     }
@@ -6482,9 +6487,6 @@ export class SessionManager implements ISessionManager {
       return
     }
     sendSpan.mark('agent.ready')
-    if (!this.sessionUsesCustomEndpoint(managed)) {
-      this.flushPendingAiTitle(managed)
-    }
 
     // Always set all sources for context (even if none are enabled), including built-ins
     const allSources = loadAllSources(workspaceRootPath)
@@ -8691,13 +8693,12 @@ export class SessionManager implements ISessionManager {
     }
   }
 
-  private sessionUsesCustomEndpoint(managed: ManagedSession): boolean {
-    const connection = (managed.llmConnection ? getLlmConnection(managed.llmConnection) : null)
-      ?? getDefaultLlmConnection()
-    return !!connection && isCompatProvider(connection.providerType)
-  }
-
   private flushPendingAiTitle(managed: ManagedSession): void {
+    if (!shouldFlushFirstTurnAiTitle({
+      hasPending: !!managed.pendingAiTitlePrompt,
+      flushPoint: 'session-idle',
+      queueLength: managed.messageQueue.length,
+    })) return
     const pendingTitle = managed.pendingAiTitlePrompt
     if (!pendingTitle) return
     managed.pendingAiTitlePrompt = undefined
@@ -8706,8 +8707,7 @@ export class SessionManager implements ISessionManager {
 
   /**
    * Generate an AI title for a session from the user's first message.
-   * Uses the live session agent only. A temporary subprocess used to race the
-   * first prompt and leave the local backend idle.
+   * Uses the live session agent only, after the first turn is idle.
    */
   private async generateTitle(managed: ManagedSession, userMessage: string): Promise<void> {
     sessionLog.info(`[generateTitle] Starting for session ${managed.id}`)
@@ -8746,23 +8746,9 @@ export class SessionManager implements ISessionManager {
         sessionLog.warn(`Title generation returned null for session ${managed.id}`)
       }
     } catch (error) {
+      // Title is background metadata. A 429/timeout here must not look like
+      // the completed reply failed (#46).
       sessionLog.error(`Failed to generate title for session ${managed.id}:`, error)
-
-      // Surface quota/auth errors to the user — these indicate the main chat call will also fail
-      const errorMsg = error instanceof Error ? error.message : String(error)
-      if (errorMsg.includes('quota') || errorMsg.includes('429') || errorMsg.includes('401') || errorMsg.includes('insufficient')) {
-        this.sendEvent({
-          type: 'typed_error',
-          sessionId: managed.id,
-          error: {
-            code: 'provider_error',
-            title: 'API Error',
-            message: `API error: ${errorMsg.slice(0, 200)}`,
-            actions: [{ key: 'r', label: 'Retry', action: 'retry' }],
-            canRetry: true,
-          }
-        }, managed.workspace.id)
-      }
     }
   }
 
