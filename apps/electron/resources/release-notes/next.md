@@ -14,7 +14,7 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 
 ## Bug Fixes
 
-- **Create MCP / Skill / automation windows stay usable** — long pasted text no longer stretches the floating create window off-screen. The window is limited to the app viewport, the title bar and send controls stay reachable, and the composer scrolls internally.
+- **Create MCP / Skill / automation windows stay usable** — long pasted text no longer stretches the floating create window off-screen. The window is limited to the app viewport, the title bar and send controls stay reachable, the composer scrolls internally, and the window can be dragged, collapsed, or resized.
 
 - **Office generation waits like a long agent job** — Word / Excel / PowerPoint turns no longer share a 10-minute wait budget across every model call, and a live high-thinking stream is not killed after 120 seconds of hidden reasoning. The product only idle-timeouts a silent stall, keeps a 5-minute HTTP idle floor, retries 429/5xx before failing, and treats leftover deadline errors as retryable provider failures. Stopping the turn no longer looks like a provider outage.
 
