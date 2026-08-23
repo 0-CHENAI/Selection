@@ -7,8 +7,11 @@ import {
   MIN_POPOVER_WIDTH,
   POPOVER_HEADER_HEIGHT,
   POPOVER_INPUT_CHROME,
+  VIEWPORT_MARGIN,
+  VIEWPORT_MARGIN_TOP,
   clampPopoverOffset,
   clampPopoverSize,
+  clampPopoverSizeFromOrigin,
   getCompactInputMaxHeight,
 } from '../edit-popover-layout'
 
@@ -38,7 +41,7 @@ describe('clampPopoverSize (#8)', () => {
       small,
     )
     expect(next.height).toBeLessThan(DEFAULT_POPOVER_HEIGHT)
-    expect(next.height).toBeLessThanOrEqual(small.height - 52 - 16)
+    expect(next.height).toBeLessThanOrEqual(small.height - VIEWPORT_MARGIN_TOP - VIEWPORT_MARGIN)
     expect(next.width).toBe(DEFAULT_POPOVER_WIDTH)
   })
 
@@ -47,8 +50,8 @@ describe('clampPopoverSize (#8)', () => {
       { width: DEFAULT_POPOVER_WIDTH, height: DEFAULT_POPOVER_HEIGHT },
       tiny,
     )
-    expect(next.width).toBeLessThanOrEqual(tiny.width - 32)
-    expect(next.height).toBeLessThanOrEqual(tiny.height - 52 - 16)
+    expect(next.width).toBeLessThanOrEqual(tiny.width - VIEWPORT_MARGIN * 2)
+    expect(next.height).toBeLessThanOrEqual(tiny.height - VIEWPORT_MARGIN_TOP - VIEWPORT_MARGIN)
   })
 
   it('does not shrink below the minimum on a large viewport', () => {
@@ -72,8 +75,8 @@ describe('clampPopoverOffset (#8)', () => {
     const size = { width: 400, height: 480 }
     const base = { x: 100, y: 80 }
     const next = clampPopoverOffset({ x: 4000, y: 4000 }, size, desktop, base)
-    expect(base.x + next.x + size.width).toBeLessThanOrEqual(desktop.width - 16)
-    expect(base.y + next.y + size.height).toBeLessThanOrEqual(desktop.height - 16)
+    expect(base.x + next.x + size.width).toBeLessThanOrEqual(desktop.width - VIEWPORT_MARGIN)
+    expect(base.y + next.y + size.height).toBeLessThanOrEqual(desktop.height - VIEWPORT_MARGIN)
   })
 
   it('keeps the title bar below the app chrome', () => {
@@ -83,7 +86,30 @@ describe('clampPopoverOffset (#8)', () => {
       desktop,
       { x: 40, y: 40 },
     )
-    expect(40 + next.y).toBeGreaterThanOrEqual(52)
+    expect(40 + next.y).toBeGreaterThanOrEqual(VIEWPORT_MARGIN_TOP)
+  })
+
+  it('does not invert the clamp when the window is larger than the viewport', () => {
+    const next = clampPopoverOffset(
+      { x: 200, y: 200 },
+      { width: 2000, height: 2000 },
+      tiny,
+      { x: 0, y: 0 },
+    )
+    expect(next.x).toBe(VIEWPORT_MARGIN)
+    expect(next.y).toBe(VIEWPORT_MARGIN_TOP)
+  })
+})
+
+describe('clampPopoverSizeFromOrigin (#8)', () => {
+  it('does not grow past the right or bottom edge', () => {
+    const next = clampPopoverSizeFromOrigin(
+      { width: 800, height: 800 },
+      desktop,
+      { x: 1200, y: 700 },
+    )
+    expect(1200 + next.width).toBeLessThanOrEqual(desktop.width - VIEWPORT_MARGIN)
+    expect(700 + next.height).toBeLessThanOrEqual(desktop.height - VIEWPORT_MARGIN)
   })
 })
 
@@ -95,7 +121,7 @@ describe('getCompactInputMaxHeight (#8)', () => {
   })
 
   it('still leaves a usable composer in a short popover', () => {
-    expect(getCompactInputMaxHeight(280)).toBeGreaterThanOrEqual(72)
+    expect(getCompactInputMaxHeight(280)).toBeGreaterThanOrEqual(48)
   })
 
   it('leaves room for the title bar and send row', () => {

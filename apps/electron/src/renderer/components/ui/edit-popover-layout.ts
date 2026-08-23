@@ -9,11 +9,13 @@ export const DEFAULT_POPOVER_WIDTH = 400
 export const DEFAULT_POPOVER_HEIGHT = 480
 export const MIN_POPOVER_WIDTH = 320
 export const MIN_POPOVER_HEIGHT = 280
-export const COLLAPSED_POPOVER_HEIGHT = 44
+/** Matches the `h-10` title bar. */
+export const COLLAPSED_POPOVER_HEIGHT = 40
 export const VIEWPORT_MARGIN = 16
 export const VIEWPORT_MARGIN_TOP = 52
 export const POPOVER_HEADER_HEIGHT = 40
 export const POPOVER_INPUT_CHROME = 56
+export const POPOVER_MESSAGE_RESERVE = 64
 
 export type Size = { width: number; height: number }
 export type Point = { x: number; y: number }
@@ -45,6 +47,11 @@ export function clampPopoverSize(
 /**
  * `base` is the popover's untranslated origin (current rect minus drag offset).
  */
+function clampAxis(value: number, min: number, max: number): number {
+  if (min <= max) return Math.max(min, Math.min(max, value))
+  return min
+}
+
 export function clampPopoverOffset(
   offset: Point,
   size: Size,
@@ -56,14 +63,31 @@ export function clampPopoverOffset(
   const minY = VIEWPORT_MARGIN_TOP - base.y
   const maxY = viewport.height - VIEWPORT_MARGIN - size.height - base.y
   return {
-    x: Math.max(minX, Math.min(maxX, offset.x)),
-    y: Math.max(minY, Math.min(maxY, offset.y)),
+    x: clampAxis(offset.x, minX, maxX),
+    y: clampAxis(offset.y, minY, maxY),
+  }
+}
+
+/**
+ * Bottom-right resize. Cap width/height by the remaining space from the
+ * current top-left so growing the window cannot cross the viewport edge.
+ */
+export function clampPopoverSizeFromOrigin(
+  size: Size,
+  viewport: Viewport,
+  origin: Point,
+): Size {
+  const fitted = clampPopoverSize(size, viewport)
+  const maxWidth = Math.max(0, viewport.width - VIEWPORT_MARGIN - origin.x)
+  const maxHeight = Math.max(0, viewport.height - VIEWPORT_MARGIN - origin.y)
+  return {
+    width: Math.min(fitted.width, maxWidth),
+    height: Math.min(fitted.height, maxHeight),
   }
 }
 
 /** Textarea cap so the send row stays on-screen inside the popover. */
 export function getCompactInputMaxHeight(popoverHeight: number): number {
-  const body = Math.max(0, popoverHeight - POPOVER_HEADER_HEIGHT)
-  const cap = Math.floor(body * 0.4) - POPOVER_INPUT_CHROME
-  return Math.max(72, Math.min(160, cap))
+  const available = popoverHeight - POPOVER_HEADER_HEIGHT - POPOVER_INPUT_CHROME
+  return Math.max(48, Math.min(160, available - POPOVER_MESSAGE_RESERVE))
 }

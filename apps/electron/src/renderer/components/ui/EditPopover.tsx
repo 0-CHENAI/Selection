@@ -11,7 +11,7 @@ import * as React from 'react'
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
 import i18n from 'i18next'
-import { ChevronDown, ChevronUp, GripHorizontal, X } from 'lucide-react'
+import { ChevronDown, ChevronUp, GripHorizontal, Square, X } from 'lucide-react'
 import { motion, AnimatePresence } from 'motion/react' // motion used for backdrop only
 import { Popover, PopoverTrigger, PopoverContent } from './popover'
 import { Button } from './button'
@@ -27,6 +27,7 @@ import {
   DEFAULT_POPOVER_WIDTH,
   clampPopoverOffset,
   clampPopoverSize,
+  clampPopoverSizeFromOrigin,
   getCompactInputMaxHeight,
 } from './edit-popover-layout'
 
@@ -860,16 +861,37 @@ export function EditPopover({
   const dragOffsetRef = useRef({ x: 0, y: 0 })
   const popoverRef = useRef<HTMLDivElement>(null)
   const [containerSize, setContainerSize] = useState(() =>
-    clampPopoverSize({ width: width || DEFAULT_POPOVER_WIDTH, height: DEFAULT_POPOVER_HEIGHT }, { width: 1440, height: 900 }),
+    clampPopoverSize(
+      { width: width || DEFAULT_POPOVER_WIDTH, height: DEFAULT_POPOVER_HEIGHT },
+      typeof window === 'undefined'
+        ? { width: 1440, height: 900 }
+        : { width: window.innerWidth, height: window.innerHeight },
+    ),
   )
   const expandedSizeRef = useRef(containerSize)
   const [isResizing, setIsResizing] = useState(false)
-  const resizeStartRef = useRef({ x: 0, y: 0, width: 0, height: 0 })
+  const resizeStartRef = useRef({ x: 0, y: 0, width: 0, height: 0, originX: 0, originY: 0 })
 
   const readViewport = useCallback(() => ({
     width: window.innerWidth,
     height: window.innerHeight,
   }), [])
+
+  const readPlacement = useCallback(() => {
+    const rect = popoverRef.current?.getBoundingClientRect()
+    if (!rect) return null
+    const offset = dragOffsetRef.current
+    return {
+      origin: { x: rect.left, y: rect.top },
+      base: { x: rect.left - offset.x, y: rect.top - offset.y },
+      offset,
+    }
+  }, [])
+
+  const applyOffset = useCallback((next: { x: number; y: number }) => {
+    dragOffsetRef.current = next
+    setDragOffset(next)
+  }, [])
 
   useEffect(() => {
     if (!open) return
@@ -887,15 +909,20 @@ export function EditPopover({
   useEffect(() => {
     if (!open) return
     const onResize = () => {
+      const viewport = readViewport()
+      const placement = readPlacement()
       setContainerSize(prev => {
-        const next = clampPopoverSize(collapsed ? expandedSizeRef.current : prev, readViewport(), collapsed)
+        const next = clampPopoverSize(collapsed ? expandedSizeRef.current : prev, viewport, collapsed)
         if (!collapsed) expandedSizeRef.current = next
+        if (placement) {
+          applyOffset(clampPopoverOffset(placement.offset, next, viewport, placement.base))
+        }
         return next
       })
     }
     window.addEventListener('resize', onResize)
     return () => window.removeEventListener('resize', onResize)
-  }, [open, collapsed, readViewport])
+  }, [open, collapsed, readViewport, readPlacement, applyOffset])
 
   const handleDragStart = useCallback((e: React.MouseEvent) => {
     if ((e.target as HTMLElement).closest('button')) return
@@ -925,8 +952,7 @@ export function EditPopover({
         readViewport(),
         { x: rect.left - curr.x, y: rect.top - curr.y },
       )
-      dragOffsetRef.current = next
-      setDragOffset(next)
+      applyOffset(next)
     }
 
     const handleMouseUp = () => setIsDragging(false)
@@ -936,29 +962,36 @@ export function EditPopover({
       document.removeEventListener('mousemove', handleMouseMove)
       document.removeEventListener('mouseup', handleMouseUp)
     }
-  }, [isDragging, readViewport])
+  }, [isDragging, readViewport, applyOffset])
 
   const handleResizeStart = useCallback((e: React.MouseEvent) => {
     e.preventDefault()
     e.stopPropagation()
     if (collapsed) return
     setIsResizing(true)
+    const origin = readPlacement()?.origin ?? { x: e.clientX, y: e.clientY }
     resizeStartRef.current = {
       x: e.clientX,
       y: e.clientY,
       width: containerSize.width,
       height: containerSize.height,
+      originX: origin.x,
+      originY: origin.y,
     }
-  }, [containerSize, collapsed])
+  }, [containerSize, collapsed, readPlacement])
 
   useEffect(() => {
     if (!isResizing) return
 
     const handleMouseMove = (e: MouseEvent) => {
-      const next = clampPopoverSize({
-        width: resizeStartRef.current.width + e.clientX - resizeStartRef.current.x,
-        height: resizeStartRef.current.height + e.clientY - resizeStartRef.current.y,
-      }, readViewport())
+      const next = clampPopoverSizeFromOrigin(
+        {
+          width: resizeStartRef.current.width + e.clientX - resizeStartRef.current.x,
+          height: resizeStartRef.current.height + e.clientY - resizeStartRef.current.y,
+        },
+        readViewport(),
+        { x: resizeStartRef.current.originX, y: resizeStartRef.current.originY },
+      )
       expandedSizeRef.current = next
       setContainerSize(next)
     }
@@ -974,15 +1007,30 @@ export function EditPopover({
 
   const toggleCollapsed = useCallback(() => {
     setCollapsed(currentlyCollapsed => {
+      const viewport = readViewport()
+      const placement = readPlacement()
       if (currentlyCollapsed) {
-        setContainerSize(clampPopoverSize(expandedSizeRef.current, readViewport(), false))
+        const next = clampPopoverSize(expandedSizeRef.current, viewport, false)
+        setContainerSize(next)
+        if (placement) {
+          applyOffset(clampPopoverOffset(placement.offset, next, viewport, placement.base))
+        }
         return false
       }
       expandedSizeRef.current = containerSize
-      setContainerSize(clampPopoverSize(containerSize, readViewport(), true))
+      setContainerSize(clampPopoverSize(containerSize, viewport, true))
       return true
     })
-  }, [containerSize, readViewport])
+  }, [containerSize, readViewport, readPlacement, applyOffset])
+
+  useEffect(() => {
+    if (!isDragging && !isResizing) return
+    const previous = document.body.style.userSelect
+    document.body.style.userSelect = 'none'
+    return () => {
+      document.body.style.userSelect = previous
+    }
+  }, [isDragging, isResizing])
 
   // Reset state when popover opens
   useEffect(() => {
@@ -1058,7 +1106,7 @@ export function EditPopover({
             side={side}
             align={align}
             sticky="always"
-            className="p-0 overflow-hidden"
+            className="p-0"
             data-testid="edit-popover"
             style={{
               width: containerSize.width,
@@ -1090,6 +1138,15 @@ export function EditPopover({
                 <span className="min-w-0 flex-1 truncate px-1 text-xs text-foreground/70 select-none">
                   {displayLabel || context.label}
                 </span>
+                {collapsed && isProcessing && (
+                  <HeaderIconButton
+                    icon={<Square className="size-3 fill-current" />}
+                    tooltip={t('chat.stopResponse')}
+                    aria-label={t('chat.stopResponse')}
+                    onMouseDown={event => event.stopPropagation()}
+                    onClick={handleStopGeneration}
+                  />
+                )}
                 <HeaderIconButton
                   icon={collapsed ? <ChevronDown className="size-4" /> : <ChevronUp className="size-4" />}
                   tooltip={collapsed ? t('editPopover.expand') : t('editPopover.collapse')}
