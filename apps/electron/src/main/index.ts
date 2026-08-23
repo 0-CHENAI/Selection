@@ -169,6 +169,10 @@ if (isDebugMode) {
   const bunBinary = join(resourcesBase, 'vendor', 'bun', process.platform === 'win32' ? 'bun.exe' : 'bun')
   if (existsSync(bunBinary)) {
     process.env.CRAFT_BUN = bunBinary
+  } else if (app.isPackaged) {
+    mainLog.warn('Bundled Bun runtime missing; Pi sessions will not start.', {
+      expectedBunPath: bunBinary,
+    })
   }
 
   process.env.CRAFT_SCRIPTS = scriptsDir
@@ -421,6 +425,9 @@ app.whenReady().then(async () => {
       appRootPath: app.isPackaged ? app.getAppPath() : process.cwd(),
       resourcesPath: process.resourcesPath,
       isPackaged: app.isPackaged,
+      nodeRuntimePath: process.env.CRAFT_BUN && existsSync(process.env.CRAFT_BUN)
+        ? process.env.CRAFT_BUN
+        : undefined,
     },
   })
 

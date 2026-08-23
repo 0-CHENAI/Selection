@@ -64,6 +64,55 @@ describe('resolve Bun runtime in dev mode', () => {
   });
 });
 
+describe('resolve bundled Bun in packaged apps', () => {
+  const tmpBase = join(tmpdir(), `bun-packaged-resolver-${Date.now()}`);
+  const originalCraftBun = process.env.CRAFT_BUN;
+  const originalResourcesBase = process.env.CRAFT_RESOURCES_BASE;
+
+  afterEach(() => {
+    try { rmSync(tmpBase, { recursive: true, force: true }); } catch {}
+    if (originalCraftBun === undefined) delete process.env.CRAFT_BUN;
+    else process.env.CRAFT_BUN = originalCraftBun;
+    if (originalResourcesBase === undefined) delete process.env.CRAFT_RESOURCES_BASE;
+    else process.env.CRAFT_RESOURCES_BASE = originalResourcesBase;
+  });
+
+  it('finds Windows extraResources bun under resources/app/vendor/bun', () => {
+    const bunBinary = process.platform === 'win32' ? 'bun.exe' : 'bun';
+    const resourcesPath = join(tmpBase, 'resources');
+    const appRoot = join(resourcesPath, 'app');
+    const bunPath = join(appRoot, 'vendor', 'bun', bunBinary);
+    mkdirSync(join(appRoot, 'vendor', 'bun'), { recursive: true });
+    writeFileSync(bunPath, 'stub');
+    delete process.env.CRAFT_BUN;
+    delete process.env.CRAFT_RESOURCES_BASE;
+
+    const paths = resolveBackendRuntimePaths({
+      appRootPath: appRoot,
+      resourcesPath,
+      isPackaged: true,
+    });
+
+    expect(paths.nodeRuntimePath).toBe(bunPath);
+  });
+
+  it('honors CRAFT_BUN in packaged mode when vendor layouts differ', () => {
+    const bunBinary = process.platform === 'win32' ? 'bun.exe' : 'bun';
+    const bunPath = join(tmpBase, 'override', bunBinary);
+    mkdirSync(join(tmpBase, 'override'), { recursive: true });
+    writeFileSync(bunPath, 'stub');
+    process.env.CRAFT_BUN = bunPath;
+
+    const paths = resolveBackendRuntimePaths({
+      appRootPath: join(tmpBase, 'app'),
+      resourcesPath: join(tmpBase, 'resources'),
+      isPackaged: true,
+    });
+
+    expect(paths.nodeRuntimePath).toBe(bunPath);
+  });
+});
+
 describe('resolveServerPath fallback', () => {
   const tmpBase = join(tmpdir(), `resolver-test-${Date.now()}`);
 
