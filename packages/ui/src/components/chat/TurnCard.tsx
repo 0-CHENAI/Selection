@@ -2712,7 +2712,11 @@ export const TurnCard = React.memo(function TurnCard({
 }: TurnCardProps) {
   const { t } = useTranslation()
   const reduceMotion = useReducedMotion()
-  const showCommentary = isVisibleCommentaryCard(response, isComplete)
+  const showCommentary = isVisibleCommentaryCard(
+    response,
+    isComplete,
+    activities.some(activity => activity.type === 'tool'),
+  )
 
   // Derive the turn phase from props using the state machine.
   // This provides a single source of truth for lifecycle state,
