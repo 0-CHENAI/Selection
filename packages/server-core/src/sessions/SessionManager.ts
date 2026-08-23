@@ -24,7 +24,13 @@ import type { MidStreamBehavior } from '@craft-agent/shared/config'
 import { PrivilegedExecutionBroker } from '@craft-agent/server-core/services'
 import { isValidWorkingDirectory } from '../utils/path-validation'
 import { InitGate } from '@craft-agent/server-core/domain'
-import { shouldFlushFirstTurnAiTitle, shouldQueueFirstTurnAiTitle } from './first-turn-title'
+import {
+  decidePendingFirstTurnAiTitle,
+  shouldCommitFirstTurnAiTitle,
+  shouldFlushFirstTurnAiTitle,
+  shouldQueueFirstTurnAiTitle,
+  type PendingFirstTurnAiTitle,
+} from './first-turn-title'
 import { i18n } from '@craft-agent/shared/i18n'
 import {
   getWorkspaces,
@@ -1037,7 +1043,7 @@ interface ManagedSession {
   agentReady?: Promise<void>
   agentReadyResolve?: () => void
   /** First-turn AI title. Generated after the session is idle so it cannot race the first prompt. */
-  pendingAiTitlePrompt?: string
+  pendingAiTitle?: PendingFirstTurnAiTitle
   // Per-session env overrides for SDK subprocess (e.g., ANTHROPIC_BASE_URL).
   // Stored on managed session so it persists across agent recreations (auth-retry, etc.)
   envOverrides?: Record<string, string>
@@ -6291,7 +6297,7 @@ export class SessionManager implements ISessionManager {
 
         // Wait until this turn finishes. Generating now races the first
         // prompt on the live agent's mini-completion channel (#46).
-        managed.pendingAiTitlePrompt = message
+        managed.pendingAiTitle = { prompt: message, placeholder: initialTitle }
       }
     }
 
@@ -8695,25 +8701,41 @@ export class SessionManager implements ISessionManager {
 
   private flushPendingAiTitle(managed: ManagedSession): void {
     if (!shouldFlushFirstTurnAiTitle({
-      hasPending: !!managed.pendingAiTitlePrompt,
-      flushPoint: 'session-idle',
+      hasPending: !!managed.pendingAiTitle,
       queueLength: managed.messageQueue.length,
     })) return
-    const pendingTitle = managed.pendingAiTitlePrompt
-    if (!pendingTitle) return
-    managed.pendingAiTitlePrompt = undefined
-    void this.generateTitle(managed, pendingTitle)
+    const pending = managed.pendingAiTitle
+    if (!pending) return
+    managed.pendingAiTitle = undefined
+    void this.generateTitle(managed, pending)
   }
 
   /**
    * Generate an AI title for a session from the user's first message.
    * Uses the live session agent only, after the first turn is idle.
    */
-  private async generateTitle(managed: ManagedSession, userMessage: string): Promise<void> {
+  private async generateTitle(managed: ManagedSession, pending: PendingFirstTurnAiTitle): Promise<void> {
     sessionLog.info(`[generateTitle] Starting for session ${managed.id}`)
 
     if (managed.agentReady) {
       await managed.agentReady.catch(() => undefined)
+    }
+
+    const decision = decidePendingFirstTurnAiTitle({
+      sessionAlive: this.sessions.get(managed.id) === managed,
+      isProcessing: managed.isProcessing,
+      queueLength: managed.messageQueue.length,
+      currentName: managed.name,
+      placeholder: pending.placeholder,
+    })
+    if (decision === 'defer') {
+      managed.pendingAiTitle = pending
+      sessionLog.info(`[generateTitle] Deferred for session ${managed.id}; a new turn is in flight`)
+      return
+    }
+    if (decision === 'drop') {
+      sessionLog.info(`[generateTitle] Dropped for session ${managed.id}; session gone or title already changed`)
+      return
     }
 
     const agent = managed.agent
@@ -8731,20 +8753,28 @@ export class SessionManager implements ISessionManager {
         resolvedLanguage: i18n.resolvedLanguage ?? null,
         titleLanguage: titleLanguage ?? null,
       })
-      const title = await agent.generateTitle(userMessage, { language: titleLanguage })
-      if (title) {
-        managed.name = title
-        this.persistSession(managed)
-        // Flush immediately to ensure disk is up-to-date before notifying renderer.
-        // This prevents race condition where lazy loading reads stale disk data
-        // (the persistence queue has a 500ms debounce).
-        await this.flushSession(managed.id)
-        // Now safe to notify renderer - disk is authoritative
-        this.sendEvent({ type: 'title_generated', sessionId: managed.id, title }, managed.workspace.id)
-        sessionLog.info(`Generated title for session ${managed.id}: "${title}"`)
-      } else {
+      const title = await agent.generateTitle(pending.prompt, { language: titleLanguage })
+      if (!title) {
         sessionLog.warn(`Title generation returned null for session ${managed.id}`)
+        return
       }
+      if (!shouldCommitFirstTurnAiTitle({
+        sessionAlive: this.sessions.get(managed.id) === managed,
+        currentName: managed.name,
+        placeholder: pending.placeholder,
+      })) {
+        sessionLog.info(`[generateTitle] Discarded result for session ${managed.id}; name changed or session gone`)
+        return
+      }
+      managed.name = title
+      this.persistSession(managed)
+      // Flush immediately to ensure disk is up-to-date before notifying renderer.
+      // This prevents race condition where lazy loading reads stale disk data
+      // (the persistence queue has a 500ms debounce).
+      await this.flushSession(managed.id)
+      // Now safe to notify renderer - disk is authoritative
+      this.sendEvent({ type: 'title_generated', sessionId: managed.id, title }, managed.workspace.id)
+      sessionLog.info(`Generated title for session ${managed.id}: "${title}"`)
     } catch (error) {
       // Title is background metadata. A 429/timeout here must not look like
       // the completed reply failed (#46).

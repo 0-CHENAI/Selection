@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'bun:test'
-import { shouldFlushFirstTurnAiTitle, shouldQueueFirstTurnAiTitle } from './first-turn-title.ts'
+import {
+  decidePendingFirstTurnAiTitle,
+  shouldCommitFirstTurnAiTitle,
+  shouldFlushFirstTurnAiTitle,
+  shouldQueueFirstTurnAiTitle,
+} from './first-turn-title.ts'
 
 describe('shouldQueueFirstTurnAiTitle (#46)', () => {
   const firstTurn = {
@@ -31,43 +36,71 @@ describe('shouldQueueFirstTurnAiTitle (#46)', () => {
 })
 
 describe('shouldFlushFirstTurnAiTitle (#46)', () => {
-  it('does not start title generation when the agent becomes ready', () => {
-    expect(shouldFlushFirstTurnAiTitle({
-      hasPending: true,
-      flushPoint: 'agent-ready',
-      queueLength: 0,
-    })).toBe(false)
-  })
-
-  it('does not start title generation while the first prompt is in flight', () => {
-    expect(shouldFlushFirstTurnAiTitle({
-      hasPending: true,
-      flushPoint: 'prompt-in-flight',
-      queueLength: 0,
-    })).toBe(false)
-  })
-
-  it('starts title generation only after the session is idle', () => {
-    expect(shouldFlushFirstTurnAiTitle({
-      hasPending: true,
-      flushPoint: 'session-idle',
-      queueLength: 0,
-    })).toBe(true)
+  it('starts the idle flush only when a title is pending and the queue is empty', () => {
+    expect(shouldFlushFirstTurnAiTitle({ hasPending: true, queueLength: 0 })).toBe(true)
   })
 
   it('waits until the message queue drains so a follow-up is not raced', () => {
-    expect(shouldFlushFirstTurnAiTitle({
-      hasPending: true,
-      flushPoint: 'session-idle',
-      queueLength: 1,
-    })).toBe(false)
+    expect(shouldFlushFirstTurnAiTitle({ hasPending: true, queueLength: 1 })).toBe(false)
   })
 
   it('is a no-op when nothing is pending', () => {
-    expect(shouldFlushFirstTurnAiTitle({
-      hasPending: false,
-      flushPoint: 'session-idle',
-      queueLength: 0,
+    expect(shouldFlushFirstTurnAiTitle({ hasPending: false, queueLength: 0 })).toBe(false)
+  })
+})
+
+describe('decidePendingFirstTurnAiTitle (#46)', () => {
+  const idle = {
+    sessionAlive: true,
+    isProcessing: false,
+    queueLength: 0,
+    currentName: 'Write a report about oak trees',
+    placeholder: 'Write a report about oak trees',
+  }
+
+  it('starts when the session is still idle on the placeholder', () => {
+    expect(decidePendingFirstTurnAiTitle(idle)).toBe('start')
+  })
+
+  it('defers when a new turn has already started', () => {
+    expect(decidePendingFirstTurnAiTitle({ ...idle, isProcessing: true })).toBe('defer')
+  })
+
+  it('defers when a follow-up is queued', () => {
+    expect(decidePendingFirstTurnAiTitle({ ...idle, queueLength: 1 })).toBe('defer')
+  })
+
+  it('drops when the user renamed the session', () => {
+    expect(decidePendingFirstTurnAiTitle({ ...idle, currentName: 'Oak bid' })).toBe('drop')
+  })
+
+  it('drops when the session is gone', () => {
+    expect(decidePendingFirstTurnAiTitle({ ...idle, sessionAlive: false })).toBe('drop')
+  })
+})
+
+describe('shouldCommitFirstTurnAiTitle (#46)', () => {
+  it('commits only while the placeholder is still the live name', () => {
+    expect(shouldCommitFirstTurnAiTitle({
+      sessionAlive: true,
+      currentName: 'Write a report about oak trees',
+      placeholder: 'Write a report about oak trees',
+    })).toBe(true)
+  })
+
+  it('does not overwrite a rename that landed during generation', () => {
+    expect(shouldCommitFirstTurnAiTitle({
+      sessionAlive: true,
+      currentName: 'Oak bid',
+      placeholder: 'Write a report about oak trees',
+    })).toBe(false)
+  })
+
+  it('does not revive a deleted session', () => {
+    expect(shouldCommitFirstTurnAiTitle({
+      sessionAlive: false,
+      currentName: 'Write a report about oak trees',
+      placeholder: 'Write a report about oak trees',
     })).toBe(false)
   })
 })
