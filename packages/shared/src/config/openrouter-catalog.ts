@@ -67,6 +67,13 @@ function isTextChatModel(rec: Record<string, unknown>): boolean {
   return modality.includes('text')
 }
 
+function isExpiredCatalogModel(rec: Record<string, unknown>): boolean {
+  const raw = rec.expiration_date ?? rec.expirationDate
+  if (typeof raw !== 'string' || !raw.trim()) return false
+  const expiresAt = Date.parse(raw)
+  return Number.isFinite(expiresAt) && expiresAt < Date.now()
+}
+
 function hasReasoning(rec: Record<string, unknown>): boolean {
   const params = rec.supported_parameters ?? rec.supportedParameters
   if (!Array.isArray(params)) return false
@@ -88,7 +95,7 @@ export function parseOpenRouterModelsPayload(json: unknown): OpenRouterCatalogMo
     const rec = asRecord(row)
     if (!rec) continue
     const id = String(rec.id ?? '').trim()
-    if (!id || seen.has(id) || !isTextChatModel(rec)) continue
+    if (!id || seen.has(id) || !isTextChatModel(rec) || isExpiredCatalogModel(rec)) continue
     seen.add(id)
 
     const pricing = asRecord(rec.pricing)

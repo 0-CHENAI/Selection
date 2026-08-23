@@ -57,6 +57,15 @@ describe('parseOpenRouterModelsPayload', () => {
     ])
   })
 
+  it('drops models past their expiration date', () => {
+    expect(parseOpenRouterModelsPayload({
+      data: [
+        { id: 'dead/model', name: 'Dead', expiration_date: '2020-01-01', architecture: { output_modalities: ['text'] } },
+        { id: 'kept/chat', name: 'Kept', architecture: { output_modalities: ['text'] } },
+      ],
+    }).map((model) => model.id)).toEqual(['kept/chat'])
+  })
+
   it('skips rerank/embedding modalities when output_modalities is absent', () => {
     expect(parseOpenRouterModelsPayload({
       data: [

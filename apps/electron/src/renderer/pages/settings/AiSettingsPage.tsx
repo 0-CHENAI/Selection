@@ -52,39 +52,45 @@ import { OnboardingWizard, type ApiSetupMethod } from '@/components/onboarding'
 import { RenameDialog } from '@/components/ui/rename-dialog'
 import { useAppShellContext } from '@/context/AppShellContext'
 import { getModelShortName, type ModelDefinition } from '@config/models'
-import { getModelsForProviderType, isUnsupportedLlmConnection, resolveMidStreamBehavior, type CustomEndpointApi, type MidStreamBehavior } from '@config/llm-connections'
+import { connectionModelIdsMatch, isUnsupportedLlmConnection, resolveMidStreamBehavior, type CustomEndpointApi, type MidStreamBehavior } from '@config/llm-connections'
 import { displayLlmConnectionName, isOrderGatewayUrl, isOrderOpenAiUrl } from '@config/order-gateway'
 import { toast } from 'sonner'
+import { useLiveOpenRouterModels } from '@/hooks/useLiveOpenRouterModels'
+import {
+  appendMissingPickerModel,
+  connectionPinnedModelIds,
+  isOpenRouterConnection,
+  resolvePickerModelsWithLive,
+  type LivePickerModel,
+} from '@/components/app-shell/input/model-picker-helpers'
 
 /**
- * Derive model dropdown options from a connection's models array,
- * falling back to registry models for the connection's provider type.
+ * Derive model dropdown options from a connection.
+ * OpenRouter uses the live catalog when available; other providers stay on
+ * the stored list or the bundled registry.
  */
 function getModelOptionsForConnection(
   connection: LlmConnectionWithStatus | undefined,
+  liveOpenRouter?: readonly LivePickerModel[] | null,
+  selectedValue?: string,
 ): Array<{ value: string; label: string; description: string; descriptionKey?: string }> {
-  if (!connection) return []
+  const models = appendMissingPickerModel(
+    resolvePickerModelsWithLive(connection, liveOpenRouter),
+    selectedValue && selectedValue !== 'global' ? selectedValue : undefined,
+  )
+  const options = models.map((m) => {
+    if (typeof m === 'string') {
+      return { value: m, label: getModelShortName(m), description: '' }
+    }
+    return { value: m.id, label: m.name, description: m.description, descriptionKey: m.descriptionKey }
+  })
 
-  // If connection has explicit models, use those
-  if (connection.models && connection.models.length > 0) {
-    return connection.models.map((m) => {
-      if (typeof m === 'string') {
-        return { value: m, label: getModelShortName(m), description: '' }
-      }
-      // ModelDefinition object
-      const def = m as ModelDefinition
-      return { value: def.id, label: def.name, description: def.description, descriptionKey: def.descriptionKey }
-    })
+  if (selectedValue && selectedValue !== 'global' && !options.some((option) => option.value === selectedValue)) {
+    const match = options.find((option) => connectionModelIdsMatch(option.value, selectedValue))
+    if (match) match.value = selectedValue
   }
 
-  // Fall back to registry models for this provider type
-  const registryModels = getModelsForProviderType(connection.providerType, connection.piAuthProvider)
-  return registryModels.map((m) => ({
-    value: m.id,
-    label: m.name,
-    description: m.description,
-    descriptionKey: m.descriptionKey,
-  }))
+  return options
 }
 
 export const meta: DetailsPageMeta = {
@@ -431,6 +437,7 @@ interface WorkspaceOverrideCardProps {
   workspace: Workspace
   llmConnections: LlmConnectionWithStatus[]
   onSettingsChange: () => void
+  liveOpenRouterModels?: LivePickerModel[] | null
 }
 
 const WORKSPACE_SETTING_LABELS: Partial<Record<keyof WorkspaceSettings, string>> = {
@@ -439,7 +446,7 @@ const WORKSPACE_SETTING_LABELS: Partial<Record<keyof WorkspaceSettings, string>>
   thinkingLevel: 'workspace thinking override',
 }
 
-function WorkspaceOverrideCard({ workspace, llmConnections, onSettingsChange }: WorkspaceOverrideCardProps) {
+function WorkspaceOverrideCard({ workspace, llmConnections, onSettingsChange, liveOpenRouterModels }: WorkspaceOverrideCardProps) {
   const { t } = useTranslation()
   const [isExpanded, setIsExpanded] = useState(false)
   const [settings, setSettings] = useState<WorkspaceSettings | null>(null)
@@ -607,9 +614,11 @@ function WorkspaceOverrideCard({ workspace, llmConnections, onSettingsChange }: 
                 description={t("settings.ai.modelDesc")}
                 value={currentModel}
                 onValueChange={handleModelChange}
+                searchable
+                pinnedValues={['global', ...connectionPinnedModelIds(workspaceEffectiveConnection)]}
                 options={[
                   { value: 'global', label: t("settings.ai.useDefault"), description: t("settings.ai.inheritFromApp") },
-                  ...getModelOptionsForConnection(workspaceEffectiveConnection).map(o => ({
+                  ...getModelOptionsForConnection(workspaceEffectiveConnection, liveOpenRouterModels, currentModel).map(o => ({
                     ...o, description: o.descriptionKey ? t(o.descriptionKey) : o.description,
                   })),
                 ]}
@@ -996,6 +1005,10 @@ export default function AiSettingsPage() {
     return llmConnections.find(c => c.isDefault)
   }, [llmConnections])
 
+  const liveOpenRouterModels = useLiveOpenRouterModels(
+    llmConnections.some((connection) => isOpenRouterConnection(connection)),
+  )
+
   // Anthropic account UUIDs that resolve from 2+ connections (issue #838).
   // Surfaces a warning when several Claude connections share one account/quota.
   const duplicateAccountUuids = useMemo(() => {
@@ -1081,7 +1094,9 @@ export default function AiSettingsPage() {
                     description={t("settings.ai.modelDesc")}
                     value={defaultModel}
                     onValueChange={handleDefaultModelChange}
-                    options={getModelOptionsForConnection(defaultConnection).map(o => ({
+                    searchable
+                    pinnedValues={connectionPinnedModelIds(defaultConnection)}
+                    options={getModelOptionsForConnection(defaultConnection, liveOpenRouterModels, defaultModel).map(o => ({
                       ...o, description: o.descriptionKey ? t(o.descriptionKey) : o.description,
                     }))}
                   />
@@ -1110,6 +1125,7 @@ export default function AiSettingsPage() {
                         workspace={workspace}
                         llmConnections={llmConnections}
                         onSettingsChange={handleWorkspaceSettingsChange}
+                        liveOpenRouterModels={liveOpenRouterModels}
                       />
                     ))}
                   </div>

@@ -70,6 +70,20 @@ describe('parseError tool-support classification', () => {
   })
 })
 
+describe('parseError OpenRouter availability', () => {
+  it('maps no-endpoints 404s to invalid_model with the model id', () => {
+    const parsed = parseError(new Error('404: {"message":"No endpoints found for ai21/jamba-large-1.7.","code":404}'))
+    expect(parsed.code).toBe('invalid_model')
+    expect(parsed.message).toContain('ai21/jamba-large-1.7')
+    expect(parsed.canRetry).toBe(false)
+  })
+
+  it('does not steal tool-support endpoint errors', () => {
+    const parsed = parseError(new Error('No endpoints found that support tool use for this model'))
+    expect(parsed.code).toBe('model_no_tool_support')
+  })
+})
+
 describe('parseError image-input classification', () => {
   it('maps distinct image failure prefixes to distinct codes', () => {
     expect(parseError(new Error('image_capability_mismatch: text-only model')).code)

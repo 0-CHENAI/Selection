@@ -137,6 +137,37 @@ describe('OfficeCLI provider timeout policy', () => {
     expect(eventTypes).not.toContain('thinking_start');
   });
 
+  it('extends the idle deadline while thinking deltas keep arriving', async () => {
+    const model = { id: 'test', api: 'openai-completions', provider: 'test' } as Model<any>;
+    const partial = {
+      role: 'assistant', content: [], api: model.api, provider: model.provider, model: model.id,
+      usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
+      stopReason: 'stop', timestamp: Date.now(),
+    } as const;
+    let attempts = 0;
+    const wrapped = createOfficecliDeadlineStreamFn(() => {
+      attempts += 1;
+      const stream = createAssistantMessageEventStream();
+      void (async () => {
+        stream.push({ type: 'start', partial });
+        stream.push({ type: 'thinking_start', contentIndex: 0, partial });
+        for (let index = 0; index < 4; index += 1) {
+          await Bun.sleep(12);
+          stream.push({ type: 'thinking_delta', contentIndex: 0, delta: 'plan', partial });
+        }
+        stream.push({ type: 'text_start', contentIndex: 0, partial });
+        stream.push({ type: 'text_delta', contentIndex: 0, delta: 'ok', partial });
+        stream.push({ type: 'text_end', contentIndex: 0, content: 'ok', partial });
+        stream.push({ type: 'done', reason: 'stop', message: partial });
+      })();
+      return stream;
+    }, () => true, 20);
+
+    const result = await (await wrapped(model, { messages: [] })).result();
+    expect(result.stopReason).toBe('stop');
+    expect(attempts).toBe(1);
+  });
+
   it('does not retry a provider terminal error', async () => {
     const model = { id: 'test', api: 'openai-completions', provider: 'test' } as Model<any>;
     const message = {

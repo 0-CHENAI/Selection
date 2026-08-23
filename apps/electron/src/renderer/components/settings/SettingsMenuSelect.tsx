@@ -8,10 +8,19 @@
 
 import * as React from 'react'
 import { useTranslation } from "react-i18next"
-import { Check, ChevronDown, Search } from 'lucide-react'
+import { Check, ChevronDown } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { settingsUI } from './SettingsUIConstants'
+import {
+  PICKER_COLLAPSE_THRESHOLD,
+  PICKER_SEARCH_RESULT_LIMIT,
+} from '@/components/app-shell/input/model-picker-helpers'
+import {
+  ModelPickerEmptyResults,
+  ModelPickerOverflowHint,
+  ModelPickerSearchField,
+} from '@/components/app-shell/input/ModelPickerSearch'
 
 export interface SettingsMenuSelectOption {
   /** Value for this option */
@@ -43,6 +52,8 @@ export interface SettingsMenuSelectProps {
   searchable?: boolean
   /** Placeholder for search input */
   searchPlaceholder?: string
+  /** Values kept in the idle preview when the catalog is collapsed */
+  pinnedValues?: string[]
 }
 
 /**
@@ -63,6 +74,7 @@ export function SettingsMenuSelect({
   onHover,
   searchable,
   searchPlaceholder,
+  pinnedValues,
 }: SettingsMenuSelectProps) {
   const { t } = useTranslation()
   const effectiveSearchPlaceholder = searchPlaceholder ?? t("common.search")
@@ -72,20 +84,41 @@ export function SettingsMenuSelect({
 
   const selectedOption = options.find((o) => o.value === value)
 
-  // Show search when explicitly enabled or when there are many options
-  const showSearch = searchable ?? options.length > 8
+  const showSearch = searchable ?? (options.length > 8)
+  const searching = searchQuery.trim().length > 0
 
-  // Filter options based on search query
   const filteredOptions = React.useMemo(() => {
-    if (!searchQuery.trim()) return options
-    const query = searchQuery.toLowerCase()
-    return options.filter(
-      (option) =>
-        option.label.toLowerCase().includes(query) ||
-        option.value.toLowerCase().includes(query) ||
-        option.description?.toLowerCase().includes(query)
-    )
-  }, [options, searchQuery])
+    const query = searchQuery.trim().toLowerCase()
+    if (query) {
+      return options.filter(
+        (option) =>
+          option.label.toLowerCase().includes(query) ||
+          option.value.toLowerCase().includes(query) ||
+          option.description?.toLowerCase().includes(query)
+      )
+    }
+
+    if (options.length <= PICKER_COLLAPSE_THRESHOLD) return options
+
+    const pinOrder: string[] = []
+    const addPin = (id?: string) => {
+      if (!id || pinOrder.includes(id)) return
+      pinOrder.push(id)
+    }
+    addPin(value)
+    for (const id of pinnedValues ?? []) addPin(id)
+
+    return pinOrder
+      .map((id) => options.find((option) => option.value === id))
+      .filter((option): option is SettingsMenuSelectOption => option != null)
+  }, [options, searchQuery, value, pinnedValues])
+
+  const hiddenCount = searching
+    ? Math.max(0, filteredOptions.length - PICKER_SEARCH_RESULT_LIMIT)
+    : Math.max(0, options.length - filteredOptions.length)
+  const visibleOptions = searching
+    ? filteredOptions.slice(0, PICKER_SEARCH_RESULT_LIMIT)
+    : filteredOptions
 
   const handleSelect = (optionValue: string) => {
     onValueChange(optionValue)
@@ -134,30 +167,18 @@ export function SettingsMenuSelect({
         onMouseLeave={() => onHover?.(null)}
       >
         {showSearch && (
-          <div className="relative mb-1.5">
-            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 size-3.5 text-muted-foreground" />
-            <input
-              ref={searchInputRef}
-              type="text"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder={effectiveSearchPlaceholder}
-              className={cn(
-                'w-full h-8 pl-8 pr-3 text-sm rounded-md',
-                'bg-foreground/5 border-0',
-                'placeholder:text-muted-foreground/50',
-                'focus:outline-none focus:ring-1 focus:ring-foreground/20'
-              )}
-            />
-          </div>
+          <ModelPickerSearchField
+            value={searchQuery}
+            onChange={setSearchQuery}
+            inputRef={searchInputRef}
+            placeholder={effectiveSearchPlaceholder}
+          />
         )}
         <div className="space-y-0.5 max-h-64 overflow-auto">
-          {filteredOptions.length === 0 ? (
-            <div className="px-2.5 py-3 text-sm text-muted-foreground text-center">
-              No results found
-            </div>
+          {visibleOptions.length === 0 ? (
+            <ModelPickerEmptyResults />
           ) : (
-            filteredOptions.map((option) => {
+            visibleOptions.map((option) => {
               const isSelected = value === option.value
               return (
                 <button
@@ -186,6 +207,7 @@ export function SettingsMenuSelect({
               )
             })
           )}
+          <ModelPickerOverflowHint hiddenCount={hiddenCount} searching={searching} />
         </div>
       </PopoverContent>
     </Popover>
@@ -222,6 +244,8 @@ export interface SettingsMenuSelectRowProps {
   searchable?: boolean
   /** Placeholder for search input */
   searchPlaceholder?: string
+  /** Values kept in the idle preview when the catalog is collapsed */
+  pinnedValues?: string[]
 }
 
 export function SettingsMenuSelectRow({
@@ -238,6 +262,7 @@ export function SettingsMenuSelectRow({
   onHover,
   searchable,
   searchPlaceholder,
+  pinnedValues,
 }: SettingsMenuSelectRowProps) {
   return (
     <div
@@ -265,6 +290,7 @@ export function SettingsMenuSelectRow({
           onHover={onHover}
           searchable={searchable}
           searchPlaceholder={searchPlaceholder}
+          pinnedValues={pinnedValues}
         />
       </div>
     </div>

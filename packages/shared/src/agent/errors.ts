@@ -453,7 +453,13 @@ export function parseError(
     // refusals without these broad fallbacks.
   ) {
     code = 'model_no_tool_support';
-  } else if (lowerMessage.includes('is not a valid model') || lowerMessage.includes('model not found') || lowerMessage.includes('invalid model') || lowerMessage.includes('model identifier is invalid')) {
+  } else if (
+    lowerMessage.includes('no endpoints found for')
+    || lowerMessage.includes('is not a valid model')
+    || lowerMessage.includes('model not found')
+    || lowerMessage.includes('invalid model')
+    || lowerMessage.includes('model identifier is invalid')
+  ) {
     code = 'invalid_model';
   // HTML-intercepted responses (proxy/firewall/captive portal).
   // Must be checked BEFORE status codes: a 502 Cloudflare page or 401 proxy login
@@ -539,6 +545,20 @@ export function parseError(
       originalError: errorMessage,
       providerInfo,
     };
+  }
+
+  if (code === 'invalid_model') {
+    const endpointMatch = fullErrorText.match(/no endpoints found for ([a-z0-9][a-z0-9_.:/-]*)/i)
+    const unavailableId = endpointMatch?.[1]?.replace(/\.$/, '')
+    if (unavailableId) {
+      return {
+        code,
+        ...definition,
+        message: `OpenRouter has no available providers for "${unavailableId}". Choose another model.`,
+        originalError: errorMessage,
+        providerInfo,
+      }
+    }
   }
 
   // For model_no_tool_support errors, try to extract the model name for a more helpful message

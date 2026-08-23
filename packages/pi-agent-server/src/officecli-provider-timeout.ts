@@ -51,8 +51,8 @@ export function isOfficecliDocumentContext(context: Context): boolean {
 
 /**
  * Bound a single provider request for Office generation so one stalled call
- * cannot consume the entire five-minute task budget. Other tasks retain the
- * user's original Pi settings.
+ * cannot consume the entire task wait budget. Other tasks retain the user's
+ * original Pi settings.
  */
 export function providerRetrySettingsForTask(
   systemPrompt: string | undefined,
@@ -79,6 +79,14 @@ function emptyUsage(): AssistantMessage['usage'] {
   };
 }
 
+/** Hidden reasoning and visible tokens both count as progress for the idle clock. */
+function isOfficecliProgressEvent(event: AssistantMessageEvent): boolean {
+  if (!('delta' in event) || typeof event.delta !== 'string' || event.delta.length === 0) {
+    return false;
+  }
+  return event.type === 'thinking_delta' || event.type === 'text_delta' || event.type === 'toolcall_delta';
+}
+
 function deadlineErrorMessage(
   model: Model<any>,
   partial: AssistantMessage | undefined,
@@ -103,9 +111,10 @@ function deadlineErrorMessage(
 }
 
 /**
- * Add an absolute wall-clock deadline around the complete provider stream.
- * Pi's timeoutMs is an HTTP idle timeout, so a provider that trickles events can
- * otherwise keep a document turn alive until the app-wide ten-minute wait budget.
+ * Idle-out a stalled Office provider stream. Thinking / text / tool deltas
+ * reset the clock so a high-thinking model can plan a document for several
+ * minutes. A provider that goes silent still dies after deadlineMs, and the
+ * cumulative task budget still caps total wait.
  */
 export function createOfficecliDeadlineStreamFn(
   baseStreamFn: StreamFn,
@@ -180,6 +189,7 @@ export function createOfficecliDeadlineStreamFn(
         const controller = new AbortController();
         let emittedDurableEvent = false;
         let abandoned = false;
+        let interruptSettled = false;
         let sourceIterator: AsyncIterator<AssistantMessageEvent> | undefined;
         const bufferedEvents: AssistantMessageEvent[] = [];
         let iteratorReturnRequested = false;
@@ -187,14 +197,28 @@ export function createOfficecliDeadlineStreamFn(
         let deltaChars = 0;
         let timer: ReturnType<typeof setTimeout> | undefined;
         let abortFromUpstream: (() => void) | undefined;
-        const interrupted = new Promise<'deadline' | 'upstream'>(resolve => {
+        let settleInterrupt: ((reason: 'deadline' | 'upstream') => void) | undefined;
+        const resetIdleTimer = () => {
+          if (interruptSettled || abandoned) return;
+          if (timer) clearTimeout(timer);
+          const elapsedMs = Date.now() - attemptStartedAt;
+          const remainingBudgetMs = taskWaitBudgetMs - taskWaitUsedMs - elapsedMs;
+          const waitMs = Math.max(1, Math.min(attemptDeadlineMs, remainingBudgetMs));
           timer = setTimeout(() => {
+            if (interruptSettled) return;
             abandoned = true;
+            interruptSettled = true;
             controller.abort(new Error('OfficeCLI model stream deadline exceeded'));
-            resolve('deadline');
-          }, attemptDeadlineMs);
+            settleInterrupt?.('deadline');
+          }, waitMs);
+        };
+        const interrupted = new Promise<'deadline' | 'upstream'>(resolve => {
+          settleInterrupt = resolve;
+          resetIdleTimer();
           abortFromUpstream = () => {
+            if (interruptSettled) return;
             abandoned = true;
+            interruptSettled = true;
             controller.abort(upstreamSignal?.reason);
             resolve('upstream');
           };
@@ -240,6 +264,7 @@ export function createOfficecliDeadlineStreamFn(
                 (event.type === 'text_end' && event.content.length > 0) ||
                 (event.type === 'toolcall_delta' && event.delta.length > 0) ||
                 event.type === 'toolcall_end';
+              if (isOfficecliProgressEvent(event)) resetIdleTimer();
               const eventWithPartial = event as AssistantMessageEvent & { partial?: AssistantMessage };
               if (eventWithPartial.partial) latestPartial = eventWithPartial.partial;
               if (event.type === 'error' && !emittedDurableEvent) {

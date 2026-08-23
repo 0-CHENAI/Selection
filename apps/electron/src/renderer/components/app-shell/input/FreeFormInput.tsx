@@ -88,13 +88,83 @@ import { WorkingDirectorySelector, formatPathForDisplay } from './WorkingDirecto
 import { CompactPermissionModeSelector } from './CompactPermissionModeSelector'
 import { CompactModelSelector } from './CompactModelSelector'
 import {
+  connectionPinnedModelIds,
   formatTokenCount,
   groupConnectionsByProvider,
+  isOpenRouterConnection,
   isPickerModelSelected,
   pickerModelId,
-  resolvePickerModels,
+  resolvePickerModelsWithLive,
+  resolveVisiblePickerModels,
   stripPiPrefixForDisplay,
 } from './model-picker-helpers'
+import { useLiveOpenRouterModels } from '@/hooks/useLiveOpenRouterModels'
+import {
+  ModelPickerEmptyResults,
+  ModelPickerOverflowHint,
+  ModelPickerSearchField,
+  shouldShowPickerSearch,
+  usePickerSearchQuery,
+  useVisiblePickerModels,
+} from './ModelPickerSearch'
+
+function SwitcherConnectionModels({
+  conn,
+  liveOpenRouterModels,
+  currentModel,
+  isCurrentConnection,
+  onPick,
+}: {
+  conn: Parameters<typeof resolvePickerModelsWithLive>[0] & { slug: string }
+  liveOpenRouterModels: Parameters<typeof resolvePickerModelsWithLive>[1]
+  currentModel: string
+  isCurrentConnection: boolean
+  onPick: (modelId: string, connectionSlug: string) => void
+}) {
+  const [query, setQuery] = React.useState('')
+  const models = resolvePickerModelsWithLive(conn, liveOpenRouterModels)
+  const visibleCatalog = resolveVisiblePickerModels(models, {
+    query,
+    currentModel: isCurrentConnection ? currentModel : conn.defaultModel,
+    pinnedIds: connectionPinnedModelIds(conn),
+  })
+  const showSearch = shouldShowPickerSearch(models.length, query)
+
+  return (
+    <StyledDropdownMenuSubContent className="min-w-[220px] max-h-80 overflow-y-auto">
+      {showSearch && (
+        <ModelPickerSearchField value={query} onChange={setQuery} className="px-1 pt-1" />
+      )}
+      {visibleCatalog.visible.length === 0 ? (
+        <ModelPickerEmptyResults />
+      ) : (
+        visibleCatalog.visible.map((model) => {
+          const modelId = pickerModelId(model)
+          const modelName = typeof model === 'string'
+            ? stripPiPrefixForDisplay(getModelShortName(model))
+            : (model.name ?? stripPiPrefixForDisplay(model.id))
+          const isSelectedModel = isCurrentConnection && isPickerModelSelected(currentModel, modelId)
+          return (
+            <StyledDropdownMenuItem
+              key={modelId}
+              onSelect={() => onPick(modelId, conn.slug)}
+              className="flex items-center justify-between px-2 py-2 rounded-lg cursor-pointer"
+            >
+              <div className="font-medium text-sm">{modelName}</div>
+              {isSelectedModel && (
+                <Check className="h-3 w-3 text-foreground ml-3 shrink-0" />
+              )}
+            </StyledDropdownMenuItem>
+          )
+        })
+      )}
+      <ModelPickerOverflowHint
+        hiddenCount={visibleCatalog.hiddenCount}
+        searching={query.trim().length > 0}
+      />
+    </StyledDropdownMenuSubContent>
+  )
+}
 
 function formatFollowUpChipText(text: string, fallback: string, maxLength = 50): string {
   const normalized = text.replace(/\s+/g, ' ').trim()
@@ -336,12 +406,21 @@ export function FreeFormInput({
     connectionCount: llmConnections.length,
   })
 
+  const liveOpenRouterModels = useLiveOpenRouterModels(
+    !connectionUnavailable && llmConnections.some((connection) => isOpenRouterConnection(connection)),
+  )
+
   const availableModels = React.useMemo(() => {
     if (connectionUnavailable) return []
     const effectiveSlug = resolveEffectiveConnectionSlug(currentConnection, workspaceDefaultConnection, llmConnections)
     const connection = llmConnections.find(c => c.slug === effectiveSlug)
-    return resolvePickerModels(connection)
-  }, [llmConnections, currentConnection, workspaceDefaultConnection, connectionUnavailable])
+    return resolvePickerModelsWithLive(connection, liveOpenRouterModels)
+  }, [llmConnections, currentConnection, workspaceDefaultConnection, connectionUnavailable, liveOpenRouterModels])
+
+  const pinnedModelIds = React.useMemo(() => {
+    const effectiveSlug = resolveEffectiveConnectionSlug(currentConnection, workspaceDefaultConnection, llmConnections)
+    return connectionPinnedModelIds(llmConnections.find(c => c.slug === effectiveSlug))
+  }, [llmConnections, currentConnection, workspaceDefaultConnection])
 
   const availableThinkingLevels = THINKING_LEVELS
 
@@ -541,6 +620,15 @@ export function FreeFormInput({
   const [isFocused, setIsFocused] = React.useState(false)
   const [inputMaxHeight, setInputMaxHeight] = React.useState(540)
   const [modelDropdownOpen, setModelDropdownOpen] = React.useState(false)
+  const { query: modelSearchQuery, setQuery: setModelSearchQuery } = usePickerSearchQuery(modelDropdownOpen)
+  const modelSearchInputRef = React.useRef<HTMLInputElement>(null)
+  const visibleCatalog = useVisiblePickerModels(
+    availableModels,
+    modelSearchQuery,
+    currentModel,
+    pinnedModelIds,
+  )
+  const showModelSearch = shouldShowPickerSearch(availableModels.length, modelSearchQuery)
 
   // Input settings (loaded from config)
   const [sendMessageKey, setSendMessageKey] = React.useState<'enter' | 'cmd-enter'>('enter')
@@ -2065,7 +2153,17 @@ export function FreeFormInput({
                 {t('common.model')}
               </TooltipContent>
             </Tooltip>
-            <StyledDropdownMenuContent side="top" align="end" sideOffset={8} className="min-w-[260px]">
+            <StyledDropdownMenuContent
+              side="top"
+              align="end"
+              sideOffset={8}
+              className="min-w-[260px] max-h-[min(24rem,70vh)] overflow-y-auto"
+              onOpenAutoFocus={(event) => {
+                if (!showModelSearch) return
+                event.preventDefault()
+                modelSearchInputRef.current?.focus()
+              }}
+            >
               {/* Connection unavailable message */}
               {pickerMode === 'unavailable' ? (
                 <div className="flex flex-col items-center justify-center py-6 px-4 text-center">
@@ -2107,34 +2205,18 @@ export function FreeFormInput({
                             </div>
                           </StyledDropdownMenuSubTrigger>
                           {isAuthenticated && (
-                            <StyledDropdownMenuSubContent className="min-w-[220px]">
-                              {resolvePickerModels(conn).map((model) => {
-                                const modelId = pickerModelId(model)
-                                const modelName = typeof model === 'string'
-                                  ? stripPiPrefixForDisplay(getModelShortName(model))
-                                  : (model.name ?? stripPiPrefixForDisplay(model.id))
-                                const isSelectedModel = isCurrentConnection && isPickerModelSelected(currentModel, modelId)
-                                return (
-                                  <StyledDropdownMenuItem
-                                    key={modelId}
-                                    onSelect={() => {
-                                      // If selecting a different connection, update both connection and model
-                                      if (!isCurrentConnection && onConnectionChange) {
-                                        onConnectionChange(conn.slug)
-                                      }
-                                      // Always pass connection with model for proper persistence
-                                      onModelChange(modelId, conn.slug)
-                                    }}
-                                    className="flex items-center justify-between px-2 py-2 rounded-lg cursor-pointer"
-                                  >
-                                    <div className="font-medium text-sm">{modelName}</div>
-                                    {isSelectedModel && (
-                                      <Check className="h-3 w-3 text-foreground ml-3 shrink-0" />
-                                    )}
-                                  </StyledDropdownMenuItem>
-                                )
-                              })}
-                            </StyledDropdownMenuSubContent>
+                            <SwitcherConnectionModels
+                              conn={conn}
+                              liveOpenRouterModels={liveOpenRouterModels}
+                              currentModel={currentModel}
+                              isCurrentConnection={isCurrentConnection}
+                              onPick={(modelId, connectionSlug) => {
+                                if (!isCurrentConnection && onConnectionChange) {
+                                  onConnectionChange(connectionSlug)
+                                }
+                                onModelChange(modelId, connectionSlug)
+                              }}
+                            />
                           )}
                         </DropdownMenuSub>
                       )
@@ -2156,8 +2238,18 @@ export function FreeFormInput({
                       <StyledDropdownMenuSeparator className="my-1" />
                     </>
                   )}
-                  {/* Model options based on effective connection's provider type */}
-                  {availableModels.map((model) => {
+                  {showModelSearch && (
+                    <ModelPickerSearchField
+                      value={modelSearchQuery}
+                      onChange={setModelSearchQuery}
+                      inputRef={modelSearchInputRef}
+                      className="px-1 pt-1"
+                    />
+                  )}
+                  {visibleCatalog.visible.length === 0 ? (
+                    <ModelPickerEmptyResults />
+                  ) : (
+                    visibleCatalog.visible.map((model) => {
                     const modelId = pickerModelId(model)
                     const modelName = typeof model === 'string'
                       ? stripPiPrefixForDisplay(getModelShortName(model))
@@ -2182,7 +2274,12 @@ export function FreeFormInput({
                         )}
                       </StyledDropdownMenuItem>
                     )
-                  })}
+                  })
+                  )}
+                  <ModelPickerOverflowHint
+                    hiddenCount={visibleCatalog.hiddenCount}
+                    searching={modelSearchQuery.trim().length > 0}
+                  />
                 </>
               )}
 

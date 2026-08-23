@@ -323,6 +323,30 @@ describe('resolveModelForProvider', () => {
 
     expect(resolveModelForProvider('pi', 'pi/claude-opus-4-6', connection)).toBe('pi/claude-opus-4-7');
   });
+
+  it('keeps an OpenRouter live-catalog pick that is not in the 3-tier list', () => {
+    const connection = {
+      providerType: 'pi',
+      piAuthProvider: 'openrouter',
+      defaultModel: 'pi/ai21/jamba-large-1.7',
+      models: ['pi/ai21/jamba-large-1.7', 'pi/openrouter/auto', 'pi/cheap'],
+      modelSelectionMode: 'userDefined3Tier',
+    } as unknown as LlmConnection;
+
+    expect(resolveModelForProvider('pi', 'pi/openrouter/0x-alpha', connection)).toBe('pi/openrouter/0x-alpha');
+  });
+
+  it('keeps a 3-tier connection pick that is not in the stored list', () => {
+    const connection = {
+      providerType: 'pi',
+      piAuthProvider: 'openai',
+      defaultModel: 'pi/gpt-5',
+      models: ['pi/gpt-5', 'pi/gpt-5-mini'],
+      modelSelectionMode: 'userDefined3Tier',
+    } as unknown as LlmConnection;
+
+    expect(resolveModelForProvider('pi', 'pi/gpt-5.4-pro', connection)).toBe('pi/gpt-5.4-pro');
+  });
 });
 
 describe('PiAgent model switching', () => {

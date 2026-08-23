@@ -157,6 +157,27 @@ export const HEARTBEAT_MAX_MISSED = 2
 /** Default request timeout in ms. */
 export const REQUEST_TIMEOUT_MS = 30_000
 
+/**
+ * Native dialogs and confirmations wait on the user. A 30s RPC deadline
+ * fails while they are still browsing. These channels wait until the
+ * dialog returns or the client disconnects.
+ */
+const USER_INTERACTION_CHANNELS = new Set<string>([
+  'dialog:openFolder',
+  'file:openDialog',
+  'gitbash:browse',
+  'auth:showLogoutConfirmation',
+  'auth:showDeleteSessionConfirmation',
+  'client:openFileDialog',
+  'client:confirmDialog',
+])
+
+/** `null` means do not arm a request timer. */
+export function requestTimeoutMsForChannel(channel: string): number | null {
+  if (USER_INTERACTION_CHANNELS.has(channel)) return null
+  return REQUEST_TIMEOUT_MS
+}
+
 // -- Reliable delivery constants --
 
 /** Max events to retain per client in the ring buffer. */
