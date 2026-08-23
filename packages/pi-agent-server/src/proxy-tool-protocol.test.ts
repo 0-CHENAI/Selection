@@ -9,7 +9,7 @@ describe('proxy tool JSONL protocol', () => {
     const proxyResult = { isError: true };
     const sdkEvent = {
       type: 'tool_execution_end' as const,
-      toolCallId: 'call-officecli-qa',
+      toolCallId: 'call-skill-validate',
       isError: false,
       result: {
         content: [{ type: 'text', text: 'QA failed' }],
@@ -18,15 +18,15 @@ describe('proxy tool JSONL protocol', () => {
     };
 
     const normalized = normalizeProxyToolExecutionEnd(sdkEvent, {
-      toolName: 'officecli_qa',
-      arguments: { file: 'report.docx', mode: 'balanced' },
+      toolName: 'skill_validate',
+      arguments: { slug: 'example' },
     });
 
     expect(normalized.forwardedEvent.isError).toBe(true);
     expect(normalized.sessionToolCompleted).toEqual({
       type: 'session_tool_completed',
-      toolName: 'officecli_qa',
-      args: { file: 'report.docx', mode: 'balanced' },
+      toolName: 'skill_validate',
+      args: { slug: 'example' },
       isError: true,
     });
     expect(sdkEvent.isError).toBe(false);

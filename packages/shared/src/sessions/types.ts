@@ -103,29 +103,6 @@ export interface SessionTokenUsage {
   currentTurn?: SessionTurnUsageSnapshot;
   /** Aggregate usage for the most recently completed user turn. Absent on legacy sessions. */
   lastTurn?: SessionTurnUsage;
-  /** Privacy-safe OfficeCLI orchestration metrics for the most recently observed user task. */
-  lastOfficecliTask?: OfficecliTaskUsage;
-}
-
-/** No document text, command text, or file paths are permitted in this payload. */
-export interface OfficecliTaskUsage {
-  attemptedToolCalls: number;
-  toolCalls: number;
-  batchCalls: number;
-  batchOperations: number;
-  batchSizes: number[];
-  directMutations: number;
-  qaCalls: number;
-  qaModes: Record<string, number>;
-  visualStatuses: Record<string, number>;
-  blockedCalls: number;
-  replanTriggered: boolean;
-  fileCount: number;
-  executionMs: number;
-  modelWaitMs: number;
-  measuredModelCalls: number;
-  errorTypes: Record<string, number>;
-  failedOperationIndexes: number[];
 }
 
 /** Provider-normalized usage for one model invocation. */

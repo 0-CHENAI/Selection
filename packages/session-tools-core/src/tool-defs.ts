@@ -34,21 +34,6 @@ import { handleTransformData } from './handlers/transform-data.ts';
 import { handleScriptSandbox } from './handlers/script-sandbox.ts';
 import { handleRenderTemplate } from './handlers/render-template.ts';
 import { handleSendDeveloperFeedback } from './handlers/send-developer-feedback.ts';
-import { handleOfficecliBatch } from './handlers/officecli-batch.ts';
-import { handleOfficecliQa } from './handlers/officecli-qa.ts';
-import { handleOfficecliFinalize } from './handlers/officecli-finalize.ts';
-import {
-  OfficecliBatchSchema,
-  OfficecliFinalizeSchema,
-  OfficecliOperationSchema,
-  OfficecliQaSchema,
-} from './handlers/officecli-schemas.ts';
-export {
-  OfficecliBatchSchema,
-  OfficecliFinalizeSchema,
-  OfficecliOperationSchema,
-  OfficecliQaSchema,
-} from './handlers/officecli-schemas.ts';
 import { handleSetSessionLabels } from './handlers/set-session-labels.ts';
 import { handleSetSessionStatus } from './handlers/set-session-status.ts';
 import { handleGetSessionInfo } from './handlers/get-session-info.ts';
@@ -434,18 +419,6 @@ Use this when a source provides HTML templates for rich rendering of its data (e
 
 Templates use Mustache syntax — the tool handles rendering and writes the output HTML to the session data folder.`,
 
-  officecli_batch: `Apply an atomic, typed batch of OfficeCLI operations to an existing Office document.
-
-Plan all remaining operations before the first call. An ordinary document build has a total budget of 2–6 batch calls; combine compatible cover, body, table, footer, field, style, get, and query operations instead of splitting them into small checkpoints. For long sources needing more than 100 operations, target 4–6 batches of 30–50 operations and never split batches by chapter. For five or more independent add/set operations, use this tool rather than Bash and group 20–50 operations per call. Only the final dependency or repair batch may be smaller when fewer than 20 operations remain. The batch is sent to the app-managed OfficeCLI binary over stdin without a shell. It stops on the first error and rolls the entire batch back. Word heading and TOC styles are preflighted once per batch when needed. Paths must stay within the session working directory.`,
-
-  officecli_qa: `Run one capability-aware quality pass over a Word document.
-
-Balanced mode validates OpenXML, issues, heading outline levels, TOC and PAGE fields, placeholders and escaped controls, and HTML structure. When the current model explicitly supports images, one whole-document contact sheet is attached; otherwise visual review is truthfully marked as skipped and no pixel-level claim is made. Use strict mode only for print-ready or explicitly requested detailed review.`,
-
-  officecli_finalize: `Save, sanitize, verify, and close an OfficeCLI document through the trusted host runtime.
-
-Use this once after the final QA instead of Bash save/close. It deterministically removes unrequested standalone OfficeCLI generator badges and provenance metadata, while preserving visible or creator attribution only when the current user explicitly requested that scope. Attribution policy is derived by the host and cannot be supplied in tool input.`,
-
   browser_tool: `Run browser actions using a CLI-like command (string or array input).
 
 All browser interactions use this single tool with strict validation and actionable feedback.
@@ -652,9 +625,6 @@ export const SESSION_TOOL_DEFS: SessionToolDef[] = [
   { name: 'transform_data', description: TOOL_DESCRIPTIONS.transform_data, inputSchema: TransformDataSchema, executionMode: 'registry', safeMode: 'allow', handler: handleTransformData },
   { name: 'script_sandbox', description: TOOL_DESCRIPTIONS.script_sandbox, inputSchema: ScriptSandboxSchema, executionMode: 'registry', safeMode: 'allow', handler: handleScriptSandbox },
   { name: 'render_template', description: TOOL_DESCRIPTIONS.render_template, inputSchema: RenderTemplateSchema, executionMode: 'registry', safeMode: 'allow', handler: handleRenderTemplate },
-  { name: 'officecli_batch', description: TOOL_DESCRIPTIONS.officecli_batch, inputSchema: OfficecliBatchSchema, executionMode: 'registry', safeMode: 'block', handler: handleOfficecliBatch },
-  { name: 'officecli_qa', description: TOOL_DESCRIPTIONS.officecli_qa, inputSchema: OfficecliQaSchema, executionMode: 'registry', safeMode: 'allow', readOnly: true, handler: handleOfficecliQa },
-  { name: 'officecli_finalize', description: TOOL_DESCRIPTIONS.officecli_finalize, inputSchema: OfficecliFinalizeSchema, executionMode: 'registry', safeMode: 'block', handler: handleOfficecliFinalize },
   { name: 'send_developer_feedback', description: TOOL_DESCRIPTIONS.send_developer_feedback, inputSchema: SendDeveloperFeedbackSchema, executionMode: 'registry', safeMode: 'allow', handler: handleSendDeveloperFeedback },
   { name: 'call_llm', description: TOOL_DESCRIPTIONS.call_llm, inputSchema: CallLlmSchema, executionMode: 'backend', safeMode: 'allow', readOnly: true, handler: null },
   { name: 'spawn_session', description: TOOL_DESCRIPTIONS.spawn_session, inputSchema: SpawnSessionSchema, executionMode: 'backend', safeMode: 'block', handler: null },
@@ -681,8 +651,6 @@ export const SESSION_TOOL_DEFS: SessionToolDef[] = [
 export interface SessionToolFilterOptions {
   /** Include the experimental send_developer_feedback tool. */
   includeDeveloperFeedback?: boolean;
-  /** Include typed OfficeCLI tools after feature/runtime checks in the caller. */
-  includeOfficecliTools?: boolean;
 }
 
 /**
@@ -693,17 +661,9 @@ export interface SessionToolFilterOptions {
  */
 export function getSessionToolDefs(options?: SessionToolFilterOptions): SessionToolDef[] {
   const includeDeveloperFeedback = options?.includeDeveloperFeedback ?? true;
-  const includeOfficecliTools = options?.includeOfficecliTools ?? true;
 
   return SESSION_TOOL_DEFS.filter(def => {
     if (!includeDeveloperFeedback && def.name === 'send_developer_feedback') {
-      return false;
-    }
-    if (!includeOfficecliTools && (
-      def.name === 'officecli_batch' ||
-      def.name === 'officecli_qa' ||
-      def.name === 'officecli_finalize'
-    )) {
       return false;
     }
     return true;
@@ -818,12 +778,10 @@ export interface JsonSchemaToolDef {
 export function getToolDefsAsJsonSchema(opts?: {
   prefix?: string;
   includeDeveloperFeedback?: boolean;
-  includeOfficecliTools?: boolean;
 }): JsonSchemaToolDef[] {
   const prefix = opts?.prefix || '';
   const defs = getSessionToolDefs({
     includeDeveloperFeedback: opts?.includeDeveloperFeedback,
-    includeOfficecliTools: opts?.includeOfficecliTools,
   });
 
   return defs.map(def => {

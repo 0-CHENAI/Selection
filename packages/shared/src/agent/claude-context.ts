@@ -63,11 +63,6 @@ import { isGoogleOAuthConfigured as isGoogleOAuthConfiguredImpl } from '../auth/
 import { debug } from '../utils/debug.ts';
 import { getSessionPlansPath, getSessionPath, getSessionDataPath } from '../sessions/storage.ts';
 import { updatePreferences as updatePreferencesImpl } from '../config/preferences.ts';
-import {
-  ensureDocxOutlineHeadingStyles,
-  resolveOfficecliBinary,
-  type ResolveOfficecliOptions,
-} from '../utils/officecli.ts';
 
 // Re-export types that may be needed by consumers
 export type { SessionToolContext, SessionToolCallbacks } from '@craft-agent/session-tools-core';
@@ -86,10 +81,6 @@ export interface ClaudeContextOptions {
   supportsImages?: boolean;
   /** Current session permission mode. */
   permissionMode?: string;
-  /** Trusted turn-level OfficeCLI attribution intent. */
-  officecliAttributionPolicy?: 'forbid' | 'allow-visible' | 'allow-metadata' | 'allow-all';
-  /** Trusted app roots for the Selection-managed OfficeCLI runtime. */
-  officecliResolution?: ResolveOfficecliOptions;
 }
 
 /**
@@ -103,22 +94,7 @@ export interface ClaudeContextOptions {
  * - Icon management
  */
 export function createClaudeContext(options: ClaudeContextOptions): SessionToolContext {
-  const { sessionId, workspacePath, workspaceId, workingDirectory, onPlanSubmitted, onAuthRequest, supportsImages, permissionMode, officecliAttributionPolicy } = options;
-  const trustedAppRoot = process.env.CRAFT_RESOURCES_BASE
-    ?? process.env.CRAFT_BUNDLED_ASSETS_ROOT
-    ?? process.env.CRAFT_RESOURCES_PATH
-    ?? process.env.CRAFT_APP_ROOT
-    ?? process.cwd();
-  const officecliResolution = options.officecliResolution ?? {
-    cwd: trustedAppRoot,
-    appRootPath: trustedAppRoot,
-    ...(process.env.CRAFT_RESOURCES_BASE
-      ? { resourcesPath: join(process.env.CRAFT_RESOURCES_BASE, 'resources') }
-      : {}),
-    trustEnvironment: false,
-  };
-  const officecliBinary = resolveOfficecliBinary(officecliResolution);
-  let turnAttributionPolicy = officecliAttributionPolicy;
+  const { sessionId, workspacePath, workspaceId, workingDirectory, onPlanSubmitted, onAuthRequest, supportsImages, permissionMode } = options;
 
   // File system implementation
   const fs: FileSystemInterface = {
@@ -251,21 +227,6 @@ export function createClaudeContext(options: ClaudeContextOptions): SessionToolC
     dataPath: getSessionDataPath(workspacePath, sessionId),
     workingDirectory,
     ...(permissionMode ? { permissionMode } : {}),
-    get officecliAttributionPolicy() {
-      return turnAttributionPolicy ?? 'forbid';
-    },
-    set officecliAttributionPolicy(policy) {
-      turnAttributionPolicy = policy;
-    },
-    ...(officecliBinary ? {
-      officecli: {
-        binaryPath: officecliBinary,
-        ensureDocxOutlineStyles: (file: string) => ensureDocxOutlineHeadingStyles(file, {
-          ...officecliResolution,
-          binary: officecliBinary,
-        }),
-      },
-    } : {}),
     ...(supportsImages !== undefined ? { supportsImages } : {}),
     callbacks,
     fs,

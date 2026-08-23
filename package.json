@@ -102,8 +102,6 @@
     "officecli:check": "bun scripts/sync-officecli.ts --check --download-runtime",
     "officecli:prepare": "bun scripts/sync-officecli.ts --prepare-runtime",
     "officecli:sync": "bun scripts/sync-officecli.ts --update",
-    "officecli:benchmark:check": "bun scripts/check-officecli-benchmark.ts",
-    "officecli:hana:e2e": "bun scripts/run-officecli-hana-e2e.ts",
     "test:officecli:integration": "bun scripts/run-officecli-integration-tests.ts",
     "oss:sync": "bun run scripts/oss-sync.ts",
     "prepare": "husky"

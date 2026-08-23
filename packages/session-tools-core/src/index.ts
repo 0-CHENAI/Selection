@@ -120,7 +120,6 @@ export type {
   FileSystemInterface,
   CredentialManagerInterface,
   ValidatorInterface,
-  OfficecliRuntimeInterface,
   LoadedSource,
   // MCP validation types
   StdioMcpConfig,
@@ -147,14 +146,6 @@ export type {
 } from './context.ts';
 
 export { createNodeFileSystem } from './context.ts';
-
-// OfficeCLI verification/runtime helpers used by first-party integration harnesses.
-export {
-  inspectOfficecliAttribution,
-  sanitizeOfficecliAttribution,
-  sanitizeOfficecliMetadata,
-} from './handlers/officecli-metadata.ts';
-export { parseOfficecliJson, runOfficecli } from './runtime/officecli-runtime.ts';
 
 // Handlers
 export {
@@ -185,10 +176,6 @@ export {
   handleRenderTemplate,
   // Send Developer Feedback
   handleSendDeveloperFeedback,
-  // OfficeCLI
-  handleOfficecliBatch,
-  handleOfficecliQa,
-  handleOfficecliFinalize,
 } from './handlers/index.ts';
 
 export type {
@@ -207,13 +194,6 @@ export type {
   ScriptSandboxArgs,
   RenderTemplateArgs,
   SendDeveloperFeedbackArgs,
-  OfficecliBatchArgs,
-  OfficecliBatchResult,
-  OfficecliOperation,
-  OfficecliQaArgs,
-  OfficecliQaResult,
-  OfficecliFinalizeArgs,
-  OfficecliFinalizeResult,
 } from './handlers/index.ts';
 
 // Tool definitions — single source of truth
@@ -231,10 +211,6 @@ export {
   TransformDataSchema,
   ScriptSandboxSchema,
   RenderTemplateSchema,
-  OfficecliBatchSchema,
-  OfficecliQaSchema,
-  OfficecliFinalizeSchema,
-  OfficecliOperationSchema,
   // Browser tool schema
   BrowserToolSchema,
   // Developer feedback schema

@@ -15,7 +15,6 @@
  */
 
 import http from 'node:http';
-import { randomUUID } from 'node:crypto';
 import { createInterface } from 'node:readline';
 import { join } from 'node:path';
 import { mkdirSync } from 'node:fs';
@@ -78,7 +77,6 @@ import { buildCallLlmRequest, withTimeout, LLM_QUERY_TIMEOUT_MS } from '../../sh
 import type { LLMQueryRequest, LLMQueryResult } from '../../shared/src/agent/llm-tool.ts';
 import { PI_TOOL_NAME_MAP, THINKING_TO_PI } from '../../shared/src/agent/backend/pi/constants.ts';
 import { getDefaultSummarizationModel } from '../../shared/src/config/models.ts';
-import { getOfficecliAttributionPolicy } from '../../shared/src/utils/officecli.ts';
 import { createWebFetchTool } from './tools/web-fetch.ts';
 import { resolveSearchProvider } from './tools/search/resolve-provider.ts';
 import { createSearchTool } from './tools/search/create-search-tool.ts';
@@ -90,14 +88,10 @@ import { createPiSessionManager } from './pi-session-manager.ts';
 import { createSelectionReadToolDefinition } from './tools/read/create-read-tool.ts';
 import { mergeSummarizedToolResult } from './tool-result-images.ts';
 import { describePromptImages } from '../../shared/src/utils/image-input.ts';
-import {
-  createOfficecliDeadlineStreamFn,
-  isOfficecliDocumentContext,
-} from './officecli-provider-timeout.ts';
+import { isBundledOfficecliLoadSkillCommand } from '../../shared/src/utils/officecli.ts';
 import {
   normalizeProxyToolExecutionEnd,
   proxyToolDetails,
-  type ProxyToolTelemetry,
 } from './proxy-tool-protocol.ts';
 
 // ============================================================
@@ -157,7 +151,6 @@ type ProxyToolContent = PiTextContent | PiImageContent;
 interface ProxyToolExecutionResult {
   content: string | ProxyToolContent[];
   isError: boolean;
-  telemetry?: ProxyToolTelemetry;
 }
 
 function normalizeProxyToolContent(content: ProxyToolExecutionResult['content']): ProxyToolContent[] {
@@ -313,7 +306,6 @@ let toolsChanged = false;
 // Callback server for call_llm
 let callbackServer: http.Server | null = null;
 let callbackPort = 0;
-let callbackPolicyToken = '';
 
 // ============================================================
 // JSONL I/O
@@ -337,16 +329,6 @@ async function startCallbackServer(): Promise<void> {
   if (callbackServer) return;
 
   const server = http.createServer(async (req, res) => {
-    if (req.method === 'GET' && req.url === '/officecli-attribution-policy') {
-      if (!callbackPolicyToken || req.headers.authorization !== `Bearer ${callbackPolicyToken}`) {
-        res.writeHead(403);
-        res.end();
-        return;
-      }
-      res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
-      res.end(JSON.stringify({ policy: getOfficecliAttributionPolicy(currentUserMessage) }));
-      return;
-    }
     if (req.method !== 'POST' || req.url !== '/call-llm') {
       res.writeHead(404);
       res.end();
@@ -370,12 +352,9 @@ async function startCallbackServer(): Promise<void> {
   });
 
   await new Promise<void>((resolve, reject) => {
-    callbackPolicyToken = randomUUID();
     server.listen(0, '127.0.0.1', () => {
       const addr = server.address();
       callbackPort = typeof addr === 'object' && addr ? addr.port : 0;
-      process.env.CRAFT_OFFICECLI_POLICY_ENDPOINT = `http://127.0.0.1:${callbackPort}/officecli-attribution-policy`;
-      process.env.CRAFT_OFFICECLI_POLICY_TOKEN = callbackPolicyToken;
       debugLog(`Callback server listening on 127.0.0.1:${callbackPort}`);
       resolve();
     });
@@ -390,9 +369,6 @@ function stopCallbackServer(): void {
     callbackServer.close();
     callbackServer = null;
     callbackPort = 0;
-    callbackPolicyToken = '';
-    delete process.env.CRAFT_OFFICECLI_POLICY_ENDPOINT;
-    delete process.env.CRAFT_OFFICECLI_POLICY_TOKEN;
   }
 }
 
@@ -737,12 +713,6 @@ async function ensureSession(): Promise<AgentSession> {
 
   // Create the session — tools flow through customTools + allowlist (see comment above).
   const { session } = await createAgentSession(sessionOptions);
-  session.agent.streamFn = createOfficecliDeadlineStreamFn(
-    session.agent.streamFn,
-    isOfficecliDocumentContext,
-    undefined,
-    () => send({ type: 'event', event: { type: 'turn_start' } }),
-  );
   piSession = session;
 
   toolsChanged = false;
@@ -864,7 +834,10 @@ function wrapSingleTool(
     // tracks set_model mid-session, not the model that was active at session
     // creation. Falls back to the fixed default when the model isn't set yet.
     const modelContextWindow = piSession?.agent.state.model?.contextWindow;
-    if (estimateTokens(resultText) > tokenLimitFor(modelContextWindow) && initConfig) {
+    const command = typeof inputObj.command === 'string' ? inputObj.command : '';
+    const preserveBundledOfficecliGuide = /bash/i.test(sdkToolName)
+      && isBundledOfficecliLoadSkillCommand(command);
+    if (!preserveBundledOfficecliGuide && estimateTokens(resultText) > tokenLimitFor(modelContextWindow) && initConfig) {
       try {
         const sessionPath = getSessionPath(
           initConfig.workspaceRootPath,

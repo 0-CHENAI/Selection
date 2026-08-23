@@ -1,46 +1,52 @@
 ---
 name: officecli
-description: "Create, inspect, and edit .docx / .xlsx / .pptx with the bundled officecli CLI. Use whenever an Office file is input or output."
+description: Create, inspect, edit, validate, and deliver Word, Excel, and PowerPoint files with Selection's bundled OfficeCLI. Use automatically for Office attachments, Office file paths, or explicit Office artifact work.
 ---
 
-# officecli (built-in)
+# OfficeCLI
 
-`officecli` is already on PATH. Do not curl-install or download it.
+Selection already ships the correct OfficeCLI binary and its official skills. Use the `officecli` command on PATH. Never install, download, self-update, or fall back to a user-installed OfficeCLI.
 
-## Hard rule
+## Load only what the task needs
 
-For Word / Excel / PowerPoint, load only the format the user needs, then run `officecli` via Bash and follow that skill's Common Workflow and Delivery Gate.
+Before creating or editing a file, load the official instructions in this order. Load each guide at most once per task.
 
-```bash
-officecli load_skill word    # or excel / pptx — do this before create
-```
+| Task | Commands, in order |
+|---|---|
+| Word | `officecli load_skill word` |
+| Academic paper | `officecli load_skill word`, then `officecli load_skill academic-paper` |
+| Fillable Word form | `officecli load_skill word-form` |
+| Excel or XLSM | `officecli load_skill excel` |
+| Financial model | `officecli load_skill excel`, then `officecli load_skill financial-model` |
+| Data dashboard | `officecli load_skill excel`, then `officecli load_skill data-dashboard` |
+| Financial dashboard | `officecli load_skill excel`, `officecli load_skill financial-model`, then `officecli load_skill data-dashboard` |
+| PowerPoint | `officecli load_skill pptx` |
+| Pitch deck | `officecli load_skill pptx`, then `officecli load_skill pitch-deck` |
+| Morph deck | `officecli load_skill pptx`, then `officecli load_skill morph-ppt` |
+| 3D Morph deck | `officecli load_skill pptx`, `officecli load_skill morph-ppt`, then `officecli load_skill morph-ppt-3d` |
 
-Load one format. Do not Read `officecli-docx` / `officecli-xlsx` / `officecli-pptx` / `officecli-execution` SKILL.md files. After `load_skill`, start `create`. Use one focused `officecli help` lookup only when a property is missing from the loaded skill.
+Do not read global `~/.agents/skills/officecli`, `docx`, `xlsx`, or `pptx` instructions. The bundled `load_skill` output is the runtime source of truth. Setup sections that mention curl, PowerShell downloads, package managers, or manual installation do not apply inside Selection.
 
-| File | Skill / load_skill |
-|------|---------------------|
-| `.docx` / Word | `officecli-docx` / `word` |
-| `.xlsx` / `.xlsm` / Excel | `officecli-xlsx` / `excel` |
-| `.pptx` / PowerPoint | `officecli-pptx` / `pptx` |
+## Execution rules
 
-`officecli create *.docx` seeds `Heading1`–`Heading3` (with `outlineLvl` 0/1/2), `Title`, and `TOCHeading`. Use those styles. Word's TOC field (`TOC \o "1-3"`) reads `outlineLvl` from `styles.xml`, not bold Normal text and not a bare `pStyle` name.
+- Use OfficeCLI as the only engine for `.docx`, `.docm`, `.xlsx`, `.xlsm`, and `.pptx` work. Do not switch to python-docx, openpyxl, python-pptx, or MarkItDown for a supported operation.
+- Keep the resident document session open across related edits. Use `save` when an intermediate checkpoint is useful and `close` only at the final delivery gate.
+- Do not impose a model-call, CLI-call, operation, QA, elapsed-time, or cost budget. Continue until the official Delivery Gate passes, the user cancels, or a genuine external blocker makes file state unverifiable.
+- Treat a non-zero exit code, `WARNING`, `UNSUPPORTED`, missing output, or read-back mismatch as incomplete work. Inspect the relevant `officecli help` output, repair, and verify again.
+- For OfficeCLI 1.0.144 CSV/TSV import, do not trust a successful native import alone. Use the atomic batch workflow from the Excel guide and read back representative cells before continuing.
+- For `.xlsm`, preserve existing VBA parts. Verify the macro package remains present and unchanged; do not claim to create or modify VBA code.
+- Legacy `.doc`, `.xls`, and `.ppt` files must be converted to OOXML before editing. Do not silently use another library.
+- For Morph workflows, ignore official-guide references to `morph-helpers.py` and `morph-helpers.sh`. Selection replaces both with the cross-platform bundled command `officecli-morph-helper` (`clone`, `ghost`, `verify`, `final-check`, and `clean-accumulation`); it runs on Selection's bundled Bun runtime and requires no Python or particular user shell.
 
-Specialized work uses `officecli-academic-paper`, `officecli-financial-model`, `officecli-data-dashboard`, `officecli-pitch-deck`, `officecli-word-form`, `morph-ppt`, or `morph-ppt-3d` — still after the matching format skill.
+## Delivery gate
 
-## Closed loop (do not skip)
+Follow every validation and visual check required by the loaded official guide. At minimum:
 
-1. `load_skill` the needed format (`word` / `excel` / `pptx`).
-2. `create` / `open`, then `get /styles` if anything looks thin.
-3. Headings first (`style=Heading1` / `Heading2` / `Heading3`), then `--type toc`.
-4. If a command prints `WARNING` / `style not found` / `Error`, stop. Run `get /styles` and `officecli help docx style`. Fix styles before more content. Do not `add` an existing Heading style — that drops `outlineLvl`. Use `set /styles/Heading1 --prop outlineLvl=0`.
-5. `view outline` showing Heading1 is not enough. Confirm `get /styles/Heading1`.
-6. `Update field to see table of contents` is not delivery. Set `updateFields=true`. Do not claim Word page numbers are ready on Mac.
-7. Run the format skill's Delivery Gate (`view issues`, `view html`, live PAGE / notes / column widths as that skill requires). Do not stop after `validate`.
+1. Save the document and run the format's structural validation.
+2. Read back representative content, formulas, relationships, notes, or styles.
+3. Render or inspect the official preview when the guide requires visual QA.
+4. Resolve every error, `WARNING`, and `UNSUPPORTED` result.
+5. Close the resident document only after the final successful checks.
+6. Reopen or re-read the saved artifact and confirm the delivered path exists.
 
-## Do not
-
-- Do not Read `~/.agents/skills/officecli` or `~/.agents/skills/docx` / `xlsx` / `pptx`. Those are not this skill.
-- Do not use python-docx, openpyxl, python-pptx, or markitdown first.
-- Do not ignore `style 'Heading1' not found in styles part`.
-- Do not re-add Heading1–3 if they already exist.
-- Do not insert a TOC before heading sources exist.
+Selection adds one compatibility repair after Word document creation: missing Heading 1–3 `outlineLvl` values are seeded without replacing existing custom styles. If that repair reports an error, the document is not ready for delivery.

@@ -13,12 +13,6 @@ interface MarkupNode {
 const RECOVERABLE_FIELDS: Record<string, ReadonlySet<string>> = {
   read: new Set(['path', 'file_path']),
   bash: new Set(['command', 'cmd', 'timeout']),
-  mcp__session__officecli_batch: new Set(['file', 'operations']),
-  officecli_batch: new Set(['file', 'operations']),
-  mcp__session__officecli_qa: new Set(['file', 'mode']),
-  officecli_qa: new Set(['file', 'mode']),
-  mcp__session__officecli_finalize: new Set(['file']),
-  officecli_finalize: new Set(['file']),
 };
 
 const FIELD_ALIASES: Record<string, Readonly<Record<string, string>>> = {

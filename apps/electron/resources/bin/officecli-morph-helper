@@ -1,0 +1,22 @@
+#!/bin/sh
+DIR=$(CDPATH= cd -- "$(dirname "$0")" && pwd)
+UNAME=$(uname -s 2>/dev/null || echo unknown)
+MACHINE=$(uname -m 2>/dev/null || echo unknown)
+
+case "$UNAME" in
+  Darwin) ARCH=x64; [ "$MACHINE" = "arm64" ] && ARCH=arm64; BIN=$DIR/darwin-$ARCH/officecli ;;
+  Linux) ARCH=x64; if [ "$MACHINE" = "aarch64" ] || [ "$MACHINE" = "arm64" ]; then ARCH=arm64; fi; BIN=$DIR/linux-$ARCH/officecli ;;
+  *) BIN="" ;;
+esac
+
+BUN=$DIR/../../vendor/bun/bun
+SCRIPT=$DIR/../scripts/officecli-morph-helper.ts
+if [ -z "$BIN" ] || [ ! -f "$BIN" ]; then
+  echo "Selection does not include bundled OfficeCLI for this platform. Repair or reinstall Selection." >&2
+  exit 127
+fi
+if [ ! -x "$BUN" ] || [ ! -f "$SCRIPT" ]; then
+  echo "Selection's bundled Morph helper runtime is unavailable. Repair or reinstall Selection." >&2
+  exit 127
+fi
+exec "$BUN" "$SCRIPT" "$BIN" "$@"

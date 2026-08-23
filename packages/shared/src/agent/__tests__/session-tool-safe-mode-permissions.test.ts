@@ -20,7 +20,6 @@ describe('session tool safe-mode classification', () => {
       'mcp__session__browser_tool',
       'mcp__session__script_sandbox',
       'mcp__session__get_task_results',
-      'mcp__session__officecli_qa',
     ] as const;
 
     for (const toolName of allowedTools) {
@@ -36,8 +35,6 @@ describe('session tool safe-mode classification', () => {
       'mcp__session__spawn_session',
       'mcp__session__run_task',
       'mcp__session__update_user_preferences',
-      'mcp__session__officecli_batch',
-      'mcp__session__officecli_finalize',
     ] as const;
 
     for (const toolName of blockedTools) {
@@ -49,7 +46,7 @@ describe('session tool safe-mode classification', () => {
     }
   });
 
-  it('keeps read-only OfficeCLI fallback QA available when typed tools are feature-gated', () => {
+  it('applies normal safe-mode Bash permissions to bundled OfficeCLI commands', () => {
     const configDir = mkdtempSync(join(tmpdir(), 'selection-officecli-safe-'));
     const previousConfigDir = process.env.CRAFT_CONFIG_DIR;
     try {

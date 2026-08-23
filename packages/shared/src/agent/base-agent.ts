@@ -1005,9 +1005,11 @@ ${formattedMessages}
 
     // Office work loads the router skill only. The model then load_skill
     // word/excel/pptx for the format the user actually needs. Do not dump
-    // official format SKILL.md files or the execution policy up front.
+    // official format SKILL.md files up front. An explicit user skill mention
+    // keeps Craft's normal project/workspace/global priority.
     const officeFormatSlugs = collectOfficeFormatSkillSlugs(message, attachments);
-    if (officeFormatSlugs.length > 0) {
+    const explicitlySelectedOfficecli = parsed.skills.includes('officecli');
+    if (officeFormatSlugs.length > 0 && !explicitlySelectedOfficecli) {
       skillPaths.delete('officecli');
       resolveBundledSlug('officecli');
     }
@@ -1044,8 +1046,9 @@ ${formattedMessages}
     const pathList = [...skillPaths.entries()]
       .map(([slug, path]) => `- ${path} (skill: ${slug})`)
       .join('\n');
-    const officeOnly = [...skillPaths.keys()].some(slug => slug.startsWith('officecli') || slug === 'docx' || slug === 'xlsx' || slug === 'pptx')
-      ? '\nAfter reading these files, load only the format the user needs with `officecli load_skill word` (or excel / pptx). Do not Read officecli-docx, officecli-xlsx, officecli-pptx, or officecli-execution SKILL.md files unless they are listed above.'
+    const bundledOfficecli = resolveBundledSkillMdPath('officecli');
+    const officeOnly = bundledOfficecli && skillPaths.get('officecli') === bundledOfficecli
+      ? '\nAfter reading the router, run only the `officecli load_skill` commands it selects. Use the bundled CLI on PATH; do not install OfficeCLI or read user-level Office skills.'
       : '';
     return `Before proceeding with the user's request, you MUST read the following skill instruction files using the Read tool or \`cat\` via Bash:\n${pathList}${officeOnly}\n\nDo not take any other action until you have read these files.`;
   }

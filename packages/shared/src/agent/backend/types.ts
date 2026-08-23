@@ -22,7 +22,6 @@ import type { McpClientPool } from '../../mcp/mcp-pool.ts';
 import type { Workspace } from '../../config/storage.ts';
 import type { SessionConfig as Session } from '../../sessions/storage.ts';
 import type { SourceManager } from '../core/source-manager.ts';
-import type { OfficecliExecutionCheckpoint } from '../core/officecli-execution-tracker.ts';
 
 // Import AbortReason and RecoveryMessage from core module (single source of truth)
 import { AbortReason, type RecoveryMessage } from '../core/index.ts';
@@ -315,13 +314,6 @@ export interface ChatOptions {
   previousResponseInterrupted?: boolean;
 }
 
-/** Content-free orchestration checkpoint retained only across internal retries. */
-export interface OfficecliContinuationState {
-  execution: OfficecliExecutionCheckpoint;
-  modelWaitMs: number;
-  measuredModelCalls: number;
-}
-
 /**
  * SDK-compatible MCP server configuration.
  * Supports HTTP/SSE (remote) and stdio (local subprocess) transports.
@@ -374,11 +366,6 @@ export interface AgentBackend {
     attachments?: FileAttachment[],
     options?: ChatOptions
   ): AsyncGenerator<AgentEvent>;
-
-  /** Optional OfficeCLI budget checkpoint used when an auth retry recreates a backend. */
-  getOfficecliContinuationState?(): OfficecliContinuationState;
-  /** Restore the checkpoint before continuing the same user-authored task. */
-  restoreOfficecliContinuationState?(state: OfficecliContinuationState): void;
 
   /**
    * Abort current query (user stop or internal abort).

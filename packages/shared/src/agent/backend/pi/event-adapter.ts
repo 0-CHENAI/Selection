@@ -339,14 +339,7 @@ export class PiEventAdapter extends BaseEventAdapter {
         if (msg?.role !== 'assistant') break;
 
         // Surface API errors — Pi SDK sets stopReason: 'error' and errorMessage on failures.
-        // OfficeCLI idle-deadline aborts are user-visible; a user Stop is not.
-        const isOfficecliUserAbort = typeof msg.errorMessage === 'string'
-          && /officecli document model request was aborted/i.test(msg.errorMessage);
-        const isOfficecliDeadlineAbort = msg.stopReason === 'aborted'
-          && typeof msg.errorMessage === 'string'
-          && msg.errorMessage.includes('OfficeCLI document')
-          && !isOfficecliUserAbort;
-        if ((msg.stopReason === 'error' || isOfficecliDeadlineAbort) && msg.errorMessage) {
+        if (msg.stopReason === 'error' && msg.errorMessage) {
           // Context overflow: hand recovery to the SDK's _runAutoCompaction
           // and keep the UI quiet until we know the outcome (recovered turn
           // arrives, or compaction fails). Suppress the raw provider error.

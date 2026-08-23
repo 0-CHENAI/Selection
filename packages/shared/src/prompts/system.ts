@@ -546,9 +546,9 @@ rg -n "session|OAuth|\"level\":\"error\"" "${logFilePath}" | tail -n 50
 
 function formatBundledOfficecliSkillGuidance(): string {
   return [
-    '- **Hard rule:** for `.docx` / `.xlsx` / `.pptx` / `.xlsm` (or Word / Excel / PowerPoint), use Selection\'s bundled OfficeCLI tools. Prefer typed OfficeCLI tools when available and use Bash only for unsupported operations or fallback. Do not use python-docx, openpyxl, python-pptx, or markitdown first.',
-    '- Read the automatically gated `officecli` skill first. Then load only the format the user needs (`word` / `excel` / `pptx`) before creating or editing. `officecli` is already on PATH; do not curl-install. Do not Read officecli-docx, officecli-xlsx, officecli-pptx, or officecli-execution SKILL.md files up front.',
-    '- Word → `word`. Excel → `excel`. PowerPoint → `pptx`. Specialized work uses officecli-docx scene skills only after the matching format is loaded.',
+    '- **Hard rule:** for `.docx` / `.docm` / `.xlsx` / `.xlsm` / `.pptx` work, use Selection\'s bundled OfficeCLI through Bash. Do not use python-docx, openpyxl, python-pptx, or markitdown for supported operations.',
+    '- Read the automatically gated `officecli` router first. Then run the exact `officecli load_skill` commands it selects before creating or editing. OfficeCLI is already on PATH; never download, install, or self-update it.',
+    '- Keep resident sessions open across related edits and close only after the loaded official Delivery Gate passes. Office work has no special call, operation, QA, time, or cost budget.',
     '- Do **not** Read `~/.agents/skills/officecli`, `~/.agents/skills/docx`, `~/.agents/skills/xlsx`, or `~/.agents/skills/pptx`.',
   ].join('\n');
 }
@@ -708,7 +708,7 @@ Office-file instructions are listed once under Document Tools.
 
 Skills are stored at four levels (listed from lowest to highest priority):
 - Global: \`~/.agents/skills/{slug}/SKILL.md\`
-- Built-in: app-shipped \`officecli\` and official OfficeCLI format skills (they override a global \`officecli\`)
+- Built-in: the app-shipped \`officecli\` router (it overrides a global \`officecli\` for automatic Office routing)
 - Workspace: \`${workspacePath}/skills/{slug}/SKILL.md\`
 - Project: \`{projectRoot}/.agents/skills/{slug}/SKILL.md\`
 
@@ -1290,7 +1290,7 @@ These CLI tools are available via Bash. OfficeCLI is bundled with Selection.
 
 **Office documents:**
 ${formatBundledOfficecliSkillGuidance()}
-- Specialized: \`officecli-academic-paper\`, \`officecli-financial-model\`, \`officecli-data-dashboard\`, \`officecli-pitch-deck\`, \`officecli-word-form\`, \`morph-ppt\`, \`morph-ppt-3d\`.
+- Specialized OfficeCLI guides are loaded privately through the router with \`officecli load_skill\` and do not appear in the normal Skill catalog.
 - Official skill Setup sections that mention curl-install do not apply.
 - Use **markitdown** only when the user explicitly requests Markdown conversion, or when \`officecli\` reports the document unsupported. Do not read an automatically generated \`.docx.md\`, \`.xlsx.md\`, or \`.pptx.md\` sidecar first.
 - Consult each CLI's \`--help\` before relying on optional flags such as \`-o\`.

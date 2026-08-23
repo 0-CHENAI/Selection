@@ -94,6 +94,7 @@ describe('PiAgent pre-tool labels guard', () => {
       action: 'block',
     })
     expect(String(sent.at(-1)?.reason ?? '')).toContain('platform OfficeCLI binary')
+    expect(String(sent.at(-1)?.reason ?? '')).toContain('Heading/TOC compatibility repair')
 
     agent.destroy()
   })

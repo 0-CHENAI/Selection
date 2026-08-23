@@ -638,38 +638,18 @@ describe('PiEventAdapter', () => {
       expect(events[0].error.code).toBe('rate_limited');
     });
 
-    it('should not emit error when the user stops an OfficeCLI turn', () => {
+    it('should not emit error when the user stops a turn', () => {
       collect(adapter.adaptEvent({ type: 'turn_start' } as any));
       const events = collect(adapter.adaptEvent({
         type: 'message_end',
         message: {
           role: 'assistant',
           stopReason: 'aborted',
-          errorMessage: 'OfficeCLI document model request was aborted',
+          errorMessage: 'Request was aborted by the user',
         },
       } as any));
 
       expect(events.every(event => event.type !== 'error' && event.type !== 'typed_error')).toBe(true);
-    });
-
-    it('should emit typed_error for OfficeCLI deadline aborts', () => {
-      const events = collect(adapter.adaptEvent({
-        type: 'message_end',
-        message: {
-          role: 'assistant',
-          stopReason: 'aborted',
-          errorMessage: 'OfficeCLI document model request exceeded the 90000ms deadline twice',
-        },
-      } as any));
-
-      expect(events).toHaveLength(1);
-      expect(events[0]).toMatchObject({
-        type: 'typed_error',
-        error: {
-          code: 'provider_error',
-          canRetry: true,
-        },
-      });
     });
 
     it('should not emit error for unrelated aborted turns', () => {
@@ -955,8 +935,8 @@ describe('PiEventAdapter', () => {
       collect(adapter.adaptEvent({
         type: 'tool_execution_start',
         toolCallId: 'call_proxy_error',
-        toolName: 'mcp__session__officecli_batch',
-        args: { file: 'missing.docx', operations: [] },
+        toolName: 'mcp__session__skill_validate',
+        args: { slug: 'missing' },
       } as any));
 
       const events = collect(adapter.adaptEvent({
@@ -971,7 +951,7 @@ describe('PiEventAdapter', () => {
 
       expect(events[0]).toMatchObject({
         type: 'tool_result',
-        toolName: 'mcp__session__officecli_batch',
+        toolName: 'mcp__session__skill_validate',
         result: '[ERROR] target does not exist',
         isError: true,
       });

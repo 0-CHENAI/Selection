@@ -228,6 +228,29 @@ function directoryHash(root: string): string {
   return digest.digest('hex');
 }
 
+function validateSelectionCompatibilityResources(): void {
+  const required = [
+    'apps/electron/resources/bin/officecli',
+    'apps/electron/resources/bin/officecli.cmd',
+    'apps/electron/resources/bin/officecli-morph-helper',
+    'apps/electron/resources/bin/officecli-morph-helper.cmd',
+    'apps/electron/resources/scripts/officecli-heading-repair.ts',
+    'apps/electron/resources/scripts/officecli-wrapper.ts',
+    'apps/electron/resources/scripts/officecli-morph-helper.ts',
+    'apps/electron/resources/skills/officecli/SKILL.md',
+  ];
+  const missing = required.filter(path => !existsSync(join(repoRoot, path)));
+  if (missing.length > 0) {
+    throw new Error(`Selection OfficeCLI compatibility resource closure is incomplete: ${missing.join(', ')}`);
+  }
+  const router = readFileSync(join(repoRoot, 'apps/electron/resources/skills/officecli/SKILL.md'), 'utf8');
+  for (const requiredInstruction of ['officecli-morph-helper', 'morph-helpers.py', 'morph-helpers.sh']) {
+    if (!router.includes(requiredInstruction)) {
+      throw new Error(`OfficeCLI router is missing the reviewed Morph compatibility instruction: ${requiredInstruction}`);
+    }
+  }
+}
+
 async function run(binary: string, args: string[]): Promise<string> {
   const proc = Bun.spawn([binary, ...args], {
     stdout: 'pipe',
@@ -340,6 +363,7 @@ export function validateManifestFiles(
   manifest: OfficecliManifest,
   options: { allowCommandPolicyDrift?: boolean } = {},
 ): void {
+  validateSelectionCompatibilityResources();
   if (manifest.manifestVersion !== 1) throw new Error(`Unsupported OfficeCLI manifest version: ${manifest.manifestVersion}`);
   if (!/^\d+\.\d+\.\d+$/.test(manifest.version) || manifest.tag !== `v${manifest.version}`) {
     throw new Error(`Manifest version/tag mismatch: ${manifest.version}/${manifest.tag}`);

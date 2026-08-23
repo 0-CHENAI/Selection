@@ -15,7 +15,6 @@ export type {
   SessionModelCallUsage,
   SessionTurnUsageSnapshot,
   SessionTurnUsage,
-  OfficecliTaskUsage,
   StoredMessage,
   SessionConfig,
   StoredSession,

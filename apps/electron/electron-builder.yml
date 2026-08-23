@@ -43,9 +43,8 @@ files:
   - resources/bin/ical-tool.cmd
   - resources/bin/officecli
   - resources/bin/officecli.cmd
-  - resources/bin/officecli-ensure-docx-styles
-  - resources/bin/officecli-ensure-docx-styles.cmd
-  - resources/bin/officecli-ensure-docx-styles.json
+  - resources/bin/officecli-morph-helper
+  - resources/bin/officecli-morph-helper.cmd
   # Include bundled uv binary (platform-specific, only the relevant one ships per build)
   - resources/bin/darwin-arm64/**/*
   - resources/bin/darwin-x64/**/*

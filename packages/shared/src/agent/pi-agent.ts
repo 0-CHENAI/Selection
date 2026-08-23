@@ -24,7 +24,6 @@ import type {
   BackendConfig,
   BackendRuntimeUpdate,
   ChatOptions,
-  OfficecliContinuationState,
   SdkMcpServerConfig,
 } from './backend/types.ts';
 import { AbortReason } from './backend/types.ts';
@@ -100,8 +99,9 @@ import { delimiter, join } from 'node:path';
 import { homedir } from 'os';
 import {
   getOfficecliWrapperDir,
-  getOfficecliAttributionPolicy,
+  isOfficecliShellCommand,
   resolveOfficecliBinary,
+  resolveOfficecliResourcesRoot,
 } from '../utils/officecli.ts';
 
 // Session storage (plans folder path)
@@ -112,10 +112,6 @@ import { parseError, type AgentError } from './errors.ts';
 
 // Centralized PreToolUse pipeline
 import { runPreToolUseChecks, type PreToolUseCheckResult } from './core/pre-tool-use.ts';
-import {
-  isOfficecliShellCommand,
-  OfficecliExecutionTracker,
-} from './core/officecli-execution-tracker.ts';
 import { recoverKnownToolInputFromIntent } from './core/tool-input-recovery.ts';
 import { getBrowserToolEnabled } from '../config/storage.ts';
 
@@ -141,12 +137,6 @@ export const PI_BACKEND_SESSION_TOOL_NAMES = new Set<string>([
 type ProxyToolExecutionResult = {
   content: string | SessionToolContent[];
   isError: boolean;
-  telemetry?: {
-    errorType?: string;
-    failedIndex?: number;
-    qaMode?: string;
-    visualStatus?: string;
-  };
 };
 
 /**
@@ -352,55 +342,8 @@ export class PiAgent extends BaseAgent {
   // Current user message (for context in summarization)
   private currentUserMessage: string = '';
 
-  // Per-user-turn OfficeCLI loop guard and privacy-safe counters.
-  private readonly officecliExecutionTracker = new OfficecliExecutionTracker();
-  private readonly officecliToolStarts = new Map<string, number>();
   private managedOfficecliShellAvailable = false;
   private managedOfficecliBinaryPath?: string;
-  private modelCallStartedAt: number | null = null;
-  private modelWaitMs = 0;
-  private measuredModelCalls = 0;
-
-  private startMeasuredModelCall(now = Date.now()): void {
-    // A new turn_start closes any provider call that ended without an
-    // assistant message_end (retry/error path), then counts the new attempt.
-    this.settleMeasuredModelCall(now);
-    this.modelCallStartedAt = now;
-    this.measuredModelCalls += 1;
-  }
-
-  private settleMeasuredModelCall(now = Date.now()): void {
-    if (this.modelCallStartedAt === null) return;
-    this.modelWaitMs += Math.max(0, now - this.modelCallStartedAt);
-    this.modelCallStartedAt = null;
-  }
-
-  getOfficecliContinuationState(): OfficecliContinuationState {
-    return {
-      execution: this.officecliExecutionTracker.checkpoint(),
-      modelWaitMs: this.modelWaitMs,
-      measuredModelCalls: this.measuredModelCalls,
-    };
-  }
-
-  restoreOfficecliContinuationState(state: OfficecliContinuationState): void {
-    this.officecliExecutionTracker.restore(state.execution);
-    this.modelWaitMs = Number.isFinite(state.modelWaitMs) ? Math.max(0, Math.floor(state.modelWaitMs)) : 0;
-    this.measuredModelCalls = Number.isFinite(state.measuredModelCalls)
-      ? Math.max(0, Math.floor(state.measuredModelCalls))
-      : 0;
-  }
-
-  /** Preserve budgets only for host-declared continuations of the same user task. */
-  private prepareOfficecliUserTask(continueUserTask: boolean): void {
-    if (!continueUserTask) {
-      this.officecliExecutionTracker.reset();
-      this.modelWaitMs = 0;
-      this.measuredModelCalls = 0;
-    }
-    this.officecliToolStarts.clear();
-    this.modelCallStartedAt = null;
-  }
 
   // Pool reference for convenience (from this.config.mcpPool)
   private get mcpPool(): McpClientPool | undefined { return this.config.mcpPool; }
@@ -582,7 +525,8 @@ export class PiAgent extends BaseAgent {
     };
     const officecliWrapperDir = getOfficecliWrapperDir(officecliResolution);
     const officecliBinary = resolveOfficecliBinary(officecliResolution);
-    this.managedOfficecliShellAvailable = Boolean(officecliWrapperDir && officecliBinary);
+    const officecliResources = resolveOfficecliResourcesRoot(officecliResolution);
+    this.managedOfficecliShellAvailable = Boolean(officecliWrapperDir && officecliBinary && officecliResources);
     this.managedOfficecliBinaryPath = this.managedOfficecliShellAvailable ? officecliBinary : undefined;
     const officecliShellWrapper = this.managedOfficecliShellAvailable && officecliWrapperDir
       ? join(officecliWrapperDir, process.platform === 'win32' ? 'officecli.cmd' : 'officecli')
@@ -601,16 +545,13 @@ export class PiAgent extends BaseAgent {
         ...getProxyEnvVars(),
         ...this.config.envOverrides,
         ...awsEnv,
-        // Bash fallback must resolve Selection's reviewed wrapper before any
-        // user-installed OfficeCLI. The wrapper then delegates to this exact
-        // app-managed binary and sanitizes generator metadata after mutations.
+        // Resolve Selection's wrapper before any user-installed OfficeCLI.
         ...(managedToolPath ? { PATH: managedToolPath } : {}),
-        // Expose only the reviewed wrapper to the model subprocess. Publishing
-        // the platform binary here let `$CRAFT_OFFICECLI` bypass attribution
-        // verification even though plain `officecli` correctly resolved via PATH.
-        // Explicitly clear inherited/session overrides when the full reviewed
-        // toolchain cannot be resolved.
+        // Expose the trusted wrapper, which adds the sole Word compatibility repair.
         CRAFT_OFFICECLI: officecliShellWrapper ?? '',
+        // Never inherit a session/user resource override. Official guides and
+        // helper assets must come from the same trusted Selection package.
+        CRAFT_OFFICECLI_RESOURCES: officecliResources ?? '',
         CRAFT_BUN: nodePath,
         // Pass session dir for cross-process toolMetadataStore
         ...(sessionDir ? { CRAFT_SESSION_DIR: sessionDir } : {}),
@@ -706,7 +647,7 @@ export class PiAgent extends BaseAgent {
     // These tools (SubmitPlan, config_validate, source auth, call_llm, etc.)
     // are executed in the main process when the LLM calls them.
     this.assertBackendSessionToolParity();
-    let sessionToolDefs = getSessionToolProxyDefs(Boolean(officecliBinary));
+    let sessionToolDefs = getSessionToolProxyDefs();
 
     // Mirror Claude's gate: hide `browser_tool` when the user has disabled
     // the built-in browser tool. Without this filter, Pi would still advertise
@@ -1231,27 +1172,9 @@ export class PiAgent extends BaseAgent {
     const eventType = event.type as string;
     let adaptedEvent = event;
 
-    // Privacy-safe latency telemetry. `turn_start` is Pi's model-call boundary;
-    // the assistant message end closes that interval. No prompts or outputs are retained.
-    if (eventType === 'turn_start') {
-      this.startMeasuredModelCall();
-    } else if (eventType === 'message_end') {
-      const message = event.message as { role?: string } | undefined;
-      if (message?.role === 'assistant') this.settleMeasuredModelCall();
-    } else if (eventType === 'agent_end') {
-      this.settleMeasuredModelCall();
-    }
-
     if (eventType === 'tool_execution_start') {
       const toolName = event.toolName as string;
       const toolCallId = event.toolCallId as string | undefined;
-      const args = event.args as Record<string, unknown> | undefined;
-      const command = args && typeof args.command === 'string' ? args.command : '';
-      const isTypedOfficecli = /(?:^|__)officecli_(?:batch|qa|finalize)$/i.test(toolName ?? '');
-      const isOfficecliBash = /bash$/i.test(toolName ?? '') && isOfficecliShellCommand(command);
-      if (toolCallId && (isTypedOfficecli || isOfficecliBash)) {
-        this.officecliToolStarts.set(toolCallId, Date.now());
-      }
       if (toolName?.startsWith('session__') || toolName?.startsWith('mcp__session__')) {
         // Session tool tracking is handled by the subprocess; it sends
         // session_tool_completed events when appropriate.
@@ -1280,24 +1203,6 @@ export class PiAgent extends BaseAgent {
       const toolCallId = event.toolCallId as string | undefined;
       if (toolCallId) {
         this.preToolMetadataByCallId.delete(toolCallId);
-        const startedAt = this.officecliToolStarts.get(toolCallId);
-        if (startedAt !== undefined) {
-          this.officecliToolStarts.delete(toolCallId);
-          const result = event.result as {
-            details?: { selectionTelemetry?: ProxyToolExecutionResult['telemetry'] };
-          } | undefined;
-          const telemetry = result?.details?.selectionTelemetry;
-          this.officecliExecutionTracker.recordExecution(Date.now() - startedAt, {
-            errorType: typeof telemetry?.errorType === 'string'
-              ? telemetry.errorType
-              : event.isError === true ? 'tool_error' : undefined,
-            failedIndex: typeof telemetry?.failedIndex === 'number'
-              ? telemetry.failedIndex
-              : undefined,
-            qaMode: telemetry?.qaMode,
-            visualStatus: telemetry?.visualStatus,
-          });
-        }
       }
     }
 
@@ -1482,7 +1387,7 @@ export class PiAgent extends BaseAgent {
         ? decided.input.command
         : null;
       if (shellCommand && isOfficecliShellCommand(shellCommand) && !this.managedOfficecliShellAvailable) {
-        sendPermissionBlock('Selection\'s app-managed OfficeCLI runtime is unavailable. Repair or reinstall the bundled runtime before running OfficeCLI shell commands.');
+        sendPermissionBlock('Selection\'s app-managed OfficeCLI runtime or official resources are unavailable. Repair or reinstall Selection before running OfficeCLI shell commands.');
         return;
       }
       if (shellCommand && this.managedOfficecliBinaryPath) {
@@ -1491,20 +1396,9 @@ export class PiAgent extends BaseAgent {
           ? this.managedOfficecliBinaryPath.toLowerCase()
           : this.managedOfficecliBinaryPath;
         if (commandForComparison.includes(binaryForComparison)) {
-          sendPermissionBlock('Direct invocation of Selection\'s platform OfficeCLI binary is blocked because it bypasses attribution verification. Invoke `officecli` through the reviewed PATH wrapper instead.');
+          sendPermissionBlock('Direct invocation of Selection\'s platform OfficeCLI binary is blocked because it bypasses the Word Heading/TOC compatibility repair. Invoke `officecli` through the trusted PATH wrapper instead.');
           return;
         }
-      }
-      const officeDecision = this.officecliExecutionTracker.inspect(
-        toolName,
-        decided.input,
-        toolCallId,
-        this.config.session?.workingDirectory ?? this.config.workspace.rootPath,
-      );
-      if (!officeDecision.allowed) {
-        this.debug(`OfficeCLI execution budget blocked ${toolName}: ${officeDecision.kind}`);
-        sendPermissionBlock(officeDecision.reason);
-        return;
       }
       await emitPreToolUse(decided.input);
       if (decided.modified || alreadyModified) {
@@ -1748,14 +1642,10 @@ export class PiAgent extends BaseAgent {
 
   private getSessionToolContext(): SessionToolContext {
     if (this._sessionToolContext) {
-      // The project directory can change while the agent stays alive. Keep the
-      // cached tool context in sync so relative Office paths follow the session.
+      // The project directory can change while the agent stays alive.
       this._sessionToolContext.workingDirectory = this.config.session?.workingDirectory;
       this._sessionToolContext.supportsImages = this.resolveCurrentModelSupportsImages();
       this._sessionToolContext.permissionMode = this.permissionManager.getPermissionMode();
-      this._sessionToolContext.officecliAttributionPolicy = getOfficecliAttributionPolicy(
-        this.getCurrentTurnUserMessage() ?? '',
-      );
       return this._sessionToolContext;
     }
 
@@ -1763,8 +1653,6 @@ export class PiAgent extends BaseAgent {
     const workspacePath = this.config.workspace.rootPath;
     const workspaceId = this.config.workspace.id;
     const supportsImages = this.resolveCurrentModelSupportsImages();
-    const runtime = getBackendRuntime(this.config);
-
     this._sessionToolContext = createClaudeContext({
       sessionId,
       workspacePath,
@@ -1772,15 +1660,6 @@ export class PiAgent extends BaseAgent {
       workingDirectory: this.config.session?.workingDirectory,
       supportsImages,
       permissionMode: this.permissionManager.getPermissionMode(),
-      officecliAttributionPolicy: getOfficecliAttributionPolicy(
-        this.getCurrentTurnUserMessage() ?? '',
-      ),
-      officecliResolution: {
-        cwd: runtime.officecliHost?.appRootPath ?? process.cwd(),
-        appRootPath: runtime.officecliHost?.appRootPath,
-        resourcesPath: runtime.officecliHost?.resourcesPath,
-        trustEnvironment: false,
-      },
       onPlanSubmitted: (planPath: string) => {
         setLastPlanFilePath(sessionId, planPath);
         this.onPlanSubmitted?.(planPath);
@@ -1892,21 +1771,12 @@ export class PiAgent extends BaseAgent {
 
       const ctx = this.getSessionToolContext();
       const result: SessionToolResult = await def.handler(ctx, args);
-      const structured = result.structuredContent;
-      const telemetry = structured ? {
-        ...(typeof structured.errorType === 'string' ? { errorType: structured.errorType } : {}),
-        ...(typeof structured.failedIndex === 'number' ? { failedIndex: structured.failedIndex } : {}),
-        ...(typeof structured.mode === 'string' ? { qaMode: structured.mode } : {}),
-        ...(typeof structured.visualStatus === 'string' ? { visualStatus: structured.visualStatus } : {}),
-      } : undefined;
-
       // Preserve MCP-compatible text/image blocks all the way into Pi's model
       // context. The first block is always text, so older string-only event/UI
       // consumers still receive the structured envelope and artifact paths.
       return {
         content: result.content,
         isError: !!result.isError,
-        ...(telemetry && Object.keys(telemetry).length > 0 ? { telemetry } : {}),
       };
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
@@ -2035,7 +1905,6 @@ export class PiAgent extends BaseAgent {
 
     this.subprocess = null;
     this.managedOfficecliShellAvailable = false;
-    this.managedOfficecliBinaryPath = undefined;
     this.readline = null;
     this.resetSubprocessErrorDedup();
     this.subprocessReady = null;
@@ -2281,7 +2150,6 @@ export class PiAgent extends BaseAgent {
     this.eventQueue.reset();
     this.currentUserMessage = message;
     this.adapter.startTurn();
-    this.prepareOfficecliUserTask(options?.continueUserTask === true);
 
     // Fire UserPromptSubmit hook event (fire-and-forget)
     this.emitAutomationEvent('UserPromptSubmit', {
@@ -2509,17 +2377,6 @@ export class PiAgent extends BaseAgent {
 
       yield { type: 'complete' };
     } finally {
-      // Count provider errors/timeouts that never emitted assistant message_end.
-      this.settleMeasuredModelCall();
-      const officecliUsage = this.officecliExecutionTracker.snapshot();
-      if (officecliUsage.toolCalls > 0) {
-        this.debug(`__OFFICECLI_USAGE__${JSON.stringify({
-          ...officecliUsage,
-          modelWaitMs: this.modelWaitMs,
-          measuredModelCalls: this.measuredModelCalls,
-        })}`);
-      }
-      this.officecliToolStarts.clear();
       this._isProcessing = false;
       this.emitStopOnce('complete');
     }
@@ -2846,7 +2703,6 @@ export class PiAgent extends BaseAgent {
       this.subprocess = null;
     }
     this.managedOfficecliShellAvailable = false;
-    this.managedOfficecliBinaryPath = undefined;
     this.subprocessReady = null;
     this.subprocessReadyResolve = null;
     this.callbackPort = 0;
@@ -2880,7 +2736,6 @@ export class PiAgent extends BaseAgent {
       this.subprocess = null;
     }
     this.managedOfficecliShellAvailable = false;
-    this.managedOfficecliBinaryPath = undefined;
 
     this.subprocessReady = null;
     this.subprocessReadyResolve = null;

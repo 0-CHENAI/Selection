@@ -79,7 +79,6 @@ import {
   type SessionStatus,
   type SessionHeader,
   type SessionTokenUsage,
-  type OfficecliTaskUsage,
   pickSessionFields,
   isSharedProjectMemoryEnabled,
 } from '@craft-agent/shared/sessions'
@@ -871,8 +870,6 @@ interface ManagedSession {
   activeTurnUsage?: TurnUsageAccumulator
   /** Usage accumulator retained across a source-activation continuation. */
   pendingContinuationUsage?: TurnUsageAccumulator
-  /** Content-free OfficeCLI budget retained when an auth retry recreates the backend. */
-  pendingOfficecliContinuationState?: ReturnType<NonNullable<AgentBackend['getOfficecliContinuationState']>>
   /** Whether the backend emitted per-call usage for this turn (prevents double-counting final usage). */
   activeTurnSawUsageUpdate?: boolean
   /** Whether the backend reports provider attempts independently of usage. */
@@ -1250,54 +1247,6 @@ function resolveSupportsBranching(managed: ManagedSession): boolean {
 const DEFAULT_TOKEN_USAGE = {
   inputTokens: 0, outputTokens: 0, totalTokens: 0,
   contextTokens: 0, costUsd: 0,
-}
-
-function parseOfficecliUsageMarker(message: string): OfficecliTaskUsage | null {
-  const marker = '__OFFICECLI_USAGE__'
-  const markerIndex = message.indexOf(marker)
-  if (markerIndex < 0) return null
-  try {
-    const raw = JSON.parse(message.slice(markerIndex + marker.length)) as Record<string, unknown>
-    const count = (key: string): number => {
-      const value = raw[key]
-      return typeof value === 'number' && Number.isFinite(value) ? Math.max(0, Math.floor(value)) : 0
-    }
-    const countMap = (key: string): Record<string, number> => {
-      const value = raw[key]
-      if (!value || typeof value !== 'object' || Array.isArray(value)) return {}
-      return Object.fromEntries(Object.entries(value as Record<string, unknown>)
-        .filter(([name, entry]) => /^[a-z0-9_-]{1,40}$/i.test(name) && typeof entry === 'number' && Number.isFinite(entry))
-        .map(([name, entry]) => [name, Math.max(0, Math.floor(entry as number))]))
-    }
-    const countArray = (key: string, maximum: number): number[] => {
-      const value = raw[key]
-      if (!Array.isArray(value)) return []
-      return value
-        .filter(entry => typeof entry === 'number' && Number.isInteger(entry) && entry >= 0 && entry <= maximum)
-        .slice(0, 100) as number[]
-    }
-    return {
-      attemptedToolCalls: count('attemptedToolCalls'),
-      toolCalls: count('toolCalls'),
-      batchCalls: count('batchCalls'),
-      batchOperations: count('batchOperations'),
-      batchSizes: countArray('batchSizes', 50),
-      directMutations: count('directMutations'),
-      qaCalls: count('qaCalls'),
-      qaModes: countMap('qaModes'),
-      visualStatuses: countMap('visualStatuses'),
-      blockedCalls: count('blockedCalls'),
-      replanTriggered: raw.replanTriggered === true,
-      fileCount: count('fileCount'),
-      executionMs: count('executionMs'),
-      modelWaitMs: count('modelWaitMs'),
-      measuredModelCalls: count('measuredModelCalls'),
-      errorTypes: countMap('errorTypes'),
-      failedOperationIndexes: countArray('failedOperationIndexes', 49),
-    }
-  } catch {
-    return null
-  }
 }
 
 /**
@@ -3855,11 +3804,6 @@ export class SessionManager implements ISessionManager {
         },
       }) as AgentInstance
 
-      if (managed.pendingOfficecliContinuationState && managed.agent.restoreOfficecliContinuationState) {
-        managed.agent.restoreOfficecliContinuationState(managed.pendingOfficecliContinuationState)
-        managed.pendingOfficecliContinuationState = undefined
-      }
-
       sessionLog.info('Created agent', {
         craftSessionId: managed.id,
         backend: provider,
@@ -3875,18 +3819,6 @@ export class SessionManager implements ISessionManager {
       // ============================================================
 
       managed.agent.onDebug = (msg: string) => {
-        const officecliUsage = parseOfficecliUsageMarker(msg)
-        if (officecliUsage) {
-          managed.tokenUsage = managed.tokenUsage ?? { ...DEFAULT_TOKEN_USAGE }
-          managed.tokenUsage.lastOfficecliTask = officecliUsage
-          this.persistSession(managed)
-          this.sendEvent({
-            type: 'usage_update',
-            sessionId: managed.id,
-            tokenUsage: managed.tokenUsage,
-          }, managed.workspace.id)
-          return
-        }
         const marker = '__PERMISSION_BLOCK__'
         if (msg.includes(marker)) {
           const idx = msg.indexOf(marker)
@@ -7287,7 +7219,6 @@ export class SessionManager implements ISessionManager {
 
         // 2. Destroy the agent — the new agent's postInit() will refresh auth
         sessionLog.info(`[auth-retry] Destroying agent for session ${sessionId}`)
-        managed.pendingOfficecliContinuationState = managed.agent?.getOfficecliContinuationState?.()
         managed.agent?.dispose()
         managed.agent = null
 

@@ -34,16 +34,11 @@ describe('session tool filtering helpers', () => {
     }
   });
 
-  it('omits all typed OfficeCLI tools when the feature/runtime gate is closed', () => {
-    const disabled = getSessionToolNames({ includeOfficecliTools: false });
-    expect(disabled.has('officecli_batch')).toBe(false);
-    expect(disabled.has('officecli_qa')).toBe(false);
-    expect(disabled.has('officecli_finalize')).toBe(false);
-
-    const enabled = getSessionToolNames({ includeOfficecliTools: true });
-    expect(enabled.has('officecli_batch')).toBe(true);
-    expect(enabled.has('officecli_qa')).toBe(true);
-    expect(enabled.has('officecli_finalize')).toBe(true);
+  it('never registers typed OfficeCLI tools', () => {
+    const names = getSessionToolNames();
+    for (const removedSuffix of ['batch', 'qa', 'finalize']) {
+      expect(names.has(`officecli_${removedSuffix}`)).toBe(false);
+    }
   });
 
   it('all canonical session tools declare safeMode metadata', () => {
@@ -52,11 +47,9 @@ describe('session tool filtering helpers', () => {
     }
   });
 
-  it('keeps OfficeCLI research and QA available in Safe mode while blocking document writes', () => {
-    const allowed = getSessionSafeAllowedToolNames({ includeOfficecliTools: true });
-    const blocked = getSessionSafeBlockedToolNames({ includeOfficecliTools: true });
-    expect(allowed.has('officecli_qa')).toBe(true);
-    expect(blocked.has('officecli_batch')).toBe(true);
-    expect(blocked.has('officecli_finalize')).toBe(true);
+  it('keeps safe-mode allow/block sets disjoint', () => {
+    const allowed = getSessionSafeAllowedToolNames();
+    const blocked = getSessionSafeBlockedToolNames();
+    for (const name of allowed) expect(blocked.has(name)).toBe(false);
   });
 });

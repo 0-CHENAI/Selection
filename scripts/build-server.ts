@@ -229,8 +229,10 @@ async function downloadUvForServer(config: ServerBuildConfig): Promise<void> {
 async function downloadOfficecliForServer(config: ServerBuildConfig): Promise<void> {
   const { platform, arch, outputDir } = config;
   const destName = platform === 'win32' ? 'officecli.exe' : 'officecli';
-  const destPath = join(outputDir, 'resources', 'bin', destName);
   const platformKey = getPlatformKey(platform, arch);
+  // Keep the reviewed wrapper at resources/bin/officecli. The raw runtime is
+  // platform-scoped so it cannot overwrite the wrapper or bypass Word repair.
+  const destPath = join(outputDir, 'resources', 'bin', platformKey, destName);
   const electronPath = join(config.electronDir, 'resources', 'bin', platformKey, destName);
 
   const buildConfig: BuildConfig = {
@@ -250,7 +252,7 @@ async function downloadOfficecliForServer(config: ServerBuildConfig): Promise<vo
     throw new Error(`officecli binary not found after download at ${electronPath}`);
   }
 
-  mkdirSync(join(outputDir, 'resources', 'bin'), { recursive: true });
+  mkdirSync(dirname(destPath), { recursive: true });
   copyFileSync(electronPath, destPath);
   if (platform !== 'win32') {
     await $`chmod +x ${destPath}`.quiet();
@@ -614,6 +616,8 @@ export CRAFT_RESOURCES_PATH="$ROOT/resources"
 # CLI tools (doc tools use uv + Python scripts)
 export CRAFT_UV="$ROOT/resources/bin/uv"
 export CRAFT_SCRIPTS="$ROOT/resources/scripts"
+export CRAFT_OFFICECLI="$ROOT/resources/bin/officecli"
+export CRAFT_OFFICECLI_RESOURCES="$ROOT/resources/officecli"
 
 # Prepend resource bin to PATH (makes doc tool wrappers available)
 export PATH="$ROOT/resources/bin:$ROOT/vendor/bun:$PATH"
@@ -757,6 +761,8 @@ ENV CRAFT_APP_ROOT=/app
 ENV CRAFT_RESOURCES_PATH=/app/resources
 ENV CRAFT_UV=/app/resources/bin/uv
 ENV CRAFT_SCRIPTS=/app/resources/scripts
+ENV CRAFT_OFFICECLI=/app/resources/bin/officecli
+ENV CRAFT_OFFICECLI_RESOURCES=/app/resources/officecli
 ENV CRAFT_RPC_HOST=0.0.0.0
 ENV CRAFT_RPC_PORT=9100
 ENV PATH="/app/resources/bin:/app/vendor/bun:\${PATH}"

@@ -1,7 +1,7 @@
 #!/bin/sh
-# Selection wrapper — prefer the app-bundled binary, never curl-install.
-# After create, or around heading / TOC writes, seed or repair Heading outlineLvl
-# so Word can compile the TOC. Do not mutate on open / refresh / view.
+# Transparent Selection launcher: always use the bundled binary and preserve
+# OfficeCLI's resident session. The only compatibility hook is post-create
+# Word Heading/TOC outline repair.
 DIR=$(CDPATH= cd -- "$(dirname "$0")" && pwd)
 UNAME=$(uname -s 2>/dev/null || echo unknown)
 MACHINE=$(uname -m 2>/dev/null || echo unknown)
@@ -10,193 +10,55 @@ case "$UNAME" in
   Darwin)
     ARCH=x64
     [ "$MACHINE" = "arm64" ] && ARCH=arm64
-    CAND=$DIR/darwin-$ARCH/officecli
+    BIN=$DIR/darwin-$ARCH/officecli
     ;;
   Linux)
     ARCH=x64
-    [ "$MACHINE" = "aarch64" ] || [ "$MACHINE" = "arm64" ] && ARCH=arm64
-    CAND=$DIR/linux-$ARCH/officecli
+    if [ "$MACHINE" = "aarch64" ] || [ "$MACHINE" = "arm64" ]; then ARCH=arm64; fi
+    BIN=$DIR/linux-$ARCH/officecli
     ;;
   MINGW*|MSYS*|CYGWIN*|Windows_NT)
-    CAND=$DIR/win32-x64/officecli.exe
+    BIN=$DIR/win32-x64/officecli.exe
     ;;
-  *)
-    CAND=""
-    ;;
+  *) BIN="" ;;
 esac
 
-if [ -n "$CAND" ] && [ -f "$CAND" ]; then
-  BIN=$CAND
-else
-  echo "officecli is not bundled in this Selection build. Rebuild the app." >&2
+if [ -z "$BIN" ] || [ ! -f "$BIN" ]; then
+  echo "Selection does not include bundled OfficeCLI for this platform. Repair or reinstall Selection." >&2
   exit 127
-fi
-
-ENSURE=$DIR/officecli-ensure-docx-styles
-SANITIZE=$DIR/../scripts/officecli-sanitize-metadata.js
-BUN_BIN=""
-if [ -x "$DIR/../../vendor/bun/bun" ]; then
-  BUN_BIN=$DIR/../../vendor/bun/bun
 fi
 
 verb=""
 docx=""
-office_file=""
-prev=""
-ensure_before=0
-ensure_after=0
 for arg in "$@"; do
   case "$arg" in
-    --*|-* ) ;;
+    --*|-*) ;;
     *)
-      if [ -z "$verb" ]; then
-        verb=$arg
-        [ "$verb" = "create" ] && ensure_after=1
-      fi
-      if [ -z "$office_file" ]; then
-        case "$arg" in
-          *.docx|*.DOCX|*.docm|*.DOCM|*.xlsx|*.XLSX|*.xlsm|*.XLSM|*.pptx|*.PPTX) office_file=$arg ;;
-        esac
-      fi
+      [ -z "$verb" ] && verb=$arg
       if [ -z "$docx" ]; then
-        case "$arg" in
-          *.docx|*.DOCX|*.docm|*.DOCM) docx=$arg ;;
-        esac
+        case "$arg" in *.docx|*.DOCX|*.docm|*.DOCM) docx=$arg ;; esac
       fi
       ;;
   esac
-  case "$arg" in
-    *style=Heading*|*style=Title*|*style=TOCHeading*|--type=toc) ensure_before=1 ;;
-    *id=Heading*|*id=Title*|*id=TOCHeading*) ensure_after=1 ;;
-  esac
-  if [ "$prev" = "--type" ] && [ "$arg" = "toc" ]; then
-    ensure_before=1
-  fi
-  prev=$arg
 done
 
-# merge reads the first Office file as a template and writes the second one.
-# Attribution verification must target the output, not rewrite the template.
-if [ "$verb" = "merge" ]; then
-  office_file=""
-  office_file_index=0
-  for arg in "$@"; do
-    case "$arg" in
-      *.docx|*.DOCX|*.docm|*.DOCM|*.xlsx|*.XLSX|*.xlsm|*.XLSM|*.pptx|*.PPTX)
-        office_file_index=$((office_file_index + 1))
-        [ "$office_file_index" -eq 2 ] && office_file=$arg
-        ;;
-    esac
-  done
-fi
+"$BIN" "$@"
+status=$?
+[ $status -ne 0 ] && exit $status
 
-# Mutation verification must be available before OfficeCLI touches the file.
-# Returning a failure only after create/add/batch has already committed is not
-# fail-closed and encourages an unsafe automatic retry.
-case "$verb" in
-  create|batch|save|close|add|set|remove|move|swap|refresh|raw-set|add-part|import|merge)
-    if [ -z "$office_file" ]; then
-      echo "Selection could not identify the Office document before mutation." >&2
-      exit 2
-    fi
-    if [ -z "$BUN_BIN" ] || [ ! -x "$BUN_BIN" ]; then
-      echo "Selection's bundled Bun runtime is unavailable; attribution verification failed closed before mutation." >&2
-      exit 127
-    fi
-    if [ ! -f "$SANITIZE" ]; then
-      echo "Selection's OfficeCLI attribution verifier is unavailable; verification failed closed before mutation." >&2
-      exit 127
-    fi
-    ;;
-esac
-
-ensure_docx() {
-  if [ -n "$docx" ] && [ -f "$ENSURE" ] && [ -f "$docx" ]; then
-    "$ENSURE" "$BIN" "$docx"
+if [ "$verb" = "create" ] && [ -n "$docx" ]; then
+  BUN=$DIR/../../vendor/bun/bun
+  ENSURE=$DIR/../scripts/officecli-heading-repair.ts
+  if [ ! -x "$BUN" ] || [ ! -f "$ENSURE" ]; then
+    echo "Selection created the Word file, but its Heading/TOC compatibility helper is unavailable." >&2
+    exit 127
   fi
-}
-
-sanitize_office_file() {
-  if [ -z "$office_file" ] || [ ! -f "$office_file" ]; then
-    echo "Selection could not verify the Office document after mutation." >&2
-    return 2
-  fi
-  if [ -z "$BUN_BIN" ] || [ ! -x "$BUN_BIN" ]; then
-    echo "Selection's bundled Bun runtime is unavailable; attribution verification failed closed." >&2
-    return 127
-  fi
-  if [ ! -f "$SANITIZE" ]; then
-    echo "Selection's OfficeCLI attribution verifier is unavailable; verification failed closed." >&2
-    return 127
-  fi
-  "$BUN_BIN" "$SANITIZE" "$office_file" "$@"
-  return $?
-}
-
-close_before_package_rewrite() {
-  [ "$verb" = "close" ] && return 0
-  "$BIN" close "$office_file" --json >/dev/null
-  return $?
-}
-
-if [ "$verb" = "create" ]; then
-  "$BIN" "$@"
+  "$BUN" "$ENSURE" "$BIN" "$docx"
   status=$?
-  [ $status -eq 0 ] && ensure_docx
-  if [ $status -eq 0 ]; then
-    close_before_package_rewrite
-    status=$?
+  if [ $status -ne 0 ]; then
+    echo "Selection created the Word file, but could not verify Heading 1-3 outline levels." >&2
+    exit $status
   fi
-  if [ $status -eq 0 ]; then
-    sanitize_office_file
-    status=$?
-  fi
-  exit $status
 fi
 
-if [ "$ensure_before" = 1 ] || [ "$ensure_after" = 1 ]; then
-  [ "$ensure_before" = 1 ] && ensure_docx
-  "$BIN" "$@"
-  status=$?
-  [ $status -eq 0 ] && [ "$ensure_after" = 1 ] && ensure_docx
-  if [ $status -eq 0 ]; then
-    close_before_package_rewrite
-    status=$?
-  fi
-  if [ $status -eq 0 ]; then
-    sanitize_office_file
-    status=$?
-  fi
-  exit $status
-fi
-
-case "$verb" in
-  save|close)
-    "$BIN" "$@"
-    status=$?
-    if [ $status -eq 0 ]; then
-      close_before_package_rewrite
-      status=$?
-    fi
-    if [ $status -eq 0 ]; then
-      sanitize_office_file --inspect-visible
-      status=$?
-    fi
-    exit $status
-    ;;
-  batch|add|set|remove|move|swap|refresh|raw-set|add-part|import|merge)
-    "$BIN" "$@"
-    status=$?
-    if [ $status -eq 0 ]; then
-      close_before_package_rewrite
-      status=$?
-    fi
-    if [ $status -eq 0 ]; then
-      sanitize_office_file
-      status=$?
-    fi
-    exit $status
-    ;;
-esac
-
-exec "$BIN" "$@"
+exit 0

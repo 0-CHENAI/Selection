@@ -29,7 +29,7 @@ import {
   listSkillSlugs,
   deleteSkill,
 } from '../storage.ts';
-import { BUNDLED_OFFICECLI_SKILL_SLUGS } from '../../utils/officecli.ts';
+import { BUNDLED_OFFICECLI_SKILL_SLUGS, getBundledOfficecliSkillsDir } from '../../utils/officecli.ts';
 
 // ============================================================
 // Temp Directory Setup
@@ -542,20 +542,14 @@ describe('loadAllSkills', () => {
 });
 
 describe('bundled skills', () => {
-  it('exposes official OfficeCLI skills as built-in skills', () => {
+  it('exposes only the hidden router while keeping official guides private', () => {
     const dirs = getBundledSkillDirectories();
-    expect(dirs.some(dir => existsSync(join(dir, 'officecli-docx', 'SKILL.md')))).toBe(true);
-
-    const skill = loadSkillBySlug(workspaceRoot, 'officecli-docx');
-    expect(skill).toBeTruthy();
-    expect(skill!.source).toBe('bundled');
-    expect(skill!.metadata.name).toBe('officecli-docx');
+    expect(dirs.some(dir => existsSync(join(dir, 'officecli', 'SKILL.md')))).toBe(true);
 
     const all = loadAllSkills(workspaceRoot);
     for (const slug of BUNDLED_OFFICECLI_SKILL_SLUGS) {
-      expect(all.some(item => item.slug === slug && item.source === 'bundled')).toBe(true);
+      expect(all.some(item => item.slug === slug && item.source === 'bundled')).toBe(false);
     }
-    expect(filterUserFacingSkills(all).some(item => item.source === 'bundled')).toBe(false);
 
     const router = loadSkillBySlug(workspaceRoot, 'officecli');
     expect(router).toBeTruthy();
@@ -563,11 +557,11 @@ describe('bundled skills', () => {
     expect(all.find(item => item.slug === 'officecli')?.source).toBe('bundled');
     expect(filterUserFacingSkills(all).some(item => item.slug === 'officecli')).toBe(false);
 
-    const executionPolicy = loadSkillBySlug(workspaceRoot, 'officecli-execution');
-    expect(executionPolicy).toBeTruthy();
-    expect(executionPolicy!.source).toBe('bundled');
-    expect(all.find(item => item.slug === 'officecli-execution')?.source).toBe('bundled');
-    expect(filterUserFacingSkills(all).some(item => item.slug === 'officecli-execution')).toBe(false);
+    const privateGuidesDir = getBundledOfficecliSkillsDir();
+    expect(privateGuidesDir).toBeTruthy();
+    for (const slug of BUNDLED_OFFICECLI_SKILL_SLUGS) {
+      expect(existsSync(join(privateGuidesDir!, slug, 'SKILL.md'))).toBe(true);
+    }
   });
 });
 

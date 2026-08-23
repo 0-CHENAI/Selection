@@ -1,13 +1,5 @@
-export interface ProxyToolTelemetry {
-  errorType?: string;
-  failedIndex?: number;
-  qaMode?: string;
-  visualStatus?: string;
-}
-
 export interface ProxyToolOutcome {
   isError: boolean;
-  telemetry?: ProxyToolTelemetry;
 }
 
 export interface PendingSessionToolCall {
@@ -32,7 +24,6 @@ export interface SessionToolCompleted {
 export function proxyToolDetails(result: ProxyToolOutcome): Record<string, unknown> | undefined {
   const details: Record<string, unknown> = {};
   if (result.isError) details.isError = true;
-  if (result.telemetry) details.selectionTelemetry = result.telemetry;
   return Object.keys(details).length > 0 ? details : undefined;
 }
 

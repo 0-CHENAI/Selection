@@ -19,7 +19,6 @@ import type { LoadedSkill, SkillMetadata, SkillSource } from './types.ts';
 import { clearDisplayTitle, loadDisplayTitles } from '../display-titles-storage.ts';
 import { getWorkspaceSkillsPath } from '../workspaces/storage.ts';
 import { getBundledAssetsDir } from '../utils/paths.ts';
-import { getBundledOfficecliSkillsDir } from '../utils/officecli.ts';
 import {
   validateIconValue,
   findIconFile,
@@ -53,19 +52,11 @@ export function getBundledSkillsDir(): string | undefined {
   return candidates.find(dir => existsSync(dir));
 }
 
-/**
- * Bundled skill directories: app-owned `resources/skills` plus version-pinned
- * OfficeCLI official skills shipped under `resources/officecli/<version>/skills`.
- */
+/** Bundled Selection skills. Versioned OfficeCLI guides are private CLI resources. */
 export function getBundledSkillDirectories(): string[] {
   const dirs: string[] = [];
   const appBundled = getBundledSkillsDir();
   if (appBundled) dirs.push(appBundled);
-
-  const officecliSkills = getBundledOfficecliSkillsDir();
-  if (officecliSkills && officecliSkills !== appBundled) {
-    dirs.push(officecliSkills);
-  }
   return dirs;
 }
 
@@ -78,7 +69,7 @@ export function filterUserFacingSkills<T extends Pick<LoadedSkill, 'source'>>(sk
   return skills.filter(isUserFacingSkill);
 }
 
-/** First bundled `SKILL.md` for a slug, including OfficeCLI official skills. */
+/** First app-bundled `SKILL.md` for a slug. Versioned OfficeCLI guides stay private. */
 export function resolveBundledSkillMdPath(slug: string): string | undefined {
   for (const dir of getBundledSkillDirectories()) {
     const skillMd = join(dir, slug, 'SKILL.md');

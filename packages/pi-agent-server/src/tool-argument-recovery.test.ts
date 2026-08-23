@@ -21,42 +21,6 @@ describe('Pi pre-validation tool argument recovery', () => {
     expect(validated).toEqual({ command: 'officecli create report.docx' });
   });
 
-  it('recovers XML-spilled typed batch input before strict validation', () => {
-    const prepareArguments = createRecoveringArgumentPreparer(
-      'mcp__session__officecli_batch',
-      undefined,
-      false,
-    );
-    const args = prepareArguments({
-      _intent: 'Build</intent><file>report.docx</file><operations><item><command>add</command><parent>/body</parent><type>paragraph</type><props><text>Hello</text></props></item></operations>',
-    }) as Record<string, unknown>;
-    expect(args.file).toBe('report.docx');
-    expect(args.operations).toEqual([
-      { command: 'add', parent: '/body', type: 'paragraph', props: { text: 'Hello' } },
-    ]);
-    expect(args._intent).toBeUndefined();
-
-    const tool = {
-      name: 'mcp__session__officecli_batch',
-      description: 'test',
-      parameters: Type.Object({
-        file: Type.String(),
-        operations: Type.Array(Type.Object({
-          command: Type.String(),
-          parent: Type.Optional(Type.String()),
-          type: Type.Optional(Type.String()),
-          props: Type.Optional(Type.Record(Type.String(), Type.Unknown())),
-        }, { additionalProperties: false })),
-      }, { additionalProperties: false }),
-    };
-    expect(() => validateToolArguments(tool, {
-      type: 'toolCall',
-      id: 'call-2',
-      name: tool.name,
-      arguments: args,
-    })).not.toThrow();
-  });
-
   it('strips provider metadata after recovering strict Read and Bash inputs', () => {
     const read = createRecoveringArgumentPreparer('Read', undefined, false)({
       _intent: 'Read it</intent><path>docs/a.txt</path>',

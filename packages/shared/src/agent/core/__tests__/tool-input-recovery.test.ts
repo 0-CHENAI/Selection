@@ -22,24 +22,6 @@ describe('recoverKnownToolInputFromIntent', () => {
       .toEqual({ command: 'officecli create report.docx' });
   });
 
-  it('recovers a typed OfficeCLI batch while preserving strict value types', () => {
-    const recovered = recoverKnownToolInputFromIntent('mcp__session__officecli_batch', {
-      _intent: 'Build the document</intent><file>报告.docx</file><operations>' +
-        '<item><command>add</command><parent>/body</parent><type>paragraph</type>' +
-        '<props><text>正文</text><bold>true</bold><size>10pt</size></props></item>' +
-        '<item><command>set</command><path>/body/p[1]</path><props><color>112233</color></props></item>' +
-        '</operations>',
-    });
-    expect(recovered).toEqual({
-      _intent: 'Build the document',
-      file: '报告.docx',
-      operations: [
-        { command: 'add', parent: '/body', type: 'paragraph', props: { text: '正文', bold: true, size: '10pt' } },
-        { command: 'set', path: '/body/p[1]', props: { color: '112233' } },
-      ],
-    });
-  });
-
   it('does not recover unknown tools, unknown fields, malformed or oversized markup', () => {
     expect(recoverKnownToolInputFromIntent('unknown', {
       _intent: 'x</intent><command>bad</command>',

@@ -18,7 +18,38 @@
 const path = require('path');
 const fs = require('fs');
 
+function pruneForeignPlatformRuntimes(context, resourcesRoot) {
+  const archName = ({ 1: 'x64', 3: 'arm64' })[context.arch] || String(context.arch);
+  const target = `${context.electronPlatformName}-${archName}`;
+  const supported = new Set(['darwin-arm64', 'darwin-x64', 'win32-x64', 'linux-x64']);
+  if (!supported.has(target)) {
+    throw new Error(`Unsupported packaged OfficeCLI target: ${target}`);
+  }
+
+  const binDirectories = [
+    path.join(resourcesRoot, 'app', 'resources', 'bin'),
+    path.join(resourcesRoot, 'app', 'dist', 'resources', 'bin'),
+  ];
+  let foundTarget = false;
+  for (const binDirectory of binDirectories) {
+    if (!fs.existsSync(binDirectory)) continue;
+    for (const entry of fs.readdirSync(binDirectory, { withFileTypes: true })) {
+      if (!entry.isDirectory() || !/^(?:darwin|win32|linux)-(?:arm64|x64)$/.test(entry.name)) continue;
+      const entryPath = path.join(binDirectory, entry.name);
+      if (entry.name === target) foundTarget = true;
+      else fs.rmSync(entryPath, { recursive: true, force: true });
+    }
+  }
+  if (!foundTarget) throw new Error(`Packaged OfficeCLI runtime is missing for ${target}`);
+  console.log(`Packaged OfficeCLI runtime pruned to ${target}`);
+}
+
 module.exports = async function afterPack(context) {
+  const resourcesRoot = context.electronPlatformName === 'darwin'
+    ? path.join(context.appOutDir, 'Selection.app', 'Contents', 'Resources')
+    : path.join(context.appOutDir, 'resources');
+  pruneForeignPlatformRuntimes(context, resourcesRoot);
+
   // Only process macOS builds
   if (context.electronPlatformName !== 'darwin') {
     console.log('Skipping Liquid Glass icon (not macOS)');
@@ -26,7 +57,7 @@ module.exports = async function afterPack(context) {
   }
 
   const appPath = context.appOutDir;
-  const resourcesDir = path.join(appPath, 'Selection.app', 'Contents', 'Resources');
+  const resourcesDir = resourcesRoot;
   const precompiledAssets = path.join(context.packager.projectDir, 'resources', 'Assets.car');
 
   console.log(`afterPack: projectDir=${context.packager.projectDir}`);
@@ -50,3 +81,5 @@ module.exports = async function afterPack(context) {
     console.log('The app will use the fallback icon.icns on all macOS versions');
   }
 };
+
+module.exports.pruneForeignPlatformRuntimes = pruneForeignPlatformRuntimes;
