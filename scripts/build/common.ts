@@ -577,19 +577,111 @@ export function resignNativeBuildTools(rootDir: string): void {
   }
 }
 
-export async function installDependencies(config: BuildConfig): Promise<void> {
-  const { rootDir, platform } = config;
+const RIPGREP_PREBUILT_VERSION = 'v15.0.1';
 
-  if (platform === 'win32') {
-    // Use hoisted linker on Windows - Bun's default isolated mode creates
-    // node_modules/.bun/ with symlinks that esbuild can't traverse on Windows
-    // ("Access is denied" errors with junction points)
-    // Hoisted mode creates flat npm-style node_modules without .bun
-    console.log('Installing dependencies (Windows hoisted mode)...');
-    await $`cd ${rootDir} && bun install --linker=hoisted`.quiet();
-  } else {
-    console.log('Installing dependencies...');
-    await $`cd ${rootDir} && bun install`.quiet();
+function hostRipgrepAsset(): { asset: string; binary: string } {
+  if (process.platform === 'win32') {
+    return {
+      asset: `ripgrep-${RIPGREP_PREBUILT_VERSION}-x86_64-pc-windows-msvc.zip`,
+      binary: 'rg.exe',
+    };
+  }
+  if (process.platform === 'darwin') {
+    const triple = process.arch === 'arm64' ? 'aarch64-apple-darwin' : 'x86_64-apple-darwin';
+    return { asset: `ripgrep-${RIPGREP_PREBUILT_VERSION}-${triple}.tar.gz`, binary: 'rg' };
+  }
+  const triple = process.arch === 'arm64' ? 'aarch64-unknown-linux-musl' : 'x86_64-unknown-linux-musl';
+  return { asset: `ripgrep-${RIPGREP_PREBUILT_VERSION}-${triple}.tar.gz`, binary: 'rg' };
+}
+
+function findFileNamed(dir: string, fileName: string): string | null {
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const path = join(dir, entry.name);
+    if (entry.isFile() && entry.name === fileName) return path;
+    if (entry.isDirectory()) {
+      const nested = findFileNamed(path, fileName);
+      if (nested) return nested;
+    }
+  }
+  return null;
+}
+
+/** Seed @vscode/ripgrep's host binary from release assets when GitHub API postinstall 403s. */
+export async function seedHostRipgrepBinary(rootDir: string, electronDir: string): Promise<boolean> {
+  const { asset, binary } = hostRipgrepAsset();
+  const pkgDir = join(rootDir, 'node_modules', '@vscode', 'ripgrep');
+  const dest = join(pkgDir, 'bin', binary);
+  if (existsSync(dest)) return true;
+  if (!existsSync(pkgDir)) return false;
+
+  const tmp = join(electronDir, '.rg-host-download');
+  rmSync(tmp, { recursive: true, force: true });
+  mkdirSync(tmp, { recursive: true });
+  mkdirSync(dirname(dest), { recursive: true });
+
+  try {
+    console.log(`Seeding host ripgrep ${RIPGREP_PREBUILT_VERSION} (${asset})...`);
+    const archivePath = join(tmp, asset);
+    const cached = join(electronDir, '.cache', 'downloads', asset);
+    if (existsSync(cached)) {
+      copyFileSync(cached, archivePath);
+    } else {
+      await curlDownload(archivePath, [
+        `https://github.com/microsoft/ripgrep-prebuilt/releases/download/${RIPGREP_PREBUILT_VERSION}/${asset}`,
+        `https://npmmirror.com/mirrors/ripgrep-prebuilt/${RIPGREP_PREBUILT_VERSION}/${asset}`,
+        `https://gitclone.com/github.com/microsoft/ripgrep-prebuilt/releases/download/${RIPGREP_PREBUILT_VERSION}/${asset}`,
+      ]);
+      mkdirSync(dirname(cached), { recursive: true });
+      copyFileSync(archivePath, cached);
+    }
+    if (asset.endsWith('.zip')) {
+      await $`unzip -o ${archivePath} -d ${tmp}`.quiet();
+    } else {
+      await $`tar -xzf ${archivePath} -C ${tmp}`.quiet();
+    }
+    const found = findFileNamed(tmp, binary);
+    if (!found) throw new Error(`${binary} not found in ${asset}`);
+    copyFileSync(found, dest);
+    if (process.platform !== 'win32') chmodSync(dest, 0o755);
+    console.log(`  Seeded ${dest}`);
+    return true;
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+}
+
+export async function installDependencies(config: BuildConfig): Promise<void> {
+  const { rootDir, electronDir, platform } = config;
+
+  const install = async () => {
+    if (platform === 'win32') {
+      // Use hoisted linker on Windows - Bun's default isolated mode creates
+      // node_modules/.bun/ with symlinks that esbuild can't traverse on Windows
+      // ("Access is denied" errors with junction points)
+      // Hoisted mode creates flat npm-style node_modules without .bun
+      console.log('Installing dependencies (Windows hoisted mode)...');
+      await $`cd ${rootDir} && bun install --linker=hoisted`.quiet();
+    } else {
+      console.log('Installing dependencies...');
+      await $`cd ${rootDir} && bun install`.quiet();
+    }
+  };
+
+  try {
+    await install();
+  } catch (error) {
+    console.warn('bun install failed; seeding host ripgrep if present and retrying once...');
+    try {
+      await seedHostRipgrepBinary(rootDir, electronDir);
+    } catch (seedError) {
+      console.warn('Could not seed host ripgrep:', seedError);
+    }
+    await install();
+  }
+
+  const binaryName = process.platform === 'win32' ? 'rg.exe' : 'rg';
+  if (!existsSync(join(rootDir, 'node_modules', '@vscode', 'ripgrep', 'bin', binaryName))) {
+    await seedHostRipgrepBinary(rootDir, electronDir);
   }
 }
 
