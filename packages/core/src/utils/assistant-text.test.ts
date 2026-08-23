@@ -15,6 +15,10 @@ describe('preferRicherAssistantText (#81)', () => {
     )
   })
 
+  it('keeps the longest prefix extension when several fallbacks match', () => {
+    expect(preferRicherAssistantText('先', '先读', '先读 skill 文件')).toBe('先读 skill 文件')
+  })
+
   it('falls back when complete is a pipe-only stub', () => {
     expect(preferRicherAssistantText('|', '先读 skill 文件再继续检查文档。', '')).toBe(
       '先读 skill 文件再继续检查文档。',

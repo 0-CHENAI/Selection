@@ -266,6 +266,25 @@ describe('issue #81 — false-final `|` must not break the work chain', () => {
     expect(isVisibleCommentaryCard(turn.response, turn.isComplete)).toBe(false)
   })
 
+  it('does not flush a pipe-only final into a finished empty card', () => {
+    const turns = groupMessagesByTurn([
+      user('继续'),
+      finalAssistant('msg-pipe', '|', 10),
+    ], { isSessionProcessing: true })
+    expect(turns.filter(item => item.type === 'assistant')).toHaveLength(0)
+  })
+
+  it('does not let a pipe-only final complete a live work chain', () => {
+    const turn = assistantTurn(groupMessagesByTurn([
+      user('继续检查文档'),
+      tool('completed', 8, 'Read'),
+      finalAssistant('msg-pipe', '|', 10),
+    ], { isSessionProcessing: true }))
+    expect(turn.isComplete).toBe(false)
+    expect(turn.response).toBeUndefined()
+    expect(deriveTurnPhase(turn)).toBe('awaiting')
+  })
+
   it('does not promote Read line-number dumps as empty cards', () => {
     const turn = assistantTurn(groupMessagesByTurn([
       user('继续'),

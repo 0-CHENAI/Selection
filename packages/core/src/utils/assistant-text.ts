@@ -16,9 +16,9 @@ export function hasRenderableAssistantText(text: string | undefined | null): boo
  * Pick assistant body text from complete + streamed fallbacks.
  *
  * `candidates[0]` is the SDK complete payload and wins when it is real
- * content. A longer fallback that still starts with that payload is treated
- * as truncation recovery. Pipe-only / empty completes fall through to the
- * first renderable fallback.
+ * content. Longer fallbacks that still start with that payload are treated
+ * as truncation recovery (the longest prefix match wins). Pipe-only / empty
+ * completes fall through to the first renderable fallback.
  */
 export function preferRicherAssistantText(
   ...candidates: Array<string | undefined | null>
@@ -27,11 +27,13 @@ export function preferRicherAssistantText(
   if (present.length === 0) return ''
 
   const primary = present[0]
+  let bestPrefix = primary
   for (const candidate of present) {
-    if (candidate.length > primary.length && candidate.startsWith(primary)) {
-      return candidate
+    if (candidate.length > bestPrefix.length && candidate.startsWith(primary)) {
+      bestPrefix = candidate
     }
   }
+  if (bestPrefix !== primary) return bestPrefix
 
   if (hasRenderableAssistantText(primary)) return primary
   return present.find(hasRenderableAssistantText) ?? primary

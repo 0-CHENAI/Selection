@@ -2865,7 +2865,7 @@ export const TurnCard = React.memo(function TurnCard({
       // Tool activities must be errors (interrupted/failed)
       if (a.type === 'tool') return a.status === 'error'
       // Intermediate activities must have no meaningful content
-      if (a.type === 'intermediate') return !a.content?.trim()
+      if (a.type === 'intermediate') return !hasRenderableAssistantText(a.content)
       // Plan activities are meaningful work
       if (a.type === 'plan') return false
       // Other activity types - consider as no meaningful work

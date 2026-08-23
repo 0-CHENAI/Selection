@@ -18,6 +18,15 @@ import {
   isSuppressedTurn,
 } from '../helpers'
 
+function streamingContentForTurn(
+  streaming: StreamingState | null,
+  turnId?: string,
+): string | undefined {
+  if (!streaming) return undefined
+  if (turnId && streaming.turnId && streaming.turnId !== turnId) return undefined
+  return streaming.content
+}
+
 /**
  * Handle text_delta - accumulate streaming content
  *
@@ -118,7 +127,7 @@ export function handleTextComplete(
     // Prefer a renderable complete payload; recover truncation from the stream (#81).
     const resolvedContent = preferRicherAssistantText(
       event.text,
-      streaming?.content,
+      streamingContentForTurn(streaming, event.turnId),
       existingMsg?.content,
     )
     const nextTimestamp = timestampAfterVisibleUser(
@@ -146,7 +155,7 @@ export function handleTextComplete(
   const newMessage: Message = {
     id: event.messageId ?? generateMessageId(),
     role: 'assistant',
-    content: preferRicherAssistantText(event.text, streaming?.content),
+    content: preferRicherAssistantText(event.text, streamingContentForTurn(streaming, event.turnId)),
     timestamp: timestampAfterVisibleUser(session.messages, event.timestamp ?? Date.now()),
     isStreaming: false,
     isPending: false,
