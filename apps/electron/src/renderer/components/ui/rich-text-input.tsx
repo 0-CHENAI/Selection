@@ -13,6 +13,7 @@ import {
 import type { LoadedSkill, LoadedSource } from '../../../shared/types'
 import type { MentionItemType } from './mention-menu'
 import { resolveSkillTitle, resolveSourceTitle } from '@craft-agent/shared/display-titles'
+import { createImeFirstKeyGate } from './ime-input-guards'
 
 // ============================================================================
 // Types
@@ -526,6 +527,8 @@ export const RichTextInput = React.forwardRef<RichTextInputHandle, RichTextInput
     // Ref for synchronous event checks; state so placeholder re-renders during IME.
     const isComposingRef = React.useRef(false)
     const [isComposing, setIsComposing] = React.useState(false)
+    const imeGateRef = React.useRef(createImeFirstKeyGate())
+    const imeFlushRafRef = React.useRef<number | null>(null)
     const lastValueRef = React.useRef(safeValue)
     const cursorPositionRef = React.useRef(0)
     const lastMentionSignatureRef = React.useRef('')
@@ -592,9 +595,7 @@ export const RichTextInput = React.forwardRef<RichTextInputHandle, RichTextInput
       get element() { return divRef.current },
     }), [])
 
-    // Handle input events
-    const handleInput = React.useCallback(() => {
-      if (isComposingRef.current) return
+    const commitInput = React.useCallback(() => {
       if (!divRef.current) return
 
       const newText = getTextFromElement(divRef.current)
@@ -620,22 +621,59 @@ export const RichTextInput = React.forwardRef<RichTextInputHandle, RichTextInput
       onInput?.(newText, cursorPos)
     }, [onChange, onInput, skills, sources, skillSlugs, sourceSlugs, workspaceId])
 
+    const cancelImeFlush = React.useCallback(() => {
+      if (imeFlushRafRef.current !== null) {
+        cancelAnimationFrame(imeFlushRafRef.current)
+        imeFlushRafRef.current = null
+      }
+    }, [])
+
+    React.useEffect(() => () => cancelImeFlush(), [cancelImeFlush])
+
+    // Handle input events
+    const handleInput = React.useCallback((event?: React.FormEvent<HTMLDivElement>) => {
+      const nativeIsComposing = Boolean((event?.nativeEvent as InputEvent | undefined)?.isComposing)
+      if (isComposingRef.current || nativeIsComposing || imeGateRef.current.isComposing) return
+      if (imeGateRef.current.shouldSkipCommit(false)) {
+        cancelImeFlush()
+        imeFlushRafRef.current = requestAnimationFrame(() => {
+          imeFlushRafRef.current = null
+          if (!imeGateRef.current.consumeDeferredCommit()) return
+          commitInput()
+        })
+        return
+      }
+      commitInput()
+    }, [cancelImeFlush, commitInput])
+
     // Handle composition (IME). During composition the React `value` stays empty
     // (we deliberately skip onChange), but the browser shows provisional text in
     // the contenteditable — hide the placeholder overlay so it doesn't cover IME.
     const handleCompositionStart = React.useCallback(() => {
+      cancelImeFlush()
+      imeGateRef.current.onCompositionStart()
       isComposingRef.current = true
       setIsComposing(true)
-    }, [])
+    }, [cancelImeFlush])
 
     const handleCompositionEnd = React.useCallback(() => {
+      imeGateRef.current.onCompositionEnd()
       isComposingRef.current = false
       setIsComposing(false)
-      handleInput()
-    }, [handleInput])
+      commitInput()
+    }, [commitInput])
 
     const handleKeyDownInternal = React.useCallback((e: React.KeyboardEvent<HTMLDivElement>) => {
-      if (isEscapeDuringComposition(e, isComposingRef.current)) {
+      imeGateRef.current.onKeyDown({
+        key: e.key,
+        keyCode: e.keyCode,
+        which: e.which,
+        isComposing: e.nativeEvent.isComposing,
+        metaKey: e.metaKey,
+        ctrlKey: e.ctrlKey,
+        altKey: e.altKey,
+      })
+      if (isEscapeDuringComposition(e, isComposingRef.current || imeGateRef.current.isComposing)) {
         e.stopPropagation()
         return
       }
@@ -691,6 +729,7 @@ export const RichTextInput = React.forwardRef<RichTextInputHandle, RichTextInput
     React.useEffect(() => {
       if (!divRef.current) return
       if (isInternalUpdate.current) return
+      if (isComposingRef.current || imeGateRef.current.isComposing) return
       if (lastValueRef.current === safeValue) return
 
       // External value change - update content

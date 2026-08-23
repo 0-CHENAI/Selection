@@ -85,22 +85,21 @@ describe('issue #58 — text then tools keeps the body readable', () => {
     expect(deriveTurnPhase(turn)).toBe('streaming')
   })
 
-  it('reclassifying that body as intermediate keeps the same card text', () => {
+  it('reclassifying that body as intermediate moves it into the work chain (#83)', () => {
     const pending = pendingAssistant('msg-body', '先说明接下来要读哪个文件。', 10)
     const turn = assistantTurn(groupMessagesByTurn([
       user('帮我改文档'),
       completeIntermediate(pending),
     ]))
 
-    expect(turn.response?.text).toBe('先说明接下来要读哪个文件。')
-    expect(turn.response?.messageId).toBe('msg-body')
-    expect(turn.response?.isStreaming).toBe(false)
-    expect(isVisibleCommentaryCard(turn.response, turn.isComplete)).toBe(true)
+    expect(turn.response).toBeUndefined()
+    expect(isVisibleCommentaryCard(turn.response, turn.isComplete)).toBe(false)
     expect(turn.activities.map(activity => activity.id)).toEqual(['msg-body'])
+    expect(turn.activities[0]?.content).toBe('先说明接下来要读哪个文件。')
     expect(deriveTurnPhase(turn)).toBe('awaiting')
   })
 
-  it('starting a tool after that body does not drop the card', () => {
+  it('starting a tool after that body keeps the work-chain row, not a main card (#83)', () => {
     const pending = pendingAssistant('msg-body', '先说明接下来要读哪个文件。', 10)
     const turn = assistantTurn(groupMessagesByTurn([
       user('帮我改文档'),
@@ -108,15 +107,15 @@ describe('issue #58 — text then tools keeps the body readable', () => {
       tool('running', 20),
     ]))
 
-    expect(turn.response?.text).toBe('先说明接下来要读哪个文件。')
-    expect(turn.response?.messageId).toBe('msg-body')
-    expect(isVisibleCommentaryCard(turn.response, turn.isComplete)).toBe(true)
+    expect(turn.response).toBeUndefined()
+    expect(isVisibleCommentaryCard(turn.response, turn.isComplete, true)).toBe(false)
     expect(turn.activities.map(activity => activity.type)).toEqual(['intermediate', 'tool'])
+    expect(turn.activities.find(activity => activity.id === 'msg-body')?.content).toBe('先说明接下来要读哪个文件。')
     expect(deriveTurnPhase(turn)).toBe('tool_active')
     expect(turn.isComplete).toBe(false)
   })
 
-  it('fast tool completion still leaves the body reviewable as commentary', () => {
+  it('fast tool completion still leaves the body reviewable in the work chain', () => {
     const pending = pendingAssistant('msg-body', '接下来会检查目录结构。', 10)
     const turn = assistantTurn(groupMessagesByTurn([
       user('查看结构'),
@@ -124,8 +123,9 @@ describe('issue #58 — text then tools keeps the body readable', () => {
       tool('completed', 11),
     ]))
 
-    expect(turn.response?.text).toBe('接下来会检查目录结构。')
-    expect(isVisibleCommentaryCard(turn.response, turn.isComplete)).toBe(true)
+    expect(turn.response).toBeUndefined()
+    expect(turn.activities.find(activity => activity.id === 'msg-body')?.content).toBe('接下来会检查目录结构。')
+    expect(isVisibleCommentaryCard(turn.response, turn.isComplete, true)).toBe(false)
     expect(deriveTurnPhase(turn)).toBe('awaiting')
   })
 
@@ -178,7 +178,7 @@ describe('issue #58 — text then tools keeps the body readable', () => {
     expect(deriveTurnPhase(turn)).toBe('complete')
   })
 
-  it('latest commentary updates the card when the model speaks again before more tools', () => {
+  it('latest commentary stays as a work-chain row when the model speaks again before more tools', () => {
     const first = completeIntermediate(pendingAssistant('msg-one', '先看配置。', 10))
     const second = completeIntermediate(pendingAssistant('msg-two', '配置没有问题，接着跑测试。', 15))
     const turn = assistantTurn(groupMessagesByTurn([
@@ -189,10 +189,9 @@ describe('issue #58 — text then tools keeps the body readable', () => {
       tool('running', 18, 'Bash'),
     ]))
 
-    expect(turn.response?.text).toBe('配置没有问题，接着跑测试。')
-    expect(turn.response?.messageId).toBe('msg-two')
-    expect(isVisibleCommentaryCard(turn.response, turn.isComplete)).toBe(true)
-    expect(turn.activities.filter(activity => activity.type === 'intermediate')).toHaveLength(2)
+    expect(turn.response).toBeUndefined()
+    expect(turn.activities.filter(activity => activity.type === 'intermediate').map(activity => activity.content))
+      .toEqual(['先看配置。', '配置没有问题，接着跑测试。'])
     expect(deriveTurnPhase(turn)).toBe('tool_active')
   })
 })
@@ -239,20 +238,20 @@ describe('issue #81 — false-final `|` must not break the work chain', () => {
       tool('running', 20, 'Edit'),
     ]))
     expect(turn.activities.filter(activity => activity.type === 'tool')).toHaveLength(2)
-    expect(turn.response?.text).toBe('接着检查段落属性。')
-    expect(turn.response?.isCommentary).toBe(true)
+    expect(turn.response).toBeUndefined()
+    expect(turn.activities.find(activity => activity.id === 'msg-next')?.content).toBe('接着检查段落属性。')
     expect(turn.isComplete).toBe(false)
   })
 
-  it('keeps real commentary readable when a later tool arrives after a false final', () => {
+  it('keeps real commentary readable in the work chain when a later tool arrives after a false final', () => {
     const turn = assistantTurn(groupMessagesByTurn([
       user('继续检查文档'),
       finalAssistant('msg-body', '先读 skill 文件再继续。', 10),
       tool('running', 20),
     ]))
-    expect(turn.response?.text).toBe('先读 skill 文件再继续。')
-    expect(turn.response?.isCommentary).toBe(true)
-    expect(isVisibleCommentaryCard(turn.response, turn.isComplete)).toBe(true)
+    expect(turn.response).toBeUndefined()
+    expect(turn.activities.find(activity => activity.id === 'msg-body')?.content).toBe('先读 skill 文件再继续。')
+    expect(isVisibleCommentaryCard(turn.response, turn.isComplete, true)).toBe(false)
     expect(turn.isComplete).toBe(false)
   })
 
@@ -291,15 +290,17 @@ describe('issue #81 — false-final `|` must not break the work chain', () => {
       completeIntermediate(pendingAssistant('msg-read', '     1|---\n     2|name: officecli', 10)),
       tool('running', 20),
     ]))
-    expect(turn.response?.text).toContain('name: officecli')
-    expect(isVisibleCommentaryCard(turn.response, turn.isComplete)).toBe(true)
+    expect(turn.response).toBeUndefined()
+    expect(turn.activities.find(activity => activity.id === 'msg-read')?.content).toContain('name: officecli')
+    expect(isVisibleCommentaryCard(turn.response, turn.isComplete, true)).toBe(false)
   })
 })
 
 describe('isVisibleCommentaryCard', () => {
-  it('is only visible while the turn is still open', () => {
+  it('is only visible while the turn is still open and no tools have started', () => {
     const response = { text: '说明', isStreaming: false, isCommentary: true, messageId: 'm1' }
     expect(isVisibleCommentaryCard(response, false)).toBe(true)
+    expect(isVisibleCommentaryCard(response, false, true)).toBe(false)
     expect(isVisibleCommentaryCard(response, true)).toBe(false)
     expect(isVisibleCommentaryCard({ ...response, isCommentary: false }, false)).toBe(false)
     expect(isVisibleCommentaryCard(undefined, false)).toBe(false)
@@ -307,7 +308,7 @@ describe('isVisibleCommentaryCard', () => {
 })
 
 describe('work-chain row visibility', () => {
-  it('hides the mirrored commentary row until a tool needs the work chain', () => {
+  it('keeps the intermediate row visible in the work chain instead of mirroring a main card', () => {
     const pending = pendingAssistant('msg-body', '先说明接下来要读哪个文件。', 10)
     const beforeTools = assistantTurn(groupMessagesByTurn([
       user('帮我改文档'),
@@ -315,20 +316,21 @@ describe('work-chain row visibility', () => {
     ]))
     const commentaryRow = beforeTools.activities.find(activity => activity.id === 'msg-body')
     expect(commentaryRow).toBeDefined()
-    expect(isMirroredCommentaryActivity(commentaryRow!, beforeTools.response, beforeTools.isComplete)).toBe(true)
+    expect(isMirroredCommentaryActivity(commentaryRow!, beforeTools.response, beforeTools.isComplete)).toBe(false)
 
     const withTool = assistantTurn(groupMessagesByTurn([
       user('帮我改文档'),
       completeIntermediate(pending),
       tool('running', 20),
     ]))
-    const stillMirrored = withTool.activities.find(activity => activity.id === 'msg-body')
+    const stillVisible = withTool.activities.find(activity => activity.id === 'msg-body')
     const toolRow = withTool.activities.find(activity => activity.type === 'tool')
-    expect(isMirroredCommentaryActivity(stillMirrored!, withTool.response, withTool.isComplete)).toBe(true)
+    expect(isMirroredCommentaryActivity(stillVisible!, withTool.response, withTool.isComplete)).toBe(false)
     expect(isMirroredCommentaryActivity(toolRow!, withTool.response, withTool.isComplete)).toBe(false)
+    expect(stillVisible?.content).toBe('先说明接下来要读哪个文件。')
   })
 
-  it('empty intermediate text does not wipe a readable card', () => {
+  it('empty intermediate text does not wipe a readable work-chain row', () => {
     const pending = pendingAssistant('msg-body', '先说明接下来要读哪个文件。', 10)
     const empty = {
       ...completeIntermediate(pending),
@@ -342,8 +344,7 @@ describe('work-chain row visibility', () => {
       empty,
     ]))
 
-    expect(turn.response?.text).toBe('先说明接下来要读哪个文件。')
-    expect(turn.response?.messageId).toBe('msg-body')
-    expect(isVisibleCommentaryCard(turn.response, turn.isComplete)).toBe(true)
+    expect(turn.activities.find(activity => activity.id === 'msg-body')?.content).toBe('先说明接下来要读哪个文件。')
+    expect(turn.response).toBeUndefined()
   })
 })

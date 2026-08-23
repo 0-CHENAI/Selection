@@ -178,8 +178,40 @@ export function deriveTurnPhase(turn: AssistantTurn): TurnPhase {
 export function isVisibleCommentaryCard(
   response: AssistantTurn['response'],
   isComplete: boolean,
+  hasToolActivities = false,
 ): boolean {
-  return !!response?.isCommentary && !isComplete && hasRenderableAssistantText(response?.text)
+  // #83: once tools are running, intermediate text belongs in the work chain,
+  // not a main-slot card that looks like the final reply.
+  return !!response?.isCommentary
+    && !isComplete
+    && !hasToolActivities
+    && hasRenderableAssistantText(response?.text)
+}
+
+/**
+ * Move a completed body off the main card and into the work chain (#83).
+ * Streaming tokens stay on the card until they reclassify as intermediate.
+ */
+export function demoteResponseToWorkChain(turn: AssistantTurn): void {
+  const response = turn.response
+  if (!response) return
+  if (hasRenderableAssistantText(response.text)) {
+    const alreadyPresent = turn.activities.some(activity =>
+      activity.id === response.messageId
+      || (activity.type === 'intermediate' && activity.content === response.text),
+    )
+    if (!alreadyPresent) {
+      turn.activities.push({
+        id: response.messageId || `intermediate-${turn.timestamp}`,
+        type: 'intermediate',
+        status: 'completed',
+        content: response.text,
+        timestamp: turn.timestamp,
+        depth: 0,
+      })
+    }
+  }
+  turn.response = undefined
 }
 
 /** The live card already shows this intermediate body — don't also insert a row. */
@@ -442,11 +474,7 @@ export function groupMessagesByTurn(messages: Message[], options: GroupTurnsOpti
     turns.pop()
     currentTurn = lastTurn
     currentTurn.isComplete = false
-    if (currentTurn.response && !hasRenderableAssistantText(currentTurn.response.text)) {
-      currentTurn.response = undefined
-    } else if (currentTurn.response && !currentTurn.response.isStreaming) {
-      currentTurn.response = { ...currentTurn.response, isCommentary: true }
-    }
+    demoteResponseToWorkChain(currentTurn)
     return currentTurn
   }
 
@@ -511,9 +539,10 @@ export function groupMessagesByTurn(messages: Message[], options: GroupTurnsOpti
           .reverse()
           .find(a => a.type === 'intermediate' && a.content)
 
-        if (hasRenderableAssistantText(lastTextActivity?.content)) {
+        const promotedText = lastTextActivity?.content
+        if (lastTextActivity && hasRenderableAssistantText(promotedText)) {
           currentTurn.response = {
-            text: lastTextActivity.content,
+            text: promotedText,
             isStreaming: false,
             messageId: lastTextActivity.id,
           }
@@ -693,25 +722,14 @@ export function groupMessagesByTurn(messages: Message[], options: GroupTurnsOpti
         }
         currentTurn.activities.push(intermediateActivity)
 
-        // Keep the latest commentary on the response card until a real
-        // (non-intermediate) reply arrives. Pending tokens already live on
-        // turn.response; dropping that slot on text_complete is what made the
-        // body card vanish the moment the next tool started.
-        const currentResponse = currentTurn.response
-        const retainCommentaryCard = !currentResponse
-          || currentResponse.isCommentary
-          || currentResponse.messageId === message.id
-        // Empty complete must not wipe a body the user is already reading.
-        if (retainCommentaryCard && hasRenderableAssistantText(message.content)) {
-          const stillStreaming = !!(message.isPending || message.isStreaming)
-          currentTurn.response = {
-            text: message.content,
-            isStreaming: stillStreaming,
-            streamStartTime: stillStreaming ? message.timestamp : undefined,
-            messageId: message.id,
-            annotations: message.annotations,
-            isCommentary: true,
-          }
+        // #83: intermediate text stays in the work chain. If this body was
+        // occupying the main card (pending tokens or leftover commentary),
+        // demote it so tools do not leave a fake final reply on screen.
+        if (
+          currentTurn.response
+          && (currentTurn.response.isCommentary || currentTurn.response.messageId === message.id)
+        ) {
+          demoteResponseToWorkChain(currentTurn)
         }
 
         // Update turn streaming state based on this message

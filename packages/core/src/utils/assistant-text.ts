@@ -5,7 +5,7 @@
  * streamed body, and a pipe-only stub must not render as a finished card.
  */
 
-export function hasRenderableAssistantText(text: string | undefined | null): boolean {
+export function hasRenderableAssistantText(text: string | undefined | null): text is string {
   if (!text) return false
   const trimmed = text.trim()
   if (!trimmed) return false
@@ -24,9 +24,9 @@ export function preferRicherAssistantText(
   ...candidates: Array<string | undefined | null>
 ): string {
   const present = candidates.filter((value): value is string => typeof value === 'string' && value.length > 0)
-  if (present.length === 0) return ''
-
   const primary = present[0]
+  if (!primary) return ''
+
   let bestPrefix = primary
   for (const candidate of present) {
     if (candidate.length > bestPrefix.length && candidate.startsWith(primary)) {
