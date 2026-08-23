@@ -871,7 +871,11 @@ export function ApiKeyInput({
                       </div>
                       <CommandPrimitive.List className="max-h-[240px] overflow-y-auto p-1">
                         {piModels
-                          .filter(m => m.name.toLowerCase().includes(tierFilter.toLowerCase()))
+                          .filter((m) => {
+                            const query = tierFilter.toLowerCase()
+                            return m.name.toLowerCase().includes(query)
+                              || m.id.toLowerCase().includes(query)
+                          })
                           .map((model) => (
                             <CommandPrimitive.Item
                               key={model.id}

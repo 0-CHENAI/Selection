@@ -69,6 +69,7 @@ import {
   type CustomEndpointModelEntry,
   type CustomEndpointModelOverrides,
 } from './custom-endpoint-models.ts';
+import { registerMissingOpenRouterModels } from './openrouter-dynamic-models.ts';
 
 // Direct source imports from shared (bundled by bun build)
 import { handleLargeResponse, estimateTokens, tokenLimitFor } from '../../shared/src/utils/large-response.ts';
@@ -432,6 +433,55 @@ function setInterceptorApiHints(model: { api?: string; provider?: string; baseUr
   );
 }
 
+function resolveOpenRouterApiKey(): string | undefined {
+  if (initConfig?.piAuth?.credential?.type === 'api_key') {
+    const key = initConfig.piAuth.credential.key.trim();
+    if (key) return key;
+  }
+  const key = initConfig?.apiKey?.trim();
+  return key || undefined;
+}
+
+function registerConfiguredOpenRouterModels(registry: PiModelRegistry): void {
+  if (initConfig?.piAuth?.provider !== 'openrouter') return;
+  const apiKey = resolveOpenRouterApiKey();
+  if (!apiKey) return;
+
+  const entries: CustomEndpointModelEntry[] = [];
+  if (initConfig.model) {
+    entries.push(findCustomEndpointModelEntry(initConfig.model, initConfig.customModels));
+  }
+  for (const model of initConfig.customModels ?? []) {
+    entries.push(normalizeCustomEndpointModelEntry(model));
+  }
+  const added = registerMissingOpenRouterModels(registry, entries, apiKey);
+  if (added.length > 0) {
+    debugLog(`[openrouter] Registered ${added.length} live model(s) missing from the Pi snapshot: ${added.join(', ')}`);
+  }
+}
+
+function resolveSessionPiModel(
+  registry: PiModelRegistry,
+  modelId: string,
+): ReturnType<typeof resolvePiModel> {
+  let piModel = resolvePiModel(
+    registry,
+    modelId,
+    initConfig?.piAuth?.provider,
+    shouldPreferCustomEndpoint(),
+  );
+  if (piModel || initConfig?.piAuth?.provider !== 'openrouter') return piModel;
+
+  const apiKey = resolveOpenRouterApiKey();
+  if (!apiKey) return piModel;
+  registerMissingOpenRouterModels(
+    registry,
+    [findCustomEndpointModelEntry(modelId, initConfig.customModels)],
+    apiKey,
+  );
+  return resolvePiModel(registry, modelId, 'openrouter', false);
+}
+
 /**
  * Resolve the API key for custom endpoint auth.
  * Returns empty string for local endpoints (Ollama etc.) that don't need auth.
@@ -552,6 +602,8 @@ function createAuthenticatedRegistry(): {
     debugLog('Custom endpoint without protocol config — models may not resolve. Set customEndpoint.api for proper routing.');
   }
 
+  registerConfiguredOpenRouterModels(modelRegistry);
+
   return { authStorage, modelRegistry };
 }
 
@@ -650,7 +702,7 @@ async function ensureSession(): Promise<AgentSession> {
   // Set model if specified
   if (initConfig.model) {
     try {
-      const piModel = resolvePiModel(modelRegistry, initConfig.model, initConfig.piAuth?.provider, shouldPreferCustomEndpoint());
+      const piModel = resolveSessionPiModel(modelRegistry, initConfig.model);
       if (piModel) {
         // Verify resolved model's provider is compatible with the authenticated provider.
         // Without this, a model that resolves to a different provider (e.g. azure-openai-responses
@@ -949,7 +1001,7 @@ async function queryLlm(request: LLMQueryRequest): Promise<LLMQueryResult> {
   if (initConfig.piAuth) {
     const authProvider = initConfig.piAuth.provider;
     const bareModel = model.startsWith('pi/') ? model.slice(3) : model;
-    const resolved = resolvePiModel(modelRegistry, bareModel, authProvider, shouldPreferCustomEndpoint());
+    const resolved = resolveSessionPiModel(modelRegistry, bareModel);
     const resolvedProvider = (resolved as any)?.provider;
     const isCompatible = resolvedProvider === authProvider || resolvedProvider === 'custom-endpoint';
     if (!resolved || !isCompatible || isDeniedMiniModelId(model, piAuthProvider)) {
@@ -972,7 +1024,7 @@ async function queryLlm(request: LLMQueryRequest): Promise<LLMQueryResult> {
     // fall back to its own internal default (which may require a provider
     // the user hasn't authenticated with, surfacing as a misleading
     // "No API key found for <provider>" error).
-    const piModel = resolvePiModel(modelRegistry, modelId, initConfig!.piAuth?.provider, shouldPreferCustomEndpoint());
+    const piModel = resolveSessionPiModel(modelRegistry, modelId);
     if (!piModel) {
       throw new Error(
         `Could not resolve mini model "${modelId}" for provider "${initConfig!.piAuth?.provider ?? '(unknown)'}"`,
@@ -1586,7 +1638,7 @@ async function handleUpdateRuntimeConfig(msg: RuntimeConfigUpdateMessage): Promi
     }
 
     if (piSession && piModelRegistry) {
-      let piModel = resolvePiModel(piModelRegistry, msg.model, initConfig.piAuth?.provider, shouldPreferCustomEndpoint());
+      let piModel = resolveSessionPiModel(piModelRegistry, msg.model);
       if (!piModel && initConfig.baseUrl?.trim() && initConfig.customEndpoint) {
         const entry = findCustomEndpointModelEntry(msg.model, initConfig.customModels);
         registerCustomEndpointModels(piModelRegistry, initConfig.customEndpoint.api, initConfig.baseUrl.trim(), [entry]);
@@ -1619,7 +1671,7 @@ async function handleSetModel(msg: Extract<InboundMessage, { type: 'set_model' }
     debugLog(`[set_model] No active session or model registry, ignoring`);
     return;
   }
-  let piModel = resolvePiModel(piModelRegistry, msg.model, initConfig?.piAuth?.provider, shouldPreferCustomEndpoint());
+  let piModel = resolveSessionPiModel(piModelRegistry, msg.model);
 
   // For custom endpoints, dynamically register unknown models so mid-session switching works.
   // Uses registerCustomEndpointModels which accumulates into the existing model set

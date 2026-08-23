@@ -71,6 +71,80 @@ describe('piDriver.buildRuntime custom endpoint models', () => {
   });
 });
 
+describe('piDriver.fetchModels OpenRouter', () => {
+  it('uses the live OpenRouter catalog when the request succeeds', async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async (input: Parameters<typeof fetch>[0]) => {
+      expect(String(input)).toBe('https://openrouter.ai/api/v1/models');
+      return new Response(JSON.stringify({
+        data: [{
+          id: 'openai/gpt-brand-new',
+          name: 'OpenAI: GPT Brand New',
+          context_length: 200000,
+          pricing: { prompt: '0.000001', completion: '0.000002' },
+          architecture: { output_modalities: ['text'] },
+        }],
+      }), { status: 200, headers: { 'content-type': 'application/json' } });
+    }) as unknown as typeof fetch;
+
+    try {
+      const result = await piDriver.fetchModels!({
+        connection: {
+          slug: 'openrouter',
+          name: 'OpenRouter',
+          providerType: 'pi',
+          authType: 'api_key',
+          piAuthProvider: 'openrouter',
+          createdAt: Date.now(),
+        } as any,
+        credentials: { apiKey: 'sk-or-test' },
+        timeoutMs: 5_000,
+        hostRuntime: {} as never,
+        resolvedPaths: {} as never,
+      });
+
+      expect(result.models).toEqual([
+        expect.objectContaining({
+          id: 'pi/openai/gpt-brand-new',
+          name: 'OpenAI: GPT Brand New',
+          provider: 'pi',
+          contextWindow: 200000,
+        }),
+      ]);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('falls back to the Pi SDK snapshot when the live catalog fails', async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async () => {
+      throw new Error('offline');
+    }) as unknown as typeof fetch;
+
+    try {
+      const result = await piDriver.fetchModels!({
+        connection: {
+          slug: 'openrouter',
+          name: 'OpenRouter',
+          providerType: 'pi',
+          authType: 'api_key',
+          piAuthProvider: 'openrouter',
+          createdAt: Date.now(),
+        } as any,
+        credentials: { apiKey: 'sk-or-test' },
+        timeoutMs: 5_000,
+        hostRuntime: {} as never,
+        resolvedPaths: {} as never,
+      });
+
+      expect(result.models.some((model) => model.id === 'pi/openrouter/auto')).toBe(true);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+});
+
 describe('piDriver.testConnection custom endpoints', () => {
   it('probes GET /v1/models instead of posting /v1/messages for ORDER-style gateways', async () => {
     const originalFetch = globalThis.fetch;

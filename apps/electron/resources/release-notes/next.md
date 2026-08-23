@@ -6,6 +6,8 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 
 ## Improvements
 
+- **OpenRouter models stay current** — API setup now loads the live OpenRouter catalog instead of the snapshot bundled with the app, so newly published models can be selected.
+
 - **Faster Office document generation** — Word, Excel, and PowerPoint tasks now load a compact Selection execution policy after the official format guidance, batch repeated content operations, avoid redundant skill and resident-process setup, and keep unrequested generator attribution out of delivered files.
 - **Release-gated typed Office tools** — Reviewed atomic batch, capability-aware QA, and trusted finalization tools are available behind the OfficeCLI typed-tools feature flag while the canonical MiniMax release benchmark is being stabilized.
 - **Clearer task usage details** — Session Info now separates the most recent model call from the full user-task total, including model calls, input/output/cache tokens, cost, and wall-clock time while preserving legacy session statistics.
