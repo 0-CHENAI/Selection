@@ -191,7 +191,7 @@ describe('first-turn title scheduling (#46)', () => {
     managed.agentReady = Promise.resolve()
     managed.agent = {
       generateTitle: async () => 'Oak Report',
-    } as Managed['agent']
+    } as unknown as Managed['agent']
 
     await (sm as unknown as {
       generateTitle: (managed: Managed, pending: PendingFirstTurnAiTitle) => Promise<void>
@@ -209,7 +209,7 @@ describe('first-turn title scheduling (#46)', () => {
     managed.agentReady = Promise.resolve()
     managed.agent = {
       generateTitle: async () => 'Oak Report',
-    } as Managed['agent']
+    } as unknown as Managed['agent']
 
     await (sm as unknown as {
       generateTitle: (managed: Managed, pending: PendingFirstTurnAiTitle) => Promise<void>
@@ -228,7 +228,7 @@ describe('first-turn title scheduling (#46)', () => {
     const titleResult = Promise.withResolvers<string>()
     managed.agent = {
       generateTitle: async () => titleResult.promise,
-    } as Managed['agent']
+    } as unknown as Managed['agent']
 
     const generating = (sm as unknown as {
       generateTitle: (managed: Managed, pending: PendingFirstTurnAiTitle) => Promise<void>
@@ -250,7 +250,7 @@ describe('first-turn title scheduling (#46)', () => {
     managed.agentReady = Promise.resolve()
     managed.agent = {
       generateTitle: async () => 'Oak Report',
-    } as Managed['agent']
+    } as unknown as Managed['agent']
     ;(sm as unknown as { sessions: Map<string, Managed> }).sessions.delete(sessionId)
 
     await (sm as unknown as {
@@ -268,7 +268,7 @@ describe('first-turn title scheduling (#46)', () => {
     managed.agentReady = Promise.resolve()
     managed.agent = {
       generateTitle: async () => 'Oak Report',
-    } as Managed['agent']
+    } as unknown as Managed['agent']
 
     await (sm as unknown as {
       generateTitle: (managed: Managed, pending: PendingFirstTurnAiTitle) => Promise<void>
@@ -287,7 +287,7 @@ describe('first-turn title scheduling (#46)', () => {
       generateTitle: async () => {
         throw new Error('429 rate limited')
       },
-    } as Managed['agent']
+    } as unknown as Managed['agent']
 
     await (sm as unknown as {
       generateTitle: (managed: Managed, pending: PendingFirstTurnAiTitle) => Promise<void>

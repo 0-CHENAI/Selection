@@ -245,13 +245,14 @@ describe('appendMissingPickerModel', () => {
 
 describe('resolveVisiblePickerModels', () => {
   const catalog = [
-    { id: 'pi/openrouter/gpt-5.5-pro', name: 'OpenAI: GPT-5.5 Pro', contextWindow: 1, reasoning: false, description: '', provider: 'pi' as const },
-    { id: 'pi/openrouter/o1-pro', name: 'OpenAI: o1-pro', contextWindow: 1, reasoning: true, description: '', provider: 'pi' as const },
-    { id: 'pi/openrouter/cheap', name: 'Cheap', contextWindow: 1, reasoning: false, description: '', provider: 'pi' as const },
-    { id: 'pi/openrouter/stealth', name: 'Stealth', contextWindow: 1, reasoning: false, description: '', provider: 'pi' as const },
+    { id: 'pi/openrouter/gpt-5.5-pro', name: 'OpenAI: GPT-5.5 Pro', shortName: 'GPT-5.5 Pro', contextWindow: 1, reasoning: false, description: '', provider: 'pi' as const },
+    { id: 'pi/openrouter/o1-pro', name: 'OpenAI: o1-pro', shortName: 'o1-pro', contextWindow: 1, reasoning: true, description: '', provider: 'pi' as const },
+    { id: 'pi/openrouter/cheap', name: 'Cheap', shortName: 'Cheap', contextWindow: 1, reasoning: false, description: '', provider: 'pi' as const },
+    { id: 'pi/openrouter/stealth', name: 'Stealth', shortName: 'Stealth', contextWindow: 1, reasoning: false, description: '', provider: 'pi' as const },
     ...Array.from({ length: 20 }, (_, i) => ({
       id: `pi/openrouter/extra-${i}`,
       name: `Extra ${i}`,
+      shortName: `Extra ${i}`,
       contextWindow: 1,
       reasoning: false,
       description: '',
@@ -306,7 +307,7 @@ describe('connectionPinnedModelIds', () => {
 
 describe('pickerModelMatchesQuery', () => {
   test('matches name and id', () => {
-    expect(pickerModelMatchesQuery({ id: 'pi/openrouter/stealth', name: 'Stealth', description: '', provider: 'pi' }, 'steal')).toBe(true)
+    expect(pickerModelMatchesQuery({ id: 'pi/openrouter/stealth', name: 'Stealth', shortName: 'Stealth', contextWindow: 1, description: '', provider: 'pi' }, 'steal')).toBe(true)
     expect(pickerModelMatchesQuery('pi/openrouter/stealth', 'openrouter/stealth')).toBe(true)
     expect(pickerModelMatchesQuery('pi/openrouter/stealth', 'jamba')).toBe(false)
   })

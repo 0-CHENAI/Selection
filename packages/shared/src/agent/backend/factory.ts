@@ -642,7 +642,7 @@ export function resolveModelForProvider(
     && connection.piAuthProvider !== 'openrouter'
     && connection.modelSelectionMode !== 'userDefined3Tier';
 
-  if (treatsModelsAsAllowlist) {
+  if (treatsModelsAsAllowlist && connection.models) {
     const connectionModelIds = connection.models.map(m => typeof m === 'string' ? m : m.id);
     if (managedModel && !connectionModelIds.includes(managedModel)) {
       managedModel = undefined;

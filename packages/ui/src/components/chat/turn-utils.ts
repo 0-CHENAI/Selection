@@ -539,9 +539,10 @@ export function groupMessagesByTurn(messages: Message[], options: GroupTurnsOpti
           .reverse()
           .find(a => a.type === 'intermediate' && a.content)
 
-        if (hasRenderableAssistantText(lastTextActivity?.content)) {
+        const promotedText = lastTextActivity?.content
+        if (lastTextActivity && hasRenderableAssistantText(promotedText)) {
           currentTurn.response = {
-            text: lastTextActivity.content,
+            text: promotedText,
             isStreaming: false,
             messageId: lastTextActivity.id,
           }

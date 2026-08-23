@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test'
-import { hasRenderableAssistantText, preferRicherAssistantText } from './assistant-text.ts'
+import { hasRenderableAssistantText, preferRicherAssistantText } from '../assistant-text.ts'
 
 describe('preferRicherAssistantText (#81)', () => {
   it('keeps a renderable complete over a longer unrelated stream', () => {

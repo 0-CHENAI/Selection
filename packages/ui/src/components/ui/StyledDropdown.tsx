@@ -101,6 +101,7 @@ interface StyledDropdownMenuContentProps
   minWidth?: string
   /** Force light mode instead of dark */
   light?: boolean
+  onOpenAutoFocus?: (event: Event) => void
 }
 
 export const StyledDropdownMenuContent = React.forwardRef<
