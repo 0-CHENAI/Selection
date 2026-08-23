@@ -332,6 +332,27 @@ describe('PiEventAdapter', () => {
       });
     });
 
+    it('should treat toolCall content as intermediate even when stopReason is stop', () => {
+      collect(adapter.adaptEvent({ type: 'turn_start' } as any));
+      const events = collect(adapter.adaptEvent({
+        type: 'message_end',
+        message: {
+          role: 'assistant',
+          stopReason: 'stop',
+          content: [
+            { type: 'text', text: '先读 skill 文件。' },
+            { type: 'toolCall', id: 'tool1', name: 'read', arguments: { path: '/tmp/skill.md' } },
+          ],
+        },
+      } as any));
+
+      expect(events[0]).toMatchObject({
+        type: 'text_complete',
+        text: '先读 skill 文件。',
+        isIntermediate: true,
+      });
+    });
+
     it('should allow multiple intermediate messages in a turn', () => {
       collect(adapter.adaptEvent({ type: 'turn_start' } as any));
 

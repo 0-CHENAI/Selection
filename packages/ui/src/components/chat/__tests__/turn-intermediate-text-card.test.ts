@@ -197,6 +197,86 @@ describe('issue #58 — text then tools keeps the body readable', () => {
   })
 })
 
+describe('issue #81 — false-final `|` must not break the work chain', () => {
+  it('reopens the flushed turn when a tool arrives after a pipe-only final', () => {
+    const turns = groupMessagesByTurn([
+      user('继续检查文档'),
+      finalAssistant('msg-pipe', '|', 10),
+      tool('running', 20),
+      tool('completed', 21, 'Read'),
+    ])
+    const assistantTurns = turns.filter(item => item.type === 'assistant')
+    expect(assistantTurns).toHaveLength(1)
+    const turn = assistantTurns[0] as AssistantTurn
+    expect(turn.response).toBeUndefined()
+    expect(turn.activities.filter(activity => activity.type === 'tool')).toHaveLength(2)
+    expect(turn.isComplete).toBe(false)
+  })
+
+  it('keeps one work chain when tools continue after a false final', () => {
+    const turns = groupMessagesByTurn([
+      user('继续检查文档'),
+      tool('completed', 8, 'Read'),
+      tool('completed', 9, 'Read'),
+      finalAssistant('msg-pipe', '|', 10),
+      tool('running', 20, 'Edit'),
+      tool('completed', 21, 'Edit'),
+    ])
+    const assistantTurns = turns.filter(item => item.type === 'assistant')
+    expect(assistantTurns).toHaveLength(1)
+    const turn = assistantTurns[0] as AssistantTurn
+    expect(turn.activities.filter(activity => activity.type === 'tool')).toHaveLength(4)
+    expect(turn.response).toBeUndefined()
+    expect(turn.isComplete).toBe(false)
+  })
+
+  it('keeps commentary and later tools on the same turn after a false final', () => {
+    const turn = assistantTurn(groupMessagesByTurn([
+      user('继续检查文档'),
+      tool('completed', 8, 'Read'),
+      finalAssistant('msg-pipe', '|', 10),
+      completeIntermediate(pendingAssistant('msg-next', '接着检查段落属性。', 15)),
+      tool('running', 20, 'Edit'),
+    ]))
+    expect(turn.activities.filter(activity => activity.type === 'tool')).toHaveLength(2)
+    expect(turn.response?.text).toBe('接着检查段落属性。')
+    expect(turn.response?.isCommentary).toBe(true)
+    expect(turn.isComplete).toBe(false)
+  })
+
+  it('keeps real commentary readable when a later tool arrives after a false final', () => {
+    const turn = assistantTurn(groupMessagesByTurn([
+      user('继续检查文档'),
+      finalAssistant('msg-body', '先读 skill 文件再继续。', 10),
+      tool('running', 20),
+    ]))
+    expect(turn.response?.text).toBe('先读 skill 文件再继续。')
+    expect(turn.response?.isCommentary).toBe(true)
+    expect(isVisibleCommentaryCard(turn.response, turn.isComplete)).toBe(true)
+    expect(turn.isComplete).toBe(false)
+  })
+
+  it('does not treat pipe-only commentary as a visible card', () => {
+    const turn = assistantTurn(groupMessagesByTurn([
+      user('继续'),
+      completeIntermediate(pendingAssistant('msg-pipe', '|', 10)),
+      tool('running', 20),
+    ]))
+    expect(turn.response).toBeUndefined()
+    expect(isVisibleCommentaryCard(turn.response, turn.isComplete)).toBe(false)
+  })
+
+  it('does not promote Read line-number dumps as empty cards', () => {
+    const turn = assistantTurn(groupMessagesByTurn([
+      user('继续'),
+      completeIntermediate(pendingAssistant('msg-read', '     1|---\n     2|name: officecli', 10)),
+      tool('running', 20),
+    ]))
+    expect(turn.response?.text).toContain('name: officecli')
+    expect(isVisibleCommentaryCard(turn.response, turn.isComplete)).toBe(true)
+  })
+})
+
 describe('isVisibleCommentaryCard', () => {
   it('is only visible while the turn is still open', () => {
     const response = { text: '说明', isStreaming: false, isCommentary: true, messageId: 'm1' }

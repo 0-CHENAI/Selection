@@ -6,8 +6,8 @@
  */
 
 import type { Message, StoredMessage, MessageRole } from '@craft-agent/core'
+import { storedToMessage, hasRenderableAssistantText } from '@craft-agent/core'
 import { isParentTaskTool } from '@craft-agent/shared/utils/toolNames'
-import { storedToMessage } from '@craft-agent/core'
 
 export { storedToMessage }
 import type { ActivityItem, ActivityStatus, ActivityType, ResponseContent, TodoItem } from './TurnCard'
@@ -179,7 +179,7 @@ export function isVisibleCommentaryCard(
   response: AssistantTurn['response'],
   isComplete: boolean,
 ): boolean {
-  return !!response?.isCommentary && !isComplete
+  return !!response?.isCommentary && !isComplete && hasRenderableAssistantText(response?.text)
 }
 
 /** The live card already shows this intermediate body — don't also insert a row. */
@@ -430,6 +430,26 @@ export function groupMessagesByTurn(messages: Message[], options: GroupTurnsOpti
   const turns: Turn[] = []
   let currentTurn: AssistantTurn | null = null
 
+  /**
+   * A misclassified "final" body flushes the work chain. If more assistant
+   * work arrives without a new user message, reopen that turn so step
+   * numbering does not restart (#81).
+   */
+  const adoptFlushedAssistantTurn = (): boolean => {
+    if (currentTurn) return true
+    const lastTurn = turns[turns.length - 1]
+    if (lastTurn?.type !== 'assistant') return false
+    turns.pop()
+    currentTurn = lastTurn
+    currentTurn.isComplete = false
+    if (currentTurn.response && !hasRenderableAssistantText(currentTurn.response.text)) {
+      currentTurn.response = undefined
+    } else if (currentTurn.response && !currentTurn.response.isStreaming) {
+      currentTurn.response = { ...currentTurn.response, isCommentary: true }
+    }
+    return true
+  }
+
   const flushCurrentTurn = (interrupted = false) => {
     if (currentTurn) {
       // Sort activities by timestamp to ensure correct chronological order
@@ -472,7 +492,7 @@ export function groupMessagesByTurn(messages: Message[], options: GroupTurnsOpti
           .reverse()
           .find(a => a.type === 'intermediate' && a.content)
 
-        if (lastTextActivity?.content) {
+        if (hasRenderableAssistantText(lastTextActivity?.content)) {
           currentTurn.response = {
             text: lastTextActivity.content,
             isStreaming: false,
@@ -617,18 +637,20 @@ export function groupMessagesByTurn(messages: Message[], options: GroupTurnsOpti
       // Tool is complete if toolStatus is 'completed' OR toolResult exists (but NOT if backgrounded)
       const isToolComplete = (message.toolStatus === 'completed' || message.toolResult !== undefined) && message.toolStatus !== 'backgrounded'
       if (!currentTurn) {
-        // Start a new turn
-        currentTurn = {
-          type: 'assistant',
-          turnId: message.turnId || message.id,
-          activities: [],
-          response: undefined,
-          intent: message.toolIntent,
-          isStreaming: !isToolComplete,
-          isComplete: false,
-          timestamp: message.timestamp,
+        if (!adoptFlushedAssistantTurn()) {
+          currentTurn = {
+            type: 'assistant',
+            turnId: message.turnId || message.id,
+            activities: [],
+            response: undefined,
+            intent: message.toolIntent,
+            isStreaming: !isToolComplete,
+            isComplete: false,
+            timestamp: message.timestamp,
+          }
         }
       }
+      if (!currentTurn) continue
       // Always add to current turn (ignoring turnId differences)
       // Pass existing activities for incremental depth calculation
       currentTurn.activities.push(messageToActivity(message, currentTurn.activities))
@@ -642,7 +664,7 @@ export function groupMessagesByTurn(messages: Message[], options: GroupTurnsOpti
       // the streaming reply — after a Read/tool step they must not become a
       // gray activity bar that restates the same markdown.
       if (message.isIntermediate) {
-        if (!currentTurn) {
+        if (!currentTurn && !adoptFlushedAssistantTurn()) {
           // Start a new turn for this intermediate message
           currentTurn = {
             type: 'assistant',
@@ -655,6 +677,7 @@ export function groupMessagesByTurn(messages: Message[], options: GroupTurnsOpti
             timestamp: message.timestamp,
           }
         }
+        if (!currentTurn) continue
         // Always add to current turn as activity (ignoring turnId differences)
         // Pending messages show as 'running' until we know they're complete
         // Include parentId for intermediate messages to support nesting within subagents
@@ -684,7 +707,7 @@ export function groupMessagesByTurn(messages: Message[], options: GroupTurnsOpti
           || currentResponse.isCommentary
           || currentResponse.messageId === message.id
         // Empty complete must not wipe a body the user is already reading.
-        if (retainCommentaryCard && message.content.trim()) {
+        if (retainCommentaryCard && hasRenderableAssistantText(message.content)) {
           const stillStreaming = !!(message.isPending || message.isStreaming)
           currentTurn.response = {
             text: message.content,
@@ -705,7 +728,7 @@ export function groupMessagesByTurn(messages: Message[], options: GroupTurnsOpti
       }
 
       // Non-intermediate assistant message = final response
-      if (!currentTurn) {
+      if (!currentTurn && !adoptFlushedAssistantTurn()) {
         // This is a response-only turn (no tools)
         currentTurn = {
           type: 'assistant',
@@ -718,6 +741,7 @@ export function groupMessagesByTurn(messages: Message[], options: GroupTurnsOpti
           timestamp: message.timestamp,
         }
       }
+      if (!currentTurn) continue
 
       // Set as response on current turn (ignoring turnId differences)
       currentTurn.response = {

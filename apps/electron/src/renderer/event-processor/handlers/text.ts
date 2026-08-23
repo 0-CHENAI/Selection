@@ -7,6 +7,7 @@
 
 import type { SessionState, StreamingState, TextDeltaEvent, TextCompleteEvent } from '../types'
 import type { Message } from '../../../shared/types'
+import { preferRicherAssistantText } from '@craft-agent/core'
 import {
   findStreamingMessage,
   findAssistantMessage,
@@ -80,7 +81,8 @@ export function handleTextDelta(
  *
  * Sets isStreaming: false, isPending: false.
  * If message not found, CREATES it (fixes race condition bug).
- * Uses complete text from SDK (event.text), not accumulated content.
+ * Prefers the SDK complete text when it is real content; falls back to the
+ * streamed body if complete is empty or a truncated stub such as `|`.
  */
 export function handleTextComplete(
   state: SessionState,
@@ -113,9 +115,12 @@ export function handleTextComplete(
     // Only update lastMessageAt for final (non-intermediate) messages
     const shouldUpdateTimestamp = !event.isIntermediate
     const existingMsg = session.messages[msgIndex]
-    // Fallback chain: SDK event text → accumulated streaming content → existing message content.
-    // Guards against SDK quirks or race conditions where event.text arrives empty.
-    const resolvedContent = event.text || streaming?.content || existingMsg?.content || ''
+    // Prefer a renderable complete payload; recover truncation from the stream (#81).
+    const resolvedContent = preferRicherAssistantText(
+      event.text,
+      streaming?.content,
+      existingMsg?.content,
+    )
     const nextTimestamp = timestampAfterVisibleUser(
       session.messages,
       event.timestamp ?? existingMsg.timestamp,
@@ -141,7 +146,7 @@ export function handleTextComplete(
   const newMessage: Message = {
     id: event.messageId ?? generateMessageId(),
     role: 'assistant',
-    content: event.text || streaming?.content || '',
+    content: preferRicherAssistantText(event.text, streaming?.content),
     timestamp: timestampAfterVisibleUser(session.messages, event.timestamp ?? Date.now()),
     isStreaming: false,
     isPending: false,

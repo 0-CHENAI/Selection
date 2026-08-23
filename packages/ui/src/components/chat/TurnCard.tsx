@@ -3,7 +3,7 @@ import { useMemo, useEffect, useRef, useCallback, useState } from 'react'
 import i18n from 'i18next'
 import { useTranslation } from 'react-i18next'
 import type { ToolDisplayMeta, AnnotationV1, AgentToolResultContent } from '@craft-agent/core'
-import { normalizePath, pathStartsWith, stripPathPrefix } from '@craft-agent/core/utils'
+import { normalizePath, pathStartsWith, stripPathPrefix, hasRenderableAssistantText } from '@craft-agent/core/utils'
 import { isParentTaskTool } from '@craft-agent/shared/utils/toolNames'
 import { motion, AnimatePresence, useReducedMotion } from 'motion/react'
 import {
@@ -2844,8 +2844,12 @@ export const TurnCard = React.memo(function TurnCard({
     [visibleActivities, hasTaskSubagents]
   )
 
+  const hasVisibleResponse = !!response && (
+    !!response.isStreaming || hasRenderableAssistantText(response.text)
+  )
+
   // Don't render if nothing to show and turn is complete
-  if (activities.length === 0 && !response && isComplete) {
+  if (activities.length === 0 && !hasVisibleResponse && isComplete) {
     return null
   }
 
@@ -2867,7 +2871,7 @@ export const TurnCard = React.memo(function TurnCard({
       // Other activity types - consider as no meaningful work
       return true
     })
-    && !response
+    && !hasVisibleResponse
   if (hasNoMeaningfulWork) {
     return null
   }
@@ -3097,7 +3101,7 @@ export const TurnCard = React.memo(function TurnCard({
       {/* Animated version for playground demos */}
       {animateResponse && (
         <AnimatePresence>
-          {response && !isBuffering && (
+          {response && hasVisibleResponse && !isBuffering && (
             <motion.div
               initial={reduceMotion ? false : { opacity: 0, y: 8 }}
               animate={{ opacity: 1, y: 0 }}
@@ -3136,7 +3140,7 @@ export const TurnCard = React.memo(function TurnCard({
         </AnimatePresence>
       )}
       {/* Non-animated version for regular app use */}
-      {!animateResponse && response && !isBuffering && (
+      {!animateResponse && response && hasVisibleResponse && !isBuffering && (
         <div className={cn("select-text", hasActivities && "mt-2")}>
           <ResponseCard
             text={response.text}
