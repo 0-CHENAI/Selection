@@ -6,6 +6,11 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 
 ## Improvements
 
+- **Process notes no longer look like the final reply** — intermediate commentary stays in the work chain with the weaker step style instead of occupying the main response card. When tools start, that text remains reviewable as a step rather than a finished Copy / Markdown card. The real final reply still uses the existing response card. (#83)
+
+- **MCP JSON and Skill file import** — Sources can import Claude Desktop / Cursor `mcpServers` JSON (including a single server or an array), and Skills can import a Zip or `SKILL.md`. Secrets are stripped, missing-auth MCP stays disabled, and Zip paths cannot escape the skills directory. (#82)
+
+
 - **OpenRouter models stay current** — Settings, chat, and API setup now load the live OpenRouter catalog instead of the snapshot bundled with the app, so newly published models can be selected. Large catalogs stay collapsed to the current and configured models until you search. Retired snapshot IDs with no OpenRouter providers are hidden, and that 404 is explained as an unavailable model instead of a raw JSON dump. Choosing a live model outside the saved 3-tier list now actually sends that model instead of falling back to the stored default.
 
 - **Faster Office document generation** — Word, Excel, and PowerPoint tasks now load a compact Selection execution policy after the official format guidance, batch repeated content operations, avoid redundant skill and resident-process setup, and keep unrequested generator attribution out of delivered files.
@@ -15,6 +20,8 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 ## Bug Fixes
 
 - **Work-chain step counts stay on one turn** — a truncated intermediate body (often just `|`) no longer flushes the thinking chain into a finished empty card with Copy / Markdown while the session is still running. The longer streamed text is kept, pipe-only stubs are ignored instead of treated as a final reply, and later tools continue the same step count instead of restarting from 1. (#81)
+
+- **Chinese IME first letter stays in composition** — the empty composer no longer commits the first pinyin letter as Latin text. Composition can start on the first key, and English first letters still insert after a frame if no IME session begins. (#84)
 
 - **Create MCP / Skill / automation windows stay usable** — long pasted text no longer stretches the floating create window off-screen. The window is limited to the app viewport, the title bar and send controls stay reachable, the composer scrolls internally, and the window can be dragged, collapsed, or resized.
 

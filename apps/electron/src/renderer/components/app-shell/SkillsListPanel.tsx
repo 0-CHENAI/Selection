@@ -30,6 +30,7 @@ export interface SkillsListPanelProps {
   /** Controlled open state for copy-from-workspace dialog (header button) */
   copyFromOpen?: boolean
   onCopyFromOpenChange?: (open: boolean) => void
+  onImportFromFile?: () => void
 }
 
 export function SkillsListPanel({
@@ -43,6 +44,7 @@ export function SkillsListPanel({
   className,
   copyFromOpen: copyFromOpenProp,
   onCopyFromOpenChange,
+  onImportFromFile,
 }: SkillsListPanelProps) {
   const { t } = useTranslation()
   const activeWorkspace = useActiveWorkspace()
@@ -91,6 +93,15 @@ export function SkillsListPanel({
                 }
                 {...getEditConfig('add-skill', workspaceRootPath)}
               />
+            )}
+            {onImportFromFile && (
+              <button
+                type="button"
+                onClick={onImportFromFile}
+                className="inline-flex items-center h-7 px-3 text-xs font-medium rounded-[8px] bg-background shadow-minimal hover:bg-foreground/[0.03] transition-colors"
+              >
+                {t('fileImport.skillTitle')}
+              </button>
             )}
             {hasOtherLocalWorkspaces && (
               <button

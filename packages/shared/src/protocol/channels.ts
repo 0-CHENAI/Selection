@@ -385,6 +385,12 @@ export const RPC_CHANNELS = {
     IMPORT: 'resources:import',
     /** Native client file picker + bounded read. Never routed to a workspace server. */
     OPEN_BUNDLE_FILE: 'resources:openBundleFile',
+    OPEN_MCP_JSON_FILE: 'resources:openMcpJsonFile',
+    OPEN_SKILL_IMPORT_FILE: 'resources:openSkillImportFile',
+    PREVIEW_MCP_JSON: 'resources:previewMcpJson',
+    IMPORT_MCP_JSON: 'resources:importMcpJson',
+    PREVIEW_SKILL_FILE: 'resources:previewSkillFile',
+    IMPORT_SKILL_FILE: 'resources:importSkillFile',
     /** Native client save picker + atomic write. Never routed to a workspace server. */
     SAVE_BUNDLE_FILE: 'resources:saveBundleFile',
     /** Local filesystem copy between workspaces (optional credentials) */
