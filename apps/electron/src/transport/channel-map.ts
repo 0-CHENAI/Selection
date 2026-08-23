@@ -387,6 +387,7 @@ export const CHANNEL_MAP = {
 
   // Automations
   getAutomations: invoke(RPC_CHANNELS.automations.GET),
+  validateAutomations: invoke(RPC_CHANNELS.automations.VALIDATE),
   testAutomation: invoke(RPC_CHANNELS.automations.TEST),
   setAutomationEnabled: invoke(RPC_CHANNELS.automations.SET_ENABLED),
   duplicateAutomation: invoke(RPC_CHANNELS.automations.DUPLICATE),
