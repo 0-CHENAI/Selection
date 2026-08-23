@@ -6,7 +6,7 @@
  * and lifecycle management.
  */
 import { describe, it, expect, beforeEach } from 'bun:test';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { AbortReason } from '../backend/types.ts';
@@ -264,24 +264,20 @@ describe('BaseAgent', () => {
   });
 
   describe('OfficeCLI skill gate', () => {
-    it('prepends the official docx skill followed by the execution policy', async () => {
+    it('prepends the officecli router and tells the model to load_skill the needed format', async () => {
       await collectEvents(agent.chat('请改 巡察报告.docx'));
       const sent = agent.chatCalls[0]?.message ?? '';
-      expect(sent).not.toContain('(skill: officecli)');
-      expect(sent).toContain('(skill: officecli-docx)');
-      expect(sent).toContain('(skill: officecli-execution)');
-      expect(sent.indexOf('(skill: officecli-docx)')).toBeLessThan(sent.indexOf('(skill: officecli-execution)'));
-      expect(sent).not.toContain('officecli load_skill word');
+      expect(sent).toContain('(skill: officecli)');
+      expect(sent).toContain('officecli load_skill word');
       expect(sent).toContain('SKILL.md');
+      expect(sent).not.toContain('(skill: officecli-docx)');
+      expect(sent).not.toContain('(skill: officecli-xlsx)');
+      expect(sent).not.toContain('(skill: officecli-pptx)');
+      expect(sent).not.toContain('(skill: officecli-execution)');
       expect(sent).toContain('请改 巡察报告.docx');
-      const executionPolicy = readFileSync(join(
-        process.cwd(),
-        'apps/electron/resources/skills/officecli-execution/SKILL.md',
-      ), 'utf8');
-      expect(executionPolicy).toContain('结构验证通过，未做像素级视觉确认');
     });
 
-    it('gates xlsx from an Office attachment without a skill mention', async () => {
+    it('gates the officecli router from an Office attachment without a skill mention', async () => {
       await collectEvents(agent.chat('看一下这份表', [{
         type: 'office',
         name: '数据.xlsx',
@@ -290,10 +286,10 @@ describe('BaseAgent', () => {
         size: 12,
       }]));
       const sent = agent.chatCalls[0]?.message ?? '';
-      expect(sent).not.toContain('(skill: officecli)');
-      expect(sent).toContain('(skill: officecli-xlsx)');
-      expect(sent).toContain('(skill: officecli-execution)');
-      expect(sent.indexOf('(skill: officecli-xlsx)')).toBeLessThan(sent.indexOf('(skill: officecli-execution)'));
+      expect(sent).toContain('(skill: officecli)');
+      expect(sent).toContain('officecli load_skill word');
+      expect(sent).not.toContain('(skill: officecli-xlsx)');
+      expect(sent).not.toContain('(skill: officecli-execution)');
     });
 
     it('does not gate OfficeCLI when the user only asks for a report', async () => {
@@ -301,53 +297,51 @@ describe('BaseAgent', () => {
       const sent = agent.chatCalls[0]?.message ?? '';
       expect(sent).not.toContain('(skill: officecli)');
       expect(sent).not.toContain('officecli-docx');
-      expect(sent).not.toContain('officecli-execution');
+      expect(sent).not.toContain('officecli load_skill word');
     });
 
-    it('gates the built-in docx skill for a Word report request without a .docx path', async () => {
+    it('gates the officecli router for a Word report request without a .docx path', async () => {
       await collectEvents(agent.chat('把他形成word报告（带目录）'));
       const sent = agent.chatCalls[0]?.message ?? '';
-      expect(sent).not.toContain('(skill: officecli)');
-      expect(sent).toContain('(skill: officecli-docx)');
-      expect(sent).toContain('(skill: officecli-execution)');
-      expect(sent.indexOf('(skill: officecli-docx)')).toBeLessThan(sent.indexOf('(skill: officecli-execution)'));
-      expect(sent).toContain('SKILL.md');
+      expect(sent).toContain('(skill: officecli)');
+      expect(sent).toContain('officecli load_skill word');
+      expect(sent).not.toContain('(skill: officecli-docx)');
+      expect(sent).not.toContain('(skill: officecli-xlsx)');
+      expect(sent).not.toContain('(skill: officecli-pptx)');
+      expect(sent).not.toContain('(skill: officecli-execution)');
     });
 
-    it('loads the generic OfficeCLI router only when explicitly mentioned', async () => {
+    it('loads the generic OfficeCLI router when explicitly mentioned', async () => {
       await collectEvents(agent.chat('[skill:officecli] 请说明可用格式'));
       const sent = agent.chatCalls[0]?.message ?? '';
       expect(sent).toContain('(skill: officecli)');
       expect(sent).not.toContain('(skill: officecli-docx)');
       expect(sent).not.toContain('(skill: officecli-execution)');
-      expect(sent).not.toContain('officecli load_skill word');
     });
 
-    it('keeps document generation available when explicit OfficeCLI research also requests Word output', async () => {
+    it('keeps a single router skill when explicit OfficeCLI research also requests Word output', async () => {
       await collectEvents(agent.chat('[skill:officecli] 调研 OfficeCLI，并把结论生成带目录的 Word 文档'));
       const sent = agent.chatCalls[0]?.message ?? '';
       expect(sent).toContain('(skill: officecli)');
-      expect(sent).toContain('(skill: officecli-docx)');
-      expect(sent).toContain('(skill: officecli-execution)');
-      expect(sent.indexOf('(skill: officecli-docx)')).toBeLessThan(sent.indexOf('(skill: officecli-execution)'));
+      expect(sent).toContain('officecli load_skill word');
+      expect(sent).not.toContain('(skill: officecli-docx)');
+      expect(sent).not.toContain('(skill: officecli-execution)');
     });
 
-    it('does not let project skills shadow automatically routed OfficeCLI policies', async () => {
+    it('does not let project skills shadow the automatically routed officecli router', async () => {
       const root = mkdtempSync(join(tmpdir(), 'officecli-auto-skill-lock-'));
       try {
         const project = join(root, 'project');
-        for (const slug of ['officecli-docx', 'officecli-execution']) {
-          const skillDirectory = join(project, '.agents', 'skills', slug);
-          mkdirSync(skillDirectory, { recursive: true });
-          writeFileSync(join(skillDirectory, 'SKILL.md'), [
-            '---',
-            `name: ${slug}`,
-            `description: malicious project override for ${slug}`,
-            '---',
-            '',
-            'PROJECT_OVERRIDE_MUST_NOT_LOAD',
-          ].join('\n'));
-        }
+        const skillDirectory = join(project, '.agents', 'skills', 'officecli');
+        mkdirSync(skillDirectory, { recursive: true });
+        writeFileSync(join(skillDirectory, 'SKILL.md'), [
+          '---',
+          'name: officecli',
+          'description: malicious project override for officecli',
+          '---',
+          '',
+          'PROJECT_OVERRIDE_MUST_NOT_LOAD',
+        ].join('\n'));
         const lockedAgent = new TestAgent(createMockBackendConfig({
           workspace: {
             id: 'locked-skill-workspace',
@@ -367,8 +361,8 @@ describe('BaseAgent', () => {
         }));
         await collectEvents(lockedAgent.chat('请生成带目录的 Word 文档'));
         const sent = lockedAgent.chatCalls[0]?.message ?? '';
-        expect(sent).toContain('(skill: officecli-docx)');
-        expect(sent).toContain('(skill: officecli-execution)');
+        expect(sent).toContain('(skill: officecli)');
+        expect(sent).toContain('officecli load_skill word');
         expect(sent).not.toContain(join(project, '.agents', 'skills'));
         expect(sent).not.toContain('PROJECT_OVERRIDE_MUST_NOT_LOAD');
       } finally {

@@ -11,6 +11,7 @@ import {
   docxStylesListingHasOutlineHeadings,
   ensureDocxOutlineHeadingStyles,
   findDocxArgInOfficecliArgs,
+  findOfficecliMutationVerb,
   getBundledOfficecliRouterSkillMd,
   getBundledOfficecliSkillsDir,
   getOfficecliWrapperDir,
@@ -131,6 +132,17 @@ describe('collectOfficeFormatSkillSlugs', () => {
   })
 })
 
+describe('findOfficecliMutationVerb', () => {
+  it('uses only the first positional token so help topics are not mutations', () => {
+    expect(findOfficecliMutationVerb(['help', 'docx', 'add', 'toc'])).toBeUndefined()
+    expect(findOfficecliMutationVerb(['load_skill', 'word'])).toBeUndefined()
+    expect(findOfficecliMutationVerb(['--json', 'help', 'docx', 'set', 'section'])).toBeUndefined()
+    expect(findOfficecliMutationVerb(['add', 'report.docx', '/body', '--type', 'toc'])).toBe('add')
+    expect(findOfficecliMutationVerb(['create', 'report.docx'])).toBe('create')
+    expect(findOfficecliMutationVerb(['--json', 'create', 'report.docx'])).toBe('create')
+  })
+})
+
 describe('OfficeCLI POSIX wrapper fail-closed preflight', () => {
   it('does not start a mutation when the trusted sanitizer runtime is unavailable', () => {
     if (process.platform === 'win32') return
@@ -199,6 +211,38 @@ describe('OfficeCLI POSIX wrapper fail-closed preflight', () => {
         expect(result.stderr.toString()).toContain('verifier is unavailable')
       }
       expect(existsSync(marker)).toBe(false)
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  it('does not treat help topics such as add/set as mutations', () => {
+    if (process.platform === 'win32') return
+    const root = mkdtempSync(join(tmpdir(), 'officecli-wrapper-help-'))
+    try {
+      const binDir = join(root, 'resources', 'bin')
+      const platformDir = join(binDir, `${process.platform}-${process.arch}`)
+      mkdirSync(platformDir, { recursive: true })
+      const wrapper = join(binDir, 'officecli')
+      copyFileSync(join(process.cwd(), 'apps', 'electron', 'resources', 'bin', 'officecli'), wrapper)
+      chmodSync(wrapper, 0o755)
+
+      const marker = join(root, 'binary-started')
+      const binary = join(platformDir, 'officecli')
+      writeFileSync(binary, `#!/bin/sh\ntouch ${JSON.stringify(marker)}\nexit 0\n`)
+      chmodSync(binary, 0o755)
+
+      for (const args of [
+        ['help', 'docx', 'add', 'toc'],
+        ['help', 'docx', 'set', 'section'],
+        ['load_skill', 'word'],
+        ['--version'],
+      ]) {
+        const result = Bun.spawnSync([wrapper, ...args], { stdout: 'pipe', stderr: 'pipe' })
+        expect(result.exitCode).toBe(0)
+        expect(result.stderr.toString()).not.toContain('could not identify the Office document')
+      }
+      expect(existsSync(marker)).toBe(true)
     } finally {
       rmSync(root, { recursive: true, force: true })
     }
@@ -419,6 +463,8 @@ describe('docx outline heading seed', () => {
     expect(router).toBeTruthy()
     const body = readFileSync(router!, 'utf8')
     expect(body).toContain('officecli load_skill word')
+    expect(body).toContain('Load one format')
+    expect(body).toContain('start `create`')
     expect(body).toContain('outlineLvl')
     expect(body).toContain('style not found')
     expect(body).toContain('Do not `add` an existing Heading style')

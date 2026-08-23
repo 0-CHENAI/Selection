@@ -14,7 +14,7 @@ describe('OfficeCLI provider timeout policy', () => {
   it('disables SDK retries when the bounded Office stream policy is active', () => {
     expect(isOfficecliDocumentTask('...\n# OfficeCLI execution policy\n...')).toBe(true);
     expect(providerRetrySettingsForTask('...\n# OfficeCLI execution policy\n...', baseline)).toEqual({
-      timeoutMs: 35_000,
+      timeoutMs: 120_000,
       maxRetries: 0,
       maxRetryDelayMs: 5_000,
     });
@@ -22,8 +22,8 @@ describe('OfficeCLI provider timeout policy', () => {
 
   it('recognizes the per-turn Skill block carried in the injected user message', () => {
     const baseSystemPrompt = 'Selection base prompt';
-    const userTurn = 'Read /skills/officecli-execution/SKILL.md before continuing';
-    expect(isOfficecliDocumentTask(`${baseSystemPrompt}\n${userTurn}`)).toBe(true);
+    expect(isOfficecliDocumentTask(`${baseSystemPrompt}\nRead /skills/officecli-execution/SKILL.md before continuing`)).toBe(true);
+    expect(isOfficecliDocumentTask(`${baseSystemPrompt}\nRead /skills/officecli/SKILL.md then officecli load_skill word`)).toBe(true);
   });
 
   it('binds policy to the latest user turn instead of process-global prompt state', () => {

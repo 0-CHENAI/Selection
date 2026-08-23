@@ -1003,18 +1003,13 @@ ${formattedMessages}
       resolveSlug(slug);
     }
 
-    // Explicit mentions resolve above. Automatic Office routing skips the generic
-    // router and reads the official format skill followed by Selection's execution
-    // policy, whose batching rules must win when the two instructions overlap.
+    // Office work loads the router skill only. The model then load_skill
+    // word/excel/pptx for the format the user actually needs. Do not dump
+    // official format SKILL.md files or the execution policy up front.
     const officeFormatSlugs = collectOfficeFormatSkillSlugs(message, attachments);
-    for (const slug of officeFormatSlugs) {
-      // Automatic routing must not be shadowed by a same-slug project or
-      // workspace skill. Explicit user mentions above keep normal precedence.
-      if (!parsed.skills.includes(slug)) resolveBundledSlug(slug);
-    }
     if (officeFormatSlugs.length > 0) {
-      skillPaths.delete('officecli-execution');
-      resolveBundledSlug('officecli-execution');
+      skillPaths.delete('officecli');
+      resolveBundledSlug('officecli');
     }
 
     // Resolve mentions to semantic markers (like file mentions) instead of stripping them.
@@ -1049,7 +1044,10 @@ ${formattedMessages}
     const pathList = [...skillPaths.entries()]
       .map(([slug, path]) => `- ${path} (skill: ${slug})`)
       .join('\n');
-    return `Before proceeding with the user's request, you MUST read the following skill instruction files using the Read tool or \`cat\` via Bash:\n${pathList}\n\nDo not take any other action until you have read these files.`;
+    const officeOnly = [...skillPaths.keys()].some(slug => slug.startsWith('officecli') || slug === 'docx' || slug === 'xlsx' || slug === 'pptx')
+      ? '\nAfter reading these files, load only the format the user needs with `officecli load_skill word` (or excel / pptx). Do not Read officecli-docx, officecli-xlsx, officecli-pptx, or officecli-execution SKILL.md files unless they are listed above.'
+      : '';
+    return `Before proceeding with the user's request, you MUST read the following skill instruction files using the Read tool or \`cat\` via Bash:\n${pathList}${officeOnly}\n\nDo not take any other action until you have read these files.`;
   }
 
   // ============================================================

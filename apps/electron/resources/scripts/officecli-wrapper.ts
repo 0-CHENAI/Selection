@@ -6,6 +6,7 @@ import {
   docxOutlineEnsureTiming,
   ensureDocxOutlineHeadingStyles,
   findDocxArgInOfficecliArgs,
+  findOfficecliMutationVerb,
 } from '../../../../packages/shared/src/utils/officecli.ts';
 import { inspectOfficecliAttribution, sanitizeOfficecliAttribution } from '../../../../packages/session-tools-core/src/handlers/officecli-metadata.ts';
 
@@ -21,7 +22,7 @@ const officeFiles = args.filter(arg =>
 );
 const docx = findDocxArgInOfficecliArgs(args);
 const timing = docxOutlineEnsureTiming(args);
-const verb = args.find(arg => /^(?:create|batch|save|close|add|set|remove|move|swap|refresh|raw-set|add-part|import|merge)$/i.test(arg))?.toLowerCase();
+const verb = findOfficecliMutationVerb(args);
 const officeFile = verb === 'merge' ? officeFiles[1] : officeFiles[0];
 
 if (verb && !officeFile) {

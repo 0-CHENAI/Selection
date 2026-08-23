@@ -360,6 +360,8 @@ const DOCX_PATH_RE = /\.(docx|docm)$/i;
 const OFFICECLI_FLAG_RE = /^-/;
 const OFFICECLI_VERB_RE =
   /^(create|add|set|open|refresh|save|close|view|get|query|validate|help|load_skill|dump|remove|batch)$/i;
+const OFFICECLI_MUTATION_VERB_RE =
+  /^(create|batch|save|close|add|set|remove|move|swap|refresh|raw-set|add-part|import|merge)$/i;
 
 export const OFFICECLI_ENSURE_DOCX_STYLES_JSON = 'officecli-ensure-docx-styles.json';
 
@@ -382,6 +384,13 @@ export function findDocxArgInOfficecliArgs(args: string[]): string | undefined {
 
 function firstOfficecliVerb(args: string[]): string | undefined {
   return args.find(arg => !OFFICECLI_FLAG_RE.test(arg) && OFFICECLI_VERB_RE.test(arg))?.toLowerCase();
+}
+
+/** First positional token, and only if that token itself is a mutation verb. */
+export function findOfficecliMutationVerb(args: string[]): string | undefined {
+  const first = args.find(arg => !OFFICECLI_FLAG_RE.test(arg));
+  if (!first || !OFFICECLI_MUTATION_VERB_RE.test(first)) return undefined;
+  return first.toLowerCase();
 }
 
 export interface DocxOutlineEnsureTiming {

@@ -12,7 +12,6 @@ import { formatBytes } from '../utils/binary-detection.ts';
 import { globSync } from 'glob';
 import os from 'os';
 import type { ProjectPromptContext } from '../projects/types.ts';
-import { getBundledOfficecliSkillsDir } from '../utils/officecli.ts';
 
 /** Maximum size of CLAUDE.md file to include (10KB) */
 const MAX_CONTEXT_FILE_SIZE = 10 * 1024;
@@ -546,22 +545,12 @@ rg -n "session|OAuth|\"level\":\"error\"" "${logFilePath}" | tail -n 50
 }
 
 function formatBundledOfficecliSkillGuidance(): string {
-  const dir = getBundledOfficecliSkillsDir();
-  const lines = [
+  return [
     '- **Hard rule:** for `.docx` / `.xlsx` / `.pptx` / `.xlsm` (or Word / Excel / PowerPoint), use Selection\'s bundled OfficeCLI tools. Prefer typed OfficeCLI tools when available and use Bash only for unsupported operations or fallback. Do not use python-docx, openpyxl, python-pptx, or markitdown first.',
-    '- Read the automatically gated official format skill and Selection execution policy before acting. Follow the format skill for document semantics and the execution policy for batching and QA. `officecli` is already on PATH; do not curl-install.',
+    '- Read the automatically gated `officecli` skill first. Then load only the format the user needs (`word` / `excel` / `pptx`) before creating or editing. `officecli` is already on PATH; do not curl-install. Do not Read officecli-docx, officecli-xlsx, officecli-pptx, or officecli-execution SKILL.md files up front.',
+    '- Word → `word`. Excel → `excel`. PowerPoint → `pptx`. Specialized work uses officecli-docx scene skills only after the matching format is loaded.',
     '- Do **not** Read `~/.agents/skills/officecli`, `~/.agents/skills/docx`, `~/.agents/skills/xlsx`, or `~/.agents/skills/pptx`.',
-  ];
-  if (!dir) {
-    lines.push('- Word → `[skill:officecli-docx]`. Excel → `[skill:officecli-xlsx]`. PowerPoint → `[skill:officecli-pptx]`.');
-    return lines.join('\n');
-  }
-  lines.push(
-    `- officecli-docx: \`${join(dir, 'officecli-docx', 'SKILL.md')}\``,
-    `- officecli-xlsx: \`${join(dir, 'officecli-xlsx', 'SKILL.md')}\``,
-    `- officecli-pptx: \`${join(dir, 'officecli-pptx', 'SKILL.md')}\``,
-  );
-  return lines.join('\n');
+  ].join('\n');
 }
 
 /**

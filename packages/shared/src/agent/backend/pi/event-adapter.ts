@@ -338,8 +338,12 @@ export class PiEventAdapter extends BaseEventAdapter {
         const sdkMessageId = (event as { sdkMessageId?: string }).sdkMessageId ?? msg?.id;
         if (msg?.role !== 'assistant') break;
 
-        // Surface API errors — Pi SDK sets stopReason: 'error' and errorMessage on failures
-        if (msg.stopReason === 'error' && msg.errorMessage) {
+        // Surface API errors — Pi SDK sets stopReason: 'error' and errorMessage on failures.
+        // OfficeCLI deadline aborts use stopReason 'aborted' but are still user-visible failures.
+        const isOfficecliDeadlineAbort = msg.stopReason === 'aborted'
+          && typeof msg.errorMessage === 'string'
+          && msg.errorMessage.includes('OfficeCLI document');
+        if ((msg.stopReason === 'error' || isOfficecliDeadlineAbort) && msg.errorMessage) {
           // Context overflow: hand recovery to the SDK's _runAutoCompaction
           // and keep the UI quiet until we know the outcome (recovered turn
           // arrives, or compaction fails). Suppress the raw provider error.

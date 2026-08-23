@@ -14,10 +14,10 @@ export interface ProviderRetrySettings {
   maxRetryDelayMs: number;
 }
 
-const OFFICECLI_MODEL_REQUEST_TIMEOUT_MS = 35_000;
+const OFFICECLI_MODEL_REQUEST_TIMEOUT_MS = 120_000;
 
-export const OFFICECLI_MODEL_STREAM_DEADLINE_MS = 35_000;
-export const OFFICECLI_MODEL_TASK_WAIT_BUDGET_MS = 210_000;
+export const OFFICECLI_MODEL_STREAM_DEADLINE_MS = 120_000;
+export const OFFICECLI_MODEL_TASK_WAIT_BUDGET_MS = 600_000;
 const OFFICECLI_MODEL_STREAM_MAX_ATTEMPTS = 2;
 const OFFICECLI_MODEL_STREAM_MAX_EVENTS = 100_000;
 const OFFICECLI_MODEL_STREAM_MAX_DELTA_CHARS = 8 * 1024 * 1024;
@@ -25,7 +25,9 @@ const OFFICECLI_MODEL_STREAM_MAX_DELTA_CHARS = 8 * 1024 * 1024;
 export function isOfficecliDocumentTask(promptContext: string | undefined): boolean {
   if (!promptContext) return false;
   return promptContext.includes('# OfficeCLI execution policy') ||
-    promptContext.includes('officecli-execution/SKILL.md');
+    promptContext.includes('officecli-execution/SKILL.md') ||
+    promptContext.includes('officecli/SKILL.md') ||
+    promptContext.includes('officecli load_skill');
 }
 
 function userMessageText(message: Context['messages'][number]): string {
@@ -103,7 +105,7 @@ function deadlineErrorMessage(
 /**
  * Add an absolute wall-clock deadline around the complete provider stream.
  * Pi's timeoutMs is an HTTP idle timeout, so a provider that trickles events can
- * otherwise keep a document turn alive until the app-wide five-minute limit.
+ * otherwise keep a document turn alive until the app-wide ten-minute wait budget.
  */
 export function createOfficecliDeadlineStreamFn(
   baseStreamFn: StreamFn,

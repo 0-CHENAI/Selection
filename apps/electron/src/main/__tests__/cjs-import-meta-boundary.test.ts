@@ -23,6 +23,13 @@ const CJS_ENTRIES: Array<{ name: string; options: BuildOptions }> = [
       external: ['electron'],
     },
   },
+  {
+    name: 'session MCP server',
+    options: {
+      entryPoints: [join(repoRoot, 'packages/session-mcp-server/src/index.ts')],
+      packages: 'external',
+    },
+  },
 ]
 
 describe('Electron CJS import.meta boundary', () => {

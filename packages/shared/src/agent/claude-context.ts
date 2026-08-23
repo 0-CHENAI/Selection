@@ -9,7 +9,7 @@
  */
 
 import { existsSync, readFileSync, writeFileSync, readdirSync, statSync, mkdirSync } from 'fs';
-import { join, basename, resolve } from 'path';
+import { join, basename } from 'path';
 import { CONFIG_DIR } from '../config/paths.ts';
 import type {
   SessionToolContext,
@@ -107,7 +107,8 @@ export function createClaudeContext(options: ClaudeContextOptions): SessionToolC
   const trustedAppRoot = process.env.CRAFT_RESOURCES_BASE
     ?? process.env.CRAFT_BUNDLED_ASSETS_ROOT
     ?? process.env.CRAFT_RESOURCES_PATH
-    ?? resolve(import.meta.dir, '../../../..');
+    ?? process.env.CRAFT_APP_ROOT
+    ?? process.cwd();
   const officecliResolution = options.officecliResolution ?? {
     cwd: trustedAppRoot,
     appRootPath: trustedAppRoot,

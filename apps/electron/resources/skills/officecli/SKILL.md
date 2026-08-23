@@ -9,13 +9,13 @@ description: "Create, inspect, and edit .docx / .xlsx / .pptx with the bundled o
 
 ## Hard rule
 
-For Word / Excel / PowerPoint, load the format skill first, then run `officecli` via Bash and follow that skill's Common Workflow and Delivery Gate.
+For Word / Excel / PowerPoint, load only the format the user needs, then run `officecli` via Bash and follow that skill's Common Workflow and Delivery Gate.
 
 ```bash
 officecli load_skill word    # or excel / pptx — do this before create
 ```
 
-Or Read the matching built-in SKILL.md. Do not skip this.
+Load one format. Do not Read `officecli-docx` / `officecli-xlsx` / `officecli-pptx` / `officecli-execution` SKILL.md files. After `load_skill`, start `create`. Use one focused `officecli help` lookup only when a property is missing from the loaded skill.
 
 | File | Skill / load_skill |
 |------|---------------------|
@@ -29,7 +29,7 @@ Specialized work uses `officecli-academic-paper`, `officecli-financial-model`, `
 
 ## Closed loop (do not skip)
 
-1. `load_skill` / Read the format skill.
+1. `load_skill` the needed format (`word` / `excel` / `pptx`).
 2. `create` / `open`, then `get /styles` if anything looks thin.
 3. Headings first (`style=Heading1` / `Heading2` / `Heading3`), then `--type toc`.
 4. If a command prints `WARNING` / `style not found` / `Error`, stop. Run `get /styles` and `officecli help docx style`. Fix styles before more content. Do not `add` an existing Heading style — that drops `outlineLvl`. Use `set /styles/Heading1 --prop outlineLvl=0`.

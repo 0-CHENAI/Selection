@@ -32,7 +32,7 @@ import {
   type Tool,
 } from '@modelcontextprotocol/sdk/types.js';
 import { existsSync, readFileSync, readdirSync, statSync, writeFileSync, mkdirSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { join } from 'node:path';
 import { FEATURE_FLAGS, isDeveloperFeedbackEnabled } from '@craft-agent/shared/feature-flags';
 import {
   ensureDocxOutlineHeadingStyles,
@@ -228,7 +228,8 @@ function createCodexContext(config: SessionConfig): SessionToolContext {
   const trustedAppRoot = process.env.CRAFT_RESOURCES_BASE
     ?? process.env.CRAFT_BUNDLED_ASSETS_ROOT
     ?? process.env.CRAFT_RESOURCES_PATH
-    ?? resolve(import.meta.dir, '../../..');
+    ?? process.env.CRAFT_APP_ROOT
+    ?? process.cwd();
   const officecliResolution = {
     cwd: trustedAppRoot,
     appRootPath: trustedAppRoot,
