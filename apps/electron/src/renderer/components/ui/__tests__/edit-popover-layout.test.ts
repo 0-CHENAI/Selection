@@ -1,0 +1,106 @@
+import { describe, expect, it } from 'bun:test'
+import {
+  COLLAPSED_POPOVER_HEIGHT,
+  DEFAULT_POPOVER_HEIGHT,
+  DEFAULT_POPOVER_WIDTH,
+  MIN_POPOVER_HEIGHT,
+  MIN_POPOVER_WIDTH,
+  POPOVER_HEADER_HEIGHT,
+  POPOVER_INPUT_CHROME,
+  clampPopoverOffset,
+  clampPopoverSize,
+  getCompactInputMaxHeight,
+} from '../edit-popover-layout'
+
+const desktop = { width: 1440, height: 900 }
+const small = { width: 800, height: 500 }
+const tiny = { width: 360, height: 280 }
+
+describe('clampPopoverSize (#8)', () => {
+  it('keeps the default create window inside a desktop viewport', () => {
+    expect(clampPopoverSize(
+      { width: DEFAULT_POPOVER_WIDTH, height: DEFAULT_POPOVER_HEIGHT },
+      desktop,
+    )).toEqual({ width: DEFAULT_POPOVER_WIDTH, height: DEFAULT_POPOVER_HEIGHT })
+  })
+
+  it('does not grow past the app viewport when content is huge', () => {
+    const next = clampPopoverSize({ width: 4000, height: 8000 }, desktop)
+    expect(next.width).toBeLessThanOrEqual(desktop.width)
+    expect(next.height).toBeLessThanOrEqual(desktop.height)
+    expect(next.width).toBeLessThan(desktop.width)
+    expect(next.height).toBeLessThan(desktop.height)
+  })
+
+  it('shrinks to fit a short window so chrome stays reachable', () => {
+    const next = clampPopoverSize(
+      { width: DEFAULT_POPOVER_WIDTH, height: DEFAULT_POPOVER_HEIGHT },
+      small,
+    )
+    expect(next.height).toBeLessThan(DEFAULT_POPOVER_HEIGHT)
+    expect(next.height).toBeLessThanOrEqual(small.height - 52 - 16)
+    expect(next.width).toBe(DEFAULT_POPOVER_WIDTH)
+  })
+
+  it('never exceeds a very small viewport', () => {
+    const next = clampPopoverSize(
+      { width: DEFAULT_POPOVER_WIDTH, height: DEFAULT_POPOVER_HEIGHT },
+      tiny,
+    )
+    expect(next.width).toBeLessThanOrEqual(tiny.width - 32)
+    expect(next.height).toBeLessThanOrEqual(tiny.height - 52 - 16)
+  })
+
+  it('does not shrink below the minimum on a large viewport', () => {
+    expect(clampPopoverSize({ width: 100, height: 80 }, desktop)).toEqual({
+      width: MIN_POPOVER_WIDTH,
+      height: MIN_POPOVER_HEIGHT,
+    })
+  })
+
+  it('collapses to the title-bar height', () => {
+    expect(clampPopoverSize(
+      { width: DEFAULT_POPOVER_WIDTH, height: DEFAULT_POPOVER_HEIGHT },
+      desktop,
+      true,
+    ).height).toBe(COLLAPSED_POPOVER_HEIGHT)
+  })
+})
+
+describe('clampPopoverOffset (#8)', () => {
+  it('keeps the window inside the viewport after a drag', () => {
+    const size = { width: 400, height: 480 }
+    const base = { x: 100, y: 80 }
+    const next = clampPopoverOffset({ x: 4000, y: 4000 }, size, desktop, base)
+    expect(base.x + next.x + size.width).toBeLessThanOrEqual(desktop.width - 16)
+    expect(base.y + next.y + size.height).toBeLessThanOrEqual(desktop.height - 16)
+  })
+
+  it('keeps the title bar below the app chrome', () => {
+    const next = clampPopoverOffset(
+      { x: 0, y: -400 },
+      { width: 400, height: 280 },
+      desktop,
+      { x: 40, y: 40 },
+    )
+    expect(40 + next.y).toBeGreaterThanOrEqual(52)
+  })
+})
+
+describe('getCompactInputMaxHeight (#8)', () => {
+  it('caps the composer so it cannot fill the create window', () => {
+    const max = getCompactInputMaxHeight(DEFAULT_POPOVER_HEIGHT)
+    expect(max).toBeLessThan(DEFAULT_POPOVER_HEIGHT / 2)
+    expect(max).toBeGreaterThanOrEqual(72)
+  })
+
+  it('still leaves a usable composer in a short popover', () => {
+    expect(getCompactInputMaxHeight(280)).toBeGreaterThanOrEqual(72)
+  })
+
+  it('leaves room for the title bar and send row', () => {
+    const height = DEFAULT_POPOVER_HEIGHT
+    const input = getCompactInputMaxHeight(height)
+    expect(POPOVER_HEADER_HEIGHT + POPOVER_INPUT_CHROME + input).toBeLessThan(height)
+  })
+})

@@ -11,7 +11,7 @@ import * as React from 'react'
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
 import i18n from 'i18next'
-import { GripHorizontal } from 'lucide-react'
+import { ChevronDown, ChevronUp, GripHorizontal, X } from 'lucide-react'
 import { motion, AnimatePresence } from 'motion/react' // motion used for backdrop only
 import { Popover, PopoverTrigger, PopoverContent } from './popover'
 import { Button } from './button'
@@ -21,6 +21,14 @@ import type { ContentBadge, Session, CreateSessionOptions } from '../../../share
 import { useActiveWorkspace, useAppShellContext, useSession, usePendingPermission, usePendingCredential } from '@/context/AppShellContext'
 import { useEscapeInterrupt } from '@/context/EscapeInterruptContext'
 import { ChatDisplay } from '../app-shell/ChatDisplay'
+import { HeaderIconButton } from './HeaderIconButton'
+import {
+  DEFAULT_POPOVER_HEIGHT,
+  DEFAULT_POPOVER_WIDTH,
+  clampPopoverOffset,
+  clampPopoverSize,
+  getCompactInputMaxHeight,
+} from './edit-popover-layout'
 
 /** Rotating placeholder keys for compact mode input - short, action-oriented */
 const COMPACT_PLACEHOLDER_KEYS = [
@@ -722,7 +730,7 @@ export function EditPopover({
   workingDirectory = 'none', // Default to session folder for config edits
   model,
   systemPromptPreset,
-  width = 400, // Default 400px for compact chat embedding
+  width = DEFAULT_POPOVER_WIDTH,
   triggerClassName,
   side = 'bottom',
   align = 'end',
@@ -844,29 +852,53 @@ export function EditPopover({
     }
   }, [isProcessing, handleEscapePress])
 
-  // Drag state for movable popover
+  // Drag / resize / collapse for the floating create window (#8)
   const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 })
   const [isDragging, setIsDragging] = useState(false)
+  const [collapsed, setCollapsed] = useState(false)
   const dragStartRef = useRef({ x: 0, y: 0, offsetX: 0, offsetY: 0 })
   const dragOffsetRef = useRef({ x: 0, y: 0 })
   const popoverRef = useRef<HTMLDivElement>(null)
-
-  // Resize state for dynamic sizing
-  const [containerSize, setContainerSize] = useState({ width: width || 400, height: 480 })
+  const [containerSize, setContainerSize] = useState(() =>
+    clampPopoverSize({ width: width || DEFAULT_POPOVER_WIDTH, height: DEFAULT_POPOVER_HEIGHT }, { width: 1440, height: 900 }),
+  )
+  const expandedSizeRef = useRef(containerSize)
   const [isResizing, setIsResizing] = useState(false)
   const resizeStartRef = useRef({ x: 0, y: 0, width: 0, height: 0 })
 
-  // Reset drag position and size when popover opens
-  useEffect(() => {
-    if (open) {
-      dragOffsetRef.current = { x: 0, y: 0 }
-      setDragOffset({ x: 0, y: 0 })
-      setContainerSize({ width: width || 400, height: 480 })
-    }
-  }, [open, width])
+  const readViewport = useCallback(() => ({
+    width: window.innerWidth,
+    height: window.innerHeight,
+  }), [])
 
-  // Handle drag events
+  useEffect(() => {
+    if (!open) return
+    dragOffsetRef.current = { x: 0, y: 0 }
+    setDragOffset({ x: 0, y: 0 })
+    setCollapsed(false)
+    const next = clampPopoverSize(
+      { width: width || DEFAULT_POPOVER_WIDTH, height: DEFAULT_POPOVER_HEIGHT },
+      readViewport(),
+    )
+    expandedSizeRef.current = next
+    setContainerSize(next)
+  }, [open, width, readViewport])
+
+  useEffect(() => {
+    if (!open) return
+    const onResize = () => {
+      setContainerSize(prev => {
+        const next = clampPopoverSize(collapsed ? expandedSizeRef.current : prev, readViewport(), collapsed)
+        if (!collapsed) expandedSizeRef.current = next
+        return next
+      })
+    }
+    window.addEventListener('resize', onResize)
+    return () => window.removeEventListener('resize', onResize)
+  }, [open, collapsed, readViewport])
+
   const handleDragStart = useCallback((e: React.MouseEvent) => {
+    if ((e.target as HTMLElement).closest('button')) return
     e.preventDefault()
     setIsDragging(true)
     dragStartRef.current = {
@@ -883,39 +915,33 @@ export function EditPopover({
     const handleMouseMove = (e: MouseEvent) => {
       const rect = popoverRef.current?.getBoundingClientRect()
       if (!rect) return
-
-      const MARGIN = 20
-      const MARGIN_TOP = 50 // Keep below header (chevrons, menu button)
       const curr = dragOffsetRef.current
-      const baseX = rect.left - curr.x
-      const baseY = rect.top - curr.y
-
-      const newX = dragStartRef.current.offsetX + e.clientX - dragStartRef.current.x
-      const newY = dragStartRef.current.offsetY + e.clientY - dragStartRef.current.y
-
-      const clampedX = Math.max(MARGIN - baseX, Math.min(window.innerWidth - MARGIN - rect.width - baseX, newX))
-      const clampedY = Math.max(MARGIN_TOP - baseY, Math.min(window.innerHeight - MARGIN - rect.height - baseY, newY))
-
-      dragOffsetRef.current = { x: clampedX, y: clampedY }
-      setDragOffset({ x: clampedX, y: clampedY })
+      const next = clampPopoverOffset(
+        {
+          x: dragStartRef.current.offsetX + e.clientX - dragStartRef.current.x,
+          y: dragStartRef.current.offsetY + e.clientY - dragStartRef.current.y,
+        },
+        { width: rect.width, height: rect.height },
+        readViewport(),
+        { x: rect.left - curr.x, y: rect.top - curr.y },
+      )
+      dragOffsetRef.current = next
+      setDragOffset(next)
     }
 
-    const handleMouseUp = () => {
-      setIsDragging(false)
-    }
-
+    const handleMouseUp = () => setIsDragging(false)
     document.addEventListener('mousemove', handleMouseMove)
     document.addEventListener('mouseup', handleMouseUp)
     return () => {
       document.removeEventListener('mousemove', handleMouseMove)
       document.removeEventListener('mouseup', handleMouseUp)
     }
-  }, [isDragging])
+  }, [isDragging, readViewport])
 
-  // Resize handlers
   const handleResizeStart = useCallback((e: React.MouseEvent) => {
     e.preventDefault()
     e.stopPropagation()
+    if (collapsed) return
     setIsResizing(true)
     resizeStartRef.current = {
       x: e.clientX,
@@ -923,31 +949,40 @@ export function EditPopover({
       width: containerSize.width,
       height: containerSize.height,
     }
-  }, [containerSize])
+  }, [containerSize, collapsed])
 
   useEffect(() => {
     if (!isResizing) return
 
     const handleMouseMove = (e: MouseEvent) => {
-      const deltaX = e.clientX - resizeStartRef.current.x
-      const deltaY = e.clientY - resizeStartRef.current.y
-      setContainerSize({
-        width: Math.max(300, resizeStartRef.current.width + deltaX),
-        height: Math.max(250, resizeStartRef.current.height + deltaY),
-      })
+      const next = clampPopoverSize({
+        width: resizeStartRef.current.width + e.clientX - resizeStartRef.current.x,
+        height: resizeStartRef.current.height + e.clientY - resizeStartRef.current.y,
+      }, readViewport())
+      expandedSizeRef.current = next
+      setContainerSize(next)
     }
 
-    const handleMouseUp = () => {
-      setIsResizing(false)
-    }
-
+    const handleMouseUp = () => setIsResizing(false)
     document.addEventListener('mousemove', handleMouseMove)
     document.addEventListener('mouseup', handleMouseUp)
     return () => {
       document.removeEventListener('mousemove', handleMouseMove)
       document.removeEventListener('mouseup', handleMouseUp)
     }
-  }, [isResizing])
+  }, [isResizing, readViewport])
+
+  const toggleCollapsed = useCallback(() => {
+    setCollapsed(currentlyCollapsed => {
+      if (currentlyCollapsed) {
+        setContainerSize(clampPopoverSize(expandedSizeRef.current, readViewport(), false))
+        return false
+      }
+      expandedSizeRef.current = containerSize
+      setContainerSize(clampPopoverSize(containerSize, readViewport(), true))
+      return true
+    })
+  }, [containerSize, readViewport])
 
   // Reset state when popover opens
   useEffect(() => {
@@ -1023,7 +1058,8 @@ export function EditPopover({
             side={side}
             align={align}
             sticky="always"
-            className="p-0"
+            className="p-0 overflow-hidden"
+            data-testid="edit-popover"
             style={{
               width: containerSize.width,
               height: containerSize.height,
@@ -1034,28 +1070,45 @@ export function EditPopover({
             onInteractOutside={handleInteractOutside}
             onEscapeKeyDown={handleEscapeKeyDown}
           >
-            {/* Container */}
             <div
               ref={popoverRef}
-              className="relative bg-foreground-2 overflow-hidden w-full h-full shadow-modal-small"
+              className="relative flex h-full w-full flex-col overflow-hidden bg-foreground-2 shadow-modal-small"
               style={{
                 transform: `translate(${dragOffset.x}px, ${dragOffset.y}px)`,
                 borderRadius: 16,
               }}
             >
-              {/* Drag handle - floating overlay */}
               <div
                 onMouseDown={handleDragStart}
                 className={cn(
-                  "absolute top-0 left-1/2 -translate-x-1/2 z-50 px-4 py-2 cursor-grab rounded pointer-events-auto titlebar-no-drag",
-                  isDragging && "cursor-grabbing"
+                  "flex h-10 shrink-0 items-center gap-1 border-b border-foreground/5 px-1.5 titlebar-no-drag",
+                  isDragging ? "cursor-grabbing" : "cursor-grab",
                 )}
+                data-testid="edit-popover-header"
               >
-                <GripHorizontal className="w-4 h-4 text-muted-foreground/30" />
+                <GripHorizontal className="ml-1 size-4 shrink-0 text-muted-foreground/40" />
+                <span className="min-w-0 flex-1 truncate px-1 text-xs text-foreground/70 select-none">
+                  {displayLabel || context.label}
+                </span>
+                <HeaderIconButton
+                  icon={collapsed ? <ChevronDown className="size-4" /> : <ChevronUp className="size-4" />}
+                  tooltip={collapsed ? t('editPopover.expand') : t('editPopover.collapse')}
+                  aria-label={collapsed ? t('editPopover.expand') : t('editPopover.collapse')}
+                  aria-expanded={!collapsed}
+                  onMouseDown={event => event.stopPropagation()}
+                  onClick={toggleCollapsed}
+                />
+                <HeaderIconButton
+                  icon={<X className="size-4" />}
+                  tooltip={t('common.close')}
+                  aria-label={t('common.close')}
+                  disabled={isProcessing}
+                  onMouseDown={event => event.stopPropagation()}
+                  onClick={() => setOpen(false)}
+                />
               </div>
 
-              {/* Content area - always uses compact ChatDisplay */}
-              <div className="flex-1 flex flex-col bg-foreground-2" style={{ height: '100%' }}>
+              <div className={cn('flex min-h-0 min-w-0 flex-1 flex-col', collapsed && 'hidden')}>
                 <ChatDisplay
                   session={displaySession}
                   onSendMessage={inlineExecution ? handleInlineSendMessage : handleLegacySendMessage}
@@ -1068,18 +1121,26 @@ export function EditPopover({
                   pendingCredential={pendingCredential}
                   onRespondToCredential={onRespondToCredential}
                   compactMode={true}
+                  compactInputMaxHeight={getCompactInputMaxHeight(containerSize.height)}
                   placeholder={placeholder}
                   emptyStateLabel={displayLabel || context.label}
                 />
               </div>
-            </div>
 
-            {/* Bottom-right resize handle - outside overflow-hidden container */}
-            <div
-              onMouseDown={handleResizeStart}
-              className="absolute -bottom-2 -right-2 w-6 h-6 cursor-nwse-resize pointer-events-auto z-50"
-              style={{ transform: `translate(${dragOffset.x}px, ${dragOffset.y}px)` }}
-            />
+              {!collapsed && (
+                <button
+                  type="button"
+                  onMouseDown={handleResizeStart}
+                  className="absolute bottom-0 right-0 z-50 flex size-4 cursor-nwse-resize items-end justify-end p-0.5 text-muted-foreground/40 hover:text-muted-foreground"
+                  aria-label={t('editPopover.resize')}
+                  title={t('editPopover.resize')}
+                >
+                  <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true">
+                    <path d="M9 1L1 9M9 5L5 9" stroke="currentColor" strokeWidth="1.4" fill="none" strokeLinecap="round" />
+                  </svg>
+                </button>
+              )}
+            </div>
           </PopoverContent>
       </Popover>
     </>

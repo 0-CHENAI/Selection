@@ -305,6 +305,8 @@ export interface FreeFormInputProps {
    * behavior.
    */
   enableCompactModelPicker?: boolean
+  /** Override the compact composer max height (EditPopover viewport clamp). */
+  compactInputMaxHeight?: number
   // Connection selection (hierarchical connection → model selector)
   /** Current LLM connection slug (locked after first message) */
   currentConnection?: string
@@ -374,6 +376,7 @@ export function FreeFormInput({
   onFollowUpIndexClick,
   compactMode = false,
   enableCompactModelPicker = false,
+  compactInputMaxHeight,
   currentConnection,
   onConnectionChange,
   connectionUnavailable = false,
@@ -647,16 +650,21 @@ export function FreeFormInput({
   // Double-Esc interrupt: show warning overlay on first Esc, interrupt on second
   const { showEscapeOverlay } = useEscapeInterrupt()
 
-  // Calculate max height: min(66% of window height, 540px)
+  // Calculate max height: min(66% of window height, 540px). EditPopover
+  // passes a tighter cap so a long paste cannot squeeze the title bar or send row.
   React.useEffect(() => {
     const updateMaxHeight = () => {
+      if (compactInputMaxHeight) {
+        setInputMaxHeight(compactInputMaxHeight)
+        return
+      }
       const maxFromWindow = Math.floor(window.innerHeight * 0.66)
       setInputMaxHeight(Math.min(maxFromWindow, 540))
     }
     updateMaxHeight()
     window.addEventListener('resize', updateMaxHeight)
     return () => window.removeEventListener('resize', updateMaxHeight)
-  }, [])
+  }, [compactInputMaxHeight])
 
   const dragCounterRef = React.useRef(0)
   // A submit can be triggered twice in the same browser task (for example by
