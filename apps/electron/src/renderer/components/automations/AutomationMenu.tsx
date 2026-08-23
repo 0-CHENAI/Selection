@@ -15,6 +15,7 @@ import {
   FileCode,
   Copy,
   Play,
+  Loader2,
   Search,
   Power,
   PowerOff,
@@ -22,11 +23,14 @@ import {
   Download,
 } from 'lucide-react'
 import { useMenuComponents } from '@/components/ui/menu-context'
+import { useOptionalAppShellContext } from '@/context/AppShellContext'
+import type { TestResult } from './types'
 
 export interface AutomationMenuProps {
   automationId: string
   automationName: string
   enabled: boolean
+  testResult?: TestResult
   onToggleEnabled?: () => void
   onTest?: () => void
   onSimulateMatch?: () => void
@@ -42,6 +46,7 @@ export function AutomationMenu({
   automationId,
   automationName,
   enabled,
+  testResult,
   onToggleEnabled,
   onTest,
   onSimulateMatch,
@@ -53,6 +58,11 @@ export function AutomationMenu({
 }: AutomationMenuProps) {
   const { MenuItem, Separator } = useMenuComponents()
   const { t } = useTranslation()
+  const appShellContext = useOptionalAppShellContext()
+  const resolvedTestResult = testResult ?? appShellContext?.automationTestResults?.[automationId]
+  const isRunning = resolvedTestResult?.state === 'running'
+  const isMatchRunning = isRunning && resolvedTestResult.mode === 'match'
+  const isActionTestRunning = isRunning && !isMatchRunning
 
   return (
     <>
@@ -70,16 +80,28 @@ export function AutomationMenu({
 
       {/* Test Automation */}
       {onTest && (
-        <MenuItem onClick={onTest}>
-          <Play className="h-3.5 w-3.5" />
-          <span className="flex-1">{t('automations.runTest')}</span>
+        <MenuItem onClick={onTest} disabled={isRunning}>
+          {isActionTestRunning ? (
+            <Loader2 className="h-3.5 w-3.5 animate-spin motion-reduce:animate-none" />
+          ) : (
+            <Play className="h-3.5 w-3.5" />
+          )}
+          <span className="flex-1">
+            {isActionTestRunning ? t('automations.testRunning') : t('automations.runTest')}
+          </span>
         </MenuItem>
       )}
 
       {onSimulateMatch && (
-        <MenuItem onClick={onSimulateMatch}>
-          <Search className="h-3.5 w-3.5" />
-          <span className="flex-1">{t('automations.matchSimulate')}</span>
+        <MenuItem onClick={onSimulateMatch} disabled={isRunning}>
+          {isMatchRunning ? (
+            <Loader2 className="h-3.5 w-3.5 animate-spin motion-reduce:animate-none" />
+          ) : (
+            <Search className="h-3.5 w-3.5" />
+          )}
+          <span className="flex-1">
+            {isMatchRunning ? t('automations.testRunning') : t('automations.matchSimulate')}
+          </span>
         </MenuItem>
       )}
 
