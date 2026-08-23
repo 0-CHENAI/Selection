@@ -79,6 +79,10 @@ export function ActionRegistryProvider({ children }: { children: React.ReactNode
   // Set up global hotkey listener
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      // IME composition (keyCode 229 / isComposing) must not be stolen by
+      // app shortcuts — first CJK keydown can look like a Latin letter (#84).
+      if (e.isComposing || e.keyCode === 229) return
+
       // Build context snapshot from DOM state at event time
       const context = getKeybindingContext(e)
 
