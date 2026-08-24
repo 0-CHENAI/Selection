@@ -138,6 +138,25 @@ describe('handleInterrupted (#616)', () => {
     })
   })
 
+  it('clears streaming flags even when isPending was never set', () => {
+    const state = makeState([
+      {
+        id: 'body',
+        role: 'assistant',
+        content: 'partial',
+        isStreaming: true,
+      },
+    ])
+    const next = handleInterrupted(state, {
+      type: 'interrupted',
+      sessionId: 'session-1',
+      message: { id: 'info-1', role: 'info', content: 'Response interrupted', timestamp: 0 } as any,
+    })
+    const body = next.state.session.messages.find(message => message.id === 'body')
+    expect(body).toMatchObject({ isStreaming: false, isPending: false })
+    expect(body?.content).toBe('partial')
+  })
+
   it('always strips transient status messages', () => {
     const state = makeState([
       { id: 'msg-1', role: 'user', content: 'hi' },

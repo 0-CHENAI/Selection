@@ -346,6 +346,64 @@ describe('handleUserMessage queued replay', () => {
     expect(next.state.session.suppressedTurnIds).toContain('live')
   })
 
+  it('does not hide the finished body when continue is accepted after interrupt (#101)', () => {
+    const state: SessionState = {
+      session: {
+        ...makeState([]).session,
+        isProcessing: false,
+        messages: [
+          { id: 'ask-word', role: 'user', content: '帮我将他形成word放在我的桌面上', timestamp: 100 },
+          {
+            id: 'work-chain',
+            role: 'assistant',
+            content: 'PAGE field is properly structured - it shows fieldChar begin',
+            timestamp: 150,
+            isIntermediate: true,
+          },
+          {
+            id: 'finished-body',
+            role: 'assistant',
+            content: '已写好三门问题的数字模拟和公式。',
+            timestamp: 160,
+            turnId: 'closed-turn',
+          },
+          {
+            id: 'optimistic-continue',
+            role: 'user',
+            content: '继续',
+            timestamp: 200,
+            isQueued: true,
+            queueId: 'backend-continue',
+          },
+        ],
+      } as any,
+      streaming: null,
+    }
+
+    const next = handleUserMessage(state, {
+      type: 'user_message',
+      sessionId: 'session-1',
+      message: { id: 'backend-continue', role: 'user', content: '继续', timestamp: 300 },
+      status: 'accepted',
+      optimisticMessageId: 'optimistic-continue',
+    })
+
+    const body = next.state.session.messages.find(message => message.id === 'finished-body')
+    const workChain = next.state.session.messages.find(message => message.id === 'work-chain')
+    const followUp = next.state.session.messages.find(message => message.id === 'optimistic-continue')
+    const turns = groupMessagesByTurn(next.state.session.messages)
+
+    expect(body?.hidden).not.toBe(true)
+    expect(body?.content).toBe('已写好三门问题的数字模拟和公式。')
+    expect(workChain?.hidden).not.toBe(true)
+    expect(followUp?.hidden).not.toBe(true)
+    expect(followUp).toMatchObject({ isQueued: false, content: '继续' })
+    expect(next.state.session.suppressedTurnIds).toBeUndefined()
+    expect(next.state.streaming).toBeNull()
+    expect(turns.map(turn => turn.type)).toEqual(['user', 'assistant', 'user'])
+    expect(turns[1]?.type === 'assistant' && turns[1].response?.text).toBe('已写好三门问题的数字模拟和公式。')
+  })
+
   it('hides an earlier steered follow-up so only the latest question stays visible', () => {
     const state = makeState([
       { id: 'initial-user', role: 'user', content: '它有哪几个部分?', timestamp: 100 },

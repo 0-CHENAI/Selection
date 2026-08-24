@@ -66,9 +66,13 @@ const IN_FLIGHT_TOOL_STATUSES = new Set(['pending', 'executing'])
  * True while a visible turn is still generating. Composer submits in this
  * state belong in the queue, not the transcript (#22, #23).
  *
- * `isProcessing` can be stale false while the thought chain, work chain, or
- * status pill is still on screen. Those message/session signals must also
- * keep follow-ups in the composer queue.
+ * `isProcessing` can be stale false while a thought/work chain is still
+ * in flight. Streaming/pending assistant rows, status pills, and executing
+ * tools must also keep follow-ups in the composer queue.
+ *
+ * Settled `isIntermediate` rows are history, not live work. After Stop they
+ * stay in the transcript; treating them as live makes the next "继续"
+ * look like a mid-stream steer and hides the already-generated body (#101).
  */
 export function sessionHasLiveGeneration(
   session: {
@@ -86,7 +90,7 @@ export function sessionHasLiveGeneration(
 function isLiveGenerationMessage(message: LiveGenerationCandidate): boolean {
   if (message.hidden) return false
   if (message.role === 'status') return true
-  if (message.role === 'assistant' && (message.isStreaming || message.isPending || message.isIntermediate)) {
+  if (message.role === 'assistant' && (message.isStreaming || message.isPending)) {
     return true
   }
   // Work-chain-only: tools can run after commentary is finalized and before
