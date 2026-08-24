@@ -234,6 +234,8 @@ export abstract class BaseAgent implements AgentBackend {
   // ============================================================
   protected _pendingSourceActivationRestart: { sourceSlug: string; userMessage: string } | null = null;
   protected _currentTurnUserMessage: string | null = null;
+  /** True while this turn gated bundled OfficeCLI for a file deliverable. */
+  protected officeFileDeliveryRequired = false;
 
   setPendingSourceActivationRestart(pending: { sourceSlug: string; userMessage: string }): void {
     // First-writer-wins under parallel `mcp__session__source_test` calls. The
@@ -962,6 +964,7 @@ ${formattedMessages}
     skillPaths: Map<string, string>;
     cleanMessage: string;
     missingSkills: string[];
+    officeFileDeliveryRequired: boolean;
   } {
     const workspaceRoot = this.config.workspace?.rootPath ?? this.workingDirectory;
     const projectRoot = this.config.session?.workingDirectory;
@@ -1033,7 +1036,8 @@ ${formattedMessages}
     return {
       skillPaths,
       cleanMessage,
-      missingSkills: parsed.invalidSkills || []
+      missingSkills: parsed.invalidSkills || [],
+      officeFileDeliveryRequired: officeFormatSlugs.length > 0,
     };
   }
 
@@ -1048,7 +1052,7 @@ ${formattedMessages}
       .join('\n');
     const bundledOfficecli = resolveBundledSkillMdPath('officecli');
     const officeOnly = bundledOfficecli && skillPaths.get('officecli') === bundledOfficecli
-      ? '\nAfter reading the router, run only the `officecli load_skill` commands it selects. Deliver a real .docx / .xlsx / .pptx; do not Write a .md as the primary artifact. Use the bundled CLI on PATH; do not install OfficeCLI or read user-level Office skills.'
+      ? '\nAfter reading the router, run only the `officecli load_skill` commands it selects. Deliver a real .docx / .xlsx / .pptx path. Chat Markdown is fine for status. Do not Write a .md, use `markdown-preview`, or treat a `call_llm` draft as the primary artifact. Use the bundled CLI on PATH; do not install OfficeCLI or read user-level Office skills.'
       : '';
     return `Before proceeding with the user's request, you MUST read the following skill instruction files using the Read tool or \`cat\` via Bash:\n${pathList}${officeOnly}\n\nDo not take any other action until you have read these files.`;
   }
@@ -1068,7 +1072,7 @@ ${formattedMessages}
     attachments?: FileAttachment[],
     options?: ChatOptions
   ): AsyncGenerator<AgentEvent> {
-    const { skillPaths, cleanMessage, missingSkills } = this.extractSkillPaths(message, attachments);
+    const { skillPaths, cleanMessage, missingSkills, officeFileDeliveryRequired } = this.extractSkillPaths(message, attachments);
     if (missingSkills.length > 0) {
       yield { type: 'error', message: `Skill(s) not found: ${missingSkills.join(', ')}` };
       yield { type: 'complete' };
@@ -1110,10 +1114,12 @@ ${formattedMessages}
     // Capture the raw user message for source-activation auto-retry. This is the
     // user-facing text only (no system-reminder, no prior activation suffix).
     this.setCurrentTurnUserMessage(userFacingMessage);
+    this.officeFileDeliveryRequired = officeFileDeliveryRequired;
     try {
       yield* this.chatImpl(effectiveMessage, attachments, options);
     } finally {
       this.setCurrentTurnUserMessage(null);
+      this.officeFileDeliveryRequired = false;
     }
   }
 

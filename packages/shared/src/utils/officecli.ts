@@ -207,13 +207,15 @@ const OFFICE_FILE_PATTERNS: Array<{ re: RegExp; slug: OfficeFormatSkillSlug }> =
   { re: /\.(?:docx|docm)(?:\b|["'）)\]])/i, slug: 'officecli-docx' },
 ];
 
-const OFFICE_ACTION_RE = /(?:创建|生成|制作|做成|做个|做|形成|新建|撰写|编写|写|编辑|修改|更新|读取|打开|查看|检查|审阅|解析|分析|预览|转换|导入|导出|填充|完善|交付|create|generate|build|make|write|edit|modify|update|read|open|inspect|review|parse|analy[sz]e|preview|convert|import|export|fill|deliver)/i;
-const OFFICE_ARTIFACT_MUTATION_RE = /(?:创建|生成|制作|做成|做个|做|形成|新建|撰写|编写|写|编辑|修改|更新|转换|导入|导出|填充|完善|交付|create|generate|build|make|write|edit|modify|update|convert|import|export|fill|deliver)/i;
+const OFFICE_ACTION_RE = /(?:创建|生成|制作|做成|做个|做|形成|新建|撰写|编写|写|编辑|修改|更新|读取|打开|查看|检查|审阅|解析|分析|预览|转换|再转|转成|转为|导入|导出|填充|完善|交付|create|generate|build|make|write|edit|modify|update|read|open|inspect|review|parse|analy[sz]e|preview|convert|import|export|fill|deliver)/i;
+const OFFICE_ARTIFACT_MUTATION_RE = /(?:创建|生成|制作|做成|做个|做|形成|新建|撰写|编写|写|编辑|修改|更新|转换|再转|转成|转为|导入|导出|填充|完善|交付|create|generate|build|make|write|edit|modify|update|convert|import|export|fill|deliver)/i;
 const WORD_PRODUCT_RE = /\bword\b|word\s*(?:文档|报告|表单)|微软\s*word/i;
 const EXCEL_PRODUCT_RE = /\bexcel\b|电子表格|工作簿/i;
 const PPT_PRODUCT_RE = /\bpower\s*point\b|\bpptx\b|\bppt\b|幻灯片|演示文稿|路演(?:稿|PPT)?/i;
 const CSV_EXCEL_INTENT_RE = /(?:\.csv\b|\.tsv\b|\bcsv\b|\btsv\b).*(?:excel|工作簿|电子表格|数据看板)|(?:excel|工作簿|电子表格|数据看板).*(?:\.csv\b|\.tsv\b|\bcsv\b|\btsv\b)/i;
-const EXPLICIT_MARKDOWN_RE = /(?:用|写成?|只要|改成|输出为|转为|转成)\s*(?:markdown|md)\b|(?:in|as|into)\s+markdown\b|\bmarkdown\b|\breadme\b|\.md\b/i;
+const EXPLICIT_MARKDOWN_RE = /(?:用|写成?|只要|改成|输出为|转为|转成)\s*(?:markdown|md|\.md)\b|(?:in|as|into)\s+markdown\b|(?:write|output|save|export)\s+(?:it\s+|this\s+)?(?:as|to|in)\s+(?:markdown|md|\.md)\b|\breadme\b/i;
+const REJECTED_MARKDOWN_RE = /(?:不要|别|不用|勿|禁止).{0,8}(?:markdown|md|\.md)\b|(?:don'?t|do\s+not|without)\s+(?:use\s+|write\s+)?markdown\b/i;
+const MARKDOWN_THEN_OFFICE_RE = /(?:markdown|md|\.md)\b.{0,24}(?:再转|转成|转为|形成|做成|改成).{0,16}(?:\bword\b|\bexcel\b|\bpptx?\b|\bdocx\b|\bxlsx\b|文档)/i;
 const ORDINARY_DOCX_RE = /报告|周报|月报|年报|文档|\breports?\b|\bmemos?\b|\bbriefs?\b|\bdocuments?\b/i;
 const ORDINARY_XLSX_RE = /表格|预算表|(?:一份|一张|一个)表|做个表|\bspreadsheets?\b|\bworkbooks?\b/i;
 const ORDINARY_PPTX_RE = /汇报|\bslides?\b|\bdecks?\b|\bpresentations?\b/i;
@@ -242,6 +244,43 @@ export function isBundledOfficecliLoadSkillCommand(command: string): boolean {
 const AGENTS_OFFICE_SKILL_RE =
   /(?:^|[\\/])\.agents[\\/]skills[\\/](officecli)(?:[\\/]SKILL\.md)?$/i;
 
+/**
+ * True only when the user asked for Markdown / README / .md as the output.
+ * Mentions like "不要用 markdown" or "先出 markdown 再转 word" are not Markdown-only.
+ */
+export function isExplicitMarkdownRequest(text: string): boolean {
+  if (MARKDOWN_THEN_OFFICE_RE.test(text)) return false;
+  if (REJECTED_MARKDOWN_RE.test(text)) {
+    return EXPLICIT_MARKDOWN_RE.test(text.replace(REJECTED_MARKDOWN_RE, ' '));
+  }
+  return EXPLICIT_MARKDOWN_RE.test(text);
+}
+
+const MARKDOWN_WRITE_PATH_RE = /\.(?:md|markdown)$/i;
+const EXEMPT_MARKDOWN_WRITE_RE = /(?:^|[/\\])(?:SKILL|guide|MEMORY|AGENTS|CLAUDE)\.md$/i;
+
+function pathStartsWithFolder(filePath: string, folder?: string): boolean {
+  if (!folder) return false;
+  const target = filePath.replace(/\\/g, '/');
+  const base = folder.replace(/\\/g, '/').replace(/\/+$/, '');
+  return target === base || target.startsWith(`${base}/`);
+}
+
+/** Block Write/Edit of a chat .md as the Office deliverable. Plans and skill files stay allowed. */
+export function isBlockedOfficeMarkdownWrite(
+  filePath: string,
+  options: { plansFolderPath?: string; dataFolderPath?: string } = {},
+): boolean {
+  if (!MARKDOWN_WRITE_PATH_RE.test(filePath)) return false;
+  if (EXEMPT_MARKDOWN_WRITE_RE.test(filePath)) return false;
+  if (pathStartsWithFolder(filePath, options.plansFolderPath)) return false;
+  if (pathStartsWithFolder(filePath, options.dataFolderPath)) return false;
+  return true;
+}
+
+export const OFFICE_MARKDOWN_WRITE_BLOCK_REASON =
+  'This turn requires an Office file (.docx / .xlsx / .pptx) via bundled OfficeCLI. Do not Write or Edit a .md as the primary artifact. Create the Office file with `officecli`, then reply with that path. Chat Markdown is fine for status only.';
+
 function addOfficeFileSlugs(text: string, slugs: Set<OfficeFormatSkillSlug>): void {
   for (const { re, slug } of OFFICE_FILE_PATTERNS) {
     if (re.test(text)) slugs.add(slug);
@@ -261,7 +300,7 @@ function addOfficeIntentSlugs(text: string, slugs: Set<OfficeFormatSkillSlug>): 
   if (PPT_PRODUCT_RE.test(text) || (createsOrEditsArtifact && /pitch\s*deck|融资路演|\bmorph\b|3D\s*morph|\bGLB\b/i.test(text))) {
     slugs.add('officecli-pptx');
   }
-  if (!createsOrEditsArtifact || EXPLICIT_MARKDOWN_RE.test(text)) return;
+  if (!createsOrEditsArtifact || isExplicitMarkdownRequest(text)) return;
   if (ORDINARY_DOCX_RE.test(text)) slugs.add('officecli-docx');
   if (ORDINARY_XLSX_RE.test(text)) slugs.add('officecli-xlsx');
   if (ORDINARY_PPTX_RE.test(text)) slugs.add('officecli-pptx');

@@ -48,5 +48,6 @@ Follow every validation and visual check required by the loaded official guide. 
 4. Resolve every error, `WARNING`, and `UNSUPPORTED` result.
 5. Close the resident document only after the final successful checks.
 6. Reopen or re-read the saved artifact and confirm the delivered path exists.
+7. Do not treat a chat Markdown body, `markdown-preview`, or a `call_llm` draft as the delivered file.
 
 Selection adds one compatibility repair after Word document creation: missing Heading 1–3 `outlineLvl` values are seeded without replacing existing custom styles. If that repair reports an error, the document is not ready for delivery.

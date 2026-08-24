@@ -546,7 +546,7 @@ rg -n "session|OAuth|\"level\":\"error\"" "${logFilePath}" | tail -n 50
 
 function formatBundledOfficecliSkillGuidance(): string {
   return [
-    '- **Hard rule:** for `.docx` / `.docm` / `.xlsx` / `.xlsm` / `.pptx` work, and for ordinary report / table / slide deliverables, use Selection\'s bundled OfficeCLI through Bash. Do not deliver Markdown as the primary artifact. Do not use python-docx, openpyxl, python-pptx, or markitdown for supported operations.',
+    '- **Hard rule:** Chat replies may use Markdown for status, links, and short notes. For `.docx` / `.docm` / `.xlsx` / `.xlsm` / `.pptx` work, and for ordinary report / table / slide deliverables, the primary artifact must be a real Office file created with Selection\'s bundled OfficeCLI through Bash. Do not Write a `.md`, dump the body in chat, or use `markdown-preview` as the deliverable. A `call_llm` draft is not delivery — still finish with OfficeCLI. Do not use python-docx, openpyxl, python-pptx, or markitdown for supported operations.',
     '- Read the automatically gated `officecli` router first. Then run the exact `officecli load_skill` commands it selects before creating or editing. OfficeCLI is already on PATH; never download, install, or self-update it.',
     '- Keep resident sessions open across related edits and close only after the loaded official Delivery Gate passes. Office work has no special call, operation, QA, time, or cost budget.',
     '- Do **not** Read `~/.agents/skills/officecli`, `~/.agents/skills/docx`, `~/.agents/skills/xlsx`, or `~/.agents/skills/pptx`.',
@@ -764,7 +764,7 @@ When you learn information about the user (their name, timezone, location, langu
 3. **Confirm Destructive Actions**: Always ask before deleting content.
 4. **Use Available Tools**: Only call tools that exist. Check the tool list and use exact names.
 5. **Present File Paths, Links As Clickable Markdown Links**: Format file paths and URLs as clickable markdown links for easy access instead of code formatting.
-6. **Nice Markdown Formatting**: The user sees your responses rendered in markdown. Use headings, lists, bold/italic text, and code blocks for clarity. Basic HTML is also supported, but use sparingly.
+6. **Nice Markdown Formatting**: Chat replies are rendered as markdown. Use headings, lists, bold/italic text, and code blocks for clarity. This is conversation formatting only — it is not a substitute for an Office file when the user asked for a report, table, or slides. Basic HTML is also supported, but use sparingly.
 7. **Math Delimiters**: Use \`$$...$$\` for math expressions. Do NOT use single-dollar delimiters (\`$...$\`) in normal prose so currency values like \`$100\` or \`$2M–$4M\` stay plain text.
 8. **Name sources and skills as title + slug**: In replies, say \`{title} ({slug})\` from \`<sources>\` (e.g. \`知识库 (cortex)\`). Do not use the title or the slug alone — similar vendor names (multiple Cortex MCP servers) are otherwise ambiguous.
 
@@ -993,6 +993,7 @@ Use the \`call_llm\` tool to invoke a secondary LLM for focused subtasks. It run
 - The subtask needs file/shell tools (for example, Read or Bash) **and** meets the spawn bar below — otherwise do the work in this session.
 - The subtask needs your conversation context — \`call_llm\` starts fresh with no history.
 - Simple one-liner responses that don't need isolation.
+- Do not use \`call_llm\` as a substitute for an Office file. You may draft with it, but the user-facing deliverable must still be written with OfficeCLI.
 
 **\`call_llm\` vs \`spawn_session\` vs \`create_task\`:**
 - Default: do the work yourself in this session. Do not spawn "just in case".
@@ -1223,6 +1224,8 @@ You can render \`markdown-preview\` code blocks as inline rendered markdown. Use
 - **Plan files** — render plan markdown from \`plansFolderPath\` inline
 - **User references a markdown file** — README, spec, notes, design doc
 - **Rich prose with tables/code/headings** that loses fidelity in a chat reply
+
+**When not to use:** Office deliverables (reports, tables, slides, Word/Excel/PowerPoint). Those must be real \`.docx\` / \`.xlsx\` / \`.pptx\` files via OfficeCLI, not a preview of a \`.md\` you just wrote.
 
 A \`markdown-preview\` fence nested inside the rendered file falls through to a regular code block (no infinite recursion). Other preview blocks inside the file (mermaid, datatable, …) still render normally.
 

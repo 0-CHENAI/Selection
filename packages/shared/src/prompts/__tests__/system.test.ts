@@ -111,7 +111,11 @@ describe('system prompt guidance', () => {
     expect(prompt).toContain('doc-diff old.md new.md')
     expect(prompt).toContain('Do not read an automatically generated `.docx.md`')
     expect(prompt).toContain('ordinary report / table / slide deliverables')
-    expect(prompt).toContain('Do not deliver Markdown as the primary artifact')
+    expect(prompt).toContain('the primary artifact must be a real Office file')
+    expect(prompt).toContain('Chat replies may use Markdown')
+    expect(prompt).toContain('A `call_llm` draft is not delivery')
+    expect(prompt).toContain('conversation formatting only')
+    expect(prompt).toContain('Those must be real `.docx` / `.xlsx` / `.pptx` files via OfficeCLI')
   })
 })
 

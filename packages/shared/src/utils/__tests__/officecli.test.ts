@@ -14,6 +14,8 @@ import {
   BUNDLED_OFFICECLI_SKILL_SLUGS,
   BUNDLED_OFFICECLI_LOAD_SKILL_ALIASES,
   collectOfficeFormatSkillSlugs,
+  isBlockedOfficeMarkdownWrite,
+  isExplicitMarkdownRequest,
   docxOutlineEnsureTiming,
   findDocxArgInOfficecliArgs,
   getBundledOfficecliRouterSkillMd,
@@ -58,6 +60,25 @@ describe('collectOfficeFormatSkillSlugs', () => {
     expect(collectOfficeFormatSkillSlugs('用 markdown 写一份报告')).toEqual([])
     expect(collectOfficeFormatSkillSlugs('write a README')).toEqual([])
     expect(collectOfficeFormatSkillSlugs('解释报告结构')).toEqual([])
+  })
+
+  it('still gates Office when the user rejects Markdown or asks to convert it', () => {
+    expect(isExplicitMarkdownRequest('不要用 markdown，写一份周报')).toBe(false)
+    expect(isExplicitMarkdownRequest('先出 markdown 再转 word')).toBe(false)
+    expect(isExplicitMarkdownRequest('写成 markdown 周报')).toBe(true)
+    expect(isExplicitMarkdownRequest('只要 md')).toBe(true)
+    expect(collectOfficeFormatSkillSlugs('不要用 markdown，写一份周报')).toEqual(['officecli-docx'])
+    expect(collectOfficeFormatSkillSlugs('先出 markdown 再转 word')).toEqual(['officecli-docx'])
+    expect(collectOfficeFormatSkillSlugs("don't use markdown, write a weekly report")).toEqual(['officecli-docx'])
+    expect(collectOfficeFormatSkillSlugs('帮我将他形成word放在我的桌面上')).toEqual(['officecli-docx'])
+    expect(collectOfficeFormatSkillSlugs('做三页汇报')).toEqual(['officecli-pptx'])
+  })
+
+  it('blocks .md writes as the Office deliverable but keeps plans and skill files', () => {
+    expect(isBlockedOfficeMarkdownWrite('/tmp/项目周报.md')).toBe(true)
+    expect(isBlockedOfficeMarkdownWrite('/tmp/项目周报.docx')).toBe(false)
+    expect(isBlockedOfficeMarkdownWrite('/tmp/skills/officecli/SKILL.md')).toBe(false)
+    expect(isBlockedOfficeMarkdownWrite('/tmp/plans/outline.md', { plansFolderPath: '/tmp/plans' })).toBe(false)
   })
 
   it('requires an Office action for product wording without a file path', () => {
@@ -543,6 +564,7 @@ describe('docx outline heading seed', () => {
     expect(body).toContain('Do not impose a model-call, CLI-call, operation, QA, elapsed-time, or cost budget')
     expect(body).toContain('ordinary create/write requests')
     expect(body).toContain('Do not deliver Markdown as the primary artifact')
+    expect(body).toContain('Do not treat a chat Markdown body, `markdown-preview`, or a `call_llm` draft as the delivered file')
   })
 
   it('seeds on wrapper create and repairs Heading1 that exists without outlineLvl', () => {
