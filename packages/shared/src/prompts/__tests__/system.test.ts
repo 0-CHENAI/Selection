@@ -110,6 +110,8 @@ describe('system prompt guidance', () => {
     expect(prompt).not.toContain('**pptx-tool**')
     expect(prompt).toContain('doc-diff old.md new.md')
     expect(prompt).toContain('Do not read an automatically generated `.docx.md`')
+    expect(prompt).toContain('ordinary report / table / slide deliverables')
+    expect(prompt).toContain('Do not deliver Markdown as the primary artifact')
   })
 })
 
