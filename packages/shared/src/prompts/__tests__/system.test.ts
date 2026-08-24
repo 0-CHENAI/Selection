@@ -9,7 +9,7 @@ mock.module('../../config/preferences.ts', () => ({
   formatPreferencesForPrompt: () => '',
 }))
 
-import { getSystemPrompt, formatProjectContextForPrompt } from '../system'
+import { getSystemPrompt, getMiniAgentSystemPrompt, formatProjectContextForPrompt } from '../system'
 import type { ProjectPromptContext } from '../../projects/types.ts'
 import { getBundledOfficecliRouterSkillMd } from '../../utils/officecli.ts'
 
@@ -115,6 +115,24 @@ describe('system prompt guidance', () => {
     expect(prompt).not.toContain('**pptx-tool**')
     expect(prompt).toContain('doc-diff old.md new.md')
     expect(prompt).toContain('Do not read an automatically generated `.docx.md`')
+  })
+
+  it('keeps internal math-formatting rules out of user-facing replies (#103)', () => {
+    const prompts = [
+      getSystemPrompt(undefined, undefined, '/tmp/workspace', '/tmp/workspace'),
+      getMiniAgentSystemPrompt('/tmp/workspace'),
+    ]
+
+    for (const prompt of prompts) {
+      const normalizedPrompt = prompt.toLowerCase()
+      expect(normalizedPrompt).toContain('present only user-relevant content')
+      expect(normalizedPrompt).toContain('silently normalize markdown and math formatting')
+      expect(normalizedPrompt).toMatch(/never (?:mention|discuss) delimiter choices/)
+      expect(normalizedPrompt).toContain('tool-output formatting')
+      expect(prompt).not.toContain('Do NOT use single-dollar delimiters')
+      expect(prompt).not.toContain('avoid single $...$ in prose')
+      expect(prompt).not.toContain('currency remains plain text')
+    }
   })
 })
 
