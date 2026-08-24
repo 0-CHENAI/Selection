@@ -48,6 +48,32 @@ interface StoppedPromptCandidate {
  * continuation. In that case we intentionally return nothing instead of
  * skipping backward and restoring an older, already-submitted user prompt.
  */
+interface LiveGenerationCandidate {
+  role?: string
+  hidden?: boolean
+  isStreaming?: boolean
+  isPending?: boolean
+  isIntermediate?: boolean
+  content?: unknown
+}
+
+/**
+ * True while a visible turn is still generating. Composer submits in this
+ * state belong in the queue, not the transcript (#22, #23).
+ */
+export function sessionHasLiveGeneration(
+  session: { isProcessing?: boolean; messages?: readonly LiveGenerationCandidate[] } | null | undefined,
+): boolean {
+  if (!session) return false
+  if (session.isProcessing) return true
+  return (session.messages ?? []).some(message =>
+    !message.hidden && (
+      (message.role === 'assistant' && (message.isStreaming || message.isPending || message.isIntermediate))
+      || message.role === 'status'
+    ),
+  )
+}
+
 export function getRestorableStoppedPrompt(messages: readonly StoppedPromptCandidate[]): string {
   const latestUserMessage = messages.findLast(message =>
     message.role === 'user' && !message.isQueued

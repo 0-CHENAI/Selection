@@ -29,7 +29,7 @@ import { NavigationProvider } from '@/contexts/NavigationContext'
 import { navigate, routes } from './lib/navigate'
 import { attachmentFromContentRef, toDraftRef } from './lib/drafts'
 import { stripMarkdown } from './utils/text'
-import { coerceInputText } from './lib/input-text'
+import { coerceInputText, sessionHasLiveGeneration } from './lib/input-text'
 import { getSessionsToRefreshAfterStaleReconnect } from './lib/reconnect-recovery'
 import { formatSessionLoadFailure, shouldTreatSessionLoadFailureAsTransportFallback } from './lib/session-load'
 import { extractWorkspaceSlugFromPath } from '@craft-agent/shared/utils/workspace-slug'
@@ -1274,11 +1274,10 @@ export default function App() {
 
   const handleSendMessage = useCallback(async (sessionId: string, message: string, attachments?: FileAttachment[], skillSlugs?: string[], externalBadges?: ContentBadge[]) => {
     try {
-      // Capture pre-send processing state so we can flag mid-stream sends
-      // for the queued badge (#616 follow-up — covers Pi steer path which
-      // returns status 'accepted', not 'queued').
+      // Capture live generation so composer submits stay in the queue
+      // instead of looking like a new transcript turn (#22, #23).
       const sessionSnapshot = store.get(sessionAtomFamily(sessionId))
-      const sendingMidStream = sessionSnapshot?.isProcessing === true
+      const sendingMidStream = sessionHasLiveGeneration(sessionSnapshot)
       const optionSnapshot = sessionOptions.get(sessionId)
 
       // Step 1: Store attachments and get persistent metadata

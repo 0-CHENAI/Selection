@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test'
-import { appendRestoredInput, coerceInputText, getRestorableStoppedPrompt } from '../input-text'
+import { appendRestoredInput, coerceInputText, getRestorableStoppedPrompt, sessionHasLiveGeneration } from '../input-text'
 
 describe('coerceInputText', () => {
   it('preserves plain strings', () => {
@@ -72,5 +72,25 @@ describe('getRestorableStoppedPrompt', () => {
       { role: 'user', content: 'active prompt' },
       { role: 'user', content: 'queued draft', isQueued: true },
     ])).toBe('active prompt')
+  })
+})
+
+describe('sessionHasLiveGeneration', () => {
+  it('treats isProcessing as live generation', () => {
+    expect(sessionHasLiveGeneration({ isProcessing: true, messages: [] })).toBe(true)
+  })
+
+  it('treats a streaming assistant body as live even if isProcessing is stale', () => {
+    expect(sessionHasLiveGeneration({
+      isProcessing: false,
+      messages: [{ role: 'assistant', isStreaming: true, isPending: true }],
+    })).toBe(true)
+  })
+
+  it('does not treat idle transcript messages as live generation', () => {
+    expect(sessionHasLiveGeneration({
+      isProcessing: false,
+      messages: [{ role: 'user', content: 'done' }, { role: 'assistant', content: 'reply' }],
+    })).toBe(false)
   })
 })

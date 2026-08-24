@@ -19,7 +19,7 @@ import {
   type BackendHostRuntimeContext,
   type PostInitResult,
 } from '@craft-agent/shared/agent/backend'
-import { getLlmConnection, getLlmConnections, getDefaultLlmConnection, getDefaultThinkingLevel, getSharedProjectMemoryEnabled, resetManagedAnthropicAuthEnvVars, resolveMidStreamBehavior, getPersistedUiLanguage, resolveTitleLanguageName } from '@craft-agent/shared/config'
+import { getLlmConnection, getLlmConnections, getDefaultLlmConnection, getDefaultThinkingLevel, getSharedProjectMemoryEnabled, resetManagedAnthropicAuthEnvVars, getPersistedUiLanguage, resolveTitleLanguageName } from '@craft-agent/shared/config'
 import type { MidStreamBehavior } from '@craft-agent/shared/config'
 import { PrivilegedExecutionBroker } from '@craft-agent/server-core/services'
 import { isValidWorkingDirectory } from '../utils/path-validation'
@@ -6074,33 +6074,20 @@ export class SessionManager implements ISessionManager {
     // this process. One call appends; every later continuation observes it.
     if (acknowledgeExistingClientMessage()) return
 
-    // If currently processing, behavior depends on the connection's
-    // `midStreamBehavior` (resolved via {@link resolveMidStreamBehavior}):
-    //
-    // - 'steer': change direction now. Soft-abort the live query and replay
-    //   the follow-up as a new turn. Do not call `redirect()` (it waits for
-    //   the current tool, then lets the original answer finish) and do not
-    //   dispose the agent.
-    // - 'queue': hold the message; the current turn runs to completion;
-    //   replay afterwards. No abort.
+    // Composer submits while a turn is running always enqueue (#22, #23).
+    // Changing direction is sendQueuedMessageNow, not Enter.
     // Hidden system nudges never abort a live user turn.
     // Regenerating calls sendMessage with existingMessageId while
     // isProcessing is already true — that is a new turn, not mid-stream.
     if (managed.isProcessing && !existingMessageId) {
-      const connection = resolveSessionConnection(managed.llmConnection, undefined)
-      const behavior = options?.hidden
-        ? 'queue'
-        : (connection ? resolveMidStreamBehavior(connection) : 'steer')
-      const shouldInterrupt = behavior === 'steer'
       const agent = managed.agent
 
       sessionLog.info('mid-stream send', {
         sessionId,
-        behavior,
-        shouldInterrupt,
+        behavior: 'queue',
+        shouldInterrupt: false,
         queueLengthBefore: managed.messageQueue.length,
         backend: agent ? agent.constructor.name : 'none',
-        connectionSlug: connection?.slug,
       })
 
       // Create user message for UI
@@ -6112,9 +6099,9 @@ export class SessionManager implements ISessionManager {
         timestamp: this.monotonic(),
         attachments: storedAttachments,
         badges: options?.badges,
-        isQueued: !shouldInterrupt,
-        queuedSkillSlugs: shouldInterrupt ? undefined : options?.skillSlugs,
-        queuedContext: shouldInterrupt ? undefined : options?.queueContext,
+        isQueued: true,
+        queuedSkillSlugs: options?.skillSlugs,
+        queuedContext: options?.queueContext,
         // Hidden system-generated messages reach the model but never render as a
         // transcript bubble (e.g. background-task-completion nudge).
         ...(options?.hidden ? { hidden: true } : {}),
@@ -6125,24 +6112,18 @@ export class SessionManager implements ISessionManager {
         type: 'user_message',
         sessionId,
         message: userMessage,
-        status: shouldInterrupt ? 'accepted' : 'queued',
+        status: 'queued',
         optimisticMessageId: options?.optimisticMessageId
       }, managed.workspace.id)
 
       managed.messageQueue.push({ message, attachments, storedAttachments, options, messageId: userMessage.id, optimisticMessageId: options?.optimisticMessageId })
-      if (shouldInterrupt) {
-        managed.wasInterrupted = true
-        this.collapseOpenTurnBeforeSteer(managed, userMessage.id)
-        // Soft-abort so leftover tokens stop. Replay uses existingMessageId.
-        managed.stopRequested = true
-        agent?.forceAbort(AbortReason.Redirect)
-      }
 
       this.persistSession(managed)
-      // Force a synchronous flush so the user message is genuinely on disk
-      // before we tell the renderer "accepted" — `persistSession` only
-      // enqueues with a 500ms debounce. (#616 reliability fix.)
+      // Force a synchronous flush so the queued item is genuinely on disk
+      // before we ack the renderer — `persistSession` only enqueues with a
+      // 500ms debounce. (#616 reliability fix.)
       await this.flushSession(managed.id)
+      this.emitQueueChanged(managed)
       onAck?.(userMessage.id)
       return
     }
