@@ -663,6 +663,7 @@ export interface ElectronAPI {
 
   // Automations
   getAutomations(workspaceId: string): Promise<unknown>
+  validateAutomations(workspaceId: string): Promise<{ valid: boolean; errors: string[]; registeredIds: string[] }>
 
   // Automation testing (manual trigger)
   testAutomation(payload: TestAutomationPayload): Promise<TestAutomationResult>

@@ -21,6 +21,30 @@ function withConfigMutex<T>(workspaceRoot: string, fn: () => Promise<T>): Promis
   return next
 }
 
+export function findStrictAutomationRegistrationErrors(
+  content: unknown,
+  validEvents: readonly string[],
+): string[] {
+  const strictErrors: string[] = []
+  const rawAutomations = (content as { automations?: unknown } | null)?.automations
+  if (!rawAutomations || typeof rawAutomations !== 'object') return strictErrors
+  for (const [event, matchers] of Object.entries(rawAutomations as Record<string, unknown>)) {
+    if (!validEvents.includes(event)) strictErrors.push(`Unknown automation event: ${event}`)
+    if (!Array.isArray(matchers)) continue
+    for (let index = 0; index < matchers.length; index++) {
+      const actions = (matchers[index] as { actions?: unknown } | null)?.actions
+      if (!Array.isArray(actions)) continue
+      for (const action of actions) {
+        const type = (action as { type?: unknown } | null)?.type
+        if (type !== 'prompt' && type !== 'webhook' && type !== 'decision') {
+          strictErrors.push(`automations.${event}[${index}]: Unknown action type: ${String(type)}`)
+        }
+      }
+    }
+  }
+  return strictErrors
+}
+
 // Shared helper: resolve workspace, read automations.json, validate matcher, mutate, write back
 interface AutomationsConfigJson { automations?: Record<string, Record<string, unknown>[]>; [key: string]: unknown }
 async function withAutomationMatcher(workspaceId: string, eventName: string, matcherIndex: number, mutate: (matchers: Record<string, unknown>[], index: number, config: AutomationsConfigJson, genId: () => string) => void) {
@@ -56,6 +80,7 @@ async function withAutomationMatcher(workspaceId: string, eventName: string, mat
 
 export const HANDLED_CHANNELS = [
   RPC_CHANNELS.automations.GET,
+  RPC_CHANNELS.automations.VALIDATE,
   RPC_CHANNELS.automations.TEST,
   RPC_CHANNELS.automations.SET_ENABLED,
   RPC_CHANNELS.automations.DUPLICATE,
@@ -92,6 +117,40 @@ export function registerAutomationsHandlers(server: RpcServer, deps: HandlerDeps
       }
       log.error(`AUTOMATIONS_GET: Error loading automations:`, error)
       throw error
+    }
+  })
+
+  // Validate the exact persisted file with the same schema and semantic checks
+  // used by AutomationSystem before renderer code is allowed to report success.
+  server.handle(RPC_CHANNELS.automations.VALIDATE, async (_ctx, workspaceId: string) => {
+    const workspace = getWorkspaceByNameOrId(workspaceId)
+    if (!workspace) return { valid: false, errors: ['Workspace not found'], registeredIds: [] }
+    try {
+      const { resolveAutomationsConfigPath } = await import('@craft-agent/shared/automations/resolve-config-path')
+      const { validateAutomationsConfig, VALID_EVENTS } = await import('@craft-agent/shared/automations')
+      const content = JSON.parse(await readFile(resolveAutomationsConfigPath(workspace.rootPath), 'utf-8'))
+      const result = validateAutomationsConfig(content)
+      const strictErrors = [
+        ...result.errors,
+        ...findStrictAutomationRegistrationErrors(content, VALID_EVENTS),
+      ]
+      const registeredIds = result.config
+        ? Object.values(result.config.automations)
+          .flatMap((matchers) => matchers ?? [])
+          .map((matcher) => matcher.id?.trim())
+          .filter((id): id is string => Boolean(id))
+        : []
+      return {
+        valid: result.valid && strictErrors.length === 0,
+        errors: strictErrors,
+        registeredIds: [...new Set(registeredIds)].sort(),
+      }
+    } catch (error) {
+      return {
+        valid: false,
+        errors: [error instanceof Error ? error.message : String(error)],
+        registeredIds: [],
+      }
     }
   })
 

@@ -370,6 +370,7 @@ export const RPC_CHANNELS = {
   },
   automations: {
     GET: 'automations:get',
+    VALIDATE: 'automations:validate',
     TEST: 'automations:test',
     SET_ENABLED: 'automations:setEnabled',
     DUPLICATE: 'automations:duplicate',

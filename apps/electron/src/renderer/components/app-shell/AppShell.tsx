@@ -44,6 +44,8 @@ import { cn } from "@/lib/utils"
 import { isMac } from "@/lib/platform"
 import { Button } from "@/components/ui/button"
 import { HeaderIconButton } from "@/components/ui/HeaderIconButton"
+import { CreationJobsButton } from "./CreationJobsButton"
+import type { CreationJob } from "@/atoms/creation-jobs"
 import { resolveInheritedFilterParams, type FilterMode } from "./inherited-filter-params"
 import { Separator } from "@/components/ui/separator"
 import { Tooltip, TooltipTrigger, TooltipContent } from "@craft-agent/ui"
@@ -149,6 +151,10 @@ import {
 } from "./panel-constants"
 import { hasOpenOverlay } from "@/lib/overlay-detection"
 import { clearSourceIconCaches } from "@/lib/icon-cache"
+import {
+  CREATION_COMPLETED_EVENT,
+  type CreationCompletedEventDetail,
+} from "@/lib/creation-job-validation"
 import { dispatchFocusInputEvent } from "./input/focus-input-events"
 
 /**
@@ -890,6 +896,8 @@ function AppShellContent({
   }, [])
   // Sources state (workspace-scoped)
   const [sources, setSources] = React.useState<LoadedSource[]>([])
+  const activeWorkspaceIdRef = React.useRef(activeWorkspaceId)
+  activeWorkspaceIdRef.current = activeWorkspaceId
   // Sync sources to atom for NavigationContext auto-selection
   const setSourcesAtom = useSetAtom(sourcesAtom)
   React.useEffect(() => {
@@ -917,7 +925,7 @@ function AppShellContent({
     automationPendingDelete, pendingDeleteAutomation, setAutomationPendingDelete,
     handleTestAutomation, handleSimulateMatch, handleToggleAutomation, handleDuplicateAutomation, handleDeleteAutomation, confirmDeleteAutomation,
     getAutomationHistory, handleReplayAutomation,
-  } = useAutomations(activeWorkspaceId)
+  } = useAutomations(activeWorkspaceId, navigateToSessionInPanel)
 
   const { projects } = useProjects(activeWorkspaceId)
   const projectMenuOptions = useMemo(
@@ -1397,6 +1405,40 @@ function AppShellContent({
     })
   }, [activeWorkspaceId, activeSessionWorkingDirectory])
 
+  // Completion is announced only after the resource has been re-read into its
+  // owning list. This prevents a success toast from racing a delayed watcher.
+  React.useEffect(() => {
+    const handleCreationCompleted = (event: Event) => {
+      const detail = (event as CustomEvent<CreationCompletedEventDetail>).detail
+      if (!detail || detail.workspaceId !== activeWorkspaceIdRef.current) return
+      if (detail.kind === 'source') {
+        detail.waitUntil(window.electronAPI.getSources(detail.workspaceId).then((loaded) => {
+          const refreshed = loaded || []
+          if (!refreshed.some((source) => source.config.slug === detail.id)) {
+            throw new Error(`Created source "${detail.id}" was not visible after refresh.`)
+          }
+          if (activeWorkspaceIdRef.current === detail.workspaceId) {
+            clearSourceIconCaches()
+            setSources(refreshed)
+          }
+        }))
+      } else if (detail.kind === 'skill') {
+        detail.waitUntil(window.electronAPI.getSkills(
+          detail.workspaceId,
+          activeSessionWorkingDirectory,
+        ).then((loaded) => {
+          const refreshed = loaded || []
+          if (!refreshed.some((skill) => skill.slug === detail.id)) {
+            throw new Error(`Created skill "${detail.id}" was not visible after refresh.`)
+          }
+          if (activeWorkspaceIdRef.current === detail.workspaceId) setSkills(refreshed)
+        }))
+      }
+    }
+    window.addEventListener(CREATION_COMPLETED_EVENT, handleCreationCompleted)
+    return () => window.removeEventListener(CREATION_COMPLETED_EVENT, handleCreationCompleted)
+  }, [activeSessionWorkingDirectory])
+
   // Filter session metadata by active workspace
   // Also exclude hidden sessions (mini-agent sessions) from all counts and lists
   // For remote workspaces, sessions have the remote workspace ID (not the local one),
@@ -1842,7 +1884,8 @@ function AppShellContent({
   // We use controlled popovers instead of deep links so the user can type
   // their request in the popover UI before opening a new chat window.
   // add-source variants: add-source (generic), add-source-api, add-source-mcp, add-source-local
-  const [editPopoverOpen, setEditPopoverOpen] = useState<'statuses' | 'labels' | 'views' | 'add-source' | 'add-source-api' | 'add-source-mcp' | 'add-source-local' | 'add-skill' | 'add-label' | 'automation-config' | 'add-project' | null>(null)
+  type ControlledEditPopoverKey = 'statuses' | 'labels' | 'views' | 'add-source' | 'add-source-api' | 'add-source-mcp' | 'add-source-local' | 'add-skill' | 'add-label' | 'add-automation' | 'add-project'
+  const [editPopoverOpen, setEditPopoverOpen] = useState<ControlledEditPopoverKey | null>(null)
   const [copySkillsFromOpen, setCopySkillsFromOpen] = useState(false)
   const [copySourcesFromOpen, setCopySourcesFromOpen] = useState(false)
   const [mcpFileImportOpen, setMcpFileImportOpen] = useState(false)
@@ -1962,8 +2005,34 @@ function AppShellContent({
   // Opens the EditPopover for adding a new automation
   const openAddAutomation = useCallback(() => {
     captureContextMenuPosition()
-    setTimeout(() => setEditPopoverOpen('automation-config'), 50)
+    setTimeout(() => setEditPopoverOpen('add-automation'), 50)
   }, [captureContextMenuPosition])
+
+  const reopenCreationJob = useCallback((contextKey: string) => {
+    const supportedKeys: ControlledEditPopoverKey[] = [
+      'add-source',
+      'add-source-api',
+      'add-source-mcp',
+      'add-source-local',
+      'add-skill',
+      'add-automation',
+    ]
+    if (!supportedKeys.includes(contextKey as ControlledEditPopoverKey)) return
+    editPopoverAnchorY.current = 52
+    setEditPopoverOpen(contextKey as ControlledEditPopoverKey)
+  }, [])
+
+  const openCreationResult = useCallback((job: CreationJob, resultId: string) => {
+    if (job.kind === 'source') {
+      navigateToSource(resultId)
+      return
+    }
+    if (job.kind === 'skill') {
+      navigate(routes.view.skills(resultId))
+      return
+    }
+    navigate(routes.view.automations({ automationId: resultId }))
+  }, [navigate, navigateToSource])
 
   // Handler for "Add Project" context menu action — creates a project directly
   // Open the "Create Project" dialog so the user can provide a name up front.
@@ -2340,6 +2409,13 @@ function AppShellContent({
           onToggleFocusMode={() => setIsSidebarAndNavigatorHidden(prev => !prev)}
           onAddSessionPanel={() => handleNewChat(true)}
           onAddBrowserPanel={() => { void handleNewBrowserWindow() }}
+          workspaceActivity={activeWorkspaceId ? (
+            <CreationJobsButton
+              workspaceId={activeWorkspaceId}
+              onReopen={reopenCreationJob}
+              onOpenResult={openCreationResult}
+            />
+          ) : undefined}
           isCompact={isAutoCompact}
         />
 
@@ -3440,7 +3516,7 @@ function AppShellContent({
                           tooltip={t("sidebarMenu.addAutomation")}
                         />
                       }
-                      {...getEditConfig('automation-config', activeWorkspace.rootPath)}
+                      {...getEditConfig('add-automation', activeWorkspace.rootPath)}
                     />
                   )}
                   {/* Add Project button (only for projects mode) */}
@@ -3500,6 +3576,7 @@ function AppShellContent({
               /* Automations List - filtered by type if automationFilter is active */
               <AutomationsListPanel
                 automations={automations}
+                automationTestResults={automationTestResults}
                 automationFilter={automationFilter ? { kind: AUTOMATION_TYPE_TO_FILTER_KIND[automationFilter.automationType] ?? 'all' } : undefined}
                 onAutomationClick={handleAutomationSelect}
                 onTestAutomation={handleTestAutomation}
@@ -3804,8 +3881,8 @@ function AppShellContent({
           )}
           {/* Add Automation EditPopover - triggered from "Add Automation" context menu in automations */}
           <EditPopover
-            open={editPopoverOpen === 'automation-config'}
-            onOpenChange={(isOpen) => setEditPopoverOpen(isOpen ? 'automation-config' : null)}
+            open={editPopoverOpen === 'add-automation'}
+            onOpenChange={(isOpen) => setEditPopoverOpen(isOpen ? 'add-automation' : null)}
             modal={true}
             trigger={
               <div
@@ -3816,7 +3893,7 @@ function AppShellContent({
             }
             side="bottom"
             align="start"
-            {...getEditConfig('automation-config', activeWorkspace.rootPath)}
+            {...getEditConfig('add-automation', activeWorkspace.rootPath)}
           />
           {/* Add Label EditPopover - triggered from "Add New Label" context menu on labels */}
           <EditPopover

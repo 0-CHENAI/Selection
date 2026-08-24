@@ -24,6 +24,7 @@ import {
 import type { SettingsMenuItem } from "../../../shared/menu-schema"
 import { SquarePenRounded } from "../icons/SquarePenRounded"
 import { useEffect, useRef, useState } from "react"
+import type { ReactNode } from "react"
 import { BrowserTabStrip } from "../browser/BrowserTabStrip"
 import type { Workspace } from "../../../shared/types"
 import { WorkspaceSwitcher } from "./WorkspaceSwitcher"
@@ -55,6 +56,8 @@ interface TopBarProps {
   onToggleFocusMode: () => void
   onAddSessionPanel: () => void
   onAddBrowserPanel: () => void
+  /** Persistent workspace-level status/action surface rendered in every layout. */
+  workspaceActivity?: ReactNode
   /** When true, hides controls that don't apply in compact/mobile layout */
   isCompact?: boolean
 }
@@ -81,6 +84,7 @@ export function TopBar({
   onToggleFocusMode,
   onAddSessionPanel,
   onAddBrowserPanel,
+  workspaceActivity,
   isCompact,
 }: TopBarProps) {
   const { t } = useTranslation()
@@ -218,6 +222,12 @@ export function TopBar({
           </div>
         </div>
       </div>
+
+      {workspaceActivity && (
+        <div className="titlebar-no-drag flex shrink-0 items-center">
+          {workspaceActivity}
+        </div>
+      )}
 
       {/* === RIGHT: Browser strip + add panel === */}
       {!isCompact && (

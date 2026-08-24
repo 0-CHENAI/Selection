@@ -12,7 +12,7 @@
 import * as React from 'react'
 import { useState, useCallback } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Webhook } from 'lucide-react'
+import { Loader2, Webhook } from 'lucide-react'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@craft-agent/ui'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { EntityListEmptyScreen } from '@/components/ui/entity-list-empty'
@@ -27,7 +27,7 @@ import { ResourceTransferDialog } from '@/components/resources/ResourceTransferD
 import { useAppShellContext } from '@/context/AppShellContext'
 import { cn } from '@/lib/utils'
 import { automationSelection } from '@/hooks/useEntitySelection'
-import { APP_EVENTS, AGENT_EVENTS, getEventDisplayName, type AutomationListItem, type AutomationListFilter } from './types'
+import { APP_EVENTS, AGENT_EVENTS, getEventDisplayName, type AutomationListItem, type AutomationListFilter, type TestResult } from './types'
 import { formatShortRelativeTime } from './utils'
 
 const {
@@ -50,6 +50,7 @@ function MicroBadge({ children, colorClass }: { children: React.ReactNode; color
 
 interface AutomationItemProps {
   automation: AutomationListItem
+  testResult?: TestResult
   isSelected: boolean
   isInMultiSelect: boolean
   isMultiSelectActive: boolean
@@ -68,6 +69,7 @@ interface AutomationItemProps {
 
 function AutomationItem({
   automation,
+  testResult,
   isSelected,
   isInMultiSelect,
   isMultiSelectActive,
@@ -84,6 +86,7 @@ function AutomationItem({
   onExport,
 }: AutomationItemProps) {
   const { t } = useTranslation()
+  const isTestRunning = testResult?.state === 'running'
   const handleClick = useCallback((e: React.MouseEvent) => {
     if (e.button === 2) {
       // Right-click: auto-add to selection if multi-select active
@@ -111,6 +114,13 @@ function AutomationItem({
       isSelected={isSelected}
       isInMultiSelect={isInMultiSelect}
       onMouseDown={handleClick}
+      buttonProps={{
+        onKeyDown: (event: React.KeyboardEvent<HTMLButtonElement>) => {
+          if (event.key !== 'Enter' && event.key !== ' ') return
+          event.preventDefault()
+          onClick()
+        },
+      }}
       icon={<AutomationAvatar event={automation.event} size="sm" />}
       title={automation.name}
       badges={
@@ -131,7 +141,15 @@ function AutomationItem({
         </>
       }
       trailing={
-        automation.lastExecutedAt ? (
+        isTestRunning ? (
+          <span
+            className="shrink-0 text-muted-foreground"
+            role="status"
+            aria-label={t('automations.testRunning')}
+          >
+            <Loader2 className="h-3.5 w-3.5 animate-spin motion-reduce:animate-none" aria-hidden="true" />
+          </span>
+        ) : automation.lastExecutedAt ? (
           <Tooltip>
             <TooltipTrigger asChild>
               <span className="shrink-0 text-[11px] text-foreground/40 whitespace-nowrap cursor-default">
@@ -149,6 +167,7 @@ function AutomationItem({
           automationId={automation.id}
           automationName={automation.name}
           enabled={automation.enabled}
+          testResult={testResult}
           onToggleEnabled={onToggleEnabled}
           onTest={onTest}
           onSimulateMatch={onSimulateMatch}
@@ -169,6 +188,7 @@ function AutomationItem({
 
 export interface AutomationsListPanelProps {
   automations: AutomationListItem[]
+  automationTestResults?: Record<string, TestResult>
   automationFilter?: AutomationListFilter | null
   onAutomationClick: (automationId: string) => void
   onDeleteAutomation?: (automationId: string) => void
@@ -183,6 +203,7 @@ export interface AutomationsListPanelProps {
 
 export function AutomationsListPanel({
   automations,
+  automationTestResults,
   automationFilter,
   onAutomationClick,
   onDeleteAutomation,
@@ -279,7 +300,7 @@ export function AutomationsListPanel({
                   {t('automations.addAutomation')}
                 </button>
               }
-              {...getEditConfig('automation-config', workspaceRootPath)}
+              {...getEditConfig('add-automation', workspaceRootPath)}
             />
           )}
         </EntityListEmptyScreen>
@@ -326,6 +347,7 @@ export function AutomationsListPanel({
                 <AutomationItem
                   key={automation.id}
                   automation={automation}
+                  testResult={automationTestResults?.[automation.id]}
                   isSelected={selectedAutomationId === automation.id}
                   isInMultiSelect={isMultiSelectActive && isInSelection(automation.id)}
                   isMultiSelectActive={isMultiSelectActive}

@@ -8,18 +8,43 @@
  */
 
 import * as React from 'react'
-import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
+import { useState, useRef, useEffect, useCallback, useMemo, useLayoutEffect } from 'react'
+import { useAtomValue, useSetAtom } from 'jotai'
 import { useTranslation } from 'react-i18next'
 import i18n from 'i18next'
 import { ChevronDown, ChevronUp, GripHorizontal, Square, X } from 'lucide-react'
-import { motion, AnimatePresence } from 'motion/react' // motion used for backdrop only
+import { toast } from 'sonner'
+import { AnimatePresence, motion, useReducedMotion } from 'motion/react'
 import { Popover, PopoverTrigger, PopoverContent } from './popover'
 import { Button } from './button'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from './alert-dialog'
 import { cn } from '@/lib/utils'
 import { usePlatform } from '@craft-agent/ui'
 import type { ContentBadge, Session, CreateSessionOptions } from '../../../shared/types'
 import { useActiveWorkspace, useAppShellContext, useSession, usePendingPermission, usePendingCredential } from '@/context/AppShellContext'
 import { useEscapeInterrupt } from '@/context/EscapeInterruptContext'
+import {
+  beginCreationJobAttemptAtom,
+  claimCreationJobAtom,
+  creationJobsAtom,
+  findActiveCreationJob,
+  findLatestCreationJob,
+  getOrCreateCreationSession,
+  patchCreationJobAtom,
+  restartCreationJobAttemptAtom,
+  shouldCancelCreationJob,
+  type CreationKind,
+} from '@/atoms/creation-jobs'
+import { readCreationIds } from '@/lib/creation-job-validation'
 import { ChatDisplay } from '../app-shell/ChatDisplay'
 import { HeaderIconButton } from './HeaderIconButton'
 import {
@@ -95,6 +120,7 @@ export type EditContextKey =
   | 'add-label'
   | 'edit-views'
   | 'edit-tool-icons'
+  | 'add-automation'
   | 'automation-config'
 
 /**
@@ -102,6 +128,8 @@ export type EditContextKey =
  * Returned by getEditConfig() for use in EditPopover.
  */
 export interface EditConfig {
+  /** Stable key used to resume a detached inline creation job. */
+  contextKey: EditContextKey
   /** Context passed to the agent */
   context: EditContext
   /** Example text shown in the popover placeholder */
@@ -122,13 +150,15 @@ export interface EditConfig {
   systemPromptPreset?: 'default' | 'mini'
   /** When true, executes inline within the popover instead of opening a new window */
   inlineExecution?: boolean
+  /** Marks this context as a resource creation flow that must be verified after completion. */
+  creationKind?: CreationKind
 }
 
 /**
  * Registry of all edit configurations.
  * Each entry contains all strings needed for the edit popover and agent context.
  */
-const EDIT_CONFIGS: Record<EditContextKey, (location: string) => EditConfig> = {
+const EDIT_CONFIGS: Record<EditContextKey, (location: string) => Omit<EditConfig, 'contextKey'>> = {
   'workspace-permissions': (location) => ({
     context: {
       label: 'Permission Settings',
@@ -319,13 +349,16 @@ const EDIT_CONFIGS: Record<EditContextKey, (location: string) => EditConfig> = {
         'Ask clarifying questions if needed: What service? MCP or API? Auth type? ' +
         'Create the source folder and config.json in the workspace sources directory. ' +
         'Follow the patterns in ~/.craft-agent/docs/sources.md. ' +
-        'After creating the source, call source_test with the source slug to verify the configuration.',
+        'Use a unique explicit config.slug. After creating the source, call source_test with that slug, ' +
+        'then re-read config.json and confirm the persisted slug. Do not claim success before both validation and re-read succeed.',
     },
     example: 'Connect to my Craft space',
     overridePlaceholder: 'What would you like to connect?',
     displayLabelKey: 'editPopover.label.addSource',
     exampleKey: 'editPopover.example.addSource',
     overridePlaceholderKey: 'editPopover.placeholder.addSource',
+    inlineExecution: true,
+    creationKind: 'source',
   }),
 
   // Filter-specific add-source contexts: user is viewing a filtered list and wants to add that type
@@ -340,13 +373,16 @@ const EDIT_CONFIGS: Record<EditContextKey, (location: string) => EditConfig> = {
         'Ask about the API endpoint URL and auth type. ' +
         'Create the source folder and config.json in the workspace sources directory. ' +
         'Follow the patterns in ~/.craft-agent/docs/sources.md. ' +
-        'After creating the source, call source_test with the source slug to verify the configuration.',
+        'Use a unique explicit config.slug. After creating the source, call source_test with that slug, ' +
+        'then re-read config.json and confirm the persisted slug. Do not claim success before both validation and re-read succeed.',
     },
     example: 'Connect to the OpenAI API',
     overridePlaceholder: 'What API would you like to connect?',
     displayLabelKey: 'editPopover.label.addApi',
     exampleKey: 'editPopover.example.addSourceApi',
     overridePlaceholderKey: 'editPopover.placeholder.addSourceApi',
+    inlineExecution: true,
+    creationKind: 'source',
   }),
 
   'add-source-mcp': (location) => ({
@@ -360,13 +396,16 @@ const EDIT_CONFIGS: Record<EditContextKey, (location: string) => EditConfig> = {
         'Ask about the service they want to connect to and whether it\'s a remote URL or local command. ' +
         'Create the source folder and config.json in the workspace sources directory. ' +
         'Follow the patterns in ~/.craft-agent/docs/sources.md. ' +
-        'After creating the source, call source_test with the source slug to verify the configuration.',
+        'Use a unique explicit config.slug. After creating the source, call source_test with that slug, ' +
+        'then re-read config.json and confirm the persisted slug. Do not claim success before both validation and re-read succeed.',
     },
     example: 'Connect to Linear',
     overridePlaceholder: 'What MCP server would you like to connect?',
     displayLabelKey: 'editPopover.label.addMcpServer',
     exampleKey: 'editPopover.example.addSourceMcp',
     overridePlaceholderKey: 'editPopover.placeholder.addSourceMcp',
+    inlineExecution: true,
+    creationKind: 'source',
   }),
 
   'add-source-local': (location) => ({
@@ -381,13 +420,16 @@ const EDIT_CONFIGS: Record<EditContextKey, (location: string) => EditConfig> = {
         'If unclear, ask about the folder path they want to connect. ' +
         'Create the source folder and config.json in the workspace sources directory. ' +
         'Follow the patterns in ~/.craft-agent/docs/sources.md. ' +
-        'After creating the source, call source_test with the source slug to verify the configuration.',
+        'Use a unique explicit config.slug. After creating the source, call source_test with that slug, ' +
+        'then re-read config.json and confirm the persisted slug. Do not claim success before both validation and re-read succeed.',
     },
     example: 'Connect to my Obsidian vault',
     overridePlaceholder: 'What folder would you like to connect?',
     displayLabelKey: 'editPopover.label.addLocalFolder',
     exampleKey: 'editPopover.example.addSourceLocal',
     overridePlaceholderKey: 'editPopover.placeholder.addSourceLocal',
+    inlineExecution: true,
+    creationKind: 'source',
   }),
 
   'add-skill': (location) => ({
@@ -400,13 +442,16 @@ const EDIT_CONFIGS: Record<EditContextKey, (location: string) => EditConfig> = {
         'Ask clarifying questions if needed: What should the skill do? When should it trigger? ' +
         'Create the skill folder and SKILL.md in the workspace skills directory. ' +
         'Follow the patterns in ~/.craft-agent/docs/skills.md. ' +
-        'After creating the skill, call skill_validate with the skill slug to verify the SKILL.md file.',
+        'Use a unique explicit folder slug. After creating the skill, call skill_validate with that slug, ' +
+        'then re-read SKILL.md and confirm it persists. Do not claim success before both validation and re-read succeed.',
     },
     example: 'Review PRs following our code standards',
     overridePlaceholder: 'What should I learn to do?',
     displayLabelKey: 'editPopover.label.addSkill',
     exampleKey: 'editPopover.example.addSkill',
     overridePlaceholderKey: 'editPopover.placeholder.addSkill',
+    inlineExecution: true,
+    creationKind: 'skill',
   }),
 
   // Status configuration context
@@ -546,6 +591,26 @@ const EDIT_CONFIGS: Record<EditContextKey, (location: string) => EditConfig> = {
     inlineExecution: true,        // Execute inline in popover
   }),
 
+  'add-automation': (location) => ({
+    context: {
+      label: 'Add Automation',
+      filePath: `${location}/automations.json`,
+      context:
+        'The user wants to add one automation to automations.json. ' +
+        'Read ~/.craft-agent/docs/automations.md and preserve the existing version 2 structure. ' +
+        'Add exactly one matcher entry with a unique explicit stable id (six lowercase hexadecimal characters), ' +
+        'then re-read automations.json and verify that the new id and requested actions persist. ' +
+        'Do not claim success before the file is valid and the re-read verification succeeds.',
+    },
+    example: 'Run a daily workspace summary',
+    displayLabelKey: 'editPopover.label.automationConfiguration',
+    exampleKey: 'editPopover.example.automationConfig',
+    model: 'default',
+    systemPromptPreset: 'mini',
+    inlineExecution: true,
+    creationKind: 'automation',
+  }),
+
   'automation-config': (location) => ({
     context: {
       label: 'Automation Configuration',
@@ -589,6 +654,7 @@ export function getEditConfig(key: EditContextKey, location: string): EditConfig
   // context.label remains in English for agent prompts; displayLabel is used in UI
   return {
     ...config,
+    contextKey: key,
     displayLabel: config.displayLabelKey ? i18n.t(config.displayLabelKey) : config.context.label,
     example: config.exampleKey ? i18n.t(config.exampleKey) : config.example,
     overridePlaceholder: config.overridePlaceholderKey ? i18n.t(config.overridePlaceholderKey) : config.overridePlaceholder,
@@ -613,6 +679,10 @@ export interface EditPopoverProps {
   example?: string
   /** Context passed to the new chat session */
   context: EditContext
+  /** Stable key used to resume an inline creation session after the popover closes. */
+  contextKey?: string
+  /** Enables verified background creation semantics for this resource type. */
+  creationKind?: CreationKind
   /** Permission mode for the new session (default: 'allow-all' / canonical: execute for fast execution) */
   permissionMode?: CreateSessionOptions['permissionMode']
   /**
@@ -727,6 +797,8 @@ export function EditPopover({
   trigger,
   example,
   context,
+  contextKey,
+  creationKind,
   permissionMode = 'allow-all',
   workingDirectory = 'none', // Default to session folder for config edits
   model,
@@ -745,6 +817,7 @@ export function EditPopover({
   inlineExecution = false,
 }: EditPopoverProps) {
   const { t } = useTranslation()
+  const reduceMotion = useReducedMotion()
   const { onOpenFile, onOpenUrl } = usePlatform()
   const workspace = useActiveWorkspace()
 
@@ -765,19 +838,56 @@ export function EditPopover({
   const [internalOpen, setInternalOpen] = useState(false)
   const isControlled = controlledOpen !== undefined
   const open = isControlled ? controlledOpen : internalOpen
-  const setOpen = (value: boolean) => {
+  const setOpen = useCallback((value: boolean) => {
     if (isControlled) {
       controlledOnOpenChange?.(value)
     } else {
       setInternalOpen(value)
     }
-  }
+  }, [controlledOnOpenChange, isControlled])
+  const previousFocusRef = useRef<HTMLElement | null>(null)
+  const wasOpenRef = useRef(false)
+  useLayoutEffect(() => {
+    if (open && !wasOpenRef.current) {
+      previousFocusRef.current = document.activeElement instanceof HTMLElement
+        ? document.activeElement
+        : null
+    }
+    wasOpenRef.current = open
+  }, [open])
 
   // Use App context for session management (same code path as main chat)
   const { onCreateSession, onSendMessage, onRespondToPermission, onRespondToCredential } = useAppShellContext()
+  const creationJobs = useAtomValue(creationJobsAtom)
+  const beginCreationAttempt = useSetAtom(beginCreationJobAttemptAtom)
+  const claimCreationJob = useSetAtom(claimCreationJobAtom)
+  const patchCreationJob = useSetAtom(patchCreationJobAtom)
+  const restartCreationAttempt = useSetAtom(restartCreationJobAttemptAtom)
+  const resolvedContextKey = contextKey || `${context.label}:${context.filePath}`
+  const creationSessionPromiseRef = useRef<Promise<string> | null>(null)
 
   // Session ID for inline execution (created on first message)
   const [inlineSessionId, setInlineSessionId] = useState<string | null>(null)
+  const [inputDraft, setInputDraft] = useState(defaultValue)
+  const [stopConfirmationOpen, setStopConfirmationOpen] = useState(false)
+  const stopConfirmationResolverRef = useRef<((confirmed: boolean) => void) | null>(null)
+
+  const resolveStopConfirmation = useCallback((confirmed: boolean) => {
+    stopConfirmationResolverRef.current?.(confirmed)
+    stopConfirmationResolverRef.current = null
+    setStopConfirmationOpen(false)
+  }, [])
+
+  const requestStopConfirmation = useCallback(() => new Promise<boolean>((resolve) => {
+    stopConfirmationResolverRef.current?.(false)
+    stopConfirmationResolverRef.current = resolve
+    setStopConfirmationOpen(true)
+  }), [])
+
+  useEffect(() => () => {
+    stopConfirmationResolverRef.current?.(false)
+    stopConfirmationResolverRef.current = null
+  }, [])
 
   // Get session data from Jotai atom (same as main chat - includes optimistic updates)
   // Pass empty string when no session yet - atom returns null for unknown IDs
@@ -803,55 +913,28 @@ export function EditPopover({
 
   // Use real session if available, otherwise stub
   const displaySession = inlineSession || stubSession
-
-  // Track processing state for close prevention and backdrop
   const isProcessing = displaySession.isProcessing
-
-  // Use existing escape interrupt context for double-ESC flow
-  // This shows the "Press Esc again to interrupt" overlay in the input field
   const { handleEscapePress } = useEscapeInterrupt()
 
-  // Reset inline session when popover closes
-  const resetInlineSession = useCallback(() => {
-    setInlineSessionId(null)
-  }, [])
-
-  // Stop/cancel generation for the inline session
+  // Ordinary inline edits retain their historical guarded-close behavior.
+  // Creation flows deliberately detach and continue through the task center.
   const handleStopGeneration = useCallback(() => {
-    if (inlineSessionId && isProcessing) {
-      window.electronAPI.cancelProcessing(inlineSessionId, false)
+    if (!creationKind && inlineSessionId && isProcessing) {
+      void window.electronAPI.cancelProcessing(inlineSessionId, false)
     }
-  }, [inlineSessionId, isProcessing])
+  }, [creationKind, inlineSessionId, isProcessing])
 
-  // Handle ESC key during generation:
-  // Uses EscapeInterruptContext for double-ESC flow (shows overlay, then interrupts)
-  const handleEscapeKeyDown = useCallback((e: KeyboardEvent) => {
-    if (!isProcessing) {
-      // Not processing - allow normal close behavior
-      return
-    }
+  const handleEscapeKeyDown = useCallback((event: KeyboardEvent) => {
+    if (creationKind || !isProcessing) return
+    event.preventDefault()
+    if (handleEscapePress()) handleStopGeneration()
+  }, [creationKind, handleEscapePress, handleStopGeneration, isProcessing])
 
-    // Prevent default close behavior during processing
-    e.preventDefault()
-
-    // Use context's double-ESC handler
-    // Returns true if this is the second press (should interrupt)
-    const shouldInterrupt = handleEscapePress()
-    if (shouldInterrupt) {
-      handleStopGeneration()
-    }
-  }, [isProcessing, handleEscapePress, handleStopGeneration])
-
-  // Handle click outside during generation:
-  // Show the ESC overlay via context, prevent closing
-  const handleInteractOutside = useCallback((e: Event) => {
-    if (isProcessing) {
-      // Prevent close during processing
-      e.preventDefault()
-      // Show the ESC overlay so user knows how to cancel
-      handleEscapePress()
-    }
-  }, [isProcessing, handleEscapePress])
+  const handleInteractOutside = useCallback((event: Event) => {
+    if (creationKind || !isProcessing) return
+    event.preventDefault()
+    handleEscapePress()
+  }, [creationKind, handleEscapePress, isProcessing])
 
   // Drag / resize / collapse for the floating create window (#8)
   const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 })
@@ -1032,40 +1115,214 @@ export function EditPopover({
     }
   }, [isDragging, isResizing])
 
-  // Reset state when popover opens
+  // Reset ordinary edit sessions on open; creation contexts are durable below.
   useEffect(() => {
     if (open) {
       setCurrentModel(model || 'haiku')
-      resetInlineSession()
+      if (!creationKind) setInlineSessionId(null)
     }
-  }, [open, model, resetInlineSession])
+  }, [creationKind, model, open])
+
+  // Reopening a creation context reattaches to its latest hidden session. Keep
+  // listening while open so a concurrently-created session can attach here too.
+  useEffect(() => {
+    if (!open || !creationKind || !workspace?.id) return
+    const latest = findLatestCreationJob(creationJobs, workspace.id, resolvedContextKey)
+    setInlineSessionId(latest?.sessionId || null)
+    if (latest?.status === 'failed' && latest.request) {
+      setInputDraft((current) => current || latest.request || '')
+    }
+  }, [creationJobs, creationKind, open, resolvedContextKey, workspace?.id])
 
   // Handle sending message from ChatDisplay (inline mode)
   // Creates hidden session on first message, then uses App context for sending
   const handleInlineSendMessage = useCallback(async (message: string) => {
     const { prompt, badges } = buildEditPrompt(context, message, displayLabel)
 
-    // Create session on first message
     let sessionId = inlineSessionId
-    if (!sessionId && workspace?.id) {
-      const createOptions: CreateSessionOptions = {
-        model: model || 'fast',
-        systemPromptPreset: systemPromptPreset || 'mini',
-        permissionMode,
-        workingDirectory,
-        hidden: true, // Hidden sessions use same App code path but don't appear in list
+    if (!workspace?.id) return
+    const preserveBlockedRequest = (description?: string) => {
+      window.setTimeout(() => setInputDraft(message), 0)
+      toast.info(t('creationJobs.sameKindRunning', 'Another creation job of this type is already running.'), {
+        description,
+      })
+    }
+
+    const createOptions: CreateSessionOptions = {
+      model: model || 'fast',
+      systemPromptPreset: systemPromptPreset || 'mini',
+      permissionMode,
+      workingDirectory,
+      hidden: true,
+    }
+
+    if (creationKind) {
+      const conflictingJob = creationJobs.find((candidate) =>
+        candidate.workspaceId === workspace.id
+        && candidate.kind === creationKind
+        && candidate.contextKey !== resolvedContextKey
+        && (candidate.status === 'running' || candidate.status === 'waiting-input')
+      )
+      if (conflictingJob) {
+        preserveBlockedRequest(t('creationJobs.sameKindRunningDescription', 'Your request was kept. Continue after the active job finishes.'))
+        return
       }
-      const newSession = await onCreateSession(workspace.id, createOptions)
-      sessionId = newSession.id
+      const active = findActiveCreationJob(creationJobs, workspace.id, resolvedContextKey, creationKind)
+      const latest = findLatestCreationJob(creationJobs, workspace.id, resolvedContextKey)
+      const retryable = !active
+        && latest?.sessionId === sessionId
+        && (latest.status === 'failed' || latest.status === 'cancelled')
+        ? latest
+        : undefined
+      if (retryable) {
+        // Reuse the original workspace-wide baseline. A failed semantic
+        // validation may already have persisted the intended ID, so taking a
+        // fresh baseline here would make that repaired resource invisible.
+        const restarted = restartCreationAttempt({ id: retryable.id, request: message })
+        if (!restarted) {
+          window.setTimeout(() => setInputDraft(message), 0)
+          toast.info(t('creationJobs.sameKindRunning', 'Another creation job of this type is already running.'))
+          return
+        }
+        sessionId = restarted.sessionId || null
+        setInlineSessionId(sessionId)
+      } else if (active) {
+        // An in-flight attempt already owns the send. Only waiting-input can
+        // atomically grant one caller a new turn; every racing caller returns.
+        if (active.status !== 'waiting-input') {
+          preserveBlockedRequest(t('creationJobs.requestKeptWhileRunning', 'Your request was kept while the current turn finishes.'))
+          return
+        }
+        const acquired = beginCreationAttempt({ id: active.id, request: message })
+        if (!acquired) {
+          preserveBlockedRequest(t('creationJobs.requestKeptAfterDuplicate', 'Another submission started first, so this request was kept.'))
+          return
+        }
+        sessionId = acquired.sessionId || null
+        setInlineSessionId(sessionId)
+      } else {
+        let baseline: string[]
+        try {
+          baseline = await readCreationIds(creationKind, workspace.id)
+        } catch (error) {
+          const claimed = claimCreationJob({
+            workspaceId: workspace.id,
+            contextKey: resolvedContextKey,
+            kind: creationKind,
+            baseline: [],
+            request: message,
+            baselineFinalMessageId: inlineSession?.lastFinalMessageId,
+            baselineMessageRole: inlineSession?.lastMessageRole,
+          })
+          if (claimed.deduped) {
+            preserveBlockedRequest()
+            return
+          }
+          patchCreationJob({
+            id: claimed.job.id,
+            expectedAttempt: claimed.job.attempt,
+            expectedStatus: 'running',
+            expectedPhase: 'preparing',
+            patch: {
+              status: 'failed',
+              phase: 'failed',
+              error: `Could not read the creation baseline: ${error instanceof Error ? error.message : String(error)}`,
+            },
+          })
+          setInputDraft(message)
+          return
+        }
+
+        const claimed = claimCreationJob({
+          workspaceId: workspace.id,
+          contextKey: resolvedContextKey,
+          kind: creationKind,
+          baseline,
+          request: message,
+          baselineFinalMessageId: inlineSession?.lastFinalMessageId,
+          baselineMessageRole: inlineSession?.lastMessageRole,
+        })
+        if (claimed.deduped) {
+          preserveBlockedRequest()
+          return
+        }
+
+        if (sessionId) {
+          patchCreationJob({
+            id: claimed.job.id,
+            expectedAttempt: claimed.job.attempt,
+            expectedStatus: 'running',
+            expectedPhase: 'preparing',
+            patch: { sessionId, phase: 'running' },
+          })
+        } else {
+          const sessionPromise = getOrCreateCreationSession(claimed.job.id, async () => {
+            const session = await onCreateSession(workspace.id, createOptions)
+            return session.id
+          })
+          creationSessionPromiseRef.current = sessionPromise
+          try {
+            sessionId = await sessionPromise
+          } catch (error) {
+            patchCreationJob({
+              id: claimed.job.id,
+              expectedAttempt: claimed.job.attempt,
+              expectedStatus: 'running',
+              expectedPhase: 'preparing',
+              patch: {
+                status: 'failed',
+                phase: 'failed',
+                error: error instanceof Error ? error.message : String(error),
+              },
+            })
+            setInputDraft(message)
+            return
+          } finally {
+            if (creationSessionPromiseRef.current === sessionPromise) creationSessionPromiseRef.current = null
+          }
+          setInlineSessionId(sessionId)
+          patchCreationJob({
+            id: claimed.job.id,
+            expectedAttempt: claimed.job.attempt,
+            expectedStatus: 'running',
+            expectedPhase: 'preparing',
+            patch: { sessionId, phase: 'running' },
+          })
+        }
+      }
+    } else if (!sessionId) {
+      const sessionPromise = creationSessionPromiseRef.current || onCreateSession(workspace.id, createOptions).then((session) => session.id)
+      creationSessionPromiseRef.current = sessionPromise
+      try {
+        sessionId = await sessionPromise
+      } finally {
+        if (creationSessionPromiseRef.current === sessionPromise) creationSessionPromiseRef.current = null
+      }
       setInlineSessionId(sessionId)
     }
 
-    // Send message via App context (includes optimistic user message update)
-    // Pass badges to hide the <edit_request> XML metadata in the user message bubble
     if (sessionId) {
       onSendMessage(sessionId, prompt, undefined, undefined, badges)
     }
-  }, [context, displayLabel, inlineSessionId, workspace?.id, model, systemPromptPreset, permissionMode, workingDirectory, onCreateSession, onSendMessage])
+  }, [beginCreationAttempt, claimCreationJob, context, creationJobs, creationKind, displayLabel, inlineSession?.lastFinalMessageId, inlineSession?.lastMessageRole, inlineSessionId, model, onCreateSession, onSendMessage, patchCreationJob, permissionMode, resolvedContextKey, restartCreationAttempt, systemPromptPreset, t, workingDirectory, workspace?.id])
+
+  const handleExplicitStop = useCallback(() => {
+    if (!creationKind || !inlineSessionId || !shouldCancelCreationJob('explicit-stop')) return
+    const job = creationJobs.find((candidate) =>
+      candidate.workspaceId === workspace?.id
+      && candidate.contextKey === resolvedContextKey
+      && candidate.sessionId === inlineSessionId
+      && candidate.status === 'running'
+    )
+    if (job) {
+      patchCreationJob({
+        id: job.id,
+        expectedAttempt: job.attempt,
+        expectedStatus: 'running',
+        patch: { status: 'cancelled', phase: 'cancelled', error: undefined },
+      })
+    }
+  }, [creationJobs, creationKind, inlineSessionId, patchCreationJob, resolvedContextKey, workspace?.id])
 
   // Legacy mode: navigates to chat in the same window
   const handleLegacySendMessage = useCallback((message: string) => {
@@ -1085,19 +1342,17 @@ export function EditPopover({
 
   return (
     <>
-      {/* Full-screen backdrop - rendered BEHIND the popover during processing */}
       <AnimatePresence>
-        {open && isProcessing && (
+        {open && isProcessing && !creationKind && (
           <motion.div
-            initial={{ opacity: 0 }}
+            initial={reduceMotion ? false : { opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            transition={{ duration: 0.5, ease: 'easeInOut' }}
-            className="fixed inset-0 bg-black/5 z-40"
+            transition={{ duration: reduceMotion ? 0 : 0.3, ease: 'easeInOut' }}
+            className="fixed inset-0 z-40 bg-black/5"
           />
         )}
       </AnimatePresence>
-
       <Popover open={open} onOpenChange={setOpen} modal={modal}>
         <PopoverTrigger asChild className={triggerClassName}>
           {trigger}
@@ -1109,14 +1364,21 @@ export function EditPopover({
             className="p-0"
             data-testid="edit-popover"
             style={{
-              width: containerSize.width,
-              height: containerSize.height,
+              width: `min(${containerSize.width}px, calc(100vw - 16px))`,
+              height: `min(${containerSize.height}px, calc(100vh - 64px))`,
               background: 'transparent',
               border: 'none',
               boxShadow: 'none',
             }}
+            aria-label={displayLabel || context.label}
             onInteractOutside={handleInteractOutside}
             onEscapeKeyDown={handleEscapeKeyDown}
+            onCloseAutoFocus={(event) => {
+              const target = previousFocusRef.current
+              if (!target?.isConnected) return
+              event.preventDefault()
+              target.focus()
+            }}
           >
             <div
               ref={popoverRef}
@@ -1159,7 +1421,7 @@ export function EditPopover({
                   icon={<X className="size-4" />}
                   tooltip={t('common.close')}
                   aria-label={t('common.close')}
-                  disabled={isProcessing}
+                  disabled={isProcessing && !creationKind}
                   onMouseDown={event => event.stopPropagation()}
                   onClick={() => setOpen(false)}
                 />
@@ -1181,6 +1443,10 @@ export function EditPopover({
                   compactInputMaxHeight={getCompactInputMaxHeight(containerSize.height)}
                   placeholder={placeholder}
                   emptyStateLabel={displayLabel || context.label}
+                  inputValue={creationKind ? inputDraft : undefined}
+                  onInputChange={creationKind ? setInputDraft : undefined}
+                  onExplicitStop={creationKind ? handleExplicitStop : undefined}
+                  onBeforeExplicitStop={creationKind ? requestStopConfirmation : undefined}
                 />
               </div>
 
@@ -1200,6 +1466,29 @@ export function EditPopover({
             </div>
           </PopoverContent>
       </Popover>
+      <AlertDialog
+        open={stopConfirmationOpen}
+        onOpenChange={(next) => {
+          if (!next) resolveStopConfirmation(false)
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t('creationJobs.stopTitle', 'Stop this creation job?')}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {t('creationJobs.stopDescription', 'Closing this window keeps the job running. Stop explicitly interrupts the current creation session.')}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={() => resolveStopConfirmation(false)}>
+              {t('common.cancel')}
+            </AlertDialogCancel>
+            <AlertDialogAction variant="destructive" onClick={() => resolveStopConfirmation(true)}>
+              {t('creationJobs.stopAction', 'Stop job')}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </>
   )
 }
