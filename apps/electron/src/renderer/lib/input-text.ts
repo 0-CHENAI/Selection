@@ -55,23 +55,45 @@ interface LiveGenerationCandidate {
   isPending?: boolean
   isIntermediate?: boolean
   content?: unknown
+  toolStatus?: string
+  isBackground?: boolean
+  taskId?: string
 }
+
+const IN_FLIGHT_TOOL_STATUSES = new Set(['pending', 'executing'])
 
 /**
  * True while a visible turn is still generating. Composer submits in this
  * state belong in the queue, not the transcript (#22, #23).
+ *
+ * `isProcessing` can be stale false while the thought chain, work chain, or
+ * status pill is still on screen. Those message/session signals must also
+ * keep follow-ups in the composer queue.
  */
 export function sessionHasLiveGeneration(
-  session: { isProcessing?: boolean; messages?: readonly LiveGenerationCandidate[] } | null | undefined,
+  session: {
+    isProcessing?: boolean
+    currentStatus?: { message?: string } | null
+    messages?: readonly LiveGenerationCandidate[]
+  } | null | undefined,
 ): boolean {
   if (!session) return false
   if (session.isProcessing) return true
-  return (session.messages ?? []).some(message =>
-    !message.hidden && (
-      (message.role === 'assistant' && (message.isStreaming || message.isPending || message.isIntermediate))
-      || message.role === 'status'
-    ),
-  )
+  if (session.currentStatus?.message) return true
+  return (session.messages ?? []).some(isLiveGenerationMessage)
+}
+
+function isLiveGenerationMessage(message: LiveGenerationCandidate): boolean {
+  if (message.hidden) return false
+  if (message.role === 'status') return true
+  if (message.role === 'assistant' && (message.isStreaming || message.isPending || message.isIntermediate)) {
+    return true
+  }
+  // Work-chain-only: tools can run after commentary is finalized and before
+  // the next assistant token. Genuine background tasks outlive the turn.
+  return message.role === 'tool'
+    && IN_FLIGHT_TOOL_STATUSES.has(message.toolStatus ?? '')
+    && !(message.isBackground && message.taskId)
 }
 
 export function getRestorableStoppedPrompt(messages: readonly StoppedPromptCandidate[]): string {

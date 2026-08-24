@@ -93,4 +93,39 @@ describe('sessionHasLiveGeneration', () => {
       messages: [{ role: 'user', content: 'done' }, { role: 'assistant', content: 'reply' }],
     })).toBe(false)
   })
+
+  it('treats thinking-only commentary as live when isProcessing is stale', () => {
+    expect(sessionHasLiveGeneration({
+      isProcessing: false,
+      messages: [{ role: 'assistant', content: '先读目录', isIntermediate: true }],
+    })).toBe(true)
+  })
+
+  it('treats a thinking status pill as live when isProcessing is stale', () => {
+    expect(sessionHasLiveGeneration({
+      isProcessing: false,
+      currentStatus: { message: 'Thinking…' },
+      messages: [{ role: 'user', content: 'question' }],
+    })).toBe(true)
+  })
+
+  it('treats a work-chain-only executing tool as live when isProcessing is stale', () => {
+    expect(sessionHasLiveGeneration({
+      isProcessing: false,
+      messages: [
+        { role: 'user', content: 'read the doc' },
+        { role: 'tool', toolStatus: 'executing', content: '' },
+      ],
+    })).toBe(true)
+  })
+
+  it('does not treat a finished background task as live generation', () => {
+    expect(sessionHasLiveGeneration({
+      isProcessing: false,
+      messages: [
+        { role: 'assistant', content: 'done' },
+        { role: 'tool', toolStatus: 'executing', isBackground: true, taskId: 'task-1' },
+      ],
+    })).toBe(false)
+  })
 })
