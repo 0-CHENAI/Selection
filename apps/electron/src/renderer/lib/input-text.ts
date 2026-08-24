@@ -54,6 +54,7 @@ interface LiveGenerationCandidate {
   isStreaming?: boolean
   isPending?: boolean
   isIntermediate?: boolean
+  content?: unknown
 }
 
 /**
