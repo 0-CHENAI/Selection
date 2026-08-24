@@ -69,4 +69,58 @@ describe('PiAgent pre-tool labels guard', () => {
 
     agent.destroy()
   })
+
+  it('blocks direct use of the platform OfficeCLI binary that bypasses the reviewed wrapper', async () => {
+    const agent = new PiAgent(createConfig())
+    agent.setPermissionMode('allow-all')
+    const rawBinary = '/Applications/Selection.app/Contents/Resources/resources/bin/darwin-arm64/officecli'
+    ;(agent as any).managedOfficecliShellAvailable = true
+    ;(agent as any).managedOfficecliBinaryPath = rawBinary
+
+    const sent: Array<Record<string, unknown>> = []
+    ;(agent as any).send = (message: Record<string, unknown>) => {
+      sent.push(message)
+    }
+    ;(agent as any).emitAutomationEvent = async () => {}
+
+    await (agent as any).handlePreToolUseRequest({
+      requestId: 'req-officecli-raw-binary',
+      toolName: 'Bash',
+      input: { command: `${JSON.stringify(rawBinary)} create report.docx` },
+    })
+
+    expect(sent.at(-1)).toMatchObject({
+      type: 'pre_tool_use_response',
+      action: 'block',
+    })
+    expect(String(sent.at(-1)?.reason ?? '')).toContain('platform OfficeCLI binary')
+    expect(String(sent.at(-1)?.reason ?? '')).toContain('Heading/TOC compatibility repair')
+
+    agent.destroy()
+  })
+
+  it('returns recovered XML-style provider arguments as a modified tool input', async () => {
+    const agent = new PiAgent(createConfig())
+    agent.setPermissionMode('allow-all')
+    const sent: Array<Record<string, unknown>> = []
+    ;(agent as any).send = (message: Record<string, unknown>) => sent.push(message)
+    ;(agent as any).emitAutomationEvent = async () => {}
+
+    await (agent as any).handlePreToolUseRequest({
+      requestId: 'req-recover-read',
+      toolName: 'Read',
+      input: {
+        _intent: 'Read the fixture</intent><path>/tmp/project-root/input.txt</path>',
+      },
+    })
+
+    expect(sent.at(-1)).toMatchObject({
+      type: 'pre_tool_use_response',
+      action: 'modify',
+      input: {
+        path: '/tmp/project-root/input.txt',
+      },
+    })
+    agent.destroy()
+  })
 })

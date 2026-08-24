@@ -45,6 +45,7 @@ import {
   // Registry
   getSessionToolRegistry,
   getToolDefsAsJsonSchema,
+  SESSION_SAFE_BLOCKED_TOOL_NAMES,
   // Helpers
   loadSourceConfig as loadSourceConfigFromHelpers,
   errorResponse,
@@ -60,6 +61,8 @@ interface SessionConfig {
   plansFolderPath: string;
   workingDirectory?: string;
   callbackPort?: string;
+  supportsImages?: boolean;
+  permissionMode?: string;
 }
 
 const CALLBACK_TOOL_TIMEOUT_MS = 120000;
@@ -197,7 +200,6 @@ function createCodexContext(config: SessionConfig): SessionToolContext {
   // Session paths for transform_data / render_template
   const sessionsDir = join(workspaceRootPath, 'sessions', sessionId);
   const sessionDataDir = join(sessionsDir, 'data');
-
   // Build context
   return {
     sessionId,
@@ -208,6 +210,8 @@ function createCodexContext(config: SessionConfig): SessionToolContext {
     sessionPath: sessionsDir,
     dataPath: sessionDataDir,
     workingDirectory: config.workingDirectory,
+    ...(config.permissionMode ? { permissionMode: config.permissionMode } : {}),
+    ...(config.supportsImages !== undefined ? { supportsImages: config.supportsImages } : {}),
     callbacks,
     fs,
     loadSourceConfig: (sourceSlug: string): SourceConfig | null => {
@@ -477,6 +481,8 @@ async function main() {
   let plansFolderPath: string | undefined;
   let workingDirectory: string | undefined;
   let callbackPort: string | undefined;
+  let supportsImages: boolean | undefined;
+  let permissionMode: string | undefined;
 
   for (let i = 0; i < args.length; i++) {
     if (args[i] === '--session-id' && args[i + 1]) {
@@ -494,6 +500,12 @@ async function main() {
     } else if (args[i] === '--callback-port' && args[i + 1]) {
       callbackPort = args[i + 1];
       i++;
+    } else if (args[i] === '--supports-images' && args[i + 1]) {
+      supportsImages = args[i + 1] === 'true' || args[i + 1] === '1';
+      i++;
+    } else if (args[i] === '--permission-mode' && args[i + 1]) {
+      permissionMode = args[i + 1];
+      i++;
     }
   }
 
@@ -507,8 +519,16 @@ async function main() {
     workspaceRootPath,
     plansFolderPath,
     workingDirectory,
+    permissionMode: permissionMode ?? process.env.CRAFT_PERMISSION_MODE,
     // CLI arg takes priority, env var as fallback (Copilot CLI may not forward env to subprocesses)
     callbackPort: callbackPort || process.env.CRAFT_LLM_CALLBACK_PORT,
+    supportsImages: supportsImages ?? (
+      process.env.CRAFT_MODEL_SUPPORTS_IMAGES === '1' || process.env.CRAFT_MODEL_SUPPORTS_IMAGES === 'true'
+        ? true
+        : process.env.CRAFT_MODEL_SUPPORTS_IMAGES === '0' || process.env.CRAFT_MODEL_SUPPORTS_IMAGES === 'false'
+          ? false
+          : undefined
+    ),
   };
 
   // Create the Codex context
@@ -556,6 +576,9 @@ async function main() {
       // Check canonical session tool registry first (feature-filtered)
       const def = sessionToolRegistry.get(name);
       if (def?.handler) {
+        if (config.permissionMode === 'safe' && SESSION_SAFE_BLOCKED_TOOL_NAMES.has(name)) {
+          return errorResponse(`Tool '${name}' is blocked in Safe mode.`);
+        }
         return await def.handler(ctx, toolArgs);
       }
 

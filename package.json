@@ -1,6 +1,6 @@
 {
   "name": "craft-agent",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "license": "Apache-2.0",
   "description": "Selection — multi-session agent desktop app",
   "type": "module",
@@ -102,8 +102,7 @@
     "officecli:check": "bun scripts/sync-officecli.ts --check --download-runtime",
     "officecli:prepare": "bun scripts/sync-officecli.ts --prepare-runtime",
     "officecli:sync": "bun scripts/sync-officecli.ts --update",
-    "officecli:benchmark:check": "bun scripts/check-officecli-benchmark.ts",
-    "test:officecli:integration": "bun test packages/shared/src/utils/__tests__/officecli-bundled.integration.test.ts",
+    "test:officecli:integration": "bun scripts/run-officecli-integration-tests.ts",
     "oss:sync": "bun run scripts/oss-sync.ts",
     "prepare": "husky"
   },

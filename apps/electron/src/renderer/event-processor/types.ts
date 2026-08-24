@@ -517,10 +517,7 @@ export interface SourceActivatedEvent {
 export interface UsageUpdateEvent {
   type: 'usage_update'
   sessionId: string
-  tokenUsage: {
-    inputTokens: number
-    contextWindow?: number
-  }
+  tokenUsage: NonNullable<Session['tokenUsage']>
 }
 
 export interface MessagesTruncatedEvent {

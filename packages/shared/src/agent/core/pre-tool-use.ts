@@ -501,7 +501,8 @@ export function getConfigCliRedirect(
   workspaceRootPath: string,
   workingDirectory?: string,
 ): { message: string } | null {
-  const filePath = input.file_path as string | undefined;
+  const filePath = (input.file_path as string | undefined)
+    ?? (toolName === 'Read' ? input.path as string | undefined : undefined);
 
   if (filePath && LABELS_BLOCKED_FILE_TOOLS.has(toolName)) {
     const relativePath = getWorkspaceRelativePath(filePath, workspaceRootPath, workingDirectory)

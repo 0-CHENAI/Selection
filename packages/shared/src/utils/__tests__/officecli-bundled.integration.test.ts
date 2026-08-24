@@ -2,7 +2,7 @@ import { describe, expect, it } from 'bun:test'
 import { existsSync, mkdtempSync, rmSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
-import { loadAllSkills, loadSkillBySlug } from '../../skills/storage.ts'
+import { filterUserFacingSkills, loadAllSkills, loadSkillBySlug } from '../../skills/storage.ts'
 import {
   BUNDLED_OFFICECLI_SKILL_SLUGS,
   getBundledOfficecliSkillsDir,
@@ -26,7 +26,7 @@ describe('bundled OfficeCLI skills', () => {
     }
   })
 
-  it('loads official skills as built-in bundled skills', () => {
+  it('registers one hidden router and keeps official guides out of Craft discovery', () => {
     if (!skillsDir) {
       if (requirePackagedRuntime) throw new Error('bundled OfficeCLI skills directory is missing')
       return
@@ -35,11 +35,12 @@ describe('bundled OfficeCLI skills', () => {
     const workspaceRoot = mkdtempSync(join(tmpdir(), 'officecli-bundled-skills-'))
     try {
       const all = loadAllSkills(workspaceRoot)
+      const router = loadSkillBySlug(workspaceRoot, 'officecli')
+      expect(router?.source).toBe('bundled')
+      expect(filterUserFacingSkills(all).some(skill => skill.slug === 'officecli')).toBe(false)
       for (const slug of BUNDLED_OFFICECLI_SKILL_SLUGS) {
-        const skill = loadSkillBySlug(workspaceRoot, slug)
-        expect(skill?.source).toBe('bundled')
-        expect(skill?.path).toBe(join(skillsDir, slug))
-        expect(all.some(item => item.slug === slug && item.source === 'bundled')).toBe(true)
+        expect(existsSync(join(skillsDir, slug, 'SKILL.md'))).toBe(true)
+        expect(all.some(item => item.slug === slug && item.source === 'bundled')).toBe(false)
       }
     } finally {
       rmSync(workspaceRoot, { recursive: true, force: true })
@@ -54,6 +55,22 @@ describe('bundled OfficeCLI skills', () => {
 
     expect(existsSync(binary)).toBe(true)
     const result = Bun.spawnSync([binary, '--version'], { stdout: 'pipe', stderr: 'pipe' })
+    expect(result.exitCode).toBe(0)
+    expect(result.stdout.toString()).toMatch(/\d+\.\d+/)
+  })
+
+  it('runs the packaged transparent TypeScript launcher without repository source imports', () => {
+    const resourcesBase = process.env.CRAFT_RESOURCES_BASE
+    if (!resourcesBase || !binary) {
+      if (requirePackagedRuntime) throw new Error('packaged OfficeCLI launcher inputs are missing')
+      return
+    }
+    const launcher = join(resourcesBase, 'resources', 'scripts', 'officecli-wrapper.ts')
+    expect(existsSync(launcher)).toBe(true)
+    const result = Bun.spawnSync([process.execPath, launcher, binary, '--version'], {
+      stdout: 'pipe',
+      stderr: 'pipe',
+    })
     expect(result.exitCode).toBe(0)
     expect(result.stdout.toString()).toMatch(/\d+\.\d+/)
   })

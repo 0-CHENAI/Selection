@@ -244,6 +244,8 @@ interface ChatDisplayProps {
    * its current behavior; ChatPage opts in when in auto-compact / mobile.
    */
   enableCompactModelPicker?: boolean
+  /** Cap the compact composer so long pastes cannot squeeze the popover chrome (#8). */
+  compactInputMaxHeight?: number
   /** Custom placeholder for input (used in compact mode for edit context) */
   placeholder?: string | string[]
   /** Label shown as empty state in compact mode (e.g., "Permission Settings") */
@@ -506,6 +508,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
   // Compact mode (for EditPopover embedding and auto-compact / WebUI mobile)
   compactMode = false,
   enableCompactModelPicker = false,
+  compactInputMaxHeight,
   placeholder,
   emptyStateLabel,
   onExplicitStop,
@@ -2109,6 +2112,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
               followUpItems: followUpInputItems,
               onFollowUpClick: handleFollowUpChipClick,
               onFollowUpIndexClick: handleFollowUpIndexClick,
+              compactInputMaxHeight,
             }}
           />
           </div>

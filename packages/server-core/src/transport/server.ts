@@ -18,6 +18,7 @@ import {
   EVENT_BUFFER_MAX_SIZE,
   EVENT_BUFFER_TTL_MS,
   DISCONNECTED_CLIENT_TTL_MS,
+  requestTimeoutMsForChannel,
   isErrorCode,
   type MessageEnvelope,
   type PushTarget,
@@ -58,7 +59,7 @@ interface PendingInvoke {
   clientId: string
   resolve: (value: any) => void
   reject: (error: Error) => void
-  timeout: ReturnType<typeof setTimeout>
+  timeout?: ReturnType<typeof setTimeout>
 }
 
 // ---------------------------------------------------------------------------
@@ -237,12 +238,15 @@ export class WsRpcServer implements RpcServer {
       }
 
       const id = randomUUID()
-      const timeout = setTimeout(() => {
-        this.pendingInvokes.delete(id)
-        const err = new Error(`Client request timeout: ${channel} (30000ms)`)
-        ;(err as any).code = 'CLIENT_REQUEST_TIMEOUT'
-        reject(err)
-      }, 30_000)
+      const timeoutMs = requestTimeoutMsForChannel(channel)
+      const timeout = timeoutMs == null
+        ? undefined
+        : setTimeout(() => {
+          this.pendingInvokes.delete(id)
+          const err = new Error(`Client request timeout: ${channel} (${timeoutMs}ms)`)
+          ;(err as any).code = 'CLIENT_REQUEST_TIMEOUT'
+          reject(err)
+        }, timeoutMs)
 
       this.pendingInvokes.set(id, { clientId, resolve, reject, timeout })
 

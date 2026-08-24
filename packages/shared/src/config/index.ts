@@ -5,6 +5,8 @@ export * from './order-gateway.ts';
 export * from './llm-validation.ts';
 export * from './models.ts';
 export * from './models-pi.ts';
+export * from './openrouter-catalog.ts';
+export * from './pi-provider-picker-models.ts';
 export * from './model-fetcher.ts';
 export * from './preferences.ts';
 export * from './storage.ts';

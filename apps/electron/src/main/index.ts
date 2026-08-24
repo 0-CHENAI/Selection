@@ -169,6 +169,10 @@ if (isDebugMode) {
   const bunBinary = join(resourcesBase, 'vendor', 'bun', process.platform === 'win32' ? 'bun.exe' : 'bun')
   if (existsSync(bunBinary)) {
     process.env.CRAFT_BUN = bunBinary
+  } else if (app.isPackaged) {
+    mainLog.warn('Bundled Bun runtime missing; Pi sessions will not start.', {
+      expectedBunPath: bunBinary,
+    })
   }
 
   process.env.CRAFT_SCRIPTS = scriptsDir
@@ -189,11 +193,14 @@ if (isDebugMode) {
   process.env.PATH = `${binDir}${delimiter}${uvPlatformDir}${delimiter}${process.env.PATH}`
 
   const officecliBinary = join(uvPlatformDir, process.platform === 'win32' ? 'officecli.exe' : 'officecli')
-  if (existsSync(officecliBinary)) {
-    process.env.CRAFT_OFFICECLI = officecliBinary
+  const officecliWrapper = join(binDir, process.platform === 'win32' ? 'officecli.cmd' : 'officecli')
+  if (existsSync(officecliBinary) && existsSync(officecliWrapper)) {
+    process.env.CRAFT_OFFICECLI = officecliWrapper
   } else {
-    mainLog.warn('Bundled officecli binary missing; Word/Excel/PowerPoint edits via officecli will fail.', {
+    delete process.env.CRAFT_OFFICECLI
+    mainLog.warn('Bundled officecli runtime or trusted wrapper missing; Word/Excel/PowerPoint edits via officecli will fail.', {
       expectedOfficecliPath: officecliBinary,
+      expectedOfficecliWrapper: officecliWrapper,
     })
   }
 
@@ -201,15 +208,13 @@ if (isDebugMode) {
     join(resourcesBase, 'dist', 'resources', 'officecli'),
     join(resourcesBase, 'resources', 'officecli'),
   ]
-  const officecliResources = process.env.CRAFT_OFFICECLI_RESOURCES
-    && existsSync(join(process.env.CRAFT_OFFICECLI_RESOURCES, 'officecli-manifest.json'))
-    ? process.env.CRAFT_OFFICECLI_RESOURCES
-    : officecliResourceCandidates.find(candidate =>
-      existsSync(join(candidate, 'officecli-manifest.json')),
-    )
+  const officecliResources = officecliResourceCandidates.find(candidate =>
+    existsSync(join(candidate, 'officecli-manifest.json')),
+  )
   if (officecliResources) {
     process.env.CRAFT_OFFICECLI_RESOURCES = officecliResources
   } else {
+    delete process.env.CRAFT_OFFICECLI_RESOURCES
     mainLog.warn('Bundled officecli resources missing; built-in OfficeCLI skills will not load.', {
       kind: app.isPackaged ? 'packaging_misconfigured' : 'resources_missing',
       expectedOfficecliResourcePaths: officecliResourceCandidates,
@@ -421,6 +426,9 @@ app.whenReady().then(async () => {
       appRootPath: app.isPackaged ? app.getAppPath() : process.cwd(),
       resourcesPath: process.resourcesPath,
       isPackaged: app.isPackaged,
+      nodeRuntimePath: process.env.CRAFT_BUN && existsSync(process.env.CRAFT_BUN)
+        ? process.env.CRAFT_BUN
+        : undefined,
     },
   })
 

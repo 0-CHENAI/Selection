@@ -13,6 +13,8 @@ const MAX_RESOURCE_BUNDLE_BYTES = 100 * 1024 * 1024
 
 export const HANDLED_CHANNELS = [
   RPC_CHANNELS.resources.OPEN_BUNDLE_FILE,
+  RPC_CHANNELS.resources.OPEN_MCP_JSON_FILE,
+  RPC_CHANNELS.resources.OPEN_SKILL_IMPORT_FILE,
   RPC_CHANNELS.resources.SAVE_BUNDLE_FILE,
 ] as const
 
@@ -68,6 +70,60 @@ export function registerResourceFileHandlers(server: RpcServer, deps: HandlerDep
     }
 
     return { canceled: false, fileName: basename(filePath), bundle }
+  })
+
+  server.handle(RPC_CHANNELS.resources.OPEN_MCP_JSON_FILE, async () => {
+    const window = focusedWindow()
+    const options: OpenDialogOptions = {
+      title: 'Import MCP JSON',
+      properties: ['openFile'],
+      filters: [
+        { name: 'JSON files', extensions: ['json'] },
+        { name: 'All files', extensions: ['*'] },
+      ],
+    }
+    const result = window
+      ? await dialog.showOpenDialog(window, options)
+      : await dialog.showOpenDialog(options)
+    if (result.canceled || result.filePaths.length === 0) return { canceled: true }
+
+    const filePath = result.filePaths[0]
+    const fileStat = await stat(filePath)
+    if (!fileStat.isFile()) throw new Error('The selected MCP JSON is not a file')
+    if (fileStat.size > 2 * 1024 * 1024) throw new Error('MCP JSON exceeds the 2 MB limit')
+    const text = await readFile(filePath, 'utf8')
+    return { canceled: false, fileName: basename(filePath), text }
+  })
+
+  server.handle(RPC_CHANNELS.resources.OPEN_SKILL_IMPORT_FILE, async () => {
+    const window = focusedWindow()
+    const options: OpenDialogOptions = {
+      title: 'Import Skill',
+      properties: ['openFile'],
+      filters: [
+        { name: 'Skill files', extensions: ['md', 'zip'] },
+        { name: 'SKILL.md', extensions: ['md'] },
+        { name: 'Zip archives', extensions: ['zip'] },
+      ],
+    }
+    const result = window
+      ? await dialog.showOpenDialog(window, options)
+      : await dialog.showOpenDialog(options)
+    if (result.canceled || result.filePaths.length === 0) return { canceled: true }
+
+    const filePath = result.filePaths[0]
+    const fileStat = await stat(filePath)
+    if (!fileStat.isFile()) throw new Error('The selected skill file is not a file')
+    const name = basename(filePath)
+    const lower = name.toLowerCase()
+    if (lower.endsWith('.zip')) {
+      if (fileStat.size > 20 * 1024 * 1024) throw new Error('Skill zip exceeds the 20 MB limit')
+      const buffer = await readFile(filePath)
+      return { canceled: false, fileName: name, kind: 'zip' as const, zipBase64: buffer.toString('base64') }
+    }
+    if (fileStat.size > 2 * 1024 * 1024) throw new Error('SKILL.md exceeds the 2 MB limit')
+    const content = await readFile(filePath, 'utf8')
+    return { canceled: false, fileName: name, kind: 'markdown' as const, content }
   })
 
   server.handle(

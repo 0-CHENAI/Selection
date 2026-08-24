@@ -56,9 +56,8 @@ describe('PiEventAdapter', () => {
 
   describe('turn lifecycle', () => {
     it('should set currentTurnId on turn_start', () => {
-      // turn_start is handled internally — emits no events
       const events = collect(adapter.adaptEvent({ type: 'turn_start' } as any));
-      expect(events).toHaveLength(0);
+      expect(events).toEqual([{ type: 'model_call_start' }]);
     });
 
     it('should emit nothing on turn_end', () => {
@@ -256,6 +255,38 @@ describe('PiEventAdapter', () => {
       } as any));
       expect(events).toHaveLength(0);
     });
+
+    it('should preserve complete per-call usage in usage_update events', () => {
+      const events = collect(adapter.adaptEvent({
+        type: 'message_end',
+        message: {
+          role: 'assistant',
+          stopReason: 'stop',
+          content: 'Done',
+          usage: {
+            input: 200,
+            output: 30,
+            cacheRead: 150,
+            cacheWrite: 10,
+            totalTokens: 390,
+            cost: { input: 0.001, output: 0.002, cacheRead: 0.0001, cacheWrite: 0.0002, total: 0.0033 },
+          },
+        },
+      } as any));
+
+      expect(events.at(-1)).toEqual({
+        type: 'usage_update',
+        usage: {
+          inputTokens: 200,
+          outputTokens: 30,
+          cacheReadTokens: 150,
+          cacheCreationTokens: 10,
+          costUsd: 0.0033,
+          contextTokens: 350,
+          contextWindow: undefined,
+        },
+      });
+    });
   });
 
   // ============================================================
@@ -298,6 +329,27 @@ describe('PiEventAdapter', () => {
         type: 'text_complete',
         text: 'Here is the final answer.',
         isIntermediate: false,
+      });
+    });
+
+    it('should treat toolCall content as intermediate even when stopReason is stop', () => {
+      collect(adapter.adaptEvent({ type: 'turn_start' } as any));
+      const events = collect(adapter.adaptEvent({
+        type: 'message_end',
+        message: {
+          role: 'assistant',
+          stopReason: 'stop',
+          content: [
+            { type: 'text', text: '先读 skill 文件。' },
+            { type: 'toolCall', id: 'tool1', name: 'read', arguments: { path: '/tmp/skill.md' } },
+          ],
+        },
+      } as any));
+
+      expect(events[0]).toMatchObject({
+        type: 'text_complete',
+        text: '先读 skill 文件。',
+        isIntermediate: true,
       });
     });
 
@@ -586,6 +638,35 @@ describe('PiEventAdapter', () => {
       expect(events[0].error.code).toBe('rate_limited');
     });
 
+    it('should not emit error when the user stops a turn', () => {
+      collect(adapter.adaptEvent({ type: 'turn_start' } as any));
+      const events = collect(adapter.adaptEvent({
+        type: 'message_end',
+        message: {
+          role: 'assistant',
+          stopReason: 'aborted',
+          errorMessage: 'Request was aborted by the user',
+        },
+      } as any));
+
+      expect(events.every(event => event.type !== 'error' && event.type !== 'typed_error')).toBe(true);
+    });
+
+    it('should not emit error for unrelated aborted turns', () => {
+      collect(adapter.adaptEvent({ type: 'turn_start' } as any));
+      const events = collect(adapter.adaptEvent({
+        type: 'message_end',
+        message: {
+          role: 'assistant',
+          stopReason: 'aborted',
+          errorMessage: 'Request was aborted',
+          content: '',
+        },
+      } as any));
+
+      expect(events.every(event => event.type !== 'error')).toBe(true);
+    });
+
     it('should not emit error without errorMessage even if stopReason is error', () => {
       collect(adapter.adaptEvent({ type: 'turn_start' } as any));
       const events = collect(adapter.adaptEvent({
@@ -846,6 +927,33 @@ describe('PiEventAdapter', () => {
         result: 'file contents',
         content: [{ type: 'text', text: 'file contents' }],
         isError: false,
+      });
+    });
+
+    it('honors proxy-tool details.isError when the Pi SDK event flag is false', () => {
+      collect(adapter.adaptEvent({ type: 'turn_start' } as any));
+      collect(adapter.adaptEvent({
+        type: 'tool_execution_start',
+        toolCallId: 'call_proxy_error',
+        toolName: 'mcp__session__skill_validate',
+        args: { slug: 'missing' },
+      } as any));
+
+      const events = collect(adapter.adaptEvent({
+        type: 'tool_execution_end',
+        toolCallId: 'call_proxy_error',
+        result: {
+          content: [{ type: 'text', text: '[ERROR] target does not exist' }],
+          details: { isError: true },
+        },
+        isError: false,
+      } as any));
+
+      expect(events[0]).toMatchObject({
+        type: 'tool_result',
+        toolName: 'mcp__session__skill_validate',
+        result: '[ERROR] target does not exist',
+        isError: true,
       });
     });
 

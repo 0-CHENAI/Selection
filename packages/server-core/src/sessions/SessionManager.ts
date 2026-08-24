@@ -24,6 +24,13 @@ import type { MidStreamBehavior } from '@craft-agent/shared/config'
 import { PrivilegedExecutionBroker } from '@craft-agent/server-core/services'
 import { isValidWorkingDirectory } from '../utils/path-validation'
 import { InitGate } from '@craft-agent/server-core/domain'
+import {
+  decidePendingFirstTurnAiTitle,
+  shouldCommitFirstTurnAiTitle,
+  shouldFlushFirstTurnAiTitle,
+  shouldQueueFirstTurnAiTitle,
+  type PendingFirstTurnAiTitle,
+} from './first-turn-title'
 import { i18n } from '@craft-agent/shared/i18n'
 import {
   getWorkspaces,
@@ -71,6 +78,7 @@ import {
   type SessionMetadata,
   type SessionStatus,
   type SessionHeader,
+  type SessionTokenUsage,
   pickSessionFields,
   isSharedProjectMemoryEnabled,
 } from '@craft-agent/shared/sessions'
@@ -96,6 +104,7 @@ import { getCredentialManager } from '@craft-agent/shared/credentials'
 import { CraftMcpClient, McpClientPool, McpPoolServer } from '@craft-agent/shared/mcp'
 import { type Session, type SessionEvent, type FileAttachment, type SendMessageOptions, type UnreadSummary, type RemoteSessionTransferPayload, type ImportRemoteSessionTransferResult, RPC_CHANNELS, generateMessageId } from '@craft-agent/shared/protocol'
 import { applySteerTranscriptBoundary, messageToStored, storedToMessage, type Message, type StoredAttachment, type ToolDisplayMeta, type TokenUsage } from '@craft-agent/core/types'
+import { hasRenderableAssistantText, preferRicherAssistantText } from '@craft-agent/core'
 import { formatPathsToRelative, formatToolInputPaths, perf, encodeIconToDataUrlAsync, getEmojiIcon, resetSummarizationClient, resolveToolIcon, readFileAttachment, resolveRegenerateAttachments, selectSpreadMessages, normalizePath } from '@craft-agent/shared/utils'
 import { filterUserFacingSkills, loadAllSkills, loadSkillBySlug, invalidateSkillsCache, type LoadedSkill } from '@craft-agent/shared/skills'
 import { invalidateContextFileCache } from '@craft-agent/shared/prompts/system'
@@ -114,6 +123,14 @@ import { waitForAutomationSessionCompletion } from './wait-automation-session.ts
 import { createTypedError } from '@craft-agent/shared/agent/errors'
 import { buildBackendRuntimeSignature, buildRestartRequiredSignature, prepareModelImageAttachments } from './runtime-config'
 import { validateArchiveTarget } from './archive-guards'
+import {
+  createTurnUsageAccumulator,
+  finalizeTurnUsage,
+  recordModelCallStart,
+  recordModelCallUsage,
+  snapshotTurnUsage,
+  type TurnUsageAccumulator,
+} from './usage-accounting'
 
 // Import from server-core domain utilities
 import { sanitizeForTitle, shouldActivateBrowserOverlay, normalizeBrowserToolName, rollbackFailedBranchCreation, releaseBrowserOwnershipOnForcedStop } from '@craft-agent/server-core/domain'
@@ -848,17 +865,15 @@ interface ManagedSession {
   // SDK session ID for conversation continuity
   sdkSessionId?: string
   // Token usage for display
-  tokenUsage?: {
-    inputTokens: number
-    outputTokens: number
-    totalTokens: number
-    contextTokens: number
-    costUsd: number
-    cacheReadTokens?: number
-    cacheCreationTokens?: number
-    /** Model's context window size in tokens (from SDK modelUsage) */
-    contextWindow?: number
-  }
+  tokenUsage?: SessionTokenUsage
+  /** Runtime-only aggregate for the currently processing user turn. */
+  activeTurnUsage?: TurnUsageAccumulator
+  /** Usage accumulator retained across a source-activation continuation. */
+  pendingContinuationUsage?: TurnUsageAccumulator
+  /** Whether the backend emitted per-call usage for this turn (prevents double-counting final usage). */
+  activeTurnSawUsageUpdate?: boolean
+  /** Whether the backend reports provider attempts independently of usage. */
+  activeTurnSawModelCallStart?: boolean
   // Session status (user-controlled) - determines open vs closed
   // Dynamic status ID referencing workspace status config
   sessionStatus?: string
@@ -1025,6 +1040,8 @@ interface ManagedSession {
   // Promise that resolves when the agent instance is ready (for title gen to await)
   agentReady?: Promise<void>
   agentReadyResolve?: () => void
+  /** First-turn AI title. Generated after the session is idle so it cannot race the first prompt. */
+  pendingAiTitle?: PendingFirstTurnAiTitle
   // Per-session env overrides for SDK subprocess (e.g., ANTHROPIC_BASE_URL).
   // Stored on managed session so it persists across agent recreations (auth-retry, etc.)
   envOverrides?: Record<string, string>
@@ -5998,6 +6015,7 @@ export class SessionManager implements ISessionManager {
     const isPendingAutoRetry = !!pendingAutoRetry
       && message === pendingAutoRetry.content
       && Date.now() < pendingAutoRetry.deadlineMs
+    const isUserTaskContinuation = _isAuthRetry === true || isPendingAutoRetry
     if (claimAutoRetryPending(managed, message) === 'drop') {
       sessionLog.info(`sendMessage: dropped duplicate source-activation retry for ${sessionId}`)
       const existingRetry = [...managed.messages].reverse().find(candidate =>
@@ -6176,11 +6194,17 @@ export class SessionManager implements ISessionManager {
         optimisticMessageId: options?.optimisticMessageId
       }, managed.workspace.id)
 
-      // If this is the first user message and no title exists, set one immediately
+      // If this is the first visible user message and no title exists, set one immediately
       // AI generation will enhance it later, but we always have a title from the start
       // Automation sessions (triggeredBy set) already have a title and skip AI generation entirely
-      const isFirstUserMessage = managed.messages.filter(m => m.role === 'user').length === 1
-      if (isFirstUserMessage && !managed.name && !managed.triggeredBy) {
+      // Hidden nudges must not become the session title.
+      const visibleUserCount = managed.messages.filter(m => m.role === 'user' && !m.hidden).length
+      if (shouldQueueFirstTurnAiTitle({
+        visibleUserCount,
+        isHidden: !!options?.hidden,
+        hasExistingName: !!managed.name,
+        isAutomation: !!managed.triggeredBy,
+      })) {
         // Replace bracket mentions with their display labels (e.g. [skill:ws:commit] -> "Commit")
         // so titles show human-readable names instead of raw IDs
         let titleSource = message
@@ -6204,9 +6228,9 @@ export class SessionManager implements ISessionManager {
           title: initialTitle,
         }, managed.workspace.id)
 
-        // Generate AI title asynchronously using agent's SDK
-        // (waits briefly for agent creation if needed)
-        this.generateTitle(managed, message)
+        // Wait until this turn finishes. Generating now races the first
+        // prompt on the live agent's mini-completion channel (#46).
+        managed.pendingAiTitle = { prompt: message, placeholder: initialTitle }
       }
     }
 
@@ -6246,6 +6270,26 @@ export class SessionManager implements ISessionManager {
     managed.streamingText = ''
     managed.processingGeneration++
     managed.turnStartFinalMessageId = this.getLastFinalAssistantMessageId(managed.messages)
+    if (isUserTaskContinuation) {
+      managed.activeTurnUsage = managed.activeTurnUsage
+        ?? managed.pendingContinuationUsage
+        ?? createTurnUsageAccumulator(Date.now())
+      managed.pendingContinuationUsage = undefined
+    } else {
+      managed.activeTurnUsage = createTurnUsageAccumulator(Date.now())
+      managed.pendingContinuationUsage = undefined
+    }
+    managed.activeTurnSawUsageUpdate = false
+    managed.activeTurnSawModelCallStart = false
+    if (!managed.tokenUsage) {
+      managed.tokenUsage = { ...DEFAULT_TOKEN_USAGE }
+    }
+    managed.tokenUsage.currentTurn = snapshotTurnUsage(managed.activeTurnUsage, Date.now())
+    this.sendEvent({
+      type: 'usage_update',
+      sessionId: managed.id,
+      tokenUsage: managed.tokenUsage,
+    }, managed.workspace.id)
 
     // Reset auth retry flag for this new message (allows one retry per message)
     // IMPORTANT: Skip reset if this is an auth retry call - the flag is already true
@@ -6434,7 +6478,6 @@ export class SessionManager implements ISessionManager {
       // This must be set before each chat() call since multiple sessions share the process.
       const chatSessionDir = getSessionStoragePath(workspaceRootPath, sessionId)
       toolMetadataStore.setSessionDir(chatSessionDir)
-
       // Interruption context is a model-only flag — never append to the stored
       // user message string (that polluted transcripts + source-activation retries).
       const previousResponseInterrupted = !!managed.wasInterrupted
@@ -6503,6 +6546,7 @@ export class SessionManager implements ISessionManager {
       sendSpan.mark('chat.starting')
       const chatIterator = agent.chat(message, preparedImages.attachments, {
         previousResponseInterrupted,
+        continueUserTask: isUserTaskContinuation,
       })
       this.announceRegenerateReplacement(managed)
       sessionLog.info('Got chat iterator, starting iteration...')
@@ -7175,6 +7219,7 @@ export class SessionManager implements ISessionManager {
 
         // 2. Destroy the agent — the new agent's postInit() will refresh auth
         sessionLog.info(`[auth-retry] Destroying agent for session ${sessionId}`)
+        managed.agent?.dispose()
         managed.agent = null
 
         // 3. Retry the message
@@ -7355,6 +7400,25 @@ export class SessionManager implements ISessionManager {
 
     sessionLog.info(`Processing stopped for session ${sessionId}: ${completionReason}`)
 
+    if (managed.activeTurnUsage) {
+      const pendingSourceContinuation = managed.autoRetryPending
+      if (
+        pendingSourceContinuation &&
+        !pendingSourceContinuation.committed &&
+        Date.now() < pendingSourceContinuation.deadlineMs
+      ) {
+        managed.pendingContinuationUsage = managed.activeTurnUsage
+      }
+      if (!managed.tokenUsage) {
+        managed.tokenUsage = { ...DEFAULT_TOKEN_USAGE }
+      }
+      managed.tokenUsage.lastTurn = finalizeTurnUsage(managed.activeTurnUsage, Date.now())
+      delete managed.tokenUsage.currentTurn
+      managed.activeTurnUsage = undefined
+      managed.activeTurnSawUsageUpdate = undefined
+      managed.activeTurnSawModelCallStart = undefined
+    }
+
     // 1. Cleanup state
     this.setProcessing(managed, false)
     managed.stopRequested = false  // Reset for next turn
@@ -7473,6 +7537,8 @@ export class SessionManager implements ISessionManager {
       // spawn_session completions that arrived mid-turn never reached the model
       // (the tool already returned `started`). Wake now that the parent is idle.
       this.flushDeferredSpawnWakes(managed)
+
+      this.flushPendingAiTitle(managed)
     }
 
     // 6. Always persist
@@ -8565,56 +8631,48 @@ export class SessionManager implements ISessionManager {
     }
   }
 
+  private flushPendingAiTitle(managed: ManagedSession): void {
+    if (!shouldFlushFirstTurnAiTitle({
+      hasPending: !!managed.pendingAiTitle,
+      queueLength: managed.messageQueue.length,
+    })) return
+    const pending = managed.pendingAiTitle
+    if (!pending) return
+    managed.pendingAiTitle = undefined
+    void this.generateTitle(managed, pending)
+  }
+
   /**
    * Generate an AI title for a session from the user's first message.
-   * Uses the agent's generateTitle() method which handles provider-specific SDK calls.
-   * If no agent exists, creates a temporary one using the session's connection.
+   * Uses the live session agent only, after the first turn is idle.
    */
-  private async generateTitle(managed: ManagedSession, userMessage: string): Promise<void> {
+  private async generateTitle(managed: ManagedSession, pending: PendingFirstTurnAiTitle): Promise<void> {
     sessionLog.info(`[generateTitle] Starting for session ${managed.id}`)
 
-    // Use existing agent or create temporary one
-    let agent: AgentInstance | null = managed.agent
-    let isTemporary = false
-
-    // Wait briefly for agent to be created (it's created concurrently)
-    if (!agent) {
-      let attempts = 0
-      while (!managed.agent && attempts < 10) {
-        await new Promise(resolve => setTimeout(resolve, 100))
-        attempts++
-      }
-      agent = managed.agent
+    if (managed.agentReady) {
+      await managed.agentReady.catch(() => undefined)
     }
 
-    // If still no agent, create a temporary one using the session's connection
-    if (!agent && managed.llmConnection) {
-      try {
-        const connection = getLlmConnection(managed.llmConnection)
-
-        agent = createBackendFromConnection(managed.llmConnection, {
-          workspace: managed.workspace,
-          miniModel: connection ? (getMiniModel(connection) ?? connection.defaultModel) : undefined,
-          session: {
-            id: `title-${managed.id}`,
-            workspaceRootPath: managed.workspace.rootPath,
-            llmConnection: managed.llmConnection,
-            createdAt: Date.now(),
-            lastUsedAt: Date.now(),
-          },
-          isHeadless: true,
-        }, buildBackendHostRuntimeContext()) as AgentInstance
-        await agent.postInit()
-        isTemporary = true
-        sessionLog.info(`[generateTitle] Created temporary agent for session ${managed.id}`)
-      } catch (error) {
-        sessionLog.error(`[generateTitle] Failed to create temporary agent:`, error)
-        return
-      }
+    const decision = decidePendingFirstTurnAiTitle({
+      sessionAlive: this.sessions.get(managed.id) === managed,
+      isProcessing: managed.isProcessing,
+      queueLength: managed.messageQueue.length,
+      currentName: managed.name,
+      placeholder: pending.placeholder,
+    })
+    if (decision === 'defer') {
+      managed.pendingAiTitle = pending
+      sessionLog.info(`[generateTitle] Deferred for session ${managed.id}; a new turn is in flight`)
+      return
+    }
+    if (decision === 'drop') {
+      sessionLog.info(`[generateTitle] Dropped for session ${managed.id}; session gone or title already changed`)
+      return
     }
 
+    const agent = managed.agent
     if (!agent) {
-      sessionLog.warn(`[generateTitle] No agent and no connection for session ${managed.id}`)
+      sessionLog.warn(`[generateTitle] No agent for session ${managed.id}; keeping the placeholder title`)
       return
     }
 
@@ -8627,43 +8685,32 @@ export class SessionManager implements ISessionManager {
         resolvedLanguage: i18n.resolvedLanguage ?? null,
         titleLanguage: titleLanguage ?? null,
       })
-      const title = await agent.generateTitle(userMessage, { language: titleLanguage })
-      if (title) {
-        managed.name = title
-        this.persistSession(managed)
-        // Flush immediately to ensure disk is up-to-date before notifying renderer.
-        // This prevents race condition where lazy loading reads stale disk data
-        // (the persistence queue has a 500ms debounce).
-        await this.flushSession(managed.id)
-        // Now safe to notify renderer - disk is authoritative
-        this.sendEvent({ type: 'title_generated', sessionId: managed.id, title }, managed.workspace.id)
-        sessionLog.info(`Generated title for session ${managed.id}: "${title}"`)
-      } else {
+      const title = await agent.generateTitle(pending.prompt, { language: titleLanguage })
+      if (!title) {
         sessionLog.warn(`Title generation returned null for session ${managed.id}`)
+        return
       }
+      if (!shouldCommitFirstTurnAiTitle({
+        sessionAlive: this.sessions.get(managed.id) === managed,
+        currentName: managed.name,
+        placeholder: pending.placeholder,
+      })) {
+        sessionLog.info(`[generateTitle] Discarded result for session ${managed.id}; name changed or session gone`)
+        return
+      }
+      managed.name = title
+      this.persistSession(managed)
+      // Flush immediately to ensure disk is up-to-date before notifying renderer.
+      // This prevents race condition where lazy loading reads stale disk data
+      // (the persistence queue has a 500ms debounce).
+      await this.flushSession(managed.id)
+      // Now safe to notify renderer - disk is authoritative
+      this.sendEvent({ type: 'title_generated', sessionId: managed.id, title }, managed.workspace.id)
+      sessionLog.info(`Generated title for session ${managed.id}: "${title}"`)
     } catch (error) {
+      // Title is background metadata. A 429/timeout here must not look like
+      // the completed reply failed (#46).
       sessionLog.error(`Failed to generate title for session ${managed.id}:`, error)
-
-      // Surface quota/auth errors to the user — these indicate the main chat call will also fail
-      const errorMsg = error instanceof Error ? error.message : String(error)
-      if (errorMsg.includes('quota') || errorMsg.includes('429') || errorMsg.includes('401') || errorMsg.includes('insufficient')) {
-        this.sendEvent({
-          type: 'typed_error',
-          sessionId: managed.id,
-          error: {
-            code: 'provider_error',
-            title: 'API Error',
-            message: `API error: ${errorMsg.slice(0, 200)}`,
-            actions: [{ key: 'r', label: 'Retry', action: 'retry' }],
-            canRetry: true,
-          }
-        }, managed.workspace.id)
-      }
-    } finally {
-      // Clean up temporary agent
-      if (isTemporary && agent) {
-        agent.destroy()
-      }
     }
   }
 
@@ -8682,10 +8729,11 @@ export class SessionManager implements ISessionManager {
         // Flush any pending deltas before sending complete (ensures renderer has all content)
         this.flushDelta(sessionId, workspaceId)
 
+        const content = preferRicherAssistantText(event.text, managed.streamingText)
         const assistantMessage: Message = {
           id: generateMessageId(),
           role: 'assistant',
-          content: event.text,
+          content,
           timestamp: this.monotonic(),
           isIntermediate: event.isIntermediate,
           turnId: event.turnId,
@@ -8695,7 +8743,7 @@ export class SessionManager implements ISessionManager {
         managed.streamingText = ''
 
         // Update lastMessageRole and lastFinalMessageId for badge/unread display (only for final messages)
-        if (!event.isIntermediate) {
+        if (!event.isIntermediate && hasRenderableAssistantText(content)) {
           managed.lastMessageRole = 'assistant'
           managed.lastFinalMessageId = assistantMessage.id
 
@@ -8731,7 +8779,7 @@ export class SessionManager implements ISessionManager {
           }
         }
 
-        this.sendEvent({ type: 'text_complete', sessionId, text: event.text, isIntermediate: event.isIntermediate, turnId: event.turnId, parentToolUseId: event.parentToolUseId, timestamp: assistantMessage.timestamp, messageId: assistantMessage.id }, workspaceId)
+        this.sendEvent({ type: 'text_complete', sessionId, text: content, isIntermediate: event.isIntermediate, turnId: event.turnId, parentToolUseId: event.parentToolUseId, timestamp: assistantMessage.timestamp, messageId: assistantMessage.id }, workspaceId)
 
         // Persist session after complete message to prevent data loss on quit
         this.persistSession(managed)
@@ -9039,10 +9087,7 @@ export class SessionManager implements ISessionManager {
             this.sendEvent({
               type: 'usage_update',
               sessionId,
-              tokenUsage: {
-                inputTokens: managed.tokenUsage.inputTokens,
-                contextWindow: managed.tokenUsage.contextWindow,
-              },
+              tokenUsage: managed.tokenUsage,
             }, workspaceId)
           }
         }
@@ -9434,9 +9479,20 @@ export class SessionManager implements ISessionManager {
               costUsd: 0,
             }
           }
+          // Backends that provide per-call usage_update events have already
+          // accounted for this final call. Legacy backends only provide the
+          // final complete event, so record it as a single-call turn.
+          if (!managed.activeTurnSawUsageUpdate && managed.activeTurnUsage) {
+            const recorded = recordModelCallUsage(managed.activeTurnUsage, event.usage, {
+              countModelCall: !managed.activeTurnSawModelCallStart,
+            })
+            managed.activeTurnUsage = recorded.accumulator
+            managed.tokenUsage.lastCall = recorded.lastCall
+            managed.tokenUsage.currentTurn = snapshotTurnUsage(recorded.accumulator, Date.now())
+          }
           // inputTokens = current context size (full conversation sent this turn), NOT accumulated
           // Each API call sends the full conversation history, so we use the latest value
-          managed.tokenUsage.inputTokens = event.usage.inputTokens
+          managed.tokenUsage.inputTokens = event.usage.contextTokens ?? event.usage.inputTokens
           // outputTokens and costUsd are accumulated across all turns (total session usage)
           managed.tokenUsage.outputTokens += event.usage.outputTokens
           managed.tokenUsage.totalTokens = managed.tokenUsage.inputTokens + managed.tokenUsage.outputTokens
@@ -9449,6 +9505,22 @@ export class SessionManager implements ISessionManager {
             managed.tokenUsage.contextWindow = event.usage.contextWindow
           }
         }
+        break
+
+      case 'model_call_start':
+        if (!managed.tokenUsage) {
+          managed.tokenUsage = { ...DEFAULT_TOKEN_USAGE }
+        }
+        managed.activeTurnUsage = recordModelCallStart(
+          managed.activeTurnUsage ?? createTurnUsageAccumulator(Date.now()),
+        )
+        managed.activeTurnSawModelCallStart = true
+        managed.tokenUsage.currentTurn = snapshotTurnUsage(managed.activeTurnUsage, Date.now())
+        this.sendEvent({
+          type: 'usage_update',
+          sessionId: managed.id,
+          tokenUsage: managed.tokenUsage,
+        }, workspaceId)
         break
 
       case 'usage_update':
@@ -9464,8 +9536,17 @@ export class SessionManager implements ISessionManager {
               costUsd: 0,
             }
           }
+          const recorded = recordModelCallUsage(
+            managed.activeTurnUsage ?? createTurnUsageAccumulator(Date.now()),
+            event.usage,
+            { countModelCall: !managed.activeTurnSawModelCallStart },
+          )
+          managed.activeTurnUsage = recorded.accumulator
+          managed.activeTurnSawUsageUpdate = true
+          managed.tokenUsage.lastCall = recorded.lastCall
+          managed.tokenUsage.currentTurn = snapshotTurnUsage(recorded.accumulator, Date.now())
           // Update only inputTokens (current context size) - other fields accumulate on complete
-          managed.tokenUsage.inputTokens = event.usage.inputTokens
+          managed.tokenUsage.inputTokens = event.usage.contextTokens ?? event.usage.inputTokens
           if (event.usage.contextWindow) {
             managed.tokenUsage.contextWindow = event.usage.contextWindow
           }
@@ -9474,10 +9555,7 @@ export class SessionManager implements ISessionManager {
           this.sendEvent({
             type: 'usage_update',
             sessionId: managed.id,
-            tokenUsage: {
-              inputTokens: event.usage.inputTokens,
-              contextWindow: event.usage.contextWindow,
-            },
+            tokenUsage: managed.tokenUsage,
           }, workspaceId)
         }
         break

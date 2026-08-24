@@ -3,6 +3,10 @@ import type { ModelDefinition } from '../../../../config/models.ts';
 import { getAllPiModels, getPiModelsForAuthProvider } from '../../../../config/models-pi.ts';
 import { getPiProviderBaseUrl } from '../../../../config/models-pi.ts';
 import { toCustomEndpointModelPayload } from '../../../../config/model-image-support.ts';
+import {
+  fetchOpenRouterCatalog,
+  openRouterCatalogToModelDefinitions,
+} from '../../../../config/openrouter-catalog.ts';
 
 // ── Copilot model types ────────────────────────────────────────────────
 type RawCopilotModel = {
@@ -276,11 +280,15 @@ async function testAnthropicCompatible(
 
 export const piDriver: ProviderDriver = {
   provider: 'pi',
-  buildRuntime: ({ context, providerOptions, resolvedPaths }) => ({
+  buildRuntime: ({ context, providerOptions, resolvedPaths, hostRuntime }) => ({
     paths: {
       piServer: resolvedPaths.piServerPath,
       interceptor: resolvedPaths.interceptorBundlePath,
       node: resolvedPaths.nodeRuntimePath,
+    },
+    officecliHost: {
+      appRootPath: hostRuntime.appRootPath,
+      resourcesPath: hostRuntime.resourcesPath,
     },
     piAuthProvider: providerOptions?.piAuthProvider || context.connection?.piAuthProvider,
     baseUrl: context.connection?.baseUrl,
@@ -295,6 +303,20 @@ export const piDriver: ProviderDriver = {
     if (connection.piAuthProvider === 'github-copilot' && copilotGitHubToken) {
       const models = await fetchCopilotModels(copilotGitHubToken, timeoutMs);
       return { models };
+    }
+
+    if (connection.piAuthProvider === 'openrouter') {
+      try {
+        const live = await fetchOpenRouterCatalog({
+          apiKey: credentials.apiKey,
+          timeoutMs,
+        });
+        if (live.length > 0) {
+          return { models: openRouterCatalogToModelDefinitions(live) };
+        }
+      } catch (err) {
+        console.warn(`[fetchOpenRouterModels] live catalog failed: ${(err as Error).message}`);
+      }
     }
 
     // All other Pi providers: use static Pi SDK model registry

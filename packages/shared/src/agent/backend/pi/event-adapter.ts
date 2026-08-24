@@ -265,15 +265,16 @@ export class PiEventAdapter extends BaseEventAdapter {
           this.overflowState = 'none';
         }
         if (this.lastUsage) {
-          const inputTokens = this.lastUsage.input + (this.lastUsage.cacheRead || 0);
+          const contextTokens = this.lastUsage.input + (this.lastUsage.cacheRead || 0);
           yield {
             type: 'complete',
             usage: {
-              inputTokens,
+              inputTokens: this.lastUsage.input,
               outputTokens: this.lastUsage.output,
               cacheReadTokens: this.lastUsage.cacheRead,
               cacheCreationTokens: this.lastUsage.cacheWrite,
               costUsd: this.lastUsage.cost.total,
+              contextTokens,
               contextWindow: this.contextWindow,
             },
           };
@@ -289,6 +290,7 @@ export class PiEventAdapter extends BaseEventAdapter {
       case 'turn_start':
         // Pi SDK turn_start has no ID, so generate one for event correlation
         this.currentTurnId = `pi-turn-${this.turnIndex}`;
+        yield { type: 'model_call_start' };
         break;
 
       case 'turn_end':
@@ -336,7 +338,7 @@ export class PiEventAdapter extends BaseEventAdapter {
         const sdkMessageId = (event as { sdkMessageId?: string }).sdkMessageId ?? msg?.id;
         if (msg?.role !== 'assistant') break;
 
-        // Surface API errors — Pi SDK sets stopReason: 'error' and errorMessage on failures
+        // Surface API errors — Pi SDK sets stopReason: 'error' and errorMessage on failures.
         if (msg.stopReason === 'error' && msg.errorMessage) {
           // Context overflow: hand recovery to the SDK's _runAutoCompaction
           // and keep the UI quiet until we know the outcome (recovered turn
@@ -366,7 +368,14 @@ export class PiEventAdapter extends BaseEventAdapter {
         const textContent = this.extractTextFromMessage(event.message);
         // Pi SDK stopReason: 'toolUse' means the model will call tools next (intermediate commentary),
         // 'stop'/'end_turn' means final response. Same logic as Claude's stop_reason === 'tool_use'.
-        const isIntermediate = msg.stopReason === 'toolUse';
+        // Some providers still attach toolCall parts with stopReason 'stop'; treat those
+        // as intermediate so the work chain is not flushed (#81).
+        const rawContent = (event.message as { content?: unknown } | undefined)?.content;
+        const hasToolCall = Array.isArray(rawContent) && rawContent.some((part) => {
+          const type = (part as { type?: string } | undefined)?.type;
+          return type === 'toolCall' || type === 'tool_use';
+        });
+        const isIntermediate = msg.stopReason === 'toolUse' || hasToolCall;
         if (textContent && (isIntermediate || !this.hasEmittedFinalText)) {
           if (!isIntermediate) this.hasEmittedFinalText = true;
 
@@ -386,11 +395,16 @@ export class PiEventAdapter extends BaseEventAdapter {
         // Emit usage_update if the assistant message includes token usage
         if (msg.usage && typeof msg.usage.input === 'number') {
           this.lastUsage = msg.usage;
-          const inputTokens = msg.usage.input + (msg.usage.cacheRead || 0);
+          const contextTokens = msg.usage.input + (msg.usage.cacheRead || 0);
           yield {
             type: 'usage_update',
             usage: {
-              inputTokens,
+              inputTokens: msg.usage.input,
+              outputTokens: msg.usage.output,
+              cacheReadTokens: msg.usage.cacheRead,
+              cacheCreationTokens: msg.usage.cacheWrite,
+              costUsd: msg.usage.cost.total,
+              contextTokens,
               contextWindow: this.contextWindow,
             },
           };
@@ -508,7 +522,10 @@ export class PiEventAdapter extends BaseEventAdapter {
         // Use accumulated output from partial results if available
         const accumulatedOutput = this.consumeOutput(toolCallId);
 
-        const isError = event.isError;
+        const resultDetails = event.result && typeof event.result === 'object'
+          ? (event.result as { details?: { isError?: unknown } }).details
+          : undefined;
+        const isError = event.isError === true || resultDetails?.isError === true;
         let result: string;
         const normalizedContent = blockReason ? undefined : normalizeToolResultContent(event.result);
         const finalImages = accumulatedOutput

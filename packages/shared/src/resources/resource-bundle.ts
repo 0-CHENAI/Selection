@@ -215,7 +215,7 @@ function sanitizeUnknown(
   return output
 }
 
-function sanitizeSourceConfig(
+export function sanitizeSourceConfig(
   config: FolderSourceConfig,
   redactions: ResourceRedaction[],
 ): { config: FolderSourceConfig; warnings: string[] } {

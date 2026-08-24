@@ -49,6 +49,7 @@ export interface SourcesListPanelProps {
   /** Controlled open state for copy-from-workspace dialog (header button) */
   copyFromOpen?: boolean
   onCopyFromOpenChange?: (open: boolean) => void
+  onImportFromFile?: () => void
 }
 
 export function SourcesListPanel({
@@ -62,6 +63,7 @@ export function SourcesListPanel({
   className,
   copyFromOpen: copyFromOpenProp,
   onCopyFromOpenChange,
+  onImportFromFile,
 }: SourcesListPanelProps) {
   const { t } = useTranslation()
   const { workspaces, activeWorkspaceId } = useAppShellContext()
@@ -125,6 +127,15 @@ export function SourcesListPanel({
                   workspaceRootPath
                 )}
               />
+            )}
+            {onImportFromFile && (
+              <button
+                type="button"
+                onClick={onImportFromFile}
+                className="inline-flex items-center h-7 px-3 text-xs font-medium rounded-[8px] bg-background shadow-minimal hover:bg-foreground/[0.03] transition-colors"
+              >
+                {t('fileImport.mcpTitle')}
+              </button>
             )}
             {hasOtherLocalWorkspaces && (
               <button

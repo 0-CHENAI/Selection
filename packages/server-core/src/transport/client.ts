@@ -12,6 +12,7 @@
 import {
   PROTOCOL_VERSION,
   REQUEST_TIMEOUT_MS,
+  requestTimeoutMsForChannel,
   SEQUENCE_ACK_INTERVAL_MS,
   isErrorCode,
   type ErrorCode,
@@ -27,7 +28,7 @@ import { serializeEnvelope, deserializeEnvelope } from './codec'
 interface PendingRequest {
   resolve: (value: any) => void
   reject: (error: Error) => void
-  timeout: ReturnType<typeof setTimeout>
+  timeout?: ReturnType<typeof setTimeout>
 }
 
 // ---------------------------------------------------------------------------
@@ -184,10 +185,15 @@ export class WsRpcClient implements RpcClient {
       }
 
       const id = crypto.randomUUID()
-      const timeout = setTimeout(() => {
-        this.pending.delete(id)
-        reject(new Error(`Request timeout: ${channel} (${this.requestTimeout}ms)`))
-      }, this.requestTimeout)
+      const timeoutMs = requestTimeoutMsForChannel(channel) === null
+        ? null
+        : this.requestTimeout
+      const timeout = timeoutMs == null
+        ? undefined
+        : setTimeout(() => {
+          this.pending.delete(id)
+          reject(new Error(`Request timeout: ${channel} (${timeoutMs}ms)`))
+        }, timeoutMs)
 
       this.pending.set(id, { resolve, reject, timeout })
 
@@ -200,7 +206,7 @@ export class WsRpcClient implements RpcClient {
 
       if (!this.trySendEnvelope(this.ws, envelope)) {
         this.pending.delete(id)
-        clearTimeout(timeout)
+        if (timeout) clearTimeout(timeout)
         reject(new Error(`Not connected (channel: ${channel})`))
       }
     })

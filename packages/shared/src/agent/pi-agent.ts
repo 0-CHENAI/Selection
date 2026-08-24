@@ -35,7 +35,12 @@ import type { ThinkingLevel } from './thinking-levels.ts';
 
 // Import models from centralized registry
 import { getModelById } from '../config/models.ts';
-import { resolveCustomModelContextWindow } from '../config/model-image-support.ts';
+import {
+  connectionModelIdsMatch,
+  inferModelSupportsImages,
+  resolveCustomModelContextWindow,
+} from '../config/model-image-support.ts';
+import { FEATURE_FLAGS } from '../feature-flags.ts';
 
 // BaseAgent provides common functionality
 import { BaseAgent } from './base-agent.ts';
@@ -90,8 +95,14 @@ import { getPermissionModeDiagnostics } from './mode-manager.ts';
 import type { McpClientPool } from '../mcp/mcp-pool.ts';
 
 // Path utilities
-import { join } from 'path';
+import { delimiter, join } from 'node:path';
 import { homedir } from 'os';
+import {
+  getOfficecliWrapperDir,
+  isOfficecliShellCommand,
+  resolveOfficecliBinary,
+  resolveOfficecliResourcesRoot,
+} from '../utils/officecli.ts';
 
 // Session storage (plans folder path)
 import { getSessionDataPath, getSessionPath, getSessionPlansPath } from '../sessions/storage.ts';
@@ -101,6 +112,7 @@ import { parseError, type AgentError } from './errors.ts';
 
 // Centralized PreToolUse pipeline
 import { runPreToolUseChecks, type PreToolUseCheckResult } from './core/pre-tool-use.ts';
+import { recoverKnownToolInputFromIntent } from './core/tool-input-recovery.ts';
 import { getBrowserToolEnabled } from '../config/storage.ts';
 
 // Workspace slug extraction for skill qualification
@@ -330,6 +342,9 @@ export class PiAgent extends BaseAgent {
   // Current user message (for context in summarization)
   private currentUserMessage: string = '';
 
+  private managedOfficecliShellAvailable = false;
+  private managedOfficecliBinaryPath?: string;
+
   // Pool reference for convenience (from this.config.mcpPool)
   private get mcpPool(): McpClientPool | undefined { return this.config.mcpPool; }
 
@@ -500,6 +515,26 @@ export class PiAgent extends BaseAgent {
 
     // Derive AWS env vars from the piAuth credential (single fetch, no race).
     const awsEnv = this.buildAwsEnv(piAuth, runtime);
+    const officecliResolution = {
+      cwd: runtime.officecliHost?.appRootPath ?? process.cwd(),
+      appRootPath: runtime.officecliHost?.appRootPath,
+      resourcesPath: runtime.officecliHost?.resourcesPath,
+      // Session/connection environment overrides must not replace Selection's
+      // reviewed OfficeCLI toolchain. These roots come from the app shell.
+      trustEnvironment: false,
+    };
+    const officecliWrapperDir = getOfficecliWrapperDir(officecliResolution);
+    const officecliBinary = resolveOfficecliBinary(officecliResolution);
+    const officecliResources = resolveOfficecliResourcesRoot(officecliResolution);
+    this.managedOfficecliShellAvailable = Boolean(officecliWrapperDir && officecliBinary && officecliResources);
+    this.managedOfficecliBinaryPath = this.managedOfficecliShellAvailable ? officecliBinary : undefined;
+    const officecliShellWrapper = this.managedOfficecliShellAvailable && officecliWrapperDir
+      ? join(officecliWrapperDir, process.platform === 'win32' ? 'officecli.cmd' : 'officecli')
+      : undefined;
+    const inheritedPath = this.config.envOverrides?.PATH ?? process.env.PATH ?? '';
+    const managedToolPath = officecliWrapperDir
+      ? `${officecliWrapperDir}${inheritedPath ? `${delimiter}${inheritedPath}` : ''}`
+      : inheritedPath;
 
     // Spawn the subprocess
     const child = spawn(nodePath, args, {
@@ -510,6 +545,14 @@ export class PiAgent extends BaseAgent {
         ...getProxyEnvVars(),
         ...this.config.envOverrides,
         ...awsEnv,
+        // Resolve Selection's wrapper before any user-installed OfficeCLI.
+        ...(managedToolPath ? { PATH: managedToolPath } : {}),
+        // Expose the trusted wrapper, which adds the sole Word compatibility repair.
+        CRAFT_OFFICECLI: officecliShellWrapper ?? '',
+        // Never inherit a session/user resource override. Official guides and
+        // helper assets must come from the same trusted Selection package.
+        CRAFT_OFFICECLI_RESOURCES: officecliResources ?? '',
+        CRAFT_BUN: nodePath,
         // Pass session dir for cross-process toolMetadataStore
         ...(sessionDir ? { CRAFT_SESSION_DIR: sessionDir } : {}),
         // Propagate debug mode
@@ -1131,6 +1174,7 @@ export class PiAgent extends BaseAgent {
 
     if (eventType === 'tool_execution_start') {
       const toolName = event.toolName as string;
+      const toolCallId = event.toolCallId as string | undefined;
       if (toolName?.startsWith('session__') || toolName?.startsWith('mcp__session__')) {
         // Session tool tracking is handled by the subprocess; it sends
         // session_tool_completed events when appropriate.
@@ -1138,7 +1182,6 @@ export class PiAgent extends BaseAgent {
 
       // Deterministic metadata bridge: if subprocess event lacks toolMetadata,
       // inject metadata captured from pre_tool_use_request before stripping.
-      const toolCallId = event.toolCallId as string | undefined;
       const existingMeta = event.toolMetadata as { intent?: string; displayName?: string } | undefined;
       if (toolCallId && !existingMeta) {
         const cached = this.preToolMetadataByCallId.get(toolCallId);
@@ -1264,7 +1307,9 @@ export class PiAgent extends BaseAgent {
     toolCallId?: string;
     input: Record<string, unknown>;
   }): Promise<void> {
-    const { requestId, toolName, toolCallId, input } = req;
+    const { requestId, toolName, toolCallId } = req;
+    const input = recoverKnownToolInputFromIntent(toolName, req.input);
+    const inputWasRecovered = input !== req.input;
     const debugSessionId = this.config.session?.id || this._sessionId;
     this.debug(`PreToolUse request from subprocess: ${toolName} (${requestId}, sessionId=${debugSessionId})`);
 
@@ -1338,6 +1383,23 @@ export class PiAgent extends BaseAgent {
         sendPermissionBlock(decided.reason);
         return;
       }
+      const shellCommand = toolName === 'Bash' && typeof decided.input.command === 'string'
+        ? decided.input.command
+        : null;
+      if (shellCommand && isOfficecliShellCommand(shellCommand) && !this.managedOfficecliShellAvailable) {
+        sendPermissionBlock('Selection\'s app-managed OfficeCLI runtime or official resources are unavailable. Repair or reinstall Selection before running OfficeCLI shell commands.');
+        return;
+      }
+      if (shellCommand && this.managedOfficecliBinaryPath) {
+        const commandForComparison = process.platform === 'win32' ? shellCommand.toLowerCase() : shellCommand;
+        const binaryForComparison = process.platform === 'win32'
+          ? this.managedOfficecliBinaryPath.toLowerCase()
+          : this.managedOfficecliBinaryPath;
+        if (commandForComparison.includes(binaryForComparison)) {
+          sendPermissionBlock('Direct invocation of Selection\'s platform OfficeCLI binary is blocked because it bypasses the Word Heading/TOC compatibility repair. Invoke `officecli` through the trusted PATH wrapper instead.');
+          return;
+        }
+      }
       await emitPreToolUse(decided.input);
       if (decided.modified || alreadyModified) {
         this.send({ type: 'pre_tool_use_response', requestId, action: 'modify', input: decided.input });
@@ -1348,7 +1410,7 @@ export class PiAgent extends BaseAgent {
 
     switch (checkResult.type) {
       case 'allow':
-        await finishAllowedTool(input, false);
+        await finishAllowedTool(input, inputWasRecovered);
         return;
 
       case 'modify':
@@ -1562,23 +1624,42 @@ export class PiAgent extends BaseAgent {
    * Get or create a SessionToolContext for executing session-scoped tools.
    * Cached per agent instance since the workspace/session don't change.
    */
+  private resolveCurrentModelSupportsImages(): boolean {
+    const modelId = this.config.model || '';
+    const runtime = getBackendRuntime(this.config);
+    const customModel = runtime.customModels?.find((model) =>
+      connectionModelIdsMatch(typeof model === 'string' ? model : model.id, modelId),
+    );
+    const customModelSupportsImages = customModel && typeof customModel !== 'string'
+      ? customModel.supportsImages
+      : undefined;
+    const registeredModel = getModelById(modelId);
+    return customModelSupportsImages
+      ?? runtime.customEndpoint?.supportsImages
+      ?? registeredModel?.supportsImages
+      ?? inferModelSupportsImages(modelId, registeredModel?.name);
+  }
+
   private getSessionToolContext(): SessionToolContext {
     if (this._sessionToolContext) {
-      // The project directory can change while the agent stays alive. Keep the
-      // cached tool context in sync so relative Office paths follow the session.
+      // The project directory can change while the agent stays alive.
       this._sessionToolContext.workingDirectory = this.config.session?.workingDirectory;
+      this._sessionToolContext.supportsImages = this.resolveCurrentModelSupportsImages();
+      this._sessionToolContext.permissionMode = this.permissionManager.getPermissionMode();
       return this._sessionToolContext;
     }
 
     const sessionId = this.config.session?.id || '';
     const workspacePath = this.config.workspace.rootPath;
     const workspaceId = this.config.workspace.id;
-
+    const supportsImages = this.resolveCurrentModelSupportsImages();
     this._sessionToolContext = createClaudeContext({
       sessionId,
       workspacePath,
       workspaceId,
       workingDirectory: this.config.session?.workingDirectory,
+      supportsImages,
+      permissionMode: this.permissionManager.getPermissionMode(),
       onPlanSubmitted: (planPath: string) => {
         setLastPlanFilePath(sessionId, planPath);
         this.onPlanSubmitted?.(planPath);
@@ -1690,11 +1771,13 @@ export class PiAgent extends BaseAgent {
 
       const ctx = this.getSessionToolContext();
       const result: SessionToolResult = await def.handler(ctx, args);
-
       // Preserve MCP-compatible text/image blocks all the way into Pi's model
       // context. The first block is always text, so older string-only event/UI
       // consumers still receive the structured envelope and artifact paths.
-      return { content: result.content, isError: !!result.isError };
+      return {
+        content: result.content,
+        isError: !!result.isError,
+      };
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
       this.debug(`Session tool ${toolName} failed: ${msg}`);
@@ -1821,6 +1904,7 @@ export class PiAgent extends BaseAgent {
     this.debug(`Pi subprocess exited: code=${code}, signal=${signal}`);
 
     this.subprocess = null;
+    this.managedOfficecliShellAvailable = false;
     this.readline = null;
     this.resetSubprocessErrorDedup();
     this.subprocessReady = null;
@@ -2139,6 +2223,10 @@ export class PiAgent extends BaseAgent {
         'Selection Backend', // backendName
         getCoAuthorPreference(), // respect user's includeCoAuthoredBy preference (#576)
         projectContext ?? undefined,
+        // Pi sessions support runtime model switching but cannot safely rebuild
+        // their registered tool schemas. Keep the prompt aligned with the strict,
+        // provider-neutral schemas registered by pi-agent-server.
+        false,
       );
 
       // Build context from sources
@@ -2187,16 +2275,9 @@ export class PiAgent extends BaseAgent {
         } else if (att.mimeType === 'application/pdf' && att.storedPath) {
           attachmentParts.push(`[Attached PDF: ${att.name}]\n[Stored at: ${att.storedPath}]`);
         } else if (att.type === 'office' && att.storedPath) {
-          const lower = `${att.name} ${att.storedPath}`.toLowerCase();
-          const officeSkill = lower.includes('.xlsx')
-            ? 'officecli-xlsx'
-            : lower.includes('.pptx')
-              ? 'officecli-pptx'
-              : 'officecli-docx';
           attachmentParts.push(
             `[Attached Office document: ${att.name}]\n` +
-            `[Stored at: ${att.storedPath}]\n` +
-            `[Load [skill:officecli] then [skill:${officeSkill}]. Run \`officecli load_skill word\` (or excel / pptx), then inspect and edit with officecli via Bash. Already on PATH; do not curl-install.]`,
+            `[Stored at: ${att.storedPath}]`,
           );
         } else if (att.storedPath) {
           let pathInfo = `[Attached file: ${att.name}]\n[Stored at: ${att.storedPath}]`;
@@ -2621,6 +2702,7 @@ export class PiAgent extends BaseAgent {
     if (this.subprocess === child) {
       this.subprocess = null;
     }
+    this.managedOfficecliShellAvailable = false;
     this.subprocessReady = null;
     this.subprocessReadyResolve = null;
     this.callbackPort = 0;
@@ -2653,6 +2735,7 @@ export class PiAgent extends BaseAgent {
       this.subprocess.kill('SIGTERM');
       this.subprocess = null;
     }
+    this.managedOfficecliShellAvailable = false;
 
     this.subprocessReady = null;
     this.subprocessReadyResolve = null;

@@ -171,6 +171,12 @@ export interface SessionToolContext {
   /** Working directory (project root) for the session, if set */
   workingDirectory?: string;
 
+  /** Current model's image-input capability. Unknown is intentionally omitted. */
+  supportsImages?: boolean;
+
+  /** Current session permission mode, when supplied by the backend. */
+  permissionMode?: string;
+
   // ============================================================
   // Callbacks (transport-agnostic)
   // ============================================================

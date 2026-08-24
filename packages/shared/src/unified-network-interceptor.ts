@@ -23,6 +23,7 @@ import {
   DEBUG,
   debugLog,
   isRichToolDescriptionsEnabled,
+  supportsRichToolMetadataForModel,
   setStoredError,
   toolMetadataStore,
   displayNameSchema,
@@ -633,14 +634,17 @@ const anthropicAdapter: ApiAdapter = {
       return body;
     }
 
-    const richDescriptions = isRichToolDescriptionsEnabled();
+    const metadataCompatible = supportsRichToolMetadataForModel(
+      typeof body.model === 'string' ? body.model : undefined,
+    );
+    const richDescriptions = metadataCompatible && isRichToolDescriptionsEnabled();
     let modifiedCount = 0;
     for (const tool of tools) {
       // MCP tools always get metadata regardless of the feature flag — they're
       // lower-volume than built-in tools and the metadata drives source-specific
       // UI (tool intents, display names in the sidebar).
       const isMcpTool = tool.name?.startsWith('mcp__');
-      if (!richDescriptions && !isMcpTool) {
+      if (!metadataCompatible || (!richDescriptions && !isMcpTool)) {
         continue;
       }
 
@@ -1106,7 +1110,10 @@ const openAiAdapter: ApiAdapter = {
       return body;
     }
 
-    const richDescriptions = isRichToolDescriptionsEnabled();
+    const metadataCompatible = supportsRichToolMetadataForModel(
+      typeof body.model === 'string' ? body.model : undefined,
+    );
+    const richDescriptions = metadataCompatible && isRichToolDescriptionsEnabled();
     let modifiedCount = 0;
 
     for (const tool of tools) {
@@ -1116,7 +1123,7 @@ const openAiAdapter: ApiAdapter = {
       // lower-volume than built-in tools and the metadata drives source-specific
       // UI (tool intents, display names in the sidebar).
       const isMcpTool = tool.function.name?.startsWith('mcp__');
-      if (!richDescriptions && !isMcpTool) {
+      if (!metadataCompatible || (!richDescriptions && !isMcpTool)) {
         continue;
       }
 
@@ -1340,14 +1347,17 @@ const openAiResponsesAdapter: ApiAdapter = {
 
     if (!tools || !Array.isArray(tools)) return body;
 
-    const richDescriptions = isRichToolDescriptionsEnabled();
+    const metadataCompatible = supportsRichToolMetadataForModel(
+      typeof body.model === 'string' ? body.model : undefined,
+    );
+    const richDescriptions = metadataCompatible && isRichToolDescriptionsEnabled();
     let modifiedCount = 0;
 
     for (const tool of tools) {
       if (tool.type !== 'function' || !tool.parameters) continue;
 
       const isMcpTool = tool.name?.startsWith('mcp__');
-      if (!richDescriptions && !isMcpTool) continue;
+      if (!metadataCompatible || (!richDescriptions && !isMcpTool)) continue;
 
       const params = tool.parameters;
       const updatedSchema = injectMetadataIntoToolSchema(params);

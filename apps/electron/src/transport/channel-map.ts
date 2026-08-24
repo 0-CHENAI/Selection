@@ -402,6 +402,12 @@ export const CHANNEL_MAP = {
   previewResourceImport: invoke(RPC_CHANNELS.resources.PREVIEW_IMPORT),
   importResources: invoke(RPC_CHANNELS.resources.IMPORT),
   openResourceBundleFile: invoke(RPC_CHANNELS.resources.OPEN_BUNDLE_FILE),
+  openMcpJsonFile: invoke(RPC_CHANNELS.resources.OPEN_MCP_JSON_FILE),
+  openSkillImportFile: invoke(RPC_CHANNELS.resources.OPEN_SKILL_IMPORT_FILE),
+  previewMcpJsonImport: invoke(RPC_CHANNELS.resources.PREVIEW_MCP_JSON),
+  importMcpJson: invoke(RPC_CHANNELS.resources.IMPORT_MCP_JSON),
+  previewSkillFileImport: invoke(RPC_CHANNELS.resources.PREVIEW_SKILL_FILE),
+  importSkillFile: invoke(RPC_CHANNELS.resources.IMPORT_SKILL_FILE),
   saveResourceBundleFile: invoke(RPC_CHANNELS.resources.SAVE_BUNDLE_FILE),
   copyResourcesBetweenWorkspaces: invoke(RPC_CHANNELS.resources.COPY_BETWEEN),
 

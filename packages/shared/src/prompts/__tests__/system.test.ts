@@ -16,6 +16,23 @@ const GIT_CONVENTIONS_HEADING = '## Git Conventions'
 const CO_AUTHOR_TRAILER = 'Co-Authored-By: Selection <agents-noreply@craft.do>'
 
 describe('system prompt guidance', () => {
+  it('can omit schema-enforced tool metadata guidance for incompatible models', () => {
+    const prompt = getSystemPrompt(
+      undefined,
+      undefined,
+      '/tmp/workspace',
+      '/tmp/workspace',
+      undefined,
+      'Selection Backend',
+      undefined,
+      undefined,
+      false,
+    )
+
+    expect(prompt).not.toContain('All MCP tools require two metadata fields')
+    expect(prompt).toContain('## Document Tools')
+  })
+
   it('uses backend-neutral debug log querying guidance (rg/grep via Bash)', () => {
     const prompt = getSystemPrompt(
       undefined,
@@ -71,17 +88,18 @@ describe('system prompt guidance', () => {
 
     expect(prompt).toContain('**officecli**')
     expect(prompt).toContain('Already on PATH')
-    expect(prompt).toContain('officecli-docx')
-    expect(prompt).toContain('officecli-xlsx')
-    expect(prompt).toContain('officecli-pptx')
+    expect(prompt).toContain('Specialized OfficeCLI guides are loaded privately')
     expect(prompt).toContain('Do **not** Read `~/.agents/skills/officecli`')
     expect(prompt).toContain('Hard rule')
+    expect(prompt).not.toContain('typed OfficeCLI tools')
     expect(prompt).toContain('python-docx')
-    expect(prompt).toContain('do not curl-install')
-    expect(prompt).toContain('officecli load_skill word')
-    expect(prompt).toContain('style not found')
-    expect(prompt).toContain('outlineLvl')
-    expect(prompt).toContain('Do not re-add an existing Heading')
+    expect(prompt).toContain('curl-install')
+    expect(prompt).toContain('Read the automatically gated `officecli` router first')
+    expect(prompt).toContain('run the exact `officecli load_skill` commands it selects')
+    expect(prompt).not.toContain('officecli-xlsx/SKILL.md')
+    expect(prompt).not.toContain('officecli-pptx/SKILL.md')
+    expect(prompt).not.toContain('officecli load_skill word')
+    expect(prompt.match(/\*\*Hard rule:\*\*/g)).toHaveLength(1)
     expect(prompt).not.toContain('office_document_inspect')
     expect(prompt).not.toContain('office_document_edit')
     expect(prompt).not.toContain('office_document_guide')

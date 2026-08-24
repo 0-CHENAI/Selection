@@ -6,8 +6,8 @@
  */
 
 import type { Message, StoredMessage, MessageRole } from '@craft-agent/core'
+import { storedToMessage, hasRenderableAssistantText } from '@craft-agent/core'
 import { isParentTaskTool } from '@craft-agent/shared/utils/toolNames'
-import { storedToMessage } from '@craft-agent/core'
 
 export { storedToMessage }
 import type { ActivityItem, ActivityStatus, ActivityType, ResponseContent, TodoItem } from './TurnCard'
@@ -178,8 +178,40 @@ export function deriveTurnPhase(turn: AssistantTurn): TurnPhase {
 export function isVisibleCommentaryCard(
   response: AssistantTurn['response'],
   isComplete: boolean,
+  hasToolActivities = false,
 ): boolean {
-  return !!response?.isCommentary && !isComplete
+  // #83: once tools are running, intermediate text belongs in the work chain,
+  // not a main-slot card that looks like the final reply.
+  return !!response?.isCommentary
+    && !isComplete
+    && !hasToolActivities
+    && hasRenderableAssistantText(response?.text)
+}
+
+/**
+ * Move a completed body off the main card and into the work chain (#83).
+ * Streaming tokens stay on the card until they reclassify as intermediate.
+ */
+export function demoteResponseToWorkChain(turn: AssistantTurn): void {
+  const response = turn.response
+  if (!response) return
+  if (hasRenderableAssistantText(response.text)) {
+    const alreadyPresent = turn.activities.some(activity =>
+      activity.id === response.messageId
+      || (activity.type === 'intermediate' && activity.content === response.text),
+    )
+    if (!alreadyPresent) {
+      turn.activities.push({
+        id: response.messageId || `intermediate-${turn.timestamp}`,
+        type: 'intermediate',
+        status: 'completed',
+        content: response.text,
+        timestamp: turn.timestamp,
+        depth: 0,
+      })
+    }
+  }
+  turn.response = undefined
 }
 
 /** The live card already shows this intermediate body — don't also insert a row. */
@@ -430,6 +462,41 @@ export function groupMessagesByTurn(messages: Message[], options: GroupTurnsOpti
   const turns: Turn[] = []
   let currentTurn: AssistantTurn | null = null
 
+  /**
+   * A misclassified "final" body flushes the work chain. If more assistant
+   * work arrives without a new user message, reopen that turn so step
+   * numbering does not restart (#81).
+   */
+  const adoptFlushedAssistantTurn = (): AssistantTurn | null => {
+    if (currentTurn) return currentTurn
+    const lastTurn = turns[turns.length - 1]
+    if (lastTurn?.type !== 'assistant') return null
+    turns.pop()
+    currentTurn = lastTurn
+    currentTurn.isComplete = false
+    demoteResponseToWorkChain(currentTurn)
+    return currentTurn
+  }
+
+  const ensureOpenAssistantTurn = (
+    message: Message,
+    init: { isStreaming: boolean; isComplete?: boolean; intent?: string },
+  ): AssistantTurn => {
+    const adopted = adoptFlushedAssistantTurn()
+    if (adopted) return adopted
+    currentTurn = {
+      type: 'assistant',
+      turnId: message.turnId || message.id,
+      activities: [],
+      response: undefined,
+      intent: init.intent,
+      isStreaming: init.isStreaming,
+      isComplete: init.isComplete ?? false,
+      timestamp: message.timestamp,
+    }
+    return currentTurn
+  }
+
   const flushCurrentTurn = (interrupted = false) => {
     if (currentTurn) {
       // Sort activities by timestamp to ensure correct chronological order
@@ -472,9 +539,10 @@ export function groupMessagesByTurn(messages: Message[], options: GroupTurnsOpti
           .reverse()
           .find(a => a.type === 'intermediate' && a.content)
 
-        if (lastTextActivity?.content) {
+        const promotedText = lastTextActivity?.content
+        if (lastTextActivity && hasRenderableAssistantText(promotedText)) {
           currentTurn.response = {
-            text: lastTextActivity.content,
+            text: promotedText,
             isStreaming: false,
             messageId: lastTextActivity.id,
           }
@@ -616,19 +684,10 @@ export function groupMessagesByTurn(messages: Message[], options: GroupTurnsOpti
     if (message.role === 'tool') {
       // Tool is complete if toolStatus is 'completed' OR toolResult exists (but NOT if backgrounded)
       const isToolComplete = (message.toolStatus === 'completed' || message.toolResult !== undefined) && message.toolStatus !== 'backgrounded'
-      if (!currentTurn) {
-        // Start a new turn
-        currentTurn = {
-          type: 'assistant',
-          turnId: message.turnId || message.id,
-          activities: [],
-          response: undefined,
-          intent: message.toolIntent,
-          isStreaming: !isToolComplete,
-          isComplete: false,
-          timestamp: message.timestamp,
-        }
-      }
+      currentTurn = ensureOpenAssistantTurn(message, {
+        isStreaming: !isToolComplete,
+        intent: message.toolIntent,
+      })
       // Always add to current turn (ignoring turnId differences)
       // Pass existing activities for incremental depth calculation
       currentTurn.activities.push(messageToActivity(message, currentTurn.activities))
@@ -642,19 +701,7 @@ export function groupMessagesByTurn(messages: Message[], options: GroupTurnsOpti
       // the streaming reply — after a Read/tool step they must not become a
       // gray activity bar that restates the same markdown.
       if (message.isIntermediate) {
-        if (!currentTurn) {
-          // Start a new turn for this intermediate message
-          currentTurn = {
-            type: 'assistant',
-            turnId: message.turnId || message.id,
-            activities: [],
-            response: undefined,
-            intent: undefined,
-            isStreaming: !!message.isPending,
-            isComplete: false,
-            timestamp: message.timestamp,
-          }
-        }
+        currentTurn = ensureOpenAssistantTurn(message, { isStreaming: !!message.isPending })
         // Always add to current turn as activity (ignoring turnId differences)
         // Pending messages show as 'running' until we know they're complete
         // Include parentId for intermediate messages to support nesting within subagents
@@ -675,25 +722,14 @@ export function groupMessagesByTurn(messages: Message[], options: GroupTurnsOpti
         }
         currentTurn.activities.push(intermediateActivity)
 
-        // Keep the latest commentary on the response card until a real
-        // (non-intermediate) reply arrives. Pending tokens already live on
-        // turn.response; dropping that slot on text_complete is what made the
-        // body card vanish the moment the next tool started.
-        const currentResponse = currentTurn.response
-        const retainCommentaryCard = !currentResponse
-          || currentResponse.isCommentary
-          || currentResponse.messageId === message.id
-        // Empty complete must not wipe a body the user is already reading.
-        if (retainCommentaryCard && message.content.trim()) {
-          const stillStreaming = !!(message.isPending || message.isStreaming)
-          currentTurn.response = {
-            text: message.content,
-            isStreaming: stillStreaming,
-            streamStartTime: stillStreaming ? message.timestamp : undefined,
-            messageId: message.id,
-            annotations: message.annotations,
-            isCommentary: true,
-          }
+        // #83: intermediate text stays in the work chain. If this body was
+        // occupying the main card (pending tokens or leftover commentary),
+        // demote it so tools do not leave a fake final reply on screen.
+        if (
+          currentTurn.response
+          && (currentTurn.response.isCommentary || currentTurn.response.messageId === message.id)
+        ) {
+          demoteResponseToWorkChain(currentTurn)
         }
 
         // Update turn streaming state based on this message
@@ -704,20 +740,21 @@ export function groupMessagesByTurn(messages: Message[], options: GroupTurnsOpti
         continue
       }
 
-      // Non-intermediate assistant message = final response
-      if (!currentTurn) {
-        // This is a response-only turn (no tools)
-        currentTurn = {
-          type: 'assistant',
-          turnId: message.turnId || message.id,
-          activities: [],
-          response: undefined,
-          intent: undefined,
-          isStreaming: !!message.isStreaming,
-          isComplete: !message.isStreaming,
-          timestamp: message.timestamp,
+      // Pipe-only / empty "finals" are truncated stubs. Do not flush the work
+      // chain or replace a body the user is already reading (#81).
+      if (!message.isStreaming && !hasRenderableAssistantText(message.content)) {
+        if (currentTurn) {
+          currentTurn.isComplete = false
+          currentTurn.isStreaming = false
         }
+        continue
       }
+
+      // Non-intermediate assistant message = final response
+      currentTurn = ensureOpenAssistantTurn(message, {
+        isStreaming: !!message.isStreaming,
+        isComplete: !message.isStreaming,
+      })
 
       // Set as response on current turn (ignoring turnId differences)
       currentTurn.response = {

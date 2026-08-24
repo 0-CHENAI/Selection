@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import { pickProviderAppropriateMiniModel } from './pick-mini-model.ts';
+import { pickProviderAppropriateMiniModel, resolveUtilityModelId } from './pick-mini-model.ts';
 
 /**
  * Minimal mock of PiModelRegistry — mirrors the pattern from model-resolution.test.ts.
@@ -15,7 +15,8 @@ function createMockRegistry(
     find(provider: string, modelId: string) {
       const models = providers[provider];
       if (!models) return undefined;
-      return models.find(m => m.id === modelId || m.name === modelId) ?? undefined;
+      const match = models.find(m => m.id === modelId || m.name === modelId);
+      return match ? { ...match, provider } : undefined;
     },
     getAll() {
       return allModels;
@@ -93,5 +94,60 @@ describe('pickProviderAppropriateMiniModel', () => {
 
     const result = pickProviderAppropriateMiniModel('openai-codex', registry, false);
     expect(result).toBeUndefined();
+  });
+});
+
+describe('resolveUtilityModelId', () => {
+  it('keeps custom-endpoint utility calls on the session model', () => {
+    const registry = createMockRegistry({
+      'custom-endpoint': [
+        { id: 'Opus', name: 'Opus' },
+        { id: 'Laufry', name: 'Laufry' },
+      ],
+      openai: [{ id: 'gpt-5.6-sol', name: 'GPT 5.6 Sol' }],
+    });
+
+    expect(resolveUtilityModelId({
+      miniModel: 'Opus',
+      sessionModel: 'Opus',
+      customModels: ['Opus', 'Laufry'],
+      piAuthProvider: 'openai',
+      preferCustomEndpoint: true,
+      registry,
+    })).toBe('Opus');
+  });
+
+  it('prefers the session model over a cheaper mini alias', () => {
+    const registry = createMockRegistry({
+      'custom-endpoint': [
+        { id: 'Opus', name: 'Opus' },
+        { id: 'Flash', name: 'Flash' },
+      ],
+    });
+
+    expect(resolveUtilityModelId({
+      miniModel: 'Flash',
+      sessionModel: 'Opus',
+      customModels: ['Opus', 'Flash'],
+      piAuthProvider: 'openai',
+      preferCustomEndpoint: true,
+      registry,
+    })).toBe('Opus');
+  });
+
+  it('does not fall through to the OpenAI catalog for custom endpoints', () => {
+    const registry = createMockRegistry({
+      'custom-endpoint': [{ id: 'Opus', name: 'Opus' }],
+      openai: [{ id: 'gpt-5.6-sol', name: 'GPT 5.6 Sol' }],
+    });
+
+    expect(resolveUtilityModelId({
+      requestModel: 'gpt-5.6-sol',
+      sessionModel: 'Opus',
+      customModels: ['Opus'],
+      piAuthProvider: 'openai',
+      preferCustomEndpoint: true,
+      registry,
+    })).toBe('Opus');
   });
 });

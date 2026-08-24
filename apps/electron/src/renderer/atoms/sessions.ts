@@ -58,13 +58,7 @@ export interface SessionMeta {
   /** LLM connection slug for this session */
   llmConnection?: string
   /** Token usage stats (from JSONL header, available without loading messages) */
-  tokenUsage?: {
-    inputTokens: number
-    outputTokens: number
-    totalTokens: number
-    costUsd: number
-    contextTokens: number
-  }
+  tokenUsage?: Session['tokenUsage']
   /** When the session was created (ms timestamp) */
   createdAt?: number
   /** Total number of messages in this session */

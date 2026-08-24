@@ -453,7 +453,13 @@ export function parseError(
     // refusals without these broad fallbacks.
   ) {
     code = 'model_no_tool_support';
-  } else if (lowerMessage.includes('is not a valid model') || lowerMessage.includes('model not found') || lowerMessage.includes('invalid model') || lowerMessage.includes('model identifier is invalid')) {
+  } else if (
+    lowerMessage.includes('no endpoints found for')
+    || lowerMessage.includes('is not a valid model')
+    || lowerMessage.includes('model not found')
+    || lowerMessage.includes('invalid model')
+    || lowerMessage.includes('model identifier is invalid')
+  ) {
     code = 'invalid_model';
   // HTML-intercepted responses (proxy/firewall/captive portal).
   // Must be checked BEFORE status codes: a 502 Cloudflare page or 401 proxy login
@@ -472,6 +478,13 @@ export function parseError(
     }
   } else if (lowerMessage.includes('429') || lowerMessage.includes('rate limit') || lowerMessage.includes('too many requests')) {
     code = 'rate_limited';
+  } else if (
+    lowerMessage.includes('officecli document')
+    && !lowerMessage.includes('was aborted')
+  ) {
+    // Stall / idle-deadline after the stream wrapper already retried.
+    // User-initiated abort stays unclassified so SessionManager can ignore it.
+    code = 'provider_error';
   } else if (lowerMessage.includes('500') || lowerMessage.includes('502') || lowerMessage.includes('503') || lowerMessage.includes('504') || lowerMessage.includes('internal server error') || lowerMessage.includes('service unavailable')) {
     code = 'service_error';
   } else if (lowerMessage.includes('network') || lowerMessage.includes('econnrefused') || lowerMessage.includes('enotfound') || lowerMessage.includes('fetch failed') || lowerMessage.includes('connection')) {
@@ -539,6 +552,20 @@ export function parseError(
       originalError: errorMessage,
       providerInfo,
     };
+  }
+
+  if (code === 'invalid_model') {
+    const endpointMatch = fullErrorText.match(/no endpoints found for ([a-z0-9][a-z0-9_.:/-]*)/i)
+    const unavailableId = endpointMatch?.[1]?.replace(/\.$/, '')
+    if (unavailableId) {
+      return {
+        code,
+        ...definition,
+        message: `OpenRouter has no available providers for "${unavailableId}". Choose another model.`,
+        originalError: errorMessage,
+        providerInfo,
+      }
+    }
   }
 
   // For model_no_tool_support errors, try to extract the model name for a more helpful message

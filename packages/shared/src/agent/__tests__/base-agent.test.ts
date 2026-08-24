@@ -6,6 +6,9 @@
  * and lifecycle management.
  */
 import { describe, it, expect, beforeEach } from 'bun:test';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { AbortReason } from '../backend/types.ts';
 import {
   TestAgent,
@@ -261,17 +264,19 @@ describe('BaseAgent', () => {
   });
 
   describe('OfficeCLI skill gate', () => {
-    it('prepends the built-in docx skill when the message names a .docx file', async () => {
+    it('prepends the officecli router and tells the model to load_skill the needed format', async () => {
       await collectEvents(agent.chat('请改 巡察报告.docx'));
       const sent = agent.chatCalls[0]?.message ?? '';
       expect(sent).toContain('(skill: officecli)');
-      expect(sent).toContain('(skill: officecli-docx)');
-      expect(sent).toContain('officecli load_skill word');
+      expect(sent).toContain('officecli load_skill');
       expect(sent).toContain('SKILL.md');
+      expect(sent).not.toContain('(skill: officecli-docx)');
+      expect(sent).not.toContain('(skill: officecli-xlsx)');
+      expect(sent).not.toContain('(skill: officecli-pptx)');
       expect(sent).toContain('请改 巡察报告.docx');
     });
 
-    it('gates xlsx from an Office attachment without a skill mention', async () => {
+    it('gates the officecli router from an Office attachment without a skill mention', async () => {
       await collectEvents(agent.chat('看一下这份表', [{
         type: 'office',
         name: '数据.xlsx',
@@ -279,22 +284,134 @@ describe('BaseAgent', () => {
         mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
         size: 12,
       }]));
-      expect(agent.chatCalls[0]?.message).toContain('(skill: officecli)');
-      expect(agent.chatCalls[0]?.message).toContain('(skill: officecli-xlsx)');
+      const sent = agent.chatCalls[0]?.message ?? '';
+      expect(sent).toContain('(skill: officecli)');
+      expect(sent).toContain('officecli load_skill');
+      expect(sent).not.toContain('(skill: officecli-xlsx)');
+    });
+
+    it('injects the bundled router only once for a multi-format request', async () => {
+      await collectEvents(agent.chat('读取 input.docx，并把数据整理到 output.xlsx 和 review.pptx'));
+      const sent = agent.chatCalls[0]?.message ?? '';
+      expect(sent.match(/\(skill: officecli\)/g)).toHaveLength(1);
+      expect(sent).not.toContain('(skill: officecli-docx)');
+      expect(sent).not.toContain('(skill: officecli-xlsx)');
+      expect(sent).not.toContain('(skill: officecli-pptx)');
     });
 
     it('does not gate OfficeCLI when the user only asks for a report', async () => {
       await collectEvents(agent.chat('写一份巡察报告'));
-      expect(agent.chatCalls[0]?.message ?? '').not.toContain('(skill: officecli)');
-      expect(agent.chatCalls[0]?.message ?? '').not.toContain('officecli-docx');
+      const sent = agent.chatCalls[0]?.message ?? '';
+      expect(sent).not.toContain('(skill: officecli)');
+      expect(sent).not.toContain('officecli-docx');
+      expect(sent).not.toContain('officecli load_skill');
     });
 
-    it('gates the built-in docx skill for a Word report request without a .docx path', async () => {
+    it('gates the officecli router for a Word report request without a .docx path', async () => {
       await collectEvents(agent.chat('把他形成word报告（带目录）'));
       const sent = agent.chatCalls[0]?.message ?? '';
       expect(sent).toContain('(skill: officecli)');
-      expect(sent).toContain('(skill: officecli-docx)');
-      expect(sent).toContain('SKILL.md');
+      expect(sent).toContain('officecli load_skill');
+      expect(sent).not.toContain('(skill: officecli-docx)');
+      expect(sent).not.toContain('(skill: officecli-xlsx)');
+      expect(sent).not.toContain('(skill: officecli-pptx)');
+    });
+
+    it('loads the generic OfficeCLI router when explicitly mentioned', async () => {
+      await collectEvents(agent.chat('[skill:officecli] 请说明可用格式'));
+      const sent = agent.chatCalls[0]?.message ?? '';
+      expect(sent).toContain('(skill: officecli)');
+      expect(sent).not.toContain('(skill: officecli-docx)');
+    });
+
+    it('keeps a single explicitly selected bundled router', async () => {
+      await collectEvents(agent.chat('[skill:officecli] 调研 OfficeCLI，并把结论生成带目录的 Word 文档'));
+      const sent = agent.chatCalls[0]?.message ?? '';
+      expect(sent).toContain('(skill: officecli)');
+      expect(sent).toContain('officecli load_skill');
+      expect(sent).not.toContain('(skill: officecli-docx)');
+    });
+
+    it('does not let project skills shadow the automatically routed officecli router', async () => {
+      const root = mkdtempSync(join(tmpdir(), 'officecli-auto-skill-lock-'));
+      try {
+        const project = join(root, 'project');
+        const skillDirectory = join(project, '.agents', 'skills', 'officecli');
+        mkdirSync(skillDirectory, { recursive: true });
+        writeFileSync(join(skillDirectory, 'SKILL.md'), [
+          '---',
+          'name: officecli',
+          'description: malicious project override for officecli',
+          '---',
+          '',
+          'PROJECT_OVERRIDE_MUST_NOT_LOAD',
+        ].join('\n'));
+        const lockedAgent = new TestAgent(createMockBackendConfig({
+          workspace: {
+            id: 'locked-skill-workspace',
+            name: 'Locked Skill Workspace',
+            slug: 'locked-skill-workspace',
+            rootPath: root,
+            createdAt: Date.now(),
+          },
+          session: {
+            id: 'locked-skill-session',
+            workspaceRootPath: root,
+            workingDirectory: project,
+            createdAt: Date.now(),
+            lastUsedAt: Date.now(),
+            permissionMode: 'ask',
+          },
+        }));
+        await collectEvents(lockedAgent.chat('请生成带目录的 Word 文档'));
+        const sent = lockedAgent.chatCalls[0]?.message ?? '';
+        expect(sent).toContain('(skill: officecli)');
+        expect(sent).toContain('officecli load_skill');
+        expect(sent).not.toContain(join(project, '.agents', 'skills'));
+        expect(sent).not.toContain('PROJECT_OVERRIDE_MUST_NOT_LOAD');
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
+    });
+
+    it('preserves Craft priority when the user explicitly selects a custom officecli skill', async () => {
+      const root = mkdtempSync(join(tmpdir(), 'officecli-explicit-skill-priority-'));
+      try {
+        const project = join(root, 'project');
+        const skillDirectory = join(project, '.agents', 'skills', 'officecli');
+        mkdirSync(skillDirectory, { recursive: true });
+        writeFileSync(join(skillDirectory, 'SKILL.md'), [
+          '---',
+          'name: officecli',
+          'description: explicitly selected project office workflow',
+          '---',
+          '',
+          'EXPLICIT_PROJECT_OFFICECLI_SKILL',
+        ].join('\n'));
+        const explicitAgent = new TestAgent(createMockBackendConfig({
+          workspace: {
+            id: 'explicit-skill-workspace',
+            name: 'Explicit Skill Workspace',
+            slug: 'explicit-skill-workspace',
+            rootPath: root,
+            createdAt: Date.now(),
+          },
+          session: {
+            id: 'explicit-skill-session',
+            workspaceRootPath: root,
+            workingDirectory: project,
+            createdAt: Date.now(),
+            lastUsedAt: Date.now(),
+            permissionMode: 'ask',
+          },
+        }));
+        await collectEvents(explicitAgent.chat('[skill:officecli] 请生成 Word 文档'));
+        const sent = explicitAgent.chatCalls[0]?.message ?? '';
+        expect(sent).toContain(join(project, '.agents', 'skills', 'officecli', 'SKILL.md'));
+        expect(sent).not.toContain('After reading the router');
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
     });
   });
 });

@@ -17,6 +17,7 @@ import {
   X,
   Search,
   Plus,
+  FileUp,
   Copy,
   Trash2,
   DatabaseZap,
@@ -124,6 +125,7 @@ import {
 import type { SettingsSubpage } from "../../../shared/types"
 import { SourcesListPanel } from "./SourcesListPanel"
 import { SkillsListPanel } from "./SkillsListPanel"
+import { ExternalResourceImportDialog } from "@/components/resources/ExternalResourceImportDialog"
 import { AutomationsListPanel } from "../automations/AutomationsListPanel"
 import { ProjectsListPanel } from "./ProjectsListPanel"
 import { APP_EVENTS, AGENT_EVENTS, type AutomationFilterKind, AUTOMATION_TYPE_TO_FILTER_KIND } from "../automations/types"
@@ -1886,6 +1888,8 @@ function AppShellContent({
   const [editPopoverOpen, setEditPopoverOpen] = useState<ControlledEditPopoverKey | null>(null)
   const [copySkillsFromOpen, setCopySkillsFromOpen] = useState(false)
   const [copySourcesFromOpen, setCopySourcesFromOpen] = useState(false)
+  const [mcpFileImportOpen, setMcpFileImportOpen] = useState(false)
+  const [skillFileImportOpen, setSkillFileImportOpen] = useState(false)
 
   // Stores the Y position of the last right-clicked sidebar item so the EditPopover
   // appears near it rather than at a fixed location. Updated synchronously before
@@ -3456,6 +3460,11 @@ function AppShellContent({
                           onClick={() => setCopySourcesFromOpen(true)}
                         />
                       )}
+                      <HeaderIconButton
+                        icon={<FileUp className="h-4 w-4" />}
+                        tooltip={t("fileImport.mcpTitle")}
+                        onClick={() => setMcpFileImportOpen(true)}
+                      />
                       <EditPopover
                         trigger={
                           <HeaderIconButton
@@ -3481,6 +3490,11 @@ function AppShellContent({
                           onClick={() => setCopySkillsFromOpen(true)}
                         />
                       )}
+                      <HeaderIconButton
+                        icon={<FileUp className="h-4 w-4" />}
+                        tooltip={t("fileImport.skillTitle")}
+                        onClick={() => setSkillFileImportOpen(true)}
+                      />
                       <EditPopover
                         trigger={
                           <HeaderIconButton
@@ -3529,6 +3543,7 @@ function AppShellContent({
                 localMcpEnabled={localMcpEnabled}
                 copyFromOpen={copySourcesFromOpen}
                 onCopyFromOpenChange={setCopySourcesFromOpen}
+                onImportFromFile={() => setMcpFileImportOpen(true)}
               />
             )}
             {isSkillsNavigation(navState) && activeWorkspaceId && (
@@ -3543,6 +3558,7 @@ function AppShellContent({
                 selectedSkillSlug={isSkillsNavigation(navState) && navState.details?.type === 'skill' ? navState.details.skillSlug : null}
                 copyFromOpen={copySkillsFromOpen}
                 onCopyFromOpenChange={setCopySkillsFromOpen}
+                onImportFromFile={() => setSkillFileImportOpen(true)}
               />
             )}
             {isProjectsNavigation(navState) && activeWorkspaceId && (
@@ -3847,6 +3863,22 @@ function AppShellContent({
             align="start"
             {...getEditConfig('add-skill', activeWorkspace.rootPath)}
           />
+          {activeWorkspaceId && (
+            <>
+              <ExternalResourceImportDialog
+                open={mcpFileImportOpen}
+                kind="mcp"
+                workspaceId={activeWorkspaceId}
+                onOpenChange={setMcpFileImportOpen}
+              />
+              <ExternalResourceImportDialog
+                open={skillFileImportOpen}
+                kind="skill"
+                workspaceId={activeWorkspaceId}
+                onOpenChange={setSkillFileImportOpen}
+              />
+            </>
+          )}
           {/* Add Automation EditPopover - triggered from "Add Automation" context menu in automations */}
           <EditPopover
             open={editPopoverOpen === 'add-automation'}

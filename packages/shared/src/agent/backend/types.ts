@@ -303,6 +303,8 @@ export interface CoreBackendConfig {
 export interface ChatOptions {
   /** Retry flag (internal use for session recovery) */
   isRetry?: boolean;
+  /** Internal continuation of the same user-authored task (source/auth retry). */
+  continueUserTask?: boolean;
   /** Override thinking level for this message only */
   thinkingOverride?: ThinkingLevel;
   /**

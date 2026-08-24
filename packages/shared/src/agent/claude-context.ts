@@ -77,6 +77,10 @@ export interface ClaudeContextOptions {
   workingDirectory?: string;
   onPlanSubmitted: (planPath: string) => void;
   onAuthRequest: (request: unknown) => void;
+  /** Current model image capability. Omit when unknown. */
+  supportsImages?: boolean;
+  /** Current session permission mode. */
+  permissionMode?: string;
 }
 
 /**
@@ -90,7 +94,7 @@ export interface ClaudeContextOptions {
  * - Icon management
  */
 export function createClaudeContext(options: ClaudeContextOptions): SessionToolContext {
-  const { sessionId, workspacePath, workspaceId, workingDirectory, onPlanSubmitted, onAuthRequest } = options;
+  const { sessionId, workspacePath, workspaceId, workingDirectory, onPlanSubmitted, onAuthRequest, supportsImages, permissionMode } = options;
 
   // File system implementation
   const fs: FileSystemInterface = {
@@ -222,6 +226,8 @@ export function createClaudeContext(options: ClaudeContextOptions): SessionToolC
     sessionPath: getSessionPath(workspacePath, sessionId),
     dataPath: getSessionDataPath(workspacePath, sessionId),
     workingDirectory,
+    ...(permissionMode ? { permissionMode } : {}),
+    ...(supportsImages !== undefined ? { supportsImages } : {}),
     callbacks,
     fs,
     validators,

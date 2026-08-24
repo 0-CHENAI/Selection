@@ -1,96 +1,64 @@
 #!/bin/sh
-# Selection wrapper — prefer the app-bundled binary, never curl-install.
-# After create, or around heading / TOC writes, seed or repair Heading outlineLvl
-# so Word can compile the TOC. Do not mutate on open / refresh / view.
-if [ -n "$CRAFT_OFFICECLI" ] && [ -f "$CRAFT_OFFICECLI" ]; then
-  BIN=$CRAFT_OFFICECLI
-else
-  DIR=$(CDPATH= cd -- "$(dirname "$0")" && pwd)
-  UNAME=$(uname -s 2>/dev/null || echo unknown)
-  MACHINE=$(uname -m 2>/dev/null || echo unknown)
-
-  case "$UNAME" in
-    Darwin)
-      ARCH=x64
-      [ "$MACHINE" = "arm64" ] && ARCH=arm64
-      CAND=$DIR/darwin-$ARCH/officecli
-      ;;
-    Linux)
-      ARCH=x64
-      [ "$MACHINE" = "aarch64" ] || [ "$MACHINE" = "arm64" ] && ARCH=arm64
-      CAND=$DIR/linux-$ARCH/officecli
-      ;;
-    MINGW*|MSYS*|CYGWIN*|Windows_NT)
-      CAND=$DIR/win32-x64/officecli.exe
-      ;;
-    *)
-      CAND=""
-      ;;
-  esac
-
-  if [ -n "$CAND" ] && [ -f "$CAND" ]; then
-    BIN=$CAND
-  else
-    echo "officecli is not bundled in this Selection build. Rebuild the app or set CRAFT_OFFICECLI." >&2
-    exit 127
-  fi
-fi
-
+# Transparent Selection launcher: always use the bundled binary and preserve
+# OfficeCLI's resident session. The only compatibility hook is post-create
+# Word Heading/TOC outline repair.
 DIR=$(CDPATH= cd -- "$(dirname "$0")" && pwd)
-ENSURE=$DIR/officecli-ensure-docx-styles
+UNAME=$(uname -s 2>/dev/null || echo unknown)
+MACHINE=$(uname -m 2>/dev/null || echo unknown)
+
+case "$UNAME" in
+  Darwin)
+    ARCH=x64
+    [ "$MACHINE" = "arm64" ] && ARCH=arm64
+    BIN=$DIR/darwin-$ARCH/officecli
+    ;;
+  Linux)
+    ARCH=x64
+    if [ "$MACHINE" = "aarch64" ] || [ "$MACHINE" = "arm64" ]; then ARCH=arm64; fi
+    BIN=$DIR/linux-$ARCH/officecli
+    ;;
+  MINGW*|MSYS*|CYGWIN*|Windows_NT)
+    BIN=$DIR/win32-x64/officecli.exe
+    ;;
+  *) BIN="" ;;
+esac
+
+if [ -z "$BIN" ] || [ ! -f "$BIN" ]; then
+  echo "Selection does not include bundled OfficeCLI for this platform. Repair or reinstall Selection." >&2
+  exit 127
+fi
 
 verb=""
 docx=""
-prev=""
-ensure_before=0
-ensure_after=0
 for arg in "$@"; do
   case "$arg" in
-    --*|-* ) ;;
-    create)
-      [ -z "$verb" ] && verb=$arg
-      ensure_after=1
-      ;;
-    add|set)
-      [ -z "$verb" ] && verb=$arg
-      ;;
+    --*|-*) ;;
     *)
+      [ -z "$verb" ] && verb=$arg
       if [ -z "$docx" ]; then
-        case "$arg" in
-          *.docx|*.DOCX|*.docm|*.DOCM) docx=$arg ;;
-        esac
+        case "$arg" in *.docx|*.DOCX|*.docm|*.DOCM) docx=$arg ;; esac
       fi
       ;;
   esac
-  case "$arg" in
-    *style=Heading*|*style=Title*|*style=TOCHeading*|--type=toc) ensure_before=1 ;;
-    *id=Heading*|*id=Title*|*id=TOCHeading*) ensure_after=1 ;;
-  esac
-  if [ "$prev" = "--type" ] && [ "$arg" = "toc" ]; then
-    ensure_before=1
-  fi
-  prev=$arg
 done
 
-ensure_docx() {
-  if [ -n "$docx" ] && [ -f "$ENSURE" ] && [ -f "$docx" ]; then
-    "$ENSURE" "$BIN" "$docx"
+"$BIN" "$@"
+status=$?
+[ $status -ne 0 ] && exit $status
+
+if [ "$verb" = "create" ] && [ -n "$docx" ]; then
+  BUN=$DIR/../../vendor/bun/bun
+  ENSURE=$DIR/../scripts/officecli-heading-repair.ts
+  if [ ! -x "$BUN" ] || [ ! -f "$ENSURE" ]; then
+    echo "Selection created the Word file, but its Heading/TOC compatibility helper is unavailable." >&2
+    exit 127
   fi
-}
-
-if [ "$verb" = "create" ]; then
-  "$BIN" "$@"
+  "$BUN" "$ENSURE" "$BIN" "$docx"
   status=$?
-  [ $status -eq 0 ] && ensure_docx
-  exit $status
+  if [ $status -ne 0 ]; then
+    echo "Selection created the Word file, but could not verify Heading 1-3 outline levels." >&2
+    exit $status
+  fi
 fi
 
-if [ "$ensure_before" = 1 ] || [ "$ensure_after" = 1 ]; then
-  [ "$ensure_before" = 1 ] && ensure_docx
-  "$BIN" "$@"
-  status=$?
-  [ $status -eq 0 ] && [ "$ensure_after" = 1 ] && ensure_docx
-  exit $status
-fi
-
-exec "$BIN" "$@"
+exit 0

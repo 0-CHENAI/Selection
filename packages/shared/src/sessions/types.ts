@@ -97,6 +97,38 @@ export interface SessionTokenUsage {
   cacheCreationTokens?: number;
   /** Model's context window size in tokens (from SDK modelUsage) */
   contextWindow?: number;
+  /** Usage reported by the most recent individual model call. Absent on legacy sessions. */
+  lastCall?: SessionModelCallUsage;
+  /** Live aggregate for the user task that is currently processing. Runtime-only in normal operation. */
+  currentTurn?: SessionTurnUsageSnapshot;
+  /** Aggregate usage for the most recently completed user turn. Absent on legacy sessions. */
+  lastTurn?: SessionTurnUsage;
+}
+
+/** Provider-normalized usage for one model invocation. */
+export interface SessionModelCallUsage {
+  inputTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+  cacheReadTokens: number;
+  cacheCreationTokens: number;
+  costUsd: number;
+}
+
+/** Provider-normalized aggregate snapshot for an in-progress user turn. */
+export interface SessionTurnUsageSnapshot extends SessionModelCallUsage {
+  modelCallCount: number;
+  wallClockMs: number;
+  startedAt: number;
+  updatedAt: number;
+}
+
+/** Provider-normalized aggregate for one user turn, including orchestration overhead. */
+export interface SessionTurnUsage extends SessionModelCallUsage {
+  modelCallCount: number;
+  wallClockMs: number;
+  startedAt: number;
+  completedAt: number;
 }
 
 /**

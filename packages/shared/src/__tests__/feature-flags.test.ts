@@ -24,6 +24,7 @@ afterEach(() => {
 
   if (ORIGINAL_ENV.CRAFT_FEATURE_EMBEDDED_SERVER === undefined) delete process.env.CRAFT_FEATURE_EMBEDDED_SERVER;
   else process.env.CRAFT_FEATURE_EMBEDDED_SERVER = ORIGINAL_ENV.CRAFT_FEATURE_EMBEDDED_SERVER;
+
 });
 
 describe('feature-flags runtime helpers', () => {
@@ -99,4 +100,5 @@ describe('feature-flags runtime helpers', () => {
 
     expect(isEmbeddedServerEnabled()).toBe(false);
   });
+
 });

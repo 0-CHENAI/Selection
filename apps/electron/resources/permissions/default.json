@@ -1,5 +1,5 @@
 {
-  "version": "2026-03-07",
+  "version": "2026-08-22",
   "allowedBashPatterns": [
     {
       "pattern": "^ls\\b",
@@ -84,6 +84,22 @@
     {
       "pattern": "^ical-tool\\s+(read|filter)\\b",
       "comment": "Calendar read operations: read events, filter by date"
+    },
+    {
+      "pattern": "^officecli(?:\\.cmd|\\.exe)?[ \\t]+validate\\b(?![^\\r\\n]*(?:--out(?:put)?\\b|--save(?:=|\\b)|\\bscreenshot\\b|\\brender\\b|\\bexport\\b))[^\\r\\n]*$",
+      "comment": "OfficeCLI read-only validation"
+    },
+    {
+      "pattern": "^officecli(?:\\.cmd|\\.exe)?[ \\t]+view[ \\t]+[^\\r\\n]+[ \\t]+(?:issues|outline|text|html)(?:[ \\t]+--json)?[ \\t]*$",
+      "comment": "OfficeCLI read-only document views without render or output flags"
+    },
+    {
+      "pattern": "^officecli(?:\\.cmd|\\.exe)?[ \\t]+(?:get|query)\\b(?![^\\r\\n]*(?:--out(?:put)?\\b|--save(?:=|\\b)|\\bscreenshot\\b|\\brender\\b|\\bexport\\b))[^\\r\\n]*$",
+      "comment": "OfficeCLI read-only get/query without output-producing options"
+    },
+    {
+      "pattern": "^officecli(?:\\.cmd|\\.exe)?\\s+--(help|version)\\b",
+      "comment": "OfficeCLI help and version inspection"
     },
     {
       "pattern": "^(pdf-tool|img-tool|ical-tool)\\s*$",

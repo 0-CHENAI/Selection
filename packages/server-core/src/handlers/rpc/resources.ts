@@ -18,12 +18,19 @@ import type {
   CopyResourcesOptions,
   ResourceImportResult,
   ResourceImportPreview,
+  McpImportCandidate,
+  McpImportDecision,
+  SkillImportDecision,
 } from '@craft-agent/shared/resources'
 
 export const HANDLED_CHANNELS = [
   RPC_CHANNELS.resources.EXPORT,
   RPC_CHANNELS.resources.PREVIEW_IMPORT,
   RPC_CHANNELS.resources.IMPORT,
+  RPC_CHANNELS.resources.PREVIEW_MCP_JSON,
+  RPC_CHANNELS.resources.IMPORT_MCP_JSON,
+  RPC_CHANNELS.resources.PREVIEW_SKILL_FILE,
+  RPC_CHANNELS.resources.IMPORT_SKILL_FILE,
   RPC_CHANNELS.resources.COPY_BETWEEN,
 ] as const
 
@@ -120,6 +127,64 @@ export function registerResourcesHandlers(server: RpcServer, deps: HandlerDeps):
 
       const { previewResourceImport } = await import('@craft-agent/shared/resources')
       return previewResourceImport(resolveFsPath(workspace.rootPath), bundle)
+    },
+  )
+
+  server.handle(
+    RPC_CHANNELS.resources.PREVIEW_MCP_JSON,
+    async (_ctx, workspaceId: string, jsonText: string): Promise<McpImportCandidate[]> => {
+      const workspace = getWorkspaceByNameOrId(workspaceId)
+      if (!workspace) throw new Error(`Workspace not found: ${workspaceId}`)
+      const { parseMcpImportJson } = await import('@craft-agent/shared/resources')
+      return parseMcpImportJson(jsonText, resolveFsPath(workspace.rootPath))
+    },
+  )
+
+  server.handle(
+    RPC_CHANNELS.resources.IMPORT_MCP_JSON,
+    async (_ctx, workspaceId: string, candidates: McpImportCandidate[], decisions: McpImportDecision[]) => {
+      const workspace = getWorkspaceByNameOrId(workspaceId)
+      if (!workspace) throw new Error(`Workspace not found: ${workspaceId}`)
+      const { importMcpCandidates } = await import('@craft-agent/shared/resources')
+      const result = await importMcpCandidates(resolveFsPath(workspace.rootPath), candidates, decisions)
+      for (const slug of result.imported) {
+        deps.sessionManager.notifyConfigFileChange(resolveFsPath(workspace.rootPath), `sources/${slug}/config.json`)
+      }
+      return result
+    },
+  )
+
+  server.handle(
+    RPC_CHANNELS.resources.PREVIEW_SKILL_FILE,
+    async (_ctx, workspaceId: string, payload: { kind: 'markdown'; content: string } | { kind: 'zip'; zipBase64: string }) => {
+      const workspace = getWorkspaceByNameOrId(workspaceId)
+      if (!workspace) throw new Error(`Workspace not found: ${workspaceId}`)
+      const root = resolveFsPath(workspace.rootPath)
+      const { previewSkillMarkdown, previewSkillZip } = await import('@craft-agent/shared/resources')
+      if (payload.kind === 'markdown') return previewSkillMarkdown(payload.content, root)
+      return previewSkillZip(Buffer.from(payload.zipBase64, 'base64'), root).preview
+    },
+  )
+
+  server.handle(
+    RPC_CHANNELS.resources.IMPORT_SKILL_FILE,
+    async (
+      _ctx,
+      workspaceId: string,
+      payload: { kind: 'markdown'; content: string } | { kind: 'zip'; zipBase64: string },
+      decision: SkillImportDecision,
+    ) => {
+      const workspace = getWorkspaceByNameOrId(workspaceId)
+      if (!workspace) throw new Error(`Workspace not found: ${workspaceId}`)
+      const root = resolveFsPath(workspace.rootPath)
+      const { importSkillMarkdown, importSkillZip } = await import('@craft-agent/shared/resources')
+      const result = payload.kind === 'markdown'
+        ? importSkillMarkdown(root, payload.content, decision)
+        : importSkillZip(root, Buffer.from(payload.zipBase64, 'base64'), decision)
+      if (!result.skipped) {
+        deps.sessionManager.notifyConfigFileChange(root, `skills/${result.slug}/SKILL.md`)
+      }
+      return result
     },
   )
 

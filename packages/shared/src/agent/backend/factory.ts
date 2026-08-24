@@ -631,7 +631,18 @@ export function resolveModelForProvider(
     ? normalizeDeprecatedModelId(connection.defaultModel)
     : undefined;
 
-  if (provider === 'pi' && connection?.models?.length) {
+  // Closed Pi catalogs (Anthropic-via-Pi, synced provider lists) treat
+  // connection.models as an allowlist so a stale session ID cannot leak
+  // onto the wrong provider. OpenRouter's stored list is only the 3-tier
+  // picker — the chat selector offers the live catalog, so a pick outside
+  // those three must still be sent.
+  const treatsModelsAsAllowlist =
+    provider === 'pi'
+    && !!connection?.models?.length
+    && connection.piAuthProvider !== 'openrouter'
+    && connection.modelSelectionMode !== 'userDefined3Tier';
+
+  if (treatsModelsAsAllowlist && connection.models) {
     const connectionModelIds = connection.models.map(m => typeof m === 'string' ? m : m.id);
     if (managedModel && !connectionModelIds.includes(managedModel)) {
       managedModel = undefined;

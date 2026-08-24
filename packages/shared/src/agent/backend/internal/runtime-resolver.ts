@@ -46,11 +46,23 @@ function resolveUpwards(base: string, relativePath: string, maxLevels = 4): stri
 
 function resolveBundledRuntimePath(hostRuntime: BackendHostRuntimeContext): string | undefined {
   const bunBinary = process.platform === 'win32' ? 'bun.exe' : 'bun';
-  const bunBasePath = process.platform === 'win32'
-    ? (hostRuntime.resourcesPath || hostRuntime.appRootPath)
-    : hostRuntime.appRootPath;
-  const bunPath = join(bunBasePath, 'vendor', 'bun', bunBinary);
-  if (existsSync(bunPath)) return bunPath;
+  // Windows extraResources copies bun to resources/app/vendor/bun/bun.exe.
+  // macOS ships it under appRoot/vendor/bun. Check every known layout
+  // instead of a platform-only guess that misses the packaged Windows path.
+  const shippedBun = firstExistingPath([
+    process.env.CRAFT_BUN,
+    process.env.CRAFT_RESOURCES_BASE
+      ? join(process.env.CRAFT_RESOURCES_BASE, 'vendor', 'bun', bunBinary)
+      : undefined,
+    join(hostRuntime.appRootPath, 'vendor', 'bun', bunBinary),
+    hostRuntime.resourcesPath
+      ? join(hostRuntime.resourcesPath, 'app', 'vendor', 'bun', bunBinary)
+      : undefined,
+    hostRuntime.resourcesPath
+      ? join(hostRuntime.resourcesPath, 'vendor', 'bun', bunBinary)
+      : undefined,
+  ].filter((candidate): candidate is string => !!candidate));
+  if (shippedBun) return shippedBun;
 
   // Packaged apps must use the runtime shipped with the application.
   if (hostRuntime.isPackaged) return undefined;
@@ -58,7 +70,6 @@ function resolveBundledRuntimePath(hostRuntime: BackendHostRuntimeContext): stri
   // Dev launches may inherit a minimal PATH. Resolve the standard Bun
   // installation locations before relying on an external command locator.
   const configuredBun = firstExistingPath([
-    process.env.CRAFT_BUN,
     process.env.BUN_INSTALL ? join(process.env.BUN_INSTALL, 'bin', bunBinary) : undefined,
     join(homedir(), '.bun', 'bin', bunBinary),
   ].filter((candidate): candidate is string => !!candidate));

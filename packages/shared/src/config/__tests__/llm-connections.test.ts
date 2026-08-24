@@ -6,6 +6,7 @@ import {
   isCompatProvider,
   isAnthropicProvider,
   isPiProvider,
+  getMiniModel,
   toBedrockNativeId,
   fromBedrockNativeId,
   normalizeBedrockModelId,
@@ -44,6 +45,32 @@ describe('getDefaultModelsForConnection', () => {
     expect(models.length).toBeGreaterThan(0)
   })
 
+})
+
+describe('getMiniModel', () => {
+  it('uses the connection default on custom endpoints when no mini/flash name exists', () => {
+    expect(getMiniModel({
+      providerType: 'pi_compat',
+      piAuthProvider: 'openai',
+      defaultModel: 'Opus',
+      models: ['Opus', 'Laufry'],
+    })).toBe('Opus')
+  })
+
+  it('stays on the selected model even when a flash/mini alias exists', () => {
+    expect(getMiniModel({
+      providerType: 'pi_compat',
+      defaultModel: 'Opus',
+      models: ['Opus', 'DeepSeek-V4-Flash'],
+    })).toBe('Opus')
+  })
+
+  it('falls back to a flash/mini alias on custom endpoints when no default is set', () => {
+    expect(getMiniModel({
+      providerType: 'pi_compat',
+      models: ['Opus', 'DeepSeek-V4-Flash'],
+    })).toBe('DeepSeek-V4-Flash')
+  })
 })
 
 // ============================================================

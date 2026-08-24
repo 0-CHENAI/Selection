@@ -63,6 +63,83 @@ describe('handleTextComplete messageId synchronization', () => {
     expect((next.session.messages[0] as any).id).toBe('msg-main-race')
   })
 
+  it('keeps a shorter renderable complete over a stale longer stream', () => {
+    const state = makeState([
+      {
+        id: 'msg-local-temp-1',
+        role: 'assistant',
+        content: '先读 skill 文件再继续检查文档。',
+        isStreaming: true,
+        isPending: true,
+        turnId: 'turn-1',
+        timestamp: 100,
+      },
+    ])
+    state.streaming = { content: '先读 skill 文件再继续检查文档。', turnId: 'turn-1' }
+
+    const next = handleTextComplete(state, {
+      type: 'text_complete',
+      sessionId: 'session-1',
+      text: '已经改完。',
+      turnId: 'turn-1',
+      messageId: 'msg-main-1',
+      timestamp: 200,
+    })
+    expect((next.session.messages[0] as any).content).toBe('已经改完。')
+  })
+
+  it('does not recover truncation from a different turn stream', () => {
+    const state = makeState([
+      {
+        id: 'msg-local-temp-1',
+        role: 'assistant',
+        content: '|',
+        isStreaming: true,
+        isPending: true,
+        turnId: 'turn-1',
+        timestamp: 100,
+      },
+    ])
+    state.streaming = { content: '另一轮已经写好的正文。', turnId: 'turn-2' }
+
+    const next = handleTextComplete(state, {
+      type: 'text_complete',
+      sessionId: 'session-1',
+      text: '|',
+      turnId: 'turn-1',
+      messageId: 'msg-main-1',
+      timestamp: 200,
+    })
+    expect((next.session.messages[0] as any).content).toBe('|')
+  })
+
+  it('does not let a truncated complete replace a longer streamed body (#81)', () => {
+    const state = makeState([
+      {
+        id: 'msg-local-temp-1',
+        role: 'assistant',
+        content: '先读 skill 文件再继续检查文档。',
+        isStreaming: true,
+        isPending: true,
+        turnId: 'turn-1',
+        timestamp: 100,
+      },
+    ])
+    state.streaming = { content: '先读 skill 文件再继续检查文档。', turnId: 'turn-1' }
+
+    const next = handleTextComplete(state, {
+      type: 'text_complete',
+      sessionId: 'session-1',
+      text: '|',
+      turnId: 'turn-1',
+      messageId: 'msg-main-1',
+      timestamp: 200,
+    })
+    const msg = next.session.messages[0] as any
+    expect(msg.content).toBe('先读 skill 文件再继续检查文档。')
+    expect(msg.isStreaming).toBe(false)
+  })
+
   it('keeps backward compatibility when messageId is missing', () => {
     const state = makeState([])
 

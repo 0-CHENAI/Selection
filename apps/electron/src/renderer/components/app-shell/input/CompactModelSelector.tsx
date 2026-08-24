@@ -33,13 +33,91 @@ import {
 import { ConnectionIcon } from '@/components/icons/ConnectionIcon'
 import { derivePickerMode } from './picker-mode'
 import {
+  connectionPinnedModelIds,
   formatTokenCount,
   groupConnectionsByProvider,
+  isOpenRouterConnection,
   isPickerModelSelected,
   pickerModelId,
-  resolvePickerModels,
+  resolvePickerModelsWithLive,
+  resolveVisiblePickerModels,
   stripPiPrefixForDisplay,
 } from './model-picker-helpers'
+import { useLiveOpenRouterModels } from '@/hooks/useLiveOpenRouterModels'
+import {
+  ModelPickerEmptyResults,
+  ModelPickerOverflowHint,
+  ModelPickerSearchField,
+  shouldShowPickerSearch,
+  usePickerSearchQuery,
+  useVisiblePickerModels,
+} from './ModelPickerSearch'
+
+function CompactSwitcherModels({
+  conn,
+  liveOpenRouterModels,
+  currentModel,
+  isCurrentConnection,
+  onPick,
+}: {
+  conn: Parameters<typeof resolvePickerModelsWithLive>[0] & { slug: string }
+  liveOpenRouterModels: Parameters<typeof resolvePickerModelsWithLive>[1]
+  currentModel: string
+  isCurrentConnection: boolean
+  onPick: (connectionSlug: string, modelId: string) => void
+}) {
+  const [query, setQuery] = React.useState('')
+  const models = resolvePickerModelsWithLive(conn, liveOpenRouterModels)
+  const visibleCatalog = resolveVisiblePickerModels(models, {
+    query,
+    currentModel: isCurrentConnection ? currentModel : conn.defaultModel,
+    pinnedIds: connectionPinnedModelIds(conn),
+  })
+  const showSearch = shouldShowPickerSearch(models.length, query)
+
+  return (
+    <div className="pl-6 flex flex-col gap-0.5">
+      {showSearch && (
+        <ModelPickerSearchField value={query} onChange={setQuery} className="px-1" />
+      )}
+      {visibleCatalog.visible.length === 0 ? (
+        <ModelPickerEmptyResults />
+      ) : (
+        visibleCatalog.visible.map(model => {
+          const modelId = pickerModelId(model)
+          const modelName = typeof model === 'string'
+            ? stripPiPrefixForDisplay(getModelShortName(model))
+            : (model.name ?? stripPiPrefixForDisplay(model.id))
+          const isSelectedModel =
+            isCurrentConnection && isPickerModelSelected(currentModel, modelId)
+          return (
+            <DrawerClose asChild key={modelId}>
+              <button
+                type="button"
+                onClick={() => onPick(conn.slug, modelId)}
+                className={cn(
+                  'flex items-center justify-between w-full px-3 py-2 rounded-lg text-left transition-colors',
+                  isSelectedModel
+                    ? 'bg-foreground/5'
+                    : 'hover:bg-foreground/5',
+                )}
+              >
+                <span className="text-sm font-medium truncate">{modelName}</span>
+                {isSelectedModel && (
+                  <Check className="h-3 w-3 text-foreground/60 ml-3 shrink-0" />
+                )}
+              </button>
+            </DrawerClose>
+          )
+        })
+      )}
+      <ModelPickerOverflowHint
+        hiddenCount={visibleCatalog.hiddenCount}
+        searching={query.trim().length > 0}
+      />
+    </div>
+  )
+}
 
 interface CompactModelSelectorProps {
   currentModel: string
@@ -91,10 +169,27 @@ export function CompactModelSelector({
     connectionCount: llmConnections.length,
   })
 
+  const liveOpenRouterModels = useLiveOpenRouterModels(
+    !connectionUnavailable && isOpenRouterConnection(effectiveConnectionDetails),
+  )
+
   const availableModels = React.useMemo(() => {
     if (connectionUnavailable) return []
-    return resolvePickerModels(effectiveConnectionDetails)
-  }, [effectiveConnectionDetails, connectionUnavailable])
+    return resolvePickerModelsWithLive(effectiveConnectionDetails, liveOpenRouterModels)
+  }, [effectiveConnectionDetails, connectionUnavailable, liveOpenRouterModels])
+
+  const { query: modelSearchQuery, setQuery: setModelSearchQuery } = usePickerSearchQuery(open)
+  const pinnedModelIds = React.useMemo(
+    () => connectionPinnedModelIds(effectiveConnectionDetails),
+    [effectiveConnectionDetails],
+  )
+  const visibleCatalog = useVisiblePickerModels(
+    availableModels,
+    modelSearchQuery,
+    currentModel,
+    pinnedModelIds,
+  )
+  const showModelSearch = shouldShowPickerSearch(availableModels.length, modelSearchQuery)
 
   const currentModelDisplayName = React.useMemo(() => {
     const model = availableModels.find(m =>
@@ -258,35 +353,13 @@ export function CompactModelSelector({
                         )}
                       </button>
                       {isAuthenticated && isExpanded && (
-                        <div className="pl-6 flex flex-col gap-0.5">
-                          {resolvePickerModels(conn).map(model => {
-                            const modelId = pickerModelId(model)
-                            const modelName = typeof model === 'string'
-                              ? stripPiPrefixForDisplay(getModelShortName(model))
-                              : (model.name ?? stripPiPrefixForDisplay(model.id))
-                            const isSelectedModel =
-                              isCurrentConnection && isPickerModelSelected(currentModel, modelId)
-                            return (
-                              <DrawerClose asChild key={modelId}>
-                                <button
-                                  type="button"
-                                  onClick={() => handlePickSwitcherModel(conn.slug, modelId)}
-                                  className={cn(
-                                    'flex items-center justify-between w-full px-3 py-2 rounded-lg text-left transition-colors',
-                                    isSelectedModel
-                                      ? 'bg-foreground/5'
-                                      : 'hover:bg-foreground/5',
-                                  )}
-                                >
-                                  <span className="text-sm font-medium truncate">{modelName}</span>
-                                  {isSelectedModel && (
-                                    <Check className="h-3 w-3 text-foreground/60 ml-3 shrink-0" />
-                                  )}
-                                </button>
-                              </DrawerClose>
-                            )
-                          })}
-                        </div>
+                        <CompactSwitcherModels
+                          conn={conn}
+                          liveOpenRouterModels={liveOpenRouterModels}
+                          currentModel={currentModel}
+                          isCurrentConnection={isCurrentConnection}
+                          onPick={handlePickSwitcherModel}
+                        />
                       )}
                     </React.Fragment>
                   )
@@ -294,8 +367,18 @@ export function CompactModelSelector({
               </React.Fragment>
             ))
           ) : (
-            // 'flat' — list models of the active connection
-            availableModels.map(model => {
+            <>
+              {showModelSearch && (
+                <ModelPickerSearchField
+                  value={modelSearchQuery}
+                  onChange={setModelSearchQuery}
+                  className="px-1"
+                />
+              )}
+              {visibleCatalog.visible.length === 0 ? (
+                <ModelPickerEmptyResults />
+              ) : (
+                visibleCatalog.visible.map(model => {
               const modelId = pickerModelId(model)
               const modelName = typeof model === 'string'
                 ? stripPiPrefixForDisplay(getModelShortName(model))
@@ -334,7 +417,13 @@ export function CompactModelSelector({
                   </button>
                 </DrawerClose>
               )
-            })
+                })
+              )}
+              <ModelPickerOverflowHint
+                hiddenCount={visibleCatalog.hiddenCount}
+                searching={modelSearchQuery.trim().length > 0}
+              />
+            </>
           )}
 
           {/* === Thinking section === */}

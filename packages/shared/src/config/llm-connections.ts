@@ -271,7 +271,7 @@ export function isDeniedMiniModelId(modelId: string, piAuthProvider?: string): b
  * Used for mini agent, title generation, and mini completions.
  */
 export function getMiniModel(
-  connection: Pick<LlmConnection, 'models' | 'providerType' | 'piAuthProvider'>,
+  connection: Pick<LlmConnection, 'models' | 'providerType' | 'piAuthProvider' | 'defaultModel'>,
 ): string | undefined {
   return findSmallModel(connection);
 }
@@ -284,7 +284,7 @@ export function getMiniModel(
  * Used for response summarization and API tool summarization.
  */
 export function getSummarizationModel(
-  connection: Pick<LlmConnection, 'models' | 'providerType' | 'piAuthProvider'>,
+  connection: Pick<LlmConnection, 'models' | 'providerType' | 'piAuthProvider' | 'defaultModel'>,
 ): string | undefined {
   return findSmallModel(connection);
 }
@@ -295,13 +295,15 @@ export function getSummarizationModel(
  *
  *   - Anthropic: find "haiku"
  *   - Pi: find "mini" or "flash"
+ *   - Custom endpoints (`pi_compat`): the connection default (the model
+ *     the user selected). A Flash/mini alias may live on another worker.
  *   - Otherwise: last model in the list
  *
  * Skips models denied by {@link isDeniedMiniModelId} for the connection's
  * auth flavor.
  */
 function findSmallModel(
-  connection: Pick<LlmConnection, 'models' | 'providerType' | 'piAuthProvider'>,
+  connection: Pick<LlmConnection, 'models' | 'providerType' | 'piAuthProvider' | 'defaultModel'>,
 ): string | undefined {
   if (!connection.models || connection.models.length === 0) return undefined;
 
@@ -312,6 +314,21 @@ function findSmallModel(
 
   const isAllowedModel = (m: ModelDefinition | string): boolean =>
     !isDeniedMiniModelId(toId(m), connection.piAuthProvider);
+
+  // Custom endpoints: stay on the selected model. A "Flash" / "mini" alias
+  // on the same connection may still be a different local worker — the
+  // stall we just fixed. Only keyword-search when the user has not chosen
+  // a default.
+  if (isCompatProvider(connection.providerType)) {
+    const defaultId = connection.defaultModel?.trim();
+    if (defaultId) {
+      const match = connection.models.find((model) => {
+        if (!isAllowedModel(model)) return false;
+        return toId(model).toLowerCase() === defaultId.toLowerCase();
+      });
+      return match ? toId(match) : defaultId;
+    }
+  }
 
   // Provider-aware keyword search
   const keywords: string[] = [];

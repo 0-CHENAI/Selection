@@ -4,6 +4,8 @@ import {
   getSessionToolDefs,
   getSessionToolNames,
   getSessionToolRegistry,
+  getSessionSafeAllowedToolNames,
+  getSessionSafeBlockedToolNames,
 } from './tool-defs.ts';
 
 describe('session tool filtering helpers', () => {
@@ -32,9 +34,22 @@ describe('session tool filtering helpers', () => {
     }
   });
 
+  it('never registers typed OfficeCLI tools', () => {
+    const names = getSessionToolNames();
+    for (const removedSuffix of ['batch', 'qa', 'finalize']) {
+      expect(names.has(`officecli_${removedSuffix}`)).toBe(false);
+    }
+  });
+
   it('all canonical session tools declare safeMode metadata', () => {
     for (const def of SESSION_TOOL_DEFS) {
       expect(def.safeMode === 'allow' || def.safeMode === 'block').toBe(true);
     }
+  });
+
+  it('keeps safe-mode allow/block sets disjoint', () => {
+    const allowed = getSessionSafeAllowedToolNames();
+    const blocked = getSessionSafeBlockedToolNames();
+    for (const name of allowed) expect(blocked.has(name)).toBe(false);
   });
 });

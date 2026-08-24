@@ -129,6 +129,16 @@ export function isRichToolDescriptionsEnabled(): boolean {
   return true;
 }
 
+/**
+ * MiniMax-M3 intermittently serializes required UI metadata and real tool
+ * arguments as one XML-like string. Keep its schemas focused on executable
+ * arguments; Selection can still render the canonical tool name as a label.
+ */
+export function supportsRichToolMetadataForModel(modelId: string | undefined): boolean {
+  if (!modelId) return true;
+  return !/(?:^|[\/_-])minimax[-_\/]?m3(?:$|[\/_-])/i.test(modelId.trim());
+}
+
 // ============================================================================
 // LAST API ERROR
 // ============================================================================

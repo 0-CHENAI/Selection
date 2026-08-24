@@ -1,7 +1,6 @@
-import { spawnSync } from 'node:child_process';
-import { existsSync, readFileSync, statSync } from 'node:fs';
+import { existsSync, readFileSync, realpathSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { isAbsolute, join, relative, resolve } from 'node:path';
 import { getBundledAssetsDir } from './paths.ts';
 
 export type OfficecliBinarySource =
@@ -18,6 +17,11 @@ export interface ResolvedOfficecliBinary {
 export interface ResolveOfficecliOptions {
   env?: NodeJS.ProcessEnv;
   cwd?: string;
+  /** Trusted host roots supplied by the application shell. */
+  appRootPath?: string;
+  resourcesPath?: string;
+  /** Disable environment overrides when resolving a subprocess toolchain. */
+  trustEnvironment?: boolean;
   platform?: NodeJS.Platform;
   arch?: string;
 }
@@ -26,6 +30,10 @@ const MANIFEST_NAME = 'officecli-manifest.json';
 
 export function officecliBinaryName(platform: NodeJS.Platform = process.platform): string {
   return platform === 'win32' ? 'officecli.exe' : 'officecli';
+}
+
+export function officecliWrapperName(platform: NodeJS.Platform = process.platform): string {
+  return platform === 'win32' ? 'officecli.cmd' : 'officecli';
 }
 
 function isFile(path: string | undefined): path is string {
@@ -46,6 +54,26 @@ function isDirectory(path: string | undefined): path is string {
   }
 }
 
+function isFileWithin(path: string, roots: string[]): boolean {
+  if (!isFile(path)) return false;
+  try {
+    const target = realpathSync.native(path);
+    return roots.some(root => {
+      try {
+        if (!isDirectory(root)) return false;
+        const base = realpathSync.native(root);
+        const rel = relative(base, target);
+        return rel === '' || (!rel.startsWith('..') && !isAbsolute(rel));
+      } catch {
+        // One missing or unreadable trusted root must not invalidate the rest.
+        return false;
+      }
+    });
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Resolve the app-managed OfficeCLI binary without consulting the user's PATH.
  */
@@ -60,11 +88,11 @@ export function resolveOfficecliRuntime(
   const platformKey = `${platform}-${arch}`;
 
   const candidates: Array<ResolvedOfficecliBinary> = [];
-  if (env.CRAFT_OFFICECLI) {
+  if (options.trustEnvironment !== false && env.CRAFT_OFFICECLI) {
     candidates.push({ path: env.CRAFT_OFFICECLI, source: 'environment' });
   }
 
-  if (env.CRAFT_RESOURCES_BASE) {
+  if (options.trustEnvironment !== false && env.CRAFT_RESOURCES_BASE) {
     candidates.push(
       {
         path: join(env.CRAFT_RESOURCES_BASE, 'resources', 'bin', platformKey, name),
@@ -77,7 +105,7 @@ export function resolveOfficecliRuntime(
     );
   }
 
-  for (const root of [env.CRAFT_BUNDLED_ASSETS_ROOT, env.CRAFT_RESOURCES_PATH]) {
+  for (const root of options.trustEnvironment === false ? [] : [env.CRAFT_BUNDLED_ASSETS_ROOT, env.CRAFT_RESOURCES_PATH]) {
     if (!root) continue;
     candidates.push(
       { path: join(root, 'resources', 'bin', name), source: 'server-resources' },
@@ -87,23 +115,31 @@ export function resolveOfficecliRuntime(
     );
   }
 
-  candidates.push(
-    { path: join(cwd, 'resources', 'bin', platformKey, name), source: 'development' },
-    { path: join(cwd, 'resources', 'bin', name), source: 'development' },
-    { path: join(cwd, 'dist', 'resources', 'bin', platformKey, name), source: 'development' },
-    {
-      path: join(cwd, 'apps', 'electron', 'resources', 'bin', platformKey, name),
-      source: 'development',
-    },
-    {
-      path: join(cwd, '..', '..', 'apps', 'electron', 'resources', 'bin', platformKey, name),
-      source: 'development',
-    },
-  );
+  const trustedRoots = [options.resourcesPath, options.appRootPath].filter((value): value is string => !!value).map(root => resolve(root));
+  for (const root of trustedRoots) {
+    candidates.push(
+      { path: join(root, 'resources', 'bin', platformKey, name), source: 'electron-resources' },
+      { path: join(root, 'resources', 'bin', name), source: 'electron-resources' },
+      { path: join(root, 'bin', platformKey, name), source: 'electron-resources' },
+      { path: join(root, 'bin', name), source: 'electron-resources' },
+      { path: join(root, 'apps', 'electron', 'resources', 'bin', platformKey, name), source: 'development' },
+    );
+  }
+  if (trustedRoots.length === 0) {
+    candidates.push(
+      { path: join(cwd, 'resources', 'bin', platformKey, name), source: 'development' },
+      { path: join(cwd, 'resources', 'bin', name), source: 'development' },
+      { path: join(cwd, 'dist', 'resources', 'bin', platformKey, name), source: 'development' },
+      { path: join(cwd, 'apps', 'electron', 'resources', 'bin', platformKey, name), source: 'development' },
+      { path: join(cwd, '..', '..', 'apps', 'electron', 'resources', 'bin', platformKey, name), source: 'development' },
+    );
+  }
 
   return candidates
     .map(candidate => ({ ...candidate, path: resolve(cwd, candidate.path) }))
-    .find(candidate => isFile(candidate.path));
+    .find(candidate => trustedRoots.length > 0
+      ? isFileWithin(candidate.path, trustedRoots)
+      : isFile(candidate.path));
 }
 
 export function resolveOfficecliBinary(options?: ResolveOfficecliOptions): string | undefined {
@@ -114,6 +150,9 @@ function packagedOfficecliRoots(base: string): string[] {
   return [
     join(base, 'dist', 'resources', 'officecli'),
     join(base, 'resources', 'officecli'),
+    join(base, 'app', 'dist', 'resources', 'officecli'),
+    join(base, 'app', 'resources', 'officecli'),
+    join(base, 'apps', 'electron', 'resources', 'officecli'),
     join(base, 'officecli'),
   ];
 }
@@ -125,20 +164,25 @@ export function resolveOfficecliResourcesRoot(options: ResolveOfficecliOptions =
   const env = options.env ?? process.env;
   const cwd = resolve(options.cwd ?? process.cwd());
   const roots: string[] = [];
+  const trustedRoots = [options.resourcesPath, options.appRootPath]
+    .filter((value): value is string => !!value)
+    .map(root => resolve(root));
 
-  if (env.CRAFT_OFFICECLI_RESOURCES) roots.push(env.CRAFT_OFFICECLI_RESOURCES);
-  if (env.CRAFT_RESOURCES_BASE) roots.push(...packagedOfficecliRoots(env.CRAFT_RESOURCES_BASE));
-  for (const base of [env.CRAFT_BUNDLED_ASSETS_ROOT, env.CRAFT_RESOURCES_PATH]) {
-    if (base) roots.push(...packagedOfficecliRoots(base));
+  if (options.trustEnvironment !== false) {
+    if (env.CRAFT_OFFICECLI_RESOURCES) roots.push(env.CRAFT_OFFICECLI_RESOURCES);
+    for (const base of [env.CRAFT_RESOURCES_BASE, env.CRAFT_BUNDLED_ASSETS_ROOT, env.CRAFT_RESOURCES_PATH]) {
+      if (base) roots.push(...packagedOfficecliRoots(base));
+    }
   }
-  roots.push(
-    join(cwd, 'apps', 'electron', 'resources', 'officecli'),
-    join(cwd, 'resources', 'officecli'),
-    join(cwd, '..', '..', 'apps', 'electron', 'resources', 'officecli'),
-  );
+  for (const base of trustedRoots) roots.push(...packagedOfficecliRoots(base));
+  if (trustedRoots.length === 0) roots.push(...packagedOfficecliRoots(cwd));
 
   return [...new Set(roots.map(root => resolve(root)))]
-    .find(root => isFile(join(root, MANIFEST_NAME)));
+    .find(root => {
+      const manifest = join(root, MANIFEST_NAME);
+      if (!isFile(manifest)) return false;
+      return trustedRoots.length === 0 || isFileWithin(manifest, trustedRoots);
+    });
 }
 
 /** Official OfficeCLI skill slugs shipped under `resources/officecli/<version>/skills`. */
@@ -157,18 +201,61 @@ export const BUNDLED_OFFICECLI_SKILL_SLUGS = [
 
 export type OfficeFormatSkillSlug = 'officecli-docx' | 'officecli-xlsx' | 'officecli-pptx';
 
-const OFFICE_FORMAT_SKILL_PATTERNS: Array<{ re: RegExp; slug: OfficeFormatSkillSlug }> = [
-  { re: /\.xlsx\b|\.xlsm\b|\bxlsx\b|\bxlsm\b|\bexcel\b|电子表格/i, slug: 'officecli-xlsx' },
-  { re: /\.pptx\b|\bpptx\b|\bppt\b|\bpowerpoint\b|幻灯片|演示文稿/i, slug: 'officecli-pptx' },
-  { re: /\.docx\b|\bdocx\b|\bword\b|word文档|word报告|微软\s*word/i, slug: 'officecli-docx' },
+const OFFICE_FILE_PATTERNS: Array<{ re: RegExp; slug: OfficeFormatSkillSlug }> = [
+  { re: /\.(?:xlsx|xlsm)(?:\b|["'）)\]])/i, slug: 'officecli-xlsx' },
+  { re: /\.pptx(?:\b|["'）)\]])/i, slug: 'officecli-pptx' },
+  { re: /\.(?:docx|docm)(?:\b|["'）)\]])/i, slug: 'officecli-docx' },
 ];
 
-const AGENTS_OFFICE_SKILL_RE =
-  /(?:^|[\\/])\.agents[\\/]skills[\\/](officecli-(?:docx|xlsx|pptx)|officecli|docx|xlsx|pptx)(?:[\\/]SKILL\.md)?$/i;
+const OFFICE_ACTION_RE = /(?:创建|生成|制作|做成|做个|形成|新建|撰写|编写|编辑|修改|更新|读取|打开|查看|检查|审阅|解析|分析|预览|转换|导入|导出|填充|完善|交付|create|generate|build|make|write|edit|modify|update|read|open|inspect|review|parse|analy[sz]e|preview|convert|import|export|fill|deliver)/i;
+const OFFICE_ARTIFACT_MUTATION_RE = /(?:创建|生成|制作|做成|做个|形成|新建|撰写|编写|编辑|修改|更新|转换|导入|导出|填充|完善|交付|create|generate|build|make|write|edit|modify|update|convert|import|export|fill|deliver)/i;
+const WORD_PRODUCT_RE = /\bword\b|word\s*(?:文档|报告|表单)|微软\s*word/i;
+const EXCEL_PRODUCT_RE = /\bexcel\b|电子表格|工作簿/i;
+const PPT_PRODUCT_RE = /\bpower\s*point\b|\bpptx\b|\bppt\b|幻灯片|演示文稿|路演(?:稿|PPT)?/i;
+const CSV_EXCEL_INTENT_RE = /(?:\.csv\b|\.tsv\b|\bcsv\b|\btsv\b).*(?:excel|工作簿|电子表格|数据看板)|(?:excel|工作簿|电子表格|数据看板).*(?:\.csv\b|\.tsv\b|\bcsv\b|\btsv\b)/i;
 
-function addOfficeFormatSkillSlugs(text: string, slugs: Set<OfficeFormatSkillSlug>): void {
-  for (const { re, slug } of OFFICE_FORMAT_SKILL_PATTERNS) {
+export const BUNDLED_OFFICECLI_LOAD_SKILL_ALIASES = [
+  'word', 'excel', 'pptx', 'academic-paper', 'financial-model',
+  'data-dashboard', 'pitch-deck', 'word-form', 'morph-ppt', 'morph-ppt-3d',
+] as const;
+
+const OFFICECLI_SHELL_COMMAND_RE = /(?:^|[;&|\s])(?:officecli(?:-[\w-]+)?(?:\.(?:exe|cmd))?|["']?\$\{?CRAFT_OFFICECLI\}?["']?|%CRAFT_OFFICECLI%)(?:["'])?\s+/i;
+
+/** Detect bundled OfficeCLI shell calls so a missing packaged runtime fails closed. */
+export function isOfficecliShellCommand(command: string): boolean {
+  return OFFICECLI_SHELL_COMMAND_RE.test(command)
+    || /\bStart-Process\b[^\r\n]*(?:officecli|CRAFT_OFFICECLI)/i.test(command);
+}
+
+/** Exact read-only guide loads bypass generic large-output summarization. */
+export function isBundledOfficecliLoadSkillCommand(command: string): boolean {
+  const aliases = BUNDLED_OFFICECLI_LOAD_SKILL_ALIASES.join('|');
+  const exactLoad = new RegExp(`^officecli\\s+load_skill\\s+(?:${aliases})$`, 'i');
+  const commands = command.trim().split(/\s*(?:&&|;|\r?\n)\s*/).filter(Boolean);
+  return commands.length > 0 && commands.every(item => exactLoad.test(item));
+}
+
+const AGENTS_OFFICE_SKILL_RE =
+  /(?:^|[\\/])\.agents[\\/]skills[\\/](officecli)(?:[\\/]SKILL\.md)?$/i;
+
+function addOfficeFileSlugs(text: string, slugs: Set<OfficeFormatSkillSlug>): void {
+  for (const { re, slug } of OFFICE_FILE_PATTERNS) {
     if (re.test(text)) slugs.add(slug);
+  }
+}
+
+function addOfficeIntentSlugs(text: string, slugs: Set<OfficeFormatSkillSlug>): void {
+  addOfficeFileSlugs(text, slugs);
+  if (!OFFICE_ACTION_RE.test(text)) return;
+  const createsOrEditsArtifact = OFFICE_ARTIFACT_MUTATION_RE.test(text);
+  if (WORD_PRODUCT_RE.test(text) || (createsOrEditsArtifact && /学术论文|期刊论文|会议论文|word\s*form|可填写\s*word|内容控件|邮件合并/i.test(text))) {
+    slugs.add('officecli-docx');
+  }
+  if (EXCEL_PRODUCT_RE.test(text) || CSV_EXCEL_INTENT_RE.test(text) || (createsOrEditsArtifact && /财务模型|三表模型|敏感性分析|\bDCF\b|\bLBO\b/i.test(text))) {
+    slugs.add('officecli-xlsx');
+  }
+  if (PPT_PRODUCT_RE.test(text) || (createsOrEditsArtifact && /pitch\s*deck|融资路演|\bmorph\b|3D\s*morph|\bGLB\b/i.test(text))) {
+    slugs.add('officecli-pptx');
   }
 }
 
@@ -182,15 +269,13 @@ export function collectOfficeFormatSkillSlugs(
   attachments?: Array<{ type?: string; name?: string; path?: string; storedPath?: string }>,
 ): OfficeFormatSkillSlug[] {
   const slugs = new Set<OfficeFormatSkillSlug>();
-  addOfficeFormatSkillSlugs(message, slugs);
+  addOfficeIntentSlugs(message, slugs);
 
   for (const attachment of attachments ?? []) {
     const hint = [attachment.name, attachment.path, attachment.storedPath].filter(Boolean).join(' ');
     const before = slugs.size;
-    addOfficeFormatSkillSlugs(hint, slugs);
-    if (attachment.type === 'office' && slugs.size === before) {
-      slugs.add('officecli-docx');
-    }
+    addOfficeFileSlugs(hint, slugs);
+    if (attachment.type === 'office' && slugs.size === before) addOfficeIntentSlugs(hint, slugs);
   }
 
   return [...slugs];
@@ -222,27 +307,11 @@ export function getBundledOfficecliRouterSkillMd(): string | undefined {
 }
 
 function bundledSkillMdForAgentsSlug(slug: string): string | undefined {
-  if (slug === 'officecli') return getBundledOfficecliRouterSkillMd();
-
-  const formatSlug: OfficeFormatSkillSlug | undefined =
-    slug === 'docx' || slug === 'officecli-docx'
-      ? 'officecli-docx'
-      : slug === 'xlsx' || slug === 'officecli-xlsx'
-        ? 'officecli-xlsx'
-        : slug === 'pptx' || slug === 'officecli-pptx'
-          ? 'officecli-pptx'
-          : undefined;
-  if (!formatSlug) return undefined;
-
-  const skillsDir = getBundledOfficecliSkillsDir();
-  if (!skillsDir) return undefined;
-  const bundled = join(skillsDir, formatSlug, 'SKILL.md');
-  return isFile(bundled) ? bundled : undefined;
+  return slug === 'officecli' ? getBundledOfficecliRouterSkillMd() : undefined;
 }
 
 /**
- * Send Reads of `~/.agents/skills/officecli` (and docx/xlsx/pptx) to the
- * bundled skill, even when the global file exists.
+ * Send Reads of `~/.agents/skills/officecli` to the bundled router.
  */
 export function resolveBundledOfficecliSkillRead(requestedPath: string): string | undefined {
   const expanded = expandUserPath(requestedPath);
@@ -278,19 +347,6 @@ export function getBundledOfficecliSkillsDir(options?: ResolveOfficecliOptions):
 
 const DOCX_PATH_RE = /\.(docx|docm)$/i;
 const OFFICECLI_FLAG_RE = /^-/;
-const OFFICECLI_VERB_RE =
-  /^(create|add|set|open|refresh|save|close|view|get|query|validate|help|load_skill|dump|remove|batch)$/i;
-
-export const OFFICECLI_ENSURE_DOCX_STYLES_JSON = 'officecli-ensure-docx-styles.json';
-
-/** Built-in paragraph styles Word TOC (`TOC \\o "1-3"`) needs in styles.xml. */
-export const DOCX_OUTLINE_HEADING_SPECS = [
-  { id: 'Heading1', outlineLvl: 0, size: '18pt', bold: true },
-  { id: 'Heading2', outlineLvl: 1, size: '14pt', bold: true },
-  { id: 'Heading3', outlineLvl: 2, size: '12pt', bold: true },
-  { id: 'Title', size: '24pt', bold: true },
-  { id: 'TOCHeading', size: '16pt', bold: true },
-] as const;
 
 export function isOfficeDocxPath(value: string): boolean {
   return DOCX_PATH_RE.test(value);
@@ -301,7 +357,7 @@ export function findDocxArgInOfficecliArgs(args: string[]): string | undefined {
 }
 
 function firstOfficecliVerb(args: string[]): string | undefined {
-  return args.find(arg => !OFFICECLI_FLAG_RE.test(arg) && OFFICECLI_VERB_RE.test(arg))?.toLowerCase();
+  return args.find(arg => !OFFICECLI_FLAG_RE.test(arg))?.toLowerCase();
 }
 
 export interface DocxOutlineEnsureTiming {
@@ -310,37 +366,13 @@ export interface DocxOutlineEnsureTiming {
 }
 
 /**
- * When the PATH wrapper should seed or repair Heading outlineLvl.
- * create / style-id writes: after (re-add wipes outlineLvl).
- * paragraph Heading / TOC writes: before (style must exist).
- * open / refresh / view: never — those must not mutate the file.
+ * The transparent PATH wrapper repairs Heading outline levels only after create.
+ * All later edits remain native OfficeCLI operations and preserve resident state.
  */
 export function docxOutlineEnsureTiming(args: string[]): DocxOutlineEnsureTiming {
   const none = { before: false, after: false };
   if (!findDocxArgInOfficecliArgs(args)) return none;
-  const verb = firstOfficecliVerb(args);
-  if (verb === 'create') return { before: false, after: true };
-  if (verb !== 'add' && verb !== 'set') return none;
-
-  let before = false;
-  let after = false;
-  let prev = '';
-  for (const arg of args) {
-    if (
-      /style=Heading/i.test(arg) ||
-      /style=Title/i.test(arg) ||
-      /style=TOCHeading/i.test(arg) ||
-      /(?:^|[=\s])toc$/i.test(arg)
-    ) {
-      before = true;
-    }
-    if (/id=Heading/i.test(arg) || /id=Title/i.test(arg) || /id=TOCHeading/i.test(arg)) {
-      after = true;
-    }
-    if (prev === '--type' && /^toc$/i.test(arg)) before = true;
-    prev = arg;
-  }
-  return { before, after };
+  return firstOfficecliVerb(args) === 'create' ? { before: false, after: true } : none;
 }
 
 export function shouldEnsureDocxOutlineStyles(args: string[]): boolean {
@@ -348,117 +380,33 @@ export function shouldEnsureDocxOutlineStyles(args: string[]): boolean {
   return timing.before || timing.after;
 }
 
-function listingHasStyleId(listing: string, id: string): boolean {
-  return new RegExp(`styleId=${id}\\b`).test(listing);
-}
-
-/** `get /styles --depth 2` lists each style, then its pPr outlineLvl on a nearby line. */
-export function styleListingHasOutlineLvl(listing: string, id: string, level: number): boolean {
-  const lines = listing.split(/\r?\n/);
-  const index = lines.findIndex(line => new RegExp(`styleId=${id}\\b`).test(line));
-  if (index < 0) return false;
-  return lines.slice(index, index + 4).some(line => line.includes(`outlineLvl=${level}`));
-}
-
-export function docxStylesListingHasOutlineHeadings(listing: string): boolean {
-  return (
-    styleListingHasOutlineLvl(listing, 'Heading1', 0) &&
-    styleListingHasOutlineLvl(listing, 'Heading2', 1) &&
-    styleListingHasOutlineLvl(listing, 'Heading3', 2)
-  );
-}
-
-function runOfficecli(binary: string, args: string[]): { exitCode: number; output: string } {
-  const result = spawnSync(binary, args, {
-    encoding: 'utf8',
-    env: { ...process.env, OFFICECLI_NO_AUTO_RESIDENT: '1' },
-  });
-  return {
-    exitCode: result.status ?? 1,
-    output: `${result.stdout ?? ''}${result.stderr ?? ''}`,
-  };
-}
-
-function headingStyleArgs(file: string, spec: (typeof DOCX_OUTLINE_HEADING_SPECS)[number]): string[] {
-  const args = [
-    'add',
-    file,
-    '/styles',
-    '--type',
-    'style',
-    '--prop',
-    `id=${spec.id}`,
-    '--prop',
-    'type=paragraph',
-    '--prop',
-    `name=${spec.id}`,
-  ];
-  if ('outlineLvl' in spec && spec.outlineLvl !== undefined) {
-    args.push('--prop', `outlineLvl=${spec.outlineLvl}`);
-  }
-  if ('size' in spec && spec.size) args.push('--prop', `size=${spec.size}`);
-  if ('bold' in spec && spec.bold) args.push('--prop', 'bold=true');
-  return args;
-}
-
-function getEnsureStylesBatchPath(options?: ResolveOfficecliOptions): string | undefined {
-  const dir = getOfficecliWrapperDir(options);
-  if (!dir) return undefined;
-  const json = join(dir, OFFICECLI_ENSURE_DOCX_STYLES_JSON);
-  return isFile(json) ? json : undefined;
-}
-
-/**
- * Word TOC uses outlineLvl from styles.xml, not pStyle names. officecli create
- * only writes Normal. Re-adding Heading drops outlineLvl — add only when missing.
- */
-export function ensureDocxOutlineHeadingStyles(
-  file: string,
-  options?: ResolveOfficecliOptions & { binary?: string },
-): boolean {
-  if (!existsSync(file) || !isOfficeDocxPath(file)) return false;
-  const binary = options?.binary ?? resolveOfficecliBinary(options);
-  if (!binary) return false;
-
-  const readListing = () => runOfficecli(binary, ['get', file, '/styles', '--depth', '2']).output;
-  const listing = readListing();
-  if (docxStylesListingHasOutlineHeadings(listing)) return true;
-
-  if (!listingHasStyleId(listing, 'Heading1')) {
-    const batch = getEnsureStylesBatchPath(options);
-    if (batch) {
-      runOfficecli(binary, ['batch', file, '--best-effort', '--input', batch]);
-    } else {
-      for (const spec of DOCX_OUTLINE_HEADING_SPECS) {
-        runOfficecli(binary, headingStyleArgs(file, spec));
-      }
-    }
-    return docxStylesListingHasOutlineHeadings(readListing());
-  }
-
-  for (const spec of DOCX_OUTLINE_HEADING_SPECS) {
-    if (!listingHasStyleId(listing, spec.id)) {
-      runOfficecli(binary, headingStyleArgs(file, spec));
-    } else if (
-      'outlineLvl' in spec &&
-      spec.outlineLvl !== undefined &&
-      !styleListingHasOutlineLvl(listing, spec.id, spec.outlineLvl)
-    ) {
-      runOfficecli(binary, ['set', file, `/styles/${spec.id}`, '--prop', `outlineLvl=${spec.outlineLvl}`]);
-    }
-  }
-  return docxStylesListingHasOutlineHeadings(readListing());
-}
-
 /** Directory that contains the PATH `officecli` / `officecli.cmd` wrappers. */
 export function getOfficecliWrapperDir(options: ResolveOfficecliOptions = {}): string | undefined {
+  const env = options.env ?? process.env;
   const cwd = resolve(options.cwd ?? process.cwd());
-  const candidates = [
-    join(cwd, 'apps', 'electron', 'resources', 'bin'),
-    join(cwd, 'resources', 'bin'),
-    join(cwd, '..', '..', 'apps', 'electron', 'resources', 'bin'),
-  ];
+  const wrapperName = officecliWrapperName(options.platform ?? process.platform);
+  const optionRoots = [options.resourcesPath, options.appRootPath]
+    .filter((value): value is string => !!value)
+    .map(root => resolve(root));
+  const envRoots = options.trustEnvironment !== false && env.CRAFT_RESOURCES_BASE
+    ? [resolve(env.CRAFT_RESOURCES_BASE)]
+    : [];
+  const trustedRoots = optionRoots.length > 0 ? optionRoots : envRoots;
+  const candidates = trustedRoots.length > 0
+    ? trustedRoots.flatMap(root => [
+        join(root, 'resources', 'bin'),
+        join(root, 'bin'),
+        join(root, 'apps', 'electron', 'resources', 'bin'),
+      ])
+    : [
+        join(cwd, 'apps', 'electron', 'resources', 'bin'),
+        join(cwd, 'resources', 'bin'),
+        join(cwd, '..', '..', 'apps', 'electron', 'resources', 'bin'),
+      ];
   return candidates.find(
-    dir => isFile(join(dir, 'officecli')) || isFile(join(dir, 'officecli.cmd')),
+    dir => {
+      const wrapper = join(dir, wrapperName);
+      return trustedRoots.length > 0 ? isFileWithin(wrapper, trustedRoots) : isFile(wrapper);
+    },
   );
 }

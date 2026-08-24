@@ -12,7 +12,6 @@ import { formatBytes } from '../utils/binary-detection.ts';
 import { globSync } from 'glob';
 import os from 'os';
 import type { ProjectPromptContext } from '../projects/types.ts';
-import { getBundledOfficecliSkillsDir } from '../utils/officecli.ts';
 
 /** Maximum size of CLAUDE.md file to include (10KB) */
 const MAX_CONTEXT_FILE_SIZE = 10 * 1024;
@@ -355,6 +354,7 @@ export function getSystemPrompt(
   backendName?: string,
   includeCoAuthoredBy?: boolean,
   projectContext?: ProjectPromptContext,
+  toolMetadataRequired: boolean = true,
 ): string {
   // Use mini agent prompt for quick edits (pass workspace root for config paths)
   if (preset === 'mini') {
@@ -379,7 +379,12 @@ export function getSystemPrompt(
   // Note: Date/time context is now added to user messages instead of system prompt
   // to enable prompt caching. The system prompt stays static and cacheable.
   // Safe Mode context is also in user messages for the same reason.
-  const basePrompt = getCraftAssistantPrompt(workspaceRootPath, backendName, resolvedIncludeCoAuthoredBy);
+  const basePrompt = getCraftAssistantPrompt(
+    workspaceRootPath,
+    backendName,
+    resolvedIncludeCoAuthoredBy,
+    toolMetadataRequired,
+  );
   const fullPrompt = `${basePrompt}${preferences}${projectBlock}${debugContext}${projectContextFiles}`;
 
   debug('[getSystemPrompt] full prompt length:', fullPrompt.length);
@@ -540,24 +545,12 @@ rg -n "session|OAuth|\"level\":\"error\"" "${logFilePath}" | tail -n 50
 }
 
 function formatBundledOfficecliSkillGuidance(): string {
-  const dir = getBundledOfficecliSkillsDir();
-  const lines = [
-    '- **Hard rule:** for `.docx` / `.xlsx` / `.pptx` / `.xlsm` (or Word / Excel / PowerPoint), use bundled `officecli` via Bash. Do not use python-docx, openpyxl, python-pptx, or markitdown first.',
-    '- First run `officecli load_skill word` (or `excel` / `pptx`), or Read the matching built-in skill. Then follow its Common Workflow and Delivery Gate. `officecli` is already on PATH; do not curl-install.',
-    '- Word: `create` seeds Heading1–3 with `outlineLvl`. Use those styles as TOC sources. If officecli prints `style not found` / WARNING / Error, stop — `get /styles` and `help docx style`. Do not re-add an existing Heading (that drops outlineLvl); `set /styles/Heading1 --prop outlineLvl=0` instead.',
-    '- Do not treat `view outline` or `Update field to see table of contents` as proof Word can compile the TOC. Check `get /styles/Heading1` (must exist with outlineLvl). Insert TOC only after heading sources exist.',
+  return [
+    '- **Hard rule:** for `.docx` / `.docm` / `.xlsx` / `.xlsm` / `.pptx` work, use Selection\'s bundled OfficeCLI through Bash. Do not use python-docx, openpyxl, python-pptx, or markitdown for supported operations.',
+    '- Read the automatically gated `officecli` router first. Then run the exact `officecli load_skill` commands it selects before creating or editing. OfficeCLI is already on PATH; never download, install, or self-update it.',
+    '- Keep resident sessions open across related edits and close only after the loaded official Delivery Gate passes. Office work has no special call, operation, QA, time, or cost budget.',
     '- Do **not** Read `~/.agents/skills/officecli`, `~/.agents/skills/docx`, `~/.agents/skills/xlsx`, or `~/.agents/skills/pptx`.',
-  ];
-  if (!dir) {
-    lines.push('- Word → `[skill:officecli-docx]`. Excel → `[skill:officecli-xlsx]`. PowerPoint → `[skill:officecli-pptx]`.');
-    return lines.join('\n');
-  }
-  lines.push(
-    `- officecli-docx: \`${join(dir, 'officecli-docx', 'SKILL.md')}\``,
-    `- officecli-xlsx: \`${join(dir, 'officecli-xlsx', 'SKILL.md')}\``,
-    `- officecli-pptx: \`${join(dir, 'officecli-pptx', 'SKILL.md')}\``,
-  );
-  return lines.join('\n');
+  ].join('\n');
 }
 
 /**
@@ -583,7 +576,12 @@ function getCraftAgentEnvironmentMarker(): string {
  * @param backendName - Backend name for "powered by X" text (default: 'Claude Code')
  * @param includeCoAuthoredBy - Whether to include the Co-Authored-By git trailer instruction (default: true)
  */
-function getCraftAssistantPrompt(workspaceRootPath?: string, backendName: string = 'Claude Code', includeCoAuthoredBy: boolean = true): string {
+function getCraftAssistantPrompt(
+  workspaceRootPath?: string,
+  backendName: string = 'Claude Code',
+  includeCoAuthoredBy: boolean = true,
+  toolMetadataRequired: boolean = true,
+): string {
   // Default to ${APP_ROOT}/workspaces/{id} if no path provided
   const workspacePath = workspaceRootPath || `${APP_ROOT}/workspaces/{id}`;
 
@@ -706,12 +704,11 @@ Skills are reusable instruction sets that teach you specialized behaviors. Each 
 1. Read its \`SKILL.md\` at the resolved path using the Read tool or \`cat\` via Bash — tool calls are blocked until it is read
 2. Follow the instructions in the file to complete the user's request
 
-Office files use the built-in \`officecli\` skill plus the matching format skill. See Document Tools.
-${formatBundledOfficecliSkillGuidance()}
+Office-file instructions are listed once under Document Tools.
 
 Skills are stored at four levels (listed from lowest to highest priority):
 - Global: \`~/.agents/skills/{slug}/SKILL.md\`
-- Built-in: app-shipped \`officecli\` and official OfficeCLI format skills (they override a global \`officecli\`)
+- Built-in: the app-shipped \`officecli\` router (it overrides a global \`officecli\` for automatic Office routing)
 - Workspace: \`${workspacePath}/skills/{slug}/SKILL.md\`
 - Project: \`{projectRoot}/.agents/skills/{slug}/SKILL.md\`
 
@@ -1293,20 +1290,22 @@ These CLI tools are available via Bash. OfficeCLI is bundled with Selection.
 
 **Office documents:**
 ${formatBundledOfficecliSkillGuidance()}
-- Specialized: \`officecli-academic-paper\`, \`officecli-financial-model\`, \`officecli-data-dashboard\`, \`officecli-pitch-deck\`, \`officecli-word-form\`, \`morph-ppt\`, \`morph-ppt-3d\`.
+- Specialized OfficeCLI guides are loaded privately through the router with \`officecli load_skill\` and do not appear in the normal Skill catalog.
 - Official skill Setup sections that mention curl-install do not apply.
 - Use **markitdown** only when the user explicitly requests Markdown conversion, or when \`officecli\` reports the document unsupported. Do not read an automatically generated \`.docx.md\`, \`.xlsx.md\`, or \`.pptx.md\` sidecar first.
 - Consult each CLI's \`--help\` before relying on optional flags such as \`-o\`.
 - PDF export is not included in the bundled officecli binary
 
-## Tool Metadata
+${toolMetadataRequired ? `## Tool Metadata
 
 All MCP tools require two metadata fields (schema-enforced):
 
 - **\`_displayName\`** (required): Short name for the action (2-4 words), e.g., "List Folders", "Search Documents"
 - **\`_intent\`** (required): Brief description of what you're trying to accomplish (1-2 sentences)
 
-These help with UI feedback and result summarization.${FEATURE_FLAGS.developerFeedback ? `
+These help with UI feedback and result summarization.
+
+` : ''}${FEATURE_FLAGS.developerFeedback ? `
 
 ## Developer Feedback
 

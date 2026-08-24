@@ -73,7 +73,7 @@ import { buildTitlePrompt, buildRegenerateTitlePrompt, validateTitle } from '../
 
 // Skill extraction for Codex/Copilot backends (Claude uses native SDK Skill tool)
 import { parseMentions, resolveSkillMentions, resolveSourceMentions, resolveFileMentions } from '../mentions/index.ts';
-import { loadAllSkills } from '../skills/storage.ts';
+import { loadAllSkills, resolveBundledSkillMdPath } from '../skills/storage.ts';
 
 // ============================================================
 // Mini Agent Configuration
@@ -989,16 +989,29 @@ ${formattedMessages}
       }
       this.debug(`[extractSkillPaths] SKILL.md not found: ${skillMdPath}`);
     };
+    const resolveBundledSlug = (slug: string) => {
+      const skillMdPath = resolveBundledSkillMdPath(slug);
+      if (skillMdPath) {
+        skillPaths.set(slug, skillMdPath);
+        this.debug(`[extractSkillPaths] Resolved locked bundled skill ${slug} → ${skillMdPath}`);
+        return;
+      }
+      this.debug(`[extractSkillPaths] Locked bundled SKILL.md not found for ${slug}`);
+    };
 
     for (const slug of parsed.skills) {
       resolveSlug(slug);
     }
 
-    // Office files: router first (HanaAgent `[Use skill: officecli]`), then format skill
+    // Office work loads the router skill only. The model then load_skill
+    // word/excel/pptx for the format the user actually needs. Do not dump
+    // official format SKILL.md files up front. An explicit user skill mention
+    // keeps Craft's normal project/workspace/global priority.
     const officeFormatSlugs = collectOfficeFormatSkillSlugs(message, attachments);
-    if (officeFormatSlugs.length > 0) resolveSlug('officecli');
-    for (const slug of officeFormatSlugs) {
-      if (!skillPaths.has(slug)) resolveSlug(slug);
+    const explicitlySelectedOfficecli = parsed.skills.includes('officecli');
+    if (officeFormatSlugs.length > 0 && !explicitlySelectedOfficecli) {
+      skillPaths.delete('officecli');
+      resolveBundledSlug('officecli');
     }
 
     // Resolve mentions to semantic markers (like file mentions) instead of stripping them.
@@ -1033,10 +1046,11 @@ ${formattedMessages}
     const pathList = [...skillPaths.entries()]
       .map(([slug, path]) => `- ${path} (skill: ${slug})`)
       .join('\n');
-    const officeHint = skillPaths.has('officecli')
-      ? '\nFor Word / Excel / PowerPoint, prefer `officecli load_skill word` (or excel / pptx); Read the listed files if you do not run load_skill.'
+    const bundledOfficecli = resolveBundledSkillMdPath('officecli');
+    const officeOnly = bundledOfficecli && skillPaths.get('officecli') === bundledOfficecli
+      ? '\nAfter reading the router, run only the `officecli load_skill` commands it selects. Use the bundled CLI on PATH; do not install OfficeCLI or read user-level Office skills.'
       : '';
-    return `Before proceeding with the user's request, you MUST read the following skill instruction files using the Read tool or \`cat\` via Bash:\n${pathList}\n\nDo not take any other action until you have read these files.${officeHint}`;
+    return `Before proceeding with the user's request, you MUST read the following skill instruction files using the Read tool or \`cat\` via Bash:\n${pathList}${officeOnly}\n\nDo not take any other action until you have read these files.`;
   }
 
   // ============================================================
