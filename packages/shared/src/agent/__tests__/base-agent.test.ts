@@ -270,6 +270,7 @@ describe('BaseAgent', () => {
       expect(sent).toContain('(skill: officecli)');
       expect(sent).toContain('officecli load_skill');
       expect(sent).toContain('SKILL.md');
+      expect(sent).toContain('do not Write a .md as the primary artifact');
       expect(sent).not.toContain('(skill: officecli-docx)');
       expect(sent).not.toContain('(skill: officecli-xlsx)');
       expect(sent).not.toContain('(skill: officecli-pptx)');
@@ -299,12 +300,33 @@ describe('BaseAgent', () => {
       expect(sent).not.toContain('(skill: officecli-pptx)');
     });
 
-    it('does not gate OfficeCLI when the user only asks for a report', async () => {
+    it('gates the officecli router for an ordinary report request', async () => {
       await collectEvents(agent.chat('写一份巡察报告'));
       const sent = agent.chatCalls[0]?.message ?? '';
-      expect(sent).not.toContain('(skill: officecli)');
-      expect(sent).not.toContain('officecli-docx');
-      expect(sent).not.toContain('officecli load_skill');
+      expect(sent).toContain('(skill: officecli)');
+      expect(sent).toContain('officecli load_skill');
+      expect(sent).toContain('do not Write a .md as the primary artifact');
+      expect(sent).not.toContain('(skill: officecli-docx)');
+      expect(sent).not.toContain('(skill: officecli-xlsx)');
+      expect(sent).not.toContain('(skill: officecli-pptx)');
+    });
+
+    it('gates the officecli router for ordinary weekly reports and tables', async () => {
+      await collectEvents(agent.chat('写一份项目周报'));
+      expect(agent.chatCalls[0]?.message ?? '').toContain('(skill: officecli)');
+      await collectEvents(agent.chat('做一份预算表'));
+      expect(agent.chatCalls[1]?.message ?? '').toContain('(skill: officecli)');
+      expect(agent.chatCalls[1]?.message ?? '').toContain('officecli load_skill');
+      expect(agent.chatCalls[1]?.message ?? '').not.toContain('(skill: officecli-xlsx)');
+    });
+
+    it('does not gate OfficeCLI for explicit Markdown or inspect-only asks', async () => {
+      await collectEvents(agent.chat('写成 markdown 周报'));
+      expect(agent.chatCalls[0]?.message ?? '').not.toContain('(skill: officecli)');
+      await collectEvents(agent.chat('只要 md'));
+      expect(agent.chatCalls[1]?.message ?? '').not.toContain('officecli load_skill');
+      await collectEvents(agent.chat('解释报告结构'));
+      expect(agent.chatCalls[2]?.message ?? '').not.toContain('(skill: officecli)');
     });
 
     it('gates the officecli router for a Word report request without a .docx path', async () => {

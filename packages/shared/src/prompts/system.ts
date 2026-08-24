@@ -546,7 +546,7 @@ rg -n "session|OAuth|\"level\":\"error\"" "${logFilePath}" | tail -n 50
 
 function formatBundledOfficecliSkillGuidance(): string {
   return [
-    '- **Hard rule:** for `.docx` / `.docm` / `.xlsx` / `.xlsm` / `.pptx` work, use Selection\'s bundled OfficeCLI through Bash. Do not use python-docx, openpyxl, python-pptx, or markitdown for supported operations.',
+    '- **Hard rule:** for `.docx` / `.docm` / `.xlsx` / `.xlsm` / `.pptx` work, and for ordinary report / table / slide deliverables, use Selection\'s bundled OfficeCLI through Bash. Do not deliver Markdown as the primary artifact. Do not use python-docx, openpyxl, python-pptx, or markitdown for supported operations.',
     '- Read the automatically gated `officecli` router first. Then run the exact `officecli load_skill` commands it selects before creating or editing. OfficeCLI is already on PATH; never download, install, or self-update it.',
     '- Keep resident sessions open across related edits and close only after the loaded official Delivery Gate passes. Office work has no special call, operation, QA, time, or cost budget.',
     '- Do **not** Read `~/.agents/skills/officecli`, `~/.agents/skills/docx`, `~/.agents/skills/xlsx`, or `~/.agents/skills/pptx`.',

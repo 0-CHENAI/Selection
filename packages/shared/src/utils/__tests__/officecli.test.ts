@@ -38,8 +38,26 @@ describe('collectOfficeFormatSkillSlugs', () => {
     expect(collectOfficeFormatSkillSlugs('deck.pptx')).toEqual(['officecli-pptx'])
   })
 
-  it('does not infer from a request that only talks about a report', () => {
-    expect(collectOfficeFormatSkillSlugs('写一份巡察报告')).toEqual([])
+  it('infers format skills from ordinary create/write deliverables', () => {
+    expect(collectOfficeFormatSkillSlugs('写一份巡察报告')).toEqual(['officecli-docx'])
+    expect(collectOfficeFormatSkillSlugs('写一份项目周报')).toEqual(['officecli-docx'])
+    expect(collectOfficeFormatSkillSlugs('撰写一份文档')).toEqual(['officecli-docx'])
+    expect(collectOfficeFormatSkillSlugs('write a weekly report')).toEqual(['officecli-docx'])
+    expect(collectOfficeFormatSkillSlugs('帮我写一份项目周报 Word')).toEqual(['officecli-docx'])
+    expect(collectOfficeFormatSkillSlugs('做一份预算表')).toEqual(['officecli-xlsx'])
+    expect(collectOfficeFormatSkillSlugs('做一份表')).toEqual(['officecli-xlsx'])
+    expect(collectOfficeFormatSkillSlugs('make a budget spreadsheet')).toEqual(['officecli-xlsx'])
+    expect(collectOfficeFormatSkillSlugs('做三页汇报')).toEqual(['officecli-pptx'])
+    expect(collectOfficeFormatSkillSlugs('做一页PPT')).toEqual(['officecli-pptx'])
+    expect(collectOfficeFormatSkillSlugs('make 3 slides')).toEqual(['officecli-pptx'])
+  })
+
+  it('does not infer ordinary Office deliverables for Markdown or inspect-only asks', () => {
+    expect(collectOfficeFormatSkillSlugs('写成 markdown 周报')).toEqual([])
+    expect(collectOfficeFormatSkillSlugs('只要 md')).toEqual([])
+    expect(collectOfficeFormatSkillSlugs('用 markdown 写一份报告')).toEqual([])
+    expect(collectOfficeFormatSkillSlugs('write a README')).toEqual([])
+    expect(collectOfficeFormatSkillSlugs('解释报告结构')).toEqual([])
   })
 
   it('requires an Office action for product wording without a file path', () => {
@@ -523,6 +541,8 @@ describe('docx outline heading seed', () => {
     expect(body).toContain('Delivery gate')
     expect(body).toContain('outlineLvl')
     expect(body).toContain('Do not impose a model-call, CLI-call, operation, QA, elapsed-time, or cost budget')
+    expect(body).toContain('ordinary create/write requests')
+    expect(body).toContain('Do not deliver Markdown as the primary artifact')
   })
 
   it('seeds on wrapper create and repairs Heading1 that exists without outlineLvl', () => {
