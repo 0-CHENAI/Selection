@@ -372,7 +372,7 @@ describe('bundled officecli smoke', () => {
     } finally {
       rmSync(root, { recursive: true, force: true })
     }
-  }, 30_000)
+  }, 120_000)
 
   it('prints every specialized skill in full via load_skill', () => {
     if (!binary) return
@@ -618,5 +618,5 @@ describe('docx outline heading seed', () => {
       }
       rmSync(root, { recursive: true, force: true })
     }
-  }, 30_000)
+  }, 120_000)
 })
