@@ -1351,7 +1351,6 @@ export class PiAgent extends BaseAgent {
       hasSourceActivation: !!this.onSourceActivationRequest,
       permissionManager: this.permissionManager,
       prerequisiteManager: this.prerequisiteManager,
-      officeFileDeliveryRequired: this.officeFileDeliveryRequired,
       onDebug: (msg) => this.debug(`PreToolUse(sessionId=${sessionId}): ${msg}`),
     });
 
@@ -1470,7 +1469,6 @@ export class PiAgent extends BaseAgent {
           hasSourceActivation: !!this.onSourceActivationRequest,
           permissionManager: this.permissionManager,
           prerequisiteManager: this.prerequisiteManager,
-          officeFileDeliveryRequired: this.officeFileDeliveryRequired,
           onDebug: (msg) => this.debug(`PreToolUse(sessionId=${sessionId}): ${msg}`),
         });
 

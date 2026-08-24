@@ -22,11 +22,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { join, resolve } from 'node:path';
 import { expandPath } from '../../utils/paths.ts';
-import {
-  isBlockedOfficeMarkdownWrite,
-  OFFICE_MARKDOWN_WRITE_BLOCK_REASON,
-  resolveBundledOfficecliSkillRead,
-} from '../../utils/officecli.ts';
+import { resolveBundledOfficecliSkillRead } from '../../utils/officecli.ts';
 import {
   detectConfigFileType,
   detectAppConfigFileType,
@@ -657,8 +653,6 @@ export interface PreToolUseInput {
   permissionManager: PermissionManagerLike;
   /** PrerequisiteManager for guide.md checking */
   prerequisiteManager?: PrerequisiteManagerLike;
-  /** This turn gated bundled OfficeCLI for a file deliverable */
-  officeFileDeliveryRequired?: boolean;
   /** Backend metadata (e.g. Pi forwards intent / displayName via input.metadata) */
   backendMetadata?: { intent?: string; displayName?: string };
   /** Debug callback */
@@ -736,7 +730,6 @@ export function runPreToolUseChecks(ctx: PreToolUseInput): PreToolUseCheckResult
     hasSourceActivation,
     permissionManager,
     prerequisiteManager,
-    officeFileDeliveryRequired,
     backendMetadata,
     onDebug,
   } = ctx;
@@ -831,19 +824,6 @@ export function runPreToolUseChecks(ctx: PreToolUseInput): PreToolUseCheckResult
   if (pathResult.modified) {
     currentInput = pathResult.input;
     wasModified = true;
-  }
-
-  // 5a2. Office-gated turns cannot Write/Edit a .md as the primary artifact
-  if (officeFileDeliveryRequired && FILE_WRITE_TOOLS.has(toolName)) {
-    const filePath = typeof currentInput.file_path === 'string'
-      ? currentInput.file_path
-      : typeof currentInput.notebook_path === 'string'
-        ? currentInput.notebook_path
-        : '';
-    if (filePath && isBlockedOfficeMarkdownWrite(filePath, { plansFolderPath, dataFolderPath })) {
-      onDebug?.(`Office delivery required: blocking ${toolName} of ${filePath}`);
-      return { type: 'block', reason: OFFICE_MARKDOWN_WRITE_BLOCK_REASON };
-    }
   }
 
   // 5c. Config-domain Bash guard (block direct labels/automations path operations unless using craft-agent)

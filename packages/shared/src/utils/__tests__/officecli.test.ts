@@ -14,8 +14,6 @@ import {
   BUNDLED_OFFICECLI_SKILL_SLUGS,
   BUNDLED_OFFICECLI_LOAD_SKILL_ALIASES,
   collectOfficeFormatSkillSlugs,
-  isBlockedOfficeMarkdownWrite,
-  isExplicitMarkdownRequest,
   docxOutlineEnsureTiming,
   findDocxArgInOfficecliArgs,
   getBundledOfficecliRouterSkillMd,
@@ -40,61 +38,15 @@ describe('collectOfficeFormatSkillSlugs', () => {
     expect(collectOfficeFormatSkillSlugs('deck.pptx')).toEqual(['officecli-pptx'])
   })
 
-  it('infers format skills from ordinary create/write deliverables', () => {
-    expect(collectOfficeFormatSkillSlugs('写一份巡察报告')).toEqual(['officecli-docx'])
-    expect(collectOfficeFormatSkillSlugs('写一份项目周报')).toEqual(['officecli-docx'])
-    expect(collectOfficeFormatSkillSlugs('撰写一份文档')).toEqual(['officecli-docx'])
-    expect(collectOfficeFormatSkillSlugs('write a weekly report')).toEqual(['officecli-docx'])
-    expect(collectOfficeFormatSkillSlugs('帮我写一份项目周报 Word')).toEqual(['officecli-docx'])
-    expect(collectOfficeFormatSkillSlugs('做一份预算表')).toEqual(['officecli-xlsx'])
-    expect(collectOfficeFormatSkillSlugs('做一份表')).toEqual(['officecli-xlsx'])
-    expect(collectOfficeFormatSkillSlugs('make a budget spreadsheet')).toEqual(['officecli-xlsx'])
-    expect(collectOfficeFormatSkillSlugs('做三页汇报')).toEqual(['officecli-pptx'])
-    expect(collectOfficeFormatSkillSlugs('做一页PPT')).toEqual(['officecli-pptx'])
-    expect(collectOfficeFormatSkillSlugs('make 3 slides')).toEqual(['officecli-pptx'])
-  })
-
-  it('does not infer ordinary Office deliverables for Markdown or inspect-only asks', () => {
+  it('does not infer format from language — the model chooses OfficeCLI', () => {
+    expect(collectOfficeFormatSkillSlugs('写一份项目周报')).toEqual([])
+    expect(collectOfficeFormatSkillSlugs('不要用 markdown，写一份周报')).toEqual([])
+    expect(collectOfficeFormatSkillSlugs('先出 markdown 再转 word')).toEqual([])
     expect(collectOfficeFormatSkillSlugs('写成 markdown 周报')).toEqual([])
-    expect(collectOfficeFormatSkillSlugs('只要 md')).toEqual([])
-    expect(collectOfficeFormatSkillSlugs('用 markdown 写一份报告')).toEqual([])
-    expect(collectOfficeFormatSkillSlugs('write a README')).toEqual([])
+    expect(collectOfficeFormatSkillSlugs('帮我将他形成word放在我的桌面上')).toEqual([])
+    expect(collectOfficeFormatSkillSlugs('做一份预算表')).toEqual([])
+    expect(collectOfficeFormatSkillSlugs('做三页汇报')).toEqual([])
     expect(collectOfficeFormatSkillSlugs('解释报告结构')).toEqual([])
-  })
-
-  it('still gates Office when the user rejects Markdown or asks to convert it', () => {
-    expect(isExplicitMarkdownRequest('不要用 markdown，写一份周报')).toBe(false)
-    expect(isExplicitMarkdownRequest('先出 markdown 再转 word')).toBe(false)
-    expect(isExplicitMarkdownRequest('写成 markdown 周报')).toBe(true)
-    expect(isExplicitMarkdownRequest('只要 md')).toBe(true)
-    expect(collectOfficeFormatSkillSlugs('不要用 markdown，写一份周报')).toEqual(['officecli-docx'])
-    expect(collectOfficeFormatSkillSlugs('先出 markdown 再转 word')).toEqual(['officecli-docx'])
-    expect(collectOfficeFormatSkillSlugs("don't use markdown, write a weekly report")).toEqual(['officecli-docx'])
-    expect(collectOfficeFormatSkillSlugs('帮我将他形成word放在我的桌面上')).toEqual(['officecli-docx'])
-    expect(collectOfficeFormatSkillSlugs('做三页汇报')).toEqual(['officecli-pptx'])
-  })
-
-  it('blocks .md writes as the Office deliverable but keeps plans and skill files', () => {
-    expect(isBlockedOfficeMarkdownWrite('/tmp/项目周报.md')).toBe(true)
-    expect(isBlockedOfficeMarkdownWrite('/tmp/项目周报.docx')).toBe(false)
-    expect(isBlockedOfficeMarkdownWrite('/tmp/skills/officecli/SKILL.md')).toBe(false)
-    expect(isBlockedOfficeMarkdownWrite('/tmp/plans/outline.md', { plansFolderPath: '/tmp/plans' })).toBe(false)
-  })
-
-  it('requires an Office action for product wording without a file path', () => {
-    expect(collectOfficeFormatSkillSlugs('把他形成word报告（带目录）')).toEqual(['officecli-docx'])
-    expect(collectOfficeFormatSkillSlugs('撰写一份 Word 文档')).toEqual(['officecli-docx'])
-    expect(collectOfficeFormatSkillSlugs('做成一份 Excel 表')).toEqual(['officecli-xlsx'])
-    expect(collectOfficeFormatSkillSlugs('用 Excel 分析这份 CSV')).toEqual(['officecli-xlsx'])
-    expect(collectOfficeFormatSkillSlugs('做个 ppt 给董事会')).toEqual(['officecli-pptx'])
-    expect(collectOfficeFormatSkillSlugs('解释 DCF')).toEqual([])
-    expect(collectOfficeFormatSkillSlugs('查看 DCF 的计算方法')).toEqual([])
-    expect(collectOfficeFormatSkillSlugs('读取这篇学术论文')).toEqual([])
-    expect(collectOfficeFormatSkillSlugs('检查 Morph 动画原理')).toEqual([])
-    expect(collectOfficeFormatSkillSlugs('分析数据')).toEqual([])
-    expect(collectOfficeFormatSkillSlugs('制作网页 Dashboard')).toEqual([])
-    expect(collectOfficeFormatSkillSlugs('创建一份财务模型')).toEqual(['officecli-xlsx'])
-    expect(collectOfficeFormatSkillSlugs('生成一个 3D Morph 演示文稿')).toEqual(['officecli-pptx'])
   })
 
   it('locks only the automatic officecli router and leaves explicit format skills alone', () => {
@@ -562,8 +514,7 @@ describe('docx outline heading seed', () => {
     expect(body).toContain('Delivery gate')
     expect(body).toContain('outlineLvl')
     expect(body).toContain('Do not impose a model-call, CLI-call, operation, QA, elapsed-time, or cost budget')
-    expect(body).toContain('ordinary create/write requests')
-    expect(body).toContain('Do not deliver Markdown as the primary artifact')
+    expect(body).toContain('Choose Markdown or a chat reply when that fits the request better')
     expect(body).toContain('Do not treat a chat Markdown body, `markdown-preview`, or a `call_llm` draft as the delivered file')
   })
 

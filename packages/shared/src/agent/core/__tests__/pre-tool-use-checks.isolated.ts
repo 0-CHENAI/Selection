@@ -95,19 +95,6 @@ mock.module('../../../utils/officecli.ts', () => ({
     }
     return undefined;
   },
-  isBlockedOfficeMarkdownWrite: (filePath: string, options: { plansFolderPath?: string; dataFolderPath?: string } = {}) => {
-    if (!/\.(?:md|markdown)$/i.test(filePath)) return false;
-    if (/(?:^|[/\\])(?:SKILL|guide|MEMORY|AGENTS|CLAUDE)\.md$/i.test(filePath)) return false;
-    const normalized = filePath.replace(/\\/g, '/');
-    const under = (folder?: string) => {
-      if (!folder) return false;
-      const base = folder.replace(/\\/g, '/').replace(/\/+$/, '');
-      return normalized === base || normalized.startsWith(`${base}/`);
-    };
-    return !under(options.plansFolderPath) && !under(options.dataFolderPath);
-  },
-  OFFICE_MARKDOWN_WRITE_BLOCK_REASON:
-    'This turn requires an Office file (.docx / .xlsx / .pptx) via bundled OfficeCLI. Do not Write or Edit a .md as the primary artifact. Create the Office file with `officecli`, then reply with that path. Chat Markdown is fine for status only.',
 }));
 
 let mockCraftAgentsCliFlag = false;
@@ -506,45 +493,6 @@ describe('runPreToolUseChecks', () => {
         expect(result.type).toBe('allow');
       },
     );
-
-    it('blocks Write of a .md deliverable when this turn requires an Office file', () => {
-      const result = runPreToolUseChecks(createInput({
-        toolName: 'Write',
-        input: { file_path: '/test/workspace/项目周报.md', content: '# 周报' },
-        officeFileDeliveryRequired: true,
-      }));
-
-      expect(result.type).toBe('block');
-      if (result.type === 'block') {
-        expect(result.reason).toContain('Office file');
-        expect(result.reason).toContain('officecli');
-        expect(result.reason).not.toMatch(/^\(skill: officecli\)$/);
-      }
-    });
-
-    it('still allows Write of an Office file and plan markdown during an Office-gated turn', () => {
-      const office = runPreToolUseChecks(createInput({
-        toolName: 'Write',
-        input: { file_path: '/test/workspace/项目周报.docx' },
-        officeFileDeliveryRequired: true,
-      }));
-      expect(office.type).toBe('allow');
-
-      const plan = runPreToolUseChecks(createInput({
-        toolName: 'Write',
-        input: { file_path: '/test/workspace/plans/outline.md', content: '# plan' },
-        plansFolderPath: '/test/workspace/plans',
-        officeFileDeliveryRequired: true,
-      }));
-      expect(plan.type).toBe('allow');
-
-      const ungated = runPreToolUseChecks(createInput({
-        toolName: 'Write',
-        input: { file_path: '/test/workspace/notes.md', content: 'notes' },
-        officeFileDeliveryRequired: false,
-      }));
-      expect(ungated.type).toBe('allow');
-    });
 
     it('strips _intent and _displayName metadata', () => {
       const result = runPreToolUseChecks(createInput({

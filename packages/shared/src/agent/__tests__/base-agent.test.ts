@@ -270,8 +270,6 @@ describe('BaseAgent', () => {
       expect(sent).toContain('(skill: officecli)');
       expect(sent).toContain('officecli load_skill');
       expect(sent).toContain('SKILL.md');
-      expect(sent).toContain('Do not Write a .md');
-      expect(sent).toContain('call_llm');
       expect(sent).not.toContain('(skill: officecli-docx)');
       expect(sent).not.toContain('(skill: officecli-xlsx)');
       expect(sent).not.toContain('(skill: officecli-pptx)');
@@ -301,60 +299,13 @@ describe('BaseAgent', () => {
       expect(sent).not.toContain('(skill: officecli-pptx)');
     });
 
-    it('gates the officecli router for an ordinary report request', async () => {
-      await collectEvents(agent.chat('写一份巡察报告'));
-      const sent = agent.chatCalls[0]?.message ?? '';
-      expect(sent).toContain('(skill: officecli)');
-      expect(sent).toContain('officecli load_skill');
-      expect(sent).toContain('Do not Write a .md');
-      expect(sent).toContain('call_llm');
-      expect(sent).not.toContain('(skill: officecli-docx)');
-      expect(sent).not.toContain('(skill: officecli-xlsx)');
-      expect(sent).not.toContain('(skill: officecli-pptx)');
-    });
-
-    it('gates the officecli router for ordinary weekly reports and tables', async () => {
+    it('does not gate OfficeCLI from language — the model chooses the tool', async () => {
       await collectEvents(agent.chat('写一份项目周报'));
-      expect(agent.chatCalls[0]?.message ?? '').toContain('(skill: officecli)');
-      await collectEvents(agent.chat('做一份预算表'));
-      expect(agent.chatCalls[1]?.message ?? '').toContain('(skill: officecli)');
-      expect(agent.chatCalls[1]?.message ?? '').toContain('officecli load_skill');
-      expect(agent.chatCalls[1]?.message ?? '').not.toContain('(skill: officecli-xlsx)');
-    });
-
-    it('does not gate OfficeCLI for explicit Markdown or inspect-only asks', async () => {
-      await collectEvents(agent.chat('写成 markdown 周报'));
       expect(agent.chatCalls[0]?.message ?? '').not.toContain('(skill: officecli)');
-      await collectEvents(agent.chat('只要 md'));
-      expect(agent.chatCalls[1]?.message ?? '').not.toContain('officecli load_skill');
-      await collectEvents(agent.chat('解释报告结构'));
-      expect(agent.chatCalls[2]?.message ?? '').not.toContain('(skill: officecli)');
-    });
-
-    it('still gates OfficeCLI when the user rejects Markdown or asks to convert it', async () => {
       await collectEvents(agent.chat('不要用 markdown，写一份周报'));
-      const rejected = agent.chatCalls[0]?.message ?? '';
-      expect(rejected).toContain('(skill: officecli)');
-      expect(rejected).toContain('officecli load_skill');
-      expect(rejected).toContain('Do not Write a .md');
-      expect(rejected).toContain('call_llm');
-      expect(rejected).not.toContain('(skill: officecli-docx)');
-
-      await collectEvents(agent.chat('先出 markdown 再转 word'));
-      expect(agent.chatCalls[1]?.message ?? '').toContain('(skill: officecli)');
-
+      expect(agent.chatCalls[1]?.message ?? '').not.toContain('(skill: officecli)');
       await collectEvents(agent.chat('帮我将他形成word放在我的桌面上'));
-      expect(agent.chatCalls[2]?.message ?? '').toContain('(skill: officecli)');
-    });
-
-    it('gates the officecli router for a Word report request without a .docx path', async () => {
-      await collectEvents(agent.chat('把他形成word报告（带目录）'));
-      const sent = agent.chatCalls[0]?.message ?? '';
-      expect(sent).toContain('(skill: officecli)');
-      expect(sent).toContain('officecli load_skill');
-      expect(sent).not.toContain('(skill: officecli-docx)');
-      expect(sent).not.toContain('(skill: officecli-xlsx)');
-      expect(sent).not.toContain('(skill: officecli-pptx)');
+      expect(agent.chatCalls[2]?.message ?? '').not.toContain('(skill: officecli)');
     });
 
     it('loads the generic OfficeCLI router when explicitly mentioned', async () => {
@@ -403,7 +354,7 @@ describe('BaseAgent', () => {
             permissionMode: 'ask',
           },
         }));
-        await collectEvents(lockedAgent.chat('请生成带目录的 Word 文档'));
+        await collectEvents(lockedAgent.chat('请生成带目录的 Word 文档 report.docx'));
         const sent = lockedAgent.chatCalls[0]?.message ?? '';
         expect(sent).toContain('(skill: officecli)');
         expect(sent).toContain('officecli load_skill');

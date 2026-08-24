@@ -1,6 +1,6 @@
 ---
 name: officecli
-description: Create, inspect, edit, validate, and deliver Word, Excel, and PowerPoint files with Selection's bundled OfficeCLI. Use automatically for Office attachments, Office file paths, or ordinary create/write requests for reports, tables, spreadsheets, and slides. Do not deliver Markdown as the primary artifact.
+description: Create, inspect, edit, validate, and deliver Word, Excel, and PowerPoint files with Selection's bundled OfficeCLI. Use when the user wants a .docx, .xlsx, or .pptx file, or attaches one. Choose Markdown or a chat reply when that fits the request better.
 ---
 
 # OfficeCLI
