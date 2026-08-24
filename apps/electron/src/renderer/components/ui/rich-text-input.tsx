@@ -13,7 +13,12 @@ import {
 import type { LoadedSkill, LoadedSource } from '../../../shared/types'
 import type { MentionItemType } from './mention-menu'
 import { resolveSkillTitle, resolveSourceTitle } from '@craft-agent/shared/display-titles'
-import { createImeFirstKeyGate, EMPTY_EDITOR_ZWSP } from './ime-input-guards'
+import {
+  createImeFirstKeyGate,
+  EMPTY_EDITOR_ZWSP,
+  isEmptyComposerValue,
+  isPlaceholderCaretBr,
+} from './ime-input-guards'
 
 // ============================================================================
 // Types
@@ -197,7 +202,16 @@ function getTextFromElement(element: HTMLElement): string {
 
       // Handle line breaks
       if (el.tagName === 'BR') {
-        text += '\n'
+        let nextSibling: Node | null = el.nextSibling
+        while (
+          nextSibling?.nodeType === Node.TEXT_NODE &&
+          nextSibling.textContent?.replace(/\u200B/g, '') === ''
+        ) {
+          nextSibling = nextSibling.nextSibling
+        }
+        if (!isPlaceholderCaretBr(isTopLevel, text, nextSibling != null)) {
+          text += '\n'
+        }
       } else if (el.tagName === 'DIV' && text.length > 0 && !text.endsWith('\n')) {
         // DIVs in contenteditable normally represent line breaks.
         // HOWEVER: When typing before a badge at position 0, browsers wrap the
@@ -278,14 +292,13 @@ function writeEditorContent(
   workspaceId: string | undefined,
   placeCaret: boolean
 ): void {
-  const html = textToHTML(text, skills, sources, workspaceId)
-  if (!html) {
+  if (isEmptyComposerValue(text)) {
     const zwsp = document.createTextNode(EMPTY_EDITOR_ZWSP)
     element.replaceChildren(zwsp, document.createElement('br'))
     if (placeCaret) ensureEmptyEditorAnchor(element)
     return
   }
-  element.innerHTML = html
+  element.innerHTML = textToHTML(text, skills, sources, workspaceId)
 }
 
 // ============================================================================
@@ -643,7 +656,8 @@ export const RichTextInput = React.forwardRef<RichTextInputHandle, RichTextInput
     const commitInput = React.useCallback(() => {
       if (!divRef.current) return
 
-      const newText = getTextFromElement(divRef.current)
+      const extracted = getTextFromElement(divRef.current)
+      const newText = isEmptyComposerValue(extracted) ? '' : extracted
       const cursorPos = getCursorPosition(divRef.current, cursorPositionRef.current)
 
       lastValueRef.current = newText
@@ -660,7 +674,9 @@ export const RichTextInput = React.forwardRef<RichTextInputHandle, RichTextInput
         else ensureEmptyEditorAnchor(divRef.current)
         isInternalUpdate.current = false
       } else if (!newText && !isComposingRef.current && !imeGateRef.current.isComposing) {
+        isInternalUpdate.current = true
         ensureEmptyEditorAnchor(divRef.current)
+        isInternalUpdate.current = false
       }
 
       onChange(newText)
@@ -668,6 +684,7 @@ export const RichTextInput = React.forwardRef<RichTextInputHandle, RichTextInput
     }, [onChange, onInput, skills, sources, skillSlugs, sourceSlugs, workspaceId])
 
     const handleBeforeInput = React.useCallback((event: React.FormEvent<HTMLDivElement>) => {
+      if (isInternalUpdate.current) return
       const native = event.nativeEvent as InputEvent
       imeGateRef.current.onPossibleFirstInsert({
         nativeIsComposing: Boolean(native.isComposing),
@@ -680,6 +697,7 @@ export const RichTextInput = React.forwardRef<RichTextInputHandle, RichTextInput
 
     // Handle input events
     const handleInput = React.useCallback((event?: React.FormEvent<HTMLDivElement>) => {
+      if (isInternalUpdate.current) return
       const nativeIsComposing = Boolean((event?.nativeEvent as InputEvent | undefined)?.isComposing)
       const currentText = divRef.current ? getTextFromElement(divRef.current) : ''
       imeGateRef.current.onPossibleFirstInsert({
@@ -786,8 +804,10 @@ export const RichTextInput = React.forwardRef<RichTextInputHandle, RichTextInput
       // Tell browser to use <br> instead of <div> for line breaks.
       // This prevents div-wrapping when typing before non-editable spans (badges).
       document.execCommand('defaultParagraphSeparator', false, 'br')
-      if (divRef.current && !lastValueRef.current) {
+      if (divRef.current && isEmptyComposerValue(lastValueRef.current)) {
+        isInternalUpdate.current = true
         ensureEmptyEditorAnchor(divRef.current)
+        isInternalUpdate.current = false
       }
       onFocus?.(e)
     }, [onFocus])
@@ -796,6 +816,9 @@ export const RichTextInput = React.forwardRef<RichTextInputHandle, RichTextInput
     const handleBlur = React.useCallback((e: React.FocusEvent<HTMLDivElement>) => {
       setIsFocused(false)
       commitPendingFirstKeyIfIdle()
+      if (!isComposingRef.current && !imeGateRef.current.isComposing) {
+        setIsImePending(false)
+      }
       onBlur?.(e)
     }, [commitPendingFirstKeyIfIdle, onBlur])
 
@@ -818,9 +841,10 @@ export const RichTextInput = React.forwardRef<RichTextInputHandle, RichTextInput
       lastMentionSignatureRef.current = getMentionSignature(safeValue, skillSlugs, sourceSlugs)
 
       const shouldPlaceCaret = pendingCursorRef.current !== null || document.activeElement === divRef.current
+      isInternalUpdate.current = true
       writeEditorContent(divRef.current, safeValue, skills, sources, workspaceId, false)
       if (shouldPlaceCaret) {
-        if (!safeValue) {
+        if (isEmptyComposerValue(safeValue)) {
           ensureEmptyEditorAnchor(divRef.current)
           pendingCursorRef.current = null
         } else {
@@ -829,21 +853,24 @@ export const RichTextInput = React.forwardRef<RichTextInputHandle, RichTextInput
           pendingCursorRef.current = null
         }
       }
+      isInternalUpdate.current = false
     }, [safeValue, skills, sources, skillSlugs, sourceSlugs, workspaceId])
 
     // Initialize content on mount
     React.useEffect(() => {
       if (!divRef.current) return
       lastMentionSignatureRef.current = getMentionSignature(safeValue, skillSlugs, sourceSlugs)
+      isInternalUpdate.current = true
       writeEditorContent(
         divRef.current,
         safeValue,
         skills,
         sources,
         workspaceId,
-        !safeValue && document.activeElement === divRef.current
+        isEmptyComposerValue(safeValue) && document.activeElement === divRef.current
       )
-      lastValueRef.current = safeValue
+      isInternalUpdate.current = false
+      lastValueRef.current = isEmptyComposerValue(safeValue) ? '' : safeValue
     }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
     // Handle selection changes to highlight badges when selected
@@ -892,7 +919,7 @@ export const RichTextInput = React.forwardRef<RichTextInputHandle, RichTextInput
     // Show placeholder only when truly empty and not mid-IME composition.
     // CJK IME keeps React value empty until compositionend; provisional text
     // still lives in the contenteditable and must not sit under a placeholder.
-    const showPlaceholder = !safeValue && !isComposing && !isImePending
+    const showPlaceholder = isEmptyComposerValue(safeValue) && !isComposing && !isImePending
 
     // Normalize placeholder to array for RotatingPlaceholder
     const placeholderArray = React.useMemo(() => {

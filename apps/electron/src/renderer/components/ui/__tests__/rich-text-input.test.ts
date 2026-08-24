@@ -22,6 +22,34 @@ describe('RichTextInput IME attributes', () => {
     expect(html).not.toContain('autoCorrect="on"')
     expect(html).not.toContain('text-transparent')
   })
+
+  it('shows the placeholder overlay for an empty or caret-newline value (#108)', () => {
+    const empty = renderToStaticMarkup(
+      React.createElement(RichTextInput, {
+        value: '',
+        onChange: () => {},
+        placeholder: 'Ask anything',
+      })
+    )
+    const caretNewline = renderToStaticMarkup(
+      React.createElement(RichTextInput, {
+        value: '\n',
+        onChange: () => {},
+        placeholder: 'Ask anything',
+      })
+    )
+    const filled = renderToStaticMarkup(
+      React.createElement(RichTextInput, {
+        value: 'hello',
+        onChange: () => {},
+        placeholder: 'Ask anything',
+      })
+    )
+
+    expect(empty).toContain('>Ask anything</div>')
+    expect(caretNewline).toContain('>Ask anything</div>')
+    expect(filled).not.toContain('>Ask anything</div>')
+  })
 })
 
 describe('isEscapeDuringComposition', () => {

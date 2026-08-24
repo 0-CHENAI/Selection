@@ -3,9 +3,11 @@ import {
   createImeFirstKeyGate,
   EMPTY_EDITOR_ZWSP,
   emptyEditorHTML,
+  isEmptyComposerValue,
   isEmptyEditorImeCandidate,
   isImeFirstLetter,
   isImeProcessKey,
+  isPlaceholderCaretBr,
   isUnmodifiedPrintableKey,
 } from '../ime-input-guards'
 
@@ -39,6 +41,22 @@ describe('IME first-key guards (#84 #97 #107)', () => {
     expect(emptyEditorHTML()).toContain(EMPTY_EDITOR_ZWSP)
     expect(emptyEditorHTML()).toContain('<br>')
     expect(emptyEditorHTML().startsWith(EMPTY_EDITOR_ZWSP)).toBe(true)
+  })
+
+  it('does not treat the empty-editor caret br as user text (#108)', () => {
+    expect(isPlaceholderCaretBr(true, '', false)).toBe(true)
+    expect(isPlaceholderCaretBr(true, '', true)).toBe(false)
+    expect(isPlaceholderCaretBr(true, 'hello', false)).toBe(false)
+    expect(isPlaceholderCaretBr(false, '', false)).toBe(false)
+  })
+
+  it('treats a lone caret newline as an empty composer (#108)', () => {
+    expect(isEmptyComposerValue('')).toBe(true)
+    expect(isEmptyComposerValue('\n')).toBe(true)
+    expect(isEmptyComposerValue(`${EMPTY_EDITOR_ZWSP}`)).toBe(true)
+    expect(isEmptyComposerValue(`${EMPTY_EDITOR_ZWSP}\n`)).toBe(true)
+    expect(isEmptyComposerValue('hello')).toBe(false)
+    expect(isEmptyComposerValue('\n\n')).toBe(false)
   })
 
   it('keeps the first-key window open when a second letter arrives before keyup', () => {

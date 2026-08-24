@@ -16,6 +16,21 @@ export function emptyEditorHTML(): string {
   return `${EMPTY_EDITOR_ZWSP}<br>`
 }
 
+/** Contenteditable caret `<br>` in an otherwise empty editor is not user text. */
+export function isPlaceholderCaretBr(
+  isTopLevel: boolean,
+  textSoFar: string,
+  hasNextMeaningfulSibling: boolean,
+): boolean {
+  return isTopLevel && textSoFar.length === 0 && !hasNextMeaningfulSibling
+}
+
+/** Empty editor, or a lone newline left by the contenteditable caret `<br>`. */
+export function isEmptyComposerValue(value: string): boolean {
+  const text = value.replace(/\u200B/g, '')
+  return text === '' || text === '\n'
+}
+
 export function isImeProcessKey(event: { keyCode?: number; which?: number }): boolean {
   return event.keyCode === 229 || event.which === 229
 }
