@@ -151,16 +151,16 @@ describe('createBuiltInConnection seeds midStreamBehavior', () => {
     expect(() => createBuiltInConnection('claude-max')).toThrow('Unknown built-in connection slug')
   })
 
-  it("ChatGPT Plus → 'steer' (Pi backend, native polite steer)", () => {
+  it("ChatGPT Plus → 'queue' so composer Enter does not interrupt", () => {
     const conn = createBuiltInConnection('chatgpt-plus')
     expect(conn.providerType).toBe('pi')
-    expect(conn.midStreamBehavior).toBe('steer')
+    expect(conn.midStreamBehavior).toBe('queue')
   })
 
-  it("Pi API key (Selection Backend) → 'steer'", () => {
+  it("Pi API key (Selection Backend) → 'queue'", () => {
     const conn = createBuiltInConnection('pi-api-key')
     expect(conn.providerType).toBe('pi')
-    expect(conn.midStreamBehavior).toBe('steer')
+    expect(conn.midStreamBehavior).toBe('queue')
   })
 
 })

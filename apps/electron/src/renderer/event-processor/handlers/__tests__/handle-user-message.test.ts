@@ -573,6 +573,18 @@ describe('handleUserMessage queued replay', () => {
         processingStartedAt: 123,
         lastMessageAt: 100,
         lastMessageRole: 'assistant',
+        messages: [
+          { id: 'u1', role: 'user', content: 'current task', timestamp: 90 },
+          {
+            id: 'live-answer',
+            role: 'assistant',
+            content: 'still streaming',
+            timestamp: 100,
+            isStreaming: true,
+            isPending: true,
+            turnId: 'turn-active',
+          },
+        ],
       },
       streaming: { content: 'still streaming', turnId: 'turn-active' },
     }
@@ -582,13 +594,24 @@ describe('handleUserMessage queued replay', () => {
     }
 
     const next = handleUserMessage(state, event)
+    const turns = groupMessagesByTurn(next.state.session.messages, { isSessionProcessing: true })
 
     expect(next.state.session.isProcessing).toBe(true)
     expect(next.state.session.processingStartedAt).toBe(123)
     expect(next.state.streaming).toEqual(state.streaming)
-    expect(next.state.session.messages[0]?.queueId).toBe('backend-follow-up')
+    expect(next.state.session.messages.find(message => message.content === 'follow up')).toMatchObject({
+      isQueued: true,
+      queueId: 'backend-follow-up',
+    })
     expect(next.state.session.lastMessageAt).toBe(100)
     expect(next.state.session.lastMessageRole).toBe('assistant')
+    expect(turns.map(turn => turn.type)).toEqual(['user', 'assistant'])
+    const assistantTurn = turns[1]
+    expect(assistantTurn?.type).toBe('assistant')
+    if (assistantTurn?.type === 'assistant') {
+      expect(assistantTurn.response?.isStreaming).toBe(true)
+      expect(assistantTurn.response?.text).toBe('still streaming')
+    }
   })
 
   it('applies canonical queue edits and ordering without touching formal messages', () => {

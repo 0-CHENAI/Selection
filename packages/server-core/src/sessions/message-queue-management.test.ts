@@ -97,6 +97,48 @@ describe('message queue management (#22)', () => {
     expect(events.at(-1)?.messages.map((message: any) => message.id)).toEqual(['queue-b'])
   })
 
+  it('does not abort a live turn when the composer queues a follow-up (#22, #23)', async () => {
+    const forceAbort = mock(() => {})
+    managed.agent = {
+      isProcessing: () => true,
+      forceAbort,
+    } as never
+    managed.messages.splice(1, 0, {
+      id: 'live-answer',
+      role: 'assistant',
+      content: 'partial answer',
+      timestamp: 1.5,
+      isStreaming: true,
+      isPending: true,
+      turnId: 'live-turn',
+    })
+
+    await manager.sendMessage(managed.id, 'later task')
+
+    expect(forceAbort).not.toHaveBeenCalled()
+    expect(managed.stopRequested).toBeFalsy()
+    expect(managed.wasInterrupted).toBeUndefined()
+    const liveAnswer = managed.messages.find(message => message.id === 'live-answer')
+    expect(liveAnswer).toMatchObject({
+      content: 'partial answer',
+      isStreaming: true,
+    })
+    expect(liveAnswer?.hidden).toBeFalsy()
+    const queuedFollowUp = managed.messages.find(message => message.content === 'later task')
+    expect(queuedFollowUp).toMatchObject({ isQueued: true })
+    expect(queuedFollowUp?.hidden).toBeFalsy()
+    expect(events.find(event => event.type === 'user_message')).toMatchObject({
+      status: 'queued',
+      message: { content: 'later task', isQueued: true },
+    })
+    expect(events.at(-1)).toMatchObject({
+      type: 'queue_changed',
+      messages: expect.arrayContaining([
+        expect.objectContaining({ content: 'later task', isQueued: true }),
+      ]),
+    })
+  })
+
   it('does not abort a live turn for a hidden system nudge', async () => {
     const forceAbort = mock(() => {})
     managed.agent = {
