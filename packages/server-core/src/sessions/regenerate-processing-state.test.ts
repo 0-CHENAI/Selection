@@ -41,6 +41,37 @@ describe('regenerate processing state (#17)', () => {
     return managed
   }
 
+  it('keeps the live transcript until the replacement run is ready to stream', async () => {
+    const sessionId = 'regen-delay-truncate'
+    const managed = buildSession(sessionId)
+    managed.messages = [
+      { id: 'u1', role: 'user', content: 'hi', timestamp: 1 },
+      { id: 'a1', role: 'assistant', content: 'hello', timestamp: 2 },
+    ]
+
+    const smInternal = sm as unknown as {
+      sendMessage: SessionManager['sendMessage']
+      announceRegenerateReplacement: (session: typeof managed) => void
+      onProcessingStopped: (id: string, reason: 'complete') => Promise<void>
+    }
+    smInternal.sendMessage = (async () => {
+      expect(managed.messages.map(message => message.id)).toEqual(['u1', 'a1'])
+      smInternal.announceRegenerateReplacement(managed)
+      expect(managed.messages.map(message => message.id)).toEqual(['u1'])
+      managed.messages.push({ id: 'a2', role: 'assistant', content: 'new answer', timestamp: 3 })
+      await smInternal.onProcessingStopped(sessionId, 'complete')
+    }) as SessionManager['sendMessage']
+
+    await sm.regenerateLastResponse(sessionId)
+    expect(managed.isProcessing).toBe(true)
+    expect(managed.messages.map(message => message.id)).toEqual(['u1', 'a1'])
+    expect((await sm.getSession(sessionId))?.isProcessing).toBe(true)
+    expect((await sm.getSession(sessionId))?.messages.map(message => message.id)).toEqual(['u1', 'a1'])
+
+    await flushImmediate()
+    expect(managed.messages.map(message => message.id)).toEqual(['u1', 'a2'])
+  })
+
   it('claims running state and keeps the old transcript as a rollback snapshot', async () => {
     const sessionId = 'regen-claim'
     const managed = buildSession(sessionId)
@@ -52,7 +83,7 @@ describe('regenerate processing state (#17)', () => {
     await sm.regenerateLastResponse(sessionId)
 
     expect(managed.isProcessing).toBe(true)
-    expect(managed.messages.map(m => m.id)).toEqual(['u1'])
+    expect(managed.messages.map(m => m.id)).toEqual(['u1', 'a1'])
     expect(managed.regenerateTransaction?.originalMessages.map(m => m.id)).toEqual(['u1', 'a1'])
   })
 
@@ -354,7 +385,7 @@ describe('regenerate processing state (#17)', () => {
     await regenerate
     await flushImmediate(1)
 
-    expect(managed.messages.map(message => message.id)).toEqual(['u1'])
+    expect(managed.messages.map(message => message.id)).toEqual(['u1', 'a1'])
     expect(sourcesAtReplay).toEqual(['new-knowledge-base'])
   })
 
