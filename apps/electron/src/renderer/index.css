@@ -310,7 +310,8 @@
   --md-counters: var(--foreground-50);
 }
 
-/* Theme Override - Semi-transparent background to allow vibrancy through */
+/* Theme Override - Semi-transparent background to allow macOS vibrancy through.
+   Only applied when ThemeContext sets data-theme-override (macOS desktop). */
 html[data-theme-override]::before {
   content: '';
   position: fixed;
@@ -318,6 +319,15 @@ html[data-theme-override]::before {
   background: color-mix(in srgb, var(--background) 50%, transparent);
   z-index: -1;
   pointer-events: none;
+}
+
+/* Windows / Web UI: the chrome (sidebar, top bar) is itself transparent so
+   vibrancy can show through. Without a native backdrop those regions pick up
+   the OS frame and look like a gray mask over light settings cards (#53). */
+html:not([data-theme-override]):not([data-scenic]),
+html:not([data-theme-override]):not([data-scenic]) body,
+html:not([data-theme-override]):not([data-scenic]) #root {
+  background-color: var(--background);
 }
 
 /* Theme Mismatch - Solid background when theme doesn't support current mode
