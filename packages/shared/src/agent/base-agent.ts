@@ -18,7 +18,7 @@ import { join } from 'node:path';
 
 import type { AgentEvent } from '@craft-agent/core/types';
 import type { FileAttachment } from '../utils/files.ts';
-import { collectOfficeFormatSkillSlugs } from '../utils/officecli.ts';
+import { shouldLoadBundledOfficecliRouter } from '../utils/officecli.ts';
 import { expandPath } from '../utils/paths.ts';
 import { resolveSpawnSessionMode, resolveSpawnWaitTimeoutMs } from './spawn-session-tool.ts';
 import { buildTransferredSessionContext } from './conversation-summary.ts';
@@ -1003,13 +1003,12 @@ ${formattedMessages}
       resolveSlug(slug);
     }
 
-    // Office work loads the router skill only. The model then load_skill
-    // word/excel/pptx for the format the user actually needs. Do not dump
+    // Named or attached Office files load the router only. The model then
+    // load_skill word/excel/pptx for the format it chooses. Do not dump
     // official format SKILL.md files up front. An explicit user skill mention
     // keeps Craft's normal project/workspace/global priority.
-    const officeFormatSlugs = collectOfficeFormatSkillSlugs(message, attachments);
     const explicitlySelectedOfficecli = parsed.skills.includes('officecli');
-    if (officeFormatSlugs.length > 0 && !explicitlySelectedOfficecli) {
+    if (shouldLoadBundledOfficecliRouter(message, attachments) && !explicitlySelectedOfficecli) {
       skillPaths.delete('officecli');
       resolveBundledSlug('officecli');
     }
@@ -1048,7 +1047,7 @@ ${formattedMessages}
       .join('\n');
     const bundledOfficecli = resolveBundledSkillMdPath('officecli');
     const officeOnly = bundledOfficecli && skillPaths.get('officecli') === bundledOfficecli
-      ? '\nAfter reading the router, run only the `officecli load_skill` commands it selects. Deliver a real .docx / .xlsx / .pptx; do not Write a .md as the primary artifact. Use the bundled CLI on PATH; do not install OfficeCLI or read user-level Office skills.'
+      ? '\nAfter reading the router, run only the `officecli load_skill` commands it selects. Use the bundled CLI on PATH; do not install OfficeCLI or read user-level Office skills.'
       : '';
     return `Before proceeding with the user's request, you MUST read the following skill instruction files using the Read tool or \`cat\` via Bash:\n${pathList}${officeOnly}\n\nDo not take any other action until you have read these files.`;
   }

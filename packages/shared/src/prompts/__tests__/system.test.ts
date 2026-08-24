@@ -11,6 +11,7 @@ mock.module('../../config/preferences.ts', () => ({
 
 import { getSystemPrompt, formatProjectContextForPrompt } from '../system'
 import type { ProjectPromptContext } from '../../projects/types.ts'
+import { getBundledOfficecliRouterSkillMd } from '../../utils/officecli.ts'
 
 const GIT_CONVENTIONS_HEADING = '## Git Conventions'
 const CO_AUTHOR_TRAILER = 'Co-Authored-By: Selection <agents-noreply@craft.do>'
@@ -90,16 +91,20 @@ describe('system prompt guidance', () => {
     expect(prompt).toContain('Already on PATH')
     expect(prompt).toContain('Specialized OfficeCLI guides are loaded privately')
     expect(prompt).toContain('Do **not** Read `~/.agents/skills/officecli`')
-    expect(prompt).toContain('Hard rule')
+    expect(prompt).not.toContain('Hard rule')
     expect(prompt).not.toContain('typed OfficeCLI tools')
     expect(prompt).toContain('python-docx')
     expect(prompt).toContain('curl-install')
-    expect(prompt).toContain('Read the automatically gated `officecli` router first')
-    expect(prompt).toContain('run the exact `officecli load_skill` commands it selects')
+    expect(prompt).toContain('When you decide the user wants a Word / Excel / PowerPoint file')
+    expect(prompt).toContain('run only the `officecli load_skill` commands it selects')
+    expect(prompt).toContain("Decide from the user's request")
+    expect(prompt).toContain('named or attached Office files')
+    const router = getBundledOfficecliRouterSkillMd()
+    expect(router).toBeTruthy()
+    expect(prompt).toContain(router!)
     expect(prompt).not.toContain('officecli-xlsx/SKILL.md')
     expect(prompt).not.toContain('officecli-pptx/SKILL.md')
     expect(prompt).not.toContain('officecli load_skill word')
-    expect(prompt.match(/\*\*Hard rule:\*\*/g)).toHaveLength(1)
     expect(prompt).not.toContain('office_document_inspect')
     expect(prompt).not.toContain('office_document_edit')
     expect(prompt).not.toContain('office_document_guide')
@@ -110,8 +115,6 @@ describe('system prompt guidance', () => {
     expect(prompt).not.toContain('**pptx-tool**')
     expect(prompt).toContain('doc-diff old.md new.md')
     expect(prompt).toContain('Do not read an automatically generated `.docx.md`')
-    expect(prompt).toContain('ordinary report / table / slide deliverables')
-    expect(prompt).toContain('Do not deliver Markdown as the primary artifact')
   })
 })
 

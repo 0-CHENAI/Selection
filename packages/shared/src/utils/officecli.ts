@@ -202,21 +202,10 @@ export const BUNDLED_OFFICECLI_SKILL_SLUGS = [
 export type OfficeFormatSkillSlug = 'officecli-docx' | 'officecli-xlsx' | 'officecli-pptx';
 
 const OFFICE_FILE_PATTERNS: Array<{ re: RegExp; slug: OfficeFormatSkillSlug }> = [
-  { re: /\.(?:xlsx|xlsm)(?:\b|["'）)\]])/i, slug: 'officecli-xlsx' },
-  { re: /\.pptx(?:\b|["'）)\]])/i, slug: 'officecli-pptx' },
-  { re: /\.(?:docx|docm)(?:\b|["'）)\]])/i, slug: 'officecli-docx' },
+  { re: /\.(?:xlsx|xlsm|xls)(?!\.md)(?:\b|["'）)\]])/i, slug: 'officecli-xlsx' },
+  { re: /\.(?:pptx|ppt)(?!\.md)(?:\b|["'）)\]])/i, slug: 'officecli-pptx' },
+  { re: /\.(?:docx|docm|doc)(?!\.md)(?:\b|["'）)\]])/i, slug: 'officecli-docx' },
 ];
-
-const OFFICE_ACTION_RE = /(?:创建|生成|制作|做成|做个|做|形成|新建|撰写|编写|写|编辑|修改|更新|读取|打开|查看|检查|审阅|解析|分析|预览|转换|导入|导出|填充|完善|交付|create|generate|build|make|write|edit|modify|update|read|open|inspect|review|parse|analy[sz]e|preview|convert|import|export|fill|deliver)/i;
-const OFFICE_ARTIFACT_MUTATION_RE = /(?:创建|生成|制作|做成|做个|做|形成|新建|撰写|编写|写|编辑|修改|更新|转换|导入|导出|填充|完善|交付|create|generate|build|make|write|edit|modify|update|convert|import|export|fill|deliver)/i;
-const WORD_PRODUCT_RE = /\bword\b|word\s*(?:文档|报告|表单)|微软\s*word/i;
-const EXCEL_PRODUCT_RE = /\bexcel\b|电子表格|工作簿/i;
-const PPT_PRODUCT_RE = /\bpower\s*point\b|\bpptx\b|\bppt\b|幻灯片|演示文稿|路演(?:稿|PPT)?/i;
-const CSV_EXCEL_INTENT_RE = /(?:\.csv\b|\.tsv\b|\bcsv\b|\btsv\b).*(?:excel|工作簿|电子表格|数据看板)|(?:excel|工作簿|电子表格|数据看板).*(?:\.csv\b|\.tsv\b|\bcsv\b|\btsv\b)/i;
-const EXPLICIT_MARKDOWN_RE = /(?:用|写成?|只要|改成|输出为|转为|转成)\s*(?:markdown|md)\b|(?:in|as|into)\s+markdown\b|\bmarkdown\b|\breadme\b|\.md\b/i;
-const ORDINARY_DOCX_RE = /报告|周报|月报|年报|文档|\breports?\b|\bmemos?\b|\bbriefs?\b|\bdocuments?\b/i;
-const ORDINARY_XLSX_RE = /表格|预算表|(?:一份|一张|一个)表|做个表|\bspreadsheets?\b|\bworkbooks?\b/i;
-const ORDINARY_PPTX_RE = /汇报|\bslides?\b|\bdecks?\b|\bpresentations?\b/i;
 
 export const BUNDLED_OFFICECLI_LOAD_SKILL_ALIASES = [
   'word', 'excel', 'pptx', 'academic-paper', 'financial-model',
@@ -248,45 +237,39 @@ function addOfficeFileSlugs(text: string, slugs: Set<OfficeFormatSkillSlug>): vo
   }
 }
 
-function addOfficeIntentSlugs(text: string, slugs: Set<OfficeFormatSkillSlug>): void {
-  addOfficeFileSlugs(text, slugs);
-  if (!OFFICE_ACTION_RE.test(text)) return;
-  const createsOrEditsArtifact = OFFICE_ARTIFACT_MUTATION_RE.test(text);
-  if (WORD_PRODUCT_RE.test(text) || (createsOrEditsArtifact && /学术论文|期刊论文|会议论文|word\s*form|可填写\s*word|内容控件|邮件合并/i.test(text))) {
-    slugs.add('officecli-docx');
-  }
-  if (EXCEL_PRODUCT_RE.test(text) || CSV_EXCEL_INTENT_RE.test(text) || (createsOrEditsArtifact && /财务模型|三表模型|敏感性分析|\bDCF\b|\bLBO\b/i.test(text))) {
-    slugs.add('officecli-xlsx');
-  }
-  if (PPT_PRODUCT_RE.test(text) || (createsOrEditsArtifact && /pitch\s*deck|融资路演|\bmorph\b|3D\s*morph|\bGLB\b/i.test(text))) {
-    slugs.add('officecli-pptx');
-  }
-  if (!createsOrEditsArtifact || EXPLICIT_MARKDOWN_RE.test(text)) return;
-  if (ORDINARY_DOCX_RE.test(text)) slugs.add('officecli-docx');
-  if (ORDINARY_XLSX_RE.test(text)) slugs.add('officecli-xlsx');
-  if (ORDINARY_PPTX_RE.test(text)) slugs.add('officecli-pptx');
-}
+type OfficeFileHint = {
+  type?: string;
+  name?: string;
+  path?: string;
+  storedPath?: string;
+};
 
 /**
- * Format skills to load when the user attaches or names an Office file,
- * asks for Word / Excel / PowerPoint, or creates an ordinary
- * report / table / slides deliverable. Specialized skills are not inferred.
+ * Office files the user already named or attached. Language like
+ * "周报" / "markdown" is left to the model — do not infer intent here.
  */
 export function collectOfficeFormatSkillSlugs(
   message: string,
-  attachments?: Array<{ type?: string; name?: string; path?: string; storedPath?: string }>,
+  attachments?: OfficeFileHint[],
 ): OfficeFormatSkillSlug[] {
   const slugs = new Set<OfficeFormatSkillSlug>();
-  addOfficeIntentSlugs(message, slugs);
+  addOfficeFileSlugs(message, slugs);
 
   for (const attachment of attachments ?? []) {
     const hint = [attachment.name, attachment.path, attachment.storedPath].filter(Boolean).join(' ');
-    const before = slugs.size;
     addOfficeFileSlugs(hint, slugs);
-    if (attachment.type === 'office' && slugs.size === before) addOfficeIntentSlugs(hint, slugs);
   }
 
   return [...slugs];
+}
+
+/** Named Office paths, or an attachment the app already classified as Office. */
+export function shouldLoadBundledOfficecliRouter(
+  message: string,
+  attachments?: OfficeFileHint[],
+): boolean {
+  if (collectOfficeFormatSkillSlugs(message, attachments).length > 0) return true;
+  return (attachments ?? []).some((attachment) => attachment.type === 'office');
 }
 
 function expandUserPath(filePath: string): string {
