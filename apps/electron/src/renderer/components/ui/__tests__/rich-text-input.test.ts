@@ -17,6 +17,7 @@ describe('RichTextInput IME attributes', () => {
 
     expect(html).toContain('autoCapitalize="none"')
     expect(html).toContain('autoCorrect="off"')
+    expect(html).toContain('spellcheck="false"')
     expect(html).not.toContain('autoCapitalize="sentences"')
     expect(html).not.toContain('autoCorrect="on"')
   })
