@@ -309,10 +309,11 @@ describe('handleUserMessage queued replay', () => {
     expect(accepted.state.session.processingStartedAt).not.toBe(123)
   })
 
-  it('moves thought under a follow-up that was not already in the composer queue', () => {
+  it('does not hide the live reply when a composer follow-up is accepted without send-now', () => {
     const state: SessionState = {
       session: {
         ...makeState([]).session,
+        isProcessing: true,
         messages: [
           { id: 'initial-user', role: 'user', content: '查看结构', timestamp: 100 },
           { id: 'thought', role: 'assistant', content: '先读文档', timestamp: 150, isIntermediate: true },
@@ -337,13 +338,57 @@ describe('handleUserMessage queued replay', () => {
       status: 'accepted',
     })
 
-    const thought = next.state.session.messages.find(message => message.id === 'thought')
-    const followUp = next.state.session.messages.find(message => message.content === '再说摘要')
-    expect(next.state.session.messages.find(message => message.id === 'answer')?.hidden).toBe(true)
-    expect(thought?.hidden).toBe(false)
-    expect(followUp?.isQueued).toBe(false)
-    expect(thought?.timestamp).toBeGreaterThan(followUp?.timestamp ?? 0)
-    expect(next.state.session.suppressedTurnIds).toContain('live')
+    const liveAnswer = next.state.session.messages.find(message => message.id === 'answer')
+    expect(liveAnswer).toMatchObject({
+      isStreaming: true,
+      content: 'partial',
+    })
+    expect(liveAnswer?.hidden).toBeFalsy()
+    expect(next.state.session.messages.find(message => message.id === 'thought')?.hidden).toBeFalsy()
+    expect(next.state.streaming).toEqual(state.streaming)
+    expect(next.state.session.suppressedTurnIds).toBeUndefined()
+  })
+
+  it('marks an optimistic mid-stream send as queued when the backend confirms queue', () => {
+    const state = makeState([
+      { id: 'u1', role: 'user', content: '你有哪些技能?', timestamp: 100 },
+      {
+        id: 'a1',
+        role: 'assistant',
+        content: 'partial',
+        timestamp: 160,
+        isStreaming: true,
+        isPending: true,
+        turnId: 'live',
+      },
+      {
+        id: 'optimistic-follow-up',
+        role: 'user',
+        content: '外部的工具呢?',
+        timestamp: 200,
+        isPending: true,
+        isQueued: false,
+      },
+    ])
+    state.streaming = { content: 'partial', turnId: 'live' }
+    state.session.isProcessing = true
+
+    const next = handleUserMessage(state, {
+      type: 'user_message',
+      sessionId: 'session-1',
+      message: { id: 'backend-follow-up', role: 'user', content: '外部的工具呢?', timestamp: 200 },
+      status: 'queued',
+      optimisticMessageId: 'optimistic-follow-up',
+    })
+
+    expect(next.state.session.messages.find(message => message.id === 'optimistic-follow-up')).toMatchObject({
+      isQueued: true,
+      queueId: 'backend-follow-up',
+    })
+    expect(next.state.session.messages.find(message => message.id === 'a1')?.hidden).toBeFalsy()
+    expect(next.state.streaming).toEqual(state.streaming)
+    expect(groupMessagesByTurn(next.state.session.messages, { isSessionProcessing: true }).map(turn => turn.type))
+      .toEqual(['user', 'assistant'])
   })
 
   it('hides an earlier steered follow-up so only the latest question stays visible', () => {

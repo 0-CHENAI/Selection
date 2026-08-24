@@ -561,8 +561,9 @@ export function handleUserMessage(
     [message.id, event.optimisticMessageId, existingQueued?.id, existingQueued?.queueId]
       .filter((id): id is string => !!id),
   )
-  // Send-now / mid-stream steer: hide the current generation and let the
-  // follow-up start a new reply, matching Codex / Grok.
+  // Only Send now steers. A composer follow-up is queued and must not hide the
+  // live reply, even if a late `accepted` event arrives while tokens are still
+  // streaming (#22, #23).
   const hasOpenGeneration = streaming !== null
     || session.isProcessing
     || session.messages.some(candidate =>
@@ -571,14 +572,7 @@ export function handleUserMessage(
         || candidate.role === 'status'
       ),
     )
-  // Hidden system continuations may drive another model turn, but they are not
-  // user-authored redirects and must never suppress/collapse the visible reply.
-  const collapsesOpenTurn = !message.hidden && status === 'accepted' && hasOpenGeneration && (
-    !!existingQueued
-    || session.messages.some(candidate =>
-      candidate.role === 'assistant' && !candidate.hidden && (candidate.isStreaming || candidate.isPending),
-    )
-  )
+  const collapsesOpenTurn = !message.hidden && status === 'accepted' && hasOpenGeneration && !!existingQueued
   const seedMessages = collapsesOpenTurn && !existingQueued
     ? [...session.messages, { ...message, isQueued: false, isPending: false }]
     : session.messages
@@ -628,9 +622,9 @@ export function handleUserMessage(
     const existingMessage = boundaryMessages[existingIndex]
 
     // Event sequence protection: don't regress from 'processing' back to 'queued'
-    // This handles out-of-order events (e.g., 'processing' arrives before 'queued')
-    if (status === 'queued' && existingMessage.isQueued === false) {
-      // Already progressed past queued state, ignore this late 'queued' event
+    // once the bubble is a committed transcript turn. Optimistic composer
+    // inserts are still pending and must be allowed to become queued.
+    if (status === 'queued' && existingMessage.isQueued === false && !existingMessage.isPending) {
       return { state, effects: [] }
     }
 
