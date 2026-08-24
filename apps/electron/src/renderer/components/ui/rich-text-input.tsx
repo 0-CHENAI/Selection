@@ -265,7 +265,8 @@ export function ensureEmptyEditorAnchor(element: HTMLElement): void {
   if (getTextFromElement(element).length > 0) return
 
   let textNode = Array.from(element.childNodes).find(
-    (node): node is Text => node.nodeType === Node.TEXT_NODE && node.data.includes(EMPTY_EDITOR_ZWSP)
+    (node): node is Text =>
+      node.nodeType === Node.TEXT_NODE && Boolean(node.textContent?.includes(EMPTY_EDITOR_ZWSP))
   )
   if (!textNode) {
     textNode = document.createTextNode(EMPTY_EDITOR_ZWSP)
@@ -660,11 +661,12 @@ export const RichTextInput = React.forwardRef<RichTextInputHandle, RichTextInput
     }), [])
 
     const commitInput = React.useCallback(() => {
-      if (!divRef.current) return
+      const editor = divRef.current
+      if (!editor) return
 
-      const extracted = getTextFromElement(divRef.current)
+      const extracted = getTextFromElement(editor)
       const newText = isEmptyComposerValue(extracted) ? '' : extracted
-      const cursorPos = getCursorPosition(divRef.current, cursorPositionRef.current)
+      const cursorPos = getCursorPosition(editor, cursorPositionRef.current)
 
       lastValueRef.current = newText
       cursorPositionRef.current = cursorPos
@@ -675,12 +677,12 @@ export const RichTextInput = React.forwardRef<RichTextInputHandle, RichTextInput
         lastMentionSignatureRef.current = newSignature
         // Re-render with badges
         runInternalUpdate(() => {
-          writeEditorContent(divRef.current, newText, skills, sources, workspaceId, false)
-          if (newText) setCursorPosition(divRef.current, cursorPos)
-          else ensureEmptyEditorAnchor(divRef.current)
+          writeEditorContent(editor, newText, skills, sources, workspaceId, false)
+          if (newText) setCursorPosition(editor, cursorPos)
+          else ensureEmptyEditorAnchor(editor)
         })
       } else if (!newText && !isComposingRef.current && !imeGateRef.current.isComposing) {
-        runInternalUpdate(() => ensureEmptyEditorAnchor(divRef.current))
+        runInternalUpdate(() => ensureEmptyEditorAnchor(editor))
       }
 
       onChange(newText)
@@ -808,8 +810,9 @@ export const RichTextInput = React.forwardRef<RichTextInputHandle, RichTextInput
       // Tell browser to use <br> instead of <div> for line breaks.
       // This prevents div-wrapping when typing before non-editable spans (badges).
       document.execCommand('defaultParagraphSeparator', false, 'br')
-      if (divRef.current && isEmptyComposerValue(lastValueRef.current)) {
-        runInternalUpdate(() => ensureEmptyEditorAnchor(divRef.current))
+      const editor = divRef.current
+      if (editor && isEmptyComposerValue(lastValueRef.current)) {
+        runInternalUpdate(() => ensureEmptyEditorAnchor(editor))
       }
       onFocus?.(e)
     }, [onFocus])
@@ -826,7 +829,8 @@ export const RichTextInput = React.forwardRef<RichTextInputHandle, RichTextInput
 
     // Sync value from props (when parent updates value externally)
     React.useEffect(() => {
-      if (!divRef.current) return
+      const editor = divRef.current
+      if (!editor) return
       if (isInternalUpdate.current) return
       if (lastValueRef.current !== safeValue && (isComposingRef.current || imeGateRef.current.shouldSkipCommit())) {
         imeGateRef.current.reset()
@@ -842,16 +846,16 @@ export const RichTextInput = React.forwardRef<RichTextInputHandle, RichTextInput
       lastValueRef.current = safeValue
       lastMentionSignatureRef.current = getMentionSignature(safeValue, skillSlugs, sourceSlugs)
 
-      const shouldPlaceCaret = pendingCursorRef.current !== null || document.activeElement === divRef.current
+      const shouldPlaceCaret = pendingCursorRef.current !== null || document.activeElement === editor
       runInternalUpdate(() => {
-        writeEditorContent(divRef.current, safeValue, skills, sources, workspaceId, false)
+        writeEditorContent(editor, safeValue, skills, sources, workspaceId, false)
         if (shouldPlaceCaret) {
           if (isEmptyComposerValue(safeValue)) {
-            ensureEmptyEditorAnchor(divRef.current)
+            ensureEmptyEditorAnchor(editor)
             pendingCursorRef.current = null
           } else {
             const cursorPos = pendingCursorRef.current ?? cursorPositionRef.current ?? safeValue.length
-            setCursorPosition(divRef.current, cursorPos)
+            setCursorPosition(editor, cursorPos)
             pendingCursorRef.current = null
           }
         }
@@ -860,16 +864,17 @@ export const RichTextInput = React.forwardRef<RichTextInputHandle, RichTextInput
 
     // Initialize content on mount
     React.useEffect(() => {
-      if (!divRef.current) return
+      const editor = divRef.current
+      if (!editor) return
       lastMentionSignatureRef.current = getMentionSignature(safeValue, skillSlugs, sourceSlugs)
       runInternalUpdate(() => {
         writeEditorContent(
-          divRef.current,
+          editor,
           safeValue,
           skills,
           sources,
           workspaceId,
-          isEmptyComposerValue(safeValue) && document.activeElement === divRef.current
+          isEmptyComposerValue(safeValue) && document.activeElement === editor
         )
       })
       lastValueRef.current = safeValue
