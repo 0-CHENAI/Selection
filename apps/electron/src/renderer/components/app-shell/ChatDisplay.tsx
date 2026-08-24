@@ -248,6 +248,10 @@ interface ChatDisplayProps {
   placeholder?: string | string[]
   /** Label shown as empty state in compact mode (e.g., "Permission Settings") */
   emptyStateLabel?: string
+  /** Called only when the user explicitly presses Stop (not for redirects or unmounts). */
+  onExplicitStop?: () => void
+  /** Optional confirmation gate for an explicit Stop action. */
+  onBeforeExplicitStop?: () => Promise<boolean>
   /** When true, the session's locked connection has been removed - disables send and shows unavailable state */
   connectionUnavailable?: boolean
 }
@@ -504,6 +508,8 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
   enableCompactModelPicker = false,
   placeholder,
   emptyStateLabel,
+  onExplicitStop,
+  onBeforeExplicitStop,
   // Connection unavailable
   connectionUnavailable = false,
 }, ref) {
@@ -1364,20 +1370,30 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
   const handleStop = (silent = false) => {
     if (!session?.isProcessing) return
 
-    // Explicit Stop (not a redirect/new-message send): put the in-flight prompt
-    // back in the input so the user can tweak and resend. Append to any draft.
-    // Exclude isQueued messages — those are restored separately by the backend
-    // `restore_input` effect (App.tsx) and would otherwise double up here.
-    if (!silent) {
-      const restoredText = getRestorableStoppedPrompt(session.messages)
-      if (restoredText) {
-        onInputChange?.(appendRestoredInput(inputValue, restoredText))
-      }
-    }
+    void (async () => {
+      if (!silent && onBeforeExplicitStop && !(await onBeforeExplicitStop())) return
 
-    window.electronAPI.cancelProcessing(session.id, silent).catch(error => {
-      console.error('[ChatDisplay] Failed to cancel processing:', error)
-    })
+      // Explicit Stop (not a redirect/new-message send): put the in-flight
+      // prompt back in the input so the user can tweak and resend.
+      if (!silent) {
+        const restoredText = getRestorableStoppedPrompt(session.messages)
+        if (restoredText) {
+          onInputChange?.(appendRestoredInput(inputValue, restoredText))
+        }
+      }
+
+      try {
+        await window.electronAPI.cancelProcessing(session.id, silent)
+        if (!silent) onExplicitStop?.()
+      } catch (error) {
+        console.error('[ChatDisplay] Failed to cancel processing:', error)
+        if (!silent) {
+          toast.error(t('creationJobs.stopFailed', 'Could not stop creation job'), {
+            description: error instanceof Error ? error.message : String(error),
+          })
+        }
+      }
+    })()
   }
 
   // Per-frame scroll compensation during input height animation
