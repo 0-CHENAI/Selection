@@ -1115,6 +1115,7 @@ export function EditPopover({
     }
   }, [isDragging, isResizing])
 
+
   // Reset ordinary edit sessions on open; creation contexts are durable below.
   useEffect(() => {
     if (open) {
