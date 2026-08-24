@@ -1,4 +1,5 @@
 import * as React from "react"
+import { useSetAtom } from "jotai"
 import { useTranslation } from "react-i18next"
 import { useEffect, useState, useMemo, useCallback } from "react"
 import {
@@ -70,6 +71,7 @@ import { useBackgroundTasks } from "@/hooks/useBackgroundTasks"
 import { useTurnCardExpansion } from "@/hooks/useTurnCardExpansion"
 import { useNavigation } from "@/contexts/NavigationContext"
 import { useAppShellContext } from "@/context/AppShellContext"
+import { updateSessionAtom } from "@/atoms/sessions"
 import { navigate, routes } from "@/lib/navigate"
 import { CHAT_LAYOUT } from "@/config/layout"
 import { collectFileChangesFromActivities, getFirstFileChangeIdForActivity } from "@/lib/file-changes"
@@ -518,6 +520,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
 }, ref) {
   const { t } = useTranslation()
   const reduceMotion = useReducedMotion()
+  const updateSession = useSetAtom(updateSessionAtom)
 
   // Panel focus state (for multi-panel auto-scroll behavior)
   const appShellContext = useAppShellContext()
@@ -1821,9 +1824,23 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
                           ? async () => {
                             if (!session) return
                             const lastUser = session.messages.findLast(m => m.role === 'user' && !m.hidden)
+                            updateSession(session.id, (current) => current
+                              ? {
+                                  ...current,
+                                  isProcessing: true,
+                                  processingStartedAt: Date.now(),
+                                }
+                              : current)
                             try {
                               await window.electronAPI.sessionCommand(session.id, { type: 'regenerate' })
                             } catch (error) {
+                              updateSession(session.id, (current) => current
+                                ? {
+                                    ...current,
+                                    isProcessing: false,
+                                    processingStartedAt: undefined,
+                                  }
+                                : current)
                               const detail = error instanceof Error ? error.message : String(error)
                               // Vite/HMR can refresh the UI while the main process
                               // is still on an older handler without `regenerate`.

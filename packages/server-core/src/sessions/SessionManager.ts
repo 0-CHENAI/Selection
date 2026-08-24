@@ -6772,7 +6772,7 @@ export class SessionManager implements ISessionManager {
       )
       const options = managed.lastSentOptions
 
-      const originalMessages = managed.messages
+      const originalMessages = [...managed.messages]
       const previousAssistant = originalMessages
         .slice(0, lastUserIdx)
         .findLast(message => message.role === 'assistant' && !message.isIntermediate && !message.hidden)
@@ -6798,7 +6798,6 @@ export class SessionManager implements ISessionManager {
         originalBranchFromSdkTurnId: managed.branchFromSdkTurnId,
       }
 
-      managed.messages = originalMessages.slice(0, lastUserIdx + 1)
       this.persistSession(managed)
       await this.flushSession(managed.id)
       if (managed.stopRequested || !managed.isProcessing) {
@@ -6902,6 +6901,10 @@ export class SessionManager implements ISessionManager {
     const transaction = managed.regenerateTransaction
     if (!transaction || transaction.rendererTruncated) return
     transaction.rendererTruncated = true
+    const keepIdx = managed.messages.findIndex(message => message.id === transaction.keepThroughMessageId)
+    if (keepIdx >= 0) {
+      managed.messages = managed.messages.slice(0, keepIdx + 1)
+    }
     this.sendEvent({
       type: 'messages_truncated',
       sessionId: managed.id,
@@ -7296,7 +7299,9 @@ export class SessionManager implements ISessionManager {
     if (!transaction) return { reason, rolledBack: false }
 
     const keepIdx = managed.messages.findIndex(message => message.id === transaction.keepThroughMessageId)
-    const replacementMessages = keepIdx >= 0 ? managed.messages.slice(keepIdx + 1) : []
+    const originalIds = new Set(transaction.originalMessages.map(message => message.id))
+    const replacementMessages = (keepIdx >= 0 ? managed.messages.slice(keepIdx + 1) : [])
+      .filter(message => !originalIds.has(message.id))
     const hasNonEmptyFinalResponse = replacementMessages.some(message =>
       message.role === 'assistant'
       && !message.isIntermediate
@@ -7323,9 +7328,8 @@ export class SessionManager implements ISessionManager {
 
     await this.disposeManagedAgentRuntime(managed, 'regenerate rollback')
 
-    const originalIds = new Set(transaction.originalMessages.map(message => message.id))
     const diagnostics = replacementMessages.filter(message =>
-      (message.role === 'error' || message.role === 'info') && !originalIds.has(message.id)
+      message.role === 'error' || message.role === 'info'
     )
     managed.messages = [...transaction.originalMessages, ...diagnostics]
     managed.streamingText = ''
