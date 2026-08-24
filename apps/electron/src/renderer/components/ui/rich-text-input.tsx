@@ -179,6 +179,17 @@ function renderBadgeHTML(
 // Helper: Extract plain text from contenteditable
 // ============================================================================
 
+function nextMeaningfulSibling(node: Node | null): Node | null {
+  let current = node
+  while (
+    current?.nodeType === Node.TEXT_NODE &&
+    current.textContent?.replace(/\u200B/g, '') === ''
+  ) {
+    current = current.nextSibling
+  }
+  return current
+}
+
 function getTextFromElement(element: HTMLElement): string {
   let text = ''
 
@@ -202,14 +213,7 @@ function getTextFromElement(element: HTMLElement): string {
 
       // Handle line breaks
       if (el.tagName === 'BR') {
-        let nextSibling: Node | null = el.nextSibling
-        while (
-          nextSibling?.nodeType === Node.TEXT_NODE &&
-          nextSibling.textContent?.replace(/\u200B/g, '') === ''
-        ) {
-          nextSibling = nextSibling.nextSibling
-        }
-        if (!isPlaceholderCaretBr(isTopLevel, text, nextSibling != null)) {
+        if (!isPlaceholderCaretBr(isTopLevel, text, nextMeaningfulSibling(el.nextSibling) != null)) {
           text += '\n'
         }
       } else if (el.tagName === 'DIV' && text.length > 0 && !text.endsWith('\n')) {
@@ -223,13 +227,7 @@ function getTextFromElement(element: HTMLElement): string {
           // Check if this DIV is followed by a mention badge at top level.
           // Skip over ZWS-only text nodes - browser may preserve them between
           // the DIV wrapper and the badge span.
-          let nextSibling: Node | null = el.nextSibling
-          while (
-            nextSibling?.nodeType === Node.TEXT_NODE &&
-            nextSibling.textContent?.replace(/\u200B/g, '') === ''
-          ) {
-            nextSibling = nextSibling.nextSibling
-          }
+          const nextSibling = nextMeaningfulSibling(el.nextSibling)
           const isBrowserWrapper =
             (nextSibling as HTMLElement)?.getAttribute?.('data-mention') === 'true'
           if (!isBrowserWrapper) {
@@ -591,6 +589,14 @@ export const RichTextInput = React.forwardRef<RichTextInputHandle, RichTextInput
     const cursorPositionRef = React.useRef(0)
     const lastMentionSignatureRef = React.useRef('')
     const isInternalUpdate = React.useRef(false)
+    const runInternalUpdate = (fn: () => void) => {
+      isInternalUpdate.current = true
+      try {
+        fn()
+      } finally {
+        isInternalUpdate.current = false
+      }
+    }
     // Pending cursor position to restore after external value update (e.g., after @mention selection)
     const pendingCursorRef = React.useRef<number | null>(null)
 
@@ -668,15 +674,13 @@ export const RichTextInput = React.forwardRef<RichTextInputHandle, RichTextInput
       if (newSignature !== lastMentionSignatureRef.current) {
         lastMentionSignatureRef.current = newSignature
         // Re-render with badges
-        isInternalUpdate.current = true
-        writeEditorContent(divRef.current, newText, skills, sources, workspaceId, false)
-        if (newText) setCursorPosition(divRef.current, cursorPos)
-        else ensureEmptyEditorAnchor(divRef.current)
-        isInternalUpdate.current = false
+        runInternalUpdate(() => {
+          writeEditorContent(divRef.current, newText, skills, sources, workspaceId, false)
+          if (newText) setCursorPosition(divRef.current, cursorPos)
+          else ensureEmptyEditorAnchor(divRef.current)
+        })
       } else if (!newText && !isComposingRef.current && !imeGateRef.current.isComposing) {
-        isInternalUpdate.current = true
-        ensureEmptyEditorAnchor(divRef.current)
-        isInternalUpdate.current = false
+        runInternalUpdate(() => ensureEmptyEditorAnchor(divRef.current))
       }
 
       onChange(newText)
@@ -805,9 +809,7 @@ export const RichTextInput = React.forwardRef<RichTextInputHandle, RichTextInput
       // This prevents div-wrapping when typing before non-editable spans (badges).
       document.execCommand('defaultParagraphSeparator', false, 'br')
       if (divRef.current && isEmptyComposerValue(lastValueRef.current)) {
-        isInternalUpdate.current = true
-        ensureEmptyEditorAnchor(divRef.current)
-        isInternalUpdate.current = false
+        runInternalUpdate(() => ensureEmptyEditorAnchor(divRef.current))
       }
       onFocus?.(e)
     }, [onFocus])
@@ -841,36 +843,36 @@ export const RichTextInput = React.forwardRef<RichTextInputHandle, RichTextInput
       lastMentionSignatureRef.current = getMentionSignature(safeValue, skillSlugs, sourceSlugs)
 
       const shouldPlaceCaret = pendingCursorRef.current !== null || document.activeElement === divRef.current
-      isInternalUpdate.current = true
-      writeEditorContent(divRef.current, safeValue, skills, sources, workspaceId, false)
-      if (shouldPlaceCaret) {
-        if (isEmptyComposerValue(safeValue)) {
-          ensureEmptyEditorAnchor(divRef.current)
-          pendingCursorRef.current = null
-        } else {
-          const cursorPos = pendingCursorRef.current ?? cursorPositionRef.current ?? safeValue.length
-          setCursorPosition(divRef.current, cursorPos)
-          pendingCursorRef.current = null
+      runInternalUpdate(() => {
+        writeEditorContent(divRef.current, safeValue, skills, sources, workspaceId, false)
+        if (shouldPlaceCaret) {
+          if (isEmptyComposerValue(safeValue)) {
+            ensureEmptyEditorAnchor(divRef.current)
+            pendingCursorRef.current = null
+          } else {
+            const cursorPos = pendingCursorRef.current ?? cursorPositionRef.current ?? safeValue.length
+            setCursorPosition(divRef.current, cursorPos)
+            pendingCursorRef.current = null
+          }
         }
-      }
-      isInternalUpdate.current = false
+      })
     }, [safeValue, skills, sources, skillSlugs, sourceSlugs, workspaceId])
 
     // Initialize content on mount
     React.useEffect(() => {
       if (!divRef.current) return
       lastMentionSignatureRef.current = getMentionSignature(safeValue, skillSlugs, sourceSlugs)
-      isInternalUpdate.current = true
-      writeEditorContent(
-        divRef.current,
-        safeValue,
-        skills,
-        sources,
-        workspaceId,
-        isEmptyComposerValue(safeValue) && document.activeElement === divRef.current
-      )
-      isInternalUpdate.current = false
-      lastValueRef.current = isEmptyComposerValue(safeValue) ? '' : safeValue
+      runInternalUpdate(() => {
+        writeEditorContent(
+          divRef.current,
+          safeValue,
+          skills,
+          sources,
+          workspaceId,
+          isEmptyComposerValue(safeValue) && document.activeElement === divRef.current
+        )
+      })
+      lastValueRef.current = safeValue
     }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
     // Handle selection changes to highlight badges when selected

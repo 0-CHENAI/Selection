@@ -28,6 +28,8 @@ describe('IME first-key guards (#84 #97 #107)', () => {
     expect(isImeFirstLetter('n')).toBe(true)
     expect(isImeFirstLetter('Ü')).toBe(true)
     expect(isEmptyEditorImeCandidate('', 'n')).toBe(true)
+    expect(isEmptyEditorImeCandidate('\n', 'n')).toBe(true)
+    expect(isEmptyEditorImeCandidate(EMPTY_EDITOR_ZWSP, 'n')).toBe(true)
     expect(isEmptyEditorImeCandidate('already', 'n')).toBe(false)
     expect(isEmptyEditorImeCandidate('', 'ni')).toBe(false)
     expect(isEmptyEditorImeCandidate('', '')).toBe(false)
@@ -88,6 +90,13 @@ describe('IME first-key guards (#84 #97 #107)', () => {
     gate.onKeyDown({ key: 'n', previousValue: 'hello' })
     expect(gate.shouldSkipCommit()).toBe(false)
     expect(gate.isPending).toBe(false)
+  })
+
+  it('still defers the first letter when a leftover caret newline is in value (#108)', () => {
+    const gate = createImeFirstKeyGate()
+    gate.onKeyDown({ key: 'n', previousValue: '\n' })
+    expect(gate.shouldSkipCommit()).toBe(true)
+    expect(gate.isPending).toBe(true)
   })
 
   it('does not defer mention or slash prefixes on an empty editor', () => {

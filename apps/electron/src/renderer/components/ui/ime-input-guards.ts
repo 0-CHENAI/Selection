@@ -52,7 +52,7 @@ export function isImeFirstLetter(key: string): boolean {
 }
 
 export function isEmptyEditorImeCandidate(previousValue: string, insertedOrCurrent: string): boolean {
-  return previousValue.length === 0 && isImeFirstLetter(insertedOrCurrent)
+  return isEmptyComposerValue(previousValue) && isImeFirstLetter(insertedOrCurrent)
 }
 
 export function createImeFirstKeyGate() {
