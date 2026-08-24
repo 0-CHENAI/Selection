@@ -48,6 +48,7 @@ import type {
   Effect,
 } from '../types'
 import type { Message } from '../../../shared/types'
+import { sessionHasLiveGeneration } from '../../lib/input-text'
 import {
   generateMessageId,
   appendMessage,
@@ -563,14 +564,7 @@ export function handleUserMessage(
   )
   // Send-now / mid-stream steer: hide the current generation and let the
   // follow-up start a new reply, matching Codex / Grok.
-  const hasOpenGeneration = streaming !== null
-    || session.isProcessing
-    || session.messages.some(candidate =>
-      !candidate.hidden && (
-        (candidate.role === 'assistant' && (candidate.isStreaming || candidate.isPending || candidate.isIntermediate))
-        || candidate.role === 'status'
-      ),
-    )
+  const hasOpenGeneration = streaming !== null || sessionHasLiveGeneration(session)
   // Hidden system continuations may drive another model turn, but they are not
   // user-authored redirects and must never suppress/collapse the visible reply.
   const collapsesOpenTurn = !message.hidden && status === 'accepted' && hasOpenGeneration && (
@@ -628,9 +622,11 @@ export function handleUserMessage(
     const existingMessage = boundaryMessages[existingIndex]
 
     // Event sequence protection: don't regress from 'processing' back to 'queued'
-    // This handles out-of-order events (e.g., 'processing' arrives before 'queued')
-    if (status === 'queued' && existingMessage.isQueued === false) {
-      // Already progressed past queued state, ignore this late 'queued' event
+    // when a late queued ack arrives after the message is already confirmed.
+    // Optimistic follow-ups can be inserted with isQueued: false if live
+    // generation was missed at send time — those are still pending and must
+    // accept a legitimate queued ack (#94).
+    if (status === 'queued' && existingMessage.isQueued === false && !existingMessage.isPending) {
       return { state, effects: [] }
     }
 
