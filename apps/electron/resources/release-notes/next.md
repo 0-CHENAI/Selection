@@ -24,6 +24,8 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 
 - **Chinese IME first letter stays in composition** — the empty composer no longer commits the first pinyin letter as Latin text. Composition can start on the first key, and English first letters still insert after a frame if no IME session begins. (#84)
 
+- **Chinese IME starts on the first letter** — an empty composer keeps a zero-width text node so Chromium can attach Pinyin composition, and the editor is not reclassed or rewritten on the first key. English first letters commit on keyup if IME never starts. (#107)
+
 - **Create MCP / Skill / automation windows stay usable** — long pasted text no longer stretches the floating create window off-screen. The window is limited to the app viewport, the title bar and send controls stay reachable, the composer scrolls internally, and the window can be dragged, collapsed, or resized.
 
 - **Long agent jobs use the normal provider lifecycle** — Live high-thinking streams are not treated as Office-specific jobs. The product's generic process safety, retry handling, and user cancellation behavior apply consistently.

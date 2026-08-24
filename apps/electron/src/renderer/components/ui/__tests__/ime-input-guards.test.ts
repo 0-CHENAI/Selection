@@ -1,15 +1,15 @@
 import { describe, expect, it } from 'bun:test'
 import {
   createImeFirstKeyGate,
-  IME_FIRST_KEY_COMMIT_DELAY_MS,
+  EMPTY_EDITOR_ZWSP,
+  emptyEditorHTML,
   isEmptyEditorImeCandidate,
   isImeFirstLetter,
   isImeProcessKey,
   isUnmodifiedPrintableKey,
-  shouldFlushDeferredFirstKey,
 } from '../ime-input-guards'
 
-describe('IME first-key guards (#84 #97)', () => {
+describe('IME first-key guards (#84 #97 #107)', () => {
   it('treats keyCode 229 as an IME process key', () => {
     expect(isImeProcessKey({ keyCode: 229 })).toBe(true)
     expect(isImeProcessKey({ which: 229 })).toBe(true)
@@ -35,15 +35,22 @@ describe('IME first-key guards (#84 #97)', () => {
     expect(isEmptyEditorImeCandidate('', ' ')).toBe(false)
   })
 
-  it('flushes a deferred first key once a second character arrives without IME', () => {
-    expect(shouldFlushDeferredFirstKey(true, false, 'ni')).toBe(true)
-    expect(shouldFlushDeferredFirstKey(true, false, 'n')).toBe(false)
-    expect(shouldFlushDeferredFirstKey(true, true, 'ni')).toBe(false)
-    expect(shouldFlushDeferredFirstKey(false, false, 'ni')).toBe(false)
+  it('gives an empty editor a text-node anchor instead of a br-only shell', () => {
+    expect(emptyEditorHTML()).toContain(EMPTY_EDITOR_ZWSP)
+    expect(emptyEditorHTML()).toContain('<br>')
+    expect(emptyEditorHTML().startsWith(EMPTY_EDITOR_ZWSP)).toBe(true)
   })
 
-  it('waits longer than one animation frame before committing English', () => {
-    expect(IME_FIRST_KEY_COMMIT_DELAY_MS).toBeGreaterThan(16)
+  it('keeps the first-key window open when a second letter arrives before keyup', () => {
+    const gate = createImeFirstKeyGate()
+    gate.onKeyDown({ key: 'n', previousValue: '' })
+    gate.onPossibleFirstInsert({ previousValue: '', insertedOrCurrent: 'n', inputType: 'insertText' })
+    expect(gate.shouldSkipCommit()).toBe(true)
+    gate.onPossibleFirstInsert({ previousValue: '', insertedOrCurrent: 'ni', inputType: 'insertText' })
+    expect(gate.isPending).toBe(true)
+    expect(gate.shouldSkipCommit()).toBe(true)
+    gate.onCompositionStart()
+    expect(gate.consumeDeferredCommit()).toBe(false)
   })
 
   it('defers commit until compositionstart can arrive after the first printable key', () => {
@@ -72,7 +79,7 @@ describe('IME first-key guards (#84 #97)', () => {
     expect(gate.shouldSkipCommit()).toBe(false)
   })
 
-  it('defers commit when Chromium inserts the first letter before keydown (#97)', () => {
+  it('defers commit when Chromium inserts the first letter before keydown', () => {
     const gate = createImeFirstKeyGate()
     gate.onPossibleFirstInsert({
       previousValue: '',
@@ -121,12 +128,19 @@ describe('IME first-key guards (#84 #97)', () => {
     expect(gate.shouldSkipCommit()).toBe(false)
   })
 
-  it('commits an English first letter when composition never starts', () => {
+  it('commits an English first letter on keyup when composition never starts', () => {
     const gate = createImeFirstKeyGate()
     gate.onKeyDown({ key: 'n', previousValue: '' })
     expect(gate.shouldSkipCommit()).toBe(true)
     expect(gate.consumeDeferredCommit()).toBe(true)
     expect(gate.shouldSkipCommit()).toBe(false)
+  })
+
+  it('does not commit on keyup after compositionstart', () => {
+    const gate = createImeFirstKeyGate()
+    gate.onKeyDown({ key: 'n', previousValue: '' })
+    gate.onCompositionStart()
+    expect(gate.consumeDeferredCommit()).toBe(false)
   })
 
   it('resets pending and composing when the parent value changes', () => {
