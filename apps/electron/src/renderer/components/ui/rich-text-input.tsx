@@ -13,7 +13,7 @@ import {
 import type { LoadedSkill, LoadedSource } from '../../../shared/types'
 import type { MentionItemType } from './mention-menu'
 import { resolveSkillTitle, resolveSourceTitle } from '@craft-agent/shared/display-titles'
-import { createImeFirstKeyGate } from './ime-input-guards'
+import { createImeFirstKeyGate, IME_FIRST_KEY_COMMIT_DELAY_MS, shouldFlushDeferredFirstKey } from './ime-input-guards'
 
 // ============================================================================
 // Types
@@ -528,7 +528,8 @@ export const RichTextInput = React.forwardRef<RichTextInputHandle, RichTextInput
     const isComposingRef = React.useRef(false)
     const [isComposing, setIsComposing] = React.useState(false)
     const imeGateRef = React.useRef(createImeFirstKeyGate())
-    const imeFlushRafRef = React.useRef<number | null>(null)
+    const imeFlushTimerRef = React.useRef<number | null>(null)
+    const [isImePending, setIsImePending] = React.useState(false)
     const lastValueRef = React.useRef(safeValue)
     const cursorPositionRef = React.useRef(0)
     const lastMentionSignatureRef = React.useRef('')
@@ -622,29 +623,63 @@ export const RichTextInput = React.forwardRef<RichTextInputHandle, RichTextInput
     }, [onChange, onInput, skills, sources, skillSlugs, sourceSlugs, workspaceId])
 
     const cancelImeFlush = React.useCallback(() => {
-      if (imeFlushRafRef.current !== null) {
-        cancelAnimationFrame(imeFlushRafRef.current)
-        imeFlushRafRef.current = null
+      if (imeFlushTimerRef.current !== null) {
+        window.clearTimeout(imeFlushTimerRef.current)
+        imeFlushTimerRef.current = null
       }
     }, [])
 
+    const scheduleDeferredCommit = React.useCallback(() => {
+      setIsImePending(true)
+      if (imeFlushTimerRef.current !== null) return
+      imeFlushTimerRef.current = window.setTimeout(() => {
+        imeFlushTimerRef.current = null
+        setIsImePending(false)
+        if (!imeGateRef.current.consumeDeferredCommit()) return
+        commitInput()
+      }, IME_FIRST_KEY_COMMIT_DELAY_MS)
+    }, [commitInput])
+
     React.useEffect(() => () => cancelImeFlush(), [cancelImeFlush])
+
+    const handleBeforeInput = React.useCallback((event: React.FormEvent<HTMLDivElement>) => {
+      const native = event.nativeEvent as InputEvent
+      imeGateRef.current.onPossibleFirstInsert({
+        nativeIsComposing: Boolean(native.isComposing),
+        previousValue: lastValueRef.current,
+        insertedOrCurrent: native.data ?? '',
+        inputType: native.inputType,
+      })
+      if (imeGateRef.current.isPending) setIsImePending(true)
+    }, [])
 
     // Handle input events
     const handleInput = React.useCallback((event?: React.FormEvent<HTMLDivElement>) => {
       const nativeIsComposing = Boolean((event?.nativeEvent as InputEvent | undefined)?.isComposing)
-      if (isComposingRef.current || nativeIsComposing || imeGateRef.current.isComposing) return
-      if (imeGateRef.current.shouldSkipCommit(false)) {
+      const currentText = divRef.current ? getTextFromElement(divRef.current) : ''
+      imeGateRef.current.onPossibleFirstInsert({
+        nativeIsComposing,
+        previousValue: lastValueRef.current,
+        insertedOrCurrent: currentText,
+        inputType: (event?.nativeEvent as InputEvent | undefined)?.inputType,
+      })
+      if (isComposingRef.current || nativeIsComposing || imeGateRef.current.isComposing) {
+        setIsImePending(false)
+        return
+      }
+      if (shouldFlushDeferredFirstKey(imeGateRef.current.isPending, imeGateRef.current.isComposing, currentText)) {
         cancelImeFlush()
-        imeFlushRafRef.current = requestAnimationFrame(() => {
-          imeFlushRafRef.current = null
-          if (!imeGateRef.current.consumeDeferredCommit()) return
-          commitInput()
-        })
+        setIsImePending(false)
+        imeGateRef.current.consumeDeferredCommit()
+        commitInput()
+        return
+      }
+      if (imeGateRef.current.shouldSkipCommit(false)) {
+        scheduleDeferredCommit()
         return
       }
       commitInput()
-    }, [cancelImeFlush, commitInput])
+    }, [cancelImeFlush, commitInput, scheduleDeferredCommit])
 
     // Handle composition (IME). During composition the React `value` stays empty
     // (we deliberately skip onChange), but the browser shows provisional text in
@@ -653,15 +688,18 @@ export const RichTextInput = React.forwardRef<RichTextInputHandle, RichTextInput
       cancelImeFlush()
       imeGateRef.current.onCompositionStart()
       isComposingRef.current = true
+      setIsImePending(false)
       setIsComposing(true)
     }, [cancelImeFlush])
 
     const handleCompositionEnd = React.useCallback(() => {
+      cancelImeFlush()
       imeGateRef.current.onCompositionEnd()
       isComposingRef.current = false
+      setIsImePending(false)
       setIsComposing(false)
       commitInput()
-    }, [commitInput])
+    }, [cancelImeFlush, commitInput])
 
     const handleKeyDownInternal = React.useCallback((e: React.KeyboardEvent<HTMLDivElement>) => {
       imeGateRef.current.onKeyDown({
@@ -669,10 +707,12 @@ export const RichTextInput = React.forwardRef<RichTextInputHandle, RichTextInput
         keyCode: e.keyCode,
         which: e.which,
         isComposing: e.nativeEvent.isComposing,
+        previousValue: lastValueRef.current,
         metaKey: e.metaKey,
         ctrlKey: e.ctrlKey,
         altKey: e.altKey,
       })
+      if (imeGateRef.current.isPending) setIsImePending(true)
       if (isEscapeDuringComposition(e, isComposingRef.current || imeGateRef.current.isComposing)) {
         e.stopPropagation()
         return
@@ -722,14 +762,29 @@ export const RichTextInput = React.forwardRef<RichTextInputHandle, RichTextInput
     // Handle blur
     const handleBlur = React.useCallback((e: React.FocusEvent<HTMLDivElement>) => {
       setIsFocused(false)
+      if (imeGateRef.current.isPending && !imeGateRef.current.isComposing && !isComposingRef.current) {
+        cancelImeFlush()
+        setIsImePending(false)
+        if (imeGateRef.current.consumeDeferredCommit()) {
+          commitInput()
+        }
+      }
       onBlur?.(e)
-    }, [onBlur])
+    }, [cancelImeFlush, commitInput, onBlur])
 
     // Sync value from props (when parent updates value externally)
     React.useEffect(() => {
       if (!divRef.current) return
       if (isInternalUpdate.current) return
-      if (isComposingRef.current || imeGateRef.current.isComposing) return
+      if (lastValueRef.current !== safeValue && (isComposingRef.current || imeGateRef.current.shouldSkipCommit())) {
+        cancelImeFlush()
+        imeGateRef.current.reset()
+        isComposingRef.current = false
+        setIsComposing(false)
+        setIsImePending(false)
+      } else if (isComposingRef.current || imeGateRef.current.shouldSkipCommit()) {
+        return
+      }
       if (lastValueRef.current === safeValue) return
 
       // External value change - update content
@@ -749,7 +804,7 @@ export const RichTextInput = React.forwardRef<RichTextInputHandle, RichTextInput
         setCursorPosition(divRef.current, cursorPos)
         pendingCursorRef.current = null // Clear after use
       }
-    }, [safeValue, skills, sources, skillSlugs, sourceSlugs, workspaceId])
+    }, [cancelImeFlush, safeValue, skills, sources, skillSlugs, sourceSlugs, workspaceId])
 
     // Initialize content on mount
     React.useEffect(() => {
@@ -806,7 +861,7 @@ export const RichTextInput = React.forwardRef<RichTextInputHandle, RichTextInput
     // Show placeholder only when truly empty and not mid-IME composition.
     // CJK IME keeps React value empty until compositionend; provisional text
     // still lives in the contenteditable and must not sit under a placeholder.
-    const showPlaceholder = !safeValue && !isComposing
+    const showPlaceholder = !safeValue && !isComposing && !isImePending
 
     // Normalize placeholder to array for RotatingPlaceholder
     const placeholderArray = React.useMemo(() => {
@@ -837,6 +892,7 @@ export const RichTextInput = React.forwardRef<RichTextInputHandle, RichTextInput
           )}
           // Use inline style for line-height to override text-sm's built-in line-height
           style={{ lineHeight: 1.25 }}
+          onBeforeInput={handleBeforeInput}
           onInput={handleInput}
           onKeyDown={handleKeyDownInternal}
           onFocus={handleFocus}
@@ -853,6 +909,7 @@ export const RichTextInput = React.forwardRef<RichTextInputHandle, RichTextInput
           // re-enable first-letter processing and break CJK IME composition.
           autoCapitalize="none"
           autoCorrect="off"
+          spellCheck={false}
         />
         {/* Rotating placeholder overlay - visible when empty, even when focused */}
         {showPlaceholder && (
