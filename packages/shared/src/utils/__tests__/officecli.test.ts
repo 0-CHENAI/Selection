@@ -14,6 +14,7 @@ import {
   BUNDLED_OFFICECLI_SKILL_SLUGS,
   BUNDLED_OFFICECLI_LOAD_SKILL_ALIASES,
   collectOfficeFormatSkillSlugs,
+  shouldLoadBundledOfficecliRouter,
   docxOutlineEnsureTiming,
   findDocxArgInOfficecliArgs,
   getBundledOfficecliRouterSkillMd,
@@ -36,6 +37,11 @@ describe('collectOfficeFormatSkillSlugs', () => {
       'officecli-docx',
     ])
     expect(collectOfficeFormatSkillSlugs('deck.pptx')).toEqual(['officecli-pptx'])
+    expect(collectOfficeFormatSkillSlugs('请改 旧稿.doc')).toEqual(['officecli-docx'])
+    expect(collectOfficeFormatSkillSlugs('预算.xls')).toEqual(['officecli-xlsx'])
+    expect(collectOfficeFormatSkillSlugs('路演.ppt')).toEqual(['officecli-pptx'])
+    expect(collectOfficeFormatSkillSlugs('不要读 report.docx.md')).toEqual([])
+    expect(collectOfficeFormatSkillSlugs('sidecar.xlsx.md')).toEqual([])
   })
 
   it('does not infer format from language — the model chooses OfficeCLI', () => {
@@ -73,6 +79,21 @@ describe('collectOfficeFormatSkillSlugs', () => {
     expect(collectOfficeFormatSkillSlugs('读取', [
       { type: 'office', name: '宏文档.DOCM', storedPath: '/tmp/session/宏文档.DOCM' },
     ])).toEqual(['officecli-docx'])
+  })
+})
+
+describe('shouldLoadBundledOfficecliRouter', () => {
+  it('loads the router for named files or office-typed attachments', () => {
+    expect(shouldLoadBundledOfficecliRouter('写一份项目周报')).toBe(false)
+    expect(shouldLoadBundledOfficecliRouter('请改 巡察报告.docx')).toBe(true)
+    expect(shouldLoadBundledOfficecliRouter('请改 旧稿.doc')).toBe(true)
+    expect(shouldLoadBundledOfficecliRouter('不要读 report.docx.md')).toBe(false)
+    expect(shouldLoadBundledOfficecliRouter('看一下', [
+      { type: 'office', name: '附件', storedPath: '/tmp/session/att-1' },
+    ])).toBe(true)
+    expect(shouldLoadBundledOfficecliRouter('看一下', [
+      { type: 'pdf', name: '说明.pdf', storedPath: '/tmp/session/att-2' },
+    ])).toBe(false)
   })
 })
 
@@ -514,7 +535,7 @@ describe('docx outline heading seed', () => {
     expect(body).toContain('Delivery gate')
     expect(body).toContain('outlineLvl')
     expect(body).toContain('Do not impose a model-call, CLI-call, operation, QA, elapsed-time, or cost budget')
-    expect(body).toContain('Choose Markdown or a chat reply when that fits the request better')
+    expect(body).toContain('Use when creating or editing a .docx, .xlsx, or .pptx file')
     expect(body).toContain('Do not treat a chat Markdown body, `markdown-preview`, or a `call_llm` draft as the delivered file')
   })
 

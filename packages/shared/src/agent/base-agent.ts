@@ -18,7 +18,7 @@ import { join } from 'node:path';
 
 import type { AgentEvent } from '@craft-agent/core/types';
 import type { FileAttachment } from '../utils/files.ts';
-import { collectOfficeFormatSkillSlugs } from '../utils/officecli.ts';
+import { shouldLoadBundledOfficecliRouter } from '../utils/officecli.ts';
 import { expandPath } from '../utils/paths.ts';
 import { resolveSpawnSessionMode, resolveSpawnWaitTimeoutMs } from './spawn-session-tool.ts';
 import { buildTransferredSessionContext } from './conversation-summary.ts';
@@ -1007,9 +1007,8 @@ ${formattedMessages}
     // load_skill word/excel/pptx for the format it chooses. Do not dump
     // official format SKILL.md files up front. An explicit user skill mention
     // keeps Craft's normal project/workspace/global priority.
-    const officeFormatSlugs = collectOfficeFormatSkillSlugs(message, attachments);
     const explicitlySelectedOfficecli = parsed.skills.includes('officecli');
-    if (officeFormatSlugs.length > 0 && !explicitlySelectedOfficecli) {
+    if (shouldLoadBundledOfficecliRouter(message, attachments) && !explicitlySelectedOfficecli) {
       skillPaths.delete('officecli');
       resolveBundledSlug('officecli');
     }

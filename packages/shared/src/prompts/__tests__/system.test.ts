@@ -11,6 +11,7 @@ mock.module('../../config/preferences.ts', () => ({
 
 import { getSystemPrompt, formatProjectContextForPrompt } from '../system'
 import type { ProjectPromptContext } from '../../projects/types.ts'
+import { getBundledOfficecliRouterSkillMd } from '../../utils/officecli.ts'
 
 const GIT_CONVENTIONS_HEADING = '## Git Conventions'
 const CO_AUTHOR_TRAILER = 'Co-Authored-By: Selection <agents-noreply@craft.do>'
@@ -94,9 +95,13 @@ describe('system prompt guidance', () => {
     expect(prompt).not.toContain('typed OfficeCLI tools')
     expect(prompt).toContain('python-docx')
     expect(prompt).toContain('curl-install')
-    expect(prompt).toContain('When you choose OfficeCLI, read the bundled `officecli` router first')
+    expect(prompt).toContain('When you decide the user wants a Word / Excel / PowerPoint file')
     expect(prompt).toContain('run only the `officecli load_skill` commands it selects')
     expect(prompt).toContain("Decide from the user's request")
+    expect(prompt).toContain('named or attached Office files')
+    const router = getBundledOfficecliRouterSkillMd()
+    expect(router).toBeTruthy()
+    expect(prompt).toContain(router!)
     expect(prompt).not.toContain('officecli-xlsx/SKILL.md')
     expect(prompt).not.toContain('officecli-pptx/SKILL.md')
     expect(prompt).not.toContain('officecli load_skill word')

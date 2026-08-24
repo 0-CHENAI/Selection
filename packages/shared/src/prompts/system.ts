@@ -9,6 +9,7 @@ import { FEATURE_FLAGS } from '../feature-flags.ts';
 import { APP_VERSION } from '../version/index.ts';
 import { readPluginName } from '../utils/workspace.ts';
 import { formatBytes } from '../utils/binary-detection.ts';
+import { getBundledOfficecliRouterSkillMd } from '../utils/officecli.ts';
 import { globSync } from 'glob';
 import os from 'os';
 import type { ProjectPromptContext } from '../projects/types.ts';
@@ -545,9 +546,13 @@ rg -n "session|OAuth|\"level\":\"error\"" "${logFilePath}" | tail -n 50
 }
 
 function formatBundledOfficecliSkillGuidance(): string {
+  const router = getBundledOfficecliRouterSkillMd();
+  const readRouter = router
+    ? `When you decide the user wants a Word / Excel / PowerPoint file, Read \`${router}\` first, then run only the \`officecli load_skill\` commands it selects.`
+    : 'When you decide the user wants a Word / Excel / PowerPoint file, read the bundled `officecli` router first, then run only the `officecli load_skill` commands it selects.';
   return [
     '- **officecli** is on PATH for `.docx` / `.docm` / `.xlsx` / `.xlsm` / `.pptx`. Decide from the user\'s request whether they want an Office file, a Markdown note, or a chat reply. Do not use python-docx, openpyxl, python-pptx, or markitdown for supported OfficeCLI operations.',
-    '- When you choose OfficeCLI, read the bundled `officecli` router first, then run only the `officecli load_skill` commands it selects. Never download, install, or self-update OfficeCLI.',
+    `- ${readRouter} Never download, install, or self-update OfficeCLI.`,
     '- Keep resident sessions open across related edits and close only after the loaded official Delivery Gate passes. Office work has no special call, operation, QA, time, or cost budget.',
     '- Do **not** Read `~/.agents/skills/officecli`, `~/.agents/skills/docx`, `~/.agents/skills/xlsx`, or `~/.agents/skills/pptx`.',
   ].join('\n');
@@ -708,7 +713,7 @@ Office-file instructions are listed once under Document Tools.
 
 Skills are stored at four levels (listed from lowest to highest priority):
 - Global: \`~/.agents/skills/{slug}/SKILL.md\`
-- Built-in: the app-shipped \`officecli\` router (it overrides a global \`officecli\` for automatic Office routing)
+- Built-in: the app-shipped \`officecli\` router (it overrides a global \`officecli\` for named or attached Office files)
 - Workspace: \`${workspacePath}/skills/{slug}/SKILL.md\`
 - Project: \`{projectRoot}/.agents/skills/{slug}/SKILL.md\`
 

@@ -290,6 +290,19 @@ describe('BaseAgent', () => {
       expect(sent).not.toContain('(skill: officecli-xlsx)');
     });
 
+    it('gates the officecli router from an office-typed attachment without a file extension', async () => {
+      await collectEvents(agent.chat('看一下', [{
+        type: 'office',
+        name: '附件',
+        path: '/tmp/session/att-1',
+        mimeType: 'application/octet-stream',
+        size: 12,
+      }]));
+      const sent = agent.chatCalls[0]?.message ?? '';
+      expect(sent).toContain('(skill: officecli)');
+      expect(sent).not.toContain('(skill: officecli-docx)');
+    });
+
     it('injects the bundled router only once for a multi-format request', async () => {
       await collectEvents(agent.chat('读取 input.docx，并把数据整理到 output.xlsx 和 review.pptx'));
       const sent = agent.chatCalls[0]?.message ?? '';

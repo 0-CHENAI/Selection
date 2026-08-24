@@ -202,9 +202,9 @@ export const BUNDLED_OFFICECLI_SKILL_SLUGS = [
 export type OfficeFormatSkillSlug = 'officecli-docx' | 'officecli-xlsx' | 'officecli-pptx';
 
 const OFFICE_FILE_PATTERNS: Array<{ re: RegExp; slug: OfficeFormatSkillSlug }> = [
-  { re: /\.(?:xlsx|xlsm)(?:\b|["'）)\]])/i, slug: 'officecli-xlsx' },
-  { re: /\.pptx(?:\b|["'）)\]])/i, slug: 'officecli-pptx' },
-  { re: /\.(?:docx|docm)(?:\b|["'）)\]])/i, slug: 'officecli-docx' },
+  { re: /\.(?:xlsx|xlsm|xls)(?!\.md)(?:\b|["'）)\]])/i, slug: 'officecli-xlsx' },
+  { re: /\.(?:pptx|ppt)(?!\.md)(?:\b|["'）)\]])/i, slug: 'officecli-pptx' },
+  { re: /\.(?:docx|docm|doc)(?!\.md)(?:\b|["'）)\]])/i, slug: 'officecli-docx' },
 ];
 
 export const BUNDLED_OFFICECLI_LOAD_SKILL_ALIASES = [
@@ -237,13 +237,20 @@ function addOfficeFileSlugs(text: string, slugs: Set<OfficeFormatSkillSlug>): vo
   }
 }
 
+type OfficeFileHint = {
+  type?: string;
+  name?: string;
+  path?: string;
+  storedPath?: string;
+};
+
 /**
  * Office files the user already named or attached. Language like
  * "周报" / "markdown" is left to the model — do not infer intent here.
  */
 export function collectOfficeFormatSkillSlugs(
   message: string,
-  attachments?: Array<{ type?: string; name?: string; path?: string; storedPath?: string }>,
+  attachments?: OfficeFileHint[],
 ): OfficeFormatSkillSlug[] {
   const slugs = new Set<OfficeFormatSkillSlug>();
   addOfficeFileSlugs(message, slugs);
@@ -254,6 +261,15 @@ export function collectOfficeFormatSkillSlugs(
   }
 
   return [...slugs];
+}
+
+/** Named Office paths, or an attachment the app already classified as Office. */
+export function shouldLoadBundledOfficecliRouter(
+  message: string,
+  attachments?: OfficeFileHint[],
+): boolean {
+  if (collectOfficeFormatSkillSlugs(message, attachments).length > 0) return true;
+  return (attachments ?? []).some((attachment) => attachment.type === 'office');
 }
 
 function expandUserPath(filePath: string): string {
