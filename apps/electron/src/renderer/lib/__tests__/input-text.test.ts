@@ -94,10 +94,20 @@ describe('sessionHasLiveGeneration', () => {
     })).toBe(false)
   })
 
-  it('treats thinking-only commentary as live when isProcessing is stale', () => {
+  it('does not treat settled work-chain commentary as live after the turn stops', () => {
     expect(sessionHasLiveGeneration({
       isProcessing: false,
-      messages: [{ role: 'assistant', content: '先读目录', isIntermediate: true }],
+      messages: [
+        { role: 'assistant', content: 'PAGE field is properly structured', isIntermediate: true },
+        { role: 'assistant', content: '已写好公式和模拟过程' },
+      ],
+    })).toBe(false)
+  })
+
+  it('treats pending commentary as live when isProcessing is stale', () => {
+    expect(sessionHasLiveGeneration({
+      isProcessing: false,
+      messages: [{ role: 'assistant', content: '先读目录', isIntermediate: true, isPending: true }],
     })).toBe(true)
   })
 
