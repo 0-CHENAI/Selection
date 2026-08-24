@@ -13,7 +13,7 @@ import {
 import type { LoadedSkill, LoadedSource } from '../../../shared/types'
 import type { MentionItemType } from './mention-menu'
 import { resolveSkillTitle, resolveSourceTitle } from '@craft-agent/shared/display-titles'
-import { createImeFirstKeyGate, IME_FIRST_KEY_COMMIT_DELAY_MS } from './ime-input-guards'
+import { createImeFirstKeyGate, IME_FIRST_KEY_COMMIT_DELAY_MS, shouldFlushDeferredFirstKey } from './ime-input-guards'
 
 // ============================================================================
 // Types
@@ -630,15 +630,15 @@ export const RichTextInput = React.forwardRef<RichTextInputHandle, RichTextInput
     }, [])
 
     const scheduleDeferredCommit = React.useCallback(() => {
-      cancelImeFlush()
       setIsImePending(true)
+      if (imeFlushTimerRef.current !== null) return
       imeFlushTimerRef.current = window.setTimeout(() => {
         imeFlushTimerRef.current = null
         setIsImePending(false)
         if (!imeGateRef.current.consumeDeferredCommit()) return
         commitInput()
       }, IME_FIRST_KEY_COMMIT_DELAY_MS)
-    }, [cancelImeFlush, commitInput])
+    }, [commitInput])
 
     React.useEffect(() => () => cancelImeFlush(), [cancelImeFlush])
 
@@ -650,9 +650,7 @@ export const RichTextInput = React.forwardRef<RichTextInputHandle, RichTextInput
         insertedOrCurrent: native.data ?? '',
         inputType: native.inputType,
       })
-      if (imeGateRef.current.shouldSkipCommit(native.isComposing)) {
-        setIsImePending(true)
-      }
+      if (imeGateRef.current.isPending) setIsImePending(true)
     }, [])
 
     // Handle input events
@@ -669,12 +667,19 @@ export const RichTextInput = React.forwardRef<RichTextInputHandle, RichTextInput
         setIsImePending(false)
         return
       }
+      if (shouldFlushDeferredFirstKey(imeGateRef.current.isPending, imeGateRef.current.isComposing, currentText)) {
+        cancelImeFlush()
+        setIsImePending(false)
+        imeGateRef.current.consumeDeferredCommit()
+        commitInput()
+        return
+      }
       if (imeGateRef.current.shouldSkipCommit(false)) {
         scheduleDeferredCommit()
         return
       }
       commitInput()
-    }, [commitInput, scheduleDeferredCommit])
+    }, [cancelImeFlush, commitInput, scheduleDeferredCommit])
 
     // Handle composition (IME). During composition the React `value` stays empty
     // (we deliberately skip onChange), but the browser shows provisional text in
@@ -702,6 +707,7 @@ export const RichTextInput = React.forwardRef<RichTextInputHandle, RichTextInput
         keyCode: e.keyCode,
         which: e.which,
         isComposing: e.nativeEvent.isComposing,
+        previousValue: lastValueRef.current,
         metaKey: e.metaKey,
         ctrlKey: e.ctrlKey,
         altKey: e.altKey,
@@ -770,7 +776,15 @@ export const RichTextInput = React.forwardRef<RichTextInputHandle, RichTextInput
     React.useEffect(() => {
       if (!divRef.current) return
       if (isInternalUpdate.current) return
-      if (isComposingRef.current || imeGateRef.current.shouldSkipCommit()) return
+      if (lastValueRef.current !== safeValue && (isComposingRef.current || imeGateRef.current.shouldSkipCommit())) {
+        cancelImeFlush()
+        imeGateRef.current.reset()
+        isComposingRef.current = false
+        setIsComposing(false)
+        setIsImePending(false)
+      } else if (isComposingRef.current || imeGateRef.current.shouldSkipCommit()) {
+        return
+      }
       if (lastValueRef.current === safeValue) return
 
       // External value change - update content
@@ -790,7 +804,7 @@ export const RichTextInput = React.forwardRef<RichTextInputHandle, RichTextInput
         setCursorPosition(divRef.current, cursorPos)
         pendingCursorRef.current = null // Clear after use
       }
-    }, [safeValue, skills, sources, skillSlugs, sourceSlugs, workspaceId])
+    }, [cancelImeFlush, safeValue, skills, sources, skillSlugs, sourceSlugs, workspaceId])
 
     // Initialize content on mount
     React.useEffect(() => {

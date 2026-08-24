@@ -3,8 +3,10 @@ import {
   createImeFirstKeyGate,
   IME_FIRST_KEY_COMMIT_DELAY_MS,
   isEmptyEditorImeCandidate,
+  isImeFirstLetter,
   isImeProcessKey,
   isUnmodifiedPrintableKey,
+  shouldFlushDeferredFirstKey,
 } from '../ime-input-guards'
 
 describe('IME first-key guards (#84 #97)', () => {
@@ -20,12 +22,24 @@ describe('IME first-key guards (#84 #97)', () => {
     expect(isUnmodifiedPrintableKey({ key: 'Enter' })).toBe(false)
   })
 
-  it('treats a single letter in an empty editor as an IME candidate', () => {
+  it('only treats latin IME first letters as empty-editor candidates', () => {
+    expect(isImeFirstLetter('n')).toBe(true)
+    expect(isImeFirstLetter('Ü')).toBe(true)
     expect(isEmptyEditorImeCandidate('', 'n')).toBe(true)
-    expect(isEmptyEditorImeCandidate('', '你')).toBe(true)
     expect(isEmptyEditorImeCandidate('already', 'n')).toBe(false)
     expect(isEmptyEditorImeCandidate('', 'ni')).toBe(false)
     expect(isEmptyEditorImeCandidate('', '')).toBe(false)
+    expect(isEmptyEditorImeCandidate('', '你')).toBe(false)
+    expect(isEmptyEditorImeCandidate('', '@')).toBe(false)
+    expect(isEmptyEditorImeCandidate('', '/')).toBe(false)
+    expect(isEmptyEditorImeCandidate('', ' ')).toBe(false)
+  })
+
+  it('flushes a deferred first key once a second character arrives without IME', () => {
+    expect(shouldFlushDeferredFirstKey(true, false, 'ni')).toBe(true)
+    expect(shouldFlushDeferredFirstKey(true, false, 'n')).toBe(false)
+    expect(shouldFlushDeferredFirstKey(true, true, 'ni')).toBe(false)
+    expect(shouldFlushDeferredFirstKey(false, false, 'ni')).toBe(false)
   })
 
   it('waits longer than one animation frame before committing English', () => {
@@ -34,7 +48,7 @@ describe('IME first-key guards (#84 #97)', () => {
 
   it('defers commit until compositionstart can arrive after the first printable key', () => {
     const gate = createImeFirstKeyGate()
-    gate.onKeyDown({ key: 'n' })
+    gate.onKeyDown({ key: 'n', previousValue: '' })
     expect(gate.shouldSkipCommit()).toBe(true)
     expect(gate.isPending).toBe(true)
 
@@ -42,6 +56,20 @@ describe('IME first-key guards (#84 #97)', () => {
     expect(gate.shouldSkipCommit()).toBe(true)
     expect(gate.isPending).toBe(false)
     expect(gate.consumeDeferredCommit()).toBe(false)
+  })
+
+  it('does not defer printable keys once the editor already has text', () => {
+    const gate = createImeFirstKeyGate()
+    gate.onKeyDown({ key: 'n', previousValue: 'hello' })
+    expect(gate.shouldSkipCommit()).toBe(false)
+    expect(gate.isPending).toBe(false)
+  })
+
+  it('does not defer mention or slash prefixes on an empty editor', () => {
+    const gate = createImeFirstKeyGate()
+    gate.onKeyDown({ key: '@', previousValue: '' })
+    gate.onPossibleFirstInsert({ previousValue: '', insertedOrCurrent: '@', inputType: 'insertText' })
+    expect(gate.shouldSkipCommit()).toBe(false)
   })
 
   it('defers commit when Chromium inserts the first letter before keydown (#97)', () => {
@@ -66,7 +94,7 @@ describe('IME first-key guards (#84 #97)', () => {
     })
     expect(gate.shouldSkipCommit()).toBe(true)
 
-    gate.onKeyDown({ key: 'n' })
+    gate.onKeyDown({ key: 'n', previousValue: '' })
     expect(gate.shouldSkipCommit()).toBe(true)
     gate.onCompositionStart()
     expect(gate.consumeDeferredCommit()).toBe(false)
@@ -95,9 +123,19 @@ describe('IME first-key guards (#84 #97)', () => {
 
   it('commits an English first letter when composition never starts', () => {
     const gate = createImeFirstKeyGate()
-    gate.onKeyDown({ key: 'n' })
+    gate.onKeyDown({ key: 'n', previousValue: '' })
     expect(gate.shouldSkipCommit()).toBe(true)
     expect(gate.consumeDeferredCommit()).toBe(true)
+    expect(gate.shouldSkipCommit()).toBe(false)
+  })
+
+  it('resets pending and composing when the parent value changes', () => {
+    const gate = createImeFirstKeyGate()
+    gate.onKeyDown({ key: 'n', previousValue: '' })
+    gate.onCompositionStart()
+    gate.reset()
+    expect(gate.isPending).toBe(false)
+    expect(gate.isComposing).toBe(false)
     expect(gate.shouldSkipCommit()).toBe(false)
   })
 })

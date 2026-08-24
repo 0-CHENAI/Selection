@@ -26,9 +26,17 @@ export function isUnmodifiedPrintableKey(event: {
   return key.length === 1
 }
 
+/** Pinyin / latin IME first keys. Mentions, slash commands, and CJK text commit immediately. */
+export function isImeFirstLetter(key: string): boolean {
+  return /^[a-zA-ZüÜ]$/.test(key)
+}
+
 export function isEmptyEditorImeCandidate(previousValue: string, insertedOrCurrent: string): boolean {
-  return previousValue.length === 0
-    && isUnmodifiedPrintableKey({ key: insertedOrCurrent })
+  return previousValue.length === 0 && isImeFirstLetter(insertedOrCurrent)
+}
+
+export function shouldFlushDeferredFirstKey(pending: boolean, composing: boolean, currentText: string): boolean {
+  return pending && !composing && currentText.length > 1
 }
 
 export function createImeFirstKeyGate() {
@@ -39,11 +47,17 @@ export function createImeFirstKeyGate() {
     if (!composing) pendingPrintableKey = true
   }
 
+  const reset = () => {
+    composing = false
+    pendingPrintableKey = false
+  }
+
   const onKeyDown = (event: {
     key?: string
     keyCode?: number
     which?: number
     isComposing?: boolean
+    previousValue?: string
     metaKey?: boolean
     ctrlKey?: boolean
     altKey?: boolean
@@ -53,7 +67,7 @@ export function createImeFirstKeyGate() {
       pendingPrintableKey = false
       return
     }
-    if (isUnmodifiedPrintableKey(event)) {
+    if (isEmptyEditorImeCandidate(event.previousValue ?? '', event.key ?? '')) {
       markPending()
     }
   }
@@ -116,6 +130,7 @@ export function createImeFirstKeyGate() {
     onCompositionEnd,
     shouldSkipCommit,
     consumeDeferredCommit,
+    reset,
     get isComposing() {
       return composing
     },
