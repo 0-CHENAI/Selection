@@ -32,6 +32,10 @@ export function officecliBinaryName(platform: NodeJS.Platform = process.platform
   return platform === 'win32' ? 'officecli.exe' : 'officecli';
 }
 
+export function officecliWrapperName(platform: NodeJS.Platform = process.platform): string {
+  return platform === 'win32' ? 'officecli.cmd' : 'officecli';
+}
+
 function isFile(path: string | undefined): path is string {
   if (!path || !existsSync(path)) return false;
   try {
@@ -378,10 +382,16 @@ export function shouldEnsureDocxOutlineStyles(args: string[]): boolean {
 
 /** Directory that contains the PATH `officecli` / `officecli.cmd` wrappers. */
 export function getOfficecliWrapperDir(options: ResolveOfficecliOptions = {}): string | undefined {
+  const env = options.env ?? process.env;
   const cwd = resolve(options.cwd ?? process.cwd());
-  const trustedRoots = [options.resourcesPath, options.appRootPath]
+  const wrapperName = officecliWrapperName(options.platform ?? process.platform);
+  const optionRoots = [options.resourcesPath, options.appRootPath]
     .filter((value): value is string => !!value)
     .map(root => resolve(root));
+  const envRoots = options.trustEnvironment !== false && env.CRAFT_RESOURCES_BASE
+    ? [resolve(env.CRAFT_RESOURCES_BASE)]
+    : [];
+  const trustedRoots = optionRoots.length > 0 ? optionRoots : envRoots;
   const candidates = trustedRoots.length > 0
     ? trustedRoots.flatMap(root => [
         join(root, 'resources', 'bin'),
@@ -395,7 +405,7 @@ export function getOfficecliWrapperDir(options: ResolveOfficecliOptions = {}): s
       ];
   return candidates.find(
     dir => {
-      const wrapper = process.platform === 'win32' ? join(dir, 'officecli.cmd') : join(dir, 'officecli');
+      const wrapper = join(dir, wrapperName);
       return trustedRoots.length > 0 ? isFileWithin(wrapper, trustedRoots) : isFile(wrapper);
     },
   );

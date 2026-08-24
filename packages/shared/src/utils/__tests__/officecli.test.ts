@@ -21,6 +21,7 @@ import {
   getOfficecliWrapperDir,
   isBundledOfficecliLoadSkillCommand,
   officecliBinaryName,
+  officecliWrapperName,
   resolveBundledOfficecliSkillRead,
   resolveOfficecliBinary,
   resolveOfficecliResourcesRoot,
@@ -140,6 +141,8 @@ describe('resolveOfficecliBinary', () => {
   it('names the Windows executable with .exe', () => {
     expect(officecliBinaryName('win32')).toBe('officecli.exe')
     expect(officecliBinaryName('darwin')).toBe('officecli')
+    expect(officecliWrapperName('win32')).toBe('officecli.cmd')
+    expect(officecliWrapperName('darwin')).toBe('officecli')
   })
 
   it('ships PATH wrappers for both Unix and Windows shells', () => {
@@ -240,6 +243,24 @@ describe('resolveOfficecliBinary', () => {
     })).toContain(join('apps', 'electron', 'resources', 'bin'))
   })
 
+  it('resolves packaged wrappers from CRAFT_RESOURCES_BASE', () => {
+    const packaged = mkdtempSync(join(tmpdir(), 'selection-packaged-officecli-'))
+    const sessionCwd = mkdtempSync(join(tmpdir(), 'selection-officecli-cwd-'))
+    try {
+      const binDir = join(packaged, 'resources', 'bin')
+      mkdirSync(binDir, { recursive: true })
+      writeFileSync(join(binDir, 'officecli'), '#!/bin/sh\necho packaged\n')
+      writeFileSync(join(binDir, 'officecli.cmd'), '@echo packaged\r\n')
+      expect(getOfficecliWrapperDir({
+        cwd: sessionCwd,
+        env: { CRAFT_RESOURCES_BASE: packaged },
+      })).toBe(binDir)
+    } finally {
+      rmSync(packaged, { recursive: true, force: true })
+      rmSync(sessionCwd, { recursive: true, force: true })
+    }
+  })
+
   it('ignores untrusted OfficeCLI resource environment overrides', () => {
     const trusted = mkdtempSync(join(tmpdir(), 'selection-trusted-officecli-resources-'))
     const untrusted = mkdtempSync(join(tmpdir(), 'selection-untrusted-officecli-resources-'))
@@ -306,7 +327,7 @@ describe('bundled officecli smoke', () => {
       const xlsx = join(workDir, '数据.xlsx')
       const pptx = join(workDir, '汇报.pptx')
       const wrapperDir = getOfficecliWrapperDir()
-      const wrapper = wrapperDir ? join(wrapperDir, process.platform === 'win32' ? 'officecli.cmd' : 'officecli') : binary
+      const wrapper = wrapperDir ? join(wrapperDir, officecliWrapperName()) : binary
 
       run(['create', docx], wrapper)
       run(['add', docx, '/body', '--type', 'paragraph', '--prop', 'text=巡察工作摘要', '--prop', 'style=Heading1'], wrapper)
@@ -509,7 +530,7 @@ describe('docx outline heading seed', () => {
     const wrapperDir = getOfficecliWrapperDir()
     if (!binary || !wrapperDir) return
 
-    const wrapper = join(wrapperDir, 'officecli')
+    const wrapper = join(wrapperDir, officecliWrapperName())
     const root = mkdtempSync(join(tmpdir(), 'officecli-heading-'))
     const touchedFiles: string[] = []
     const env = {
