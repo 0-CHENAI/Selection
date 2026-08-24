@@ -13,7 +13,12 @@ import {
 import type { LoadedSkill, LoadedSource } from '../../../shared/types'
 import type { MentionItemType } from './mention-menu'
 import { resolveSkillTitle, resolveSourceTitle } from '@craft-agent/shared/display-titles'
-import { createImeFirstKeyGate, IME_FIRST_KEY_COMMIT_DELAY_MS, shouldFlushDeferredFirstKey } from './ime-input-guards'
+import {
+  createImeFirstKeyGate,
+  EMPTY_EDITOR_ZWSP,
+  isEmptyComposerValue,
+  isPlaceholderCaretBr,
+} from './ime-input-guards'
 
 // ============================================================================
 // Types
@@ -174,6 +179,17 @@ function renderBadgeHTML(
 // Helper: Extract plain text from contenteditable
 // ============================================================================
 
+function nextMeaningfulSibling(node: Node | null): Node | null {
+  let current = node
+  while (
+    current?.nodeType === Node.TEXT_NODE &&
+    current.textContent?.replace(/\u200B/g, '') === ''
+  ) {
+    current = current.nextSibling
+  }
+  return current
+}
+
 function getTextFromElement(element: HTMLElement): string {
   let text = ''
 
@@ -197,7 +213,9 @@ function getTextFromElement(element: HTMLElement): string {
 
       // Handle line breaks
       if (el.tagName === 'BR') {
-        text += '\n'
+        if (!isPlaceholderCaretBr(isTopLevel, text, nextMeaningfulSibling(el.nextSibling) != null)) {
+          text += '\n'
+        }
       } else if (el.tagName === 'DIV' && text.length > 0 && !text.endsWith('\n')) {
         // DIVs in contenteditable normally represent line breaks.
         // HOWEVER: When typing before a badge at position 0, browsers wrap the
@@ -209,13 +227,7 @@ function getTextFromElement(element: HTMLElement): string {
           // Check if this DIV is followed by a mention badge at top level.
           // Skip over ZWS-only text nodes - browser may preserve them between
           // the DIV wrapper and the badge span.
-          let nextSibling: Node | null = el.nextSibling
-          while (
-            nextSibling?.nodeType === Node.TEXT_NODE &&
-            nextSibling.textContent?.replace(/\u200B/g, '') === ''
-          ) {
-            nextSibling = nextSibling.nextSibling
-          }
+          const nextSibling = nextMeaningfulSibling(el.nextSibling)
           const isBrowserWrapper =
             (nextSibling as HTMLElement)?.getAttribute?.('data-mention') === 'true'
           if (!isBrowserWrapper) {
@@ -241,6 +253,51 @@ function getTextFromElement(element: HTMLElement): string {
   })
 
   return text
+}
+
+/**
+ * Give Chromium a text node to attach IME composition. Build it with DOM
+ * nodes — `innerHTML` can strip a leading ZWSP and leave a `<br>`-only
+ * editor, which InsertTexts the first Pinyin letter. Caret stays inside
+ * the ZWSP node (not at element offset 0).
+ */
+export function ensureEmptyEditorAnchor(element: HTMLElement): void {
+  if (getTextFromElement(element).length > 0) return
+
+  let textNode = Array.from(element.childNodes).find(
+    (node): node is Text =>
+      node.nodeType === Node.TEXT_NODE && Boolean(node.textContent?.includes(EMPTY_EDITOR_ZWSP))
+  )
+  if (!textNode) {
+    textNode = document.createTextNode(EMPTY_EDITOR_ZWSP)
+    const br = document.createElement('br')
+    element.replaceChildren(textNode, br)
+  }
+
+  const selection = window.getSelection()
+  if (!selection) return
+  const range = document.createRange()
+  range.setStart(textNode, Math.min(EMPTY_EDITOR_ZWSP.length, textNode.data.length))
+  range.collapse(true)
+  selection.removeAllRanges()
+  selection.addRange(range)
+}
+
+function writeEditorContent(
+  element: HTMLElement,
+  text: string,
+  skills: LoadedSkill[],
+  sources: LoadedSource[],
+  workspaceId: string | undefined,
+  placeCaret: boolean
+): void {
+  if (isEmptyComposerValue(text)) {
+    const zwsp = document.createTextNode(EMPTY_EDITOR_ZWSP)
+    element.replaceChildren(zwsp, document.createElement('br'))
+    if (placeCaret) ensureEmptyEditorAnchor(element)
+    return
+  }
+  element.innerHTML = textToHTML(text, skills, sources, workspaceId)
 }
 
 // ============================================================================
@@ -528,12 +585,19 @@ export const RichTextInput = React.forwardRef<RichTextInputHandle, RichTextInput
     const isComposingRef = React.useRef(false)
     const [isComposing, setIsComposing] = React.useState(false)
     const imeGateRef = React.useRef(createImeFirstKeyGate())
-    const imeFlushTimerRef = React.useRef<number | null>(null)
     const [isImePending, setIsImePending] = React.useState(false)
     const lastValueRef = React.useRef(safeValue)
     const cursorPositionRef = React.useRef(0)
     const lastMentionSignatureRef = React.useRef('')
     const isInternalUpdate = React.useRef(false)
+    const runInternalUpdate = (fn: () => void) => {
+      isInternalUpdate.current = true
+      try {
+        fn()
+      } finally {
+        isInternalUpdate.current = false
+      }
+    }
     // Pending cursor position to restore after external value update (e.g., after @mention selection)
     const pendingCursorRef = React.useRef<number | null>(null)
 
@@ -597,10 +661,12 @@ export const RichTextInput = React.forwardRef<RichTextInputHandle, RichTextInput
     }), [])
 
     const commitInput = React.useCallback(() => {
-      if (!divRef.current) return
+      const editor = divRef.current
+      if (!editor) return
 
-      const newText = getTextFromElement(divRef.current)
-      const cursorPos = getCursorPosition(divRef.current, cursorPositionRef.current)
+      const extracted = getTextFromElement(editor)
+      const newText = isEmptyComposerValue(extracted) ? '' : extracted
+      const cursorPos = getCursorPosition(editor, cursorPositionRef.current)
 
       lastValueRef.current = newText
       cursorPositionRef.current = cursorPos
@@ -610,39 +676,21 @@ export const RichTextInput = React.forwardRef<RichTextInputHandle, RichTextInput
       if (newSignature !== lastMentionSignatureRef.current) {
         lastMentionSignatureRef.current = newSignature
         // Re-render with badges
-        isInternalUpdate.current = true
-        const html = textToHTML(newText, skills, sources, workspaceId)
-        divRef.current.innerHTML = html || '<br>' // Empty contenteditable needs a BR
-        // Restore cursor
-        setCursorPosition(divRef.current, cursorPos)
-        isInternalUpdate.current = false
+        runInternalUpdate(() => {
+          writeEditorContent(editor, newText, skills, sources, workspaceId, false)
+          if (newText) setCursorPosition(editor, cursorPos)
+          else ensureEmptyEditorAnchor(editor)
+        })
+      } else if (!newText && !isComposingRef.current && !imeGateRef.current.isComposing) {
+        runInternalUpdate(() => ensureEmptyEditorAnchor(editor))
       }
 
       onChange(newText)
       onInput?.(newText, cursorPos)
     }, [onChange, onInput, skills, sources, skillSlugs, sourceSlugs, workspaceId])
 
-    const cancelImeFlush = React.useCallback(() => {
-      if (imeFlushTimerRef.current !== null) {
-        window.clearTimeout(imeFlushTimerRef.current)
-        imeFlushTimerRef.current = null
-      }
-    }, [])
-
-    const scheduleDeferredCommit = React.useCallback(() => {
-      setIsImePending(true)
-      if (imeFlushTimerRef.current !== null) return
-      imeFlushTimerRef.current = window.setTimeout(() => {
-        imeFlushTimerRef.current = null
-        setIsImePending(false)
-        if (!imeGateRef.current.consumeDeferredCommit()) return
-        commitInput()
-      }, IME_FIRST_KEY_COMMIT_DELAY_MS)
-    }, [commitInput])
-
-    React.useEffect(() => () => cancelImeFlush(), [cancelImeFlush])
-
     const handleBeforeInput = React.useCallback((event: React.FormEvent<HTMLDivElement>) => {
+      if (isInternalUpdate.current) return
       const native = event.nativeEvent as InputEvent
       imeGateRef.current.onPossibleFirstInsert({
         nativeIsComposing: Boolean(native.isComposing),
@@ -655,6 +703,7 @@ export const RichTextInput = React.forwardRef<RichTextInputHandle, RichTextInput
 
     // Handle input events
     const handleInput = React.useCallback((event?: React.FormEvent<HTMLDivElement>) => {
+      if (isInternalUpdate.current) return
       const nativeIsComposing = Boolean((event?.nativeEvent as InputEvent | undefined)?.isComposing)
       const currentText = divRef.current ? getTextFromElement(divRef.current) : ''
       imeGateRef.current.onPossibleFirstInsert({
@@ -667,39 +716,40 @@ export const RichTextInput = React.forwardRef<RichTextInputHandle, RichTextInput
         setIsImePending(false)
         return
       }
-      if (shouldFlushDeferredFirstKey(imeGateRef.current.isPending, imeGateRef.current.isComposing, currentText)) {
-        cancelImeFlush()
-        setIsImePending(false)
-        imeGateRef.current.consumeDeferredCommit()
-        commitInput()
-        return
-      }
       if (imeGateRef.current.shouldSkipCommit(false)) {
-        scheduleDeferredCommit()
+        setIsImePending(true)
         return
       }
       commitInput()
-    }, [cancelImeFlush, commitInput, scheduleDeferredCommit])
+    }, [commitInput])
 
     // Handle composition (IME). During composition the React `value` stays empty
     // (we deliberately skip onChange), but the browser shows provisional text in
     // the contenteditable — hide the placeholder overlay so it doesn't cover IME.
     const handleCompositionStart = React.useCallback(() => {
-      cancelImeFlush()
       imeGateRef.current.onCompositionStart()
       isComposingRef.current = true
       setIsImePending(false)
       setIsComposing(true)
-    }, [cancelImeFlush])
+    }, [])
 
     const handleCompositionEnd = React.useCallback(() => {
-      cancelImeFlush()
       imeGateRef.current.onCompositionEnd()
       isComposingRef.current = false
       setIsImePending(false)
       setIsComposing(false)
       commitInput()
-    }, [cancelImeFlush, commitInput])
+    }, [commitInput])
+
+    const commitPendingFirstKeyIfIdle = React.useCallback(() => {
+      if (!imeGateRef.current.isPending || imeGateRef.current.isComposing || isComposingRef.current) {
+        return
+      }
+      setIsImePending(false)
+      if (imeGateRef.current.consumeDeferredCommit()) {
+        commitInput()
+      }
+    }, [commitInput])
 
     const handleKeyDownInternal = React.useCallback((e: React.KeyboardEvent<HTMLDivElement>) => {
       imeGateRef.current.onKeyDown({
@@ -720,6 +770,10 @@ export const RichTextInput = React.forwardRef<RichTextInputHandle, RichTextInput
 
       onKeyDown?.(e)
     }, [onKeyDown])
+
+    const handleKeyUpInternal = React.useCallback(() => {
+      commitPendingFirstKeyIfIdle()
+    }, [commitPendingFirstKeyIfIdle])
 
     // Handle paste - delegate files to parent, manually insert plain text
     const handlePasteInternal = React.useCallback((e: React.ClipboardEvent) => {
@@ -756,28 +810,29 @@ export const RichTextInput = React.forwardRef<RichTextInputHandle, RichTextInput
       // Tell browser to use <br> instead of <div> for line breaks.
       // This prevents div-wrapping when typing before non-editable spans (badges).
       document.execCommand('defaultParagraphSeparator', false, 'br')
+      const editor = divRef.current
+      if (editor && isEmptyComposerValue(lastValueRef.current)) {
+        runInternalUpdate(() => ensureEmptyEditorAnchor(editor))
+      }
       onFocus?.(e)
     }, [onFocus])
 
     // Handle blur
     const handleBlur = React.useCallback((e: React.FocusEvent<HTMLDivElement>) => {
       setIsFocused(false)
-      if (imeGateRef.current.isPending && !imeGateRef.current.isComposing && !isComposingRef.current) {
-        cancelImeFlush()
+      commitPendingFirstKeyIfIdle()
+      if (!isComposingRef.current && !imeGateRef.current.isComposing) {
         setIsImePending(false)
-        if (imeGateRef.current.consumeDeferredCommit()) {
-          commitInput()
-        }
       }
       onBlur?.(e)
-    }, [cancelImeFlush, commitInput, onBlur])
+    }, [commitPendingFirstKeyIfIdle, onBlur])
 
     // Sync value from props (when parent updates value externally)
     React.useEffect(() => {
-      if (!divRef.current) return
+      const editor = divRef.current
+      if (!editor) return
       if (isInternalUpdate.current) return
       if (lastValueRef.current !== safeValue && (isComposingRef.current || imeGateRef.current.shouldSkipCommit())) {
-        cancelImeFlush()
         imeGateRef.current.reset()
         isComposingRef.current = false
         setIsComposing(false)
@@ -791,27 +846,37 @@ export const RichTextInput = React.forwardRef<RichTextInputHandle, RichTextInput
       lastValueRef.current = safeValue
       lastMentionSignatureRef.current = getMentionSignature(safeValue, skillSlugs, sourceSlugs)
 
-      const html = textToHTML(safeValue, skills, sources, workspaceId)
-      divRef.current.innerHTML = html || '<br>'
-
-      // Restore cursor position after innerHTML update.
-      // Only restore if:
-      // 1. We have a pending position from setSelectionRange (explicit programmatic positioning), OR
-      // 2. The element is actually focused (user is actively editing)
-      // This prevents stealing focus during session changes when search is active.
-      if (pendingCursorRef.current !== null || document.activeElement === divRef.current) {
-        const cursorPos = pendingCursorRef.current ?? cursorPositionRef.current ?? safeValue.length
-        setCursorPosition(divRef.current, cursorPos)
-        pendingCursorRef.current = null // Clear after use
-      }
-    }, [cancelImeFlush, safeValue, skills, sources, skillSlugs, sourceSlugs, workspaceId])
+      const shouldPlaceCaret = pendingCursorRef.current !== null || document.activeElement === editor
+      runInternalUpdate(() => {
+        writeEditorContent(editor, safeValue, skills, sources, workspaceId, false)
+        if (shouldPlaceCaret) {
+          if (isEmptyComposerValue(safeValue)) {
+            ensureEmptyEditorAnchor(editor)
+            pendingCursorRef.current = null
+          } else {
+            const cursorPos = pendingCursorRef.current ?? cursorPositionRef.current ?? safeValue.length
+            setCursorPosition(editor, cursorPos)
+            pendingCursorRef.current = null
+          }
+        }
+      })
+    }, [safeValue, skills, sources, skillSlugs, sourceSlugs, workspaceId])
 
     // Initialize content on mount
     React.useEffect(() => {
-      if (!divRef.current) return
+      const editor = divRef.current
+      if (!editor) return
       lastMentionSignatureRef.current = getMentionSignature(safeValue, skillSlugs, sourceSlugs)
-      const html = textToHTML(safeValue, skills, sources, workspaceId)
-      divRef.current.innerHTML = html || '<br>'
+      runInternalUpdate(() => {
+        writeEditorContent(
+          editor,
+          safeValue,
+          skills,
+          sources,
+          workspaceId,
+          isEmptyComposerValue(safeValue) && document.activeElement === editor
+        )
+      })
       lastValueRef.current = safeValue
     }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -861,7 +926,7 @@ export const RichTextInput = React.forwardRef<RichTextInputHandle, RichTextInput
     // Show placeholder only when truly empty and not mid-IME composition.
     // CJK IME keeps React value empty until compositionend; provisional text
     // still lives in the contenteditable and must not sit under a placeholder.
-    const showPlaceholder = !safeValue && !isComposing && !isImePending
+    const showPlaceholder = isEmptyComposerValue(safeValue) && !isComposing && !isImePending
 
     // Normalize placeholder to array for RotatingPlaceholder
     const placeholderArray = React.useMemo(() => {
@@ -886,8 +951,6 @@ export const RichTextInput = React.forwardRef<RichTextInputHandle, RichTextInput
             'outline-none text-sm whitespace-pre-wrap break-words',
             'min-h-[1.5em]',
             disabled && 'opacity-50 cursor-not-allowed',
-            // Make text transparent when showing placeholder (so caret is still visible)
-            showPlaceholder && 'text-transparent caret-foreground',
             className
           )}
           // Use inline style for line-height to override text-sm's built-in line-height
@@ -895,6 +958,7 @@ export const RichTextInput = React.forwardRef<RichTextInputHandle, RichTextInput
           onBeforeInput={handleBeforeInput}
           onInput={handleInput}
           onKeyDown={handleKeyDownInternal}
+          onKeyUp={handleKeyUpInternal}
           onFocus={handleFocus}
           onBlur={handleBlur}
           onPaste={handlePasteInternal}

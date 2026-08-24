@@ -1,15 +1,35 @@
 /**
- * CJK IME first-key guards (#84, #97).
+ * CJK IME first-key guards (#25, #84, #97, #107).
  *
- * Chromium can insert the first latin letter on an empty contenteditable
- * before `keydown` and before `compositionstart`. Committing that letter
- * into React state (or flipping placeholder classes) rewrites the DOM and
- * prevents composition. Defer the commit until we know the key was not
- * starting an IME session.
+ * macOS Pinyin on an empty contenteditable often InsertTexts the first latin
+ * letter instead of SetComposition when the editor has no text node (only
+ * `<br>`). Deferring React commit cannot start IME after that insert. Keep a
+ * ZWSP anchor so Chromium can attach composition, do not rewrite the
+ * contenteditable on the first key, and commit English on keyup if IME
+ * never starts — not on a timer.
  */
 
-/** Wait long enough for macOS Pinyin to emit compositionstart after the first insert. */
-export const IME_FIRST_KEY_COMMIT_DELAY_MS = 80
+/** Zero-width text node so an empty editor is not `<br>`-only. */
+export const EMPTY_EDITOR_ZWSP = '\u200B'
+
+export function emptyEditorHTML(): string {
+  return `${EMPTY_EDITOR_ZWSP}<br>`
+}
+
+/** Contenteditable caret `<br>` in an otherwise empty editor is not user text. */
+export function isPlaceholderCaretBr(
+  isTopLevel: boolean,
+  textSoFar: string,
+  hasNextMeaningfulSibling: boolean,
+): boolean {
+  return isTopLevel && textSoFar.length === 0 && !hasNextMeaningfulSibling
+}
+
+/** Empty editor, or a lone newline left by the contenteditable caret `<br>`. */
+export function isEmptyComposerValue(value: string): boolean {
+  const text = value.replace(/\u200B/g, '')
+  return text === '' || text === '\n'
+}
 
 export function isImeProcessKey(event: { keyCode?: number; which?: number }): boolean {
   return event.keyCode === 229 || event.which === 229
@@ -32,11 +52,7 @@ export function isImeFirstLetter(key: string): boolean {
 }
 
 export function isEmptyEditorImeCandidate(previousValue: string, insertedOrCurrent: string): boolean {
-  return previousValue.length === 0 && isImeFirstLetter(insertedOrCurrent)
-}
-
-export function shouldFlushDeferredFirstKey(pending: boolean, composing: boolean, currentText: string): boolean {
-  return pending && !composing && currentText.length > 1
+  return isEmptyComposerValue(previousValue) && isImeFirstLetter(insertedOrCurrent)
 }
 
 export function createImeFirstKeyGate() {
@@ -74,7 +90,7 @@ export function createImeFirstKeyGate() {
 
   /**
    * Chromium may fire beforeinput/input with a single latin letter while the
-   * editor is still empty, before keydown or compositionstart (#97).
+   * editor is still empty, before keydown or compositionstart.
    */
   const onPossibleFirstInsert = (event: {
     nativeIsComposing?: boolean
@@ -114,9 +130,8 @@ export function createImeFirstKeyGate() {
     composing || nativeIsComposing === true || pendingPrintableKey
 
   /**
-   * Call after the first-key delay. Returns true when the DOM may be
-   * committed to React (English / confirmed text). Returns false when an IME
-   * composition started in the meantime.
+   * English first letters commit on keyup (or blur) if composition never
+   * started. Returns false when an IME session is active.
    */
   const consumeDeferredCommit = () => {
     pendingPrintableKey = false
