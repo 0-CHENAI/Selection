@@ -23,6 +23,8 @@ import type {
   TaskValidationResultDto,
   TaskGetResult,
   TaskResultsDto,
+  TaskControlResultDto,
+  TaskRunSnapshotDto,
 } from '@craft-agent/shared/protocol'
 import { getWorkspaceByNameOrId } from '@craft-agent/shared/config'
 import {
@@ -30,6 +32,7 @@ import {
   saveTaskSpec,
   loadTaskSpec,
   listTaskSlugs,
+  listRunIds,
   buildGeneratorPrompt,
   buildRepairPrompt,
   loadTaskResults,
@@ -37,7 +40,7 @@ import {
 import { createLogger } from '@craft-agent/shared/utils'
 import { pushTyped, type RpcServer } from '@craft-agent/server-core/transport'
 import type { HandlerDeps } from '../handler-deps'
-import { TaskRunner, createTaskFromSpec, finishTaskOrchestrator } from '../../tasks'
+import { TaskRunner, TaskControlError, createTaskFromSpec, finishTaskOrchestrator } from '../../tasks'
 
 const tasksLog = createLogger('tasks-generate')
 
@@ -49,8 +52,10 @@ export const HANDLED_CHANNELS = [
   RPC_CHANNELS.tasks.PAUSE,
   RPC_CHANNELS.tasks.RESUME,
   RPC_CHANNELS.tasks.STOP,
+  RPC_CHANNELS.tasks.CONTINUE,
   RPC_CHANNELS.tasks.GET,
   RPC_CHANNELS.tasks.LIST,
+  RPC_CHANNELS.tasks.LIST_RUNS,
   RPC_CHANNELS.tasks.GET_RESULTS,
 ] as const
 
@@ -97,10 +102,30 @@ export function registerTasksHandlers(server: RpcServer, deps: HandlerDeps): voi
     let runner = runners.get(workspaceId)
     if (!runner) {
       const ws = workspaceOrThrow(workspaceId)
-      runner = new TaskRunner({ host: deps.sessionManager, workspaceId: ws.id, workspaceRoot: ws.rootPath })
+      runner = new TaskRunner({
+        host: deps.sessionManager,
+        workspaceId: ws.id,
+        workspaceRoot: ws.rootPath,
+        onRunChanged: (snapshot) => {
+          pushTyped(server, RPC_CHANNELS.tasks.RUN_CHANGED, { to: 'workspace', workspaceId: ws.id }, ws.id, snapshot)
+        },
+      })
       runners.set(workspaceId, runner)
+      runner.scanUnfinished()
     }
     return runner
+  }
+
+  function controlResult(fn: () => TaskRunSnapshotDto | Promise<TaskRunSnapshotDto>): Promise<TaskControlResultDto> {
+    return Promise.resolve()
+      .then(fn)
+      .then((snapshot) => ({ snapshot }))
+      .catch((err: unknown) => {
+        if (err instanceof TaskControlError) {
+          return { snapshot: { slug: '', runId: '', taskId: '', status: err.status, nodes: [], tokensUsed: 0 }, conflict: { code: 'conflict' as const, message: err.message } }
+        }
+        throw err
+      })
   }
 
   deps.sessionManager.setTaskRunnerLookup((workspaceId) => runnerFor(workspaceId))
@@ -314,15 +339,19 @@ export function registerTasksHandlers(server: RpcServer, deps: HandlerDeps): voi
   })
 
   server.handle(RPC_CHANNELS.tasks.PAUSE, async (_ctx, workspaceId: string, slug: string, runId: string) => {
-    runnerFor(workspaceId).pause(slug, runId)
+    return controlResult(() => runnerFor(workspaceId).pause(slug, runId))
   })
 
   server.handle(RPC_CHANNELS.tasks.RESUME, async (_ctx, workspaceId: string, slug: string, runId: string) => {
-    runnerFor(workspaceId).resume(slug, runId)
+    return controlResult(() => runnerFor(workspaceId).resume(slug, runId))
   })
 
   server.handle(RPC_CHANNELS.tasks.STOP, async (_ctx, workspaceId: string, slug: string, runId: string) => {
-    await runnerFor(workspaceId).stop(slug, runId)
+    return controlResult(() => runnerFor(workspaceId).stop(slug, runId))
+  })
+
+  server.handle(RPC_CHANNELS.tasks.CONTINUE, async (_ctx, workspaceId: string, slug: string, runId: string) => {
+    return controlResult(() => runnerFor(workspaceId).continue(slug, runId))
   })
 
   // tasks:get — spec + (optional) active run-state.
@@ -336,13 +365,18 @@ export function registerTasksHandlers(server: RpcServer, deps: HandlerDeps): voi
         run: null,
       }
     }
-    const run = runId ? runnerFor(workspaceId).getRunState(slug, runId) : null
-    return { slug, validation: toValidationDto(loaded), spec: loaded.spec, run }
+    const runner = runnerFor(workspaceId)
+    const run = runId ? runner.getRunState(slug, runId) : null
+    return { slug, validation: toValidationDto(loaded), spec: loaded.spec, run, latestRun: run ?? runner.getLatestRun(slug) }
   })
 
   // tasks:list — slugs with a task.yaml.
   server.handle(RPC_CHANNELS.tasks.LIST, async (_ctx, workspaceId: string): Promise<string[]> => {
     return listTaskSlugs(workspaceOrThrow(workspaceId).rootPath)
+  })
+
+  server.handle(RPC_CHANNELS.tasks.LIST_RUNS, async (_ctx, workspaceId: string, slug: string): Promise<string[]> => {
+    return listRunIds(workspaceOrThrow(workspaceId).rootPath, slug)
   })
 
   // tasks:getResults — storage-backed read of a run's outcome (verdict + per-node output).

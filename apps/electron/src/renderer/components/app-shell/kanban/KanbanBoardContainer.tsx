@@ -41,6 +41,21 @@ import type {
  * and that is exactly what the tile's Play button dispatches. `lastMessageAt` can't
  * carry this distinction: the server stamps it at creation time as a sort key.
  */
+function snapshotRunState(
+  live: { nodes: { id: string; state: string }[] } | undefined,
+  taskNodeId: string | undefined,
+): SubtaskRunState | undefined {
+  if (!live || !taskNodeId) return undefined
+  const node = live.nodes.find((n) => n.id === taskNodeId)
+  if (!node) return undefined
+  if (node.state === 'done') return 'done'
+  if (node.state === 'failed' || node.state === 'invalid') return 'failed'
+  if (node.state === 'running' || node.state === 'retry-wait' || node.state === 'waiting-approval' || node.state === 'ready') {
+    return 'running'
+  }
+  return 'pending'
+}
+
 function deriveRunState(child: SessionMeta, statusesById: Map<string, SessionStatus>): SubtaskRunState {
   if (statusesById.get(child.sessionStatus ?? '')?.category === 'closed') return 'done'
   // The Conductor marks a failed node 'needs-review' (there is no 'failed' session
@@ -127,6 +142,18 @@ export function KanbanBoardContainer() {
   }, [activeWorkspaceId, projects, setProjectFilter])
 
   const [expandedTaskIds, setExpandedTaskIds] = React.useState<Set<string>>(() => new Set())
+  const [runSnapshots, setRunSnapshots] = React.useState<Map<string, { status: string; runId: string; nodes: { id: string; state: string }[] }>>(() => new Map())
+
+  React.useEffect(() => {
+    return window.electronAPI.onTaskRunChanged((wsId, snapshot) => {
+      if (wsId !== activeWorkspaceId) return
+      setRunSnapshots((prev) => {
+        const next = new Map(prev)
+        next.set(snapshot.slug, snapshot)
+        return next
+      })
+    })
+  }, [activeWorkspaceId])
 
   // Full-pane Task editor overlays the board pane (no global route needed). "Add task" opens it in
   // create mode; the tile "Edit task" affordance opens it in edit mode pointed at that session.
@@ -254,10 +281,11 @@ export function KanbanBoardContainer() {
       // Validity against the *active* column set is enforced by KanbanBoard (unknown
       // ids fall back to the first column), so no built-in-only guard is needed here.
       const column = meta.kanbanColumn ?? statusToColumn(statusId)
+      const live = meta.taskSlug ? runSnapshots.get(meta.taskSlug) : undefined
       const children: SubtaskChildRow[] = (childrenByParent.get(meta.id) ?? []).map(child => ({
         id: child.id,
         title: getSessionTitle(child),
-        runState: deriveRunState(child, statusesById),
+        runState: snapshotRunState(live, child.taskNodeId) ?? deriveRunState(child, statusesById),
         model: child.model ?? DEFAULT_MODEL,
         taskNodeId: child.taskNodeId,
         createdAt: child.createdAt,
@@ -287,7 +315,7 @@ export function KanbanBoardContainer() {
       })
     }
     return result
-  }, [metaMap, statusesById, specNodesBySlug])
+  }, [metaMap, statusesById, specNodesBySlug, runSnapshots])
 
   // Project filter: empty selection = show all. While a filter is active, tiles
   // with no project are hidden (an explicit "No project" option is a later add).
@@ -338,13 +366,27 @@ export function KanbanBoardContainer() {
     (taskId: string) => {
       const meta = metaMap.get(taskId)
       if (activeWorkspaceId && meta?.taskSlug) {
+        const live = runSnapshots.get(meta.taskSlug)
+        const fail = (err: unknown) => {
+          toast.error(t('tasks.toastRunFailed'), {
+            description: err instanceof Error ? err.message : String(err),
+          })
+        }
+        if (live && (live.status === 'paused' || live.status === 'pausing')) {
+          void window.electronAPI.resumeTask(activeWorkspaceId, meta.taskSlug, live.runId).catch(fail)
+          return
+        }
+        if (live && live.status === 'interrupted') {
+          void window.electronAPI.continueTask(activeWorkspaceId, meta.taskSlug, live.runId).catch(fail)
+          return
+        }
+        if (live && ['running', 'verifying', 'repairing', 'waiting-approval', 'waiting-budget'].includes(live.status)) {
+          void window.electronAPI.pauseTask(activeWorkspaceId, meta.taskSlug, live.runId).catch(fail)
+          return
+        }
         window.electronAPI
           .runTask(activeWorkspaceId, { slug: meta.taskSlug, orchestratorSessionId: taskId })
-          .catch((err: unknown) => {
-            toast.error(t('tasks.toastRunFailed'), {
-              description: err instanceof Error ? err.message : String(err),
-            })
-          })
+          .catch(fail)
         return
       }
       for (const child of metaMap.values()) {
@@ -359,7 +401,7 @@ export function KanbanBoardContainer() {
         updateSessionMeta(child.id, { isProcessing: true })
       }
     },
-    [metaMap, statusesById, onSendMessage, updateSessionMeta, activeWorkspaceId, t]
+    [metaMap, statusesById, onSendMessage, updateSessionMeta, activeWorkspaceId, t, runSnapshots]
   )
 
   // Create a parent task tile in place — no navigation. It lands in ToDo (no
