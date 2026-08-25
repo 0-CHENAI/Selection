@@ -180,6 +180,16 @@ export function saveTaskDocument(
   if (!incoming.valid || !incoming.spec) {
     throw new Error(`Refusing to save invalid task: ${incoming.errors.map((e) => e.message).join('; ')}`);
   }
+  let raw: unknown;
+  try {
+    raw = parseYaml(stripBom(yaml));
+  } catch (e) {
+    throw new Error(`Refusing to save invalid task: ${(e as Error).message}`);
+  }
+  const unknown = v2UnknownFields(raw);
+  if (unknown.length) {
+    throw new Error(`Refusing to save invalid task: ${unknown.map((e) => e.message).join('; ')}`);
+  }
   const slug = incoming.spec.id;
   const existing = loadTaskDocument(workspaceRoot, slug);
   if (existing) {
@@ -193,7 +203,11 @@ export function saveTaskDocument(
       backupTaskYaml(workspaceRoot, slug, existing.yaml);
     }
   }
-  const spec: TaskSpec = { ...incoming.spec, schema_version: 2 };
+  const spec: TaskSpec = {
+    ...incoming.spec,
+    schema_version: 2,
+    nodes: incoming.spec.nodes.map((n) => (n.kind === 'orchestrator' ? { ...n, kind: 'session' as const } : n)),
+  };
   // Re-parse through the v1-compatible schema after stamping version so defaults apply.
   const stamped = TaskSpecSchema.parse(spec);
   const body = serializeTaskYaml(stamped);

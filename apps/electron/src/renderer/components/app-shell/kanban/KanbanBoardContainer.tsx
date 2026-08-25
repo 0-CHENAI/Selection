@@ -18,7 +18,7 @@ import { getDefaultModelsForConnection, isUnsupportedLlmConnection, type LlmConn
 import type { SessionStatus } from '@/config/session-status-config'
 import type { KanbanColumnDef } from '@craft-agent/shared/projects/types'
 import { KanbanBoard } from './KanbanBoard'
-import { KANBAN_COLUMNS, statusToColumn } from './status-column'
+import { KANBAN_COLUMNS, resolveBoardColumn, statusToColumn } from './status-column'
 import { BoardListToggle } from './BoardListToggle'
 import { KanbanProjectFilter, type KanbanProjectFilterOption } from './KanbanProjectFilter'
 import { TaskEditor } from './TaskEditor'
@@ -241,22 +241,31 @@ export function KanbanBoardContainer() {
     }
     let cancelled = false
     void Promise.all(
-      slugs.map(async (slug): Promise<readonly [string, SpecNodeSummary[]]> => {
+      slugs.map(async (slug) => {
         try {
           const res = await window.electronAPI.getTask(activeWorkspaceId, slug)
           const spec = res.spec as { defaults?: { model?: string }; nodes?: SpecNode[] } | undefined
           const defaultModel = spec?.defaults?.model
-          return [
+          return {
             slug,
-            (spec?.nodes ?? []).map(n => ({ id: n.id, title: n.title || n.id, model: n.model ?? defaultModel })),
-          ]
+            nodes: (spec?.nodes ?? []).map(n => ({ id: n.id, title: n.title || n.id, model: n.model ?? defaultModel })),
+            latestRun: res.latestRun ?? null,
+          }
         } catch {
           // Unreadable spec → empty node list: the tile falls back to children-only rows.
-          return [slug, []]
+          return { slug, nodes: [], latestRun: null }
         }
       })
     ).then(entries => {
-      if (!cancelled) setSpecNodesBySlug(new Map(entries))
+      if (cancelled) return
+      setSpecNodesBySlug(new Map(entries.map((e) => [e.slug, e.nodes])))
+      setRunSnapshots((prev) => {
+        const next = new Map(prev)
+        for (const e of entries) {
+          if (e.latestRun) next.set(e.slug, e.latestRun)
+        }
+        return next
+      })
     })
     return () => {
       cancelled = true
@@ -277,15 +286,15 @@ export function KanbanBoardContainer() {
       if (meta.parentSessionId) continue
       if (meta.isArchived || meta.hidden || meta.taskDraft) continue
       const statusId = meta.sessionStatus ?? 'todo'
-      // Placement is the persisted free-string column, else the status' default column.
-      // Validity against the *active* column set is enforced by KanbanBoard (unknown
-      // ids fall back to the first column), so no built-in-only guard is needed here.
-      const column = meta.kanbanColumn ?? statusToColumn(statusId)
+      const projectColumns = projects.find((p) => p.config.id === meta.projectId)?.config.kanbanColumns
+      const column = meta.kanbanColumn ?? resolveBoardColumn(statusId, projectColumns) ?? statusToColumn(statusId)
       const live = meta.taskSlug ? runSnapshots.get(meta.taskSlug) : undefined
       const children: SubtaskChildRow[] = (childrenByParent.get(meta.id) ?? []).map(child => ({
         id: child.id,
         title: getSessionTitle(child),
-        runState: snapshotRunState(live, child.taskNodeId) ?? deriveRunState(child, statusesById),
+        runState: child.taskNodeId
+          ? (snapshotRunState(live, child.taskNodeId) ?? 'pending')
+          : deriveRunState(child, statusesById),
         model: child.model ?? DEFAULT_MODEL,
         taskNodeId: child.taskNodeId,
         createdAt: child.createdAt,
@@ -315,7 +324,7 @@ export function KanbanBoardContainer() {
       })
     }
     return result
-  }, [metaMap, statusesById, specNodesBySlug, runSnapshots])
+  }, [metaMap, statusesById, specNodesBySlug, runSnapshots, projects])
 
   // Project filter: empty selection = show all. While a filter is active, tiles
   // with no project are hidden (an explicit "No project" option is a later add).

@@ -638,6 +638,7 @@ export function TaskEditor({
             | undefined
           if (!spec) return
           if (res.etag) setEtag(res.etag)
+          if (res.latestRun) setLiveRun(res.latestRun)
           setSourceVersion(res.sourceVersion)
           setMigrationWarnings(res.migrationWarnings ?? [])
           if (res.yaml) setYamlDraft(res.yaml)

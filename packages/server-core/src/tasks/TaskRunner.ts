@@ -38,6 +38,8 @@ import {
   missingSensitive,
   materializeDeps,
   appendRunLog,
+  writeRunState,
+  readRunState,
   writeNodeOutput,
   writeNodeAttempt,
   readNodeOutput,
@@ -45,6 +47,7 @@ import {
   loadTaskDocument,
   writeSpecRevision,
   readSpecRevision,
+  readLatestSpecRevision,
   listTaskSlugs,
   listRunIds,
   deriveRunStatusFromLog,
@@ -248,6 +251,9 @@ class ActiveRun {
   private revision = 0;
   private readonly seenDecisionIds = new Set<string>();
   private invalidPatchCount = 0;
+  private nextSeq = 1;
+  private readonly approvalTimers = new Set<ReturnType<typeof setTimeout>>();
+  private suppressSchedule = false;
 
   constructor(
     private spec: TaskSpec,
@@ -347,6 +353,26 @@ class ActiveRun {
     return this.snapshot();
   }
 
+  restoreCheckpoint(
+    checkpoint: {
+      seq: number;
+      revision: number;
+      tokensUsed: number;
+      tokenBudget?: number;
+      seenDecisionIds: string[];
+      invalidPatchCount: number;
+    } | null,
+    revisionFallback: number,
+  ): void {
+    this.revision = checkpoint?.revision ?? revisionFallback;
+    if (!checkpoint) return;
+    this.nextSeq = checkpoint.seq + 1;
+    this.tokensUsed = checkpoint.tokensUsed;
+    if (checkpoint.tokenBudget !== undefined) this.tokenBudget = checkpoint.tokenBudget;
+    this.invalidPatchCount = checkpoint.invalidPatchCount;
+    for (const id of checkpoint.seenDecisionIds) this.seenDecisionIds.add(id);
+  }
+
   /**
    * Rebuild run state from a persisted run-log. Done nodes reuse recorded output.
    * `mode: 'scan'` marks leftover running nodes interrupted and does not schedule.
@@ -357,21 +383,25 @@ class ActiveRun {
     loadOutput: (nodeId: string) => NodeOutput | null,
     mode: 'scan' | 'hydrate' = 'hydrate',
   ): void {
+    this.suppressSchedule = true;
     for (const e of log) {
+      const entrySeq = (e as RunLogEntry & { seq?: number }).seq;
+      if (typeof entrySeq === 'number') this.nextSeq = Math.max(this.nextSeq, entrySeq + 1);
+      if ('tokensUsed' in e && typeof e.tokensUsed === 'number') this.tokensUsed = e.tokensUsed;
       if (e.kind === 'node-spawned') {
-        const st = this.state.get(e.nodeId);
+        const st = this.state.get(e.nodeId) ?? this.ensureInstanceState(e.nodeId);
         if (st) {
           st.sessionId = e.sessionId;
           this.sessionToNode.set(e.sessionId, e.nodeId);
         }
       } else if (e.kind === 'node-scheduled') {
-        const st = this.state.get(e.nodeId);
+        const st = this.state.get(e.nodeId) ?? this.ensureInstanceState(e.nodeId);
         if (st) {
           st.attempt += 1;
           if (st.state === 'pending' || st.state === 'ready' || st.state === 'retry-wait') st.state = 'running';
         }
       } else if (e.kind === 'node-finished') {
-        const st = this.state.get(e.nodeId);
+        const st = this.state.get(e.nodeId) ?? this.ensureInstanceState(e.nodeId);
         if (st) st.state = e.state;
       } else if (e.kind === 'node-waiting-approval') {
         const st = this.state.get(e.nodeId);
@@ -402,21 +432,57 @@ class ActiveRun {
       }
     }
     this.inFlight = 0;
+    this.restoreExpansionState(loadOutput);
     if (mode === 'scan' && !this.isTerminal() && this.runStatus !== 'paused' && this.runStatus !== 'waiting-approval' && this.runStatus !== 'waiting-budget') {
       this.runStatus = 'interrupted';
       this.log({ kind: 'run-interrupted' });
     }
     if (this.runStatus === 'pausing') this.runStatus = 'paused';
     this.expireApprovals(this.deps.now?.());
+    this.suppressSchedule = false;
     this.unsubscribe = this.deps.host.onSessionComplete((evt) => this.onSessionComplete(evt));
     this.emitChanged();
+  }
+
+  private ensureInstanceState(nodeId: string): NodeStateEntry | undefined {
+    if (!nodeId.includes('#')) return undefined;
+    let st = this.instances.get(nodeId);
+    if (!st) {
+      st = { state: 'pending', attempt: 0 };
+      this.instances.set(nodeId, st);
+      this.instanceCount += 1;
+    }
+    return st;
+  }
+
+  private restoreExpansionState(loadOutput: (nodeId: string) => NodeOutput | null): void {
+    for (const node of this.spec.nodes) {
+      if (node.kind === 'map' && this.state.get(node.id)?.state === 'running') {
+        try {
+          this.mapItems.set(node.id, parseForEach(this.resolveForEach(node)));
+        } catch {
+          this.mapItems.set(node.id, []);
+        }
+      }
+      if (node.kind === 'loop') {
+        let maxIdx = -1;
+        for (const iid of this.instances.keys()) {
+          if (definitionId(iid) !== node.id) continue;
+          const idx = Number(iid.slice(node.id.length + 1));
+          if (Number.isInteger(idx)) maxIdx = Math.max(maxIdx, idx);
+          const out = loadOutput(iid);
+          if (out) this.instanceOutputs.set(iid, out);
+        }
+        if (maxIdx >= 0) this.loopIndex.set(node.id, maxIdx + (this.instances.get(instanceId(node.id, maxIdx))?.state === 'done' ? 1 : 0));
+      }
+    }
   }
 
   async stop(): Promise<RunSnapshot> {
     if (this.isTerminal()) return this.snapshot();
     this.stopRequested = true;
-    for (const [nodeId, st] of this.state) {
-      if (st.state === 'running') {
+    for (const [nodeId, st] of [...this.state, ...this.instances]) {
+      if (st.state === 'running' || st.state === 'interrupted') {
         st.state = 'cancelled';
         this.inFlight = Math.max(0, this.inFlight - 1);
         this.log({ kind: 'node-finished', nodeId, sessionId: st.sessionId ?? '', state: 'cancelled', reason: 'stopped' });
@@ -424,6 +490,12 @@ class ActiveRun {
           void this.deps.host.cancelProcessing(st.sessionId, true);
           this.applyCard(st.sessionId, TODO_STATUS);
         }
+      }
+    }
+    for (const [sessionId, nodeId] of this.sessionToNode) {
+      if (this.instances.get(nodeId)?.state === 'cancelled') {
+        void this.deps.host.cancelProcessing(sessionId, true);
+        this.applyCard(sessionId, TODO_STATUS);
       }
     }
     const hasFinally =
@@ -466,6 +538,7 @@ class ActiveRun {
   // --- scheduling ---
 
   private scheduleReady(): void {
+    if (this.suppressSchedule) return;
     if (this.runStatus === 'pausing') {
       if (this.inFlight === 0) {
         this.runStatus = 'paused';
@@ -599,10 +672,7 @@ class ActiveRun {
     const targets = new Set([...node.route.cases.map((c) => c.goto), node.route.default]);
     for (const target of targets) {
       if (target === selected) continue;
-      const dest = this.spec.nodes.find((n) => n.id === target);
-      if (!dest) continue;
-      const deps = this.edges.get(target);
-      if (deps && deps.size === 1 && deps.has(node.id)) this.skipNode(target, 'route');
+      if (this.spec.nodes.some((n) => n.id === target)) this.skipNode(target, 'route');
     }
   }
 
@@ -737,8 +807,12 @@ class ActiveRun {
   }
 
   private exhaustLoop(node: TaskNode): void {
-    if (node.loop?.else) {
-      this.completeControlNode(node.id, 'exhausted', { exhausted: true });
+    const elseId = node.loop?.else;
+    if (elseId) {
+      this.completeControlNode(node.id, 'exhausted', { exhausted: true, else: elseId });
+      for (const [id, deps] of this.edges) {
+        if (id !== elseId && deps.has(node.id)) this.skipNode(id, 'loop-else');
+      }
       return;
     }
     this.failNode(node.id, 'loop-exhausted');
@@ -809,9 +883,17 @@ class ActiveRun {
     const st = this.state.get(node.id)!;
     st.state = 'waiting-approval';
     if (node.timeout && node.timeout > 0) {
-      const deadline = new Date((this.deps.now ? Date.parse(this.deps.now()) : Date.now()) + node.timeout * 1000).toISOString();
+      const nowMs = this.deps.now ? Date.parse(this.deps.now()) : Date.now();
+      const deadline = new Date(nowMs + node.timeout * 1000).toISOString();
       st.approvalDeadline = deadline;
       this.log({ kind: 'node-waiting-approval', nodeId: node.id, deadline });
+      if (!this.deps.now) {
+        const timer = setTimeout(() => {
+          this.approvalTimers.delete(timer);
+          this.expireApprovals();
+        }, node.timeout * 1000);
+        this.approvalTimers.add(timer);
+      }
     } else {
       this.log({ kind: 'node-waiting-approval', nodeId: node.id });
     }
@@ -838,7 +920,7 @@ class ActiveRun {
   acceptOutput(sessionId: string, payload: { text?: string; values?: Record<string, unknown> }): { ok: true } | { ok: false; error: string } {
     const nodeId = this.sessionToNode.get(sessionId);
     if (!nodeId) return { ok: false, error: 'Session is not a node in this run' };
-    const node = this.spec.nodes.find((n) => n.id === nodeId);
+    const node = this.spec.nodes.find((n) => n.id === nodeId || n.id === definitionId(nodeId));
     if (!node) return { ok: false, error: 'Unknown node' };
     const declared = node.outputs ?? [];
     const values = { ...(payload.values ?? {}) };
@@ -862,7 +944,6 @@ class ActiveRun {
     if (this.runStatus !== 'verifying') {
       throw new TaskControlError(this.runStatus, 'Run is not waiting for a verdict');
     }
-    this.verdictLocked = true;
     this.handleVerdictObject({ result: payload.result, reason: payload.reason, nodes: payload.nodes });
     return this.snapshot();
   }
@@ -887,7 +968,9 @@ class ActiveRun {
     const now = nowIso ? Date.parse(nowIso) : Date.now();
     for (const [id, st] of this.state) {
       if (st.state !== 'waiting-approval' || !st.approvalDeadline) continue;
-      if (Date.parse(st.approvalDeadline) <= now) this.failNode(id, 'approval-timeout', st.sessionId, 'error');
+      if (Date.parse(st.approvalDeadline) > now) continue;
+      if (this.runStatus === 'waiting-approval') this.runStatus = 'running';
+      this.failNode(id, 'approval-timeout', st.sessionId, 'error');
     }
   }
 
@@ -916,12 +999,14 @@ class ActiveRun {
     if (approval.length) {
       this.runStatus = 'waiting-approval';
       this.log({ kind: 'run-waiting-approval' });
+      this.coordinatorCheckpoint('approval');
       this.emitChanged();
       return;
     }
     if (this.isOverBudget() && this.hasPendingNodes()) {
       this.runStatus = 'waiting-budget';
       this.log({ kind: 'run-waiting-budget' });
+      this.coordinatorCheckpoint('budget');
       this.emitChanged();
     }
   }
@@ -1154,6 +1239,7 @@ class ActiveRun {
 
   /** Enter the non-terminal `verifying` state and ask the orchestrator for a verdict. Does NOT finalize. */
   private enterVerifying(): void {
+    this.verdictLocked = false;
     this.coordinatorCheckpoint('before-verify');
     this.runStatus = 'verifying';
     this.log({ kind: 'run-verifying' });
@@ -1179,6 +1265,8 @@ class ActiveRun {
     this.verdictOff = undefined;
     for (const timer of this.retryTimers) clearTimeout(timer);
     this.retryTimers.clear();
+    for (const timer of this.approvalTimers) clearTimeout(timer);
+    this.approvalTimers.clear();
     if (this.settled) return;
     this.settled = true;
     const snap = this.snapshot();
@@ -1264,6 +1352,8 @@ class ActiveRun {
 
   private handleVerdictObject(verdict: { result: 'pass' | 'fail' | 'unparsed'; reason?: string; nodes?: string[] }): void {
     if (this.runStatus !== 'verifying') return;
+    if (this.verdictLocked) return;
+    this.verdictLocked = true;
     this.log({ kind: 'verdict', result: verdict.result, reason: verdict.reason, nodes: verdict.nodes });
 
     if (verdict.result === 'pass') {
@@ -1293,11 +1383,14 @@ class ActiveRun {
       return;
     }
     this.repairsUsed += 1;
+    this.runStatus = 'repairing';
+    this.log({ kind: 'run-repairing' });
     this.repairForVerdict(verdict.reason, verdict.nodes);
   }
 
   /** Re-ask the orchestrator for a parseable verdict line (format-only; does not consume repair budget). */
   private async reAskVerdict(): Promise<void> {
+    this.verdictLocked = false;
     const orchestrator = this.opts.orchestratorSessionId;
     if (!orchestrator) {
       this.finish('completed');
@@ -1485,7 +1578,21 @@ class ActiveRun {
 
   private log(entry: RunLogEntryInput): void {
     const t = this.deps.now ? this.deps.now() : new Date().toISOString();
-    appendRunLog(this.deps.workspaceRoot, this.slug, this.runId, { ...entry, t } as RunLogEntry);
+    const seq = this.nextSeq++;
+    appendRunLog(this.deps.workspaceRoot, this.slug, this.runId, {
+      ...entry,
+      t,
+      seq,
+      revision: this.revision,
+    });
+    writeRunState(this.deps.workspaceRoot, this.slug, this.runId, {
+      seq,
+      revision: this.revision,
+      tokensUsed: this.tokensUsed,
+      tokenBudget: this.tokenBudget,
+      seenDecisionIds: [...this.seenDecisionIds],
+      invalidPatchCount: this.invalidPatchCount,
+    });
     if (
       entry.kind === 'run-started' ||
       entry.kind === 'run-completed' ||
@@ -1692,12 +1799,14 @@ export class TaskRunner {
 
   /** Reconstruct an in-memory run from the run spec snapshot + run-log. Never reads live YAML for the graph. */
   private rehydrate(slug: string, runId: string, mode: 'scan' | 'hydrate'): ActiveRun {
-    const spec = readSpecRevision(this.deps.workspaceRoot, slug, runId, 0);
+    const latest = readLatestSpecRevision(this.deps.workspaceRoot, slug, runId);
+    const spec = latest?.spec ?? readSpecRevision(this.deps.workspaceRoot, slug, runId, 0);
     if (!spec) throw new Error(`Cannot restore "${slug}:${runId}": no spec snapshot`);
     const log = readRunLog(this.deps.workspaceRoot, slug, runId);
     if (log.length === 0) throw new Error(`Cannot restore "${slug}:${runId}": no run-log found`);
     const started = log.find((e) => e.kind === 'run-started');
     const orchestratorSessionId = started && started.kind === 'run-started' ? started.orchestratorSessionId : undefined;
+    const checkpoint = readRunState(this.deps.workspaceRoot, slug, runId);
     const run = new ActiveRun(
       spec,
       slug,
@@ -1710,6 +1819,7 @@ export class TaskRunner {
       },
       this.deps,
     );
+    run.restoreCheckpoint(checkpoint, latest?.revision ?? 0);
     run.hydrate(log, (nodeId) => readNodeOutput(this.deps.workspaceRoot, slug, runId, nodeId), mode);
     this.runs.set(this.key(slug, runId), run);
     return run;
@@ -1724,7 +1834,7 @@ export class TaskRunner {
   async stop(slug: string, runId: string): Promise<RunSnapshot> {
     const existing = this.runs.get(this.key(slug, runId));
     if (existing) return existing.stop();
-    return this.rehydrate(slug, runId, 'hydrate').stop();
+    return this.rehydrate(slug, runId, 'scan').stop();
   }
 
   respondApproval(slug: string, runId: string, nodeId: string, approved: boolean): RunSnapshot {
@@ -1764,7 +1874,16 @@ export class TaskRunner {
       const snap = run.snapshot();
       if (snap.slug === slug) latest = snap;
     }
-    return latest;
+    if (latest) return latest;
+    const last = listRunIds(this.deps.workspaceRoot, slug).at(-1);
+    if (!last) return null;
+    try {
+      const snap = this.rehydrate(slug, last, isTerminalRunStatus(deriveRunStatusFromLog(readRunLog(this.deps.workspaceRoot, slug, last))) ? 'hydrate' : 'scan').snapshot();
+      if (isTerminalRunStatus(snap.status)) this.runs.delete(this.key(slug, last));
+      return snap;
+    } catch {
+      return null;
+    }
   }
 
   /** Await a run reaching a terminal state (completed/failed/stopped). */

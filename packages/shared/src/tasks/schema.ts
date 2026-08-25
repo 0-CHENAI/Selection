@@ -281,6 +281,13 @@ export const TaskSpecSchema = z
           path: ['nodes', i, 'prompt'],
         });
       }
+      if (node.kind === 'loop' && !node.loop) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `Node "${node.id}" is a loop and must declare loop.max`,
+          path: ['nodes', i, 'loop'],
+        });
+      }
     });
   });
 

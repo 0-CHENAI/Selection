@@ -1156,6 +1156,29 @@ describe('TaskRunner (Conductor)', () => {
     host.complete('work');
     await tick();
     expect(approver.getRunState('appr2', 'r2')!.status).toBe('completed');
+
+    saveTaskSpec(
+      root,
+      specOf({
+        schema_version: 2,
+        id: 'appr3',
+        title: 'Appr3',
+        goal: 'g',
+        nodes: [
+          { id: 'gate', kind: 'approval', timeout: 1 },
+          { id: 'work', depends_on: ['gate'], prompt: 'work' },
+        ],
+      }),
+    );
+    let now = '2026-06-07T00:00:00.000Z';
+    const timed = new TaskRunner({ host, workspaceId: 'ws', workspaceRoot: root, now: () => now });
+    timed.run('appr3', { runId: 'r3', verifyOnComplete: false });
+    await tick();
+    expect(timed.getRunState('appr3', 'r3')!.status).toBe('waiting-approval');
+    now = '2026-06-07T00:00:02.000Z';
+    const scanned = new TaskRunner({ host, workspaceId: 'ws', workspaceRoot: root, now: () => now });
+    scanned.scanUnfinished();
+    expect(scanned.getRunState('appr3', 'r3')!.nodes.find((n) => n.id === 'gate')!.state).toBe('failed');
   });
 
   it('v2 finally runs after a failure and does not overwrite the original failure', async () => {
@@ -1339,6 +1362,32 @@ describe('TaskRunner (Conductor)', () => {
     expect(runner.getRunState('mp', 'r1')!.status).toBe('completed');
   });
 
+  it('v2 map instance accepts submit_task_output against the definition node', async () => {
+    saveTaskSpec(
+      root,
+      specOf({
+        schema_version: 2,
+        id: 'mpo',
+        title: 'Mpo',
+        goal: 'g',
+        params: [{ name: 'items', default: '["one"]' }],
+        nodes: [
+          {
+            id: 'fan',
+            kind: 'map',
+            for_each: '${params.items}',
+            prompt: 'do ${item}',
+            outputs: [{ name: 'item', required: true }],
+          },
+        ],
+      }),
+    );
+    const runner = makeRunner();
+    runner.run('mpo', { runId: 'r1', verifyOnComplete: false });
+    await tick();
+    expect(runner.submitNodeOutput(host.sessionIdFor('fan#0'), { values: { item: 'one' } })).toEqual({ ok: true });
+  });
+
   it('v2 map over 256 instances fails the run', async () => {
     const items = JSON.stringify(Array.from({ length: 300 }, (_, i) => i));
     saveTaskSpec(
@@ -1413,6 +1462,36 @@ describe('TaskRunner (Conductor)', () => {
     host.complete('iter#1', { finalText: 'b' });
     await tick();
     expect(runner2.getRunState('lp2', 'r2')!.status).toBe('failed');
+
+    saveTaskSpec(
+      root,
+      specOf({
+        schema_version: 2,
+        id: 'lp3',
+        title: 'Lp3',
+        goal: 'g',
+        nodes: [
+          {
+            id: 'iter',
+            kind: 'loop',
+            loop: { until: { ref: 'nodes.iter.output', op: 'eq', value: 'never' }, max: 1, else: 'fallback' },
+            prompt: 'n=${index}',
+          },
+          { id: 'fallback', depends_on: ['iter'], prompt: 'fb' },
+          { id: 'okpath', depends_on: ['iter'], prompt: 'ok' },
+        ],
+      }),
+    );
+    const runner3 = new TaskRunner({ host, workspaceId: 'ws', workspaceRoot: root, now: () => '2026-06-07T00:00:00.000Z' });
+    runner3.run('lp3', { runId: 'r3', verifyOnComplete: false });
+    await tick();
+    host.complete('iter#0', { finalText: 'still-going' });
+    await tick();
+    expect(runner3.getRunState('lp3', 'r3')!.nodes.find((n) => n.id === 'okpath')!.state).toBe('skipped');
+    expect(host.dispatchedNames()).toContain('fallback');
+    host.complete('fallback');
+    await tick();
+    expect(runner3.getRunState('lp3', 'r3')!.status).toBe('completed');
   });
 
   it('v2 filter and aggregate transform without sessions', async () => {
@@ -1523,6 +1602,10 @@ describe('TaskRunner (Conductor)', () => {
       host.complete('a', { finalText: 'A' });
       await tick();
       expect(host.dispatchedNames()).toContain('b');
+      const restarted = new TaskRunner({ host, workspaceId: 'ws', workspaceRoot: root, now: () => '2026-06-07T00:00:00.000Z' });
+      restarted.scanUnfinished();
+      expect(restarted.getRunState('orchp2', 'r2')!.revision).toBe(1);
+      expect(restarted.getRunState('orchp2', 'r2')!.nodes.some((n) => n.id === 'b')).toBe(true);
     } finally {
       if (prev === undefined) delete process.env.CRAFT_FEATURE_TASKS_ORCHESTRATE;
       else process.env.CRAFT_FEATURE_TASKS_ORCHESTRATE = prev;
