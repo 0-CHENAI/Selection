@@ -84,6 +84,8 @@ export { handleSubmitTaskOutput } from './submit-task-output.ts';
 export type { SubmitTaskOutputArgs } from './submit-task-output.ts';
 export { handleSubmitTaskVerdict } from './submit-task-verdict.ts';
 export { handleSubmitOrchestrationPatch } from './submit-orchestration-patch.ts';
+export { handleSubmitTaskDefinition } from './submit-task-definition.ts';
+export { handleControlTaskRun } from './control-task-run.ts';
 export type { SubmitTaskVerdictArgs } from './submit-task-verdict.ts';
 export { handleArchiveSession } from './archive-session.ts';
 export type { ArchiveSessionArgs } from './archive-session.ts';

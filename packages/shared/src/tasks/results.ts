@@ -14,6 +14,7 @@ import {
   readRunLog,
   readRunSpecSnapshot,
 } from './storage.ts'
+import { readLatestSpecRevision } from './revisions.ts'
 
 export interface LoadedTaskResults {
   slug: string
@@ -33,7 +34,10 @@ export interface LoadedTaskResults {
     output?: string
     attempt?: number
     failureReason?: string
+    outputs?: Record<string, unknown>
+    artifacts?: unknown[]
   }>
+  revision?: number
 }
 
 export function loadTaskResults(root: string, slug: string, runId?: string): LoadedTaskResults {
@@ -91,6 +95,10 @@ export function loadTaskResults(root: string, slug: string, runId?: string): Loa
       ...(e.sessionId ? { sessionId: e.sessionId } : {}),
       ...(e.failureReason ? { failureReason: e.failureReason } : {}),
       ...(out?.text ? { output: out.text } : {}),
+      ...(out?.params ? { outputs: out.params } : {}),
+      ...(out?.params && Object.values(out.params).some((v) => v && typeof v === 'object' && 'hash' in (v as object))
+        ? { artifacts: Object.values(out.params).filter((v) => v && typeof v === 'object' && 'hash' in (v as object)) }
+        : {}),
     }
   })
 
@@ -108,5 +116,6 @@ export function loadTaskResults(root: string, slug: string, runId?: string): Loa
     ...(tokensUsed !== undefined ? { tokensUsed } : {}),
     ...(snapshot?.acceptance_criteria ? { acceptanceCriteria: snapshot.acceptance_criteria } : {}),
     nodes,
+    revision: readLatestSpecRevision(root, slug, chosen)?.revision,
   }
 }
