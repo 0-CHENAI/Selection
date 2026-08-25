@@ -15,7 +15,7 @@ import {
   toSkillCatalogEntries,
   truncateSkillDescription,
 } from '../catalog.ts';
-import { invalidateSkillsCache, loadAllSkills } from '../storage.ts';
+import { invalidateSkillsCache, invalidateSkillsCacheIfSkillMarkdown, loadAllSkills } from '../storage.ts';
 import type { LoadedSkill } from '../types.ts';
 
 function skill(overrides: Partial<LoadedSkill> & { slug: string; description?: string; name?: string; globs?: string[]; requiredSources?: string[] }): LoadedSkill {
@@ -190,6 +190,35 @@ describe('skill catalog', () => {
       const after = buildSkillCatalog(loadAllSkills(root)) ?? '';
       expect(after).toContain(`(${slug})`);
       expect(after).toContain('A newly added workspace skill');
+    } finally {
+      invalidateSkillsCache();
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('rebuilds the handbook after a SKILL.md write invalidates the cache', () => {
+    const root = mkdtempSync(join(tmpdir(), 'skill-catalog-write-'));
+    const skillsDir = join(root, 'skills');
+    mkdirSync(skillsDir, { recursive: true });
+    try {
+      invalidateSkillsCache();
+      buildSkillCatalog(loadAllSkills(root));
+      const slug = `written-skill-${Date.now()}`;
+      const skillMd = join(skillsDir, slug, 'SKILL.md');
+      mkdirSync(join(skillsDir, slug), { recursive: true });
+      writeFileSync(skillMd, [
+        '---',
+        'name: Written Skill',
+        'description: Created by a conversation Write',
+        '---',
+        '',
+        'Hello',
+      ].join('\n'));
+      expect(buildSkillCatalog(loadAllSkills(root)) ?? '').not.toContain(`(${slug})`);
+      invalidateSkillsCacheIfSkillMarkdown({ filePath: skillMd });
+      const after = buildSkillCatalog(loadAllSkills(root)) ?? '';
+      expect(after).toContain(`(${slug})`);
+      expect(after).toContain('Created by a conversation Write');
     } finally {
       invalidateSkillsCache();
       rmSync(root, { recursive: true, force: true });

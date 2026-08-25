@@ -56,6 +56,22 @@ describe('skill file import (#82)', () => {
     }
   })
 
+  it('imports a YAML list description as catalog text', () => {
+    const root = workspace()
+    try {
+      const result = importSkillMarkdown(root, `---
+name: List Desc
+description:
+  - Helps with office
+  - documents
+---
+`, { action: 'overwrite' })
+      expect(loadSkillBySlug(root, result.slug)?.metadata.description).toBe('Helps with office documents')
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
   it('rejects zip path traversal and missing frontmatter', () => {
     const root = workspace()
     try {

@@ -505,5 +505,40 @@ describe('BaseAgent', () => {
       expect(sent).toContain('(skill: officecli)');
       expect(sent).not.toContain('The following skills may apply this turn');
     });
+
+    it('includes a conversation-written skill on the next turn after Write', async () => {
+      const root = mkdtempSync(join(tmpdir(), 'skill-chat-write-'));
+      try {
+        const writeAgent = new TestAgent(createMockBackendConfig({
+          workspace: {
+            id: 'write-workspace',
+            name: 'Write Workspace',
+            slug: 'write-workspace',
+            rootPath: root,
+            createdAt: Date.now(),
+          },
+        }));
+        await collectEvents(writeAgent.chat('hello'));
+        const skillsDir = join(root, 'skills', 'chat-made');
+        mkdirSync(skillsDir, { recursive: true });
+        const skillMd = join(skillsDir, 'SKILL.md');
+        writeFileSync(skillMd, [
+          '---',
+          'name: Chat Made',
+          'description: Created in this conversation',
+          '---',
+          '',
+          'Do the thing.',
+        ].join('\n'));
+        expect(writeAgent.getPromptBuilder().formatSkillCatalog() ?? '').not.toContain('(chat-made)');
+
+        writeAgent.noteSkillWrite(skillMd);
+        const catalog = writeAgent.getPromptBuilder().formatSkillCatalog() ?? '';
+        expect(catalog).toContain('Chat Made (chat-made)');
+        expect(catalog).toContain('Created in this conversation');
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
+    });
   });
 });

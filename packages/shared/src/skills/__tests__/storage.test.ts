@@ -28,6 +28,11 @@ import {
   skillExists,
   listSkillSlugs,
   deleteSkill,
+  invalidateSkillsCache,
+  invalidateSkillsCacheIfSkillMarkdown,
+  isSkillMarkdownPath,
+  shouldInvalidateSkillsCacheForTool,
+  skillMutationFromToolEvent,
 } from '../storage.ts';
 import { BUNDLED_OFFICECLI_SKILL_SLUGS, getBundledOfficecliSkillsDir } from '../../utils/officecli.ts';
 
@@ -182,6 +187,26 @@ describe('loadSkill', () => {
 
     expect(skill).not.toBeNull();
     expect(skill!.metadata.globs).toEqual(['*.tsx', '*.css']);
+  });
+
+  it('coerces YAML list descriptions and a single glob string', () => {
+    const skillDir = join(workspaceRoot, 'skills', 'yaml-list');
+    mkdirSync(skillDir, { recursive: true });
+    writeFileSync(join(skillDir, 'SKILL.md'), [
+      '---',
+      'name: YAML List',
+      'description:',
+      '  - Review PDFs',
+      '  - and extract tables',
+      'globs: "**/*.pdf"',
+      '---',
+      '',
+      'Body',
+    ].join('\n'));
+
+    const skill = loadSkill(workspaceRoot, 'yaml-list');
+    expect(skill?.metadata.description).toBe('Review PDFs and extract tables');
+    expect(skill?.metadata.globs).toEqual(['**/*.pdf']);
   });
 
   it('should load skill with normalized requiredSources', () => {
@@ -630,5 +655,43 @@ describe('deleteSkill', () => {
   it('should return false for non-existent skill', () => {
     const result = deleteSkill(workspaceRoot, 'nonexistent');
     expect(result).toBe(false);
+  });
+
+  it('drops the list cache so a deleted skill disappears immediately', () => {
+    createSkill(join(workspaceRoot, 'skills'), 'cached-delete');
+    invalidateSkillsCache();
+    expect(loadAllSkills(workspaceRoot).some(skill => skill.slug === 'cached-delete')).toBe(true);
+    expect(deleteSkill(workspaceRoot, 'cached-delete')).toBe(true);
+    expect(loadAllSkills(workspaceRoot).some(skill => skill.slug === 'cached-delete')).toBe(false);
+  });
+});
+
+describe('skill markdown cache invalidation', () => {
+  it('detects SKILL.md paths and Bash commands', () => {
+    expect(isSkillMarkdownPath('/ws/skills/commit/SKILL.md')).toBe(true);
+    expect(isSkillMarkdownPath('C:\\ws\\skills\\commit\\SKILL.md')).toBe(true);
+    expect(isSkillMarkdownPath('/ws/skills/commit/README.md')).toBe(false);
+    expect(shouldInvalidateSkillsCacheForTool({ command: 'cat > /ws/skills/x/SKILL.md' })).toBe(true);
+    expect(shouldInvalidateSkillsCacheForTool({ command: 'echo hi' })).toBe(false);
+    expect(skillMutationFromToolEvent('Write', { file_path: '/ws/skills/x/SKILL.md' })).toEqual({
+      filePath: '/ws/skills/x/SKILL.md',
+    });
+    expect(skillMutationFromToolEvent('Write', { path: '/ws/skills/x/SKILL.md' })).toEqual({
+      filePath: '/ws/skills/x/SKILL.md',
+    });
+    expect(skillMutationFromToolEvent('Read', { file_path: '/ws/skills/x/SKILL.md' })).toBeNull();
+    expect(skillMutationFromToolEvent('Write', undefined)).toBeNull();
+  });
+
+  it('makes a newly written workspace skill visible without waiting for TTL', () => {
+    const skillsDir = join(workspaceRoot, 'skills');
+    invalidateSkillsCache();
+    loadAllSkills(workspaceRoot);
+    createSkill(skillsDir, 'chat-made', { name: 'Chat Made', description: 'Created in conversation' });
+    expect(loadAllSkills(workspaceRoot).some(skill => skill.slug === 'chat-made')).toBe(false);
+    expect(invalidateSkillsCacheIfSkillMarkdown({
+      filePath: join(skillsDir, 'chat-made', 'SKILL.md'),
+    })).toBe(true);
+    expect(loadAllSkills(workspaceRoot).some(skill => skill.slug === 'chat-made')).toBe(true);
   });
 });
