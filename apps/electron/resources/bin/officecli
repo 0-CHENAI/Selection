@@ -28,6 +28,8 @@ if [ -z "$BIN" ] || [ ! -f "$BIN" ]; then
   exit 127
 fi
 
+export OFFICECLI_SKIP_UPDATE=1
+
 verb=""
 docx=""
 for arg in "$@"; do

@@ -77,6 +77,15 @@ describe('system prompt guidance', () => {
     expect(prompt).toContain('Name sources and skills as title + slug')
   })
 
+  it('uses configured sources directly and relies on automatic guide preparation', () => {
+    const prompt = getSystemPrompt(undefined, undefined, '/tmp/workspace', '/tmp/workspace')
+
+    expect(prompt).toContain('meaningful source guidelines are supplied automatically before execution')
+    expect(prompt).toContain('Do not read its `config.json` or `guide.md`')
+    expect(prompt).not.toContain('Usage guidelines (read before first use!)')
+    expect(prompt).not.toContain('read its `config.json` + `guide.md`, then use it')
+  })
+
   it('keeps Codex tool-naming guidance aligned with title + slug speech', () => {
     const prompt = getSystemPrompt(undefined, undefined, '/tmp/workspace', '/tmp/workspace', undefined, 'Codex')
 

@@ -23,6 +23,26 @@ describe('OfficeCLI sync governance', () => {
     expect(() => validateManifestFiles(manifest())).not.toThrow();
   });
 
+  it('prevents reviewed binaries from self-updating through every managed launch path', () => {
+    const repositoryRoot = resolve(import.meta.dir, '..');
+    const managedLaunchPaths = [
+      'scripts/sync-officecli.ts',
+      'scripts/run-officecli-integration-tests.ts',
+      'apps/electron/resources/bin/officecli',
+      'apps/electron/resources/bin/officecli.cmd',
+      'apps/electron/resources/scripts/officecli-wrapper.ts',
+      'apps/electron/resources/scripts/officecli-heading-repair.ts',
+      'packages/shared/src/agent/pi-agent.ts',
+    ];
+
+    for (const path of managedLaunchPaths) {
+      const content = readFileSync(join(repositoryRoot, path), 'utf8');
+      expect(content, `${path} must disable OfficeCLI self-updates`).toMatch(
+        /OFFICECLI_SKIP_UPDATE(?:=1|['"]?\s*:\s*['"]1['"])/,
+      );
+    }
+  });
+
   it('records the reviewed Windows schema CRC without changing the default CRC', () => {
     const reviewed = manifest();
     expect(reviewed.schemaCrc).toBe('b2b0b395');

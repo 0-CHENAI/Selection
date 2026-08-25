@@ -11,7 +11,7 @@
  * Pipeline steps:
  * 1. Permission mode check: Block tools disallowed by current mode
  * 2. Source blocking: Block tools from inactive MCP sources
- * 3. Prerequisite check: Block source tools until guide.md is read
+ * 3. Prerequisite check: Prepare meaningful source guides; enforce Skill/browser reads
  * 4. call_llm detection: Intercept mcp__session__call_llm
  * 5. Input transforms: Path expansion, config validation, skill qualification,
  *    metadata stripping
@@ -617,6 +617,14 @@ export type PreToolUseCheckResult =
       approvalTtlSeconds?: number;
     }
   | { type: 'source_activation_needed'; sourceSlug: string; sourceExists: boolean; additionalSourceSlugs?: string[] }
+  | {
+      type: 'source_guide_required';
+      sourceSlug: string;
+      guidePath: string;
+      guideContent: string;
+      guideVersion: string;
+      alreadyPreparedInGeneration: boolean;
+    }
   | { type: 'call_llm_intercept'; input: Record<string, unknown> }
   | { type: 'spawn_session_intercept'; input: Record<string, unknown> };
 
@@ -651,10 +659,12 @@ export interface PreToolUseInput {
   hasSourceActivation: boolean;
   /** PermissionManager for session-scoped whitelists */
   permissionManager: PermissionManagerLike;
-  /** PrerequisiteManager for guide.md checking */
+  /** PrerequisiteManager for source-guide preparation and Skill/browser checks */
   prerequisiteManager?: PrerequisiteManagerLike;
   /** Backend metadata (e.g. Pi forwards intent / displayName via input.metadata) */
   backendMetadata?: { intent?: string; displayName?: string };
+  /** Assistant message generation, used to defer source-call siblings until replanning. */
+  assistantGeneration?: number;
   /** Debug callback */
   onDebug?: (message: string) => void;
 }
@@ -675,7 +685,7 @@ export interface PermissionManagerLike {
  * Minimal interface for PrerequisiteManager.
  */
 export interface PrerequisiteManagerLike {
-  checkPrerequisites(toolName: string): PrerequisiteCheckResult;
+  checkPrerequisites(toolName: string, assistantGeneration?: number): PrerequisiteCheckResult;
   trackBashSkillRead(input: Record<string, unknown>): boolean;
   findCatalogSkillForTool?(toolName: string, input: Record<string, unknown>): { requiredSources?: string[] } | null;
 }
@@ -695,7 +705,7 @@ const FILE_WRITE_TOOLS = new Set(['Write', 'Edit', 'MultiEdit', 'NotebookEdit'])
  * Pipeline:
  * 1. Permission mode check (shouldAllowToolInMode)
  * 2. Source blocking (inactive MCP sources)
- * 3. Prerequisite check (guide.md before source tools)
+ * 3. Prerequisite check (on-demand source guides and Skill/browser requirements)
  * 4. call_llm interception
  * 5. Input transforms and routing guards (paths, Office, config, skills, metadata)
  * 6. Ask-mode prompt decision
@@ -732,6 +742,7 @@ export function runPreToolUseChecks(ctx: PreToolUseInput): PreToolUseCheckResult
     permissionManager,
     prerequisiteManager,
     backendMetadata,
+    assistantGeneration,
     onDebug,
   } = ctx;
 
@@ -790,15 +801,26 @@ export function runPreToolUseChecks(ctx: PreToolUseInput): PreToolUseCheckResult
   }
 
   // ============================================================
-  // 3. PREREQUISITE CHECK (guide.md before source tools)
+  // 3. PREREQUISITE CHECK (on-demand source guides and Skill/browser requirements)
   // ============================================================
   if (prerequisiteManager) {
     // Allow Bash through if it's reading a pending skill file (clears the prerequisite)
     if (toolName === 'Bash' && prerequisiteManager.trackBashSkillRead(input)) {
       // Prerequisite cleared — fall through to remaining pipeline steps
     } else {
-      const prereqResult = prerequisiteManager.checkPrerequisites(toolName);
+      const prereqResult = prerequisiteManager.checkPrerequisites(toolName, assistantGeneration);
       if (!prereqResult.allowed) {
+        if (prereqResult.sourceGuide) {
+          const guide = prereqResult.sourceGuide;
+          return {
+            type: 'source_guide_required',
+            sourceSlug: guide.sourceSlug,
+            guidePath: guide.filePath,
+            guideContent: guide.content,
+            guideVersion: guide.version,
+            alreadyPreparedInGeneration: guide.alreadyPreparedInGeneration,
+          };
+        }
         return { type: 'block', reason: prereqResult.blockReason!, source: 'prerequisite' };
       }
     }

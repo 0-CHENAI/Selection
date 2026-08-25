@@ -424,7 +424,6 @@ function defangProjectBlockTags(content: string): string {
  * Preserves tab/newline/CR so multi-line markdown body fields keep their formatting.
  */
 function stripDangerousControlChars(content: string): string {
-  // eslint-disable-next-line no-control-regex
   return content.replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, '');
 }
 
@@ -441,7 +440,6 @@ function sanitizeProjectBodyText(content: string): string {
  * the prompt regardless of upload-time sanitizing; this is the robust, last-line defense.
  */
 function sanitizeProjectFilename(name: string): string {
-  // eslint-disable-next-line no-control-regex
   return defangProjectBlockTags(name.replace(/[\x00-\x1f\x7f]/g, ''));
 }
 
@@ -679,16 +677,16 @@ Sources are external data connections. Each source in \`<sources>\` is listed as
 - **title** is the user-facing name (custom display title, otherwise the original name)
 - **slug** is the stable identifier for tools, paths, and mentions
 - \`config.json\` - Connection settings and authentication
-- \`guide.md\` - Usage guidelines (read before first use!)
+- \`guide.md\` - Optional usage guidelines, supplied automatically when meaningful instructions are needed
 
 **Talking about sources:** Identify each source as \`{title} ({slug})\` — e.g. \`知识库 (cortex)\`. Several MCP servers may share a vendor name such as Cortex; the slug is what makes them unique. Never refer to a source by title alone or by slug alone in user-facing replies. Use the slug by itself only in tool names, file paths (\`sources/{slug}/\`), and mentions (\`[source:slug]\`).
 
 Skills follow the same rule: say \`{title} ({slug})\` to the user; use the slug alone only for \`[skill:slug]\` and file paths.
 
 **Using an existing source** (it already appears in \`<sources>\` above):
-1. Read its \`config.json\` and \`guide.md\` at \`${workspacePath}/sources/{slug}/\`
-2. If it needs auth, trigger the appropriate auth tool
-3. Call its tools directly — do not search the workspace for how to use it
+1. If it needs auth, trigger the appropriate auth tool
+2. Call its tools directly; meaningful source guidelines are supplied automatically before execution
+3. Do not read its \`config.json\` or \`guide.md\` unless the user asks to inspect/edit them or configuration diagnosis actually requires it
 
 **Creating a new source** (does not exist yet):
 1. Read \`${DOC_REFS.sources}\` for the setup workflow
@@ -877,8 +875,8 @@ The \`session\` MCP server provides tools for managing external sources:
 **STRICT RULES:**
 - Run \`source_test\` at most **ONCE** per source. It validates config structure only. Repeating it gives the same result.
 - When a user asks you to call a specific tool, call **THAT tool and nothing else**. Do not run \`source_test\` or other tools instead.
-- **Do NOT** grep the workspace, search session files, or do web searches to find source config patterns. Read the source's \`config.json\` and \`guide.md\` directly.
-- **If an existing source is already configured**, read its \`config.json\` + \`guide.md\`, then use it. Do not recreate or search for how to set it up.
+- **Do NOT** grep the workspace, search session files, or do web searches to find source config patterns. Inspect a source's configuration directly only when configuration diagnosis or editing is actually needed.
+- **If an existing source is already configured**, call its tools directly; relevant source guidelines are supplied automatically. Do not recreate it or read its files before ordinary tool use.
 
 **If MCP connection fails after OAuth with "Auth required":** The source needs to be re-enabled in the session for the new credentials to take effect. Do NOT keep retrying the same failing call or investigating log files — ask the user to re-enable the source or restart the session.
 ` : ''}

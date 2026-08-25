@@ -331,7 +331,7 @@ export abstract class BaseAgent implements AgentBackend {
       onDebug: (msg) => this.debug(msg),
     });
 
-    // PrerequisiteManager: blocks source tool calls until guide.md is read
+    // PrerequisiteManager: prepares meaningful source guides and enforces Skill/browser prerequisites
     this.prerequisiteManager = new PrerequisiteManager({
       workspaceRootPath: config.workspace.rootPath,
       onDebug: (msg) => this.debug(msg),
@@ -562,7 +562,18 @@ export abstract class BaseAgent implements AgentBackend {
   }
 
   setWorkspace(workspace: Workspace): void {
+    const workspaceChanged = this.config.workspace.id !== workspace.id
+      || this.config.workspace.rootPath !== workspace.rootPath;
     this.config.workspace = workspace;
+    this.promptBuilder.setWorkspace(workspace);
+    this.prerequisiteManager.setWorkspaceRootPath(workspace.rootPath);
+    this.sourceManager.resetSeenSources();
+    if (workspaceChanged) {
+      this.sourceManager.updateActiveState([], [], []);
+      this.sourceManager.setAllSources([]);
+      this.permissionManager.clearWhitelists();
+      this.permissionManager.updateWorkingDirectory(workspace.rootPath);
+    }
     // Subclasses should clear session-specific state
   }
 

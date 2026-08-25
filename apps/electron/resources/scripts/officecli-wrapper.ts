@@ -19,7 +19,10 @@ if (!binary || !existsSync(binary)) {
   process.exit(127);
 }
 
-const child = spawnSync(binary, args, { stdio: 'inherit', env: process.env });
+const child = spawnSync(binary, args, {
+  stdio: 'inherit',
+  env: { ...process.env, OFFICECLI_SKIP_UPDATE: '1' },
+});
 if (child.error) {
   console.error(child.error.message);
   process.exit(1);

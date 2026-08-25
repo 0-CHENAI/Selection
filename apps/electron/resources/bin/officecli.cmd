@@ -6,6 +6,8 @@ if not exist "%BIN%" (
   exit /b 127
 )
 
+set "OFFICECLI_SKIP_UPDATE=1"
+
 set "BUN_BIN=%~dp0..\..\vendor\bun\bun.exe"
 set "WRAPPER=%~dp0..\scripts\officecli-wrapper.ts"
 if not exist "%BUN_BIN%" (

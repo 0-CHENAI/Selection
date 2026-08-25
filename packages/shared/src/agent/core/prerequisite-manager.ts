@@ -10,12 +10,14 @@
  * - Reset state on context compaction
  */
 
-import { existsSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { existsSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { join, relative, resolve, sep } from 'node:path';
 import { expandPath } from './path-processor.ts';
 import { getBrowserToolEnabled } from '../../config/storage.ts';
 import { catalogPathKey } from '../../skills/catalog.ts';
+import { getSourceSlugForTool, hasMeaningfulSourceGuide } from '../../sources/guide-content.ts';
 
 interface CatalogSkillRef {
   slug: string;
@@ -41,6 +43,16 @@ export interface PrerequisiteRule {
 export interface PrerequisiteCheckResult {
   allowed: boolean;
   blockReason?: string;
+  sourceGuide?: SourceGuideRequirement;
+}
+
+export interface SourceGuideRequirement {
+  sourceSlug: string;
+  filePath: string;
+  content: string;
+  version: string;
+  /** Sibling calls from the same assistant message must also wait for replanning. */
+  alreadyPreparedInGeneration: boolean;
 }
 
 export interface PrerequisiteManagerConfig {
@@ -51,9 +63,6 @@ export interface PrerequisiteManagerConfig {
 // ============================================================
 // Constants
 // ============================================================
-
-/** Slugs that are exempt from prerequisite checks (internal sources) */
-const EXEMPT_SLUGS = new Set(['session', 'craft-agents-docs']);
 
 /** Global browser tools docs path required before browser tool usage. */
 import { CONFIG_DIR } from '../../config/paths.ts';
@@ -70,46 +79,13 @@ const BROWSER_TOOLS_DOC_PATH = resolve(join(CONFIG_DIR, 'docs', 'browser-tools.m
  * - What message to show when blocking
  */
 const RULES: PrerequisiteRule[] = [
-  // MCP source tools: mcp__{slug}__* format
-  {
-    toolMatcher: (toolName: string) => {
-      if (!toolName.startsWith('mcp__')) return false;
-      const parts = toolName.split('__');
-      if (parts.length < 3) return false;
-      const slug = parts[1]!;
-      return !EXEMPT_SLUGS.has(slug);
-    },
-    resolveRequiredPath: (toolName: string, workspaceRootPath: string) => {
-      const parts = toolName.split('__');
-      const slug = parts[1]!;
-      const guidePath = resolve(workspaceRootPath, 'sources', slug, 'guide.md');
-      return existsSync(guidePath) ? guidePath : null;
-    },
-    blockMessage:
-      'You must read the source guide before using this tool. Please read the file at {filePath} first, then retry.',
-  },
-
-  // API source tools: api_{slug} format
-  {
-    toolMatcher: (toolName: string) => {
-      return toolName.startsWith('api_');
-    },
-    resolveRequiredPath: (toolName: string, workspaceRootPath: string) => {
-      const slug = toolName.slice(4); // Remove 'api_' prefix
-      const guidePath = resolve(workspaceRootPath, 'sources', slug, 'guide.md');
-      return existsSync(guidePath) ? guidePath : null;
-    },
-    blockMessage:
-      'You must read the source guide before using this tool. Please read the file at {filePath} first, then retry.',
-  },
-
   // Built-in browser tool: require browser-tools.md first.
   // Only matches the session-scoped tool (not external MCP browser tools like mcp__playwright__*),
   // and skipped entirely when the built-in browser tool is disabled.
   {
     toolMatcher: (toolName: string) =>
-      getBrowserToolEnabled() &&
-      (toolName === 'browser_tool' || toolName === 'mcp__session__browser_tool'),
+      (toolName === 'browser_tool' || toolName === 'mcp__session__browser_tool') &&
+      getBrowserToolEnabled(),
     resolveRequiredPath: () => {
       return existsSync(BROWSER_TOOLS_DOC_PATH) ? BROWSER_TOOLS_DOC_PATH : null;
     },
@@ -130,6 +106,7 @@ export class PrerequisiteManager {
   private readFiles: Set<string> = new Set();
   private rejectionCounts: Map<string, number> = new Map();
   private pendingSkillPaths: Set<string> = new Set();
+  private preparedSourceGuides = new Map<string, { version: string; assistantGeneration?: number }>();
   private catalogByPath = new Map<string, CatalogSkillRef>();
   private workspaceRootPath: string;
   private onDebug?: (message: string) => void;
@@ -137,6 +114,16 @@ export class PrerequisiteManager {
   constructor(config: PrerequisiteManagerConfig) {
     this.workspaceRootPath = config.workspaceRootPath;
     this.onDebug = config.onDebug;
+  }
+
+  /** Workspace changes must never reuse another workspace's guide or Skill state. */
+  setWorkspaceRootPath(workspaceRootPath: string): void {
+    if (resolve(workspaceRootPath) === resolve(this.workspaceRootPath)) return;
+
+    this.workspaceRootPath = workspaceRootPath;
+    this.catalogByPath.clear();
+    this.resetReadState();
+    this.onDebug?.(`Prerequisite: switched workspace root to ${workspaceRootPath}`);
   }
 
   /**
@@ -177,13 +164,18 @@ export class PrerequisiteManager {
 
   /**
    * Check if a tool call's prerequisites are met.
-   * Iterates rules, checks if required files have been read.
-   * After MAX_REJECTIONS blocks for the same path, allows through gracefully.
+   * Source guides are prepared internally on demand. Skill/browser prerequisites
+   * retain their existing model-driven read behavior.
    */
-  checkPrerequisites(toolName: string): PrerequisiteCheckResult {
+  checkPrerequisites(toolName: string, assistantGeneration?: number): PrerequisiteCheckResult {
     // Check dynamic skill prerequisites first
     const skillResult = this.checkSkillPrerequisites(toolName);
     if (!skillResult.allowed) return skillResult;
+
+    const sourceSlug = getSourceSlugForTool(toolName);
+    if (sourceSlug) {
+      return this.checkSourceGuidePrerequisite(sourceSlug, assistantGeneration);
+    }
 
     for (const rule of RULES) {
       if (!rule.toolMatcher(toolName)) continue;
@@ -212,6 +204,97 @@ export class PrerequisiteManager {
     }
 
     return { allowed: true };
+  }
+
+  private checkSourceGuidePrerequisite(
+    sourceSlug: string,
+    assistantGeneration?: number,
+  ): PrerequisiteCheckResult {
+    const filePath = resolve(this.workspaceRootPath, 'sources', sourceSlug, 'guide.md');
+    let content: string;
+    try {
+      content = readFileSync(filePath, 'utf8');
+    } catch (error) {
+      this.preparedSourceGuides.delete(sourceSlug);
+      if (error instanceof Error && 'code' in error && error.code === 'ENOENT') {
+        return { allowed: true };
+      }
+      const detail = error instanceof Error ? error.message : String(error);
+      return {
+        allowed: false,
+        blockReason: `Source "${sourceSlug}" has a guide that cannot be read at ${filePath}: ${detail}`,
+      };
+    }
+
+    if (!hasMeaningfulSourceGuide(content)) {
+      this.preparedSourceGuides.delete(sourceSlug);
+      return { allowed: true };
+    }
+
+    const version = createHash('sha256').update(content).digest('hex');
+    const prepared = this.preparedSourceGuides.get(sourceSlug);
+    const alreadyPrepared = prepared?.version === version;
+    const sameGeneration = alreadyPrepared
+      && assistantGeneration !== undefined
+      && prepared.assistantGeneration === assistantGeneration;
+
+    if (alreadyPrepared && !sameGeneration) {
+      return { allowed: true };
+    }
+
+    if (prepared && !alreadyPrepared) {
+      this.preparedSourceGuides.delete(sourceSlug);
+    }
+
+    this.onDebug?.(
+      sameGeneration
+        ? `Source guide preparation: deferring sibling call for ${sourceSlug}`
+        : `Source guide preparation required: ${sourceSlug} (${filePath})`,
+    );
+
+    return {
+      allowed: false,
+      sourceGuide: {
+        sourceSlug,
+        filePath,
+        content,
+        version,
+        alreadyPreparedInGeneration: sameGeneration,
+      },
+    };
+  }
+
+  /** Mark a source guide ready only after its content was returned to model history. */
+  markSourceGuidePrepared(
+    requirement: Pick<SourceGuideRequirement, 'sourceSlug' | 'filePath' | 'version'>,
+    assistantGeneration?: number,
+  ): void {
+    this.preparedSourceGuides.set(requirement.sourceSlug, {
+      version: requirement.version,
+      assistantGeneration,
+    });
+    this.readFiles.add(expandPath(requirement.filePath));
+    this.onDebug?.(`Source guide prepared: ${requirement.sourceSlug}`);
+  }
+
+  /** A user/model-directed Read counts only after its successful tool result. */
+  trackSuccessfulSourceGuideRead(toolInput: Record<string, unknown>): void {
+    const filePath = typeof toolInput.file_path === 'string'
+      ? toolInput.file_path
+      : typeof toolInput.path === 'string'
+        ? toolInput.path
+        : null;
+    if (!filePath) return;
+
+    const expanded = resolve(expandPath(filePath));
+    const fromSources = relative(resolve(this.workspaceRootPath, 'sources'), expanded);
+    const parts = fromSources.split(sep);
+    if (parts.length !== 2 || parts[1] !== 'guide.md' || !parts[0] || parts[0] === '..') return;
+
+    const inspection = this.checkSourceGuidePrerequisite(parts[0]);
+    if (inspection.sourceGuide) {
+      this.markSourceGuidePrepared(inspection.sourceGuide);
+    }
   }
 
   /**
@@ -294,6 +377,7 @@ export class PrerequisiteManager {
     this.readFiles.clear();
     this.rejectionCounts.clear();
     this.pendingSkillPaths.clear();
+    this.preparedSourceGuides.clear();
     this.onDebug?.(`Prerequisite: reset read state (cleared ${count} reads, ${skillCount} skill prerequisites)`);
   }
 
