@@ -126,6 +126,67 @@ describe('SourceServerBuilder.buildApiConfig', () => {
   });
 });
 
+describe('SourceServerBuilder.buildMcpServer', () => {
+  const builder = new SourceServerBuilder();
+
+  test('adds bearer authorization without dropping non-secret static headers', () => {
+    const source = createMockSource({
+      type: 'mcp',
+      mcp: {
+        transport: 'http',
+        url: 'https://api.anysearch.com/mcp',
+        authType: 'bearer',
+        headers: { 'X-Anysearch-Client': 'mcp/1.0.0' },
+      },
+    });
+
+    const config = builder.buildMcpServer(source, 'test-token');
+    if (config?.type !== 'http') throw new Error('Expected an HTTP MCP server config');
+
+    expect(config.headers).toEqual({
+      'X-Anysearch-Client': 'mcp/1.0.0',
+      Authorization: 'Bearer test-token',
+    });
+  });
+
+  test('does not serialize structured header credentials as bearer tokens', () => {
+    const source = createMockSource({
+      type: 'mcp',
+      mcp: {
+        transport: 'http',
+        url: 'https://example.com/mcp',
+        authType: 'bearer',
+        headerNames: ['X-API-Key'],
+        headers: { 'X-Client': 'selection' },
+      },
+    });
+    const credential = { 'X-API-Key': 'test-api-key' };
+
+    const config = builder.buildMcpServer(source, JSON.stringify(credential), credential);
+    if (config?.type !== 'http') throw new Error('Expected an HTTP MCP server config');
+
+    expect(config.headers).toEqual({
+      'X-Client': 'selection',
+      'X-API-Key': 'test-api-key',
+    });
+  });
+
+  test('rejects an authenticated header source whose stored credentials are missing', () => {
+    const source = createMockSource({
+      type: 'mcp',
+      isAuthenticated: true,
+      mcp: {
+        transport: 'http',
+        url: 'https://example.com/mcp',
+        authType: 'bearer',
+        headerNames: ['X-API-Key'],
+      },
+    });
+
+    expect(builder.buildMcpServer(source, null, null)).toBeNull();
+  });
+});
+
 describe('buildHeaders with MultiHeaderCredential', () => {
   test('should apply all headers from MultiHeaderCredential', () => {
     const credential: MultiHeaderCredential = {

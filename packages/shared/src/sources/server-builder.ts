@@ -135,7 +135,14 @@ export class SourceServerBuilder {
     }
 
     // 3. Auth token (highest priority — OAuth/bearer overrides everything)
-    if (mcp.authType !== 'none') {
+    // headerNames uses a structured credential whose values were already merged
+    // above. Do not also serialize that JSON credential as a Bearer token.
+    if (mcp.headerNames?.length) {
+      if (source.config.isAuthenticated && (!credential || !isMultiHeaderCredential(credential))) {
+        debug(`[SourceServerBuilder] Source ${source.config.slug} needs header re-authentication`);
+        return null;
+      }
+    } else if (mcp.authType !== 'none') {
       if (token) {
         mergedHeaders = { ...mergedHeaders, Authorization: `Bearer ${token}` };
       } else if (source.config.isAuthenticated) {
