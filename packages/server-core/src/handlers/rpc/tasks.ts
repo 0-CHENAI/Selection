@@ -50,7 +50,7 @@ import {
 import { createLogger } from '@craft-agent/shared/utils'
 import { pushTyped, type RpcServer } from '@craft-agent/server-core/transport'
 import type { HandlerDeps } from '../handler-deps'
-import { TaskRunner, TaskControlError, createTaskFromSpec, finishTaskOrchestrator } from '../../tasks'
+import { TaskRunner, TaskControlError, createTaskFromSpec, finishTaskOrchestrator, resolveGeneratedYaml } from '../../tasks'
 
 const tasksLog = createLogger('tasks-generate')
 
@@ -96,12 +96,6 @@ const GENERATE_TIMEOUT_MS = 180_000
 // One initial generation plus up to one feedback-driven repair turn. Bounded so a model
 // that keeps emitting invalid specs can't loop forever; the last attempt is returned as-is.
 const MAX_GENERATE_ATTEMPTS = 2
-
-/** Pull the YAML body out of an LLM reply (tolerate ```yaml fences or surrounding prose). */
-function extractYaml(text: string): string {
-  const fenced = text.match(/```(?:ya?ml)?\s*\n?([\s\S]*?)```/i)
-  return (fenced ? fenced[1] : text).trim()
-}
 
 export function registerTasksHandlers(server: RpcServer, deps: HandlerDeps): void {
   // One Conductor per workspace, created on demand. Holds active runs in memory.
@@ -334,7 +328,7 @@ export function registerTasksHandlers(server: RpcServer, deps: HandlerDeps): voi
         for (let attempt = 0; attempt < MAX_GENERATE_ATTEMPTS; attempt++) {
           attempts = attempt + 1
           const finalText = await askOrchestrator(prompt)
-          yaml = extractYaml(finalText)
+          yaml = resolveGeneratedYaml(sessionId, finalText)
           parsed = parseTaskYaml(yaml)
           if (parsed.valid) break
           prompt = buildRepairPrompt(parsed.errors)

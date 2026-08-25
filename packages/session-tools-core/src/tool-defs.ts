@@ -45,6 +45,8 @@ import { handleGetTaskResults } from './handlers/get-task-results.ts';
 import { handleSubmitTaskOutput } from './handlers/submit-task-output.ts';
 import { handleSubmitTaskVerdict } from './handlers/submit-task-verdict.ts';
 import { handleSubmitOrchestrationPatch } from './handlers/submit-orchestration-patch.ts';
+import { handleSubmitTaskDefinition } from './handlers/submit-task-definition.ts';
+import { handleControlTaskRun } from './handlers/control-task-run.ts';
 import { handleArchiveSession } from './handlers/archive-session.ts';
 import { handleSendAgentMessage } from './handlers/send-agent-message.ts';
 import { handleListMessagingChannels, handleUnbindMessagingChannel } from './handlers/messaging.ts';
@@ -211,8 +213,9 @@ export const ArchiveSessionSchema = z.object({
 });
 
 export const CreateTaskSchema = z.object({
-  title: z.string().describe('Short task title shown on the board (also drives the slug)'),
-  description: z.string().describe('What the task should accomplish — becomes the task goal and the initial node prompt'),
+  title: z.string().optional().describe('Short task title shown on the board (also drives the slug)'),
+  description: z.string().optional().describe('What the task should accomplish — becomes the task goal and the initial node prompt'),
+  spec: z.record(z.string(), z.unknown()).optional().describe('Full v2 task spec. Mutually exclusive with title+description.'),
   acceptanceCriteria: z.string().optional().describe('Freeform rubric the final result is verified against'),
   sources: z.array(z.string()).optional().describe('Source slugs to enable on the task sessions'),
   skills: z.array(z.string()).optional().describe('Skill slugs applied to dispatched task prompts'),
@@ -237,6 +240,19 @@ export const GetTaskResultsSchema = z.object({
 export const SubmitTaskOutputSchema = z.object({
   text: z.string().optional().describe('Optional prose summary of the node result'),
   values: z.record(z.string(), z.unknown()).optional().describe('Declared output values keyed by name'),
+});
+
+export const SubmitTaskDefinitionSchema = z.object({
+  spec: z.record(z.string(), z.unknown()).describe('Complete v2 task spec. Server validates; do not paste free-text YAML.'),
+});
+
+export const ControlTaskRunSchema = z.object({
+  slug: z.string(),
+  runId: z.string(),
+  action: z.enum(['pause', 'resume', 'stop', 'continue', 'approve', 'reject', 'updateLimits']),
+  nodeId: z.string().optional(),
+  tokenBudget: z.number().optional(),
+  params: z.record(z.string(), z.unknown()).optional(),
 });
 
 export const SubmitOrchestrationPatchSchema = z.object({
@@ -542,7 +558,7 @@ Requires an explicit sessionId and cannot target your own session. Use list_sess
 
   create_task: `Create a Selection Task on the kanban board — writes tasks/<slug>/task.yaml and creates its orchestrator session. CREATION ONLY: the task lands in "todo" and is NOT run.
 
-Provide title + description (the description becomes the task goal and the initial node prompt). Optional: acceptanceCriteria (verification rubric), sources / skills (workspace slugs), llmConnection + model, workingDirectory, projectId. When projectId is omitted, the task inherits the invoking session's project.
+Provide either title + description (single-node form) OR a full v2 spec (exclusive). Optional on the simple form: acceptanceCriteria, sources / skills, llmConnection + model, workingDirectory, projectId.
 
 Returns { slug, orchestratorSessionId, taskLabelId, warnings } — unknown source/skill slugs are reported as warnings, not errors. Use it only when the user asks to capture or queue work as a board task. Do not create a board task for one-off chat work. To execute immediately in chat, do the work yourself or (if the spawn bar is met) use spawn_session. To start this board task's Conductor DAG, call run_task with the returned slug.`,
 
@@ -550,13 +566,21 @@ Returns { slug, orchestratorSessionId, taskLabelId, warnings } — unknown sourc
 
 Provide slug (from create_task or the board) and/or orchestratorSessionId. Optional params are forwarded to the runner. waitForCompletion (default false) waits until the run is completed, failed, or stopped.
 
-Returns { slug, runId, status, nodeCount, nodes }. This does not create a task — use create_task first. Use only when the user asked to run a board task. Chat-time one-off work should be done in this session, or with spawn_session if the spawn bar is met — not create-then-run.`,
+Returns a typed snapshot { slug, runId, status, nodeCount, nodes }. Parameter errors are returned as tool errors. This does not create a task — use create_task first. Use only when the user asked to run a board task.`,
+
+  control_task_run: `Control an active Conductor run: pause, resume, stop, continue, approve/reject a node, or updateLimits.
+
+Use only when the user asked to control a board task run. Stop here is "stop the Conductor run", not the background-task chip.`,
+
+  submit_task_definition: `Submit a structured v2 task spec instead of pasting YAML in chat.
+
+The server validates the spec. On errors, fix and submit again (generation allows at most two corrections).`,
 
   get_task_results: `Read a Conductor run's verdict and per-node outputs from disk.
 
 Provide slug. Optional runId selects a specific run; omit to read the latest. Works after restart — it does not require an in-memory run.
 
-Returns { slug, runId, runIds, verdict, verdicts, repair, runStatus, nodes }.`,
+Returns typed outputs, artifacts, revisions, verdicts, and per-node state.`,
 
   submit_task_output: `Submit structured output for the current Conductor node.
 
@@ -679,6 +703,8 @@ export const SESSION_TOOL_DEFS: SessionToolDef[] = [
   { name: 'submit_task_output', description: TOOL_DESCRIPTIONS.submit_task_output, inputSchema: SubmitTaskOutputSchema, executionMode: 'registry', safeMode: 'allow', handler: handleSubmitTaskOutput },
   { name: 'submit_task_verdict', description: TOOL_DESCRIPTIONS.submit_task_verdict, inputSchema: SubmitTaskVerdictSchema, executionMode: 'registry', safeMode: 'allow', handler: handleSubmitTaskVerdict },
   { name: 'submit_orchestration_patch', description: TOOL_DESCRIPTIONS.submit_orchestration_patch, inputSchema: SubmitOrchestrationPatchSchema, executionMode: 'registry', safeMode: 'allow', handler: handleSubmitOrchestrationPatch },
+  { name: 'submit_task_definition', description: TOOL_DESCRIPTIONS.submit_task_definition, inputSchema: SubmitTaskDefinitionSchema, executionMode: 'registry', safeMode: 'allow', handler: handleSubmitTaskDefinition },
+  { name: 'control_task_run', description: TOOL_DESCRIPTIONS.control_task_run, inputSchema: ControlTaskRunSchema, executionMode: 'registry', safeMode: 'block', handler: handleControlTaskRun },
   { name: 'get_session_info', description: TOOL_DESCRIPTIONS.get_session_info, inputSchema: GetSessionInfoSchema, executionMode: 'registry', safeMode: 'allow', readOnly: true, handler: handleGetSessionInfo },
   { name: 'list_sessions', description: TOOL_DESCRIPTIONS.list_sessions, inputSchema: ListSessionsSchema, executionMode: 'registry', safeMode: 'allow', readOnly: true, handler: handleListSessions },
   { name: 'list_background_tasks', description: TOOL_DESCRIPTIONS.list_background_tasks, inputSchema: ListBackgroundTasksSchema, executionMode: 'registry', safeMode: 'allow', readOnly: true, handler: handleListBackgroundTasks },

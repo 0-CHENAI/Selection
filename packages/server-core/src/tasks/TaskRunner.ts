@@ -59,8 +59,11 @@ import {
   type OrchestrationPatch,
 } from '@craft-agent/shared/tasks';
 import { isTasksOrchestrateEnabled } from '@craft-agent/shared/feature-flags';
+import { createLogger } from '@craft-agent/shared/utils';
 import { createHash } from 'crypto';
 import { MAX_RUN_INSTANCES, isSessionLikeKind, isControlKind, unimplementedV2Nodes } from './executors';
+
+const conductorLog = createLogger('tasks-conductor');
 
 export { V2_IMPLEMENTED_KINDS, MAX_RUN_INSTANCES } from './executors';
 
@@ -720,7 +723,10 @@ class ActiveRun {
         item: output.text,
         index: this.loopIndex.get(node.id) ?? 0,
         prev: output.text,
-        nodes: { ...this.conditionCtx().nodes, [node.id]: { output: output.text } },
+        nodes: {
+          ...((this.conditionCtx().nodes as Record<string, unknown> | undefined) ?? {}),
+          [node.id]: { output: output.text },
+        },
       })
     ) {
       this.completeControlNode(node.id, output.text, { iterations: (this.loopIndex.get(node.id) ?? 0) + 1 });
@@ -1480,6 +1486,21 @@ class ActiveRun {
   private log(entry: RunLogEntryInput): void {
     const t = this.deps.now ? this.deps.now() : new Date().toISOString();
     appendRunLog(this.deps.workspaceRoot, this.slug, this.runId, { ...entry, t } as RunLogEntry);
+    if (
+      entry.kind === 'run-started' ||
+      entry.kind === 'run-completed' ||
+      entry.kind === 'run-failed' ||
+      entry.kind === 'run-stopped' ||
+      entry.kind === 'run-paused' ||
+      entry.kind === 'run-resumed'
+    ) {
+      conductorLog.info(entry.kind, {
+        slug: this.slug,
+        runId: this.runId,
+        revision: this.revision,
+        status: this.runStatus,
+      });
+    }
   }
 }
 

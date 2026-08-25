@@ -18,3 +18,9 @@ export type {
 } from './TaskRunner';
 export { TaskControlError } from './TaskRunner';
 export { V2_IMPLEMENTED_KINDS, MAX_RUN_INSTANCES } from './executors';
+export {
+  rememberSubmittedDefinition,
+  takeSubmittedDefinition,
+  extractYamlFromModelText,
+  resolveGeneratedYaml,
+} from './submitted-definitions';

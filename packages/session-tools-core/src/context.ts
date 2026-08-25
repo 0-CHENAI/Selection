@@ -368,6 +368,10 @@ export interface SessionToolContext {
 
   submitOrchestrationPatch?(input: OrchestrationPatchInput): Promise<{ status: string; revision?: number }>;
 
+  submitTaskDefinition?(input: SubmitTaskDefinitionInput): Promise<{ valid: boolean; errors?: string[]; yaml?: string }>;
+
+  controlTaskRun?(input: ControlTaskRunInput): Promise<{ status: string; conflict?: string }>;
+
   // ============================================================
   // Inter-Session Messaging
   // ============================================================
@@ -476,9 +480,11 @@ export interface ResolvedStatusResult {
 /** Input for create_task — structured fields, mapped onto a TaskSpec by the backend. */
 export interface CreateTaskInput {
   /** Short task title shown on the board (also drives the slug). */
-  title: string;
+  title?: string;
   /** What the task should accomplish — becomes the task goal and the initial node prompt. */
-  description: string;
+  description?: string;
+  /** Full v2 spec. Mutually exclusive with the single-node title/description form. */
+  spec?: unknown;
   /** Freeform rubric the final result is verified against. */
   acceptanceCriteria?: string;
   /** Source slugs enabled on the task's sessions. */
@@ -525,6 +531,9 @@ export interface RunTaskResult {
   status: string;
   nodeCount: number;
   nodes: RunTaskNodeState[];
+  tokensUsed?: number;
+  revision?: number;
+  blockers?: string[];
 }
 
 export interface SubmitTaskOutputInput {
@@ -550,6 +559,19 @@ export interface OrchestrationPatchInput {
   action?: 'continue' | 'pause' | 'complete' | 'fail';
 }
 
+export interface SubmitTaskDefinitionInput {
+  spec: unknown;
+}
+
+export interface ControlTaskRunInput {
+  slug: string;
+  runId: string;
+  action: 'pause' | 'resume' | 'stop' | 'continue' | 'approve' | 'reject' | 'updateLimits';
+  nodeId?: string;
+  tokenBudget?: number;
+  params?: Record<string, unknown>;
+}
+
 export interface GetTaskResultsInput {
   slug: string;
   runId?: string;
@@ -570,7 +592,10 @@ export interface TaskResultsPayload {
     state: string;
     sessionId?: string;
     output?: string;
+    outputs?: Record<string, unknown>;
+    artifacts?: unknown[];
   }>;
+  revision?: number;
 }
 
 export interface SessionInfo {

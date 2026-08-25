@@ -6,7 +6,9 @@ Frozen contracts for the Tasks kanban Conductor. Implementation lives in
 `sessions/.../tasks-architecture.md` referenced by earlier schema comments.
 
 Work happens on `feat/tasks-conductor-v2` branched from `origin/test`. Do not
-commit Conductor work onto `test`.
+commit Conductor work onto `test`. User-facing copy lives in `USER-GUIDE.md`.
+`orchestrate` stays Beta behind `CRAFT_FEATURE_TASKS_ORCHESTRATE` until a
+packaged Electron + real-model gate.
 
 ## 1. Product modes
 

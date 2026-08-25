@@ -68,6 +68,8 @@ describe('system prompt guidance', () => {
     expect(prompt).toContain('Do not spawn another child to collect that result')
     expect(prompt).toContain('do **not** automatically `archive_session`')
     expect(prompt).toContain('`run_task`')
+    expect(prompt).toContain('`control_task_run`')
+    expect(prompt).toContain('`submit_task_definition`')
     expect(prompt).toContain('`submit_task_output`')
     expect(prompt).toContain('`submit_task_verdict`')
   })

@@ -8,11 +8,12 @@
  */
 export function buildGeneratorPrompt(goal: string, title?: string): string {
   return [
-    'You are authoring a `task.yaml` that decomposes a goal into a small DAG of subtasks.',
+    'You are authoring a v2 task spec that decomposes a goal into a small DAG of subtasks.',
     'Each node becomes a child AI session; a `depends_on` edge passes the upstream node\'s output to the dependent.',
     '',
     'Rules:',
-    '- Output ONLY the YAML — no prose, no code fences, no explanation.',
+    '- Prefer submit_task_definition with a complete v2 spec object (schema_version: 2). Do not paste free-text YAML unless the tool is unavailable.',
+    '- If you must emit YAML: output ONLY the YAML — no prose, no code fences, no explanation.',
     '- Prefer the SIMPLEST graph that achieves the goal: few nodes, clear titles, explicit dependencies. A human will read and edit this.',
     '- Make nodes parallel (no `depends_on` between them) ONLY when the steps are genuinely independent.',
     '- Reference an upstream result inside a prompt with ${nodes.<id>.output}.',
@@ -64,8 +65,8 @@ export function buildRepairPrompt(errors: { path: string; message: string }[]): 
     'The task.yaml you produced failed validation with these errors:',
     ...errors.map((e) => `- ${e.path}: ${e.message}`),
     '',
-    'Fix every error and output the COMPLETE corrected task.yaml.',
+    'Fix every error and submit the COMPLETE corrected spec via submit_task_definition (or YAML if that tool is unavailable).',
     'Most common cause: a ${nodes.<id>.output} reference whose <id> is not declared under `nodes`. Either add the missing node or change the reference to an id you actually declare.',
-    'Output ONLY the YAML — no prose, no code fences, no explanation.',
+    'You have at most one more correction after the first failure.',
   ].join('\n')
 }

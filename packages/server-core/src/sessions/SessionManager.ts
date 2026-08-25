@@ -83,8 +83,8 @@ import {
   isSharedProjectMemoryEnabled,
 } from '@craft-agent/shared/sessions'
 import { loadWorkspaceSources, loadAllSources, getSourcesBySlugs, isSourceUsable, type LoadedSource, type McpServerConfig, getSourcesNeedingAuth, getSourceCredentialManager, getSourceServerBuilder, type SourceWithCredential, isApiOAuthProvider, hasRenewEndpoint, SERVER_BUILD_ERRORS, TokenRefreshManager, createTokenGetter } from '@craft-agent/shared/sources'
-import { listTaskSlugs, parseTaskSpec, uniqueTaskSlug, loadTaskResults } from '@craft-agent/shared/tasks'
-import { createTaskFromSpec, resolveCreateTaskProjectId, type TaskRunner } from '../tasks'
+import { listTaskSlugs, parseTaskSpec, parseTaskYaml, serializeTaskYaml, uniqueTaskSlug, loadTaskResults } from '@craft-agent/shared/tasks'
+import { createTaskFromSpec, resolveCreateTaskProjectId, rememberSubmittedDefinition, type TaskRunner } from '../tasks'
 import {
   buildBackgroundTaskNudge,
   mapCompletionReasonToTaskStatus,
@@ -4476,7 +4476,17 @@ export class SessionManager implements ISessionManager {
           const projectId = resolveCreateTaskProjectId(input.projectId, managed.projectId)
           // Slug is derived from the title and must never overwrite an existing task
           // (unlike the TaskEditor, where re-saving the same slug is the edit flow).
-          const slug = uniqueTaskSlug(input.title, new Set(listTaskSlugs(ws.rootPath)))
+          if (input.spec) {
+            const raw = input.spec as Record<string, unknown>
+            const slug = uniqueTaskSlug(String(raw.title ?? raw.id ?? 'task'), new Set(listTaskSlugs(ws.rootPath)))
+            const parsed = parseTaskSpec({ ...raw, id: slug, schema_version: 2, ...(projectId ? { project: projectId } : {}) })
+            if (!parsed.success) {
+              throw new Error(`Invalid task spec: ${parsed.error.issues.map(i => i.message).join('; ')}`)
+            }
+            const created = await createTaskFromSpec(this, ws.id, ws.rootPath, parsed.data)
+            return { ...created, warnings: [...created.warnings] }
+          }
+          const slug = uniqueTaskSlug(input.title ?? 'untitled-task', new Set(listTaskSlugs(ws.rootPath)))
 
           // Fail-soft reference checks: unknown slugs warn, they don't block creation
           // (matching the finish() philosophy in the tasks:create handler).
@@ -4507,7 +4517,7 @@ export class SessionManager implements ISessionManager {
             ...(input.model || input.llmConnection
               ? { defaults: { ...(input.model ? { model: input.model } : {}), ...(input.llmConnection ? { llmConnection: input.llmConnection } : {}) } }
               : {}),
-            nodes: [{ id: 'main', title: input.title, prompt: input.description }],
+            nodes: [{ id: 'main', title: input.title ?? slug, prompt: input.description ?? '' }],
           })
           if (!parsed.success) {
             throw new Error(`Invalid task spec: ${parsed.error.issues.map(i => i.message).join('; ')}`)
@@ -4543,6 +4553,36 @@ export class SessionManager implements ISessionManager {
             action: input.action,
           })
           return { status: snap.status, revision: snap.revision }
+        },
+        submitTaskDefinitionFn: async (input) => {
+          const parsed = parseTaskSpec({ ...(input.spec as object), schema_version: 2 })
+          if (!parsed.success) {
+            return { valid: false, errors: parsed.error.issues.map((i) => i.message) }
+          }
+          const yaml = serializeTaskYaml(parsed.data)
+          const graph = parseTaskYaml(yaml)
+          if (!graph.valid) {
+            return { valid: false, errors: graph.errors.map((e) => `${e.path}: ${e.message}`) }
+          }
+          rememberSubmittedDefinition(managed.id, yaml)
+          return { valid: true, yaml }
+        },
+        controlTaskRunFn: async (input) => {
+          const runner = this.taskRunnerLookup?.(managed.workspace.id)
+          if (!runner) throw new Error('Task runner is not available')
+          try {
+            const snap =
+              input.action === 'pause' ? runner.pause(input.slug, input.runId)
+              : input.action === 'resume' ? runner.resume(input.slug, input.runId)
+              : input.action === 'stop' ? await runner.stop(input.slug, input.runId)
+              : input.action === 'continue' ? runner.continue(input.slug, input.runId)
+              : input.action === 'approve' ? runner.respondApproval(input.slug, input.runId, input.nodeId ?? '', true)
+              : input.action === 'reject' ? runner.respondApproval(input.slug, input.runId, input.nodeId ?? '', false)
+              : runner.updateRunLimits(input.slug, input.runId, input.tokenBudget, input.params)
+            return { status: snap.status }
+          } catch (err) {
+            return { status: 'failed', conflict: err instanceof Error ? err.message : String(err) }
+          }
         },
         getSessionInfoFn: (sessionId?: string) => {
           const targetId = sessionId ?? managed.id
@@ -8074,6 +8114,9 @@ export class SessionManager implements ISessionManager {
       status: settled.status,
       nodeCount: settled.nodes.filter((n) => n.state !== 'skipped').length,
       nodes: settled.nodes.map((n) => ({ id: n.id, state: n.state, sessionId: n.sessionId })),
+      tokensUsed: settled.tokensUsed,
+      revision: settled.revision,
+      ...(settled.blockers?.length ? { blockers: settled.blockers } : {}),
     }
   }
 

@@ -356,6 +356,6 @@ describe('generator-prompt', () => {
     ]);
     expect(prompt).toContain('- nodes.design.inputs: Reference ${nodes.audit-completion-signal.output} points to unknown node "audit-completion-signal"');
     expect(prompt).toContain('- root: second problem');
-    expect(prompt).toContain('Output ONLY the YAML');
+    expect(prompt).toContain('submit_task_definition');
   });
 });
