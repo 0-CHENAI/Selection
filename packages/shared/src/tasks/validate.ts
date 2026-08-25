@@ -22,6 +22,8 @@ export const TASK_CAPS = {
   maxWidth: 24,
   /** Hard ceiling on a loop's `max` (schema requires the field; this bounds it). */
   maxLoopIterations: 50,
+  /** Live execution instances (map/loop expansions) per run. Exceeding fails the run. */
+  maxInstances: 256,
 } as const;
 
 const TASK_FILE = 'task.yaml';
@@ -64,6 +66,15 @@ export function validateTaskSpec(spec: TaskSpec): ValidationResult {
       if (!byId.has(dep)) {
         errors.push(err(`${path}.depends_on`, `Node "${node.id}" depends on unknown node "${dep}"`));
         continue;
+      }
+    }
+
+    if (node.kind === 'route' && node.route) {
+      const targets = [...node.route.cases.map((c) => c.goto), node.route.default];
+      for (const target of targets) {
+        if (!byId.has(target)) {
+          errors.push(err(`${path}.route`, `Route "${node.id}" targets unknown node "${target}"`));
+        }
       }
     }
 

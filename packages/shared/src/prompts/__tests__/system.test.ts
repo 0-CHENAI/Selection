@@ -68,6 +68,8 @@ describe('system prompt guidance', () => {
     expect(prompt).toContain('Do not spawn another child to collect that result')
     expect(prompt).toContain('do **not** automatically `archive_session`')
     expect(prompt).toContain('`run_task`')
+    expect(prompt).toContain('`submit_task_output`')
+    expect(prompt).toContain('`submit_task_verdict`')
   })
 
   it('tells the model to speak source titles rather than slugs', () => {

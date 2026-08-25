@@ -42,6 +42,8 @@ import { handleListBackgroundTasks } from './handlers/list-background-tasks.ts';
 import { handleCreateTask } from './handlers/create-task.ts';
 import { handleRunTask } from './handlers/run-task.ts';
 import { handleGetTaskResults } from './handlers/get-task-results.ts';
+import { handleSubmitTaskOutput } from './handlers/submit-task-output.ts';
+import { handleSubmitTaskVerdict } from './handlers/submit-task-verdict.ts';
 import { handleArchiveSession } from './handlers/archive-session.ts';
 import { handleSendAgentMessage } from './handlers/send-agent-message.ts';
 import { handleListMessagingChannels, handleUnbindMessagingChannel } from './handlers/messaging.ts';
@@ -229,6 +231,18 @@ export const RunTaskSchema = z.object({
 export const GetTaskResultsSchema = z.object({
   slug: z.string().describe('Task slug to inspect'),
   runId: z.string().optional().describe('Specific run id. Omit to read the latest run.'),
+});
+
+export const SubmitTaskOutputSchema = z.object({
+  text: z.string().optional().describe('Optional prose summary of the node result'),
+  values: z.record(z.string(), z.unknown()).optional().describe('Declared output values keyed by name'),
+});
+
+export const SubmitTaskVerdictSchema = z.object({
+  result: z.enum(['pass', 'fail']).describe('Verification result'),
+  reason: z.string().optional().describe('One-line reason for a fail'),
+  nodes: z.array(z.string()).optional().describe('Definition node ids to repair on fail'),
+  runId: z.string().optional().describe('Run id when the parent has more than one active run'),
 });
 
 export const ListSessionsSchema = z.object({
@@ -532,6 +546,14 @@ Provide slug. Optional runId selects a specific run; omit to read the latest. Wo
 
 Returns { slug, runId, runIds, verdict, verdicts, repair, runStatus, nodes }.`,
 
+  submit_task_output: `Submit structured output for the current Conductor node.
+
+Required when the node declares outputs. Pass values matching the declared names. Optional text is a prose summary. Missing this call marks the node invalid.`,
+
+  submit_task_verdict: `Submit the Conductor verification verdict for the current run.
+
+Use result pass or fail. Fail may include reason and nodes to repair. Parent chat messages are never treated as a verdict.`,
+
   get_session_info: `Get metadata about the current session or a specific session by ID.
 
 Returns labels, status, name, permission mode, projectId (if the session is bound to a project), workingDirectory, and other details.
@@ -638,6 +660,8 @@ export const SESSION_TOOL_DEFS: SessionToolDef[] = [
   { name: 'create_task', description: TOOL_DESCRIPTIONS.create_task, inputSchema: CreateTaskSchema, executionMode: 'registry', safeMode: 'block', handler: handleCreateTask },
   { name: 'run_task', description: TOOL_DESCRIPTIONS.run_task, inputSchema: RunTaskSchema, executionMode: 'registry', safeMode: 'block', handler: handleRunTask },
   { name: 'get_task_results', description: TOOL_DESCRIPTIONS.get_task_results, inputSchema: GetTaskResultsSchema, executionMode: 'registry', safeMode: 'allow', readOnly: true, handler: handleGetTaskResults },
+  { name: 'submit_task_output', description: TOOL_DESCRIPTIONS.submit_task_output, inputSchema: SubmitTaskOutputSchema, executionMode: 'registry', safeMode: 'allow', handler: handleSubmitTaskOutput },
+  { name: 'submit_task_verdict', description: TOOL_DESCRIPTIONS.submit_task_verdict, inputSchema: SubmitTaskVerdictSchema, executionMode: 'registry', safeMode: 'allow', handler: handleSubmitTaskVerdict },
   { name: 'get_session_info', description: TOOL_DESCRIPTIONS.get_session_info, inputSchema: GetSessionInfoSchema, executionMode: 'registry', safeMode: 'allow', readOnly: true, handler: handleGetSessionInfo },
   { name: 'list_sessions', description: TOOL_DESCRIPTIONS.list_sessions, inputSchema: ListSessionsSchema, executionMode: 'registry', safeMode: 'allow', readOnly: true, handler: handleListSessions },
   { name: 'list_background_tasks', description: TOOL_DESCRIPTIONS.list_background_tasks, inputSchema: ListBackgroundTasksSchema, executionMode: 'registry', safeMode: 'allow', readOnly: true, handler: handleListBackgroundTasks },

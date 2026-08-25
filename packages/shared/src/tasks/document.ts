@@ -87,6 +87,7 @@ const NODE_KEYS = new Set([
   'timeout',
   'cache',
   'approval',
+  'route',
 ]);
 
 function v2UnknownFields(raw: unknown): ValidationIssue[] {

@@ -69,6 +69,8 @@ export const RPC_CHANNELS = {
     RESUME: 'tasks:resume',
     STOP: 'tasks:stop',
     CONTINUE: 'tasks:continue',
+    RESPOND_APPROVAL: 'tasks:respondApproval',
+    UPDATE_RUN_LIMITS: 'tasks:updateRunLimits',
     GET: 'tasks:get',
     LIST: 'tasks:list',
     LIST_RUNS: 'tasks:listRuns',

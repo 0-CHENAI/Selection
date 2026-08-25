@@ -27,6 +27,8 @@ import type {
   TaskResultsDto,
   TaskControlResultDto,
   TaskRunSnapshotDto,
+  TaskRespondApprovalRequest,
+  TaskUpdateRunLimitsRequest,
 } from '@craft-agent/shared/protocol'
 import { getWorkspaceByNameOrId } from '@craft-agent/shared/config'
 import {
@@ -57,6 +59,8 @@ export const HANDLED_CHANNELS = [
   RPC_CHANNELS.tasks.RESUME,
   RPC_CHANNELS.tasks.STOP,
   RPC_CHANNELS.tasks.CONTINUE,
+  RPC_CHANNELS.tasks.RESPOND_APPROVAL,
+  RPC_CHANNELS.tasks.UPDATE_RUN_LIMITS,
   RPC_CHANNELS.tasks.GET,
   RPC_CHANNELS.tasks.LIST,
   RPC_CHANNELS.tasks.LIST_RUNS,
@@ -388,6 +392,14 @@ export function registerTasksHandlers(server: RpcServer, deps: HandlerDeps): voi
 
   server.handle(RPC_CHANNELS.tasks.CONTINUE, async (_ctx, workspaceId: string, slug: string, runId: string) => {
     return controlResult(() => runnerFor(workspaceId).continue(slug, runId))
+  })
+
+  server.handle(RPC_CHANNELS.tasks.RESPOND_APPROVAL, async (_ctx, workspaceId: string, req: TaskRespondApprovalRequest) => {
+    return controlResult(() => runnerFor(workspaceId).respondApproval(req.slug, req.runId, req.nodeId, req.approved))
+  })
+
+  server.handle(RPC_CHANNELS.tasks.UPDATE_RUN_LIMITS, async (_ctx, workspaceId: string, req: TaskUpdateRunLimitsRequest) => {
+    return controlResult(() => runnerFor(workspaceId).updateRunLimits(req.slug, req.runId, req.tokenBudget))
   })
 
   // tasks:get — spec + (optional) active run-state.

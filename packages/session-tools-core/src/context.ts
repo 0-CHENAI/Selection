@@ -360,6 +360,12 @@ export interface SessionToolContext {
   /** Read a Conductor run's verdict and node outputs from disk. Injected by SessionManager. */
   getTaskResults?(slug: string, runId?: string): Promise<TaskResultsPayload>;
 
+  /** Child node structured output. Injected by SessionManager for Conductor sessions. */
+  submitTaskOutput?(input: SubmitTaskOutputInput): Promise<{ ok: boolean; error?: string }>;
+
+  /** Parent-session structured verdict. Injected by SessionManager. */
+  submitTaskVerdict?(input: SubmitTaskVerdictInput): Promise<{ status: string }>;
+
   // ============================================================
   // Inter-Session Messaging
   // ============================================================
@@ -517,6 +523,18 @@ export interface RunTaskResult {
   status: string;
   nodeCount: number;
   nodes: RunTaskNodeState[];
+}
+
+export interface SubmitTaskOutputInput {
+  text?: string;
+  values?: Record<string, unknown>;
+}
+
+export interface SubmitTaskVerdictInput {
+  result: 'pass' | 'fail';
+  reason?: string;
+  nodes?: string[];
+  runId?: string;
 }
 
 export interface GetTaskResultsInput {

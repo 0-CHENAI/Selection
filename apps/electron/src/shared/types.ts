@@ -186,6 +186,8 @@ import type {
   TaskCreateResult,
   TaskSaveRequest,
   TaskSaveResult,
+  TaskRespondApprovalRequest,
+  TaskUpdateRunLimitsRequest,
   TaskGenerateRequest,
   TaskGenerateAck,
   TaskGenerateResult,
@@ -251,6 +253,8 @@ export interface ElectronAPI {
   resumeTask(workspaceId: string, slug: string, runId: string): Promise<TaskControlResultDto>
   stopTask(workspaceId: string, slug: string, runId: string): Promise<TaskControlResultDto>
   continueTask(workspaceId: string, slug: string, runId: string): Promise<TaskControlResultDto>
+  respondTaskApproval(workspaceId: string, req: TaskRespondApprovalRequest): Promise<TaskControlResultDto>
+  updateTaskRunLimits(workspaceId: string, req: TaskUpdateRunLimitsRequest): Promise<TaskControlResultDto>
   getTask(workspaceId: string, slug: string, runId?: string): Promise<TaskGetResult>
   listTasks(workspaceId: string): Promise<string[]>
   listTaskRuns(workspaceId: string, slug: string): Promise<string[]>
