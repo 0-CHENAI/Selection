@@ -4,6 +4,7 @@
  * Channels (all REMOTE_ELIGIBLE — tasks are workspace content):
  *   tasks:validate — lint/dry-run a task.yaml string (no side effects)
  *   tasks:create   — write task.yaml + create the orchestrator parent session
+ *   tasks:duplicate — clone a task.yaml into a new slug + orchestrator session
  *   tasks:run      — start a run (returns the run snapshot)
  *   tasks:pause | resume | stop — run control
  *   tasks:get      — spec + (optional) active run-state
@@ -16,6 +17,7 @@ import { RPC_CHANNELS } from '@craft-agent/shared/protocol'
 import type {
   TaskCreateRequest,
   TaskCreateResult,
+  TaskDuplicateRequest,
   TaskSaveRequest,
   TaskSaveResult,
   TaskGenerateRequest,
@@ -38,6 +40,9 @@ import {
   loadTaskDocument,
   saveTaskDocument,
   listTaskSlugs,
+  cloneTaskDefinition,
+  uniqueTaskSlug,
+  SLUG_RE,
   listRunIds,
   buildGeneratorPrompt,
   buildRepairPrompt,
@@ -57,6 +62,7 @@ const tasksLog = createLogger('tasks-generate')
 export const HANDLED_CHANNELS = [
   RPC_CHANNELS.tasks.VALIDATE,
   RPC_CHANNELS.tasks.CREATE,
+  RPC_CHANNELS.tasks.DUPLICATE,
   RPC_CHANNELS.tasks.SAVE,
   RPC_CHANNELS.tasks.GENERATE,
   RPC_CHANNELS.tasks.RUN,
@@ -210,6 +216,38 @@ export function registerTasksHandlers(server: RpcServer, deps: HandlerDeps): voi
     // above (all three paths persist first), so skip the core's save. createSession announces the
     // orchestrator to the renderer by default, so its tile appears on the board immediately.
     const created = await createTaskFromSpec(deps.sessionManager, workspaceId, ws.rootPath, spec, { save: false })
+    return { slug: created.slug, orchestratorSessionId: created.orchestratorSessionId, validation, taskLabelId: created.taskLabelId }
+  })
+
+  // tasks:duplicate — clone the authored DAG into a new slug + orchestrator. No run state.
+  server.handle(RPC_CHANNELS.tasks.DUPLICATE, async (_ctx, workspaceId: string, req: TaskDuplicateRequest): Promise<TaskCreateResult> => {
+    const fail = (path: string, message: string): TaskCreateResult => ({
+      slug: '',
+      orchestratorSessionId: '',
+      validation: { valid: false, errors: [{ path, message, severity: 'error' }], warnings: [] },
+    })
+    if (typeof req.slug !== 'string' || !SLUG_RE.test(req.slug)) {
+      return fail('slug', `Task "${req.slug}" not found`)
+    }
+    const ws = workspaceOrThrow(workspaceId)
+    const loaded = loadTaskDocument(ws.rootPath, req.slug)
+    if (!loaded?.valid || !loaded.spec) {
+      return fail('root', `Task "${req.slug}" not found`)
+    }
+    const title = req.title?.trim() || `${loaded.spec.title} copy`
+    let cloned
+    try {
+      cloned = cloneTaskDefinition(loaded.spec, { id: uniqueTaskSlug(title, new Set(listTaskSlugs(ws.rootPath))), title })
+    } catch (err) {
+      return fail('nodes', err instanceof Error ? err.message : String(err))
+    }
+    const yaml = serializeTaskYaml(cloned)
+    const parsed = parseTaskYaml(yaml)
+    const validation = toValidationDto(parsed)
+    if (!parsed.valid || !parsed.spec) {
+      return { slug: '', orchestratorSessionId: '', validation }
+    }
+    const created = await createTaskFromSpec(deps.sessionManager, workspaceId, ws.rootPath, parsed.spec)
     return { slug: created.slug, orchestratorSessionId: created.orchestratorSessionId, validation, taskLabelId: created.taskLabelId }
   })
 

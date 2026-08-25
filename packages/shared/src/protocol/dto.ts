@@ -244,6 +244,13 @@ export interface TaskCreateRequest {
   attachToExistingSession?: string
 }
 
+export interface TaskDuplicateRequest {
+  /** Existing task slug to copy. */
+  slug: string
+  /** Title for the new task. Omitted → `${source.title} copy`. */
+  title?: string
+}
+
 export interface TaskCreateResult {
   /** Empty string when validation failed — inspect `validation`. */
   slug: string

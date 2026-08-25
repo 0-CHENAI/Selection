@@ -1,5 +1,5 @@
 import * as React from 'react'
-import { Check, ChevronDown, ChevronRight, Clock, Flag, MessageSquare, Pencil, Play, Plus } from 'lucide-react'
+import { Check, ChevronDown, ChevronRight, Clock, CopyPlus, Flag, MessageSquare, Pencil, Play, Plus } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { useAtomValue } from 'jotai'
 import { formatDistanceToNowStrict, type Locale } from 'date-fns'
@@ -62,6 +62,8 @@ interface TaskTileProps {
   onClick?: () => void
   /** Open the full-pane editor for this task (edit mode). Enables the right-click "Edit task" item. */
   onEdit?: () => void
+  /** Clone this spec-backed task onto a new board tile. Hidden when the tile has no task.yaml. */
+  onDuplicate?: () => void
   /** Toggle the subtask list. */
   onToggleSubtasks?: () => void
   /** Open a spawned subtask's session window. */
@@ -94,6 +96,7 @@ export function TaskTile({
   expanded,
   onClick,
   onEdit,
+  onDuplicate,
   onToggleSubtasks,
   onSubtaskClick,
   onAddSubtask,
@@ -114,6 +117,7 @@ export function TaskTile({
   // the Conductor creates them), but only dispatches session-backed rows on plain tiles.
   // Disabled while anything is in flight: a second Conductor run would be refused anyway.
   const hasRunningSubtasks = task.subtasks.some(s => s.runState === 'running')
+  const canDuplicate = !!onDuplicate && !!task.taskSlug
   const canRunSubtasks =
     !hasRunningSubtasks &&
     !task.isProcessing &&
@@ -170,6 +174,25 @@ export function TaskTile({
         />
       )}
 
+      {canDuplicate && (
+        <button
+          type="button"
+          data-no-dnd="true"
+          onClick={e => {
+            e.stopPropagation()
+            onDuplicate()
+          }}
+          onKeyDown={e => e.stopPropagation()}
+          title={t('kanban.duplicateTask')}
+          aria-label={t('kanban.duplicateTask')}
+          className={cn(
+            'absolute top-2 z-10 grid h-6 w-6 place-items-center rounded-md border border-border/60 bg-card text-foreground/50 opacity-0 shadow-minimal transition-opacity hover:bg-foreground/[0.05] hover:text-foreground group-hover:opacity-100 focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50',
+            onEdit ? 'right-9' : 'right-2',
+          )}
+        >
+          <CopyPlus className="h-3.5 w-3.5" strokeWidth={2} />
+        </button>
+      )}
       {onEdit && (
         <button
           type="button"
@@ -190,7 +213,10 @@ export function TaskTile({
       <div className="relative p-3 pl-3.5">
         {(project || task.isFlagged) && (
           // Right padding keeps the flag clear of the hover-revealed corner pencil.
-          <div className={cn('mb-1.5 flex items-center justify-between gap-2', onEdit && task.isFlagged && 'pr-7')}>
+          <div className={cn(
+            'mb-1.5 flex items-center justify-between gap-2',
+            (onEdit || canDuplicate) && task.isFlagged && (onEdit && canDuplicate ? 'pr-14' : 'pr-7'),
+          )}>
             {project ? (
               <span className="inline-flex min-w-0 items-center gap-1 text-[11px] font-medium text-foreground/55">
                 <span
@@ -325,16 +351,24 @@ export function TaskTile({
     </div>
   )
 
-  if (!onEdit) return card
+  if (!onEdit && !canDuplicate) return card
 
   return (
     <ContextMenu>
       <ContextMenuTrigger asChild>{card}</ContextMenuTrigger>
       <StyledContextMenuContent>
-        <StyledContextMenuItem onSelect={onEdit}>
-          <Pencil className="h-4 w-4" />
-          {t('kanban.editTask')}
-        </StyledContextMenuItem>
+        {onEdit && (
+          <StyledContextMenuItem onSelect={onEdit}>
+            <Pencil className="h-4 w-4" />
+            {t('kanban.editTask')}
+          </StyledContextMenuItem>
+        )}
+        {canDuplicate && (
+          <StyledContextMenuItem onSelect={onDuplicate}>
+            <CopyPlus className="h-4 w-4" />
+            {t('kanban.duplicateTask')}
+          </StyledContextMenuItem>
+        )}
       </StyledContextMenuContent>
     </ContextMenu>
   )

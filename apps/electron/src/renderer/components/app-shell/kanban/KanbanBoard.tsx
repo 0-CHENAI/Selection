@@ -41,6 +41,8 @@ interface KanbanBoardProps {
   onTaskClick?: (taskId: string) => void
   /** Open the full-pane editor against a tile (edit mode). Enables the tile's "Edit task" action. */
   onEditTask?: (taskId: string) => void
+  /** Clone a spec-backed tile onto a new board card. */
+  onDuplicateTask?: (taskId: string) => void
   onToggleSubtasks?: (taskId: string) => void
   onSubtaskClick?: (taskId: string, subtaskId: string) => void
   onAddSubtask?: (taskId: string, title: string, model: string) => void
@@ -84,6 +86,7 @@ export function KanbanBoard({
   expandedTaskIds,
   onTaskClick,
   onEditTask,
+  onDuplicateTask,
   onToggleSubtasks,
   onSubtaskClick,
   onAddSubtask,
@@ -167,6 +170,7 @@ export function KanbanBoard({
             expandedTaskIds={expandedTaskIds}
             onTaskClick={onTaskClick}
             onEditTask={onEditTask}
+            onDuplicateTask={onDuplicateTask}
             onToggleSubtasks={onToggleSubtasks}
             onSubtaskClick={onSubtaskClick}
             onAddSubtask={onAddSubtask}

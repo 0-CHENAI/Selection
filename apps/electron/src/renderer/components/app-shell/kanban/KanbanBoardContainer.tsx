@@ -298,6 +298,17 @@ export function KanbanBoardContainer() {
     return tasks.filter(task => task.projectId !== undefined && allow.has(task.projectId))
   }, [tasks, projectFilter])
 
+  const existingTasks = React.useMemo(() => {
+    const seen = new Set<string>()
+    const out: { slug: string; title: string }[] = []
+    for (const task of tasks) {
+      if (!task.taskSlug || seen.has(task.taskSlug)) continue
+      seen.add(task.taskSlug)
+      out.push({ slug: task.taskSlug, title: task.title })
+    }
+    return out
+  }, [tasks])
+
   const defaultSubtaskModel = catalogDefault
 
   const handleToggleSubtasks = React.useCallback((taskId: string) => {
@@ -538,6 +549,40 @@ export function KanbanBoardContainer() {
     [metaMap]
   )
 
+  const duplicatingRef = React.useRef(false)
+  const handleDuplicateTask = React.useCallback(
+    (taskId: string) => {
+      const meta = metaMap.get(taskId)
+      if (!activeWorkspaceId || !meta?.taskSlug || duplicatingRef.current) return
+      duplicatingRef.current = true
+      void window.electronAPI
+        .duplicateTask(activeWorkspaceId, {
+          slug: meta.taskSlug,
+          title: t('tasks.copyTitle', { title: getSessionTitle(meta) }),
+        })
+        .then((created) => {
+          if (!created.slug) {
+            toast.error(t('tasks.toastDuplicateFailed'), {
+              description: created.validation.errors[0]?.message,
+            })
+            return
+          }
+          toast.success(t('tasks.toastDuplicated'), {
+            description: t('tasks.toastDuplicatedDesc', { slug: created.slug }),
+          })
+        })
+        .catch((err: unknown) => {
+          toast.error(t('tasks.toastDuplicateFailed'), {
+            description: err instanceof Error ? err.message : String(err),
+          })
+        })
+        .finally(() => {
+          duplicatingRef.current = false
+        })
+    },
+    [activeWorkspaceId, metaMap, t],
+  )
+
   if (editorTarget && activeWorkspaceId) {
     return (
       <TaskEditor
@@ -565,6 +610,10 @@ export function KanbanBoardContainer() {
             navigateToSession(sessionId)
           }
         }}
+        onDuplicated={({ sessionId, taskSlug }) => {
+          setEditorTarget({ mode: 'edit', sessionId, taskSlug })
+        }}
+        existingTasks={existingTasks}
         modelGroups={subtaskModelGroups}
         modelToConnection={modelToConnection}
         defaultModel={defaultSubtaskModel ?? ''}
@@ -615,6 +664,7 @@ export function KanbanBoardContainer() {
           expandedTaskIds={expandedTaskIds}
           onTaskClick={openSessionScoped}
           onEditTask={handleEditTask}
+          onDuplicateTask={handleDuplicateTask}
           onToggleSubtasks={handleToggleSubtasks}
           onSubtaskClick={(taskId, subtaskId) => openSessionScoped(subtaskId, metaMap.get(taskId)?.projectId)}
           onAddSubtask={handleAddSubtask}

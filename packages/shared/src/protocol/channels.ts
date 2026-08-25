@@ -60,6 +60,7 @@ export const RPC_CHANNELS = {
     // Conductor — the Tasks DAG runner.
     VALIDATE: 'tasks:validate',
     CREATE: 'tasks:create',
+    DUPLICATE: 'tasks:duplicate',
     SAVE: 'tasks:save',
     GENERATE: 'tasks:generate',
     // Push: the authored spec (or an error) for an async tasks:generate, keyed by orchestratorSessionId.

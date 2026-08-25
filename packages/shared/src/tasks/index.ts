@@ -7,6 +7,7 @@
  */
 export * from './schema.ts';
 export * from './slug.ts';
+export * from './clone.ts';
 export * from './refs.ts';
 export * from './validate.ts';
 export * from './storage.ts';

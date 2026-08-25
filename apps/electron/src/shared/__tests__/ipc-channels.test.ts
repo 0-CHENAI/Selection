@@ -287,6 +287,7 @@ const EXPECTED_CHANNELS: string[] = [
   'tasks:applyRunRevision',
   'tasks:continue',
   'tasks:create',
+  'tasks:duplicate',
   'tasks:generate',
   'tasks:generated',
   'tasks:get',

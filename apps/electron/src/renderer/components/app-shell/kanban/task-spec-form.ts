@@ -147,6 +147,13 @@ export interface SpecForm {
   fixedId?: string
   runner?: 'conduct' | 'orchestrate'
   layout?: Record<string, { x: number; y: number }>
+  /** Task-level fields the form does not edit (carried when starting from an existing spec). */
+  taskExtras?: {
+    params?: unknown
+    outputs?: unknown
+    token_budget?: number
+    max_parallel?: number
+  }
 }
 
 /** A spec node as authored by the generator / loaded from disk (loose, renderer-facing shape). */
@@ -257,6 +264,10 @@ export function buildSpec(form: SpecForm, modelToConnection: Map<string, string>
     ...(Object.keys(defaults).length ? { defaults } : {}),
     ...(form.runner && form.runner !== 'conduct' ? { runner: form.runner } : {}),
     ...(form.layout && Object.keys(form.layout).length ? { ui: { layout: { nodes: form.layout } } } : {}),
+    ...(form.taskExtras?.params ? { params: form.taskExtras.params } : {}),
+    ...(form.taskExtras?.outputs ? { outputs: form.taskExtras.outputs } : {}),
+    ...(form.taskExtras?.token_budget ? { token_budget: form.taskExtras.token_budget } : {}),
+    ...(form.taskExtras?.max_parallel ? { max_parallel: form.taskExtras.max_parallel } : {}),
     nodes,
   }
 }

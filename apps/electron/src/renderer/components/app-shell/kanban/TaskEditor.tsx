@@ -1,5 +1,5 @@
 import * as React from 'react'
-import { ChevronLeft, ChevronDown, Sparkles, Plus, Trash2, Check, X, ExternalLink, RefreshCw, CheckCircle2, XCircle, CircleSlash, DatabaseZap, Zap, Folder } from 'lucide-react'
+import { ChevronLeft, ChevronDown, Sparkles, Plus, Trash2, Check, X, ExternalLink, RefreshCw, CheckCircle2, XCircle, CircleSlash, DatabaseZap, Zap, Folder, CopyPlus } from 'lucide-react'
 import { toast } from 'sonner'
 import { useTranslation } from 'react-i18next'
 import { cn } from '@/lib/utils'
@@ -20,8 +20,8 @@ import {
   DropdownMenuLabel,
   DropdownMenuSeparator,
 } from '@/components/ui/dropdown-menu'
-import type { KanbanModelProviderGroup, TaskEditorTarget } from './types'
-import { uid, buildSpec, specToSubtasks, canDependOn, quickAddNodeId, quickAddChildToSubtask, DEFAULT_REPAIR_ATTEMPTS, MAX_REPAIR_ATTEMPTS_CAP, SESSION_LIKE_KINDS, type EditorSubtask, type SpecNode, type TaskPermissionMode } from './task-spec-form'
+import type { KanbanModelProviderGroup, TaskEditorTarget, TaskTemplateOption } from './types'
+import { uid, buildSpec, specToSubtasks, canDependOn, quickAddNodeId, quickAddChildToSubtask, QUICK_ADD_NODE_PREFIX, DEFAULT_REPAIR_ATTEMPTS, MAX_REPAIR_ATTEMPTS_CAP, SESSION_LIKE_KINDS, type EditorSubtask, type SpecNode, type TaskPermissionMode } from './task-spec-form'
 import { runnerLabelKey, runStatusLabelKey } from './task-labels'
 import { ConductorWorkbench, type WorkbenchSpec } from './ConductorWorkbench'
 import { isTasksOrchestrateEnabled } from '@craft-agent/shared/feature-flags'
@@ -496,6 +496,10 @@ export interface TaskEditorProps {
    * RESOLVED reserved-label id from tasks:create (may be 'task-2' after a name collision).
    */
   onCreated?: (created: { sessionId: string; taskLabelId?: string; projectId?: string }) => void
+  /** After a one-click duplicate, reopen the new tile so the cloned graph is visible. */
+  onDuplicated?: (created: { sessionId: string; taskSlug: string }) => void
+  /** Spec-backed tasks on the board, used as starting graphs in create mode. */
+  existingTasks?: TaskTemplateOption[]
   /** Real provider→model groups (from the workspace's LLM connections). */
   modelGroups: KanbanModelProviderGroup[]
   /** model id → connection slug that serves it (so each node routes to the right backend). */
@@ -511,6 +515,8 @@ export function TaskEditor({
   onOpenSession,
   onOpenChildSession,
   onCreated,
+  onDuplicated,
+  existingTasks = [],
   modelGroups,
   modelToConnection,
   defaultModel,
@@ -576,6 +582,8 @@ export function TaskEditor({
   const [etag, setEtag] = React.useState<string | null>(null)
   const [sourceVersion, setSourceVersion] = React.useState<1 | 2 | undefined>(undefined)
   const [migrationWarnings, setMigrationWarnings] = React.useState<string[]>([])
+  const [templateSlug, setTemplateSlug] = React.useState('')
+  const [taskExtras, setTaskExtras] = React.useState<NonNullable<Parameters<typeof buildSpec>[0]['taskExtras']>>()
 
   // Jotai store handle for one-shot reads (no subscription — the editor must not re-render
   // on every streaming metadata tick just to have read children once at open).
@@ -629,7 +637,7 @@ export function TaskEditor({
         .then((res) => {
           if (cancelled) return
           const spec = res.spec as
-            | { title?: string; goal?: string; acceptance_criteria?: string; max_iterations?: number; project?: string; cwd?: string; sources?: string[]; skills?: string[]; runner?: 'conduct' | 'orchestrate'; defaults?: { model?: string; llmConnection?: string; permissionMode?: TaskPermissionMode }; nodes?: Array<{ id: string; title?: string; kind?: SpecNode['kind']; prompt?: string; model?: string; llmConnection?: string; depends_on?: string[] }>; ui?: { layout?: { nodes?: Record<string, { x: number; y: number }> } } }
+            | { title?: string; goal?: string; acceptance_criteria?: string; max_iterations?: number; project?: string; cwd?: string; sources?: string[]; skills?: string[]; runner?: 'conduct' | 'orchestrate'; defaults?: { model?: string; llmConnection?: string; permissionMode?: TaskPermissionMode }; nodes?: Array<{ id: string; title?: string; kind?: SpecNode['kind']; prompt?: string; model?: string; llmConnection?: string; depends_on?: string[] }>; ui?: { layout?: { nodes?: Record<string, { x: number; y: number }> } }; params?: unknown; outputs?: unknown; token_budget?: number; max_parallel?: number }
             | undefined
           if (!spec) return
           if (res.etag) setEtag(res.etag)
@@ -658,6 +666,12 @@ export function TaskEditor({
           if (spec.defaults?.permissionMode) setPermissionMode(spec.defaults.permissionMode)
           else if (sessionMeta?.permissionMode) setPermissionMode(sessionMeta.permissionMode as TaskPermissionMode)
           const nodes = spec.nodes ?? []
+          setTaskExtras({
+            params: spec.params,
+            outputs: spec.outputs,
+            token_budget: spec.token_budget,
+            max_parallel: spec.max_parallel,
+          })
           setSubtasks([
             ...specToSubtasks(nodes),
             ...collectQuickAddRows(new Set(nodes.map((n) => n.id))),
@@ -705,6 +719,120 @@ export function TaskEditor({
       setLiveRun(snapshot)
     })
   }, [editSlug])
+
+  const applyTemplate = React.useCallback(
+    async (slug: string) => {
+      setTemplateSlug(slug)
+      if (!slug) {
+        setTaskExtras(undefined)
+        return
+      }
+      setBusy(true)
+      try {
+        const res = await window.electronAPI.getTask(workspaceId, slug)
+        const spec = res.spec as
+          | {
+              title?: string
+              goal?: string
+              acceptance_criteria?: string
+              max_iterations?: number
+              project?: string
+              cwd?: string
+              sources?: string[]
+              skills?: string[]
+              runner?: 'conduct' | 'orchestrate'
+              defaults?: { model?: string; llmConnection?: string; permissionMode?: TaskPermissionMode }
+              nodes?: SpecNode[]
+              ui?: { layout?: { nodes?: Record<string, { x: number; y: number }> } }
+              params?: Array<{ name: string; sensitive?: boolean; default?: unknown }>
+              outputs?: unknown
+              token_budget?: number
+              max_parallel?: number
+            }
+          | undefined
+        if (!spec) {
+          toast.error(t('tasks.toastDuplicateFailed'))
+          return
+        }
+        setMode('manual')
+        setRunner(spec.runner ?? 'conduct')
+        const nodes = (spec.nodes ?? []).filter((n) => !n.id.startsWith(QUICK_ADD_NODE_PREFIX))
+        if (nodes.length === 0) {
+          toast.error(t('tasks.toastDuplicateFailed'), { description: t('tasks.templateEmpty') })
+          setTemplateSlug('')
+          return
+        }
+        setLayout(
+          Object.fromEntries(
+            Object.entries(spec.ui?.layout?.nodes ?? {}).filter(([id]) => !id.startsWith(QUICK_ADD_NODE_PREFIX)),
+          ),
+        )
+        const sourceTitle = spec.title?.trim() || slug
+        setTitle(t('tasks.copyTitle', { title: sourceTitle }))
+        setGoal(spec.goal ?? '')
+        setAcceptanceCriteria(spec.acceptance_criteria ?? '')
+        setMaxRepairs(spec.max_iterations != null ? String(spec.max_iterations) : '')
+        setProjectId(spec.project ?? '')
+        setBoundProjectId(spec.project ?? '')
+        setCwd(spec.cwd ?? '')
+        setSourceSlugs(spec.sources ?? [])
+        setSkillSlugs(spec.skills ?? [])
+        setOrchModel(spec.defaults?.model ?? fallbackModel)
+        setOrchConnection(spec.defaults?.llmConnection)
+        setPermissionMode(spec.defaults?.permissionMode ?? 'allow-all')
+        setTaskExtras({
+          params: spec.params?.map((param) => {
+            if (!param.sensitive) return param
+            const { default: _omit, ...rest } = param
+            return rest
+          }),
+          outputs: spec.outputs,
+          token_budget: spec.token_budget,
+          max_parallel: spec.max_parallel,
+        })
+        setSubtasks(specToSubtasks(nodes))
+        setDirty(true)
+      } catch (err) {
+        toast.error(t('tasks.toastDuplicateFailed'), {
+          description: err instanceof Error ? err.message : String(err),
+        })
+      } finally {
+        setBusy(false)
+      }
+    },
+    [fallbackModel, t, workspaceId],
+  )
+
+  const handleDuplicate = React.useCallback(async () => {
+    if (!editSlug) return
+    if (dirty) {
+      toast.error(t('tasks.duplicateNeedsSave'))
+      return
+    }
+    setBusy(true)
+    try {
+      const created = await window.electronAPI.duplicateTask(workspaceId, {
+        slug: editSlug,
+        title: t('tasks.copyTitle', { title: title.trim() || editSlug }),
+      })
+      if (!created.slug) {
+        toast.error(t('tasks.toastDuplicateFailed'), {
+          description: created.validation.errors[0]?.message,
+        })
+        return
+      }
+      toast.success(t('tasks.toastDuplicated'), {
+        description: t('tasks.toastDuplicatedDesc', { slug: created.slug }),
+      })
+      onDuplicated?.({ sessionId: created.orchestratorSessionId, taskSlug: created.slug })
+    } catch (err) {
+      toast.error(t('tasks.toastDuplicateFailed'), {
+        description: err instanceof Error ? err.message : String(err),
+      })
+    } finally {
+      setBusy(false)
+    }
+  }, [dirty, editSlug, onDuplicated, t, title, workspaceId])
 
   const controlRun = React.useCallback(
     async (op: 'pause' | 'resume' | 'stop' | 'continue') => {
@@ -805,6 +933,8 @@ export function TaskEditor({
       if (spec.defaults?.llmConnection) setOrchConnection(spec.defaults.llmConnection)
       if (spec.defaults?.permissionMode) setPermissionMode(spec.defaults.permissionMode)
       setSubtasks(specToSubtasks(spec.nodes ?? []))
+      setTaskExtras(undefined)
+      setTemplateSlug('')
       setMode('manual')
       // Record the draft as adoptable: submit reuses it in place (edits are fine to run on it).
       generatedDraftRef.current = res.orchestratorSessionId
@@ -897,6 +1027,7 @@ export function TaskEditor({
         fixedId: editSlug,
         runner,
         layout,
+        taskExtras,
       },
       modelToConnection,
     ) as WorkbenchSpec
@@ -981,6 +1112,7 @@ export function TaskEditor({
         fixedId: editSlug,
         runner,
         layout,
+        taskExtras,
       },
       modelToConnection,
     )
@@ -1103,6 +1235,16 @@ export function TaskEditor({
         </div>
 
         <div className="ml-auto flex items-center gap-2">
+          {isEdit && editSlug && (
+            <Btn
+              variant="secondary"
+              onClick={() => void handleDuplicate()}
+              disabled={busy || dirty}
+              title={dirty ? t('tasks.duplicateNeedsSave') : t('tasks.duplicateTask')}
+            >
+              <CopyPlus className="h-3.5 w-3.5" strokeWidth={2} /> {t('tasks.duplicateTask')}
+            </Btn>
+          )}
           {isEdit && onOpenSession && (
             <Btn variant="secondary" onClick={onOpenSession} disabled={busy}>
               <ExternalLink className="h-3.5 w-3.5" strokeWidth={2} /> {t('tasks.openSession')}
@@ -1225,6 +1367,28 @@ export function TaskEditor({
         {/* Left — definition */}
         <div className="flex min-h-0 flex-col gap-4 overflow-y-auto rounded-xl border border-border bg-card p-4 shadow-minimal">
           <div className="text-[15px] font-bold">{t('tasks.definition')}</div>
+
+          {!isEdit && existingTasks.length > 0 && (
+            <div>
+              <div className="mb-1.5 text-[12px] font-semibold text-foreground/55">{t('tasks.useTemplate')}</div>
+              <select
+                value={templateSlug}
+                disabled={busy}
+                onChange={(e) => void applyTemplate(e.target.value)}
+                className="w-full rounded-lg border border-border bg-background px-3 py-2 text-[13px] outline-none focus:border-foreground/25"
+              >
+                <option value="">{t('tasks.useTemplateNone')}</option>
+                {existingTasks.map((task) => (
+                  <option key={task.slug} value={task.slug}>
+                    {task.title}
+                  </option>
+                ))}
+              </select>
+              {templateSlug && (
+                <p className="mt-1.5 text-[11px] leading-relaxed text-foreground/45">{t('tasks.templateHint')}</p>
+              )}
+            </div>
+          )}
 
           <div className="inline-flex w-fit rounded-[9px] bg-foreground/[0.05] p-0.5">
             {(['manual', 'generate'] as Mode[]).map((m) => (

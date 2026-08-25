@@ -32,6 +32,8 @@ interface KanbanColumnProps {
   onTaskClick?: (taskId: string) => void
   /** Open the editor against a tile (edit mode). Enables the tile's "Edit task" action. */
   onEditTask?: (taskId: string) => void
+  /** Clone a spec-backed tile onto a new board card. */
+  onDuplicateTask?: (taskId: string) => void
   onToggleSubtasks?: (taskId: string) => void
   onSubtaskClick?: (taskId: string, subtaskId: string) => void
   onAddSubtask?: (taskId: string, title: string, model: string) => void
@@ -67,6 +69,7 @@ export function KanbanColumn({
   expandedTaskIds,
   onTaskClick,
   onEditTask,
+  onDuplicateTask,
   onToggleSubtasks,
   onSubtaskClick,
   onAddSubtask,
@@ -130,6 +133,7 @@ export function KanbanColumn({
               expanded={expandedTaskIds.has(task.id)}
               onClick={() => onTaskClick?.(task.id)}
               onEdit={onEditTask ? () => onEditTask(task.id) : undefined}
+              onDuplicate={onDuplicateTask && task.taskSlug ? () => onDuplicateTask(task.id) : undefined}
               onToggleSubtasks={() => onToggleSubtasks?.(task.id)}
               onSubtaskClick={onSubtaskClick ? subtaskId => onSubtaskClick(task.id, subtaskId) : undefined}
               onAddSubtask={onAddSubtask ? (title, model) => onAddSubtask(task.id, title, model) : undefined}

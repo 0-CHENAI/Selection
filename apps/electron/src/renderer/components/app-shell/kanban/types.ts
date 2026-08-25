@@ -34,6 +34,12 @@ export type TaskEditorTarget =
   | { mode: 'create'; initialProjectId?: string }
   | { mode: 'edit'; sessionId: string; taskSlug?: string; initialTitle?: string }
 
+/** An existing Conductor task that can seed a new editor or a duplicate. */
+export interface TaskTemplateOption {
+  slug: string
+  title: string
+}
+
 export interface KanbanSubtask {
   /** Row key. A child session id, or `node:<nodeId>` for an authored-but-never-run spec node. */
   id: string

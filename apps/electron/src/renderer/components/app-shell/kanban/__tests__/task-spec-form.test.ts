@@ -59,6 +59,30 @@ describe('task-spec-form round-trip', () => {
     expect('skills' in empty).toBe(false)
   })
 
+  it('carries task-level extras when starting from an existing spec', () => {
+    const subtasks = specToSubtasks([{ id: 'a', title: 'A', prompt: 'p' }], 'm')
+    const spec = buildSpec(
+      {
+        title: 'T',
+        goal: 'g',
+        projectId: '',
+        orchModel: '',
+        subtasks,
+        taskExtras: {
+          params: [{ name: 'topic', default: 'ok' }],
+          outputs: { result: '${nodes.a.output}' },
+          token_budget: 8000,
+          max_parallel: 2,
+        },
+      },
+      noConn,
+    )
+    expect(spec.params).toEqual([{ name: 'topic', default: 'ok' }])
+    expect(spec.outputs).toEqual({ result: '${nodes.a.output}' })
+    expect(spec.token_budget).toBe(8000)
+    expect(spec.max_parallel).toBe(2)
+  })
+
   it('preserves multi-dependency (fan-in) edges that the single-dependency editor would otherwise drop', () => {
     const generated: SpecNode[] = [
       { id: 'a', title: 'A', prompt: 'pa' },
