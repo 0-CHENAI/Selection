@@ -1,5 +1,5 @@
 import * as React from 'react'
-import { ChevronLeft, ChevronDown, Sparkles, Plus, Trash2, Check, X, ExternalLink, RefreshCw, CheckCircle2, XCircle, CircleSlash, DatabaseZap, Zap, Folder, CopyPlus } from 'lucide-react'
+import { ChevronLeft, ChevronDown, Sparkles, Plus, Trash2, Check, X, ExternalLink, RefreshCw, CheckCircle2, XCircle, CircleSlash, DatabaseZap, Zap, Folder, CopyPlus, BookmarkPlus } from 'lucide-react'
 import { toast } from 'sonner'
 import { useTranslation } from 'react-i18next'
 import { cn } from '@/lib/utils'
@@ -21,7 +21,7 @@ import {
   DropdownMenuSeparator,
 } from '@/components/ui/dropdown-menu'
 import type { KanbanModelProviderGroup, TaskEditorTarget, TaskTemplateOption } from './types'
-import { uid, buildSpec, specToSubtasks, canDependOn, quickAddNodeId, quickAddChildToSubtask, QUICK_ADD_NODE_PREFIX, DEFAULT_REPAIR_ATTEMPTS, MAX_REPAIR_ATTEMPTS_CAP, SESSION_LIKE_KINDS, type EditorSubtask, type SpecNode, type TaskPermissionMode } from './task-spec-form'
+import { uid, buildSpec, specToSubtasks, reusableSpecNodes, canDependOn, quickAddNodeId, quickAddChildToSubtask, DEFAULT_REPAIR_ATTEMPTS, MAX_REPAIR_ATTEMPTS_CAP, SESSION_LIKE_KINDS, type EditorSubtask, type SpecNode, type TaskPermissionMode } from './task-spec-form'
 import { runnerLabelKey, runStatusLabelKey } from './task-labels'
 import { ConductorWorkbench, type WorkbenchSpec } from './ConductorWorkbench'
 import { isTasksOrchestrateEnabled } from '@craft-agent/shared/feature-flags'
@@ -500,6 +500,10 @@ export interface TaskEditorProps {
   onDuplicated?: (created: { sessionId: string; taskSlug: string }) => void
   /** Spec-backed tasks on the board, used as starting graphs in create mode. */
   existingTasks?: TaskTemplateOption[]
+  /** Workspace-local templates (no session). Shown first in the create-mode picker. */
+  libraryTemplates?: TaskTemplateOption[]
+  /** After a library template is deleted, so the create-mode picker drops it. */
+  onLibraryTemplatesChange?: (items: TaskTemplateOption[]) => void
   /** Real provider→model groups (from the workspace's LLM connections). */
   modelGroups: KanbanModelProviderGroup[]
   /** model id → connection slug that serves it (so each node routes to the right backend). */
@@ -517,6 +521,8 @@ export function TaskEditor({
   onCreated,
   onDuplicated,
   existingTasks = [],
+  libraryTemplates = [],
+  onLibraryTemplatesChange,
   modelGroups,
   modelToConnection,
   defaultModel,
@@ -583,6 +589,7 @@ export function TaskEditor({
   const [sourceVersion, setSourceVersion] = React.useState<1 | 2 | undefined>(undefined)
   const [migrationWarnings, setMigrationWarnings] = React.useState<string[]>([])
   const [templateSlug, setTemplateSlug] = React.useState('')
+  const [hasLibraryTemplate, setHasLibraryTemplate] = React.useState(false)
   const [taskExtras, setTaskExtras] = React.useState<NonNullable<Parameters<typeof buildSpec>[0]['taskExtras']>>()
 
   // Jotai store handle for one-shot reads (no subscription — the editor must not re-render
@@ -720,16 +727,39 @@ export function TaskEditor({
     })
   }, [editSlug])
 
+  React.useEffect(() => {
+    if (!editSlug) {
+      setHasLibraryTemplate(false)
+      return
+    }
+    let cancelled = false
+    void window.electronAPI
+      .getTaskTemplate(workspaceId, editSlug)
+      .then((res) => {
+        if (!cancelled) setHasLibraryTemplate(!!res.spec && res.validation.valid)
+      })
+      .catch(() => {
+        if (!cancelled) setHasLibraryTemplate(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [editSlug, workspaceId])
+
   const applyTemplate = React.useCallback(
-    async (slug: string) => {
-      setTemplateSlug(slug)
-      if (!slug) {
+    async (value: string) => {
+      setTemplateSlug(value)
+      if (!value) {
         setTaskExtras(undefined)
         return
       }
+      const fromLibrary = value.startsWith('library:')
+      const slug = fromLibrary ? value.slice('library:'.length) : value.startsWith('task:') ? value.slice('task:'.length) : value
       setBusy(true)
       try {
-        const res = await window.electronAPI.getTask(workspaceId, slug)
+        const res = fromLibrary
+          ? await window.electronAPI.getTaskTemplate(workspaceId, slug)
+          : await window.electronAPI.getTask(workspaceId, slug)
         const spec = res.spec as
           | {
               title?: string
@@ -750,25 +780,28 @@ export function TaskEditor({
               max_parallel?: number
             }
           | undefined
-        if (!spec) {
-          toast.error(t('tasks.toastDuplicateFailed'))
+        if (!spec || !res.validation.valid) {
+          toast.error(fromLibrary ? t('tasks.toastTemplateLoadFailed') : t('tasks.toastDuplicateFailed'))
           return
         }
         setMode('manual')
         setRunner(spec.runner ?? 'conduct')
-        const nodes = (spec.nodes ?? []).filter((n) => !n.id.startsWith(QUICK_ADD_NODE_PREFIX))
+        const nodes = reusableSpecNodes(spec.nodes ?? [])
         if (nodes.length === 0) {
-          toast.error(t('tasks.toastDuplicateFailed'), { description: t('tasks.templateEmpty') })
+          toast.error(fromLibrary ? t('tasks.toastTemplateLoadFailed') : t('tasks.toastDuplicateFailed'), {
+            description: t('tasks.templateEmpty'),
+          })
           setTemplateSlug('')
           return
         }
+        const keepIds = new Set(nodes.map((n) => n.id))
         setLayout(
           Object.fromEntries(
-            Object.entries(spec.ui?.layout?.nodes ?? {}).filter(([id]) => !id.startsWith(QUICK_ADD_NODE_PREFIX)),
+            Object.entries(spec.ui?.layout?.nodes ?? {}).filter(([id]) => keepIds.has(id)),
           ),
         )
         const sourceTitle = spec.title?.trim() || slug
-        setTitle(t('tasks.copyTitle', { title: sourceTitle }))
+        setTitle(fromLibrary ? sourceTitle : t('tasks.copyTitle', { title: sourceTitle }))
         setGoal(spec.goal ?? '')
         setAcceptanceCriteria(spec.acceptance_criteria ?? '')
         setMaxRepairs(spec.max_iterations != null ? String(spec.max_iterations) : '')
@@ -793,7 +826,7 @@ export function TaskEditor({
         setSubtasks(specToSubtasks(nodes))
         setDirty(true)
       } catch (err) {
-        toast.error(t('tasks.toastDuplicateFailed'), {
+        toast.error(fromLibrary ? t('tasks.toastTemplateLoadFailed') : t('tasks.toastDuplicateFailed'), {
           description: err instanceof Error ? err.message : String(err),
         })
       } finally {
@@ -833,6 +866,67 @@ export function TaskEditor({
       setBusy(false)
     }
   }, [dirty, editSlug, onDuplicated, t, title, workspaceId])
+
+  const handleSaveAsTemplate = React.useCallback(async () => {
+    if (!editSlug) return
+    if (dirty) {
+      toast.error(t('tasks.saveTemplateNeedsSave'))
+      return
+    }
+    setBusy(true)
+    try {
+      const saved = await window.electronAPI.saveTaskTemplate(workspaceId, {
+        slug: editSlug,
+        title: title.trim() || editSlug,
+      })
+      if (!saved.slug) {
+        toast.error(t('tasks.toastTemplateSaveFailed'), {
+          description: saved.validation.errors[0]?.message,
+        })
+        return
+      }
+      toast.success(t('tasks.toastTemplateSaved'), {
+        description: t('tasks.toastTemplateSavedDesc', { slug: saved.slug }),
+      })
+      setHasLibraryTemplate(true)
+    } catch (err) {
+      toast.error(t('tasks.toastTemplateSaveFailed'), {
+        description: err instanceof Error ? err.message : String(err),
+      })
+    } finally {
+      setBusy(false)
+    }
+  }, [dirty, editSlug, t, title, workspaceId])
+
+  const handleDeleteTemplate = React.useCallback(
+    async (slug: string, label: string) => {
+      if (!window.confirm(t('tasks.deleteTemplateConfirm', { title: label }))) return
+      setBusy(true)
+      try {
+        const deleted = await window.electronAPI.deleteTaskTemplate(workspaceId, slug)
+        if (!deleted.slug) {
+          toast.error(t('tasks.toastTemplateDeleteFailed'), {
+            description: deleted.validation.errors[0]?.message,
+          })
+          return
+        }
+        toast.success(t('tasks.toastTemplateDeleted'), {
+          description: t('tasks.toastTemplateDeletedDesc', { slug: deleted.slug }),
+        })
+        setHasLibraryTemplate(false)
+        if (templateSlug === `library:${slug}`) setTemplateSlug('')
+        const items = await window.electronAPI.listTaskTemplates(workspaceId)
+        onLibraryTemplatesChange?.(items)
+      } catch (err) {
+        toast.error(t('tasks.toastTemplateDeleteFailed'), {
+          description: err instanceof Error ? err.message : String(err),
+        })
+      } finally {
+        setBusy(false)
+      }
+    },
+    [onLibraryTemplatesChange, t, templateSlug, workspaceId],
+  )
 
   const controlRun = React.useCallback(
     async (op: 'pause' | 'resume' | 'stop' | 'continue') => {
@@ -1236,14 +1330,34 @@ export function TaskEditor({
 
         <div className="ml-auto flex items-center gap-2">
           {isEdit && editSlug && (
-            <Btn
-              variant="secondary"
-              onClick={() => void handleDuplicate()}
-              disabled={busy || dirty}
-              title={dirty ? t('tasks.duplicateNeedsSave') : t('tasks.duplicateTask')}
-            >
-              <CopyPlus className="h-3.5 w-3.5" strokeWidth={2} /> {t('tasks.duplicateTask')}
-            </Btn>
+            <>
+              <Btn
+                variant="secondary"
+                onClick={() => void handleDuplicate()}
+                disabled={busy || dirty}
+                title={dirty ? t('tasks.duplicateNeedsSave') : t('tasks.duplicateTask')}
+              >
+                <CopyPlus className="h-3.5 w-3.5" strokeWidth={2} /> {t('tasks.duplicateTask')}
+              </Btn>
+              <Btn
+                variant="secondary"
+                onClick={() => void handleSaveAsTemplate()}
+                disabled={busy || dirty}
+                title={dirty ? t('tasks.saveTemplateNeedsSave') : t('tasks.saveAsTemplate')}
+              >
+                <BookmarkPlus className="h-3.5 w-3.5" strokeWidth={2} /> {t('tasks.saveAsTemplate')}
+              </Btn>
+              {hasLibraryTemplate && (
+                <Btn
+                  variant="secondary"
+                  onClick={() => void handleDeleteTemplate(editSlug, title.trim() || editSlug)}
+                  disabled={busy}
+                  title={t('tasks.deleteTemplate')}
+                >
+                  <Trash2 className="h-3.5 w-3.5" strokeWidth={2} /> {t('tasks.deleteTemplate')}
+                </Btn>
+              )}
+            </>
           )}
           {isEdit && onOpenSession && (
             <Btn variant="secondary" onClick={onOpenSession} disabled={busy}>
@@ -1368,7 +1482,7 @@ export function TaskEditor({
         <div className="flex min-h-0 flex-col gap-4 overflow-y-auto rounded-xl border border-border bg-card p-4 shadow-minimal">
           <div className="text-[15px] font-bold">{t('tasks.definition')}</div>
 
-          {!isEdit && existingTasks.length > 0 && (
+          {!isEdit && (libraryTemplates.length > 0 || existingTasks.length > 0) && (
             <div>
               <div className="mb-1.5 text-[12px] font-semibold text-foreground/55">{t('tasks.useTemplate')}</div>
               <select
@@ -1378,14 +1492,41 @@ export function TaskEditor({
                 className="w-full rounded-lg border border-border bg-background px-3 py-2 text-[13px] outline-none focus:border-foreground/25"
               >
                 <option value="">{t('tasks.useTemplateNone')}</option>
-                {existingTasks.map((task) => (
-                  <option key={task.slug} value={task.slug}>
-                    {task.title}
-                  </option>
-                ))}
+                {libraryTemplates.length > 0 && (
+                  <optgroup label={t('tasks.libraryTemplates')}>
+                    {libraryTemplates.map((task) => (
+                      <option key={`library:${task.slug}`} value={`library:${task.slug}`}>
+                        {task.title}
+                      </option>
+                    ))}
+                  </optgroup>
+                )}
+                {existingTasks.length > 0 && (
+                  <optgroup label={t('tasks.existingTasks')}>
+                    {existingTasks.map((task) => (
+                      <option key={`task:${task.slug}`} value={`task:${task.slug}`}>
+                        {task.title}
+                      </option>
+                    ))}
+                  </optgroup>
+                )}
               </select>
               {templateSlug && (
                 <p className="mt-1.5 text-[11px] leading-relaxed text-foreground/45">{t('tasks.templateHint')}</p>
+              )}
+              {templateSlug.startsWith('library:') && (
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => {
+                    const slug = templateSlug.slice('library:'.length)
+                    const label = libraryTemplates.find((item) => item.slug === slug)?.title || slug
+                    void handleDeleteTemplate(slug, label)
+                  }}
+                  className="mt-1.5 text-[12px] font-semibold text-foreground/55 hover:text-foreground"
+                >
+                  {t('tasks.deleteTemplate')}
+                </button>
               )}
             </div>
           )}

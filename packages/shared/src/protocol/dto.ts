@@ -251,6 +251,39 @@ export interface TaskDuplicateRequest {
   title?: string
 }
 
+export interface TaskTemplateSummaryDto {
+  slug: string
+  title: string
+}
+
+export interface TaskGetTemplateResult {
+  slug: string
+  title: string
+  validation: TaskValidationResultDto
+  spec?: unknown
+  yaml?: string
+}
+
+export interface TaskSaveTemplateRequest {
+  /** Live task slug to snapshot into the workspace template library. */
+  slug: string
+  /** Template title. Omitted → source title. Re-saving the same slug overwrites. */
+  title?: string
+}
+
+export interface TaskSaveTemplateResult {
+  /** Empty string when validation failed — inspect `validation`. */
+  slug: string
+  title: string
+  validation: TaskValidationResultDto
+}
+
+export interface TaskDeleteTemplateResult {
+  /** Empty string when the template was missing or the slug was invalid. */
+  slug: string
+  validation: TaskValidationResultDto
+}
+
 export interface TaskCreateResult {
   /** Empty string when validation failed — inspect `validation`. */
   slug: string

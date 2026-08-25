@@ -185,6 +185,11 @@ import type {
   TaskCreateRequest,
   TaskCreateResult,
   TaskDuplicateRequest,
+  TaskTemplateSummaryDto,
+  TaskGetTemplateResult,
+  TaskSaveTemplateRequest,
+  TaskSaveTemplateResult,
+  TaskDeleteTemplateResult,
   TaskSaveRequest,
   TaskSaveResult,
   TaskRespondApprovalRequest,
@@ -246,6 +251,10 @@ export interface ElectronAPI {
   validateTask(workspaceId: string, yaml: string): Promise<TaskValidationResultDto>
   createTask(workspaceId: string, req: TaskCreateRequest): Promise<TaskCreateResult>
   duplicateTask(workspaceId: string, req: TaskDuplicateRequest): Promise<TaskCreateResult>
+  listTaskTemplates(workspaceId: string): Promise<TaskTemplateSummaryDto[]>
+  getTaskTemplate(workspaceId: string, slug: string): Promise<TaskGetTemplateResult>
+  saveTaskTemplate(workspaceId: string, req: TaskSaveTemplateRequest): Promise<TaskSaveTemplateResult>
+  deleteTaskTemplate(workspaceId: string, slug: string): Promise<TaskDeleteTemplateResult>
   saveTask(workspaceId: string, req: TaskSaveRequest): Promise<TaskSaveResult>
   generateTask(workspaceId: string, req: TaskGenerateRequest): Promise<TaskGenerateAck>
   /** Async generate result (or error), keyed by orchestratorSessionId. Subscribe before/after generateTask. */

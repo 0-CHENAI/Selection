@@ -61,6 +61,10 @@ export const RPC_CHANNELS = {
     VALIDATE: 'tasks:validate',
     CREATE: 'tasks:create',
     DUPLICATE: 'tasks:duplicate',
+    LIST_TEMPLATES: 'tasks:listTemplates',
+    GET_TEMPLATE: 'tasks:getTemplate',
+    SAVE_TEMPLATE: 'tasks:saveTemplate',
+    DELETE_TEMPLATE: 'tasks:deleteTemplate',
     SAVE: 'tasks:save',
     GENERATE: 'tasks:generate',
     // Push: the authored spec (or an error) for an async tasks:generate, keyed by orchestratorSessionId.

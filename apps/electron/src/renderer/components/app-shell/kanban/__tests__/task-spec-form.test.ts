@@ -2,6 +2,7 @@ import { describe, it, expect } from 'bun:test'
 import {
   buildSpec,
   specToSubtasks,
+  reusableSpecNodes,
   canDependOn,
   quickAddNodeId,
   quickAddSessionId,
@@ -110,6 +111,33 @@ describe('task-spec-form round-trip', () => {
     const spec = buildSpec({ title: 'T', goal: 'g', projectId: '', orchModel: '', subtasks }, noConn)
     const synth = (spec.nodes as Array<{ id: string; depends_on?: string[] }>).find((n) => n.id === 'synth')!
     expect(synth.depends_on).toEqual(['a']) // 'b' filtered out, not emitted as a dangling ref
+  })
+
+  it('reusableSpecNodes drops qa- nodes and route/loop.else that pointed at them', () => {
+    const nodes = reusableSpecNodes([
+      {
+        id: 'branch',
+        kind: 'route',
+        route: {
+          cases: [
+            { when: 'A', goto: 'keep' },
+            { when: 'B', goto: 'qa-gone' },
+          ],
+          default: 'keep',
+        },
+      },
+      { id: 'keep', prompt: 'keep' },
+      { id: 'qa-gone', prompt: 'typed' },
+      { id: 'retry', kind: 'loop', prompt: 'retry', loop: { until: 'DONE', max: 2, else: 'qa-gone' } },
+      { id: 'write', prompt: 'write', depends_on: ['keep', 'qa-gone'] },
+    ])
+    expect(nodes.map((n) => n.id)).toEqual(['branch', 'keep', 'retry', 'write'])
+    expect(nodes[0]?.route).toEqual({
+      cases: [{ when: 'A', goto: 'keep' }],
+      default: 'keep',
+    })
+    expect(nodes[2]?.loop).toEqual({ until: 'DONE', max: 2 })
+    expect(nodes[3]?.depends_on).toEqual(['keep'])
   })
 
   it('preserves qa- node ids so adopted quick-add subtasks survive edit → save round-trips', () => {

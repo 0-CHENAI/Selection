@@ -24,3 +24,17 @@ export function uniqueTaskSlug(title: string, taken: ReadonlySet<string>): strin
     if (!taken.has(candidate)) return candidate;
   }
 }
+
+/**
+ * Keep `preferred` when it is free; otherwise mint from `title`.
+ * `tasks:create` uses this so a new instance (including one started from a
+ * template) never overwrites an existing task.yaml.
+ */
+export function allocateUniqueTaskSlug(
+  preferred: string,
+  title: string,
+  taken: ReadonlySet<string>,
+): string {
+  if (preferred && !taken.has(preferred)) return preferred;
+  return uniqueTaskSlug(title, taken);
+}

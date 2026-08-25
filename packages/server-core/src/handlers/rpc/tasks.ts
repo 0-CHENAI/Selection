@@ -5,6 +5,7 @@
  *   tasks:validate — lint/dry-run a task.yaml string (no side effects)
  *   tasks:create   — write task.yaml + create the orchestrator parent session
  *   tasks:duplicate — clone a task.yaml into a new slug + orchestrator session
+ *   tasks:listTemplates | getTemplate | saveTemplate | deleteTemplate — workspace-local template library
  *   tasks:run      — start a run (returns the run snapshot)
  *   tasks:pause | resume | stop — run control
  *   tasks:get      — spec + (optional) active run-state
@@ -18,6 +19,11 @@ import type {
   TaskCreateRequest,
   TaskCreateResult,
   TaskDuplicateRequest,
+  TaskGetTemplateResult,
+  TaskSaveTemplateRequest,
+  TaskSaveTemplateResult,
+  TaskDeleteTemplateResult,
+  TaskTemplateSummaryDto,
   TaskSaveRequest,
   TaskSaveResult,
   TaskGenerateRequest,
@@ -42,6 +48,11 @@ import {
   listTaskSlugs,
   cloneTaskDefinition,
   uniqueTaskSlug,
+  allocateUniqueTaskSlug,
+  listTaskTemplates,
+  loadTaskTemplate,
+  saveTaskTemplateSpec,
+  deleteTaskTemplate,
   SLUG_RE,
   listRunIds,
   buildGeneratorPrompt,
@@ -63,6 +74,10 @@ export const HANDLED_CHANNELS = [
   RPC_CHANNELS.tasks.VALIDATE,
   RPC_CHANNELS.tasks.CREATE,
   RPC_CHANNELS.tasks.DUPLICATE,
+  RPC_CHANNELS.tasks.LIST_TEMPLATES,
+  RPC_CHANNELS.tasks.GET_TEMPLATE,
+  RPC_CHANNELS.tasks.SAVE_TEMPLATE,
+  RPC_CHANNELS.tasks.DELETE_TEMPLATE,
   RPC_CHANNELS.tasks.SAVE,
   RPC_CHANNELS.tasks.GENERATE,
   RPC_CHANNELS.tasks.RUN,
@@ -154,13 +169,19 @@ export function registerTasksHandlers(server: RpcServer, deps: HandlerDeps): voi
   server.handle(RPC_CHANNELS.tasks.CREATE, async (_ctx, workspaceId: string, req: TaskCreateRequest): Promise<TaskCreateResult> => {
     const ws = workspaceOrThrow(workspaceId)
     const parsed = parseTaskYaml(req.yaml)
-    const validation = toValidationDto(parsed)
     if (!parsed.valid || !parsed.spec) {
-      return { slug: '', orchestratorSessionId: '', validation }
+      return { slug: '', orchestratorSessionId: '', validation: toValidationDto(parsed) }
     }
-    const spec = parsed.spec
+    // Create is always a new instance. If the title slug is already a live task
+    // (common when starting from a workspace template), mint a free id instead of
+    // overwriting task.yaml and attaching a second orchestrator to the same slug.
+    const taken = new Set(listTaskSlugs(ws.rootPath))
+    const specId = allocateUniqueTaskSlug(parsed.spec.id, parsed.spec.title, taken)
+    const spec = specId === parsed.spec.id ? parsed.spec : { ...parsed.spec, id: specId }
+    const yaml = spec.id === parsed.spec.id ? req.yaml : serializeTaskYaml(spec)
+    const validation = toValidationDto({ ...parsed, spec })
     const existing = loadTaskDocument(ws.rootPath, spec.id)
-    saveTaskDocument(ws.rootPath, req.yaml, existing?.etag ?? null)
+    saveTaskDocument(ws.rootPath, yaml, existing?.etag ?? null)
 
     // Single choke point for ALL orchestrator paths (attach / adopt / fresh): apply the reserved
     // "Task" label (surfacing its resolved id so the renderer can navigate to the label filter)
@@ -249,6 +270,87 @@ export function registerTasksHandlers(server: RpcServer, deps: HandlerDeps): voi
     }
     const created = await createTaskFromSpec(deps.sessionManager, workspaceId, ws.rootPath, parsed.spec)
     return { slug: created.slug, orchestratorSessionId: created.orchestratorSessionId, validation, taskLabelId: created.taskLabelId }
+  })
+
+  // tasks:listTemplates — workspace-local library; never scans tasks/.
+  server.handle(RPC_CHANNELS.tasks.LIST_TEMPLATES, async (_ctx, workspaceId: string): Promise<TaskTemplateSummaryDto[]> => {
+    return listTaskTemplates(workspaceOrThrow(workspaceId).rootPath)
+  })
+
+  // tasks:getTemplate — definition only (no run, no session).
+  server.handle(RPC_CHANNELS.tasks.GET_TEMPLATE, async (_ctx, workspaceId: string, slug: string): Promise<TaskGetTemplateResult> => {
+    const fail = (message: string): TaskGetTemplateResult => ({
+      slug: typeof slug === 'string' ? slug : '',
+      title: '',
+      validation: { valid: false, errors: [{ path: 'slug', message, severity: 'error' }], warnings: [] },
+    })
+    if (typeof slug !== 'string' || !SLUG_RE.test(slug)) {
+      return fail(`Template "${slug}" not found`)
+    }
+    const loaded = loadTaskTemplate(workspaceOrThrow(workspaceId).rootPath, slug)
+    if (!loaded) return fail(`Template "${slug}" not found`)
+    const validation = toValidationDto(loaded)
+    if (!loaded.valid || !loaded.spec) {
+      return { slug, title: '', validation }
+    }
+    return {
+      slug,
+      title: loaded.spec.title.trim() || slug,
+      validation,
+      spec: loaded.spec,
+      yaml: loaded.yaml,
+    }
+  })
+
+  // tasks:saveTemplate — snapshot a live task.yaml into task-templates/<slug>/template.yaml.
+  server.handle(RPC_CHANNELS.tasks.SAVE_TEMPLATE, async (_ctx, workspaceId: string, req: TaskSaveTemplateRequest): Promise<TaskSaveTemplateResult> => {
+    const fail = (path: string, message: string): TaskSaveTemplateResult => ({
+      slug: '',
+      title: '',
+      validation: { valid: false, errors: [{ path, message, severity: 'error' }], warnings: [] },
+    })
+    if (typeof req.slug !== 'string' || !SLUG_RE.test(req.slug)) {
+      return fail('slug', `Task "${req.slug}" not found`)
+    }
+    const ws = workspaceOrThrow(workspaceId)
+    const loaded = loadTaskDocument(ws.rootPath, req.slug)
+    if (!loaded?.valid || !loaded.spec) {
+      return fail('root', `Task "${req.slug}" not found`)
+    }
+    const title = req.title?.trim() || loaded.spec.title
+    let cloned
+    try {
+      cloned = cloneTaskDefinition(loaded.spec, { id: req.slug, title })
+    } catch (err) {
+      return fail('nodes', err instanceof Error ? err.message : String(err))
+    }
+    const yaml = serializeTaskYaml(cloned)
+    const parsed = parseTaskYaml(yaml)
+    const validation = toValidationDto(parsed)
+    if (!parsed.valid || !parsed.spec) {
+      return { slug: '', title: '', validation }
+    }
+    try {
+      saveTaskTemplateSpec(ws.rootPath, parsed.spec)
+    } catch (err) {
+      return fail('root', err instanceof Error ? err.message : String(err))
+    }
+    return { slug: parsed.spec.id, title: parsed.spec.title, validation }
+  })
+
+  // tasks:deleteTemplate — remove task-templates/<slug>/; never touches tasks/.
+  server.handle(RPC_CHANNELS.tasks.DELETE_TEMPLATE, async (_ctx, workspaceId: string, slug: string): Promise<TaskDeleteTemplateResult> => {
+    const fail = (message: string): TaskDeleteTemplateResult => ({
+      slug: '',
+      validation: { valid: false, errors: [{ path: 'slug', message, severity: 'error' }], warnings: [] },
+    })
+    if (typeof slug !== 'string' || !SLUG_RE.test(slug)) {
+      return fail(`Template "${slug}" not found`)
+    }
+    if (!deleteTaskTemplate(workspaceOrThrow(workspaceId).rootPath, slug)) {
+      return fail(`Template "${slug}" not found`)
+    }
+    return { slug, validation: { valid: true, errors: [], warnings: [] } }
   })
 
   // tasks:save — etag-guarded write that stamps schema_version: 2 and backups a v1 original.

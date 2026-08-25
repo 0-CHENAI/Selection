@@ -272,6 +272,41 @@ export function buildSpec(form: SpecForm, modelToConnection: Map<string, string>
   }
 }
 
+/**
+ * Drop quick-add nodes and any edges/route/loop.else that pointed at them.
+ * Mirrors `cloneTaskDefinition` for the renderer (which cannot import the tasks barrel).
+ */
+export function reusableSpecNodes(nodes: readonly SpecNode[]): SpecNode[] {
+  const drop = new Set(nodes.filter((n) => n.id.startsWith(QUICK_ADD_NODE_PREFIX)).map((n) => n.id))
+  return nodes.filter((n) => !drop.has(n.id)).map((n) => scrubQuickAddRefs(n, drop))
+}
+
+function scrubQuickAddRefs(node: SpecNode, drop: ReadonlySet<string>): SpecNode {
+  const depends_on = node.depends_on?.filter((id) => !drop.has(id))
+  const { depends_on: _deps, route, loop, ...rest } = node
+  let next: SpecNode = depends_on && depends_on.length > 0 ? { ...rest, depends_on } : rest
+
+  if (route && typeof route === 'object' && !Array.isArray(route) && 'cases' in route) {
+    const raw = route as { cases?: Array<{ goto?: string }>; default?: string }
+    const cases = (raw.cases ?? []).filter((c) => typeof c.goto === 'string' && !drop.has(c.goto))
+    if (cases.length > 0 && !(typeof raw.default === 'string' && drop.has(raw.default))) {
+      next = { ...next, route: { ...raw, cases } }
+    }
+  }
+
+  if (loop && typeof loop === 'object' && !Array.isArray(loop)) {
+    const raw = loop as { else?: string }
+    if (typeof raw.else === 'string' && drop.has(raw.else)) {
+      const { else: _else, ...loopRest } = raw
+      next = { ...next, loop: loopRest }
+    } else {
+      next = { ...next, loop }
+    }
+  }
+
+  return next
+}
+
 /** Map authored TaskSpec nodes → the editor's multi-dependency subtask rows. */
 export function specToSubtasks(nodes: SpecNode[], _fallbackModel?: string): EditorSubtask[] {
   const uidByNodeId = new Map<string, string>()

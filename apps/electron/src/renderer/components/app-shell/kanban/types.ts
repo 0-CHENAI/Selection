@@ -34,7 +34,7 @@ export type TaskEditorTarget =
   | { mode: 'create'; initialProjectId?: string }
   | { mode: 'edit'; sessionId: string; taskSlug?: string; initialTitle?: string }
 
-/** An existing Conductor task that can seed a new editor or a duplicate. */
+/** A starting graph for create mode: a live board task or a workspace template. */
 export interface TaskTemplateOption {
   slug: string
   title: string

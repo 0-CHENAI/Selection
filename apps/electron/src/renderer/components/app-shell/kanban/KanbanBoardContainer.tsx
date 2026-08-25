@@ -29,6 +29,7 @@ import type {
   KanbanProject,
   KanbanTask,
   SubtaskRunState,
+  TaskTemplateOption,
 } from './types'
 
 /**
@@ -124,6 +125,27 @@ export function KanbanBoardContainer() {
   // navigate here — the overlay is already open when the board mounts. Declared before the
   // spec fetch below, which refetches when the editor closes (a save may have changed specs).
   const [editorTarget, setEditorTarget] = useAtom(kanbanEditorTargetAtom)
+  const [libraryTemplates, setLibraryTemplates] = React.useState<TaskTemplateOption[]>([])
+
+  React.useEffect(() => {
+    if (!activeWorkspaceId) {
+      setLibraryTemplates([])
+      return
+    }
+    if (editorTarget?.mode !== 'create') return
+    let cancelled = false
+    void window.electronAPI
+      .listTaskTemplates(activeWorkspaceId)
+      .then((items) => {
+        if (!cancelled) setLibraryTemplates(items)
+      })
+      .catch(() => {
+        if (!cancelled) setLibraryTemplates([])
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [activeWorkspaceId, editorTarget])
 
   const statusesById = React.useMemo(() => {
     const map = new Map<string, SessionStatus>()
@@ -614,6 +636,8 @@ export function KanbanBoardContainer() {
           setEditorTarget({ mode: 'edit', sessionId, taskSlug })
         }}
         existingTasks={existingTasks}
+        libraryTemplates={libraryTemplates}
+        onLibraryTemplatesChange={setLibraryTemplates}
         modelGroups={subtaskModelGroups}
         modelToConnection={modelToConnection}
         defaultModel={defaultSubtaskModel ?? ''}

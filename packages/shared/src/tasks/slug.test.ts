@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'bun:test';
-import { slugify, uniqueTaskSlug } from './slug.ts';
+import { allocateUniqueTaskSlug, slugify, uniqueTaskSlug } from './slug.ts';
 
 describe('slugify', () => {
   it('kebab-cases titles and strips edge dashes', () => {
@@ -32,5 +32,16 @@ describe('uniqueTaskSlug', () => {
     const candidate = uniqueTaskSlug('a'.repeat(80), new Set([base]));
     expect(candidate.length).toBeLessThanOrEqual(48);
     expect(candidate.endsWith('-2')).toBe(true);
+  });
+});
+
+describe('allocateUniqueTaskSlug', () => {
+  it('keeps a free preferred id even when it differs from the title slug', () => {
+    expect(allocateUniqueTaskSlug('review-copy', 'Review', new Set())).toBe('review-copy');
+  });
+
+  it('mints from the title when the preferred id is already taken', () => {
+    expect(allocateUniqueTaskSlug('review', 'Review', new Set(['review']))).toBe('review-2');
+    expect(allocateUniqueTaskSlug('review', 'Review', new Set(['review', 'review-2']))).toBe('review-3');
   });
 });
