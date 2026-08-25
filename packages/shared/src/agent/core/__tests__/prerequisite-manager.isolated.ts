@@ -395,8 +395,6 @@ describe('PrerequisiteManager', () => {
       manager.setCatalogSkills([
         {
           slug: 'vision',
-          title: 'Vision',
-          description: 'See images',
           skillMdPath: '/ws/skills/vision/SKILL.md',
           requiredSources: ['qwen-mm'],
         },
