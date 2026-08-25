@@ -263,7 +263,11 @@ export function collectOfficeFormatSkillSlugs(
   return [...slugs];
 }
 
-/** Named Office paths, or an attachment the app already classified as Office. */
+/**
+ * Hard-load the bundled officecli router only when this turn already names or
+ * attaches an Office file. Intent-only requests ("做一份 PPT") discover the
+ * router from the skill catalog instead.
+ */
 export function shouldLoadBundledOfficecliRouter(
   message: string,
   attachments?: OfficeFileHint[],

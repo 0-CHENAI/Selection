@@ -17,6 +17,8 @@ import { formatPreferencesForPrompt } from '../../config/preferences.ts';
 import { formatSessionState } from '../mode-manager.ts';
 import { getDateTimeContext, getWorkingDirectoryContext } from '../../prompts/system.ts';
 import { getSessionPlansPath, getSessionDataPath, getSessionPath } from '../../sessions/storage.ts';
+import { buildSkillCatalog } from '../../skills/catalog.ts';
+import { loadAllSkills } from '../../skills/storage.ts';
 import type {
   PromptBuilderConfig,
   ContextBlockOptions,
@@ -61,8 +63,8 @@ export class PromptBuilder {
    * user message.
    *
    * This is the Claude path: it composes {@link buildVolatileContextParts} and
-   * {@link buildStableContextParts} so the output is byte-identical to the
-   * pre-split version (same 5 blocks, same order) AND the one-shot mode-change
+   * {@link buildStableContextParts} so the output is byte-identical to calling
+   * the two halves (same blocks, same order) AND the one-shot mode-change
    * signal is consumed exactly once per turn (only the volatile builder consumes
    * it). Callers that place volatile vs stable context in different locations
    * (e.g. the Pi adapter, to preserve prompt caching — issue #862) should call
@@ -138,7 +140,8 @@ export class PromptBuilder {
    *
    * Blocks (in order):
    *  1. workspace capabilities
-   *  2. working directory, when available
+   *  2. available skills handbook (default preset only)
+   *  3. working directory, when available
    *
    * Pure and idempotent: holds no one-shot state, so it is safe to call any
    * number of times per turn.
@@ -149,6 +152,11 @@ export class PromptBuilder {
     // Workspace capabilities
     parts.push(this.formatWorkspaceCapabilities());
 
+    const skillCatalog = this.formatSkillCatalog();
+    if (skillCatalog) {
+      parts.push(skillCatalog);
+    }
+
     // Working directory context
     const workingDirContext = this.getWorkingDirectoryContext();
     if (workingDirContext) {
@@ -156,6 +164,18 @@ export class PromptBuilder {
     }
 
     return parts;
+  }
+
+  /**
+   * Capability handbook for skill discovery. Mini agents skip this — they
+   * only edit configuration and should not scan the skill tree.
+   */
+  formatSkillCatalog(): string | null {
+    if (this.config.systemPromptPreset === 'mini') return null;
+    if (!this.workspaceRootPath) return null;
+    return buildSkillCatalog(
+      loadAllSkills(this.workspaceRootPath, this.config.session?.workingDirectory),
+    );
   }
 
   /**

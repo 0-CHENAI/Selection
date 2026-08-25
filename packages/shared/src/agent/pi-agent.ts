@@ -1425,20 +1425,23 @@ export class PiAgent extends BaseAgent {
       }
 
       case 'source_activation_needed': {
-        const { sourceSlug, sourceExists } = checkResult;
-        this.debug(`PreToolUse(sessionId=${sessionId}): Source "${sourceSlug}" not active, attempting activation...`);
+        const { sourceSlug, sourceExists, additionalSourceSlugs } = checkResult;
+        const sourceSlugs = [sourceSlug, ...(additionalSourceSlugs ?? [])];
+        this.debug(`PreToolUse(sessionId=${sessionId}): Source "${sourceSlugs.join(', ')}" not active, attempting activation...`);
 
         if (this.onSourceActivationRequest) {
           try {
-            const activated = await this.onSourceActivationRequest(sourceSlug);
-            if (!activated) {
-              const reason = sourceExists
-                ? `Source "${sourceSlug}" is not active. Activate it by @mentioning it in your message or via the source icon at the bottom of the input field.`
-                : `Source "${sourceSlug}" is not available yet. It needs to be created and configured first.`;
-              this.send({ type: 'pre_tool_use_response', requestId, action: 'block', reason });
-              return;
+            for (const slug of sourceSlugs) {
+              const activated = await this.onSourceActivationRequest(slug);
+              if (!activated) {
+                const reason = sourceExists
+                  ? `Source "${slug}" is not active. Activate it by @mentioning it in your message or via the source icon at the bottom of the input field.`
+                  : `Source "${slug}" is not available yet. It needs to be created and configured first.`;
+                this.send({ type: 'pre_tool_use_response', requestId, action: 'block', reason });
+                return;
+              }
+              this.debug(`PreToolUse(sessionId=${sessionId}): Source "${slug}" activated successfully`);
             }
-            this.debug(`PreToolUse(sessionId=${sessionId}): Source "${sourceSlug}" activated successfully`);
             this.eventQueue.enqueue({
               type: 'source_activated' as const,
               sourceSlug,

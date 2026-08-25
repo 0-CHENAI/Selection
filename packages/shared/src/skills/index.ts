@@ -24,3 +24,27 @@ export {
   skillNeedsIconDownload,
   downloadSkillIcon,
 } from './storage.ts';
+export {
+  AVAILABLE_SKILLS_TAG,
+  OFFICECLI_CATALOG_TRIGGER,
+  SKILL_CATALOG_MAX_DESCRIPTION_LENGTH,
+  buildSkillCatalog,
+  catalogPathKey,
+  defangAvailableSkillsTag,
+  findCatalogEntryBySkillMdPath,
+  formatSkillCatalog,
+  isExcludedFromSkillCatalog,
+  toSkillCatalogEntries,
+  truncateSkillDescription,
+  type SkillCatalogEntry,
+} from './catalog.ts';
+export {
+  collectSkillSlugsForSourcePreEnable,
+  extractPathLikeTokens,
+  formatSkillSuggestions,
+  globToRegExp,
+  matchSkillsByGlobs,
+  type SkillMatch,
+  type SkillMatchAttachment,
+  type SkillMatchInput,
+} from './match.ts';

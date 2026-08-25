@@ -83,7 +83,7 @@ describe('collectOfficeFormatSkillSlugs', () => {
 })
 
 describe('shouldLoadBundledOfficecliRouter', () => {
-  it('loads the router for named files or office-typed attachments', () => {
+  it('loads the router only for named files or office-typed attachments', () => {
     expect(shouldLoadBundledOfficecliRouter('写一份项目周报')).toBe(false)
     expect(shouldLoadBundledOfficecliRouter('请改 巡察报告.docx')).toBe(true)
     expect(shouldLoadBundledOfficecliRouter('请改 旧稿.doc')).toBe(true)
@@ -92,8 +92,14 @@ describe('shouldLoadBundledOfficecliRouter', () => {
       { type: 'office', name: '附件', storedPath: '/tmp/session/att-1' },
     ])).toBe(true)
     expect(shouldLoadBundledOfficecliRouter('看一下', [
+      { type: 'office', name: '数据.xlsx', path: '/tmp/数据.xlsx' },
+    ])).toBe(true)
+    expect(shouldLoadBundledOfficecliRouter('看一下', [
       { type: 'pdf', name: '说明.pdf', storedPath: '/tmp/session/att-2' },
     ])).toBe(false)
+    expect(shouldLoadBundledOfficecliRouter('把他形成word报告（带目录）')).toBe(false)
+    expect(shouldLoadBundledOfficecliRouter('做个 ppt 给董事会')).toBe(false)
+    expect(shouldLoadBundledOfficecliRouter('写一份巡察报告')).toBe(false)
   })
 })
 

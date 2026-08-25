@@ -106,7 +106,7 @@ import { type Session, type SessionEvent, type FileAttachment, type SendMessageO
 import { applySteerTranscriptBoundary, messageToStored, storedToMessage, type Message, type StoredAttachment, type ToolDisplayMeta, type TokenUsage } from '@craft-agent/core/types'
 import { hasRenderableAssistantText, preferRicherAssistantText } from '@craft-agent/core'
 import { formatPathsToRelative, formatToolInputPaths, perf, encodeIconToDataUrlAsync, getEmojiIcon, resetSummarizationClient, resolveToolIcon, readFileAttachment, resolveRegenerateAttachments, selectSpreadMessages, normalizePath } from '@craft-agent/shared/utils'
-import { filterUserFacingSkills, loadAllSkills, loadSkillBySlug, invalidateSkillsCache, type LoadedSkill } from '@craft-agent/shared/skills'
+import { collectSkillSlugsForSourcePreEnable, filterUserFacingSkills, loadAllSkills, loadSkillBySlug, invalidateSkillsCache, type LoadedSkill } from '@craft-agent/shared/skills'
 import { invalidateContextFileCache } from '@craft-agent/shared/prompts/system'
 import { getToolIconsDir, getMiniModel } from '@craft-agent/shared/config'
 import { getDefaultSummarizationModel } from '@craft-agent/shared/config/models'
@@ -6292,62 +6292,74 @@ export class SessionManager implements ISessionManager {
     // This prevents the finally block from clobbering state when a follow-up message arrives.
     const myGeneration = managed.processingGeneration
 
-    // Pre-enable sources required by invoked skills (Issue #249)
-    // This eliminates the two-turn penalty where the agent discovers missing sources at runtime.
-    // Uses targeted loadSkillBySlug() instead of loadAllSkills() to avoid O(N) filesystem scans.
-    if (options?.skillSlugs?.length) {
-      try {
-        const workspaceRoot = managed.workspace.rootPath
+    // Pre-enable sources required by invoked, hard-loaded, or glob-matched skills (#249, #117).
+    try {
+      const workspaceRoot = managed.workspace.rootPath
+      const skills = loadAllSkills(workspaceRoot, managed.workingDirectory)
+      const skillSlugs = collectSkillSlugsForSourcePreEnable({
+        message,
+        attachments: [
+          ...(attachments ?? []),
+          ...(storedAttachments ?? []).map(item => ({
+            type: item.type,
+            name: item.name,
+            storedPath: item.storedPath,
+            mimeType: item.mimeType,
+          })),
+        ],
+        mentionedSlugs: options?.skillSlugs,
+        skills,
+      })
 
-        const requiredSources = new Set<string>()
-        for (const slug of options.skillSlugs) {
-          const skill = loadSkillBySlug(workspaceRoot, slug, managed.workingDirectory)
-          if (skill?.metadata.requiredSources) {
-            for (const src of skill.metadata.requiredSources) {
-              requiredSources.add(src)
-            }
+      const requiredSources = new Set<string>()
+      for (const slug of skillSlugs) {
+        const skill = skills.find(item => item.slug === slug)
+          ?? loadSkillBySlug(workspaceRoot, slug, managed.workingDirectory)
+        if (skill?.metadata.requiredSources) {
+          for (const src of skill.metadata.requiredSources) {
+            requiredSources.add(src)
           }
         }
-
-        if (requiredSources.size > 0) {
-          const currentSlugs = new Set(managed.enabledSourceSlugs || [])
-          const toEnable: string[] = []
-          const skipped: string[] = []
-          const candidateSlugs = Array.from(requiredSources)
-          const loadedSources = getSourcesBySlugs(workspaceRoot, candidateSlugs)
-          const usableSources = new Set(
-            loadedSources
-              .filter(isSourceUsable)
-              .map(source => source.config.slug)
-          )
-
-          for (const srcSlug of candidateSlugs) {
-            if (currentSlugs.has(srcSlug)) continue
-            if (usableSources.has(srcSlug)) {
-              toEnable.push(srcSlug)
-            } else {
-              skipped.push(srcSlug)
-            }
-          }
-
-          if (skipped.length > 0) {
-            sessionLog.warn(`Skill requires sources that are not usable (missing or unauthenticated): ${skipped.join(', ')}`)
-          }
-
-          if (toEnable.length > 0) {
-            managed.enabledSourceSlugs = [...(managed.enabledSourceSlugs || []), ...toEnable]
-            sessionLog.info(`Pre-enabled sources for skill invocation: ${toEnable.join(', ')}`)
-            this.persistSession(managed)
-            this.sendEvent({
-              type: 'sources_changed',
-              sessionId,
-              enabledSourceSlugs: managed.enabledSourceSlugs,
-            }, managed.workspace.id)
-          }
-        }
-      } catch (e) {
-        sessionLog.warn(`Failed to pre-enable skill sources for session ${sessionId}:`, e)
       }
+
+      if (requiredSources.size > 0) {
+        const currentSlugs = new Set(managed.enabledSourceSlugs || [])
+        const toEnable: string[] = []
+        const skipped: string[] = []
+        const candidateSlugs = Array.from(requiredSources)
+        const loadedSources = getSourcesBySlugs(workspaceRoot, candidateSlugs)
+        const usableSources = new Set(
+          loadedSources
+            .filter(isSourceUsable)
+            .map(source => source.config.slug)
+        )
+
+        for (const srcSlug of candidateSlugs) {
+          if (currentSlugs.has(srcSlug)) continue
+          if (usableSources.has(srcSlug)) {
+            toEnable.push(srcSlug)
+          } else {
+            skipped.push(srcSlug)
+          }
+        }
+
+        if (skipped.length > 0) {
+          sessionLog.warn(`Skill requires sources that are not usable (missing or unauthenticated): ${skipped.join(', ')}`)
+        }
+
+        if (toEnable.length > 0) {
+          managed.enabledSourceSlugs = [...(managed.enabledSourceSlugs || []), ...toEnable]
+          sessionLog.info(`Pre-enabled sources for skill invocation: ${toEnable.join(', ')}`)
+          this.persistSession(managed)
+          this.sendEvent({
+            type: 'sources_changed',
+            sessionId,
+            enabledSourceSlugs: managed.enabledSourceSlugs,
+          }, managed.workspace.id)
+        }
+      }
+    } catch (e) {
+      sessionLog.warn(`Failed to pre-enable skill sources for session ${sessionId}:`, e)
     }
 
     // Start perf span for entire sendMessage flow

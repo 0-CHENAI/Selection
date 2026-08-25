@@ -910,6 +910,48 @@ describe('runPreToolUseChecks', () => {
       expect(result.type).toBe('block');
     });
 
+    it('activates requiredSources when Read targets a catalog SKILL.md', () => {
+      const prereqManager = createMockPrerequisiteManager({
+        findCatalogSkillForTool: (toolName, input) => {
+          if (toolName === 'Read' && input.file_path === '/ws/skills/vision/SKILL.md') {
+            return { requiredSources: ['qwen-mm', 'extra'] };
+          }
+          return null;
+        },
+      });
+
+      const result = runPreToolUseChecks(createInput({
+        toolName: 'Read',
+        input: { file_path: '/ws/skills/vision/SKILL.md' },
+        activeSourceSlugs: [],
+        allSourceSlugs: ['qwen-mm', 'extra'],
+        prerequisiteManager: prereqManager,
+      }));
+
+      expect(result.type).toBe('source_activation_needed');
+      if (result.type === 'source_activation_needed') {
+        expect(result.sourceSlug).toBe('qwen-mm');
+        expect(result.sourceExists).toBe(true);
+        expect(result.additionalSourceSlugs).toEqual(['extra']);
+      }
+    });
+
+    it('does not activate sources for an arbitrary Read', () => {
+      const prereqManager = createMockPrerequisiteManager({
+        findCatalogSkillForTool: () => null,
+      });
+
+      const result = runPreToolUseChecks(createInput({
+        toolName: 'Read',
+        input: { file_path: '/tmp/notes.md' },
+        activeSourceSlugs: [],
+        allSourceSlugs: ['qwen-mm'],
+        prerequisiteManager: prereqManager,
+      }));
+
+      expect(result.type).toBe('allow');
+    });
+
     it('call_llm interception runs before transforms', () => {
       // call_llm should be intercepted even if input has metadata
       const result = runPreToolUseChecks(createInput({

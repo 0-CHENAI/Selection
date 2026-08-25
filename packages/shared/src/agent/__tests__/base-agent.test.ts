@@ -321,6 +321,21 @@ describe('BaseAgent', () => {
       expect(agent.chatCalls[2]?.message ?? '').not.toContain('(skill: officecli)');
     });
 
+    it('does not force-read officecli for a Word request without a file', async () => {
+      await collectEvents(agent.chat('把他形成word报告（带目录）'));
+      const sent = agent.chatCalls[0]?.message ?? '';
+      expect(sent).not.toContain('(skill: officecli)');
+      expect(sent).not.toContain('Do not take any other action until you have read these files');
+      expect(sent).not.toContain('(skill: officecli-docx)');
+    });
+
+    it('does not force-read officecli for a PPT request without a file', async () => {
+      await collectEvents(agent.chat('做个 ppt 给董事会'));
+      const sent = agent.chatCalls[0]?.message ?? '';
+      expect(sent).not.toContain('(skill: officecli)');
+      expect(sent).not.toContain('officecli load_skill');
+    });
+
     it('loads the generic OfficeCLI router when explicitly mentioned', async () => {
       await collectEvents(agent.chat('[skill:officecli] 请说明可用格式'));
       const sent = agent.chatCalls[0]?.message ?? '';
@@ -416,6 +431,79 @@ describe('BaseAgent', () => {
       } finally {
         rmSync(root, { recursive: true, force: true });
       }
+    });
+
+    it('still force-reads an explicitly mentioned workspace skill', async () => {
+      const root = mkdtempSync(join(tmpdir(), 'skill-mention-prereq-'));
+      try {
+        const skillsDir = join(root, 'skills', 'commit');
+        mkdirSync(skillsDir, { recursive: true });
+        writeFileSync(join(skillsDir, 'SKILL.md'), [
+          '---',
+          'name: Git Commit',
+          'description: Write commits',
+          '---',
+          '',
+          'Commit carefully.',
+        ].join('\n'));
+        const mentionAgent = new TestAgent(createMockBackendConfig({
+          workspace: {
+            id: 'mention-workspace',
+            name: 'Mention Workspace',
+            slug: 'mention-workspace',
+            rootPath: root,
+            createdAt: Date.now(),
+          },
+        }));
+        await collectEvents(mentionAgent.chat('[skill:commit] ship it'));
+        const sent = mentionAgent.chatCalls[0]?.message ?? '';
+        expect(sent).toContain('(skill: commit)');
+        expect(sent).toContain(join(root, 'skills', 'commit', 'SKILL.md'));
+        expect(sent).toContain('Do not take any other action until you have read these files');
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
+    });
+
+    it('soft-suggests a glob-matched skill without forcing a Read', async () => {
+      const root = mkdtempSync(join(tmpdir(), 'skill-glob-suggest-'));
+      try {
+        const skillsDir = join(root, 'skills', 'pdf-review');
+        mkdirSync(skillsDir, { recursive: true });
+        writeFileSync(join(skillsDir, 'SKILL.md'), [
+          '---',
+          'name: PDF Review',
+          'description: Review PDF attachments',
+          'globs:',
+          '  - "**/*.pdf"',
+          '---',
+          '',
+          'Read the PDF carefully.',
+        ].join('\n'));
+        const suggestAgent = new TestAgent(createMockBackendConfig({
+          workspace: {
+            id: 'suggest-workspace',
+            name: 'Suggest Workspace',
+            slug: 'suggest-workspace',
+            rootPath: root,
+            createdAt: Date.now(),
+          },
+        }));
+        await collectEvents(suggestAgent.chat('请看 notes.pdf'));
+        const sent = suggestAgent.chatCalls[0]?.message ?? '';
+        expect(sent).toContain('PDF Review (pdf-review)');
+        expect(sent).toContain('are not blocked');
+        expect(sent).not.toContain('Do not take any other action until you have read these files');
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
+    });
+
+    it('does not soft-suggest officecli when an Office file already force-loads it', async () => {
+      await collectEvents(agent.chat('请改 巡察报告.docx'));
+      const sent = agent.chatCalls[0]?.message ?? '';
+      expect(sent).toContain('(skill: officecli)');
+      expect(sent).not.toContain('The following skills may apply this turn');
     });
   });
 });
