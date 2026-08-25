@@ -205,6 +205,8 @@ export interface TaskValidationResultDto {
   warnings: TaskValidationIssueDto[]
   /** Pre-flight estimate: total nodes and how many sessions a run would spawn. */
   estimate?: { nodeCount: number; sessionNodeCount: number }
+  /** Parsed spec when validation succeeded — used by the YAML↔canvas sync. */
+  spec?: unknown
 }
 
 export interface TaskSaveRequest {

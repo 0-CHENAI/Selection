@@ -64,12 +64,39 @@ export const slugify = (s: string): string =>
 /** Permission modes are fixed (safe|ask|allow-all); mirrored here to avoid a shared Node import in the renderer. */
 export type TaskPermissionMode = 'safe' | 'ask' | 'allow-all'
 
+export type EditorNodeKind =
+  | 'session'
+  | 'orchestrator'
+  | 'route'
+  | 'parallel'
+  | 'map'
+  | 'loop'
+  | 'approval'
+  | 'synthesize'
+  | 'verify'
+  | 'judge'
+  | 'filter'
+  | 'aggregate'
+  | 'finally'
+
+export const SESSION_LIKE_KINDS = new Set<EditorNodeKind>([
+  'session',
+  'orchestrator',
+  'finally',
+  'synthesize',
+  'verify',
+  'judge',
+  'map',
+  'loop',
+])
+
 export interface EditorSubtask {
   uid: string
   // Original node id from a generated/loaded spec, preserved across the editor round-trip so
   // AI-authored ${nodes.<id>.output} references embedded in sibling prompts keep resolving.
   // Undefined for subtasks added manually in the editor (their id is derived from the title).
   nodeId?: string
+  kind?: EditorNodeKind
   title: string
   prompt: string
   // Explicit authored model. UNDEFINED = inherit the orchestrator default — buildSpec then emits no
@@ -115,12 +142,15 @@ export interface SpecForm {
   // by default; without this, editing an existing task's title would fork a new slug/folder and
   // orphan the bound orchestrator session. Undefined → create mode (id derived from title).
   fixedId?: string
+  runner?: 'conduct' | 'orchestrate'
+  layout?: Record<string, { x: number; y: number }>
 }
 
 /** A spec node as authored by the generator / loaded from disk (loose, renderer-facing shape). */
 export interface SpecNode {
   id: string
   title?: string
+  kind?: EditorNodeKind
   prompt?: string
   model?: string
   /** Connection serving `model`; read back into the row so an explicit connection round-trips. */
@@ -164,6 +194,7 @@ export function buildSpec(form: SpecForm, modelToConnection: Map<string, string>
     const depends_on = [...new Set(deps)].filter((d) => d !== selfId && finalIds.has(d))
     return {
       id: selfId,
+      ...(st.kind && st.kind !== 'session' ? { kind: st.kind } : {}),
       ...(st.title.trim() ? { title: st.title.trim() } : {}),
       ...(st.model ? { model: st.model } : {}),
       // Pin the connection that serves the model so non-default (pi/*) models resolve a backend.
@@ -199,6 +230,8 @@ export function buildSpec(form: SpecForm, modelToConnection: Map<string, string>
     ...(form.sourceSlugs?.length ? { sources: form.sourceSlugs } : {}),
     ...(form.skillSlugs?.length ? { skills: form.skillSlugs } : {}),
     ...(Object.keys(defaults).length ? { defaults } : {}),
+    ...(form.runner && form.runner !== 'conduct' ? { runner: form.runner } : {}),
+    ...(form.layout && Object.keys(form.layout).length ? { ui: { layout: { nodes: form.layout } } } : {}),
     nodes,
   }
 }
@@ -210,6 +243,7 @@ export function specToSubtasks(nodes: SpecNode[], _fallbackModel?: string): Edit
   return nodes.map((n) => ({
     uid: uidByNodeId.get(n.id)!,
     nodeId: n.id,
+    ...(n.kind && n.kind !== 'session' ? { kind: n.kind } : {}),
     title: n.title || n.id,
     prompt: n.prompt || '',
     // Keep model/connection OPTIONAL: a node that inherited the orchestrator default must round-trip

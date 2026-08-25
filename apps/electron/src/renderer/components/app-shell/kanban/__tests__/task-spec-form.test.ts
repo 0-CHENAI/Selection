@@ -394,3 +394,28 @@ describe('canDependOn cycle guard', () => {
     expect(canDependOn(rows({ a: [], b: [], c: [] }), 'c', 'a')).toBe(true)
   })
 })
+
+describe('v2 canvas fields', () => {
+  it('round-trips kind, runner, and layout', () => {
+    const generated: SpecNode[] = [
+      { id: 'gate', title: 'Gate', kind: 'approval' },
+      { id: 'work', title: 'Work', kind: 'session', prompt: 'do it', depends_on: ['gate'] },
+    ]
+    const subtasks = specToSubtasks(generated)
+    const spec = buildSpec(
+      {
+        title: 'T',
+        goal: 'g',
+        projectId: '',
+        orchModel: '',
+        subtasks,
+        runner: 'orchestrate',
+        layout: { gate: { x: 10, y: 20 } },
+      },
+      noConn,
+    )
+    expect((spec.nodes as Array<{ id: string; kind?: string }>).find((n) => n.id === 'gate')?.kind).toBe('approval')
+    expect(spec.runner).toBe('orchestrate')
+    expect((spec.ui as { layout: { nodes: Record<string, { x: number }> } }).layout.nodes.gate.x).toBe(10)
+  })
+})
