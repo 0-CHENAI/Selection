@@ -12,12 +12,26 @@ export const V2_IMPLEMENTED_KINDS = new Set<NodeKind>([
   'route',
   'approval',
   'finally',
+  'map',
+  'loop',
+  'synthesize',
+  'verify',
+  'judge',
+  'filter',
+  'aggregate',
 ]);
 
 export const MAX_RUN_INSTANCES = 256;
 
 export function isSessionLikeKind(kind: NodeKind | undefined): boolean {
-  return kind === 'session' || kind === 'orchestrator' || kind === 'finally';
+  return (
+    kind === 'session' ||
+    kind === 'orchestrator' ||
+    kind === 'finally' ||
+    kind === 'synthesize' ||
+    kind === 'verify' ||
+    kind === 'judge'
+  );
 }
 
 export function isControlKind(kind: NodeKind | undefined): boolean {

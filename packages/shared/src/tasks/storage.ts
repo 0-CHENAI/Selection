@@ -284,17 +284,42 @@ export function writeNodeOutput(
   atomicWriteFileSync(join(dir, `${nodeId}.json`), JSON.stringify(output, null, 2));
 }
 
-export function readNodeOutput(
+export function writeNodeAttempt(
   workspaceRoot: string,
   slug: string,
   runId: string,
-  nodeId: string,
-): NodeOutput | null {
-  const path = join(runDir(workspaceRoot, slug, runId), NODES_DIR, `${nodeId}.json`);
+  instanceId: string,
+  attempt: number,
+  output: NodeOutput,
+): void {
+  const dir = join(runDir(workspaceRoot, slug, runId), NODES_DIR, instanceId);
+  ensureDir(dir);
+  atomicWriteFileSync(join(dir, `attempt-${attempt}.json`), JSON.stringify(output, null, 2));
+}
+
+function readJsonOutput(path: string): NodeOutput | null {
   if (!existsSync(path)) return null;
   try {
     return JSON.parse(readFileSync(path, 'utf-8')) as NodeOutput;
   } catch {
     return null;
   }
+}
+
+export function readNodeOutput(
+  workspaceRoot: string,
+  slug: string,
+  runId: string,
+  nodeId: string,
+): NodeOutput | null {
+  const base = join(runDir(workspaceRoot, slug, runId), NODES_DIR);
+  const direct = readJsonOutput(join(base, `${nodeId}.json`));
+  if (direct) return direct;
+  const instDir = join(base, nodeId);
+  if (!existsSync(instDir)) return null;
+  const attempts = readdirSync(instDir)
+    .filter((f) => /^attempt-\d+\.json$/.test(f))
+    .sort((a, b) => Number(a.replace(/\D/g, '')) - Number(b.replace(/\D/g, '')));
+  const last = attempts.at(-1);
+  return last ? readJsonOutput(join(instDir, last)) : null;
 }

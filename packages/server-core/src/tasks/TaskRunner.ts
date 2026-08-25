@@ -12,8 +12,8 @@
  *   5. drives child `sessionStatus` + `kanbanColumn` so the board renders the live DAG,
  *   6. persists an append-only run-log under `tasks/<slug>/runs/<runId>/`.
  *
- * v1 executes `kind: 'session'` nodes wired by `depends_on` + `inputs`. Control-flow
- * kinds (route/loop/approval/…) parse but are not yet executed (P4).
+ * v1 executes `kind: 'session'` nodes wired by `depends_on` + `inputs`.
+ * v2 dispatches implemented kinds (session/control/map/loop/transforms).
  *
  * The runner depends on a minimal `ConductorSessionHost` interface (which
  * SessionManager structurally satisfies) so it is unit-testable with a mock.
@@ -29,9 +29,17 @@ import {
   type RunStatus,
   nodeTitle,
   interpolateRefs,
+  interpolateLocals,
+  instanceId,
+  definitionId,
+  parseForEach,
+  resolveArtifact,
+  sensitiveParamNames,
+  missingSensitive,
   materializeDeps,
   appendRunLog,
   writeNodeOutput,
+  writeNodeAttempt,
   readNodeOutput,
   readRunLog,
   loadTaskDocument,
@@ -48,6 +56,7 @@ import {
   DEFAULT_REPAIR_ATTEMPTS,
   MAX_REPAIR_ATTEMPTS_CAP,
 } from '@craft-agent/shared/tasks';
+import { createHash } from 'crypto';
 import { MAX_RUN_INSTANCES, isSessionLikeKind, isControlKind, unimplementedV2Nodes } from './executors';
 
 export { V2_IMPLEMENTED_KINDS, MAX_RUN_INSTANCES } from './executors';
@@ -223,6 +232,12 @@ class ActiveRun {
   private originalFailed = false;
   private readonly submittedOutputs = new Map<string, NodeOutput>();
   private verdictLocked = false;
+  private readonly instances = new Map<string, NodeStateEntry>();
+  private readonly instanceOutputs = new Map<string, NodeOutput>();
+  private readonly mapItems = new Map<string, unknown[]>();
+  private readonly loopIndex = new Map<string, number>();
+  private readonly promptCache = new Map<string, NodeOutput>();
+  private readonly retryTimers = new Set<ReturnType<typeof setTimeout>>();
 
   constructor(
     private readonly spec: TaskSpec,
@@ -294,6 +309,7 @@ class ActiveRun {
     if (this.runStatus !== 'paused' && this.runStatus !== 'pausing') {
       throw new TaskControlError(this.runStatus, `Cannot resume a ${this.runStatus} run; use continue after interrupt`);
     }
+    this.assertSensitiveReady();
     // Cancelled nodes return to pending so they re-dispatch. Nodes that exhausted their `retry`
     // budget stay 'failed' — automatic retry happens in failNode within the run, not on resume.
     for (const [, st] of this.state) if (st.state === 'cancelled') st.state = 'pending';
@@ -309,6 +325,7 @@ class ActiveRun {
     if (this.runStatus !== 'interrupted') {
       throw new TaskControlError(this.runStatus, `Cannot continue a ${this.runStatus} run`);
     }
+    this.assertSensitiveReady();
     for (const [, st] of this.state) {
       if (st.state === 'interrupted' || st.state === 'cancelled') st.state = 'pending';
     }
@@ -459,7 +476,7 @@ class ActiveRun {
     for (const node of this.spec.nodes) {
       if (this.inFlight >= this.maxParallel && isSessionLikeKind(node.kind)) break;
       if (!this.isReady(node)) continue;
-      if (!this.whenAllows(node)) {
+      if (node.kind !== 'filter' && !this.whenAllows(node)) {
         this.skipNode(node.id, 'when');
         continue;
       }
@@ -518,6 +535,30 @@ class ActiveRun {
       this.enterApproval(node);
       return;
     }
+    if (this.sourceVersion === 2 && node.kind === 'map') {
+      this.executeMap(node);
+      return;
+    }
+    if (this.sourceVersion === 2 && node.kind === 'loop') {
+      this.executeLoop(node);
+      return;
+    }
+    if (this.sourceVersion === 2 && node.kind === 'filter') {
+      this.instanceCount += 1;
+      this.executeFilter(node);
+      return;
+    }
+    if (this.sourceVersion === 2 && node.kind === 'aggregate') {
+      this.instanceCount += 1;
+      this.executeAggregate(node);
+      return;
+    }
+    const cached = this.cachedOutput(node);
+    if (cached) {
+      this.instanceCount += 1;
+      this.completeControlNode(node.id, cached.text, cached.params);
+      return;
+    }
     this.markRunning(node);
     void this.dispatch(node);
   }
@@ -561,6 +602,194 @@ class ActiveRun {
     return node.route.default;
   }
 
+  private executeMap(node: TaskNode): void {
+    const items = parseForEach(this.resolveForEach(node));
+    if (this.instanceCount + Math.max(items.length, 1) > MAX_RUN_INSTANCES) {
+      this.originalFailed = true;
+      this.finish('failed');
+      return;
+    }
+    const st = this.state.get(node.id)!;
+    st.state = 'running';
+    st.attempt += 1;
+    this.log({ kind: 'node-scheduled', nodeId: node.id });
+    this.mapItems.set(node.id, items);
+    if (items.length === 0) {
+      this.completeControlNode(node.id, '[]', { items: [] });
+      return;
+    }
+    this.scheduleMapInstances(node);
+  }
+
+  private scheduleMapInstances(node: TaskNode): void {
+    const items = this.mapItems.get(node.id) ?? [];
+    const parallel = node.max_parallel ?? this.maxParallel;
+    let running = 0;
+    for (let i = 0; i < items.length; i++) {
+      const iid = instanceId(node.id, i);
+      if (this.instances.get(iid)?.state === 'running') running += 1;
+    }
+    for (let i = 0; i < items.length; i++) {
+      if (running >= parallel) break;
+      const iid = instanceId(node.id, i);
+      if (this.instances.has(iid)) continue;
+      if (this.instanceCount >= MAX_RUN_INSTANCES) {
+        this.originalFailed = true;
+        this.finish('failed');
+        return;
+      }
+      this.instances.set(iid, { state: 'running', attempt: 1 });
+      this.instanceCount += 1;
+      this.inFlight += 1;
+      this.log({ kind: 'node-scheduled', nodeId: iid });
+      void this.dispatch(node, { id: iid, item: items[i], index: i });
+      running += 1;
+    }
+  }
+
+  private finishMap(node: TaskNode): void {
+    const items = this.mapItems.get(node.id) ?? [];
+    const ordered: unknown[] = [];
+    const texts: string[] = [];
+    for (let i = 0; i < items.length; i++) {
+      const iid = instanceId(node.id, i);
+      const out = this.instanceOutputs.get(iid);
+      const st = this.instances.get(iid);
+      if (st && (st.state === 'failed' || st.state === 'invalid')) {
+        this.failNode(node.id, `map instance ${iid} ${st.state}`);
+        return;
+      }
+      texts.push(out?.text ?? '');
+      ordered.push(out?.params?.item ?? out?.text ?? '');
+    }
+    this.completeControlNode(node.id, texts.join('\n'), { items: ordered });
+  }
+
+  private executeLoop(node: TaskNode): void {
+    if (!node.loop) {
+      this.failNode(node.id, 'loop.max is required');
+      return;
+    }
+    const st = this.state.get(node.id)!;
+    if (st.state === 'pending') {
+      st.state = 'running';
+      st.attempt += 1;
+      this.log({ kind: 'node-scheduled', nodeId: node.id });
+      this.loopIndex.set(node.id, 0);
+    }
+    this.startLoopIteration(node);
+  }
+
+  private startLoopIteration(node: TaskNode): void {
+    const index = this.loopIndex.get(node.id) ?? 0;
+    const max = node.loop?.max ?? 0;
+    if (index >= max) {
+      this.exhaustLoop(node);
+      return;
+    }
+    if (this.instanceCount >= MAX_RUN_INSTANCES) {
+      this.originalFailed = true;
+      this.finish('failed');
+      return;
+    }
+    const iid = instanceId(node.id, index);
+    const prev = index > 0 ? this.instanceOutputs.get(instanceId(node.id, index - 1))?.text : undefined;
+    this.instances.set(iid, { state: 'running', attempt: 1 });
+    this.instanceCount += 1;
+    this.inFlight += 1;
+    this.log({ kind: 'node-scheduled', nodeId: iid });
+    void this.dispatch(node, { id: iid, index, prev });
+  }
+
+  private afterLoopInstance(node: TaskNode, instanceKey: string, output: NodeOutput): void {
+    this.instanceOutputs.set(instanceKey, output);
+    writeNodeAttempt(this.deps.workspaceRoot, this.slug, this.runId, instanceKey, 1, output);
+    const until = node.loop?.until;
+    if (
+      until &&
+      this.evalWhen(until, {
+        item: output.text,
+        index: this.loopIndex.get(node.id) ?? 0,
+        prev: output.text,
+        nodes: { ...this.conditionCtx().nodes, [node.id]: { output: output.text } },
+      })
+    ) {
+      this.completeControlNode(node.id, output.text, { iterations: (this.loopIndex.get(node.id) ?? 0) + 1 });
+      return;
+    }
+    this.loopIndex.set(node.id, (this.loopIndex.get(node.id) ?? 0) + 1);
+    this.startLoopIteration(node);
+  }
+
+  private exhaustLoop(node: TaskNode): void {
+    if (node.loop?.else) {
+      this.completeControlNode(node.id, 'exhausted', { exhausted: true });
+      return;
+    }
+    this.failNode(node.id, 'loop-exhausted');
+  }
+
+  private executeFilter(node: TaskNode): void {
+    const items = parseForEach(this.resolveForEach(node));
+    const kept = items.filter((item, index) => {
+      if (!node.when) return true;
+      return this.evalWhen(node.when, { item, index });
+    });
+    this.completeControlNode(node.id, JSON.stringify(kept), { items: kept });
+  }
+
+  private executeAggregate(node: TaskNode): void {
+    const deps = [...(this.edges.get(node.id) ?? [])];
+    const texts = deps.map((id) => this.outputs[id]?.text ?? '');
+    if (node.aggregate === 'majority' || node.aggregate === 'vote') {
+      const counts = new Map<string, number>();
+      for (const t of texts) counts.set(t, (counts.get(t) ?? 0) + 1);
+      let winner = texts[0] ?? '';
+      let best = 0;
+      for (const [t, n] of counts) if (n > best) {
+        winner = t;
+        best = n;
+      }
+      this.completeControlNode(node.id, winner, { votes: Object.fromEntries(counts) });
+      return;
+    }
+    this.completeControlNode(node.id, texts.join('\n'), { items: texts });
+  }
+
+  private resolveForEach(node: TaskNode): string {
+    const expr = node.for_each;
+    if (expr) {
+      return interpolateRefs(expr, { nodeOutputs: this.outputs, params: this.opts.params });
+    }
+    const firstDep = [...(this.edges.get(node.id) ?? [])][0];
+    return firstDep ? (this.outputs[firstDep]?.text ?? '') : '';
+  }
+
+  private cachedOutput(node: TaskNode): NodeOutput | undefined {
+    if (node.cache !== 'pure') return undefined;
+    const key = this.cacheKey(node);
+    return this.promptCache.get(key);
+  }
+
+  private cacheKey(node: TaskNode, locals?: { item?: unknown; index?: number; prev?: string }): string {
+    const prompt = interpolateLocals(
+      interpolateRefs(node.prompt ?? '', { nodeOutputs: this.outputs, params: this.opts.params }),
+      locals ?? {},
+    );
+    return createHash('sha256').update(`${node.id}\n${prompt}`).digest('hex');
+  }
+
+  private rememberCache(node: TaskNode, output: NodeOutput, locals?: { item?: unknown; index?: number; prev?: string }): void {
+    if (node.cache === 'pure') this.promptCache.set(this.cacheKey(node, locals), output);
+  }
+
+  private assertSensitiveReady(): void {
+    const missing = missingSensitive(this.opts.params, sensitiveParamNames(this.spec.params));
+    if (missing.length) {
+      throw new TaskControlError(this.runStatus, `Sensitive params must be re-entered: ${missing.join(', ')}`);
+    }
+  }
+
   private enterApproval(node: TaskNode): void {
     const st = this.state.get(node.id)!;
     st.state = 'waiting-approval';
@@ -596,15 +825,20 @@ class ActiveRun {
     const node = this.spec.nodes.find((n) => n.id === nodeId);
     if (!node) return { ok: false, error: 'Unknown node' };
     const declared = node.outputs ?? [];
+    const values = { ...(payload.values ?? {}) };
     if (declared.length) {
-      const values = payload.values ?? {};
       for (const decl of declared) {
         if (decl.required !== false && !(decl.name in values) && payload.text == null) {
           return { ok: false, error: `Missing required output "${decl.name}"` };
         }
+        if (decl.kind === 'artifact' && values[decl.name] != null) {
+          const resolved = resolveArtifact(this.deps.workspaceRoot, this.spec.cwd, String(values[decl.name]));
+          if (!resolved.ok) return { ok: false, error: resolved.error };
+          values[decl.name] = resolved.artifact;
+        }
       }
     }
-    this.submittedOutputs.set(nodeId, { text: payload.text ?? '', params: payload.values });
+    this.submittedOutputs.set(nodeId, { text: payload.text ?? '', params: values });
     return { ok: true };
   }
 
@@ -617,8 +851,9 @@ class ActiveRun {
     return this.snapshot();
   }
 
-  updateLimits(tokenBudget?: number): RunSnapshot {
+  updateLimits(tokenBudget?: number, params?: Record<string, unknown>): RunSnapshot {
     if (tokenBudget !== undefined) this.tokenBudget = tokenBudget;
+    if (params) this.opts.params = { ...this.opts.params, ...params };
     if (this.runStatus === 'waiting-budget') {
       this.runStatus = 'running';
       this.log({ kind: 'run-resumed' });
@@ -645,9 +880,9 @@ class ActiveRun {
     return this.evalWhen(node.when);
   }
 
-  private evalWhen(when: string | ConditionAst): boolean {
+  private evalWhen(when: string | ConditionAst, extra?: Record<string, unknown>): boolean {
     const cond = typeof when === 'string' ? conditionFromLegacyWhen(when) : when;
-    return evaluateCondition(cond, this.conditionCtx());
+    return evaluateCondition(cond, { ...this.conditionCtx(), ...extra });
   }
 
   private conditionCtx(): Record<string, unknown> {
@@ -675,11 +910,11 @@ class ActiveRun {
     }
   }
 
-  private async dispatch(node: TaskNode): Promise<void> {
+  private async dispatch(node: TaskNode, instance?: { id: string; item?: unknown; index?: number; prev?: string }): Promise<void> {
     try {
       // Task-level skills ride as [skill:slug] mentions on every child prompt — the agent
       // pipeline resolves each SKILL.md and blocks tools until it is read (skills-as-context).
-      const prompt = skillsPreamble(this.spec.skills) + (await this.buildPrompt(node));
+      const prompt = skillsPreamble(this.spec.skills) + (await this.buildPrompt(node, instance));
       // Children run where the parent runs: inherit the orchestrator's resolved working directory,
       // falling back to the spec's declared `cwd`. Without this they default to the workspace cwd
       // rather than the parent session's (project) directory.
@@ -693,8 +928,8 @@ class ActiveRun {
         // tell Conductor-owned children apart from hand-authored subtasks (it skips the former).
         taskSlug: this.slug,
         taskRunId: this.runId,
-        taskNodeId: node.id,
-        name: nodeTitle(node),
+        taskNodeId: definitionId(instance?.id ?? node.id),
+        name: instance?.id ?? nodeTitle(node),
         model: node.model ?? this.spec.defaults?.model,
         // Required for non-default (e.g. pi/*) models to resolve a backend — without it the
         // child session completes instantly with no output.
@@ -714,19 +949,20 @@ class ActiveRun {
       // createSession announces the child to the renderer by default, so it nests under the task
       // tile with its real title instead of a fabricated "New Chat" (or never appearing).
       const child = await this.deps.host.createSession(this.deps.workspaceId, options);
-      const st = this.state.get(node.id)!;
+      const key = instance?.id ?? node.id;
+      const st = this.instances.get(key) ?? this.state.get(node.id)!;
       st.sessionId = child.id;
-      this.sessionToNode.set(child.id, node.id);
-      this.log({ kind: 'node-spawned', nodeId: node.id, sessionId: child.id });
+      this.sessionToNode.set(child.id, key);
+      this.log({ kind: 'node-spawned', nodeId: key, sessionId: child.id });
       this.applyCard(child.id, RUNNING_STATUS);
       await this.deps.host.sendMessage(child.id, prompt);
     } catch (err) {
-      this.failNode(node.id, `dispatch failed: ${(err as Error).message}`);
+      this.failNode(instance?.id ?? node.id, `dispatch failed: ${(err as Error).message}`);
     }
   }
 
   /** Resolve a node's prompt: declared inputs (+ optional summarize) then ${…} interpolation. */
-  private async buildPrompt(node: TaskNode): Promise<string> {
+  private async buildPrompt(node: TaskNode, instance?: { id: string; item?: unknown; index?: number; prev?: string }): Promise<string> {
     const inputValues: Record<string, unknown> = {};
     for (const [name, ref] of Object.entries(node.inputs ?? {})) {
       const fromExpr = typeof ref === 'string' ? ref : ref.from;
@@ -736,6 +972,7 @@ class ActiveRun {
       inputValues[name] = resolved;
     }
     let text = interpolateRefs(node.prompt ?? '', { nodeOutputs: this.outputs, params: this.opts.params });
+    text = interpolateLocals(text, instance ?? {});
     text = text.replace(INPUTS_REF_RE, (raw, name: string) => (name in inputValues ? String(inputValues[name]) : raw));
 
     // Failure-aware retry: prepend the prior failure so a retried session knows what went wrong
@@ -752,7 +989,8 @@ class ActiveRun {
   private onSessionComplete(evt: SessionCompletionEvent): void {
     const nodeId = this.sessionToNode.get(evt.sessionId);
     if (!nodeId) return; // not one of our child nodes
-    const st = this.state.get(nodeId);
+    const defId = definitionId(nodeId);
+    const st = this.instances.get(nodeId) ?? this.state.get(defId);
     if (!st || st.state !== 'running') return; // already settled/cancelled
 
     if (evt.tokenUsage) {
@@ -772,26 +1010,42 @@ class ActiveRun {
 
     if (evt.reason === 'complete') {
       const text = evt.finalText ?? this.deps.host.getSessionFinalText(evt.sessionId) ?? '';
-      const node = this.spec.nodes.find((n) => n.id === nodeId);
-      const submitted = this.submittedOutputs.get(nodeId);
+      const node = this.spec.nodes.find((n) => n.id === defId);
+      const submitted = this.submittedOutputs.get(nodeId) ?? this.submittedOutputs.get(defId);
       const declared = node?.outputs?.length ?? 0;
 
-      if (this.sourceVersion === 2 && declared > 0 && !submitted) {
-        this.failNode(nodeId, 'completed without submit_task_output', evt.sessionId, 'invalid');
+      if (this.sourceVersion === 2 && declared > 0 && !submitted && node && isSessionLikeKind(node.kind)) {
+        this.failNode(defId, 'completed without submit_task_output', evt.sessionId, 'invalid');
         return;
       }
       if (declared > 0 && !submitted && text.trim() === '') {
-        this.failNode(nodeId, 'completed without producing declared output', evt.sessionId, 'empty');
+        this.failNode(defId, 'completed without producing declared output', evt.sessionId, 'empty');
         return;
       }
 
       const output: NodeOutput = submitted ?? { text };
-      this.outputs[nodeId] = output;
       st.state = 'done';
       this.inFlight = Math.max(0, this.inFlight - 1);
-      writeNodeOutput(this.deps.workspaceRoot, this.slug, this.runId, nodeId, output);
+      writeNodeAttempt(this.deps.workspaceRoot, this.slug, this.runId, nodeId, st.attempt || 1, output);
       this.log({ kind: 'node-finished', nodeId, sessionId: evt.sessionId, state: 'done' });
       this.applyCard(evt.sessionId, DONE_STATUS);
+      if (node && (node.kind === 'map' || node.kind === 'loop')) {
+        this.instanceOutputs.set(nodeId, output);
+        if (node.kind === 'map') {
+          const items = this.mapItems.get(defId) ?? [];
+          const allDone = items.every((_, i) => isTerminalNodeState(this.instances.get(instanceId(defId, i))?.state));
+          if (allDone) this.finishMap(node);
+          else this.scheduleMapInstances(node);
+        } else {
+          this.afterLoopInstance(node, nodeId, output);
+        }
+        this.emitChanged();
+        this.scheduleReady();
+        return;
+      }
+      this.outputs[defId] = output;
+      writeNodeOutput(this.deps.workspaceRoot, this.slug, this.runId, defId, output);
+      if (node) this.rememberCache(node, output);
       this.emitChanged();
       this.scheduleReady();
     } else if (evt.reason === 'interrupted') {
@@ -805,32 +1059,51 @@ class ActiveRun {
       this.scheduleReady();
     } else {
       // 'error' | 'timeout'
-      this.failNode(nodeId, evt.reason, evt.sessionId);
+      this.failNode(defId, evt.reason, evt.sessionId);
     }
   }
 
   private failNode(nodeId: string, reason: string, sessionId?: string, failure: 'error' | 'empty' | 'invalid' = 'error'): void {
-    const st = this.state.get(nodeId)!;
-    const wasRunning = st.state === 'running';
-    if (wasRunning) this.inFlight = Math.max(0, this.inFlight - 1);
+    const defId = definitionId(nodeId);
+    const st = this.state.get(defId);
+    if (!st) return;
+    const inst = this.instances.get(nodeId);
+    const expanding = this.mapItems.has(defId) || this.loopIndex.has(defId);
+    if (inst?.state === 'running' || (st.state === 'running' && !expanding)) {
+      this.inFlight = Math.max(0, this.inFlight - 1);
+    }
+    if (inst) inst.state = failure === 'invalid' ? 'invalid' : 'failed';
 
-    const node = this.spec.nodes.find((n) => n.id === nodeId);
+    const node = this.spec.nodes.find((n) => n.id === defId);
     const retry = node?.retry;
     if (retry && st.attempt <= retry.limit && retryMatches(retry.when, failure)) {
       st.lastFailure = `Previous attempt failed: ${reason}. Address the cause before retrying.`;
-      st.state = 'pending';
+      const delay = retryBackoffMs(retry, st.attempt);
       const sid = sessionId ?? st.sessionId;
       if (sid) this.applyCard(sid, TODO_STATUS);
-      this.log({ kind: 'node-retry', nodeId, attempt: st.attempt, reason });
+      this.log({ kind: 'node-retry', nodeId: defId, attempt: st.attempt, reason });
+      if (delay > 0) {
+        st.state = 'retry-wait';
+        const timer = setTimeout(() => {
+          this.retryTimers.delete(timer);
+          if (st.state === 'retry-wait') {
+            st.state = 'pending';
+            this.scheduleReady();
+          }
+        }, delay);
+        this.retryTimers.add(timer);
+      } else {
+        st.state = 'pending';
+        this.scheduleReady();
+      }
       this.emitChanged();
-      this.scheduleReady();
       return;
     }
 
     st.state = failure === 'invalid' ? 'invalid' : 'failed';
     if (node?.kind !== 'finally') this.originalFailed = true;
     const sid = sessionId ?? st.sessionId;
-    this.log({ kind: 'node-finished', nodeId, sessionId: sid ?? '', state: st.state, reason });
+    this.log({ kind: 'node-finished', nodeId: defId, sessionId: sid ?? '', state: st.state, reason });
     if (sid) this.applyCard(sid, FAILED_STATUS);
     this.emitChanged();
     this.scheduleReady();
@@ -886,6 +1159,8 @@ class ActiveRun {
     this.unsubscribe = undefined;
     this.verdictOff?.();
     this.verdictOff = undefined;
+    for (const timer of this.retryTimers) clearTimeout(timer);
+    this.retryTimers.clear();
     if (this.settled) return;
     this.settled = true;
     const snap = this.snapshot();
@@ -1035,6 +1310,11 @@ class ActiveRun {
       if (!st || st.state !== 'done') continue;
       st.state = 'pending';
       st.lastFailure = `The previous result was rejected on verification: ${detail}. Revise your output to meet the acceptance criteria.`;
+      for (const iid of [...this.instances.keys()]) {
+        if (definitionId(iid) === id && this.instances.get(iid)?.state !== 'cancelled') this.instances.delete(iid);
+      }
+      this.mapItems.delete(id);
+      this.loopIndex.delete(id);
       this.log({ kind: 'node-retry', nodeId: id, attempt: st.attempt, reason: `verdict-fail: ${detail}` });
       reset += 1;
     }
@@ -1147,6 +1427,17 @@ function skillsPreamble(skills: string[] | undefined): string {
  * defaults to retrying on `error` (the common "transient failure" case); `empty`/`invalid`
  * triggers are opt-in and not yet produced by the runner, so they never match here.
  */
+function retryBackoffMs(
+  retry: { backoff?: { base?: number; factor?: number; max?: number } },
+  attempt: number,
+): number {
+  const base = retry.backoff?.base ?? 0;
+  if (base <= 0) return 0;
+  const factor = retry.backoff?.factor ?? 2;
+  const max = retry.backoff?.max ?? base * 16;
+  return Math.min(max, base * factor ** Math.max(0, attempt - 1));
+}
+
 function retryMatches(
   when: 'error' | 'empty' | 'invalid' | readonly string[] | undefined,
   failure: 'error' | 'empty' | 'invalid',
@@ -1328,8 +1619,8 @@ export class TaskRunner {
     return this.requireRun(slug, runId).respondApproval(nodeId, approved);
   }
 
-  updateRunLimits(slug: string, runId: string, tokenBudget?: number): RunSnapshot {
-    return this.requireRun(slug, runId).updateLimits(tokenBudget);
+  updateRunLimits(slug: string, runId: string, tokenBudget?: number, params?: Record<string, unknown>): RunSnapshot {
+    return this.requireRun(slug, runId).updateLimits(tokenBudget, params);
   }
 
   submitNodeOutput(sessionId: string, payload: { text?: string; values?: Record<string, unknown> }) {

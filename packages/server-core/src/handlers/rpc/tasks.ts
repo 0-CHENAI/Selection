@@ -400,7 +400,7 @@ export function registerTasksHandlers(server: RpcServer, deps: HandlerDeps): voi
   })
 
   server.handle(RPC_CHANNELS.tasks.UPDATE_RUN_LIMITS, async (_ctx, workspaceId: string, req: TaskUpdateRunLimitsRequest) => {
-    return controlResult(() => runnerFor(workspaceId).updateRunLimits(req.slug, req.runId, req.tokenBudget))
+    return controlResult(() => runnerFor(workspaceId).updateRunLimits(req.slug, req.runId, req.tokenBudget, req.params))
   })
 
   // tasks:get — spec + (optional) active run-state.

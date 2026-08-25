@@ -350,6 +350,8 @@ export interface TaskUpdateRunLimitsRequest {
   slug: string
   runId: string
   tokenBudget?: number
+  /** Re-enter sensitive params after resume/continue (never persisted in plaintext). */
+  params?: Record<string, unknown>
 }
 
 export interface TaskGetResult {
