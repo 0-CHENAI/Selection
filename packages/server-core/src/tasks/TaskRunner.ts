@@ -26,6 +26,7 @@ import {
   type NodeOutput,
   type RunLogEntry,
   type NodeRunState,
+  type RunStatus,
   nodeTitle,
   interpolateRefs,
   materializeDeps,
@@ -33,8 +34,14 @@ import {
   writeNodeOutput,
   readNodeOutput,
   readRunLog,
+  readRunSpecSnapshot,
   loadTaskSpec,
   writeRunSpecSnapshot,
+  listTaskSlugs,
+  listRunIds,
+  deriveRunStatusFromLog,
+  isTerminalRunStatus,
+  resolveKanbanColumnId,
   DEFAULT_REPAIR_ATTEMPTS,
   MAX_REPAIR_ATTEMPTS_CAP,
 } from '@craft-agent/shared/tasks';
@@ -50,6 +57,8 @@ export interface ConductorSessionHost {
   sendMessage(sessionId: string, message: string): Promise<void>;
   setSessionStatus(sessionId: string, status: string): Promise<void>;
   setKanbanColumn(sessionId: string, column: string | null): Promise<void>;
+  /** Map a session status to a board column. Return null to keep the current column. */
+  resolveKanbanColumn?(sessionId: string, statusId: string): Promise<string | null>;
   /** Records the total DAG node count on the orchestrator session for a stable board progress denominator. */
   setTaskNodeCount(sessionId: string, count: number): Promise<void>;
   cancelProcessing(sessionId: string, silent?: boolean): Promise<void>;
@@ -70,6 +79,8 @@ export interface TaskRunnerDeps {
   /** Injectable clock (run-log timestamps) + run-id generator, for determinism in tests. */
   now?: () => string;
   genRunId?: () => string;
+  /** Push a typed snapshot after every durable run/node/budget/approval change. */
+  onRunChanged?: (snapshot: RunSnapshot) => void;
 }
 
 export interface RunOptions {
@@ -83,7 +94,18 @@ export interface RunOptions {
   verifyOnComplete?: boolean;
 }
 
-export type RunStatus = 'running' | 'paused' | 'verifying' | 'stopped' | 'completed' | 'failed';
+export type { RunStatus };
+
+export class TaskControlError extends Error {
+  readonly code = 'conflict' as const;
+  constructor(
+    readonly status: RunStatus,
+    message: string,
+  ) {
+    super(message);
+    this.name = 'TaskControlError';
+  }
+}
 
 export interface NodeRunStatus {
   id: string;
@@ -101,6 +123,8 @@ export interface RunSnapshot {
   nodes: NodeRunStatus[];
   /** Sum of each child's (input + output) tokens observed at completion. */
   tokensUsed: number;
+  /** Node ids that currently block the run (approval, budget, interrupt). */
+  blockers?: string[];
 }
 
 // ---------------------------------------------------------------------------
@@ -116,10 +140,12 @@ const DEFAULT_MAX_PARALLEL = 4;
 const AUTONOMOUS_DEFAULT_MODE = 'allow-all' as const;
 const RUNNING_STATUS = 'in-progress';
 const DONE_STATUS = 'done';
+const TODO_STATUS = 'todo';
 // There is no 'failed' session status (the fixed set is todo|in-progress|needs-review|done|cancelled).
-// We flag a failed child as 'needs-review' (amber, attention needed); the board's 'failed' run-state
-// is derived from the run-log, not from a session status.
+// Failed children and the settled top-level card use 'needs-review'. Runs never auto-close
+// the orchestrator tile to done/cancelled — see ARCHITECTURE.md §5.
 const FAILED_STATUS = 'needs-review';
+const REVIEW_STATUS = 'needs-review';
 
 // A malformed verdict (no parseable VERDICT line) is re-asked this many times before we give up and
 // fail the run. These re-asks are format-only — they do NOT consume the repair (max_iterations) budget.
@@ -210,38 +236,71 @@ class ActiveRun {
       }
     }
     if (this.opts.orchestratorSessionId) {
-      void this.deps.host.setKanbanColumn(this.opts.orchestratorSessionId, 'in-progress');
-      void this.deps.host.setSessionStatus(this.opts.orchestratorSessionId, RUNNING_STATUS);
+      this.applyCard(this.opts.orchestratorSessionId, RUNNING_STATUS);
       // Publish the executable node count so deferred kinds don't inflate the board.
       const executableCount = this.spec.nodes.filter(isExecutableTaskNode).length;
       void this.deps.host.setTaskNodeCount(this.opts.orchestratorSessionId, executableCount);
     }
     this.scheduleReady();
+    this.emitChanged();
   }
 
-  pause(): void {
-    if (this.runStatus !== 'running') return;
-    this.runStatus = 'paused';
-    this.log({ kind: 'run-paused' });
-    // In-flight children keep running; their completions still record output but won't schedule.
+  pause(): RunSnapshot {
+    if (this.runStatus === 'pausing' || this.runStatus === 'paused') return this.snapshot();
+    if (this.isTerminal() || this.runStatus === 'interrupted') {
+      throw new TaskControlError(this.runStatus, `Cannot pause a ${this.runStatus} run`);
+    }
+    if (this.inFlight === 0) {
+      this.runStatus = 'paused';
+      this.log({ kind: 'run-paused' });
+    } else {
+      this.runStatus = 'pausing';
+      this.log({ kind: 'run-pausing' });
+    }
+    this.emitChanged();
+    return this.snapshot();
   }
 
-  resume(): void {
-    if (this.runStatus !== 'paused') return;
+  resume(): RunSnapshot {
+    if (this.runStatus === 'running') return this.snapshot();
+    if (this.runStatus !== 'paused' && this.runStatus !== 'pausing') {
+      throw new TaskControlError(this.runStatus, `Cannot resume a ${this.runStatus} run; use continue after interrupt`);
+    }
     // Cancelled nodes return to pending so they re-dispatch. Nodes that exhausted their `retry`
     // budget stay 'failed' — automatic retry happens in failNode within the run, not on resume.
     for (const [, st] of this.state) if (st.state === 'cancelled') st.state = 'pending';
     this.runStatus = 'running';
     this.log({ kind: 'run-resumed' });
     this.scheduleReady();
+    this.emitChanged();
+    return this.snapshot();
+  }
+
+  continueAfterInterrupt(): RunSnapshot {
+    if (this.runStatus === 'running') return this.snapshot();
+    if (this.runStatus !== 'interrupted') {
+      throw new TaskControlError(this.runStatus, `Cannot continue a ${this.runStatus} run`);
+    }
+    for (const [, st] of this.state) {
+      if (st.state === 'interrupted' || st.state === 'cancelled') st.state = 'pending';
+    }
+    this.runStatus = 'running';
+    this.log({ kind: 'run-resumed' });
+    this.scheduleReady();
+    this.emitChanged();
+    return this.snapshot();
   }
 
   /**
-   * Rebuild run state from a persisted run-log (cross-restart resume). Done nodes reuse their
-   * recorded output and are NOT re-run; in-flight/cancelled nodes fall back to pending so they
-   * re-dispatch. A done node whose output file is missing also falls back to pending.
+   * Rebuild run state from a persisted run-log. Done nodes reuse recorded output.
+   * `mode: 'scan'` marks leftover running nodes interrupted and does not schedule.
+   * `mode: 'hydrate'` restores the durable run status (paused / waiting-*) as-is.
    */
-  hydrate(log: RunLogEntry[], loadOutput: (nodeId: string) => NodeOutput | null): void {
+  hydrate(
+    log: RunLogEntry[],
+    loadOutput: (nodeId: string) => NodeOutput | null,
+    mode: 'scan' | 'hydrate' = 'hydrate',
+  ): void {
     for (const e of log) {
       if (e.kind === 'node-spawned') {
         const st = this.state.get(e.nodeId);
@@ -251,55 +310,64 @@ class ActiveRun {
         }
       } else if (e.kind === 'node-scheduled') {
         const st = this.state.get(e.nodeId);
-        if (st) st.attempt += 1;
+        if (st) {
+          st.attempt += 1;
+          if (st.state === 'pending' || st.state === 'ready' || st.state === 'retry-wait') st.state = 'running';
+        }
       } else if (e.kind === 'node-finished') {
         const st = this.state.get(e.nodeId);
         if (st) st.state = e.state;
       } else if (e.kind === 'verdict') {
-        // Reconstruct the durable repair counters so a cross-restart resume honors the cap rather
-        // than restarting the budget from zero (the in-memory counters reset on a fresh process).
         if (e.result === 'fail') this.repairsUsed += 1;
         else if (e.result === 'unparsed') this.unparsedReAsks += 1;
         else if (e.result === 'pass') this.unparsedReAsks = 0;
       }
     }
+    this.runStatus = deriveRunStatusFromLog(log);
     for (const [nodeId, st] of this.state) {
       if (st.state === 'done') {
         const out = loadOutput(nodeId);
         if (out) this.outputs[nodeId] = out;
-        else st.state = 'pending'; // recorded output missing → must re-run
-      } else if (st.state === 'running' || st.state === 'cancelled') {
-        st.state = 'pending'; // in-flight at shutdown / cancelled → re-dispatch on resume
+        else st.state = 'pending';
+      } else if (st.state === 'running' || st.state === 'retry-wait') {
+        if (mode === 'scan' && this.runStatus !== 'paused' && this.runStatus !== 'pausing') {
+          st.state = 'interrupted';
+          this.log({ kind: 'node-finished', nodeId, sessionId: st.sessionId ?? '', state: 'interrupted', reason: 'startup-scan' });
+        } else {
+          // Paused hydrate: leftover in-flight nodes re-dispatch on resume.
+          st.state = 'pending';
+        }
       }
     }
     this.inFlight = 0;
-  }
-
-  /** Resume a hydrated run: subscribe, log, and schedule the ready set (finished nodes are skipped). */
-  resumeFromHydrated(): void {
-    if (this.unsubscribe) return;
-    this.runStatus = 'running';
+    if (mode === 'scan' && !this.isTerminal() && this.runStatus !== 'paused' && this.runStatus !== 'waiting-approval' && this.runStatus !== 'waiting-budget') {
+      this.runStatus = 'interrupted';
+      this.log({ kind: 'run-interrupted' });
+    }
+    if (this.runStatus === 'pausing') this.runStatus = 'paused';
     this.unsubscribe = this.deps.host.onSessionComplete((evt) => this.onSessionComplete(evt));
-    this.log({ kind: 'run-resumed' });
-    this.scheduleReady();
+    this.emitChanged();
   }
 
-  async stop(): Promise<void> {
-    if (this.isTerminal()) return;
+  async stop(): Promise<RunSnapshot> {
+    if (this.isTerminal()) return this.snapshot();
     this.runStatus = 'stopped';
-    this.log({ kind: 'run-stopped' });
+    this.log({ kind: 'run-stopped', tokensUsed: this.tokensUsed });
     for (const [nodeId, st] of this.state) {
       if (st.state === 'running') {
         st.state = 'cancelled';
         this.log({ kind: 'node-finished', nodeId, sessionId: st.sessionId ?? '', state: 'cancelled', reason: 'stopped' });
         if (st.sessionId) {
           void this.deps.host.cancelProcessing(st.sessionId, true);
-          void this.deps.host.setKanbanColumn(st.sessionId, 'todo');
+          this.applyCard(st.sessionId, TODO_STATUS);
         }
       }
     }
     this.inFlight = 0;
+    if (this.opts.orchestratorSessionId) this.applyCard(this.opts.orchestratorSessionId, REVIEW_STATUS);
+    this.emitChanged();
     this.finalize();
+    return this.snapshot();
   }
 
   waitUntilSettled(): Promise<RunSnapshot> {
@@ -325,6 +393,14 @@ class ActiveRun {
   // --- scheduling ---
 
   private scheduleReady(): void {
+    if (this.runStatus === 'pausing') {
+      if (this.inFlight === 0) {
+        this.runStatus = 'paused';
+        this.log({ kind: 'run-paused' });
+        this.emitChanged();
+      }
+      return;
+    }
     if (this.runStatus !== 'running') return;
     // Resume/hydrate can leave deferred kinds pending; never dispatch them as sessions.
     for (const node of this.spec.nodes) {
@@ -407,7 +483,7 @@ class ActiveRun {
       st.sessionId = child.id;
       this.sessionToNode.set(child.id, node.id);
       this.log({ kind: 'node-spawned', nodeId: node.id, sessionId: child.id });
-      await this.deps.host.setKanbanColumn(child.id, 'in-progress');
+      this.applyCard(child.id, RUNNING_STATUS);
       await this.deps.host.sendMessage(child.id, prompt);
     } catch (err) {
       this.failNode(node.id, `dispatch failed: ${(err as Error).message}`);
@@ -477,8 +553,8 @@ class ActiveRun {
       this.inFlight = Math.max(0, this.inFlight - 1);
       writeNodeOutput(this.deps.workspaceRoot, this.slug, this.runId, nodeId, output);
       this.log({ kind: 'node-finished', nodeId, sessionId: evt.sessionId, state: 'done' });
-      void this.deps.host.setSessionStatus(evt.sessionId, DONE_STATUS);
-      void this.deps.host.setKanbanColumn(evt.sessionId, 'done');
+      this.applyCard(evt.sessionId, DONE_STATUS);
+      this.emitChanged();
       this.scheduleReady();
     } else if (evt.reason === 'interrupted') {
       // Externally aborted while running → cancelled (re-dispatched on resume). We do not
@@ -486,7 +562,8 @@ class ActiveRun {
       st.state = 'cancelled';
       this.inFlight = Math.max(0, this.inFlight - 1);
       this.log({ kind: 'node-finished', nodeId, sessionId: evt.sessionId, state: 'cancelled', reason: 'interrupted' });
-      void this.deps.host.setKanbanColumn(evt.sessionId, 'todo');
+      this.applyCard(evt.sessionId, TODO_STATUS);
+      this.emitChanged();
       this.scheduleReady();
     } else {
       // 'error' | 'timeout'
@@ -508,8 +585,9 @@ class ActiveRun {
       st.lastFailure = `Previous attempt failed: ${reason}. Address the cause before retrying.`;
       st.state = 'pending';
       const sid = sessionId ?? st.sessionId;
-      if (sid) void this.deps.host.setKanbanColumn(sid, 'todo');
+      if (sid) this.applyCard(sid, TODO_STATUS);
       this.log({ kind: 'node-retry', nodeId, attempt: st.attempt, reason });
+      this.emitChanged();
       this.scheduleReady();
       return;
     }
@@ -517,7 +595,8 @@ class ActiveRun {
     st.state = 'failed';
     const sid = sessionId ?? st.sessionId;
     this.log({ kind: 'node-finished', nodeId, sessionId: sid ?? '', state: 'failed', reason });
-    if (sid) void this.deps.host.setSessionStatus(sid, FAILED_STATUS);
+    if (sid) this.applyCard(sid, FAILED_STATUS);
+    this.emitChanged();
     this.scheduleReady();
   }
 
@@ -551,18 +630,11 @@ class ActiveRun {
 
   private finish(status: RunStatus): void {
     this.runStatus = status;
-    this.log({ kind: status === 'completed' ? 'run-completed' : 'run-failed' });
-    // Settle the task tile: completed → done, failed → needs-review (the fixed status set has no
-    // 'failed'). The in-progress column was set at start().
-    const orchestrator = this.opts.orchestratorSessionId;
-    if (orchestrator) {
-      if (status === 'completed') {
-        void this.deps.host.setKanbanColumn(orchestrator, 'done');
-        void this.deps.host.setSessionStatus(orchestrator, DONE_STATUS);
-      } else {
-        void this.deps.host.setSessionStatus(orchestrator, FAILED_STATUS);
-      }
-    }
+    this.log({ kind: status === 'completed' ? 'run-completed' : 'run-failed', tokensUsed: this.tokensUsed });
+    // Top-level card stays open: success and failure both go to needs-review. Only the
+    // user can close the tile. Column moves only when dropStatusId matches.
+    if (this.opts.orchestratorSessionId) this.applyCard(this.opts.orchestratorSessionId, REVIEW_STATUS);
+    this.emitChanged();
     this.finalize();
   }
 
@@ -779,6 +851,22 @@ class ActiveRun {
     return this.runStatus === 'completed' || this.runStatus === 'failed' || this.runStatus === 'stopped';
   }
 
+  private applyCard(sessionId: string, statusId: string): void {
+    void this.deps.host.setSessionStatus(sessionId, statusId);
+    void this.resolveAndMoveColumn(sessionId, statusId);
+  }
+
+  private async resolveAndMoveColumn(sessionId: string, statusId: string): Promise<void> {
+    const column = this.deps.host.resolveKanbanColumn
+      ? await this.deps.host.resolveKanbanColumn(sessionId, statusId)
+      : resolveKanbanColumnId(statusId);
+    if (column) void this.deps.host.setKanbanColumn(sessionId, column);
+  }
+
+  private emitChanged(): void {
+    this.deps.onRunChanged?.(this.snapshot());
+  }
+
   private log(entry: RunLogEntryInput): void {
     const t = this.deps.now ? this.deps.now() : new Date().toISOString();
     appendRunLog(this.deps.workspaceRoot, this.slug, this.runId, { ...entry, t } as RunLogEntry);
@@ -838,11 +926,6 @@ function parseVerdict(text: string): { result: 'pass' | 'fail' | 'unparsed'; rea
   return out;
 }
 
-/** A run is terminal (no further work) once completed/failed/stopped. running/paused/verifying are active. */
-function isTerminalRunStatus(status: RunStatus): boolean {
-  return status === 'completed' || status === 'failed' || status === 'stopped';
-}
-
 function resolveParams(spec: TaskSpec, provided?: Record<string, unknown>): Record<string, unknown> {
   const out: Record<string, unknown> = {};
   for (const p of spec.params ?? []) if (p.default !== undefined) out[p.name] = p.default;
@@ -893,49 +976,91 @@ export class TaskRunner {
     return run.snapshot();
   }
 
-  pause(slug: string, runId: string): void {
-    this.runs.get(this.key(slug, runId))?.pause();
+  pause(slug: string, runId: string): RunSnapshot {
+    return this.requireRun(slug, runId).pause();
   }
 
-  resume(slug: string, runId: string): void {
+  resume(slug: string, runId: string): RunSnapshot {
     const existing = this.runs.get(this.key(slug, runId));
-    if (existing) {
-      existing.resume();
-      return;
-    }
-    // Not in memory (e.g. after an app restart): reconstruct from the persisted run-log.
-    this.rehydrate(slug, runId);
+    if (existing) return existing.resume();
+    const run = this.rehydrate(slug, runId, 'hydrate');
+    return run.resume();
   }
 
-  /** Reconstruct an in-memory run from its persisted run-log + node outputs, then resume it. */
-  private rehydrate(slug: string, runId: string): RunSnapshot {
-    const loaded = loadTaskSpec(this.deps.workspaceRoot, slug);
-    if (!loaded?.spec || !loaded.valid) {
-      throw new Error(`Cannot resume "${slug}:${runId}": task.yaml is missing or invalid`);
+  continue(slug: string, runId: string): RunSnapshot {
+    const existing = this.runs.get(this.key(slug, runId));
+    if (existing) return existing.continueAfterInterrupt();
+    const run = this.rehydrate(slug, runId, 'scan');
+    return run.continueAfterInterrupt();
+  }
+
+  /**
+   * Load unfinished runs from disk without scheduling. Running nodes become
+   * `interrupted`. Paused / waiting-approval / waiting-budget keep those states.
+   */
+  scanUnfinished(): RunSnapshot[] {
+    const out: RunSnapshot[] = [];
+    for (const slug of listTaskSlugs(this.deps.workspaceRoot)) {
+      for (const runId of listRunIds(this.deps.workspaceRoot, slug)) {
+        if (this.runs.has(this.key(slug, runId))) {
+          const snap = this.runs.get(this.key(slug, runId))!.snapshot();
+          if (!isTerminalRunStatus(snap.status)) out.push(snap);
+          continue;
+        }
+        const log = readRunLog(this.deps.workspaceRoot, slug, runId);
+        if (log.length === 0) continue;
+        if (isTerminalRunStatus(deriveRunStatusFromLog(log))) continue;
+        out.push(this.rehydrate(slug, runId, 'scan').snapshot());
+      }
     }
+    return out;
+  }
+
+  /** Reconstruct an in-memory run from the run spec snapshot + run-log. Never reads live YAML for the graph. */
+  private rehydrate(slug: string, runId: string, mode: 'scan' | 'hydrate'): ActiveRun {
+    const snapshot = readRunSpecSnapshot(this.deps.workspaceRoot, slug, runId);
+    const live = loadTaskSpec(this.deps.workspaceRoot, slug);
+    const spec = snapshot ?? live?.spec;
+    if (!spec) throw new Error(`Cannot restore "${slug}:${runId}": no spec snapshot or task.yaml`);
     const log = readRunLog(this.deps.workspaceRoot, slug, runId);
-    if (log.length === 0) throw new Error(`Cannot resume "${slug}:${runId}": no run-log found`);
+    if (log.length === 0) throw new Error(`Cannot restore "${slug}:${runId}": no run-log found`);
     const started = log.find((e) => e.kind === 'run-started');
     const orchestratorSessionId = started && started.kind === 'run-started' ? started.orchestratorSessionId : undefined;
     const run = new ActiveRun(
-      loaded.spec,
+      spec,
       slug,
       runId,
-      { orchestratorSessionId, params: resolveParams(loaded.spec), verifyOnComplete: true },
+      { orchestratorSessionId, params: resolveParams(spec), verifyOnComplete: true },
       this.deps,
     );
-    run.hydrate(log, (nodeId) => readNodeOutput(this.deps.workspaceRoot, slug, runId, nodeId));
+    run.hydrate(log, (nodeId) => readNodeOutput(this.deps.workspaceRoot, slug, runId, nodeId), mode);
     this.runs.set(this.key(slug, runId), run);
-    run.resumeFromHydrated();
-    return run.snapshot();
+    return run;
   }
 
-  async stop(slug: string, runId: string): Promise<void> {
-    await this.runs.get(this.key(slug, runId))?.stop();
+  private requireRun(slug: string, runId: string): ActiveRun {
+    const run = this.runs.get(this.key(slug, runId));
+    if (!run) throw new TaskControlError('failed', `No active run ${slug}:${runId}`);
+    return run;
+  }
+
+  async stop(slug: string, runId: string): Promise<RunSnapshot> {
+    const existing = this.runs.get(this.key(slug, runId));
+    if (existing) return existing.stop();
+    return this.rehydrate(slug, runId, 'hydrate').stop();
   }
 
   getRunState(slug: string, runId: string): RunSnapshot | null {
     return this.runs.get(this.key(slug, runId))?.snapshot() ?? null;
+  }
+
+  getLatestRun(slug: string): RunSnapshot | null {
+    let latest: RunSnapshot | null = null;
+    for (const run of this.runs.values()) {
+      const snap = run.snapshot();
+      if (snap.slug === slug) latest = snap;
+    }
+    return latest;
   }
 
   /** Await a run reaching a terminal state (completed/failed/stopped). */

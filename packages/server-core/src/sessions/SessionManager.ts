@@ -8396,6 +8396,15 @@ export class SessionManager implements ISessionManager {
    * Set the kanban board column for a session ('todo' | 'in-progress' | 'done').
    * Pass `null` to clear (board falls back to the default column). Independent of sessionStatus.
    */
+  async resolveKanbanColumn(sessionId: string, statusId: string): Promise<string | null> {
+    const { resolveKanbanColumnId } = await import('@craft-agent/shared/tasks')
+    const managed = this.sessions.get(sessionId)
+    if (!managed?.projectId) return resolveKanbanColumnId(statusId)
+    const { loadProjectById } = await import('@craft-agent/shared/projects')
+    const project = loadProjectById(managed.workspace.rootPath, managed.projectId)
+    return resolveKanbanColumnId(statusId, project?.config.kanbanColumns)
+  }
+
   async setKanbanColumn(sessionId: string, column: string | null): Promise<void> {
     const managed = this.sessions.get(sessionId)
     if (managed) {

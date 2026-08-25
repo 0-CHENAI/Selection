@@ -297,7 +297,7 @@ export interface TaskRunRequest {
 
 export interface TaskNodeRunStateDto {
   id: string
-  /** pending | running | done | failed | cancelled | skipped */
+  /** pending | ready | running | retry-wait | waiting-approval | done | failed | invalid | cancelled | skipped | interrupted */
   state: string
   sessionId?: string
   attempt: number
@@ -307,12 +307,18 @@ export interface TaskRunSnapshotDto {
   slug: string
   runId: string
   taskId: string
-  /** running | paused | verifying | stopped | completed | failed */
+  /** running | pausing | paused | waiting-approval | waiting-budget | verifying | repairing | interrupted | stopped | completed | failed */
   status: string
   orchestratorSessionId?: string
   nodes: TaskNodeRunStateDto[]
   /** Sum of each child's (input + output) tokens observed at completion. */
   tokensUsed: number
+  blockers?: string[]
+}
+
+export interface TaskControlResultDto {
+  snapshot: TaskRunSnapshotDto
+  conflict?: { code: 'conflict'; message: string }
 }
 
 export interface TaskGetResult {
@@ -322,6 +328,7 @@ export interface TaskGetResult {
   spec?: unknown
   /** Active run snapshot when a runId was supplied and known; otherwise null. */
   run?: TaskRunSnapshotDto | null
+  latestRun?: TaskRunSnapshotDto | null
 }
 
 /** One subtask's outcome in a completed/persisted run, for the editor's Results tab. */
@@ -334,6 +341,8 @@ export interface TaskResultNodeDto {
   sessionId?: string
   /** The node's recorded final output text (from nodes/<id>.json), when present. */
   output?: string
+  attempt?: number
+  failureReason?: string
 }
 
 /**
@@ -355,6 +364,7 @@ export interface TaskResultsDto {
   repair?: { used: number; max: number }
   /** Terminal run status recovered from the run-log (completed | failed | stopped | …). */
   runStatus?: string
+  tokensUsed?: number
   /** The run's acceptance criteria (from the per-run spec snapshot), shown above the verdict. */
   acceptanceCriteria?: string
   nodes: TaskResultNodeDto[]

@@ -29,7 +29,51 @@ const NODES_DIR = 'nodes';
 // ---------------------------------------------------------------------------
 
 /** Per-node lifecycle state recorded in the run log. Richer than the board's SubtaskRunState. */
-export type NodeRunState = 'pending' | 'running' | 'done' | 'failed' | 'cancelled' | 'skipped';
+export type NodeRunState =
+  | 'pending'
+  | 'ready'
+  | 'running'
+  | 'retry-wait'
+  | 'waiting-approval'
+  | 'done'
+  | 'failed'
+  | 'invalid'
+  | 'cancelled'
+  | 'skipped'
+  | 'interrupted';
+
+export const NODE_RUN_STATES = [
+  'pending',
+  'ready',
+  'running',
+  'retry-wait',
+  'waiting-approval',
+  'done',
+  'failed',
+  'invalid',
+  'cancelled',
+  'skipped',
+  'interrupted',
+] as const;
+
+export type RunStatus =
+  | 'running'
+  | 'pausing'
+  | 'paused'
+  | 'waiting-approval'
+  | 'waiting-budget'
+  | 'verifying'
+  | 'repairing'
+  | 'interrupted'
+  | 'stopped'
+  | 'completed'
+  | 'failed';
+
+export const TERMINAL_RUN_STATUSES: readonly RunStatus[] = ['completed', 'failed', 'stopped'];
+
+export function isTerminalRunStatus(status: RunStatus): boolean {
+  return status === 'completed' || status === 'failed' || status === 'stopped';
+}
 
 /** Append-only run-log event. `t` is an ISO-8601 timestamp. */
 export type RunLogEntry =
@@ -38,7 +82,22 @@ export type RunLogEntry =
   | { t: string; kind: 'node-spawned'; nodeId: string; sessionId: string }
   | { t: string; kind: 'node-finished'; nodeId: string; sessionId: string; state: NodeRunState; reason?: string }
   | { t: string; kind: 'node-retry'; nodeId: string; attempt: number; reason: string }
-  | { t: string; kind: 'run-paused' | 'run-resumed' | 'run-stopped' | 'run-completed' | 'run-failed' | 'run-verifying' }
+  | {
+      t: string;
+      kind:
+        | 'run-paused'
+        | 'run-pausing'
+        | 'run-resumed'
+        | 'run-stopped'
+        | 'run-completed'
+        | 'run-failed'
+        | 'run-verifying'
+        | 'run-interrupted'
+        | 'run-waiting-approval'
+        | 'run-waiting-budget'
+        | 'run-repairing';
+      tokensUsed?: number;
+    }
   | { t: string; kind: 'verdict'; result: 'pass' | 'fail' | 'unparsed'; reason?: string; nodes?: string[] }
   | { t: string; kind: 'budget-breach'; metric: 'tokens' | 'parallel' | 'iterations'; value: number; limit: number };
 
@@ -143,6 +202,31 @@ export function readRunLog(workspaceRoot: string, slug: string, runId: string): 
     }
   }
   return out;
+}
+
+const RUN_STATUS_EVENTS: Record<string, RunStatus> = {
+  'run-started': 'running',
+  'run-paused': 'paused',
+  'run-pausing': 'pausing',
+  'run-resumed': 'running',
+  'run-stopped': 'stopped',
+  'run-completed': 'completed',
+  'run-failed': 'failed',
+  'run-verifying': 'verifying',
+  'run-interrupted': 'interrupted',
+  'run-waiting-approval': 'waiting-approval',
+  'run-waiting-budget': 'waiting-budget',
+  'run-repairing': 'repairing',
+};
+
+/** Last durable run status recorded in a log. Missing start → running. */
+export function deriveRunStatusFromLog(log: readonly RunLogEntry[]): RunStatus {
+  let status: RunStatus = 'running';
+  for (const entry of log) {
+    const next = RUN_STATUS_EVENTS[entry.kind];
+    if (next) status = next;
+  }
+  return status;
 }
 
 /** List run ids for a task (sorted lexicographically). */

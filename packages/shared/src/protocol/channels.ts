@@ -67,10 +67,14 @@ export const RPC_CHANNELS = {
     PAUSE: 'tasks:pause',
     RESUME: 'tasks:resume',
     STOP: 'tasks:stop',
+    CONTINUE: 'tasks:continue',
     GET: 'tasks:get',
     LIST: 'tasks:list',
+    LIST_RUNS: 'tasks:listRuns',
     // Storage-backed read of a run's outcome (verdict + per-node output). Survives restart.
     GET_RESULTS: 'tasks:getResults',
+    // Push: full typed snapshot after every run/node/budget/approval/repair change.
+    RUN_CHANGED: 'tasks:runChanged',
   },
   workspaces: {
     GET: 'workspaces:get',

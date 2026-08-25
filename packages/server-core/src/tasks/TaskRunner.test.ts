@@ -6,7 +6,7 @@ import type { TokenUsage } from '@craft-agent/core/types';
 import type { CreateSessionOptions } from '@craft-agent/shared/protocol';
 import { parseTaskSpec, saveTaskSpec, readRunLog, readNodeOutput, type TaskSpec } from '@craft-agent/shared/tasks';
 import type { SessionCompletionEvent } from '../sessions/SessionManager';
-import { TaskRunner, type ConductorSessionHost } from './TaskRunner';
+import { TaskRunner, TaskControlError, type ConductorSessionHost } from './TaskRunner';
 
 // Flush pending microtasks so the runner's async dispatch (create → column → send) settles.
 const tick = () => new Promise<void>((r) => setTimeout(r, 0));
@@ -33,6 +33,7 @@ class MockHost implements ConductorSessionHost {
   readonly nodeCounts: { sessionId: string; count: number }[] = [];
   readonly cancelled: string[] = [];
   readonly finalTextById = new Map<string, string>();
+  resolveKanbanColumn?: (sessionId: string, statusId: string) => Promise<string | null>;
 
   async createSession(_workspaceId: string, options: CreateSessionOptions): Promise<{ id: string }> {
     const id = `sess-${options.name}`;
@@ -274,16 +275,18 @@ describe('TaskRunner (Conductor)', () => {
     expect(host.created.find((c) => c.options.name === 'a')?.options.workingDirectory).toBe('/spec/dir')
   })
 
-  it('moves the orchestrator tile to in-progress on start and done on completion', async () => {
+  it('moves the orchestrator tile to in-progress on start and needs-review on completion', async () => {
     saveTaskSpec(root, specOf({ id: 'col', title: 'Col', goal: 'g', nodes: [{ id: 'a', prompt: 'a' }] }))
     const runner = makeRunner()
     runner.run('col', { runId: 'r1', orchestratorSessionId: 'orch', verifyOnComplete: false })
     await tick()
     expect(host.columns).toContainEqual({ sessionId: 'orch', column: 'in-progress' })
+    expect(host.statuses).toContainEqual({ sessionId: 'orch', status: 'in-progress' })
 
     host.complete('a', { finalText: 'A' })
     await tick()
-    expect(host.columns).toContainEqual({ sessionId: 'orch', column: 'done' })
+    expect(host.statuses).toContainEqual({ sessionId: 'orch', status: 'needs-review' })
+    expect(host.columns.some((c) => c.sessionId === 'orch' && c.column === 'done')).toBe(false)
   })
 
   it('runs a fan-out and joins at the synthesizer', async () => {
@@ -403,6 +406,7 @@ describe('TaskRunner (Conductor)', () => {
     await tick();
 
     runner.pause('pz', 'r1');
+    expect(runner.getRunState('pz', 'r1')!.status).toBe('pausing');
     host.complete('a', { finalText: 'A' });
     await tick();
     expect(host.promptFor('b')).toBeUndefined(); // paused → no scheduling
@@ -431,7 +435,7 @@ describe('TaskRunner (Conductor)', () => {
       }),
     );
     const runner = makeRunner();
-    runner.run('st', { runId: 'r1' });
+    runner.run('st', { runId: 'r1', orchestratorSessionId: 'orch' });
     await tick();
 
     await runner.stop('st', 'r1');
@@ -439,6 +443,8 @@ describe('TaskRunner (Conductor)', () => {
     expect(snap.status).toBe('stopped');
     expect(snap.nodes.find((n) => n.id === 'a')!.state).toBe('cancelled');
     expect(host.cancelled).toContain('sess-a');
+    expect(host.statuses).toContainEqual({ sessionId: 'orch', status: 'needs-review' });
+    expect(host.columns.some((c) => c.sessionId === 'orch' && c.column === 'done')).toBe(false);
   });
 
   it('resumes a run from the persisted run-log after a restart, reusing finished node outputs', async () => {
@@ -771,7 +777,9 @@ describe('TaskRunner (Conductor)', () => {
     // Restart: fresh host + runner with empty in-memory state, resume from the run-log.
     const host2 = new MockHost();
     const r2 = new TaskRunner({ host: host2, workspaceId: 'ws', workspaceRoot: root, now: () => '2026-06-07T00:00:00.000Z' });
-    r2.resume('hyd', 'r1');
+    const scanned = r2.scanUnfinished();
+    expect(scanned.some((s) => s.runId === 'r1' && s.status === 'interrupted')).toBe(true);
+    r2.continue('hyd', 'r1');
     await tick();
     expect(r2.getRunState('hyd', 'r1')!.status).toBe('verifying');
 
@@ -941,5 +949,82 @@ describe('TaskRunner (Conductor)', () => {
 
     expect(host2.dispatchedNames()).toEqual(['work']);
     expect(r2.getRunState('resume-skip', 'r1')!.nodes.find((n) => n.id === 'gate')!.state).toBe('skipped');
+  });
+
+  it('scans a crashed running run as interrupted and continues without re-running done nodes', async () => {
+    saveTaskSpec(
+      root,
+      specOf({
+        id: 'crash',
+        title: 'Crash',
+        goal: 'g',
+        nodes: [
+          { id: 'a', prompt: 'a' },
+          { id: 'b', depends_on: ['a'], prompt: 'b ${nodes.a.output}' },
+        ],
+      }),
+    );
+    const r1 = makeRunner();
+    r1.run('crash', { runId: 'r1', verifyOnComplete: false });
+    await tick();
+    host.complete('a', { finalText: 'A' });
+    await tick();
+    expect(host.dispatchedNames()).toEqual(['a', 'b']);
+
+    const host2 = new MockHost();
+    const r2 = new TaskRunner({ host: host2, workspaceId: 'ws', workspaceRoot: root, now: () => '2026-06-07T00:00:00.000Z' });
+    const scanned = r2.scanUnfinished();
+    expect(scanned[0]?.status).toBe('interrupted');
+    expect(scanned[0]?.nodes.find((n) => n.id === 'a')!.state).toBe('done');
+    expect(scanned[0]?.nodes.find((n) => n.id === 'b')!.state).toBe('interrupted');
+    expect(host2.dispatchedNames()).toEqual([]);
+
+    expect(() => r2.resume('crash', 'r1')).toThrow(TaskControlError);
+
+    r2.continue('crash', 'r1');
+    await tick();
+    expect(host2.dispatchedNames()).toEqual(['b']);
+    expect(host2.promptFor('b')).toBe('b A');
+    host2.complete('b', { finalText: 'B' });
+    await tick();
+    expect(r2.getRunState('crash', 'r1')!.status).toBe('completed');
+  });
+
+  it('moves a child onto a custom dropStatusId column and keeps the top card off done', async () => {
+    const columns = [
+      { id: 'doing', dropStatusId: 'in-progress' },
+      { id: 'review', dropStatusId: 'needs-review' },
+    ];
+    host.resolveKanbanColumn = async (_id, status) => {
+      const { resolveKanbanColumnId } = await import('@craft-agent/shared/tasks');
+      return resolveKanbanColumnId(status, columns);
+    };
+    saveTaskSpec(root, specOf({ id: 'mapcol', title: 'Map', goal: 'g', nodes: [{ id: 'a', prompt: 'a' }] }));
+    const runner = makeRunner();
+    runner.run('mapcol', { runId: 'r1', orchestratorSessionId: 'orch', verifyOnComplete: false });
+    await tick();
+    expect(host.columns).toContainEqual({ sessionId: 'orch', column: 'doing' });
+    host.complete('a', { finalText: 'A' });
+    await tick();
+    expect(host.columns).toContainEqual({ sessionId: 'orch', column: 'review' });
+    expect(host.statuses).toContainEqual({ sessionId: 'orch', status: 'needs-review' });
+  });
+
+  it('emits a snapshot on every run change', async () => {
+    const snaps: string[] = [];
+    saveTaskSpec(root, specOf({ id: 'push', title: 'Push', goal: 'g', nodes: [{ id: 'a', prompt: 'a' }] }));
+    const runner = new TaskRunner({
+      host,
+      workspaceId: 'ws',
+      workspaceRoot: root,
+      now: () => '2026-06-07T00:00:00.000Z',
+      onRunChanged: (s) => snaps.push(s.status),
+    });
+    runner.run('push', { runId: 'r1', verifyOnComplete: false });
+    await tick();
+    host.complete('a', { finalText: 'A' });
+    await tick();
+    expect(snaps).toContain('running');
+    expect(snaps).toContain('completed');
   });
 });

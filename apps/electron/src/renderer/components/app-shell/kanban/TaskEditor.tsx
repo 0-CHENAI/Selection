@@ -569,6 +569,8 @@ export function TaskEditor({
   // Results tab (edit mode): storage-backed run outcome, loaded lazily on tab open / refresh.
   const [results, setResults] = React.useState<TaskResults | null>(null)
   const [resultsLoading, setResultsLoading] = React.useState(false)
+  const [selectedRunId, setSelectedRunId] = React.useState<string | null>(null)
+  const [liveRun, setLiveRun] = React.useState<Awaited<ReturnType<typeof window.electronAPI.runTask>> | null>(null)
 
   // Jotai store handle for one-shot reads (no subscription — the editor must not re-render
   // on every streaming metadata tick just to have read children once at open).
@@ -665,12 +667,15 @@ export function TaskEditor({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [target.mode, editSessionId, editSlug, workspaceId])
 
-  const loadResults = React.useCallback(() => {
+  const loadResults = React.useCallback((runId?: string) => {
     if (!editSlug) return
     setResultsLoading(true)
     void window.electronAPI
-      .getTaskResults(workspaceId, editSlug)
-      .then((res) => setResults(res))
+      .getTaskResults(workspaceId, editSlug, runId)
+      .then((res) => {
+        setResults(res)
+        if (res.runId) setSelectedRunId(res.runId)
+      })
       .catch(() => {})
       .finally(() => setResultsLoading(false))
   }, [workspaceId, editSlug])
@@ -679,6 +684,37 @@ export function TaskEditor({
   React.useEffect(() => {
     if (tab === 'results' && editSlug && !results && !resultsLoading) loadResults()
   }, [tab, editSlug, results, resultsLoading, loadResults])
+
+  React.useEffect(() => {
+    if (!editSlug) return
+    return window.electronAPI.onTaskRunChanged((_ws, snapshot) => {
+      if (snapshot.slug !== editSlug) return
+      setLiveRun(snapshot)
+    })
+  }, [editSlug])
+
+  const controlRun = React.useCallback(
+    async (op: 'pause' | 'resume' | 'stop' | 'continue') => {
+      if (!editSlug || !liveRun) return
+      const api = {
+        pause: window.electronAPI.pauseTask,
+        resume: window.electronAPI.resumeTask,
+        stop: window.electronAPI.stopTask,
+        continue: window.electronAPI.continueTask,
+      }[op]
+      try {
+        const res = await api(workspaceId, editSlug, liveRun.runId)
+        if (res.conflict) {
+          toast.error(t('tasks.toastControlConflict'), { description: res.conflict.message })
+          return
+        }
+        setLiveRun(res.snapshot)
+      } catch (err) {
+        toast.error(t('tasks.toastRunFailed'), { description: err instanceof Error ? err.message : String(err) })
+      }
+    },
+    [editSlug, liveRun, workspaceId, t],
+  )
 
   // Async generate: tasks:generate returns the orchestrator session id immediately and the
   // authored spec arrives later via the onTaskGenerated push event. We track the pending
@@ -954,6 +990,20 @@ export function TaskEditor({
               <ExternalLink className="h-3.5 w-3.5" strokeWidth={2} /> {t('tasks.openSession')}
             </Btn>
           )}
+          {isEdit && liveRun && !['completed', 'failed', 'stopped'].includes(liveRun.status) && (
+            <div className="flex items-center gap-1.5">
+              {(liveRun.status === 'running' || liveRun.status === 'verifying' || liveRun.status === 'repairing') && (
+                <Btn variant="secondary" onClick={() => void controlRun('pause')}>{t('tasks.pauseRun')}</Btn>
+              )}
+              {(liveRun.status === 'paused' || liveRun.status === 'pausing') && (
+                <Btn variant="secondary" onClick={() => void controlRun('resume')}>{t('tasks.resumeRun')}</Btn>
+              )}
+              {liveRun.status === 'interrupted' && (
+                <Btn variant="secondary" onClick={() => void controlRun('continue')}>{t('tasks.continueRun')}</Btn>
+              )}
+              <Btn variant="secondary" onClick={() => void controlRun('stop')}>{t('tasks.stopRun')}</Btn>
+            </div>
+          )}
           {tab === 'definition' && (
             <>
               <Btn variant="secondary" onClick={onClose} disabled={busy}>
@@ -980,6 +1030,11 @@ export function TaskEditor({
         <ResultsPanel
           results={results}
           loading={resultsLoading}
+          selectedRunId={selectedRunId}
+          onSelectRun={(id) => {
+            setSelectedRunId(id)
+            loadResults(id)
+          }}
           onOpenChildSession={onOpenChildSession}
         />
       ) : (
@@ -1236,10 +1291,14 @@ export function TaskEditor({
 function ResultsPanel({
   results,
   loading,
+  selectedRunId,
+  onSelectRun,
   onOpenChildSession,
 }: {
   results: TaskResults | null
   loading: boolean
+  selectedRunId: string | null
+  onSelectRun: (runId: string) => void
   onOpenChildSession?: (sessionId: string) => void
 }) {
   const { t } = useTranslation()
@@ -1266,6 +1325,28 @@ function ResultsPanel({
   const repair = results.repair
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto rounded-xl border border-border bg-card p-4 shadow-minimal">
+      {results.runIds.length > 0 && (
+        <label className="flex items-center gap-2 text-[12px]">
+          <span className="font-semibold text-foreground/55">{t('tasks.runPicker')}</span>
+          <select
+            className="rounded-md border border-border bg-background px-2 py-1 text-[12px]"
+            value={selectedRunId ?? results.runId ?? ''}
+            onChange={(e) => onSelectRun(e.target.value)}
+          >
+            {results.runIds.map((id) => (
+              <option key={id} value={id}>{id}</option>
+            ))}
+          </select>
+          {results.runStatus && (
+            <span className="rounded-full bg-foreground/[0.06] px-2 py-0.5 text-[10.5px] font-bold text-foreground/60">
+              {results.runStatus}
+            </span>
+          )}
+          {results.tokensUsed != null && (
+            <span className="text-[11px] text-foreground/45">{t('tasks.tokensUsed', { count: results.tokensUsed })}</span>
+          )}
+        </label>
+      )}
       {results.acceptanceCriteria && (
         <div className="rounded-[10px] border border-border/70 bg-foreground/[0.015] px-3 py-2.5">
           <div className="text-[11px] font-bold uppercase tracking-wide text-foreground/45">{t('tasks.acceptanceCriteria')}</div>
@@ -1341,6 +1422,9 @@ function ResultsPanel({
             <span className={cn('shrink-0 rounded-full border px-2 py-0.5 text-[10.5px] font-bold', pill.className)}>
               {pill.labelKey ? t(pill.labelKey) : node.state}
             </span>
+            {node.attempt != null && node.attempt > 0 && (
+              <span className="text-[10.5px] text-foreground/45">{t('tasks.attemptCount', { count: node.attempt })}</span>
+            )}
             {node.sessionId && onOpenChildSession && (
               <button
                 type="button"
@@ -1351,6 +1435,9 @@ function ResultsPanel({
               </button>
             )}
           </div>
+          {node.failureReason && (
+            <p className="mt-1.5 text-[11.5px] text-red-500/80">{t('tasks.failureReason')}: {node.failureReason}</p>
+          )}
           {node.output ? (
             <div className="mt-2 max-h-72 overflow-y-auto rounded-md border border-border/50 bg-background px-3 py-2 text-[12px] leading-relaxed">
               <Markdown>{node.output}</Markdown>

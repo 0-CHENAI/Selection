@@ -10,5 +10,6 @@ export * from './slug.ts';
 export * from './refs.ts';
 export * from './validate.ts';
 export * from './storage.ts';
+export * from './kanban-column.ts';
 export * from './generator-prompt.ts';
 export * from './results.ts';

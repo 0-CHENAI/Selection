@@ -16,3 +16,4 @@ export type {
   RunStatus,
   NodeRunStatus,
 } from './TaskRunner';
+export { TaskControlError } from './TaskRunner';
