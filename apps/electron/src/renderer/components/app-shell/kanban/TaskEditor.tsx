@@ -21,6 +21,7 @@ import {
 } from '@/components/ui/dropdown-menu'
 import type { KanbanModelProviderGroup, TaskEditorTarget } from './types'
 import { uid, buildSpec, specToSubtasks, canDependOn, quickAddNodeId, quickAddChildToSubtask, DEFAULT_REPAIR_ATTEMPTS, MAX_REPAIR_ATTEMPTS_CAP, SESSION_LIKE_KINDS, type EditorSubtask, type SpecNode, type TaskPermissionMode } from './task-spec-form'
+import { runnerLabelKey, runStatusLabelKey } from './task-labels'
 import { ConductorWorkbench, type WorkbenchSpec } from './ConductorWorkbench'
 import { isTasksOrchestrateEnabled } from '@craft-agent/shared/feature-flags'
 import { resolveNodeStatePill } from './node-state-pill'
@@ -1223,7 +1224,7 @@ export function TaskEditor({
           )}
         </div>
       ) : tab === 'canvas' ? (
-        <ConductorWorkbench spec={currentSpec()} liveRun={liveRun} onSpecChange={applyWorkbenchSpec} />
+        <ConductorWorkbench spec={currentSpec()} liveRun={liveRun} />
       ) : (
       /* Body */
       <div className="grid min-h-0 flex-1 grid-cols-[minmax(360px,2fr)_3fr] gap-3">
@@ -1317,12 +1318,12 @@ export function TaskEditor({
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <SelectButton style={{ width: 196 }}>
-                    <span className="truncate">{runner === 'orchestrate' ? t('tasks.orchestrateBeta') : 'conduct'}</span>
+                    <span className="truncate">{t(runnerLabelKey(runner, isTasksOrchestrateEnabled()))}</span>
                   </SelectButton>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end">
                   <DropdownMenuItem className="text-xs" onSelect={() => { setRunner('conduct'); setDirty(true) }}>
-                    conduct
+                    {t('tasks.runnerConduct')}
                     {runner === 'conduct' && <Check className="ml-auto h-3.5 w-3.5 shrink-0" strokeWidth={2} />}
                   </DropdownMenuItem>
                   <DropdownMenuItem
@@ -1330,7 +1331,7 @@ export function TaskEditor({
                     disabled={!isTasksOrchestrateEnabled()}
                     onSelect={() => { setRunner('orchestrate'); setDirty(true) }}
                   >
-                    {t('tasks.orchestrateBeta')}
+                    {t(runnerLabelKey('orchestrate', isTasksOrchestrateEnabled()))}
                     {runner === 'orchestrate' && <Check className="ml-auto h-3.5 w-3.5 shrink-0" strokeWidth={2} />}
                   </DropdownMenuItem>
                 </DropdownMenuContent>
@@ -1533,6 +1534,7 @@ function ResultsPanel({
   const verdict = results.verdict
   const verdicts = results.verdicts ?? (verdict ? [verdict] : [])
   const repair = results.repair
+  const runStatusKey = runStatusLabelKey(results.runStatus)
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto rounded-xl border border-border bg-card p-4 shadow-minimal">
       {results.runIds.length > 0 && (
@@ -1549,7 +1551,7 @@ function ResultsPanel({
           </select>
           {results.runStatus && (
             <span className="rounded-full bg-foreground/[0.06] px-2 py-0.5 text-[10.5px] font-bold text-foreground/60">
-              {results.runStatus}
+              {runStatusKey ? t(runStatusKey) : results.runStatus}
             </span>
           )}
           {results.tokensUsed != null && (
