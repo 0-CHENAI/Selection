@@ -74,6 +74,8 @@ import { buildTitlePrompt, buildRegenerateTitlePrompt, validateTitle } from '../
 // Skill extraction for Codex/Copilot backends (Claude uses native SDK Skill tool)
 import { parseMentions, resolveSkillMentions, resolveSourceMentions, resolveFileMentions } from '../mentions/index.ts';
 import { loadAllSkills, resolveBundledSkillMdPath } from '../skills/storage.ts';
+import { toSkillCatalogEntries } from '../skills/catalog.ts';
+import { formatSkillSuggestions, matchSkillsByGlobs } from '../skills/match.ts';
 
 // ============================================================
 // Mini Agent Configuration
@@ -1004,9 +1006,9 @@ ${formattedMessages}
     }
 
     // Named or attached Office files load the router only. The model then
-    // load_skill word/excel/pptx for the format it chooses. Do not dump
-    // official format SKILL.md files up front. An explicit user skill mention
-    // keeps Craft's normal project/workspace/global priority.
+    // load_skill word/excel/pptx for the format it chooses. Intent-only Office
+    // work ("做一份 PPT") discovers officecli from the skill catalog instead.
+    // An explicit user skill mention keeps Craft's normal project/workspace/global priority.
     const explicitlySelectedOfficecli = parsed.skills.includes('officecli');
     if (shouldLoadBundledOfficecliRouter(message, attachments) && !explicitlySelectedOfficecli) {
       skillPaths.delete('officecli');
@@ -1074,10 +1076,21 @@ ${formattedMessages}
       return;
     }
 
+    const workspaceRoot = this.config.workspace?.rootPath ?? this.workingDirectory;
+    const projectRoot = this.config.session?.workingDirectory;
+    const catalogEntries = toSkillCatalogEntries(loadAllSkills(workspaceRoot, projectRoot));
+
     // Register skill prerequisites — blocks all tools until SKILL.md files are read.
     if (skillPaths.size > 0) {
       this.prerequisiteManager.registerSkillPrerequisites([...skillPaths.values()]);
     }
+
+    const suggested = matchSkillsByGlobs(catalogEntries, { message, attachments });
+    const excludeSuggested = new Set(skillPaths.keys());
+    if (shouldLoadBundledOfficecliRouter(message, attachments)) {
+      excludeSuggested.add('officecli');
+    }
+    const suggestion = formatSkillSuggestions(suggested, excludeSuggested);
 
     // Prepend branch seed context (for seeded branch sessions) and transferred-session summary.
     const branchSeedContext = this.buildBranchSeedContext(this.config.getBranchSeedMessages?.());
@@ -1098,7 +1111,7 @@ ${formattedMessages}
     // Strip any system-reminder that a caller accidentally embedded in `message`
     // so retry capture and model injection stay separated.
     const userFacingMessage = sanitizeUserMessageForRetry(cleanMessage);
-    const messageParts = [branchSeedContext, transferredSessionContext, directive, userFacingMessage].filter(Boolean);
+    const messageParts = [branchSeedContext, transferredSessionContext, directive, suggestion, userFacingMessage].filter(Boolean);
     let effectiveMessage = messageParts.join('\n\n');
 
     // Model-only interruption context — never stored/displayed as user content.

@@ -38,3 +38,13 @@ export {
   truncateSkillDescription,
   type SkillCatalogEntry,
 } from './catalog.ts';
+export {
+  collectSkillSlugsForSourcePreEnable,
+  extractPathLikeTokens,
+  formatSkillSuggestions,
+  globToRegExp,
+  matchSkillsByGlobs,
+  type SkillMatch,
+  type SkillMatchAttachment,
+  type SkillMatchInput,
+} from './match.ts';
