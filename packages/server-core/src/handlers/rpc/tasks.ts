@@ -16,6 +16,8 @@ import { RPC_CHANNELS } from '@craft-agent/shared/protocol'
 import type {
   TaskCreateRequest,
   TaskCreateResult,
+  TaskSaveRequest,
+  TaskSaveResult,
   TaskGenerateRequest,
   TaskGenerateAck,
   TaskGenerateResult,
@@ -29,13 +31,14 @@ import type {
 import { getWorkspaceByNameOrId } from '@craft-agent/shared/config'
 import {
   parseTaskYaml,
-  saveTaskSpec,
-  loadTaskSpec,
+  loadTaskDocument,
+  saveTaskDocument,
   listTaskSlugs,
   listRunIds,
   buildGeneratorPrompt,
   buildRepairPrompt,
   loadTaskResults,
+  TaskEtagConflictError,
 } from '@craft-agent/shared/tasks'
 import { createLogger } from '@craft-agent/shared/utils'
 import { pushTyped, type RpcServer } from '@craft-agent/server-core/transport'
@@ -47,6 +50,7 @@ const tasksLog = createLogger('tasks-generate')
 export const HANDLED_CHANNELS = [
   RPC_CHANNELS.tasks.VALIDATE,
   RPC_CHANNELS.tasks.CREATE,
+  RPC_CHANNELS.tasks.SAVE,
   RPC_CHANNELS.tasks.GENERATE,
   RPC_CHANNELS.tasks.RUN,
   RPC_CHANNELS.tasks.PAUSE,
@@ -144,7 +148,8 @@ export function registerTasksHandlers(server: RpcServer, deps: HandlerDeps): voi
       return { slug: '', orchestratorSessionId: '', validation }
     }
     const spec = parsed.spec
-    saveTaskSpec(ws.rootPath, spec)
+    const existing = loadTaskDocument(ws.rootPath, spec.id)
+    saveTaskDocument(ws.rootPath, req.yaml, existing?.etag ?? null)
 
     // Single choke point for ALL orchestrator paths (attach / adopt / fresh): apply the reserved
     // "Task" label (surfacing its resolved id so the renderer can navigate to the label filter)
@@ -201,6 +206,37 @@ export function registerTasksHandlers(server: RpcServer, deps: HandlerDeps): voi
     // orchestrator to the renderer by default, so its tile appears on the board immediately.
     const created = await createTaskFromSpec(deps.sessionManager, workspaceId, ws.rootPath, spec, { save: false })
     return { slug: created.slug, orchestratorSessionId: created.orchestratorSessionId, validation, taskLabelId: created.taskLabelId }
+  })
+
+  // tasks:save — etag-guarded write that stamps schema_version: 2 and backups a v1 original.
+  server.handle(RPC_CHANNELS.tasks.SAVE, async (_ctx, workspaceId: string, req: TaskSaveRequest): Promise<TaskSaveResult> => {
+    const ws = workspaceOrThrow(workspaceId)
+    try {
+      const saved = saveTaskDocument(ws.rootPath, req.yaml, req.expectedEtag)
+      return {
+        slug: saved.slug,
+        validation: toValidationDto({ valid: saved.valid, errors: saved.errors, warnings: saved.warnings, spec: saved.spec }),
+        spec: saved.spec,
+        yaml: saved.yaml,
+        etag: saved.etag,
+        sourceVersion: saved.sourceVersion,
+        migrationWarnings: saved.migrationWarnings,
+      }
+    } catch (err) {
+      if (err instanceof TaskEtagConflictError) {
+        return {
+          slug: '',
+          validation: {
+            valid: false,
+            errors: [{ path: 'etag', message: err.message, severity: 'error' }],
+            warnings: [],
+          },
+          conflict: { code: 'etag-conflict', expected: err.expected, actual: err.actual },
+          etag: err.actual,
+        }
+      }
+      throw err
+    }
   })
 
   // tasks:generate — the persistent orchestrator session AUTHORS the task.yaml from a goal (#2).
@@ -357,7 +393,7 @@ export function registerTasksHandlers(server: RpcServer, deps: HandlerDeps): voi
   // tasks:get — spec + (optional) active run-state.
   server.handle(RPC_CHANNELS.tasks.GET, async (_ctx, workspaceId: string, slug: string, runId?: string): Promise<TaskGetResult> => {
     const ws = workspaceOrThrow(workspaceId)
-    const loaded = loadTaskSpec(ws.rootPath, slug)
+    const loaded = loadTaskDocument(ws.rootPath, slug)
     if (!loaded) {
       return {
         slug,
@@ -367,7 +403,17 @@ export function registerTasksHandlers(server: RpcServer, deps: HandlerDeps): voi
     }
     const runner = runnerFor(workspaceId)
     const run = runId ? runner.getRunState(slug, runId) : null
-    return { slug, validation: toValidationDto(loaded), spec: loaded.spec, run, latestRun: run ?? runner.getLatestRun(slug) }
+    return {
+      slug,
+      validation: toValidationDto({ valid: loaded.valid, errors: loaded.errors, warnings: loaded.warnings, spec: loaded.spec }),
+      spec: loaded.spec,
+      yaml: loaded.yaml,
+      etag: loaded.etag,
+      sourceVersion: loaded.sourceVersion,
+      migrationWarnings: loaded.migrationWarnings,
+      run,
+      latestRun: run ?? runner.getLatestRun(slug),
+    }
   })
 
   // tasks:list — slugs with a task.yaml.

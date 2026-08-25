@@ -905,6 +905,44 @@ describe('TaskRunner (Conductor)', () => {
     expect(runner.getRunState('skip-dep', 'r1')!.status).toBe('completed');
   });
 
+  it('refuses to start a v2 run that contains unimplemented kinds', () => {
+    saveTaskSpec(
+      root,
+      specOf({
+        schema_version: 2,
+        id: 'v2-gate',
+        title: 'V2 gate',
+        goal: 'g',
+        nodes: [
+          { id: 'a', prompt: 'a' },
+          { id: 'gate', kind: 'approval' },
+        ],
+      }),
+    );
+    const runner = makeRunner();
+    expect(() => runner.run('v2-gate', { runId: 'r1', verifyOnComplete: false })).toThrow(/unimplemented kinds/);
+  });
+
+  it('runs a v2 file that only uses implemented kinds', async () => {
+    saveTaskSpec(
+      root,
+      specOf({
+        schema_version: 2,
+        id: 'v2-ok',
+        title: 'V2 ok',
+        goal: 'g',
+        nodes: [{ id: 'a', prompt: 'a' }],
+      }),
+    );
+    const runner = makeRunner();
+    runner.run('v2-ok', { runId: 'r1', verifyOnComplete: false });
+    await tick();
+    expect(host.dispatchedNames()).toEqual(['a']);
+    host.complete('a');
+    await tick();
+    expect(runner.getRunState('v2-ok', 'r1')!.status).toBe('completed');
+  });
+
   it('dispatches orchestrator-kind nodes (v1 escape hatch)', async () => {
     saveTaskSpec(
       root,

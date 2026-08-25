@@ -207,6 +207,22 @@ export interface TaskValidationResultDto {
   estimate?: { nodeCount: number; sessionNodeCount: number }
 }
 
+export interface TaskSaveRequest {
+  yaml: string
+  expectedEtag: string
+}
+
+export interface TaskSaveResult {
+  slug: string
+  validation: TaskValidationResultDto
+  spec?: unknown
+  yaml?: string
+  etag?: string
+  sourceVersion?: 1 | 2
+  migrationWarnings?: string[]
+  conflict?: { code: 'etag-conflict'; expected: string; actual: string }
+}
+
 export interface TaskCreateRequest {
   /** task.yaml source text (authoritative). */
   yaml: string
@@ -326,6 +342,10 @@ export interface TaskGetResult {
   validation: TaskValidationResultDto
   /** The parsed TaskSpec (from @craft-agent/shared/tasks) when valid; consumers cast. */
   spec?: unknown
+  yaml?: string
+  etag?: string
+  sourceVersion?: 1 | 2
+  migrationWarnings?: string[]
   /** Active run snapshot when a runId was supplied and known; otherwise null. */
   run?: TaskRunSnapshotDto | null
   latestRun?: TaskRunSnapshotDto | null

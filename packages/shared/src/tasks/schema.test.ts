@@ -111,6 +111,32 @@ describe('schema', () => {
     const r = parseTaskSpec({ id: 'Bad Id', title: 'X', goal: 'g', nodes: [{ id: 'a', prompt: 'p' }] });
     expect(r.success).toBe(false);
   });
+
+  it('accepts v2 fields: schema_version, sensitive params, output metadata, when AST, retry.when array, ui.layout', () => {
+    const r = parseTaskSpec({
+      ...CHAIN,
+      schema_version: 2,
+      params: [{ name: 'token', type: 'string', sensitive: true }],
+      nodes: [
+        {
+          id: 'audit',
+          prompt: 'Audit',
+          when: { ref: 'params.token', op: 'exists' },
+          retry: { limit: 1, when: ['error', 'invalid'] },
+          outputs: [{ name: 'summary', required: true, description: 'Audit summary' }],
+        },
+      ],
+      ui: { layout: { direction: 'TB', nodes: { audit: { x: 0, y: 0 } } } },
+    });
+    expect(r.success).toBe(true);
+    if (!r.success) return;
+    expect(r.data.schema_version).toBe(2);
+    expect(r.data.params?.[0]?.sensitive).toBe(true);
+    expect(r.data.nodes[0]!.outputs?.[0]).toMatchObject({ name: 'summary', required: true });
+    expect(r.data.nodes[0]!.when).toEqual({ ref: 'params.token', op: 'exists' });
+    expect(r.data.nodes[0]!.retry?.when).toEqual(['error', 'invalid']);
+    expect(r.data.ui?.layout?.direction).toBe('TB');
+  });
 });
 
 // ---------------------------------------------------------------------------
