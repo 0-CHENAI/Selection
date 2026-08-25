@@ -36,8 +36,7 @@
     "win32-x64": {
       "name": "officecli-win-x64.exe",
       "url": "https://github.com/iOfficeAI/OfficeCLI/releases/download/v1.0.144/officecli-win-x64.exe",
-      "sha256": "e780cc6a5385f84b4d54d71b0c179904ed534125ec33fe39b1a8711fa80e387e",
-      "schemaCrc": "22d3fc61"
+      "sha256": "e780cc6a5385f84b4d54d71b0c179904ed534125ec33fe39b1a8711fa80e387e"
     },
     "win32-arm64": {
       "name": "officecli-win-arm64.exe",
@@ -160,92 +159,92 @@
     "word": {
       "directory": "officecli-docx",
       "entry": "SKILL.md",
+      "inherits": [],
       "contentHash": "1da56ed53a308222ab2516a2974ae98c6703b7d504fa5158348c39a18e85a4f1",
-      "resourceHash": "575b254611e5bacc3e890a2313f479f805c05e075de07a1197eec9aa1f53a3be",
-      "inherits": []
+      "resourceHash": "575b254611e5bacc3e890a2313f479f805c05e075de07a1197eec9aa1f53a3be"
     },
     "excel": {
       "directory": "officecli-xlsx",
       "entry": "SKILL.md",
+      "inherits": [],
       "contentHash": "5cd79d2c7398525acb9ffb431f5ff52f124a796f3b1a061f1f9f54f99bd367f3",
-      "resourceHash": "3d28a2ee2e92b3ec5876a6f2488531805d54c583fe2144b32a9ad4a38cb3ac19",
-      "inherits": []
+      "resourceHash": "3d28a2ee2e92b3ec5876a6f2488531805d54c583fe2144b32a9ad4a38cb3ac19"
     },
     "pptx": {
       "directory": "officecli-pptx",
       "entry": "SKILL.md",
+      "inherits": [],
       "contentHash": "0d53192751d5770984f16f3c34f9923377651555c667150d7f96e16e8c9757b3",
-      "resourceHash": "0a8e1010b32fdbd9962f048cf3c373a974d5a75fd9457401700691b0e751c4ba",
-      "inherits": []
+      "resourceHash": "0a8e1010b32fdbd9962f048cf3c373a974d5a75fd9457401700691b0e751c4ba"
     },
     "academic-paper": {
       "directory": "officecli-academic-paper",
       "entry": "SKILL.md",
-      "contentHash": "573292e01c2b9b9885c6cd24ffec5f808d88f8a1868aa0e962bcab9a479f40e5",
-      "resourceHash": "5e429aff44d5750d8535fd7d08c1172eaaefcef70041df5795c1ba492fbf0c0f",
       "inherits": [
         "word"
-      ]
+      ],
+      "contentHash": "573292e01c2b9b9885c6cd24ffec5f808d88f8a1868aa0e962bcab9a479f40e5",
+      "resourceHash": "5e429aff44d5750d8535fd7d08c1172eaaefcef70041df5795c1ba492fbf0c0f"
     },
     "financial-model": {
       "directory": "officecli-financial-model",
       "entry": "SKILL.md",
-      "contentHash": "65280bce9537ff3192bbc8fe1ad94980662929a71390b258d7f38f24772d8c9e",
-      "resourceHash": "f6cccee37cea1d550cf880e1be98c86ffe44f0c3725e516d6f41fbeda2e4de8a",
       "inherits": [
         "excel"
-      ]
+      ],
+      "contentHash": "65280bce9537ff3192bbc8fe1ad94980662929a71390b258d7f38f24772d8c9e",
+      "resourceHash": "f6cccee37cea1d550cf880e1be98c86ffe44f0c3725e516d6f41fbeda2e4de8a"
     },
     "data-dashboard": {
       "directory": "officecli-data-dashboard",
       "entry": "SKILL.md",
-      "contentHash": "38cf745bb04cb7005cd089e6e87073509f190e46e035707528a5d0b01b2dafd0",
-      "resourceHash": "026fb6131a75b76b5855d650cb00d79bd3900c93ed0b2a00aa30be87e78896a7",
       "inherits": [
         "excel"
-      ]
+      ],
+      "contentHash": "38cf745bb04cb7005cd089e6e87073509f190e46e035707528a5d0b01b2dafd0",
+      "resourceHash": "026fb6131a75b76b5855d650cb00d79bd3900c93ed0b2a00aa30be87e78896a7"
     },
     "pitch-deck": {
       "directory": "officecli-pitch-deck",
       "entry": "SKILL.md",
-      "contentHash": "6b59efdc094451945fd059548771326cce4bd2e3544d0659d3d6acf0825ea2b1",
-      "resourceHash": "54adc0fedb117875d9931b6c963dc3e7d9e2cdaf7fc8ff5dc0bfb67630ec1cd1",
       "inherits": [
         "pptx"
-      ]
+      ],
+      "contentHash": "6b59efdc094451945fd059548771326cce4bd2e3544d0659d3d6acf0825ea2b1",
+      "resourceHash": "54adc0fedb117875d9931b6c963dc3e7d9e2cdaf7fc8ff5dc0bfb67630ec1cd1"
     },
     "word-form": {
       "directory": "officecli-word-form",
       "entry": "SKILL.md",
-      "contentHash": "428eef196cd5b9f6a6267a3f25f85919e6c560b10b53e31513f2a1e6fd7a396a",
-      "resourceHash": "19d35b33ce5a5b3b94a6f95d97778619287e217af3a5ef829cae124a63ff3cd0",
       "inherits": [
         "word"
-      ]
+      ],
+      "contentHash": "428eef196cd5b9f6a6267a3f25f85919e6c560b10b53e31513f2a1e6fd7a396a",
+      "resourceHash": "19d35b33ce5a5b3b94a6f95d97778619287e217af3a5ef829cae124a63ff3cd0"
     },
     "morph-ppt": {
       "directory": "morph-ppt",
       "entry": "SKILL.md",
-      "contentHash": "0d7e196f30061e4da8a29fb4fd3f995f6130f02708a98615e28459594a28c07a",
-      "resourceHash": "3a83ba95b6124f46a509ae8a7cd935935e567ef97020b3aafecfa32258fea25d",
       "inherits": [
         "pptx"
-      ]
+      ],
+      "contentHash": "0d7e196f30061e4da8a29fb4fd3f995f6130f02708a98615e28459594a28c07a",
+      "resourceHash": "3a83ba95b6124f46a509ae8a7cd935935e567ef97020b3aafecfa32258fea25d"
     },
     "morph-ppt-3d": {
       "directory": "morph-ppt-3d",
       "entry": "SKILL.md",
-      "contentHash": "951080c11ac0995fc3e4fb9a09a67fa6c8f02f353bf735e7ec6f6c02cab9fdad",
-      "resourceHash": "0909b9d418d75c7fd2e94f6999d2559ce251f81232f2dc4da08424271384018f",
       "inherits": [
         "morph-ppt",
         "pptx"
-      ]
+      ],
+      "contentHash": "951080c11ac0995fc3e4fb9a09a67fa6c8f02f353bf735e7ec6f6c02cab9fdad",
+      "resourceHash": "0909b9d418d75c7fd2e94f6999d2559ce251f81232f2dc4da08424271384018f"
     }
   },
   "commandSchema": {
     "file": "1.0.144/command-schema.json",
-    "sha256": "b9a39101433feec76a2ba33ddd8ae5a9de4d516b1d865a16b6895f0695f71acd",
+    "sha256": "5dc447597dfc53ff15026911008c3b23c312754c13404e5a4c3421bd473cb9de",
     "unclassifiedCommands": [],
     "staleClassifications": []
   },

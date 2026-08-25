@@ -2,7 +2,7 @@
   "version": "1.0.144",
   "schemaCrc": "b2b0b395",
   "generatedFrom": "reviewed-release-binary",
-  "rootHelpSha256": "cc31b4d365558a767eef9733714424b64598e007061f6f9238054a3af680799a",
+  "rootHelpSha256": "28165ddbd976e5f2aed3f8b1b7dfdb6c06c8340e52da56f9107a10f558087d00",
   "helpAllSha256": "cc3b037f27302e5360aac6013a16579b93676794213107c41b697d1740c13210",
   "helpAllEntries": 2466,
   "rootCommands": [
@@ -37,7 +37,7 @@
   ],
   "commands": {
     "add": {
-      "helpSha256": "7ae3d08b9ad8270531dacd2e2cab9e0c89d4505c5706e697c16d8f253974079a",
+      "helpSha256": "f363fcbc2397b5036f6b5ed7e6f5c6c01019349d609c3c8c4c3eef3d55ee15a1",
       "flags": [
         "--after",
         "--before",
@@ -51,7 +51,7 @@
       ]
     },
     "add-part": {
-      "helpSha256": "816c0d5cdcb889f7e24b024ce43fa5293ec4b7dc6e95cc1e57200a12581f2747",
+      "helpSha256": "c50ed9e84aba049b06d0ee77d51da747e890213e51e571529e4181067cc8f3a7",
       "flags": [
         "--help",
         "--json",
@@ -59,7 +59,7 @@
       ]
     },
     "batch": {
-      "helpSha256": "46b9530bf203ea3e9e24ddbcbb20c8e9b8eb6c133b4114c6778d46cea4d9eddb",
+      "helpSha256": "2b4c50199f27bc63d43aee88fb4b008da7740545bcb51880fd52f3a4ed584a7e",
       "flags": [
         "--best-effort",
         "--commands",
@@ -72,14 +72,14 @@
       ]
     },
     "close": {
-      "helpSha256": "9bbde75519f2d0b1e13a16c326e1e306740c5e2d97cf2b63cb63c9698a0b0e91",
+      "helpSha256": "21f48a9ac82df5fc9b5abe60880a96b7ad640a636d482bb448e3b1d41e434065",
       "flags": [
         "--help",
         "--json"
       ]
     },
     "create": {
-      "helpSha256": "3f9a3b97f55c5e1938700be139492319c30d93e720736de6fedcc589e3c83359",
+      "helpSha256": "ffe0c3a802bb452bc544ae979b6e138c689fe3ab93a545a7741fbc048f8f1c7c",
       "flags": [
         "--force",
         "--help",
@@ -90,7 +90,7 @@
       ]
     },
     "dump": {
-      "helpSha256": "583a182397355efcab6830fcf0c3454f58174852d2e0ca982fa81ea41a35affe",
+      "helpSha256": "7cb4dd8447fb36fe7834ee9b2e28333e3b64d092de2b864453a910c7472d7b94",
       "flags": [
         "--format",
         "--help",
@@ -99,7 +99,7 @@
       ]
     },
     "get": {
-      "helpSha256": "8bd6c224fae884abe587d1a39b3d9f744af92317899c9ef6762f231edfa353ad",
+      "helpSha256": "15f76fb865941dd2c3d1f46c4dec74431030d812f1ca6344138da9cf354d467a",
       "flags": [
         "--depth",
         "--help",
@@ -108,7 +108,7 @@
       ]
     },
     "help": {
-      "helpSha256": "cc31b4d365558a767eef9733714424b64598e007061f6f9238054a3af680799a",
+      "helpSha256": "28165ddbd976e5f2aed3f8b1b7dfdb6c06c8340e52da56f9107a10f558087d00",
       "flags": [
         "--commands",
         "--force",
@@ -121,7 +121,7 @@
       ]
     },
     "import": {
-      "helpSha256": "cb27fd1318e3d32c7f85d496e486c6bbef83bd597390f05f50a3f4c143a4cbb3",
+      "helpSha256": "49b51cae6511abd5e1877549b2465102d5359a581cffd4a0f37f4c6bffa4ea59",
       "flags": [
         "--file",
         "--format",
@@ -141,7 +141,7 @@
       "flags": []
     },
     "merge": {
-      "helpSha256": "44cf023bd126f1aa6b9aff7ae746207e322993b9dc515eee842f56bd491ef578",
+      "helpSha256": "b2dd660b1472437d1f426a413b1a05d984a296f1dd70ffb099a35b0139a1bd81",
       "flags": [
         "--data",
         "--force",
@@ -150,7 +150,7 @@
       ]
     },
     "move": {
-      "helpSha256": "77af0332944224edbba6128c29f8f64493be48bfe36941c5b554c38dc2572cd2",
+      "helpSha256": "118ed40fc5c3f5cf08e269de3ebd813c72b81664d15dd268d7c8b3e42bc94ba9",
       "flags": [
         "--after",
         "--before",
@@ -162,21 +162,21 @@
       ]
     },
     "open": {
-      "helpSha256": "4577fe2f61bfd0c6310ef6e8ff6822d41b0924c3d0b6c0afa89360bf9c700e76",
+      "helpSha256": "70dfb3c3242d94bada3a2bcff3715d22a48e6a675f8c2411c7ecd9f171420604",
       "flags": [
         "--help",
         "--json"
       ]
     },
     "plugins": {
-      "helpSha256": "a636a3d6641aa3de423d2d216edc086564b39f80003f807a741f9c55e52e6714",
+      "helpSha256": "87f2808f6bed2e73a89abb69720a683d51fa028cdad419c65d1188a81a821e45",
       "flags": [
         "--help",
         "--prop"
       ]
     },
     "query": {
-      "helpSha256": "bdce1881517d46b8a4216f10bfdc14ac1f8a862ad1d7c93848943242fa32faf3",
+      "helpSha256": "40b63ea37c825dd7fa2ecc0d515f29e477395b3c899b462b68de00858f9bc55c",
       "flags": [
         "--compact",
         "--fields",
@@ -187,7 +187,7 @@
       ]
     },
     "raw": {
-      "helpSha256": "4a6843ed45f863e76f61e4f764a268b3228135cf0031c76b366b69ab6298a700",
+      "helpSha256": "a19175047531d7a405f2b9fb2e8ff8f0e515eaa03964f93f12655d0fa432b3ed",
       "flags": [
         "--cols",
         "--end",
@@ -197,7 +197,7 @@
       ]
     },
     "raw-set": {
-      "helpSha256": "a6212f61db51ece6abee3e2aafb930c19d00821327d70a852f17d95dff654000",
+      "helpSha256": "6a3cabcd6431bc6d8ba4d9fa7582b23516f8f7cadc21666fc08033500b17723e",
       "flags": [
         "--action",
         "--help",
@@ -207,14 +207,14 @@
       ]
     },
     "refresh": {
-      "helpSha256": "43dc1b38e1e798be47a74420d562cf3f5d1a1b8c1b4a5ca8ef36e22637b518fb",
+      "helpSha256": "afb4c6935334f3f80956e95eac757e2190e136c156fb0ad5960eddeba3ad5ed0",
       "flags": [
         "--help",
         "--json"
       ]
     },
     "remove": {
-      "helpSha256": "d2781da27de5ca6e98084976d184a45d49ced2f3deea5b9a40c574a043ef73b3",
+      "helpSha256": "fa402734c59870a1608b3af475eeaf06fa8882ad5404d10bf9e7d6637bc39f69",
       "flags": [
         "--help",
         "--json",
@@ -223,14 +223,14 @@
       ]
     },
     "save": {
-      "helpSha256": "1ba2b081bd92b47fbc5d3a59718512626cb0b9beecae944da122979a74c0d98a",
+      "helpSha256": "153a225e42a89ebb26411033f27ea70b1712b492269278100ffc41ea4c504a1d",
       "flags": [
         "--help",
         "--json"
       ]
     },
     "set": {
-      "helpSha256": "b629def6ecc1fbe136fff42112d1418ec149e4d83abb3e2738071c0121d081c0",
+      "helpSha256": "e18bb599c544b1f50dfe9987e4071fd3166da1a3e7eea91b481e868f394d5509",
       "flags": [
         "--find",
         "--force",
@@ -245,27 +245,27 @@
       "flags": []
     },
     "swap": {
-      "helpSha256": "8c717365e145084f20c1b1439f374ea8938efae9f3b72ec63f54e2d4bf45761d",
+      "helpSha256": "aaee5b6fe7c7e8b81550694972687850fa03bb424fcf47235320436bf02f6334",
       "flags": [
         "--help",
         "--json"
       ]
     },
     "unwatch": {
-      "helpSha256": "2ee49a736fc7bb1148a872ccdab7eb36e8da5fd23fe8a39e240dce00da50f511",
+      "helpSha256": "8dcc7c455e7759ad13a09fe39c886054c5e9578b3ea1b1f137ced6cee9202767",
       "flags": [
         "--help"
       ]
     },
     "validate": {
-      "helpSha256": "b3ac0ed1fcc4d8f6a21a62da545ed15aff306044ba7a23088130306d8a21fadb",
+      "helpSha256": "1e08b2fd019d5e41a51cdeec1e8bbe30edc4f734233f6a44e2976a801f753568",
       "flags": [
         "--help",
         "--json"
       ]
     },
     "view": {
-      "helpSha256": "0752d48300602485b1acc2fc416b74703f1879712ac54694297efacf73b81f7c",
+      "helpSha256": "7eb16c43c0a7a05ed8cfd9ac1e557dd261c39a78844397eb91b6d0789896e6ca",
       "flags": [
         "--browser",
         "--cols",
@@ -287,7 +287,7 @@
       ]
     },
     "watch": {
-      "helpSha256": "562eaf80398aefee69c60527f0240836f5463986cb556292a9b73ce702211b4e",
+      "helpSha256": "2e27544ff2a52945a4ab6fc322f8036356b3ff28b9bea9b1adcd1e973ce1f587",
       "flags": [
         "--all",
         "--help",

@@ -27,7 +27,23 @@
 ```json
 {
   "added": [],
-  "removed": []
+  "removed": [],
+  "changed": [
+    {
+      "key": "win32-x64",
+      "before": {
+        "name": "officecli-win-x64.exe",
+        "url": "https://github.com/iOfficeAI/OfficeCLI/releases/download/v1.0.144/officecli-win-x64.exe",
+        "sha256": "e780cc6a5385f84b4d54d71b0c179904ed534125ec33fe39b1a8711fa80e387e",
+        "schemaCrc": "22d3fc61"
+      },
+      "after": {
+        "name": "officecli-win-x64.exe",
+        "url": "https://github.com/iOfficeAI/OfficeCLI/releases/download/v1.0.144/officecli-win-x64.exe",
+        "sha256": "e780cc6a5385f84b4d54d71b0c179904ed534125ec33fe39b1a8711fa80e387e"
+      }
+    }
+  ]
 }
 ```
 
@@ -35,6 +51,18 @@
 
 ```json
 []
+```
+
+## 需要复验的兼容 Recipe
+
+```json
+{
+  "importViaAtomicBatch": {
+    "enabled": true,
+    "maxSourceBytes": 5000000,
+    "reason": "The reviewed OfficeCLI release reports successful CSV/TSV import without persisting worksheet cells; use one atomic native batch until a reviewed upgrade passes the real content assertion."
+  }
+}
 ```
 
 > 此报告只用于人工审查。运行时自更新保持禁用，draft PR 不会自动合并。
