@@ -47,6 +47,20 @@ nodes:
     expect(doc.errors.some((e) => e.message.includes('Unknown field'))).toBe(true);
   });
 
+  it('refuses to save unknown fields even when the source file is still v1', () => {
+    mkdirSync(taskDir(root, 'demo'), { recursive: true });
+    writeFileSync(taskYamlPath(root, 'demo'), V1);
+    const before = loadTaskDocument(root, 'demo')!;
+    expect(() =>
+      saveTaskDocument(
+        root,
+        `${V1}mystery: true\n`,
+        before.etag,
+      ),
+    ).toThrow(/Unknown field/);
+    expect(readFileSync(taskYamlPath(root, 'demo'), 'utf-8')).toBe(V1);
+  });
+
   it('first v2 save backups the original yaml and writes schema_version', () => {
     mkdirSync(taskDir(root, 'demo'), { recursive: true });
     writeFileSync(taskYamlPath(root, 'demo'), V1);

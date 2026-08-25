@@ -4,6 +4,7 @@
  * Layout under the workspace root (architecture §6, LOCKED #6):
  *   {workspaceRoot}/tasks/<slug>/task.yaml                    — the editable spec
  *   {workspaceRoot}/tasks/<slug>/runs/<runId>/run-log.jsonl   — append-only run log
+ *   {workspaceRoot}/tasks/<slug>/runs/<runId>/run-state.json  — atomic derived checkpoint
  *   {workspaceRoot}/tasks/<slug>/runs/<runId>/nodes/<id>.json — per-node output
  *
  * The run log is the durability substrate: replaying it re-derives scheduling
@@ -22,7 +23,17 @@ const TASKS_DIR = 'tasks';
 const TASK_FILE = 'task.yaml';
 const RUNS_DIR = 'runs';
 const RUN_LOG = 'run-log.jsonl';
+const RUN_STATE = 'run-state.json';
 const NODES_DIR = 'nodes';
+
+export interface RunStateCheckpoint {
+  seq: number;
+  revision: number;
+  tokensUsed: number;
+  tokenBudget?: number;
+  seenDecisionIds: string[];
+  invalidPatchCount: number;
+}
 
 // ---------------------------------------------------------------------------
 // Run-state types
@@ -76,7 +87,7 @@ export function isTerminalRunStatus(status: RunStatus): boolean {
 }
 
 /** Append-only run-log event. `t` is an ISO-8601 timestamp. */
-export type RunLogEntry =
+type RunLogPayload =
   | { t: string; kind: 'run-started'; taskId: string; runId: string; orchestratorSessionId?: string }
   | { t: string; kind: 'node-scheduled'; nodeId: string }
   | { t: string; kind: 'node-spawned'; nodeId: string; sessionId: string }
@@ -101,6 +112,8 @@ export type RunLogEntry =
     }
   | { t: string; kind: 'verdict'; result: 'pass' | 'fail' | 'unparsed'; reason?: string; nodes?: string[] }
   | { t: string; kind: 'budget-breach'; metric: 'tokens' | 'parallel' | 'iterations'; value: number; limit: number };
+
+export type RunLogEntry = RunLogPayload & { seq?: number; revision?: number };
 
 // ---------------------------------------------------------------------------
 // Path helpers
@@ -186,6 +199,31 @@ export function appendRunLog(workspaceRoot: string, slug: string, runId: string,
   const dir = runDir(workspaceRoot, slug, runId);
   ensureDir(dir);
   appendFileSync(join(dir, RUN_LOG), JSON.stringify(entry) + '\n', 'utf-8');
+}
+
+export function writeRunState(
+  workspaceRoot: string,
+  slug: string,
+  runId: string,
+  state: RunStateCheckpoint,
+): void {
+  const dir = runDir(workspaceRoot, slug, runId);
+  ensureDir(dir);
+  atomicWriteFileSync(join(dir, RUN_STATE), JSON.stringify(state));
+}
+
+export function readRunState(
+  workspaceRoot: string,
+  slug: string,
+  runId: string,
+): RunStateCheckpoint | null {
+  const path = join(runDir(workspaceRoot, slug, runId), RUN_STATE);
+  if (!existsSync(path)) return null;
+  try {
+    return JSON.parse(readFileSync(path, 'utf-8')) as RunStateCheckpoint;
+  } catch {
+    return null;
+  }
 }
 
 /** Read + parse the run log in append order. Skips malformed lines. */

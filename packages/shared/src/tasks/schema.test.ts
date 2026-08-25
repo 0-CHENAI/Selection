@@ -17,6 +17,8 @@ import {
   writeNodeOutput,
   writeNodeAttempt,
   readNodeOutput,
+  writeRunState,
+  readRunState,
   listTaskSlugs,
   type RunLogEntry,
 } from './storage.ts';
@@ -338,6 +340,23 @@ describe('storage', () => {
     writeNodeAttempt(root, 'demo', 'r1', 'fan#0', 1, { text: 'first' });
     writeNodeAttempt(root, 'demo', 'r1', 'fan#0', 2, { text: 'second' });
     expect(readNodeOutput(root, 'demo', 'r1', 'fan#0')).toEqual({ text: 'second' });
+  });
+
+  it('writes and reads a run-state checkpoint', () => {
+    writeRunState(root, 'demo', 'r1', {
+      seq: 3,
+      revision: 1,
+      tokensUsed: 12,
+      seenDecisionIds: ['d1'],
+      invalidPatchCount: 0,
+    });
+    expect(readRunState(root, 'demo', 'r1')).toEqual({
+      seq: 3,
+      revision: 1,
+      tokensUsed: 12,
+      seenDecisionIds: ['d1'],
+      invalidPatchCount: 0,
+    });
   });
 });
 
