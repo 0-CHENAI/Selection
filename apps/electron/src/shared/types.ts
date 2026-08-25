@@ -258,6 +258,7 @@ export interface ElectronAPI {
   getTask(workspaceId: string, slug: string, runId?: string): Promise<TaskGetResult>
   listTasks(workspaceId: string): Promise<string[]>
   listTaskRuns(workspaceId: string, slug: string): Promise<string[]>
+  applyTaskRunRevision(workspaceId: string, req: import('@craft-agent/shared/protocol').TaskApplyRunRevisionRequest): Promise<import('@craft-agent/shared/protocol').TaskApplyRunRevisionResult>
   getTaskResults(workspaceId: string, slug: string, runId?: string): Promise<TaskResultsDto>
   onTaskRunChanged(callback: (workspaceId: string, snapshot: TaskRunSnapshotDto) => void): () => void
 

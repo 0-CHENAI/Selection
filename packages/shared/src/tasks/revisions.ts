@@ -27,6 +27,23 @@ export function writeSpecRevision(
   if (revision === 0) writeRunSpecSnapshot(workspaceRoot, slug, runId, spec);
 }
 
+export function readLatestSpecRevision(
+  workspaceRoot: string,
+  slug: string,
+  runId: string,
+): { revision: number; spec: TaskSpec } | null {
+  let latest: { revision: number; spec: TaskSpec } | null = null;
+  for (let i = 0; i < 8; i++) {
+    const path = specRevisionPath(workspaceRoot, slug, runId, i);
+    if (!existsSync(path)) continue;
+    const spec = readSpecRevision(workspaceRoot, slug, runId, i);
+    if (spec) latest = { revision: i, spec };
+  }
+  if (latest) return latest;
+  const snap = readRunSpecSnapshot(workspaceRoot, slug, runId);
+  return snap ? { revision: 0, spec: snap } : null;
+}
+
 export function readSpecRevision(
   workspaceRoot: string,
   slug: string,

@@ -366,6 +366,8 @@ export interface SessionToolContext {
   /** Parent-session structured verdict. Injected by SessionManager. */
   submitTaskVerdict?(input: SubmitTaskVerdictInput): Promise<{ status: string }>;
 
+  submitOrchestrationPatch?(input: OrchestrationPatchInput): Promise<{ status: string; revision?: number }>;
+
   // ============================================================
   // Inter-Session Messaging
   // ============================================================
@@ -535,6 +537,17 @@ export interface SubmitTaskVerdictInput {
   reason?: string;
   nodes?: string[];
   runId?: string;
+}
+
+export interface OrchestrationPatchInput {
+  runId: string;
+  decisionId: string;
+  baseRevision: number;
+  rationale: string;
+  add?: unknown[];
+  update?: unknown[];
+  cancel?: string[];
+  action?: 'continue' | 'pause' | 'complete' | 'fail';
 }
 
 export interface GetTaskResultsInput {

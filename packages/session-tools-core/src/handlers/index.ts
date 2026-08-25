@@ -83,6 +83,7 @@ export type { GetTaskResultsArgs } from './get-task-results.ts';
 export { handleSubmitTaskOutput } from './submit-task-output.ts';
 export type { SubmitTaskOutputArgs } from './submit-task-output.ts';
 export { handleSubmitTaskVerdict } from './submit-task-verdict.ts';
+export { handleSubmitOrchestrationPatch } from './submit-orchestration-patch.ts';
 export type { SubmitTaskVerdictArgs } from './submit-task-verdict.ts';
 export { handleArchiveSession } from './archive-session.ts';
 export type { ArchiveSessionArgs } from './archive-session.ts';

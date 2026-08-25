@@ -346,6 +346,22 @@ export interface TaskRespondApprovalRequest {
   approved: boolean
 }
 
+export interface TaskApplyRunRevisionRequest {
+  slug: string
+  runId: string
+  expectedEtag: string
+  confirm?: boolean
+}
+
+export interface TaskApplyRunRevisionResult {
+  diff: { added: string[]; removed: string[]; changed: string[] }
+  applied?: boolean
+  validation: TaskValidationResultDto
+  etag?: string
+  yaml?: string
+  conflict?: { code: 'etag-conflict'; expected: string; actual: string }
+}
+
 export interface TaskUpdateRunLimitsRequest {
   slug: string
   runId: string

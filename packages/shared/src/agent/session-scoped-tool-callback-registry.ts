@@ -100,6 +100,9 @@ export interface SessionScopedToolCallbacks {
   submitTaskVerdictFn?: (
     input: import('@craft-agent/session-tools-core').SubmitTaskVerdictInput
   ) => Promise<{ status: string }>;
+  submitOrchestrationPatchFn?: (
+    input: import('@craft-agent/session-tools-core').OrchestrationPatchInput
+  ) => Promise<{ status: string; revision?: number }>;
 }
 
 // Registry of callbacks keyed by sessionId

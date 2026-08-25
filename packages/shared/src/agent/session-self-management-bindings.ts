@@ -173,6 +173,14 @@ export function attachSessionSelfManagementBindings(
     enumerable: true,
   });
 
+  Object.defineProperty(context, 'submitOrchestrationPatch', {
+    get() {
+      return getSessionScopedToolCallbacks(sessionId)?.submitOrchestrationPatchFn;
+    },
+    configurable: true,
+    enumerable: true,
+  });
+
   // getSessionInfo needs wrapping to default sid → sessionId
   Object.defineProperty(context, 'getSessionInfo', {
     get() {
