@@ -5,19 +5,29 @@
  * until required files (like guide.md) have been read.
  */
 import { describe, it, expect, beforeEach, mock } from 'bun:test';
-import { existsSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { resolve, join } from 'node:path';
 import { PrerequisiteManager } from '../prerequisite-manager.ts';
 
-// Mock existsSync to control guide.md existence
-const originalExistsSync = existsSync;
 let mockExistsPaths: Set<string> = new Set();
+let mockGuideContents: Map<string, string> = new Map();
+let mockGuideReadFailures: Set<string> = new Set();
 
 mock.module('node:fs', () => ({
   existsSync: (path: string) => mockExistsPaths.has(path),
-  // Re-export anything else the module needs
-  readFileSync: originalExistsSync,
+  readFileSync: (path: string) => {
+    if (mockGuideReadFailures.has(path)) throw new Error('permission denied');
+    if (!mockExistsPaths.has(path)) {
+      throw Object.assign(new Error(`ENOENT: no such file or directory, open '${path}'`), {
+        code: 'ENOENT',
+      });
+    }
+    return mockGuideContents.get(path) ?? '# Source\nUse the documented endpoint.';
+  },
+}));
+
+mock.module('../../../config/storage.ts', () => ({
+  getBrowserToolEnabled: () => true,
 }));
 
 const WORKSPACE_ROOT = '/test/workspace';
@@ -37,6 +47,8 @@ describe('PrerequisiteManager', () => {
   beforeEach(() => {
     debugMessages = [];
     mockExistsPaths = new Set();
+    mockGuideContents = new Map();
+    mockGuideReadFailures = new Set();
     manager = new PrerequisiteManager({
       workspaceRootPath: WORKSPACE_ROOT,
       onDebug: (msg) => debugMessages.push(msg),
@@ -52,14 +64,14 @@ describe('PrerequisiteManager', () => {
       mockExistsPaths.add(guidePath('linear'));
       const result = manager.checkPrerequisites('mcp__linear__createIssue');
       expect(result.allowed).toBe(false);
-      expect(result.blockReason).toContain('guide.md');
+      expect(result.sourceGuide?.filePath).toContain('guide.md');
     });
 
     it('matches API source tools (api_{slug})', () => {
       mockExistsPaths.add(guidePath('github'));
       const result = manager.checkPrerequisites('api_github');
       expect(result.allowed).toBe(false);
-      expect(result.blockReason).toContain('guide.md');
+      expect(result.sourceGuide?.filePath).toContain('guide.md');
     });
 
     it('does not match built-in tools', () => {
@@ -98,7 +110,7 @@ describe('PrerequisiteManager', () => {
       const docsPath = browserDocPath();
       mockExistsPaths.add(docsPath);
 
-      const result = manager.checkPrerequisites('browser_snapshot');
+      const result = manager.checkPrerequisites('browser_tool');
       expect(result.allowed).toBe(false);
       expect(result.blockReason).toContain(docsPath);
     });
@@ -123,7 +135,7 @@ describe('PrerequisiteManager', () => {
       mockExistsPaths.add(expected);
       const result = manager.checkPrerequisites('mcp__linear__createIssue');
       expect(result.allowed).toBe(false);
-      expect(result.blockReason).toContain(expected);
+      expect(result.sourceGuide?.filePath).toBe(expected);
     });
 
     it('resolves guide.md path from API tool name', () => {
@@ -131,7 +143,7 @@ describe('PrerequisiteManager', () => {
       mockExistsPaths.add(expected);
       const result = manager.checkPrerequisites('api_slack');
       expect(result.allowed).toBe(false);
-      expect(result.blockReason).toContain(expected);
+      expect(result.sourceGuide?.filePath).toBe(expected);
     });
   });
 
@@ -147,8 +159,11 @@ describe('PrerequisiteManager', () => {
       // Before reading - blocked
       expect(manager.checkPrerequisites('mcp__linear__createIssue').allowed).toBe(false);
 
-      // Track the read
+      // Starting a Read does not prove the guide reached model history.
       manager.trackReadTool({ file_path: guideFile });
+      expect(manager.checkPrerequisites('mcp__linear__createIssue').allowed).toBe(false);
+
+      manager.trackSuccessfulSourceGuideRead({ file_path: guideFile });
 
       // After reading - allowed
       expect(manager.checkPrerequisites('mcp__linear__createIssue').allowed).toBe(true);
@@ -158,7 +173,7 @@ describe('PrerequisiteManager', () => {
       const guideFile = guidePath('github');
       mockExistsPaths.add(guideFile);
 
-      manager.trackReadTool({ path: guideFile });
+      manager.trackSuccessfulSourceGuideRead({ path: guideFile });
       expect(manager.checkPrerequisites('api_github').allowed).toBe(true);
     });
 
@@ -173,7 +188,7 @@ describe('PrerequisiteManager', () => {
       mockExistsPaths.add(linearGuide);
       mockExistsPaths.add(slackGuide);
 
-      manager.trackReadTool({ file_path: linearGuide });
+      manager.trackSuccessfulSourceGuideRead({ file_path: linearGuide });
 
       expect(manager.checkPrerequisites('mcp__linear__createIssue').allowed).toBe(true);
       expect(manager.checkPrerequisites('mcp__slack__sendMessage').allowed).toBe(false);
@@ -189,7 +204,7 @@ describe('PrerequisiteManager', () => {
       const guideFile = guidePath('linear');
       mockExistsPaths.add(guideFile);
 
-      manager.trackReadTool({ file_path: guideFile });
+      manager.trackSuccessfulSourceGuideRead({ file_path: guideFile });
       expect(manager.checkPrerequisites('mcp__linear__createIssue').allowed).toBe(true);
 
       manager.resetReadState();
@@ -240,69 +255,129 @@ describe('PrerequisiteManager', () => {
   });
 
   // ============================================================
-  // Max Rejection (graceful fallback)
+  // Source-guide preparation never bypasses meaningful instructions.
   // ============================================================
 
-  describe('max rejection', () => {
-    it('blocks on first attempt, allows on second for same path', () => {
+  describe('source guide preparation', () => {
+    it('requires preparation on every attempt until the guide is delivered', () => {
       mockExistsPaths.add(guidePath('linear'));
 
-      // First attempt — blocked
       const first = manager.checkPrerequisites('mcp__linear__createIssue');
       expect(first.allowed).toBe(false);
+      expect(first.sourceGuide?.sourceSlug).toBe('linear');
 
-      // Second attempt (same source, guide still not read) — allowed through
       const second = manager.checkPrerequisites('mcp__linear__createIssue');
-      expect(second.allowed).toBe(true);
+      expect(second.allowed).toBe(false);
+      expect(second.sourceGuide?.sourceSlug).toBe('linear');
     });
 
-    it('tracks rejection counts per source independently', () => {
+    it('tracks source-guide preparation independently', () => {
       mockExistsPaths.add(guidePath('linear'));
       mockExistsPaths.add(guidePath('slack'));
 
-      // Block linear once
-      expect(manager.checkPrerequisites('mcp__linear__createIssue').allowed).toBe(false);
+      const linear = manager.checkPrerequisites('mcp__linear__createIssue');
+      expect(linear.allowed).toBe(false);
 
-      // Slack should still block on first attempt
       expect(manager.checkPrerequisites('mcp__slack__sendMessage').allowed).toBe(false);
 
-      // Linear second attempt — allowed
+      manager.markSourceGuidePrepared(linear.sourceGuide!);
       expect(manager.checkPrerequisites('mcp__linear__createIssue').allowed).toBe(true);
+      expect(manager.checkPrerequisites('mcp__slack__sendMessage').allowed).toBe(false);
     });
 
-    it('resets rejection counts on resetReadState', () => {
+    it('re-prepares guides after context reset', () => {
       mockExistsPaths.add(guidePath('linear'));
 
-      // Exhaust rejections
-      manager.checkPrerequisites('mcp__linear__createIssue'); // blocked
-      manager.checkPrerequisites('mcp__linear__createIssue'); // allowed (max reached)
+      const pending = manager.checkPrerequisites('mcp__linear__createIssue');
+      manager.markSourceGuidePrepared(pending.sourceGuide!);
+      expect(manager.checkPrerequisites('mcp__linear__createIssue').allowed).toBe(true);
 
-      // Reset
       manager.resetReadState();
-
-      // Should block again (rejection count reset)
       expect(manager.checkPrerequisites('mcp__linear__createIssue').allowed).toBe(false);
     });
 
-    it('allows different tools from same source after one rejection', () => {
+    it('reuses a prepared guide across different tools from the same source', () => {
       mockExistsPaths.add(guidePath('linear'));
 
-      // First tool blocked
-      expect(manager.checkPrerequisites('mcp__linear__createIssue').allowed).toBe(false);
-
-      // Different tool from same source — same guide path, already rejected once
+      const first = manager.checkPrerequisites('mcp__linear__createIssue');
+      manager.markSourceGuidePrepared(first.sourceGuide!);
       expect(manager.checkPrerequisites('mcp__linear__listIssues').allowed).toBe(true);
+    });
+
+    it('skips automatically generated placeholder guides', () => {
+      const filePath = guidePath('anysearch');
+      mockExistsPaths.add(filePath);
+      mockGuideContents.set(filePath,
+        '# anysearch\n\n## Guidelines\n\n(Add usage guidelines here)\n\n## Context\n\n(Add context about this source)',
+      );
+
+      expect(manager.checkPrerequisites('mcp__anysearch__search').allowed).toBe(true);
+      expect(manager.checkPrerequisites('api_anysearch').allowed).toBe(true);
+    });
+
+    it('does not execute sibling calls created before their guide entered context', () => {
+      mockExistsPaths.add(guidePath('linear'));
+      const first = manager.checkPrerequisites('mcp__linear__createIssue', 7);
+      manager.markSourceGuidePrepared(first.sourceGuide!, 7);
+
+      const sibling = manager.checkPrerequisites('mcp__linear__listIssues', 7);
+      expect(sibling.allowed).toBe(false);
+      expect(sibling.sourceGuide?.alreadyPreparedInGeneration).toBe(true);
+      expect(manager.checkPrerequisites('mcp__linear__listIssues', 8).allowed).toBe(true);
+    });
+
+    it('invalidates a prepared guide when its contents change', () => {
+      const filePath = guidePath('linear');
+      mockExistsPaths.add(filePath);
+      mockGuideContents.set(filePath, '# Source\nUse v1.');
+      const first = manager.checkPrerequisites('api_linear');
+      manager.markSourceGuidePrepared(first.sourceGuide!);
+
+      mockGuideContents.set(filePath, '# Source\nUse v2.');
+      const updated = manager.checkPrerequisites('api_linear');
+      expect(updated.allowed).toBe(false);
+      expect(updated.sourceGuide?.content).toContain('Use v2.');
+      expect(updated.sourceGuide?.version).not.toBe(first.sourceGuide?.version);
+    });
+
+    it('allows a guide after its instructions are removed', () => {
+      const filePath = guidePath('linear');
+      mockExistsPaths.add(filePath);
+      expect(manager.checkPrerequisites('api_linear').allowed).toBe(false);
+
+      mockGuideContents.set(filePath, '# Source\n\n## Guidelines');
+      expect(manager.checkPrerequisites('api_linear').allowed).toBe(true);
+    });
+
+    it('fails closed when an existing source guide cannot be read', () => {
+      const filePath = guidePath('linear');
+      mockExistsPaths.add(filePath);
+      mockGuideReadFailures.add(filePath);
+
+      const result = manager.checkPrerequisites('api_linear');
+      expect(result.allowed).toBe(false);
+      expect(result.sourceGuide).toBeUndefined();
+      expect(result.blockReason).toContain('permission denied');
+    });
+
+    it('fails closed when guide access is denied even if an existence probe cannot see it', () => {
+      const filePath = guidePath('linear');
+      mockGuideReadFailures.add(filePath);
+
+      const result = manager.checkPrerequisites('api_linear');
+      expect(result.allowed).toBe(false);
+      expect(result.blockReason).toContain('permission denied');
     });
 
     it('does not bypass strict browser prerequisite after repeated rejections', () => {
       const docsPath = browserDocPath();
       mockExistsPaths.add(docsPath);
 
-      expect(manager.checkPrerequisites('browser_open').allowed).toBe(false);
-      expect(manager.checkPrerequisites('browser_open').allowed).toBe(false);
+      expect(manager.checkPrerequisites('browser_tool').allowed).toBe(false);
+      expect(manager.checkPrerequisites('browser_tool').allowed).toBe(false);
 
       manager.trackReadTool({ file_path: docsPath });
-      expect(manager.checkPrerequisites('browser_open').allowed).toBe(true);
+      expect(manager.checkPrerequisites('browser_tool').allowed).toBe(true);
     });
   });
 
@@ -381,7 +456,7 @@ describe('PrerequisiteManager', () => {
     it('logs when a tool is blocked', () => {
       mockExistsPaths.add(guidePath('linear'));
       manager.checkPrerequisites('mcp__linear__createIssue');
-      expect(debugMessages.some((m) => m.includes('Prerequisite blocked'))).toBe(true);
+      expect(debugMessages.some((m) => m.includes('preparation required'))).toBe(true);
     });
 
     it('logs when a read is tracked', () => {

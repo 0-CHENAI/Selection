@@ -12,10 +12,10 @@
  * - Determine authentication requirements for sources
  */
 
-import { join } from 'node:path';
 import { formatSourceRef } from '../../display-titles.ts';
 import type { LoadedSource } from '../../sources/types.ts';
 import { sourceNeedsAuthentication } from '../../sources/credential-manager.ts';
+import { hasMeaningfulSourceGuide } from '../../sources/guide-content.ts';
 import type { SourceManagerConfig } from './types.ts';
 
 /** Slugs exempt from guide.md prerequisite (internal sources) */
@@ -216,12 +216,12 @@ export class SourceManager {
       parts.push(`Inactive: ${inactiveList.join(', ')}`);
     }
 
-    // Persistent reminder: if any active source has a guide, remind the LLM every message
+    // Only real instructions matter; empty editable guide templates are inert.
     const activeSourcesWithGuides = activeSources.filter(
-      (s) => s.guide?.raw && !GUIDE_EXEMPT_SLUGS.has(s.config.slug)
+      (s) => hasMeaningfulSourceGuide(s.guide?.raw) && !GUIDE_EXEMPT_SLUGS.has(s.config.slug)
     );
     if (activeSourcesWithGuides.length > 0) {
-      parts.push('Read each source\'s guide.md before first tool use — calls are blocked until guide is read.');
+      parts.push('Source usage instructions are prepared automatically when a source tool needs them.');
     }
 
     // Source descriptions (shown once per session when first introduced)
@@ -235,15 +235,13 @@ export class SourceManager {
       for (const s of unseenSources) {
         const tagline = s.config.tagline || s.config.provider;
         parts.push(`- ${formatSourceRef(s)}: ${tagline}`);
-        // Add guide path for sources that have guides (excluding internal sources)
-        if (s.guide?.raw && !GUIDE_EXEMPT_SLUGS.has(s.config.slug)) {
-          parts.push(`  Guide: ${join(s.folderPath, 'guide.md')}`);
+        if (hasMeaningfulSourceGuide(s.guide?.raw) && !GUIDE_EXEMPT_SLUGS.has(s.config.slug)) {
           hasGuides = true;
         }
       }
       if (hasGuides) {
         parts.push('');
-        parts.push('IMPORTANT: You MUST read a source\'s guide with the Read tool BEFORE using any of its tools. Tool calls WILL BE REJECTED if the guide has not been read first.');
+        parts.push('Relevant source instructions are supplied automatically before the first actual tool call.');
       }
     }
 

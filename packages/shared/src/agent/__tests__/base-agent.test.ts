@@ -96,6 +96,32 @@ describe('BaseAgent', () => {
         createdAt: Date.now(),
       });
       expect(agent.getWorkspace().id).toBe('new-workspace');
+      expect(agent.getPromptBuilder().getWorkspaceRootPath()).toBe('/new/path');
+    });
+
+    it('does not carry active sources or session approvals into a different workspace', async () => {
+      await agent.setSourceServers(
+        { 'old-source': { type: 'http', url: 'http://test' } },
+        {},
+        ['old-source'],
+      );
+      agent.setAllSources([createMockSource({ slug: 'old-source' })]);
+      agent.getPermissionManager().whitelistCommand('dangerous-old-command');
+      agent.getPermissionManager().whitelistDomain('old-workspace.example');
+
+      agent.setWorkspace({
+        id: 'new-workspace',
+        name: 'New Workspace',
+        slug: 'path',
+        rootPath: '/new/path',
+        createdAt: Date.now(),
+      });
+
+      expect(agent.getActiveSourceSlugs()).toEqual([]);
+      expect(agent.getAllSources()).toEqual([]);
+      expect(agent.getPermissionManager().isCommandWhitelisted('dangerous-old-command')).toBe(false);
+      expect(agent.getPermissionManager().isDomainWhitelisted('old-workspace.example')).toBe(false);
+      expect(agent.getPermissionManager().getPermissionsContext().workspaceRootPath).toBe('/new/path');
     });
 
     it('should have session ID', () => {

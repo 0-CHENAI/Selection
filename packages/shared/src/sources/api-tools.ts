@@ -190,12 +190,10 @@ function buildUrl(
  * Build tool description from API config.
  *
  * The description is sent to the LLM with every request, so we keep it small
- * and point to `sources/{slug}/guide.md` for endpoint-specific detail. The
- * agent's PrerequisiteManager already blocks calls to this tool until the
- * guide has been Read in the current context window, so the guide always
- * lands in conversation history before the model can call anything — making
- * a duplicate copy here pure waste (and the cause of #683-style provider
- * rejections when guide.md is large).
+ * and rely on the agent's on-demand source-guide preparation for meaningful
+ * endpoint-specific detail. The guide enters model history only when this
+ * source is actually needed; copying it into every request caused #683-style
+ * provider rejections when guide.md was large.
  *
  * Exported only for unit testing; treat as internal.
  */
@@ -204,8 +202,8 @@ export function buildToolDescription(config: ApiConfig): string {
   let desc = `Make authenticated requests to the ${config.name} API (${config.baseUrl}).\n\n`;
   desc += `Authentication is handled automatically — pass path, method, and params.\n`;
   desc += `For non-JSON request bodies, use params: { _rawBody: "raw content", _contentType: "text/plain" }. The _rawBody value is sent as-is without JSON encoding.\n\n`;
-  desc += `**Before the first call, Read the source guide at sources/${config.name}/guide.md** — `;
-  desc += `it documents available endpoints, required params, and any quirks. The Read is required before the first call (enforced) and again after compaction.\n\n`;
+  desc += `Source-specific endpoint instructions are supplied automatically when needed; `;
+  desc += `do not read a source guide unless the user explicitly asks for it.\n\n`;
   desc += `**Binary responses** (PDFs, images, archives) are auto-saved to the session downloads folder; reference the returned path when telling the user about downloaded files.`;
 
   if (config.docsUrl) {

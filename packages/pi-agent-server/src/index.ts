@@ -89,6 +89,13 @@ import { createSelectionReadToolDefinition } from './tools/read/create-read-tool
 import { mergeSummarizedToolResult } from './tool-result-images.ts';
 import { describePromptImages } from '../../shared/src/utils/image-input.ts';
 import { isBundledOfficecliLoadSkillCommand } from '../../shared/src/utils/officecli.ts';
+import { getSourceSlugForTool } from '../../shared/src/sources/guide-content.ts';
+import {
+  formatSourceGuidePreparationResult,
+  getSourceGuidePreparationFailure,
+  SourceGuideEventGate,
+  type SourceGuidePreparation,
+} from './source-guide-protocol.ts';
 import {
   normalizeProxyToolExecutionEnd,
   proxyToolDetails,
@@ -165,7 +172,14 @@ type InboundMessage =
   | { type: 'prompt'; id: string; message: string; systemPrompt: string; images?: Array<{ type: 'image'; data: string; mimeType: string }> }
   | { type: 'register_tools'; tools: ProxyToolDef[] }
   | { type: 'tool_execute_response'; requestId: string; result: ProxyToolExecutionResult }
-  | { type: 'pre_tool_use_response'; requestId: string; action: 'allow' | 'block' | 'modify'; input?: Record<string, unknown>; reason?: string }
+  | {
+      type: 'pre_tool_use_response';
+      requestId: string;
+      action: 'allow' | 'block' | 'modify' | 'prepare_source_guide';
+      input?: Record<string, unknown>;
+      reason?: string;
+      sourceGuide?: SourceGuidePreparation;
+    }
   | { type: 'abort' }
   | { type: 'mini_completion'; id: string; prompt: string }
   | { type: 'llm_query'; id: string; request: LLMQueryRequest }
@@ -208,6 +222,19 @@ interface OutboundPreToolUseReq {
   toolName: string;
   toolCallId?: string;
   input: Record<string, unknown>;
+  assistantGeneration?: number;
+}
+interface OutboundSourceGuidePrepared {
+  type: 'source_guide_prepared';
+  toolCallId: string;
+  sourceSlug: string;
+  guidePath: string;
+  guideVersion: string;
+  assistantGeneration?: number;
+}
+interface OutboundSourceGuideFailed extends Omit<OutboundSourceGuidePrepared, 'type'> {
+  type: 'source_guide_failed';
+  reason: string;
 }
 interface OutboundToolExecReq { type: 'tool_execute_request'; requestId: string; toolName: string; args: Record<string, unknown> }
 interface OutboundSessionToolCompleted { type: 'session_tool_completed'; toolName: string; args: Record<string, unknown>; isError: boolean }
@@ -252,6 +279,8 @@ type OutboundMessage =
   | OutboundReady
   | OutboundEvent
   | OutboundPreToolUseReq
+  | OutboundSourceGuidePrepared
+  | OutboundSourceGuideFailed
   | OutboundToolExecReq
   | OutboundSessionToolCompleted
   | OutboundMiniResult
@@ -277,9 +306,17 @@ let initConfig: Extract<InboundMessage, { type: 'init' }> | null = null;
 
 // Mutable state
 let currentUserMessage = '';
+let currentAssistantGeneration = 0;
+const sourceGuideEventGate = new SourceGuideEventGate<OutboundAgentEvent>();
 
 // Pending promises for async handshakes
-const pendingPreToolUse = new Map<string, { resolve: (response: { action: string; input?: Record<string, unknown>; reason?: string }) => void }>();
+type PreToolUseResponse = {
+  action: 'allow' | 'block' | 'modify' | 'prepare_source_guide';
+  input?: Record<string, unknown>;
+  reason?: string;
+  sourceGuide?: SourceGuidePreparation;
+};
+const pendingPreToolUse = new Map<string, { resolve: (response: PreToolUseResponse) => void }>();
 const pendingToolExecutions = new Map<string, { resolve: (result: ProxyToolExecutionResult) => void }>();
 
 // Pending session MCP tool calls for completion detection
@@ -743,7 +780,10 @@ async function requestPreToolUseApproval(
   sdkToolName: string,
   input: Record<string, unknown>,
   toolCallId?: string,
-): Promise<Record<string, unknown>> {
+): Promise<
+  | { action: 'execute'; input: Record<string, unknown> }
+  | { action: 'prepare_source_guide'; preparation: SourceGuidePreparation }
+> {
   const requestId = `pi-ptu-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
   send({
@@ -751,18 +791,39 @@ async function requestPreToolUseApproval(
     requestId,
     toolName: sdkToolName,
     ...(toolCallId ? { toolCallId } : {}),
+    ...(currentAssistantGeneration ? { assistantGeneration: currentAssistantGeneration } : {}),
     input,
   });
 
-  const response = await new Promise<{ action: string; input?: Record<string, unknown>; reason?: string }>((resolve) => {
+  const response = await new Promise<PreToolUseResponse>((resolve) => {
     pendingPreToolUse.set(requestId, { resolve });
   });
+
+  if (response.action === 'prepare_source_guide') {
+    if (!response.sourceGuide || !toolCallId) {
+      if (toolCallId) {
+        const bufferedStart = sourceGuideEventGate.releaseStart(toolCallId);
+        if (bufferedStart) send({ type: 'event', event: bufferedStart });
+      }
+      throw new Error(`Source guide preparation for "${sdkToolName}" is incomplete; the tool was not executed.`);
+    }
+    sourceGuideEventGate.suppress(toolCallId, response.sourceGuide);
+    return { action: 'prepare_source_guide', preparation: response.sourceGuide };
+  }
+
+  if (toolCallId) {
+    const bufferedStart = sourceGuideEventGate.releaseStart(toolCallId);
+    if (bufferedStart) send({ type: 'event', event: bufferedStart });
+  }
 
   if (response.action === 'block') {
     throw new Error(response.reason || `Tool "${sdkToolName}" is not allowed`);
   }
 
-  return response.action === 'modify' && response.input ? response.input : input;
+  return {
+    action: 'execute',
+    input: response.action === 'modify' && response.input ? response.input : input,
+  };
 }
 
 function wrapToolsWithHooks(
@@ -813,7 +874,14 @@ function wrapSingleTool(
     }
 
     // Send to main process for permission checking + transforms
-    inputObj = await requestPreToolUseApproval(sdkToolName, inputObj, toolCallId);
+    const approval = await requestPreToolUseApproval(sdkToolName, inputObj, toolCallId);
+    if (approval.action === 'prepare_source_guide') {
+      return {
+        content: [{ type: 'text', text: formatSourceGuidePreparationResult(approval.preparation) }],
+        details: { isError: false },
+      };
+    }
+    inputObj = approval.input;
 
     // Metadata is for Craft UI only. Keep a final defensive strip here so the
     // upstream Pi tool implementation always receives clean executable args,
@@ -923,7 +991,13 @@ function buildProxyTools(): ToolDefinition<any, any>[] {
       const inputObj = params as Record<string, unknown>;
 
       // Permission checking via main process
-      const approvedInput = await requestPreToolUseApproval(def.name, inputObj, toolCallId);
+      const approval = await requestPreToolUseApproval(def.name, inputObj, toolCallId);
+      if (approval.action === 'prepare_source_guide') {
+        return {
+          content: [{ type: 'text', text: formatSourceGuidePreparationResult(approval.preparation) }],
+          details: { isError: false },
+        };
+      }
 
       // Execute via main process
       const requestId = `proxy-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -932,7 +1006,7 @@ function buildProxyTools(): ToolDefinition<any, any>[] {
         type: 'tool_execute_request',
         requestId,
         toolName: def.name,
-        args: approvedInput,
+        args: approval.input,
       });
 
       const result = await new Promise<ProxyToolExecutionResult>((resolve) => {
@@ -1222,6 +1296,7 @@ function handleSessionEvent(event: AgentSessionEvent): void {
     }
 
     if (msg?.role === 'assistant' && piSession) {
+      currentAssistantGeneration++;
       // CRITICAL: do NOT read `getLeafId()` here.
       //
       // The Pi SDK fires `message_end` synchronously BEFORE calling
@@ -1315,6 +1390,24 @@ function handleSessionEvent(event: AgentSessionEvent): void {
   }
 
   if (event.type === 'tool_execution_end') {
+    const prepared = sourceGuideEventGate.consumeSuppressed(event.toolCallId);
+    if (prepared) {
+      const correlation = {
+        toolCallId: event.toolCallId,
+        sourceSlug: prepared.sourceSlug,
+        guidePath: prepared.guidePath,
+        guideVersion: prepared.guideVersion,
+        ...(prepared.assistantGeneration !== undefined
+          ? { assistantGeneration: prepared.assistantGeneration }
+          : {}),
+      };
+      const failure = getSourceGuidePreparationFailure(event.isError, event.result);
+      send(failure
+        ? { type: 'source_guide_failed', ...correlation, reason: failure }
+        : { type: 'source_guide_prepared', ...correlation });
+      return;
+    }
+
     const pending = pendingSessionToolCalls.get(event.toolCallId);
     const normalized = normalizeProxyToolExecutionEnd(event, pending);
     forwardedEvent = normalized.forwardedEvent;
@@ -1322,6 +1415,11 @@ function handleSessionEvent(event: AgentSessionEvent): void {
       pendingSessionToolCalls.delete(event.toolCallId);
       send(normalized.sessionToolCompleted);
     }
+  }
+
+  if (event.type === 'tool_execution_start' && getSourceSlugForTool(event.toolName)) {
+    sourceGuideEventGate.bufferStart(event.toolCallId, forwardedEvent);
+    return;
   }
 
   // Forward all events to main process
@@ -1489,7 +1587,12 @@ function handlePreToolUseResponse(msg: Extract<InboundMessage, { type: 'pre_tool
   const pending = pendingPreToolUse.get(msg.requestId);
   if (pending) {
     pendingPreToolUse.delete(msg.requestId);
-    pending.resolve({ action: msg.action, input: msg.input, reason: msg.reason });
+    pending.resolve({
+      action: msg.action,
+      input: msg.input,
+      reason: msg.reason,
+      sourceGuide: msg.sourceGuide,
+    });
   } else {
     debugLog(`No pending pre_tool_use for requestId: ${msg.requestId}`);
   }
@@ -1503,6 +1606,7 @@ async function handleAbort(): Promise<void> {
       debugLog(`Abort failed: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
+  sourceGuideEventGate.clear();
 
   // Reject all pending pre-tool-use requests
   for (const [, pending] of pendingPreToolUse) {

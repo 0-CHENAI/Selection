@@ -225,6 +225,31 @@ describe('SourceManager', () => {
       expect(formatted).toContain('知识库 (slug: cortex, inactive)');
       expect(formatted).toContain('- 知识库 (slug: cortex): Knowledge base');
     });
+
+    it('does not advertise empty generated source guides', () => {
+      const source = createMockSource('anysearch');
+      source.guide = {
+        raw: '# anysearch\n\n## Guidelines\n\n(Add usage guidelines here)\n\n## Context\n\n(Add context about this source)',
+      };
+      sourceManager.setAllSources([source]);
+      sourceManager.updateActiveState(['anysearch'], [], ['anysearch']);
+
+      const formatted = sourceManager.formatSourceState();
+      expect(formatted).not.toContain('guide.md');
+      expect(formatted).not.toContain('prepared automatically');
+    });
+
+    it('describes meaningful guides as automatically prepared without exposing a Read path', () => {
+      const source = createMockSource('anysearch');
+      source.guide = { raw: '# anysearch\nPrefer official sources.' };
+      sourceManager.setAllSources([source]);
+      sourceManager.updateActiveState(['anysearch'], [], ['anysearch']);
+
+      const formatted = sourceManager.formatSourceState();
+      expect(formatted).toContain('prepared automatically');
+      expect(formatted).not.toContain('guide.md');
+      expect(formatted).not.toContain('MUST read');
+    });
   });
 
   describe('Authentication Utilities', () => {
