@@ -3,7 +3,7 @@ import { Check, ChevronDown, ChevronRight, Clock, Flag, MessageSquare, Pencil, P
 import { useTranslation } from 'react-i18next'
 import { useAtomValue } from 'jotai'
 import { formatDistanceToNowStrict, type Locale } from 'date-fns'
-import { DEFAULT_MODEL, getModelShortName } from '@config/models'
+import { getModelShortName } from '@config/models'
 import { cn } from '@/lib/utils'
 import { getProviderIcon } from '@/lib/provider-icons'
 import { shortTimeLocale } from '@/utils/session'
@@ -40,6 +40,7 @@ import type { KanbanModelProviderGroup, KanbanProject, KanbanTask } from './type
  * SVGs and the favicon fallback for icon-less providers.
  */
 function resolveProviderIcon(provider: string): string | null {
+  if (provider === 'anthropic' || provider === 'order') return null
   return getProviderIcon(provider) ?? getProviderIcon('pi', null, provider)
 }
 
@@ -420,7 +421,7 @@ function AddSubtask({
   const inputRef = React.useRef<HTMLTextAreaElement>(null)
 
   const options = React.useMemo(() => (modelGroups ?? []).flatMap(g => g.models), [modelGroups])
-  const [model, setModel] = React.useState(() => defaultModel ?? options[0]?.id ?? DEFAULT_MODEL)
+  const [model, setModel] = React.useState(() => defaultModel ?? options[0]?.id ?? '')
 
   React.useEffect(() => {
     if (composing) inputRef.current?.focus()

@@ -41,7 +41,7 @@ import {
   migrateLegacyCredentials,
   migrateLegacyLlmConnectionsConfig,
   migrateOrphanedDefaultConnections,
-  MODEL_REGISTRY,
+  resolveKnownRegistryModelId,
   type Workspace,
   type WorkspaceInfo,
 } from '@craft-agent/shared/config'
@@ -8887,15 +8887,12 @@ export class SessionManager implements ISessionManager {
         const formattedToolInput = formatToolInputPaths(event.input)
 
         // Resolve call_llm model for TurnCard badge display.
-        // Resolve call_llm model short names to full IDs for display.
+        // Known registry ids only — do not rewrite ORDER aliases like "Opus".
         // Note: Pi sessions override the model in PiEventAdapter (call_llm always uses miniModel).
         if (event.toolName === 'mcp__session__call_llm' && formattedToolInput?.model) {
-          const shortName = String(formattedToolInput.model)
-          const modelDef = MODEL_REGISTRY.find(m => m.id === shortName)
-            || MODEL_REGISTRY.find(m => m.shortName.toLowerCase() === shortName.toLowerCase())
-            || MODEL_REGISTRY.find(m => m.name.toLowerCase() === shortName.toLowerCase())
-          if (modelDef) {
-            formattedToolInput.model = modelDef.id
+          const resolved = resolveKnownRegistryModelId(String(formattedToolInput.model))
+          if (resolved) {
+            formattedToolInput.model = resolved
           }
         }
 
