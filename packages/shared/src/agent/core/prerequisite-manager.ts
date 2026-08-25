@@ -16,6 +16,16 @@ import { resolve, join } from 'node:path';
 import { expandPath } from './path-processor.ts';
 import { getBrowserToolEnabled } from '../../config/storage.ts';
 
+interface CatalogSkillRef {
+  slug: string;
+  skillMdPath: string;
+  requiredSources?: string[];
+}
+
+function catalogPathKey(filePath: string): string {
+  return resolve(expandPath(filePath)).replace(/\\/g, '/').toLowerCase();
+}
+
 // ============================================================
 // Types
 // ============================================================
@@ -123,6 +133,7 @@ export class PrerequisiteManager {
   private readFiles: Set<string> = new Set();
   private rejectionCounts: Map<string, number> = new Map();
   private pendingSkillPaths: Set<string> = new Set();
+  private catalogByPath = new Map<string, CatalogSkillRef>();
   private workspaceRootPath: string;
   private onDebug?: (message: string) => void;
 
@@ -142,6 +153,29 @@ export class PrerequisiteManager {
       this.pendingSkillPaths.add(expanded);
       this.onDebug?.(`Prerequisite: registered skill prerequisite ${expanded}`);
     }
+  }
+
+  /**
+   * Remember catalog SKILL.md paths for this turn so a model-initiated Read
+   * can activate that skill's requiredSources.
+   */
+  setCatalogSkills(entries: CatalogSkillRef[]): void {
+    this.catalogByPath.clear();
+    for (const entry of entries) {
+      this.catalogByPath.set(catalogPathKey(entry.skillMdPath), entry);
+    }
+  }
+
+  /**
+   * If Read/cat targets a catalog SKILL.md, return that entry.
+   * Only handbook paths count — arbitrary file Reads do not open sources.
+   */
+  findCatalogSkillForTool(toolName: string, input: Record<string, unknown>): CatalogSkillRef | null {
+    for (const candidate of extractSkillReadCandidates(toolName, input)) {
+      const hit = this.catalogByPath.get(catalogPathKey(candidate));
+      if (hit) return hit;
+    }
+    return null;
   }
 
   /**
@@ -272,4 +306,29 @@ export class PrerequisiteManager {
   hasRead(filePath: string): boolean {
     return this.readFiles.has(expandPath(filePath));
   }
+}
+
+const SKILL_MD_IN_COMMAND_RE = /(?:^|[\s"'`])((?:~|\/|[A-Za-z]:[\\/])[^\s"'`;|&]+SKILL\.md)/gi;
+
+export function extractSkillMdPathsFromCommand(command: string): string[] {
+  const paths: string[] = [];
+  const matcher = new RegExp(SKILL_MD_IN_COMMAND_RE.source, 'gi');
+  let match: RegExpExecArray | null;
+  while ((match = matcher.exec(command))) {
+    paths.push(match[1]!);
+  }
+  return paths;
+}
+
+export function extractSkillReadCandidates(toolName: string, input: Record<string, unknown>): string[] {
+  if (toolName === 'Read') {
+    const filePath = (typeof input.file_path === 'string' && input.file_path)
+      || (typeof input.path === 'string' && input.path)
+      || '';
+    return filePath ? [filePath] : [];
+  }
+  if (toolName === 'Bash' && typeof input.command === 'string') {
+    return extractSkillMdPathsFromCommand(input.command);
+  }
+  return [];
 }

@@ -1079,6 +1079,7 @@ ${formattedMessages}
     const workspaceRoot = this.config.workspace?.rootPath ?? this.workingDirectory;
     const projectRoot = this.config.session?.workingDirectory;
     const catalogEntries = toSkillCatalogEntries(loadAllSkills(workspaceRoot, projectRoot));
+    this.prerequisiteManager.setCatalogSkills(catalogEntries);
 
     // Register skill prerequisites — blocks all tools until SKILL.md files are read.
     if (skillPaths.size > 0) {

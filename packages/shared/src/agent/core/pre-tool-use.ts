@@ -616,7 +616,7 @@ export type PreToolUseCheckResult =
       commandHash?: string;
       approvalTtlSeconds?: number;
     }
-  | { type: 'source_activation_needed'; sourceSlug: string; sourceExists: boolean }
+  | { type: 'source_activation_needed'; sourceSlug: string; sourceExists: boolean; additionalSourceSlugs?: string[] }
   | { type: 'call_llm_intercept'; input: Record<string, unknown> }
   | { type: 'spawn_session_intercept'; input: Record<string, unknown> };
 
@@ -677,6 +677,7 @@ export interface PermissionManagerLike {
 export interface PrerequisiteManagerLike {
   checkPrerequisites(toolName: string): PrerequisiteCheckResult;
   trackBashSkillRead(input: Record<string, unknown>): boolean;
+  findCatalogSkillForTool?(toolName: string, input: Record<string, unknown>): { requiredSources?: string[] } | null;
 }
 
 /** Built-in MCP servers that are always available (not user sources) */
@@ -868,6 +869,23 @@ export function runPreToolUseChecks(ctx: PreToolUseInput): PreToolUseCheckResult
   if (metadataResult.modified) {
     currentInput = metadataResult.input;
     wasModified = true;
+  }
+
+  // 5h. Catalog SKILL.md Read → activate requiredSources (model self-select)
+  if (hasSourceActivation && prerequisiteManager?.findCatalogSkillForTool) {
+    const catalogSkill = prerequisiteManager.findCatalogSkillForTool(toolName, currentInput);
+    const missing = (catalogSkill?.requiredSources ?? []).filter(slug =>
+      !activeSourceSlugs.includes(slug) && allSourceSlugs.includes(slug)
+    );
+    if (missing.length > 0) {
+      onDebug?.(`Catalog skill Read needs sources: ${missing.join(', ')}`);
+      return {
+        type: 'source_activation_needed',
+        sourceSlug: missing[0]!,
+        sourceExists: true,
+        additionalSourceSlugs: missing.slice(1),
+      };
+    }
   }
 
   // ============================================================
