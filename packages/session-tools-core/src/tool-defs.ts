@@ -44,6 +44,7 @@ import { handleRunTask } from './handlers/run-task.ts';
 import { handleGetTaskResults } from './handlers/get-task-results.ts';
 import { handleSubmitTaskOutput } from './handlers/submit-task-output.ts';
 import { handleSubmitTaskVerdict } from './handlers/submit-task-verdict.ts';
+import { handleSubmitOrchestrationPatch } from './handlers/submit-orchestration-patch.ts';
 import { handleArchiveSession } from './handlers/archive-session.ts';
 import { handleSendAgentMessage } from './handlers/send-agent-message.ts';
 import { handleListMessagingChannels, handleUnbindMessagingChannel } from './handlers/messaging.ts';
@@ -236,6 +237,17 @@ export const GetTaskResultsSchema = z.object({
 export const SubmitTaskOutputSchema = z.object({
   text: z.string().optional().describe('Optional prose summary of the node result'),
   values: z.record(z.string(), z.unknown()).optional().describe('Declared output values keyed by name'),
+});
+
+export const SubmitOrchestrationPatchSchema = z.object({
+  runId: z.string().describe('Active run id'),
+  decisionId: z.string().describe('Idempotency key for this decision'),
+  baseRevision: z.number().int().min(0).describe('Revision this patch is based on'),
+  rationale: z.string().describe('Why the graph is changing'),
+  add: z.array(z.record(z.string(), z.unknown())).optional().describe('Pending nodes to add'),
+  update: z.array(z.record(z.string(), z.unknown())).optional().describe('Pending nodes to update'),
+  cancel: z.array(z.string()).optional().describe('Pending node ids to cancel'),
+  action: z.enum(['continue', 'pause', 'complete', 'fail']).optional(),
 });
 
 export const SubmitTaskVerdictSchema = z.object({
@@ -554,6 +566,10 @@ Required when the node declares outputs. Pass values matching the declared names
 
 Use result pass or fail. Fail may include reason and nodes to repair. Parent chat messages are never treated as a verdict.`,
 
+  submit_orchestration_patch: `Apply a restricted patch to the current orchestrate run.
+
+Requires runId, decisionId, baseRevision, and rationale. May add/update/cancel pending nodes. Cannot change running or finished nodes, task identity, budget, or raise permissions. Off unless CRAFT_FEATURE_TASKS_ORCHESTRATE is enabled.`,
+
   get_session_info: `Get metadata about the current session or a specific session by ID.
 
 Returns labels, status, name, permission mode, projectId (if the session is bound to a project), workingDirectory, and other details.
@@ -662,6 +678,7 @@ export const SESSION_TOOL_DEFS: SessionToolDef[] = [
   { name: 'get_task_results', description: TOOL_DESCRIPTIONS.get_task_results, inputSchema: GetTaskResultsSchema, executionMode: 'registry', safeMode: 'allow', readOnly: true, handler: handleGetTaskResults },
   { name: 'submit_task_output', description: TOOL_DESCRIPTIONS.submit_task_output, inputSchema: SubmitTaskOutputSchema, executionMode: 'registry', safeMode: 'allow', handler: handleSubmitTaskOutput },
   { name: 'submit_task_verdict', description: TOOL_DESCRIPTIONS.submit_task_verdict, inputSchema: SubmitTaskVerdictSchema, executionMode: 'registry', safeMode: 'allow', handler: handleSubmitTaskVerdict },
+  { name: 'submit_orchestration_patch', description: TOOL_DESCRIPTIONS.submit_orchestration_patch, inputSchema: SubmitOrchestrationPatchSchema, executionMode: 'registry', safeMode: 'allow', handler: handleSubmitOrchestrationPatch },
   { name: 'get_session_info', description: TOOL_DESCRIPTIONS.get_session_info, inputSchema: GetSessionInfoSchema, executionMode: 'registry', safeMode: 'allow', readOnly: true, handler: handleGetSessionInfo },
   { name: 'list_sessions', description: TOOL_DESCRIPTIONS.list_sessions, inputSchema: ListSessionsSchema, executionMode: 'registry', safeMode: 'allow', readOnly: true, handler: handleListSessions },
   { name: 'list_background_tasks', description: TOOL_DESCRIPTIONS.list_background_tasks, inputSchema: ListBackgroundTasksSchema, executionMode: 'registry', safeMode: 'allow', readOnly: true, handler: handleListBackgroundTasks },

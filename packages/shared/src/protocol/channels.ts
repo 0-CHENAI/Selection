@@ -74,6 +74,7 @@ export const RPC_CHANNELS = {
     GET: 'tasks:get',
     LIST: 'tasks:list',
     LIST_RUNS: 'tasks:listRuns',
+    APPLY_RUN_REVISION: 'tasks:applyRunRevision',
     // Storage-backed read of a run's outcome (verdict + per-node output). Survives restart.
     GET_RESULTS: 'tasks:getResults',
     // Push: full typed snapshot after every run/node/budget/approval/repair change.

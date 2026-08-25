@@ -29,6 +29,8 @@ import type {
   TaskRunSnapshotDto,
   TaskRespondApprovalRequest,
   TaskUpdateRunLimitsRequest,
+  TaskApplyRunRevisionRequest,
+  TaskApplyRunRevisionResult,
 } from '@craft-agent/shared/protocol'
 import { getWorkspaceByNameOrId } from '@craft-agent/shared/config'
 import {
@@ -41,6 +43,9 @@ import {
   buildRepairPrompt,
   loadTaskResults,
   TaskEtagConflictError,
+  definitionDiff,
+  readLatestSpecRevision,
+  serializeTaskYaml,
 } from '@craft-agent/shared/tasks'
 import { createLogger } from '@craft-agent/shared/utils'
 import { pushTyped, type RpcServer } from '@craft-agent/server-core/transport'
@@ -64,6 +69,7 @@ export const HANDLED_CHANNELS = [
   RPC_CHANNELS.tasks.GET,
   RPC_CHANNELS.tasks.LIST,
   RPC_CHANNELS.tasks.LIST_RUNS,
+  RPC_CHANNELS.tasks.APPLY_RUN_REVISION,
   RPC_CHANNELS.tasks.GET_RESULTS,
 ] as const
 
@@ -443,5 +449,37 @@ export function registerTasksHandlers(server: RpcServer, deps: HandlerDeps): voi
   // works after restart and without an active in-memory run — unlike tasks:get's run snapshot.
   server.handle(RPC_CHANNELS.tasks.GET_RESULTS, async (_ctx, workspaceId: string, slug: string, runId?: string): Promise<TaskResultsDto> => {
     return loadTaskResults(workspaceOrThrow(workspaceId).rootPath, slug, runId)
+  })
+
+  server.handle(RPC_CHANNELS.tasks.APPLY_RUN_REVISION, async (_ctx, workspaceId: string, req: TaskApplyRunRevisionRequest): Promise<TaskApplyRunRevisionResult> => {
+    const ws = workspaceOrThrow(workspaceId)
+    const live = loadTaskDocument(ws.rootPath, req.slug)
+    if (!live?.spec) {
+      return {
+        diff: { added: [], removed: [], changed: [] },
+        validation: { valid: false, errors: [{ path: 'root', message: `Task "${req.slug}" not found`, severity: 'error' }], warnings: [] },
+      }
+    }
+    const runSpec = runnerFor(workspaceId).currentRunSpec(req.slug, req.runId) ?? readLatestSpecRevision(ws.rootPath, req.slug, req.runId)?.spec
+    if (!runSpec) {
+      return {
+        diff: { added: [], removed: [], changed: [] },
+        validation: { valid: false, errors: [{ path: 'run', message: `No run spec for ${req.runId}`, severity: 'error' }], warnings: [] },
+      }
+    }
+    const diff = definitionDiff(live.spec, runSpec)
+    const yaml = serializeTaskYaml({ ...runSpec, schema_version: 2 })
+    const parsed = parseTaskYaml(yaml)
+    const validation = toValidationDto(parsed)
+    if (!req.confirm) return { diff, validation, yaml }
+    try {
+      const saved = saveTaskDocument(ws.rootPath, yaml, req.expectedEtag)
+      return { diff, validation: toValidationDto({ valid: saved.valid, errors: saved.errors, warnings: saved.warnings, spec: saved.spec }), applied: true, etag: saved.etag, yaml: saved.yaml }
+    } catch (err) {
+      if (err instanceof TaskEtagConflictError) {
+        return { diff, validation, conflict: { code: 'etag-conflict', expected: err.expected, actual: err.actual } }
+      }
+      throw err
+    }
   })
 }

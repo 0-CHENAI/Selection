@@ -1467,4 +1467,65 @@ describe('TaskRunner (Conductor)', () => {
     await tick();
     expect(host.dispatchedNames().filter((n) => n === 'a').length).toBeGreaterThanOrEqual(1);
   });
+
+  it('orchestrate patch adds a pending node and rejects edits to done nodes', async () => {
+    const prev = process.env.CRAFT_FEATURE_TASKS_ORCHESTRATE;
+    process.env.CRAFT_FEATURE_TASKS_ORCHESTRATE = '1';
+    try {
+      saveTaskSpec(
+        root,
+        specOf({
+          schema_version: 2,
+          id: 'orchp',
+          title: 'Orchp',
+          goal: 'g',
+          runner: 'orchestrate',
+          nodes: [{ id: 'a', prompt: 'a' }],
+        }),
+      );
+      const runner = makeRunner();
+      runner.run('orchp', { runId: 'r1', verifyOnComplete: false });
+      await tick();
+      host.complete('a', { finalText: 'A' });
+      await tick();
+      expect(() =>
+        runner.applyOrchestrationPatch('orchp', 'r1', {
+          runId: 'r1',
+          decisionId: 'd1',
+          baseRevision: 0,
+          rationale: 'cannot touch done',
+          update: [{ id: 'a', kind: 'session', prompt: 'nope' }],
+        }),
+      ).toThrow(/done/);
+      saveTaskSpec(
+        root,
+        specOf({
+          schema_version: 2,
+          id: 'orchp2',
+          title: 'Orchp2',
+          goal: 'g',
+          runner: 'orchestrate',
+          nodes: [{ id: 'a', prompt: 'a' }],
+        }),
+      );
+      const r2 = new TaskRunner({ host, workspaceId: 'ws', workspaceRoot: root, now: () => '2026-06-07T00:00:00.000Z' });
+      r2.run('orchp2', { runId: 'r2', verifyOnComplete: false });
+      await tick();
+      const snap = r2.applyOrchestrationPatch('orchp2', 'r2', {
+        runId: 'r2',
+        decisionId: 'add-b',
+        baseRevision: 0,
+        rationale: 'append pending work',
+        add: [{ id: 'b', kind: 'session', prompt: 'b', depends_on: ['a'] }],
+      });
+      expect(snap.revision).toBe(1);
+      expect(snap.nodes.some((n) => n.id === 'b')).toBe(true);
+      host.complete('a', { finalText: 'A' });
+      await tick();
+      expect(host.dispatchedNames()).toContain('b');
+    } finally {
+      if (prev === undefined) delete process.env.CRAFT_FEATURE_TASKS_ORCHESTRATE;
+      else process.env.CRAFT_FEATURE_TASKS_ORCHESTRATE = prev;
+    }
+  });
 });

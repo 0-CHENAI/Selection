@@ -285,6 +285,7 @@ const EXPECTED_CHANNELS: string[] = [
   'system:homeDir',
   'system:isDebugMode',
   'system:versions',
+  'tasks:applyRunRevision',
   'tasks:continue',
   'tasks:create',
   'tasks:generate',

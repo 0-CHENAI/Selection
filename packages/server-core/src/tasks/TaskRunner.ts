@@ -55,7 +55,10 @@ import {
   type ConditionAst,
   DEFAULT_REPAIR_ATTEMPTS,
   MAX_REPAIR_ATTEMPTS_CAP,
+  validateOrchestrationPatch,
+  type OrchestrationPatch,
 } from '@craft-agent/shared/tasks';
+import { isTasksOrchestrateEnabled } from '@craft-agent/shared/feature-flags';
 import { createHash } from 'crypto';
 import { MAX_RUN_INSTANCES, isSessionLikeKind, isControlKind, unimplementedV2Nodes } from './executors';
 
@@ -142,6 +145,7 @@ export interface RunSnapshot {
   tokensUsed: number;
   /** Node ids that currently block the run (approval, budget, interrupt). */
   blockers?: string[];
+  revision?: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -205,7 +209,7 @@ class ActiveRun {
   private readonly state = new Map<string, NodeStateEntry>();
   private readonly sessionToNode = new Map<string, string>();
   private readonly outputs: Record<string, NodeOutput> = {};
-  private readonly edges: Map<string, Set<string>>;
+  private edges: Map<string, Set<string>>;
   private readonly maxParallel: number;
   private inFlight = 0;
   private tokensUsed = 0;
@@ -238,9 +242,12 @@ class ActiveRun {
   private readonly loopIndex = new Map<string, number>();
   private readonly promptCache = new Map<string, NodeOutput>();
   private readonly retryTimers = new Set<ReturnType<typeof setTimeout>>();
+  private revision = 0;
+  private readonly seenDecisionIds = new Set<string>();
+  private invalidPatchCount = 0;
 
   constructor(
-    private readonly spec: TaskSpec,
+    private spec: TaskSpec,
     private readonly slug: string,
     private readonly runId: string,
     private readonly opts: Required<Pick<RunOptions, 'verifyOnComplete'>> & RunOptions,
@@ -284,6 +291,7 @@ class ActiveRun {
       const executableCount = this.spec.nodes.filter(isExecutableTaskNode).length;
       void this.deps.host.setTaskNodeCount(this.opts.orchestratorSessionId, executableCount);
     }
+    this.coordinatorCheckpoint('first-schedule');
     this.scheduleReady();
     this.emitChanged();
   }
@@ -444,6 +452,7 @@ class ActiveRun {
       orchestratorSessionId: this.opts.orchestratorSessionId,
       tokensUsed: this.tokensUsed,
       blockers: blockers.length ? blockers : undefined,
+      revision: this.revision,
       nodes: this.spec.nodes.map((n) => {
         const st = this.state.get(n.id)!;
         return { id: n.id, state: st.state, sessionId: st.sessionId, attempt: st.attempt };
@@ -814,6 +823,7 @@ class ActiveRun {
       this.failNode(nodeId, 'approval-rejected', st.sessionId, 'error');
     }
     if (this.runStatus === 'waiting-approval') this.runStatus = 'running';
+    this.coordinatorCheckpoint('approval');
     this.scheduleReady();
     this.emitChanged();
     return this.snapshot();
@@ -1106,6 +1116,7 @@ class ActiveRun {
     this.log({ kind: 'node-finished', nodeId: defId, sessionId: sid ?? '', state: st.state, reason });
     if (sid) this.applyCard(sid, FAILED_STATUS);
     this.emitChanged();
+    this.coordinatorCheckpoint('node-failed');
     this.scheduleReady();
   }
 
@@ -1137,6 +1148,7 @@ class ActiveRun {
 
   /** Enter the non-terminal `verifying` state and ask the orchestrator for a verdict. Does NOT finalize. */
   private enterVerifying(): void {
+    this.coordinatorCheckpoint('before-verify');
     this.runStatus = 'verifying';
     this.log({ kind: 'run-verifying' });
     void this.sendVerification();
@@ -1369,6 +1381,7 @@ class ActiveRun {
     if (this.inFlight === 0) {
       this.runStatus = 'waiting-budget';
       this.log({ kind: 'run-waiting-budget' });
+      this.coordinatorCheckpoint('budget');
       this.emitChanged();
     }
   }
@@ -1399,6 +1412,69 @@ class ActiveRun {
 
   private emitChanged(): void {
     this.deps.onRunChanged?.(this.snapshot());
+  }
+
+  applyPatch(patch: OrchestrationPatch): RunSnapshot {
+    const result = validateOrchestrationPatch(patch, {
+      spec: this.spec,
+      revision: this.revision,
+      runId: this.runId,
+      seenDecisionIds: this.seenDecisionIds,
+      nodeStates: Object.fromEntries([...this.state.entries()].map(([id, st]) => [id, st.state])),
+      invalidPatchCount: this.invalidPatchCount,
+    });
+    if (!result.ok) {
+      this.invalidPatchCount += 1;
+      if (result.pauseForReview) {
+        this.runStatus = 'paused';
+        this.log({ kind: 'run-paused' });
+        this.emitChanged();
+      }
+      throw new TaskControlError(this.runStatus, result.error);
+    }
+    this.spec = result.spec;
+    this.revision = result.revision;
+    this.seenDecisionIds.add(patch.decisionId);
+    this.invalidPatchCount = 0;
+    this.edges = materializeDeps(this.spec);
+    this.dependents = undefined;
+    for (const n of this.spec.nodes) {
+      if (!this.state.has(n.id)) this.state.set(n.id, { state: 'pending', attempt: 0 });
+    }
+    for (const id of result.cancelled) {
+      const st = this.state.get(id);
+      if (st) st.state = 'cancelled';
+    }
+    writeSpecRevision(this.deps.workspaceRoot, this.slug, this.runId, this.revision, this.spec);
+    if (result.action === 'pause') {
+      this.pause();
+    } else if (result.action === 'complete') {
+      this.finish('completed');
+    } else if (result.action === 'fail') {
+      this.finish('failed');
+    } else if (this.runStatus === 'paused' || this.runStatus === 'pausing') {
+      this.runStatus = 'running';
+      this.scheduleReady();
+    } else {
+      this.scheduleReady();
+    }
+    this.emitChanged();
+    return this.snapshot();
+  }
+
+  currentSpec(): TaskSpec {
+    return this.spec;
+  }
+
+  private coordinatorCheckpoint(reason: string): void {
+    if (!isTasksOrchestrateEnabled() || this.spec.runner !== 'orchestrate') return;
+    if (reason === 'batch') return;
+    const orch = this.opts.orchestratorSessionId;
+    if (!orch) return;
+    void this.sendToOrchestrator(
+      orch,
+      `Conductor checkpoint (${reason}). Revision ${this.revision}. Call submit_orchestration_patch or continue.`,
+    );
   }
 
   private log(entry: RunLogEntryInput): void {
@@ -1560,6 +1636,21 @@ export class TaskRunner {
    * Load unfinished runs from disk without scheduling. Running nodes become
    * `interrupted`. Paused / waiting-approval / waiting-budget keep those states.
    */
+  applyOrchestrationPatch(slug: string, runId: string, patch: OrchestrationPatch): RunSnapshot {
+    return this.requireRun(slug, runId).applyPatch(patch);
+  }
+
+  applyOrchestrationPatchByRunId(runId: string, patch: OrchestrationPatch): RunSnapshot {
+    for (const run of this.runs.values()) {
+      if (run.snapshot().runId === runId) return run.applyPatch(patch);
+    }
+    throw new TaskControlError('failed', `No active run ${runId}`);
+  }
+
+  currentRunSpec(slug: string, runId: string): TaskSpec | null {
+    return this.runs.get(this.key(slug, runId))?.currentSpec() ?? null;
+  }
+
   scanUnfinished(): RunSnapshot[] {
     const out: RunSnapshot[] = [];
     for (const slug of listTaskSlugs(this.deps.workspaceRoot)) {

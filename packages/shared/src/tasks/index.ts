@@ -20,3 +20,4 @@ export * from './results.ts';
 export * from './instances.ts';
 export * from './artifacts.ts';
 export * from './sensitive.ts';
+export * from './orchestration-patch.ts';

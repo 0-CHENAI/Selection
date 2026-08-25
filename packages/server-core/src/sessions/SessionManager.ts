@@ -4528,6 +4528,21 @@ export class SessionManager implements ISessionManager {
           const snap = runner.submitVerdict(managed.id, input)
           return { status: snap.status }
         },
+        submitOrchestrationPatchFn: async (input) => {
+          const runner = this.taskRunnerLookup?.(managed.workspace.id)
+          if (!runner) throw new Error('Task runner is not available')
+          const snap = runner.applyOrchestrationPatchByRunId(input.runId, {
+            runId: input.runId,
+            decisionId: input.decisionId,
+            baseRevision: input.baseRevision,
+            rationale: input.rationale,
+            add: input.add as never,
+            update: input.update as never,
+            cancel: input.cancel,
+            action: input.action,
+          })
+          return { status: snap.status, revision: snap.revision }
+        },
         getSessionInfoFn: (sessionId?: string) => {
           const targetId = sessionId ?? managed.id
           const session = this.sessions.get(targetId)
