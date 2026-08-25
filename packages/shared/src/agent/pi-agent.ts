@@ -552,6 +552,8 @@ export class PiAgent extends BaseAgent {
         // Never inherit a session/user resource override. Official guides and
         // helper assets must come from the same trusted Selection package.
         CRAFT_OFFICECLI_RESOURCES: officecliResources ?? '',
+        // Selection owns its pinned runtime; upstream must never replace it.
+        OFFICECLI_SKIP_UPDATE: '1',
         CRAFT_BUN: nodePath,
         // Pass session dir for cross-process toolMetadataStore
         ...(sessionDir ? { CRAFT_SESSION_DIR: sessionDir } : {}),

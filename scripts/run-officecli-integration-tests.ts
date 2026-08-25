@@ -13,7 +13,11 @@ const child = Bun.spawn([
   'packages/session-tools-core/src/tool-defs-filtering.test.ts',
 ], {
   cwd: repoRoot,
-  env: { ...process.env, OFFICECLI_INTEGRATION: '1' },
+  env: {
+    ...process.env,
+    OFFICECLI_INTEGRATION: '1',
+    OFFICECLI_SKIP_UPDATE: '1',
+  },
   stdin: 'inherit',
   stdout: 'inherit',
   stderr: 'inherit',
