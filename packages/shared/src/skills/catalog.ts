@@ -62,7 +62,8 @@ export function defangAvailableSkillsTag(text: string): string {
   return text.replace(/<\s*\/\s*available_skills\s*>/gi, '&lt;/available_skills&gt;');
 }
 
-function normalizeCatalogText(text: string): string {
+function normalizeCatalogText(text: unknown): string {
+  if (typeof text !== 'string') return '';
   return text.replace(/\s+/g, ' ').trim();
 }
 

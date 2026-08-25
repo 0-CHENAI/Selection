@@ -73,7 +73,7 @@ import { buildTitlePrompt, buildRegenerateTitlePrompt, validateTitle } from '../
 
 // Skill extraction for Codex/Copilot backends (Claude uses native SDK Skill tool)
 import { parseMentions, resolveSkillMentions, resolveSourceMentions, resolveFileMentions } from '../mentions/index.ts';
-import { loadAllSkills, resolveBundledSkillMdPath } from '../skills/storage.ts';
+import { invalidateSkillsCacheIfSkillMarkdown, loadAllSkills, resolveBundledSkillMdPath } from '../skills/storage.ts';
 import { toSkillCatalogEntries } from '../skills/catalog.ts';
 import { formatSkillSuggestions, matchSkillsByGlobs } from '../skills/match.ts';
 
@@ -1052,6 +1052,20 @@ ${formattedMessages}
       ? '\nAfter reading the router, run only the `officecli load_skill` commands it selects. Use the bundled CLI on PATH; do not install OfficeCLI or read user-level Office skills.'
       : '';
     return `Before proceeding with the user's request, you MUST read the following skill instruction files using the Read tool or \`cat\` via Bash:\n${pathList}${officeOnly}\n\nDo not take any other action until you have read these files.`;
+  }
+
+  /**
+   * After Write/Edit/Bash creates or edits a SKILL.md, drop the skill list
+   * cache and refresh catalog lookup so the same turn can activate sources
+   * and the next turn injects the new handbook entry.
+   */
+  protected noteSkillMarkdownMutation(filePath?: string, command?: string): void {
+    if (!invalidateSkillsCacheIfSkillMarkdown({ filePath, command })) return;
+    const workspaceRoot = this.config.workspace?.rootPath ?? this.workingDirectory;
+    const projectRoot = this.config.session?.workingDirectory;
+    this.prerequisiteManager.setCatalogSkills(
+      toSkillCatalogEntries(loadAllSkills(workspaceRoot, projectRoot)),
+    );
   }
 
   // ============================================================

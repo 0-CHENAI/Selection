@@ -7,7 +7,7 @@ import { dirname, join } from 'path'
 import { unzipSync } from 'fflate'
 import matter from 'gray-matter'
 import { getWorkspaceSkillsPath } from '../workspaces/storage.ts'
-import { invalidateSkillsCache, loadSkillBySlug } from '../skills/storage.ts'
+import { coerceSkillDescription, coerceSkillName, invalidateSkillsCache, loadSkillBySlug } from '../skills/storage.ts'
 import { isSafeResourceSlug } from './copy-between-workspaces.ts'
 import { stagedDirectoryReplace } from '../utils/fs-stage.ts'
 import { tmpdir } from 'os'
@@ -54,8 +54,8 @@ function parseSkillMarkdown(content: string): { name: string; description: strin
   } catch {
     throw new Error('Could not parse SKILL.md')
   }
-  const name = typeof parsed.data.name === 'string' ? parsed.data.name.trim() : ''
-  const description = typeof parsed.data.description === 'string' ? parsed.data.description.trim() : ''
+  const name = coerceSkillName(parsed.data.name)
+  const description = coerceSkillDescription(parsed.data.description)
   if (!name || !description) {
     throw new Error('SKILL.md is missing required frontmatter name or description')
   }

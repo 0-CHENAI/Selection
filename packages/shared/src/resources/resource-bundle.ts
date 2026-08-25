@@ -29,7 +29,7 @@ import {
 import { getWorkspaceSourcesPath, getWorkspaceSkillsPath } from '../workspaces/storage.ts'
 import { loadSourceConfig, getSourcePath } from '../sources/storage.ts'
 import { isBuiltinSource } from '../sources/builtin-sources.ts'
-import { loadSkillBySlug } from '../skills/storage.ts'
+import { invalidateSkillsCache, loadSkillBySlug } from '../skills/storage.ts'
 import { validateSourceConfig } from '../config/validators.ts'
 import { AUTOMATIONS_CONFIG_FILE, AUTOMATIONS_HISTORY_FILE, AUTOMATIONS_RETRY_QUEUE_FILE } from '../automations/constants.ts'
 import { validateAutomationsConfig } from '../automations/validation.ts'
@@ -1769,6 +1769,7 @@ function importSkills(
     }
   }
 
+  if (result.imported.length > 0) invalidateSkillsCache()
   return result
 }
 

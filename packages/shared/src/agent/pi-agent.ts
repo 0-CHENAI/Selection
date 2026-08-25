@@ -103,6 +103,7 @@ import {
   resolveOfficecliBinary,
   resolveOfficecliResourcesRoot,
 } from '../utils/officecli.ts';
+import { skillMutationFromToolEvent } from '../skills/storage.ts';
 
 // Session storage (plans folder path)
 import { getSessionDataPath, getSessionPath, getSessionPlansPath } from '../sessions/storage.ts';
@@ -338,6 +339,10 @@ export class PiAgent extends BaseAgent {
     displayName?: string;
     capturedAt: number;
   }> = new Map();
+
+  // tool_result events do not carry input. Remember Write/Edit/Bash SKILL.md
+  // mutations from tool_start so a successful result can drop the skill cache.
+  private pendingSkillMutationByCallId = new Map<string, { filePath?: string; command?: string }>();
 
   // Current user message (for context in summarization)
   private currentUserMessage: string = '';
@@ -1219,6 +1224,28 @@ export class PiAgent extends BaseAgent {
         this.resetPrerequisiteState();
       }
 
+      if (agentEvent.type === 'tool_start') {
+        const mutation = skillMutationFromToolEvent(
+          agentEvent.toolName,
+          agentEvent.input as Record<string, unknown> | undefined,
+        );
+        if (mutation) {
+          this.pendingSkillMutationByCallId.set(agentEvent.toolUseId, mutation);
+        }
+      }
+
+      if (agentEvent.type === 'tool_result') {
+        const pending = agentEvent.toolUseId
+          ? this.pendingSkillMutationByCallId.get(agentEvent.toolUseId)
+          : undefined;
+        if (pending) {
+          this.pendingSkillMutationByCallId.delete(agentEvent.toolUseId);
+          if (!agentEvent.isError) {
+            this.noteSkillMarkdownMutation(pending.filePath, pending.command);
+          }
+        }
+      }
+
       // Fire PostToolUse / PostToolUseFailure hook events (fire-and-forget)
       if (agentEvent.type === 'tool_result') {
         const hookEvent = agentEvent.isError ? 'PostToolUseFailure' : 'PostToolUse';
@@ -1968,6 +1995,7 @@ export class PiAgent extends BaseAgent {
 
     // Drop any cached pre-tool metadata for the dead subprocess.
     this.preToolMetadataByCallId.clear();
+    this.pendingSkillMutationByCallId.clear();
   }
 
   /**
@@ -2540,6 +2568,7 @@ export class PiAgent extends BaseAgent {
 
     // Clear bridge cache for this interrupted turn.
     this.preToolMetadataByCallId.clear();
+    this.pendingSkillMutationByCallId.clear();
   }
 
   forceAbort(reason: AbortReason): void {
@@ -2565,6 +2594,7 @@ export class PiAgent extends BaseAgent {
 
     // Clear bridge cache for aborted turn.
     this.preToolMetadataByCallId.clear();
+    this.pendingSkillMutationByCallId.clear();
 
     // For PlanSubmitted and AuthRequest, just interrupt the turn
     if (reason === AbortReason.PlanSubmitted || reason === AbortReason.AuthRequest) {
@@ -2710,6 +2740,7 @@ export class PiAgent extends BaseAgent {
     this.subprocessReadyResolve = null;
     this.callbackPort = 0;
     this.preToolMetadataByCallId.clear();
+    this.pendingSkillMutationByCallId.clear();
     this.adapter.resetOverflowState();
 
     if (result) {
@@ -2744,6 +2775,7 @@ export class PiAgent extends BaseAgent {
     this.subprocessReadyResolve = null;
     this.callbackPort = 0;
     this.preToolMetadataByCallId.clear();
+    this.pendingSkillMutationByCallId.clear();
 
     // Clear any in-flight overflow-recovery state so a stale fallback timer
     // doesn't fire on a torn-down adapter.

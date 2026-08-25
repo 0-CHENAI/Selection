@@ -12,18 +12,15 @@
 
 import { existsSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { resolve, join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { expandPath } from './path-processor.ts';
 import { getBrowserToolEnabled } from '../../config/storage.ts';
+import { catalogPathKey } from '../../skills/catalog.ts';
 
 interface CatalogSkillRef {
   slug: string;
   skillMdPath: string;
   requiredSources?: string[];
-}
-
-function catalogPathKey(filePath: string): string {
-  return resolve(expandPath(filePath)).replace(/\\/g, '/').toLowerCase();
 }
 
 // ============================================================
