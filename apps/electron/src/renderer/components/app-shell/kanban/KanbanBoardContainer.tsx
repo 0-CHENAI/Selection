@@ -13,8 +13,6 @@ import { useLabels } from '@/hooks/useLabels'
 import { getSessionTitle } from '@/utils/session'
 import { routes } from '@/lib/navigate'
 import { resolveTaskScopeLabelId } from '@craft-agent/shared/labels'
-import { DEFAULT_MODEL, getModelShortName } from '@config/models'
-import { getDefaultModelsForConnection, isUnsupportedLlmConnection, type LlmConnectionWithStatus } from '@config/llm-connections'
 import type { SessionStatus } from '@/config/session-status-config'
 import type { KanbanColumnDef } from '@craft-agent/shared/projects/types'
 import { KanbanBoard } from './KanbanBoard'
@@ -22,12 +20,12 @@ import { KANBAN_COLUMNS, resolveBoardColumn, statusToColumn } from './status-col
 import { BoardListToggle } from './BoardListToggle'
 import { KanbanProjectFilter, type KanbanProjectFilterOption } from './KanbanProjectFilter'
 import { TaskEditor } from './TaskEditor'
+import { buildModelCatalog, catalogDefaultModel } from './kanban-models'
 import { mergeSubtaskRows, type SpecNodeSummary, type SubtaskChildRow } from './subtask-merge'
 import type { SpecNode } from './task-spec-form'
 import type {
   KanbanColumnId,
   KanbanColumnMeta,
-  KanbanModelProviderGroup,
   KanbanProject,
   KanbanTask,
   SubtaskRunState,
@@ -65,41 +63,6 @@ function deriveRunState(child: SessionMeta, statusesById: Map<string, SessionSta
   if (child.isProcessing) return 'running'
   if ((child.messageCount ?? 0) > 0) return 'done'
   return 'pending'
-}
-
-/**
- * Build the subtask composer's provider→model catalog from the workspace's
- * authenticated LLM connections, plus a model-id → connection-slug map so a
- * spawned subtask routes to the connection that actually serves the model.
- * Model-id collisions across connections are last-wins (acceptable for v1).
- */
-function buildModelCatalog(connections: LlmConnectionWithStatus[]): {
-  groups: KanbanModelProviderGroup[]
-  modelToConnection: Map<string, string>
-} {
-  const groups: KanbanModelProviderGroup[] = []
-  const modelToConnection = new Map<string, string>()
-
-  for (const conn of connections) {
-    if (!conn.isAuthenticated) continue
-    if (isUnsupportedLlmConnection(conn)) continue
-    const rawModels = conn.models?.length
-      ? conn.models
-      : getDefaultModelsForConnection(conn.providerType, conn.piAuthProvider)
-    const models = rawModels.map(m => {
-      const id = typeof m === 'string' ? m : m.id
-      const name = typeof m === 'string' ? getModelShortName(m) : m.name || getModelShortName(m.id)
-      return { id, name }
-    })
-    if (models.length === 0) continue
-    for (const m of models) modelToConnection.set(m.id, conn.slug)
-    // Provider key drives the brand icon: 'anthropic' resolves directly; Pi
-    // connections resolve through their piAuthProvider (see resolveProviderIcon in TaskTile).
-    const provider = conn.providerType === 'anthropic' ? 'anthropic' : conn.piAuthProvider || conn.providerType
-    groups.push({ provider, label: conn.name, models })
-  }
-
-  return { groups, modelToConnection }
 }
 
 /**
@@ -189,6 +152,7 @@ export function KanbanBoardContainer() {
     () => buildModelCatalog(llmConnections),
     [llmConnections]
   )
+  const catalogDefault = catalogDefaultModel(subtaskModelGroups)
 
   // Per-project columns apply only when exactly one project is in focus — the
   // cross-project "all tasks" view always uses the default 3 columns so it stays
@@ -295,20 +259,20 @@ export function KanbanBoardContainer() {
         runState: child.taskNodeId
           ? (snapshotRunState(live, child.taskNodeId) ?? 'pending')
           : deriveRunState(child, statusesById),
-        model: child.model ?? DEFAULT_MODEL,
+        model: child.model ?? catalogDefault ?? '',
         taskNodeId: child.taskNodeId,
         createdAt: child.createdAt,
       }))
       // Spec-backed tiles show one row per DAG node (bound to its latest child session,
       // or pending when never run) plus unadopted quick-adds; plain tiles show children.
       const specNodes = meta.taskSlug ? specNodesBySlug.get(meta.taskSlug) : undefined
-      const subtasks = mergeSubtaskRows(specNodes, children, DEFAULT_MODEL)
+      const subtasks = mergeSubtaskRows(specNodes, children, catalogDefault ?? '')
       result.push({
         id: meta.id,
         title: getSessionTitle(meta),
         column,
         statusId,
-        model: meta.model ?? DEFAULT_MODEL,
+        model: meta.model ?? catalogDefault ?? '',
         projectId: meta.projectId,
         taskSlug: meta.taskSlug,
         subtasks,
@@ -324,7 +288,7 @@ export function KanbanBoardContainer() {
       })
     }
     return result
-  }, [metaMap, statusesById, specNodesBySlug, runSnapshots, projects])
+  }, [metaMap, statusesById, specNodesBySlug, runSnapshots, projects, catalogDefault])
 
   // Project filter: empty selection = show all. While a filter is active, tiles
   // with no project are hidden (an explicit "No project" option is a later add).
@@ -334,7 +298,7 @@ export function KanbanBoardContainer() {
     return tasks.filter(task => task.projectId !== undefined && allow.has(task.projectId))
   }, [tasks, projectFilter])
 
-  const defaultSubtaskModel = modelToConnection.has(DEFAULT_MODEL) ? DEFAULT_MODEL : undefined
+  const defaultSubtaskModel = catalogDefault
 
   const handleToggleSubtasks = React.useCallback((taskId: string) => {
     setExpandedTaskIds(prev => {
@@ -603,7 +567,7 @@ export function KanbanBoardContainer() {
         }}
         modelGroups={subtaskModelGroups}
         modelToConnection={modelToConnection}
-        defaultModel={defaultSubtaskModel ?? DEFAULT_MODEL}
+        defaultModel={defaultSubtaskModel ?? ''}
       />
     )
   }

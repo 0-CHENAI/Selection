@@ -286,6 +286,14 @@ export function getModelById(modelId: string): ModelDefinition | undefined {
 }
 
 /**
+ * Exact / deprecated-id lookup only. Family aliases like ORDER's "Opus"
+ * must not be rewritten to `claude-opus-4-8`.
+ */
+export function resolveKnownRegistryModelId(modelId: string): string | undefined {
+  return getModelById(modelId)?.id;
+}
+
+/**
  * Get display name for a model ID (full name with version).
  */
 export function getModelDisplayName(modelId: string): string {

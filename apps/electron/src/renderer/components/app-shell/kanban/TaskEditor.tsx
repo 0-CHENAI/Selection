@@ -4,7 +4,8 @@ import { toast } from 'sonner'
 import { useTranslation } from 'react-i18next'
 import { cn } from '@/lib/utils'
 import { Spinner, LoadingIndicator, Markdown } from '@craft-agent/ui'
-import { ANTHROPIC_MODELS, DEFAULT_MODEL, getModelShortName } from '@config/models'
+import { getModelShortName } from '@config/models'
+import { catalogDefaultModel } from './kanban-models'
 import { useAtomValue, useStore } from 'jotai'
 import { useProjects } from '@/hooks/useProjects'
 import { sourcesAtom } from '@/atoms/sources'
@@ -51,13 +52,6 @@ const GENERATE_CLIENT_TIMEOUT_MS = 200_000
  * orchestrator drafting the graph — is the next increment.)
  */
 
-// ---------------------------------------------------------------------------
-// Model catalog — real provider→model groups (from the workspace's connections),
-// with an Anthropic fallback when nothing is connected yet.
-// ---------------------------------------------------------------------------
-const FALLBACK_MODEL_GROUPS: KanbanModelProviderGroup[] = [
-  { provider: 'anthropic', label: 'Anthropic', models: ANTHROPIC_MODELS.map((m) => ({ id: m.id, name: m.name })) },
-]
 function resolveModelName(groups: KanbanModelProviderGroup[], id: string): string {
   for (const g of groups) {
     const hit = g.models.find((m) => m.id === id)
@@ -527,8 +521,8 @@ export function TaskEditor({
   // in those cases buildSpec derives the id from the title.
   const editSlug = target.mode === 'edit' ? target.taskSlug : undefined
   const editSessionId = target.mode === 'edit' ? target.sessionId : undefined
-  const groups = modelGroups.length > 0 ? modelGroups : FALLBACK_MODEL_GROUPS
-  const fallbackModel = defaultModel || groups[0]?.models[0]?.id || DEFAULT_MODEL
+  const groups = modelGroups
+  const fallbackModel = catalogDefaultModel(groups, defaultModel) ?? ''
   const { projects } = useProjects(workspaceId)
   const [tab, setTab] = React.useState<Tab>('definition')
   const [mode, setMode] = React.useState<Mode>('manual')
