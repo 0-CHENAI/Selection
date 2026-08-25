@@ -1,10 +1,10 @@
 import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
-import { mkdtempSync, rmSync } from 'fs';
+import { existsSync, mkdtempSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import type { TokenUsage } from '@craft-agent/core/types';
 import type { CreateSessionOptions } from '@craft-agent/shared/protocol';
-import { parseTaskSpec, saveTaskSpec, readRunLog, readNodeOutput, type TaskSpec } from '@craft-agent/shared/tasks';
+import { parseTaskSpec, saveTaskSpec, readRunLog, readNodeOutput, specRevisionPath, type TaskSpec } from '@craft-agent/shared/tasks';
 import type { SessionCompletionEvent } from '../sessions/SessionManager';
 import { TaskRunner, TaskControlError, type ConductorSessionHost } from './TaskRunner';
 
@@ -915,7 +915,7 @@ describe('TaskRunner (Conductor)', () => {
         goal: 'g',
         nodes: [
           { id: 'a', prompt: 'a' },
-          { id: 'gate', kind: 'approval' },
+          { id: 'gate', kind: 'map' },
         ],
       }),
     );
@@ -1064,5 +1064,261 @@ describe('TaskRunner (Conductor)', () => {
     await tick();
     expect(snaps).toContain('running');
     expect(snaps).toContain('completed');
+  });
+
+  it('v2 parallel completes without a session and unblocks dependents', async () => {
+    saveTaskSpec(
+      root,
+      specOf({
+        schema_version: 2,
+        id: 'par',
+        title: 'Par',
+        goal: 'g',
+        nodes: [
+          { id: 'fork', kind: 'parallel' },
+          { id: 'a', depends_on: ['fork'], prompt: 'a' },
+        ],
+      }),
+    );
+    const runner = makeRunner();
+    runner.run('par', { runId: 'r1', verifyOnComplete: false });
+    await tick();
+    expect(existsSync(specRevisionPath(root, 'par', 'r1', 0))).toBe(true);
+    expect(host.dispatchedNames()).toEqual(['a']);
+    expect(runner.getRunState('par', 'r1')!.nodes.find((n) => n.id === 'fork')!.state).toBe('done');
+    host.complete('a');
+    await tick();
+    expect(runner.getRunState('par', 'r1')!.status).toBe('completed');
+  });
+
+  it('v2 route skips the unselected branch', async () => {
+    saveTaskSpec(
+      root,
+      specOf({
+        schema_version: 2,
+        id: 'rt',
+        title: 'Rt',
+        goal: 'g',
+        params: [{ name: 'env', default: 'dev' }],
+        nodes: [
+          {
+            id: 'decide',
+            kind: 'route',
+            route: {
+              cases: [{ when: { ref: 'params.env', op: 'eq', value: 'prod' }, goto: 'prod' }],
+              default: 'dev',
+            },
+          },
+          { id: 'prod', depends_on: ['decide'], prompt: 'prod' },
+          { id: 'dev', depends_on: ['decide'], prompt: 'dev' },
+        ],
+      }),
+    );
+    const runner = makeRunner();
+    runner.run('rt', { runId: 'r1', verifyOnComplete: false });
+    await tick();
+    expect(host.dispatchedNames()).toEqual(['dev']);
+    expect(runner.getRunState('rt', 'r1')!.nodes.find((n) => n.id === 'prod')!.state).toBe('skipped');
+    host.complete('dev');
+    await tick();
+    expect(runner.getRunState('rt', 'r1')!.status).toBe('completed');
+  });
+
+  it('v2 approval waits, reject fails, approve continues', async () => {
+    saveTaskSpec(
+      root,
+      specOf({
+        schema_version: 2,
+        id: 'appr',
+        title: 'Appr',
+        goal: 'g',
+        nodes: [
+          { id: 'gate', kind: 'approval' },
+          { id: 'work', depends_on: ['gate'], prompt: 'work' },
+        ],
+      }),
+    );
+    const rejector = makeRunner();
+    rejector.run('appr', { runId: 'r1', verifyOnComplete: false });
+    await tick();
+    expect(rejector.getRunState('appr', 'r1')!.status).toBe('waiting-approval');
+    rejector.respondApproval('appr', 'r1', 'gate', false);
+    await tick();
+    expect(rejector.getRunState('appr', 'r1')!.nodes.find((n) => n.id === 'gate')!.state).toBe('failed');
+    expect(rejector.getRunState('appr', 'r1')!.status).toBe('failed');
+
+    saveTaskSpec(
+      root,
+      specOf({
+        schema_version: 2,
+        id: 'appr2',
+        title: 'Appr2',
+        goal: 'g',
+        nodes: [
+          { id: 'gate', kind: 'approval' },
+          { id: 'work', depends_on: ['gate'], prompt: 'work' },
+        ],
+      }),
+    );
+    const approver = new TaskRunner({ host, workspaceId: 'ws', workspaceRoot: root, now: () => '2026-06-07T00:00:00.000Z' });
+    approver.run('appr2', { runId: 'r2', verifyOnComplete: false });
+    await tick();
+    approver.respondApproval('appr2', 'r2', 'gate', true);
+    await tick();
+    expect(host.dispatchedNames()).toContain('work');
+    host.complete('work');
+    await tick();
+    expect(approver.getRunState('appr2', 'r2')!.status).toBe('completed');
+  });
+
+  it('v2 finally runs after a failure and does not overwrite the original failure', async () => {
+    saveTaskSpec(
+      root,
+      specOf({
+        schema_version: 2,
+        id: 'fin',
+        title: 'Fin',
+        goal: 'g',
+        nodes: [
+          { id: 'work', prompt: 'work' },
+          { id: 'cleanup', kind: 'finally', prompt: 'cleanup' },
+        ],
+      }),
+    );
+    const runner = makeRunner();
+    runner.run('fin', { runId: 'r1', verifyOnComplete: false });
+    await tick();
+    host.complete('work', { reason: 'error' });
+    await tick();
+    expect(host.dispatchedNames()).toContain('cleanup');
+    host.complete('cleanup');
+    await tick();
+    expect(runner.getRunState('fin', 'r1')!.status).toBe('failed');
+    expect(runner.getRunState('fin', 'r1')!.nodes.find((n) => n.id === 'cleanup')!.state).toBe('done');
+  });
+
+  it('v2 stop still runs a ready finally node', async () => {
+    saveTaskSpec(
+      root,
+      specOf({
+        schema_version: 2,
+        id: 'stfin',
+        title: 'Stfin',
+        goal: 'g',
+        nodes: [
+          { id: 'work', prompt: 'work' },
+          { id: 'cleanup', kind: 'finally', prompt: 'cleanup' },
+        ],
+      }),
+    );
+    const runner = makeRunner();
+    runner.run('stfin', { runId: 'r1', verifyOnComplete: false });
+    await tick();
+    await runner.stop('stfin', 'r1');
+    await tick();
+    expect(host.cancelled).toContain('sess-work');
+    expect(host.dispatchedNames()).toContain('cleanup');
+    host.complete('cleanup');
+    await tick();
+    expect(runner.getRunState('stfin', 'r1')!.status).toBe('stopped');
+  });
+
+  it('v2 skips a node whose when condition is false', async () => {
+    saveTaskSpec(
+      root,
+      specOf({
+        schema_version: 2,
+        id: 'when',
+        title: 'When',
+        goal: 'g',
+        params: [{ name: 'ok', default: false }],
+        nodes: [
+          { id: 'maybe', prompt: 'maybe', when: { ref: 'params.ok', op: 'eq', value: true } },
+          { id: 'always', prompt: 'always' },
+        ],
+      }),
+    );
+    const runner = makeRunner();
+    runner.run('when', { runId: 'r1', verifyOnComplete: false });
+    await tick();
+    expect(host.dispatchedNames()).toEqual(['always']);
+    expect(runner.getRunState('when', 'r1')!.nodes.find((n) => n.id === 'maybe')!.state).toBe('skipped');
+    host.complete('always');
+    await tick();
+    expect(runner.getRunState('when', 'r1')!.status).toBe('completed');
+  });
+
+  it('v2 marks a node invalid when declared outputs are not submitted', async () => {
+    saveTaskSpec(
+      root,
+      specOf({
+        schema_version: 2,
+        id: 'out',
+        title: 'Out',
+        goal: 'g',
+        nodes: [{ id: 'a', prompt: 'a', outputs: [{ name: 'summary', required: true }] }],
+      }),
+    );
+    const runner = makeRunner();
+    runner.run('out', { runId: 'r1', verifyOnComplete: false });
+    await tick();
+    host.complete('a', { finalText: 'ignored without submit' });
+    await tick();
+    expect(runner.getRunState('out', 'r1')!.nodes.find((n) => n.id === 'a')!.state).toBe('invalid');
+    expect(runner.getRunState('out', 'r1')!.status).toBe('failed');
+  });
+
+  it('v2 accepts submit_task_output and submit_task_verdict; parent text is not a verdict', async () => {
+    saveTaskSpec(
+      root,
+      specOf({
+        schema_version: 2,
+        id: 'ver',
+        title: 'Ver',
+        goal: 'g',
+        nodes: [{ id: 'a', prompt: 'a', outputs: [{ name: 'summary' }] }],
+      }),
+    );
+    const runner = makeRunner();
+    runner.run('ver', { runId: 'r1', orchestratorSessionId: 'orch' });
+    await tick();
+    expect(runner.submitNodeOutput('sess-a', { values: { summary: 'ok' } }).ok).toBe(true);
+    host.complete('a', { finalText: 'assistant prose' });
+    await tick();
+    expect(runner.getRunState('ver', 'r1')!.status).toBe('verifying');
+    host.completeSession('orch', { finalText: 'VERDICT: FAIL — human chatter' });
+    await tick();
+    expect(runner.getRunState('ver', 'r1')!.status).toBe('verifying');
+    runner.submitVerdict('orch', { result: 'pass' });
+    expect(runner.getRunState('ver', 'r1')!.status).toBe('completed');
+  });
+
+  it('v2 waiting-budget promotes only when idle and resumes after updateRunLimits', async () => {
+    saveTaskSpec(
+      root,
+      specOf({
+        schema_version: 2,
+        id: 'bud',
+        title: 'Bud',
+        goal: 'g',
+        token_budget: 1,
+        nodes: [
+          { id: 'a', prompt: 'a' },
+          { id: 'b', depends_on: ['a'], prompt: 'b' },
+        ],
+      }),
+    );
+    const runner = makeRunner();
+    runner.run('bud', { runId: 'r1', verifyOnComplete: false });
+    await tick();
+    host.complete('a', { finalText: 'A', tokenUsage: tu(2, 2) });
+    await tick();
+    expect(runner.getRunState('bud', 'r1')!.status).toBe('waiting-budget');
+    runner.updateRunLimits('bud', 'r1', 100);
+    await tick();
+    expect(host.dispatchedNames()).toContain('b');
+    host.complete('b');
+    await tick();
+    expect(runner.getRunState('bud', 'r1')!.status).toBe('completed');
   });
 });

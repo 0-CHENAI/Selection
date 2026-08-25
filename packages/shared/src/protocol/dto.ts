@@ -337,6 +337,19 @@ export interface TaskControlResultDto {
   conflict?: { code: 'conflict'; message: string }
 }
 
+export interface TaskRespondApprovalRequest {
+  slug: string
+  runId: string
+  nodeId: string
+  approved: boolean
+}
+
+export interface TaskUpdateRunLimitsRequest {
+  slug: string
+  runId: string
+  tokenBudget?: number
+}
+
 export interface TaskGetResult {
   slug: string
   validation: TaskValidationResultDto

@@ -154,6 +154,16 @@ export const UiLayoutSchema = z.object({
   viewport: z.object({ x: z.number(), y: z.number(), zoom: z.number() }).optional(),
 });
 
+export const RouteCaseSchema = z.object({
+  when: WhenSchema,
+  goto: slug('route target'),
+});
+
+export const RouteSchema = z.object({
+  cases: z.array(RouteCaseSchema).min(1),
+  default: slug('route default'),
+});
+
 export const TaskDefaultsSchema = z.object({
   model: z.string().min(1).optional(),
   llmConnection: z.string().min(1).optional(),
@@ -197,6 +207,7 @@ const TaskNodeObject = z.object({
   timeout: z.number().positive().optional(),
   cache: z.enum(CACHE_MODES).optional(),
   approval: z.boolean().optional(),
+  route: RouteSchema.optional(),
 });
 
 /**
@@ -280,6 +291,7 @@ export const TaskSpecSchema = z
 export type InputRef = z.infer<typeof InputRefSchema>;
 export type OutputDecl = z.infer<typeof OutputDeclSchema>;
 export type Loop = z.infer<typeof LoopSchema>;
+export type Route = z.infer<typeof RouteSchema>;
 export type Retry = z.infer<typeof RetrySchema>;
 export type TaskParam = z.infer<typeof TaskParamSchema>;
 export type TaskDefaults = z.infer<typeof TaskDefaultsSchema>;

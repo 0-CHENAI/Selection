@@ -1039,6 +1039,36 @@ export function TaskEditor({
               <Btn variant="secondary" onClick={() => void controlRun('stop')}>{t('tasks.stopRun')}</Btn>
             </div>
           )}
+          {isEdit && liveRun?.nodes.some((n) => n.state === 'waiting-approval') && (
+            <div className="flex items-center gap-1.5">
+              {liveRun.nodes.filter((n) => n.state === 'waiting-approval').map((n) => (
+                <span key={n.id} className="flex items-center gap-1">
+                  <Btn
+                    variant="secondary"
+                    onClick={() => void window.electronAPI.respondTaskApproval(workspaceId, {
+                      slug: editSlug!,
+                      runId: liveRun.runId,
+                      nodeId: n.id,
+                      approved: true,
+                    }).then((res) => { if (!res.conflict) setLiveRun(res.snapshot) })}
+                  >
+                    {t('tasks.approveNode', { id: n.id })}
+                  </Btn>
+                  <Btn
+                    variant="secondary"
+                    onClick={() => void window.electronAPI.respondTaskApproval(workspaceId, {
+                      slug: editSlug!,
+                      runId: liveRun.runId,
+                      nodeId: n.id,
+                      approved: false,
+                    }).then((res) => { if (!res.conflict) setLiveRun(res.snapshot) })}
+                  >
+                    {t('tasks.rejectNode', { id: n.id })}
+                  </Btn>
+                </span>
+              ))}
+            </div>
+          )}
           {tab === 'definition' && (
             <>
               <Btn variant="secondary" onClick={onClose} disabled={busy}>

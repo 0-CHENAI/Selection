@@ -81,6 +81,7 @@ export type RunLogEntry =
   | { t: string; kind: 'node-scheduled'; nodeId: string }
   | { t: string; kind: 'node-spawned'; nodeId: string; sessionId: string }
   | { t: string; kind: 'node-finished'; nodeId: string; sessionId: string; state: NodeRunState; reason?: string }
+  | { t: string; kind: 'node-waiting-approval'; nodeId: string; deadline?: string }
   | { t: string; kind: 'node-retry'; nodeId: string; attempt: number; reason: string }
   | {
       t: string;

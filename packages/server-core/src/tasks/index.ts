@@ -17,3 +17,4 @@ export type {
   NodeRunStatus,
 } from './TaskRunner';
 export { TaskControlError } from './TaskRunner';
+export { V2_IMPLEMENTED_KINDS, MAX_RUN_INSTANCES } from './executors';

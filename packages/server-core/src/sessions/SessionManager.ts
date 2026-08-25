@@ -4517,6 +4517,17 @@ export class SessionManager implements ISessionManager {
         },
         runTaskFn: async (input) => this.runTaskFromTool(managed.workspace.id, input),
         getTaskResultsFn: async (slug, runId) => loadTaskResults(managed.workspace.rootPath, slug, runId),
+        submitTaskOutputFn: async (input) => {
+          const runner = this.taskRunnerLookup?.(managed.workspace.id)
+          if (!runner) return { ok: false, error: 'Task runner is not available' }
+          return runner.submitNodeOutput(managed.id, input)
+        },
+        submitTaskVerdictFn: async (input) => {
+          const runner = this.taskRunnerLookup?.(managed.workspace.id)
+          if (!runner) throw new Error('Task runner is not available')
+          const snap = runner.submitVerdict(managed.id, input)
+          return { status: snap.status }
+        },
         getSessionInfoFn: (sessionId?: string) => {
           const targetId = sessionId ?? managed.id
           const session = this.sessions.get(targetId)
