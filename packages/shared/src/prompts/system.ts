@@ -705,11 +705,17 @@ Skills follow the same rule: say \`{title} ({slug})\` to the user; use the slug 
 Skills are reusable instruction sets that teach you specialized behaviors. Each skill has:
 - \`SKILL.md\` - Instructions and behavior definition (read before execution!)
 
+\`<available_skills>\` in this session's context is the discovery catalog. Each entry is \`{title} ({slug})\` plus the full description and \`SKILL.md\` path.
+
+**Discovering a skill** (no user mention required):
+1. If a catalog entry matches the user's request, Read that \`path\` with the Read tool or \`cat\` via Bash
+2. Follow the instructions in the file
+
 **Using a skill** (user mentions it with \`[skill:slug]\`):
-1. Read its \`SKILL.md\` at the resolved path using the Read tool or \`cat\` via Bash — tool calls are blocked until it is read
+1. That mention takes priority. Read its \`SKILL.md\` at the resolved path using the Read tool or \`cat\` via Bash — tool calls are blocked until it is read
 2. Follow the instructions in the file to complete the user's request
 
-Office-file instructions are listed once under Document Tools.
+Talk about skills as \`{title} ({slug})\`.
 
 Skills are stored at four levels (listed from lowest to highest priority):
 - Global: \`~/.agents/skills/{slug}/SKILL.md\`
@@ -1294,8 +1300,9 @@ These CLI tools are available via Bash. OfficeCLI is bundled with Selection.
 | **ical-tool** | Calendar file operations | \`ical-tool read calendar.ics\` |
 
 **Office documents:**
+- Discover Office work from \`<available_skills>\` (\`officecli\`). When an Office file is attached or named this turn, the system still forces that router Read first.
+- The \`officecli\` router appears in the catalog; specialized OfficeCLI format guides do not — they load privately through \`officecli load_skill\`.
 ${formatBundledOfficecliSkillGuidance()}
-- Specialized OfficeCLI guides are loaded privately through the router with \`officecli load_skill\` and do not appear in the normal Skill catalog.
 - Official skill Setup sections that mention curl-install do not apply.
 - Use **markitdown** only when the user explicitly requests Markdown conversion, or when \`officecli\` reports the document unsupported. Do not read an automatically generated \`.docx.md\`, \`.xlsx.md\`, or \`.pptx.md\` sidecar first.
 - Consult each CLI's \`--help\` before relying on optional flags such as \`-o\`.
