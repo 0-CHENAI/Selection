@@ -20,7 +20,7 @@ import {
   DropdownMenuSeparator,
 } from '@/components/ui/dropdown-menu'
 import type { KanbanModelProviderGroup, TaskEditorTarget } from './types'
-import { uid, buildSpec, specToSubtasks, canDependOn, quickAddNodeId, quickAddChildToSubtask, DEFAULT_REPAIR_ATTEMPTS, MAX_REPAIR_ATTEMPTS_CAP, SESSION_LIKE_KINDS, type EditorSubtask, type SpecNode, type TaskPermissionMode } from './task-spec-form'
+import { uid, buildSpec, specToSubtasks, sameAuthoredNodes, canDependOn, quickAddNodeId, quickAddChildToSubtask, DEFAULT_REPAIR_ATTEMPTS, MAX_REPAIR_ATTEMPTS_CAP, SESSION_LIKE_KINDS, type EditorSubtask, type SpecNode, type TaskPermissionMode } from './task-spec-form'
 import { ConductorWorkbench, type WorkbenchSpec } from './ConductorWorkbench'
 import { isTasksOrchestrateEnabled } from '@craft-agent/shared/feature-flags'
 import { resolveNodeStatePill } from './node-state-pill'
@@ -920,7 +920,9 @@ export function TaskEditor({
     if (next.goal) setGoal(next.goal)
     if (next.runner) setRunner(next.runner)
     if (next.ui?.layout?.nodes) setLayout(next.ui.layout.nodes)
-    setSubtasks(specToSubtasks(next.nodes))
+    setSubtasks((prev) =>
+      sameAuthoredNodes(prev, next.nodes ?? []) ? prev : specToSubtasks(next.nodes ?? []),
+    )
   }, [])
 
   const validateYamlDraft = React.useCallback(async () => {

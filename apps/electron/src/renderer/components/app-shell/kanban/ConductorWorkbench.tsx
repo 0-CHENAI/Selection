@@ -8,6 +8,7 @@ import {
   addEdge,
   useNodesState,
   useEdgesState,
+  useReactFlow,
   type Connection,
   type Node,
   type Edge,
@@ -18,6 +19,7 @@ import { isTasksOrchestrateEnabled } from '@craft-agent/shared/feature-flags'
 import {
   PALETTE_KINDS,
   applyGraphToSpec,
+  applyLayoutToSpec,
   autoLayout,
   classifyEdge,
   deleteImpact,
@@ -72,6 +74,9 @@ function fromFlow(nodes: Node[], edges: Edge[], spec: WorkbenchSpec): CanvasGrap
 
 function WorkbenchInner({ spec, liveRun, onSpecChange }: ConductorWorkbenchProps) {
   const { t } = useTranslation()
+  const { getNodes } = useReactFlow()
+  const specRef = React.useRef(spec)
+  specRef.current = spec
   const orchestrateOn = isTasksOrchestrateEnabled()
   const graph = specToGraph(spec)
   const hasCoords = spec.nodes.some((n) => spec.ui?.layout?.nodes?.[n.id])
@@ -153,7 +158,11 @@ function WorkbenchInner({ spec, liveRun, onSpecChange }: ConductorWorkbenchProps
             onNodesChange={onNodesChange}
             onEdgesChange={onEdgesChange}
             onConnect={onConnect}
-            onNodeDragStop={(_e, _n, next) => commit(next, edges)}
+            onNodeDragStop={() => {
+              const positions: Record<string, { x: number; y: number }> = {}
+              for (const n of getNodes()) positions[n.id] = { x: n.position.x, y: n.position.y }
+              onSpecChange(applyLayoutToSpec(specRef.current, positions))
+            }}
             onNodesDelete={(deleted) => {
               for (const n of deleted) {
                 const impact = deleteImpact({ nodes: [], edges: edges.map((e) => ({ source: e.source, target: e.target })) }, n.id)

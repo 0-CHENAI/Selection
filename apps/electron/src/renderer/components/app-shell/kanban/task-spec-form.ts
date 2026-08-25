@@ -236,6 +236,30 @@ export function buildSpec(form: SpecForm, modelToConnection: Map<string, string>
   }
 }
 
+/**
+ * True when editor rows already represent `nodes` (ids, edges, copy). Layout-only
+ * canvas writes must keep this true so we do not remint row uids; connect/delete
+ * change depends_on or membership and must return false.
+ */
+export function sameAuthoredNodes(rows: EditorSubtask[], nodes: SpecNode[]): boolean {
+  if (rows.length !== nodes.length) return false
+  const nodeIdByUid = new Map(rows.map((s) => [s.uid, s.nodeId ?? '']))
+  const rowByNodeId = new Map(rows.filter((s) => s.nodeId).map((s) => [s.nodeId!, s]))
+  for (const n of nodes) {
+    const row = rowByNodeId.get(n.id)
+    if (!row) return false
+    if ((row.kind ?? 'session') !== (n.kind ?? 'session')) return false
+    if (row.title !== (n.title || n.id)) return false
+    if (row.prompt !== (n.prompt || '')) return false
+    if ((row.model ?? '') !== (n.model ?? '')) return false
+    if ((row.llmConnection ?? '') !== (n.llmConnection ?? '')) return false
+    const rowDeps = row.dependsOn.map((u) => nodeIdByUid.get(u)).filter(Boolean).slice().sort()
+    const nodeDeps = [...(n.depends_on ?? [])].sort()
+    if (rowDeps.join('|') !== nodeDeps.join('|')) return false
+  }
+  return true
+}
+
 /** Map authored TaskSpec nodes → the editor's multi-dependency subtask rows. */
 export function specToSubtasks(nodes: SpecNode[], _fallbackModel?: string): EditorSubtask[] {
   const uidByNodeId = new Map<string, string>()

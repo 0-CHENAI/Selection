@@ -2,6 +2,7 @@ import { describe, it, expect } from 'bun:test'
 import {
   buildSpec,
   specToSubtasks,
+  sameAuthoredNodes,
   canDependOn,
   quickAddNodeId,
   quickAddSessionId,
@@ -392,6 +393,27 @@ describe('canDependOn cycle guard', () => {
 
   it('allows a safe, unrelated dependency', () => {
     expect(canDependOn(rows({ a: [], b: [], c: [] }), 'c', 'a')).toBe(true)
+  })
+})
+
+describe('sameAuthoredNodes', () => {
+  const generated: SpecNode[] = [
+    { id: 'a', title: 'A', prompt: 'pa' },
+    { id: 'b', title: 'B', prompt: 'pb', depends_on: ['a'] },
+    { id: 'c', title: 'C', kind: 'approval', depends_on: ['b'] },
+  ]
+
+  it('stays true for a layout-only write-back of the same authored nodes', () => {
+    expect(sameAuthoredNodes(specToSubtasks(generated), generated)).toBe(true)
+  })
+
+  it('is false when a canvas connect changes depends_on without changing ids', () => {
+    const connected = generated.map((n) => (n.id === 'c' ? { ...n, depends_on: ['a', 'b'] } : n))
+    expect(sameAuthoredNodes(specToSubtasks(generated), connected)).toBe(false)
+  })
+
+  it('is false when a generated node is missing from the next spec', () => {
+    expect(sameAuthoredNodes(specToSubtasks(generated), generated.slice(0, 1))).toBe(false)
   })
 })
 

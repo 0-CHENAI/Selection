@@ -95,6 +95,31 @@ export function graphToDependsOn(graph: CanvasGraph): Record<string, string[]> {
   return out
 }
 
+/**
+ * Drag/pan writes coordinates only. Never replace `spec.nodes` from a partial
+ * flow selection — xyflow's onNodeDragStop third argument is the dragged set.
+ */
+export function applyLayoutToSpec<T extends SpecLike>(
+  spec: T,
+  positions: Record<string, { x: number; y: number }>,
+): T {
+  const known = new Set(spec.nodes.map((n) => n.id))
+  const nodes = { ...spec.ui?.layout?.nodes }
+  for (const [id, pos] of Object.entries(positions)) {
+    if (known.has(id)) nodes[id] = pos
+  }
+  return {
+    ...spec,
+    ui: {
+      ...spec.ui,
+      layout: {
+        ...spec.ui?.layout,
+        nodes,
+      },
+    },
+  }
+}
+
 export function applyGraphToSpec<T extends SpecLike>(spec: T, graph: CanvasGraph): T {
   const deps = graphToDependsOn(graph)
   const layoutNodes: Record<string, { x: number; y: number }> = {}

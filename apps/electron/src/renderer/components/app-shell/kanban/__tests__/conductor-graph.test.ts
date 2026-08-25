@@ -2,6 +2,7 @@ import { describe, expect, it } from 'bun:test'
 import {
   specToGraph,
   applyGraphToSpec,
+  applyLayoutToSpec,
   autoLayout,
   classifyEdge,
   deleteImpact,
@@ -26,6 +27,28 @@ describe('conductor-graph', () => {
     const next = applyGraphToSpec(SPEC, graph)
     expect(next.nodes.find((n) => n.id === 'b')?.depends_on).toEqual(['a'])
     expect(next.ui?.layout?.nodes?.a).toBeDefined()
+  })
+
+  it('applyLayoutToSpec writes one dragged position without dropping generated nodes', () => {
+    const spec = {
+      ...SPEC,
+      ui: { layout: { nodes: { a: { x: 0, y: 0 }, b: { x: 10, y: 10 }, c: { x: 20, y: 20 } } } },
+    }
+    const next = applyLayoutToSpec(spec, { b: { x: 80, y: 90 }, ghost: { x: 1, y: 1 } })
+    expect(next.nodes.map((n) => n.id)).toEqual(['a', 'b', 'c'])
+    expect(next.nodes).toEqual(spec.nodes)
+    expect(next.ui?.layout?.nodes).toEqual({
+      a: { x: 0, y: 0 },
+      b: { x: 80, y: 90 },
+      c: { x: 20, y: 20 },
+    })
+  })
+
+  it('applyGraphToSpec replaces the node table (delete/add), so drag must not use a partial graph', () => {
+    const graph = specToGraph(SPEC)
+    const draggedOnly = { nodes: graph.nodes.filter((n) => n.id === 'b'), edges: graph.edges }
+    const next = applyGraphToSpec(SPEC, draggedOnly)
+    expect(next.nodes.map((n) => n.id)).toEqual(['b'])
   })
 
   it('rejects self-loops, duplicates, and cycles immediately', () => {
