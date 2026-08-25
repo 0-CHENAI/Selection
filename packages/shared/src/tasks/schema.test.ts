@@ -15,6 +15,7 @@ import {
   appendRunLog,
   readRunLog,
   writeNodeOutput,
+  writeNodeAttempt,
   readNodeOutput,
   listTaskSlugs,
   type RunLogEntry,
@@ -331,6 +332,12 @@ describe('storage', () => {
     writeNodeOutput(root, 'demo', 'r1', 'audit', { text: 'findings', params: { count: 3 } });
     expect(readNodeOutput(root, 'demo', 'r1', 'audit')).toEqual({ text: 'findings', params: { count: 3 } });
     expect(readNodeOutput(root, 'demo', 'r1', 'missing')).toBeNull();
+  });
+
+  it('reads the latest instance attempt when the v1 file is absent', () => {
+    writeNodeAttempt(root, 'demo', 'r1', 'fan#0', 1, { text: 'first' });
+    writeNodeAttempt(root, 'demo', 'r1', 'fan#0', 2, { text: 'second' });
+    expect(readNodeOutput(root, 'demo', 'r1', 'fan#0')).toEqual({ text: 'second' });
   });
 });
 

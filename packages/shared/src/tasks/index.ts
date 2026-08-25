@@ -17,3 +17,6 @@ export * from './document.ts';
 export * from './revisions.ts';
 export * from './generator-prompt.ts';
 export * from './results.ts';
+export * from './instances.ts';
+export * from './artifacts.ts';
+export * from './sensitive.ts';

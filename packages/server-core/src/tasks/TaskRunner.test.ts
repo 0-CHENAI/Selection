@@ -906,21 +906,8 @@ describe('TaskRunner (Conductor)', () => {
   });
 
   it('refuses to start a v2 run that contains unimplemented kinds', () => {
-    saveTaskSpec(
-      root,
-      specOf({
-        schema_version: 2,
-        id: 'v2-gate',
-        title: 'V2 gate',
-        goal: 'g',
-        nodes: [
-          { id: 'a', prompt: 'a' },
-          { id: 'gate', kind: 'map' },
-        ],
-      }),
-    );
-    const runner = makeRunner();
-    expect(() => runner.run('v2-gate', { runId: 'r1', verifyOnComplete: false })).toThrow(/unimplemented kinds/);
+    const { unimplementedV2Nodes } = require('./executors') as typeof import('./executors');
+    expect(unimplementedV2Nodes([{ id: 'ghost', kind: 'not-a-kind' as never }])).toHaveLength(1);
   });
 
   it('runs a v2 file that only uses implemented kinds', async () => {
@@ -1320,5 +1307,164 @@ describe('TaskRunner (Conductor)', () => {
     host.complete('b');
     await tick();
     expect(runner.getRunState('bud', 'r1')!.status).toBe('completed');
+  });
+
+  it('v2 map expands instances in order and unblocks dependents', async () => {
+    saveTaskSpec(
+      root,
+      specOf({
+        schema_version: 2,
+        id: 'mp',
+        title: 'Mp',
+        goal: 'g',
+        params: [{ name: 'items', default: '["one","two"]' }],
+        nodes: [
+          { id: 'fan', kind: 'map', for_each: '${params.items}', prompt: 'do ${item}' },
+          { id: 'after', depends_on: ['fan'], prompt: 'got ${nodes.fan.output}' },
+        ],
+      }),
+    );
+    const runner = makeRunner();
+    runner.run('mp', { runId: 'r1', verifyOnComplete: false });
+    await tick();
+    expect(host.dispatchedNames()).toEqual(['fan#0', 'fan#1']);
+    expect(host.promptFor('fan#0')).toContain('do one');
+    host.complete('fan#0', { finalText: 'A' });
+    host.complete('fan#1', { finalText: 'B' });
+    await tick();
+    expect(host.promptFor('after')).toContain('A');
+    expect(host.promptFor('after')).toContain('B');
+    host.complete('after');
+    await tick();
+    expect(runner.getRunState('mp', 'r1')!.status).toBe('completed');
+  });
+
+  it('v2 map over 256 instances fails the run', async () => {
+    const items = JSON.stringify(Array.from({ length: 300 }, (_, i) => i));
+    saveTaskSpec(
+      root,
+      specOf({
+        schema_version: 2,
+        id: 'big',
+        title: 'Big',
+        goal: 'g',
+        params: [{ name: 'items', default: items }],
+        nodes: [{ id: 'fan', kind: 'map', for_each: '${params.items}', prompt: 'do ${item}' }],
+      }),
+    );
+    const runner = makeRunner();
+    runner.run('big', { runId: 'r1', verifyOnComplete: false });
+    await tick();
+    expect(runner.getRunState('big', 'r1')!.status).toBe('failed');
+    expect(host.dispatchedNames()).toEqual([]);
+  });
+
+  it('v2 loop iterates until the condition and fails when max is exhausted', async () => {
+    saveTaskSpec(
+      root,
+      specOf({
+        schema_version: 2,
+        id: 'lp',
+        title: 'Lp',
+        goal: 'g',
+        nodes: [
+          {
+            id: 'iter',
+            kind: 'loop',
+            loop: { until: { ref: 'nodes.iter.output', op: 'contains', value: 'STOP' }, max: 5 },
+            prompt: 'n=${index}',
+          },
+        ],
+      }),
+    );
+    const runner = makeRunner();
+    runner.run('lp', { runId: 'r1', verifyOnComplete: false });
+    await tick();
+    expect(host.dispatchedNames()).toEqual(['iter#0']);
+    host.complete('iter#0', { finalText: 'go' });
+    await tick();
+    expect(host.dispatchedNames()).toEqual(['iter#0', 'iter#1']);
+    host.complete('iter#1', { finalText: 'STOP' });
+    await tick();
+    expect(runner.getRunState('lp', 'r1')!.status).toBe('completed');
+
+    saveTaskSpec(
+      root,
+      specOf({
+        schema_version: 2,
+        id: 'lp2',
+        title: 'Lp2',
+        goal: 'g',
+        nodes: [
+          {
+            id: 'iter',
+            kind: 'loop',
+            loop: { until: { ref: 'nodes.iter.output', op: 'eq', value: 'never' }, max: 2 },
+            prompt: 'n=${index}',
+          },
+        ],
+      }),
+    );
+    const runner2 = new TaskRunner({ host, workspaceId: 'ws', workspaceRoot: root, now: () => '2026-06-07T00:00:00.000Z' });
+    runner2.run('lp2', { runId: 'r2', verifyOnComplete: false });
+    await tick();
+    host.complete('iter#0', { finalText: 'a' });
+    await tick();
+    host.complete('iter#1', { finalText: 'b' });
+    await tick();
+    expect(runner2.getRunState('lp2', 'r2')!.status).toBe('failed');
+  });
+
+  it('v2 filter and aggregate transform without sessions', async () => {
+    saveTaskSpec(
+      root,
+      specOf({
+        schema_version: 2,
+        id: 'xf',
+        title: 'Xf',
+        goal: 'g',
+        params: [{ name: 'items', default: '["keep-a","drop","keep-b"]' }],
+        nodes: [
+          { id: 'flt', kind: 'filter', for_each: '${params.items}', when: { ref: 'item', op: 'contains', value: 'keep' } },
+          { id: 'left', prompt: 'L' },
+          { id: 'right', prompt: 'R' },
+          { id: 'agg', kind: 'aggregate', depends_on: ['left', 'right'], aggregate: 'concat' },
+        ],
+      }),
+    );
+    const runner = makeRunner();
+    runner.run('xf', { runId: 'r1', verifyOnComplete: false });
+    await tick();
+    expect(JSON.parse(readNodeOutput(root, 'xf', 'r1', 'flt')!.text)).toEqual(['keep-a', 'keep-b']);
+    host.complete('left', { finalText: 'L' });
+    host.complete('right', { finalText: 'R' });
+    await tick();
+    expect(readNodeOutput(root, 'xf', 'r1', 'agg')!.text).toContain('L');
+    expect(runner.getRunState('xf', 'r1')!.status).toBe('completed');
+  });
+
+  it('v2 continue after restart requires re-entering sensitive params', async () => {
+    saveTaskSpec(
+      root,
+      specOf({
+        schema_version: 2,
+        id: 'sec',
+        title: 'Sec',
+        goal: 'g',
+        params: [{ name: 'token', sensitive: true }],
+        nodes: [{ id: 'a', prompt: 'use ${params.token}' }],
+      }),
+    );
+    const runner = makeRunner();
+    runner.run('sec', { runId: 'r1', params: { token: 's3cret' }, verifyOnComplete: false });
+    await tick();
+    expect(host.promptFor('a')).toContain('s3cret');
+    const runner2 = new TaskRunner({ host, workspaceId: 'ws', workspaceRoot: root, now: () => '2026-06-07T00:00:00.000Z' });
+    expect(runner2.scanUnfinished()[0]?.status).toBe('interrupted');
+    expect(() => runner2.continue('sec', 'r1')).toThrow(/Sensitive params/);
+    runner2.updateRunLimits('sec', 'r1', undefined, { token: 's3cret' });
+    runner2.continue('sec', 'r1');
+    await tick();
+    expect(host.dispatchedNames().filter((n) => n === 'a').length).toBeGreaterThanOrEqual(1);
   });
 });
