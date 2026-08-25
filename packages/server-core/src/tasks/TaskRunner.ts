@@ -35,7 +35,7 @@ import {
   readNodeOutput,
   readRunLog,
   readRunSpecSnapshot,
-  loadTaskSpec,
+  loadTaskDocument,
   writeRunSpecSnapshot,
   listTaskSlugs,
   listRunIds,
@@ -92,6 +92,8 @@ export interface RunOptions {
   runId?: string;
   /** When the run completes, message the orchestrator to verify the result. Default true. */
   verifyOnComplete?: boolean;
+  /** Disk source version. Unsaved v1 files keep skip semantics; v2 refuses unimplemented kinds. */
+  sourceVersion?: 1 | 2;
 }
 
 export type { RunStatus };
@@ -154,6 +156,9 @@ const MAX_UNPARSED_REASKS = 2;
 const INPUTS_REF_RE = /\$\{\s*inputs\.([a-zA-Z_][a-zA-Z0-9_]*)\s*\}/g;
 
 /** v1 executes session nodes plus the orchestrator escape hatch; control-flow kinds wait for P4. */
+/** Kinds the v2 runner may execute. Unsaved v1 files still use the skip contract below. */
+export const V2_IMPLEMENTED_KINDS = new Set<TaskNode['kind']>(['session', 'orchestrator']);
+
 function isExecutableTaskNode(node: TaskNode): boolean {
   return node.kind === 'session' || node.kind === 'orchestrator';
 }
@@ -198,6 +203,7 @@ class ActiveRun {
   private dependents?: Map<string, Set<string>>;
   private settled = false;
   private settleResolvers: ((s: RunSnapshot) => void)[] = [];
+  private readonly sourceVersion: 1 | 2;
 
   constructor(
     private readonly spec: TaskSpec,
@@ -206,6 +212,7 @@ class ActiveRun {
     private readonly opts: Required<Pick<RunOptions, 'verifyOnComplete'>> & RunOptions,
     private readonly deps: TaskRunnerDeps,
   ) {
+    this.sourceVersion = opts.sourceVersion ?? (spec.schema_version === 2 ? 2 : 1);
     this.edges = materializeDeps(spec);
     this.maxParallel = spec.max_parallel ?? deps.defaultMaxParallel ?? DEFAULT_MAX_PARALLEL;
     // Runner-side clamp (belt-and-suspenders: the schema already caps `max_iterations` at the same
@@ -227,9 +234,10 @@ class ActiveRun {
     }
     this.log({ kind: 'run-started', taskId: this.spec.id, runId: this.runId, orchestratorSessionId: this.opts.orchestratorSessionId });
     this.runStatus = 'running';
-    // Move the task tile to the in-progress column for the duration of the run.
+    // v1 unsaved files keep skip semantics. v2 never silent-skips unimplemented kinds
+    // (those runs are refused before start()).
     for (const node of this.spec.nodes) {
-      if (!isExecutableTaskNode(node)) {
+      if (this.sourceVersion === 1 && !isExecutableTaskNode(node)) {
         const st = this.state.get(node.id)!;
         st.state = 'skipped';
         this.log({ kind: 'node-finished', nodeId: node.id, sessionId: '', state: 'skipped' });
@@ -402,13 +410,15 @@ class ActiveRun {
       return;
     }
     if (this.runStatus !== 'running') return;
-    // Resume/hydrate can leave deferred kinds pending; never dispatch them as sessions.
-    for (const node of this.spec.nodes) {
-      if (isExecutableTaskNode(node)) continue;
-      const st = this.state.get(node.id)!;
-      if (st.state !== 'pending') continue;
-      st.state = 'skipped';
-      this.log({ kind: 'node-finished', nodeId: node.id, sessionId: '', state: 'skipped' });
+    // Resume/hydrate of a v1 run can leave deferred kinds pending; never dispatch them as sessions.
+    if (this.sourceVersion === 1) {
+      for (const node of this.spec.nodes) {
+        if (isExecutableTaskNode(node)) continue;
+        const st = this.state.get(node.id)!;
+        if (st.state !== 'pending') continue;
+        st.state = 'skipped';
+        this.log({ kind: 'node-finished', nodeId: node.id, sessionId: '', state: 'skipped' });
+      }
     }
     for (const node of this.spec.nodes) {
       if (this.inFlight >= this.maxParallel) break;
@@ -893,8 +903,9 @@ function skillsPreamble(skills: string[] | undefined): string {
  * defaults to retrying on `error` (the common "transient failure" case); `empty`/`invalid`
  * triggers are opt-in and not yet produced by the runner, so they never match here.
  */
-function retryMatches(when: 'error' | 'empty' | 'invalid' | undefined, failure: 'error'): boolean {
-  return (when ?? 'error') === failure;
+function retryMatches(when: 'error' | 'empty' | 'invalid' | readonly string[] | undefined, failure: 'error'): boolean {
+  const list = !when ? ['error'] : Array.isArray(when) ? when : [when];
+  return list.includes(failure);
 }
 
 /**
@@ -943,10 +954,18 @@ export class TaskRunner {
 
   /** Load + validate a task's yaml and start a run. Throws if the task is missing or invalid. */
   run(slug: string, opts: RunOptions = {}): RunSnapshot {
-    const loaded = loadTaskSpec(this.deps.workspaceRoot, slug);
+    const loaded = loadTaskDocument(this.deps.workspaceRoot, slug);
     if (!loaded?.spec) throw new Error(`Task "${slug}" not found or has no valid task.yaml`);
     if (!loaded.valid) {
       throw new Error(`Refusing to run invalid task "${slug}": ${loaded.errors.map((e) => e.message).join('; ')}`);
+    }
+    if (loaded.sourceVersion === 2) {
+      const unimplemented = loaded.spec.nodes.filter((n) => !V2_IMPLEMENTED_KINDS.has(n.kind));
+      if (unimplemented.length) {
+        throw new Error(
+          `Cannot start a v2 run: unimplemented kinds: ${unimplemented.map((n) => `${n.id} (${n.kind})`).join(', ')}`,
+        );
+      }
     }
     // One active run per orchestrator: a second concurrent run would race the same parent session's
     // verdict listener (two runs attaching onSessionComplete on the same orchestrator would cross
@@ -968,7 +987,12 @@ export class TaskRunner {
       loaded.spec,
       slug,
       runId,
-      { ...opts, params: resolveParams(loaded.spec, opts.params), verifyOnComplete: opts.verifyOnComplete ?? true },
+      {
+        ...opts,
+        sourceVersion: loaded.sourceVersion,
+        params: resolveParams(loaded.spec, opts.params),
+        verifyOnComplete: opts.verifyOnComplete ?? true,
+      },
       this.deps,
     );
     this.runs.set(this.key(slug, runId), run);
@@ -1018,10 +1042,8 @@ export class TaskRunner {
 
   /** Reconstruct an in-memory run from the run spec snapshot + run-log. Never reads live YAML for the graph. */
   private rehydrate(slug: string, runId: string, mode: 'scan' | 'hydrate'): ActiveRun {
-    const snapshot = readRunSpecSnapshot(this.deps.workspaceRoot, slug, runId);
-    const live = loadTaskSpec(this.deps.workspaceRoot, slug);
-    const spec = snapshot ?? live?.spec;
-    if (!spec) throw new Error(`Cannot restore "${slug}:${runId}": no spec snapshot or task.yaml`);
+    const spec = readRunSpecSnapshot(this.deps.workspaceRoot, slug, runId);
+    if (!spec) throw new Error(`Cannot restore "${slug}:${runId}": no spec snapshot`);
     const log = readRunLog(this.deps.workspaceRoot, slug, runId);
     if (log.length === 0) throw new Error(`Cannot restore "${slug}:${runId}": no run-log found`);
     const started = log.find((e) => e.kind === 'run-started');
@@ -1030,7 +1052,12 @@ export class TaskRunner {
       spec,
       slug,
       runId,
-      { orchestratorSessionId, params: resolveParams(spec), verifyOnComplete: true },
+      {
+        orchestratorSessionId,
+        params: resolveParams(spec),
+        verifyOnComplete: true,
+        sourceVersion: spec.schema_version === 2 ? 2 : 1,
+      },
       this.deps,
     );
     run.hydrate(log, (nodeId) => readNodeOutput(this.deps.workspaceRoot, slug, runId, nodeId), mode);

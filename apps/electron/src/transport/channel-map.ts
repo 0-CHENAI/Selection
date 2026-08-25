@@ -32,6 +32,7 @@ export const CHANNEL_MAP = {
   // Tasks (Conductor)
   validateTask: invoke(RPC_CHANNELS.tasks.VALIDATE),
   createTask: invoke(RPC_CHANNELS.tasks.CREATE),
+  saveTask: invoke(RPC_CHANNELS.tasks.SAVE),
   generateTask: invoke(RPC_CHANNELS.tasks.GENERATE),
   runTask: invoke(RPC_CHANNELS.tasks.RUN),
   pauseTask: invoke(RPC_CHANNELS.tasks.PAUSE),

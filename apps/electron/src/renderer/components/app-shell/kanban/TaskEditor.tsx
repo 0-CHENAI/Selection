@@ -571,6 +571,9 @@ export function TaskEditor({
   const [resultsLoading, setResultsLoading] = React.useState(false)
   const [selectedRunId, setSelectedRunId] = React.useState<string | null>(null)
   const [liveRun, setLiveRun] = React.useState<Awaited<ReturnType<typeof window.electronAPI.runTask>> | null>(null)
+  const [etag, setEtag] = React.useState<string | null>(null)
+  const [sourceVersion, setSourceVersion] = React.useState<1 | 2 | undefined>(undefined)
+  const [migrationWarnings, setMigrationWarnings] = React.useState<string[]>([])
 
   // Jotai store handle for one-shot reads (no subscription — the editor must not re-render
   // on every streaming metadata tick just to have read children once at open).
@@ -627,6 +630,9 @@ export function TaskEditor({
             | { title?: string; goal?: string; acceptance_criteria?: string; max_iterations?: number; project?: string; cwd?: string; sources?: string[]; skills?: string[]; defaults?: { model?: string; llmConnection?: string; permissionMode?: TaskPermissionMode }; nodes?: Array<{ id: string; title?: string; prompt?: string; model?: string; llmConnection?: string; depends_on?: string[] }> }
             | undefined
           if (!spec) return
+          if (res.etag) setEtag(res.etag)
+          setSourceVersion(res.sourceVersion)
+          setMigrationWarnings(res.migrationWarnings ?? [])
           if (spec.title) setTitle(spec.title)
           if (spec.goal) setGoal(spec.goal)
           setAcceptanceCriteria(spec.acceptance_criteria ?? '')
@@ -905,6 +911,35 @@ export function TaskEditor({
     const draftId = generatedDraftRef.current
     setBusy(true)
     try {
+      if (isEdit && etag) {
+        const saved = await window.electronAPI.saveTask(workspaceId, { yaml, expectedEtag: etag })
+        if (saved.conflict) {
+          toast.error(t('tasks.toastEtagConflict'))
+          return
+        }
+        if (!saved.validation.valid) {
+          const first = saved.validation.errors[0]
+          toast.error(t('tasks.toastInvalid'), { description: first ? `${first.path}: ${first.message}` : undefined })
+          return
+        }
+        setEtag(saved.etag ?? null)
+        setSourceVersion(saved.sourceVersion)
+        setMigrationWarnings(saved.migrationWarnings ?? [])
+        if (!run) {
+          toast.success(t('tasks.toastSaved'), { description: saved.slug })
+          onClose()
+          return
+        }
+        const runResult = await window.electronAPI.runTask(workspaceId, {
+          slug: saved.slug,
+          orchestratorSessionId: editSessionId,
+        })
+        toast.success(t('tasks.toastStarted'), {
+          description: t('tasks.toastStartedDesc', { slug: saved.slug, runId: runResult.runId, count: runResult.nodes.length }),
+        })
+        onClose()
+        return
+      }
       // Edit mode binds the authored spec onto the tile's existing session; create mode reuses
       // a generate draft if present, else mints a fresh orchestrator.
       const created = await window.electronAPI.createTask(workspaceId, {
@@ -1025,6 +1060,17 @@ export function TaskEditor({
           )}
         </div>
       </div>
+
+      {tab === 'definition' && migrationWarnings.length > 0 && (
+        <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[12.5px] text-foreground/80">
+          {t('tasks.migrationBanner', { version: sourceVersion ?? 1 })}
+          <ul className="mt-1 list-disc pl-4">
+            {migrationWarnings.map((w) => (
+              <li key={w}>{w}</li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       {tab === 'results' ? (
         <ResultsPanel

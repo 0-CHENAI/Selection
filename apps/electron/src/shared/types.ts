@@ -184,6 +184,8 @@ import type {
   TaskValidationResultDto,
   TaskCreateRequest,
   TaskCreateResult,
+  TaskSaveRequest,
+  TaskSaveResult,
   TaskGenerateRequest,
   TaskGenerateAck,
   TaskGenerateResult,
@@ -240,6 +242,7 @@ export interface ElectronAPI {
   // Tasks (Conductor)
   validateTask(workspaceId: string, yaml: string): Promise<TaskValidationResultDto>
   createTask(workspaceId: string, req: TaskCreateRequest): Promise<TaskCreateResult>
+  saveTask(workspaceId: string, req: TaskSaveRequest): Promise<TaskSaveResult>
   generateTask(workspaceId: string, req: TaskGenerateRequest): Promise<TaskGenerateAck>
   /** Async generate result (or error), keyed by orchestratorSessionId. Subscribe before/after generateTask. */
   onTaskGenerated(callback: (workspaceId: string, result: TaskGenerateResult) => void): () => void

@@ -93,14 +93,8 @@ export const OutputDeclSchema = z.object({
   kind: z.enum(OUTPUT_KINDS).optional(),
   type: z.string().optional(),
   enum: z.array(z.string()).optional(),
-});
-
-/** Bounded loop control (Loop-Until-Done). `max` is mandatory — an unbounded loop burns tokens forever. */
-export const LoopSchema = z.object({
-  until: z.string().min(1),
-  max: z.number().int().positive(),
-  else: z.string().optional(),
-  carry: z.string().optional(),
+  required: z.boolean().optional(),
+  description: z.string().optional(),
 });
 
 export const RetrySchema = z.object({
@@ -112,7 +106,7 @@ export const RetrySchema = z.object({
       max: z.number().positive().optional(),
     })
     .optional(),
-  when: z.enum(RETRY_WHEN).optional(),
+  when: z.union([z.enum(RETRY_WHEN), z.array(z.enum(RETRY_WHEN))]).optional(),
 });
 
 export const TaskParamSchema = z.object({
@@ -120,6 +114,44 @@ export const TaskParamSchema = z.object({
   type: z.enum(PARAM_TYPES).optional(),
   default: z.unknown().optional(),
   enum: z.array(z.string()).optional(),
+  sensitive: z.boolean().optional(),
+});
+
+export const CONDITION_OPS = ['exists', 'eq', 'ne', 'gt', 'gte', 'lt', 'lte', 'contains', 'in'] as const;
+
+export type ConditionAst =
+  | { ref: string; op: (typeof CONDITION_OPS)[number]; value?: unknown }
+  | { all: ConditionAst[] }
+  | { any: ConditionAst[] }
+  | { not: ConditionAst };
+
+export const ConditionAstSchema: z.ZodType<ConditionAst> = z.lazy(() =>
+  z.union([
+    z.object({
+      ref: z.string().min(1),
+      op: z.enum(CONDITION_OPS),
+      value: z.unknown().optional(),
+    }),
+    z.object({ all: z.array(ConditionAstSchema).min(1) }),
+    z.object({ any: z.array(ConditionAstSchema).min(1) }),
+    z.object({ not: ConditionAstSchema }),
+  ]),
+);
+
+export const WhenSchema = z.union([z.string().min(1), ConditionAstSchema]);
+
+/** Bounded loop control (Loop-Until-Done). `max` is mandatory — an unbounded loop burns tokens forever. */
+export const LoopSchema = z.object({
+  until: WhenSchema,
+  max: z.number().int().positive(),
+  else: z.string().optional(),
+  carry: z.string().optional(),
+});
+
+export const UiLayoutSchema = z.object({
+  direction: z.enum(['TB', 'LR']).optional(),
+  nodes: z.record(z.string(), z.object({ x: z.number(), y: z.number() })).optional(),
+  viewport: z.object({ x: z.number(), y: z.number(), zoom: z.number() }).optional(),
 });
 
 export const TaskDefaultsSchema = z.object({
@@ -154,7 +186,7 @@ const TaskNodeObject = z.object({
   outputs: z.array(OutputDeclSchema).optional(),
 
   // Control-flow (parsed now, executed in P4).
-  when: z.string().optional(),
+  when: WhenSchema.optional(),
   trigger: z.enum(TRIGGER_RULES).optional(),
   replicas: z.number().int().positive().optional(),
   aggregate: z.enum(AGGREGATE_MODES).optional(),
@@ -189,6 +221,7 @@ export const TaskNodeSchema = z.preprocess((raw) => {
 
 export const TaskSpecSchema = z
   .object({
+    schema_version: z.literal(2).optional(),
     id: slug('task id'),
     title: z.string().min(1),
     goal: z.string().min(1),
@@ -216,6 +249,7 @@ export const TaskSpecSchema = z
     nodes: z.array(TaskNodeSchema).min(1, 'A task must define at least one node'),
     /** Named task outputs → reference strings, e.g. { result: "${nodes.review.output}" }. */
     outputs: z.record(z.string(), z.string()).optional(),
+    ui: z.object({ layout: UiLayoutSchema.optional() }).optional(),
   })
   .superRefine((spec, ctx) => {
     const seen = new Set<string>();
