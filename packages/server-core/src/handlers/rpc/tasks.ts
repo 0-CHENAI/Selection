@@ -81,6 +81,7 @@ function toValidationDto(result: ReturnType<typeof parseTaskYaml>): TaskValidati
     errors: result.errors.map(issue),
     warnings: result.warnings.map(issue),
     estimate: result.spec ? { nodeCount: result.spec.nodes.length, sessionNodeCount } : undefined,
+    ...(result.spec ? { spec: result.spec } : {}),
   }
 }
 

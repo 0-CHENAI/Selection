@@ -20,7 +20,9 @@ import {
   DropdownMenuSeparator,
 } from '@/components/ui/dropdown-menu'
 import type { KanbanModelProviderGroup, TaskEditorTarget } from './types'
-import { uid, buildSpec, specToSubtasks, canDependOn, quickAddNodeId, quickAddChildToSubtask, DEFAULT_REPAIR_ATTEMPTS, MAX_REPAIR_ATTEMPTS_CAP, type EditorSubtask, type TaskPermissionMode } from './task-spec-form'
+import { uid, buildSpec, specToSubtasks, canDependOn, quickAddNodeId, quickAddChildToSubtask, DEFAULT_REPAIR_ATTEMPTS, MAX_REPAIR_ATTEMPTS_CAP, SESSION_LIKE_KINDS, type EditorSubtask, type SpecNode, type TaskPermissionMode } from './task-spec-form'
+import { ConductorWorkbench, type WorkbenchSpec } from './ConductorWorkbench'
+import { isTasksOrchestrateEnabled } from '@craft-agent/shared/feature-flags'
 import { resolveNodeStatePill } from './node-state-pill'
 import { SourceAvatar } from '@/components/ui/source-avatar'
 import { SkillAvatar } from '@/components/ui/skill-avatar'
@@ -64,7 +66,7 @@ function resolveModelName(groups: KanbanModelProviderGroup[], id: string): strin
 }
 
 type Mode = 'generate' | 'manual'
-type Tab = 'definition' | 'results'
+type Tab = 'definition' | 'canvas' | 'yaml' | 'results'
 
 // The target type lives in ./types so the editor-target atom can import it without
 // pulling in this component module; re-exported here for existing consumers.
@@ -529,6 +531,11 @@ export function TaskEditor({
   const { projects } = useProjects(workspaceId)
   const [tab, setTab] = React.useState<Tab>('definition')
   const [mode, setMode] = React.useState<Mode>('manual')
+  const [runner, setRunner] = React.useState<'conduct' | 'orchestrate'>('conduct')
+  const [layout, setLayout] = React.useState<Record<string, { x: number; y: number }>>({})
+  const [yamlDraft, setYamlDraft] = React.useState('')
+  const [yamlDiagnostics, setYamlDiagnostics] = React.useState<string[]>([])
+  const [dirty, setDirty] = React.useState(false)
   const [title, setTitle] = React.useState('')
   const [goal, setGoal] = React.useState('')
   const [acceptanceCriteria, setAcceptanceCriteria] = React.useState('')
@@ -627,12 +634,16 @@ export function TaskEditor({
         .then((res) => {
           if (cancelled) return
           const spec = res.spec as
-            | { title?: string; goal?: string; acceptance_criteria?: string; max_iterations?: number; project?: string; cwd?: string; sources?: string[]; skills?: string[]; defaults?: { model?: string; llmConnection?: string; permissionMode?: TaskPermissionMode }; nodes?: Array<{ id: string; title?: string; prompt?: string; model?: string; llmConnection?: string; depends_on?: string[] }> }
+            | { title?: string; goal?: string; acceptance_criteria?: string; max_iterations?: number; project?: string; cwd?: string; sources?: string[]; skills?: string[]; runner?: 'conduct' | 'orchestrate'; defaults?: { model?: string; llmConnection?: string; permissionMode?: TaskPermissionMode }; nodes?: Array<{ id: string; title?: string; kind?: SpecNode['kind']; prompt?: string; model?: string; llmConnection?: string; depends_on?: string[] }>; ui?: { layout?: { nodes?: Record<string, { x: number; y: number }> } } }
             | undefined
           if (!spec) return
           if (res.etag) setEtag(res.etag)
           setSourceVersion(res.sourceVersion)
           setMigrationWarnings(res.migrationWarnings ?? [])
+          if (res.yaml) setYamlDraft(res.yaml)
+          if (spec.runner) setRunner(spec.runner)
+          if (spec.ui?.layout?.nodes) setLayout(spec.ui.layout.nodes)
+          setDirty(false)
           if (spec.title) setTitle(spec.title)
           if (spec.goal) setGoal(spec.goal)
           setAcceptanceCriteria(spec.acceptance_criteria ?? '')
@@ -750,8 +761,10 @@ export function TaskEditor({
 
   const project = projects.find((p) => p.config.id === projectId)
 
-  const updateSubtask = (id: string, patch: Partial<EditorSubtask>) =>
+  const updateSubtask = (id: string, patch: Partial<EditorSubtask>) => {
+    setDirty(true)
     setSubtasks((prev) => prev.map((s) => (s.uid === id ? { ...s, ...patch } : s)))
+  }
   const removeSubtask = (id: string) =>
     setSubtasks((prev) =>
       prev.filter((s) => s.uid !== id).map((s) => ({ ...s, dependsOn: s.dependsOn.filter((d) => d !== id) })),
@@ -869,6 +882,74 @@ export function TaskEditor({
     }
   }
 
+  const currentSpec = React.useCallback((): WorkbenchSpec => {
+    return buildSpec(
+      {
+        title,
+        goal,
+        acceptanceCriteria,
+        maxRepairs: maxRepairs.trim() === '' ? undefined : Number(maxRepairs),
+        projectId,
+        orchModel,
+        orchConnection,
+        permissionMode,
+        boundProjectId,
+        subtasks,
+        cwd,
+        sourceSlugs,
+        skillSlugs,
+        fixedId: editSlug,
+        runner,
+        layout,
+      },
+      modelToConnection,
+    ) as WorkbenchSpec
+  }, [
+    title, goal, acceptanceCriteria, maxRepairs, projectId, orchModel, orchConnection, permissionMode,
+    boundProjectId, subtasks, cwd, sourceSlugs, skillSlugs, editSlug, runner, layout, modelToConnection,
+  ])
+
+  const requestClose = React.useCallback(() => {
+    if (dirty && !window.confirm(t('tasks.discardUnsaved'))) return
+    onClose()
+  }, [dirty, onClose, t])
+
+  const applyWorkbenchSpec = React.useCallback((next: WorkbenchSpec) => {
+    setDirty(true)
+    if (next.title) setTitle(next.title)
+    if (next.goal) setGoal(next.goal)
+    if (next.runner) setRunner(next.runner)
+    if (next.ui?.layout?.nodes) setLayout(next.ui.layout.nodes)
+    setSubtasks(specToSubtasks(next.nodes))
+  }, [])
+
+  const validateYamlDraft = React.useCallback(async () => {
+    try {
+      const res = await window.electronAPI.validateTask(workspaceId, yamlDraft)
+      if (!res.valid) {
+        setYamlDiagnostics(res.errors.map((e) => `${e.path}: ${e.message}`))
+        return
+      }
+      setYamlDiagnostics([])
+      if (res.spec) applyWorkbenchSpec(res.spec as WorkbenchSpec)
+    } catch (err) {
+      setYamlDiagnostics([err instanceof Error ? err.message : String(err)])
+    }
+  }, [workspaceId, yamlDraft, applyWorkbenchSpec])
+
+  React.useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === 's') {
+        e.preventDefault()
+        void submit(false)
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+    // submit is recreated each render; bind to current closure.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  })
+
   // Create the task (write task.yaml + orchestrator session). When `run` is true, also start a
   // run; otherwise the task tile just lands on the board in ToDo for the user to run later.
   async function submit(run: boolean) {
@@ -880,7 +961,7 @@ export function TaskEditor({
       toast.error(t('tasks.toastNeedSubtask'))
       return
     }
-    if (subtasks.some((s) => !s.prompt.trim())) {
+    if (subtasks.some((s) => SESSION_LIKE_KINDS.has(s.kind ?? 'session') && !s.prompt.trim())) {
       toast.error(t('tasks.toastNeedPrompt'))
       return
     }
@@ -902,6 +983,8 @@ export function TaskEditor({
         sourceSlugs,
         skillSlugs,
         fixedId: editSlug,
+        runner,
+        layout,
       },
       modelToConnection,
     )
@@ -995,29 +1078,33 @@ export function TaskEditor({
     <div className="flex h-full flex-col gap-3 bg-background p-3 text-foreground">
       {/* Header */}
       <div className="flex items-center gap-2.5 rounded-xl border border-border bg-card px-3 py-2.5 shadow-minimal">
-        <Btn variant="ghost" className="px-2" onClick={onClose}>
+        <Btn variant="ghost" className="px-2" onClick={requestClose}>
           <ChevronLeft className="h-4 w-4" strokeWidth={2} /> {t('kanban.board')}
         </Btn>
         <span className="text-foreground/25">/</span>
         <span className="text-sm font-semibold">{isEdit ? t('tasks.editTask') : t('kanban.newTask')}</span>
 
         {/* Definition / Results tabs — edit mode only (results need a backing task to read). */}
-        {isEdit && (
-          <div className="ml-3 inline-flex rounded-[9px] bg-foreground/[0.05] p-0.5">
-            {(['definition', 'results'] as Tab[]).map((tb) => (
-              <button
-                key={tb}
-                onClick={() => setTab(tb)}
-                className={cn(
-                  'rounded-[7px] px-3 py-1 text-[12.5px] font-semibold transition-colors',
-                  tab === tb ? 'bg-card text-foreground shadow-minimal' : 'text-foreground/55 hover:text-foreground/80',
-                )}
-              >
-                {tb === 'definition' ? t('tasks.tabDefinition') : t('tasks.tabResults')}
-              </button>
-            ))}
-          </div>
-        )}
+        <div className="ml-3 inline-flex rounded-[9px] bg-foreground/[0.05] p-0.5">
+          {(isEdit ? (['definition', 'canvas', 'yaml', 'results'] as Tab[]) : (['definition', 'canvas', 'yaml'] as Tab[])).map((tb) => (
+            <button
+              key={tb}
+              onClick={() => {
+                if (tb === 'yaml') setYamlDraft(JSON.stringify(currentSpec(), null, 2))
+                setTab(tb)
+              }}
+              className={cn(
+                'rounded-[7px] px-3 py-1 text-[12.5px] font-semibold transition-colors',
+                tab === tb ? 'bg-card text-foreground shadow-minimal' : 'text-foreground/55 hover:text-foreground/80',
+              )}
+            >
+              {tb === 'definition' && t('tasks.tabDefinition')}
+              {tb === 'canvas' && t('tasks.tabCanvas')}
+              {tb === 'yaml' && t('tasks.tabYaml')}
+              {tb === 'results' && t('tasks.tabResults')}
+            </button>
+          ))}
+        </div>
 
         <div className="ml-auto flex items-center gap-2">
           {isEdit && onOpenSession && (
@@ -1069,9 +1156,9 @@ export function TaskEditor({
               ))}
             </div>
           )}
-          {tab === 'definition' && (
+          {(tab === 'definition' || tab === 'canvas' || tab === 'yaml') && (
             <>
-              <Btn variant="secondary" onClick={onClose} disabled={busy}>
+              <Btn variant="secondary" onClick={requestClose} disabled={busy}>
                 {t('common.cancel')}
               </Btn>
               <Btn variant="secondary" onClick={() => submit(false)} disabled={busy}>
@@ -1113,6 +1200,29 @@ export function TaskEditor({
           }}
           onOpenChildSession={onOpenChildSession}
         />
+      ) : tab === 'yaml' ? (
+        <div className="flex min-h-0 flex-1 flex-col gap-2">
+          <textarea
+            className="min-h-[280px] flex-1 rounded-xl border border-border bg-card p-3 font-mono text-[12px]"
+            value={yamlDraft}
+            onChange={(e) => {
+              setDirty(true)
+              setYamlDraft(e.target.value)
+            }}
+            onBlur={() => void validateYamlDraft()}
+            spellCheck={false}
+            aria-label={t('tasks.tabYaml')}
+          />
+          {yamlDiagnostics.length > 0 && (
+            <ul className="rounded-lg border border-red-500/30 bg-red-500/10 p-2 text-[12px] text-red-700">
+              {yamlDiagnostics.map((d) => (
+                <li key={d}>{d}</li>
+              ))}
+            </ul>
+          )}
+        </div>
+      ) : tab === 'canvas' ? (
+        <ConductorWorkbench spec={currentSpec()} liveRun={liveRun} onSpecChange={applyWorkbenchSpec} />
       ) : (
       /* Body */
       <div className="grid min-h-0 flex-1 grid-cols-[minmax(360px,2fr)_3fr] gap-3">
@@ -1202,6 +1312,29 @@ export function TaskEditor({
               </DropdownMenu>
             </FieldRow>
 
+            <FieldRow label={t('tasks.runnerLabel')}>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <SelectButton style={{ width: 196 }}>
+                    <span className="truncate">{runner === 'orchestrate' ? t('tasks.orchestrateBeta') : 'conduct'}</span>
+                  </SelectButton>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem className="text-xs" onSelect={() => { setRunner('conduct'); setDirty(true) }}>
+                    conduct
+                    {runner === 'conduct' && <Check className="ml-auto h-3.5 w-3.5 shrink-0" strokeWidth={2} />}
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    className="text-xs"
+                    disabled={!isTasksOrchestrateEnabled()}
+                    onSelect={() => { setRunner('orchestrate'); setDirty(true) }}
+                  >
+                    {t('tasks.orchestrateBeta')}
+                    {runner === 'orchestrate' && <Check className="ml-auto h-3.5 w-3.5 shrink-0" strokeWidth={2} />}
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </FieldRow>
             <FieldRow label={t('tasks.orchestratorModel')}>
               <ModelSelect
                 value={orchModel}

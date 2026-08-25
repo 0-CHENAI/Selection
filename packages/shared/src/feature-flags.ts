@@ -49,6 +49,16 @@ export function isCraftAgentsCliEnabled(): boolean {
 }
 
 /**
+ * Restricted orchestrate runner. Defaults off until P4/P5 gates pass.
+ * Override with CRAFT_FEATURE_TASKS_ORCHESTRATE=1|0.
+ */
+export function isTasksOrchestrateEnabled(): boolean {
+  const override = parseBooleanEnv(getEnv('CRAFT_FEATURE_TASKS_ORCHESTRATE'));
+  if (override !== undefined) return override;
+  return false;
+}
+
+/**
  * Runtime-evaluated check for embedded server settings page.
  *
  * Defaults to disabled. Override with CRAFT_FEATURE_EMBEDDED_SERVER=1|0.
@@ -86,5 +96,8 @@ export const FEATURE_FLAGS = {
    */
   get embeddedServer(): boolean {
     return isEmbeddedServerEnabled();
+  },
+  get tasksOrchestrate(): boolean {
+    return isTasksOrchestrateEnabled();
   },
 } as const;
