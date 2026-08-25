@@ -230,6 +230,17 @@ export default function SourceInfoPage({ sourceSlug, workspaceId, onDelete }: So
       setMcpToolsError(null)
       return
     }
+    if (
+      source.config.connectionStatus === 'connecting'
+      || source.config.connectionStatus === 'needs_auth'
+      || source.config.connectionStatus === 'failed'
+      || source.config.connectionStatus === 'untested'
+    ) {
+      setMcpTools(null)
+      setMcpToolsError(null)
+      setMcpToolsLoading(source.config.connectionStatus === 'connecting')
+      return
+    }
 
     let isMounted = true
     setMcpToolsLoading(true)
@@ -358,6 +369,16 @@ export default function SourceInfoPage({ sourceSlug, workspaceId, onDelete }: So
     window.electronAPI.openUrl(`craftagents://sources/source/${sourceSlug}?window=focused`)
   }, [sourceSlug])
 
+  const handleRetryConnection = useCallback(async () => {
+    try {
+      await window.electronAPI.retryMcpConnection(workspaceId, sourceSlug)
+    } catch (error) {
+      toast.error(t('sourcesList.statusConnectionFailed'), {
+        description: error instanceof Error ? error.message : String(error),
+      })
+    }
+  }, [sourceSlug, t, workspaceId])
+
   const sourceName = source ? resolveSourceTitle(source) : sourceSlug
   const rename = useDisplayTitleRename('source', workspaceId)
   const renameTarget = source && {
@@ -383,6 +404,11 @@ export default function SourceInfoPage({ sourceSlug, workspaceId, onDelete }: So
             onRename={() => source && renameTarget && rename.start(source.config.slug, renameTarget)}
             onExport={() => setExportOpen(true)}
             onDelete={handleDelete}
+            onRetryConnection={source?.config.type === 'mcp'
+              && (source.config.connectionStatus === 'failed'
+                || (source.config.connectionStatus === 'needs_auth' && Boolean(source.config.connectionError)))
+              ? () => void handleRetryConnection()
+              : undefined}
           />
         }
       />
@@ -428,7 +454,16 @@ export default function SourceInfoPage({ sourceSlug, workspaceId, onDelete }: So
                 <div className="px-4 py-2 border-t border-border/30 bg-destructive/5">
                   <div className="flex items-start gap-2 text-sm text-destructive">
                     <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
-                    <span>{source.config.connectionError}</span>
+                    <span className="flex-1">{source.config.connectionError}</span>
+                    {source.config.type === 'mcp' && (
+                      <button
+                        type="button"
+                        className="shrink-0 font-medium underline-offset-2 hover:underline focus-visible:underline"
+                        onClick={() => void handleRetryConnection()}
+                      >
+                        {t('common.retry')}
+                      </button>
+                    )}
                   </div>
                 </div>
               )}

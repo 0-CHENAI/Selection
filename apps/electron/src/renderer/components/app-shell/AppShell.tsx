@@ -126,6 +126,7 @@ import type { SettingsSubpage } from "../../../shared/types"
 import { SourcesListPanel } from "./SourcesListPanel"
 import { SkillsListPanel } from "./SkillsListPanel"
 import { ExternalResourceImportDialog } from "@/components/resources/ExternalResourceImportDialog"
+import { importSkillFromFile, openSkillFilePicker } from "@/components/resources/external-resource-import"
 import { AutomationsListPanel } from "../automations/AutomationsListPanel"
 import { ProjectsListPanel } from "./ProjectsListPanel"
 import { APP_EVENTS, AGENT_EVENTS, type AutomationFilterKind, AUTOMATION_TYPE_TO_FILTER_KIND } from "../automations/types"
@@ -1889,7 +1890,35 @@ function AppShellContent({
   const [copySkillsFromOpen, setCopySkillsFromOpen] = useState(false)
   const [copySourcesFromOpen, setCopySourcesFromOpen] = useState(false)
   const [mcpFileImportOpen, setMcpFileImportOpen] = useState(false)
-  const [skillFileImportOpen, setSkillFileImportOpen] = useState(false)
+  const skillFileInputRef = useRef<HTMLInputElement>(null)
+  const skillFileImporting = useRef(false)
+
+  const handleImportSkillFromFile = useCallback(() => {
+    if (!activeWorkspaceId || skillFileImporting.current) return
+    if (skillFileInputRef.current) openSkillFilePicker(skillFileInputRef.current)
+  }, [activeWorkspaceId])
+
+  const handleSkillImportFileChange = useCallback(async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0]
+    event.target.value = ''
+    if (!file || !activeWorkspaceId || skillFileImporting.current) return
+
+    skillFileImporting.current = true
+    try {
+      const result = await importSkillFromFile(window.electronAPI, activeWorkspaceId, file)
+      if (result.status === 'imported') {
+        toast.success(t('fileImport.skillImported', { slug: result.slug }))
+      } else if (result.status === 'skipped') {
+        toast.success(t('fileImport.skipped'))
+      }
+    } catch (error) {
+      toast.error(t('fileImport.skillFailed'), {
+        description: error instanceof Error ? error.message : String(error),
+      })
+    } finally {
+      skillFileImporting.current = false
+    }
+  }, [activeWorkspaceId, t])
 
   // Stores the Y position of the last right-clicked sidebar item so the EditPopover
   // appears near it rather than at a fixed location. Updated synchronously before
@@ -3493,7 +3522,7 @@ function AppShellContent({
                       <HeaderIconButton
                         icon={<FileUp className="h-4 w-4" />}
                         tooltip={t("fileImport.skillTitle")}
-                        onClick={() => setSkillFileImportOpen(true)}
+                        onClick={handleImportSkillFromFile}
                       />
                       <EditPopover
                         trigger={
@@ -3558,7 +3587,7 @@ function AppShellContent({
                 selectedSkillSlug={isSkillsNavigation(navState) && navState.details?.type === 'skill' ? navState.details.skillSlug : null}
                 copyFromOpen={copySkillsFromOpen}
                 onCopyFromOpenChange={setCopySkillsFromOpen}
-                onImportFromFile={() => setSkillFileImportOpen(true)}
+                onImportFromFile={handleImportSkillFromFile}
               />
             )}
             {isProjectsNavigation(navState) && activeWorkspaceId && (
@@ -3865,17 +3894,17 @@ function AppShellContent({
           />
           {activeWorkspaceId && (
             <>
-              <ExternalResourceImportDialog
-                open={mcpFileImportOpen}
-                kind="mcp"
-                workspaceId={activeWorkspaceId}
-                onOpenChange={setMcpFileImportOpen}
+              <input
+                ref={skillFileInputRef}
+                type="file"
+                accept=".md,.zip"
+                className="hidden"
+                onChange={(event) => void handleSkillImportFileChange(event)}
               />
               <ExternalResourceImportDialog
-                open={skillFileImportOpen}
-                kind="skill"
+                open={mcpFileImportOpen}
                 workspaceId={activeWorkspaceId}
-                onOpenChange={setSkillFileImportOpen}
+                onOpenChange={setMcpFileImportOpen}
               />
             </>
           )}

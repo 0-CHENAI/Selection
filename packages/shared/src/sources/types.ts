@@ -408,13 +408,14 @@ export interface LocalSourceConfig {
 
 /**
  * Source connection status
+ * - 'connecting': Source is being authenticated or validated in the background
  * - 'connected': Source is connected and working
  * - 'needs_auth': Source requires authentication
  * - 'failed': Connection failed with error
  * - 'untested': Connection has not been tested
  * - 'local_disabled': Stdio source is disabled (local MCP servers off)
  */
-export type SourceConnectionStatus = 'connected' | 'needs_auth' | 'failed' | 'untested' | 'local_disabled';
+export type SourceConnectionStatus = 'connecting' | 'connected' | 'needs_auth' | 'failed' | 'untested' | 'local_disabled';
 
 // ============================================================================
 // Source Brand

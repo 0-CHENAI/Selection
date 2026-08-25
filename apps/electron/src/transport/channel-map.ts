@@ -230,6 +230,7 @@ export const CHANNEL_MAP = {
   getDefaultPermissionsConfig: invoke(RPC_CHANNELS.permissions.GET_DEFAULTS),
   onDefaultPermissionsChanged: listener(RPC_CHANNELS.permissions.DEFAULTS_CHANGED),
   getMcpTools: invoke(RPC_CHANNELS.sources.GET_MCP_TOOLS),
+  retryMcpConnection: invoke(RPC_CHANNELS.sources.RETRY_CONNECTION),
   setSourceDisplayTitle: invoke(RPC_CHANNELS.sources.SET_DISPLAY_TITLE),
 
   // Session content search

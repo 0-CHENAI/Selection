@@ -483,6 +483,7 @@ export interface ElectronAPI {
   getWorkspacePermissionsConfig(workspaceId: string): Promise<import('@craft-agent/shared/agent').PermissionsConfigFile | null>
   getDefaultPermissionsConfig(): Promise<{ config: import('@craft-agent/shared/agent').PermissionsConfigFile | null; path: string }>
   getMcpTools(workspaceId: string, sourceSlug: string): Promise<McpToolsResult>
+  retryMcpConnection(workspaceId: string, sourceSlug: string): Promise<{ started: boolean }>
   setSourceDisplayTitle(workspaceId: string, sourceSlug: string, title: string): Promise<{ displayTitle: string | null }>
 
   // OAuth (server-owned credentials, client-orchestrated flow)
@@ -696,8 +697,8 @@ export interface ElectronAPI {
   previewMcpJsonImport(workspaceId: string, jsonText: string): Promise<McpImportCandidate[]>
   importMcpJson(
     workspaceId: string,
-    candidates: McpImportCandidate[],
-    decisions: McpImportDecision[],
+    candidatesOrJson: McpImportCandidate[] | string,
+    decisions?: McpImportDecision[],
   ): Promise<{ imported: string[]; skipped: string[] }>
   previewSkillFileImport(
     workspaceId: string,

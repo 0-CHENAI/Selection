@@ -2,6 +2,7 @@
  * SourceStatusIndicator - Shows connection status for sources
  *
  * A small colored dot that indicates the source's connection status:
+ * - Pulsing blue: Connecting or authenticating
  * - Green: Connected/tested successfully
  * - Yellow: Requires authentication
  * - Red: Failed to connect
@@ -37,6 +38,12 @@ const STATUS_CONFIG: Record<SourceConnectionStatus, {
   label: string
   description: string
 }> = {
+  connecting: {
+    color: 'bg-info',
+    pulseColor: 'bg-info/80',
+    label: 'Connecting',
+    description: 'Source connection is being verified',
+  },
   connected: {
     color: 'bg-success',
     pulseColor: 'bg-success/80',
@@ -99,11 +106,11 @@ export function SourceStatusIndicator({
             className
           )}
         >
-          {/* Pulse animation for connected status */}
-          {status === 'connected' && (
+          {/* A connecting source needs a live activity affordance. */}
+          {(status === 'connected' || status === 'connecting') && (
             <span
               className={cn(
-                'absolute inline-flex rounded-full opacity-75 animate-ping',
+                'absolute inline-flex rounded-full opacity-75 motion-safe:animate-ping',
                 config.pulseColor,
                 sizeClass
               )}

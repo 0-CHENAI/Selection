@@ -1,6 +1,7 @@
 import * as React from 'react'
 import { useTranslation } from 'react-i18next'
-import { DatabaseZap } from 'lucide-react'
+import { DatabaseZap, LoaderCircle } from 'lucide-react'
+import { toast } from 'sonner'
 import { SourceAvatar } from '@/components/ui/source-avatar'
 import { deriveConnectionStatus } from '@/components/ui/source-status-indicator'
 import { EntityPanel } from '@/components/ui/entity-panel'
@@ -24,9 +25,10 @@ const SOURCE_TYPE_CONFIG: Record<string, { labelKey: string; colorClass: string 
 }
 
 const SOURCE_STATUS_CONFIG: Record<string, { labelKey: string; colorClass: string } | null> = {
-  connected: null,
+  connecting: { labelKey: 'common.connecting', colorClass: 'bg-info/10 text-info' },
+  connected: { labelKey: 'sourcesList.statusConnected', colorClass: 'bg-success/10 text-success' },
   needs_auth: { labelKey: 'sourcesList.statusAuthRequired', colorClass: 'bg-warning/10 text-warning' },
-  failed: { labelKey: 'sourcesList.statusDisconnected', colorClass: 'bg-destructive/10 text-destructive' },
+  failed: { labelKey: 'sourcesList.statusConnectionFailed', colorClass: 'bg-destructive/10 text-destructive' },
   untested: { labelKey: 'sourcesList.statusNotTested', colorClass: 'bg-foreground/10 text-foreground/50' },
   local_disabled: { labelKey: 'sourcesList.statusDisabled', colorClass: 'bg-foreground/10 text-foreground/50' },
 }
@@ -152,7 +154,18 @@ export function SourcesListPanel({
       mapItem={(source) => {
         const connectionStatus = deriveConnectionStatus(source, localMcpEnabled)
         const typeConfig = SOURCE_TYPE_CONFIG[source.config.type]
-        const statusConfig = SOURCE_STATUS_CONFIG[connectionStatus]
+        const statusConfig = connectionStatus === 'connected' && source.config.type !== 'mcp'
+          ? null
+          : SOURCE_STATUS_CONFIG[connectionStatus]
+        const authenticating = connectionStatus === 'connecting'
+          && source.config.mcp?.authType !== undefined
+          && source.config.mcp.authType !== 'none'
+        const authFailed = connectionStatus === 'needs_auth' && Boolean(source.config.connectionError)
+        const statusLabel = authenticating
+          ? t('sourcesList.statusAuthenticating')
+          : authFailed
+            ? t('sourcesList.statusAuthFailed')
+            : statusConfig ? t(statusConfig.labelKey) : ''
         const subtitle = source.config.tagline || source.config.provider || ''
         const title = resolveSourceTitle(source)
         return {
@@ -163,7 +176,12 @@ export function SourcesListPanel({
               {typeConfig && <EntityListBadge colorClass={typeConfig.colorClass}>{t(typeConfig.labelKey)}</EntityListBadge>}
               {statusConfig && (
                 <EntityListBadge colorClass={statusConfig.colorClass} tooltip={source.config.connectionError || undefined} className="cursor-default">
-                  {t(statusConfig.labelKey)}
+                  <span className="inline-flex items-center gap-1" role="status" aria-live="polite">
+                    {connectionStatus === 'connecting' && (
+                      <LoaderCircle className="h-3 w-3 motion-safe:animate-spin" aria-hidden="true" />
+                    )}
+                    {statusLabel}
+                  </span>
                 </EntityListBadge>
               )}
               <span className="shrink-0 font-mono text-[10px] text-muted-foreground">{source.config.slug}</span>
@@ -187,6 +205,18 @@ export function SourcesListPanel({
                 setSendDialogOpen(true)
               } : undefined}
               onExport={() => setExportResourceSlug(source.config.slug)}
+              onRetryConnection={source.config.type === 'mcp'
+                && (connectionStatus === 'failed' || authFailed)
+                ? () => {
+                  if (!activeWorkspaceId) return
+                  void window.electronAPI.retryMcpConnection(activeWorkspaceId, source.config.slug)
+                    .catch(error => {
+                      toast.error(t('sourcesList.statusConnectionFailed'), {
+                        description: error instanceof Error ? error.message : String(error),
+                      })
+                    })
+                }
+                : undefined}
             />
           ),
         }
