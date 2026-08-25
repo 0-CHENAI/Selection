@@ -11,7 +11,7 @@
  * v1 PARSES BUT DEFERS: every other `kind` and the control-flow fields
  *   (`loop`, `when`, `route`, `for_each`, `aggregate`, `approval`, …). They are
  *   validated so hand-authored yaml round-trips, but the Conductor ignores them
- *   until P4. See sessions/.../tasks-architecture.md §5–§5a for the full design.
+ *   until a v2 save enables the executors. See ARCHITECTURE.md in this folder.
  *
  * Design note: the architecture draft used BOTH `type:` and `kind:` for a
  * node's role. We consolidate on a single `kind` discriminant (cleaner, avoids
