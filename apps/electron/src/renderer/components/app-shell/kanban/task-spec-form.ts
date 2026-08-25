@@ -110,6 +110,9 @@ export interface EditorSubtask {
   // node (depends_on: [A, B]) keeps every edge visible and editable. uids that no longer resolve to
   // a row (upstream deleted) are dropped by buildSpec, never emitted as a dangling ref.
   dependsOn: string[]
+  // v2 fields the definition form does not edit (loop/map/route/when/outputs/…).
+  // Must survive generate → edit title/prompt → save, or YAML-authored graphs get stripped.
+  extras?: Record<string, unknown>
 }
 
 export interface SpecForm {
@@ -147,6 +150,26 @@ export interface SpecForm {
 }
 
 /** A spec node as authored by the generator / loaded from disk (loose, renderer-facing shape). */
+const FORM_OWNED_NODE_KEYS = new Set([
+  'id',
+  'title',
+  'kind',
+  'prompt',
+  'model',
+  'llmConnection',
+  'depends_on',
+])
+
+/** v2 control-flow / IO fields the form does not own. */
+export function nodeExtras(node: Record<string, unknown>): Record<string, unknown> | undefined {
+  const extras: Record<string, unknown> = {}
+  for (const [key, value] of Object.entries(node)) {
+    if (FORM_OWNED_NODE_KEYS.has(key) || value === undefined) continue
+    extras[key] = value
+  }
+  return Object.keys(extras).length ? extras : undefined
+}
+
 export interface SpecNode {
   id: string
   title?: string
@@ -156,6 +179,7 @@ export interface SpecNode {
   /** Connection serving `model`; read back into the row so an explicit connection round-trips. */
   llmConnection?: string
   depends_on?: string[]
+  [key: string]: unknown
 }
 
 export function buildSpec(form: SpecForm, modelToConnection: Map<string, string>): Record<string, unknown> {
@@ -193,6 +217,7 @@ export function buildSpec(form: SpecForm, modelToConnection: Map<string, string>
     const deps = st.dependsOn.map((u) => nodeIdByUid.get(u)).filter((d): d is string => d != null)
     const depends_on = [...new Set(deps)].filter((d) => d !== selfId && finalIds.has(d))
     return {
+      ...(st.extras ?? {}),
       id: selfId,
       ...(st.kind && st.kind !== 'session' ? { kind: st.kind } : {}),
       ...(st.title.trim() ? { title: st.title.trim() } : {}),
@@ -244,13 +269,14 @@ export function specToSubtasks(nodes: SpecNode[], _fallbackModel?: string): Edit
     uid: uidByNodeId.get(n.id)!,
     nodeId: n.id,
     ...(n.kind && n.kind !== 'session' ? { kind: n.kind } : {}),
-    title: n.title || n.id,
-    prompt: n.prompt || '',
+    title: (typeof n.title === 'string' && n.title) || n.id,
+    prompt: typeof n.prompt === 'string' ? n.prompt : '',
     // Keep model/connection OPTIONAL: a node that inherited the orchestrator default must round-trip
     // WITHOUT gaining an explicit model (which buildSpec would otherwise pin + re-route). The editor
     // computes an effective display model separately. `_fallbackModel` is kept for call-site compat.
-    ...(n.model ? { model: n.model } : {}),
-    ...(n.llmConnection ? { llmConnection: n.llmConnection } : {}),
+    ...(typeof n.model === 'string' && n.model ? { model: n.model } : {}),
+    ...(typeof n.llmConnection === 'string' && n.llmConnection ? { llmConnection: n.llmConnection } : {}),
+    extras: nodeExtras(n as Record<string, unknown>),
     // Every edge mapped to a local uid. Edges pointing at ids absent from this spec are dangling
     // (the backend would reject them) so they're dropped rather than carried as raw ids.
     dependsOn: (n.depends_on ?? [])

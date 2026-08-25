@@ -40,21 +40,6 @@ export interface CanvasGraph {
 
 export type EdgeConflict = 'self' | 'duplicate' | 'cycle'
 
-export const PALETTE_KINDS: CanvasKind[] = [
-  'session',
-  'parallel',
-  'route',
-  'approval',
-  'finally',
-  'map',
-  'loop',
-  'synthesize',
-  'verify',
-  'judge',
-  'filter',
-  'aggregate',
-]
-
 type SpecLike = {
   nodes: Array<{
     id: string
@@ -64,6 +49,54 @@ type SpecLike = {
     depends_on?: string[]
   }>
   ui?: { layout?: { direction?: 'TB' | 'LR'; nodes?: Record<string, { x: number; y: number }> } }
+}
+
+/** Instance ids are `definition#index`. Renderer-local — do not import shared/tasks (fs). */
+export function definitionId(nodeId: string): string {
+  const i = nodeId.indexOf('#')
+  return i === -1 ? nodeId : nodeId.slice(0, i)
+}
+
+/** True only when every authored node has a stored coordinate. A partial layout is leftover drag residue. */
+export function hasCompleteLayout(spec: SpecLike): boolean {
+  const layout = spec.ui?.layout?.nodes ?? {}
+  return spec.nodes.length > 0 && spec.nodes.every((n) => layout[n.id] != null)
+}
+
+/** Structure the topology view rematerializes on. Ids alone miss edge/title edits. */
+export function specTopologyKey(spec: SpecLike): string {
+  const layout = spec.ui?.layout?.nodes ?? {}
+  const dir = spec.ui?.layout?.direction ?? ''
+  return `${dir}\x1e${spec.nodes
+    .map((n) => {
+      const p = layout[n.id]
+      return [n.id, n.kind ?? '', n.title ?? '', p?.x ?? '', p?.y ?? '', ...(n.depends_on ?? [])].join('\x1f')
+    })
+    .join('|')}`
+}
+
+const OVERLAY_RANK: Record<string, number> = {
+  failed: 8,
+  invalid: 8,
+  'waiting-approval': 7,
+  running: 6,
+  'retry-wait': 5,
+  interrupted: 4,
+  ready: 3,
+  pending: 2,
+  skipped: 1,
+  cancelled: 1,
+  done: 0,
+}
+
+/** Definition-node overlay: fold map/loop instances (`fan#0`) onto `fan`. */
+export function overlayState(
+  nodeId: string,
+  live?: { nodes: Array<{ id: string; state: string }> } | null,
+): string | undefined {
+  const related = live?.nodes.filter((n) => n.id === nodeId || definitionId(n.id) === nodeId) ?? []
+  if (!related.length) return undefined
+  return related.reduce((best, n) => ((OVERLAY_RANK[n.state] ?? 0) > (OVERLAY_RANK[best] ?? 0) ? n.state : best), related[0]!.state)
 }
 
 export function specToGraph(spec: SpecLike): CanvasGraph {

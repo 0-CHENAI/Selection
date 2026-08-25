@@ -395,6 +395,64 @@ describe('canDependOn cycle guard', () => {
   })
 })
 
+describe('v2 extras round-trip', () => {
+  it('preserves loop, for_each, route, when, outputs, and timeout through generate → edit → save', () => {
+    const generated: SpecNode[] = [
+      {
+        id: 'gate',
+        title: 'Gate',
+        kind: 'approval',
+        timeout: 30,
+        prompt: 'wait',
+      },
+      {
+        id: 'fan',
+        title: 'Fan',
+        kind: 'map',
+        for_each: '${params.items}',
+        outputs: [{ name: 'item', required: true }],
+        prompt: 'do ${item}',
+        depends_on: ['gate'],
+      },
+      {
+        id: 'iter',
+        title: 'Iter',
+        kind: 'loop',
+        loop: { until: { ref: 'nodes.iter.output', op: 'eq', value: 'ok' }, max: 3, else: 'fallback' },
+        prompt: 'n=${index}',
+      },
+      {
+        id: 'branch',
+        title: 'Branch',
+        kind: 'route',
+        route: { cases: [{ when: { ref: 'params.x', op: 'eq', value: 'a' }, goto: 'fan' }], default: 'iter' },
+        when: { ref: 'params.ready', op: 'exists' },
+      },
+    ]
+    const spec = buildSpec(
+      { title: 'T', goal: 'g', projectId: '', orchModel: '', subtasks: specToSubtasks(generated) },
+      noConn,
+    )
+    const nodes = spec.nodes as Array<Record<string, unknown>>
+    expect(nodes.find((n) => n.id === 'gate')).toMatchObject({ kind: 'approval', timeout: 30 })
+    expect(nodes.find((n) => n.id === 'fan')).toMatchObject({
+      kind: 'map',
+      for_each: '${params.items}',
+      outputs: [{ name: 'item', required: true }],
+      depends_on: ['gate'],
+    })
+    expect(nodes.find((n) => n.id === 'iter')).toMatchObject({
+      kind: 'loop',
+      loop: { until: { ref: 'nodes.iter.output', op: 'eq', value: 'ok' }, max: 3, else: 'fallback' },
+    })
+    expect(nodes.find((n) => n.id === 'branch')).toMatchObject({
+      kind: 'route',
+      route: { cases: [{ when: { ref: 'params.x', op: 'eq', value: 'a' }, goto: 'fan' }], default: 'iter' },
+      when: { ref: 'params.ready', op: 'exists' },
+    })
+  })
+})
+
 describe('v2 canvas fields', () => {
   it('round-trips kind, runner, and layout', () => {
     const generated: SpecNode[] = [

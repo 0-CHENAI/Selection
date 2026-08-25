@@ -5,7 +5,10 @@ import {
   autoLayout,
   classifyEdge,
   deleteImpact,
+  hasCompleteLayout,
   layerLayout,
+  overlayState,
+  specTopologyKey,
 } from '../conductor-graph.ts'
 
 const SPEC = {
@@ -26,6 +29,39 @@ describe('conductor-graph', () => {
     const next = applyGraphToSpec(SPEC, graph)
     expect(next.nodes.find((n) => n.id === 'b')?.depends_on).toEqual(['a'])
     expect(next.ui?.layout?.nodes?.a).toBeDefined()
+  })
+
+  it('specTopologyKey changes when depends_on changes, not when layout is incomplete', () => {
+    const a = specTopologyKey(SPEC)
+    const b = specTopologyKey({
+      ...SPEC,
+      nodes: SPEC.nodes.map((n) => (n.id === 'c' ? { ...n, depends_on: ['a', 'b'] } : n)),
+    })
+    expect(a).not.toBe(b)
+  })
+
+  it('hasCompleteLayout is false when only a dragged leftover coordinate exists', () => {
+    expect(hasCompleteLayout(SPEC)).toBe(false)
+    expect(hasCompleteLayout({ ...SPEC, ui: { layout: { nodes: { b: { x: 80, y: 90 } } } } })).toBe(false)
+    expect(
+      hasCompleteLayout({
+        ...SPEC,
+        ui: { layout: { nodes: { a: { x: 0, y: 0 }, b: { x: 1, y: 1 }, c: { x: 2, y: 2 } } } },
+      }),
+    ).toBe(true)
+  })
+
+  it('overlayState folds map instances onto the definition node and ignores prefix siblings', () => {
+    const live = {
+      nodes: [
+        { id: 'fan#0', state: 'done' },
+        { id: 'fan#1', state: 'running' },
+        { id: 'fanout', state: 'failed' },
+      ],
+    }
+    expect(overlayState('fan', live)).toBe('running')
+    expect(overlayState('fanout', live)).toBe('failed')
+    expect(overlayState('other', live)).toBeUndefined()
   })
 
   it('rejects self-loops, duplicates, and cycles immediately', () => {

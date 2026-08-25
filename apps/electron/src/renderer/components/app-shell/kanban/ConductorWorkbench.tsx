@@ -1,3 +1,7 @@
+/**
+ * Read-only topology + live-run overlay.
+ * Authoring stays on the definition tab and YAML — this surface never writes spec.nodes.
+ */
 import * as React from 'react'
 import {
   ReactFlow,
@@ -5,25 +9,24 @@ import {
   Background,
   Controls,
   MiniMap,
-  addEdge,
   useNodesState,
   useEdgesState,
-  type Connection,
+  useReactFlow,
   type Node,
   type Edge,
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 import { useTranslation } from 'react-i18next'
 import { isTasksOrchestrateEnabled } from '@craft-agent/shared/feature-flags'
+import { resolveNodeStatePill } from './node-state-pill'
+import { nodeKindLabelKey, runStatusLabelKey, runnerLabelKey } from './task-labels'
 import {
-  PALETTE_KINDS,
-  applyGraphToSpec,
   autoLayout,
-  classifyEdge,
-  deleteImpact,
+  hasCompleteLayout,
+  overlayState,
   specToGraph,
+  specTopologyKey,
   type CanvasGraph,
-  type CanvasKind,
 } from './conductor-graph'
 
 export interface WorkbenchSpec {
@@ -38,138 +41,114 @@ export interface WorkbenchSpec {
 interface ConductorWorkbenchProps {
   spec: WorkbenchSpec
   liveRun?: { status: string; nodes: Array<{ id: string; state: string }> } | null
-  onSpecChange: (spec: WorkbenchSpec) => void
 }
 
-function toFlow(graph: CanvasGraph, live?: ConductorWorkbenchProps['liveRun']): { nodes: Node[]; edges: Edge[] } {
-  const stateById = new Map(live?.nodes.map((n) => [n.id, n.state]) ?? [])
+function nodeLabel(
+  n: { id: string; title?: string; kind?: string },
+  live: ConductorWorkbenchProps['liveRun'],
+  translate: (key: string) => string,
+): string {
+  const state = overlayState(n.id, live)
+  const pill = state ? resolveNodeStatePill(state) : null
+  const stateText = pill?.labelKey ? translate(pill.labelKey) : state
+  return `${n.title ?? n.id} · ${translate(nodeKindLabelKey(n.kind))}${stateText ? ` · ${stateText}` : ''}`
+}
+
+function toFlow(
+  graph: CanvasGraph,
+  spec: WorkbenchSpec,
+  live: ConductorWorkbenchProps['liveRun'],
+  translate: (key: string) => string,
+): { nodes: Node[]; edges: Edge[] } {
+  const byId = new Map(spec.nodes.map((n) => [n.id, n]))
   return {
     nodes: graph.nodes.map((n) => ({
       id: n.id,
       position: { x: n.x, y: n.y },
-      data: { label: `${n.title} · ${n.kind}${stateById.get(n.id) ? ` · ${stateById.get(n.id)}` : ''}` },
+      data: { label: nodeLabel(byId.get(n.id) ?? n, live, translate) },
     })),
     edges: graph.edges.map((e, i) => ({ id: `e-${e.source}-${e.target}-${i}`, source: e.source, target: e.target })),
   }
 }
 
-function fromFlow(nodes: Node[], edges: Edge[], spec: WorkbenchSpec): CanvasGraph {
-  return {
-    nodes: nodes.map((n) => {
-      const prev = spec.nodes.find((p) => p.id === n.id)
-      return {
-        id: n.id,
-        title: prev?.title ?? n.id,
-        kind: (prev?.kind as CanvasKind) || 'session',
-        prompt: prev?.prompt,
-        x: n.position.x,
-        y: n.position.y,
-      }
-    }),
-    edges: edges.map((e) => ({ source: e.source, target: e.target })),
-  }
+function displayFlow(spec: WorkbenchSpec, live: ConductorWorkbenchProps['liveRun'], translate: (key: string) => string) {
+  const graph = specToGraph(spec)
+  const laid = hasCompleteLayout(spec) ? graph : autoLayout(graph, spec.ui?.layout?.direction)
+  return toFlow(laid, spec, live, translate)
 }
 
-function WorkbenchInner({ spec, liveRun, onSpecChange }: ConductorWorkbenchProps) {
+function WorkbenchInner({ spec, liveRun }: ConductorWorkbenchProps) {
   const { t } = useTranslation()
+  const { fitView } = useReactFlow()
   const orchestrateOn = isTasksOrchestrateEnabled()
-  const graph = specToGraph(spec)
-  const hasCoords = spec.nodes.some((n) => spec.ui?.layout?.nodes?.[n.id])
-  const initial = toFlow(hasCoords ? graph : autoLayout(graph), liveRun)
+  const initial = displayFlow(spec, liveRun, t)
   const [nodes, setNodes, onNodesChange] = useNodesState(initial.nodes)
   const [edges, setEdges, onEdgesChange] = useEdgesState(initial.edges)
   const [selected, setSelected] = React.useState<string | null>(null)
-  const specKey = spec.nodes.map((n) => n.id).join('|')
+  const topologyKey = specTopologyKey(spec)
+  const liveKey = `${liveRun?.status ?? ''}:${(liveRun?.nodes ?? []).map((n) => `${n.id}:${n.state}`).join('|')}`
 
   React.useEffect(() => {
-    const nextGraph = specToGraph(spec)
-    const laid = spec.nodes.some((n) => spec.ui?.layout?.nodes?.[n.id]) ? nextGraph : autoLayout(nextGraph)
-    const flow = toFlow(laid, liveRun)
+    const flow = displayFlow(spec, liveRun, t)
     setNodes(flow.nodes)
     setEdges(flow.edges)
-    // Only rematerialize when the node set changes; drag updates keep layout in the spec.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [specKey, liveRun?.status])
+  }, [topologyKey])
 
-  const commit = React.useCallback(
-    (nextNodes: Node[], nextEdges: Edge[]) => {
-      onSpecChange(applyGraphToSpec(spec, fromFlow(nextNodes, nextEdges, spec)))
-    },
-    [onSpecChange, spec],
-  )
+  React.useEffect(() => {
+    setNodes((prev) =>
+      prev.map((n) => {
+        const authored = spec.nodes.find((p) => p.id === n.id)
+        if (!authored) return n
+        const label = nodeLabel(authored, liveRun, t)
+        return n.data.label === label ? n : { ...n, data: { ...n.data, label } }
+      }),
+    )
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [liveKey])
 
-  const onConnect = React.useCallback(
-    (connection: Connection) => {
-      if (!connection.source || !connection.target) return
-      const conflict = classifyEdge(
-        edges.map((e) => ({ source: e.source, target: e.target })),
-        { source: connection.source, target: connection.target },
-      )
-      if (conflict) return
-      const next = addEdge(connection, edges)
-      setEdges(next)
-      commit(nodes, next)
-    },
-    [edges, nodes, setEdges, commit],
-  )
+  React.useEffect(() => {
+    const id = requestAnimationFrame(() => fitView({ padding: 0.2 }))
+    return () => cancelAnimationFrame(id)
+  }, [topologyKey, fitView])
 
-  const addNode = (kind: CanvasKind) => {
-    const id = `${kind}-${nodes.length + 1}`.replace(/[^a-z0-9-]/g, '')
-    const node: Node = { id, position: { x: 80, y: 80 + nodes.length * 24 }, data: { label: `${id} · ${kind}` } }
-    const next = [...nodes, node]
-    setNodes(next)
-    commit(next, edges)
-  }
+  React.useEffect(() => {
+    if (selected && !spec.nodes.some((n) => n.id === selected)) setSelected(null)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [topologyKey, selected])
 
   const selectedSpec = spec.nodes.find((n) => n.id === selected)
+  const selectedLive = selectedSpec ? overlayState(selectedSpec.id, liveRun) : undefined
+  const selectedPill = selectedLive ? resolveNodeStatePill(selectedLive) : null
+  const runStatusKey = runStatusLabelKey(liveRun?.status)
 
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-2">
       <div className="flex items-center gap-2 text-[12.5px] text-foreground/55">
-        <span>
-          {spec.runner === 'orchestrate' && !orchestrateOn ? t('tasks.orchestrateBeta') : spec.runner ?? 'conduct'}
-        </span>
-        {liveRun && !['completed', 'failed', 'stopped'].includes(liveRun.status) && (
-          <span className="ml-auto">{t('tasks.canvasActiveRunHint')}</span>
+        <span>{t(runnerLabelKey(spec.runner, orchestrateOn))}</span>
+        <span className="text-foreground/40">{t('tasks.canvasReadOnlyHint')}</span>
+        {liveRun && (
+          <span className="ml-auto">
+            {t('tasks.tabLiveRun')}: {runStatusKey ? t(runStatusKey) : liveRun.status}
+          </span>
         )}
       </div>
-      <div className="grid min-h-[420px] flex-1 grid-cols-[140px_minmax(0,1fr)_220px] gap-2">
-        <aside className="flex flex-col gap-1 overflow-auto rounded-lg border border-border bg-card p-2" aria-label={t('tasks.tabCanvas')}>
-          {PALETTE_KINDS.map((kind) => (
-            <button
-              key={kind}
-              type="button"
-              className="rounded px-2 py-1 text-left text-[12px] hover:bg-foreground/5"
-              onClick={() => addNode(kind)}
-            >
-              {kind}
-            </button>
-          ))}
-        </aside>
+      <div className="grid min-h-[420px] flex-1 grid-cols-[minmax(0,1fr)_220px] gap-2">
         <div className="overflow-hidden rounded-lg border border-border bg-card">
           <ReactFlow
             nodes={nodes}
             edges={edges}
             onNodesChange={onNodesChange}
             onEdgesChange={onEdgesChange}
-            onConnect={onConnect}
-            onNodeDragStop={(_e, _n, next) => commit(next, edges)}
-            onNodesDelete={(deleted) => {
-              for (const n of deleted) {
-                const impact = deleteImpact({ nodes: [], edges: edges.map((e) => ({ source: e.source, target: e.target })) }, n.id)
-                if (impact.dependents.length && !window.confirm(t('tasks.deleteNodeImpact', { id: n.id, nodes: impact.dependents.join(', ') }))) {
-                  return
-                }
-              }
-              const ids = new Set(deleted.map((n) => n.id))
-              const nextNodes = nodes.filter((n) => !ids.has(n.id))
-              const nextEdges = edges.filter((e) => !ids.has(e.source) && !ids.has(e.target))
-              setNodes(nextNodes)
-              setEdges(nextEdges)
-              commit(nextNodes, nextEdges)
+            nodesDraggable={false}
+            nodesConnectable={false}
+            elementsSelectable
+            deleteKeyCode={null}
+            onSelectionChange={(sel) => {
+              const id = sel.nodes[0]?.id
+              if (id) setSelected(id)
             }}
-            onSelectionChange={(sel) => setSelected(sel.nodes[0]?.id ?? null)}
-            deleteKeyCode={['Backspace', 'Delete']}
+            onPaneClick={() => setSelected(null)}
             fitView
           >
             <Background />
@@ -181,16 +160,16 @@ function WorkbenchInner({ spec, liveRun, onSpecChange }: ConductorWorkbenchProps
           {selectedSpec ? (
             <div className="flex flex-col gap-2">
               <div className="font-semibold">{selectedSpec.id}</div>
-              <div className="text-foreground/55">{selectedSpec.kind ?? 'session'}</div>
+              <div className="text-foreground/55">{t(nodeKindLabelKey(selectedSpec.kind))}</div>
+              {selectedPill && selectedLive && (
+                <div className={`inline-flex w-fit rounded border px-1.5 py-0.5 text-[11px] ${selectedPill.className}`}>
+                  {selectedPill.labelKey ? t(selectedPill.labelKey) : selectedLive}
+                </div>
+              )}
               {selectedSpec.prompt && <p className="whitespace-pre-wrap text-foreground/80">{selectedSpec.prompt}</p>}
             </div>
           ) : (
             <p className="text-foreground/45">{t('tasks.canvasInspectorEmpty')}</p>
-          )}
-          {liveRun && (
-            <div className="mt-3 border-t border-border pt-2 text-foreground/60">
-              {t('tasks.tabLiveRun')}: {liveRun.status}
-            </div>
           )}
         </aside>
       </div>
