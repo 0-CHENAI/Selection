@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'bun:test'
 import {
   COLLAPSED_POPOVER_HEIGHT,
+  COLLAPSED_POPOVER_WIDTH,
   DEFAULT_POPOVER_HEIGHT,
   DEFAULT_POPOVER_WIDTH,
   MIN_POPOVER_HEIGHT,
@@ -15,6 +16,8 @@ import {
   clampPopoverSizeFromOrigin,
   clampVisualPopoverOffset,
   getCompactInputMaxHeight,
+  hasPopoverDragMoved,
+  offsetToPinVisualOrigin,
   popoverBodyClassName,
 } from '../edit-popover-layout'
 
@@ -64,12 +67,44 @@ describe('clampPopoverSize (#8)', () => {
     })
   })
 
-  it('collapses to the title-bar height', () => {
-    expect(clampPopoverSize(
+  it('collapses to a compact title-bar strip', () => {
+    const next = clampPopoverSize(
       { width: DEFAULT_POPOVER_WIDTH, height: DEFAULT_POPOVER_HEIGHT },
       desktop,
       true,
-    ).height).toBe(COLLAPSED_POPOVER_HEIGHT)
+    )
+    expect(next.height).toBe(COLLAPSED_POPOVER_HEIGHT)
+    expect(next.width).toBe(COLLAPSED_POPOVER_WIDTH)
+    expect(next.width).toBeLessThan(MIN_POPOVER_WIDTH)
+  })
+
+  it('caps the collapsed strip to a very small viewport', () => {
+    const narrow = { width: 200, height: 280 }
+    const next = clampPopoverSize(
+      { width: DEFAULT_POPOVER_WIDTH, height: DEFAULT_POPOVER_HEIGHT },
+      narrow,
+      true,
+    )
+    expect(next.width).toBe(narrow.width - VIEWPORT_MARGIN * 2)
+    expect(next.width).toBeLessThan(COLLAPSED_POPOVER_WIDTH)
+    expect(next.height).toBe(COLLAPSED_POPOVER_HEIGHT)
+  })
+})
+
+describe('hasPopoverDragMoved', () => {
+  const start = { x: 100, y: 80 }
+
+  it('ignores a click with no movement', () => {
+    expect(hasPopoverDragMoved(start, start)).toBe(false)
+  })
+
+  it('ignores jitter below the drag threshold', () => {
+    expect(hasPopoverDragMoved(start, { x: 102, y: 81 })).toBe(false)
+  })
+
+  it('starts a drag once the pointer leaves the threshold', () => {
+    expect(hasPopoverDragMoved(start, { x: 104, y: 80 })).toBe(true)
+    expect(hasPopoverDragMoved(start, { x: 100, y: 85 })).toBe(true)
   })
 })
 
@@ -162,6 +197,45 @@ describe('clampVisualPopoverOffset (#123)', () => {
       { width: 400, height: 480 },
       desktop,
     )).toEqual(offset)
+  })
+})
+
+describe('offsetToPinVisualOrigin', () => {
+  it('does not invent an offset when the painted origin did not move', () => {
+    const visual = { left: 520, top: 200 }
+    expect(offsetToPinVisualOrigin(
+      { x: 0, y: 0 },
+      visual,
+      visual,
+      { width: COLLAPSED_POPOVER_WIDTH, height: COLLAPSED_POPOVER_HEIGHT },
+      desktop,
+    )).toEqual({ x: 0, y: 0 })
+  })
+
+  it('undoes a Radix re-center after collapse so the title stays put', () => {
+    const previous = { left: 520, top: 200 }
+    const recentered = { left: 600, top: 200 }
+    expect(offsetToPinVisualOrigin(
+      { x: 0, y: 0 },
+      previous,
+      recentered,
+      { width: COLLAPSED_POPOVER_WIDTH, height: COLLAPSED_POPOVER_HEIGHT },
+      desktop,
+    )).toEqual({ x: -80, y: 0 })
+  })
+
+  it('pulls an expanded window back when the pinned origin would overflow', () => {
+    const previous = { left: 1184, top: 80 }
+    const next = offsetToPinVisualOrigin(
+      { x: 0, y: 0 },
+      previous,
+      previous,
+      { width: DEFAULT_POPOVER_WIDTH, height: DEFAULT_POPOVER_HEIGHT },
+      desktop,
+    )
+    expect(1184 + next.x).toBeGreaterThanOrEqual(VIEWPORT_MARGIN)
+    expect(1184 + next.x + DEFAULT_POPOVER_WIDTH).toBeLessThanOrEqual(desktop.width - VIEWPORT_MARGIN)
+    expect(next.x).toBeLessThan(0)
   })
 })
 

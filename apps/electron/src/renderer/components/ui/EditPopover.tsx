@@ -58,6 +58,8 @@ import {
   clampPopoverSizeFromOrigin,
   clampVisualPopoverOffset,
   getCompactInputMaxHeight,
+  hasPopoverDragMoved,
+  offsetToPinVisualOrigin,
   popoverBodyClassName,
 } from './edit-popover-layout'
 
@@ -944,9 +946,12 @@ export function EditPopover({
   // Drag / resize / collapse for the floating create window (#8)
   const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 })
   const [isDragging, setIsDragging] = useState(false)
+  const [dragArmed, setDragArmed] = useState(false)
+  const isDraggingRef = useRef(false)
   const [collapsed, setCollapsed] = useState(false)
   const dragStartRef = useRef({ x: 0, y: 0, offsetX: 0, offsetY: 0 })
   const dragOffsetRef = useRef({ x: 0, y: 0 })
+  const pinOriginRef = useRef<{ left: number; top: number } | null>(null)
   const popoverRef = useRef<HTMLDivElement>(null)
   const [containerSize, setContainerSize] = useState(() =>
     clampPopoverSize(
@@ -981,20 +986,10 @@ export function EditPopover({
     setDragOffset(next)
   }, [])
 
-  const clampCurrentOffset = useCallback((size: { width: number; height: number }) => {
-    const placement = readPlacement()
-    if (!placement) return
-    applyOffset(clampVisualPopoverOffset(
-      placement.offset,
-      { left: placement.origin.x, top: placement.origin.y },
-      size,
-      readViewport(),
-    ))
-  }, [applyOffset, readPlacement, readViewport])
-
   useEffect(() => {
     if (!open) return
     dragOffsetRef.current = { x: 0, y: 0 }
+    pinOriginRef.current = null
     setDragOffset({ x: 0, y: 0 })
     setCollapsed(false)
     const next = clampPopoverSize(
@@ -1022,19 +1017,25 @@ export function EditPopover({
   const handleDragStart = useCallback((e: React.MouseEvent) => {
     if ((e.target as HTMLElement).closest('button')) return
     e.preventDefault()
-    setIsDragging(true)
+    isDraggingRef.current = false
     dragStartRef.current = {
       x: e.clientX,
       y: e.clientY,
       offsetX: dragOffset.x,
       offsetY: dragOffset.y,
     }
+    setDragArmed(true)
   }, [dragOffset])
 
   useEffect(() => {
-    if (!isDragging) return
+    if (!dragArmed) return
 
     const handleMouseMove = (e: MouseEvent) => {
+      if (!isDraggingRef.current) {
+        if (!hasPopoverDragMoved(dragStartRef.current, { x: e.clientX, y: e.clientY })) return
+        isDraggingRef.current = true
+        setIsDragging(true)
+      }
       const rect = popoverRef.current?.getBoundingClientRect()
       if (!rect) return
       const curr = dragOffsetRef.current
@@ -1050,14 +1051,18 @@ export function EditPopover({
       applyOffset(next)
     }
 
-    const handleMouseUp = () => setIsDragging(false)
+    const handleMouseUp = () => {
+      isDraggingRef.current = false
+      setIsDragging(false)
+      setDragArmed(false)
+    }
     document.addEventListener('mousemove', handleMouseMove)
     document.addEventListener('mouseup', handleMouseUp)
     return () => {
       document.removeEventListener('mousemove', handleMouseMove)
       document.removeEventListener('mouseup', handleMouseUp)
     }
-  }, [isDragging, readViewport, applyOffset])
+  }, [dragArmed, readViewport, applyOffset])
 
   const handleResizeStart = useCallback((e: React.MouseEvent) => {
     e.preventDefault()
@@ -1102,32 +1107,52 @@ export function EditPopover({
 
   const toggleCollapsed = useCallback(() => {
     const viewport = readViewport()
+    const rect = popoverRef.current?.getBoundingClientRect()
+    if (rect) pinOriginRef.current = { left: rect.left, top: rect.top }
     if (collapsed) {
       const next = clampPopoverSize(expandedSizeRef.current, viewport, false)
       setContainerSize(next)
-      clampCurrentOffset(next)
       setCollapsed(false)
       return
     }
     expandedSizeRef.current = containerSize
     const next = clampPopoverSize(containerSize, viewport, true)
     setContainerSize(next)
-    clampCurrentOffset(next)
     setCollapsed(true)
-  }, [clampCurrentOffset, collapsed, containerSize, readViewport])
+  }, [collapsed, containerSize, readViewport])
 
   // Only correct a user-dragged card after collapse/expand. Running on first
   // open would clamp an unpositioned portal (0,0) and jump the window (#123).
+  // Collapse/expand also pins the last painted top-left so a 400→240 shrink
+  // cannot let Radix re-center the strip.
   useLayoutEffect(() => {
-    if (!open || isDragging || isResizing) return
-    const offset = dragOffsetRef.current
-    if (offset.x === 0 && offset.y === 0) return
+    if (!open || isDragging || dragArmed || isResizing) return
     const rect = popoverRef.current?.getBoundingClientRect()
     if (!rect) return
-    const next = clampVisualPopoverOffset(offset, rect, containerSize, readViewport())
+    const offset = dragOffsetRef.current
+    const pin = pinOriginRef.current
+    if (pin) {
+      pinOriginRef.current = null
+      const next = offsetToPinVisualOrigin(
+        offset,
+        pin,
+        { left: rect.left, top: rect.top },
+        containerSize,
+        readViewport(),
+      )
+      if (next.x !== offset.x || next.y !== offset.y) applyOffset(next)
+      return
+    }
+    if (offset.x === 0 && offset.y === 0) return
+    const next = clampVisualPopoverOffset(
+      offset,
+      { left: rect.left, top: rect.top },
+      containerSize,
+      readViewport(),
+    )
     if (next.x === offset.x && next.y === offset.y) return
     applyOffset(next)
-  }, [open, collapsed, containerSize, isDragging, isResizing, applyOffset, readViewport])
+  }, [open, collapsed, containerSize, isDragging, dragArmed, isResizing, applyOffset, readViewport])
 
   useLayoutEffect(() => {
     if (!collapsed) return
@@ -1138,13 +1163,13 @@ export function EditPopover({
   }, [collapsed])
 
   useEffect(() => {
-    if (!isDragging && !isResizing) return
+    if (!dragArmed && !isDragging && !isResizing) return
     const previous = document.body.style.userSelect
     document.body.style.userSelect = 'none'
     return () => {
       document.body.style.userSelect = previous
     }
-  }, [isDragging, isResizing])
+  }, [dragArmed, isDragging, isResizing])
 
 
   // Reset ordinary edit sessions on open; creation contexts are durable below.
@@ -1426,7 +1451,8 @@ export function EditPopover({
               <div
                 onMouseDown={handleDragStart}
                 className={cn(
-                  "flex h-10 shrink-0 items-center gap-1 border-b border-foreground/5 px-1.5 titlebar-no-drag",
+                  "flex h-10 shrink-0 items-center gap-1 px-1.5 titlebar-no-drag",
+                  !collapsed && "border-b border-foreground/5",
                   isDragging ? "cursor-grabbing" : "cursor-grab",
                 )}
                 data-testid="edit-popover-header"
