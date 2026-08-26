@@ -71,6 +71,21 @@ export const apiKeyInputComponents: ComponentEntry[] = [
         },
       },
       {
+        name: 'Custom limits (auto + edited)',
+        description: 'Shows per-model context/output cards with default and saved overrides',
+        props: {
+          providerType: 'pi_api_key',
+          initialValues: {
+            activePreset: 'custom',
+            baseUrl: 'https://order.ai.jxepdi.top/v1',
+            connectionDefaultModel: 'Opus, Laufry',
+            customApi: 'openai-completions',
+            modelContextWindows: { Opus: 200_000 },
+            modelMaxTokens: { Opus: 65_536 },
+          },
+        },
+      },
+      {
         name: 'Ollama Local (OpenAI)',
         description: 'Local Ollama endpoint — OpenAI compatible',
         props: {

@@ -6,6 +6,7 @@ import { cn } from '@/lib/utils'
 import { Label } from '@/components/ui/label'
 import type { RemoteModel } from './fetch-openai-models.ts'
 import { parseSelectedModels, resolveRemoteModelSupportsImages } from './fetch-openai-models.ts'
+import { formatModelLimitCaption } from '@/components/app-shell/input/model-picker-helpers'
 
 interface RemoteModelsPickerProps {
   models: RemoteModel[]
@@ -128,6 +129,10 @@ export function RemoteModelsPicker({
                   filtered.map((model) => {
                     const isOn = selectedSet.has(model.id)
                     const hasVision = resolveRemoteModelSupportsImages(model, imageCaps?.[model.id])
+                    const limitCaption = formatModelLimitCaption(model, {
+                      context: t('chat.context'),
+                      output: t('chat.usage.output'),
+                    })
                     return (
                       <CommandPrimitive.Item
                         key={model.id}
@@ -141,7 +146,14 @@ export function RemoteModelsPicker({
                           'outline-none data-[selected=true]:bg-foreground/5',
                         )}
                       >
-                        <span className="truncate">{model.name}</span>
+                        <span className="min-w-0">
+                          <span className="block truncate">{model.name}</span>
+                          {limitCaption && (
+                            <span className="block text-[10px] text-foreground/35 tabular-nums">
+                              {limitCaption}
+                            </span>
+                          )}
+                        </span>
                         <span className="flex shrink-0 items-center gap-2">
                           <button
                             type="button"

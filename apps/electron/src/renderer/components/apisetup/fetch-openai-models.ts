@@ -4,7 +4,14 @@
  */
 
 import {
+  connectionModelIdsMatch,
+  DEFAULT_CUSTOM_CONTEXT_WINDOW,
+  DEFAULT_CUSTOM_MAX_TOKENS,
   inferModelSupportsImages,
+  MAX_CUSTOM_CONTEXT_WINDOW,
+  MAX_CUSTOM_MAX_TOKENS,
+  MIN_CUSTOM_CONTEXT_WINDOW,
+  MIN_CUSTOM_MAX_TOKENS,
   sanitizeCustomContextWindow,
   sanitizeCustomMaxTokens,
 } from '../../../../../../packages/shared/src/config/model-image-support.ts'
@@ -176,6 +183,102 @@ export function readDeclaredMaxTokens(rec: Record<string, unknown>): number | un
     if (parsed !== undefined) return parsed
   }
   return undefined
+}
+
+export function findRemoteModel(models: readonly RemoteModel[], id: string): RemoteModel | undefined {
+  return models.find((model) => connectionModelIdsMatch(model.id, id))
+}
+
+export function lookupRecordByModelId<T>(
+  record: Record<string, T> | undefined,
+  id: string,
+): T | undefined {
+  if (!record) return undefined
+  if (Object.prototype.hasOwnProperty.call(record, id)) return record[id]
+  const key = Object.keys(record).find((candidate) => connectionModelIdsMatch(candidate, id))
+  return key === undefined ? undefined : record[key]
+}
+
+export function setHasModelId(ids: ReadonlySet<string>, id: string): boolean {
+  if (ids.has(id)) return true
+  for (const candidate of ids) {
+    if (connectionModelIdsMatch(candidate, id)) return true
+  }
+  return false
+}
+
+/**
+ * Auto-detect from /v1/models, but keep an explicit user/saved value.
+ * A stored default (the visible fallback) does not hide a later catalog value.
+ */
+export function resolveCatalogOrOverrideLimit(opts: {
+  edited: boolean
+  override?: number
+  catalog?: number
+  fallback: number
+}): number {
+  const { edited, override, catalog, fallback } = opts
+  if (edited && override !== undefined) return override
+  if (catalog !== undefined) {
+    if (override !== undefined && override !== fallback && override !== catalog) return override
+    return catalog
+  }
+  return override ?? fallback
+}
+
+export type ModelLimitSource = 'manual' | 'catalog' | 'default'
+
+export function resolveModelLimitSource(opts: {
+  edited: boolean
+  override?: number
+  catalog?: number
+  displayed: number
+  fallback: number
+}): ModelLimitSource {
+  if (opts.edited) return 'manual'
+  if (opts.catalog !== undefined && opts.displayed === opts.catalog) return 'catalog'
+  if (opts.override !== undefined && opts.override !== opts.fallback) return 'manual'
+  return 'default'
+}
+
+/** Clamp a draft/saved window so submit never replaces a too-small value with the default. */
+export function persistCustomContextWindow(value: number): number {
+  const sanitized = sanitizeCustomContextWindow(value)
+  if (sanitized !== undefined) return sanitized
+  if (!Number.isFinite(value) || value <= 0) return DEFAULT_CUSTOM_CONTEXT_WINDOW
+  return Math.min(MAX_CUSTOM_CONTEXT_WINDOW, Math.max(MIN_CUSTOM_CONTEXT_WINDOW, Math.floor(value)))
+}
+
+/** Clamp a draft/saved max output to the context window and legal range. */
+export function persistCustomMaxTokens(value: number, contextWindow: number): number {
+  const sanitized = sanitizeCustomMaxTokens(value, contextWindow)
+  if (sanitized !== undefined) return sanitized
+  if (!Number.isFinite(value) || value <= 0) {
+    return Math.min(DEFAULT_CUSTOM_MAX_TOKENS, contextWindow)
+  }
+  const clamped = Math.min(
+    MAX_CUSTOM_MAX_TOKENS,
+    Math.max(MIN_CUSTOM_MAX_TOKENS, Math.floor(value)),
+    Math.floor(contextWindow),
+  )
+  return clamped >= MIN_CUSTOM_MAX_TOKENS
+    ? clamped
+    : Math.min(DEFAULT_CUSTOM_MAX_TOKENS, contextWindow)
+}
+
+export type ModelLimitsStatus = 'detecting' | 'detected' | 'unavailable' | 'defaults' | 'hint'
+
+export function resolveModelLimitsStatus(opts: {
+  loading: boolean
+  catalogFilled: boolean
+  fetchFailed: boolean
+  hasKey: boolean
+}): ModelLimitsStatus {
+  if (opts.loading) return 'detecting'
+  if (opts.catalogFilled) return 'detected'
+  if (opts.fetchFailed && opts.hasKey) return 'unavailable'
+  if (opts.hasKey) return 'defaults'
+  return 'hint'
 }
 
 /** User override, then catalog declaration. Name is not used here. */

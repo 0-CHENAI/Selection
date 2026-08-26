@@ -48,6 +48,7 @@ import {
   ModelPickerEmptyResults,
   ModelPickerOverflowHint,
   ModelPickerSearchField,
+  pickerModelLimitCaption,
   shouldShowPickerSearch,
   usePickerSearchQuery,
   useVisiblePickerModels,
@@ -66,6 +67,7 @@ function CompactSwitcherModels({
   isCurrentConnection: boolean
   onPick: (connectionSlug: string, modelId: string) => void
 }) {
+  const { t } = useTranslation()
   const [query, setQuery] = React.useState('')
   const models = resolvePickerModelsWithLive(conn, liveOpenRouterModels)
   const visibleCatalog = resolveVisiblePickerModels(models, {
@@ -90,6 +92,7 @@ function CompactSwitcherModels({
             : (model.name ?? stripPiPrefixForDisplay(model.id))
           const isSelectedModel =
             isCurrentConnection && isPickerModelSelected(currentModel, modelId)
+          const limitCaption = pickerModelLimitCaption(model, t)
           return (
             <DrawerClose asChild key={modelId}>
               <button
@@ -102,7 +105,12 @@ function CompactSwitcherModels({
                     : 'hover:bg-foreground/5',
                 )}
               >
-                <span className="text-sm font-medium truncate">{modelName}</span>
+                <span className="min-w-0">
+                  <span className="block text-sm font-medium truncate">{modelName}</span>
+                  {limitCaption && (
+                    <span className="block text-xs text-foreground/50 tabular-nums">{limitCaption}</span>
+                  )}
+                </span>
                 {isSelectedModel && (
                   <Check className="h-3 w-3 text-foreground/60 ml-3 shrink-0" />
                 )}
@@ -393,6 +401,8 @@ export function CompactModelSelector({
                 : (typeof model !== 'string' && 'description' in model
                     ? (model.description as string)
                     : '')
+              const limitCaption = pickerModelLimitCaption(model, t)
+              const secondary = [description, limitCaption].filter(Boolean).join(' · ')
               return (
                 <DrawerClose asChild key={modelId}>
                   <button
@@ -405,9 +415,9 @@ export function CompactModelSelector({
                   >
                     <div className="min-w-0">
                       <div className="text-sm font-medium truncate">{modelName}</div>
-                      {description && (
+                      {secondary && (
                         <div className="text-xs text-foreground/50 truncate">
-                          {description}
+                          {secondary}
                         </div>
                       )}
                     </div>

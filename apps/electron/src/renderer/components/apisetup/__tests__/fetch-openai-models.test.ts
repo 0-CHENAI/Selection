@@ -1,11 +1,19 @@
 import { describe, expect, test } from 'bun:test'
 import {
+  findRemoteModel,
   firstSelectedModelId,
   inferModelSupportsImages,
+  lookupRecordByModelId,
   modelsEndpoint,
   parseOpenAiModelsPayload,
   parseSelectedModels,
+  persistCustomContextWindow,
+  persistCustomMaxTokens,
+  resolveCatalogOrOverrideLimit,
+  resolveModelLimitSource,
+  resolveModelLimitsStatus,
   resolveRemoteModelSupportsImages,
+  setHasModelId,
   toggleSelectedModel,
 } from '../fetch-openai-models.ts'
 
@@ -169,5 +177,149 @@ describe('toggleSelectedModel', () => {
     expect(firstSelectedModelId('Opus, Laufry')).toBe('Opus')
     expect(firstSelectedModelId('Opus，Laufry')).toBe('Opus')
     expect(firstSelectedModelId('')).toBeUndefined()
+  })
+})
+
+describe('findRemoteModel', () => {
+  test('matches catalog ids with runtime prefixes and case', () => {
+    const models = [{ id: 'Opus', name: 'Opus', contextWindow: 200_000 }]
+    expect(findRemoteModel(models, 'pi/Opus')?.contextWindow).toBe(200_000)
+    expect(findRemoteModel(models, 'opus')?.id).toBe('Opus')
+    expect(findRemoteModel(models, 'Maylo')).toBeUndefined()
+  })
+})
+
+describe('resolveCatalogOrOverrideLimit', () => {
+  test('uses catalog when nothing was edited and the saved value is the default', () => {
+    expect(resolveCatalogOrOverrideLimit({
+      edited: false,
+      override: 8_192,
+      catalog: 32_768,
+      fallback: 8_192,
+    })).toBe(32_768)
+  })
+
+  test('keeps a saved custom value when it is not the default or catalog', () => {
+    expect(resolveCatalogOrOverrideLimit({
+      edited: false,
+      override: 16_384,
+      catalog: 32_768,
+      fallback: 8_192,
+    })).toBe(16_384)
+  })
+
+  test('keeps this-session edits even when they match the default', () => {
+    expect(resolveCatalogOrOverrideLimit({
+      edited: true,
+      override: 8_192,
+      catalog: 32_768,
+      fallback: 8_192,
+    })).toBe(8_192)
+  })
+
+  test('falls back when the catalog is missing', () => {
+    expect(resolveCatalogOrOverrideLimit({
+      edited: false,
+      fallback: 8_192,
+    })).toBe(8_192)
+  })
+})
+
+describe('resolveModelLimitSource', () => {
+  test('labels catalog, default, and manual values', () => {
+    expect(resolveModelLimitSource({
+      edited: false,
+      catalog: 32_768,
+      displayed: 32_768,
+      fallback: 8_192,
+    })).toBe('catalog')
+    expect(resolveModelLimitSource({
+      edited: false,
+      displayed: 8_192,
+      fallback: 8_192,
+    })).toBe('default')
+    expect(resolveModelLimitSource({
+      edited: true,
+      override: 16_384,
+      catalog: 32_768,
+      displayed: 16_384,
+      fallback: 8_192,
+    })).toBe('manual')
+  })
+
+  test('keeps default when a default max is only clamped by a smaller context', () => {
+    expect(resolveModelLimitSource({
+      edited: false,
+      override: 8_192,
+      displayed: 4_096,
+      fallback: 8_192,
+    })).toBe('default')
+  })
+})
+
+describe('lookupRecordByModelId', () => {
+  test('matches saved keys with runtime prefixes and case', () => {
+    const windows = { Opus: 200_000 }
+    expect(lookupRecordByModelId(windows, 'pi/Opus')).toBe(200_000)
+    expect(lookupRecordByModelId(windows, 'opus')).toBe(200_000)
+    expect(lookupRecordByModelId(windows, 'Laufry')).toBeUndefined()
+  })
+})
+
+describe('setHasModelId', () => {
+  test('matches edited ids with case and prefixes', () => {
+    expect(setHasModelId(new Set(['Opus']), 'pi/opus')).toBe(true)
+    expect(setHasModelId(new Set(['Opus']), 'Laufry')).toBe(false)
+  })
+})
+
+describe('persistCustomContextWindow', () => {
+  test('clamps below-min drafts to the minimum instead of the default', () => {
+    expect(persistCustomContextWindow(512)).toBe(1_024)
+    expect(persistCustomContextWindow(200_000)).toBe(200_000)
+    expect(persistCustomContextWindow(Number.NaN)).toBe(131_072)
+  })
+})
+
+describe('persistCustomMaxTokens', () => {
+  test('clamps output to the context window and legal range', () => {
+    expect(persistCustomMaxTokens(65_536, 4_096)).toBe(4_096)
+    expect(persistCustomMaxTokens(100, 131_072)).toBe(256)
+    expect(persistCustomMaxTokens(8_192, 131_072)).toBe(8_192)
+  })
+})
+
+describe('resolveModelLimitsStatus', () => {
+  test('prefers loading, then catalog, then fetch failure', () => {
+    expect(resolveModelLimitsStatus({
+      loading: true,
+      catalogFilled: true,
+      fetchFailed: false,
+      hasKey: true,
+    })).toBe('detecting')
+    expect(resolveModelLimitsStatus({
+      loading: false,
+      catalogFilled: true,
+      fetchFailed: false,
+      hasKey: true,
+    })).toBe('detected')
+    expect(resolveModelLimitsStatus({
+      loading: false,
+      catalogFilled: false,
+      fetchFailed: true,
+      hasKey: true,
+    })).toBe('unavailable')
+    expect(resolveModelLimitsStatus({
+      loading: false,
+      catalogFilled: false,
+      fetchFailed: false,
+      hasKey: true,
+    })).toBe('defaults')
+    expect(resolveModelLimitsStatus({
+      loading: false,
+      catalogFilled: false,
+      fetchFailed: false,
+      hasKey: false,
+    })).toBe('hint')
   })
 })
