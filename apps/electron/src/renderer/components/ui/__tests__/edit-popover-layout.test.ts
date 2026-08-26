@@ -5,6 +5,7 @@ import {
   DEFAULT_POPOVER_WIDTH,
   MIN_POPOVER_HEIGHT,
   MIN_POPOVER_WIDTH,
+  POPOVER_COLLISION_PADDING,
   POPOVER_HEADER_HEIGHT,
   POPOVER_INPUT_CHROME,
   VIEWPORT_MARGIN,
@@ -12,7 +13,9 @@ import {
   clampPopoverOffset,
   clampPopoverSize,
   clampPopoverSizeFromOrigin,
+  clampVisualPopoverOffset,
   getCompactInputMaxHeight,
+  popoverBodyClassName,
 } from '../edit-popover-layout'
 
 const desktop = { width: 1440, height: 900 }
@@ -70,6 +73,22 @@ describe('clampPopoverSize (#8)', () => {
   })
 })
 
+describe('popoverBodyClassName (#122)', () => {
+  it('drops flex when collapsed so hidden can actually hide the empty state', () => {
+    expect(popoverBodyClassName(true)).toBe('hidden')
+    expect(popoverBodyClassName(true)).not.toMatch(/\bflex\b/)
+    expect(popoverBodyClassName(false)).toMatch(/\bflex\b/)
+    expect(popoverBodyClassName(false)).not.toMatch(/\bhidden\b/)
+  })
+})
+
+describe('POPOVER_COLLISION_PADDING (#123)', () => {
+  it('reserves the app title bar, not the Radix 20px default', () => {
+    expect(POPOVER_COLLISION_PADDING.top).toBe(VIEWPORT_MARGIN_TOP)
+    expect(POPOVER_COLLISION_PADDING.top).toBeGreaterThan(20)
+  })
+})
+
 describe('clampPopoverOffset (#8)', () => {
   it('keeps the window inside the viewport after a drag', () => {
     const size = { width: 400, height: 480 }
@@ -98,6 +117,51 @@ describe('clampPopoverOffset (#8)', () => {
     )
     expect(next.x).toBe(VIEWPORT_MARGIN)
     expect(next.y).toBe(VIEWPORT_MARGIN_TOP)
+  })
+})
+
+describe('clampVisualPopoverOffset (#123)', () => {
+  it('keeps expand-from-top below the app chrome after the origin jumps', () => {
+    // Collapsed bar was dragged to y=52 (offset -348, base 400). Expand to 480.
+    // Radix then shifts the untranslated origin 400 → 300, painting at y=-48.
+    const offset = { x: 0, y: -348 }
+    const shiftedBaseY = 300
+    const visual = { left: 100, top: shiftedBaseY + offset.y }
+    expect(visual.top).toBeLessThan(VIEWPORT_MARGIN_TOP)
+
+    const next = clampVisualPopoverOffset(
+      offset,
+      visual,
+      { width: 400, height: 480 },
+      desktop,
+    )
+    expect(shiftedBaseY + next.y).toBeGreaterThanOrEqual(VIEWPORT_MARGIN_TOP)
+    expect(shiftedBaseY + next.y + 480).toBeLessThanOrEqual(desktop.height - VIEWPORT_MARGIN)
+  })
+
+  it('keeps the title bar pinned when expanding a collapsed strip at the top', () => {
+    const offset = { x: 0, y: -348 }
+    const visual = { left: 100, top: VIEWPORT_MARGIN_TOP }
+    const next = clampVisualPopoverOffset(
+      offset,
+      visual,
+      { width: 400, height: DEFAULT_POPOVER_HEIGHT },
+      desktop,
+    )
+    expect(visual.top - offset.y + next.y).toBeGreaterThanOrEqual(VIEWPORT_MARGIN_TOP)
+    expect(visual.top - offset.y + next.y + DEFAULT_POPOVER_HEIGHT)
+      .toBeLessThanOrEqual(desktop.height - VIEWPORT_MARGIN)
+  })
+
+  it('does not move a window that already clears the title bar', () => {
+    const offset = { x: 12, y: -40 }
+    const visual = { left: 120, top: 80 }
+    expect(clampVisualPopoverOffset(
+      offset,
+      visual,
+      { width: 400, height: 480 },
+      desktop,
+    )).toEqual(offset)
   })
 })
 
