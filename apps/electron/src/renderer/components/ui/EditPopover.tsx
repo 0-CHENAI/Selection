@@ -1123,26 +1123,39 @@ export function EditPopover({
 
   // Only correct a user-dragged card after collapse/expand. Running on first
   // open would clamp an unpositioned portal (0,0) and jump the window (#123).
-  // Collapse/expand also pins the last painted top-left so a 400→240 shrink
-  // cannot let Radix re-center the strip.
+  // Radix can flip sides after the size change, so keep the pinned origin
+  // through its positioning frame instead of clearing it synchronously.
   useLayoutEffect(() => {
     if (!open || isDragging || dragArmed || isResizing) return
+    const pin = pinOriginRef.current
+    if (pin) {
+      let frame = 0
+      let pass = 0
+      const restorePinnedOrigin = () => {
+        const rect = popoverRef.current?.getBoundingClientRect()
+        if (!rect || pinOriginRef.current !== pin) return
+        const offset = dragOffsetRef.current
+        const next = offsetToPinVisualOrigin(
+          offset,
+          pin,
+          { left: rect.left, top: rect.top },
+          containerSize,
+          readViewport(),
+        )
+        if (next.x !== offset.x || next.y !== offset.y) applyOffset(next)
+        pass += 1
+        if (pass < 2) {
+          frame = window.requestAnimationFrame(restorePinnedOrigin)
+        } else {
+          pinOriginRef.current = null
+        }
+      }
+      frame = window.requestAnimationFrame(restorePinnedOrigin)
+      return () => window.cancelAnimationFrame(frame)
+    }
     const rect = popoverRef.current?.getBoundingClientRect()
     if (!rect) return
     const offset = dragOffsetRef.current
-    const pin = pinOriginRef.current
-    if (pin) {
-      pinOriginRef.current = null
-      const next = offsetToPinVisualOrigin(
-        offset,
-        pin,
-        { left: rect.left, top: rect.top },
-        containerSize,
-        readViewport(),
-      )
-      if (next.x !== offset.x || next.y !== offset.y) applyOffset(next)
-      return
-    }
     if (offset.x === 0 && offset.y === 0) return
     const next = clampVisualPopoverOffset(
       offset,
@@ -1419,7 +1432,10 @@ export function EditPopover({
             align={align}
             sticky="always"
             collisionPadding={POPOVER_COLLISION_PADDING}
-            avoidCollisions={!isDragging && dragOffset.x === 0 && dragOffset.y === 0}
+            // Keep Radix on one positioning coordinate system while dragging.
+            // Flipping collision handling on the first move rebases the popover
+            // before our translate is applied, which makes it jump to an edge.
+            avoidCollisions
             className="p-0"
             data-testid="edit-popover"
             style={{
