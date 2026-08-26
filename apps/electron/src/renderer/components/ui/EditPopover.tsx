@@ -949,6 +949,7 @@ export function EditPopover({
   const [dragArmed, setDragArmed] = useState(false)
   const isDraggingRef = useRef(false)
   const [collapsed, setCollapsed] = useState(false)
+  const [bodyHidden, setBodyHidden] = useState(false)
   const dragStartRef = useRef({ x: 0, y: 0, offsetX: 0, offsetY: 0 })
   const dragOffsetRef = useRef({ x: 0, y: 0 })
   const pinOriginRef = useRef<{ left: number; top: number } | null>(null)
@@ -986,12 +987,12 @@ export function EditPopover({
     setDragOffset(next)
   }, [])
 
-  useEffect(() => {
-    if (!open) return
+  useLayoutEffect(() => {
     dragOffsetRef.current = { x: 0, y: 0 }
     pinOriginRef.current = null
     setDragOffset({ x: 0, y: 0 })
     setCollapsed(false)
+    setBodyHidden(false)
     const next = clampPopoverSize(
       { width: width || DEFAULT_POPOVER_WIDTH, height: DEFAULT_POPOVER_HEIGHT },
       readViewport(),
@@ -1111,6 +1112,7 @@ export function EditPopover({
     if (rect) pinOriginRef.current = { left: rect.left, top: rect.top }
     if (collapsed) {
       const next = clampPopoverSize(expandedSizeRef.current, viewport, false)
+      setBodyHidden(false)
       setContainerSize(next)
       setCollapsed(false)
       return
@@ -1119,7 +1121,8 @@ export function EditPopover({
     const next = clampPopoverSize(containerSize, viewport, true)
     setContainerSize(next)
     setCollapsed(true)
-  }, [collapsed, containerSize, readViewport])
+    if (reduceMotion) setBodyHidden(true)
+  }, [collapsed, containerSize, readViewport, reduceMotion])
 
   // Only correct a user-dragged card after collapse/expand. Running on first
   // open would clamp an unpositioned portal (0,0) and jump the window (#123).
@@ -1410,6 +1413,8 @@ export function EditPopover({
     setOpen(false)
   }, [context, displayLabel, workingDirectory, model, systemPromptPreset, permissionMode, setOpen])
 
+  const positioningSize = collapsed ? expandedSizeRef.current : containerSize
+
   return (
     <>
       <AnimatePresence>
@@ -1436,11 +1441,11 @@ export function EditPopover({
             // Flipping collision handling on the first move rebases the popover
             // before our translate is applied, which makes it jump to an edge.
             avoidCollisions
-            className="p-0"
+            className="pointer-events-none p-0"
             data-testid="edit-popover"
             style={{
-              width: `min(${containerSize.width}px, calc(100vw - ${VIEWPORT_MARGIN * 2}px))`,
-              height: `min(${containerSize.height}px, calc(100vh - ${VIEWPORT_MARGIN_TOP + VIEWPORT_MARGIN}px))`,
+              width: `min(${positioningSize.width}px, calc(100vw - ${VIEWPORT_MARGIN * 2}px))`,
+              height: `min(${positioningSize.height}px, calc(100vh - ${VIEWPORT_MARGIN_TOP + VIEWPORT_MARGIN}px))`,
               background: 'transparent',
               border: 'none',
               boxShadow: 'none',
@@ -1455,9 +1460,15 @@ export function EditPopover({
               target.focus()
             }}
           >
-            <div
+            <motion.div
               ref={popoverRef}
-              className="relative flex h-full w-full flex-col overflow-hidden bg-foreground-2 shadow-modal-small"
+              initial={false}
+              animate={{ width: containerSize.width, height: containerSize.height }}
+              transition={{
+                duration: reduceMotion || isResizing ? 0 : 0.2,
+                ease: [0.22, 1, 0.36, 1],
+              }}
+              className="pointer-events-auto relative flex flex-col overflow-hidden bg-foreground-2 shadow-modal-small"
               data-collapsed={collapsed ? 'true' : 'false'}
               style={{
                 transform: `translate(${dragOffset.x}px, ${dragOffset.y}px)`,
@@ -1504,10 +1515,19 @@ export function EditPopover({
                 />
               </div>
 
-              <div
-                hidden={collapsed}
+              <motion.div
+                hidden={bodyHidden}
                 aria-hidden={collapsed}
-                className={popoverBodyClassName(collapsed)}
+                initial={false}
+                animate={{ opacity: collapsed ? 0 : 1, y: collapsed ? -4 : 0 }}
+                transition={{
+                  duration: reduceMotion ? 0 : collapsed ? 0.1 : 0.16,
+                  ease: [0.22, 1, 0.36, 1],
+                }}
+                onAnimationComplete={() => {
+                  if (collapsed) setBodyHidden(true)
+                }}
+                className={popoverBodyClassName(bodyHidden)}
                 data-testid="edit-popover-body"
               >
                 <ChatDisplay
@@ -1522,7 +1542,7 @@ export function EditPopover({
                   pendingCredential={pendingCredential}
                   onRespondToCredential={onRespondToCredential}
                   compactMode={true}
-                  compactInputMaxHeight={getCompactInputMaxHeight(containerSize.height)}
+                  compactInputMaxHeight={getCompactInputMaxHeight(expandedSizeRef.current.height)}
                   placeholder={placeholder}
                   emptyStateLabel={displayLabel || context.label}
                   inputValue={creationKind ? inputDraft : undefined}
@@ -1530,7 +1550,7 @@ export function EditPopover({
                   onExplicitStop={creationKind ? handleExplicitStop : undefined}
                   onBeforeExplicitStop={creationKind ? requestStopConfirmation : undefined}
                 />
-              </div>
+              </motion.div>
 
               {!collapsed && (
                 <button
@@ -1545,7 +1565,7 @@ export function EditPopover({
                   </svg>
                 </button>
               )}
-            </div>
+            </motion.div>
           </PopoverContent>
       </Popover>
       <AlertDialog
