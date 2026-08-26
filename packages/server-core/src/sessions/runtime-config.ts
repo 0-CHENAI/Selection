@@ -38,6 +38,7 @@ function normalizeCustomModels(connection: LlmConnection): Array<Record<string, 
       return definedObject({
         id: model.id,
         contextWindow: model.contextWindow,
+        maxTokens: model.maxTokens,
         supportsImages: typeof model.supportsImages === 'boolean' ? model.supportsImages : undefined,
       })
     })

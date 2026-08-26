@@ -31,6 +31,7 @@ import {
   shouldQueueFirstTurnAiTitle,
   type PendingFirstTurnAiTitle,
 } from './first-turn-title'
+import { completionStopReason } from './completion-outcome.ts'
 import { i18n } from '@craft-agent/shared/i18n'
 import {
   getWorkspaces,
@@ -3471,16 +3472,7 @@ export class SessionManager implements ISessionManager {
             baseUrl: connection.baseUrl,
             piAuthProvider: connection.piAuthProvider,
             customEndpoint: connection.customEndpoint,
-            customModels: connection.models?.map((model) => (
-              typeof model === 'string'
-                ? toCustomEndpointModelPayload(model)
-                : toCustomEndpointModelPayload({
-                    id: model.id,
-                    name: model.name,
-                    contextWindow: model.contextWindow,
-                    supportsImages: model.supportsImages,
-                  })
-            )),
+            customModels: connection.models?.map(toCustomEndpointModelPayload),
           } : undefined,
         })
       } catch (error) {
@@ -6658,9 +6650,10 @@ export class SessionManager implements ISessionManager {
             }
           }
 
-          sendSpan.mark('chat.complete')
+          const stopReason = completionStopReason(managed.messages)
+          sendSpan.mark(stopReason === 'error' ? 'chat.complete.terminal_error' : 'chat.complete')
           sendSpan.end()
-          await this.onProcessingStopped(sessionId, 'complete')
+          await this.onProcessingStopped(sessionId, stopReason)
           return  // Exit function, skip finally block (onProcessingStopped handles cleanup)
         }
 

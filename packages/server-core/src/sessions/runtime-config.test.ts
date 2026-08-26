@@ -57,6 +57,16 @@ describe('buildBackendRuntimeSignature', () => {
     expect(withWindow).not.toBe(withoutWindow)
   })
 
+  it('changes when a custom endpoint model maxTokens changes', () => {
+    const withoutMax = sig(baseCompat)
+    const withMax = sig({
+      ...baseCompat,
+      models: [{ id: 'gemma', supportsImages: true, maxTokens: 32_768 } as never],
+    })
+
+    expect(withMax).not.toBe(withoutMax)
+  })
+
   it('changes when a custom endpoint model image override changes', () => {
     const enabled = sig(baseCompat)
     const disabled = sig({

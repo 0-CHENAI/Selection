@@ -65,6 +65,7 @@ interface UseOnboardingReturn {
     models?: string[]
     modelImageCaps?: Record<string, boolean>
     modelContextWindows?: Record<string, number>
+    modelMaxTokens?: Record<string, number>
     customApi?: CustomEndpointConfig['api']
   }
 

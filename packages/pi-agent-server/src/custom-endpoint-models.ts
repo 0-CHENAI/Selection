@@ -1,6 +1,10 @@
 import {
+  DEFAULT_CUSTOM_CONTEXT_WINDOW,
+  DEFAULT_CUSTOM_MAX_TOKENS,
   inferModelSupportsImages,
   normalizeConnectionModelId,
+  sanitizeCustomContextWindow,
+  sanitizeCustomMaxTokens,
 } from '../../shared/src/config/model-image-support.ts'
 
 export type CustomEndpointInput = 'text' | 'image'
@@ -11,6 +15,7 @@ export interface CustomEndpointModelDefaults {
 
 export interface CustomEndpointModelOverrides {
   contextWindow?: number
+  maxTokens?: number
   supportsImages?: boolean
 }
 
@@ -21,6 +26,7 @@ export interface CustomEndpointModelEntry extends CustomEndpointModelOverrides {
 export type CustomEndpointModelConfig = string | {
   id: string
   contextWindow?: number
+  maxTokens?: number
   supportsImages?: boolean
 }
 
@@ -56,6 +62,7 @@ export function normalizeCustomEndpointModelEntry(model: CustomEndpointModelConf
   return {
     id: stripPiPrefix(model.id),
     ...(model.contextWindow !== undefined ? { contextWindow: model.contextWindow } : {}),
+    ...(model.maxTokens !== undefined ? { maxTokens: model.maxTokens } : {}),
     ...(model.supportsImages !== undefined ? { supportsImages: model.supportsImages } : {}),
   }
 }
@@ -75,6 +82,11 @@ export function buildCustomEndpointModelDef(
     ?? defaults?.supportsImages
     ?? inferModelSupportsImages(id)
   const input: CustomEndpointInput[] = supportsImages ? ['text', 'image'] : ['text']
+  const contextWindow = sanitizeCustomContextWindow(overrides?.contextWindow) ?? DEFAULT_CUSTOM_CONTEXT_WINDOW
+  const maxTokens = sanitizeCustomMaxTokens(
+    overrides?.maxTokens ?? DEFAULT_CUSTOM_MAX_TOKENS,
+    contextWindow,
+  ) ?? Math.min(DEFAULT_CUSTOM_MAX_TOKENS, contextWindow)
 
   return {
     id,
@@ -82,7 +94,7 @@ export function buildCustomEndpointModelDef(
     reasoning: false,
     input,
     cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-    contextWindow: overrides?.contextWindow ?? 131_072,
-    maxTokens: 8_192,
+    contextWindow,
+    maxTokens,
   }
 }
