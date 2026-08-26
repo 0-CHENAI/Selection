@@ -103,6 +103,7 @@ import {
   ModelPickerEmptyResults,
   ModelPickerOverflowHint,
   ModelPickerSearchField,
+  pickerModelLimitCaption,
   shouldShowPickerSearch,
   usePickerSearchQuery,
   useVisiblePickerModels,
@@ -121,6 +122,7 @@ function SwitcherConnectionModels({
   isCurrentConnection: boolean
   onPick: (modelId: string, connectionSlug: string) => void
 }) {
+  const { t } = useTranslation()
   const [query, setQuery] = React.useState('')
   const models = resolvePickerModelsWithLive(conn, liveOpenRouterModels)
   const visibleCatalog = resolveVisiblePickerModels(models, {
@@ -144,13 +146,19 @@ function SwitcherConnectionModels({
             ? stripPiPrefixForDisplay(getModelShortName(model))
             : (model.name ?? stripPiPrefixForDisplay(model.id))
           const isSelectedModel = isCurrentConnection && isPickerModelSelected(currentModel, modelId)
+          const limitCaption = pickerModelLimitCaption(model, t)
           return (
             <StyledDropdownMenuItem
               key={modelId}
               onSelect={() => onPick(modelId, conn.slug)}
               className="flex items-center justify-between px-2 py-2 rounded-lg cursor-pointer"
             >
-              <div className="font-medium text-sm">{modelName}</div>
+              <div className="min-w-0 text-left">
+                <div className="font-medium text-sm">{modelName}</div>
+                {limitCaption && (
+                  <div className="text-xs text-muted-foreground tabular-nums">{limitCaption}</div>
+                )}
+              </div>
               {isSelectedModel && (
                 <Check className="h-3 w-3 text-foreground ml-3 shrink-0" />
               )}
@@ -2257,6 +2265,8 @@ export function FreeFormInput({
                     const isSelected = isPickerModelSelected(currentModel, modelId)
                     const descriptionKey = typeof model !== 'string' && 'descriptionKey' in model ? (model.descriptionKey as string) : undefined
                     const description = descriptionKey ? t(descriptionKey) : (typeof model !== 'string' && 'description' in model ? (model.description as string) : '')
+                    const limitCaption = pickerModelLimitCaption(model, t)
+                    const secondary = [description, limitCaption].filter(Boolean).join(' · ')
                     return (
                       <StyledDropdownMenuItem
                         key={modelId}
@@ -2265,8 +2275,8 @@ export function FreeFormInput({
                       >
                         <div className="text-left">
                           <div className="font-medium text-sm">{modelName}</div>
-                          {description && (
-                            <div className="text-xs text-muted-foreground">{description}</div>
+                          {secondary && (
+                            <div className="text-xs text-muted-foreground">{secondary}</div>
                           )}
                         </div>
                         {isSelected && (

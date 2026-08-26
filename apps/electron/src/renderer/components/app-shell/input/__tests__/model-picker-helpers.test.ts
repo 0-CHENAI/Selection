@@ -10,6 +10,8 @@ import type { LlmConnection } from '@craft-agent/shared/config/llm-connections'
 import {
   appendMissingPickerModel,
   connectionPinnedModelIds,
+  formatModelLimitCaption,
+  formatModelTokenLimit,
   formatTokenCount,
   groupConnectionsByProvider,
   isOpenRouterConnection,
@@ -80,6 +82,36 @@ describe('formatTokenCount', () => {
     expect(formatTokenCount(1_000_000)).toBe('1.0M')
     expect(formatTokenCount(1_500_000)).toBe('1.5M')
     expect(formatTokenCount(12_345_678)).toBe('12.3M')
+  })
+})
+
+describe('formatModelTokenLimit', () => {
+  test('uses binary thousands for multiples of 1024', () => {
+    expect(formatModelTokenLimit(8_192)).toBe('8k')
+    expect(formatModelTokenLimit(65_536)).toBe('64k')
+    expect(formatModelTokenLimit(131_072)).toBe('128k')
+    expect(formatModelTokenLimit(1_048_576)).toBe('1M')
+  })
+
+  test('falls back to decimal grouping otherwise', () => {
+    expect(formatModelTokenLimit(200_000)).toBe('200k')
+    expect(formatModelTokenLimit(8_000)).toBe('8.0k')
+  })
+})
+
+describe('formatModelLimitCaption', () => {
+  const labels = { context: 'context', output: 'output' }
+
+  test('joins context and output when both are present', () => {
+    expect(formatModelLimitCaption({ contextWindow: 200_000, maxTokens: 65_536 }, labels))
+      .toBe('200k context · 64k output')
+  })
+
+  test('omits missing or empty values', () => {
+    expect(formatModelLimitCaption({ contextWindow: 131_072 }, labels)).toBe('128k context')
+    expect(formatModelLimitCaption({ maxTokens: 8_000 }, labels)).toBe('8.0k output')
+    expect(formatModelLimitCaption('Opus', labels)).toBeUndefined()
+    expect(formatModelLimitCaption({ contextWindow: 0 }, labels)).toBeUndefined()
   })
 })
 
