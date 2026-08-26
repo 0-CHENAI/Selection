@@ -950,6 +950,7 @@ export function EditPopover({
   const isDraggingRef = useRef(false)
   const [collapsed, setCollapsed] = useState(false)
   const [bodyHidden, setBodyHidden] = useState(false)
+  const [isTransitioning, setIsTransitioning] = useState(false)
   const dragStartRef = useRef({ x: 0, y: 0, offsetX: 0, offsetY: 0 })
   const dragOffsetRef = useRef({ x: 0, y: 0 })
   const pinOriginRef = useRef<{ left: number; top: number } | null>(null)
@@ -993,6 +994,7 @@ export function EditPopover({
     setDragOffset({ x: 0, y: 0 })
     setCollapsed(false)
     setBodyHidden(false)
+    setIsTransitioning(false)
     const next = clampPopoverSize(
       { width: width || DEFAULT_POPOVER_WIDTH, height: DEFAULT_POPOVER_HEIGHT },
       readViewport(),
@@ -1110,6 +1112,7 @@ export function EditPopover({
     const viewport = readViewport()
     const rect = popoverRef.current?.getBoundingClientRect()
     if (rect) pinOriginRef.current = { left: rect.left, top: rect.top }
+    setIsTransitioning(true)
     if (collapsed) {
       const next = clampPopoverSize(expandedSizeRef.current, viewport, false)
       setBodyHidden(false)
@@ -1468,6 +1471,7 @@ export function EditPopover({
                 duration: reduceMotion || isResizing ? 0 : 0.2,
                 ease: [0.22, 1, 0.36, 1],
               }}
+              onAnimationComplete={() => setIsTransitioning(false)}
               className="pointer-events-auto relative flex flex-col overflow-hidden bg-foreground-2 shadow-modal-small"
               data-collapsed={collapsed ? 'true' : 'false'}
               style={{
@@ -1491,7 +1495,7 @@ export function EditPopover({
                 {collapsed && isProcessing && (
                   <HeaderIconButton
                     icon={<Square className="size-3 fill-current" />}
-                    tooltip={t('chat.stopResponse')}
+                    tooltip={isTransitioning ? undefined : t('chat.stopResponse')}
                     aria-label={t('chat.stopResponse')}
                     onMouseDown={event => event.stopPropagation()}
                     onClick={handleStopGeneration}
@@ -1499,7 +1503,7 @@ export function EditPopover({
                 )}
                 <HeaderIconButton
                   icon={collapsed ? <ChevronDown className="size-4" /> : <ChevronUp className="size-4" />}
-                  tooltip={collapsed ? t('editPopover.expand') : t('editPopover.collapse')}
+                  tooltip={isTransitioning ? undefined : collapsed ? t('editPopover.expand') : t('editPopover.collapse')}
                   aria-label={collapsed ? t('editPopover.expand') : t('editPopover.collapse')}
                   aria-expanded={!collapsed}
                   onMouseDown={event => event.stopPropagation()}
@@ -1507,7 +1511,7 @@ export function EditPopover({
                 />
                 <HeaderIconButton
                   icon={<X className="size-4" />}
-                  tooltip={t('common.close')}
+                  tooltip={isTransitioning ? undefined : t('common.close')}
                   aria-label={t('common.close')}
                   disabled={isProcessing && !creationKind}
                   onMouseDown={event => event.stopPropagation()}
