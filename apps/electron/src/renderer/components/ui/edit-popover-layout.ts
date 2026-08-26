@@ -17,6 +17,22 @@ export const POPOVER_HEADER_HEIGHT = 40
 export const POPOVER_INPUT_CHROME = 56
 export const POPOVER_MESSAGE_RESERVE = 64
 
+/** Keep Radix collision padding aligned with the app title-bar inset. */
+export const POPOVER_COLLISION_PADDING = {
+  top: VIEWPORT_MARGIN_TOP,
+  right: VIEWPORT_MARGIN,
+  bottom: VIEWPORT_MARGIN,
+  left: VIEWPORT_MARGIN,
+} as const
+
+/**
+ * Collapsed body must not keep `flex`. Tailwind's `flex` and `hidden` both set
+ * `display`, and `flex` wins in the generated sheet — #122 empty-state leak.
+ */
+export function popoverBodyClassName(collapsed: boolean): string {
+  return collapsed ? 'hidden' : 'flex min-h-0 min-w-0 flex-1 flex-col'
+}
+
 export type Size = { width: number; height: number }
 export type Point = { x: number; y: number }
 export type Viewport = { width: number; height: number }
@@ -66,6 +82,25 @@ export function clampPopoverOffset(
     x: clampAxis(offset.x, minX, maxX),
     y: clampAxis(offset.y, minY, maxY),
   }
+}
+
+/**
+ * Clamp using the painted box (getBoundingClientRect, includes translate).
+ * After collapse/expand Radix may move the untranslated origin; re-run this
+ * so the card cannot cover the app title bar (#123).
+ */
+export function clampVisualPopoverOffset(
+  offset: Point,
+  visual: { left: number; top: number },
+  size: Size,
+  viewport: Viewport,
+): Point {
+  return clampPopoverOffset(
+    offset,
+    size,
+    viewport,
+    { x: visual.left - offset.x, y: visual.top - offset.y },
+  )
 }
 
 /**

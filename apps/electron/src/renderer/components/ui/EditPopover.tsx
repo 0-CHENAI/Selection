@@ -50,10 +50,15 @@ import { HeaderIconButton } from './HeaderIconButton'
 import {
   DEFAULT_POPOVER_HEIGHT,
   DEFAULT_POPOVER_WIDTH,
+  POPOVER_COLLISION_PADDING,
+  VIEWPORT_MARGIN,
+  VIEWPORT_MARGIN_TOP,
   clampPopoverOffset,
   clampPopoverSize,
   clampPopoverSizeFromOrigin,
+  clampVisualPopoverOffset,
   getCompactInputMaxHeight,
+  popoverBodyClassName,
 } from './edit-popover-layout'
 
 /** Rotating placeholder keys for compact mode input - short, action-oriented */
@@ -976,6 +981,17 @@ export function EditPopover({
     setDragOffset(next)
   }, [])
 
+  const clampCurrentOffset = useCallback((size: { width: number; height: number }) => {
+    const placement = readPlacement()
+    if (!placement) return
+    applyOffset(clampVisualPopoverOffset(
+      placement.offset,
+      { left: placement.origin.x, top: placement.origin.y },
+      size,
+      readViewport(),
+    ))
+  }, [applyOffset, readPlacement, readViewport])
+
   useEffect(() => {
     if (!open) return
     dragOffsetRef.current = { x: 0, y: 0 }
@@ -993,19 +1009,15 @@ export function EditPopover({
     if (!open) return
     const onResize = () => {
       const viewport = readViewport()
-      const placement = readPlacement()
       setContainerSize(prev => {
         const next = clampPopoverSize(collapsed ? expandedSizeRef.current : prev, viewport, collapsed)
         if (!collapsed) expandedSizeRef.current = next
-        if (placement) {
-          applyOffset(clampPopoverOffset(placement.offset, next, viewport, placement.base))
-        }
         return next
       })
     }
     window.addEventListener('resize', onResize)
     return () => window.removeEventListener('resize', onResize)
-  }, [open, collapsed, readViewport, readPlacement, applyOffset])
+  }, [open, collapsed, readViewport])
 
   const handleDragStart = useCallback((e: React.MouseEvent) => {
     if ((e.target as HTMLElement).closest('button')) return
@@ -1089,22 +1101,41 @@ export function EditPopover({
   }, [isResizing, readViewport])
 
   const toggleCollapsed = useCallback(() => {
-    setCollapsed(currentlyCollapsed => {
-      const viewport = readViewport()
-      const placement = readPlacement()
-      if (currentlyCollapsed) {
-        const next = clampPopoverSize(expandedSizeRef.current, viewport, false)
-        setContainerSize(next)
-        if (placement) {
-          applyOffset(clampPopoverOffset(placement.offset, next, viewport, placement.base))
-        }
-        return false
-      }
-      expandedSizeRef.current = containerSize
-      setContainerSize(clampPopoverSize(containerSize, viewport, true))
-      return true
-    })
-  }, [containerSize, readViewport, readPlacement, applyOffset])
+    const viewport = readViewport()
+    if (collapsed) {
+      const next = clampPopoverSize(expandedSizeRef.current, viewport, false)
+      setContainerSize(next)
+      clampCurrentOffset(next)
+      setCollapsed(false)
+      return
+    }
+    expandedSizeRef.current = containerSize
+    const next = clampPopoverSize(containerSize, viewport, true)
+    setContainerSize(next)
+    clampCurrentOffset(next)
+    setCollapsed(true)
+  }, [clampCurrentOffset, collapsed, containerSize, readViewport])
+
+  // Only correct a user-dragged card after collapse/expand. Running on first
+  // open would clamp an unpositioned portal (0,0) and jump the window (#123).
+  useLayoutEffect(() => {
+    if (!open || isDragging || isResizing) return
+    const offset = dragOffsetRef.current
+    if (offset.x === 0 && offset.y === 0) return
+    const rect = popoverRef.current?.getBoundingClientRect()
+    if (!rect) return
+    const next = clampVisualPopoverOffset(offset, rect, containerSize, readViewport())
+    if (next.x === offset.x && next.y === offset.y) return
+    applyOffset(next)
+  }, [open, collapsed, containerSize, isDragging, isResizing, applyOffset, readViewport])
+
+  useLayoutEffect(() => {
+    if (!collapsed) return
+    const active = document.activeElement
+    if (active instanceof HTMLElement && popoverRef.current?.contains(active)) {
+      active.blur()
+    }
+  }, [collapsed])
 
   useEffect(() => {
     if (!isDragging && !isResizing) return
@@ -1362,11 +1393,13 @@ export function EditPopover({
             side={side}
             align={align}
             sticky="always"
+            collisionPadding={POPOVER_COLLISION_PADDING}
+            avoidCollisions={!isDragging && dragOffset.x === 0 && dragOffset.y === 0}
             className="p-0"
             data-testid="edit-popover"
             style={{
-              width: `min(${containerSize.width}px, calc(100vw - 16px))`,
-              height: `min(${containerSize.height}px, calc(100vh - 64px))`,
+              width: `min(${containerSize.width}px, calc(100vw - ${VIEWPORT_MARGIN * 2}px))`,
+              height: `min(${containerSize.height}px, calc(100vh - ${VIEWPORT_MARGIN_TOP + VIEWPORT_MARGIN}px))`,
               background: 'transparent',
               border: 'none',
               boxShadow: 'none',
@@ -1384,6 +1417,7 @@ export function EditPopover({
             <div
               ref={popoverRef}
               className="relative flex h-full w-full flex-col overflow-hidden bg-foreground-2 shadow-modal-small"
+              data-collapsed={collapsed ? 'true' : 'false'}
               style={{
                 transform: `translate(${dragOffset.x}px, ${dragOffset.y}px)`,
                 borderRadius: 16,
@@ -1428,7 +1462,12 @@ export function EditPopover({
                 />
               </div>
 
-              <div className={cn('flex min-h-0 min-w-0 flex-1 flex-col', collapsed && 'hidden')}>
+              <div
+                hidden={collapsed}
+                aria-hidden={collapsed}
+                className={popoverBodyClassName(collapsed)}
+                data-testid="edit-popover-body"
+              >
                 <ChatDisplay
                   session={displaySession}
                   onSendMessage={inlineExecution ? handleInlineSendMessage : handleLegacySendMessage}
