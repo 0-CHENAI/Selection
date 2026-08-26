@@ -3,7 +3,11 @@
  * Used by ORDER (and any branded gateway) after the user pastes an API key.
  */
 
-import { inferModelSupportsImages } from '../../../../../../packages/shared/src/config/model-image-support.ts'
+import {
+  inferModelSupportsImages,
+  sanitizeCustomContextWindow,
+  sanitizeCustomMaxTokens,
+} from '../../../../../../packages/shared/src/config/model-image-support.ts'
 
 export { inferModelSupportsImages }
 
@@ -14,6 +18,8 @@ export interface RemoteModel {
   supportsImages?: boolean
   /** Declared catalog context window in tokens. */
   contextWindow?: number
+  /** Declared catalog max output tokens. */
+  maxTokens?: number
 }
 
 function asRecord(value: unknown): Record<string, unknown> | undefined {
@@ -98,15 +104,8 @@ export function readDeclaredSupportsImages(rec: Record<string, unknown>): boolea
   )
 }
 
-const MIN_DECLARED_CONTEXT_WINDOW = 1_024
-const MAX_DECLARED_CONTEXT_WINDOW = 10_000_000
-
 function parseContextWindow(value: unknown): number | undefined {
-  const raw = typeof value === 'string' && value.trim() ? Number(value) : value
-  if (typeof raw !== 'number' || !Number.isFinite(raw)) return undefined
-  const tokens = Math.floor(raw)
-  if (tokens < MIN_DECLARED_CONTEXT_WINDOW || tokens > MAX_DECLARED_CONTEXT_WINDOW) return undefined
-  return tokens
+  return sanitizeCustomContextWindow(value)
 }
 
 /** Read context length from common OpenAI-compatible / OpenRouter / LiteLLM payloads. */
@@ -140,6 +139,40 @@ export function readDeclaredContextWindow(rec: Record<string, unknown>): number 
 
   for (const value of candidates) {
     const parsed = parseContextWindow(value)
+    if (parsed !== undefined) return parsed
+  }
+  return undefined
+}
+
+function parseMaxTokens(value: unknown): number | undefined {
+  return sanitizeCustomMaxTokens(value)
+}
+
+/** Read max output tokens from common OpenAI-compatible / OpenRouter / LiteLLM payloads. */
+export function readDeclaredMaxTokens(rec: Record<string, unknown>): number | undefined {
+  const info = asRecord(rec.model_info) ?? asRecord(rec.info) ?? asRecord(rec.meta)
+  const caps = asRecord(rec.capabilities) ?? asRecord(info?.capabilities)
+  const topProvider = asRecord(rec.top_provider)
+  const limits = asRecord(rec.limits)
+
+  const candidates = [
+    rec.max_output_tokens,
+    rec.maxOutputTokens,
+    rec.max_completion_tokens,
+    rec.maxCompletionTokens,
+    rec.max_output,
+    rec.output_token_limit,
+    info?.max_output_tokens,
+    info?.max_completion_tokens,
+    caps?.max_output_tokens,
+    topProvider?.max_output_tokens,
+    topProvider?.max_completion_tokens,
+    limits?.max_output_tokens,
+    limits?.max_completion_tokens,
+  ]
+
+  for (const value of candidates) {
+    const parsed = parseMaxTokens(value)
     if (parsed !== undefined) return parsed
   }
   return undefined
@@ -180,11 +213,13 @@ export function parseOpenAiModelsPayload(json: unknown): RemoteModel[] {
     const name = String(rec.display_name ?? rec.displayName ?? rec.name ?? id).trim() || id
     const declared = readDeclaredSupportsImages(rec)
     const contextWindow = readDeclaredContextWindow(rec)
+    const maxTokens = sanitizeCustomMaxTokens(readDeclaredMaxTokens(rec), contextWindow)
     models.push({
       id,
       name,
       ...(declared !== undefined ? { supportsImages: declared } : {}),
       ...(contextWindow !== undefined ? { contextWindow } : {}),
+      ...(maxTokens !== undefined ? { maxTokens } : {}),
     })
   }
   return models

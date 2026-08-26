@@ -43,12 +43,49 @@ export function inferModelSupportsImages(id: string, name?: string): boolean {
   return VISION_TOKEN.test(haystack) || VL_AFFIX.test(haystack)
 }
 
+export const DEFAULT_CUSTOM_CONTEXT_WINDOW = 131_072
+export const DEFAULT_CUSTOM_MAX_TOKENS = 8_192
+export const MIN_CUSTOM_CONTEXT_WINDOW = 1_024
+export const MAX_CUSTOM_CONTEXT_WINDOW = 10_000_000
+export const MIN_CUSTOM_MAX_TOKENS = 256
+export const MAX_CUSTOM_MAX_TOKENS = 1_000_000
+
+function readTokenCount(value: unknown): number | undefined {
+  const raw = typeof value === 'string' && value.trim() ? Number(value) : value
+  if (typeof raw !== 'number' || !Number.isFinite(raw)) return undefined
+  const tokens = Math.floor(raw)
+  return tokens > 0 ? tokens : undefined
+}
+
+/** Visible / stored custom-endpoint context window, if it is in range. */
+export function sanitizeCustomContextWindow(value: unknown): number | undefined {
+  const tokens = readTokenCount(value)
+  if (tokens === undefined || tokens < MIN_CUSTOM_CONTEXT_WINDOW || tokens > MAX_CUSTOM_CONTEXT_WINDOW) {
+    return undefined
+  }
+  return tokens
+}
+
+/** Visible / stored custom-endpoint max output, clamped to the context window when known. */
+export function sanitizeCustomMaxTokens(value: unknown, contextWindow?: number): number | undefined {
+  const tokens = readTokenCount(value)
+  if (tokens === undefined || tokens < MIN_CUSTOM_MAX_TOKENS || tokens > MAX_CUSTOM_MAX_TOKENS) {
+    return undefined
+  }
+  if (typeof contextWindow === 'number' && Number.isFinite(contextWindow) && contextWindow > 0) {
+    const clamped = Math.min(tokens, Math.floor(contextWindow))
+    return clamped < MIN_CUSTOM_MAX_TOKENS ? undefined : clamped
+  }
+  return tokens
+}
+
 export type CustomEndpointModelSource =
   | string
   | {
       id: string
       name?: string
       contextWindow?: number
+      maxTokens?: number
       supportsImages?: boolean
     }
 
@@ -57,6 +94,7 @@ export type CustomEndpointModelPayload =
   | {
       id: string
       contextWindow?: number
+      maxTokens?: number
       supportsImages?: boolean
     }
 
@@ -70,23 +108,25 @@ export function toCustomEndpointModelPayload(
 ): CustomEndpointModelPayload {
   const id = typeof model === 'string' ? model : model.id
   const contextWindow = typeof model === 'string' ? undefined : model.contextWindow
+  const maxTokens = typeof model === 'string' ? undefined : model.maxTokens
   const explicit = typeof model === 'object' && typeof model.supportsImages === 'boolean'
     ? model.supportsImages
     : undefined
-  if (contextWindow || explicit !== undefined) {
+  if (contextWindow || maxTokens || explicit !== undefined) {
     return {
       id,
       ...(contextWindow ? { contextWindow } : {}),
+      ...(maxTokens ? { maxTokens } : {}),
       ...(explicit !== undefined ? { supportsImages: explicit } : {}),
     }
   }
   return id
 }
 
-/** Stored catalog window for a custom-endpoint model, if one was persisted. */
-export function resolveCustomModelContextWindow(
-  models: Array<string | { id: string; contextWindow?: number }> | undefined,
+function resolveStoredTokenLimit(
+  models: Array<string | { id: string; contextWindow?: number; maxTokens?: number }> | undefined,
   modelId: string,
+  field: 'contextWindow' | 'maxTokens',
 ): number | undefined {
   if (!models?.length || !modelId) return undefined
   const match = models.find((model) => {
@@ -94,7 +134,23 @@ export function resolveCustomModelContextWindow(
     return connectionModelIdsMatch(id, modelId)
   })
   if (!match || typeof match === 'string') return undefined
-  const window = match.contextWindow
-  if (typeof window !== 'number' || !Number.isFinite(window) || window <= 0) return undefined
-  return Math.floor(window)
+  return field === 'contextWindow'
+    ? sanitizeCustomContextWindow(match[field])
+    : sanitizeCustomMaxTokens(match[field])
+}
+
+/** Stored catalog window for a custom-endpoint model, if one was persisted. */
+export function resolveCustomModelContextWindow(
+  models: Array<string | { id: string; contextWindow?: number }> | undefined,
+  modelId: string,
+): number | undefined {
+  return resolveStoredTokenLimit(models, modelId, 'contextWindow')
+}
+
+/** Stored max output tokens for a custom-endpoint model, if one was persisted. */
+export function resolveCustomModelMaxTokens(
+  models: Array<string | { id: string; maxTokens?: number }> | undefined,
+  modelId: string,
+): number | undefined {
+  return resolveStoredTokenLimit(models, modelId, 'maxTokens')
 }

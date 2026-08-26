@@ -20,12 +20,22 @@ import {
   connectionModelIdsMatch,
   inferModelSupportsImages,
   resolveCustomModelContextWindow,
+  resolveCustomModelMaxTokens,
 } from './model-image-support';
 export {
+  DEFAULT_CUSTOM_CONTEXT_WINDOW,
+  DEFAULT_CUSTOM_MAX_TOKENS,
+  MAX_CUSTOM_CONTEXT_WINDOW,
+  MAX_CUSTOM_MAX_TOKENS,
+  MIN_CUSTOM_CONTEXT_WINDOW,
+  MIN_CUSTOM_MAX_TOKENS,
   connectionModelIdsMatch,
   inferModelSupportsImages,
   normalizeConnectionModelId,
   resolveCustomModelContextWindow,
+  resolveCustomModelMaxTokens,
+  sanitizeCustomContextWindow,
+  sanitizeCustomMaxTokens,
   toCustomEndpointModelPayload,
 } from './model-image-support';
 import type { CredentialManager } from '../credentials/manager.ts';
@@ -617,6 +627,14 @@ export function resolveConnectionModelContextWindow(
   modelId: string,
 ): number | undefined {
   return resolveCustomModelContextWindow(connection?.models, modelId);
+}
+
+/** Per-model max output tokens from the connection catalog (ORDER / custom endpoints). */
+export function resolveConnectionModelMaxTokens(
+  connection: Pick<LlmConnection, 'models'> | null | undefined,
+  modelId: string,
+): number | undefined {
+  return resolveCustomModelMaxTokens(connection?.models, modelId);
 }
 
 /**

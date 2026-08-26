@@ -138,7 +138,7 @@ interface InitMessage {
   resumeSdkSessionId?: string;
   forceFreshSession?: boolean;
   customEndpoint?: { api: CustomEndpointApi; supportsImages?: boolean };
-  customModels?: Array<string | { id: string; contextWindow?: number; supportsImages?: boolean }>;
+  customModels?: Array<string | { id: string; contextWindow?: number; maxTokens?: number; supportsImages?: boolean }>;
   piAuth?: { provider: string; credential: PiCredential };
 }
 
@@ -150,7 +150,7 @@ interface RuntimeConfigUpdateMessage {
   authType?: string;
   baseUrl?: string;
   customEndpoint?: { api: CustomEndpointApi; supportsImages?: boolean };
-  customModels?: Array<string | { id: string; contextWindow?: number; supportsImages?: boolean }>;
+  customModels?: Array<string | { id: string; contextWindow?: number; maxTokens?: number; supportsImages?: boolean }>;
 }
 
 type ProxyToolContent = PiTextContent | PiImageContent;
@@ -545,9 +545,10 @@ function registerCustomEndpointModels(
 ): void {
   for (const m of models) {
     customEndpointModelIds.add(m.id);
-    if (m.contextWindow || m.supportsImages !== undefined) {
+    if (m.contextWindow || m.maxTokens || m.supportsImages !== undefined) {
       customModelOverrides.set(m.id, {
         ...(m.contextWindow ? { contextWindow: m.contextWindow } : {}),
+        ...(m.maxTokens ? { maxTokens: m.maxTokens } : {}),
         ...(m.supportsImages !== undefined ? { supportsImages: m.supportsImages } : {}),
       });
     }

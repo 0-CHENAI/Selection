@@ -39,7 +39,18 @@ import {
   type RemoteModel,
 } from "./fetch-openai-models.ts"
 
-import type { CustomEndpointApi, CustomEndpointConfig } from '@config/llm-connections'
+import {
+  DEFAULT_CUSTOM_CONTEXT_WINDOW,
+  DEFAULT_CUSTOM_MAX_TOKENS,
+  MAX_CUSTOM_CONTEXT_WINDOW,
+  MAX_CUSTOM_MAX_TOKENS,
+  MIN_CUSTOM_CONTEXT_WINDOW,
+  MIN_CUSTOM_MAX_TOKENS,
+  sanitizeCustomContextWindow,
+  sanitizeCustomMaxTokens,
+  type CustomEndpointApi,
+  type CustomEndpointConfig,
+} from '@config/llm-connections'
 
 export type ApiKeyStatus = 'idle' | 'validating' | 'success' | 'error'
 
@@ -51,6 +62,7 @@ export type SubmittedConnectionModel = string | {
   shortName?: string
   supportsImages?: boolean
   contextWindow?: number
+  maxTokens?: number
 }
 
 export interface ApiKeySubmitData {
@@ -98,6 +110,7 @@ export interface ApiKeyInputProps {
     models?: string[]
     modelImageCaps?: Record<string, boolean>
     modelContextWindows?: Record<string, number>
+    modelMaxTokens?: Record<string, number>
     /** Pre-fill the protocol toggle for custom endpoints */
     customApi?: CustomEndpointApi
   }
@@ -200,6 +213,21 @@ function parseModelList(value: string): string[] {
   return parseSelectedModels(value)
 }
 
+function readDraftTokenLimit(value: string, max: number): number | undefined {
+  const parsed = Number(value)
+  if (!Number.isFinite(parsed) || parsed <= 0 || parsed > max) return undefined
+  return Math.floor(parsed)
+}
+
+function resolveModelTokenLimit(
+  id: string,
+  overrides: Record<string, number>,
+  catalog: number | undefined,
+  fallback: number,
+): number {
+  return overrides[id] ?? catalog ?? fallback
+}
+
 // ============================================================
 // Pi model tier selection (for providers with many models)
 // ============================================================
@@ -263,11 +291,20 @@ export function ApiKeyInput({
   const [modelImageCaps, setModelImageCaps] = useState<Record<string, boolean>>(
     () => ({ ...initialValues?.modelImageCaps }),
   )
+  const [modelContextWindows, setModelContextWindows] = useState<Record<string, number>>(
+    () => ({ ...initialValues?.modelContextWindows }),
+  )
+  const [modelMaxTokens, setModelMaxTokens] = useState<Record<string, number>>(
+    () => ({ ...initialValues?.modelMaxTokens }),
+  )
 
   const isDisabled = disabled || status === 'validating'
 
   const isPiApiKeyFlow = providerType === 'pi_api_key'
   const isOrderPreset = activePreset === 'order-openai'
+  const isCustomEndpointForm = (
+    activePreset === 'custom' || OPENAI_COMPAT_CUSTOM_URL_PRESETS.has(activePreset)
+  ) && !!baseUrl.trim()
   const isBedrock = activePreset === 'amazon-bedrock'
   // Hide endpoint/model fields for providers with well-known endpoints handled by the SDK
   const DEFAULT_ENDPOINT_PROVIDERS = new Set(['anthropic', 'openai', 'pi', 'google'])
@@ -373,6 +410,23 @@ export function ApiKeyInput({
             }
             return next
           })
+          const mergeCatalogLimits = (
+            prev: Record<string, number>,
+            field: 'contextWindow' | 'maxTokens',
+          ) => {
+            const next = { ...prev }
+            let changed = false
+            for (const model of models) {
+              const value = model[field]
+              if (next[model.id] === undefined && value) {
+                next[model.id] = value
+                changed = true
+              }
+            }
+            return changed ? next : prev
+          }
+          setModelContextWindows((prev) => mergeCatalogLimits(prev, 'contextWindow'))
+          setModelMaxTokens((prev) => mergeCatalogLimits(prev, 'maxTokens'))
         })
         .catch((err: unknown) => {
           if (controller.signal.aborted) return
@@ -473,6 +527,23 @@ export function ApiKeyInput({
     }
   }
 
+  const resolveEditableLimits = (id: string) => {
+    const remote = remoteModels.find((model) => model.id === id)
+    const contextWindow = resolveModelTokenLimit(
+      id,
+      modelContextWindows,
+      remote?.contextWindow ?? initialValues?.modelContextWindows?.[id],
+      DEFAULT_CUSTOM_CONTEXT_WINDOW,
+    )
+    const maxTokens = resolveModelTokenLimit(
+      id,
+      modelMaxTokens,
+      remote?.maxTokens ?? initialValues?.modelMaxTokens?.[id],
+      DEFAULT_CUSTOM_MAX_TOKENS,
+    )
+    return { remote, contextWindow, maxTokens }
+  }
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
 
@@ -531,21 +602,27 @@ export function ApiKeyInput({
     const effectiveBaseUrl = baseUrl.trim()
 
     const parsedModels = parseModelList(connectionDefaultModel)
-    const submittedModels = isOrderPreset
+    const submittedModels = (isCustomEndpointForm && parsedModels.length > 0)
       ? parsedModels.map((id) => {
-        const remote = remoteModels.find((model) => model.id === id)
-        const supportsImages = resolveRemoteModelSupportsImages(
-          remote ?? { id, name: id },
-          modelImageCaps[id],
-        )
-        const contextWindow = remote?.contextWindow ?? initialValues?.modelContextWindows?.[id]
-        return {
-          id,
-          name: remote?.name ?? id,
-          shortName: remote?.name ?? id,
-          supportsImages,
-          ...(contextWindow ? { contextWindow } : {}),
+        const { remote, contextWindow: rawContextWindow, maxTokens: rawMaxTokens } = resolveEditableLimits(id)
+        const contextWindow = sanitizeCustomContextWindow(rawContextWindow) ?? DEFAULT_CUSTOM_CONTEXT_WINDOW
+        const maxTokens = sanitizeCustomMaxTokens(rawMaxTokens, contextWindow)
+          ?? Math.min(DEFAULT_CUSTOM_MAX_TOKENS, contextWindow)
+        if (isOrderPreset) {
+          const supportsImages = resolveRemoteModelSupportsImages(
+            remote ?? { id, name: id },
+            modelImageCaps[id],
+          )
+          return {
+            id,
+            name: remote?.name ?? id,
+            shortName: remote?.name ?? id,
+            supportsImages,
+            contextWindow,
+            maxTokens,
+          }
         }
+        return { id, contextWindow, maxTokens }
       })
       : parsedModels
 
@@ -580,6 +657,11 @@ export function ApiKeyInput({
       customEndpoint,
     })
   }
+
+  const selectedCustomModelIds = parseModelList(connectionDefaultModel)
+  const showCustomModelLimits = isCustomEndpointForm
+    && !isBedrock
+    && selectedCustomModelIds.length > 0
 
   const tierConfigs = [
     { label: t('apiSetup.modelTier.best'), desc: t('apiSetup.modelTier.bestDesc'), value: bestModel, onChange: setBestModel },
@@ -977,6 +1059,66 @@ export function ApiKeyInput({
               {t('apiSetup.customEndpointRequired')}
             </p>
           )}
+        </div>
+      )}
+
+      {showCustomModelLimits && (
+        <div className="space-y-3">
+          <p className="text-xs text-foreground/30">{t('apiSetup.modelLimitsHint')}</p>
+          {selectedCustomModelIds.map((id) => {
+            const { remote, contextWindow, maxTokens } = resolveEditableLimits(id)
+            return (
+              <div key={id} className="space-y-2">
+                <p className="truncate text-xs font-medium text-foreground/70">{remote?.name ?? id}</p>
+                <div className="grid grid-cols-2 gap-2">
+                  <div className="space-y-1">
+                    <Label htmlFor={`context-window-${id}`} className="text-muted-foreground font-normal text-xs">
+                      {t('apiSetup.contextWindow')}
+                    </Label>
+                    <div className={cn("rounded-md shadow-minimal transition-colors", "bg-foreground-2 focus-within:bg-background")}>
+                      <Input
+                        id={`context-window-${id}`}
+                        type="number"
+                        min={MIN_CUSTOM_CONTEXT_WINDOW}
+                        max={MAX_CUSTOM_CONTEXT_WINDOW}
+                        step={1024}
+                        value={contextWindow}
+                        onChange={(e) => {
+                          const next = readDraftTokenLimit(e.target.value, MAX_CUSTOM_CONTEXT_WINDOW)
+                          if (next === undefined) return
+                          setModelContextWindows((prev) => ({ ...prev, [id]: next }))
+                        }}
+                        className="border-0 bg-transparent shadow-none"
+                        disabled={isDisabled}
+                      />
+                    </div>
+                  </div>
+                  <div className="space-y-1">
+                    <Label htmlFor={`max-tokens-${id}`} className="text-muted-foreground font-normal text-xs">
+                      {t('apiSetup.maxOutputTokens')}
+                    </Label>
+                    <div className={cn("rounded-md shadow-minimal transition-colors", "bg-foreground-2 focus-within:bg-background")}>
+                      <Input
+                        id={`max-tokens-${id}`}
+                        type="number"
+                        min={MIN_CUSTOM_MAX_TOKENS}
+                        max={MAX_CUSTOM_MAX_TOKENS}
+                        step={256}
+                        value={maxTokens}
+                        onChange={(e) => {
+                          const next = readDraftTokenLimit(e.target.value, MAX_CUSTOM_MAX_TOKENS)
+                          if (next === undefined) return
+                          setModelMaxTokens((prev) => ({ ...prev, [id]: next }))
+                        }}
+                        className="border-0 bg-transparent shadow-none"
+                        disabled={isDisabled}
+                      />
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )
+          })}
         </div>
       )}
 

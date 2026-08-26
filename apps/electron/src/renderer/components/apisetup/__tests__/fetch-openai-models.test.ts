@@ -64,6 +64,26 @@ describe('parseOpenAiModelsPayload', () => {
     ])
   })
 
+  test('reads catalog max output tokens from specific field names only', () => {
+    expect(parseOpenAiModelsPayload({
+      data: [
+        { id: 'Opus', max_output_tokens: 65_536 },
+        { id: 'Laufry', max_completion_tokens: '32768' },
+        { id: 'Maylo', info: { max_output_tokens: 16_384 } },
+        { id: 'generic', max_tokens: 8_192 },
+        { id: 'tiny', max_output_tokens: 16 },
+        { id: 'clamped', context_window: 4_096, max_output_tokens: 65_536 },
+      ],
+    })).toEqual([
+      { id: 'Opus', name: 'Opus', maxTokens: 65_536 },
+      { id: 'Laufry', name: 'Laufry', maxTokens: 32_768 },
+      { id: 'Maylo', name: 'Maylo', maxTokens: 16_384 },
+      { id: 'generic', name: 'generic' },
+      { id: 'tiny', name: 'tiny' },
+      { id: 'clamped', name: 'clamped', contextWindow: 4_096, maxTokens: 4_096 },
+    ])
+  })
+
   test('reads catalog context windows from common field names', () => {
     expect(parseOpenAiModelsPayload({
       data: [

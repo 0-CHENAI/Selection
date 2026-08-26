@@ -545,6 +545,25 @@ describe('PiEventAdapter', () => {
   // ============================================================
 
   describe('error surfacing', () => {
+    it('still emits complete after a terminal message_end error', () => {
+      const errorEvents = collect(adapter.adaptEvent({
+        type: 'message_end',
+        message: {
+          role: 'assistant',
+          stopReason: 'error',
+          errorMessage: 'Stream ended without finish_reason',
+        },
+      } as any))
+      const completeEvents = collect(adapter.adaptEvent({ type: 'agent_end' } as any))
+
+      expect(errorEvents).toHaveLength(1)
+      expect(errorEvents[0]).toMatchObject({
+        type: 'error',
+        message: 'Stream ended without finish_reason',
+      })
+      expect(completeEvents).toEqual([{ type: 'complete' }])
+    })
+
     it('should emit plain error for unclassified error messages', () => {
       const events = collect(adapter.adaptEvent({
         type: 'message_end',
