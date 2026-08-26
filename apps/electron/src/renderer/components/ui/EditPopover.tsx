@@ -949,6 +949,8 @@ export function EditPopover({
   const [dragArmed, setDragArmed] = useState(false)
   const isDraggingRef = useRef(false)
   const [collapsed, setCollapsed] = useState(false)
+  const [bodyHidden, setBodyHidden] = useState(false)
+  const [isTransitioning, setIsTransitioning] = useState(false)
   const dragStartRef = useRef({ x: 0, y: 0, offsetX: 0, offsetY: 0 })
   const dragOffsetRef = useRef({ x: 0, y: 0 })
   const pinOriginRef = useRef<{ left: number; top: number } | null>(null)
@@ -986,12 +988,13 @@ export function EditPopover({
     setDragOffset(next)
   }, [])
 
-  useEffect(() => {
-    if (!open) return
+  useLayoutEffect(() => {
     dragOffsetRef.current = { x: 0, y: 0 }
     pinOriginRef.current = null
     setDragOffset({ x: 0, y: 0 })
     setCollapsed(false)
+    setBodyHidden(false)
+    setIsTransitioning(false)
     const next = clampPopoverSize(
       { width: width || DEFAULT_POPOVER_WIDTH, height: DEFAULT_POPOVER_HEIGHT },
       readViewport(),
@@ -1109,8 +1112,10 @@ export function EditPopover({
     const viewport = readViewport()
     const rect = popoverRef.current?.getBoundingClientRect()
     if (rect) pinOriginRef.current = { left: rect.left, top: rect.top }
+    setIsTransitioning(true)
     if (collapsed) {
       const next = clampPopoverSize(expandedSizeRef.current, viewport, false)
+      setBodyHidden(false)
       setContainerSize(next)
       setCollapsed(false)
       return
@@ -1119,30 +1124,44 @@ export function EditPopover({
     const next = clampPopoverSize(containerSize, viewport, true)
     setContainerSize(next)
     setCollapsed(true)
-  }, [collapsed, containerSize, readViewport])
+    if (reduceMotion) setBodyHidden(true)
+  }, [collapsed, containerSize, readViewport, reduceMotion])
 
   // Only correct a user-dragged card after collapse/expand. Running on first
   // open would clamp an unpositioned portal (0,0) and jump the window (#123).
-  // Collapse/expand also pins the last painted top-left so a 400→240 shrink
-  // cannot let Radix re-center the strip.
+  // Radix can flip sides after the size change, so keep the pinned origin
+  // through its positioning frame instead of clearing it synchronously.
   useLayoutEffect(() => {
     if (!open || isDragging || dragArmed || isResizing) return
+    const pin = pinOriginRef.current
+    if (pin) {
+      let frame = 0
+      let pass = 0
+      const restorePinnedOrigin = () => {
+        const rect = popoverRef.current?.getBoundingClientRect()
+        if (!rect || pinOriginRef.current !== pin) return
+        const offset = dragOffsetRef.current
+        const next = offsetToPinVisualOrigin(
+          offset,
+          pin,
+          { left: rect.left, top: rect.top },
+          containerSize,
+          readViewport(),
+        )
+        if (next.x !== offset.x || next.y !== offset.y) applyOffset(next)
+        pass += 1
+        if (pass < 2) {
+          frame = window.requestAnimationFrame(restorePinnedOrigin)
+        } else {
+          pinOriginRef.current = null
+        }
+      }
+      frame = window.requestAnimationFrame(restorePinnedOrigin)
+      return () => window.cancelAnimationFrame(frame)
+    }
     const rect = popoverRef.current?.getBoundingClientRect()
     if (!rect) return
     const offset = dragOffsetRef.current
-    const pin = pinOriginRef.current
-    if (pin) {
-      pinOriginRef.current = null
-      const next = offsetToPinVisualOrigin(
-        offset,
-        pin,
-        { left: rect.left, top: rect.top },
-        containerSize,
-        readViewport(),
-      )
-      if (next.x !== offset.x || next.y !== offset.y) applyOffset(next)
-      return
-    }
     if (offset.x === 0 && offset.y === 0) return
     const next = clampVisualPopoverOffset(
       offset,
@@ -1397,6 +1416,8 @@ export function EditPopover({
     setOpen(false)
   }, [context, displayLabel, workingDirectory, model, systemPromptPreset, permissionMode, setOpen])
 
+  const positioningSize = collapsed ? expandedSizeRef.current : containerSize
+
   return (
     <>
       <AnimatePresence>
@@ -1419,12 +1440,15 @@ export function EditPopover({
             align={align}
             sticky="always"
             collisionPadding={POPOVER_COLLISION_PADDING}
-            avoidCollisions={!isDragging && dragOffset.x === 0 && dragOffset.y === 0}
-            className="p-0"
+            // Keep Radix on one positioning coordinate system while dragging.
+            // Flipping collision handling on the first move rebases the popover
+            // before our translate is applied, which makes it jump to an edge.
+            avoidCollisions
+            className="pointer-events-none p-0"
             data-testid="edit-popover"
             style={{
-              width: `min(${containerSize.width}px, calc(100vw - ${VIEWPORT_MARGIN * 2}px))`,
-              height: `min(${containerSize.height}px, calc(100vh - ${VIEWPORT_MARGIN_TOP + VIEWPORT_MARGIN}px))`,
+              width: `min(${positioningSize.width}px, calc(100vw - ${VIEWPORT_MARGIN * 2}px))`,
+              height: `min(${positioningSize.height}px, calc(100vh - ${VIEWPORT_MARGIN_TOP + VIEWPORT_MARGIN}px))`,
               background: 'transparent',
               border: 'none',
               boxShadow: 'none',
@@ -1439,9 +1463,16 @@ export function EditPopover({
               target.focus()
             }}
           >
-            <div
+            <motion.div
               ref={popoverRef}
-              className="relative flex h-full w-full flex-col overflow-hidden bg-foreground-2 shadow-modal-small"
+              initial={false}
+              animate={{ width: containerSize.width, height: containerSize.height }}
+              transition={{
+                duration: reduceMotion || isResizing ? 0 : 0.2,
+                ease: [0.22, 1, 0.36, 1],
+              }}
+              onAnimationComplete={() => setIsTransitioning(false)}
+              className="pointer-events-auto relative flex flex-col overflow-hidden bg-foreground-2 shadow-modal-small"
               data-collapsed={collapsed ? 'true' : 'false'}
               style={{
                 transform: `translate(${dragOffset.x}px, ${dragOffset.y}px)`,
@@ -1464,7 +1495,7 @@ export function EditPopover({
                 {collapsed && isProcessing && (
                   <HeaderIconButton
                     icon={<Square className="size-3 fill-current" />}
-                    tooltip={t('chat.stopResponse')}
+                    tooltip={isTransitioning ? undefined : t('chat.stopResponse')}
                     aria-label={t('chat.stopResponse')}
                     onMouseDown={event => event.stopPropagation()}
                     onClick={handleStopGeneration}
@@ -1472,7 +1503,7 @@ export function EditPopover({
                 )}
                 <HeaderIconButton
                   icon={collapsed ? <ChevronDown className="size-4" /> : <ChevronUp className="size-4" />}
-                  tooltip={collapsed ? t('editPopover.expand') : t('editPopover.collapse')}
+                  tooltip={isTransitioning ? undefined : collapsed ? t('editPopover.expand') : t('editPopover.collapse')}
                   aria-label={collapsed ? t('editPopover.expand') : t('editPopover.collapse')}
                   aria-expanded={!collapsed}
                   onMouseDown={event => event.stopPropagation()}
@@ -1480,7 +1511,7 @@ export function EditPopover({
                 />
                 <HeaderIconButton
                   icon={<X className="size-4" />}
-                  tooltip={t('common.close')}
+                  tooltip={isTransitioning ? undefined : t('common.close')}
                   aria-label={t('common.close')}
                   disabled={isProcessing && !creationKind}
                   onMouseDown={event => event.stopPropagation()}
@@ -1488,10 +1519,19 @@ export function EditPopover({
                 />
               </div>
 
-              <div
-                hidden={collapsed}
+              <motion.div
+                hidden={bodyHidden}
                 aria-hidden={collapsed}
-                className={popoverBodyClassName(collapsed)}
+                initial={false}
+                animate={{ opacity: collapsed ? 0 : 1, y: collapsed ? -4 : 0 }}
+                transition={{
+                  duration: reduceMotion ? 0 : collapsed ? 0.1 : 0.16,
+                  ease: [0.22, 1, 0.36, 1],
+                }}
+                onAnimationComplete={() => {
+                  if (collapsed) setBodyHidden(true)
+                }}
+                className={popoverBodyClassName(bodyHidden)}
                 data-testid="edit-popover-body"
               >
                 <ChatDisplay
@@ -1506,7 +1546,7 @@ export function EditPopover({
                   pendingCredential={pendingCredential}
                   onRespondToCredential={onRespondToCredential}
                   compactMode={true}
-                  compactInputMaxHeight={getCompactInputMaxHeight(containerSize.height)}
+                  compactInputMaxHeight={getCompactInputMaxHeight(expandedSizeRef.current.height)}
                   placeholder={placeholder}
                   emptyStateLabel={displayLabel || context.label}
                   inputValue={creationKind ? inputDraft : undefined}
@@ -1514,7 +1554,7 @@ export function EditPopover({
                   onExplicitStop={creationKind ? handleExplicitStop : undefined}
                   onBeforeExplicitStop={creationKind ? requestStopConfirmation : undefined}
                 />
-              </div>
+              </motion.div>
 
               {!collapsed && (
                 <button
@@ -1529,7 +1569,7 @@ export function EditPopover({
                   </svg>
                 </button>
               )}
-            </div>
+            </motion.div>
           </PopoverContent>
       </Popover>
       <AlertDialog
