@@ -3835,6 +3835,13 @@ export class SessionManager implements ISessionManager {
         sessionLog.info(msg)
       }
 
+      // File watchers can miss newly-created directories or atomic writes.
+      // Conversation tool writes therefore publish their freshly reloaded skill
+      // catalog directly, so the renderer never has to wait for the cache TTL.
+      managed.agent.onSkillsListChange = (skills) => {
+        this.broadcastSkillsChanged(managed.workspace.id, skills)
+      }
+
       // Unified auth callback — replaces per-backend onChatGptAuthRequired/onGithubAuthRequired
       managed.agent.onBackendAuthRequired = (reason: string) => {
         sessionLog.warn(`Backend auth required for session ${managed.id}: ${reason}`)
