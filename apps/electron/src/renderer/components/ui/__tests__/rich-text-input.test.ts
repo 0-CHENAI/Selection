@@ -1,7 +1,11 @@
 import React from 'react'
 import { describe, it, expect } from 'bun:test'
 import { renderToStaticMarkup } from 'react-dom/server'
-import { isEscapeDuringComposition, RichTextInput } from '../rich-text-input'
+import {
+  isEscapeDuringComposition,
+  RichTextInput,
+  shouldShowPlaceholder,
+} from '../rich-text-input'
 
 describe('RichTextInput IME attributes', () => {
   it('keeps browser first-letter processing disabled', () => {
@@ -49,6 +53,11 @@ describe('RichTextInput IME attributes', () => {
     expect(empty).toContain('>Ask anything</div>')
     expect(caretNewline).toContain('>Ask anything</div>')
     expect(filled).not.toContain('>Ask anything</div>')
+  })
+
+  it('hides the placeholder when the editor DOM is ahead of the controlled value (#133)', () => {
+    expect(shouldShowPlaceholder('', false, false, false)).toBe(false)
+    expect(shouldShowPlaceholder('', true, false, false)).toBe(true)
   })
 })
 

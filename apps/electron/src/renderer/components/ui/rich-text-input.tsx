@@ -49,6 +49,15 @@ export function isEscapeDuringComposition(
   return Boolean(isComposingRefActive || event.isComposing || event.nativeEvent?.isComposing)
 }
 
+export function shouldShowPlaceholder(
+  controlledValue: string,
+  isEditorEmpty: boolean,
+  isComposing: boolean,
+  isImePending: boolean
+): boolean {
+  return isEmptyComposerValue(controlledValue) && isEditorEmpty && !isComposing && !isImePending
+}
+
 export interface RichTextInputProps extends Omit<React.HTMLAttributes<HTMLDivElement>, 'onChange' | 'onInput' | 'onPaste'> {
   /** Current text value */
   value: string
@@ -580,6 +589,12 @@ export const RichTextInput = React.forwardRef<RichTextInputHandle, RichTextInput
     const { t } = useTranslation()
     const safeValue = React.useMemo(() => coerceInputText(value), [value])
     const divRef = React.useRef<HTMLDivElement>(null)
+    // The DOM can temporarily be ahead of the controlled value while an IME is
+    // composing (notably on Windows). Track its emptiness independently so the
+    // placeholder never overlaps provisional or newly committed text.
+    const [isEditorEmpty, setIsEditorEmpty] = React.useState(
+      () => isEmptyComposerValue(safeValue)
+    )
     const [isFocused, setIsFocused] = React.useState(false)
     // Ref for synchronous event checks; state so placeholder re-renders during IME.
     const isComposingRef = React.useRef(false)
@@ -668,6 +683,7 @@ export const RichTextInput = React.forwardRef<RichTextInputHandle, RichTextInput
       const newText = isEmptyComposerValue(extracted) ? '' : extracted
       const cursorPos = getCursorPosition(editor, cursorPositionRef.current)
 
+      setIsEditorEmpty(isEmptyComposerValue(newText))
       lastValueRef.current = newText
       cursorPositionRef.current = cursorPos
 
@@ -706,6 +722,7 @@ export const RichTextInput = React.forwardRef<RichTextInputHandle, RichTextInput
       if (isInternalUpdate.current) return
       const nativeIsComposing = Boolean((event?.nativeEvent as InputEvent | undefined)?.isComposing)
       const currentText = divRef.current ? getTextFromElement(divRef.current) : ''
+      setIsEditorEmpty(isEmptyComposerValue(currentText))
       imeGateRef.current.onPossibleFirstInsert({
         nativeIsComposing,
         previousValue: lastValueRef.current,
@@ -844,6 +861,7 @@ export const RichTextInput = React.forwardRef<RichTextInputHandle, RichTextInput
 
       // External value change - update content
       lastValueRef.current = safeValue
+      setIsEditorEmpty(isEmptyComposerValue(safeValue))
       lastMentionSignatureRef.current = getMentionSignature(safeValue, skillSlugs, sourceSlugs)
 
       const shouldPlaceCaret = pendingCursorRef.current !== null || document.activeElement === editor
@@ -878,6 +896,7 @@ export const RichTextInput = React.forwardRef<RichTextInputHandle, RichTextInput
         )
       })
       lastValueRef.current = safeValue
+      setIsEditorEmpty(isEmptyComposerValue(safeValue))
     }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
     // Handle selection changes to highlight badges when selected
@@ -926,7 +945,12 @@ export const RichTextInput = React.forwardRef<RichTextInputHandle, RichTextInput
     // Show placeholder only when truly empty and not mid-IME composition.
     // CJK IME keeps React value empty until compositionend; provisional text
     // still lives in the contenteditable and must not sit under a placeholder.
-    const showPlaceholder = isEmptyComposerValue(safeValue) && !isComposing && !isImePending
+    const showPlaceholder = shouldShowPlaceholder(
+      safeValue,
+      isEditorEmpty,
+      isComposing,
+      isImePending
+    )
 
     // Normalize placeholder to array for RotatingPlaceholder
     const placeholderArray = React.useMemo(() => {
