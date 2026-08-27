@@ -244,11 +244,13 @@ export function shouldShowThinkingIndicator(phase: TurnPhase, isBuffering: boole
 }
 
 /**
- * Select the newest semantic progress text while a turn is doing work.
+ * Select the newest semantic progress title while a turn is doing work.
  *
- * The completed title remains stable, and final response streaming has its own
- * label. Timestamps are authoritative because live activities can briefly be
- * received out of array order; array order only breaks timestamp ties.
+ * Tool intents and explicit system statuses are concise title candidates.
+ * Raw thinking/intermediate bodies stay in the expanded work chain instead of
+ * being duplicated into its header (#141). Timestamps are authoritative because
+ * live activities can briefly be received out of array order; array order only
+ * breaks timestamp ties.
  */
 export function getActiveTurnPreview(
   activities: ActivityItem[],
@@ -259,14 +261,9 @@ export function getActiveTurnPreview(
   let latest: { text: string; timestamp: number; index: number } | undefined
 
   activities.forEach((activity, index) => {
-    const activityContent = (
-      activity.type === 'intermediate'
-      || activity.type === 'thinking'
-      || activity.type === 'status'
-    )
-      ? activity.content?.trim()
-      : undefined
-    const text = activityContent || activity.intent?.trim()
+    const toolIntent = activity.type === 'tool' ? activity.intent?.trim() : undefined
+    const statusText = activity.type === 'status' ? activity.content?.trim() : undefined
+    const text = toolIntent || statusText
     if (!text) return
 
     if (

@@ -12,7 +12,7 @@ function createActivity(overrides: Partial<ActivityItem>): ActivityItem {
 }
 
 describe('getActiveTurnPreview', () => {
-  it('选择最新的中间思考内容，而不是该轮最初的意图', () => {
+  it('过程正文不会覆盖该轮已有的语义标题（#141）', () => {
     const activities = [
       createActivity({
         intent: '确认 OfficeCLI 运行时可用，准备读取招标文件',
@@ -26,7 +26,7 @@ describe('getActiveTurnPreview', () => {
     ]
 
     expect(getActiveTurnPreview(activities, 'tool_active'))
-      .toBe('已读取前 60% 内容，继续读取剩余章节')
+      .toBe('确认 OfficeCLI 运行时可用，准备读取招标文件')
   })
 
   it('选择最新工具意图覆盖该轮最初的意图', () => {
@@ -39,25 +39,23 @@ describe('getActiveTurnPreview', () => {
       .toBe('定位第五章和第六章')
   })
 
-  it('根据时间戳选择最新进展，不依赖活动数组的暂时顺序', () => {
+  it('根据时间戳选择最新工具意图，不依赖活动数组的暂时顺序', () => {
     const activities = [
       createActivity({
-        type: 'intermediate',
-        content: '最新进展',
+        intent: '最新工具意图',
         timestamp: 5,
       }),
       createActivity({
-        type: 'intermediate',
-        content: '较早进展',
+        intent: '较早工具意图',
         timestamp: 2,
       }),
     ]
 
     expect(getActiveTurnPreview(activities, 'awaiting'))
-      .toBe('最新进展')
+      .toBe('最新工具意图')
   })
 
-  it('等待下一步时继续显示最新进展，不退回该轮最初的标题', () => {
+  it('新工具阶段仍会更新标题，不回归旧标题停滞问题（#34）', () => {
     const activities = [
       createActivity({ intent: '准备读取文件', timestamp: 1 }),
       createActivity({
@@ -65,10 +63,11 @@ describe('getActiveTurnPreview', () => {
         content: '已读取文件，准备定位章节',
         timestamp: 2,
       }),
+      createActivity({ intent: '定位第五章和第六章', timestamp: 3 }),
     ]
 
     expect(getActiveTurnPreview(activities, 'awaiting'))
-      .toBe('已读取文件，准备定位章节')
+      .toBe('定位第五章和第六章')
   })
 
   it('使用最新状态消息作为当前进展', () => {
@@ -98,10 +97,11 @@ describe('getActiveTurnPreview', () => {
     expect(getActiveTurnPreview(activities, 'streaming')).toBeUndefined()
   })
 
-  it('忽略没有语义内容的活动', () => {
+  it('忽略工具结果、思考和过程正文的原始内容及非工具 intent', () => {
     const activities = [
       createActivity({ content: '工具原始输出', timestamp: 2 }),
-      createActivity({ type: 'intermediate', content: '   ', timestamp: 3 }),
+      createActivity({ type: 'thinking', content: '内部思考内容', intent: '内部思考标题', timestamp: 3 }),
+      createActivity({ type: 'intermediate', content: '最后一段过程正文', intent: '过程正文标题', timestamp: 4 }),
     ]
 
     expect(getActiveTurnPreview(activities, 'awaiting')).toBeUndefined()
