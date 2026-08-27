@@ -113,6 +113,25 @@ describe('PiEventAdapter', () => {
       expect(events[0].turnId).toMatch(/^pi-turn-1__m0$/);
     });
 
+    it('should buffer Codex text deltas until their response phase is known', () => {
+      collect(adapter.adaptEvent({ type: 'turn_start' } as any));
+      const events = collect(adapter.adaptEvent({
+        type: 'message_update',
+        assistantMessageEvent: {
+          type: 'text_delta',
+          delta: 'Let me verify the original file.',
+          partial: {
+            role: 'assistant',
+            api: 'openai-codex-responses',
+            provider: 'openai-codex',
+            content: [{ type: 'text', text: 'Let me verify the original file.' }],
+          },
+        },
+      } as any));
+
+      expect(events).toHaveLength(0);
+    });
+
     it('should skip message_update without text_delta type', () => {
       collect(adapter.adaptEvent({ type: 'turn_start' } as any));
       const events = collect(adapter.adaptEvent({
@@ -159,6 +178,83 @@ describe('PiEventAdapter', () => {
         text: 'Hello there',
         isIntermediate: false,
       });
+    });
+
+    it('should exclude Codex commentary from the final assistant body', () => {
+      collect(adapter.adaptEvent({ type: 'turn_start' } as any));
+      const events = collect(adapter.adaptEvent({
+        type: 'message_end',
+        message: {
+          role: 'assistant',
+          stopReason: 'stop',
+          content: [
+            {
+              type: 'text',
+              text: 'Let me confirm this against the original file.',
+              textSignature: JSON.stringify({ v: 1, id: 'msg_commentary', phase: 'commentary' }),
+            },
+            {
+              type: 'text',
+              text: 'The validation errors were already present in the original document.',
+              textSignature: JSON.stringify({ v: 1, id: 'msg_final', phase: 'final_answer' }),
+            },
+          ],
+        },
+      } as any));
+
+      expect(events).toHaveLength(1);
+      expect(events[0]).toMatchObject({
+        type: 'text_complete',
+        text: 'The validation errors were already present in the original document.',
+        isIntermediate: false,
+      });
+    });
+
+    it('should keep filtering commentary when response signature versions advance', () => {
+      collect(adapter.adaptEvent({ type: 'turn_start' } as any));
+      const events = collect(adapter.adaptEvent({
+        type: 'message_end',
+        message: {
+          role: 'assistant',
+          stopReason: 'stop',
+          content: [
+            {
+              type: 'text',
+              text: 'Internal process note.',
+              textSignature: JSON.stringify({ v: 2, phase: 'commentary' }),
+            },
+            {
+              type: 'text',
+              text: 'Visible answer.',
+              textSignature: JSON.stringify({ v: 2, phase: 'final_answer' }),
+            },
+          ],
+        },
+      } as any));
+
+      expect(events).toHaveLength(1);
+      expect(events[0]).toMatchObject({ text: 'Visible answer.', isIntermediate: false });
+    });
+
+    it('should not emit a reply body for commentary-only Codex output', () => {
+      collect(adapter.adaptEvent({ type: 'turn_start' } as any));
+      const events = collect(adapter.adaptEvent({
+        type: 'message_end',
+        message: {
+          role: 'assistant',
+          stopReason: 'toolUse',
+          content: [
+            {
+              type: 'text',
+              text: 'I will inspect the file now.',
+              textSignature: JSON.stringify({ v: 1, id: 'msg_commentary', phase: 'commentary' }),
+            },
+            { type: 'toolCall', id: 'call_1', name: 'read', arguments: {} },
+          ],
+        },
+      } as any));
+
+      expect(events).toHaveLength(0);
     });
 
     it('should attach sdkMessageId from message_end onto the text_complete', () => {

@@ -47,6 +47,30 @@ const OVERFLOW_FALLBACK_TIMEOUT_MS = 5_000;
  */
 type PiEvent = PiAgentEvent | AgentSessionEvent;
 
+type TextPhase = 'commentary' | 'final_answer';
+
+/**
+ * OpenAI Responses stores the message phase inside Pi's text signature.
+ * Treat malformed/legacy signatures as unclassified text so older providers
+ * keep their existing behavior.
+ */
+function getTextPhase(textSignature: unknown): TextPhase | undefined {
+  if (typeof textSignature !== 'string' || !textSignature.startsWith('{')) return undefined;
+  try {
+    const parsed = JSON.parse(textSignature) as { phase?: unknown };
+    if (parsed.phase === 'commentary' || parsed.phase === 'final_answer') {
+      return parsed.phase;
+    }
+  } catch {
+    // Legacy opaque signatures are not phase metadata.
+  }
+  return undefined;
+}
+
+function isCodexResponsesMessage(message: AssistantMessage | undefined): boolean {
+  return message?.api === 'openai-codex-responses' || message?.provider === 'openai-codex';
+}
+
 /**
  * Maps Pi SDK events to SelectionEvents for UI compatibility.
  *
@@ -315,6 +339,11 @@ export class PiEventAdapter extends BaseEventAdapter {
         // Pi SDK emits message_update only for assistant messages (streaming deltas)
         const amEvent: AssistantMessageEvent = event.assistantMessageEvent;
         if (amEvent.type === 'text_delta' && amEvent.delta) {
+          // Codex attaches the phase only after the Responses output item
+          // finishes. Hold these deltas until message_end can classify them,
+          // otherwise internal commentary briefly appears as reply text (#135).
+          if (isCodexResponsesMessage(amEvent.partial)) break;
+
           this.hasStreamedDeltas = true;
           if (!this.messageSubTurnId) {
             this.messageSubTurnId = this.nextSubTurnId('m');
@@ -778,7 +807,7 @@ export class PiEventAdapter extends BaseEventAdapter {
 
     const msg = message as {
       role?: string;
-      content?: string | Array<{ type: string; text?: string }>;
+      content?: string | Array<{ type: string; text?: string; textSignature?: string }>;
     };
 
     if (typeof msg.content === 'string') {
@@ -787,7 +816,7 @@ export class PiEventAdapter extends BaseEventAdapter {
 
     if (Array.isArray(msg.content)) {
       const textParts = msg.content
-        .filter((c) => c.type === 'text' && c.text)
+        .filter((c) => c.type === 'text' && c.text && getTextPhase(c.textSignature) !== 'commentary')
         .map((c) => c.text!);
       return textParts.length > 0 ? textParts.join('') : null;
     }
