@@ -12,7 +12,12 @@ import {
 } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
-import { beginMcpJsonImport } from './external-resource-import'
+import type { ExternalImportAction } from '../../../shared/types'
+import {
+  beginMcpJsonImport,
+  confirmSkillFileImport,
+  type PreparedSkillFileImport,
+} from './external-resource-import'
 
 const MCP_JSON_PLACEHOLDER = `{
   "mcpServers": {
@@ -100,6 +105,104 @@ export function ExternalResourceImportDialog({
         <DialogFooter>
           <Button variant="ghost" onClick={() => onOpenChange(false)}>{t('common.cancel')}</Button>
           <Button disabled={!mcpJson.trim()} onClick={confirm}>
+            {t('fileImport.confirm')}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+interface SkillFileImportDialogProps {
+  open: boolean
+  workspaceId: string
+  prepared: PreparedSkillFileImport
+  onOpenChange: (open: boolean) => void
+}
+
+export function SkillFileImportDialog({
+  open,
+  workspaceId,
+  prepared,
+  onOpenChange,
+}: SkillFileImportDialogProps) {
+  const { t } = useTranslation()
+  const [loading, setLoading] = useState(false)
+  const [action, setAction] = useState<ExternalImportAction>(
+    prepared.preview.conflict ? 'skip' : 'overwrite',
+  )
+  const [renameTo, setRenameTo] = useState('')
+
+  const confirm = async () => {
+    setLoading(true)
+    try {
+      const result = await confirmSkillFileImport(
+        window.electronAPI,
+        workspaceId,
+        prepared,
+        { action, renameTo: action === 'rename' ? renameTo.trim() : undefined },
+      )
+      if (result.status === 'imported') {
+        toast.success(t('fileImport.skillImported', { slug: result.slug }))
+      } else {
+        toast.success(t('fileImport.skipped'))
+      }
+      onOpenChange(false)
+    } catch (error) {
+      toast.error(t('fileImport.skillFailed'), {
+        description: error instanceof Error ? error.message : String(error),
+      })
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const preview = prepared.preview
+  const canConfirm = action !== 'rename' || Boolean(renameTo.trim())
+
+  return (
+    <Dialog
+      open={open}
+      onOpenChange={(next) => {
+        if (!loading) onOpenChange(next)
+      }}
+    >
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>{t('fileImport.skillTitle')}</DialogTitle>
+          <DialogDescription>{t('fileImport.skillDescription')}</DialogDescription>
+        </DialogHeader>
+        <div className="space-y-2 text-sm">
+          <div className="font-medium">{preview.name}</div>
+          <div className="text-muted-foreground">{preview.description}</div>
+          <div className="text-muted-foreground">{preview.suggestedSlug}</div>
+          {preview.conflict && <div className="text-warning">{t('fileImport.conflict')}</div>}
+          <div className="text-muted-foreground">{preview.files.join(', ')}</div>
+          <select
+            aria-label={t('fileImport.confirm')}
+            className="w-full rounded-[6px] bg-background px-2 py-1"
+            value={action}
+            onChange={event => setAction(event.target.value as ExternalImportAction)}
+          >
+            <option value="overwrite">{preview.conflict ? t('fileImport.overwrite') : t('fileImport.import')}</option>
+            <option value="skip">{t('fileImport.skip')}</option>
+            <option value="rename">{t('fileImport.rename')}</option>
+          </select>
+          {action === 'rename' && (
+            <input
+              aria-label={t('fileImport.rename')}
+              className="w-full rounded-[6px] bg-background px-2 py-1"
+              value={renameTo}
+              onChange={event => setRenameTo(event.target.value)}
+              placeholder={t('fileImport.renamePlaceholder')}
+            />
+          )}
+        </div>
+        <DialogFooter>
+          <Button variant="ghost" disabled={loading} onClick={() => onOpenChange(false)}>
+            {t('common.cancel')}
+          </Button>
+          <Button disabled={loading || !canConfirm} onClick={() => void confirm()}>
             {t('fileImport.confirm')}
           </Button>
         </DialogFooter>

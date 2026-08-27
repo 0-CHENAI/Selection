@@ -125,8 +125,17 @@ import {
 import type { SettingsSubpage } from "../../../shared/types"
 import { SourcesListPanel } from "./SourcesListPanel"
 import { SkillsListPanel } from "./SkillsListPanel"
-import { ExternalResourceImportDialog } from "@/components/resources/ExternalResourceImportDialog"
-import { importSkillFromFile, openSkillFilePicker } from "@/components/resources/external-resource-import"
+import {
+  ExternalResourceImportDialog,
+  SkillFileImportDialog,
+} from "@/components/resources/ExternalResourceImportDialog"
+import {
+  openSkillFilePicker,
+  prepareSkillFileImport,
+  listenForSkillFilePickerCancel,
+  releaseSkillFilePicker,
+  type PreparedSkillFileImport,
+} from "@/components/resources/external-resource-import"
 import { AutomationsListPanel } from "../automations/AutomationsListPanel"
 import { ProjectsListPanel } from "./ProjectsListPanel"
 import { APP_EVENTS, AGENT_EVENTS, type AutomationFilterKind, AUTOMATION_TYPE_TO_FILTER_KIND } from "../automations/types"
@@ -1910,33 +1919,71 @@ function AppShellContent({
   const [mcpFileImportOpen, setMcpFileImportOpen] = useState(false)
   const skillFileInputRef = useRef<HTMLInputElement>(null)
   const skillFileImporting = useRef(false)
+  const skillFileCancelCleanupRef = useRef<(() => void) | null>(null)
+  const skillFileImportTriggerRef = useRef<HTMLElement | null>(null)
+  const [preparedSkillFileImport, setPreparedSkillFileImport] = useState<{
+    workspaceId: string
+    value: PreparedSkillFileImport
+  } | null>(null)
 
-  const handleImportSkillFromFile = useCallback(() => {
-    if (!activeWorkspaceId || skillFileImporting.current) return
-    if (skillFileInputRef.current) openSkillFilePicker(skillFileInputRef.current)
-  }, [activeWorkspaceId])
+  const clearSkillFileCancelListener = useCallback(() => {
+    skillFileCancelCleanupRef.current?.()
+    skillFileCancelCleanupRef.current = null
+  }, [])
 
-  const handleSkillImportFileChange = useCallback(async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0]
-    event.target.value = ''
-    if (!file || !activeWorkspaceId || skillFileImporting.current) return
+  const finishSkillFileImport = useCallback(() => {
+    clearSkillFileCancelListener()
+    setPreparedSkillFileImport(null)
+    releaseSkillFilePicker(skillFileImporting)
+    requestAnimationFrame(() => skillFileImportTriggerRef.current?.focus())
+  }, [clearSkillFileCancelListener])
 
-    skillFileImporting.current = true
+  const handleImportSkillFromFile = useCallback((event: React.MouseEvent<HTMLButtonElement>) => {
+    if (!activeWorkspaceId || !skillFileInputRef.current || skillFileImporting.current) return
+    skillFileImportTriggerRef.current = event.currentTarget
+    clearSkillFileCancelListener()
+    skillFileCancelCleanupRef.current = listenForSkillFilePickerCancel(
+      skillFileInputRef.current,
+      finishSkillFileImport,
+    )
     try {
-      const result = await importSkillFromFile(window.electronAPI, activeWorkspaceId, file)
-      if (result.status === 'imported') {
-        toast.success(t('fileImport.skillImported', { slug: result.slug }))
-      } else if (result.status === 'skipped') {
-        toast.success(t('fileImport.skipped'))
-      }
+      openSkillFilePicker(skillFileInputRef.current, skillFileImporting)
     } catch (error) {
+      finishSkillFileImport()
       toast.error(t('fileImport.skillFailed'), {
         description: error instanceof Error ? error.message : String(error),
       })
-    } finally {
-      skillFileImporting.current = false
     }
-  }, [activeWorkspaceId, t])
+  }, [activeWorkspaceId, clearSkillFileCancelListener, finishSkillFileImport, t])
+
+  const handleSkillImportFileChange = useCallback(async (event: React.ChangeEvent<HTMLInputElement>) => {
+    clearSkillFileCancelListener()
+    const file = event.target.files?.[0]
+    event.target.value = ''
+    if (!file || !activeWorkspaceId) {
+      finishSkillFileImport()
+      return
+    }
+
+    try {
+      const value = await prepareSkillFileImport(window.electronAPI, activeWorkspaceId, file)
+      setPreparedSkillFileImport({ workspaceId: activeWorkspaceId, value })
+    } catch (error) {
+      finishSkillFileImport()
+      toast.error(t('fileImport.skillFailed'), {
+        description: error instanceof Error ? error.message : String(error),
+      })
+    }
+  }, [activeWorkspaceId, clearSkillFileCancelListener, finishSkillFileImport, t])
+
+  useEffect(() => {
+    if (
+      preparedSkillFileImport
+      && preparedSkillFileImport.workspaceId !== activeWorkspaceId
+    ) {
+      finishSkillFileImport()
+    }
+  }, [activeWorkspaceId, finishSkillFileImport, preparedSkillFileImport])
 
   // Stores the Y position of the last right-clicked sidebar item so the EditPopover
   // appears near it rather than at a fixed location. Updated synchronously before
@@ -3919,6 +3966,16 @@ function AppShellContent({
                 className="hidden"
                 onChange={(event) => void handleSkillImportFileChange(event)}
               />
+              {preparedSkillFileImport && (
+                <SkillFileImportDialog
+                  open
+                  workspaceId={preparedSkillFileImport.workspaceId}
+                  prepared={preparedSkillFileImport.value}
+                  onOpenChange={(open) => {
+                    if (!open) finishSkillFileImport()
+                  }}
+                />
+              )}
               <ExternalResourceImportDialog
                 open={mcpFileImportOpen}
                 workspaceId={activeWorkspaceId}

@@ -1,8 +1,11 @@
 import { describe, expect, it, mock } from 'bun:test'
 import {
   beginMcpJsonImport,
-  importSkillFromFile,
+  confirmSkillFileImport,
+  listenForSkillFilePickerCancel,
   openSkillFilePicker,
+  prepareSkillFileImport,
+  releaseSkillFilePicker,
   validateMcpImportJsonInput,
   type McpJsonImportApi,
   type SkillFileImportApi,
@@ -67,23 +70,54 @@ describe('beginMcpJsonImport', () => {
   })
 })
 
-describe('importSkillFromFile', () => {
-  it('opens the native picker synchronously without waiting for an RPC round trip', () => {
+describe('skill file import stages', () => {
+  it('opens the native picker synchronously and suppresses repeated triggers until release', () => {
     const steps: string[] = []
+    const guard = { current: false }
     const input = {
       value: 'previous-skill.md',
       click: mock(() => steps.push('native-picker')),
     }
 
-    openSkillFilePicker(input)
+    expect(openSkillFilePicker(input, guard)).toBe(true)
+    expect(openSkillFilePicker(input, guard)).toBe(false)
     steps.push('click-handler-finished')
 
     expect(steps).toEqual(['native-picker', 'click-handler-finished'])
     expect(input.value).toBe('')
     expect(input.click).toHaveBeenCalledTimes(1)
+
+    releaseSkillFilePicker(guard)
+    expect(openSkillFilePicker(input, guard)).toBe(true)
+    expect(input.click).toHaveBeenCalledTimes(2)
   })
 
-  it('imports a selected Markdown skill without a confirmation dialog', async () => {
+  it('releases the picker exactly once when the native chooser is cancelled', () => {
+    const input = new EventTarget()
+    const guard = { current: true }
+    const onCancel = mock(() => releaseSkillFilePicker(guard))
+    const cleanup = listenForSkillFilePickerCancel(input, onCancel)
+
+    input.dispatchEvent(new Event('cancel'))
+    input.dispatchEvent(new Event('cancel'))
+    cleanup()
+
+    expect(onCancel).toHaveBeenCalledTimes(1)
+    expect(guard.current).toBe(false)
+  })
+
+  it('releases the single-flight guard when opening the picker throws', () => {
+    const guard = { current: false }
+    const input = {
+      value: '',
+      click: () => { throw new Error('picker unavailable') },
+    }
+
+    expect(() => openSkillFilePicker(input, guard)).toThrow('picker unavailable')
+    expect(guard.current).toBe(false)
+  })
+
+  it('previews a selected Markdown skill without importing before confirmation', async () => {
     const content = '---\nname: Research\ndescription: Research a topic\n---\n'
     const file = new File([content], 'SKILL.md')
     const previewSkillFileImport = mock(async () => skillPreview())
@@ -93,21 +127,29 @@ describe('importSkillFromFile', () => {
       importSkillFile,
     } satisfies SkillFileImportApi
 
-    await expect(importSkillFromFile(api, workspaceId, file)).resolves.toEqual({
-      status: 'imported',
-      slug: 'research',
+    const prepared = await prepareSkillFileImport(api, workspaceId, file)
+
+    expect(prepared).toEqual({
+      payload: { kind: 'markdown', content },
+      preview: skillPreview(),
     })
     expect(previewSkillFileImport).toHaveBeenCalledWith(workspaceId, {
       kind: 'markdown',
       content,
     })
-    expect(importSkillFile).toHaveBeenCalledWith(workspaceId, {
-      kind: 'markdown',
-      content,
-    }, { action: 'overwrite' })
+    expect(importSkillFile).not.toHaveBeenCalled()
+
+    await expect(confirmSkillFileImport(api, workspaceId, prepared, {
+      action: 'overwrite',
+    })).resolves.toEqual({ status: 'imported', slug: 'research' })
+    expect(importSkillFile).toHaveBeenCalledWith(
+      workspaceId,
+      prepared.payload,
+      { action: 'overwrite' },
+    )
   })
 
-  it('imports skill archives without changing their encoded payload', async () => {
+  it('previews skill archives without changing their encoded payload', async () => {
     const zipBase64 = 'c2tpbGwtYXJjaGl2ZQ=='
     const file = new File(['skill-archive'], 'research.zip')
     const previewSkillFileImport = mock(async () => skillPreview())
@@ -117,18 +159,14 @@ describe('importSkillFromFile', () => {
       importSkillFile,
     } satisfies SkillFileImportApi
 
-    await expect(importSkillFromFile(api, workspaceId, file)).resolves.toEqual({
-      status: 'imported',
-      slug: 'research',
-    })
+    const prepared = await prepareSkillFileImport(api, workspaceId, file)
+
     expect(previewSkillFileImport).toHaveBeenCalledWith(workspaceId, {
       kind: 'zip',
       zipBase64,
     })
-    expect(importSkillFile).toHaveBeenCalledWith(workspaceId, {
-      kind: 'zip',
-      zipBase64,
-    }, { action: 'overwrite' })
+    expect(prepared.payload).toEqual({ kind: 'zip', zipBase64 })
+    expect(importSkillFile).not.toHaveBeenCalled()
   })
 
   it('encodes archives larger than a single base64 conversion chunk', async () => {
@@ -141,17 +179,15 @@ describe('importSkillFromFile', () => {
       importSkillFile,
     } satisfies SkillFileImportApi
 
-    await expect(importSkillFromFile(api, workspaceId, file)).resolves.toEqual({
-      status: 'imported',
-      slug: 'research',
-    })
+    await prepareSkillFileImport(api, workspaceId, file)
     expect(previewSkillFileImport).toHaveBeenCalledWith(workspaceId, {
       kind: 'zip',
       zipBase64: Buffer.from(bytes).toString('base64'),
     })
+    expect(importSkillFile).not.toHaveBeenCalled()
   })
 
-  it('skips an existing skill instead of overwriting it without confirmation', async () => {
+  it('preserves a conflict for the confirmation stage and applies the selected action', async () => {
     const content = '---\nname: Research\ndescription: Research a topic\n---\n'
     const file = new File([content], 'SKILL.md')
     const importSkillFile = mock(async () => ({ slug: 'research', skipped: true }))
@@ -160,14 +196,40 @@ describe('importSkillFromFile', () => {
       importSkillFile,
     } satisfies SkillFileImportApi
 
-    await expect(importSkillFromFile(api, workspaceId, file)).resolves.toEqual({
-      status: 'skipped',
-      slug: 'research',
-    })
-    expect(importSkillFile).toHaveBeenCalledWith(workspaceId, {
-      kind: 'markdown',
-      content,
-    }, { action: 'skip' })
+    const prepared = await prepareSkillFileImport(api, workspaceId, file)
+
+    expect(prepared.preview.conflict).toBe(true)
+    expect(importSkillFile).not.toHaveBeenCalled()
+
+    await expect(confirmSkillFileImport(api, workspaceId, prepared, {
+      action: 'skip',
+    })).resolves.toEqual({ status: 'skipped', slug: 'research' })
+    expect(importSkillFile).toHaveBeenCalledWith(
+      workspaceId,
+      { kind: 'markdown', content },
+      { action: 'skip' },
+    )
+  })
+
+  it('passes a confirmed rename decision to the import API', async () => {
+    const content = '---\nname: Research\ndescription: Research a topic\n---\n'
+    const file = new File([content], 'SKILL.md')
+    const importSkillFile = mock(async () => ({ slug: 'research-copy', skipped: false }))
+    const api = {
+      previewSkillFileImport: async () => skillPreview(true),
+      importSkillFile,
+    } satisfies SkillFileImportApi
+    const prepared = await prepareSkillFileImport(api, workspaceId, file)
+
+    await expect(confirmSkillFileImport(api, workspaceId, prepared, {
+      action: 'rename',
+      renameTo: 'research-copy',
+    })).resolves.toEqual({ status: 'imported', slug: 'research-copy' })
+    expect(importSkillFile).toHaveBeenCalledWith(
+      workspaceId,
+      prepared.payload,
+      { action: 'rename', renameTo: 'research-copy' },
+    )
   })
 
   it('rejects oversized Markdown files before reading or importing them', async () => {
@@ -176,7 +238,7 @@ describe('importSkillFromFile', () => {
     const importSkillFile = mock(async () => ({ slug: 'research', skipped: false }))
     const api = { previewSkillFileImport, importSkillFile } satisfies SkillFileImportApi
 
-    await expect(importSkillFromFile(api, workspaceId, file)).rejects.toThrow('2 MB limit')
+    await expect(prepareSkillFileImport(api, workspaceId, file)).rejects.toThrow('2 MB limit')
     expect(previewSkillFileImport).not.toHaveBeenCalled()
     expect(importSkillFile).not.toHaveBeenCalled()
   })
@@ -191,7 +253,7 @@ describe('importSkillFromFile', () => {
       importSkillFile,
     } satisfies SkillFileImportApi
 
-    await expect(importSkillFromFile(api, workspaceId, file)).rejects.toThrow('required frontmatter')
+    await expect(prepareSkillFileImport(api, workspaceId, file)).rejects.toThrow('required frontmatter')
     expect(importSkillFile).not.toHaveBeenCalled()
   })
 })
