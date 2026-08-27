@@ -49,6 +49,15 @@ export function isEscapeDuringComposition(
   return Boolean(isComposingRefActive || event.isComposing || event.nativeEvent?.isComposing)
 }
 
+export function shouldShowPlaceholder(
+  controlledValue: string,
+  isEditorEmpty: boolean,
+  isComposing: boolean,
+  isImePending: boolean
+): boolean {
+  return isEmptyComposerValue(controlledValue) && isEditorEmpty && !isComposing && !isImePending
+}
+
 export interface RichTextInputProps extends Omit<React.HTMLAttributes<HTMLDivElement>, 'onChange' | 'onInput' | 'onPaste'> {
   /** Current text value */
   value: string
@@ -528,22 +537,27 @@ function RotatingPlaceholder({
     // Don't rotate if only one placeholder
     if (placeholders.length <= 1) return
 
+    let fadeTimeout: ReturnType<typeof setTimeout> | undefined
     const interval = setInterval(() => {
       // Fade out
       setOpacity(0)
 
       // After fade out (300ms), swap text and fade back in
-      setTimeout(() => {
+      fadeTimeout = setTimeout(() => {
         setCurrentIndex((prev) => (prev + 1) % placeholders.length)
         setOpacity(1)
       }, 300)
     }, intervalMs)
 
-    return () => clearInterval(interval)
+    return () => {
+      clearInterval(interval)
+      if (fadeTimeout !== undefined) clearTimeout(fadeTimeout)
+    }
   }, [placeholders.length, intervalMs])
 
   return (
     <div
+      aria-hidden="true"
       className={cn('transition-opacity duration-300 ease-in-out', className)}
       style={{ opacity }}
     >
@@ -580,7 +594,12 @@ export const RichTextInput = React.forwardRef<RichTextInputHandle, RichTextInput
     const { t } = useTranslation()
     const safeValue = React.useMemo(() => coerceInputText(value), [value])
     const divRef = React.useRef<HTMLDivElement>(null)
-    const [isFocused, setIsFocused] = React.useState(false)
+    // The DOM can temporarily be ahead of the controlled value while an IME is
+    // composing (notably on Windows). Track its emptiness independently so the
+    // placeholder never overlaps provisional or newly committed text.
+    const [isEditorEmpty, setIsEditorEmpty] = React.useState(
+      () => isEmptyComposerValue(safeValue)
+    )
     // Ref for synchronous event checks; state so placeholder re-renders during IME.
     const isComposingRef = React.useRef(false)
     const [isComposing, setIsComposing] = React.useState(false)
@@ -668,6 +687,7 @@ export const RichTextInput = React.forwardRef<RichTextInputHandle, RichTextInput
       const newText = isEmptyComposerValue(extracted) ? '' : extracted
       const cursorPos = getCursorPosition(editor, cursorPositionRef.current)
 
+      setIsEditorEmpty(isEmptyComposerValue(newText))
       lastValueRef.current = newText
       cursorPositionRef.current = cursorPos
 
@@ -706,6 +726,7 @@ export const RichTextInput = React.forwardRef<RichTextInputHandle, RichTextInput
       if (isInternalUpdate.current) return
       const nativeIsComposing = Boolean((event?.nativeEvent as InputEvent | undefined)?.isComposing)
       const currentText = divRef.current ? getTextFromElement(divRef.current) : ''
+      setIsEditorEmpty(isEmptyComposerValue(currentText))
       imeGateRef.current.onPossibleFirstInsert({
         nativeIsComposing,
         previousValue: lastValueRef.current,
@@ -806,7 +827,6 @@ export const RichTextInput = React.forwardRef<RichTextInputHandle, RichTextInput
 
     // Handle focus
     const handleFocus = React.useCallback((e: React.FocusEvent<HTMLDivElement>) => {
-      setIsFocused(true)
       // Tell browser to use <br> instead of <div> for line breaks.
       // This prevents div-wrapping when typing before non-editable spans (badges).
       document.execCommand('defaultParagraphSeparator', false, 'br')
@@ -819,7 +839,6 @@ export const RichTextInput = React.forwardRef<RichTextInputHandle, RichTextInput
 
     // Handle blur
     const handleBlur = React.useCallback((e: React.FocusEvent<HTMLDivElement>) => {
-      setIsFocused(false)
       commitPendingFirstKeyIfIdle()
       if (!isComposingRef.current && !imeGateRef.current.isComposing) {
         setIsImePending(false)
@@ -844,6 +863,7 @@ export const RichTextInput = React.forwardRef<RichTextInputHandle, RichTextInput
 
       // External value change - update content
       lastValueRef.current = safeValue
+      setIsEditorEmpty(isEmptyComposerValue(safeValue))
       lastMentionSignatureRef.current = getMentionSignature(safeValue, skillSlugs, sourceSlugs)
 
       const shouldPlaceCaret = pendingCursorRef.current !== null || document.activeElement === editor
@@ -926,12 +946,20 @@ export const RichTextInput = React.forwardRef<RichTextInputHandle, RichTextInput
     // Show placeholder only when truly empty and not mid-IME composition.
     // CJK IME keeps React value empty until compositionend; provisional text
     // still lives in the contenteditable and must not sit under a placeholder.
-    const showPlaceholder = isEmptyComposerValue(safeValue) && !isComposing && !isImePending
+    const showPlaceholder = shouldShowPlaceholder(
+      safeValue,
+      isEditorEmpty,
+      isComposing,
+      isImePending
+    )
 
     // Normalize placeholder to array for RotatingPlaceholder
     const placeholderArray = React.useMemo(() => {
-      if (!placeholder) return [t("chatInput.placeholder.typeMessage")]
-      return Array.isArray(placeholder) ? placeholder : [placeholder]
+      const defaultPlaceholder = t("chatInput.placeholder.typeMessage")
+      if (Array.isArray(placeholder)) {
+        return placeholder.length > 0 ? placeholder : [defaultPlaceholder]
+      }
+      return placeholder ? [placeholder] : [defaultPlaceholder]
     }, [placeholder, t])
 
     // Check if value contains any mentions (badges) to adjust line height
@@ -965,7 +993,7 @@ export const RichTextInput = React.forwardRef<RichTextInputHandle, RichTextInput
           onCompositionStart={handleCompositionStart}
           onCompositionEnd={handleCompositionEnd}
           aria-disabled={disabled}
-          aria-placeholder={Array.isArray(placeholder) ? placeholder[0] : placeholder}
+          aria-placeholder={placeholderArray[0]}
           role="textbox"
           aria-multiline="true"
           {...restProps}
