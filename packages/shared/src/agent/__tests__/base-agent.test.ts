@@ -558,10 +558,15 @@ describe('BaseAgent', () => {
         ].join('\n'));
         expect(writeAgent.getPromptBuilder().formatSkillCatalog() ?? '').not.toContain('(chat-made)');
 
+        let publishedSkills: string[] = [];
+        writeAgent.onSkillsListChange = (skills) => {
+          publishedSkills = skills.map(skill => skill.slug);
+        };
         writeAgent.noteSkillWrite(skillMd);
         const catalog = writeAgent.getPromptBuilder().formatSkillCatalog() ?? '';
         expect(catalog).toContain('Chat Made (chat-made)');
         expect(catalog).toContain('Created in this conversation');
+        expect(publishedSkills).toContain('chat-made');
       } finally {
         rmSync(root, { recursive: true, force: true });
       }

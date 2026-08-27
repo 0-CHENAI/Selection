@@ -17,6 +17,7 @@ import type { FileAttachment } from '../../utils/files.ts';
 import type { ThinkingLevel } from '../thinking-levels.ts';
 import type { PermissionMode } from '../mode-manager.ts';
 import type { LoadedSource } from '../../sources/types.ts';
+import type { LoadedSkill } from '../../skills/types.ts';
 import type { AuthRequest } from '../session-scoped-tools.ts';
 import type { McpClientPool } from '../../mcp/mcp-pool.ts';
 import type { Workspace } from '../../config/storage.ts';
@@ -636,6 +637,9 @@ export interface AgentBackend {
 
   /** Called when a source config changes */
   onSourceChange: SourceChangeCallback | null;
+
+  /** Called when the available skill list changes */
+  onSkillsListChange: ((skills: LoadedSkill[]) => void) | null;
 
   /** Called when permission mode changes */
   onPermissionModeChange: ((mode: PermissionMode) => void) | null;
