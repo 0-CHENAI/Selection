@@ -1,9 +1,15 @@
 import { describe, expect, test } from 'bun:test'
 import {
+  buildModelLimitOptions,
+  DEFAULT_MODEL_CONTEXT_WINDOW_PRESET,
+  DEFAULT_MODEL_MAX_OUTPUT_PRESET,
   findRemoteModel,
   firstSelectedModelId,
   inferModelSupportsImages,
+  isValidModelLimitCombination,
   lookupRecordByModelId,
+  MODEL_CONTEXT_WINDOW_PRESETS,
+  MODEL_MAX_OUTPUT_PRESETS,
   modelsEndpoint,
   parseOpenAiModelsPayload,
   parseSelectedModels,
@@ -12,10 +18,60 @@ import {
   resolveCatalogOrOverrideLimit,
   resolveModelLimitSource,
   resolveModelLimitsStatus,
+  resolveMaxTokensForContext,
   resolveRemoteModelSupportsImages,
   setHasModelId,
   toggleSelectedModel,
 } from '../fetch-openai-models.ts'
+
+describe('model limit presets', () => {
+  test('uses the product-defined token mappings', () => {
+    expect(MODEL_CONTEXT_WINDOW_PRESETS).toEqual([
+      { label: '200K', value: 204_800 },
+      { label: '256K', value: 262_144 },
+      { label: '512K', value: 524_288 },
+      { label: '1M', value: 1_048_576 },
+      { label: '1.5M', value: 1_572_864 },
+      { label: '2M', value: 2_097_152 },
+    ])
+    expect(MODEL_MAX_OUTPUT_PRESETS).toEqual([
+      { label: '64K', value: 65_536 },
+      { label: '128K', value: 131_072 },
+      { label: '256K', value: 262_144 },
+    ])
+    expect(DEFAULT_MODEL_CONTEXT_WINDOW_PRESET).toBe(204_800)
+    expect(DEFAULT_MODEL_MAX_OUTPUT_PRESET).toBe(65_536)
+  })
+
+  test('keeps a non-preset catalog value visible but read-only', () => {
+    expect(buildModelLimitOptions(
+      MODEL_CONTEXT_WINDOW_PRESETS,
+      1_000_448,
+    )).toEqual([
+      { label: '1000448', value: 1_000_448, readOnly: true },
+      ...MODEL_CONTEXT_WINDOW_PRESETS.map((option) => ({ ...option, readOnly: false })),
+    ])
+  })
+
+  test('does not offer an output preset that consumes the whole context window', () => {
+    expect(buildModelLimitOptions(
+      MODEL_MAX_OUTPUT_PRESETS,
+      131_072,
+      262_144,
+    )).toEqual([
+      { label: '64K', value: 65_536, readOnly: false },
+      { label: '128K', value: 131_072, readOnly: false },
+    ])
+    expect(isValidModelLimitCombination(262_144, 262_144)).toBe(false)
+    expect(isValidModelLimitCombination(262_144, 524_288)).toBe(true)
+  })
+
+  test('downgrades max output to the largest legal preset after context changes', () => {
+    expect(resolveMaxTokensForContext(262_144, 262_144)).toBe(131_072)
+    expect(resolveMaxTokensForContext(262_144, 524_288)).toBe(262_144)
+    expect(resolveMaxTokensForContext(65_536, 204_800)).toBe(65_536)
+  })
+})
 
 describe('modelsEndpoint', () => {
   test('appends /v1/models when base has no version suffix', () => {
@@ -80,7 +136,7 @@ describe('parseOpenAiModelsPayload', () => {
         { id: 'Maylo', info: { max_output_tokens: 16_384 } },
         { id: 'generic', max_tokens: 8_192 },
         { id: 'tiny', max_output_tokens: 16 },
-        { id: 'clamped', context_window: 4_096, max_output_tokens: 65_536 },
+        { id: 'invalid-combination', context_window: 4_096, max_output_tokens: 65_536 },
       ],
     })).toEqual([
       { id: 'Opus', name: 'Opus', maxTokens: 65_536 },
@@ -88,7 +144,12 @@ describe('parseOpenAiModelsPayload', () => {
       { id: 'Maylo', name: 'Maylo', maxTokens: 16_384 },
       { id: 'generic', name: 'generic' },
       { id: 'tiny', name: 'tiny' },
-      { id: 'clamped', name: 'clamped', contextWindow: 4_096, maxTokens: 4_096 },
+      {
+        id: 'invalid-combination',
+        name: 'invalid-combination',
+        contextWindow: 4_096,
+        maxTokens: 65_536,
+      },
     ])
   })
 
@@ -197,6 +258,16 @@ describe('resolveCatalogOrOverrideLimit', () => {
       catalog: 32_768,
       fallback: 8_192,
     })).toBe(32_768)
+  })
+
+  test('treats a legacy default as a default so catalog metadata can replace it', () => {
+    expect(resolveCatalogOrOverrideLimit({
+      edited: false,
+      override: 8_192,
+      catalog: 65_536,
+      fallback: 65_536,
+      fallbackAliases: [8_192],
+    })).toBe(65_536)
   })
 
   test('keeps a saved custom value when it is not the default or catalog', () => {

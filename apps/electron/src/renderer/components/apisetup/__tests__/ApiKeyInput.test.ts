@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'bun:test'
 import {
+  buildCustomEndpointModelSubmission,
   resolveCustomEndpointPayload,
   resolvePiAuthProviderForSubmit,
   resolvePresetStateForBaseUrlChange,
@@ -179,6 +180,40 @@ describe('resolveCustomEndpointPayload', () => {
     })).toEqual({
       customEndpoint: { api: 'openai-completions' },
       piAuthProvider: 'openai',
+    })
+  })
+})
+
+describe('buildCustomEndpointModelSubmission', () => {
+  it('persists an explicit multimodal setting for every custom endpoint', () => {
+    expect(buildCustomEndpointModelSubmission({
+      id: 'private-model',
+      supportsImages: true,
+      contextWindow: 262_144,
+      maxTokens: 131_072,
+    })).toEqual({
+      id: 'private-model',
+      supportsImages: true,
+      contextWindow: 262_144,
+      maxTokens: 131_072,
+    })
+  })
+
+  it('keeps ORDER catalog names without changing the capability payload', () => {
+    expect(buildCustomEndpointModelSubmission({
+      id: 'Opus',
+      name: 'Opus 4.8',
+      includeDisplayNames: true,
+      supportsImages: false,
+      contextWindow: 524_288,
+      maxTokens: 262_144,
+    })).toEqual({
+      id: 'Opus',
+      name: 'Opus 4.8',
+      shortName: 'Opus 4.8',
+      supportsImages: false,
+      contextWindow: 524_288,
+      maxTokens: 262_144,
     })
   })
 })
