@@ -18,7 +18,7 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 
 ## Bug Fixes
 
-- **Workspace file links open reliably on Windows 10** — opening a generated Word, Excel, or other workspace file now acknowledges the OS dispatch immediately instead of timing out after 30 seconds while Windows negotiates the default application. (#134)
+- **Workspace file links open reliably on Windows 10** — opening a generated Word, Excel, or other workspace file no longer times out after 30 seconds while Windows negotiates the default application. Prompt file-association errors still reach the app instead of being hidden. (#134)
 
 - **Windows 10 light mode no longer washes the sidebar and top bar gray** — the 50% vibrancy overlay is macOS-only. Windows paints a solid surface matching Appearance, so light mode chrome matches the settings panel instead of sitting as a dark mask over transparent regions. (#53)
 
