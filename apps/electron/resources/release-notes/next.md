@@ -18,6 +18,8 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 
 ## Bug Fixes
 
+- **Workspace file links open reliably on Windows 10** — opening a generated Word, Excel, or other workspace file now acknowledges the OS dispatch immediately instead of timing out after 30 seconds while Windows negotiates the default application. (#134)
+
 - **Windows 10 light mode no longer washes the sidebar and top bar gray** — the 50% vibrancy overlay is macOS-only. Windows paints a solid surface matching Appearance, so light mode chrome matches the settings panel instead of sitting as a dark mask over transparent regions. (#53)
 
 - **Work-chain step counts stay on one turn** — a truncated intermediate body (often just `|`) no longer flushes the thinking chain into a finished empty card with Copy / Markdown while the session is still running. The longer streamed text is kept, pipe-only stubs are ignored instead of treated as a final reply, and later tools continue the same step count instead of restarting from 1. (#81)
