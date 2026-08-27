@@ -57,11 +57,8 @@ type TextPhase = 'commentary' | 'final_answer';
 function getTextPhase(textSignature: unknown): TextPhase | undefined {
   if (typeof textSignature !== 'string' || !textSignature.startsWith('{')) return undefined;
   try {
-    const parsed = JSON.parse(textSignature) as { v?: unknown; phase?: unknown };
-    if (
-      parsed.v === 1
-      && (parsed.phase === 'commentary' || parsed.phase === 'final_answer')
-    ) {
+    const parsed = JSON.parse(textSignature) as { phase?: unknown };
+    if (parsed.phase === 'commentary' || parsed.phase === 'final_answer') {
       return parsed.phase;
     }
   } catch {

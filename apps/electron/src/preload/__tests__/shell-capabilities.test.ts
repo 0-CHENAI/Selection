@@ -2,10 +2,10 @@ import { describe, expect, it } from 'bun:test'
 import { dispatchOpenPath } from '../shell-capabilities'
 
 describe('dispatchOpenPath', () => {
-  it('acknowledges immediately when the Windows open request remains pending', () => {
+  it('acknowledges after the grace window when the Windows open request remains pending', async () => {
     const neverSettles = new Promise<string>(() => {})
 
-    const result = dispatchOpenPath('C:\\workspace\\report.docx', () => neverSettles)
+    const result = await dispatchOpenPath('C:\\workspace\\report.docx', () => neverSettles, console.error, 0)
 
     expect(result).toEqual({})
   })
@@ -18,6 +18,24 @@ describe('dispatchOpenPath', () => {
     })).toThrow(failure)
   })
 
+  it('returns a fast shell error to the renderer', async () => {
+    const result = await dispatchOpenPath(
+      'C:\\workspace\\report.docx',
+      async () => 'No application is associated with the specified file',
+    )
+
+    expect(result).toEqual({ error: 'No application is associated with the specified file' })
+  })
+
+  it('returns a fast rejected dispatch to the renderer', async () => {
+    const result = await dispatchOpenPath(
+      'C:\\workspace\\report.docx',
+      async () => { throw new Error('native dispatch failed') },
+    )
+
+    expect(result).toEqual({ error: 'native dispatch failed' })
+  })
+
   it('logs an asynchronous Windows shell error after acknowledging', async () => {
     const messages: Array<[string, unknown?]> = []
     let rejectOpen!: (error: Error) => void
@@ -25,10 +43,11 @@ describe('dispatchOpenPath', () => {
       rejectOpen = reject
     })
 
-    expect(dispatchOpenPath(
+    expect(await dispatchOpenPath(
       'C:\\workspace\\report.docx',
       () => completion,
       (message, error) => messages.push([message, error]),
+      0,
     )).toEqual({})
 
     const failure = new Error('no file association')

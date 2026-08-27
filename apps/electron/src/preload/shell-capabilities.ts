@@ -1,6 +1,7 @@
 /**
- * Hand a path to the OS without tying the transport response to the lifetime
- * of the default application's launch request.
+ * Hand a path to the OS without tying the transport response to the full
+ * lifetime of the default application's launch request. A short grace window
+ * preserves actionable association/dispatch errors that resolve promptly.
  *
  * On some Windows 10 systems Electron's shell.openPath() promise can remain
  * pending while Windows negotiates a file association (notably for Office
@@ -11,17 +12,31 @@ export function dispatchOpenPath(
   path: string,
   openPath: (path: string) => Promise<string>,
   logError: (message: string, error?: unknown) => void = console.error,
-): Record<string, never> {
+  errorGraceMs = 250,
+): Promise<{ error?: string }> {
   const completion = openPath(path)
 
-  void completion.then(
-    error => {
-      if (error) logError(`Failed to open file: ${error}`)
-    },
-    error => logError('Failed to open file:', error),
-  )
+  return new Promise(resolve => {
+    let acknowledged = false
+    const finish = (result: { error?: string }) => {
+      if (acknowledged) return false
+      acknowledged = true
+      clearTimeout(timer)
+      resolve(result)
+      return true
+    }
+    const timer = setTimeout(() => finish({}), errorGraceMs)
 
-  // The capability acknowledges that the request was dispatched. Synchronous
-  // errors from openPath still propagate to the caller above.
-  return {}
+    void completion.then(
+      error => {
+        if (!finish(error ? { error } : {}) && error) {
+          logError(`Failed to open file: ${error}`)
+        }
+      },
+      error => {
+        const message = error instanceof Error ? error.message : String(error)
+        if (!finish({ error: message })) logError('Failed to open file:', error)
+      },
+    )
+  })
 }

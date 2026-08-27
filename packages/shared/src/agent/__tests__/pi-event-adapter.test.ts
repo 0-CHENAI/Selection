@@ -210,6 +210,32 @@ describe('PiEventAdapter', () => {
       });
     });
 
+    it('should keep filtering commentary when response signature versions advance', () => {
+      collect(adapter.adaptEvent({ type: 'turn_start' } as any));
+      const events = collect(adapter.adaptEvent({
+        type: 'message_end',
+        message: {
+          role: 'assistant',
+          stopReason: 'stop',
+          content: [
+            {
+              type: 'text',
+              text: 'Internal process note.',
+              textSignature: JSON.stringify({ v: 2, phase: 'commentary' }),
+            },
+            {
+              type: 'text',
+              text: 'Visible answer.',
+              textSignature: JSON.stringify({ v: 2, phase: 'final_answer' }),
+            },
+          ],
+        },
+      } as any));
+
+      expect(events).toHaveLength(1);
+      expect(events[0]).toMatchObject({ text: 'Visible answer.', isIntermediate: false });
+    });
+
     it('should not emit a reply body for commentary-only Codex output', () => {
       collect(adapter.adaptEvent({ type: 'turn_start' } as any));
       const events = collect(adapter.adaptEvent({
