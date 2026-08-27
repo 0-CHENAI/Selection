@@ -58,6 +58,24 @@ describe('RichTextInput IME attributes', () => {
   it('hides the placeholder when the editor DOM is ahead of the controlled value (#133)', () => {
     expect(shouldShowPlaceholder('', false, false, false)).toBe(false)
     expect(shouldShowPlaceholder('', true, false, false)).toBe(true)
+    expect(shouldShowPlaceholder('', true, true, false)).toBe(false)
+    expect(shouldShowPlaceholder('', true, false, true)).toBe(false)
+    expect(shouldShowPlaceholder('hello', true, false, false)).toBe(false)
+    expect(shouldShowPlaceholder('\n', true, false, false)).toBe(true)
+  })
+
+  it('falls back to the default accessible placeholder for an empty array', () => {
+    const html = renderToStaticMarkup(
+      React.createElement(RichTextInput, {
+        value: '',
+        onChange: () => {},
+        placeholder: [],
+      })
+    )
+
+    expect(html).toContain('aria-placeholder="chatInput.placeholder.typeMessage"')
+    expect(html).toContain('aria-hidden="true"')
+    expect(html).toContain('>chatInput.placeholder.typeMessage</div>')
   })
 })
 

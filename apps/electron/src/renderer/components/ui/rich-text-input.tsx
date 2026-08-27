@@ -537,22 +537,27 @@ function RotatingPlaceholder({
     // Don't rotate if only one placeholder
     if (placeholders.length <= 1) return
 
+    let fadeTimeout: ReturnType<typeof setTimeout> | undefined
     const interval = setInterval(() => {
       // Fade out
       setOpacity(0)
 
       // After fade out (300ms), swap text and fade back in
-      setTimeout(() => {
+      fadeTimeout = setTimeout(() => {
         setCurrentIndex((prev) => (prev + 1) % placeholders.length)
         setOpacity(1)
       }, 300)
     }, intervalMs)
 
-    return () => clearInterval(interval)
+    return () => {
+      clearInterval(interval)
+      if (fadeTimeout !== undefined) clearTimeout(fadeTimeout)
+    }
   }, [placeholders.length, intervalMs])
 
   return (
     <div
+      aria-hidden="true"
       className={cn('transition-opacity duration-300 ease-in-out', className)}
       style={{ opacity }}
     >
@@ -595,7 +600,6 @@ export const RichTextInput = React.forwardRef<RichTextInputHandle, RichTextInput
     const [isEditorEmpty, setIsEditorEmpty] = React.useState(
       () => isEmptyComposerValue(safeValue)
     )
-    const [isFocused, setIsFocused] = React.useState(false)
     // Ref for synchronous event checks; state so placeholder re-renders during IME.
     const isComposingRef = React.useRef(false)
     const [isComposing, setIsComposing] = React.useState(false)
@@ -823,7 +827,6 @@ export const RichTextInput = React.forwardRef<RichTextInputHandle, RichTextInput
 
     // Handle focus
     const handleFocus = React.useCallback((e: React.FocusEvent<HTMLDivElement>) => {
-      setIsFocused(true)
       // Tell browser to use <br> instead of <div> for line breaks.
       // This prevents div-wrapping when typing before non-editable spans (badges).
       document.execCommand('defaultParagraphSeparator', false, 'br')
@@ -836,7 +839,6 @@ export const RichTextInput = React.forwardRef<RichTextInputHandle, RichTextInput
 
     // Handle blur
     const handleBlur = React.useCallback((e: React.FocusEvent<HTMLDivElement>) => {
-      setIsFocused(false)
       commitPendingFirstKeyIfIdle()
       if (!isComposingRef.current && !imeGateRef.current.isComposing) {
         setIsImePending(false)
@@ -896,7 +898,6 @@ export const RichTextInput = React.forwardRef<RichTextInputHandle, RichTextInput
         )
       })
       lastValueRef.current = safeValue
-      setIsEditorEmpty(isEmptyComposerValue(safeValue))
     }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
     // Handle selection changes to highlight badges when selected
@@ -954,8 +955,11 @@ export const RichTextInput = React.forwardRef<RichTextInputHandle, RichTextInput
 
     // Normalize placeholder to array for RotatingPlaceholder
     const placeholderArray = React.useMemo(() => {
-      if (!placeholder) return [t("chatInput.placeholder.typeMessage")]
-      return Array.isArray(placeholder) ? placeholder : [placeholder]
+      const defaultPlaceholder = t("chatInput.placeholder.typeMessage")
+      if (Array.isArray(placeholder)) {
+        return placeholder.length > 0 ? placeholder : [defaultPlaceholder]
+      }
+      return placeholder ? [placeholder] : [defaultPlaceholder]
     }, [placeholder, t])
 
     // Check if value contains any mentions (badges) to adjust line height
@@ -989,7 +993,7 @@ export const RichTextInput = React.forwardRef<RichTextInputHandle, RichTextInput
           onCompositionStart={handleCompositionStart}
           onCompositionEnd={handleCompositionEnd}
           aria-disabled={disabled}
-          aria-placeholder={Array.isArray(placeholder) ? placeholder[0] : placeholder}
+          aria-placeholder={placeholderArray[0]}
           role="textbox"
           aria-multiline="true"
           {...restProps}
