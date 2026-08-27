@@ -1,9 +1,31 @@
-import type { ElectronAPI } from '../../../shared/types'
+import type {
+  ElectronAPI,
+  SkillImportDecision,
+  SkillImportPreview,
+} from '../../../shared/types'
 
 export type SkillFileImportApi = Pick<
   ElectronAPI,
   'previewSkillFileImport' | 'importSkillFile'
 >
+
+export type SkillFilePayload =
+  | { kind: 'markdown'; content: string }
+  | { kind: 'zip'; zipBase64: string }
+
+export interface PreparedSkillFileImport {
+  payload: SkillFilePayload
+  preview: SkillImportPreview
+}
+
+export interface SkillFilePickerGuard {
+  current: boolean
+}
+
+interface SkillFilePickerCancelTarget {
+  addEventListener(type: 'cancel', listener: EventListener): void
+  removeEventListener(type: 'cancel', listener: EventListener): void
+}
 
 export type McpJsonImportApi = Pick<ElectronAPI, 'importMcpJson'>
 
@@ -62,9 +84,45 @@ export function beginMcpJsonImport(
   return api.importMcpJson(workspaceId, json)
 }
 
-export function openSkillFilePicker(input: Pick<HTMLInputElement, 'click' | 'value'>): void {
+export function openSkillFilePicker(
+  input: Pick<HTMLInputElement, 'click' | 'value'>,
+  guard: SkillFilePickerGuard,
+): boolean {
+  if (guard.current) return false
+
+  guard.current = true
   input.value = ''
-  input.click()
+  try {
+    input.click()
+    return true
+  } catch (error) {
+    guard.current = false
+    throw error
+  }
+}
+
+export function releaseSkillFilePicker(guard: SkillFilePickerGuard): void {
+  guard.current = false
+}
+
+export function listenForSkillFilePickerCancel(
+  target: SkillFilePickerCancelTarget,
+  onCancel: () => void,
+): () => void {
+  let active = true
+  const handleCancel: EventListener = () => {
+    if (!active) return
+    active = false
+    target.removeEventListener('cancel', handleCancel)
+    onCancel()
+  }
+  target.addEventListener('cancel', handleCancel)
+
+  return () => {
+    if (!active) return
+    active = false
+    target.removeEventListener('cancel', handleCancel)
+  }
 }
 
 function encodeSkillZip(bytes: Uint8Array): string {
@@ -75,11 +133,11 @@ function encodeSkillZip(bytes: Uint8Array): string {
   return btoa(binary)
 }
 
-export async function importSkillFromFile(
+export async function prepareSkillFileImport(
   api: SkillFileImportApi,
   workspaceId: string,
   file: File,
-): Promise<SkillFileImportResult> {
+): Promise<PreparedSkillFileImport> {
   const isZip = file.name.toLowerCase().endsWith('.zip')
   if (file.size > (isZip ? MAX_SKILL_ZIP_BYTES : MAX_SKILL_MARKDOWN_BYTES)) {
     throw new Error(isZip ? 'Skill zip exceeds the 20 MB limit' : 'SKILL.md exceeds the 2 MB limit')
@@ -89,9 +147,17 @@ export async function importSkillFromFile(
     ? { kind: 'zip' as const, zipBase64: encodeSkillZip(new Uint8Array(await file.arrayBuffer())) }
     : { kind: 'markdown' as const, content: await file.text() }
   const preview = await api.previewSkillFileImport(workspaceId, payload)
-  const result = await api.importSkillFile(workspaceId, payload, {
-    action: preview.conflict ? 'skip' : 'overwrite',
-  })
+
+  return { payload, preview }
+}
+
+export async function confirmSkillFileImport(
+  api: SkillFileImportApi,
+  workspaceId: string,
+  prepared: PreparedSkillFileImport,
+  decision: SkillImportDecision,
+): Promise<SkillFileImportResult> {
+  const result = await api.importSkillFile(workspaceId, prepared.payload, decision)
 
   return {
     status: result.skipped ? 'skipped' : 'imported',
