@@ -1023,15 +1023,6 @@ function AppShellContent({
     return cleanup
   }, [activeWorkspaceId])
 
-  // Subscribe to live skill updates (when skills are added/removed dynamically)
-  React.useEffect(() => {
-    const cleanup = window.electronAPI.onSkillsChanged((workspaceId, updatedSkills) => {
-      if (workspaceId !== activeWorkspaceId) return
-      setSkills(updatedSkills || [])
-    })
-    return cleanup
-  }, [activeWorkspaceId])
-
   // Handle session source selection changes
   const handleSessionSourcesChange = React.useCallback(async (sessionId: string, sourceSlugs: string[]) => {
     try {
@@ -1399,11 +1390,38 @@ function AppShellContent({
     : undefined
   React.useEffect(() => {
     if (!activeWorkspaceId) return
-    window.electronAPI.getSkills(activeWorkspaceId, activeSessionWorkingDirectory).then((loaded) => {
-      setSkills(loaded || [])
-    }).catch(err => {
-      console.error('[Chat] Failed to load skills:', err)
+
+    let cancelled = false
+    let loadGeneration = 0
+
+    // Skill broadcasts are workspace-scoped, while project Skills depend on
+    // the active session's working directory. Re-read the correctly scoped
+    // list instead of trusting a payload produced for another session.
+    const reloadSkills = async () => {
+      const generation = ++loadGeneration
+      try {
+        const loaded = await window.electronAPI.getSkills(
+          activeWorkspaceId,
+          activeSessionWorkingDirectory,
+        )
+        if (!cancelled && generation === loadGeneration) setSkills(loaded || [])
+      } catch (err) {
+        if (!cancelled && generation === loadGeneration) {
+          console.error('[Chat] Failed to load skills:', err)
+        }
+      }
+    }
+
+    const cleanup = window.electronAPI.onSkillsChanged((workspaceId) => {
+      if (workspaceId === activeWorkspaceId) void reloadSkills()
     })
+
+    void reloadSkills()
+
+    return () => {
+      cancelled = true
+      cleanup()
+    }
   }, [activeWorkspaceId, activeSessionWorkingDirectory])
 
   // Completion is announced only after the resource has been re-read into its
