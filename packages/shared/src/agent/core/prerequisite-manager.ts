@@ -354,9 +354,14 @@ export class PrerequisiteManager {
     const command = input.command as string;
     if (!command || this.pendingSkillPaths.size === 0) return false;
 
+    const readPathKeys = new Set(
+      extractSkillMdPathsFromCommand(command).map(catalogPathKey),
+    );
+    if (readPathKeys.size === 0) return false;
+
     let matched = false;
     for (const path of this.pendingSkillPaths) {
-      if (command.includes(path)) {
+      if (readPathKeys.has(catalogPathKey(path))) {
         this.pendingSkillPaths.delete(path);
         this.readFiles.add(path);
         this.onDebug?.(`Prerequisite: cleared skill prerequisite via Bash: ${path}`);
@@ -389,14 +394,17 @@ export class PrerequisiteManager {
   }
 }
 
-const SKILL_MD_IN_COMMAND_RE = /(?:^|[\s"'`])((?:~|\/|[A-Za-z]:[\\/])[^\s"'`;|&]+SKILL\.md)/gi;
+// Only explicit file-reading commands count. Merely mentioning a handbook path
+// (for example with `echo`) must not activate a skill or clear its prerequisite.
+const SKILL_MD_READ_COMMAND_RE = /(?:^|[;&|]\s*)(?:cat|type|get-content|gc)\b(?:\s+-[^\s"'`;&|]+)*\s+(?:"([^"\r\n]*SKILL\.md)"|'([^'\r\n]*SKILL\.md)'|((?:~|\/|[A-Za-z]:[\\/])[^\s"'`;&|]*SKILL\.md))/gi;
 
 export function extractSkillMdPathsFromCommand(command: string): string[] {
   const paths: string[] = [];
-  const matcher = new RegExp(SKILL_MD_IN_COMMAND_RE.source, 'gi');
+  const matcher = new RegExp(SKILL_MD_READ_COMMAND_RE.source, 'gi');
   let match: RegExpExecArray | null;
   while ((match = matcher.exec(command))) {
-    paths.push(match[1]!);
+    const filePath = match[1] ?? match[2] ?? match[3];
+    if (filePath) paths.push(filePath);
   }
   return paths;
 }

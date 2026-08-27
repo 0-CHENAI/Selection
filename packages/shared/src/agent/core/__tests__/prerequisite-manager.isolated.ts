@@ -413,6 +413,24 @@ describe('PrerequisiteManager', () => {
       expect(result).toBe(false);
     });
 
+    it('does not clear a skill prerequisite when a command only mentions the path', () => {
+      const skillPath = '/test/workspace/skills/my-skill/SKILL.md';
+      manager.registerSkillPrerequisites([skillPath]);
+
+      expect(manager.trackBashSkillRead({ command: `echo ${skillPath}` })).toBe(false);
+      expect(manager.checkPrerequisites('WebSearch').allowed).toBe(false);
+    });
+
+    it('recognizes quoted PowerShell reads without accepting unrelated commands', () => {
+      const skillPath = '/test/workspace/skills/my skill/SKILL.md';
+      manager.registerSkillPrerequisites([skillPath]);
+
+      expect(manager.trackBashSkillRead({
+        command: `Get-Content -Raw "${skillPath}"`,
+      })).toBe(true);
+      expect(manager.checkPrerequisites('WebSearch').allowed).toBe(true);
+    });
+
     it('returns false when there are no pending skill paths', () => {
       const result = manager.trackBashSkillRead({ command: 'cat /any/file' });
       expect(result).toBe(false);

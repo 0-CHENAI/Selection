@@ -47,7 +47,7 @@ describe('skill catalog', () => {
     const block = formatSkillCatalog(entries);
     expect(block).toContain('<available_skills>');
     expect(block).toContain('- Git Commit (commit): Write a careful git commit message');
-    expect(block).toContain('path: /skills/commit/SKILL.md');
+    expect(block).toContain(`path: ${join('/skills/commit', 'SKILL.md')}`);
     expect(block).toContain('needs: github');
     expect(block?.endsWith('</available_skills>')).toBe(true);
   });

@@ -26,6 +26,7 @@ import type { ThinkingLevel } from './thinking-levels.ts';
 import { DEFAULT_THINKING_LEVEL, normalizeThinkingLevel } from './thinking-levels.ts';
 import type { PermissionMode } from './mode-manager.ts';
 import type { LoadedSource } from '../sources/types.ts';
+import type { LoadedSkill } from '../skills/types.ts';
 import { buildCallLlmRequest, type LLMQueryRequest, type LLMQueryResult } from './llm-tool.ts';
 import { getLlmConnections, getDefaultLlmConnection } from '../config/storage.ts';
 import { loadAllSources } from '../sources/storage.ts';
@@ -277,6 +278,7 @@ export abstract class BaseAgent implements AgentBackend {
   onAuthRequest: AuthCallback | null = null;
   onSourceChange: SourceChangeCallback | null = null;
   onSourcesListChange: ((sources: LoadedSource[]) => void) | null = null;
+  onSkillsListChange: ((skills: LoadedSkill[]) => void) | null = null;
   onConfigValidationError: ((file: string, errors: string[]) => void) | null = null;
   onPermissionModeChange: ((mode: PermissionMode) => void) | null = null;
   onDebug: ((message: string) => void) | null = null;
@@ -366,6 +368,10 @@ export abstract class BaseAgent implements AgentBackend {
       onSourcesListChange: (sources) => {
         this.debug(`Sources list changed: ${sources.length} sources`);
         this.onSourcesListChange?.(sources);
+      },
+      onSkillsListChange: (skills) => {
+        this.debug(`Skills list changed: ${skills.length} skills`);
+        this.onSkillsListChange?.(skills);
       },
       onValidationError: (file, errors) => {
         this.debug(`Config validation error: ${file}`);
@@ -1074,9 +1080,9 @@ ${formattedMessages}
     if (!invalidateSkillsCacheIfSkillMarkdown({ filePath, command })) return;
     const workspaceRoot = this.config.workspace?.rootPath ?? this.workingDirectory;
     const projectRoot = this.config.session?.workingDirectory;
-    this.prerequisiteManager.setCatalogSkills(
-      toSkillCatalogEntries(loadAllSkills(workspaceRoot, projectRoot)),
-    );
+    const skills = loadAllSkills(workspaceRoot, projectRoot);
+    this.prerequisiteManager.setCatalogSkills(toSkillCatalogEntries(skills));
+    this.onSkillsListChange?.(skills);
   }
 
   // ============================================================

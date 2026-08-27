@@ -38,7 +38,10 @@ for (const file of localeFiles) {
   const sorted: Record<string, unknown> = {}
   for (const key of sortedKeys) sorted[key] = parsed[key]
 
-  const formatted = JSON.stringify(sorted, null, 2) + '\n'
+  // Preserve the checkout's line-ending convention. Without this, every
+  // correctly sorted locale in a Windows CRLF worktree is reported as drift.
+  const newline = original.includes('\r\n') ? '\r\n' : '\n'
+  const formatted = JSON.stringify(sorted, null, 2).replace(/\n/g, newline) + newline
 
   if (formatted === original) continue
 
