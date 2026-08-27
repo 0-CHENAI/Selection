@@ -1,5 +1,9 @@
 import { describe, it, expect } from 'bun:test'
-import { resolveInheritedFilterParams, type FilterMode } from './inherited-filter-params'
+import {
+  resolveInheritedFilterParams,
+  resolveNewSessionParams,
+  type FilterMode,
+} from './inherited-filter-params'
 
 const m = (...entries: [string, FilterMode][]) => new Map(entries)
 
@@ -33,5 +37,26 @@ describe('resolveInheritedFilterParams (#970)', () => {
 
   it('returns null for cross-dimension ambiguity (one status + one label include)', () => {
     expect(resolveInheritedFilterParams(m(['todo', 'include']), m(['bug', 'include']), m())).toBeNull()
+  })
+})
+
+describe('resolveNewSessionParams (#145)', () => {
+  it('binds a new session to the project selected in the Projects navigator', () => {
+    expect(resolveNewSessionParams(m(), m(), m(), 'proj-selected')).toEqual({ project: 'proj-selected' })
+  })
+
+  it('prefers the selected project over stale session-list filters', () => {
+    expect(
+      resolveNewSessionParams(
+        m(['todo', 'include']),
+        m(['bug', 'include']),
+        m(['proj-filter', 'include']),
+        'proj-selected',
+      ),
+    ).toEqual({ project: 'proj-selected' })
+  })
+
+  it('preserves sole-filter inheritance outside the Projects navigator', () => {
+    expect(resolveNewSessionParams(m(), m(['bug', 'include']), m(), null)).toEqual({ label: 'bug' })
   })
 })

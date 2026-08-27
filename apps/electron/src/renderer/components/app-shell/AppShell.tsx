@@ -46,7 +46,7 @@ import { Button } from "@/components/ui/button"
 import { HeaderIconButton } from "@/components/ui/HeaderIconButton"
 import { CreationJobsButton } from "./CreationJobsButton"
 import type { CreationJob } from "@/atoms/creation-jobs"
-import { resolveInheritedFilterParams, type FilterMode } from "./inherited-filter-params"
+import { resolveNewSessionParams, type FilterMode } from "./inherited-filter-params"
 import { Separator } from "@/components/ui/separator"
 import { Tooltip, TooltipTrigger, TooltipContent } from "@craft-agent/ui"
 import {
@@ -2150,25 +2150,42 @@ function AppShellContent({
   }, [activeWorkspace?.id, navigate, t])
 
   /**
-   * Resolve the "inherit sole active filter" rule for new sessions. Only
+   * Resolve the current project's explicit context first, then fall back to
+   * the "inherit sole active filter" rule for session-list views. Only
    * include-mode filters are candidates — an excluded status/label/project must
-   * never be inherited (#970). See resolveInheritedFilterParams.
+   * never be inherited (#970). See resolveNewSessionParams.
    */
-  const resolveInheritedNewSessionParams = useCallback(
-    () => resolveInheritedFilterParams(listFilter, labelFilter, projectFilter),
-    [listFilter, labelFilter, projectFilter]
+  const selectedProjectSlug = isProjectsNavigation(navState)
+    ? navState.details?.projectSlug
+    : undefined
+  const selectedProjectId = useMemo(
+    () => projectMenuOptions.find(project => project.slug === selectedProjectSlug)?.id,
+    [projectMenuOptions, selectedProjectSlug],
+  )
+
+  const resolveNewSessionCreationParams = useCallback(
+    () => resolveNewSessionParams(listFilter, labelFilter, projectFilter, selectedProjectId),
+    [listFilter, labelFilter, projectFilter, selectedProjectId],
   )
 
   // Create a new chat and select it
   const handleNewChat = useCallback((newPanel: boolean = false) => {
     if (!activeWorkspace) return
 
+    // A deep-linked project can render before the projects query completes.
+    // Never turn that transient state into an unbound session; the user can
+    // retry once the project metadata has loaded.
+    if (selectedProjectSlug && !selectedProjectId) {
+      toast.error(t('projectInfo.notFound'))
+      return
+    }
+
     // Exit search mode and switch to All Sessions
     setSearchActive(false)
     setSearchQuery('')
 
     // Inherit sole-active filter into the new session when unambiguous.
-    const inherited = resolveInheritedNewSessionParams()
+    const inherited = resolveNewSessionCreationParams()
 
     // Delegate to NavigationContext which handles session creation
     navigate(
@@ -2178,7 +2195,7 @@ function AppShellContent({
 
     // Focus the chat input after navigation completes
     setTimeout(() => focusZone('chat', { intent: 'programmatic' }), 50)
-  }, [activeWorkspace, focusZone, navigate, resolveInheritedNewSessionParams])
+  }, [activeWorkspace, focusZone, resolveNewSessionCreationParams, selectedProjectId, selectedProjectSlug, t])
 
   // Create a brand new dedicated browser window and focus it.
   // Intentionally unbound: this action should always create a NEW window.

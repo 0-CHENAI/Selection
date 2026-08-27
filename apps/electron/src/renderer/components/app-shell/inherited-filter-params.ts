@@ -34,3 +34,20 @@ export function resolveInheritedFilterParams<S extends string, L extends string,
   if (projectIncludes.length === 1) return { project: projectIncludes[0] }
   return null
 }
+
+/**
+ * Resolve metadata for a new session from the current navigation context.
+ *
+ * A project selected in the Projects navigator is explicit user intent and
+ * therefore takes precedence over any session-list filters left in memory.
+ * Outside a project, preserve the existing sole-include inheritance rule.
+ */
+export function resolveNewSessionParams<S extends string, L extends string, P extends string>(
+  statusFilter: Map<S, FilterMode>,
+  labelFilter: Map<L, FilterMode>,
+  projectFilter: Map<P, FilterMode>,
+  activeProjectId?: P | null,
+): InheritedNewSessionParams | null {
+  if (activeProjectId) return { project: activeProjectId }
+  return resolveInheritedFilterParams(statusFilter, labelFilter, projectFilter)
+}
