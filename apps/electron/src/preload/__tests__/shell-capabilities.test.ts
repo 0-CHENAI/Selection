@@ -1,5 +1,27 @@
 import { describe, expect, it } from 'bun:test'
-import { dispatchOpenPath } from '../shell-capabilities'
+import { dispatchDetachedOpenPath, dispatchOpenPath } from '../shell-capabilities'
+
+describe('dispatchDetachedOpenPath', () => {
+  it('passes a Chinese Windows path with spaces and parentheses unchanged', async () => {
+    const calls: string[] = []
+    const path = 'C:\\Users\\fairy\\报告 (1)_批注.docx'
+
+    const result = await dispatchDetachedOpenPath(path, async value => {
+      calls.push(value)
+    })
+
+    expect(calls).toEqual([path])
+    expect(result).toEqual({})
+  })
+
+  it('returns a launcher failure to the RPC caller', async () => {
+    const result = await dispatchDetachedOpenPath('D:\\测试\\报告.xlsx', async () => {
+      throw new Error('launcher failed')
+    })
+
+    expect(result).toEqual({ error: 'launcher failed' })
+  })
+})
 
 describe('dispatchOpenPath', () => {
   it('acknowledges after the grace period when the Windows open request remains pending', async () => {

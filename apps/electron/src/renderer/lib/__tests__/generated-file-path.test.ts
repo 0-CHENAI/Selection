@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import {
   asciiContainingDir,
+  generatedFileBaseDir,
   joinBaseAndRel,
   listGeneratedFilePathCandidates,
   normalizeGeneratedFilePath,
@@ -21,6 +22,35 @@ describe('normalizeGeneratedFilePath', () => {
       .toBe('D:/selection/巡察工作/a.md')
     expect(normalizeGeneratedFilePath('/D:/selection/a.md'))
       .toBe('D:/selection/a.md')
+  })
+
+  test('converts a Git Bash /c path to a Windows drive path', () => {
+    expect(normalizeGeneratedFilePath(
+      '/c/Users/fairy/.selection/sessions/报告 (1)_批注.docx',
+      true,
+    )).toBe('C:/Users/fairy/.selection/sessions/报告 (1)_批注.docx')
+  })
+
+  test('preserves a POSIX /c path outside Windows', () => {
+    expect(normalizeGeneratedFilePath('/c/project/report.docx', false))
+      .toBe('/c/project/report.docx')
+  })
+})
+
+describe('generatedFileBaseDir', () => {
+  test('uses the current session folder when no working directory was selected', () => {
+    expect(generatedFileBaseDir({
+      sessionFolderPath: 'C:\\Users\\fairy\\.selection\\sessions\\current',
+      workspaceRootPath: 'C:\\Users\\fairy\\.selection',
+    })).toBe('C:\\Users\\fairy\\.selection\\sessions\\current')
+  })
+
+  test('keeps an explicit working directory ahead of the session folder', () => {
+    expect(generatedFileBaseDir({
+      workingDirectory: 'D:\\测试',
+      sessionFolderPath: 'C:\\Users\\fairy\\.selection\\sessions\\current',
+      workspaceRootPath: 'C:\\Users\\fairy\\.selection',
+    })).toBe('D:\\测试')
   })
 })
 
@@ -112,6 +142,47 @@ describe('resolveOpenableGeneratedFile', () => {
       },
     })
     expect(pick).toEqual({ path: realPath })
+  })
+
+  test('opens a bare generated filename directly from the session folder', async () => {
+    const sessionFolder = 'C:\\Users\\fairy\\.selection\\sessions\\current'
+    const generated = `${sessionFolder}\\云南华电2025年度光伏EPC总承包框架招标文件_法律审查汇总.xlsx`
+    const seen: string[] = []
+    const pick = await resolveOpenableGeneratedFile({
+      requestedPath: '云南华电2025年度光伏EPC总承包框架招标文件_法律审查汇总.xlsx',
+      baseDir: sessionFolder,
+      searchFiles: async (dir, query) => {
+        seen.push(`${dir}::${query}`)
+        return [{
+          type: 'file',
+          name: query,
+          path: generated,
+          relativePath: query,
+        }]
+      },
+    })
+    expect(seen).toEqual([`${sessionFolder}::云南华电2025年度光伏EPC总承包框架招标文件_法律审查汇总.xlsx`])
+    expect(pick).toEqual({ path: generated })
+  })
+
+  test('probes a Git Bash absolute path as its real Windows path', async () => {
+    const generated = 'C:/Users/fairy/.selection/sessions/current/报告 (1)_批注.docx'
+    const seen: string[] = []
+    const pick = await resolveOpenableGeneratedFile({
+      requestedPath: '/c/Users/fairy/.selection/sessions/current/报告 (1)_批注.docx',
+      baseDir: 'C:\\Users\\fairy\\.selection',
+      searchFiles: async (dir, query) => {
+        seen.push(`${dir}::${query}`)
+        return [{
+          type: 'file',
+          name: query,
+          path: generated,
+          relativePath: 'sessions/current/报告 (1)_批注.docx',
+        }]
+      },
+    })
+    expect(seen).toEqual(['C:/Users/fairy/.selection/sessions/current::报告 (1)_批注.docx'])
+    expect(pick).toEqual({ path: generated })
   })
 
   test('falls back to a workspace-root search instead of opening the doubled path', async () => {

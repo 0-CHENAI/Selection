@@ -1,10 +1,18 @@
 import { isAbsolutePath } from './drafts'
 
+function isWindowsRuntime(): boolean {
+  return typeof navigator !== 'undefined' && /Windows/i.test(navigator.userAgent)
+}
+
+function hasWindowsBase(baseDir?: string | null): boolean {
+  return !!baseDir && (/^[A-Za-z]:[\\/]/.test(baseDir) || baseDir.includes('\\'))
+}
+
 /**
  * Normalize a file path coming from generated markdown / mention links
  * so it can be opened on Windows and under Chinese workspace folders.
  */
-export function normalizeGeneratedFilePath(path: string): string {
+export function normalizeGeneratedFilePath(path: string, windows = isWindowsRuntime()): string {
   let p = path.trim()
   if (!p) return p
 
@@ -22,6 +30,13 @@ export function normalizeGeneratedFilePath(path: string): string {
     // file://localhost/C:/foo or leftover /C:/foo
     p = p.replace(/^localhost\//i, '')
     if (/^\/[A-Za-z]:[\\/]/.test(p)) p = p.slice(1)
+  }
+
+  // Git Bash / MSYS tools commonly print C:\foo as /c/foo. Chromium treats
+  // that as a POSIX absolute path, which makes Windows search a non-existent
+  // /c directory and fall back to a misleading workspace-wide closest match.
+  if (windows) {
+    p = p.replace(/^\/([A-Za-z])(?=[\\/])/, (_match, drive: string) => `${drive.toUpperCase()}:`)
   }
 
   p = p.replace(/^\/([A-Za-z]:[\\/])/, '$1')
@@ -53,7 +68,7 @@ function sameFolderName(a: string, b: string, windows: boolean): boolean {
  * that exists rather than always stripping (workspace named `skills` is common).
  */
 export function listGeneratedFilePathCandidates(path: string, baseDir?: string | null): string[] {
-  const normalized = normalizeGeneratedFilePath(path)
+  const normalized = normalizeGeneratedFilePath(path, hasWindowsBase(baseDir) || isWindowsRuntime())
   if (isAbsolutePath(normalized) || normalized.startsWith('~/') || normalized.startsWith('\\\\')) {
     return [normalized]
   }
@@ -78,7 +93,24 @@ export function listGeneratedFilePathCandidates(path: string, baseDir?: string |
 }
 
 export function resolveGeneratedFilePath(path: string, baseDir?: string | null): string {
-  return listGeneratedFilePathCandidates(path, baseDir)[0] ?? normalizeGeneratedFilePath(path)
+  return listGeneratedFilePathCandidates(path, baseDir)[0]
+    ?? normalizeGeneratedFilePath(path, hasWindowsBase(baseDir) || isWindowsRuntime())
+}
+
+/**
+ * Generated files live in the selected working directory when one exists;
+ * otherwise the session folder is the agent's cwd and must be tried before the
+ * much broader workspace root.
+ */
+export function generatedFileBaseDir(opts: {
+  workingDirectory?: string | null
+  sessionFolderPath?: string | null
+  workspaceRootPath?: string | null
+}): string | undefined {
+  return opts.workingDirectory
+    || opts.sessionFolderPath
+    || opts.workspaceRootPath
+    || undefined
 }
 
 export type GeneratedFileSearchHit = {
