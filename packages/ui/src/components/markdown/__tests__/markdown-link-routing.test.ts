@@ -244,6 +244,26 @@ describe('generated markdown file-link pipeline', () => {
     })
   })
 
+  it('does not let CommonMark remove the separator before .selection', () => {
+    const path = 'C:\\Users\\fairy\\.selection\\workspaces\\my-workspace\\sessions\\current\\attachments\\Harness.docx'
+    const hrefs = rawHrefs(`[Harness.docx](${path})`)
+    expect(hrefs).toHaveLength(1)
+    expect(resolveMarkdownLinkTarget(hrefs[0]!)).toEqual({
+      kind: 'file',
+      path: 'C:/Users/fairy/.selection/workspaces/my-workspace/sessions/current/attachments/Harness.docx',
+    })
+  })
+
+  it('opens the full parenthesized Chinese filename from issue 134', () => {
+    const path = 'C:\\Users\\fairy\\attachments\\云南华电2025年度光伏EPC总承包框架招标文件 (1)_法律审查批注.docx'
+    const hrefs = rawHrefs(`[打开 Word 批注版](${path})`)
+    expect(hrefs).toHaveLength(1)
+    expect(resolveMarkdownLinkTarget(hrefs[0]!)).toEqual({
+      kind: 'file',
+      path: path.replace(/\\/g, '/'),
+    })
+  })
+
   it('keeps the full path when hidden directories and parentheses are present', () => {
     const hrefs = rawHrefs(
       '[报告](C:\\Users\\fairy\\.selection\\sessions\\云南华电 (1)_法律审查汇总.xlsx)',

@@ -269,10 +269,32 @@ describe('detectLinks', () => {
   })
 })
 
-describe('preprocessLinks — spaced Windows destinations', () => {
+describe('preprocessLinks — Windows file destinations', () => {
+  it('preserves the separator before a hidden directory', () => {
+    const input = '[Harness.docx](C:\\Users\\fairy\\.selection\\sessions\\Harness.docx)'
+    expect(preprocessLinks(input)).toBe('[Harness.docx](<C:/Users/fairy/.selection/sessions/Harness.docx>)')
+  })
+
   it('wraps an unquoted destination that contains spaces', () => {
     const input = '[技能](D:\\selection\\巡察工作\\my file.md)'
     expect(preprocessLinks(input)).toBe('[技能](<D:/selection/巡察工作/my file.md>)')
+  })
+
+  it('keeps a parenthesized Chinese filename in the destination (#134)', () => {
+    const input = '[打开 Word 批注版](C:\\Users\\fairy\\attachments\\云南华电2025年度光伏EPC总承包框架招标文件 (1)_法律审查批注.docx)'
+    expect(preprocessLinks(input)).toBe(
+      '[打开 Word 批注版](<C:/Users/fairy/attachments/云南华电2025年度光伏EPC总承包框架招标文件 (1)_法律审查批注.docx>)',
+    )
+  })
+
+  it('wraps a parenthesized destination even when it has no spaces', () => {
+    const input = '[报告](D:\\selection\\报告(终稿).docx)'
+    expect(preprocessLinks(input)).toBe('[报告](<D:/selection/报告(终稿).docx>)')
+  })
+
+  it('treats a backslash before a parenthesized Windows folder as a separator', () => {
+    const input = '[报告](D:\\selection\\(归档)\\报告.docx)'
+    expect(preprocessLinks(input)).toBe('[报告](<D:/selection/(归档)/报告.docx>)')
   })
 
   it('does not wrap destinations that are already angle-bracketed', () => {

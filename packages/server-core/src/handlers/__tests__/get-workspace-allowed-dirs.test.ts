@@ -163,4 +163,11 @@ describe('validateWorkspaceFilePath', () => {
     expect(normalizeAccessibleFilePath('file://localhost/C:/Users/me/a.docx'))
       .toBe('C:/Users/me/a.docx')
   })
+
+  it('normalizes Git Bash drive paths on Windows', () => {
+    expect(normalizeAccessibleFilePath(
+      '/c/Users/fairy/.selection/sessions/报告 (1)_批注.docx',
+      'win32',
+    )).toBe('C:/Users/fairy/.selection/sessions/报告 (1)_批注.docx')
+  })
 })
