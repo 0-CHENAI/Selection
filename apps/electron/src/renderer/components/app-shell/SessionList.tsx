@@ -18,6 +18,7 @@ import { EntityList, type EntityListGroup } from "@/components/ui/entity-list"
 import { RenameDialog } from "@/components/ui/rename-dialog"
 import { SessionSearchHeader } from "./SessionSearchHeader"
 import { SessionItem } from "./SessionItem"
+import { SquarePenRounded } from "../icons/SquarePenRounded"
 import { SessionListProvider, type SessionListContextValue } from "@/context/SessionListContext"
 import { useSessionSelection, useSessionSelectionStore } from "@/hooks/useSession"
 import { useSessionSearch, type FilterMode } from "@/hooks/useSessionSearch"
@@ -174,6 +175,22 @@ export function SessionList({
 
   // Get current filter from navigation state (for preserving context in tab routes)
   const currentFilter = isSessionsNavigation(navState) ? navState.filter : undefined
+
+  // Resolve creation context once for both the empty state and the persistent
+  // project-scoped action. The action is shown only when the current filters
+  // unambiguously identify one included project.
+  const inheritedNewSessionParams = resolveSessionListNewSessionParams(
+    currentFilter,
+    statusFilter ?? new Map(),
+    labelFilterMap ?? new Map(),
+    projectFilter ?? new Map()
+  )
+  const newSessionProject = inheritedNewSessionParams?.project
+    ? projects?.find(project => project.id === inheritedNewSessionParams.project)
+    : undefined
+  const handleCreateSession = () => {
+    navigate(routes.action.newSession(inheritedNewSessionParams ?? undefined))
+  }
 
   const [renameDialogOpen, setRenameDialogOpen] = useState(false)
   const [renameSessionId, setRenameSessionId] = useState<string | null>(null)
@@ -753,18 +770,13 @@ export function SessionList({
         className="h-full"
       >
         <button
-          onClick={() => {
-            const params = resolveSessionListNewSessionParams(
-              currentFilter,
-              statusFilter ?? new Map(),
-              labelFilterMap ?? new Map(),
-              projectFilter ?? new Map()
-            )
-            navigate(routes.action.newSession(params ?? undefined))
-          }}
+          type="button"
+          onClick={handleCreateSession}
           className="inline-flex items-center h-7 px-3 text-xs font-medium rounded-[8px] bg-background shadow-minimal hover:bg-foreground/[0.03] transition-colors"
         >
-          {t("session.newSession")}
+          {newSessionProject
+            ? t('projectInfo.newSessionButton', { name: newSessionProject.name })
+            : t("session.newSession")}
         </button>
       </EntityListEmptyScreen>
     )
@@ -796,6 +808,21 @@ export function SessionList({
         }}
         header={
           <>
+            {!searchActive && newSessionProject && (
+              <div className="shrink-0 border-b border-border/40 px-3 py-2">
+                <button
+                  type="button"
+                  onClick={handleCreateSession}
+                  className="flex h-9 w-full items-center gap-2 rounded-[8px] bg-background px-3 text-left text-[13px] font-normal shadow-minimal transition-colors hover:bg-foreground/[0.03]"
+                  aria-label={t('projectInfo.newSessionButton', { name: newSessionProject.name })}
+                >
+                  <SquarePenRounded className="h-3.5 w-3.5 shrink-0" />
+                  <span className="truncate">
+                    {t('projectInfo.newSessionButton', { name: newSessionProject.name })}
+                  </span>
+                </button>
+              </div>
+            )}
             {searchActive && (
               <SessionSearchHeader
                 searchQuery={searchQuery}
