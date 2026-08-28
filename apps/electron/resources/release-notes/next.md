@@ -18,6 +18,8 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 
 ## Bug Fixes
 
+- **Custom-endpoint model limits stay distinct and selectable** — each model is a separate card, and the context / max-output menus open above the API setup overlay instead of appearing stuck closed. (#146)
+
 - **无工作目录时也能直接打开中文交付文件** — Markdown 文件链接现在会按括号层级识别完整路径，保留 `.selection` 等点号目录前的 Windows 路径分隔符，兼容 `/c/Users/...` 形式，并在未选择工作目录时优先从当前会话目录解析；Windows 使用不会被 Office 文件关联长期阻塞的系统启动器。`报告 (1)_批注.docx` 和普通英文文件名都不再被截断、误改路径或退化为全工作区“最近匹配”，Word、Excel 链接点击后会直接交给默认应用。跟进 #134。
 
 - **Project-scoped new sessions stay in their project** — A project-filtered session list now keeps a clearly labeled “New session in {project}” action above its existing conversations. Both that action and the empty-list action inherit a single included project, so the created session appears immediately and remains correctly bound after refresh or restart. Excluded and ambiguous project filters are not inherited. (#149)
