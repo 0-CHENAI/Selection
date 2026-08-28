@@ -51,3 +51,13 @@ export function resolveNewSessionParams<S extends string, L extends string, P ex
   if (activeProjectId) return { project: activeProjectId }
   return resolveInheritedFilterParams(statusFilter, labelFilter, projectFilter)
 }
+
+/** Resolve a visible detail session when entering a project-scoped list. */
+export function resolveProjectNavigationSessionId(
+  sessions: ReadonlyArray<{ id: string; projectId?: string }>,
+  projectId: string,
+  hasOtherSecondaryFilters = false,
+): string | null {
+  if (hasOtherSecondaryFilters) return null
+  return sessions.find(session => session.projectId === projectId)?.id ?? null
+}

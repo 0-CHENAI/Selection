@@ -46,7 +46,7 @@ import { Button } from "@/components/ui/button"
 import { HeaderIconButton } from "@/components/ui/HeaderIconButton"
 import { CreationJobsButton } from "./CreationJobsButton"
 import type { CreationJob } from "@/atoms/creation-jobs"
-import { resolveNewSessionParams, type FilterMode } from "./inherited-filter-params"
+import { resolveNewSessionParams, resolveProjectNavigationSessionId, type FilterMode } from "./inherited-filter-params"
 import { Separator } from "@/components/ui/separator"
 import { Tooltip, TooltipTrigger, TooltipContent } from "@craft-agent/ui"
 import {
@@ -770,25 +770,6 @@ function AppShellContent({
     })
   }, [sessionFilterKey])
 
-  // Jump to All Sessions filtered by a single project. Used by the Projects list
-  // context menu — sets the allSessions view's project filter (preserving its
-  // other filters), then navigates.
-  const handleJumpToProjectSessions = useCallback((projectId: string) => {
-    setViewFiltersMap(prev => {
-      const existing = prev['allSessions']
-      return {
-        ...prev,
-        allSessions: {
-          statuses: existing?.statuses ?? {},
-          labels: existing?.labels ?? {},
-          projects: { [projectId]: 'include' },
-          groupingMode: existing?.groupingMode,
-        }
-      }
-    })
-    navigate(routes.view.allSessions())
-  }, [])
-
   // Jump to All Sessions scoped to a task: replace the allSessions view's label filter
   // (and project filter, when the task is bound to one) with the task's scope, then open
   // the session. These are the SAME user-clearable filters the list-header chips edit —
@@ -1484,6 +1465,39 @@ function AppShellContent({
   const activeSessionMetas = useMemo(() => {
     return workspaceSessionMetas.filter(s => !s.isArchived)
   }, [workspaceSessionMetas])
+
+  // Project children are implemented as an All Sessions secondary filter, but
+  // NavigationContext cannot see that local filter when it auto-selects a chat.
+  // Select a project-bound session explicitly, or suppress auto-selection when
+  // the project is empty so an unrelated global chat cannot remain on the right.
+  const handleJumpToProjectSessions = useCallback((projectId: string) => {
+    setViewFiltersMap(prev => {
+      const existing = prev['allSessions']
+      return {
+        ...prev,
+        allSessions: {
+          statuses: existing?.statuses ?? {},
+          labels: existing?.labels ?? {},
+          projects: { [projectId]: 'include' },
+          groupingMode: existing?.groupingMode,
+        }
+      }
+    })
+
+    const allSessionsFilters = viewFiltersMap['allSessions']
+    const hasOtherSecondaryFilters =
+      Object.keys(allSessionsFilters?.statuses ?? {}).length > 0
+      || Object.keys(allSessionsFilters?.labels ?? {}).length > 0
+    const firstProjectSessionId = resolveProjectNavigationSessionId(
+      activeSessionMetas,
+      projectId,
+      hasOtherSecondaryFilters,
+    )
+    navigate(
+      routes.view.allSessions(firstProjectSessionId ?? undefined),
+      firstProjectSessionId ? undefined : { skipAutoSelect: true },
+    )
+  }, [activeSessionMetas, viewFiltersMap])
 
   const refreshWorkspaceUnreadMap = useCallback(async () => {
     try {
