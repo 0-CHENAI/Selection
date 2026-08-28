@@ -1214,46 +1214,46 @@ export function ApiKeyInput({
                 </header>
                 <div className="space-y-3 p-3.5">
                   <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                  <ModelLimitSelect
-                    id={`context-window-${id}`}
-                    label={t('apiSetup.contextWindow')}
-                    value={contextWindow}
-                    source={contextSource}
-                    presets={MODEL_CONTEXT_WINDOW_PRESETS}
-                    disabled={isDisabled}
-                    onChange={(next) => {
-                      setEditedContextIds((prev) => new Set(prev).add(id))
-                      setModelContextWindows((prev) => ({ ...prev, [id]: next }))
-                      const adjustedMax = resolveMaxTokensForContext(maxTokens, next)
-                      if (adjustedMax !== maxTokens) {
+                    <ModelLimitSelect
+                      id={`context-window-${id}`}
+                      label={t('apiSetup.contextWindow')}
+                      value={contextWindow}
+                      source={contextSource}
+                      presets={MODEL_CONTEXT_WINDOW_PRESETS}
+                      disabled={isDisabled}
+                      onChange={(next) => {
+                        setEditedContextIds((prev) => new Set(prev).add(id))
+                        setModelContextWindows((prev) => ({ ...prev, [id]: next }))
+                        const adjustedMax = resolveMaxTokensForContext(maxTokens, next)
+                        if (adjustedMax !== maxTokens) {
+                          setEditedMaxTokenIds((prev) => new Set(prev).add(id))
+                          setModelMaxTokens((prev) => ({ ...prev, [id]: adjustedMax }))
+                          setLimitNotice(t('apiSetup.modelLimitAdjusted', {
+                            model: remote?.name ?? id,
+                            value: formatModelTokenLimit(adjustedMax),
+                          }))
+                        } else {
+                          setLimitNotice(null)
+                        }
+                        setLimitError(null)
+                      }}
+                    />
+                    <ModelLimitSelect
+                      id={`max-tokens-${id}`}
+                      label={t('apiSetup.maxOutputTokens')}
+                      value={maxTokens}
+                      source={maxSource}
+                      presets={MODEL_MAX_OUTPUT_PRESETS}
+                      upperExclusive={contextWindow}
+                      invalid={limitsInvalid}
+                      disabled={isDisabled}
+                      onChange={(next) => {
                         setEditedMaxTokenIds((prev) => new Set(prev).add(id))
-                        setModelMaxTokens((prev) => ({ ...prev, [id]: adjustedMax }))
-                        setLimitNotice(t('apiSetup.modelLimitAdjusted', {
-                          model: remote?.name ?? id,
-                          value: formatModelTokenLimit(adjustedMax),
-                        }))
-                      } else {
+                        setModelMaxTokens((prev) => ({ ...prev, [id]: next }))
+                        setLimitError(null)
                         setLimitNotice(null)
-                      }
-                      setLimitError(null)
-                    }}
-                  />
-                  <ModelLimitSelect
-                    id={`max-tokens-${id}`}
-                    label={t('apiSetup.maxOutputTokens')}
-                    value={maxTokens}
-                    source={maxSource}
-                    presets={MODEL_MAX_OUTPUT_PRESETS}
-                    upperExclusive={contextWindow}
-                    invalid={limitsInvalid}
-                    disabled={isDisabled}
-                    onChange={(next) => {
-                      setEditedMaxTokenIds((prev) => new Set(prev).add(id))
-                      setModelMaxTokens((prev) => ({ ...prev, [id]: next }))
-                      setLimitError(null)
-                      setLimitNotice(null)
-                    }}
-                  />
+                      }}
+                    />
                   </div>
                   <div className="flex items-center justify-between gap-3 border-t border-foreground/8 pt-3">
                     <div className="min-w-0">

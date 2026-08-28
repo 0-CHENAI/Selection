@@ -120,7 +120,7 @@ export function listLocalFolderPaths(workspaceRootPath: string): string[] {
  * Normalize markdown / file:// / Windows drive paths before allowlist checks.
  * Mirrors the renderer generated-file-path rules so OPEN_FILE sees the same path.
  */
-export function normalizeAccessibleFilePath(filePath: string): string {
+export function normalizeAccessibleFilePath(filePath: string, platform = process.platform): string {
   let value = filePath.trim()
   if (!value) return value
   if (value.includes('%')) {
@@ -135,6 +135,9 @@ export function normalizeAccessibleFilePath(filePath: string): string {
     value = value.replace(/^file:\/\/+/i, '')
     value = value.replace(/^localhost\//i, '')
     if (/^\/[A-Za-z]:[\\/]/.test(value)) value = value.slice(1)
+  }
+  if (platform === 'win32') {
+    value = value.replace(/^\/([A-Za-z])(?=[\\/])/, (_match, drive: string) => `${drive.toUpperCase()}:`)
   }
   return value.replace(/^\/([A-Za-z]:[\\/])/, '$1')
 }

@@ -1,6 +1,6 @@
 /**
- * Hand a path to the OS without tying the transport response indefinitely to
- * the lifetime of the default application's launch request.
+ * Hand a path to Electron's shell without tying the transport response
+ * indefinitely to the lifetime of the default application's launch request.
  *
  * On some Windows 10 systems Electron's shell.openPath() promise can remain
  * pending while Windows negotiates a file association (notably for Office
@@ -17,6 +17,25 @@ export interface OpenPathResult {
 export interface DispatchOpenPathOptions {
   graceMs?: number
   logError?: (message: string, error?: unknown) => void
+}
+
+/**
+ * Windows' Electron shell.openPath can remain pending inside ShellExecuteEx.
+ * A detached system launcher resolves as soon as the launcher process starts,
+ * while still using the user's default file association.
+ */
+export async function dispatchDetachedOpenPath(
+  path: string,
+  launchPath: (path: string) => Promise<unknown>,
+): Promise<OpenPathResult> {
+  try {
+    await launchPath(path)
+    return {}
+  } catch (error) {
+    return {
+      error: error instanceof Error ? error.message : String(error),
+    }
+  }
 }
 
 export function dispatchOpenPath(

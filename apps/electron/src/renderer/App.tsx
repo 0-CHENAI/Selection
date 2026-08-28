@@ -32,6 +32,7 @@ import { stripMarkdown } from './utils/text'
 import { coerceInputText, sessionHasLiveGeneration } from './lib/input-text'
 import { getSessionsToRefreshAfterStaleReconnect } from './lib/reconnect-recovery'
 import { formatSessionLoadFailure, shouldTreatSessionLoadFailureAsTransportFallback } from './lib/session-load'
+import { createSessionWithConfirmedProject } from './lib/create-session-with-project'
 import { extractWorkspaceSlugFromPath } from '@craft-agent/shared/utils/workspace-slug'
 import { DEFAULT_THINKING_LEVEL } from '@craft-agent/shared/agent/thinking-levels'
 import { initRendererPerf } from './lib/perf'
@@ -1170,7 +1171,15 @@ export default function App() {
   }, [])
 
   const handleCreateSession = useCallback(async (workspaceId: string, options?: import('../shared/types').CreateSessionOptions): Promise<Session> => {
-    const session = await window.electronAPI.createSession(workspaceId, options)
+    const session = await createSessionWithConfirmedProject(
+      (id, createOptions) => window.electronAPI.createSession(id, createOptions),
+      (sessionId, projectId) => window.electronAPI.sessionCommand(sessionId, {
+        type: 'setProjectId',
+        projectId,
+      }),
+      workspaceId,
+      options,
+    )
     // Add to per-session atom and metadata map (no sessionsAtom)
     addSession(session)
     syncSessionOptionsFromSession(session)
