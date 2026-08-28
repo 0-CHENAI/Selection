@@ -72,6 +72,42 @@ function isInsideCode(pos: number, ranges: CodeRange[]): boolean {
 }
 
 /**
+ * Find the closing parenthesis for an inline markdown destination. Bare
+ * destinations may contain balanced parentheses, while angle-bracketed
+ * destinations may contain parentheses without any escaping at all.
+ */
+function findInlineLinkDestinationEnd(text: string, start: number): number {
+  let depth = 1
+  let insideAngleDestination = text[start] === '<'
+  const destinationPrefix = text.slice(start)
+  const isWindowsPath = /^[A-Za-z]:[\\/]/.test(destinationPrefix) || destinationPrefix.startsWith('\\\\')
+
+  for (let i = start; i < text.length; i++) {
+    const char = text[i]
+    if (char === '\n' || char === '\r') return -1
+
+    if (char === '\\' && !isWindowsPath) {
+      i++
+      continue
+    }
+
+    if (insideAngleDestination) {
+      if (char === '>') insideAngleDestination = false
+      continue
+    }
+
+    if (char === '(') {
+      depth++
+    } else if (char === ')') {
+      depth--
+      if (depth === 0) return i
+    }
+  }
+
+  return -1
+}
+
+/**
  * Find all markdown link ranges in text: both [text](...) and [text][ref] patterns.
  * Returns ranges covering the entire link syntax so any URL detected within
  * these spans is skipped by preprocessLinks() — preventing nested/broken links.
@@ -79,11 +115,15 @@ function isInsideCode(pos: number, ranges: CodeRange[]): boolean {
 function findMarkdownLinkRanges(text: string): CodeRange[] {
   const ranges: CodeRange[] = []
 
-  // Match [text](url) — inline links
-  const inlineLinkRegex = /\[(?:[^\[\]]|\\\[|\\\])*\]\([^)]*\)/g
+  // Match [text](url) — inline links. Scan the destination instead of using
+  // `[^)]*` so paths such as `report (1).docx` stay inside the same link.
+  const inlineLinkRegex = /\[(?:[^\[\]]|\\\[|\\\])*\]\(/g
   let match
   while ((match = inlineLinkRegex.exec(text)) !== null) {
-    ranges.push({ start: match.index, end: match.index + match[0].length })
+    const destinationEnd = findInlineLinkDestinationEnd(text, inlineLinkRegex.lastIndex)
+    if (destinationEnd < 0) continue
+    ranges.push({ start: match.index, end: destinationEnd + 1 })
+    inlineLinkRegex.lastIndex = destinationEnd + 1
   }
 
   // Match [text][ref] — reference links
@@ -230,22 +270,41 @@ function stripPlaceholderLinks(text: string): string {
  */
 function wrapSpacedFileDestinations(text: string): string {
   const codeRanges = findCodeRanges(text)
-  return text.replace(
-    /\[([^\]]*)\]\((?!<)([^)\n]*\s[^)\n]*)\)/g,
-    (full, label: string, dest: string, offset: number) => {
-      if (isInsideCode(offset, codeRanges)) return full
-      const trimmed = dest.trim()
-      if (!trimmed || /^(https?|mailto|ftp):/i.test(trimmed)) return full
-      // Destination with a markdown title: [text](path "title") — leave alone
-      if (/\s+['"]/.test(trimmed)) return full
-      // CommonMark <dest> cannot contain `>`
-      if (trimmed.includes('>')) return full
-      if (isFilePathTarget(trimmed) || /^[A-Za-z]:[\\/]/.test(trimmed) || /[\\/]/.test(trimmed)) {
-        return `[${label}](<${trimmed}>)`
-      }
-      return full
-    },
-  )
+  const inlineLinkStartRegex = /\[([^\]\n]*)\]\(/g
+  let result = ''
+  let lastIndex = 0
+  let match
+
+  while ((match = inlineLinkStartRegex.exec(text)) !== null) {
+    const destinationStart = inlineLinkStartRegex.lastIndex
+    const destinationEnd = findInlineLinkDestinationEnd(text, destinationStart)
+    if (destinationEnd < 0) continue
+
+    // Continue after this link rather than interpreting parenthesized pieces of
+    // its destination as another markdown link.
+    inlineLinkStartRegex.lastIndex = destinationEnd + 1
+
+    if (isInsideCode(match.index, codeRanges)) continue
+
+    const destination = text.slice(destinationStart, destinationEnd)
+    const trimmed = destination.trim()
+    if (!trimmed || trimmed.startsWith('<') || /^(https?|mailto|ftp):/i.test(trimmed)) continue
+    // A plain destination only needs repair when CommonMark punctuation can
+    // split it. Balanced parentheses are valid, but wrapping them too keeps the
+    // parser from mistaking a filename suffix for the link's closing delimiter.
+    if (!/[\s()]/.test(trimmed)) continue
+    // Destination with a markdown title: [text](path "title") — leave alone
+    if (/\s+['"]/.test(trimmed)) continue
+    // CommonMark <dest> cannot contain `>`
+    if (trimmed.includes('>')) continue
+    if (!isFilePathTarget(trimmed) && !/^[A-Za-z]:[\\/]/.test(trimmed) && !/[\\/]/.test(trimmed)) continue
+
+    result += text.slice(lastIndex, match.index)
+    result += `[${match[1]}](<${trimmed}>)`
+    lastIndex = destinationEnd + 1
+  }
+
+  return result + text.slice(lastIndex)
 }
 
 export function preprocessLinks(text: string): string {

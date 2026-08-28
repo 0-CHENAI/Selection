@@ -244,6 +244,16 @@ describe('generated markdown file-link pipeline', () => {
     })
   })
 
+  it('opens the full parenthesized Chinese filename from issue 149', () => {
+    const path = 'C:\\Users\\fairy\\attachments\\云南华电2025年度光伏EPC总承包框架招标文件 (1)_法律审查批注.docx'
+    const hrefs = rawHrefs(`[打开 Word 批注版](${path})`)
+    expect(hrefs).toHaveLength(1)
+    expect(resolveMarkdownLinkTarget(hrefs[0]!)).toEqual({
+      kind: 'file',
+      path,
+    })
+  })
+
   it('opens file://D:/ hostname-as-drive URLs as files', () => {
     const hrefs = rawHrefs('[报告](file://D:/selection/巡察工作/a.md)')
     expect(hrefs).toHaveLength(1)
