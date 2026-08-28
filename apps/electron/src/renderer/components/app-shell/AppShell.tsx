@@ -46,7 +46,7 @@ import { Button } from "@/components/ui/button"
 import { HeaderIconButton } from "@/components/ui/HeaderIconButton"
 import { CreationJobsButton } from "./CreationJobsButton"
 import type { CreationJob } from "@/atoms/creation-jobs"
-import { resolveInheritedFilterParams, type FilterMode } from "./inherited-filter-params"
+import { resolveNewSessionParams, resolveProjectNavigationSessionId, type FilterMode } from "./inherited-filter-params"
 import { filterSessionsByProject } from "./project-session-filter"
 import { Separator } from "@/components/ui/separator"
 import { Tooltip, TooltipTrigger, TooltipContent } from "@craft-agent/ui"
@@ -771,25 +771,6 @@ function AppShellContent({
     })
   }, [sessionFilterKey])
 
-  // Jump to All Sessions filtered by a single project. Used by the Projects list
-  // context menu — sets the allSessions view's project filter (preserving its
-  // other filters), then navigates.
-  const handleJumpToProjectSessions = useCallback((projectId: string) => {
-    setViewFiltersMap(prev => {
-      const existing = prev['allSessions']
-      return {
-        ...prev,
-        allSessions: {
-          statuses: existing?.statuses ?? {},
-          labels: existing?.labels ?? {},
-          projects: { [projectId]: 'include' },
-          groupingMode: existing?.groupingMode,
-        }
-      }
-    })
-    navigate(routes.view.allSessions())
-  }, [])
-
   // Jump to All Sessions scoped to a task: replace the allSessions view's label filter
   // (and project filter, when the task is bound to one) with the task's scope, then open
   // the session. These are the SAME user-clearable filters the list-header chips edit —
@@ -1486,6 +1467,39 @@ function AppShellContent({
     return workspaceSessionMetas.filter(s => !s.isArchived)
   }, [workspaceSessionMetas])
 
+  // Project children are implemented as an All Sessions secondary filter, but
+  // NavigationContext cannot see that local filter when it auto-selects a chat.
+  // Select a project-bound session explicitly, or suppress auto-selection when
+  // the project is empty so an unrelated global chat cannot remain on the right.
+  const handleJumpToProjectSessions = useCallback((projectId: string) => {
+    setViewFiltersMap(prev => {
+      const existing = prev['allSessions']
+      return {
+        ...prev,
+        allSessions: {
+          statuses: existing?.statuses ?? {},
+          labels: existing?.labels ?? {},
+          projects: { [projectId]: 'include' },
+          groupingMode: existing?.groupingMode,
+        }
+      }
+    })
+
+    const allSessionsFilters = viewFiltersMap['allSessions']
+    const hasOtherSecondaryFilters =
+      Object.keys(allSessionsFilters?.statuses ?? {}).length > 0
+      || Object.keys(allSessionsFilters?.labels ?? {}).length > 0
+    const firstProjectSessionId = resolveProjectNavigationSessionId(
+      activeSessionMetas,
+      projectId,
+      hasOtherSecondaryFilters,
+    )
+    navigate(
+      routes.view.allSessions(firstProjectSessionId ?? undefined),
+      firstProjectSessionId ? undefined : { skipAutoSelect: true },
+    )
+  }, [activeSessionMetas, viewFiltersMap])
+
   const refreshWorkspaceUnreadMap = useCallback(async () => {
     try {
       const summary = await window.electronAPI.getUnreadSummary()
@@ -2134,25 +2148,42 @@ function AppShellContent({
   }, [activeWorkspace?.id, navigate, t])
 
   /**
-   * Resolve the "inherit sole active filter" rule for new sessions. Only
+   * Resolve the current project's explicit context first, then fall back to
+   * the "inherit sole active filter" rule for session-list views. Only
    * include-mode filters are candidates — an excluded status/label/project must
-   * never be inherited (#970). See resolveInheritedFilterParams.
+   * never be inherited (#970). See resolveNewSessionParams.
    */
-  const resolveInheritedNewSessionParams = useCallback(
-    () => resolveInheritedFilterParams(listFilter, labelFilter, projectFilter),
-    [listFilter, labelFilter, projectFilter]
+  const selectedProjectSlug = isProjectsNavigation(navState)
+    ? navState.details?.projectSlug
+    : undefined
+  const selectedProjectId = useMemo(
+    () => projectMenuOptions.find(project => project.slug === selectedProjectSlug)?.id,
+    [projectMenuOptions, selectedProjectSlug],
+  )
+
+  const resolveNewSessionCreationParams = useCallback(
+    () => resolveNewSessionParams(listFilter, labelFilter, projectFilter, selectedProjectId),
+    [listFilter, labelFilter, projectFilter, selectedProjectId],
   )
 
   // Create a new chat and select it
   const handleNewChat = useCallback((newPanel: boolean = false) => {
     if (!activeWorkspace) return
 
+    // A deep-linked project can render before the projects query completes.
+    // Never turn that transient state into an unbound session; the user can
+    // retry once the project metadata has loaded.
+    if (selectedProjectSlug && !selectedProjectId) {
+      toast.error(t('projectInfo.notFound'))
+      return
+    }
+
     // Exit search mode and switch to All Sessions
     setSearchActive(false)
     setSearchQuery('')
 
     // Inherit sole-active filter into the new session when unambiguous.
-    const inherited = resolveInheritedNewSessionParams()
+    const inherited = resolveNewSessionCreationParams()
 
     // Delegate to NavigationContext which handles session creation
     navigate(
@@ -2162,7 +2193,7 @@ function AppShellContent({
 
     // Focus the chat input after navigation completes
     setTimeout(() => focusZone('chat', { intent: 'programmatic' }), 50)
-  }, [activeWorkspace, focusZone, navigate, resolveInheritedNewSessionParams])
+  }, [activeWorkspace, focusZone, resolveNewSessionCreationParams, selectedProjectId, selectedProjectSlug, t])
 
   // Create a brand new dedicated browser window and focus it.
   // Intentionally unbound: this action should always create a NEW window.
