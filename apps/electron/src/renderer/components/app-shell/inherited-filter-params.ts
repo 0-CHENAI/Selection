@@ -1,3 +1,5 @@
+import type { SessionFilter } from '../../../shared/types'
+
 /** Filter mode for tri-state filtering: include shows only matching, exclude hides matching. */
 export type FilterMode = 'include' | 'exclude'
 
@@ -33,4 +35,30 @@ export function resolveInheritedFilterParams<S extends string, L extends string,
   if (labelIncludes.length === 1) return { label: labelIncludes[0] }
   if (projectIncludes.length === 1) return { project: projectIncludes[0] }
   return null
+}
+
+/**
+ * Resolve inheritance for the SessionList empty-state action.
+ *
+ * Primary state/label routes are implicit include filters, while the filter-bar
+ * maps contain the secondary status, label, and project filters. Combining them
+ * before delegating keeps this entry point aligned with the header new-session
+ * action and preserves the same ambiguity safeguards.
+ */
+export function resolveSessionListNewSessionParams(
+  currentFilter: SessionFilter | undefined,
+  statusFilter: Map<string, FilterMode>,
+  labelFilter: Map<string, FilterMode>,
+  projectFilter: Map<string, FilterMode>
+): InheritedNewSessionParams | null {
+  const statuses = new Map(statusFilter)
+  const labels = new Map(labelFilter)
+
+  if (currentFilter?.kind === 'state') {
+    statuses.set(currentFilter.stateId, 'include')
+  } else if (currentFilter?.kind === 'label' && currentFilter.labelId !== '__all__') {
+    labels.set(currentFilter.labelId, 'include')
+  }
+
+  return resolveInheritedFilterParams(statuses, labels, projectFilter)
 }

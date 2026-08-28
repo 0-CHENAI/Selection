@@ -31,6 +31,7 @@ import { sendToWorkspaceAtom, type SessionMeta } from "@/atoms/sessions"
 import type { ViewConfig } from "@craft-agent/shared/views"
 import type { SessionStatusId, SessionStatus } from "@/config/session-status-config"
 import { buildCollapsedGroupsScopeSuffix } from "@/utils/session-list-collapse"
+import { resolveSessionListNewSessionParams } from "./inherited-filter-params"
 
 export interface SessionListRow {
   item: SessionMeta
@@ -87,6 +88,8 @@ interface SessionListProps {
   statusFilter?: Map<string, FilterMode>
   /** Secondary label filter (label chips) - for search result grouping */
   labelFilterMap?: Map<string, FilterMode>
+  /** Secondary project filter (project chips) - used by empty-state creation inheritance */
+  projectFilter?: Map<string, FilterMode>
   /** Override which session is highlighted (for multi-panel focused panel tracking) */
   focusedSessionId?: string | null
   /** Override navigation target (for multi-panel: focuses existing panel or navigates focused panel) */
@@ -143,6 +146,7 @@ export function SessionList({
   workspaceId,
   statusFilter,
   labelFilterMap,
+  projectFilter,
   focusedSessionId,
   onNavigateToSession,
   hasPendingPrompt,
@@ -750,10 +754,13 @@ export function SessionList({
       >
         <button
           onClick={() => {
-            const params: { status?: string; label?: string } = {}
-            if (currentFilter?.kind === 'state') params.status = currentFilter.stateId
-            else if (currentFilter?.kind === 'label') params.label = currentFilter.labelId
-            navigate(routes.action.newSession(Object.keys(params).length > 0 ? params : undefined))
+            const params = resolveSessionListNewSessionParams(
+              currentFilter,
+              statusFilter ?? new Map(),
+              labelFilterMap ?? new Map(),
+              projectFilter ?? new Map()
+            )
+            navigate(routes.action.newSession(params ?? undefined))
           }}
           className="inline-flex items-center h-7 px-3 text-xs font-medium rounded-[8px] bg-background shadow-minimal hover:bg-foreground/[0.03] transition-colors"
         >
