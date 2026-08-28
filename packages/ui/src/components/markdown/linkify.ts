@@ -264,11 +264,15 @@ function stripPlaceholderLinks(text: string): string {
 }
 
 /**
- * CommonMark treats an unquoted destination as ending at the first space.
- * AI often writes `[报告](D:\巡察工作\my file.md)` which then is not a link.
- * Wrap those destinations in `<>` so the click handler still receives the full path.
+ * Make generated local-file destinations safe for CommonMark parsing.
+ *
+ * Besides ending a bare destination at a space, CommonMark treats a Windows
+ * separator before punctuation as an escape. For example, the `\.` in
+ * `C:\Users\me\.selection\file.docx` becomes `.`, silently changing the path
+ * to `C:\Users\me.selection\file.docx`. Forward slashes are valid Windows path
+ * separators and survive the markdown parser unchanged.
  */
-function wrapSpacedFileDestinations(text: string): string {
+function normalizeFileDestinations(text: string): string {
   const codeRanges = findCodeRanges(text)
   const inlineLinkStartRegex = /\[([^\]\n]*)\]\(/g
   let result = ''
@@ -288,19 +292,34 @@ function wrapSpacedFileDestinations(text: string): string {
 
     const destination = text.slice(destinationStart, destinationEnd)
     const trimmed = destination.trim()
-    if (!trimmed || trimmed.startsWith('<') || /^(https?|mailto|ftp):/i.test(trimmed)) continue
-    // A plain destination only needs repair when CommonMark punctuation can
-    // split it. Balanced parentheses are valid, but wrapping them too keeps the
-    // parser from mistaking a filename suffix for the link's closing delimiter.
-    if (!/[\s()]/.test(trimmed)) continue
-    // Destination with a markdown title: [text](path "title") — leave alone
+    if (!trimmed || /^(https?|mailto|ftp):/i.test(trimmed)) continue
+    // Destination with a markdown title: [text](path "title") — leave alone.
     if (/\s+['"]/.test(trimmed)) continue
-    // CommonMark <dest> cannot contain `>`
+
+    if (trimmed.startsWith('<') && trimmed.endsWith('>')) {
+      const inner = trimmed.slice(1, -1)
+      if (!inner.includes('>') && inner.includes('\\') && isFilePathTarget(inner)) {
+        result += text.slice(lastIndex, match.index)
+        result += `[${match[1]}](<${inner.replace(/\\/g, '/')}>)`
+        lastIndex = destinationEnd + 1
+      }
+      continue
+    }
+
     if (trimmed.includes('>')) continue
     if (!isFilePathTarget(trimmed) && !/^[A-Za-z]:[\\/]/.test(trimmed) && !/[\\/]/.test(trimmed)) continue
 
+    const normalized = trimmed.includes('\\') ? trimmed.replace(/\\/g, '/') : trimmed
+    // A plain destination only needs repair when CommonMark punctuation can
+    // split it. Balanced parentheses are valid, but wrapping them too keeps the
+    // parser from mistaking a filename suffix for the link's closing delimiter.
+    const needsWrapping = /[\s()]/.test(normalized)
+    if (normalized === trimmed && !needsWrapping) continue
+
     result += text.slice(lastIndex, match.index)
-    result += `[${match[1]}](<${trimmed}>)`
+    result += needsWrapping
+      ? `[${match[1]}](<${normalized}>)`
+      : `[${match[1]}](${normalized})`
     lastIndex = destinationEnd + 1
   }
 
@@ -311,7 +330,7 @@ export function preprocessLinks(text: string): string {
   // First pass: strip markdown links with placeholder/fabricated URLs
   // (e.g., AI-generated `[commit](https://github.com/...)` → `\`commit\``)
   text = stripPlaceholderLinks(text)
-  text = wrapSpacedFileDestinations(text)
+  text = normalizeFileDestinations(text)
 
   // Quick check - if no potential links, return early
   if (!linkify.pretest(text) && !FILE_PATH_PRETEST_REGEX.test(text)) {

@@ -231,7 +231,7 @@ describe('generated markdown file-link pipeline', () => {
     expect(hrefs).toHaveLength(1)
     expect(resolveMarkdownLinkTarget(hrefs[0]!)).toEqual({
       kind: 'file',
-      path: 'D:\\selection\\巡察工作\\skills\\SKILL.md',
+      path: 'D:/selection/巡察工作/skills/SKILL.md',
     })
   })
 
@@ -240,7 +240,17 @@ describe('generated markdown file-link pipeline', () => {
     expect(hrefs).toHaveLength(1)
     expect(resolveMarkdownLinkTarget(hrefs[0]!)).toEqual({
       kind: 'file',
-      path: 'D:\\selection\\巡察工作\\my file.md',
+      path: 'D:/selection/巡察工作/my file.md',
+    })
+  })
+
+  it('does not let CommonMark remove the separator before .selection', () => {
+    const path = 'C:\\Users\\fairy\\.selection\\workspaces\\my-workspace\\sessions\\current\\attachments\\Harness.docx'
+    const hrefs = rawHrefs(`[Harness.docx](${path})`)
+    expect(hrefs).toHaveLength(1)
+    expect(resolveMarkdownLinkTarget(hrefs[0]!)).toEqual({
+      kind: 'file',
+      path: 'C:/Users/fairy/.selection/workspaces/my-workspace/sessions/current/attachments/Harness.docx',
     })
   })
 
@@ -250,7 +260,7 @@ describe('generated markdown file-link pipeline', () => {
     expect(hrefs).toHaveLength(1)
     expect(resolveMarkdownLinkTarget(hrefs[0]!)).toEqual({
       kind: 'file',
-      path,
+      path: path.replace(/\\/g, '/'),
     })
   })
 
