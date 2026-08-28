@@ -18,13 +18,17 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 
 ## Bug Fixes
 
-- **无工作目录时也能直接打开中文交付文件** — Markdown 文件链接现在会按括号层级识别完整路径，保留 `.selection` 等点号目录前的 Windows 路径分隔符，兼容 `/c/Users/...` 形式，并在未选择工作目录时优先从当前会话目录解析；Windows 使用不会被 Office 文件关联长期阻塞的系统启动器。`报告 (1)_批注.docx` 和普通英文文件名都不再被截断、误改路径或退化为全工作区“最近匹配”，Word、Excel 链接点击后会直接交给默认应用。修复 #149。
+- **无工作目录时也能直接打开中文交付文件** — Markdown 文件链接现在会按括号层级识别完整路径，保留 `.selection` 等点号目录前的 Windows 路径分隔符，兼容 `/c/Users/...` 形式，并在未选择工作目录时优先从当前会话目录解析；Windows 使用不会被 Office 文件关联长期阻塞的系统启动器。`报告 (1)_批注.docx` 和普通英文文件名都不再被截断、误改路径或退化为全工作区“最近匹配”，Word、Excel 链接点击后会直接交给默认应用。跟进 #134。
+
+- **Project-scoped new sessions stay in their project** — A project-filtered session list now keeps a clearly labeled “New session in {project}” action above its existing conversations. Both that action and the empty-list action inherit a single included project, so the created session appears immediately and remains correctly bound after refresh or restart. Excluded and ambiguous project filters are not inherited. (#149)
 
 - **Codex process narration stays out of reply bodies** — Responses API text marked as internal `commentary` is held back while its phase is unknown and filtered once classified, so repeated lines such as “Let me confirm…” no longer appear alongside the final answer. (#135)
 
 - **Work-chain titles stay concise and stable** — collapsed headers now follow semantic tool stages and explicit system status instead of copying the latest process narration. Turns that have commentary before their first tool show a neutral processing state, while later tool stages still update normally. (#141)
 
-- **Workspace file links open reliably on Windows 10** — opening a generated Word, Excel, or other workspace file no longer times out after 30 seconds while Windows negotiates the default application. Prompt file-association errors still reach the app instead of being hidden. (#134)
+- **Workspace file links open reliably on Windows 10** — generated Word, Excel, and other workspace links now preserve hidden directory names, spaces, and parentheses instead of being rejected as outside the allowed workspace. Opening a valid file also no longer times out while Windows negotiates the default application, and prompt file-association errors still reach the app. (#134)
+
+- **Project navigation stays scoped to the selected project** — opening a project now selects only one of that project's conversations, or clears an unrelated global conversation when the project is empty. New Session controls preserve and verify the project binding before publishing the new conversation, so it appears in the project's list instead of only under All Sessions. (#145)
 
 - **Windows 10 light mode no longer washes the sidebar and top bar gray** — the 50% vibrancy overlay is macOS-only. Windows paints a solid surface matching Appearance, so light mode chrome matches the settings panel instead of sitting as a dark mask over transparent regions. (#53)
 

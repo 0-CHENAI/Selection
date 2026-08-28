@@ -272,7 +272,7 @@ describe('detectLinks', () => {
 describe('preprocessLinks — Windows file destinations', () => {
   it('preserves the separator before a hidden directory', () => {
     const input = '[Harness.docx](C:\\Users\\fairy\\.selection\\sessions\\Harness.docx)'
-    expect(preprocessLinks(input)).toBe('[Harness.docx](C:/Users/fairy/.selection/sessions/Harness.docx)')
+    expect(preprocessLinks(input)).toBe('[Harness.docx](<C:/Users/fairy/.selection/sessions/Harness.docx>)')
   })
 
   it('wraps an unquoted destination that contains spaces', () => {
@@ -280,7 +280,7 @@ describe('preprocessLinks — Windows file destinations', () => {
     expect(preprocessLinks(input)).toBe('[技能](<D:/selection/巡察工作/my file.md>)')
   })
 
-  it('keeps a parenthesized Chinese filename in the destination (#149)', () => {
+  it('keeps a parenthesized Chinese filename in the destination (#134)', () => {
     const input = '[打开 Word 批注版](C:\\Users\\fairy\\attachments\\云南华电2025年度光伏EPC总承包框架招标文件 (1)_法律审查批注.docx)'
     expect(preprocessLinks(input)).toBe(
       '[打开 Word 批注版](<C:/Users/fairy/attachments/云南华电2025年度光伏EPC总承包框架招标文件 (1)_法律审查批注.docx>)',
@@ -315,6 +315,20 @@ describe('preprocessLinks — Windows file destinations', () => {
   it('does not wrap destinations that contain >', () => {
     const input = '[技能](D:\\selection\\a>b file.md)'
     expect(preprocessLinks(input)).toBe(input)
+  })
+
+  it('preserves hidden directories and balanced parentheses in Windows paths', () => {
+    const input = '[报告](C:\\Users\\fairy\\.selection\\sessions\\云南华电 (1)_法律审查汇总.xlsx)'
+    expect(preprocessLinks(input)).toBe(
+      '[报告](<C:/Users/fairy/.selection/sessions/云南华电 (1)_法律审查汇总.xlsx>)',
+    )
+  })
+
+  it('normalizes generated session placeholders before markdown parsing', () => {
+    const input = '[report]({{SESSION_PATH}}\\attachments\\contract (1).xlsx)'
+    expect(preprocessLinks(input)).toBe(
+      '[report](<{{SESSION_PATH}}/attachments/contract (1).xlsx>)',
+    )
   })
 })
 
