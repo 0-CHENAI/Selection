@@ -18,6 +18,8 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 
 ## Bug Fixes
 
+- **Custom-endpoint model limits stay distinct and selectable** — each model is a separate card, and the context / max-output menus open above the API setup overlay instead of appearing stuck closed. (#146)
+
 - **Codex process narration stays out of reply bodies** — Responses API text marked as internal `commentary` is held back while its phase is unknown and filtered once classified, so repeated lines such as “Let me confirm…” no longer appear alongside the final answer. (#135)
 
 - **Work-chain titles stay concise and stable** — collapsed headers now follow semantic tool stages and explicit system status instead of copying the latest process narration. Turns that have commentary before their first tool show a neutral processing state, while later tool stages still update normally. (#141)

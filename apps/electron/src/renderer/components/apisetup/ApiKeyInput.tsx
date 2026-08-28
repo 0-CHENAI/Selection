@@ -296,7 +296,7 @@ function ModelLimitSelect({
         >
           <SelectValue />
         </SelectTrigger>
-        <SelectContent>
+        <SelectContent className="z-floating-menu pointer-events-auto">
           {options.map((option) => (
             <SelectItem
               key={option.value}
@@ -1186,7 +1186,7 @@ export function ApiKeyInput({
       )}
 
       {showCustomModelLimits && (
-        <div className="space-y-3">
+        <div className="space-y-5">
           <div className="space-y-1">
             <Label className="text-muted-foreground font-normal">
               {t('apiSetup.modelLimitsTitle')}
@@ -1205,9 +1205,15 @@ export function ApiKeyInput({
             )
             const limitsInvalid = !isValidModelLimitCombination(maxTokens, contextWindow)
             return (
-              <div key={id} className="space-y-2.5 rounded-md bg-foreground-2 p-3">
-                <p className="truncate text-xs font-medium text-foreground/80">{remote?.name ?? id}</p>
-                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+              <section
+                key={id}
+                className="overflow-hidden rounded-[10px] border border-border bg-background shadow-minimal"
+              >
+                <header className="border-b border-foreground/8 bg-foreground/[0.03] px-3.5 py-2">
+                  <p className="truncate text-sm font-medium text-foreground">{remote?.name ?? id}</p>
+                </header>
+                <div className="space-y-3 p-3.5">
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                   <ModelLimitSelect
                     id={`context-window-${id}`}
                     label={t('apiSetup.contextWindow')}
@@ -1248,28 +1254,29 @@ export function ApiKeyInput({
                       setLimitNotice(null)
                     }}
                   />
-                </div>
-                <div className="flex items-center justify-between gap-3 pt-0.5">
-                  <div className="min-w-0">
-                    <Label htmlFor={`multimodal-${id}`} className="text-xs font-normal">
-                      {t('apiSetup.multimodal')}
-                    </Label>
-                    <p id={`multimodal-hint-${id}`} className="text-[11px] text-foreground/40">
-                      {t('apiSetup.multimodalHint')}
-                    </p>
                   </div>
-                  <Switch
-                    id={`multimodal-${id}`}
-                    checked={supportsImages}
-                    onCheckedChange={(checked) => {
-                      setModelImageCaps((prev) => ({ ...prev, [id]: checked }))
-                    }}
-                    disabled={isDisabled}
-                    aria-label={`${remote?.name ?? id}: ${t('apiSetup.multimodal')}`}
-                    aria-describedby={`multimodal-hint-${id}`}
-                  />
+                  <div className="flex items-center justify-between gap-3 border-t border-foreground/8 pt-3">
+                    <div className="min-w-0">
+                      <Label htmlFor={`multimodal-${id}`} className="text-xs font-normal">
+                        {t('apiSetup.multimodal')}
+                      </Label>
+                      <p id={`multimodal-hint-${id}`} className="text-[11px] text-foreground/40">
+                        {t('apiSetup.multimodalHint')}
+                      </p>
+                    </div>
+                    <Switch
+                      id={`multimodal-${id}`}
+                      checked={supportsImages}
+                      onCheckedChange={(checked) => {
+                        setModelImageCaps((prev) => ({ ...prev, [id]: checked }))
+                      }}
+                      disabled={isDisabled}
+                      aria-label={`${remote?.name ?? id}: ${t('apiSetup.multimodal')}`}
+                      aria-describedby={`multimodal-hint-${id}`}
+                    />
+                  </div>
                 </div>
-              </div>
+              </section>
             )
           })}
           {limitError && (
