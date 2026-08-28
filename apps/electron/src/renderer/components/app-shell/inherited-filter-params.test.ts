@@ -3,6 +3,7 @@ import {
   resolveInheritedFilterParams,
   resolveNewSessionParams,
   resolveProjectNavigationSessionId,
+  resolveSessionListNewSessionParams,
   type FilterMode,
 } from './inherited-filter-params'
 
@@ -85,5 +86,57 @@ describe('resolveProjectNavigationSessionId (#145)', () => {
         true,
       ),
     ).toBeNull()
+  })
+})
+
+describe('resolveSessionListNewSessionParams (#149)', () => {
+  it('binds a session created from an empty list scoped to one project', () => {
+    expect(resolveSessionListNewSessionParams(
+      { kind: 'allSessions' },
+      m(),
+      m(),
+      m(['project-1', 'include'])
+    )).toEqual({ project: 'project-1' })
+  })
+
+  it('does not bind an excluded or ambiguous project', () => {
+    expect(resolveSessionListNewSessionParams(
+      { kind: 'allSessions' },
+      m(),
+      m(),
+      m(['project-1', 'exclude'])
+    )).toBeNull()
+
+    expect(resolveSessionListNewSessionParams(
+      { kind: 'allSessions' },
+      m(),
+      m(),
+      m(['project-1', 'include'], ['project-2', 'include'])
+    )).toBeNull()
+  })
+
+  it('keeps primary state and label routes in the shared ambiguity rules', () => {
+    expect(resolveSessionListNewSessionParams(
+      { kind: 'state', stateId: 'todo' },
+      m(),
+      m(),
+      m()
+    )).toEqual({ status: 'todo' })
+
+    expect(resolveSessionListNewSessionParams(
+      { kind: 'label', labelId: 'bug' },
+      m(),
+      m(),
+      m(['project-1', 'include'])
+    )).toBeNull()
+  })
+
+  it('does not add a binding outside an inheritable filter context', () => {
+    expect(resolveSessionListNewSessionParams(
+      { kind: 'allSessions' },
+      m(),
+      m(),
+      m()
+    )).toBeNull()
   })
 })

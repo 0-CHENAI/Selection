@@ -2,6 +2,31 @@ import type { CustomEndpointApi, CustomEndpointConfig } from '@config/llm-connec
 
 export type PresetKey = string
 
+export interface CustomEndpointModelSubmissionInput {
+  id: string
+  name?: string
+  includeDisplayNames?: boolean
+  supportsImages: boolean
+  contextWindow: number
+  maxTokens: number
+}
+
+/** Build the persisted model shape consistently for ORDER and generic endpoints. */
+export function buildCustomEndpointModelSubmission(
+  input: CustomEndpointModelSubmissionInput,
+) {
+  const displayName = input.name ?? input.id
+  return {
+    id: input.id,
+    ...(input.includeDisplayNames
+      ? { name: displayName, shortName: displayName }
+      : {}),
+    supportsImages: input.supportsImages,
+    contextWindow: input.contextWindow,
+    maxTokens: input.maxTokens,
+  }
+}
+
 /**
  * Preset keys that are regional variants of a canonical Pi auth provider.
  * The Pi SDK recognizes both 'minimax' and 'minimax-cn' as separate providers

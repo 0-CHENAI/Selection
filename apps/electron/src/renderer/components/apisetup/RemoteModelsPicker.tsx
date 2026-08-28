@@ -1,11 +1,11 @@
 import { useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Command as CommandPrimitive } from 'cmdk'
-import { Check, ChevronDown, Image as ImageIcon, Loader2 } from 'lucide-react'
+import { Check, ChevronDown, Loader2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Label } from '@/components/ui/label'
 import type { RemoteModel } from './fetch-openai-models.ts'
-import { parseSelectedModels, resolveRemoteModelSupportsImages } from './fetch-openai-models.ts'
+import { parseSelectedModels } from './fetch-openai-models.ts'
 import { formatModelLimitCaption } from '@/components/app-shell/input/model-picker-helpers'
 
 interface RemoteModelsPickerProps {
@@ -17,8 +17,6 @@ interface RemoteModelsPickerProps {
   hint?: string
   waitingForKey?: boolean
   onToggle: (id: string) => void
-  imageCaps?: Record<string, boolean>
-  onToggleImage?: (id: string) => void
   onRetry?: () => void
 }
 
@@ -31,8 +29,6 @@ export function RemoteModelsPicker({
   hint,
   waitingForKey,
   onToggle,
-  imageCaps,
-  onToggleImage,
   onRetry,
 }: RemoteModelsPickerProps) {
   const { t } = useTranslation()
@@ -128,7 +124,6 @@ export function RemoteModelsPicker({
                 ) : (
                   filtered.map((model) => {
                     const isOn = selectedSet.has(model.id)
-                    const hasVision = resolveRemoteModelSupportsImages(model, imageCaps?.[model.id])
                     const limitCaption = formatModelLimitCaption(model, {
                       context: t('chat.context'),
                       output: t('chat.usage.output'),
@@ -154,34 +149,7 @@ export function RemoteModelsPicker({
                             </span>
                           )}
                         </span>
-                        <span className="flex shrink-0 items-center gap-2">
-                          <button
-                            type="button"
-                            aria-pressed={hasVision}
-                            aria-label={hasVision
-                              ? t('chat.modelPicker.supportsImagesOn')
-                              : t('chat.modelPicker.supportsImagesOff')}
-                            title={hasVision
-                              ? t('chat.modelPicker.supportsImagesOn')
-                              : t('chat.modelPicker.supportsImagesOff')}
-                            className={cn(
-                              'inline-flex h-5 items-center gap-1 rounded-full px-1.5 text-[10px] font-medium',
-                              hasVision
-                                ? 'bg-success/12 text-success'
-                                : 'bg-foreground/5 text-foreground/35 hover:bg-foreground/8',
-                            )}
-                            onPointerDown={(event) => event.stopPropagation()}
-                            onClick={(event) => {
-                              event.preventDefault()
-                              event.stopPropagation()
-                              onToggleImage?.(model.id)
-                            }}
-                          >
-                            <ImageIcon className="size-3 shrink-0" />
-                            {t('apiSetup.multimodal')}
-                          </button>
-                          <Check className={cn('size-3', isOn ? 'opacity-100' : 'opacity-0')} />
-                        </span>
+                        <Check className={cn('size-3 shrink-0', isOn ? 'opacity-100' : 'opacity-0')} />
                       </CommandPrimitive.Item>
                     )
                   })

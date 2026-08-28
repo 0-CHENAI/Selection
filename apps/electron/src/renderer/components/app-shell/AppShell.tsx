@@ -47,6 +47,7 @@ import { HeaderIconButton } from "@/components/ui/HeaderIconButton"
 import { CreationJobsButton } from "./CreationJobsButton"
 import type { CreationJob } from "@/atoms/creation-jobs"
 import { resolveNewSessionParams, resolveProjectNavigationSessionId, type FilterMode } from "./inherited-filter-params"
+import { filterSessionsByProject } from "./project-session-filter"
 import { Separator } from "@/components/ui/separator"
 import { Tooltip, TooltipTrigger, TooltipContent } from "@craft-agent/ui"
 import {
@@ -1702,24 +1703,7 @@ function AppShellContent({
     }
     // Filter by project — supports include/exclude on session.projectId
     if (projectFilter.size > 0) {
-      const projectIncludes = new Set<string>()
-      const projectExcludes = new Set<string>()
-      for (const [id, mode] of projectFilter) {
-        if (mode === 'include') projectIncludes.add(id)
-        else projectExcludes.add(id)
-      }
-      if (projectIncludes.size > 0) {
-        result = result.filter(s => {
-          const pid = (s as { projectId?: string }).projectId
-          return pid !== undefined && projectIncludes.has(pid)
-        })
-      }
-      if (projectExcludes.size > 0) {
-        result = result.filter(s => {
-          const pid = (s as { projectId?: string }).projectId
-          return pid === undefined || !projectExcludes.has(pid)
-        })
-      }
+      result = filterSessionsByProject(result, projectFilter)
     }
 
     return result
@@ -3772,6 +3756,7 @@ function AppShellContent({
                   workspaceId={activeWorkspaceId ?? undefined}
                   statusFilter={listFilter}
                   labelFilterMap={labelFilter}
+                  projectFilter={projectFilter}
                   focusedSessionId={panelCount === 0 ? null : panelCount > 1 ? focusedSessionId : undefined}
                   onNavigateToSession={panelCount > 1 ? navigateToSessionInPanel : undefined}
                   hasPendingPrompt={hasPendingPrompt}
