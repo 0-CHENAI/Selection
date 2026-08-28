@@ -272,12 +272,12 @@ describe('detectLinks', () => {
 describe('preprocessLinks — spaced Windows destinations', () => {
   it('wraps an unquoted destination that contains spaces', () => {
     const input = '[技能](D:\\selection\\巡察工作\\my file.md)'
-    expect(preprocessLinks(input)).toBe('[技能](<D:\\selection\\巡察工作\\my file.md>)')
+    expect(preprocessLinks(input)).toBe('[技能](<D:/selection/巡察工作/my file.md>)')
   })
 
   it('does not wrap destinations that are already angle-bracketed', () => {
     const input = '[技能](<D:\\selection\\巡察工作\\my file.md>)'
-    expect(preprocessLinks(input)).toBe(input)
+    expect(preprocessLinks(input)).toBe('[技能](<D:/selection/巡察工作/my file.md>)')
   })
 
   it('does not wrap titled destinations', () => {
@@ -293,6 +293,20 @@ describe('preprocessLinks — spaced Windows destinations', () => {
   it('does not wrap destinations that contain >', () => {
     const input = '[技能](D:\\selection\\a>b file.md)'
     expect(preprocessLinks(input)).toBe(input)
+  })
+
+  it('preserves hidden directories and balanced parentheses in Windows paths', () => {
+    const input = '[报告](C:\\Users\\fairy\\.selection\\sessions\\云南华电 (1)_法律审查汇总.xlsx)'
+    expect(preprocessLinks(input)).toBe(
+      '[报告](<C:/Users/fairy/.selection/sessions/云南华电 (1)_法律审查汇总.xlsx>)',
+    )
+  })
+
+  it('normalizes generated session placeholders before markdown parsing', () => {
+    const input = '[report]({{SESSION_PATH}}\\attachments\\contract (1).xlsx)'
+    expect(preprocessLinks(input)).toBe(
+      '[report](<{{SESSION_PATH}}/attachments/contract (1).xlsx>)',
+    )
   })
 })
 

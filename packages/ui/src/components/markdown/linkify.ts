@@ -35,6 +35,11 @@ interface CodeRange {
   end: number
 }
 
+interface InlineMarkdownLinkRange extends CodeRange {
+  destinationStart: number
+  destinationEnd: number
+}
+
 /**
  * Find all code block and inline code ranges in text
  * These ranges should be excluded from link detection
@@ -76,15 +81,63 @@ function isInsideCode(pos: number, ranges: CodeRange[]): boolean {
  * Returns ranges covering the entire link syntax so any URL detected within
  * these spans is skipped by preprocessLinks() — preventing nested/broken links.
  */
+function findInlineMarkdownLinkRanges(text: string): InlineMarkdownLinkRange[] {
+  const ranges: InlineMarkdownLinkRange[] = []
+  const linkStartRegex = /\[(?:[^\[\]]|\\\[|\\\])*\]\(/g
+  let match: RegExpExecArray | null
+
+  while ((match = linkStartRegex.exec(text)) !== null) {
+    const destinationStart = linkStartRegex.lastIndex
+    let destinationEnd = -1
+    let parenthesisDepth = 0
+    let inAngleDestination = false
+    let foundDestinationContent = false
+
+    for (let index = destinationStart; index < text.length; index += 1) {
+      const character = text[index]!
+
+      if (character === '\n' || character === '\r') break
+
+      if (!foundDestinationContent && !/\s/.test(character)) {
+        foundDestinationContent = true
+        inAngleDestination = character === '<'
+      }
+
+      if (inAngleDestination) {
+        if (character === '>') inAngleDestination = false
+        continue
+      }
+
+      if (character === '(') {
+        parenthesisDepth += 1
+      } else if (character === ')') {
+        if (parenthesisDepth === 0) {
+          destinationEnd = index
+          break
+        }
+        parenthesisDepth -= 1
+      }
+    }
+
+    if (destinationEnd < 0) continue
+
+    ranges.push({
+      start: match.index,
+      end: destinationEnd + 1,
+      destinationStart,
+      destinationEnd,
+    })
+    linkStartRegex.lastIndex = destinationEnd + 1
+  }
+
+  return ranges
+}
+
 function findMarkdownLinkRanges(text: string): CodeRange[] {
-  const ranges: CodeRange[] = []
+  const ranges: CodeRange[] = findInlineMarkdownLinkRanges(text)
 
   // Match [text](url) — inline links
-  const inlineLinkRegex = /\[(?:[^\[\]]|\\\[|\\\])*\]\([^)]*\)/g
   let match
-  while ((match = inlineLinkRegex.exec(text)) !== null) {
-    ranges.push({ start: match.index, end: match.index + match[0].length })
-  }
 
   // Match [text][ref] — reference links
   const refLinkRegex = /\[(?:[^\[\]]|\\\[|\\\])*\]\[[^\]]*\]/g
@@ -223,36 +276,41 @@ function stripPlaceholderLinks(text: string): string {
   )
 }
 
-/**
- * CommonMark treats an unquoted destination as ending at the first space.
- * AI often writes `[报告](D:\巡察工作\my file.md)` which then is not a link.
- * Wrap those destinations in `<>` so the click handler still receives the full path.
- */
-function wrapSpacedFileDestinations(text: string): string {
+function normalizeFileDestinations(text: string): string {
   const codeRanges = findCodeRanges(text)
-  return text.replace(
-    /\[([^\]]*)\]\((?!<)([^)\n]*\s[^)\n]*)\)/g,
-    (full, label: string, dest: string, offset: number) => {
-      if (isInsideCode(offset, codeRanges)) return full
-      const trimmed = dest.trim()
-      if (!trimmed || /^(https?|mailto|ftp):/i.test(trimmed)) return full
-      // Destination with a markdown title: [text](path "title") — leave alone
-      if (/\s+['"]/.test(trimmed)) return full
-      // CommonMark <dest> cannot contain `>`
-      if (trimmed.includes('>')) return full
-      if (isFilePathTarget(trimmed) || /^[A-Za-z]:[\\/]/.test(trimmed) || /[\\/]/.test(trimmed)) {
-        return `[${label}](<${trimmed}>)`
-      }
-      return full
-    },
-  )
+  const links = findInlineMarkdownLinkRanges(text)
+  let result = ''
+  let lastIndex = 0
+
+  for (const link of links) {
+    if (isInsideCode(link.start, codeRanges)) continue
+
+    const rawDestination = text.slice(link.destinationStart, link.destinationEnd)
+    const trimmed = rawDestination.trim()
+    const unwrapped = trimmed.startsWith('<') && trimmed.endsWith('>')
+      ? trimmed.slice(1, -1)
+      : trimmed
+    const isWorkspacePath = /^\{\{SESSION_PATH\}\}[\\/]/.test(unwrapped)
+    const isWindowsPath = /^[A-Za-z]:[\\/]/.test(unwrapped)
+
+    if (!unwrapped || (!isFilePathTarget(unwrapped) && !isWorkspacePath && !isWindowsPath)) continue
+    if (/\s+['"]/.test(unwrapped) || /[<>\r\n]/.test(unwrapped)) continue
+
+    const normalized = unwrapped.replace(/\\/g, '/')
+    result += text.slice(lastIndex, link.destinationStart)
+    result += `<${normalized}>`
+    lastIndex = link.destinationEnd
+  }
+
+  if (lastIndex === 0) return text
+  return result + text.slice(lastIndex)
 }
 
 export function preprocessLinks(text: string): string {
   // First pass: strip markdown links with placeholder/fabricated URLs
   // (e.g., AI-generated `[commit](https://github.com/...)` → `\`commit\``)
   text = stripPlaceholderLinks(text)
-  text = wrapSpacedFileDestinations(text)
+  text = normalizeFileDestinations(text)
 
   // Quick check - if no potential links, return early
   if (!linkify.pretest(text) && !FILE_PATH_PRETEST_REGEX.test(text)) {

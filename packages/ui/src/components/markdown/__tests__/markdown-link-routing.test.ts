@@ -231,7 +231,7 @@ describe('generated markdown file-link pipeline', () => {
     expect(hrefs).toHaveLength(1)
     expect(resolveMarkdownLinkTarget(hrefs[0]!)).toEqual({
       kind: 'file',
-      path: 'D:\\selection\\巡察工作\\skills\\SKILL.md',
+      path: 'D:/selection/巡察工作/skills/SKILL.md',
     })
   })
 
@@ -240,7 +240,18 @@ describe('generated markdown file-link pipeline', () => {
     expect(hrefs).toHaveLength(1)
     expect(resolveMarkdownLinkTarget(hrefs[0]!)).toEqual({
       kind: 'file',
-      path: 'D:\\selection\\巡察工作\\my file.md',
+      path: 'D:/selection/巡察工作/my file.md',
+    })
+  })
+
+  it('keeps the full path when hidden directories and parentheses are present', () => {
+    const hrefs = rawHrefs(
+      '[报告](C:\\Users\\fairy\\.selection\\sessions\\云南华电 (1)_法律审查汇总.xlsx)',
+    )
+    expect(hrefs).toHaveLength(1)
+    expect(resolveMarkdownLinkTarget(hrefs[0]!)).toEqual({
+      kind: 'file',
+      path: 'C:/Users/fairy/.selection/sessions/云南华电 (1)_法律审查汇总.xlsx',
     })
   })
 
