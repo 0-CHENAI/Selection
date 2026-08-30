@@ -800,7 +800,7 @@ export class PiAgent extends BaseAgent {
    * Build AWS environment variables from piAuth credentials for the subprocess.
    *
    * The Pi SDK's Bedrock provider reads from the AWS default credential chain
-   * (env vars), not from Pi AuthStorage. We inject at spawn time so credentials
+   * (env vars), not from Pi's credential store. We inject at spawn time so credentials
    * are scoped to the subprocess and don't leak to the main process.
    *
    * NOTE: IAM credentials (especially STS session tokens) are immutable after
@@ -873,8 +873,8 @@ export class PiAgent extends BaseAgent {
       try {
         if (piAuthProvider === 'github-copilot') {
           // Copilot: refresh the short-lived Copilot token using the GitHub access token
-          const { refreshGitHubCopilotToken } = await import('@earendil-works/pi-ai/oauth');
-          const newCreds = await refreshGitHubCopilotToken(stored.refreshToken);
+          const { refreshGitHubCopilotTokenWithSdk } = await import('../auth/github-copilot-sdk.ts');
+          const newCreds = await refreshGitHubCopilotTokenWithSdk(stored.refreshToken);
           await credentialManager.setLlmOAuth(slug, {
             accessToken: newCreds.access,
             refreshToken: newCreds.refresh,

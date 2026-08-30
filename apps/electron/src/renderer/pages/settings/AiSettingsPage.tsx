@@ -169,6 +169,11 @@ const PI_AUTH_PROVIDER_LABELS: Record<string, string> = {
   cerebras: 'Cerebras',
   zai: 'z.ai',
   huggingface: 'Hugging Face',
+  minimax: 'Minimax',
+  'minimax-cn': 'Minimax (CN)',
+  'kimi-coding': 'Kimi (Coding)',
+  moonshotai: 'Moonshot AI',
+  'moonshotai-cn': 'Moonshot AI (CN)',
   'vercel-ai-gateway': 'Vercel AI Gateway',
   'github-copilot': 'GitHub Copilot',
 }
@@ -495,7 +500,7 @@ function WorkspaceOverrideCard({ workspace, llmConnections, onSettingsChange, li
         description: message,
       })
     }
-  }, [workspace.id, onSettingsChange, settings])
+  }, [workspace.id, onSettingsChange, settings, t])
 
   const handleConnectionChange = useCallback((slug: string) => {
     // 'global' means use app default (clear workspace override)

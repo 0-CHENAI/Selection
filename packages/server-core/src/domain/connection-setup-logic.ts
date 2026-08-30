@@ -202,6 +202,8 @@ const PI_AUTH_PROVIDER_DISPLAY_NAMES: Record<string, string> = {
   minimax: 'Minimax',
   'minimax-cn': 'Minimax CN',
   'kimi-coding': 'Kimi (Coding)',
+  moonshotai: 'Moonshot AI',
+  'moonshotai-cn': 'Moonshot AI (CN)',
   'vercel-ai-gateway': 'Vercel AI Gateway',
 }
 

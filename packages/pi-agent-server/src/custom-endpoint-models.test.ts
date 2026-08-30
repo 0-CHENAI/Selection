@@ -102,6 +102,16 @@ describe('buildCustomEndpointModelDef', () => {
     const model = buildCustomEndpointModelDef('Opus', { supportsImages: false })
     expect(model.input).toEqual(['text'])
   })
+
+  it('omits the OpenAI-specific store parameter for compatible custom endpoints', () => {
+    const model = buildCustomEndpointModelDef('strict-gateway', undefined, undefined, 'openai-completions')
+    expect(model.compat).toEqual({ supportsStore: false })
+  })
+
+  it('does not attach OpenAI compatibility flags to Anthropic endpoints', () => {
+    const model = buildCustomEndpointModelDef('anthropic-gateway', undefined, undefined, 'anthropic-messages')
+    expect(model).not.toHaveProperty('compat')
+  })
 })
 
 describe('findCustomEndpointModelEntry', () => {

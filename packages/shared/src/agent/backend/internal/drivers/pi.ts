@@ -48,10 +48,10 @@ async function listModelsViaHttp(
   githubToken: string,
   timeoutMs: number,
 ): Promise<RawCopilotModel[]> {
-  const { refreshGitHubCopilotToken } = await import('@earendil-works/pi-ai/oauth');
+  const { refreshGitHubCopilotTokenWithSdk } = await import('../../../../auth/github-copilot-sdk.ts');
 
   // Step 1: Exchange GitHub OAuth token → Copilot API token
-  const creds = await refreshGitHubCopilotToken(githubToken);
+  const creds = await refreshGitHubCopilotTokenWithSdk(githubToken);
   const copilotToken = creds.access;
 
   // Step 2: Extract base URL from token

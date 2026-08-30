@@ -24,8 +24,8 @@ import { homedir } from 'node:os';
 import {
   createAgentSession,
   SessionManager as PiSessionManager,
-  AuthStorage as PiAuthStorage,
   ModelRegistry as PiModelRegistry,
+  ModelRuntime as PiModelRuntime,
   SettingsManager as PiSettingsManager,
   createBashToolDefinition,
   createEditToolDefinition,
@@ -38,15 +38,16 @@ import type {
   AgentSession,
   AgentSessionEvent,
   AgentToolResult,
-  AuthCredential,
   CreateAgentSessionOptions,
   ToolDefinition,
 } from '@earendil-works/pi-coding-agent';
 
 // Pi AI types
-import type {
-  ImageContent as PiImageContent,
-  TextContent as PiTextContent,
+import {
+  InMemoryCredentialStore,
+  InMemoryModelsStore,
+  type ImageContent as PiImageContent,
+  type TextContent as PiTextContent,
 } from '@earendil-works/pi-ai';
 
 // Pre-register the Bedrock provider module so the Pi SDK doesn't attempt a
@@ -58,6 +59,9 @@ import { setBedrockProviderModule } from '@earendil-works/pi-ai/api/bedrock-conv
 import { bedrockProviderModule } from '@earendil-works/pi-ai/bedrock-provider';
 setBedrockProviderModule(bedrockProviderModule);
 
+import { registerBunOAuthFlows } from '@earendil-works/pi-ai/bun-oauth';
+registerBunOAuthFlows();
+
 // Model resolution (extracted for testability + custom-endpoint precedence)
 import { resolvePiModel, isDeniedMiniModelId, isModelNotFoundError } from './model-resolution.ts';
 import { pickProviderAppropriateMiniModel, resolveUtilityModelId } from './pick-mini-model.ts';
@@ -65,9 +69,12 @@ import {
   buildCustomEndpointModelDef,
   findCustomEndpointModelEntry,
   normalizeCustomEndpointModelEntry,
+  stripPiPrefix,
+  type CustomEndpointApi,
   type CustomEndpointModelEntry,
   type CustomEndpointModelOverrides,
 } from './custom-endpoint-models.ts';
+import { syncCredentialForPiSdk, type PiCredential } from './adapt-credential.ts';
 import { registerMissingOpenRouterModels } from './openrouter-dynamic-models.ts';
 
 // Direct source imports from shared (bundled by bun build)
@@ -104,15 +111,6 @@ import {
 // ============================================================
 // Types — JSONL Protocol
 // ============================================================
-
-/** Credential union used in init and token_update messages */
-type PiCredential =
-  | { type: 'api_key'; key: string }
-  | { type: 'oauth'; access: string; refresh: string; expires: number }
-  | { type: 'iam'; accessKeyId: string; secretAccessKey: string; region?: string; sessionToken?: string };
-
-/** Custom endpoint protocol — determines which streaming adapter Pi SDK uses */
-type CustomEndpointApi = 'openai-completions' | 'anthropic-messages';
 
 /** Init message from main process — configures the Pi agent server */
 interface InitMessage {
@@ -298,7 +296,13 @@ type OutboundMessage =
 
 let piSession: AgentSession | null = null;
 let piModelRegistry: PiModelRegistry | null = null;
-let moduleAuthStorage: PiAuthStorage | null = null;
+let moduleCredentialStore: InMemoryCredentialStore | null = null;
+type AuthenticatedRuntime = {
+  modelRuntime: PiModelRuntime;
+  modelRegistry: PiModelRegistry;
+};
+let moduleRuntimePromise: Promise<AuthenticatedRuntime> | null = null;
+let runtimeConfigGeneration = 0;
 let unsubscribeEvents: (() => void) | null = null;
 
 // Init config (set on 'init' message)
@@ -565,60 +569,80 @@ function registerCustomEndpointModels(
         ? { supportsImages: initConfig.customEndpoint.supportsImages }
         : undefined,
       customModelOverrides.get(id),
+      api,
     )),
   });
   debugLog(`Registered custom endpoint: ${baseUrl} with ${allIds.length} model(s) [${allIds.join(', ')}], api: ${api}`);
 }
 
 /**
- * Create an in-memory auth storage pre-loaded with the user's credentials
- * and a model registry backed by it. Used by both the main session and
- * ephemeral queryLlm sessions.
+ * Return the shared Pi runtime and registry, refreshing the mutable credential
+ * store first. Caching avoids rebuilding the provider catalog for every utility
+ * completion while keeping token updates visible to all sessions.
  */
-function createAuthenticatedRegistry(): {
-  authStorage: PiAuthStorage;
-  modelRegistry: PiModelRegistry;
-} {
-  // Reuse module-level authStorage if already created (allows token_update to mutate it).
-  // Only create a new one on first call or after re-init.
-  if (!moduleAuthStorage) {
-    moduleAuthStorage = PiAuthStorage.inMemory();
-  }
-  const authStorage = moduleAuthStorage;
+async function createAuthenticatedRuntime(): Promise<AuthenticatedRuntime> {
+  const generation = runtimeConfigGeneration;
+  if (!moduleCredentialStore) moduleCredentialStore = new InMemoryCredentialStore();
+  const credentials = moduleCredentialStore;
+
   if (initConfig?.piAuth) {
     const { provider, credential } = initConfig.piAuth;
-    // Pi SDK 0.70.0's AuthCredential union (ApiKeyCredential | OAuthCredential) doesn't
-    // include 'iam' as a first-class member, but the auth storage accepts it at runtime
-    // — the Bedrock provider module reads AWS env directly; this `set` keeps Pi SDK's
-    // internal provider-tracking consistent regardless of credential shape.
-    authStorage.set(provider, credential as unknown as AuthCredential);
-    debugLog(`Injected ${credential.type} credential for provider: ${provider}`);
+    const mode = await syncCredentialForPiSdk(credentials, provider, credential);
+    if (mode === 'stored') {
+      debugLog(`Injected ${credential.type} credential for provider: ${provider}`);
+    } else {
+      debugLog(`Using ambient ${credential.type} credential for provider: ${provider}`);
+    }
   } else if (initConfig?.apiKey) {
-    authStorage.set('anthropic', { type: 'api_key', key: initConfig.apiKey });
-    debugLog('Injected API key into auth storage (legacy fallback)');
+    const apiKey = initConfig.apiKey;
+    await credentials.modify('anthropic', async () => ({ type: 'api_key', key: apiKey }));
+    debugLog('Injected API key into credential store (legacy fallback)');
   }
 
-  const modelRegistry = PiModelRegistry.inMemory(authStorage);
+  // A concurrent init/runtime-config update changed the source of truth while
+  // credential synchronization was awaiting its serialized store write.
+  if (generation !== runtimeConfigGeneration) return createAuthenticatedRuntime();
 
-  // Register custom endpoint models dynamically via Pi SDK's registerProvider API.
-  // This makes arbitrary OpenAI/Anthropic-compatible endpoints work through the Pi SDK
-  // by creating synthetic Model<Api> objects that the SDK requires.
-  const hasCustomEndpoint = !!initConfig?.baseUrl?.trim();
-  if (hasCustomEndpoint && initConfig?.customEndpoint) {
-    const { api } = initConfig.customEndpoint;
-    const modelEntries: CustomEndpointModelEntry[] = (initConfig.customModels?.length
-      ? initConfig.customModels
-      : [initConfig.model || 'default']
-    ).map(normalizeCustomEndpointModelEntry);
-    customEndpointModelIds = new Set();  // Reset on fresh registry creation
-    registerCustomEndpointModels(modelRegistry, api, initConfig.baseUrl!.trim(), modelEntries);
-  } else if (hasCustomEndpoint && !initConfig?.customEndpoint) {
-    debugLog('Custom endpoint without protocol config — models may not resolve. Set customEndpoint.api for proper routing.');
+  if (!moduleRuntimePromise) {
+    let guardedBuild: Promise<AuthenticatedRuntime>;
+    const build = (async () => {
+      const modelRuntime = await PiModelRuntime.create({
+        credentials,
+        modelsPath: null,
+        modelsStore: new InMemoryModelsStore(),
+      });
+      if (generation !== runtimeConfigGeneration) {
+        throw new Error('Runtime configuration changed during initialization');
+      }
+      const modelRegistry = new PiModelRegistry(modelRuntime);
+
+      const hasCustomEndpoint = !!initConfig?.baseUrl?.trim();
+      if (hasCustomEndpoint && initConfig?.customEndpoint) {
+        const { api } = initConfig.customEndpoint;
+        const modelEntries: CustomEndpointModelEntry[] = (initConfig.customModels?.length
+          ? initConfig.customModels
+          : [initConfig.model || 'default']
+        ).map(normalizeCustomEndpointModelEntry);
+        customEndpointModelIds = new Set();
+        customModelOverrides.clear();
+        registerCustomEndpointModels(modelRegistry, api, initConfig.baseUrl!.trim(), modelEntries);
+      } else if (hasCustomEndpoint) {
+        debugLog('Custom endpoint without protocol config — models may not resolve. Set customEndpoint.api for proper routing.');
+      }
+
+      registerConfiguredOpenRouterModels(modelRegistry);
+      piModelRegistry = modelRegistry;
+      return { modelRuntime, modelRegistry };
+    })();
+    guardedBuild = build.catch((error) => {
+      // A stale build from a preceding init must not clear a newer cache.
+      if (moduleRuntimePromise === guardedBuild) moduleRuntimePromise = null;
+      throw error;
+    });
+    moduleRuntimePromise = guardedBuild;
   }
 
-  registerConfiguredOpenRouterModels(modelRegistry);
-
-  return { authStorage, modelRegistry };
+  return moduleRuntimePromise;
 }
 
 async function ensureSession(): Promise<AgentSession> {
@@ -627,9 +651,7 @@ async function ensureSession(): Promise<AgentSession> {
 
   const cwd = resolvedCwd();
 
-  const { authStorage, modelRegistry } = createAuthenticatedRegistry();
-  // Store at module scope for set_model handler
-  piModelRegistry = modelRegistry;
+  const { modelRuntime, modelRegistry } = await createAuthenticatedRuntime();
 
   // Build tools: coding tools + web tools wrapped with permission hooks + proxy tools.
   // Search provider is selected based on the user's LLM connection:
@@ -640,12 +662,13 @@ async function ensureSession(): Promise<AgentSession> {
   //
   // IMPORTANT: resolve dynamically on each search call so token_update refreshes
   // are used without recreating the session.
+  const activeSearchModel = () => (initConfig?.model ? stripPiPrefix(initConfig.model) : undefined);
   const searchProvider = {
     get name() {
-      return resolveSearchProvider(initConfig?.piAuth).name;
+      return resolveSearchProvider(initConfig?.piAuth, activeSearchModel()).name;
     },
     async search(query: string, count: number) {
-      return resolveSearchProvider(initConfig?.piAuth).search(query, count);
+      return resolveSearchProvider(initConfig?.piAuth, activeSearchModel()).search(query, count);
     },
   };
   const searchTool = createSearchTool(searchProvider);
@@ -654,7 +677,7 @@ async function ensureSession(): Promise<AgentSession> {
   );
   const webTools = [searchTool, webFetchTool];
 
-  // Pi SDK 0.70.0 registration contract:
+  // Pi SDK tool registration contract:
   //   - `customTools` accepts ToolDefinition[] — our hook-wrapped objects go here
   //   - `tools` is a string[] name allowlist — MUST include every tool we want active,
   //     otherwise Pi SDK defaults to the built-in [read, bash, edit, write] set and
@@ -683,8 +706,7 @@ async function ensureSession(): Promise<AgentSession> {
   // Build session options
   const sessionOptions: CreateAgentSessionOptions = {
     cwd,
-    authStorage,
-    modelRegistry,
+    modelRuntime,
     customTools: wrappedAll,
     tools: toolAllowlist,
   };
@@ -1031,8 +1053,8 @@ async function queryLlm(request: LLMQueryRequest): Promise<LLMQueryResult> {
 
   debugLog('[queryLlm] Starting');
 
-  // Create authenticated registry upfront — used by both the provider guard and the ephemeral session.
-  const { authStorage, modelRegistry } = createAuthenticatedRegistry();
+  // Resolve against the shared authenticated runtime used by the main session.
+  const { modelRuntime, modelRegistry } = await createAuthenticatedRuntime();
 
   const piAuthProvider = initConfig.piAuth?.provider;
   let model: string
@@ -1063,7 +1085,7 @@ async function queryLlm(request: LLMQueryRequest): Promise<LLMQueryResult> {
     // If piAuth is set, ensure the mini model uses the same provider.
     // Pi SDK will fail with "No API key found" if the model requires a different provider.
     // Exception: 'custom-endpoint' provider is always compatible because it has its own
-    // API key configured via resolveCustomEndpointApiKey() and doesn't use authStorage.
+    // API key configured via resolveCustomEndpointApiKey() and doesn't use the credential store.
     if (initConfig.piAuth) {
       const authProvider = initConfig.piAuth.provider;
       const bareModel = model.startsWith('pi/') ? model.slice(3) : model;
@@ -1101,8 +1123,7 @@ async function queryLlm(request: LLMQueryRequest): Promise<LLMQueryResult> {
     // Create minimal ephemeral session
     const ephemeralOptions: CreateAgentSessionOptions = {
       cwd: resolvedCwd(),
-      authStorage,
-      modelRegistry,
+      modelRuntime,
       tools: [],
       sessionManager: PiSessionManager.inMemory(),
       model: piModel,
@@ -1432,6 +1453,7 @@ function handleSessionEvent(event: AgentSessionEvent): void {
 // ============================================================
 
 async function handleInit(msg: Extract<InboundMessage, { type: 'init' }>): Promise<void> {
+  runtimeConfigGeneration += 1;
   // Clean up any existing session from a previous init
   if (piSession) {
     if (unsubscribeEvents) {
@@ -1442,7 +1464,11 @@ async function handleInit(msg: Extract<InboundMessage, { type: 'init' }>): Promi
     piSession = null;
     debugLog('Cleaned up existing session for re-init');
   }
-  moduleAuthStorage = null; // Reset so createAuthenticatedRegistry() creates fresh storage
+  moduleCredentialStore = null;
+  moduleRuntimePromise = null;
+  piModelRegistry = null;
+  customEndpointModelIds = new Set();
+  customModelOverrides.clear();
 
   initConfig = msg;
 
@@ -1451,6 +1477,8 @@ async function handleInit(msg: Extract<InboundMessage, { type: 'init' }>): Promi
   if (msg.piAuth?.provider === 'azure-openai-responses' && msg.baseUrl) {
     process.env.AZURE_OPENAI_BASE_URL = msg.baseUrl;
     debugLog(`Set AZURE_OPENAI_BASE_URL=${msg.baseUrl}`);
+  } else {
+    delete process.env.AZURE_OPENAI_BASE_URL;
   }
 
   // Start callback server for call_llm (idempotent — skips if already running)
@@ -1723,6 +1751,8 @@ async function handleUpdateRuntimeConfig(msg: RuntimeConfigUpdateMessage): Promi
       throw new Error('Runtime config update received before init');
     }
 
+    runtimeConfigGeneration += 1;
+    if (!piModelRegistry) moduleRuntimePromise = null;
     initConfig = {
       ...initConfig,
       model: msg.model,
@@ -1733,15 +1763,21 @@ async function handleUpdateRuntimeConfig(msg: RuntimeConfigUpdateMessage): Promi
       customModels: msg.customModels,
     };
 
-    if (piModelRegistry && initConfig.baseUrl?.trim() && initConfig.customEndpoint) {
-      const modelEntries: CustomEndpointModelEntry[] = (initConfig.customModels?.length
-        ? initConfig.customModels
-        : [initConfig.model || 'default']
-      ).map(normalizeCustomEndpointModelEntry);
-
+    if (piModelRegistry) {
       customEndpointModelIds = new Set();
       customModelOverrides.clear();
-      registerCustomEndpointModels(piModelRegistry, initConfig.customEndpoint.api, initConfig.baseUrl.trim(), modelEntries);
+      if (initConfig.baseUrl?.trim() && initConfig.customEndpoint) {
+        const modelEntries: CustomEndpointModelEntry[] = (initConfig.customModels?.length
+          ? initConfig.customModels
+          : [initConfig.model || 'default']
+        ).map(normalizeCustomEndpointModelEntry);
+        registerCustomEndpointModels(piModelRegistry, initConfig.customEndpoint.api, initConfig.baseUrl.trim(), modelEntries);
+      } else {
+        // Runtime updates can move away from a custom endpoint. Leaving the old
+        // synthetic provider registered lets later model resolution route back
+        // to stale URL/capability data.
+        piModelRegistry.unregisterProvider('custom-endpoint');
+      }
     }
 
     if (piSession && piModelRegistry) {
@@ -1798,6 +1834,7 @@ async function handleSetModel(msg: Extract<InboundMessage, { type: 'set_model' }
   try {
     await piSession.setModel(piModel);
     setInterceptorApiHints(piModel as { api?: string; provider?: string; baseUrl?: string });
+    if (initConfig) initConfig.model = msg.model;
     debugLog(`[set_model] Model changed to: ${msg.model} (resolved: ${piModel.provider}/${piModel.id})`);
   } catch (error) {
     const errorMsg = error instanceof Error ? error.message : String(error);
@@ -1932,16 +1969,19 @@ async function processMessage(msg: InboundMessage): Promise<void> {
       break;
 
     case 'token_update':
-      if (moduleAuthStorage) {
+      if (!initConfig) {
+        debugLog('token_update received before init; ignoring');
+        break;
+      }
+      initConfig.piAuth = msg.piAuth;
+      if (moduleCredentialStore) {
         const { provider, credential } = msg.piAuth;
-        // See ambient comment at the initial `authStorage.set` call — same shape reason.
-        moduleAuthStorage.set(provider, credential as unknown as AuthCredential);
-        if (initConfig) {
-          initConfig.piAuth = msg.piAuth;
-        }
+        await syncCredentialForPiSdk(moduleCredentialStore, provider, credential);
         debugLog(`Updated ${credential.type} credential for provider: ${provider}`);
       } else {
-        debugLog('token_update received but no authStorage initialized');
+        // createAuthenticatedRuntime reads initConfig, so retaining the update is
+        // sufficient when the first runtime has not been created yet.
+        debugLog('Stored token_update for pending runtime initialization');
       }
       break;
 
