@@ -90,6 +90,7 @@ import { createSearchTool } from './tools/search/create-search-tool.ts';
 import { allowCraftMetadataProperties, stripCraftMetadata } from './craft-metadata-schema.ts';
 import { createRecoveringArgumentPreparer } from './tool-argument-recovery.ts';
 import { applySystemPromptOverride } from './system-prompt-override.ts';
+import { installContextBudgetGuard } from './context-budget-stream.ts';
 import { resolvePiSessionPaths } from './session-paths.ts';
 import { createPiSessionManager } from './pi-session-manager.ts';
 import { createSelectionReadToolDefinition } from './tools/read/create-read-tool.ts';
@@ -610,6 +611,12 @@ async function createAuthenticatedRuntime(): Promise<AuthenticatedRuntime> {
         credentials,
         modelsPath: null,
         modelsStore: new InMemoryModelsStore(),
+      });
+      installContextBudgetGuard(modelRuntime, (info) => {
+        debugLog(
+          `Context budget ${info.phase}: ${info.model} ` +
+          `${info.requestedMaxTokens} -> ${info.appliedMaxTokens}`,
+        );
       });
       if (generation !== runtimeConfigGeneration) {
         throw new Error('Runtime configuration changed during initialization');

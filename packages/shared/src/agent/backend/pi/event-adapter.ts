@@ -23,6 +23,7 @@ import { PI_TOOL_NAME_MAP } from './constants.ts';
 import { toolMetadataStore } from '../../../interceptor-common.ts';
 import { parseError } from '../../errors.ts';
 import { normalizeToolResultContent } from '../../tool-matching.ts';
+import { ACTIONABLE_CONTEXT_OVERFLOW_MESSAGE } from './context-budget.ts';
 
 /**
  * Pi SDK auto-compaction race signature — the AbortController crash described
@@ -194,13 +195,12 @@ export class PiEventAdapter extends BaseEventAdapter {
       // Re-check state at fire time — a late `compaction_start` may have
       // already transitioned us to `compacting`.
       if (this.overflowState !== 'awaiting') return;
-      const errorMessage = this.heldOverflowError ?? 'Context overflow';
       this.heldOverflowError = null;
       this.overflowState = 'none';
       this.log.warn('Overflow recovery fallback fired — SDK emitted no compaction events', {
         timeoutMs: OVERFLOW_FALLBACK_TIMEOUT_MS,
       });
-      this.onFallbackEvent?.({ type: 'error', message: errorMessage });
+      this.onFallbackEvent?.({ type: 'error', message: ACTIONABLE_CONTEXT_OVERFLOW_MESSAGE });
       this.onFallbackComplete?.();
     }, OVERFLOW_FALLBACK_TIMEOUT_MS);
   }
@@ -616,12 +616,21 @@ export class PiEventAdapter extends BaseEventAdapter {
           // Use "Compacted" keyword so session handler detects statusType: 'compaction_complete'
           yield { type: 'info', message: 'Compacted context to fit within limits' };
         } else if (compactionEvent.errorMessage) {
+          const wasRecoveringOverflow =
+            this.overflowState === 'compacting' ||
+            this.overflowState === 'awaiting' ||
+            this.overflowState === 'held';
           // Defensive handler for the Pi SDK auto-compaction race (cause A
           // in plans/fix-pi-gpt-compaction.md). The raw stack
           // `undefined is not an object (evaluating 'this._autoCompactionAbortController.signal')`
           // is unhelpful to the user; convert it to a friendly retry hint and
           // log for diagnostics. Remove once the upstream fix ships.
-          if (SDK_AUTOCOMPACT_RACE_SIGNATURE.test(compactionEvent.errorMessage)) {
+          if (wasRecoveringOverflow) {
+            this.log.warn('Context overflow recovery failed', {
+              errorMessage: compactionEvent.errorMessage,
+            });
+            yield { type: 'error', message: ACTIONABLE_CONTEXT_OVERFLOW_MESSAGE };
+          } else if (SDK_AUTOCOMPACT_RACE_SIGNATURE.test(compactionEvent.errorMessage)) {
             this.log.warn('Pi SDK auto-compaction race; recommend manual /compact', {
               errorMessage: compactionEvent.errorMessage,
             });
@@ -639,11 +648,7 @@ export class PiEventAdapter extends BaseEventAdapter {
           // the turn now — no recovered agent_end will arrive on the failure
           // path. pendingQueueComplete signals the caller to terminate the
           // iterator since this is a non-agent_end event.
-          if (
-            this.overflowState === 'compacting' ||
-            this.overflowState === 'awaiting' ||
-            this.overflowState === 'held'
-          ) {
+          if (wasRecoveringOverflow) {
             yield { type: 'complete' };
             this.pendingQueueComplete = true;
             this.overflowState = 'none';

@@ -9,6 +9,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { PiEventAdapter } from '../backend/pi/event-adapter.ts';
+import { ACTIONABLE_CONTEXT_OVERFLOW_MESSAGE } from '../backend/pi/context-budget.ts';
 import { toolMetadataStore } from '../../interceptor-common.ts';
 
 // Helper: collect all events from a generator
@@ -1514,7 +1515,10 @@ describe('PiEventAdapter', () => {
       } as any));
 
       expect(failureEvents).toEqual([
-        { type: 'error', message: 'Context compaction failed: Out of memory during summary' },
+        {
+          type: 'error',
+          message: ACTIONABLE_CONTEXT_OVERFLOW_MESSAGE,
+        },
         { type: 'complete' },
       ]);
       // Queue should terminate even though the event wasn't agent_end.
@@ -1540,7 +1544,10 @@ describe('PiEventAdapter', () => {
         // No compaction events arrive. Advance past the 5 s fallback timeout.
         jest.advanceTimersByTime(5_000);
 
-        expect(enqueued).toEqual([{ type: 'error', message: overflowMessage.errorMessage }]);
+        expect(enqueued).toEqual([{
+          type: 'error',
+          message: ACTIONABLE_CONTEXT_OVERFLOW_MESSAGE,
+        }]);
         expect(completed).toBe(true);
       } finally {
         jest.useRealTimers();
@@ -1583,7 +1590,10 @@ describe('PiEventAdapter', () => {
       } as any));
 
       expect(events).toEqual([
-        { type: 'error', message: 'Auto-compaction hit a transient error. Try /compact manually.' },
+        {
+          type: 'error',
+          message: ACTIONABLE_CONTEXT_OVERFLOW_MESSAGE,
+        },
         { type: 'complete' },
       ]);
       // The raw `_autoCompactionAbortController.signal` text is not in any yield.
