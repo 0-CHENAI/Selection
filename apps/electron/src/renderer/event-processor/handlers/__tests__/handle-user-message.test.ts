@@ -346,6 +346,64 @@ describe('handleUserMessage queued replay', () => {
     expect(next.state.session.suppressedTurnIds).toContain('live')
   })
 
+  it('does not hide the finished body when continue is accepted after interrupt (#101)', () => {
+    const state: SessionState = {
+      session: {
+        ...makeState([]).session,
+        isProcessing: false,
+        messages: [
+          { id: 'ask-word', role: 'user', content: '帮我将他形成word放在我的桌面上', timestamp: 100 },
+          {
+            id: 'work-chain',
+            role: 'assistant',
+            content: 'PAGE field is properly structured - it shows fieldChar begin',
+            timestamp: 150,
+            isIntermediate: true,
+          },
+          {
+            id: 'finished-body',
+            role: 'assistant',
+            content: '已写好三门问题的数字模拟和公式。',
+            timestamp: 160,
+            turnId: 'closed-turn',
+          },
+          {
+            id: 'optimistic-continue',
+            role: 'user',
+            content: '继续',
+            timestamp: 200,
+            isQueued: true,
+            queueId: 'backend-continue',
+          },
+        ],
+      } as any,
+      streaming: null,
+    }
+
+    const next = handleUserMessage(state, {
+      type: 'user_message',
+      sessionId: 'session-1',
+      message: { id: 'backend-continue', role: 'user', content: '继续', timestamp: 300 },
+      status: 'accepted',
+      optimisticMessageId: 'optimistic-continue',
+    })
+
+    const body = next.state.session.messages.find(message => message.id === 'finished-body')
+    const workChain = next.state.session.messages.find(message => message.id === 'work-chain')
+    const followUp = next.state.session.messages.find(message => message.id === 'optimistic-continue')
+    const turns = groupMessagesByTurn(next.state.session.messages)
+
+    expect(body?.hidden).not.toBe(true)
+    expect(body?.content).toBe('已写好三门问题的数字模拟和公式。')
+    expect(workChain?.hidden).not.toBe(true)
+    expect(followUp?.hidden).not.toBe(true)
+    expect(followUp).toMatchObject({ isQueued: false, content: '继续' })
+    expect(next.state.session.suppressedTurnIds).toBeUndefined()
+    expect(next.state.streaming).toBeNull()
+    expect(turns.map(turn => turn.type)).toEqual(['user', 'assistant', 'user'])
+    expect(turns[1]?.type === 'assistant' && turns[1].response?.text).toBe('已写好三门问题的数字模拟和公式。')
+  })
+
   it('hides an earlier steered follow-up so only the latest question stays visible', () => {
     const state = makeState([
       { id: 'initial-user', role: 'user', content: '它有哪几个部分?', timestamp: 100 },
@@ -551,6 +609,7 @@ describe('handleUserMessage queued replay', () => {
         content: 'follow up',
         timestamp: 300,
         isQueued: false,
+        isPending: false,
       },
     ])
     const lateQueuedEvent: UserMessageEvent = {
@@ -565,6 +624,71 @@ describe('handleUserMessage queued replay', () => {
     expect(next.state.session.messages[0]?.isQueued).toBe(false)
   })
 
+  it('promotes a mis-tagged optimistic follow-up into the queue without collapsing the live turn (#94)', () => {
+    const state: SessionState = {
+      session: {
+        ...makeState([]).session,
+        isProcessing: false,
+        processingStartedAt: 123,
+        lastMessageAt: 100,
+        lastMessageRole: 'assistant',
+        messages: [
+          { id: 'u1', role: 'user', content: 'current task', timestamp: 90 },
+          {
+            id: 'thought',
+            role: 'assistant',
+            content: '先读文档',
+            timestamp: 95,
+            isIntermediate: true,
+          },
+          {
+            id: 'live-tool',
+            role: 'tool',
+            content: '',
+            timestamp: 100,
+            toolUseId: 'tu-live',
+            toolName: 'Read',
+            toolStatus: 'executing',
+          },
+          {
+            id: 'optimistic-follow-up',
+            role: 'user',
+            content: 'follow up',
+            timestamp: 200,
+            isPending: true,
+            isQueued: false,
+          },
+        ],
+      } as any,
+      streaming: { content: 'still thinking', turnId: 'turn-active' },
+    }
+
+    const next = handleUserMessage(state, {
+      ...processingEvent(200),
+      status: 'queued',
+    })
+    const turns = groupMessagesByTurn(next.state.session.messages, { isSessionProcessing: true })
+    const followUp = next.state.session.messages.find(message => message.id === 'optimistic-follow-up')
+
+    expect(next.state).not.toBe(state)
+    expect(followUp).toMatchObject({
+      isQueued: true,
+      isPending: false,
+      queueId: 'backend-follow-up',
+    })
+    expect(followUp?.hidden).not.toBe(true)
+    expect(next.state.session.messages.find(message => message.id === 'thought')?.hidden).not.toBe(true)
+    expect(next.state.session.messages.find(message => message.id === 'live-tool')?.hidden).not.toBe(true)
+    expect(next.state.session.messages.find(message => message.id === 'live-tool')?.toolStatus).toBe('executing')
+    expect(next.state.streaming).toEqual(state.streaming)
+    expect(next.state.session.suppressedTurnIds).toBeUndefined()
+    expect(next.state.session.processingStartedAt).toBe(123)
+    expect(next.state.session.lastMessageAt).toBe(100)
+    expect(next.state.session.lastMessageRole).toBe('assistant')
+    expect(turns.map(turn => turn.type)).toEqual(['user', 'assistant'])
+    expect(turns.some(turn => turn.type === 'user' && turn.message.content === 'follow up')).toBe(false)
+  })
+
   it('keeps the active turn and streaming state intact when a message is queued', () => {
     const state: SessionState = {
       session: {
@@ -573,6 +697,18 @@ describe('handleUserMessage queued replay', () => {
         processingStartedAt: 123,
         lastMessageAt: 100,
         lastMessageRole: 'assistant',
+        messages: [
+          { id: 'u1', role: 'user', content: 'current task', timestamp: 90 },
+          {
+            id: 'live-answer',
+            role: 'assistant',
+            content: 'still streaming',
+            timestamp: 100,
+            isStreaming: true,
+            isPending: true,
+            turnId: 'turn-active',
+          },
+        ],
       },
       streaming: { content: 'still streaming', turnId: 'turn-active' },
     }
@@ -582,13 +718,24 @@ describe('handleUserMessage queued replay', () => {
     }
 
     const next = handleUserMessage(state, event)
+    const turns = groupMessagesByTurn(next.state.session.messages, { isSessionProcessing: true })
 
     expect(next.state.session.isProcessing).toBe(true)
     expect(next.state.session.processingStartedAt).toBe(123)
     expect(next.state.streaming).toEqual(state.streaming)
-    expect(next.state.session.messages[0]?.queueId).toBe('backend-follow-up')
+    expect(next.state.session.messages.find(message => message.content === 'follow up')).toMatchObject({
+      isQueued: true,
+      queueId: 'backend-follow-up',
+    })
     expect(next.state.session.lastMessageAt).toBe(100)
     expect(next.state.session.lastMessageRole).toBe('assistant')
+    expect(turns.map(turn => turn.type)).toEqual(['user', 'assistant'])
+    const assistantTurn = turns[1]
+    expect(assistantTurn?.type).toBe('assistant')
+    if (assistantTurn?.type === 'assistant') {
+      expect(assistantTurn.response?.isStreaming).toBe(true)
+      expect(assistantTurn.response?.text).toBe('still streaming')
+    }
   })
 
   it('applies canonical queue edits and ordering without touching formal messages', () => {

@@ -9,8 +9,9 @@ mock.module('../../config/preferences.ts', () => ({
   formatPreferencesForPrompt: () => '',
 }))
 
-import { getSystemPrompt, formatProjectContextForPrompt } from '../system'
+import { getSystemPrompt, getMiniAgentSystemPrompt, formatProjectContextForPrompt } from '../system'
 import type { ProjectPromptContext } from '../../projects/types.ts'
+import { getBundledOfficecliRouterSkillMd } from '../../utils/officecli.ts'
 
 const GIT_CONVENTIONS_HEADING = '## Git Conventions'
 const CO_AUTHOR_TRAILER = 'Co-Authored-By: Selection <agents-noreply@craft.do>'
@@ -76,6 +77,15 @@ describe('system prompt guidance', () => {
     expect(prompt).toContain('Name sources and skills as title + slug')
   })
 
+  it('uses configured sources directly and relies on automatic guide preparation', () => {
+    const prompt = getSystemPrompt(undefined, undefined, '/tmp/workspace', '/tmp/workspace')
+
+    expect(prompt).toContain('meaningful source guidelines are supplied automatically before execution')
+    expect(prompt).toContain('Do not read its `config.json` or `guide.md`')
+    expect(prompt).not.toContain('Usage guidelines (read before first use!)')
+    expect(prompt).not.toContain('read its `config.json` + `guide.md`, then use it')
+  })
+
   it('keeps Codex tool-naming guidance aligned with title + slug speech', () => {
     const prompt = getSystemPrompt(undefined, undefined, '/tmp/workspace', '/tmp/workspace', undefined, 'Codex')
 
@@ -88,18 +98,28 @@ describe('system prompt guidance', () => {
 
     expect(prompt).toContain('**officecli**')
     expect(prompt).toContain('Already on PATH')
-    expect(prompt).toContain('Specialized OfficeCLI guides are loaded privately')
+    expect(prompt).toContain('Discover Office work from `<available_skills>`')
+    expect(prompt).toContain('The `officecli` router appears in the catalog')
+    expect(prompt).toContain('specialized OfficeCLI format guides do not')
     expect(prompt).toContain('Do **not** Read `~/.agents/skills/officecli`')
-    expect(prompt).toContain('Hard rule')
+    expect(prompt).not.toContain('Hard rule')
     expect(prompt).not.toContain('typed OfficeCLI tools')
     expect(prompt).toContain('python-docx')
     expect(prompt).toContain('curl-install')
-    expect(prompt).toContain('Read the automatically gated `officecli` router first')
-    expect(prompt).toContain('run the exact `officecli load_skill` commands it selects')
+    expect(prompt).toContain('When you decide the user wants a Word / Excel / PowerPoint file')
+    expect(prompt).toContain('run only the `officecli load_skill` commands it selects')
+    expect(prompt).toContain("Decide from the user's request")
+    expect(prompt).toContain('named or attached Office files')
+    const router = getBundledOfficecliRouterSkillMd()
+    expect(router).toBeTruthy()
+    expect(prompt).toContain(router!)
+    expect(prompt).toContain('no user mention required')
+    expect(prompt).toContain('That mention takes priority')
+    expect(prompt).not.toContain('Office-file instructions are listed once under Document Tools')
+    expect(prompt).not.toContain('Read the automatically gated `officecli` router first')
     expect(prompt).not.toContain('officecli-xlsx/SKILL.md')
     expect(prompt).not.toContain('officecli-pptx/SKILL.md')
     expect(prompt).not.toContain('officecli load_skill word')
-    expect(prompt.match(/\*\*Hard rule:\*\*/g)).toHaveLength(1)
     expect(prompt).not.toContain('office_document_inspect')
     expect(prompt).not.toContain('office_document_edit')
     expect(prompt).not.toContain('office_document_guide')
@@ -110,6 +130,24 @@ describe('system prompt guidance', () => {
     expect(prompt).not.toContain('**pptx-tool**')
     expect(prompt).toContain('doc-diff old.md new.md')
     expect(prompt).toContain('Do not read an automatically generated `.docx.md`')
+  })
+
+  it('keeps internal math-formatting rules out of user-facing replies (#103)', () => {
+    const prompts = [
+      getSystemPrompt(undefined, undefined, '/tmp/workspace', '/tmp/workspace'),
+      getMiniAgentSystemPrompt('/tmp/workspace'),
+    ]
+
+    for (const prompt of prompts) {
+      const normalizedPrompt = prompt.toLowerCase()
+      expect(normalizedPrompt).toContain('present only user-relevant content')
+      expect(normalizedPrompt).toContain('silently normalize markdown and math formatting')
+      expect(normalizedPrompt).toMatch(/never (?:mention|discuss) delimiter choices/)
+      expect(normalizedPrompt).toContain('tool-output formatting')
+      expect(prompt).not.toContain('Do NOT use single-dollar delimiters')
+      expect(prompt).not.toContain('avoid single $...$ in prose')
+      expect(prompt).not.toContain('currency remains plain text')
+    }
   })
 })
 

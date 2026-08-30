@@ -51,9 +51,11 @@ describe('normalizeCustomEndpointModelEntry', () => {
 })
 
 describe('buildCustomEndpointModelDef', () => {
-  it('defaults custom endpoint models to text-only input', () => {
+  it('defaults custom endpoint models to text-only input and 128k/8k limits', () => {
     const model = buildCustomEndpointModelDef('my-model')
     expect(model.input).toEqual(['text'])
+    expect(model.contextWindow).toBe(131_072)
+    expect(model.maxTokens).toBe(8_192)
   })
 
   it('enables image input when the connection explicitly opts in', () => {
@@ -66,10 +68,29 @@ describe('buildCustomEndpointModelDef', () => {
     expect(model.input).toEqual(['text'])
   })
 
-  it('lets per-model overrides enable image input and custom context window', () => {
-    const model = buildCustomEndpointModelDef('vision-model', undefined, { supportsImages: true, contextWindow: 262_144 })
+  it('clamps maxTokens to the context window', () => {
+    const oversized = buildCustomEndpointModelDef('tiny-window', undefined, {
+      contextWindow: 4_096,
+      maxTokens: 65_536,
+    })
+    expect(oversized.contextWindow).toBe(4_096)
+    expect(oversized.maxTokens).toBe(4_096)
+
+    const implicitDefault = buildCustomEndpointModelDef('tiny-window', undefined, {
+      contextWindow: 4_096,
+    })
+    expect(implicitDefault.maxTokens).toBe(4_096)
+  })
+
+  it('lets per-model overrides enable image input and custom token limits', () => {
+    const model = buildCustomEndpointModelDef('vision-model', undefined, {
+      supportsImages: true,
+      contextWindow: 262_144,
+      maxTokens: 65_536,
+    })
     expect(model.input).toEqual(['text', 'image'])
     expect(model.contextWindow).toBe(262_144)
+    expect(model.maxTokens).toBe(65_536)
   })
 
   it('infers image input for well-known vision names when no flag is set', () => {
@@ -105,12 +126,13 @@ describe('findCustomEndpointModelEntry', () => {
     })
   })
 
-  it('preserves a stored catalog context window when the runtime ID is prefixed', () => {
+  it('preserves stored catalog token limits when the runtime ID is prefixed', () => {
     expect(findCustomEndpointModelEntry('custom-endpoint/DeepSeek-V4-Flash', [
-      { id: 'DeepSeek-V4-Flash', contextWindow: 262_144 },
+      { id: 'DeepSeek-V4-Flash', contextWindow: 262_144, maxTokens: 65_536 },
     ])).toEqual({
       id: 'DeepSeek-V4-Flash',
       contextWindow: 262_144,
+      maxTokens: 65_536,
     })
   })
 })

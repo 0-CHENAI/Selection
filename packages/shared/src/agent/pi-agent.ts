@@ -103,6 +103,7 @@ import {
   resolveOfficecliBinary,
   resolveOfficecliResourcesRoot,
 } from '../utils/officecli.ts';
+import { skillMutationFromToolEvent } from '../skills/storage.ts';
 
 // Session storage (plans folder path)
 import { getSessionDataPath, getSessionPath, getSessionPlansPath } from '../sessions/storage.ts';
@@ -338,6 +339,17 @@ export class PiAgent extends BaseAgent {
     displayName?: string;
     capturedAt: number;
   }> = new Map();
+  private readToolInputsByCallId = new Map<string, Record<string, unknown>>();
+  private pendingSourceGuidePreparations = new Map<string, {
+    sourceSlug: string;
+    filePath: string;
+    version: string;
+    assistantGeneration?: number;
+  }>();
+
+  // tool_result events do not carry input. Remember Write/Edit/Bash SKILL.md
+  // mutations from tool_start so a successful result can drop the skill cache.
+  private pendingSkillMutationByCallId = new Map<string, { filePath?: string; command?: string }>();
 
   // Current user message (for context in summarization)
   private currentUserMessage: string = '';
@@ -552,6 +564,8 @@ export class PiAgent extends BaseAgent {
         // Never inherit a session/user resource override. Official guides and
         // helper assets must come from the same trusted Selection package.
         CRAFT_OFFICECLI_RESOURCES: officecliResources ?? '',
+        // Selection owns its pinned runtime; upstream must never replace it.
+        OFFICECLI_SKIP_UPDATE: '1',
         CRAFT_BUN: nodePath,
         // Pass session dir for cross-process toolMetadataStore
         ...(sessionDir ? { CRAFT_SESSION_DIR: sessionDir } : {}),
@@ -995,8 +1009,52 @@ export class PiAgent extends BaseAgent {
           toolName: string;
           toolCallId?: string;
           input: Record<string, unknown>;
+          assistantGeneration?: number;
         });
         break;
+
+      case 'source_guide_prepared':
+      case 'source_guide_failed': {
+        const toolCallId = msg.toolCallId;
+        const sourceSlug = msg.sourceSlug;
+        const guidePath = msg.guidePath;
+        const guideVersion = msg.guideVersion;
+        const assistantGeneration = msg.assistantGeneration;
+        const pending = typeof toolCallId === 'string'
+          ? this.pendingSourceGuidePreparations.get(toolCallId)
+          : undefined;
+        if (
+          pending
+          && typeof toolCallId === 'string'
+          && typeof sourceSlug === 'string'
+          && typeof guidePath === 'string'
+          && typeof guideVersion === 'string'
+          && pending.sourceSlug === sourceSlug
+          && pending.filePath === guidePath
+          && pending.version === guideVersion
+          && pending.assistantGeneration === assistantGeneration
+        ) {
+          this.pendingSourceGuidePreparations.delete(toolCallId);
+          if (type === 'source_guide_failed') {
+            const reason = typeof msg.reason === 'string' && msg.reason.trim()
+              ? msg.reason.trim()
+              : 'The instructions could not be delivered to the model context.';
+            this.eventQueue.enqueue({
+              type: 'error',
+              message: `Source "${sourceSlug}" instructions could not be prepared: ${reason} The requested tool was not executed.`,
+            });
+          } else {
+            this.prerequisiteManager.markSourceGuidePrepared({
+              sourceSlug,
+              filePath: guidePath,
+              version: guideVersion,
+            }, pending.assistantGeneration);
+          }
+        } else {
+          this.debug(`Ignoring unknown or stale source guide preparation ${type}: ${String(toolCallId)}`);
+        }
+        break;
+      }
 
       case 'tool_execute_request':
         // Subprocess wants main process to execute a proxy tool (MCP/API/session)
@@ -1212,11 +1270,44 @@ export class PiAgent extends BaseAgent {
     for (const agentEvent of this.adapter.adaptEvent(adaptedEvent as any)) {
       // Track Read tool calls for prerequisite checking
       if (agentEvent.type === 'tool_start' && agentEvent.toolName === 'Read') {
-        this.prerequisiteManager.trackReadTool(agentEvent.input as Record<string, unknown>);
+        const readInput = agentEvent.input as Record<string, unknown>;
+        this.prerequisiteManager.trackReadTool(readInput);
+        this.readToolInputsByCallId.set(agentEvent.toolUseId, readInput);
+      }
+      if (agentEvent.type === 'tool_result') {
+        const readInput = this.readToolInputsByCallId.get(agentEvent.toolUseId);
+        if (readInput) {
+          this.readToolInputsByCallId.delete(agentEvent.toolUseId);
+          if (!agentEvent.isError) {
+            this.prerequisiteManager.trackSuccessfulSourceGuideRead(readInput);
+          }
+        }
       }
       // Reset prerequisite state on compaction (LLM loses guide content)
       if (agentEvent.type === 'info' && typeof agentEvent.message === 'string' && agentEvent.message.startsWith('Compacted')) {
         this.resetPrerequisiteState();
+      }
+
+      if (agentEvent.type === 'tool_start') {
+        const mutation = skillMutationFromToolEvent(
+          agentEvent.toolName,
+          agentEvent.input as Record<string, unknown> | undefined,
+        );
+        if (mutation) {
+          this.pendingSkillMutationByCallId.set(agentEvent.toolUseId, mutation);
+        }
+      }
+
+      if (agentEvent.type === 'tool_result') {
+        const pending = agentEvent.toolUseId
+          ? this.pendingSkillMutationByCallId.get(agentEvent.toolUseId)
+          : undefined;
+        if (pending) {
+          this.pendingSkillMutationByCallId.delete(agentEvent.toolUseId);
+          if (!agentEvent.isError) {
+            this.noteSkillMarkdownMutation(pending.filePath, pending.command);
+          }
+        }
       }
 
       // Fire PostToolUse / PostToolUseFailure hook events (fire-and-forget)
@@ -1306,8 +1397,9 @@ export class PiAgent extends BaseAgent {
     toolName: string;
     toolCallId?: string;
     input: Record<string, unknown>;
+    assistantGeneration?: number;
   }): Promise<void> {
-    const { requestId, toolName, toolCallId } = req;
+    const { requestId, toolName, toolCallId, assistantGeneration } = req;
     const input = recoverKnownToolInputFromIntent(toolName, req.input);
     const inputWasRecovered = input !== req.input;
     const debugSessionId = this.config.session?.id || this._sessionId;
@@ -1351,8 +1443,50 @@ export class PiAgent extends BaseAgent {
       hasSourceActivation: !!this.onSourceActivationRequest,
       permissionManager: this.permissionManager,
       prerequisiteManager: this.prerequisiteManager,
+      assistantGeneration,
       onDebug: (msg) => this.debug(`PreToolUse(sessionId=${sessionId}): ${msg}`),
     });
+
+    const prepareSourceGuide = (
+      result: Extract<PreToolUseCheckResult, { type: 'source_guide_required' }>,
+    ) => {
+      if (!toolCallId) {
+        this.send({
+          type: 'pre_tool_use_response',
+          requestId,
+          action: 'block',
+          reason: `Source "${result.sourceSlug}" instructions could not be prepared because the tool call has no identifier.`,
+        });
+        return;
+      }
+
+      // Preparation never emits a user-visible tool end, so its speculative
+      // display metadata must not remain in the real-tool event bridge.
+      this.preToolMetadataByCallId.delete(toolCallId);
+      this.debug(
+        `Preparing source guide for "${result.sourceSlug}" internally `
+          + `(generation=${assistantGeneration ?? 'unknown'}, sibling=${result.alreadyPreparedInGeneration})`,
+      );
+      this.pendingSourceGuidePreparations.set(toolCallId, {
+        sourceSlug: result.sourceSlug,
+        filePath: result.guidePath,
+        version: result.guideVersion,
+        assistantGeneration,
+      });
+      this.send({
+        type: 'pre_tool_use_response',
+        requestId,
+        action: 'prepare_source_guide',
+        sourceGuide: {
+          sourceSlug: result.sourceSlug,
+          guidePath: result.guidePath,
+          guideContent: result.guideContent,
+          guideVersion: result.guideVersion,
+          alreadyPreparedInGeneration: result.alreadyPreparedInGeneration,
+          ...(assistantGeneration !== undefined ? { assistantGeneration } : {}),
+        },
+      });
+    };
 
     const emitPreToolUse = async (toolInput: Record<string, unknown>) => {
       await this.emitAutomationEvent('PreToolUse', {
@@ -1408,6 +1542,56 @@ export class PiAgent extends BaseAgent {
       }
     };
 
+    const promptForTool = async (
+      result: Extract<PreToolUseCheckResult, { type: 'prompt' }>,
+    ): Promise<void> => {
+      if (!this.onPermissionRequest) {
+        // No permission handler — retain existing headless behavior.
+        await finishAllowedTool(result.modifiedInput ?? input, !!result.modifiedInput);
+        return;
+      }
+
+      const permRequestId = `pi-perm-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      this.debug(`PreToolUse(sessionId=${sessionId}): Prompting user for ${toolName} - ${result.description}`);
+
+      const permissionPromise = new Promise<boolean>((resolve) => {
+        this.pendingPermissions.set(permRequestId, {
+          resolve,
+          toolName,
+        });
+      });
+
+      this.emitAutomationEvent('PermissionRequest', {
+        hook_event_name: 'PermissionRequest',
+        tool_name: toolName,
+      });
+
+      this.onPermissionRequest({
+        requestId: permRequestId,
+        toolName,
+        command: result.command,
+        description: result.description,
+        type: result.promptType,
+        appName: result.appName,
+        reason: result.reason,
+        impact: result.impact,
+        requiresSystemPrompt: result.requiresSystemPrompt,
+        rememberForMinutes: result.rememberForMinutes,
+        commandHash: result.commandHash,
+        approvalTtlSeconds: result.approvalTtlSeconds,
+      });
+
+      const allowed = await permissionPromise;
+      this.pendingPermissions.delete(permRequestId);
+
+      if (!allowed) {
+        this.send({ type: 'pre_tool_use_response', requestId, action: 'block', reason: 'Permission denied by user.' });
+        return;
+      }
+
+      await finishAllowedTool(result.modifiedInput ?? input, !!result.modifiedInput);
+    };
+
     switch (checkResult.type) {
       case 'allow':
         await finishAllowedTool(input, inputWasRecovered);
@@ -1424,26 +1608,28 @@ export class PiAgent extends BaseAgent {
         return;
       }
 
+      case 'source_guide_required':
+        prepareSourceGuide(checkResult);
+        return;
+
       case 'source_activation_needed': {
-        const { sourceSlug, sourceExists } = checkResult;
-        this.debug(`PreToolUse(sessionId=${sessionId}): Source "${sourceSlug}" not active, attempting activation...`);
+        const { sourceSlug, sourceExists, additionalSourceSlugs } = checkResult;
+        const sourceSlugs = [sourceSlug, ...(additionalSourceSlugs ?? [])];
+        this.debug(`PreToolUse(sessionId=${sessionId}): Source "${sourceSlugs.join(', ')}" not active, attempting activation...`);
 
         if (this.onSourceActivationRequest) {
           try {
-            const activated = await this.onSourceActivationRequest(sourceSlug);
-            if (!activated) {
-              const reason = sourceExists
-                ? `Source "${sourceSlug}" is not active. Activate it by @mentioning it in your message or via the source icon at the bottom of the input field.`
-                : `Source "${sourceSlug}" is not available yet. It needs to be created and configured first.`;
-              this.send({ type: 'pre_tool_use_response', requestId, action: 'block', reason });
-              return;
+            for (const slug of sourceSlugs) {
+              const activated = await this.onSourceActivationRequest(slug);
+              if (!activated) {
+                const reason = sourceExists
+                  ? `Source "${slug}" is not active. Activate it by @mentioning it in your message or via the source icon at the bottom of the input field.`
+                  : `Source "${slug}" is not available yet. It needs to be created and configured first.`;
+                this.send({ type: 'pre_tool_use_response', requestId, action: 'block', reason });
+                return;
+              }
+              this.debug(`PreToolUse(sessionId=${sessionId}): Source "${slug}" activated successfully`);
             }
-            this.debug(`PreToolUse(sessionId=${sessionId}): Source "${sourceSlug}" activated successfully`);
-            this.eventQueue.enqueue({
-              type: 'source_activated' as const,
-              sourceSlug,
-              originalMessage: this.getCurrentTurnUserMessage() ?? '',
-            });
           } catch (err) {
             const reason = sourceExists
               ? `Source "${sourceSlug}" could not be activated: ${err}`
@@ -1469,16 +1655,44 @@ export class PiAgent extends BaseAgent {
           hasSourceActivation: !!this.onSourceActivationRequest,
           permissionManager: this.permissionManager,
           prerequisiteManager: this.prerequisiteManager,
+          assistantGeneration,
           onDebug: (msg) => this.debug(`PreToolUse(sessionId=${sessionId}): ${msg}`),
         });
 
-        if (postResult.type === 'block') {
+        if (postResult.type === 'source_activation_needed') {
+          this.send({
+            type: 'pre_tool_use_response',
+            requestId,
+            action: 'block',
+            reason: `Source "${postResult.sourceSlug}" is not active after activation; the requested tool was not executed.`,
+          });
+          return;
+        }
+
+        this.eventQueue.enqueue({
+          type: 'source_activated' as const,
+          sourceSlug,
+          originalMessage: this.getCurrentTurnUserMessage() ?? '',
+        });
+
+        if (postResult.type === 'source_guide_required') {
+          prepareSourceGuide(postResult);
+        } else if (postResult.type === 'block') {
           await emitPreToolUse(input);
           sendPermissionBlock(postResult.reason);
         } else if (postResult.type === 'modify') {
           await finishAllowedTool(postResult.input, true);
+        } else if (postResult.type === 'prompt') {
+          await promptForTool(postResult);
+        } else if (postResult.type === 'allow') {
+          await finishAllowedTool(input, inputWasRecovered);
         } else {
-          await finishAllowedTool(input, false);
+          this.send({
+            type: 'pre_tool_use_response',
+            requestId,
+            action: 'block',
+            reason: `Source "${sourceSlug}" could not be safely authorized after activation; the requested tool was not executed.`,
+          });
         }
         return;
       }
@@ -1490,55 +1704,9 @@ export class PiAgent extends BaseAgent {
         this.send({ type: 'pre_tool_use_response', requestId, action: 'allow' });
         return;
 
-      case 'prompt': {
-        if (!this.onPermissionRequest) {
-          // No permission handler — allow, then tighten via automations
-          await finishAllowedTool(checkResult.modifiedInput ?? input, !!checkResult.modifiedInput);
-          return;
-        }
-
-        const permRequestId = `pi-perm-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-        this.debug(`PreToolUse(sessionId=${sessionId}): Prompting user for ${toolName} - ${checkResult.description}`);
-
-        // Wait for user response via pendingPermissions
-        const permissionPromise = new Promise<boolean>((resolve) => {
-          this.pendingPermissions.set(permRequestId, {
-            resolve,
-            toolName,
-          });
-        });
-
-        this.emitAutomationEvent('PermissionRequest', {
-          hook_event_name: 'PermissionRequest',
-          tool_name: toolName,
-        });
-
-        this.onPermissionRequest({
-          requestId: permRequestId,
-          toolName,
-          command: checkResult.command,
-          description: checkResult.description,
-          type: checkResult.promptType,
-          appName: checkResult.appName,
-          reason: checkResult.reason,
-          impact: checkResult.impact,
-          requiresSystemPrompt: checkResult.requiresSystemPrompt,
-          rememberForMinutes: checkResult.rememberForMinutes,
-          commandHash: checkResult.commandHash,
-          approvalTtlSeconds: checkResult.approvalTtlSeconds,
-        });
-
-        const allowed = await permissionPromise;
-        this.pendingPermissions.delete(permRequestId);
-
-        if (!allowed) {
-          this.send({ type: 'pre_tool_use_response', requestId, action: 'block', reason: 'Permission denied by user.' });
-          return;
-        }
-
-        await finishAllowedTool(checkResult.modifiedInput ?? input, !!checkResult.modifiedInput);
+      case 'prompt':
+        await promptForTool(checkResult);
         return;
-      }
     }
   }
 
@@ -1554,13 +1722,15 @@ export class PiAgent extends BaseAgent {
     toolName: string;
     args: Record<string, unknown>;
   }): Promise<void> {
-    // Prerequisite check: block source tools until guide.md is read
+    // Defense in depth: source execution is never allowed to bypass preparation.
     const prereqResult = this.prerequisiteManager.checkPrerequisites(request.toolName);
     if (!prereqResult.allowed) {
+      const reason = prereqResult.blockReason
+        ?? `Source "${prereqResult.sourceGuide?.sourceSlug ?? request.toolName}" usage instructions were not prepared; the requested tool was not executed.`;
       this.send({
         type: 'tool_execute_response',
         requestId: request.requestId,
-        result: { content: prereqResult.blockReason!, isError: true },
+        result: { content: reason, isError: true },
       });
       return;
     }
@@ -1848,6 +2018,10 @@ export class PiAgent extends BaseAgent {
       return;
     }
 
+    // Manual compaction can complete without a forwarded compaction_end event.
+    // Its summary is a new model context, so all source guides must be replayed.
+    this.resetPrerequisiteState();
+
     const raw = msg.result as Record<string, unknown> | undefined;
     if (!raw) {
       pending.resolve(null);
@@ -1965,6 +2139,10 @@ export class PiAgent extends BaseAgent {
 
     // Drop any cached pre-tool metadata for the dead subprocess.
     this.preToolMetadataByCallId.clear();
+    this.pendingSkillMutationByCallId.clear();
+    // The replacement process has a fresh context and cannot acknowledge
+    // preparations or Read calls owned by its predecessor.
+    this.resetPrerequisiteState();
   }
 
   /**
@@ -2537,6 +2715,9 @@ export class PiAgent extends BaseAgent {
 
     // Clear bridge cache for this interrupted turn.
     this.preToolMetadataByCallId.clear();
+    this.pendingSkillMutationByCallId.clear();
+    this.pendingSourceGuidePreparations.clear();
+    this.readToolInputsByCallId.clear();
   }
 
   forceAbort(reason: AbortReason): void {
@@ -2562,6 +2743,9 @@ export class PiAgent extends BaseAgent {
 
     // Clear bridge cache for aborted turn.
     this.preToolMetadataByCallId.clear();
+    this.pendingSkillMutationByCallId.clear();
+    this.pendingSourceGuidePreparations.clear();
+    this.readToolInputsByCallId.clear();
 
     // For PlanSubmitted and AuthRequest, just interrupt the turn
     if (reason === AbortReason.PlanSubmitted || reason === AbortReason.AuthRequest) {
@@ -2617,6 +2801,12 @@ export class PiAgent extends BaseAgent {
     this.killSubprocess();
     super.clearHistory();
     this.debug('History cleared - next chat will start new subprocess');
+  }
+
+  override resetPrerequisiteState(): void {
+    super.resetPrerequisiteState();
+    this.pendingSourceGuidePreparations.clear();
+    this.readToolInputsByCallId.clear();
   }
 
   destroy(): void {
@@ -2707,6 +2897,9 @@ export class PiAgent extends BaseAgent {
     this.subprocessReadyResolve = null;
     this.callbackPort = 0;
     this.preToolMetadataByCallId.clear();
+    this.pendingSkillMutationByCallId.clear();
+    this.pendingSourceGuidePreparations.clear();
+    this.readToolInputsByCallId.clear();
     this.adapter.resetOverflowState();
 
     if (result) {
@@ -2741,6 +2934,9 @@ export class PiAgent extends BaseAgent {
     this.subprocessReadyResolve = null;
     this.callbackPort = 0;
     this.preToolMetadataByCallId.clear();
+    this.pendingSkillMutationByCallId.clear();
+    this.pendingSourceGuidePreparations.clear();
+    this.readToolInputsByCallId.clear();
 
     // Clear any in-flight overflow-recovery state so a stale fallback timer
     // doesn't fire on a torn-down adapter.

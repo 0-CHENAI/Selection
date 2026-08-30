@@ -30,7 +30,7 @@ export interface SkillsListPanelProps {
   /** Controlled open state for copy-from-workspace dialog (header button) */
   copyFromOpen?: boolean
   onCopyFromOpenChange?: (open: boolean) => void
-  onImportFromFile?: () => void
+  onImportFromFile?: React.MouseEventHandler<HTMLButtonElement>
 }
 
 export function SkillsListPanel({

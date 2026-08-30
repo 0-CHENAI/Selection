@@ -19,7 +19,7 @@ import {
   type BackendHostRuntimeContext,
   type PostInitResult,
 } from '@craft-agent/shared/agent/backend'
-import { getLlmConnection, getLlmConnections, getDefaultLlmConnection, getDefaultThinkingLevel, getSharedProjectMemoryEnabled, resetManagedAnthropicAuthEnvVars, resolveMidStreamBehavior, getPersistedUiLanguage, resolveTitleLanguageName } from '@craft-agent/shared/config'
+import { getLlmConnection, getLlmConnections, getDefaultLlmConnection, getDefaultThinkingLevel, getSharedProjectMemoryEnabled, resetManagedAnthropicAuthEnvVars, getPersistedUiLanguage, resolveTitleLanguageName } from '@craft-agent/shared/config'
 import type { MidStreamBehavior } from '@craft-agent/shared/config'
 import { PrivilegedExecutionBroker } from '@craft-agent/server-core/services'
 import { isValidWorkingDirectory } from '../utils/path-validation'
@@ -31,6 +31,7 @@ import {
   shouldQueueFirstTurnAiTitle,
   type PendingFirstTurnAiTitle,
 } from './first-turn-title'
+import { completionStopReason } from './completion-outcome.ts'
 import { i18n } from '@craft-agent/shared/i18n'
 import {
   getWorkspaces,
@@ -106,7 +107,7 @@ import { type Session, type SessionEvent, type FileAttachment, type SendMessageO
 import { applySteerTranscriptBoundary, messageToStored, storedToMessage, type Message, type StoredAttachment, type ToolDisplayMeta, type TokenUsage } from '@craft-agent/core/types'
 import { hasRenderableAssistantText, preferRicherAssistantText } from '@craft-agent/core'
 import { formatPathsToRelative, formatToolInputPaths, perf, encodeIconToDataUrlAsync, getEmojiIcon, resetSummarizationClient, resolveToolIcon, readFileAttachment, resolveRegenerateAttachments, selectSpreadMessages, normalizePath } from '@craft-agent/shared/utils'
-import { filterUserFacingSkills, loadAllSkills, loadSkillBySlug, invalidateSkillsCache, type LoadedSkill } from '@craft-agent/shared/skills'
+import { collectSkillSlugsForSourcePreEnable, filterUserFacingSkills, loadAllSkills, loadSkillBySlug, invalidateSkillsCache, type LoadedSkill } from '@craft-agent/shared/skills'
 import { invalidateContextFileCache } from '@craft-agent/shared/prompts/system'
 import { getToolIconsDir, getMiniModel } from '@craft-agent/shared/config'
 import { getDefaultSummarizationModel } from '@craft-agent/shared/config/models'
@@ -3471,16 +3472,7 @@ export class SessionManager implements ISessionManager {
             baseUrl: connection.baseUrl,
             piAuthProvider: connection.piAuthProvider,
             customEndpoint: connection.customEndpoint,
-            customModels: connection.models?.map((model) => (
-              typeof model === 'string'
-                ? toCustomEndpointModelPayload(model)
-                : toCustomEndpointModelPayload({
-                    id: model.id,
-                    name: model.name,
-                    contextWindow: model.contextWindow,
-                    supportsImages: model.supportsImages,
-                  })
-            )),
+            customModels: connection.models?.map(toCustomEndpointModelPayload),
           } : undefined,
         })
       } catch (error) {
@@ -3841,6 +3833,13 @@ export class SessionManager implements ISessionManager {
         }
 
         sessionLog.info(msg)
+      }
+
+      // File watchers can miss newly-created directories or atomic writes.
+      // Conversation tool writes therefore publish their freshly reloaded skill
+      // catalog directly, so the renderer never has to wait for the cache TTL.
+      managed.agent.onSkillsListChange = (skills) => {
+        this.broadcastSkillsChanged(managed.workspace.id, skills)
       }
 
       // Unified auth callback — replaces per-backend onChatGptAuthRequired/onGithubAuthRequired
@@ -6074,33 +6073,20 @@ export class SessionManager implements ISessionManager {
     // this process. One call appends; every later continuation observes it.
     if (acknowledgeExistingClientMessage()) return
 
-    // If currently processing, behavior depends on the connection's
-    // `midStreamBehavior` (resolved via {@link resolveMidStreamBehavior}):
-    //
-    // - 'steer': change direction now. Soft-abort the live query and replay
-    //   the follow-up as a new turn. Do not call `redirect()` (it waits for
-    //   the current tool, then lets the original answer finish) and do not
-    //   dispose the agent.
-    // - 'queue': hold the message; the current turn runs to completion;
-    //   replay afterwards. No abort.
+    // Composer submits while a turn is running always enqueue (#22, #23).
+    // Changing direction is sendQueuedMessageNow, not Enter.
     // Hidden system nudges never abort a live user turn.
     // Regenerating calls sendMessage with existingMessageId while
     // isProcessing is already true — that is a new turn, not mid-stream.
     if (managed.isProcessing && !existingMessageId) {
-      const connection = resolveSessionConnection(managed.llmConnection, undefined)
-      const behavior = options?.hidden
-        ? 'queue'
-        : (connection ? resolveMidStreamBehavior(connection) : 'steer')
-      const shouldInterrupt = behavior === 'steer'
       const agent = managed.agent
 
       sessionLog.info('mid-stream send', {
         sessionId,
-        behavior,
-        shouldInterrupt,
+        behavior: 'queue',
+        shouldInterrupt: false,
         queueLengthBefore: managed.messageQueue.length,
         backend: agent ? agent.constructor.name : 'none',
-        connectionSlug: connection?.slug,
       })
 
       // Create user message for UI
@@ -6112,9 +6098,9 @@ export class SessionManager implements ISessionManager {
         timestamp: this.monotonic(),
         attachments: storedAttachments,
         badges: options?.badges,
-        isQueued: !shouldInterrupt,
-        queuedSkillSlugs: shouldInterrupt ? undefined : options?.skillSlugs,
-        queuedContext: shouldInterrupt ? undefined : options?.queueContext,
+        isQueued: true,
+        queuedSkillSlugs: options?.skillSlugs,
+        queuedContext: options?.queueContext,
         // Hidden system-generated messages reach the model but never render as a
         // transcript bubble (e.g. background-task-completion nudge).
         ...(options?.hidden ? { hidden: true } : {}),
@@ -6125,24 +6111,18 @@ export class SessionManager implements ISessionManager {
         type: 'user_message',
         sessionId,
         message: userMessage,
-        status: shouldInterrupt ? 'accepted' : 'queued',
+        status: 'queued',
         optimisticMessageId: options?.optimisticMessageId
       }, managed.workspace.id)
 
       managed.messageQueue.push({ message, attachments, storedAttachments, options, messageId: userMessage.id, optimisticMessageId: options?.optimisticMessageId })
-      if (shouldInterrupt) {
-        managed.wasInterrupted = true
-        this.collapseOpenTurnBeforeSteer(managed, userMessage.id)
-        // Soft-abort so leftover tokens stop. Replay uses existingMessageId.
-        managed.stopRequested = true
-        agent?.forceAbort(AbortReason.Redirect)
-      }
 
       this.persistSession(managed)
-      // Force a synchronous flush so the user message is genuinely on disk
-      // before we tell the renderer "accepted" — `persistSession` only
-      // enqueues with a 500ms debounce. (#616 reliability fix.)
+      // Force a synchronous flush so the queued item is genuinely on disk
+      // before we ack the renderer — `persistSession` only enqueues with a
+      // 500ms debounce. (#616 reliability fix.)
       await this.flushSession(managed.id)
+      this.emitQueueChanged(managed)
       onAck?.(userMessage.id)
       return
     }
@@ -6311,62 +6291,74 @@ export class SessionManager implements ISessionManager {
     // This prevents the finally block from clobbering state when a follow-up message arrives.
     const myGeneration = managed.processingGeneration
 
-    // Pre-enable sources required by invoked skills (Issue #249)
-    // This eliminates the two-turn penalty where the agent discovers missing sources at runtime.
-    // Uses targeted loadSkillBySlug() instead of loadAllSkills() to avoid O(N) filesystem scans.
-    if (options?.skillSlugs?.length) {
-      try {
-        const workspaceRoot = managed.workspace.rootPath
+    // Pre-enable sources required by invoked, hard-loaded, or glob-matched skills (#249, #117).
+    try {
+      const workspaceRoot = managed.workspace.rootPath
+      const skills = loadAllSkills(workspaceRoot, managed.workingDirectory)
+      const skillSlugs = collectSkillSlugsForSourcePreEnable({
+        message,
+        attachments: [
+          ...(attachments ?? []),
+          ...(storedAttachments ?? []).map(item => ({
+            type: item.type,
+            name: item.name,
+            storedPath: item.storedPath,
+            mimeType: item.mimeType,
+          })),
+        ],
+        mentionedSlugs: options?.skillSlugs,
+        skills,
+      })
 
-        const requiredSources = new Set<string>()
-        for (const slug of options.skillSlugs) {
-          const skill = loadSkillBySlug(workspaceRoot, slug, managed.workingDirectory)
-          if (skill?.metadata.requiredSources) {
-            for (const src of skill.metadata.requiredSources) {
-              requiredSources.add(src)
-            }
+      const requiredSources = new Set<string>()
+      for (const slug of skillSlugs) {
+        const skill = skills.find(item => item.slug === slug)
+          ?? loadSkillBySlug(workspaceRoot, slug, managed.workingDirectory)
+        if (skill?.metadata.requiredSources) {
+          for (const src of skill.metadata.requiredSources) {
+            requiredSources.add(src)
           }
         }
-
-        if (requiredSources.size > 0) {
-          const currentSlugs = new Set(managed.enabledSourceSlugs || [])
-          const toEnable: string[] = []
-          const skipped: string[] = []
-          const candidateSlugs = Array.from(requiredSources)
-          const loadedSources = getSourcesBySlugs(workspaceRoot, candidateSlugs)
-          const usableSources = new Set(
-            loadedSources
-              .filter(isSourceUsable)
-              .map(source => source.config.slug)
-          )
-
-          for (const srcSlug of candidateSlugs) {
-            if (currentSlugs.has(srcSlug)) continue
-            if (usableSources.has(srcSlug)) {
-              toEnable.push(srcSlug)
-            } else {
-              skipped.push(srcSlug)
-            }
-          }
-
-          if (skipped.length > 0) {
-            sessionLog.warn(`Skill requires sources that are not usable (missing or unauthenticated): ${skipped.join(', ')}`)
-          }
-
-          if (toEnable.length > 0) {
-            managed.enabledSourceSlugs = [...(managed.enabledSourceSlugs || []), ...toEnable]
-            sessionLog.info(`Pre-enabled sources for skill invocation: ${toEnable.join(', ')}`)
-            this.persistSession(managed)
-            this.sendEvent({
-              type: 'sources_changed',
-              sessionId,
-              enabledSourceSlugs: managed.enabledSourceSlugs,
-            }, managed.workspace.id)
-          }
-        }
-      } catch (e) {
-        sessionLog.warn(`Failed to pre-enable skill sources for session ${sessionId}:`, e)
       }
+
+      if (requiredSources.size > 0) {
+        const currentSlugs = new Set(managed.enabledSourceSlugs || [])
+        const toEnable: string[] = []
+        const skipped: string[] = []
+        const candidateSlugs = Array.from(requiredSources)
+        const loadedSources = getSourcesBySlugs(workspaceRoot, candidateSlugs)
+        const usableSources = new Set(
+          loadedSources
+            .filter(isSourceUsable)
+            .map(source => source.config.slug)
+        )
+
+        for (const srcSlug of candidateSlugs) {
+          if (currentSlugs.has(srcSlug)) continue
+          if (usableSources.has(srcSlug)) {
+            toEnable.push(srcSlug)
+          } else {
+            skipped.push(srcSlug)
+          }
+        }
+
+        if (skipped.length > 0) {
+          sessionLog.warn(`Skill requires sources that are not usable (missing or unauthenticated): ${skipped.join(', ')}`)
+        }
+
+        if (toEnable.length > 0) {
+          managed.enabledSourceSlugs = [...(managed.enabledSourceSlugs || []), ...toEnable]
+          sessionLog.info(`Pre-enabled sources for skill invocation: ${toEnable.join(', ')}`)
+          this.persistSession(managed)
+          this.sendEvent({
+            type: 'sources_changed',
+            sessionId,
+            enabledSourceSlugs: managed.enabledSourceSlugs,
+          }, managed.workspace.id)
+        }
+      }
+    } catch (e) {
+      sessionLog.warn(`Failed to pre-enable skill sources for session ${sessionId}:`, e)
     }
 
     // Start perf span for entire sendMessage flow
@@ -6665,9 +6657,10 @@ export class SessionManager implements ISessionManager {
             }
           }
 
-          sendSpan.mark('chat.complete')
+          const stopReason = completionStopReason(managed.messages)
+          sendSpan.mark(stopReason === 'error' ? 'chat.complete.terminal_error' : 'chat.complete')
           sendSpan.end()
-          await this.onProcessingStopped(sessionId, 'complete')
+          await this.onProcessingStopped(sessionId, stopReason)
           return  // Exit function, skip finally block (onProcessingStopped handles cleanup)
         }
 
@@ -6791,7 +6784,7 @@ export class SessionManager implements ISessionManager {
       )
       const options = managed.lastSentOptions
 
-      const originalMessages = managed.messages
+      const originalMessages = [...managed.messages]
       const previousAssistant = originalMessages
         .slice(0, lastUserIdx)
         .findLast(message => message.role === 'assistant' && !message.isIntermediate && !message.hidden)
@@ -6817,7 +6810,6 @@ export class SessionManager implements ISessionManager {
         originalBranchFromSdkTurnId: managed.branchFromSdkTurnId,
       }
 
-      managed.messages = originalMessages.slice(0, lastUserIdx + 1)
       this.persistSession(managed)
       await this.flushSession(managed.id)
       if (managed.stopRequested || !managed.isProcessing) {
@@ -6921,6 +6913,10 @@ export class SessionManager implements ISessionManager {
     const transaction = managed.regenerateTransaction
     if (!transaction || transaction.rendererTruncated) return
     transaction.rendererTruncated = true
+    const keepIdx = managed.messages.findIndex(message => message.id === transaction.keepThroughMessageId)
+    if (keepIdx >= 0) {
+      managed.messages = managed.messages.slice(0, keepIdx + 1)
+    }
     this.sendEvent({
       type: 'messages_truncated',
       sessionId: managed.id,
@@ -7315,7 +7311,9 @@ export class SessionManager implements ISessionManager {
     if (!transaction) return { reason, rolledBack: false }
 
     const keepIdx = managed.messages.findIndex(message => message.id === transaction.keepThroughMessageId)
-    const replacementMessages = keepIdx >= 0 ? managed.messages.slice(keepIdx + 1) : []
+    const originalIds = new Set(transaction.originalMessages.map(message => message.id))
+    const replacementMessages = (keepIdx >= 0 ? managed.messages.slice(keepIdx + 1) : [])
+      .filter(message => !originalIds.has(message.id))
     const hasNonEmptyFinalResponse = replacementMessages.some(message =>
       message.role === 'assistant'
       && !message.isIntermediate
@@ -7342,9 +7340,8 @@ export class SessionManager implements ISessionManager {
 
     await this.disposeManagedAgentRuntime(managed, 'regenerate rollback')
 
-    const originalIds = new Set(transaction.originalMessages.map(message => message.id))
     const diagnostics = replacementMessages.filter(message =>
-      (message.role === 'error' || message.role === 'info') && !originalIds.has(message.id)
+      message.role === 'error' || message.role === 'info'
     )
     managed.messages = [...transaction.originalMessages, ...diagnostics]
     managed.streamingText = ''

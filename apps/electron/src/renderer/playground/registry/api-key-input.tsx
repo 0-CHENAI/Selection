@@ -71,6 +71,22 @@ export const apiKeyInputComponents: ComponentEntry[] = [
         },
       },
       {
+        name: 'Custom limits (auto + edited)',
+        description: 'Shows per-model context/output cards with default and saved overrides',
+        props: {
+          providerType: 'pi_api_key',
+          initialValues: {
+            activePreset: 'custom',
+            baseUrl: 'https://order.ai.jxepdi.top/v1',
+            connectionDefaultModel: 'Laufry, Opus, MO',
+            customApi: 'openai-completions',
+            modelContextWindows: { Laufry: 1_000_448, Opus: 1_536 * 1_024 },
+            modelMaxTokens: { Laufry: 128 * 1_024, Opus: 128 * 1_024, MO: 128 * 1_024 },
+            modelImageCaps: { Laufry: true, Opus: true, MO: true },
+          },
+        },
+      },
+      {
         name: 'Ollama Local (OpenAI)',
         description: 'Local Ollama endpoint — OpenAI compatible',
         props: {
@@ -135,6 +151,9 @@ export const apiKeyInputComponents: ComponentEntry[] = [
         },
       },
     ],
+    wrapper: ({ children }) => (
+      <div className="h-full w-full overflow-auto bg-foreground-2 p-6">{children}</div>
+    ),
     mockData: () => ({
       onSubmit: logSubmit,
       providerType: 'pi_api_key',

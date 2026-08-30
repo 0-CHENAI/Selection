@@ -646,12 +646,16 @@ function getPreviewText(
   }
 
   // When complete, show summary (badge already shows count)
-  if (turnPhase === 'complete' || turnPhase === 'awaiting') {
+  if (turnPhase === 'complete') {
     const errorSuffix = errorCount > 0
       ? i18n.t('turnCard.errorCount', { count: errorCount })
       : ''
     return `${i18n.t('turnCard.stepsCompleted')}${errorSuffix}`
   }
+
+  // An open turn may contain commentary before it has a semantic tool intent.
+  // Keep the header accurate without duplicating that commentary (#141).
+  if (turnPhase === 'awaiting') return i18n.t('turnCard.processing')
 
   return i18n.t('turnCard.starting')
 }

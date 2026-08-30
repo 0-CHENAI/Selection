@@ -48,6 +48,58 @@ interface StoppedPromptCandidate {
  * continuation. In that case we intentionally return nothing instead of
  * skipping backward and restoring an older, already-submitted user prompt.
  */
+interface LiveGenerationCandidate {
+  role?: string
+  hidden?: boolean
+  isStreaming?: boolean
+  isPending?: boolean
+  isIntermediate?: boolean
+  content?: unknown
+  toolStatus?: string
+  isBackground?: boolean
+  taskId?: string
+}
+
+const IN_FLIGHT_TOOL_STATUSES = new Set(['pending', 'executing'])
+
+/**
+ * True while a visible turn is still generating. Composer submits in this
+ * state belong in the queue, not the transcript (#22, #23).
+ *
+ * `isProcessing` can be stale false while a thought/work chain is still
+ * in flight. Streaming/pending assistant rows, status pills, and executing
+ * tools must also keep follow-ups in the composer queue.
+ *
+ * Settled `isIntermediate` rows are history, not live work. After Stop they
+ * stay in the transcript; treating them as live makes the next "继续"
+ * look like a mid-stream steer and hides the already-generated body (#101).
+ */
+export function sessionHasLiveGeneration(
+  session: {
+    isProcessing?: boolean
+    currentStatus?: { message?: string } | null
+    messages?: readonly LiveGenerationCandidate[]
+  } | null | undefined,
+): boolean {
+  if (!session) return false
+  if (session.isProcessing) return true
+  if (session.currentStatus?.message) return true
+  return (session.messages ?? []).some(isLiveGenerationMessage)
+}
+
+function isLiveGenerationMessage(message: LiveGenerationCandidate): boolean {
+  if (message.hidden) return false
+  if (message.role === 'status') return true
+  if (message.role === 'assistant' && (message.isStreaming || message.isPending)) {
+    return true
+  }
+  // Work-chain-only: tools can run after commentary is finalized and before
+  // the next assistant token. Genuine background tasks outlive the turn.
+  return message.role === 'tool'
+    && IN_FLIGHT_TOOL_STATUSES.has(message.toolStatus ?? '')
+    && !(message.isBackground && message.taskId)
+}
+
 export function getRestorableStoppedPrompt(messages: readonly StoppedPromptCandidate[]): string {
   const latestUserMessage = messages.findLast(message =>
     message.role === 'user' && !message.isQueued

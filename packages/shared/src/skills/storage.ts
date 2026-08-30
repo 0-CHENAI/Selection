@@ -111,9 +111,9 @@ function normalizeRequiredSources(value: unknown): string[] | undefined {
 function parseSkillFile(content: string): { metadata: SkillMetadata; body: string } | null {
   try {
     const parsed = matter(content);
-
-    // Validate required fields
-    if (!parsed.data.name || !parsed.data.description) {
+    const name = coerceSkillName(parsed.data.name);
+    const description = coerceSkillDescription(parsed.data.description);
+    if (!name || !description) {
       return null;
     }
 
@@ -123,9 +123,9 @@ function parseSkillFile(content: string): { metadata: SkillMetadata; body: strin
 
     return {
       metadata: {
-        name: parsed.data.name as string,
-        description: parsed.data.description as string,
-        globs: parsed.data.globs as string[] | undefined,
+        name,
+        description,
+        globs: coerceSkillGlobs(parsed.data.globs),
         alwaysAllow: parsed.data.alwaysAllow as string[] | undefined,
         icon,
         requiredSources: normalizeRequiredSources(parsed.data.requiredSources),
@@ -247,15 +247,82 @@ export function loadWorkspaceSkills(workspaceRoot: string): LoadedSkill[] {
 
 // ── Skills cache ────────────────────────────────────────────────────────
 // loadAllSkills reads from up to 5 directories on every call (~100ms).
-// The result rarely changes during a session, so we cache it per
-// (workspaceRoot, projectRoot) pair with a 5-minute safety TTL.
+// Cache per (workspaceRoot, projectRoot) with a short safety TTL. Skill
+// writes must call invalidateSkillsCache() so the next turn (or the rest
+// of this turn) sees the new SKILL.md without waiting out the TTL.
 
 const skillsCache = new Map<string, { skills: LoadedSkill[]; ts: number }>();
-const SKILLS_CACHE_TTL = 5 * 60_000; // 5 minutes
+const SKILLS_CACHE_TTL = 10_000;
+const SKILL_MARKDOWN_PATH_RE = /(?:^|[\\/])SKILL\.md$/i;
 
 /** Invalidate the skills cache (call on working dir change or skill file events). */
 export function invalidateSkillsCache(): void {
   skillsCache.clear();
+}
+
+export function isSkillMarkdownPath(filePath: string): boolean {
+  return SKILL_MARKDOWN_PATH_RE.test(filePath.replace(/\\/g, '/'));
+}
+
+/** True when a Write/Edit path or Bash command touched a SKILL.md. */
+export function shouldInvalidateSkillsCacheForTool(input: {
+  filePath?: string;
+  command?: string;
+}): boolean {
+  if (input.filePath && isSkillMarkdownPath(input.filePath)) return true;
+  return typeof input.command === 'string' && SKILL_MARKDOWN_PATH_RE.test(input.command);
+}
+
+/** Drop the list cache when a tool writes or edits SKILL.md. */
+export function invalidateSkillsCacheIfSkillMarkdown(input: {
+  filePath?: string;
+  command?: string;
+}): boolean {
+  if (!shouldInvalidateSkillsCacheForTool(input)) return false;
+  invalidateSkillsCache();
+  return true;
+}
+
+/** tool_result events omit input — capture this from tool_start instead. */
+export function skillMutationFromToolEvent(
+  toolName: string,
+  input: Record<string, unknown> | undefined,
+): { filePath?: string; command?: string } | null {
+  if (!input) return null;
+  if (toolName === 'Write' || toolName === 'Edit' || toolName === 'MultiEdit') {
+    const filePath = (typeof input.file_path === 'string' && input.file_path)
+      || (typeof input.path === 'string' && input.path)
+      || undefined;
+    return filePath && isSkillMarkdownPath(filePath) ? { filePath } : null;
+  }
+  if (toolName === 'Bash' && typeof input.command === 'string') {
+    return SKILL_MARKDOWN_PATH_RE.test(input.command) ? { command: input.command } : null;
+  }
+  return null;
+}
+
+export function coerceSkillName(value: unknown): string {
+  return typeof value === 'string' ? value.trim() : '';
+}
+
+export function coerceSkillDescription(value: unknown): string {
+  if (typeof value === 'string') return value.trim();
+  if (!Array.isArray(value)) return '';
+  return value
+    .filter((item): item is string => typeof item === 'string')
+    .join(' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+export function coerceSkillGlobs(value: unknown): string[] | undefined {
+  const asArray = typeof value === 'string' ? [value] : Array.isArray(value) ? value : undefined;
+  if (!asArray) return undefined;
+  const globs = asArray
+    .filter((item): item is string => typeof item === 'string')
+    .map(item => item.trim())
+    .filter(Boolean);
+  return globs.length > 0 ? globs : undefined;
 }
 
 /**
@@ -264,7 +331,8 @@ export function invalidateSkillsCache(): void {
  * Priority: global < bundled < workspace < project
  *
  * Results are cached per (workspaceRoot, projectRoot) pair. Call
- * invalidateSkillsCache() on working directory changes or skill file events.
+ * invalidateSkillsCache() on working directory changes or skill file events
+ * so a conversation-created skill is visible on the next load.
  *
  * @param workspaceRoot - Absolute path to workspace root
  * @param projectRoot - Optional project root (working directory) for project-level skills
@@ -383,6 +451,7 @@ export function deleteSkill(workspaceRoot: string, slug: string): boolean {
   try {
     rmSync(skillDir, { recursive: true });
     clearDisplayTitle(workspaceRoot, 'skills', slug);
+    invalidateSkillsCache();
     return true;
   } catch {
     return false;

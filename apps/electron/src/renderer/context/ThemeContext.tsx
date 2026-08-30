@@ -10,7 +10,8 @@ import {
   type ThemeFile,
   type ShikiThemeConfig,
 } from '@config/theme'
-import { isMac } from '@/lib/platform'
+import { isMac, isWebUI } from '@/lib/platform'
+import { shouldUseVibrancyOverlay } from './theme-chrome'
 
 export type ThemeMode = 'light' | 'dark' | 'system'
 export type FontFamily = 'inter' | 'system'
@@ -308,8 +309,13 @@ export function ThemeProvider({
       delete root.dataset.theme
     }
 
-    // Always set theme override for semi-transparent background (vibrancy effect)
-    root.dataset.themeOverride = 'true'
+    // macOS vibrancy needs a semi-transparent wash. Windows 10 has no light
+    // Acrylic, so the same overlay turns the sidebar and top bar gray (#53).
+    if (shouldUseVibrancyOverlay(isMac, isWebUI)) {
+      root.dataset.themeOverride = 'true'
+    } else {
+      delete root.dataset.themeOverride
+    }
   }, [effectiveColorTheme, font])
 
   // Apply dark/light class and theme-specific DOM attributes

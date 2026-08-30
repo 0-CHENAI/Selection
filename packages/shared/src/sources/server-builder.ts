@@ -135,7 +135,14 @@ export class SourceServerBuilder {
     }
 
     // 3. Auth token (highest priority — OAuth/bearer overrides everything)
-    if (mcp.authType !== 'none') {
+    // headerNames uses a structured credential whose values were already merged
+    // above. Do not also serialize that JSON credential as a Bearer token.
+    if (mcp.headerNames?.length) {
+      if (source.config.isAuthenticated && (!credential || !isMultiHeaderCredential(credential))) {
+        debug(`[SourceServerBuilder] Source ${source.config.slug} needs header re-authentication`);
+        return null;
+      }
+    } else if (mcp.authType !== 'none') {
       if (token) {
         mergedHeaders = { ...mergedHeaders, Authorization: `Bearer ${token}` };
       } else if (source.config.isAuthenticated) {
@@ -269,9 +276,8 @@ export class SourceServerBuilder {
     const config: ApiConfig = {
       name: source.config.slug,
       baseUrl: api.baseUrl,
-      // documentation is no longer inlined into the tool description (see #683
-      // and api-tools.ts:buildToolDescription). The model reads guide.md via
-      // the prerequisite-manager-enforced Read instead.
+      // Documentation stays out of the per-request tool description (#683).
+      // Meaningful source guides are delivered to the model lazily instead.
       defaultHeaders: api.defaultHeaders,
     };
 

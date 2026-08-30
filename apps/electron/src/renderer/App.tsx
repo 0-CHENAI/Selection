@@ -29,9 +29,10 @@ import { NavigationProvider } from '@/contexts/NavigationContext'
 import { navigate, routes } from './lib/navigate'
 import { attachmentFromContentRef, toDraftRef } from './lib/drafts'
 import { stripMarkdown } from './utils/text'
-import { coerceInputText } from './lib/input-text'
+import { coerceInputText, sessionHasLiveGeneration } from './lib/input-text'
 import { getSessionsToRefreshAfterStaleReconnect } from './lib/reconnect-recovery'
 import { formatSessionLoadFailure, shouldTreatSessionLoadFailureAsTransportFallback } from './lib/session-load'
+import { createSessionWithConfirmedProject } from './lib/create-session-with-project'
 import { extractWorkspaceSlugFromPath } from '@craft-agent/shared/utils/workspace-slug'
 import { DEFAULT_THINKING_LEVEL } from '@craft-agent/shared/agent/thinking-levels'
 import { initRendererPerf } from './lib/perf'
@@ -1170,7 +1171,15 @@ export default function App() {
   }, [])
 
   const handleCreateSession = useCallback(async (workspaceId: string, options?: import('../shared/types').CreateSessionOptions): Promise<Session> => {
-    const session = await window.electronAPI.createSession(workspaceId, options)
+    const session = await createSessionWithConfirmedProject(
+      (id, createOptions) => window.electronAPI.createSession(id, createOptions),
+      (sessionId, projectId) => window.electronAPI.sessionCommand(sessionId, {
+        type: 'setProjectId',
+        projectId,
+      }),
+      workspaceId,
+      options,
+    )
     // Add to per-session atom and metadata map (no sessionsAtom)
     addSession(session)
     syncSessionOptionsFromSession(session)
@@ -1274,11 +1283,10 @@ export default function App() {
 
   const handleSendMessage = useCallback(async (sessionId: string, message: string, attachments?: FileAttachment[], skillSlugs?: string[], externalBadges?: ContentBadge[]) => {
     try {
-      // Capture pre-send processing state so we can flag mid-stream sends
-      // for the queued badge (#616 follow-up — covers Pi steer path which
-      // returns status 'accepted', not 'queued').
+      // Capture live generation so composer submits stay in the queue
+      // instead of looking like a new transcript turn (#22, #23).
       const sessionSnapshot = store.get(sessionAtomFamily(sessionId))
-      const sendingMidStream = sessionSnapshot?.isProcessing === true
+      const sendingMidStream = sessionHasLiveGeneration(sessionSnapshot)
       const optionSnapshot = sessionOptions.get(sessionId)
 
       // Step 1: Store attachments and get persistent metadata

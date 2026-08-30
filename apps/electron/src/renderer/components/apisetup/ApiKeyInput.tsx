@@ -16,6 +16,14 @@ import { Command as CommandPrimitive } from "cmdk"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
+import { Switch } from "@/components/ui/switch"
+import {
   DropdownMenu,
   DropdownMenuTrigger,
   StyledDropdownMenuContent,
@@ -25,6 +33,7 @@ import { cn } from "@/lib/utils"
 import { Check, ChevronDown, Eye, EyeOff, Loader2 } from "lucide-react"
 import { pickTierDefaults, resolveTierModels, type PiModelInfo } from "./tier-models"
 import {
+  buildCustomEndpointModelSubmission,
   resolveCustomEndpointPayload,
   resolvePiAuthProviderForSubmit,
   resolvePresetStateForBaseUrlChange,
@@ -32,14 +41,37 @@ import {
 } from "./submit-helpers"
 import { RemoteModelsPicker } from "./RemoteModelsPicker"
 import {
+  buildModelLimitOptions,
+  DEFAULT_MODEL_CONTEXT_WINDOW_PRESET,
+  DEFAULT_MODEL_MAX_OUTPUT_PRESET,
   fetchOpenAiCompatibleModels,
+  findRemoteModel,
+  lookupRecordByModelId,
+  MODEL_CONTEXT_WINDOW_PRESETS,
+  MODEL_MAX_OUTPUT_PRESETS,
   parseSelectedModels,
+  persistCustomContextWindow,
+  persistCustomMaxTokens,
+  isValidModelLimitCombination,
+  resolveCatalogOrOverrideLimit,
+  resolveModelLimitSource,
+  resolveModelLimitsStatus,
+  resolveMaxTokensForContext,
   resolveRemoteModelSupportsImages,
+  setHasModelId,
   toggleSelectedModel,
+  type ModelLimitSource,
+  type ModelLimitPreset,
   type RemoteModel,
 } from "./fetch-openai-models.ts"
+import { formatModelTokenLimit } from '@/components/app-shell/input/model-picker-helpers'
 
-import type { CustomEndpointApi, CustomEndpointConfig } from '@config/llm-connections'
+import {
+  DEFAULT_CUSTOM_CONTEXT_WINDOW,
+  DEFAULT_CUSTOM_MAX_TOKENS,
+  type CustomEndpointApi,
+  type CustomEndpointConfig,
+} from '@config/llm-connections'
 
 export type ApiKeyStatus = 'idle' | 'validating' | 'success' | 'error'
 
@@ -51,6 +83,7 @@ export type SubmittedConnectionModel = string | {
   shortName?: string
   supportsImages?: boolean
   contextWindow?: number
+  maxTokens?: number
 }
 
 export interface ApiKeySubmitData {
@@ -98,6 +131,7 @@ export interface ApiKeyInputProps {
     models?: string[]
     modelImageCaps?: Record<string, boolean>
     modelContextWindows?: Record<string, number>
+    modelMaxTokens?: Record<string, number>
     /** Pre-fill the protocol toggle for custom endpoints */
     customApi?: CustomEndpointApi
   }
@@ -168,6 +202,7 @@ const GOOGLE_PRESETS: Preset[] = [
 
 /** Presets that require the Pi SDK for authentication — hidden in Anthropic API Key mode */
 const PI_ONLY_PRESET_KEYS: ReadonlySet<string> = new Set(['minimax-global', 'minimax-cn'])
+const DEFAULT_ENDPOINT_PROVIDERS: ReadonlySet<string> = new Set(['anthropic', 'openai', 'pi', 'google'])
 
 const COMPAT_ANTHROPIC_DEFAULTS = 'claude-opus-4-8, claude-opus-4-7, claude-sonnet-4-6, claude-haiku-4-5'
 const COMPAT_OPENAI_DEFAULTS = 'openai/gpt-5.2-codex, openai/gpt-5.1-codex-mini'
@@ -198,6 +233,88 @@ function getPresetForUrl(url: string, presets: Preset[]): PresetKey {
 
 function parseModelList(value: string): string[] {
   return parseSelectedModels(value)
+}
+
+function ModelLimitSourceChip({ source }: { source: ModelLimitSource }) {
+  const { t } = useTranslation()
+  return (
+    <span
+      className={cn(
+        'inline-flex h-4 items-center rounded-full px-1.5 text-[10px] font-medium',
+        source === 'catalog' && 'bg-success/12 text-success',
+        source === 'manual' && 'bg-foreground/10 text-foreground/75',
+        source === 'default' && 'bg-foreground/5 text-foreground/40',
+      )}
+    >
+      {t(`apiSetup.modelLimitSource.${source}`)}
+    </span>
+  )
+}
+
+function ModelLimitSelect({
+  id,
+  label,
+  value,
+  source,
+  presets,
+  upperExclusive,
+  invalid,
+  disabled,
+  onChange,
+}: {
+  id: string
+  label: string
+  value: number
+  source: ModelLimitSource
+  presets: readonly ModelLimitPreset[]
+  upperExclusive?: number
+  invalid?: boolean
+  disabled?: boolean
+  onChange: (next: number) => void
+}) {
+  const { t } = useTranslation()
+  const options = buildModelLimitOptions(presets, value, upperExclusive)
+  return (
+    <div className="space-y-1.5">
+      <Label htmlFor={id} className="flex items-center gap-1.5 text-muted-foreground font-normal text-xs">
+        <span>{label}</span>
+        <span className="tabular-nums text-foreground/50">{formatModelTokenLimit(value)}</span>
+        <ModelLimitSourceChip source={source} />
+      </Label>
+      <Select
+        value={String(value)}
+        onValueChange={(next) => onChange(Number(next))}
+        disabled={disabled}
+      >
+        <SelectTrigger
+          id={id}
+          aria-invalid={invalid || undefined}
+          className={cn(
+            'border-0 bg-background/80 shadow-minimal tabular-nums',
+            invalid && 'ring-1 ring-destructive/50',
+          )}
+        >
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent className="z-floating-menu pointer-events-auto">
+          {options.map((option) => (
+            <SelectItem
+              key={option.value}
+              value={String(option.value)}
+              disabled={option.readOnly}
+            >
+              {option.readOnly
+                ? t('apiSetup.modelLimitCurrentValue', {
+                    label: option.label,
+                    value: option.value.toLocaleString(),
+                  })
+                : option.label}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+    </div>
+  )
 }
 
 // ============================================================
@@ -258,19 +375,32 @@ export function ApiKeyInput({
   const [remoteModels, setRemoteModels] = useState<RemoteModel[]>([])
   const [remoteModelsLoading, setRemoteModelsLoading] = useState(false)
   const [remoteModelsError, setRemoteModelsError] = useState<string | null>(null)
+  const [remoteModelsFailed, setRemoteModelsFailed] = useState(false)
   const [remoteModelsNonce, setRemoteModelsNonce] = useState(0)
   const remoteModelsAbortRef = useRef<AbortController | null>(null)
   const [modelImageCaps, setModelImageCaps] = useState<Record<string, boolean>>(
     () => ({ ...initialValues?.modelImageCaps }),
   )
+  const [modelContextWindows, setModelContextWindows] = useState<Record<string, number>>(
+    () => ({ ...initialValues?.modelContextWindows }),
+  )
+  const [modelMaxTokens, setModelMaxTokens] = useState<Record<string, number>>(
+    () => ({ ...initialValues?.modelMaxTokens }),
+  )
+  const [editedContextIds, setEditedContextIds] = useState<Set<string>>(() => new Set())
+  const [editedMaxTokenIds, setEditedMaxTokenIds] = useState<Set<string>>(() => new Set())
+  const [limitError, setLimitError] = useState<string | null>(null)
+  const [limitNotice, setLimitNotice] = useState<string | null>(null)
 
   const isDisabled = disabled || status === 'validating'
 
   const isPiApiKeyFlow = providerType === 'pi_api_key'
   const isOrderPreset = activePreset === 'order-openai'
+  const isCustomEndpointForm = (
+    activePreset === 'custom' || OPENAI_COMPAT_CUSTOM_URL_PRESETS.has(activePreset)
+  ) && !!baseUrl.trim()
   const isBedrock = activePreset === 'amazon-bedrock'
   // Hide endpoint/model fields for providers with well-known endpoints handled by the SDK
-  const DEFAULT_ENDPOINT_PROVIDERS = new Set(['anthropic', 'openai', 'pi', 'google'])
   const isDefaultProviderPreset = DEFAULT_ENDPOINT_PROVIDERS.has(activePreset)
 
   // Provider-specific placeholders from the active preset
@@ -327,17 +457,19 @@ export function ApiKeyInput({
     } finally {
       setPiModelsLoading(false)
     }
-  }, [isPiApiKeyFlow])
+  }, [initialPreset, initialValues?.models, isPiApiKeyFlow])
 
   useEffect(() => {
     loadPiModels(activePreset)
   }, [activePreset, loadPiModels])
 
-  // ORDER: after the user pastes a key, list models from GET /v1/models.
+  // Custom OpenAI-compatible endpoints: read /v1/models after the user pastes a key.
+  // ORDER uses the catalog for the picker; custom/Manifest use it to prefill limits.
   useEffect(() => {
-    if (!isOrderPreset) {
+    if (!isCustomEndpointForm) {
       setRemoteModels([])
       setRemoteModelsError(null)
+      setRemoteModelsFailed(false)
       setRemoteModelsLoading(false)
       return
     }
@@ -348,6 +480,7 @@ export function ApiKeyInput({
       remoteModelsAbortRef.current?.abort()
       setRemoteModels([])
       setRemoteModelsError(null)
+      setRemoteModelsFailed(false)
       setRemoteModelsLoading(false)
       return
     }
@@ -357,13 +490,15 @@ export function ApiKeyInput({
     remoteModelsAbortRef.current = controller
     setRemoteModelsLoading(true)
     setRemoteModelsError(null)
+    setRemoteModelsFailed(false)
 
     const timer = setTimeout(() => {
       fetchOpenAiCompatibleModels(endpoint, key, controller.signal)
         .then((models) => {
           if (controller.signal.aborted) return
           setRemoteModels(models)
-          setRemoteModelsError(models.length === 0 ? t('apiSetup.noModels') : null)
+          setRemoteModelsFailed(false)
+          setRemoteModelsError(isOrderPreset && models.length === 0 ? t('apiSetup.noModels') : null)
           setModelImageCaps((prev) => {
             const next = { ...prev }
             for (const model of models) {
@@ -376,9 +511,11 @@ export function ApiKeyInput({
         })
         .catch((err: unknown) => {
           if (controller.signal.aborted) return
-          console.error('[ApiKeyInput] ORDER /v1/models failed', err)
+          console.error('[ApiKeyInput] /v1/models failed', err)
           setRemoteModels([])
-          setRemoteModelsError(t('apiSetup.fetchModelsFailed'))
+          setRemoteModelsFailed(true)
+          // Custom URLs often lack this route — keep defaults editable instead of blocking.
+          setRemoteModelsError(isOrderPreset ? t('apiSetup.fetchModelsFailed') : null)
         })
         .finally(() => {
           if (!controller.signal.aborted) setRemoteModelsLoading(false)
@@ -389,7 +526,7 @@ export function ApiKeyInput({
       clearTimeout(timer)
       controller.abort()
     }
-  }, [isOrderPreset, apiKey, baseUrl, remoteModelsNonce, t])
+  }, [isCustomEndpointForm, isOrderPreset, apiKey, baseUrl, remoteModelsNonce, t])
 
   // Whether to show 3 tier dropdowns instead of text input
   const hasPiModels = isPiApiKeyFlow
@@ -415,6 +552,8 @@ export function ApiKeyInput({
       setCustomApi('openai-completions')
     }
     setModelError(null)
+    setLimitError(null)
+    setLimitNotice(null)
     // Pre-fill recommended model for Ollama; clear for all others
     // (Default provider presets hide the field entirely, others default to provider model IDs when empty)
     if (preset.key === 'ollama') {
@@ -470,6 +609,49 @@ export function ApiKeyInput({
       } else if (presetKey === 'openrouter' || presetKey === 'vercel-ai-gateway' || presetKey === 'custom') {
         setConnectionDefaultModel(providerType === 'openai' ? COMPAT_OPENAI_DEFAULTS : COMPAT_ANTHROPIC_DEFAULTS)
       }
+    }
+  }
+
+  const resolveEditableLimits = (id: string) => {
+    const remote = findRemoteModel(remoteModels, id)
+    const contextOverride = lookupRecordByModelId(modelContextWindows, id)
+      ?? lookupRecordByModelId(initialValues?.modelContextWindows, id)
+    const maxOverride = lookupRecordByModelId(modelMaxTokens, id)
+      ?? lookupRecordByModelId(initialValues?.modelMaxTokens, id)
+    const contextWindow = resolveCatalogOrOverrideLimit({
+      edited: setHasModelId(editedContextIds, id),
+      override: contextOverride,
+      catalog: remote?.contextWindow,
+      fallback: DEFAULT_MODEL_CONTEXT_WINDOW_PRESET,
+      fallbackAliases: [DEFAULT_CUSTOM_CONTEXT_WINDOW],
+    })
+    const maxTokens = resolveCatalogOrOverrideLimit({
+      edited: setHasModelId(editedMaxTokenIds, id),
+      override: maxOverride,
+      catalog: remote?.maxTokens,
+      fallback: DEFAULT_MODEL_MAX_OUTPUT_PRESET,
+      fallbackAliases: [DEFAULT_CUSTOM_MAX_TOKENS],
+    })
+    return {
+      remote,
+      contextWindow,
+      maxTokens,
+      contextSource: resolveModelLimitSource({
+        edited: setHasModelId(editedContextIds, id),
+        override: contextOverride,
+        catalog: remote?.contextWindow,
+        displayed: contextWindow,
+        fallback: DEFAULT_MODEL_CONTEXT_WINDOW_PRESET,
+        fallbackAliases: [DEFAULT_CUSTOM_CONTEXT_WINDOW],
+      }),
+      maxSource: resolveModelLimitSource({
+        edited: setHasModelId(editedMaxTokenIds, id),
+        override: maxOverride,
+        catalog: remote?.maxTokens,
+        displayed: maxTokens,
+        fallback: DEFAULT_MODEL_MAX_OUTPUT_PRESET,
+        fallbackAliases: [DEFAULT_CUSTOM_MAX_TOKENS],
+      }),
     }
   }
 
@@ -531,21 +713,29 @@ export function ApiKeyInput({
     const effectiveBaseUrl = baseUrl.trim()
 
     const parsedModels = parseModelList(connectionDefaultModel)
-    const submittedModels = isOrderPreset
+    if (selectedLimitRows.some((row) => (
+      !isValidModelLimitCombination(row.maxTokens, row.contextWindow)
+    ))) {
+      setLimitError(t('apiSetup.modelLimitInvalid'))
+      return
+    }
+    const submittedModels = (isCustomEndpointForm && parsedModels.length > 0)
       ? parsedModels.map((id) => {
-        const remote = remoteModels.find((model) => model.id === id)
+        const { remote, contextWindow: rawContextWindow, maxTokens: rawMaxTokens } = resolveEditableLimits(id)
+        const contextWindow = persistCustomContextWindow(rawContextWindow)
+        const maxTokens = persistCustomMaxTokens(rawMaxTokens, contextWindow)
         const supportsImages = resolveRemoteModelSupportsImages(
           remote ?? { id, name: id },
-          modelImageCaps[id],
+          lookupRecordByModelId(modelImageCaps, id),
         )
-        const contextWindow = remote?.contextWindow ?? initialValues?.modelContextWindows?.[id]
-        return {
+        return buildCustomEndpointModelSubmission({
           id,
-          name: remote?.name ?? id,
-          shortName: remote?.name ?? id,
+          name: remote?.name,
+          includeDisplayNames: isOrderPreset,
           supportsImages,
-          ...(contextWindow ? { contextWindow } : {}),
-        }
+          contextWindow,
+          maxTokens,
+        })
       })
       : parsedModels
 
@@ -580,6 +770,28 @@ export function ApiKeyInput({
       customEndpoint,
     })
   }
+
+  const selectedCustomModelIds = parseModelList(connectionDefaultModel)
+  const showCustomModelLimits = isCustomEndpointForm
+    && !isBedrock
+    && selectedCustomModelIds.length > 0
+  const selectedLimitRows = showCustomModelLimits
+    ? selectedCustomModelIds.map((id) => ({ id, ...resolveEditableLimits(id) }))
+    : []
+  const limitsStatusKey = {
+    detecting: 'apiSetup.modelLimitsDetecting',
+    detected: 'apiSetup.modelLimitsDetected',
+    unavailable: 'apiSetup.modelLimitsUnavailable',
+    defaults: 'apiSetup.modelLimitsUsingDefaults',
+    hint: 'apiSetup.modelLimitsHint',
+  }[resolveModelLimitsStatus({
+    loading: remoteModelsLoading,
+    catalogFilled: selectedLimitRows.some((row) => (
+      row.contextSource === 'catalog' || row.maxSource === 'catalog'
+    )),
+    fetchFailed: remoteModelsFailed,
+    hasKey: apiKey.trim().length >= 8,
+  })]
 
   const tierConfigs = [
     { label: t('apiSetup.modelTier.best'), desc: t('apiSetup.modelTier.bestDesc'), value: bestModel, onChange: setBestModel },
@@ -922,17 +1134,8 @@ export function ApiKeyInput({
           onToggle={(id) => {
             setConnectionDefaultModel((prev) => toggleSelectedModel(prev, id))
             setModelError(null)
-          }}
-          imageCaps={modelImageCaps}
-          onToggleImage={(id) => {
-            setModelImageCaps((prev) => {
-              const remote = remoteModels.find((model) => model.id === id)
-              const current = resolveRemoteModelSupportsImages(
-                remote ?? { id, name: id },
-                prev[id],
-              )
-              return { ...prev, [id]: !current }
-            })
+            setLimitError(null)
+            setLimitNotice(null)
           }}
           onRetry={() => setRemoteModelsNonce((n) => n + 1)}
         />
@@ -956,6 +1159,8 @@ export function ApiKeyInput({
               onChange={(e) => {
                 setConnectionDefaultModel(e.target.value)
                 setModelError(null)
+                setLimitError(null)
+                setLimitNotice(null)
               }}
               placeholder={
                 activePreset === 'order-openai'
@@ -976,6 +1181,109 @@ export function ApiKeyInput({
             <p className="text-xs text-foreground/30">
               {t('apiSetup.customEndpointRequired')}
             </p>
+          )}
+        </div>
+      )}
+
+      {showCustomModelLimits && (
+        <div className="space-y-5">
+          <div className="space-y-1">
+            <Label className="text-muted-foreground font-normal">
+              {t('apiSetup.modelLimitsTitle')}
+            </Label>
+            <p className="flex items-center gap-1.5 text-xs text-foreground/40">
+              {remoteModelsLoading && (
+                <Loader2 className="size-3 shrink-0 animate-spin" />
+              )}
+              <span>{t(limitsStatusKey)}</span>
+            </p>
+          </div>
+          {selectedLimitRows.map(({ id, remote, contextWindow, maxTokens, contextSource, maxSource }) => {
+            const supportsImages = resolveRemoteModelSupportsImages(
+              remote ?? { id, name: id },
+              lookupRecordByModelId(modelImageCaps, id),
+            )
+            const limitsInvalid = !isValidModelLimitCombination(maxTokens, contextWindow)
+            return (
+              <section
+                key={id}
+                className="overflow-hidden rounded-[10px] border border-border bg-background shadow-minimal"
+              >
+                <header className="border-b border-foreground/8 bg-foreground/[0.03] px-3.5 py-2">
+                  <p className="truncate text-sm font-medium text-foreground">{remote?.name ?? id}</p>
+                </header>
+                <div className="space-y-3 p-3.5">
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                    <ModelLimitSelect
+                      id={`context-window-${id}`}
+                      label={t('apiSetup.contextWindow')}
+                      value={contextWindow}
+                      source={contextSource}
+                      presets={MODEL_CONTEXT_WINDOW_PRESETS}
+                      disabled={isDisabled}
+                      onChange={(next) => {
+                        setEditedContextIds((prev) => new Set(prev).add(id))
+                        setModelContextWindows((prev) => ({ ...prev, [id]: next }))
+                        const adjustedMax = resolveMaxTokensForContext(maxTokens, next)
+                        if (adjustedMax !== maxTokens) {
+                          setEditedMaxTokenIds((prev) => new Set(prev).add(id))
+                          setModelMaxTokens((prev) => ({ ...prev, [id]: adjustedMax }))
+                          setLimitNotice(t('apiSetup.modelLimitAdjusted', {
+                            model: remote?.name ?? id,
+                            value: formatModelTokenLimit(adjustedMax),
+                          }))
+                        } else {
+                          setLimitNotice(null)
+                        }
+                        setLimitError(null)
+                      }}
+                    />
+                    <ModelLimitSelect
+                      id={`max-tokens-${id}`}
+                      label={t('apiSetup.maxOutputTokens')}
+                      value={maxTokens}
+                      source={maxSource}
+                      presets={MODEL_MAX_OUTPUT_PRESETS}
+                      upperExclusive={contextWindow}
+                      invalid={limitsInvalid}
+                      disabled={isDisabled}
+                      onChange={(next) => {
+                        setEditedMaxTokenIds((prev) => new Set(prev).add(id))
+                        setModelMaxTokens((prev) => ({ ...prev, [id]: next }))
+                        setLimitError(null)
+                        setLimitNotice(null)
+                      }}
+                    />
+                  </div>
+                  <div className="flex items-center justify-between gap-3 border-t border-foreground/8 pt-3">
+                    <div className="min-w-0">
+                      <Label htmlFor={`multimodal-${id}`} className="text-xs font-normal">
+                        {t('apiSetup.multimodal')}
+                      </Label>
+                      <p id={`multimodal-hint-${id}`} className="text-[11px] text-foreground/40">
+                        {t('apiSetup.multimodalHint')}
+                      </p>
+                    </div>
+                    <Switch
+                      id={`multimodal-${id}`}
+                      checked={supportsImages}
+                      onCheckedChange={(checked) => {
+                        setModelImageCaps((prev) => ({ ...prev, [id]: checked }))
+                      }}
+                      disabled={isDisabled}
+                      aria-label={`${remote?.name ?? id}: ${t('apiSetup.multimodal')}`}
+                      aria-describedby={`multimodal-hint-${id}`}
+                    />
+                  </div>
+                </div>
+              </section>
+            )
+          })}
+          {limitError && (
+            <p className="text-xs text-destructive" role="alert">{limitError}</p>
+          )}
+          {limitNotice && !limitError && (
+            <p className="text-xs text-foreground/50" role="status">{limitNotice}</p>
           )}
         </div>
       )}

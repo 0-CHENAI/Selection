@@ -14,6 +14,7 @@ import {
   BUNDLED_OFFICECLI_SKILL_SLUGS,
   BUNDLED_OFFICECLI_LOAD_SKILL_ALIASES,
   collectOfficeFormatSkillSlugs,
+  shouldLoadBundledOfficecliRouter,
   docxOutlineEnsureTiming,
   findDocxArgInOfficecliArgs,
   getBundledOfficecliRouterSkillMd,
@@ -36,26 +37,22 @@ describe('collectOfficeFormatSkillSlugs', () => {
       'officecli-docx',
     ])
     expect(collectOfficeFormatSkillSlugs('deck.pptx')).toEqual(['officecli-pptx'])
+    expect(collectOfficeFormatSkillSlugs('请改 旧稿.doc')).toEqual(['officecli-docx'])
+    expect(collectOfficeFormatSkillSlugs('预算.xls')).toEqual(['officecli-xlsx'])
+    expect(collectOfficeFormatSkillSlugs('路演.ppt')).toEqual(['officecli-pptx'])
+    expect(collectOfficeFormatSkillSlugs('不要读 report.docx.md')).toEqual([])
+    expect(collectOfficeFormatSkillSlugs('sidecar.xlsx.md')).toEqual([])
   })
 
-  it('does not infer from a request that only talks about a report', () => {
-    expect(collectOfficeFormatSkillSlugs('写一份巡察报告')).toEqual([])
-  })
-
-  it('requires an Office action for product wording without a file path', () => {
-    expect(collectOfficeFormatSkillSlugs('把他形成word报告（带目录）')).toEqual(['officecli-docx'])
-    expect(collectOfficeFormatSkillSlugs('撰写一份 Word 文档')).toEqual(['officecli-docx'])
-    expect(collectOfficeFormatSkillSlugs('做成一份 Excel 表')).toEqual(['officecli-xlsx'])
-    expect(collectOfficeFormatSkillSlugs('用 Excel 分析这份 CSV')).toEqual(['officecli-xlsx'])
-    expect(collectOfficeFormatSkillSlugs('做个 ppt 给董事会')).toEqual(['officecli-pptx'])
-    expect(collectOfficeFormatSkillSlugs('解释 DCF')).toEqual([])
-    expect(collectOfficeFormatSkillSlugs('查看 DCF 的计算方法')).toEqual([])
-    expect(collectOfficeFormatSkillSlugs('读取这篇学术论文')).toEqual([])
-    expect(collectOfficeFormatSkillSlugs('检查 Morph 动画原理')).toEqual([])
-    expect(collectOfficeFormatSkillSlugs('分析数据')).toEqual([])
-    expect(collectOfficeFormatSkillSlugs('制作网页 Dashboard')).toEqual([])
-    expect(collectOfficeFormatSkillSlugs('创建一份财务模型')).toEqual(['officecli-xlsx'])
-    expect(collectOfficeFormatSkillSlugs('生成一个 3D Morph 演示文稿')).toEqual(['officecli-pptx'])
+  it('does not infer format from language — the model chooses OfficeCLI', () => {
+    expect(collectOfficeFormatSkillSlugs('写一份项目周报')).toEqual([])
+    expect(collectOfficeFormatSkillSlugs('不要用 markdown，写一份周报')).toEqual([])
+    expect(collectOfficeFormatSkillSlugs('先出 markdown 再转 word')).toEqual([])
+    expect(collectOfficeFormatSkillSlugs('写成 markdown 周报')).toEqual([])
+    expect(collectOfficeFormatSkillSlugs('帮我将他形成word放在我的桌面上')).toEqual([])
+    expect(collectOfficeFormatSkillSlugs('做一份预算表')).toEqual([])
+    expect(collectOfficeFormatSkillSlugs('做三页汇报')).toEqual([])
+    expect(collectOfficeFormatSkillSlugs('解释报告结构')).toEqual([])
   })
 
   it('locks only the automatic officecli router and leaves explicit format skills alone', () => {
@@ -82,6 +79,27 @@ describe('collectOfficeFormatSkillSlugs', () => {
     expect(collectOfficeFormatSkillSlugs('读取', [
       { type: 'office', name: '宏文档.DOCM', storedPath: '/tmp/session/宏文档.DOCM' },
     ])).toEqual(['officecli-docx'])
+  })
+})
+
+describe('shouldLoadBundledOfficecliRouter', () => {
+  it('loads the router only for named files or office-typed attachments', () => {
+    expect(shouldLoadBundledOfficecliRouter('写一份项目周报')).toBe(false)
+    expect(shouldLoadBundledOfficecliRouter('请改 巡察报告.docx')).toBe(true)
+    expect(shouldLoadBundledOfficecliRouter('请改 旧稿.doc')).toBe(true)
+    expect(shouldLoadBundledOfficecliRouter('不要读 report.docx.md')).toBe(false)
+    expect(shouldLoadBundledOfficecliRouter('看一下', [
+      { type: 'office', name: '附件', storedPath: '/tmp/session/att-1' },
+    ])).toBe(true)
+    expect(shouldLoadBundledOfficecliRouter('看一下', [
+      { type: 'office', name: '数据.xlsx', path: '/tmp/数据.xlsx' },
+    ])).toBe(true)
+    expect(shouldLoadBundledOfficecliRouter('看一下', [
+      { type: 'pdf', name: '说明.pdf', storedPath: '/tmp/session/att-2' },
+    ])).toBe(false)
+    expect(shouldLoadBundledOfficecliRouter('把他形成word报告（带目录）')).toBe(false)
+    expect(shouldLoadBundledOfficecliRouter('做个 ppt 给董事会')).toBe(false)
+    expect(shouldLoadBundledOfficecliRouter('写一份巡察报告')).toBe(false)
   })
 })
 
@@ -523,6 +541,8 @@ describe('docx outline heading seed', () => {
     expect(body).toContain('Delivery gate')
     expect(body).toContain('outlineLvl')
     expect(body).toContain('Do not impose a model-call, CLI-call, operation, QA, elapsed-time, or cost budget')
+    expect(body).toContain('Use when creating or editing a .docx, .xlsx, or .pptx file')
+    expect(body).toContain('Do not treat a chat Markdown body, `markdown-preview`, or a `call_llm` draft as the delivered file')
   })
 
   it('seeds on wrapper create and repairs Heading1 that exists without outlineLvl', () => {

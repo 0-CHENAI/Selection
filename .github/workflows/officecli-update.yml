@@ -13,15 +13,19 @@ concurrency:
   group: officecli-upgrade-draft
   cancel-in-progress: false
 
+env:
+  OFFICECLI_BASE_BRANCH: test
+
 jobs:
   update:
     runs-on: ubuntu-latest
     timeout-minutes: 30
 
     steps:
-      - name: Checkout default branch
+      - name: Checkout OfficeCLI integration branch
         uses: actions/checkout@v6
         with:
+          ref: ${{ env.OFFICECLI_BASE_BRANCH }}
           fetch-depth: 0
 
       - name: Setup Bun
@@ -45,6 +49,10 @@ jobs:
             echo "changed=true" >> "$GITHUB_OUTPUT"
           fi
 
+      - name: Enforce reviewed command and resource policy
+        if: steps.changes.outputs.changed == 'true'
+        run: bun scripts/sync-officecli.ts --check --download-runtime
+
       - name: Publish or refresh draft upgrade PR
         if: steps.changes.outputs.changed == 'true'
         shell: bash
@@ -64,14 +72,10 @@ jobs:
 
           title="构建：升级 OfficeCLI 至 v${OFFICECLI_VERSION}"
           body_file="apps/electron/resources/officecli/officecli-upgrade-report.md"
-          pr_number=$(gh pr list --state open --head "$branch" --json number --jq '.[0].number // empty')
+          pr_number=$(gh pr list --state open --base "$OFFICECLI_BASE_BRANCH" --head "$branch" --json number --jq '.[0].number // empty')
           if [[ -n "$pr_number" ]]; then
-            gh pr edit "$pr_number" --title "$title" --body-file "$body_file"
+            gh pr edit "$pr_number" --base "$OFFICECLI_BASE_BRANCH" --title "$title" --body-file "$body_file"
             gh pr ready "$pr_number" --undo || true
           else
-            gh pr create --draft --base "${{ github.event.repository.default_branch }}" --head "$branch" --title "$title" --body-file "$body_file"
+            gh pr create --draft --base "$OFFICECLI_BASE_BRANCH" --head "$branch" --title "$title" --body-file "$body_file"
           fi
-
-      - name: Enforce reviewed command and resource policy
-        if: steps.changes.outputs.changed == 'true'
-        run: bun scripts/sync-officecli.ts --check --download-runtime

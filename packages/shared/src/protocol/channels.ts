@@ -255,6 +255,7 @@ export const RPC_CHANNELS = {
     CHANGED: 'sources:changed',
     GET_PERMISSIONS: 'sources:getPermissions',
     GET_MCP_TOOLS: 'sources:getMcpTools',
+    RETRY_CONNECTION: 'sources:retryConnection',
     SET_DISPLAY_TITLE: 'sources:setDisplayTitle',
   },
   oauth: {

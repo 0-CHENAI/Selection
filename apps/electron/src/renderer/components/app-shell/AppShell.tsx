@@ -46,7 +46,8 @@ import { Button } from "@/components/ui/button"
 import { HeaderIconButton } from "@/components/ui/HeaderIconButton"
 import { CreationJobsButton } from "./CreationJobsButton"
 import type { CreationJob } from "@/atoms/creation-jobs"
-import { resolveInheritedFilterParams, type FilterMode } from "./inherited-filter-params"
+import { resolveNewSessionParams, resolveProjectNavigationSessionId, type FilterMode } from "./inherited-filter-params"
+import { filterSessionsByProject } from "./project-session-filter"
 import { Separator } from "@/components/ui/separator"
 import { Tooltip, TooltipTrigger, TooltipContent } from "@craft-agent/ui"
 import {
@@ -125,7 +126,17 @@ import {
 import type { SettingsSubpage } from "../../../shared/types"
 import { SourcesListPanel } from "./SourcesListPanel"
 import { SkillsListPanel } from "./SkillsListPanel"
-import { ExternalResourceImportDialog } from "@/components/resources/ExternalResourceImportDialog"
+import {
+  ExternalResourceImportDialog,
+  SkillFileImportDialog,
+} from "@/components/resources/ExternalResourceImportDialog"
+import {
+  openSkillFilePicker,
+  prepareSkillFileImport,
+  listenForSkillFilePickerCancel,
+  releaseSkillFilePicker,
+  type PreparedSkillFileImport,
+} from "@/components/resources/external-resource-import"
 import { AutomationsListPanel } from "../automations/AutomationsListPanel"
 import { ProjectsListPanel } from "./ProjectsListPanel"
 import { APP_EVENTS, AGENT_EVENTS, type AutomationFilterKind, AUTOMATION_TYPE_TO_FILTER_KIND } from "../automations/types"
@@ -760,25 +771,6 @@ function AppShellContent({
     })
   }, [sessionFilterKey])
 
-  // Jump to All Sessions filtered by a single project. Used by the Projects list
-  // context menu — sets the allSessions view's project filter (preserving its
-  // other filters), then navigates.
-  const handleJumpToProjectSessions = useCallback((projectId: string) => {
-    setViewFiltersMap(prev => {
-      const existing = prev['allSessions']
-      return {
-        ...prev,
-        allSessions: {
-          statuses: existing?.statuses ?? {},
-          labels: existing?.labels ?? {},
-          projects: { [projectId]: 'include' },
-          groupingMode: existing?.groupingMode,
-        }
-      }
-    })
-    navigate(routes.view.allSessions())
-  }, [])
-
   // Jump to All Sessions scoped to a task: replace the allSessions view's label filter
   // (and project filter, when the task is bound to one) with the task's scope, then open
   // the session. These are the SAME user-clearable filters the list-header chips edit —
@@ -1018,15 +1010,6 @@ function AppShellContent({
       // Clear icon cache so updated source icons are re-fetched on render
       clearSourceIconCaches()
       setSources(updatedSources || [])
-    })
-    return cleanup
-  }, [activeWorkspaceId])
-
-  // Subscribe to live skill updates (when skills are added/removed dynamically)
-  React.useEffect(() => {
-    const cleanup = window.electronAPI.onSkillsChanged((workspaceId, updatedSkills) => {
-      if (workspaceId !== activeWorkspaceId) return
-      setSkills(updatedSkills || [])
     })
     return cleanup
   }, [activeWorkspaceId])
@@ -1398,11 +1381,38 @@ function AppShellContent({
     : undefined
   React.useEffect(() => {
     if (!activeWorkspaceId) return
-    window.electronAPI.getSkills(activeWorkspaceId, activeSessionWorkingDirectory).then((loaded) => {
-      setSkills(loaded || [])
-    }).catch(err => {
-      console.error('[Chat] Failed to load skills:', err)
+
+    let cancelled = false
+    let loadGeneration = 0
+
+    // Skill broadcasts are workspace-scoped, while project Skills depend on
+    // the active session's working directory. Re-read the correctly scoped
+    // list instead of trusting a payload produced for another session.
+    const reloadSkills = async () => {
+      const generation = ++loadGeneration
+      try {
+        const loaded = await window.electronAPI.getSkills(
+          activeWorkspaceId,
+          activeSessionWorkingDirectory,
+        )
+        if (!cancelled && generation === loadGeneration) setSkills(loaded || [])
+      } catch (err) {
+        if (!cancelled && generation === loadGeneration) {
+          console.error('[Chat] Failed to load skills:', err)
+        }
+      }
+    }
+
+    const cleanup = window.electronAPI.onSkillsChanged((workspaceId) => {
+      if (workspaceId === activeWorkspaceId) void reloadSkills()
     })
+
+    void reloadSkills()
+
+    return () => {
+      cancelled = true
+      cleanup()
+    }
   }, [activeWorkspaceId, activeSessionWorkingDirectory])
 
   // Completion is announced only after the resource has been re-read into its
@@ -1456,6 +1466,39 @@ function AppShellContent({
   const activeSessionMetas = useMemo(() => {
     return workspaceSessionMetas.filter(s => !s.isArchived)
   }, [workspaceSessionMetas])
+
+  // Project children are implemented as an All Sessions secondary filter, but
+  // NavigationContext cannot see that local filter when it auto-selects a chat.
+  // Select a project-bound session explicitly, or suppress auto-selection when
+  // the project is empty so an unrelated global chat cannot remain on the right.
+  const handleJumpToProjectSessions = useCallback((projectId: string) => {
+    setViewFiltersMap(prev => {
+      const existing = prev['allSessions']
+      return {
+        ...prev,
+        allSessions: {
+          statuses: existing?.statuses ?? {},
+          labels: existing?.labels ?? {},
+          projects: { [projectId]: 'include' },
+          groupingMode: existing?.groupingMode,
+        }
+      }
+    })
+
+    const allSessionsFilters = viewFiltersMap['allSessions']
+    const hasOtherSecondaryFilters =
+      Object.keys(allSessionsFilters?.statuses ?? {}).length > 0
+      || Object.keys(allSessionsFilters?.labels ?? {}).length > 0
+    const firstProjectSessionId = resolveProjectNavigationSessionId(
+      activeSessionMetas,
+      projectId,
+      hasOtherSecondaryFilters,
+    )
+    navigate(
+      routes.view.allSessions(firstProjectSessionId ?? undefined),
+      firstProjectSessionId ? undefined : { skipAutoSelect: true },
+    )
+  }, [activeSessionMetas, viewFiltersMap])
 
   const refreshWorkspaceUnreadMap = useCallback(async () => {
     try {
@@ -1660,24 +1703,7 @@ function AppShellContent({
     }
     // Filter by project — supports include/exclude on session.projectId
     if (projectFilter.size > 0) {
-      const projectIncludes = new Set<string>()
-      const projectExcludes = new Set<string>()
-      for (const [id, mode] of projectFilter) {
-        if (mode === 'include') projectIncludes.add(id)
-        else projectExcludes.add(id)
-      }
-      if (projectIncludes.size > 0) {
-        result = result.filter(s => {
-          const pid = (s as { projectId?: string }).projectId
-          return pid !== undefined && projectIncludes.has(pid)
-        })
-      }
-      if (projectExcludes.size > 0) {
-        result = result.filter(s => {
-          const pid = (s as { projectId?: string }).projectId
-          return pid === undefined || !projectExcludes.has(pid)
-        })
-      }
+      result = filterSessionsByProject(result, projectFilter)
     }
 
     return result
@@ -1889,7 +1915,73 @@ function AppShellContent({
   const [copySkillsFromOpen, setCopySkillsFromOpen] = useState(false)
   const [copySourcesFromOpen, setCopySourcesFromOpen] = useState(false)
   const [mcpFileImportOpen, setMcpFileImportOpen] = useState(false)
-  const [skillFileImportOpen, setSkillFileImportOpen] = useState(false)
+  const skillFileInputRef = useRef<HTMLInputElement>(null)
+  const skillFileImporting = useRef(false)
+  const skillFileCancelCleanupRef = useRef<(() => void) | null>(null)
+  const skillFileImportTriggerRef = useRef<HTMLElement | null>(null)
+  const [preparedSkillFileImport, setPreparedSkillFileImport] = useState<{
+    workspaceId: string
+    value: PreparedSkillFileImport
+  } | null>(null)
+
+  const clearSkillFileCancelListener = useCallback(() => {
+    skillFileCancelCleanupRef.current?.()
+    skillFileCancelCleanupRef.current = null
+  }, [])
+
+  const finishSkillFileImport = useCallback(() => {
+    clearSkillFileCancelListener()
+    setPreparedSkillFileImport(null)
+    releaseSkillFilePicker(skillFileImporting)
+    requestAnimationFrame(() => skillFileImportTriggerRef.current?.focus())
+  }, [clearSkillFileCancelListener])
+
+  const handleImportSkillFromFile = useCallback((event: React.MouseEvent<HTMLButtonElement>) => {
+    if (!activeWorkspaceId || !skillFileInputRef.current || skillFileImporting.current) return
+    skillFileImportTriggerRef.current = event.currentTarget
+    clearSkillFileCancelListener()
+    skillFileCancelCleanupRef.current = listenForSkillFilePickerCancel(
+      skillFileInputRef.current,
+      finishSkillFileImport,
+    )
+    try {
+      openSkillFilePicker(skillFileInputRef.current, skillFileImporting)
+    } catch (error) {
+      finishSkillFileImport()
+      toast.error(t('fileImport.skillFailed'), {
+        description: error instanceof Error ? error.message : String(error),
+      })
+    }
+  }, [activeWorkspaceId, clearSkillFileCancelListener, finishSkillFileImport, t])
+
+  const handleSkillImportFileChange = useCallback(async (event: React.ChangeEvent<HTMLInputElement>) => {
+    clearSkillFileCancelListener()
+    const file = event.target.files?.[0]
+    event.target.value = ''
+    if (!file || !activeWorkspaceId) {
+      finishSkillFileImport()
+      return
+    }
+
+    try {
+      const value = await prepareSkillFileImport(window.electronAPI, activeWorkspaceId, file)
+      setPreparedSkillFileImport({ workspaceId: activeWorkspaceId, value })
+    } catch (error) {
+      finishSkillFileImport()
+      toast.error(t('fileImport.skillFailed'), {
+        description: error instanceof Error ? error.message : String(error),
+      })
+    }
+  }, [activeWorkspaceId, clearSkillFileCancelListener, finishSkillFileImport, t])
+
+  useEffect(() => {
+    if (
+      preparedSkillFileImport
+      && preparedSkillFileImport.workspaceId !== activeWorkspaceId
+    ) {
+      finishSkillFileImport()
+    }
+  }, [activeWorkspaceId, finishSkillFileImport, preparedSkillFileImport])
 
   // Stores the Y position of the last right-clicked sidebar item so the EditPopover
   // appears near it rather than at a fixed location. Updated synchronously before
@@ -2056,25 +2148,42 @@ function AppShellContent({
   }, [activeWorkspace?.id, navigate, t])
 
   /**
-   * Resolve the "inherit sole active filter" rule for new sessions. Only
+   * Resolve the current project's explicit context first, then fall back to
+   * the "inherit sole active filter" rule for session-list views. Only
    * include-mode filters are candidates — an excluded status/label/project must
-   * never be inherited (#970). See resolveInheritedFilterParams.
+   * never be inherited (#970). See resolveNewSessionParams.
    */
-  const resolveInheritedNewSessionParams = useCallback(
-    () => resolveInheritedFilterParams(listFilter, labelFilter, projectFilter),
-    [listFilter, labelFilter, projectFilter]
+  const selectedProjectSlug = isProjectsNavigation(navState)
+    ? navState.details?.projectSlug
+    : undefined
+  const selectedProjectId = useMemo(
+    () => projectMenuOptions.find(project => project.slug === selectedProjectSlug)?.id,
+    [projectMenuOptions, selectedProjectSlug],
+  )
+
+  const resolveNewSessionCreationParams = useCallback(
+    () => resolveNewSessionParams(listFilter, labelFilter, projectFilter, selectedProjectId),
+    [listFilter, labelFilter, projectFilter, selectedProjectId],
   )
 
   // Create a new chat and select it
   const handleNewChat = useCallback((newPanel: boolean = false) => {
     if (!activeWorkspace) return
 
+    // A deep-linked project can render before the projects query completes.
+    // Never turn that transient state into an unbound session; the user can
+    // retry once the project metadata has loaded.
+    if (selectedProjectSlug && !selectedProjectId) {
+      toast.error(t('projectInfo.notFound'))
+      return
+    }
+
     // Exit search mode and switch to All Sessions
     setSearchActive(false)
     setSearchQuery('')
 
     // Inherit sole-active filter into the new session when unambiguous.
-    const inherited = resolveInheritedNewSessionParams()
+    const inherited = resolveNewSessionCreationParams()
 
     // Delegate to NavigationContext which handles session creation
     navigate(
@@ -2084,7 +2193,7 @@ function AppShellContent({
 
     // Focus the chat input after navigation completes
     setTimeout(() => focusZone('chat', { intent: 'programmatic' }), 50)
-  }, [activeWorkspace, focusZone, navigate, resolveInheritedNewSessionParams])
+  }, [activeWorkspace, focusZone, resolveNewSessionCreationParams, selectedProjectId, selectedProjectSlug, t])
 
   // Create a brand new dedicated browser window and focus it.
   // Intentionally unbound: this action should always create a NEW window.
@@ -3493,7 +3602,7 @@ function AppShellContent({
                       <HeaderIconButton
                         icon={<FileUp className="h-4 w-4" />}
                         tooltip={t("fileImport.skillTitle")}
-                        onClick={() => setSkillFileImportOpen(true)}
+                        onClick={handleImportSkillFromFile}
                       />
                       <EditPopover
                         trigger={
@@ -3558,7 +3667,7 @@ function AppShellContent({
                 selectedSkillSlug={isSkillsNavigation(navState) && navState.details?.type === 'skill' ? navState.details.skillSlug : null}
                 copyFromOpen={copySkillsFromOpen}
                 onCopyFromOpenChange={setCopySkillsFromOpen}
-                onImportFromFile={() => setSkillFileImportOpen(true)}
+                onImportFromFile={handleImportSkillFromFile}
               />
             )}
             {isProjectsNavigation(navState) && activeWorkspaceId && (
@@ -3647,6 +3756,7 @@ function AppShellContent({
                   workspaceId={activeWorkspaceId ?? undefined}
                   statusFilter={listFilter}
                   labelFilterMap={labelFilter}
+                  projectFilter={projectFilter}
                   focusedSessionId={panelCount === 0 ? null : panelCount > 1 ? focusedSessionId : undefined}
                   onNavigateToSession={panelCount > 1 ? navigateToSessionInPanel : undefined}
                   hasPendingPrompt={hasPendingPrompt}
@@ -3865,17 +3975,27 @@ function AppShellContent({
           />
           {activeWorkspaceId && (
             <>
+              <input
+                ref={skillFileInputRef}
+                type="file"
+                accept=".md,.zip"
+                className="hidden"
+                onChange={(event) => void handleSkillImportFileChange(event)}
+              />
+              {preparedSkillFileImport && (
+                <SkillFileImportDialog
+                  open
+                  workspaceId={preparedSkillFileImport.workspaceId}
+                  prepared={preparedSkillFileImport.value}
+                  onOpenChange={(open) => {
+                    if (!open) finishSkillFileImport()
+                  }}
+                />
+              )}
               <ExternalResourceImportDialog
                 open={mcpFileImportOpen}
-                kind="mcp"
                 workspaceId={activeWorkspaceId}
                 onOpenChange={setMcpFileImportOpen}
-              />
-              <ExternalResourceImportDialog
-                open={skillFileImportOpen}
-                kind="skill"
-                workspaceId={activeWorkspaceId}
-                onOpenChange={setSkillFileImportOpen}
               />
             </>
           )}

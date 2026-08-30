@@ -43,6 +43,7 @@ interface CredentialsStepProps {
     models?: string[]
     modelImageCaps?: Record<string, boolean>
     modelContextWindows?: Record<string, number>
+    modelMaxTokens?: Record<string, number>
     customApi?: CustomEndpointApi
   }
 }

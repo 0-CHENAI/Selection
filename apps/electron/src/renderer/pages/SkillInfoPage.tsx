@@ -46,40 +46,42 @@ export default function SkillInfoPage({ skillSlug, workspaceId, workingDirectory
   // Load skill data
   useEffect(() => {
     let isMounted = true
+    let loadGeneration = 0
     setLoading(true)
     setError(null)
 
     const loadSkill = async () => {
+      const generation = ++loadGeneration
       try {
         const skills = await window.electronAPI.getSkills(workspaceId, workingDirectory)
 
-        if (!isMounted) return
+        if (!isMounted || generation !== loadGeneration) return
 
         // Find the skill by slug
         const found = skills.find((s) => s.slug === skillSlug)
         if (found) {
           setSkill(found)
+          setError(null)
         } else {
+          setSkill(null)
           setError(t('skillInfo.notFound'))
         }
       } catch (err) {
-        if (!isMounted) return
+        if (!isMounted || generation !== loadGeneration) return
         setError(err instanceof Error ? err.message : t('skillInfo.failedToLoad'))
       } finally {
-        if (isMounted) setLoading(false)
+        if (isMounted && generation === loadGeneration) setLoading(false)
       }
     }
 
-    loadSkill()
-
-    // Subscribe to skill changes
-    const unsubscribe = window.electronAPI.onSkillsChanged?.((changedWorkspaceId, skills) => {
+    // Broadcast payloads can belong to a different session working directory.
+    // Re-read this page's scoped catalog and clear stale deleted Skills.
+    const unsubscribe = window.electronAPI.onSkillsChanged?.((changedWorkspaceId) => {
       if (changedWorkspaceId !== workspaceId) return
-      const updated = skills.find((s) => s.slug === skillSlug)
-      if (updated) {
-        setSkill(updated)
-      }
+      void loadSkill()
     })
+
+    void loadSkill()
 
     return () => {
       isMounted = false

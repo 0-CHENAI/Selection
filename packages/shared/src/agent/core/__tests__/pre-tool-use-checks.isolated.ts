@@ -382,6 +382,44 @@ describe('runPreToolUseChecks', () => {
       expect(result.type).toBe('allow');
     });
 
+    it('routes meaningful source guides to internal preparation instead of a user-visible block', () => {
+      const generations: Array<number | undefined> = [];
+      const prereqManager = createMockPrerequisiteManager({
+        checkPrerequisites: (_toolName, assistantGeneration) => {
+          generations.push(assistantGeneration);
+          return {
+            allowed: false,
+            sourceGuide: {
+              sourceSlug: 'linear',
+              filePath: '/test/workspace/sources/linear/guide.md',
+              content: 'Use the issue search endpoint.',
+              version: 'guide-version',
+              alreadyPreparedInGeneration: false,
+            },
+          };
+        },
+      });
+
+      const result = runPreToolUseChecks(createInput({
+        toolName: 'mcp__linear__searchIssues',
+        input: {},
+        activeSourceSlugs: ['linear'],
+        allSourceSlugs: ['linear'],
+        assistantGeneration: 4,
+        prerequisiteManager: prereqManager,
+      }));
+
+      expect(result).toEqual({
+        type: 'source_guide_required',
+        sourceSlug: 'linear',
+        guidePath: '/test/workspace/sources/linear/guide.md',
+        guideContent: 'Use the issue search endpoint.',
+        guideVersion: 'guide-version',
+        alreadyPreparedInGeneration: false,
+      });
+      expect(generations).toEqual([4]);
+    });
+
     it('skips when no prerequisiteManager provided', () => {
       const result = runPreToolUseChecks(createInput({
         toolName: 'mcp__linear__createIssue',
@@ -908,6 +946,48 @@ describe('runPreToolUseChecks', () => {
       }));
 
       expect(result.type).toBe('block');
+    });
+
+    it('activates requiredSources when Read targets a catalog SKILL.md', () => {
+      const prereqManager = createMockPrerequisiteManager({
+        findCatalogSkillForTool: (toolName, input) => {
+          if (toolName === 'Read' && input.file_path === '/ws/skills/vision/SKILL.md') {
+            return { requiredSources: ['qwen-mm', 'extra'] };
+          }
+          return null;
+        },
+      });
+
+      const result = runPreToolUseChecks(createInput({
+        toolName: 'Read',
+        input: { file_path: '/ws/skills/vision/SKILL.md' },
+        activeSourceSlugs: [],
+        allSourceSlugs: ['qwen-mm', 'extra'],
+        prerequisiteManager: prereqManager,
+      }));
+
+      expect(result.type).toBe('source_activation_needed');
+      if (result.type === 'source_activation_needed') {
+        expect(result.sourceSlug).toBe('qwen-mm');
+        expect(result.sourceExists).toBe(true);
+        expect(result.additionalSourceSlugs).toEqual(['extra']);
+      }
+    });
+
+    it('does not activate sources for an arbitrary Read', () => {
+      const prereqManager = createMockPrerequisiteManager({
+        findCatalogSkillForTool: () => null,
+      });
+
+      const result = runPreToolUseChecks(createInput({
+        toolName: 'Read',
+        input: { file_path: '/tmp/notes.md' },
+        activeSourceSlugs: [],
+        allSourceSlugs: ['qwen-mm'],
+        prerequisiteManager: prereqManager,
+      }));
+
+      expect(result.type).toBe('allow');
     });
 
     it('call_llm interception runs before transforms', () => {

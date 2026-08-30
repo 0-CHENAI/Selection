@@ -23,6 +23,7 @@ import {
   Send,
   Pencil,
   Download,
+  RotateCcw,
 } from 'lucide-react'
 import { useMenuComponents } from '@/components/ui/menu-context'
 import { getFileManagerName } from '@/lib/platform'
@@ -41,6 +42,7 @@ export interface SourceMenuProps {
   /** Rename the display title without changing the source slug */
   onRename?: () => void
   onExport?: () => void
+  onRetryConnection?: () => void
 }
 
 /**
@@ -56,6 +58,7 @@ export function SourceMenu({
   onSendToWorkspace,
   onRename,
   onExport,
+  onRetryConnection,
 }: SourceMenuProps) {
   const { t } = useTranslation()
 
@@ -64,6 +67,13 @@ export function SourceMenu({
 
   return (
     <>
+      {onRetryConnection && (
+        <MenuItem onClick={onRetryConnection}>
+          <RotateCcw className="h-3.5 w-3.5" />
+          <span className="flex-1">{t('common.retry')}</span>
+        </MenuItem>
+      )}
+
       {/* Open in New Window */}
       <MenuItem onClick={onOpenInNewWindow}>
         <AppWindow className="h-3.5 w-3.5" />

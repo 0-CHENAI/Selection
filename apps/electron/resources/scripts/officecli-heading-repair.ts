@@ -42,7 +42,10 @@ function runOfficecli(binary: string, args: string[]): CommandResult {
   // Do not disable OfficeCLI's resident mode here. The create command may have
   // a live in-memory document, and bypassing it can make a later flush undo the
   // compatibility repair.
-  const child = spawnSync(binary, args, { encoding: 'utf8', env: process.env });
+  const child = spawnSync(binary, args, {
+    encoding: 'utf8',
+    env: { ...process.env, OFFICECLI_SKIP_UPDATE: '1' },
+  });
   const output = `${child.stdout ?? ''}${child.stderr ?? ''}`;
   const incomplete = /\b(?:WARNING|UNSUPPORTED)\b/i.test(output);
   return {

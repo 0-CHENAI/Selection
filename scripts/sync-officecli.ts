@@ -257,6 +257,7 @@ async function run(binary: string, args: string[]): Promise<string> {
     stderr: 'pipe',
     env: {
       ...process.env,
+      OFFICECLI_SKIP_UPDATE: '1',
       DOTNET_SYSTEM_GLOBALIZATION_INVARIANT: '1',
       LANG: 'C',
       LC_ALL: 'C',

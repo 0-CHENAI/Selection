@@ -55,10 +55,21 @@ describe('PromptBuilder volatile/stable context split (issue #862)', () => {
     expect(volatileText).toContain(SOURCE_BLOCK)
     // workspace capabilities is stable
     expect(stableText).toContain('<workspace_capabilities>')
+    expect(stableText).toContain('<available_skills>')
+    expect(stableText).toContain('(officecli)')
 
     // The halves must not bleed into each other
     expect(volatileText).not.toContain('<workspace_capabilities>')
+    expect(volatileText).not.toContain('<available_skills>')
     expect(stableText).not.toContain('permissionMode:')
+  })
+
+  it('does not inject the skill catalog for mini agents', () => {
+    cleanupModeState(SESSION_ID)
+    const builder = new TestAgent(createMockBackendConfig({
+      systemPromptPreset: 'mini',
+    })).getPromptBuilder()
+    expect(builder.buildStableContextParts().join('\n')).not.toContain('<available_skills>')
   })
 
   it('consumes the one-shot mode-change signal exactly once, only on the volatile path', () => {

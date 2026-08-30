@@ -23,7 +23,7 @@ import remarkCollapsibleSections from './remarkCollapsibleSections'
 import { CollapsibleSection } from './CollapsibleSection'
 import { useCollapsibleMarkdown } from './CollapsibleMarkdownContext'
 import { wrapWithSafeProxy } from './safe-components'
-import { MARKDOWN_MATH_OPTIONS } from './math-options'
+import { MARKDOWN_MATH_OPTIONS, protectCurrencyDollars } from './math-options'
 import { markdownUrlTransform } from './url-transform'
 
 /**
@@ -159,6 +159,18 @@ function createComponents(
         {child}
       </div>
     )
+  }
+
+  const renderLanguageMath = (
+    className: string | undefined,
+    children: React.ReactNode,
+    nodePosition?: { start?: { line?: number }; end?: { line?: number } },
+  ) => {
+    const code = String(children).replace(/\n$/, '')
+    if (className?.includes('math-inline')) {
+      return <MarkdownLatexBlock code={code} displayMode={false} />
+    }
+    return wrapBlock('latex', code, <MarkdownLatexBlock code={code} className="my-2" />, nodePosition)
   }
 
   const baseComponents: Partial<Components> = {
@@ -311,9 +323,9 @@ function createComponents(
               props.node?.position,
             )
           }
-          // LaTeX/math code blocks → KaTeX rendered display math
+          // Fenced ```latex / ```math → display. remark-math inline → keep inline.
           if (match?.[1] === 'latex' || match?.[1] === 'math') {
-            return wrapBlock('latex', code, <MarkdownLatexBlock code={code} className="my-2" />, props.node?.position)
+            return renderLanguageMath(className, children, props.node?.position)
           }
           // Mermaid code blocks → zinc-styled SVG diagram.
           // Hide the inline expand button when the mermaid block is the first
@@ -449,9 +461,9 @@ function createComponents(
             props.node?.position,
           )
         }
-        // LaTeX/math code blocks → KaTeX rendered display math
+        // Fenced ```latex / ```math → display. remark-math inline → keep inline.
         if (match?.[1] === 'latex' || match?.[1] === 'math') {
-          return wrapBlock('latex', code, <MarkdownLatexBlock code={code} className="my-2" />, props.node?.position)
+          return renderLanguageMath(className, children, props.node?.position)
         }
         // Mermaid code blocks → zinc-styled SVG diagram.
         // (Same first-block detection as minimal mode — see comment above.)
@@ -595,15 +607,13 @@ export function Markdown({
     [mode, onUrlClick, onFileClick, collapsible, collapsibleContext, hideFirstMermaidExpand, disablePreviewBlocks]
   )
 
-  // Preprocess to convert raw URLs and file paths to markdown links
+  // Linkify first, then shield currency `$` so `$A$` can be inline math.
   const processedContent = React.useMemo(
-    () => preprocessLinks(children),
+    () => protectCurrencyDollars(preprocessLinks(children)),
     [children]
   )
 
   // Conditionally include the collapsible sections plugin.
-  // IMPORTANT: Disable single-dollar inline math so currency like $2M–$4M
-  // stays plain text. Math should use $$...$$ delimiters.
   const remarkPlugins = React.useMemo(
     () => {
       const mathPlugin: [typeof remarkMath, typeof MARKDOWN_MATH_OPTIONS] = [
@@ -621,7 +631,7 @@ export function Markdown({
     <div className={cn('markdown-content', className)}>
       <ReactMarkdown
         remarkPlugins={remarkPlugins}
-        rehypePlugins={[rehypeKatex, rehypeRaw]}
+        rehypePlugins={[[rehypeKatex, { throwOnError: false, strict: false }], rehypeRaw]}
         components={components}
         urlTransform={markdownUrlTransform}
       >

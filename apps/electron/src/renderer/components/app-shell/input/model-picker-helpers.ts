@@ -21,6 +21,32 @@ export function formatTokenCount(tokens: number): string {
   return tokens.toString()
 }
 
+/** Model windows are usually multiples of 1024 — keep 65536 as 64k, not 66k. */
+export function formatModelTokenLimit(tokens: number): string {
+  if (tokens >= 1024 && tokens % 1024 === 0) {
+    const kib = tokens / 1024
+    if (kib >= 1024 && kib % 1024 === 0) return `${kib / 1024}M`
+    return `${kib}k`
+  }
+  return formatTokenCount(tokens)
+}
+
+/** Compact "200k context · 64k output" line for pickers and setup cards. */
+export function formatModelLimitCaption(
+  model: { contextWindow?: number; maxTokens?: number } | string | null | undefined,
+  labels: { context: string; output: string },
+): string | undefined {
+  if (!model || typeof model === 'string') return undefined
+  const parts: string[] = []
+  if (typeof model.contextWindow === 'number' && model.contextWindow > 0) {
+    parts.push(`${formatModelTokenLimit(model.contextWindow)} ${labels.context}`)
+  }
+  if (typeof model.maxTokens === 'number' && model.maxTokens > 0) {
+    parts.push(`${formatModelTokenLimit(model.maxTokens)} ${labels.output}`)
+  }
+  return parts.length > 0 ? parts.join(' · ') : undefined
+}
+
 /**
  * Strip the "pi/" prefix from model IDs/display names so the user sees a
  * provider-agnostic label in the picker (e.g., "pi/claude-opus" → "claude-opus").

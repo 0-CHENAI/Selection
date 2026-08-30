@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test'
-import { appendRestoredInput, coerceInputText, getRestorableStoppedPrompt } from '../input-text'
+import { appendRestoredInput, coerceInputText, getRestorableStoppedPrompt, sessionHasLiveGeneration } from '../input-text'
 
 describe('coerceInputText', () => {
   it('preserves plain strings', () => {
@@ -72,5 +72,70 @@ describe('getRestorableStoppedPrompt', () => {
       { role: 'user', content: 'active prompt' },
       { role: 'user', content: 'queued draft', isQueued: true },
     ])).toBe('active prompt')
+  })
+})
+
+describe('sessionHasLiveGeneration', () => {
+  it('treats isProcessing as live generation', () => {
+    expect(sessionHasLiveGeneration({ isProcessing: true, messages: [] })).toBe(true)
+  })
+
+  it('treats a streaming assistant body as live even if isProcessing is stale', () => {
+    expect(sessionHasLiveGeneration({
+      isProcessing: false,
+      messages: [{ role: 'assistant', isStreaming: true, isPending: true }],
+    })).toBe(true)
+  })
+
+  it('does not treat idle transcript messages as live generation', () => {
+    expect(sessionHasLiveGeneration({
+      isProcessing: false,
+      messages: [{ role: 'user', content: 'done' }, { role: 'assistant', content: 'reply' }],
+    })).toBe(false)
+  })
+
+  it('does not treat settled work-chain commentary as live after the turn stops', () => {
+    expect(sessionHasLiveGeneration({
+      isProcessing: false,
+      messages: [
+        { role: 'assistant', content: 'PAGE field is properly structured', isIntermediate: true },
+        { role: 'assistant', content: '已写好公式和模拟过程' },
+      ],
+    })).toBe(false)
+  })
+
+  it('treats pending commentary as live when isProcessing is stale', () => {
+    expect(sessionHasLiveGeneration({
+      isProcessing: false,
+      messages: [{ role: 'assistant', content: '先读目录', isIntermediate: true, isPending: true }],
+    })).toBe(true)
+  })
+
+  it('treats a thinking status pill as live when isProcessing is stale', () => {
+    expect(sessionHasLiveGeneration({
+      isProcessing: false,
+      currentStatus: { message: 'Thinking…' },
+      messages: [{ role: 'user', content: 'question' }],
+    })).toBe(true)
+  })
+
+  it('treats a work-chain-only executing tool as live when isProcessing is stale', () => {
+    expect(sessionHasLiveGeneration({
+      isProcessing: false,
+      messages: [
+        { role: 'user', content: 'read the doc' },
+        { role: 'tool', toolStatus: 'executing', content: '' },
+      ],
+    })).toBe(true)
+  })
+
+  it('does not treat a finished background task as live generation', () => {
+    expect(sessionHasLiveGeneration({
+      isProcessing: false,
+      messages: [
+        { role: 'assistant', content: 'done' },
+        { role: 'tool', toolStatus: 'executing', isBackground: true, taskId: 'task-1' },
+      ],
+    })).toBe(false)
   })
 })

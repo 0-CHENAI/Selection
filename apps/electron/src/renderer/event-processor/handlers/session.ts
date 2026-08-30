@@ -48,6 +48,7 @@ import type {
   Effect,
 } from '../types'
 import type { Message } from '../../../shared/types'
+import { sessionHasLiveGeneration } from '../../lib/input-text'
 import {
   generateMessageId,
   appendMessage,
@@ -342,8 +343,8 @@ export function handleInterrupted(
       if (m.role === 'tool' && m.toolResult === undefined && m.toolStatus !== 'completed' && m.toolStatus !== 'error') {
         return { ...m, toolStatus: 'error' as const, toolResult: 'Interrupted', isError: true }
       }
-      // Clear pending state on assistant messages (transient streaming state)
-      if (m.role === 'assistant' && m.isPending) {
+      // Clear transient streaming flags even if only isStreaming was set.
+      if (m.role === 'assistant' && (m.isPending || m.isStreaming)) {
         return { ...m, isPending: false, isStreaming: false }
       }
       return m
@@ -561,24 +562,18 @@ export function handleUserMessage(
     [message.id, event.optimisticMessageId, existingQueued?.id, existingQueued?.queueId]
       .filter((id): id is string => !!id),
   )
-  // Send-now / mid-stream steer: hide the current generation and let the
+  // Send-now / mid-stream steer: hide the in-flight body and let the
   // follow-up start a new reply, matching Codex / Grok.
-  const hasOpenGeneration = streaming !== null
-    || session.isProcessing
-    || session.messages.some(candidate =>
-      !candidate.hidden && (
-        (candidate.role === 'assistant' && (candidate.isStreaming || candidate.isPending || candidate.isIntermediate))
-        || candidate.role === 'status'
-      ),
-    )
+  // A queued ack alone is not enough: after Stop, leftover work-chain
+  // rows can make the next "继续" look queued while the backend is idle.
+  // Collapsing then hides the already-generated body (#101).
+  const hasInFlightAssistant = session.messages.some(candidate =>
+    candidate.role === 'assistant' && !candidate.hidden && (candidate.isStreaming || candidate.isPending),
+  )
+  const hasOpenGeneration = streaming !== null || sessionHasLiveGeneration(session)
   // Hidden system continuations may drive another model turn, but they are not
   // user-authored redirects and must never suppress/collapse the visible reply.
-  const collapsesOpenTurn = !message.hidden && status === 'accepted' && hasOpenGeneration && (
-    !!existingQueued
-    || session.messages.some(candidate =>
-      candidate.role === 'assistant' && !candidate.hidden && (candidate.isStreaming || candidate.isPending),
-    )
-  )
+  const collapsesOpenTurn = !message.hidden && status === 'accepted' && hasOpenGeneration && hasInFlightAssistant
   const seedMessages = collapsesOpenTurn && !existingQueued
     ? [...session.messages, { ...message, isQueued: false, isPending: false }]
     : session.messages
@@ -628,9 +623,11 @@ export function handleUserMessage(
     const existingMessage = boundaryMessages[existingIndex]
 
     // Event sequence protection: don't regress from 'processing' back to 'queued'
-    // This handles out-of-order events (e.g., 'processing' arrives before 'queued')
-    if (status === 'queued' && existingMessage.isQueued === false) {
-      // Already progressed past queued state, ignore this late 'queued' event
+    // when a late queued ack arrives after the message is already confirmed.
+    // Optimistic follow-ups can be inserted with isQueued: false if live
+    // generation was missed at send time — those are still pending and must
+    // accept a legitimate queued ack (#94).
+    if (status === 'queued' && existingMessage.isQueued === false && !existingMessage.isPending) {
       return { state, effects: [] }
     }
 

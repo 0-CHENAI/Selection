@@ -18,10 +18,12 @@
 
 import '@sentry/electron/preload'
 import { contextBridge, ipcRenderer, shell, webUtils } from 'electron'
+import open from 'open'
 import { WsRpcClient, type TransportConnectionState } from '../transport/client'
 import { RoutedClient } from '../transport/routed-client'
 import { buildClientApi } from '../transport/build-api'
 import { CHANNEL_MAP } from '../transport/channel-map'
+import { dispatchDetachedOpenPath, dispatchOpenPath } from './shell-capabilities'
 import { createCallbackServer } from '@craft-agent/shared/auth/callback-server'
 import { CHATGPT_OAUTH_CONFIG } from '@craft-agent/shared/auth/chatgpt-oauth-config'
 import {
@@ -160,10 +162,11 @@ if (isClientOnly) {
 
 client.handleCapability(CLIENT_OPEN_EXTERNAL, (url: string) => shell.openExternal(url))
 
-client.handleCapability(CLIENT_OPEN_PATH, async (path: string) => {
-  const error = await shell.openPath(path)
-  return { error: error || undefined }
-})
+client.handleCapability(CLIENT_OPEN_PATH, (path: string) => (
+  process.platform === 'win32'
+    ? dispatchDetachedOpenPath(path, value => open(value, { wait: false }))
+    : dispatchOpenPath(path, value => shell.openPath(value))
+))
 
 client.handleCapability(CLIENT_SHOW_IN_FOLDER, (path: string) => {
   shell.showItemInFolder(path)

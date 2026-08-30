@@ -11,15 +11,45 @@ export const MIN_POPOVER_WIDTH = 320
 export const MIN_POPOVER_HEIGHT = 280
 /** Matches the `h-10` title bar. */
 export const COLLAPSED_POPOVER_HEIGHT = 40
+/** Hug the title + header buttons; ignore the 320 expanded minimum. */
+export const COLLAPSED_POPOVER_WIDTH = 240
 export const VIEWPORT_MARGIN = 16
 export const VIEWPORT_MARGIN_TOP = 52
 export const POPOVER_HEADER_HEIGHT = 40
 export const POPOVER_INPUT_CHROME = 56
 export const POPOVER_MESSAGE_RESERVE = 64
+/** Clicks on the drag handle must not start a drag or flip Radix collision. */
+export const POPOVER_DRAG_THRESHOLD = 4
+
+/** Keep Radix collision padding aligned with the app title-bar inset. */
+export const POPOVER_COLLISION_PADDING = {
+  top: VIEWPORT_MARGIN_TOP,
+  right: VIEWPORT_MARGIN,
+  bottom: VIEWPORT_MARGIN,
+  left: VIEWPORT_MARGIN,
+} as const
+
+/**
+ * Collapsed body must not keep `flex`. Tailwind's `flex` and `hidden` both set
+ * `display`, and `flex` wins in the generated sheet — #122 empty-state leak.
+ */
+export function popoverBodyClassName(collapsed: boolean): string {
+  return collapsed ? 'hidden' : 'flex min-h-0 min-w-0 flex-1 flex-col'
+}
 
 export type Size = { width: number; height: number }
 export type Point = { x: number; y: number }
 export type Viewport = { width: number; height: number }
+
+export function hasPopoverDragMoved(
+  start: Point,
+  current: Point,
+  threshold = POPOVER_DRAG_THRESHOLD,
+): boolean {
+  const dx = current.x - start.x
+  const dy = current.y - start.y
+  return dx * dx + dy * dy >= threshold * threshold
+}
 
 export function viewportMaxSize(viewport: Viewport): Size {
   return {
@@ -37,7 +67,9 @@ export function clampPopoverSize(
   const minWidth = Math.min(MIN_POPOVER_WIDTH, max.width)
   const minHeight = Math.min(MIN_POPOVER_HEIGHT, max.height)
   return {
-    width: Math.min(Math.max(size.width, minWidth), Math.max(minWidth, max.width)),
+    width: collapsed
+      ? Math.min(COLLAPSED_POPOVER_WIDTH, max.width)
+      : Math.min(Math.max(size.width, minWidth), Math.max(minWidth, max.width)),
     height: collapsed
       ? Math.min(COLLAPSED_POPOVER_HEIGHT, Math.max(max.height, COLLAPSED_POPOVER_HEIGHT))
       : Math.min(Math.max(size.height, minHeight), Math.max(minHeight, max.height)),
@@ -66,6 +98,44 @@ export function clampPopoverOffset(
     x: clampAxis(offset.x, minX, maxX),
     y: clampAxis(offset.y, minY, maxY),
   }
+}
+
+/**
+ * Clamp using the painted box (getBoundingClientRect, includes translate).
+ * After collapse/expand Radix may move the untranslated origin; re-run this
+ * so the card cannot cover the app title bar (#123).
+ */
+export function clampVisualPopoverOffset(
+  offset: Point,
+  visual: { left: number; top: number },
+  size: Size,
+  viewport: Viewport,
+): Point {
+  return clampPopoverOffset(
+    offset,
+    size,
+    viewport,
+    { x: visual.left - offset.x, y: visual.top - offset.y },
+  )
+}
+
+/**
+ * Collapse/expand changes the box size. Radix may also re-place the
+ * untranslated origin while avoidCollisions is still on. Shift the drag
+ * offset so the top-left the user last saw stays put, then clamp.
+ */
+export function offsetToPinVisualOrigin(
+  offset: Point,
+  previousVisual: { left: number; top: number },
+  currentVisual: { left: number; top: number },
+  nextSize: Size,
+  viewport: Viewport,
+): Point {
+  const pinned = {
+    x: offset.x + previousVisual.left - currentVisual.left,
+    y: offset.y + previousVisual.top - currentVisual.top,
+  }
+  return clampVisualPopoverOffset(pinned, previousVisual, nextSize, viewport)
 }
 
 /**

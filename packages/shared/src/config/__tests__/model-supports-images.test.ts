@@ -2,6 +2,9 @@ import { describe, expect, it } from 'bun:test'
 import {
   modelSupportsImages,
   resolveConnectionModelContextWindow,
+  resolveConnectionModelMaxTokens,
+  sanitizeCustomContextWindow,
+  sanitizeCustomMaxTokens,
   toCustomEndpointModelPayload,
   type LlmConnection,
 } from '../llm-connections.ts'
@@ -134,6 +137,13 @@ describe('toCustomEndpointModelPayload', () => {
       contextWindow: 200_000,
     })
   })
+
+  it('forwards an explicit maxTokens override', () => {
+    expect(toCustomEndpointModelPayload({ id: 'Laufry', maxTokens: 32_768 })).toEqual({
+      id: 'Laufry',
+      maxTokens: 32_768,
+    })
+  })
 })
 
 describe('resolveConnectionModelContextWindow', () => {
@@ -150,6 +160,39 @@ describe('resolveConnectionModelContextWindow', () => {
     const conn: LlmConnection = { ...BASE_COMPAT, models: ['Opus'] }
     expect(resolveConnectionModelContextWindow(conn, 'Opus')).toBeUndefined()
     expect(resolveConnectionModelContextWindow(null, 'Opus')).toBeUndefined()
+  })
+})
+
+describe('sanitizeCustom token limits', () => {
+  it('rejects out-of-range context windows and max output', () => {
+    expect(sanitizeCustomContextWindow(16)).toBeUndefined()
+    expect(sanitizeCustomContextWindow(20_000_000)).toBeUndefined()
+    expect(sanitizeCustomMaxTokens(16)).toBeUndefined()
+    expect(sanitizeCustomMaxTokens(2_000_000)).toBeUndefined()
+    expect(sanitizeCustomContextWindow(131_072)).toBe(131_072)
+    expect(sanitizeCustomMaxTokens(32_768)).toBe(32_768)
+  })
+
+  it('clamps max output to the context window when both are known', () => {
+    expect(sanitizeCustomMaxTokens(65_536, 4_096)).toBe(4_096)
+    expect(sanitizeCustomMaxTokens(1_024, 4_096)).toBe(1_024)
+  })
+})
+
+describe('resolveConnectionModelMaxTokens', () => {
+  it('reads a stored max output and matches prefixed runtime IDs', () => {
+    const conn: LlmConnection = {
+      ...BASE_COMPAT,
+      models: [{ id: 'DeepSeek-V4-Flash', maxTokens: 32_768 } as never],
+    }
+    expect(resolveConnectionModelMaxTokens(conn, 'custom-endpoint/DeepSeek-V4-Flash')).toBe(32_768)
+    expect(resolveConnectionModelMaxTokens(conn, 'pi/DeepSeek-V4-Flash')).toBe(32_768)
+  })
+
+  it('returns undefined when the catalog has no max output', () => {
+    const conn: LlmConnection = { ...BASE_COMPAT, models: ['Opus'] }
+    expect(resolveConnectionModelMaxTokens(conn, 'Opus')).toBeUndefined()
+    expect(resolveConnectionModelMaxTokens(null, 'Opus')).toBeUndefined()
   })
 })
 

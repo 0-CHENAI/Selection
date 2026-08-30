@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next'
 import { Search } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import {
+  formatModelLimitCaption,
   PICKER_COLLAPSE_THRESHOLD,
   resolveVisiblePickerModels,
 } from './model-picker-helpers'
@@ -101,4 +102,14 @@ export function ModelPickerEmptyResults() {
       {t('chat.modelPicker.noResults')}
     </div>
   )
+}
+
+export function pickerModelLimitCaption(
+  model: ModelDefinition | string,
+  t: (key: string) => string,
+): string | undefined {
+  return formatModelLimitCaption(model, {
+    context: t('chat.context'),
+    output: t('chat.usage.output'),
+  })
 }

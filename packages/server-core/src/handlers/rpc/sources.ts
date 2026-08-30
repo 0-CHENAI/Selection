@@ -1,11 +1,16 @@
 import { RPC_CHANNELS } from '@craft-agent/shared/protocol'
 import { getWorkspaceByNameOrId } from '@craft-agent/shared/config'
-import { loadWorkspaceSources } from '@craft-agent/shared/sources'
+import { getSourceCredentialManager, getSourceServerBuilder, loadWorkspaceSources } from '@craft-agent/shared/sources'
 import { setDisplayTitle } from '@craft-agent/shared/display-titles/storage'
 import { safeJsonParse } from '@craft-agent/shared/utils/files'
-import { getCredentialManager } from '@craft-agent/shared/credentials'
+import { resolveFsPath } from '@craft-agent/shared/utils'
 import { pushTyped, type RpcServer } from '@craft-agent/server-core/transport'
 import type { HandlerDeps } from '../handler-deps'
+import {
+  createMcpValidationDependencies,
+  resumeInterruptedMcpValidations,
+  startMcpSourceValidation,
+} from './mcp-import-credentials'
 
 export const HANDLED_CHANNELS = [
   RPC_CHANNELS.sources.GET,
@@ -17,6 +22,7 @@ export const HANDLED_CHANNELS = [
   RPC_CHANNELS.workspace.GET_PERMISSIONS,
   RPC_CHANNELS.permissions.GET_DEFAULTS,
   RPC_CHANNELS.sources.GET_MCP_TOOLS,
+  RPC_CHANNELS.sources.RETRY_CONNECTION,
   RPC_CHANNELS.sources.SET_DISPLAY_TITLE,
 ] as const
 
@@ -30,7 +36,18 @@ export function registerSourcesHandlers(server: RpcServer, deps: HandlerDeps): v
       log.error(`SOURCES_GET: Workspace not found: ${workspaceId}`)
       return []
     }
-    return loadWorkspaceSources(workspace.rootPath)
+    const workspaceRootPath = resolveFsPath(workspace.rootPath)
+    const sources = loadWorkspaceSources(workspaceRootPath)
+    for (const validation of resumeInterruptedMcpValidations(
+      workspaceRootPath,
+      sources,
+      createMcpValidationDependencies(deps),
+    )) {
+      void validation.catch(error => {
+        log.error('Failed to resume interrupted MCP connection validation:', error)
+      })
+    }
+    return sources
   })
 
   // Create a new source
@@ -104,6 +121,22 @@ export function registerSourcesHandlers(server: RpcServer, deps: HandlerDeps): v
     log.info(`Saved credentials for source: ${sourceSlug}`)
   })
 
+  server.handle(RPC_CHANNELS.sources.RETRY_CONNECTION, async (_ctx, workspaceId: string, sourceSlug: string) => {
+    const workspace = getWorkspaceByNameOrId(workspaceId)
+    if (!workspace) throw new Error(`Workspace not found: ${workspaceId}`)
+
+    const validation = startMcpSourceValidation(
+      resolveFsPath(workspace.rootPath),
+      sourceSlug,
+      createMcpValidationDependencies(deps),
+    )
+    void validation.catch(error => {
+      log.error(`Background MCP connection retry failed for ${sourceSlug}:`, error)
+    })
+
+    return { started: true }
+  })
+
   // Get permissions config for a source (raw format for UI display)
   server.handle(RPC_CHANNELS.sources.GET_PERMISSIONS, async (_ctx, workspaceId: string, sourceSlug: string) => {
     const workspace = getWorkspaceByNameOrId(workspaceId)
@@ -174,6 +207,9 @@ export function registerSourcesHandlers(server: RpcServer, deps: HandlerDeps): v
       if (source.config.type !== 'mcp') return { success: false, error: 'Source is not an MCP server' }
       if (!source.config.mcp) return { success: false, error: 'MCP config not found' }
 
+      if (source.config.connectionStatus === 'connecting') {
+        return { success: false, error: 'Source connection is still being validated' }
+      }
       if (source.config.connectionStatus === 'needs_auth') {
         return { success: false, error: 'Source requires authentication' }
       }
@@ -203,21 +239,23 @@ export function registerSourcesHandlers(server: RpcServer, deps: HandlerDeps): v
           return { success: false, error: 'MCP source URL is required for HTTP/SSE transport' }
         }
 
-        let accessToken: string | undefined
-        if (source.config.mcp.authType === 'oauth' || source.config.mcp.authType === 'bearer') {
-          const credentialManager = getCredentialManager()
-          const credentialId = source.config.mcp.authType === 'oauth'
-            ? { type: 'source_oauth' as const, workspaceId: source.workspaceId, sourceId: sourceSlug }
-            : { type: 'source_bearer' as const, workspaceId: source.workspaceId, sourceId: sourceSlug }
-          const credential = await credentialManager.get(credentialId)
-          accessToken = credential?.value
+        const credentialManager = getSourceCredentialManager()
+        const token = source.config.mcp.authType === 'none'
+          ? null
+          : await credentialManager.getToken(source)
+        const credential = source.config.mcp.headerNames?.length
+          ? await credentialManager.getApiCredential(source)
+          : null
+        const mcpConfig = getSourceServerBuilder().buildMcpServer(source, token, credential)
+        if (!mcpConfig || mcpConfig.type === 'stdio') {
+          return { success: false, error: 'Failed to build MCP connection configuration' }
         }
 
         log.info(`Fetching MCP tools from ${source.config.mcp.url}`)
         client = new CraftMcpClient({
           transport: 'http',
-          url: source.config.mcp.url,
-          headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : undefined,
+          url: mcpConfig.url,
+          headers: mcpConfig.headers,
         })
       }
 

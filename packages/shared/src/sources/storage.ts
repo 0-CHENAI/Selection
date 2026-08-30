@@ -504,7 +504,8 @@ export function generateSourceSlug(workspaceRootPath: string, name: string): str
  */
 export async function createSource(
   workspaceRootPath: string,
-  input: CreateSourceInput
+  input: CreateSourceInput,
+  options: { skipIconDownload?: boolean } = {},
 ): Promise<FolderSourceConfig> {
   const slug = generateSourceSlug(workspaceRootPath, input.name);
   const now = Date.now();
@@ -555,12 +556,12 @@ export async function createSource(
   // If icon is a URL, download it immediately
   // (watcher will also handle this, but doing it here provides immediate feedback)
   const sourcePath = getSourcePath(workspaceRootPath, slug);
-  if (config.icon && isIconUrl(config.icon)) {
+  if (!options.skipIconDownload && config.icon && isIconUrl(config.icon)) {
     const iconPath = await downloadIcon(sourcePath, config.icon, 'Sources');
     if (iconPath) {
       debug(`[createSource] Icon downloaded for ${slug}: ${iconPath}`);
     }
-  } else if (!config.icon) {
+  } else if (!options.skipIconDownload && !config.icon) {
     // No icon provided - try to auto-fetch from service URL
     const { deriveServiceUrl, getHighQualityLogoUrl } = await import('../utils/logo.ts');
     const { downloadIcon } = await import('../utils/icon.ts');
@@ -625,4 +626,3 @@ export function sourceExists(workspaceRootPath: string, sourceSlug: string): boo
 // ============================================================
 
 export { parseGuideMarkdown };
-

@@ -19,8 +19,44 @@ function manifest(): OfficecliManifest {
 }
 
 describe('OfficeCLI sync governance', () => {
+  it('builds automated OfficeCLI upgrades from test and opens their PRs against test', () => {
+    const workflow = readFileSync(
+      resolve(import.meta.dir, '../.github/workflows/officecli-update.yml'),
+      'utf8',
+    );
+
+    expect(workflow).toContain('OFFICECLI_BASE_BRANCH: test');
+    expect(workflow).toContain('ref: ${{ env.OFFICECLI_BASE_BRANCH }}');
+    expect(workflow).toContain('gh pr list --state open --base "$OFFICECLI_BASE_BRANCH"');
+    expect(workflow).toContain('gh pr edit "$pr_number" --base "$OFFICECLI_BASE_BRANCH"');
+    expect(workflow).toContain('gh pr create --draft --base "$OFFICECLI_BASE_BRANCH"');
+    expect(workflow.indexOf('Enforce reviewed command and resource policy')).toBeLessThan(
+      workflow.indexOf('Publish or refresh draft upgrade PR'),
+    );
+  });
+
   it('accepts the complete reviewed manifest', () => {
     expect(() => validateManifestFiles(manifest())).not.toThrow();
+  });
+
+  it('prevents reviewed binaries from self-updating through every managed launch path', () => {
+    const repositoryRoot = resolve(import.meta.dir, '..');
+    const managedLaunchPaths = [
+      'scripts/sync-officecli.ts',
+      'scripts/run-officecli-integration-tests.ts',
+      'apps/electron/resources/bin/officecli',
+      'apps/electron/resources/bin/officecli.cmd',
+      'apps/electron/resources/scripts/officecli-wrapper.ts',
+      'apps/electron/resources/scripts/officecli-heading-repair.ts',
+      'packages/shared/src/agent/pi-agent.ts',
+    ];
+
+    for (const path of managedLaunchPaths) {
+      const content = readFileSync(join(repositoryRoot, path), 'utf8');
+      expect(content, `${path} must disable OfficeCLI self-updates`).toMatch(
+        /OFFICECLI_SKIP_UPDATE(?:=1|['"]?\s*:\s*['"]1['"])/,
+      );
+    }
   });
 
   it('records the reviewed Windows schema CRC without changing the default CRC', () => {

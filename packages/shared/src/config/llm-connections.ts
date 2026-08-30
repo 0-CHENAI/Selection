@@ -20,12 +20,22 @@ import {
   connectionModelIdsMatch,
   inferModelSupportsImages,
   resolveCustomModelContextWindow,
+  resolveCustomModelMaxTokens,
 } from './model-image-support';
 export {
+  DEFAULT_CUSTOM_CONTEXT_WINDOW,
+  DEFAULT_CUSTOM_MAX_TOKENS,
+  MAX_CUSTOM_CONTEXT_WINDOW,
+  MAX_CUSTOM_MAX_TOKENS,
+  MIN_CUSTOM_CONTEXT_WINDOW,
+  MIN_CUSTOM_MAX_TOKENS,
   connectionModelIdsMatch,
   inferModelSupportsImages,
   normalizeConnectionModelId,
   resolveCustomModelContextWindow,
+  resolveCustomModelMaxTokens,
+  sanitizeCustomContextWindow,
+  sanitizeCustomMaxTokens,
   toCustomEndpointModelPayload,
 } from './model-image-support';
 import type { CredentialManager } from '../credentials/manager.ts';
@@ -134,9 +144,9 @@ export interface CustomEndpointConfig {
  * - 'queue': Hold the message; let the current turn finish naturally; replay
  *   as a new turn afterwards. No abort, no destructive interruption.
  *
- * Default is per-`providerType` via {@link defaultMidStreamBehavior}; reads
- * everywhere should go through {@link resolveMidStreamBehavior} so connections
- * created before this field existed still pick up the right default.
+ * Composer Enter always queues (#22, #23). `steer` is the queue panel's
+ * "Send now" path, not the default submit. Reads of the stored field still
+ * go through {@link resolveMidStreamBehavior}.
  */
 export type MidStreamBehavior = 'steer' | 'queue';
 
@@ -508,16 +518,12 @@ export function isPiProvider(providerType: LlmProviderType): boolean {
 /**
  * Default mid-stream send behavior for a given provider type.
  *
- * - 'anthropic' → 'queue': Claude's emulated steer (PreToolUse hook injection)
- *   has a real failure mode — if no tool fires before the turn ends, the steer
- *   becomes `steer_undelivered` and gets re-queued anyway, paying for the
- *   original turn's tokens for nothing. Default to queue for predictability.
- * - 'pi' / 'pi_compat' → 'steer': interrupt the live query and replay the
- *   follow-up as a new turn. Native `.steer()` waits for the current tool
- *   and then finishes the original answer, which produces two cards.
+ * Composer Enter always queues (#22, #23). Changing direction is the
+ * queue panel's "Send now" action. Keep the stored default on `queue`
+ * so Settings does not advertise Enter-to-steer.
  */
-export function defaultMidStreamBehavior(providerType: LlmProviderType): MidStreamBehavior {
-  return providerType === 'pi' || providerType === 'pi_compat' ? 'steer' : 'queue';
+export function defaultMidStreamBehavior(_providerType: LlmProviderType): MidStreamBehavior {
+  return 'queue';
 }
 
 /**
@@ -621,6 +627,14 @@ export function resolveConnectionModelContextWindow(
   modelId: string,
 ): number | undefined {
   return resolveCustomModelContextWindow(connection?.models, modelId);
+}
+
+/** Per-model max output tokens from the connection catalog (ORDER / custom endpoints). */
+export function resolveConnectionModelMaxTokens(
+  connection: Pick<LlmConnection, 'models'> | null | undefined,
+  modelId: string,
+): number | undefined {
+  return resolveCustomModelMaxTokens(connection?.models, modelId);
 }
 
 /**

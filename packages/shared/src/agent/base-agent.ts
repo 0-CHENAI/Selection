@@ -18,7 +18,7 @@ import { join } from 'node:path';
 
 import type { AgentEvent } from '@craft-agent/core/types';
 import type { FileAttachment } from '../utils/files.ts';
-import { collectOfficeFormatSkillSlugs } from '../utils/officecli.ts';
+import { shouldLoadBundledOfficecliRouter } from '../utils/officecli.ts';
 import { expandPath } from '../utils/paths.ts';
 import { resolveSpawnSessionMode, resolveSpawnWaitTimeoutMs } from './spawn-session-tool.ts';
 import { buildTransferredSessionContext } from './conversation-summary.ts';
@@ -26,6 +26,7 @@ import type { ThinkingLevel } from './thinking-levels.ts';
 import { DEFAULT_THINKING_LEVEL, normalizeThinkingLevel } from './thinking-levels.ts';
 import type { PermissionMode } from './mode-manager.ts';
 import type { LoadedSource } from '../sources/types.ts';
+import type { LoadedSkill } from '../skills/types.ts';
 import { buildCallLlmRequest, type LLMQueryRequest, type LLMQueryResult } from './llm-tool.ts';
 import { getLlmConnections, getDefaultLlmConnection } from '../config/storage.ts';
 import { loadAllSources } from '../sources/storage.ts';
@@ -73,7 +74,9 @@ import { buildTitlePrompt, buildRegenerateTitlePrompt, validateTitle } from '../
 
 // Skill extraction for Codex/Copilot backends (Claude uses native SDK Skill tool)
 import { parseMentions, resolveSkillMentions, resolveSourceMentions, resolveFileMentions } from '../mentions/index.ts';
-import { loadAllSkills, resolveBundledSkillMdPath } from '../skills/storage.ts';
+import { invalidateSkillsCacheIfSkillMarkdown, loadAllSkills, resolveBundledSkillMdPath } from '../skills/storage.ts';
+import { toSkillCatalogEntries } from '../skills/catalog.ts';
+import { formatSkillSuggestions, matchSkillsByGlobs } from '../skills/match.ts';
 
 // ============================================================
 // Mini Agent Configuration
@@ -275,6 +278,7 @@ export abstract class BaseAgent implements AgentBackend {
   onAuthRequest: AuthCallback | null = null;
   onSourceChange: SourceChangeCallback | null = null;
   onSourcesListChange: ((sources: LoadedSource[]) => void) | null = null;
+  onSkillsListChange: ((skills: LoadedSkill[]) => void) | null = null;
   onConfigValidationError: ((file: string, errors: string[]) => void) | null = null;
   onPermissionModeChange: ((mode: PermissionMode) => void) | null = null;
   onDebug: ((message: string) => void) | null = null;
@@ -329,7 +333,7 @@ export abstract class BaseAgent implements AgentBackend {
       onDebug: (msg) => this.debug(msg),
     });
 
-    // PrerequisiteManager: blocks source tool calls until guide.md is read
+    // PrerequisiteManager: prepares meaningful source guides and enforces Skill/browser prerequisites
     this.prerequisiteManager = new PrerequisiteManager({
       workspaceRootPath: config.workspace.rootPath,
       onDebug: (msg) => this.debug(msg),
@@ -364,6 +368,10 @@ export abstract class BaseAgent implements AgentBackend {
       onSourcesListChange: (sources) => {
         this.debug(`Sources list changed: ${sources.length} sources`);
         this.onSourcesListChange?.(sources);
+      },
+      onSkillsListChange: (skills) => {
+        this.debug(`Skills list changed: ${skills.length} skills`);
+        this.onSkillsListChange?.(skills);
       },
       onValidationError: (file, errors) => {
         this.debug(`Config validation error: ${file}`);
@@ -560,7 +568,18 @@ export abstract class BaseAgent implements AgentBackend {
   }
 
   setWorkspace(workspace: Workspace): void {
+    const workspaceChanged = this.config.workspace.id !== workspace.id
+      || this.config.workspace.rootPath !== workspace.rootPath;
     this.config.workspace = workspace;
+    this.promptBuilder.setWorkspace(workspace);
+    this.prerequisiteManager.setWorkspaceRootPath(workspace.rootPath);
+    this.sourceManager.resetSeenSources();
+    if (workspaceChanged) {
+      this.sourceManager.updateActiveState([], [], []);
+      this.sourceManager.setAllSources([]);
+      this.permissionManager.clearWhitelists();
+      this.permissionManager.updateWorkingDirectory(workspace.rootPath);
+    }
     // Subclasses should clear session-specific state
   }
 
@@ -1003,13 +1022,12 @@ ${formattedMessages}
       resolveSlug(slug);
     }
 
-    // Office work loads the router skill only. The model then load_skill
-    // word/excel/pptx for the format the user actually needs. Do not dump
-    // official format SKILL.md files up front. An explicit user skill mention
-    // keeps Craft's normal project/workspace/global priority.
-    const officeFormatSlugs = collectOfficeFormatSkillSlugs(message, attachments);
+    // Named or attached Office files load the router only. The model then
+    // load_skill word/excel/pptx for the format it chooses. Intent-only Office
+    // work ("做一份 PPT") discovers officecli from the skill catalog instead.
+    // An explicit user skill mention keeps Craft's normal project/workspace/global priority.
     const explicitlySelectedOfficecli = parsed.skills.includes('officecli');
-    if (officeFormatSlugs.length > 0 && !explicitlySelectedOfficecli) {
+    if (shouldLoadBundledOfficecliRouter(message, attachments) && !explicitlySelectedOfficecli) {
       skillPaths.delete('officecli');
       resolveBundledSlug('officecli');
     }
@@ -1053,6 +1071,20 @@ ${formattedMessages}
     return `Before proceeding with the user's request, you MUST read the following skill instruction files using the Read tool or \`cat\` via Bash:\n${pathList}${officeOnly}\n\nDo not take any other action until you have read these files.`;
   }
 
+  /**
+   * After Write/Edit/Bash creates or edits a SKILL.md, drop the skill list
+   * cache and refresh catalog lookup so the same turn can activate sources
+   * and the next turn injects the new handbook entry.
+   */
+  protected noteSkillMarkdownMutation(filePath?: string, command?: string): void {
+    if (!invalidateSkillsCacheIfSkillMarkdown({ filePath, command })) return;
+    const workspaceRoot = this.config.workspace?.rootPath ?? this.workingDirectory;
+    const projectRoot = this.config.session?.workingDirectory;
+    const skills = loadAllSkills(workspaceRoot, projectRoot);
+    this.prerequisiteManager.setCatalogSkills(toSkillCatalogEntries(skills));
+    this.onSkillsListChange?.(skills);
+  }
+
   // ============================================================
   // Chat entry point (template method)
   // ============================================================
@@ -1075,10 +1107,22 @@ ${formattedMessages}
       return;
     }
 
+    const workspaceRoot = this.config.workspace?.rootPath ?? this.workingDirectory;
+    const projectRoot = this.config.session?.workingDirectory;
+    const catalogEntries = toSkillCatalogEntries(loadAllSkills(workspaceRoot, projectRoot));
+    this.prerequisiteManager.setCatalogSkills(catalogEntries);
+
     // Register skill prerequisites — blocks all tools until SKILL.md files are read.
     if (skillPaths.size > 0) {
       this.prerequisiteManager.registerSkillPrerequisites([...skillPaths.values()]);
     }
+
+    const suggested = matchSkillsByGlobs(catalogEntries, { message, attachments });
+    const excludeSuggested = new Set(skillPaths.keys());
+    if (shouldLoadBundledOfficecliRouter(message, attachments)) {
+      excludeSuggested.add('officecli');
+    }
+    const suggestion = formatSkillSuggestions(suggested, excludeSuggested);
 
     // Prepend branch seed context (for seeded branch sessions) and transferred-session summary.
     const branchSeedContext = this.buildBranchSeedContext(this.config.getBranchSeedMessages?.());
@@ -1099,7 +1143,7 @@ ${formattedMessages}
     // Strip any system-reminder that a caller accidentally embedded in `message`
     // so retry capture and model injection stay separated.
     const userFacingMessage = sanitizeUserMessageForRetry(cleanMessage);
-    const messageParts = [branchSeedContext, transferredSessionContext, directive, userFacingMessage].filter(Boolean);
+    const messageParts = [branchSeedContext, transferredSessionContext, directive, suggestion, userFacingMessage].filter(Boolean);
     let effectiveMessage = messageParts.join('\n\n');
 
     // Model-only interruption context — never stored/displayed as user content.

@@ -10,6 +10,11 @@ import { getCredentialManager, SOURCE_CREDENTIAL_TYPES } from '@craft-agent/shar
 import { resolveFsPath } from '@craft-agent/shared/utils'
 import type { RpcServer } from '@craft-agent/server-core/transport'
 import type { HandlerDeps } from '../handler-deps'
+import {
+  activateImportedMcpSources,
+  createMcpValidationDependencies,
+  extractMcpImportCredentials,
+} from './mcp-import-credentials'
 import type {
   ResourceBundle,
   ResourceImportMode,
@@ -142,13 +147,45 @@ export function registerResourcesHandlers(server: RpcServer, deps: HandlerDeps):
 
   server.handle(
     RPC_CHANNELS.resources.IMPORT_MCP_JSON,
-    async (_ctx, workspaceId: string, candidates: McpImportCandidate[], decisions: McpImportDecision[]) => {
+    async (
+      _ctx,
+      workspaceId: string,
+      input: McpImportCandidate[] | string,
+      requestedDecisions?: McpImportDecision[],
+    ) => {
       const workspace = getWorkspaceByNameOrId(workspaceId)
       if (!workspace) throw new Error(`Workspace not found: ${workspaceId}`)
-      const { importMcpCandidates } = await import('@craft-agent/shared/resources')
-      const result = await importMcpCandidates(resolveFsPath(workspace.rootPath), candidates, decisions)
+      const workspaceRootPath = resolveFsPath(workspace.rootPath)
+      const { importMcpCandidates, parseMcpImportJson } = await import('@craft-agent/shared/resources')
+      const candidates = typeof input === 'string'
+        ? parseMcpImportJson(input, workspaceRootPath)
+        : input
+      const decisions = requestedDecisions ?? candidates.map(candidate => ({
+        key: candidate.key,
+        action: candidate.conflict ? 'skip' as const : 'overwrite' as const,
+      }))
+      const credentials = typeof input === 'string'
+        ? extractMcpImportCredentials(input, candidates)
+        : new Map<string, string>()
+      const result = await importMcpCandidates(workspaceRootPath, candidates, decisions)
+
+      const pendingValidations = activateImportedMcpSources(
+        workspaceRootPath,
+        candidates,
+        decisions,
+        result.imported,
+        credentials,
+        createMcpValidationDependencies(deps),
+      )
+
+      for (const validation of pendingValidations) {
+        void validation.catch(error => {
+          deps.platform.logger?.error('Background MCP connection validation failed:', error)
+        })
+      }
+
       for (const slug of result.imported) {
-        deps.sessionManager.notifyConfigFileChange(resolveFsPath(workspace.rootPath), `sources/${slug}/config.json`)
+        deps.sessionManager.notifyConfigFileChange(workspaceRootPath, `sources/${slug}/config.json`)
       }
       return result
     },

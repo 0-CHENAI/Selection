@@ -19,7 +19,7 @@ import { toast } from 'sonner'
 import { PanelHeaderCenterButton } from '@/components/ui/PanelHeaderCenterButton'
 import { useAppShellContext, usePendingPermission, usePendingCredential, useSessionOptionsFor, useSession as useSessionData } from '@/context/AppShellContext'
 import { rendererPerf } from '@/lib/perf'
-import { resolveOpenableGeneratedFile } from '@/lib/generated-file-path'
+import { generatedFileBaseDir, resolveOpenableGeneratedFile } from '@/lib/generated-file-path'
 import { resolveMarkdownLinkTarget } from '@craft-agent/ui'
 import { navigate, routes } from '@/lib/navigate'
 import { coerceInputText } from '@/lib/input-text'
@@ -330,7 +330,11 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
 
   const handleOpenFile = React.useCallback(
     async (path: string) => {
-      const baseDir = workingDirectory || activeWorkspace?.rootPath
+      const baseDir = generatedFileBaseDir({
+        workingDirectory,
+        sessionFolderPath: session?.sessionFolderPath,
+        workspaceRootPath: activeWorkspace?.rootPath,
+      })
       const pick = await resolveOpenableGeneratedFile({
         requestedPath: path,
         baseDir,
@@ -341,7 +345,7 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
       }
       onOpenFile(pick.path)
     },
-    [onOpenFile, workingDirectory, activeWorkspace?.rootPath, t]
+    [onOpenFile, workingDirectory, session?.sessionFolderPath, activeWorkspace?.rootPath, t]
   )
 
   const handleOpenUrl = React.useCallback(

@@ -676,6 +676,7 @@ export default function AiSettingsPage() {
     models?: string[]
     modelImageCaps?: Record<string, boolean>
     modelContextWindows?: Record<string, number>
+    modelMaxTokens?: Record<string, number>
     customApi?: CustomEndpointApi
   } | undefined>(undefined)
   const setFullscreenOverlayOpen = useSetAtom(fullscreenOverlayOpenAtom)
@@ -888,6 +889,15 @@ export default function AiSettingsPage() {
       }),
     )
 
+    const modelMaxTokens = Object.fromEntries(
+      (connection.models ?? []).flatMap((entry) => {
+        if (typeof entry === 'string' || typeof entry.maxTokens !== 'number' || entry.maxTokens <= 0) {
+          return []
+        }
+        return [[entry.id, entry.maxTokens]] as Array<[string, number]>
+      }),
+    )
+
     const isCustomEndpointConnection = !!connection.customEndpoint && !!connection.baseUrl?.trim()
     const activePreset = isOrderGatewayUrl(connection.baseUrl)
       ? (isOrderOpenAiUrl(connection.baseUrl) ? 'order-openai' : 'custom')
@@ -901,6 +911,7 @@ export default function AiSettingsPage() {
       models: modelIds,
       modelImageCaps,
       modelContextWindows,
+      modelMaxTokens,
       customApi: connection.customEndpoint?.api,
     })
 
