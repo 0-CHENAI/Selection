@@ -17,6 +17,7 @@ import {
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { useRegisterModal } from '@/context/ModalContext'
+import { shouldSubmitProjectNameOnKeyDown } from './project-name-submit'
 
 interface CreateProjectDialogProps {
   open: boolean
@@ -28,13 +29,17 @@ interface CreateProjectDialogProps {
 export function CreateProjectDialog({ open, onCancel, onSubmit }: CreateProjectDialogProps) {
   const { t } = useTranslation()
   const [name, setName] = React.useState('')
+  const isComposingRef = React.useRef(false)
 
   // Register with modal context so X / Cmd+W closes the dialog first
   useRegisterModal(open, onCancel)
 
   // Reset name whenever the dialog opens
   React.useEffect(() => {
-    if (open) setName('')
+    if (open) {
+      setName('')
+      isComposingRef.current = false
+    }
   }, [open])
 
   const trimmed = name.trim()
@@ -62,8 +67,14 @@ export function CreateProjectDialog({ open, onCancel, onSubmit }: CreateProjectD
             value={name}
             onChange={(e) => setName(e.target.value)}
             placeholder={t('projectsList.createDialogNamePlaceholder')}
+            onCompositionStart={() => {
+              isComposingRef.current = true
+            }}
+            onCompositionEnd={() => {
+              isComposingRef.current = false
+            }}
             onKeyDown={(e) => {
-              if (e.key === 'Enter' && canSubmit) {
+              if (shouldSubmitProjectNameOnKeyDown(e.nativeEvent, canSubmit, isComposingRef.current)) {
                 e.preventDefault()
                 handleSubmit()
               }
