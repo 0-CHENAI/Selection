@@ -35,6 +35,18 @@ export function isImeProcessKey(event: { keyCode?: number; which?: number }): bo
   return event.keyCode === 229 || event.which === 229
 }
 
+/**
+ * Canonical IME composition check for keyboard actions. Browsers do not
+ * consistently expose every signal, so combine tracked composition state,
+ * the native flag, and the Chromium process-key fallback.
+ */
+export function isImeComposingEvent(
+  event: { isComposing?: boolean; keyCode?: number; which?: number },
+  trackedIsComposing = false,
+): boolean {
+  return trackedIsComposing || event.isComposing === true || isImeProcessKey(event)
+}
+
 export function isUnmodifiedPrintableKey(event: {
   key?: string
   metaKey?: boolean
@@ -78,7 +90,7 @@ export function createImeFirstKeyGate() {
     ctrlKey?: boolean
     altKey?: boolean
   }) => {
-    if (event.isComposing || isImeProcessKey(event)) {
+    if (isImeComposingEvent(event)) {
       composing = true
       pendingPrintableKey = false
       return

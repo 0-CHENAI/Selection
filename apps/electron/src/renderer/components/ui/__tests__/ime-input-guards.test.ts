@@ -6,6 +6,7 @@ import {
   isEmptyComposerValue,
   isEmptyEditorImeCandidate,
   isImeFirstLetter,
+  isImeComposingEvent,
   isImeProcessKey,
   isPlaceholderCaretBr,
   isUnmodifiedPrintableKey,
@@ -16,6 +17,14 @@ describe('IME first-key guards (#84 #97 #107)', () => {
     expect(isImeProcessKey({ keyCode: 229 })).toBe(true)
     expect(isImeProcessKey({ which: 229 })).toBe(true)
     expect(isImeProcessKey({ keyCode: 78 })).toBe(false)
+  })
+
+  it('combines tracked, native, and process-key composition signals', () => {
+    expect(isImeComposingEvent({}, true)).toBe(true)
+    expect(isImeComposingEvent({ isComposing: true })).toBe(true)
+    expect(isImeComposingEvent({ keyCode: 229 })).toBe(true)
+    expect(isImeComposingEvent({ which: 229 })).toBe(true)
+    expect(isImeComposingEvent({ isComposing: false, keyCode: 13 })).toBe(false)
   })
 
   it('treats unmodified latin letters as printable IME candidates', () => {
