@@ -19,6 +19,22 @@ function manifest(): OfficecliManifest {
 }
 
 describe('OfficeCLI sync governance', () => {
+  it('builds automated OfficeCLI upgrades from test and opens their PRs against test', () => {
+    const workflow = readFileSync(
+      resolve(import.meta.dir, '../.github/workflows/officecli-update.yml'),
+      'utf8',
+    );
+
+    expect(workflow).toContain('OFFICECLI_BASE_BRANCH: test');
+    expect(workflow).toContain('ref: ${{ env.OFFICECLI_BASE_BRANCH }}');
+    expect(workflow).toContain('gh pr list --state open --base "$OFFICECLI_BASE_BRANCH"');
+    expect(workflow).toContain('gh pr edit "$pr_number" --base "$OFFICECLI_BASE_BRANCH"');
+    expect(workflow).toContain('gh pr create --draft --base "$OFFICECLI_BASE_BRANCH"');
+    expect(workflow.indexOf('Enforce reviewed command and resource policy')).toBeLessThan(
+      workflow.indexOf('Publish or refresh draft upgrade PR'),
+    );
+  });
+
   it('accepts the complete reviewed manifest', () => {
     expect(() => validateManifestFiles(manifest())).not.toThrow();
   });
