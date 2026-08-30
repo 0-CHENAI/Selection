@@ -2,7 +2,7 @@ import { describe, expect, it } from 'bun:test'
 import { shouldSubmitProjectNameOnKeyDown } from '../project-name-submit'
 
 describe('project name keyboard submission (#148)', () => {
-  it('does not submit Enter while composition is active', () => {
+  it('does not submit Enter while tracked composition is active', () => {
     expect(shouldSubmitProjectNameOnKeyDown({ key: 'Enter' }, true, true)).toBe(false)
   })
 

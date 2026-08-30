@@ -1,4 +1,4 @@
-import { isImeProcessKey } from '@/components/ui/ime-input-guards'
+import { isImeComposingEvent } from '@/components/ui/ime-input-guards'
 
 interface ProjectNameKeyEvent {
   key?: string
@@ -19,7 +19,5 @@ export function shouldSubmitProjectNameOnKeyDown(
 ): boolean {
   return event.key === 'Enter'
     && canSubmit
-    && !isComposing
-    && !event.isComposing
-    && !isImeProcessKey(event)
+    && !isImeComposingEvent(event, isComposing)
 }

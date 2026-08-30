@@ -73,6 +73,11 @@ export function CreateProjectDialog({ open, onCancel, onSubmit }: CreateProjectD
             onCompositionEnd={() => {
               isComposingRef.current = false
             }}
+            onBlur={() => {
+              // A focus change ends or cancels IME input even if the browser
+              // does not deliver compositionend before the element blurs.
+              isComposingRef.current = false
+            }}
             onKeyDown={(e) => {
               if (shouldSubmitProjectNameOnKeyDown(e.nativeEvent, canSubmit, isComposingRef.current)) {
                 e.preventDefault()
