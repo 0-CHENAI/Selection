@@ -36,7 +36,8 @@
     "win32-x64": {
       "name": "officecli-win-x64.exe",
       "url": "https://github.com/iOfficeAI/OfficeCLI/releases/download/v1.0.145/officecli-win-x64.exe",
-      "sha256": "760696b262f3d6bd2cd174577220d54541b6e1e04ec58dee051f1897395638b8"
+      "sha256": "760696b262f3d6bd2cd174577220d54541b6e1e04ec58dee051f1897395638b8",
+      "schemaCrc": "22d3fc61"
     },
     "win32-arm64": {
       "name": "officecli-win-arm64.exe",
