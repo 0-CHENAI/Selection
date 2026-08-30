@@ -807,20 +807,22 @@ export function registerLlmConnectionsHandlers(server: RpcServer, deps: HandlerD
     success: boolean
     error?: string
   }> => {
+    let flowAbort: AbortController | null = null
     try {
-      const { loginGitHubCopilot } = await import('@earendil-works/pi-ai/oauth')
+      const { loginGitHubCopilotWithSdk } = await import('@craft-agent/shared/auth/github-copilot-sdk')
       const credentialManager = getCredentialManager()
 
       // Cancel any previous in-flight flow
       copilotOAuthAbort?.abort()
-      copilotOAuthAbort = new AbortController()
+      flowAbort = new AbortController()
+      copilotOAuthAbort = flowAbort
 
       deps.platform.logger?.info(`Starting GitHub Copilot OAuth device flow for connection: ${connectionSlug}`)
 
       // Use Pi SDK's login flow — this handles the device code flow AND
       // the critical Copilot token exchange that determines the correct
       // API endpoint for the user's subscription tier (individual/business/enterprise).
-      const credentials = await loginGitHubCopilot({
+      const credentials = await loginGitHubCopilotWithSdk({
         onDeviceCode: ({ userCode, verificationUri }) => {
           deps.platform.logger?.info(`[GitHub OAuth] Device code: ${userCode}`)
           pushTyped(server, RPC_CHANNELS.copilot.DEVICE_CODE, { to: 'client', clientId: ctx.clientId }, {
@@ -839,9 +841,14 @@ export function registerLlmConnectionsHandlers(server: RpcServer, deps: HandlerD
         onProgress: (message) => {
           deps.platform.logger?.info(`[GitHub OAuth] ${message}`)
         },
-        signal: copilotOAuthAbort.signal,
+        signal: flowAbort.signal,
       })
 
+      // Abort is cooperative. Even if the SDK resolves after cancellation,
+      // never persist credentials from a superseded flow.
+      if (flowAbort.signal.aborted || copilotOAuthAbort !== flowAbort) {
+        throw new Error('GitHub Copilot OAuth flow was cancelled or superseded')
+      }
       copilotOAuthAbort = null
 
       // Store the full OAuth credential:
@@ -858,7 +865,9 @@ export function registerLlmConnectionsHandlers(server: RpcServer, deps: HandlerD
       refreshModelsInBackground(connectionSlug, 'Copilot auth')
       return { success: true }
     } catch (error) {
-      copilotOAuthAbort = null
+      // A newer login may already own the shared cancellation slot. Do not let
+      // this older flow's completion make the newer flow uncancellable.
+      if (flowAbort && copilotOAuthAbort === flowAbort) copilotOAuthAbort = null
       deps.platform.logger?.error('GitHub Copilot OAuth failed:', error)
       return {
         success: false,

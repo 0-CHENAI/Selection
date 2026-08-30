@@ -11,10 +11,13 @@
 
 import type { WebSearchProvider, WebSearchResult } from '../types.ts';
 import { parseResponsesApiResults, type ResponsesApiResponse } from './responses-api-parser.ts';
+import { isModelRejectionError } from '../../../model-resolution.ts';
+import { stripPiPrefix } from '../../../custom-endpoint-models.ts';
+import { PI_PREFERRED_DEFAULTS } from '../../../../../shared/src/config/llm-connections.ts';
 
 /**
  * Codex backend request contract (search path):
- * - model: gpt-5.3-codex
+ * - model: active connection first, then bounded shared-catalog fallbacks
  * - store: false
  * - stream: true (backend may return JSON or SSE)
  * - instructions + tool_choice + text.verbosity
@@ -24,7 +27,9 @@ import { parseResponsesApiResults, type ResponsesApiResponse } from './responses
  *   - ./chatgpt.test.ts
  *   - ../SEARCH_PAYLOAD_CONTRACT.md
  */
-const DEFAULT_SEARCH_MODEL = 'gpt-5.3-codex';
+const CODEX_SEARCH_MODELS: readonly string[] = PI_PREFERRED_DEFAULTS['openai-codex'] ?? [];
+const FALLBACK_SEARCH_MODEL = CODEX_SEARCH_MODELS[0] ?? 'gpt-5.6-sol';
+const MAX_MODEL_CANDIDATES = 4;
 const API_BASE = 'https://chatgpt.com/backend-api/codex';
 const JWT_CLAIM_PATH = 'https://api.openai.com/auth';
 const ERROR_TEXT_LIMIT = 600;
@@ -70,79 +75,97 @@ export class ChatGPTBackendSearchProvider implements WebSearchProvider {
 
   async search(query: string, count: number): Promise<WebSearchResult[]> {
     const attemptErrors: string[] = [];
+    const models = this.candidateModels();
 
-    for (const attempt of SEARCH_ATTEMPTS) {
-      const requestBody = {
-        model: this.options?.model || DEFAULT_SEARCH_MODEL,
-        store: false,
-        stream: true,
-        instructions: SEARCH_INSTRUCTIONS,
-        tools: [{ type: attempt.toolType }],
-        tool_choice: 'auto',
-        parallel_tool_calls: true,
-        text: { verbosity: SEARCH_TEXT_VERBOSITY },
-        input: [
-          {
+    for (let modelIndex = 0; modelIndex < models.length; modelIndex++) {
+      const model = models[modelIndex]!;
+      const hasMoreModels = modelIndex < models.length - 1;
+      let modelRejected = false;
+
+      for (let attemptIndex = 0; attemptIndex < SEARCH_ATTEMPTS.length; attemptIndex++) {
+        const attempt = SEARCH_ATTEMPTS[attemptIndex]!;
+        const hasMoreAttempts = attemptIndex < SEARCH_ATTEMPTS.length - 1;
+        const requestBody = {
+          model,
+          store: false,
+          stream: true,
+          instructions: SEARCH_INSTRUCTIONS,
+          tools: [{ type: attempt.toolType }],
+          tool_choice: 'auto',
+          parallel_tool_calls: true,
+          text: { verbosity: SEARCH_TEXT_VERBOSITY },
+          input: [{
             role: 'user',
-            content: [
-              {
-                type: 'input_text',
-                text: `Search the web for: ${query}\n\nReturn the top ${count} results with title, URL, and a brief description.`,
-              },
-            ],
+            content: [{
+              type: 'input_text',
+              text: `Search the web for: ${query}\n\nReturn the top ${count} results with title, URL, and a brief description.`,
+            }],
+          }],
+        };
+        const requestFingerprint = buildRequestFingerprint(requestBody);
+        const response = await fetch(`${API_BASE}/responses`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${this.accessToken}`,
+            'chatgpt-account-id': this.accountId,
+            'OpenAI-Beta': 'responses=experimental',
           },
-        ],
-      };
+          body: JSON.stringify(requestBody),
+          signal: AbortSignal.timeout(30_000),
+        });
+        const contentType = response.headers.get('content-type') || 'unknown';
 
-      const requestFingerprint = buildRequestFingerprint(requestBody);
-      const hasMoreAttempts = attempt !== SEARCH_ATTEMPTS[SEARCH_ATTEMPTS.length - 1];
-
-      const response = await fetch(`${API_BASE}/responses`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${this.accessToken}`,
-          'chatgpt-account-id': this.accountId,
-          'OpenAI-Beta': 'responses=experimental',
-        },
-        body: JSON.stringify(requestBody),
-        signal: AbortSignal.timeout(30_000),
-      });
-
-      const contentType = response.headers.get('content-type') || 'unknown';
-
-      if (response.ok) {
-        try {
-          const data = await parseResponsePayload(response);
-          return parseResponsesApiResults(data, query, count);
-        } catch (parseError) {
-          const parseMessage = parseError instanceof Error ? parseError.message : String(parseError);
-          attemptErrors.push(
-            `${attempt.label} parse failed [${requestFingerprint}, content-type=${contentType}]: ${compactErrorText(parseMessage)}`,
-          );
-
-          if (hasMoreAttempts) {
-            continue;
+        if (response.ok) {
+          try {
+            const data = await parseResponsePayload(response);
+            return parseResponsesApiResults(data, query, count);
+          } catch (parseError) {
+            const parseMessage = parseError instanceof Error ? parseError.message : String(parseError);
+            attemptErrors.push(
+              `${attempt.label} parse failed [${requestFingerprint}, content-type=${contentType}]: ${compactErrorText(parseMessage)}`,
+            );
+            if (hasMoreAttempts) continue;
+            throw new Error(`ChatGPT search failed: ${summarizeAttemptErrors(attemptErrors)}`);
           }
+        }
 
-          throw new Error(`ChatGPT search failed: ${attemptErrors.join('; ')}`);
+        const errorText = await response.text();
+        attemptErrors.push(
+          `${attempt.label} failed (HTTP ${response.status}) [${requestFingerprint}, content-type=${contentType}]: ${compactErrorText(errorText)}`,
+        );
+
+        if (response.status === 400 && isModelRejectionError(errorText, model)) {
+          modelRejected = true;
+          break;
+        }
+        if (!(response.status === 400 && hasMoreAttempts)) {
+          throw new Error(`ChatGPT search failed: ${summarizeAttemptErrors(attemptErrors)}`);
         }
       }
 
-      const errorText = await response.text();
-      const compactError = compactErrorText(errorText);
-      attemptErrors.push(
-        `${attempt.label} failed (HTTP ${response.status}) [${requestFingerprint}, content-type=${contentType}]: ${compactError}`,
-      );
-
-      // Retry only for likely schema/tool incompatibility (400).
-      const canRetry = response.status === 400;
-      if (!(canRetry && hasMoreAttempts)) {
-        throw new Error(`ChatGPT search failed: ${attemptErrors.join('; ')}`);
+      if (modelRejected && hasMoreModels) continue;
+      if (modelRejected) {
+        throw new Error(`ChatGPT search failed: ${summarizeAttemptErrors(attemptErrors)}`);
       }
     }
 
-    throw new Error(`ChatGPT search failed: ${attemptErrors.join('; ')}`);
+    throw new Error(`ChatGPT search failed: ${summarizeAttemptErrors(attemptErrors)}`);
+  }
+
+  private candidateModels(): string[] {
+    const ordered = [this.options?.model, ...CODEX_SEARCH_MODELS, FALLBACK_SEARCH_MODEL];
+    const seen = new Set<string>();
+    const models: string[] = [];
+    for (const raw of ordered) {
+      if (!raw) continue;
+      const bare = stripPiPrefix(raw);
+      if (bare && !seen.has(bare)) {
+        seen.add(bare);
+        models.push(bare);
+      }
+    }
+    return models.length > 0 ? models.slice(0, MAX_MODEL_CANDIDATES) : [FALLBACK_SEARCH_MODEL];
   }
 }
 
@@ -200,6 +223,16 @@ function parseSseResponsePayload(sseText: string): ResponsesApiResponse {
   }
 
   return completed;
+}
+
+function summarizeAttemptErrors(errors: string[]): string {
+  if (errors.length <= 3) return errors.join('; ');
+  const omitted = errors.length - 3;
+  return [
+    ...errors.slice(0, 2),
+    `(+${omitted} more attempt${omitted === 1 ? '' : 's'})`,
+    errors[errors.length - 1]!,
+  ].join('; ');
 }
 
 function buildRequestFingerprint(body: {

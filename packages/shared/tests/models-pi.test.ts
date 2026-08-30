@@ -34,4 +34,18 @@ describe('models-pi filtering', () => {
     expect(ids).toContain('pi/deepseek-v4-flash');
     expect(ids).toContain('pi/deepseek-v4-pro');
   });
+
+  it('includes both Moonshot API regions with human-readable labels', () => {
+    const providers = getPiApiKeyProviders();
+    expect(providers).toEqual(expect.arrayContaining([
+      expect.objectContaining({ key: 'moonshotai', label: 'Moonshot AI' }),
+      expect.objectContaining({ key: 'moonshotai-cn', label: 'Moonshot AI (CN)' }),
+    ]));
+  });
+
+  it('exposes Kimi K3 for Moonshot and Kimi Coding providers', () => {
+    expect(getPiModelsForAuthProvider('moonshotai').map(model => model.id)).toContain('pi/kimi-k3');
+    expect(getPiModelsForAuthProvider('moonshotai-cn').map(model => model.id)).toContain('pi/kimi-k3');
+    expect(getPiModelsForAuthProvider('kimi-coding').map(model => model.id)).toContain('pi/k3');
+  });
 });

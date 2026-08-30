@@ -8,7 +8,15 @@ import {
   createBuiltInConnection,
   validateModelList,
   splitModelIdList,
+  piAuthProviderDisplayName,
 } from './connection-setup-logic'
+
+describe('piAuthProviderDisplayName', () => {
+  it('labels both Moonshot API regions', () => {
+    expect(piAuthProviderDisplayName('moonshotai')).toBe('Moonshot AI')
+    expect(piAuthProviderDisplayName('moonshotai-cn')).toBe('Moonshot AI (CN)')
+  })
+})
 
 describe('validateSetupTestInput', () => {
   it('rejects pi custom endpoint tests without piAuthProvider', () => {

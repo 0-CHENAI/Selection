@@ -108,6 +108,15 @@ describe('getDefaultModelForConnection', () => {
     expect(modelIds).toContain(defaultModel)
   })
 
+  it('Pi Moonshot defaults to Kimi K3 in both API regions', () => {
+    for (const provider of ['moonshotai', 'moonshotai-cn'] as const) {
+      const defaultModel = getDefaultModelForConnection('pi', provider)
+      expect(defaultModel).toBe('pi/kimi-k3')
+      const models = getDefaultModelsForConnection('pi', provider)
+      expect(models.map(model => typeof model === 'string' ? model : model.id)).toContain(defaultModel)
+    }
+  })
+
   it('returns empty string for pi_compat (dynamic provider)', () => {
     const defaultModel = getDefaultModelForConnection('pi_compat')
     expect(defaultModel).toBe('')
