@@ -659,6 +659,7 @@
   "fileImport.rename": "名前を変更",
   "fileImport.renamePlaceholder": "新しい名前",
   "fileImport.skillDescription": "SKILL.md または Skill の Zip をインポートできます。Zip 内の他のファイルは SKILL.md と同じ場所に残します。",
+  "fileImport.skillDropHint": "SKILL.md または Skill の Zip をドロップしてインポート",
   "fileImport.skillFailed": "Skill をインポートできませんでした",
   "fileImport.skillImported": "Skill {{slug}} をインポートしました",
   "fileImport.skillTitle": "ファイルからインポート",

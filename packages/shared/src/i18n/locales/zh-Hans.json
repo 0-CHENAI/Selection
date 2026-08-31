@@ -659,6 +659,7 @@
   "fileImport.rename": "重命名",
   "fileImport.renamePlaceholder": "新名称",
   "fileImport.skillDescription": "可导入 SKILL.md 或 Skill Zip。Zip 中的其他文件会与 SKILL.md 放在同一目录。",
+  "fileImport.skillDropHint": "拖放 SKILL.md 或 Skill Zip 以导入",
   "fileImport.skillFailed": "无法导入 Skill",
   "fileImport.skillImported": "已导入 Skill {{slug}}",
   "fileImport.skillTitle": "从文件导入",

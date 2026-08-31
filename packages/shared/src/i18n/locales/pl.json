@@ -659,6 +659,7 @@
   "fileImport.rename": "Zmień nazwę",
   "fileImport.renamePlaceholder": "Nowa nazwa",
   "fileImport.skillDescription": "Zaimportuj SKILL.md lub Zip skilla. Dodatkowe pliki z Zip zostają obok SKILL.md.",
+  "fileImport.skillDropHint": "Upuść SKILL.md lub Zip skilla, aby zaimportować",
   "fileImport.skillFailed": "Nie udało się zaimportować skilla",
   "fileImport.skillImported": "Zaimportowano skill {{slug}}",
   "fileImport.skillTitle": "Importuj z pliku",
