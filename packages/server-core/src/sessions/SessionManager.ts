@@ -1345,6 +1345,24 @@ export interface SessionCompletionEvent {
   tokenUsage?: TokenUsage
 }
 
+/** Build the in-place backend refresh payload without consulting global config. */
+export function buildAgentRuntimeConfigUpdate(
+  backendContext: ReturnType<typeof resolveBackendContext>,
+) {
+  const connection = backendContext.connection
+  return {
+    model: backendContext.resolvedModel,
+    providerType: connection?.providerType,
+    authType: backendContext.authType,
+    runtime: connection ? {
+      baseUrl: connection.baseUrl,
+      piAuthProvider: connection.piAuthProvider,
+      customEndpoint: connection.customEndpoint,
+      customModels: connection.models?.map(toCustomEndpointModelPayload),
+    } : undefined,
+  }
+}
+
 export interface MidStreamDeliveryOutcome {
   shouldQueue: boolean
   wasInterrupted: boolean
@@ -3593,21 +3611,10 @@ export class SessionManager implements ISessionManager {
       return
     }
 
-    const connection = backendContext.connection
     let refreshed = false
     if (managed.agent?.updateRuntimeConfig) {
       try {
-        refreshed = await managed.agent.updateRuntimeConfig({
-          model: backendContext.resolvedModel,
-          providerType: connection?.providerType,
-          authType: backendContext.authType,
-          runtime: connection ? {
-            baseUrl: connection.baseUrl,
-            piAuthProvider: connection.piAuthProvider,
-            customEndpoint: connection.customEndpoint,
-            customModels: connection.models?.map(toCustomEndpointModelPayload),
-          } : undefined,
-        })
+        refreshed = await managed.agent.updateRuntimeConfig(buildAgentRuntimeConfigUpdate(backendContext))
       } catch (error) {
         sessionLog.warn(`Runtime config in-place refresh failed for ${managed.id}: ${error instanceof Error ? error.message : error}`)
       }
