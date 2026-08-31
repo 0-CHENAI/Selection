@@ -94,6 +94,21 @@ export interface SessionScopedToolCallbacks {
     slug: string,
     runId?: string
   ) => Promise<import('@craft-agent/session-tools-core').TaskResultsPayload>;
+  submitTaskOutputFn?: (
+    input: import('@craft-agent/session-tools-core').SubmitTaskOutputInput
+  ) => Promise<{ ok: boolean; error?: string }>;
+  submitTaskVerdictFn?: (
+    input: import('@craft-agent/session-tools-core').SubmitTaskVerdictInput
+  ) => Promise<{ status: string }>;
+  submitOrchestrationPatchFn?: (
+    input: import('@craft-agent/session-tools-core').OrchestrationPatchInput
+  ) => Promise<{ status: string; revision?: number }>;
+  submitTaskDefinitionFn?: (
+    input: import('@craft-agent/session-tools-core').SubmitTaskDefinitionInput
+  ) => Promise<{ valid: boolean; errors?: string[]; yaml?: string }>;
+  controlTaskRunFn?: (
+    input: import('@craft-agent/session-tools-core').ControlTaskRunInput
+  ) => Promise<{ status: string; conflict?: string }>;
 }
 
 // Registry of callbacks keyed by sessionId

@@ -24,7 +24,7 @@ type ToolResult = {
 import { readFile } from 'fs/promises';
 import { existsSync, statSync } from 'fs';
 import path from 'node:path';
-import { getModelById, getDefaultSummarizationModel, MODEL_REGISTRY } from '../config/models.ts';
+import { getDefaultSummarizationModel, resolveKnownRegistryModelId } from '../config/models.ts';
 
 // ============================================================================
 // QUERY INTERFACES (used by agent backends to implement queryFn)
@@ -206,15 +206,10 @@ export async function buildCallLlmRequest(
 
   textParts.push(prompt);
 
-  // Resolve model against registry, with optional backend-specific validation
+  // Resolve known registry ids only — do not map "Opus" onto claude-opus-4-8.
   let model = input.model as string | undefined;
   if (model) {
-    const modelDef = getModelById(model)
-      || MODEL_REGISTRY.find(m => m.shortName.toLowerCase() === model!.toLowerCase())
-      || MODEL_REGISTRY.find(m => m.name.toLowerCase() === model!.toLowerCase());
-    if (modelDef) {
-      model = modelDef.id;
-    }
+    model = resolveKnownRegistryModelId(model) ?? model
 
     // Backend-specific model validation (e.g., Codex rejects non-OpenAI models)
     if (options.validateModel) {
@@ -586,22 +581,9 @@ export function createLLMTool(options: LLMToolOptions) {
         );
       }
 
-      // --- Validate and resolve model against registry ---
+      // Known Claude ids stay as registry ids. ORDER aliases (Opus, Laufry) pass through.
       if (args.model) {
-        let modelDef = getModelById(args.model);
-        if (!modelDef) {
-          modelDef = MODEL_REGISTRY.find(m => m.shortName.toLowerCase() === args.model!.toLowerCase())
-            || MODEL_REGISTRY.find(m => m.name.toLowerCase() === args.model!.toLowerCase());
-          if (modelDef) {
-            args.model = modelDef.id;
-          } else {
-            const available = MODEL_REGISTRY.map(m => `  - ${m.id} (${m.shortName})`).join('\n');
-            return errorResponse(
-              `Unknown model: "${args.model}"\n\n` +
-              `Available models:\n${available}`
-            );
-          }
-        }
+        args.model = resolveKnownRegistryModelId(args.model) ?? args.model
       }
 
       // ========================================

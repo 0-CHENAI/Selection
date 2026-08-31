@@ -120,6 +120,17 @@ export interface Session {
   taskNodeCount?: number
   /** Tasks Conductor: generate-time draft orchestrator, hidden from the board until adopted by createTask. */
   taskDraft?: boolean
+  /** Per-session opt-in for autonomous Swarm delegation. */
+  swarmEnabled?: boolean
+  orchestrationId?: string
+  orchestrationRootSessionId?: string
+  orchestrationDepth?: number
+  orchestrationRole?: 'coordinator' | 'worker' | 'reviewer'
+  orchestrationLifecycle?: 'managed' | 'detached'
+  orchestrationStatus?: 'running' | 'completed' | 'need-to-check' | 'stopped'
+  orchestrationBlocker?: string
+  orchestrationTokensUsed?: number
+  orchestrationTokenBudget?: number
 }
 
 export interface CreateSessionOptions {
@@ -166,6 +177,16 @@ export interface CreateSessionOptions {
   taskNodeId?: string
   /** Tasks Conductor: mark the orchestrator as a generate-time draft (hidden until adopted by createTask). */
   taskDraft?: boolean
+  swarmEnabled?: boolean
+  orchestrationId?: string
+  orchestrationRootSessionId?: string
+  orchestrationDepth?: number
+  orchestrationRole?: 'coordinator' | 'worker' | 'reviewer'
+  orchestrationLifecycle?: 'managed' | 'detached'
+  orchestrationStatus?: 'running' | 'completed' | 'need-to-check' | 'stopped'
+  orchestrationBlocker?: string
+  orchestrationTokensUsed?: number
+  orchestrationTokenBudget?: number
   /**
    * Apply the reserved "Task" label (valueType 'number') after creation. Top-level sessions
    * allocate the next task number; sessions with a `parentSessionId` inherit the parent's
@@ -205,6 +226,24 @@ export interface TaskValidationResultDto {
   warnings: TaskValidationIssueDto[]
   /** Pre-flight estimate: total nodes and how many sessions a run would spawn. */
   estimate?: { nodeCount: number; sessionNodeCount: number }
+  /** Parsed spec when validation succeeded — used by the YAML↔canvas sync. */
+  spec?: unknown
+}
+
+export interface TaskSaveRequest {
+  yaml: string
+  expectedEtag: string
+}
+
+export interface TaskSaveResult {
+  slug: string
+  validation: TaskValidationResultDto
+  spec?: unknown
+  yaml?: string
+  etag?: string
+  sourceVersion?: 1 | 2
+  migrationWarnings?: string[]
+  conflict?: { code: 'etag-conflict'; expected: string; actual: string }
 }
 
 export interface TaskCreateRequest {
@@ -295,24 +334,106 @@ export interface TaskRunRequest {
   params?: Record<string, unknown>
 }
 
+export interface SwarmRunNodeDto {
+  sessionId: string
+  parentSessionId?: string
+  name: string
+  role: 'coordinator' | 'worker' | 'reviewer'
+  model?: string
+  status: 'running' | 'completed' | 'need-to-check' | 'stopped'
+  depth: number
+  elapsedSeconds: number
+  tokensUsed: number
+  lifecycle: 'managed' | 'detached'
+  blocker?: string
+  summary?: string
+}
+
+export interface SwarmRunDetailsDto {
+  orchestrationId: string
+  rootSessionId: string
+  coordinatorSessionId: string
+  status: 'running' | 'completed' | 'need-to-check' | 'stopped'
+  blocker?: string
+  tokensUsed: number
+  tokenBudget?: number
+  nodes: SwarmRunNodeDto[]
+}
+
 export interface TaskNodeRunStateDto {
   id: string
-  /** pending | running | done | failed | cancelled | skipped */
+  /** Definition id for dynamic map/loop/replica instances. */
+  definitionId?: string
+  /** pending | ready | running | retry-wait | waiting-approval | done | failed | invalid | cancelled | skipped | interrupted */
   state: string
   sessionId?: string
   attempt: number
+  retryCount?: number
+  role?: 'worker' | 'reviewer'
+  model?: string
+  tokensUsed?: number
+  blocker?: string
 }
 
 export interface TaskRunSnapshotDto {
   slug: string
   runId: string
   taskId: string
-  /** running | paused | verifying | stopped | completed | failed */
+  /** running | pausing | paused | waiting-approval | waiting-budget | verifying | repairing | interrupted | stopped | completed | failed */
   status: string
   orchestratorSessionId?: string
   nodes: TaskNodeRunStateDto[]
   /** Sum of each child's (input + output) tokens observed at completion. */
   tokensUsed: number
+  /** Current user-controlled run ceiling. Missing means unlimited. */
+  tokenBudget?: number
+  blockers?: string[]
+  revision?: number
+}
+
+export interface TaskControlResultDto {
+  snapshot: TaskRunSnapshotDto
+  conflict?: { code: 'conflict'; message: string }
+}
+
+export interface TaskRespondApprovalRequest {
+  slug: string
+  runId: string
+  nodeId: string
+  approved: boolean
+}
+
+export interface TaskApplyRunRevisionRequest {
+  slug: string
+  runId: string
+  expectedEtag: string
+  /** Required on confirm; copied from the immediately preceding preview. */
+  expectedRunRevision?: number
+  /** Required on confirm; binds the preview to the exact run graph. */
+  expectedRunSpecHash?: string
+  confirm?: boolean
+}
+
+export interface TaskApplyRunRevisionResult {
+  diff: { added: string[]; removed: string[]; changed: string[] }
+  applied?: boolean
+  validation: TaskValidationResultDto
+  etag?: string
+  yaml?: string
+  runRevision?: number
+  runSpecHash?: string
+  conflict?:
+    | { code: 'etag-conflict'; expected: string; actual: string }
+    | { code: 'run-revision-conflict'; expected: number; actual: number }
+    | { code: 'run-spec-conflict'; expected: string; actual: string }
+}
+
+export interface TaskUpdateRunLimitsRequest {
+  slug: string
+  runId: string
+  tokenBudget?: number
+  /** Re-enter sensitive params after resume/continue (never persisted in plaintext). */
+  params?: Record<string, unknown>
 }
 
 export interface TaskGetResult {
@@ -320,8 +441,13 @@ export interface TaskGetResult {
   validation: TaskValidationResultDto
   /** The parsed TaskSpec (from @craft-agent/shared/tasks) when valid; consumers cast. */
   spec?: unknown
+  yaml?: string
+  etag?: string
+  sourceVersion?: 1 | 2
+  migrationWarnings?: string[]
   /** Active run snapshot when a runId was supplied and known; otherwise null. */
   run?: TaskRunSnapshotDto | null
+  latestRun?: TaskRunSnapshotDto | null
 }
 
 /** One subtask's outcome in a completed/persisted run, for the editor's Results tab. */
@@ -334,6 +460,8 @@ export interface TaskResultNodeDto {
   sessionId?: string
   /** The node's recorded final output text (from nodes/<id>.json), when present. */
   output?: string
+  attempt?: number
+  failureReason?: string
 }
 
 /**
@@ -355,6 +483,9 @@ export interface TaskResultsDto {
   repair?: { used: number; max: number }
   /** Terminal run status recovered from the run-log (completed | failed | stopped | …). */
   runStatus?: string
+  tokensUsed?: number
+  /** Latest durable graph revision observed for this run. */
+  revision?: number
   /** The run's acceptance criteria (from the per-run spec snapshot), shown above the verdict. */
   acceptanceCriteria?: string
   nodes: TaskResultNodeDto[]
@@ -412,7 +543,7 @@ export type SessionEvent =
   | { type: 'name_changed'; sessionId: string; name?: string }
   | { type: 'session_model_changed'; sessionId: string; model: string | null }
   | { type: 'session_status_changed'; sessionId: string; sessionStatus: SessionStatus }
-  | { type: 'session_metadata_changed'; sessionId: string; changes: Partial<Pick<Session, 'taskNodeCount' | 'kanbanColumn' | 'taskDraft' | 'taskSlug' | 'projectId'>> }
+  | { type: 'session_metadata_changed'; sessionId: string; changes: Partial<Pick<Session, 'taskNodeCount' | 'kanbanColumn' | 'taskDraft' | 'taskSlug' | 'projectId' | 'swarmEnabled' | 'orchestrationId' | 'orchestrationRootSessionId' | 'orchestrationDepth' | 'orchestrationRole' | 'orchestrationLifecycle' | 'orchestrationStatus' | 'orchestrationBlocker' | 'orchestrationTokensUsed' | 'orchestrationTokenBudget'>> }
   | { type: 'session_deleted'; sessionId: string }
   | { type: 'session_created'; sessionId: string }
   | { type: 'session_shared'; sessionId: string; sharedUrl: string }
@@ -431,6 +562,12 @@ export interface SendMessageOptions {
   skillSlugs?: string[]
   badges?: ContentBadge[]
   optimisticMessageId?: string
+  /**
+   * Trusted renderer/main signal that this visible user turn came from an
+   * explicit delegation action. Message text never grants spawn authority.
+   * Internal and hidden turns must leave this unset.
+   */
+  userAuthorizedSpawn?: boolean
   /** Session-scoped options frozen when a mid-stream message is queued. */
   queueContext?: QueuedMessageContext
   /**

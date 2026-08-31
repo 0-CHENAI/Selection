@@ -209,6 +209,12 @@ interface ChatDisplayProps {
   sessionStatuses?: import('@/config/session-status-config').SessionStatus[]
   /** Callback when session state changes */
   onSessionStatusChange?: (stateId: string) => void
+  /** Per-session opt-in for autonomous Swarm delegation. */
+  swarmEnabled?: boolean
+  onSwarmEnabledChange?: (enabled: boolean) => void | Promise<void>
+  /** Hidden worker/reviewer sessions inherit this setting and cannot edit it. */
+  swarmToggleDisabled?: boolean
+  swarmRunning?: boolean
   /** Workspace ID for loading skill icons */
   workspaceId?: string
   // Working directory (per session)
@@ -491,6 +497,10 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
   // States (for # menu and badge)
   sessionStatuses,
   onSessionStatusChange,
+  swarmEnabled = false,
+  onSwarmEnabledChange,
+  swarmToggleDisabled = false,
+  swarmRunning = false,
   workspaceId,
   // Working directory
   workingDirectory,
@@ -2087,12 +2097,17 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
               !!session.projectId &&
               (session.sharedProjectMemoryEnabled === undefined || session.sharedProjectMemoryEnabled === true)
             }
+            swarmEnabled={swarmEnabled}
+            onSwarmEnabledChange={onSwarmEnabledChange}
+            swarmToggleDisabled={swarmToggleDisabled}
+            swarmRunning={swarmRunning}
             onSessionStatusChange={onSessionStatusChange}
             queuedMessages={queuedMessages}
             inputProps={{
               placeholder,
               disabled: isInputDisabled,
               isProcessing: session.isProcessing,
+              swarmEnabled,
               onAnimatedHeightChange: handleAnimatedHeightChange,
               onSubmit: handleSubmit,
               onStop: handleStop,

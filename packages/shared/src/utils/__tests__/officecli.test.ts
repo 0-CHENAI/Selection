@@ -29,6 +29,17 @@ import {
   shouldEnsureDocxOutlineStyles,
 } from '../officecli'
 
+function seedTrustedOfficecliRoot(appRootPath: string) {
+  const binDir = join(appRootPath, 'apps', 'electron', 'resources', 'bin')
+  const runtimeDir = join(binDir, `${process.platform}-${process.arch}`)
+  const wrapperPath = join(binDir, officecliWrapperName())
+  const binaryPath = join(runtimeDir, officecliBinaryName())
+  mkdirSync(runtimeDir, { recursive: true })
+  writeFileSync(wrapperPath, 'trusted wrapper\n')
+  writeFileSync(binaryPath, 'trusted runtime\n')
+  return { binDir, binaryPath }
+}
+
 describe('collectOfficeFormatSkillSlugs', () => {
   it('infers format skills from Office paths in the message', () => {
     expect(collectOfficeFormatSkillSlugs('请改 巡察报告.docx')).toEqual(['officecli-docx'])
@@ -225,40 +236,43 @@ describe('resolveOfficecliBinary', () => {
 
   it('does not trust an OfficeCLI wrapper planted in the session cwd', () => {
     const sessionCwd = mkdtempSync(join(tmpdir(), 'selection-untrusted-officecli-'))
+    const appRootPath = mkdtempSync(join(tmpdir(), 'selection-trusted-officecli-root-'))
     try {
       const plantedDir = join(sessionCwd, 'resources', 'bin')
       mkdirSync(plantedDir, { recursive: true })
-      writeFileSync(join(plantedDir, 'officecli'), '#!/bin/sh\necho untrusted\n')
-      const appRootPath = process.cwd()
+      writeFileSync(join(plantedDir, officecliWrapperName()), 'untrusted wrapper\n')
+      const trusted = seedTrustedOfficecliRoot(appRootPath)
       expect(getOfficecliWrapperDir({
         cwd: sessionCwd,
         appRootPath,
         trustEnvironment: false,
-      })).toBe(join(appRootPath, 'apps', 'electron', 'resources', 'bin'))
+      })).toBe(trusted.binDir)
       expect(resolveOfficecliBinary({
         cwd: sessionCwd,
         appRootPath,
         trustEnvironment: false,
-      })).toContain(join('apps', 'electron', 'resources', 'bin'))
+      })).toBe(trusted.binaryPath)
     } finally {
       rmSync(sessionCwd, { recursive: true, force: true })
+      rmSync(appRootPath, { recursive: true, force: true })
     }
   })
 
   it('continues through valid trusted roots when another configured root is missing', () => {
-    const appRootPath = process.cwd()
-    expect(getOfficecliWrapperDir({
-      cwd: '/tmp/untrusted-officecli-cwd',
-      appRootPath,
-      resourcesPath: join(appRootPath, 'definitely-missing-resources-root'),
-      trustEnvironment: false,
-    })).toBe(join(appRootPath, 'apps', 'electron', 'resources', 'bin'))
-    expect(resolveOfficecliBinary({
-      cwd: '/tmp/untrusted-officecli-cwd',
-      appRootPath,
-      resourcesPath: join(appRootPath, 'definitely-missing-resources-root'),
-      trustEnvironment: false,
-    })).toContain(join('apps', 'electron', 'resources', 'bin'))
+    const appRootPath = mkdtempSync(join(tmpdir(), 'selection-trusted-officecli-root-'))
+    try {
+      const trusted = seedTrustedOfficecliRoot(appRootPath)
+      const options = {
+        cwd: '/tmp/untrusted-officecli-cwd',
+        appRootPath,
+        resourcesPath: join(appRootPath, 'definitely-missing-resources-root'),
+        trustEnvironment: false,
+      } as const
+      expect(getOfficecliWrapperDir(options)).toBe(trusted.binDir)
+      expect(resolveOfficecliBinary(options)).toBe(trusted.binaryPath)
+    } finally {
+      rmSync(appRootPath, { recursive: true, force: true })
+    }
   })
 
   it('resolves packaged wrappers from CRAFT_RESOURCES_BASE', () => {

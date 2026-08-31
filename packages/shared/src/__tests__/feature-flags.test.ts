@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from 'bun:test';
-import { isDevRuntime, isDeveloperFeedbackEnabled, isCraftAgentsCliEnabled, isEmbeddedServerEnabled } from '../feature-flags.ts';
+import { isDevRuntime, isDeveloperFeedbackEnabled, isCraftAgentsCliEnabled, isEmbeddedServerEnabled, isTasksOrchestrateEnabled } from '../feature-flags.ts';
 
 const ORIGINAL_ENV = {
   NODE_ENV: process.env.NODE_ENV,
@@ -7,6 +7,7 @@ const ORIGINAL_ENV = {
   CRAFT_FEATURE_DEVELOPER_FEEDBACK: process.env.CRAFT_FEATURE_DEVELOPER_FEEDBACK,
   CRAFT_FEATURE_CRAFT_AGENTS_CLI: process.env.CRAFT_FEATURE_CRAFT_AGENTS_CLI,
   CRAFT_FEATURE_EMBEDDED_SERVER: process.env.CRAFT_FEATURE_EMBEDDED_SERVER,
+  CRAFT_FEATURE_TASKS_ORCHESTRATE: process.env.CRAFT_FEATURE_TASKS_ORCHESTRATE,
 };
 
 afterEach(() => {
@@ -24,6 +25,9 @@ afterEach(() => {
 
   if (ORIGINAL_ENV.CRAFT_FEATURE_EMBEDDED_SERVER === undefined) delete process.env.CRAFT_FEATURE_EMBEDDED_SERVER;
   else process.env.CRAFT_FEATURE_EMBEDDED_SERVER = ORIGINAL_ENV.CRAFT_FEATURE_EMBEDDED_SERVER;
+
+  if (ORIGINAL_ENV.CRAFT_FEATURE_TASKS_ORCHESTRATE === undefined) delete process.env.CRAFT_FEATURE_TASKS_ORCHESTRATE;
+  else process.env.CRAFT_FEATURE_TASKS_ORCHESTRATE = ORIGINAL_ENV.CRAFT_FEATURE_TASKS_ORCHESTRATE;
 
 });
 
@@ -99,6 +103,16 @@ describe('feature-flags runtime helpers', () => {
     process.env.CRAFT_FEATURE_EMBEDDED_SERVER = '0';
 
     expect(isEmbeddedServerEnabled()).toBe(false);
+  });
+
+  it('isTasksOrchestrateEnabled defaults to false', () => {
+    delete process.env.CRAFT_FEATURE_TASKS_ORCHESTRATE;
+    expect(isTasksOrchestrateEnabled()).toBe(false);
+  });
+
+  it('isTasksOrchestrateEnabled honors explicit override true', () => {
+    process.env.CRAFT_FEATURE_TASKS_ORCHESTRATE = '1';
+    expect(isTasksOrchestrateEnabled()).toBe(true);
   });
 
 });

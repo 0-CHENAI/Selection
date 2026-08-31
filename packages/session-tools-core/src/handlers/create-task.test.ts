@@ -75,6 +75,23 @@ describe('handleCreateTask', () => {
     expect(calls).toHaveLength(0);
   });
 
+  it('accepts a full spec and rejects mixing it with title/description', async () => {
+    const { ctx, calls } = createCtx();
+    const mixed = await handleCreateTask(ctx, {
+      title: 'T',
+      description: 'D',
+      spec: { id: 'x', title: 'X', goal: 'g', nodes: [] },
+    });
+    expect(mixed.isError).toBe(true);
+    expect(calls).toHaveLength(0);
+
+    const ok = await handleCreateTask(ctx, {
+      spec: { id: 'x', title: 'X', goal: 'g', nodes: [{ id: 'a', prompt: 'a' }] },
+    });
+    expect(ok.isError).toBeFalsy();
+    expect(calls[0]?.spec).toBeDefined();
+  });
+
   it('wraps backend failures as tool errors', async () => {
     const ctx = {
       createTask: async () => {
