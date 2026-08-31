@@ -10,6 +10,7 @@ import { ActiveOptionBadges } from '../ActiveOptionBadges'
 import { InputContainer } from './InputContainer'
 import { InputErrorBoundary } from './InputErrorBoundary'
 import { QueuedMessagePanel } from './QueuedMessagePanel'
+import { SwarmToggle } from './SwarmToggle'
 
 interface ChatInputZoneProps {
   compactMode?: boolean
@@ -29,6 +30,11 @@ interface ChatInputZoneProps {
   currentSessionStatus?: string
   showSharedProjectMemory?: boolean
   onSessionStatusChange?: (stateId: string) => void
+  swarmEnabled?: boolean
+  onSwarmEnabledChange?: (enabled: boolean) => void | Promise<void>
+  swarmToggleDisabled?: boolean
+  swarmRunning?: boolean
+  onStopSwarm?: () => void | Promise<void>
   className?: string
   queuedMessages?: Message[]
   inputProps: React.ComponentProps<typeof InputContainer>
@@ -52,6 +58,11 @@ export function ChatInputZone({
   currentSessionStatus = 'todo',
   showSharedProjectMemory = false,
   onSessionStatusChange,
+  swarmEnabled = false,
+  onSwarmEnabledChange,
+  swarmToggleDisabled = false,
+  swarmRunning = false,
+  onStopSwarm,
   className,
   queuedMessages = [],
   inputProps,
@@ -115,6 +126,17 @@ export function ChatInputZone({
         messages={queuedMessages}
         compactMode={compactMode}
       />
+
+      {onSwarmEnabledChange && (
+        <SwarmToggle
+          enabled={swarmEnabled}
+          onEnabledChange={onSwarmEnabledChange}
+          disabled={swarmToggleDisabled}
+          compact={compactMode}
+          running={swarmRunning}
+          onStop={onStopSwarm}
+        />
+      )}
 
       <InputErrorBoundary
         sessionId={sessionId}
