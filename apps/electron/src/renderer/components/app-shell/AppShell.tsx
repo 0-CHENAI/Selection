@@ -46,7 +46,7 @@ import { Button } from "@/components/ui/button"
 import { HeaderIconButton } from "@/components/ui/HeaderIconButton"
 import { CreationJobsButton } from "./CreationJobsButton"
 import type { CreationJob } from "@/atoms/creation-jobs"
-import { resolveNewSessionParams, resolveProjectNavigationSessionId, type FilterMode } from "./inherited-filter-params"
+import { clearProjectFilter, resolveNewSessionParams, resolveProjectNavigationSessionId, type FilterMode } from "./inherited-filter-params"
 import { filterSessionsByProject } from "./project-session-filter"
 import { Separator } from "@/components/ui/separator"
 import { Tooltip, TooltipTrigger, TooltipContent } from "@craft-agent/ui"
@@ -1819,6 +1819,18 @@ function AppShellContent({
   }, [collapsedItems, activeWorkspaceId])
 
   const handleAllSessionsClick = useCallback(() => {
+    // Project children share the allSessions route and are represented by a
+    // secondary project filter. Explicitly selecting the parent must clear
+    // that scope; otherwise both rows stay highlighted and the list remains
+    // restricted to the previously selected project (#165).
+    setViewFiltersMap(prev => {
+      const existing = prev['allSessions']
+      if (!existing || Object.keys(existing.projects ?? {}).length === 0) return prev
+      return {
+        ...prev,
+        allSessions: clearProjectFilter(existing),
+      }
+    })
     navigate(routes.view.allSessions())
   }, [])
 
