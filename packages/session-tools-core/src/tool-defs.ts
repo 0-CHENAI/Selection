@@ -190,6 +190,23 @@ export const SpawnSessionSchema = z.object({
     path: z.string().describe('Absolute file path on disk'),
     name: z.string().optional().describe('Display name (defaults to file basename)'),
   })).optional().describe('Files to include with the prompt'),
+  lifecycle: z.enum(['managed', 'detached']).optional()
+    .describe('managed (default) participates in parent completion and explicit Swarm stop; detached continues independently.'),
+  role: z.enum(['coordinator', 'worker', 'reviewer']).optional()
+    .describe('Observation/result ownership role only; it does not grant permissions.'),
+  spawnReason: z.enum(['user-requested', 'automatic']).optional()
+    .describe('Use user-requested only when the user explicitly asked to delegate. Autonomous splitting requires automatic.'),
+  qualification: z.object({
+    tracks: z.array(z.object({
+      name: z.string().min(1),
+      input: z.string().min(1),
+      expectedOutput: z.string().min(1),
+      evidence: z.string().min(1),
+      toolKinds: z.array(z.string().min(1)).min(1),
+    })).min(2),
+    parallelBenefit: z.string().min(1),
+    finalAggregation: z.string().min(1),
+  }).optional().describe('Required for automatic spawning: two independent tool tracks plus a final aggregation contract.'),
 });
 
 // Session self-management tools
@@ -518,7 +535,7 @@ For large files (>2000 lines), use {path, startLine, endLine} to select a portio
 
   spawn_session: `Create a first-class child session that runs independently with its own prompt, connection, model, and sources.
 
-Default: do the work in this session. Spawn only when the user asked to split/parallelize, you have two or more independent tool-heavy tracks, or the side work would pollute this conversation. Do not spawn for ordinary Q&A, editing existing text, summarizing/classifying/extracting fields from text you already have, reading a file or two, a single command, or "just in case". Prefer at most 3 background children in one turn.
+Default: do the work in this session. When Swarm is OFF, spawn only after an explicit user request and set spawnReason="user-requested". When Swarm is ON, autonomous splitting must set spawnReason="automatic" and provide qualification with at least two independent tool-heavy tracks, a concrete parallel benefit, per-track input/output/evidence contracts, and finalAggregation. The backend fails closed when this contract is incomplete. Do not spawn for ordinary Q&A, editing existing text, summarizing/classifying/extracting fields from text you already have, reading a file or two, a single command, or "just in case". The backend enforces at most 3 live children per parent, depth 2, and 12 live nodes per Swarm.
 
 When spawning, the 'prompt' parameter is required. Call help=true only if you need to pick a different connection or model.
 
@@ -532,7 +549,7 @@ Optional overrides: \`model\`, \`llmConnection\`, \`permissionMode\`, \`thinking
 
 \`thinkingLevel\` is silently ignored on non-reasoning models (e.g. gpt-4o, gemini-2.5-flash).
 
-The child appears in the session list (parentSessionId = this session).
+Children default to lifecycle="managed" and role="worker". Managed children participate in parent completion and explicit Swarm stop; lifecycle="detached" explicitly leaves both contracts. Workers are hidden from the ordinary session list but remain openable from run details.
 Only use 'attachments' for existing file paths on disk — the tool reads them automatically.`,
 
   send_developer_feedback: `Send freeform feedback to the Selection development team.

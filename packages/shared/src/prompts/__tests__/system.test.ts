@@ -22,6 +22,28 @@ const GIT_CONVENTIONS_HEADING = '## Git Conventions'
 const CO_AUTHOR_TRAILER = 'Co-Authored-By: Selection <agents-noreply@craft.do>'
 
 describe('system prompt guidance', () => {
+  it('fails closed for autonomous delegation unless the per-session Swarm switch is on', () => {
+    const off = getSystemPrompt(undefined, undefined, '/tmp/workspace', '/tmp/workspace')
+    const on = getSystemPrompt(
+      undefined,
+      undefined,
+      '/tmp/workspace',
+      '/tmp/workspace',
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      true,
+      true,
+    )
+
+    expect(off).toContain('Swarm mode is OFF')
+    expect(off).toContain('Never split work autonomously')
+    expect(on).toContain('Swarm mode is ON')
+    expect(on).toContain('fail closed')
+    expect(on).toContain('final aggregation or verification contract')
+  })
+
   it('keeps scratch artifacts out of the user-selected working directory (#163)', () => {
     const prompt = getSystemPrompt(undefined, undefined, '/tmp/workspace', '/tmp/deliverables')
 

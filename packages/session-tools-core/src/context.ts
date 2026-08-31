@@ -674,6 +674,14 @@ export interface BackgroundTaskInfo {
   completedAt?: number;
   /** Present for first-class spawn_session children. */
   source?: 'spawn_session';
+  orchestrationId?: string;
+  rootSessionId?: string;
+  parentSessionId?: string;
+  depth?: number;
+  role?: 'coordinator' | 'worker' | 'reviewer';
+  lifecycle?: 'managed' | 'detached';
+  projectId?: string;
+  blocker?: string;
 }
 
 // ============================================================

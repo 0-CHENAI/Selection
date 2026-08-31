@@ -102,6 +102,8 @@ export interface ISessionManager {
   ): Promise<boolean>
   setSessionConnection(sessionId: string, connectionSlug: string): Promise<void>
   updateSessionModel(sessionId: string, workspaceId: string, model: string | null, connection?: string): Promise<void>
+  updateSessionSwarmEnabled(sessionId: string, enabled: boolean): Promise<void>
+  stopSwarm(sessionId: string): Promise<{ stoppedSessionIds: string[]; detachedSessionIds: string[] }>
 
   // ---------------------------------------------------------------------------
   // Messaging

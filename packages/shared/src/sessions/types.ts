@@ -65,6 +65,15 @@ export const SESSION_PERSISTENT_FIELDS = [
   'taskNodeId',
   'taskNodeCount',
   'taskDraft',
+  // Per-session Swarm preview state and lineage
+  'swarmEnabled',
+  'orchestrationId',
+  'orchestrationRootSessionId',
+  'orchestrationDepth',
+  'orchestrationRole',
+  'orchestrationLifecycle',
+  'orchestrationStatus',
+  'orchestrationBlocker',
 ] as const;
 
 export type SessionPersistentField = typeof SESSION_PERSISTENT_FIELDS[number];
@@ -77,6 +86,18 @@ export type SessionPersistentField = typeof SESSION_PERSISTENT_FIELDS[number];
  * Falls back to 'todo' if status doesn't exist.
  */
 export type SessionStatus = string;
+
+export interface SwarmSessionMetadata {
+  /** Autonomous delegation is opt-in per session; missing legacy values resolve to false. */
+  swarmEnabled?: boolean;
+  orchestrationId?: string;
+  orchestrationRootSessionId?: string;
+  orchestrationDepth?: number;
+  orchestrationRole?: 'coordinator' | 'worker' | 'reviewer';
+  orchestrationLifecycle?: 'managed' | 'detached';
+  orchestrationStatus?: 'running' | 'completed' | 'need-to-check' | 'stopped';
+  orchestrationBlocker?: string;
+}
 
 /**
  * Built-in status IDs (for TypeScript consumers)
@@ -140,7 +161,7 @@ export type { StoredMessage } from '@craft-agent/core/types';
 /**
  * Session configuration (persisted metadata)
  */
-export interface SessionConfig {
+export interface SessionConfig extends SwarmSessionMetadata {
   id: string;
   /** SDK session ID (captured after first message) */
   sdkSessionId?: string;
@@ -286,7 +307,7 @@ export interface StoredSession extends SessionConfig {
  * Contains all metadata needed for list views (pre-computed at save time).
  * This enables fast session listing without parsing message content.
  */
-export interface SessionHeader {
+export interface SessionHeader extends SwarmSessionMetadata {
   id: string;
   /** SDK session ID (captured after first message) */
   sdkSessionId?: string;
@@ -401,7 +422,7 @@ export interface SessionHeader {
 /**
  * Session metadata (lightweight, for lists)
  */
-export interface SessionMetadata {
+export interface SessionMetadata extends SwarmSessionMetadata {
   id: string;
   workspaceRootPath: string;
   name?: string;

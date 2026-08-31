@@ -27,6 +27,12 @@ function setup() {
       sessionId: 'spawned-id',
       name: 'spawned',
       status: 'started',
+      orchestrationId: 'orch-1',
+      parentSessionId: 'parent',
+      rootSessionId: 'parent',
+      depth: 1,
+      role: 'worker',
+      lifecycle: 'managed',
     };
     return result;
   };
@@ -88,5 +94,28 @@ describe('spawn_session thinkingLevel forwarding', () => {
     expect(captured[0]?.permissionMode).toBe('ask');
     expect(captured[0]?.model).toBe('claude-opus-4-7');
     expect(captured[0]?.labels).toEqual(['test']);
+  });
+
+  it('forwards Swarm lifecycle, role, reason, and qualification unchanged', async () => {
+    const qualification = {
+      tracks: [
+        { name: 'code', input: 'repo', expectedOutput: 'findings', evidence: 'tests', toolKinds: ['Read'] },
+        { name: 'runtime', input: 'app', expectedOutput: 'trace', evidence: 'logs', toolKinds: ['Bash'] },
+      ],
+      parallelBenefit: 'independent evidence collection',
+      finalAggregation: 'parent compares both contracts',
+    };
+    await agent.invokeSpawn({
+      prompt: 'investigate',
+      lifecycle: 'detached',
+      role: 'reviewer',
+      spawnReason: 'automatic',
+      qualification,
+    });
+
+    expect(captured[0]?.lifecycle).toBe('detached');
+    expect(captured[0]?.role).toBe('reviewer');
+    expect(captured[0]?.spawnReason).toBe('automatic');
+    expect(captured[0]?.qualification).toEqual(qualification);
   });
 });

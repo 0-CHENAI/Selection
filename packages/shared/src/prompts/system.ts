@@ -356,6 +356,7 @@ export function getSystemPrompt(
   includeCoAuthoredBy?: boolean,
   projectContext?: ProjectPromptContext,
   toolMetadataRequired: boolean = true,
+  swarmEnabled: boolean = false,
 ): string {
   // Use mini agent prompt for quick edits (pass workspace root for config paths)
   if (preset === 'mini') {
@@ -385,6 +386,7 @@ export function getSystemPrompt(
     backendName,
     resolvedIncludeCoAuthoredBy,
     toolMetadataRequired,
+    swarmEnabled,
   );
   const fullPrompt = `${basePrompt}${preferences}${projectBlock}${debugContext}${projectContextFiles}`;
 
@@ -584,6 +586,7 @@ function getCraftAssistantPrompt(
   backendName: string = 'Claude Code',
   includeCoAuthoredBy: boolean = true,
   toolMetadataRequired: boolean = true,
+  swarmEnabled: boolean = false,
 ): string {
   // Default to ${APP_ROOT}/workspaces/{id} if no path provided
   const workspacePath = workspaceRootPath || `${APP_ROOT}/workspaces/{id}`;
@@ -651,6 +654,10 @@ Use the browser as an **alternative/fallback** path when source setup is fragile
 - \`release\` — you're done but user may want to keep browsing the page
 - \`hide\` — temporarily done, may need browser again later in conversation
 ` : '';
+
+  const swarmPolicySection = swarmEnabled
+    ? `**Swarm mode is ON for this session.** Autonomous \`spawn_session\` is allowed only when all qualification fields are complete: at least two independent tool-requiring tracks, a concrete parallel benefit, per-track input/output/evidence contracts, and a final aggregation or verification contract. Use \`spawnReason: "automatic"\` plus \`qualification\`. If any condition is missing, fail closed and keep the work in this session. Ordinary Q&A, one-file reads, one command, rewriting, and simple summaries never qualify. When authoring a qualified v2 Task, use \`runner: "orchestrate"\`; otherwise keep \`conduct\`.\n\n`
+    : `**Swarm mode is OFF for this session.** Never split work autonomously. \`spawn_session\` is allowed only when the user explicitly asks to delegate or parallelize; then set \`spawnReason: "user-requested"\`. Otherwise keep all work in this session.\n\n`;
 
   return `${environmentMarker}
 
@@ -1045,7 +1052,7 @@ If you get a "Labels rejected" error, the reason is per-entry — common causes 
 - Use \`get_session_info\` for full details on a specific session (list-then-detail pattern).
 - Do NOT call \`list_sessions\` with a high limit just to scan all sessions — filter first.
 
-**Delegating to a child session (use sparingly):**
+${swarmPolicySection}**Delegating to a child session (use sparingly):**
 Default: do the work yourself. \`spawn_session\` creates a first-class child session (\`parentSessionId\` = you). Spawn only if **one** of these is true:
 - The user explicitly asked to split work, run in parallel, or open another session.
 - There are at least two **independent** tracks that each need tools (Read/Bash/…) and cannot be finished from the current context.

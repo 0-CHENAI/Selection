@@ -36,6 +36,8 @@ export const RPC_CHANNELS = {
     EVENT: 'session:event',
     GET_MODEL: 'session:getModel',
     SET_MODEL: 'session:setModel',
+    SET_SWARM_ENABLED: 'session:setSwarmEnabled',
+    STOP_SWARM: 'session:stopSwarm',
     GET_FILES: 'sessions:getFiles',
     GET_NOTES: 'sessions:getNotes',
     SET_NOTES: 'sessions:setNotes',

@@ -2405,6 +2405,7 @@ export class PiAgent extends BaseAgent {
         // their registered tool schemas. Keep the prompt aligned with the strict,
         // provider-neutral schemas registered by pi-agent-server.
         false,
+        this.config.session?.swarmEnabled === true,
       );
 
       // Build context from sources

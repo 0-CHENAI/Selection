@@ -103,6 +103,23 @@ export interface MiniAgentConfig {
 
 export type SpawnSessionMode = 'wait' | 'background';
 export type SpawnSessionResultStatus = 'started' | 'completed' | 'failed' | 'interrupted' | 'timeout';
+export type SpawnSessionLifecycle = 'managed' | 'detached';
+export type SpawnSessionRole = 'coordinator' | 'worker' | 'reviewer';
+export type SpawnSessionReason = 'user-requested' | 'automatic';
+
+export interface SpawnSessionQualificationTrack {
+  name: string;
+  input: string;
+  expectedOutput: string;
+  evidence: string;
+  toolKinds: string[];
+}
+
+export interface SpawnSessionQualification {
+  tracks: SpawnSessionQualificationTrack[];
+  parallelBenefit: string;
+  finalAggregation: string;
+}
 
 export interface SpawnSessionRequest {
   prompt: string;
@@ -121,6 +138,14 @@ export interface SpawnSessionRequest {
   /** Wait-mode timeout in ms. Clamped to 30 minutes. */
   timeoutMs?: number;
   attachments?: Array<{ path: string; name?: string }>;
+  /** managed children participate in the parent's completion and explicit stop. */
+  lifecycle?: SpawnSessionLifecycle;
+  /** Observation/result ownership only; never grants permissions. */
+  role?: SpawnSessionRole;
+  /** Distinguishes an explicit user delegation from autonomous planning. */
+  spawnReason?: SpawnSessionReason;
+  /** Required evidence contract for autonomous delegation. */
+  qualification?: SpawnSessionQualification;
 }
 
 export interface SpawnSessionResult {
@@ -131,6 +156,13 @@ export interface SpawnSessionResult {
   model?: string;
   /** Present in wait mode when the child produced a final assistant message. */
   finalText?: string;
+  orchestrationId: string;
+  parentSessionId: string;
+  rootSessionId: string;
+  depth: number;
+  role: SpawnSessionRole;
+  projectId?: string;
+  lifecycle: SpawnSessionLifecycle;
 }
 
 export interface SpawnSessionHelpResult {
@@ -1307,6 +1339,10 @@ ${formattedMessages}
       mode: resolveSpawnSessionMode(input.mode),
       timeoutMs: resolveSpawnWaitTimeoutMs(input.timeoutMs),
       attachments: input.attachments as SpawnSessionRequest['attachments'],
+      lifecycle: input.lifecycle as SpawnSessionRequest['lifecycle'],
+      role: input.role as SpawnSessionRequest['role'],
+      spawnReason: input.spawnReason as SpawnSessionRequest['spawnReason'],
+      qualification: input.qualification as SpawnSessionRequest['qualification'],
     };
 
     return this.onSpawnSession(request);

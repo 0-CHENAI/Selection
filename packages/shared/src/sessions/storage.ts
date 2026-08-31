@@ -194,6 +194,14 @@ export async function createSession(
     taskRunId?: string;
     taskNodeId?: string;
     taskDraft?: boolean;
+    swarmEnabled?: boolean;
+    orchestrationId?: string;
+    orchestrationRootSessionId?: string;
+    orchestrationDepth?: number;
+    orchestrationRole?: 'coordinator' | 'worker' | 'reviewer';
+    orchestrationLifecycle?: 'managed' | 'detached';
+    orchestrationStatus?: 'running' | 'completed' | 'need-to-check' | 'stopped';
+    orchestrationBlocker?: string;
   }
 ): Promise<SessionConfig> {
   ensureSessionsDir(workspaceRootPath);
@@ -235,6 +243,14 @@ export async function createSession(
     taskRunId: options?.taskRunId,
     taskNodeId: options?.taskNodeId,
     taskDraft: options?.taskDraft,
+    swarmEnabled: options?.swarmEnabled ?? false,
+    orchestrationId: options?.orchestrationId,
+    orchestrationRootSessionId: options?.orchestrationRootSessionId,
+    orchestrationDepth: options?.orchestrationDepth,
+    orchestrationRole: options?.orchestrationRole,
+    orchestrationLifecycle: options?.orchestrationLifecycle,
+    orchestrationStatus: options?.orchestrationStatus,
+    orchestrationBlocker: options?.orchestrationBlocker,
   };
 
   // Save empty session
