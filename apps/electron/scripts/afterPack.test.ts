@@ -3,14 +3,27 @@ import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-const { pruneForeignPlatformRuntimes } = require('./afterPack.cjs') as {
+const { pruneForeignPlatformRuntimes, resolvePackagedResourcesRoot } = require('./afterPack.cjs') as {
   pruneForeignPlatformRuntimes: (
     context: { arch: string | number; electronPlatformName: string },
     resourcesRoot: string,
   ) => void
+  resolvePackagedResourcesRoot: (context: {
+    electronPlatformName: string
+    appOutDir: string
+    packager: { appInfo: { productFilename: string } }
+  }) => string
 }
 
 describe('afterPack OfficeCLI runtime pruning', () => {
+  it('resolves the macOS resources path from the configured product filename', () => {
+    expect(resolvePackagedResourcesRoot({
+      electronPlatformName: 'darwin',
+      appOutDir: '/tmp/out',
+      packager: { appInfo: { productFilename: 'Selection Swarm Preview' } },
+    })).toBe('/tmp/out/Selection Swarm Preview.app/Contents/Resources')
+  })
+
   it('keeps only the target platform runtime in every packaged resource copy', () => {
     const root = mkdtempSync(join(tmpdir(), 'selection-after-pack-'))
     try {

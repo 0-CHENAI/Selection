@@ -80,6 +80,8 @@
     "electron:dist:dev:mac": "CSC_IDENTITY_AUTO_DISCOVERY=false CRAFT_DEV_RUNTIME=1 bun run electron:build && cd apps/electron && CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --config electron-builder.yml --mac",
     "electron:dist:dev:win": "CRAFT_DEV_RUNTIME=1 bun run electron:build && cd apps/electron && electron-builder --config electron-builder.yml --win",
     "electron:dist:dev:linux": "CRAFT_DEV_RUNTIME=1 bun run electron:build && cd apps/electron && electron-builder --config electron-builder.yml --linux",
+    "electron:build:swarm-preview": "CRAFT_SWARM_PREVIEW_BUILD=1 CRAFT_FEATURE_TASKS_ORCHESTRATE=1 bun run electron:build",
+    "electron:dist:swarm-preview:mac": "CRAFT_SWARM_PREVIEW_BUILD=1 CRAFT_FEATURE_TASKS_ORCHESTRATE=1 bun run electron:build && cd apps/electron && CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --config electron-builder.swarm-preview.yml --mac",
     "playground:dev": "lsof -ti:5173 | xargs kill -9 2>/dev/null; vite dev --config apps/electron/vite.config.ts --open /playground.html",
     "viewer:dev": "lsof -ti:5174 | xargs kill -9 2>/dev/null; vite dev --config apps/viewer/vite.config.ts --open /s/tz5-13I84pwK_he",
     "viewer:typecheck": "cd apps/viewer && bun run typecheck",

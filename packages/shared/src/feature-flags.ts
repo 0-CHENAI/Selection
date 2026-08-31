@@ -55,7 +55,13 @@ export function isCraftAgentsCliEnabled(): boolean {
 export function isTasksOrchestrateEnabled(): boolean {
   const override = parseBooleanEnv(getEnv('CRAFT_FEATURE_TASKS_ORCHESTRATE'));
   if (override !== undefined) return override;
+  if (parseBooleanEnv(getEnv('CRAFT_SWARM_PREVIEW_BUILD')) === true) return true;
   return false;
+}
+
+/** True only for the separately packaged Swarm/Conductor technical preview. */
+export function isSwarmPreviewBuild(): boolean {
+  return parseBooleanEnv(getEnv('CRAFT_SWARM_PREVIEW_BUILD')) === true;
 }
 
 /**
