@@ -899,7 +899,7 @@ export function TaskEditor({
         layout,
       },
       modelToConnection,
-    ) as WorkbenchSpec
+    ) as unknown as WorkbenchSpec
   }, [
     title, goal, acceptanceCriteria, maxRepairs, projectId, orchModel, orchConnection, permissionMode,
     boundProjectId, subtasks, cwd, sourceSlugs, skillSlugs, editSlug, runner, layout, modelToConnection,
@@ -927,7 +927,7 @@ export function TaskEditor({
         return
       }
       setYamlDiagnostics([])
-      if (res.spec) applyWorkbenchSpec(res.spec as WorkbenchSpec)
+      if (res.spec) applyWorkbenchSpec(res.spec as unknown as WorkbenchSpec)
     } catch (err) {
       setYamlDiagnostics([err instanceof Error ? err.message : String(err)])
     }
@@ -1167,7 +1167,7 @@ export function TaskEditor({
             </>
           )}
           {tab === 'results' && (
-            <Btn variant="secondary" onClick={loadResults} disabled={resultsLoading}>
+            <Btn variant="secondary" onClick={() => loadResults()} disabled={resultsLoading}>
               {resultsLoading ? <Spinner /> : <RefreshCw className="h-3.5 w-3.5" strokeWidth={2} />} {t('common.refresh')}
             </Btn>
           )}

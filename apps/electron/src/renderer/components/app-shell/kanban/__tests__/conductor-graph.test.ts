@@ -9,9 +9,10 @@ import {
   layerLayout,
   overlayState,
   specTopologyKey,
+  type SpecLike,
 } from '../conductor-graph.ts'
 
-const SPEC = {
+const SPEC: SpecLike = {
   nodes: [
     { id: 'a', title: 'A', kind: 'session', prompt: 'a' },
     { id: 'b', title: 'B', kind: 'session', prompt: 'b', depends_on: ['a'] },

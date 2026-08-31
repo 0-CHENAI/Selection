@@ -20,6 +20,7 @@ import { useTranslation } from 'react-i18next'
 import { isTasksOrchestrateEnabled } from '@craft-agent/shared/feature-flags'
 import { resolveNodeStatePill } from './node-state-pill'
 import { nodeKindLabelKey, runStatusLabelKey, runnerLabelKey } from './task-labels'
+import type { EditorNodeKind } from './task-spec-form'
 import {
   autoLayout,
   hasCompleteLayout,
@@ -34,7 +35,7 @@ export interface WorkbenchSpec {
   title?: string
   goal?: string
   runner?: 'conduct' | 'orchestrate'
-  nodes: Array<{ id: string; title?: string; kind?: string; prompt?: string; depends_on?: string[] }>
+  nodes: Array<{ id: string; title?: string; kind?: EditorNodeKind; prompt?: string; depends_on?: string[] }>
   ui?: { layout?: { direction?: 'TB' | 'LR'; nodes?: Record<string, { x: number; y: number }> } }
 }
 

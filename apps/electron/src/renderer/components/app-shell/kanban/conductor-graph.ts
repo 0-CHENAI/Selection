@@ -40,7 +40,7 @@ export interface CanvasGraph {
 
 export type EdgeConflict = 'self' | 'duplicate' | 'cycle'
 
-type SpecLike = {
+export type SpecLike = {
   nodes: Array<{
     id: string
     title?: string
