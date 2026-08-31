@@ -17,7 +17,9 @@ const actualSharedAgentModule = await import('../../../../../packages/shared/src
 const actualSharedAgentBackendModule = await import('../../../../../packages/shared/src/agent/backend/index.ts')
 const actualSharedConfigModule = await import('../../../../../packages/shared/src/config/index.ts')
 const actualSharedWorkspacesModule = await import('../../../../../packages/shared/src/workspaces/index.ts')
-const actualConfigDefaults = actualSharedConfigModule.loadConfigDefaults()
+const actualConfigDefaults = await Bun.file(
+  new URL('../../../resources/config-defaults.json', import.meta.url),
+).json()
 
 mock.module('electron', () => ({
   app: {

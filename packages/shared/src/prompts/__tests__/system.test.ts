@@ -9,6 +9,12 @@ mock.module('../../config/preferences.ts', () => ({
   formatPreferencesForPrompt: () => '',
 }))
 
+// System prompt assertions are independent of persisted app configuration.
+// Keep the browser section at its default-on state without reading ~/.selection.
+mock.module('../../config/storage.ts', () => ({
+  getBrowserToolEnabled: () => true,
+}))
+
 import {
   getSystemPrompt,
   getMiniAgentSystemPrompt,
