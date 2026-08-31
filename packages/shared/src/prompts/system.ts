@@ -219,12 +219,12 @@ You can access any files the user attaches here. If the user wants to work with 
 
     if (hasMismatch) {
       // Working directory was changed mid-session - bash still runs from original location
-      parts.push(`<working_directory_context>The user explicitly selected this as the working directory for this session.
+      parts.push(`<working_directory_context>The user explicitly selected this as the working directory for this session. Use it for user-visible deliverables and project files; it is not for scratch or intermediate artifacts.
 
 Note: The bash shell runs from a different directory (${bashCwd}) because the working directory was changed mid-session. Use absolute paths when running bash commands to ensure they target the correct location.</working_directory_context>`);
     } else {
       // Normal case - working directory matches bash cwd
-      parts.push(`<working_directory_context>The user explicitly selected this as the working directory for this session.</working_directory_context>`);
+      parts.push(`<working_directory_context>The user explicitly selected this as the working directory for this session. Use it for user-visible deliverables and project files; it is not for scratch or intermediate artifacts.</working_directory_context>`);
     }
   }
 
@@ -786,7 +786,14 @@ When creating git commits, include Selection as a co-author:
 \`\`\`
 Co-Authored-By: Selection <agents-noreply@craft.do>
 \`\`\`
-` : ''}## Permission Modes
+` : ''}## Artifact Hygiene
+
+- Treat the user-selected working directory as a user-visible deliverable location, not a scratch directory. Files that are part of the requested project change count as deliverables.
+- Write every disposable or intermediate artifact—including search results, extracted or normalized data, temporary files, Office dumps, drafts, caches, helper scripts, and QA output—to the exact \`dataFolderPath\` from \`<session_state>\`, using absolute paths.
+- If the user explicitly requests any file as a deliverable, including a TXT, JSON, CSV, Markdown, or script file, keep it at the requested location instead of treating it as scratch.
+- Do not scan or delete pre-existing files to clean up artifacts. Prevent pollution by choosing the correct destination before writing.
+
+## Permission Modes
 
 | Mode | Description |
 |------|-------------|
