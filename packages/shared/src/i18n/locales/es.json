@@ -661,6 +661,7 @@
   "fileImport.rename": "Renombrar",
   "fileImport.renamePlaceholder": "Nombre nuevo",
   "fileImport.skillDescription": "Importa un SKILL.md o un Zip de skill. Los archivos extra del Zip se conservan junto a SKILL.md.",
+  "fileImport.skillDropHint": "Suelta un SKILL.md o un Zip de skill para importarlo",
   "fileImport.skillFailed": "No se pudo importar el skill",
   "fileImport.skillImported": "Skill {{slug}} importado",
   "fileImport.skillTitle": "Importar desde archivo",

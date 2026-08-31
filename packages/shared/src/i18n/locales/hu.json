@@ -661,6 +661,7 @@
   "fileImport.rename": "Átnevezés",
   "fileImport.renamePlaceholder": "Új név",
   "fileImport.skillDescription": "Importáljon SKILL.md fájlt vagy skill Zip-et. A Zip további fájljai a SKILL.md mellett maradnak.",
+  "fileImport.skillDropHint": "Húzzon ide egy SKILL.md fájlt vagy skill Zip-et az importáláshoz",
   "fileImport.skillFailed": "A skill nem importálható",
   "fileImport.skillImported": "{{slug}} skill importálva",
   "fileImport.skillTitle": "Importálás fájlból",

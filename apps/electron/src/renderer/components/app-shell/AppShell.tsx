@@ -132,6 +132,7 @@ import {
   SkillFileImportDialog,
 } from "@/components/resources/ExternalResourceImportDialog"
 import {
+  getDroppedSkillImportFile,
   openSkillFilePicker,
   prepareSkillFileImport,
   listenForSkillFilePickerCancel,
@@ -1987,6 +1988,34 @@ function AppShellContent({
     }
   }, [activeWorkspaceId, clearSkillFileCancelListener, finishSkillFileImport, t])
 
+  const handleImportSkillFromDrop = useCallback((files: File[]) => {
+    if (!activeWorkspaceId || skillFileImporting.current) return
+
+    let file: File
+    try {
+      file = getDroppedSkillImportFile(files)
+    } catch (error) {
+      toast.error(t('fileImport.skillFailed'), {
+        description: error instanceof Error ? error.message : String(error),
+      })
+      return
+    }
+
+    skillFileImportTriggerRef.current = null
+    clearSkillFileCancelListener()
+    skillFileImporting.current = true
+    void prepareSkillFileImport(window.electronAPI, activeWorkspaceId, file)
+      .then(value => {
+        setPreparedSkillFileImport({ workspaceId: activeWorkspaceId, value })
+      })
+      .catch(error => {
+        finishSkillFileImport()
+        toast.error(t('fileImport.skillFailed'), {
+          description: error instanceof Error ? error.message : String(error),
+        })
+      })
+  }, [activeWorkspaceId, clearSkillFileCancelListener, finishSkillFileImport, t])
+
   useEffect(() => {
     if (
       preparedSkillFileImport
@@ -3684,6 +3713,7 @@ function AppShellContent({
                 copyFromOpen={copySkillsFromOpen}
                 onCopyFromOpenChange={setCopySkillsFromOpen}
                 onImportFromFile={handleImportSkillFromFile}
+                onImportDroppedFiles={handleImportSkillFromDrop}
               />
             )}
             {isProjectsNavigation(navState) && activeWorkspaceId && (

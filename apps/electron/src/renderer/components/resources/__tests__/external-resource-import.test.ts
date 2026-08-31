@@ -2,6 +2,8 @@ import { describe, expect, it, mock } from 'bun:test'
 import {
   beginMcpJsonImport,
   confirmSkillFileImport,
+  getDroppedSkillImportFile,
+  isSupportedSkillImportFile,
   listenForSkillFilePickerCancel,
   openSkillFilePicker,
   prepareSkillFileImport,
@@ -71,6 +73,27 @@ describe('beginMcpJsonImport', () => {
 })
 
 describe('skill file import stages', () => {
+  it('accepts a single dropped Markdown skill or Zip archive', () => {
+    const markdown = new File(['skill'], 'SKILL.md')
+    const archive = new File(['zip'], 'research.ZIP')
+
+    expect(isSupportedSkillImportFile(markdown)).toBe(true)
+    expect(isSupportedSkillImportFile(archive)).toBe(true)
+    expect(getDroppedSkillImportFile([markdown])).toBe(markdown)
+    expect(getDroppedSkillImportFile([archive])).toBe(archive)
+  })
+
+  it('rejects empty, multiple, and unsupported skill file drops', () => {
+    const markdown = new File(['skill'], 'SKILL.md')
+    const archive = new File(['zip'], 'research.zip')
+    const text = new File(['notes'], 'notes.txt')
+
+    expect(() => getDroppedSkillImportFile([])).toThrow('Drop a SKILL.md')
+    expect(() => getDroppedSkillImportFile([markdown, archive])).toThrow('one SKILL.md')
+    expect(() => getDroppedSkillImportFile([text])).toThrow('Only SKILL.md')
+    expect(isSupportedSkillImportFile(text)).toBe(false)
+  })
+
   it('opens the native picker synchronously and suppresses repeated triggers until release', () => {
     const steps: string[] = []
     const guard = { current: false }
@@ -254,6 +277,17 @@ describe('skill file import stages', () => {
     } satisfies SkillFileImportApi
 
     await expect(prepareSkillFileImport(api, workspaceId, file)).rejects.toThrow('required frontmatter')
+    expect(importSkillFile).not.toHaveBeenCalled()
+  })
+
+  it('rejects unsupported file types before previewing them', async () => {
+    const file = new File(['notes'], 'notes.txt')
+    const previewSkillFileImport = mock(async () => skillPreview())
+    const importSkillFile = mock(async () => ({ slug: 'research', skipped: false }))
+    const api = { previewSkillFileImport, importSkillFile } satisfies SkillFileImportApi
+
+    await expect(prepareSkillFileImport(api, workspaceId, file)).rejects.toThrow('Only SKILL.md')
+    expect(previewSkillFileImport).not.toHaveBeenCalled()
     expect(importSkillFile).not.toHaveBeenCalled()
   })
 })
