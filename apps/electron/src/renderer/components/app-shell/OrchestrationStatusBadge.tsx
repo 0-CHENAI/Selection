@@ -27,7 +27,7 @@ export function OrchestrationStatusBadge({
   const title = blocker || label
 
   if (displayState === 'running' || displayState === 'completed') {
-    return (
+    const dot = (
       <span
         role="status"
         aria-label={label}
@@ -38,6 +38,17 @@ export function OrchestrationStatusBadge({
         )}
       />
     )
+    return onOpenDetails ? (
+      <button
+        type="button"
+        aria-label={label}
+        title={title}
+        className="inline-flex rounded-full focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+        onClick={onOpenDetails}
+      >
+        {dot}
+      </button>
+    ) : dot
   }
 
   const className = cn(

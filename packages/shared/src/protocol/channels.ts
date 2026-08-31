@@ -37,6 +37,7 @@ export const RPC_CHANNELS = {
     GET_MODEL: 'session:getModel',
     SET_MODEL: 'session:setModel',
     SET_SWARM_ENABLED: 'session:setSwarmEnabled',
+    GET_SWARM_RUN_DETAILS: 'session:getSwarmRunDetails',
     UPDATE_SWARM_BUDGET: 'session:updateSwarmBudget',
     STOP_SWARM: 'session:stopSwarm',
     GET_FILES: 'sessions:getFiles',

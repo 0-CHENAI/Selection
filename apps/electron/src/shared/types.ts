@@ -460,6 +460,7 @@ export interface ElectronAPI {
   getSessionModel(sessionId: string, workspaceId: string): Promise<string | null>
   setSessionModel(sessionId: string, workspaceId: string, model: string | null, connection?: string): Promise<void>
   setSessionSwarmEnabled(sessionId: string, enabled: boolean): Promise<void>
+  getSessionSwarmRunDetails(sessionId: string, workspaceId: string): Promise<import('@craft-agent/shared/protocol').SwarmRunDetailsDto | null>
   updateSessionSwarmBudget(sessionId: string, tokenBudget: number): Promise<void>
   stopSessionSwarm(sessionId: string): Promise<{ stoppedSessionIds: string[]; detachedSessionIds: string[] }>
 

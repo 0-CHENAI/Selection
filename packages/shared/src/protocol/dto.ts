@@ -334,6 +334,32 @@ export interface TaskRunRequest {
   params?: Record<string, unknown>
 }
 
+export interface SwarmRunNodeDto {
+  sessionId: string
+  parentSessionId?: string
+  name: string
+  role: 'coordinator' | 'worker' | 'reviewer'
+  model?: string
+  status: 'running' | 'completed' | 'need-to-check' | 'stopped'
+  depth: number
+  elapsedSeconds: number
+  tokensUsed: number
+  lifecycle: 'managed' | 'detached'
+  blocker?: string
+  summary?: string
+}
+
+export interface SwarmRunDetailsDto {
+  orchestrationId: string
+  rootSessionId: string
+  coordinatorSessionId: string
+  status: 'running' | 'completed' | 'need-to-check' | 'stopped'
+  blocker?: string
+  tokensUsed: number
+  tokenBudget?: number
+  nodes: SwarmRunNodeDto[]
+}
+
 export interface TaskNodeRunStateDto {
   id: string
   /** Definition id for dynamic map/loop/replica instances. */
@@ -381,6 +407,10 @@ export interface TaskApplyRunRevisionRequest {
   slug: string
   runId: string
   expectedEtag: string
+  /** Required on confirm; copied from the immediately preceding preview. */
+  expectedRunRevision?: number
+  /** Required on confirm; binds the preview to the exact run graph. */
+  expectedRunSpecHash?: string
   confirm?: boolean
 }
 
@@ -390,7 +420,12 @@ export interface TaskApplyRunRevisionResult {
   validation: TaskValidationResultDto
   etag?: string
   yaml?: string
-  conflict?: { code: 'etag-conflict'; expected: string; actual: string }
+  runRevision?: number
+  runSpecHash?: string
+  conflict?:
+    | { code: 'etag-conflict'; expected: string; actual: string }
+    | { code: 'run-revision-conflict'; expected: number; actual: number }
+    | { code: 'run-spec-conflict'; expected: string; actual: string }
 }
 
 export interface TaskUpdateRunLimitsRequest {
@@ -449,6 +484,8 @@ export interface TaskResultsDto {
   /** Terminal run status recovered from the run-log (completed | failed | stopped | …). */
   runStatus?: string
   tokensUsed?: number
+  /** Latest durable graph revision observed for this run. */
+  revision?: number
   /** The run's acceptance criteria (from the per-run spec snapshot), shown above the verdict. */
   acceptanceCriteria?: string
   nodes: TaskResultNodeDto[]
@@ -525,6 +562,12 @@ export interface SendMessageOptions {
   skillSlugs?: string[]
   badges?: ContentBadge[]
   optimisticMessageId?: string
+  /**
+   * Trusted renderer/main signal that this visible user turn came from an
+   * explicit delegation action. Message text never grants spawn authority.
+   * Internal and hidden turns must leave this unset.
+   */
+  userAuthorizedSpawn?: boolean
   /** Session-scoped options frozen when a mid-stream message is queued. */
   queueContext?: QueuedMessageContext
   /**

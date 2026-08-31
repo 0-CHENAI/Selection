@@ -146,6 +146,11 @@ export interface SpawnSessionRequest {
   spawnReason?: SpawnSessionReason;
   /** Required evidence contract for autonomous delegation. */
   qualification?: SpawnSessionQualification;
+  /**
+   * Server-injected, single-use authorization bound to the current session turn.
+   * It is intentionally absent from the public spawn_session tool schema.
+   */
+  qualificationCredential?: string;
 }
 
 export interface SpawnSessionResult {

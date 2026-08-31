@@ -215,10 +215,6 @@ interface ChatDisplayProps {
   /** Hidden worker/reviewer sessions inherit this setting and cannot edit it. */
   swarmToggleDisabled?: boolean
   swarmRunning?: boolean
-  onStopSwarm?: () => void | Promise<void>
-  swarmTokensUsed?: number
-  swarmTokenBudget?: number
-  onSwarmBudgetIncrease?: (tokenBudget: number) => void | Promise<void>
   /** Workspace ID for loading skill icons */
   workspaceId?: string
   // Working directory (per session)
@@ -505,10 +501,6 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
   onSwarmEnabledChange,
   swarmToggleDisabled = false,
   swarmRunning = false,
-  onStopSwarm,
-  swarmTokensUsed = 0,
-  swarmTokenBudget,
-  onSwarmBudgetIncrease,
   workspaceId,
   // Working directory
   workingDirectory,
@@ -2109,16 +2101,13 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
             onSwarmEnabledChange={onSwarmEnabledChange}
             swarmToggleDisabled={swarmToggleDisabled}
             swarmRunning={swarmRunning}
-            onStopSwarm={onStopSwarm}
-            swarmTokensUsed={swarmTokensUsed}
-            swarmTokenBudget={swarmTokenBudget}
-            onSwarmBudgetIncrease={onSwarmBudgetIncrease}
             onSessionStatusChange={onSessionStatusChange}
             queuedMessages={queuedMessages}
             inputProps={{
               placeholder,
               disabled: isInputDisabled,
               isProcessing: session.isProcessing,
+              swarmEnabled,
               onAnimatedHeightChange: handleAnimatedHeightChange,
               onSubmit: handleSubmit,
               onStop: handleStop,

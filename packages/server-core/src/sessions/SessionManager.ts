@@ -8,7 +8,7 @@ import { basename, dirname, join } from 'path'
 import { existsSync } from 'fs'
 import { readFile, writeFile, mkdir } from 'fs/promises'
 import { randomUUID } from 'node:crypto'
-import { type AgentEvent, setPermissionMode, hydratePreviousPermissionMode, getPermissionModeDiagnostics, type PermissionMode, unregisterSessionScopedToolCallbacks, mergeSessionScopedToolCallbacks, AbortReason, type AuthRequest, type AuthResult, type CredentialAuthRequest, type BrowserPaneFns, generateConversationSummary, resolveKeepBackgroundTasksAlive, sanitizeUserMessageForRetry, resolveSpawnWaitTimeoutMs, type SpawnSessionLifecycle, type SpawnSessionRequest, type SpawnSessionResult, type SpawnSessionRole } from '@craft-agent/shared/agent'
+import { type AgentEvent, setPermissionMode, hydratePreviousPermissionMode, getPermissionModeDiagnostics, type PermissionMode, unregisterSessionScopedToolCallbacks, mergeSessionScopedToolCallbacks, AbortReason, type AuthRequest, type AuthResult, type CredentialAuthRequest, type BrowserPaneFns, generateConversationSummary, resolveKeepBackgroundTasksAlive, sanitizeUserMessageForRetry, resolveSpawnWaitTimeoutMs, type SpawnSessionLifecycle, type SpawnSessionRequest, type SpawnSessionResult, type SpawnSessionRole, type SpawnSessionReason } from '@craft-agent/shared/agent'
 import {
   resolveSessionConnection,
   createBackendFromConnection,
@@ -85,12 +85,14 @@ import {
 } from '@craft-agent/shared/sessions'
 import { loadWorkspaceSources, loadAllSources, getSourcesBySlugs, isSourceUsable, type LoadedSource, type McpServerConfig, getSourcesNeedingAuth, getSourceCredentialManager, getSourceServerBuilder, type SourceWithCredential, isApiOAuthProvider, hasRenewEndpoint, SERVER_BUILD_ERRORS, TokenRefreshManager, createTokenGetter } from '@craft-agent/shared/sources'
 import { listTaskSlugs, parseTaskSpec, parseTaskYaml, serializeTaskYaml, uniqueTaskSlug, loadTaskResults } from '@craft-agent/shared/tasks'
-import { createTaskFromSpec, resolveCreateTaskProjectId, rememberSubmittedDefinition, validateSubmittedDefinition, type TaskRunner } from '../tasks'
+import { clearSubmittedDefinition, createTaskFromSpec, resolveCreateTaskProjectId, rememberSubmittedDefinition, validateSubmittedDefinition, type TaskRunner } from '../tasks'
 import {
   assessSpawnQualification,
   assessSwarmSpawnLimits,
   buildBackgroundTaskNudge,
   buildManagedSwarmNudge,
+  FIXED_SWARM_TOKEN_BUDGET,
+  MAX_SWARM_CHILDREN_PER_PARENT,
   countRunningSpawnChildren,
   recoverPersistedSwarmStatus,
   resolveInheritedSwarmEnabled,
@@ -107,7 +109,7 @@ import { isParentTaskTool } from '@craft-agent/shared/utils/toolNames'
 import { restoreFiles } from '@craft-agent/shared/utils/bundle-files'
 import { getCredentialManager } from '@craft-agent/shared/credentials'
 import { CraftMcpClient, McpClientPool, McpPoolServer } from '@craft-agent/shared/mcp'
-import { type Session, type SessionEvent, type FileAttachment, type SendMessageOptions, type UnreadSummary, type RemoteSessionTransferPayload, type ImportRemoteSessionTransferResult, RPC_CHANNELS, generateMessageId } from '@craft-agent/shared/protocol'
+import { type Session, type SessionEvent, type FileAttachment, type SendMessageOptions, type UnreadSummary, type RemoteSessionTransferPayload, type ImportRemoteSessionTransferResult, type SwarmRunDetailsDto, type SwarmRunNodeDto, RPC_CHANNELS, generateMessageId } from '@craft-agent/shared/protocol'
 import { applySteerTranscriptBoundary, messageToStored, storedToMessage, type Message, type StoredAttachment, type ToolDisplayMeta, type TokenUsage } from '@craft-agent/core/types'
 import { hasRenderableAssistantText, preferRicherAssistantText } from '@craft-agent/core'
 import { formatPathsToRelative, formatToolInputPaths, perf, encodeIconToDataUrlAsync, getEmojiIcon, resetSummarizationClient, resolveToolIcon, readFileAttachment, resolveRegenerateAttachments, selectSpreadMessages, normalizePath } from '@craft-agent/shared/utils'
@@ -910,6 +912,8 @@ interface ManagedSession {
   parentSessionId?: string
   // Swarm is opt-in and inherited by spawned descendants. Legacy sessions default to false.
   swarmEnabled?: boolean
+  /** Runtime-only: refresh the agent after the active turn so the next turn sees the new Swarm config. */
+  swarmRuntimeRefreshPending?: boolean
   orchestrationId?: string
   orchestrationRootSessionId?: string
   orchestrationDepth?: number
@@ -1330,6 +1334,8 @@ interface PendingDelta {
 export interface SessionCompletionEvent {
   sessionId: string
   workspaceId: string
+  /** Monotonic in-memory turn identity used to bind ephemeral tool submissions. */
+  generation: number
   reason: 'complete' | 'interrupted' | 'error' | 'timeout'
   /** The final (non-intermediate) assistant message id for this turn, if any. */
   finalMessageId?: string
@@ -1404,6 +1410,11 @@ export class SessionManager implements ISessionManager {
   private swarmTurnCompletions: Map<string, SessionCompletionEvent> = new Map()
   /** Per-session cumulative usage already included in the current Swarm total. */
   private swarmAccountedTokens: Map<string, number> = new Map()
+  /** Ephemeral, single-use spawn capabilities. Never persisted or exposed to the model. */
+  private spawnQualificationCredentials: Map<string, Map<string, {
+    generation: number
+    reason: SpawnSessionReason
+  }>> = new Map()
   /**
    * WS2 keep-alive flag (default ON, opt-out via `CRAFT_KEEP_BG_AGENTS_ALIVE=0`).
    * When true, a persistent streaming query keeps the subprocess alive across
@@ -1460,6 +1471,9 @@ export class SessionManager implements ISessionManager {
     if (!was && processing) {
       sessionRuntimeHooks.onSessionStarted()
     } else if (was && !processing) {
+      // Turn capabilities are intentionally memory-only and expire as soon as
+      // the turn stops. A later turn must receive newly generation-bound ones.
+      this.spawnQualificationCredentials.delete(managed.id)
       sessionRuntimeHooks.onSessionStopped()
     }
   }
@@ -4554,7 +4568,15 @@ export class SessionManager implements ISessionManager {
       })
 
       // Wire up onSpawnSession to create independent sessions from agent tool calls
-      managed.agent.onSpawnSession = (request) => this.spawnSessionFromTool(managed, request)
+      managed.agent.onSpawnSession = (request) => {
+        const spawnReason = request.spawnReason ?? 'automatic'
+        return this.spawnSessionFromTool(managed, {
+          ...request,
+          // Inject inside the trusted server callback. The public tool schema
+          // neither accepts nor forwards this opaque capability.
+          qualificationCredential: this.resolveSpawnQualificationCredential(managed, spawnReason),
+        })
+      }
 
       // Wire up session self-management tools (set_session_labels, set_session_status, etc.)
       mergeSessionScopedToolCallbacks(managed.id, {
@@ -4675,7 +4697,7 @@ export class SessionManager implements ISessionManager {
         submitTaskDefinitionFn: async (input) => {
           const submitted = validateSubmittedDefinition(input.spec)
           if (!submitted.valid) return submitted
-          rememberSubmittedDefinition(managed.id, submitted.yaml)
+          rememberSubmittedDefinition(managed.id, managed.processingGeneration, submitted.yaml)
           return submitted
         },
         controlTaskRunFn: async (input) => {
@@ -6137,6 +6159,7 @@ export class SessionManager implements ISessionManager {
     }
     managed.autoRetryPending = undefined
 
+    clearSubmittedDefinition(sessionId)
     this.sessions.delete(sessionId)
 
     // Clean up session metadata in AutomationSystem (prevents memory leak)
@@ -6245,6 +6268,12 @@ export class SessionManager implements ISessionManager {
       return false
     }
     if (acknowledgeExistingClientMessage()) return
+
+    // Explicit delegation is a current-turn capability. Never queue it behind
+    // a live generation where the trusted user action and model turn diverge.
+    if (managed.isProcessing && !existingMessageId && options?.userAuthorizedSpawn) {
+      throw new Error('Explicit delegation cannot be queued; finish or stop the current response first')
+    }
 
     // Clear any pending plan execution state when a genuinely new user message
     // is sent. This runs after the idempotency gate so replaying an already
@@ -6433,6 +6462,10 @@ export class SessionManager implements ISessionManager {
     this.setProcessing(managed, true)
     managed.streamingText = ''
     managed.processingGeneration++
+    this.prepareSpawnQualificationCredentials(
+      managed,
+      options?.hidden !== true && options?.userAuthorizedSpawn === true,
+    )
     managed.turnStartFinalMessageId = this.getLastFinalAssistantMessageId(managed.messages)
     if (isUserTaskContinuation) {
       managed.activeTurnUsage = managed.activeTurnUsage
@@ -7670,6 +7703,14 @@ export class SessionManager implements ISessionManager {
     this.setProcessing(managed, false)
     managed.stopRequested = false  // Reset for next turn
 
+    // A Swarm toggle is allowed while a response is streaming so the button
+    // remains responsive. The current turn keeps its original system prompt,
+    // then this idle boundary rebuilds the runtime before a queued/next turn.
+    if (managed.swarmRuntimeRefreshPending) {
+      managed.swarmRuntimeRefreshPending = false
+      await this.disposeManagedAgentRuntime(managed, 'deferred Swarm setting change')
+    }
+
     // 1b. Orphan backstop: with the default per-turn subprocess model, any
     // background sub-agent still marked `running` dies when this turn's
     // subprocess is torn down. Flip those registry entries to `orphaned` so a
@@ -7774,6 +7815,7 @@ export class SessionManager implements ISessionManager {
       this.emitSessionComplete({
         sessionId,
         workspaceId: managed.workspace.id,
+        generation: managed.processingGeneration,
         reason: completionReason,
         finalMessageId: currentFinalMessageId,
         finalText: currentFinalMessageId
@@ -8071,6 +8113,130 @@ export class SessionManager implements ISessionManager {
       .sort((a, b) => b.startTime - a.startTime)
   }
 
+  getSwarmRunDetails(sessionId: string, workspaceId: string): SwarmRunDetailsDto | null {
+    const requested = this.sessions.get(sessionId)
+    const orchestrationId = requested?.orchestrationId
+    if (!requested || !orchestrationId) return null
+
+    const rootSessionId = requested.orchestrationRootSessionId ?? requested.id
+    if (requested.id !== rootSessionId || requested.orchestrationRole !== 'coordinator') return null
+    const coordinator = this.sessions.get(rootSessionId)
+    if (!coordinator
+      || coordinator.orchestrationId !== orchestrationId
+      || coordinator.workspace.id !== workspaceId) return null
+
+    const now = Date.now()
+    const orchestrationCandidates = Array.from(this.sessions.values())
+      .filter(candidate =>
+        candidate.id !== coordinator.id
+        && candidate.orchestrationId === orchestrationId
+        && candidate.orchestrationRootSessionId === rootSessionId
+        && !candidate.taskNodeId
+      )
+    const lineageViolations = orchestrationCandidates.filter(candidate =>
+      candidate.workspace.id !== coordinator.workspace.id
+      || candidate.projectId !== coordinator.projectId
+    )
+    const candidates = orchestrationCandidates
+      .filter(candidate =>
+        candidate.workspace.id === coordinator.workspace.id
+        && candidate.projectId === coordinator.projectId
+      )
+      .sort((a, b) =>
+        (a.createdAt ?? 0) - (b.createdAt ?? 0)
+        || a.id.localeCompare(b.id)
+      )
+    const descendants: ManagedSession[] = []
+    const seen = new Set<string>()
+    const appendChildren = (parentSessionId: string): void => {
+      for (const candidate of candidates) {
+        if (candidate.parentSessionId !== parentSessionId || seen.has(candidate.id)) continue
+        seen.add(candidate.id)
+        descendants.push(candidate)
+        appendChildren(candidate.id)
+      }
+    }
+    appendChildren(coordinator.id)
+    const disconnected = candidates.filter(candidate => !seen.has(candidate.id))
+
+    const taskFor = (child: ManagedSession): { task?: RunningBackgroundTask; summary?: string } => {
+      const parent = child.parentSessionId ? this.sessions.get(child.parentSessionId) : undefined
+      return {
+        task: parent?.backgroundTaskRegistry.get(child.id),
+        summary: parent?.backgroundTaskOutputs.get(child.id)?.summary || undefined,
+      }
+    }
+    const childTasks = descendants.map(taskFor)
+    const coordinatorStartedAt = childTasks.reduce<number | undefined>(
+      (earliest, entry) => entry.task?.startTime !== undefined
+        ? Math.min(earliest ?? entry.task.startTime, entry.task.startTime)
+        : earliest,
+      undefined,
+    )
+    const coordinatorEndedAt = childTasks.reduce<number | undefined>(
+      (latest, entry) => entry.task?.completedAt !== undefined
+        ? Math.max(latest ?? entry.task.completedAt, entry.task.completedAt)
+        : latest,
+      undefined,
+    )
+
+    const coordinatorNode: SwarmRunNodeDto = {
+      sessionId: coordinator.id,
+      name: coordinator.name ?? coordinator.id,
+      role: 'coordinator',
+      model: coordinator.model,
+      status: coordinator.orchestrationStatus ?? 'running',
+      depth: 0,
+      elapsedSeconds: coordinatorStartedAt === undefined
+        ? 0
+        : Math.max(0, Math.round(((coordinator.orchestrationStatus === 'running' ? now : coordinatorEndedAt ?? now) - coordinatorStartedAt) / 1000)),
+      tokensUsed: coordinator.orchestrationTokensUsed ?? 0,
+      lifecycle: 'managed',
+      blocker: coordinator.orchestrationBlocker,
+    }
+
+    const nodes = descendants.map((child, index): SwarmRunNodeDto => {
+      const { task, summary } = childTasks[index]!
+      const status = task?.status === 'completed' ? 'completed'
+        : task?.status === 'stopped' ? 'stopped'
+          : task?.status === 'failed' || task?.status === 'orphaned' ? 'need-to-check'
+            : child.orchestrationStatus ?? 'running'
+      const startedAt = task?.startTime ?? child.createdAt ?? now
+      const endedAt = status === 'running' ? now : task?.completedAt ?? now
+      return {
+        sessionId: child.id,
+        parentSessionId: child.parentSessionId,
+        name: child.name ?? child.id,
+        role: child.orchestrationRole === 'reviewer' ? 'reviewer' : 'worker',
+        model: child.model,
+        status,
+        depth: child.orchestrationDepth ?? 1,
+        elapsedSeconds: Math.max(0, Math.round((endedAt - startedAt) / 1000)),
+        tokensUsed: child.tokenUsage?.totalTokens ?? 0,
+        lifecycle: child.orchestrationLifecycle ?? 'managed',
+        blocker: task?.status === 'orphaned'
+          ? task.blocker ?? 'Worker lifecycle is orphaned'
+          : child.orchestrationBlocker ?? task?.blocker,
+        summary,
+      }
+    })
+
+    return {
+      orchestrationId,
+      rootSessionId,
+      coordinatorSessionId: coordinator.id,
+      status: coordinator.orchestrationStatus ?? 'running',
+      blocker: [
+        coordinator.orchestrationBlocker,
+        lineageViolations.length > 0 ? `${lineageViolations.length} worker(s) were excluded because workspace or project ownership did not match` : undefined,
+        disconnected.length > 0 ? `${disconnected.length} worker(s) were excluded because their parent lineage was disconnected` : undefined,
+      ].filter(Boolean).join('\n') || undefined,
+      tokensUsed: coordinator.orchestrationTokensUsed ?? 0,
+      tokenBudget: FIXED_SWARM_TOKEN_BUDGET,
+      nodes: [coordinatorNode, ...nodes],
+    }
+  }
+
   setTaskRunnerLookup(lookup: (workspaceId: string) => TaskRunner): void {
     this.taskRunnerLookup = lookup
   }
@@ -8126,6 +8292,62 @@ export class SessionManager implements ISessionManager {
     }, managed.workspace.id)
   }
 
+  private issueSpawnQualificationCredentials(
+    managed: ManagedSession,
+    reason: SpawnSessionReason,
+    count = MAX_SWARM_CHILDREN_PER_PARENT,
+  ): void {
+    let credentials = this.spawnQualificationCredentials.get(managed.id)
+    if (!credentials) {
+      credentials = new Map()
+      this.spawnQualificationCredentials.set(managed.id, credentials)
+    }
+    for (let index = 0; index < count; index++) {
+      credentials.set(randomUUID(), {
+        generation: managed.processingGeneration,
+        reason,
+      })
+    }
+  }
+
+  private prepareSpawnQualificationCredentials(
+    managed: ManagedSession,
+    userAuthorizedSpawn: boolean,
+  ): void {
+    this.spawnQualificationCredentials.delete(managed.id)
+    if (managed.swarmEnabled) {
+      this.issueSpawnQualificationCredentials(managed, 'automatic')
+    }
+    if (userAuthorizedSpawn) {
+      this.issueSpawnQualificationCredentials(managed, 'user-requested')
+    }
+  }
+
+  private resolveSpawnQualificationCredential(
+    managed: ManagedSession,
+    reason: SpawnSessionReason,
+    supplied?: string,
+  ): string | undefined {
+    const credentials = this.spawnQualificationCredentials.get(managed.id)
+    if (!credentials) return undefined
+    if (supplied) {
+      const entry = credentials.get(supplied)
+      return entry?.generation === managed.processingGeneration && entry.reason === reason
+        ? supplied
+        : undefined
+    }
+    for (const [credential, entry] of credentials) {
+      if (entry.generation === managed.processingGeneration && entry.reason === reason) return credential
+    }
+    return undefined
+  }
+
+  private consumeSpawnQualificationCredential(managed: ManagedSession, credential: string): void {
+    const credentials = this.spawnQualificationCredentials.get(managed.id)
+    credentials?.delete(credential)
+    if (credentials?.size === 0) this.spawnQualificationCredentials.delete(managed.id)
+  }
+
   private reserveSwarmSpawn(parentSessionId: string, orchestrationId: string): () => void {
     this.pendingSwarmChildren.set(
       parentSessionId,
@@ -8168,7 +8390,7 @@ export class SessionManager implements ISessionManager {
       && childIds.has(info.taskId)
     )
     const budgetOwner = this.sessions.get(session.orchestrationRootSessionId ?? session.id) ?? session
-    const budget = budgetOwner.orchestrationTokenBudget
+    const budget = FIXED_SWARM_TOKEN_BUDGET
     const tokensUsed = budgetOwner.orchestrationTokensUsed ?? 0
     if (session.id === budgetOwner.id && budget !== undefined && tokensUsed >= budget) {
       this.updateOrchestrationMetadata(session, {
@@ -8246,7 +8468,7 @@ export class SessionManager implements ISessionManager {
       if (delta > 0) {
         const root = this.sessions.get(managed.orchestrationRootSessionId ?? managed.id) ?? managed
         const tokensUsed = (root.orchestrationTokensUsed ?? 0) + delta
-        const budget = root.orchestrationTokenBudget
+        const budget = FIXED_SWARM_TOKEN_BUDGET
         this.updateOrchestrationMetadata(root, {
           orchestrationTokensUsed: tokensUsed,
           ...(budget !== undefined && tokensUsed >= budget
@@ -8287,11 +8509,38 @@ export class SessionManager implements ISessionManager {
     request: SpawnSessionRequest,
   ): Promise<SpawnSessionResult> {
     sessionLog.info(`Spawn session request from session ${managed.id}:`, request.name || '(unnamed)')
-    const spawnReason = request.spawnReason ?? 'automatic'
-    if (spawnReason === 'automatic') {
-      if (!managed.swarmEnabled) {
-        throw new Error('Automatic spawn_session is disabled for this session; enable Swarm or use the current session')
-      }
+    const requestedSpawnReason = request.spawnReason ?? 'automatic'
+    if (requestedSpawnReason === 'automatic' && !managed.swarmEnabled) {
+      throw new Error('Automatic spawn_session is disabled for this session; enable Swarm or use the current session')
+    }
+    let effectiveSpawnReason = requestedSpawnReason
+    let qualificationCredential = this.resolveSpawnQualificationCredential(
+      managed,
+      requestedSpawnReason,
+      request.qualificationCredential,
+    )
+    // In Swarm mode the switch itself authorizes qualified autonomous planning.
+    // Models sometimes label a user-described split as `user-requested` even
+    // though the trusted renderer did not issue a /delegate capability. Safely
+    // normalize only to the existing automatic credential; the strict
+    // qualification contract below still applies in full.
+    if (
+      !qualificationCredential
+      && !request.qualificationCredential
+      && requestedSpawnReason === 'user-requested'
+      && managed.swarmEnabled
+    ) {
+      qualificationCredential = this.resolveSpawnQualificationCredential(managed, 'automatic')
+      if (qualificationCredential) effectiveSpawnReason = 'automatic'
+    }
+    if (!qualificationCredential) {
+      throw new Error(
+        requestedSpawnReason === 'user-requested'
+          ? 'No current-turn user delegation authorization is available'
+          : 'No current-turn Swarm qualification credential is available',
+      )
+    }
+    if (effectiveSpawnReason === 'automatic') {
       const qualification = assessSpawnQualification(request.qualification)
       if (!qualification.eligible) {
         const blocker = `Swarm qualification failed: ${qualification.reasons.join('; ')}`
@@ -8318,11 +8567,16 @@ export class SessionManager implements ISessionManager {
       orchestrationLifecycle: managed.orchestrationLifecycle ?? 'managed',
       orchestrationStatus: 'running',
       orchestrationBlocker: undefined,
-      ...(startsNewRootRun ? { orchestrationTokensUsed: 0 } : {}),
+      ...(startsNewRootRun
+        ? {
+            orchestrationTokensUsed: 0,
+            orchestrationTokenBudget: FIXED_SWARM_TOKEN_BUDGET,
+          }
+        : {}),
     })
 
     const budgetOwner = this.sessions.get(rootSessionId) ?? managed
-    const budget = budgetOwner.orchestrationTokenBudget
+    const budget = FIXED_SWARM_TOKEN_BUDGET
     const tokensUsed = budgetOwner.orchestrationTokensUsed ?? 0
     if (budget !== undefined && tokensUsed >= budget) {
       const blocker = `Swarm token budget reached: ${tokensUsed}/${budget}`
@@ -8343,6 +8597,9 @@ export class SessionManager implements ISessionManager {
     })
     if (!limit.allowed) throw new Error(limit.error)
 
+    // Consume only after the request is fully authorized and within limits, but
+    // before the first await. Concurrent/replayed tool calls cannot share it.
+    this.consumeSpawnQualificationCredential(managed, qualificationCredential)
     const releaseReservation = this.reserveSwarmSpawn(managed.id, orchestrationId)
     let session: Session
     try {
@@ -8446,6 +8703,7 @@ export class SessionManager implements ISessionManager {
           this.surfaceSpawnedSessionCompletion({
             sessionId: childManaged.id,
             workspaceId: childManaged.workspace.id,
+            generation: childManaged.processingGeneration,
             reason: 'error',
             finalText: err instanceof Error ? err.message : String(err),
           })
@@ -8526,6 +8784,7 @@ export class SessionManager implements ISessionManager {
         this.surfaceSpawnedSessionCompletion({
           sessionId: childManaged.id,
           workspaceId: childManaged.workspace.id,
+          generation: childManaged.processingGeneration,
           reason: 'error',
           finalText: err instanceof Error ? err.message : String(err),
         })
@@ -8547,7 +8806,7 @@ export class SessionManager implements ISessionManager {
     )
     if (children.length === 0 || children.some(child => child.orchestrationStatus === 'running')) return
     const budgetOwner = this.sessions.get(managed.orchestrationRootSessionId ?? managed.id) ?? managed
-    const budget = budgetOwner.orchestrationTokenBudget
+    const budget = FIXED_SWARM_TOKEN_BUDGET
     const tokensUsed = budgetOwner.orchestrationTokensUsed ?? 0
     if (budget !== undefined && tokensUsed >= budget) {
       this.updateOrchestrationMetadata(budgetOwner, {
@@ -8623,6 +8882,12 @@ export class SessionManager implements ISessionManager {
     if (!running || running.source !== 'spawn_session' || running.status !== 'running') return
 
     const completion = this.swarmTurnCompletions.get(child.id)
+    // Some providers finish a turn without attaching finalText to the
+    // completion event even though the final assistant message was persisted.
+    // The managed Swarm contract requires the parent to receive that result
+    // automatically; falling back to the in-process session transcript keeps
+    // aggregation independent from cross-session messaging permissions.
+    const finalText = completion?.finalText ?? this.getSessionFinalText(child.id)
     running.status = child.orchestrationStatus === 'completed'
       ? 'completed'
       : child.orchestrationStatus === 'stopped'
@@ -8631,12 +8896,12 @@ export class SessionManager implements ISessionManager {
     running.completedAt = Date.now()
     if (running.status !== 'completed') {
       running.blocker = child.orchestrationBlocker
-        ?? completion?.finalText
+        ?? finalText
         ?? `Spawned session subtree ended with ${child.orchestrationStatus}`
     }
     parent.backgroundTaskOutputs.set(child.id, {
       outputFile: '',
-      summary: completion?.finalText ?? '',
+      summary: finalText ?? '',
       status: running.status,
       completedAt: running.completedAt,
     })
@@ -9096,52 +9361,34 @@ export class SessionManager implements ISessionManager {
     if ((managed.swarmEnabled ?? false) === enabled) return
 
     managed.swarmEnabled = enabled
+    if (enabled) managed.orchestrationTokenBudget = FIXED_SWARM_TOKEN_BUDGET
     this.setMetadataWriteGuard(managed)
     this.persistSession(managed)
     await this.flushSession(managed.id)
     this.sendEvent({
       type: 'session_metadata_changed',
       sessionId: managed.id,
-      changes: { swarmEnabled: enabled },
+      changes: {
+        swarmEnabled: enabled,
+        ...(enabled ? { orchestrationTokenBudget: FIXED_SWARM_TOKEN_BUDGET } : {}),
+      },
     }, managed.workspace.id)
 
-    // The backend system prompt is constructed from SessionConfig. Recreate an
-    // idle runtime so the next turn observes the toggle; an active turn remains
-    // untouched and is still guarded server-side by spawnSessionFromTool.
-    if (managed.agent && !managed.isProcessing && !managed.agent.isProcessing()) {
+    // The backend system prompt and compaction policy are constructed from
+    // SessionConfig. Keep the active turn stable, but guarantee that the next
+    // queued or user turn recreates the runtime with the new setting.
+    if (managed.agent && (managed.isProcessing || managed.agent.isProcessing())) {
+      managed.swarmRuntimeRefreshPending = true
+    } else if (managed.agent) {
       await this.disposeManagedAgentRuntime(managed, 'Swarm setting changed')
     }
   }
 
-  /** Set or raise the temporary Swarm's token ceiling. Models cannot call this RPC. */
-  async updateSwarmTokenBudget(sessionId: string, tokenBudget: number): Promise<void> {
+  /** Kept for older clients; the technical-preview Swarm ceiling is immutable. */
+  async updateSwarmTokenBudget(sessionId: string, _tokenBudget: number): Promise<void> {
     const managed = this.sessions.get(sessionId)
     if (!managed) throw new Error(`Session ${sessionId} not found`)
-    if (managed.parentSessionId || managed.orchestrationRole === 'worker' || managed.orchestrationRole === 'reviewer') {
-      throw new Error('Only the root Swarm coordinator can update the token budget')
-    }
-    if (!Number.isFinite(tokenBudget) || tokenBudget <= 0) {
-      throw new Error('Swarm token budget must be a positive finite number')
-    }
-    const current = managed.orchestrationTokenBudget
-    const used = managed.orchestrationTokensUsed ?? 0
-    if (current !== undefined && tokenBudget < current) {
-      throw new Error('Swarm token budget can only be increased')
-    }
-    if (tokenBudget <= used) {
-      throw new Error(`Swarm token budget must exceed tokens already used (${used})`)
-    }
-    const wasBudgetBlocked = managed.orchestrationBlocker?.startsWith('Swarm token budget reached:') === true
-    this.updateOrchestrationMetadata(managed, {
-      orchestrationTokenBudget: tokenBudget,
-      ...(wasBudgetBlocked
-        ? { orchestrationStatus: 'running' as const, orchestrationBlocker: undefined }
-        : {}),
-    })
-    await this.flushSession(managed.id)
-    if (wasBudgetBlocked && managed.orchestrationId) {
-      this.surfaceManagedSwarmWake(managed, managed.orchestrationId)
-    }
+    throw new Error(`Swarm token budget is fixed at ${FIXED_SWARM_TOKEN_BUDGET} tokens`)
   }
 
   setOrchestrationStatus(

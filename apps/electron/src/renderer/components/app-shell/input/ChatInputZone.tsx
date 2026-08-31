@@ -10,7 +10,6 @@ import { ActiveOptionBadges } from '../ActiveOptionBadges'
 import { InputContainer } from './InputContainer'
 import { InputErrorBoundary } from './InputErrorBoundary'
 import { QueuedMessagePanel } from './QueuedMessagePanel'
-import { SwarmToggle } from './SwarmToggle'
 
 interface ChatInputZoneProps {
   compactMode?: boolean
@@ -34,10 +33,6 @@ interface ChatInputZoneProps {
   onSwarmEnabledChange?: (enabled: boolean) => void | Promise<void>
   swarmToggleDisabled?: boolean
   swarmRunning?: boolean
-  onStopSwarm?: () => void | Promise<void>
-  swarmTokensUsed?: number
-  swarmTokenBudget?: number
-  onSwarmBudgetIncrease?: (tokenBudget: number) => void | Promise<void>
   className?: string
   queuedMessages?: Message[]
   inputProps: React.ComponentProps<typeof InputContainer>
@@ -65,10 +60,6 @@ export function ChatInputZone({
   onSwarmEnabledChange,
   swarmToggleDisabled = false,
   swarmRunning = false,
-  onStopSwarm,
-  swarmTokensUsed = 0,
-  swarmTokenBudget,
-  onSwarmBudgetIncrease,
   className,
   queuedMessages = [],
   inputProps,
@@ -124,6 +115,10 @@ export function ChatInputZone({
           currentSessionStatus={currentSessionStatus}
           showSharedProjectMemory={showSharedProjectMemory}
           onSessionStatusChange={onSessionStatusChange}
+          swarmEnabled={swarmEnabled}
+          onSwarmEnabledChange={onSwarmEnabledChange}
+          swarmToggleDisabled={swarmToggleDisabled}
+          swarmRunning={swarmRunning}
         />
       )}
 
@@ -132,20 +127,6 @@ export function ChatInputZone({
         messages={queuedMessages}
         compactMode={compactMode}
       />
-
-      {onSwarmEnabledChange && (
-        <SwarmToggle
-          enabled={swarmEnabled}
-          onEnabledChange={onSwarmEnabledChange}
-          disabled={swarmToggleDisabled}
-          compact={compactMode}
-          running={swarmRunning}
-          onStop={onStopSwarm}
-          tokensUsed={swarmTokensUsed}
-          tokenBudget={swarmTokenBudget}
-          onBudgetIncrease={onSwarmBudgetIncrease}
-        />
-      )}
 
       <InputErrorBoundary
         sessionId={sessionId}

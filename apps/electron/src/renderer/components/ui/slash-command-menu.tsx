@@ -1,7 +1,7 @@
 import * as React from 'react'
 import { useTranslation } from "react-i18next"
 import { Command as CommandPrimitive } from 'cmdk'
-import { Check, Minimize2 } from 'lucide-react'
+import { Check, Minimize2, Users } from 'lucide-react'
 import { Icon_Folder } from '@craft-agent/ui'
 import { cn } from '@/lib/utils'
 import { PERMISSION_MODE_CONFIG, PERMISSION_MODE_ORDER, type PermissionMode } from '@craft-agent/shared/agent/modes'
@@ -14,7 +14,7 @@ import { SkillAvatar } from '@/components/ui/skill-avatar'
 // Types
 // ============================================================================
 
-export type SlashCommandId = PermissionMode | 'compact'
+export type SlashCommandId = PermissionMode | 'compact' | 'delegate'
 
 /** Union type for all item types in the slash menu */
 export type SlashItemType = 'command' | 'folder' | 'skill'
@@ -112,8 +112,16 @@ const compactCommand: SlashCommand = {
   icon: <Minimize2 className={MENU_ICON_SIZE} />,
 }
 
+const delegateCommand: SlashCommand = {
+  id: 'delegate',
+  label: 'Delegate Task',
+  description: 'Explicitly authorize agents to split this task',
+  icon: <Users className={MENU_ICON_SIZE} />,
+}
+
 /** Commands available from the `/` inline menu (modes are NOT included — use the mode badge UI). */
 export const DEFAULT_SLASH_COMMANDS: SlashCommand[] = [
+  delegateCommand,
   compactCommand,
 ]
 
@@ -652,7 +660,7 @@ export function useInlineSlashCommand({
     result.push({
       id: 'commands',
       label: t('commands.section', 'Commands'),
-      items: [compactCommand],
+      items: DEFAULT_SLASH_COMMANDS,
     })
 
     // Recent folders section - sorted alphabetically by folder name, show all

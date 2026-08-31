@@ -22,6 +22,7 @@ import type {
   PermissionModeState,
   UnreadSummary,
   ShareResult,
+  SwarmRunDetailsDto,
 } from '@craft-agent/shared/protocol'
 import type { SessionBundle, DispatchMode } from '@craft-agent/shared/sessions'
 import type { EventSink } from '../transport'
@@ -103,6 +104,7 @@ export interface ISessionManager {
   setSessionConnection(sessionId: string, connectionSlug: string): Promise<void>
   updateSessionModel(sessionId: string, workspaceId: string, model: string | null, connection?: string): Promise<void>
   updateSessionSwarmEnabled(sessionId: string, enabled: boolean): Promise<void>
+  getSwarmRunDetails(sessionId: string, workspaceId: string): SwarmRunDetailsDto | null
   updateSwarmTokenBudget(sessionId: string, tokenBudget: number): Promise<void>
   stopSwarm(sessionId: string): Promise<{ stoppedSessionIds: string[]; detachedSessionIds: string[] }>
 

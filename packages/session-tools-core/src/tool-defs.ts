@@ -174,6 +174,27 @@ export const SpawnSessionSchema = z.object({
   help: z.boolean().optional().describe('If true, returns available connections, models, and sources instead of creating a session'),
   prompt: z.string().optional().describe('Instructions for the new session (required when not in help mode)'),
   name: z.string().optional().describe('Session name'),
+  spawnReason: z.enum(['user-requested', 'automatic']).optional()
+    .describe('Use user-requested only when the user explicitly asked to delegate. Autonomous splitting requires automatic.'),
+  // Keep the nested qualification contract before the remaining top-level
+  // controls. ORDER/Laufry follows JSON-schema property order when composing
+  // tool arguments; putting this object last caused trailing role/lifecycle
+  // keys to be emitted inside qualification under load.
+  qualification: z.object({
+    tracks: z.array(z.object({
+      name: z.string().min(1),
+      input: z.string().min(1),
+      expectedOutput: z.string().min(1),
+      evidence: z.string().min(1),
+      toolKinds: z.array(z.string().min(1)).min(1),
+    })).min(2),
+    parallelBenefit: z.string().min(1),
+    finalAggregation: z.string().min(1),
+  }).optional().describe('Required for automatic spawning: two independent tool tracks plus a final aggregation contract.'),
+  lifecycle: z.enum(['managed', 'detached']).optional()
+    .describe('managed (default) participates in parent completion and explicit Swarm stop; detached continues independently.'),
+  role: z.enum(['coordinator', 'worker', 'reviewer']).optional()
+    .describe('Observation/result ownership role only; it does not grant permissions.'),
   llmConnection: z.string().optional().describe('Connection slug (e.g., "anthropic-api", "codex")'),
   model: z.string().optional().describe('Model ID override'),
   enabledSourceSlugs: z.array(z.string()).optional().describe('Source slugs to enable in the new session'),
@@ -190,23 +211,6 @@ export const SpawnSessionSchema = z.object({
     path: z.string().describe('Absolute file path on disk'),
     name: z.string().optional().describe('Display name (defaults to file basename)'),
   })).optional().describe('Files to include with the prompt'),
-  lifecycle: z.enum(['managed', 'detached']).optional()
-    .describe('managed (default) participates in parent completion and explicit Swarm stop; detached continues independently.'),
-  role: z.enum(['coordinator', 'worker', 'reviewer']).optional()
-    .describe('Observation/result ownership role only; it does not grant permissions.'),
-  spawnReason: z.enum(['user-requested', 'automatic']).optional()
-    .describe('Use user-requested only when the user explicitly asked to delegate. Autonomous splitting requires automatic.'),
-  qualification: z.object({
-    tracks: z.array(z.object({
-      name: z.string().min(1),
-      input: z.string().min(1),
-      expectedOutput: z.string().min(1),
-      evidence: z.string().min(1),
-      toolKinds: z.array(z.string().min(1)).min(1),
-    })).min(2),
-    parallelBenefit: z.string().min(1),
-    finalAggregation: z.string().min(1),
-  }).optional().describe('Required for automatic spawning: two independent tool tracks plus a final aggregation contract.'),
 });
 
 // Session self-management tools

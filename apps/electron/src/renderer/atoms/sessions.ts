@@ -89,8 +89,12 @@ export interface SessionMeta {
   taskDraft?: boolean
   /** Per-session opt-in for autonomous Swarm delegation. Missing means disabled. */
   swarmEnabled?: boolean
+  orchestrationId?: string
+  orchestrationRootSessionId?: string
+  orchestrationDepth?: number
   /** Swarm lineage role. Worker and reviewer sessions stay out of ordinary session lists. */
   orchestrationRole?: 'coordinator' | 'worker' | 'reviewer'
+  orchestrationLifecycle?: 'managed' | 'detached'
   /** User-facing summary of the internal orchestration state. */
   orchestrationStatus?: 'running' | 'completed' | 'need-to-check' | 'stopped'
   /** Human-readable reason for a blocked orchestration. */

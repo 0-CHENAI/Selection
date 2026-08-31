@@ -30,6 +30,7 @@ export const HANDLED_CHANNELS = [
   RPC_CHANNELS.sessions.GET_MODEL,
   RPC_CHANNELS.sessions.SET_MODEL,
   RPC_CHANNELS.sessions.SET_SWARM_ENABLED,
+  RPC_CHANNELS.sessions.GET_SWARM_RUN_DETAILS,
   RPC_CHANNELS.sessions.UPDATE_SWARM_BUDGET,
   RPC_CHANNELS.sessions.STOP_SWARM,
   RPC_CHANNELS.settings.GET_DEFAULT_THINKING_LEVEL,
@@ -95,6 +96,10 @@ export function registerSettingsHandlers(server: RpcServer, deps: HandlerDeps): 
   server.handle(RPC_CHANNELS.sessions.SET_SWARM_ENABLED, async (_ctx, sessionId: string, enabled: boolean) => {
     if (typeof enabled !== 'boolean') throw new Error('Swarm enabled must be a boolean')
     await deps.sessionManager.updateSessionSwarmEnabled(sessionId, enabled)
+  })
+
+  server.handle(RPC_CHANNELS.sessions.GET_SWARM_RUN_DETAILS, async (_ctx, sessionId: string, workspaceId: string) => {
+    return deps.sessionManager.getSwarmRunDetails(sessionId, workspaceId)
   })
 
   server.handle(RPC_CHANNELS.sessions.UPDATE_SWARM_BUDGET, async (_ctx, sessionId: string, tokenBudget: number) => {

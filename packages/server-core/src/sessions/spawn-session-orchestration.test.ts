@@ -6,6 +6,7 @@ import {
   countLiveSwarmChildren,
   countLiveSwarmNodes,
   countRunningSpawnChildren,
+  FIXED_SWARM_TOKEN_BUDGET,
   recoverPersistedSwarmStatus,
   mapCompletionReasonToSpawnStatus,
   mapCompletionReasonToTaskStatus,
@@ -17,6 +18,10 @@ import {
 } from './spawn-session-orchestration.ts'
 
 describe('spawn-session orchestration helpers', () => {
+  it('uses one immutable 256 Ki token ceiling for temporary Swarms', () => {
+    expect(FIXED_SWARM_TOKEN_BUDGET).toBe(262_144)
+  })
+
   it('marks persisted running Swarms as interrupted instead of restoring ghost workers', () => {
     expect(recoverPersistedSwarmStatus('completed')).toBeUndefined()
     expect(recoverPersistedSwarmStatus('running')).toEqual({

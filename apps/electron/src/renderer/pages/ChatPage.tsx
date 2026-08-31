@@ -15,6 +15,7 @@ import { SessionMenu } from '@/components/app-shell/SessionMenu'
 import { CompactSessionMenu } from '@/components/app-shell/CompactSessionMenu'
 import { SessionInfoPopover } from '@/components/app-shell/SessionInfoPopover'
 import { OrchestrationStatusBadge } from '@/components/app-shell/OrchestrationStatusBadge'
+import { SwarmRunDetailsDialog } from '@/components/app-shell/SwarmRunDetailsDialog'
 import { RenameDialog } from '@/components/ui/rename-dialog'
 import { toast } from 'sonner'
 import { PanelHeaderCenterButton } from '@/components/ui/PanelHeaderCenterButton'
@@ -115,6 +116,7 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
   const updateSessionMeta = useSetAtom(updateSessionMetaAtom)
   const [messagesLoadError, setMessagesLoadError] = React.useState<string | null>(null)
   const [messagesRetrying, setMessagesRetrying] = React.useState(false)
+  const [swarmDetailsOpen, setSwarmDetailsOpen] = React.useState(false)
   const autoForcedReloadSessionRef = React.useRef<string | null>(null)
   const shouldForceInitialMessagesReload = React.useMemo(() => {
     const expectedMessageCount = session?.messageCount ?? sessionMeta?.messageCount ?? 0
@@ -465,20 +467,11 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
     }
   }, [sessionId, session?.swarmEnabled, sessionMeta?.swarmEnabled, updateSession, updateSessionMeta, t])
 
-  const handleStopSwarm = React.useCallback(async () => {
+  const handleStopSwarmForDetails = React.useCallback(async () => {
     try {
       await window.electronAPI.stopSessionSwarm(sessionId)
     } catch (error) {
       console.error('[ChatPage] Failed to stop Swarm:', error)
-      toast.error(t('common.error'))
-    }
-  }, [sessionId, t])
-
-  const handleSwarmBudgetIncrease = React.useCallback(async (tokenBudget: number) => {
-    try {
-      await window.electronAPI.updateSessionSwarmBudget(sessionId, tokenBudget)
-    } catch (error) {
-      console.error('[ChatPage] Failed to update Swarm token budget:', error)
       toast.error(t('common.error'), { description: error instanceof Error ? error.message : String(error) })
       throw error
     }
@@ -488,8 +481,12 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
   // that opens the board's full-pane Task editor prefilled from task.yaml — the same
   // surface as creation, so goal/acceptance criteria/subtasks can change and the whole
   // task can be re-run (Save & Run mints a fresh Conductor run).
-  const taskSlug = sessionMeta?.taskSlug
+  const taskSlug = session?.taskSlug ?? sessionMeta?.taskSlug
   const isTaskOrchestrator = !!taskSlug && !sessionMeta?.parentSessionId
+  const orchestrationRole = session?.orchestrationRole ?? sessionMeta?.orchestrationRole
+  const orchestrationId = session?.orchestrationId ?? sessionMeta?.orchestrationId
+  const swarmWorkspaceId = session?.workspaceId ?? sessionMeta?.workspaceId
+  const isTemporarySwarmCoordinator = !taskSlug && orchestrationRole === 'coordinator' && !!orchestrationId && !!swarmWorkspaceId
   const setKanbanEditorTarget = useSetAtom(kanbanEditorTargetAtom)
   const handleEditTask = React.useCallback(() => {
     if (!taskSlug) return
@@ -506,7 +503,7 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
     <OrchestrationStatusBadge
       status={session?.orchestrationStatus ?? sessionMeta?.orchestrationStatus}
       blocker={session?.orchestrationBlocker ?? sessionMeta?.orchestrationBlocker}
-      onOpenDetails={isTaskOrchestrator ? handleEditTask : undefined}
+      onOpenDetails={isTemporarySwarmCoordinator ? () => setSwarmDetailsOpen(true) : isTaskOrchestrator ? handleEditTask : undefined}
     />
   )
 
@@ -699,10 +696,6 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
                 onSwarmEnabledChange={handleSwarmEnabledChange}
                 swarmToggleDisabled={swarmToggleDisabled}
                 swarmRunning={orchestrationStatus === 'running'}
-                onStopSwarm={handleStopSwarm}
-                swarmTokensUsed={sessionMeta.orchestrationTokensUsed ?? 0}
-                swarmTokenBudget={sessionMeta.orchestrationTokenBudget}
-                onSwarmBudgetIncrease={handleSwarmBudgetIncrease}
                 workspaceId={activeWorkspaceId || undefined}
                 onSourcesChange={(slugs) => onSessionSourcesChange?.(sessionId, slugs)}
                 workingDirectory={sessionMeta.workingDirectory}
@@ -786,10 +779,6 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
             onSwarmEnabledChange={handleSwarmEnabledChange}
             swarmToggleDisabled={swarmToggleDisabled}
             swarmRunning={orchestrationStatus === 'running'}
-            onStopSwarm={handleStopSwarm}
-            swarmTokensUsed={session?.orchestrationTokensUsed ?? sessionMeta?.orchestrationTokensUsed ?? 0}
-            swarmTokenBudget={session?.orchestrationTokenBudget ?? sessionMeta?.orchestrationTokenBudget}
-            onSwarmBudgetIncrease={handleSwarmBudgetIncrease}
             workspaceId={activeWorkspaceId || undefined}
             onSourcesChange={(slugs) => onSessionSourcesChange?.(sessionId, slugs)}
             workingDirectory={workingDirectory}
@@ -817,6 +806,20 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
         onSubmit={handleRenameSubmit}
         placeholder={t('chat.enterSessionName')}
       />
+      {isTemporarySwarmCoordinator && (
+        <SwarmRunDetailsDialog
+          sessionId={sessionId}
+          workspaceId={swarmWorkspaceId}
+          open={swarmDetailsOpen}
+          onOpenChange={setSwarmDetailsOpen}
+          onOpenWorker={(workerSessionId) => {
+            setSwarmDetailsOpen(false)
+            navigate(routes.view.allSessions(workerSessionId))
+          }}
+          onStop={handleStopSwarmForDetails}
+          refreshKey={`${orchestrationId}:${orchestrationStatus ?? ''}:${session?.orchestrationTokensUsed ?? sessionMeta?.orchestrationTokensUsed ?? 0}:${session?.orchestrationBlocker ?? sessionMeta?.orchestrationBlocker ?? ''}`}
+        />
+      )}
     </>
   )
 })

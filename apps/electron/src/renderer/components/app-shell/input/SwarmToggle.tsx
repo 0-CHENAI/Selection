@@ -1,111 +1,104 @@
 import * as React from 'react'
 import { useTranslation } from 'react-i18next'
-import { Switch } from '@/components/ui/switch'
+import { AtomIcon, type AtomIconHandle } from '@/components/ui/atom'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@craft-agent/ui'
 import { cn } from '@/lib/utils'
+import { resolveSwarmBadgeState } from './swarm-badge-state'
 
 interface SwarmToggleProps {
   enabled: boolean
   onEnabledChange?: (enabled: boolean) => void | Promise<void>
   disabled?: boolean
-  compact?: boolean
   running?: boolean
-  onStop?: () => void | Promise<void>
-  tokensUsed?: number
-  tokenBudget?: number
-  onBudgetIncrease?: (tokenBudget: number) => void | Promise<void>
 }
 
-export function SwarmToggle({ enabled, onEnabledChange, disabled = false, compact = false, running = false, onStop, tokensUsed = 0, tokenBudget, onBudgetIncrease }: SwarmToggleProps) {
+export function SwarmToggle({
+  enabled,
+  onEnabledChange,
+  disabled = false,
+  running = false,
+}: SwarmToggleProps) {
   const { t } = useTranslation()
   const [pending, setPending] = React.useState(false)
-  const [budgetDraft, setBudgetDraft] = React.useState('')
-  const toggleId = React.useId()
+  const iconRef = React.useRef<AtomIconHandle>(null)
+  const badgeState = resolveSwarmBadgeState(enabled, running)
+  const isDisabled = disabled || pending || !onEnabledChange
 
   const handleChange = React.useCallback(async (checked: boolean) => {
-    if (!onEnabledChange || pending) return
+    if (!onEnabledChange || pending || disabled) return
     setPending(true)
     try {
       await onEnabledChange(checked)
     } finally {
       setPending(false)
     }
-  }, [onEnabledChange, pending])
+  }, [disabled, onEnabledChange, pending])
 
-  const submitBudget = React.useCallback(async () => {
-    if (!onBudgetIncrease || pending) return
-    const next = Number(budgetDraft)
-    if (!Number.isFinite(next) || next <= Math.max(tokensUsed, tokenBudget ?? 0)) return
-    setPending(true)
-    try {
-      await onBudgetIncrease(next)
-      setBudgetDraft('')
-    } finally {
-      setPending(false)
+  const handleBadgeClick = React.useCallback(() => {
+    void handleChange(!enabled)
+  }, [enabled, handleChange])
+
+  const badgeDescription = badgeState === 'running'
+    ? t('swarm.badgeRunning')
+    : badgeState === 'enabled'
+      ? t('swarm.badgeEnabled')
+      : t('swarm.badgeIdle')
+
+  React.useEffect(() => {
+    if (enabled) {
+      iconRef.current?.startAnimation()
+      return
     }
-  }, [budgetDraft, onBudgetIncrease, pending, tokenBudget, tokensUsed])
+    iconRef.current?.stopAnimation()
+  }, [enabled])
+
+  const badgeClassName = cn(
+    'group h-[30px] rounded-[8px] pl-2.5 pr-2.5 text-xs font-medium leading-none',
+    'flex shrink-0 items-center gap-1.5 outline-none select-none',
+    'transition-[background-color,color,box-shadow,opacity] duration-200',
+    'focus-visible:ring-2 focus-visible:ring-[color-mix(in_oklch,var(--swarm-color)_45%,transparent)]',
+    enabled
+      ? 'shadow-tinted text-[color-mix(in_oklch,var(--swarm-color)_86%,var(--foreground))]'
+      : 'shadow-minimal bg-[color-mix(in_srgb,var(--background)_97%,var(--foreground))] text-foreground/75 hover:bg-foreground/5 hover:text-foreground',
+    isDisabled && !enabled && 'cursor-not-allowed opacity-55',
+  )
+  const badgeStyle = enabled ? {
+    '--swarm-color': 'oklch(0.64 0.22 292)',
+    '--shadow-color': '116, 76, 210',
+    backgroundColor: 'color-mix(in oklch, var(--swarm-color) 13%, var(--background))',
+  } as React.CSSProperties : {
+    '--swarm-color': 'oklch(0.64 0.22 292)',
+  } as React.CSSProperties
+  const badgeContent = (
+    <>
+      <span className="flex size-3.5 shrink-0 items-center justify-center self-center">
+        <AtomIcon ref={iconRef} size={14} aria-hidden="true" />
+      </span>
+      <span className="inline-flex items-center text-xs leading-none">{t('swarm.toggleLabel')}</span>
+      <span className={cn('inline-flex items-center text-xs font-normal leading-none', enabled ? 'opacity-75' : 'opacity-50')}>
+        {badgeDescription}
+      </span>
+    </>
+  )
 
   return (
-    <div className={cn('mb-1.5 flex items-start justify-between gap-3 px-1', compact && 'px-0.5')}>
-      <div className="min-w-0">
-        <label
-          htmlFor={toggleId}
-          className="block text-[11px] font-medium leading-4 text-foreground/70"
-        >
-          {t('swarm.toggleLabel')}
-        </label>
-        {enabled && (
-          <>
-            <p className="text-[10px] leading-4 text-muted-foreground">
-              {t('swarm.eligibilityHint')}
-            </p>
-            <p className="text-[10px] leading-4 text-muted-foreground">
-              {tokenBudget === undefined
-                ? t('swarm.tokensUnlimited', { used: tokensUsed })
-                : t('swarm.tokensBudgeted', { used: tokensUsed, budget: tokenBudget })}
-            </p>
-            {!disabled && onBudgetIncrease && (
-              <div className="mt-1 flex items-center gap-1.5">
-                <input
-                  type="number"
-                  min={Math.max(tokensUsed, tokenBudget ?? 0) + 1}
-                  step="1"
-                  value={budgetDraft}
-                  onChange={(event) => setBudgetDraft(event.target.value)}
-                  placeholder={t('swarm.budgetPlaceholder')}
-                  aria-label={t('swarm.budgetPlaceholder')}
-                  className="h-6 w-28 rounded-md border border-border bg-background px-2 text-[10px]"
-                />
-                <button
-                  type="button"
-                  className="text-[10px] font-medium text-foreground/65 hover:underline disabled:opacity-50"
-                  disabled={pending || !budgetDraft}
-                  onClick={() => void submitBudget()}
-                >
-                  {t('swarm.updateBudget')}
-                </button>
-              </div>
-            )}
-          </>
-        )}
-      </div>
-      <Switch
-        id={toggleId}
-        checked={enabled}
-        disabled={disabled || pending || !onEnabledChange}
-        onCheckedChange={handleChange}
-        aria-label={t('swarm.toggleLabel')}
-        title={disabled ? t('swarm.inheritedHint') : t('swarm.toggleLabel')}
-      />
-      {running && onStop && (
+    <Tooltip>
+      <TooltipTrigger asChild>
         <button
           type="button"
-          className="shrink-0 text-[10px] leading-4 text-destructive hover:underline disabled:opacity-50"
-          disabled={pending}
-          onClick={() => void onStop()}
+          aria-label={`${t('swarm.toggleLabel')} · ${badgeDescription}`}
+          aria-pressed={enabled}
+          disabled={isDisabled}
+          onClick={handleBadgeClick}
+          className={badgeClassName}
+          style={badgeStyle}
         >
-          {t('swarm.stopRun')}
+          {badgeContent}
         </button>
-      )}
-    </div>
+      </TooltipTrigger>
+      <TooltipContent side="top" className="max-w-64">
+        {disabled ? t('swarm.inheritedHint') : t('swarm.eligibilityHint')}
+      </TooltipContent>
+    </Tooltip>
   )
 }

@@ -118,4 +118,15 @@ describe('spawn_session thinkingLevel forwarding', () => {
     expect(captured[0]?.spawnReason).toBe('automatic');
     expect(captured[0]?.qualification).toEqual(qualification);
   });
+
+  it('never forwards a model-supplied server qualification credential', async () => {
+    await agent.invokeSpawn({
+      prompt: 'attempt to forge server authority',
+      spawnReason: 'user-requested',
+      qualificationCredential: 'model-forged-token',
+    });
+
+    expect(captured[0]?.spawnReason).toBe('user-requested');
+    expect(captured[0]?.qualificationCredential).toBeUndefined();
+  });
 });
