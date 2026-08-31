@@ -61,6 +61,33 @@ export function quickAddChildToSubtask(child: {
 export const slugify = (s: string): string =>
   s.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 48)
 
+/**
+ * Select the document sent to tasks:save/create. YAML is already validated by
+ * the caller and must remain the source of truth; form mode serializes the
+ * merged spec as JSON (a valid YAML subset).
+ */
+export function taskDocumentForSave(
+  source: 'yaml' | 'form',
+  yamlDraft: string,
+  formSpec: Record<string, unknown>,
+): string {
+  return source === 'yaml' ? yamlDraft : JSON.stringify(formSpec, null, 2)
+}
+
+/** Existing task files may only be saved after a successful, versioned load. */
+export function canSafelySaveExistingTask(input: {
+  taskSlug?: string
+  etag: string | null
+  loadError: string | null
+}): boolean {
+  return !input.taskSlug || (!!input.etag && !input.loadError)
+}
+
+/** Preserve loaded/authored YAML until the form has actually changed. */
+export function shouldRefreshYamlDraft(hasLocalSource: boolean, formChangedSinceYaml: boolean): boolean {
+  return !hasLocalSource || formChangedSinceYaml
+}
+
 /** Permission modes are fixed (safe|ask|allow-all); mirrored here to avoid a shared Node import in the renderer. */
 export type TaskPermissionMode = 'safe' | 'ask' | 'allow-all'
 
@@ -147,6 +174,15 @@ export interface SpecForm {
   fixedId?: string
   runner?: 'conduct' | 'orchestrate'
   layout?: Record<string, { x: number; y: number }>
+  /**
+   * Last complete, server-validated spec loaded from disk or the YAML editor.
+   *
+   * The definition form intentionally edits only a subset of v2. Keeping the
+   * complete spec as the merge base prevents valid fields such as params,
+   * token_budget, top-level outputs, max_parallel, and UI viewport settings
+   * from disappearing when the user changes an ordinary form field.
+   */
+  preservedSpec?: Record<string, unknown>
 }
 
 /** A spec node as authored by the generator / loaded from disk (loose, renderer-facing shape). */
@@ -233,14 +269,34 @@ export function buildSpec(form: SpecForm, modelToConnection: Map<string, string>
   const cwd = form.cwd?.trim()
   const acceptanceCriteria = form.acceptanceCriteria?.trim()
   // Task-family defaults: orchestrator model/connection + the explicit, persisted permission mode.
-  const defaults: Record<string, unknown> = {}
+  const preservedDefaults = form.preservedSpec?.defaults
+  const defaults: Record<string, unknown> =
+    preservedDefaults && typeof preservedDefaults === 'object' && !Array.isArray(preservedDefaults)
+      ? { ...(preservedDefaults as Record<string, unknown>) }
+      : {}
   if (form.orchModel) defaults.model = form.orchModel
+  else delete defaults.model
   if (orchConn) defaults.llmConnection = orchConn
+  else delete defaults.llmConnection
   if (form.permissionMode) defaults.permissionMode = form.permissionMode
   // Leaving the picker on "No Project" for an already-bound task must NOT drop `project` (children read
   // spec.project) — fall back to the existing binding as a floor. A picked project overrides it.
   const project = form.projectId || form.boundProjectId
-  return {
+  const preservedUi = form.preservedSpec?.ui
+  const ui = preservedUi && typeof preservedUi === 'object' && !Array.isArray(preservedUi)
+    ? { ...(preservedUi as Record<string, unknown>) }
+    : {}
+  const preservedLayout = ui.layout
+  const uiLayout = preservedLayout && typeof preservedLayout === 'object' && !Array.isArray(preservedLayout)
+    ? { ...(preservedLayout as Record<string, unknown>) }
+    : {}
+  if (form.layout && Object.keys(form.layout).length) uiLayout.nodes = form.layout
+  else delete uiLayout.nodes
+  if (Object.keys(uiLayout).length) ui.layout = uiLayout
+  else delete ui.layout
+
+  const spec: Record<string, unknown> = {
+    ...(form.preservedSpec ?? {}),
     id: form.fixedId || slugify(form.title) || 'untitled-task',
     title: form.title.trim() || 'Untitled task',
     goal: form.goal.trim() || form.title.trim() || 'Untitled task',
@@ -256,9 +312,22 @@ export function buildSpec(form: SpecForm, modelToConnection: Map<string, string>
     ...(form.skillSlugs?.length ? { skills: form.skillSlugs } : {}),
     ...(Object.keys(defaults).length ? { defaults } : {}),
     ...(form.runner && form.runner !== 'conduct' ? { runner: form.runner } : {}),
-    ...(form.layout && Object.keys(form.layout).length ? { ui: { layout: { nodes: form.layout } } } : {}),
+    ...(Object.keys(ui).length ? { ui } : {}),
     nodes,
   }
+  // A preserved merge base must not make cleared form-owned fields sticky.
+  // Delete them explicitly when the form says "inherit/empty" while leaving
+  // every form-unowned v2 field untouched.
+  if (!acceptanceCriteria) delete spec.acceptance_criteria
+  if (form.maxRepairs === undefined || !Number.isFinite(form.maxRepairs)) delete spec.max_iterations
+  if (!project) delete spec.project
+  if (!cwd) delete spec.cwd
+  if (!form.sourceSlugs?.length) delete spec.sources
+  if (!form.skillSlugs?.length) delete spec.skills
+  if (!Object.keys(defaults).length) delete spec.defaults
+  if (!form.runner || form.runner === 'conduct') delete spec.runner
+  if (!Object.keys(ui).length) delete spec.ui
+  return spec
 }
 
 /** Map authored TaskSpec nodes → the editor's multi-dependency subtask rows. */

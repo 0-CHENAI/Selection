@@ -21,7 +21,7 @@ import {
   DropdownMenuSeparator,
 } from '@/components/ui/dropdown-menu'
 import type { KanbanModelProviderGroup, TaskEditorTarget } from './types'
-import { uid, buildSpec, specToSubtasks, canDependOn, quickAddNodeId, quickAddChildToSubtask, DEFAULT_REPAIR_ATTEMPTS, MAX_REPAIR_ATTEMPTS_CAP, SESSION_LIKE_KINDS, type EditorSubtask, type SpecNode, type TaskPermissionMode } from './task-spec-form'
+import { uid, buildSpec, specToSubtasks, canDependOn, quickAddNodeId, quickAddChildToSubtask, taskDocumentForSave, canSafelySaveExistingTask, shouldRefreshYamlDraft, DEFAULT_REPAIR_ATTEMPTS, MAX_REPAIR_ATTEMPTS_CAP, SESSION_LIKE_KINDS, type EditorSubtask, type SpecNode, type TaskPermissionMode } from './task-spec-form'
 import { runnerLabelKey, runStatusLabelKey } from './task-labels'
 import { ConductorWorkbench, type WorkbenchSpec } from './ConductorWorkbench'
 import { isTasksOrchestrateEnabled } from '@craft-agent/shared/feature-flags'
@@ -69,6 +69,22 @@ export type { TaskEditorTarget } from './types'
 
 /** Storage-backed run results (shape inferred from the electronAPI so no shared import is needed). */
 type TaskResults = Awaited<ReturnType<typeof window.electronAPI.getTaskResults>>
+
+type EditableTaskSpec = Record<string, unknown> & {
+  id?: string
+  title?: string
+  goal?: string
+  acceptance_criteria?: string
+  max_iterations?: number
+  project?: string
+  cwd?: string
+  sources?: string[]
+  skills?: string[]
+  runner?: 'conduct' | 'orchestrate'
+  defaults?: { model?: string; llmConnection?: string; permissionMode?: TaskPermissionMode }
+  nodes?: SpecNode[]
+  ui?: { layout?: { nodes?: Record<string, { x: number; y: number }> } }
+}
 
 // ---------------------------------------------------------------------------
 // Small inline controls (presentational)
@@ -530,6 +546,8 @@ export function TaskEditor({
   const [layout, setLayout] = React.useState<Record<string, { x: number; y: number }>>({})
   const [yamlDraft, setYamlDraft] = React.useState('')
   const [yamlDiagnostics, setYamlDiagnostics] = React.useState<string[]>([])
+  const [yamlHasLocalSource, setYamlHasLocalSource] = React.useState(false)
+  const [formChangedSinceYaml, setFormChangedSinceYaml] = React.useState(false)
   const [dirty, setDirty] = React.useState(false)
   const [title, setTitle] = React.useState('')
   const [goal, setGoal] = React.useState('')
@@ -576,6 +594,13 @@ export function TaskEditor({
   const [etag, setEtag] = React.useState<string | null>(null)
   const [sourceVersion, setSourceVersion] = React.useState<1 | 2 | undefined>(undefined)
   const [migrationWarnings, setMigrationWarnings] = React.useState<string[]>([])
+  const [preservedSpec, setPreservedSpec] = React.useState<Record<string, unknown> | undefined>(undefined)
+  const [taskLoadError, setTaskLoadError] = React.useState<string | null>(null)
+
+  const markFormChanged = React.useCallback(() => {
+    setDirty(true)
+    setFormChangedSinceYaml(true)
+  }, [])
 
   // Jotai store handle for one-shot reads (no subscription — the editor must not re-render
   // on every streaming metadata tick just to have read children once at open).
@@ -609,14 +634,17 @@ export function TaskEditor({
         return quickAddChildToSubtask({ sessionId: child.id, title, model: child.model, llmConnection: child.llmConnection })
       })
     },
-    // fallbackModel is stable for the life of an open editor (same reasoning as the prefill effect).
-    // eslint-disable-next-line react-hooks/exhaustive-deps
     [store, editSessionId],
   )
 
   // Edit-mode prefill: spec-backed tiles load their authored task.yaml; either way the tile's
   // quick-add children merge in as editable rows (adopted into the spec on the next save).
   React.useEffect(() => {
+    setTaskLoadError(null)
+    setPreservedSpec(undefined)
+    setEtag(null)
+    setYamlHasLocalSource(false)
+    setFormChangedSinceYaml(false)
     if (target.mode !== 'edit') return
     let cancelled = false
     // The tile's existing project binding (spec-less quick-add tiles have no spec.project, so fall
@@ -628,15 +656,28 @@ export function TaskEditor({
         .getTask(workspaceId, target.taskSlug)
         .then((res) => {
           if (cancelled) return
-          const spec = res.spec as
-            | { title?: string; goal?: string; acceptance_criteria?: string; max_iterations?: number; project?: string; cwd?: string; sources?: string[]; skills?: string[]; runner?: 'conduct' | 'orchestrate'; defaults?: { model?: string; llmConnection?: string; permissionMode?: TaskPermissionMode }; nodes?: Array<{ id: string; title?: string; kind?: SpecNode['kind']; prompt?: string; model?: string; llmConnection?: string; depends_on?: string[] }>; ui?: { layout?: { nodes?: Record<string, { x: number; y: number }> } } }
-            | undefined
-          if (!spec) return
-          if (res.etag) setEtag(res.etag)
+          const spec = res.spec as EditableTaskSpec | undefined
+          if (!spec) {
+            const message = t('tasks.loadMissingSpec')
+            setTaskLoadError(message)
+            toast.error(t('tasks.toastLoadFailed'), { description: message })
+            return
+          }
+          if (!res.etag) {
+            const message = t('tasks.loadMissingEtag')
+            setTaskLoadError(message)
+            toast.error(t('tasks.toastLoadFailed'), { description: message })
+            return
+          }
+          setPreservedSpec(spec)
+          setEtag(res.etag)
           if (res.latestRun) setLiveRun(res.latestRun)
           setSourceVersion(res.sourceVersion)
           setMigrationWarnings(res.migrationWarnings ?? [])
-          if (res.yaml) setYamlDraft(res.yaml)
+          if (res.yaml) {
+            setYamlDraft(res.yaml)
+            setYamlHasLocalSource(true)
+          }
           if (spec.runner) setRunner(spec.runner)
           if (spec.ui?.layout?.nodes) setLayout(spec.ui.layout.nodes)
           setDirty(false)
@@ -663,7 +704,12 @@ export function TaskEditor({
             ...collectQuickAddRows(new Set(nodes.map((n) => n.id))),
           ])
         })
-        .catch(() => {})
+        .catch((error) => {
+          if (cancelled) return
+          const message = error instanceof Error ? error.message : String(error)
+          setTaskLoadError(message)
+          toast.error(t('tasks.toastLoadFailed'), { description: message })
+        })
     } else {
       if (target.initialTitle) setTitle(target.initialTitle)
       // A bound quick-add tile with no task.yaml: prefill + floor from the session's own state, so
@@ -778,20 +824,24 @@ export function TaskEditor({
   const project = projects.find((p) => p.config.id === projectId)
 
   const updateSubtask = (id: string, patch: Partial<EditorSubtask>) => {
-    setDirty(true)
+    markFormChanged()
     setSubtasks((prev) => prev.map((s) => (s.uid === id ? { ...s, ...patch } : s)))
   }
-  const removeSubtask = (id: string) =>
+  const removeSubtask = (id: string) => {
+    markFormChanged()
     setSubtasks((prev) =>
       prev.filter((s) => s.uid !== id).map((s) => ({ ...s, dependsOn: s.dependsOn.filter((d) => d !== id) })),
     )
-  const addSubtask = () =>
+  }
+  const addSubtask = () => {
+    markFormChanged()
     setSubtasks((prev) => {
       const last = prev[prev.length - 1]
       // No explicit model → the new subtask inherits the orchestrator default (the picker still shows
       // that effective model). Picking a model in the row makes it explicit.
       return [...prev, { uid: uid(), title: '', prompt: '', dependsOn: last ? [last.uid] : [] }]
     })
+  }
 
   // Generate mode: the persistent orchestrator session AUTHORS the task.yaml from the goal,
   // then we drop into Manual so the user reviews/edits the AI's plan before running — the
@@ -816,6 +866,7 @@ export function TaskEditor({
         toast.error(t('tasks.toastInvalid'), { description: first ? `${first.path}: ${first.message}` : undefined })
         return
       }
+      setPreservedSpec(spec as Record<string, unknown>)
       if (spec.title) setTitle(spec.title)
       if (spec.goal) setGoal(spec.goal)
       setAcceptanceCriteria(spec.acceptance_criteria ?? '')
@@ -825,6 +876,9 @@ export function TaskEditor({
       if (spec.defaults?.llmConnection) setOrchConnection(spec.defaults.llmConnection)
       if (spec.defaults?.permissionMode) setPermissionMode(spec.defaults.permissionMode)
       setSubtasks(specToSubtasks(spec.nodes ?? []))
+      setYamlHasLocalSource(false)
+      setFormChangedSinceYaml(true)
+      setDirty(true)
       setMode('manual')
       // Record the draft as adoptable: submit reuses it in place (edits are fine to run on it).
       generatedDraftRef.current = res.orchestratorSessionId
@@ -832,7 +886,7 @@ export function TaskEditor({
       // the visible signal. A top-right toast would also overlap the editor's top-right
       // Cancel/Create/Create & Run buttons and swallow their clicks.
     },
-    [t, fallbackModel, discardDraft],
+    [t, discardDraft],
   )
 
   // Subscribe once for async generate results; ignore events for other generations/sessions.
@@ -917,12 +971,13 @@ export function TaskEditor({
         fixedId: editSlug,
         runner,
         layout,
+        preservedSpec,
       },
       modelToConnection,
     ) as unknown as WorkbenchSpec
   }, [
     title, goal, acceptanceCriteria, maxRepairs, projectId, orchModel, orchConnection, permissionMode,
-    boundProjectId, subtasks, cwd, sourceSlugs, skillSlugs, editSlug, runner, layout, modelToConnection,
+    boundProjectId, subtasks, cwd, sourceSlugs, skillSlugs, editSlug, runner, layout, preservedSpec, modelToConnection,
   ])
 
   const requestClose = React.useCallback(() => {
@@ -930,13 +985,25 @@ export function TaskEditor({
     onClose()
   }, [dirty, onClose, t])
 
-  const applyWorkbenchSpec = React.useCallback((next: WorkbenchSpec) => {
+  const applyWorkbenchSpec = React.useCallback((next: EditableTaskSpec, source: 'form' | 'yaml' = 'form') => {
+    setPreservedSpec(next)
     setDirty(true)
-    if (next.title) setTitle(next.title)
-    if (next.goal) setGoal(next.goal)
-    if (next.runner) setRunner(next.runner)
-    if (next.ui?.layout?.nodes) setLayout(next.ui.layout.nodes)
-    setSubtasks(specToSubtasks(next.nodes))
+    setFormChangedSinceYaml(source === 'form')
+    if (source === 'yaml') setYamlHasLocalSource(true)
+    setTitle(typeof next.title === 'string' ? next.title : '')
+    setGoal(typeof next.goal === 'string' ? next.goal : '')
+    setAcceptanceCriteria(typeof next.acceptance_criteria === 'string' ? next.acceptance_criteria : '')
+    setMaxRepairs(typeof next.max_iterations === 'number' ? String(next.max_iterations) : '')
+    setProjectId(typeof next.project === 'string' ? next.project : '')
+    setCwd(typeof next.cwd === 'string' ? next.cwd : '')
+    setSourceSlugs(Array.isArray(next.sources) ? next.sources : [])
+    setSkillSlugs(Array.isArray(next.skills) ? next.skills : [])
+    setRunner(next.runner === 'orchestrate' ? 'orchestrate' : 'conduct')
+    setOrchModel(next.defaults?.model ?? '')
+    setOrchConnection(next.defaults?.llmConnection)
+    setPermissionMode(next.defaults?.permissionMode ?? 'safe')
+    setLayout(next.ui?.layout?.nodes ?? {})
+    setSubtasks(specToSubtasks(next.nodes ?? []))
   }, [])
 
   const validateYamlDraft = React.useCallback(async () => {
@@ -947,7 +1014,7 @@ export function TaskEditor({
         return
       }
       setYamlDiagnostics([])
-      if (res.spec) applyWorkbenchSpec(res.spec as unknown as WorkbenchSpec)
+      if (res.spec) applyWorkbenchSpec(res.spec as EditableTaskSpec, 'yaml')
     } catch (err) {
       setYamlDiagnostics([err instanceof Error ? err.message : String(err)])
     }
@@ -962,54 +1029,83 @@ export function TaskEditor({
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-    // submit is recreated each render; bind to current closure.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   })
 
   // Create the task (write task.yaml + orchestrator session). When `run` is true, also start a
   // run; otherwise the task tile just lands on the board in ToDo for the user to run later.
   async function submit(run: boolean) {
-    if (!title.trim()) {
-      toast.error(t('tasks.toastNeedTitle'))
+    if (isEdit && !canSafelySaveExistingTask({ taskSlug: editSlug, etag, loadError: taskLoadError })) {
+      toast.error(t('tasks.toastLoadFailed'), { description: taskLoadError ?? t('tasks.loadFailedBanner') })
       return
     }
-    if (subtasks.length === 0) {
-      toast.error(t('tasks.toastNeedSubtask'))
-      return
+    if (tab !== 'yaml') {
+      if (!title.trim()) {
+        toast.error(t('tasks.toastNeedTitle'))
+        return
+      }
+      if (subtasks.length === 0) {
+        toast.error(t('tasks.toastNeedSubtask'))
+        return
+      }
+      if (subtasks.some((s) => SESSION_LIKE_KINDS.has(s.kind ?? 'session') && !s.prompt.trim())) {
+        toast.error(t('tasks.toastNeedPrompt'))
+        return
+      }
     }
-    if (subtasks.some((s) => SESSION_LIKE_KINDS.has(s.kind ?? 'session') && !s.prompt.trim())) {
-      toast.error(t('tasks.toastNeedPrompt'))
-      return
-    }
-    // Edit mode pins the existing slug so the title can change without forking a new task folder
-    // and orphaning the bound orchestrator session.
-    const spec = buildSpec(
-      {
-        title,
-        goal,
-        acceptanceCriteria,
-        maxRepairs: maxRepairs.trim() === '' ? undefined : Number(maxRepairs),
-        projectId,
-        orchModel,
-        orchConnection,
-        permissionMode,
-        boundProjectId,
-        subtasks,
-        cwd,
-        sourceSlugs,
-        skillSlugs,
-        fixedId: editSlug,
-        runner,
-        layout,
-      },
-      modelToConnection,
-    )
-    const yaml = JSON.stringify(spec, null, 2) // JSON is a valid YAML subset
     // Adopt the generate draft in place whenever we have one — spec edits run fine on the draft
     // orchestrator, so there's no need to mint a fresh session.
     const draftId = generatedDraftRef.current
     setBusy(true)
     try {
+      let spec: Record<string, unknown>
+      let yaml: string
+      if (tab === 'yaml') {
+        const validation = await window.electronAPI.validateTask(workspaceId, yamlDraft)
+        if (!validation.valid || !validation.spec) {
+          setYamlDiagnostics(validation.errors.map((e) => `${e.path}: ${e.message}`))
+          const first = validation.errors[0]
+          toast.error(t('tasks.toastInvalid'), { description: first ? `${first.path}: ${first.message}` : undefined })
+          return
+        }
+        spec = validation.spec as Record<string, unknown>
+        if (isEdit && editSlug && spec.id !== editSlug) {
+          const message = t('tasks.taskIdImmutable', { id: editSlug })
+          setYamlDiagnostics([message])
+          toast.error(t('tasks.toastInvalid'), { description: message })
+          return
+        }
+        // The YAML tab is a real authoring source. Save exactly the validated
+        // document instead of rebuilding a lossy subset from form state.
+        yaml = taskDocumentForSave('yaml', yamlDraft, spec)
+        setYamlDiagnostics([])
+        setPreservedSpec(spec)
+      } else {
+        // Edit mode pins the existing slug so the title can change without forking a new task folder
+        // and orphaning the bound orchestrator session.
+        spec = buildSpec(
+          {
+            title,
+            goal,
+            acceptanceCriteria,
+            maxRepairs: maxRepairs.trim() === '' ? undefined : Number(maxRepairs),
+            projectId,
+            orchModel,
+            orchConnection,
+            permissionMode,
+            boundProjectId,
+            subtasks,
+            cwd,
+            sourceSlugs,
+            skillSlugs,
+            fixedId: editSlug,
+            runner,
+            layout,
+            preservedSpec,
+          },
+          modelToConnection,
+        )
+        yaml = taskDocumentForSave('form', yamlDraft, spec)
+      }
       if (isEdit && etag) {
         const saved = await window.electronAPI.saveTask(workspaceId, { yaml, expectedEtag: etag })
         if (saved.conflict) {
@@ -1106,7 +1202,11 @@ export function TaskEditor({
             <button
               key={tb}
               onClick={() => {
-                if (tb === 'yaml') setYamlDraft(JSON.stringify(currentSpec(), null, 2))
+                if (tb === 'yaml' && shouldRefreshYamlDraft(yamlHasLocalSource, formChangedSinceYaml)) {
+                  setYamlDraft(JSON.stringify(currentSpec(), null, 2))
+                  setYamlHasLocalSource(true)
+                  setFormChangedSinceYaml(false)
+                }
                 setTab(tb)
               }}
               className={cn(
@@ -1194,10 +1294,10 @@ export function TaskEditor({
               <Btn variant="secondary" onClick={requestClose} disabled={busy}>
                 {t('common.cancel')}
               </Btn>
-              <Btn variant="secondary" onClick={() => submit(false)} disabled={busy}>
+              <Btn variant="secondary" onClick={() => submit(false)} disabled={busy || !!taskLoadError}>
                 {isEdit ? t('common.save') : t('common.create')}
               </Btn>
-              <Btn variant="primary" onClick={() => submit(true)} disabled={busy}>
+              <Btn variant="primary" onClick={() => submit(true)} disabled={busy || !!taskLoadError}>
                 {busy ? <Spinner /> : <Sparkles className="h-3.5 w-3.5" strokeWidth={2.5} />}
                 {busy ? t('tasks.starting') : isEdit ? t('tasks.saveAndRun') : t('tasks.createAndRun')}
               </Btn>
@@ -1210,6 +1310,13 @@ export function TaskEditor({
           )}
         </div>
       </div>
+
+      {taskLoadError && (
+        <div role="alert" className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-[12.5px] text-red-700 dark:text-red-300">
+          <span className="font-semibold">{t('tasks.loadFailedBanner')}</span>{' '}
+          <span>{taskLoadError}</span>
+        </div>
+      )}
 
       {tab === 'definition' && migrationWarnings.length > 0 && (
         <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[12.5px] text-foreground/80">
@@ -1240,6 +1347,8 @@ export function TaskEditor({
             value={yamlDraft}
             onChange={(e) => {
               setDirty(true)
+              setYamlHasLocalSource(true)
+              setFormChangedSinceYaml(false)
               setYamlDraft(e.target.value)
             }}
             onBlur={() => void validateYamlDraft()}
@@ -1283,7 +1392,7 @@ export function TaskEditor({
             <div className="mb-1.5 text-[12px] font-semibold text-foreground/55">{t('tasks.title')}</div>
             <input
               value={title}
-              onChange={(e) => setTitle(e.target.value)}
+              onChange={(e) => { setTitle(e.target.value); markFormChanged() }}
               placeholder={t('tasks.titlePlaceholder')}
               className="w-full rounded-lg border border-border bg-background px-3 py-2 text-[13.5px] font-semibold outline-none focus:border-foreground/25"
             />
@@ -1296,7 +1405,7 @@ export function TaskEditor({
             </div>
             <textarea
               value={goal}
-              onChange={(e) => setGoal(e.target.value)}
+              onChange={(e) => { setGoal(e.target.value); markFormChanged() }}
               rows={4}
               placeholder={t('tasks.goalPlaceholder')}
               className="w-full resize-none rounded-lg border border-border bg-background px-3 py-2 text-[12.5px] leading-relaxed outline-none focus:border-foreground/25 field-sizing-content max-h-48"
@@ -1310,7 +1419,7 @@ export function TaskEditor({
             </div>
             <textarea
               value={acceptanceCriteria}
-              onChange={(e) => setAcceptanceCriteria(e.target.value)}
+              onChange={(e) => { setAcceptanceCriteria(e.target.value); markFormChanged() }}
               rows={3}
               placeholder={t('tasks.acceptanceCriteriaPlaceholder')}
               className="w-full resize-none rounded-lg border border-border bg-background px-3 py-2 text-[12.5px] leading-relaxed outline-none focus:border-foreground/25 field-sizing-content max-h-48"
@@ -1330,13 +1439,13 @@ export function TaskEditor({
                       never unbinds on save, and buildSpec floors a blank pick to the existing project,
                       so showing it for a bound task would be a no-op that implies clearing works. */}
                   {!boundProjectId && (
-                    <DropdownMenuItem className="text-xs" onSelect={() => setProjectId('')}>
+                    <DropdownMenuItem className="text-xs" onSelect={() => { setProjectId(''); markFormChanged() }}>
                       {t('tasks.noProject')}
                       {!projectId && <Check className="ml-auto h-3.5 w-3.5" strokeWidth={2} />}
                     </DropdownMenuItem>
                   )}
                   {projects.map((p) => (
-                    <DropdownMenuItem key={p.config.id} className="text-xs" onSelect={() => setProjectId(p.config.id)}>
+                    <DropdownMenuItem key={p.config.id} className="text-xs" onSelect={() => { setProjectId(p.config.id); markFormChanged() }}>
                       <span className="truncate">{p.config.name}</span>
                       {projectId === p.config.id && <Check className="ml-auto h-3.5 w-3.5 shrink-0" strokeWidth={2} />}
                     </DropdownMenuItem>
@@ -1353,14 +1462,14 @@ export function TaskEditor({
                   </SelectButton>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end">
-                  <DropdownMenuItem className="text-xs" onSelect={() => { setRunner('conduct'); setDirty(true) }}>
+                  <DropdownMenuItem className="text-xs" onSelect={() => { setRunner('conduct'); markFormChanged() }}>
                     {t('tasks.runnerConduct')}
                     {runner === 'conduct' && <Check className="ml-auto h-3.5 w-3.5 shrink-0" strokeWidth={2} />}
                   </DropdownMenuItem>
                   <DropdownMenuItem
                     className="text-xs"
                     disabled={!isTasksOrchestrateEnabled()}
-                    onSelect={() => { setRunner('orchestrate'); setDirty(true) }}
+                    onSelect={() => { setRunner('orchestrate'); markFormChanged() }}
                   >
                     {t(runnerLabelKey('orchestrate', isTasksOrchestrateEnabled()))}
                     {runner === 'orchestrate' && <Check className="ml-auto h-3.5 w-3.5 shrink-0" strokeWidth={2} />}
@@ -1376,6 +1485,7 @@ export function TaskEditor({
                   // (possibly custom) connection; changing it re-routes to the new model's connection.
                   setOrchModel(m)
                   setOrchConnection(modelToConnection.get(m))
+                  markFormChanged()
                 }}
                 groups={groups}
               />
@@ -1390,7 +1500,7 @@ export function TaskEditor({
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end" className="min-w-[160px]">
                   {(['allow-all', 'ask', 'safe'] as const).map((m) => (
-                    <DropdownMenuItem key={m} className="text-xs" onSelect={() => setPermissionMode(m)}>
+                    <DropdownMenuItem key={m} className="text-xs" onSelect={() => { setPermissionMode(m); markFormChanged() }}>
                       <span className="truncate">{t(`mode.${m}`)}</span>
                       {permissionMode === m && <Check className="ml-auto h-3.5 w-3.5 shrink-0" strokeWidth={2} />}
                     </DropdownMenuItem>
@@ -1404,7 +1514,7 @@ export function TaskEditor({
                 <SourcesField
                   sources={enabledSources}
                   values={sourceSlugs}
-                  onChange={setSourceSlugs}
+                  onChange={(values) => { setSourceSlugs(values); markFormChanged() }}
                   title={t('tasks.sourcesHint')}
                 />
               </FieldRow>
@@ -1415,7 +1525,7 @@ export function TaskEditor({
                 <SkillsField
                   skills={workspaceSkills}
                   values={skillSlugs}
-                  onChange={setSkillSlugs}
+                  onChange={(values) => { setSkillSlugs(values); markFormChanged() }}
                   workspaceId={workspaceId}
                   title={t('tasks.skillsHint')}
                 />
@@ -1423,7 +1533,7 @@ export function TaskEditor({
             )}
 
             <FieldRow label={t('tasks.workingDirectory')}>
-              <FolderField cwd={cwd} onChange={setCwd} workspaceId={workspaceId} />
+              <FolderField cwd={cwd} onChange={(value) => { setCwd(value); markFormChanged() }} workspaceId={workspaceId} />
             </FieldRow>
 
             <FieldRow label={t('tasks.maxRepairs')}>
@@ -1433,7 +1543,7 @@ export function TaskEditor({
                 min={0}
                 max={MAX_REPAIR_ATTEMPTS_CAP}
                 value={maxRepairs}
-                onChange={(e) => setMaxRepairs(e.target.value)}
+                onChange={(e) => { setMaxRepairs(e.target.value); markFormChanged() }}
                 placeholder={String(DEFAULT_REPAIR_ATTEMPTS)}
                 title={t('tasks.maxRepairsHint')}
                 className="h-8 w-[88px] rounded-lg border border-border bg-background px-2.5 text-right text-[12.5px] tabular-nums outline-none focus:border-foreground/25 placeholder:text-foreground/30"
