@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'bun:test'
 import {
+  clearProjectFilter,
   resolveInheritedFilterParams,
   resolveNewSessionParams,
   resolveProjectNavigationSessionId,
@@ -8,6 +9,25 @@ import {
 } from './inherited-filter-params'
 
 const m = (...entries: [string, FilterMode][]) => new Map(entries)
+
+describe('clearProjectFilter (#165)', () => {
+  it('returns the All Sessions view to global scope without losing other filters', () => {
+    const entry = {
+      statuses: { todo: 'include' as const },
+      labels: { bug: 'exclude' as const },
+      projects: { 'project-1': 'include' as const },
+      groupingMode: 'status' as const,
+    }
+
+    expect(clearProjectFilter(entry)).toEqual({
+      statuses: { todo: 'include' },
+      labels: { bug: 'exclude' },
+      projects: {},
+      groupingMode: 'status',
+    })
+    expect(entry.projects).toEqual({ 'project-1': 'include' })
+  })
+})
 
 describe('resolveInheritedFilterParams (#970)', () => {
   it('inherits a sole include-mode status', () => {

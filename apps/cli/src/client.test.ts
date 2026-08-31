@@ -390,7 +390,10 @@ describe('CliRpcClient', () => {
 function generateSelfSignedCert(): { cert: string; key: string } | null {
   try {
     const keyResult = Bun.spawnSync({
-      cmd: ['openssl', 'req', '-x509', '-newkey', 'ec', '-pkeyopt', 'ec_paramgen_curve:prime256v1',
+      // Bun 1.3.x links BoringSSL builds that reject some OpenSSL-generated
+      // PKCS#8 EC keys with DECODE_ERROR. RSA keeps this transport test focused
+      // on wss:// behavior instead of the host crypto backend's EC key parser.
+      cmd: ['openssl', 'req', '-x509', '-newkey', 'rsa:2048',
         '-keyout', '/dev/stdout', '-out', '/dev/stdout',
         '-days', '1', '-nodes', '-subj', '/CN=localhost', '-batch'],
       stderr: 'pipe',

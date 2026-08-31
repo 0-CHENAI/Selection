@@ -9,6 +9,14 @@ const getDefaultThinkingLevelMock = mock(() => 'think')
 const setDefaultThinkingLevelMock = mock((_level: string) => true)
 const getSharedProjectMemoryEnabledMock = mock(() => false)
 const setSharedProjectMemoryEnabledMock = mock((_enabled: boolean) => true)
+const getSwarmRunDetailsMock = mock((_sessionId: string, _workspaceId: string) => ({
+  orchestrationId: 'orch-1',
+  rootSessionId: 'parent',
+  coordinatorSessionId: 'parent',
+  status: 'running' as const,
+  tokensUsed: 0,
+  nodes: [],
+}))
 
 mock.module('@craft-agent/shared/config', () => ({
   getPreferencesPath: () => '/tmp/preferences.json',
@@ -21,6 +29,8 @@ mock.module('@craft-agent/shared/config', () => ({
   setDefaultThinkingLevel: setDefaultThinkingLevelMock,
   getSharedProjectMemoryEnabled: getSharedProjectMemoryEnabledMock,
   setSharedProjectMemoryEnabled: setSharedProjectMemoryEnabledMock,
+  isUnsupportedLlmConnection: () => false,
+  UNSUPPORTED_LLM_CONNECTION_MESSAGE: 'Unsupported connection',
 }))
 
 describe('settings default thinking RPC handlers', () => {
@@ -32,6 +42,7 @@ describe('settings default thinking RPC handlers', () => {
     setDefaultThinkingLevelMock.mockClear()
     getSharedProjectMemoryEnabledMock.mockClear()
     setSharedProjectMemoryEnabledMock.mockClear()
+    getSwarmRunDetailsMock.mockClear()
 
     const server: RpcServer = {
       handle(channel, handler) {
@@ -46,7 +57,7 @@ describe('settings default thinking RPC handlers', () => {
     }
 
     const deps: HandlerDeps = {
-      sessionManager: {} as HandlerDeps['sessionManager'],
+      sessionManager: { getSwarmRunDetails: getSwarmRunDetailsMock } as unknown as HandlerDeps['sessionManager'],
       platform: {
         appRootPath: '',
         resourcesPath: '',
@@ -122,5 +133,16 @@ describe('settings default thinking RPC handlers', () => {
 
     await expect(setHandler!({ clientId: 'client-1' }, 'true')).rejects.toThrow('must be a boolean')
     expect(setSharedProjectMemoryEnabledMock).not.toHaveBeenCalled()
+  })
+
+  it('returns typed Swarm run details for a coordinator session', async () => {
+    const handler = handlers.get(RPC_CHANNELS.sessions.GET_SWARM_RUN_DETAILS)
+    expect(handler).toBeTruthy()
+
+    expect(await handler!({ clientId: 'client-1' }, 'parent', 'workspace-1')).toMatchObject({
+      orchestrationId: 'orch-1',
+      coordinatorSessionId: 'parent',
+    })
+    expect(getSwarmRunDetailsMock).toHaveBeenCalledWith('parent', 'workspace-1')
   })
 })

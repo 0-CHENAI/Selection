@@ -1,5 +1,10 @@
 import type { FilterMode } from './inherited-filter-params'
 
+/** A project include represents an active project child in the sidebar. */
+export function hasIncludedProjectFilter(projectFilter: Map<string, FilterMode>): boolean {
+  return Array.from(projectFilter.values()).some(mode => mode === 'include')
+}
+
 /** Apply the filter bar's include/exclude semantics to a session list. */
 export function filterSessionsByProject<T extends { projectId?: string }>(
   sessions: T[],

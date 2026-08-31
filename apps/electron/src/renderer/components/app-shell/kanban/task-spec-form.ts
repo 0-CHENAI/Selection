@@ -61,8 +61,61 @@ export function quickAddChildToSubtask(child: {
 export const slugify = (s: string): string =>
   s.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 48)
 
+/**
+ * Select the document sent to tasks:save/create. YAML is already validated by
+ * the caller and must remain the source of truth; form mode serializes the
+ * merged spec as JSON (a valid YAML subset).
+ */
+export function taskDocumentForSave(
+  source: 'yaml' | 'form',
+  yamlDraft: string,
+  formSpec: Record<string, unknown>,
+): string {
+  return source === 'yaml' ? yamlDraft : JSON.stringify(formSpec, null, 2)
+}
+
+/** Existing task files may only be saved after a successful, versioned load. */
+export function canSafelySaveExistingTask(input: {
+  taskSlug?: string
+  etag: string | null
+  loadError: string | null
+}): boolean {
+  return !input.taskSlug || (!!input.etag && !input.loadError)
+}
+
+/** Preserve loaded/authored YAML until the form has actually changed. */
+export function shouldRefreshYamlDraft(hasLocalSource: boolean, formChangedSinceYaml: boolean): boolean {
+  return !hasLocalSource || formChangedSinceYaml
+}
+
 /** Permission modes are fixed (safe|ask|allow-all); mirrored here to avoid a shared Node import in the renderer. */
 export type TaskPermissionMode = 'safe' | 'ask' | 'allow-all'
+
+export type EditorNodeKind =
+  | 'session'
+  | 'orchestrator'
+  | 'route'
+  | 'parallel'
+  | 'map'
+  | 'loop'
+  | 'approval'
+  | 'synthesize'
+  | 'verify'
+  | 'judge'
+  | 'filter'
+  | 'aggregate'
+  | 'finally'
+
+export const SESSION_LIKE_KINDS = new Set<EditorNodeKind>([
+  'session',
+  'orchestrator',
+  'finally',
+  'synthesize',
+  'verify',
+  'judge',
+  'map',
+  'loop',
+])
 
 export interface EditorSubtask {
   uid: string
@@ -70,6 +123,7 @@ export interface EditorSubtask {
   // AI-authored ${nodes.<id>.output} references embedded in sibling prompts keep resolving.
   // Undefined for subtasks added manually in the editor (their id is derived from the title).
   nodeId?: string
+  kind?: EditorNodeKind
   title: string
   prompt: string
   // Explicit authored model. UNDEFINED = inherit the orchestrator default — buildSpec then emits no
@@ -83,6 +137,9 @@ export interface EditorSubtask {
   // node (depends_on: [A, B]) keeps every edge visible and editable. uids that no longer resolve to
   // a row (upstream deleted) are dropped by buildSpec, never emitted as a dangling ref.
   dependsOn: string[]
+  // v2 fields the definition form does not edit (loop/map/route/when/outputs/…).
+  // Must survive generate → edit title/prompt → save, or YAML-authored graphs get stripped.
+  extras?: Record<string, unknown>
 }
 
 export interface SpecForm {
@@ -115,17 +172,50 @@ export interface SpecForm {
   // by default; without this, editing an existing task's title would fork a new slug/folder and
   // orphan the bound orchestrator session. Undefined → create mode (id derived from title).
   fixedId?: string
+  runner?: 'conduct' | 'orchestrate'
+  layout?: Record<string, { x: number; y: number }>
+  /**
+   * Last complete, server-validated spec loaded from disk or the YAML editor.
+   *
+   * The definition form intentionally edits only a subset of v2. Keeping the
+   * complete spec as the merge base prevents valid fields such as params,
+   * token_budget, top-level outputs, max_parallel, and UI viewport settings
+   * from disappearing when the user changes an ordinary form field.
+   */
+  preservedSpec?: Record<string, unknown>
 }
 
 /** A spec node as authored by the generator / loaded from disk (loose, renderer-facing shape). */
+const FORM_OWNED_NODE_KEYS = new Set([
+  'id',
+  'title',
+  'kind',
+  'prompt',
+  'model',
+  'llmConnection',
+  'depends_on',
+])
+
+/** v2 control-flow / IO fields the form does not own. */
+export function nodeExtras(node: Record<string, unknown>): Record<string, unknown> | undefined {
+  const extras: Record<string, unknown> = {}
+  for (const [key, value] of Object.entries(node)) {
+    if (FORM_OWNED_NODE_KEYS.has(key) || value === undefined) continue
+    extras[key] = value
+  }
+  return Object.keys(extras).length ? extras : undefined
+}
+
 export interface SpecNode {
   id: string
   title?: string
+  kind?: EditorNodeKind
   prompt?: string
   model?: string
   /** Connection serving `model`; read back into the row so an explicit connection round-trips. */
   llmConnection?: string
   depends_on?: string[]
+  [key: string]: unknown
 }
 
 export function buildSpec(form: SpecForm, modelToConnection: Map<string, string>): Record<string, unknown> {
@@ -163,7 +253,9 @@ export function buildSpec(form: SpecForm, modelToConnection: Map<string, string>
     const deps = st.dependsOn.map((u) => nodeIdByUid.get(u)).filter((d): d is string => d != null)
     const depends_on = [...new Set(deps)].filter((d) => d !== selfId && finalIds.has(d))
     return {
+      ...(st.extras ?? {}),
       id: selfId,
+      ...(st.kind && st.kind !== 'session' ? { kind: st.kind } : {}),
       ...(st.title.trim() ? { title: st.title.trim() } : {}),
       ...(st.model ? { model: st.model } : {}),
       // Pin the connection that serves the model so non-default (pi/*) models resolve a backend.
@@ -177,14 +269,34 @@ export function buildSpec(form: SpecForm, modelToConnection: Map<string, string>
   const cwd = form.cwd?.trim()
   const acceptanceCriteria = form.acceptanceCriteria?.trim()
   // Task-family defaults: orchestrator model/connection + the explicit, persisted permission mode.
-  const defaults: Record<string, unknown> = {}
+  const preservedDefaults = form.preservedSpec?.defaults
+  const defaults: Record<string, unknown> =
+    preservedDefaults && typeof preservedDefaults === 'object' && !Array.isArray(preservedDefaults)
+      ? { ...(preservedDefaults as Record<string, unknown>) }
+      : {}
   if (form.orchModel) defaults.model = form.orchModel
+  else delete defaults.model
   if (orchConn) defaults.llmConnection = orchConn
+  else delete defaults.llmConnection
   if (form.permissionMode) defaults.permissionMode = form.permissionMode
   // Leaving the picker on "No Project" for an already-bound task must NOT drop `project` (children read
   // spec.project) — fall back to the existing binding as a floor. A picked project overrides it.
   const project = form.projectId || form.boundProjectId
-  return {
+  const preservedUi = form.preservedSpec?.ui
+  const ui = preservedUi && typeof preservedUi === 'object' && !Array.isArray(preservedUi)
+    ? { ...(preservedUi as Record<string, unknown>) }
+    : {}
+  const preservedLayout = ui.layout
+  const uiLayout = preservedLayout && typeof preservedLayout === 'object' && !Array.isArray(preservedLayout)
+    ? { ...(preservedLayout as Record<string, unknown>) }
+    : {}
+  if (form.layout && Object.keys(form.layout).length) uiLayout.nodes = form.layout
+  else delete uiLayout.nodes
+  if (Object.keys(uiLayout).length) ui.layout = uiLayout
+  else delete ui.layout
+
+  const spec: Record<string, unknown> = {
+    ...(form.preservedSpec ?? {}),
     id: form.fixedId || slugify(form.title) || 'untitled-task',
     title: form.title.trim() || 'Untitled task',
     goal: form.goal.trim() || form.title.trim() || 'Untitled task',
@@ -199,8 +311,23 @@ export function buildSpec(form: SpecForm, modelToConnection: Map<string, string>
     ...(form.sourceSlugs?.length ? { sources: form.sourceSlugs } : {}),
     ...(form.skillSlugs?.length ? { skills: form.skillSlugs } : {}),
     ...(Object.keys(defaults).length ? { defaults } : {}),
+    ...(form.runner && form.runner !== 'conduct' ? { runner: form.runner } : {}),
+    ...(Object.keys(ui).length ? { ui } : {}),
     nodes,
   }
+  // A preserved merge base must not make cleared form-owned fields sticky.
+  // Delete them explicitly when the form says "inherit/empty" while leaving
+  // every form-unowned v2 field untouched.
+  if (!acceptanceCriteria) delete spec.acceptance_criteria
+  if (form.maxRepairs === undefined || !Number.isFinite(form.maxRepairs)) delete spec.max_iterations
+  if (!project) delete spec.project
+  if (!cwd) delete spec.cwd
+  if (!form.sourceSlugs?.length) delete spec.sources
+  if (!form.skillSlugs?.length) delete spec.skills
+  if (!Object.keys(defaults).length) delete spec.defaults
+  if (!form.runner || form.runner === 'conduct') delete spec.runner
+  if (!Object.keys(ui).length) delete spec.ui
+  return spec
 }
 
 /** Map authored TaskSpec nodes → the editor's multi-dependency subtask rows. */
@@ -210,13 +337,15 @@ export function specToSubtasks(nodes: SpecNode[], _fallbackModel?: string): Edit
   return nodes.map((n) => ({
     uid: uidByNodeId.get(n.id)!,
     nodeId: n.id,
-    title: n.title || n.id,
-    prompt: n.prompt || '',
+    ...(n.kind && n.kind !== 'session' ? { kind: n.kind } : {}),
+    title: (typeof n.title === 'string' && n.title) || n.id,
+    prompt: typeof n.prompt === 'string' ? n.prompt : '',
     // Keep model/connection OPTIONAL: a node that inherited the orchestrator default must round-trip
     // WITHOUT gaining an explicit model (which buildSpec would otherwise pin + re-route). The editor
     // computes an effective display model separately. `_fallbackModel` is kept for call-site compat.
-    ...(n.model ? { model: n.model } : {}),
-    ...(n.llmConnection ? { llmConnection: n.llmConnection } : {}),
+    ...(typeof n.model === 'string' && n.model ? { model: n.model } : {}),
+    ...(typeof n.llmConnection === 'string' && n.llmConnection ? { llmConnection: n.llmConnection } : {}),
+    extras: nodeExtras(n as Record<string, unknown>),
     // Every edge mapped to a local uid. Edges pointing at ids absent from this spec are dangling
     // (the backend would reject them) so they're dropped rather than carried as raw ids.
     dependsOn: (n.depends_on ?? [])

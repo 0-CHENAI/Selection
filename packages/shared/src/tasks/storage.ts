@@ -4,6 +4,7 @@
  * Layout under the workspace root (architecture §6, LOCKED #6):
  *   {workspaceRoot}/tasks/<slug>/task.yaml                    — the editable spec
  *   {workspaceRoot}/tasks/<slug>/runs/<runId>/run-log.jsonl   — append-only run log
+ *   {workspaceRoot}/tasks/<slug>/runs/<runId>/run-state.json  — atomic derived checkpoint
  *   {workspaceRoot}/tasks/<slug>/runs/<runId>/nodes/<id>.json — per-node output
  *
  * The run log is the durability substrate: replaying it re-derives scheduling
@@ -22,25 +23,107 @@ const TASKS_DIR = 'tasks';
 const TASK_FILE = 'task.yaml';
 const RUNS_DIR = 'runs';
 const RUN_LOG = 'run-log.jsonl';
+const RUN_STATE = 'run-state.json';
 const NODES_DIR = 'nodes';
+const TASK_SEGMENT_RE = /^[a-z0-9][a-z0-9-]*$/;
+const RUN_SEGMENT_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
+
+function assertPathSegment(value: string, kind: 'task' | 'run'): void {
+  const valid = kind === 'task' ? TASK_SEGMENT_RE.test(value) : RUN_SEGMENT_RE.test(value) && !value.includes('..');
+  if (!valid) throw new Error(`Invalid ${kind} id "${value}"`);
+}
+
+export interface RunStateCheckpoint {
+  seq: number;
+  revision: number;
+  tokensUsed: number;
+  tokenBudget?: number;
+  /** Resolved non-sensitive run params. Sensitive values are never checkpointed. */
+  params?: Record<string, unknown>;
+  seenDecisionIds: string[];
+  invalidPatchCount: number;
+}
 
 // ---------------------------------------------------------------------------
 // Run-state types
 // ---------------------------------------------------------------------------
 
 /** Per-node lifecycle state recorded in the run log. Richer than the board's SubtaskRunState. */
-export type NodeRunState = 'pending' | 'running' | 'done' | 'failed' | 'cancelled' | 'skipped';
+export type NodeRunState =
+  | 'pending'
+  | 'ready'
+  | 'running'
+  | 'retry-wait'
+  | 'waiting-approval'
+  | 'done'
+  | 'failed'
+  | 'invalid'
+  | 'cancelled'
+  | 'skipped'
+  | 'interrupted';
+
+export const NODE_RUN_STATES = [
+  'pending',
+  'ready',
+  'running',
+  'retry-wait',
+  'waiting-approval',
+  'done',
+  'failed',
+  'invalid',
+  'cancelled',
+  'skipped',
+  'interrupted',
+] as const;
+
+export type RunStatus =
+  | 'running'
+  | 'pausing'
+  | 'paused'
+  | 'waiting-approval'
+  | 'waiting-budget'
+  | 'verifying'
+  | 'repairing'
+  | 'interrupted'
+  | 'stopped'
+  | 'completed'
+  | 'failed';
+
+export const TERMINAL_RUN_STATUSES: readonly RunStatus[] = ['completed', 'failed', 'stopped'];
+
+export function isTerminalRunStatus(status: RunStatus): boolean {
+  return status === 'completed' || status === 'failed' || status === 'stopped';
+}
 
 /** Append-only run-log event. `t` is an ISO-8601 timestamp. */
-export type RunLogEntry =
+type RunLogPayload =
   | { t: string; kind: 'run-started'; taskId: string; runId: string; orchestratorSessionId?: string }
   | { t: string; kind: 'node-scheduled'; nodeId: string }
   | { t: string; kind: 'node-spawned'; nodeId: string; sessionId: string }
   | { t: string; kind: 'node-finished'; nodeId: string; sessionId: string; state: NodeRunState; reason?: string }
+  | { t: string; kind: 'node-waiting-approval'; nodeId: string; deadline?: string }
   | { t: string; kind: 'node-retry'; nodeId: string; attempt: number; reason: string }
-  | { t: string; kind: 'run-paused' | 'run-resumed' | 'run-stopped' | 'run-completed' | 'run-failed' | 'run-verifying' }
+  | {
+      t: string;
+      kind:
+        | 'run-paused'
+        | 'run-pausing'
+        | 'run-resumed'
+        | 'run-stopped'
+        | 'run-completed'
+        | 'run-failed'
+        | 'run-verifying'
+        | 'run-interrupted'
+        | 'run-waiting-approval'
+        | 'run-waiting-budget'
+        | 'run-repairing';
+      tokensUsed?: number;
+    }
   | { t: string; kind: 'verdict'; result: 'pass' | 'fail' | 'unparsed'; reason?: string; nodes?: string[] }
+  | { t: string; kind: 'orchestration-patch'; decisionId: string; baseRevision: number; rationale: string; cancelled?: string[] }
   | { t: string; kind: 'budget-breach'; metric: 'tokens' | 'parallel' | 'iterations'; value: number; limit: number };
+
+export type RunLogEntry = RunLogPayload & { seq?: number; revision?: number };
 
 // ---------------------------------------------------------------------------
 // Path helpers
@@ -50,12 +133,14 @@ export function tasksRoot(workspaceRoot: string): string {
   return join(workspaceRoot, TASKS_DIR);
 }
 export function taskDir(workspaceRoot: string, slug: string): string {
+  assertPathSegment(slug, 'task');
   return join(workspaceRoot, TASKS_DIR, slug);
 }
 export function taskYamlPath(workspaceRoot: string, slug: string): string {
   return join(taskDir(workspaceRoot, slug), TASK_FILE);
 }
 export function runDir(workspaceRoot: string, slug: string, runId: string): string {
+  assertPathSegment(runId, 'run');
   return join(taskDir(workspaceRoot, slug), RUNS_DIR, runId);
 }
 
@@ -128,6 +213,31 @@ export function appendRunLog(workspaceRoot: string, slug: string, runId: string,
   appendFileSync(join(dir, RUN_LOG), JSON.stringify(entry) + '\n', 'utf-8');
 }
 
+export function writeRunState(
+  workspaceRoot: string,
+  slug: string,
+  runId: string,
+  state: RunStateCheckpoint,
+): void {
+  const dir = runDir(workspaceRoot, slug, runId);
+  ensureDir(dir);
+  atomicWriteFileSync(join(dir, RUN_STATE), JSON.stringify(state));
+}
+
+export function readRunState(
+  workspaceRoot: string,
+  slug: string,
+  runId: string,
+): RunStateCheckpoint | null {
+  const path = join(runDir(workspaceRoot, slug, runId), RUN_STATE);
+  if (!existsSync(path)) return null;
+  try {
+    return JSON.parse(readFileSync(path, 'utf-8')) as RunStateCheckpoint;
+  } catch {
+    return null;
+  }
+}
+
 /** Read + parse the run log in append order. Skips malformed lines. */
 export function readRunLog(workspaceRoot: string, slug: string, runId: string): RunLogEntry[] {
   const path = join(runDir(workspaceRoot, slug, runId), RUN_LOG);
@@ -143,6 +253,31 @@ export function readRunLog(workspaceRoot: string, slug: string, runId: string): 
     }
   }
   return out;
+}
+
+const RUN_STATUS_EVENTS: Record<string, RunStatus> = {
+  'run-started': 'running',
+  'run-paused': 'paused',
+  'run-pausing': 'pausing',
+  'run-resumed': 'running',
+  'run-stopped': 'stopped',
+  'run-completed': 'completed',
+  'run-failed': 'failed',
+  'run-verifying': 'verifying',
+  'run-interrupted': 'interrupted',
+  'run-waiting-approval': 'waiting-approval',
+  'run-waiting-budget': 'waiting-budget',
+  'run-repairing': 'repairing',
+};
+
+/** Last durable run status recorded in a log. Missing start → running. */
+export function deriveRunStatusFromLog(log: readonly RunLogEntry[]): RunStatus {
+  let status: RunStatus = 'running';
+  for (const entry of log) {
+    const next = RUN_STATUS_EVENTS[entry.kind];
+    if (next) status = next;
+  }
+  return status;
 }
 
 /** List run ids for a task (sorted lexicographically). */
@@ -199,17 +334,42 @@ export function writeNodeOutput(
   atomicWriteFileSync(join(dir, `${nodeId}.json`), JSON.stringify(output, null, 2));
 }
 
-export function readNodeOutput(
+export function writeNodeAttempt(
   workspaceRoot: string,
   slug: string,
   runId: string,
-  nodeId: string,
-): NodeOutput | null {
-  const path = join(runDir(workspaceRoot, slug, runId), NODES_DIR, `${nodeId}.json`);
+  instanceId: string,
+  attempt: number,
+  output: NodeOutput,
+): void {
+  const dir = join(runDir(workspaceRoot, slug, runId), NODES_DIR, instanceId);
+  ensureDir(dir);
+  atomicWriteFileSync(join(dir, `attempt-${attempt}.json`), JSON.stringify(output, null, 2));
+}
+
+function readJsonOutput(path: string): NodeOutput | null {
   if (!existsSync(path)) return null;
   try {
     return JSON.parse(readFileSync(path, 'utf-8')) as NodeOutput;
   } catch {
     return null;
   }
+}
+
+export function readNodeOutput(
+  workspaceRoot: string,
+  slug: string,
+  runId: string,
+  nodeId: string,
+): NodeOutput | null {
+  const base = join(runDir(workspaceRoot, slug, runId), NODES_DIR);
+  const direct = readJsonOutput(join(base, `${nodeId}.json`));
+  if (direct) return direct;
+  const instDir = join(base, nodeId);
+  if (!existsSync(instDir)) return null;
+  const attempts = readdirSync(instDir)
+    .filter((f) => /^attempt-\d+\.json$/.test(f))
+    .sort((a, b) => Number(a.replace(/\D/g, '')) - Number(b.replace(/\D/g, '')));
+  const last = attempts.at(-1);
+  return last ? readJsonOutput(join(instDir, last)) : null;
 }

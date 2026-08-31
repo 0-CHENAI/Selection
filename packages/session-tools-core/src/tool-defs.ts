@@ -42,6 +42,11 @@ import { handleListBackgroundTasks } from './handlers/list-background-tasks.ts';
 import { handleCreateTask } from './handlers/create-task.ts';
 import { handleRunTask } from './handlers/run-task.ts';
 import { handleGetTaskResults } from './handlers/get-task-results.ts';
+import { handleSubmitTaskOutput } from './handlers/submit-task-output.ts';
+import { handleSubmitTaskVerdict } from './handlers/submit-task-verdict.ts';
+import { handleSubmitOrchestrationPatch } from './handlers/submit-orchestration-patch.ts';
+import { handleSubmitTaskDefinition } from './handlers/submit-task-definition.ts';
+import { handleControlTaskRun } from './handlers/control-task-run.ts';
 import { handleArchiveSession } from './handlers/archive-session.ts';
 import { handleSendAgentMessage } from './handlers/send-agent-message.ts';
 import { handleListMessagingChannels, handleUnbindMessagingChannel } from './handlers/messaging.ts';
@@ -169,6 +174,27 @@ export const SpawnSessionSchema = z.object({
   help: z.boolean().optional().describe('If true, returns available connections, models, and sources instead of creating a session'),
   prompt: z.string().optional().describe('Instructions for the new session (required when not in help mode)'),
   name: z.string().optional().describe('Session name'),
+  spawnReason: z.enum(['user-requested', 'automatic']).optional()
+    .describe('Use user-requested only when the user explicitly asked to delegate. Autonomous splitting requires automatic.'),
+  // Keep the nested qualification contract before the remaining top-level
+  // controls. ORDER/Laufry follows JSON-schema property order when composing
+  // tool arguments; putting this object last caused trailing role/lifecycle
+  // keys to be emitted inside qualification under load.
+  qualification: z.object({
+    tracks: z.array(z.object({
+      name: z.string().min(1),
+      input: z.string().min(1),
+      expectedOutput: z.string().min(1),
+      evidence: z.string().min(1),
+      toolKinds: z.array(z.string().min(1)).min(1),
+    })).min(2),
+    parallelBenefit: z.string().min(1),
+    finalAggregation: z.string().min(1),
+  }).optional().describe('Required for automatic spawning: two independent tool tracks plus a final aggregation contract.'),
+  lifecycle: z.enum(['managed', 'detached']).optional()
+    .describe('managed (default) participates in parent completion and explicit Swarm stop; detached continues independently.'),
+  role: z.enum(['coordinator', 'worker', 'reviewer']).optional()
+    .describe('Observation/result ownership role only; it does not grant permissions.'),
   llmConnection: z.string().optional().describe('Connection slug (e.g., "anthropic-api", "codex")'),
   model: z.string().optional().describe('Model ID override'),
   enabledSourceSlugs: z.array(z.string()).optional().describe('Source slugs to enable in the new session'),
@@ -208,8 +234,9 @@ export const ArchiveSessionSchema = z.object({
 });
 
 export const CreateTaskSchema = z.object({
-  title: z.string().describe('Short task title shown on the board (also drives the slug)'),
-  description: z.string().describe('What the task should accomplish — becomes the task goal and the initial node prompt'),
+  title: z.string().optional().describe('Short task title shown on the board (also drives the slug)'),
+  description: z.string().optional().describe('What the task should accomplish — becomes the task goal and the initial node prompt'),
+  spec: z.record(z.string(), z.unknown()).optional().describe('Full v2 task spec. Mutually exclusive with title+description.'),
   acceptanceCriteria: z.string().optional().describe('Freeform rubric the final result is verified against'),
   sources: z.array(z.string()).optional().describe('Source slugs to enable on the task sessions'),
   skills: z.array(z.string()).optional().describe('Skill slugs applied to dispatched task prompts'),
@@ -229,6 +256,39 @@ export const RunTaskSchema = z.object({
 export const GetTaskResultsSchema = z.object({
   slug: z.string().describe('Task slug to inspect'),
   runId: z.string().optional().describe('Specific run id. Omit to read the latest run.'),
+});
+
+export const SubmitTaskOutputSchema = z.object({
+  text: z.string().optional().describe('Optional prose summary of the node result'),
+  values: z.record(z.string(), z.unknown()).optional().describe('Declared output values keyed by name'),
+});
+
+export const SubmitTaskDefinitionSchema = z.object({
+  spec: z.record(z.string(), z.unknown()).describe('Complete v2 task spec. Server validates; do not paste free-text YAML.'),
+});
+
+export const ControlTaskRunSchema = z.object({
+  slug: z.string(),
+  runId: z.string(),
+  action: z.enum(['pause', 'resume', 'stop', 'continue']),
+});
+
+export const SubmitOrchestrationPatchSchema = z.object({
+  runId: z.string().describe('Active run id'),
+  decisionId: z.string().describe('Idempotency key for this decision'),
+  baseRevision: z.number().int().min(0).describe('Revision this patch is based on'),
+  rationale: z.string().describe('Why the graph is changing'),
+  add: z.array(z.record(z.string(), z.unknown())).optional().describe('Pending nodes to add'),
+  update: z.array(z.record(z.string(), z.unknown())).optional().describe('Pending nodes to update'),
+  cancel: z.array(z.string()).optional().describe('Pending node ids to cancel'),
+  action: z.enum(['continue', 'pause']).optional(),
+});
+
+export const SubmitTaskVerdictSchema = z.object({
+  result: z.enum(['pass', 'fail']).describe('Verification result'),
+  reason: z.string().optional().describe('One-line reason for a fail'),
+  nodes: z.array(z.string()).optional().describe('Definition node ids to repair on fail'),
+  runId: z.string().optional().describe('Run id when the parent has more than one active run'),
 });
 
 export const ListSessionsSchema = z.object({
@@ -476,7 +536,7 @@ For large files (>2000 lines), use {path, startLine, endLine} to select a portio
 
   spawn_session: `Create a first-class child session that runs independently with its own prompt, connection, model, and sources.
 
-Default: do the work in this session. Spawn only when the user asked to split/parallelize, you have two or more independent tool-heavy tracks, or the side work would pollute this conversation. Do not spawn for ordinary Q&A, editing existing text, summarizing/classifying/extracting fields from text you already have, reading a file or two, a single command, or "just in case". Prefer at most 3 background children in one turn.
+Default: do the work in this session. When Swarm is OFF, spawn only after an explicit user request and set spawnReason="user-requested". When Swarm is ON, autonomous splitting must set spawnReason="automatic" and provide qualification with at least two independent tool-heavy tracks, a concrete parallel benefit, per-track input/output/evidence contracts, and finalAggregation. The backend fails closed when this contract is incomplete. Do not spawn for ordinary Q&A, editing existing text, summarizing/classifying/extracting fields from text you already have, reading a file or two, a single command, or "just in case". The backend enforces at most 3 live children per parent, depth 2, and 12 live nodes per Swarm.
 
 When spawning, the 'prompt' parameter is required. Call help=true only if you need to pick a different connection or model.
 
@@ -490,7 +550,7 @@ Optional overrides: \`model\`, \`llmConnection\`, \`permissionMode\`, \`thinking
 
 \`thinkingLevel\` is silently ignored on non-reasoning models (e.g. gpt-4o, gemini-2.5-flash).
 
-The child appears in the session list (parentSessionId = this session).
+Children default to lifecycle="managed" and role="worker". Managed children participate in parent completion and explicit Swarm stop; lifecycle="detached" explicitly leaves both contracts. Workers are hidden from the ordinary session list but remain openable from run details.
 Only use 'attachments' for existing file paths on disk — the tool reads them automatically.`,
 
   send_developer_feedback: `Send freeform feedback to the Selection development team.
@@ -516,7 +576,7 @@ Requires an explicit sessionId and cannot target your own session. Use list_sess
 
   create_task: `Create a Selection Task on the kanban board — writes tasks/<slug>/task.yaml and creates its orchestrator session. CREATION ONLY: the task lands in "todo" and is NOT run.
 
-Provide title + description (the description becomes the task goal and the initial node prompt). Optional: acceptanceCriteria (verification rubric), sources / skills (workspace slugs), llmConnection + model, workingDirectory, projectId. When projectId is omitted, the task inherits the invoking session's project.
+Provide either title + description (single-node form) OR a full v2 spec (exclusive). Optional on the simple form: acceptanceCriteria, sources / skills, llmConnection + model, workingDirectory, projectId.
 
 Returns { slug, orchestratorSessionId, taskLabelId, warnings } — unknown source/skill slugs are reported as warnings, not errors. Use it only when the user asks to capture or queue work as a board task. Do not create a board task for one-off chat work. To execute immediately in chat, do the work yourself or (if the spawn bar is met) use spawn_session. To start this board task's Conductor DAG, call run_task with the returned slug.`,
 
@@ -524,13 +584,33 @@ Returns { slug, orchestratorSessionId, taskLabelId, warnings } — unknown sourc
 
 Provide slug (from create_task or the board) and/or orchestratorSessionId. Optional params are forwarded to the runner. waitForCompletion (default false) waits until the run is completed, failed, or stopped.
 
-Returns { slug, runId, status, nodeCount, nodes }. This does not create a task — use create_task first. Use only when the user asked to run a board task. Chat-time one-off work should be done in this session, or with spawn_session if the spawn bar is met — not create-then-run.`,
+Returns a typed snapshot { slug, runId, status, nodeCount, nodes }. Parameter errors are returned as tool errors. This does not create a task — use create_task first. Use only when the user asked to run a board task.`,
+
+  control_task_run: `Control an active Conductor run: pause, resume, stop, or continue.
+
+Approval, sensitive-parameter entry, and budget changes are user-only controls in the run details UI. Use only when the user asked to control a board task run. Stop here is "stop the Conductor run", not the background-task chip.`,
+
+  submit_task_definition: `Submit a structured v2 task spec instead of pasting YAML in chat.
+
+The server validates the spec. On errors, fix and submit again (generation allows at most two corrections).`,
 
   get_task_results: `Read a Conductor run's verdict and per-node outputs from disk.
 
 Provide slug. Optional runId selects a specific run; omit to read the latest. Works after restart — it does not require an in-memory run.
 
-Returns { slug, runId, runIds, verdict, verdicts, repair, runStatus, nodes }.`,
+Returns typed outputs, artifacts, revisions, verdicts, and per-node state.`,
+
+  submit_task_output: `Submit structured output for the current Conductor node.
+
+Required when the node declares outputs. Pass values matching the declared names. Optional text is a prose summary. Missing this call marks the node invalid.`,
+
+  submit_task_verdict: `Submit the Conductor verification verdict for the current run.
+
+Use result pass or fail. Fail may include reason and nodes to repair. Parent chat messages are never treated as a verdict.`,
+
+  submit_orchestration_patch: `Apply a restricted patch to the current orchestrate run.
+
+Requires runId, decisionId, baseRevision, and rationale. May add/update/cancel pending nodes. Cannot change running or finished nodes, task identity, budget, or raise permissions. Off unless CRAFT_FEATURE_TASKS_ORCHESTRATE is enabled.`,
 
   get_session_info: `Get metadata about the current session or a specific session by ID.
 
@@ -638,6 +718,11 @@ export const SESSION_TOOL_DEFS: SessionToolDef[] = [
   { name: 'create_task', description: TOOL_DESCRIPTIONS.create_task, inputSchema: CreateTaskSchema, executionMode: 'registry', safeMode: 'block', handler: handleCreateTask },
   { name: 'run_task', description: TOOL_DESCRIPTIONS.run_task, inputSchema: RunTaskSchema, executionMode: 'registry', safeMode: 'block', handler: handleRunTask },
   { name: 'get_task_results', description: TOOL_DESCRIPTIONS.get_task_results, inputSchema: GetTaskResultsSchema, executionMode: 'registry', safeMode: 'allow', readOnly: true, handler: handleGetTaskResults },
+  { name: 'submit_task_output', description: TOOL_DESCRIPTIONS.submit_task_output, inputSchema: SubmitTaskOutputSchema, executionMode: 'registry', safeMode: 'allow', handler: handleSubmitTaskOutput },
+  { name: 'submit_task_verdict', description: TOOL_DESCRIPTIONS.submit_task_verdict, inputSchema: SubmitTaskVerdictSchema, executionMode: 'registry', safeMode: 'allow', handler: handleSubmitTaskVerdict },
+  { name: 'submit_orchestration_patch', description: TOOL_DESCRIPTIONS.submit_orchestration_patch, inputSchema: SubmitOrchestrationPatchSchema, executionMode: 'registry', safeMode: 'allow', handler: handleSubmitOrchestrationPatch },
+  { name: 'submit_task_definition', description: TOOL_DESCRIPTIONS.submit_task_definition, inputSchema: SubmitTaskDefinitionSchema, executionMode: 'registry', safeMode: 'allow', handler: handleSubmitTaskDefinition },
+  { name: 'control_task_run', description: TOOL_DESCRIPTIONS.control_task_run, inputSchema: ControlTaskRunSchema, executionMode: 'registry', safeMode: 'block', handler: handleControlTaskRun },
   { name: 'get_session_info', description: TOOL_DESCRIPTIONS.get_session_info, inputSchema: GetSessionInfoSchema, executionMode: 'registry', safeMode: 'allow', readOnly: true, handler: handleGetSessionInfo },
   { name: 'list_sessions', description: TOOL_DESCRIPTIONS.list_sessions, inputSchema: ListSessionsSchema, executionMode: 'registry', safeMode: 'allow', readOnly: true, handler: handleListSessions },
   { name: 'list_background_tasks', description: TOOL_DESCRIPTIONS.list_background_tasks, inputSchema: ListBackgroundTasksSchema, executionMode: 'registry', safeMode: 'allow', readOnly: true, handler: handleListBackgroundTasks },

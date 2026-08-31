@@ -36,6 +36,10 @@ export const RPC_CHANNELS = {
     EVENT: 'session:event',
     GET_MODEL: 'session:getModel',
     SET_MODEL: 'session:setModel',
+    SET_SWARM_ENABLED: 'session:setSwarmEnabled',
+    GET_SWARM_RUN_DETAILS: 'session:getSwarmRunDetails',
+    UPDATE_SWARM_BUDGET: 'session:updateSwarmBudget',
+    STOP_SWARM: 'session:stopSwarm',
     GET_FILES: 'sessions:getFiles',
     GET_NOTES: 'sessions:getNotes',
     SET_NOTES: 'sessions:setNotes',
@@ -60,6 +64,7 @@ export const RPC_CHANNELS = {
     // Conductor — the Tasks DAG runner.
     VALIDATE: 'tasks:validate',
     CREATE: 'tasks:create',
+    SAVE: 'tasks:save',
     GENERATE: 'tasks:generate',
     // Push: the authored spec (or an error) for an async tasks:generate, keyed by orchestratorSessionId.
     GENERATED: 'tasks:generated',
@@ -67,10 +72,17 @@ export const RPC_CHANNELS = {
     PAUSE: 'tasks:pause',
     RESUME: 'tasks:resume',
     STOP: 'tasks:stop',
+    CONTINUE: 'tasks:continue',
+    RESPOND_APPROVAL: 'tasks:respondApproval',
+    UPDATE_RUN_LIMITS: 'tasks:updateRunLimits',
     GET: 'tasks:get',
     LIST: 'tasks:list',
+    LIST_RUNS: 'tasks:listRuns',
+    APPLY_RUN_REVISION: 'tasks:applyRunRevision',
     // Storage-backed read of a run's outcome (verdict + per-node output). Survives restart.
     GET_RESULTS: 'tasks:getResults',
+    // Push: full typed snapshot after every run/node/budget/approval/repair change.
+    RUN_CHANGED: 'tasks:runChanged',
   },
   workspaces: {
     GET: 'workspaces:get',

@@ -1,9 +1,10 @@
-import { getModelDisplayName, getModelShortName, getModelProvider } from '@config/models'
+import { getModelDisplayName, getModelShortName } from '@config/models'
 import { getProviderIcon } from '@/lib/provider-icons'
 import { cn } from '@/lib/utils'
+import { modelChipProvider } from './kanban-models'
 
 interface ModelChipProps {
-  /** Model id, e.g. 'claude-opus-4-7'. */
+  /** Model id, e.g. 'Laufry' or a registry id. */
   model: string
   /** Show the short name ("Haiku") instead of the full display name ("Haiku 4.5"). */
   short?: boolean
@@ -11,13 +12,14 @@ interface ModelChipProps {
 }
 
 /**
- * Read-only chip: provider brand icon + model name. Reuses the centralized
- * model registry (`@config/models`) and provider icon map so it can't drift
- * from the real model metadata.
+ * Read-only chip: optional provider mark + model name.
+ * Unknown aliases and leftover Anthropic registry ids stay unbranded — ORDER
+ * is wordmark-only, and inventing a Claude spark next to Laufry is wrong.
  */
 export function ModelChip({ model, short = false, className }: ModelChipProps) {
-  const provider = getModelProvider(model) ?? 'anthropic'
-  const iconUrl = getProviderIcon(provider)
+  if (!model) return null
+  const provider = modelChipProvider(model)
+  const iconUrl = provider ? getProviderIcon(provider) : null
   const label = short ? getModelShortName(model) : getModelDisplayName(model)
 
   return (

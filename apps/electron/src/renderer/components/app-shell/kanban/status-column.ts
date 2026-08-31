@@ -23,6 +23,17 @@ export const KANBAN_COLUMNS: readonly (KanbanColumnMeta & {
  * parked in In Progress). Kept as one small function so the mapping is trivial
  * to change when the wiring phase introduces real, user-defined statuses.
  */
+export function resolveBoardColumn(
+  statusId: string,
+  columns?: ReadonlyArray<{ id: string; dropStatusId?: string }> | null,
+): string | null {
+  if (columns && columns.length > 0) {
+    return columns.find((c) => c.dropStatusId === statusId)?.id ?? null
+  }
+  if (statusId === 'todo' || statusId === 'in-progress' || statusId === 'done') return statusId
+  return null
+}
+
 export function statusToColumn(statusId: string): KanbanColumnId {
   switch (statusId) {
     case 'in-progress':

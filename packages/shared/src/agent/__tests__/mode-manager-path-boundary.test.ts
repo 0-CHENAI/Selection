@@ -1,8 +1,9 @@
-import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
+import { describe, it, expect, beforeAll, beforeEach, afterEach } from 'bun:test';
 import { mkdtempSync, mkdirSync, rmSync, symlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { shouldAllowToolInMode, extractBashWriteTarget } from '../../agent/mode-manager.ts';
+import { setPowerShellValidatorRoot } from '../../agent/powershell-validator.ts';
 
 describe('mode-manager path containment for plans/data exceptions', () => {
   let base: string;
@@ -10,6 +11,12 @@ describe('mode-manager path containment for plans/data exceptions', () => {
   let dataDir: string;
   let siblingPlans: string;
   let siblingData: string;
+
+  beforeAll(() => {
+    // Production startup injects this resource root. The test must do the same
+    // explicitly instead of depending on another test or a desktop bootstrap.
+    setPowerShellValidatorRoot(join(import.meta.dir, '..'));
+  });
 
   beforeEach(() => {
     base = mkdtempSync(join(tmpdir(), 'craft-mode-boundary-test-'));
@@ -54,7 +61,7 @@ describe('mode-manager path containment for plans/data exceptions', () => {
       { plansFolderPath: plansDir, dataFolderPath: dataDir }
     );
     expect(result.allowed).toBe(false);
-  });
+  }, 15_000); // First Shell AST validation can exceed Bun's 5s default on a cold CI runner.
 
   it('allows Bash redirect inside data folder', () => {
     const result = shouldAllowToolInMode(

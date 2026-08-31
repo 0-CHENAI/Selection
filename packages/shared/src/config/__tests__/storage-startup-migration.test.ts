@@ -442,7 +442,7 @@ describe('legacy Opus migration to default Opus (integration)', () => {
     expect(migratedWsConfig.defaults.model).toBe('claude-opus-4-6')
   })
 
-  it('migrates workspace default Opus 4.7 to Opus 4.8', () => {
+  it('leaves workspace default Opus 4.7 unchanged', () => {
     const { configDir, workspaceRoot, configPath } = setupWorkspaceConfigDir()
     const wsConfigPath = join(workspaceRoot, 'config.json')
     const wsConfig = JSON.parse(readFileSync(wsConfigPath, 'utf-8'))
@@ -464,7 +464,32 @@ describe('legacy Opus migration to default Opus (integration)', () => {
     runMigration(configDir)
 
     const migratedWsConfig = JSON.parse(readFileSync(wsConfigPath, 'utf-8'))
-    expect(migratedWsConfig.defaults.model).toBe('claude-opus-4-8')
+    expect(migratedWsConfig.defaults.model).toBe('claude-opus-4-7')
+  })
+
+  it('leaves workspace default alias Opus unchanged', () => {
+    const { configDir, workspaceRoot, configPath } = setupWorkspaceConfigDir()
+    const wsConfigPath = join(workspaceRoot, 'config.json')
+    const wsConfig = JSON.parse(readFileSync(wsConfigPath, 'utf-8'))
+    wsConfig.defaults = { model: 'Opus' }
+    writeFileSync(wsConfigPath, JSON.stringify(wsConfig, null, 2), 'utf-8')
+
+    writeRootConfig(configPath, workspaceRoot, [
+      {
+        slug: 'order',
+        name: 'ORDER',
+        providerType: 'pi_compat',
+        authType: 'api_key',
+        createdAt: Date.now(),
+        models: ['Opus', 'Laufry'],
+        defaultModel: 'Opus',
+      },
+    ])
+
+    runMigration(configDir)
+
+    const migratedWsConfig = JSON.parse(readFileSync(wsConfigPath, 'utf-8'))
+    expect(migratedWsConfig.defaults.model).toBe('Opus')
   })
 
   it('keeps Pi Anthropic Opus 4.6 IDs unchanged', () => {
