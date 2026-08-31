@@ -61,7 +61,7 @@ describe('mode-manager path containment for plans/data exceptions', () => {
       { plansFolderPath: plansDir, dataFolderPath: dataDir }
     );
     expect(result.allowed).toBe(false);
-  });
+  }, 15_000); // First Shell AST validation can exceed Bun's 5s default on a cold CI runner.
 
   it('allows Bash redirect inside data folder', () => {
     const result = shouldAllowToolInMode(
