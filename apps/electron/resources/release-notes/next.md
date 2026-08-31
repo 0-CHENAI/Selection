@@ -18,7 +18,7 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 
 ## Bug Fixes
 
-- **All Sessions leaves project scope** — clicking All Sessions after browsing a project now clears the project-only filter and project highlight while preserving status, label, and grouping preferences, so the global list shows every conversation again. (#165)
+- **All Sessions leaves project scope** — browsing a project now highlights only that project instead of also highlighting All Sessions. Clicking All Sessions clears the project-only filter and restores the global highlight while preserving status, label, and grouping preferences, so the global list shows every conversation again. (#165)
 
 - **Custom-endpoint model limits stay distinct and selectable** — each model is a separate card, and the context / max-output menus open above the API setup overlay instead of appearing stuck closed. (#146)
 
