@@ -57,6 +57,8 @@ function getBuildDefines(): string[] {
     "MICROSOFT_OAUTH_CLIENT_SECRET",
     "SENTRY_ELECTRON_INGEST_URL",
     "CRAFT_DEV_RUNTIME",
+    "CRAFT_FEATURE_TASKS_ORCHESTRATE",
+    "CRAFT_SWARM_PREVIEW_BUILD",
   ];
 
   return definedVars.map((varName) => {

@@ -288,6 +288,14 @@ export function getModelById(modelId: string): ModelDefinition | undefined {
 }
 
 /**
+ * Exact / deprecated-id lookup only. Family aliases like ORDER's "Opus"
+ * must not be rewritten to `claude-opus-4-8`.
+ */
+export function resolveKnownRegistryModelId(modelId: string): string | undefined {
+  return getModelById(modelId)?.id;
+}
+
+/**
  * Get display name for a model ID (full name with version).
  */
 export function getModelDisplayName(modelId: string): string {
@@ -341,6 +349,13 @@ export function getModelContextWindow(modelId: string): number | undefined {
  * Default reserve is 16_384 (room for the model's reply).
  */
 export const COMPACTION_RESERVE_TOKENS = 16_384;
+export const SWARM_COMPACTION_TRIGGER_RATIO = 0.8;
+
+/** Reserve the final 20% so Pi compacts a Swarm agent at 80% of its own window. */
+export function swarmCompactionReserveTokens(contextWindow: number): number {
+  if (!Number.isFinite(contextWindow) || contextWindow <= 0) return 0;
+  return Math.max(1, Math.ceil(contextWindow * (1 - SWARM_COMPACTION_TRIGGER_RATIO)));
+}
 
 export function compactionTriggerTokens(
   contextWindow: number,

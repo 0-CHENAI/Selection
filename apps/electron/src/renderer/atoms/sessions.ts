@@ -87,6 +87,21 @@ export interface SessionMeta {
   taskNodeCount?: number
   /** Tasks Conductor: a generate-time draft orchestrator, hidden from the board until adopted by createTask. */
   taskDraft?: boolean
+  /** Per-session opt-in for autonomous Swarm delegation. Missing means disabled. */
+  swarmEnabled?: boolean
+  orchestrationId?: string
+  orchestrationRootSessionId?: string
+  orchestrationDepth?: number
+  /** Swarm lineage role. Worker and reviewer sessions stay out of ordinary session lists. */
+  orchestrationRole?: 'coordinator' | 'worker' | 'reviewer'
+  orchestrationLifecycle?: 'managed' | 'detached'
+  /** User-facing summary of the internal orchestration state. */
+  orchestrationStatus?: 'running' | 'completed' | 'need-to-check' | 'stopped'
+  /** Human-readable reason for a blocked orchestration. */
+  orchestrationBlocker?: string
+  /** Temporary Swarm usage, independent of DAG run accounting. */
+  orchestrationTokensUsed?: number
+  orchestrationTokenBudget?: number
 }
 
 /**

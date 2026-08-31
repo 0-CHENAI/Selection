@@ -656,7 +656,7 @@ describe('SAFE_MODE_CONFIG', () => {
   });
 
   it('should have display properties', () => {
-    expect(SAFE_MODE_CONFIG.displayName).toBe('Explore');
+    expect(SAFE_MODE_CONFIG.displayName).toBe('Read-only Explore');
     expect(SAFE_MODE_CONFIG.shortcutHint).toBe('SHIFT+TAB');
   });
 });
@@ -2000,13 +2000,22 @@ describe('unwrapPowerShellCommand', () => {
 
 describe('PowerShell plans folder exception', () => {
   const psAvailable = isPowerShellAvailable();
-  const plansFolderPath = 'C:\\Users\\test\\.craft-agent\\workspaces\\ws\\sessions\\s1\\plans';
+  const testRoot = join(tmpdir(), `mode-manager-powershell-plans-${process.pid}`);
+  const plansFolderPath = join(testRoot, 'plans');
+
+  beforeAll(() => {
+    mkdirSync(plansFolderPath, { recursive: true });
+  });
+
+  afterAll(() => {
+    rmSync(testRoot, { recursive: true, force: true });
+  });
 
   describe('should allow Out-File to plans folder', () => {
     it('allows Out-File with -FilePath to plans folder', () => {
       if (!psAvailable) return;
 
-      const command = `@('# Sample Plan','','## Goal','Test') | Out-File -FilePath '${plansFolderPath}\\sample-plan.md' -Encoding utf8`;
+      const command = `@('# Sample Plan','','## Goal','Test') | Out-File -FilePath '${join(plansFolderPath, 'sample-plan.md')}' -Encoding utf8`;
       const result = shouldAllowToolInMode(
         'Bash',
         { command },
@@ -2019,7 +2028,7 @@ describe('PowerShell plans folder exception', () => {
     it('allows Set-Content to plans folder', () => {
       if (!psAvailable) return;
 
-      const command = `'# Plan content' | Set-Content -Path '${plansFolderPath}\\plan.md'`;
+      const command = `'# Plan content' | Set-Content -Path '${join(plansFolderPath, 'plan.md')}'`;
       const result = shouldAllowToolInMode(
         'Bash',
         { command },
@@ -2034,7 +2043,7 @@ describe('PowerShell plans folder exception', () => {
     it('blocks Out-File to temp folder', () => {
       if (!psAvailable) return;
 
-      const command = `@('data') | Out-File -FilePath 'C:\\temp\\evil.txt' -Encoding utf8`;
+      const command = `@('data') | Out-File -FilePath '${join(testRoot, 'outside', 'evil.txt')}' -Encoding utf8`;
       const result = shouldAllowToolInMode(
         'Bash',
         { command },
@@ -2047,7 +2056,7 @@ describe('PowerShell plans folder exception', () => {
     it('blocks Set-Content outside plans folder', () => {
       if (!psAvailable) return;
 
-      const command = `'content' | Set-Content -Path 'C:\\Users\\test\\Desktop\\file.txt'`;
+      const command = `'content' | Set-Content -Path '${join(testRoot, 'outside', 'file.txt')}'`;
       const result = shouldAllowToolInMode(
         'Bash',
         { command },
@@ -2060,10 +2069,10 @@ describe('PowerShell plans folder exception', () => {
 
   describe('case-insensitive path matching on Windows', () => {
     it('allows write when path case differs from plansFolderPath', () => {
-      if (!psAvailable) return;
+      if (!psAvailable || process.platform !== 'win32') return;
 
-      // plansFolderPath uses lowercase 'test', command uses 'Test'
-      const command = `@('plan') | Out-File -FilePath 'C:\\Users\\Test\\.craft-agent\\workspaces\\ws\\sessions\\s1\\plans\\plan.md'`;
+      const differentlyCasedPath = `${plansFolderPath.toUpperCase()}\\plan.md`;
+      const command = `@('plan') | Out-File -FilePath '${differentlyCasedPath}'`;
       const result = shouldAllowToolInMode(
         'Bash',
         { command },

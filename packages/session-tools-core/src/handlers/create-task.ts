@@ -18,11 +18,17 @@ export async function handleCreateTask(
   if (!ctx.createTask) {
     return errorResponse('create_task is not available in this context.');
   }
-  if (!args.title?.trim()) {
-    return errorResponse('title is required.');
-  }
-  if (!args.description?.trim()) {
-    return errorResponse('description is required.');
+  if (args.spec) {
+    if (args.title?.trim() || args.description?.trim()) {
+      return errorResponse('spec is exclusive with title/description.');
+    }
+  } else {
+    if (!args.title?.trim()) {
+      return errorResponse('title is required.');
+    }
+    if (!args.description?.trim()) {
+      return errorResponse('description is required.');
+    }
   }
 
   try {

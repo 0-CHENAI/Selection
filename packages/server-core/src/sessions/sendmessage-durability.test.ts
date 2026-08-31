@@ -112,6 +112,22 @@ describe('sendMessage durability', () => {
     expect(onDiskAtAck).toBe(true)
   })
 
+  it('rejects explicit delegation instead of queueing its turn capability', async () => {
+    const sessionId = 'delegate-midstream'
+    const managed = buildSession(sessionId)
+    managed.isProcessing = true
+
+    await expect(sm.sendMessage(
+      sessionId,
+      'delegate this task',
+      undefined,
+      undefined,
+      { userAuthorizedSpawn: true },
+    )).rejects.toThrow('cannot be queued')
+    expect(managed.messageQueue).toHaveLength(0)
+    expect(managed.messages).toHaveLength(0)
+  })
+
   it('deduplicates a replayed normal send by its persisted client message id', async () => {
     const sessionId = 'idempotent-normal'
     const managed = buildSession(sessionId)

@@ -11,7 +11,7 @@
  * v1 PARSES BUT DEFERS: every other `kind` and the control-flow fields
  *   (`loop`, `when`, `route`, `for_each`, `aggregate`, `approval`, …). They are
  *   validated so hand-authored yaml round-trips, but the Conductor ignores them
- *   until P4. See sessions/.../tasks-architecture.md §5–§5a for the full design.
+ *   until a v2 save enables the executors. See ARCHITECTURE.md in this folder.
  *
  * Design note: the architecture draft used BOTH `type:` and `kind:` for a
  * node's role. We consolidate on a single `kind` discriminant (cleaner, avoids
@@ -47,6 +47,10 @@ export const OUTPUT_KINDS = ['param', 'artifact'] as const;
 export const RETRY_WHEN = ['error', 'empty', 'invalid'] as const;
 export const CACHE_MODES = ['pure', 'off'] as const;
 export const TASK_RUNNERS = ['conduct', 'orchestrate'] as const;
+
+/** DAG worker concurrency defaults/caps for the technical preview. */
+export const DEFAULT_DAG_MAX_PARALLEL = 4;
+export const MAX_DAG_MAX_PARALLEL = 8;
 
 // ---------------------------------------------------------------------------
 // Repair (verification-loop) bounds — SINGLE SOURCE OF TRUTH.
@@ -93,14 +97,8 @@ export const OutputDeclSchema = z.object({
   kind: z.enum(OUTPUT_KINDS).optional(),
   type: z.string().optional(),
   enum: z.array(z.string()).optional(),
-});
-
-/** Bounded loop control (Loop-Until-Done). `max` is mandatory — an unbounded loop burns tokens forever. */
-export const LoopSchema = z.object({
-  until: z.string().min(1),
-  max: z.number().int().positive(),
-  else: z.string().optional(),
-  carry: z.string().optional(),
+  required: z.boolean().optional(),
+  description: z.string().optional(),
 });
 
 export const RetrySchema = z.object({
@@ -112,7 +110,7 @@ export const RetrySchema = z.object({
       max: z.number().positive().optional(),
     })
     .optional(),
-  when: z.enum(RETRY_WHEN).optional(),
+  when: z.union([z.enum(RETRY_WHEN), z.array(z.enum(RETRY_WHEN))]).optional(),
 });
 
 export const TaskParamSchema = z.object({
@@ -120,6 +118,54 @@ export const TaskParamSchema = z.object({
   type: z.enum(PARAM_TYPES).optional(),
   default: z.unknown().optional(),
   enum: z.array(z.string()).optional(),
+  sensitive: z.boolean().optional(),
+});
+
+export const CONDITION_OPS = ['exists', 'eq', 'ne', 'gt', 'gte', 'lt', 'lte', 'contains', 'in'] as const;
+
+export type ConditionAst =
+  | { ref: string; op: (typeof CONDITION_OPS)[number]; value?: unknown }
+  | { all: ConditionAst[] }
+  | { any: ConditionAst[] }
+  | { not: ConditionAst };
+
+export const ConditionAstSchema: z.ZodType<ConditionAst> = z.lazy(() =>
+  z.union([
+    z.object({
+      ref: z.string().min(1),
+      op: z.enum(CONDITION_OPS),
+      value: z.unknown().optional(),
+    }).strict(),
+    z.object({ all: z.array(ConditionAstSchema).min(1) }).strict(),
+    z.object({ any: z.array(ConditionAstSchema).min(1) }).strict(),
+    z.object({ not: ConditionAstSchema }).strict(),
+  ]),
+);
+
+export const WhenSchema = z.union([z.string().min(1), ConditionAstSchema]);
+
+/** Bounded loop control (Loop-Until-Done). `max` is mandatory — an unbounded loop burns tokens forever. */
+export const LoopSchema = z.object({
+  until: WhenSchema,
+  max: z.number().int().positive(),
+  else: z.string().optional(),
+  carry: z.string().optional(),
+});
+
+export const UiLayoutSchema = z.object({
+  direction: z.enum(['TB', 'LR']).optional(),
+  nodes: z.record(z.string(), z.object({ x: z.number(), y: z.number() })).optional(),
+  viewport: z.object({ x: z.number(), y: z.number(), zoom: z.number() }).optional(),
+});
+
+export const RouteCaseSchema = z.object({
+  when: WhenSchema,
+  goto: slug('route target'),
+});
+
+export const RouteSchema = z.object({
+  cases: z.array(RouteCaseSchema).min(1),
+  default: slug('route default'),
 });
 
 export const TaskDefaultsSchema = z.object({
@@ -154,7 +200,7 @@ const TaskNodeObject = z.object({
   outputs: z.array(OutputDeclSchema).optional(),
 
   // Control-flow (parsed now, executed in P4).
-  when: z.string().optional(),
+  when: WhenSchema.optional(),
   trigger: z.enum(TRIGGER_RULES).optional(),
   replicas: z.number().int().positive().optional(),
   aggregate: z.enum(AGGREGATE_MODES).optional(),
@@ -165,6 +211,7 @@ const TaskNodeObject = z.object({
   timeout: z.number().positive().optional(),
   cache: z.enum(CACHE_MODES).optional(),
   approval: z.boolean().optional(),
+  route: RouteSchema.optional(),
 });
 
 /**
@@ -189,6 +236,7 @@ export const TaskNodeSchema = z.preprocess((raw) => {
 
 export const TaskSpecSchema = z
   .object({
+    schema_version: z.literal(2).optional(),
     id: slug('task id'),
     title: z.string().min(1),
     goal: z.string().min(1),
@@ -216,9 +264,11 @@ export const TaskSpecSchema = z
     nodes: z.array(TaskNodeSchema).min(1, 'A task must define at least one node'),
     /** Named task outputs → reference strings, e.g. { result: "${nodes.review.output}" }. */
     outputs: z.record(z.string(), z.string()).optional(),
+    ui: z.object({ layout: UiLayoutSchema.optional() }).optional(),
   })
   .superRefine((spec, ctx) => {
     const seen = new Set<string>();
+    const sessionLikeKinds = new Set(['session', 'orchestrator', 'map', 'loop', 'synthesize', 'verify', 'judge', 'finally']);
     spec.nodes.forEach((node, i) => {
       if (seen.has(node.id)) {
         ctx.addIssue({
@@ -228,12 +278,56 @@ export const TaskSpecSchema = z
         });
       }
       seen.add(node.id);
-      // v1 executes session nodes; they must carry a prompt.
-      if (node.kind === 'session' && (!node.prompt || node.prompt.trim() === '')) {
+      // v2 must not accept a model-backed node that can only execute as a
+      // successful no-op. v1 keeps its historical session-only requirement.
+      if (
+        (node.kind === 'session' || (spec.schema_version === 2 && sessionLikeKinds.has(node.kind)))
+        && (!node.prompt || node.prompt.trim() === '')
+      ) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
-          message: `Node "${node.id}" is a session node and must have a non-empty prompt`,
+          message: `Node "${node.id}" is model-backed and must have a non-empty prompt`,
           path: ['nodes', i, 'prompt'],
+        });
+      }
+      if (node.kind === 'loop' && !node.loop) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `Node "${node.id}" is a loop and must declare loop.max`,
+          path: ['nodes', i, 'loop'],
+        });
+      }
+      if (spec.schema_version === 2 && node.kind === 'route' && !node.route) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `Node "${node.id}" is a route and must declare cases plus a default`,
+          path: ['nodes', i, 'route'],
+        });
+      }
+      if (spec.schema_version === 2 && (node.kind === 'map' || node.kind === 'filter') && !node.for_each) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `Node "${node.id}" must declare for_each`,
+          path: ['nodes', i, 'for_each'],
+        });
+      }
+      if (spec.schema_version === 2 && node.aggregate === 'synthesize') {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `aggregate: synthesize is not a deterministic aggregate mode; use a separate synthesize node`,
+          path: ['nodes', i, 'aggregate'],
+        });
+      }
+      if (
+        spec.schema_version === 2
+        && node.timeout !== undefined
+        && node.kind !== 'approval'
+        && !sessionLikeKinds.has(node.kind)
+      ) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `Node "${node.id}" cannot use timeout because it does not dispatch a session or wait for approval`,
+          path: ['nodes', i, 'timeout'],
         });
       }
     });
@@ -246,6 +340,7 @@ export const TaskSpecSchema = z
 export type InputRef = z.infer<typeof InputRefSchema>;
 export type OutputDecl = z.infer<typeof OutputDeclSchema>;
 export type Loop = z.infer<typeof LoopSchema>;
+export type Route = z.infer<typeof RouteSchema>;
 export type Retry = z.infer<typeof RetrySchema>;
 export type TaskParam = z.infer<typeof TaskParamSchema>;
 export type TaskDefaults = z.infer<typeof TaskDefaultsSchema>;

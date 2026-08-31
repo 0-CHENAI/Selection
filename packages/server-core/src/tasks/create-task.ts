@@ -4,7 +4,7 @@
  * task.yaml + orchestrator parent session + reserved TASK label + spec sources.
  * Never starts a run — running is tasks:run / TaskRunner.
  */
-import { saveTaskSpec, type TaskSpec } from '@craft-agent/shared/tasks'
+import { saveTaskDocument, serializeTaskYaml, type TaskSpec } from '@craft-agent/shared/tasks'
 import { createLogger } from '@craft-agent/shared/utils'
 import type { ISessionManager } from '../handlers/session-manager-interface'
 
@@ -74,7 +74,9 @@ export async function createTaskFromSpec(
   spec: TaskSpec,
   opts?: { save?: boolean },
 ): Promise<CreateTaskFromSpecResult> {
-  if (opts?.save !== false) saveTaskSpec(workspaceRoot, spec)
+  if (opts?.save !== false) {
+    saveTaskDocument(workspaceRoot, serializeTaskYaml({ ...spec, schema_version: 2 }), null)
+  }
 
   const orchestrator = await sessionManager.createSession(workspaceId, {
     name: spec.title,

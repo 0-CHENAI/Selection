@@ -52,6 +52,7 @@ describe('PromptBuilder volatile/stable context split (issue #862)', () => {
 
     // session_state + source ride the volatile tail
     expect(volatileText).toContain('permissionMode:')
+    expect(volatileText).toContain('dataFolderPath: /tmp/data')
     expect(volatileText).toContain(SOURCE_BLOCK)
     // workspace capabilities is stable
     expect(stableText).toContain('<workspace_capabilities>')
@@ -62,6 +63,7 @@ describe('PromptBuilder volatile/stable context split (issue #862)', () => {
     expect(volatileText).not.toContain('<workspace_capabilities>')
     expect(volatileText).not.toContain('<available_skills>')
     expect(stableText).not.toContain('permissionMode:')
+    expect(stableText).not.toContain('/tmp/data')
   })
 
   it('does not inject the skill catalog for mini agents', () => {

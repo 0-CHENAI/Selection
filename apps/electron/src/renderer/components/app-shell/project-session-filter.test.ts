@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test'
 import type { FilterMode } from './inherited-filter-params'
-import { filterSessionsByProject } from './project-session-filter'
+import { filterSessionsByProject, hasIncludedProjectFilter } from './project-session-filter'
 
 const m = (...entries: [string, FilterMode][]) => new Map(entries)
 const sessions = [
@@ -11,6 +11,17 @@ const sessions = [
 
 const matchingIds = (filter: Map<string, FilterMode>) =>
   filterSessionsByProject(sessions, filter).map(session => session.id)
+
+describe('hasIncludedProjectFilter (#165)', () => {
+  it('treats an included project as the active sidebar child', () => {
+    expect(hasIncludedProjectFilter(m(['project-1', 'include']))).toBe(true)
+  })
+
+  it('keeps All Sessions active for empty or exclude-only project filters', () => {
+    expect(hasIncludedProjectFilter(m())).toBe(false)
+    expect(hasIncludedProjectFilter(m(['project-1', 'exclude']))).toBe(false)
+  })
+})
 
 describe('filterSessionsByProject (#149)', () => {
   it('shows only sessions bound to an included project', () => {

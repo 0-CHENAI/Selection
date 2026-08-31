@@ -83,7 +83,7 @@ import { getSessionPlansPath, getSessionPath } from '../../shared/src/sessions/s
 import { buildCallLlmRequest, withTimeout, LLM_QUERY_TIMEOUT_MS } from '../../shared/src/agent/llm-tool.ts';
 import type { LLMQueryRequest, LLMQueryResult } from '../../shared/src/agent/llm-tool.ts';
 import { PI_TOOL_NAME_MAP, THINKING_TO_PI } from '../../shared/src/agent/backend/pi/constants.ts';
-import { getDefaultSummarizationModel } from '../../shared/src/config/models.ts';
+import { getDefaultSummarizationModel, swarmCompactionReserveTokens } from '../../shared/src/config/models.ts';
 import { createWebFetchTool } from './tools/web-fetch.ts';
 import { resolveSearchProvider } from './tools/search/resolve-provider.ts';
 import { createSearchTool } from './tools/search/create-search-tool.ts';
@@ -136,6 +136,8 @@ interface InitMessage {
   branchFromSdkTurnId?: string;
   resumeSdkSessionId?: string;
   forceFreshSession?: boolean;
+  /** Swarm agents compact at 80% of their own model context window. */
+  swarmEnabled?: boolean;
   customEndpoint?: { api: CustomEndpointApi; supportsImages?: boolean };
   customModels?: Array<string | { id: string; contextWindow?: number; maxTokens?: number; supportsImages?: boolean }>;
   piAuth?: { provider: string; credential: PiCredential };
@@ -297,6 +299,7 @@ type OutboundMessage =
 
 let piSession: AgentSession | null = null;
 let piModelRegistry: PiModelRegistry | null = null;
+let piSettingsManager: PiSettingsManager | null = null;
 let moduleCredentialStore: InMemoryCredentialStore | null = null;
 type AuthenticatedRuntime = {
   modelRuntime: PiModelRuntime;
@@ -308,6 +311,20 @@ let unsubscribeEvents: (() => void) | null = null;
 
 // Init config (set on 'init' message)
 let initConfig: Extract<InboundMessage, { type: 'init' }> | null = null;
+
+function applySwarmCompactionOverride(model: { contextWindow?: number } | undefined): void {
+  if (!initConfig?.swarmEnabled || !piSettingsManager) return;
+  const contextWindow = model?.contextWindow ?? 0;
+  const reserveTokens = swarmCompactionReserveTokens(contextWindow);
+  if (reserveTokens <= 0) return;
+  piSettingsManager.applyOverrides({
+    compaction: {
+      enabled: true,
+      reserveTokens,
+    },
+  });
+  debugLog(`Swarm auto-compaction threshold configured at 80% (${reserveTokens} reserved of ${contextWindow})`);
+}
 
 // Mutable state
 let currentUserMessage = '';
@@ -724,7 +741,8 @@ async function ensureSession(): Promise<AgentSession> {
     const { agentDir, sessionDir } = resolvePiSessionPaths(initConfig.sessionPath, initConfig.agentDir);
     mkdirSync(agentDir, { recursive: true });
     sessionOptions.agentDir = agentDir;
-    sessionOptions.settingsManager = PiSettingsManager.create(cwd, agentDir);
+    piSettingsManager = PiSettingsManager.create(cwd, agentDir);
+    sessionOptions.settingsManager = piSettingsManager;
 
     // Session resume: use a per-Craft-session directory so the Pi SDK can
     // persist and resume its own session across subprocess restarts.
@@ -777,6 +795,8 @@ async function ensureSession(): Promise<AgentSession> {
   if (piThinkingLevel) {
     sessionOptions.thinkingLevel = piThinkingLevel;
   }
+
+  applySwarmCompactionOverride(sessionOptions.model);
 
   // Create the session — tools flow through customTools + allowlist (see comment above).
   const { session } = await createAgentSession(sessionOptions);
@@ -1474,6 +1494,7 @@ async function handleInit(msg: Extract<InboundMessage, { type: 'init' }>): Promi
   moduleCredentialStore = null;
   moduleRuntimePromise = null;
   piModelRegistry = null;
+  piSettingsManager = null;
   customEndpointModelIds = new Set();
   customModelOverrides.clear();
 
@@ -1801,6 +1822,7 @@ async function handleUpdateRuntimeConfig(msg: RuntimeConfigUpdateMessage): Promi
       }
 
       await piSession.setModel(piModel);
+      applySwarmCompactionOverride(piModel);
       setInterceptorApiHints(piModel as { api?: string; provider?: string; baseUrl?: string });
       debugLog(`[runtime_config] Updated runtime config and active model: ${piModel.provider}/${piModel.id}`);
     } else {
@@ -1840,6 +1862,7 @@ async function handleSetModel(msg: Extract<InboundMessage, { type: 'set_model' }
   }
   try {
     await piSession.setModel(piModel);
+    applySwarmCompactionOverride(piModel);
     setInterceptorApiHints(piModel as { api?: string; provider?: string; baseUrl?: string });
     if (initConfig) initConfig.model = msg.model;
     debugLog(`[set_model] Model changed to: ${msg.model} (resolved: ${piModel.provider}/${piModel.id})`);

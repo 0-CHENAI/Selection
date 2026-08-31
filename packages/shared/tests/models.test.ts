@@ -11,6 +11,7 @@ import {
   ANTHROPIC_MODELS,
   getModelIdByShortName,
   normalizeDeprecatedModelId,
+  resolveKnownRegistryModelId,
   compactionTriggerTokens,
   COMPACTION_RESERVE_TOKENS,
 } from '../src/config/models.ts';
@@ -108,6 +109,13 @@ describe('Opus registry', () => {
 
   it('resolves "Opus" shortName to 4.8', () => {
     expect(getModelIdByShortName('Opus')).toBe('claude-opus-4-8');
+  });
+
+  it('does not rewrite family aliases to Claude ids', () => {
+    expect(resolveKnownRegistryModelId('Opus')).toBeUndefined();
+    expect(resolveKnownRegistryModelId('Laufry')).toBeUndefined();
+    expect(resolveKnownRegistryModelId('claude-opus-4-8')).toBe('claude-opus-4-8');
+    expect(resolveKnownRegistryModelId('claude-opus-4-7')).toBe('claude-opus-4-7');
   });
 
   it('normalizes deprecated Opus IDs to Opus 4.8 without migrating Opus 4.7 or 4.6', () => {

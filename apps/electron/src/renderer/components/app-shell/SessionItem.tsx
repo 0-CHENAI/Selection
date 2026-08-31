@@ -13,6 +13,7 @@ import { CompactSessionMenu } from "./CompactSessionMenu"
 import { SessionStatusIcon } from "./SessionStatusIcon"
 import { SessionBadges } from "./SessionBadges"
 import { SessionProjectColorWrapper } from "./SessionProjectColorWrapper"
+import { OrchestrationStatusBadge } from "./OrchestrationStatusBadge"
 import { hasTransferTargets } from "./transfer-targets"
 import { useProjectColorTreatment } from "@/hooks/useProjectColorTreatment"
 import { getSessionTitle, getSessionPreviewText, highlightMatch, hasUnreadMeta, shortTimeLocale } from "@/utils/session"
@@ -23,6 +24,7 @@ import type { SessionMeta } from "@/atoms/sessions"
 import { messagingBindingsBySessionAtom } from "@/atoms/messaging"
 import { useAtomValue } from "jotai"
 import { extractLabelId } from "@craft-agent/shared/labels"
+import { deriveOrchestrationDisplayState } from '@/lib/swarm-session'
 
 const PLATFORM_PILL: Record<'telegram' | 'whatsapp', { label: string; colorClass: string }> = {
   telegram: {
@@ -88,6 +90,14 @@ export function SessionItem({
     : undefined
   const projectColor = boundProject?.color
   const projectName = boundProject?.name
+  const orchestrationDisplayState = deriveOrchestrationDisplayState(item.orchestrationStatus)
+  const orchestrationStatus = (
+    <OrchestrationStatusBadge
+      status={item.orchestrationStatus}
+      blocker={item.orchestrationBlocker}
+      compact
+    />
+  )
 
   const handleClick = (e: React.MouseEvent) => {
     ctx.onFocusZone()
@@ -214,8 +224,9 @@ export function SessionItem({
       titleClassName={cn("text-[13px]", item.isAsyncOperationOngoing && "animate-shimmer-text")}
       subtitle={previewText}
       titleSuffix={
-        (projectName || hasMessagingBinding) ? (
+        (orchestrationDisplayState || projectName || hasMessagingBinding) ? (
           <div className="flex items-center gap-1">
+            {orchestrationStatus}
             {projectName && (
               <span
                 className="text-[11px] text-foreground/40 whitespace-nowrap truncate max-w-[120px] opacity-0 group-hover:opacity-100 transition-opacity duration-150"

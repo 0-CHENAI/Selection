@@ -14,6 +14,7 @@ import { toast } from 'sonner'
 import { useActiveWorkspace, useAppShellContext } from '@/context/AppShellContext'
 import { navigate, routes } from '@/lib/navigate'
 import { sessionMetaMapAtom } from '@/atoms/sessions'
+import { isOrdinarySessionVisible } from '@/lib/swarm-session'
 import {
   Info_Page,
   Info_Section,
@@ -39,7 +40,7 @@ export default function ProjectInfoPage({ projectSlug }: ProjectInfoPageProps) {
   const workspace = useActiveWorkspace()
   const workspaceId = workspace?.id
   const sessionMetaMap = useAtomValue(sessionMetaMapAtom)
-  const { onCreateSession } = useAppShellContext()
+  const { onCreateSession, onOpenFile } = useAppShellContext()
 
   const [project, setProject] = useState<LoadedProject | null>(null)
   const [loading, setLoading] = useState(true)
@@ -113,7 +114,7 @@ export default function ProjectInfoPage({ projectSlug }: ProjectInfoPageProps) {
     if (!project) return []
     const result: { id: string; name: string }[] = []
     for (const meta of sessionMetaMap.values()) {
-      if ((meta as { projectId?: string }).projectId === project.config.id) {
+      if (isOrdinarySessionVisible(meta) && meta.projectId === project.config.id) {
         result.push({ id: meta.id, name: meta.name ?? meta.id })
       }
     }
@@ -402,7 +403,7 @@ export default function ProjectInfoPage({ projectSlug }: ProjectInfoPageProps) {
                     <TooltipTrigger asChild>
                       <button
                         type="button"
-                        onClick={() => window.electronAPI.openFile(project.folderPath)}
+                        onClick={() => onOpenFile(project.folderPath)}
                         className="shrink-0 inline-flex h-6 w-6 items-center justify-center rounded text-foreground/50 hover:text-foreground hover:bg-foreground/5 transition-colors"
                         aria-label={t('projectInfo.openLocation')}
                       >

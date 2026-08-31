@@ -3,6 +3,16 @@ import type { SessionFilter } from '../../../shared/types'
 /** Filter mode for tri-state filtering: include shows only matching, exclude hides matching. */
 export type FilterMode = 'include' | 'exclude'
 
+/**
+ * Remove a project-scoped list filter while preserving the view's other
+ * secondary filters and display preferences.
+ */
+export function clearProjectFilter<T extends { projects?: Record<string, FilterMode> }>(
+  entry: T,
+): Omit<T, 'projects'> & { projects: Record<string, FilterMode> } {
+  return { ...entry, projects: {} }
+}
+
 export interface InheritedNewSessionParams {
   status?: string
   label?: string

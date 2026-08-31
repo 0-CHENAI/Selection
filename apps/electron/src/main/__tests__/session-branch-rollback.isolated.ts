@@ -15,6 +15,11 @@ let mockedProvider: 'anthropic' | 'pi' = 'anthropic'
 // Partial-mock baseline: import real modules via file paths (avoids recursive mock imports)
 const actualSharedAgentModule = await import('../../../../../packages/shared/src/agent/index.ts')
 const actualSharedAgentBackendModule = await import('../../../../../packages/shared/src/agent/backend/index.ts')
+const actualSharedConfigModule = await import('../../../../../packages/shared/src/config/index.ts')
+const actualSharedWorkspacesModule = await import('../../../../../packages/shared/src/workspaces/index.ts')
+const actualConfigDefaults = await Bun.file(
+  new URL('../../../resources/config-defaults.json', import.meta.url),
+).json()
 
 mock.module('electron', () => ({
   app: {
@@ -57,10 +62,13 @@ mock.module('../logger', () => {
 })
 
 mock.module('@craft-agent/shared/config', () => ({
+  ...actualSharedConfigModule,
   getWorkspaceByNameOrId: (id: string) => (id === workspace.id ? workspace : null),
   getWorkspaces: () => [workspace],
   loadConfigDefaults: () => ({
+    ...actualConfigDefaults,
     workspaceDefaults: {
+      ...actualConfigDefaults.workspaceDefaults,
       permissionMode: 'ask',
       thinkingLevel: 'medium',
     },
@@ -110,6 +118,7 @@ mock.module('@craft-agent/shared/config', () => ({
 }))
 
 mock.module('@craft-agent/shared/workspaces', () => ({
+  ...actualSharedWorkspacesModule,
   loadWorkspaceConfig: () => ({
     defaults: {
       permissionMode: 'ask',

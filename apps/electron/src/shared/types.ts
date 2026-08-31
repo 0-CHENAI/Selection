@@ -184,11 +184,16 @@ import type {
   TaskValidationResultDto,
   TaskCreateRequest,
   TaskCreateResult,
+  TaskSaveRequest,
+  TaskSaveResult,
+  TaskRespondApprovalRequest,
+  TaskUpdateRunLimitsRequest,
   TaskGenerateRequest,
   TaskGenerateAck,
   TaskGenerateResult,
   TaskRunRequest,
   TaskRunSnapshotDto,
+  TaskControlResultDto,
   TaskGetResult,
   TaskResultsDto,
   FileAttachment,
@@ -239,16 +244,23 @@ export interface ElectronAPI {
   // Tasks (Conductor)
   validateTask(workspaceId: string, yaml: string): Promise<TaskValidationResultDto>
   createTask(workspaceId: string, req: TaskCreateRequest): Promise<TaskCreateResult>
+  saveTask(workspaceId: string, req: TaskSaveRequest): Promise<TaskSaveResult>
   generateTask(workspaceId: string, req: TaskGenerateRequest): Promise<TaskGenerateAck>
   /** Async generate result (or error), keyed by orchestratorSessionId. Subscribe before/after generateTask. */
   onTaskGenerated(callback: (workspaceId: string, result: TaskGenerateResult) => void): () => void
   runTask(workspaceId: string, req: TaskRunRequest): Promise<TaskRunSnapshotDto>
-  pauseTask(workspaceId: string, slug: string, runId: string): Promise<void>
-  resumeTask(workspaceId: string, slug: string, runId: string): Promise<void>
-  stopTask(workspaceId: string, slug: string, runId: string): Promise<void>
+  pauseTask(workspaceId: string, slug: string, runId: string): Promise<TaskControlResultDto>
+  resumeTask(workspaceId: string, slug: string, runId: string): Promise<TaskControlResultDto>
+  stopTask(workspaceId: string, slug: string, runId: string): Promise<TaskControlResultDto>
+  continueTask(workspaceId: string, slug: string, runId: string): Promise<TaskControlResultDto>
+  respondTaskApproval(workspaceId: string, req: TaskRespondApprovalRequest): Promise<TaskControlResultDto>
+  updateTaskRunLimits(workspaceId: string, req: TaskUpdateRunLimitsRequest): Promise<TaskControlResultDto>
   getTask(workspaceId: string, slug: string, runId?: string): Promise<TaskGetResult>
   listTasks(workspaceId: string): Promise<string[]>
+  listTaskRuns(workspaceId: string, slug: string): Promise<string[]>
+  applyTaskRunRevision(workspaceId: string, req: import('@craft-agent/shared/protocol').TaskApplyRunRevisionRequest): Promise<import('@craft-agent/shared/protocol').TaskApplyRunRevisionResult>
   getTaskResults(workspaceId: string, slug: string, runId?: string): Promise<TaskResultsDto>
+  onTaskRunChanged(callback: (workspaceId: string, snapshot: TaskRunSnapshotDto) => void): () => void
 
   respondToPermission(sessionId: string, requestId: string, allowed: boolean, alwaysAllow: boolean, options?: PermissionResponseOptions): Promise<boolean>
   respondToCredential(sessionId: string, requestId: string, response: CredentialResponse): Promise<boolean>
@@ -447,6 +459,10 @@ export interface ElectronAPI {
   // Session-specific model (overrides global)
   getSessionModel(sessionId: string, workspaceId: string): Promise<string | null>
   setSessionModel(sessionId: string, workspaceId: string, model: string | null, connection?: string): Promise<void>
+  setSessionSwarmEnabled(sessionId: string, enabled: boolean): Promise<void>
+  getSessionSwarmRunDetails(sessionId: string, workspaceId: string): Promise<import('@craft-agent/shared/protocol').SwarmRunDetailsDto | null>
+  updateSessionSwarmBudget(sessionId: string, tokenBudget: number): Promise<void>
+  stopSessionSwarm(sessionId: string): Promise<{ stoppedSessionIds: string[]; detachedSessionIds: string[] }>
 
   // Workspace Settings (per-workspace configuration)
   getWorkspaceSettings(workspaceId: string): Promise<WorkspaceSettings | null>

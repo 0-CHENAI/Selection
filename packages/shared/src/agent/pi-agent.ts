@@ -636,6 +636,7 @@ export class PiAgent extends BaseAgent {
       baseUrl: runtime.baseUrl,
       customEndpoint: runtime.customEndpoint,
       customModels: runtime.customModels,
+      swarmEnabled: this.config.session?.swarmEnabled === true,
       // Branch params for Pi SDK session fork
       branchFromSdkSessionId: this.config.session?.branchFromSdkSessionId,
       branchFromSessionPath: this.config.session?.branchFromSessionPath,
@@ -2405,6 +2406,7 @@ export class PiAgent extends BaseAgent {
         // their registered tool schemas. Keep the prompt aligned with the strict,
         // provider-neutral schemas registered by pi-agent-server.
         false,
+        this.config.session?.swarmEnabled === true,
       );
 
       // Build context from sources
