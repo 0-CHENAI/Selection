@@ -23,4 +23,5 @@ export {
   takeSubmittedDefinition,
   extractYamlFromModelText,
   resolveGeneratedYaml,
+  validateSubmittedDefinition,
 } from './submitted-definitions';

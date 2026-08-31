@@ -85,14 +85,14 @@ import {
 } from '@craft-agent/shared/sessions'
 import { loadWorkspaceSources, loadAllSources, getSourcesBySlugs, isSourceUsable, type LoadedSource, type McpServerConfig, getSourcesNeedingAuth, getSourceCredentialManager, getSourceServerBuilder, type SourceWithCredential, isApiOAuthProvider, hasRenewEndpoint, SERVER_BUILD_ERRORS, TokenRefreshManager, createTokenGetter } from '@craft-agent/shared/sources'
 import { listTaskSlugs, parseTaskSpec, parseTaskYaml, serializeTaskYaml, uniqueTaskSlug, loadTaskResults } from '@craft-agent/shared/tasks'
-import { createTaskFromSpec, resolveCreateTaskProjectId, rememberSubmittedDefinition, type TaskRunner } from '../tasks'
+import { createTaskFromSpec, resolveCreateTaskProjectId, rememberSubmittedDefinition, validateSubmittedDefinition, type TaskRunner } from '../tasks'
 import {
   assessSpawnQualification,
   assessSwarmSpawnLimits,
   buildBackgroundTaskNudge,
   buildManagedSwarmNudge,
-  mapCompletionReasonToTaskStatus,
   countRunningSpawnChildren,
+  recoverPersistedSwarmStatus,
   resolveInheritedSwarmEnabled,
   shouldDeferSpawnWake,
   shouldOrphanBackgroundTask,
@@ -2227,9 +2227,46 @@ export class SessionManager implements ISessionManager {
         }
       }
 
+      this.recoverPersistedSwarmSessions()
+
       sessionLog.info(`Loaded ${totalSessions} sessions from disk (metadata only)`)
     } catch (error) {
       sessionLog.error('Failed to load sessions from disk:', error)
+    }
+  }
+
+  private recoverPersistedSwarmSessions(): void {
+    // Agent subprocesses do not survive an application restart. Persisted
+    // `running` Swarm metadata must therefore never be presented as live.
+    // Rebuild the parent registry as blocked history, but do not wake or
+    // automatically re-dispatch any session during startup.
+    const recoveredAt = Date.now()
+    for (const managed of this.sessions.values()) {
+      const recovered = recoverPersistedSwarmStatus(managed.orchestrationStatus)
+      if (!managed.orchestrationId || !recovered) continue
+      managed.orchestrationStatus = recovered.status
+      managed.orchestrationBlocker = recovered.blocker
+      const parent = managed.parentSessionId ? this.sessions.get(managed.parentSessionId) : undefined
+      if (parent) {
+        parent.backgroundTaskRegistry.set(managed.id, {
+          taskId: managed.id,
+          intent: managed.name ?? managed.id,
+          startTime: managed.createdAt ?? recoveredAt,
+          completedAt: recoveredAt,
+          status: 'failed',
+          source: 'spawn_session',
+          orchestrationId: managed.orchestrationId,
+          rootSessionId: managed.orchestrationRootSessionId,
+          parentSessionId: parent.id,
+          depth: managed.orchestrationDepth,
+          role: managed.orchestrationRole,
+          lifecycle: managed.orchestrationLifecycle,
+          projectId: managed.projectId,
+          blocker: recovered.blocker,
+        })
+      }
+      this.setMetadataWriteGuard(managed)
+      this.persistSession(managed)
     }
   }
 
@@ -4623,7 +4660,7 @@ export class SessionManager implements ISessionManager {
         submitOrchestrationPatchFn: async (input) => {
           const runner = this.taskRunnerLookup?.(managed.workspace.id)
           if (!runner) throw new Error('Task runner is not available')
-          const snap = runner.applyOrchestrationPatchByRunId(input.runId, {
+          const snap = runner.applyOrchestrationPatchByRunId(managed.id, input.runId, {
             runId: input.runId,
             decisionId: input.decisionId,
             baseRevision: input.baseRevision,
@@ -4636,30 +4673,21 @@ export class SessionManager implements ISessionManager {
           return { status: snap.status, revision: snap.revision }
         },
         submitTaskDefinitionFn: async (input) => {
-          const parsed = parseTaskSpec({ ...(input.spec as object), schema_version: 2 })
-          if (!parsed.success) {
-            return { valid: false, errors: parsed.error.issues.map((i) => i.message) }
-          }
-          const yaml = serializeTaskYaml(parsed.data)
-          const graph = parseTaskYaml(yaml)
-          if (!graph.valid) {
-            return { valid: false, errors: graph.errors.map((e) => `${e.path}: ${e.message}`) }
-          }
-          rememberSubmittedDefinition(managed.id, yaml)
-          return { valid: true, yaml }
+          const submitted = validateSubmittedDefinition(input.spec)
+          if (!submitted.valid) return submitted
+          rememberSubmittedDefinition(managed.id, submitted.yaml)
+          return submitted
         },
         controlTaskRunFn: async (input) => {
           const runner = this.taskRunnerLookup?.(managed.workspace.id)
           if (!runner) throw new Error('Task runner is not available')
           try {
+            runner.assertRunCoordinator(managed.id, input.slug, input.runId)
             const snap =
               input.action === 'pause' ? runner.pause(input.slug, input.runId)
               : input.action === 'resume' ? runner.resume(input.slug, input.runId)
               : input.action === 'stop' ? await runner.stop(input.slug, input.runId)
-              : input.action === 'continue' ? runner.continue(input.slug, input.runId)
-              : input.action === 'approve' ? runner.respondApproval(input.slug, input.runId, input.nodeId ?? '', true)
-              : input.action === 'reject' ? runner.respondApproval(input.slug, input.runId, input.nodeId ?? '', false)
-              : runner.updateRunLimits(input.slug, input.runId, input.tokenBudget, input.params)
+              : runner.continue(input.slug, input.runId)
             return { status: snap.status }
           } catch (err) {
             return { status: 'failed', conflict: err instanceof Error ? err.message : String(err) }
@@ -8129,6 +8157,16 @@ export class SessionManager implements ISessionManager {
     const turn = this.swarmTurnCompletions.get(session.id)
     const children = this.getManagedSwarmChildren(session.id)
       .filter(child => child.orchestrationId === session.orchestrationId)
+    // A background child can finish its own "dispatch" turn before its managed
+    // descendants settle. Keep the coordinator non-terminal until the direct
+    // child has been reported terminal in the parent's registry and the
+    // aggregation nudge has produced a new coordinator turn.
+    const childIds = new Set(children.map(child => child.id))
+    const hasUnreportedManagedChild = Array.from(session.backgroundTaskRegistry.values()).some(info =>
+      info.source === 'spawn_session'
+      && info.status === 'running'
+      && childIds.has(info.taskId)
+    )
     const budgetOwner = this.sessions.get(session.orchestrationRootSessionId ?? session.id) ?? session
     const budget = budgetOwner.orchestrationTokenBudget
     const tokensUsed = budgetOwner.orchestrationTokensUsed ?? 0
@@ -8161,6 +8199,7 @@ export class SessionManager implements ISessionManager {
       })
     } else if (turn) {
       if (turn.reason === 'complete') {
+        if (hasUnreportedManagedChild) return
         this.updateOrchestrationMetadata(session, {
           orchestrationStatus: 'completed',
           orchestrationBlocker: undefined,
@@ -8190,7 +8229,7 @@ export class SessionManager implements ISessionManager {
     const managed = this.sessions.get(evt.sessionId)
     if (!managed?.orchestrationId) return false
     if (managed.orchestrationStatus !== 'running') return false
-    const eventKey = `${evt.sessionId}:${evt.finalMessageId ?? `${evt.reason}:${evt.finalText ?? ''}`}`
+    const eventKey = `${evt.sessionId}:${evt.finalMessageId ?? `${managed.processingGeneration}:${evt.reason}:${evt.finalText ?? ''}`}`
     if (this.processedSwarmCompletionEvents.has(eventKey)) return false
     this.processedSwarmCompletionEvents.add(eventKey)
     // This guard is intentionally bounded; terminal child state remains the
@@ -8387,6 +8426,18 @@ export class SessionManager implements ISessionManager {
         isParentInterrupted: () =>
           managed.stopRequested === true || managed.processingGeneration !== parentGeneration,
         subscribe: (listener) => this.onSessionComplete(listener),
+        acceptCompletion: () => childManaged?.orchestrationStatus !== 'running',
+        getTerminalOutcome: () => {
+          if (!childManaged || childManaged.orchestrationStatus === 'running') return undefined
+          const completion = this.swarmTurnCompletions.get(childManaged.id)
+          if (childManaged.orchestrationStatus === 'completed') {
+            return { status: 'completed', finalText: completion?.finalText }
+          }
+          if (childManaged.orchestrationStatus === 'stopped') {
+            return { status: 'interrupted', finalText: childManaged.orchestrationBlocker ?? completion?.finalText }
+          }
+          return { status: 'failed', finalText: childManaged.orchestrationBlocker ?? completion?.finalText }
+        },
         onAttach: (settle) => { settleWait = settle },
       })
       this.sendMessage(session.id, request.prompt, fileAttachments).catch(err => {
@@ -8405,12 +8456,42 @@ export class SessionManager implements ISessionManager {
         })
       })
       const outcome = await outcomeP
-      this.emitSessionAgentEvent(managed, 'SubagentStop', {
-        hook_event_name: 'SubagentStop',
-        agent_id: session.id,
-        agent_type: 'spawn_session',
-        ...(outcome.status === 'failed' && outcome.finalText ? { error: outcome.finalText } : {}),
-      })
+      // A wait timeout/interruption does not stop the child. Promote it into
+      // the same durable parent registry used by background mode so a late
+      // terminal result is surfaced exactly once instead of disappearing.
+      const promotedToBackground = (
+        outcome.status === 'timeout' || outcome.status === 'interrupted'
+      ) && childManaged?.orchestrationStatus === 'running'
+      if (promotedToBackground) {
+        const intent = (request.name?.trim() || request.prompt.trim().slice(0, 80)) || session.id
+        await this.processEvent(managed, {
+          type: 'task_backgrounded',
+          toolUseId: `spawn:${session.id}`,
+          taskId: session.id,
+          intent,
+        })
+        const registered = managed.backgroundTaskRegistry.get(session.id)
+        if (registered) {
+          Object.assign(registered, {
+            source: 'spawn_session' as const,
+            orchestrationId,
+            rootSessionId,
+            parentSessionId: managed.id,
+            depth: parentDepth + 1,
+            role,
+            lifecycle,
+            projectId: managed.projectId,
+          })
+        }
+      }
+      if (!promotedToBackground) {
+        this.emitSessionAgentEvent(managed, 'SubagentStop', {
+          hook_event_name: 'SubagentStop',
+          agent_id: session.id,
+          agent_type: 'spawn_session',
+          ...(outcome.status === 'failed' && outcome.finalText ? { error: outcome.finalText } : {}),
+        })
+      }
       return {
         ...baseResult,
         status: outcome.status,
@@ -8475,6 +8556,25 @@ export class SessionManager implements ISessionManager {
       })
       return
     }
+    const blockedChild = children.find(child =>
+      child.orchestrationStatus === 'need-to-check' || child.orchestrationStatus === 'stopped'
+    )
+    if (
+      blockedChild
+      || managed.orchestrationStatus === 'need-to-check'
+      || managed.orchestrationStatus === 'stopped'
+    ) {
+      if (managed.orchestrationStatus !== 'stopped') {
+        this.updateOrchestrationMetadata(managed, {
+          orchestrationStatus: 'need-to-check',
+          orchestrationBlocker: managed.orchestrationBlocker
+            ?? blockedChild?.orchestrationBlocker
+            ?? `Managed child ${blockedChild?.id ?? 'unknown'} did not complete successfully`,
+        })
+      }
+      this.reportManagedChildTerminal(managed)
+      return
+    }
     this.updateOrchestrationMetadata(managed, {
       orchestrationStatus: 'running',
       orchestrationBlocker: undefined,
@@ -8494,7 +8594,69 @@ export class SessionManager implements ISessionManager {
     })
     void this.sendMessage(managed.id, nudge, [], [], { hidden: true }).catch((err) => {
       sessionLog.error(`[swarm-lifecycle] failed to surface settled Swarm ${orchestrationId}:`, err)
+      this.updateOrchestrationMetadata(managed, {
+        orchestrationStatus: 'need-to-check',
+        orchestrationBlocker: `Failed to start Swarm aggregation: ${err instanceof Error ? err.message : String(err)}`,
+      })
+      this.reportManagedChildTerminal(managed)
     })
+  }
+
+  /**
+   * Report a managed child's terminal *subtree* exactly once. A coordinator's
+   * own completion event is not enough: it stays `running` while descendants or
+   * a required aggregation turn remain outstanding.
+   */
+  private reportManagedChildTerminal(child: ManagedSession): void {
+    const orchestrationId = child.orchestrationId
+    if (!orchestrationId) return
+    if (
+      child.orchestrationStatus !== 'completed'
+      && child.orchestrationStatus !== 'need-to-check'
+      && child.orchestrationStatus !== 'stopped'
+    ) return
+    const parentId = child.parentSessionId
+    if (!parentId) return
+    const parent = this.sessions.get(parentId)
+    if (!parent) return
+    const running = parent.backgroundTaskRegistry.get(child.id)
+    if (!running || running.source !== 'spawn_session' || running.status !== 'running') return
+
+    const completion = this.swarmTurnCompletions.get(child.id)
+    running.status = child.orchestrationStatus === 'completed'
+      ? 'completed'
+      : child.orchestrationStatus === 'stopped'
+        ? 'stopped'
+        : 'failed'
+    running.completedAt = Date.now()
+    if (running.status !== 'completed') {
+      running.blocker = child.orchestrationBlocker
+        ?? completion?.finalText
+        ?? `Spawned session subtree ended with ${child.orchestrationStatus}`
+    }
+    parent.backgroundTaskOutputs.set(child.id, {
+      outputFile: '',
+      summary: completion?.finalText ?? '',
+      status: running.status,
+      completedAt: running.completedAt,
+    })
+    this.taskOutputIndex.set(child.id, parent.id)
+    this.emitSessionAgentEvent(parent, 'SubagentStop', {
+      hook_event_name: 'SubagentStop',
+      agent_id: child.id,
+      agent_type: 'spawn_session',
+      ...(running.status !== 'completed' && running.blocker ? { error: running.blocker } : {}),
+    })
+    if (child.orchestrationLifecycle === 'detached') return
+
+    const siblings = this.getManagedSwarmChildren(parent.id)
+      .filter(candidate => candidate.orchestrationId === orchestrationId)
+    if (siblings.some(candidate => candidate.orchestrationStatus === 'running')) return
+    if (parent.isProcessing) {
+      parent.pendingSwarmWakeOrchestrationIds.add(orchestrationId)
+    } else {
+      this.surfaceManagedSwarmWake(parent, orchestrationId)
+    }
   }
 
   private flushDeferredSpawnWakes(managed: ManagedSession): void {
@@ -8528,40 +8690,7 @@ export class SessionManager implements ISessionManager {
     const child = this.sessions.get(evt.sessionId)
     if (!child?.orchestrationId) return
     if (!this.recordSwarmCompletion(evt)) return
-    const parentId = child?.parentSessionId
-    if (!child || !parentId) return
-    const parent = this.sessions.get(parentId)
-    if (!parent) return
-    const running = parent.backgroundTaskRegistry.get(child.id)
-    if (!running || running.source !== 'spawn_session' || running.status !== 'running') return
-    running.status = mapCompletionReasonToTaskStatus(evt.reason)
-    running.completedAt = Date.now()
-    if (evt.reason !== 'complete') {
-      running.blocker = evt.finalText || `Spawned session ended with ${evt.reason}`
-    }
-    parent.backgroundTaskOutputs.set(child.id, {
-      outputFile: '',
-      summary: evt.finalText ?? '',
-      status: running.status,
-      completedAt: running.completedAt,
-    })
-    this.taskOutputIndex.set(child.id, parent.id)
-    this.emitSessionAgentEvent(parent, 'SubagentStop', {
-      hook_event_name: 'SubagentStop',
-      agent_id: child.id,
-      agent_type: 'spawn_session',
-      ...(evt.reason !== 'complete' && evt.finalText ? { error: evt.finalText } : {}),
-    })
-    if (child.orchestrationLifecycle === 'detached') return
-
-    const siblings = this.getManagedSwarmChildren(parent.id)
-      .filter(candidate => candidate.orchestrationId === child.orchestrationId)
-    if (siblings.some(candidate => candidate.orchestrationStatus === 'running')) return
-    if (parent.isProcessing) {
-      parent.pendingSwarmWakeOrchestrationIds.add(child.orchestrationId)
-    } else {
-      this.surfaceManagedSwarmWake(parent, child.orchestrationId)
-    }
+    this.reportManagedChildTerminal(child)
   }
 
   private findTaskOrchestratorSessionId(workspaceId: string, slug: string): string | undefined {

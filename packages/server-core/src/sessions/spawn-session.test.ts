@@ -28,6 +28,7 @@ type SpawnInternals = {
   stopSwarm: SessionManager['stopSwarm']
   updateSessionSwarmEnabled: SessionManager['updateSessionSwarmEnabled']
   updateSwarmTokenBudget: SessionManager['updateSwarmTokenBudget']
+  recoverPersistedSwarmSessions: () => void
 }
 
 function internals(sm: SessionManager): SpawnInternals {
@@ -131,6 +132,40 @@ describe('SessionManager spawn_session wait/background', () => {
     parallelBenefit: 'The tracks are independent.',
     finalAggregation: 'The coordinator reconciles both evidence sets.',
   }
+
+  it('recovers persisted running Swarms as need-to-check and rebuilds the parent registry', () => {
+    const parent = buildParent()
+    Object.assign(parent, {
+      orchestrationId: 'orch-restart',
+      orchestrationRootSessionId: parent.id,
+      orchestrationDepth: 0,
+      orchestrationRole: 'coordinator' as const,
+      orchestrationLifecycle: 'managed' as const,
+      orchestrationStatus: 'running' as const,
+    })
+    const child = createManagedSession({
+      id: 'restart-child',
+      name: 'Restart child',
+      parentSessionId: parent.id,
+      orchestrationId: 'orch-restart',
+      orchestrationRootSessionId: parent.id,
+      orchestrationDepth: 1,
+      orchestrationRole: 'worker',
+      orchestrationLifecycle: 'managed',
+      orchestrationStatus: 'running',
+    }, parent.workspace, { messagesLoaded: true })
+    internals(sm).sessions.set(child.id, child)
+
+    internals(sm).recoverPersistedSwarmSessions()
+
+    expect(parent.orchestrationStatus).toBe('need-to-check')
+    expect(child.orchestrationStatus).toBe('need-to-check')
+    expect(parent.backgroundTaskRegistry.get(child.id)).toMatchObject({
+      status: 'failed',
+      source: 'spawn_session',
+      blocker: expect.stringContaining('application restart'),
+    })
+  })
 
   it('blocks automatic spawning while disabled and fails closed on incomplete qualification', async () => {
     const parent = buildParent()
@@ -364,6 +399,14 @@ describe('SessionManager spawn_session wait/background', () => {
         orchestrationStatus: 'running',
       }, parent.workspace, { messagesLoaded: true })
       internals(sm).sessions.set(id, child)
+      parent.backgroundTaskRegistry.set(id, {
+        taskId: id,
+        startTime: Date.now(),
+        status: 'running',
+        source: 'spawn_session',
+        orchestrationId: 'orch',
+        lifecycle: 'managed',
+      })
     }
 
     internals(sm).emitSessionComplete({
@@ -376,7 +419,214 @@ describe('SessionManager spawn_session wait/background', () => {
     emitChild('complete', 'a', 'child-a')
     expect(parent.orchestrationStatus).toBe('running')
     emitChild('complete', 'b', 'child-b')
+    expect(internals(sm).sessions.get(parent.id)?.orchestrationStatus).toBe('running')
+    expect(parent.pendingSwarmWakeOrchestrationIds).toEqual(new Set(['orch']))
+
+    parent.isProcessing = false
+    internals(sm).flushDeferredSpawnWakes(parent)
+    expect(sendCalls.filter(call => call.id === parent.id)).toHaveLength(1)
+    expect(parent.orchestrationStatus).toBe('running')
+
+    internals(sm).emitSessionComplete({
+      sessionId: parent.id,
+      workspaceId: parent.workspace.id,
+      reason: 'complete',
+      finalMessageId: 'parent-aggregate-final',
+      finalText: 'aggregated',
+    })
     expect(internals(sm).sessions.get(parent.id)?.orchestrationStatus).toBe('completed')
+  })
+
+  it('waits for a nested coordinator aggregation before reporting its subtree terminal', () => {
+    const root = buildParent('root')
+    root.isProcessing = false
+    root.orchestrationId = 'orch-nested'
+    root.orchestrationRootSessionId = root.id
+    root.orchestrationDepth = 0
+    root.orchestrationLifecycle = 'managed'
+    root.orchestrationStatus = 'running'
+
+    const coordinator = createManagedSession({
+      id: 'coordinator',
+      parentSessionId: root.id,
+      orchestrationId: 'orch-nested',
+      orchestrationRootSessionId: root.id,
+      orchestrationDepth: 1,
+      orchestrationLifecycle: 'managed',
+      orchestrationRole: 'coordinator',
+      orchestrationStatus: 'running',
+    }, root.workspace, { messagesLoaded: true })
+    coordinator.isProcessing = false
+    const grandchild = createManagedSession({
+      id: 'grandchild',
+      parentSessionId: coordinator.id,
+      orchestrationId: 'orch-nested',
+      orchestrationRootSessionId: root.id,
+      orchestrationDepth: 2,
+      orchestrationLifecycle: 'managed',
+      orchestrationRole: 'worker',
+      orchestrationStatus: 'running',
+    }, root.workspace, { messagesLoaded: true })
+    grandchild.isProcessing = false
+    internals(sm).sessions.set(coordinator.id, coordinator)
+    internals(sm).sessions.set(grandchild.id, grandchild)
+    root.backgroundTaskRegistry.set(coordinator.id, {
+      taskId: coordinator.id,
+      startTime: Date.now(),
+      status: 'running',
+      source: 'spawn_session',
+      orchestrationId: 'orch-nested',
+      lifecycle: 'managed',
+    })
+    coordinator.backgroundTaskRegistry.set(grandchild.id, {
+      taskId: grandchild.id,
+      startTime: Date.now(),
+      status: 'running',
+      source: 'spawn_session',
+      orchestrationId: 'orch-nested',
+      lifecycle: 'managed',
+    })
+
+    internals(sm).emitSessionComplete({
+      sessionId: coordinator.id,
+      workspaceId: root.workspace.id,
+      reason: 'complete',
+      finalMessageId: 'coordinator-dispatch',
+      finalText: 'worker started',
+    })
+    expect(root.backgroundTaskRegistry.get(coordinator.id)?.status).toBe('running')
+
+    emitChild('complete', 'leaf result', grandchild.id)
+    emitChild('complete', 'leaf result', grandchild.id)
+    expect(coordinator.orchestrationStatus).toBe('running')
+    expect(root.backgroundTaskRegistry.get(coordinator.id)?.status).toBe('running')
+    expect(sendCalls.filter(call => call.id === coordinator.id)).toHaveLength(1)
+
+    internals(sm).emitSessionComplete({
+      sessionId: coordinator.id,
+      workspaceId: root.workspace.id,
+      reason: 'complete',
+      finalMessageId: 'coordinator-aggregate',
+      finalText: 'nested aggregate',
+    })
+    expect(coordinator.orchestrationStatus).toBe('completed')
+    expect(root.backgroundTaskRegistry.get(coordinator.id)?.status).toBe('completed')
+    expect(root.orchestrationStatus).toBe('running')
+    expect(sendCalls.filter(call => call.id === root.id)).toHaveLength(1)
+
+    internals(sm).emitSessionComplete({
+      sessionId: root.id,
+      workspaceId: root.workspace.id,
+      reason: 'complete',
+      finalMessageId: 'root-aggregate',
+      finalText: 'root aggregate',
+    })
+    expect(internals(sm).sessions.get(root.id)?.orchestrationStatus).toBe('completed')
+  })
+
+  it('wait mode does not resolve on a nested coordinator dispatch turn', async () => {
+    const parent = buildParent()
+    stubCreateChild('coordinator')
+    const pending = internals(sm).spawnSessionFromTool(parent, {
+      prompt: 'Coordinate nested work',
+      mode: 'wait',
+      spawnReason: 'user-requested',
+      timeoutMs: 2_000,
+      role: 'coordinator',
+    })
+    await flush()
+    sendCalls.length = 0
+    const coordinator = internals(sm).sessions.get('coordinator')!
+    coordinator.isProcessing = false
+    const grandchild = createManagedSession({
+      id: 'wait-grandchild',
+      parentSessionId: coordinator.id,
+      orchestrationId: coordinator.orchestrationId,
+      orchestrationRootSessionId: parent.id,
+      orchestrationDepth: 2,
+      orchestrationLifecycle: 'managed',
+      orchestrationRole: 'worker',
+      orchestrationStatus: 'running',
+    }, parent.workspace, { messagesLoaded: true })
+    internals(sm).sessions.set(grandchild.id, grandchild)
+    coordinator.backgroundTaskRegistry.set(grandchild.id, {
+      taskId: grandchild.id,
+      startTime: Date.now(),
+      status: 'running',
+      source: 'spawn_session',
+      orchestrationId: coordinator.orchestrationId,
+      lifecycle: 'managed',
+    })
+
+    let settled = false
+    void pending.then(() => { settled = true })
+    internals(sm).emitSessionComplete({
+      sessionId: coordinator.id,
+      workspaceId: parent.workspace.id,
+      reason: 'complete',
+      finalMessageId: 'dispatch-turn',
+      finalText: 'worker launched',
+    })
+    await flush()
+    expect(settled).toBe(false)
+
+    emitChild('complete', 'leaf result', grandchild.id)
+    await flush()
+    expect(settled).toBe(false)
+    expect(sendCalls.filter(call => call.id === coordinator.id)).toHaveLength(1)
+
+    internals(sm).emitSessionComplete({
+      sessionId: coordinator.id,
+      workspaceId: parent.workspace.id,
+      reason: 'complete',
+      finalMessageId: 'aggregate-turn',
+      finalText: 'nested aggregate',
+    })
+    await expect(pending).resolves.toMatchObject({
+      sessionId: coordinator.id,
+      status: 'completed',
+      finalText: 'nested aggregate',
+    })
+  })
+
+  it('keeps a blocked child and its parent need-to-check without sending an aggregation wake', async () => {
+    const parent = buildParent()
+    parent.isProcessing = false
+    stubCreateChild()
+    await internals(sm).spawnSessionFromTool(parent, {
+      prompt: 'Find auth flows',
+      mode: 'background',
+      spawnReason: 'user-requested',
+    })
+
+    emitChild('error', 'worker failed')
+    emitChild('error', 'worker failed')
+
+    expect(internals(sm).sessions.get('child')?.orchestrationStatus).toBe('need-to-check')
+    expect(parent.backgroundTaskRegistry.get('child')?.status).toBe('failed')
+    expect(parent.orchestrationStatus).toBe('need-to-check')
+    expect(parent.orchestrationBlocker).toContain('worker failed')
+    expect(sendCalls.filter(call => call.id === parent.id)).toHaveLength(0)
+  })
+
+  it('moves the coordinator to need-to-check when the aggregation nudge cannot be sent', async () => {
+    const parent = buildParent()
+    parent.isProcessing = false
+    stubCreateChild()
+    await internals(sm).spawnSessionFromTool(parent, {
+      prompt: 'Find auth flows',
+      mode: 'background',
+      spawnReason: 'user-requested',
+    })
+    internals(sm).sendMessage = async (id) => {
+      if (id === parent.id) throw new Error('aggregation rejected')
+    }
+
+    emitChild('complete', 'worker result')
+    await flush()
+
+    expect(parent.orchestrationStatus).toBe('need-to-check')
+    expect(parent.orchestrationBlocker).toContain('aggregation rejected')
   })
 
   it('prevents a child from enabling Swarm while its parent is disabled', async () => {
@@ -433,6 +683,11 @@ describe('SessionManager spawn_session wait/background', () => {
     expect(result.status).toBe('timeout')
     expect(result.sessionId).toBe('child')
     expect(internals(sm).sessions.get('child')?.isProcessing).toBe(true)
+    expect(parent.backgroundTaskRegistry.get('child')?.status).toBe('running')
+    emitChild('complete', 'late result')
+    await flush()
+    expect(parent.backgroundTaskRegistry.get('child')?.status).toBe('completed')
+    expect(parent.pendingSwarmWakeOrchestrationIds.size).toBe(1)
   })
 
   it('parent abort returns interrupted and does not stop the child', async () => {
@@ -448,6 +703,7 @@ describe('SessionManager spawn_session wait/background', () => {
     parent.stopRequested = true
     await expect(pending).resolves.toMatchObject({ sessionId: 'child', status: 'interrupted' })
     expect(internals(sm).sessions.get('child')?.isProcessing).toBe(true)
+    expect(parent.backgroundTaskRegistry.get('child')?.status).toBe('running')
   })
 
   it('background registers the child, lists it, and does not orphan it', async () => {

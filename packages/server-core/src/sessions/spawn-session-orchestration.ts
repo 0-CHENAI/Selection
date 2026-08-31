@@ -241,6 +241,17 @@ export function countRunningSpawnChildren(input: {
   return ids.size
 }
 
+export function recoverPersistedSwarmStatus(status: string | undefined): {
+  status: 'need-to-check'
+  blocker: string
+} | undefined {
+  if (status !== 'running') return undefined
+  return {
+    status: 'need-to-check',
+    blocker: 'Swarm execution was interrupted by an application restart; review the run before continuing.',
+  }
+}
+
 export function buildBackgroundTaskNudge(opts: {
   status: string
   taskId: string
@@ -300,6 +311,10 @@ export async function waitForChildSessionCompletion(opts: {
   timeoutMs: number
   isParentInterrupted: () => boolean
   subscribe: (listener: (evt: SpawnCompletionEvent) => void) => () => void
+  /** Coordinators may emit an ordinary turn completion while descendants still run. */
+  acceptCompletion?: (evt: SpawnCompletionEvent) => boolean
+  /** Lets descendant-driven subtree failure settle a wait without another coordinator turn. */
+  getTerminalOutcome?: () => SpawnWaitOutcome | undefined
   onAttach?: (settle: (result: SpawnWaitOutcome) => void) => void
 }): Promise<SpawnWaitOutcome> {
   return new Promise((resolve) => {
@@ -323,6 +338,7 @@ export async function waitForChildSessionCompletion(opts: {
 
     unsub = opts.subscribe((evt) => {
       if (evt.sessionId !== opts.childSessionId) return
+      if (opts.acceptCompletion && !opts.acceptCompletion(evt)) return
       finish({
         status: mapCompletionReasonToSpawnStatus(evt.reason),
         finalText: evt.finalText,
@@ -334,6 +350,11 @@ export async function waitForChildSessionCompletion(opts: {
     }, opts.timeoutMs)
 
     poll = setInterval(() => {
+      const terminal = opts.getTerminalOutcome?.()
+      if (terminal) {
+        finish(terminal)
+        return
+      }
       if (opts.isParentInterrupted()) {
         finish({ status: 'interrupted' })
       }

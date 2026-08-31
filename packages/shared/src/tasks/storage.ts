@@ -25,12 +25,21 @@ const RUNS_DIR = 'runs';
 const RUN_LOG = 'run-log.jsonl';
 const RUN_STATE = 'run-state.json';
 const NODES_DIR = 'nodes';
+const TASK_SEGMENT_RE = /^[a-z0-9][a-z0-9-]*$/;
+const RUN_SEGMENT_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
+
+function assertPathSegment(value: string, kind: 'task' | 'run'): void {
+  const valid = kind === 'task' ? TASK_SEGMENT_RE.test(value) : RUN_SEGMENT_RE.test(value) && !value.includes('..');
+  if (!valid) throw new Error(`Invalid ${kind} id "${value}"`);
+}
 
 export interface RunStateCheckpoint {
   seq: number;
   revision: number;
   tokensUsed: number;
   tokenBudget?: number;
+  /** Resolved non-sensitive run params. Sensitive values are never checkpointed. */
+  params?: Record<string, unknown>;
   seenDecisionIds: string[];
   invalidPatchCount: number;
 }
@@ -124,12 +133,14 @@ export function tasksRoot(workspaceRoot: string): string {
   return join(workspaceRoot, TASKS_DIR);
 }
 export function taskDir(workspaceRoot: string, slug: string): string {
+  assertPathSegment(slug, 'task');
   return join(workspaceRoot, TASKS_DIR, slug);
 }
 export function taskYamlPath(workspaceRoot: string, slug: string): string {
   return join(taskDir(workspaceRoot, slug), TASK_FILE);
 }
 export function runDir(workspaceRoot: string, slug: string, runId: string): string {
+  assertPathSegment(runId, 'run');
   return join(taskDir(workspaceRoot, slug), RUNS_DIR, runId);
 }
 

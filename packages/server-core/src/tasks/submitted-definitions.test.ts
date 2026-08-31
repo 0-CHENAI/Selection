@@ -3,6 +3,7 @@ import {
   extractYamlFromModelText,
   rememberSubmittedDefinition,
   resolveGeneratedYaml,
+  validateSubmittedDefinition,
 } from './submitted-definitions.ts';
 
 describe('resolveGeneratedYaml', () => {
@@ -19,5 +20,27 @@ describe('resolveGeneratedYaml', () => {
   it('extracts fenced YAML when nothing was submitted', () => {
     expect(extractYamlFromModelText('```yaml\nid: fenced\n```')).toBe('id: fenced');
     expect(extractYamlFromModelText('id: bare')).toBe('id: bare');
+  });
+
+  it('rejects unknown v2 fields before permissive schema parsing can strip them', () => {
+    const invalid = validateSubmittedDefinition({
+      id: 'strict',
+      title: 'Strict',
+      goal: 'g',
+      token_buget: 100,
+      nodes: [{ id: 'work', prompt: 'work' }],
+    });
+    expect(invalid.valid).toBe(false);
+    if (!invalid.valid) expect(invalid.errors.join('\n')).toContain('token_buget');
+
+    const valid = validateSubmittedDefinition({
+      id: 'strict',
+      title: 'Strict',
+      goal: 'g',
+      token_budget: 100,
+      nodes: [{ id: 'work', prompt: 'work' }],
+    });
+    expect(valid.valid).toBe(true);
+    if (valid.valid) expect(valid.yaml).toContain('schema_version: 2');
   });
 });

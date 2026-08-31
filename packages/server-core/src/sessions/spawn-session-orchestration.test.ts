@@ -6,6 +6,7 @@ import {
   countLiveSwarmChildren,
   countLiveSwarmNodes,
   countRunningSpawnChildren,
+  recoverPersistedSwarmStatus,
   mapCompletionReasonToSpawnStatus,
   mapCompletionReasonToTaskStatus,
   resolveInheritedSwarmEnabled,
@@ -16,6 +17,14 @@ import {
 } from './spawn-session-orchestration.ts'
 
 describe('spawn-session orchestration helpers', () => {
+  it('marks persisted running Swarms as interrupted instead of restoring ghost workers', () => {
+    expect(recoverPersistedSwarmStatus('completed')).toBeUndefined()
+    expect(recoverPersistedSwarmStatus('running')).toEqual({
+      status: 'need-to-check',
+      blocker: expect.stringContaining('application restart'),
+    })
+  })
+
   it('inherits the Swarm switch for children and branches while preserving explicit overrides', () => {
     expect(resolveInheritedSwarmEnabled({})).toBe(false)
     expect(resolveInheritedSwarmEnabled({ parent: true })).toBe(true)

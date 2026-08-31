@@ -2,9 +2,12 @@ import { isTasksOrchestrateEnabled } from '../feature-flags.ts';
 import { TaskNodeSchema, type TaskNode, type TaskSpec } from './schema.ts';
 import { TASK_CAPS, validateTaskSpec } from './validate.ts';
 import type { NodeRunState } from './storage.ts';
+import { v2UnknownFields } from './document.ts';
 
 export const MAX_SPEC_REVISIONS = 8;
 export const MAX_INVALID_PATCHES = 2;
+
+export type TaskNodePatch = Partial<TaskNode> & Pick<TaskNode, 'id'>;
 
 const PERM_RANK: Record<string, number> = { safe: 0, ask: 1, 'allow-all': 2 };
 
@@ -14,8 +17,13 @@ export interface OrchestrationPatch {
   baseRevision: number;
   rationale: string;
   add?: TaskNode[];
-  update?: TaskNode[];
+  update?: TaskNodePatch[];
   cancel?: string[];
+  /**
+   * Legacy terminal values remain decodable so the validator can reject an old
+   * payload deterministically. New typed callers use the narrower session-tool
+   * input and schema (`continue | pause`).
+   */
   action?: 'continue' | 'pause' | 'complete' | 'fail';
 }
 
@@ -34,7 +42,7 @@ export interface PatchOk {
   spec: TaskSpec;
   revision: number;
   cancelled: string[];
-  action?: OrchestrationPatch['action'];
+  action?: 'continue' | 'pause';
 }
 
 export interface PatchErr {
@@ -71,6 +79,12 @@ export function validateOrchestrationPatch(patch: OrchestrationPatch, ctx: Patch
   if (ctx.seenDecisionIds.has(patch.decisionId)) return fail(ctx, 'decisionId replayed');
   if (patch.baseRevision !== ctx.revision) return fail(ctx, 'stale revision');
   if (ctx.revision + 1 >= MAX_SPEC_REVISIONS) return fail(ctx, 'revision cap exceeded');
+  // Keep a runtime guard for older/untyped callers even though the public type
+  // and tool schema expose scheduling controls only.
+  const rawAction = (patch as { action?: unknown }).action;
+  if (rawAction !== undefined && rawAction !== 'continue' && rawAction !== 'pause') {
+    return fail(ctx, `action ${String(rawAction)} cannot bypass node settlement and the final structured verdict`);
+  }
 
   const byId = new Map(ctx.spec.nodes.map((n) => [n.id, n]));
   const nextNodes = ctx.spec.nodes.map((n) => ({ ...n }));
@@ -83,18 +97,35 @@ export function validateOrchestrationPatch(patch: OrchestrationPatch, ctx: Patch
     if (!byId.has(id)) return fail(ctx, `cannot cancel unknown node ${id}`);
   }
 
-  for (const raw of [...(patch.add ?? []), ...(patch.update ?? [])]) {
+  const normalized = new Map<string, TaskNode>();
+  for (const raw of patch.add ?? []) {
+    const unknown = v2UnknownFields({ ...ctx.spec, schema_version: 2, nodes: [raw] });
+    if (unknown.length) return fail(ctx, unknown.map((issue) => issue.message).join('; '));
     const parsed = TaskNodeSchema.safeParse(raw);
     if (!parsed.success) return fail(ctx, parsed.error.issues.map((i) => i.message).join('; '));
+    normalized.set(parsed.data.id, parsed.data);
   }
 
-  for (const node of patch.update ?? []) {
+  for (const raw of patch.update ?? []) {
+    const unknown = v2UnknownFields({ ...ctx.spec, schema_version: 2, nodes: [raw] });
+    if (unknown.length) return fail(ctx, unknown.map((issue) => issue.message).join('; '));
+    const id = typeof raw.id === 'string' ? raw.id : '';
+    const existing = byId.get(id);
+    if (!existing) return fail(ctx, `cannot update unknown node ${id || '<missing id>'}`);
+    // Updates are partial records. Parse the merged node so schema defaults do
+    // not silently replace an existing non-session kind.
+    const parsed = TaskNodeSchema.safeParse({ ...existing, ...raw });
+    if (!parsed.success) return fail(ctx, parsed.error.issues.map((i) => i.message).join('; '));
+    normalized.set(parsed.data.id, parsed.data);
+  }
+
+  for (const raw of patch.update ?? []) {
+    const node = normalized.get(raw.id)!;
     const state = ctx.nodeStates[node.id] ?? 'pending';
     if (TERMINAL_OR_LIVE.has(state) && state !== 'pending' && state !== 'ready') {
       return fail(ctx, `cannot update ${node.id} in state ${state}`);
     }
     const idx = nextNodes.findIndex((n) => n.id === node.id);
-    if (idx < 0) return fail(ctx, `cannot update unknown node ${node.id}`);
     if (!permissionAllowed(node.permissionMode, ceiling)) {
       return fail(ctx, `node ${node.id} permission exceeds task ceiling`);
     }
@@ -107,7 +138,8 @@ export function validateOrchestrationPatch(patch: OrchestrationPatch, ctx: Patch
     nextNodes[idx] = { ...nextNodes[idx], ...node };
   }
 
-  for (const node of patch.add ?? []) {
+  for (const raw of patch.add ?? []) {
+    const node = normalized.get(raw.id)!;
     if (byId.has(node.id) || nextNodes.some((n) => n.id === node.id)) {
       return fail(ctx, `cannot add duplicate node ${node.id}`);
     }
@@ -129,7 +161,13 @@ export function validateOrchestrationPatch(patch: OrchestrationPatch, ctx: Patch
   if (!graph.valid) return fail(ctx, graph.errors.map((e) => e.message).join('; '));
   if (remaining.length > TASK_CAPS.maxNodes) return fail(ctx, 'node cap exceeded');
 
-  return { ok: true, spec: next, revision: ctx.revision + 1, cancelled, action: patch.action };
+  return {
+    ok: true,
+    spec: next,
+    revision: ctx.revision + 1,
+    cancelled,
+    action: rawAction as 'continue' | 'pause' | undefined,
+  };
 }
 
 function permissionAllowed(mode: string | undefined, ceiling: string): boolean {

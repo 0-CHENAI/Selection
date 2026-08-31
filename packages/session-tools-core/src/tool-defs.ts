@@ -266,10 +266,7 @@ export const SubmitTaskDefinitionSchema = z.object({
 export const ControlTaskRunSchema = z.object({
   slug: z.string(),
   runId: z.string(),
-  action: z.enum(['pause', 'resume', 'stop', 'continue', 'approve', 'reject', 'updateLimits']),
-  nodeId: z.string().optional(),
-  tokenBudget: z.number().optional(),
-  params: z.record(z.string(), z.unknown()).optional(),
+  action: z.enum(['pause', 'resume', 'stop', 'continue']),
 });
 
 export const SubmitOrchestrationPatchSchema = z.object({
@@ -280,7 +277,7 @@ export const SubmitOrchestrationPatchSchema = z.object({
   add: z.array(z.record(z.string(), z.unknown())).optional().describe('Pending nodes to add'),
   update: z.array(z.record(z.string(), z.unknown())).optional().describe('Pending nodes to update'),
   cancel: z.array(z.string()).optional().describe('Pending node ids to cancel'),
-  action: z.enum(['continue', 'pause', 'complete', 'fail']).optional(),
+  action: z.enum(['continue', 'pause']).optional(),
 });
 
 export const SubmitTaskVerdictSchema = z.object({
@@ -585,9 +582,9 @@ Provide slug (from create_task or the board) and/or orchestratorSessionId. Optio
 
 Returns a typed snapshot { slug, runId, status, nodeCount, nodes }. Parameter errors are returned as tool errors. This does not create a task — use create_task first. Use only when the user asked to run a board task.`,
 
-  control_task_run: `Control an active Conductor run: pause, resume, stop, continue, approve/reject a node, or updateLimits.
+  control_task_run: `Control an active Conductor run: pause, resume, stop, or continue.
 
-Use only when the user asked to control a board task run. Stop here is "stop the Conductor run", not the background-task chip.`,
+Approval, sensitive-parameter entry, and budget changes are user-only controls in the run details UI. Use only when the user asked to control a board task run. Stop here is "stop the Conductor run", not the background-task chip.`,
 
   submit_task_definition: `Submit a structured v2 task spec instead of pasting YAML in chat.
 

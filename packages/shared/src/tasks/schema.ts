@@ -268,6 +268,7 @@ export const TaskSpecSchema = z
   })
   .superRefine((spec, ctx) => {
     const seen = new Set<string>();
+    const sessionLikeKinds = new Set(['session', 'orchestrator', 'map', 'loop', 'synthesize', 'verify', 'judge', 'finally']);
     spec.nodes.forEach((node, i) => {
       if (seen.has(node.id)) {
         ctx.addIssue({
@@ -277,11 +278,15 @@ export const TaskSpecSchema = z
         });
       }
       seen.add(node.id);
-      // v1 executes session nodes; they must carry a prompt.
-      if (node.kind === 'session' && (!node.prompt || node.prompt.trim() === '')) {
+      // v2 must not accept a model-backed node that can only execute as a
+      // successful no-op. v1 keeps its historical session-only requirement.
+      if (
+        (node.kind === 'session' || (spec.schema_version === 2 && sessionLikeKinds.has(node.kind)))
+        && (!node.prompt || node.prompt.trim() === '')
+      ) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
-          message: `Node "${node.id}" is a session node and must have a non-empty prompt`,
+          message: `Node "${node.id}" is model-backed and must have a non-empty prompt`,
           path: ['nodes', i, 'prompt'],
         });
       }
@@ -290,6 +295,39 @@ export const TaskSpecSchema = z
           code: z.ZodIssueCode.custom,
           message: `Node "${node.id}" is a loop and must declare loop.max`,
           path: ['nodes', i, 'loop'],
+        });
+      }
+      if (spec.schema_version === 2 && node.kind === 'route' && !node.route) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `Node "${node.id}" is a route and must declare cases plus a default`,
+          path: ['nodes', i, 'route'],
+        });
+      }
+      if (spec.schema_version === 2 && (node.kind === 'map' || node.kind === 'filter') && !node.for_each) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `Node "${node.id}" must declare for_each`,
+          path: ['nodes', i, 'for_each'],
+        });
+      }
+      if (spec.schema_version === 2 && node.aggregate === 'synthesize') {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `aggregate: synthesize is not a deterministic aggregate mode; use a separate synthesize node`,
+          path: ['nodes', i, 'aggregate'],
+        });
+      }
+      if (
+        spec.schema_version === 2
+        && node.timeout !== undefined
+        && node.kind !== 'approval'
+        && !sessionLikeKinds.has(node.kind)
+      ) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `Node "${node.id}" cannot use timeout because it does not dispatch a session or wait for approval`,
+          path: ['nodes', i, 'timeout'],
         });
       }
     });

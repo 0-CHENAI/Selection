@@ -140,6 +140,21 @@ describe('schema', () => {
     expect(r.data.nodes[0]!.retry?.when).toEqual(['error', 'invalid']);
     expect(r.data.ui?.layout?.direction).toBe('TB');
   });
+
+  it('fails closed for incomplete or silently unsupported v2 node contracts', () => {
+    const base = { schema_version: 2, id: 'strict', title: 'Strict', goal: 'g' } as const;
+    expect(parseTaskSpec({ ...base, nodes: [{ id: 'route', kind: 'route' }] }).success).toBe(false);
+    expect(parseTaskSpec({ ...base, nodes: [{ id: 'map', kind: 'map', prompt: 'map' }] }).success).toBe(false);
+    expect(parseTaskSpec({ ...base, nodes: [{ id: 'judge', kind: 'judge' }] }).success).toBe(false);
+    expect(parseTaskSpec({
+      ...base,
+      nodes: [{ id: 'replica', prompt: 'work', replicas: 2, aggregate: 'synthesize' }],
+    }).success).toBe(false);
+    expect(parseTaskSpec({
+      ...base,
+      nodes: [{ id: 'route', kind: 'route', route: { cases: [{ when: 'true', goto: 'end' }], default: 'end' }, timeout: 1 }, { id: 'end', prompt: 'end' }],
+    }).success).toBe(false);
+  });
 });
 
 // ---------------------------------------------------------------------------

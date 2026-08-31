@@ -114,6 +114,40 @@ describe('orchestration patch', () => {
     if (!second.ok) expect(second.pauseForReview).toBe(true);
   });
 
+  it('rejects terminal actions so patches cannot bypass settlement or the final verdict', () => {
+    process.env.CRAFT_FEATURE_TASKS_ORCHESTRATE = '1';
+    for (const action of ['complete', 'fail'] as const) {
+      const res = validateOrchestrationPatch(patch({ action }), ctx({
+        nodeStates: { a: 'running', b: 'pending' },
+      }));
+      expect(res.ok).toBe(false);
+      if (!res.ok) expect(res.error).toMatch(/cannot bypass node settlement and the final structured verdict/);
+    }
+  });
+
+  it('treats update as a partial record without replacing the existing node kind', () => {
+    process.env.CRAFT_FEATURE_TASKS_ORCHESTRATE = '1';
+    const current = spec({
+      nodes: [
+        { id: 'a', kind: 'session', prompt: 'a' },
+        { id: 'cleanup', kind: 'finally', prompt: 'cleanup', depends_on: ['a'] },
+      ],
+    });
+    const result = validateOrchestrationPatch(
+      patch({ update: [{ id: 'cleanup', title: 'Updated cleanup' }] }),
+      ctx({ spec: current, nodeStates: { a: 'pending', cleanup: 'pending' } }),
+    );
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.spec.nodes.find((node) => node.id === 'cleanup')).toMatchObject({
+        kind: 'finally',
+        prompt: 'cleanup',
+        title: 'Updated cleanup',
+      });
+    }
+  });
+
   it('definitionDiff is definition-level', () => {
     const from = spec();
     const to = spec({

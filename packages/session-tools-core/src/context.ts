@@ -556,7 +556,7 @@ export interface OrchestrationPatchInput {
   add?: unknown[];
   update?: unknown[];
   cancel?: string[];
-  action?: 'continue' | 'pause' | 'complete' | 'fail';
+  action?: 'continue' | 'pause';
 }
 
 export interface SubmitTaskDefinitionInput {
@@ -566,10 +566,7 @@ export interface SubmitTaskDefinitionInput {
 export interface ControlTaskRunInput {
   slug: string;
   runId: string;
-  action: 'pause' | 'resume' | 'stop' | 'continue' | 'approve' | 'reject' | 'updateLimits';
-  nodeId?: string;
-  tokenBudget?: number;
-  params?: Record<string, unknown>;
+  action: 'pause' | 'resume' | 'stop' | 'continue';
 }
 
 export interface GetTaskResultsInput {

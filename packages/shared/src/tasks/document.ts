@@ -119,7 +119,7 @@ function conditionUnknownFields(raw: unknown, path: string): ValidationIssue[] {
   return issues;
 }
 
-function v2UnknownFields(raw: unknown): ValidationIssue[] {
+export function v2UnknownFields(raw: unknown): ValidationIssue[] {
   const issues = unknownKeys(raw, TASK_KEYS, 'root');
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return issues;
   const task = raw as Record<string, unknown>;

@@ -32,9 +32,10 @@ import type {
   TaskApplyRunRevisionRequest,
   TaskApplyRunRevisionResult,
 } from '@craft-agent/shared/protocol'
-import { getWorkspaceByNameOrId } from '@craft-agent/shared/config'
+import { getWorkspaceByNameOrId, getLlmConnections } from '@craft-agent/shared/config'
 import {
   parseTaskYaml,
+  parseTaskDocument,
   loadTaskDocument,
   saveTaskDocument,
   listTaskSlugs,
@@ -115,6 +116,15 @@ export function registerTasksHandlers(server: RpcServer, deps: HandlerDeps): voi
         host: deps.sessionManager,
         workspaceId: ws.id,
         workspaceRoot: ws.rootPath,
+        // Dynamic nodes may only name a model exposed by a configured
+        // connection. The global registry is a catalog, not proof that this
+        // workspace can actually dispatch the model.
+        allowedModels: new Set(
+          getLlmConnections().flatMap((connection) => [
+            ...(connection.defaultModel ? [connection.defaultModel] : []),
+            ...(connection.models ?? []).map((model) => typeof model === 'string' ? model : model.id),
+          ]),
+        ),
         onRunChanged: (snapshot) => {
           pushTyped(server, RPC_CHANNELS.tasks.RUN_CHANGED, { to: 'workspace', workspaceId: ws.id }, ws.id, snapshot)
         },
@@ -141,13 +151,13 @@ export function registerTasksHandlers(server: RpcServer, deps: HandlerDeps): voi
 
   // tasks:validate — lint/dry-run; no side effects.
   server.handle(RPC_CHANNELS.tasks.VALIDATE, async (_ctx, _workspaceId: string, yaml: string): Promise<TaskValidationResultDto> => {
-    return toValidationDto(parseTaskYaml(yaml))
+    return toValidationDto(parseTaskDocument(yaml))
   })
 
   // tasks:create — write task.yaml + create the orchestrator parent session.
   server.handle(RPC_CHANNELS.tasks.CREATE, async (_ctx, workspaceId: string, req: TaskCreateRequest): Promise<TaskCreateResult> => {
     const ws = workspaceOrThrow(workspaceId)
-    const parsed = parseTaskYaml(req.yaml)
+    const parsed = parseTaskDocument(req.yaml)
     const validation = toValidationDto(parsed)
     if (!parsed.valid || !parsed.spec) {
       return { slug: '', orchestratorSessionId: '', validation }
