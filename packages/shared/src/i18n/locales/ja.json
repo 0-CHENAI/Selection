@@ -2004,6 +2004,7 @@
   "turnCard.starting": "開始中...",
   "turnCard.stepsCompleted": "ステップ完了",
   "turnCard.thinking": "考え中…",
+  "turnCard.used": "使用済み",
   "viewer.clearSession": "セッションをクリア",
   "webui.connectingToServer": "サーバーに接続中...",
   "webui.connectionFailed": "接続に失敗しました",

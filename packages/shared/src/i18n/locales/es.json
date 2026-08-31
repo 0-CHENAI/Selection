@@ -2004,6 +2004,7 @@
   "turnCard.starting": "Iniciando...",
   "turnCard.stepsCompleted": "Pasos completados",
   "turnCard.thinking": "Pensando…",
+  "turnCard.used": "Usado",
   "viewer.clearSession": "Limpiar sesión",
   "webui.connectingToServer": "Conectando al servidor...",
   "webui.connectionFailed": "Error de conexión",
