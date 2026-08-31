@@ -216,6 +216,9 @@ interface ChatDisplayProps {
   swarmToggleDisabled?: boolean
   swarmRunning?: boolean
   onStopSwarm?: () => void | Promise<void>
+  swarmTokensUsed?: number
+  swarmTokenBudget?: number
+  onSwarmBudgetIncrease?: (tokenBudget: number) => void | Promise<void>
   /** Workspace ID for loading skill icons */
   workspaceId?: string
   // Working directory (per session)
@@ -503,6 +506,9 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
   swarmToggleDisabled = false,
   swarmRunning = false,
   onStopSwarm,
+  swarmTokensUsed = 0,
+  swarmTokenBudget,
+  onSwarmBudgetIncrease,
   workspaceId,
   // Working directory
   workingDirectory,
@@ -2104,6 +2110,9 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
             swarmToggleDisabled={swarmToggleDisabled}
             swarmRunning={swarmRunning}
             onStopSwarm={onStopSwarm}
+            swarmTokensUsed={swarmTokensUsed}
+            swarmTokenBudget={swarmTokenBudget}
+            onSwarmBudgetIncrease={onSwarmBudgetIncrease}
             onSessionStatusChange={onSessionStatusChange}
             queuedMessages={queuedMessages}
             inputProps={{

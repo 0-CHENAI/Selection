@@ -224,6 +224,7 @@ const EXPECTED_CHANNELS: string[] = [
   'session:setModel',
   'session:setSwarmEnabled',
   'session:stopSwarm',
+  'session:updateSwarmBudget',
   'sessions:cancel',
   'sessions:command',
   'sessions:create',

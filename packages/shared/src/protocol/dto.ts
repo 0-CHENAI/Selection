@@ -129,6 +129,8 @@ export interface Session {
   orchestrationLifecycle?: 'managed' | 'detached'
   orchestrationStatus?: 'running' | 'completed' | 'need-to-check' | 'stopped'
   orchestrationBlocker?: string
+  orchestrationTokensUsed?: number
+  orchestrationTokenBudget?: number
 }
 
 export interface CreateSessionOptions {
@@ -183,6 +185,8 @@ export interface CreateSessionOptions {
   orchestrationLifecycle?: 'managed' | 'detached'
   orchestrationStatus?: 'running' | 'completed' | 'need-to-check' | 'stopped'
   orchestrationBlocker?: string
+  orchestrationTokensUsed?: number
+  orchestrationTokenBudget?: number
   /**
    * Apply the reserved "Task" label (valueType 'number') after creation. Top-level sessions
    * allocate the next task number; sessions with a `parentSessionId` inherit the parent's
@@ -502,7 +506,7 @@ export type SessionEvent =
   | { type: 'name_changed'; sessionId: string; name?: string }
   | { type: 'session_model_changed'; sessionId: string; model: string | null }
   | { type: 'session_status_changed'; sessionId: string; sessionStatus: SessionStatus }
-  | { type: 'session_metadata_changed'; sessionId: string; changes: Partial<Pick<Session, 'taskNodeCount' | 'kanbanColumn' | 'taskDraft' | 'taskSlug' | 'projectId' | 'swarmEnabled' | 'orchestrationId' | 'orchestrationRootSessionId' | 'orchestrationDepth' | 'orchestrationRole' | 'orchestrationLifecycle' | 'orchestrationStatus' | 'orchestrationBlocker'>> }
+  | { type: 'session_metadata_changed'; sessionId: string; changes: Partial<Pick<Session, 'taskNodeCount' | 'kanbanColumn' | 'taskDraft' | 'taskSlug' | 'projectId' | 'swarmEnabled' | 'orchestrationId' | 'orchestrationRootSessionId' | 'orchestrationDepth' | 'orchestrationRole' | 'orchestrationLifecycle' | 'orchestrationStatus' | 'orchestrationBlocker' | 'orchestrationTokensUsed' | 'orchestrationTokenBudget'>> }
   | { type: 'session_deleted'; sessionId: string }
   | { type: 'session_created'; sessionId: string }
   | { type: 'session_shared'; sessionId: string; sharedUrl: string }

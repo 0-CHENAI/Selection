@@ -474,6 +474,16 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
     }
   }, [sessionId, t])
 
+  const handleSwarmBudgetIncrease = React.useCallback(async (tokenBudget: number) => {
+    try {
+      await window.electronAPI.updateSessionSwarmBudget(sessionId, tokenBudget)
+    } catch (error) {
+      console.error('[ChatPage] Failed to update Swarm token budget:', error)
+      toast.error(t('common.error'), { description: error instanceof Error ? error.message : String(error) })
+      throw error
+    }
+  }, [sessionId, t])
+
   // Task orchestrator sessions (spec-backed, top-level) get an "Edit task" header action
   // that opens the board's full-pane Task editor prefilled from task.yaml — the same
   // surface as creation, so goal/acceptance criteria/subtasks can change and the whole
@@ -650,6 +660,8 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
         orchestrationRole: sessionMeta.orchestrationRole,
         orchestrationStatus: sessionMeta.orchestrationStatus,
         orchestrationBlocker: sessionMeta.orchestrationBlocker,
+        orchestrationTokensUsed: sessionMeta.orchestrationTokensUsed,
+        orchestrationTokenBudget: sessionMeta.orchestrationTokenBudget,
       }
 
       return (
@@ -688,6 +700,9 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
                 swarmToggleDisabled={swarmToggleDisabled}
                 swarmRunning={orchestrationStatus === 'running'}
                 onStopSwarm={handleStopSwarm}
+                swarmTokensUsed={sessionMeta.orchestrationTokensUsed ?? 0}
+                swarmTokenBudget={sessionMeta.orchestrationTokenBudget}
+                onSwarmBudgetIncrease={handleSwarmBudgetIncrease}
                 workspaceId={activeWorkspaceId || undefined}
                 onSourcesChange={(slugs) => onSessionSourcesChange?.(sessionId, slugs)}
                 workingDirectory={sessionMeta.workingDirectory}
@@ -772,6 +787,9 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
             swarmToggleDisabled={swarmToggleDisabled}
             swarmRunning={orchestrationStatus === 'running'}
             onStopSwarm={handleStopSwarm}
+            swarmTokensUsed={session?.orchestrationTokensUsed ?? sessionMeta?.orchestrationTokensUsed ?? 0}
+            swarmTokenBudget={session?.orchestrationTokenBudget ?? sessionMeta?.orchestrationTokenBudget}
+            onSwarmBudgetIncrease={handleSwarmBudgetIncrease}
             workspaceId={activeWorkspaceId || undefined}
             onSourcesChange={(slugs) => onSessionSourcesChange?.(sessionId, slugs)}
             workingDirectory={workingDirectory}

@@ -202,6 +202,8 @@ export async function createSession(
     orchestrationLifecycle?: 'managed' | 'detached';
     orchestrationStatus?: 'running' | 'completed' | 'need-to-check' | 'stopped';
     orchestrationBlocker?: string;
+    orchestrationTokensUsed?: number;
+    orchestrationTokenBudget?: number;
   }
 ): Promise<SessionConfig> {
   ensureSessionsDir(workspaceRootPath);
@@ -251,6 +253,8 @@ export async function createSession(
     orchestrationLifecycle: options?.orchestrationLifecycle,
     orchestrationStatus: options?.orchestrationStatus,
     orchestrationBlocker: options?.orchestrationBlocker,
+    orchestrationTokensUsed: options?.orchestrationTokensUsed,
+    orchestrationTokenBudget: options?.orchestrationTokenBudget,
   };
 
   // Save empty session

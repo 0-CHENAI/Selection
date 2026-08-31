@@ -95,6 +95,9 @@ export interface SessionMeta {
   orchestrationStatus?: 'running' | 'completed' | 'need-to-check' | 'stopped'
   /** Human-readable reason for a blocked orchestration. */
   orchestrationBlocker?: string
+  /** Temporary Swarm usage, independent of DAG run accounting. */
+  orchestrationTokensUsed?: number
+  orchestrationTokenBudget?: number
 }
 
 /**

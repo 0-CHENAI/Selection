@@ -27,6 +27,7 @@ type SpawnInternals = {
   onSessionComplete: SessionManager['onSessionComplete']
   stopSwarm: SessionManager['stopSwarm']
   updateSessionSwarmEnabled: SessionManager['updateSessionSwarmEnabled']
+  updateSwarmTokenBudget: SessionManager['updateSwarmTokenBudget']
 }
 
 function internals(sm: SessionManager): SpawnInternals {
@@ -100,12 +101,21 @@ describe('SessionManager spawn_session wait/background', () => {
     }
   }
 
-  function emitChild(reason: SessionCompletionEvent['reason'], finalText?: string, childId = 'child') {
+  function emitChild(reason: SessionCompletionEvent['reason'], finalText?: string, childId = 'child', totalTokens?: number) {
     internals(sm).emitSessionComplete({
       sessionId: childId,
       workspaceId: 'ws_test',
       reason,
       finalText,
+      ...(totalTokens === undefined ? {} : {
+        tokenUsage: {
+          inputTokens: totalTokens,
+          outputTokens: 0,
+          totalTokens,
+          contextTokens: totalTokens,
+          costUsd: 0,
+        },
+      }),
     })
   }
 
@@ -307,6 +317,33 @@ describe('SessionManager spawn_session wait/background', () => {
     emitChild('complete', 'Found login.ts')
     await flush()
     expect(sendCalls).toHaveLength(1)
+  })
+
+  it('accounts temporary Swarm tokens once and blocks new workers until the user raises the budget', async () => {
+    const parent = buildParent()
+    parent.swarmEnabled = true
+    await internals(sm).updateSwarmTokenBudget(parent.id, 10)
+    stubCreateChild()
+    await internals(sm).spawnSessionFromTool(parent, {
+      prompt: 'Find auth flows',
+      mode: 'background',
+      spawnReason: 'user-requested',
+    })
+    emitChild('complete', 'done', 'child', 10)
+    emitChild('complete', 'done', 'child', 10)
+    await flush()
+
+    expect(parent.orchestrationTokensUsed).toBe(10)
+    expect(parent.orchestrationStatus).toBe('need-to-check')
+    expect(parent.orchestrationBlocker).toContain('10/10')
+    await expect(internals(sm).spawnSessionFromTool(parent, {
+      prompt: 'Another worker',
+      spawnReason: 'user-requested',
+    })).rejects.toThrow('token budget reached')
+
+    await internals(sm).updateSwarmTokenBudget(parent.id, 20)
+    expect(parent.orchestrationTokenBudget).toBe(20)
+    expect(parent.orchestrationBlocker).toBeUndefined()
   })
 
   it('keeps the coordinator running until every managed child reaches a terminal state', () => {

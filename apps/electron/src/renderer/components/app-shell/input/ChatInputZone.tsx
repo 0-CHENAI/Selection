@@ -35,6 +35,9 @@ interface ChatInputZoneProps {
   swarmToggleDisabled?: boolean
   swarmRunning?: boolean
   onStopSwarm?: () => void | Promise<void>
+  swarmTokensUsed?: number
+  swarmTokenBudget?: number
+  onSwarmBudgetIncrease?: (tokenBudget: number) => void | Promise<void>
   className?: string
   queuedMessages?: Message[]
   inputProps: React.ComponentProps<typeof InputContainer>
@@ -63,6 +66,9 @@ export function ChatInputZone({
   swarmToggleDisabled = false,
   swarmRunning = false,
   onStopSwarm,
+  swarmTokensUsed = 0,
+  swarmTokenBudget,
+  onSwarmBudgetIncrease,
   className,
   queuedMessages = [],
   inputProps,
@@ -135,6 +141,9 @@ export function ChatInputZone({
           compact={compactMode}
           running={swarmRunning}
           onStop={onStopSwarm}
+          tokensUsed={swarmTokensUsed}
+          tokenBudget={swarmTokenBudget}
+          onBudgetIncrease={onSwarmBudgetIncrease}
         />
       )}
 

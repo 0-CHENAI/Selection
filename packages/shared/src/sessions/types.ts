@@ -74,6 +74,8 @@ export const SESSION_PERSISTENT_FIELDS = [
   'orchestrationLifecycle',
   'orchestrationStatus',
   'orchestrationBlocker',
+  'orchestrationTokensUsed',
+  'orchestrationTokenBudget',
 ] as const;
 
 export type SessionPersistentField = typeof SESSION_PERSISTENT_FIELDS[number];
@@ -97,6 +99,8 @@ export interface SwarmSessionMetadata {
   orchestrationLifecycle?: 'managed' | 'detached';
   orchestrationStatus?: 'running' | 'completed' | 'need-to-check' | 'stopped';
   orchestrationBlocker?: string;
+  orchestrationTokensUsed?: number;
+  orchestrationTokenBudget?: number;
 }
 
 /**

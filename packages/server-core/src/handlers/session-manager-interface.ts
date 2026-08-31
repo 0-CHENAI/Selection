@@ -103,6 +103,7 @@ export interface ISessionManager {
   setSessionConnection(sessionId: string, connectionSlug: string): Promise<void>
   updateSessionModel(sessionId: string, workspaceId: string, model: string | null, connection?: string): Promise<void>
   updateSessionSwarmEnabled(sessionId: string, enabled: boolean): Promise<void>
+  updateSwarmTokenBudget(sessionId: string, tokenBudget: number): Promise<void>
   stopSwarm(sessionId: string): Promise<{ stoppedSessionIds: string[]; detachedSessionIds: string[] }>
 
   // ---------------------------------------------------------------------------

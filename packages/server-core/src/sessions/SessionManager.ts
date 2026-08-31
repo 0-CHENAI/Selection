@@ -917,6 +917,8 @@ interface ManagedSession {
   orchestrationLifecycle?: SpawnSessionLifecycle
   orchestrationStatus?: 'running' | 'completed' | 'need-to-check' | 'stopped'
   orchestrationBlocker?: string
+  orchestrationTokensUsed?: number
+  orchestrationTokenBudget?: number
   // Kanban board column id ('todo' | 'in-progress' | 'done'); independent of sessionStatus
   kanbanColumn?: string
   // Tasks Conductor: slug of the task spec this session belongs to (orchestrator + child nodes)
@@ -1234,6 +1236,8 @@ export function buildAgentSessionConfig(managed: ManagedSession): SessionConfig 
     orchestrationLifecycle: managed.orchestrationLifecycle,
     orchestrationStatus: managed.orchestrationStatus,
     orchestrationBlocker: managed.orchestrationBlocker,
+    orchestrationTokensUsed: managed.orchestrationTokensUsed,
+    orchestrationTokenBudget: managed.orchestrationTokenBudget,
   }
 }
 
@@ -1398,6 +1402,8 @@ export class SessionManager implements ISessionManager {
   private processedSwarmCompletionEvents: Set<string> = new Set()
   /** Last coordinator turn outcome, used when managed children settle later. */
   private swarmTurnCompletions: Map<string, SessionCompletionEvent> = new Map()
+  /** Per-session cumulative usage already included in the current Swarm total. */
+  private swarmAccountedTokens: Map<string, number> = new Map()
   /**
    * WS2 keep-alive flag (default ON, opt-out via `CRAFT_KEEP_BG_AGENTS_ALIVE=0`).
    * When true, a persistent streaming query keeps the subprocess alive across
@@ -2182,6 +2188,9 @@ export class SessionManager implements ISessionManager {
             enabledSourceSlugs: meta.enabledSourceSlugs,
             workingDirectory: meta.workingDirectory ?? wsDefaultWorkingDir,
           })
+          if (managed.orchestrationId) {
+            this.swarmAccountedTokens.set(managed.id, managed.tokenUsage?.totalTokens ?? 0)
+          }
 
           // Migration: clear orphaned llmConnection references (e.g., after connection was deleted)
           if (managed.llmConnection) {
@@ -3148,6 +3157,8 @@ export class SessionManager implements ISessionManager {
       orchestrationLifecycle: options?.orchestrationLifecycle,
       orchestrationStatus: options?.orchestrationStatus,
       orchestrationBlocker: options?.orchestrationBlocker,
+      orchestrationTokensUsed: options?.orchestrationTokensUsed,
+      orchestrationTokenBudget: options?.orchestrationTokenBudget,
       // Persist only an EXPLICIT selection (e.g. a task's spec.sources on its subtasks).
       // The workspace-default fallback stays dynamic — freezing it into the header would
       // pin every ordinary session to the defaults as of its creation time.
@@ -3262,6 +3273,8 @@ export class SessionManager implements ISessionManager {
       orchestrationLifecycle: options?.orchestrationLifecycle,
       orchestrationStatus: options?.orchestrationStatus,
       orchestrationBlocker: options?.orchestrationBlocker,
+      orchestrationTokensUsed: options?.orchestrationTokensUsed,
+      orchestrationTokenBudget: options?.orchestrationTokenBudget,
       branchFromMessageId: validatedBranch?.sourceMessageId,
       branchContextStrategy: validatedBranch?.branchContextStrategy,
       branchFromSdkSessionId: validatedBranch?.branchFromSdkSessionId,
@@ -8071,7 +8084,9 @@ export class SessionManager implements ISessionManager {
       | 'orchestrationRole'
       | 'orchestrationLifecycle'
       | 'orchestrationStatus'
-      | 'orchestrationBlocker'>>,
+      | 'orchestrationBlocker'
+      | 'orchestrationTokensUsed'
+      | 'orchestrationTokenBudget'>>,
   ): void {
     Object.assign(managed, changes)
     this.setMetadataWriteGuard(managed)
@@ -8114,6 +8129,16 @@ export class SessionManager implements ISessionManager {
     const turn = this.swarmTurnCompletions.get(session.id)
     const children = this.getManagedSwarmChildren(session.id)
       .filter(child => child.orchestrationId === session.orchestrationId)
+    const budgetOwner = this.sessions.get(session.orchestrationRootSessionId ?? session.id) ?? session
+    const budget = budgetOwner.orchestrationTokenBudget
+    const tokensUsed = budgetOwner.orchestrationTokensUsed ?? 0
+    if (session.id === budgetOwner.id && budget !== undefined && tokensUsed >= budget) {
+      this.updateOrchestrationMetadata(session, {
+        orchestrationStatus: 'need-to-check',
+        orchestrationBlocker: `Swarm token budget reached: ${tokensUsed}/${budget}`,
+      })
+      return
+    }
     const runningChild = children.find(child => child.orchestrationStatus === 'running')
     if (runningChild) {
       if (session.orchestrationStatus !== 'running' || session.orchestrationBlocker) {
@@ -8174,6 +8199,26 @@ export class SessionManager implements ISessionManager {
       const oldest = this.processedSwarmCompletionEvents.values().next().value
       if (oldest) this.processedSwarmCompletionEvents.delete(oldest)
     }
+    if (managed.orchestrationLifecycle !== 'detached' && evt.tokenUsage) {
+      const cumulative = Math.max(0, evt.tokenUsage.totalTokens ?? 0)
+      const previous = this.swarmAccountedTokens.get(managed.id) ?? 0
+      const delta = Math.max(0, cumulative - previous)
+      this.swarmAccountedTokens.set(managed.id, cumulative)
+      if (delta > 0) {
+        const root = this.sessions.get(managed.orchestrationRootSessionId ?? managed.id) ?? managed
+        const tokensUsed = (root.orchestrationTokensUsed ?? 0) + delta
+        const budget = root.orchestrationTokenBudget
+        this.updateOrchestrationMetadata(root, {
+          orchestrationTokensUsed: tokensUsed,
+          ...(budget !== undefined && tokensUsed >= budget
+            ? {
+                orchestrationStatus: 'need-to-check' as const,
+                orchestrationBlocker: `Swarm token budget reached: ${tokensUsed}/${budget}`,
+              }
+            : {}),
+        })
+      }
+    }
     this.swarmTurnCompletions.set(managed.id, evt)
     this.refreshSwarmSessionState(managed)
     return true
@@ -8221,7 +8266,9 @@ export class SessionManager implements ISessionManager {
     const role = request.role ?? 'worker'
     const parentDepth = managed.orchestrationDepth ?? 0
     const startsNewRootRun = !managed.parentSessionId
-      && (!managed.orchestrationId || managed.orchestrationStatus !== 'running')
+      && (!managed.orchestrationId
+        || managed.orchestrationStatus === 'completed'
+        || managed.orchestrationStatus === 'stopped')
     const orchestrationId = startsNewRootRun ? randomUUID() : (managed.orchestrationId ?? randomUUID())
     const rootSessionId = managed.orchestrationRootSessionId ?? managed.id
     this.updateOrchestrationMetadata(managed, {
@@ -8232,7 +8279,20 @@ export class SessionManager implements ISessionManager {
       orchestrationLifecycle: managed.orchestrationLifecycle ?? 'managed',
       orchestrationStatus: 'running',
       orchestrationBlocker: undefined,
+      ...(startsNewRootRun ? { orchestrationTokensUsed: 0 } : {}),
     })
+
+    const budgetOwner = this.sessions.get(rootSessionId) ?? managed
+    const budget = budgetOwner.orchestrationTokenBudget
+    const tokensUsed = budgetOwner.orchestrationTokensUsed ?? 0
+    if (budget !== undefined && tokensUsed >= budget) {
+      const blocker = `Swarm token budget reached: ${tokensUsed}/${budget}`
+      this.updateOrchestrationMetadata(budgetOwner, {
+        orchestrationStatus: 'need-to-check',
+        orchestrationBlocker: blocker,
+      })
+      throw new Error(blocker)
+    }
 
     const limit = assessSwarmSpawnLimits({
       sessions: this.sessions.values(),
@@ -8405,6 +8465,16 @@ export class SessionManager implements ISessionManager {
       && !child.taskNodeId
     )
     if (children.length === 0 || children.some(child => child.orchestrationStatus === 'running')) return
+    const budgetOwner = this.sessions.get(managed.orchestrationRootSessionId ?? managed.id) ?? managed
+    const budget = budgetOwner.orchestrationTokenBudget
+    const tokensUsed = budgetOwner.orchestrationTokensUsed ?? 0
+    if (budget !== undefined && tokensUsed >= budget) {
+      this.updateOrchestrationMetadata(budgetOwner, {
+        orchestrationStatus: 'need-to-check',
+        orchestrationBlocker: `Swarm token budget reached: ${tokensUsed}/${budget}`,
+      })
+      return
+    }
     this.updateOrchestrationMetadata(managed, {
       orchestrationStatus: 'running',
       orchestrationBlocker: undefined,
@@ -8911,6 +8981,37 @@ export class SessionManager implements ISessionManager {
     // untouched and is still guarded server-side by spawnSessionFromTool.
     if (managed.agent && !managed.isProcessing && !managed.agent.isProcessing()) {
       await this.disposeManagedAgentRuntime(managed, 'Swarm setting changed')
+    }
+  }
+
+  /** Set or raise the temporary Swarm's token ceiling. Models cannot call this RPC. */
+  async updateSwarmTokenBudget(sessionId: string, tokenBudget: number): Promise<void> {
+    const managed = this.sessions.get(sessionId)
+    if (!managed) throw new Error(`Session ${sessionId} not found`)
+    if (managed.parentSessionId || managed.orchestrationRole === 'worker' || managed.orchestrationRole === 'reviewer') {
+      throw new Error('Only the root Swarm coordinator can update the token budget')
+    }
+    if (!Number.isFinite(tokenBudget) || tokenBudget <= 0) {
+      throw new Error('Swarm token budget must be a positive finite number')
+    }
+    const current = managed.orchestrationTokenBudget
+    const used = managed.orchestrationTokensUsed ?? 0
+    if (current !== undefined && tokenBudget < current) {
+      throw new Error('Swarm token budget can only be increased')
+    }
+    if (tokenBudget <= used) {
+      throw new Error(`Swarm token budget must exceed tokens already used (${used})`)
+    }
+    const wasBudgetBlocked = managed.orchestrationBlocker?.startsWith('Swarm token budget reached:') === true
+    this.updateOrchestrationMetadata(managed, {
+      orchestrationTokenBudget: tokenBudget,
+      ...(wasBudgetBlocked
+        ? { orchestrationStatus: 'running' as const, orchestrationBlocker: undefined }
+        : {}),
+    })
+    await this.flushSession(managed.id)
+    if (wasBudgetBlocked && managed.orchestrationId) {
+      this.surfaceManagedSwarmWake(managed, managed.orchestrationId)
     }
   }
 

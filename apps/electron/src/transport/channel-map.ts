@@ -192,6 +192,7 @@ export const CHANNEL_MAP = {
   getSessionModel: invoke(RPC_CHANNELS.sessions.GET_MODEL),
   setSessionModel: invoke(RPC_CHANNELS.sessions.SET_MODEL),
   setSessionSwarmEnabled: invoke(RPC_CHANNELS.sessions.SET_SWARM_ENABLED),
+  updateSessionSwarmBudget: invoke(RPC_CHANNELS.sessions.UPDATE_SWARM_BUDGET),
   stopSessionSwarm: invoke(RPC_CHANNELS.sessions.STOP_SWARM),
 
   // Workspace Settings
