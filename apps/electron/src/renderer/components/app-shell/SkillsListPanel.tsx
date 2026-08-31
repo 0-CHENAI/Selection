@@ -1,6 +1,6 @@
 import * as React from 'react'
 import { useTranslation } from 'react-i18next'
-import { Zap } from 'lucide-react'
+import { Upload, Zap } from 'lucide-react'
 import { toast } from 'sonner'
 import { SkillAvatar } from '@/components/ui/skill-avatar'
 import { EntityPanel } from '@/components/ui/entity-panel'
@@ -15,6 +15,7 @@ import { useActiveWorkspace, useAppShellContext } from '@/context/AppShellContex
 import { getFileManagerName } from '@/lib/platform'
 import { useDisplayTitleRename } from '@/hooks/useDisplayTitleRename'
 import { resolveSkillTitle } from '@craft-agent/shared/display-titles'
+import { cn } from '@/lib/utils'
 import type { LoadedSkill } from '../../../shared/types'
 
 export interface SkillsListPanelProps {
@@ -31,6 +32,7 @@ export interface SkillsListPanelProps {
   copyFromOpen?: boolean
   onCopyFromOpenChange?: (open: boolean) => void
   onImportFromFile?: React.MouseEventHandler<HTMLButtonElement>
+  onImportDroppedFiles?: (files: File[]) => void
 }
 
 export function SkillsListPanel({
@@ -45,6 +47,7 @@ export function SkillsListPanel({
   copyFromOpen: copyFromOpenProp,
   onCopyFromOpenChange,
   onImportFromFile,
+  onImportDroppedFiles,
 }: SkillsListPanelProps) {
   const { t } = useTranslation()
   const activeWorkspace = useActiveWorkspace()
@@ -64,16 +67,56 @@ export function SkillsListPanel({
   const copyFromOpen = copyFromOpenProp ?? copyFromOpenInternal
   const setCopyFromOpen = onCopyFromOpenChange ?? setCopyFromOpenInternal
   const rename = useDisplayTitleRename('skill', workspaceId ?? activeWorkspaceId, workingDirectory)
+  const [isDraggingFile, setIsDraggingFile] = React.useState(false)
+  const dragDepthRef = React.useRef(0)
+
+  const handleDragEnter = (event: React.DragEvent<HTMLDivElement>) => {
+    if (!onImportDroppedFiles || !event.dataTransfer.types.includes('Files')) return
+    event.preventDefault()
+    event.stopPropagation()
+    dragDepthRef.current += 1
+    setIsDraggingFile(true)
+  }
+
+  const handleDragLeave = (event: React.DragEvent<HTMLDivElement>) => {
+    if (!isDraggingFile) return
+    event.preventDefault()
+    event.stopPropagation()
+    dragDepthRef.current = Math.max(0, dragDepthRef.current - 1)
+    if (dragDepthRef.current === 0) setIsDraggingFile(false)
+  }
+
+  const handleDragOver = (event: React.DragEvent<HTMLDivElement>) => {
+    if (!onImportDroppedFiles || !event.dataTransfer.types.includes('Files')) return
+    event.preventDefault()
+    event.stopPropagation()
+    event.dataTransfer.dropEffect = 'copy'
+  }
+
+  const handleDrop = (event: React.DragEvent<HTMLDivElement>) => {
+    if (!onImportDroppedFiles || !event.dataTransfer.types.includes('Files')) return
+    event.preventDefault()
+    event.stopPropagation()
+    dragDepthRef.current = 0
+    setIsDraggingFile(false)
+    onImportDroppedFiles(Array.from(event.dataTransfer.files))
+  }
 
   return (
     <>
+    <div
+      className={cn('relative flex min-h-0 flex-1', className)}
+      onDragEnter={handleDragEnter}
+      onDragLeave={handleDragLeave}
+      onDragOver={handleDragOver}
+      onDrop={handleDrop}
+    >
     <EntityPanel<LoadedSkill>
       items={skills}
       getId={(s) => s.slug}
       selection={skillSelection}
       selectedId={selectedSkillSlug}
       onItemClick={onSkillClick}
-      className={className}
       containerProps={{ 'data-list-role': 'skills' }}
       emptyState={
         <EntityListEmptyScreen
@@ -122,7 +165,6 @@ export function SkillsListPanel({
           title,
           badges: (
             <span className="flex items-center gap-1.5 min-w-0">
-              <span className="shrink-0 font-mono text-[10px] text-muted-foreground">{skill.slug}</span>
               {skill.source === 'project' && (
                 <span className="shrink-0 text-[10px] px-1.5 py-0.5 rounded-full bg-foreground/5 text-muted-foreground">
                   {t('skillsList.projectBadge')}
@@ -175,6 +217,19 @@ export function SkillsListPanel({
         }
       }}
     />
+    {isDraggingFile && (
+      <div
+        role="status"
+        aria-live="polite"
+        className="pointer-events-none absolute inset-2 z-20 flex items-center justify-center rounded-xl border-2 border-dashed border-foreground/40 bg-background/90 backdrop-blur-sm"
+      >
+        <div className="flex flex-col items-center gap-2 px-4 text-center text-sm font-medium">
+          <Upload className="h-5 w-5" />
+          <span>{t('fileImport.skillDropHint')}</span>
+        </div>
+      </div>
+    )}
+    </div>
 
     {/* Send to Workspace dialog */}
     {sendResourceSlug && (

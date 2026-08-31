@@ -151,7 +151,6 @@ export function PanelHeader({
         "text-sm font-semibold truncate font-sans leading-tight",
         isRegeneratingTitle && "animate-shimmer-text"
       )}>{title}</h1>
-      {badge}
     </motion.div>
   )
 
@@ -186,7 +185,15 @@ export function PanelHeader({
     </DropdownMenu>
   ) : titleContent
 
-  const titleNode = (isCompactMode && compactTitleMenu) ? compactTitleMenu : desktopTitleNode
+  const selectedTitleNode = (isCompactMode && compactTitleMenu) ? compactTitleMenu : desktopTitleNode
+  // Keep status badges outside the title-menu trigger. Some badges are direct
+  // run-detail controls and must not become nested buttons or open the session menu.
+  const titleNode = badge ? (
+    <div className="flex min-w-0 items-center gap-1.5">
+      <div className="min-w-0 overflow-hidden">{selectedTitleNode}</div>
+      {badge}
+    </div>
+  ) : selectedTitleNode
 
   // Compact (mobile) layout puts the title in an absolute-positioned overlay.
   // The side insets are based on the actual number of control slots so a long

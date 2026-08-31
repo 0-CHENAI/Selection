@@ -38,6 +38,8 @@ export interface PrerequisiteRule {
   blockMessage: string;
   /** If true, always block until file is read (no graceful fallback). */
   strict?: boolean;
+  /** Only apply this rule when the built-in browser tool is enabled. */
+  requiresBrowserToolEnabled?: boolean;
 }
 
 export interface PrerequisiteCheckResult {
@@ -58,6 +60,8 @@ export interface SourceGuideRequirement {
 export interface PrerequisiteManagerConfig {
   workspaceRootPath: string;
   onDebug?: (message: string) => void;
+  /** Optional test/runtime override; production falls back to persisted config. */
+  browserToolEnabled?: boolean;
 }
 
 // ============================================================
@@ -84,14 +88,14 @@ const RULES: PrerequisiteRule[] = [
   // and skipped entirely when the built-in browser tool is disabled.
   {
     toolMatcher: (toolName: string) =>
-      (toolName === 'browser_tool' || toolName === 'mcp__session__browser_tool') &&
-      getBrowserToolEnabled(),
+      toolName === 'browser_tool' || toolName === 'mcp__session__browser_tool',
     resolveRequiredPath: () => {
       return existsSync(BROWSER_TOOLS_DOC_PATH) ? BROWSER_TOOLS_DOC_PATH : null;
     },
     blockMessage:
       'You must read the browser tools guide before using browser automation. Please read the file at {filePath} first, then retry.',
     strict: true,
+    requiresBrowserToolEnabled: true,
   },
 ];
 
@@ -110,10 +114,12 @@ export class PrerequisiteManager {
   private catalogByPath = new Map<string, CatalogSkillRef>();
   private workspaceRootPath: string;
   private onDebug?: (message: string) => void;
+  private browserToolEnabledOverride?: boolean;
 
   constructor(config: PrerequisiteManagerConfig) {
     this.workspaceRootPath = config.workspaceRootPath;
     this.onDebug = config.onDebug;
+    this.browserToolEnabledOverride = config.browserToolEnabled;
   }
 
   /** Workspace changes must never reuse another workspace's guide or Skill state. */
@@ -179,6 +185,10 @@ export class PrerequisiteManager {
 
     for (const rule of RULES) {
       if (!rule.toolMatcher(toolName)) continue;
+      if (
+        rule.requiresBrowserToolEnabled &&
+        !(this.browserToolEnabledOverride ?? getBrowserToolEnabled())
+      ) continue;
 
       const requiredPath = rule.resolveRequiredPath(toolName, this.workspaceRootPath);
       if (!requiredPath) continue; // No guide.md exists, skip

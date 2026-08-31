@@ -14,6 +14,8 @@ import { PanelHeader } from '@/components/app-shell/PanelHeader'
 import { SessionMenu } from '@/components/app-shell/SessionMenu'
 import { CompactSessionMenu } from '@/components/app-shell/CompactSessionMenu'
 import { SessionInfoPopover } from '@/components/app-shell/SessionInfoPopover'
+import { OrchestrationStatusBadge } from '@/components/app-shell/OrchestrationStatusBadge'
+import { SwarmRunDetailsDialog } from '@/components/app-shell/SwarmRunDetailsDialog'
 import { RenameDialog } from '@/components/ui/rename-dialog'
 import { toast } from 'sonner'
 import { PanelHeaderCenterButton } from '@/components/ui/PanelHeaderCenterButton'
@@ -24,7 +26,14 @@ import { resolveMarkdownLinkTarget } from '@craft-agent/ui'
 import { navigate, routes } from '@/lib/navigate'
 import { coerceInputText } from '@/lib/input-text'
 import { deriveSessionMessagesLoadState, formatSessionLoadFailure } from '@/lib/session-load'
-import { ensureSessionMessagesLoadedAtom, forceSessionMessagesReloadAtom, loadedSessionsAtom, sessionMetaMapAtom } from '@/atoms/sessions'
+import {
+  ensureSessionMessagesLoadedAtom,
+  forceSessionMessagesReloadAtom,
+  loadedSessionsAtom,
+  sessionMetaMapAtom,
+  updateSessionAtom,
+  updateSessionMetaAtom,
+} from '@/atoms/sessions'
 import { kanbanEditorTargetAtom } from '@/atoms/kanban'
 import { getSessionTitle } from '@/utils/session'
 // Model resolution: connection.defaultModel (no hardcoded defaults)
@@ -103,8 +112,11 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
   // Fallback: ensure messages are loaded when session is viewed
   const ensureMessagesLoaded = useSetAtom(ensureSessionMessagesLoadedAtom)
   const forceMessagesReload = useSetAtom(forceSessionMessagesReloadAtom)
+  const updateSession = useSetAtom(updateSessionAtom)
+  const updateSessionMeta = useSetAtom(updateSessionMetaAtom)
   const [messagesLoadError, setMessagesLoadError] = React.useState<string | null>(null)
   const [messagesRetrying, setMessagesRetrying] = React.useState(false)
+  const [swarmDetailsOpen, setSwarmDetailsOpen] = React.useState(false)
   const autoForcedReloadSessionRef = React.useRef<string | null>(null)
   const shouldForceInitialMessagesReload = React.useMemo(() => {
     const expectedMessageCount = session?.messageCount ?? sessionMeta?.messageCount ?? 0
@@ -437,12 +449,44 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
     onSessionLabelsChange?.(sessionId, newLabels)
   }, [sessionId, onSessionLabelsChange])
 
+  const swarmEnabled = session?.swarmEnabled ?? sessionMeta?.swarmEnabled ?? false
+  const orchestrationStatus = session?.orchestrationStatus ?? sessionMeta?.orchestrationStatus
+  const swarmToggleDisabled = sessionMeta?.orchestrationRole === 'worker'
+    || sessionMeta?.orchestrationRole === 'reviewer'
+  const handleSwarmEnabledChange = React.useCallback(async (enabled: boolean) => {
+    const previous = session?.swarmEnabled ?? sessionMeta?.swarmEnabled ?? false
+    updateSession(sessionId, current => current ? { ...current, swarmEnabled: enabled } : current)
+    updateSessionMeta(sessionId, { swarmEnabled: enabled })
+    try {
+      await window.electronAPI.setSessionSwarmEnabled(sessionId, enabled)
+    } catch (error) {
+      updateSession(sessionId, current => current ? { ...current, swarmEnabled: previous } : current)
+      updateSessionMeta(sessionId, { swarmEnabled: previous })
+      console.error('[ChatPage] Failed to update Swarm mode:', error)
+      toast.error(t('common.error'))
+    }
+  }, [sessionId, session?.swarmEnabled, sessionMeta?.swarmEnabled, updateSession, updateSessionMeta, t])
+
+  const handleStopSwarmForDetails = React.useCallback(async () => {
+    try {
+      await window.electronAPI.stopSessionSwarm(sessionId)
+    } catch (error) {
+      console.error('[ChatPage] Failed to stop Swarm:', error)
+      toast.error(t('common.error'), { description: error instanceof Error ? error.message : String(error) })
+      throw error
+    }
+  }, [sessionId, t])
+
   // Task orchestrator sessions (spec-backed, top-level) get an "Edit task" header action
   // that opens the board's full-pane Task editor prefilled from task.yaml — the same
   // surface as creation, so goal/acceptance criteria/subtasks can change and the whole
   // task can be re-run (Save & Run mints a fresh Conductor run).
-  const taskSlug = sessionMeta?.taskSlug
+  const taskSlug = session?.taskSlug ?? sessionMeta?.taskSlug
   const isTaskOrchestrator = !!taskSlug && !sessionMeta?.parentSessionId
+  const orchestrationRole = session?.orchestrationRole ?? sessionMeta?.orchestrationRole
+  const orchestrationId = session?.orchestrationId ?? sessionMeta?.orchestrationId
+  const swarmWorkspaceId = session?.workspaceId ?? sessionMeta?.workspaceId
+  const isTemporarySwarmCoordinator = !taskSlug && orchestrationRole === 'coordinator' && !!orchestrationId && !!swarmWorkspaceId
   const setKanbanEditorTarget = useSetAtom(kanbanEditorTargetAtom)
   const handleEditTask = React.useCallback(() => {
     if (!taskSlug) return
@@ -454,6 +498,14 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
     })
     navigate(routes.view.board())
   }, [taskSlug, sessionId, sessionMeta, setKanbanEditorTarget])
+
+  const orchestrationBadge = (
+    <OrchestrationStatusBadge
+      status={session?.orchestrationStatus ?? sessionMeta?.orchestrationStatus}
+      blocker={session?.orchestrationBlocker ?? sessionMeta?.orchestrationBlocker}
+      onOpenDetails={isTemporarySwarmCoordinator ? () => setSwarmDetailsOpen(true) : isTaskOrchestrator ? handleEditTask : undefined}
+    />
+  )
 
   const handleDelete = React.useCallback(async () => {
     await onDeleteSession(sessionId)
@@ -601,12 +653,18 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
         enabledSourceSlugs: sessionMeta.enabledSourceSlugs,
         projectId: sessionMeta.projectId,
         sharedProjectMemoryEnabled: sessionMeta.sharedProjectMemoryEnabled,
+        swarmEnabled: sessionMeta.swarmEnabled,
+        orchestrationRole: sessionMeta.orchestrationRole,
+        orchestrationStatus: sessionMeta.orchestrationStatus,
+        orchestrationBlocker: sessionMeta.orchestrationBlocker,
+        orchestrationTokensUsed: sessionMeta.orchestrationTokensUsed,
+        orchestrationTokenBudget: sessionMeta.orchestrationTokenBudget,
       }
 
       return (
         <>
           <div className="h-full flex flex-col">
-            <PanelHeader  title={displayTitle} titleMenu={titleMenu} compactTitleMenu={compactTitleMenu} leadingAction={leadingAction} actions={headerActions} rightSidebarButton={rightSidebarButton} isRegeneratingTitle={isAsyncOperationOngoing} />
+            <PanelHeader title={displayTitle} badge={orchestrationBadge} titleMenu={titleMenu} compactTitleMenu={compactTitleMenu} leadingAction={leadingAction} actions={headerActions} rightSidebarButton={rightSidebarButton} isRegeneratingTitle={isAsyncOperationOngoing} />
             <div className="flex-1 flex flex-col min-h-0">
               <ChatDisplay
                 ref={chatDisplayRef}
@@ -634,6 +692,10 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
                 skills={skills}
                 sessionStatuses={sessionStatuses}
                 onSessionStatusChange={handleSessionStatusChange}
+                swarmEnabled={swarmEnabled}
+                onSwarmEnabledChange={handleSwarmEnabledChange}
+                swarmToggleDisabled={swarmToggleDisabled}
+                swarmRunning={orchestrationStatus === 'running'}
                 workspaceId={activeWorkspaceId || undefined}
                 onSourcesChange={(slugs) => onSessionSourcesChange?.(sessionId, slugs)}
                 workingDirectory={sessionMeta.workingDirectory}
@@ -679,7 +741,7 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
   return (
     <>
       <div className="h-full flex flex-col">
-        <PanelHeader  title={displayTitle} titleMenu={titleMenu} compactTitleMenu={compactTitleMenu} leadingAction={leadingAction} actions={headerActions} rightSidebarButton={rightSidebarButton} isRegeneratingTitle={isAsyncOperationOngoing} />
+        <PanelHeader title={displayTitle} badge={orchestrationBadge} titleMenu={titleMenu} compactTitleMenu={compactTitleMenu} leadingAction={leadingAction} actions={headerActions} rightSidebarButton={rightSidebarButton} isRegeneratingTitle={isAsyncOperationOngoing} />
         <div className="flex-1 flex flex-col min-h-0">
           <ChatDisplay
             ref={chatDisplayRef}
@@ -713,6 +775,10 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
             onLabelsChange={(newLabels) => onSessionLabelsChange?.(sessionId, newLabels)}
             sessionStatuses={sessionStatuses}
             onSessionStatusChange={handleSessionStatusChange}
+            swarmEnabled={swarmEnabled}
+            onSwarmEnabledChange={handleSwarmEnabledChange}
+            swarmToggleDisabled={swarmToggleDisabled}
+            swarmRunning={orchestrationStatus === 'running'}
             workspaceId={activeWorkspaceId || undefined}
             onSourcesChange={(slugs) => onSessionSourcesChange?.(sessionId, slugs)}
             workingDirectory={workingDirectory}
@@ -740,6 +806,20 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
         onSubmit={handleRenameSubmit}
         placeholder={t('chat.enterSessionName')}
       />
+      {isTemporarySwarmCoordinator && (
+        <SwarmRunDetailsDialog
+          sessionId={sessionId}
+          workspaceId={swarmWorkspaceId}
+          open={swarmDetailsOpen}
+          onOpenChange={setSwarmDetailsOpen}
+          onOpenWorker={(workerSessionId) => {
+            setSwarmDetailsOpen(false)
+            navigate(routes.view.allSessions(workerSessionId))
+          }}
+          onStop={handleStopSwarmForDetails}
+          refreshKey={`${orchestrationId}:${orchestrationStatus ?? ''}:${session?.orchestrationTokensUsed ?? sessionMeta?.orchestrationTokensUsed ?? 0}:${session?.orchestrationBlocker ?? sessionMeta?.orchestrationBlocker ?? ''}`}
+        />
+      )}
     </>
   )
 })

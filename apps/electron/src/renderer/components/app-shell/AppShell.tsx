@@ -95,6 +95,7 @@ import { getSessionTitle } from "@/utils/session"
 import { useSetAtom } from "jotai"
 import type { Session, Workspace, FileAttachment, PermissionRequest, LoadedSource, LoadedSkill, PermissionMode, SourceFilter, AutomationFilter } from "../../../shared/types"
 import { sessionMetaMapAtom, sendToWorkspaceAtom, type SessionMeta } from "@/atoms/sessions"
+import { isOrdinarySessionVisible } from '@/lib/swarm-session'
 import { sourcesAtom } from "@/atoms/sources"
 import { skillsAtom } from "@/atoms/skills"
 import { panelStackAtom, panelCountAtom, focusedPanelIdAtom, focusedSessionIdAtom, focusNextPanelAtom, focusPrevPanelAtom, parseSessionIdFromRoute } from "@/atoms/panel-stack"
@@ -131,6 +132,7 @@ import {
   SkillFileImportDialog,
 } from "@/components/resources/ExternalResourceImportDialog"
 import {
+  getDroppedSkillImportFile,
   openSkillFilePicker,
   prepareSkillFileImport,
   listenForSkillFilePickerCancel,
@@ -1456,9 +1458,9 @@ function AppShellContent({
   const remoteWorkspaceId = activeWorkspace?.remoteServer?.remoteWorkspaceId
   const workspaceSessionMetas = useMemo(() => {
     const metas = Array.from(sessionMetaMap.values())
-    if (!activeWorkspaceId) return metas.filter(s => !s.hidden)
+    if (!activeWorkspaceId) return metas.filter(isOrdinarySessionVisible)
     return metas.filter(s =>
-      !s.hidden && (s.workspaceId === activeWorkspaceId || (remoteWorkspaceId && s.workspaceId === remoteWorkspaceId))
+      isOrdinarySessionVisible(s) && (s.workspaceId === activeWorkspaceId || (remoteWorkspaceId && s.workspaceId === remoteWorkspaceId))
     )
   }, [sessionMetaMap, activeWorkspaceId, remoteWorkspaceId])
 
@@ -1984,6 +1986,34 @@ function AppShellContent({
         description: error instanceof Error ? error.message : String(error),
       })
     }
+  }, [activeWorkspaceId, clearSkillFileCancelListener, finishSkillFileImport, t])
+
+  const handleImportSkillFromDrop = useCallback((files: File[]) => {
+    if (!activeWorkspaceId || skillFileImporting.current) return
+
+    let file: File
+    try {
+      file = getDroppedSkillImportFile(files)
+    } catch (error) {
+      toast.error(t('fileImport.skillFailed'), {
+        description: error instanceof Error ? error.message : String(error),
+      })
+      return
+    }
+
+    skillFileImportTriggerRef.current = null
+    clearSkillFileCancelListener()
+    skillFileImporting.current = true
+    void prepareSkillFileImport(window.electronAPI, activeWorkspaceId, file)
+      .then(value => {
+        setPreparedSkillFileImport({ workspaceId: activeWorkspaceId, value })
+      })
+      .catch(error => {
+        finishSkillFileImport()
+        toast.error(t('fileImport.skillFailed'), {
+          description: error instanceof Error ? error.message : String(error),
+        })
+      })
   }, [activeWorkspaceId, clearSkillFileCancelListener, finishSkillFileImport, t])
 
   useEffect(() => {
@@ -3683,6 +3713,7 @@ function AppShellContent({
                 copyFromOpen={copySkillsFromOpen}
                 onCopyFromOpenChange={setCopySkillsFromOpen}
                 onImportFromFile={handleImportSkillFromFile}
+                onImportDroppedFiles={handleImportSkillFromDrop}
               />
             )}
             {isProjectsNavigation(navState) && activeWorkspaceId && (

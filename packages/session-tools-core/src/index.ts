@@ -143,6 +143,11 @@ export type {
   RunTaskNodeState,
   GetTaskResultsInput,
   TaskResultsPayload,
+  SubmitTaskOutputInput,
+  SubmitTaskVerdictInput,
+  OrchestrationPatchInput,
+  SubmitTaskDefinitionInput,
+  ControlTaskRunInput,
 } from './context.ts';
 
 export { createNodeFileSystem } from './context.ts';

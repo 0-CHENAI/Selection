@@ -29,6 +29,16 @@ export type TooltipPlacement = {
   placement: 'below' | 'above'
 }
 
+type FocusVisibleTarget = Pick<Element, 'matches'>
+
+/**
+ * Mouse clicks and dialog focus restoration should not reopen a tooltip that
+ * was dismissed by activating its button. Keyboard focus remains discoverable.
+ */
+export function shouldShowHeaderTooltipOnFocus(target: FocusVisibleTarget): boolean {
+  return target.matches(':focus-visible')
+}
+
 const DEFAULT_TOOLTIP_SIZE = { width: 48, height: 28 }
 const VIEWPORT_PAD = 8
 const GAP = 6

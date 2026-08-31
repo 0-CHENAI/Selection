@@ -41,14 +41,14 @@ describe('ensureLabelsExist', () => {
     expect(created!.color).toBe('foreground/50');
   });
 
-  it('preserves value on valued labels that need creation', () => {
+  it('preserves value and localizes reserved valued labels that need creation', () => {
     const result = ensureLabelsExist(workspaceRoot, ['priority::3']);
     expect(result).toEqual(['priority::3']);
 
     const config = loadLabelConfig(workspaceRoot);
     const created = flattenLabels(config.labels).find(l => l.id === 'priority');
     expect(created).toBeDefined();
-    expect(created!.name).toBe('Priority');
+    expect(created!.name).toBe('优先级');
   });
 
   it('passes through valued labels when the label already exists', () => {

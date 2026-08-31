@@ -30,6 +30,9 @@ files:
   - packages/shared/src/interceptor-request-utils.ts
   # Include CLI tool Python scripts (platform-independent)
   - resources/scripts/**/*
+  # Runtime bundles must not ship the CLI smoke-test harness or bytecode caches.
+  - "!**/resources/scripts/tests/**"
+  - "!**/__pycache__/**"
   # Include CLI tool shell wrappers (platform-independent, both Unix and Windows)
   - resources/bin/markitdown
   - resources/bin/markitdown.cmd
@@ -54,6 +57,10 @@ files:
   - vendor/bun/**/*
   # Exclude everything from node_modules (will use extraResources for SDK)
   - "!node_modules/**/*"
+  # Build outputs live inside the Electron project. Never recursively package a
+  # prior desktop release into the next app bundle.
+  - "!release/**"
+  - "!release-swarm-preview/**"
 
 # Why extraResources instead of `files`: since electron-builder v20.15.2,
 # `node_modules` directories are auto-excluded from `files`. extraResources
@@ -108,8 +115,15 @@ mac:
       to: messaging-whatsapp-worker/worker.cjs
   # Exclude binaries for other platforms
   files:
+    # A positive platform filter prevents electron-builder from prepending its
+    # default **/* matcher, which would otherwise copy Electron source/tests.
+    - dist/**/*
+    - "!**/resources/scripts/tests/**"
+    - "!**/__pycache__/**"
     - "!**/resources/bin/win32-*/**"
     - "!**/resources/bin/linux-*/**"
+    - "!release/**"
+    - "!release-swarm-preview/**"
   # Use predictable naming for macOS packages (applies to zip; dmg uses its own config below)
   artifactName: "Selection-${arch}.${ext}"
   # Code signing & notarization (disabled by default for local builds)
@@ -146,6 +160,9 @@ win:
   # Use predictable naming: Selection-x64.exe
   artifactName: "Selection-${arch}.${ext}"
   files:
+    - dist/**/*
+    - "!**/resources/scripts/tests/**"
+    - "!**/__pycache__/**"
     # Exclude binaries for other platforms
     - "!**/resources/bin/darwin-*/**"
     - "!**/resources/bin/linux-*/**"
@@ -156,6 +173,8 @@ win:
     # See: https://github.com/electron-userland/electron-builder/issues/8250
     - "!vendor/bun/**/*"
     - "!**/resources/bin/win32-x64/**"
+    - "!release/**"
+    - "!release-swarm-preview/**"
   # Copy executables as extraResources to avoid EBUSY file locking (see comment above)
   extraResources:
     - from: node_modules/@vscode/ripgrep
@@ -195,5 +214,10 @@ linux:
       to: messaging-whatsapp-worker/worker.cjs
   # Exclude binaries for other platforms
   files:
+    - dist/**/*
+    - "!**/resources/scripts/tests/**"
+    - "!**/__pycache__/**"
     - "!**/resources/bin/darwin-*/**"
     - "!**/resources/bin/win32-*/**"
+    - "!release/**"
+    - "!release-swarm-preview/**"
