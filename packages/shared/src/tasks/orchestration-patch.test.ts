@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'bun:test';
-import { definitionDiff, validateOrchestrationPatch, type OrchestrationPatch, type PatchContext } from './orchestration-patch.ts';
+import { definitionDiff, mergeRunDefinition, validateOrchestrationPatch, type OrchestrationPatch, type PatchContext } from './orchestration-patch.ts';
 import type { TaskSpec } from './schema.ts';
 
 const ORIGINAL = process.env.CRAFT_FEATURE_TASKS_ORCHESTRATE;
@@ -157,5 +157,31 @@ describe('orchestration patch', () => {
       ],
     });
     expect(definitionDiff(from, to)).toEqual({ added: ['c'], removed: ['b'], changed: ['a'] });
+  });
+
+  it('applies only run nodes and preserves current task-level ownership and limits', () => {
+    const live = spec({
+      title: 'live title',
+      goal: 'live goal',
+      project: 'live-project',
+      cwd: 'live-dir',
+      token_budget: 123,
+      defaults: { permissionMode: 'safe' },
+    });
+    const run = spec({
+      title: 'stale title',
+      goal: 'stale goal',
+      project: 'stale-project',
+      cwd: 'stale-dir',
+      token_budget: 999,
+      defaults: { permissionMode: 'allow-all' },
+      nodes: [{ id: 'patched', kind: 'session', prompt: 'new graph' }],
+    });
+
+    expect(mergeRunDefinition(live, run)).toEqual({
+      ...live,
+      schema_version: 2,
+      nodes: run.nodes,
+    });
   });
 });

@@ -129,13 +129,25 @@ export function validateTaskSpec(spec: TaskSpec): ValidationResult {
             continue;
           }
           if (ref.field) {
-            warnings.push(
-              warn(
-                `${path}.inputs`,
-                `Reference ${ref.raw} reads a structured output field, but node outputs carry only free-form text in v1 — the token will be left unresolved at runtime`,
-                `Use \${nodes.${ref.nodeId}.output} to consume the node's full text output`,
-              ),
-            );
+            if (spec.schema_version === 2) {
+              const declared = byId.get(ref.nodeId)?.outputs?.some((output) => output.name === ref.field);
+              if (!declared) {
+                errors.push(
+                  err(
+                    `${path}.inputs`,
+                    `Reference ${ref.raw} reads undeclared output field "${ref.field}" from node "${ref.nodeId}"`,
+                  ),
+                );
+              }
+            } else {
+              warnings.push(
+                warn(
+                  `${path}.inputs`,
+                  `Reference ${ref.raw} reads a structured output field, but node outputs carry only free-form text in v1 — the token will be left unresolved at runtime`,
+                  `Use \${nodes.${ref.nodeId}.output} to consume the node's full text output`,
+                ),
+              );
+            }
           }
           if (!nodeDeps(node).includes(ref.nodeId)) {
             warnings.push(
@@ -235,13 +247,25 @@ export function validateTaskSpec(spec: TaskSpec): ValidationResult {
         errors.push(err(`outputs.${name}`, `Output "${name}" references unknown node "${ref.nodeId}"`));
       }
       if (ref.kind === 'node' && byId.has(ref.nodeId) && ref.field) {
-        warnings.push(
-          warn(
-            `outputs.${name}`,
-            `Output "${name}" reads a structured output field ${ref.raw}, but node outputs carry only free-form text in v1 — the token will be left unresolved at runtime`,
-            `Use \${nodes.${ref.nodeId}.output} to consume the node's full text output`,
-          ),
-        );
+        if (spec.schema_version === 2) {
+          const declared = byId.get(ref.nodeId)?.outputs?.some((output) => output.name === ref.field);
+          if (!declared) {
+            errors.push(
+              err(
+                `outputs.${name}`,
+                `Output "${name}" reads undeclared field "${ref.field}" from node "${ref.nodeId}"`,
+              ),
+            );
+          }
+        } else {
+          warnings.push(
+            warn(
+              `outputs.${name}`,
+              `Output "${name}" reads a structured output field ${ref.raw}, but node outputs carry only free-form text in v1 — the token will be left unresolved at runtime`,
+              `Use \${nodes.${ref.nodeId}.output} to consume the node's full text output`,
+            ),
+          );
+        }
       }
       if (ref.kind === 'param' && !declaredParams.has(ref.name)) {
         errors.push(err(`outputs.${name}`, `Output "${name}" references undeclared param "${ref.name}"`));

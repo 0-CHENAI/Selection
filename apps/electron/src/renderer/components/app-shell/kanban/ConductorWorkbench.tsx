@@ -18,6 +18,7 @@ import {
 import '@xyflow/react/dist/style.css'
 import { useTranslation } from 'react-i18next'
 import { isTasksOrchestrateEnabled } from '@craft-agent/shared/feature-flags'
+import type { TaskNodeRunStateDto, TaskRunSnapshotDto } from '@craft-agent/shared/protocol'
 import { resolveNodeStatePill } from './node-state-pill'
 import { nodeKindLabelKey, runStatusLabelKey, runnerLabelKey } from './task-labels'
 import type { EditorNodeKind } from './task-spec-form'
@@ -41,7 +42,21 @@ export interface WorkbenchSpec {
 
 interface ConductorWorkbenchProps {
   spec: WorkbenchSpec
-  liveRun?: { status: string; nodes: Array<{ id: string; state: string }> } | null
+  liveRun?: TaskRunSnapshotDto | null
+}
+
+export function runtimeNodesForDefinition(nodes: TaskNodeRunStateDto[], nodeId: string): TaskNodeRunStateDto[] {
+  return nodes.filter((node) => node.id === nodeId || node.definitionId === nodeId || node.id.startsWith(`${nodeId}#`))
+}
+
+function definitionOverlayState(nodeId: string, live: ConductorWorkbenchProps['liveRun']): string | undefined {
+  if (!live) return undefined
+  return overlayState(nodeId, {
+    nodes: live.nodes.map((node) => ({
+      id: node.definitionId ? `${node.definitionId}#${node.id}` : node.id,
+      state: node.state,
+    })),
+  })
 }
 
 function nodeLabel(
@@ -49,7 +64,7 @@ function nodeLabel(
   live: ConductorWorkbenchProps['liveRun'],
   translate: (key: string) => string,
 ): string {
-  const state = overlayState(n.id, live)
+  const state = definitionOverlayState(n.id, live)
   const pill = state ? resolveNodeStatePill(state) : null
   const stateText = pill?.labelKey ? translate(pill.labelKey) : state
   return `${n.title ?? n.id} · ${translate(nodeKindLabelKey(n.kind))}${stateText ? ` · ${stateText}` : ''}`
@@ -119,8 +134,10 @@ function WorkbenchInner({ spec, liveRun }: ConductorWorkbenchProps) {
   }, [topologyKey, selected])
 
   const selectedSpec = spec.nodes.find((n) => n.id === selected)
-  const selectedLive = selectedSpec ? overlayState(selectedSpec.id, liveRun) : undefined
+  const selectedLive = selectedSpec ? definitionOverlayState(selectedSpec.id, liveRun) : undefined
   const selectedPill = selectedLive ? resolveNodeStatePill(selectedLive) : null
+  const selectedInstances = selectedSpec ? runtimeNodesForDefinition(liveRun?.nodes ?? [], selectedSpec.id) : []
+  const dynamicInstances = (liveRun?.nodes ?? []).filter((node) => node.definitionId || node.id.includes('#'))
   const runStatusKey = runStatusLabelKey(liveRun?.status)
 
   return (
@@ -168,9 +185,80 @@ function WorkbenchInner({ spec, liveRun }: ConductorWorkbenchProps) {
                 </div>
               )}
               {selectedSpec.prompt && <p className="whitespace-pre-wrap text-foreground/80">{selectedSpec.prompt}</p>}
+              {selectedInstances.length > 0 && (
+                <section className="mt-1 border-t border-border/70 pt-2">
+                  <div className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-foreground/45">
+                    {t('tasks.runtimeInstances', { count: selectedInstances.length })}
+                  </div>
+                  <div className="space-y-3">
+                    {selectedInstances.map((instance) => {
+                      const pill = resolveNodeStatePill(instance.state)
+                      return (
+                        <div key={instance.id} className="min-w-0">
+                          <div className="flex items-center gap-2">
+                            <span className="truncate font-mono text-[11px] font-semibold">{instance.id}</span>
+                            <span className={`ml-auto shrink-0 rounded border px-1.5 py-0.5 text-[10.5px] ${pill.className}`}>
+                              {pill.labelKey ? t(pill.labelKey) : instance.state}
+                            </span>
+                          </div>
+                          <dl className="mt-1.5 grid grid-cols-2 gap-x-2 gap-y-1 text-[11px] text-foreground/55">
+                            <div>
+                              <dt className="inline">{t('tasks.nodeModel')}: </dt>
+                              <dd className="inline text-foreground/75">{instance.model ?? t('tasks.notAvailable')}</dd>
+                            </div>
+                            <div>
+                              <dt className="inline">{t('tasks.nodeTokens')}: </dt>
+                              <dd className="inline text-foreground/75">{instance.tokensUsed ?? 0}</dd>
+                            </div>
+                            <div>
+                              <dt className="inline">{t('tasks.nodeAttempt')}: </dt>
+                              <dd className="inline text-foreground/75">{instance.attempt}</dd>
+                            </div>
+                            <div>
+                              <dt className="inline">{t('tasks.nodeRetries')}: </dt>
+                              <dd className="inline text-foreground/75">{instance.retryCount ?? 0}</dd>
+                            </div>
+                          </dl>
+                          {instance.blocker && (
+                            <div className="mt-1.5 rounded-md bg-amber-500/10 px-2 py-1.5 text-[11px] leading-relaxed text-amber-800 dark:text-amber-200">
+                              <span className="font-semibold">{t('tasks.nodeBlocker')}: </span>{instance.blocker}
+                            </div>
+                          )}
+                        </div>
+                      )
+                    })}
+                  </div>
+                </section>
+              )}
             </div>
           ) : (
             <p className="text-foreground/45">{t('tasks.canvasInspectorEmpty')}</p>
+          )}
+          {dynamicInstances.length > 0 && (
+            <section className="mt-3 border-t border-border/70 pt-2">
+              <div className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-foreground/45">
+                {t('tasks.dynamicInstances', { count: dynamicInstances.length })}
+              </div>
+              <div className="space-y-1">
+                {dynamicInstances.map((instance) => {
+                  const definition = instance.definitionId ?? instance.id.slice(0, instance.id.indexOf('#'))
+                  const pill = resolveNodeStatePill(instance.state)
+                  return (
+                    <button
+                      key={instance.id}
+                      type="button"
+                      className="flex w-full items-center gap-2 rounded px-1 py-1 text-left hover:bg-foreground/[0.04] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                      onClick={() => setSelected(definition)}
+                    >
+                      <span className="min-w-0 flex-1 truncate font-mono text-[11px]">{instance.id}</span>
+                      <span className={`shrink-0 rounded border px-1 py-0.5 text-[10px] ${pill.className}`}>
+                        {pill.labelKey ? t(pill.labelKey) : instance.state}
+                      </span>
+                    </button>
+                  )
+                })}
+              </div>
+            </section>
           )}
         </aside>
       </div>

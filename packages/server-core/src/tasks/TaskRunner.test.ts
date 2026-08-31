@@ -92,6 +92,7 @@ class MockHost implements ConductorSessionHost {
     const evt: SessionCompletionEvent = {
       sessionId,
       workspaceId: 'ws',
+      generation: 0,
       reason: opts.reason ?? 'complete',
       finalText: opts.finalText,
       tokenUsage: opts.tokenUsage,
@@ -1889,6 +1890,51 @@ describe('TaskRunner (Conductor)', () => {
       restarted.scanUnfinished();
       expect(restarted.getRunState('orchp2', 'r2')!.revision).toBe(1);
       expect(restarted.getRunState('orchp2', 'r2')!.nodes.some((n) => n.id === 'b')).toBe(true);
+    } finally {
+      if (prev === undefined) delete process.env.CRAFT_FEATURE_TASKS_ORCHESTRATE;
+      else process.env.CRAFT_FEATURE_TASKS_ORCHESTRATE = prev;
+    }
+  });
+
+  it('executes a verification-time orchestrate patch before accepting the final verdict', async () => {
+    const prev = process.env.CRAFT_FEATURE_TASKS_ORCHESTRATE;
+    process.env.CRAFT_FEATURE_TASKS_ORCHESTRATE = '1';
+    try {
+      saveTaskSpec(root, specOf({
+        schema_version: 2,
+        id: 'verify-patch',
+        title: 'Verify patch',
+        goal: 'g',
+        runner: 'orchestrate',
+        nodes: [{ id: 'a', prompt: 'a' }],
+      }));
+      const runner = makeRunner();
+      runner.run('verify-patch', {
+        runId: 'r1',
+        orchestratorSessionId: 'orch',
+        orchestrateAllowed: true,
+      });
+      await tick();
+      host.complete('a', { finalText: 'A' });
+      await tick();
+      expect(runner.getRunState('verify-patch', 'r1')?.status).toBe('verifying');
+
+      const patched = runner.applyOrchestrationPatch('verify-patch', 'r1', {
+        runId: 'r1',
+        decisionId: 'repair-b',
+        baseRevision: 0,
+        rationale: 'add verification repair',
+        add: [{ id: 'b', kind: 'session', prompt: 'repair ${nodes.a.output}', depends_on: ['a'] }],
+      });
+      expect(patched.status).toBe('running');
+      await tick();
+      expect(host.dispatchedNames()).toContain('b');
+      expect(() => runner.submitVerdict('orch', { runId: 'r1', result: 'pass' })).toThrow(/not waiting for a verdict/);
+
+      host.complete('b', { finalText: 'B' });
+      await tick();
+      expect(runner.getRunState('verify-patch', 'r1')?.status).toBe('verifying');
+      expect(runner.submitVerdict('orch', { runId: 'r1', result: 'pass' }).status).toBe('completed');
     } finally {
       if (prev === undefined) delete process.env.CRAFT_FEATURE_TASKS_ORCHESTRATE;
       else process.env.CRAFT_FEATURE_TASKS_ORCHESTRATE = prev;

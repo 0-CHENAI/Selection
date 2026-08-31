@@ -197,6 +197,19 @@ export function definitionDiff(from: TaskSpec, to: TaskSpec): DefinitionDiff {
   return { added, removed, changed };
 }
 
+/**
+ * Apply only the graph definition produced by a run. Task identity, project,
+ * working directory, sources, skills, permissions and budgets remain owned by
+ * the latest live task document.
+ */
+export function mergeRunDefinition(from: TaskSpec, run: TaskSpec): TaskSpec {
+  return {
+    ...from,
+    schema_version: 2,
+    nodes: run.nodes,
+  };
+}
+
 function stripUi(node: TaskNode): TaskNode {
   return node;
 }

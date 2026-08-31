@@ -32,6 +32,7 @@ import type {
   TaskApplyRunRevisionRequest,
   TaskApplyRunRevisionResult,
 } from '@craft-agent/shared/protocol'
+import { createHash } from 'node:crypto'
 import { getWorkspaceByNameOrId, getLlmConnections } from '@craft-agent/shared/config'
 import {
   parseTaskYaml,
@@ -45,13 +46,14 @@ import {
   loadTaskResults,
   TaskEtagConflictError,
   definitionDiff,
+  mergeRunDefinition,
   readLatestSpecRevision,
   serializeTaskYaml,
 } from '@craft-agent/shared/tasks'
 import { createLogger } from '@craft-agent/shared/utils'
 import { pushTyped, type RpcServer } from '@craft-agent/server-core/transport'
 import type { HandlerDeps } from '../handler-deps'
-import { TaskRunner, TaskControlError, createTaskFromSpec, finishTaskOrchestrator, resolveGeneratedYaml } from '../../tasks'
+import { TaskRunner, TaskControlError, clearSubmittedDefinition, createTaskFromSpec, finishTaskOrchestrator, resolveGeneratedYaml } from '../../tasks'
 
 const tasksLog = createLogger('tasks-generate')
 
@@ -135,13 +137,29 @@ export function registerTasksHandlers(server: RpcServer, deps: HandlerDeps): voi
     return runner
   }
 
-  function controlResult(fn: () => TaskRunSnapshotDto | Promise<TaskRunSnapshotDto>): Promise<TaskControlResultDto> {
+  function controlResult(
+    runner: TaskRunner,
+    slug: string,
+    runId: string,
+    fn: () => TaskRunSnapshotDto | Promise<TaskRunSnapshotDto>,
+  ): Promise<TaskControlResultDto> {
     return Promise.resolve()
       .then(fn)
       .then((snapshot) => ({ snapshot }))
       .catch((err: unknown) => {
         if (err instanceof TaskControlError) {
-          return { snapshot: { slug: '', runId: '', taskId: '', status: err.status, nodes: [], tokensUsed: 0 }, conflict: { code: 'conflict' as const, message: err.message } }
+          // Preserve the authoritative run snapshot on conflicts. Returning an
+          // empty placeholder makes the renderer briefly lose node/revision and
+          // budget state precisely when it needs to explain the blocker.
+          const snapshot = runner.getRunState(slug, runId) ?? {
+            slug,
+            runId,
+            taskId: slug,
+            status: err.status,
+            nodes: [],
+            tokensUsed: 0,
+          }
+          return { snapshot, conflict: { code: 'conflict' as const, message: err.message } }
         }
         throw err
       })
@@ -301,7 +319,8 @@ export function registerTasksHandlers(server: RpcServer, deps: HandlerDeps): voi
     // sending so a fast turn can't complete before we listen; a timeout keeps a hung turn
     // from blocking forever.
     const askOrchestrator = (prompt: string) =>
-      new Promise<string>((resolve, reject) => {
+      new Promise<{ text: string; generation: number }>((resolve, reject) => {
+        clearSubmittedDefinition(sessionId)
         let settled = false
         let off: (() => void) | undefined
         let timer: ReturnType<typeof setTimeout> | undefined
@@ -315,9 +334,12 @@ export function registerTasksHandlers(server: RpcServer, deps: HandlerDeps): voi
         off = deps.sessionManager.onSessionComplete((evt) => {
           if (evt.sessionId !== sessionId) return
           const text = evt.finalText ?? deps.sessionManager.getSessionFinalText(sessionId) ?? ''
-          finish(() => resolve(text))
+          finish(() => resolve({ text, generation: evt.generation }))
         })
-        timer = setTimeout(() => finish(() => reject(new Error('Task generation timed out'))), GENERATE_TIMEOUT_MS)
+        timer = setTimeout(() => finish(() => {
+          clearSubmittedDefinition(sessionId)
+          reject(new Error('Task generation timed out'))
+        }), GENERATE_TIMEOUT_MS)
         void Promise.resolve(deps.sessionManager.sendMessage(sessionId, prompt))
           .catch((err: unknown) => finish(() => reject(err instanceof Error ? err : new Error(String(err)))))
       })
@@ -337,8 +359,8 @@ export function registerTasksHandlers(server: RpcServer, deps: HandlerDeps): voi
         let attempts = 0
         for (let attempt = 0; attempt < MAX_GENERATE_ATTEMPTS; attempt++) {
           attempts = attempt + 1
-          const finalText = await askOrchestrator(prompt)
-          yaml = resolveGeneratedYaml(sessionId, finalText)
+          const turn = await askOrchestrator(prompt)
+          yaml = resolveGeneratedYaml(sessionId, turn.generation, turn.text)
           parsed = parseTaskYaml(yaml)
           if (parsed.valid) break
           prompt = buildRepairPrompt(parsed.errors)
@@ -394,27 +416,33 @@ export function registerTasksHandlers(server: RpcServer, deps: HandlerDeps): voi
   })
 
   server.handle(RPC_CHANNELS.tasks.PAUSE, async (_ctx, workspaceId: string, slug: string, runId: string) => {
-    return controlResult(() => runnerFor(workspaceId).pause(slug, runId))
+    const runner = runnerFor(workspaceId)
+    return controlResult(runner, slug, runId, () => runner.pause(slug, runId))
   })
 
   server.handle(RPC_CHANNELS.tasks.RESUME, async (_ctx, workspaceId: string, slug: string, runId: string) => {
-    return controlResult(() => runnerFor(workspaceId).resume(slug, runId))
+    const runner = runnerFor(workspaceId)
+    return controlResult(runner, slug, runId, () => runner.resume(slug, runId))
   })
 
   server.handle(RPC_CHANNELS.tasks.STOP, async (_ctx, workspaceId: string, slug: string, runId: string) => {
-    return controlResult(() => runnerFor(workspaceId).stop(slug, runId))
+    const runner = runnerFor(workspaceId)
+    return controlResult(runner, slug, runId, () => runner.stop(slug, runId))
   })
 
   server.handle(RPC_CHANNELS.tasks.CONTINUE, async (_ctx, workspaceId: string, slug: string, runId: string) => {
-    return controlResult(() => runnerFor(workspaceId).continue(slug, runId))
+    const runner = runnerFor(workspaceId)
+    return controlResult(runner, slug, runId, () => runner.continue(slug, runId))
   })
 
   server.handle(RPC_CHANNELS.tasks.RESPOND_APPROVAL, async (_ctx, workspaceId: string, req: TaskRespondApprovalRequest) => {
-    return controlResult(() => runnerFor(workspaceId).respondApproval(req.slug, req.runId, req.nodeId, req.approved))
+    const runner = runnerFor(workspaceId)
+    return controlResult(runner, req.slug, req.runId, () => runner.respondApproval(req.slug, req.runId, req.nodeId, req.approved))
   })
 
   server.handle(RPC_CHANNELS.tasks.UPDATE_RUN_LIMITS, async (_ctx, workspaceId: string, req: TaskUpdateRunLimitsRequest) => {
-    return controlResult(() => runnerFor(workspaceId).updateRunLimits(req.slug, req.runId, req.tokenBudget, req.params))
+    const runner = runnerFor(workspaceId)
+    return controlResult(runner, req.slug, req.runId, () => runner.updateRunLimits(req.slug, req.runId, req.tokenBudget, req.params))
   })
 
   // tasks:get — spec + (optional) active run-state.
@@ -468,24 +496,63 @@ export function registerTasksHandlers(server: RpcServer, deps: HandlerDeps): voi
         validation: { valid: false, errors: [{ path: 'root', message: `Task "${req.slug}" not found`, severity: 'error' }], warnings: [] },
       }
     }
-    const runSpec = runnerFor(workspaceId).currentRunSpec(req.slug, req.runId) ?? readLatestSpecRevision(ws.rootPath, req.slug, req.runId)?.spec
-    if (!runSpec) {
+    const runner = runnerFor(workspaceId)
+    const activeSnapshot = runner.getRunState(req.slug, req.runId)
+    const activeSpec = runner.currentRunSpec(req.slug, req.runId)
+    const runRevision = activeSpec && activeSnapshot
+      ? { revision: activeSnapshot.revision ?? 0, spec: activeSpec }
+      : readLatestSpecRevision(ws.rootPath, req.slug, req.runId)
+    if (!runRevision) {
       return {
         diff: { added: [], removed: [], changed: [] },
         validation: { valid: false, errors: [{ path: 'run', message: `No run spec for ${req.runId}`, severity: 'error' }], warnings: [] },
       }
     }
-    const diff = definitionDiff(live.spec, runSpec)
-    const yaml = serializeTaskYaml({ ...runSpec, schema_version: 2 })
+    const runSpecHash = createHash('sha256')
+      .update(JSON.stringify(runRevision.spec.nodes))
+      .digest('hex')
+    const merged = mergeRunDefinition(live.spec, runRevision.spec)
+    const diff = definitionDiff(live.spec, merged)
+    const yaml = serializeTaskYaml(merged)
     const parsed = parseTaskYaml(yaml)
     const validation = toValidationDto(parsed)
-    if (!req.confirm) return { diff, validation, yaml }
+    const resultBase = { diff, validation, yaml, runRevision: runRevision.revision, runSpecHash }
+    if (!req.confirm) return resultBase
+    if (diff.added.length === 0 && diff.removed.length === 0 && diff.changed.length === 0) {
+      return resultBase
+    }
+    if (req.expectedRunRevision === undefined || req.expectedRunSpecHash === undefined) {
+      return {
+        ...resultBase,
+        validation: {
+          ...validation,
+          valid: false,
+          errors: [...validation.errors, {
+            path: 'run',
+            message: 'Run revision confirmation requires the preceding preview identity',
+            severity: 'error' as const,
+          }],
+        },
+      }
+    }
+    if (req.expectedRunRevision !== runRevision.revision) {
+      return {
+        ...resultBase,
+        conflict: { code: 'run-revision-conflict', expected: req.expectedRunRevision, actual: runRevision.revision },
+      }
+    }
+    if (req.expectedRunSpecHash !== runSpecHash) {
+      return {
+        ...resultBase,
+        conflict: { code: 'run-spec-conflict', expected: req.expectedRunSpecHash, actual: runSpecHash },
+      }
+    }
     try {
       const saved = saveTaskDocument(ws.rootPath, yaml, req.expectedEtag)
-      return { diff, validation: toValidationDto({ valid: saved.valid, errors: saved.errors, warnings: saved.warnings, spec: saved.spec }), applied: true, etag: saved.etag, yaml: saved.yaml }
+      return { ...resultBase, validation: toValidationDto({ valid: saved.valid, errors: saved.errors, warnings: saved.warnings, spec: saved.spec }), applied: true, etag: saved.etag, yaml: saved.yaml }
     } catch (err) {
       if (err instanceof TaskEtagConflictError) {
-        return { diff, validation, conflict: { code: 'etag-conflict', expected: err.expected, actual: err.actual } }
+        return { ...resultBase, conflict: { code: 'etag-conflict', expected: err.expected, actual: err.actual } }
       }
       throw err
     }

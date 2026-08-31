@@ -561,9 +561,6 @@ class ActiveRun {
       }
       if ((node.replicas ?? 1) > 1) {
         this.replicaCounts.set(node.id, node.replicas!);
-        for (let i = 0; i < node.replicas!; i++) {
-          const iid = instanceId(node.id, i);
-        }
       }
     }
   }
@@ -2001,6 +1998,7 @@ class ActiveRun {
     if (this.isTerminal()) {
       throw new TaskControlError(this.runStatus, `Cannot patch a ${this.runStatus} run`);
     }
+    const wasVerifying = this.runStatus === 'verifying';
     const result = validateOrchestrationPatch(patch, {
       spec: this.spec,
       revision: this.revision,
@@ -2046,6 +2044,14 @@ class ActiveRun {
     });
     if (result.action === 'pause') {
       this.pause();
+    } else if (wasVerifying) {
+      // A verification-time patch represents more work, so invalidate the
+      // outstanding verdict request and execute the new revision before asking
+      // the coordinator for another structured verdict.
+      this.runStatus = 'running';
+      this.verdictLocked = false;
+      this.log({ kind: 'run-resumed' });
+      this.scheduleReady();
     } else if (this.runStatus === 'paused' || this.runStatus === 'pausing') {
       this.runStatus = 'running';
       this.scheduleReady();
@@ -2133,7 +2139,7 @@ function skillsPreamble(skills: string[] | undefined): string {
 /**
  * Whether a node's `retry.when` trigger covers a given failure class. An absent `when`
  * defaults to retrying on `error` (the common "transient failure" case); `empty`/`invalid`
- * triggers are opt-in and not yet produced by the runner, so they never match here.
+ * triggers are opt-in and are emitted by declared-output validation.
  */
 function retryBackoffMs(
   retry: { backoff?: { base?: number; factor?: number; max?: number } },

@@ -160,6 +160,26 @@ nodes:
     expect(existsSync(taskYamlPath(root, 'demo'))).toBe(true);
   });
 
+  it('migrates the known v1 type alias while keeping v2 strict', () => {
+    const legacy = `id: demo
+title: Demo
+goal: g
+nodes:
+  - id: a
+    type: session
+    prompt: hello
+`;
+    mkdirSync(taskDir(root, 'demo'), { recursive: true });
+    writeFileSync(taskYamlPath(root, 'demo'), legacy);
+    const before = loadTaskDocument(root, 'demo')!;
+    const saved = saveTaskDocument(root, legacy, before.etag);
+    expect(saved.sourceVersion).toBe(2);
+    expect(saved.yaml).toContain('kind: session');
+    expect(saved.yaml).not.toContain('type: session');
+
+    expect(parseTaskDocument(legacy.replace('id: demo', 'schema_version: 2\nid: demo')).valid).toBe(false);
+  });
+
   it('refuses to overwrite when etag does not match', () => {
     mkdirSync(taskDir(root, 'demo'), { recursive: true });
     writeFileSync(taskYamlPath(root, 'demo'), V1);

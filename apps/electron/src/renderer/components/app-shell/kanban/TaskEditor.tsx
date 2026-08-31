@@ -24,6 +24,7 @@ import type { KanbanModelProviderGroup, TaskEditorTarget } from './types'
 import { uid, buildSpec, specToSubtasks, canDependOn, quickAddNodeId, quickAddChildToSubtask, taskDocumentForSave, canSafelySaveExistingTask, shouldRefreshYamlDraft, DEFAULT_REPAIR_ATTEMPTS, MAX_REPAIR_ATTEMPTS_CAP, SESSION_LIKE_KINDS, type EditorSubtask, type SpecNode, type TaskPermissionMode } from './task-spec-form'
 import { runnerLabelKey, runStatusLabelKey } from './task-labels'
 import { ConductorWorkbench, type WorkbenchSpec } from './ConductorWorkbench'
+import { ApplyRunRevisionDialog, canConfirmRunRevision } from './ApplyRunRevisionDialog'
 import { isTasksOrchestrateEnabled } from '@craft-agent/shared/feature-flags'
 import { resolveNodeStatePill } from './node-state-pill'
 import { SourceAvatar } from '@/components/ui/source-avatar'
@@ -33,6 +34,7 @@ import { SkillSelectorPopover } from '@/components/ui/SkillSelectorPopover'
 import { WorkingDirectorySelector } from '../input/WorkingDirectorySelector'
 import type { LoadedSource, LoadedSkill } from '../../../../shared/types'
 import { resolveSkillTitle, resolveSourceTitle } from '@craft-agent/shared/display-titles'
+import { buildSensitiveRunParams, sensitiveRunParamNames } from './sensitive-run-params'
 
 // Client-side fallback for async generate: a touch longer than the server's GENERATE_TIMEOUT_MS
 // (180s) so the orchestrator's own timeout + result push can land before we give up locally.
@@ -83,6 +85,7 @@ type EditableTaskSpec = Record<string, unknown> & {
   runner?: 'conduct' | 'orchestrate'
   defaults?: { model?: string; llmConnection?: string; permissionMode?: TaskPermissionMode }
   nodes?: SpecNode[]
+  params?: Array<{ name?: string; sensitive?: boolean }>
   ui?: { layout?: { nodes?: Record<string, { x: number; y: number }> } }
 }
 
@@ -591,11 +594,18 @@ export function TaskEditor({
   const [selectedRunId, setSelectedRunId] = React.useState<string | null>(null)
   const [liveRun, setLiveRun] = React.useState<Awaited<ReturnType<typeof window.electronAPI.runTask>> | null>(null)
   const [tokenBudgetDraft, setTokenBudgetDraft] = React.useState('')
+  const [sensitiveParamDrafts, setSensitiveParamDrafts] = React.useState<Record<string, string>>({})
   const [etag, setEtag] = React.useState<string | null>(null)
   const [sourceVersion, setSourceVersion] = React.useState<1 | 2 | undefined>(undefined)
   const [migrationWarnings, setMigrationWarnings] = React.useState<string[]>([])
   const [preservedSpec, setPreservedSpec] = React.useState<Record<string, unknown> | undefined>(undefined)
   const [taskLoadError, setTaskLoadError] = React.useState<string | null>(null)
+  const [revisionDialogOpen, setRevisionDialogOpen] = React.useState(false)
+  const [revisionPreview, setRevisionPreview] = React.useState<Awaited<ReturnType<typeof window.electronAPI.applyTaskRunRevision>> | null>(null)
+  const [revisionPreviewRunId, setRevisionPreviewRunId] = React.useState<string | null>(null)
+  const [revisionPreviewLoading, setRevisionPreviewLoading] = React.useState(false)
+  const [revisionApplying, setRevisionApplying] = React.useState(false)
+  const [revisionError, setRevisionError] = React.useState<string | null>(null)
 
   const markFormChanged = React.useCallback(() => {
     setDirty(true)
@@ -794,6 +804,117 @@ export function TaskEditor({
     setLiveRun(res.snapshot)
     setTokenBudgetDraft('')
   }, [editSlug, liveRun, tokenBudgetDraft, workspaceId, t])
+
+  const sensitiveParams = React.useMemo(
+    () => sensitiveRunParamNames(preservedSpec),
+    [preservedSpec],
+  )
+
+  React.useEffect(() => {
+    setSensitiveParamDrafts({})
+  }, [liveRun?.runId])
+
+  const restoreSensitiveParams = React.useCallback(async () => {
+    if (!editSlug || !liveRun) return
+    const resolved = buildSensitiveRunParams(sensitiveParams, sensitiveParamDrafts)
+    if (!resolved.params) {
+      toast.error(t('tasks.sensitiveParamsRequired'), { description: resolved.missing.join(', ') })
+      return
+    }
+    try {
+      const res = await window.electronAPI.updateTaskRunLimits(workspaceId, {
+        slug: editSlug,
+        runId: liveRun.runId,
+        params: resolved.params,
+      })
+      if (res.conflict) {
+        toast.error(t('tasks.toastControlConflict'), { description: res.conflict.message })
+        return
+      }
+      setLiveRun(res.snapshot)
+      setSensitiveParamDrafts({})
+      toast.success(t('tasks.sensitiveParamsRestored'))
+    } catch (err) {
+      toast.error(t('tasks.toastRunFailed'), { description: err instanceof Error ? err.message : String(err) })
+    }
+  }, [editSlug, liveRun, sensitiveParamDrafts, sensitiveParams, workspaceId, t])
+
+  const previewRunRevision = React.useCallback(async () => {
+    const runId = selectedRunId ?? results?.runId ?? liveRun?.runId
+    if (!editSlug || !runId || !etag) return
+    setRevisionDialogOpen(true)
+    setRevisionPreview(null)
+    setRevisionPreviewRunId(runId)
+    setRevisionError(null)
+    setRevisionPreviewLoading(true)
+    try {
+      const preview = await window.electronAPI.applyTaskRunRevision(workspaceId, {
+        slug: editSlug,
+        runId,
+        expectedEtag: etag,
+        confirm: false,
+      })
+      setRevisionPreview(preview)
+    } catch (error) {
+      setRevisionError(error instanceof Error ? error.message : String(error))
+    } finally {
+      setRevisionPreviewLoading(false)
+    }
+  }, [editSlug, etag, liveRun?.runId, results?.runId, selectedRunId, workspaceId])
+
+  const confirmRunRevision = React.useCallback(async () => {
+    const preview = revisionPreview
+    if (!editSlug || !revisionPreviewRunId || !etag || !preview || !canConfirmRunRevision(preview)) return
+    setRevisionApplying(true)
+    setRevisionError(null)
+    try {
+      const applied = await window.electronAPI.applyTaskRunRevision(workspaceId, {
+        slug: editSlug,
+        runId: revisionPreviewRunId,
+        expectedEtag: etag,
+        expectedRunRevision: preview.runRevision,
+        expectedRunSpecHash: preview.runSpecHash,
+        confirm: true,
+      })
+      if (applied.conflict) {
+        setRevisionPreview((current) => current ? { ...current, conflict: applied.conflict } : applied)
+        setRevisionError(applied.conflict.code === 'etag-conflict'
+          ? t('tasks.revisionEtagConflict')
+          : t('tasks.revisionRunConflict'))
+        return
+      }
+      if (!applied.applied || !applied.validation.valid || !applied.yaml || !applied.etag) {
+        setRevisionPreview(applied)
+        setRevisionError(t('tasks.revisionApplyFailed'))
+        return
+      }
+
+      const spec = applied.validation.spec as EditableTaskSpec | undefined
+      setYamlDraft(applied.yaml)
+      setEtag(applied.etag)
+      setSourceVersion(2)
+      setMigrationWarnings([])
+      setYamlDiagnostics([])
+      setYamlHasLocalSource(true)
+      setFormChangedSinceYaml(false)
+      setDirty(false)
+      if (spec) {
+        setPreservedSpec(spec)
+        setSubtasks(specToSubtasks(spec.nodes ?? []))
+        if (spec.runner) setRunner(spec.runner)
+        setLayout(spec.ui?.layout?.nodes ?? {})
+      }
+      setRevisionDialogOpen(false)
+      setRevisionPreview(null)
+      setRevisionPreviewRunId(null)
+      setTab('yaml')
+      toast.success(t('tasks.revisionApplySuccess'))
+    } catch (error) {
+      setRevisionError(error instanceof Error ? error.message : String(error))
+    } finally {
+      setRevisionApplying(false)
+    }
+  }, [editSlug, etag, revisionPreview, revisionPreviewRunId, t, workspaceId])
 
   // Async generate: tasks:generate returns the orchestrator session id immediately and the
   // authored spec arrives later via the onTaskGenerated push event. We track the pending
@@ -1289,6 +1410,28 @@ export function TaskEditor({
               </Btn>
             </div>
           )}
+          {isEdit && liveRun?.status === 'interrupted' && sensitiveParams.length > 0 && (
+            <div className="flex items-center gap-1.5" aria-label={t('tasks.sensitiveParamsTitle')}>
+              {sensitiveParams.map((name) => (
+                <input
+                  key={name}
+                  type="password"
+                  autoComplete="off"
+                  value={sensitiveParamDrafts[name] ?? ''}
+                  onChange={(event) => setSensitiveParamDrafts((current) => ({
+                    ...current,
+                    [name]: event.target.value,
+                  }))}
+                  placeholder={name}
+                  aria-label={t('tasks.sensitiveParamInput', { name })}
+                  className="h-7 w-28 rounded-md border border-border bg-background px-2 text-[11.5px]"
+                />
+              ))}
+              <Btn variant="secondary" onClick={() => void restoreSensitiveParams()}>
+                {t('tasks.restoreSensitiveParams')}
+              </Btn>
+            </div>
+          )}
           {(tab === 'definition' || tab === 'canvas' || tab === 'yaml') && (
             <>
               <Btn variant="secondary" onClick={requestClose} disabled={busy}>
@@ -1318,6 +1461,20 @@ export function TaskEditor({
         </div>
       )}
 
+      {liveRun && ((liveRun.blockers?.length ?? 0) > 0 || liveRun.nodes.some((node) => node.blocker)) && (
+        <div role="alert" className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[12.5px] text-foreground/80">
+          <div className="font-semibold">{t('tasks.runBlockers')}</div>
+          <ul className="mt-1 list-disc space-y-0.5 pl-4">
+            {(liveRun.blockers ?? []).map((blocker, index) => <li key={`run:${index}:${blocker}`}>{blocker}</li>)}
+            {liveRun.nodes.filter((node) => node.blocker).map((node) => (
+              <li key={`node:${node.id}:${node.blocker}`}>
+                <span className="font-mono">{node.id}</span>: {node.blocker}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
       {tab === 'definition' && migrationWarnings.length > 0 && (
         <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[12.5px] text-foreground/80">
           {t('tasks.migrationBanner', { version: sourceVersion ?? 1 })}
@@ -1339,6 +1496,8 @@ export function TaskEditor({
             loadResults(id)
           }}
           onOpenChildSession={onOpenChildSession}
+          onApplyRunRevision={() => void previewRunRevision()}
+          canApplyRunRevision={Boolean(editSlug && etag && (selectedRunId ?? results?.runId ?? liveRun?.runId))}
         />
       ) : tab === 'yaml' ? (
         <div className="flex min-h-0 flex-1 flex-col gap-2">
@@ -1633,6 +1792,23 @@ export function TaskEditor({
         </div>
       </div>
       )}
+      <ApplyRunRevisionDialog
+        open={revisionDialogOpen}
+        preview={revisionPreview}
+        loading={revisionPreviewLoading}
+        applying={revisionApplying}
+        error={revisionError}
+        hasUnsavedChanges={dirty}
+        onOpenChange={(open) => {
+          setRevisionDialogOpen(open)
+          if (!open) {
+            setRevisionPreview(null)
+            setRevisionPreviewRunId(null)
+            setRevisionError(null)
+          }
+        }}
+        onConfirm={() => void confirmRunRevision()}
+      />
     </div>
   )
 }
@@ -1646,12 +1822,16 @@ function ResultsPanel({
   selectedRunId,
   onSelectRun,
   onOpenChildSession,
+  onApplyRunRevision,
+  canApplyRunRevision,
 }: {
   results: TaskResults | null
   loading: boolean
   selectedRunId: string | null
   onSelectRun: (runId: string) => void
   onOpenChildSession?: (sessionId: string) => void
+  onApplyRunRevision: () => void
+  canApplyRunRevision: boolean
 }) {
   const { t } = useTranslation()
 
@@ -1700,6 +1880,11 @@ function ResultsPanel({
           )}
         </label>
       )}
+      <div className="flex justify-end">
+        <Btn variant="secondary" onClick={onApplyRunRevision} disabled={!canApplyRunRevision}>
+          {t('tasks.applyRunRevision')}
+        </Btn>
+      </div>
       {results.acceptanceCriteria && (
         <div className="rounded-[10px] border border-border/70 bg-foreground/[0.015] px-3 py-2.5">
           <div className="text-[11px] font-bold uppercase tracking-wide text-foreground/45">{t('tasks.acceptanceCriteria')}</div>

@@ -150,7 +150,8 @@ export function TaskTile({
       style={
         isLive
           ? {
-              boxShadow: `0 0 0 1px ${accent}, 0 4px 16px -4px color-mix(in srgb, ${accent} 40%, transparent)`,
+              outline: `1px solid ${accent}`,
+              outlineOffset: '-1px',
             }
           : undefined
       }

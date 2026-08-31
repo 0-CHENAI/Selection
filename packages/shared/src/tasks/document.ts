@@ -67,7 +67,6 @@ const NODE_KEYS = new Set([
   'title',
   'prompt',
   'kind',
-  'type',
   'model',
   'llmConnection',
   'permissionMode',
@@ -119,7 +118,10 @@ function conditionUnknownFields(raw: unknown, path: string): ValidationIssue[] {
   return issues;
 }
 
-export function v2UnknownFields(raw: unknown): ValidationIssue[] {
+export function v2UnknownFields(
+  raw: unknown,
+  options: { allowLegacyNodeType?: boolean } = {},
+): ValidationIssue[] {
   const issues = unknownKeys(raw, TASK_KEYS, 'root');
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return issues;
   const task = raw as Record<string, unknown>;
@@ -145,9 +147,12 @@ export function v2UnknownFields(raw: unknown): ValidationIssue[] {
 
   const nodes = task.nodes;
   if (!Array.isArray(nodes)) return issues;
+  const nodeKeys = options.allowLegacyNodeType
+    ? new Set([...NODE_KEYS, 'type'])
+    : NODE_KEYS;
   nodes.forEach((node, i) => {
     const path = `nodes.${i}`;
-    issues.push(...unknownKeys(node, NODE_KEYS, path));
+    issues.push(...unknownKeys(node, nodeKeys, path));
     if (!node || typeof node !== 'object' || Array.isArray(node)) return;
     const record = node as Record<string, unknown>;
     if (record.inputs && typeof record.inputs === 'object' && !Array.isArray(record.inputs)) {
@@ -275,7 +280,7 @@ export function saveTaskDocument(
   } catch (e) {
     throw new Error(`Refusing to save invalid task: ${(e as Error).message}`);
   }
-  const unknown = v2UnknownFields(raw);
+  const unknown = v2UnknownFields(raw, { allowLegacyNodeType: incoming.sourceVersion === 1 });
   if (unknown.length) {
     throw new Error(`Refusing to save invalid task: ${unknown.map((e) => e.message).join('; ')}`);
   }

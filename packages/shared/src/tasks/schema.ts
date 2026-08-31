@@ -135,10 +135,10 @@ export const ConditionAstSchema: z.ZodType<ConditionAst> = z.lazy(() =>
       ref: z.string().min(1),
       op: z.enum(CONDITION_OPS),
       value: z.unknown().optional(),
-    }),
-    z.object({ all: z.array(ConditionAstSchema).min(1) }),
-    z.object({ any: z.array(ConditionAstSchema).min(1) }),
-    z.object({ not: ConditionAstSchema }),
+    }).strict(),
+    z.object({ all: z.array(ConditionAstSchema).min(1) }).strict(),
+    z.object({ any: z.array(ConditionAstSchema).min(1) }).strict(),
+    z.object({ not: ConditionAstSchema }).strict(),
   ]),
 );
 

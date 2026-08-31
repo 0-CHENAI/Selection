@@ -21,6 +21,7 @@ export { V2_IMPLEMENTED_KINDS, MAX_RUN_INSTANCES } from './executors';
 export {
   rememberSubmittedDefinition,
   takeSubmittedDefinition,
+  clearSubmittedDefinition,
   extractYamlFromModelText,
   resolveGeneratedYaml,
   validateSubmittedDefinition,
