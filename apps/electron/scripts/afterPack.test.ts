@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test'
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -16,6 +16,15 @@ const { pruneForeignPlatformRuntimes, resolvePackagedResourcesRoot } = require('
 }
 
 describe('afterPack OfficeCLI runtime pruning', () => {
+  it('never recursively packages prior desktop release directories', () => {
+    const config = readFileSync(join(import.meta.dir, '../electron-builder.yml'), 'utf8')
+    expect(config).toContain('- "!release/**"')
+    expect(config).toContain('- "!release-swarm-preview/**"')
+    expect(config.match(/- "!\*\*\/resources\/scripts\/tests\/\*\*"/g)).toHaveLength(4)
+    expect(config.match(/- "!\*\*\/__pycache__\/\*\*"/g)).toHaveLength(4)
+    expect(config.match(/^    - dist\/\*\*\/\*$/gm)).toHaveLength(3)
+  })
+
   it('resolves the macOS resources path from the configured product filename', () => {
     expect(resolvePackagedResourcesRoot({
       electronPlatformName: 'darwin',

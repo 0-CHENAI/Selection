@@ -21,7 +21,7 @@
     "!apps/online-docs"
   ],
   "scripts": {
-    "test": "bun test && for f in $(find . -name '*.isolated.ts' -not -path './node_modules/*'); do bun test \"$f\" || exit 1; done",
+    "test": "bash scripts/run-tracked-tests.sh",
     "typecheck": "bun run typecheck:shared",
     "typecheck:shared": "cd packages/shared && bun run tsc --noEmit",
     "typecheck:staged": "bash scripts/typecheck-staged.sh",
@@ -41,7 +41,7 @@
     "test:pi-agent-server": "bun test packages/pi-agent-server/src scripts/build/common.pi-agent-server.test.ts",
     "test:doc-tools": "uv run python -m unittest apps.electron.resources.scripts.tests.test_pdf_tool_smoke apps.electron.resources.scripts.tests.test_img_tool_smoke apps.electron.resources.scripts.tests.test_ical_tool_smoke apps.electron.resources.scripts.tests.test_doc_diff_smoke apps.electron.resources.scripts.tests.test_markitdown_smoke",
     "validate:dev": "bun run typecheck:all && bun run test:shared:all && bun run test:pi-agent-server && bun run test:doc-tools",
-    "validate:ci": "bun run validate:dev && bun run lint:i18n:parity && bun run lint:i18n:sorted && bun run lint:i18n:coverage",
+    "validate:ci": "bun run validate:dev && bun run test && bun run lint && bun run lint:i18n:parity && bun run lint:i18n:sorted && bun run lint:i18n:coverage",
     "lint:ipc-sends": "bash scripts/check-raw-sends.sh",
     "lint:tool-name-checks": "bash scripts/check-task-tool-checks.sh",
     "lint:electron": "cd apps/electron && bun run lint",
