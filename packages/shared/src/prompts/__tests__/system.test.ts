@@ -9,7 +9,12 @@ mock.module('../../config/preferences.ts', () => ({
   formatPreferencesForPrompt: () => '',
 }))
 
-import { getSystemPrompt, getMiniAgentSystemPrompt, formatProjectContextForPrompt } from '../system'
+import {
+  getSystemPrompt,
+  getMiniAgentSystemPrompt,
+  formatProjectContextForPrompt,
+  getWorkingDirectoryContext,
+} from '../system'
 import type { ProjectPromptContext } from '../../projects/types.ts'
 import { getBundledOfficecliRouterSkillMd } from '../../utils/officecli.ts'
 
@@ -17,6 +22,29 @@ const GIT_CONVENTIONS_HEADING = '## Git Conventions'
 const CO_AUTHOR_TRAILER = 'Co-Authored-By: Selection <agents-noreply@craft.do>'
 
 describe('system prompt guidance', () => {
+  it('keeps scratch artifacts out of the user-selected working directory (#163)', () => {
+    const prompt = getSystemPrompt(undefined, undefined, '/tmp/workspace', '/tmp/deliverables')
+
+    expect(prompt).toContain('## Artifact Hygiene')
+    expect(prompt).toContain('user-visible deliverable location, not a scratch directory')
+    expect(prompt).toContain('every disposable or intermediate artifact')
+    expect(prompt).toContain('exact `dataFolderPath` from `<session_state>`')
+    expect(prompt).toContain('explicitly requests any file as a deliverable')
+    expect(prompt).toContain('including a TXT, JSON, CSV, Markdown, or script file')
+    expect(prompt).toContain('Do not scan or delete pre-existing files')
+  })
+
+  it('labels a user-selected working directory as a non-scratch location (#163)', () => {
+    const context = getWorkingDirectoryContext('/tmp/deliverables', false, '/tmp/deliverables')
+    const changedMidSession = getWorkingDirectoryContext('/tmp/deliverables', false, '/tmp/original')
+
+    expect(context).toContain('user-visible deliverables and project files')
+    expect(context).toContain('not for scratch or intermediate artifacts')
+    expect(changedMidSession).toContain('user-visible deliverables and project files')
+    expect(changedMidSession).toContain('not for scratch or intermediate artifacts')
+    expect(changedMidSession).toContain('bash shell runs from a different directory')
+  })
+
   it('can omit schema-enforced tool metadata guidance for incompatible models', () => {
     const prompt = getSystemPrompt(
       undefined,
