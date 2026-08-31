@@ -16,3 +16,13 @@ export type {
   RunStatus,
   NodeRunStatus,
 } from './TaskRunner';
+export { TaskControlError } from './TaskRunner';
+export { V2_IMPLEMENTED_KINDS, MAX_RUN_INSTANCES } from './executors';
+export {
+  rememberSubmittedDefinition,
+  takeSubmittedDefinition,
+  clearSubmittedDefinition,
+  extractYamlFromModelText,
+  resolveGeneratedYaml,
+  validateSubmittedDefinition,
+} from './submitted-definitions';

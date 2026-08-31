@@ -29,6 +29,17 @@ import {
   shouldEnsureDocxOutlineStyles,
 } from '../officecli'
 
+function seedTrustedOfficecliRoot(appRootPath: string) {
+  const binDir = join(appRootPath, 'apps', 'electron', 'resources', 'bin')
+  const runtimeDir = join(binDir, `${process.platform}-${process.arch}`)
+  const wrapperPath = join(binDir, officecliWrapperName())
+  const binaryPath = join(runtimeDir, officecliBinaryName())
+  mkdirSync(runtimeDir, { recursive: true })
+  writeFileSync(wrapperPath, 'trusted wrapper\n')
+  writeFileSync(binaryPath, 'trusted runtime\n')
+  return { binDir, binaryPath }
+}
+
 describe('collectOfficeFormatSkillSlugs', () => {
   it('infers format skills from Office paths in the message', () => {
     expect(collectOfficeFormatSkillSlugs('请改 巡察报告.docx')).toEqual(['officecli-docx'])
@@ -225,40 +236,43 @@ describe('resolveOfficecliBinary', () => {
 
   it('does not trust an OfficeCLI wrapper planted in the session cwd', () => {
     const sessionCwd = mkdtempSync(join(tmpdir(), 'selection-untrusted-officecli-'))
+    const appRootPath = mkdtempSync(join(tmpdir(), 'selection-trusted-officecli-root-'))
     try {
       const plantedDir = join(sessionCwd, 'resources', 'bin')
       mkdirSync(plantedDir, { recursive: true })
-      writeFileSync(join(plantedDir, 'officecli'), '#!/bin/sh\necho untrusted\n')
-      const appRootPath = process.cwd()
+      writeFileSync(join(plantedDir, officecliWrapperName()), 'untrusted wrapper\n')
+      const trusted = seedTrustedOfficecliRoot(appRootPath)
       expect(getOfficecliWrapperDir({
         cwd: sessionCwd,
         appRootPath,
         trustEnvironment: false,
-      })).toBe(join(appRootPath, 'apps', 'electron', 'resources', 'bin'))
+      })).toBe(trusted.binDir)
       expect(resolveOfficecliBinary({
         cwd: sessionCwd,
         appRootPath,
         trustEnvironment: false,
-      })).toContain(join('apps', 'electron', 'resources', 'bin'))
+      })).toBe(trusted.binaryPath)
     } finally {
       rmSync(sessionCwd, { recursive: true, force: true })
+      rmSync(appRootPath, { recursive: true, force: true })
     }
   })
 
   it('continues through valid trusted roots when another configured root is missing', () => {
-    const appRootPath = process.cwd()
-    expect(getOfficecliWrapperDir({
-      cwd: '/tmp/untrusted-officecli-cwd',
-      appRootPath,
-      resourcesPath: join(appRootPath, 'definitely-missing-resources-root'),
-      trustEnvironment: false,
-    })).toBe(join(appRootPath, 'apps', 'electron', 'resources', 'bin'))
-    expect(resolveOfficecliBinary({
-      cwd: '/tmp/untrusted-officecli-cwd',
-      appRootPath,
-      resourcesPath: join(appRootPath, 'definitely-missing-resources-root'),
-      trustEnvironment: false,
-    })).toContain(join('apps', 'electron', 'resources', 'bin'))
+    const appRootPath = mkdtempSync(join(tmpdir(), 'selection-trusted-officecli-root-'))
+    try {
+      const trusted = seedTrustedOfficecliRoot(appRootPath)
+      const options = {
+        cwd: '/tmp/untrusted-officecli-cwd',
+        appRootPath,
+        resourcesPath: join(appRootPath, 'definitely-missing-resources-root'),
+        trustEnvironment: false,
+      } as const
+      expect(getOfficecliWrapperDir(options)).toBe(trusted.binDir)
+      expect(resolveOfficecliBinary(options)).toBe(trusted.binaryPath)
+    } finally {
+      rmSync(appRootPath, { recursive: true, force: true })
+    }
   })
 
   it('resolves packaged wrappers from CRAFT_RESOURCES_BASE', () => {
@@ -481,6 +495,31 @@ describe('bundled officecli smoke', () => {
   })
 })
 
+describe('bundled officecli router', () => {
+  it('documents the official skill closed loop on the bundled router', () => {
+    const router = getBundledOfficecliRouterSkillMd()
+    expect(router).toBeTruthy()
+    const body = readFileSync(router!, 'utf8')
+    expect(body).toContain('officecli load_skill word')
+    expect(body).toContain('Load only what the task needs')
+    expect(body).toContain('Delivery gate')
+    expect(body).toContain('outlineLvl')
+    expect(body).toContain('Do not impose a model-call, CLI-call, operation, QA, elapsed-time, or cost budget')
+    expect(body).toContain('Use when creating or editing a .docx, .xlsx, or .pptx file')
+    expect(body).toContain('Do not treat a chat Markdown body, `markdown-preview`, or a `call_llm` draft as the delivered file')
+    expect(body).toContain('## Artifact paths')
+    expect(body).toContain('every disposable or intermediate artifact')
+    expect(body).toContain('exact `dataFolderPath` from `<session_state>`')
+    expect(body).toContain('Use absolute paths for every scratch artifact')
+    expect(body).toContain('Relative scratch paths shown in an official guide')
+    expect(body).toContain('explicitly asks to keep a support file')
+    expect(body).toContain('Use the user-requested destination for the final Office file')
+    expect(body).toContain('If the user did not provide one, use the effective working directory')
+    expect(body).toContain('Companion files required by an official guide for planning, reproducibility, or QA')
+    expect(body).toContain('overrides guide delivery lists for those support files')
+  })
+})
+
 describe('docx outline heading seed', () => {
   it('repairs only immediately after Word creation', () => {
     expect(findDocxArgInOfficecliArgs(['create', '报告.docx'])).toBe('报告.docx')
@@ -530,19 +569,6 @@ describe('docx outline heading seed', () => {
     ].join('\n')
     expect(styleHasAnyOutlineLevel(listing, 'Heading1')).toBe(true)
     expect(styleHasOutlineLevel(listing, 'Heading1', 0)).toBe(false)
-  })
-
-  it('documents the official skill closed loop on the bundled router', () => {
-    const router = getBundledOfficecliRouterSkillMd()
-    expect(router).toBeTruthy()
-    const body = readFileSync(router!, 'utf8')
-    expect(body).toContain('officecli load_skill word')
-    expect(body).toContain('Load only what the task needs')
-    expect(body).toContain('Delivery gate')
-    expect(body).toContain('outlineLvl')
-    expect(body).toContain('Do not impose a model-call, CLI-call, operation, QA, elapsed-time, or cost budget')
-    expect(body).toContain('Use when creating or editing a .docx, .xlsx, or .pptx file')
-    expect(body).toContain('Do not treat a chat Markdown body, `markdown-preview`, or a `call_llm` draft as the delivered file')
   })
 
   it('seeds on wrapper create and repairs Heading1 that exists without outlineLvl', () => {

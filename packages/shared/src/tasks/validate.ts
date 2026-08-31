@@ -13,7 +13,14 @@
 import type { ValidationIssue, ValidationResult } from '../config/validators.ts';
 import { getModelById } from '../config/models.ts';
 import { extractRefs } from './refs.ts';
-import { parseTaskSpec, nodeDeps, type TaskSpec, type TaskNode } from './schema.ts';
+import {
+  MAX_DAG_MAX_PARALLEL,
+  PARAM_TYPES,
+  parseTaskSpec,
+  nodeDeps,
+  type TaskSpec,
+  type TaskNode,
+} from './schema.ts';
 
 /** Generous structural backstops. Rarely bind; surface "too large — simplify", never silently truncate. */
 export const TASK_CAPS = {
@@ -22,9 +29,12 @@ export const TASK_CAPS = {
   maxWidth: 24,
   /** Hard ceiling on a loop's `max` (schema requires the field; this bounds it). */
   maxLoopIterations: 50,
+  /** Live execution instances (map/loop expansions) per run. Exceeding fails the run. */
+  maxInstances: 256,
 } as const;
 
 const TASK_FILE = 'task.yaml';
+const PERMISSION_RANK = { safe: 0, ask: 1, 'allow-all': 2 } as const;
 
 function err(path: string, message: string, suggestion?: string): ValidationIssue {
   return { file: TASK_FILE, path, message, severity: 'error', ...(suggestion ? { suggestion } : {}) };
@@ -51,9 +61,34 @@ export function validateTaskSpec(spec: TaskSpec): ValidationResult {
 
   // Materialized dependency edges (explicit depends_on ∪ ref targets), for cycle + metrics.
   const deps = materializeDeps(spec);
+  const permissionCeiling = spec.defaults?.permissionMode ?? 'safe';
+
+  // v1 remains readable with its historical semantics. A saved v2 definition is
+  // strict: concurrency above the preview ceiling is refused instead of being
+  // silently accepted and over-scheduled by the runtime.
+  if (spec.schema_version === 2 && (spec.max_parallel ?? 0) > MAX_DAG_MAX_PARALLEL) {
+    errors.push(
+      err(
+        'max_parallel',
+        `DAG max_parallel ${spec.max_parallel} exceeds the hard cap of ${MAX_DAG_MAX_PARALLEL}`,
+      ),
+    );
+  }
 
   for (const node of spec.nodes) {
     const path = `nodes.${node.id}`;
+
+    if (
+      node.permissionMode &&
+      PERMISSION_RANK[node.permissionMode] > PERMISSION_RANK[permissionCeiling]
+    ) {
+      errors.push(
+        err(
+          `${path}.permissionMode`,
+          `Node permission ${node.permissionMode} exceeds task ceiling ${permissionCeiling}`,
+        ),
+      );
+    }
 
     // Explicit depends_on.
     for (const dep of nodeDeps(node)) {
@@ -64,6 +99,15 @@ export function validateTaskSpec(spec: TaskSpec): ValidationResult {
       if (!byId.has(dep)) {
         errors.push(err(`${path}.depends_on`, `Node "${node.id}" depends on unknown node "${dep}"`));
         continue;
+      }
+    }
+
+    if (node.kind === 'route' && node.route) {
+      const targets = [...node.route.cases.map((c) => c.goto), node.route.default];
+      for (const target of targets) {
+        if (!byId.has(target)) {
+          errors.push(err(`${path}.route`, `Route "${node.id}" targets unknown node "${target}"`));
+        }
       }
     }
 
@@ -85,13 +129,25 @@ export function validateTaskSpec(spec: TaskSpec): ValidationResult {
             continue;
           }
           if (ref.field) {
-            warnings.push(
-              warn(
-                `${path}.inputs`,
-                `Reference ${ref.raw} reads a structured output field, but node outputs carry only free-form text in v1 — the token will be left unresolved at runtime`,
-                `Use \${nodes.${ref.nodeId}.output} to consume the node's full text output`,
-              ),
-            );
+            if (spec.schema_version === 2) {
+              const declared = byId.get(ref.nodeId)?.outputs?.some((output) => output.name === ref.field);
+              if (!declared) {
+                errors.push(
+                  err(
+                    `${path}.inputs`,
+                    `Reference ${ref.raw} reads undeclared output field "${ref.field}" from node "${ref.nodeId}"`,
+                  ),
+                );
+              }
+            } else {
+              warnings.push(
+                warn(
+                  `${path}.inputs`,
+                  `Reference ${ref.raw} reads a structured output field, but node outputs carry only free-form text in v1 — the token will be left unresolved at runtime`,
+                  `Use \${nodes.${ref.nodeId}.output} to consume the node's full text output`,
+                ),
+              );
+            }
           }
           if (!nodeDeps(node).includes(ref.nodeId)) {
             warnings.push(
@@ -128,6 +184,60 @@ export function validateTaskSpec(spec: TaskSpec): ValidationResult {
     if (node.loop?.else && !byId.has(node.loop.else)) {
       errors.push(err(`${path}.loop.else`, `loop.else points to unknown node "${node.loop.else}"`));
     }
+    if (spec.schema_version === 2 && (node.max_parallel ?? 0) > MAX_DAG_MAX_PARALLEL) {
+      errors.push(
+        err(
+          `${path}.max_parallel`,
+          `Node max_parallel ${node.max_parallel} exceeds the hard cap of ${MAX_DAG_MAX_PARALLEL}`,
+        ),
+      );
+    }
+    if (spec.schema_version === 2 && node.replicas && node.replicas > 1 && !node.aggregate) {
+      errors.push(err(`${path}.aggregate`, `Node "${node.id}" with replicas must declare an aggregate mode`));
+    }
+    if (spec.schema_version === 2 && (node.replicas ?? 0) > TASK_CAPS.maxInstances) {
+      errors.push(
+        err(
+          `${path}.replicas`,
+          `Node replicas ${node.replicas} exceeds the run instance cap of ${TASK_CAPS.maxInstances}`,
+        ),
+      );
+    }
+    if (
+      spec.schema_version === 2 &&
+      (node.replicas ?? 1) > 1 &&
+      !['session', 'orchestrator', 'finally', 'synthesize', 'verify', 'judge'].includes(node.kind)
+    ) {
+      errors.push(err(`${path}.replicas`, `Node kind "${node.kind}" does not support replicas`));
+    }
+    if (spec.schema_version === 2) {
+      for (const [outputIndex, output] of (node.outputs ?? []).entries()) {
+        if (output.kind !== 'artifact' && output.type && !PARAM_TYPES.includes(output.type as never)) {
+          errors.push(
+            err(
+              `${path}.outputs.${outputIndex}.type`,
+              `Unknown output type "${output.type}"; expected ${PARAM_TYPES.join(', ')}`,
+            ),
+          );
+        }
+        if (output.type === 'enum' && (!output.enum || output.enum.length === 0)) {
+          errors.push(err(`${path}.outputs.${outputIndex}.enum`, `Enum output "${output.name}" must declare values`));
+        }
+      }
+    }
+  }
+
+  if (spec.schema_version === 2) {
+    for (const [paramIndex, param] of (spec.params ?? []).entries()) {
+      if (param.sensitive && param.default !== undefined) {
+        errors.push(
+          err(
+            `params.${paramIndex}.default`,
+            `Sensitive param "${param.name}" cannot define a persisted default`,
+          ),
+        );
+      }
+    }
   }
 
   // Task-level outputs: refs must resolve.
@@ -137,13 +247,25 @@ export function validateTaskSpec(spec: TaskSpec): ValidationResult {
         errors.push(err(`outputs.${name}`, `Output "${name}" references unknown node "${ref.nodeId}"`));
       }
       if (ref.kind === 'node' && byId.has(ref.nodeId) && ref.field) {
-        warnings.push(
-          warn(
-            `outputs.${name}`,
-            `Output "${name}" reads a structured output field ${ref.raw}, but node outputs carry only free-form text in v1 — the token will be left unresolved at runtime`,
-            `Use \${nodes.${ref.nodeId}.output} to consume the node's full text output`,
-          ),
-        );
+        if (spec.schema_version === 2) {
+          const declared = byId.get(ref.nodeId)?.outputs?.some((output) => output.name === ref.field);
+          if (!declared) {
+            errors.push(
+              err(
+                `outputs.${name}`,
+                `Output "${name}" reads undeclared field "${ref.field}" from node "${ref.nodeId}"`,
+              ),
+            );
+          }
+        } else {
+          warnings.push(
+            warn(
+              `outputs.${name}`,
+              `Output "${name}" reads a structured output field ${ref.raw}, but node outputs carry only free-form text in v1 — the token will be left unresolved at runtime`,
+              `Use \${nodes.${ref.nodeId}.output} to consume the node's full text output`,
+            ),
+          );
+        }
       }
       if (ref.kind === 'param' && !declaredParams.has(ref.name)) {
         errors.push(err(`outputs.${name}`, `Output "${name}" references undeclared param "${ref.name}"`));

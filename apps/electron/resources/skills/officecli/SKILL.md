@@ -38,6 +38,15 @@ Do not read global `~/.agents/skills/officecli`, `docx`, `xlsx`, or `pptx` instr
 - Legacy `.doc`, `.xls`, and `.ppt` files must be converted to OOXML before editing. Do not silently use another library.
 - For Morph workflows, ignore official-guide references to `morph-helpers.py` and `morph-helpers.sh`. Selection replaces both with the cross-platform bundled command `officecli-morph-helper` (`clone`, `ghost`, `verify`, `final-check`, and `clean-accumulation`); it runs on Selection's bundled Bun runtime and requires no Python or particular user shell.
 
+## Artifact paths
+
+- Use the user-requested destination for the final Office file. If the user did not provide one, use the effective working directory. Set the final file variable to that absolute path.
+- Put every disposable or intermediate artifact—including search results, extracted or normalized data, temporary files, Office dumps, drafts, caches, build inputs, helper scripts, and QA output—in the exact `dataFolderPath` from `<session_state>`.
+- Use absolute paths for every scratch artifact. Relative scratch paths shown in an official guide, such as `blueprint.json`, `sheet.json`, `brief.md`, or temporary CSV files, are examples only and must be resolved under `dataFolderPath` inside Selection.
+- Companion files required by an official guide for planning, reproducibility, or QA are still session artifacts unless the user explicitly asks to receive them. This Selection rule overrides guide delivery lists for those support files.
+- If the user explicitly asks to keep a support file as a deliverable, write it to the requested location. Do not infer that every TXT or JSON file is disposable.
+- Do not scan or delete pre-existing files in the working directory as cleanup. Avoid pollution by choosing the correct destination before creating an artifact.
+
 ## Delivery gate
 
 Follow every validation and visual check required by the loaded official guide. At minimum:

@@ -9,6 +9,10 @@ import { resolve } from 'path'
 // import { sentryVitePlugin } from '@sentry/vite-plugin'
 
 export default defineConfig({
+  define: {
+    'process.env.CRAFT_FEATURE_TASKS_ORCHESTRATE': JSON.stringify(process.env.CRAFT_FEATURE_TASKS_ORCHESTRATE ?? ''),
+    'process.env.CRAFT_SWARM_PREVIEW_BUILD': JSON.stringify(process.env.CRAFT_SWARM_PREVIEW_BUILD ?? ''),
+  },
   plugins: [
     react({
       babel: {

@@ -1,9 +1,16 @@
 import { describe, expect, it } from 'bun:test'
 import {
+  assessSpawnQualification,
+  assessSwarmSpawnLimits,
   buildBackgroundTaskNudge,
+  countLiveSwarmChildren,
+  countLiveSwarmNodes,
   countRunningSpawnChildren,
+  FIXED_SWARM_TOKEN_BUDGET,
+  recoverPersistedSwarmStatus,
   mapCompletionReasonToSpawnStatus,
   mapCompletionReasonToTaskStatus,
+  resolveInheritedSwarmEnabled,
   shouldDeferSpawnWake,
   shouldOrphanBackgroundTask,
   shouldWakeOnTaskCompleted,
@@ -11,6 +18,110 @@ import {
 } from './spawn-session-orchestration.ts'
 
 describe('spawn-session orchestration helpers', () => {
+  it('uses one immutable 256 Ki token ceiling for temporary Swarms', () => {
+    expect(FIXED_SWARM_TOKEN_BUDGET).toBe(262_144)
+  })
+
+  it('marks persisted running Swarms as interrupted instead of restoring ghost workers', () => {
+    expect(recoverPersistedSwarmStatus('completed')).toBeUndefined()
+    expect(recoverPersistedSwarmStatus('running')).toEqual({
+      status: 'need-to-check',
+      blocker: expect.stringContaining('application restart'),
+    })
+  })
+
+  it('inherits the Swarm switch for children and branches while preserving explicit overrides', () => {
+    expect(resolveInheritedSwarmEnabled({})).toBe(false)
+    expect(resolveInheritedSwarmEnabled({ parent: true })).toBe(true)
+    expect(resolveInheritedSwarmEnabled({ branchSource: true })).toBe(true)
+    expect(resolveInheritedSwarmEnabled({ requested: false, parent: true, branchSource: true })).toBe(false)
+  })
+
+  it('fails closed unless automatic spawning has a complete structured qualification', () => {
+    expect(assessSpawnQualification(undefined)).toEqual({
+      eligible: false,
+      reasons: ['missing qualification contract'],
+    })
+    expect(assessSpawnQualification({
+      tracks: [{
+        name: 'code',
+        input: 'repo',
+        expectedOutput: 'findings',
+        evidence: 'tests',
+        toolKinds: ['shell'],
+      }],
+      parallelBenefit: '',
+      finalAggregation: '',
+    }).eligible).toBe(false)
+    expect(assessSpawnQualification({
+      tracks: [
+        { name: 'code', input: 'repo', expectedOutput: 'findings', evidence: 'tests', toolKinds: ['shell'] },
+        { name: 'docs', input: 'spec', expectedOutput: 'gaps', evidence: 'citations', toolKinds: ['browser'] },
+      ],
+      parallelBenefit: 'The tracks do not depend on each other.',
+      finalAggregation: 'The coordinator merges findings and verifies conflicts.',
+    })).toEqual({ eligible: true, reasons: [] })
+  })
+
+  it('enforces direct concurrency, depth, and whole-swarm live-node limits', () => {
+    const sessions = [
+      { id: 'root', isProcessing: true, orchestrationId: 'orch', orchestrationStatus: 'running' as const },
+      ...Array.from({ length: 3 }, (_, index) => ({
+        id: `child-${index}`,
+        parentSessionId: 'root',
+        isProcessing: true,
+        orchestrationId: 'orch',
+        orchestrationDepth: 1,
+        orchestrationStatus: 'running' as const,
+      })),
+    ]
+    expect(countLiveSwarmChildren(sessions, 'root')).toBe(3)
+    expect(countLiveSwarmNodes(sessions, 'orch')).toBe(4)
+    expect(assessSwarmSpawnLimits({
+      sessions,
+      parentSessionId: 'root',
+      parentDepth: 0,
+      orchestrationId: 'orch',
+    })).toEqual(expect.objectContaining({ allowed: false, error: expect.stringContaining('concurrency') }))
+
+    expect(assessSwarmSpawnLimits({
+      sessions: [],
+      parentSessionId: 'grandchild',
+      parentDepth: 2,
+      orchestrationId: 'orch',
+    })).toEqual(expect.objectContaining({ allowed: false, error: expect.stringContaining('depth') }))
+
+    const twelve = Array.from({ length: 12 }, (_, index) => ({
+      id: `node-${index}`,
+      isProcessing: true,
+      orchestrationId: 'orch',
+      orchestrationStatus: 'running' as const,
+    }))
+    expect(assessSwarmSpawnLimits({
+      sessions: twelve,
+      parentSessionId: 'node-0',
+      parentDepth: 0,
+      orchestrationId: 'orch',
+    })).toEqual(expect.objectContaining({ allowed: false, error: expect.stringContaining('live-node') }))
+  })
+
+  it('counts reservations so concurrent requests cannot race past a limit', () => {
+    expect(assessSwarmSpawnLimits({
+      sessions: [],
+      parentSessionId: 'root',
+      parentDepth: 0,
+      orchestrationId: 'orch',
+      pendingChildren: 3,
+    }).allowed).toBe(false)
+    expect(assessSwarmSpawnLimits({
+      sessions: [],
+      parentSessionId: 'root',
+      parentDepth: 0,
+      orchestrationId: 'orch',
+      pendingNodes: 12,
+    }).allowed).toBe(false)
+  })
+
   it('maps completion reasons', () => {
     expect(mapCompletionReasonToSpawnStatus('complete')).toBe('completed')
     expect(mapCompletionReasonToSpawnStatus('interrupted')).toBe('interrupted')

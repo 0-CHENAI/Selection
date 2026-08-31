@@ -32,15 +32,22 @@ export const CHANNEL_MAP = {
   // Tasks (Conductor)
   validateTask: invoke(RPC_CHANNELS.tasks.VALIDATE),
   createTask: invoke(RPC_CHANNELS.tasks.CREATE),
+  saveTask: invoke(RPC_CHANNELS.tasks.SAVE),
   generateTask: invoke(RPC_CHANNELS.tasks.GENERATE),
   runTask: invoke(RPC_CHANNELS.tasks.RUN),
   pauseTask: invoke(RPC_CHANNELS.tasks.PAUSE),
   resumeTask: invoke(RPC_CHANNELS.tasks.RESUME),
   stopTask: invoke(RPC_CHANNELS.tasks.STOP),
+  continueTask: invoke(RPC_CHANNELS.tasks.CONTINUE),
+  respondTaskApproval: invoke(RPC_CHANNELS.tasks.RESPOND_APPROVAL),
+  updateTaskRunLimits: invoke(RPC_CHANNELS.tasks.UPDATE_RUN_LIMITS),
   getTask: invoke(RPC_CHANNELS.tasks.GET),
   listTasks: invoke(RPC_CHANNELS.tasks.LIST),
+  listTaskRuns: invoke(RPC_CHANNELS.tasks.LIST_RUNS),
+  applyTaskRunRevision: invoke(RPC_CHANNELS.tasks.APPLY_RUN_REVISION),
   getTaskResults: invoke(RPC_CHANNELS.tasks.GET_RESULTS),
   onTaskGenerated: listener(RPC_CHANNELS.tasks.GENERATED),
+  onTaskRunChanged: listener(RPC_CHANNELS.tasks.RUN_CHANGED),
   respondToPermission: invoke(RPC_CHANNELS.sessions.RESPOND_TO_PERMISSION),
   respondToCredential: invoke(RPC_CHANNELS.sessions.RESPOND_TO_CREDENTIAL),
   sessionCommand: invoke(RPC_CHANNELS.sessions.COMMAND),
@@ -184,6 +191,10 @@ export const CHANNEL_MAP = {
   // Session-specific model
   getSessionModel: invoke(RPC_CHANNELS.sessions.GET_MODEL),
   setSessionModel: invoke(RPC_CHANNELS.sessions.SET_MODEL),
+  setSessionSwarmEnabled: invoke(RPC_CHANNELS.sessions.SET_SWARM_ENABLED),
+  getSessionSwarmRunDetails: invoke(RPC_CHANNELS.sessions.GET_SWARM_RUN_DETAILS),
+  updateSessionSwarmBudget: invoke(RPC_CHANNELS.sessions.UPDATE_SWARM_BUDGET),
+  stopSessionSwarm: invoke(RPC_CHANNELS.sessions.STOP_SWARM),
 
   // Workspace Settings
   getWorkspaceSettings: invoke(RPC_CHANNELS.workspace.SETTINGS_GET),

@@ -12,8 +12,8 @@
  *   5. drives child `sessionStatus` + `kanbanColumn` so the board renders the live DAG,
  *   6. persists an append-only run-log under `tasks/<slug>/runs/<runId>/`.
  *
- * v1 executes `kind: 'session'` nodes wired by `depends_on` + `inputs`. Control-flow
- * kinds (route/loop/approval/…) parse but are not yet executed (P4).
+ * v1 executes `kind: 'session'` nodes wired by `depends_on` + `inputs`.
+ * v2 dispatches implemented kinds (session/control/map/loop/transforms).
  *
  * The runner depends on a minimal `ConductorSessionHost` interface (which
  * SessionManager structurally satisfies) so it is unit-testable with a mock.
@@ -26,33 +26,75 @@ import {
   type NodeOutput,
   type RunLogEntry,
   type NodeRunState,
+  type RunStatus,
   nodeTitle,
   interpolateRefs,
+  interpolateLocals,
+  instanceId,
+  definitionId,
+  parseForEach,
+  resolveArtifact,
+  sensitiveParamNames,
+  missingSensitive,
   materializeDeps,
   appendRunLog,
+  writeRunState,
+  readRunState,
   writeNodeOutput,
+  writeNodeAttempt,
   readNodeOutput,
   readRunLog,
-  loadTaskSpec,
-  writeRunSpecSnapshot,
+  loadTaskDocument,
+  writeSpecRevision,
+  readSpecRevision,
+  listTaskSlugs,
+  listRunIds,
+  deriveRunStatusFromLog,
+  isTerminalRunStatus,
+  resolveKanbanColumnId,
+  evaluateCondition,
+  conditionFromLegacyWhen,
+  type ConditionAst,
   DEFAULT_REPAIR_ATTEMPTS,
   MAX_REPAIR_ATTEMPTS_CAP,
+  DEFAULT_DAG_MAX_PARALLEL,
+  MAX_DAG_MAX_PARALLEL,
+  validateOrchestrationPatch,
+  type OrchestrationPatch,
 } from '@craft-agent/shared/tasks';
+import { isTasksOrchestrateEnabled } from '@craft-agent/shared/feature-flags';
+import { createLogger } from '@craft-agent/shared/utils';
+import { createHash } from 'crypto';
+import { MAX_RUN_INSTANCES, isSessionLikeKind, isControlKind, unimplementedV2Nodes } from './executors';
+
+const conductorLog = createLogger('tasks-conductor');
+
+export { V2_IMPLEMENTED_KINDS, MAX_RUN_INSTANCES } from './executors';
 
 // ---------------------------------------------------------------------------
 // Host interface (SessionManager satisfies this structurally)
 // ---------------------------------------------------------------------------
 
 export interface ConductorSessionHost {
-  /** Creates the child session AND announces it to the renderer (createSession emits
-   *  session_created by default), so the subtask appears on the board with its real title. */
+  /** Creates the child session. DAG workers are persisted but hidden from the
+   * ordinary session list; run details address them by task/run/node metadata. */
   createSession(workspaceId: string, options: CreateSessionOptions): Promise<{ id: string }>;
   sendMessage(sessionId: string, message: string): Promise<void>;
   setSessionStatus(sessionId: string, status: string): Promise<void>;
   setKanbanColumn(sessionId: string, column: string | null): Promise<void>;
+  /** Map a session status to a board column. Return null to keep the current column. */
+  resolveKanbanColumn?(sessionId: string, statusId: string): Promise<string | null>;
   /** Records the total DAG node count on the orchestrator session for a stable board progress denominator. */
   setTaskNodeCount(sessionId: string, count: number): Promise<void>;
+  /** Persist the parent-facing orchestration badge independently of board/session status. */
+  setOrchestrationStatus?(
+    sessionId: string,
+    status: 'running' | 'completed' | 'need-to-check' | 'stopped',
+    blocker?: string,
+  ): Promise<void>;
   cancelProcessing(sessionId: string, silent?: boolean): Promise<void>;
+  /** Explicitly stop managed spawn_session descendants owned by a DAG worker. */
+  stopSwarm?(sessionId: string): Promise<{ stoppedSessionIds: string[]; detachedSessionIds: string[] }>;
   onSessionComplete(listener: (evt: SessionCompletionEvent) => void): () => void;
   getSessionFinalText(sessionId: string): string | undefined;
   /** Resolved working directory of a session, so children inherit the orchestrator's cwd. */
@@ -70,6 +112,10 @@ export interface TaskRunnerDeps {
   /** Injectable clock (run-log timestamps) + run-id generator, for determinism in tests. */
   now?: () => string;
   genRunId?: () => string;
+  /** Push a typed snapshot after every durable run/node/budget/approval change. */
+  onRunChanged?: (snapshot: RunSnapshot) => void;
+  /** Model ids currently configured in this workspace; dynamic patches may not escape this set. */
+  allowedModels?: ReadonlySet<string>;
 }
 
 export interface RunOptions {
@@ -81,15 +127,36 @@ export interface RunOptions {
   runId?: string;
   /** When the run completes, message the orchestrator to verify the result. Default true. */
   verifyOnComplete?: boolean;
+  /** Disk source version. Unsaved v1 files keep skip semantics; v2 refuses unimplemented kinds. */
+  sourceVersion?: 1 | 2;
+  /** Explicit authorization derived from the parent session's Swarm toggle. */
+  orchestrateAllowed?: boolean;
 }
 
-export type RunStatus = 'running' | 'paused' | 'verifying' | 'stopped' | 'completed' | 'failed';
+export type { RunStatus };
+
+export class TaskControlError extends Error {
+  readonly code = 'conflict' as const;
+  constructor(
+    readonly status: RunStatus,
+    message: string,
+  ) {
+    super(message);
+    this.name = 'TaskControlError';
+  }
+}
 
 export interface NodeRunStatus {
   id: string;
+  definitionId?: string;
   state: NodeRunState;
   sessionId?: string;
   attempt: number;
+  retryCount?: number;
+  role?: 'worker' | 'reviewer';
+  model?: string;
+  tokensUsed?: number;
+  blocker?: string;
 }
 
 export interface RunSnapshot {
@@ -101,25 +168,28 @@ export interface RunSnapshot {
   nodes: NodeRunStatus[];
   /** Sum of each child's (input + output) tokens observed at completion. */
   tokensUsed: number;
+  /** Current user-controlled run ceiling. Missing means unlimited. */
+  tokenBudget?: number;
+  /** Node ids that currently block the run (approval, budget, interrupt). */
+  blockers?: string[];
+  revision?: number;
 }
 
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
 
-const DEFAULT_MAX_PARALLEL = 4;
-// Explicit, unattended-safe default for a subtask's permission mode when neither the node nor the task
-// defaults set one. Conductor children run with no human to answer an `ask` prompt, so we must NOT fall
-// through to the workspace default (which may be `ask` → the child hangs, or read-only `safe` → it
-// silently produces nothing). The task editor now persists an explicit `defaults.permissionMode`, so
-// this constant only governs hand-authored specs that omit it — and it is never `ask`.
-const AUTONOMOUS_DEFAULT_MODE = 'allow-all' as const;
+// Missing authority is never interpreted as write authority. Nodes which need
+// broader access must be explicitly granted it by the task definition.
+const DEFAULT_TASK_PERMISSION_MODE = 'safe' as const;
 const RUNNING_STATUS = 'in-progress';
 const DONE_STATUS = 'done';
+const TODO_STATUS = 'todo';
 // There is no 'failed' session status (the fixed set is todo|in-progress|needs-review|done|cancelled).
-// We flag a failed child as 'needs-review' (amber, attention needed); the board's 'failed' run-state
-// is derived from the run-log, not from a session status.
+// Failed children and the settled top-level card use 'needs-review'. Runs never auto-close
+// the orchestrator tile to done/cancelled — see ARCHITECTURE.md §5.
 const FAILED_STATUS = 'needs-review';
+const REVIEW_STATUS = 'needs-review';
 
 // A malformed verdict (no parseable VERDICT line) is re-asked this many times before we give up and
 // fail the run. These re-asks are format-only — they do NOT consume the repair (max_iterations) budget.
@@ -127,9 +197,45 @@ const MAX_UNPARSED_REASKS = 2;
 
 const INPUTS_REF_RE = /\$\{\s*inputs\.([a-zA-Z_][a-zA-Z0-9_]*)\s*\}/g;
 
-/** v1 executes session nodes plus the orchestrator escape hatch; control-flow kinds wait for P4. */
 function isExecutableTaskNode(node: TaskNode): boolean {
   return node.kind === 'session' || node.kind === 'orchestrator';
+}
+
+function isTerminalNodeState(state: NodeRunState | undefined): boolean {
+  return (
+    state === 'done' ||
+    state === 'skipped' ||
+    state === 'failed' ||
+    state === 'invalid' ||
+    state === 'cancelled'
+  );
+}
+
+function orchestrationDisplayStatus(snapshot: RunSnapshot): {
+  status: 'running' | 'completed' | 'need-to-check' | 'stopped';
+  blocker?: string;
+} {
+  if (snapshot.status === 'completed') return { status: 'completed' };
+  if (snapshot.status === 'stopped') return { status: 'stopped', blocker: 'Run stopped' };
+  if (
+    snapshot.status === 'running' ||
+    snapshot.status === 'pausing' ||
+    snapshot.status === 'verifying' ||
+    snapshot.status === 'repairing'
+  ) {
+    return { status: 'running' };
+  }
+  const details = snapshot.blockers?.length ? `: ${snapshot.blockers.join(', ')}` : '';
+  return { status: 'need-to-check', blocker: `${snapshot.status}${details}` };
+}
+
+const TASK_PERMISSION_RANK = { safe: 0, ask: 1, 'allow-all': 2 } as const;
+
+function permissionAllowedByTask(
+  requested: keyof typeof TASK_PERMISSION_RANK,
+  ceiling: keyof typeof TASK_PERMISSION_RANK,
+): boolean {
+  return TASK_PERMISSION_RANK[requested] <= TASK_PERMISSION_RANK[ceiling];
 }
 
 /** Distributive Omit so the run-log discriminated union keeps its per-variant fields. */
@@ -142,6 +248,7 @@ interface NodeStateEntry {
   attempt: number;
   /** Reason the previous attempt failed, fed back into the retry prompt (failure-aware retry). */
   lastFailure?: string;
+  approvalDeadline?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -152,7 +259,7 @@ class ActiveRun {
   private readonly state = new Map<string, NodeStateEntry>();
   private readonly sessionToNode = new Map<string, string>();
   private readonly outputs: Record<string, NodeOutput> = {};
-  private readonly edges: Map<string, Set<string>>;
+  private edges: Map<string, Set<string>>;
   private readonly maxParallel: number;
   private inFlight = 0;
   private tokensUsed = 0;
@@ -172,16 +279,44 @@ class ActiveRun {
   private dependents?: Map<string, Set<string>>;
   private settled = false;
   private settleResolvers: ((s: RunSnapshot) => void)[] = [];
+  private readonly sourceVersion: 1 | 2;
+  private tokenBudget: number | undefined;
+  private instanceCount = 0;
+  private stopRequested = false;
+  private originalFailed = false;
+  private readonly submittedOutputs = new Map<string, NodeOutput>();
+  private verdictLocked = false;
+  private readonly instances = new Map<string, NodeStateEntry>();
+  private readonly instanceOutputs = new Map<string, NodeOutput>();
+  private readonly mapItems = new Map<string, unknown[]>();
+  private readonly replicaCounts = new Map<string, number>();
+  private readonly loopIndex = new Map<string, number>();
+  private readonly promptCache = new Map<string, NodeOutput>();
+  private readonly retryTimers = new Set<ReturnType<typeof setTimeout>>();
+  private revision = 0;
+  private readonly seenDecisionIds = new Set<string>();
+  private invalidPatchCount = 0;
+  /** Sticky once observed; even the final batch must stop for an explicit user budget increase. */
+  private budgetBreached = false;
+  private nextSeq = 1;
+  private readonly approvalTimers = new Set<ReturnType<typeof setTimeout>>();
+  private readonly sessionTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  private suppressSchedule = false;
 
   constructor(
-    private readonly spec: TaskSpec,
+    private spec: TaskSpec,
     private readonly slug: string,
     private readonly runId: string,
     private readonly opts: Required<Pick<RunOptions, 'verifyOnComplete'>> & RunOptions,
     private readonly deps: TaskRunnerDeps,
   ) {
+    this.sourceVersion = opts.sourceVersion ?? (spec.schema_version === 2 ? 2 : 1);
+    this.tokenBudget = spec.token_budget;
     this.edges = materializeDeps(spec);
-    this.maxParallel = spec.max_parallel ?? deps.defaultMaxParallel ?? DEFAULT_MAX_PARALLEL;
+    this.maxParallel = Math.min(
+      spec.max_parallel ?? deps.defaultMaxParallel ?? DEFAULT_DAG_MAX_PARALLEL,
+      MAX_DAG_MAX_PARALLEL,
+    );
     // Runner-side clamp (belt-and-suspenders: the schema already caps `max_iterations` at the same
     // bound, so a parsed spec can't exceed it — but a programmatically built spec might).
     this.maxRepairs = Math.min(spec.max_iterations ?? DEFAULT_REPAIR_ATTEMPTS, MAX_REPAIR_ATTEMPTS_CAP);
@@ -191,115 +326,302 @@ class ActiveRun {
   // --- lifecycle ---
 
   start(): void {
+    this.assertSensitiveReady();
+    // The frozen run graph is a correctness prerequisite, not a presentation
+    // convenience. Refuse to dispatch anything if revision 0 cannot be durably
+    // written; otherwise a restart could only consult the mutable task.yaml.
+    writeSpecRevision(this.deps.workspaceRoot, this.slug, this.runId, 0, this.spec);
     this.unsubscribe = this.deps.host.onSessionComplete((evt) => this.onSessionComplete(evt));
-    // Snapshot the spec for this run so the Results view labels nodes by run-time titles even after
-    // the live task.yaml is edited. Best-effort: a snapshot failure must not abort the run.
-    try {
-      writeRunSpecSnapshot(this.deps.workspaceRoot, this.slug, this.runId, this.spec);
-    } catch {
-      // ignore — Results falls back to run-log node ids when no snapshot exists
-    }
     this.log({ kind: 'run-started', taskId: this.spec.id, runId: this.runId, orchestratorSessionId: this.opts.orchestratorSessionId });
     this.runStatus = 'running';
-    // Move the task tile to the in-progress column for the duration of the run.
+    // v1 unsaved files keep skip semantics. v2 never silent-skips unimplemented kinds
+    // (those runs are refused before start()).
     for (const node of this.spec.nodes) {
-      if (!isExecutableTaskNode(node)) {
+      if (this.sourceVersion === 1 && !isExecutableTaskNode(node)) {
         const st = this.state.get(node.id)!;
         st.state = 'skipped';
         this.log({ kind: 'node-finished', nodeId: node.id, sessionId: '', state: 'skipped' });
       }
     }
     if (this.opts.orchestratorSessionId) {
-      void this.deps.host.setKanbanColumn(this.opts.orchestratorSessionId, 'in-progress');
-      void this.deps.host.setSessionStatus(this.opts.orchestratorSessionId, RUNNING_STATUS);
+      this.applyCard(this.opts.orchestratorSessionId, RUNNING_STATUS);
       // Publish the executable node count so deferred kinds don't inflate the board.
       const executableCount = this.spec.nodes.filter(isExecutableTaskNode).length;
       void this.deps.host.setTaskNodeCount(this.opts.orchestratorSessionId, executableCount);
     }
+    this.coordinatorCheckpoint('first-schedule');
     this.scheduleReady();
+    this.emitChanged();
   }
 
-  pause(): void {
-    if (this.runStatus !== 'running') return;
-    this.runStatus = 'paused';
-    this.log({ kind: 'run-paused' });
-    // In-flight children keep running; their completions still record output but won't schedule.
+  pause(): RunSnapshot {
+    if (this.runStatus === 'pausing' || this.runStatus === 'paused') return this.snapshot();
+    if (this.isTerminal() || this.runStatus === 'interrupted') {
+      throw new TaskControlError(this.runStatus, `Cannot pause a ${this.runStatus} run`);
+    }
+    if (this.inFlight === 0) {
+      this.runStatus = 'paused';
+      this.log({ kind: 'run-paused' });
+    } else {
+      this.runStatus = 'pausing';
+      this.log({ kind: 'run-pausing' });
+    }
+    this.emitChanged();
+    return this.snapshot();
   }
 
-  resume(): void {
-    if (this.runStatus !== 'paused') return;
+  resume(): RunSnapshot {
+    if (this.runStatus === 'running') return this.snapshot();
+    if (this.runStatus !== 'paused' && this.runStatus !== 'pausing') {
+      throw new TaskControlError(this.runStatus, `Cannot resume a ${this.runStatus} run; use continue after interrupt`);
+    }
+    this.assertSensitiveReady();
     // Cancelled nodes return to pending so they re-dispatch. Nodes that exhausted their `retry`
     // budget stay 'failed' — automatic retry happens in failNode within the run, not on resume.
     for (const [, st] of this.state) if (st.state === 'cancelled') st.state = 'pending';
+    for (const [, st] of this.instances) if (st.state === 'cancelled') st.state = 'pending';
     this.runStatus = 'running';
     this.log({ kind: 'run-resumed' });
     this.scheduleReady();
+    this.emitChanged();
+    return this.snapshot();
+  }
+
+  continueAfterInterrupt(): RunSnapshot {
+    if (this.runStatus === 'running') return this.snapshot();
+    if (this.runStatus !== 'interrupted') {
+      throw new TaskControlError(this.runStatus, `Cannot continue a ${this.runStatus} run`);
+    }
+    this.assertSensitiveReady();
+    for (const [, st] of this.state) {
+      if (st.state === 'interrupted' || st.state === 'cancelled') st.state = 'pending';
+    }
+    for (const [, st] of this.instances) {
+      if (st.state === 'interrupted' || st.state === 'cancelled') st.state = 'pending';
+    }
+    this.runStatus = 'running';
+    this.log({ kind: 'run-resumed' });
+    this.scheduleReady();
+    this.emitChanged();
+    return this.snapshot();
+  }
+
+  restoreCheckpoint(
+    checkpoint: {
+      seq: number;
+      revision: number;
+      tokensUsed: number;
+      tokenBudget?: number;
+      params?: Record<string, unknown>;
+      seenDecisionIds: string[];
+      invalidPatchCount: number;
+    } | null,
+    revisionFallback: number,
+  ): void {
+    this.revision = checkpoint?.revision ?? revisionFallback;
+    if (!checkpoint) return;
+    this.nextSeq = checkpoint.seq + 1;
+    this.tokensUsed = checkpoint.tokensUsed;
+    if (checkpoint.tokenBudget !== undefined) this.tokenBudget = checkpoint.tokenBudget;
+    if (checkpoint.params) this.opts.params = { ...this.opts.params, ...checkpoint.params };
+    this.invalidPatchCount = checkpoint.invalidPatchCount;
+    for (const id of checkpoint.seenDecisionIds) this.seenDecisionIds.add(id);
   }
 
   /**
-   * Rebuild run state from a persisted run-log (cross-restart resume). Done nodes reuse their
-   * recorded output and are NOT re-run; in-flight/cancelled nodes fall back to pending so they
-   * re-dispatch. A done node whose output file is missing also falls back to pending.
+   * Rebuild run state from a persisted run-log. Done nodes reuse recorded output.
+   * `mode: 'scan'` marks leftover running nodes interrupted and does not schedule.
+   * `mode: 'hydrate'` restores the durable run status (paused / waiting-*) as-is.
    */
-  hydrate(log: RunLogEntry[], loadOutput: (nodeId: string) => NodeOutput | null): void {
+  hydrate(
+    log: RunLogEntry[],
+    loadOutput: (nodeId: string) => NodeOutput | null,
+    mode: 'scan' | 'hydrate' = 'hydrate',
+  ): void {
+    this.suppressSchedule = true;
     for (const e of log) {
+      const entrySeq = (e as RunLogEntry & { seq?: number }).seq;
+      if (typeof entrySeq === 'number') this.nextSeq = Math.max(this.nextSeq, entrySeq + 1);
+      if ('tokensUsed' in e && typeof e.tokensUsed === 'number') this.tokensUsed = e.tokensUsed;
       if (e.kind === 'node-spawned') {
-        const st = this.state.get(e.nodeId);
+        const st = this.state.get(e.nodeId) ?? this.ensureInstanceState(e.nodeId);
         if (st) {
           st.sessionId = e.sessionId;
           this.sessionToNode.set(e.sessionId, e.nodeId);
         }
       } else if (e.kind === 'node-scheduled') {
-        const st = this.state.get(e.nodeId);
-        if (st) st.attempt += 1;
+        const st = this.state.get(e.nodeId) ?? this.ensureInstanceState(e.nodeId);
+        if (st) {
+          st.attempt += 1;
+          if (st.state === 'pending' || st.state === 'ready' || st.state === 'retry-wait') st.state = 'running';
+        }
       } else if (e.kind === 'node-finished') {
-        const st = this.state.get(e.nodeId);
+        const st = this.state.get(e.nodeId) ?? this.ensureInstanceState(e.nodeId);
         if (st) st.state = e.state;
+      } else if (e.kind === 'node-waiting-approval') {
+        const st = this.state.get(e.nodeId);
+        if (st) {
+          st.state = 'waiting-approval';
+          st.approvalDeadline = e.deadline;
+        }
       } else if (e.kind === 'verdict') {
-        // Reconstruct the durable repair counters so a cross-restart resume honors the cap rather
-        // than restarting the budget from zero (the in-memory counters reset on a fresh process).
         if (e.result === 'fail') this.repairsUsed += 1;
         else if (e.result === 'unparsed') this.unparsedReAsks += 1;
         else if (e.result === 'pass') this.unparsedReAsks = 0;
       }
     }
+    // `instanceCount` is an execution-attempt guard, not just the number of
+    // instance ids that happened to be reconstructed above. Session-backed
+    // attempts log node-scheduled; synchronous controls and pure-cache hits
+    // only log a terminal done event, so account for both without double count.
+    const outstandingSchedules = new Map<string, number>();
+    this.instanceCount = 0;
+    for (const entry of log) {
+      if (entry.kind === 'node-scheduled') {
+        this.instanceCount += 1;
+        outstandingSchedules.set(entry.nodeId, (outstandingSchedules.get(entry.nodeId) ?? 0) + 1);
+      } else if (entry.kind === 'node-finished' && entry.state === 'done') {
+        const credit = outstandingSchedules.get(entry.nodeId) ?? 0;
+        if (credit > 0) outstandingSchedules.set(entry.nodeId, credit - 1);
+        else this.instanceCount += 1;
+      }
+    }
+    this.runStatus = deriveRunStatusFromLog(log);
     for (const [nodeId, st] of this.state) {
       if (st.state === 'done') {
         const out = loadOutput(nodeId);
         if (out) this.outputs[nodeId] = out;
-        else st.state = 'pending'; // recorded output missing → must re-run
-      } else if (st.state === 'running' || st.state === 'cancelled') {
-        st.state = 'pending'; // in-flight at shutdown / cancelled → re-dispatch on resume
-      }
-    }
-    this.inFlight = 0;
-  }
-
-  /** Resume a hydrated run: subscribe, log, and schedule the ready set (finished nodes are skipped). */
-  resumeFromHydrated(): void {
-    if (this.unsubscribe) return;
-    this.runStatus = 'running';
-    this.unsubscribe = this.deps.host.onSessionComplete((evt) => this.onSessionComplete(evt));
-    this.log({ kind: 'run-resumed' });
-    this.scheduleReady();
-  }
-
-  async stop(): Promise<void> {
-    if (this.isTerminal()) return;
-    this.runStatus = 'stopped';
-    this.log({ kind: 'run-stopped' });
-    for (const [nodeId, st] of this.state) {
-      if (st.state === 'running') {
-        st.state = 'cancelled';
-        this.log({ kind: 'node-finished', nodeId, sessionId: st.sessionId ?? '', state: 'cancelled', reason: 'stopped' });
-        if (st.sessionId) {
-          void this.deps.host.cancelProcessing(st.sessionId, true);
-          void this.deps.host.setKanbanColumn(st.sessionId, 'todo');
+        else st.state = 'pending';
+      } else if (st.state === 'running' || st.state === 'retry-wait') {
+        if (mode === 'scan' && this.runStatus !== 'paused' && this.runStatus !== 'pausing') {
+          st.state = 'interrupted';
+          this.log({ kind: 'node-finished', nodeId, sessionId: st.sessionId ?? '', state: 'interrupted', reason: 'startup-scan' });
+        } else {
+          // Paused hydrate: leftover in-flight nodes re-dispatch on resume.
+          st.state = 'pending';
         }
       }
     }
+    for (const [nodeId, st] of this.instances) {
+      if (st.state !== 'running' && st.state !== 'retry-wait') continue;
+      if (mode === 'scan' && this.runStatus !== 'paused' && this.runStatus !== 'pausing') {
+        st.state = 'interrupted';
+        this.log({ kind: 'node-finished', nodeId, sessionId: st.sessionId ?? '', state: 'interrupted', reason: 'startup-scan' });
+      } else {
+        st.state = 'pending';
+      }
+    }
     this.inFlight = 0;
-    this.finalize();
+    this.restoreExpansionState(loadOutput);
+    if (this.runStatus === 'pausing') this.runStatus = 'paused';
+    this.expireApprovals(this.deps.now?.());
+    this.restoreApprovalTimers();
+    if (mode === 'scan' && !this.isTerminal() && this.runStatus !== 'paused' && this.runStatus !== 'waiting-approval' && this.runStatus !== 'waiting-budget') {
+      this.runStatus = 'interrupted';
+      this.log({ kind: 'run-interrupted' });
+    }
+    this.suppressSchedule = false;
+    this.unsubscribe = this.deps.host.onSessionComplete((evt) => this.onSessionComplete(evt));
+    this.emitChanged();
+  }
+
+  private ensureInstanceState(nodeId: string): NodeStateEntry | undefined {
+    if (!nodeId.includes('#')) return undefined;
+    let st = this.instances.get(nodeId);
+    if (!st) {
+      st = { state: 'pending', attempt: 0 };
+      this.instances.set(nodeId, st);
+      this.instanceCount += 1;
+    }
+    return st;
+  }
+
+  private restoreExpansionState(loadOutput: (nodeId: string) => NodeOutput | null): void {
+    for (const [iid, st] of this.instances) {
+      if (st.state !== 'done') continue;
+      const out = loadOutput(iid);
+      if (out) this.instanceOutputs.set(iid, out);
+    }
+    for (const node of this.spec.nodes) {
+      if (node.kind === 'map' && this.state.get(node.id)?.state === 'running') {
+        try {
+          this.mapItems.set(node.id, parseForEach(this.resolveForEach(node)));
+        } catch {
+          this.mapItems.set(node.id, []);
+        }
+      }
+      if (node.kind === 'loop') {
+        let maxIdx = -1;
+        for (const iid of this.instances.keys()) {
+          if (definitionId(iid) !== node.id) continue;
+          const idx = Number(iid.slice(node.id.length + 1));
+          if (Number.isInteger(idx)) maxIdx = Math.max(maxIdx, idx);
+        }
+        if (maxIdx >= 0) this.loopIndex.set(node.id, maxIdx + (this.instances.get(instanceId(node.id, maxIdx))?.state === 'done' ? 1 : 0));
+      }
+      if ((node.replicas ?? 1) > 1) {
+        this.replicaCounts.set(node.id, node.replicas!);
+      }
+    }
+  }
+
+  async stop(): Promise<RunSnapshot> {
+    if (this.isTerminal()) return this.snapshot();
+    this.stopRequested = true;
+    this.suppressSchedule = true;
+    for (const timer of this.retryTimers) clearTimeout(timer);
+    this.retryTimers.clear();
+    for (const timer of this.approvalTimers) clearTimeout(timer);
+    this.approvalTimers.clear();
+    for (const timer of this.sessionTimers.values()) clearTimeout(timer);
+    this.sessionTimers.clear();
+
+    const sessionsToCancel = new Set<string>();
+    for (const [nodeId, st] of [...this.state, ...this.instances]) {
+      const node = this.spec.nodes.find((candidate) => candidate.id === definitionId(nodeId));
+      // Cleanup nodes are allowed to finish (or start below) after stop. Every
+      // other non-terminal node becomes terminal before any async cancellation,
+      // closing the completion-event race and making implicit finally ready.
+      if (node?.kind === 'finally' || isTerminalNodeState(st.state)) continue;
+      if (st.state === 'running') this.inFlight = Math.max(0, this.inFlight - 1);
+      st.state = 'cancelled';
+      this.submittedOutputs.delete(nodeId);
+      this.log({ kind: 'node-finished', nodeId, sessionId: st.sessionId ?? '', state: 'cancelled', reason: 'stopped' });
+      if (st.sessionId) sessionsToCancel.add(st.sessionId);
+    }
+
+    for (const sessionId of sessionsToCancel) {
+      let stoppedBySwarm = false;
+      if (this.deps.host.stopSwarm) {
+        try {
+          const stopped = await this.deps.host.stopSwarm(sessionId);
+          stoppedBySwarm = stopped.stoppedSessionIds.includes(sessionId);
+        } catch (error) {
+          conductorLog.warn('stop-swarm-failed', { slug: this.slug, runId: this.runId, sessionId, error });
+        }
+      }
+      if (!stoppedBySwarm) {
+        try {
+          await this.deps.host.cancelProcessing(sessionId, true);
+        } catch (error) {
+          // The in-memory node is already terminal. A cancellation transport
+          // failure must not freeze scheduling or suppress contracted finally
+          // cleanup forever; startup recovery will mark any surviving worker.
+          conductorLog.warn('cancel-session-failed', { slug: this.slug, runId: this.runId, sessionId, error });
+        }
+      }
+      this.applyCard(sessionId, TODO_STATUS);
+    }
+    this.suppressSchedule = false;
+    const hasFinally =
+      this.sourceVersion === 2 && this.spec.nodes.some((n) => n.kind === 'finally' && this.isFinallyReady(n));
+    if (hasFinally) {
+      this.runStatus = 'running';
+      this.scheduleReady();
+      return this.snapshot();
+    }
+    this.finish('stopped');
+    return this.snapshot();
   }
 
   waitUntilSettled(): Promise<RunSnapshot> {
@@ -308,6 +630,10 @@ class ActiveRun {
   }
 
   snapshot(): RunSnapshot {
+    const blockers = [...this.state.entries()]
+      .filter(([, st]) => st.state === 'waiting-approval' || st.state === 'interrupted' || st.state === 'failed' || st.state === 'invalid')
+      .map(([id]) => id);
+    if (this.isOverBudget() && this.hasPendingNodes()) blockers.push('budget');
     return {
       slug: this.slug,
       runId: this.runId,
@@ -315,60 +641,779 @@ class ActiveRun {
       status: this.runStatus,
       orchestratorSessionId: this.opts.orchestratorSessionId,
       tokensUsed: this.tokensUsed,
-      nodes: this.spec.nodes.map((n) => {
+      tokenBudget: this.tokenBudget,
+      blockers: blockers.length ? blockers : undefined,
+      revision: this.revision,
+      nodes: [
+        ...this.spec.nodes.map((n) => {
         const st = this.state.get(n.id)!;
-        return { id: n.id, state: st.state, sessionId: st.sessionId, attempt: st.attempt };
+        return {
+          id: n.id,
+          definitionId: n.id,
+          state: st.state,
+          sessionId: st.sessionId,
+          attempt: st.attempt,
+          retryCount: Math.max(0, st.attempt - 1),
+          role: n.kind === 'verify' || n.kind === 'judge' ? 'reviewer' as const : 'worker' as const,
+          model: n.model ?? this.spec.defaults?.model,
+          tokensUsed: st.sessionId ? this.sessionTokens.get(st.sessionId) : undefined,
+          blocker: st.lastFailure,
+        };
       }),
+        ...Array.from(this.instances, ([id, st]) => {
+          const defId = definitionId(id);
+          const node = this.spec.nodes.find((candidate) => candidate.id === defId);
+          return {
+            id,
+            definitionId: defId,
+            state: st.state,
+            sessionId: st.sessionId,
+            attempt: st.attempt,
+            retryCount: Math.max(0, st.attempt - 1),
+            role: node?.kind === 'verify' || node?.kind === 'judge' ? 'reviewer' as const : 'worker' as const,
+            model: node?.model ?? this.spec.defaults?.model,
+            tokensUsed: st.sessionId ? this.sessionTokens.get(st.sessionId) : undefined,
+            blocker: st.lastFailure,
+          };
+        }),
+      ],
     };
   }
 
   // --- scheduling ---
 
   private scheduleReady(): void {
-    if (this.runStatus !== 'running') return;
-    // Resume/hydrate can leave deferred kinds pending; never dispatch them as sessions.
-    for (const node of this.spec.nodes) {
-      if (isExecutableTaskNode(node)) continue;
-      const st = this.state.get(node.id)!;
-      if (st.state !== 'pending') continue;
-      st.state = 'skipped';
-      this.log({ kind: 'node-finished', nodeId: node.id, sessionId: '', state: 'skipped' });
+    if (this.suppressSchedule) return;
+    if (this.runStatus === 'pausing') {
+      if (this.inFlight === 0) {
+        this.runStatus = 'paused';
+        this.log({ kind: 'run-paused' });
+        this.emitChanged();
+      }
+      return;
     }
+    if (this.runStatus !== 'running') return;
+    this.settleBlockedNodes();
+    this.pumpExpandedInstances();
+    // Resume/hydrate of a v1 run can leave deferred kinds pending; never dispatch them as sessions.
+    if (this.sourceVersion === 1) {
+      for (const node of this.spec.nodes) {
+        if (isExecutableTaskNode(node)) continue;
+        const st = this.state.get(node.id)!;
+        if (st.state !== 'pending') continue;
+        st.state = 'skipped';
+        this.log({ kind: 'node-finished', nodeId: node.id, sessionId: '', state: 'skipped' });
+      }
+    }
+    let settledSynchronously = false;
     for (const node of this.spec.nodes) {
-      if (this.inFlight >= this.maxParallel) break;
+      if (this.stopRequested && node.kind !== 'finally') continue;
+      if (this.inFlight >= this.maxParallel && isSessionLikeKind(node.kind)) break;
       if (!this.isReady(node)) continue;
-      if (this.isOverBudget()) {
+      if (node.kind !== 'filter' && !this.whenAllows(node)) {
+        this.skipNode(node.id, 'when');
+        continue;
+      }
+      if (!this.stopRequested && this.isOverBudget() && isSessionLikeKind(node.kind)) {
         this.pauseForBudget();
         return;
       }
-      this.markRunning(node);
-      void this.dispatch(node);
+      if (this.instanceCount >= MAX_RUN_INSTANCES) {
+        this.originalFailed = true;
+        this.finish('failed');
+        return;
+      }
+      this.dispatchByKind(node);
+      const stateAfterDispatch = this.state.get(node.id)?.state;
+      if (stateAfterDispatch !== 'running' && stateAfterDispatch !== 'pending') settledSynchronously = true;
     }
+    // Control nodes settle synchronously. Iterate to a fixed point so a valid
+    // DAG does not depend on whether a dependent appears before its control
+    // predecessor in YAML order.
+    if (
+      settledSynchronously
+      && this.spec.nodes.some((node) => this.isReady(node) && (!this.stopRequested || node.kind === 'finally'))
+    ) {
+      this.scheduleReady();
+      return;
+    }
+    this.maybePromoteWaiting();
     this.maybeFinish();
+  }
+
+  /** Mark nodes that can no longer run after an upstream failure as cancelled. */
+  private settleBlockedNodes(): void {
+    let changed = true;
+    while (changed) {
+      changed = false;
+      for (const node of this.spec.nodes) {
+        if (node.kind === 'finally' || this.state.get(node.id)?.state !== 'pending') continue;
+        if (node.trigger === 'all_done') continue;
+        const dependencyStates = [...(this.edges.get(node.id) ?? [])]
+          .map((dep) => this.state.get(dep)?.state);
+        const blocked = node.trigger === 'one_success'
+          // A failed branch must not cancel a race while another branch can
+          // still succeed. It becomes impossible only after every dependency
+          // settles without a successful result.
+          ? dependencyStates.length > 0
+            && dependencyStates.every(isTerminalNodeState)
+            && !dependencyStates.some((state) => state === 'done')
+          : dependencyStates.some((state) =>
+              state === 'failed' || state === 'invalid' || state === 'cancelled');
+        if (!blocked) continue;
+        const st = this.state.get(node.id)!;
+        st.state = 'cancelled';
+        st.lastFailure = 'Blocked by a failed or cancelled dependency';
+        this.log({ kind: 'node-finished', nodeId: node.id, sessionId: '', state: 'cancelled', reason: 'blocked-dependency' });
+        changed = true;
+      }
+    }
   }
 
   private isReady(node: TaskNode): boolean {
     if (this.state.get(node.id)!.state !== 'pending') return false;
-    for (const dep of this.edges.get(node.id) ?? []) {
-      const depState = this.state.get(dep)?.state;
-      if (depState !== 'done' && depState !== 'skipped') return false;
+    if (this.sourceVersion === 2 && node.kind === 'finally') return this.isFinallyReady(node);
+    const deps = [...(this.edges.get(node.id) ?? [])];
+    const states = deps.map((dep) => this.state.get(dep)?.state);
+    if (node.trigger === 'all_done') return states.every(isTerminalNodeState);
+    if (node.trigger === 'one_success') return states.some((state) => state === 'done');
+    if (node.trigger === 'none_failed_min_one_success') {
+      return states.every(isTerminalNodeState)
+        && states.some((state) => state === 'done')
+        && !states.some((state) => state === 'failed' || state === 'invalid' || state === 'cancelled');
     }
-    return true;
+    return states.every((state) => state === 'done' || state === 'skipped');
+  }
+
+  /** Fill capacity for already-expanded nodes before opening more definitions. */
+  private pumpExpandedInstances(): void {
+    for (const node of this.spec.nodes) {
+      if (this.inFlight >= this.maxParallel) return;
+      if (this.state.get(node.id)?.state !== 'running') continue;
+      if (this.replicaCounts.has(node.id)) this.scheduleReplicaInstances(node);
+      else if (this.mapItems.has(node.id)) this.scheduleMapInstances(node);
+      else if (this.loopIndex.has(node.id)) this.startLoopIteration(node);
+    }
+  }
+
+  private isFinallyReady(node: TaskNode): boolean {
+    const explicit = [...(this.edges.get(node.id) ?? [])];
+    const watched =
+      explicit.length > 0
+        ? explicit
+        : this.spec.nodes.filter((n) => n.kind !== 'finally' && n.id !== node.id).map((n) => n.id);
+    return watched.every((id) => isTerminalNodeState(this.state.get(id)?.state));
   }
 
   private markRunning(node: TaskNode): void {
     const st = this.state.get(node.id)!;
+    this.submittedOutputs.delete(node.id);
     st.state = 'running';
     st.attempt += 1;
     this.inFlight += 1;
+    this.instanceCount += 1;
     this.log({ kind: 'node-scheduled', nodeId: node.id });
   }
 
-  private async dispatch(node: TaskNode): Promise<void> {
+  private dispatchByKind(node: TaskNode): void {
+    if (this.sourceVersion === 2 && isControlKind(node.kind)) {
+      this.instanceCount += 1;
+      if (node.kind === 'route') this.executeRoute(node);
+      else this.completeControlNode(node.id, 'parallel');
+      return;
+    }
+    if (this.sourceVersion === 2 && node.kind === 'approval') {
+      this.instanceCount += 1;
+      this.enterApproval(node);
+      return;
+    }
+    if (this.sourceVersion === 2 && node.kind === 'map') {
+      this.executeMap(node);
+      return;
+    }
+    if (this.sourceVersion === 2 && node.kind === 'loop') {
+      this.executeLoop(node);
+      return;
+    }
+    if (this.sourceVersion === 2 && node.kind === 'filter') {
+      this.instanceCount += 1;
+      this.executeFilter(node);
+      return;
+    }
+    if (this.sourceVersion === 2 && node.kind === 'aggregate') {
+      this.instanceCount += 1;
+      this.executeAggregate(node);
+      return;
+    }
+    if (this.sourceVersion === 2 && (node.replicas ?? 1) > 1 && isSessionLikeKind(node.kind)) {
+      this.executeReplicas(node);
+      return;
+    }
+    const cached = this.cachedOutput(node);
+    if (cached) {
+      this.instanceCount += 1;
+      this.completeControlNode(node.id, cached.text, cached.params);
+      return;
+    }
+    this.markRunning(node);
+    void this.dispatch(node);
+  }
+
+  private skipNode(nodeId: string, reason: string): void {
+    const st = this.state.get(nodeId);
+    if (!st || st.state === 'skipped') return;
+    st.state = 'skipped';
+    this.log({ kind: 'node-finished', nodeId, sessionId: '', state: 'skipped', reason });
+  }
+
+  private completeControlNode(nodeId: string, text: string, values?: Record<string, unknown>): void {
+    const st = this.state.get(nodeId)!;
+    st.state = 'done';
+    const output: NodeOutput = { text, ...(values ? { params: values } : {}) };
+    this.outputs[nodeId] = output;
+    writeNodeOutput(this.deps.workspaceRoot, this.slug, this.runId, nodeId, output);
+    this.log({ kind: 'node-finished', nodeId, sessionId: '', state: 'done' });
+    this.emitChanged();
+  }
+
+  private executeRoute(node: TaskNode): void {
+    const selected = this.selectRouteTarget(node);
+    this.completeControlNode(node.id, selected, { selected });
+    if (!node.route) return;
+    const targets = new Set([...node.route.cases.map((c) => c.goto), node.route.default]);
+    const selectedReachable = this.reachableDependents(selected);
+    for (const target of targets) {
+      if (target === selected) continue;
+      for (const id of this.reachableDependents(target)) {
+        // A merge reachable from the selected target belongs to the surviving
+        // branch. Everything exclusive to the unselected target is pruned.
+        if (!selectedReachable.has(id)) this.skipNode(id, 'route');
+      }
+    }
+  }
+
+  private reachableDependents(start: string): Set<string> {
+    const out = new Set<string>();
+    const queue = [start];
+    const dependents = this.dependentsMap();
+    while (queue.length) {
+      const id = queue.shift()!;
+      if (out.has(id)) continue;
+      out.add(id);
+      for (const next of dependents.get(id) ?? []) queue.push(next);
+    }
+    return out;
+  }
+
+  private selectRouteTarget(node: TaskNode): string {
+    if (!node.route) return node.id;
+    for (const c of node.route.cases) {
+      if (this.evalWhen(c.when)) return c.goto;
+    }
+    return node.route.default;
+  }
+
+  private executeMap(node: TaskNode): void {
+    const items = parseForEach(this.resolveForEach(node));
+    if (this.instanceCount + Math.max(items.length, 1) > MAX_RUN_INSTANCES) {
+      this.originalFailed = true;
+      this.finish('failed');
+      return;
+    }
+    const st = this.state.get(node.id)!;
+    st.state = 'running';
+    st.attempt += 1;
+    this.log({ kind: 'node-scheduled', nodeId: node.id });
+    this.mapItems.set(node.id, items);
+    if (items.length === 0) {
+      this.completeControlNode(node.id, '[]', { items: [] });
+      return;
+    }
+    this.scheduleMapInstances(node);
+  }
+
+  private scheduleMapInstances(node: TaskNode): void {
+    const items = this.mapItems.get(node.id) ?? [];
+    const parallel = Math.min(node.max_parallel ?? this.maxParallel, this.maxParallel, MAX_DAG_MAX_PARALLEL);
+    let running = 0;
+    for (let i = 0; i < items.length; i++) {
+      const iid = instanceId(node.id, i);
+      if (this.instances.get(iid)?.state === 'running') running += 1;
+    }
+    for (let i = 0; i < items.length; i++) {
+      if (running >= parallel || this.inFlight >= this.maxParallel) break;
+      const iid = instanceId(node.id, i);
+      const existing = this.instances.get(iid);
+      if (existing && existing.state !== 'pending') continue;
+      if (!existing && this.instanceCount >= MAX_RUN_INSTANCES) {
+        this.originalFailed = true;
+        this.finish('failed');
+        return;
+      }
+      const instance = existing ?? { state: 'pending' as const, attempt: 0 };
+      this.submittedOutputs.delete(iid);
+      instance.state = 'running';
+      instance.attempt += 1;
+      this.instances.set(iid, instance);
+      if (!existing) this.instanceCount += 1;
+      this.inFlight += 1;
+      this.log({ kind: 'node-scheduled', nodeId: iid });
+      void this.dispatch(node, { id: iid, item: items[i], index: i });
+      running += 1;
+    }
+  }
+
+  private executeReplicas(node: TaskNode): void {
+    const count = node.replicas ?? 1;
+    if (count <= 1 || !node.aggregate) {
+      this.failNode(node.id, 'replicas require an aggregate mode');
+      return;
+    }
+    const newInstances = Array.from({ length: count }, (_, i) => instanceId(node.id, i))
+      .filter((id) => !this.instances.has(id)).length;
+    if (this.instanceCount + newInstances > MAX_RUN_INSTANCES) {
+      this.originalFailed = true;
+      this.finish('failed');
+      return;
+    }
+    const st = this.state.get(node.id)!;
+    st.state = 'running';
+    st.attempt += 1;
+    this.log({ kind: 'node-scheduled', nodeId: node.id });
+    this.replicaCounts.set(node.id, count);
+    this.scheduleReplicaInstances(node);
+  }
+
+  private scheduleReplicaInstances(node: TaskNode): void {
+    const count = this.replicaCounts.get(node.id) ?? node.replicas ?? 0;
+    const parallel = Math.min(node.max_parallel ?? this.maxParallel, this.maxParallel, MAX_DAG_MAX_PARALLEL);
+    let running = 0;
+    for (let i = 0; i < count; i++) {
+      if (this.instances.get(instanceId(node.id, i))?.state === 'running') running += 1;
+    }
+    for (let i = 0; i < count; i++) {
+      if (running >= parallel || this.inFlight >= this.maxParallel) break;
+      const iid = instanceId(node.id, i);
+      const existing = this.instances.get(iid);
+      if (existing && existing.state !== 'pending') continue;
+      if (!existing && this.instanceCount >= MAX_RUN_INSTANCES) {
+        this.originalFailed = true;
+        this.finish('failed');
+        return;
+      }
+      const instance = existing ?? { state: 'pending' as const, attempt: 0 };
+      this.submittedOutputs.delete(iid);
+      instance.state = 'running';
+      instance.attempt += 1;
+      this.instances.set(iid, instance);
+      if (!existing) this.instanceCount += 1;
+      this.inFlight += 1;
+      this.log({ kind: 'node-scheduled', nodeId: iid });
+      void this.dispatch(node, { id: iid, item: i, index: i });
+      running += 1;
+    }
+  }
+
+  private finishReplicas(node: TaskNode): void {
+    const count = this.replicaCounts.get(node.id) ?? node.replicas ?? 0;
+    const outputs: NodeOutput[] = [];
+    for (let i = 0; i < count; i++) {
+      const iid = instanceId(node.id, i);
+      const state = this.instances.get(iid)?.state;
+      if (state === 'failed' || state === 'invalid' || state === 'cancelled') {
+        this.failNode(node.id, `replica ${iid} ${state}`);
+        return;
+      }
+      const output = this.instanceOutputs.get(iid);
+      if (output) outputs.push(output);
+    }
+    const texts = outputs.map((output) => output.text);
+    let text: string;
+    let params: Record<string, unknown> = { items: outputs.map((output) => output.params ?? output.text) };
+    if (node.aggregate === 'vote' || node.aggregate === 'majority') {
+      const votes = new Map<string, number>();
+      for (const value of texts) votes.set(value, (votes.get(value) ?? 0) + 1);
+      let winner = texts[0] ?? '';
+      let best = -1;
+      for (const [value, total] of votes) {
+        if (total > best) {
+          winner = value;
+          best = total;
+        }
+      }
+      text = winner;
+      params = { ...params, votes: Object.fromEntries(votes) };
+    } else if (node.aggregate === 'filter') {
+      const kept = texts.filter((value) => value.trim() !== '');
+      text = kept.join('\n');
+      params = { ...params, items: kept };
+    } else {
+      // concat and synthesize preserve stable replica order. A separate
+      // synthesize node can perform model-based synthesis when required.
+      text = texts.join('\n');
+    }
+    this.completeControlNode(node.id, text, params);
+  }
+
+  private finishMap(node: TaskNode): void {
+    const items = this.mapItems.get(node.id) ?? [];
+    const ordered: unknown[] = [];
+    const texts: string[] = [];
+    for (let i = 0; i < items.length; i++) {
+      const iid = instanceId(node.id, i);
+      const out = this.instanceOutputs.get(iid);
+      const st = this.instances.get(iid);
+      if (st && (st.state === 'failed' || st.state === 'invalid')) {
+        this.failNode(node.id, `map instance ${iid} ${st.state}`);
+        return;
+      }
+      texts.push(out?.text ?? '');
+      ordered.push(out?.params?.item ?? out?.text ?? '');
+    }
+    this.completeControlNode(node.id, texts.join('\n'), { items: ordered });
+  }
+
+  private executeLoop(node: TaskNode): void {
+    if (!node.loop) {
+      this.failNode(node.id, 'loop.max is required');
+      return;
+    }
+    const st = this.state.get(node.id)!;
+    if (st.state === 'pending') {
+      st.state = 'running';
+      st.attempt += 1;
+      this.log({ kind: 'node-scheduled', nodeId: node.id });
+      this.loopIndex.set(node.id, 0);
+    }
+    this.startLoopIteration(node);
+  }
+
+  private startLoopIteration(node: TaskNode): void {
+    if (this.inFlight >= this.maxParallel) return;
+    const index = this.loopIndex.get(node.id) ?? 0;
+    const max = node.loop?.max ?? 0;
+    if (index >= max) {
+      this.exhaustLoop(node);
+      return;
+    }
+    const iid = instanceId(node.id, index);
+    const existing = this.instances.get(iid);
+    if (existing && existing.state !== 'pending') return;
+    if (!existing && this.instanceCount >= MAX_RUN_INSTANCES) {
+      this.originalFailed = true;
+      this.finish('failed');
+      return;
+    }
+    const prev = index > 0 ? this.instanceOutputs.get(instanceId(node.id, index - 1))?.text : undefined;
+    const item = index === 0
+      ? (node.loop?.carry
+          ? interpolateRefs(node.loop.carry, { nodeOutputs: this.outputs, params: this.opts.params })
+          : undefined)
+      : prev;
+    const instance = existing ?? { state: 'pending' as const, attempt: 0 };
+    this.submittedOutputs.delete(iid);
+    instance.state = 'running';
+    instance.attempt += 1;
+    this.instances.set(iid, instance);
+    if (!existing) this.instanceCount += 1;
+    this.inFlight += 1;
+    this.log({ kind: 'node-scheduled', nodeId: iid });
+    void this.dispatch(node, { id: iid, item, index, prev });
+  }
+
+  private afterLoopInstance(node: TaskNode, instanceKey: string, output: NodeOutput): void {
+    this.instanceOutputs.set(instanceKey, output);
+    writeNodeAttempt(this.deps.workspaceRoot, this.slug, this.runId, instanceKey, 1, output);
+    const until = node.loop?.until;
+    if (
+      until &&
+      this.evalWhen(until, {
+        item: output.text,
+        index: this.loopIndex.get(node.id) ?? 0,
+        prev: output.text,
+        nodes: {
+          ...((this.conditionCtx().nodes as Record<string, unknown> | undefined) ?? {}),
+          [node.id]: { output: output.text },
+        },
+      })
+    ) {
+      this.completeControlNode(node.id, output.text, { iterations: (this.loopIndex.get(node.id) ?? 0) + 1 });
+      return;
+    }
+    this.loopIndex.set(node.id, (this.loopIndex.get(node.id) ?? 0) + 1);
+    this.startLoopIteration(node);
+  }
+
+  private exhaustLoop(node: TaskNode): void {
+    const elseId = node.loop?.else;
+    if (elseId) {
+      this.completeControlNode(node.id, 'exhausted', { exhausted: true, else: elseId });
+      for (const [id, deps] of this.edges) {
+        if (id !== elseId && deps.has(node.id)) this.skipNode(id, 'loop-else');
+      }
+      return;
+    }
+    this.failNode(node.id, 'loop-exhausted');
+  }
+
+  private executeFilter(node: TaskNode): void {
+    const items = parseForEach(this.resolveForEach(node));
+    const kept = items.filter((item, index) => {
+      if (!node.when) return true;
+      return this.evalWhen(node.when, { item, index });
+    });
+    this.completeControlNode(node.id, JSON.stringify(kept), { items: kept });
+  }
+
+  private executeAggregate(node: TaskNode): void {
+    const deps = [...(this.edges.get(node.id) ?? [])];
+    const texts = deps.map((id) => this.outputs[id]?.text ?? '');
+    if (node.aggregate === 'majority' || node.aggregate === 'vote') {
+      const counts = new Map<string, number>();
+      for (const t of texts) counts.set(t, (counts.get(t) ?? 0) + 1);
+      let winner = texts[0] ?? '';
+      let best = 0;
+      for (const [t, n] of counts) if (n > best) {
+        winner = t;
+        best = n;
+      }
+      this.completeControlNode(node.id, winner, { votes: Object.fromEntries(counts) });
+      return;
+    }
+    if (node.aggregate === 'filter') {
+      const kept = texts.filter((text) => text.trim() !== '');
+      this.completeControlNode(node.id, kept.join('\n'), { items: kept });
+      return;
+    }
+    this.completeControlNode(node.id, texts.join('\n'), { items: texts });
+  }
+
+  private resolveForEach(node: TaskNode): string {
+    const expr = node.for_each;
+    if (expr) {
+      return interpolateRefs(expr, { nodeOutputs: this.outputs, params: this.opts.params });
+    }
+    const firstDep = [...(this.edges.get(node.id) ?? [])][0];
+    return firstDep ? (this.outputs[firstDep]?.text ?? '') : '';
+  }
+
+  private cachedOutput(node: TaskNode): NodeOutput | undefined {
+    if (node.cache !== 'pure') return undefined;
+    const key = this.cacheKey(node);
+    return this.promptCache.get(key);
+  }
+
+  private cacheKey(node: TaskNode, locals?: { item?: unknown; index?: number; prev?: string }): string {
+    const prompt = interpolateLocals(
+      interpolateRefs(node.prompt ?? '', { nodeOutputs: this.outputs, params: this.opts.params }),
+      locals ?? {},
+    );
+    return createHash('sha256').update(`${node.id}\n${prompt}`).digest('hex');
+  }
+
+  private rememberCache(node: TaskNode, output: NodeOutput, locals?: { item?: unknown; index?: number; prev?: string }): void {
+    if (node.cache === 'pure') this.promptCache.set(this.cacheKey(node, locals), output);
+  }
+
+  private assertSensitiveReady(): void {
+    const missing = missingSensitive(this.opts.params, sensitiveParamNames(this.spec.params));
+    if (missing.length) {
+      throw new TaskControlError(this.runStatus, `Sensitive params must be re-entered: ${missing.join(', ')}`);
+    }
     try {
+      this.opts.params = resolveParams(this.spec, this.opts.params);
+    } catch (error) {
+      throw new TaskControlError(this.runStatus, error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  private enterApproval(node: TaskNode): void {
+    const st = this.state.get(node.id)!;
+    st.state = 'waiting-approval';
+    if (node.timeout && node.timeout > 0) {
+      const nowMs = this.deps.now ? Date.parse(this.deps.now()) : Date.now();
+      const deadline = new Date(nowMs + node.timeout * 1000).toISOString();
+      st.approvalDeadline = deadline;
+      this.log({ kind: 'node-waiting-approval', nodeId: node.id, deadline });
+      if (!this.deps.now) {
+        const timer = setTimeout(() => {
+          this.approvalTimers.delete(timer);
+          this.expireApprovals();
+        }, node.timeout * 1000);
+        this.approvalTimers.add(timer);
+      }
+    } else {
+      this.log({ kind: 'node-waiting-approval', nodeId: node.id });
+    }
+    this.emitChanged();
+  }
+
+  respondApproval(nodeId: string, approved: boolean): RunSnapshot {
+    const st = this.state.get(nodeId);
+    if (!st || st.state !== 'waiting-approval') {
+      throw new TaskControlError(this.runStatus, `Node ${nodeId} is not waiting for approval`);
+    }
+    if (approved) {
+      this.completeControlNode(nodeId, 'approved', { approved: true });
+    } else {
+      this.failNode(nodeId, 'approval-rejected', st.sessionId, 'error');
+    }
+    if (this.runStatus === 'waiting-approval') this.runStatus = 'running';
+    this.coordinatorCheckpoint('approval');
+    this.scheduleReady();
+    this.emitChanged();
+    return this.snapshot();
+  }
+
+  acceptOutput(sessionId: string, payload: { text?: string; values?: Record<string, unknown> }): { ok: true } | { ok: false; error: string } {
+    const nodeId = this.sessionToNode.get(sessionId);
+    if (!nodeId) return { ok: false, error: 'Session is not a node in this run' };
+    const node = this.spec.nodes.find((n) => n.id === nodeId || n.id === definitionId(nodeId));
+    if (!node) return { ok: false, error: 'Unknown node' };
+    const active = this.instances.get(nodeId) ?? this.state.get(definitionId(nodeId));
+    if (!active || active.state !== 'running' || active.sessionId !== sessionId) {
+      return { ok: false, error: 'Session is not the active attempt for this node' };
+    }
+    const declared = node.outputs ?? [];
+    const values = { ...(payload.values ?? {}) };
+    if (declared.length) {
+      if (this.sourceVersion === 2) {
+        const allowed = new Set(declared.map((decl) => decl.name));
+        const extra = Object.keys(values).find((name) => !allowed.has(name));
+        if (extra) return { ok: false, error: `Undeclared output "${extra}"` };
+      }
+      for (const decl of declared) {
+        if (decl.required !== false && !(decl.name in values) && (this.sourceVersion === 2 || payload.text == null)) {
+          return { ok: false, error: `Missing required output "${decl.name}"` };
+        }
+        if (decl.name in values && decl.kind !== 'artifact') {
+          const typeError = outputTypeError(decl.type, decl.enum, values[decl.name]);
+          if (typeError) return { ok: false, error: `Output "${decl.name}" ${typeError}` };
+        }
+        if (decl.kind === 'artifact' && values[decl.name] != null) {
+          const resolved = resolveArtifact(this.deps.workspaceRoot, this.spec.cwd, String(values[decl.name]));
+          if (!resolved.ok) return { ok: false, error: resolved.error };
+          values[decl.name] = resolved.artifact;
+        }
+      }
+    }
+    this.submittedOutputs.set(nodeId, { text: payload.text ?? '', params: values });
+    return { ok: true };
+  }
+
+  submitStructuredVerdict(payload: { result: 'pass' | 'fail'; reason?: string; nodes?: string[] }): RunSnapshot {
+    if (this.runStatus !== 'verifying') {
+      throw new TaskControlError(this.runStatus, 'Run is not waiting for a verdict');
+    }
+    this.handleVerdictObject({ result: payload.result, reason: payload.reason, nodes: payload.nodes });
+    return this.snapshot();
+  }
+
+  updateLimits(tokenBudget?: number, params?: Record<string, unknown>): RunSnapshot {
+    if (tokenBudget !== undefined) {
+      if (!Number.isFinite(tokenBudget) || tokenBudget <= 0) {
+        throw new TaskControlError(this.runStatus, 'Token budget must be a positive finite number');
+      }
+      if (this.tokenBudget !== undefined && tokenBudget < this.tokenBudget) {
+        throw new TaskControlError(this.runStatus, 'Token budget can only be increased');
+      }
+      if (tokenBudget < this.tokensUsed) {
+        throw new TaskControlError(this.runStatus, 'Token budget cannot be lower than tokens already used');
+      }
+      this.tokenBudget = tokenBudget;
+      if (!this.isOverBudget()) this.budgetBreached = false;
+    }
+    if (params) this.opts.params = resolveParams(this.spec, { ...this.opts.params, ...params });
+    if (this.runStatus === 'waiting-budget') {
+      this.runStatus = 'running';
+      this.log({ kind: 'run-resumed' });
+      this.scheduleReady();
+    }
+    this.writeCheckpoint(Math.max(0, this.nextSeq - 1));
+    this.emitChanged();
+    return this.snapshot();
+  }
+
+  hasSession(sessionId: string): boolean {
+    return this.sessionToNode.has(sessionId) || this.opts.orchestratorSessionId === sessionId;
+  }
+
+  expireApprovals(nowIso?: string): void {
+    const now = nowIso ? Date.parse(nowIso) : Date.now();
+    for (const [id, st] of this.state) {
+      if (st.state !== 'waiting-approval' || !st.approvalDeadline) continue;
+      if (Date.parse(st.approvalDeadline) > now) continue;
+      if (this.runStatus === 'waiting-approval') this.runStatus = 'running';
+      this.failNode(id, 'approval-timeout', st.sessionId, 'error');
+    }
+  }
+
+  private restoreApprovalTimers(): void {
+    if (this.deps.now) return;
+    const now = Date.now();
+    for (const [id, st] of this.state) {
+      if (st.state !== 'waiting-approval' || !st.approvalDeadline) continue;
+      const remaining = Math.max(0, Date.parse(st.approvalDeadline) - now);
+      const timer = setTimeout(() => {
+        this.approvalTimers.delete(timer);
+        this.expireApprovals();
+      }, remaining);
+      this.approvalTimers.add(timer);
+    }
+  }
+
+  private whenAllows(node: TaskNode): boolean {
+    if (!node.when) return true;
+    return this.evalWhen(node.when);
+  }
+
+  private evalWhen(when: string | ConditionAst, extra?: Record<string, unknown>): boolean {
+    const cond = typeof when === 'string' ? conditionFromLegacyWhen(when) : when;
+    return evaluateCondition(cond, { ...this.conditionCtx(), ...extra });
+  }
+
+  private conditionCtx(): Record<string, unknown> {
+    const nodes: Record<string, unknown> = {};
+    for (const [id, out] of Object.entries(this.outputs)) {
+      nodes[id] = { output: out.text, ...(out.params ?? {}) };
+    }
+    return { params: this.opts.params ?? {}, nodes };
+  }
+
+  private maybePromoteWaiting(): void {
+    if (this.runStatus !== 'running' || this.inFlight > 0) return;
+    if (this.spec.nodes.some((n) => this.isReady(n) && this.whenAllows(n))) return;
+    const approval = [...this.state.entries()].filter(([, st]) => st.state === 'waiting-approval').map(([id]) => id);
+    if (approval.length) {
+      this.runStatus = 'waiting-approval';
+      this.log({ kind: 'run-waiting-approval' });
+      this.coordinatorCheckpoint('approval');
+      this.emitChanged();
+      return;
+    }
+    if (this.isOverBudget() && this.hasPendingNodes()) {
+      this.runStatus = 'waiting-budget';
+      this.log({ kind: 'run-waiting-budget' });
+      this.coordinatorCheckpoint('budget');
+      this.emitChanged();
+    }
+  }
+
+  private async dispatch(node: TaskNode, instance?: { id: string; item?: unknown; index?: number; prev?: string }): Promise<void> {
+    try {
+      const ceiling = this.spec.defaults?.permissionMode ?? DEFAULT_TASK_PERMISSION_MODE;
+      const requested = node.permissionMode ?? ceiling;
+      if (!permissionAllowedByTask(requested, ceiling)) {
+        this.failNode(instance?.id ?? node.id, `permission ${requested} exceeds task ceiling ${ceiling}`);
+        return;
+      }
+      if (this.sourceVersion === 2 && requested === 'ask') {
+        this.failNode(instance?.id ?? node.id, 'permission ask requires user intervention');
+        return;
+      }
       // Task-level skills ride as [skill:slug] mentions on every child prompt — the agent
       // pipeline resolves each SKILL.md and blocks tools until it is read (skills-as-context).
-      const prompt = skillsPreamble(this.spec.skills) + (await this.buildPrompt(node));
+      const prompt = skillsPreamble(this.spec.skills) + (await this.buildPrompt(node, instance));
       // Children run where the parent runs: inherit the orchestrator's resolved working directory,
       // falling back to the spec's declared `cwd`. Without this they default to the workspace cwd
       // rather than the parent session's (project) directory.
@@ -382,15 +1427,16 @@ class ActiveRun {
         // tell Conductor-owned children apart from hand-authored subtasks (it skips the former).
         taskSlug: this.slug,
         taskRunId: this.runId,
-        taskNodeId: node.id,
-        name: nodeTitle(node),
+        taskNodeId: definitionId(instance?.id ?? node.id),
+        hidden: true,
+        name: instance?.id ?? nodeTitle(node),
         model: node.model ?? this.spec.defaults?.model,
         // Required for non-default (e.g. pi/*) models to resolve a backend — without it the
         // child session completes instantly with no output.
         llmConnection: node.llmConnection ?? this.spec.defaults?.llmConnection,
-        // Node override → task default (persisted by the editor, visible to the user) → explicit
-        // unattended-safe fallback. Never the workspace default (which could be `ask` → hang).
-        permissionMode: node.permissionMode ?? this.spec.defaults?.permissionMode ?? AUTONOMOUS_DEFAULT_MODE,
+        // Node override → explicit task ceiling → safe. Never inherit a
+        // permissive workspace default when the task omitted authorization.
+        permissionMode: requested,
         labels: node.labels,
         // Inherit the orchestrator's task number (task::N) so the whole run filters as one task.
         applyTaskLabel: true,
@@ -400,22 +1446,44 @@ class ActiveRun {
         ...(cwd ? { workingDirectory: cwd } : {}),
         sessionStatus: RUNNING_STATUS,
       };
-      // createSession announces the child to the renderer by default, so it nests under the task
-      // tile with its real title instead of a fabricated "New Chat" (or never appearing).
+      // Hidden workers remain persisted/queryable by their task/run/node linkage,
+      // but do not appear as ordinary project sessions.
       const child = await this.deps.host.createSession(this.deps.workspaceId, options);
-      const st = this.state.get(node.id)!;
+      const key = instance?.id ?? node.id;
+      const st = this.instances.get(key) ?? this.state.get(node.id)!;
       st.sessionId = child.id;
-      this.sessionToNode.set(child.id, node.id);
-      this.log({ kind: 'node-spawned', nodeId: node.id, sessionId: child.id });
-      await this.deps.host.setKanbanColumn(child.id, 'in-progress');
+      this.sessionToNode.set(child.id, key);
+      this.log({ kind: 'node-spawned', nodeId: key, sessionId: child.id });
+      this.applyCard(child.id, RUNNING_STATUS);
+      if (node.timeout && node.timeout > 0) {
+        const timer = setTimeout(() => {
+          this.sessionTimers.delete(child.id);
+          const active = this.instances.get(key) ?? this.state.get(definitionId(key));
+          if (!active || active.state !== 'running' || active.sessionId !== child.id) return;
+          this.failNode(key, 'node-timeout', child.id, 'error');
+          void (async () => {
+            try {
+              const stopped = this.deps.host.stopSwarm
+                ? await this.deps.host.stopSwarm(child.id)
+                : { stoppedSessionIds: [], detachedSessionIds: [] };
+              if (!stopped.stoppedSessionIds.includes(child.id)) {
+                await this.deps.host.cancelProcessing(child.id, true);
+              }
+            } catch (error) {
+              conductorLog.warn('timeout-cancel-failed', { slug: this.slug, runId: this.runId, sessionId: child.id, error });
+            }
+          })();
+        }, node.timeout * 1000);
+        this.sessionTimers.set(child.id, timer);
+      }
       await this.deps.host.sendMessage(child.id, prompt);
     } catch (err) {
-      this.failNode(node.id, `dispatch failed: ${(err as Error).message}`);
+      this.failNode(instance?.id ?? node.id, `dispatch failed: ${(err as Error).message}`);
     }
   }
 
   /** Resolve a node's prompt: declared inputs (+ optional summarize) then ${…} interpolation. */
-  private async buildPrompt(node: TaskNode): Promise<string> {
+  private async buildPrompt(node: TaskNode, instance?: { id: string; item?: unknown; index?: number; prev?: string }): Promise<string> {
     const inputValues: Record<string, unknown> = {};
     for (const [name, ref] of Object.entries(node.inputs ?? {})) {
       const fromExpr = typeof ref === 'string' ? ref : ref.from;
@@ -425,11 +1493,12 @@ class ActiveRun {
       inputValues[name] = resolved;
     }
     let text = interpolateRefs(node.prompt ?? '', { nodeOutputs: this.outputs, params: this.opts.params });
+    text = interpolateLocals(text, instance ?? {});
     text = text.replace(INPUTS_REF_RE, (raw, name: string) => (name in inputValues ? String(inputValues[name]) : raw));
 
     // Failure-aware retry: prepend the prior failure so a retried session knows what went wrong
     // instead of blindly repeating a deterministic failure.
-    const st = this.state.get(node.id)!;
+    const st = instance ? (this.instances.get(instance.id) ?? this.state.get(node.id)!) : this.state.get(node.id)!;
     if (st.attempt > 1 && st.lastFailure) {
       text = `${st.lastFailure}\n\n${text}`;
     }
@@ -441,8 +1510,12 @@ class ActiveRun {
   private onSessionComplete(evt: SessionCompletionEvent): void {
     const nodeId = this.sessionToNode.get(evt.sessionId);
     if (!nodeId) return; // not one of our child nodes
-    const st = this.state.get(nodeId);
-    if (!st || st.state !== 'running') return; // already settled/cancelled
+    const defId = definitionId(nodeId);
+    const st = this.instances.get(nodeId) ?? this.state.get(defId);
+    if (!st || st.state !== 'running' || st.sessionId !== evt.sessionId) return; // stale/already settled
+    const timeout = this.sessionTimers.get(evt.sessionId);
+    if (timeout) clearTimeout(timeout);
+    this.sessionTimers.delete(evt.sessionId);
 
     if (evt.tokenUsage) {
       // `tokenUsage` is cumulative-per-session; add only the delta since this session's last
@@ -455,30 +1528,57 @@ class ActiveRun {
 
     // Completion-time budget check: pause immediately on breach (not only at schedule-time), but
     // only while pending work remains — never block a run that is about to finish.
-    if (this.isOverBudget() && this.runStatus === 'running' && this.hasPendingNodes()) {
-      this.pauseForBudget();
-    }
+    if (this.isOverBudget()) this.budgetBreached = true;
 
     if (evt.reason === 'complete') {
       const text = evt.finalText ?? this.deps.host.getSessionFinalText(evt.sessionId) ?? '';
+      const node = this.spec.nodes.find((n) => n.id === defId);
+      const submitted = this.submittedOutputs.get(nodeId) ?? this.submittedOutputs.get(defId);
+      const declared = node?.outputs?.length ?? 0;
 
-      // A clean turn-completion is not proof of success: a node that declared `outputs` but
-      // produced no text delivered nothing. Treat that as a failure (retry/needs-review) instead
-      // of silently marking it done. Nodes with no declared outputs keep the lenient behavior.
-      const node = this.spec.nodes.find((n) => n.id === nodeId);
-      if ((node?.outputs?.length ?? 0) > 0 && text.trim() === '') {
-        this.failNode(nodeId, 'completed without producing declared output', evt.sessionId);
+      if (this.sourceVersion === 2 && declared > 0 && !submitted && node && isSessionLikeKind(node.kind)) {
+        this.failNode(nodeId, 'completed without submit_task_output', evt.sessionId, 'invalid');
         return;
       }
-
-      const output: NodeOutput = { text };
-      this.outputs[nodeId] = output;
+      if (declared > 0 && !submitted && text.trim() === '') {
+        this.failNode(nodeId, 'completed without producing declared output', evt.sessionId, 'empty');
+        return;
+      }
+      const output: NodeOutput = submitted ?? { text };
       st.state = 'done';
       this.inFlight = Math.max(0, this.inFlight - 1);
-      writeNodeOutput(this.deps.workspaceRoot, this.slug, this.runId, nodeId, output);
+      writeNodeAttempt(this.deps.workspaceRoot, this.slug, this.runId, nodeId, st.attempt || 1, output);
       this.log({ kind: 'node-finished', nodeId, sessionId: evt.sessionId, state: 'done' });
-      void this.deps.host.setSessionStatus(evt.sessionId, DONE_STATUS);
-      void this.deps.host.setKanbanColumn(evt.sessionId, 'done');
+      this.applyCard(evt.sessionId, DONE_STATUS);
+      if (node && this.replicaCounts.has(defId)) {
+        this.instanceOutputs.set(nodeId, output);
+        const count = this.replicaCounts.get(defId)!;
+        const allDone = Array.from({ length: count }, (_, i) => this.instances.get(instanceId(defId, i)))
+          .every((instance) => isTerminalNodeState(instance?.state));
+        if (allDone) this.finishReplicas(node);
+        else this.scheduleReplicaInstances(node);
+        this.emitChanged();
+        this.scheduleReady();
+        return;
+      }
+      if (node && (node.kind === 'map' || node.kind === 'loop')) {
+        this.instanceOutputs.set(nodeId, output);
+        if (node.kind === 'map') {
+          const items = this.mapItems.get(defId) ?? [];
+          const allDone = items.every((_, i) => isTerminalNodeState(this.instances.get(instanceId(defId, i))?.state));
+          if (allDone) this.finishMap(node);
+          else this.scheduleMapInstances(node);
+        } else {
+          this.afterLoopInstance(node, nodeId, output);
+        }
+        this.emitChanged();
+        this.scheduleReady();
+        return;
+      }
+      this.outputs[defId] = output;
+      writeNodeOutput(this.deps.workspaceRoot, this.slug, this.runId, defId, output);
+      if (node) this.rememberCache(node, output);
+      this.emitChanged();
       this.scheduleReady();
     } else if (evt.reason === 'interrupted') {
       // Externally aborted while running → cancelled (re-dispatched on resume). We do not
@@ -486,7 +1586,8 @@ class ActiveRun {
       st.state = 'cancelled';
       this.inFlight = Math.max(0, this.inFlight - 1);
       this.log({ kind: 'node-finished', nodeId, sessionId: evt.sessionId, state: 'cancelled', reason: 'interrupted' });
-      void this.deps.host.setKanbanColumn(evt.sessionId, 'todo');
+      this.applyCard(evt.sessionId, TODO_STATUS);
+      this.emitChanged();
       this.scheduleReady();
     } else {
       // 'error' | 'timeout'
@@ -494,47 +1595,103 @@ class ActiveRun {
     }
   }
 
-  private failNode(nodeId: string, reason: string, sessionId?: string): void {
-    const st = this.state.get(nodeId)!;
-    const wasRunning = st.state === 'running';
-    if (wasRunning) this.inFlight = Math.max(0, this.inFlight - 1);
+  private failNode(nodeId: string, reason: string, sessionId?: string, failure: 'error' | 'empty' | 'invalid' = 'error'): void {
+    const defId = definitionId(nodeId);
+    const st = this.state.get(defId);
+    if (!st) return;
+    const inst = this.instances.get(nodeId);
+    this.submittedOutputs.delete(nodeId);
+    const expanding = this.mapItems.has(defId) || this.loopIndex.has(defId) || this.replicaCounts.has(defId);
+    if (inst?.state === 'running' || (st.state === 'running' && !expanding)) {
+      this.inFlight = Math.max(0, this.inFlight - 1);
+    }
+    if (inst) inst.state = failure === 'invalid' ? 'invalid' : 'failed';
 
-    // Bounded, failure-aware retry: re-dispatch the node when its `retry` policy still
-    // has budget and matches this failure class. error/timeout/dispatch failures all map
-    // to the `error` retry trigger (empty/invalid detection is deferred).
-    const node = this.spec.nodes.find((n) => n.id === nodeId);
+    const node = this.spec.nodes.find((n) => n.id === defId);
     const retry = node?.retry;
-    if (retry && st.attempt <= retry.limit && retryMatches(retry.when, 'error')) {
+    if (inst && expanding && retry && inst.attempt <= retry.limit && retryMatches(retry.when, failure)) {
+      inst.lastFailure = `Previous attempt failed: ${reason}. Address the cause before retrying.`;
+      const delay = retryBackoffMs(retry, inst.attempt);
+      const sid = sessionId ?? inst.sessionId;
+      if (sid) this.applyCard(sid, TODO_STATUS);
+      this.log({ kind: 'node-retry', nodeId, attempt: inst.attempt, reason });
+      if (delay > 0) {
+        inst.state = 'retry-wait';
+        const timer = setTimeout(() => {
+          this.retryTimers.delete(timer);
+          if (inst.state === 'retry-wait') {
+            inst.state = 'pending';
+            this.scheduleReady();
+          }
+        }, delay);
+        this.retryTimers.add(timer);
+      } else {
+        inst.state = 'pending';
+        this.scheduleReady();
+      }
+      this.emitChanged();
+      return;
+    }
+    if (!inst && retry && st.attempt <= retry.limit && retryMatches(retry.when, failure)) {
       st.lastFailure = `Previous attempt failed: ${reason}. Address the cause before retrying.`;
-      st.state = 'pending';
+      const delay = retryBackoffMs(retry, st.attempt);
       const sid = sessionId ?? st.sessionId;
-      if (sid) void this.deps.host.setKanbanColumn(sid, 'todo');
-      this.log({ kind: 'node-retry', nodeId, attempt: st.attempt, reason });
-      this.scheduleReady();
+      if (sid) this.applyCard(sid, TODO_STATUS);
+      this.log({ kind: 'node-retry', nodeId: defId, attempt: st.attempt, reason });
+      if (delay > 0) {
+        st.state = 'retry-wait';
+        const timer = setTimeout(() => {
+          this.retryTimers.delete(timer);
+          if (st.state === 'retry-wait') {
+            st.state = 'pending';
+            this.scheduleReady();
+          }
+        }, delay);
+        this.retryTimers.add(timer);
+      } else {
+        st.state = 'pending';
+        this.scheduleReady();
+      }
+      this.emitChanged();
       return;
     }
 
-    st.state = 'failed';
+    st.state = failure === 'invalid' ? 'invalid' : 'failed';
+    st.lastFailure = reason;
+    if (node?.kind !== 'finally') this.originalFailed = true;
     const sid = sessionId ?? st.sessionId;
-    this.log({ kind: 'node-finished', nodeId, sessionId: sid ?? '', state: 'failed', reason });
-    if (sid) void this.deps.host.setSessionStatus(sid, FAILED_STATUS);
+    this.log({ kind: 'node-finished', nodeId: defId, sessionId: sid ?? '', state: st.state, reason });
+    if (sid) this.applyCard(sid, FAILED_STATUS);
+    this.emitChanged();
+    this.coordinatorCheckpoint('node-failed');
     this.scheduleReady();
   }
 
   private maybeFinish(): void {
-    if (this.runStatus !== 'running') return;
+    if (this.runStatus !== 'running' && !this.stopRequested) return;
     if (this.inFlight > 0) return;
-    if (this.spec.nodes.some((n) => this.isReady(n))) return; // more to dispatch
+    if (this.spec.nodes.some((n) => this.isReady(n))) return;
+    if ([...this.state.values()].some((st) => st.state === 'waiting-approval')) return;
+
+    if (this.stopRequested) {
+      this.finish('stopped');
+      return;
+    }
+
+    if (this.budgetBreached || this.isOverBudget()) {
+      this.budgetBreached = true;
+      this.pauseForBudget();
+      return;
+    }
+
     const allGood = this.spec.nodes.every((n) => {
       const s = this.state.get(n.id)!.state;
       return s === 'done' || s === 'skipped';
     });
-    if (!allGood) {
+    if (!allGood || this.originalFailed) {
       this.finish('failed');
       return;
     }
-    // All nodes succeeded. Gate the terminal status on the orchestrator's verdict when there is one
-    // to ask; with no orchestrator there is nothing to verify against, so complete directly.
     if (this.opts.verifyOnComplete && this.opts.orchestratorSessionId) {
       this.enterVerifying();
     } else {
@@ -544,6 +1701,8 @@ class ActiveRun {
 
   /** Enter the non-terminal `verifying` state and ask the orchestrator for a verdict. Does NOT finalize. */
   private enterVerifying(): void {
+    this.verdictLocked = false;
+    this.coordinatorCheckpoint('before-verify');
     this.runStatus = 'verifying';
     this.log({ kind: 'run-verifying' });
     void this.sendVerification();
@@ -551,18 +1710,13 @@ class ActiveRun {
 
   private finish(status: RunStatus): void {
     this.runStatus = status;
-    this.log({ kind: status === 'completed' ? 'run-completed' : 'run-failed' });
-    // Settle the task tile: completed → done, failed → needs-review (the fixed status set has no
-    // 'failed'). The in-progress column was set at start().
-    const orchestrator = this.opts.orchestratorSessionId;
-    if (orchestrator) {
-      if (status === 'completed') {
-        void this.deps.host.setKanbanColumn(orchestrator, 'done');
-        void this.deps.host.setSessionStatus(orchestrator, DONE_STATUS);
-      } else {
-        void this.deps.host.setSessionStatus(orchestrator, FAILED_STATUS);
-      }
-    }
+    const kind =
+      status === 'completed' ? 'run-completed' : status === 'stopped' ? 'run-stopped' : 'run-failed';
+    this.log({ kind, tokensUsed: this.tokensUsed });
+    // Top-level card stays open: success and failure both go to needs-review. Only the
+    // user can close the tile. Column moves only when dropStatusId matches.
+    if (this.opts.orchestratorSessionId) this.applyCard(this.opts.orchestratorSessionId, REVIEW_STATUS);
+    this.emitChanged();
     this.finalize();
   }
 
@@ -571,6 +1725,12 @@ class ActiveRun {
     this.unsubscribe = undefined;
     this.verdictOff?.();
     this.verdictOff = undefined;
+    for (const timer of this.retryTimers) clearTimeout(timer);
+    this.retryTimers.clear();
+    for (const timer of this.approvalTimers) clearTimeout(timer);
+    this.approvalTimers.clear();
+    for (const timer of this.sessionTimers.values()) clearTimeout(timer);
+    this.sessionTimers.clear();
     if (this.settled) return;
     this.settled = true;
     const snap = this.snapshot();
@@ -584,7 +1744,7 @@ class ActiveRun {
       this.finish('completed');
       return;
     }
-    this.attachVerdictListener(orchestrator);
+    if (this.sourceVersion === 1) this.attachVerdictListener(orchestrator);
     const sections = this.spec.nodes.map((n) => {
       const out = this.outputs[n.id];
       return `### ${nodeTitle(n)} (${n.id})\n${out ? out.text : '(no output)'}`;
@@ -601,11 +1761,15 @@ class ActiveRun {
       ...sections,
       '',
       'Verify the final result against the criteria above and summarize the outcome.',
-      'End your reply with a verdict line, on its own line, in exactly one of these forms:',
-      'VERDICT: PASS',
-      'VERDICT: FAIL — <one-line reason>',
-      'If only some subtasks need redoing, name them so only those (and their dependents) re-run:',
-      'VERDICT: FAIL — nodes=<id>,<id> — <one-line reason>',
+      this.sourceVersion === 2
+        ? 'Call submit_task_verdict with result pass or fail. Parent chat messages are not verdicts.'
+        : [
+            'End your reply with a verdict line, on its own line, in exactly one of these forms:',
+            'VERDICT: PASS',
+            'VERDICT: FAIL — <one-line reason>',
+            'If only some subtasks need redoing, name them so only those (and their dependents) re-run:',
+            'VERDICT: FAIL — nodes=<id>,<id> — <one-line reason>',
+          ].join('\n'),
     ].join('\n');
     await this.sendToOrchestrator(orchestrator, message);
   }
@@ -644,9 +1808,16 @@ class ActiveRun {
    *   FAIL      → repair the frontier if budget remains, else failed (iterations/token budget breach).
    */
   private handleVerdict(text: string): void {
-    if (this.runStatus !== 'verifying') return; // stopped/finalized while awaiting the verdict
+    if (this.sourceVersion === 2) return;
+    if (this.runStatus !== 'verifying') return;
     writeNodeOutput(this.deps.workspaceRoot, this.slug, this.runId, '__verdict__', { text });
-    const verdict = parseVerdict(text);
+    this.handleVerdictObject(parseVerdict(text));
+  }
+
+  private handleVerdictObject(verdict: { result: 'pass' | 'fail' | 'unparsed'; reason?: string; nodes?: string[] }): void {
+    if (this.runStatus !== 'verifying') return;
+    if (this.verdictLocked) return;
+    this.verdictLocked = true;
     this.log({ kind: 'verdict', result: verdict.result, reason: verdict.reason, nodes: verdict.nodes });
 
     if (verdict.result === 'pass') {
@@ -661,28 +1832,29 @@ class ActiveRun {
         void this.reAskVerdict();
         return;
       }
-      // Repeatedly malformed → don't hang the run forever.
       this.finish('failed');
       return;
     }
 
-    // FAIL — repair the frontier if there is budget for it.
     if (this.repairsUsed >= this.maxRepairs) {
       this.log({ kind: 'budget-breach', metric: 'iterations', value: this.repairsUsed, limit: this.maxRepairs });
       this.finish('failed');
       return;
     }
     if (this.isOverBudget()) {
-      this.log({ kind: 'budget-breach', metric: 'tokens', value: this.tokensUsed, limit: this.spec.token_budget! });
+      this.log({ kind: 'budget-breach', metric: 'tokens', value: this.tokensUsed, limit: this.tokenBudget ?? this.spec.token_budget! });
       this.finish('failed');
       return;
     }
     this.repairsUsed += 1;
+    this.runStatus = 'repairing';
+    this.log({ kind: 'run-repairing' });
     this.repairForVerdict(verdict.reason, verdict.nodes);
   }
 
   /** Re-ask the orchestrator for a parseable verdict line (format-only; does not consume repair budget). */
   private async reAskVerdict(): Promise<void> {
+    this.verdictLocked = false;
     const orchestrator = this.opts.orchestratorSessionId;
     if (!orchestrator) {
       this.finish('completed');
@@ -708,11 +1880,23 @@ class ActiveRun {
   private repairForVerdict(reason: string | undefined, named?: string[]): void {
     const detail = reason ?? 'the result did not meet the acceptance criteria';
     let reset = 0;
+    this.promptCache.clear();
     for (const id of this.computeFrontier(named)) {
       const st = this.state.get(id);
       if (!st || st.state !== 'done') continue;
       st.state = 'pending';
+      delete this.outputs[id];
+      this.submittedOutputs.delete(id);
       st.lastFailure = `The previous result was rejected on verification: ${detail}. Revise your output to meet the acceptance criteria.`;
+      for (const iid of [...this.instances.keys()]) {
+        if (definitionId(iid) === id && this.instances.get(iid)?.state !== 'cancelled') {
+          this.instances.delete(iid);
+          this.instanceOutputs.delete(iid);
+          this.submittedOutputs.delete(iid);
+        }
+      }
+      this.mapItems.delete(id);
+      this.loopIndex.delete(id);
       this.log({ kind: 'node-retry', nodeId: id, attempt: st.attempt, reason: `verdict-fail: ${detail}` });
       reset += 1;
     }
@@ -759,12 +1943,18 @@ class ActiveRun {
   // --- budget ---
 
   private isOverBudget(): boolean {
-    return this.spec.token_budget !== undefined && this.tokensUsed >= this.spec.token_budget;
+    return this.tokenBudget !== undefined && this.tokensUsed >= this.tokenBudget;
   }
 
   private pauseForBudget(): void {
-    this.log({ kind: 'budget-breach', metric: 'tokens', value: this.tokensUsed, limit: this.spec.token_budget! });
-    this.pause();
+    this.log({ kind: 'budget-breach', metric: 'tokens', value: this.tokensUsed, limit: this.tokenBudget! });
+    this.budgetBreached = true;
+    if (this.inFlight === 0) {
+      this.runStatus = 'waiting-budget';
+      this.log({ kind: 'run-waiting-budget' });
+      this.coordinatorCheckpoint('budget');
+      this.emitChanged();
+    }
   }
 
   /** True if any node is still waiting to be dispatched (used to avoid pausing a finishable run). */
@@ -779,9 +1969,155 @@ class ActiveRun {
     return this.runStatus === 'completed' || this.runStatus === 'failed' || this.runStatus === 'stopped';
   }
 
+  private applyCard(sessionId: string, statusId: string): void {
+    void this.deps.host.setSessionStatus(sessionId, statusId);
+    void this.resolveAndMoveColumn(sessionId, statusId);
+  }
+
+  private async resolveAndMoveColumn(sessionId: string, statusId: string): Promise<void> {
+    const column = this.deps.host.resolveKanbanColumn
+      ? await this.deps.host.resolveKanbanColumn(sessionId, statusId)
+      : resolveKanbanColumnId(statusId);
+    if (column) void this.deps.host.setKanbanColumn(sessionId, column);
+  }
+
+  private emitChanged(): void {
+    const snapshot = this.snapshot();
+    this.deps.onRunChanged?.(snapshot);
+    if (snapshot.orchestratorSessionId && this.deps.host.setOrchestrationStatus) {
+      const display = orchestrationDisplayStatus(snapshot);
+      void this.deps.host.setOrchestrationStatus(
+        snapshot.orchestratorSessionId,
+        display.status,
+        display.blocker,
+      );
+    }
+  }
+
+  applyPatch(patch: OrchestrationPatch): RunSnapshot {
+    if (this.isTerminal()) {
+      throw new TaskControlError(this.runStatus, `Cannot patch a ${this.runStatus} run`);
+    }
+    const wasVerifying = this.runStatus === 'verifying';
+    const result = validateOrchestrationPatch(patch, {
+      spec: this.spec,
+      revision: this.revision,
+      runId: this.runId,
+      seenDecisionIds: this.seenDecisionIds,
+      nodeStates: Object.fromEntries([...this.state.entries()].map(([id, st]) => [id, st.state])),
+      allowedModels: this.deps.allowedModels,
+      invalidPatchCount: this.invalidPatchCount,
+    });
+    if (!result.ok) {
+      this.invalidPatchCount += 1;
+      this.writeCheckpoint(Math.max(0, this.nextSeq - 1));
+      if (result.pauseForReview) {
+        this.runStatus = 'paused';
+        this.log({ kind: 'run-paused' });
+        this.emitChanged();
+      }
+      throw new TaskControlError(this.runStatus, result.error);
+    }
+    this.spec = result.spec;
+    this.revision = result.revision;
+    this.seenDecisionIds.add(patch.decisionId);
+    this.invalidPatchCount = 0;
+    this.edges = materializeDeps(this.spec);
+    this.dependents = undefined;
+    for (const n of this.spec.nodes) {
+      if (!this.state.has(n.id)) this.state.set(n.id, { state: 'pending', attempt: 0 });
+    }
+    for (const id of result.cancelled) {
+      const st = this.state.get(id);
+      if (st) st.state = 'cancelled';
+    }
+    writeSpecRevision(this.deps.workspaceRoot, this.slug, this.runId, this.revision, this.spec);
+    // The patch is not acknowledged until both its revision and decision id are
+    // durable. `log` appends the decision and atomically checkpoints revision +
+    // seenDecisionIds; a crash before this point leaves only an ignored orphan revision.
+    this.log({
+      kind: 'orchestration-patch',
+      decisionId: patch.decisionId,
+      baseRevision: patch.baseRevision,
+      rationale: patch.rationale,
+      cancelled: result.cancelled.length ? result.cancelled : undefined,
+    });
+    if (result.action === 'pause') {
+      this.pause();
+    } else if (wasVerifying) {
+      // A verification-time patch represents more work, so invalidate the
+      // outstanding verdict request and execute the new revision before asking
+      // the coordinator for another structured verdict.
+      this.runStatus = 'running';
+      this.verdictLocked = false;
+      this.log({ kind: 'run-resumed' });
+      this.scheduleReady();
+    } else if (this.runStatus === 'paused' || this.runStatus === 'pausing') {
+      this.runStatus = 'running';
+      this.scheduleReady();
+    } else {
+      this.scheduleReady();
+    }
+    this.emitChanged();
+    return this.snapshot();
+  }
+
+  currentSpec(): TaskSpec {
+    return this.spec;
+  }
+
+  private coordinatorCheckpoint(reason: string): void {
+    if (!isTasksOrchestrateEnabled() || this.spec.runner !== 'orchestrate') return;
+    if (reason === 'batch') return;
+    const orch = this.opts.orchestratorSessionId;
+    if (!orch) return;
+    void this.sendToOrchestrator(
+      orch,
+      `Conductor checkpoint (${reason}). Revision ${this.revision}. Call submit_orchestration_patch or continue.`,
+    );
+  }
+
   private log(entry: RunLogEntryInput): void {
     const t = this.deps.now ? this.deps.now() : new Date().toISOString();
-    appendRunLog(this.deps.workspaceRoot, this.slug, this.runId, { ...entry, t } as RunLogEntry);
+    const seq = this.nextSeq++;
+    appendRunLog(this.deps.workspaceRoot, this.slug, this.runId, {
+      ...entry,
+      t,
+      seq,
+      revision: this.revision,
+    });
+    this.writeCheckpoint(seq);
+    if (
+      entry.kind === 'run-started' ||
+      entry.kind === 'run-completed' ||
+      entry.kind === 'run-failed' ||
+      entry.kind === 'run-stopped' ||
+      entry.kind === 'run-paused' ||
+      entry.kind === 'run-resumed'
+    ) {
+      conductorLog.info(entry.kind, {
+        slug: this.slug,
+        runId: this.runId,
+        revision: this.revision,
+        status: this.runStatus,
+      });
+    }
+  }
+
+  private writeCheckpoint(seq: number): void {
+    const sensitive = new Set(sensitiveParamNames(this.spec.params));
+    const persistedParams = Object.fromEntries(
+      Object.entries(this.opts.params ?? {}).filter(([name]) => !sensitive.has(name)),
+    );
+    writeRunState(this.deps.workspaceRoot, this.slug, this.runId, {
+      seq,
+      revision: this.revision,
+      tokensUsed: this.tokensUsed,
+      tokenBudget: this.tokenBudget,
+      ...(Object.keys(persistedParams).length ? { params: persistedParams } : {}),
+      seenDecisionIds: [...this.seenDecisionIds],
+      invalidPatchCount: this.invalidPatchCount,
+    });
   }
 }
 
@@ -803,10 +2139,25 @@ function skillsPreamble(skills: string[] | undefined): string {
 /**
  * Whether a node's `retry.when` trigger covers a given failure class. An absent `when`
  * defaults to retrying on `error` (the common "transient failure" case); `empty`/`invalid`
- * triggers are opt-in and not yet produced by the runner, so they never match here.
+ * triggers are opt-in and are emitted by declared-output validation.
  */
-function retryMatches(when: 'error' | 'empty' | 'invalid' | undefined, failure: 'error'): boolean {
-  return (when ?? 'error') === failure;
+function retryBackoffMs(
+  retry: { backoff?: { base?: number; factor?: number; max?: number } },
+  attempt: number,
+): number {
+  const base = retry.backoff?.base ?? 0;
+  if (base <= 0) return 0;
+  const factor = retry.backoff?.factor ?? 2;
+  const max = retry.backoff?.max ?? base * 16;
+  return Math.min(max, base * factor ** Math.max(0, attempt - 1));
+}
+
+function retryMatches(
+  when: 'error' | 'empty' | 'invalid' | readonly string[] | undefined,
+  failure: 'error' | 'empty' | 'invalid',
+): boolean {
+  const list = !when ? ['error'] : Array.isArray(when) ? when : [when];
+  return list.includes(failure);
 }
 
 /**
@@ -838,15 +2189,48 @@ function parseVerdict(text: string): { result: 'pass' | 'fail' | 'unparsed'; rea
   return out;
 }
 
-/** A run is terminal (no further work) once completed/failed/stopped. running/paused/verifying are active. */
-function isTerminalRunStatus(status: RunStatus): boolean {
-  return status === 'completed' || status === 'failed' || status === 'stopped';
+function resolveParams(spec: TaskSpec, provided?: Record<string, unknown>): Record<string, unknown> {
+  const declarations = new Map((spec.params ?? []).map((param) => [param.name, param]));
+  const extra = Object.keys(provided ?? {}).find((name) => !declarations.has(name));
+  if (extra) throw new Error(`Unknown task param "${extra}"`);
+  const out: Record<string, unknown> = {};
+  for (const param of spec.params ?? []) {
+    const value = provided && param.name in provided ? provided[param.name] : param.default;
+    if (value === undefined || value === '') throw new Error(`Missing required task param "${param.name}"`);
+    const typeError = outputTypeError(param.type, param.enum, value);
+    if (typeError) throw new Error(`Task param "${param.name}" ${typeError}`);
+    out[param.name] = value;
+  }
+  return out;
 }
 
-function resolveParams(spec: TaskSpec, provided?: Record<string, unknown>): Record<string, unknown> {
+function restoreParams(spec: TaskSpec, persisted?: Record<string, unknown>): Record<string, unknown> {
   const out: Record<string, unknown> = {};
-  for (const p of spec.params ?? []) if (p.default !== undefined) out[p.name] = p.default;
-  return { ...out, ...(provided ?? {}) };
+  for (const param of spec.params ?? []) {
+    if (param.sensitive) out[param.name] = '***';
+    else if (persisted && param.name in persisted) out[param.name] = persisted[param.name];
+    else if (param.default !== undefined) out[param.name] = param.default;
+  }
+  return out;
+}
+
+function outputTypeError(type: string | undefined, values: string[] | undefined, value: unknown): string | null {
+  if (!type || type === 'json') {
+    try {
+      return JSON.stringify(value) === undefined ? 'must be JSON-serializable' : null;
+    } catch {
+      return 'must be JSON-serializable';
+    }
+  }
+  if (type === 'string' || type === 'text') return typeof value === 'string' ? null : `must be ${type}`;
+  if (type === 'number') return typeof value === 'number' && Number.isFinite(value) ? null : 'must be a finite number';
+  if (type === 'boolean') return typeof value === 'boolean' ? null : 'must be boolean';
+  if (type === 'enum') {
+    return typeof value === 'string' && values?.includes(value)
+      ? null
+      : `must be one of ${(values ?? []).join(', ')}`;
+  }
+  return `uses unsupported type ${type}`;
 }
 
 export class TaskRunner {
@@ -860,10 +2244,21 @@ export class TaskRunner {
 
   /** Load + validate a task's yaml and start a run. Throws if the task is missing or invalid. */
   run(slug: string, opts: RunOptions = {}): RunSnapshot {
-    const loaded = loadTaskSpec(this.deps.workspaceRoot, slug);
+    const loaded = loadTaskDocument(this.deps.workspaceRoot, slug);
     if (!loaded?.spec) throw new Error(`Task "${slug}" not found or has no valid task.yaml`);
     if (!loaded.valid) {
       throw new Error(`Refusing to run invalid task "${slug}": ${loaded.errors.map((e) => e.message).join('; ')}`);
+    }
+    if (loaded.spec.runner === 'orchestrate' && opts.orchestrateAllowed !== true) {
+      throw new Error(`Refusing to run orchestrate task "${slug}": parent session Swarm mode is not enabled`);
+    }
+    if (loaded.sourceVersion === 2) {
+      const unimplemented = unimplementedV2Nodes(loaded.spec.nodes);
+      if (unimplemented.length) {
+        throw new Error(
+          `Cannot start a v2 run: unimplemented kinds: ${unimplemented.map((n) => `${n.id} (${n.kind})`).join(', ')}`,
+        );
+      }
     }
     // One active run per orchestrator: a second concurrent run would race the same parent session's
     // verdict listener (two runs attaching onSessionComplete on the same orchestrator would cross
@@ -881,61 +2276,200 @@ export class TaskRunner {
       }
     }
     const runId = opts.runId ?? (this.deps.genRunId ? this.deps.genRunId() : `run-${Date.now()}`);
+    if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(runId) || runId.includes('..')) {
+      throw new Error(`Invalid run id "${runId}"`);
+    }
+    const duplicateInMemory = [...this.runs.values()].some((run) => run.snapshot().runId === runId);
+    const duplicateOnDisk = listTaskSlugs(this.deps.workspaceRoot)
+      .some((taskSlug) => listRunIds(this.deps.workspaceRoot, taskSlug).includes(runId));
+    if (duplicateInMemory || duplicateOnDisk) {
+      throw new Error(`Run id "${runId}" already exists in this workspace`);
+    }
     const run = new ActiveRun(
       loaded.spec,
       slug,
       runId,
-      { ...opts, params: resolveParams(loaded.spec, opts.params), verifyOnComplete: opts.verifyOnComplete ?? true },
+      {
+        ...opts,
+        sourceVersion: loaded.sourceVersion,
+        params: resolveParams(loaded.spec, opts.params),
+        verifyOnComplete: opts.verifyOnComplete ?? true,
+      },
       this.deps,
     );
-    this.runs.set(this.key(slug, runId), run);
+    // Do not publish a half-started run. start() first freezes revision 0 and
+    // may fail on storage errors; only a durably started run enters the registry.
     run.start();
+    this.runs.set(this.key(slug, runId), run);
     return run.snapshot();
   }
 
-  pause(slug: string, runId: string): void {
-    this.runs.get(this.key(slug, runId))?.pause();
+  pause(slug: string, runId: string): RunSnapshot {
+    return this.requireRun(slug, runId).pause();
   }
 
-  resume(slug: string, runId: string): void {
+  resume(slug: string, runId: string): RunSnapshot {
     const existing = this.runs.get(this.key(slug, runId));
-    if (existing) {
-      existing.resume();
-      return;
-    }
-    // Not in memory (e.g. after an app restart): reconstruct from the persisted run-log.
-    this.rehydrate(slug, runId);
+    if (existing) return existing.resume();
+    const run = this.rehydrate(slug, runId, 'hydrate');
+    return run.resume();
   }
 
-  /** Reconstruct an in-memory run from its persisted run-log + node outputs, then resume it. */
-  private rehydrate(slug: string, runId: string): RunSnapshot {
-    const loaded = loadTaskSpec(this.deps.workspaceRoot, slug);
-    if (!loaded?.spec || !loaded.valid) {
-      throw new Error(`Cannot resume "${slug}:${runId}": task.yaml is missing or invalid`);
+  continue(slug: string, runId: string): RunSnapshot {
+    const existing = this.runs.get(this.key(slug, runId));
+    if (existing) return existing.continueAfterInterrupt();
+    const run = this.rehydrate(slug, runId, 'scan');
+    return run.continueAfterInterrupt();
+  }
+
+  /**
+   * Load unfinished runs from disk without scheduling. Running nodes become
+   * `interrupted`. Paused / waiting-approval / waiting-budget keep those states.
+   */
+  applyOrchestrationPatch(slug: string, runId: string, patch: OrchestrationPatch): RunSnapshot {
+    return this.requireRun(slug, runId).applyPatch(patch);
+  }
+
+  applyOrchestrationPatchByRunId(sessionId: string, runId: string, patch: OrchestrationPatch): RunSnapshot {
+    for (const run of this.runs.values()) {
+      const snapshot = run.snapshot();
+      if (snapshot.runId !== runId) continue;
+      if (snapshot.orchestratorSessionId !== sessionId) {
+        throw new TaskControlError(snapshot.status, 'Only the run coordinator may patch this orchestration');
+      }
+      return run.applyPatch(patch);
     }
+    throw new TaskControlError('failed', `No active run ${runId}`);
+  }
+
+  assertRunCoordinator(sessionId: string, slug: string, runId: string): void {
+    const snapshot = this.requireRun(slug, runId).snapshot();
+    if (snapshot.orchestratorSessionId !== sessionId) {
+      throw new TaskControlError(snapshot.status, 'Only the run coordinator may control this run');
+    }
+  }
+
+  currentRunSpec(slug: string, runId: string): TaskSpec | null {
+    return this.runs.get(this.key(slug, runId))?.currentSpec() ?? null;
+  }
+
+  scanUnfinished(): RunSnapshot[] {
+    const out: RunSnapshot[] = [];
+    for (const slug of listTaskSlugs(this.deps.workspaceRoot)) {
+      for (const runId of listRunIds(this.deps.workspaceRoot, slug)) {
+        if (this.runs.has(this.key(slug, runId))) {
+          const snap = this.runs.get(this.key(slug, runId))!.snapshot();
+          if (!isTerminalRunStatus(snap.status)) out.push(snap);
+          continue;
+        }
+        const log = readRunLog(this.deps.workspaceRoot, slug, runId);
+        if (log.length === 0) continue;
+        if (isTerminalRunStatus(deriveRunStatusFromLog(log))) continue;
+        out.push(this.rehydrate(slug, runId, 'scan').snapshot());
+      }
+    }
+    return out;
+  }
+
+  /** Reconstruct an in-memory run from the run spec snapshot + run-log. Never reads live YAML for the graph. */
+  private rehydrate(slug: string, runId: string, mode: 'scan' | 'hydrate'): ActiveRun {
+    const checkpoint = readRunState(this.deps.workspaceRoot, slug, runId);
     const log = readRunLog(this.deps.workspaceRoot, slug, runId);
-    if (log.length === 0) throw new Error(`Cannot resume "${slug}:${runId}": no run-log found`);
+    if (log.length === 0) throw new Error(`Cannot restore "${slug}:${runId}": no run-log found`);
+
+    // Restore only a revision which the durable state machine has observed.
+    // A newer spec-revisions file can exist if the process crashed between
+    // writing a patch and checkpointing its first event; adopting that orphan
+    // would mutate the graph across restart.
+    const loggedRevision = log.reduce(
+      (max, entry) => typeof entry.revision === 'number' ? Math.max(max, entry.revision) : max,
+      0,
+    );
+    const durableRevision = checkpoint?.revision ?? loggedRevision;
+    const spec = readSpecRevision(this.deps.workspaceRoot, slug, runId, durableRevision);
+    if (!spec) throw new Error(`Cannot restore "${slug}:${runId}": no spec snapshot`);
     const started = log.find((e) => e.kind === 'run-started');
     const orchestratorSessionId = started && started.kind === 'run-started' ? started.orchestratorSessionId : undefined;
     const run = new ActiveRun(
-      loaded.spec,
+      spec,
       slug,
       runId,
-      { orchestratorSessionId, params: resolveParams(loaded.spec), verifyOnComplete: true },
+      {
+        orchestratorSessionId,
+        params: restoreParams(spec, checkpoint?.params),
+        verifyOnComplete: true,
+        sourceVersion: spec.schema_version === 2 ? 2 : 1,
+      },
       this.deps,
     );
-    run.hydrate(log, (nodeId) => readNodeOutput(this.deps.workspaceRoot, slug, runId, nodeId));
+    run.restoreCheckpoint(checkpoint, durableRevision);
+    run.hydrate(log, (nodeId) => readNodeOutput(this.deps.workspaceRoot, slug, runId, nodeId), mode);
     this.runs.set(this.key(slug, runId), run);
-    run.resumeFromHydrated();
-    return run.snapshot();
+    return run;
   }
 
-  async stop(slug: string, runId: string): Promise<void> {
-    await this.runs.get(this.key(slug, runId))?.stop();
+  private requireRun(slug: string, runId: string): ActiveRun {
+    const run = this.runs.get(this.key(slug, runId));
+    if (!run) throw new TaskControlError('failed', `No active run ${slug}:${runId}`);
+    return run;
+  }
+
+  async stop(slug: string, runId: string): Promise<RunSnapshot> {
+    const existing = this.runs.get(this.key(slug, runId));
+    if (existing) return existing.stop();
+    return this.rehydrate(slug, runId, 'scan').stop();
+  }
+
+  respondApproval(slug: string, runId: string, nodeId: string, approved: boolean): RunSnapshot {
+    return this.requireRun(slug, runId).respondApproval(nodeId, approved);
+  }
+
+  updateRunLimits(slug: string, runId: string, tokenBudget?: number, params?: Record<string, unknown>): RunSnapshot {
+    return this.requireRun(slug, runId).updateLimits(tokenBudget, params);
+  }
+
+  submitNodeOutput(sessionId: string, payload: { text?: string; values?: Record<string, unknown> }) {
+    const run = this.findRunBySession(sessionId);
+    if (!run) return { ok: false as const, error: 'No active run owns this session' };
+    return run.acceptOutput(sessionId, payload);
+  }
+
+  submitVerdict(sessionId: string, payload: { result: 'pass' | 'fail'; reason?: string; nodes?: string[]; runId?: string }): RunSnapshot {
+    const run = payload.runId
+      ? [...this.runs.values()].find((r) => {
+          const snapshot = r.snapshot();
+          return snapshot.runId === payload.runId && snapshot.orchestratorSessionId === sessionId;
+        })
+      : [...this.runs.values()].find((r) => r.snapshot().orchestratorSessionId === sessionId);
+    if (!run) throw new TaskControlError('failed', 'No verifying run for this session');
+    return run.submitStructuredVerdict(payload);
+  }
+
+  private findRunBySession(sessionId: string): ActiveRun | undefined {
+    for (const run of this.runs.values()) if (run.hasSession(sessionId)) return run;
+    return undefined;
   }
 
   getRunState(slug: string, runId: string): RunSnapshot | null {
     return this.runs.get(this.key(slug, runId))?.snapshot() ?? null;
+  }
+
+  getLatestRun(slug: string): RunSnapshot | null {
+    let latest: RunSnapshot | null = null;
+    for (const run of this.runs.values()) {
+      const snap = run.snapshot();
+      if (snap.slug === slug) latest = snap;
+    }
+    if (latest) return latest;
+    const last = listRunIds(this.deps.workspaceRoot, slug).at(-1);
+    if (!last) return null;
+    try {
+      const snap = this.rehydrate(slug, last, isTerminalRunStatus(deriveRunStatusFromLog(readRunLog(this.deps.workspaceRoot, slug, last))) ? 'hydrate' : 'scan').snapshot();
+      if (isTerminalRunStatus(snap.status)) this.runs.delete(this.key(slug, last));
+      return snap;
+    } catch {
+      return null;
+    }
   }
 
   /** Await a run reaching a terminal state (completed/failed/stopped). */
