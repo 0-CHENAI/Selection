@@ -2015,7 +2015,7 @@ describe('PowerShell plans folder exception', () => {
     it('allows Out-File with -FilePath to plans folder', () => {
       if (!psAvailable) return;
 
-      const command = `@('# Sample Plan','','## Goal','Test') | Out-File -FilePath '${plansFolderPath}\\sample-plan.md' -Encoding utf8`;
+      const command = `@('# Sample Plan','','## Goal','Test') | Out-File -FilePath '${join(plansFolderPath, 'sample-plan.md')}' -Encoding utf8`;
       const result = shouldAllowToolInMode(
         'Bash',
         { command },
@@ -2028,7 +2028,7 @@ describe('PowerShell plans folder exception', () => {
     it('allows Set-Content to plans folder', () => {
       if (!psAvailable) return;
 
-      const command = `'# Plan content' | Set-Content -Path '${plansFolderPath}\\plan.md'`;
+      const command = `'# Plan content' | Set-Content -Path '${join(plansFolderPath, 'plan.md')}'`;
       const result = shouldAllowToolInMode(
         'Bash',
         { command },
