@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'bun:test'
-import { placeViewportTooltip } from '../header-icon-tooltip'
+import {
+  placeViewportTooltip,
+  shouldShowHeaderTooltipOnFocus,
+} from '../header-icon-tooltip'
 
 const tooltip = { width: 48, height: 28 }
 const desktop = { width: 1440, height: 900 }
@@ -30,5 +33,17 @@ describe('placeViewportTooltip', () => {
       top: 94,
       placement: 'below',
     })
+  })
+})
+
+describe('shouldShowHeaderTooltipOnFocus', () => {
+  it('shows the tooltip for keyboard-visible focus', () => {
+    const target = { matches: (selector: string) => selector === ':focus-visible' }
+    expect(shouldShowHeaderTooltipOnFocus(target)).toBe(true)
+  })
+
+  it('keeps the tooltip hidden for mouse or programmatically restored focus', () => {
+    const target = { matches: () => false }
+    expect(shouldShowHeaderTooltipOnFocus(target)).toBe(false)
   })
 })

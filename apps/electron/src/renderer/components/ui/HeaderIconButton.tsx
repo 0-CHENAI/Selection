@@ -10,7 +10,10 @@ import { forwardRef, useCallback, useId, useLayoutEffect, useRef, useState } fro
 import { createPortal } from 'react-dom'
 import { cn } from '@/lib/utils'
 import { mergeRefs } from '@/lib/merge-refs'
-import { placeViewportTooltip } from './header-icon-tooltip'
+import {
+  placeViewportTooltip,
+  shouldShowHeaderTooltipOnFocus,
+} from './header-icon-tooltip'
 
 interface HeaderIconButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
   /** Icon as React element - caller controls size/styling */
@@ -95,7 +98,7 @@ export const HeaderIconButton = forwardRef<HTMLButtonElement, HeaderIconButtonPr
         }}
         onFocus={(event) => {
           onFocus?.(event)
-          show()
+          if (shouldShowHeaderTooltipOnFocus(event.currentTarget)) show()
         }}
         onBlur={(event) => {
           onBlur?.(event)
