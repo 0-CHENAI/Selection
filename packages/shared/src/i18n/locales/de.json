@@ -1880,6 +1880,7 @@
   "turnCard.starting": "Starten...",
   "turnCard.stepsCompleted": "Schritte abgeschlossen",
   "turnCard.thinking": "Denke nach…",
+  "turnCard.used": "Verwendet",
   "viewer.clearSession": "Sitzung zurücksetzen",
   "webui.connectingToServer": "Verbindung zum Server wird hergestellt...",
   "webui.connectionFailed": "Verbindung fehlgeschlagen",

@@ -24,6 +24,7 @@ import {
   FilePenLine,
   GitBranch,
   RefreshCw,
+  Sparkles,
 } from 'lucide-react'
 import { cn } from '../../lib/utils'
 import { Markdown } from '../markdown'
@@ -103,6 +104,7 @@ import { useAnnotationCancelRestore } from '../annotations/use-annotation-cancel
 import { DocumentFormattedMarkdownOverlay } from '../overlay'
 import { AcceptPlanDropdown } from './AcceptPlanDropdown'
 import { CompactAcceptPlanDrawer } from './CompactAcceptPlanDrawer'
+import { parseSkillUsedMarkers } from './skill-used-markers'
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -1388,6 +1390,31 @@ function BranchDropdown({ onBranch }: BranchDropdownProps) {
 // Response cards expand with content and scroll with the outer chat list only.
 // Nested max-height + overflow-y-auto caused painful dual-scroll; do not reintroduce.
 
+function SkillUsedIndicator({ skills }: { skills: string[] }) {
+  const { t } = useTranslation()
+
+  if (skills.length === 0) return null
+
+  return (
+    <div
+      data-testid="skill-used-indicator"
+      className="mb-2 flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground select-none"
+    >
+      <span>{t('turnCard.used')}</span>
+      {skills.map(skill => (
+        <span
+          key={skill}
+          className="inline-flex min-w-0 max-w-full items-center gap-1 rounded-[6px] border border-border/60 bg-muted/40 px-2 py-1 shadow-minimal"
+        >
+          <Sparkles className="h-3 w-3 shrink-0 text-muted-foreground/70" aria-hidden="true" />
+          <span className="truncate">{skill}</span>
+        </span>
+      ))}
+      <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-success" aria-hidden="true" />
+    </div>
+  )
+}
+
 function clearAnnotationMarks(root: HTMLElement): void {
   const annotatedInlineCodeNodes = root.querySelectorAll<HTMLElement>('code[data-ca-annotation-inline-code="true"]')
   annotatedInlineCodeNodes.forEach((codeNode) => {
@@ -1584,8 +1611,13 @@ export function ResponseCard({
   isCommentary = false,
 }: ResponseCardProps) {
   const { t } = useTranslation()
+  const parsedSkillUsage = useMemo(
+    () => parseSkillUsedMarkers(text, isStreaming),
+    [text, isStreaming],
+  )
+  const responseText = parsedSkillUsage.content
   // Throttled content for display - updates every CONTENT_THROTTLE_MS during streaming
-  const [displayedText, setDisplayedText] = useState(text)
+  const [displayedText, setDisplayedText] = useState(responseText)
   const lastUpdateRef = useRef(Date.now())
   // Copy to clipboard state
   const [copied, setCopied] = useState(false)
@@ -1670,13 +1702,13 @@ export function ResponseCard({
   const handleCopy = useCallback(async () => {
     try {
       // Copy plain text — not markdown source (user expects what they see)
-      await navigator.clipboard.writeText(markdownToPlainText(text))
+      await navigator.clipboard.writeText(markdownToPlainText(responseText))
       setCopied(true)
       setTimeout(() => setCopied(false), 2000)
     } catch (err) {
       console.error('Failed to copy:', err)
     }
-  }, [text])
+  }, [responseText])
 
   const renderedAnnotations = useMemo(() => {
     const persisted = annotations ?? []
@@ -1774,7 +1806,7 @@ export function ResponseCard({
       window.removeEventListener('resize', scheduleCoordsRecompute)
       root.removeEventListener('scroll', scheduleCoordsRecompute, { capture: true } as EventListenerOptions)
     }
-  }, [annotations, renderedAnnotations, text, displayedText, isStreaming])
+  }, [annotations, renderedAnnotations, responseText, displayedText, isStreaming])
 
   useEffect(() => {
     if (!canAnnotate) {
@@ -1900,7 +1932,7 @@ export function ResponseCard({
         messageId,
         annotationId: activeAnnotationDetail.annotationId,
         note: normalizedNote,
-        selectedText: extractAnnotationSelectedText(activeAnnotation, text),
+        selectedText: extractAnnotationSelectedText(activeAnnotation, responseText),
       }
     }
 
@@ -1941,7 +1973,7 @@ export function ResponseCard({
     closeSelectionMenu,
     sessionId,
     markSubmitSuccess,
-    text,
+    responseText,
   ])
 
   const handleSubmitFollowUp = useCallback((note: string) => {
@@ -2305,7 +2337,7 @@ export function ResponseCard({
   useEffect(() => {
     if (!isStreaming) {
       // Streaming ended - show final content immediately
-      setDisplayedText(text)
+      setDisplayedText(responseText)
       return
     }
 
@@ -2314,24 +2346,24 @@ export function ResponseCard({
 
     if (elapsed >= BUFFER_CONFIG.CONTENT_THROTTLE_MS) {
       // Enough time passed - update immediately
-      setDisplayedText(text)
+      setDisplayedText(responseText)
       lastUpdateRef.current = now
     } else {
       // Schedule update for remaining time
       const timeout = setTimeout(() => {
-        setDisplayedText(text)
+        setDisplayedText(responseText)
         lastUpdateRef.current = Date.now()
       }, BUFFER_CONFIG.CONTENT_THROTTLE_MS - elapsed)
       return () => clearTimeout(timeout)
     }
-  }, [text, isStreaming])
+  }, [responseText, isStreaming])
 
   // Time-aware buffer gate (re-checks on min/max window even if tokens stall)
-  const reveal = useStreamingReveal(text, isStreaming, streamStartTime)
+  const reveal = useStreamingReveal(responseText, isStreaming, streamStartTime)
 
   const isCompleted = !isStreaming
   const isBuffering = isStreaming && !reveal.shouldShow
-  const bodyText = isStreaming ? displayedText : text
+  const bodyText = isStreaming ? displayedText : responseText
   // Commentary must stay on the live card tree. Switching to the completed
   // chrome remounts markdown and pops a final-reply footer the moment tools start.
   const showCompletedChrome = (isCompleted && !isCommentary) || variant === 'plan'
@@ -2386,13 +2418,14 @@ export function ResponseCard({
             onMouseUp={handleTextSelection}
             className="pl-[22px] pr-[16px] py-3 text-sm"
           >
+            <SkillUsedIndicator skills={parsedSkillUsage.skills} />
             <div ref={contentLayerRef} className="relative">
               <Markdown
                 mode="minimal"
                 onUrlClick={onOpenUrl}
                 onFileClick={onOpenFile}
               >
-                {text}
+                {responseText}
               </Markdown>
               {annotationOverlayLayer}
             </div>
@@ -2523,7 +2556,7 @@ export function ResponseCard({
 
         {/* Fullscreen overlay for reading/annotating response and plan content. */}
         <DocumentFormattedMarkdownOverlay
-          content={text}
+          content={responseText}
           isOpen={isFullscreen}
           onClose={() => setIsFullscreen(false)}
           variant={isPlan ? 'plan' : undefined}
@@ -2557,6 +2590,7 @@ export function ResponseCard({
           onMouseUp={handleTextSelection}
           className="pl-[22px] pr-4 py-3 text-sm"
         >
+          <SkillUsedIndicator skills={parsedSkillUsage.skills} />
           <div ref={contentLayerRef} className="relative">
             <Markdown
               mode="minimal"
