@@ -4,7 +4,7 @@ import { tmpdir } from 'os';
 import { join } from 'path';
 import type { TokenUsage } from '@craft-agent/core/types';
 import type { CreateSessionOptions } from '@craft-agent/shared/protocol';
-import { parseTaskSpec, saveTaskSpec, readRunLog, readNodeOutput, specRevisionPath, type TaskSpec } from '@craft-agent/shared/tasks';
+import { parseTaskSpec, saveTaskSpec, readRunLog, readNodeOutput, specRevisionPath, writeSpecRevision, type TaskSpec } from '@craft-agent/shared/tasks';
 import type { SessionCompletionEvent } from '../sessions/SessionManager';
 import { TaskRunner, TaskControlError, type ConductorSessionHost } from './TaskRunner';
 
@@ -31,6 +31,7 @@ class MockHost implements ConductorSessionHost {
   readonly statuses: { sessionId: string; status: string }[] = [];
   readonly columns: { sessionId: string; column: string | null }[] = [];
   readonly nodeCounts: { sessionId: string; count: number }[] = [];
+  readonly orchestrationStatuses: { sessionId: string; status: string; blocker?: string }[] = [];
   readonly cancelled: string[] = [];
   readonly finalTextById = new Map<string, string>();
   resolveKanbanColumn?: (sessionId: string, statusId: string) => Promise<string | null>;
@@ -51,6 +52,9 @@ class MockHost implements ConductorSessionHost {
   }
   async setTaskNodeCount(sessionId: string, count: number): Promise<void> {
     this.nodeCounts.push({ sessionId, count });
+  }
+  async setOrchestrationStatus(sessionId: string, status: 'running' | 'completed' | 'need-to-check' | 'stopped', blocker?: string): Promise<void> {
+    this.orchestrationStatuses.push({ sessionId, status, ...(blocker ? { blocker } : {}) });
   }
   async cancelProcessing(sessionId: string): Promise<void> {
     this.cancelled.push(sessionId);
@@ -154,11 +158,15 @@ describe('TaskRunner (Conductor)', () => {
     expect(snap.status).toBe('completed');
     expect(snap.nodes.every((n) => n.state === 'done')).toBe(true);
     expect(snap.tokensUsed).toBe(55);
+    expect(host.orchestrationStatuses.some((entry) => entry.sessionId === 'orch' && entry.status === 'running')).toBe(true);
+    expect(host.orchestrationStatuses.at(-1)).toMatchObject({ sessionId: 'orch', status: 'completed' });
 
     // Run-log + node output persisted.
     const log = readRunLog(root, 'demo', 'r1');
     expect(log[0]).toMatchObject({ kind: 'run-started' });
     expect(log.some((e) => e.kind === 'run-completed')).toBe(true);
+    expect(log.map((entry) => entry.seq)).toEqual(log.map((_, index) => index + 1));
+    expect(log.every((entry) => typeof entry.revision === 'number')).toBe(true);
     expect(readNodeOutput(root, 'demo', 'r1', 'audit')).toEqual({ text: 'AUDIT' });
   });
 
@@ -210,9 +218,9 @@ describe('TaskRunner (Conductor)', () => {
     expect(host.created.find((c) => c.options.name === 'b')?.options.permissionMode).toBe('ask')
   })
 
-  it('defaults an omitted permission mode to allow-all (unattended-safe), not undefined/ask', async () => {
-    // A hand-authored spec that sets no permission mode must NOT fall through to the workspace default
-    // (which could be `ask` → the unattended child would hang). The runner supplies an explicit default.
+  it('defaults an omitted permission mode to safe instead of inheriting write authority', async () => {
+    // A hand-authored spec that sets no permission mode must not fall through
+    // to a permissive workspace default.
     saveTaskSpec(
       root,
       specOf({ id: 'perm2', title: 'Perm2', goal: 'g', nodes: [{ id: 'c', prompt: 'c' }] }),
@@ -221,7 +229,32 @@ describe('TaskRunner (Conductor)', () => {
     runner.run('perm2', { runId: 'r1' })
     await tick()
 
-    expect(host.created.find((c) => c.options.name === 'c')?.options.permissionMode).toBe('allow-all')
+    expect(host.created.find((c) => c.options.name === 'c')?.options.permissionMode).toBe('safe')
+  })
+
+  it('turns unattended ask permission into a parent need-to-check blocker', async () => {
+    saveTaskSpec(
+      root,
+      specOf({
+        schema_version: 2,
+        id: 'perm-ask',
+        title: 'Perm ask',
+        goal: 'g',
+        defaults: { permissionMode: 'ask' },
+        nodes: [{ id: 'a', prompt: 'a' }],
+      }),
+    )
+    const runner = makeRunner()
+    runner.run('perm-ask', { runId: 'r1', orchestratorSessionId: 'orch', verifyOnComplete: false })
+    await tick()
+
+    expect(host.created).toHaveLength(0)
+    expect(runner.getRunState('perm-ask', 'r1')?.status).toBe('failed')
+    expect(host.orchestrationStatuses.at(-1)).toMatchObject({
+      sessionId: 'orch',
+      status: 'need-to-check',
+      blocker: 'failed',
+    })
   })
 
   it('stamps task/run/node linkage on each dispatched child session', async () => {
@@ -240,9 +273,7 @@ describe('TaskRunner (Conductor)', () => {
     expect(optsA?.taskNodeId).toBe('a')
   })
 
-  it('creates a child session per node (createSession announces each to the renderer by default)', async () => {
-    // Renderer visibility depends on createSession emitting session_created; the runner's job is
-    // simply to create one session per node (the host's createSession owns the announcement).
+  it('creates persisted child sessions but hides DAG workers from the ordinary session list', async () => {
     saveTaskSpec(
       root,
       specOf({ id: 'announce', title: 'Announce', goal: 'g', nodes: [{ id: 'a', prompt: 'a' }, { id: 'b', prompt: 'b' }] }),
@@ -252,6 +283,7 @@ describe('TaskRunner (Conductor)', () => {
     await tick()
 
     expect(host.created.map((c) => c.id)).toEqual([host.sessionIdFor('a'), host.sessionIdFor('b')])
+    expect(host.created.every((child) => child.options.hidden === true)).toBe(true)
   })
 
   it("children inherit the orchestrator's working directory (falling back to spec.cwd)", async () => {
@@ -342,7 +374,7 @@ describe('TaskRunner (Conductor)', () => {
       }),
     );
     const runner = makeRunner();
-    runner.run('fail', { runId: 'r1' });
+    runner.run('fail', { runId: 'r1', orchestratorSessionId: 'orch' });
     await tick();
 
     host.complete('a', { reason: 'error' });
@@ -354,6 +386,11 @@ describe('TaskRunner (Conductor)', () => {
     expect(snap.nodes.find((n) => n.id === 'b')!.state).toBe('pending');
     expect(host.promptFor('b')).toBeUndefined();
     expect(host.statuses.some((s) => s.sessionId === 'sess-a' && s.status === 'needs-review')).toBe(true);
+    expect(host.orchestrationStatuses.at(-1)).toMatchObject({
+      sessionId: 'orch',
+      status: 'need-to-check',
+      blocker: 'failed',
+    });
 
     const log = readRunLog(root, 'fail', 'r1');
     expect(log.some((e) => e.kind === 'node-finished' && (e as { state?: string }).state === 'failed')).toBe(true);
@@ -1015,6 +1052,33 @@ describe('TaskRunner (Conductor)', () => {
     expect(r2.getRunState('crash', 'r1')!.status).toBe('completed');
   });
 
+  it('restores the checkpointed run revision and ignores a newer orphan revision file', async () => {
+    const frozen = specOf({
+      schema_version: 2,
+      id: 'frozen',
+      title: 'Frozen',
+      goal: 'g',
+      nodes: [{ id: 'a', prompt: 'a' }],
+    });
+    saveTaskSpec(root, frozen);
+    const r1 = makeRunner();
+    r1.run('frozen', { runId: 'r1', verifyOnComplete: false });
+    await tick();
+
+    // Simulate a crash after a revision file was written but before any event
+    // or checkpoint acknowledged it.
+    writeSpecRevision(root, 'frozen', 'r1', 1, {
+      ...frozen,
+      nodes: [...frozen.nodes, { id: 'orphan', kind: 'session', prompt: 'must not run' }],
+    });
+
+    const host2 = new MockHost();
+    const r2 = new TaskRunner({ host: host2, workspaceId: 'ws', workspaceRoot: root });
+    const [snapshot] = r2.scanUnfinished();
+    expect(snapshot?.revision).toBe(0);
+    expect(snapshot?.nodes.map((node) => node.id)).toEqual(['a']);
+  });
+
   it('moves a child onto a custom dropStatusId column and keeps the top card off done', async () => {
     const columns = [
       { id: 'doing', dropStatusId: 'in-progress' },
@@ -1179,6 +1243,7 @@ describe('TaskRunner (Conductor)', () => {
     const scanned = new TaskRunner({ host, workspaceId: 'ws', workspaceRoot: root, now: () => now });
     scanned.scanUnfinished();
     expect(scanned.getRunState('appr3', 'r3')!.nodes.find((n) => n.id === 'gate')!.state).toBe('failed');
+    expect(scanned.getRunState('appr3', 'r3')!.status).toBe('interrupted');
   });
 
   it('v2 finally runs after a failure and does not overwrite the original failure', async () => {
@@ -1303,6 +1368,31 @@ describe('TaskRunner (Conductor)', () => {
     expect(runner.getRunState('ver', 'r1')!.status).toBe('completed');
   });
 
+  it('v2 rejects missing and incorrectly typed structured outputs', async () => {
+    saveTaskSpec(
+      root,
+      specOf({
+        schema_version: 2,
+        id: 'typed-out',
+        title: 'Typed out',
+        goal: 'g',
+        nodes: [{ id: 'a', prompt: 'a', outputs: [{ name: 'score', type: 'number' }] }],
+      }),
+    );
+    const runner = makeRunner();
+    runner.run('typed-out', { runId: 'r1', verifyOnComplete: false });
+    await tick();
+    expect(runner.submitNodeOutput('sess-a', { text: 'prose only' })).toEqual({
+      ok: false,
+      error: 'Missing required output "score"',
+    });
+    expect(runner.submitNodeOutput('sess-a', { values: { score: 'high' } })).toEqual({
+      ok: false,
+      error: 'Output "score" must be a finite number',
+    });
+    expect(runner.submitNodeOutput('sess-a', { values: { score: 9 } })).toEqual({ ok: true });
+  });
+
   it('v2 waiting-budget promotes only when idle and resumes after updateRunLimits', async () => {
     saveTaskSpec(
       root,
@@ -1323,8 +1413,13 @@ describe('TaskRunner (Conductor)', () => {
     await tick();
     host.complete('a', { finalText: 'A', tokenUsage: tu(2, 2) });
     await tick();
-    expect(runner.getRunState('bud', 'r1')!.status).toBe('waiting-budget');
-    runner.updateRunLimits('bud', 'r1', 100);
+    expect(runner.getRunState('bud', 'r1')).toEqual(expect.objectContaining({
+      status: 'waiting-budget',
+      tokenBudget: 1,
+      tokensUsed: 4,
+    }));
+    expect(() => runner.updateRunLimits('bud', 'r1', 0.5)).toThrow('only be increased');
+    expect(runner.updateRunLimits('bud', 'r1', 100).tokenBudget).toBe(100);
     await tick();
     expect(host.dispatchedNames()).toContain('b');
     host.complete('b');
@@ -1360,6 +1455,96 @@ describe('TaskRunner (Conductor)', () => {
     host.complete('after');
     await tick();
     expect(runner.getRunState('mp', 'r1')!.status).toBe('completed');
+  });
+
+  it('v2 replicas run with bounded concurrency and aggregate in source order', async () => {
+    saveTaskSpec(
+      root,
+      specOf({
+        schema_version: 2,
+        id: 'rep',
+        title: 'Rep',
+        goal: 'g',
+        max_parallel: 2,
+        nodes: [
+          { id: 'fan', prompt: 'replica ${index}', replicas: 3, aggregate: 'concat' },
+          { id: 'after', depends_on: ['fan'], prompt: 'joined ${nodes.fan.output}' },
+        ],
+      }),
+    );
+    const runner = makeRunner();
+    runner.run('rep', { runId: 'r1', verifyOnComplete: false });
+    await tick();
+    expect(host.dispatchedNames()).toEqual(['fan#0', 'fan#1']);
+    expect(host.promptFor('fan#0')).toContain('replica 0');
+
+    // Completion order does not affect aggregate order.
+    host.complete('fan#1', { finalText: 'B' });
+    await tick();
+    expect(host.dispatchedNames()).toEqual(['fan#0', 'fan#1', 'fan#2']);
+    host.complete('fan#2', { finalText: 'C' });
+    host.complete('fan#0', { finalText: 'A' });
+    await tick();
+    expect(host.promptFor('after')).toContain('A\nB\nC');
+    host.complete('after');
+    await tick();
+    expect(runner.getRunState('rep', 'r1')!.status).toBe('completed');
+  });
+
+  it('v2 retries the failed replica instance with the prior failure reason', async () => {
+    saveTaskSpec(
+      root,
+      specOf({
+        schema_version: 2,
+        id: 'rep-retry',
+        title: 'Rep retry',
+        goal: 'g',
+        max_parallel: 1,
+        nodes: [{ id: 'fan', prompt: 'replica ${index}', replicas: 2, aggregate: 'concat', retry: { limit: 1, when: 'error' } }],
+      }),
+    );
+    const runner = makeRunner();
+    runner.run('rep-retry', { runId: 'r1', verifyOnComplete: false });
+    await tick();
+    host.complete('fan#0', { reason: 'error' });
+    await tick();
+    expect(host.dispatchedNames()).toEqual(['fan#0', 'fan#0']);
+    expect(host.sent.at(-1)?.message).toContain('Previous attempt failed: error');
+    host.complete('fan#0', { finalText: 'A' });
+    await tick();
+    host.complete('fan#1', { finalText: 'B' });
+    await tick();
+    expect(runner.getRunState('rep-retry', 'r1')!.status).toBe('completed');
+  });
+
+  it('v2 continues interrupted replica instances from the frozen run graph', async () => {
+    saveTaskSpec(
+      root,
+      specOf({
+        schema_version: 2,
+        id: 'rep-resume',
+        title: 'Rep resume',
+        goal: 'g',
+        max_parallel: 1,
+        nodes: [{ id: 'fan', prompt: 'replica ${index}', replicas: 2, aggregate: 'concat' }],
+      }),
+    );
+    const first = makeRunner();
+    first.run('rep-resume', { runId: 'r1', verifyOnComplete: false });
+    await tick();
+    expect(host.dispatchedNames()).toEqual(['fan#0']);
+
+    const resumedHost = new MockHost();
+    const resumed = new TaskRunner({ host: resumedHost, workspaceId: 'ws', workspaceRoot: root });
+    expect(resumed.scanUnfinished()[0]?.status).toBe('interrupted');
+    resumed.continue('rep-resume', 'r1');
+    await tick();
+    expect(resumedHost.dispatchedNames()).toEqual(['fan#0']);
+    resumedHost.complete('fan#0', { finalText: 'A' });
+    await tick();
+    resumedHost.complete('fan#1', { finalText: 'B' });
+    await tick();
+    expect(resumed.getRunState('rep-resume', 'r1')!.status).toBe('completed');
   });
 
   it('v2 map instance accepts submit_task_output against the definition node', async () => {
@@ -1563,7 +1748,8 @@ describe('TaskRunner (Conductor)', () => {
         }),
       );
       const runner = makeRunner();
-      runner.run('orchp', { runId: 'r1', verifyOnComplete: false });
+      expect(() => runner.run('orchp', { runId: 'denied', verifyOnComplete: false })).toThrow(/Swarm mode/);
+      runner.run('orchp', { runId: 'r1', verifyOnComplete: false, orchestrateAllowed: true });
       await tick();
       host.complete('a', { finalText: 'A' });
       await tick();
@@ -1588,7 +1774,7 @@ describe('TaskRunner (Conductor)', () => {
         }),
       );
       const r2 = new TaskRunner({ host, workspaceId: 'ws', workspaceRoot: root, now: () => '2026-06-07T00:00:00.000Z' });
-      r2.run('orchp2', { runId: 'r2', verifyOnComplete: false });
+      r2.run('orchp2', { runId: 'r2', verifyOnComplete: false, orchestrateAllowed: true });
       await tick();
       const snap = r2.applyOrchestrationPatch('orchp2', 'r2', {
         runId: 'r2',

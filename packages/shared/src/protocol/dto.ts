@@ -120,6 +120,15 @@ export interface Session {
   taskNodeCount?: number
   /** Tasks Conductor: generate-time draft orchestrator, hidden from the board until adopted by createTask. */
   taskDraft?: boolean
+  /** Per-session opt-in for autonomous Swarm delegation. */
+  swarmEnabled?: boolean
+  orchestrationId?: string
+  orchestrationRootSessionId?: string
+  orchestrationDepth?: number
+  orchestrationRole?: 'coordinator' | 'worker' | 'reviewer'
+  orchestrationLifecycle?: 'managed' | 'detached'
+  orchestrationStatus?: 'running' | 'completed' | 'need-to-check' | 'stopped'
+  orchestrationBlocker?: string
 }
 
 export interface CreateSessionOptions {
@@ -166,6 +175,14 @@ export interface CreateSessionOptions {
   taskNodeId?: string
   /** Tasks Conductor: mark the orchestrator as a generate-time draft (hidden until adopted by createTask). */
   taskDraft?: boolean
+  swarmEnabled?: boolean
+  orchestrationId?: string
+  orchestrationRootSessionId?: string
+  orchestrationDepth?: number
+  orchestrationRole?: 'coordinator' | 'worker' | 'reviewer'
+  orchestrationLifecycle?: 'managed' | 'detached'
+  orchestrationStatus?: 'running' | 'completed' | 'need-to-check' | 'stopped'
+  orchestrationBlocker?: string
   /**
    * Apply the reserved "Task" label (valueType 'number') after creation. Top-level sessions
    * allocate the next task number; sessions with a `parentSessionId` inherit the parent's
@@ -315,10 +332,17 @@ export interface TaskRunRequest {
 
 export interface TaskNodeRunStateDto {
   id: string
+  /** Definition id for dynamic map/loop/replica instances. */
+  definitionId?: string
   /** pending | ready | running | retry-wait | waiting-approval | done | failed | invalid | cancelled | skipped | interrupted */
   state: string
   sessionId?: string
   attempt: number
+  retryCount?: number
+  role?: 'worker' | 'reviewer'
+  model?: string
+  tokensUsed?: number
+  blocker?: string
 }
 
 export interface TaskRunSnapshotDto {
@@ -331,7 +355,10 @@ export interface TaskRunSnapshotDto {
   nodes: TaskNodeRunStateDto[]
   /** Sum of each child's (input + output) tokens observed at completion. */
   tokensUsed: number
+  /** Current user-controlled run ceiling. Missing means unlimited. */
+  tokenBudget?: number
   blockers?: string[]
+  revision?: number
 }
 
 export interface TaskControlResultDto {
@@ -475,7 +502,7 @@ export type SessionEvent =
   | { type: 'name_changed'; sessionId: string; name?: string }
   | { type: 'session_model_changed'; sessionId: string; model: string | null }
   | { type: 'session_status_changed'; sessionId: string; sessionStatus: SessionStatus }
-  | { type: 'session_metadata_changed'; sessionId: string; changes: Partial<Pick<Session, 'taskNodeCount' | 'kanbanColumn' | 'taskDraft' | 'taskSlug' | 'projectId'>> }
+  | { type: 'session_metadata_changed'; sessionId: string; changes: Partial<Pick<Session, 'taskNodeCount' | 'kanbanColumn' | 'taskDraft' | 'taskSlug' | 'projectId' | 'swarmEnabled' | 'orchestrationId' | 'orchestrationRootSessionId' | 'orchestrationDepth' | 'orchestrationRole' | 'orchestrationLifecycle' | 'orchestrationStatus' | 'orchestrationBlocker'>> }
   | { type: 'session_deleted'; sessionId: string }
   | { type: 'session_created'; sessionId: string }
   | { type: 'session_shared'; sessionId: string; sharedUrl: string }

@@ -38,7 +38,8 @@ function isInside(root: string, candidate: string): boolean {
 
 /**
  * Resolve a declared artifact path against workspace/cwd. Symlinks are followed
- * via realpath; the real file must stay inside workspaceRoot or cwd.
+ * via realpath; the real file must stay inside workspaceRoot. A task cwd is a
+ * resolution convenience, never a second trusted artifact root.
  */
 export function resolveArtifact(
   workspaceRoot: string,
@@ -46,8 +47,9 @@ export function resolveArtifact(
   declared: string,
 ): ArtifactResolveResult {
   if (!declared || typeof declared !== 'string') return { ok: false, error: 'artifact path is empty' };
+  if (isAbsolute(declared)) return { ok: false, error: 'artifact path must be workspace-relative' };
   const base = cwd && cwd.trim() ? cwd : workspaceRoot;
-  const abs = isAbsolute(declared) ? declared : resolve(base, declared);
+  const abs = resolve(base, declared);
   if (!existsSync(abs)) return { ok: false, error: 'artifact not found' };
   if (lstatSync(abs).isSymbolicLink()) {
     // Follow, then reject if the real path escaped.
@@ -59,16 +61,8 @@ export function resolveArtifact(
     return { ok: false, error: 'artifact not found' };
   }
   const rootReal = realpathSync(workspaceRoot);
-  let cwdReal = rootReal;
-  if (cwd && existsSync(cwd)) {
-    try {
-      cwdReal = realpathSync(cwd);
-    } catch {
-      cwdReal = rootReal;
-    }
-  }
-  if (!isInside(rootReal, real) && !isInside(cwdReal, real)) {
-    return { ok: false, error: 'artifact escapes workspace/cwd' };
+  if (!isInside(rootReal, real)) {
+    return { ok: false, error: 'artifact escapes workspace' };
   }
   const st = statSync(real);
   if (!st.isFile()) return { ok: false, error: 'artifact is not a file' };
@@ -76,7 +70,7 @@ export function resolveArtifact(
   return {
     ok: true,
     artifact: {
-      path: relative(rootReal, real) || real,
+      path: relative(rootReal, real),
       mime: mimeFromExt(real),
       size: st.size,
       hash: createHash('sha256').update(buf).digest('hex'),

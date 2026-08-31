@@ -47,6 +47,93 @@ nodes:
     expect(doc.errors.some((e) => e.message.includes('Unknown field'))).toBe(true);
   });
 
+  it('rejects nested unknown fields on a v2 file instead of stripping them', () => {
+    const doc = parseTaskDocument(`schema_version: 2
+id: demo
+title: Demo
+goal: g
+defaults:
+  permissionMode: safe
+  surprise: true
+nodes:
+  - id: a
+    prompt: hello
+    retry:
+      limit: 1
+      backoff:
+        base: 1
+        mystery: 2
+    outputs:
+      - name: result
+        typo_required: true
+`);
+    expect(doc.valid).toBe(false);
+    expect(doc.errors.map((error) => error.path)).toEqual(
+      expect.arrayContaining([
+        'defaults.surprise',
+        'nodes.0.retry.backoff.mystery',
+        'nodes.0.outputs.0.typo_required',
+      ]),
+    );
+  });
+
+  it('refuses v2 concurrency above eight and replicas without aggregation', () => {
+    const overParallel = parseTaskDocument(`schema_version: 2
+id: demo
+title: Demo
+goal: g
+max_parallel: 9
+nodes:
+  - id: a
+    prompt: hello
+`);
+    expect(overParallel.valid).toBe(false);
+    expect(overParallel.errors.some((error) => error.message.includes('hard cap of 8'))).toBe(true);
+
+    const replicas = parseTaskDocument(`schema_version: 2
+id: demo
+title: Demo
+goal: g
+nodes:
+  - id: a
+    prompt: hello
+    replicas: 2
+`);
+    expect(replicas.valid).toBe(false);
+    expect(replicas.errors.some((error) => error.message.includes('must declare an aggregate mode'))).toBe(true);
+  });
+
+  it('refuses permission escalation and persisted sensitive defaults', () => {
+    const escalation = parseTaskDocument(`schema_version: 2
+id: demo
+title: Demo
+goal: g
+defaults:
+  permissionMode: safe
+nodes:
+  - id: a
+    prompt: hello
+    permissionMode: allow-all
+`);
+    expect(escalation.valid).toBe(false);
+    expect(escalation.errors.some((error) => error.message.includes('exceeds task ceiling safe'))).toBe(true);
+
+    const secretDefault = parseTaskDocument(`schema_version: 2
+id: demo
+title: Demo
+goal: g
+params:
+  - name: token
+    sensitive: true
+    default: secret
+nodes:
+  - id: a
+    prompt: hello
+`);
+    expect(secretDefault.valid).toBe(false);
+    expect(secretDefault.errors.some((error) => error.message.includes('cannot define a persisted default'))).toBe(true);
+  });
+
   it('refuses to save unknown fields even when the source file is still v1', () => {
     mkdirSync(taskDir(root, 'demo'), { recursive: true });
     writeFileSync(taskYamlPath(root, 'demo'), V1);

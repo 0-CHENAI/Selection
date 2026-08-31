@@ -111,6 +111,7 @@ type RunLogPayload =
       tokensUsed?: number;
     }
   | { t: string; kind: 'verdict'; result: 'pass' | 'fail' | 'unparsed'; reason?: string; nodes?: string[] }
+  | { t: string; kind: 'orchestration-patch'; decisionId: string; baseRevision: number; rationale: string; cancelled?: string[] }
   | { t: string; kind: 'budget-breach'; metric: 'tokens' | 'parallel' | 'iterations'; value: number; limit: number };
 
 export type RunLogEntry = RunLogPayload & { seq?: number; revision?: number };

@@ -90,13 +90,102 @@ const NODE_KEYS = new Set([
   'route',
 ]);
 
+const DEFAULT_KEYS = new Set(['model', 'llmConnection', 'permissionMode']);
+const PARAM_KEYS = new Set(['name', 'type', 'default', 'enum', 'sensitive']);
+const INPUT_REF_KEYS = new Set(['from', 'summarize']);
+const OUTPUT_DECL_KEYS = new Set(['name', 'kind', 'type', 'enum', 'required', 'description']);
+const RETRY_KEYS = new Set(['limit', 'backoff', 'when']);
+const BACKOFF_KEYS = new Set(['base', 'factor', 'max']);
+const LOOP_KEYS = new Set(['until', 'max', 'else', 'carry']);
+const ROUTE_KEYS = new Set(['cases', 'default']);
+const ROUTE_CASE_KEYS = new Set(['when', 'goto']);
+const CONDITION_KEYS = new Set(['ref', 'op', 'value', 'all', 'any', 'not']);
+const UI_KEYS = new Set(['layout']);
+const LAYOUT_KEYS = new Set(['direction', 'nodes', 'viewport']);
+const POSITION_KEYS = new Set(['x', 'y']);
+const VIEWPORT_KEYS = new Set(['x', 'y', 'zoom']);
+
+function conditionUnknownFields(raw: unknown, path: string): ValidationIssue[] {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return [];
+  const issues = unknownKeys(raw, CONDITION_KEYS, path);
+  const condition = raw as { all?: unknown; any?: unknown; not?: unknown };
+  if (Array.isArray(condition.all)) {
+    condition.all.forEach((item, i) => issues.push(...conditionUnknownFields(item, `${path}.all.${i}`)));
+  }
+  if (Array.isArray(condition.any)) {
+    condition.any.forEach((item, i) => issues.push(...conditionUnknownFields(item, `${path}.any.${i}`)));
+  }
+  if (condition.not !== undefined) issues.push(...conditionUnknownFields(condition.not, `${path}.not`));
+  return issues;
+}
+
 function v2UnknownFields(raw: unknown): ValidationIssue[] {
   const issues = unknownKeys(raw, TASK_KEYS, 'root');
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return issues;
-  const nodes = (raw as { nodes?: unknown }).nodes;
+  const task = raw as Record<string, unknown>;
+  issues.push(...unknownKeys(task.defaults, DEFAULT_KEYS, 'defaults'));
+  if (Array.isArray(task.params)) {
+    task.params.forEach((param, i) => issues.push(...unknownKeys(param, PARAM_KEYS, `params.${i}`)));
+  }
+  const ui = task.ui;
+  issues.push(...unknownKeys(ui, UI_KEYS, 'ui'));
+  if (ui && typeof ui === 'object' && !Array.isArray(ui)) {
+    const layout = (ui as { layout?: unknown }).layout;
+    issues.push(...unknownKeys(layout, LAYOUT_KEYS, 'ui.layout'));
+    if (layout && typeof layout === 'object' && !Array.isArray(layout)) {
+      const layoutRecord = layout as { nodes?: unknown; viewport?: unknown };
+      if (layoutRecord.nodes && typeof layoutRecord.nodes === 'object' && !Array.isArray(layoutRecord.nodes)) {
+        for (const [id, position] of Object.entries(layoutRecord.nodes as Record<string, unknown>)) {
+          issues.push(...unknownKeys(position, POSITION_KEYS, `ui.layout.nodes.${id}`));
+        }
+      }
+      issues.push(...unknownKeys(layoutRecord.viewport, VIEWPORT_KEYS, 'ui.layout.viewport'));
+    }
+  }
+
+  const nodes = task.nodes;
   if (!Array.isArray(nodes)) return issues;
   nodes.forEach((node, i) => {
-    issues.push(...unknownKeys(node, NODE_KEYS, `nodes.${i}`));
+    const path = `nodes.${i}`;
+    issues.push(...unknownKeys(node, NODE_KEYS, path));
+    if (!node || typeof node !== 'object' || Array.isArray(node)) return;
+    const record = node as Record<string, unknown>;
+    if (record.inputs && typeof record.inputs === 'object' && !Array.isArray(record.inputs)) {
+      for (const [name, input] of Object.entries(record.inputs as Record<string, unknown>)) {
+        issues.push(...unknownKeys(input, INPUT_REF_KEYS, `${path}.inputs.${name}`));
+      }
+    }
+    if (Array.isArray(record.outputs)) {
+      record.outputs.forEach((output, outputIndex) => {
+        issues.push(...unknownKeys(output, OUTPUT_DECL_KEYS, `${path}.outputs.${outputIndex}`));
+      });
+    }
+    issues.push(...unknownKeys(record.retry, RETRY_KEYS, `${path}.retry`));
+    if (record.retry && typeof record.retry === 'object' && !Array.isArray(record.retry)) {
+      issues.push(
+        ...unknownKeys((record.retry as { backoff?: unknown }).backoff, BACKOFF_KEYS, `${path}.retry.backoff`),
+      );
+    }
+    issues.push(...unknownKeys(record.loop, LOOP_KEYS, `${path}.loop`));
+    if (record.loop && typeof record.loop === 'object' && !Array.isArray(record.loop)) {
+      issues.push(...conditionUnknownFields((record.loop as { until?: unknown }).until, `${path}.loop.until`));
+    }
+    issues.push(...conditionUnknownFields(record.when, `${path}.when`));
+    issues.push(...unknownKeys(record.route, ROUTE_KEYS, `${path}.route`));
+    if (record.route && typeof record.route === 'object' && !Array.isArray(record.route)) {
+      const cases = (record.route as { cases?: unknown }).cases;
+      if (Array.isArray(cases)) {
+        cases.forEach((routeCase, caseIndex) => {
+          const casePath = `${path}.route.cases.${caseIndex}`;
+          issues.push(...unknownKeys(routeCase, ROUTE_CASE_KEYS, casePath));
+          if (routeCase && typeof routeCase === 'object' && !Array.isArray(routeCase)) {
+            issues.push(
+              ...conditionUnknownFields((routeCase as { when?: unknown }).when, `${casePath}.when`),
+            );
+          }
+        });
+      }
+    }
   });
   return issues;
 }
@@ -215,4 +304,3 @@ export function saveTaskDocument(
   atomicWriteFileSync(taskYamlPath(workspaceRoot, slug), body);
   return parseTaskDocument(body, slug);
 }
-

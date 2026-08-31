@@ -5,10 +5,12 @@ Frozen contracts for the Tasks kanban Conductor. Implementation lives in
 `@craft-agent/server-core/tasks` (runner). This document replaces the missing
 `sessions/.../tasks-architecture.md` referenced by earlier schema comments.
 
-Work happens on `feat/tasks-conductor-v2` branched from `origin/test`. Do not
-commit Conductor work onto `test`. User-facing copy lives in `USER-GUIDE.md`.
-`orchestrate` stays Beta behind `CRAFT_FEATURE_TASKS_ORCHESTRATE` until a
-packaged Electron + real-model gate.
+The technical preview is developed on `codex/swarm-conductor-preview`, based
+on `origin/test`. Do not commit Conductor work directly onto `test`.
+User-facing copy lives in `USER-GUIDE.md`. `orchestrate` stays Beta behind
+`CRAFT_FEATURE_TASKS_ORCHESTRATE`; the separate preview build enables it with
+`CRAFT_SWARM_PREVIEW_BUILD=1`. Promotion still requires packaged Electron and
+real-model acceptance.
 
 ## 1. Product modes
 
@@ -76,7 +78,12 @@ Hydration **must** read `spec.json` / `spec-revisions/0000.json`, never live
 Background-task chip “Stop Task” is a different surface and must keep distinct
 copy.
 
-## 5. Cards and columns
+## 5. Orchestration status and legacy cards
+
+Scheduling and terminal correctness use only `TaskRunSnapshotDto` and the
+durable run state machine. Session status, labels, and kanban columns are never
+inputs to DAG/Swarm scheduling. The card updates below are compatibility mirrors
+for existing boards and may be removed without changing run semantics.
 
 Top-level orchestrator card:
 
@@ -102,8 +109,9 @@ Board progress and pills read `TaskRunSnapshotDto` from `tasks:runChanged`.
 `ConductorSessionHost.resolveKanbanColumn(sessionId, statusId)` looks up the
 session project’s `kanbanColumns`. Missing match returns `null` (keep column).
 
-Child sessions default `permissionMode` to `allow-all` when the spec omits one.
-Never fall through to the workspace default (`ask` hangs unattended children).
+Child sessions default `permissionMode` to `safe` when the spec omits one.
+Never fall through to a more permissive workspace default. Tasks that require
+write access must declare an explicit task ceiling and node permission.
 
 ## 6. Persistence
 
@@ -161,7 +169,8 @@ Refs may only name task params, completed node outputs, and map/loop locals.
 Outputs: `{ name, kind, type, required, enum, description }`.
 `kind: param` = string/number/boolean/enum/json/text.
 `kind: artifact` = workspace-relative path; server resolves the real path,
-rejects symlink escape from workspace/cwd, records rel path, MIME, size, hash.
+rejects absolute paths and symlink escape from the workspace root, and records
+only the relative path, MIME, size, and hash.
 
 `submit_task_output({ text?, values })` is required when a node declares
 outputs. Missing call → `invalid` (retryable). Nodes with no outputs still

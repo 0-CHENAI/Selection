@@ -543,10 +543,9 @@ export function TaskEditor({
   // Explicit connection serving the orch model; undefined lets buildSpec derive it from orchModel.
   // Preserved from the loaded spec so an authored connection isn't rewritten on save (round-trip).
   const [orchConnection, setOrchConnection] = React.useState<string | undefined>(undefined)
-  // Task-family permission mode. New UI tasks default to autonomous (Execute/allow-all) so product
-  // behavior is unchanged; edit mode prefills from the spec. Persisted to defaults.permissionMode so
-  // subtask autonomy is explicit + visible, never a hidden runner default.
-  const [permissionMode, setPermissionMode] = React.useState<TaskPermissionMode>('allow-all')
+  // Task-family permission ceiling. Preview tasks fail closed at safe unless the user explicitly
+  // raises it; edit mode prefills from the spec. Persisted to defaults.permissionMode.
+  const [permissionMode, setPermissionMode] = React.useState<TaskPermissionMode>('safe')
   // The task's project binding at load (edit mode). Floor for buildSpec so leaving the picker on
   // "No Project" can't silently drop a binding, and the gate for whether "No Project" is offered.
   const [boundProjectId, setBoundProjectId] = React.useState('')
@@ -573,6 +572,7 @@ export function TaskEditor({
   const [resultsLoading, setResultsLoading] = React.useState(false)
   const [selectedRunId, setSelectedRunId] = React.useState<string | null>(null)
   const [liveRun, setLiveRun] = React.useState<Awaited<ReturnType<typeof window.electronAPI.runTask>> | null>(null)
+  const [tokenBudgetDraft, setTokenBudgetDraft] = React.useState('')
   const [etag, setEtag] = React.useState<string | null>(null)
   const [sourceVersion, setSourceVersion] = React.useState<1 | 2 | undefined>(undefined)
   const [migrationWarnings, setMigrationWarnings] = React.useState<string[]>([])
@@ -728,6 +728,26 @@ export function TaskEditor({
     },
     [editSlug, liveRun, workspaceId, t],
   )
+
+  const increaseTokenBudget = React.useCallback(async () => {
+    if (!editSlug || !liveRun) return
+    const tokenBudget = Number(tokenBudgetDraft)
+    if (!Number.isFinite(tokenBudget) || tokenBudget <= (liveRun.tokenBudget ?? liveRun.tokensUsed)) {
+      toast.error(t('tasks.toastControlConflict'), { description: t('tasks.budgetMustIncrease') })
+      return
+    }
+    const res = await window.electronAPI.updateTaskRunLimits(workspaceId, {
+      slug: editSlug,
+      runId: liveRun.runId,
+      tokenBudget,
+    })
+    if (res.conflict) {
+      toast.error(t('tasks.toastControlConflict'), { description: res.conflict.message })
+      return
+    }
+    setLiveRun(res.snapshot)
+    setTokenBudgetDraft('')
+  }, [editSlug, liveRun, tokenBudgetDraft, workspaceId, t])
 
   // Async generate: tasks:generate returns the orchestrator session id immediately and the
   // authored spec arrives later via the onTaskGenerated push event. We track the pending
@@ -1150,6 +1170,23 @@ export function TaskEditor({
                   </Btn>
                 </span>
               ))}
+            </div>
+          )}
+          {isEdit && liveRun?.status === 'waiting-budget' && (
+            <div className="flex items-center gap-1.5">
+              <input
+                type="number"
+                min={(liveRun.tokenBudget ?? liveRun.tokensUsed) + 1}
+                step="1"
+                value={tokenBudgetDraft}
+                onChange={(event) => setTokenBudgetDraft(event.target.value)}
+                placeholder={String((liveRun.tokenBudget ?? liveRun.tokensUsed) + 1)}
+                aria-label={t('tasks.newTokenBudget')}
+                className="h-7 w-28 rounded-md border border-border bg-background px-2 text-[11.5px]"
+              />
+              <Btn variant="secondary" onClick={() => void increaseTokenBudget()}>
+                {t('tasks.increaseBudget')}
+              </Btn>
             </div>
           )}
           {(tab === 'definition' || tab === 'canvas' || tab === 'yaml') && (

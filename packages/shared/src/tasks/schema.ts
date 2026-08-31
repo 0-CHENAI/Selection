@@ -48,6 +48,10 @@ export const RETRY_WHEN = ['error', 'empty', 'invalid'] as const;
 export const CACHE_MODES = ['pure', 'off'] as const;
 export const TASK_RUNNERS = ['conduct', 'orchestrate'] as const;
 
+/** DAG worker concurrency defaults/caps for the technical preview. */
+export const DEFAULT_DAG_MAX_PARALLEL = 4;
+export const MAX_DAG_MAX_PARALLEL = 8;
+
 // ---------------------------------------------------------------------------
 // Repair (verification-loop) bounds — SINGLE SOURCE OF TRUTH.
 // `max_iterations` caps how many times a FAIL verdict re-runs the repair frontier.

@@ -372,10 +372,14 @@ export function registerTasksHandlers(server: RpcServer, deps: HandlerDeps): voi
 
   // tasks:run — start a run.
   server.handle(RPC_CHANNELS.tasks.RUN, async (_ctx, workspaceId: string, req: TaskRunRequest) => {
+    const orchestrator = req.orchestratorSessionId
+      ? await deps.sessionManager.getSession(req.orchestratorSessionId)
+      : null
     return runnerFor(workspaceId).run(req.slug, {
       runId: req.runId,
       orchestratorSessionId: req.orchestratorSessionId,
       params: req.params,
+      orchestrateAllowed: orchestrator?.swarmEnabled === true,
     })
   })
 

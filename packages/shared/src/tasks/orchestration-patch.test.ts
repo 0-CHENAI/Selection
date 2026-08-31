@@ -74,6 +74,20 @@ describe('orchestration patch', () => {
     expect(priv.ok).toBe(false);
     if (!priv.ok) expect(priv.error).toMatch(/ceiling/);
 
+    const omittedCeiling = validateOrchestrationPatch(
+      patch({ add: [{ id: 'c', kind: 'session', prompt: 'c', permissionMode: 'ask' }] }),
+      ctx(),
+    );
+    expect(omittedCeiling.ok).toBe(false);
+    if (!omittedCeiling.ok) expect(omittedCeiling.error).toMatch(/ceiling/);
+
+    const unverifiableModel = validateOrchestrationPatch(
+      patch({ add: [{ id: 'c', kind: 'session', prompt: 'c', model: 'unknown' }] }),
+      ctx(),
+    );
+    expect(unverifiableModel.ok).toBe(false);
+    if (!unverifiableModel.ok) expect(unverifiableModel.error).toMatch(/not in the workspace/);
+
     const stale = validateOrchestrationPatch(patch({ baseRevision: 1 }), ctx());
     expect(stale.ok).toBe(false);
 

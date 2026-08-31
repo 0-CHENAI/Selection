@@ -38,4 +38,19 @@ describe('resolveArtifact', () => {
   it('rejects missing files', () => {
     expect(resolveArtifact(root, undefined, 'missing.bin').ok).toBe(false);
   });
+
+  it('rejects absolute paths even when they point inside the workspace', () => {
+    const absolute = join(root, 'note.md');
+    writeFileSync(absolute, 'hello');
+    const res = resolveArtifact(root, undefined, absolute);
+    expect(res).toEqual({ ok: false, error: 'artifact path must be workspace-relative' });
+  });
+
+  it('does not treat an external task cwd as a trusted artifact root', () => {
+    const outside = mkdtempSync(join(tmpdir(), 'artifact-cwd-'));
+    writeFileSync(join(outside, 'result.txt'), 'outside');
+    const res = resolveArtifact(root, outside, 'result.txt');
+    expect(res).toEqual({ ok: false, error: 'artifact escapes workspace' });
+    rmSync(outside, { recursive: true, force: true });
+  });
 });

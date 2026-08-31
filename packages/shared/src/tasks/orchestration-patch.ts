@@ -75,7 +75,7 @@ export function validateOrchestrationPatch(patch: OrchestrationPatch, ctx: Patch
   const byId = new Map(ctx.spec.nodes.map((n) => [n.id, n]));
   const nextNodes = ctx.spec.nodes.map((n) => ({ ...n }));
   const cancelled = [...(patch.cancel ?? [])];
-  const ceiling = ctx.spec.defaults?.permissionMode ?? 'allow-all';
+  const ceiling = ctx.spec.defaults?.permissionMode ?? 'safe';
 
   for (const id of cancelled) {
     const state = ctx.nodeStates[id] ?? 'pending';
@@ -98,8 +98,11 @@ export function validateOrchestrationPatch(patch: OrchestrationPatch, ctx: Patch
     if (!permissionAllowed(node.permissionMode, ceiling)) {
       return fail(ctx, `node ${node.id} permission exceeds task ceiling`);
     }
-    if (node.model && ctx.allowedModels && !ctx.allowedModels.has(node.model)) {
+    if (node.model && (!ctx.allowedModels || !ctx.allowedModels.has(node.model))) {
       return fail(ctx, `model ${node.model} is not in the workspace`);
+    }
+    if (node.llmConnection && node.llmConnection !== ctx.spec.defaults?.llmConnection) {
+      return fail(ctx, `llmConnection ${node.llmConnection} exceeds the task connection boundary`);
     }
     nextNodes[idx] = { ...nextNodes[idx], ...node };
   }
@@ -111,8 +114,11 @@ export function validateOrchestrationPatch(patch: OrchestrationPatch, ctx: Patch
     if (!permissionAllowed(node.permissionMode, ceiling)) {
       return fail(ctx, `node ${node.id} permission exceeds task ceiling`);
     }
-    if (node.model && ctx.allowedModels && !ctx.allowedModels.has(node.model)) {
+    if (node.model && (!ctx.allowedModels || !ctx.allowedModels.has(node.model))) {
       return fail(ctx, `model ${node.model} is not in the workspace`);
+    }
+    if (node.llmConnection && node.llmConnection !== ctx.spec.defaults?.llmConnection) {
+      return fail(ctx, `llmConnection ${node.llmConnection} exceeds the task connection boundary`);
     }
     nextNodes.push(node);
   }
