@@ -18,6 +18,7 @@ import {
   PARAM_TYPES,
   parseTaskSpec,
   nodeDeps,
+  isStructuredSchemaVersion,
   type TaskSpec,
   type TaskNode,
 } from './schema.ts';
@@ -66,7 +67,7 @@ export function validateTaskSpec(spec: TaskSpec): ValidationResult {
   // v1 remains readable with its historical semantics. A saved v2 definition is
   // strict: concurrency above the preview ceiling is refused instead of being
   // silently accepted and over-scheduled by the runtime.
-  if (spec.schema_version === 2 && (spec.max_parallel ?? 0) > MAX_DAG_MAX_PARALLEL) {
+  if (isStructuredSchemaVersion(spec.schema_version) && (spec.max_parallel ?? 0) > MAX_DAG_MAX_PARALLEL) {
     errors.push(
       err(
         'max_parallel',
@@ -129,7 +130,7 @@ export function validateTaskSpec(spec: TaskSpec): ValidationResult {
             continue;
           }
           if (ref.field) {
-            if (spec.schema_version === 2) {
+            if (isStructuredSchemaVersion(spec.schema_version)) {
               const declared = byId.get(ref.nodeId)?.outputs?.some((output) => output.name === ref.field);
               if (!declared) {
                 errors.push(
@@ -184,7 +185,7 @@ export function validateTaskSpec(spec: TaskSpec): ValidationResult {
     if (node.loop?.else && !byId.has(node.loop.else)) {
       errors.push(err(`${path}.loop.else`, `loop.else points to unknown node "${node.loop.else}"`));
     }
-    if (spec.schema_version === 2 && (node.max_parallel ?? 0) > MAX_DAG_MAX_PARALLEL) {
+    if (isStructuredSchemaVersion(spec.schema_version) && (node.max_parallel ?? 0) > MAX_DAG_MAX_PARALLEL) {
       errors.push(
         err(
           `${path}.max_parallel`,
@@ -192,10 +193,10 @@ export function validateTaskSpec(spec: TaskSpec): ValidationResult {
         ),
       );
     }
-    if (spec.schema_version === 2 && node.replicas && node.replicas > 1 && !node.aggregate) {
+    if (isStructuredSchemaVersion(spec.schema_version) && node.replicas && node.replicas > 1 && !node.aggregate) {
       errors.push(err(`${path}.aggregate`, `Node "${node.id}" with replicas must declare an aggregate mode`));
     }
-    if (spec.schema_version === 2 && (node.replicas ?? 0) > TASK_CAPS.maxInstances) {
+    if (isStructuredSchemaVersion(spec.schema_version) && (node.replicas ?? 0) > TASK_CAPS.maxInstances) {
       errors.push(
         err(
           `${path}.replicas`,
@@ -204,13 +205,13 @@ export function validateTaskSpec(spec: TaskSpec): ValidationResult {
       );
     }
     if (
-      spec.schema_version === 2 &&
+      isStructuredSchemaVersion(spec.schema_version) &&
       (node.replicas ?? 1) > 1 &&
       !['session', 'orchestrator', 'finally', 'synthesize', 'verify', 'judge'].includes(node.kind)
     ) {
       errors.push(err(`${path}.replicas`, `Node kind "${node.kind}" does not support replicas`));
     }
-    if (spec.schema_version === 2) {
+    if (isStructuredSchemaVersion(spec.schema_version)) {
       for (const [outputIndex, output] of (node.outputs ?? []).entries()) {
         if (output.kind !== 'artifact' && output.type && !PARAM_TYPES.includes(output.type as never)) {
           errors.push(
@@ -227,7 +228,7 @@ export function validateTaskSpec(spec: TaskSpec): ValidationResult {
     }
   }
 
-  if (spec.schema_version === 2) {
+  if (isStructuredSchemaVersion(spec.schema_version)) {
     for (const [paramIndex, param] of (spec.params ?? []).entries()) {
       if (param.sensitive && param.default !== undefined) {
         errors.push(
@@ -247,7 +248,7 @@ export function validateTaskSpec(spec: TaskSpec): ValidationResult {
         errors.push(err(`outputs.${name}`, `Output "${name}" references unknown node "${ref.nodeId}"`));
       }
       if (ref.kind === 'node' && byId.has(ref.nodeId) && ref.field) {
-        if (spec.schema_version === 2) {
+        if (isStructuredSchemaVersion(spec.schema_version)) {
           const declared = byId.get(ref.nodeId)?.outputs?.some((output) => output.name === ref.field);
           if (!declared) {
             errors.push(

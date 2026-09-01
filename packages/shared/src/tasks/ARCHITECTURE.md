@@ -43,7 +43,8 @@ real-model acceptance.
 ## 3. Run and node state
 
 Run: `running | pausing | paused | waiting-approval | waiting-budget |
-verifying | repairing | interrupted | stopped | completed | failed`.
+waiting-coordinator | verifying | repairing | interrupted | stopped |
+completed | failed`.
 
 Node: `pending | ready | running | retry-wait | waiting-approval | done |
 failed | invalid | cancelled | skipped | interrupted`.
@@ -180,7 +181,10 @@ use final assistant text (v1 compat).
 the text parser. Human chat on the parent session is never a verdict; the
 runner owns a correlated turn queue.
 
-Retry triggers: `error | empty | invalid`. `cache:pure` is same-run only.
+Retry triggers: `error | empty | invalid`. v2 `cache:pure` is same-run only.
+v3 cache is `none | run-pure | workspace-pure`. `workspace-pure` is opt-in,
+fingerprint-complete, 7-day TTL, and never applies to verify/judge/approval/
+finally or coordinator decisions.
 
 Sensitive params are omitted from logs and plaintext persistence. Resume /
 continue must re-prompt. Residual risk: once interpolated into a child prompt,

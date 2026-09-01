@@ -99,7 +99,7 @@ export function validateOrchestrationPatch(patch: OrchestrationPatch, ctx: Patch
 
   const normalized = new Map<string, TaskNode>();
   for (const raw of patch.add ?? []) {
-    const unknown = v2UnknownFields({ ...ctx.spec, schema_version: 2, nodes: [raw] });
+    const unknown = v2UnknownFields({ ...ctx.spec, schema_version: ctx.spec.schema_version === 3 ? 3 : 2, nodes: [raw] });
     if (unknown.length) return fail(ctx, unknown.map((issue) => issue.message).join('; '));
     const parsed = TaskNodeSchema.safeParse(raw);
     if (!parsed.success) return fail(ctx, parsed.error.issues.map((i) => i.message).join('; '));
@@ -107,7 +107,7 @@ export function validateOrchestrationPatch(patch: OrchestrationPatch, ctx: Patch
   }
 
   for (const raw of patch.update ?? []) {
-    const unknown = v2UnknownFields({ ...ctx.spec, schema_version: 2, nodes: [raw] });
+    const unknown = v2UnknownFields({ ...ctx.spec, schema_version: ctx.spec.schema_version === 3 ? 3 : 2, nodes: [raw] });
     if (unknown.length) return fail(ctx, unknown.map((issue) => issue.message).join('; '));
     const id = typeof raw.id === 'string' ? raw.id : '';
     const existing = byId.get(id);
@@ -203,10 +203,17 @@ export function definitionDiff(from: TaskSpec, to: TaskSpec): DefinitionDiff {
  * the latest live task document.
  */
 export function mergeRunDefinition(from: TaskSpec, run: TaskSpec): TaskSpec {
+  const schema_version = from.schema_version === 3 || run.schema_version === 3 ? 3 : 2;
   return {
     ...from,
-    schema_version: 2,
+    schema_version,
     nodes: run.nodes,
+    ...(schema_version === 3
+      ? {
+          execution: from.execution ?? run.execution,
+          acceptance_criteria: from.acceptance_criteria ?? run.acceptance_criteria,
+        }
+      : {}),
   };
 }
 

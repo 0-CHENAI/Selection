@@ -184,4 +184,24 @@ describe('orchestration patch', () => {
       nodes: run.nodes,
     });
   });
+
+  it('keeps v3 execution and acceptance criteria when applying a run graph onto v2', () => {
+    const live = spec({
+      schema_version: 2,
+      title: 'live title',
+      acceptance_criteria: undefined,
+    });
+    const run = spec({
+      schema_version: 3,
+      acceptance_criteria: 'both branches exist',
+      execution: { coordinator_gate: { mode: 'required' }, verification: { required: true } },
+      nodes: [{ id: 'patched', kind: 'session', prompt: 'new graph' }],
+    });
+    const merged = mergeRunDefinition(live, run);
+    expect(merged.schema_version).toBe(3);
+    expect(merged.nodes).toEqual(run.nodes);
+    expect(merged.acceptance_criteria).toBe('both branches exist');
+    expect(merged.execution).toEqual(run.execution);
+    expect(merged.title).toBe('live title');
+  });
 });

@@ -7,6 +7,7 @@ import { join } from 'path';
 import { atomicWriteFileSync } from '../utils/files.ts';
 import { runDir, writeRunSpecSnapshot, readRunSpecSnapshot } from './storage.ts';
 import type { TaskSpec } from './schema.ts';
+import { MAX_SPEC_REVISIONS } from './orchestration-patch.ts';
 
 const REVISIONS_DIR = 'spec-revisions';
 
@@ -33,7 +34,7 @@ export function readLatestSpecRevision(
   runId: string,
 ): { revision: number; spec: TaskSpec } | null {
   let latest: { revision: number; spec: TaskSpec } | null = null;
-  for (let i = 0; i < 8; i++) {
+  for (let i = 0; i < MAX_SPEC_REVISIONS; i++) {
     const path = specRevisionPath(workspaceRoot, slug, runId, i);
     if (!existsSync(path)) continue;
     const spec = readSpecRevision(workspaceRoot, slug, runId, i);

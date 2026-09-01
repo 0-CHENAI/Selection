@@ -181,6 +181,22 @@ export function attachSessionSelfManagementBindings(
     enumerable: true,
   });
 
+  Object.defineProperty(context, 'submitOrchestrationDecision', {
+    get() {
+      return getSessionScopedToolCallbacks(sessionId)?.submitOrchestrationDecisionFn;
+    },
+    configurable: true,
+    enumerable: true,
+  });
+
+  Object.defineProperty(context, 'submitTaskNodeVerdict', {
+    get() {
+      return getSessionScopedToolCallbacks(sessionId)?.submitTaskNodeVerdictFn;
+    },
+    configurable: true,
+    enumerable: true,
+  });
+
   Object.defineProperty(context, 'submitTaskDefinition', {
     get() {
       return getSessionScopedToolCallbacks(sessionId)?.submitTaskDefinitionFn;
