@@ -102,7 +102,7 @@ function WorkbenchInner({ spec, liveRun }: ConductorWorkbenchProps) {
   const [edges, setEdges, onEdgesChange] = useEdgesState(initial.edges)
   const [selected, setSelected] = React.useState<string | null>(null)
   const topologyKey = specTopologyKey(spec)
-  const liveKey = `${liveRun?.status ?? ''}:${(liveRun?.nodes ?? []).map((n) => `${n.id}:${n.state}`).join('|')}`
+  const liveKey = `${liveRun?.status ?? ''}:${liveRun?.metrics?.elapsedMs ?? ''}:${liveRun?.metrics?.cacheHits ?? ''}:${(liveRun?.nodes ?? []).map((n) => `${n.id}:${n.state}:${n.cacheStatus}:${n.elapsedMs}:${n.verdict?.result}`).join('|')}`
 
   React.useEffect(() => {
     const flow = displayFlow(spec, liveRun, t)
@@ -146,8 +146,18 @@ function WorkbenchInner({ spec, liveRun }: ConductorWorkbenchProps) {
         <span>{t(runnerLabelKey(spec.runner, orchestrateOn))}</span>
         <span className="text-foreground/40">{t('tasks.canvasReadOnlyHint')}</span>
         {liveRun && (
-          <span className="ml-auto">
-            {t('tasks.tabLiveRun')}: {runStatusKey ? t(runStatusKey) : liveRun.status}
+          <span className="ml-auto flex flex-wrap items-center gap-2">
+            <span>{t('tasks.tabLiveRun')}: {runStatusKey ? t(runStatusKey) : liveRun.status}</span>
+            {liveRun.status === 'waiting-coordinator' && (
+              <span>{t('tasks.coordinatorWaiting')}: {liveRun.blockers?.join(', ')}</span>
+            )}
+            {liveRun.blockers?.includes('coordinator-timeout') && <span>{t('tasks.coordinatorTimeout')}</span>}
+            {liveRun.metrics?.verifyBudgetRemaining !== undefined && (
+              <span>{t('tasks.verifyBudget')}: {liveRun.metrics.verifyBudgetRemaining}</span>
+            )}
+            {liveRun.metrics?.criticalPathNodeIds?.length ? (
+              <span>{t('tasks.criticalPath')}: {liveRun.metrics.criticalPathNodeIds.slice(0, 4).join(' → ')}</span>
+            ) : null}
           </span>
         )}
       </div>
@@ -218,7 +228,44 @@ function WorkbenchInner({ spec, liveRun }: ConductorWorkbenchProps) {
                               <dt className="inline">{t('tasks.nodeRetries')}: </dt>
                               <dd className="inline text-foreground/75">{instance.retryCount ?? 0}</dd>
                             </div>
+                            <div>
+                              <dt className="inline">{t('tasks.nodeElapsed')}: </dt>
+                              <dd className="inline text-foreground/75">{instance.elapsedMs ?? 0}ms</dd>
+                            </div>
+                            <div>
+                              <dt className="inline">{t('tasks.nodeQueue')}: </dt>
+                              <dd className="inline text-foreground/75">{instance.queueMs ?? 0}ms</dd>
+                            </div>
+                            <div>
+                              <dt className="inline">{t('tasks.nodeCache')}: </dt>
+                              <dd className="inline text-foreground/75">
+                                {instance.cacheStatus === 'hit'
+                                  ? t('tasks.nodeCacheHit')
+                                  : instance.cacheStatus === 'bypass'
+                                    ? t('tasks.nodeCacheBypass')
+                                    : instance.cacheStatus === 'miss'
+                                      ? t('tasks.nodeCacheMiss')
+                                      : instance.cacheStatus ?? t('tasks.notAvailable')}
+                              </dd>
+                            </div>
                           </dl>
+                          {instance.cacheStatus === 'hit' && (
+                            <div className="mt-1.5 text-[11px] text-foreground/55">
+                              {t('tasks.cacheSource')}: {instance.cacheSourceRunId ?? t('tasks.notAvailable')}
+                              {instance.cacheCreatedAt ? ` · ${t('tasks.cacheCreatedAt')}: ${instance.cacheCreatedAt}` : ''}
+                            </div>
+                          )}
+                          {instance.verdict && (
+                            <div className="mt-1.5 rounded-md bg-foreground/[0.04] px-2 py-1.5 text-[11px]">
+                              <div>{t('tasks.finalVerdict')}: {instance.verdict.result}</div>
+                              {instance.verdict.reason && (
+                                <div className="text-foreground/70">{instance.verdict.reason}</div>
+                              )}
+                              {instance.verdict.evidence && (
+                                <div className="text-foreground/70">{t('tasks.evidenceSummary')}: {instance.verdict.evidence}</div>
+                              )}
+                            </div>
+                          )}
                           {instance.blocker && (
                             <div className="mt-1.5 rounded-md bg-amber-500/10 px-2 py-1.5 text-[11px] leading-relaxed text-amber-800 dark:text-amber-200">
                               <span className="font-semibold">{t('tasks.nodeBlocker')}: </span>{instance.blocker}

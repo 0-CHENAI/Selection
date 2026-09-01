@@ -28,6 +28,7 @@ const RUN_STATUS_KEYS: Record<string, string> = {
   verifying: 'tasks.runStatusVerifying',
   'waiting-approval': 'tasks.runStatusWaitingApproval',
   'waiting-budget': 'tasks.runStatusWaitingBudget',
+  'waiting-coordinator': 'tasks.runStatusWaitingCoordinator',
 }
 
 export function nodeKindLabelKey(kind?: string): string {

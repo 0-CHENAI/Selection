@@ -7,6 +7,7 @@ describe('task-labels', () => {
     expect(nodeKindLabelKey(undefined)).toBe('tasks.nodeKindSession')
     expect(nodeKindLabelKey('mystery')).toBe('tasks.nodeKindSession')
     expect(runStatusLabelKey('waiting-approval')).toBe('tasks.runStatusWaitingApproval')
+    expect(runStatusLabelKey('waiting-coordinator')).toBe('tasks.runStatusWaitingCoordinator')
     expect(runStatusLabelKey('unknown')).toBeNull()
   })
 

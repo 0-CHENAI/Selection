@@ -424,6 +424,8 @@ function getToolDisplayName(name: string): string {
     'get_task_results': 'Get Task Results',
     'submit_task_output': 'Submit Task Output',
     'submit_task_verdict': 'Submit Task Verdict',
+    'submit_task_node_verdict': 'Submit Node Verdict',
+    'submit_orchestration_decision': 'Submit Orchestration Decision',
     'list_background_tasks': 'List Background Tasks',
     'send_agent_message': 'Send Agent Message',
     'spawn_session': 'Spawn Session',
