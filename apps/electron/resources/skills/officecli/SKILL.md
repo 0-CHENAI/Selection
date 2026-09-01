@@ -33,7 +33,6 @@ Do not read global `~/.agents/skills/officecli`, `docx`, `xlsx`, or `pptx` instr
 - Keep the resident document session open across related edits. Use `save` when an intermediate checkpoint is useful and `close` only at the final delivery gate.
 - Do not impose a model-call, CLI-call, operation, QA, elapsed-time, or cost budget. Continue until the official Delivery Gate passes, the user cancels, or a genuine external blocker makes file state unverifiable.
 - Treat a non-zero exit code, `WARNING`, `UNSUPPORTED`, missing output, or read-back mismatch as incomplete work. Inspect the relevant `officecli help` output, repair, and verify again.
-- For OfficeCLI 1.0.144 CSV/TSV import, do not trust a successful native import alone. Use the atomic batch workflow from the Excel guide and read back representative cells before continuing.
 - For `.xlsm`, preserve existing VBA parts. Verify the macro package remains present and unchanged; do not claim to create or modify VBA code.
 - Legacy `.doc`, `.xls`, and `.ppt` files must be converted to OOXML before editing. Do not silently use another library.
 - For Morph workflows, ignore official-guide references to `morph-helpers.py` and `morph-helpers.sh`. Selection replaces both with the cross-platform bundled command `officecli-morph-helper` (`clone`, `ghost`, `verify`, `final-check`, and `clean-accumulation`); it runs on Selection's bundled Bun runtime and requires no Python or particular user shell.

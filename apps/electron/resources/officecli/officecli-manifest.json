@@ -94,13 +94,6 @@
       "config"
     ]
   },
-  "compatibilityRecipes": {
-    "importViaAtomicBatch": {
-      "enabled": true,
-      "maxSourceBytes": 5000000,
-      "reason": "The reviewed OfficeCLI release reports successful CSV/TSV import without persisting worksheet cells; use one atomic native batch until a reviewed upgrade passes the real content assertion."
-    }
-  },
   "externalDependencies": [
     {
       "id": "katex",

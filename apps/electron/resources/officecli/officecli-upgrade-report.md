@@ -121,13 +121,9 @@
 ## 需要复验的兼容 Recipe
 
 ```json
-{
-  "importViaAtomicBatch": {
-    "enabled": true,
-    "maxSourceBytes": 5000000,
-    "reason": "The reviewed OfficeCLI release reports successful CSV/TSV import without persisting worksheet cells; use one atomic native batch until a reviewed upgrade passes the real content assertion."
-  }
-}
+{}
 ```
+
+人工复验：1.0.146 的 `import` 已把 CSV/TSV（`--file` 与 `--stdin`）写入单元格，因此关闭 `importViaAtomicBatch`。
 
 > 此报告只用于人工审查。运行时自更新保持禁用，draft PR 不会自动合并。

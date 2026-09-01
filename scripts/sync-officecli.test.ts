@@ -59,10 +59,10 @@ describe('OfficeCLI sync governance', () => {
     }
   });
 
-  it('records the reviewed Windows schema CRC without changing the default CRC', () => {
+  it('records the reviewed schema CRC without treating a platform CRC as the default', () => {
     const reviewed = manifest();
-    expect(reviewed.schemaCrc).toBe('b2b0b395');
-    expect(reviewed.assets['win32-x64']?.schemaCrc).toBe('22d3fc61');
+    expect(reviewed.schemaCrc).toBe('909df808');
+    expect(reviewed.assets['win32-x64']?.schemaCrc).toBeUndefined();
 
     const invalid = manifest();
     invalid.assets['win32-x64']!.schemaCrc = 'not-a-crc';
@@ -169,14 +169,26 @@ describe('OfficeCLI sync governance', () => {
   });
 
   it('requires compatibility recipes to remain explicit and reviewed', () => {
+    const reviewed = manifest();
+    expect(reviewed.compatibilityRecipes?.importViaAtomicBatch).toBeUndefined();
+
     const invalidImportRecipe = manifest();
-    invalidImportRecipe.compatibilityRecipes!.importViaAtomicBatch!.maxSourceBytes = 0;
+    invalidImportRecipe.compatibilityRecipes = {
+      importViaAtomicBatch: {
+        enabled: true,
+        maxSourceBytes: 0,
+        reason: 'The reviewed OfficeCLI release needs a placeholder reason that is long enough.',
+      },
+    };
     expect(() => validateManifestFiles(invalidImportRecipe)).toThrow('Invalid OfficeCLI import compatibility recipe');
 
     const unknownRecipe = manifest() as OfficecliManifest & {
       compatibilityRecipes: Record<string, unknown>;
     };
-    unknownRecipe.compatibilityRecipes.unreviewedWriter = { enabled: true };
+    unknownRecipe.compatibilityRecipes = {
+      ...(reviewed.compatibilityRecipes ?? {}),
+      unreviewedWriter: { enabled: true },
+    };
     expect(() => validateManifestFiles(unknownRecipe)).toThrow('Unreviewed OfficeCLI compatibility recipes');
   });
 
