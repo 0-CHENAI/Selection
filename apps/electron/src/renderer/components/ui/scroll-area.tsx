@@ -5,12 +5,19 @@ import { cn } from "@/lib/utils"
 interface ScrollAreaProps extends React.ComponentProps<typeof ScrollAreaPrimitive.Root> {
   /** Ref to the scrollable viewport element */
   viewportRef?: React.RefObject<HTMLDivElement>
+  /**
+   * Keep Radix's intrinsic `display: table` content wrapper pinned to the
+   * viewport width. Use for vertical-only lists whose children must truncate
+   * against the visible panel edge instead of expanding the scroll content.
+   */
+  constrainContentWidth?: boolean
 }
 
 function ScrollArea({
   className,
   children,
   viewportRef,
+  constrainContentWidth = false,
   ...props
 }: ScrollAreaProps) {
   return (
@@ -21,7 +28,10 @@ function ScrollArea({
     >
       <ScrollAreaPrimitive.Viewport
         ref={viewportRef}
-        className="h-full w-full rounded-[inherit]"
+        className={cn(
+          "h-full w-full rounded-[inherit]",
+          constrainContentWidth && "[&>div]:!block [&>div]:!w-full [&>div]:!min-w-0",
+        )}
       >
         {children}
       </ScrollAreaPrimitive.Viewport>
