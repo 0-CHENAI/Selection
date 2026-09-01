@@ -858,6 +858,8 @@ interface ManagedSession {
   // Incremented each time a new message starts processing.
   // Used to detect if a follow-up message has superseded the current one (stale-request guard).
   processingGeneration: number
+  /** Runtime-only idempotency gate for terminal cleanup of one processing generation. */
+  processingStop?: { generation: number; promise: Promise<void> }
   // NOTE: Parent-child tracking state (pendingTools, parentToolStack, toolToParentMap,
   // pendingTextParent) has been removed. CraftAgent now provides parentToolUseId
   // directly on all events using the SDK's authoritative parent_tool_use_id field.
@@ -6627,7 +6629,7 @@ export class SessionManager implements ISessionManager {
         sessionId,
         error: msg,
       }, managed.workspace.id)
-      await this.onProcessingStopped(sessionId, 'error')
+      await this.onProcessingStopped(sessionId, 'error', myGeneration)
       return
     }
     if (managed.stopRequested || !managed.isProcessing || managed.processingGeneration !== myGeneration) {
@@ -6637,7 +6639,7 @@ export class SessionManager implements ISessionManager {
         managed.agent.forceAbort(AbortReason.UserStop)
       }
       if (managed.isProcessing && managed.processingGeneration === myGeneration) {
-        await this.onProcessingStopped(sessionId, 'interrupted')
+        await this.onProcessingStopped(sessionId, 'interrupted', myGeneration)
       }
       return
     }
@@ -6755,7 +6757,7 @@ export class SessionManager implements ISessionManager {
         }, managed.workspace.id)
         sendSpan.mark('image-input.blocked')
         sendSpan.end()
-        await this.onProcessingStopped(sessionId, 'error')
+        await this.onProcessingStopped(sessionId, 'error', myGeneration)
         return
       }
 
@@ -6819,12 +6821,27 @@ export class SessionManager implements ISessionManager {
             return
           }
 
+          // Pi can emit a trailing complete after forceAbort. Stop owns the
+          // terminal outcome in that case: classifying this as a normal empty
+          // completion would skip runtime replacement and let late events from
+          // the interrupted subprocess leak into the next turn (#182).
+          if (managed.stopRequested) {
+            sessionLog.info('Chat completed while stop was requested; finishing as interrupted')
+            sendSpan.mark('chat.complete.interrupted')
+            sendSpan.end()
+            await this.onProcessingStopped(sessionId, 'interrupted', myGeneration)
+            return
+          }
+
           sessionLog.info('Chat completed via complete event')
 
           // Check if we got an assistant response in this turn
           // If not, the SDK may have hit context limits or other issues
           const lastAssistantMsg = [...managed.messages].reverse().find(m =>
-            m.role === 'assistant' && !m.isIntermediate && !m.hidden
+            m.role === 'assistant'
+            && !m.isIntermediate
+            && !m.hidden
+            && hasRenderableAssistantText(m.content)
           )
           const lastUserMsg = [...managed.messages].reverse().find(m =>
             m.role === 'user' && !m.hidden && !m.isQueued
@@ -6878,13 +6895,51 @@ export class SessionManager implements ISessionManager {
                   details: errorMessage.errorDetails,
                 },
               }, managed.workspace.id)
+            } else {
+              const hasCurrentTurnError = managed.messages.some(message =>
+                message.role === 'error'
+                && !message.hidden
+                && message.timestamp > lastUserMsg.timestamp
+              )
+
+              if (!hasCurrentTurnError) {
+                const typedError = createTypedError('unknown_error', {
+                  title: 'No response received',
+                  message: 'The agent ended this turn without returning a response. Retry to continue.',
+                })
+                const errorMessage: Message = {
+                  id: generateMessageId(),
+                  role: 'error',
+                  content: `${typedError.title}: ${typedError.message}`,
+                  timestamp: this.monotonic(),
+                  errorCode: typedError.code,
+                  errorTitle: typedError.title,
+                  errorDetails: typedError.details,
+                  errorCanRetry: typedError.canRetry,
+                  errorActions: typedError.actions,
+                }
+                managed.messages.push(errorMessage)
+                this.sendEvent({
+                  type: 'typed_error',
+                  sessionId,
+                  error: {
+                    code: typedError.code,
+                    title: typedError.title,
+                    message: typedError.message,
+                    actions: typedError.actions,
+                    canRetry: typedError.canRetry,
+                    details: typedError.details,
+                  },
+                  timestamp: errorMessage.timestamp,
+                }, managed.workspace.id)
+              }
             }
           }
 
           const stopReason = completionStopReason(managed.messages)
           sendSpan.mark(stopReason === 'error' ? 'chat.complete.terminal_error' : 'chat.complete')
           sendSpan.end()
-          await this.onProcessingStopped(sessionId, stopReason)
+          await this.onProcessingStopped(sessionId, stopReason, myGeneration)
           return  // Exit function, skip finally block (onProcessingStopped handles cleanup)
         }
 
@@ -6901,7 +6956,7 @@ export class SessionManager implements ISessionManager {
         sendSpan.end()
       } else if (managed.stopRequested) {
         sessionLog.info('Chat loop completed after stop request - events drained successfully')
-        await this.onProcessingStopped(sessionId, 'interrupted')
+        await this.onProcessingStopped(sessionId, 'interrupted', myGeneration)
       } else {
         sessionLog.info('Chat loop exited unexpectedly')
       }
@@ -6926,7 +6981,7 @@ export class SessionManager implements ISessionManager {
         // by setting isProcessing = false directly. All other abort reasons route
         // through onProcessingStopped for queue draining.
         if (reason === AbortReason.UserStop || reason === AbortReason.Redirect || reason === undefined) {
-          await this.onProcessingStopped(sessionId, 'interrupted')
+          await this.onProcessingStopped(sessionId, 'interrupted', myGeneration)
         }
       } else {
         sessionLog.error('Error in chat:', error)
@@ -6945,7 +7000,7 @@ export class SessionManager implements ISessionManager {
           error: error instanceof Error ? error.message : 'Unknown error'
         }, managed.workspace.id)
         // Handle error via centralized handler
-        await this.onProcessingStopped(sessionId, 'error')
+        await this.onProcessingStopped(sessionId, 'error', myGeneration)
       }
     } finally {
       // Only handle cleanup for unexpected exits (loop break without complete event)
@@ -6955,7 +7010,7 @@ export class SessionManager implements ISessionManager {
         sessionLog.info('Finally block cleanup - unexpected exit')
         sendSpan.mark('chat.unexpected_exit')
         sendSpan.end()
-        await this.onProcessingStopped(sessionId, 'interrupted')
+        await this.onProcessingStopped(sessionId, 'interrupted', myGeneration)
       }
     }
   }
@@ -6981,6 +7036,8 @@ export class SessionManager implements ISessionManager {
     // Claim the running state before any await so a second click cannot race
     // in, and so Stop works while the previous agent is being disposed.
     this.setProcessing(managed, true)
+    managed.processingGeneration++
+    const regenerateGeneration = managed.processingGeneration
     let announced = false
 
     try {
@@ -7074,7 +7131,7 @@ export class SessionManager implements ISessionManager {
       setImmediate(() => {
         if (managed.stopRequested || !managed.isProcessing) {
           if (managed.isProcessing) {
-            void this.onProcessingStopped(sessionId, 'interrupted')
+            void this.onProcessingStopped(sessionId, 'interrupted', regenerateGeneration)
           }
           return
         }
@@ -7093,7 +7150,7 @@ export class SessionManager implements ISessionManager {
             error: error instanceof Error ? error.message : 'Failed to regenerate',
           }, managed.workspace.id)
           if (managed.isProcessing) {
-            void this.onProcessingStopped(sessionId, 'error')
+            void this.onProcessingStopped(sessionId, 'error', managed.processingGeneration)
           }
         })
       })
@@ -7108,7 +7165,7 @@ export class SessionManager implements ISessionManager {
             error: error instanceof Error ? error.message : 'Failed to regenerate',
           }, managed.workspace.id)
         }
-        await this.onProcessingStopped(sessionId, 'error')
+        await this.onProcessingStopped(sessionId, 'error', managed.processingGeneration)
       } else if (announced) {
         this.sendEvent({
           type: 'error',
@@ -7116,7 +7173,7 @@ export class SessionManager implements ISessionManager {
           error: error instanceof Error ? error.message : 'Failed to regenerate',
         }, managed.workspace.id)
         if (managed.isProcessing) {
-          await this.onProcessingStopped(sessionId, 'error')
+          await this.onProcessingStopped(sessionId, 'error', managed.processingGeneration)
         }
       } else {
         this.setProcessing(managed, false)
@@ -7389,16 +7446,17 @@ export class SessionManager implements ISessionManager {
     // turn after we clear isProcessing / stopRequested.
     if (!hadAgent) {
       managed.processingGeneration++
-      await this.onProcessingStopped(sessionId, 'interrupted')
+      await this.onProcessingStopped(sessionId, 'interrupted', managed.processingGeneration)
       return
     }
 
     // Safety timeout: if event loop doesn't complete within 5 seconds, force cleanup
     // This handles cases where the generator gets stuck
+    const stopGeneration = managed.processingGeneration
     setTimeout(() => {
       if (managed.stopRequested && managed.isProcessing) {
         sessionLog.warn('Generator did not complete after stop request, forcing cleanup')
-        this.onProcessingStopped(sessionId, 'timeout')
+        this.onProcessingStopped(sessionId, 'timeout', stopGeneration)
       }
     }, 5000)
 
@@ -7558,7 +7616,7 @@ export class SessionManager implements ISessionManager {
           error: 'Authentication failed. Please check your credentials.',
           timestamp: failedMessage.timestamp,
         }, workspaceId)
-        this.onProcessingStopped(sessionId, 'error')
+        this.onProcessingStopped(sessionId, 'error', managed.processingGeneration)
       }
     })
 
@@ -7674,13 +7732,42 @@ export class SessionManager implements ISessionManager {
    *
    * @param sessionId - The session that stopped processing
    * @param reason - Why processing stopped ('complete' | 'interrupted' | 'error')
+   * @param expectedGeneration - The generation owned by the caller; stale owners are ignored
    */
-  private async onProcessingStopped(
+  private onProcessingStopped(
     sessionId: string,
-    reason: 'complete' | 'interrupted' | 'error' | 'timeout'
+    reason: 'complete' | 'interrupted' | 'error' | 'timeout',
+    expectedGeneration: number,
   ): Promise<void> {
     const managed = this.sessions.get(sessionId)
-    if (!managed) return
+    if (!managed) return Promise.resolve()
+
+    const generation = expectedGeneration ?? managed.processingGeneration
+    if (generation !== managed.processingGeneration) {
+      sessionLog.info('Ignoring stale processing-stop request', {
+        sessionId,
+        expectedGeneration: generation,
+        currentGeneration: managed.processingGeneration,
+        reason,
+      })
+      return Promise.resolve()
+    }
+
+    const existingStop = managed.processingStop
+    if (existingStop?.generation === generation) {
+      return existingStop.promise
+    }
+
+    const promise = this.finishProcessingStopped(managed, reason)
+    managed.processingStop = { generation, promise }
+    return promise
+  }
+
+  private async finishProcessingStopped(
+    managed: ManagedSession,
+    reason: 'complete' | 'interrupted' | 'error' | 'timeout'
+  ): Promise<void> {
+    const sessionId = managed.id
 
     const regenerateOutcome = await this.settleRegenerateTransaction(managed, reason)
     const completionReason = regenerateOutcome.reason
@@ -7706,6 +7793,16 @@ export class SessionManager implements ISessionManager {
       managed.activeTurnSawModelCallStart = undefined
     }
 
+    // A stopped Pi turn can still have parallel tool/LLM work resolving in its
+    // subprocess. Its events do not carry a turn identifier, so reusing that
+    // runtime lets a late `agent_end` complete the next turn (#182). Keep the
+    // session busy until the old runtime is fully gone; queued work can then
+    // resume on a fresh runtime using the persisted SDK session anchor.
+    const mustRestartRuntime = completionReason === 'interrupted' || completionReason === 'timeout'
+    if (mustRestartRuntime) {
+      await this.disposeManagedAgentRuntime(managed, `${completionReason} response`)
+    }
+
     // 1. Cleanup state
     this.setProcessing(managed, false)
     managed.stopRequested = false  // Reset for next turn
@@ -7715,7 +7812,9 @@ export class SessionManager implements ISessionManager {
     // then this idle boundary rebuilds the runtime before a queued/next turn.
     if (managed.swarmRuntimeRefreshPending) {
       managed.swarmRuntimeRefreshPending = false
-      await this.disposeManagedAgentRuntime(managed, 'deferred Swarm setting change')
+      if (!mustRestartRuntime) {
+        await this.disposeManagedAgentRuntime(managed, 'deferred Swarm setting change')
+      }
     }
 
     // 1b. Orphan backstop: with the default per-turn subprocess model, any
@@ -7977,7 +8076,7 @@ export class SessionManager implements ISessionManager {
           },
         }, managed.workspace.id)
         // Call onProcessingStopped to handle cleanup and check for more queued messages
-        this.onProcessingStopped(sessionId, 'error')
+        this.onProcessingStopped(sessionId, 'error', managed.processingGeneration)
       })
     })
   }
