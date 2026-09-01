@@ -184,6 +184,35 @@ export function commandSchemaContractsEqual(actual: CommandSnapshot, reviewed: C
   return commandSchemaContractIssues(actual, reviewed).length === 0;
 }
 
+const OFFICECLI_ROOT_METADATA = new Set(['officecli-manifest.json', 'officecli-upgrade-report.md']);
+const IGNORED_OFFICECLI_ROOT_ENTRIES = new Set(['.DS_Store']);
+
+export function unexpectedOfficecliRootEntries(entries: string[], version: string): string[] {
+  return entries.filter(entry => (
+    !OFFICECLI_ROOT_METADATA.has(entry)
+    && entry !== version
+    && !IGNORED_OFFICECLI_ROOT_ENTRIES.has(entry)
+  )).sort();
+}
+
+export function platformSchemaCrcReviewHint(
+  issues: string[],
+  platformKey: string,
+  actualCrc: string,
+  recordedCrc: string | undefined,
+): string | undefined {
+  if (issues.length === 1 && issues[0]!.startsWith('schemaCrc ') && !recordedCrc) {
+    return `If the command flags match, record assets["${platformKey}"].schemaCrc = "${actualCrc}" without changing the default schemaCrc.`;
+  }
+  return undefined;
+}
+
+function pruneStaleOfficecliVersions(currentVersion: string): void {
+  for (const entry of unexpectedOfficecliRootEntries(readdirSync(officeRoot), currentVersion)) {
+    rmSync(join(officeRoot, entry), { recursive: true, force: true });
+  }
+}
+
 function json<T>(path: string): T {
   return JSON.parse(readFileSync(path, 'utf8')) as T;
 }
@@ -362,12 +391,18 @@ function classificationDiff(manifest: OfficecliManifest, snapshot: CommandSnapsh
 
 export function validateManifestFiles(
   manifest: OfficecliManifest,
-  options: { allowCommandPolicyDrift?: boolean } = {},
+  options: { allowCommandPolicyDrift?: boolean; allowStaleVersionDirectories?: boolean } = {},
 ): void {
   validateSelectionCompatibilityResources();
   if (manifest.manifestVersion !== 1) throw new Error(`Unsupported OfficeCLI manifest version: ${manifest.manifestVersion}`);
   if (!/^\d+\.\d+\.\d+$/.test(manifest.version) || manifest.tag !== `v${manifest.version}`) {
     throw new Error(`Manifest version/tag mismatch: ${manifest.version}/${manifest.tag}`);
+  }
+  if (!options.allowStaleVersionDirectories) {
+    const leftover = unexpectedOfficecliRootEntries(readdirSync(officeRoot), manifest.version);
+    if (leftover.length > 0) {
+      throw new Error(`Unexpected OfficeCLI resource: ${leftover.join(', ')}`);
+    }
   }
   if (!/^[0-9a-f]{40}$/.test(manifest.tagCommit)) throw new Error(`Invalid tag commit: ${manifest.tagCommit}`);
   if (manifest.sourceRepository !== 'https://github.com/iOfficeAI/OfficeCLI') {
@@ -780,8 +815,15 @@ async function check(downloadRuntime: boolean): Promise<void> {
       };
       const contractIssues = commandSchemaContractIssues(snapshot, reviewedForPlatform);
       if (contractIssues.length > 0) {
+        const hint = platformSchemaCrcReviewHint(
+          contractIssues,
+          platformKey,
+          snapshot.schemaCrc,
+          manifest.assets[platformKey]?.schemaCrc,
+        );
         throw new Error(
-          `Reviewed command schema contract differs from the current platform binary: ${contractIssues.join('; ')}`,
+          `Reviewed command schema contract differs from the current platform binary: ${contractIssues.join('; ')}`
+          + (hint ? `. ${hint}` : ''),
         );
       }
       const expected = manifest.assets[platformKey]?.sha256;
@@ -951,8 +993,16 @@ async function update(allowUnclassified: boolean): Promise<void> {
       cpSync(stagedVersion, destination, { recursive: true });
       writeJson(manifestPath, manifest);
       writeFileSync(reportPath, report);
-      validateManifestFiles(manifest, { allowCommandPolicyDrift: allowUnclassified });
+      validateManifestFiles(manifest, {
+        allowCommandPolicyDrift: allowUnclassified,
+        allowStaleVersionDirectories: true,
+      });
       if (backedUp) rmSync(backup, { recursive: true, force: true });
+      pruneStaleOfficecliVersions(version);
+      const leftover = unexpectedOfficecliRootEntries(readdirSync(officeRoot), version);
+      if (leftover.length > 0) {
+        throw new Error(`Failed to prune stale OfficeCLI resources: ${leftover.join(', ')}`);
+      }
     } catch (error) {
       try {
         if (existsSync(destination)) rmSync(destination, { recursive: true, force: true });

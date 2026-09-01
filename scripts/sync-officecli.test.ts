@@ -5,7 +5,9 @@ import { describe, expect, it } from 'bun:test';
 import {
   commandSchemaContractsEqual,
   extractExternalDependencies,
+  platformSchemaCrcReviewHint,
   posixRelPath,
+  unexpectedOfficecliRootEntries,
   validateOfficecliReleaseAssetUrl,
   validateManifestFiles,
   type CommandSnapshot,
@@ -37,6 +39,38 @@ describe('OfficeCLI sync governance', () => {
 
   it('accepts the complete reviewed manifest', () => {
     expect(() => validateManifestFiles(manifest())).not.toThrow();
+  });
+
+  it('keeps only the reviewed version directory next to the manifest', () => {
+    expect(unexpectedOfficecliRootEntries(
+      ['officecli-manifest.json', 'officecli-upgrade-report.md', '1.0.146', '.DS_Store'],
+      '1.0.146',
+    )).toEqual([]);
+    expect(unexpectedOfficecliRootEntries(
+      ['officecli-manifest.json', 'officecli-upgrade-report.md', '1.0.144', '1.0.145', '1.0.146'],
+      '1.0.146',
+    )).toEqual(['1.0.144', '1.0.145']);
+  });
+
+  it('explains how to record a platform schema CRC when that is the only drift', () => {
+    expect(platformSchemaCrcReviewHint(
+      ['schemaCrc 69cd35d9 != 909df808'],
+      'win32-x64',
+      '69cd35d9',
+      undefined,
+    )).toContain('assets["win32-x64"].schemaCrc = "69cd35d9"');
+    expect(platformSchemaCrcReviewHint(
+      ['schemaCrc 69cd35d9 != 909df808'],
+      'win32-x64',
+      '69cd35d9',
+      '69cd35d9',
+    )).toBeUndefined();
+    expect(platformSchemaCrcReviewHint(
+      ['schemaCrc 69cd35d9 != 909df808', 'missing commands: import'],
+      'win32-x64',
+      '69cd35d9',
+      undefined,
+    )).toBeUndefined();
   });
 
   it('prevents reviewed binaries from self-updating through every managed launch path', () => {
@@ -83,7 +117,7 @@ describe('OfficeCLI sync governance', () => {
 
   it('treats platform-specific help hashes as non-blocking when the command contract matches', () => {
     const reviewed = JSON.parse(
-      readFileSync(resolve(import.meta.dir, '../apps/electron/resources/officecli/1.0.144/command-schema.json'), 'utf8'),
+      readFileSync(resolve(import.meta.dir, '../apps/electron/resources/officecli/1.0.146/command-schema.json'), 'utf8'),
     ) as CommandSnapshot;
     const sameContractDifferentHelp: CommandSnapshot = {
       ...reviewed,

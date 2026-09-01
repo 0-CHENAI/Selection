@@ -519,6 +519,21 @@ describe('bundled officecli smoke', () => {
       expect(tsvReadback).toContain('城市')
       expect(tsvReadback).toContain('北京')
       expect(tsvReadback).toContain('2189')
+
+      const stdinWorkbook = join(root, 'stdin.xlsx')
+      run(['create', stdinWorkbook])
+      const stdinImport = Bun.spawnSync(
+        [binary, 'import', stdinWorkbook, '/Sheet1', '--stdin', '--start-cell', 'B2'],
+        { stdin: readFileSync(csv), stdout: 'pipe', stderr: 'pipe', env },
+      )
+      const stdinOutput = `${stdinImport.stdout.toString()}${stdinImport.stderr.toString()}`
+      if (stdinImport.exitCode !== 0 || /\b(?:WARNING|UNSUPPORTED)\b/i.test(stdinOutput)) {
+        throw new Error(`officecli import --stdin returned an incomplete result: ${stdinOutput}`)
+      }
+      const stdinReadback = run(['get', stdinWorkbook, '/Sheet1/B2:C3', '--json'])
+      expect(stdinReadback).toContain('姓名')
+      expect(stdinReadback).toContain('张三')
+      expect(stdinReadback).toContain('42')
     } finally {
       rmSync(root, { recursive: true, force: true })
     }
