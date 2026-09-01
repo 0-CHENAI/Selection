@@ -773,6 +773,35 @@ interface ActivityRowProps {
 }
 
 /**
+ * Keep the height wrapper mounted so adding rows does not remount it and
+ * replay height 0 → auto (looks like collapse then expand).
+ */
+function ExpandableHeightPanel({
+  open,
+  reduceMotion,
+  children,
+}: {
+  open: boolean
+  reduceMotion: boolean | null
+  children: React.ReactNode
+}) {
+  return (
+    <motion.div
+      initial={false}
+      animate={open ? { height: 'auto', opacity: 1 } : { height: 0, opacity: 0 }}
+      transition={{
+        height: { duration: reduceMotion ? 0 : 0.25, ease: [0.4, 0, 0.2, 1] },
+        opacity: { duration: reduceMotion ? 0 : 0.15 },
+      }}
+      className={cn("overflow-hidden", !open && "pointer-events-none")}
+      aria-hidden={!open}
+    >
+      {children}
+    </motion.div>
+  )
+}
+
+/**
  * TreeViewConnector is no longer used - the vertical line from the expanded section
  * already provides visual hierarchy. Keeping this as a no-op for now in case
  * we need depth indentation in the future.
@@ -1124,6 +1153,8 @@ interface ActivityGroupRowProps {
   onOpenActivityDetails?: (activity: ActivityItem) => void
   /** Animation index for staggered animation */
   animationIndex?: number
+  /** Only slide/stagger on the expand click, not when new children arrive */
+  animateEntrance?: boolean
   /** Session folder path for stripping from file paths in tool display */
   sessionFolderPath?: string
   /** Display mode: 'detailed' shows all info, 'informative' hides MCP/API names and params */
@@ -1134,7 +1165,7 @@ interface ActivityGroupRowProps {
  * Renders a Task subagent with its child activities grouped together.
  * Provides visual containment and collapsible children.
  */
-function ActivityGroupRow({ group, expandedGroups: externalExpandedGroups, onExpandedGroupsChange, onOpenActivityDetails, animationIndex = 0, sessionFolderPath, displayMode = 'detailed' }: ActivityGroupRowProps) {
+function ActivityGroupRow({ group, expandedGroups: externalExpandedGroups, onExpandedGroupsChange, onOpenActivityDetails, animationIndex = 0, animateEntrance = false, sessionFolderPath, displayMode = 'detailed' }: ActivityGroupRowProps) {
   const reduceMotion = useReducedMotion()
   // Use local state if no controlled state provided
   const [localExpandedGroups, setLocalExpandedGroups] = useState<Set<string>>(new Set())
@@ -1143,6 +1174,11 @@ function ActivityGroupRow({ group, expandedGroups: externalExpandedGroups, onExp
 
   const groupId = group.parent.id
   const isExpanded = expandedGroups.has(groupId)
+  const wasGroupExpandedRef = useRef(isExpanded)
+  const staggerChildren = isExpanded && !wasGroupExpandedRef.current
+  useEffect(() => {
+    wasGroupExpandedRef.current = isExpanded
+  }, [isExpanded])
 
   const toggleExpanded = useCallback(() => {
     const next = new Set(expandedGroups)
@@ -1161,10 +1197,12 @@ function ActivityGroupRow({ group, expandedGroups: externalExpandedGroups, onExp
 
   return (
     <motion.div
-      initial={reduceMotion ? false : { opacity: 0, x: -8 }}
+      initial={reduceMotion || !animateEntrance ? false : { opacity: 0, x: -8 }}
       animate={{ opacity: 1, x: 0 }}
       transition={{
-        delay: reduceMotion ? 0 : (animationIndex < SIZE_CONFIG.staggeredAnimationLimit ? animationIndex * 0.03 : 0.3),
+        delay: reduceMotion || !animateEntrance
+          ? 0
+          : (animationIndex < SIZE_CONFIG.staggeredAnimationLimit ? animationIndex * 0.03 : 0.3),
         duration: reduceMotion ? 0 : undefined,
       }}
       className="space-y-0.5"
@@ -1251,40 +1289,27 @@ function ActivityGroupRow({ group, expandedGroups: externalExpandedGroups, onExp
       </div>
 
       {/* Children with indentation */}
-      <AnimatePresence initial={false}>
-        {isExpanded && group.children.length > 0 && (
-          <motion.div
-            initial={reduceMotion ? false : { height: 0, opacity: 0 }}
-            animate={{ height: 'auto', opacity: 1 }}
-            exit={reduceMotion ? undefined : { height: 0, opacity: 0 }}
-            transition={{
-              height: { duration: reduceMotion ? 0 : 0.2, ease: [0.4, 0, 0.2, 1] },
-              opacity: { duration: reduceMotion ? 0 : 0.15 }
-            }}
-            className="overflow-hidden"
-          >
-            <div className="pl-0 space-y-0.5 border-l-2 border-muted ml-[5px]">
-              {group.children.map((child, idx) => (
-                <motion.div
-                  key={child.id}
-                  initial={reduceMotion ? false : { opacity: 0, x: -4 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  transition={{ delay: reduceMotion ? 0 : idx * 0.02, duration: reduceMotion ? 0 : undefined }}
-                  className="ml-[-4px]"
-                >
-                  <ActivityRow
-                    activity={child}
-                    onOpenDetails={onOpenActivityDetails ? () => onOpenActivityDetails(child) : undefined}
-                    isLastChild={idx === group.children.length - 1}
-                    sessionFolderPath={sessionFolderPath}
-                    displayMode={displayMode}
-                  />
-                </motion.div>
-              ))}
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+      <ExpandableHeightPanel open={isExpanded && group.children.length > 0} reduceMotion={reduceMotion}>
+        <div className="pl-0 space-y-0.5 border-l-2 border-muted ml-[5px]">
+          {group.children.map((child, idx) => (
+            <motion.div
+              key={child.id}
+              initial={reduceMotion || !staggerChildren ? false : { opacity: 0, x: -4 }}
+              animate={{ opacity: 1, x: 0 }}
+              transition={{ delay: reduceMotion || !staggerChildren ? 0 : idx * 0.02, duration: reduceMotion ? 0 : undefined }}
+              className="ml-[-4px]"
+            >
+              <ActivityRow
+                activity={child}
+                onOpenDetails={onOpenActivityDetails ? () => onOpenActivityDetails(child) : undefined}
+                isLastChild={idx === group.children.length - 1}
+                sessionFolderPath={sessionFolderPath}
+                displayMode={displayMode}
+              />
+            </motion.div>
+          ))}
+        </div>
+      </ExpandableHeightPanel>
     </motion.div>
   )
 }
@@ -2779,15 +2804,14 @@ export const TurnCard = React.memo(function TurnCard({
 
   // Track if user has toggled expansion (skip animation on initial mount)
   const hasUserToggled = useRef(false)
+  const wasExpandedRef = useRef(isExpanded)
+  const staggerOnThisExpand = isExpanded && !wasExpandedRef.current && hasUserToggled.current
+  useEffect(() => {
+    wasExpandedRef.current = isExpanded
+  }, [isExpanded])
 
   // Ref for scrollable activities container (to scroll to bottom on expand)
   const activitiesContainerRef = useRef<HTMLDivElement>(null)
-
-  // Track if component has mounted (enable fade-in for new activities after mount)
-  const hasMounted = useRef(false)
-  useEffect(() => {
-    hasMounted.current = true
-  }, [])
 
   const toggleExpanded = useCallback(() => {
     hasUserToggled.current = true
@@ -2988,18 +3012,7 @@ export const TurnCard = React.memo(function TurnCard({
           </button>
 
           {/* Expanded Activity List */}
-          <AnimatePresence initial={false}>
-            {isExpanded && (
-              <motion.div
-                initial={reduceMotion ? false : { height: 0, opacity: 0 }}
-                animate={{ height: 'auto', opacity: 1 }}
-                exit={reduceMotion ? undefined : { height: 0, opacity: 0 }}
-                transition={{
-                  height: { duration: reduceMotion ? 0 : 0.25, ease: [0.4, 0, 0.2, 1] },
-                  opacity: { duration: reduceMotion ? 0 : 0.15 }
-                }}
-                className="overflow-hidden"
-              >
+          <ExpandableHeightPanel open={isExpanded} reduceMotion={reduceMotion}>
                 {/* Activities expand fully — no nested vertical scroll (outer chat scrolls) */}
                 {/* ml-[15px] positions the border-l under the chevron */}
                 <div
@@ -3018,6 +3031,7 @@ export const TurnCard = React.memo(function TurnCard({
                           onExpandedGroupsChange={handleExpandedActivityGroupsChange}
                           onOpenActivityDetails={onOpenActivityDetails}
                           animationIndex={index}
+                          animateEntrance={staggerOnThisExpand}
                           sessionFolderPath={sessionFolderPath}
                           displayMode={displayMode}
                         />
@@ -3025,13 +3039,13 @@ export const TurnCard = React.memo(function TurnCard({
                         <motion.div
                           key={item.id}
                           initial={
-                            reduceMotion || !(hasUserToggled.current || hasMounted.current)
+                            reduceMotion || !staggerOnThisExpand
                               ? false
                               : { opacity: 0, x: -8 }
                           }
                           animate={{ opacity: 1, x: 0 }}
                           transition={{
-                            delay: reduceMotion || !hasUserToggled.current
+                            delay: reduceMotion || !staggerOnThisExpand
                               ? 0
                               : (index < SIZE_CONFIG.staggeredAnimationLimit ? index * 0.03 : SIZE_CONFIG.staggeredAnimationLimit * 0.03),
                             duration: reduceMotion ? 0 : undefined,
@@ -3052,14 +3066,13 @@ export const TurnCard = React.memo(function TurnCard({
                       <motion.div
                         key={activity.id}
                         initial={
-                          reduceMotion || !(hasUserToggled.current || hasMounted.current)
+                          reduceMotion || !staggerOnThisExpand
                             ? false
                             : { opacity: 0, x: -8 }
                         }
                         animate={{ opacity: 1, x: 0 }}
-                        // Only animate on user toggle, not initial mount
                         transition={{
-                          delay: reduceMotion || !hasUserToggled.current
+                          delay: reduceMotion || !staggerOnThisExpand
                             ? 0
                             : (index < SIZE_CONFIG.staggeredAnimationLimit ? index * 0.03 : SIZE_CONFIG.staggeredAnimationLimit * 0.03),
                           duration: reduceMotion ? 0 : undefined,
@@ -3079,10 +3092,12 @@ export const TurnCard = React.memo(function TurnCard({
                   {isThinking && !animateResponse && (
                     <motion.div
                       key="thinking"
-                      initial={reduceMotion ? false : { opacity: 0, x: -8 }}
+                      initial={reduceMotion || !staggerOnThisExpand ? false : { opacity: 0, x: -8 }}
                       animate={{ opacity: 1, x: 0 }}
                       transition={{
-                        delay: reduceMotion ? 0 : Math.min(visibleActivities.length, SIZE_CONFIG.staggeredAnimationLimit) * 0.03,
+                        delay: reduceMotion || !staggerOnThisExpand
+                          ? 0
+                          : Math.min(visibleActivities.length, SIZE_CONFIG.staggeredAnimationLimit) * 0.03,
                         duration: reduceMotion ? 0 : 0.3,
                         ease: "easeOut"
                       }}
@@ -3098,9 +3113,7 @@ export const TurnCard = React.memo(function TurnCard({
                 {todos && todos.length > 0 && (
                   <TodoList todos={todos} />
                 )}
-              </motion.div>
-            )}
-          </AnimatePresence>
+          </ExpandableHeightPanel>
         </div>
       )}
 

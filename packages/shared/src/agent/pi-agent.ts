@@ -671,11 +671,14 @@ export class PiAgent extends BaseAgent {
     }
 
     // Patch call_llm description with the current session model (#192).
+    // Both the MCP name and the prompt-facing alias must get the same hint.
     const callLlmDefault = this.getModel();
     if (callLlmDefault) {
-      const callLlmDef = sessionToolDefs.find(d => d.name === 'mcp__session__call_llm');
-      if (callLlmDef) {
-        callLlmDef.description += `\n\nDefault model for this session: ${callLlmDefault}. Omit the model parameter to use it automatically. Pass a different model only when you intentionally want another tier.`;
+      const hint = `\n\nDefault model for this session: ${callLlmDefault}. Omit the model parameter to use it automatically. Pass a different model only when you intentionally want another tier.`;
+      for (const def of sessionToolDefs) {
+        if (def.name === 'mcp__session__call_llm' || def.name === 'call_llm') {
+          def.description += hint;
+        }
       }
     }
 

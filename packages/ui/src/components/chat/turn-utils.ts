@@ -83,11 +83,12 @@ export type Turn = AssistantTurn | UserTurn | SystemTurn | AuthRequestTurn
  * - Backend turnId can be reused across visually split assistant cards
  *   (e.g., steer/interruption boundaries).
  * - Expansion state must be keyed by UI-card identity, not raw backend turnId.
+ *
+ * Do not include `response.messageId`. That id appears and disappears as
+ * pending text, intermediate rows, and tools arrive, which would remount the
+ * card and replay expand/collapse on every new element.
  */
 export function getAssistantTurnUiKey(turn: AssistantTurn, index: number): string {
-  if (turn.response?.messageId) {
-    return `assistant:msg:${turn.response.messageId}`
-  }
   return `assistant:turn:${turn.turnId}:${turn.timestamp}:${index}`
 }
 
