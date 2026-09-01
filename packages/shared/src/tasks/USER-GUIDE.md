@@ -8,7 +8,7 @@
 
 普通会话输入区的 Swarm 开关默认关闭，只影响当前会话及其后代。开启不代表一定拆分：只有至少两个独立工具工作轨、并行有收益、输入/输出/证据合同完整且父级定义了汇总或验证时才会创建 worker；资格不足会留在当前会话。worker 默认隐藏，可从父会话运行详情进入。
 
-Swarm Token 预算与 DAG run 预算独立计量。输入区会显示当前 Swarm 用量；用户可设置或提高上限，达到上限后当前 worker 允许收尾，但不会再派发或唤醒新工作，父会话进入 `need-to-check`。
+Swarm Token 预算与 DAG run 预算独立计量。`spawn_session` Swarm 的上限固定为 262144 Token，用户不能改。输入区会显示当前 Swarm 用量；达到上限后当前 worker 允许收尾，但不会再派发或唤醒新工作，父会话进入 `need-to-check`。看板 Task 的 `token_budget` 仍由用户提高。
 
 用「生成」时优先走 `submit_task_definition`（结构化 v2 spec），服务端最多修正两次。只有工具不可用时才回退到从回复里截 YAML。
 
@@ -39,6 +39,15 @@ Swarm Token 预算与 DAG run 预算独立计量。输入区会显示当前 Swar
 没有 `schema_version` 的文件是 v1。编辑器可内存迁移并显示警告。**未首次保存为 v2 之前，运行仍按 v1**：只执行 session / 旧 orchestrator，其余 kind skip。
 
 首次保存：原 YAML 备份到 `tasks/<slug>/.history/`，写出 `schema_version: 2`。
+
+v3 首次保存同样备份历史并校验 ETag，不改写旧 run log。`cache: pure` 只有在用户确认迁移后才会变成 `run-pure`；`workspace-pure` 必须显式声明。强制质量门要求可检查的 `acceptance_criteria`。
+
+## v3 调度门与验证
+
+- orchestrate v3 在首次调度、节点失败、审批响应、预算恢复、无 ready 节点和最终验证前进入 `waiting-coordinator`。
+- 协调器必须调用 `submit_orchestration_decision`（continue / patch / pause）。过期、重复或错误 revision 会被拒绝。
+- 等待上限 120 秒；超时后暂停并显示 `coordinator-timeout`，不会自动继续。
+- verify/judge 必须 `submit_task_node_verdict`。最终 run verdict 仍由父 Coordinator 的 `submit_task_verdict` 提交，普通聊天文本不是 verdict。
 
 ## 补丁边界（orchestrate）
 

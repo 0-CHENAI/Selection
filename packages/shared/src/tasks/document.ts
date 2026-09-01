@@ -18,7 +18,7 @@ export interface LoadedTaskDocument {
   slug: string;
   yaml: string;
   etag: string;
-  sourceVersion: 1 | 2;
+  sourceVersion: 1 | 2 | 3;
   spec?: TaskSpec;
   valid: boolean;
   errors: ValidationIssue[];
@@ -57,6 +57,7 @@ const TASK_KEYS = new Set([
   'token_budget',
   'max_parallel',
   'max_iterations',
+  'execution',
   'nodes',
   'outputs',
   'ui',
@@ -99,6 +100,9 @@ const LOOP_KEYS = new Set(['until', 'max', 'else', 'carry']);
 const ROUTE_KEYS = new Set(['cases', 'default']);
 const ROUTE_CASE_KEYS = new Set(['when', 'goto']);
 const CONDITION_KEYS = new Set(['ref', 'op', 'value', 'all', 'any', 'not']);
+const EXECUTION_KEYS = new Set(['coordinator_gate', 'verification']);
+const COORDINATOR_GATE_KEYS = new Set(['mode', 'timeout_seconds']);
+const VERIFICATION_KEYS = new Set(['required', 'reserve_ratio']);
 const UI_KEYS = new Set(['layout']);
 const LAYOUT_KEYS = new Set(['direction', 'nodes', 'viewport']);
 const POSITION_KEYS = new Set(['x', 'y']);
@@ -126,6 +130,12 @@ export function v2UnknownFields(
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return issues;
   const task = raw as Record<string, unknown>;
   issues.push(...unknownKeys(task.defaults, DEFAULT_KEYS, 'defaults'));
+  issues.push(...unknownKeys(task.execution, EXECUTION_KEYS, 'execution'));
+  if (task.execution && typeof task.execution === 'object' && !Array.isArray(task.execution)) {
+    const execution = task.execution as { coordinator_gate?: unknown; verification?: unknown };
+    issues.push(...unknownKeys(execution.coordinator_gate, COORDINATOR_GATE_KEYS, 'execution.coordinator_gate'));
+    issues.push(...unknownKeys(execution.verification, VERIFICATION_KEYS, 'execution.verification'));
+  }
   if (Array.isArray(task.params)) {
     task.params.forEach((param, i) => issues.push(...unknownKeys(param, PARAM_KEYS, `params.${i}`)));
   }
@@ -214,10 +224,11 @@ export function parseTaskDocument(yamlText: string, slug = ''): LoadedTaskDocume
     };
   }
 
-  const sourceVersion: 1 | 2 =
-    raw && typeof raw === 'object' && !Array.isArray(raw) && (raw as { schema_version?: unknown }).schema_version === 2
-      ? 2
-      : 1;
+  const rawVersion =
+    raw && typeof raw === 'object' && !Array.isArray(raw)
+      ? (raw as { schema_version?: unknown }).schema_version
+      : undefined;
+  const sourceVersion: 1 | 2 | 3 = rawVersion === 3 ? 3 : rawVersion === 2 ? 2 : 1;
 
   const parsed = parseTaskSpec(raw);
   const graph = parsed.success ? validateTaskSpec(parsed.data) : { valid: false, errors: [], warnings: [] };
@@ -228,12 +239,23 @@ export function parseTaskDocument(yamlText: string, slug = ''): LoadedTaskDocume
   const warnings = [...graph.warnings];
   const migrationWarnings: string[] = [];
 
-  if (sourceVersion === 2) {
+  if (sourceVersion >= 2) {
     errors.push(...v2UnknownFields(raw));
   } else if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
     if (!('schema_version' in (raw as object))) {
       migrationWarnings.push('No schema_version; treated as v1. First save will write schema_version: 2 and backup the original YAML.');
     }
+  }
+  if (sourceVersion === 2 && parsed.success) {
+    const cachePure = parsed.data.nodes.filter((node) => node.cache === 'pure').map((node) => node.id);
+    if (cachePure.length) {
+      migrationWarnings.push(
+        `v3 migration will convert cache: pure to run-pure on nodes ${cachePure.join(', ')} after confirmation. Cross-run workspace-pure is never implied.`,
+      );
+    }
+    migrationWarnings.push(
+      'v3 adds a coordinator gate (waiting-coordinator, 120s timeout) and structured node verdicts. Confirm the migration before the first v3 save.',
+    );
   }
 
   const spec = parsed.success ? parsed.data : undefined;
@@ -265,10 +287,26 @@ export function backupTaskYaml(workspaceRoot: string, slug: string, yaml: string
   return dest;
 }
 
+export function previewV3Migration(spec: TaskSpec): { warnings: string[]; cachePureNodeIds: string[] } {
+  const cachePureNodeIds = spec.nodes.filter((node) => node.cache === 'pure').map((node) => node.id);
+  const warnings = [
+    'schema_version becomes 3. v1/v2 run logs are not rewritten.',
+    'Coordinator checkpoints wait for submit_orchestration_decision; timeout pauses with coordinator-timeout.',
+    'verify/judge nodes must call submit_task_node_verdict. Parent chat is never a run verdict.',
+  ];
+  if (cachePureNodeIds.length) {
+    warnings.push(
+      `cache: pure on ${cachePureNodeIds.join(', ')} becomes run-pure (same-run only). workspace-pure is never implied.`,
+    );
+  }
+  return { warnings, cachePureNodeIds };
+}
+
 export function saveTaskDocument(
   workspaceRoot: string,
   yaml: string,
   expectedEtag: string | null,
+  options: { confirmV3Migration?: boolean } = {},
 ): LoadedTaskDocument {
   const incoming = parseTaskDocument(yaml);
   if (!incoming.valid || !incoming.spec) {
@@ -293,16 +331,33 @@ export function saveTaskDocument(
     if (existing.etag !== expectedEtag) {
       throw new TaskEtagConflictError(expectedEtag, existing.etag);
     }
-    if (existing.sourceVersion === 1) {
+    if (existing.sourceVersion === 1 || (existing.sourceVersion < 3 && incoming.sourceVersion === 3)) {
       backupTaskYaml(workspaceRoot, slug, existing.yaml);
+    }
+  }
+  const wantsV3 = incoming.sourceVersion === 3;
+  if (wantsV3) {
+    const migration = previewV3Migration(incoming.spec);
+    const upgrading = !!existing && existing.sourceVersion < 3;
+    if ((upgrading || migration.cachePureNodeIds.length) && !options.confirmV3Migration) {
+      throw new Error(
+        upgrading
+          ? 'Refusing to save schema_version: 3 over a v1/v2 task without confirmation.'
+          : `Refusing to migrate cache: pure without confirmation. Nodes: ${migration.cachePureNodeIds.join(', ')}`,
+      );
     }
   }
   const spec: TaskSpec = {
     ...incoming.spec,
-    schema_version: 2,
-    nodes: incoming.spec.nodes.map((n) => (n.kind === 'orchestrator' ? { ...n, kind: 'session' as const } : n)),
+    schema_version: wantsV3 ? 3 : 2,
+    nodes: incoming.spec.nodes.map((n) => {
+      const kind = n.kind === 'orchestrator' ? 'session' as const : n.kind;
+      if (wantsV3 && options.confirmV3Migration && n.cache === 'pure') {
+        return { ...n, kind, cache: 'run-pure' as const };
+      }
+      return { ...n, kind };
+    }),
   };
-  // Re-parse through the v1-compatible schema after stamping version so defaults apply.
   const stamped = TaskSpecSchema.parse(spec);
   const body = serializeTaskYaml(stamped);
   mkdirSync(taskDir(workspaceRoot, slug), { recursive: true });

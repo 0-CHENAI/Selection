@@ -21,3 +21,8 @@ export * from './instances.ts';
 export * from './artifacts.ts';
 export * from './sensitive.ts';
 export * from './orchestration-patch.ts';
+export * from './orchestration-decision.ts';
+export * from './node-verdict.ts';
+export * from './metrics.ts';
+export * from './critical-path.ts';
+export * from './workspace-cache.ts';

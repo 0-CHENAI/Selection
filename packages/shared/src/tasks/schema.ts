@@ -45,8 +45,11 @@ export const TRIGGER_RULES = ['all_success', 'none_failed_min_one_success', 'one
 export const PARAM_TYPES = ['string', 'number', 'boolean', 'enum', 'json', 'text'] as const;
 export const OUTPUT_KINDS = ['param', 'artifact'] as const;
 export const RETRY_WHEN = ['error', 'empty', 'invalid'] as const;
-export const CACHE_MODES = ['pure', 'off'] as const;
+export const CACHE_MODES_V2 = ['pure', 'off'] as const;
+export const CACHE_MODES_V3 = ['none', 'run-pure', 'workspace-pure'] as const;
+export const CACHE_MODES = [...CACHE_MODES_V2, ...CACHE_MODES_V3] as const;
 export const TASK_RUNNERS = ['conduct', 'orchestrate'] as const;
+export const COORDINATOR_GATE_MODES = ['required', 'off'] as const;
 
 /** DAG worker concurrency defaults/caps for the technical preview. */
 export const DEFAULT_DAG_MAX_PARALLEL = 4;
@@ -63,6 +66,39 @@ export const MAX_DAG_MAX_PARALLEL = 8;
 export const DEFAULT_REPAIR_ATTEMPTS = 3;
 /** Hard upper bound on `max_iterations` — a guardrail against runaway verify→repair loops. */
 export const MAX_REPAIR_ATTEMPTS_CAP = 10;
+
+/** v3 coordinator gate wait is fixed; the field exists so the YAML contract is explicit. */
+export const COORDINATOR_GATE_TIMEOUT_SECONDS = 120;
+/** Share of `token_budget` reserved for the final structured verification. */
+export const VERIFY_RESERVE_RATIO = 0.2;
+export const VERIFY_RESERVE_MIN_TOKENS = 4_096;
+export const VERIFY_RESERVE_MAX_TOKENS = 32_768;
+/** Cross-run `workspace-pure` cache TTL. */
+export const WORKSPACE_CACHE_TTL_DAYS = 7;
+export const WORKSPACE_CACHE_TTL_MS = WORKSPACE_CACHE_TTL_DAYS * 24 * 60 * 60 * 1000;
+/** Fingerprint domain version — bump when cache key inputs change. */
+export const CONDUCTOR_CACHE_RUNTIME_VERSION = '3.0.0';
+
+export function isStructuredSchemaVersion(version: number | undefined): boolean {
+  return version === 2 || version === 3;
+}
+
+export function taskSourceVersion(spec: { schema_version?: number } | undefined): 1 | 2 | 3 {
+  if (spec?.schema_version === 3) return 3;
+  if (spec?.schema_version === 2) return 2;
+  return 1;
+}
+
+export function computeVerifyReserve(
+  tokenBudget: number | undefined,
+  reserveRatio = VERIFY_RESERVE_RATIO,
+): number {
+  if (tokenBudget == null || tokenBudget <= 0) return 0;
+  return Math.min(
+    VERIFY_RESERVE_MAX_TOKENS,
+    Math.max(VERIFY_RESERVE_MIN_TOKENS, Math.floor(tokenBudget * reserveRatio)),
+  );
+}
 
 // ---------------------------------------------------------------------------
 // Primitive validators
@@ -174,6 +210,27 @@ export const TaskDefaultsSchema = z.object({
   permissionMode: z.enum(PERMISSION_MODES).optional(),
 });
 
+export const CoordinatorGateSchema = z
+  .object({
+    mode: z.enum(COORDINATOR_GATE_MODES).default('required'),
+    timeout_seconds: z.literal(COORDINATOR_GATE_TIMEOUT_SECONDS).optional(),
+  })
+  .strict();
+
+export const VerificationExecutionSchema = z
+  .object({
+    required: z.boolean().default(true),
+    reserve_ratio: z.literal(VERIFY_RESERVE_RATIO).optional(),
+  })
+  .strict();
+
+export const TaskExecutionSchema = z
+  .object({
+    coordinator_gate: CoordinatorGateSchema.optional(),
+    verification: VerificationExecutionSchema.optional(),
+  })
+  .strict();
+
 // ---------------------------------------------------------------------------
 // Node schema
 // ---------------------------------------------------------------------------
@@ -236,7 +293,7 @@ export const TaskNodeSchema = z.preprocess((raw) => {
 
 export const TaskSpecSchema = z
   .object({
-    schema_version: z.literal(2).optional(),
+    schema_version: z.union([z.literal(2), z.literal(3)]).optional(),
     id: slug('task id'),
     title: z.string().min(1),
     goal: z.string().min(1),
@@ -261,6 +318,7 @@ export const TaskSpecSchema = z
     /** Max repair attempts on a FAIL verdict (re-run the repair frontier). 0 disables repair;
      *  capped at MAX_REPAIR_ATTEMPTS_CAP. Omitted → runner uses DEFAULT_REPAIR_ATTEMPTS. */
     max_iterations: z.number().int().min(0).max(MAX_REPAIR_ATTEMPTS_CAP).optional(),
+    execution: TaskExecutionSchema.optional(),
     nodes: z.array(TaskNodeSchema).min(1, 'A task must define at least one node'),
     /** Named task outputs → reference strings, e.g. { result: "${nodes.review.output}" }. */
     outputs: z.record(z.string(), z.string()).optional(),
@@ -269,6 +327,14 @@ export const TaskSpecSchema = z
   .superRefine((spec, ctx) => {
     const seen = new Set<string>();
     const sessionLikeKinds = new Set(['session', 'orchestrator', 'map', 'loop', 'synthesize', 'verify', 'judge', 'finally']);
+    const structured = isStructuredSchemaVersion(spec.schema_version);
+    if (spec.schema_version !== 3 && spec.execution) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'execution is a v3 field; set schema_version: 3 after confirming the migration',
+        path: ['execution'],
+      });
+    }
     spec.nodes.forEach((node, i) => {
       if (seen.has(node.id)) {
         ctx.addIssue({
@@ -278,10 +344,10 @@ export const TaskSpecSchema = z
         });
       }
       seen.add(node.id);
-      // v2 must not accept a model-backed node that can only execute as a
-      // successful no-op. v1 keeps its historical session-only requirement.
+      // Structured schemas must not accept a model-backed node that can only
+      // execute as a successful no-op. v1 keeps its historical session-only requirement.
       if (
-        (node.kind === 'session' || (spec.schema_version === 2 && sessionLikeKinds.has(node.kind)))
+        (node.kind === 'session' || (structured && sessionLikeKinds.has(node.kind)))
         && (!node.prompt || node.prompt.trim() === '')
       ) {
         ctx.addIssue({
@@ -297,21 +363,21 @@ export const TaskSpecSchema = z
           path: ['nodes', i, 'loop'],
         });
       }
-      if (spec.schema_version === 2 && node.kind === 'route' && !node.route) {
+      if (structured && node.kind === 'route' && !node.route) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
           message: `Node "${node.id}" is a route and must declare cases plus a default`,
           path: ['nodes', i, 'route'],
         });
       }
-      if (spec.schema_version === 2 && (node.kind === 'map' || node.kind === 'filter') && !node.for_each) {
+      if (structured && (node.kind === 'map' || node.kind === 'filter') && !node.for_each) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
           message: `Node "${node.id}" must declare for_each`,
           path: ['nodes', i, 'for_each'],
         });
       }
-      if (spec.schema_version === 2 && node.aggregate === 'synthesize') {
+      if (structured && node.aggregate === 'synthesize') {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
           message: `aggregate: synthesize is not a deterministic aggregate mode; use a separate synthesize node`,
@@ -319,7 +385,7 @@ export const TaskSpecSchema = z
         });
       }
       if (
-        spec.schema_version === 2
+        structured
         && node.timeout !== undefined
         && node.kind !== 'approval'
         && !sessionLikeKinds.has(node.kind)
@@ -329,6 +395,15 @@ export const TaskSpecSchema = z
           message: `Node "${node.id}" cannot use timeout because it does not dispatch a session or wait for approval`,
           path: ['nodes', i, 'timeout'],
         });
+      }
+      if (node.cache !== undefined) {
+        if (spec.schema_version !== 3 && (node.cache === 'none' || node.cache === 'run-pure' || node.cache === 'workspace-pure')) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: `Node "${node.id}" uses v3 cache "${node.cache}"; set schema_version: 3 after confirming the migration`,
+            path: ['nodes', i, 'cache'],
+          });
+        }
       }
     });
   });
@@ -344,8 +419,10 @@ export type Route = z.infer<typeof RouteSchema>;
 export type Retry = z.infer<typeof RetrySchema>;
 export type TaskParam = z.infer<typeof TaskParamSchema>;
 export type TaskDefaults = z.infer<typeof TaskDefaultsSchema>;
+export type TaskExecution = z.infer<typeof TaskExecutionSchema>;
 export type TaskNode = z.infer<typeof TaskNodeSchema>;
 export type TaskSpec = z.infer<typeof TaskSpecSchema>;
+export type CacheMode = (typeof CACHE_MODES)[number];
 
 // ---------------------------------------------------------------------------
 // Helpers
