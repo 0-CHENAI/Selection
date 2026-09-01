@@ -698,6 +698,15 @@ export function groupMessagesByTurn(messages: Message[], options: GroupTurnsOpti
       // the streaming reply — after a Read/tool step they must not become a
       // gray activity bar that restates the same markdown.
       if (message.isIntermediate) {
+        // Keep an empty pending item as the live thinking indicator, but do not
+        // turn a completed whitespace-only event into a blank work-chain row.
+        if (!message.isPending && !hasRenderableAssistantText(message.content)) {
+          if (currentTurn && !message.isStreaming) {
+            currentTurn.isStreaming = false
+          }
+          continue
+        }
+
         currentTurn = ensureOpenAssistantTurn(message, { isStreaming: !!message.isPending })
         // Always add to current turn as activity (ignoring turnId differences)
         // Pending messages show as 'running' until we know they're complete

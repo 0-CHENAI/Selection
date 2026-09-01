@@ -345,6 +345,38 @@ describe('work-chain row visibility', () => {
     ]))
 
     expect(turn.activities.find(activity => activity.id === 'msg-body')?.content).toBe('先说明接下来要读哪个文件。')
+    expect(turn.activities.some(activity => activity.id === 'msg-empty')).toBe(false)
     expect(turn.response).toBeUndefined()
+  })
+
+  it('drops a completed whitespace-only intermediate row before successful tools (#179)', () => {
+    const whitespaceOnly = completeIntermediate(
+      pendingAssistant('msg-empty', '\n\n\n\n', 10),
+    )
+    const turn = assistantTurn(groupMessagesByTurn([
+      user('校验 Mermaid 示例'),
+      whitespaceOnly,
+      tool('completed', 20, 'mcp__session__mermaid_validate'),
+    ]))
+
+    expect(turn.activities.map(activity => activity.type)).toEqual(['tool'])
+    expect(turn.activities[0]?.status).toBe('completed')
+  })
+
+  it('keeps an empty pending intermediate row as the live thinking indicator', () => {
+    const pending = pendingAssistant('msg-pending', '', 10)
+    pending.isIntermediate = true
+    const turn = assistantTurn(groupMessagesByTurn([
+      user('继续处理'),
+      pending,
+    ]))
+
+    expect(turn.activities).toEqual([
+      expect.objectContaining({
+        id: 'msg-pending',
+        type: 'intermediate',
+        status: 'running',
+      }),
+    ])
   })
 })
