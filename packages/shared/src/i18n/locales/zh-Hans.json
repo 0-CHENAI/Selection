@@ -246,6 +246,7 @@
   "chat.modelPicker.supportsImagesOn": "图像输入已启用",
   "chat.modelPicker.thinkingSection": "思考",
   "chat.modelPicker.toggleVisionFailed": "更新图像支持失败",
+  "chat.modelPicker.unavailable": "提供商已不再提供",
   "chat.moreSubmitActions": "更多提交操作",
   "chat.noFoldersFound": "未找到文件夹",
   "chat.noOutputYet": "暂无输出",

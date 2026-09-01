@@ -246,6 +246,7 @@
   "chat.modelPicker.supportsImagesOn": "Image input enabled",
   "chat.modelPicker.thinkingSection": "Thinking",
   "chat.modelPicker.toggleVisionFailed": "Failed to update image support",
+  "chat.modelPicker.unavailable": "No longer available",
   "chat.moreSubmitActions": "More submit actions",
   "chat.noFoldersFound": "No folders found",
   "chat.noOutputYet": "No output available yet",

@@ -5883,7 +5883,8 @@ export class SessionManager implements ISessionManager {
     sessionLog.info(`[updateSessionModel] sessionId=${sessionId}, model=${model}, connection=${connection}`)
     const managed = this.sessions.get(sessionId)
     if (managed) {
-      managed.model = model ?? undefined
+      const nextModel = model?.trim() ? model : undefined
+      managed.model = nextModel
       const previousConnection = managed.llmConnection
       let connectionChanged = false
       if (connection && connection !== managed.llmConnection) {
@@ -5898,7 +5899,7 @@ export class SessionManager implements ISessionManager {
           connectionChanged = true
         }
       }
-      const updates: { model?: string; llmConnection?: string } = { model: model ?? undefined }
+      const updates: { model?: string; llmConnection?: string } = { model: nextModel }
       if (connectionChanged) {
         updates.llmConnection = managed.llmConnection
       }
@@ -5919,15 +5920,15 @@ export class SessionManager implements ISessionManager {
         // Fallback chain: session model > workspace default > connection default
         const wsConfig = loadWorkspaceConfig(managed.workspace.rootPath)
         const sessionConn = resolveSessionConnection(managed.llmConnection, wsConfig?.defaults?.defaultLlmConnection)
-        const effectiveModel = model ?? wsConfig?.defaults?.model ?? sessionConn?.defaultModel!
+        const effectiveModel = nextModel ?? wsConfig?.defaults?.model ?? sessionConn?.defaultModel!
         sessionLog.info(`[updateSessionModel] Calling agent.setModel(${effectiveModel}) [agent exists=${!!managed.agent}, previousConnection=${previousConnection}, connectionLocked=${managed.connectionLocked}]`)
         managed.agent.setModel(effectiveModel)
       } else {
         sessionLog.info(`[updateSessionModel] No agent yet, model will apply on next agent creation`)
       }
       // Notify renderer of the model change
-      this.sendEvent({ type: 'session_model_changed', sessionId, model }, managed.workspace.id)
-      sessionLog.info(`Session ${sessionId} model updated to: ${model ?? '(global config)'}`)
+      this.sendEvent({ type: 'session_model_changed', sessionId, model: nextModel ?? null }, managed.workspace.id)
+      sessionLog.info(`Session ${sessionId} model updated to: ${nextModel ?? '(global config)'}`)
     }
   }
 

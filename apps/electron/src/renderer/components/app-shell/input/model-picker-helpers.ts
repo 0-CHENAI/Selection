@@ -117,6 +117,39 @@ export function appendMissingPickerModel(
   return [...models, modelId]
 }
 
+export function isUnavailablePickerModel(
+  catalog: Array<ModelDefinition | string>,
+  modelId: string,
+): boolean {
+  return !catalog.some((model) => isPickerModelSelected(modelId, pickerModelId(model)))
+}
+
+export type PickerModelAction = 'select' | 'clear' | 'ignore'
+
+/**
+ * Retired IDs stay visible so the current selection can be cleared, but they
+ * must not become a new selection — the provider will 404.
+ */
+export function resolvePickerModelAction(
+  modelId: string,
+  currentModel: string,
+  catalog: Array<ModelDefinition | string>,
+): PickerModelAction {
+  if (!isUnavailablePickerModel(catalog, modelId)) return 'select'
+  return isPickerModelSelected(currentModel, modelId) ? 'clear' : 'ignore'
+}
+
+/** `undefined` = do not change; `''` = clear the current selection. */
+export function chosenPickerModelId(
+  modelId: string,
+  currentModel: string,
+  catalog: Array<ModelDefinition | string>,
+): string | undefined {
+  const action = resolvePickerModelAction(modelId, currentModel, catalog)
+  if (action === 'ignore') return undefined
+  return action === 'clear' ? '' : modelId
+}
+
 /**
  * Same as resolvePickerModels, but OpenRouter uses the live catalog when
  * the fetch succeeded. Stored 3-tier IDs stay on the connection; this is

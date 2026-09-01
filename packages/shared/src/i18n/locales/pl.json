@@ -246,6 +246,7 @@
   "chat.modelPicker.supportsImagesOn": "Obrazy włączone",
   "chat.modelPicker.thinkingSection": "Myślenie",
   "chat.modelPicker.toggleVisionFailed": "Nie udało się zaktualizować obsługi obrazów",
+  "chat.modelPicker.unavailable": "Już niedostępny",
   "chat.moreSubmitActions": "Więcej akcji wysyłania",
   "chat.noFoldersFound": "Nie znaleziono folderów",
   "chat.noOutputYet": "Brak wyników na razie",

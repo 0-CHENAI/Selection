@@ -246,6 +246,7 @@
   "chat.modelPicker.supportsImagesOn": "Bildeingabe aktiviert",
   "chat.modelPicker.thinkingSection": "Denken",
   "chat.modelPicker.toggleVisionFailed": "Bildunterstützung konnte nicht aktualisiert werden",
+  "chat.modelPicker.unavailable": "Nicht mehr verfügbar",
   "chat.moreSubmitActions": "Weitere Sendeaktionen",
   "chat.noFoldersFound": "Keine Ordner gefunden",
   "chat.noOutputYet": "Noch keine Ausgabe verfügbar",

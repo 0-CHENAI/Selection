@@ -33,11 +33,14 @@ import {
 import { ConnectionIcon } from '@/components/icons/ConnectionIcon'
 import { derivePickerMode } from './picker-mode'
 import {
+  appendMissingPickerModel,
+  chosenPickerModelId,
   connectionPinnedModelIds,
   formatTokenCount,
   groupConnectionsByProvider,
   isOpenRouterConnection,
   isPickerModelSelected,
+  isUnavailablePickerModel,
   pickerModelId,
   resolvePickerModelsWithLive,
   resolveVisiblePickerModels,
@@ -69,7 +72,11 @@ function CompactSwitcherModels({
 }) {
   const { t } = useTranslation()
   const [query, setQuery] = React.useState('')
-  const models = resolvePickerModelsWithLive(conn, liveOpenRouterModels)
+  const catalog = resolvePickerModelsWithLive(conn, liveOpenRouterModels)
+  const models = appendMissingPickerModel(
+    catalog,
+    isCurrentConnection ? currentModel : undefined,
+  )
   const visibleCatalog = resolveVisiblePickerModels(models, {
     query,
     currentModel: isCurrentConnection ? currentModel : conn.defaultModel,
@@ -92,12 +99,23 @@ function CompactSwitcherModels({
             : (model.name ?? stripPiPrefixForDisplay(model.id))
           const isSelectedModel =
             isCurrentConnection && isPickerModelSelected(currentModel, modelId)
-          const limitCaption = pickerModelLimitCaption(model, t)
+          const unavailable = isUnavailablePickerModel(catalog, modelId)
+          const limitCaption = unavailable
+            ? t('chat.modelPicker.unavailable')
+            : pickerModelLimitCaption(model, t)
           return (
             <DrawerClose asChild key={modelId}>
               <button
                 type="button"
-                onClick={() => onPick(conn.slug, modelId)}
+                onClick={() => {
+                  const next = chosenPickerModelId(
+                    modelId,
+                    isCurrentConnection ? currentModel : '',
+                    catalog,
+                  )
+                  if (next === undefined) return
+                  onPick(conn.slug, next)
+                }}
                 className={cn(
                   'flex items-center justify-between w-full px-3 py-2 rounded-lg text-left transition-colors',
                   isSelectedModel
@@ -108,7 +126,12 @@ function CompactSwitcherModels({
                 <span className="min-w-0">
                   <span className="block text-sm font-medium truncate">{modelName}</span>
                   {limitCaption && (
-                    <span className="block text-xs text-foreground/50 tabular-nums">{limitCaption}</span>
+                    <span className={cn(
+                      'block text-xs tabular-nums',
+                      unavailable ? 'text-destructive/80' : 'text-foreground/50',
+                    )}>
+                      {limitCaption}
+                    </span>
                   )}
                 </span>
                 {isSelectedModel && (
@@ -181,10 +204,15 @@ export function CompactModelSelector({
     !connectionUnavailable && isOpenRouterConnection(effectiveConnectionDetails),
   )
 
-  const availableModels = React.useMemo(() => {
+  const pickerCatalog = React.useMemo(() => {
     if (connectionUnavailable) return []
     return resolvePickerModelsWithLive(effectiveConnectionDetails, liveOpenRouterModels)
   }, [effectiveConnectionDetails, connectionUnavailable, liveOpenRouterModels])
+
+  const availableModels = React.useMemo(
+    () => appendMissingPickerModel(pickerCatalog, currentModel),
+    [pickerCatalog, currentModel],
+  )
 
   const { query: modelSearchQuery, setQuery: setModelSearchQuery } = usePickerSearchQuery(open)
   const pinnedModelIds = React.useMemo(
@@ -392,6 +420,7 @@ export function CompactModelSelector({
                 ? stripPiPrefixForDisplay(getModelShortName(model))
                 : (model.name ?? stripPiPrefixForDisplay(model.id))
               const isSelected = isPickerModelSelected(currentModel, modelId)
+              const unavailable = isUnavailablePickerModel(pickerCatalog, modelId)
               const descriptionKey =
                 typeof model !== 'string' && 'descriptionKey' in model
                   ? (model.descriptionKey as string)
@@ -402,12 +431,18 @@ export function CompactModelSelector({
                     ? (model.description as string)
                     : '')
               const limitCaption = pickerModelLimitCaption(model, t)
-              const secondary = [description, limitCaption].filter(Boolean).join(' · ')
+              const secondary = unavailable
+                ? t('chat.modelPicker.unavailable')
+                : [description, limitCaption].filter(Boolean).join(' · ')
               return (
                 <DrawerClose asChild key={modelId}>
                   <button
                     type="button"
-                    onClick={() => handlePickFlatModel(modelId)}
+                    onClick={() => {
+                      const next = chosenPickerModelId(modelId, currentModel, pickerCatalog)
+                      if (next === undefined) return
+                      handlePickFlatModel(next)
+                    }}
                     className={cn(
                       'flex items-center justify-between w-full px-3 py-2 rounded-lg text-left transition-colors',
                       isSelected ? 'bg-foreground/5' : 'hover:bg-foreground/5',
@@ -416,7 +451,10 @@ export function CompactModelSelector({
                     <div className="min-w-0">
                       <div className="text-sm font-medium truncate">{modelName}</div>
                       {secondary && (
-                        <div className="text-xs text-foreground/50 truncate">
+                        <div className={cn(
+                          'text-xs truncate',
+                          unavailable ? 'text-destructive/80' : 'text-foreground/50',
+                        )}>
                           {secondary}
                         </div>
                       )}
