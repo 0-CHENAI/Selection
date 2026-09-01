@@ -20,6 +20,7 @@ import { markdownToPlainText } from '../chat/markdown-to-plain-text'
 import { FullscreenOverlayBase } from './FullscreenOverlayBase'
 import type { OverlayTypeBadge } from './FullscreenOverlayBaseHeader'
 import { AnnotatableMarkdownDocument } from './AnnotatableMarkdownDocument'
+import { documentOverlayErrorLabel } from './document-overlay-error-label'
 
 export interface DocumentFormattedMarkdownOverlayProps {
   /** The content to display (markdown) */
@@ -40,6 +41,8 @@ export interface DocumentFormattedMarkdownOverlayProps {
   typeBadge?: OverlayTypeBadge
   /** Optional error message — renders a tinted error banner above the content card */
   error?: string
+  /** Override the error banner label. Write documents default to "Write Failed". */
+  errorLabel?: string
   /** Optional session id used for annotation payload source metadata */
   sessionId?: string
   /** Optional message id; when present with callbacks, overlay becomes annotatable */
@@ -70,6 +73,7 @@ export function DocumentFormattedMarkdownOverlay({
   filePath,
   typeBadge,
   error,
+  errorLabel,
   sessionId,
   messageId,
   annotations,
@@ -90,7 +94,7 @@ export function DocumentFormattedMarkdownOverlay({
       filePath={filePath}
       typeBadge={typeBadge}
       copyContent={plainCopyContent}
-      error={error ? { label: 'Write Failed', message: error } : undefined}
+      error={error ? { label: documentOverlayErrorLabel(errorLabel, typeBadge?.label), message: error } : undefined}
     >
       {/* Content wrapper — min-h-full for vertical centering within FullscreenOverlayBase's scroll container.
           Scrolling and gradient fade mask are handled by FullscreenOverlayBase. */}
