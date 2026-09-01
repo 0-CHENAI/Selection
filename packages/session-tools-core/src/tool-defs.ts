@@ -45,6 +45,8 @@ import { handleGetTaskResults } from './handlers/get-task-results.ts';
 import { handleSubmitTaskOutput } from './handlers/submit-task-output.ts';
 import { handleSubmitTaskVerdict } from './handlers/submit-task-verdict.ts';
 import { handleSubmitOrchestrationPatch } from './handlers/submit-orchestration-patch.ts';
+import { handleSubmitOrchestrationDecision } from './handlers/submit-orchestration-decision.ts';
+import { handleSubmitTaskNodeVerdict } from './handlers/submit-task-node-verdict.ts';
 import { handleSubmitTaskDefinition } from './handlers/submit-task-definition.ts';
 import { handleControlTaskRun } from './handlers/control-task-run.ts';
 import { handleArchiveSession } from './handlers/archive-session.ts';
@@ -289,6 +291,35 @@ export const SubmitTaskVerdictSchema = z.object({
   reason: z.string().optional().describe('One-line reason for a fail'),
   nodes: z.array(z.string()).optional().describe('Definition node ids to repair on fail'),
   runId: z.string().optional().describe('Run id when the parent has more than one active run'),
+});
+
+export const SubmitOrchestrationDecisionSchema = z.object({
+  runId: z.string().describe('Active run id'),
+  checkpointId: z.string().describe('Checkpoint this decision answers'),
+  decisionId: z.string().describe('Idempotency key for this decision'),
+  baseRevision: z.number().int().min(0).describe('Revision this decision is based on'),
+  action: z.enum(['continue', 'patch', 'pause']).describe('continue the graph, patch pending nodes, or pause for review'),
+  rationale: z.string().optional().describe('Required when action is patch'),
+  add: z.array(z.record(z.string(), z.unknown())).optional().describe('Pending nodes to add'),
+  update: z.array(z.record(z.string(), z.unknown())).optional().describe('Pending nodes to update'),
+  cancel: z.array(z.string()).optional().describe('Pending node ids to cancel'),
+}).superRefine((value, ctx) => {
+  if (value.action === 'patch' && !value.rationale?.trim()) {
+    ctx.addIssue({ code: 'custom', path: ['rationale'], message: 'patch requires a rationale' });
+  }
+});
+
+export const SubmitTaskNodeVerdictSchema = z.object({
+  result: z.enum(['pass', 'fail']).describe('Node verification result'),
+  reason: z.string().optional().describe('Required on fail'),
+  nodes: z.array(z.string()).optional().describe('Definition node ids to rework on fail'),
+  evidence: z.string().optional().describe('Required evidence summary on fail'),
+  nodeId: z.string().optional().describe('Definition or instance id when not implied by the session'),
+}).superRefine((value, ctx) => {
+  if (value.result !== 'fail') return;
+  if (!value.reason?.trim()) ctx.addIssue({ code: 'custom', path: ['reason'], message: 'fail verdict requires a reason' });
+  if (!value.evidence?.trim()) ctx.addIssue({ code: 'custom', path: ['evidence'], message: 'fail verdict requires evidence' });
+  if (!value.nodes?.length) ctx.addIssue({ code: 'custom', path: ['nodes'], message: 'fail verdict requires nodes to rework' });
 });
 
 export const ListSessionsSchema = z.object({
@@ -610,7 +641,15 @@ Use result pass or fail. Fail may include reason and nodes to repair. Parent cha
 
   submit_orchestration_patch: `Apply a restricted patch to the current orchestrate run.
 
-Requires runId, decisionId, baseRevision, and rationale. May add/update/cancel pending nodes. Cannot change running or finished nodes, task identity, budget, or raise permissions. Off unless CRAFT_FEATURE_TASKS_ORCHESTRATE is enabled.`,
+Requires runId, decisionId, baseRevision, and rationale. May add/update/cancel pending nodes. Cannot change running or finished nodes, task identity, budget, or raise permissions. Off unless CRAFT_FEATURE_TASKS_ORCHESTRATE is enabled. While a v3 run is waiting-coordinator, use submit_orchestration_decision instead.`,
+
+  submit_orchestration_decision: `Release a v3 coordinator scheduling gate.
+
+Requires runId, checkpointId, decisionId, and baseRevision. action continue uses the current graph, patch updates pending nodes then continues, pause waits for the user. Stale revision, replayed decisionId, and unknown checkpointId are rejected. Timeout pauses with coordinator-timeout and does not auto-continue.`,
+
+  submit_task_node_verdict: `Submit a structured pass/fail verdict for a verify or judge node.
+
+FAIL requires reason, evidence, and nodes to rework. PASS unblocks dependents. Chat text is not a verdict.`,
 
   get_session_info: `Get metadata about the current session or a specific session by ID.
 
@@ -721,6 +760,8 @@ export const SESSION_TOOL_DEFS: SessionToolDef[] = [
   { name: 'submit_task_output', description: TOOL_DESCRIPTIONS.submit_task_output, inputSchema: SubmitTaskOutputSchema, executionMode: 'registry', safeMode: 'allow', handler: handleSubmitTaskOutput },
   { name: 'submit_task_verdict', description: TOOL_DESCRIPTIONS.submit_task_verdict, inputSchema: SubmitTaskVerdictSchema, executionMode: 'registry', safeMode: 'allow', handler: handleSubmitTaskVerdict },
   { name: 'submit_orchestration_patch', description: TOOL_DESCRIPTIONS.submit_orchestration_patch, inputSchema: SubmitOrchestrationPatchSchema, executionMode: 'registry', safeMode: 'allow', handler: handleSubmitOrchestrationPatch },
+  { name: 'submit_orchestration_decision', description: TOOL_DESCRIPTIONS.submit_orchestration_decision, inputSchema: SubmitOrchestrationDecisionSchema, executionMode: 'registry', safeMode: 'allow', handler: handleSubmitOrchestrationDecision },
+  { name: 'submit_task_node_verdict', description: TOOL_DESCRIPTIONS.submit_task_node_verdict, inputSchema: SubmitTaskNodeVerdictSchema, executionMode: 'registry', safeMode: 'allow', handler: handleSubmitTaskNodeVerdict },
   { name: 'submit_task_definition', description: TOOL_DESCRIPTIONS.submit_task_definition, inputSchema: SubmitTaskDefinitionSchema, executionMode: 'registry', safeMode: 'allow', handler: handleSubmitTaskDefinition },
   { name: 'control_task_run', description: TOOL_DESCRIPTIONS.control_task_run, inputSchema: ControlTaskRunSchema, executionMode: 'registry', safeMode: 'block', handler: handleControlTaskRun },
   { name: 'get_session_info', description: TOOL_DESCRIPTIONS.get_session_info, inputSchema: GetSessionInfoSchema, executionMode: 'registry', safeMode: 'allow', readOnly: true, handler: handleGetSessionInfo },

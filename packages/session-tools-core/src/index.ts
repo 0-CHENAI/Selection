@@ -146,6 +146,8 @@ export type {
   SubmitTaskOutputInput,
   SubmitTaskVerdictInput,
   OrchestrationPatchInput,
+  OrchestrationDecisionInput,
+  SubmitTaskNodeVerdictInput,
   SubmitTaskDefinitionInput,
   ControlTaskRunInput,
 } from './context.ts';

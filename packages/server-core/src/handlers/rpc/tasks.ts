@@ -47,6 +47,7 @@ import {
   TaskEtagConflictError,
   definitionDiff,
   mergeRunDefinition,
+  previewV3Migration,
   readLatestSpecRevision,
   serializeTaskYaml,
 } from '@craft-agent/shared/tasks'
@@ -182,7 +183,9 @@ export function registerTasksHandlers(server: RpcServer, deps: HandlerDeps): voi
     }
     const spec = parsed.spec
     const existing = loadTaskDocument(ws.rootPath, spec.id)
-    saveTaskDocument(ws.rootPath, req.yaml, existing?.etag ?? null)
+    saveTaskDocument(ws.rootPath, req.yaml, existing?.etag ?? null, {
+      confirmV3Migration: req.confirmV3Migration,
+    })
 
     // Single choke point for ALL orchestrator paths (attach / adopt / fresh): apply the reserved
     // "Task" label (surfacing its resolved id so the renderer can navigate to the label filter)
@@ -245,7 +248,9 @@ export function registerTasksHandlers(server: RpcServer, deps: HandlerDeps): voi
   server.handle(RPC_CHANNELS.tasks.SAVE, async (_ctx, workspaceId: string, req: TaskSaveRequest): Promise<TaskSaveResult> => {
     const ws = workspaceOrThrow(workspaceId)
     try {
-      const saved = saveTaskDocument(ws.rootPath, req.yaml, req.expectedEtag)
+      const saved = saveTaskDocument(ws.rootPath, req.yaml, req.expectedEtag, {
+        confirmV3Migration: req.confirmV3Migration,
+      })
       return {
         slug: saved.slug,
         validation: toValidationDto({ valid: saved.valid, errors: saved.errors, warnings: saved.warnings, spec: saved.spec }),
@@ -515,8 +520,23 @@ export function registerTasksHandlers(server: RpcServer, deps: HandlerDeps): voi
     const diff = definitionDiff(live.spec, merged)
     const yaml = serializeTaskYaml(merged)
     const parsed = parseTaskYaml(yaml)
+    const incoming = parseTaskDocument(yaml)
     const validation = toValidationDto(parsed)
-    const resultBase = { diff, validation, yaml, runRevision: runRevision.revision, runSpecHash }
+    const migrationWarnings = [
+      ...incoming.migrationWarnings,
+      ...(live.sourceVersion < 3 && incoming.sourceVersion === 3 && incoming.spec
+        ? previewV3Migration(incoming.spec).warnings
+        : []),
+    ]
+    const resultBase = {
+      diff,
+      validation,
+      yaml,
+      runRevision: runRevision.revision,
+      runSpecHash,
+      sourceVersion: incoming.sourceVersion,
+      migrationWarnings,
+    }
     if (!req.confirm) return resultBase
     if (diff.added.length === 0 && diff.removed.length === 0 && diff.changed.length === 0) {
       return resultBase
@@ -548,11 +568,32 @@ export function registerTasksHandlers(server: RpcServer, deps: HandlerDeps): voi
       }
     }
     try {
-      const saved = saveTaskDocument(ws.rootPath, yaml, req.expectedEtag)
-      return { ...resultBase, validation: toValidationDto({ valid: saved.valid, errors: saved.errors, warnings: saved.warnings, spec: saved.spec }), applied: true, etag: saved.etag, yaml: saved.yaml }
+      const saved = saveTaskDocument(ws.rootPath, yaml, req.expectedEtag, {
+        confirmV3Migration: req.confirmV3Migration === true,
+      })
+      return {
+        ...resultBase,
+        validation: toValidationDto({ valid: saved.valid, errors: saved.errors, warnings: saved.warnings, spec: saved.spec }),
+        applied: true,
+        etag: saved.etag,
+        yaml: saved.yaml,
+        sourceVersion: saved.sourceVersion,
+        migrationWarnings: saved.migrationWarnings,
+      }
     } catch (err) {
       if (err instanceof TaskEtagConflictError) {
         return { ...resultBase, conflict: { code: 'etag-conflict', expected: err.expected, actual: err.actual } }
+      }
+      const message = err instanceof Error ? err.message : String(err)
+      if (/without confirmation/.test(message)) {
+        return {
+          ...resultBase,
+          validation: {
+            ...validation,
+            valid: false,
+            errors: [...validation.errors, { path: 'schema_version', message, severity: 'error' as const }],
+          },
+        }
       }
       throw err
     }

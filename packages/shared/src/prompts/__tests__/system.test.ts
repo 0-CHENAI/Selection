@@ -130,6 +130,8 @@ describe('system prompt guidance', () => {
     expect(prompt).toContain('final-text fallback exists only for legacy v1/history')
     expect(prompt).toContain('`submit_task_output`')
     expect(prompt).toContain('`submit_task_verdict`')
+    expect(prompt).toContain('`submit_orchestration_decision`')
+    expect(prompt).toContain('`submit_task_node_verdict`')
   })
 
   it('tells the model to speak source titles rather than slugs', () => {

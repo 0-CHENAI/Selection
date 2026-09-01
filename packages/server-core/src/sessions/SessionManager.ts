@@ -32,6 +32,7 @@ import {
   type PendingFirstTurnAiTitle,
 } from './first-turn-title'
 import { completionStopReason } from './completion-outcome.ts'
+import { toolCallBypassesWorkspaceCache } from './session-tool-usage.ts'
 import { i18n } from '@craft-agent/shared/i18n'
 import {
   getWorkspaces,
@@ -937,6 +938,8 @@ interface ManagedSession {
   taskNodeCount?: number
   // Tasks Conductor: hidden generate-time orchestrator awaiting validated adoption (off the board)
   taskDraft?: boolean
+  /** True when this turn invoked a non-protocol tool. Used by workspace-pure cache. */
+  usedExternalToolsThisTurn?: boolean
   // Working directory for this session (used by agent for bash commands)
   workingDirectory?: string
   // SDK cwd for session storage - set once at creation, never changes.
@@ -4703,6 +4706,27 @@ export class SessionManager implements ISessionManager {
           })
           return { status: snap.status, revision: snap.revision }
         },
+        submitOrchestrationDecisionFn: async (input) => {
+          const runner = this.taskRunnerLookup?.(managed.workspace.id)
+          if (!runner) throw new Error('Task runner is not available')
+          const snap = runner.applyOrchestrationDecisionByRunId(managed.id, {
+            runId: input.runId,
+            checkpointId: input.checkpointId,
+            decisionId: input.decisionId,
+            baseRevision: input.baseRevision,
+            action: input.action,
+            rationale: input.rationale,
+            add: input.add as never,
+            update: input.update as never,
+            cancel: input.cancel,
+          })
+          return { status: snap.status, revision: snap.revision }
+        },
+        submitTaskNodeVerdictFn: async (input) => {
+          const runner = this.taskRunnerLookup?.(managed.workspace.id)
+          if (!runner) return { ok: false, error: 'Task runner is not available' }
+          return runner.submitNodeVerdict(managed.id, input)
+        },
         submitTaskDefinitionFn: async (input) => {
           const submitted = validateSubmittedDefinition(input.spec)
           if (!submitted.valid) return submitted
@@ -5534,6 +5558,16 @@ export class SessionManager implements ISessionManager {
     const id = this.getLastFinalAssistantMessageId(managed.messages)
     if (!id) return undefined
     return managed.messages.find(m => m.id === id)?.content
+  }
+
+  /**
+   * Whether the current turn invoked a non-protocol tool.
+   * Unknown sessions return undefined so workspace-pure will not store a new entry.
+   */
+  sessionUsedTools(sessionId: string): boolean | undefined {
+    const managed = this.sessions.get(sessionId)
+    if (!managed) return undefined
+    return managed.usedExternalToolsThisTurn === true
   }
 
   /**
@@ -6768,6 +6802,7 @@ export class SessionManager implements ISessionManager {
       })
       this.announceRegenerateReplacement(managed)
       sessionLog.info('Got chat iterator, starting iteration...')
+      managed.usedExternalToolsThisTurn = false
 
       for await (const event of chatIterator) {
         // Log events (skip noisy text_delta)
@@ -9932,6 +9967,9 @@ export class SessionManager implements ISessionManager {
       }
 
       case 'tool_start': {
+        if (toolCallBypassesWorkspaceCache(event.toolName)) {
+          managed.usedExternalToolsThisTurn = true
+        }
         // Format tool input paths to relative for better readability
         const formattedToolInput = formatToolInputPaths(event.input)
 

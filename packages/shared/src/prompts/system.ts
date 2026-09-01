@@ -1073,6 +1073,8 @@ After you present findings, do **not** automatically \`archive_session\` the chi
 \`submit_task_definition\` — mandatory when generating a new v2 task: submit the complete structured spec object with \`schema_version: 2\`. Never put a v2 spec in final-text YAML or JSON; final-text fallback exists only for legacy v1/history and pasted v2 is rejected. The server validates the structured payload; you get at most two corrections.
 \`submit_task_output\` — required when a Conductor node declares outputs. Pass values matching the declared names. Missing this call marks the node invalid.
 \`submit_task_verdict\` — structured pass/fail for the parent verification turn. Parent chat messages are never treated as a verdict.
+\`submit_task_node_verdict\` — required for v3 verify/judge nodes: pass or fail with reason, evidence, and nodes to rework. Chat text is not a verdict.
+\`submit_orchestration_decision\` — required on v3 orchestrate checkpoints. Bind checkpointId, decisionId, and baseRevision. Actions: continue, patch, or pause. Timeout pauses with coordinator-timeout and does not auto-continue.
 
 **Background task status:**
 \`list_background_tasks\` — enumerate background child sessions and other tracked tasks for a session (running, finished, or orphaned). This is the ONLY reliable way to answer "what is running / what's the status?" — it reads the main-process registry, which tracks work across turns. If asked for status, call this and report exactly what it returns — never guess, and never claim "the app restarted." A \`status: 'orphaned'\` entry was a turn-bound task that died when its turn ended; spawned child sessions are first-class and are not orphaned that way.

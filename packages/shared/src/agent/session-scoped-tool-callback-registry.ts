@@ -103,6 +103,12 @@ export interface SessionScopedToolCallbacks {
   submitOrchestrationPatchFn?: (
     input: import('@craft-agent/session-tools-core').OrchestrationPatchInput
   ) => Promise<{ status: string; revision?: number }>;
+  submitOrchestrationDecisionFn?: (
+    input: import('@craft-agent/session-tools-core').OrchestrationDecisionInput
+  ) => Promise<{ status: string; revision?: number }>;
+  submitTaskNodeVerdictFn?: (
+    input: import('@craft-agent/session-tools-core').SubmitTaskNodeVerdictInput
+  ) => Promise<{ ok: boolean; error?: string }>;
   submitTaskDefinitionFn?: (
     input: import('@craft-agent/session-tools-core').SubmitTaskDefinitionInput
   ) => Promise<{ valid: boolean; errors?: string[]; yaml?: string }>;
