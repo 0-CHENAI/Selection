@@ -43,6 +43,10 @@ describe('resolveCallLlmModel()', () => {
   it('treats blank requested models as omitted', () => {
     expect(resolveCallLlmModel('   ', 'qwen/qwen3-max')).toBe('qwen/qwen3-max');
   });
+
+  it('returns undefined when neither side has a model', () => {
+    expect(resolveCallLlmModel(undefined, '  ')).toBeUndefined();
+  });
 });
 
 describe('buildCallLlmRequest()', () => {

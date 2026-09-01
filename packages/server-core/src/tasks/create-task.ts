@@ -36,7 +36,8 @@ export function resolveCreateTaskProjectId(
 
 /**
  * Agent-created Tasks inherit the invoking session's model and connection
- * unless the spec already names them. Explicit task/node values still win.
+ * unless `spec.defaults` already names them. Node-level overrides still win
+ * at dispatch.
  */
 export function inheritTaskExecutionDefaults(
   spec: TaskSpec,

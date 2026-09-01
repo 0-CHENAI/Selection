@@ -3470,11 +3470,17 @@ export class SessionManager implements ISessionManager {
   }
 
   getSessionModel(sessionId: string): string | undefined {
-    return this.sessions.get(sessionId)?.model
+    const managed = this.sessions.get(sessionId)
+    return managed ? this.sessionExecutionModel(managed) : undefined
   }
 
   getSessionLlmConnection(sessionId: string): string | undefined {
     return this.sessions.get(sessionId)?.llmConnection
+  }
+
+  /** Live picker model when the agent is up; otherwise the stored session override. */
+  private sessionExecutionModel(managed: ManagedSession): string | undefined {
+    return managed.agent?.getModel() || managed.model
   }
 
   private async disposeManagedAgentRuntime(managed: ManagedSession, reason: string): Promise<void> {
@@ -4631,6 +4637,10 @@ export class SessionManager implements ISessionManager {
         // itself is createTaskFromSpec, shared verbatim with the tasks:create RPC.
         createTaskFn: async (input) => {
           const ws = managed.workspace
+          const sessionExecution = {
+            model: this.sessionExecutionModel(managed),
+            llmConnection: managed.llmConnection,
+          }
           // Match spawn_session: an explicit project wins, otherwise keep newly
           // captured work in the project that owns the invoking session.
           const projectId = resolveCreateTaskProjectId(input.projectId, managed.projectId)
@@ -4647,10 +4657,7 @@ export class SessionManager implements ISessionManager {
               this,
               ws.id,
               ws.rootPath,
-              inheritTaskExecutionDefaults(parsed.data, {
-                model: managed.model,
-                llmConnection: managed.llmConnection,
-              }),
+              inheritTaskExecutionDefaults(parsed.data, sessionExecution),
             )
             return { ...created, warnings: [...created.warnings] }
           }
@@ -4695,10 +4702,7 @@ export class SessionManager implements ISessionManager {
             this,
             ws.id,
             ws.rootPath,
-            inheritTaskExecutionDefaults(parsed.data, {
-              model: managed.model,
-              llmConnection: managed.llmConnection,
-            }),
+            inheritTaskExecutionDefaults(parsed.data, sessionExecution),
           )
           return { ...created, warnings: [...warnings, ...created.warnings] }
         },
@@ -8772,7 +8776,7 @@ export class SessionManager implements ISessionManager {
       session = await this.createSession(managed.workspace.id, {
         name: request.name,
         llmConnection: request.llmConnection ?? managed.llmConnection,
-        model: request.model ?? managed.model,
+        model: request.model ?? this.sessionExecutionModel(managed),
         enabledSourceSlugs: request.enabledSourceSlugs ?? managed.enabledSourceSlugs,
         permissionMode: request.permissionMode ?? managed.permissionMode ?? 'safe',
         thinkingLevel: request.thinkingLevel ?? managed.thinkingLevel,

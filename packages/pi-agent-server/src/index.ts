@@ -1107,19 +1107,23 @@ async function queryLlm(request: LLMQueryRequest): Promise<LLMQueryResult> {
     // Title generation / summarization pass miniModel explicitly.
     // If that session model uses a different provider than the user
     // authenticated with, fall back to a provider-compatible default.
-    model = request.model ?? initConfig.model ?? initConfig.miniModel ?? getDefaultSummarizationModel();
+    const inheritedModel = request.model ?? initConfig.model
+    model = inheritedModel ?? initConfig.miniModel ?? getDefaultSummarizationModel();
 
-    // If piAuth is set, ensure the mini model uses the same provider.
+    // If piAuth is set, the chosen model must resolve under that provider.
     // Pi SDK will fail with "No API key found" if the model requires a different provider.
     // Exception: 'custom-endpoint' provider is always compatible because it has its own
     // API key configured via resolveCustomEndpointApiKey() and doesn't use the credential store.
+    // isDeniedMiniModelId only applies to the utility fallback, not an explicit
+    // or current-session model — those should run as requested (#192).
     if (initConfig.piAuth) {
       const authProvider = initConfig.piAuth.provider;
       const bareModel = model.startsWith('pi/') ? model.slice(3) : model;
       const resolved = resolveSessionPiModel(modelRegistry, bareModel);
       const resolvedProvider = (resolved as any)?.provider;
       const isCompatible = resolvedProvider === authProvider || resolvedProvider === 'custom-endpoint';
-      if (!resolved || !isCompatible || isDeniedMiniModelId(model, piAuthProvider)) {
+      const deniedUtility = !inheritedModel && isDeniedMiniModelId(model, piAuthProvider);
+      if (!resolved || !isCompatible || deniedUtility) {
         // Anthropic: keep Haiku (the cheap/fast mini). For every other provider
         // Haiku is unresolvable, so walk PI_PREFERRED_DEFAULTS for a model that
         // actually works under the user's auth.
@@ -1143,7 +1147,7 @@ async function queryLlm(request: LLMQueryRequest): Promise<LLMQueryResult> {
     const piModel = resolveSessionPiModel(modelRegistry, modelId);
     if (!piModel) {
       throw new Error(
-        `Could not resolve mini model "${modelId}" for provider "${initConfig!.piAuth?.provider ?? '(unknown)'}"`,
+        `Could not resolve model "${modelId}" for provider "${initConfig!.piAuth?.provider ?? '(unknown)'}"`,
       );
     }
 
@@ -1309,7 +1313,10 @@ async function preExecuteCallLlm(input: Record<string, unknown>): Promise<LLMQue
 
 async function runMiniCompletion(prompt: string): Promise<string | null> {
   try {
-    const result = await queryLlm({ prompt, model: initConfig?.miniModel });
+    const result = await queryLlm({
+      prompt,
+      model: initConfig?.miniModel ?? getDefaultSummarizationModel(),
+    });
     const text = result.text || null;
     debugLog(`[runMiniCompletion] Result: ${text ? `"${text.slice(0, 200)}"` : 'null'}`);
     return text;
@@ -1684,7 +1691,10 @@ async function handleMiniCompletion(msg: Extract<InboundMessage, { type: 'mini_c
   // as 'error' messages instead of being swallowed and returned as null.
   // runMiniCompletion is kept for the summarize callback where null is acceptable.
   try {
-    const result = await queryLlm({ prompt: msg.prompt, model: initConfig?.miniModel });
+    const result = await queryLlm({
+      prompt: msg.prompt,
+      model: initConfig?.miniModel ?? getDefaultSummarizationModel(),
+    });
     send({ type: 'mini_completion_result', id: msg.id, text: result.text || null });
   } catch (error) {
     const errorMsg = error instanceof Error ? error.message : String(error);

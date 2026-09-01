@@ -38,6 +38,14 @@ describe('inheritTaskExecutionDefaults', () => {
     expect(inherited.defaults).toEqual({ model: 'qwen/qwen3-max', llmConnection: 'qwen-conn' })
   })
 
+  it('fills only the omitted execution field from the invoking session', () => {
+    const inherited = inheritTaskExecutionDefaults(
+      specOf({ ...base, defaults: { llmConnection: 'pi-conn' } }),
+      { model: 'qwen/qwen3-max', llmConnection: 'qwen-conn' },
+    )
+    expect(inherited.defaults).toEqual({ model: 'qwen/qwen3-max', llmConnection: 'pi-conn' })
+  })
+
   it('keeps an explicit task default instead of the session model', () => {
     const inherited = inheritTaskExecutionDefaults(
       specOf({ ...base, defaults: { model: 'pi/gpt-5-mini', llmConnection: 'pi-conn' } }),
