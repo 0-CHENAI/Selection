@@ -59,10 +59,10 @@ describe('OfficeCLI sync governance', () => {
     }
   });
 
-  it('records the reviewed schema CRC without treating a platform CRC as the default', () => {
+  it('records the reviewed Windows schema CRC without changing the default CRC', () => {
     const reviewed = manifest();
     expect(reviewed.schemaCrc).toBe('909df808');
-    expect(reviewed.assets['win32-x64']?.schemaCrc).toBeUndefined();
+    expect(reviewed.assets['win32-x64']?.schemaCrc).toBe('69cd35d9');
 
     const invalid = manifest();
     invalid.assets['win32-x64']!.schemaCrc = 'not-a-crc';

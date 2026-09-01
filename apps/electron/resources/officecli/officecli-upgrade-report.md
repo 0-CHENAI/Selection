@@ -124,6 +124,6 @@
 {}
 ```
 
-人工复验：1.0.146 的 `import` 已把 CSV/TSV（`--file` 与 `--stdin`）写入单元格，因此关闭 `importViaAtomicBatch`。
+人工复验：1.0.146 的 `import` 已把 CSV/TSV（`--file` 与 `--stdin`）写入单元格，因此关闭 `importViaAtomicBatch`。Windows x64 二进制 schema CRC 为 `69cd35d9`，与 Linux 审查值 `909df808` 不同，已单独记录，不覆盖默认 CRC。
 
 > 此报告只用于人工审查。运行时自更新保持禁用，draft PR 不会自动合并。
