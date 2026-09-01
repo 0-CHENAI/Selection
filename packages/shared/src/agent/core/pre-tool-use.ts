@@ -12,7 +12,7 @@
  * 1. Permission mode check: Block tools disallowed by current mode
  * 2. Source blocking: Block tools from inactive MCP sources
  * 3. Prerequisite check: Prepare meaningful source guides; enforce Skill/browser reads
- * 4. call_llm detection: Intercept mcp__session__call_llm
+ * 4. call_llm / spawn_session detection: Intercept prefixed and short names
  * 5. Input transforms: Path expansion, config validation, skill qualification,
  *    metadata stripping
  * 6. Ask-mode prompt decision: Determine if user approval is needed
@@ -829,10 +829,18 @@ export function runPreToolUseChecks(ctx: PreToolUseInput): PreToolUseCheckResult
   // ============================================================
   // 4. CALL_LLM / SPAWN_SESSION INTERCEPTION
   // ============================================================
-  if (toolName === 'mcp__session__call_llm') {
+  if (
+    toolName === 'mcp__session__call_llm'
+    || toolName === 'session__call_llm'
+    || toolName === 'call_llm'
+  ) {
     return { type: 'call_llm_intercept', input };
   }
-  if (toolName === 'mcp__session__spawn_session') {
+  if (
+    toolName === 'mcp__session__spawn_session'
+    || toolName === 'session__spawn_session'
+    || toolName === 'spawn_session'
+  ) {
     return { type: 'spawn_session_intercept', input };
   }
 

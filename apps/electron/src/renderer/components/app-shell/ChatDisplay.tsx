@@ -2219,6 +2219,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
               variant: 'blue',
             }}
             error={activityOutputOverlayData.error}
+            errorLabel={activityOutputOverlayData.toolName === 'Write' ? 'Write Failed' : undefined}
           />
         ) : detectLanguage(activityOutputOverlayData.content) === 'markdown' ? (
           <DocumentFormattedMarkdownOverlay

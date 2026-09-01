@@ -83,6 +83,7 @@ import { getSessionPlansPath, getSessionPath } from '../../shared/src/sessions/s
 import { buildCallLlmRequest, withTimeout, LLM_QUERY_TIMEOUT_MS } from '../../shared/src/agent/llm-tool.ts';
 import type { LLMQueryRequest, LLMQueryResult } from '../../shared/src/agent/llm-tool.ts';
 import { PI_TOOL_NAME_MAP, THINKING_TO_PI } from '../../shared/src/agent/backend/pi/constants.ts';
+import { resolveSessionToolProxyName } from '../../shared/src/agent/backend/pi/session-tool-defs.ts';
 import { getDefaultSummarizationModel, swarmCompactionReserveTokens } from '../../shared/src/config/models.ts';
 import { createWebFetchTool } from './tools/web-fetch.ts';
 import { resolveSearchProvider } from './tools/search/resolve-provider.ts';
@@ -898,7 +899,7 @@ function wrapSingleTool(
   const parameters = allowRichMetadata
     ? allowCraftMetadataProperties(tool.parameters)
     : tool.parameters;
-  const sdkToolName = PI_TOOL_NAME_MAP[tool.name] || tool.name;
+  const sdkToolName = PI_TOOL_NAME_MAP[tool.name] || resolveSessionToolProxyName(tool.name);
   const prepareArguments = createRecoveringArgumentPreparer(
     sdkToolName,
     tool.prepareArguments,
@@ -1006,69 +1007,75 @@ function wrapSingleTool(
 function buildProxyTools(): ToolDefinition<any, any>[] {
   debugLog(`Building proxy tools from ${proxyToolDefs.length} definitions: ${proxyToolDefs.map(t => t.name).join(', ')}`);
 
-  return proxyToolDefs.map<ToolDefinition<any, any>>(def => ({
-    name: def.name,
-    label: def.name
-      .replace(/^mcp__.*?__/, '')
-      .replace(/_/g, ' ')
-      .replace(/([a-z])([A-Z])/g, '$1 $2'),
-    description: def.description,
-    // Pi SDK omits tools without promptSnippet from the system prompt's
-    // "Available tools" section, making them invisible to the LLM.
-    // Derive a snippet from the description so proxy tools are listed.
-    promptSnippet: def.description.length > 200
-      ? def.description.slice(0, 197) + '...'
-      : def.description,
-    parameters: def.inputSchema,
-    execute: async (
-      toolCallId: string,
-      params: any,
-    ): Promise<AgentToolResult<any>> => {
-      // Check speculative prefetch cache first (parallel call_llm optimization).
-      // If this tool was prefetched on message_end, the request is already in-flight —
-      // just await the result instead of sending a duplicate request.
-      const prefetched = prefetchCache.get(toolCallId);
-      if (prefetched) {
-        prefetchCache.delete(toolCallId);
-        debugLog(`Prefetch cache hit for ${def.name} (toolCallId: ${toolCallId})`);
-        const result = await prefetched;
+  return proxyToolDefs.map<ToolDefinition<any, any>>(def => {
+    const executionName = resolveSessionToolProxyName(def.name);
+    return {
+      name: def.name,
+      label: def.name
+        .replace(/^mcp__.*?__/, '')
+        .replace(/_/g, ' ')
+        .replace(/([a-z])([A-Z])/g, '$1 $2'),
+      description: def.description,
+      // Pi SDK omits tools without promptSnippet from the system prompt's
+      // "Available tools" section, making them invisible to the LLM.
+      // Short-name aliases stay in the registry for exact-name lookup but are
+      // kept out of that text list so the model does not see duplicates.
+      promptSnippet: executionName !== def.name
+        ? undefined
+        : def.description.length > 200
+          ? def.description.slice(0, 197) + '...'
+          : def.description,
+      parameters: def.inputSchema,
+      execute: async (
+        toolCallId: string,
+        params: any,
+      ): Promise<AgentToolResult<any>> => {
+        // Check speculative prefetch cache first (parallel call_llm optimization).
+        // If this tool was prefetched on message_end, the request is already in-flight —
+        // just await the result instead of sending a duplicate request.
+        const prefetched = prefetchCache.get(toolCallId);
+        if (prefetched) {
+          prefetchCache.delete(toolCallId);
+          debugLog(`Prefetch cache hit for ${executionName} (toolCallId: ${toolCallId})`);
+          const result = await prefetched;
+          return {
+            content: normalizeProxyToolContent(result.content),
+            details: proxyToolDetails(result),
+          };
+        }
+
+        const inputObj = params as Record<string, unknown>;
+
+        // Permission checking via main process
+        const approval = await requestPreToolUseApproval(executionName, inputObj, toolCallId);
+        if (approval.action === 'prepare_source_guide') {
+          return {
+            content: [{ type: 'text', text: formatSourceGuidePreparationResult(approval.preparation) }],
+            details: { isError: false },
+          };
+        }
+
+        // Execute via main process
+        const requestId = `proxy-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+
+        send({
+          type: 'tool_execute_request',
+          requestId,
+          toolName: executionName,
+          args: approval.input,
+        });
+
+        const result = await new Promise<ProxyToolExecutionResult>((resolve) => {
+          pendingToolExecutions.set(requestId, { resolve });
+        });
+
         return {
           content: normalizeProxyToolContent(result.content),
           details: proxyToolDetails(result),
         };
-      }
-
-      const inputObj = params as Record<string, unknown>;
-
-      // Permission checking via main process
-      const approval = await requestPreToolUseApproval(def.name, inputObj, toolCallId);
-      if (approval.action === 'prepare_source_guide') {
-        return {
-          content: [{ type: 'text', text: formatSourceGuidePreparationResult(approval.preparation) }],
-          details: { isError: false },
-        };
-      }
-
-      // Execute via main process
-      const requestId = `proxy-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-
-      send({
-        type: 'tool_execute_request',
-        requestId,
-        toolName: def.name,
-        args: approval.input,
-      });
-
-      const result = await new Promise<ProxyToolExecutionResult>((resolve) => {
-        pendingToolExecutions.set(requestId, { resolve });
-      });
-
-      return {
-        content: normalizeProxyToolContent(result.content),
-        details: proxyToolDetails(result),
-      };
-    },
-  }));
+      },
+    };
+  });
 }
 
 // ============================================================

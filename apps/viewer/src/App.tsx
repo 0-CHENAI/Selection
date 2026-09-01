@@ -302,6 +302,7 @@ export function App() {
           typeBadge={{ icon: FileText, label: overlayData.toolName, variant: 'default' }}
           onOpenUrl={platformActions.onOpenUrl}
           error={overlayData.error}
+          errorLabel={overlayData.toolName === 'Write' ? 'Write Failed' : undefined}
         />
       )}
 

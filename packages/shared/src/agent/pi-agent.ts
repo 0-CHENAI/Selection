@@ -672,11 +672,14 @@ export class PiAgent extends BaseAgent {
       sessionToolDefs = sessionToolDefs.filter(d => d.name !== 'mcp__session__browser_tool');
     }
 
-    // Patch call_llm description with provider-specific model hint
+    // Patch call_llm description with provider-specific model hint.
+    // Both the MCP name and the prompt-facing alias must get the same hint.
     if (this.config.miniModel) {
-      const callLlmDef = sessionToolDefs.find(d => d.name === 'mcp__session__call_llm');
-      if (callLlmDef) {
-        callLlmDef.description += `\n\nDefault fast model for this session: ${this.config.miniModel}. Omit the model parameter to use it automatically.`;
+      const hint = `\n\nDefault fast model for this session: ${this.config.miniModel}. Omit the model parameter to use it automatically.`;
+      for (const def of sessionToolDefs) {
+        if (def.name === 'mcp__session__call_llm' || def.name === 'call_llm') {
+          def.description += hint;
+        }
       }
     }
 
