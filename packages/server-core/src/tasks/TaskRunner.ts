@@ -123,6 +123,10 @@ export interface ConductorSessionHost {
   getSessionFinalText(sessionId: string): string | undefined;
   /** Resolved working directory of a session, so children inherit the orchestrator's cwd. */
   getSessionWorkingDirectory(sessionId: string): string | undefined;
+  /** Current model of a session, so DAG workers inherit the orchestrator when the spec omits one. */
+  getSessionModel?(sessionId: string): string | undefined;
+  /** Current LLM connection of a session, so DAG workers inherit the orchestrator when the spec omits one. */
+  getSessionLlmConnection?(sessionId: string): string | undefined;
   /** True when the session invoked tools. Undefined means unknown — workspace-pure will not store. */
   sessionUsedTools?(sessionId: string): boolean | undefined;
   /** Skill file contents for cache fingerprints. Missing slugs bypass workspace-pure. */
@@ -768,7 +772,7 @@ class ActiveRun {
         attempt: st.attempt,
         retryCount: Math.max(0, st.attempt - 1),
         role: node?.kind === 'verify' || node?.kind === 'judge' ? 'reviewer' as const : 'worker' as const,
-        model: node?.model ?? this.spec.defaults?.model,
+        model: this.resolveNodeModel(node),
         tokensUsed: st.sessionId ? this.sessionTokens.get(st.sessionId) : undefined,
         blocker: st.lastFailure,
         elapsedMs: timing?.elapsedMs,
@@ -1615,10 +1619,10 @@ class ActiveRun {
         taskNodeId: definitionId(instance?.id ?? node.id),
         hidden: true,
         name: instance?.id ?? nodeTitle(node),
-        model: node.model ?? this.spec.defaults?.model,
+        model: this.resolveNodeModel(node),
         // Required for non-default (e.g. pi/*) models to resolve a backend — without it the
         // child session completes instantly with no output.
-        llmConnection: node.llmConnection ?? this.spec.defaults?.llmConnection,
+        llmConnection: node.llmConnection ?? this.spec.defaults?.llmConnection ?? this.orchestratorLlmConnection(),
         // Node override → explicit task ceiling → safe. Never inherit a
         // permissive workspace default when the task omitted authorization.
         permissionMode: requested,
@@ -2614,8 +2618,22 @@ class ActiveRun {
     return metrics;
   }
 
+  private resolveNodeModel(node?: TaskNode): string | undefined {
+    return node?.model ?? this.spec.defaults?.model ?? this.orchestratorModel();
+  }
+
+  private orchestratorModel(): string | undefined {
+    const id = this.opts.orchestratorSessionId;
+    return id ? this.deps.host.getSessionModel?.(id) : undefined;
+  }
+
+  private orchestratorLlmConnection(): string | undefined {
+    const id = this.opts.orchestratorSessionId;
+    return id ? this.deps.host.getSessionLlmConnection?.(id) : undefined;
+  }
+
   private connectionKey(node: TaskNode): string {
-    return node.llmConnection ?? this.spec.defaults?.llmConnection ?? 'default';
+    return node.llmConnection ?? this.spec.defaults?.llmConnection ?? this.orchestratorLlmConnection() ?? 'default';
   }
 
   private tryAcquireConnection(node: TaskNode, slotId = node.id): boolean {
@@ -2789,7 +2807,7 @@ class ActiveRun {
       inputs: node.inputs ?? {},
       dependencyOutputs,
       artifactHashes,
-      model: node.model ?? this.spec.defaults?.model,
+      model: this.resolveNodeModel(node),
       connection: this.connectionKey(node),
       skillContents: this.skillContents() ?? {},
       runtimeVersion: CONDUCTOR_CACHE_RUNTIME_VERSION,

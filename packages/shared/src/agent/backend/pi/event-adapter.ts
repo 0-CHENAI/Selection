@@ -104,11 +104,11 @@ export class PiEventAdapter extends BaseEventAdapter {
   // Model context window for usage_update events
   private contextWindow: number | undefined;
 
-  // Mini model ID for call_llm display default (#596).
+  // Current session model for call_llm display default (#192).
   // Used when the caller didn't specify an explicit model — we fill args.model
   // on the tool_start event so the UI shows the effective default instead of
   // leaving the badge blank.
-  private miniModel: string | undefined;
+  private callLlmDefaultModel: string | undefined;
 
   // Track last usage for emitting with complete event
   private lastUsage: { input: number; output: number; cacheRead: number; cacheWrite: number; totalTokens: number; cost: { total: number } } | undefined;
@@ -213,13 +213,13 @@ export class PiEventAdapter extends BaseEventAdapter {
   }
 
   /**
-   * Set the mini model ID for call_llm badge default.
+   * Set the default model shown on the call_llm badge.
    * When the agent's call_llm invocation omits `args.model`, we fill it with
    * this so the UI badge shows the effective default instead of nothing.
    * Explicit `args.model` values from the agent are always preserved.
    */
-  setMiniModel(model: string | undefined): void {
-    this.miniModel = model;
+  setCallLlmDefaultModel(model: string | undefined): void {
+    this.callLlmDefaultModel = model;
   }
 
   /**
@@ -455,10 +455,11 @@ export class PiEventAdapter extends BaseEventAdapter {
         const args = this.normalizeToolInput(toolName, (event.args ?? {}) as Record<string, unknown>);
 
         // For call_llm, fill in the default display model when the caller didn't
-        // specify one — Pi's call_llm defaults to miniModel. We only fill the gap;
-        // we never overwrite an explicit agent-provided model (that was the #596 bug).
-        if (toolName.includes('call_llm') && this.miniModel && !args.model) {
-          args.model = this.miniModel;
+        // specify one — unspecified call_llm inherits the current session model.
+        // We only fill the gap; we never overwrite an explicit agent-provided
+        // model (that was the #596 bug).
+        if (toolName.includes('call_llm') && this.callLlmDefaultModel && !args.model) {
+          args.model = this.callLlmDefaultModel;
         }
 
         // Canonical metadata from subprocess event payload (interceptor/bridge-authoritative path).

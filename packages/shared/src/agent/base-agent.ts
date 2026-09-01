@@ -1295,6 +1295,7 @@ ${formattedMessages}
       backendName: this.backendName,
       sessionPath,
       validateModel: this.validateCallLlmModel?.bind(this),
+      defaultModel: this.getModel(),
     });
     return this.queryLlm(request);
   }
@@ -1302,7 +1303,7 @@ ${formattedMessages}
   /**
    * Optional model validation hook for call_llm.
    * Override in subclasses to filter models (e.g., Codex rejects non-OpenAI models).
-   * Return undefined to fall back to miniModel.
+   * Return undefined to fall back to the current session model.
    */
   protected validateCallLlmModel?(modelId: string): string | undefined;
 

@@ -54,6 +54,8 @@ export interface ISessionManager {
   /** Resolved working directory of a live session (Tasks Conductor uses it so children inherit
    *  the orchestrator's cwd). */
   getSessionWorkingDirectory(sessionId: string): string | undefined
+  getSessionModel(sessionId: string): string | undefined
+  getSessionLlmConnection(sessionId: string): string | undefined
   deleteSession(sessionId: string): Promise<void>
 
   // ---------------------------------------------------------------------------

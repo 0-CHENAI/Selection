@@ -20,6 +20,8 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 
 ## Bug Fixes
 
+- **Parallel `call_llm` and Swarm workers follow the current session model** — omitting `model` no longer falls through to the connection's Fast / mini tier. Work-chain badges, `spawn_session` children, and Conductor nodes without an explicit model inherit the input-area selection; an explicit tool or task model still wins. Title generation and other utility completions stay on the cheap model. (#192)
+
 - **All Sessions leaves project scope** — browsing a project now highlights only that project instead of also highlighting All Sessions. Clicking All Sessions clears the project-only filter and restores the global highlight while preserving status, label, and grouping preferences, so the global list shows every conversation again. (#165)
 
 - **Custom-endpoint model limits stay distinct and selectable** — each model is a separate card, and the context / max-output menus open above the API setup overlay instead of appearing stuck closed. (#146)

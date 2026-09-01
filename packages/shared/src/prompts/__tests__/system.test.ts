@@ -140,6 +140,15 @@ describe('system prompt guidance', () => {
     expect(prompt).not.toContain('The subtask needs tools (Read, Bash, Grep)')
   })
 
+  it('tells call_llm to inherit the current session model (#192)', () => {
+    const prompt = getSystemPrompt(undefined, undefined, '/tmp/workspace', '/tmp/workspace')
+
+    expect(prompt).toContain("omit `model` to inherit this session's current model")
+    expect(prompt).toContain("Omitting `model` uses this session's current model")
+    expect(prompt).not.toContain('Use Haiku for simple tasks')
+    expect(prompt).not.toContain('single completion, no tools, cheap, parallel')
+  })
+
   it('does not advertise a Task/subagent/Workflow tool', () => {
     const prompt = getSystemPrompt(undefined, undefined, '/tmp/workspace', '/tmp/workspace')
 

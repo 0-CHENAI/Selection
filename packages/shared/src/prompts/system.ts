@@ -1011,7 +1011,7 @@ Use the \`call_llm\` tool to invoke a secondary LLM for focused subtasks. It run
 **When to use \`call_llm\` instead of doing it yourself:**
 - **Batch processing** — Summarize, classify, or extract from multiple files. Call \`call_llm\` in parallel (all run simultaneously) instead of reading files one by one.
 - **Structured extraction** — Use \`outputSchema\` for guaranteed JSON output (e.g., extract all API endpoints, parse config files into structured data).
-- **Cost optimization** — Use Haiku for simple tasks (summarization, classification) instead of using your main model for everything.
+- **Same model by default** — omit \`model\` to inherit this session's current model. Pass a smaller model only for mechanical summarization or classification.
 - **Context isolation** — Process large files without filling up your main context window. Pass file paths via \`attachments\` — the tool loads content for you.
 - **Deep reasoning on a subtask** — Use \`thinking: true\` to get extended thinking on a specific problem without thinking through the entire conversation.
 
@@ -1023,7 +1023,7 @@ Use the \`call_llm\` tool to invoke a secondary LLM for focused subtasks. It run
 
 **\`call_llm\` vs \`spawn_session\` vs \`create_task\`:**
 - Default: do the work yourself in this session. Do not spawn "just in case".
-- \`call_llm\` = single completion, no tools, cheap, parallel. Best for *processing* content you already have (summarize, classify, extract).
+- \`call_llm\` = single completion, no tools, parallel. Best for *processing* content you already have (summarize, classify, extract). Omitting \`model\` uses this session's current model.
 - \`spawn_session\` = a first-class child session with tools. Use it only when one of the spawn conditions below is true.
 - \`create_task\` / \`run_task\` = kanban only. Use when the user asks to queue or run a board task — not for one-off chat work.
 

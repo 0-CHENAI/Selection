@@ -86,7 +86,7 @@ import {
 } from '@craft-agent/shared/sessions'
 import { loadWorkspaceSources, loadAllSources, getSourcesBySlugs, isSourceUsable, type LoadedSource, type McpServerConfig, getSourcesNeedingAuth, getSourceCredentialManager, getSourceServerBuilder, type SourceWithCredential, isApiOAuthProvider, hasRenewEndpoint, SERVER_BUILD_ERRORS, TokenRefreshManager, createTokenGetter } from '@craft-agent/shared/sources'
 import { listTaskSlugs, parseTaskSpec, parseTaskYaml, serializeTaskYaml, uniqueTaskSlug, loadTaskResults } from '@craft-agent/shared/tasks'
-import { clearSubmittedDefinition, createTaskFromSpec, resolveCreateTaskProjectId, rememberSubmittedDefinition, validateSubmittedDefinition, type TaskRunner } from '../tasks'
+import { clearSubmittedDefinition, createTaskFromSpec, inheritTaskExecutionDefaults, resolveCreateTaskProjectId, rememberSubmittedDefinition, validateSubmittedDefinition, type TaskRunner } from '../tasks'
 import {
   assessSpawnQualification,
   assessSwarmSpawnLimits,
@@ -3469,6 +3469,14 @@ export class SessionManager implements ISessionManager {
     return this.sessions.get(sessionId)?.workingDirectory
   }
 
+  getSessionModel(sessionId: string): string | undefined {
+    return this.sessions.get(sessionId)?.model
+  }
+
+  getSessionLlmConnection(sessionId: string): string | undefined {
+    return this.sessions.get(sessionId)?.llmConnection
+  }
+
   private async disposeManagedAgentRuntime(managed: ManagedSession, reason: string): Promise<void> {
     const sessionId = managed.id
 
@@ -4635,7 +4643,15 @@ export class SessionManager implements ISessionManager {
             if (!parsed.success) {
               throw new Error(`Invalid task spec: ${parsed.error.issues.map(i => i.message).join('; ')}`)
             }
-            const created = await createTaskFromSpec(this, ws.id, ws.rootPath, parsed.data)
+            const created = await createTaskFromSpec(
+              this,
+              ws.id,
+              ws.rootPath,
+              inheritTaskExecutionDefaults(parsed.data, {
+                model: managed.model,
+                llmConnection: managed.llmConnection,
+              }),
+            )
             return { ...created, warnings: [...created.warnings] }
           }
           const slug = uniqueTaskSlug(input.title ?? 'untitled-task', new Set(listTaskSlugs(ws.rootPath)))
@@ -4675,7 +4691,15 @@ export class SessionManager implements ISessionManager {
             throw new Error(`Invalid task spec: ${parsed.error.issues.map(i => i.message).join('; ')}`)
           }
 
-          const created = await createTaskFromSpec(this, ws.id, ws.rootPath, parsed.data)
+          const created = await createTaskFromSpec(
+            this,
+            ws.id,
+            ws.rootPath,
+            inheritTaskExecutionDefaults(parsed.data, {
+              model: managed.model,
+              llmConnection: managed.llmConnection,
+            }),
+          )
           return { ...created, warnings: [...warnings, ...created.warnings] }
         },
         runTaskFn: async (input) => this.runTaskFromTool(managed.workspace.id, input),
@@ -9976,7 +10000,7 @@ export class SessionManager implements ISessionManager {
 
         // Resolve call_llm model for TurnCard badge display.
         // Known registry ids only — do not rewrite ORDER aliases like "Opus".
-        // Note: Pi sessions override the model in PiEventAdapter (call_llm always uses miniModel).
+        // Note: Pi sessions override the model in PiEventAdapter (unspecified call_llm uses the session model).
         if (event.toolName === 'mcp__session__call_llm' && formattedToolInput?.model) {
           const resolved = resolveKnownRegistryModelId(String(formattedToolInput.model))
           if (resolved) {
