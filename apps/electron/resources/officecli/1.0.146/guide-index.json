@@ -1,0 +1,2824 @@
+{
+  "version": "1.0.146",
+  "guides": {
+    "word": {
+      "directory": "officecli-docx",
+      "entry": "SKILL.md",
+      "headings": [
+        {
+          "level": 1,
+          "title": "OfficeCLI DOCX Skill"
+        },
+        {
+          "level": 2,
+          "title": "Setup"
+        },
+        {
+          "level": 2,
+          "title": "⚠️ Help-First Rule"
+        },
+        {
+          "level": 2,
+          "title": "Mental Model"
+        },
+        {
+          "level": 2,
+          "title": "Shell & Execution Discipline"
+        },
+        {
+          "level": 2,
+          "title": "Requirements for Outputs"
+        },
+        {
+          "level": 3,
+          "title": "Visual delivery floor (applies to EVERY document)"
+        },
+        {
+          "level": 2,
+          "title": "Common Workflow"
+        },
+        {
+          "level": 2,
+          "title": "Quick Start"
+        },
+        {
+          "level": 2,
+          "title": "Reading & Analysis"
+        },
+        {
+          "level": 2,
+          "title": "Creating & Editing"
+        },
+        {
+          "level": 3,
+          "title": "Paragraphs, runs, styles"
+        },
+        {
+          "level": 3,
+          "title": "Tables"
+        },
+        {
+          "level": 3,
+          "title": "Lists (bullets, numbered, multi-level)"
+        },
+        {
+          "level": 3,
+          "title": "Tab stops (signature lines, leader rows)"
+        },
+        {
+          "level": 3,
+          "title": "Fields (PAGE / NUMPAGES / DATE / MERGEFIELD / REF)"
+        },
+        {
+          "level": 1,
+          "title": "Renders «customer_name» — visible placeholder, replaced in Word at mail-merge time."
+        },
+        {
+          "level": 3,
+          "title": "Headers & Footers (page numbering)"
+        },
+        {
+          "level": 1,
+          "title": "Empty first-page footer — auto-enables differentFirstPage so the cover has no page number"
+        },
+        {
+          "level": 1,
+          "title": "Default footer with live page number"
+        },
+        {
+          "level": 3,
+          "title": "Table of Contents"
+        },
+        {
+          "level": 1,
+          "title": "Built-in Heading styles are TOC sources."
+        },
+        {
+          "level": 1,
+          "title": "Custom paragraph styles need an outline level (0 = Heading 1)."
+        },
+        {
+          "level": 1,
+          "title": "Add the TOC only after its sources exist."
+        },
+        {
+          "level": 3,
+          "title": "Images"
+        },
+        {
+          "level": 3,
+          "title": "Charts"
+        },
+        {
+          "level": 3,
+          "title": "Hyperlinks and bookmarks"
+        },
+        {
+          "level": 3,
+          "title": "Sections and page setup"
+        },
+        {
+          "level": 1,
+          "title": "Newspaper-style multi-column flow (columnSpace in twips; 720 = 0.5in):"
+        },
+        {
+          "level": 3,
+          "title": "Forcing page breaks"
+        },
+        {
+          "level": 1,
+          "title": "Default: apply the break directly to the heading."
+        },
+        {
+          "level": 3,
+          "title": "Report-level recipes"
+        },
+        {
+          "level": 3,
+          "title": "Template delivery — separating Template Notes from end-user content"
+        },
+        {
+          "level": 3,
+          "title": "Advanced / specialty topics (skip if you are writing a report)"
+        },
+        {
+          "level": 3,
+          "title": "Raw-set escape hatch (L1 / L2 / L3)"
+        },
+        {
+          "level": 2,
+          "title": "QA (Required)"
+        },
+        {
+          "level": 3,
+          "title": "Minimum cycle before \"done\""
+        },
+        {
+          "level": 3,
+          "title": "Delivery Gate (run before handing off — any failure = REJECT, do NOT deliver)"
+        },
+        {
+          "level": 1,
+          "title": "Gate 1 — schema."
+        },
+        {
+          "level": 1,
+          "title": "Gate 2 — token leak (shell-escape / template tokens / literal \\$ \\t \\n). grep -c never false-PASSes."
+        },
+        {
+          "level": 1,
+          "title": "A TOC placeholder is valid before a Word-compatible field engine updates it; confirm the TOC field and updateFields setting structurally instead."
+        },
+        {
+          "level": 1,
+          "title": "Gate 3 — live PAGE field exists when a footer is expected."
+        },
+        {
+          "level": 3,
+          "title": "Field / cached-value spot-check"
+        },
+        {
+          "level": 3,
+          "title": "Honest limit"
+        },
+        {
+          "level": 3,
+          "title": "QA display notes (don't chase these)"
+        },
+        {
+          "level": 2,
+          "title": "Known Issues & Pitfalls"
+        },
+        {
+          "level": 3,
+          "title": "Renderer quirks (cross-viewer, [RENDERER-BUG] — don't chase)"
+        },
+        {
+          "level": 3,
+          "title": "Common pitfalls"
+        },
+        {
+          "level": 2,
+          "title": "Raw-set XML appendix (L3 patterns)"
+        },
+        {
+          "level": 3,
+          "title": "Help pointer"
+        }
+      ],
+      "files": [
+        {
+          "path": "SKILL.md",
+          "sha256": "1da56ed53a308222ab2516a2974ae98c6703b7d504fa5158348c39a18e85a4f1",
+          "sizeBytes": 42878
+        }
+      ]
+    },
+    "excel": {
+      "directory": "officecli-xlsx",
+      "entry": "SKILL.md",
+      "headings": [
+        {
+          "level": 1,
+          "title": "OfficeCLI XLSX Skill"
+        },
+        {
+          "level": 2,
+          "title": "Setup"
+        },
+        {
+          "level": 2,
+          "title": "⚠️ Help-First Rule"
+        },
+        {
+          "level": 2,
+          "title": "Shell & Execution Discipline"
+        },
+        {
+          "level": 2,
+          "title": "Requirements for Outputs"
+        },
+        {
+          "level": 3,
+          "title": "All Excel files"
+        },
+        {
+          "level": 3,
+          "title": "Visual delivery floor (applies to EVERY workbook)"
+        },
+        {
+          "level": 1,
+          "title": "Summary / chart / dashboard sheet (small, ≤ ~40 rows): fit to a single page."
+        },
+        {
+          "level": 1,
+          "title": "Tall data table (dozens+ rows): fit WIDTH only, let height paginate naturally."
+        },
+        {
+          "level": 1,
+          "title": "fitToPage=true here crushes every row onto one page → unreadable (### dates, 5px rows)."
+        },
+        {
+          "level": 3,
+          "title": "Financial models only — skip this section if you are building a template, tracker, CSV import, or operational sheet"
+        },
+        {
+          "level": 2,
+          "title": "Common Workflow"
+        },
+        {
+          "level": 2,
+          "title": "Quick Start"
+        },
+        {
+          "level": 2,
+          "title": "CSV / bulk import"
+        },
+        {
+          "level": 1,
+          "title": "gen_batch.py — produces batch chunks of 80 value-set ops each"
+        },
+        {
+          "level": 2,
+          "title": "Reading & Analysis"
+        },
+        {
+          "level": 2,
+          "title": "Creating & Editing"
+        },
+        {
+          "level": 3,
+          "title": "Cells and formulas"
+        },
+        {
+          "level": 3,
+          "title": "Named ranges"
+        },
+        {
+          "level": 3,
+          "title": "Charts"
+        },
+        {
+          "level": 3,
+          "title": "Conditional formatting"
+        },
+        {
+          "level": 3,
+          "title": "Data validation"
+        },
+        {
+          "level": 3,
+          "title": "Other elements (one-liners)"
+        },
+        {
+          "level": 2,
+          "title": "Chart Axis-by-Role"
+        },
+        {
+          "level": 2,
+          "title": "QA (Required)"
+        },
+        {
+          "level": 3,
+          "title": "Minimum cycle before \"done\""
+        },
+        {
+          "level": 3,
+          "title": "Formula verification checklist"
+        },
+        {
+          "level": 3,
+          "title": "Template QA"
+        },
+        {
+          "level": 3,
+          "title": "Fresh eyes"
+        },
+        {
+          "level": 3,
+          "title": "Honest limit"
+        },
+        {
+          "level": 2,
+          "title": "Known Issues & Pitfalls"
+        },
+        {
+          "level": 3,
+          "title": "The cross-sheet `!` trap (short)"
+        },
+        {
+          "level": 3,
+          "title": "CLI bug backlog (short)"
+        },
+        {
+          "level": 3,
+          "title": "Renderer caveats (cross-viewer color fidelity)"
+        },
+        {
+          "level": 3,
+          "title": "Escape layers (shell quoting is above; these are the extras)"
+        },
+        {
+          "level": 3,
+          "title": "Other common pitfalls"
+        }
+      ],
+      "files": [
+        {
+          "path": "SKILL.md",
+          "sha256": "5cd79d2c7398525acb9ffb431f5ff52f124a796f3b1a061f1f9f54f99bd367f3",
+          "sizeBytes": 35305
+        }
+      ]
+    },
+    "pptx": {
+      "directory": "officecli-pptx",
+      "entry": "SKILL.md",
+      "headings": [
+        {
+          "level": 1,
+          "title": "OfficeCLI PPTX Skill"
+        },
+        {
+          "level": 2,
+          "title": "Setup"
+        },
+        {
+          "level": 2,
+          "title": "⚠️ Help-First Rule"
+        },
+        {
+          "level": 2,
+          "title": "Shell & Execution Discipline"
+        },
+        {
+          "level": 2,
+          "title": "Requirements for Outputs"
+        },
+        {
+          "level": 3,
+          "title": "All decks"
+        },
+        {
+          "level": 3,
+          "title": "Visual delivery floor (applies to EVERY deck)"
+        },
+        {
+          "level": 2,
+          "title": "Design Principles"
+        },
+        {
+          "level": 3,
+          "title": "Grid, margins, negative space"
+        },
+        {
+          "level": 3,
+          "title": "Font pairings"
+        },
+        {
+          "level": 3,
+          "title": "Color and contrast"
+        },
+        {
+          "level": 3,
+          "title": "Chart-choice decision table"
+        },
+        {
+          "level": 3,
+          "title": "Animation"
+        },
+        {
+          "level": 3,
+          "title": "Layout patterns & data display"
+        },
+        {
+          "level": 3,
+          "title": "Image treatment (only when a slide uses a photo / screenshot / logo)"
+        },
+        {
+          "level": 3,
+          "title": "Visual motif commitment"
+        },
+        {
+          "level": 3,
+          "title": "Visual AI-tells to avoid"
+        },
+        {
+          "level": 2,
+          "title": "Common Workflow"
+        },
+        {
+          "level": 2,
+          "title": "Quick Start"
+        },
+        {
+          "level": 1,
+          "title": "Cover — dark fill, centered title"
+        },
+        {
+          "level": 1,
+          "title": "Content — white fill, title + body + notes"
+        },
+        {
+          "level": 2,
+          "title": "Reading & Analysis"
+        },
+        {
+          "level": 2,
+          "title": "Creating & Editing"
+        },
+        {
+          "level": 3,
+          "title": "Slides and backgrounds"
+        },
+        {
+          "level": 3,
+          "title": "Shapes"
+        },
+        {
+          "level": 3,
+          "title": "Text inside shapes (paragraphs, runs, styling)"
+        },
+        {
+          "level": 3,
+          "title": "Charts"
+        },
+        {
+          "level": 3,
+          "title": "Pictures"
+        },
+        {
+          "level": 3,
+          "title": "Connectors (LEAD — flowcharts / decision trees first-class)"
+        },
+        {
+          "level": 3,
+          "title": "Animations (LEAD)"
+        },
+        {
+          "level": 3,
+          "title": "Hyperlinks, tooltips, slide-jump"
+        },
+        {
+          "level": 3,
+          "title": "Tables, placeholders, groups, zoom — one-liners"
+        },
+        {
+          "level": 3,
+          "title": "Deck-level recipes"
+        },
+        {
+          "level": 4,
+          "title": "(a) Cover (and section divider)"
+        },
+        {
+          "level": 4,
+          "title": "(b) Data slide (chart + commentary block)"
+        },
+        {
+          "level": 1,
+          "title": "Chart — left 2/3 (single-quote the title because of `$`)"
+        },
+        {
+          "level": 1,
+          "title": "Commentary card — right 1/3: background + heading + body"
+        },
+        {
+          "level": 4,
+          "title": "(c) Flowchart / process diagram (boxes + connectors)"
+        },
+        {
+          "level": 1,
+          "title": "Connector pattern — reuse for any box-to-box graph."
+        },
+        {
+          "level": 4,
+          "title": "(d) Multi-slide deck skeletons"
+        },
+        {
+          "level": 4,
+          "title": "(e) KPI callouts — giant-number card grid"
+        },
+        {
+          "level": 1,
+          "title": "Two cards: navy standard + terracotta watch. Each = bg + big number + sublabel + chip."
+        },
+        {
+          "level": 4,
+          "title": "(f) Decision tree — YES/NO branching"
+        },
+        {
+          "level": 2,
+          "title": "QA (Required)"
+        },
+        {
+          "level": 3,
+          "title": "Delivery Gate (any failure = REJECT, do NOT deliver)"
+        },
+        {
+          "level": 3,
+          "title": "Gate 3 — Visual audit (MANDATORY)"
+        },
+        {
+          "level": 2,
+          "title": "Common Pitfalls"
+        }
+      ],
+      "files": [
+        {
+          "path": "SKILL.md",
+          "sha256": "0d53192751d5770984f16f3c34f9923377651555c667150d7f96e16e8c9757b3",
+          "sizeBytes": 44849
+        }
+      ]
+    },
+    "academic-paper": {
+      "directory": "officecli-academic-paper",
+      "entry": "SKILL.md",
+      "headings": [
+        {
+          "level": 1,
+          "title": "OfficeCLI Academic Paper Skill"
+        },
+        {
+          "level": 2,
+          "title": "Setup"
+        },
+        {
+          "level": 2,
+          "title": "⚠️ Help-First Rule"
+        },
+        {
+          "level": 2,
+          "title": "Mental Model & Inheritance"
+        },
+        {
+          "level": 2,
+          "title": "Shell & Execution Discipline"
+        },
+        {
+          "level": 2,
+          "title": "What \"academic\" means here (identity)"
+        },
+        {
+          "level": 3,
+          "title": "Reverse handoff — when to go BACK to docx"
+        },
+        {
+          "level": 2,
+          "title": "Workflow — 5 verbs"
+        },
+        {
+          "level": 2,
+          "title": "Requirements (academic floor on top of docx v2)"
+        },
+        {
+          "level": 3,
+          "title": "Typography and spacing (venue-aware)"
+        },
+        {
+          "level": 3,
+          "title": "Abstract, bibliography, caption placement"
+        },
+        {
+          "level": 3,
+          "title": "Cover / first-page block"
+        },
+        {
+          "level": 3,
+          "title": "Section numbering convention (STYLE-DEPENDENT — do not apply blindly)"
+        },
+        {
+          "level": 2,
+          "title": "Quick Start — minimal APA paper"
+        },
+        {
+          "level": 2,
+          "title": "Citation style recipes"
+        },
+        {
+          "level": 3,
+          "title": "APA 7 (social sciences — psychology, education, management)"
+        },
+        {
+          "level": 1,
+          "title": "Body paragraph with parenthetical citation"
+        },
+        {
+          "level": 1,
+          "title": "Reference entry with hanging indent"
+        },
+        {
+          "level": 1,
+          "title": "DOI hyperlink appended to the reference paragraph"
+        },
+        {
+          "level": 3,
+          "title": "Chicago 17 — Notes-Bibliography (humanities — history, philosophy, religion)"
+        },
+        {
+          "level": 1,
+          "title": "Body paragraph that will anchor a footnote, then the footnote itself"
+        },
+        {
+          "level": 1,
+          "title": "Next footnote — shortened form"
+        },
+        {
+          "level": 1,
+          "title": "Bibliography section split — primary sources first"
+        },
+        {
+          "level": 3,
+          "title": "IEEE (engineering — transactions, conference proceedings)"
+        },
+        {
+          "level": 1,
+          "title": "Body citing reference 1"
+        },
+        {
+          "level": 1,
+          "title": "Reference list entry — number in the text"
+        },
+        {
+          "level": 3,
+          "title": "MLA 9 (literature, languages, cultural studies)"
+        },
+        {
+          "level": 2,
+          "title": "Equations (OMML — inline vs display)"
+        },
+        {
+          "level": 1,
+          "title": "Display equation (own paragraph, centered) — explicitly set mode=display for clarity"
+        },
+        {
+          "level": 1,
+          "title": "Display equation with Greek / subscript / integral — verify rendering below"
+        },
+        {
+          "level": 1,
+          "title": "Inline equation INSIDE prose — required whenever variables like x_{t+1}, \\lambda, etc. appear in a body paragraph:"
+        },
+        {
+          "level": 1,
+          "title": "Tab positions depend on the COLUMN width (twips). Default blank doc = A4, 3.18cm margins"
+        },
+        {
+          "level": 1,
+          "title": "→ text width = 8300 twips."
+        },
+        {
+          "level": 1,
+          "title": "single column: center tab = 4150, right tab = 8300"
+        },
+        {
+          "level": 1,
+          "title": "two columns (default 720-twip gutter): col = (8300-720)/2 = 3790 → center 1895, right 3790"
+        },
+        {
+          "level": 1,
+          "title": "(other page size / margins: text width = pageWidth - marginLeft - marginRight; recompute.)"
+        },
+        {
+          "level": 2,
+          "title": "Figures, tables, and cross-references (SEQ + PAGEREF)"
+        },
+        {
+          "level": 3,
+          "title": "SEQ auto-numbering — figures and tables"
+        },
+        {
+          "level": 1,
+          "title": "Figure with caption BELOW the image. Caption = \"Figure <seq>: title\" + optional bookmark for cross-ref."
+        },
+        {
+          "level": 1,
+          "title": "Caption paragraph (below the figure, per academic convention)"
+        },
+        {
+          "level": 1,
+          "title": "Bookmark the caption so other paragraphs can PAGEREF it"
+        },
+        {
+          "level": 1,
+          "title": "(Numbers are filled later by a single `set / --prop recalcFields=seq`, after all captions exist.)"
+        },
+        {
+          "level": 3,
+          "title": "PAGEREF — cross-reference by bookmark"
+        },
+        {
+          "level": 1,
+          "title": "Cross-ref paragraph: \"see Figure 1 on page X\""
+        },
+        {
+          "level": 3,
+          "title": "Tables — caption ABOVE"
+        },
+        {
+          "level": 1,
+          "title": "Caption first (ABOVE the table), THEN the table"
+        },
+        {
+          "level": 1,
+          "title": "... fill header + rows per docx v2 §Tables"
+        },
+        {
+          "level": 3,
+          "title": "Verify SEQ + PAGEREF fields landed"
+        },
+        {
+          "level": 1,
+          "title": "At least one SEQ Figure or SEQ Table in the body document part"
+        },
+        {
+          "level": 2,
+          "title": "Footnotes vs endnotes"
+        },
+        {
+          "level": 1,
+          "title": "Footnote anchored to paragraph N"
+        },
+        {
+          "level": 1,
+          "title": "Endnote — anchored to paragraph N (like footnote); lands at /endnote[@endnoteId=N]"
+        },
+        {
+          "level": 2,
+          "title": "Bibliography section"
+        },
+        {
+          "level": 1,
+          "title": "Section heading — same as body Heading1 (excluded from body numbering by convention)"
+        },
+        {
+          "level": 1,
+          "title": "Each entry: hanging indent 720 twips (0.5\"), with indent=720 as the partner (first line flush, wraps indented)"
+        },
+        {
+          "level": 1,
+          "title": "DOI hyperlink on its own run appended to the entry paragraph"
+        },
+        {
+          "level": 2,
+          "title": "Multi-column (IEEE journal two-column recipe)"
+        },
+        {
+          "level": 1,
+          "title": "1. Title, authors, affiliation — single-column (the default first section)"
+        },
+        {
+          "level": 1,
+          "title": "2. Abstract — still single-column, block-style"
+        },
+        {
+          "level": 1,
+          "title": "3. Section break + two-column from here on"
+        },
+        {
+          "level": 1,
+          "title": "`/section[last()]` resolves to the final section (like p[last()]); an explicit /section[N] also works."
+        },
+        {
+          "level": 1,
+          "title": "After the add, SECTION_COUNT should be 2 — [1] is pre-break, [2] is post-break (2-col body area)."
+        },
+        {
+          "level": 1,
+          "title": "4. Body — IEEE wants Roman numerals + ALL CAPS section titles (P1.2)."
+        },
+        {
+          "level": 1,
+          "title": "5. At the end of 2-column body, ANOTHER section break + revert to single column for references / appendices"
+        },
+        {
+          "level": 1,
+          "title": "(If you want references in 2-col too, skip step 5 — but most IEEE papers use 2-col for references as well.)"
+        },
+        {
+          "level": 1,
+          "title": "officecli add \"$FILE\" /body --type section --prop type=continuous"
+        },
+        {
+          "level": 1,
+          "title": "Use /section[last()] for the final section, or re-count for an explicit /section[N]:"
+        },
+        {
+          "level": 1,
+          "title": "officecli set \"$FILE\" \"/section[3]\" --prop columns=1"
+        },
+        {
+          "level": 1,
+          "title": "6. Footer, close, validate"
+        },
+        {
+          "level": 2,
+          "title": "Abstract / keywords / affiliation block"
+        },
+        {
+          "level": 1,
+          "title": "Superscript affiliation markers (multi-institution paper)"
+        },
+        {
+          "level": 1,
+          "title": "Running header (skip on cover via type=first empty header — see docx v2 §headers)"
+        },
+        {
+          "level": 2,
+          "title": "QA — Delivery Gate (executable)"
+        },
+        {
+          "level": 3,
+          "title": "Gates 1-3 — inherited from docx v2"
+        },
+        {
+          "level": 3,
+          "title": "Gate 4 — citation round-trip"
+        },
+        {
+          "level": 1,
+          "title": "IEEE example (bracketed numerics). Adjust regex for APA (Author, Year) or MLA (Author Page)."
+        },
+        {
+          "level": 1,
+          "title": "REJECT when citations exceed entries (cites without references). Entries > citations is allowed by some venues."
+        },
+        {
+          "level": 3,
+          "title": "Gate 5a — SEQ presence + cached numbers distinct"
+        },
+        {
+          "level": 1,
+          "title": "Count SEQ fields via query (raw-grep collapses multi-matches on one XML line → undercounts)."
+        },
+        {
+          "level": 1,
+          "title": "Cached values must be distinct. Run `set / --prop recalcFields=seq` once after all captions exist;"
+        },
+        {
+          "level": 1,
+          "title": "before recalc the fields render the #OCLI_NOTEVAL! sentinel, after recalc Figure 1 / Figure 2 / Figure 3:"
+        },
+        {
+          "level": 3,
+          "title": "Gate 5b — Visual audit via HTML preview (MANDATORY, not optional)"
+        },
+        {
+          "level": 3,
+          "title": "Honest limit"
+        },
+        {
+          "level": 2,
+          "title": "Known Issues & Pitfalls (academic-specific)"
+        },
+        {
+          "level": 2,
+          "title": "Renderer quirks (cross-viewer)"
+        },
+        {
+          "level": 2,
+          "title": "Help pointer"
+        }
+      ],
+      "files": [
+        {
+          "path": "SKILL.md",
+          "sha256": "573292e01c2b9b9885c6cd24ffec5f808d88f8a1868aa0e962bcab9a479f40e5",
+          "sizeBytes": 45705
+        }
+      ]
+    },
+    "financial-model": {
+      "directory": "officecli-financial-model",
+      "entry": "SKILL.md",
+      "headings": [
+        {
+          "level": 1,
+          "title": "OfficeCLI Financial-Model Skill"
+        },
+        {
+          "level": 2,
+          "title": "Setup"
+        },
+        {
+          "level": 2,
+          "title": "Help-First Rule"
+        },
+        {
+          "level": 2,
+          "title": "Mental Model & Inheritance"
+        },
+        {
+          "level": 2,
+          "title": "Shell & Execution Discipline"
+        },
+        {
+          "level": 2,
+          "title": "Core Principles (identity)"
+        },
+        {
+          "level": 3,
+          "title": "Reverse handoff — when to go BACK to xlsx base"
+        },
+        {
+          "level": 2,
+          "title": "Three-zone architecture (hard rule)"
+        },
+        {
+          "level": 1,
+          "title": "Calc zone: zero numeric hardcodes allowed. `cell:not(:has(formula))` selects the literal (non-formula) cells; `cell:has(formula)` selects the formula cells."
+        },
+        {
+          "level": 1,
+          "title": "Assumptions zone: should be non-zero."
+        },
+        {
+          "level": 2,
+          "title": "Print delivery (board / IC / LP)"
+        },
+        {
+          "level": 1,
+          "title": "1. Print_Area scoped to the Outputs sheet (Summary or Dashboard)."
+        },
+        {
+          "level": 1,
+          "title": "2. Hide every non-Outputs sheet — Print_Area scope alone does NOT stop the print pipeline from emitting every visible sheet."
+        },
+        {
+          "level": 1,
+          "title": "3. fit-to-page landscape on Outputs sheet."
+        },
+        {
+          "level": 2,
+          "title": "Build-order & cache-drift rule (critical for 3-statement)"
+        },
+        {
+          "level": 2,
+          "title": "Recipes — three model types"
+        },
+        {
+          "level": 3,
+          "title": "Recipe A — 3-statement model (P&L + BS + CF)"
+        },
+        {
+          "level": 1,
+          "title": "(1) Top-line trend (Revenue + EBITDA)."
+        },
+        {
+          "level": 1,
+          "title": "(2) Margin trend (Gross / EBITDA / NI margin)."
+        },
+        {
+          "level": 1,
+          "title": "(3) Cash trajectory (Ending Cash ± Runway)."
+        },
+        {
+          "level": 1,
+          "title": "Balance check every period must say OK (range get → cells under .data.results[0].children[])"
+        },
+        {
+          "level": 1,
+          "title": "Cash recon every period must say OK"
+        },
+        {
+          "level": 1,
+          "title": "Summary KPIs are plausible numbers, not null"
+        },
+        {
+          "level": 3,
+          "title": "Recipe B — DCF valuation"
+        },
+        {
+          "level": 1,
+          "title": "Cell D14 (first data cell, grid anchor at C14 = WACC label, C15 = first WACC value)"
+        },
+        {
+          "level": 1,
+          "title": "Substitute $D$13 (this cell's g) and $C15 (this cell's WACC) into a replicated EV + equity formula."
+        },
+        {
+          "level": 3,
+          "title": "Recipe C — LBO model"
+        },
+        {
+          "level": 1,
+          "title": "Sources = Uses hard check."
+        },
+        {
+          "level": 1,
+          "title": "Stated-vs-plug consistency (Gate 4 addendum; only run if you chose pattern (a))."
+        },
+        {
+          "level": 1,
+          "title": "year 2 senior TLB"
+        },
+        {
+          "level": 1,
+          "title": "Add the sweep-rule comment as a classic comment (comment is NOT a cell prop — separate --type comment)."
+        },
+        {
+          "level": 1,
+          "title": "Values/formulas — single non-resident batch."
+        },
+        {
+          "level": 1,
+          "title": "Classic comments — one --type comment per anchor cell."
+        },
+        {
+          "level": 1,
+          "title": "Iterate converged?"
+        },
+        {
+          "level": 2,
+          "title": "Sensitivity & scenarios"
+        },
+        {
+          "level": 1,
+          "title": "If you want a hover tooltip on B5, add it separately:"
+        },
+        {
+          "level": 2,
+          "title": "Financial function patterns"
+        },
+        {
+          "level": 2,
+          "title": "Circular references & iterative calc"
+        },
+        {
+          "level": 3,
+          "title": "Write-order surgery (de-ring → write downstream → re-ring)"
+        },
+        {
+          "level": 2,
+          "title": "Audit & Delivery Gate"
+        },
+        {
+          "level": 3,
+          "title": "Gates 1–3 — inherited from xlsx v2 verbatim"
+        },
+        {
+          "level": 3,
+          "title": "Gate 4 — statement integrity (3-statement & LBO)"
+        },
+        {
+          "level": 3,
+          "title": "Gate 5 — cached-value sanity on valuation cells"
+        },
+        {
+          "level": 1,
+          "title": "Customize the path list per recipe — this is the DCF example"
+        },
+        {
+          "level": 3,
+          "title": "Gate 6 — hardcode / zone discipline"
+        },
+        {
+          "level": 1,
+          "title": "`cell:not(:has(formula))` selects the literal cells (and `cell:has(formula)` the formula cells)."
+        },
+        {
+          "level": 1,
+          "title": "Named-range coverage + dead-decoration audit: ≥3 ranges declared AND each referenced by ≥1 formula."
+        },
+        {
+          "level": 3,
+          "title": "Gate 5b — visual audit via HTML preview (mandatory)"
+        },
+        {
+          "level": 3,
+          "title": "Gate 6.1 — token / placeholder sweep"
+        },
+        {
+          "level": 3,
+          "title": "Honest limit"
+        },
+        {
+          "level": 2,
+          "title": "Known Issues & Pitfalls"
+        },
+        {
+          "level": 2,
+          "title": "Help pointer"
+        }
+      ],
+      "files": [
+        {
+          "path": "SKILL.md",
+          "sha256": "65280bce9537ff3192bbc8fe1ad94980662929a71390b258d7f38f24772d8c9e",
+          "sizeBytes": 48112
+        }
+      ]
+    },
+    "data-dashboard": {
+      "directory": "officecli-data-dashboard",
+      "entry": "SKILL.md",
+      "headings": [
+        {
+          "level": 1,
+          "title": "Data Dashboard (scene-layer on officecli-xlsx)"
+        },
+        {
+          "level": 2,
+          "title": "Setup"
+        },
+        {
+          "level": 2,
+          "title": "⚠️ Help-First Rule"
+        },
+        {
+          "level": 2,
+          "title": "Mental Model & Inheritance"
+        },
+        {
+          "level": 2,
+          "title": "Shell & Execution Discipline"
+        },
+        {
+          "level": 2,
+          "title": "Core Principles"
+        },
+        {
+          "level": 2,
+          "title": "Requirements"
+        },
+        {
+          "level": 2,
+          "title": "Quick Start"
+        },
+        {
+          "level": 1,
+          "title": "Resolve Dashboard's 0-based index from the actual sheet list — never hardcode."
+        },
+        {
+          "level": 2,
+          "title": "Design Ideas"
+        },
+        {
+          "level": 3,
+          "title": "Layout patterns (pick one, stay consistent)"
+        },
+        {
+          "level": 3,
+          "title": "Complexity scaling by data size"
+        },
+        {
+          "level": 3,
+          "title": "Chart type selection"
+        },
+        {
+          "level": 3,
+          "title": "Preset options"
+        },
+        {
+          "level": 3,
+          "title": "Conditional formatting — semantic colors"
+        },
+        {
+          "level": 3,
+          "title": "KPI card anatomy"
+        },
+        {
+          "level": 3,
+          "title": "Chart width budget by title length"
+        },
+        {
+          "level": 3,
+          "title": "Print-ready delivery (board-pack / investor-send / one-pager)"
+        },
+        {
+          "level": 1,
+          "title": "1. Print_Area scoped to Dashboard (xlnm convention)."
+        },
+        {
+          "level": 1,
+          "title": "2. fit-to-page on Dashboard."
+        },
+        {
+          "level": 1,
+          "title": "3. Landscape page setup."
+        },
+        {
+          "level": 1,
+          "title": "4. Hide non-Dashboard sheets — Print_Area scope alone does NOT stop the print pipeline from emitting every visible sheet."
+        },
+        {
+          "level": 2,
+          "title": "QA (REQUIRED — Delivery Gate)"
+        },
+        {
+          "level": 3,
+          "title": "Minimum cycle before \"done\""
+        },
+        {
+          "level": 1,
+          "title": "a) Token / ### sweep."
+        },
+        {
+          "level": 1,
+          "title": "b) Per-KPI: cachedValue length × coef must fit col width. coef=0.55 fit-to-page, 0.85 otherwise."
+        },
+        {
+          "level": 1,
+          "title": "c) Rerun Gate 2 title × 0.18 ≤ anchor span.  d) Log which fallback was used and why."
+        },
+        {
+          "level": 3,
+          "title": "Honest limits"
+        },
+        {
+          "level": 2,
+          "title": "Reference"
+        },
+        {
+          "level": 2,
+          "title": "Known Issues & Pitfalls"
+        },
+        {
+          "level": 3,
+          "title": "Dashboard-specific"
+        },
+        {
+          "level": 3,
+          "title": "Inherited (pointer only)"
+        }
+      ],
+      "files": [
+        {
+          "path": "SKILL.md",
+          "sha256": "38cf745bb04cb7005cd089e6e87073509f190e46e035707528a5d0b01b2dafd0",
+          "sizeBytes": 29873
+        }
+      ]
+    },
+    "pitch-deck": {
+      "directory": "officecli-pitch-deck",
+      "entry": "SKILL.md",
+      "headings": [
+        {
+          "level": 1,
+          "title": "OfficeCLI Pitch Deck Skill"
+        },
+        {
+          "level": 2,
+          "title": "Setup"
+        },
+        {
+          "level": 2,
+          "title": "⚠️ Help-First Rule"
+        },
+        {
+          "level": 2,
+          "title": "Mental Model & Inheritance"
+        },
+        {
+          "level": 2,
+          "title": "Shell & Execution Discipline"
+        },
+        {
+          "level": 2,
+          "title": "What \"pitch deck\" means here (identity)"
+        },
+        {
+          "level": 3,
+          "title": "Reverse handoff — when to go BACK to pptx base"
+        },
+        {
+          "level": 2,
+          "title": "Series A / B / C stage diagnosis (decision tool)"
+        },
+        {
+          "level": 2,
+          "title": "赛道 arc templates (5 families)"
+        },
+        {
+          "level": 3,
+          "title": "(1) B2B SaaS / Enterprise software"
+        },
+        {
+          "level": 3,
+          "title": "(2) Consumer (B2C app / consumer hardware / D2C)"
+        },
+        {
+          "level": 3,
+          "title": "(3) Deep Tech / Frontier tech (AI foundation models, quantum, climate hardware, robotics)"
+        },
+        {
+          "level": 3,
+          "title": "(4) Marketplace / Network business (two-sided platform, social, commerce)"
+        },
+        {
+          "level": 3,
+          "title": "(5) Bio / Life sciences / Healthtech"
+        },
+        {
+          "level": 2,
+          "title": "Slide Patterns (layout canon)"
+        },
+        {
+          "level": 3,
+          "title": "C.1 Title / Cover (dark gradient)"
+        },
+        {
+          "level": 3,
+          "title": "C.2 3-Stat callout row"
+        },
+        {
+          "level": 3,
+          "title": "C.3 4-Stat callout row"
+        },
+        {
+          "level": 3,
+          "title": "C.4 Chart + Context (chart left, stats right)"
+        },
+        {
+          "level": 3,
+          "title": "C.5 Icon-in-circle grid (3-row vertical)"
+        },
+        {
+          "level": 3,
+          "title": "C.5b 2×2 Feature grid (4 parallel items)"
+        },
+        {
+          "level": 2,
+          "title": "Key-slide recipes (10 essentials)"
+        },
+        {
+          "level": 3,
+          "title": "(1) Cover slide — company · tagline · round · date"
+        },
+        {
+          "level": 3,
+          "title": "(2) Problem slide — industry pain in 1 sentence + 3 data cards"
+        },
+        {
+          "level": 1,
+          "title": "Repeat the 4-block pattern at x=12.04cm and x=22.58cm for cards 2 and 3."
+        },
+        {
+          "level": 3,
+          "title": "(2b) Why Now slide — Consumer / Seed / early A must-have"
+        },
+        {
+          "level": 1,
+          "title": "Card 1 (x=1.5cm) — trigger / data / implication / source. Repeat at x=12.04cm and x=22.58cm."
+        },
+        {
+          "level": 1,
+          "title": "Card 2 pattern: Oura IPO 2024 / +$2.4B valuation / category proven. Card 3: On-device LLM (Llama 3.2) / Q4-24 / privacy moat viable."
+        },
+        {
+          "level": 3,
+          "title": "(3) Solution slide — product in one sentence + 3-step \"how it works\""
+        },
+        {
+          "level": 1,
+          "title": "Title — \"a product pattern, not a brand slogan\"."
+        },
+        {
+          "level": 1,
+          "title": "Good: \"Auto-correlate K8s events across 3 data planes in 90 seconds\""
+        },
+        {
+          "level": 1,
+          "title": "Bad:  \"The future of observability\""
+        },
+        {
+          "level": 1,
+          "title": "3 boxes across: gap = (33.87 − 3 − 3·7) / 2 = 4.93cm; x = 1.5, 13.43, 25.36"
+        },
+        {
+          "level": 1,
+          "title": "Connectors + arrowheads: --prop tailEnd=triangle ALWAYS (pptx Known Issues C-P-5..6)."
+        },
+        {
+          "level": 1,
+          "title": "Full batch block → see pptx v2 §Creating and Editing (c) 4-step flowchart; swap N from 4 boxes to 3."
+        },
+        {
+          "level": 3,
+          "title": "(4) Market slide — TAM / SAM / SOM nested columns"
+        },
+        {
+          "level": 1,
+          "title": "Use a pptx column chart with 3 values. Categories = TAM,SAM,SOM. Source annotation is a separate shape."
+        },
+        {
+          "level": 3,
+          "title": "(5) Product slide — screenshot + 3 bullets OR 3-card feature grid"
+        },
+        {
+          "level": 1,
+          "title": "(a) screenshot + bullets — consumer pattern"
+        },
+        {
+          "level": 1,
+          "title": "Right column bullets (each as a separate shape so sizes stay explicit)"
+        },
+        {
+          "level": 1,
+          "title": "Repeat for bullets 2 and 3 at y=7.5cm / y=10cm."
+        },
+        {
+          "level": 3,
+          "title": "(6) Business model slide — unit econ or revenue model"
+        },
+        {
+          "level": 1,
+          "title": "SaaS pattern: KPI card values + sub-label + gray VC-floor context under each."
+        },
+        {
+          "level": 1,
+          "title": "Card 1 (LTV): big number \"$420K\", sub \"Lifetime value\", context \"floor: ARPU × GM / churn\""
+        },
+        {
+          "level": 1,
+          "title": "Card 2 (CAC): big number \"$90K\",  sub \"Acquisition cost\", context \"fully-loaded S&M spend\""
+        },
+        {
+          "level": 1,
+          "title": "Card 3 (Payback): big number \"14 mo\", sub \"CAC payback\", context \"VC floor: < 18 mo\""
+        },
+        {
+          "level": 1,
+          "title": "Card 4 (GM): big number \"78%\", sub \"Gross margin\", context \"SaaS floor: 70%+\""
+        },
+        {
+          "level": 1,
+          "title": "Grid math for 4 cards across: usable = 33.87 − 3 − 3·0.76 = 28.59, col = 7.15cm"
+        },
+        {
+          "level": 1,
+          "title": "→ Full batch template → pptx v2 §(e). Adapt card count 3→4 and card width 9.78cm→7.15cm."
+        },
+        {
+          "level": 3,
+          "title": "(7) Traction slide — ARR curve that starts at 0"
+        },
+        {
+          "level": 1,
+          "title": "Right callout"
+        },
+        {
+          "level": 3,
+          "title": "(8) Team slide — avatars + names + prior companies (not just a wall)"
+        },
+        {
+          "level": 1,
+          "title": "Card 1 — CEO"
+        },
+        {
+          "level": 1,
+          "title": "Repeat for Card 2 (CTO, x=10cm) and Card 3 (VP Eng, x=18cm) — 3 cards × 5-6 shapes each."
+        },
+        {
+          "level": 3,
+          "title": "(9) Financials slide — 4-year plan + honest assumptions"
+        },
+        {
+          "level": 1,
+          "title": "5 assumption bullets as 5 separate paragraph shapes at y=6, 7.5, 9, 10.5, 12cm — size=14, italic=true."
+        },
+        {
+          "level": 1,
+          "title": "Keep each bullet ≤ 14 words so 8.8cm width fits without wrap."
+        },
+        {
+          "level": 3,
+          "title": "(10) The Ask — hero number + 4-bucket Use-of-Funds + runway"
+        },
+        {
+          "level": 3,
+          "title": "(11) Pipeline chart — Bio / Deep Tech must-have"
+        },
+        {
+          "level": 1,
+          "title": "4 stage headers + candidate row 1 (HLX-201 at Ph2, bar width = 3·5.97 = 17.91cm) in one batch."
+        },
+        {
+          "level": 1,
+          "title": "Repeat rows 2 & 3 at y=7.8cm / y=10.1cm with bar widths per stage (Ph1=5.97cm, Ph1-Ph2=11.94cm, Ph1-Ph3=17.91cm)."
+        },
+        {
+          "level": 1,
+          "title": "NCT footer full-width at y=16.8cm."
+        },
+        {
+          "level": 3,
+          "title": "(12) Competitive comparison table — Series B+ essential"
+        },
+        {
+          "level": 1,
+          "title": "Inline table via --prop data= (per-cell r#c# is silently ignored / not honored — use data=). Single-quote the data value — '$15/host' would strip."
+        },
+        {
+          "level": 1,
+          "title": "Highlight your row: loop over /slide[$SLIDE]/table[1]/tr[5]/tc[1..5] and set cell fill to CADCFC."
+        },
+        {
+          "level": 2,
+          "title": "Numbers convention (pitch-specific)"
+        },
+        {
+          "level": 2,
+          "title": "VC ship-check (6 red flags / positive signals)"
+        },
+        {
+          "level": 2,
+          "title": "Traction triple-pattern (ARR + milestones + logos)"
+        },
+        {
+          "level": 1,
+          "title": "Milestone timeline: 5 dates as circles on a horizontal line at y=8cm."
+        },
+        {
+          "level": 1,
+          "title": "Use pptx shapes (ellipse preset) + connectors (shape=straight) between them."
+        },
+        {
+          "level": 1,
+          "title": "Each milestone = ellipse at y=8cm + date label above + event description below."
+        },
+        {
+          "level": 1,
+          "title": "→ See pptx v2 Recipe (d) row 9 (Roadmap timeline) for the canonical pattern."
+        },
+        {
+          "level": 1,
+          "title": "Logo wall: pictures in a 5×N grid. Typical spacing: logo width = 5cm, height = 2cm, gap = 0.4cm."
+        },
+        {
+          "level": 1,
+          "title": "grid math for 5 logos across, 1.5cm edge margin: usable = 33.87 − 3 − 4·0.4 = 29.27, col = 5.85cm"
+        },
+        {
+          "level": 1,
+          "title": "(use 5cm logo width centered in each 5.85cm column)"
+        },
+        {
+          "level": 2,
+          "title": "QA — Delivery Gate (executable)"
+        },
+        {
+          "level": 3,
+          "title": "Gates 1–5a — inherited from pptx v2 verbatim"
+        },
+        {
+          "level": 1,
+          "title": "$XXM stripped by zsh leaves bare \" M ARR\" / \" M raised\" / \"Series [A-C] · M\" patterns."
+        },
+        {
+          "level": 3,
+          "title": "Gate 5b — Visual audit via HTML preview (MANDATORY, NOT optional)"
+        },
+        {
+          "level": 3,
+          "title": "Gate 6 — Pitch narrative sanity (executable)"
+        },
+        {
+          "level": 1,
+          "title": "6.1 — no TBD / lorem / placeholder tokens (stronger than Gate 2 — pitch-specific scope)"
+        },
+        {
+          "level": 1,
+          "title": "6.2 — TAM / SAM / SOM presence (Series A+)"
+        },
+        {
+          "level": 1,
+          "title": "6.3 — Unit econ presence (Series B+): CAC OR LTV OR payback"
+        },
+        {
+          "level": 1,
+          "title": "6.4 — Use of Funds present on ask slide"
+        },
+        {
+          "level": 1,
+          "title": "6.5 — Team prior-company signal (at least one of ex- / former / prior / previously)"
+        },
+        {
+          "level": 1,
+          "title": "6.6 — Traction chart y-axis anchored at 0 (at least one chart must set axismin=0, Series A+)"
+        },
+        {
+          "level": 3,
+          "title": "Honest limit"
+        },
+        {
+          "level": 2,
+          "title": "Known Issues & Pitfalls"
+        },
+        {
+          "level": 2,
+          "title": "Help pointer"
+        }
+      ],
+      "files": [
+        {
+          "path": "SKILL.md",
+          "sha256": "6b59efdc094451945fd059548771326cce4bd2e3544d0659d3d6acf0825ea2b1",
+          "sizeBytes": 66735
+        }
+      ]
+    },
+    "word-form": {
+      "directory": "officecli-word-form",
+      "entry": "SKILL.md",
+      "headings": [
+        {
+          "level": 1,
+          "title": "OfficeCLI Word-Form Skill"
+        },
+        {
+          "level": 2,
+          "title": "BEFORE YOU START (CRITICAL)"
+        },
+        {
+          "level": 2,
+          "title": "Help-First Rule"
+        },
+        {
+          "level": 2,
+          "title": "Mental Model & Inheritance"
+        },
+        {
+          "level": 2,
+          "title": "Shell & Execution Discipline"
+        },
+        {
+          "level": 3,
+          "title": "`--after find:` micro-playbook"
+        },
+        {
+          "level": 1,
+          "title": "Trap: first-match hits 甲方 only, 乙方 missed"
+        },
+        {
+          "level": 1,
+          "title": "Fix: two signatories, two unique anchors"
+        },
+        {
+          "level": 2,
+          "title": "What makes a real form (identity)"
+        },
+        {
+          "level": 2,
+          "title": "Requirements for Outputs (hard floor)"
+        },
+        {
+          "level": 2,
+          "title": "Three Paths (core decision)"
+        },
+        {
+          "level": 3,
+          "title": "Path A — Pure CLI (the default for almost everything)"
+        },
+        {
+          "level": 1,
+          "title": "dropdown WITH its options and a non-default date format, in one add each — no raw-set:"
+        },
+        {
+          "level": 1,
+          "title": "lock works on add AND set:"
+        },
+        {
+          "level": 1,
+          "title": "protection comes last, once all fields exist:"
+        },
+        {
+          "level": 1,
+          "title": "officecli set \"$FILE\" / --prop protection=forms"
+        },
+        {
+          "level": 3,
+          "title": "Path B — CLI + `raw-set` bridge (only an attribute help does NOT expose)"
+        },
+        {
+          "level": 1,
+          "title": "Display text ≠ stored value — not expressible via items=, so inject the listItems directly:"
+        },
+        {
+          "level": 3,
+          "title": "Path C — Word template (only what no API reaches)"
+        },
+        {
+          "level": 1,
+          "title": "One-time in Word: Developer tab → Insert Content Control → Save as template.docx"
+        },
+        {
+          "level": 3,
+          "title": "Decision table"
+        },
+        {
+          "level": 2,
+          "title": "Quick Start — Path A + FormField (minimal intake form)"
+        },
+        {
+          "level": 2,
+          "title": "Path B — raw-set recipes"
+        },
+        {
+          "level": 3,
+          "title": "B1 — Dropdown items (append)"
+        },
+        {
+          "level": 1,
+          "title": "Skeleton (Path A)"
+        },
+        {
+          "level": 1,
+          "title": "Inject items"
+        },
+        {
+          "level": 1,
+          "title": "Verify"
+        },
+        {
+          "level": 3,
+          "title": "B2 — Combobox items (same as B1, different xpath tail)"
+        },
+        {
+          "level": 3,
+          "title": "B3 — Date format (setattr)"
+        },
+        {
+          "level": 1,
+          "title": "Chinese: yyyy年MM月dd日"
+        },
+        {
+          "level": 1,
+          "title": "US:    w:val=MM/dd/yyyy"
+        },
+        {
+          "level": 1,
+          "title": "ISO:   w:val=yyyy-MM-dd  (already the default)"
+        },
+        {
+          "level": 1,
+          "title": "Long:  w:val=\"MMMM d, yyyy\""
+        },
+        {
+          "level": 3,
+          "title": "raw-set actions & errors"
+        },
+        {
+          "level": 2,
+          "title": "Path C — Word template workflow"
+        },
+        {
+          "level": 2,
+          "title": "MERGEFIELD (data-driven track)"
+        },
+        {
+          "level": 1,
+          "title": "Readback: \"Dear «CustomerName», «CompanyName»\""
+        },
+        {
+          "level": 3,
+          "title": "Common field patterns"
+        },
+        {
+          "level": 3,
+          "title": "IF conditional (CLI-expressible)"
+        },
+        {
+          "level": 1,
+          "title": "Merge-time result: \"Mr. «LastName»\" or \"Ms. «LastName»\""
+        },
+        {
+          "level": 2,
+          "title": "Legacy FormField"
+        },
+        {
+          "level": 1,
+          "title": "CHECKBOX — the only real checkbox (SDT type=checkbox is not implemented)"
+        },
+        {
+          "level": 1,
+          "title": "TEXT formfield"
+        },
+        {
+          "level": 1,
+          "title": "DROPDOWN formfield — items NOT settable via CLI; use Word template or SDT Path B"
+        },
+        {
+          "level": 1,
+          "title": "Read / modify by name (stable) or 1-based index"
+        },
+        {
+          "level": 2,
+          "title": "Document protection & lock"
+        },
+        {
+          "level": 3,
+          "title": "Enabling form protection"
+        },
+        {
+          "level": 3,
+          "title": "Protection modes"
+        },
+        {
+          "level": 3,
+          "title": "Lock values (settable on `add` and `set`)"
+        },
+        {
+          "level": 1,
+          "title": "Omit lock entirely → unlocked (default)"
+        },
+        {
+          "level": 3,
+          "title": "lock × `protection=forms` interaction"
+        },
+        {
+          "level": 3,
+          "title": "Block-level lock (paragraph-wrapping SDT)"
+        },
+        {
+          "level": 1,
+          "title": "raw-set actions: append | prepend | insertbefore | insertafter | replace | remove | setattr"
+        },
+        {
+          "level": 1,
+          "title": "No `wrap` action — two-step instead: (1) insertbefore an empty <w:sdt><w:sdtContent/></w:sdt>,"
+        },
+        {
+          "level": 1,
+          "title": "(2) move the original <w:p> inside by `replace` on the sdtContent with a copy of the paragraph XML."
+        },
+        {
+          "level": 1,
+          "title": "Simpler alternative: read the paragraph XML via `officecli raw`, then `replace` the whole <w:p> with <w:sdt>...<w:sdtContent>[original w:p]</w:sdtContent></w:sdt>:"
+        },
+        {
+          "level": 1,
+          "title": "NOTE: this needs an XML-aware extraction, NOT awk. `raw /document` emits the whole document on ONE line,"
+        },
+        {
+          "level": 1,
+          "title": "so an awk range like `/paraId=.../,/<\\/w:p>/` grabs the entire <w:document> (schema-invalid). Parse the XML"
+        },
+        {
+          "level": 1,
+          "title": "and pull the single <w:p> by paraId instead:"
+        },
+        {
+          "level": 3,
+          "title": "Role-gated fields (multi-role forms)"
+        },
+        {
+          "level": 1,
+          "title": "Patient section — editable (no lock, or sdtlocked to prevent accidental deletion only)"
+        },
+        {
+          "level": 1,
+          "title": "Physician section — locked against patient edits"
+        },
+        {
+          "level": 2,
+          "title": "Recipe — Contract / SOW template with MERGEFIELD + signature"
+        },
+        {
+          "level": 3,
+          "title": "Recipe (sow-a) Boilerplate + cover + parties"
+        },
+        {
+          "level": 3,
+          "title": "Recipe (sow-b) SDT fields — all via Path A"
+        },
+        {
+          "level": 1,
+          "title": "(Only reach for raw-set if a listItem's stored value must differ from its display text — see Path B.)"
+        },
+        {
+          "level": 3,
+          "title": "Recipe (sow-c) Watermark + locks + document protection"
+        },
+        {
+          "level": 2,
+          "title": "Design principles (forms)"
+        },
+        {
+          "level": 2,
+          "title": "Batch mode (brief)"
+        },
+        {
+          "level": 2,
+          "title": "Delivery Gate (executable)"
+        },
+        {
+          "level": 1,
+          "title": "Assumes FILE=<your-form.docx>, document has been closed with officecli close \"$FILE\""
+        },
+        {
+          "level": 1,
+          "title": "Gate 1 — Validate (must be clean; protection=forms no longer produces a schema error)"
+        },
+        {
+          "level": 1,
+          "title": "Gate 2 — Token / placeholder leak (labels used as visual underscore substitutes)"
+        },
+        {
+          "level": 1,
+          "title": "Gate 3 — At least one structured field exists"
+        },
+        {
+          "level": 1,
+          "title": "Gate 4 — Every SDT has alias + tag (skill-imposed H2)"
+        },
+        {
+          "level": 1,
+          "title": "NOTE: `query`/`get --json` wrap prop fields under `.data.results[N].format.{prop}` — use `.data.results[0].format.alias` / `.format.tag`, never bare `.alias` or `.data.format`."
+        },
+        {
+          "level": 1,
+          "title": "Gate 5 — Protection enforced + per-field lock inventory"
+        },
+        {
+          "level": 1,
+          "title": "Gate 6 — No type=checkbox leaked onto any SDT"
+        },
+        {
+          "level": 2,
+          "title": "Known Issues"
+        },
+        {
+          "level": 2,
+          "title": "Phase 2 — enhance in Word"
+        },
+        {
+          "level": 2,
+          "title": "Help pointer"
+        }
+      ],
+      "files": [
+        {
+          "path": "SKILL.md",
+          "sha256": "428eef196cd5b9f6a6267a3f25f85919e6c560b10b53e31513f2a1e6fd7a396a",
+          "sizeBytes": 46899
+        }
+      ]
+    },
+    "morph-ppt": {
+      "directory": "morph-ppt",
+      "entry": "SKILL.md",
+      "headings": [
+        {
+          "level": 1,
+          "title": "OfficeCLI Morph-PPT Skill"
+        },
+        {
+          "level": 2,
+          "title": "Setup"
+        },
+        {
+          "level": 2,
+          "title": "⚠️ Help-First Rule"
+        },
+        {
+          "level": 2,
+          "title": "Mental Model & Inheritance"
+        },
+        {
+          "level": 3,
+          "title": "Reverse handoff — when to go BACK to pptx base (or sibling skills)"
+        },
+        {
+          "level": 2,
+          "title": "Shell & Execution Discipline"
+        },
+        {
+          "level": 2,
+          "title": "Two primitives this skill owns"
+        },
+        {
+          "level": 2,
+          "title": "What is Morph? (core mechanics)"
+        },
+        {
+          "level": 1,
+          "title": "Slide 2: actor is visible at x=5cm — Slide 3: same name, ghosted off-canvas → visible slide-off motion"
+        },
+        {
+          "level": 2,
+          "title": "Morph Pair Planning (pre-code, REQUIRED)"
+        },
+        {
+          "level": 2,
+          "title": "Morph Recipes (4 patterns)"
+        },
+        {
+          "level": 3,
+          "title": "(a) Single-element morph — size / position"
+        },
+        {
+          "level": 1,
+          "title": "Slide 1 — hero"
+        },
+        {
+          "level": 1,
+          "title": "Slide 2 — headline shrinks + moves; new body takes stage"
+        },
+        {
+          "level": 3,
+          "title": "(b) Multi-element coordinated morph — Actors / Choreography"
+        },
+        {
+          "level": 1,
+          "title": "Slide 1 — anchor composition (already built via recipe a; here we add actors)"
+        },
+        {
+          "level": 1,
+          "title": "Slide 2 — morph: ring moves + grows, dot slides left (spatial variety ≥ 5cm on both)"
+        },
+        {
+          "level": 1,
+          "title": "Ghost slide-1 content (name path still resolves after morph — see Known Issues)"
+        },
+        {
+          "level": 1,
+          "title": "Verify morph pair: identical names on slides 1 & 2"
+        },
+        {
+          "level": 1,
+          "title": "Compare — `!!scene-ring` and `!!scene-dot` MUST appear on both, byte-identical."
+        },
+        {
+          "level": 1,
+          "title": "Note: morph stores names with a `!!` prefix; compare the prefixed forms."
+        },
+        {
+          "level": 3,
+          "title": "(c) Continuous multi-slide morph (story arc) — use helpers"
+        },
+        {
+          "level": 1,
+          "title": "Invoke the provided helper library for clone + ghost + verify"
+        },
+        {
+          "level": 1,
+          "title": "... assume slide 1 is built with 2 scene actors (!!scene-ring, !!scene-dot) + #s1-title"
+        },
+        {
+          "level": 1,
+          "title": "Helper builds slide 2–5 with: clone from previous + apply transition=morph + ghost previous #sN- content"
+        },
+        {
+          "level": 1,
+          "title": "`clone` prints the cloned slide's shape list — read it to pick which shape indices carry the"
+        },
+        {
+          "level": 1,
+          "title": "previous slide's #s(n-1)- content, then pass those explicit indices to `ghost`."
+        },
+        {
+          "level": 3,
+          "title": "(d) Morph + fade hybrid — entrance on morph slide"
+        },
+        {
+          "level": 1,
+          "title": "Slide 2 already has transition=morph and !!scene-ring. Add a new card with fade-entrance."
+        },
+        {
+          "level": 1,
+          "title": "Apply simultaneous-with-morph fade entrance to the new card."
+        },
+        {
+          "level": 1,
+          "title": "'fade-entrance-300-with' = fade in, 300ms, trigger=withPrevious (plays with the morph transition)."
+        },
+        {
+          "level": 2,
+          "title": "Choreography — animation types + staggered timing"
+        },
+        {
+          "level": 2,
+          "title": "Scene-actor spatial rule"
+        },
+        {
+          "level": 2,
+          "title": "Style library lookup workflow"
+        },
+        {
+          "level": 2,
+          "title": "Delivery Gate (inherits pptx v2 + morph additions)"
+        },
+        {
+          "level": 3,
+          "title": "Gate 2 morph addendum — price / metric tokens eaten by zsh"
+        },
+        {
+          "level": 1,
+          "title": "Gate 2 morph — price / metric token leaks + stray-period placeholders"
+        },
+        {
+          "level": 1,
+          "title": "Pattern hits: bare prices ($9, $29, $9.99), /unit suffix ($9/mo, $199/yr), ${VAR}, \\n/\\r/\\t, lone period"
+        },
+        {
+          "level": 3,
+          "title": "Gate 5b — Visual audit via HTML preview (MANDATORY) — extended for morph"
+        },
+        {
+          "level": 2,
+          "title": "Renderer honesty"
+        },
+        {
+          "level": 2,
+          "title": "Ghost Discipline & Actor Lifecycle"
+        },
+        {
+          "level": 3,
+          "title": "The Per-Slide Ghosting Rule"
+        },
+        {
+          "level": 3,
+          "title": "Workflow Pattern (Bash)"
+        },
+        {
+          "level": 1,
+          "title": "After adding new content shapes to slide $SLIDE:"
+        },
+        {
+          "level": 3,
+          "title": "Detection: Ghost Count Gate"
+        },
+        {
+          "level": 2,
+          "title": "Common Morph Pitfalls (design + workflow traps)"
+        },
+        {
+          "level": 2,
+          "title": "Known Issues & Pitfalls"
+        },
+        {
+          "level": 1,
+          "title": "Per-slide: add spd=\"slow\" to every transition element on slide N (2 XML hits per morph slide)"
+        },
+        {
+          "level": 2,
+          "title": "Outputs & delivery"
+        },
+        {
+          "level": 2,
+          "title": "Adjustments after creation"
+        },
+        {
+          "level": 2,
+          "title": "References"
+        }
+      ],
+      "files": [
+        {
+          "path": "SKILL.md",
+          "sha256": "0d7e196f30061e4da8a29fb4fd3f995f6130f02708a98615e28459594a28c07a",
+          "sizeBytes": 48768
+        },
+        {
+          "path": "reference/decision-rules.md",
+          "sha256": "e1ab8c7b2071cb1947913e0dfef36ce7e4e7cec6ff8beb92a4775c5435adc96a",
+          "sizeBytes": 6141
+        },
+        {
+          "path": "reference/pptx-design.md",
+          "sha256": "40a86833c2da317c9507051e7412b27ffa9ea02e7177ae67e20709cc9a2d394b",
+          "sizeBytes": 13935
+        },
+        {
+          "path": "reference/styles/INDEX.md",
+          "sha256": "4a8ffdc368c69b02b768d362d1b267deb63c44ffe4c99a042151298895ecbdb4",
+          "sizeBytes": 17649
+        },
+        {
+          "path": "reference/styles/bw--brutalist-raw/bw__brutalist_raw.pptx",
+          "sha256": "70da31714e4e7a1077385947f21375c2f95a0e9beb649527996a61b1f1a2e25e",
+          "sizeBytes": 13521
+        },
+        {
+          "path": "reference/styles/bw--brutalist-raw/style.md",
+          "sha256": "f7069ea3a417b124bc4a6d1087827a39fdbd8e2bba4fb1deabb834f3976ad26d",
+          "sizeBytes": 2145
+        },
+        {
+          "path": "reference/styles/bw--mono-line/bw__mono_line.pptx",
+          "sha256": "c3462a33f4d84dad7ccdcc5f25dcb6a1df871b7bc3f5da6d7d631ecb5707e883",
+          "sizeBytes": 15074
+        },
+        {
+          "path": "reference/styles/bw--mono-line/style.md",
+          "sha256": "94136290396cb32ac204105f5db03180a8de79e171a91869eb8d2f386b103757",
+          "sizeBytes": 4011
+        },
+        {
+          "path": "reference/styles/bw--swiss-bauhaus/bw__swiss_bauhaus.pptx",
+          "sha256": "f869a8e7af020806278d2d32d603635d87a6b83d3d20ec5509b0e09d45a4e88a",
+          "sizeBytes": 13298
+        },
+        {
+          "path": "reference/styles/bw--swiss-bauhaus/style.md",
+          "sha256": "1c57fb2339b2443678dc818dc0030fc67377818a9239fb6a08091627b90ef77e",
+          "sizeBytes": 2261
+        },
+        {
+          "path": "reference/styles/bw--swiss-system/style.md",
+          "sha256": "6728ea3d81e32fcbe894f5c73f1f7610c2a8d70e72c0a2566739872825ee9f56",
+          "sizeBytes": 1305
+        },
+        {
+          "path": "reference/styles/dark--architectural-plan/dark__architectural_plan.pptx",
+          "sha256": "1a622fa12da7ebedd2c6c6286a93ca90538105cc0068365b5a4104450de3df73",
+          "sizeBytes": 20683
+        },
+        {
+          "path": "reference/styles/dark--architectural-plan/style.md",
+          "sha256": "aefebb22ecae46282874c70571174e2f561eaf181affcec0290605f0dfe3149b",
+          "sizeBytes": 1792
+        },
+        {
+          "path": "reference/styles/dark--aurora-softedge/style.md",
+          "sha256": "9782226aa00f113131dbdf5955ba28fd7fc3c9e4786d40d7ff28c5886b31e1bc",
+          "sizeBytes": 625
+        },
+        {
+          "path": "reference/styles/dark--blueprint-grid/dark__blueprint_grid.pptx",
+          "sha256": "c3ab428b6776f8b748ab521daf38207c708cbd49cd15126666bc4e1b765b73ca",
+          "sizeBytes": 15603
+        },
+        {
+          "path": "reference/styles/dark--blueprint-grid/style.md",
+          "sha256": "f1dac76a6571d3fb436743cf274bedbe6eec75735b9792704d9d5db0ac4be795",
+          "sizeBytes": 1479
+        },
+        {
+          "path": "reference/styles/dark--circle-digital/dark__circle_digital.pptx",
+          "sha256": "c975360a9c93244aada91c32371c633e62ac0297599bdb3b470f94672f28f54a",
+          "sizeBytes": 18645
+        },
+        {
+          "path": "reference/styles/dark--circle-digital/style.md",
+          "sha256": "87c5c2eff2f6ae9c0f635397c7345b8a2c693e49c1814e1e353bc62167b03457",
+          "sizeBytes": 1821
+        },
+        {
+          "path": "reference/styles/dark--cosmic-neon/dark__cosmic_neon.pptx",
+          "sha256": "591bf765f3de2321c46f76181092a0937feb37bfd081f3db03a07c444a19123c",
+          "sizeBytes": 20045
+        },
+        {
+          "path": "reference/styles/dark--cosmic-neon/style.md",
+          "sha256": "245ea683e6b3dd34b2ef8d463ea9e76effee30d0021adcd19fe22fd60955b4e5",
+          "sizeBytes": 2709
+        },
+        {
+          "path": "reference/styles/dark--cyber-future/dark__cyber_future.pptx",
+          "sha256": "6407d4929c67989ddc9a8108f07914f77b4071258d5ea2595b588446cbb6cf9d",
+          "sizeBytes": 19041
+        },
+        {
+          "path": "reference/styles/dark--cyber-future/style.md",
+          "sha256": "bbd014dcb3fda27de0c1a52d009b1d97303e4abfa68d437525a0a59c6e148708",
+          "sizeBytes": 2448
+        },
+        {
+          "path": "reference/styles/dark--diagonal-cut/dark__diagonal_cut.pptx",
+          "sha256": "4dd827c78082f20b413a3cad46ae2390425f851582c9d60ee7a3811001592a21",
+          "sizeBytes": 17367
+        },
+        {
+          "path": "reference/styles/dark--diagonal-cut/style.md",
+          "sha256": "e7a05ce8c769094c06ca055e6e4b6197f8edd3dad7c6e411a6dbe07074d0806c",
+          "sizeBytes": 4395
+        },
+        {
+          "path": "reference/styles/dark--editorial-story/dark__editorial_story.pptx",
+          "sha256": "9a1aeee393f455d7f2aa57c0b6d4c4dcd787dd993f6b3920ef4dde2c00e56b79",
+          "sizeBytes": 24186
+        },
+        {
+          "path": "reference/styles/dark--editorial-story/style.md",
+          "sha256": "dca552c3743553db5631b0db62e0d84e9dd980a38799a1592e53a4518a77e3c1",
+          "sizeBytes": 2439
+        },
+        {
+          "path": "reference/styles/dark--investor-pitch/style.md",
+          "sha256": "da078ccc3949c13a4a3756b462b2a79a36fabc48ceb801b22c1b512e63a3c2b6",
+          "sizeBytes": 2397
+        },
+        {
+          "path": "reference/styles/dark--investor-pitch/template.pptx",
+          "sha256": "8f151ae28bf0d05f48d332d22933900de4a12e8e16b3bbdbbcb6b5fe3c57bf74",
+          "sizeBytes": 22294
+        },
+        {
+          "path": "reference/styles/dark--liquid-flow/dark__liquid_flow.pptx",
+          "sha256": "22d4c69f1ab02c9232eb3fec1d495ca622db96782ca49043c51662939a466de5",
+          "sizeBytes": 16096
+        },
+        {
+          "path": "reference/styles/dark--liquid-flow/style.md",
+          "sha256": "d15e323d6e699227f0d8eb6e97637ec47d68e7b53af7ed4f6ec45c28c8fdbe9b",
+          "sizeBytes": 1842
+        },
+        {
+          "path": "reference/styles/dark--luxury-minimal/dark__luxury_minimal.pptx",
+          "sha256": "0aeb8d8d3e199310310fb460cb95197732859deb1e86da6e4b15eab393ae8d68",
+          "sizeBytes": 18989
+        },
+        {
+          "path": "reference/styles/dark--luxury-minimal/style.md",
+          "sha256": "c7e615a2b4ed6ba3db4cfef55df14a2ddadba8fabce591c182eb7a9c75b178a8",
+          "sizeBytes": 2358
+        },
+        {
+          "path": "reference/styles/dark--midnight-blueprint/style.md",
+          "sha256": "463dfaa751cb0dac3eb9130324a457a07fdc23d52927376f42eb525613f7f62d",
+          "sizeBytes": 2660
+        },
+        {
+          "path": "reference/styles/dark--neon-productivity/dark__neon_productivity.pptx",
+          "sha256": "0dc867748fc9c41b50ea64dc488b76e224218e0770bcc15ee97f62cf45233f45",
+          "sizeBytes": 36279
+        },
+        {
+          "path": "reference/styles/dark--neon-productivity/style.md",
+          "sha256": "6a28d41a766cfbbb0dac503381eda5d3169ac4753d62672e10fadc2008811138",
+          "sizeBytes": 2643
+        },
+        {
+          "path": "reference/styles/dark--obsidian-amber/style.md",
+          "sha256": "6af06c49237c6be9fd1d82e81e4909eef2e87ea3752ec97351fbcf1e57b80556",
+          "sizeBytes": 615
+        },
+        {
+          "path": "reference/styles/dark--premium-navy/dark__premium_navy.pptx",
+          "sha256": "242add5f5be50bd5ea342c30c4482f0c6c7b675912b1b248901dcf65d8b62d7f",
+          "sizeBytes": 15088
+        },
+        {
+          "path": "reference/styles/dark--premium-navy/style.md",
+          "sha256": "636b15e46d5a1039a677ea5079030839b1c448e16e478463d215734a69affd87",
+          "sizeBytes": 4909
+        },
+        {
+          "path": "reference/styles/dark--sage-grain/style.md",
+          "sha256": "f71d9617ef6b1f1aa1e61e4efabf6f8dd5fb4b8c34134b436a24f62d26e9562f",
+          "sizeBytes": 1809
+        },
+        {
+          "path": "reference/styles/dark--space-odyssey/dark__space_odyssey.pptx",
+          "sha256": "fa110c5e9e0014a6a21118c398224928db247561f58c1c2aea33f88ed221ea4c",
+          "sizeBytes": 20246
+        },
+        {
+          "path": "reference/styles/dark--space-odyssey/style.md",
+          "sha256": "c7809561ffe97391e3b0484405be725b97a4ff6bc4c4d775a718d05376dbb516",
+          "sizeBytes": 2894
+        },
+        {
+          "path": "reference/styles/dark--spotlight-stage/dark__spotlight_stage.pptx",
+          "sha256": "e984d29369b0e995bf5766961a2ea66344ecc830d5b32e7fc35bc98933b0b8ef",
+          "sizeBytes": 14256
+        },
+        {
+          "path": "reference/styles/dark--spotlight-stage/style.md",
+          "sha256": "9d77013b2510a8a5677e05004072673c791da9e35026033c5a3cef62cad43776",
+          "sizeBytes": 1565
+        },
+        {
+          "path": "reference/styles/dark--velvet-rose/style.md",
+          "sha256": "ed17112e29f4091112ec5219116878186b19ffadc600fbbcebdae5391a24315b",
+          "sizeBytes": 612
+        },
+        {
+          "path": "reference/styles/light--bold-type/light__bold_type.pptx",
+          "sha256": "e2b4ee154861c548be53e6cf10c369a262af3b5a3927065ee0b941b3795e7154",
+          "sizeBytes": 13691
+        },
+        {
+          "path": "reference/styles/light--bold-type/style.md",
+          "sha256": "869ea46d3993ad6ee3c019c765fa732eb864907a3fb4587b2dea1c9c32da61a1",
+          "sizeBytes": 5285
+        },
+        {
+          "path": "reference/styles/light--firmwise-saas/style.md",
+          "sha256": "db693ab4b3a06cec51be8e072862207c6b16cbe6b8d09175c70c737d32194d35",
+          "sizeBytes": 956
+        },
+        {
+          "path": "reference/styles/light--fluid-gradient/style.md",
+          "sha256": "b5ec68f3eb6a8bd9cc2297c7be571db27be75bdfc9e83a1a384661667d5e7a2b",
+          "sizeBytes": 562
+        },
+        {
+          "path": "reference/styles/light--glassmorphism-vc/style.md",
+          "sha256": "d71c6abdd9ee7a7e6ecf5b68aea7006192ed714243b92cef3c6b9533470cb7b1",
+          "sizeBytes": 588
+        },
+        {
+          "path": "reference/styles/light--isometric-clean/light__isometric_clean.pptx",
+          "sha256": "cf0a3b3f8d7e443c52af2a2439c691c0a1a42e5600ce26125c4fd3b2ef33e155",
+          "sizeBytes": 14365
+        },
+        {
+          "path": "reference/styles/light--isometric-clean/style.md",
+          "sha256": "af0acbb01e98670232f1e6ad278a02c7e0f6da6b747c31dcbaae9afa86619f36",
+          "sizeBytes": 1538
+        },
+        {
+          "path": "reference/styles/light--minimal-corporate/style.md",
+          "sha256": "971fb197af2f5d22d204e85433c994a24250f6e9726d0ecb7ea8e3e6dd73b676",
+          "sizeBytes": 2734
+        },
+        {
+          "path": "reference/styles/light--minimal-product/light__minimal_product.pptx",
+          "sha256": "d83e8d3f875ff1aba8616b57ec41ccc180930c2fe52cc6114eb55fdcfc6c8784",
+          "sizeBytes": 20566
+        },
+        {
+          "path": "reference/styles/light--minimal-product/style.md",
+          "sha256": "3fc6b39fc07066b7a7cc6c9b40ea1d69f8701b4d7c98b85c2c037eb8683d1a78",
+          "sizeBytes": 2662
+        },
+        {
+          "path": "reference/styles/light--project-proposal/style.md",
+          "sha256": "3a28a34344b5e13cc6e4d563e083d0fc25d8e8375ba7b2c618c3b928670c14f7",
+          "sizeBytes": 2837
+        },
+        {
+          "path": "reference/styles/light--spring-launch/style.md",
+          "sha256": "e6f3775c0fca4a3704b2718f0bbb8eaa5921bf07d99e8eada611e73bd41a02b9",
+          "sizeBytes": 2766
+        },
+        {
+          "path": "reference/styles/light--training-interactive/style.md",
+          "sha256": "394e239413648dd733dbe074ab92d5e445a2c55cf893ac7caf378a063f3b1bb1",
+          "sizeBytes": 2627
+        },
+        {
+          "path": "reference/styles/light--watercolor-wash/light__watercolor_wash.pptx",
+          "sha256": "abd77433a8b2f84b0fbd082f172ae27d8b42031f4a99876d048c2256d4e48c3a",
+          "sizeBytes": 18160
+        },
+        {
+          "path": "reference/styles/light--watercolor-wash/style.md",
+          "sha256": "cf66e692aa9a5b2b50b612729b89a415591bfbae1b3e21614a3bc3a1fb7b7efe",
+          "sizeBytes": 1513
+        },
+        {
+          "path": "reference/styles/mixed--bauhaus-blocks/style.md",
+          "sha256": "b345e65fdacea7201946b4a5a09b988fb7f059654d6add0973728978eb5b2477",
+          "sizeBytes": 5279
+        },
+        {
+          "path": "reference/styles/mixed--chromatic-aberration/style.md",
+          "sha256": "206c15cb69eb85eabcba1d2a5f4086fc737487e00a6df2835647ffe80ac69bb1",
+          "sizeBytes": 5125
+        },
+        {
+          "path": "reference/styles/mixed--duotone-split/mixed__duotone_split.pptx",
+          "sha256": "000b862efb366de1ad77a83a6fc17b9f212217989e70ee0f2d4929fbccdd88ff",
+          "sizeBytes": 14373
+        },
+        {
+          "path": "reference/styles/mixed--duotone-split/style.md",
+          "sha256": "e3e0f07ff32c27962de6b4c538928e65a4842903389df2528457e15bf3f29c58",
+          "sizeBytes": 3825
+        },
+        {
+          "path": "reference/styles/mixed--spectral-grid/style.md",
+          "sha256": "559e997e642ce8910964b1c21af5524f1428d905ab8a2d460dc9b114af8d6a36",
+          "sizeBytes": 589
+        },
+        {
+          "path": "reference/styles/vivid--bauhaus-electric/style.md",
+          "sha256": "9e7e3a9721732fe20b32697bf7d408f157ef28195fdb7c27ddb44369036938e1",
+          "sizeBytes": 570
+        },
+        {
+          "path": "reference/styles/vivid--candy-stripe/style.md",
+          "sha256": "7ab21bbc486d9ae28a3439e965f39b853a8179100a45263ac830640b37b11dd3",
+          "sizeBytes": 3910
+        },
+        {
+          "path": "reference/styles/vivid--candy-stripe/vivid__candy_stripe.pptx",
+          "sha256": "8f693160846994eab82b356367ba1d793f1e90e5c2e099202db9bd26e828f2cd",
+          "sizeBytes": 13486
+        },
+        {
+          "path": "reference/styles/vivid--energy-neon/style.md",
+          "sha256": "318370c3995e8c33b5d583202d1bd8653e4f4809a61fcb0020f375250debb49d",
+          "sizeBytes": 2779
+        },
+        {
+          "path": "reference/styles/vivid--pink-editorial/style.md",
+          "sha256": "a99231ad8f057543735b7988319439023e45213073085cf8f9d9fde235a3984f",
+          "sizeBytes": 4159
+        },
+        {
+          "path": "reference/styles/vivid--playful-marketing/style.md",
+          "sha256": "d092e2b080c97cb6bd3ca2d24ba9937839fa8234946144c08d07d15be3b3ce57",
+          "sizeBytes": 2627
+        },
+        {
+          "path": "reference/styles/vivid--playful-marketing/vivid__playful_marketing.pptx",
+          "sha256": "2aa48a5c15d8328f2a1f38d7e39db4e5a50d97ecca522f4d88625b34c8d19f15",
+          "sizeBytes": 14263
+        },
+        {
+          "path": "reference/styles/warm--bloom-academy/style.md",
+          "sha256": "ed4fa635b432bf0940db6bf3a9afdc30fb4d7b5b31394d17726088ac732915c1",
+          "sizeBytes": 691
+        },
+        {
+          "path": "reference/styles/warm--brand-refresh/style.md",
+          "sha256": "e36ef9d7282b83802595fec67d16e835751ffcedec780459af3bea0b4d2dc251",
+          "sizeBytes": 2047
+        },
+        {
+          "path": "reference/styles/warm--brand-refresh/warm__brand_refresh.pptx",
+          "sha256": "93096fcf784d4d777c3f353cac8e68f4f0a70513763b04770d29fed3b43054b4",
+          "sizeBytes": 13928
+        },
+        {
+          "path": "reference/styles/warm--coral-culture/style.md",
+          "sha256": "10a796d5ddae795827888934e2fa03c25ec4021177ac399e740d6399a8b532c6",
+          "sizeBytes": 609
+        },
+        {
+          "path": "reference/styles/warm--earth-organic/style.md",
+          "sha256": "2adba1875c38b0eb260c9aec4c4f0f23c8de876bc93f651c2833beaa78ee3163",
+          "sizeBytes": 5255
+        },
+        {
+          "path": "reference/styles/warm--earth-organic/warm__earth_organic.pptx",
+          "sha256": "046575db5e3d4ac4029da595dcc0bdb631082174dcb06b3d0387aeae34e51c64",
+          "sizeBytes": 17558
+        },
+        {
+          "path": "reference/styles/warm--monument-editorial/style.md",
+          "sha256": "5bf6e018f9464e7d41cd2fc39b5ef86517d3c32ec93fe664ec6ec6ae0e640f18",
+          "sizeBytes": 643
+        },
+        {
+          "path": "reference/styles/warm--playful-organic/Cat-Secret-Life.pptx",
+          "sha256": "3cdbb2979afda97e0e82131b81d84a7c002ed6eda156c89a62e9b81e6c0af7db",
+          "sizeBytes": 21566
+        },
+        {
+          "path": "reference/styles/warm--playful-organic/style.md",
+          "sha256": "5fa311bfe1c28dbb33b5bd61676b31d7768bf972edc8e23afe5872e72fc5b136",
+          "sizeBytes": 2631
+        },
+        {
+          "path": "reference/styles/warm--sunset-mosaic/style.md",
+          "sha256": "3a4db863f356b4d8174f52b0f646c35f0fe441f0d16342948b6a699fd4666227",
+          "sizeBytes": 648
+        },
+        {
+          "path": "reference/styles/warm--vital-bloom/style.md",
+          "sha256": "8b928419cb4b76b72eee0db9868da79fcc06a062a9cd0929f14bf9900a167f7b",
+          "sizeBytes": 571
+        }
+      ]
+    },
+    "morph-ppt-3d": {
+      "directory": "morph-ppt-3d",
+      "entry": "SKILL.md",
+      "headings": [
+        {
+          "level": 1,
+          "title": "Morph PPT — 3D Extension"
+        },
+        {
+          "level": 2,
+          "title": "Setup"
+        },
+        {
+          "level": 2,
+          "title": "Use when"
+        },
+        {
+          "level": 2,
+          "title": "3D Model Compatibility Gate (before generation)"
+        },
+        {
+          "level": 2,
+          "title": "Model Discovery Flow (when user has no model)"
+        },
+        {
+          "level": 3,
+          "title": "Step 1: Understand the topic and suggest model direction"
+        },
+        {
+          "level": 3,
+          "title": "Step 2: Search for models (agent-driven)"
+        },
+        {
+          "level": 3,
+          "title": "Step 3: Present candidates to user for confirmation"
+        },
+        {
+          "level": 3,
+          "title": "Step 4: Download the confirmed model"
+        },
+        {
+          "level": 1,
+          "title": "For Sketchfab (if user has the download URL)"
+        },
+        {
+          "level": 1,
+          "title": "For Khronos samples (always works)"
+        },
+        {
+          "level": 3,
+          "title": "Step 5: When user says \"anything\" / \"you decide\" / \"just make a demo\""
+        },
+        {
+          "level": 3,
+          "title": "Step 6: When user wants to find models themselves"
+        },
+        {
+          "level": 3,
+          "title": "Step 7: When user gives keywords and asks agent to search"
+        },
+        {
+          "level": 3,
+          "title": "License reminder"
+        },
+        {
+          "level": 2,
+          "title": "Visual Design System (4.0 enrichment)"
+        },
+        {
+          "level": 3,
+          "title": "Color Palettes (pick one per deck, or blend)"
+        },
+        {
+          "level": 3,
+          "title": "Font Pairings (pick one per deck)"
+        },
+        {
+          "level": 3,
+          "title": "Hard Rules (mandatory, no exceptions)"
+        },
+        {
+          "level": 3,
+          "title": "Visual Element Checkpoint"
+        },
+        {
+          "level": 2,
+          "title": "3D Model Insertion Rules"
+        },
+        {
+          "level": 3,
+          "title": "Add model fresh on every slide — NEVER clone"
+        },
+        {
+          "level": 1,
+          "title": "After cloning slide 1 to slide 2:"
+        },
+        {
+          "level": 1,
+          "title": "Slide 1"
+        },
+        {
+          "level": 1,
+          "title": "Slide 2"
+        },
+        {
+          "level": 3,
+          "title": "Controllable properties"
+        },
+        {
+          "level": 3,
+          "title": "Do NOT manually set"
+        },
+        {
+          "level": 2,
+          "title": "Model-Content Layout"
+        },
+        {
+          "level": 3,
+          "title": "Core Principle: Model IS the Subject"
+        },
+        {
+          "level": 3,
+          "title": "Size Contrast Rule (MANDATORY)"
+        },
+        {
+          "level": 3,
+          "title": "Layout Patterns (6 types)"
+        },
+        {
+          "level": 1,
+          "title": "Pattern E: model fills slide as backdrop"
+        },
+        {
+          "level": 1,
+          "title": "Text overlaid on model"
+        },
+        {
+          "level": 1,
+          "title": "Pattern F: model bleeds off right edge"
+        },
+        {
+          "level": 3,
+          "title": "Layout Progression"
+        },
+        {
+          "level": 3,
+          "title": "Text Layout Safety (MANDATORY)"
+        },
+        {
+          "level": 3,
+          "title": "Model Bleed Guidelines"
+        },
+        {
+          "level": 2,
+          "title": "Camera Language"
+        },
+        {
+          "level": 3,
+          "title": "Shot Types (use >= 3 different per deck)"
+        },
+        {
+          "level": 3,
+          "title": "Content-Driven Camera"
+        },
+        {
+          "level": 3,
+          "title": "Rotation Rules"
+        },
+        {
+          "level": 3,
+          "title": "Example Shot Plan"
+        },
+        {
+          "level": 2,
+          "title": "Workflow Integration with morph-ppt"
+        },
+        {
+          "level": 3,
+          "title": "Phase 2 additions (Planning)"
+        },
+        {
+          "level": 3,
+          "title": "Phase 3 additions (Build)"
+        },
+        {
+          "level": 3,
+          "title": "Phase 4 additions (Verification)"
+        },
+        {
+          "level": 2,
+          "title": "File Placement Rule"
+        }
+      ],
+      "files": [
+        {
+          "path": "SKILL.md",
+          "sha256": "951080c11ac0995fc3e4fb9a09a67fa6c8f02f353bf735e7ec6f6c02cab9fdad",
+          "sizeBytes": 25711
+        }
+      ]
+    }
+  }
+}

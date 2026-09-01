@@ -16,6 +16,7 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 - **OpenRouter models stay current** — Settings, chat, and API setup now load the live OpenRouter catalog instead of the snapshot bundled with the app, so newly published models can be selected. Large catalogs stay collapsed to the current and configured models until you search. Retired snapshot IDs with no OpenRouter providers are hidden, and that 404 is explained as an unavailable model instead of a raw JSON dump. Choosing a live model outside the saved 3-tier list now actually sends that model instead of falling back to the stored default.
 
 - **OfficeCLI is now one native built-in Skill** — Office attachments and explicit Word, Excel, or PowerPoint artifact requests automatically load one hidden router. It selects complete official guides on demand, uses Selection's fixed bundled runtime, keeps resident edit sessions open, and applies no Office-specific call, operation, QA, time, or cost limit.
+- **Bundled OfficeCLI is now 1.0.146** — Desktop runtimes and official guides move to v1.0.146. Native CSV/TSV import now persists worksheet cells, so the previous atomic-batch workaround is retired. (#194)
 - **Clearer task usage details** — Session Info now separates the most recent model call from the full user-task total, including model calls, input/output/cache tokens, cost, and wall-clock time while preserving legacy session statistics.
 
 ## Bug Fixes

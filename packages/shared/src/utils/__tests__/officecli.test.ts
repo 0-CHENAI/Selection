@@ -486,6 +486,44 @@ describe('bundled officecli smoke', () => {
     }
   }, 30_000)
 
+  it('persists native CSV and TSV import into worksheet cells', () => {
+    if (!binary) return
+    const root = mkdtempSync(join(tmpdir(), 'officecli-import-'))
+    const env = { ...process.env, OFFICECLI_NO_AUTO_RESIDENT: '1' }
+    const run = (args: string[]) => {
+      const result = Bun.spawnSync([binary, ...args], { stdout: 'pipe', stderr: 'pipe', env })
+      const output = `${result.stdout.toString()}${result.stderr.toString()}`
+      if (result.exitCode !== 0 || /\b(?:WARNING|UNSUPPORTED)\b/i.test(output)) {
+        throw new Error(`officecli ${args.join(' ')} returned an incomplete result: ${output}`)
+      }
+      return output
+    }
+    try {
+      const csv = join(root, '名单.csv')
+      const tsv = join(root, '城市.tsv')
+      const csvWorkbook = join(root, '名单.xlsx')
+      const tsvWorkbook = join(root, '城市.xlsx')
+      writeFileSync(csv, '姓名,金额\n张三,42\n')
+      writeFileSync(tsv, '城市\t人口\n北京\t2189\n')
+
+      run(['create', csvWorkbook])
+      run(['import', csvWorkbook, '/Sheet1', '--file', csv, '--header'])
+      const csvReadback = run(['get', csvWorkbook, '/Sheet1/A1:B2', '--json'])
+      expect(csvReadback).toContain('姓名')
+      expect(csvReadback).toContain('张三')
+      expect(csvReadback).toContain('42')
+
+      run(['create', tsvWorkbook])
+      run(['import', tsvWorkbook, '/Sheet1', '--file', tsv, '--format', 'tsv', '--header'])
+      const tsvReadback = run(['get', tsvWorkbook, '/Sheet1/A1:B2', '--json'])
+      expect(tsvReadback).toContain('城市')
+      expect(tsvReadback).toContain('北京')
+      expect(tsvReadback).toContain('2189')
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  }, 30_000)
+
   it('resolves the bundled official skill directory', () => {
     const skillsDir = getBundledOfficecliSkillsDir()
     expect(skillsDir).toBeTruthy()
@@ -517,6 +555,7 @@ describe('bundled officecli router', () => {
     expect(body).toContain('If the user did not provide one, use the effective working directory')
     expect(body).toContain('Companion files required by an official guide for planning, reproducibility, or QA')
     expect(body).toContain('overrides guide delivery lists for those support files')
+    expect(body).not.toContain('For OfficeCLI 1.0.144 CSV/TSV import')
   })
 })
 
