@@ -296,7 +296,12 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
   // Session model change handler - persists per-session model and connection
   const handleModelChange = React.useCallback((model: string, connection?: string) => {
     if (activeWorkspaceId) {
-      window.electronAPI.setSessionModel(sessionId, activeWorkspaceId, model, connection)
+      window.electronAPI.setSessionModel(
+        sessionId,
+        activeWorkspaceId,
+        model.trim() ? model : null,
+        connection,
+      )
     }
   }, [sessionId, activeWorkspaceId])
 

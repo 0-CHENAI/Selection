@@ -25,6 +25,15 @@ import { uid, buildSpec, specToSubtasks, canDependOn, quickAddNodeId, quickAddCh
 import { runnerLabelKey, runStatusLabelKey } from './task-labels'
 import { ConductorWorkbench, type WorkbenchSpec } from './ConductorWorkbench'
 import { ApplyRunRevisionDialog, canConfirmRunRevision } from './ApplyRunRevisionDialog'
+import { Button } from '@/components/ui/button'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
 import { isTasksOrchestrateEnabled } from '@craft-agent/shared/feature-flags'
 import { resolveNodeStatePill } from './node-state-pill'
 import { SourceAvatar } from '@/components/ui/source-avatar'
@@ -39,6 +48,24 @@ import { buildSensitiveRunParams, sensitiveRunParamNames } from './sensitive-run
 // Client-side fallback for async generate: a touch longer than the server's GENERATE_TIMEOUT_MS
 // (180s) so the orchestrator's own timeout + result push can land before we give up locally.
 const GENERATE_CLIENT_TIMEOUT_MS = 200_000
+
+function specNeedsV3Confirm(sourceVersion: 1 | 2 | 3 | undefined, spec: Record<string, unknown>): boolean {
+  return (sourceVersion ?? 1) < 3 && spec.schema_version === 3
+}
+
+function v3MigrationLines(spec: Record<string, unknown>): string[] {
+  const nodes = Array.isArray(spec.nodes) ? spec.nodes as Array<{ id?: string; cache?: string }> : []
+  const cachePure = nodes.filter((node) => node.cache === 'pure').map((node) => node.id).filter(Boolean)
+  const lines = [
+    'schema_version becomes 3. v1/v2 run logs are not rewritten.',
+    'Coordinator checkpoints wait for submit_orchestration_decision; timeout pauses with coordinator-timeout.',
+    'verify/judge nodes must call submit_task_node_verdict. Parent chat is never a run verdict.',
+  ]
+  if (cachePure.length) {
+    lines.push(`cache: pure on ${cachePure.join(', ')} becomes run-pure (same-run only). workspace-pure is never implied.`)
+  }
+  return lines
+}
 
 /**
  * TaskEditor — full-pane authoring surface for a Tasks DAG (graduated from the
@@ -596,8 +623,9 @@ export function TaskEditor({
   const [tokenBudgetDraft, setTokenBudgetDraft] = React.useState('')
   const [sensitiveParamDrafts, setSensitiveParamDrafts] = React.useState<Record<string, string>>({})
   const [etag, setEtag] = React.useState<string | null>(null)
-  const [sourceVersion, setSourceVersion] = React.useState<1 | 2 | undefined>(undefined)
+  const [sourceVersion, setSourceVersion] = React.useState<1 | 2 | 3 | undefined>(undefined)
   const [migrationWarnings, setMigrationWarnings] = React.useState<string[]>([])
+  const [v3Confirm, setV3Confirm] = React.useState<{ run: boolean; spec: Record<string, unknown> } | null>(null)
   const [preservedSpec, setPreservedSpec] = React.useState<Record<string, unknown> | undefined>(undefined)
   const [taskLoadError, setTaskLoadError] = React.useState<string | null>(null)
   const [revisionDialogOpen, setRevisionDialogOpen] = React.useState(false)
@@ -875,6 +903,7 @@ export function TaskEditor({
         expectedRunRevision: preview.runRevision,
         expectedRunSpecHash: preview.runSpecHash,
         confirm: true,
+        confirmV3Migration: (preview.migrationWarnings?.length ?? 0) > 0,
       })
       if (applied.conflict) {
         setRevisionPreview((current) => current ? { ...current, conflict: applied.conflict } : applied)
@@ -892,8 +921,8 @@ export function TaskEditor({
       const spec = applied.validation.spec as EditableTaskSpec | undefined
       setYamlDraft(applied.yaml)
       setEtag(applied.etag)
-      setSourceVersion(2)
-      setMigrationWarnings([])
+      setSourceVersion(applied.sourceVersion ?? 2)
+      setMigrationWarnings(applied.migrationWarnings ?? [])
       setYamlDiagnostics([])
       setYamlHasLocalSource(true)
       setFormChangedSinceYaml(false)
@@ -1154,7 +1183,7 @@ export function TaskEditor({
 
   // Create the task (write task.yaml + orchestrator session). When `run` is true, also start a
   // run; otherwise the task tile just lands on the board in ToDo for the user to run later.
-  async function submit(run: boolean) {
+  async function submit(run: boolean, confirmV3Migration = false) {
     if (isEdit && !canSafelySaveExistingTask({ taskSlug: editSlug, etag, loadError: taskLoadError })) {
       toast.error(t('tasks.toastLoadFailed'), { description: taskLoadError ?? t('tasks.loadFailedBanner') })
       return
@@ -1227,8 +1256,16 @@ export function TaskEditor({
         )
         yaml = taskDocumentForSave('form', yamlDraft, spec)
       }
+      if (specNeedsV3Confirm(sourceVersion, spec) && !confirmV3Migration) {
+        setV3Confirm({ run, spec })
+        return
+      }
       if (isEdit && etag) {
-        const saved = await window.electronAPI.saveTask(workspaceId, { yaml, expectedEtag: etag })
+        const saved = await window.electronAPI.saveTask(workspaceId, {
+          yaml,
+          expectedEtag: etag,
+          confirmV3Migration: confirmV3Migration || specNeedsV3Confirm(sourceVersion, spec),
+        })
         if (saved.conflict) {
           toast.error(t('tasks.toastEtagConflict'))
           return
@@ -1260,6 +1297,7 @@ export function TaskEditor({
       // a generate draft if present, else mints a fresh orchestrator.
       const created = await window.electronAPI.createTask(workspaceId, {
         yaml,
+        confirmV3Migration,
         ...(isEdit && editSessionId
           ? { attachToExistingSession: editSessionId }
           : { orchestratorSessionId: draftId ?? undefined }),
@@ -1477,7 +1515,7 @@ export function TaskEditor({
 
       {tab === 'definition' && migrationWarnings.length > 0 && (
         <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[12.5px] text-foreground/80">
-          {t('tasks.migrationBanner', { version: sourceVersion ?? 1 })}
+          {t(sourceVersion === 3 ? 'tasks.migrationBannerV3' : 'tasks.migrationBanner', { version: sourceVersion ?? 1 })}
           <ul className="mt-1 list-disc pl-4">
             {migrationWarnings.map((w) => (
               <li key={w}>{w}</li>
@@ -1809,6 +1847,36 @@ export function TaskEditor({
         }}
         onConfirm={() => void confirmRunRevision()}
       />
+      <Dialog open={v3Confirm !== null} onOpenChange={(open) => { if (!open) setV3Confirm(null) }}>
+        <DialogContent className="max-h-[82vh] overflow-y-auto sm:max-w-[560px]">
+          <DialogHeader>
+            <DialogTitle>{t('tasks.confirmV3Title')}</DialogTitle>
+            <DialogDescription>{t('tasks.confirmV3Description')}</DialogDescription>
+          </DialogHeader>
+          {v3Confirm && (
+            <ul className="list-disc space-y-1 pl-5 text-[12.5px] text-foreground/75">
+              {v3MigrationLines(v3Confirm.spec).map((line) => (
+                <li key={line}>{line}</li>
+              ))}
+            </ul>
+          )}
+          <DialogFooter>
+            <Button variant="outline" size="sm" onClick={() => setV3Confirm(null)}>
+              {t('common.cancel')}
+            </Button>
+            <Button
+              size="sm"
+              onClick={() => {
+                const pending = v3Confirm
+                setV3Confirm(null)
+                if (pending) void submit(pending.run, true)
+              }}
+            >
+              {t('tasks.confirmV3Confirm')}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

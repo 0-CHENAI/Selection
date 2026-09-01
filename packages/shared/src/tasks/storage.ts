@@ -18,6 +18,8 @@ import { validateTaskInput } from './validate.ts';
 import { TaskSpecSchema, type TaskSpec } from './schema.ts';
 import type { NodeOutput } from './refs.ts';
 import type { ValidationResult } from '../config/validators.ts';
+import type { CoordinatorGateReason, TaskRunMetrics } from './metrics.ts';
+import type { CoordinatorGateState } from './orchestration-decision.ts';
 
 const TASKS_DIR = 'tasks';
 const TASK_FILE = 'task.yaml';
@@ -42,6 +44,9 @@ export interface RunStateCheckpoint {
   params?: Record<string, unknown>;
   seenDecisionIds: string[];
   invalidPatchCount: number;
+  completedCheckpointIds?: string[];
+  coordinatorGate?: CoordinatorGateState;
+  metrics?: TaskRunMetrics;
 }
 
 // ---------------------------------------------------------------------------
@@ -84,6 +89,7 @@ export type RunStatus =
   | 'waiting-budget'
   | 'verifying'
   | 'repairing'
+  | 'waiting-coordinator'
   | 'interrupted'
   | 'stopped'
   | 'completed'
@@ -116,11 +122,33 @@ type RunLogPayload =
         | 'run-interrupted'
         | 'run-waiting-approval'
         | 'run-waiting-budget'
+        | 'run-waiting-coordinator'
         | 'run-repairing';
       tokensUsed?: number;
     }
-  | { t: string; kind: 'verdict'; result: 'pass' | 'fail' | 'unparsed'; reason?: string; nodes?: string[] }
+  | { t: string; kind: 'verdict'; result: 'pass' | 'fail' | 'unparsed'; reason?: string; nodes?: string[]; evidence?: string }
+  | { t: string; kind: 'node-verdict'; nodeId: string; result: 'pass' | 'fail'; reason?: string; nodes?: string[]; evidence?: string }
   | { t: string; kind: 'orchestration-patch'; decisionId: string; baseRevision: number; rationale: string; cancelled?: string[] }
+  | {
+      t: string;
+      kind: 'coordinator-request';
+      checkpointId: string;
+      reason: CoordinatorGateReason;
+      revision: number;
+      deadline: string;
+    }
+  | {
+      t: string;
+      kind: 'coordinator-decision';
+      checkpointId: string;
+      decisionId: string;
+      action: 'continue' | 'patch' | 'pause';
+      baseRevision: number;
+    }
+  | { t: string; kind: 'coordinator-timeout'; checkpointId: string }
+  | { t: string; kind: 'cache-hit'; nodeId: string; fingerprint: string; createdAt: string; sourceRunId: string }
+  | { t: string; kind: 'cache-bypass'; nodeId: string; reason: string }
+  | { t: string; kind: 'metrics'; metrics: TaskRunMetrics }
   | { t: string; kind: 'budget-breach'; metric: 'tokens' | 'parallel' | 'iterations'; value: number; limit: number };
 
 export type RunLogEntry = RunLogPayload & { seq?: number; revision?: number };
@@ -267,6 +295,7 @@ const RUN_STATUS_EVENTS: Record<string, RunStatus> = {
   'run-interrupted': 'interrupted',
   'run-waiting-approval': 'waiting-approval',
   'run-waiting-budget': 'waiting-budget',
+  'run-waiting-coordinator': 'waiting-coordinator',
   'run-repairing': 'repairing',
 };
 

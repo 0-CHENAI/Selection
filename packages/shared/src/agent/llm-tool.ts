@@ -165,6 +165,22 @@ export interface BuildCallLlmOptions {
   validateModel?: (resolvedModelId: string) => string | undefined;
   /** Session directory for resolving relative attachment paths */
   sessionPath?: string;
+  /** Current session model used when the caller omits `model` (#192). */
+  defaultModel?: string;
+}
+
+/**
+ * `call_llm` inherits the current session model unless the caller names another.
+ * Title generation and other utility completions keep their own mini-model path.
+ */
+export function resolveCallLlmModel(
+  requested: string | undefined,
+  sessionModel: string | undefined,
+): string | undefined {
+  const explicit = requested?.trim();
+  if (explicit) return explicit;
+  const inherited = sessionModel?.trim();
+  return inherited || undefined;
 }
 
 /**
@@ -207,7 +223,11 @@ export async function buildCallLlmRequest(
   textParts.push(prompt);
 
   // Resolve known registry ids only — do not map "Opus" onto claude-opus-4-8.
-  let model = input.model as string | undefined;
+  // Unspecified call_llm inherits the current session model, not the cheap/fast tier.
+  let model = resolveCallLlmModel(
+    typeof input.model === 'string' ? input.model : undefined,
+    options.defaultModel,
+  );
   if (model) {
     model = resolveKnownRegistryModelId(model) ?? model
 
@@ -542,6 +562,8 @@ export interface LLMToolOptions {
   sessionId: string;
   /** Session directory for resolving relative attachment paths */
   sessionPath?: string;
+  /** Current session model used when the caller omits `model`. */
+  defaultModel?: string;
   /**
    * Lazy resolver for the agent-native query callback.
    * Called at execution time to get the current callback from the session registry.
@@ -645,7 +667,7 @@ export function createLLMTool(options: LLMToolOptions) {
       // EXECUTE QUERY
       // ========================================
 
-      const model = args.model || getDefaultSummarizationModel();
+      const model = resolveCallLlmModel(args.model, options.defaultModel) || getDefaultSummarizationModel();
       const schema = args.outputSchema || (args.outputFormat ? OUTPUT_FORMATS[args.outputFormat] : null);
 
       try {

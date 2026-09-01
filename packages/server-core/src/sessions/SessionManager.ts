@@ -32,6 +32,7 @@ import {
   type PendingFirstTurnAiTitle,
 } from './first-turn-title'
 import { completionStopReason } from './completion-outcome.ts'
+import { toolCallBypassesWorkspaceCache } from './session-tool-usage.ts'
 import { i18n } from '@craft-agent/shared/i18n'
 import {
   getWorkspaces,
@@ -85,7 +86,7 @@ import {
 } from '@craft-agent/shared/sessions'
 import { loadWorkspaceSources, loadAllSources, getSourcesBySlugs, isSourceUsable, type LoadedSource, type McpServerConfig, getSourcesNeedingAuth, getSourceCredentialManager, getSourceServerBuilder, type SourceWithCredential, isApiOAuthProvider, hasRenewEndpoint, SERVER_BUILD_ERRORS, TokenRefreshManager, createTokenGetter } from '@craft-agent/shared/sources'
 import { listTaskSlugs, parseTaskSpec, parseTaskYaml, serializeTaskYaml, uniqueTaskSlug, loadTaskResults } from '@craft-agent/shared/tasks'
-import { clearSubmittedDefinition, createTaskFromSpec, resolveCreateTaskProjectId, rememberSubmittedDefinition, validateSubmittedDefinition, type TaskRunner } from '../tasks'
+import { clearSubmittedDefinition, createTaskFromSpec, inheritTaskExecutionDefaults, resolveCreateTaskProjectId, rememberSubmittedDefinition, validateSubmittedDefinition, type TaskRunner } from '../tasks'
 import {
   assessSpawnQualification,
   assessSwarmSpawnLimits,
@@ -858,6 +859,8 @@ interface ManagedSession {
   // Incremented each time a new message starts processing.
   // Used to detect if a follow-up message has superseded the current one (stale-request guard).
   processingGeneration: number
+  /** Runtime-only idempotency gate for terminal cleanup of one processing generation. */
+  processingStop?: { generation: number; promise: Promise<void> }
   // NOTE: Parent-child tracking state (pendingTools, parentToolStack, toolToParentMap,
   // pendingTextParent) has been removed. CraftAgent now provides parentToolUseId
   // directly on all events using the SDK's authoritative parent_tool_use_id field.
@@ -935,6 +938,8 @@ interface ManagedSession {
   taskNodeCount?: number
   // Tasks Conductor: hidden generate-time orchestrator awaiting validated adoption (off the board)
   taskDraft?: boolean
+  /** True when this turn invoked a non-protocol tool. Used by workspace-pure cache. */
+  usedExternalToolsThisTurn?: boolean
   // Working directory for this session (used by agent for bash commands)
   workingDirectory?: string
   // SDK cwd for session storage - set once at creation, never changes.
@@ -3464,6 +3469,20 @@ export class SessionManager implements ISessionManager {
     return this.sessions.get(sessionId)?.workingDirectory
   }
 
+  getSessionModel(sessionId: string): string | undefined {
+    const managed = this.sessions.get(sessionId)
+    return managed ? this.sessionExecutionModel(managed) : undefined
+  }
+
+  getSessionLlmConnection(sessionId: string): string | undefined {
+    return this.sessions.get(sessionId)?.llmConnection
+  }
+
+  /** Live picker model when the agent is up; otherwise the stored session override. */
+  private sessionExecutionModel(managed: ManagedSession): string | undefined {
+    return managed.agent?.getModel() || managed.model
+  }
+
   private async disposeManagedAgentRuntime(managed: ManagedSession, reason: string): Promise<void> {
     const sessionId = managed.id
 
@@ -4618,6 +4637,10 @@ export class SessionManager implements ISessionManager {
         // itself is createTaskFromSpec, shared verbatim with the tasks:create RPC.
         createTaskFn: async (input) => {
           const ws = managed.workspace
+          const sessionExecution = {
+            model: this.sessionExecutionModel(managed),
+            llmConnection: managed.llmConnection,
+          }
           // Match spawn_session: an explicit project wins, otherwise keep newly
           // captured work in the project that owns the invoking session.
           const projectId = resolveCreateTaskProjectId(input.projectId, managed.projectId)
@@ -4630,7 +4653,12 @@ export class SessionManager implements ISessionManager {
             if (!parsed.success) {
               throw new Error(`Invalid task spec: ${parsed.error.issues.map(i => i.message).join('; ')}`)
             }
-            const created = await createTaskFromSpec(this, ws.id, ws.rootPath, parsed.data)
+            const created = await createTaskFromSpec(
+              this,
+              ws.id,
+              ws.rootPath,
+              inheritTaskExecutionDefaults(parsed.data, sessionExecution),
+            )
             return { ...created, warnings: [...created.warnings] }
           }
           const slug = uniqueTaskSlug(input.title ?? 'untitled-task', new Set(listTaskSlugs(ws.rootPath)))
@@ -4670,7 +4698,12 @@ export class SessionManager implements ISessionManager {
             throw new Error(`Invalid task spec: ${parsed.error.issues.map(i => i.message).join('; ')}`)
           }
 
-          const created = await createTaskFromSpec(this, ws.id, ws.rootPath, parsed.data)
+          const created = await createTaskFromSpec(
+            this,
+            ws.id,
+            ws.rootPath,
+            inheritTaskExecutionDefaults(parsed.data, sessionExecution),
+          )
           return { ...created, warnings: [...warnings, ...created.warnings] }
         },
         runTaskFn: async (input) => this.runTaskFromTool(managed.workspace.id, input),
@@ -4700,6 +4733,27 @@ export class SessionManager implements ISessionManager {
             action: input.action,
           })
           return { status: snap.status, revision: snap.revision }
+        },
+        submitOrchestrationDecisionFn: async (input) => {
+          const runner = this.taskRunnerLookup?.(managed.workspace.id)
+          if (!runner) throw new Error('Task runner is not available')
+          const snap = runner.applyOrchestrationDecisionByRunId(managed.id, {
+            runId: input.runId,
+            checkpointId: input.checkpointId,
+            decisionId: input.decisionId,
+            baseRevision: input.baseRevision,
+            action: input.action,
+            rationale: input.rationale,
+            add: input.add as never,
+            update: input.update as never,
+            cancel: input.cancel,
+          })
+          return { status: snap.status, revision: snap.revision }
+        },
+        submitTaskNodeVerdictFn: async (input) => {
+          const runner = this.taskRunnerLookup?.(managed.workspace.id)
+          if (!runner) return { ok: false, error: 'Task runner is not available' }
+          return runner.submitNodeVerdict(managed.id, input)
         },
         submitTaskDefinitionFn: async (input) => {
           const submitted = validateSubmittedDefinition(input.spec)
@@ -5535,6 +5589,16 @@ export class SessionManager implements ISessionManager {
   }
 
   /**
+   * Whether the current turn invoked a non-protocol tool.
+   * Unknown sessions return undefined so workspace-pure will not store a new entry.
+   */
+  sessionUsedTools(sessionId: string): boolean | undefined {
+    const managed = this.sessions.get(sessionId)
+    if (!managed) return undefined
+    return managed.usedExternalToolsThisTurn === true
+  }
+
+  /**
    * Set which session the user is actively viewing.
    * Called when user navigates to a session. Used to determine whether to mark
    * new messages as unread - if user is viewing, don't mark unread.
@@ -5847,7 +5911,8 @@ export class SessionManager implements ISessionManager {
     sessionLog.info(`[updateSessionModel] sessionId=${sessionId}, model=${model}, connection=${connection}`)
     const managed = this.sessions.get(sessionId)
     if (managed) {
-      managed.model = model ?? undefined
+      const nextModel = model?.trim() ? model : undefined
+      managed.model = nextModel
       const previousConnection = managed.llmConnection
       let connectionChanged = false
       if (connection && connection !== managed.llmConnection) {
@@ -5862,7 +5927,7 @@ export class SessionManager implements ISessionManager {
           connectionChanged = true
         }
       }
-      const updates: { model?: string; llmConnection?: string } = { model: model ?? undefined }
+      const updates: { model?: string; llmConnection?: string } = { model: nextModel }
       if (connectionChanged) {
         updates.llmConnection = managed.llmConnection
       }
@@ -5883,15 +5948,15 @@ export class SessionManager implements ISessionManager {
         // Fallback chain: session model > workspace default > connection default
         const wsConfig = loadWorkspaceConfig(managed.workspace.rootPath)
         const sessionConn = resolveSessionConnection(managed.llmConnection, wsConfig?.defaults?.defaultLlmConnection)
-        const effectiveModel = model ?? wsConfig?.defaults?.model ?? sessionConn?.defaultModel!
+        const effectiveModel = nextModel ?? wsConfig?.defaults?.model ?? sessionConn?.defaultModel!
         sessionLog.info(`[updateSessionModel] Calling agent.setModel(${effectiveModel}) [agent exists=${!!managed.agent}, previousConnection=${previousConnection}, connectionLocked=${managed.connectionLocked}]`)
         managed.agent.setModel(effectiveModel)
       } else {
         sessionLog.info(`[updateSessionModel] No agent yet, model will apply on next agent creation`)
       }
       // Notify renderer of the model change
-      this.sendEvent({ type: 'session_model_changed', sessionId, model }, managed.workspace.id)
-      sessionLog.info(`Session ${sessionId} model updated to: ${model ?? '(global config)'}`)
+      this.sendEvent({ type: 'session_model_changed', sessionId, model: nextModel ?? null }, managed.workspace.id)
+      sessionLog.info(`Session ${sessionId} model updated to: ${nextModel ?? '(global config)'}`)
     }
   }
 
@@ -6627,7 +6692,7 @@ export class SessionManager implements ISessionManager {
         sessionId,
         error: msg,
       }, managed.workspace.id)
-      await this.onProcessingStopped(sessionId, 'error')
+      await this.onProcessingStopped(sessionId, 'error', myGeneration)
       return
     }
     if (managed.stopRequested || !managed.isProcessing || managed.processingGeneration !== myGeneration) {
@@ -6637,7 +6702,7 @@ export class SessionManager implements ISessionManager {
         managed.agent.forceAbort(AbortReason.UserStop)
       }
       if (managed.isProcessing && managed.processingGeneration === myGeneration) {
-        await this.onProcessingStopped(sessionId, 'interrupted')
+        await this.onProcessingStopped(sessionId, 'interrupted', myGeneration)
       }
       return
     }
@@ -6755,7 +6820,7 @@ export class SessionManager implements ISessionManager {
         }, managed.workspace.id)
         sendSpan.mark('image-input.blocked')
         sendSpan.end()
-        await this.onProcessingStopped(sessionId, 'error')
+        await this.onProcessingStopped(sessionId, 'error', myGeneration)
         return
       }
 
@@ -6766,6 +6831,7 @@ export class SessionManager implements ISessionManager {
       })
       this.announceRegenerateReplacement(managed)
       sessionLog.info('Got chat iterator, starting iteration...')
+      managed.usedExternalToolsThisTurn = false
 
       for await (const event of chatIterator) {
         // Log events (skip noisy text_delta)
@@ -6819,12 +6885,27 @@ export class SessionManager implements ISessionManager {
             return
           }
 
+          // Pi can emit a trailing complete after forceAbort. Stop owns the
+          // terminal outcome in that case: classifying this as a normal empty
+          // completion would skip runtime replacement and let late events from
+          // the interrupted subprocess leak into the next turn (#182).
+          if (managed.stopRequested) {
+            sessionLog.info('Chat completed while stop was requested; finishing as interrupted')
+            sendSpan.mark('chat.complete.interrupted')
+            sendSpan.end()
+            await this.onProcessingStopped(sessionId, 'interrupted', myGeneration)
+            return
+          }
+
           sessionLog.info('Chat completed via complete event')
 
           // Check if we got an assistant response in this turn
           // If not, the SDK may have hit context limits or other issues
           const lastAssistantMsg = [...managed.messages].reverse().find(m =>
-            m.role === 'assistant' && !m.isIntermediate && !m.hidden
+            m.role === 'assistant'
+            && !m.isIntermediate
+            && !m.hidden
+            && hasRenderableAssistantText(m.content)
           )
           const lastUserMsg = [...managed.messages].reverse().find(m =>
             m.role === 'user' && !m.hidden && !m.isQueued
@@ -6878,13 +6959,51 @@ export class SessionManager implements ISessionManager {
                   details: errorMessage.errorDetails,
                 },
               }, managed.workspace.id)
+            } else {
+              const hasCurrentTurnError = managed.messages.some(message =>
+                message.role === 'error'
+                && !message.hidden
+                && message.timestamp > lastUserMsg.timestamp
+              )
+
+              if (!hasCurrentTurnError) {
+                const typedError = createTypedError('unknown_error', {
+                  title: 'No response received',
+                  message: 'The agent ended this turn without returning a response. Retry to continue.',
+                })
+                const errorMessage: Message = {
+                  id: generateMessageId(),
+                  role: 'error',
+                  content: `${typedError.title}: ${typedError.message}`,
+                  timestamp: this.monotonic(),
+                  errorCode: typedError.code,
+                  errorTitle: typedError.title,
+                  errorDetails: typedError.details,
+                  errorCanRetry: typedError.canRetry,
+                  errorActions: typedError.actions,
+                }
+                managed.messages.push(errorMessage)
+                this.sendEvent({
+                  type: 'typed_error',
+                  sessionId,
+                  error: {
+                    code: typedError.code,
+                    title: typedError.title,
+                    message: typedError.message,
+                    actions: typedError.actions,
+                    canRetry: typedError.canRetry,
+                    details: typedError.details,
+                  },
+                  timestamp: errorMessage.timestamp,
+                }, managed.workspace.id)
+              }
             }
           }
 
           const stopReason = completionStopReason(managed.messages)
           sendSpan.mark(stopReason === 'error' ? 'chat.complete.terminal_error' : 'chat.complete')
           sendSpan.end()
-          await this.onProcessingStopped(sessionId, stopReason)
+          await this.onProcessingStopped(sessionId, stopReason, myGeneration)
           return  // Exit function, skip finally block (onProcessingStopped handles cleanup)
         }
 
@@ -6901,7 +7020,7 @@ export class SessionManager implements ISessionManager {
         sendSpan.end()
       } else if (managed.stopRequested) {
         sessionLog.info('Chat loop completed after stop request - events drained successfully')
-        await this.onProcessingStopped(sessionId, 'interrupted')
+        await this.onProcessingStopped(sessionId, 'interrupted', myGeneration)
       } else {
         sessionLog.info('Chat loop exited unexpectedly')
       }
@@ -6926,7 +7045,7 @@ export class SessionManager implements ISessionManager {
         // by setting isProcessing = false directly. All other abort reasons route
         // through onProcessingStopped for queue draining.
         if (reason === AbortReason.UserStop || reason === AbortReason.Redirect || reason === undefined) {
-          await this.onProcessingStopped(sessionId, 'interrupted')
+          await this.onProcessingStopped(sessionId, 'interrupted', myGeneration)
         }
       } else {
         sessionLog.error('Error in chat:', error)
@@ -6945,7 +7064,7 @@ export class SessionManager implements ISessionManager {
           error: error instanceof Error ? error.message : 'Unknown error'
         }, managed.workspace.id)
         // Handle error via centralized handler
-        await this.onProcessingStopped(sessionId, 'error')
+        await this.onProcessingStopped(sessionId, 'error', myGeneration)
       }
     } finally {
       // Only handle cleanup for unexpected exits (loop break without complete event)
@@ -6955,7 +7074,7 @@ export class SessionManager implements ISessionManager {
         sessionLog.info('Finally block cleanup - unexpected exit')
         sendSpan.mark('chat.unexpected_exit')
         sendSpan.end()
-        await this.onProcessingStopped(sessionId, 'interrupted')
+        await this.onProcessingStopped(sessionId, 'interrupted', myGeneration)
       }
     }
   }
@@ -6981,6 +7100,8 @@ export class SessionManager implements ISessionManager {
     // Claim the running state before any await so a second click cannot race
     // in, and so Stop works while the previous agent is being disposed.
     this.setProcessing(managed, true)
+    managed.processingGeneration++
+    const regenerateGeneration = managed.processingGeneration
     let announced = false
 
     try {
@@ -7074,7 +7195,7 @@ export class SessionManager implements ISessionManager {
       setImmediate(() => {
         if (managed.stopRequested || !managed.isProcessing) {
           if (managed.isProcessing) {
-            void this.onProcessingStopped(sessionId, 'interrupted')
+            void this.onProcessingStopped(sessionId, 'interrupted', regenerateGeneration)
           }
           return
         }
@@ -7093,7 +7214,7 @@ export class SessionManager implements ISessionManager {
             error: error instanceof Error ? error.message : 'Failed to regenerate',
           }, managed.workspace.id)
           if (managed.isProcessing) {
-            void this.onProcessingStopped(sessionId, 'error')
+            void this.onProcessingStopped(sessionId, 'error', managed.processingGeneration)
           }
         })
       })
@@ -7108,7 +7229,7 @@ export class SessionManager implements ISessionManager {
             error: error instanceof Error ? error.message : 'Failed to regenerate',
           }, managed.workspace.id)
         }
-        await this.onProcessingStopped(sessionId, 'error')
+        await this.onProcessingStopped(sessionId, 'error', managed.processingGeneration)
       } else if (announced) {
         this.sendEvent({
           type: 'error',
@@ -7116,7 +7237,7 @@ export class SessionManager implements ISessionManager {
           error: error instanceof Error ? error.message : 'Failed to regenerate',
         }, managed.workspace.id)
         if (managed.isProcessing) {
-          await this.onProcessingStopped(sessionId, 'error')
+          await this.onProcessingStopped(sessionId, 'error', managed.processingGeneration)
         }
       } else {
         this.setProcessing(managed, false)
@@ -7389,16 +7510,17 @@ export class SessionManager implements ISessionManager {
     // turn after we clear isProcessing / stopRequested.
     if (!hadAgent) {
       managed.processingGeneration++
-      await this.onProcessingStopped(sessionId, 'interrupted')
+      await this.onProcessingStopped(sessionId, 'interrupted', managed.processingGeneration)
       return
     }
 
     // Safety timeout: if event loop doesn't complete within 5 seconds, force cleanup
     // This handles cases where the generator gets stuck
+    const stopGeneration = managed.processingGeneration
     setTimeout(() => {
       if (managed.stopRequested && managed.isProcessing) {
         sessionLog.warn('Generator did not complete after stop request, forcing cleanup')
-        this.onProcessingStopped(sessionId, 'timeout')
+        this.onProcessingStopped(sessionId, 'timeout', stopGeneration)
       }
     }, 5000)
 
@@ -7558,7 +7680,7 @@ export class SessionManager implements ISessionManager {
           error: 'Authentication failed. Please check your credentials.',
           timestamp: failedMessage.timestamp,
         }, workspaceId)
-        this.onProcessingStopped(sessionId, 'error')
+        this.onProcessingStopped(sessionId, 'error', managed.processingGeneration)
       }
     })
 
@@ -7674,13 +7796,42 @@ export class SessionManager implements ISessionManager {
    *
    * @param sessionId - The session that stopped processing
    * @param reason - Why processing stopped ('complete' | 'interrupted' | 'error')
+   * @param expectedGeneration - The generation owned by the caller; stale owners are ignored
    */
-  private async onProcessingStopped(
+  private onProcessingStopped(
     sessionId: string,
-    reason: 'complete' | 'interrupted' | 'error' | 'timeout'
+    reason: 'complete' | 'interrupted' | 'error' | 'timeout',
+    expectedGeneration: number,
   ): Promise<void> {
     const managed = this.sessions.get(sessionId)
-    if (!managed) return
+    if (!managed) return Promise.resolve()
+
+    const generation = expectedGeneration ?? managed.processingGeneration
+    if (generation !== managed.processingGeneration) {
+      sessionLog.info('Ignoring stale processing-stop request', {
+        sessionId,
+        expectedGeneration: generation,
+        currentGeneration: managed.processingGeneration,
+        reason,
+      })
+      return Promise.resolve()
+    }
+
+    const existingStop = managed.processingStop
+    if (existingStop?.generation === generation) {
+      return existingStop.promise
+    }
+
+    const promise = this.finishProcessingStopped(managed, reason)
+    managed.processingStop = { generation, promise }
+    return promise
+  }
+
+  private async finishProcessingStopped(
+    managed: ManagedSession,
+    reason: 'complete' | 'interrupted' | 'error' | 'timeout'
+  ): Promise<void> {
+    const sessionId = managed.id
 
     const regenerateOutcome = await this.settleRegenerateTransaction(managed, reason)
     const completionReason = regenerateOutcome.reason
@@ -7706,6 +7857,16 @@ export class SessionManager implements ISessionManager {
       managed.activeTurnSawModelCallStart = undefined
     }
 
+    // A stopped Pi turn can still have parallel tool/LLM work resolving in its
+    // subprocess. Its events do not carry a turn identifier, so reusing that
+    // runtime lets a late `agent_end` complete the next turn (#182). Keep the
+    // session busy until the old runtime is fully gone; queued work can then
+    // resume on a fresh runtime using the persisted SDK session anchor.
+    const mustRestartRuntime = completionReason === 'interrupted' || completionReason === 'timeout'
+    if (mustRestartRuntime) {
+      await this.disposeManagedAgentRuntime(managed, `${completionReason} response`)
+    }
+
     // 1. Cleanup state
     this.setProcessing(managed, false)
     managed.stopRequested = false  // Reset for next turn
@@ -7715,7 +7876,9 @@ export class SessionManager implements ISessionManager {
     // then this idle boundary rebuilds the runtime before a queued/next turn.
     if (managed.swarmRuntimeRefreshPending) {
       managed.swarmRuntimeRefreshPending = false
-      await this.disposeManagedAgentRuntime(managed, 'deferred Swarm setting change')
+      if (!mustRestartRuntime) {
+        await this.disposeManagedAgentRuntime(managed, 'deferred Swarm setting change')
+      }
     }
 
     // 1b. Orphan backstop: with the default per-turn subprocess model, any
@@ -7977,7 +8140,7 @@ export class SessionManager implements ISessionManager {
           },
         }, managed.workspace.id)
         // Call onProcessingStopped to handle cleanup and check for more queued messages
-        this.onProcessingStopped(sessionId, 'error')
+        this.onProcessingStopped(sessionId, 'error', managed.processingGeneration)
       })
     })
   }
@@ -8613,7 +8776,7 @@ export class SessionManager implements ISessionManager {
       session = await this.createSession(managed.workspace.id, {
         name: request.name,
         llmConnection: request.llmConnection ?? managed.llmConnection,
-        model: request.model ?? managed.model,
+        model: request.model ?? this.sessionExecutionModel(managed),
         enabledSourceSlugs: request.enabledSourceSlugs ?? managed.enabledSourceSlugs,
         permissionMode: request.permissionMode ?? managed.permissionMode ?? 'safe',
         thinkingLevel: request.thinkingLevel ?? managed.thinkingLevel,
@@ -9833,12 +9996,15 @@ export class SessionManager implements ISessionManager {
       }
 
       case 'tool_start': {
+        if (toolCallBypassesWorkspaceCache(event.toolName)) {
+          managed.usedExternalToolsThisTurn = true
+        }
         // Format tool input paths to relative for better readability
         const formattedToolInput = formatToolInputPaths(event.input)
 
         // Resolve call_llm model for TurnCard badge display.
         // Known registry ids only — do not rewrite ORDER aliases like "Opus".
-        // Note: Pi sessions override the model in PiEventAdapter (call_llm always uses miniModel).
+        // Note: Pi sessions override the model in PiEventAdapter (unspecified call_llm uses the session model).
         if (event.toolName === 'mcp__session__call_llm' && formattedToolInput?.model) {
           const resolved = resolveKnownRegistryModelId(String(formattedToolInput.model))
           if (resolved) {

@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import type { TaskApplyRunRevisionResult } from '@craft-agent/shared/protocol'
-import { canConfirmRunRevision } from '../ApplyRunRevisionDialog'
+import { canConfirmRunRevision, revisionRequiresV3Ack } from '../ApplyRunRevisionDialog'
 import { runtimeNodesForDefinition } from '../ConductorWorkbench'
 
 function preview(overrides: Partial<TaskApplyRunRevisionResult> = {}): TaskApplyRunRevisionResult {
@@ -28,6 +28,11 @@ describe('canConfirmRunRevision', () => {
     expect(canConfirmRunRevision(preview({
       conflict: { code: 'etag-conflict', expected: 'old', actual: 'new' },
     }))).toBe(false)
+  })
+
+  test('requires an explicit v3 acknowledgement when migration warnings are present', () => {
+    expect(revisionRequiresV3Ack(preview())).toBe(false)
+    expect(revisionRequiresV3Ack(preview({ migrationWarnings: ['v2 cache:pure becomes run-pure'] }))).toBe(true)
   })
 })
 

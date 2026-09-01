@@ -6,6 +6,8 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 
 ## Improvements
 
+- **Skills support drag-and-drop import** — Drop one `SKILL.md` or Skill Zip anywhere on the Skills panel to reuse the existing preview, validation, conflict, and confirmation flow. Unsupported or multiple files are rejected with a clear error while the file picker remains available. (#167)
+
 - **Process notes no longer look like the final reply** — intermediate commentary stays in the work chain with the weaker step style instead of occupying the main response card. When tools start, that text remains reviewable as a step rather than a finished Copy / Markdown card. The real final reply still uses the existing response card. (#83)
 
 - **MCP JSON and Skill file import** — Sources can import Claude Desktop / Cursor `mcpServers` JSON (including a single server or an array), and Skills can import a Zip or `SKILL.md`. Secrets are stripped, missing-auth MCP stays disabled, and Zip paths cannot escape the skills directory. (#82)
@@ -17,6 +19,8 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 - **Clearer task usage details** — Session Info now separates the most recent model call from the full user-task total, including model calls, input/output/cache tokens, cost, and wall-clock time while preserving legacy session statistics.
 
 ## Bug Fixes
+
+- **Parallel `call_llm` and Swarm workers follow the current session model** — omitting `model` no longer falls through to the connection's Fast / mini tier. Work-chain badges, `spawn_session` children, and Conductor nodes without an explicit model inherit the input-area selection; an explicit tool or task model still wins. Title generation and other utility completions stay on the cheap model. (#192)
 
 - **All Sessions leaves project scope** — browsing a project now highlights only that project instead of also highlighting All Sessions. Clicking All Sessions clears the project-only filter and restores the global highlight while preserving status, label, and grouping preferences, so the global list shows every conversation again. (#165)
 

@@ -161,6 +161,15 @@ export function EntityList<T>({
   onCollapseAll,
   onExpandAll,
 }: EntityListProps<T>) {
+  const rootClassName = cn(
+    'flex min-w-0 max-w-full flex-1 flex-col min-h-0 overflow-x-hidden',
+    className,
+  )
+  const {
+    className: containerClassName,
+    ...containerAttributes
+  } = containerProps ?? {}
+
   // Determine if we have content
   const hasGroups = groups && groups.length > 0
   const hasItems = items && items.length > 0
@@ -169,7 +178,7 @@ export function EntityList<T>({
   // Empty state — rendered outside everything for proper centering
   if (isEmpty && emptyState) {
     return (
-      <div className={cn('flex flex-col flex-1', className)}>
+      <div className={rootClassName}>
         {header}
         {emptyState}
       </div>
@@ -177,15 +186,22 @@ export function EntityList<T>({
   }
 
   return (
-    <div className={cn('flex flex-col flex-1 min-h-0', className)}>
+    <div className={rootClassName}>
       {header}
-      <ScrollArea className={cn('flex-1', scrollAreaClassName)} viewportRef={viewportRef}>
+      <ScrollArea
+        className={cn('min-w-0 max-w-full flex-1', scrollAreaClassName)}
+        viewportRef={viewportRef}
+        constrainContentWidth
+      >
         <div
           ref={containerRef}
-          className="flex flex-col pb-2"
-          {...containerProps}
+          {...containerAttributes}
+          className={cn(
+            'flex w-full min-w-0 max-w-full flex-col overflow-x-hidden pb-2',
+            containerClassName,
+          )}
         >
-          <div className="pt-1">
+          <div className="w-full min-w-0 max-w-full overflow-x-hidden pt-1">
             {hasGroups
               ? groups!.map((group) => {
                   const isCollapsed = group.collapsible && collapsedGroups?.has(group.key)

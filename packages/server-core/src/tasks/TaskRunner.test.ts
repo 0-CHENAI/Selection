@@ -70,8 +70,16 @@ class MockHost implements ConductorSessionHost {
     return this.finalTextById.get(sessionId);
   }
   workingDirById = new Map<string, string>();
+  modelById = new Map<string, string>();
+  connectionById = new Map<string, string>();
   getSessionWorkingDirectory(sessionId: string): string | undefined {
     return this.workingDirById.get(sessionId);
+  }
+  getSessionModel(sessionId: string): string | undefined {
+    return this.modelById.get(sessionId);
+  }
+  getSessionLlmConnection(sessionId: string): string | undefined {
+    return this.connectionById.get(sessionId);
   }
 
   // --- test helpers (sessionId is derived from the node title, which defaults to the node id) ---
@@ -196,6 +204,33 @@ describe('TaskRunner (Conductor)', () => {
     const optsB = host.created.find((c) => c.options.name === 'b')?.options
     expect(optsA?.llmConnection).toBe('pi-conn')
     expect(optsB?.llmConnection).toBe('default-conn')
+  })
+
+  it('inherits the orchestrator session model when the spec omits one', async () => {
+    saveTaskSpec(
+      root,
+      specOf({
+        id: 'inherit-model',
+        title: 'Inherit',
+        goal: 'g',
+        nodes: [
+          { id: 'a', prompt: 'a' },
+          { id: 'b', prompt: 'b', model: 'pi/gpt-5-mini', llmConnection: 'pi-conn' },
+        ],
+      }),
+    )
+    host.modelById.set('orch', 'qwen/qwen3-max')
+    host.connectionById.set('orch', 'qwen-conn')
+    const runner = makeRunner()
+    runner.run('inherit-model', { runId: 'r1', orchestratorSessionId: 'orch' })
+    await tick()
+
+    const optsA = host.created.find((c) => c.options.name === 'a')?.options
+    const optsB = host.created.find((c) => c.options.name === 'b')?.options
+    expect(optsA?.model).toBe('qwen/qwen3-max')
+    expect(optsA?.llmConnection).toBe('qwen-conn')
+    expect(optsB?.model).toBe('pi/gpt-5-mini')
+    expect(optsB?.llmConnection).toBe('pi-conn')
   })
 
   it('resolves permissionMode: node override → task default → child (never the workspace default)', async () => {

@@ -6,7 +6,7 @@
  * and the validateModel callback hook.
  */
 import { describe, it, expect } from 'bun:test';
-import { buildCallLlmRequest } from '../llm-tool.ts';
+import { buildCallLlmRequest, resolveCallLlmModel } from '../llm-tool.ts';
 import { join } from 'path';
 import { writeFileSync, mkdirSync, rmSync } from 'fs';
 
@@ -30,6 +30,24 @@ function cleanupFixtures() {
 // ============================================================
 // Tests
 // ============================================================
+
+describe('resolveCallLlmModel()', () => {
+  it('uses the explicit model when present', () => {
+    expect(resolveCallLlmModel('pi/gpt-5-mini', 'qwen/qwen3-max')).toBe('pi/gpt-5-mini');
+  });
+
+  it('inherits the session model when the caller omits one', () => {
+    expect(resolveCallLlmModel(undefined, 'qwen/qwen3-max')).toBe('qwen/qwen3-max');
+  });
+
+  it('treats blank requested models as omitted', () => {
+    expect(resolveCallLlmModel('   ', 'qwen/qwen3-max')).toBe('qwen/qwen3-max');
+  });
+
+  it('returns undefined when neither side has a model', () => {
+    expect(resolveCallLlmModel(undefined, '  ')).toBeUndefined();
+  });
+});
 
 describe('buildCallLlmRequest()', () => {
   // Setup/teardown
@@ -66,6 +84,22 @@ describe('buildCallLlmRequest()', () => {
     expect(result.prompt).toBe('Summarize this');
     expect(result.systemPrompt).toBeUndefined();
     expect(result.model).toBeUndefined();
+  });
+
+  it('inherits defaultModel when the caller omits model', async () => {
+    const result = await buildCallLlmRequest(
+      { prompt: 'Research this' },
+      { backendName: 'Test', defaultModel: 'qwen/qwen3-max' }
+    );
+    expect(result.model).toBe('qwen/qwen3-max');
+  });
+
+  it('keeps an explicit model instead of defaultModel', async () => {
+    const result = await buildCallLlmRequest(
+      { prompt: 'Research this', model: 'pi/gpt-5-mini' },
+      { backendName: 'Test', defaultModel: 'qwen/qwen3-max' }
+    );
+    expect(result.model).toBe('pi/gpt-5-mini');
   });
 
   it('passes through systemPrompt', async () => {

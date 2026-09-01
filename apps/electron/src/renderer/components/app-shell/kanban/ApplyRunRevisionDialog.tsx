@@ -12,6 +12,10 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 
+export function revisionRequiresV3Ack(preview: TaskApplyRunRevisionResult | null): boolean {
+  return (preview?.migrationWarnings?.length ?? 0) > 0
+}
+
 export function canConfirmRunRevision(preview: TaskApplyRunRevisionResult | null): boolean {
   const hasChanges = Boolean(preview && (
     preview.diff.added.length > 0
@@ -65,8 +69,14 @@ export function ApplyRunRevisionDialog({
   onConfirm,
 }: ApplyRunRevisionDialogProps) {
   const { t } = useTranslation()
+  const [v3Acked, setV3Acked] = React.useState(false)
   const issues = preview ? [...preview.validation.errors, ...preview.validation.warnings] : []
-  const canConfirm = canConfirmRunRevision(preview) && !loading && !applying
+  const needsV3Ack = revisionRequiresV3Ack(preview)
+  const canConfirm = canConfirmRunRevision(preview) && (!needsV3Ack || v3Acked) && !loading && !applying
+
+  React.useEffect(() => {
+    setV3Acked(false)
+  }, [preview?.runSpecHash, preview?.runRevision, preview?.yaml])
 
   return (
     <Dialog open={open} onOpenChange={(next) => { if (!applying) onOpenChange(next) }}>
@@ -112,6 +122,26 @@ export function ApplyRunRevisionDialog({
                 </ul>
               )}
             </div>
+
+            {needsV3Ack && (
+              <div role="note" className="rounded-lg bg-amber-500/10 px-3 py-2 text-[12px] text-foreground/75">
+                <div className="font-semibold">{t('tasks.confirmV3Title')}</div>
+                <ul className="mt-1 list-disc space-y-0.5 pl-4">
+                  {preview.migrationWarnings?.map((warning) => (
+                    <li key={warning}>{warning}</li>
+                  ))}
+                </ul>
+                <label className="mt-2 flex items-start gap-2 text-[12px] text-foreground/80">
+                  <input
+                    type="checkbox"
+                    className="mt-0.5"
+                    checked={v3Acked}
+                    onChange={(event) => setV3Acked(event.target.checked)}
+                  />
+                  <span>{t('tasks.confirmV3ApplyAck')}</span>
+                </label>
+              </div>
+            )}
 
             {hasUnsavedChanges && (
               <div role="note" className="flex gap-2 rounded-lg bg-amber-500/10 px-3 py-2 text-[12px] text-foreground/75">

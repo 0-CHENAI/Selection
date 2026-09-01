@@ -417,4 +417,92 @@ describe('message queue management (#22)', () => {
       error: { code: 'queued_message_replay_failed' },
     })
   })
+
+  it('disposes an interrupted runtime before allowing queued messages to replay (#182)', async () => {
+    const disposal = Promise.withResolvers<void>()
+    const lifecycle: string[] = []
+    managed.agent = {
+      disposeForRestart: async () => {
+        lifecycle.push('dispose:start')
+        await disposal.promise
+        lifecycle.push('dispose:end')
+      },
+    } as never
+
+    ;(manager as any).processNextQueuedMessage = () => {
+      lifecycle.push('replay')
+    }
+
+    const stopping = (manager as any).onProcessingStopped(managed.id, 'interrupted')
+    await new Promise<void>(resolve => setImmediate(resolve))
+
+    expect(lifecycle).toEqual(['dispose:start'])
+    expect(managed.isProcessing).toBe(true)
+
+    disposal.resolve()
+    await stopping
+    await new Promise<void>(resolve => setImmediate(resolve))
+
+    expect(lifecycle).toEqual(['dispose:start', 'dispose:end', 'replay'])
+    expect(managed.agent).toBeNull()
+    expect(managed.isProcessing).toBe(false)
+  })
+
+  it('also disposes a runtime when interrupt draining times out (#182)', async () => {
+    const disposeForRestart = mock(async () => {})
+    managed.agent = { disposeForRestart } as never
+    managed.messageQueue = []
+
+    await (manager as any).onProcessingStopped(managed.id, 'timeout')
+
+    expect(disposeForRestart).toHaveBeenCalledTimes(1)
+    expect(managed.agent).toBeNull()
+    expect(managed.isProcessing).toBe(false)
+  })
+
+  it('deduplicates concurrent timeout and interrupted cleanup for one generation (#182)', async () => {
+    const disposal = Promise.withResolvers<void>()
+    const disposeForRestart = mock(async () => {
+      await disposal.promise
+    })
+    const replay = mock(() => {})
+    managed.agent = { disposeForRestart } as never
+    ;(manager as any).processNextQueuedMessage = replay
+
+    const timedOut = (manager as any).onProcessingStopped(managed.id, 'timeout')
+    await new Promise<void>(resolve => setImmediate(resolve))
+    const interrupted = (manager as any).onProcessingStopped(managed.id, 'interrupted')
+
+    expect(disposeForRestart).toHaveBeenCalledTimes(1)
+    disposal.resolve()
+    await Promise.all([timedOut, interrupted])
+    await new Promise<void>(resolve => setImmediate(resolve))
+
+    expect(disposeForRestart).toHaveBeenCalledTimes(1)
+    expect(replay).toHaveBeenCalledTimes(1)
+    expect(managed.agent).toBeNull()
+    expect(managed.isProcessing).toBe(false)
+  })
+
+  it('ignores a previous generation cleanup after the next turn starts (#182)', async () => {
+    const previousGeneration = managed.processingGeneration
+    const disposeOldRuntime = mock(async () => {})
+    managed.agent = { disposeForRestart: disposeOldRuntime } as never
+    managed.messageQueue = []
+
+    await (manager as any).onProcessingStopped(managed.id, 'timeout', previousGeneration)
+    expect(disposeOldRuntime).toHaveBeenCalledTimes(1)
+
+    const disposeNewRuntime = mock(async () => {})
+    const newRuntime = { disposeForRestart: disposeNewRuntime } as never
+    managed.processingGeneration++
+    managed.isProcessing = true
+    managed.agent = newRuntime
+
+    await (manager as any).onProcessingStopped(managed.id, 'interrupted', previousGeneration)
+
+    expect(disposeNewRuntime).not.toHaveBeenCalled()
+    expect(managed.agent).toBe(newRuntime)
+    expect(managed.isProcessing).toBe(true)
+  })
 })

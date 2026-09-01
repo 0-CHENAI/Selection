@@ -402,9 +402,7 @@ export class PiAgent extends BaseAgent {
     if (contextWindow) {
       this.adapter.setContextWindow(contextWindow);
     }
-    if (config.miniModel) {
-      this.adapter.setMiniModel(config.miniModel);
-    }
+    this.adapter.setCallLlmDefaultModel(this.getModel() || config.miniModel);
 
     // Set session dir on adapter for concurrent-safe toolMetadataStore lookups
     if (config.session?.id && config.workspace.rootPath) {
@@ -672,10 +670,11 @@ export class PiAgent extends BaseAgent {
       sessionToolDefs = sessionToolDefs.filter(d => d.name !== 'mcp__session__browser_tool');
     }
 
-    // Patch call_llm description with provider-specific model hint.
+    // Patch call_llm description with the current session model (#192).
     // Both the MCP name and the prompt-facing alias must get the same hint.
-    if (this.config.miniModel) {
-      const hint = `\n\nDefault fast model for this session: ${this.config.miniModel}. Omit the model parameter to use it automatically.`;
+    const callLlmDefault = this.getModel();
+    if (callLlmDefault) {
+      const hint = `\n\nDefault model for this session: ${callLlmDefault}. Omit the model parameter to use it automatically. Pass a different model only when you intentionally want another tier.`;
       for (const def of sessionToolDefs) {
         if (def.name === 'mcp__session__call_llm' || def.name === 'call_llm') {
           def.description += hint;
@@ -2600,6 +2599,7 @@ export class PiAgent extends BaseAgent {
       },
     };
     this._model = update.model;
+    this.adapter.setCallLlmDefaultModel(update.model);
     this.applyCatalogContextWindow(update.model);
 
     if (!this.subprocess) {
@@ -2630,6 +2630,7 @@ export class PiAgent extends BaseAgent {
   override setModel(model: string): void {
     const previousModel = this.getModel();
     super.setModel(model);
+    this.adapter.setCallLlmDefaultModel(model);
     this.applyCatalogContextWindow(model);
     // Forward to subprocess so it uses the new model on next turn
     if (this.subprocess) {

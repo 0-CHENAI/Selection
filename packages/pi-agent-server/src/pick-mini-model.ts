@@ -3,7 +3,8 @@ import { resolvePiModel, isDeniedMiniModelId } from './model-resolution.ts';
 import { PI_PREFERRED_DEFAULTS } from '../../shared/src/config/llm-connections.ts';
 
 /**
- * Choose a utility-completion model (title, summarization, call_llm default).
+ * Choose a utility-completion model (title, summarization).
+ * `call_llm` inherits the current session model unless the caller names another.
  *
  * Custom endpoints must stay on `custom-endpoint`. Falling through to the
  * OpenAI catalog (gpt-5.6-sol, …) sends the request somewhere else, so the

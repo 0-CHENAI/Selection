@@ -9,6 +9,7 @@ import { describe, test, expect } from 'bun:test'
 import type { LlmConnection } from '@craft-agent/shared/config/llm-connections'
 import {
   appendMissingPickerModel,
+  chosenPickerModelId,
   connectionPinnedModelIds,
   formatModelLimitCaption,
   formatModelTokenLimit,
@@ -16,8 +17,10 @@ import {
   groupConnectionsByProvider,
   isOpenRouterConnection,
   isPickerModelSelected,
+  isUnavailablePickerModel,
   pickerModelId,
   pickerModelMatchesQuery,
+  resolvePickerModelAction,
   resolvePickerModels,
   resolvePickerModelsWithLive,
   resolveVisiblePickerModels,
@@ -272,6 +275,44 @@ describe('appendMissingPickerModel', () => {
 
   test('appends when the id is absent', () => {
     expect(appendMissingPickerModel(['pi/Opus'], 'Laufry')).toEqual(['pi/Opus', 'Laufry'])
+  })
+})
+
+describe('resolvePickerModelAction', () => {
+  const catalog = ['pi/openrouter/stealth', 'pi/openrouter/horizon-beta']
+
+  test('selects a model the provider still offers', () => {
+    expect(resolvePickerModelAction('pi/openrouter/stealth', 'pi/openrouter/legacy', catalog))
+      .toBe('select')
+  })
+
+  test('clears the current model after the provider drops it', () => {
+    expect(resolvePickerModelAction('pi/openrouter/legacy', 'pi/openrouter/legacy', catalog))
+      .toBe('clear')
+    expect(isUnavailablePickerModel(catalog, 'pi/openrouter/legacy')).toBe(true)
+  })
+
+  test('does not select a dropped model that is not current', () => {
+    expect(resolvePickerModelAction('pi/openrouter/legacy', 'pi/openrouter/stealth', catalog))
+      .toBe('ignore')
+  })
+
+  test('chosenPickerModelId maps actions to the next stored value', () => {
+    expect(chosenPickerModelId('pi/openrouter/stealth', 'pi/openrouter/legacy', catalog))
+      .toBe('pi/openrouter/stealth')
+    expect(chosenPickerModelId('pi/openrouter/legacy', 'pi/openrouter/legacy', catalog))
+      .toBe('')
+    expect(chosenPickerModelId('pi/openrouter/legacy', 'pi/openrouter/stealth', catalog))
+      .toBeUndefined()
+  })
+
+  test('appended current model stays visible in the collapsed preview', () => {
+    const models = appendMissingPickerModel(catalog, 'pi/openrouter/legacy')
+    const visible = resolveVisiblePickerModels(models, {
+      currentModel: 'pi/openrouter/legacy',
+      collapseThreshold: 1,
+    })
+    expect(visible.visible.map(pickerModelId)).toEqual(['pi/openrouter/legacy'])
   })
 })
 

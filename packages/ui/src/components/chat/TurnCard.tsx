@@ -24,6 +24,7 @@ import {
   FilePenLine,
   GitBranch,
   RefreshCw,
+  Sparkles,
 } from 'lucide-react'
 import { cn } from '../../lib/utils'
 import { Markdown } from '../markdown'
@@ -103,6 +104,7 @@ import { useAnnotationCancelRestore } from '../annotations/use-annotation-cancel
 import { DocumentFormattedMarkdownOverlay } from '../overlay'
 import { AcceptPlanDropdown } from './AcceptPlanDropdown'
 import { CompactAcceptPlanDrawer } from './CompactAcceptPlanDrawer'
+import { parseSkillUsedMarkers } from './skill-used-markers'
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -422,6 +424,8 @@ function getToolDisplayName(name: string): string {
     'get_task_results': 'Get Task Results',
     'submit_task_output': 'Submit Task Output',
     'submit_task_verdict': 'Submit Task Verdict',
+    'submit_task_node_verdict': 'Submit Node Verdict',
+    'submit_orchestration_decision': 'Submit Orchestration Decision',
     'list_background_tasks': 'List Background Tasks',
     'send_agent_message': 'Send Agent Message',
     'spawn_session': 'Spawn Session',
@@ -766,6 +770,35 @@ interface ActivityRowProps {
   sessionFolderPath?: string
   /** Display mode: 'detailed' shows all info, 'informative' hides MCP/API names and params */
   displayMode?: 'informative' | 'detailed'
+}
+
+/**
+ * Keep the height wrapper mounted so adding rows does not remount it and
+ * replay height 0 → auto (looks like collapse then expand).
+ */
+function ExpandableHeightPanel({
+  open,
+  reduceMotion,
+  children,
+}: {
+  open: boolean
+  reduceMotion: boolean | null
+  children: React.ReactNode
+}) {
+  return (
+    <motion.div
+      initial={false}
+      animate={open ? { height: 'auto', opacity: 1 } : { height: 0, opacity: 0 }}
+      transition={{
+        height: { duration: reduceMotion ? 0 : 0.25, ease: [0.4, 0, 0.2, 1] },
+        opacity: { duration: reduceMotion ? 0 : 0.15 },
+      }}
+      className={cn("overflow-hidden", !open && "pointer-events-none")}
+      aria-hidden={!open}
+    >
+      {children}
+    </motion.div>
+  )
 }
 
 /**
@@ -1120,6 +1153,8 @@ interface ActivityGroupRowProps {
   onOpenActivityDetails?: (activity: ActivityItem) => void
   /** Animation index for staggered animation */
   animationIndex?: number
+  /** Only slide/stagger on the expand click, not when new children arrive */
+  animateEntrance?: boolean
   /** Session folder path for stripping from file paths in tool display */
   sessionFolderPath?: string
   /** Display mode: 'detailed' shows all info, 'informative' hides MCP/API names and params */
@@ -1130,7 +1165,7 @@ interface ActivityGroupRowProps {
  * Renders a Task subagent with its child activities grouped together.
  * Provides visual containment and collapsible children.
  */
-function ActivityGroupRow({ group, expandedGroups: externalExpandedGroups, onExpandedGroupsChange, onOpenActivityDetails, animationIndex = 0, sessionFolderPath, displayMode = 'detailed' }: ActivityGroupRowProps) {
+function ActivityGroupRow({ group, expandedGroups: externalExpandedGroups, onExpandedGroupsChange, onOpenActivityDetails, animationIndex = 0, animateEntrance = false, sessionFolderPath, displayMode = 'detailed' }: ActivityGroupRowProps) {
   const reduceMotion = useReducedMotion()
   // Use local state if no controlled state provided
   const [localExpandedGroups, setLocalExpandedGroups] = useState<Set<string>>(new Set())
@@ -1139,6 +1174,11 @@ function ActivityGroupRow({ group, expandedGroups: externalExpandedGroups, onExp
 
   const groupId = group.parent.id
   const isExpanded = expandedGroups.has(groupId)
+  const wasGroupExpandedRef = useRef(isExpanded)
+  const staggerChildren = isExpanded && !wasGroupExpandedRef.current
+  useEffect(() => {
+    wasGroupExpandedRef.current = isExpanded
+  }, [isExpanded])
 
   const toggleExpanded = useCallback(() => {
     const next = new Set(expandedGroups)
@@ -1157,10 +1197,12 @@ function ActivityGroupRow({ group, expandedGroups: externalExpandedGroups, onExp
 
   return (
     <motion.div
-      initial={reduceMotion ? false : { opacity: 0, x: -8 }}
+      initial={reduceMotion || !animateEntrance ? false : { opacity: 0, x: -8 }}
       animate={{ opacity: 1, x: 0 }}
       transition={{
-        delay: reduceMotion ? 0 : (animationIndex < SIZE_CONFIG.staggeredAnimationLimit ? animationIndex * 0.03 : 0.3),
+        delay: reduceMotion || !animateEntrance
+          ? 0
+          : (animationIndex < SIZE_CONFIG.staggeredAnimationLimit ? animationIndex * 0.03 : 0.3),
         duration: reduceMotion ? 0 : undefined,
       }}
       className="space-y-0.5"
@@ -1247,40 +1289,27 @@ function ActivityGroupRow({ group, expandedGroups: externalExpandedGroups, onExp
       </div>
 
       {/* Children with indentation */}
-      <AnimatePresence initial={false}>
-        {isExpanded && group.children.length > 0 && (
-          <motion.div
-            initial={reduceMotion ? false : { height: 0, opacity: 0 }}
-            animate={{ height: 'auto', opacity: 1 }}
-            exit={reduceMotion ? undefined : { height: 0, opacity: 0 }}
-            transition={{
-              height: { duration: reduceMotion ? 0 : 0.2, ease: [0.4, 0, 0.2, 1] },
-              opacity: { duration: reduceMotion ? 0 : 0.15 }
-            }}
-            className="overflow-hidden"
-          >
-            <div className="pl-0 space-y-0.5 border-l-2 border-muted ml-[5px]">
-              {group.children.map((child, idx) => (
-                <motion.div
-                  key={child.id}
-                  initial={reduceMotion ? false : { opacity: 0, x: -4 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  transition={{ delay: reduceMotion ? 0 : idx * 0.02, duration: reduceMotion ? 0 : undefined }}
-                  className="ml-[-4px]"
-                >
-                  <ActivityRow
-                    activity={child}
-                    onOpenDetails={onOpenActivityDetails ? () => onOpenActivityDetails(child) : undefined}
-                    isLastChild={idx === group.children.length - 1}
-                    sessionFolderPath={sessionFolderPath}
-                    displayMode={displayMode}
-                  />
-                </motion.div>
-              ))}
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+      <ExpandableHeightPanel open={isExpanded && group.children.length > 0} reduceMotion={reduceMotion}>
+        <div className="pl-0 space-y-0.5 border-l-2 border-muted ml-[5px]">
+          {group.children.map((child, idx) => (
+            <motion.div
+              key={child.id}
+              initial={reduceMotion || !staggerChildren ? false : { opacity: 0, x: -4 }}
+              animate={{ opacity: 1, x: 0 }}
+              transition={{ delay: reduceMotion || !staggerChildren ? 0 : idx * 0.02, duration: reduceMotion ? 0 : undefined }}
+              className="ml-[-4px]"
+            >
+              <ActivityRow
+                activity={child}
+                onOpenDetails={onOpenActivityDetails ? () => onOpenActivityDetails(child) : undefined}
+                isLastChild={idx === group.children.length - 1}
+                sessionFolderPath={sessionFolderPath}
+                displayMode={displayMode}
+              />
+            </motion.div>
+          ))}
+        </div>
+      </ExpandableHeightPanel>
     </motion.div>
   )
 }
@@ -1389,6 +1418,31 @@ function BranchDropdown({ onBranch }: BranchDropdownProps) {
 
 // Response cards expand with content and scroll with the outer chat list only.
 // Nested max-height + overflow-y-auto caused painful dual-scroll; do not reintroduce.
+
+function SkillUsedIndicator({ skills }: { skills: string[] }) {
+  const { t } = useTranslation()
+
+  if (skills.length === 0) return null
+
+  return (
+    <div
+      data-testid="skill-used-indicator"
+      className="mb-2 flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground select-none"
+    >
+      <span>{t('turnCard.used')}</span>
+      {skills.map(skill => (
+        <span
+          key={skill}
+          className="inline-flex min-w-0 max-w-full items-center gap-1 rounded-[6px] border border-border/60 bg-muted/40 px-2 py-1 shadow-minimal"
+        >
+          <Sparkles className="h-3 w-3 shrink-0 text-muted-foreground/70" aria-hidden="true" />
+          <span className="truncate">{skill}</span>
+        </span>
+      ))}
+      <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-success" aria-hidden="true" />
+    </div>
+  )
+}
 
 function clearAnnotationMarks(root: HTMLElement): void {
   const annotatedInlineCodeNodes = root.querySelectorAll<HTMLElement>('code[data-ca-annotation-inline-code="true"]')
@@ -1586,8 +1640,13 @@ export function ResponseCard({
   isCommentary = false,
 }: ResponseCardProps) {
   const { t } = useTranslation()
+  const parsedSkillUsage = useMemo(
+    () => parseSkillUsedMarkers(text, isStreaming),
+    [text, isStreaming],
+  )
+  const responseText = parsedSkillUsage.content
   // Throttled content for display - updates every CONTENT_THROTTLE_MS during streaming
-  const [displayedText, setDisplayedText] = useState(text)
+  const [displayedText, setDisplayedText] = useState(responseText)
   const lastUpdateRef = useRef(Date.now())
   // Copy to clipboard state
   const [copied, setCopied] = useState(false)
@@ -1672,13 +1731,13 @@ export function ResponseCard({
   const handleCopy = useCallback(async () => {
     try {
       // Copy plain text — not markdown source (user expects what they see)
-      await navigator.clipboard.writeText(markdownToPlainText(text))
+      await navigator.clipboard.writeText(markdownToPlainText(responseText))
       setCopied(true)
       setTimeout(() => setCopied(false), 2000)
     } catch (err) {
       console.error('Failed to copy:', err)
     }
-  }, [text])
+  }, [responseText])
 
   const renderedAnnotations = useMemo(() => {
     const persisted = annotations ?? []
@@ -1776,7 +1835,7 @@ export function ResponseCard({
       window.removeEventListener('resize', scheduleCoordsRecompute)
       root.removeEventListener('scroll', scheduleCoordsRecompute, { capture: true } as EventListenerOptions)
     }
-  }, [annotations, renderedAnnotations, text, displayedText, isStreaming])
+  }, [annotations, renderedAnnotations, responseText, displayedText, isStreaming])
 
   useEffect(() => {
     if (!canAnnotate) {
@@ -1902,7 +1961,7 @@ export function ResponseCard({
         messageId,
         annotationId: activeAnnotationDetail.annotationId,
         note: normalizedNote,
-        selectedText: extractAnnotationSelectedText(activeAnnotation, text),
+        selectedText: extractAnnotationSelectedText(activeAnnotation, responseText),
       }
     }
 
@@ -1943,7 +2002,7 @@ export function ResponseCard({
     closeSelectionMenu,
     sessionId,
     markSubmitSuccess,
-    text,
+    responseText,
   ])
 
   const handleSubmitFollowUp = useCallback((note: string) => {
@@ -2307,7 +2366,7 @@ export function ResponseCard({
   useEffect(() => {
     if (!isStreaming) {
       // Streaming ended - show final content immediately
-      setDisplayedText(text)
+      setDisplayedText(responseText)
       return
     }
 
@@ -2316,24 +2375,24 @@ export function ResponseCard({
 
     if (elapsed >= BUFFER_CONFIG.CONTENT_THROTTLE_MS) {
       // Enough time passed - update immediately
-      setDisplayedText(text)
+      setDisplayedText(responseText)
       lastUpdateRef.current = now
     } else {
       // Schedule update for remaining time
       const timeout = setTimeout(() => {
-        setDisplayedText(text)
+        setDisplayedText(responseText)
         lastUpdateRef.current = Date.now()
       }, BUFFER_CONFIG.CONTENT_THROTTLE_MS - elapsed)
       return () => clearTimeout(timeout)
     }
-  }, [text, isStreaming])
+  }, [responseText, isStreaming])
 
   // Time-aware buffer gate (re-checks on min/max window even if tokens stall)
-  const reveal = useStreamingReveal(text, isStreaming, streamStartTime)
+  const reveal = useStreamingReveal(responseText, isStreaming, streamStartTime)
 
   const isCompleted = !isStreaming
   const isBuffering = isStreaming && !reveal.shouldShow
-  const bodyText = isStreaming ? displayedText : text
+  const bodyText = isStreaming ? displayedText : responseText
   // Commentary must stay on the live card tree. Switching to the completed
   // chrome remounts markdown and pops a final-reply footer the moment tools start.
   const showCompletedChrome = (isCompleted && !isCommentary) || variant === 'plan'
@@ -2388,13 +2447,14 @@ export function ResponseCard({
             onMouseUp={handleTextSelection}
             className="pl-[22px] pr-[16px] py-3 text-sm"
           >
+            <SkillUsedIndicator skills={parsedSkillUsage.skills} />
             <div ref={contentLayerRef} className="relative">
               <Markdown
                 mode="minimal"
                 onUrlClick={onOpenUrl}
                 onFileClick={onOpenFile}
               >
-                {text}
+                {responseText}
               </Markdown>
               {annotationOverlayLayer}
             </div>
@@ -2525,7 +2585,7 @@ export function ResponseCard({
 
         {/* Fullscreen overlay for reading/annotating response and plan content. */}
         <DocumentFormattedMarkdownOverlay
-          content={text}
+          content={responseText}
           isOpen={isFullscreen}
           onClose={() => setIsFullscreen(false)}
           variant={isPlan ? 'plan' : undefined}
@@ -2559,6 +2619,7 @@ export function ResponseCard({
           onMouseUp={handleTextSelection}
           className="pl-[22px] pr-4 py-3 text-sm"
         >
+          <SkillUsedIndicator skills={parsedSkillUsage.skills} />
           <div ref={contentLayerRef} className="relative">
             <Markdown
               mode="minimal"
@@ -2743,15 +2804,14 @@ export const TurnCard = React.memo(function TurnCard({
 
   // Track if user has toggled expansion (skip animation on initial mount)
   const hasUserToggled = useRef(false)
+  const wasExpandedRef = useRef(isExpanded)
+  const staggerOnThisExpand = isExpanded && !wasExpandedRef.current && hasUserToggled.current
+  useEffect(() => {
+    wasExpandedRef.current = isExpanded
+  }, [isExpanded])
 
   // Ref for scrollable activities container (to scroll to bottom on expand)
   const activitiesContainerRef = useRef<HTMLDivElement>(null)
-
-  // Track if component has mounted (enable fade-in for new activities after mount)
-  const hasMounted = useRef(false)
-  useEffect(() => {
-    hasMounted.current = true
-  }, [])
 
   const toggleExpanded = useCallback(() => {
     hasUserToggled.current = true
@@ -2952,18 +3012,7 @@ export const TurnCard = React.memo(function TurnCard({
           </button>
 
           {/* Expanded Activity List */}
-          <AnimatePresence initial={false}>
-            {isExpanded && (
-              <motion.div
-                initial={reduceMotion ? false : { height: 0, opacity: 0 }}
-                animate={{ height: 'auto', opacity: 1 }}
-                exit={reduceMotion ? undefined : { height: 0, opacity: 0 }}
-                transition={{
-                  height: { duration: reduceMotion ? 0 : 0.25, ease: [0.4, 0, 0.2, 1] },
-                  opacity: { duration: reduceMotion ? 0 : 0.15 }
-                }}
-                className="overflow-hidden"
-              >
+          <ExpandableHeightPanel open={isExpanded} reduceMotion={reduceMotion}>
                 {/* Activities expand fully — no nested vertical scroll (outer chat scrolls) */}
                 {/* ml-[15px] positions the border-l under the chevron */}
                 <div
@@ -2982,6 +3031,7 @@ export const TurnCard = React.memo(function TurnCard({
                           onExpandedGroupsChange={handleExpandedActivityGroupsChange}
                           onOpenActivityDetails={onOpenActivityDetails}
                           animationIndex={index}
+                          animateEntrance={staggerOnThisExpand}
                           sessionFolderPath={sessionFolderPath}
                           displayMode={displayMode}
                         />
@@ -2989,13 +3039,13 @@ export const TurnCard = React.memo(function TurnCard({
                         <motion.div
                           key={item.id}
                           initial={
-                            reduceMotion || !(hasUserToggled.current || hasMounted.current)
+                            reduceMotion || !staggerOnThisExpand
                               ? false
                               : { opacity: 0, x: -8 }
                           }
                           animate={{ opacity: 1, x: 0 }}
                           transition={{
-                            delay: reduceMotion || !hasUserToggled.current
+                            delay: reduceMotion || !staggerOnThisExpand
                               ? 0
                               : (index < SIZE_CONFIG.staggeredAnimationLimit ? index * 0.03 : SIZE_CONFIG.staggeredAnimationLimit * 0.03),
                             duration: reduceMotion ? 0 : undefined,
@@ -3016,14 +3066,13 @@ export const TurnCard = React.memo(function TurnCard({
                       <motion.div
                         key={activity.id}
                         initial={
-                          reduceMotion || !(hasUserToggled.current || hasMounted.current)
+                          reduceMotion || !staggerOnThisExpand
                             ? false
                             : { opacity: 0, x: -8 }
                         }
                         animate={{ opacity: 1, x: 0 }}
-                        // Only animate on user toggle, not initial mount
                         transition={{
-                          delay: reduceMotion || !hasUserToggled.current
+                          delay: reduceMotion || !staggerOnThisExpand
                             ? 0
                             : (index < SIZE_CONFIG.staggeredAnimationLimit ? index * 0.03 : SIZE_CONFIG.staggeredAnimationLimit * 0.03),
                           duration: reduceMotion ? 0 : undefined,
@@ -3043,10 +3092,12 @@ export const TurnCard = React.memo(function TurnCard({
                   {isThinking && !animateResponse && (
                     <motion.div
                       key="thinking"
-                      initial={reduceMotion ? false : { opacity: 0, x: -8 }}
+                      initial={reduceMotion || !staggerOnThisExpand ? false : { opacity: 0, x: -8 }}
                       animate={{ opacity: 1, x: 0 }}
                       transition={{
-                        delay: reduceMotion ? 0 : Math.min(visibleActivities.length, SIZE_CONFIG.staggeredAnimationLimit) * 0.03,
+                        delay: reduceMotion || !staggerOnThisExpand
+                          ? 0
+                          : Math.min(visibleActivities.length, SIZE_CONFIG.staggeredAnimationLimit) * 0.03,
                         duration: reduceMotion ? 0 : 0.3,
                         ease: "easeOut"
                       }}
@@ -3062,9 +3113,7 @@ export const TurnCard = React.memo(function TurnCard({
                 {todos && todos.length > 0 && (
                   <TodoList todos={todos} />
                 )}
-              </motion.div>
-            )}
-          </AnimatePresence>
+          </ExpandableHeightPanel>
         </div>
       )}
 

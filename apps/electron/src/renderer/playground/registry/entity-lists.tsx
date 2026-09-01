@@ -12,6 +12,7 @@ import { Spinner, Tooltip, TooltipTrigger, TooltipContent } from '@craft-agent/u
 import { cn } from '@/lib/utils'
 import { EntityRow } from '@/components/ui/entity-row'
 import { EntityList } from '@/components/ui/entity-list'
+import { FadingText } from '@/components/ui/fading-text'
 import { Empty, EmptyHeader, EmptyMedia, EmptyTitle, EmptyDescription } from '@/components/ui/empty'
 import { useMenuComponents } from '@/components/ui/menu-context'
 import { useEntityListInteractions } from '@/hooks/useEntityListInteractions'
@@ -422,7 +423,19 @@ function SkillEntityListPreview({
               )
             }
             title={skill.name}
-            badges={<span className="truncate">{skill.description}</span>}
+            badgesEdgeFade={false}
+            badges={(
+              <span className="flex flex-1 min-w-0 overflow-hidden">
+                <FadingText
+                  className="block min-w-0 flex-1 pr-3"
+                  fadeWidth={16}
+                  trailingGap={12}
+                  overflowTitle={skill.description}
+                >
+                  {skill.description}
+                </FadingText>
+              </span>
+            )}
             isSelected={index === selectedIndex}
             showSeparator={!isFirst}
             menuContent={<MockMenuItems />}
@@ -550,7 +563,19 @@ function MixedEntityListPreview({
               )
             }
             title={skill.name}
-            badges={<span className="truncate">{skill.description}</span>}
+            badgesEdgeFade={false}
+            badges={(
+              <span className="flex flex-1 min-w-0 overflow-hidden">
+                <FadingText
+                  className="block min-w-0 flex-1 pr-3"
+                  fadeWidth={16}
+                  trailingGap={12}
+                  overflowTitle={skill.description}
+                >
+                  {skill.description}
+                </FadingText>
+              </span>
+            )}
             isSelected={currentFlatIndex === selectedIndex}
             showSeparator={!isFirst}
             menuContent={<MockMenuItems />}

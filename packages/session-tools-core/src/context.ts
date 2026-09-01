@@ -368,6 +368,10 @@ export interface SessionToolContext {
 
   submitOrchestrationPatch?(input: OrchestrationPatchInput): Promise<{ status: string; revision?: number }>;
 
+  submitOrchestrationDecision?(input: OrchestrationDecisionInput): Promise<{ status: string; revision?: number }>;
+
+  submitTaskNodeVerdict?(input: SubmitTaskNodeVerdictInput): Promise<{ ok: boolean; error?: string }>;
+
   submitTaskDefinition?(input: SubmitTaskDefinitionInput): Promise<{ valid: boolean; errors?: string[]; yaml?: string }>;
 
   controlTaskRun?(input: ControlTaskRunInput): Promise<{ status: string; conflict?: string }>;
@@ -557,6 +561,26 @@ export interface OrchestrationPatchInput {
   update?: unknown[];
   cancel?: string[];
   action?: 'continue' | 'pause';
+}
+
+export interface OrchestrationDecisionInput {
+  runId: string;
+  checkpointId: string;
+  decisionId: string;
+  baseRevision: number;
+  action: 'continue' | 'patch' | 'pause';
+  rationale?: string;
+  add?: unknown[];
+  update?: unknown[];
+  cancel?: string[];
+}
+
+export interface SubmitTaskNodeVerdictInput {
+  result: 'pass' | 'fail';
+  reason?: string;
+  nodes?: string[];
+  evidence?: string;
+  nodeId?: string;
 }
 
 export interface SubmitTaskDefinitionInput {

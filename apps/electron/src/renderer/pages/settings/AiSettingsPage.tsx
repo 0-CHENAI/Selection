@@ -60,6 +60,7 @@ import {
   appendMissingPickerModel,
   connectionPinnedModelIds,
   isOpenRouterConnection,
+  isUnavailablePickerModel,
   resolvePickerModelsWithLive,
   type LivePickerModel,
 } from '@/components/app-shell/input/model-picker-helpers'
@@ -73,16 +74,31 @@ function getModelOptionsForConnection(
   connection: LlmConnectionWithStatus | undefined,
   liveOpenRouter?: readonly LivePickerModel[] | null,
   selectedValue?: string,
-): Array<{ value: string; label: string; description: string; descriptionKey?: string }> {
+): Array<{ value: string; label: string; description: string; descriptionKey?: string; unavailable?: boolean }> {
+  const catalog = resolvePickerModelsWithLive(connection, liveOpenRouter)
   const models = appendMissingPickerModel(
-    resolvePickerModelsWithLive(connection, liveOpenRouter),
+    catalog,
     selectedValue && selectedValue !== 'global' ? selectedValue : undefined,
   )
   const options = models.map((m) => {
+    const value = typeof m === 'string' ? m : m.id
+    const unavailable = isUnavailablePickerModel(catalog, value)
     if (typeof m === 'string') {
-      return { value: m, label: getModelShortName(m), description: '' }
+      return {
+        value: m,
+        label: getModelShortName(m),
+        description: '',
+        descriptionKey: unavailable ? 'chat.modelPicker.unavailable' : undefined,
+        unavailable,
+      }
     }
-    return { value: m.id, label: m.name, description: m.description, descriptionKey: m.descriptionKey }
+    return {
+      value: m.id,
+      label: m.name,
+      description: m.description,
+      descriptionKey: unavailable ? 'chat.modelPicker.unavailable' : m.descriptionKey,
+      unavailable,
+    }
   })
 
   if (selectedValue && selectedValue !== 'global' && !options.some((option) => option.value === selectedValue)) {

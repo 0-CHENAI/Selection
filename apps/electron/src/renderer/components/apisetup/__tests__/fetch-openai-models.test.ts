@@ -8,6 +8,7 @@ import {
   inferModelSupportsImages,
   isValidModelLimitCombination,
   lookupRecordByModelId,
+  mergeMissingSelectedModels,
   MODEL_CONTEXT_WINDOW_PRESETS,
   MODEL_MAX_OUTPUT_PRESETS,
   modelsEndpoint,
@@ -230,6 +231,10 @@ describe('toggleSelectedModel', () => {
     expect(parseSelectedModels(toggleSelectedModel(twice, 'Opus'))).toEqual(['Laufry'])
   })
 
+  test('unchecks a stored prefix against the live catalog id', () => {
+    expect(parseSelectedModels(toggleSelectedModel('pi/Opus, Laufry', 'Opus'))).toEqual(['Laufry'])
+  })
+
   test('splits fullwidth and enumeration commas used in zh placeholders', () => {
     expect(parseSelectedModels('Opus，Laufry、Maylo')).toEqual(['Opus', 'Laufry', 'Maylo'])
   })
@@ -238,6 +243,37 @@ describe('toggleSelectedModel', () => {
     expect(firstSelectedModelId('Opus, Laufry')).toBe('Opus')
     expect(firstSelectedModelId('Opus，Laufry')).toBe('Opus')
     expect(firstSelectedModelId('')).toBeUndefined()
+  })
+})
+
+describe('mergeMissingSelectedModels', () => {
+  const live = [
+    { id: 'Opus', name: 'Opus', contextWindow: 200_000 },
+    { id: 'Laufry', name: 'Laufry', contextWindow: 128_000 },
+  ]
+
+  test('returns the live catalog when every selection is still offered', () => {
+    expect(mergeMissingSelectedModels(live, ['Opus'])).toEqual(live)
+  })
+
+  test('prepends saved IDs the provider no longer returns', () => {
+    expect(mergeMissingSelectedModels(live, ['Maylo', 'Opus']).map((model) => model.id))
+      .toEqual(['Maylo', 'Opus', 'Laufry'])
+  })
+
+  test('matches stored prefixes so pi/Opus is not duplicated', () => {
+    expect(mergeMissingSelectedModels(live, ['pi/Opus']).map((model) => model.id))
+      .toEqual(['Opus', 'Laufry'])
+  })
+
+  test('keeps a stale selection when the live catalog is empty', () => {
+    expect(mergeMissingSelectedModels([], ['Maylo'])).toEqual([{ id: 'Maylo', name: 'Maylo' }])
+  })
+
+  test('toggle still removes a stale ID after it is merged back into the list', () => {
+    const listed = mergeMissingSelectedModels(live, ['Maylo', 'Opus'])
+    expect(listed.some((model) => model.id === 'Maylo')).toBe(true)
+    expect(parseSelectedModels(toggleSelectedModel('Maylo, Opus', 'Maylo'))).toEqual(['Opus'])
   })
 })
 

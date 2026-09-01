@@ -45,6 +45,8 @@ import { handleGetTaskResults } from './handlers/get-task-results.ts';
 import { handleSubmitTaskOutput } from './handlers/submit-task-output.ts';
 import { handleSubmitTaskVerdict } from './handlers/submit-task-verdict.ts';
 import { handleSubmitOrchestrationPatch } from './handlers/submit-orchestration-patch.ts';
+import { handleSubmitOrchestrationDecision } from './handlers/submit-orchestration-decision.ts';
+import { handleSubmitTaskNodeVerdict } from './handlers/submit-task-node-verdict.ts';
 import { handleSubmitTaskDefinition } from './handlers/submit-task-definition.ts';
 import { handleControlTaskRun } from './handlers/control-task-run.ts';
 import { handleArchiveSession } from './handlers/archive-session.ts';
@@ -112,7 +114,7 @@ export const CallLlmSchema = z.object({
       endLine: z.number().optional().describe('Last line (1-indexed)'),
     }),
   ])).optional().describe('File paths on disk to attach (max 20). NOT for inline text — put text in prompt instead. Use {path, startLine, endLine} for large files.'),
-  model: z.string().optional().describe('Model ID or short name. Defaults to a fast model.'),
+  model: z.string().optional().describe('Model ID or short name. Omit to inherit the current session model.'),
   systemPrompt: z.string().optional().describe('Optional system prompt'),
   maxTokens: z.number().optional().describe('Max output tokens (1-64000). Defaults to 4096'),
   temperature: z.number().optional().describe('Sampling temperature 0-1'),
@@ -196,7 +198,7 @@ export const SpawnSessionSchema = z.object({
   role: z.enum(['coordinator', 'worker', 'reviewer']).optional()
     .describe('Observation/result ownership role only; it does not grant permissions.'),
   llmConnection: z.string().optional().describe('Connection slug (e.g., "anthropic-api", "codex")'),
-  model: z.string().optional().describe('Model ID override'),
+  model: z.string().optional().describe('Model ID override. Omit to inherit the current session model.'),
   enabledSourceSlugs: z.array(z.string()).optional().describe('Source slugs to enable in the new session'),
   permissionMode: z.enum(['safe', 'ask', 'allow-all']).optional().describe('Permission mode for the new session'),
   thinkingLevel: z.enum(['off', 'low', 'medium', 'high', 'xhigh', 'max']).optional()
@@ -241,7 +243,7 @@ export const CreateTaskSchema = z.object({
   sources: z.array(z.string()).optional().describe('Source slugs to enable on the task sessions'),
   skills: z.array(z.string()).optional().describe('Skill slugs applied to dispatched task prompts'),
   llmConnection: z.string().optional().describe('LLM connection slug serving the model'),
-  model: z.string().optional().describe('Model ID for the task sessions (workspace default when omitted)'),
+  model: z.string().optional().describe('Model ID for the task sessions (current session model when omitted)'),
   workingDirectory: z.string().optional().describe('Working directory for the task sessions'),
   projectId: z.string().optional().describe("Project ID to bind the task to (defaults to the invoking session's project)"),
 });
@@ -289,6 +291,35 @@ export const SubmitTaskVerdictSchema = z.object({
   reason: z.string().optional().describe('One-line reason for a fail'),
   nodes: z.array(z.string()).optional().describe('Definition node ids to repair on fail'),
   runId: z.string().optional().describe('Run id when the parent has more than one active run'),
+});
+
+export const SubmitOrchestrationDecisionSchema = z.object({
+  runId: z.string().describe('Active run id'),
+  checkpointId: z.string().describe('Checkpoint this decision answers'),
+  decisionId: z.string().describe('Idempotency key for this decision'),
+  baseRevision: z.number().int().min(0).describe('Revision this decision is based on'),
+  action: z.enum(['continue', 'patch', 'pause']).describe('continue the graph, patch pending nodes, or pause for review'),
+  rationale: z.string().optional().describe('Required when action is patch'),
+  add: z.array(z.record(z.string(), z.unknown())).optional().describe('Pending nodes to add'),
+  update: z.array(z.record(z.string(), z.unknown())).optional().describe('Pending nodes to update'),
+  cancel: z.array(z.string()).optional().describe('Pending node ids to cancel'),
+}).superRefine((value, ctx) => {
+  if (value.action === 'patch' && !value.rationale?.trim()) {
+    ctx.addIssue({ code: 'custom', path: ['rationale'], message: 'patch requires a rationale' });
+  }
+});
+
+export const SubmitTaskNodeVerdictSchema = z.object({
+  result: z.enum(['pass', 'fail']).describe('Node verification result'),
+  reason: z.string().optional().describe('Required on fail'),
+  nodes: z.array(z.string()).optional().describe('Definition node ids to rework on fail'),
+  evidence: z.string().optional().describe('Required evidence summary on fail'),
+  nodeId: z.string().optional().describe('Definition or instance id when not implied by the session'),
+}).superRefine((value, ctx) => {
+  if (value.result !== 'fail') return;
+  if (!value.reason?.trim()) ctx.addIssue({ code: 'custom', path: ['reason'], message: 'fail verdict requires a reason' });
+  if (!value.evidence?.trim()) ctx.addIssue({ code: 'custom', path: ['evidence'], message: 'fail verdict requires evidence' });
+  if (!value.nodes?.length) ctx.addIssue({ code: 'custom', path: ['nodes'], message: 'fail verdict requires nodes to rework' });
 });
 
 export const ListSessionsSchema = z.object({
@@ -525,10 +556,11 @@ Examples:
 - \`hide\` — hide the window while preserving state`,
 
   call_llm: `Invoke a secondary LLM for focused subtasks. Use for:
-- Cost optimization: use a smaller model for simple tasks (summarization, classification)
-- Structured output: JSON schema compliance via prompt instructions
 - Parallel processing: call multiple times in one message - all run simultaneously
+- Structured output: JSON schema compliance via prompt instructions
 - Context isolation: process content without polluting main context
+
+Omit \`model\` to inherit the current session model. Pass a different model only when you intentionally want another tier (for example a smaller model for mechanical summarization).
 
 Put text/content directly in the 'prompt' parameter. Do NOT pass inline text via attachments.
 Only use 'attachments' for existing file paths on disk - the tool loads file content automatically.
@@ -546,7 +578,7 @@ mode:
 
 Optional timeoutMs applies only to wait (default 15 minutes, max 30). On timeout the child keeps running.
 
-Optional overrides: \`model\`, \`llmConnection\`, \`permissionMode\`, \`thinkingLevel\`, \`enabledSourceSlugs\`, \`labels\`, \`workingDirectory\`. Omitted fields inherit from the spawning session or the workspace default.
+Optional overrides: \`model\`, \`llmConnection\`, \`permissionMode\`, \`thinkingLevel\`, \`enabledSourceSlugs\`, \`labels\`, \`workingDirectory\`. Omitted \`model\` and \`llmConnection\` inherit from the current session. Other omitted fields inherit from the spawning session or the workspace default.
 
 \`thinkingLevel\` is silently ignored on non-reasoning models (e.g. gpt-4o, gemini-2.5-flash).
 
@@ -576,7 +608,7 @@ Requires an explicit sessionId and cannot target your own session. Use list_sess
 
   create_task: `Create a Selection Task on the kanban board — writes tasks/<slug>/task.yaml and creates its orchestrator session. CREATION ONLY: the task lands in "todo" and is NOT run.
 
-Provide either title + description (single-node form) OR a full v2 spec (exclusive). Optional on the simple form: acceptanceCriteria, sources / skills, llmConnection + model, workingDirectory, projectId.
+Provide either title + description (single-node form) OR a full v2 spec (exclusive). Optional on the simple form: acceptanceCriteria, sources / skills, llmConnection + model, workingDirectory, projectId. Omitted model and connection inherit from the current session.
 
 Returns { slug, orchestratorSessionId, taskLabelId, warnings } — unknown source/skill slugs are reported as warnings, not errors. Use it only when the user asks to capture or queue work as a board task. Do not create a board task for one-off chat work. To execute immediately in chat, do the work yourself or (if the spawn bar is met) use spawn_session. To start this board task's Conductor DAG, call run_task with the returned slug.`,
 
@@ -610,7 +642,15 @@ Use result pass or fail. Fail may include reason and nodes to repair. Parent cha
 
   submit_orchestration_patch: `Apply a restricted patch to the current orchestrate run.
 
-Requires runId, decisionId, baseRevision, and rationale. May add/update/cancel pending nodes. Cannot change running or finished nodes, task identity, budget, or raise permissions. Off unless CRAFT_FEATURE_TASKS_ORCHESTRATE is enabled.`,
+Requires runId, decisionId, baseRevision, and rationale. May add/update/cancel pending nodes. Cannot change running or finished nodes, task identity, budget, or raise permissions. Off unless CRAFT_FEATURE_TASKS_ORCHESTRATE is enabled. While a v3 run is waiting-coordinator, use submit_orchestration_decision instead.`,
+
+  submit_orchestration_decision: `Release a v3 coordinator scheduling gate.
+
+Requires runId, checkpointId, decisionId, and baseRevision. action continue uses the current graph, patch updates pending nodes then continues, pause waits for the user. Stale revision, replayed decisionId, and unknown checkpointId are rejected. Timeout pauses with coordinator-timeout and does not auto-continue.`,
+
+  submit_task_node_verdict: `Submit a structured pass/fail verdict for a verify or judge node.
+
+FAIL requires reason, evidence, and nodes to rework. PASS unblocks dependents. Chat text is not a verdict.`,
 
   get_session_info: `Get metadata about the current session or a specific session by ID.
 
@@ -721,6 +761,8 @@ export const SESSION_TOOL_DEFS: SessionToolDef[] = [
   { name: 'submit_task_output', description: TOOL_DESCRIPTIONS.submit_task_output, inputSchema: SubmitTaskOutputSchema, executionMode: 'registry', safeMode: 'allow', handler: handleSubmitTaskOutput },
   { name: 'submit_task_verdict', description: TOOL_DESCRIPTIONS.submit_task_verdict, inputSchema: SubmitTaskVerdictSchema, executionMode: 'registry', safeMode: 'allow', handler: handleSubmitTaskVerdict },
   { name: 'submit_orchestration_patch', description: TOOL_DESCRIPTIONS.submit_orchestration_patch, inputSchema: SubmitOrchestrationPatchSchema, executionMode: 'registry', safeMode: 'allow', handler: handleSubmitOrchestrationPatch },
+  { name: 'submit_orchestration_decision', description: TOOL_DESCRIPTIONS.submit_orchestration_decision, inputSchema: SubmitOrchestrationDecisionSchema, executionMode: 'registry', safeMode: 'allow', handler: handleSubmitOrchestrationDecision },
+  { name: 'submit_task_node_verdict', description: TOOL_DESCRIPTIONS.submit_task_node_verdict, inputSchema: SubmitTaskNodeVerdictSchema, executionMode: 'registry', safeMode: 'allow', handler: handleSubmitTaskNodeVerdict },
   { name: 'submit_task_definition', description: TOOL_DESCRIPTIONS.submit_task_definition, inputSchema: SubmitTaskDefinitionSchema, executionMode: 'registry', safeMode: 'allow', handler: handleSubmitTaskDefinition },
   { name: 'control_task_run', description: TOOL_DESCRIPTIONS.control_task_run, inputSchema: ControlTaskRunSchema, executionMode: 'registry', safeMode: 'block', handler: handleControlTaskRun },
   { name: 'get_session_info', description: TOOL_DESCRIPTIONS.get_session_info, inputSchema: GetSessionInfoSchema, executionMode: 'registry', safeMode: 'allow', readOnly: true, handler: handleGetSessionInfo },

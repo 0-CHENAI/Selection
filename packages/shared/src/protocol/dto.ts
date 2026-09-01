@@ -233,6 +233,8 @@ export interface TaskValidationResultDto {
 export interface TaskSaveRequest {
   yaml: string
   expectedEtag: string
+  /** Required when first saving schema_version: 3 over a v1/v2 file that still uses cache: pure. */
+  confirmV3Migration?: boolean
 }
 
 export interface TaskSaveResult {
@@ -241,7 +243,7 @@ export interface TaskSaveResult {
   spec?: unknown
   yaml?: string
   etag?: string
-  sourceVersion?: 1 | 2
+  sourceVersion?: 1 | 2 | 3
   migrationWarnings?: string[]
   conflict?: { code: 'etag-conflict'; expected: string; actual: string }
 }
@@ -263,6 +265,8 @@ export interface TaskCreateRequest {
    * leave a duplicate tile). Distinct from `orchestratorSessionId`, which adopts a hidden draft.
    */
   attachToExistingSession?: string
+  /** Required when creating schema_version: 3 over an existing v1/v2 file or converting cache: pure. */
+  confirmV3Migration?: boolean
 }
 
 export interface TaskCreateResult {
@@ -373,13 +377,19 @@ export interface TaskNodeRunStateDto {
   model?: string
   tokensUsed?: number
   blocker?: string
+  elapsedMs?: number
+  queueMs?: number
+  cacheStatus?: 'none' | 'hit' | 'miss' | 'bypass'
+  cacheCreatedAt?: string
+  cacheSourceRunId?: string
+  verdict?: { result: 'pass' | 'fail'; reason?: string; evidence?: string; nodes?: string[] }
 }
 
 export interface TaskRunSnapshotDto {
   slug: string
   runId: string
   taskId: string
-  /** running | pausing | paused | waiting-approval | waiting-budget | verifying | repairing | interrupted | stopped | completed | failed */
+  /** running | pausing | paused | waiting-approval | waiting-budget | waiting-coordinator | verifying | repairing | interrupted | stopped | completed | failed */
   status: string
   orchestratorSessionId?: string
   nodes: TaskNodeRunStateDto[]
@@ -389,6 +399,22 @@ export interface TaskRunSnapshotDto {
   tokenBudget?: number
   blockers?: string[]
   revision?: number
+  metrics?: {
+    elapsedMs: number
+    queueMs: number
+    modelMs: number
+    tokensUsed: number
+    retries: number
+    repairs: number
+    coordinatorWaitMs: number
+    coordinatorWaits: number
+    cacheHits: number
+    cacheMisses: number
+    cacheBypasses: number
+    verifyBudgetReserved?: number
+    verifyBudgetRemaining?: number
+    criticalPathNodeIds?: string[]
+  }
 }
 
 export interface TaskControlResultDto {
@@ -412,6 +438,8 @@ export interface TaskApplyRunRevisionRequest {
   /** Required on confirm; binds the preview to the exact run graph. */
   expectedRunSpecHash?: string
   confirm?: boolean
+  /** Required when apply would upgrade a v1/v2 task or convert cache: pure. */
+  confirmV3Migration?: boolean
 }
 
 export interface TaskApplyRunRevisionResult {
@@ -422,6 +450,8 @@ export interface TaskApplyRunRevisionResult {
   yaml?: string
   runRevision?: number
   runSpecHash?: string
+  sourceVersion?: 1 | 2 | 3
+  migrationWarnings?: string[]
   conflict?:
     | { code: 'etag-conflict'; expected: string; actual: string }
     | { code: 'run-revision-conflict'; expected: number; actual: number }
@@ -443,7 +473,7 @@ export interface TaskGetResult {
   spec?: unknown
   yaml?: string
   etag?: string
-  sourceVersion?: 1 | 2
+  sourceVersion?: 1 | 2 | 3
   migrationWarnings?: string[]
   /** Active run snapshot when a runId was supplied and known; otherwise null. */
   run?: TaskRunSnapshotDto | null

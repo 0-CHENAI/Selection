@@ -35,6 +35,30 @@ export function resolveCreateTaskProjectId(
 }
 
 /**
+ * Agent-created Tasks inherit the invoking session's model and connection
+ * unless `spec.defaults` already names them. Node-level overrides still win
+ * at dispatch.
+ */
+export function inheritTaskExecutionDefaults(
+  spec: TaskSpec,
+  session: { model?: string; llmConnection?: string },
+): TaskSpec {
+  const model = spec.defaults?.model || session.model
+  const llmConnection = spec.defaults?.llmConnection || session.llmConnection
+  if (model === spec.defaults?.model && llmConnection === spec.defaults?.llmConnection) {
+    return spec
+  }
+  return {
+    ...spec,
+    defaults: {
+      ...spec.defaults,
+      ...(model ? { model } : {}),
+      ...(llmConnection ? { llmConnection } : {}),
+    },
+  }
+}
+
+/**
  * Post-create setup shared by ALL orchestrator paths (attach / adopt / fresh):
  * apply the reserved "Task" label and enable the spec's sources on the
  * orchestrator session. Fail-soft — neither a label nor a sources problem may
