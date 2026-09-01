@@ -246,6 +246,7 @@
   "chat.modelPicker.supportsImagesOn": "画像入力は有効",
   "chat.modelPicker.thinkingSection": "思考",
   "chat.modelPicker.toggleVisionFailed": "画像サポートの更新に失敗しました",
+  "chat.modelPicker.unavailable": "提供終了",
   "chat.moreSubmitActions": "送信アクションをさらに表示",
   "chat.noFoldersFound": "フォルダが見つかりません",
   "chat.noOutputYet": "出力はまだありません",

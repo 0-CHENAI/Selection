@@ -90,11 +90,14 @@ import { WorkingDirectorySelector, formatPathForDisplay } from './WorkingDirecto
 import { CompactPermissionModeSelector } from './CompactPermissionModeSelector'
 import { CompactModelSelector } from './CompactModelSelector'
 import {
+  appendMissingPickerModel,
+  chosenPickerModelId,
   connectionPinnedModelIds,
   formatTokenCount,
   groupConnectionsByProvider,
   isOpenRouterConnection,
   isPickerModelSelected,
+  isUnavailablePickerModel,
   pickerModelId,
   resolvePickerModelsWithLive,
   resolveVisiblePickerModels,
@@ -126,7 +129,11 @@ function SwitcherConnectionModels({
 }) {
   const { t } = useTranslation()
   const [query, setQuery] = React.useState('')
-  const models = resolvePickerModelsWithLive(conn, liveOpenRouterModels)
+  const catalog = resolvePickerModelsWithLive(conn, liveOpenRouterModels)
+  const models = appendMissingPickerModel(
+    catalog,
+    isCurrentConnection ? currentModel : undefined,
+  )
   const visibleCatalog = resolveVisiblePickerModels(models, {
     query,
     currentModel: isCurrentConnection ? currentModel : conn.defaultModel,
@@ -148,17 +155,33 @@ function SwitcherConnectionModels({
             ? stripPiPrefixForDisplay(getModelShortName(model))
             : (model.name ?? stripPiPrefixForDisplay(model.id))
           const isSelectedModel = isCurrentConnection && isPickerModelSelected(currentModel, modelId)
-          const limitCaption = pickerModelLimitCaption(model, t)
+          const unavailable = isUnavailablePickerModel(catalog, modelId)
+          const limitCaption = unavailable
+            ? t('chat.modelPicker.unavailable')
+            : pickerModelLimitCaption(model, t)
           return (
             <StyledDropdownMenuItem
               key={modelId}
-              onSelect={() => onPick(modelId, conn.slug)}
+              onSelect={() => {
+                const next = chosenPickerModelId(
+                  modelId,
+                  isCurrentConnection ? currentModel : '',
+                  catalog,
+                )
+                if (next === undefined) return
+                onPick(next, conn.slug)
+              }}
               className="flex items-center justify-between px-2 py-2 rounded-lg cursor-pointer"
             >
               <div className="min-w-0 text-left">
                 <div className="font-medium text-sm">{modelName}</div>
                 {limitCaption && (
-                  <div className="text-xs text-muted-foreground tabular-nums">{limitCaption}</div>
+                  <div className={cn(
+                    'text-xs tabular-nums',
+                    unavailable ? 'text-destructive/80' : 'text-muted-foreground',
+                  )}>
+                    {limitCaption}
+                  </div>
                 )}
               </div>
               {isSelectedModel && (
@@ -432,10 +455,15 @@ export function FreeFormInput({
     !connectionUnavailable && isOpenRouterConnection(effectiveConnectionDetails),
   )
 
-  const availableModels = React.useMemo(() => {
+  const pickerCatalog = React.useMemo(() => {
     if (connectionUnavailable) return []
     return resolvePickerModelsWithLive(effectiveConnectionDetails, liveOpenRouterModels)
   }, [effectiveConnectionDetails, connectionUnavailable, liveOpenRouterModels])
+
+  const availableModels = React.useMemo(
+    () => appendMissingPickerModel(pickerCatalog, currentModel),
+    [pickerCatalog, currentModel],
+  )
 
   const pinnedModelIds = React.useMemo(() => {
     return connectionPinnedModelIds(effectiveConnectionDetails)
@@ -2293,20 +2321,32 @@ export function FreeFormInput({
                       ? stripPiPrefixForDisplay(getModelShortName(model))
                       : (model.name ?? stripPiPrefixForDisplay(model.id))
                     const isSelected = isPickerModelSelected(currentModel, modelId)
+                    const unavailable = isUnavailablePickerModel(pickerCatalog, modelId)
                     const descriptionKey = typeof model !== 'string' && 'descriptionKey' in model ? (model.descriptionKey as string) : undefined
                     const description = descriptionKey ? t(descriptionKey) : (typeof model !== 'string' && 'description' in model ? (model.description as string) : '')
                     const limitCaption = pickerModelLimitCaption(model, t)
-                    const secondary = [description, limitCaption].filter(Boolean).join(' · ')
+                    const secondary = unavailable
+                      ? t('chat.modelPicker.unavailable')
+                      : [description, limitCaption].filter(Boolean).join(' · ')
                     return (
                       <StyledDropdownMenuItem
                         key={modelId}
-                        onSelect={() => onModelChange(modelId, effectiveConnection)}
+                        onSelect={() => {
+                          const next = chosenPickerModelId(modelId, currentModel, pickerCatalog)
+                          if (next === undefined) return
+                          onModelChange(next, effectiveConnection)
+                        }}
                         className="flex items-center justify-between px-2 py-2 rounded-lg cursor-pointer"
                       >
                         <div className="text-left">
                           <div className="font-medium text-sm">{modelName}</div>
                           {secondary && (
-                            <div className="text-xs text-muted-foreground">{secondary}</div>
+                            <div className={cn(
+                              'text-xs',
+                              unavailable ? 'text-destructive/80' : 'text-muted-foreground',
+                            )}>
+                              {secondary}
+                            </div>
                           )}
                         </div>
                         {isSelected && (

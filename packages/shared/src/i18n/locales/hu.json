@@ -246,6 +246,7 @@
   "chat.modelPicker.supportsImagesOn": "Képbevitel bekapcsolva",
   "chat.modelPicker.thinkingSection": "Gondolkodás",
   "chat.modelPicker.toggleVisionFailed": "Nem sikerült frissíteni a képtámogatást",
+  "chat.modelPicker.unavailable": "Már nem elérhető",
   "chat.moreSubmitActions": "További küldési lehetőségek",
   "chat.noFoldersFound": "Nem található mappa",
   "chat.noOutputYet": "Még nincs elérhető kimenet",

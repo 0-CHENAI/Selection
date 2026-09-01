@@ -29,6 +29,8 @@ export interface SettingsMenuSelectOption {
   label: string
   /** Optional description/subtitle */
   description?: string
+  /** Saved selection the provider no longer offers */
+  unavailable?: boolean
 }
 
 export interface SettingsMenuSelectProps {
@@ -120,12 +122,25 @@ export function SettingsMenuSelect({
     ? filteredOptions.slice(0, PICKER_SEARCH_RESULT_LIMIT)
     : filteredOptions
 
-  const handleSelect = (optionValue: string) => {
-    onValueChange(optionValue)
+  const closeMenu = () => {
     setIsOpen(false)
     setSearchQuery('')
-    // Clear preview on selection since the actual value is now set
     onHover?.(null)
+  }
+
+  const handleSelect = (optionValue: string) => {
+    const option = options.find((item) => item.value === optionValue)
+    if (option?.unavailable) {
+      // Retired IDs stay visible so they can be cleared, never chosen again.
+      if (value === optionValue) {
+        const inherit = options.find((item) => item.value === 'global')
+        if (inherit) onValueChange(inherit.value)
+      }
+      closeMenu()
+      return
+    }
+    onValueChange(optionValue)
+    closeMenu()
   }
 
   // Clear preview when popover closes (via click outside, escape, etc.)
@@ -195,7 +210,11 @@ export function SettingsMenuSelect({
                   <div className="flex-1 min-w-0">
                     <div className={settingsUI.label}>{option.label}</div>
                     {option.description && (
-                      <div className={cn(settingsUI.descriptionSmall, settingsUI.labelDescriptionGap)}>
+                      <div className={cn(
+                        settingsUI.descriptionSmall,
+                        settingsUI.labelDescriptionGap,
+                        option.unavailable && 'text-destructive/80',
+                      )}>
                         {option.description}
                       </div>
                     )}

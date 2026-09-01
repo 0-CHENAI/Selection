@@ -246,6 +246,7 @@
   "chat.modelPicker.supportsImagesOn": "Imágenes habilitadas",
   "chat.modelPicker.thinkingSection": "Razonamiento",
   "chat.modelPicker.toggleVisionFailed": "No se pudo actualizar el soporte de imágenes",
+  "chat.modelPicker.unavailable": "Ya no está disponible",
   "chat.moreSubmitActions": "Más acciones de envío",
   "chat.noFoldersFound": "No se encontraron carpetas",
   "chat.noOutputYet": "Sin salida disponible aún",

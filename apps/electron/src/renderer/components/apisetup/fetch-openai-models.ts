@@ -450,8 +450,25 @@ export function firstSelectedModelId(value: string | undefined): string | undefi
 
 export function toggleSelectedModel(current: string, id: string): string {
   const selected = parseSelectedModels(current)
-  const next = selected.includes(id)
-    ? selected.filter((item) => item !== id)
+  const has = selected.some((item) => connectionModelIdsMatch(item, id))
+  const next = has
+    ? selected.filter((item) => !connectionModelIdsMatch(item, id))
     : [...selected, id]
   return next.join(', ')
+}
+
+/**
+ * Provider catalogs drop retired IDs, but saved selections still need a row
+ * the user can uncheck. Missing IDs are prepended and keep their stored form.
+ */
+export function mergeMissingSelectedModels(
+  models: readonly RemoteModel[],
+  selectedIds: readonly string[],
+): RemoteModel[] {
+  const missing: RemoteModel[] = []
+  for (const id of selectedIds) {
+    if (findRemoteModel(models, id) || findRemoteModel(missing, id)) continue
+    missing.push({ id, name: id })
+  }
+  return missing.length === 0 ? [...models] : [...missing, ...models]
 }
