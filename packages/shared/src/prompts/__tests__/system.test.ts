@@ -28,6 +28,34 @@ const GIT_CONVENTIONS_HEADING = '## Git Conventions'
 const CO_AUTHOR_TRAILER = 'Co-Authored-By: Selection <agents-noreply@craft.do>'
 
 describe('system prompt guidance', () => {
+  it('includes Swarm and Conductor DAG in first-party self-knowledge (#189)', () => {
+    const off = getSystemPrompt(undefined, undefined, '/tmp/workspace', '/tmp/workspace')
+    const on = getSystemPrompt(
+      undefined,
+      undefined,
+      '/tmp/workspace',
+      '/tmp/workspace',
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      true,
+      true,
+    )
+
+    for (const prompt of [off, on]) {
+      expect(prompt).toContain('**Swarm**')
+      expect(prompt).toContain('**Tasks / Conductor DAG**')
+      expect(prompt).toContain('built-in product capabilities')
+      expect(prompt).toContain('Do not search the home directory, `~/.selection`')
+      expect(prompt).not.toContain('Task tool with subagents')
+    }
+    expect(off).toContain('explain this even when the toggle is off')
+    expect(off).toContain('Swarm** control in the chat input')
+    expect(off).toContain('session-level parallelism')
+    expect(off).toContain('persisted Task DAG')
+  })
+
   it('fails closed for autonomous delegation unless the per-session Swarm switch is on', () => {
     const off = getSystemPrompt(undefined, undefined, '/tmp/workspace', '/tmp/workspace')
     const on = getSystemPrompt(
@@ -44,7 +72,8 @@ describe('system prompt guidance', () => {
     )
 
     expect(off).toContain('Swarm mode is OFF')
-    expect(off).toContain('Never split work autonomously')
+    expect(off).toContain('Selection still has Swarm')
+    expect(off).toContain('this session will not split work autonomously')
     expect(on).toContain('Swarm mode is ON')
     expect(on).toContain('fail closed')
     expect(on).toContain('final aggregation or verification contract')
