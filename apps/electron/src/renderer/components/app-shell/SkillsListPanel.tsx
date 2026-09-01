@@ -11,6 +11,7 @@ import { SendResourceToWorkspaceDialog } from './SendResourceToWorkspaceDialog'
 import { CopyResourcesFromWorkspaceDialog } from './CopyResourcesFromWorkspaceDialog'
 import { ResourceTransferDialog } from '@/components/resources/ResourceTransferDialog'
 import { EditPopover, getEditConfig } from '@/components/ui/EditPopover'
+import { FadingText } from '@/components/ui/fading-text'
 import { useActiveWorkspace, useAppShellContext } from '@/context/AppShellContext'
 import { getFileManagerName } from '@/lib/platform'
 import { useDisplayTitleRename } from '@/hooks/useDisplayTitleRename'
@@ -163,8 +164,9 @@ export function SkillsListPanel({
         return {
           icon: <SkillAvatar skill={skill} size="sm" workspaceId={workspaceId} />,
           title,
+          badgesEdgeFade: false,
           badges: (
-            <span className="flex items-center gap-1.5 min-w-0">
+            <span className="flex flex-1 items-center gap-1.5 min-w-0 overflow-hidden">
               {skill.source === 'project' && (
                 <span className="shrink-0 text-[10px] px-1.5 py-0.5 rounded-full bg-foreground/5 text-muted-foreground">
                   {t('skillsList.projectBadge')}
@@ -175,7 +177,14 @@ export function SkillsListPanel({
                   {t('skillsList.bundledBadge')}
                 </span>
               )}
-              <span className="truncate">{skill.metadata.description}</span>
+              <FadingText
+                className="block min-w-0 flex-1 pr-3"
+                fadeWidth={16}
+                trailingGap={12}
+                overflowTitle={skill.metadata.description}
+              >
+                {skill.metadata.description}
+              </FadingText>
             </span>
           ),
           menu: (
