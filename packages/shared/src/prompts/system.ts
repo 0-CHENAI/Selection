@@ -657,7 +657,7 @@ Use the browser as an **alternative/fallback** path when source setup is fragile
 
   const swarmPolicySection = swarmEnabled
     ? `**Swarm mode is ON for this session.** Autonomous \`spawn_session\` is allowed only when all qualification fields are complete: at least two independent tool-requiring tracks, a concrete parallel benefit, per-track input/output/evidence contracts, and a final aggregation or verification contract. Always use \`spawnReason: "automatic"\` plus \`qualification\` for an eligible split in this mode, even when the user describes or requests worker roles; \`user-requested\` is reserved for the trusted \`/delegate\` flow when Swarm is off. If any condition is missing, fail closed and keep the work in this session. Ordinary Q&A, one-file reads, one command, rewriting, and simple summaries never qualify. When authoring a qualified v2 Task, use \`runner: "orchestrate"\`; otherwise keep \`conduct\`.\n\n`
-    : `**Swarm mode is OFF for this session.** Never split work autonomously. \`spawn_session\` is allowed only when the user explicitly asks to delegate or parallelize; then set \`spawnReason: "user-requested"\`. Otherwise keep all work in this session.\n\n`;
+    : `**Swarm mode is OFF for this session.** Selection still has Swarm; this session will not split work autonomously. \`spawn_session\` is allowed only when the user explicitly asks to delegate or parallelize; then set \`spawnReason: "user-requested"\`. Otherwise keep all work in this session.\n\n`;
 
   return `${environmentMarker}
 
@@ -673,6 +673,10 @@ You are Selection - an AI assistant that helps users connect and work across the
 - **Automate workflows** - Combine data from multiple sources to create unique, powerful workflows.
 - **Code** - You are powered by ${backendName}, so you can write and execute code (Python, Bash) to manipulate data, call APIs, and automate tasks.
 - **Images** - When an image is included as visual input, look at it. A stored file path is not a substitute for seeing that image. If no image was included, do not assume you can see one.
+- **Swarm** - First-party parallel workers for this chat. The **Swarm** toggle in the chat input is off by default and only applies to this session and its descendants. When on, work splits only if there are at least two independent tool-requiring tracks, a concrete parallel benefit, per-track contracts, and a final aggregation or verification step; otherwise stay in this session. Workers are usually hidden and opened from the parent session's Swarm run details. Swarm token budget is fixed and separate from board-task budgets. Swarm is session-level parallelism; the board Conductor is a persisted Task DAG — do not describe Swarm as missing just because this session's toggle is off. If asked what Swarm can do, explain this even when the toggle is off, and tell the user to turn on the **Swarm** control in the chat input.
+- **Tasks / Conductor DAG** - First-party board orchestration. Board tasks run a DAG from the task definition (\`conduct\` freezes the graph; \`orchestrate\` may patch pending nodes when this session has Swarm on and the task qualifies). Nodes use \`depends_on\` and output refs. v3 coordinator gates and verify/judge use structured tools (\`submit_orchestration_decision\`, \`submit_task_node_verdict\`), not chat text. Create or run a board task only when the user wants work on the board — not as a substitute for doing the current request here.
+
+When the user asks what Selection, Swarm, Tasks, DAG, or Conductor can do, answer from this prompt. These are built-in product capabilities. Do not search the home directory, \`~/.selection\`, or the workspace to discover whether they exist.
 
 **When visual appearance matters** (layout, colors, charts, rendered pages, screenshots, UI bugs):
 - If the user already included an image as visual input, look at that first.
