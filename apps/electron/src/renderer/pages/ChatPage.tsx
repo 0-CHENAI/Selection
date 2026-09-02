@@ -69,17 +69,9 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
     onAttachmentsChange,
     enabledSources,
     skills,
-    labels,
-    onSessionLabelsChange,
     enabledModes,
-    sessionStatuses,
     onSessionSourcesChange,
     onRenameSession,
-    onFlagSession,
-    onUnflagSession,
-    onArchiveSession,
-    onUnarchiveSession,
-    onSessionStatusChange,
     onDeleteSession,
     rightSidebarButton,
     leadingAction,
@@ -332,7 +324,7 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
     const connection = connectionSlug ? llmConnections.find(c => c.slug === connectionSlug) : null
 
     return connection?.defaultModel ?? ''
-  }, [session?.id, session?.model, session?.llmConnection, workspaceDefaultLlmConnection, llmConnections, connectionUnavailable])
+  }, [session?.model, session?.llmConnection, workspaceDefaultLlmConnection, llmConnections, connectionUnavailable])
 
   // Working directory for this session
   const workingDirectory = session?.workingDirectory
@@ -400,8 +392,6 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
   // Priority: name > first user message > preview > "New chat"
   const displayTitle = session ? getSessionTitle(session) : (sessionMeta ? getSessionTitle(sessionMeta) : t('chat.session'))
   const isFlagged = session?.isFlagged || sessionMeta?.isFlagged || false
-  const isArchived = session?.isArchived || sessionMeta?.isArchived || false
-  const currentSessionStatus = session?.sessionStatus || sessionMeta?.sessionStatus || 'todo'
   const hasMessages = !!(session?.messages?.length || sessionMeta?.lastFinalMessageId)
   const hasUnreadMessages = sessionMeta
     ? !!(sessionMeta.lastFinalMessageId && sessionMeta.lastFinalMessageId !== sessionMeta.lastReadMessageId)
@@ -426,33 +416,9 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
     setRenameDialogOpen(false)
   }, [sessionId, renameName, displayTitle, onRenameSession])
 
-  const handleFlag = React.useCallback(() => {
-    onFlagSession(sessionId)
-  }, [sessionId, onFlagSession])
-
-  const handleUnflag = React.useCallback(() => {
-    onUnflagSession(sessionId)
-  }, [sessionId, onUnflagSession])
-
-  const handleArchive = React.useCallback(() => {
-    onArchiveSession(sessionId)
-  }, [sessionId, onArchiveSession])
-
-  const handleUnarchive = React.useCallback(() => {
-    onUnarchiveSession(sessionId)
-  }, [sessionId, onUnarchiveSession])
-
   const handleMarkUnread = React.useCallback(() => {
     onMarkSessionUnread(sessionId)
   }, [sessionId, onMarkSessionUnread])
-
-  const handleSessionStatusChange = React.useCallback((state: string) => {
-    onSessionStatusChange(sessionId, state)
-  }, [sessionId, onSessionStatusChange])
-
-  const handleLabelsChange = React.useCallback((newLabels: string[]) => {
-    onSessionLabelsChange?.(sessionId, newLabels)
-  }, [sessionId, onSessionLabelsChange])
 
   const swarmEnabled = session?.swarmEnabled ?? sessionMeta?.swarmEnabled ?? false
   const orchestrationStatus = session?.orchestrationStatus ?? sessionMeta?.orchestrationStatus
@@ -543,7 +509,7 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
         )}
       />
     )
-  }, [isCompactMode, sessionId, session?.sessionFolderPath, sessionMeta])
+  }, [isCompactMode, sessionId, session?.sessionFolderPath, sessionMeta, t])
 
   // Pencil opens the Task editor for orchestrator sessions. Compact mode also
   // shows session info; desktop online-share control has been removed.
@@ -573,32 +539,16 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
   const titleMenu = React.useMemo(() => (sessionMeta && !isCompactMode) ? (
     <SessionMenu
       item={sessionMeta}
-      sessionStatuses={sessionStatuses ?? []}
-      labels={labels ?? []}
-      onLabelsChange={handleLabelsChange}
       onRename={handleRename}
-      onFlag={handleFlag}
-      onUnflag={handleUnflag}
-      onArchive={handleArchive}
-      onUnarchive={handleUnarchive}
       onMarkUnread={handleMarkUnread}
-      onSessionStatusChange={handleSessionStatusChange}
       onOpenInNewWindow={handleOpenInNewWindow}
       onDelete={handleDelete}
     />
   ) : null, [
     sessionMeta,
     isCompactMode,
-    sessionStatuses,
-    labels,
-    handleLabelsChange,
     handleRename,
-    handleFlag,
-    handleUnflag,
-    handleArchive,
-    handleUnarchive,
     handleMarkUnread,
-    handleSessionStatusChange,
     handleOpenInNewWindow,
     handleDelete,
   ])
@@ -608,16 +558,8 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
       title={displayTitle}
       isRegeneratingTitle={isAsyncOperationOngoing}
       item={sessionMeta}
-      sessionStatuses={sessionStatuses ?? []}
-      labels={labels ?? []}
-      onLabelsChange={handleLabelsChange}
       onRename={handleRename}
-      onFlag={handleFlag}
-      onUnflag={handleUnflag}
-      onArchive={handleArchive}
-      onUnarchive={handleUnarchive}
       onMarkUnread={handleMarkUnread}
-      onSessionStatusChange={handleSessionStatusChange}
       onOpenInNewWindow={handleOpenInNewWindow}
       onDelete={handleDelete}
     />
@@ -626,16 +568,8 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
     isCompactMode,
     displayTitle,
     isAsyncOperationOngoing,
-    sessionStatuses,
-    labels,
-    handleLabelsChange,
     handleRename,
-    handleFlag,
-    handleUnflag,
-    handleArchive,
-    handleUnarchive,
     handleMarkUnread,
-    handleSessionStatusChange,
     handleOpenInNewWindow,
     handleDelete,
   ])
@@ -695,8 +629,6 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
                 onAttachmentsChange={handleAttachmentsChange}
                 sources={enabledSources}
                 skills={skills}
-                sessionStatuses={sessionStatuses}
-                onSessionStatusChange={handleSessionStatusChange}
                 swarmEnabled={swarmEnabled}
                 onSwarmEnabledChange={handleSwarmEnabledChange}
                 swarmToggleDisabled={swarmToggleDisabled}
@@ -776,10 +708,6 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
             onAttachmentsChange={handleAttachmentsChange}
             sources={enabledSources}
             skills={skills}
-            labels={labels}
-            onLabelsChange={(newLabels) => onSessionLabelsChange?.(sessionId, newLabels)}
-            sessionStatuses={sessionStatuses}
-            onSessionStatusChange={handleSessionStatusChange}
             swarmEnabled={swarmEnabled}
             onSwarmEnabledChange={handleSwarmEnabledChange}
             swarmToggleDisabled={swarmToggleDisabled}

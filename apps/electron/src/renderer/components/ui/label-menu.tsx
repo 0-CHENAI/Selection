@@ -328,6 +328,8 @@ export interface LabelMenuInputElement {
 }
 
 export interface UseInlineLabelMenuOptions {
+  /** Disable the legacy session classification picker while keeping hook order stable. */
+  enabled?: boolean
   /** Ref to the input element */
   inputRef: React.RefObject<LabelMenuInputElement | null>
   /** Available labels (tree structure) */
@@ -364,6 +366,7 @@ export interface UseInlineLabelMenuReturn {
  * Already-applied labels are excluded from the menu to prevent duplicates.
  */
 export function useInlineLabelMenu({
+  enabled = true,
   inputRef,
   labels,
   sessionLabels = [],
@@ -387,6 +390,13 @@ export function useInlineLabelMenu({
   const handleInputChange = React.useCallback((value: string, cursorPosition: number) => {
     // Store current state for handleSelect
     currentInputRef.current = { value, cursorPosition }
+
+    if (!enabled) {
+      setIsOpen(false)
+      setFilter('')
+      setHashStart(-1)
+      return
+    }
 
     const textBeforeCursor = value.slice(0, cursorPosition)
     // Match # at start of input or after whitespace, followed by optional filter text
@@ -422,7 +432,7 @@ export function useInlineLabelMenu({
       setFilter('')
       setHashStart(-1)
     }
-  }, [inputRef, items])
+  }, [enabled, inputRef, items])
 
   // Handle label selection: remove #trigger text from input, call onSelect
   const handleSelect = React.useCallback((labelId: string): string => {

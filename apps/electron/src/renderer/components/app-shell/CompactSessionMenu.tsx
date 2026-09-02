@@ -4,17 +4,17 @@
  * Bottom-sheet replacement for the desktop ChatPage title dropdown
  * (`SessionMenu` wrapped by `PanelHeader`'s Radix DropdownMenu) when
  * `AppShellContext.isCompactMode === true`. Mirrors the same actions but
- * routes Status / Labels / Connect Messaging submenus through
+ * routes Connect Messaging submenus through
  * an internal view stack instead of nested Radix popovers — Radix submenus
  * get clipped by the panel container query on narrow viewports, and the
- * Status submenu in particular falls off the right edge.
+ * nested submenus can fall off the right edge.
  *
- * Pattern matches the other compact pickers (`CompactSessionListFilter`,
- * `CompactWorkspaceSwitcher`, `CompactPermissionModeSelector`) and also
+ * Pattern matches the other compact pickers (`CompactWorkspaceSwitcher`,
+ * `CompactPermissionModeSelector`) and also
  * follows the iOS-style drill-in behaviour established by `MobileAppMenu`.
  *
- * Side-effect handlers (refresh title / copy path / label toggle with
- * optimistic state) come from `useSessionMenuActions`, shared with the
+ * Side-effect handlers (refresh title / copy path) come from
+ * `useSessionMenuActions`, shared with the
  * desktop `SessionMenu` so a new session action only has to be wired
  * through one place.
  *
@@ -27,8 +27,6 @@ import * as React from 'react'
 import { useTranslation } from 'react-i18next'
 import { motion } from 'motion/react'
 import {
-  Archive,
-  ArchiveRestore,
   AppWindow,
   Check,
   ChevronDown,
@@ -36,15 +34,12 @@ import {
   ChevronRight,
   Columns2,
   Copy,
-  Flag,
-  FlagOff,
   FolderOpen,
   MailOpen,
   MessageSquare,
   Pencil,
   RefreshCw,
   Send,
-  Tag,
   Trash2,
 } from 'lucide-react'
 
@@ -56,26 +51,13 @@ import {
   DrawerHeader,
   DrawerTitle,
 } from '@/components/ui/drawer'
-import { LabelIcon } from '@/components/ui/label-icon'
-import {
-  createLabelMenuItems,
-  type LabelMenuItem,
-} from '@/components/ui/label-menu-utils'
-import type { LabelConfig } from '@craft-agent/shared/labels'
-import {
-  getStateColor,
-  getStateIcon,
-  getStatusIconStyle,
-  type SessionStatus,
-  type SessionStatusId,
-} from '@/config/session-status-config'
 import type { SessionMeta } from '@/atoms/sessions'
-import { getSessionStatus, hasUnreadMeta, hasMessagesMeta } from '@/utils/session'
+import { hasUnreadMeta, hasMessagesMeta } from '@/utils/session'
 import { getFileManagerName } from '@/lib/platform'
 import { useMessagingConnect, type MessagingPlatform } from '@/components/messaging/MessagingSessionMenuItem'
 import { useSessionMenuActions } from '@/hooks/useSessionMenuActions'
 
-type View = 'root' | 'status' | 'labels' | 'messaging'
+type View = 'root' | 'messaging'
 
 export interface CompactSessionMenuProps {
   /** Title text shown in the trigger button + drawer header. */
@@ -87,19 +69,11 @@ export interface CompactSessionMenuProps {
 
   // Session data — same as SessionMenu
   item: SessionMeta
-  sessionStatuses: SessionStatus[]
-  labels?: LabelConfig[]
   hasTransferTargets?: boolean
 
   // Callbacks — same as SessionMenu
-  onLabelsChange?: (labels: string[]) => void
   onRename: () => void
-  onFlag: () => void
-  onUnflag: () => void
-  onArchive: () => void
-  onUnarchive: () => void
   onMarkUnread: () => void
-  onSessionStatusChange: (state: SessionStatusId) => void
   onOpenInNewWindow: () => void
   onSendToWorkspace?: () => void
   onDelete: () => void
@@ -125,17 +99,9 @@ export function CompactSessionMenu({
   badge,
   isRegeneratingTitle,
   item,
-  sessionStatuses,
-  labels = [],
   hasTransferTargets,
-  onLabelsChange,
   onRename,
-  onFlag,
-  onUnflag,
-  onArchive,
-  onUnarchive,
   onMarkUnread,
-  onSessionStatusChange,
   onOpenInNewWindow,
   onSendToWorkspace,
   onDelete,
@@ -170,19 +136,10 @@ export function CompactSessionMenu({
     setView('root')
   }, [item.id, setOpen])
 
-  const isFlagged = item.isFlagged ?? false
-  const isArchived = item.isArchived ?? false
-  const currentSessionStatus = getSessionStatus(item)
-  const sessionLabels = item.labels ?? []
   const _hasMessages = hasMessagesMeta(item)
   const _hasUnread = hasUnreadMeta(item)
 
-  const actions = useSessionMenuActions({ item, onLabelsChange })
-
-  const flatLabelItems = React.useMemo(
-    (): LabelMenuItem[] => createLabelMenuItems(labels),
-    [labels],
-  )
+  const actions = useSessionMenuActions({ item })
 
   // Wrap a callback so it also closes the drawer. Async callbacks fire
   // their work in the background — the drawer doesn't need to stay open
@@ -210,8 +167,6 @@ export function CompactSessionMenu({
   // ---------------------------------------------------------------------------
   const headerTitle = (() => {
     switch (view) {
-      case 'status':    return t('sessionMenu.status')
-      case 'labels':    return t('sessionMenu.labels')
       case 'messaging': return t('sessionMenu.connectMessaging')
       default:          return title ?? ''
     }
@@ -284,23 +239,11 @@ export function CompactSessionMenu({
         <div className="flex-1 min-h-0 overflow-y-auto px-2 pb-6">
           {view === 'root' && (
             <RootPane
-              sessionStatuses={sessionStatuses}
-              currentSessionStatus={currentSessionStatus}
-              labelsCount={sessionLabels.length}
-              hasLabels={labels.length > 0}
-              isFlagged={isFlagged}
-              isArchived={isArchived}
               hasMessages={_hasMessages}
               hasUnread={_hasUnread}
               hasTransferTargets={hasTransferTargets}
               onSendToWorkspace={closeAfter(onSendToWorkspace)}
               onOpenMessagingSub={() => setView('messaging')}
-              onOpenStatusSub={() => setView('status')}
-              onOpenLabelsSub={() => setView('labels')}
-              onFlag={closeAfter(onFlag)}
-              onUnflag={closeAfter(onUnflag)}
-              onArchive={closeAfter(onArchive)}
-              onUnarchive={closeAfter(onUnarchive)}
               onMarkUnread={closeAfter(onMarkUnread)}
               onRename={closeAfter(onRename)}
               onRefreshTitle={closeAfter(actions.refreshTitle)}
@@ -309,25 +252,6 @@ export function CompactSessionMenu({
               onShowInFinder={closeAfter(actions.showInFinder)}
               onCopyPath={closeAfter(actions.copyPath)}
               onDelete={closeAfter(onDelete)}
-            />
-          )}
-
-          {view === 'status' && (
-            <StatusPane
-              sessionStatuses={sessionStatuses}
-              activeStateId={currentSessionStatus}
-              onSelect={(id) => {
-                onSessionStatusChange(id)
-                setOpen(false)
-              }}
-            />
-          )}
-
-          {view === 'labels' && (
-            <LabelsPane
-              items={flatLabelItems}
-              appliedLabelIds={actions.appliedLabelIds}
-              onToggle={actions.toggleLabel}
             />
           )}
 
@@ -345,23 +269,11 @@ export function CompactSessionMenu({
 // ---------------------------------------------------------------------------
 
 interface RootPaneProps {
-  sessionStatuses: SessionStatus[]
-  currentSessionStatus: SessionStatusId
-  labelsCount: number
-  hasLabels: boolean
-  isFlagged: boolean
-  isArchived: boolean
   hasMessages: boolean
   hasUnread: boolean
   hasTransferTargets?: boolean
   onSendToWorkspace?: () => void
   onOpenMessagingSub: () => void
-  onOpenStatusSub: () => void
-  onOpenLabelsSub: () => void
-  onFlag?: () => void
-  onUnflag?: () => void
-  onArchive?: () => void
-  onUnarchive?: () => void
   onMarkUnread?: () => void
   onRename?: () => void
   onRefreshTitle?: () => void
@@ -373,23 +285,11 @@ interface RootPaneProps {
 }
 
 function RootPane({
-  sessionStatuses,
-  currentSessionStatus,
-  labelsCount,
-  hasLabels,
-  isFlagged,
-  isArchived,
   hasMessages,
   hasUnread,
   hasTransferTargets,
   onSendToWorkspace,
   onOpenMessagingSub,
-  onOpenStatusSub,
-  onOpenLabelsSub,
-  onFlag,
-  onUnflag,
-  onArchive,
-  onUnarchive,
   onMarkUnread,
   onRename,
   onRefreshTitle,
@@ -400,14 +300,6 @@ function RootPane({
   onDelete,
 }: RootPaneProps) {
   const { t } = useTranslation()
-
-  const statusIconNode = (() => {
-    const icon = getStateIcon(currentSessionStatus, sessionStatuses)
-    return React.isValidElement(icon)
-      ? React.cloneElement(icon as React.ReactElement<{ bare?: boolean }>, { bare: true })
-      : icon
-  })()
-  const statusColor = getStateColor(currentSessionStatus, sessionStatuses) ?? undefined
 
   return (
     <div className="flex flex-col">
@@ -423,35 +315,6 @@ function RootPane({
       />
 
       <Separator />
-
-      <Row
-        icon={<span style={statusColor ? { color: statusColor } : undefined}>{statusIconNode}</span>}
-        label={t('sessionMenu.status')}
-        chevron
-        onTap={onOpenStatusSub}
-      />
-
-      {hasLabels && (
-        <Row
-          icon={<Tag className="h-4 w-4" />}
-          label={t('sessionMenu.labels')}
-          trailing={labelsCount > 0 ? <CountBadge count={labelsCount} /> : undefined}
-          chevron
-          onTap={onOpenLabelsSub}
-        />
-      )}
-
-      {!isFlagged ? (
-        <Row icon={<Flag className="h-4 w-4 text-info" />} label={t('sessionMenu.flag')} onTap={onFlag} />
-      ) : (
-        <Row icon={<FlagOff className="h-4 w-4" />} label={t('sessionMenu.unflag')} onTap={onUnflag} />
-      )}
-
-      {!isArchived ? (
-        <Row icon={<Archive className="h-4 w-4" />} label={t('sessionMenu.archive')} onTap={onArchive} />
-      ) : (
-        <Row icon={<ArchiveRestore className="h-4 w-4" />} label={t('sessionMenu.unarchive')} onTap={onUnarchive} />
-      )}
 
       {!hasUnread && hasMessages && (
         <Row icon={<MailOpen className="h-4 w-4" />} label={t('sessionMenu.markAsUnread')} onTap={onMarkUnread} />
@@ -487,6 +350,8 @@ function RootPane({
   )
 }
 
+/* Removed session classification panes retained here temporarily only to make
+ * the deletion diff reviewable alongside the compact-menu rewrite.
 function StatusPane({
   sessionStatuses,
   activeStateId,
@@ -525,7 +390,7 @@ function LabelsPane({
   appliedLabelIds: Set<string>
   onToggle: (id: string) => void
 }) {
-  // The Labels row in RootPane is gated on `hasLabels`, so this pane is only
+  // Obsolete classification pane.
   // ever entered when items.length > 0 — no empty-state branch needed.
   return (
     <div className="flex flex-col">
@@ -552,6 +417,7 @@ function LabelsPane({
 
 
 
+*/
 function MessagingPane({ onConnect }: { onConnect: (platform: MessagingPlatform) => void }) {
   return (
     <div className="flex flex-col">

@@ -548,7 +548,8 @@ function convertCompoundToNavigationState(compound: ParsedCompoundRoute): Naviga
     if (!compound.details) {
       return { navigator: 'settings', subpage: null }
     }
-    return { navigator: 'settings', subpage: compound.details.type as SettingsSubpage }
+    const subpage = compound.details.type as SettingsSubpage
+    return { navigator: 'settings', subpage: subpage === 'labels' ? 'app' : subpage }
   }
 
   // Sources - include filter if present
@@ -639,7 +640,7 @@ function convertParsedRouteToNavigationState(parsed: ParsedRoute): NavigationSta
     case 'permissions':
       return { navigator: 'settings', subpage: 'permissions' }
     case 'labels':
-      return { navigator: 'settings', subpage: 'labels' }
+      return { navigator: 'settings', subpage: 'app' }
     case 'shortcuts':
       return { navigator: 'settings', subpage: 'shortcuts' }
     case 'preferences':

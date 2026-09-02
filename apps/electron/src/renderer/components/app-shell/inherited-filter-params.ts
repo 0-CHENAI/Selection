@@ -55,13 +55,13 @@ export function resolveInheritedFilterParams<S extends string, L extends string,
  * Outside a project, preserve the existing sole-include inheritance rule.
  */
 export function resolveNewSessionParams<S extends string, L extends string, P extends string>(
-  statusFilter: Map<S, FilterMode>,
-  labelFilter: Map<L, FilterMode>,
+  _statusFilter: Map<S, FilterMode>,
+  _labelFilter: Map<L, FilterMode>,
   projectFilter: Map<P, FilterMode>,
   activeProjectId?: P | null,
 ): InheritedNewSessionParams | null {
   if (activeProjectId) return { project: activeProjectId }
-  return resolveInheritedFilterParams(statusFilter, labelFilter, projectFilter)
+  return resolveInheritedFilterParams(new Map(), new Map(), projectFilter)
 }
 
 /** Resolve a visible detail session when entering a project-scoped list. */
@@ -83,19 +83,10 @@ export function resolveProjectNavigationSessionId(
  * action and preserves the same ambiguity safeguards.
  */
 export function resolveSessionListNewSessionParams(
-  currentFilter: SessionFilter | undefined,
-  statusFilter: Map<string, FilterMode>,
-  labelFilter: Map<string, FilterMode>,
+  _currentFilter: SessionFilter | undefined,
+  _statusFilter: Map<string, FilterMode>,
+  _labelFilter: Map<string, FilterMode>,
   projectFilter: Map<string, FilterMode>
 ): InheritedNewSessionParams | null {
-  const statuses = new Map(statusFilter)
-  const labels = new Map(labelFilter)
-
-  if (currentFilter?.kind === 'state') {
-    statuses.set(currentFilter.stateId, 'include')
-  } else if (currentFilter?.kind === 'label' && currentFilter.labelId !== '__all__') {
-    labels.set(currentFilter.labelId, 'include')
-  }
-
-  return resolveInheritedFilterParams(statuses, labels, projectFilter)
+  return resolveInheritedFilterParams(new Map(), new Map(), projectFilter)
 }
