@@ -310,4 +310,68 @@ describe('source_activated auto-retry', () => {
 
     expect(replayMarkers).toEqual([true])
   })
+
+  it('explicit Stop before the retry timer prevents finish-first resurrection', async () => {
+    const sessionId = 'stop-before-timer'
+    const managed = buildSession(sessionId)
+    managed.isProcessing = true
+    managed.processingGeneration = 1
+    managed.activeTurnUsage = {
+      inputTokens: 1_000,
+      outputTokens: 200,
+      totalTokens: 1_200,
+      cacheReadTokens: 0,
+      cacheCreationTokens: 0,
+      costUsd: 0,
+      modelCallCount: 1,
+      startedAt: Date.now(),
+    }
+    managed.agent = { forceAbort: () => {}, dispose: async () => {} } as never
+
+    await fireSourceActivated(sessionId, 'github', 'continue the task')
+    await sm.cancelProcessing(sessionId, true)
+    const replayed: string[] = []
+    ;(sm as unknown as { sendMessage: (_id: string, message: string) => Promise<void> }).sendMessage = async (_id, message) => {
+      replayed.push(message)
+    }
+    await (sm as unknown as {
+      onProcessingStopped: (id: string, reason: 'interrupted', generation: number) => Promise<void>
+    }).onProcessingStopped(sessionId, 'interrupted', 1)
+    await new Promise(r => setTimeout(r, 150))
+
+    expect(replayed).toEqual([])
+    expect(managed.messageQueue).toEqual([])
+    expect(managed.autoRetryPending).toBeUndefined()
+    expect(managed.autoRetryTimer).toBeUndefined()
+    expect(managed.pendingContinuationUsage).toBeUndefined()
+    expect(managed.tokenUsage?.lastTurn?.totalTokens).toBe(1_200)
+  })
+
+  it('explicit Stop removes a timer-first queued continuation without replaying it', async () => {
+    const sessionId = 'stop-after-timer'
+    const managed = buildSession(sessionId)
+    managed.isProcessing = true
+    managed.processingGeneration = 1
+    managed.agent = { forceAbort: () => {}, dispose: async () => {} } as never
+
+    await fireSourceActivated(sessionId, 'github', 'continue the task')
+    await new Promise(r => setTimeout(r, 150))
+    expect(managed.messageQueue[0]?.isSourceContinuation).toBe(true)
+
+    await sm.cancelProcessing(sessionId, true)
+    const replayed: string[] = []
+    ;(sm as unknown as { sendMessage: (_id: string, message: string) => Promise<void> }).sendMessage = async (_id, message) => {
+      replayed.push(message)
+    }
+    await (sm as unknown as {
+      onProcessingStopped: (id: string, reason: 'interrupted', generation: number) => Promise<void>
+    }).onProcessingStopped(sessionId, 'interrupted', 1)
+    await new Promise<void>(resolve => setImmediate(resolve))
+
+    expect(replayed).toEqual([])
+    expect(managed.messageQueue).toEqual([])
+    expect(managed.messages.some(message => message.hidden && message.content.includes('[github activated]'))).toBe(false)
+    expect(managed.autoRetryPending).toBeUndefined()
+    expect(managed.pendingContinuationUsage).toBeUndefined()
+  })
 })

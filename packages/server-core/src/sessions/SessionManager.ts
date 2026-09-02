@@ -6336,7 +6336,7 @@ export class SessionManager implements ISessionManager {
     // reserve its queue slot synchronously. Waiting on message loading or disk
     // cleanup here leaves a gap where processing-stop can emit a terminal child
     // completion before the continuation is visible (#804).
-    if (isPendingAutoRetry && managed.isProcessing && !existingMessageId) {
+    if (isPendingAutoRetry && managed.isProcessing && !managed.stopRequested && !existingMessageId) {
       const userMessage: Message = {
         id: generateMessageId(),
         role: 'user',
@@ -7493,6 +7493,14 @@ export class SessionManager implements ISessionManager {
 
     sessionLog.info('Cancelling processing for session:', sessionId, silent ? '(silent)' : '')
 
+    // Stop is authoritative over an automatic source continuation. Clear both
+    // the not-yet-fired timer and any usage accumulator waiting to cross that
+    // logical boundary so the cancelled task cannot resurrect itself.
+    if (managed.autoRetryTimer) clearTimeout(managed.autoRetryTimer)
+    managed.autoRetryTimer = undefined
+    managed.autoRetryPending = undefined
+    managed.pendingContinuationUsage = undefined
+
     // Composer items go back to the input. Send-now / steer follow-ups are
     // already in the transcript (`isQueued === false`) and must stay there.
     const stillQueuedEntries = managed.messageQueue.filter((entry) => {
@@ -7912,6 +7920,8 @@ export class SessionManager implements ISessionManager {
     if (managed.activeTurnUsage) {
       const pendingSourceContinuation = managed.autoRetryPending
       if (
+        completionReason === 'complete' &&
+        !managed.stopRequested &&
         pendingSourceContinuation &&
         !pendingSourceContinuation.committed &&
         Date.now() < pendingSourceContinuation.deadlineMs
@@ -10853,6 +10863,16 @@ export class SessionManager implements ISessionManager {
           const current = this.sessions.get(sessionId)
           if (!current) return
           current.autoRetryTimer = undefined
+
+          // A callback already dequeued by the event loop can outlive
+          // clearTimeout(). Stop or replacement of its pending slot still wins.
+          if (
+            current.stopRequested
+            || current.autoRetryPending?.content !== messageWithSuffix
+          ) {
+            sessionLog.info(`Auto-retry cancelled for ${sessionId}: pending continuation is no longer active`)
+            return
+          }
 
           // If a user follow-up arrived in the 100ms window, skip — they preempted us.
           if (current.messages.length > messageCountAtSchedule) {

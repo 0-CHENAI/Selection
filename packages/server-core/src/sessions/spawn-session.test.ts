@@ -1530,6 +1530,22 @@ describe('SessionManager spawn_session wait/background', () => {
       orchestrationStatus: 'running',
     }, parent.workspace, { messagesLoaded: true })
     child.isProcessing = true
+    child.autoRetryPending = {
+      content: 'retry after source activation',
+      deadlineMs: Date.now() + 2_000,
+      committed: false,
+    }
+    child.autoRetryTimer = setTimeout(() => {}, 5_000)
+    child.pendingContinuationUsage = {
+      inputTokens: 100,
+      outputTokens: 0,
+      totalTokens: 100,
+      cacheReadTokens: 0,
+      cacheCreationTokens: 0,
+      costUsd: 0,
+      modelCallCount: 1,
+      startedAt: Date.now(),
+    }
     internals(sm).sessions.set(child.id, child)
     parent.backgroundTaskRegistry.set(child.id, {
       taskId: child.id,
@@ -1551,6 +1567,10 @@ describe('SessionManager spawn_session wait/background', () => {
     ])
     expect(parent.backgroundTaskRegistry.get(child.id)?.status).toBe('stopped')
     expect(child.orchestrationStatus).toBe('stopped')
+    expect(child.autoRetryTimer).toBeUndefined()
+    expect(child.autoRetryPending).toBeUndefined()
+    expect(child.pendingContinuationUsage).toBeUndefined()
+    expect(child.messageQueue).toEqual([])
     await expect(sm.getTaskOutput(child.id)).resolves.toBe('Swarm stopped by user')
   })
 
