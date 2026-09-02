@@ -276,10 +276,7 @@ export interface SessionConfig extends SwarmSessionMetadata {
   };
   /** Workspace-scoped project id this session belongs to (undefined = unbound). */
   projectId?: string;
-  /**
-   * Snapshot of the app setting at creation time. Missing means a legacy
-   * session and is intentionally interpreted as shared for upgrade safety.
-   */
+  /** When true, this session was created with shared project MEMORY.md. Runtime ignores it. */
   sharedProjectMemoryEnabled?: boolean;
   /** Parent session id — when set, this session is a subtask of the parent (undefined = top-level task). */
   parentSessionId?: string;
@@ -394,7 +391,7 @@ export interface SessionHeader extends SwarmSessionMetadata {
   };
   /** Workspace-scoped project id this session belongs to (undefined = unbound). */
   projectId?: string;
-  /** Per-session shared project memory snapshot; missing or false means isolated. */
+  /** Persisted snapshot only; runtime no longer shares project MEMORY.md. */
   sharedProjectMemoryEnabled?: boolean;
   /** Parent session id — when set, this session is a subtask of the parent (undefined = top-level task). */
   parentSessionId?: string;
@@ -492,7 +489,7 @@ export interface SessionMetadata extends SwarmSessionMetadata {
   branchFromMessageId?: string;
   /** Workspace-scoped project id this session belongs to (undefined = unbound). */
   projectId?: string;
-  /** Per-session shared project memory snapshot; missing or false means isolated. */
+  /** Persisted snapshot only; runtime no longer shares project MEMORY.md. */
   sharedProjectMemoryEnabled?: boolean;
   /** Parent session id — when set, this session is a subtask of the parent (undefined = top-level task). */
   parentSessionId?: string;
@@ -510,11 +507,9 @@ export interface SessionMetadata extends SwarmSessionMetadata {
   taskDraft?: boolean;
 }
 
-/** Resolve the persisted memory mode. Missing or non-true values are isolated. */
+/** Project sessions use independent memory; shared MEMORY.md is retired. */
 export function isSharedProjectMemoryEnabled(
-  session: Pick<SessionConfig, 'sharedProjectMemoryEnabled'> | null | undefined,
+  _session?: Pick<SessionConfig, 'sharedProjectMemoryEnabled'> | null,
 ): boolean {
-  const value = (session as { sharedProjectMemoryEnabled?: unknown } | null | undefined)
-    ?.sharedProjectMemoryEnabled;
-  return value === true;
+  return false;
 }
