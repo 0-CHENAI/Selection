@@ -44,6 +44,7 @@ export function NavigatorPanel({
     <Panel variant="shrink" width={width} className={className}>
       <PanelHeader
         title={title}
+        titleAlign="start"
         actions={headerActions}
       />
       {children}
