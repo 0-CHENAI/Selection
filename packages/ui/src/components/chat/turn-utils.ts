@@ -245,6 +245,24 @@ export function shouldShowThinkingIndicator(phase: TurnPhase, isBuffering: boole
 }
 
 /**
+ * Desktop `Streaming...` footer means "this card's body is still being typed".
+ * Once tools (including spawn_session) have started, progress belongs on the
+ * work chain / task bar — not a footer that makes a finished preamble look live.
+ * Keep `response.isStreaming` itself unchanged so the live card tree is not remounted.
+ */
+export function shouldShowStreamingFooter(input: {
+  isStreaming: boolean
+  compactMode?: boolean
+  isCommentary?: boolean
+  hasToolActivities?: boolean
+}): boolean {
+  return !!input.isStreaming
+    && !input.compactMode
+    && !input.isCommentary
+    && !input.hasToolActivities
+}
+
+/**
  * Select the newest semantic progress title while a turn is doing work.
  *
  * Tool intents and explicit system statuses are concise title candidates.

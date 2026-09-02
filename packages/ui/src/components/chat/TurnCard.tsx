@@ -55,6 +55,7 @@ import {
   getActiveTurnPreview,
   isVisibleCommentaryCard,
   isMirroredCommentaryActivity,
+  shouldShowStreamingFooter,
   shouldShowThinkingIndicator,
   type ActivityGroup,
   type AssistantTurn,
@@ -1372,6 +1373,8 @@ export interface ResponseCardProps {
   annotationInteractionMode?: AnnotationInteractionMode
   /** Tool-bound commentary — keep the body readable, hide final-reply actions */
   isCommentary?: boolean
+  /** Tools have started on this turn; hide Streaming... on a finished preamble. */
+  hasToolActivities?: boolean
 }
 
 interface BranchDropdownProps {
@@ -1638,6 +1641,7 @@ export function ResponseCard({
   openAnnotationRequest,
   annotationInteractionMode = 'interactive',
   isCommentary = false,
+  hasToolActivities = false,
 }: ResponseCardProps) {
   const { t } = useTranslation()
   const parsedSkillUsage = useMemo(
@@ -2396,6 +2400,12 @@ export function ResponseCard({
   // Commentary must stay on the live card tree. Switching to the completed
   // chrome remounts markdown and pops a final-reply footer the moment tools start.
   const showCompletedChrome = (isCompleted && !isCommentary) || variant === 'plan'
+  const showStreamingFooter = shouldShowStreamingFooter({
+    isStreaming,
+    compactMode,
+    isCommentary,
+    hasToolActivities,
+  })
 
   // While buffering, return null - TurnCard will show a subtle indicator instead
   if (isBuffering) {
@@ -2632,9 +2642,9 @@ export function ResponseCard({
           </div>
         </div>
 
-        {/* Desktop streaming footer; compact mode renders nothing here
-            (the Accept-Plan footer only applies to completed plans). */}
-        {!compactMode && isStreaming && (
+        {/* Desktop streaming footer: only while this card's body is still
+            being typed. Compact mode and tool-bound preambles omit it. */}
+        {showStreamingFooter && (
           <div className={cn("px-4 py-2 border-t border-border/30 flex items-center bg-muted/20", SIZE_CONFIG.fontSize)}>
             <div className="flex items-center gap-2 text-muted-foreground">
               <Spinner className={SIZE_CONFIG.spinnerSize} />
@@ -2779,10 +2789,11 @@ export const TurnCard = React.memo(function TurnCard({
 }: TurnCardProps) {
   const { t } = useTranslation()
   const reduceMotion = useReducedMotion()
+  const hasToolActivities = activities.some(activity => activity.type === 'tool')
   const showCommentary = isVisibleCommentaryCard(
     response,
     isComplete,
-    activities.some(activity => activity.type === 'tool'),
+    hasToolActivities,
   )
 
   // Derive the turn phase from props using the state machine.
@@ -3187,6 +3198,7 @@ export const TurnCard = React.memo(function TurnCard({
                 isLastResponse={isLastResponse}
                 compactMode={compactMode}
                 isCommentary={showCommentary}
+                hasToolActivities={hasToolActivities}
                 onBranch={onBranch && response.messageId ? (options?: { newPanel?: boolean }) => onBranch(response.messageId!, options) : undefined}
                 onRegenerate={onRegenerate}
                 sendMessageKey={sendMessageKey}
@@ -3221,6 +3233,7 @@ export const TurnCard = React.memo(function TurnCard({
             isLastResponse={isLastResponse}
             compactMode={compactMode}
             isCommentary={showCommentary}
+            hasToolActivities={hasToolActivities}
             onBranch={onBranch && response.messageId ? (options?: { newPanel?: boolean }) => onBranch(response.messageId!, options) : undefined}
             onRegenerate={onRegenerate}
             sendMessageKey={sendMessageKey}
