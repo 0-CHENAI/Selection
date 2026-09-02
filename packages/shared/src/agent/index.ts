@@ -185,6 +185,7 @@ export {
   MAX_SPAWN_WAIT_TIMEOUT_MS,
   resolveSpawnSessionMode,
   resolveSpawnWaitTimeoutMs,
+  synthesizeFanOutQualification,
   createSpawnSessionTool,
   wrapSpawnSessionToolError,
 } from './spawn-session-tool.ts';

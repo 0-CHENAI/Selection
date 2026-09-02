@@ -11,7 +11,12 @@
  *   blocks until the child finishes (or times out).
  */
 
-import type { SpawnSessionMode, SpawnSessionResult, SpawnSessionHelpResult } from './base-agent.ts';
+import type {
+  SpawnSessionHelpResult,
+  SpawnSessionMode,
+  SpawnSessionQualification,
+  SpawnSessionResult,
+} from './base-agent.ts';
 
 export const DEFAULT_SPAWN_SESSION_MODE: SpawnSessionMode = 'background';
 export const DEFAULT_SPAWN_WAIT_TIMEOUT_MS = 15 * 60 * 1000;
@@ -24,6 +29,35 @@ export function resolveSpawnSessionMode(raw: unknown): SpawnSessionMode {
 export function resolveSpawnWaitTimeoutMs(raw: unknown): number {
   const n = typeof raw === 'number' && Number.isFinite(raw) ? raw : DEFAULT_SPAWN_WAIT_TIMEOUT_MS;
   return Math.min(Math.max(1, Math.floor(n)), MAX_SPAWN_WAIT_TIMEOUT_MS);
+}
+
+/** Build the same structured contract for distinct spawn_session calls in one assistant turn. */
+export function synthesizeFanOutQualification(
+  candidates: Array<{ name?: string; prompt?: string }>,
+): SpawnSessionQualification | undefined {
+  const tracks: SpawnSessionQualification['tracks'] = []
+  const seen = new Set<string>()
+  for (const candidate of candidates) {
+    const name = candidate.name?.trim()
+      || candidate.prompt?.trim().split(/\n/, 1)[0]?.trim()
+      || ''
+    if (!name || seen.has(name)) continue
+    seen.add(name)
+    const input = candidate.prompt?.trim() || name
+    tracks.push({
+      name,
+      input,
+      expectedOutput: `Findings for ${name}`,
+      evidence: `Primary sources and tool output for ${name}`,
+      toolKinds: ['web_search'],
+    })
+  }
+  if (tracks.length < 2) return undefined
+  return {
+    tracks,
+    parallelBenefit: 'Each track investigates an independent subject and can run without waiting on the others.',
+    finalAggregation: 'The coordinator compares worker findings and presents one combined answer.',
+  }
 }
 
 export type SpawnSessionFn = (input: Record<string, unknown>) => Promise<SpawnSessionResult | SpawnSessionHelpResult>;

@@ -450,6 +450,49 @@ export interface GroupTurnsOptions {
    * Mirrors the messaging-gateway/renderer.ts lastAssistantText fallback.
    */
   isSessionProcessing?: boolean
+  /**
+   * Keep the latest spawn_session turn visually open while its managed Swarm
+   * workers are still running. The parent agent may be idle between its
+   * dispatch turn and the hidden aggregation turn, but the user-visible task
+   * has not completed yet.
+   */
+  isManagedSwarmRunning?: boolean
+}
+
+/** Normalize only Selection's own session-tool aliases, never third-party namespaces. */
+export function normalizeCraftSessionToolName(toolName: string): string {
+  if (toolName.startsWith('mcp__session__')) return toolName.slice('mcp__session__'.length)
+  if (toolName.startsWith('session__')) return toolName.slice('session__'.length)
+  return toolName
+}
+
+function isSpawnSessionToolName(toolName: string | undefined): boolean {
+  return !!toolName && normalizeCraftSessionToolName(toolName).toLowerCase() === 'spawn_session'
+}
+
+function isManagedAutomaticSpawn(activity: ActivityItem): boolean {
+  if (activity.type !== 'tool' || !isSpawnSessionToolName(activity.toolName)) return false
+  if (!activity.content) return false
+  try {
+    const result = JSON.parse(activity.content) as Record<string, unknown>
+    const keepsRunning = result.status === 'started'
+      || (result.status === 'timeout' && result.mode === 'wait')
+    return keepsRunning
+      && result.spawnReason === 'automatic'
+      && result.lifecycle === 'managed'
+  } catch {
+    return false
+  }
+}
+
+function keepLatestManagedSwarmTurnOpen(turns: Turn[]): void {
+  const latestAssistant = turns.findLast((turn): turn is AssistantTurn => turn.type === 'assistant')
+  if (!latestAssistant) return
+  if (turns.at(-1) !== latestAssistant) return
+  if (!latestAssistant.activities.some(isManagedAutomaticSpawn)) return
+
+  latestAssistant.isComplete = false
+  latestAssistant.isStreaming = true
 }
 
 /**
@@ -816,6 +859,10 @@ export function groupMessagesByTurn(messages: Message[], options: GroupTurnsOpti
   // Flush any remaining turn
   flushCurrentTurn()
 
+  if (options.isManagedSwarmRunning) {
+    keepLatestManagedSwarmTurnOpen(turns)
+  }
+
   return turns
 }
 
@@ -1141,7 +1188,7 @@ export function formatOrchestrationToolSummary(
   content: string | undefined,
 ): string | null {
   if (!toolName || !content) return null
-  const name = toolName.replace(/^mcp__[^_]+__/, '')
+  const name = normalizeCraftSessionToolName(toolName)
   if (!ORCHESTRATION_TOOL_NAMES.has(name)) return null
 
   const parsed = parseOrchestrationResult(content)

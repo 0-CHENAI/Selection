@@ -1497,10 +1497,15 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
   }, [pendingPermission, pendingCredential])
 
   // Memoize turn grouping - avoids O(n) iteration on every render/keystroke
+  const sessionMessages = session?.messages
+  const sessionIsProcessing = session?.isProcessing
   const allTurns = React.useMemo(() => {
-    if (!session) return []
-    return groupMessagesByTurn(session.messages, { isSessionProcessing: session.isProcessing })
-  }, [session?.messages, session?.isProcessing])
+    if (!sessionMessages) return []
+    return groupMessagesByTurn(sessionMessages, {
+      isSessionProcessing: sessionIsProcessing,
+      isManagedSwarmRunning: swarmRunning,
+    })
+  }, [sessionMessages, sessionIsProcessing, swarmRunning])
 
   const queuedMessages = React.useMemo(
     () => session?.messages.filter(message =>

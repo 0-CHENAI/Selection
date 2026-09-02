@@ -112,6 +112,11 @@ export function detectLanguageFromPath(filePath: string): string {
   return langMap[ext || ''] || 'text'
 }
 
+/** Avoid rendering the same tool failure as both the error banner and output body. */
+export function shouldRenderGenericOverlayContent(content: string, error?: string): boolean {
+  return !error || content.trim() !== error.trim()
+}
+
 export function GenericOverlay({
   content,
   language,
@@ -127,6 +132,7 @@ export function GenericOverlay({
 }: GenericOverlayProps) {
   const { t } = useTranslation()
   const resolvedTitle = title ?? t('overlay.preview')
+  const showContent = shouldRenderGenericOverlayContent(content, error)
 
   // Auto-detect language if not provided
   const detectedLanguage = useMemo(() => {
@@ -154,32 +160,34 @@ export function GenericOverlay({
       error={error ? { label: 'Tool Failed', message: error } : undefined}
       className="bg-foreground-3"
     >
-      <ContentFrame title={t('overlay.preview')}>
-        <div className="flex-1 overflow-y-auto min-h-0">
-          {diffMode ? (
-            // Side-by-side diff view
-            <div className="flex gap-4 h-full p-4">
-              <div className="flex-1 flex flex-col min-w-0">
-                <div className="text-xs text-muted-foreground mb-2 font-medium">Original</div>
-                <div className="flex-1 overflow-auto p-4">
-                  <CodeBlock code={originalContent} language={detectedLanguage} mode="minimal" forcedTheme={theme} />
+      {showContent && (
+        <ContentFrame title={t('overlay.preview')}>
+          <div className="flex-1 overflow-y-auto min-h-0">
+            {diffMode ? (
+              // Side-by-side diff view
+              <div className="flex gap-4 h-full p-4">
+                <div className="flex-1 flex flex-col min-w-0">
+                  <div className="text-xs text-muted-foreground mb-2 font-medium">Original</div>
+                  <div className="flex-1 overflow-auto p-4">
+                    <CodeBlock code={originalContent} language={detectedLanguage} mode="minimal" forcedTheme={theme} />
+                  </div>
+                </div>
+                <div className="flex-1 flex flex-col min-w-0">
+                  <div className="text-xs text-muted-foreground mb-2 font-medium">Modified</div>
+                  <div className="flex-1 overflow-auto p-4">
+                    <CodeBlock code={modifiedContent} language={detectedLanguage} mode="minimal" forcedTheme={theme} />
+                  </div>
                 </div>
               </div>
-              <div className="flex-1 flex flex-col min-w-0">
-                <div className="text-xs text-muted-foreground mb-2 font-medium">Modified</div>
-                <div className="flex-1 overflow-auto p-4">
-                  <CodeBlock code={modifiedContent} language={detectedLanguage} mode="minimal" forcedTheme={theme} />
-                </div>
+            ) : (
+              // Single content view
+              <div className="p-4">
+                <CodeBlock code={content} language={detectedLanguage} mode="minimal" forcedTheme={theme} />
               </div>
-            </div>
-          ) : (
-            // Single content view
-            <div className="p-4">
-              <CodeBlock code={content} language={detectedLanguage} mode="minimal" forcedTheme={theme} />
-            </div>
-          )}
-        </div>
-      </ContentFrame>
+            )}
+          </div>
+        </ContentFrame>
+      )}
     </PreviewOverlay>
   )
 }

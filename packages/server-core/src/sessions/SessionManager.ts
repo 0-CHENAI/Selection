@@ -8883,7 +8883,7 @@ export class SessionManager implements ISessionManager {
     }
 
     const mode = request.mode === 'wait' ? 'wait' : 'background'
-    const baseResult = {
+    const baseResult: Omit<SpawnSessionResult, 'status' | 'finalText'> = {
       sessionId: session.id,
       name: session.name || request.name || session.id,
       connection: session.llmConnection,
@@ -8895,6 +8895,8 @@ export class SessionManager implements ISessionManager {
       role,
       projectId: managed.projectId,
       lifecycle,
+      spawnReason: effectiveSpawnReason,
+      mode,
     }
 
     this.emitSessionAgentEvent(managed, 'SubagentStart', {
