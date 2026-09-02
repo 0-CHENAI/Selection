@@ -1065,6 +1065,7 @@
   "session.readGroup": "Przeczytane ({{count}})",
   "session.renameSession": "Zmień nazwę sesji",
   "session.results": "{{count}} wyników",
+  "session.searchPlaceholder": "Szukaj w tytułach i treści...",
   "session.searchUnavailable": "Wyszukiwanie niedostępne",
   "session.selectConversation": "Wybierz rozmowę, aby rozpocząć",
   "session.unreadGroup": "Nieprzeczytane ({{count}})",

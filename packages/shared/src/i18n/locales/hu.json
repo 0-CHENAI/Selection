@@ -1065,6 +1065,7 @@
   "session.readGroup": "Olvasott ({{count}})",
   "session.renameSession": "Munkamenet átnevezése",
   "session.results": "{{count}} találat",
+  "session.searchPlaceholder": "Keresés címekben és tartalmakban...",
   "session.searchUnavailable": "A keresés nem érhető el",
   "session.selectConversation": "Válassz egy beszélgetést a kezdéshez",
   "session.unreadGroup": "Olvasatlan ({{count}})",

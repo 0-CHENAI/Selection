@@ -1065,6 +1065,7 @@
   "session.readGroup": "Gelesen ({{count}})",
   "session.renameSession": "Sitzung umbenennen",
   "session.results": "{{count}} Ergebnisse",
+  "session.searchPlaceholder": "Titel und Inhalte durchsuchen...",
   "session.searchUnavailable": "Suche nicht verfügbar",
   "session.selectConversation": "Wähle eine Unterhaltung aus, um loszulegen",
   "session.unreadGroup": "Ungelesen ({{count}})",

@@ -1065,6 +1065,7 @@
   "session.readGroup": "已读 ({{count}})",
   "session.renameSession": "重命名会话",
   "session.results": "{{count}} 个结果",
+  "session.searchPlaceholder": "搜索标题和内容…",
   "session.searchUnavailable": "搜索不可用",
   "session.selectConversation": "选择一个对话开始",
   "session.unreadGroup": "未读 ({{count}})",
