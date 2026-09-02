@@ -9,8 +9,8 @@
  * get clipped by the panel container query on narrow viewports, and the
  * nested submenus can fall off the right edge.
  *
- * Pattern matches the other compact pickers (`CompactSessionListFilter`,
- * `CompactWorkspaceSwitcher`, `CompactPermissionModeSelector`) and also
+ * Pattern matches the other compact pickers (`CompactWorkspaceSwitcher`,
+ * `CompactPermissionModeSelector`) and also
  * follows the iOS-style drill-in behaviour established by `MobileAppMenu`.
  *
  * Side-effect handlers (refresh title / copy path) come from

@@ -392,8 +392,6 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
   // Priority: name > first user message > preview > "New chat"
   const displayTitle = session ? getSessionTitle(session) : (sessionMeta ? getSessionTitle(sessionMeta) : t('chat.session'))
   const isFlagged = session?.isFlagged || sessionMeta?.isFlagged || false
-  const isArchived = session?.isArchived || sessionMeta?.isArchived || false
-  const currentSessionStatus = session?.sessionStatus || sessionMeta?.sessionStatus || 'todo'
   const hasMessages = !!(session?.messages?.length || sessionMeta?.lastFinalMessageId)
   const hasUnreadMessages = sessionMeta
     ? !!(sessionMeta.lastFinalMessageId && sessionMeta.lastFinalMessageId !== sessionMeta.lastReadMessageId)

@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'bun:test'
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import {
+  normalizeSessionGroupingMode,
   prepareOrdinarySessionSidebarLinks,
   sanitizeRemovedSessionFilters,
   type PersistedSessionViewFilters,
@@ -43,5 +46,21 @@ describe('ordinary session UI migration', () => {
         groupingMode: 'date',
       },
     })
+  })
+
+  it('maps persisted status grouping onto date', () => {
+    expect(normalizeSessionGroupingMode('status')).toBe('date')
+    expect(normalizeSessionGroupingMode('unread')).toBe('unread')
+  })
+
+  it('does not reconstruct classification entries in AppShell', () => {
+    const appShell = readFileSync(join(import.meta.dir, 'AppShell.tsx'), 'utf8')
+    expect(appShell).toContain('titleAlign="start"')
+    expect(appShell).not.toContain('id: "nav:flagged"')
+    expect(appShell).not.toContain('id: "nav:archived"')
+    expect(appShell).not.toContain("id: `nav:state:")
+    expect(appShell).not.toContain("setChatGroupingMode('status')")
+    expect(appShell).not.toContain('legacyClassificationControlsEnabled')
+    expect(appShell).not.toContain('CompactSessionListFilter')
   })
 })
