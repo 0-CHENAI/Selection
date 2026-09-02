@@ -13,7 +13,7 @@
  */
 
 import { describe, it, expect } from 'bun:test'
-import { deriveTurnPhase, shouldShowThinkingIndicator, type TurnPhase, type AssistantTurn } from '../turn-utils'
+import { deriveTurnPhase, shouldShowStreamingFooter, shouldShowThinkingIndicator, type TurnPhase, type AssistantTurn } from '../turn-utils'
 import type { ActivityItem, ResponseContent } from '../TurnCard'
 
 // ============================================================================
@@ -418,5 +418,24 @@ describe('shouldShowThinkingIndicator', () => {
   it('returns false for complete phase', () => {
     expect(shouldShowThinkingIndicator('complete', false)).toBe(false)
     expect(shouldShowThinkingIndicator('complete', true)).toBe(false)
+  })
+})
+
+describe('shouldShowStreamingFooter', () => {
+  it('shows while a desktop final answer is still being typed', () => {
+    expect(shouldShowStreamingFooter({ isStreaming: true })).toBe(true)
+  })
+
+  it('hides after spawn_session / other tools have started (#203)', () => {
+    expect(shouldShowStreamingFooter({
+      isStreaming: true,
+      hasToolActivities: true,
+    })).toBe(false)
+  })
+
+  it('hides commentary, compact mode, and completed cards', () => {
+    expect(shouldShowStreamingFooter({ isStreaming: true, isCommentary: true })).toBe(false)
+    expect(shouldShowStreamingFooter({ isStreaming: true, compactMode: true })).toBe(false)
+    expect(shouldShowStreamingFooter({ isStreaming: false })).toBe(false)
   })
 })

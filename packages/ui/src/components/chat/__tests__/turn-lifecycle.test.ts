@@ -7,7 +7,7 @@
  */
 
 import { describe, it, expect } from 'bun:test'
-import { deriveTurnPhase, groupMessagesByTurn, type AssistantTurn } from '../turn-utils'
+import { deriveTurnPhase, groupMessagesByTurn, shouldShowStreamingFooter, type AssistantTurn } from '../turn-utils'
 import type { Message } from '@craft-agent/core'
 
 // ============================================================================
@@ -544,6 +544,38 @@ describe('pending follow-up replies', () => {
       expect(assistant.activities).toEqual([])
       expect(assistant.response?.text).toBe('好的，下面列出文稿的所有章节及其子项：')
       expect(assistant.response?.isStreaming).toBe(true)
+      expect(shouldShowStreamingFooter({
+        isStreaming: assistant.response.isStreaming,
+        hasToolActivities: assistant.activities.some(activity => activity.type === 'tool'),
+      })).toBe(true)
+    }
+  })
+
+  it('keeps a finished swarm preamble streaming on the card but hides the footer once spawn_session starts (#203)', () => {
+    resetCounters()
+    const user = createUserMessage('同时调研三个独立模型')
+    const preamble: Message = {
+      id: 'preamble',
+      role: 'assistant',
+      content: '好的，我将启动三个子代理并行调研这三个模型的最新信息。',
+      timestamp: user.timestamp + 10,
+      isStreaming: true,
+      isPending: true,
+    }
+    const spawn = createToolMessage('running', 'spawn_session')
+    spawn.timestamp = user.timestamp + 20
+
+    const turns = groupMessagesByTurn([user, preamble, spawn])
+    const assistant = turns[1]
+    expect(assistant?.type).toBe('assistant')
+    if (assistant?.type === 'assistant') {
+      expect(assistant.response?.text).toBe('好的，我将启动三个子代理并行调研这三个模型的最新信息。')
+      expect(assistant.response?.isStreaming).toBe(true)
+      expect(assistant.activities.some(activity => activity.type === 'tool')).toBe(true)
+      expect(shouldShowStreamingFooter({
+        isStreaming: assistant.response.isStreaming,
+        hasToolActivities: true,
+      })).toBe(false)
     }
   })
 })

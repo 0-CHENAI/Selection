@@ -13,7 +13,7 @@ import { Spinner } from '@craft-agent/ui'
 import { cn } from '@/lib/utils'
 import { toast } from 'sonner'
 import type { BackgroundTask } from './ActiveTasksBar'
-import { backgroundTasksAtomFamily } from '@/atoms/sessions'
+import { backgroundTasksAtomFamily, type BackgroundTaskStatus } from '@/atoms/sessions'
 
 /** Terminal data for overlay display */
 export interface TerminalOverlayData {
@@ -55,6 +55,23 @@ export interface TaskActionMenuProps {
   onShowTerminalOverlay?: (data: TerminalOverlayData) => void
   /** Additional class name */
   className?: string
+}
+
+/** Module-level so elapsed ticks do not remount Spinner and restart its CSS animation. */
+export function TaskStatusIcon({ status }: { status: BackgroundTaskStatus }) {
+  switch (status) {
+    case 'completed':
+      return <CheckCircle2 className="h-3.5 w-3.5 text-green-600 dark:text-green-500" />
+    case 'failed':
+      return <XCircle className="h-3.5 w-3.5 text-destructive" />
+    case 'stopped':
+      return <Square className="h-3 w-3 opacity-60" />
+    case 'orphaned':
+    case 'stale':
+      return <AlertTriangle className="h-3.5 w-3.5 text-amber-600 dark:text-amber-500" />
+    default:
+      return <Spinner className="text-xs" />
+  }
 }
 
 /**
@@ -149,22 +166,6 @@ export function TaskActionMenu({ task, sessionId, onKillTask, onOpenSession, onI
     (task.status === 'orphaned' || task.status === 'stale') && "bg-amber-500/10 hover:bg-amber-500/15 dark:bg-amber-500/15",
   )
 
-  const StatusIcon = () => {
-    switch (task.status) {
-      case 'completed':
-        return <CheckCircle2 className="h-3.5 w-3.5 text-green-600 dark:text-green-500" />
-      case 'failed':
-        return <XCircle className="h-3.5 w-3.5 text-destructive" />
-      case 'stopped':
-        return <Square className="h-3 w-3 opacity-60" />
-      case 'orphaned':
-      case 'stale':
-        return <AlertTriangle className="h-3.5 w-3.5 text-amber-600 dark:text-amber-500" />
-      default:
-        return <Spinner className="text-xs" />
-    }
-  }
-
   const statusLabel: Record<string, string> = {
     completed: t('chat.taskStatusDone', 'done'),
     failed: t('chat.taskStatusFailed', 'failed'),
@@ -186,7 +187,7 @@ export function TaskActionMenu({ task, sessionId, onKillTask, onOpenSession, onI
     <>
           {/* Status icon */}
           <div className="flex items-center justify-center shrink-0">
-            <StatusIcon />
+            <TaskStatusIcon status={task.status} />
           </div>
 
           {/* Type badge */}
