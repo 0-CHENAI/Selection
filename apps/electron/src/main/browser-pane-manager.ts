@@ -740,7 +740,7 @@ export class BrowserPaneManager implements IBrowserPaneManager {
       if (looksLikeHost) {
         normalizedUrl = `https://${normalizedUrl}`
       } else {
-        normalizedUrl = `https://duckduckgo.com/?q=${encodeURIComponent(normalizedUrl)}`
+        normalizedUrl = `https://www.bing.com/search?q=${encodeURIComponent(normalizedUrl)}`
       }
     }
 

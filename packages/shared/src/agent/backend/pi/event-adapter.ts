@@ -614,6 +614,24 @@ export class PiEventAdapter extends BaseEventAdapter {
             this.overflowState = 'recovering';
             this.heldOverflowError = null;
           }
+          const usage = compactionEvent.result.usage;
+          if (usage && typeof usage.input === 'number') {
+            const contextTokens = usage.input + (usage.cacheRead || 0);
+            // Summary generation is a real provider call. Forward its usage so
+            // per-agent budgets include compaction instead of hiding that cost.
+            yield {
+              type: 'usage_update',
+              usage: {
+                inputTokens: usage.input,
+                outputTokens: usage.output,
+                cacheReadTokens: usage.cacheRead,
+                cacheCreationTokens: usage.cacheWrite,
+                costUsd: usage.cost.total,
+                contextTokens,
+                contextWindow: this.contextWindow,
+              },
+            };
+          }
           // Use "Compacted" keyword so session handler detects statusType: 'compaction_complete'
           yield { type: 'info', message: 'Compacted context to fit within limits' };
         } else if (compactionEvent.errorMessage) {

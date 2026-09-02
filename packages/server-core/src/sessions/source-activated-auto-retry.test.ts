@@ -283,4 +283,31 @@ describe('source_activated auto-retry', () => {
 
     expect(calls).toEqual([])
   })
+
+  it('timer-first retry reserves one queue slot and preserves continuation identity on replay', async () => {
+    const sessionId = 'timer-first-queued-replay'
+    const managed = buildSession(sessionId)
+    managed.isProcessing = true
+
+    await fireSourceActivated(sessionId, 'github', 'continue the task')
+    await new Promise(r => setTimeout(r, 150))
+
+    expect(managed.messageQueue).toHaveLength(1)
+    expect(managed.messageQueue[0]?.isSourceContinuation).toBe(true)
+    expect(managed.autoRetryPending?.committed).toBe(true)
+
+    const replayMarkers: boolean[] = []
+    ;(sm as unknown as {
+      sendMessage: (...args: unknown[]) => Promise<void>
+    }).sendMessage = async (...args) => {
+      replayMarkers.push(args[9] === true)
+    }
+    managed.isProcessing = false
+    await (sm as unknown as {
+      processNextQueuedMessage: (id: string) => Promise<void>
+    }).processNextQueuedMessage(sessionId)
+    await new Promise<void>(resolve => setImmediate(resolve))
+
+    expect(replayMarkers).toEqual([true])
+  })
 })

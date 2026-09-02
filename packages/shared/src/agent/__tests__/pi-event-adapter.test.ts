@@ -1294,6 +1294,40 @@ describe('PiEventAdapter', () => {
       });
     });
 
+    it('should account for the provider usage of a successful compaction', () => {
+      adapter.setContextWindow(262_144);
+      const events = collect(adapter.adaptEvent({
+        type: 'compaction_end',
+        result: {
+          usage: {
+            input: 10_000,
+            output: 1_000,
+            cacheRead: 2_000,
+            cacheWrite: 500,
+            totalTokens: 13_500,
+            cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0.1 },
+          },
+        },
+        aborted: false,
+      } as any));
+
+      expect(events).toEqual([
+        {
+          type: 'usage_update',
+          usage: {
+            inputTokens: 10_000,
+            outputTokens: 1_000,
+            cacheReadTokens: 2_000,
+            cacheCreationTokens: 500,
+            costUsd: 0.1,
+            contextTokens: 12_000,
+            contextWindow: 262_144,
+          },
+        },
+        { type: 'info', message: 'Compacted context to fit within limits' },
+      ]);
+    });
+
     it('should emit error for failed compaction_end', () => {
       const events = collect(adapter.adaptEvent({
         type: 'compaction_end',

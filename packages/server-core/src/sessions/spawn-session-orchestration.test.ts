@@ -20,7 +20,7 @@ import {
 } from './spawn-session-orchestration.ts'
 
 describe('spawn-session orchestration helpers', () => {
-  it('uses one immutable 256 Ki token ceiling for temporary Swarms', () => {
+  it('uses an immutable 256 Ki token ceiling for each spawned Swarm agent', () => {
     expect(FIXED_SWARM_TOKEN_BUDGET).toBe(262_144)
   })
 
