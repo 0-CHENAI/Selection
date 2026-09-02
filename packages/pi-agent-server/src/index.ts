@@ -90,7 +90,6 @@ import { resolveSearchProvider } from './tools/search/resolve-provider.ts';
 import { createSearchTool } from './tools/search/create-search-tool.ts';
 import { allowCraftMetadataProperties, stripCraftMetadata } from './craft-metadata-schema.ts';
 import { createRecoveringArgumentPreparer } from './tool-argument-recovery.ts';
-import { isPrefetchableTool } from './prefetchable-tools.ts';
 import { applySystemPromptOverride } from './system-prompt-override.ts';
 import { installContextBudgetGuard } from './context-budget-stream.ts';
 import { resolvePiSessionPaths } from './session-paths.ts';
@@ -110,6 +109,7 @@ import {
   normalizeProxyToolExecutionEnd,
   proxyToolDetails,
 } from './proxy-tool-protocol.ts';
+import { SpawnFanOutQualificationCache } from './spawn-fan-out-preparation.ts';
 
 // ============================================================
 // Types — JSONL Protocol
@@ -345,13 +345,11 @@ const pendingToolExecutions = new Map<string, { resolve: (result: ProxyToolExecu
 
 // Pending session MCP tool calls for completion detection
 const pendingSessionToolCalls = new Map<string, { toolName: string; arguments: Record<string, unknown> }>();
+const pendingSpawnFanOutQualifications = new SpawnFanOutQualificationCache();
+let activeSpawnTools: ToolDefinition<any, any>[] = [];
 
 // Proxy tool definitions from main process
 let proxyToolDefs: ProxyToolDef[] = [];
-
-// Speculative prefetch so Pi's sequential execute() still overlaps sibling
-// call_llm / spawn_session calls from the same assistant message.
-const prefetchCache = new Map<string, Promise<ProxyToolExecutionResult>>();
 
 // Flag: proxy tools changed since last session creation — session needs recreation
 let toolsChanged = false;
@@ -718,6 +716,9 @@ async function ensureSession(): Promise<AgentSession> {
   // are fixed for the lifetime of the session. Keep the schemas provider-neutral
   // and strict so a later model switch cannot leave stale metadata requirements.
   const wrappedAll = wrapToolsWithHooks([...builtinDefs, ...webTools, ...proxyTools], false);
+  activeSpawnTools = wrappedAll.filter(
+    tool => resolveSessionToolProxyName(tool.name) === 'mcp__session__spawn_session',
+  );
   const toolAllowlist = wrappedAll.map(t => t.name);
   debugLog(`Session tools: ${builtinDefs.length} builtin + ${webTools.length} web + ${proxyTools.length} proxy = ${wrappedAll.length} total`);
 
@@ -907,7 +908,6 @@ function wrapSingleTool(
     ctx,
   ) => {
     let inputObj: Record<string, unknown> = { ...(params as Record<string, unknown>) };
-
     // Extract intent before main process strips metadata (used for summarization)
     const intent = typeof inputObj._intent === 'string' ? inputObj._intent : undefined;
 
@@ -915,6 +915,11 @@ function wrapSingleTool(
     if ((sdkToolName === 'Write' || sdkToolName === 'Edit' || sdkToolName === 'MultiEdit' || sdkToolName === 'NotebookEdit')
         && typeof inputObj.path === 'string' && !inputObj.file_path) {
       inputObj = { ...inputObj, file_path: inputObj.path };
+    }
+
+    const fanOutQualification = pendingSpawnFanOutQualifications.consume(toolCallId);
+    if (fanOutQualification && inputObj.qualification == null) {
+      inputObj = { ...inputObj, qualification: fanOutQualification };
     }
 
     // Send to main process for permission checking + transforms
@@ -1020,43 +1025,16 @@ function buildProxyTools(): ToolDefinition<any, any>[] {
           : def.description,
       parameters: def.inputSchema,
       execute: async (
-        toolCallId: string,
+        _toolCallId: string,
         params: any,
       ): Promise<AgentToolResult<any>> => {
-        // Check speculative prefetch cache first. If this tool was prefetched
-        // on message_end, await that in-flight request instead of sending another.
-        const prefetched = prefetchCache.get(toolCallId);
-        if (prefetched) {
-          prefetchCache.delete(toolCallId);
-          debugLog(`Prefetch cache hit for ${executionName} (toolCallId: ${toolCallId})`);
-          const result = await prefetched;
-          return {
-            content: normalizeProxyToolContent(result.content),
-            details: proxyToolDetails(result),
-          };
-        }
-
-        const inputObj = params as Record<string, unknown>;
-
-        // Permission checking via main process
-        const approval = await requestPreToolUseApproval(executionName, inputObj, toolCallId);
-        if (approval.action === 'prepare_source_guide') {
-          return {
-            content: [{ type: 'text', text: formatSourceGuidePreparationResult(approval.preparation) }],
-            details: { isError: false },
-          };
-        }
-
-        // Execute via main process
         const requestId = `proxy-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-
         send({
           type: 'tool_execute_request',
           requestId,
           toolName: executionName,
-          args: approval.input,
+          args: params as Record<string, unknown>,
         });
-
         const result = await new Promise<ProxyToolExecutionResult>((resolve) => {
           pendingToolExecutions.set(requestId, { resolve });
         });
@@ -1349,13 +1327,28 @@ function handleSessionEvent(event: AgentSessionEvent): void {
 
   // Log API errors for debugging and attach provider-native turn anchor for branch cutoffs.
   if (event.type === 'message_end') {
-    const msg = event.message as { role?: string; stopReason?: string; errorMessage?: string } | undefined;
+    const msg = event.message as {
+      role?: string;
+      stopReason?: string;
+      errorMessage?: string;
+      content?: Array<{
+        type: string;
+        id?: string;
+        name?: string;
+        arguments?: unknown;
+      }>;
+    } | undefined;
     if (msg?.stopReason === 'error') {
       debugLog(`API error in message_end: ${msg.errorMessage || 'unknown'}`);
     }
 
     if (msg?.role === 'assistant' && piSession) {
       currentAssistantGeneration++;
+      pendingSpawnFanOutQualifications.prepare(
+        msg.stopReason,
+        Array.isArray(msg.content) ? msg.content : [],
+        activeSpawnTools,
+      );
       // CRITICAL: do NOT read `getLeafId()` here.
       //
       // The Pi SDK fires `message_end` synchronously BEFORE calling
@@ -1400,31 +1393,11 @@ function handleSessionEvent(event: AgentSessionEvent): void {
         });
       }
 
-      // If the assistant message contains 2+ prefetchable tool calls, fire them
-      // to the main process now so sequential execute() still overlaps.
-      const content = (msg as { content?: Array<{ type: string; id?: string; name?: string; arguments?: unknown }> }).content;
-      if (Array.isArray(content)) {
-        const prefetchableToolCalls = content.filter(
-          (c) => c.type === 'toolCall' && c.name && isPrefetchableTool(c.name),
-        );
-        if (prefetchableToolCalls.length >= 2) {
-          debugLog(`Prefetching ${prefetchableToolCalls.length} parallel ${prefetchableToolCalls[0]?.name} calls`);
-          for (const tc of prefetchableToolCalls) {
-            const requestId = `prefetch-${tc.id}`;
-            const promise = new Promise<ProxyToolExecutionResult>((resolve) => {
-              pendingToolExecutions.set(requestId, { resolve });
-            });
-            send({
-              type: 'tool_execute_request',
-              requestId,
-              toolName: tc.name!,
-              args: (tc.arguments ?? {}) as Record<string, unknown>,
-            });
-            prefetchCache.set(tc.id!, promise);
-          }
-        }
-      }
     }
+  }
+
+  if (event.type === 'turn_end' || event.type === 'agent_end') {
+    pendingSpawnFanOutQualifications.clear();
   }
 
   // Detect session MCP tool completions + enrich tool starts with canonical metadata
@@ -1490,6 +1463,8 @@ function handleSessionEvent(event: AgentSessionEvent): void {
 
 async function handleInit(msg: Extract<InboundMessage, { type: 'init' }>): Promise<void> {
   runtimeConfigGeneration += 1;
+  pendingSpawnFanOutQualifications.clear();
+  activeSpawnTools = [];
   // Clean up any existing session from a previous init
   if (piSession) {
     if (unsubscribeEvents) {
@@ -1673,6 +1648,7 @@ async function handleAbort(): Promise<void> {
     }
   }
   sourceGuideEventGate.clear();
+  pendingSpawnFanOutQualifications.clear();
 
   // Reject all pending pre-tool-use requests
   for (const [, pending] of pendingPreToolUse) {
@@ -1680,8 +1656,6 @@ async function handleAbort(): Promise<void> {
   }
   pendingPreToolUse.clear();
 
-  // Clear speculative prefetch cache — in-flight prefetches will resolve but never be consumed
-  prefetchCache.clear();
 }
 
 async function handleMiniCompletion(msg: Extract<InboundMessage, { type: 'mini_completion' }>): Promise<void> {
@@ -1909,6 +1883,8 @@ async function handleSetThinkingLevel(msg: Extract<InboundMessage, { type: 'set_
 
 function handleShutdown(): void {
   debugLog('Shutdown requested');
+  pendingSpawnFanOutQualifications.clear();
+  activeSpawnTools = [];
 
   // Unsubscribe events
   if (unsubscribeEvents) {

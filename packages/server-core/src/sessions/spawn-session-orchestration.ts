@@ -1,7 +1,6 @@
-import type {
-  SpawnSessionQualification,
-  SpawnSessionResultStatus,
-} from '@craft-agent/shared/agent'
+import type { SpawnSessionQualification, SpawnSessionResultStatus } from '@craft-agent/shared/agent'
+
+export { synthesizeFanOutQualification } from '@craft-agent/shared/agent'
 
 export const MAX_SWARM_CHILDREN_PER_PARENT = 3
 export const MAX_SWARM_DEPTH = 2
@@ -29,35 +28,6 @@ const MISSING_QUALIFICATION_CONTRACT_MESSAGE = [
   'Pass qualification on spawn_session with tracks (at least two independent tracks), parallelBenefit, and finalAggregation.',
   'Writing a contract phrase into the name or prompt does not count.',
 ].join(' ')
-
-/** Recover a contract from distinct worker names in one turn's fan-out. */
-export function synthesizeFanOutQualification(
-  candidates: Array<{ name?: string; prompt?: string }>,
-): SpawnSessionQualification | undefined {
-  const tracks: SpawnSessionQualification['tracks'] = []
-  const seen = new Set<string>()
-  for (const candidate of candidates) {
-    const name = candidate.name?.trim()
-      || candidate.prompt?.trim().split(/\n/, 1)[0]?.trim()
-      || ''
-    if (!name || seen.has(name)) continue
-    seen.add(name)
-    const input = candidate.prompt?.trim() || name
-    tracks.push({
-      name,
-      input,
-      expectedOutput: `Findings for ${name}`,
-      evidence: `Primary sources and tool output for ${name}`,
-      toolKinds: ['web_search'],
-    })
-  }
-  if (tracks.length < 2) return undefined
-  return {
-    tracks,
-    parallelBenefit: 'Each track investigates an independent subject and can run without waiting on the others.',
-    finalAggregation: 'The coordinator compares worker findings and presents one combined answer.',
-  }
-}
 
 export function formatSpawnQualificationFailure(
   reasons: string[],

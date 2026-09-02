@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'bun:test';
+import { Agent } from '@earendil-works/pi-agent-core';
 import {
   createReadToolDefinition,
   createBashToolDefinition,
@@ -87,6 +88,16 @@ describe('Pi subprocess tool shape contract', () => {
 });
 
 describe('Pi SDK CreateAgentSessionOptions contract', () => {
+  it('keeps native tool execution parallel without message_end side effects', () => {
+    const agent = new Agent({
+      streamFn: (() => {
+        throw new Error('not used by this contract test');
+      }),
+    });
+
+    expect(agent.toolExecution).toBe('parallel');
+  });
+
   it('`tools` field is typed as string[] (name allowlist, not objects)', () => {
     // Compile-time proof. If Pi SDK ever changes this back to accept tool
     // objects, the line below will become a type error and this test will
