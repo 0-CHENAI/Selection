@@ -63,4 +63,15 @@ describe('ordinary session UI migration', () => {
     expect(appShell).not.toContain('legacyClassificationControlsEnabled')
     expect(appShell).not.toContain('CompactSessionListFilter')
   })
+
+  it('does not render a project-scoped new-session bar inside SessionList (#215)', () => {
+    const sessionList = readFileSync(join(import.meta.dir, 'SessionList.tsx'), 'utf8')
+
+    // This is intentionally a structural source guard: the regression was an
+    // extra EntityList header branch, while project inheritance is covered by
+    // resolveSessionListNewSessionParams tests.
+    expect(sessionList).not.toContain('newSessionProject')
+    expect(sessionList).not.toContain('projectInfo.newSessionButton')
+    expect(sessionList).not.toContain('<SquarePenRounded')
+  })
 })
