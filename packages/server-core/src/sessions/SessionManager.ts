@@ -6271,6 +6271,38 @@ export class SessionManager implements ISessionManager {
     sessionLog.info(`Deleted session ${sessionId}`)
   }
 
+  /** Remove every runtime and transcript trace of an unstarted source continuation. */
+  private discardPendingSourceContinuation(managed: ManagedSession, replayMessageId?: string): void {
+    const pendingContent = managed.autoRetryPending?.content
+    if (managed.autoRetryTimer) clearTimeout(managed.autoRetryTimer)
+    managed.autoRetryTimer = undefined
+
+    const queuedMessageIds = new Set(
+      managed.messageQueue
+        .filter(entry => entry.isSourceContinuation)
+        .map(entry => entry.messageId)
+        .filter((id): id is string => !!id),
+    )
+    managed.messageQueue = managed.messageQueue.filter(entry => !entry.isSourceContinuation)
+    if (replayMessageId) queuedMessageIds.add(replayMessageId)
+    if (queuedMessageIds.size > 0) {
+      managed.messages = managed.messages.filter(message => !queuedMessageIds.has(message.id))
+    } else if (pendingContent) {
+      // A queue item can already have been popped for setImmediate replay. In
+      // that gap its id is no longer in messageQueue, so remove only the newest
+      // matching hidden turn instead of every historical turn with that text.
+      const pendingMessageIndex = managed.messages.findLastIndex(message => (
+        message.role === 'user'
+        && message.hidden
+        && message.content === pendingContent
+      ))
+      if (pendingMessageIndex >= 0) managed.messages.splice(pendingMessageIndex, 1)
+    }
+
+    managed.autoRetryPending = undefined
+    managed.pendingContinuationUsage = undefined
+  }
+
   async sendMessage(
     sessionId: string,
     message: string,
@@ -6305,6 +6337,21 @@ export class SessionManager implements ISessionManager {
     // create can invalidate this call (cancel bumps processingGeneration).
     const generationAtEntry = managed.processingGeneration
     this.setLastMessageClientId(sessionId, rpcContext?.callerClientId)
+
+    // The queue item may have been popped immediately before stopSwarm moved
+    // the node to a terminal state. Re-check at the actual replay boundary so
+    // that idle/setImmediate gap cannot resurrect a stopped Swarm.
+    if (
+      _isSourceContinuationReplay
+      && (
+        managed.stopRequested
+        || (!!managed.orchestrationStatus && managed.orchestrationStatus !== 'running')
+      )
+    ) {
+      this.discardPendingSourceContinuation(managed, existingMessageId)
+      this.persistSession(managed)
+      return
+    }
 
     // Source-activation auto-retry dedup (craft-agents-oss#804). When the server
     // has just scheduled or committed a "[<slug> activated]" retry, drop a matching
@@ -6596,6 +6643,18 @@ export class SessionManager implements ISessionManager {
       sessionLog.warn(`Auto-label evaluation failed for session ${sessionId}:`, e)
     }
 
+    const sourceReplayTerminated = _isSourceContinuationReplay && (
+      managed.stopRequested
+      || (!!managed.orchestrationStatus && managed.orchestrationStatus !== 'running')
+    )
+    if (sourceReplayTerminated) {
+      // Stop may land while this replay is awaiting message loading, plan
+      // cleanup, or its durability flush. Re-check at the final commit point
+      // before setProcessing so a stopped Swarm cannot restart itself.
+      this.discardPendingSourceContinuation(managed, userMessage.id)
+      this.persistSession(managed)
+      return
+    }
     if (managed.stopRequested || managed.processingGeneration !== generationAtEntry) {
       return
     }
@@ -7496,10 +7555,7 @@ export class SessionManager implements ISessionManager {
     // Stop is authoritative over an automatic source continuation. Clear both
     // the not-yet-fired timer and any usage accumulator waiting to cross that
     // logical boundary so the cancelled task cannot resurrect itself.
-    if (managed.autoRetryTimer) clearTimeout(managed.autoRetryTimer)
-    managed.autoRetryTimer = undefined
-    managed.autoRetryPending = undefined
-    managed.pendingContinuationUsage = undefined
+    this.discardPendingSourceContinuation(managed)
 
     // Composer items go back to the input. Send-now / steer follow-ups are
     // already in the transcript (`isQueued === false`) and must stay there.
@@ -7632,6 +7688,9 @@ export class SessionManager implements ISessionManager {
         await stopManagedTree(child, orchestrationId)
       }
 
+      // This also catches the idle gap after a source continuation queue item
+      // was popped but before its setImmediate replay starts.
+      this.discardPendingSourceContinuation(managed)
       this.updateOrchestrationMetadata(managed, {
         orchestrationStatus: 'stopped',
         orchestrationBlocker: 'Swarm stopped by user',

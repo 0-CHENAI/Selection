@@ -1574,6 +1574,47 @@ describe('SessionManager spawn_session wait/background', () => {
     await expect(sm.getTaskOutput(child.id)).resolves.toBe('Swarm stopped by user')
   })
 
+  it('clears an idle Swarm continuation that was popped before replay', async () => {
+    const root = buildParent('idle-replay-root')
+    const continuation = 'retry after source activation'
+    root.isProcessing = false
+    root.orchestrationId = 'orch-idle-replay'
+    root.orchestrationRootSessionId = root.id
+    root.orchestrationDepth = 0
+    root.orchestrationLifecycle = 'managed'
+    root.orchestrationStatus = 'running'
+    root.autoRetryPending = {
+      content: continuation,
+      deadlineMs: Date.now() + 2_000,
+      committed: true,
+    }
+    root.pendingContinuationUsage = {
+      inputTokens: 100,
+      outputTokens: 0,
+      totalTokens: 100,
+      cacheReadTokens: 0,
+      cacheCreationTokens: 0,
+      costUsd: 0,
+      modelCallCount: 1,
+      startedAt: Date.now(),
+    }
+    root.messages.push({
+      id: 'popped-source-continuation',
+      role: 'user',
+      content: continuation,
+      timestamp: Date.now(),
+      hidden: true,
+    })
+
+    const result = await internals(sm).stopSwarm(root.id)
+
+    expect(result.stoppedSessionIds).toEqual([root.id])
+    expect(internals(sm).sessions.get(root.id)?.orchestrationStatus).toBe('stopped')
+    expect(root.messages.some(message => message.content === continuation)).toBe(false)
+    expect(root.autoRetryPending).toBeUndefined()
+    expect(root.pendingContinuationUsage).toBeUndefined()
+  })
+
   it('emits parent task_completed for a detached worker without waking aggregation', async () => {
     const events: Array<{ type?: string; taskId?: string; status?: string }> = []
     sm.setEventSink((_channel, _target, event) => {

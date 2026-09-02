@@ -374,4 +374,105 @@ describe('source_activated auto-retry', () => {
     expect(managed.autoRetryPending).toBeUndefined()
     expect(managed.pendingContinuationUsage).toBeUndefined()
   })
+
+  it('terminal Swarm state rejects a continuation popped immediately before Stop', async () => {
+    const sessionId = 'stopped-during-replay-gap'
+    const managed = buildSession(sessionId)
+    const continuation = 'continue the task\n\n[github activated]'
+    const continuationId = 'popped-source-continuation'
+    managed.orchestrationId = 'orch-stopped'
+    managed.orchestrationStatus = 'stopped'
+    managed.autoRetryPending = {
+      content: continuation,
+      deadlineMs: Date.now() + 2_000,
+      committed: true,
+    }
+    managed.pendingContinuationUsage = {
+      inputTokens: 100,
+      outputTokens: 0,
+      totalTokens: 100,
+      cacheReadTokens: 0,
+      cacheCreationTokens: 0,
+      costUsd: 0,
+      modelCallCount: 1,
+      startedAt: Date.now(),
+    }
+    managed.messages.push({
+      id: continuationId,
+      role: 'user',
+      content: continuation,
+      timestamp: Date.now(),
+      hidden: true,
+    })
+
+    await sm.sendMessage(
+      sessionId,
+      continuation,
+      undefined,
+      undefined,
+      { hidden: true },
+      continuationId,
+      undefined,
+      undefined,
+      undefined,
+      true,
+    )
+
+    expect(managed.isProcessing).toBe(false)
+    expect(managed.messages.some(message => message.id === continuationId)).toBe(false)
+    expect(managed.autoRetryPending).toBeUndefined()
+    expect(managed.pendingContinuationUsage).toBeUndefined()
+  })
+
+  it('Stop during replay persistence prevents the final model start', async () => {
+    const sessionId = 'stopped-during-replay-flush'
+    const managed = buildSession(sessionId)
+    const continuation = 'continue the task\n\n[github activated]'
+    managed.orchestrationId = 'orch-stopped-during-flush'
+    managed.orchestrationRootSessionId = sessionId
+    managed.orchestrationDepth = 0
+    managed.orchestrationLifecycle = 'managed'
+    managed.orchestrationStatus = 'running'
+    managed.autoRetryPending = {
+      content: continuation,
+      deadlineMs: Date.now() + 2_000,
+      committed: true,
+    }
+
+    let markFlushEntered!: () => void
+    let releaseFlush!: () => void
+    const flushEntered = new Promise<void>(resolve => { markFlushEntered = resolve })
+    const flushReleased = new Promise<void>(resolve => { releaseFlush = resolve })
+    ;(sm as unknown as { flushSession: (_id: string) => Promise<void> }).flushSession = async () => {
+      markFlushEntered()
+      await flushReleased
+    }
+
+    const replay = sm.sendMessage(
+      sessionId,
+      continuation,
+      undefined,
+      undefined,
+      { hidden: true },
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      true,
+    )
+    await flushEntered
+    await (sm as unknown as {
+      stopSwarm: (id: string) => Promise<unknown>
+    }).stopSwarm(sessionId)
+    releaseFlush()
+    await replay
+
+    expect(managed.isProcessing).toBe(false)
+    expect(managed.messages.some(message => message.content === continuation)).toBe(false)
+    expect(managed.autoRetryPending).toBeUndefined()
+    expect(managed.pendingContinuationUsage).toBeUndefined()
+    expect((sm as unknown as {
+      sessions: Map<string, { orchestrationStatus?: string }>
+    }).sessions.get(sessionId)?.orchestrationStatus).toBe('stopped')
+  })
 })
