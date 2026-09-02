@@ -505,7 +505,6 @@ export async function clearSessionMessages(workspaceRootPath: string, sessionId:
  */
 export async function getOrCreateLatestSession(
   workspaceRootPath: string,
-  sharedProjectMemoryEnabled = false,
 ): Promise<SessionConfig> {
   const sessions = listActiveSessions(workspaceRootPath);
   if (sessions.length > 0 && sessions[0]) {
@@ -520,7 +519,7 @@ export async function getOrCreateLatestSession(
       sharedProjectMemoryEnabled: latest.sharedProjectMemoryEnabled,
     };
   }
-  return createSession(workspaceRootPath, { sharedProjectMemoryEnabled });
+  return createSession(workspaceRootPath, { sharedProjectMemoryEnabled: false });
 }
 
 // ============================================================
