@@ -1021,6 +1021,187 @@ describe('SessionManager spawn_session wait/background', () => {
     expect(parent.backgroundTaskRegistry.get('legacy-task')?.status).toBe('orphaned')
   })
 
+  it('emits parent task_completed as soon as one worker finishes, without waiting for siblings', async () => {
+    const events: Array<{ type?: string; sessionId?: string; taskId?: string; status?: string; summary?: string }> = []
+    sm.setEventSink((_channel, _target, event) => {
+      events.push(event as { type?: string; sessionId?: string; taskId?: string; status?: string; summary?: string })
+    })
+    const parent = buildParent()
+    parent.isProcessing = true
+    parent.orchestrationId = 'orch-chips'
+    parent.orchestrationRootSessionId = parent.id
+    parent.orchestrationDepth = 0
+    parent.orchestrationLifecycle = 'managed'
+    parent.orchestrationStatus = 'running'
+    for (const [id, name] of [['child-a', '调研 Hy4-preview'], ['child-b', '调研 GLM5.3']] as const) {
+      const child = createManagedSession({
+        id,
+        name,
+        parentSessionId: parent.id,
+        orchestrationId: 'orch-chips',
+        orchestrationRootSessionId: parent.id,
+        orchestrationDepth: 1,
+        orchestrationLifecycle: 'managed',
+        orchestrationStatus: 'running',
+      }, parent.workspace, { messagesLoaded: true })
+      internals(sm).sessions.set(id, child)
+      parent.backgroundTaskRegistry.set(id, {
+        taskId: id,
+        startTime: Date.now() - 5_000,
+        status: 'running',
+        source: 'spawn_session',
+        intent: name,
+        orchestrationId: 'orch-chips',
+        lifecycle: 'managed',
+      })
+    }
+
+    emitChild('complete', 'Hy4-preview sources', 'child-a')
+
+    const completed = events.filter((event) => event.type === 'task_completed')
+    expect(completed).toEqual([
+      expect.objectContaining({
+        type: 'task_completed',
+        sessionId: parent.id,
+        taskId: 'child-a',
+        status: 'completed',
+        summary: 'Hy4-preview sources',
+      }),
+    ])
+    expect(parent.backgroundTaskRegistry.get('child-a')).toMatchObject({
+      status: 'completed',
+      completedAt: expect.any(Number),
+    })
+    expect(parent.backgroundTaskRegistry.get('child-b')?.status).toBe('running')
+    expect(internals(sm).sessions.get('child-a')?.orchestrationStatus).toBe('completed')
+    expect(internals(sm).sessions.get('child-b')?.orchestrationStatus).toBe('running')
+    expect(parent.orchestrationStatus).toBe('running')
+    await expect(sm.getTaskOutput('child-a')).resolves.toBe('Hy4-preview sources')
+    await expect(sm.getTaskOutput('child-b')).resolves.toBeNull()
+  })
+
+  it('emits parent task_completed failed when a worker errors', async () => {
+    const events: Array<{ type?: string; taskId?: string; status?: string }> = []
+    sm.setEventSink((_channel, _target, event) => {
+      events.push(event as { type?: string; taskId?: string; status?: string })
+    })
+    const parent = buildParent()
+    parent.isProcessing = true
+    stubCreateChild()
+    await internals(sm).spawnSessionFromTool(parent, {
+      spawnReason: 'user-requested',
+      prompt: 'Find auth flows',
+      mode: 'background',
+    })
+    events.length = 0
+    emitChild('error', 'worker failed')
+    expect(events.filter((event) => event.type === 'task_completed')).toEqual([
+      expect.objectContaining({
+        type: 'task_completed',
+        taskId: 'child',
+        status: 'failed',
+      }),
+    ])
+    expect(parent.backgroundTaskRegistry.get('child')?.status).toBe('failed')
+  })
+
+  it('emits parent task_completed stopped when Swarm is stopped', async () => {
+    const events: Array<{ type?: string; taskId?: string; status?: string }> = []
+    sm.setEventSink((_channel, _target, event) => {
+      events.push(event as { type?: string; taskId?: string; status?: string })
+    })
+    const parent = buildParent()
+    parent.orchestrationId = 'orch-stop-chip'
+    parent.orchestrationRootSessionId = parent.id
+    parent.orchestrationDepth = 0
+    parent.orchestrationLifecycle = 'managed'
+    parent.orchestrationStatus = 'running'
+    const child = createManagedSession({
+      id: 'stop-child',
+      name: '调研 Kimi K3',
+      parentSessionId: parent.id,
+      orchestrationId: 'orch-stop-chip',
+      orchestrationRootSessionId: parent.id,
+      orchestrationDepth: 1,
+      orchestrationLifecycle: 'managed',
+      orchestrationStatus: 'running',
+    }, parent.workspace, { messagesLoaded: true })
+    child.isProcessing = true
+    internals(sm).sessions.set(child.id, child)
+    parent.backgroundTaskRegistry.set(child.id, {
+      taskId: child.id,
+      startTime: Date.now() - 2_000,
+      status: 'running',
+      source: 'spawn_session',
+      orchestrationId: 'orch-stop-chip',
+      lifecycle: 'managed',
+    })
+
+    await internals(sm).stopSwarm(parent.id)
+
+    expect(events.filter((event) => event.type === 'task_completed')).toEqual([
+      expect.objectContaining({
+        type: 'task_completed',
+        taskId: child.id,
+        status: 'stopped',
+      }),
+    ])
+    expect(parent.backgroundTaskRegistry.get(child.id)?.status).toBe('stopped')
+    expect(child.orchestrationStatus).toBe('stopped')
+    await expect(sm.getTaskOutput(child.id)).resolves.toBe('Swarm stopped by user')
+  })
+
+  it('emits parent task_completed for a detached worker without waking aggregation', async () => {
+    const events: Array<{ type?: string; taskId?: string; status?: string }> = []
+    sm.setEventSink((_channel, _target, event) => {
+      events.push(event as { type?: string; taskId?: string; status?: string })
+    })
+    const parent = buildParent()
+    parent.swarmEnabled = true
+    parent.isProcessing = false
+    stubCreateChild()
+    await internals(sm).spawnSessionFromTool(parent, {
+      prompt: 'Investigate code',
+      spawnReason: 'automatic',
+      qualification: completeQualification,
+      mode: 'background',
+      role: 'reviewer',
+      lifecycle: 'detached',
+    })
+    events.length = 0
+    sendCalls.length = 0
+    emitChild('complete', 'detached result')
+    expect(events.filter((event) => event.type === 'task_completed')).toEqual([
+      expect.objectContaining({
+        type: 'task_completed',
+        taskId: 'child',
+        status: 'completed',
+      }),
+    ])
+    expect(parent.backgroundTaskRegistry.get('child')?.status).toBe('completed')
+    expect(sendCalls.filter((call) => call.id === parent.id)).toEqual([])
+    await expect(sm.getTaskOutput('child')).resolves.toBe('detached result')
+  })
+
+  it('emits parent task_completed only once for a duplicate child completion', async () => {
+    const events: Array<{ type?: string; taskId?: string }> = []
+    sm.setEventSink((_channel, _target, event) => {
+      events.push(event as { type?: string; taskId?: string })
+    })
+    const parent = buildParent()
+    parent.isProcessing = false
+    stubCreateChild()
+    await internals(sm).spawnSessionFromTool(parent, {
+      spawnReason: 'user-requested',
+      prompt: 'Find auth flows',
+      mode: 'background',
+    })
+    events.length = 0
+    emitChild('complete', 'Found login.ts')
+    emitChild('complete', 'Found login.ts')
+    expect(events.filter((event) => event.type === 'task_completed')).toHaveLength(1)
+  })
+
   it('background child completion wakes an idle parent even when keep-alive is off', async () => {
     const parent = buildParent()
     parent.isProcessing = false
