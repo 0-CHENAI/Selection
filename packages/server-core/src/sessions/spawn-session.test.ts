@@ -1076,6 +1076,8 @@ describe('SessionManager spawn_session wait/background', () => {
     expect(internals(sm).sessions.get('child-a')?.orchestrationStatus).toBe('completed')
     expect(internals(sm).sessions.get('child-b')?.orchestrationStatus).toBe('running')
     expect(parent.orchestrationStatus).toBe('running')
+    await expect(sm.getTaskOutput('child-a')).resolves.toBe('Hy4-preview sources')
+    await expect(sm.getTaskOutput('child-b')).resolves.toBeNull()
   })
 
   it('emits parent task_completed failed when a worker errors', async () => {
@@ -1146,6 +1148,39 @@ describe('SessionManager spawn_session wait/background', () => {
     ])
     expect(parent.backgroundTaskRegistry.get(child.id)?.status).toBe('stopped')
     expect(child.orchestrationStatus).toBe('stopped')
+    await expect(sm.getTaskOutput(child.id)).resolves.toBe('Swarm stopped by user')
+  })
+
+  it('emits parent task_completed for a detached worker without waking aggregation', async () => {
+    const events: Array<{ type?: string; taskId?: string; status?: string }> = []
+    sm.setEventSink((_channel, _target, event) => {
+      events.push(event as { type?: string; taskId?: string; status?: string })
+    })
+    const parent = buildParent()
+    parent.swarmEnabled = true
+    parent.isProcessing = false
+    stubCreateChild()
+    await internals(sm).spawnSessionFromTool(parent, {
+      prompt: 'Investigate code',
+      spawnReason: 'automatic',
+      qualification: completeQualification,
+      mode: 'background',
+      role: 'reviewer',
+      lifecycle: 'detached',
+    })
+    events.length = 0
+    sendCalls.length = 0
+    emitChild('complete', 'detached result')
+    expect(events.filter((event) => event.type === 'task_completed')).toEqual([
+      expect.objectContaining({
+        type: 'task_completed',
+        taskId: 'child',
+        status: 'completed',
+      }),
+    ])
+    expect(parent.backgroundTaskRegistry.get('child')?.status).toBe('completed')
+    expect(sendCalls.filter((call) => call.id === parent.id)).toEqual([])
+    await expect(sm.getTaskOutput('child')).resolves.toBe('detached result')
   })
 
   it('emits parent task_completed only once for a duplicate child completion', async () => {

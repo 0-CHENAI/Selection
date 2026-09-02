@@ -7560,14 +7560,12 @@ export class SessionManager implements ISessionManager {
       })
       this.swarmTurnCompletions.delete(managed.id)
       if (managed.parentSessionId) {
-        const parent = this.sessions.get(managed.parentSessionId)
-        const entry = parent?.backgroundTaskRegistry.get(managed.id)
-        if (parent && entry?.source === 'spawn_session' && entry.status === 'running') {
-          entry.status = 'stopped'
-          entry.completedAt = Date.now()
-          entry.blocker = 'Swarm stopped by user'
-          this.emitSpawnTaskCompleted(parent, managed.id, 'stopped', entry.blocker)
-        }
+        this.finalizeSpawnBackgroundTask(
+          this.sessions.get(managed.parentSessionId),
+          managed.id,
+          'stopped',
+          'Swarm stopped by user',
+        )
       }
       if (managed.isProcessing) await this.cancelProcessing(managed.id, true)
       stoppedSessionIds.push(managed.id)
@@ -9033,15 +9031,34 @@ export class SessionManager implements ISessionManager {
   }
 
   /**
-   * Tell the parent-session renderer chip to leave `running`. Registry updates
-   * alone are not enough: ActiveTasksBar only freezes elapsed on `task_completed`.
+   * Mark a spawn_session registry entry terminal, persist output for View
+   * Output, and tell the parent-session renderer chip to leave `running`.
+   * Registry updates alone are not enough: ActiveTasksBar only freezes elapsed
+   * on `task_completed`.
    */
-  private emitSpawnTaskCompleted(
-    parent: ManagedSession,
+  private finalizeSpawnBackgroundTask(
+    parent: ManagedSession | undefined,
     taskId: string,
     status: 'completed' | 'failed' | 'stopped',
     summary?: string,
-  ): void {
+  ): boolean {
+    const running = parent?.backgroundTaskRegistry.get(taskId)
+    if (!parent || !running || running.source !== 'spawn_session' || running.status !== 'running') {
+      return false
+    }
+    running.status = status
+    running.completedAt = Date.now()
+    if (status !== 'completed') {
+      running.blocker = summary
+        ?? `Spawned session subtree ended with ${status}`
+    }
+    parent.backgroundTaskOutputs.set(taskId, {
+      outputFile: '',
+      summary: summary ?? '',
+      status,
+      completedAt: running.completedAt,
+    })
+    this.taskOutputIndex.set(taskId, parent.id)
     this.sendEvent({
       type: 'task_completed',
       sessionId: parent.id,
@@ -9049,6 +9066,7 @@ export class SessionManager implements ISessionManager {
       status,
       ...(summary ? { summary } : {}),
     }, parent.workspace.id)
+    return true
   }
 
   /**
@@ -9068,9 +9086,6 @@ export class SessionManager implements ISessionManager {
     if (!parentId) return
     const parent = this.sessions.get(parentId)
     if (!parent) return
-    const running = parent.backgroundTaskRegistry.get(child.id)
-    if (!running || running.source !== 'spawn_session' || running.status !== 'running') return
-
     const completion = this.swarmTurnCompletions.get(child.id)
     // Some providers finish a turn without attaching finalText to the
     // completion event even though the final assistant message was persisted.
@@ -9078,30 +9093,22 @@ export class SessionManager implements ISessionManager {
     // automatically; falling back to the in-process session transcript keeps
     // aggregation independent from cross-session messaging permissions.
     const finalText = completion?.finalText ?? this.getSessionFinalText(child.id)
-    running.status = child.orchestrationStatus === 'completed'
+    const status: 'completed' | 'failed' | 'stopped' = child.orchestrationStatus === 'completed'
       ? 'completed'
       : child.orchestrationStatus === 'stopped'
         ? 'stopped'
         : 'failed'
-    running.completedAt = Date.now()
-    if (running.status !== 'completed') {
-      running.blocker = child.orchestrationBlocker
+    const summary = status === 'completed'
+      ? finalText
+      : child.orchestrationBlocker
         ?? finalText
         ?? `Spawned session subtree ended with ${child.orchestrationStatus}`
-    }
-    parent.backgroundTaskOutputs.set(child.id, {
-      outputFile: '',
-      summary: finalText ?? '',
-      status: running.status,
-      completedAt: running.completedAt,
-    })
-    this.taskOutputIndex.set(child.id, parent.id)
-    this.emitSpawnTaskCompleted(parent, child.id, running.status, finalText ?? running.blocker)
+    if (!this.finalizeSpawnBackgroundTask(parent, child.id, status, summary)) return
     this.emitSessionAgentEvent(parent, 'SubagentStop', {
       hook_event_name: 'SubagentStop',
       agent_id: child.id,
       agent_type: 'spawn_session',
-      ...(running.status !== 'completed' && running.blocker ? { error: running.blocker } : {}),
+      ...(status !== 'completed' && summary ? { error: summary } : {}),
     })
     if (child.orchestrationLifecycle === 'detached') return
 
@@ -9146,6 +9153,9 @@ export class SessionManager implements ISessionManager {
     const child = this.sessions.get(evt.sessionId)
     if (!child?.orchestrationId) return
     const recorded = this.recordSwarmCompletion(evt)
+    // A duplicate or already-terminal completion still needs the parent chip
+    // updated if registry/UI never left `running`. Skip only while the child
+    // itself is still a live Swarm node.
     if (!recorded && child.orchestrationStatus === 'running') return
     this.reportManagedChildTerminal(child)
   }
