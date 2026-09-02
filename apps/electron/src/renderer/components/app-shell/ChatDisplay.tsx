@@ -2092,10 +2092,6 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
             labels={[]}
             sessionStatuses={[]}
             currentSessionStatus={session.sessionStatus || 'todo'}
-            showSharedProjectMemory={
-              !!session.projectId &&
-              (session.sharedProjectMemoryEnabled === undefined || session.sharedProjectMemoryEnabled === true)
-            }
             swarmEnabled={swarmEnabled}
             onSwarmEnabledChange={onSwarmEnabledChange}
             swarmToggleDisabled={swarmToggleDisabled}

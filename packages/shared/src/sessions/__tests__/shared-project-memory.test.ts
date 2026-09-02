@@ -21,9 +21,9 @@ describe('session persistence: shared project memory', () => {
     expect(picked.sharedProjectMemoryEnabled).toBe(false)
   })
 
-  it('treats missing legacy fields as shared while respecting explicit values', () => {
-    expect(isSharedProjectMemoryEnabled(undefined)).toBe(true)
-    expect(isSharedProjectMemoryEnabled({})).toBe(true)
+  it('treats missing or non-true values as isolated', () => {
+    expect(isSharedProjectMemoryEnabled(undefined)).toBe(false)
+    expect(isSharedProjectMemoryEnabled({})).toBe(false)
     expect(isSharedProjectMemoryEnabled({ sharedProjectMemoryEnabled: true })).toBe(true)
     expect(isSharedProjectMemoryEnabled({ sharedProjectMemoryEnabled: false })).toBe(false)
     expect(isSharedProjectMemoryEnabled({ sharedProjectMemoryEnabled: 'true' } as any)).toBe(false)

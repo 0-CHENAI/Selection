@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next"
 import { cn } from '@/lib/utils'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { SlashCommandMenu, DEFAULT_SLASH_COMMAND_GROUPS, type SlashCommandId } from '@/components/ui/slash-command-menu'
-import { BrainCircuit, ChevronDown, Info } from 'lucide-react'
+import { ChevronDown, Info } from 'lucide-react'
 import { PERMISSION_MODE_CONFIG, type PermissionMode } from '@craft-agent/shared/agent/modes'
 import { ActiveTasksBar, type BackgroundTask } from './ActiveTasksBar'
 import type { TerminalOverlayData } from './TaskActionMenu'
@@ -77,8 +77,6 @@ export interface ActiveOptionBadgesProps {
   sessionStatuses?: SessionStatus[]
   /** Current session state ID */
   currentSessionStatus?: string
-  /** Show that this project-bound session shares the project's persistent memory. */
-  showSharedProjectMemory?: boolean
   /** Callback when state changes */
   onSessionStatusChange?: (stateId: string) => void
   /** Per-session opt-in for autonomous Swarm delegation. */
@@ -113,7 +111,6 @@ export function ActiveOptionBadges({
   onLabelsChange,
   autoOpenLabelId,
   onAutoOpenConsumed,
-  showSharedProjectMemory = false,
   swarmEnabled = false,
   onSwarmEnabledChange,
   swarmToggleDisabled = false,
@@ -150,7 +147,7 @@ export function ActiveOptionBadges({
   const stackRef = useDynamicStack({ gap: 8, minVisible: 20, reservedStart: 0 })
 
   // Only render if badges or tasks are active
-  if (!permissionMode && tasks.length === 0 && !onSwarmEnabledChange && !hasStackContent && !showSharedProjectMemory) {
+  if (!permissionMode && tasks.length === 0 && !onSwarmEnabledChange && !hasStackContent) {
     return null
   }
 
@@ -196,15 +193,6 @@ export function ActiveOptionBadges({
               running={swarmRunning}
             />
           </div>
-        )}
-
-        {showSharedProjectMemory && (
-          <MetadataBadge
-            label={t('chat.sharedProjectMemory')}
-            icon={<BrainCircuit className="h-3.5 w-3.5" />}
-            shadow="minimal"
-            tabIndex={-1}
-          />
         )}
 
         {/* Stacking container for label badges (left side).

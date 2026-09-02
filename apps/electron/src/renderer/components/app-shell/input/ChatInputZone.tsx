@@ -27,7 +27,6 @@ interface ChatInputZoneProps {
   onLabelsChange?: (labels: string[]) => void
   sessionStatuses?: SessionStatus[]
   currentSessionStatus?: string
-  showSharedProjectMemory?: boolean
   onSessionStatusChange?: (stateId: string) => void
   swarmEnabled?: boolean
   onSwarmEnabledChange?: (enabled: boolean) => void | Promise<void>
@@ -54,7 +53,6 @@ export function ChatInputZone({
   onLabelsChange,
   sessionStatuses = [],
   currentSessionStatus = 'todo',
-  showSharedProjectMemory = false,
   onSessionStatusChange,
   swarmEnabled = false,
   onSwarmEnabledChange,
@@ -113,7 +111,6 @@ export function ChatInputZone({
           onAutoOpenConsumed={() => setAutoOpenLabelId(null)}
           sessionStatuses={sessionStatuses}
           currentSessionStatus={currentSessionStatus}
-          showSharedProjectMemory={showSharedProjectMemory}
           onSessionStatusChange={onSessionStatusChange}
           swarmEnabled={swarmEnabled}
           onSwarmEnabledChange={onSwarmEnabledChange}

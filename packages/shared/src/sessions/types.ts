@@ -394,7 +394,7 @@ export interface SessionHeader extends SwarmSessionMetadata {
   };
   /** Workspace-scoped project id this session belongs to (undefined = unbound). */
   projectId?: string;
-  /** Per-session shared project memory snapshot; missing means legacy shared. */
+  /** Per-session shared project memory snapshot; missing or false means isolated. */
   sharedProjectMemoryEnabled?: boolean;
   /** Parent session id — when set, this session is a subtask of the parent (undefined = top-level task). */
   parentSessionId?: string;
@@ -492,7 +492,7 @@ export interface SessionMetadata extends SwarmSessionMetadata {
   branchFromMessageId?: string;
   /** Workspace-scoped project id this session belongs to (undefined = unbound). */
   projectId?: string;
-  /** Per-session shared project memory snapshot; missing means legacy shared. */
+  /** Per-session shared project memory snapshot; missing or false means isolated. */
   sharedProjectMemoryEnabled?: boolean;
   /** Parent session id — when set, this session is a subtask of the parent (undefined = top-level task). */
   parentSessionId?: string;
@@ -510,13 +510,11 @@ export interface SessionMetadata extends SwarmSessionMetadata {
   taskDraft?: boolean;
 }
 
-/** Resolve the persisted memory mode while preserving pre-migration behavior. */
+/** Resolve the persisted memory mode. Missing or non-true values are isolated. */
 export function isSharedProjectMemoryEnabled(
   session: Pick<SessionConfig, 'sharedProjectMemoryEnabled'> | null | undefined,
 ): boolean {
   const value = (session as { sharedProjectMemoryEnabled?: unknown } | null | undefined)
     ?.sharedProjectMemoryEnabled;
-  // Only a genuinely missing legacy field keeps the old shared behavior.
-  // Corrupt/imported non-boolean values fail closed to isolated.
-  return value === undefined ? true : value === true;
+  return value === true;
 }
