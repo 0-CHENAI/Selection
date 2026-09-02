@@ -90,6 +90,7 @@ import { resolveSearchProvider } from './tools/search/resolve-provider.ts';
 import { createSearchTool } from './tools/search/create-search-tool.ts';
 import { allowCraftMetadataProperties, stripCraftMetadata } from './craft-metadata-schema.ts';
 import { createRecoveringArgumentPreparer } from './tool-argument-recovery.ts';
+import { isPrefetchableTool } from './prefetchable-tools.ts';
 import { applySystemPromptOverride } from './system-prompt-override.ts';
 import { installContextBudgetGuard } from './context-budget-stream.ts';
 import { resolvePiSessionPaths } from './session-paths.ts';
@@ -348,17 +349,9 @@ const pendingSessionToolCalls = new Map<string, { toolName: string; arguments: R
 // Proxy tool definitions from main process
 let proxyToolDefs: ProxyToolDef[] = [];
 
-// Speculative prefetch for read-only tools (enables parallel execution despite Pi SDK's sequential loop).
-// When the LLM emits multiple call_llm tool calls in a single message, we fire all requests
-// to the main process in parallel on message_end (before executeToolCalls iterates sequentially).
-// Each proxy tool's execute() then hits the cache instead of sending a new request.
-const PREFETCHABLE_TOOLS = new Set(['call_llm']);
+// Speculative prefetch so Pi's sequential execute() still overlaps sibling
+// call_llm / spawn_session calls from the same assistant message.
 const prefetchCache = new Map<string, Promise<ProxyToolExecutionResult>>();
-
-function isPrefetchableTool(toolName: string): boolean {
-  const stripped = toolName.replace(/^(mcp__session__|session__)/, '');
-  return PREFETCHABLE_TOOLS.has(stripped);
-}
 
 // Flag: proxy tools changed since last session creation — session needs recreation
 let toolsChanged = false;
@@ -1030,9 +1023,8 @@ function buildProxyTools(): ToolDefinition<any, any>[] {
         toolCallId: string,
         params: any,
       ): Promise<AgentToolResult<any>> => {
-        // Check speculative prefetch cache first (parallel call_llm optimization).
-        // If this tool was prefetched on message_end, the request is already in-flight —
-        // just await the result instead of sending a duplicate request.
+        // Check speculative prefetch cache first. If this tool was prefetched
+        // on message_end, await that in-flight request instead of sending another.
         const prefetched = prefetchCache.get(toolCallId);
         if (prefetched) {
           prefetchCache.delete(toolCallId);
@@ -1408,9 +1400,8 @@ function handleSessionEvent(event: AgentSessionEvent): void {
         });
       }
 
-      // Speculative prefetch: if the assistant message contains 2+ prefetchable tool calls,
-      // fire all requests to the main process in parallel NOW, before executeToolCalls
-      // iterates sequentially. Each proxy tool's execute() will hit the cache.
+      // If the assistant message contains 2+ prefetchable tool calls, fire them
+      // to the main process now so sequential execute() still overlaps.
       const content = (msg as { content?: Array<{ type: string; id?: string; name?: string; arguments?: unknown }> }).content;
       if (Array.isArray(content)) {
         const prefetchableToolCalls = content.filter(

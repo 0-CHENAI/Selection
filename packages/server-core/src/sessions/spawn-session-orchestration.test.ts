@@ -2,6 +2,8 @@ import { describe, expect, it } from 'bun:test'
 import {
   assessSpawnQualification,
   assessSwarmSpawnLimits,
+  formatSpawnQualificationFailure,
+  synthesizeFanOutQualification,
   buildBackgroundTaskNudge,
   countLiveSwarmChildren,
   countLiveSwarmNodes,
@@ -42,6 +44,10 @@ describe('spawn-session orchestration helpers', () => {
       eligible: false,
       reasons: ['missing qualification contract'],
     })
+    expect(formatSpawnQualificationFailure(['missing qualification contract'])).toContain('qualification')
+    expect(formatSpawnQualificationFailure(['missing qualification contract'])).toContain('parallelBenefit')
+    expect(formatSpawnQualificationFailure(['missing qualification contract'])).not.toContain('spawn_session failed')
+    expect(formatSpawnQualificationFailure(['missing qualification contract'], () => 'localized')).toBe('localized')
     expect(assessSpawnQualification({
       tracks: [{
         name: 'code',
@@ -61,6 +67,27 @@ describe('spawn-session orchestration helpers', () => {
       parallelBenefit: 'The tracks do not depend on each other.',
       finalAggregation: 'The coordinator merges findings and verifies conflicts.',
     })).toEqual({ eligible: true, reasons: [] })
+  })
+
+  it('synthesizes a qualification contract from distinct parallel fan-out tracks', () => {
+    expect(synthesizeFanOutQualification([
+      { name: '调研 Hy4-preview', prompt: 'Research Hy4-preview.' },
+    ])).toBeUndefined()
+    expect(synthesizeFanOutQualification([
+      { name: '调研 Hy4-preview 带任务契约', prompt: 'Research Hy4-preview.' },
+      { name: '调研 Hy4-preview 带任务契约', prompt: 'Research Hy4-preview again.' },
+    ])).toBeUndefined()
+    const synthesized = synthesizeFanOutQualification([
+      { name: '调研 Hy4-preview', prompt: 'Research Hy4-preview capabilities.' },
+      { name: '调研 GLM-5.3', prompt: 'Research GLM-5.3 capabilities.' },
+      { name: '调研 Kimi K3', prompt: 'Research Kimi K3 capabilities.' },
+    ])
+    expect(assessSpawnQualification(synthesized).eligible).toBe(true)
+    expect(synthesized?.tracks.map(track => track.name)).toEqual([
+      '调研 Hy4-preview',
+      '调研 GLM-5.3',
+      '调研 Kimi K3',
+    ])
   })
 
   it('enforces direct concurrency, depth, and whole-swarm live-node limits', () => {

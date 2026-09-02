@@ -1655,6 +1655,8 @@
   "swarm.roleCoordinator": "コーディネーター",
   "swarm.roleReviewer": "レビュー担当",
   "swarm.roleWorker": "Worker",
+  "swarm.spawn.missingQualificationContract": "Swarmワーカーを作成できません：構造化された並列契約がありません。spawn_session の qualification に tracks（独立した作業トラックを2つ以上）、parallelBenefit、finalAggregation を渡してください。名前やプロンプトに「契約」と書いただけでは不十分です。",
+  "swarm.spawn.qualificationFailed": "Swarmワーカーを作成できません：{{reasons}}。spawn_session に完全な qualification オブジェクトを渡してください。名前やプロンプトの文言では不十分です。",
   "swarm.statusCompleted": "Swarm完了",
   "swarm.statusNeedToCheck": "確認が必要",
   "swarm.statusRunning": "Swarm実行中",

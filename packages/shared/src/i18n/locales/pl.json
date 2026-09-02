@@ -1655,6 +1655,8 @@
   "swarm.roleCoordinator": "Koordynator",
   "swarm.roleReviewer": "Recenzent",
   "swarm.roleWorker": "Worker",
+  "swarm.spawn.missingQualificationContract": "Nie można utworzyć workerów Swarm: brakuje strukturalnej umowy równoległej. Przekaż qualification w spawn_session z tracks (co najmniej dwa niezależne tory), parallelBenefit i finalAggregation. Wpisanie zwrotu o umowie w nazwie lub promptcie się nie liczy.",
+  "swarm.spawn.qualificationFailed": "Nie można utworzyć workerów Swarm: {{reasons}}. Przekaż kompletny obiekt qualification w spawn_session; zwrot w nazwie lub promptcie się nie liczy.",
   "swarm.statusCompleted": "Swarm ukończony",
   "swarm.statusNeedToCheck": "wymaga sprawdzenia",
   "swarm.statusRunning": "Swarm działa",

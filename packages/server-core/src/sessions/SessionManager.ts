@@ -95,11 +95,13 @@ import {
   FIXED_SWARM_TOKEN_BUDGET,
   MAX_SWARM_CHILDREN_PER_PARENT,
   countRunningSpawnChildren,
+  formatSpawnQualificationFailure,
   recoverPersistedSwarmStatus,
   resolveInheritedSwarmEnabled,
   shouldDeferSpawnWake,
   shouldOrphanBackgroundTask,
   shouldWakeOnTaskCompleted,
+  synthesizeFanOutQualification,
   waitForChildSessionCompletion,
 } from './spawn-session-orchestration.ts'
 import { ConfigWatcher, type ConfigWatcherCallbacks } from '@craft-agent/shared/config'
@@ -1439,6 +1441,14 @@ export class SessionManager implements ISessionManager {
     reason: SpawnSessionReason
   }>> = new Map()
   /**
+   * Concurrent spawn_session calls in one turn register here before the first
+   * await so a missing qualification object can be recovered from the fan-out.
+   */
+  private spawnFanOutBatches: Map<string, {
+    tracks: Array<{ name?: string; prompt: string }>
+    resolvers: Array<(tracks: Array<{ name?: string; prompt: string }>) => void>
+  }> = new Map()
+  /**
    * WS2 keep-alive flag (default ON, opt-out via `CRAFT_KEEP_BG_AGENTS_ALIVE=0`).
    * When true, a persistent streaming query keeps the subprocess alive across
    * turns so background sub-agents survive, and orphaning is suppressed. When
@@ -1497,6 +1507,7 @@ export class SessionManager implements ISessionManager {
       // Turn capabilities are intentionally memory-only and expire as soon as
       // the turn stops. A later turn must receive newly generation-bound ones.
       this.spawnQualificationCredentials.delete(managed.id)
+      this.flushSpawnFanOutBatch(managed.id)
       sessionRuntimeHooks.onSessionStopped()
     }
   }
@@ -8517,6 +8528,35 @@ export class SessionManager implements ISessionManager {
     if (credentials?.size === 0) this.spawnQualificationCredentials.delete(managed.id)
   }
 
+  private flushSpawnFanOutBatch(parentSessionId: string): void {
+    const batch = this.spawnFanOutBatches.get(parentSessionId)
+    if (!batch) return
+    this.spawnFanOutBatches.delete(parentSessionId)
+    const snapshot = batch.tracks.slice()
+    for (const resolveWaiter of batch.resolvers) resolveWaiter(snapshot)
+  }
+
+  /**
+   * Register this spawn in the parent's in-flight fan-out, then wait one
+   * macrotask so sibling parallel calls can join the same batch.
+   */
+  private collectFanOutSpawnTracks(
+    parentSessionId: string,
+    track: { name?: string; prompt: string },
+  ): Promise<Array<{ name?: string; prompt: string }>> {
+    let batch = this.spawnFanOutBatches.get(parentSessionId)
+    if (!batch) {
+      batch = { tracks: [], resolvers: [] }
+      this.spawnFanOutBatches.set(parentSessionId, batch)
+      setImmediate(() => this.flushSpawnFanOutBatch(parentSessionId))
+    }
+    const active = batch
+    active.tracks.push(track)
+    return new Promise((resolve) => {
+      active.resolvers.push(resolve)
+    })
+  }
+
   private reserveSwarmSpawn(parentSessionId: string, orchestrationId: string): () => void {
     this.pendingSwarmChildren.set(
       parentSessionId,
@@ -8710,9 +8750,19 @@ export class SessionManager implements ISessionManager {
       )
     }
     if (effectiveSpawnReason === 'automatic') {
-      const qualification = assessSpawnQualification(request.qualification)
-      if (!qualification.eligible) {
-        const blocker = `Swarm qualification failed: ${qualification.reasons.join('; ')}`
+      let qualification = request.qualification
+      if (!qualification) {
+        const fanOut = await this.collectFanOutSpawnTracks(managed.id, {
+          name: request.name,
+          prompt: request.prompt,
+        })
+        qualification = synthesizeFanOutQualification(fanOut)
+      }
+      const assessment = assessSpawnQualification(qualification)
+      if (!assessment.eligible) {
+        const blocker = formatSpawnQualificationFailure(assessment.reasons, (key, vars) => (
+          i18n.isInitialized ? String(i18n.t(key, vars)) : key
+        ))
         this.updateOrchestrationMetadata(managed, { orchestrationBlocker: blocker })
         throw new Error(blocker)
       }
@@ -8766,8 +8816,18 @@ export class SessionManager implements ISessionManager {
     })
     if (!limit.allowed) throw new Error(limit.error)
 
-    // Consume only after the request is fully authorized and within limits, but
-    // before the first await. Concurrent/replayed tool calls cannot share it.
+    // Ignore the peeked token: parallel callers all receive the same one.
+    qualificationCredential = this.resolveSpawnQualificationCredential(
+      managed,
+      effectiveSpawnReason,
+    )
+    if (!qualificationCredential) {
+      throw new Error(
+        requestedSpawnReason === 'user-requested'
+          ? 'No current-turn user delegation authorization is available'
+          : 'No current-turn Swarm qualification credential is available',
+      )
+    }
     this.consumeSpawnQualificationCredential(managed, qualificationCredential)
     const releaseReservation = this.reserveSwarmSpawn(managed.id, orchestrationId)
     let session: Session

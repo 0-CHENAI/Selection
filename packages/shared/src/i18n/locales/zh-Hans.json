@@ -1655,6 +1655,8 @@
   "swarm.roleCoordinator": "协调器",
   "swarm.roleReviewer": "复核者",
   "swarm.roleWorker": "Worker",
+  "swarm.spawn.missingQualificationContract": "无法创建 Swarm 子代理：缺少结构化并行契约。请在 spawn_session 的 qualification 参数中提供 tracks（至少两条独立工作轨）、parallelBenefit 和 finalAggregation。把「任务契约」写进名称或提示词不算数。",
+  "swarm.spawn.qualificationFailed": "无法创建 Swarm 子代理：{{reasons}}。请在 spawn_session 传入完整的 qualification 对象；把说明写进名称或提示词不算数。",
   "swarm.statusCompleted": "Swarm 已完成",
   "swarm.statusNeedToCheck": "need-to-check",
   "swarm.statusRunning": "Swarm 运行中",

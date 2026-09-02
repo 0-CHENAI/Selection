@@ -41,6 +41,28 @@ function errorResponse(message: string): ToolResult {
   };
 }
 
+const SPAWN_QUALIFICATION_FAILURE_PREFIXES = [
+  'Unable to create Swarm workers',
+  '无法创建 Swarm 子代理',
+  'Swarm-Worker konnten nicht erstellt werden',
+  'No se pudieron crear workers de Swarm',
+  'Swarmワーカーを作成できません',
+  'Nem hozhatók létre Swarm workerek',
+  'Nie można utworzyć workerów Swarm',
+]
+
+/**
+ * Avoid nesting "spawn_session failed:" on messages that are already a complete
+ * user-facing spawn error (especially localized qualification failures).
+ */
+export function wrapSpawnSessionToolError(message: string): string {
+  const trimmed = message.trim()
+  if (!trimmed) return 'spawn_session failed'
+  if (/^spawn_session failed:/i.test(trimmed) || /^Error:/i.test(trimmed)) return trimmed
+  if (SPAWN_QUALIFICATION_FAILURE_PREFIXES.some(prefix => trimmed.startsWith(prefix))) return trimmed
+  return `spawn_session failed: ${trimmed}`
+}
+
 export interface SpawnSessionToolOptions {
   sessionId: string;
   /**
@@ -66,7 +88,7 @@ export function createSpawnSessionTool(options: SpawnSessionToolOptions) {
         };
       } catch (error) {
         if (error instanceof Error) {
-          return errorResponse(`spawn_session failed: ${error.message}`);
+          return errorResponse(wrapSpawnSessionToolError(error.message));
         }
         throw error;
       }

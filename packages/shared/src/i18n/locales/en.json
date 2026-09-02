@@ -1655,6 +1655,8 @@
   "swarm.roleCoordinator": "Coordinator",
   "swarm.roleReviewer": "Reviewer",
   "swarm.roleWorker": "Worker",
+  "swarm.spawn.missingQualificationContract": "Unable to create Swarm workers: missing structured parallel contract. Pass qualification on spawn_session with tracks (at least two independent tracks), parallelBenefit, and finalAggregation. Writing a contract phrase into the name or prompt does not count.",
+  "swarm.spawn.qualificationFailed": "Unable to create Swarm workers: {{reasons}}. Pass a complete qualification object on spawn_session; a phrase in the name or prompt does not count.",
   "swarm.statusCompleted": "Swarm completed",
   "swarm.statusNeedToCheck": "need-to-check",
   "swarm.statusRunning": "Swarm running",

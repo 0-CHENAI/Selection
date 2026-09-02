@@ -90,13 +90,17 @@ describe('SessionManager spawn_session wait/background', () => {
     return managed
   }
 
-  function stubCreateChild(childId = 'child') {
+  function stubCreateChild(childId: string | (() => string) = 'child') {
     internals(sm).createSession = async (_workspaceId, options) => {
+      // Production createSession awaits I/O before inserting the child. Yield
+      // first so reservations are not double-counted against already-live children.
+      await Promise.resolve()
+      const id = typeof childId === 'function' ? childId() : childId
       const parent = internals(sm).sessions.get('parent')!
       const child = createManagedSession(
         {
-          id: childId,
-          name: 'Research auth',
+          id,
+          name: options?.name ?? 'Research auth',
           hidden: options?.hidden,
           projectId: options?.projectId,
           parentSessionId: parent.id,
@@ -112,10 +116,10 @@ describe('SessionManager spawn_session wait/background', () => {
         { messagesLoaded: true },
       )
       child.isProcessing = true
-      internals(sm).sessions.set(childId, child)
+      internals(sm).sessions.set(id, child)
       return {
-        id: childId,
-        name: child.name ?? childId,
+        id,
+        name: child.name ?? id,
         llmConnection: parent.llmConnection,
         model: parent.model,
         hidden: child.hidden,
@@ -204,7 +208,7 @@ describe('SessionManager spawn_session wait/background', () => {
     await expect(internals(sm).spawnSessionFromTool(parent, {
       prompt: 'Split this task',
       spawnReason: 'automatic',
-    })).rejects.toThrow('Swarm qualification failed')
+    })).rejects.toThrow(/Unable to create Swarm workers|qualification/)
     expect(internals(sm).sessions.has('child')).toBe(false)
   })
 
@@ -262,7 +266,7 @@ describe('SessionManager spawn_session wait/background', () => {
     await expect(api.spawnSessionFromTool(parent, {
       prompt: 'An incomplete split must still fail closed',
       spawnReason: 'user-requested',
-    })).rejects.toThrow('Swarm qualification failed')
+    })).rejects.toThrow(/Unable to create Swarm workers|qualification/)
     expect(api.resolveSpawnQualificationCredential(parent, 'automatic', credential)).toBe(credential)
   })
 
@@ -314,7 +318,7 @@ describe('SessionManager spawn_session wait/background', () => {
       prompt: 'Incomplete split',
       spawnReason: 'automatic',
       qualificationCredential: credential,
-    })).rejects.toThrow('Swarm qualification failed')
+    })).rejects.toThrow(/Unable to create Swarm workers|qualification/)
     expect(api.resolveSpawnQualificationCredential(parent, 'automatic', credential)).toBe(credential)
 
     await expect(api.spawnSessionFromTool(parent, {
@@ -324,6 +328,55 @@ describe('SessionManager spawn_session wait/background', () => {
       qualification: completeQualification,
     })).resolves.toMatchObject({ status: 'started', sessionId: 'child' })
     expect(api.resolveSpawnQualificationCredential(parent, 'automatic', credential)).toBeUndefined()
+  })
+
+  it('synthesizes qualification from three parallel unnamed-qualification workers', async () => {
+    const parent = buildParent()
+    parent.swarmEnabled = true
+    const api = internals(sm)
+    api.spawnQualificationCredentials.delete(parent.id)
+    api.prepareSpawnQualificationCredentials(parent, false)
+    const peeked = api.resolveSpawnQualificationCredential(parent, 'automatic')
+    expect(peeked).toBeString()
+    let n = 0
+    stubCreateChild(() => `child-${++n}`)
+
+    const results = await Promise.all([
+      api.spawnSessionFromTool(parent, {
+        prompt: 'Research Hy4-preview capabilities and citations.',
+        name: '调研 Hy4-preview',
+        spawnReason: 'automatic',
+        qualificationCredential: peeked,
+      }),
+      api.spawnSessionFromTool(parent, {
+        prompt: 'Research GLM-5.3 capabilities and citations.',
+        name: '调研 GLM-5.3',
+        spawnReason: 'automatic',
+        qualificationCredential: peeked,
+      }),
+      api.spawnSessionFromTool(parent, {
+        prompt: 'Research Kimi K3 capabilities and citations.',
+        name: '调研 Kimi K3',
+        spawnReason: 'automatic',
+        qualificationCredential: peeked,
+      }),
+    ])
+
+    expect(results.map(result => result.status)).toEqual(['started', 'started', 'started'])
+    expect(new Set(results.map(result => result.sessionId)).size).toBe(3)
+    expect(api.resolveSpawnQualificationCredential(parent, 'automatic')).toBeUndefined()
+  })
+
+  it('does not treat a contract phrase in the name as a qualification object', async () => {
+    const parent = buildParent()
+    parent.swarmEnabled = true
+    stubCreateChild()
+    await expect(internals(sm).spawnSessionFromTool(parent, {
+      prompt: 'Research Hy4-preview capabilities.',
+      name: '调研 Hy4-preview 带任务契约',
+      spawnReason: 'automatic',
+    })).rejects.toThrow(/qualification/)
+    expect(internals(sm).sessions.has('child')).toBe(false)
   })
 
   it('persists orchestration identity, hides workers, and inherits project ownership', async () => {

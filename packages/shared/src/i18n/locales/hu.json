@@ -1655,6 +1655,8 @@
   "swarm.roleCoordinator": "Koordinátor",
   "swarm.roleReviewer": "Ellenőrző",
   "swarm.roleWorker": "Worker",
+  "swarm.spawn.missingQualificationContract": "Nem hozhatók létre Swarm workerek: hiányzik a strukturált párhuzamos szerződés. A spawn_session hívásban adja meg a qualification objektumot tracks (legalább két független sáv), parallelBenefit és finalAggregation mezőkkel. A névbe vagy promptba írt szerződéses kifejezés nem számít.",
+  "swarm.spawn.qualificationFailed": "Nem hozhatók létre Swarm workerek: {{reasons}}. Adjon meg egy teljes qualification objektumot a spawn_session hívásban; a névbe vagy promptba írt kifejezés nem számít.",
   "swarm.statusCompleted": "Swarm befejezve",
   "swarm.statusNeedToCheck": "ellenőrzést igényel",
   "swarm.statusRunning": "Swarm fut",

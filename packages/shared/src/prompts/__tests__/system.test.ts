@@ -77,6 +77,9 @@ describe('system prompt guidance', () => {
     expect(on).toContain('Swarm mode is ON')
     expect(on).toContain('fail closed')
     expect(on).toContain('final aggregation or verification contract')
+    expect(on).toContain('qualification')
+    expect(on).toContain('not a phrase in the session name or prompt')
+    expect(on).toContain('same-turn fan-out')
   })
 
   it('keeps scratch artifacts out of the user-selected working directory (#163)', () => {
