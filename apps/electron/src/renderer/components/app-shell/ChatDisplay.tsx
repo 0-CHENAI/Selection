@@ -2088,10 +2088,9 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
             onKillTask={(taskId) => killTask(taskId, backgroundTasks.find(t => t.id === taskId)?.type === 'shell' ? 'shell' : 'agent')}
             onOpenSession={navigateToSession}
             onInsertMessage={onInputChange}
-            sessionLabels={session.labels}
-            labels={labels}
-            onLabelsChange={onLabelsChange}
-            sessionStatuses={sessionStatuses}
+            sessionLabels={[]}
+            labels={[]}
+            sessionStatuses={[]}
             currentSessionStatus={session.sessionStatus || 'todo'}
             showSharedProjectMemory={
               !!session.projectId &&
@@ -2101,7 +2100,6 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
             onSwarmEnabledChange={onSwarmEnabledChange}
             swarmToggleDisabled={swarmToggleDisabled}
             swarmRunning={swarmRunning}
-            onSessionStatusChange={onSessionStatusChange}
             queuedMessages={queuedMessages}
             inputProps={{
               placeholder,

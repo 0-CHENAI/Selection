@@ -169,6 +169,11 @@ import {
   type CreationCompletedEventDetail,
 } from "@/lib/creation-job-validation"
 import { dispatchFocusInputEvent } from "./input/focus-input-events"
+import {
+  prepareOrdinarySessionSidebarLinks,
+  normalizeSessionGroupingMode,
+  sanitizeRemovedSessionFilters,
+} from "./ordinary-session-ui"
 
 /**
  * AppShellProps - Minimal props interface for AppShell component
@@ -581,6 +586,7 @@ function AppShellContent({
   const shellWidth = useContainerWidth(shellRef)
   const MOBILE_THRESHOLD = 768
   const isAutoCompact = shellWidth > 0 && shellWidth < MOBILE_THRESHOLD
+  const legacyClassificationControlsEnabled: boolean = false
 
   const effectiveSidebarAndNavigatorHidden = isSidebarAndNavigatorHidden || isAutoCompact
 
@@ -692,22 +698,14 @@ function AppShellContent({
         saved.allSessions = { statuses, labels }
       }
     }
-    return saved
+    return sanitizeRemovedSessionFilters(saved)
   })
 
   // Derive current view's status filter as a Map<SessionStatusId, FilterMode>
-  const listFilter = useMemo(() => {
-    if (!sessionFilterKey) return new Map<SessionStatusId, FilterMode>()
-    const entry = viewFiltersMap[sessionFilterKey]?.statuses ?? {}
-    return new Map<SessionStatusId, FilterMode>(Object.entries(entry) as [SessionStatusId, FilterMode][])
-  }, [viewFiltersMap, sessionFilterKey])
+  const listFilter = useMemo(() => new Map<SessionStatusId, FilterMode>(), [])
 
   // Derive current view's label filter as a Map<string, FilterMode>
-  const labelFilter = useMemo(() => {
-    if (!sessionFilterKey) return new Map<string, FilterMode>()
-    const entry = viewFiltersMap[sessionFilterKey]?.labels ?? {}
-    return new Map<string, FilterMode>(Object.entries(entry) as [string, FilterMode][])
-  }, [viewFiltersMap, sessionFilterKey])
+  const labelFilter = useMemo(() => new Map<string, FilterMode>(), [])
 
   // Derive current view's project filter as a Map<projectId, FilterMode>
   const projectFilter = useMemo(() => {
@@ -786,7 +784,7 @@ function AppShellContent({
           ...prev,
           allSessions: {
             statuses: existing?.statuses ?? {},
-            labels: { [scope.labelId]: 'include' },
+            labels: {},
             projects: scope.projectId ? { [scope.projectId]: 'include' } : {},
             groupingMode: existing?.groupingMode,
           }
@@ -804,9 +802,10 @@ function AppShellContent({
   // Grouping mode for chat list: per-view (stored in viewFiltersMap), forced to 'date' for state sub-views
   const isStateSubView = sessionFilter?.kind === 'state'
 
-  const chatGroupingMode: ChatGroupingMode = isStateSubView
-    ? 'date'
-    : (viewFiltersMap[sessionFilterKey ?? '']?.groupingMode ?? 'date')
+  const storedGroupingMode = viewFiltersMap[sessionFilterKey ?? '']?.groupingMode ?? 'date'
+  const chatGroupingMode = normalizeSessionGroupingMode(
+    isStateSubView ? 'date' : storedGroupingMode,
+  )
 
   const setChatGroupingMode = useCallback((mode: ChatGroupingMode) => {
     setViewFiltersMap(prev => {
@@ -1464,9 +1463,10 @@ function AppShellContent({
     )
   }, [sessionMetaMap, activeWorkspaceId, remoteWorkspaceId])
 
-  // Active sessions exclude archived - use this for all counts and filters except archived view
+  // Classification metadata is retained for backward compatibility, but it no
+  // longer removes sessions from the ordinary list (#180).
   const activeSessionMetas = useMemo(() => {
-    return workspaceSessionMetas.filter(s => !s.isArchived)
+    return workspaceSessionMetas
   }, [workspaceSessionMetas])
 
   // Project children are implemented as an All Sessions secondary filter, but
@@ -1479,18 +1479,15 @@ function AppShellContent({
       return {
         ...prev,
         allSessions: {
-          statuses: existing?.statuses ?? {},
-          labels: existing?.labels ?? {},
+          statuses: {},
+          labels: {},
           projects: { [projectId]: 'include' },
           groupingMode: existing?.groupingMode,
         }
       }
     })
 
-    const allSessionsFilters = viewFiltersMap['allSessions']
-    const hasOtherSecondaryFilters =
-      Object.keys(allSessionsFilters?.statuses ?? {}).length > 0
-      || Object.keys(allSessionsFilters?.labels ?? {}).length > 0
+    const hasOtherSecondaryFilters = false
     const firstProjectSessionId = resolveProjectNavigationSessionId(
       activeSessionMetas,
       projectId,
@@ -1500,7 +1497,7 @@ function AppShellContent({
       routes.view.allSessions(firstProjectSessionId ?? undefined),
       firstProjectSessionId ? undefined : { skipAutoSelect: true },
     )
-  }, [activeSessionMetas, viewFiltersMap])
+  }, [activeSessionMetas])
 
   const refreshWorkspaceUnreadMap = useCallback(async () => {
     try {
@@ -1624,25 +1621,21 @@ function AppShellContent({
 
     switch (sessionFilter.kind) {
       case 'allSessions':
-        // "All Sessions" - shows active (non-archived) sessions
-        result = activeSessionMetas
+        // Ordinary sessions include legacy archived/classified conversations.
+        result = workspaceSessionMetas
         break
       case 'flagged':
-        result = activeSessionMetas.filter(s => s.isFlagged)
+        result = workspaceSessionMetas
         break
       case 'archived':
-        // Archived view shows only archived sessions
-        result = workspaceSessionMetas.filter(s => s.isArchived)
+        // Legacy classification routes are aliases of ordinary sessions.
+        result = workspaceSessionMetas
         break
       case 'state':
-        // Filter by specific todo state (excludes archived)
-        result = activeSessionMetas.filter(s => (s.sessionStatus || 'todo') === sessionFilter.stateId)
+        result = workspaceSessionMetas
         break
       case 'label': {
-        // Shared predicate (handles '__all__', descendant labels, and the optional
-        // project scope) — the same implementation the session list filters with,
-        // so the two stay aligned by construction.
-        result = activeSessionMetas.filter(s => matchesLabelFilter(s, sessionFilter, labelConfigs))
+        result = workspaceSessionMetas
         break
       }
       case 'view': {
@@ -1811,7 +1804,11 @@ function AppShellContent({
   // Persist per-view filter map to localStorage (workspace-scoped)
   React.useEffect(() => {
     if (!activeWorkspaceId) return
-    storage.set(storage.KEYS.viewFilters, viewFiltersMap, activeWorkspaceId)
+    storage.set(
+      storage.KEYS.viewFilters,
+      sanitizeRemovedSessionFilters(viewFiltersMap),
+      activeWorkspaceId,
+    )
   }, [viewFiltersMap, activeWorkspaceId])
 
   // Persist sidebar section collapsed states (workspace-scoped)
@@ -2294,35 +2291,17 @@ function AppShellContent({
   const unifiedSidebarItems = React.useMemo((): SidebarItem[] => {
     const result: SidebarItem[] = []
 
-    // 1. Sessions section: All Sessions (expandable) with status items, Flagged, Archived as children
+    // Classification entries were removed in #180. Keep keyboard navigation in
+    // the same order as the visible #181 sidebar.
     result.push({ id: 'nav:allSessions', type: 'nav', action: handleAllSessionsClick })
-    for (const state of effectiveSessionStatuses) {
-      result.push({ id: `nav:state:${state.id}`, type: 'nav', action: () => handleSessionStatusClick(state.id) })
-    }
-    result.push({ id: 'nav:flagged', type: 'nav', action: handleFlaggedClick })
-    result.push({ id: 'nav:archived', type: 'nav', action: handleArchivedClick })
-
-    // 2. Labels section header + regular label tree for keyboard nav
-    result.push({ id: 'nav:labels', type: 'nav', action: () => handleLabelClick('__all__') })
-    // Flatten regular label tree for keyboard navigation (depth-first)
-    const flattenTree = (nodes: LabelTreeNode[]) => {
-      for (const node of nodes) {
-        if (node.label) {
-          result.push({ id: `nav:label:${node.fullId}`, type: 'nav', action: () => handleLabelClick(node.fullId) })
-        }
-        if (node.children.length > 0) flattenTree(node.children)
-      }
-    }
-    flattenTree(labelTree)
-
-    // 3. Sources, Skills, Settings
+    result.push({ id: 'nav:projects', type: 'nav', action: handleProjectsClick })
     result.push({ id: 'nav:sources', type: 'nav', action: handleSourcesClick })
     result.push({ id: 'nav:skills', type: 'nav', action: handleSkillsClick })
     result.push({ id: 'nav:automations', type: 'nav', action: handleAutomationsClick })
     result.push({ id: 'nav:settings', type: 'nav', action: () => handleSettingsClick() })
 
     return result
-  }, [handleAllSessionsClick, handleFlaggedClick, handleArchivedClick, handleSessionStatusClick, effectiveSessionStatuses, handleLabelClick, labelConfigs, labelTree, viewConfigs, handleViewClick, handleSourcesClick, handleSkillsClick, handleAutomationsClick, handleSettingsClick])
+  }, [handleAllSessionsClick, handleProjectsClick, handleSourcesClick, handleSkillsClick, handleAutomationsClick, handleSettingsClick])
 
   // Toggle folder expanded state
   const handleToggleFolder = React.useCallback((path: string) => {
@@ -2465,13 +2444,12 @@ function AppShellContent({
 
     switch (sessionFilter.kind) {
       case 'flagged':
-        return t("sidebar.flagged")
+        return t("sidebar.allSessions")
       case 'state': {
-        const state = effectiveSessionStatuses.find(s => s.id === sessionFilter.stateId)
-        return state ? t(`status.${state.id}`, state.label) : t("sidebar.allSessions")
+        return t("sidebar.allSessions")
       }
       case 'label':
-        return sessionFilter.labelId === '__all__' ? t("sidebar.labels") : getLabelDisplayName(labelConfigs, sessionFilter.labelId)
+        return t("sidebar.allSessions")
       case 'view':
         return sessionFilter.viewId === '__all__' ? t("sidebar.views") : viewConfigs.find(v => v.id === sessionFilter.viewId)?.name || t("sidebar.views")
       default:
@@ -2630,7 +2608,7 @@ function AppShellContent({
                   isCollapsed={false}
                   getItemProps={getSidebarItemProps}
                   focusedItemId={focusedSidebarItemId}
-                  links={[
+                  links={prepareOrdinarySessionSidebarLinks([
                     // --- Sessions Section ---
                     // All Sessions: expandable with status children (sortable) + Flagged & Archived as trailing items
                     {
@@ -2648,7 +2626,6 @@ function AppShellContent({
                       onToggle: () => toggleExpanded('nav:allSessions'),
                       contextMenu: {
                         type: 'allSessions',
-                        onConfigureStatuses: openConfigureStatuses,
                         onMarkAllRead: () => {
                           if (!activeWorkspaceId) return
                           // Optimistic: clear hasUnread on all workspace session metas
@@ -2874,7 +2851,7 @@ function AppShellContent({
                       variant: isSettingsNavigation(navState) ? "default" : "ghost",
                       onClick: () => handleSettingsClick(),
                     },
-                  ]}
+                  ])}
                 />
                 {/* Agent Tree: Hierarchical list of agents */}
                 {/* Agents section removed */}
@@ -2917,10 +2894,15 @@ function AppShellContent({
                       }}
                     />
                   )}
-                  {/* Filter dropdown - available in ALL chat views.
-                      Shows user-added filters (removable) and pinned filters (non-removable, derived from route).
-                      Pinned filters: state views pin a status, label views pin a label, flagged pins the flag. */}
+                  {/* Session search remains available after classification filters are removed. */}
                   {isSessionsNavigation(navState) && (
+                    <HeaderIconButton
+                      icon={<Search className="h-4 w-4" />}
+                      tooltip={t("sidebar.search")}
+                      onClick={() => setSearchActive(true)}
+                    />
+                  )}
+                  {legacyClassificationControlsEnabled && isSessionsNavigation(navState) && (
                     isAutoCompact ? (
                       <CompactSessionListFilter
                         listFilter={listFilter}

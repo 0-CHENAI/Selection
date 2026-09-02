@@ -100,24 +100,23 @@ export function SidebarMenu({
     )
   }
 
-  // All Sessions / Status / Flagged: show "Configure Statuses" (+ "Mark All Read" for allSessions)
-  if ((type === 'allSessions' || type === 'status' || type === 'flagged') && onConfigureStatuses) {
+  // Ordinary sessions retain the unrelated "Mark All Read" action without
+  // exposing the removed status configuration workflow.
+  if (type === 'allSessions' && onMarkAllRead) {
     return (
-      <>
-        {type === 'allSessions' && onMarkAllRead && (
-          <>
-            <MenuItem onClick={onMarkAllRead}>
-              <CheckCheck className="h-3.5 w-3.5" />
-              <span className="flex-1">{t("sidebarMenu.markAllRead")}</span>
-            </MenuItem>
-            <Separator />
-          </>
-        )}
-        <MenuItem onClick={onConfigureStatuses}>
-          <Settings2 className="h-3.5 w-3.5" />
-          <span className="flex-1">{t("sidebarMenu.configureStatuses")}</span>
-        </MenuItem>
-      </>
+      <MenuItem onClick={onMarkAllRead}>
+        <CheckCheck className="h-3.5 w-3.5" />
+        <span className="flex-1">{t("sidebarMenu.markAllRead")}</span>
+      </MenuItem>
+    )
+  }
+
+  if ((type === 'status' || type === 'flagged') && onConfigureStatuses) {
+    return (
+      <MenuItem onClick={onConfigureStatuses}>
+        <Settings2 className="h-3.5 w-3.5" />
+        <span className="flex-1">{t("sidebarMenu.configureStatuses")}</span>
+      </MenuItem>
     )
   }
 

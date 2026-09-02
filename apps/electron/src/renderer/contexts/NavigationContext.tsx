@@ -40,8 +40,6 @@ import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import { useAtomValue, useSetAtom, useStore } from 'jotai'
 import { useSession } from '@/hooks/useSession'
-import { useLabels } from '@/hooks/useLabels'
-import { matchesLabelFilter } from '@craft-agent/shared/labels'
 import {
   parseRoute,
   parseRouteToNavigationState,
@@ -73,7 +71,8 @@ import {
   isProjectsNavigation,
   DEFAULT_NAVIGATION_STATE,
 } from '../../shared/types'
-import { sessionMetaMapAtom, updateSessionMetaAtom, type SessionMeta } from '@/atoms/sessions'
+import { normalizeRemovedSessionClassification } from '../../shared/session-classification'
+import { sessionMetaMapAtom, type SessionMeta } from '@/atoms/sessions'
 import { isOrdinarySessionVisible } from '@/lib/swarm-session'
 import { sourcesAtom } from '@/atoms/sources'
 import { skillsAtom } from '@/atoms/skills'
@@ -170,10 +169,6 @@ export function NavigationProvider({
   // Read session metadata directly from atom (reactive to session changes)
   const sessionMetaMap = useAtomValue(sessionMetaMapAtom)
   const sessionMetas = useMemo(() => Array.from(sessionMetaMap.values()), [sessionMetaMap])
-  const updateSessionMeta = useSetAtom(updateSessionMetaAtom)
-  // Label tree for filter matching (auto-select must agree with the visible list).
-  const { labels: labelConfigs } = useLabels(workspaceId)
-
   const pushPanel = useSetAtom(pushPanelAtom)
 
   // Store reference for reading fresh atom values in callbacks (avoids stale closures)
@@ -536,37 +531,15 @@ export function NavigationProvider({
   // Helper: Filter sessions by SessionFilter
   // Always excludes hidden sessions - they should never appear in navigation
   const filterSessionsByFilter = useCallback(
-    (filter: SessionFilter): SessionMeta[] => {
+    (_filter: SessionFilter): SessionMeta[] => {
       // First filter out hidden sessions - they should never appear in any view
       const visibleSessions = sessionMetas.filter(
         s => isOrdinarySessionVisible(s) && (!workspaceId || s.workspaceId === workspaceId)
       )
 
-      return visibleSessions.filter((session) => {
-        switch (filter.kind) {
-          case 'allSessions':
-            return session.isArchived !== true
-          case 'flagged':
-            return session.isFlagged === true && session.isArchived !== true
-          case 'archived':
-            return session.isArchived === true
-          case 'state':
-            return session.sessionStatus === filter.stateId && session.isArchived !== true
-          case 'label': {
-            if (session.isArchived === true) return false
-            // Shared predicate — descendant-aware and project-scoped, matching
-            // exactly what the session list renders (auto-select must agree).
-            return matchesLabelFilter(session, filter, labelConfigs)
-          }
-          case 'view':
-            if (session.isArchived === true) return false
-            return true
-          default:
-            return false
-        }
-      })
+      return visibleSessions
     },
-    [sessionMetas, workspaceId, labelConfigs]
+    [sessionMetas, workspaceId]
   )
 
   const getFirstSessionId = useCallback(
@@ -621,7 +594,7 @@ export function NavigationProvider({
    */
   const resolveAutoSelection = useCallback(
     (newState: NavigationState, options?: { skipAutoSelect?: boolean }): NavigationState => {
-      let nextState = newState
+      let nextState = normalizeRemovedSessionClassification(newState)
 
       // Validate session exists in current workspace (local or remote ID)
       if (isSessionsNavigation(nextState) && nextState.details) {
@@ -705,12 +678,6 @@ export function NavigationProvider({
           if (parsed.params.systemPrompt) {
             createOptions.systemPromptPreset = parsed.params.systemPrompt as 'default' | 'mini' | string
           }
-          if (parsed.params.status) {
-            createOptions.sessionStatus = parsed.params.status
-          }
-          if (parsed.params.label) {
-            createOptions.labels = [parsed.params.label]
-          }
           if (parsed.params.project) {
             createOptions.projectId = parsed.params.project
           }
@@ -720,25 +687,7 @@ export function NavigationProvider({
             await window.electronAPI.sessionCommand(session.id, { type: 'rename', name: parsed.params.name })
           }
 
-          if (parsed.params.status) {
-            updateSessionMeta(session.id, { sessionStatus: parsed.params.status })
-          }
-          if (parsed.params.label) {
-            updateSessionMeta(session.id, { labels: [parsed.params.label] })
-          }
-
-          if (parsed.params.status) {
-            await window.electronAPI.sessionCommand(session.id, { type: 'setSessionStatus', state: parsed.params.status })
-          }
-          if (parsed.params.label) {
-            await window.electronAPI.sessionCommand(session.id, { type: 'setLabels', labels: [parsed.params.label] })
-          }
-
-          // Determine navigation filter
-          const filter: import('../../shared/types').SessionFilter =
-            parsed.params.status ? { kind: 'state', stateId: parsed.params.status } :
-            parsed.params.label ? { kind: 'label', labelId: parsed.params.label } :
-            { kind: 'allSessions' }
+          const filter: import('../../shared/types').SessionFilter = { kind: 'allSessions' }
 
           if (options?.newPanel) {
             // Open the new session in a new panel using lane-aware routing (pushPanel auto-focuses it)
@@ -851,7 +800,7 @@ export function NavigationProvider({
           console.warn('[Navigation] Unknown action:', parsed.name)
       }
     },
-    [workspaceId, onCreateSession, onInputChange, pushPanel, store, updateSessionMeta]
+    [workspaceId, onCreateSession, onInputChange, pushPanel, store]
   )
 
   // =========================================================================
@@ -1212,19 +1161,11 @@ export function NavigationProvider({
     const filter = navigationState.filter
     switch (filter.kind) {
       case 'allSessions':
-        navigate(routes.view.allSessions(sessionId))
-        break
       case 'flagged':
-        navigate(routes.view.flagged(sessionId))
-        break
       case 'archived':
-        navigate(routes.view.archived(sessionId))
-        break
       case 'state':
-        navigate(routes.view.state(filter.stateId, sessionId))
-        break
       case 'label':
-        navigate(routes.view.label(filter.labelId, sessionId))
+        navigate(routes.view.allSessions(sessionId))
         break
       case 'view':
         navigate(routes.view.view(filter.viewId, sessionId))

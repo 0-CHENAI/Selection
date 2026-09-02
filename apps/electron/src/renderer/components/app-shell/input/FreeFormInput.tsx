@@ -1072,6 +1072,7 @@ export function FreeFormInput({
   }, [onLabelAdd])
 
   const inlineLabel = useInlineLabelMenu({
+    enabled: false,
     inputRef: richInputRef,
     labels,
     sessionLabels,
