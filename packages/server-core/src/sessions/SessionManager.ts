@@ -7562,10 +7562,11 @@ export class SessionManager implements ISessionManager {
       if (managed.parentSessionId) {
         const parent = this.sessions.get(managed.parentSessionId)
         const entry = parent?.backgroundTaskRegistry.get(managed.id)
-        if (entry?.source === 'spawn_session' && entry.status === 'running') {
+        if (parent && entry?.source === 'spawn_session' && entry.status === 'running') {
           entry.status = 'stopped'
           entry.completedAt = Date.now()
           entry.blocker = 'Swarm stopped by user'
+          this.emitSpawnTaskCompleted(parent, managed.id, 'stopped', entry.blocker)
         }
       }
       if (managed.isProcessing) await this.cancelProcessing(managed.id, true)
@@ -9032,6 +9033,25 @@ export class SessionManager implements ISessionManager {
   }
 
   /**
+   * Tell the parent-session renderer chip to leave `running`. Registry updates
+   * alone are not enough: ActiveTasksBar only freezes elapsed on `task_completed`.
+   */
+  private emitSpawnTaskCompleted(
+    parent: ManagedSession,
+    taskId: string,
+    status: 'completed' | 'failed' | 'stopped',
+    summary?: string,
+  ): void {
+    this.sendEvent({
+      type: 'task_completed',
+      sessionId: parent.id,
+      taskId,
+      status,
+      ...(summary ? { summary } : {}),
+    }, parent.workspace.id)
+  }
+
+  /**
    * Report a managed child's terminal *subtree* exactly once. A coordinator's
    * own completion event is not enough: it stays `running` while descendants or
    * a required aggregation turn remain outstanding.
@@ -9076,6 +9096,7 @@ export class SessionManager implements ISessionManager {
       completedAt: running.completedAt,
     })
     this.taskOutputIndex.set(child.id, parent.id)
+    this.emitSpawnTaskCompleted(parent, child.id, running.status, finalText ?? running.blocker)
     this.emitSessionAgentEvent(parent, 'SubagentStop', {
       hook_event_name: 'SubagentStop',
       agent_id: child.id,
@@ -9124,7 +9145,8 @@ export class SessionManager implements ISessionManager {
   private surfaceSpawnedSessionCompletion(evt: SessionCompletionEvent): void {
     const child = this.sessions.get(evt.sessionId)
     if (!child?.orchestrationId) return
-    if (!this.recordSwarmCompletion(evt)) return
+    const recorded = this.recordSwarmCompletion(evt)
+    if (!recorded && child.orchestrationStatus === 'running') return
     this.reportManagedChildTerminal(child)
   }
 
