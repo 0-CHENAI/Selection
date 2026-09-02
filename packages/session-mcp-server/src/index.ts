@@ -34,6 +34,7 @@ import {
 import { existsSync, readFileSync, readdirSync, statSync, writeFileSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { isDeveloperFeedbackEnabled } from '@craft-agent/shared/feature-flags';
+import { wrapSpawnSessionToolError } from '@craft-agent/shared/agent';
 // Import from session-tools-core
 import {
   type SessionToolContext,
@@ -415,7 +416,7 @@ async function handleSpawnSession(
     try {
       const parsed = JSON.parse(precomputed);
       if (parsed.error) {
-        return errorResponse(`spawn_session failed: ${parsed.error}`);
+        return errorResponse(wrapSpawnSessionToolError(String(parsed.error)));
       }
       // Return the full result (could be help info or spawn result)
       return {
@@ -437,7 +438,7 @@ async function handleSpawnSession(
       });
       const result = await resp.json() as Record<string, unknown>;
       if (result.error) {
-        return errorResponse(`spawn_session failed: ${result.error}`);
+        return errorResponse(wrapSpawnSessionToolError(String(result.error)));
       }
       return {
         content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }],

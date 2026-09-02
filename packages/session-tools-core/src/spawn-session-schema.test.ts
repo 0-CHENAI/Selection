@@ -30,4 +30,10 @@ describe('spawn_session schema', () => {
     const properties = spawn?.inputSchema.properties as Record<string, { additionalProperties?: unknown }> | undefined
     expect(properties?.qualification?.additionalProperties).not.toBe(false)
   })
+
+  it('tells the model to pass a qualification object rather than a name phrase', () => {
+    const spawn = getToolDefsAsJsonSchema().find(def => def.name === 'spawn_session')
+    expect(spawn?.description).toContain('qualification object')
+    expect(spawn?.description).toContain('not a phrase in name or prompt')
+  })
 })

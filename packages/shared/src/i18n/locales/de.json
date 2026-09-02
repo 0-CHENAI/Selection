@@ -1655,6 +1655,8 @@
   "swarm.roleCoordinator": "Koordinator",
   "swarm.roleReviewer": "Prüfer",
   "swarm.roleWorker": "Worker",
+  "swarm.spawn.missingQualificationContract": "Swarm-Worker konnten nicht erstellt werden: strukturierter Parallelvertrag fehlt. Übergeben Sie qualification an spawn_session mit tracks (mindestens zwei unabhängige Tracks), parallelBenefit und finalAggregation. Ein Vertragsbegriff im Namen oder Prompt zählt nicht.",
+  "swarm.spawn.qualificationFailed": "Swarm-Worker konnten nicht erstellt werden: {{reasons}}. Übergeben Sie ein vollständiges qualification-Objekt an spawn_session; ein Satz im Namen oder Prompt zählt nicht.",
   "swarm.statusCompleted": "Swarm abgeschlossen",
   "swarm.statusNeedToCheck": "Prüfung erforderlich",
   "swarm.statusRunning": "Swarm läuft",

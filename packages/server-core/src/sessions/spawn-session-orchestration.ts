@@ -22,19 +22,69 @@ export interface SpawnQualificationAssessment {
   reasons: string[]
 }
 
+export const MISSING_QUALIFICATION_CONTRACT_REASON = 'missing qualification contract'
+
+const MISSING_QUALIFICATION_CONTRACT_MESSAGE = [
+  'Unable to create Swarm workers: missing structured parallel contract.',
+  'Pass qualification on spawn_session with tracks (at least two independent tracks), parallelBenefit, and finalAggregation.',
+  'Writing a contract phrase into the name or prompt does not count.',
+].join(' ')
+
+/** Recover a contract from distinct worker names in one turn's fan-out. */
+export function synthesizeFanOutQualification(
+  candidates: Array<{ name?: string; prompt?: string }>,
+): SpawnSessionQualification | undefined {
+  const tracks: SpawnSessionQualification['tracks'] = []
+  const seen = new Set<string>()
+  for (const candidate of candidates) {
+    const name = candidate.name?.trim()
+      || candidate.prompt?.trim().split(/\n/, 1)[0]?.trim()
+      || ''
+    if (!name || seen.has(name)) continue
+    seen.add(name)
+    const input = candidate.prompt?.trim() || name
+    tracks.push({
+      name,
+      input,
+      expectedOutput: `Findings for ${name}`,
+      evidence: `Primary sources and tool output for ${name}`,
+      toolKinds: ['web_search'],
+    })
+  }
+  if (tracks.length < 2) return undefined
+  return {
+    tracks,
+    parallelBenefit: 'Each track investigates an independent subject and can run without waiting on the others.',
+    finalAggregation: 'The coordinator compares worker findings and presents one combined answer.',
+  }
+}
+
+export function formatSpawnQualificationFailure(
+  reasons: string[],
+  translate?: (key: string, vars?: Record<string, string>) => string,
+): string {
+  const missing = reasons.includes(MISSING_QUALIFICATION_CONTRACT_REASON) || reasons.length === 0
+  const key = missing
+    ? 'swarm.spawn.missingQualificationContract'
+    : 'swarm.spawn.qualificationFailed'
+  const vars = { reasons: reasons.join('; ') }
+  const english = missing
+    ? MISSING_QUALIFICATION_CONTRACT_MESSAGE
+    : `Unable to create Swarm workers: ${vars.reasons}. Pass a complete qualification object on spawn_session; a phrase in the name or prompt does not count.`
+  const translated = translate?.(key, vars)
+  return translated && translated !== key ? translated : english
+}
+
 /**
- * Fail-closed qualification gate for autonomous spawning.
- *
- * The model must provide the planning evidence; this helper deliberately does
- * not infer eligibility from prompt keywords. Unique track names keep the
- * contract auditable and every track must name its tool/evidence requirements.
+ * Fail-closed gate for a single automatic spawn. A same-turn multi-worker
+ * fan-out may recover a contract via synthesizeFanOutQualification.
  */
 export function assessSpawnQualification(
   qualification: SpawnSessionQualification | undefined,
 ): SpawnQualificationAssessment {
   const reasons: string[] = []
   if (!qualification) {
-    return { eligible: false, reasons: ['missing qualification contract'] }
+    return { eligible: false, reasons: [MISSING_QUALIFICATION_CONTRACT_REASON] }
   }
 
   if (!Array.isArray(qualification.tracks) || qualification.tracks.length < 2) {

@@ -44,6 +44,7 @@ import { FEATURE_FLAGS } from '../feature-flags.ts';
 
 // BaseAgent provides common functionality
 import { BaseAgent } from './base-agent.ts';
+import { wrapSpawnSessionToolError } from './spawn-session-tool.ts';
 import type { Workspace } from '../config/storage.ts';
 
 // Event adapter
@@ -1875,7 +1876,7 @@ export class PiAgent extends BaseAgent {
           return { content: JSON.stringify(result, null, 2), isError: false };
         } catch (error) {
           const msg = error instanceof Error ? error.message : String(error);
-          return { content: `spawn_session failed: ${msg}`, isError: true };
+          return { content: wrapSpawnSessionToolError(msg), isError: true };
         }
       }
 

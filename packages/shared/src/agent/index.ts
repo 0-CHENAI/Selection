@@ -186,6 +186,7 @@ export {
   resolveSpawnSessionMode,
   resolveSpawnWaitTimeoutMs,
   createSpawnSessionTool,
+  wrapSpawnSessionToolError,
 } from './spawn-session-tool.ts';
 
 // WS2 keep-alive: shared flag resolver + pushable streaming-input utility.
