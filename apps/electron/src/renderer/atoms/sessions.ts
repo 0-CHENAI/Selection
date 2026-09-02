@@ -71,7 +71,7 @@ export interface SessionMeta {
   archivedAt?: number
   /** Workspace-scoped project id this session is bound to (undefined = unbound) */
   projectId?: string
-  /** Shared project memory snapshot; missing means a legacy shared session. */
+  /** Persisted snapshot only; runtime no longer shares project MEMORY.md. */
   sharedProjectMemoryEnabled?: boolean
   /** Parent session id — when set, this session is a subtask of the parent (undefined = top-level task) */
   parentSessionId?: string

@@ -60,7 +60,7 @@ export interface StoredConfig {
   llmConnections?: LlmConnection[];
   defaultLlmConnection?: string;  // Slug of default connection for new sessions
   defaultThinkingLevel?: ThinkingLevel;  // App-level default thinking level for new sessions
-  sharedProjectMemoryEnabled?: boolean;  // Snapshot source for new sessions (default: false)
+  sharedProjectMemoryEnabled?: boolean;  // Retired; new sessions are always isolated
 
   workspaces: Workspace[];
   activeWorkspaceId: string | null;

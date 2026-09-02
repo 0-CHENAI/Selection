@@ -909,7 +909,7 @@ interface ManagedSession {
   labels?: string[]
   // Workspace-scoped project binding (undefined = unbound)
   projectId?: string
-  // Snapshot of app-level shared project memory setting; missing means legacy shared
+  // Persisted snapshot only; runtime no longer shares project MEMORY.md
   sharedProjectMemoryEnabled?: boolean
   // Parent session id — when set, this session is a subtask of the parent (undefined = top-level task)
   parentSessionId?: string
@@ -11405,9 +11405,7 @@ export class SessionManager implements ISessionManager {
       sessionStatus: header.sessionStatus,
       labels: header.labels,
       enabledSourceSlugs: header.enabledSourceSlugs,
-      // Preserve an explicit imported snapshot. A missing legacy field stays
-      // undefined and therefore retains the pre-upgrade shared behavior.
-      sharedProjectMemoryEnabled: header.sharedProjectMemoryEnabled,
+      sharedProjectMemoryEnabled: header.sharedProjectMemoryEnabled ?? false,
       workingDirectory: header.workingDirectory,
       model: header.model,
       llmConnection: header.llmConnection,
