@@ -1064,6 +1064,7 @@
   "session.readGroup": "既読 ({{count}})",
   "session.renameSession": "セッションの名前を変更",
   "session.results": "{{count}}件の結果",
+  "session.searchPlaceholder": "タイトルと内容を検索...",
   "session.searchUnavailable": "検索は利用できません",
   "session.selectConversation": "会話を選択して開始",
   "session.unreadGroup": "未読 ({{count}})",

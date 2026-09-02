@@ -1064,6 +1064,7 @@
   "session.readGroup": "Leídos ({{count}})",
   "session.renameSession": "Renombrar sesión",
   "session.results": "{{count}} resultados",
+  "session.searchPlaceholder": "Buscar títulos y contenido...",
   "session.searchUnavailable": "Búsqueda no disponible",
   "session.selectConversation": "Selecciona una conversación para comenzar",
   "session.unreadGroup": "No leídos ({{count}})",

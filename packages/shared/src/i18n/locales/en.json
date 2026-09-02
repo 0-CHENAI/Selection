@@ -1064,6 +1064,7 @@
   "session.readGroup": "Read ({{count}})",
   "session.renameSession": "Rename Session",
   "session.results": "{{count}} results",
+  "session.searchPlaceholder": "Search titles and content...",
   "session.searchUnavailable": "Search unavailable",
   "session.selectConversation": "Select a conversation to get started",
   "session.unreadGroup": "Unread ({{count}})",
