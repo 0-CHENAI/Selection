@@ -8890,7 +8890,7 @@ export class SessionManager implements ISessionManager {
         outcome.status === 'timeout' || outcome.status === 'interrupted'
       ) && childManaged?.orchestrationStatus === 'running'
       if (promotedToBackground) {
-        const intent = (request.name?.trim() || request.prompt.trim().slice(0, 80)) || session.id
+        const intent = request.name?.trim() || undefined
         await this.processEvent(managed, {
           type: 'task_backgrounded',
           toolUseId: `spawn:${session.id}`,
@@ -8926,7 +8926,7 @@ export class SessionManager implements ISessionManager {
       }
     }
 
-    const intent = (request.name?.trim() || request.prompt.trim().slice(0, 80)) || session.id
+    const intent = request.name?.trim() || undefined
     await this.processEvent(managed, {
       type: 'task_backgrounded',
       toolUseId: `spawn:${session.id}`,
