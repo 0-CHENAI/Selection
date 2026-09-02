@@ -63,6 +63,10 @@ function compactTitleInset(controlCount: number): number {
     + COMPACT_HEADER_TITLE_GAP
 }
 
+// EntityRow: wrapper pl-2 + button pl-2 + title-row icon gap (10px).
+// Start-aligned navigator titles must share this edge with session names.
+const LIST_TITLE_START_PADDING = 26
+
 export interface PanelHeaderProps {
   /** Header title (undefined hides with animation) */
   title?: string
@@ -82,11 +86,7 @@ export interface PanelHeaderProps {
   compactTitleMenu?: React.ReactNode
   /** Optional leading action rendered before the title (e.g., back button in compact mode) */
   leadingAction?: React.ReactNode
-  /**
-   * Title alignment. `'center'` (default) matches chat, file, and settings
-   * pages. `'start'` pins the title to the header's left content edge — use
-   * for navigator list headers so the title lines up with the list.
-   */
+  /** `'start'` aligns the title with list row text; default `'center'` leaves page headers unchanged. */
   titleAlign?: 'center' | 'start'
   /** Optional center button rendered between title and right actions */
   centerButton?: React.ReactNode
@@ -209,7 +209,9 @@ export function PanelHeader({
   const compactTrailingControlCount = [centerButton, actions, rightSidebarButton].filter(Boolean).length
   const compactTitleInsetStyle = isCompactMode
     ? {
-        left: compactTitleInset(compactLeadingControlCount),
+        left: compactLeadingControlCount === 0 && titleAlign === 'start'
+          ? LIST_TITLE_START_PADDING
+          : compactTitleInset(compactLeadingControlCount),
         right: compactTitleInset(compactTrailingControlCount),
       }
     : undefined
@@ -279,13 +281,13 @@ export function PanelHeader({
     </>
   )
 
-  // Base padding (16px = pl-4, matches pr-2 when leading action present for symmetry)
-  const basePadding = leadingAction ? 8 : 16
+  const startAligned = titleAlign === 'start'
+  const basePadding = leadingAction ? 8 : (startAligned ? LIST_TITLE_START_PADDING : 16)
 
   const baseClassName = cn(
     'flex shrink-0 items-center pr-2 min-w-0 gap-1.5 relative z-panel h-[42px]',
     // Only use static paddingLeft class when not animating
-    !shouldCompensate && (paddingLeft || (leadingAction ? 'pl-2' : 'pl-4')),
+    !shouldCompensate && (paddingLeft || (leadingAction ? 'pl-2' : startAligned ? 'pl-[26px]' : 'pl-4')),
     className
   )
 

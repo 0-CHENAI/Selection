@@ -54,7 +54,8 @@ describe('PanelHeader title alignment', () => {
 
     expect(html).toContain('所有会话')
     expect(html).not.toContain('mx-auto')
-    expect(html).toContain('pl-4')
+    expect(html).toContain('pl-[26px]')
+    expect(html).not.toContain('pl-4')
     expect(html).toContain('truncate')
     expect(html).toContain('overflow-hidden')
     expect(html).toContain('min-w-0')
@@ -93,6 +94,7 @@ describe('PanelHeader title alignment', () => {
     expect(startAligned).toContain('justify-start')
     expect(startAligned).not.toContain('justify-center')
     expect(startAligned).toContain('overflow-hidden')
+    expect(startAligned).toMatch(/left:\s*26px/)
   })
 
   it('does not drop compact leading-action compensation when start-aligned', () => {
@@ -123,7 +125,7 @@ describe('Navigator list headers opt into start alignment', () => {
 
     expect(html).toContain('所有会话')
     expect(html).not.toContain('mx-auto')
-    expect(html).toContain('pl-4')
+    expect(html).toContain('pl-[26px]')
     expect(html.indexOf('所有会话')).toBeLessThan(html.indexOf('Filter'))
   })
 
