@@ -210,12 +210,36 @@ describe('SessionManager spawn_session wait/background', () => {
       orchestrationLifecycle: 'managed',
       orchestrationStatus: 'running',
     }, parent.workspace, { messagesLoaded: true })
+    child.orchestrationTokensUsed = 240_000
+    child.orchestrationTokenBudget = FIXED_SWARM_TOKEN_BUDGET
+    child.tokenUsage = {
+      inputTokens: 8_000,
+      outputTokens: 2_000,
+      totalTokens: 250_000,
+      contextTokens: 8_000,
+      costUsd: 0,
+      currentTurn: {
+        inputTokens: 8_000,
+        outputTokens: 2_000,
+        totalTokens: 10_000,
+        cacheReadTokens: 0,
+        cacheCreationTokens: 0,
+        costUsd: 0,
+        modelCallCount: 1,
+        wallClockMs: 5,
+        startedAt: Date.now() - 5,
+        updatedAt: Date.now(),
+      },
+    }
     internals(sm).sessions.set(child.id, child)
 
     internals(sm).recoverPersistedSwarmSessions()
 
     expect(parent.orchestrationStatus).toBe('need-to-check')
     expect(child.orchestrationStatus).toBe('need-to-check')
+    expect(child.orchestrationTokensUsed).toBe(250_000)
+    expect(child.tokenUsage?.currentTurn).toBeUndefined()
+    expect(child.tokenUsage?.lastTurn?.totalTokens).toBe(10_000)
     expect(parent.backgroundTaskRegistry.get(child.id)).toMatchObject({
       status: 'failed',
       source: 'spawn_session',
@@ -812,6 +836,8 @@ describe('SessionManager spawn_session wait/background', () => {
     })
     const child = internals(sm).sessions.get('child')!
     child.orchestrationTokensUsed = 250_000
+    // Persisted values from older builds must not override the immutable cap.
+    child.orchestrationTokenBudget = FIXED_SWARM_TOKEN_BUDGET * 2
     let aborted = false
     child.agent = {
       forceAbort: () => { aborted = true },
@@ -826,13 +852,41 @@ describe('SessionManager spawn_session wait/background', () => {
     expect(aborted).toBe(true)
     expect(child.stopRequested).toBe(true)
     expect(child.orchestrationStatus).toBe('need-to-check')
+    expect(child.orchestrationTokenBudget).toBe(FIXED_SWARM_TOKEN_BUDGET)
     expect(child.orchestrationBlocker).toContain('263000/262144')
+
+    internals(sm).issueSpawnQualificationCredentials(child, 'user-requested', 1)
+    internals(sm).createSession = async () => {
+      throw new Error('over-budget child reached session creation')
+    }
+    await expect(internals(sm).spawnSessionFromTool(child, {
+      prompt: 'Must not spawn after the live budget boundary',
+      mode: 'background',
+      spawnReason: 'user-requested',
+    })).rejects.toThrow('263000/262144')
+    expect(child.orchestrationStatus).toBe('need-to-check')
+    // The live turn is included in the gate but remains unsettled until the
+    // interrupted turn completes, so it must not be written twice here.
+    expect(child.orchestrationTokensUsed).toBe(250_000)
+
+    const liveNode = internals(sm).getSwarmRunDetails(parent.id, parent.workspace.id)
+      ?.nodes.find(node => node.sessionId === child.id)
+    expect(liveNode).toMatchObject({
+      status: 'need-to-check',
+      tokensUsed: 263_000,
+      tokenBudget: FIXED_SWARM_TOKEN_BUDGET,
+    })
 
     child.messageQueue.push({ message: 'queued before budget stop' })
     internals(sm).processNextQueuedMessage = async () => {}
     await internals(sm).onProcessingStopped(child.id, 'interrupted')
     expect(child.orchestrationTokensUsed).toBe(263_000)
     expect(parent.orchestrationStatus).toBe('need-to-check')
+    await expect(SessionManager.prototype.sendMessage.call(
+      sm,
+      child.id,
+      'Must not start another model turn',
+    )).rejects.toThrow('263000/262144')
   })
 
   it('meters a detached agent independently without charging its parent', async () => {

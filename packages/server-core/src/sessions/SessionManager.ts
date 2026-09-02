@@ -1117,6 +1117,28 @@ interface ManagedSession {
   }
 }
 
+function getSwarmAgentBudgetState(managed: ManagedSession): {
+  budget: number
+  durableTokensUsed: number
+  liveTurnTokens: number
+  projectedTokensUsed: number
+} {
+  const durableTokensUsed = managed.orchestrationTokensUsed
+    ?? Math.max(0, managed.tokenUsage?.totalTokens ?? 0)
+  const liveTurnTokens = Math.max(
+    0,
+    managed.activeTurnUsage?.totalTokens
+      ?? managed.tokenUsage?.currentTurn?.totalTokens
+      ?? 0,
+  )
+  return {
+    budget: FIXED_SWARM_TOKEN_BUDGET,
+    durableTokensUsed,
+    liveTurnTokens,
+    projectedTokensUsed: durableTokensUsed + liveTurnTokens,
+  }
+}
+
 const PI_SDK_MESSAGE_ID_CACHE_LIMIT = 256
 
 export interface AutoRetryPendingHost {
@@ -2242,11 +2264,15 @@ export class SessionManager implements ISessionManager {
           // Older builds stored only a root-run aggregate. Seed each restored
           // child from its own last durable usage snapshot so the first turn
           // under the per-agent contract does not restart from zero.
-          if (
-            isSpawnedSwarmAgent(managed)
-            && managed.orchestrationTokensUsed === undefined
-          ) {
-            managed.orchestrationTokensUsed = Math.max(0, managed.tokenUsage?.totalTokens ?? 0)
+          if (isSpawnedSwarmAgent(managed)) {
+            if (
+              managed.orchestrationTokensUsed === undefined
+              && managed.orchestrationStatus !== 'running'
+            ) {
+              managed.orchestrationTokensUsed = Math.max(0, managed.tokenUsage?.totalTokens ?? 0)
+            }
+            // The per-agent ceiling is a product invariant, not mutable
+            // persisted configuration. Normalize legacy or polluted values.
             managed.orchestrationTokenBudget = FIXED_SWARM_TOKEN_BUDGET
           }
           // Migration: clear orphaned llmConnection references (e.g., after connection was deleted)
@@ -2301,8 +2327,33 @@ export class SessionManager implements ISessionManager {
     for (const managed of this.sessions.values()) {
       const recovered = recoverPersistedSwarmStatus(managed.orchestrationStatus)
       if (!managed.orchestrationId || !recovered) continue
+      // Hydrate before settling the interrupted turn. persistSession() also
+      // hydrates cold sessions, which would otherwise restore the stale
+      // currentTurn snapshot after we clear it below.
+      if (!managed.messagesLoaded) this.hydrateMessagesForColdPersist(managed)
+      if (isSpawnedSwarmAgent(managed) && managed.tokenUsage?.currentTurn) {
+        const currentTurn = managed.tokenUsage.currentTurn
+        const currentTurnTokens = Math.max(0, currentTurn.totalTokens)
+        const priorTokens = managed.orchestrationTokensUsed
+        // A legacy session has no independent durable counter and its latest
+        // session snapshot can already include this call. Use a high-water
+        // fallback there; modern sessions safely add the unsettled turn.
+        managed.orchestrationTokensUsed = priorTokens === undefined
+          ? Math.max(Math.max(0, managed.tokenUsage.totalTokens ?? 0), currentTurnTokens)
+          : priorTokens + currentTurnTokens
+        managed.orchestrationTokenBudget = FIXED_SWARM_TOKEN_BUDGET
+        managed.tokenUsage.lastTurn = {
+          ...currentTurn,
+          completedAt: recoveredAt,
+        }
+        delete managed.tokenUsage.currentTurn
+      }
       managed.orchestrationStatus = recovered.status
-      managed.orchestrationBlocker = recovered.blocker
+      const budget = FIXED_SWARM_TOKEN_BUDGET
+      const tokensUsed = managed.orchestrationTokensUsed ?? 0
+      managed.orchestrationBlocker = isSpawnedSwarmAgent(managed) && tokensUsed >= budget
+        ? `Swarm agent token budget reached: ${tokensUsed}/${budget}`
+        : recovered.blocker
       const parent = managed.parentSessionId ? this.sessions.get(managed.parentSessionId) : undefined
       if (parent) {
         parent.backgroundTaskRegistry.set(managed.id, {
@@ -6353,6 +6404,17 @@ export class SessionManager implements ISessionManager {
       return
     }
 
+    const swarmBudget = getSwarmAgentBudgetState(managed)
+    if (isSpawnedSwarmAgent(managed) && swarmBudget.projectedTokensUsed >= swarmBudget.budget) {
+      const blocker = `Swarm agent token budget reached: ${swarmBudget.projectedTokensUsed}/${swarmBudget.budget}`
+      this.updateOrchestrationMetadata(managed, {
+        orchestrationStatus: 'need-to-check',
+        orchestrationBlocker: blocker,
+        orchestrationTokenBudget: FIXED_SWARM_TOKEN_BUDGET,
+      })
+      throw new Error(blocker)
+    }
+
     // Source-activation auto-retry dedup (craft-agents-oss#804). When the server
     // has just scheduled or committed a "[<slug> activated]" retry, drop a matching
     // duplicate that arrives from a legacy renderer still running the client-side
@@ -8561,12 +8623,9 @@ export class SessionManager implements ISessionManager {
             : child.orchestrationStatus ?? 'running'
       const startedAt = task?.startTime ?? child.createdAt ?? now
       const endedAt = status === 'running' ? now : task?.completedAt ?? now
-      const durableTokensUsed = child.orchestrationTokensUsed
-        ?? child.tokenUsage?.totalTokens
-        ?? 0
-      const liveTurnTokens = status === 'running'
-        ? child.tokenUsage?.currentTurn?.totalTokens ?? 0
-        : 0
+      // A budget stop marks the node need-to-check before the interrupted turn
+      // is durably settled. Keep showing that in-flight usage during the gap.
+      const budgetState = getSwarmAgentBudgetState(child)
       return {
         sessionId: child.id,
         parentSessionId: child.parentSessionId,
@@ -8576,7 +8635,7 @@ export class SessionManager implements ISessionManager {
         status,
         depth: child.orchestrationDepth ?? 1,
         elapsedSeconds: Math.max(0, Math.round((endedAt - startedAt) / 1000)),
-        tokensUsed: durableTokensUsed + liveTurnTokens,
+        tokensUsed: budgetState.projectedTokensUsed,
         tokenBudget: FIXED_SWARM_TOKEN_BUDGET,
         lifecycle: child.orchestrationLifecycle ?? 'managed',
         blocker: task?.status === 'orphaned'
@@ -8789,12 +8848,11 @@ export class SessionManager implements ISessionManager {
       && info.status === 'running'
       && childIds.has(info.taskId)
     )
-    const budget = session.orchestrationTokenBudget ?? FIXED_SWARM_TOKEN_BUDGET
-    const tokensUsed = session.orchestrationTokensUsed ?? 0
-    if (isSpawnedSwarmAgent(session) && tokensUsed >= budget) {
+    const budgetState = getSwarmAgentBudgetState(session)
+    if (isSpawnedSwarmAgent(session) && budgetState.projectedTokensUsed >= budgetState.budget) {
       this.updateOrchestrationMetadata(session, {
         orchestrationStatus: 'need-to-check',
-        orchestrationBlocker: `Swarm agent token budget reached: ${tokensUsed}/${budget}`,
+        orchestrationBlocker: `Swarm agent token budget reached: ${budgetState.projectedTokensUsed}/${budgetState.budget}`,
       })
       if (session.orchestrationLifecycle === 'managed' && session.parentSessionId) {
         const parent = this.sessions.get(session.parentSessionId)
@@ -8970,7 +9028,19 @@ export class SessionManager implements ISessionManager {
     const lifecycle = request.lifecycle ?? 'managed'
     const role = request.role ?? 'worker'
     const parentDepth = managed.orchestrationDepth ?? 0
-    const startsNewRootRun = !isSpawnedSwarmAgent(managed)
+    const spawnedAgent = isSpawnedSwarmAgent(managed)
+    const budgetState = getSwarmAgentBudgetState(managed)
+    if (spawnedAgent && budgetState.projectedTokensUsed >= budgetState.budget) {
+      const blocker = `Swarm agent token budget reached: ${budgetState.projectedTokensUsed}/${budgetState.budget}`
+      this.updateOrchestrationMetadata(managed, {
+        orchestrationStatus: 'need-to-check',
+        orchestrationBlocker: blocker,
+        orchestrationTokenBudget: FIXED_SWARM_TOKEN_BUDGET,
+      })
+      throw new Error(blocker)
+    }
+
+    const startsNewRootRun = !spawnedAgent
       && (!managed.orchestrationId
         || managed.orchestrationStatus === 'completed'
         || managed.orchestrationStatus === 'stopped')
@@ -8991,22 +9061,6 @@ export class SessionManager implements ISessionManager {
           }
         : {}),
     })
-
-    const budget = managed.orchestrationTokenBudget ?? FIXED_SWARM_TOKEN_BUDGET
-    const tokensUsed = Math.max(
-      managed.orchestrationTokensUsed ?? 0,
-      managed.tokenUsage?.totalTokens ?? 0,
-    )
-    if (isSpawnedSwarmAgent(managed) && tokensUsed >= budget) {
-      const blocker = `Swarm agent token budget reached: ${tokensUsed}/${budget}`
-      this.updateOrchestrationMetadata(managed, {
-        orchestrationStatus: 'need-to-check',
-        orchestrationBlocker: blocker,
-        orchestrationTokensUsed: tokensUsed,
-        orchestrationTokenBudget: FIXED_SWARM_TOKEN_BUDGET,
-      })
-      throw new Error(blocker)
-    }
 
     const limit = assessSwarmSpawnLimits({
       sessions: this.sessions.values(),
@@ -11044,15 +11098,13 @@ export class SessionManager implements ISessionManager {
             tokenUsage: managed.tokenUsage,
           }, workspaceId)
 
-          const budget = managed.orchestrationTokenBudget ?? FIXED_SWARM_TOKEN_BUDGET
-          const projectedTokens = (managed.orchestrationTokensUsed ?? 0)
-            + recorded.accumulator.totalTokens
+          const budgetState = getSwarmAgentBudgetState(managed)
           if (
             isSpawnedSwarmAgent(managed)
             && managed.orchestrationStatus === 'running'
-            && projectedTokens >= budget
+            && budgetState.projectedTokensUsed >= budgetState.budget
           ) {
-            const blocker = `Swarm agent token budget reached: ${projectedTokens}/${budget}`
+            const blocker = `Swarm agent token budget reached: ${budgetState.projectedTokensUsed}/${budgetState.budget}`
             this.updateOrchestrationMetadata(managed, {
               orchestrationStatus: 'need-to-check',
               orchestrationBlocker: blocker,
