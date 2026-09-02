@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test'
-import { SpawnSessionSchema } from './tool-defs.ts'
+import { SpawnSessionSchema, getToolDefsAsJsonSchema } from './tool-defs.ts'
 
 describe('spawn_session schema', () => {
   it('closes qualification before the remaining top-level controls', () => {
@@ -17,9 +17,17 @@ describe('spawn_session schema', () => {
         ],
         parallelBenefit: 'parallel',
         finalAggregation: 'merge',
+        role: 'worker',
+        lifecycle: 'managed',
       },
       lifecycle: 'managed',
       role: 'worker',
     }).success).toBe(true)
+  })
+
+  it('publishes qualification as an open object so ORDER-stuffed keys do not fail Pi validation', () => {
+    const spawn = getToolDefsAsJsonSchema().find(def => def.name === 'spawn_session')
+    const properties = spawn?.inputSchema.properties as Record<string, { additionalProperties?: unknown }> | undefined
+    expect(properties?.qualification?.additionalProperties).not.toBe(false)
   })
 })

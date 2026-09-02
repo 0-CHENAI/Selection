@@ -181,7 +181,8 @@ export const SpawnSessionSchema = z.object({
   // Keep the nested qualification contract before the remaining top-level
   // controls. ORDER/Laufry follows JSON-schema property order when composing
   // tool arguments; putting this object last caused trailing role/lifecycle
-  // keys to be emitted inside qualification under load.
+  // keys to be emitted inside qualification under load. `.passthrough()` keeps
+  // Pi's TypeBox validator from rejecting those leftover keys.
   qualification: z.object({
     tracks: z.array(z.object({
       name: z.string().min(1),
@@ -192,7 +193,7 @@ export const SpawnSessionSchema = z.object({
     })).min(2),
     parallelBenefit: z.string().min(1),
     finalAggregation: z.string().min(1),
-  }).optional().describe('Required for automatic spawning: two independent tool tracks plus a final aggregation contract.'),
+  }).passthrough().optional().describe('Required for automatic spawning: two independent tool tracks plus a final aggregation contract.'),
   lifecycle: z.enum(['managed', 'detached']).optional()
     .describe('managed (default) participates in parent completion and explicit Swarm stop; detached continues independently.'),
   role: z.enum(['coordinator', 'worker', 'reviewer']).optional()
