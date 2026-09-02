@@ -18,4 +18,20 @@ describe('Swarm context compaction', () => {
     expect(swarmCompactionReserveTokens(0)).toBe(0)
     expect(swarmCompactionReserveTokens(Number.NaN)).toBe(0)
   })
+
+  it('compacts a child at 80% of its own 256 Ki budget on larger model windows', () => {
+    const contextWindow = 1_000_000
+    const agentTokenBudget = 262_144
+    const reserve = swarmCompactionReserveTokens(contextWindow, agentTokenBudget)
+
+    expect(reserve).toBe(790_285)
+    expect(compactionTriggerTokens(contextWindow, reserve)).toBe(209_715)
+  })
+
+  it('still protects a smaller model context before the agent budget is reached', () => {
+    const contextWindow = 131_072
+    const reserve = swarmCompactionReserveTokens(contextWindow, 262_144)
+
+    expect(compactionTriggerTokens(contextWindow, reserve)).toBe(104_857)
+  })
 })

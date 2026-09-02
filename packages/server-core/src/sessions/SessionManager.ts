@@ -83,6 +83,7 @@ import {
   type SessionTokenUsage,
   pickSessionFields,
   isSharedProjectMemoryEnabled,
+  isSpawnedSwarmAgent,
 } from '@craft-agent/shared/sessions'
 import { loadWorkspaceSources, loadAllSources, getSourcesBySlugs, isSourceUsable, type LoadedSource, type McpServerConfig, getSourcesNeedingAuth, getSourceCredentialManager, getSourceServerBuilder, type SourceWithCredential, isApiOAuthProvider, hasRenewEndpoint, SERVER_BUILD_ERRORS, TokenRefreshManager, createTokenGetter } from '@craft-agent/shared/sources'
 import { listTaskSlugs, parseTaskSpec, parseTaskYaml, serializeTaskYaml, uniqueTaskSlug, loadTaskResults } from '@craft-agent/shared/tasks'
@@ -113,7 +114,7 @@ import { restoreFiles } from '@craft-agent/shared/utils/bundle-files'
 import { getCredentialManager } from '@craft-agent/shared/credentials'
 import { CraftMcpClient, McpClientPool, McpPoolServer } from '@craft-agent/shared/mcp'
 import { type Session, type SessionEvent, type FileAttachment, type SendMessageOptions, type UnreadSummary, type RemoteSessionTransferPayload, type ImportRemoteSessionTransferResult, type SwarmRunDetailsDto, type SwarmRunNodeDto, RPC_CHANNELS, generateMessageId } from '@craft-agent/shared/protocol'
-import { applySteerTranscriptBoundary, messageToStored, storedToMessage, type Message, type StoredAttachment, type ToolDisplayMeta, type TokenUsage } from '@craft-agent/core/types'
+import { applySteerTranscriptBoundary, messageToStored, storedToMessage, type Message, type StoredAttachment, type ToolDisplayMeta } from '@craft-agent/core/types'
 import { hasRenderableAssistantText, preferRicherAssistantText } from '@craft-agent/core'
 import { formatPathsToRelative, formatToolInputPaths, perf, encodeIconToDataUrlAsync, getEmojiIcon, resetSummarizationClient, resolveToolIcon, readFileAttachment, resolveRegenerateAttachments, selectSpreadMessages, normalizePath } from '@craft-agent/shared/utils'
 import { collectSkillSlugsForSourcePreEnable, filterUserFacingSkills, loadAllSkills, loadSkillBySlug, invalidateSkillsCache, type LoadedSkill } from '@craft-agent/shared/skills'
@@ -990,6 +991,8 @@ interface ManagedSession {
     options?: SendMessageOptions
     messageId?: string  // Pre-generated ID for matching with UI
     optimisticMessageId?: string  // Frontend's ID for reliable event matching
+    /** Internal source continuation already accepted by the dedup gate. */
+    isSourceContinuation?: boolean
   }>
   // Map of shellId -> command for killing background shells
   backgroundShellCommands: Map<string, string>
@@ -1111,6 +1114,28 @@ interface ManagedSession {
     deadlineMs: number
     /** True after the first matching sendMessage consumes the slot; later matches drop. */
     committed: boolean
+  }
+}
+
+function getSwarmAgentBudgetState(managed: ManagedSession): {
+  budget: number
+  durableTokensUsed: number
+  liveTurnTokens: number
+  projectedTokensUsed: number
+} {
+  const durableTokensUsed = managed.orchestrationTokensUsed
+    ?? Math.max(0, managed.tokenUsage?.totalTokens ?? 0)
+  const liveTurnTokens = Math.max(
+    0,
+    managed.activeTurnUsage?.totalTokens
+      ?? managed.tokenUsage?.currentTurn?.totalTokens
+      ?? 0,
+  )
+  return {
+    budget: FIXED_SWARM_TOKEN_BUDGET,
+    durableTokensUsed,
+    liveTurnTokens,
+    projectedTokensUsed: durableTokensUsed + liveTurnTokens,
   }
 }
 
@@ -1349,7 +1374,9 @@ export interface SessionCompletionEvent {
   /** Convenience copy of the final assistant message text (same as getSessionFinalText). */
   finalText?: string
   /** The session's cumulative token usage, so the Conductor can meter token_budget without re-fetching. */
-  tokenUsage?: TokenUsage
+  tokenUsage?: SessionTokenUsage
+  /** Tokens to debit for this turn; zero while usage carries into an automatic continuation. */
+  turnTokens?: number
 }
 
 /** Build the in-place backend refresh payload without consulting global config. */
@@ -1433,8 +1460,6 @@ export class SessionManager implements ISessionManager {
   private processedSwarmCompletionEvents: Set<string> = new Set()
   /** Last coordinator turn outcome, used when managed children settle later. */
   private swarmTurnCompletions: Map<string, SessionCompletionEvent> = new Map()
-  /** Per-session cumulative usage already included in the current Swarm total. */
-  private swarmAccountedTokens: Map<string, number> = new Map()
   /** Ephemeral, single-use spawn capabilities. Never persisted or exposed to the model. */
   private spawnQualificationCredentials: Map<string, Map<string, {
     generation: number
@@ -2236,10 +2261,20 @@ export class SessionManager implements ISessionManager {
             enabledSourceSlugs: meta.enabledSourceSlugs,
             workingDirectory: meta.workingDirectory ?? wsDefaultWorkingDir,
           })
-          if (managed.orchestrationId) {
-            this.swarmAccountedTokens.set(managed.id, managed.tokenUsage?.totalTokens ?? 0)
+          // Older builds stored only a root-run aggregate. Seed each restored
+          // child from its own last durable usage snapshot so the first turn
+          // under the per-agent contract does not restart from zero.
+          if (isSpawnedSwarmAgent(managed)) {
+            if (
+              managed.orchestrationTokensUsed === undefined
+              && managed.orchestrationStatus !== 'running'
+            ) {
+              managed.orchestrationTokensUsed = Math.max(0, managed.tokenUsage?.totalTokens ?? 0)
+            }
+            // The per-agent ceiling is a product invariant, not mutable
+            // persisted configuration. Normalize legacy or polluted values.
+            managed.orchestrationTokenBudget = FIXED_SWARM_TOKEN_BUDGET
           }
-
           // Migration: clear orphaned llmConnection references (e.g., after connection was deleted)
           if (managed.llmConnection) {
             const conn = resolveSessionConnection(managed.llmConnection, undefined)
@@ -2292,8 +2327,33 @@ export class SessionManager implements ISessionManager {
     for (const managed of this.sessions.values()) {
       const recovered = recoverPersistedSwarmStatus(managed.orchestrationStatus)
       if (!managed.orchestrationId || !recovered) continue
+      // Hydrate before settling the interrupted turn. persistSession() also
+      // hydrates cold sessions, which would otherwise restore the stale
+      // currentTurn snapshot after we clear it below.
+      if (!managed.messagesLoaded) this.hydrateMessagesForColdPersist(managed)
+      if (isSpawnedSwarmAgent(managed) && managed.tokenUsage?.currentTurn) {
+        const currentTurn = managed.tokenUsage.currentTurn
+        const currentTurnTokens = Math.max(0, currentTurn.totalTokens)
+        const priorTokens = managed.orchestrationTokensUsed
+        // A legacy session has no independent durable counter and its latest
+        // session snapshot can already include this call. Use a high-water
+        // fallback there; modern sessions safely add the unsettled turn.
+        managed.orchestrationTokensUsed = priorTokens === undefined
+          ? Math.max(Math.max(0, managed.tokenUsage.totalTokens ?? 0), currentTurnTokens)
+          : priorTokens + currentTurnTokens
+        managed.orchestrationTokenBudget = FIXED_SWARM_TOKEN_BUDGET
+        managed.tokenUsage.lastTurn = {
+          ...currentTurn,
+          completedAt: recoveredAt,
+        }
+        delete managed.tokenUsage.currentTurn
+      }
       managed.orchestrationStatus = recovered.status
-      managed.orchestrationBlocker = recovered.blocker
+      const budget = FIXED_SWARM_TOKEN_BUDGET
+      const tokensUsed = managed.orchestrationTokensUsed ?? 0
+      managed.orchestrationBlocker = isSpawnedSwarmAgent(managed) && tokensUsed >= budget
+        ? `Swarm agent token budget reached: ${tokensUsed}/${budget}`
+        : recovered.blocker
       const parent = managed.parentSessionId ? this.sessions.get(managed.parentSessionId) : undefined
       if (parent) {
         parent.backgroundTaskRegistry.set(managed.id, {
@@ -6262,6 +6322,38 @@ export class SessionManager implements ISessionManager {
     sessionLog.info(`Deleted session ${sessionId}`)
   }
 
+  /** Remove every runtime and transcript trace of an unstarted source continuation. */
+  private discardPendingSourceContinuation(managed: ManagedSession, replayMessageId?: string): void {
+    const pendingContent = managed.autoRetryPending?.content
+    if (managed.autoRetryTimer) clearTimeout(managed.autoRetryTimer)
+    managed.autoRetryTimer = undefined
+
+    const queuedMessageIds = new Set(
+      managed.messageQueue
+        .filter(entry => entry.isSourceContinuation)
+        .map(entry => entry.messageId)
+        .filter((id): id is string => !!id),
+    )
+    managed.messageQueue = managed.messageQueue.filter(entry => !entry.isSourceContinuation)
+    if (replayMessageId) queuedMessageIds.add(replayMessageId)
+    if (queuedMessageIds.size > 0) {
+      managed.messages = managed.messages.filter(message => !queuedMessageIds.has(message.id))
+    } else if (pendingContent) {
+      // A queue item can already have been popped for setImmediate replay. In
+      // that gap its id is no longer in messageQueue, so remove only the newest
+      // matching hidden turn instead of every historical turn with that text.
+      const pendingMessageIndex = managed.messages.findLastIndex(message => (
+        message.role === 'user'
+        && message.hidden
+        && message.content === pendingContent
+      ))
+      if (pendingMessageIndex >= 0) managed.messages.splice(pendingMessageIndex, 1)
+    }
+
+    managed.autoRetryPending = undefined
+    managed.pendingContinuationUsage = undefined
+  }
+
   async sendMessage(
     sessionId: string,
     message: string,
@@ -6285,6 +6377,8 @@ export class SessionManager implements ISessionManager {
      * directly (tests, intra-server flows) to leave the existing pin in place.
      */
     rpcContext?: { callerClientId?: string },
+    /** Internal queue replay marker; never supplied by RPC callers. */
+    _isSourceContinuationReplay = false,
   ): Promise<void> {
     const managed = this.sessions.get(sessionId)
     if (!managed) {
@@ -6295,17 +6389,43 @@ export class SessionManager implements ISessionManager {
     const generationAtEntry = managed.processingGeneration
     this.setLastMessageClientId(sessionId, rpcContext?.callerClientId)
 
+    // The queue item may have been popped immediately before stopSwarm moved
+    // the node to a terminal state. Re-check at the actual replay boundary so
+    // that idle/setImmediate gap cannot resurrect a stopped Swarm.
+    if (
+      _isSourceContinuationReplay
+      && (
+        managed.stopRequested
+        || (!!managed.orchestrationStatus && managed.orchestrationStatus !== 'running')
+      )
+    ) {
+      this.discardPendingSourceContinuation(managed, existingMessageId)
+      this.persistSession(managed)
+      return
+    }
+
+    const swarmBudget = getSwarmAgentBudgetState(managed)
+    if (isSpawnedSwarmAgent(managed) && swarmBudget.projectedTokensUsed >= swarmBudget.budget) {
+      const blocker = `Swarm agent token budget reached: ${swarmBudget.projectedTokensUsed}/${swarmBudget.budget}`
+      this.updateOrchestrationMetadata(managed, {
+        orchestrationStatus: 'need-to-check',
+        orchestrationBlocker: blocker,
+        orchestrationTokenBudget: FIXED_SWARM_TOKEN_BUDGET,
+      })
+      throw new Error(blocker)
+    }
+
     // Source-activation auto-retry dedup (craft-agents-oss#804). When the server
     // has just scheduled or committed a "[<slug> activated]" retry, drop a matching
     // duplicate that arrives from a legacy renderer still running the client-side
     // auto_retry. The first matching caller wins (server timer or legacy RPC,
     // whichever arrives first), subsequent matching calls within the deadline drop.
     const pendingAutoRetry = managed.autoRetryPending
-    const isPendingAutoRetry = !!pendingAutoRetry
+    const isPendingAutoRetry = _isSourceContinuationReplay || (!!pendingAutoRetry
       && message === pendingAutoRetry.content
-      && Date.now() < pendingAutoRetry.deadlineMs
+      && Date.now() < pendingAutoRetry.deadlineMs)
     const isUserTaskContinuation = _isAuthRetry === true || isPendingAutoRetry
-    if (claimAutoRetryPending(managed, message) === 'drop') {
+    if (!_isSourceContinuationReplay && claimAutoRetryPending(managed, message) === 'drop') {
       sessionLog.info(`sendMessage: dropped duplicate source-activation retry for ${sessionId}`)
       const existingRetry = [...managed.messages].reverse().find(candidate =>
         candidate.role === 'user' && candidate.hidden && candidate.content === message
@@ -6319,6 +6439,47 @@ export class SessionManager implements ISessionManager {
     // authoritative entry point instead of relying only on the timer options.
     if (isPendingAutoRetry && !options?.hidden) {
       options = { ...options, hidden: true }
+    }
+
+    // A source retry that arrives while the current model call is unwinding must
+    // reserve its queue slot synchronously. Waiting on message loading or disk
+    // cleanup here leaves a gap where processing-stop can emit a terminal child
+    // completion before the continuation is visible (#804).
+    if (isPendingAutoRetry && managed.isProcessing && !managed.stopRequested && !existingMessageId) {
+      const userMessage: Message = {
+        id: generateMessageId(),
+        role: 'user',
+        content: message,
+        timestamp: this.monotonic(),
+        attachments: storedAttachments,
+        badges: options?.badges,
+        isQueued: true,
+        queuedSkillSlugs: options?.skillSlugs,
+        queuedContext: options?.queueContext,
+        hidden: true,
+      }
+      managed.messages.push(userMessage)
+      this.sendEvent({
+        type: 'user_message',
+        sessionId,
+        message: userMessage,
+        status: 'queued',
+        optimisticMessageId: options?.optimisticMessageId,
+      }, managed.workspace.id)
+      managed.messageQueue.push({
+        message,
+        attachments,
+        storedAttachments,
+        options,
+        messageId: userMessage.id,
+        optimisticMessageId: options?.optimisticMessageId,
+        isSourceContinuation: true,
+      })
+      this.persistSession(managed)
+      await this.flushSession(managed.id)
+      this.emitQueueChanged(managed)
+      onAck?.(userMessage.id)
+      return
     }
 
     // Ensure messages are loaded before we try to add new ones
@@ -6411,7 +6572,14 @@ export class SessionManager implements ISessionManager {
         optimisticMessageId: options?.optimisticMessageId
       }, managed.workspace.id)
 
-      managed.messageQueue.push({ message, attachments, storedAttachments, options, messageId: userMessage.id, optimisticMessageId: options?.optimisticMessageId })
+      managed.messageQueue.push({
+        message,
+        attachments,
+        storedAttachments,
+        options,
+        messageId: userMessage.id,
+        optimisticMessageId: options?.optimisticMessageId,
+      })
 
       this.persistSession(managed)
       // Force a synchronous flush so the queued item is genuinely on disk
@@ -6537,6 +6705,18 @@ export class SessionManager implements ISessionManager {
       sessionLog.warn(`Auto-label evaluation failed for session ${sessionId}:`, e)
     }
 
+    const sourceReplayTerminated = _isSourceContinuationReplay && (
+      managed.stopRequested
+      || (!!managed.orchestrationStatus && managed.orchestrationStatus !== 'running')
+    )
+    if (sourceReplayTerminated) {
+      // Stop may land while this replay is awaiting message loading, plan
+      // cleanup, or its durability flush. Re-check at the final commit point
+      // before setProcessing so a stopped Swarm cannot restart itself.
+      this.discardPendingSourceContinuation(managed, userMessage.id)
+      this.persistSession(managed)
+      return
+    }
     if (managed.stopRequested || managed.processingGeneration !== generationAtEntry) {
       return
     }
@@ -7434,6 +7614,11 @@ export class SessionManager implements ISessionManager {
 
     sessionLog.info('Cancelling processing for session:', sessionId, silent ? '(silent)' : '')
 
+    // Stop is authoritative over an automatic source continuation. Clear both
+    // the not-yet-fired timer and any usage accumulator waiting to cross that
+    // logical boundary so the cancelled task cannot resurrect itself.
+    this.discardPendingSourceContinuation(managed)
+
     // Composer items go back to the input. Send-now / steer follow-ups are
     // already in the transcript (`isQueued === false`) and must stay there.
     const stillQueuedEntries = managed.messageQueue.filter((entry) => {
@@ -7565,6 +7750,9 @@ export class SessionManager implements ISessionManager {
         await stopManagedTree(child, orchestrationId)
       }
 
+      // This also catches the idle gap after a source continuation queue item
+      // was popped but before its setImmediate replay starts.
+      this.discardPendingSourceContinuation(managed)
       this.updateOrchestrationMetadata(managed, {
         orchestrationStatus: 'stopped',
         orchestrationBlocker: 'Swarm stopped by user',
@@ -7842,6 +8030,8 @@ export class SessionManager implements ISessionManager {
     reason: 'complete' | 'interrupted' | 'error' | 'timeout'
   ): Promise<void> {
     const sessionId = managed.id
+    let completedTurnTokens: number | undefined
+    let swarmTurnUsageRecorded = false
 
     const regenerateOutcome = await this.settleRegenerateTransaction(managed, reason)
     const completionReason = regenerateOutcome.reason
@@ -7851,20 +8041,60 @@ export class SessionManager implements ISessionManager {
     if (managed.activeTurnUsage) {
       const pendingSourceContinuation = managed.autoRetryPending
       if (
+        completionReason === 'complete' &&
+        !managed.stopRequested &&
         pendingSourceContinuation &&
         !pendingSourceContinuation.committed &&
         Date.now() < pendingSourceContinuation.deadlineMs
       ) {
-        managed.pendingContinuationUsage = managed.activeTurnUsage
+        if (managed.messageQueue.length === 0) {
+          // The 100ms retry timer has not fired yet. Convert it into an internal
+          // queue item now so this logical task cannot cross a terminal boundary.
+          if (managed.autoRetryTimer) clearTimeout(managed.autoRetryTimer)
+          managed.autoRetryTimer = undefined
+          pendingSourceContinuation.committed = true
+          managed.pendingContinuationUsage = managed.activeTurnUsage
+          managed.messageQueue.push({
+            message: pendingSourceContinuation.content,
+            options: { hidden: true },
+            isSourceContinuation: true,
+          })
+        } else {
+          // A real queued follow-up preempts an uncommitted automatic retry.
+          if (managed.autoRetryTimer) clearTimeout(managed.autoRetryTimer)
+          managed.autoRetryTimer = undefined
+          managed.autoRetryPending = undefined
+        }
       }
       if (!managed.tokenUsage) {
         managed.tokenUsage = { ...DEFAULT_TOKEN_USAGE }
       }
       managed.tokenUsage.lastTurn = finalizeTurnUsage(managed.activeTurnUsage, Date.now())
+      completedTurnTokens = managed.tokenUsage.lastTurn.totalTokens
+      if (managed.pendingContinuationUsage === managed.activeTurnUsage) {
+        // The automatic continuation reuses this accumulator and debits the
+        // whole logical task at its final boundary. Charging this segment now
+        // would count the carried tokens twice.
+        completedTurnTokens = 0
+      }
       delete managed.tokenUsage.currentTurn
       managed.activeTurnUsage = undefined
       managed.activeTurnSawUsageUpdate = undefined
       managed.activeTurnSawModelCallStart = undefined
+    }
+
+    if (isSpawnedSwarmAgent(managed) && managed.orchestrationStatus === 'need-to-check') {
+      // A live usage update may have stopped this agent at the model-call
+      // boundary. Persist the just-finished turn even though terminal Swarm
+      // propagation intentionally ignores non-running sessions.
+      this.recordSwarmAgentTokenUsage(managed, managed.tokenUsage, completedTurnTokens)
+      swarmTurnUsageRecorded = true
+      if (managed.orchestrationLifecycle === 'managed' && managed.parentSessionId) {
+        const parent = this.sessions.get(managed.parentSessionId)
+        if (parent && parent.orchestrationId === managed.orchestrationId) {
+          this.refreshSwarmSessionState(parent)
+        }
+      }
     }
 
     // A stopped Pi turn can still have parallel tool/LLM work resolving in its
@@ -7956,6 +8186,11 @@ export class SessionManager implements ISessionManager {
 
     // 5. Check queue and process or complete
     if (managed.messageQueue.length > 0) {
+      // Regular queued messages begin a separate turn, but this branch does not
+      // emit SessionCompletionEvent. Persist the finished turn's debit first.
+      if (!swarmTurnUsageRecorded) {
+        this.recordSwarmAgentTokenUsage(managed, managed.tokenUsage, completedTurnTokens)
+      }
       // Has queued messages - process next
       void this.processNextQueuedMessage(sessionId)
     } else {
@@ -8002,6 +8237,7 @@ export class SessionManager implements ISessionManager {
           ? managed.messages.find(m => m.id === currentFinalMessageId)?.content
           : undefined,
         tokenUsage: managed.tokenUsage,
+        turnTokens: completedTurnTokens,
       })
       // spawn_session completions that arrived mid-turn never reached the model
       // (the tool already returned `started`). Wake now that the parent is idle.
@@ -8126,7 +8362,11 @@ export class SessionManager implements ISessionManager {
         next.attachments,
         next.storedAttachments,
         next.options,
-        next.messageId
+        next.messageId,
+        undefined,
+        undefined,
+        undefined,
+        next.isSourceContinuation === true,
       ).catch(err => {
         sessionLog.error('replay failed', {
           sessionId,
@@ -8370,7 +8610,7 @@ export class SessionManager implements ISessionManager {
       elapsedSeconds: coordinatorStartedAt === undefined
         ? 0
         : Math.max(0, Math.round(((coordinator.orchestrationStatus === 'running' ? now : coordinatorEndedAt ?? now) - coordinatorStartedAt) / 1000)),
-      tokensUsed: coordinator.orchestrationTokensUsed ?? 0,
+      tokensUsed: 0,
       lifecycle: 'managed',
       blocker: coordinator.orchestrationBlocker,
     }
@@ -8383,6 +8623,9 @@ export class SessionManager implements ISessionManager {
             : child.orchestrationStatus ?? 'running'
       const startedAt = task?.startTime ?? child.createdAt ?? now
       const endedAt = status === 'running' ? now : task?.completedAt ?? now
+      // A budget stop marks the node need-to-check before the interrupted turn
+      // is durably settled. Keep showing that in-flight usage during the gap.
+      const budgetState = getSwarmAgentBudgetState(child)
       return {
         sessionId: child.id,
         parentSessionId: child.parentSessionId,
@@ -8392,7 +8635,8 @@ export class SessionManager implements ISessionManager {
         status,
         depth: child.orchestrationDepth ?? 1,
         elapsedSeconds: Math.max(0, Math.round((endedAt - startedAt) / 1000)),
-        tokensUsed: child.tokenUsage?.totalTokens ?? 0,
+        tokensUsed: budgetState.projectedTokensUsed,
+        tokenBudget: FIXED_SWARM_TOKEN_BUDGET,
         lifecycle: child.orchestrationLifecycle ?? 'managed',
         blocker: task?.status === 'orphaned'
           ? task.blocker ?? 'Worker lifecycle is orphaned'
@@ -8400,6 +8644,11 @@ export class SessionManager implements ISessionManager {
         summary,
       }
     })
+
+    const highestAgentTokensUsed = nodes.reduce(
+      (highest, node) => Math.max(highest, node.tokensUsed),
+      0,
+    )
 
     return {
       orchestrationId,
@@ -8411,8 +8660,9 @@ export class SessionManager implements ISessionManager {
         lineageViolations.length > 0 ? `${lineageViolations.length} worker(s) were excluded because workspace or project ownership did not match` : undefined,
         disconnected.length > 0 ? `${disconnected.length} worker(s) were excluded because their parent lineage was disconnected` : undefined,
       ].filter(Boolean).join('\n') || undefined,
-      tokensUsed: coordinator.orchestrationTokensUsed ?? 0,
+      tokensUsed: highestAgentTokensUsed,
       tokenBudget: FIXED_SWARM_TOKEN_BUDGET,
+      tokenBudgetScope: 'agent',
       nodes: [coordinatorNode, ...nodes],
     }
   }
@@ -8598,14 +8848,18 @@ export class SessionManager implements ISessionManager {
       && info.status === 'running'
       && childIds.has(info.taskId)
     )
-    const budgetOwner = this.sessions.get(session.orchestrationRootSessionId ?? session.id) ?? session
-    const budget = FIXED_SWARM_TOKEN_BUDGET
-    const tokensUsed = budgetOwner.orchestrationTokensUsed ?? 0
-    if (session.id === budgetOwner.id && budget !== undefined && tokensUsed >= budget) {
+    const budgetState = getSwarmAgentBudgetState(session)
+    if (isSpawnedSwarmAgent(session) && budgetState.projectedTokensUsed >= budgetState.budget) {
       this.updateOrchestrationMetadata(session, {
         orchestrationStatus: 'need-to-check',
-        orchestrationBlocker: `Swarm token budget reached: ${tokensUsed}/${budget}`,
+        orchestrationBlocker: `Swarm agent token budget reached: ${budgetState.projectedTokensUsed}/${budgetState.budget}`,
       })
+      if (session.orchestrationLifecycle === 'managed' && session.parentSessionId) {
+        const parent = this.sessions.get(session.parentSessionId)
+        if (parent && parent.orchestrationId === session.orchestrationId) {
+          this.refreshSwarmSessionState(parent)
+        }
+      }
       return
     }
     const runningChild = children.find(child => child.orchestrationStatus === 'running')
@@ -8660,7 +8914,8 @@ export class SessionManager implements ISessionManager {
     const managed = this.sessions.get(evt.sessionId)
     if (!managed?.orchestrationId) return false
     if (managed.orchestrationStatus !== 'running') return false
-    const eventKey = `${evt.sessionId}:${evt.finalMessageId ?? `${managed.processingGeneration}:${evt.reason}:${evt.finalText ?? ''}`}`
+    if (evt.generation !== managed.processingGeneration) return false
+    const eventKey = `${evt.sessionId}:${evt.generation}`
     if (this.processedSwarmCompletionEvents.has(eventKey)) return false
     this.processedSwarmCompletionEvents.add(eventKey)
     // This guard is intentionally bounded; terminal child state remains the
@@ -8669,29 +8924,30 @@ export class SessionManager implements ISessionManager {
       const oldest = this.processedSwarmCompletionEvents.values().next().value
       if (oldest) this.processedSwarmCompletionEvents.delete(oldest)
     }
-    if (managed.orchestrationLifecycle !== 'detached' && evt.tokenUsage) {
-      const cumulative = Math.max(0, evt.tokenUsage.totalTokens ?? 0)
-      const previous = this.swarmAccountedTokens.get(managed.id) ?? 0
-      const delta = Math.max(0, cumulative - previous)
-      this.swarmAccountedTokens.set(managed.id, cumulative)
-      if (delta > 0) {
-        const root = this.sessions.get(managed.orchestrationRootSessionId ?? managed.id) ?? managed
-        const tokensUsed = (root.orchestrationTokensUsed ?? 0) + delta
-        const budget = FIXED_SWARM_TOKEN_BUDGET
-        this.updateOrchestrationMetadata(root, {
-          orchestrationTokensUsed: tokensUsed,
-          ...(budget !== undefined && tokensUsed >= budget
-            ? {
-                orchestrationStatus: 'need-to-check' as const,
-                orchestrationBlocker: `Swarm token budget reached: ${tokensUsed}/${budget}`,
-              }
-            : {}),
-        })
-      }
-    }
+    this.recordSwarmAgentTokenUsage(managed, evt.tokenUsage, evt.turnTokens)
     this.swarmTurnCompletions.set(managed.id, evt)
     this.refreshSwarmSessionState(managed)
     return true
+  }
+
+  private recordSwarmAgentTokenUsage(
+    managed: ManagedSession,
+    tokenUsage: SessionTokenUsage | undefined,
+    turnTokens: number | undefined,
+  ): void {
+    if (!isSpawnedSwarmAgent(managed) || !tokenUsage) return
+    const previous = managed.orchestrationTokensUsed ?? 0
+    // Modern runtimes expose the true per-turn aggregate. Add that durable
+    // debit so context compaction cannot make the counter move backwards.
+    // Legacy runtimes only expose a non-monotonic session snapshot, where a
+    // high-water mark is the safest compatible fallback.
+    const cumulative = turnTokens === undefined
+      ? Math.max(previous, Math.max(0, tokenUsage.totalTokens ?? 0))
+      : previous + Math.max(0, turnTokens)
+    this.updateOrchestrationMetadata(managed, {
+      orchestrationTokensUsed: cumulative,
+      orchestrationTokenBudget: FIXED_SWARM_TOKEN_BUDGET,
+    })
   }
 
   private assertSpawnPermissionAndProject(
@@ -8772,7 +9028,19 @@ export class SessionManager implements ISessionManager {
     const lifecycle = request.lifecycle ?? 'managed'
     const role = request.role ?? 'worker'
     const parentDepth = managed.orchestrationDepth ?? 0
-    const startsNewRootRun = !managed.parentSessionId
+    const spawnedAgent = isSpawnedSwarmAgent(managed)
+    const budgetState = getSwarmAgentBudgetState(managed)
+    if (spawnedAgent && budgetState.projectedTokensUsed >= budgetState.budget) {
+      const blocker = `Swarm agent token budget reached: ${budgetState.projectedTokensUsed}/${budgetState.budget}`
+      this.updateOrchestrationMetadata(managed, {
+        orchestrationStatus: 'need-to-check',
+        orchestrationBlocker: blocker,
+        orchestrationTokenBudget: FIXED_SWARM_TOKEN_BUDGET,
+      })
+      throw new Error(blocker)
+    }
+
+    const startsNewRootRun = !spawnedAgent
       && (!managed.orchestrationId
         || managed.orchestrationStatus === 'completed'
         || managed.orchestrationStatus === 'stopped')
@@ -8793,18 +9061,6 @@ export class SessionManager implements ISessionManager {
           }
         : {}),
     })
-
-    const budgetOwner = this.sessions.get(rootSessionId) ?? managed
-    const budget = FIXED_SWARM_TOKEN_BUDGET
-    const tokensUsed = budgetOwner.orchestrationTokensUsed ?? 0
-    if (budget !== undefined && tokensUsed >= budget) {
-      const blocker = `Swarm token budget reached: ${tokensUsed}/${budget}`
-      this.updateOrchestrationMetadata(budgetOwner, {
-        orchestrationStatus: 'need-to-check',
-        orchestrationBlocker: blocker,
-      })
-      throw new Error(blocker)
-    }
 
     const limit = assessSwarmSpawnLimits({
       sessions: this.sessions.values(),
@@ -8852,6 +9108,8 @@ export class SessionManager implements ISessionManager {
         orchestrationRole: role,
         orchestrationLifecycle: lifecycle,
         orchestrationStatus: 'running',
+        orchestrationTokensUsed: 0,
+        orchestrationTokenBudget: FIXED_SWARM_TOKEN_BUDGET,
       })
     } finally {
       releaseReservation()
@@ -9036,16 +9294,6 @@ export class SessionManager implements ISessionManager {
       && !child.taskNodeId
     )
     if (children.length === 0 || children.some(child => child.orchestrationStatus === 'running')) return
-    const budgetOwner = this.sessions.get(managed.orchestrationRootSessionId ?? managed.id) ?? managed
-    const budget = FIXED_SWARM_TOKEN_BUDGET
-    const tokensUsed = budgetOwner.orchestrationTokensUsed ?? 0
-    if (budget !== undefined && tokensUsed >= budget) {
-      this.updateOrchestrationMetadata(budgetOwner, {
-        orchestrationStatus: 'need-to-check',
-        orchestrationBlocker: `Swarm token budget reached: ${tokensUsed}/${budget}`,
-      })
-      return
-    }
     const blockedChild = children.find(child =>
       child.orchestrationStatus === 'need-to-check' || child.orchestrationStatus === 'stopped'
     )
@@ -9652,7 +9900,7 @@ export class SessionManager implements ISessionManager {
   async updateSwarmTokenBudget(sessionId: string, _tokenBudget: number): Promise<void> {
     const managed = this.sessions.get(sessionId)
     if (!managed) throw new Error(`Session ${sessionId} not found`)
-    throw new Error(`Swarm token budget is fixed at ${FIXED_SWARM_TOKEN_BUDGET} tokens`)
+    throw new Error(`Each Swarm agent token budget is fixed at ${FIXED_SWARM_TOKEN_BUDGET} tokens`)
   }
 
   setOrchestrationStatus(
@@ -10729,6 +10977,16 @@ export class SessionManager implements ISessionManager {
           if (!current) return
           current.autoRetryTimer = undefined
 
+          // A callback already dequeued by the event loop can outlive
+          // clearTimeout(). Stop or replacement of its pending slot still wins.
+          if (
+            current.stopRequested
+            || current.autoRetryPending?.content !== messageWithSuffix
+          ) {
+            sessionLog.info(`Auto-retry cancelled for ${sessionId}: pending continuation is no longer active`)
+            return
+          }
+
           // If a user follow-up arrived in the 100ms window, skip — they preempted us.
           if (current.messages.length > messageCountAtSchedule) {
             sessionLog.info(`Auto-retry skipped for ${sessionId}: follow-up message arrived first`)
@@ -10839,6 +11097,28 @@ export class SessionManager implements ISessionManager {
             sessionId: managed.id,
             tokenUsage: managed.tokenUsage,
           }, workspaceId)
+
+          const budgetState = getSwarmAgentBudgetState(managed)
+          if (
+            isSpawnedSwarmAgent(managed)
+            && managed.orchestrationStatus === 'running'
+            && budgetState.projectedTokensUsed >= budgetState.budget
+          ) {
+            const blocker = `Swarm agent token budget reached: ${budgetState.projectedTokensUsed}/${budgetState.budget}`
+            this.updateOrchestrationMetadata(managed, {
+              orchestrationStatus: 'need-to-check',
+              orchestrationBlocker: blocker,
+              orchestrationTokenBudget: FIXED_SWARM_TOKEN_BUDGET,
+            })
+            // A budget stop must not schedule a hidden source continuation.
+            if (managed.autoRetryTimer) clearTimeout(managed.autoRetryTimer)
+            managed.autoRetryTimer = undefined
+            managed.autoRetryPending = undefined
+            managed.pendingContinuationUsage = undefined
+            // Provider usage arrives only after an atomic model call, so that
+            // call may cross the exact ceiling. Stop before any later call/tool.
+            await this.cancelProcessing(managed.id, true)
+          }
         }
         break
 

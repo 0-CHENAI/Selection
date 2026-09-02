@@ -24,7 +24,11 @@ export type {
 } from './types.ts';
 
 // Field constants
-export { SESSION_PERSISTENT_FIELDS, isSharedProjectMemoryEnabled } from './types.ts';
+export {
+  SESSION_PERSISTENT_FIELDS,
+  isSharedProjectMemoryEnabled,
+  isSpawnedSwarmAgent,
+} from './types.ts';
 
 // Storage functions
 export {

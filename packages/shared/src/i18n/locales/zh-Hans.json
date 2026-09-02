@@ -1652,6 +1652,7 @@
   "swarm.lifecycleManaged": "受管",
   "swarm.noRunDetails": "暂无 Swarm 运行详情。",
   "swarm.openWorker": "打开",
+  "swarm.perAgentTokensBudgeted": "子代理最高用量：{{used}} / {{budget}} token · 每个子代理独立计算",
   "swarm.roleCoordinator": "协调器",
   "swarm.roleReviewer": "复核者",
   "swarm.roleWorker": "Worker",

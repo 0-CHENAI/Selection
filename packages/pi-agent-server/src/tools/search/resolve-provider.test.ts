@@ -3,7 +3,8 @@ import { resolveSearchProvider } from './resolve-provider.ts';
 import { ResponsesApiSearchProvider } from './providers/openai.ts';
 import { ChatGPTBackendSearchProvider } from './providers/chatgpt.ts';
 import { GoogleSearchProvider } from './providers/google.ts';
-import { DDGSearchProvider } from './providers/ddg.ts';
+import { UnavailableSearchProvider } from './providers/unavailable.ts';
+import { createSearchTool } from './create-search-tool.ts';
 
 /** Build a minimal JWT with a chatgpt_account_id claim. */
 function makeJwt(accountId: string): string {
@@ -56,7 +57,7 @@ describe('resolveSearchProvider', () => {
     expect(provider.name).toBe('ChatGPT');
   });
 
-  it('falls back to DDG for openai-codex + oauth with malformed JWT', () => {
+  it('returns unavailable for openai-codex + oauth with malformed JWT', () => {
     const provider = resolveSearchProvider({
       provider: 'openai-codex',
       credential: {
@@ -67,16 +68,16 @@ describe('resolveSearchProvider', () => {
       },
     });
 
-    expect(provider).toBeInstanceOf(DDGSearchProvider);
+    expect(provider).toBeInstanceOf(UnavailableSearchProvider);
   });
 
-  it('falls back to DDG for openai-codex + api_key with malformed non-JWT token', () => {
+  it('returns unavailable for openai-codex + api_key with malformed non-JWT token', () => {
     const provider = resolveSearchProvider({
       provider: 'openai-codex',
       credential: { type: 'api_key', key: 'not-a-jwt' },
     });
 
-    expect(provider).toBeInstanceOf(DDGSearchProvider);
+    expect(provider).toBeInstanceOf(UnavailableSearchProvider);
   });
 
   // --- OpenRouter ---
@@ -102,9 +103,9 @@ describe('resolveSearchProvider', () => {
     expect(provider).toBeInstanceOf(GoogleSearchProvider);
   });
 
-  // --- Fallback cases ---
+  // --- Unsupported connection cases ---
 
-  it('falls back to DDG for openai + oauth (no ChatGPT backend for plain openai)', () => {
+  it('returns unavailable for openai + oauth (no ChatGPT backend for plain openai)', () => {
     const provider = resolveSearchProvider({
       provider: 'openai',
       credential: {
@@ -115,33 +116,41 @@ describe('resolveSearchProvider', () => {
       },
     });
 
-    expect(provider).toBeInstanceOf(DDGSearchProvider);
+    expect(provider).toBeInstanceOf(UnavailableSearchProvider);
   });
 
-  it('falls back to DDG when provider is unknown', () => {
+  it('returns unavailable when provider is unknown', () => {
     const provider = resolveSearchProvider({
       provider: 'unknown',
       credential: { type: 'api_key', key: 'x' },
     });
 
-    expect(provider).toBeInstanceOf(DDGSearchProvider);
+    expect(provider).toBeInstanceOf(UnavailableSearchProvider);
   });
 
-  it('falls back to DDG when key is empty', () => {
+  it('returns unavailable when key is empty', () => {
     const provider = resolveSearchProvider({
       provider: 'openai',
       credential: { type: 'api_key', key: '' },
     });
 
-    expect(provider).toBeInstanceOf(DDGSearchProvider);
+    expect(provider).toBeInstanceOf(UnavailableSearchProvider);
   });
 
-  it('falls back to DDG when no piAuth is provided', () => {
-    expect(resolveSearchProvider()).toBeInstanceOf(DDGSearchProvider);
-    expect(resolveSearchProvider(undefined)).toBeInstanceOf(DDGSearchProvider);
+  it('returns unavailable when no piAuth is provided', () => {
+    expect(resolveSearchProvider()).toBeInstanceOf(UnavailableSearchProvider);
+    expect(resolveSearchProvider(undefined)).toBeInstanceOf(UnavailableSearchProvider);
   });
 
-  it('falls back to DDG for github-copilot (no search API available)', () => {
+  it('returns a structured tool error instead of using an implicit network fallback', async () => {
+    const tool = createSearchTool(resolveSearchProvider());
+    const result = await tool.execute('tool-unavailable', { query: 'private query' });
+
+    expect(result.details?.isError).toBe(true);
+    expect((result.content[0] as any).text).toContain('no configured provider-native search support');
+  });
+
+  it('returns unavailable for github-copilot (no search API available)', () => {
     const provider = resolveSearchProvider({
       provider: 'github-copilot',
       credential: {
@@ -152,15 +161,15 @@ describe('resolveSearchProvider', () => {
       },
     });
 
-    expect(provider).toBeInstanceOf(DDGSearchProvider);
+    expect(provider).toBeInstanceOf(UnavailableSearchProvider);
   });
 
-  it('falls back to DDG for vercel-ai-gateway (not yet wired for provider-native search)', () => {
+  it('returns unavailable for vercel-ai-gateway (not yet wired for provider-native search)', () => {
     const provider = resolveSearchProvider({
       provider: 'vercel-ai-gateway',
       credential: { type: 'api_key', key: 'vercel-test-key' },
     });
 
-    expect(provider).toBeInstanceOf(DDGSearchProvider);
+    expect(provider).toBeInstanceOf(UnavailableSearchProvider);
   });
 });

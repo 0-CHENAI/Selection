@@ -26,6 +26,11 @@ type SpawnInternals = {
   sendMessage: SessionManager['sendMessage']
   keepBackgroundTasksAlive: boolean
   onSessionComplete: SessionManager['onSessionComplete']
+  processNextQueuedMessage: (sessionId: string) => Promise<void>
+  processEvent: (
+    managed: ReturnType<typeof createManagedSession>,
+    event: { type: 'usage_update'; usage: { inputTokens: number; outputTokens: number } },
+  ) => Promise<void>
   stopSwarm: SessionManager['stopSwarm']
   getSwarmRunDetails: SessionManager['getSwarmRunDetails']
   updateSessionSwarmEnabled: SessionManager['updateSessionSwarmEnabled']
@@ -111,6 +116,8 @@ describe('SessionManager spawn_session wait/background', () => {
           orchestrationRole: options?.orchestrationRole,
           orchestrationLifecycle: options?.orchestrationLifecycle,
           orchestrationStatus: options?.orchestrationStatus,
+          orchestrationTokensUsed: options?.orchestrationTokensUsed,
+          orchestrationTokenBudget: options?.orchestrationTokenBudget,
         },
         parent.workspace,
         { messagesLoaded: true },
@@ -128,13 +135,21 @@ describe('SessionManager spawn_session wait/background', () => {
     }
   }
 
-  function emitChild(reason: SessionCompletionEvent['reason'], finalText?: string, childId = 'child', totalTokens?: number) {
+  function emitChild(
+    reason: SessionCompletionEvent['reason'],
+    finalText?: string,
+    childId = 'child',
+    totalTokens?: number,
+    options?: { finalMessageId?: string; lastTurnTokens?: number },
+  ) {
     internals(sm).emitSessionComplete({
       sessionId: childId,
       workspaceId: 'ws_test',
       generation: internals(sm).sessions.get(childId)?.processingGeneration ?? 0,
       reason,
       finalText,
+      finalMessageId: options?.finalMessageId,
+      turnTokens: options?.lastTurnTokens,
       ...(totalTokens === undefined ? {} : {
         tokenUsage: {
           inputTokens: totalTokens,
@@ -142,6 +157,20 @@ describe('SessionManager spawn_session wait/background', () => {
           totalTokens,
           contextTokens: totalTokens,
           costUsd: 0,
+          ...(options?.lastTurnTokens === undefined ? {} : {
+            lastTurn: {
+              inputTokens: options.lastTurnTokens,
+              outputTokens: 0,
+              totalTokens: options.lastTurnTokens,
+              cacheReadTokens: 0,
+              cacheCreationTokens: 0,
+              costUsd: 0,
+              modelCallCount: 1,
+              wallClockMs: 1,
+              startedAt: Date.now() - 1,
+              completedAt: Date.now(),
+            },
+          }),
         },
       }),
     })
@@ -181,12 +210,36 @@ describe('SessionManager spawn_session wait/background', () => {
       orchestrationLifecycle: 'managed',
       orchestrationStatus: 'running',
     }, parent.workspace, { messagesLoaded: true })
+    child.orchestrationTokensUsed = 240_000
+    child.orchestrationTokenBudget = FIXED_SWARM_TOKEN_BUDGET
+    child.tokenUsage = {
+      inputTokens: 8_000,
+      outputTokens: 2_000,
+      totalTokens: 250_000,
+      contextTokens: 8_000,
+      costUsd: 0,
+      currentTurn: {
+        inputTokens: 8_000,
+        outputTokens: 2_000,
+        totalTokens: 10_000,
+        cacheReadTokens: 0,
+        cacheCreationTokens: 0,
+        costUsd: 0,
+        modelCallCount: 1,
+        wallClockMs: 5,
+        startedAt: Date.now() - 5,
+        updatedAt: Date.now(),
+      },
+    }
     internals(sm).sessions.set(child.id, child)
 
     internals(sm).recoverPersistedSwarmSessions()
 
     expect(parent.orchestrationStatus).toBe('need-to-check')
     expect(child.orchestrationStatus).toBe('need-to-check')
+    expect(child.orchestrationTokensUsed).toBe(250_000)
+    expect(child.tokenUsage?.currentTurn).toBeUndefined()
+    expect(child.tokenUsage?.lastTurn?.totalTokens).toBe(10_000)
     expect(parent.backgroundTaskRegistry.get(child.id)).toMatchObject({
       status: 'failed',
       source: 'spawn_session',
@@ -452,6 +505,26 @@ describe('SessionManager spawn_session wait/background', () => {
     const orchestrationId = result.orchestrationId!
     const child = internals(sm).sessions.get('child')!
     child.model = 'worker-model'
+    child.orchestrationTokensUsed = 84
+    child.tokenUsage = {
+      inputTokens: 0,
+      outputTokens: 0,
+      totalTokens: 0,
+      contextTokens: 0,
+      costUsd: 0,
+      currentTurn: {
+        inputTokens: 16,
+        outputTokens: 0,
+        totalTokens: 16,
+        cacheReadTokens: 0,
+        cacheCreationTokens: 0,
+        costUsd: 0,
+        modelCallCount: 1,
+        wallClockMs: 1,
+        startedAt: Date.now() - 1,
+        updatedAt: Date.now(),
+      },
+    }
     parent.orchestrationTokensUsed = 42
     // Legacy metadata may contain an editable value; run details must ignore it.
     parent.orchestrationTokenBudget = 100
@@ -472,6 +545,8 @@ describe('SessionManager spawn_session wait/background', () => {
       orchestrationRole: 'worker',
       orchestrationLifecycle: 'managed',
       orchestrationStatus: 'completed',
+      orchestrationTokensUsed: 21,
+      orchestrationTokenBudget: FIXED_SWARM_TOKEN_BUDGET,
       model: 'nested-model',
       hidden: true,
     }, parent.workspace, { messagesLoaded: true })
@@ -500,12 +575,29 @@ describe('SessionManager spawn_session wait/background', () => {
       orchestrationId,
       rootSessionId: parent.id,
       coordinatorSessionId: parent.id,
-      tokensUsed: 42,
+      tokensUsed: 100,
       tokenBudget: FIXED_SWARM_TOKEN_BUDGET,
+      tokenBudgetScope: 'agent',
       nodes: [
-        { sessionId: parent.id, role: 'coordinator', depth: 0 },
-        { sessionId: child.id, role: 'reviewer', depth: 1, lifecycle: 'detached', summary: 'child summary' },
-        { sessionId: grandchild.id, role: 'worker', depth: 2, lifecycle: 'managed', summary: 'nested summary' },
+        { sessionId: parent.id, role: 'coordinator', depth: 0, tokensUsed: 0 },
+        {
+          sessionId: child.id,
+          role: 'reviewer',
+          depth: 1,
+          lifecycle: 'detached',
+          summary: 'child summary',
+          tokensUsed: 100,
+          tokenBudget: FIXED_SWARM_TOKEN_BUDGET,
+        },
+        {
+          sessionId: grandchild.id,
+          role: 'worker',
+          depth: 2,
+          lifecycle: 'managed',
+          summary: 'nested summary',
+          tokensUsed: 21,
+          tokenBudget: FIXED_SWARM_TOKEN_BUDGET,
+        },
       ],
     })
     expect(internals(sm).getSwarmRunDetails(child.id, parent.workspace.id)).toBeNull()
@@ -635,31 +727,309 @@ describe('SessionManager spawn_session wait/background', () => {
     expect(sendCalls).toHaveLength(1)
   })
 
-  it('accounts temporary Swarm tokens once and enforces the immutable 256 Ki budget', async () => {
+  it('gives each spawned agent an independent immutable 256 Ki token budget', async () => {
     const parent = buildParent()
     parent.swarmEnabled = true
-    stubCreateChild()
-    await internals(sm).spawnSessionFromTool(parent, {
-      prompt: 'Find auth flows',
-      mode: 'background',
-      spawnReason: 'user-requested',
-    })
+    let nextChild = 0
+    stubCreateChild(() => `child-${++nextChild}`)
+    for (let index = 1; index <= 3; index++) {
+      await internals(sm).spawnSessionFromTool(parent, {
+        prompt: `Independent task ${index}`,
+        mode: 'background',
+        spawnReason: 'user-requested',
+      })
+    }
     expect(parent.orchestrationTokenBudget).toBe(FIXED_SWARM_TOKEN_BUDGET)
-    emitChild('complete', 'done', 'child', FIXED_SWARM_TOKEN_BUDGET)
-    emitChild('complete', 'done', 'child', FIXED_SWARM_TOKEN_BUDGET)
+    for (let index = 1; index <= 3; index++) {
+      const child = internals(sm).sessions.get(`child-${index}`)!
+      expect(child.orchestrationTokensUsed).toBe(0)
+      expect(child.orchestrationTokenBudget).toBe(FIXED_SWARM_TOKEN_BUDGET)
+      child.isProcessing = false
+      emitChild('complete', 'done', child.id, 100_000)
+    }
     await flush()
 
-    expect(parent.orchestrationTokensUsed).toBe(FIXED_SWARM_TOKEN_BUDGET)
-    expect(parent.orchestrationStatus).toBe('need-to-check')
-    expect(parent.orchestrationBlocker).toContain(`${FIXED_SWARM_TOKEN_BUDGET}/${FIXED_SWARM_TOKEN_BUDGET}`)
+    expect(parent.orchestrationTokensUsed).toBe(0)
+    expect(parent.orchestrationBlocker).toBeUndefined()
+    for (let index = 1; index <= 3; index++) {
+      expect(internals(sm).sessions.get(`child-${index}`)?.orchestrationTokensUsed).toBe(100_000)
+    }
+
+    // The siblings used 300K in total, but that must not exhaust a shared root budget.
+    internals(sm).issueSpawnQualificationCredentials(parent, 'user-requested', 1)
     await expect(internals(sm).spawnSessionFromTool(parent, {
-      prompt: 'Another worker',
+      prompt: 'Another independent worker',
+      mode: 'background',
       spawnReason: 'user-requested',
-    })).rejects.toThrow('token budget reached')
+    })).resolves.toMatchObject({ status: 'started', sessionId: 'child-4' })
 
     await expect(internals(sm).updateSwarmTokenBudget(parent.id, FIXED_SWARM_TOKEN_BUDGET * 2))
       .rejects.toThrow(`fixed at ${FIXED_SWARM_TOKEN_BUDGET}`)
     expect(parent.orchestrationTokenBudget).toBe(FIXED_SWARM_TOKEN_BUDGET)
+  })
+
+  it('blocks only the agent that reaches its budget and keeps sibling capacity available', async () => {
+    const parent = buildParent()
+    parent.swarmEnabled = true
+    let nextChild = 0
+    stubCreateChild(() => `child-${++nextChild}`)
+    await internals(sm).spawnSessionFromTool(parent, {
+      prompt: 'Budgeted task',
+      mode: 'background',
+      spawnReason: 'user-requested',
+    })
+
+    emitChild('complete', 'done', 'child-1', FIXED_SWARM_TOKEN_BUDGET)
+    await flush()
+
+    const exhausted = internals(sm).sessions.get('child-1')!
+    expect(exhausted.orchestrationTokensUsed).toBe(FIXED_SWARM_TOKEN_BUDGET)
+    expect(exhausted.orchestrationStatus).toBe('need-to-check')
+    expect(exhausted.orchestrationBlocker).toContain(`${FIXED_SWARM_TOKEN_BUDGET}/${FIXED_SWARM_TOKEN_BUDGET}`)
+    expect(parent.orchestrationTokensUsed).toBe(0)
+
+    internals(sm).issueSpawnQualificationCredentials(parent, 'user-requested', 1)
+    await expect(internals(sm).spawnSessionFromTool(parent, {
+      prompt: 'Healthy sibling',
+      mode: 'background',
+      spawnReason: 'user-requested',
+    })).resolves.toMatchObject({ status: 'started', sessionId: 'child-2' })
+    expect(internals(sm).sessions.get('child-2')).toMatchObject({
+      orchestrationTokensUsed: 0,
+      orchestrationTokenBudget: FIXED_SWARM_TOKEN_BUDGET,
+      orchestrationStatus: 'running',
+    })
+  })
+
+  it('does not apply a child-agent budget to a Conductor worker acting as the Swarm root', async () => {
+    const parent = buildParent()
+    parent.parentSessionId = 'board-session'
+    parent.orchestrationId = 'dag-worker-swarm'
+    parent.orchestrationRootSessionId = parent.id
+    parent.orchestrationDepth = 0
+    parent.orchestrationRole = 'coordinator'
+    parent.orchestrationStatus = 'running'
+    parent.orchestrationTokensUsed = FIXED_SWARM_TOKEN_BUDGET
+    parent.orchestrationTokenBudget = FIXED_SWARM_TOKEN_BUDGET
+    stubCreateChild()
+
+    await expect(internals(sm).spawnSessionFromTool(parent, {
+      prompt: 'Independent worker from a DAG node',
+      mode: 'background',
+      spawnReason: 'user-requested',
+    })).resolves.toMatchObject({ sessionId: 'child' })
+
+    expect(internals(sm).sessions.get('child')).toMatchObject({
+      orchestrationRootSessionId: parent.id,
+      orchestrationTokensUsed: 0,
+      orchestrationTokenBudget: FIXED_SWARM_TOKEN_BUDGET,
+    })
+  })
+
+  it('stops a spawned agent at the first model-call boundary that reaches its budget', async () => {
+    const parent = buildParent()
+    stubCreateChild()
+    await internals(sm).spawnSessionFromTool(parent, {
+      prompt: 'Budget boundary',
+      mode: 'background',
+      spawnReason: 'user-requested',
+    })
+    const child = internals(sm).sessions.get('child')!
+    child.orchestrationTokensUsed = 250_000
+    // Persisted values from older builds must not override the immutable cap.
+    child.orchestrationTokenBudget = FIXED_SWARM_TOKEN_BUDGET * 2
+    let aborted = false
+    child.agent = {
+      forceAbort: () => { aborted = true },
+      dispose: async () => {},
+    } as never
+
+    await internals(sm).processEvent(child, {
+      type: 'usage_update',
+      usage: { inputTokens: 13_000, outputTokens: 0 },
+    })
+
+    expect(aborted).toBe(true)
+    expect(child.stopRequested).toBe(true)
+    expect(child.orchestrationStatus).toBe('need-to-check')
+    expect(child.orchestrationTokenBudget).toBe(FIXED_SWARM_TOKEN_BUDGET)
+    expect(child.orchestrationBlocker).toContain('263000/262144')
+
+    internals(sm).issueSpawnQualificationCredentials(child, 'user-requested', 1)
+    internals(sm).createSession = async () => {
+      throw new Error('over-budget child reached session creation')
+    }
+    await expect(internals(sm).spawnSessionFromTool(child, {
+      prompt: 'Must not spawn after the live budget boundary',
+      mode: 'background',
+      spawnReason: 'user-requested',
+    })).rejects.toThrow('263000/262144')
+    expect(child.orchestrationStatus).toBe('need-to-check')
+    // The live turn is included in the gate but remains unsettled until the
+    // interrupted turn completes, so it must not be written twice here.
+    expect(child.orchestrationTokensUsed).toBe(250_000)
+
+    const liveNode = internals(sm).getSwarmRunDetails(parent.id, parent.workspace.id)
+      ?.nodes.find(node => node.sessionId === child.id)
+    expect(liveNode).toMatchObject({
+      status: 'need-to-check',
+      tokensUsed: 263_000,
+      tokenBudget: FIXED_SWARM_TOKEN_BUDGET,
+    })
+
+    child.messageQueue.push({ message: 'queued before budget stop' })
+    internals(sm).processNextQueuedMessage = async () => {}
+    await internals(sm).onProcessingStopped(child.id, 'interrupted')
+    expect(child.orchestrationTokensUsed).toBe(263_000)
+    expect(parent.orchestrationStatus).toBe('need-to-check')
+    await expect(SessionManager.prototype.sendMessage.call(
+      sm,
+      child.id,
+      'Must not start another model turn',
+    )).rejects.toThrow('263000/262144')
+  })
+
+  it('meters a detached agent independently without charging its parent', async () => {
+    const parent = buildParent()
+    stubCreateChild()
+    await internals(sm).spawnSessionFromTool(parent, {
+      prompt: 'Detached research',
+      mode: 'background',
+      lifecycle: 'detached',
+      spawnReason: 'user-requested',
+    })
+
+    emitChild('complete', 'done', 'child', FIXED_SWARM_TOKEN_BUDGET)
+    await flush()
+
+    expect(internals(sm).sessions.get('child')).toMatchObject({
+      orchestrationTokensUsed: FIXED_SWARM_TOKEN_BUDGET,
+      orchestrationTokenBudget: FIXED_SWARM_TOKEN_BUDGET,
+      orchestrationStatus: 'need-to-check',
+    })
+    expect(parent.orchestrationTokensUsed).toBe(0)
+    expect(parent.orchestrationBlocker).toBeUndefined()
+  })
+
+  it('adds per-turn usage so context compaction cannot reduce an agent debit', async () => {
+    const parent = buildParent()
+    stubCreateChild()
+    await internals(sm).spawnSessionFromTool(parent, {
+      prompt: 'Multi-turn nested coordinator',
+      mode: 'background',
+      spawnReason: 'user-requested',
+    })
+    const child = internals(sm).sessions.get('child')!
+
+    child.processingGeneration = 1
+    emitChild('complete', 'turn one', child.id, 90_000, {
+      finalMessageId: 'turn-1',
+      lastTurnTokens: 90_000,
+    })
+    expect(child.orchestrationTokensUsed).toBe(90_000)
+
+    // Simulate the child receiving another orchestration turn after compaction:
+    // the session snapshot shrinks, while lastTurn remains the authoritative debit.
+    child.orchestrationStatus = 'running'
+    child.processingGeneration = 2
+    emitChild('complete', 'turn two', child.id, 20_000, {
+      finalMessageId: 'turn-2',
+      lastTurnTokens: 20_000,
+    })
+    expect(child.orchestrationTokensUsed).toBe(110_000)
+
+    child.orchestrationStatus = 'running'
+    emitChild('complete', 'duplicate turn two', child.id, 20_000, {
+      finalMessageId: 'turn-2',
+      lastTurnTokens: 20_000,
+    })
+    expect(child.orchestrationTokensUsed).toBe(110_000)
+  })
+
+  it('debits every separate queued turn instead of only the final queue item', async () => {
+    const parent = buildParent()
+    stubCreateChild()
+    await internals(sm).spawnSessionFromTool(parent, {
+      prompt: 'Process queued turns',
+      mode: 'background',
+      spawnReason: 'user-requested',
+    })
+    const child = internals(sm).sessions.get('child')!
+    const turnUsage = (totalTokens: number) => ({
+      inputTokens: totalTokens,
+      outputTokens: 0,
+      totalTokens,
+      cacheReadTokens: 0,
+      cacheCreationTokens: 0,
+      costUsd: 0,
+      modelCallCount: 1,
+      startedAt: Date.now() - 1,
+    })
+
+    child.activeTurnUsage = turnUsage(40_000)
+    child.messageQueue.push({ message: 'next turn' })
+    internals(sm).processNextQueuedMessage = async () => {}
+    await internals(sm).onProcessingStopped(child.id, 'complete')
+    expect(child.orchestrationTokensUsed).toBe(40_000)
+
+    child.messageQueue = []
+    child.isProcessing = true
+    child.orchestrationStatus = 'running'
+    child.processingGeneration += 1
+    child.activeTurnUsage = turnUsage(20_000)
+    await internals(sm).onProcessingStopped(child.id, 'complete')
+    expect(child.orchestrationTokensUsed).toBe(60_000)
+  })
+
+  it('debits an automatic source continuation once at its final boundary', async () => {
+    const parent = buildParent()
+    stubCreateChild()
+    await internals(sm).spawnSessionFromTool(parent, {
+      prompt: 'Continue after source activation',
+      mode: 'background',
+      spawnReason: 'user-requested',
+    })
+    const child = internals(sm).sessions.get('child')!
+    const turnUsage = (totalTokens: number) => ({
+      inputTokens: totalTokens,
+      outputTokens: 0,
+      totalTokens,
+      cacheReadTokens: 0,
+      cacheCreationTokens: 0,
+      costUsd: 0,
+      modelCallCount: 1,
+      startedAt: Date.now() - 1,
+    })
+
+    child.activeTurnUsage = turnUsage(40_000)
+    child.autoRetryPending = {
+      content: 'retry',
+      deadlineMs: Date.now() + 2_000,
+      committed: false,
+    }
+    child.autoRetryTimer = setTimeout(() => {}, 5_000)
+    const firstGeneration = child.processingGeneration
+    await internals(sm).onProcessingStopped(child.id, 'complete')
+    expect(child.orchestrationTokensUsed).toBe(0)
+    expect(child.orchestrationStatus).toBe('running')
+    expect(child.autoRetryTimer).toBeUndefined()
+
+    // Finishing before the 100ms retry timer must synchronously convert the
+    // continuation into a queue replay instead of emitting a terminal event.
+    await flush()
+    expect(sendCalls.filter(call => call.id === child.id && call.msg === 'retry')).toHaveLength(1)
+    expect(child.processingGeneration).toBe(firstGeneration)
+
+    child.autoRetryPending = undefined
+    child.isProcessing = true
+    child.processingGeneration += 1
+    child.activeTurnUsage = child.pendingContinuationUsage ?? turnUsage(40_000)
+    child.pendingContinuationUsage = undefined
+    child.activeTurnUsage.totalTokens = 60_000
+    child.activeTurnUsage.inputTokens = 60_000
+    await internals(sm).onProcessingStopped(child.id, 'complete')
+    expect(child.orchestrationTokensUsed).toBe(60_000)
+    expect(child.orchestrationStatus).toBe('completed')
   })
 
   it('keeps the coordinator running until every managed child reaches a terminal state', () => {
@@ -709,6 +1079,7 @@ describe('SessionManager spawn_session wait/background', () => {
     expect(sendCalls.filter(call => call.id === parent.id)).toHaveLength(1)
     expect(parent.orchestrationStatus).toBe('running')
 
+    parent.processingGeneration += 1
     internals(sm).emitSessionComplete({
       sessionId: parent.id,
       workspaceId: parent.workspace.id,
@@ -827,6 +1198,7 @@ describe('SessionManager spawn_session wait/background', () => {
     expect(root.backgroundTaskRegistry.get(coordinator.id)?.status).toBe('running')
     expect(sendCalls.filter(call => call.id === coordinator.id)).toHaveLength(1)
 
+    coordinator.processingGeneration += 1
     internals(sm).emitSessionComplete({
       sessionId: coordinator.id,
       workspaceId: root.workspace.id,
@@ -903,6 +1275,7 @@ describe('SessionManager spawn_session wait/background', () => {
     expect(settled).toBe(false)
     expect(sendCalls.filter(call => call.id === coordinator.id)).toHaveLength(1)
 
+    coordinator.processingGeneration += 1
     internals(sm).emitSessionComplete({
       sessionId: coordinator.id,
       workspaceId: parent.workspace.id,
@@ -1211,6 +1584,22 @@ describe('SessionManager spawn_session wait/background', () => {
       orchestrationStatus: 'running',
     }, parent.workspace, { messagesLoaded: true })
     child.isProcessing = true
+    child.autoRetryPending = {
+      content: 'retry after source activation',
+      deadlineMs: Date.now() + 2_000,
+      committed: false,
+    }
+    child.autoRetryTimer = setTimeout(() => {}, 5_000)
+    child.pendingContinuationUsage = {
+      inputTokens: 100,
+      outputTokens: 0,
+      totalTokens: 100,
+      cacheReadTokens: 0,
+      cacheCreationTokens: 0,
+      costUsd: 0,
+      modelCallCount: 1,
+      startedAt: Date.now(),
+    }
     internals(sm).sessions.set(child.id, child)
     parent.backgroundTaskRegistry.set(child.id, {
       taskId: child.id,
@@ -1232,7 +1621,52 @@ describe('SessionManager spawn_session wait/background', () => {
     ])
     expect(parent.backgroundTaskRegistry.get(child.id)?.status).toBe('stopped')
     expect(child.orchestrationStatus).toBe('stopped')
+    expect(child.autoRetryTimer).toBeUndefined()
+    expect(child.autoRetryPending).toBeUndefined()
+    expect(child.pendingContinuationUsage).toBeUndefined()
+    expect(child.messageQueue).toEqual([])
     await expect(sm.getTaskOutput(child.id)).resolves.toBe('Swarm stopped by user')
+  })
+
+  it('clears an idle Swarm continuation that was popped before replay', async () => {
+    const root = buildParent('idle-replay-root')
+    const continuation = 'retry after source activation'
+    root.isProcessing = false
+    root.orchestrationId = 'orch-idle-replay'
+    root.orchestrationRootSessionId = root.id
+    root.orchestrationDepth = 0
+    root.orchestrationLifecycle = 'managed'
+    root.orchestrationStatus = 'running'
+    root.autoRetryPending = {
+      content: continuation,
+      deadlineMs: Date.now() + 2_000,
+      committed: true,
+    }
+    root.pendingContinuationUsage = {
+      inputTokens: 100,
+      outputTokens: 0,
+      totalTokens: 100,
+      cacheReadTokens: 0,
+      cacheCreationTokens: 0,
+      costUsd: 0,
+      modelCallCount: 1,
+      startedAt: Date.now(),
+    }
+    root.messages.push({
+      id: 'popped-source-continuation',
+      role: 'user',
+      content: continuation,
+      timestamp: Date.now(),
+      hidden: true,
+    })
+
+    const result = await internals(sm).stopSwarm(root.id)
+
+    expect(result.stoppedSessionIds).toEqual([root.id])
+    expect(internals(sm).sessions.get(root.id)?.orchestrationStatus).toBe('stopped')
+    expect(root.messages.some(message => message.content === continuation)).toBe(false)
+    expect(root.autoRetryPending).toBeUndefined()
+    expect(root.pendingContinuationUsage).toBeUndefined()
   })
 
   it('emits parent task_completed for a detached worker without waking aggregation', async () => {

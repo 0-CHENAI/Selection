@@ -1652,6 +1652,7 @@
   "swarm.lifecycleManaged": "Zarządzany",
   "swarm.noRunDetails": "Brak szczegółów uruchomienia Swarm.",
   "swarm.openWorker": "Otwórz",
+  "swarm.perAgentTokensBudgeted": "Najwyższe użycie agenta: {{used}} / {{budget}} tokenów · niezależnie dla każdego agenta",
   "swarm.roleCoordinator": "Koordynator",
   "swarm.roleReviewer": "Recenzent",
   "swarm.roleWorker": "Worker",

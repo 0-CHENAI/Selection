@@ -1652,6 +1652,7 @@
   "swarm.lifecycleManaged": "Felügyelt",
   "swarm.noRunDetails": "Nem érhetők el Swarm futási részletek.",
   "swarm.openWorker": "Megnyitás",
+  "swarm.perAgentTokensBudgeted": "Legmagasabb agenthasználat: {{used}} / {{budget}} token · agentenként független",
   "swarm.roleCoordinator": "Koordinátor",
   "swarm.roleReviewer": "Ellenőrző",
   "swarm.roleWorker": "Worker",

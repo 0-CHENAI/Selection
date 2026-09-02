@@ -283,4 +283,196 @@ describe('source_activated auto-retry', () => {
 
     expect(calls).toEqual([])
   })
+
+  it('timer-first retry reserves one queue slot and preserves continuation identity on replay', async () => {
+    const sessionId = 'timer-first-queued-replay'
+    const managed = buildSession(sessionId)
+    managed.isProcessing = true
+
+    await fireSourceActivated(sessionId, 'github', 'continue the task')
+    await new Promise(r => setTimeout(r, 150))
+
+    expect(managed.messageQueue).toHaveLength(1)
+    expect(managed.messageQueue[0]?.isSourceContinuation).toBe(true)
+    expect(managed.autoRetryPending?.committed).toBe(true)
+
+    const replayMarkers: boolean[] = []
+    ;(sm as unknown as {
+      sendMessage: (...args: unknown[]) => Promise<void>
+    }).sendMessage = async (...args) => {
+      replayMarkers.push(args[9] === true)
+    }
+    managed.isProcessing = false
+    await (sm as unknown as {
+      processNextQueuedMessage: (id: string) => Promise<void>
+    }).processNextQueuedMessage(sessionId)
+    await new Promise<void>(resolve => setImmediate(resolve))
+
+    expect(replayMarkers).toEqual([true])
+  })
+
+  it('explicit Stop before the retry timer prevents finish-first resurrection', async () => {
+    const sessionId = 'stop-before-timer'
+    const managed = buildSession(sessionId)
+    managed.isProcessing = true
+    managed.processingGeneration = 1
+    managed.activeTurnUsage = {
+      inputTokens: 1_000,
+      outputTokens: 200,
+      totalTokens: 1_200,
+      cacheReadTokens: 0,
+      cacheCreationTokens: 0,
+      costUsd: 0,
+      modelCallCount: 1,
+      startedAt: Date.now(),
+    }
+    managed.agent = { forceAbort: () => {}, dispose: async () => {} } as never
+
+    await fireSourceActivated(sessionId, 'github', 'continue the task')
+    await sm.cancelProcessing(sessionId, true)
+    const replayed: string[] = []
+    ;(sm as unknown as { sendMessage: (_id: string, message: string) => Promise<void> }).sendMessage = async (_id, message) => {
+      replayed.push(message)
+    }
+    await (sm as unknown as {
+      onProcessingStopped: (id: string, reason: 'interrupted', generation: number) => Promise<void>
+    }).onProcessingStopped(sessionId, 'interrupted', 1)
+    await new Promise(r => setTimeout(r, 150))
+
+    expect(replayed).toEqual([])
+    expect(managed.messageQueue).toEqual([])
+    expect(managed.autoRetryPending).toBeUndefined()
+    expect(managed.autoRetryTimer).toBeUndefined()
+    expect(managed.pendingContinuationUsage).toBeUndefined()
+    expect(managed.tokenUsage?.lastTurn?.totalTokens).toBe(1_200)
+  })
+
+  it('explicit Stop removes a timer-first queued continuation without replaying it', async () => {
+    const sessionId = 'stop-after-timer'
+    const managed = buildSession(sessionId)
+    managed.isProcessing = true
+    managed.processingGeneration = 1
+    managed.agent = { forceAbort: () => {}, dispose: async () => {} } as never
+
+    await fireSourceActivated(sessionId, 'github', 'continue the task')
+    await new Promise(r => setTimeout(r, 150))
+    expect(managed.messageQueue[0]?.isSourceContinuation).toBe(true)
+
+    await sm.cancelProcessing(sessionId, true)
+    const replayed: string[] = []
+    ;(sm as unknown as { sendMessage: (_id: string, message: string) => Promise<void> }).sendMessage = async (_id, message) => {
+      replayed.push(message)
+    }
+    await (sm as unknown as {
+      onProcessingStopped: (id: string, reason: 'interrupted', generation: number) => Promise<void>
+    }).onProcessingStopped(sessionId, 'interrupted', 1)
+    await new Promise<void>(resolve => setImmediate(resolve))
+
+    expect(replayed).toEqual([])
+    expect(managed.messageQueue).toEqual([])
+    expect(managed.messages.some(message => message.hidden && message.content.includes('[github activated]'))).toBe(false)
+    expect(managed.autoRetryPending).toBeUndefined()
+    expect(managed.pendingContinuationUsage).toBeUndefined()
+  })
+
+  it('terminal Swarm state rejects a continuation popped immediately before Stop', async () => {
+    const sessionId = 'stopped-during-replay-gap'
+    const managed = buildSession(sessionId)
+    const continuation = 'continue the task\n\n[github activated]'
+    const continuationId = 'popped-source-continuation'
+    managed.orchestrationId = 'orch-stopped'
+    managed.orchestrationStatus = 'stopped'
+    managed.autoRetryPending = {
+      content: continuation,
+      deadlineMs: Date.now() + 2_000,
+      committed: true,
+    }
+    managed.pendingContinuationUsage = {
+      inputTokens: 100,
+      outputTokens: 0,
+      totalTokens: 100,
+      cacheReadTokens: 0,
+      cacheCreationTokens: 0,
+      costUsd: 0,
+      modelCallCount: 1,
+      startedAt: Date.now(),
+    }
+    managed.messages.push({
+      id: continuationId,
+      role: 'user',
+      content: continuation,
+      timestamp: Date.now(),
+      hidden: true,
+    })
+
+    await sm.sendMessage(
+      sessionId,
+      continuation,
+      undefined,
+      undefined,
+      { hidden: true },
+      continuationId,
+      undefined,
+      undefined,
+      undefined,
+      true,
+    )
+
+    expect(managed.isProcessing).toBe(false)
+    expect(managed.messages.some(message => message.id === continuationId)).toBe(false)
+    expect(managed.autoRetryPending).toBeUndefined()
+    expect(managed.pendingContinuationUsage).toBeUndefined()
+  })
+
+  it('Stop during replay persistence prevents the final model start', async () => {
+    const sessionId = 'stopped-during-replay-flush'
+    const managed = buildSession(sessionId)
+    const continuation = 'continue the task\n\n[github activated]'
+    managed.orchestrationId = 'orch-stopped-during-flush'
+    managed.orchestrationRootSessionId = sessionId
+    managed.orchestrationDepth = 0
+    managed.orchestrationLifecycle = 'managed'
+    managed.orchestrationStatus = 'running'
+    managed.autoRetryPending = {
+      content: continuation,
+      deadlineMs: Date.now() + 2_000,
+      committed: true,
+    }
+
+    let markFlushEntered!: () => void
+    let releaseFlush!: () => void
+    const flushEntered = new Promise<void>(resolve => { markFlushEntered = resolve })
+    const flushReleased = new Promise<void>(resolve => { releaseFlush = resolve })
+    ;(sm as unknown as { flushSession: (_id: string) => Promise<void> }).flushSession = async () => {
+      markFlushEntered()
+      await flushReleased
+    }
+
+    const replay = sm.sendMessage(
+      sessionId,
+      continuation,
+      undefined,
+      undefined,
+      { hidden: true },
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      true,
+    )
+    await flushEntered
+    await (sm as unknown as {
+      stopSwarm: (id: string) => Promise<unknown>
+    }).stopSwarm(sessionId)
+    releaseFlush()
+    await replay
+
+    expect(managed.isProcessing).toBe(false)
+    expect(managed.messages.some(message => message.content === continuation)).toBe(false)
+    expect(managed.autoRetryPending).toBeUndefined()
+    expect(managed.pendingContinuationUsage).toBeUndefined()
+    expect((sm as unknown as {
+      sessions: Map<string, { orchestrationStatus?: string }>
+    }).sessions.get(sessionId)?.orchestrationStatus).toBe('stopped')
+  })
 })

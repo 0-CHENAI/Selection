@@ -56,7 +56,11 @@ import { getSystemPrompt } from '../prompts/system.ts';
 import { getCoAuthorPreference } from '../config/preferences.ts';
 import { loadProjectPromptContext } from '../projects/storage.ts';
 import type { ProjectPromptContext } from '../projects/types.ts';
-import { isSharedProjectMemoryEnabled } from '../sessions/types.ts';
+import {
+  isSharedProjectMemoryEnabled,
+  isSpawnedSwarmAgent,
+  type SessionConfig,
+} from '../sessions/types.ts';
 
 // Credential manager for token storage
 import { getCredentialManager } from '../credentials/manager.ts';
@@ -128,6 +132,18 @@ import { saveBinaryResponse } from '../utils/binary-detection.ts';
 // ============================================================
 // PiAgent Implementation
 // ============================================================
+
+export function buildPiSwarmInitConfig(session: SessionConfig | undefined): {
+  swarmEnabled: boolean;
+  swarmAgentTokenBudget?: number;
+} {
+  return {
+    swarmEnabled: session?.swarmEnabled === true,
+    swarmAgentTokenBudget: session && isSpawnedSwarmAgent(session)
+      ? session.orchestrationTokenBudget
+      : undefined,
+  };
+}
 
 /** Backend-executed session tools currently supported by PiAgent. */
 export const PI_BACKEND_SESSION_TOOL_NAMES = new Set<string>([
@@ -635,7 +651,7 @@ export class PiAgent extends BaseAgent {
       baseUrl: runtime.baseUrl,
       customEndpoint: runtime.customEndpoint,
       customModels: runtime.customModels,
-      swarmEnabled: this.config.session?.swarmEnabled === true,
+      ...buildPiSwarmInitConfig(this.config.session),
       // Branch params for Pi SDK session fork
       branchFromSdkSessionId: this.config.session?.branchFromSdkSessionId,
       branchFromSessionPath: this.config.session?.branchFromSessionPath,

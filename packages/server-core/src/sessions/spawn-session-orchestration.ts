@@ -5,7 +5,7 @@ export { synthesizeFanOutQualification } from '@craft-agent/shared/agent'
 export const MAX_SWARM_CHILDREN_PER_PARENT = 3
 export const MAX_SWARM_DEPTH = 2
 export const MAX_SWARM_LIVE_NODES = 12
-/** Technical-preview hard cap shared by every temporary Swarm run (256 Ki tokens). */
+/** Cumulative ceiling per spawned Swarm agent, enforced at model-call boundaries (256 Ki tokens). */
 export const FIXED_SWARM_TOKEN_BUDGET = 256 * 1024
 
 export function resolveInheritedSwarmEnabled(input: {

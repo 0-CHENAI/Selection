@@ -558,7 +558,7 @@ describe('BrowserPaneManager', () => {
     await manager.navigate('nav-2', 'craft agents browser tools')
     const instance = (manager as any).instances.get('nav-2')
     expect(instance.pageView.webContents.loadURL).toHaveBeenCalledWith(
-      'https://duckduckgo.com/?q=craft%20agents%20browser%20tools'
+      'https://www.bing.com/search?q=craft%20agents%20browser%20tools'
     )
   })
 

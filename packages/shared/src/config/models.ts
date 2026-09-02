@@ -351,10 +351,23 @@ export function getModelContextWindow(modelId: string): number | undefined {
 export const COMPACTION_RESERVE_TOKENS = 16_384;
 export const SWARM_COMPACTION_TRIGGER_RATIO = 0.8;
 
-/** Reserve the final 20% so Pi compacts a Swarm agent at 80% of its own window. */
-export function swarmCompactionReserveTokens(contextWindow: number): number {
+/**
+ * Reserve enough space for Pi to compact at 80% of the smaller boundary:
+ * the active model context window or this spawned agent's own token budget.
+ */
+export function swarmCompactionReserveTokens(
+  contextWindow: number,
+  agentTokenBudget?: number,
+): number {
   if (!Number.isFinite(contextWindow) || contextWindow <= 0) return 0;
-  return Math.max(1, Math.ceil(contextWindow * (1 - SWARM_COMPACTION_TRIGGER_RATIO)));
+  const validAgentBudget = typeof agentTokenBudget === 'number'
+    && Number.isFinite(agentTokenBudget)
+    && agentTokenBudget > 0
+    ? agentTokenBudget
+    : contextWindow;
+  const triggerBoundary = Math.min(contextWindow, validAgentBudget);
+  const triggerTokens = Math.max(1, Math.floor(triggerBoundary * SWARM_COMPACTION_TRIGGER_RATIO));
+  return Math.max(1, contextWindow - triggerTokens);
 }
 
 export function compactionTriggerTokens(

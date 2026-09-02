@@ -106,7 +106,9 @@ export function SwarmRunDetailsDialog({
               {details
                 ? details.tokenBudget === undefined
                   ? t('swarm.tokensUnlimited', { used: details.tokensUsed })
-                  : t('swarm.tokensBudgeted', { used: details.tokensUsed, budget: details.tokenBudget })
+                  : details.tokenBudgetScope === 'agent'
+                    ? t('swarm.perAgentTokensBudgeted', { used: details.tokensUsed, budget: details.tokenBudget })
+                    : t('swarm.tokensBudgeted', { used: details.tokensUsed, budget: details.tokenBudget })
                 : t('common.loading')}
             </span>
             <button
@@ -157,7 +159,11 @@ export function SwarmRunDetailsDialog({
               <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-[10.5px] text-muted-foreground">
                 {node.model && <span>{node.model}</span>}
                 <span>{formatSwarmElapsed(node.elapsedSeconds)}</span>
-                <span>{t('tasks.tokensUsed', { count: node.tokensUsed })}</span>
+                <span>
+                  {node.tokenBudget === undefined
+                    ? t('tasks.tokensUsed', { count: node.tokensUsed })
+                    : t('swarm.tokensBudgeted', { used: node.tokensUsed, budget: node.tokenBudget })}
+                </span>
                 <span>{node.lifecycle === 'detached' ? t('swarm.lifecycleDetached') : t('swarm.lifecycleManaged')}</span>
               </div>
               {node.lifecycle === 'detached' && (

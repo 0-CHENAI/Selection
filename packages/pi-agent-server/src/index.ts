@@ -138,8 +138,10 @@ interface InitMessage {
   branchFromSdkTurnId?: string;
   resumeSdkSessionId?: string;
   forceFreshSession?: boolean;
-  /** Swarm agents compact at 80% of their own model context window. */
+  /** Swarm sessions enable an earlier auto-compaction policy. */
   swarmEnabled?: boolean;
+  /** Independent budget for a spawned agent; roots omit this value. */
+  swarmAgentTokenBudget?: number;
   customEndpoint?: { api: CustomEndpointApi; supportsImages?: boolean };
   customModels?: Array<string | { id: string; contextWindow?: number; maxTokens?: number; supportsImages?: boolean }>;
   piAuth?: { provider: string; credential: PiCredential };
@@ -315,9 +317,12 @@ let unsubscribeEvents: (() => void) | null = null;
 let initConfig: Extract<InboundMessage, { type: 'init' }> | null = null;
 
 function applySwarmCompactionOverride(model: { contextWindow?: number } | undefined): void {
-  if (!initConfig?.swarmEnabled || !piSettingsManager) return;
+  if ((!initConfig?.swarmEnabled && initConfig?.swarmAgentTokenBudget === undefined) || !piSettingsManager) return;
   const contextWindow = model?.contextWindow ?? 0;
-  const reserveTokens = swarmCompactionReserveTokens(contextWindow);
+  const reserveTokens = swarmCompactionReserveTokens(
+    contextWindow,
+    initConfig.swarmAgentTokenBudget,
+  );
   if (reserveTokens <= 0) return;
   piSettingsManager.applyOverrides({
     compaction: {
@@ -325,7 +330,10 @@ function applySwarmCompactionOverride(model: { contextWindow?: number } | undefi
       reserveTokens,
     },
   });
-  debugLog(`Swarm auto-compaction threshold configured at 80% (${reserveTokens} reserved of ${contextWindow})`);
+  const triggerTokens = contextWindow - reserveTokens;
+  debugLog(
+    `Swarm auto-compaction threshold configured at ${triggerTokens} tokens (${reserveTokens} reserved of ${contextWindow})`,
+  );
 }
 
 // Mutable state
@@ -674,7 +682,7 @@ async function ensureSession(): Promise<AgentSession> {
   //   - OpenAI/OpenRouter → Responses API built-in web_search
   //   - ChatGPT Plus (openai-codex) → ChatGPT backend responses endpoint
   //   - Google → Gemini API with googleSearch grounding
-  //   - Others → DuckDuckGo fallback
+  //   - Others → explicit unavailable result (no implicit third-party fallback)
   //
   // IMPORTANT: resolve dynamically on each search call so token_update refreshes
   // are used without recreating the session.

@@ -348,6 +348,8 @@ export interface SwarmRunNodeDto {
   depth: number
   elapsedSeconds: number
   tokensUsed: number
+  /** Independent token ceiling for this spawned agent. Coordinators have no child-agent ceiling. */
+  tokenBudget?: number
   lifecycle: 'managed' | 'detached'
   blocker?: string
   summary?: string
@@ -359,8 +361,12 @@ export interface SwarmRunDetailsDto {
   coordinatorSessionId: string
   status: 'running' | 'completed' | 'need-to-check' | 'stopped'
   blocker?: string
+  /** Highest usage among spawned agents in this run; never a sibling aggregate. */
   tokensUsed: number
+  /** Independent ceiling applied to each spawned agent. */
   tokenBudget?: number
+  /** Missing means the legacy run-wide budget contract. */
+  tokenBudgetScope?: 'run' | 'agent'
   nodes: SwarmRunNodeDto[]
 }
 

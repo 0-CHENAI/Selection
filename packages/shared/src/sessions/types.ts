@@ -103,6 +103,17 @@ export interface SwarmSessionMetadata {
   orchestrationTokenBudget?: number;
 }
 
+/** True only for an agent spawned inside a Swarm, never for its root coordinator. */
+export function isSpawnedSwarmAgent(
+  session: Pick<SwarmSessionMetadata, 'orchestrationId' | 'orchestrationRootSessionId' | 'orchestrationDepth'> & { id: string },
+): boolean {
+  if (!session.orchestrationId) return false;
+  if (session.orchestrationRootSessionId) {
+    return session.orchestrationRootSessionId !== session.id;
+  }
+  return (session.orchestrationDepth ?? 0) > 0;
+}
+
 /**
  * Built-in status IDs (for TypeScript consumers)
  * These are the default statuses but users can add/remove custom ones

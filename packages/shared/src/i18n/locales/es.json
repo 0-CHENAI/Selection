@@ -1652,6 +1652,7 @@
   "swarm.lifecycleManaged": "Gestionado",
   "swarm.noRunDetails": "No hay detalles de ejecución Swarm.",
   "swarm.openWorker": "Abrir",
+  "swarm.perAgentTokensBudgeted": "Uso máximo por agente: {{used}} / {{budget}} tokens · independiente por agente",
   "swarm.roleCoordinator": "Coordinador",
   "swarm.roleReviewer": "Revisor",
   "swarm.roleWorker": "Worker",
