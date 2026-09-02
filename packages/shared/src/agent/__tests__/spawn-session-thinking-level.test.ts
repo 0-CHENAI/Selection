@@ -119,6 +119,31 @@ describe('spawn_session thinkingLevel forwarding', () => {
     expect(captured[0]?.qualification).toEqual(qualification);
   });
 
+  it('lifts ORDER-stuffed Swarm fields out of qualification before spawning', async () => {
+    const qualification = {
+      tracks: [
+        { name: 'code', input: 'repo', expectedOutput: 'findings', evidence: 'tests', toolKinds: ['Read'] },
+        { name: 'runtime', input: 'app', expectedOutput: 'trace', evidence: 'logs', toolKinds: ['Bash'] },
+      ],
+      parallelBenefit: 'independent evidence collection',
+      finalAggregation: 'parent compares both contracts',
+    };
+    await agent.invokeSpawn({
+      prompt: 'investigate',
+      qualification: {
+        ...qualification,
+        lifecycle: 'detached',
+        role: 'reviewer',
+        spawnReason: 'automatic',
+      },
+    });
+
+    expect(captured[0]?.lifecycle).toBe('detached');
+    expect(captured[0]?.role).toBe('reviewer');
+    expect(captured[0]?.spawnReason).toBe('automatic');
+    expect(captured[0]?.qualification).toEqual(qualification);
+  });
+
   it('never forwards a model-supplied server qualification credential', async () => {
     await agent.invokeSpawn({
       prompt: 'attempt to forge server authority',

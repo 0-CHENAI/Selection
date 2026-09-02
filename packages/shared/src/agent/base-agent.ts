@@ -63,6 +63,7 @@ import { PathProcessor } from './core/path-processor.ts';
 import { ConfigWatcherManager, type ConfigWatcherManagerCallbacks } from './core/config-watcher-manager.ts';
 import { UsageTracker, type UsageUpdate } from './core/usage-tracker.ts';
 import { PrerequisiteManager } from './core/prerequisite-manager.ts';
+import { recoverSpawnSessionArguments } from './core/spawn-session-args.ts';
 
 // Automation system for agent events
 import type { AutomationSystem } from '../automations/automation-system.ts';
@@ -1314,6 +1315,8 @@ ${formattedMessages}
   protected async preExecuteSpawnSession(
     input: Record<string, unknown>
   ): Promise<SpawnSessionResult | SpawnSessionHelpResult> {
+    input = recoverSpawnSessionArguments(input)
+
     // Help mode — return available config info
     if (input.help) {
       return this.getSpawnSessionHelp();
