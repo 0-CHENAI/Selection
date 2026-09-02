@@ -82,11 +82,7 @@ export interface PanelHeaderProps {
   compactTitleMenu?: React.ReactNode
   /** Optional leading action rendered before the title (e.g., back button in compact mode) */
   leadingAction?: React.ReactNode
-  /**
-   * Title alignment. `'center'` (default) matches chat, file, and settings
-   * pages. `'start'` pins the title to the header's left content edge — use
-   * for navigator list headers so the title lines up with the list.
-   */
+  /** `'start'` aligns the title with list content; default `'center'` leaves page headers unchanged. */
   titleAlign?: 'center' | 'start'
   /** Optional center button rendered between title and right actions */
   centerButton?: React.ReactNode

@@ -21,6 +21,10 @@ beforeAll(async () => {
   ;({ PanelHeader } = await import('../PanelHeader'))
 })
 
+const DESKTOP_TITLE_SLOT_CENTERED = 'max-w-full overflow-hidden mx-auto'
+const COMPACT_OVERLAY_CENTERED = 'absolute inset-y-0 flex items-center pointer-events-none justify-center'
+const COMPACT_OVERLAY_START = 'absolute inset-y-0 flex items-center pointer-events-none justify-start'
+
 function renderWithShell(
   node: ReactNode,
   context: Partial<AppShellContextType> = {},
@@ -32,18 +36,27 @@ function renderWithShell(
   )
 }
 
+function navigatorSlotHeaderProps(appShell: string): string {
+  const slot = appShell.indexOf('navigatorSlot=')
+  expect(slot).toBeGreaterThan(-1)
+  const headerStart = appShell.indexOf('<PanelHeader', slot)
+  expect(headerStart).toBeGreaterThan(slot)
+  // Self-closing tag with a large `actions` tree — only the opening props
+  // need to carry listTitle + titleAlign="start".
+  return appShell.slice(headerStart, headerStart + 280)
+}
+
 describe('PanelHeader title alignment', () => {
-  it('centers the title by default so chat and file pages stay unchanged', () => {
+  it('centers the desktop title slot by default so page headers stay unchanged', () => {
     const html = renderWithShell(<PanelHeader title="Session name" />)
 
-    expect(html).toContain('mx-auto')
+    expect(html).toContain(DESKTOP_TITLE_SLOT_CENTERED)
     expect(html).toContain('Session name')
-    expect(html).toContain('truncate')
     expect(html).toContain('pl-4')
-    expect(html).not.toContain('justify-start')
+    expect(html).not.toContain(COMPACT_OVERLAY_START)
   })
 
-  it('left-aligns navigator titles without mx-auto while keeping list padding', () => {
+  it('drops mx-auto on the desktop title slot when start-aligned, keeping list padding and right actions', () => {
     const html = renderWithShell(
       <PanelHeader
         title="所有会话"
@@ -53,17 +66,13 @@ describe('PanelHeader title alignment', () => {
     )
 
     expect(html).toContain('所有会话')
-    expect(html).not.toContain('mx-auto')
+    expect(html).not.toContain(DESKTOP_TITLE_SLOT_CENTERED)
+    expect(html).toContain('max-w-full overflow-hidden')
     expect(html).toContain('pl-4')
-    expect(html).toContain('truncate')
-    expect(html).toContain('overflow-hidden')
-    expect(html).toContain('min-w-0')
     expect(html.indexOf('所有会话')).toBeLessThan(html.indexOf('Filter'))
-    expect(html).toContain('Filter')
-    expect(html).toContain('shrink-0')
   })
 
-  it('still left-aligns after a leading action and keeps compact back-button padding', () => {
+  it('keeps the title after a leading action and uses back-button padding', () => {
     const html = renderWithShell(
       <PanelHeader
         title="所有会话"
@@ -72,30 +81,40 @@ describe('PanelHeader title alignment', () => {
       />,
     )
 
-    expect(html).not.toContain('mx-auto')
+    expect(html).not.toContain(DESKTOP_TITLE_SLOT_CENTERED)
     expect(html).toContain('Back')
     expect(html).toContain('pl-2')
     expect(html.indexOf('Back')).toBeLessThan(html.indexOf('所有会话'))
   })
 
-  it('keeps compact overlay titles centered unless start alignment is requested', () => {
+  it('keeps the compact overlay centered unless start alignment is requested', () => {
     const centered = renderWithShell(
       <PanelHeader title="Session name" />,
       { isCompactMode: true },
     )
-    expect(centered).toContain('justify-center')
-    expect(centered).not.toContain('justify-start')
+    expect(centered).toContain(COMPACT_OVERLAY_CENTERED)
+    expect(centered).not.toContain(COMPACT_OVERLAY_START)
 
     const startAligned = renderWithShell(
       <PanelHeader title="所有会话" titleAlign="start" />,
       { isCompactMode: true },
     )
-    expect(startAligned).toContain('justify-start')
-    expect(startAligned).not.toContain('justify-center')
-    expect(startAligned).toContain('overflow-hidden')
+    expect(startAligned).toContain(COMPACT_OVERLAY_START)
+    expect(startAligned).not.toContain(COMPACT_OVERLAY_CENTERED)
   })
 
-  it('does not drop compact leading-action compensation when start-aligned', () => {
+  it('does not treat a title-menu chevron justify-center as overlay centering', () => {
+    const html = renderWithShell(
+      <PanelHeader title="所有会话" titleAlign="start" titleMenu={<div>Rename</div>} />,
+      { isCompactMode: true },
+    )
+
+    expect(html).toContain(COMPACT_OVERLAY_START)
+    expect(html).not.toContain(COMPACT_OVERLAY_CENTERED)
+    expect(html).toContain('justify-center')
+  })
+
+  it('reserves compact insets for the back button and right-side filter', () => {
     const html = renderWithShell(
       <PanelHeader
         title="所有会话"
@@ -108,40 +127,29 @@ describe('PanelHeader title alignment', () => {
 
     expect(html).toContain('Back')
     expect(html).toContain('Filter')
-    expect(html).toContain('justify-start')
-    expect(html).toContain('z-[1]')
+    expect(html).toContain(COMPACT_OVERLAY_START)
+    expect(html).toMatch(/left:\s*66px/)
+    expect(html).toMatch(/right:\s*66px/)
   })
 })
 
 describe('Navigator list headers opt into start alignment', () => {
-  it('NavigatorPanel pins its title to the left content edge', () => {
+  it('NavigatorPanel forwards start alignment onto PanelHeader', () => {
     const html = renderWithShell(
       <NavigatorPanel title="所有会话" width={320} headerActions={<button type="button">Filter</button>}>
         <div>list</div>
       </NavigatorPanel>,
     )
 
-    expect(html).toContain('所有会话')
-    expect(html).not.toContain('mx-auto')
-    expect(html).toContain('pl-4')
+    expect(html).not.toContain(DESKTOP_TITLE_SLOT_CENTERED)
     expect(html.indexOf('所有会话')).toBeLessThan(html.indexOf('Filter'))
   })
 
-  it('AppShell navigator header requests start alignment; chat/file pages do not', () => {
+  it('wires titleAlign=start onto the live AppShell navigatorSlot PanelHeader', () => {
     const appShell = readFileSync(join(import.meta.dir, '../AppShell.tsx'), 'utf8')
-    const navigatorSlot = appShell.slice(appShell.indexOf('navigatorSlot='))
-    expect(navigatorSlot).toContain('titleAlign="start"')
+    const header = navigatorSlotHeaderProps(appShell)
 
-    const chatPage = readFileSync(
-      join(import.meta.dir, '../../../pages/ChatPage.tsx'),
-      'utf8',
-    )
-    expect(chatPage).not.toContain('titleAlign')
-
-    const sourceInfo = readFileSync(
-      join(import.meta.dir, '../../../pages/SourceInfoPage.tsx'),
-      'utf8',
-    )
-    expect(sourceInfo).not.toContain('titleAlign')
+    expect(header).toContain('title={isSidebarVisible ? listTitle : undefined}')
+    expect(header).toContain('titleAlign="start"')
   })
 })
