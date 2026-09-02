@@ -19,7 +19,7 @@ import {
   type BackendHostRuntimeContext,
   type PostInitResult,
 } from '@craft-agent/shared/agent/backend'
-import { getLlmConnection, getLlmConnections, getDefaultLlmConnection, getDefaultThinkingLevel, getSharedProjectMemoryEnabled, resetManagedAnthropicAuthEnvVars, getPersistedUiLanguage, resolveTitleLanguageName } from '@craft-agent/shared/config'
+import { getLlmConnection, getLlmConnections, getDefaultLlmConnection, getDefaultThinkingLevel, resetManagedAnthropicAuthEnvVars, getPersistedUiLanguage, resolveTitleLanguageName } from '@craft-agent/shared/config'
 import type { MidStreamBehavior } from '@craft-agent/shared/config'
 import { PrivilegedExecutionBroker } from '@craft-agent/server-core/services'
 import { isValidWorkingDirectory } from '../utils/path-validation'
@@ -3215,9 +3215,9 @@ export class SessionManager implements ISessionManager {
       labels: options?.labels,
       isFlagged: options?.isFlagged,
       projectId: resolvedProjectId,
-      // Every newly created session snapshots the current setting. This also
-      // means branches do not inherit their parent's memory mode.
-      sharedProjectMemoryEnabled: getSharedProjectMemoryEnabled(),
+      // Project sessions keep independent memory; do not inherit a shared
+      // project MEMORY.md even when the session is bound to a project.
+      sharedProjectMemoryEnabled: false,
       parentSessionId: options?.parentSessionId,
       taskSlug: options?.taskSlug,
       taskRunId: options?.taskRunId,

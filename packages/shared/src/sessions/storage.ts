@@ -236,9 +236,6 @@ export async function createSession(
     labels: options?.labels,
     isFlagged: options?.isFlagged,
     projectId: options?.projectId,
-    // Lower-level callers that do not supply the app setting still get the
-    // privacy-safe default. Legacy compatibility applies only when reading
-    // sessions that already lack the field on disk.
     sharedProjectMemoryEnabled: options?.sharedProjectMemoryEnabled ?? false,
     parentSessionId: options?.parentSessionId,
     taskSlug: options?.taskSlug,

@@ -681,10 +681,7 @@ export async function switchWorkspaceAtomic(workspaceId: string): Promise<{ work
   if (!workspace) return null;
 
   // Get or create the latest session for this workspace
-  const session = await getOrCreateLatestSession(
-    workspace.rootPath,
-    getSharedProjectMemoryEnabled(),
-  );
+  const session = await getOrCreateLatestSession(workspace.rootPath);
 
   // Update active workspace in config
   config.activeWorkspaceId = workspaceId;
