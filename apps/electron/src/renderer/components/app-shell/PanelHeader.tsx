@@ -82,6 +82,12 @@ export interface PanelHeaderProps {
   compactTitleMenu?: React.ReactNode
   /** Optional leading action rendered before the title (e.g., back button in compact mode) */
   leadingAction?: React.ReactNode
+  /**
+   * Title alignment. `'center'` (default) matches chat, file, and settings
+   * pages. `'start'` pins the title to the header's left content edge — use
+   * for navigator list headers so the title lines up with the list.
+   */
+  titleAlign?: 'center' | 'start'
   /** Optional center button rendered between title and right actions */
   centerButton?: React.ReactNode
   /** Optional action buttons rendered on the right */
@@ -107,6 +113,7 @@ export function PanelHeader({
   titleMenu,
   compactTitleMenu,
   leadingAction: explicitLeadingAction,
+  titleAlign = 'center',
   centerButton,
   actions,
   rightSidebarButton,
@@ -231,7 +238,10 @@ export function PanelHeader({
         </div>
       )}
       <div
-        className="absolute inset-y-0 flex items-center justify-center pointer-events-none"
+        className={cn(
+          "absolute inset-y-0 flex items-center pointer-events-none",
+          titleAlign === 'start' ? "justify-start" : "justify-center",
+        )}
         style={compactTitleInsetStyle}
       >
         <div className="max-w-full overflow-hidden pointer-events-auto">
@@ -247,7 +257,7 @@ export function PanelHeader({
         </div>
       )}
       <div className="flex-1 min-w-0 flex items-center select-none">
-        <div className={cn("max-w-full overflow-hidden", !leadingAction && "mx-auto")}>
+        <div className={cn("max-w-full overflow-hidden", !leadingAction && titleAlign !== 'start' && "mx-auto")}>
           {titleNode}
         </div>
       </div>

@@ -2892,6 +2892,7 @@ function AppShellContent({
             >
             <PanelHeader
               title={isSidebarVisible ? listTitle : undefined}
+              titleAlign="start"
               compensateForStoplight={!isSidebarVisible}
               badge={automationFilter?.automationType === 'scheduled' ? (
                 <Tooltip>
