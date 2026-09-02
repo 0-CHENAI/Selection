@@ -34,6 +34,8 @@ function setup() {
       depth: 1,
       role: 'worker',
       lifecycle: 'managed',
+      spawnReason: 'automatic',
+      mode: 'background',
     };
     return result;
   };

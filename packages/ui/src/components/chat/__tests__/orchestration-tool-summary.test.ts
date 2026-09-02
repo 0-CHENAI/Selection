@@ -20,6 +20,13 @@ describe('formatOrchestrationToolSummary', () => {
     )).toBe('running · run-9')
   })
 
+  it('summarizes the legacy Selection session alias', () => {
+    expect(formatOrchestrationToolSummary(
+      'session__spawn_session',
+      JSON.stringify({ sessionId: 'child-2', status: 'started' }),
+    )).toBe('started · child-2')
+  })
+
   it('truncates long finalText onto one line', () => {
     const summary = formatOrchestrationToolSummary(
       'spawn_session',
@@ -37,6 +44,10 @@ describe('formatOrchestrationToolSummary', () => {
 
   it('ignores unrelated tools and help payloads', () => {
     expect(formatOrchestrationToolSummary('Read', '{"status":"ok"}')).toBeNull()
+    expect(formatOrchestrationToolSummary(
+      'mcp__vendor__spawn_session',
+      '{"status":"started","sessionId":"vendor-child"}',
+    )).toBeNull()
     expect(formatOrchestrationToolSummary('spawn_session', '{"connections":[]}')).toBeNull()
     expect(formatOrchestrationToolSummary('spawn_session', 'not json')).toBeNull()
   })

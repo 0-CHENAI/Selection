@@ -51,6 +51,7 @@ import {
   formatDuration,
   formatOrchestrationToolSummary,
   formatTokens,
+  normalizeCraftSessionToolName,
   deriveTurnPhase,
   getActiveTurnPreview,
   isVisibleCommentaryCard,
@@ -410,7 +411,7 @@ export interface TurnCardProps {
 
 /** Get display name for a tool (strip MCP prefixes, apply friendly names) */
 function getToolDisplayName(name: string): string {
-  const stripped = name.replace(/^mcp__[^_]+__/, '')
+  const stripped = normalizeCraftSessionToolName(name).replace(/^mcp__[^_]+__/, '')
 
   // Friendly display names for specific tools
   const displayNames: Record<string, string> = {
@@ -1324,6 +1325,8 @@ export interface ResponseCardProps {
   text: string
   /** Whether the content is still streaming */
   isStreaming: boolean
+  /** Whether the owning turn is complete; independent from token streaming. */
+  isTurnComplete?: boolean
   /** When streaming started - used for buffering timeout calculation */
   streamStartTime?: number
   /** Callback to open file in editor */
@@ -1617,6 +1620,7 @@ function applyTextHighlightRange(
 export function ResponseCard({
   text,
   isStreaming,
+  isTurnComplete,
   streamStartTime,
   onOpenFile,
   onOpenUrl,
@@ -2394,7 +2398,7 @@ export function ResponseCard({
   // Time-aware buffer gate (re-checks on min/max window even if tokens stall)
   const reveal = useStreamingReveal(responseText, isStreaming, streamStartTime)
 
-  const isCompleted = !isStreaming
+  const isCompleted = isTurnComplete ?? !isStreaming
   const isBuffering = isStreaming && !reveal.shouldShow
   const bodyText = isStreaming ? displayedText : responseText
   // Commentary must stay on the live card tree. Switching to the completed
@@ -3181,6 +3185,7 @@ export const TurnCard = React.memo(function TurnCard({
               <ResponseCard
                 text={response.text}
                 isStreaming={response.isStreaming}
+                isTurnComplete={isComplete}
                 streamStartTime={response.streamStartTime}
                 sessionId={sessionId}
                 onOpenFile={onOpenFile}
@@ -3216,6 +3221,7 @@ export const TurnCard = React.memo(function TurnCard({
           <ResponseCard
             text={response.text}
             isStreaming={response.isStreaming}
+            isTurnComplete={isComplete}
             streamStartTime={response.streamStartTime}
             sessionId={sessionId}
             onOpenFile={onOpenFile}

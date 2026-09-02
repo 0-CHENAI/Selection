@@ -236,7 +236,12 @@ describe('SessionManager spawn_session wait/background', () => {
     await expect(api.spawnSessionFromTool(parent, {
       prompt: 'Explicitly delegated work',
       spawnReason: 'user-requested',
-    })).resolves.toMatchObject({ status: 'started', sessionId: 'child' })
+    })).resolves.toMatchObject({
+      status: 'started',
+      sessionId: 'child',
+      spawnReason: 'user-requested',
+      mode: 'background',
+    })
   })
 
   it('normalizes a qualified user-requested label to automatic while Swarm is enabled', async () => {
@@ -251,7 +256,12 @@ describe('SessionManager spawn_session wait/background', () => {
       prompt: 'The user described two independent worker tracks',
       spawnReason: 'user-requested',
       qualification: completeQualification,
-    })).resolves.toMatchObject({ status: 'started', sessionId: 'child' })
+    })).resolves.toMatchObject({
+      status: 'started',
+      sessionId: 'child',
+      spawnReason: 'automatic',
+      mode: 'background',
+    })
   })
 
   it('keeps the automatic qualification gate when normalizing a Swarm spawn label', async () => {
@@ -401,6 +411,8 @@ describe('SessionManager spawn_session wait/background', () => {
       role: 'reviewer',
       lifecycle: 'detached',
       projectId: 'project-1',
+      spawnReason: 'automatic',
+      mode: 'background',
     })
     expect(result.orchestrationId).toBeString()
     expect(internals(sm).sessions.get('child')).toMatchObject({

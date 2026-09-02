@@ -169,6 +169,9 @@ export interface SpawnSessionResult {
   role: SpawnSessionRole;
   projectId?: string;
   lifecycle: SpawnSessionLifecycle;
+  /** Effective reason after trusted authorization normalization. */
+  spawnReason?: SpawnSessionReason;
+  mode?: SpawnSessionMode;
 }
 
 export interface SpawnSessionHelpResult {
