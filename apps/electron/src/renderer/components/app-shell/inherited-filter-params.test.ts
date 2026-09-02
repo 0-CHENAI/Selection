@@ -78,8 +78,8 @@ describe('resolveNewSessionParams (#145)', () => {
     ).toEqual({ project: 'proj-selected' })
   })
 
-  it('preserves sole-filter inheritance outside the Projects navigator', () => {
-    expect(resolveNewSessionParams(m(), m(['bug', 'include']), m(), null)).toEqual({ label: 'bug' })
+  it('does not write removed status or label metadata into a new session', () => {
+    expect(resolveNewSessionParams(m(['todo', 'include']), m(['bug', 'include']), m(), null)).toBeNull()
   })
 })
 
@@ -135,20 +135,20 @@ describe('resolveSessionListNewSessionParams (#149)', () => {
     )).toBeNull()
   })
 
-  it('keeps primary state and label routes in the shared ambiguity rules', () => {
+  it('ignores removed primary state and label routes', () => {
     expect(resolveSessionListNewSessionParams(
       { kind: 'state', stateId: 'todo' },
       m(),
       m(),
       m()
-    )).toEqual({ status: 'todo' })
+    )).toBeNull()
 
     expect(resolveSessionListNewSessionParams(
       { kind: 'label', labelId: 'bug' },
       m(),
       m(),
       m(['project-1', 'include'])
-    )).toBeNull()
+    )).toEqual({ project: 'project-1' })
   })
 
   it('does not add a binding outside an inheritable filter context', () => {
