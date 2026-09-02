@@ -1021,6 +1021,25 @@ describe('SessionManager spawn_session wait/background', () => {
     expect(parent.backgroundTaskRegistry.get('legacy-task')?.status).toBe('orphaned')
   })
 
+  it('does not put the spawn prompt on the background chip when name is missing (#205)', async () => {
+    const parent = buildParent()
+    stubCreateChild()
+    await internals(sm).spawnSessionFromTool(parent, {
+      spawnReason: 'user-requested',
+      prompt: '请使用 web_search 和 web_fetch 工具调研这三个模型的最新信息。',
+      mode: 'background',
+    })
+    const listed = internals(sm).listBackgroundTasks(parent.id)
+    expect(listed).toEqual([
+      expect.objectContaining({
+        taskId: 'child',
+        status: 'running',
+        source: 'spawn_session',
+      }),
+    ])
+    expect(listed[0]?.intent).toBeUndefined()
+  })
+
   it('emits parent task_completed as soon as one worker finishes, without waiting for siblings', async () => {
     const events: Array<{ type?: string; sessionId?: string; taskId?: string; status?: string; summary?: string }> = []
     sm.setEventSink((_channel, _target, event) => {
