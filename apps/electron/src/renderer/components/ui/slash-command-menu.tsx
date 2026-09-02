@@ -1,7 +1,7 @@
 import * as React from 'react'
 import { useTranslation } from "react-i18next"
 import { Command as CommandPrimitive } from 'cmdk'
-import { Check, Minimize2, Users } from 'lucide-react'
+import { Check, Minimize2, Sparkles, Users } from 'lucide-react'
 import { Icon_Folder } from '@craft-agent/ui'
 import { cn } from '@/lib/utils'
 import { PERMISSION_MODE_CONFIG, PERMISSION_MODE_ORDER, type PermissionMode } from '@craft-agent/shared/agent/modes'
@@ -469,7 +469,7 @@ export function InlineSlashCommand({
       ref={menuRef}
       data-inline-menu
       className={cn('fixed z-dropdown', MENU_CONTAINER_STYLE, className)}
-      style={{ left: Math.round(position.x) - 10, bottom: bottomPosition, minWidth: 220, maxWidth: 260 }}
+      style={{ left: Math.round(position.x) - 10, bottom: bottomPosition, minWidth: 320, maxWidth: 400 }}
     >
       <div ref={listRef} className={MENU_LIST_STYLE}>
         {filteredSections.map((section, sectionIndex) => (
@@ -520,11 +520,27 @@ export function InlineSlashCommand({
                       isSelected && MENU_ITEM_SELECTED
                     )}
                   >
-                    <div className="shrink-0">
-                      <SkillAvatar skill={item.skill} size="sm" workspaceId={workspaceId} />
+                    <div className="shrink-0 text-muted-foreground">
+                      <SkillAvatar
+                        skill={item.skill}
+                        size="sm"
+                        workspaceId={workspaceId}
+                        bare
+                        chromeless
+                        fallbackIcon={Sparkles}
+                        className="text-muted-foreground"
+                      />
                     </div>
-                    <div className="flex-1 min-w-0">
-                      <span className="truncate block">{item.label}</span>
+                    <div className={cn(
+                      'min-w-0 flex-1',
+                      item.description ? 'grid grid-cols-2 gap-2 items-center' : undefined,
+                    )}>
+                      <span className="block min-w-0 truncate">{item.label}</span>
+                      {item.description ? (
+                        <span className="block min-w-0 truncate text-muted-foreground" title={item.description}>
+                          {item.description}
+                        </span>
+                      ) : null}
                     </div>
                     <span className="rounded-[4px] shadow-minimal bg-background px-1.5 py-0.5 text-[10px] text-muted-foreground shrink-0">
                       {t('common.skill')}
