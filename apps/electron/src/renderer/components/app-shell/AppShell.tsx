@@ -18,7 +18,7 @@ import {
   Copy,
   Trash2,
   DatabaseZap,
-  Zap,
+  WandSparkles,
   Inbox,
   Globe,
   FolderOpen,
@@ -2175,7 +2175,7 @@ function AppShellContent({
                       id: "nav:skills",
                       title: t("sidebar.skills"),
                       label: String(skills.length),
-                      icon: Zap,
+                      icon: WandSparkles,
                       variant: isSkillsNavigation(navState) ? "default" : "ghost",
                       onClick: handleSkillsClick,
                       contextMenu: {

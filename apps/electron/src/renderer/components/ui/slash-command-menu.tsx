@@ -534,19 +534,17 @@ export function InlineSlashCommand({
                         bare
                       />
                     </div>
-                    {item.description ? (
-                      <div className="grid flex-1 min-w-0 grid-cols-[minmax(0,2fr)_minmax(0,3fr)] items-center gap-3">
-                        <span className="truncate" title={item.label}>{item.label}</span>
+                    <div className="flex-1 min-w-0">
+                      <span className="block truncate" title={item.label}>{item.label}</span>
+                      {item.description && (
                         <span
-                          className="truncate text-muted-foreground"
+                          className="mt-0.5 block truncate text-[11px] leading-4 text-muted-foreground"
                           title={item.description}
                         >
                           {item.description}
                         </span>
-                      </div>
-                    ) : (
-                      <span className="flex-1 min-w-0 truncate" title={item.label}>{item.label}</span>
-                    )}
+                      )}
+                    </div>
                     <span className="rounded-[4px] shadow-minimal bg-background px-1.5 py-0.5 text-[10px] text-muted-foreground shrink-0">
                       {t('common.skill')}
                     </span>

@@ -58,11 +58,11 @@ function renderSkillItem(description: string): string {
 }
 
 describe('InlineSlashCommand skill rows', () => {
-  it('renders title and truncated description columns with a description tooltip', () => {
+  it('renders title and truncated description on separate lines with a description tooltip', () => {
     const description = 'Build core GSAP animations and timelines'
     const html = renderSkillItem(description)
 
-    expect(html).toContain('grid-cols-[minmax(0,2fr)_minmax(0,3fr)]')
+    expect(html).toContain('mt-0.5 block truncate text-[11px]')
     expect(html).toContain('GSAP Core')
     expect(html).toContain(description)
     expect(html).toContain(`title="${description}"`)
@@ -73,6 +73,6 @@ describe('InlineSlashCommand skill rows', () => {
 
     expect(html).toContain('lucide-wand-sparkles')
     expect(html).not.toContain('lucide-zap')
-    expect(html).not.toContain('grid-cols-[minmax(0,2fr)_minmax(0,3fr)]')
+    expect(html).not.toContain('mt-0.5 block truncate text-[11px]')
   })
 })
