@@ -41,6 +41,10 @@ export function isSupportedSkillImportFile(file: Pick<File, 'name'>): boolean {
   return /\.(?:md|zip)$/i.test(file.name)
 }
 
+export function hasFileDragType(types: ArrayLike<string>): boolean {
+  return Array.from(types).some(type => type.toLowerCase() === 'files')
+}
+
 export function getDroppedSkillImportFile(files: ArrayLike<File>): File {
   if (files.length === 0) {
     throw new Error('Drop a SKILL.md or skill Zip to import')

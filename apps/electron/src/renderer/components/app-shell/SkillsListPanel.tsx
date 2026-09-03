@@ -17,6 +17,7 @@ import { getFileManagerName } from '@/lib/platform'
 import { useDisplayTitleRename } from '@/hooks/useDisplayTitleRename'
 import { resolveSkillTitle } from '@craft-agent/shared/display-titles'
 import { cn } from '@/lib/utils'
+import { hasFileDragType } from '@/components/resources/external-resource-import'
 import type { LoadedSkill } from '../../../shared/types'
 
 export interface SkillsListPanelProps {
@@ -72,7 +73,7 @@ export function SkillsListPanel({
   const dragDepthRef = React.useRef(0)
 
   const handleDragEnter = (event: React.DragEvent<HTMLDivElement>) => {
-    if (!onImportDroppedFiles || !event.dataTransfer.types.includes('Files')) return
+    if (!onImportDroppedFiles || !hasFileDragType(event.dataTransfer.types)) return
     event.preventDefault()
     event.stopPropagation()
     dragDepthRef.current += 1
@@ -88,14 +89,14 @@ export function SkillsListPanel({
   }
 
   const handleDragOver = (event: React.DragEvent<HTMLDivElement>) => {
-    if (!onImportDroppedFiles || !event.dataTransfer.types.includes('Files')) return
+    if (!onImportDroppedFiles || !hasFileDragType(event.dataTransfer.types)) return
     event.preventDefault()
     event.stopPropagation()
     event.dataTransfer.dropEffect = 'copy'
   }
 
   const handleDrop = (event: React.DragEvent<HTMLDivElement>) => {
-    if (!onImportDroppedFiles || !event.dataTransfer.types.includes('Files')) return
+    if (!onImportDroppedFiles || !hasFileDragType(event.dataTransfer.types)) return
     event.preventDefault()
     event.stopPropagation()
     dragDepthRef.current = 0
