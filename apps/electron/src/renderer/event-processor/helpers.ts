@@ -85,10 +85,9 @@ export function findStreamingMessage(
   turnId?: string
 ): number {
   if (turnId) {
-    const index = messages.findIndex(m =>
+    return messages.findIndex(m =>
       m.role === 'assistant' && m.turnId === turnId && m.isStreaming && !m.hidden
     )
-    if (index !== -1) return index
   }
   // Fallback: find last streaming assistant message
   for (let i = messages.length - 1; i >= 0; i--) {
@@ -107,10 +106,9 @@ export function findAssistantMessage(
   turnId?: string
 ): number {
   if (turnId) {
-    const index = messages.findIndex(m =>
+    return messages.findIndex(m =>
       m.role === 'assistant' && m.turnId === turnId && !m.hidden
     )
-    if (index !== -1) return index
   }
   // Fallback: find last streaming assistant message
   for (let i = messages.length - 1; i >= 0; i--) {

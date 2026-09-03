@@ -6,13 +6,15 @@
  */
 
 import type { Session, Message, PermissionRequest, CredentialRequest, TypedError, PermissionMode, SessionStatus, AuthRequest, ToolDisplayMeta } from '../../shared/types'
-import type { AgentToolResultContent } from '@craft-agent/core/types'
+import type { AgentToolResultContent, TextStreamPhase } from '@craft-agent/core/types'
 
 /**
  * Streaming state for a session - replaces streamingTextRef
  */
 export interface StreamingState {
   content: string
+  /** Missing only for renderer state created by an older application build. */
+  phase?: TextStreamPhase
   turnId?: string
   parentToolUseId?: string
 }
@@ -32,6 +34,8 @@ export interface TextDeltaEvent {
   type: 'text_delta'
   sessionId: string
   delta: string
+  /** Missing only for legacy senders; current backends classify every delta. */
+  phase?: TextStreamPhase
   turnId?: string
 }
 

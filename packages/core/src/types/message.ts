@@ -587,13 +587,21 @@ export type AgentToolResultContent =
   | { type: 'image'; data: string; mimeType: string };
 
 /**
+ * Classification of an assistant text stream before its message completes.
+ * Unknown streams stay in the work chain until the backend can prove they are
+ * the final answer; providers with an explicit final-answer signal may stream
+ * directly into the response card.
+ */
+export type TextStreamPhase = 'unclassified' | 'intermediate' | 'final';
+
+/**
  * Events emitted by CraftAgent during chat
  * turnId: Correlation ID from the API's message.id, groups all events in an assistant turn
  */
 export type AgentEvent =
   | { type: 'status'; message: string }
   | { type: 'info'; message: string }
-  | { type: 'text_delta'; text: string; turnId?: string; parentToolUseId?: string }
+  | { type: 'text_delta'; text: string; phase?: TextStreamPhase; turnId?: string; parentToolUseId?: string }
   | { type: 'text_complete'; text: string; isIntermediate?: boolean; turnId?: string; parentToolUseId?: string; sdkMessageId?: string }
   | { type: 'pi_turn_anchor'; sdkMessageId: string; sdkTurnAnchor: string }
   | { type: 'tool_start'; toolName: string; toolUseId: string; input: Record<string, unknown>; intent?: string; displayName?: string; turnId?: string; parentToolUseId?: string; toolDisplayMeta?: ToolDisplayMeta }

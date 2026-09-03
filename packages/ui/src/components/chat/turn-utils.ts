@@ -605,6 +605,11 @@ export function groupMessagesByTurn(messages: Message[], options: GroupTurnsOpti
             isStreaming: false,
             messageId: lastTextActivity.id,
           }
+          // The same body has changed semantic roles from process commentary
+          // to the only available final response. Keep a single visible copy.
+          currentTurn.activities = currentTurn.activities.filter(
+            activity => activity.id !== lastTextActivity.id,
+          )
         }
       }
 
@@ -694,7 +699,7 @@ export function groupMessagesByTurn(messages: Message[], options: GroupTurnsOpti
     // Error/info/warning messages are standalone
     if (message.role === 'error' || message.role === 'info' || message.role === 'warning') {
       // Flush current turn first (mark as interrupted if info message)
-      const isInterruption = message.role === 'info'
+      const isInterruption = message.role === 'info' || message.role === 'error'
       // For error/warning (not info), the previous turn is complete
       if (currentTurn && !isInterruption) currentTurn.isComplete = true
       flushCurrentTurn(isInterruption)
