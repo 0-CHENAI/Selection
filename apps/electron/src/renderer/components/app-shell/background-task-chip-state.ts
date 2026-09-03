@@ -34,6 +34,9 @@ export function advanceBackgroundTaskChips(
     })
     .filter((task) => {
       if (task.status === 'running' || task.status === 'stale') return true
+      // Managed Swarm children remain inspectable while their coordinator is
+      // aggregating. The chip's Dismiss action is the explicit removal path.
+      if (task.type === 'agent' && task.orchestrationId) return true
       const age = now - (task.completedAt ?? now)
       const linger = task.status === 'orphaned'
         ? ORPHANED_LINGER_MS

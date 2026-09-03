@@ -65,6 +65,31 @@ describe('background task chip lifecycle', () => {
     expect(next.map(item => item.id)).toEqual(['task-1', 'task-3'])
   })
 
+  it('keeps terminal managed Swarm agents until the user dismisses them', () => {
+    const swarmChild = task({
+      status: 'completed',
+      completedAt: NOW - 10 * TERMINAL_LINGER_MS,
+      orchestrationId: 'orch-1',
+    })
+    const ordinaryAgent = task({
+      id: 'task-2',
+      status: 'completed',
+      completedAt: NOW - TERMINAL_LINGER_MS,
+    })
+    const ordinaryShell = task({
+      id: 'shell-1',
+      type: 'shell',
+      status: 'completed',
+      completedAt: NOW - TERMINAL_LINGER_MS,
+    })
+
+    expect(advanceBackgroundTaskChips([
+      swarmChild,
+      ordinaryAgent,
+      ordinaryShell,
+    ], NOW)).toEqual([swarmChild])
+  })
+
   it('restores a stale task to running when progress resumes', () => {
     const stale = task({ status: 'stale', lastSignalAt: NOW - RUNNING_SIGNAL_TIMEOUT_MS })
     const next = markBackgroundTaskSignal(stale, NOW)

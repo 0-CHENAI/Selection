@@ -102,6 +102,7 @@ export interface SessionMeta {
   /** Temporary Swarm usage, independent of DAG run accounting. */
   orchestrationTokensUsed?: number
   orchestrationTokenBudget?: number
+  orchestrationAggregation?: Session['orchestrationAggregation']
 }
 
 /**
@@ -747,6 +748,8 @@ export interface BackgroundTask {
   outputFile?: string
   /** Short summary, set when task_completed arrives */
   summary?: string
+  /** Managed Swarm run id. These child chips remain until explicitly dismissed. */
+  orchestrationId?: string
 }
 
 /**

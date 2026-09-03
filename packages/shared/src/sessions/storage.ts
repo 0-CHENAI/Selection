@@ -204,6 +204,7 @@ export async function createSession(
     orchestrationBlocker?: string;
     orchestrationTokensUsed?: number;
     orchestrationTokenBudget?: number;
+    orchestrationAggregation?: SessionConfig['orchestrationAggregation'];
   }
 ): Promise<SessionConfig> {
   ensureSessionsDir(workspaceRootPath);
@@ -252,6 +253,7 @@ export async function createSession(
     orchestrationBlocker: options?.orchestrationBlocker,
     orchestrationTokensUsed: options?.orchestrationTokensUsed,
     orchestrationTokenBudget: options?.orchestrationTokenBudget,
+    orchestrationAggregation: options?.orchestrationAggregation,
   };
 
   // Save empty session

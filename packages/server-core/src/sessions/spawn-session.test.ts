@@ -4,7 +4,12 @@ import { tmpdir } from 'os'
 import { join } from 'path'
 import type { SpawnSessionReason, SpawnSessionRequest, SpawnSessionResult } from '@craft-agent/shared/agent'
 import { SessionManager, createManagedSession, type SessionCompletionEvent } from './SessionManager.ts'
-import { FIXED_SWARM_TOKEN_BUDGET } from './spawn-session-orchestration.ts'
+import {
+  buildManagedSwarmCoverageMarker,
+  DEFAULT_MANAGED_SWARM_FINAL_AGGREGATION,
+  FIXED_SWARM_TOKEN_BUDGET,
+  type ManagedSwarmAggregationChild,
+} from './spawn-session-orchestration.ts'
 
 type SpawnInternals = {
   sessions: Map<string, ReturnType<typeof createManagedSession>>
@@ -180,6 +185,21 @@ describe('SessionManager spawn_session wait/background', () => {
     await new Promise((resolve) => setTimeout(resolve, ms))
   }
 
+  function aggregationText(
+    orchestrationId: string,
+    children: Array<{ sessionId: string; status: ManagedSwarmAggregationChild['status'] }>,
+  ): string {
+    return [
+      ...children.map(child => `${child.sessionId} ${child.status}：已纳入最终结论。`),
+      '综合结论：已核对全部 worker 结果和状态。',
+      buildManagedSwarmCoverageMarker({
+        orchestrationId,
+        finalAggregation: DEFAULT_MANAGED_SWARM_FINAL_AGGREGATION,
+        children,
+      }),
+    ].join('\n')
+  }
+
   const completeQualification = {
     tracks: [
       { name: 'code', input: 'repo', expectedOutput: 'findings', evidence: 'tests', toolKinds: ['shell'] },
@@ -198,6 +218,12 @@ describe('SessionManager spawn_session wait/background', () => {
       orchestrationRole: 'coordinator' as const,
       orchestrationLifecycle: 'managed' as const,
       orchestrationStatus: 'running' as const,
+      orchestrationAggregation: {
+        orchestrationId: 'orch-restart',
+        finalAggregation: 'Persisted aggregation contract',
+        phase: 'awaiting-aggregation' as const,
+        repairAttempts: 0,
+      },
     })
     const child = createManagedSession({
       id: 'restart-child',
@@ -236,6 +262,11 @@ describe('SessionManager spawn_session wait/background', () => {
     internals(sm).recoverPersistedSwarmSessions()
 
     expect(parent.orchestrationStatus).toBe('need-to-check')
+    expect(parent.orchestrationAggregation).toMatchObject({
+      orchestrationId: 'orch-restart',
+      finalAggregation: 'Persisted aggregation contract',
+      phase: 'awaiting-aggregation',
+    })
     expect(child.orchestrationStatus).toBe('need-to-check')
     expect(child.orchestrationTokensUsed).toBe(250_000)
     expect(child.tokenUsage?.currentTurn).toBeUndefined()
@@ -552,6 +583,12 @@ describe('SessionManager spawn_session wait/background', () => {
       mode: 'background',
     })
     expect(result.orchestrationId).toBeString()
+    expect(parent.orchestrationAggregation).toEqual({
+      orchestrationId: result.orchestrationId,
+      finalAggregation: completeQualification.finalAggregation,
+      phase: 'waiting-workers',
+      repairAttempts: 0,
+    })
     expect(internals(sm).sessions.get('child')).toMatchObject({
       hidden: true,
       projectId: 'project-1',
@@ -965,7 +1002,8 @@ describe('SessionManager spawn_session wait/background', () => {
     internals(sm).processNextQueuedMessage = async () => {}
     await internals(sm).onProcessingStopped(child.id, 'interrupted')
     expect(child.orchestrationTokensUsed).toBe(263_000)
-    expect(parent.orchestrationStatus).toBe('need-to-check')
+    expect(parent.orchestrationStatus).toBe('running')
+    expect(parent.pendingSwarmWakeOrchestrationIds).toContain(child.orchestrationId!)
     await expect(SessionManager.prototype.sendMessage.call(
       sm,
       child.id,
@@ -1170,9 +1208,116 @@ describe('SessionManager spawn_session wait/background', () => {
       generation: parent.processingGeneration,
       reason: 'complete',
       finalMessageId: 'parent-aggregate-final',
-      finalText: 'aggregated',
+      finalText: aggregationText('orch', [
+        { sessionId: 'child-a', status: 'completed' },
+        { sessionId: 'child-b', status: 'completed' },
+      ]),
     })
     expect(internals(sm).sessions.get(parent.id)?.orchestrationStatus).toBe('completed')
+  })
+
+  it('settles a valid aggregation before replaying an already queued user message', async () => {
+    const parent = buildParent()
+    parent.isProcessing = false
+    stubCreateChild()
+    await internals(sm).spawnSessionFromTool(parent, {
+      prompt: 'Find auth flows',
+      mode: 'background',
+      spawnReason: 'user-requested',
+    })
+    emitChild('complete', 'worker result')
+    expect(parent.orchestrationAggregation?.phase).toBe('awaiting-aggregation')
+
+    parent.isProcessing = true
+    parent.processingGeneration += 1
+    parent.turnStartFinalMessageId = 'dispatch-final'
+    parent.messages.push({
+      id: 'aggregation-final',
+      role: 'assistant',
+      content: aggregationText(parent.orchestrationId!, [
+        { sessionId: 'child', status: 'completed' },
+      ]),
+      timestamp: Date.now(),
+    })
+    parent.messageQueue.push({ message: 'queued user follow-up' })
+    internals(sm).processNextQueuedMessage = async () => {}
+
+    await internals(sm).onProcessingStopped(parent.id, 'complete')
+
+    expect(parent.orchestrationStatus).toBe('completed')
+    expect(parent.messageQueue[0]?.message).toBe('queued user follow-up')
+  })
+
+  it('queues one targeted aggregation repair and fails closed after that repair', async () => {
+    const parent = buildParent()
+    parent.isProcessing = false
+    stubCreateChild()
+    await internals(sm).spawnSessionFromTool(parent, {
+      prompt: 'Find auth flows',
+      mode: 'background',
+      spawnReason: 'user-requested',
+    })
+    emitChild('complete', 'worker result')
+
+    parent.processingGeneration += 1
+    internals(sm).emitSessionComplete({
+      sessionId: parent.id,
+      workspaceId: parent.workspace.id,
+      generation: parent.processingGeneration,
+      reason: 'complete',
+      finalMessageId: 'incomplete-aggregation',
+      finalText: '需要我帮你汇总 worker 报告吗？',
+    })
+    expect(parent.orchestrationStatus).toBe('running')
+    expect(parent.orchestrationAggregation).toMatchObject({
+      phase: 'repairing',
+      repairAttempts: 1,
+    })
+    expect(parent.messageQueue).toHaveLength(1)
+    expect(parent.messageQueue[0]).toMatchObject({ options: { hidden: true } })
+    expect(parent.messageQueue[0]?.message).toContain('single allowed repair attempt')
+
+    parent.processingGeneration += 1
+    internals(sm).emitSessionComplete({
+      sessionId: parent.id,
+      workspaceId: parent.workspace.id,
+      generation: parent.processingGeneration,
+      reason: 'complete',
+      finalMessageId: 'failed-repair',
+      finalText: 'still incomplete',
+    })
+    expect(parent.orchestrationStatus).toBe('need-to-check')
+    expect(parent.orchestrationBlocker).toContain('after one repair')
+  })
+
+  it('resets a pending aggregation when the coordinator adds another managed worker', async () => {
+    const parent = buildParent()
+    parent.isProcessing = false
+    stubCreateChild('child-1')
+    await internals(sm).spawnSessionFromTool(parent, {
+      prompt: 'First worker',
+      mode: 'background',
+      spawnReason: 'user-requested',
+    })
+    emitChild('complete', 'first result', 'child-1')
+    expect(parent.orchestrationAggregation).toMatchObject({
+      phase: 'awaiting-aggregation',
+      workers: [{ sessionId: 'child-1', status: 'completed' }],
+    })
+
+    internals(sm).issueSpawnQualificationCredentials(parent, 'user-requested', 1)
+    stubCreateChild('child-2')
+    await internals(sm).spawnSessionFromTool(parent, {
+      prompt: 'Second worker discovered during aggregation',
+      mode: 'background',
+      spawnReason: 'user-requested',
+    })
+
+    expect(parent.orchestrationAggregation).toMatchObject({
+      phase: 'waiting-workers',
+      repairAttempts: 0,
+    })
+    expect(parent.orchestrationAggregation?.workers).toBeUndefined()
   })
 
   it('surfaces a persisted child final message when the provider omits completion finalText', () => {
@@ -1289,7 +1434,9 @@ describe('SessionManager spawn_session wait/background', () => {
       generation: coordinator.processingGeneration,
       reason: 'complete',
       finalMessageId: 'coordinator-aggregate',
-      finalText: 'nested aggregate',
+      finalText: aggregationText('orch-nested', [
+        { sessionId: 'grandchild', status: 'completed' },
+      ]),
     })
     expect(coordinator.orchestrationStatus).toBe('completed')
     expect(root.backgroundTaskRegistry.get(coordinator.id)?.status).toBe('completed')
@@ -1302,7 +1449,9 @@ describe('SessionManager spawn_session wait/background', () => {
       generation: root.processingGeneration,
       reason: 'complete',
       finalMessageId: 'root-aggregate',
-      finalText: 'root aggregate',
+      finalText: aggregationText('orch-nested', [
+        { sessionId: 'coordinator', status: 'completed' },
+      ]),
     })
     expect(internals(sm).sessions.get(root.id)?.orchestrationStatus).toBe('completed')
   })
@@ -1366,16 +1515,18 @@ describe('SessionManager spawn_session wait/background', () => {
       generation: coordinator.processingGeneration,
       reason: 'complete',
       finalMessageId: 'aggregate-turn',
-      finalText: 'nested aggregate',
+      finalText: aggregationText(coordinator.orchestrationId!, [
+        { sessionId: 'wait-grandchild', status: 'completed' },
+      ]),
     })
     await expect(pending).resolves.toMatchObject({
       sessionId: coordinator.id,
       status: 'completed',
-      finalText: 'nested aggregate',
+      finalText: expect.stringContaining('wait-grandchild'),
     })
   })
 
-  it('keeps a blocked child and its parent need-to-check without sending an aggregation wake', async () => {
+  it('aggregates a blocked child disclosure before marking the parent need-to-check', async () => {
     const parent = buildParent()
     parent.isProcessing = false
     stubCreateChild()
@@ -1390,9 +1541,22 @@ describe('SessionManager spawn_session wait/background', () => {
 
     expect(internals(sm).sessions.get('child')?.orchestrationStatus).toBe('need-to-check')
     expect(parent.backgroundTaskRegistry.get('child')?.status).toBe('failed')
+    expect(parent.orchestrationStatus).toBe('running')
+    expect(sendCalls.filter(call => call.id === parent.id)).toHaveLength(1)
+
+    parent.processingGeneration += 1
+    internals(sm).emitSessionComplete({
+      sessionId: parent.id,
+      workspaceId: parent.workspace.id,
+      generation: parent.processingGeneration,
+      reason: 'complete',
+      finalMessageId: 'parent-partial-final',
+      finalText: aggregationText(parent.orchestrationId!, [
+        { sessionId: 'child', status: 'failed' },
+      ]),
+    })
     expect(parent.orchestrationStatus).toBe('need-to-check')
     expect(parent.orchestrationBlocker).toContain('worker failed')
-    expect(sendCalls.filter(call => call.id === parent.id)).toHaveLength(0)
   })
 
   it('moves the coordinator to need-to-check when the aggregation nudge cannot be sent', async () => {

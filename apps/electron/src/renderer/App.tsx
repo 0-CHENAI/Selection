@@ -151,6 +151,7 @@ function handleBackgroundTaskEvent(
           lastSignalAt: startTime,
           intent: evt.intent as string | undefined,
           status: 'running' as const,
+          orchestrationId: evt.orchestrationId as string | undefined,
           ...(isWorkflow ? { workflowId: evt.workflowId as string | undefined, agentsCompleted: 0 } : {}),
         },
       ])
@@ -207,6 +208,7 @@ function handleBackgroundTaskEvent(
             completedAt: Date.now(),
             outputFile: (evt.outputFile as string | undefined) ?? t.outputFile,
             summary: (evt.summary as string | undefined) ?? t.summary,
+            orchestrationId: (evt.orchestrationId as string | undefined) ?? t.orchestrationId,
           }
         : t
     ))

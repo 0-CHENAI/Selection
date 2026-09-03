@@ -76,6 +76,7 @@ export const SESSION_PERSISTENT_FIELDS = [
   'orchestrationBlocker',
   'orchestrationTokensUsed',
   'orchestrationTokenBudget',
+  'orchestrationAggregation',
 ] as const;
 
 export type SessionPersistentField = typeof SESSION_PERSISTENT_FIELDS[number];
@@ -89,6 +90,19 @@ export type SessionPersistentField = typeof SESSION_PERSISTENT_FIELDS[number];
  */
 export type SessionStatus = string;
 
+export interface SwarmAggregationContract {
+  orchestrationId: string;
+  finalAggregation: string;
+  phase: 'waiting-workers' | 'awaiting-aggregation' | 'repairing';
+  repairAttempts: number;
+  /** Stable references to the exact terminal worker results selected for aggregation. */
+  workers?: Array<{
+    sessionId: string;
+    status: 'completed' | 'failed' | 'stopped';
+    finalMessageId?: string;
+  }>;
+}
+
 export interface SwarmSessionMetadata {
   /** Autonomous delegation is opt-in per session; missing legacy values resolve to false. */
   swarmEnabled?: boolean;
@@ -101,6 +115,8 @@ export interface SwarmSessionMetadata {
   orchestrationBlocker?: string;
   orchestrationTokensUsed?: number;
   orchestrationTokenBudget?: number;
+  /** Durable final-answer contract for the active managed Swarm run. */
+  orchestrationAggregation?: SwarmAggregationContract;
 }
 
 /** True only for an agent spawned inside a Swarm, never for its root coordinator. */

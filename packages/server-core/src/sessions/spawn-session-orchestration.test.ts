@@ -8,6 +8,10 @@ import {
   synthesizeAutomaticQualification,
   synthesizeFanOutQualification,
   buildBackgroundTaskNudge,
+  buildManagedSwarmCoverageMarker,
+  buildManagedSwarmNudge,
+  type ManagedSwarmAggregationChild,
+  assessManagedSwarmAggregation,
   countLiveSwarmChildren,
   countLiveSwarmNodes,
   countRunningSpawnChildren,
@@ -70,6 +74,74 @@ describe('spawn-session orchestration helpers', () => {
       parallelBenefit: 'The tracks do not depend on each other.',
       finalAggregation: 'The coordinator merges findings and verifies conflicts.',
     })).toEqual({ eligible: true, reasons: [] })
+  })
+
+  it('requires exact worker coverage and rejects deferred aggregation', () => {
+    const finalAggregation = 'Compare all worker evidence and resolve conflicts.'
+    const children = [
+      { sessionId: 'worker-a', status: 'completed' },
+      { sessionId: 'worker-b', status: 'failed' },
+    ] satisfies ManagedSwarmAggregationChild[]
+    const marker = buildManagedSwarmCoverageMarker({
+      orchestrationId: 'orch-1',
+      finalAggregation,
+      children,
+    })
+    const valid = [
+      'worker-a completed：给出代码证据。',
+      'worker-b failed：执行失败，结论保留该风险。',
+      '综合结论：两条结果存在上述限制。',
+      marker,
+    ].join('\n')
+
+    expect(assessManagedSwarmAggregation({
+      finalText: valid,
+      orchestrationId: 'orch-1',
+      finalAggregation,
+      children,
+    })).toEqual({ valid: true, reasons: [] })
+    expect(assessManagedSwarmAggregation({
+      finalText: `worker-a completed。需要我帮你汇总剩余报告吗？\n${marker}`,
+      orchestrationId: 'orch-1',
+      finalAggregation,
+      children,
+    })).toMatchObject({
+      valid: false,
+      reasons: expect.arrayContaining([
+        expect.stringContaining('worker-b'),
+        expect.stringContaining('defers aggregation'),
+      ]),
+    })
+    expect(assessManagedSwarmAggregation({
+      finalText: valid,
+      orchestrationId: 'orch-1',
+      finalAggregation: 'A different aggregation contract.',
+      children,
+    })).toMatchObject({
+      valid: false,
+      reasons: expect.arrayContaining([
+        expect.stringContaining('declared aggregation contract'),
+      ]),
+    })
+  })
+
+  it('puts the persisted contract, long worker output, and exact marker in the aggregation nudge', () => {
+    const longSummary = 'evidence '.repeat(2_000)
+    const nudge = buildManagedSwarmNudge({
+      orchestrationId: 'orch-long',
+      finalAggregation: 'Reconcile code and documentation evidence.',
+      children: [
+        { sessionId: 'worker-a', status: 'completed', summary: longSummary },
+      ],
+    })
+
+    expect(nudge).toContain('Reconcile code and documentation evidence.')
+    expect(nudge).toContain(longSummary)
+    expect(nudge).toContain(buildManagedSwarmCoverageMarker({
+      orchestrationId: 'orch-long',
+      finalAggregation: 'Reconcile code and documentation evidence.',
+      children: [{ sessionId: 'worker-a', status: 'completed' }],
+    }))
   })
 
   it('synthesizes a qualification contract from distinct parallel fan-out tracks', () => {

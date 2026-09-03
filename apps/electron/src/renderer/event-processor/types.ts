@@ -175,7 +175,7 @@ export interface SessionStatusChangedEvent {
 export interface SessionMetadataChangedEvent {
   type: 'session_metadata_changed'
   sessionId: string
-  changes: Partial<Pick<Session, 'taskNodeCount' | 'kanbanColumn' | 'taskDraft' | 'taskSlug' | 'projectId' | 'swarmEnabled' | 'orchestrationId' | 'orchestrationRootSessionId' | 'orchestrationDepth' | 'orchestrationRole' | 'orchestrationLifecycle' | 'orchestrationStatus' | 'orchestrationBlocker' | 'orchestrationTokensUsed' | 'orchestrationTokenBudget'>>
+  changes: Partial<Pick<Session, 'taskNodeCount' | 'kanbanColumn' | 'taskDraft' | 'taskSlug' | 'projectId' | 'swarmEnabled' | 'orchestrationId' | 'orchestrationRootSessionId' | 'orchestrationDepth' | 'orchestrationRole' | 'orchestrationLifecycle' | 'orchestrationStatus' | 'orchestrationBlocker' | 'orchestrationTokensUsed' | 'orchestrationTokenBudget' | 'orchestrationAggregation'>>
 }
 
 /**
@@ -376,6 +376,8 @@ export interface TaskBackgroundedEvent {
   kind?: 'workflow'
   /** Workflow run id (wf_...) — correlates workflow_agent_completed events to this chip. */
   workflowId?: string
+  /** Managed Swarm run id. Keeps its child chip visible through aggregation. */
+  orchestrationId?: string
 }
 
 /**
@@ -425,6 +427,7 @@ export interface TaskCompletedEvent {
   outputFile?: string
   summary?: string
   turnId?: string
+  orchestrationId?: string
 }
 
 /**
