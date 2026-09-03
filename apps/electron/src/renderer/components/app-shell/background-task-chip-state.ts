@@ -34,6 +34,9 @@ export function advanceBackgroundTaskChips(
     })
     .filter((task) => {
       if (task.status === 'running' || task.status === 'stale') return true
+      // Managed Swarm children remain inspectable while their coordinator is
+      // aggregating. The chip's Dismiss action is the explicit removal path.
+      if (task.type === 'agent' && task.orchestrationId) return true
       const age = now - (task.completedAt ?? now)
       const linger = task.status === 'orphaned'
         ? ORPHANED_LINGER_MS
@@ -72,6 +75,9 @@ export function markLiveBackgroundTasksOrphaned(
   let changed = false
   const next = tasks.map((task) => {
     if (task.status !== 'running' && task.status !== 'stale') return task
+    // spawn_session workers are independent sessions and survive the parent
+    // turn even when SDK-owned background agents do not.
+    if (task.type === 'agent' && task.orchestrationId) return task
     changed = true
     return {
       ...task,
@@ -80,4 +86,19 @@ export function markLiveBackgroundTasksOrphaned(
     }
   })
   return changed ? next : tasks
+}
+
+/**
+ * A tool result normally closes its transient task chip. Managed Swarm workers
+ * are different: spawn_session returns a regular JSON tool result immediately
+ * after task_backgrounded, while the child keeps running independently. Keep
+ * those chips until their lifecycle event updates them and the user dismisses
+ * them explicitly.
+ */
+export function shouldRemoveTaskForToolResult(
+  task: BackgroundTask,
+  toolUseId: string,
+): boolean {
+  if (task.toolUseId !== toolUseId) return false
+  return !(task.type === 'agent' && task.orchestrationId)
 }

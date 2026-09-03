@@ -6,6 +6,7 @@ import {
   markLiveBackgroundTasksOrphaned,
   ORPHANED_LINGER_MS,
   RUNNING_SIGNAL_TIMEOUT_MS,
+  shouldRemoveTaskForToolResult,
   TERMINAL_LINGER_MS,
 } from '../background-task-chip-state'
 
@@ -65,6 +66,31 @@ describe('background task chip lifecycle', () => {
     expect(next.map(item => item.id)).toEqual(['task-1', 'task-3'])
   })
 
+  it('keeps terminal managed Swarm agents until the user dismisses them', () => {
+    const swarmChild = task({
+      status: 'completed',
+      completedAt: NOW - 10 * TERMINAL_LINGER_MS,
+      orchestrationId: 'orch-1',
+    })
+    const ordinaryAgent = task({
+      id: 'task-2',
+      status: 'completed',
+      completedAt: NOW - TERMINAL_LINGER_MS,
+    })
+    const ordinaryShell = task({
+      id: 'shell-1',
+      type: 'shell',
+      status: 'completed',
+      completedAt: NOW - TERMINAL_LINGER_MS,
+    })
+
+    expect(advanceBackgroundTaskChips([
+      swarmChild,
+      ordinaryAgent,
+      ordinaryShell,
+    ], NOW)).toEqual([swarmChild])
+  })
+
   it('restores a stale task to running when progress resumes', () => {
     const stale = task({ status: 'stale', lastSignalAt: NOW - RUNNING_SIGNAL_TIMEOUT_MS })
     const next = markBackgroundTaskSignal(stale, NOW)
@@ -89,5 +115,22 @@ describe('background task chip lifecycle', () => {
     expect(next.map(item => item.status)).toEqual(['orphaned', 'orphaned', 'completed'])
     expect(next[0]?.completedAt).toBe(NOW)
     expect(next[1]?.completedAt).toBe(NOW)
+  })
+
+  it('does not orphan an independently running Swarm session at parent turn end', () => {
+    const swarmChild = task({ orchestrationId: 'orch-1' })
+
+    expect(markLiveBackgroundTasksOrphaned([swarmChild], NOW)).toEqual([swarmChild])
+  })
+
+  it('does not remove a managed Swarm worker when spawn_session returns', () => {
+    const swarmChild = task({ orchestrationId: 'orch-1' })
+
+    expect(shouldRemoveTaskForToolResult(swarmChild, 'tool-1')).toBe(false)
+  })
+
+  it('still removes an ordinary task for a non-backgrounding tool result', () => {
+    expect(shouldRemoveTaskForToolResult(task(), 'tool-1')).toBe(true)
+    expect(shouldRemoveTaskForToolResult(task(), 'other-tool')).toBe(false)
   })
 })

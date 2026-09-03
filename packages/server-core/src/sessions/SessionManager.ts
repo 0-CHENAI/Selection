@@ -81,6 +81,7 @@ import {
   type SessionStatus,
   type SessionHeader,
   type SessionTokenUsage,
+  type SwarmAggregationContract,
   pickSessionFields,
   isSharedProjectMemoryEnabled,
   isSpawnedSwarmAgent,
@@ -93,6 +94,9 @@ import {
   assessSwarmSpawnLimits,
   buildBackgroundTaskNudge,
   buildManagedSwarmNudge,
+  buildManagedSwarmRepairNudge,
+  assessManagedSwarmAggregation,
+  DEFAULT_MANAGED_SWARM_FINAL_AGGREGATION,
   FIXED_SWARM_TOKEN_BUDGET,
   MAX_SWARM_CHILDREN_PER_PARENT,
   countRunningSpawnChildren,
@@ -104,6 +108,7 @@ import {
   shouldOrphanBackgroundTask,
   shouldWakeOnTaskCompleted,
   synthesizeAutomaticQualification,
+  type ManagedSwarmAggregationChild,
   waitForChildSessionCompletion,
 } from './spawn-session-orchestration.ts'
 import { ConfigWatcher, type ConfigWatcherCallbacks } from '@craft-agent/shared/config'
@@ -930,6 +935,7 @@ interface ManagedSession {
   orchestrationBlocker?: string
   orchestrationTokensUsed?: number
   orchestrationTokenBudget?: number
+  orchestrationAggregation?: SwarmAggregationContract
   // Kanban board column id ('todo' | 'in-progress' | 'done'); independent of sessionStatus
   kanbanColumn?: string
   // Tasks Conductor: slug of the task spec this session belongs to (orchestrator + child nodes)
@@ -1275,6 +1281,7 @@ export function buildAgentSessionConfig(managed: ManagedSession): SessionConfig 
     orchestrationBlocker: managed.orchestrationBlocker,
     orchestrationTokensUsed: managed.orchestrationTokensUsed,
     orchestrationTokenBudget: managed.orchestrationTokenBudget,
+    orchestrationAggregation: managed.orchestrationAggregation,
   }
 }
 
@@ -3305,6 +3312,7 @@ export class SessionManager implements ISessionManager {
       orchestrationBlocker: options?.orchestrationBlocker,
       orchestrationTokensUsed: options?.orchestrationTokensUsed,
       orchestrationTokenBudget: options?.orchestrationTokenBudget,
+      orchestrationAggregation: options?.orchestrationAggregation,
       // Persist only an EXPLICIT selection (e.g. a task's spec.sources on its subtasks).
       // The workspace-default fallback stays dynamic — freezing it into the header would
       // pin every ordinary session to the defaults as of its creation time.
@@ -3421,6 +3429,7 @@ export class SessionManager implements ISessionManager {
       orchestrationBlocker: options?.orchestrationBlocker,
       orchestrationTokensUsed: options?.orchestrationTokensUsed,
       orchestrationTokenBudget: options?.orchestrationTokenBudget,
+      orchestrationAggregation: options?.orchestrationAggregation,
       branchFromMessageId: validatedBranch?.sourceMessageId,
       branchContextStrategy: validatedBranch?.branchContextStrategy,
       branchFromSdkSessionId: validatedBranch?.branchFromSdkSessionId,
@@ -8096,6 +8105,7 @@ export class SessionManager implements ISessionManager {
           this.refreshSwarmSessionState(parent)
         }
       }
+      this.reportManagedChildTerminal(managed)
     }
 
     // A stopped Pi turn can still have parallel tool/LLM work resolving in its
@@ -8183,6 +8193,29 @@ export class SessionManager implements ISessionManager {
       managed.pendingExternalMetadata = undefined
       sessionLog.info(`Applying deferred external metadata for session ${sessionId} after processing stop`)
       this.applyExternalSessionMetadata(managed, pendingHeader)
+    }
+
+    const aggregation = managed.orchestrationAggregation
+    if (
+      managed.orchestrationStatus === 'running'
+      && aggregation
+      && aggregation.orchestrationId === managed.orchestrationId
+      && (aggregation.phase === 'awaiting-aggregation' || aggregation.phase === 'repairing')
+    ) {
+      // Aggregation completion must be evaluated before queued user messages.
+      // The ordinary completion event is emitted only when the queue is empty.
+      swarmTurnUsageRecorded = this.recordSwarmCompletion({
+        sessionId,
+        workspaceId: managed.workspace.id,
+        generation: managed.processingGeneration,
+        reason: completionReason,
+        finalMessageId: currentFinalMessageId,
+        finalText: currentFinalMessageId
+          ? managed.messages.find(m => m.id === currentFinalMessageId)?.content
+          : undefined,
+        tokenUsage: managed.tokenUsage,
+        turnTokens: completedTurnTokens,
+      }) || swarmTurnUsageRecorded
     }
 
     // 5. Check queue and process or complete
@@ -8711,7 +8744,8 @@ export class SessionManager implements ISessionManager {
       | 'orchestrationStatus'
       | 'orchestrationBlocker'
       | 'orchestrationTokensUsed'
-      | 'orchestrationTokenBudget'>>,
+      | 'orchestrationTokenBudget'
+      | 'orchestrationAggregation'>>,
   ): void {
     Object.assign(managed, changes)
     this.setMetadataWriteGuard(managed)
@@ -8835,6 +8869,31 @@ export class SessionManager implements ISessionManager {
     )
   }
 
+  private getManagedSwarmAggregationChildren(
+    parent: ManagedSession,
+    orchestrationId: string,
+  ): ManagedSwarmAggregationChild[] {
+    return this.getManagedSwarmChildren(parent.id)
+      .filter(child => child.orchestrationId === orchestrationId)
+      .map(child => {
+        const output = parent.backgroundTaskOutputs.get(child.id)
+        const status: ManagedSwarmAggregationChild['status'] = child.orchestrationStatus === 'completed'
+          ? 'completed'
+          : child.orchestrationStatus === 'stopped'
+            ? 'stopped'
+            : 'failed'
+        return {
+          sessionId: child.id,
+          name: child.name,
+          status,
+          summary: output?.summary ?? this.getSessionFinalText(child.id),
+          blocker: child.orchestrationBlocker,
+          finalMessageId: this.swarmTurnCompletions.get(child.id)?.finalMessageId
+            ?? this.getLastFinalAssistantMessageId(child.messages),
+        }
+      })
+  }
+
   private refreshSwarmSessionState(session: ManagedSession): void {
     const turn = this.swarmTurnCompletions.get(session.id)
     const children = this.getManagedSwarmChildren(session.id)
@@ -8874,6 +8933,22 @@ export class SessionManager implements ISessionManager {
       return
     }
 
+    const aggregation = session.orchestrationAggregation
+    if (
+      children.length > 0
+      && aggregation?.orchestrationId === session.orchestrationId
+    ) {
+      // Managed children have settled, but their terminal states still need a
+      // coordinator answer that passes the persisted aggregation contract.
+      if (session.orchestrationStatus !== 'running' || session.orchestrationBlocker) {
+        this.updateOrchestrationMetadata(session, {
+          orchestrationStatus: 'running',
+          orchestrationBlocker: undefined,
+        })
+      }
+      return
+    }
+
     const blockedChild = children.find(child =>
       child.orchestrationStatus === 'need-to-check' || child.orchestrationStatus === 'stopped'
     )
@@ -8886,10 +8961,18 @@ export class SessionManager implements ISessionManager {
     } else if (turn) {
       if (turn.reason === 'complete') {
         if (hasUnreportedManagedChild) return
-        this.updateOrchestrationMetadata(session, {
-          orchestrationStatus: 'completed',
-          orchestrationBlocker: undefined,
-        })
+        const finalText = turn.finalText ?? this.getSessionFinalText(session.id)
+        if (isSpawnedSwarmAgent(session) && !finalText?.trim()) {
+          this.updateOrchestrationMetadata(session, {
+            orchestrationStatus: 'need-to-check',
+            orchestrationBlocker: 'Swarm worker completed without a usable final result',
+          })
+        } else {
+          this.updateOrchestrationMetadata(session, {
+            orchestrationStatus: 'completed',
+            orchestrationBlocker: undefined,
+          })
+        }
       } else if (turn.reason === 'interrupted') {
         this.updateOrchestrationMetadata(session, {
           orchestrationStatus: 'stopped',
@@ -8927,6 +9010,71 @@ export class SessionManager implements ISessionManager {
     }
     this.recordSwarmAgentTokenUsage(managed, evt.tokenUsage, evt.turnTokens)
     this.swarmTurnCompletions.set(managed.id, evt)
+    const aggregation = managed.orchestrationAggregation
+    if (
+      aggregation?.orchestrationId === managed.orchestrationId
+      && (aggregation.phase === 'awaiting-aggregation' || aggregation.phase === 'repairing')
+    ) {
+      const children = this.getManagedSwarmAggregationChildren(
+        managed,
+        aggregation.orchestrationId,
+      )
+      const assessment = evt.reason === 'complete'
+        ? assessManagedSwarmAggregation({
+            finalText: evt.finalText,
+            orchestrationId: aggregation.orchestrationId,
+            finalAggregation: aggregation.finalAggregation,
+            children,
+          })
+        : {
+            valid: false,
+            reasons: [`aggregation turn ended with ${evt.reason}`],
+          }
+      if (assessment.valid) {
+        const blockedChild = children.find(child => child.status !== 'completed')
+        this.updateOrchestrationMetadata(managed, blockedChild
+          ? {
+              orchestrationStatus: 'need-to-check',
+              orchestrationBlocker: blockedChild.blocker
+                ?? `Managed child ${blockedChild.sessionId} did not complete successfully; the final answer discloses the partial result`,
+            }
+          : {
+              orchestrationStatus: 'completed',
+              orchestrationBlocker: undefined,
+            })
+        this.reportManagedChildTerminal(managed)
+        return true
+      }
+
+      if (aggregation.repairAttempts < 1) {
+        this.updateOrchestrationMetadata(managed, {
+          orchestrationStatus: 'running',
+          orchestrationBlocker: undefined,
+          orchestrationAggregation: {
+            ...aggregation,
+            phase: 'repairing',
+            repairAttempts: aggregation.repairAttempts + 1,
+          },
+        })
+        managed.messageQueue.unshift({
+          message: buildManagedSwarmRepairNudge({
+            orchestrationId: aggregation.orchestrationId,
+            finalAggregation: aggregation.finalAggregation,
+            children,
+            reasons: assessment.reasons,
+          }),
+          options: { hidden: true },
+        })
+        return true
+      }
+
+      this.updateOrchestrationMetadata(managed, {
+        orchestrationStatus: 'need-to-check',
+        orchestrationBlocker: `Swarm final aggregation failed after one repair: ${assessment.reasons.join('; ')}`,
+      })
+      this.reportManagedChildTerminal(managed)
+      return true
+    }
     this.refreshSwarmSessionState(managed)
     return true
   }
@@ -9006,6 +9154,7 @@ export class SessionManager implements ISessionManager {
           : 'No current-turn Swarm qualification credential is available',
       )
     }
+    let finalAggregation = request.qualification?.finalAggregation?.trim()
     if (effectiveSpawnReason === 'automatic') {
       let qualification = request.qualification
       if (!qualification) {
@@ -9028,6 +9177,7 @@ export class SessionManager implements ISessionManager {
         this.updateOrchestrationMetadata(managed, { orchestrationBlocker: blocker })
         throw new Error(blocker)
       }
+      finalAggregation = qualification?.finalAggregation.trim()
     }
     this.assertSpawnPermissionAndProject(managed, request)
 
@@ -9049,9 +9199,33 @@ export class SessionManager implements ISessionManager {
     const startsNewRootRun = !spawnedAgent
       && (!managed.orchestrationId
         || managed.orchestrationStatus === 'completed'
+        || managed.orchestrationStatus === 'need-to-check'
         || managed.orchestrationStatus === 'stopped')
     const orchestrationId = startsNewRootRun ? randomUUID() : (managed.orchestrationId ?? randomUUID())
     const rootSessionId = managed.orchestrationRootSessionId ?? managed.id
+    const existingAggregation = managed.orchestrationAggregation
+    const canReuseAggregation = (
+      !startsNewRootRun
+      && existingAggregation?.orchestrationId === orchestrationId
+    )
+    const orchestrationAggregation: SwarmAggregationContract = canReuseAggregation && existingAggregation
+      ? (
+          lifecycle === 'managed' && existingAggregation.phase !== 'waiting-workers'
+            ? {
+                ...existingAggregation,
+                phase: 'waiting-workers',
+                repairAttempts: 0,
+                workers: undefined,
+              }
+            : existingAggregation
+        )
+      : {
+          orchestrationId,
+          finalAggregation: finalAggregation
+            || DEFAULT_MANAGED_SWARM_FINAL_AGGREGATION,
+          phase: 'waiting-workers',
+          repairAttempts: 0,
+        }
     this.updateOrchestrationMetadata(managed, {
       orchestrationId,
       orchestrationRootSessionId: rootSessionId,
@@ -9060,6 +9234,7 @@ export class SessionManager implements ISessionManager {
       orchestrationLifecycle: managed.orchestrationLifecycle ?? 'managed',
       orchestrationStatus: 'running',
       orchestrationBlocker: undefined,
+      orchestrationAggregation,
       ...(startsNewRootRun
         ? {
             orchestrationTokensUsed: 0,
@@ -9168,6 +9343,30 @@ export class SessionManager implements ISessionManager {
       agent_id: session.id,
       agent_type: 'spawn_session',
     })
+    // Every spawned session is independently inspectable in the parent UI.
+    // Register before starting the child so both wait and background modes use
+    // the same running -> terminal chip lifecycle.
+    const intent = request.name?.trim() || undefined
+    await this.processEvent(managed, {
+      type: 'task_backgrounded',
+      toolUseId: `spawn:${session.id}`,
+      taskId: session.id,
+      intent,
+      orchestrationId,
+    })
+    const registered = managed.backgroundTaskRegistry.get(session.id)
+    if (registered) {
+      Object.assign(registered, {
+        source: 'spawn_session' as const,
+        orchestrationId,
+        rootSessionId,
+        parentSessionId: managed.id,
+        depth: parentDepth + 1,
+        role,
+        lifecycle,
+        projectId: managed.projectId,
+      })
+    }
 
     if (mode === 'wait') {
       const parentGeneration = managed.processingGeneration
@@ -9209,68 +9408,11 @@ export class SessionManager implements ISessionManager {
         })
       })
       const outcome = await outcomeP
-      // A wait timeout/interruption does not stop the child. Promote it into
-      // the same durable parent registry used by background mode so a late
-      // terminal result is surfaced exactly once instead of disappearing.
-      const promotedToBackground = (
-        outcome.status === 'timeout' || outcome.status === 'interrupted'
-      ) && childManaged?.orchestrationStatus === 'running'
-      if (promotedToBackground) {
-        const intent = request.name?.trim() || undefined
-        await this.processEvent(managed, {
-          type: 'task_backgrounded',
-          toolUseId: `spawn:${session.id}`,
-          taskId: session.id,
-          intent,
-        })
-        const registered = managed.backgroundTaskRegistry.get(session.id)
-        if (registered) {
-          Object.assign(registered, {
-            source: 'spawn_session' as const,
-            orchestrationId,
-            rootSessionId,
-            parentSessionId: managed.id,
-            depth: parentDepth + 1,
-            role,
-            lifecycle,
-            projectId: managed.projectId,
-          })
-        }
-      }
-      if (!promotedToBackground) {
-        this.emitSessionAgentEvent(managed, 'SubagentStop', {
-          hook_event_name: 'SubagentStop',
-          agent_id: session.id,
-          agent_type: 'spawn_session',
-          ...(outcome.status === 'failed' && outcome.finalText ? { error: outcome.finalText } : {}),
-        })
-      }
       return {
         ...baseResult,
         status: outcome.status,
         ...(outcome.finalText ? { finalText: outcome.finalText } : {}),
       }
-    }
-
-    const intent = request.name?.trim() || undefined
-    await this.processEvent(managed, {
-      type: 'task_backgrounded',
-      toolUseId: `spawn:${session.id}`,
-      taskId: session.id,
-      intent,
-    })
-    const registered = managed.backgroundTaskRegistry.get(session.id)
-    if (registered) {
-      Object.assign(registered, {
-        source: 'spawn_session' as const,
-        orchestrationId,
-        rootSessionId,
-        parentSessionId: managed.id,
-        depth: parentDepth + 1,
-        role,
-        lifecycle,
-        projectId: managed.projectId,
-      })
     }
 
     this.sendMessage(session.id, request.prompt, fileAttachments).catch(err => {
@@ -9300,41 +9442,41 @@ export class SessionManager implements ISessionManager {
       && !child.taskNodeId
     )
     if (children.length === 0 || children.some(child => child.orchestrationStatus === 'running')) return
-    const blockedChild = children.find(child =>
-      child.orchestrationStatus === 'need-to-check' || child.orchestrationStatus === 'stopped'
-    )
     if (
-      blockedChild
-      || managed.orchestrationStatus === 'need-to-check'
+      managed.orchestrationStatus === 'need-to-check'
       || managed.orchestrationStatus === 'stopped'
     ) {
-      if (managed.orchestrationStatus !== 'stopped') {
-        this.updateOrchestrationMetadata(managed, {
-          orchestrationStatus: 'need-to-check',
-          orchestrationBlocker: managed.orchestrationBlocker
-            ?? blockedChild?.orchestrationBlocker
-            ?? `Managed child ${blockedChild?.id ?? 'unknown'} did not complete successfully`,
-        })
-      }
       this.reportManagedChildTerminal(managed)
       return
     }
+    const currentAggregation = managed.orchestrationAggregation
+    const aggregation: SwarmAggregationContract = currentAggregation?.orchestrationId === orchestrationId
+      ? currentAggregation
+      : {
+          orchestrationId,
+          finalAggregation: DEFAULT_MANAGED_SWARM_FINAL_AGGREGATION,
+          phase: 'waiting-workers',
+          repairAttempts: 0,
+        }
+    if (aggregation.phase !== 'waiting-workers') return
+    const aggregationChildren = this.getManagedSwarmAggregationChildren(managed, orchestrationId)
     this.updateOrchestrationMetadata(managed, {
       orchestrationStatus: 'running',
       orchestrationBlocker: undefined,
+      orchestrationAggregation: {
+        ...aggregation,
+        phase: 'awaiting-aggregation',
+        workers: aggregationChildren.map(child => ({
+          sessionId: child.sessionId,
+          status: child.status,
+          finalMessageId: child.finalMessageId,
+        })),
+      },
     })
     const nudge = buildManagedSwarmNudge({
       orchestrationId,
-      children: children.map(child => {
-        const output = managed.backgroundTaskOutputs.get(child.id)
-        return {
-          sessionId: child.id,
-          name: child.name,
-          status: child.orchestrationStatus ?? 'need-to-check',
-          summary: output?.summary,
-          blocker: child.orchestrationBlocker,
-        }
-      }),
+      finalAggregation: aggregation.finalAggregation,
+      children: aggregationChildren,
     })
     void this.sendMessage(managed.id, nudge, [], [], { hidden: true }).catch((err) => {
       sessionLog.error(`[swarm-lifecycle] failed to surface settled Swarm ${orchestrationId}:`, err)
@@ -9380,6 +9522,7 @@ export class SessionManager implements ISessionManager {
       sessionId: parent.id,
       taskId,
       status,
+      orchestrationId: running.orchestrationId,
       ...(summary ? { summary } : {}),
     }, parent.workspace.id)
     return true
@@ -10751,6 +10894,7 @@ export class SessionManager implements ISessionManager {
             startTime: Date.now(),
             status: 'running',
             turnId: event.turnId,
+            orchestrationId: event.orchestrationId,
             // Workflow launches carry a wf_ id + a live sub-agent completion count.
             ...(event.workflowId ? { workflowId: event.workflowId } : {}),
             ...(event.kind === 'workflow' ? { agentsCompleted: 0 } : {}),
@@ -10844,6 +10988,7 @@ export class SessionManager implements ISessionManager {
           if (running) {
             running.status = event.status
             running.completedAt = Date.now()
+            running.orchestrationId ??= event.orchestrationId
           } else {
             // Terminal notification for a task we never saw backgrounded (e.g.
             // it completed in the same subprocess before task_backgrounded was
@@ -10853,6 +10998,7 @@ export class SessionManager implements ISessionManager {
               startTime: Date.now(),
               status: event.status,
               completedAt: Date.now(),
+              orchestrationId: event.orchestrationId,
             })
           }
           sessionLog.info(`[bg-lifecycle] task completed`, {
