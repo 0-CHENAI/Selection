@@ -1,6 +1,11 @@
 import type { SpawnSessionQualification, SpawnSessionResultStatus } from '@craft-agent/shared/agent'
 
-export { synthesizeFanOutQualification } from '@craft-agent/shared/agent'
+export {
+  extractParallelTrackNames,
+  readCurrentTurnSpawnContext,
+  synthesizeAutomaticQualification,
+  synthesizeFanOutQualification,
+} from '@craft-agent/shared/agent'
 
 export const MAX_SWARM_CHILDREN_PER_PARENT = 3
 export const MAX_SWARM_DEPTH = 2
@@ -46,8 +51,9 @@ export function formatSpawnQualificationFailure(
 }
 
 /**
- * Fail-closed gate for a single automatic spawn. A same-turn multi-worker
- * fan-out may recover a contract via synthesizeFanOutQualification.
+ * Fail-closed gate for a single automatic spawn. A missing object may still
+ * recover via synthesizeAutomaticQualification (same-turn fan-out, or an
+ * explicit user parallel-research request).
  */
 export function assessSpawnQualification(
   qualification: SpawnSessionQualification | undefined,

@@ -97,12 +97,13 @@ import {
   MAX_SWARM_CHILDREN_PER_PARENT,
   countRunningSpawnChildren,
   formatSpawnQualificationFailure,
+  readCurrentTurnSpawnContext,
   recoverPersistedSwarmStatus,
   resolveInheritedSwarmEnabled,
   shouldDeferSpawnWake,
   shouldOrphanBackgroundTask,
   shouldWakeOnTaskCompleted,
-  synthesizeFanOutQualification,
+  synthesizeAutomaticQualification,
   waitForChildSessionCompletion,
 } from './spawn-session-orchestration.ts'
 import { ConfigWatcher, type ConfigWatcherCallbacks } from '@craft-agent/shared/config'
@@ -9012,7 +9013,12 @@ export class SessionManager implements ISessionManager {
           name: request.name,
           prompt: request.prompt,
         })
-        qualification = synthesizeFanOutQualification(fanOut)
+        const { userText, planningText } = readCurrentTurnSpawnContext(managed.messages)
+        qualification = synthesizeAutomaticQualification({
+          candidates: fanOut,
+          userText,
+          planningText,
+        })
       }
       const assessment = assessSpawnQualification(qualification)
       if (!assessment.eligible) {
