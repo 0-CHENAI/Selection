@@ -47,6 +47,7 @@ import { getDiffStats, getUnifiedDiffStats } from '../code-viewer'
 import { TurnCardActionsMenu } from './TurnCardActionsMenu'
 import {
   computeLastChildSet,
+  getRenderedActivityRows,
   groupActivitiesByParent,
   isActivityGroup,
   formatDuration,
@@ -58,7 +59,7 @@ import {
   isVisibleCommentaryCard,
   isMirroredCommentaryActivity,
   shouldShowStreamingFooter,
-  shouldShowThinkingIndicator,
+  shouldShowGenericThinkingIndicator,
   type ActivityGroup,
   type AssistantTurn,
   type TurnPhase,
@@ -767,6 +768,8 @@ export function ActivityStatusIcon({
 
 interface ActivityRowProps {
   activity: ActivityItem
+  /** Localized label shown while an intermediate activity is running */
+  thinkingLabel: string
   /** Callback to open activity details in Monaco */
   onOpenDetails?: () => void
   /** Whether this is the last child at its depth level (for └ corner in tree view) */
@@ -825,14 +828,14 @@ function TreeViewConnector({ depth }: { depth: number; isLastChild?: boolean }) 
 }
 
 /** Single activity row in expanded view */
-function ActivityRow({ activity, onOpenDetails, isLastChild, sessionFolderPath, displayMode = 'detailed' }: ActivityRowProps) {
+function ActivityRow({ activity, thinkingLabel, onOpenDetails, isLastChild, sessionFolderPath, displayMode = 'detailed' }: ActivityRowProps) {
   const depth = activity.depth || 0
 
   // Intermediate messages (LLM commentary) - render with dashed circle icon
   // Show "Thinking" while streaming, stripped markdown content when complete
   if (activity.type === 'intermediate') {
     const isThinking = activity.status === 'running'
-    const displayContent = isThinking ? 'Thinking...' : stripMarkdown(activity.content || '')
+    const displayContent = isThinking ? thinkingLabel : stripMarkdown(activity.content || '')
     const isComplete = activity.status === 'completed'
     return (
       <div className="flex items-stretch">
@@ -1150,6 +1153,8 @@ function ActivityRow({ activity, onOpenDetails, isLastChild, sessionFolderPath, 
 
 interface ActivityGroupRowProps {
   group: ActivityGroup
+  /** Localized label forwarded to running intermediate child rows */
+  thinkingLabel: string
   /** Controlled expansion state for activity groups */
   expandedGroups?: Set<string>
   /** Callback when expansion changes */
@@ -1170,7 +1175,7 @@ interface ActivityGroupRowProps {
  * Renders a Task subagent with its child activities grouped together.
  * Provides visual containment and collapsible children.
  */
-function ActivityGroupRow({ group, expandedGroups: externalExpandedGroups, onExpandedGroupsChange, onOpenActivityDetails, animationIndex = 0, animateEntrance = false, sessionFolderPath, displayMode = 'detailed' }: ActivityGroupRowProps) {
+function ActivityGroupRow({ group, thinkingLabel, expandedGroups: externalExpandedGroups, onExpandedGroupsChange, onOpenActivityDetails, animationIndex = 0, animateEntrance = false, sessionFolderPath, displayMode = 'detailed' }: ActivityGroupRowProps) {
   const reduceMotion = useReducedMotion()
   // Use local state if no controlled state provided
   const [localExpandedGroups, setLocalExpandedGroups] = useState<Set<string>>(new Set())
@@ -1306,6 +1311,7 @@ function ActivityGroupRow({ group, expandedGroups: externalExpandedGroups, onExp
             >
               <ActivityRow
                 activity={child}
+                thinkingLabel={thinkingLabel}
                 onOpenDetails={onOpenActivityDetails ? () => onOpenActivityDetails(child) : undefined}
                 isLastChild={idx === group.children.length - 1}
                 sessionFolderPath={sessionFolderPath}
@@ -2810,6 +2816,7 @@ export const TurnCard = React.memo(function TurnCard({
   annotationInteractionMode = 'interactive',
 }: TurnCardProps) {
   const { t } = useTranslation()
+  const thinkingLabel = t('turnCard.thinking')
   const reduceMotion = useReducedMotion()
   const hasToolActivities = activities.some(activity => activity.type === 'tool')
   const showCommentary = isVisibleCommentaryCard(
@@ -2940,6 +2947,14 @@ export const TurnCard = React.memo(function TurnCard({
     [visibleActivities, hasTaskSubagents]
   )
 
+  const renderedActivityRows = useMemo(
+    () => getRenderedActivityRows(
+      groupedActivities ?? visibleActivities,
+      expandedActivityGroups,
+    ),
+    [expandedActivityGroups, groupedActivities, visibleActivities],
+  )
+
   // Pre-compute which activities are last children - O(n) instead of O(n²) per-render check
   // Only used for flat view (non-grouped)
   const lastChildSet = useMemo(
@@ -2963,7 +2978,8 @@ export const TurnCard = React.memo(function TurnCard({
   // - No response text to show
   // - No plan activities
   // The "Response interrupted" info banner alone is sufficient feedback.
-  const hasNoMeaningfulWork = activities.length > 0
+  const hasNoMeaningfulWork = isComplete
+    && activities.length > 0
     && activities.every(a => {
       // Tool activities must be errors (interrupted/failed)
       if (a.type === 'tool') return a.status === 'error'
@@ -2985,7 +3001,11 @@ export const TurnCard = React.memo(function TurnCard({
   // Determine if thinking indicator should show using the phase-based state machine.
   // This properly handles the "gap" state (awaiting) between tool completion and next action,
   // which was previously causing the turn card to "disappear".
-  const isThinking = shouldShowThinkingIndicator(turnPhase, isBuffering)
+  const showGenericThinkingIndicator = shouldShowGenericThinkingIndicator(
+    turnPhase,
+    isBuffering,
+    renderedActivityRows,
+  )
 
   return (
     <div className="space-y-1">
@@ -3060,6 +3080,7 @@ export const TurnCard = React.memo(function TurnCard({
                         <ActivityGroupRow
                           key={item.parent.id}
                           group={item}
+                          thinkingLabel={thinkingLabel}
                           expandedGroups={expandedActivityGroups}
                           onExpandedGroupsChange={handleExpandedActivityGroupsChange}
                           onOpenActivityDetails={onOpenActivityDetails}
@@ -3086,6 +3107,7 @@ export const TurnCard = React.memo(function TurnCard({
                         >
                           <ActivityRow
                             activity={item}
+                            thinkingLabel={thinkingLabel}
                             onOpenDetails={onOpenActivityDetails ? () => onOpenActivityDetails(item) : undefined}
                             sessionFolderPath={sessionFolderPath}
                             displayMode={displayMode}
@@ -3113,6 +3135,7 @@ export const TurnCard = React.memo(function TurnCard({
                       >
                         <ActivityRow
                           activity={activity}
+                          thinkingLabel={thinkingLabel}
                           onOpenDetails={onOpenActivityDetails ? () => onOpenActivityDetails(activity) : undefined}
                           isLastChild={lastChildSet.has(activity.id)}
                           sessionFolderPath={sessionFolderPath}
@@ -3122,7 +3145,7 @@ export const TurnCard = React.memo(function TurnCard({
                     ))
                   )}
                   {/* Thinking/Buffering indicator - shown while waiting for response */}
-                  {isThinking && !animateResponse && (
+                  {showGenericThinkingIndicator && !animateResponse && (
                     <motion.div
                       key="thinking"
                       initial={reduceMotion || !staggerOnThisExpand ? false : { opacity: 0, x: -8 }}
@@ -3137,7 +3160,7 @@ export const TurnCard = React.memo(function TurnCard({
                       className={cn("flex items-center gap-2 py-0.5 text-muted-foreground/70", SIZE_CONFIG.fontSize)}
                     >
                       <GenerativeActivityIndicator size={12} variant={isBuffering ? 'signal' : 'orbit'} />
-                      <span>{isBuffering ? t('turnCard.preparingResponse') : t('turnCard.thinking')}</span>
+                      <span>{isBuffering ? t('turnCard.preparingResponse') : thinkingLabel}</span>
                     </motion.div>
                   )}
                   </AnimatePresence>
@@ -3151,10 +3174,10 @@ export const TurnCard = React.memo(function TurnCard({
       )}
 
       {/* Standalone thinking indicator - when no activities but still working */}
-      {!hasActivities && isThinking && !animateResponse && (
+      {!hasActivities && showGenericThinkingIndicator && !animateResponse && (
         <div className={cn("flex items-center gap-2 px-3 py-1.5 text-muted-foreground", SIZE_CONFIG.fontSize)}>
           <GenerativeActivityIndicator size={12} variant={isBuffering ? 'signal' : 'orbit'} />
-          <span>{isBuffering ? t('turnCard.preparingResponse') : t('turnCard.thinking')}</span>
+          <span>{isBuffering ? t('turnCard.preparingResponse') : thinkingLabel}</span>
         </div>
       )}
 

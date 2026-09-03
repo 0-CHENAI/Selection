@@ -13,7 +13,15 @@
  */
 
 import { describe, it, expect } from 'bun:test'
-import { deriveTurnPhase, shouldShowStreamingFooter, shouldShowThinkingIndicator, type TurnPhase, type AssistantTurn } from '../turn-utils'
+import {
+  deriveTurnPhase,
+  getRenderedActivityRows,
+  shouldShowGenericThinkingIndicator,
+  shouldShowStreamingFooter,
+  shouldShowThinkingIndicator,
+  type TurnPhase,
+  type AssistantTurn,
+} from '../turn-utils'
 import type { ActivityItem, ResponseContent } from '../TurnCard'
 
 // ============================================================================
@@ -418,6 +426,50 @@ describe('shouldShowThinkingIndicator', () => {
   it('returns false for complete phase', () => {
     expect(shouldShowThinkingIndicator('complete', false)).toBe(false)
     expect(shouldShowThinkingIndicator('complete', true)).toBe(false)
+  })
+})
+
+describe('shouldShowGenericThinkingIndicator', () => {
+  it('hides the duplicate row when a visible intermediate activity is running (#239)', () => {
+    expect(shouldShowGenericThinkingIndicator('awaiting', false, [{
+      type: 'intermediate',
+      status: 'running',
+    }])).toBe(false)
+  })
+
+  it('keeps the standalone row while there are no visible activities (#239)', () => {
+    expect(shouldShowGenericThinkingIndicator('pending', false, [])).toBe(true)
+  })
+
+  it('keeps gap feedback after visible tools have completed (#239)', () => {
+    expect(shouldShowGenericThinkingIndicator('awaiting', false, [{
+      type: 'tool',
+      status: 'completed',
+    }])).toBe(true)
+  })
+
+  it('does not treat a running child in a collapsed task group as visible (#239)', () => {
+    const parent = {
+      id: 'task-row',
+      type: 'tool',
+      status: 'completed',
+    } as ActivityItem
+    const child = {
+      id: 'child-row',
+      type: 'intermediate',
+      status: 'running',
+    } as ActivityItem
+    const group = {
+      type: 'group',
+      parent,
+      children: [child],
+    } as const
+
+    const collapsedRows = getRenderedActivityRows([group], new Set())
+    const expandedRows = getRenderedActivityRows([group], new Set([parent.id]))
+
+    expect(shouldShowGenericThinkingIndicator('awaiting', false, collapsedRows)).toBe(true)
+    expect(shouldShowGenericThinkingIndicator('awaiting', false, expandedRows)).toBe(false)
   })
 })
 

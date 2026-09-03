@@ -245,6 +245,22 @@ export function shouldShowThinkingIndicator(phase: TurnPhase, isBuffering: boole
 }
 
 /**
+ * Determines whether the generic thinking row is needed in addition to the
+ * visible work-chain activities. A running intermediate activity renders its
+ * own localized thinking state, so mounting another row would duplicate it.
+ */
+export function shouldShowGenericThinkingIndicator(
+  phase: TurnPhase,
+  isBuffering: boolean,
+  renderedActivities: ReadonlyArray<Pick<ActivityItem, 'type' | 'status'>>,
+): boolean {
+  return shouldShowThinkingIndicator(phase, isBuffering)
+    && !renderedActivities.some(
+      activity => activity.type === 'intermediate' && activity.status === 'running',
+    )
+}
+
+/**
  * Desktop `Streaming...` footer means "this card's body is still being typed".
  * Once tools (including spawn_session) have started, progress belongs on the
  * work chain / task bar — not a footer that makes a finished preamble look live.
@@ -1287,6 +1303,32 @@ export interface ActivityGroup {
  */
 export function isActivityGroup(item: ActivityItem | ActivityGroup): item is ActivityGroup {
   return 'type' in item && item.type === 'group' && 'parent' in item && 'children' in item
+}
+
+/**
+ * Return only activity rows exposed by the current group expansion state.
+ * Collapsed children stay mounted for animation, but users cannot see them and
+ * they therefore must not suppress higher-level progress feedback.
+ */
+export function getRenderedActivityRows(
+  items: ReadonlyArray<ActivityItem | ActivityGroup>,
+  expandedGroupIds: ReadonlySet<string>,
+): ActivityItem[] {
+  const rows: ActivityItem[] = []
+
+  for (const item of items) {
+    if (!isActivityGroup(item)) {
+      rows.push(item)
+      continue
+    }
+
+    rows.push(item.parent)
+    if (expandedGroupIds.has(item.parent.id)) {
+      rows.push(...item.children)
+    }
+  }
+
+  return rows
 }
 
 /**
