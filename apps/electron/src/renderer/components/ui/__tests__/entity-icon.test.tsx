@@ -55,3 +55,21 @@ describe('EntityIcon chromeless rendering', () => {
     expect(html).not.toContain('rounded-[4px]')
   })
 })
+
+describe('EntityIcon bare rendering', () => {
+  it('removes container chrome from custom raster images', () => {
+    const html = renderToStaticMarkup(
+      <EntityIcon
+        icon={{ kind: 'file', value: 'https://example.com/icon.png', colorable: false }}
+        size="sm"
+        fallbackIcon={DatabaseZap}
+        bare
+      />,
+    )
+
+    expect(html).toContain('h-4 w-4')
+    expect(html).not.toContain('ring-1')
+    expect(html).not.toContain('bg-muted')
+    expect(html).not.toContain('rounded-[4px]')
+  })
+})
