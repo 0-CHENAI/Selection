@@ -580,7 +580,7 @@ describe('pending follow-up replies', () => {
     }
   })
 
-  it('keeps the completed dispatch response open while managed Swarm workers are running (#224)', () => {
+  it('keeps the managed Swarm turn open without presenting dispatch text as the final response (#224)', () => {
     resetCounters()
     const user = createUserMessage('同时调研三个独立模型')
     const spawn = createToolMessage('completed', 'session__spawn_session')
@@ -610,11 +610,11 @@ describe('pending follow-up replies', () => {
     if (assistant?.type === 'assistant') {
       expect(assistant.isComplete).toBe(false)
       expect(assistant.isStreaming).toBe(true)
-      expect(assistant.response?.isStreaming).toBe(false)
-      expect(shouldShowStreamingFooter({
-        isStreaming: assistant.response?.isStreaming ?? false,
-        hasToolActivities: true,
-      })).toBe(false)
+      expect(assistant.response).toBeUndefined()
+      expect(assistant.activities.some(activity =>
+        activity.type === 'intermediate'
+        && activity.content === dispatched.content
+      )).toBe(true)
     }
   })
 
@@ -782,7 +782,7 @@ describe('pending follow-up replies', () => {
     if (assistant?.type === 'assistant') {
       expect(assistant.isComplete).toBe(false)
       expect(assistant.isStreaming).toBe(true)
-      expect(assistant.response?.isStreaming).toBe(false)
+      expect(assistant.response).toBeUndefined()
     }
   })
 

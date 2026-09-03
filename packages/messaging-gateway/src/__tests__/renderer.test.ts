@@ -151,6 +151,11 @@ const ev = {
     result: 'ok',
   }),
   complete: (): SessionEvent => ({ type: 'complete', sessionId: 's' }),
+  pendingComplete: (): SessionEvent => ({
+    type: 'complete',
+    sessionId: 's',
+    orchestrationPending: true,
+  }),
 }
 
 // ---------------------------------------------------------------------------
@@ -199,6 +204,25 @@ describe('Renderer — progress mode (default)', () => {
     expect(sends[0]!.text).toBe('💭 thinking…')
     expect(edits.length).toBe(1)
     expect(edits[0]!.text).toBe('hello world')
+  })
+
+  it('does not commit dispatch text while managed Swarm aggregation is pending', async () => {
+    const adapter = makeAdapter()
+    const binding = makeBinding()
+    await play(renderer, binding, adapter, [
+      ev.final('Workers started.'),
+      ev.pendingComplete(),
+    ])
+
+    const edits = adapter.calls.filter((c) => c.kind === 'editMessage')
+    expect(edits).toHaveLength(0)
+
+    await play(renderer, binding, adapter, [
+      ev.final('Aggregated answer.'),
+      ev.complete(),
+    ])
+    expect(adapter.calls.filter((c) => c.kind === 'editMessage').at(-1)?.text)
+      .toBe('Aggregated answer.')
   })
 
   it('drops intermediate text — never appears in any message', async () => {
@@ -314,6 +338,23 @@ describe('Renderer — final_only mode', () => {
     expect(edits.length).toBe(0)
     expect(sends.length).toBe(1)
     expect(sends[0]!.text).toBe('Part 1.\n\nPart 2.')
+  })
+
+  it('stays silent on a pending Swarm completion', async () => {
+    const adapter = makeAdapter()
+    const binding = makeBinding({ responseMode: 'final_only' as ResponseMode })
+    await play(renderer, binding, adapter, [
+      ev.final('Workers started.'),
+      ev.pendingComplete(),
+    ])
+    expect(adapter.calls).toHaveLength(0)
+
+    await play(renderer, binding, adapter, [
+      ev.final('Aggregated answer.'),
+      ev.complete(),
+    ])
+    expect(adapter.calls.filter((c) => c.kind === 'sendText').map((c) => c.text))
+      .toEqual(['Aggregated answer.'])
   })
 
   it('empty completion: no send at all', async () => {

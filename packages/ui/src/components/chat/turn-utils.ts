@@ -491,6 +491,7 @@ function keepLatestManagedSwarmTurnOpen(turns: Turn[]): void {
   if (turns.at(-1) !== latestAssistant) return
   if (!latestAssistant.activities.some(isManagedAutomaticSpawn)) return
 
+  demoteResponseToWorkChain(latestAssistant)
   latestAssistant.isComplete = false
   latestAssistant.isStreaming = true
 }

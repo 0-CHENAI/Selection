@@ -379,6 +379,11 @@ export class Renderer {
       }
 
       case 'complete': {
+        if (event.orchestrationPending === true) {
+          state.finalBuffer = ''
+          state.lastAssistantText = ''
+          return
+        }
         // Prefer the clean non-intermediate final; fall back to the last
         // assistant text so a tool-terminated run still delivers a message
         // instead of freezing the bubble on "thinking…".
@@ -462,6 +467,11 @@ export class Renderer {
       }
 
       case 'complete': {
+        if (event.orchestrationPending === true) {
+          state.finalBuffer = ''
+          state.lastAssistantText = ''
+          return
+        }
         // Prefer the clean non-intermediate final; fall back to the last
         // assistant text so final_only still delivers something rather than
         // staying silent when the run ends on a tool call.
