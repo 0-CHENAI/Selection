@@ -81,6 +81,7 @@ import { TransportConnectionBanner, shouldShowTransportConnectionBanner } from '
 import {
   markBackgroundTaskSignal,
   markLiveBackgroundTasksOrphaned,
+  shouldRemoveTaskForToolResult,
 } from '@/components/app-shell/background-task-chip-state'
 import { getFileManagerName } from '@/lib/platform'
 import { rendererLog } from '@/lib/logger'
@@ -225,14 +226,18 @@ function handleBackgroundTaskEvent(
     // Background tasks return immediately with agentId/shell_id/backgroundTaskId,
     // we should only remove when the task actually completes
     const result = typeof evt.result === 'string' ? evt.result : JSON.stringify(evt.result)
-    const isBackgroundingResult = result && (
+    const isBackgroundingResult = Boolean(result && (
       /agentId:\s*[a-zA-Z0-9_-]+/.test(result) ||
       /shell_id:\s*[a-zA-Z0-9_-]+/.test(result) ||
       /"backgroundTaskId":\s*"[a-zA-Z0-9_-]+"/.test(result)
-    )
+    ))
     if (!isBackgroundingResult) {
       const currentTasks = store.get(backgroundTasksAtom)
-      store.set(backgroundTasksAtom, currentTasks.filter(t => t.toolUseId !== evt.toolUseId))
+      store.set(backgroundTasksAtom, currentTasks.filter(t => !shouldRemoveTaskForToolResult(
+        t,
+        evt.toolUseId as string,
+        isBackgroundingResult,
+      )))
     }
   } else if (event.type === 'complete' || event.type === 'interrupted' || event.type === 'error') {
     // Orphan backstop: without keep-alive, turn teardown is authoritative evidence

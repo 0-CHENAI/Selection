@@ -9329,11 +9329,39 @@ export class SessionManager implements ISessionManager {
       mode,
     }
 
+    const registerSpawnedTask = async (): Promise<void> => {
+      const intent = request.name?.trim() || undefined
+      await this.processEvent(managed, {
+        type: 'task_backgrounded',
+        toolUseId: `spawn:${session.id}`,
+        taskId: session.id,
+        intent,
+        orchestrationId,
+      })
+      const registered = managed.backgroundTaskRegistry.get(session.id)
+      if (registered) {
+        Object.assign(registered, {
+          source: 'spawn_session' as const,
+          orchestrationId,
+          rootSessionId,
+          parentSessionId: managed.id,
+          depth: parentDepth + 1,
+          role,
+          lifecycle,
+          projectId: managed.projectId,
+        })
+      }
+    }
+
     this.emitSessionAgentEvent(managed, 'SubagentStart', {
       hook_event_name: 'SubagentStart',
       agent_id: session.id,
       agent_type: 'spawn_session',
     })
+    // Every spawned session is independently inspectable in the parent UI.
+    // Register before starting the child so both wait and background modes use
+    // the same running -> terminal chip lifecycle.
+    await registerSpawnedTask()
 
     if (mode === 'wait') {
       const parentGeneration = managed.processingGeneration
@@ -9375,70 +9403,11 @@ export class SessionManager implements ISessionManager {
         })
       })
       const outcome = await outcomeP
-      // A wait timeout/interruption does not stop the child. Promote it into
-      // the same durable parent registry used by background mode so a late
-      // terminal result is surfaced exactly once instead of disappearing.
-      const promotedToBackground = (
-        outcome.status === 'timeout' || outcome.status === 'interrupted'
-      ) && childManaged?.orchestrationStatus === 'running'
-      if (promotedToBackground) {
-        const intent = request.name?.trim() || undefined
-        await this.processEvent(managed, {
-          type: 'task_backgrounded',
-          toolUseId: `spawn:${session.id}`,
-          taskId: session.id,
-          intent,
-          orchestrationId,
-        })
-        const registered = managed.backgroundTaskRegistry.get(session.id)
-        if (registered) {
-          Object.assign(registered, {
-            source: 'spawn_session' as const,
-            orchestrationId,
-            rootSessionId,
-            parentSessionId: managed.id,
-            depth: parentDepth + 1,
-            role,
-            lifecycle,
-            projectId: managed.projectId,
-          })
-        }
-      }
-      if (!promotedToBackground) {
-        this.emitSessionAgentEvent(managed, 'SubagentStop', {
-          hook_event_name: 'SubagentStop',
-          agent_id: session.id,
-          agent_type: 'spawn_session',
-          ...(outcome.status === 'failed' && outcome.finalText ? { error: outcome.finalText } : {}),
-        })
-      }
       return {
         ...baseResult,
         status: outcome.status,
         ...(outcome.finalText ? { finalText: outcome.finalText } : {}),
       }
-    }
-
-    const intent = request.name?.trim() || undefined
-    await this.processEvent(managed, {
-      type: 'task_backgrounded',
-      toolUseId: `spawn:${session.id}`,
-      taskId: session.id,
-      intent,
-      orchestrationId,
-    })
-    const registered = managed.backgroundTaskRegistry.get(session.id)
-    if (registered) {
-      Object.assign(registered, {
-        source: 'spawn_session' as const,
-        orchestrationId,
-        rootSessionId,
-        parentSessionId: managed.id,
-        depth: parentDepth + 1,
-        role,
-        lifecycle,
-        projectId: managed.projectId,
-      })
     }
 
     this.sendMessage(session.id, request.prompt, fileAttachments).catch(err => {

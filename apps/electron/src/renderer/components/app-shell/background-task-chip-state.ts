@@ -84,3 +84,19 @@ export function markLiveBackgroundTasksOrphaned(
   })
   return changed ? next : tasks
 }
+
+/**
+ * A tool result normally closes its transient task chip. Managed Swarm workers
+ * are different: spawn_session returns a regular JSON tool result immediately
+ * after task_backgrounded, while the child keeps running independently. Keep
+ * those chips until their lifecycle event updates them and the user dismisses
+ * them explicitly.
+ */
+export function shouldRemoveTaskForToolResult(
+  task: BackgroundTask,
+  toolUseId: string,
+  isBackgroundingResult: boolean,
+): boolean {
+  if (task.toolUseId !== toolUseId || isBackgroundingResult) return false
+  return !(task.type === 'agent' && task.orchestrationId)
+}

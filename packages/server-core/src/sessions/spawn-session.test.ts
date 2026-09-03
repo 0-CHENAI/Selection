@@ -1606,7 +1606,7 @@ describe('SessionManager spawn_session wait/background', () => {
     expect(parent.agent).toBeNull()
   })
 
-  it('wait returns completed + finalText without registering a background chip', async () => {
+  it('wait returns completed + finalText and keeps an inspectable terminal chip', async () => {
     const parent = buildParent()
     stubCreateChild()
     const pending = internals(sm).spawnSessionFromTool(parent, {
@@ -1617,13 +1617,26 @@ describe('SessionManager spawn_session wait/background', () => {
       timeoutMs: 2_000,
     })
     await flush()
+    expect(internals(sm).listBackgroundTasks(parent.id)).toEqual([
+      expect.objectContaining({
+        taskId: 'child',
+        status: 'running',
+        source: 'spawn_session',
+      }),
+    ])
     emitChild('complete', 'Found login.ts')
     await expect(pending).resolves.toMatchObject({
       sessionId: 'child',
       status: 'completed',
       finalText: 'Found login.ts',
     })
-    expect(internals(sm).listBackgroundTasks(parent.id)).toEqual([])
+    expect(internals(sm).listBackgroundTasks(parent.id)).toEqual([
+      expect.objectContaining({
+        taskId: 'child',
+        status: 'completed',
+        source: 'spawn_session',
+      }),
+    ])
   })
 
   it('wait maps child error to failed and leaves the child running', async () => {
@@ -2105,7 +2118,7 @@ describe('SessionManager spawn_session wait/background', () => {
     expect(parent.backgroundTaskRegistry.get('child')?.status).toBe('running')
   })
 
-  it('stop reports a wait-mode child that is not in the background registry', async () => {
+  it('stop reports an unregistered spawned child from legacy runtime state', async () => {
     const events: Array<{ type: string; runningChildCount?: number }> = []
     sm.setEventSink((_channel, _target, event) => {
       events.push(event as { type: string; runningChildCount?: number })

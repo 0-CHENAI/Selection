@@ -6,6 +6,7 @@ import {
   markLiveBackgroundTasksOrphaned,
   ORPHANED_LINGER_MS,
   RUNNING_SIGNAL_TIMEOUT_MS,
+  shouldRemoveTaskForToolResult,
   TERMINAL_LINGER_MS,
 } from '../background-task-chip-state'
 
@@ -114,5 +115,17 @@ describe('background task chip lifecycle', () => {
     expect(next.map(item => item.status)).toEqual(['orphaned', 'orphaned', 'completed'])
     expect(next[0]?.completedAt).toBe(NOW)
     expect(next[1]?.completedAt).toBe(NOW)
+  })
+
+  it('does not remove a managed Swarm worker when spawn_session returns', () => {
+    const swarmChild = task({ orchestrationId: 'orch-1' })
+
+    expect(shouldRemoveTaskForToolResult(swarmChild, 'tool-1', false)).toBe(false)
+  })
+
+  it('still removes an ordinary task for a non-backgrounding tool result', () => {
+    expect(shouldRemoveTaskForToolResult(task(), 'tool-1', false)).toBe(true)
+    expect(shouldRemoveTaskForToolResult(task(), 'other-tool', false)).toBe(false)
+    expect(shouldRemoveTaskForToolResult(task(), 'tool-1', true)).toBe(false)
   })
 })
