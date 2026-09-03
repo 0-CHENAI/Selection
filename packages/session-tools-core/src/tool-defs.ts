@@ -193,7 +193,7 @@ export const SpawnSessionSchema = z.object({
     })).min(2),
     parallelBenefit: z.string().min(1),
     finalAggregation: z.string().min(1),
-  }).passthrough().optional().describe('Required for automatic spawning: two independent tool tracks plus a final aggregation contract.'),
+  }).passthrough().optional().describe('Required for automatic Swarm V3 spawning: one shared fan-out contract with two independent tool tracks plus a final aggregation contract.'),
   lifecycle: z.enum(['managed', 'detached']).optional()
     .describe('managed (default) participates in parent completion and explicit Swarm stop; detached continues independently.'),
   role: z.enum(['coordinator', 'worker', 'reviewer']).optional()
@@ -569,7 +569,7 @@ For large files (>2000 lines), use {path, startLine, endLine} to select a portio
 
   spawn_session: `Create a first-class child session that runs independently with its own prompt, connection, model, and sources.
 
-Default: do the work in this session. When Swarm is OFF, spawn only after an explicit user request and set spawnReason="user-requested". When Swarm is ON, autonomous splitting must set spawnReason="automatic" and pass a qualification object on every spawn_session call in the fan-out — not a phrase in name or prompt. qualification must include tracks (at least two independent tool-heavy tracks, each with name/input/expectedOutput/evidence/toolKinds), parallelBenefit, and finalAggregation. Use the same qualification object on every worker in that split. The backend fails closed for a single incomplete spawn; a same-turn fan-out of two or more distinctly named workers may recover a contract. Do not spawn for ordinary Q&A, editing existing text, summarizing/classifying/extracting fields from text you already have, reading a file or two, a single command, or "just in case". The backend enforces at most 3 live children per parent, depth 2, and 12 live nodes per Swarm.
+Default: do the work in this session. When Swarm is OFF, spawn only after an explicit user request and set spawnReason="user-requested". When Swarm is ON, autonomous splitting must set spawnReason="automatic" and use the Swarm V3 contract: build one qualification object for the entire fan-out and pass that same object on every spawn_session worker call — not a phrase in name or prompt, and not a separate single-track qualification for each worker. qualification must include tracks (at least two independent tool-heavy tracks, each with name/input/expectedOutput/evidence/toolKinds), parallelBenefit, and finalAggregation. The backend fails closed for a single incomplete spawn; a same-turn fan-out of two or more distinctly named workers may recover a missing or legacy single-track contract. Do not spawn for ordinary Q&A, editing existing text, summarizing/classifying/extracting fields from text you already have, reading a file or two, a single command, or "just in case". The backend enforces at most 3 live children per parent, depth 2, and 12 live nodes per Swarm.
 
 When spawning, the 'prompt' parameter is required. Call help=true only if you need to pick a different connection or model.
 
