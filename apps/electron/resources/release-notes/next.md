@@ -21,7 +21,7 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 
 ## Bug Fixes
 
-- **Only final answers stream in the response card** — text whose role is not yet known stays in the work chain, while providers with an explicit final-answer phase can stream directly into the formal response. Commentary, tool steps, cancellation, errors, and reloads preserve their semantic roles without flashing process narration as the answer. (#87)
+- **Final answers appear only after generation finishes** — network text stays out of the formal response card while the model is working. Once the complete final answer arrives, the UI reveals it locally in a quick pass capped below two seconds; reduced-motion users see it immediately. Commentary, tool steps, cancellation, errors, and reloads preserve their semantic roles without flashing process narration as the answer. Follow-up to #87.
 
 - **Parallel `call_llm` and Swarm workers follow the current session model** — omitting `model` no longer falls through to the connection's Fast / mini tier. Work-chain badges, `spawn_session` children, and Conductor nodes without an explicit model inherit the input-area selection; an explicit tool or task model still wins. Title generation and other utility completions stay on the cheap model. (#192)
 
