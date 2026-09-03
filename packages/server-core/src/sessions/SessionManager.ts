@@ -8961,10 +8961,18 @@ export class SessionManager implements ISessionManager {
     } else if (turn) {
       if (turn.reason === 'complete') {
         if (hasUnreportedManagedChild) return
-        this.updateOrchestrationMetadata(session, {
-          orchestrationStatus: 'completed',
-          orchestrationBlocker: undefined,
-        })
+        const finalText = turn.finalText ?? this.getSessionFinalText(session.id)
+        if (isSpawnedSwarmAgent(session) && !finalText?.trim()) {
+          this.updateOrchestrationMetadata(session, {
+            orchestrationStatus: 'need-to-check',
+            orchestrationBlocker: 'Swarm worker completed without a usable final result',
+          })
+        } else {
+          this.updateOrchestrationMetadata(session, {
+            orchestrationStatus: 'completed',
+            orchestrationBlocker: undefined,
+          })
+        }
       } else if (turn.reason === 'interrupted') {
         this.updateOrchestrationMetadata(session, {
           orchestrationStatus: 'stopped',
@@ -9191,6 +9199,7 @@ export class SessionManager implements ISessionManager {
     const startsNewRootRun = !spawnedAgent
       && (!managed.orchestrationId
         || managed.orchestrationStatus === 'completed'
+        || managed.orchestrationStatus === 'need-to-check'
         || managed.orchestrationStatus === 'stopped')
     const orchestrationId = startsNewRootRun ? randomUUID() : (managed.orchestrationId ?? randomUUID())
     const rootSessionId = managed.orchestrationRootSessionId ?? managed.id
@@ -9329,30 +9338,6 @@ export class SessionManager implements ISessionManager {
       mode,
     }
 
-    const registerSpawnedTask = async (): Promise<void> => {
-      const intent = request.name?.trim() || undefined
-      await this.processEvent(managed, {
-        type: 'task_backgrounded',
-        toolUseId: `spawn:${session.id}`,
-        taskId: session.id,
-        intent,
-        orchestrationId,
-      })
-      const registered = managed.backgroundTaskRegistry.get(session.id)
-      if (registered) {
-        Object.assign(registered, {
-          source: 'spawn_session' as const,
-          orchestrationId,
-          rootSessionId,
-          parentSessionId: managed.id,
-          depth: parentDepth + 1,
-          role,
-          lifecycle,
-          projectId: managed.projectId,
-        })
-      }
-    }
-
     this.emitSessionAgentEvent(managed, 'SubagentStart', {
       hook_event_name: 'SubagentStart',
       agent_id: session.id,
@@ -9361,7 +9346,27 @@ export class SessionManager implements ISessionManager {
     // Every spawned session is independently inspectable in the parent UI.
     // Register before starting the child so both wait and background modes use
     // the same running -> terminal chip lifecycle.
-    await registerSpawnedTask()
+    const intent = request.name?.trim() || undefined
+    await this.processEvent(managed, {
+      type: 'task_backgrounded',
+      toolUseId: `spawn:${session.id}`,
+      taskId: session.id,
+      intent,
+      orchestrationId,
+    })
+    const registered = managed.backgroundTaskRegistry.get(session.id)
+    if (registered) {
+      Object.assign(registered, {
+        source: 'spawn_session' as const,
+        orchestrationId,
+        rootSessionId,
+        parentSessionId: managed.id,
+        depth: parentDepth + 1,
+        role,
+        lifecycle,
+        projectId: managed.projectId,
+      })
+    }
 
     if (mode === 'wait') {
       const parentGeneration = managed.processingGeneration

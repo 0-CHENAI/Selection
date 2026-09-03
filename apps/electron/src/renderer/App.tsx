@@ -233,11 +233,13 @@ function handleBackgroundTaskEvent(
     ))
     if (!isBackgroundingResult) {
       const currentTasks = store.get(backgroundTasksAtom)
-      store.set(backgroundTasksAtom, currentTasks.filter(t => !shouldRemoveTaskForToolResult(
+      const nextTasks = currentTasks.filter(t => !shouldRemoveTaskForToolResult(
         t,
         evt.toolUseId as string,
-        isBackgroundingResult,
-      )))
+      ))
+      if (nextTasks.length !== currentTasks.length) {
+        store.set(backgroundTasksAtom, nextTasks)
+      }
     }
   } else if (event.type === 'complete' || event.type === 'interrupted' || event.type === 'error') {
     // Orphan backstop: without keep-alive, turn teardown is authoritative evidence

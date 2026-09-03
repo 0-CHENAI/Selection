@@ -117,15 +117,20 @@ describe('background task chip lifecycle', () => {
     expect(next[1]?.completedAt).toBe(NOW)
   })
 
+  it('does not orphan an independently running Swarm session at parent turn end', () => {
+    const swarmChild = task({ orchestrationId: 'orch-1' })
+
+    expect(markLiveBackgroundTasksOrphaned([swarmChild], NOW)).toEqual([swarmChild])
+  })
+
   it('does not remove a managed Swarm worker when spawn_session returns', () => {
     const swarmChild = task({ orchestrationId: 'orch-1' })
 
-    expect(shouldRemoveTaskForToolResult(swarmChild, 'tool-1', false)).toBe(false)
+    expect(shouldRemoveTaskForToolResult(swarmChild, 'tool-1')).toBe(false)
   })
 
   it('still removes an ordinary task for a non-backgrounding tool result', () => {
-    expect(shouldRemoveTaskForToolResult(task(), 'tool-1', false)).toBe(true)
-    expect(shouldRemoveTaskForToolResult(task(), 'other-tool', false)).toBe(false)
-    expect(shouldRemoveTaskForToolResult(task(), 'tool-1', true)).toBe(false)
+    expect(shouldRemoveTaskForToolResult(task(), 'tool-1')).toBe(true)
+    expect(shouldRemoveTaskForToolResult(task(), 'other-tool')).toBe(false)
   })
 })

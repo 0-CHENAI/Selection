@@ -343,6 +343,10 @@ export interface ManagedSwarmAggregationChild {
 const SWARM_COVERAGE_PREFIX = '<!-- selection-swarm-coverage:'
 const SWARM_COVERAGE_SUFFIX = '-->'
 
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
 export function buildManagedSwarmCoverageMarker(opts: {
   orchestrationId: string
   finalAggregation: string
@@ -473,11 +477,12 @@ export function assessManagedSwarmAggregation(input: {
 
   const visibleText = markerStart >= 0 ? finalText.slice(0, markerStart) : finalText
   for (const child of input.children) {
-    if (!visibleText.includes(child.sessionId)) {
-      reasons.push(`visible answer does not disclose worker ${child.sessionId}`)
-    }
-    if (!visibleText.includes(child.status)) {
-      reasons.push(`visible answer does not disclose status ${child.status}`)
+    const workerStatusLine = new RegExp(
+      `^(?=[^\\r\\n]*${escapeRegExp(child.sessionId)})(?=[^\\r\\n]*\\b${escapeRegExp(child.status)}\\b)[^\\r\\n]*$`,
+      'm',
+    )
+    if (!workerStatusLine.test(visibleText)) {
+      reasons.push(`visible answer does not disclose worker ${child.sessionId} with status ${child.status} on the same line`)
     }
   }
   const defersAggregation = /(?:需要我|要不要我|是否需要我|你希望我).{0,24}(?:合并|汇总|整合)|(?:would you like me|do you want me|if you want,? i can).{0,40}(?:merge|combine|summari[sz]e)/i

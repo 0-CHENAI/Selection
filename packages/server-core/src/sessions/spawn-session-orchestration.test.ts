@@ -123,6 +123,23 @@ describe('spawn-session orchestration helpers', () => {
         expect.stringContaining('declared aggregation contract'),
       ]),
     })
+    expect(assessManagedSwarmAggregation({
+      finalText: [
+        'worker-a completed：给出代码证据。',
+        'worker-b：仅提供了部分证据。',
+        '状态概览：failed。',
+        '综合结论：两条结果存在上述限制。',
+        marker,
+      ].join('\n'),
+      orchestrationId: 'orch-1',
+      finalAggregation,
+      children,
+    })).toMatchObject({
+      valid: false,
+      reasons: expect.arrayContaining([
+        expect.stringContaining('worker-b with status failed on the same line'),
+      ]),
+    })
   })
 
   it('puts the persisted contract, long worker output, and exact marker in the aggregation nudge', () => {

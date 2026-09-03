@@ -611,6 +611,37 @@ describe('SessionManager spawn_session wait/background', () => {
     })
   })
 
+  it('starts a fresh orchestration after the previous run needs review', async () => {
+    const parent = buildParent()
+    parent.swarmEnabled = true
+    parent.orchestrationId = 'orch-previous'
+    parent.orchestrationRootSessionId = parent.id
+    parent.orchestrationRole = 'coordinator'
+    parent.orchestrationStatus = 'need-to-check'
+    parent.orchestrationAggregation = {
+      orchestrationId: 'orch-previous',
+      finalAggregation: 'Old contract',
+      phase: 'repairing',
+      repairAttempts: 1,
+    }
+    stubCreateChild()
+
+    const result = await internals(sm).spawnSessionFromTool(parent, {
+      prompt: 'Investigate the new run',
+      spawnReason: 'automatic',
+      qualification: completeQualification,
+      mode: 'background',
+    })
+
+    expect(result.orchestrationId).not.toBe('orch-previous')
+    expect(parent.orchestrationAggregation).toEqual({
+      orchestrationId: result.orchestrationId,
+      finalAggregation: completeQualification.finalAggregation,
+      phase: 'waiting-workers',
+      repairAttempts: 0,
+    })
+  })
+
   it('aggregates the coordinator and every managed or detached descendant for run details', async () => {
     const parent = buildParent()
     parent.swarmEnabled = true
@@ -1149,6 +1180,12 @@ describe('SessionManager spawn_session wait/background', () => {
     child.pendingContinuationUsage = undefined
     child.activeTurnUsage.totalTokens = 60_000
     child.activeTurnUsage.inputTokens = 60_000
+    child.messages.push({
+      id: 'child-final',
+      role: 'assistant',
+      content: 'automatic continuation completed',
+      timestamp: Date.now(),
+    })
     await internals(sm).onProcessingStopped(child.id, 'complete')
     expect(child.orchestrationTokensUsed).toBe(60_000)
     expect(child.orchestrationStatus).toBe('completed')
@@ -1557,6 +1594,30 @@ describe('SessionManager spawn_session wait/background', () => {
     })
     expect(parent.orchestrationStatus).toBe('need-to-check')
     expect(parent.orchestrationBlocker).toContain('worker failed')
+  })
+
+  it('does not treat an empty worker completion as a successful result', async () => {
+    const parent = buildParent()
+    parent.isProcessing = false
+    stubCreateChild()
+    await internals(sm).spawnSessionFromTool(parent, {
+      prompt: 'Find auth flows',
+      mode: 'background',
+      spawnReason: 'user-requested',
+    })
+
+    emitChild('complete')
+    await flush()
+
+    expect(internals(sm).sessions.get('child')).toMatchObject({
+      orchestrationStatus: 'need-to-check',
+      orchestrationBlocker: expect.stringContaining('without a usable final result'),
+    })
+    expect(parent.backgroundTaskRegistry.get('child')).toMatchObject({
+      status: 'failed',
+      blocker: expect.stringContaining('without a usable final result'),
+    })
+    expect(sendCalls.find(call => call.id === parent.id)?.msg).toContain('failed')
   })
 
   it('moves the coordinator to need-to-check when the aggregation nudge cannot be sent', async () => {

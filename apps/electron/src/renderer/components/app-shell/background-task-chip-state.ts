@@ -75,6 +75,9 @@ export function markLiveBackgroundTasksOrphaned(
   let changed = false
   const next = tasks.map((task) => {
     if (task.status !== 'running' && task.status !== 'stale') return task
+    // spawn_session workers are independent sessions and survive the parent
+    // turn even when SDK-owned background agents do not.
+    if (task.type === 'agent' && task.orchestrationId) return task
     changed = true
     return {
       ...task,
@@ -95,8 +98,7 @@ export function markLiveBackgroundTasksOrphaned(
 export function shouldRemoveTaskForToolResult(
   task: BackgroundTask,
   toolUseId: string,
-  isBackgroundingResult: boolean,
 ): boolean {
-  if (task.toolUseId !== toolUseId || isBackgroundingResult) return false
+  if (task.toolUseId !== toolUseId) return false
   return !(task.type === 'agent' && task.orchestrationId)
 }
