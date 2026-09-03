@@ -53,4 +53,15 @@ describe('normalizeRemovedSessionClassification', () => {
       subpage: 'app',
     })
   })
+
+  it.each(['permissions', 'messaging'] as const)(
+    'hides the %s settings page and redirects stale routes to app settings',
+    (subpage) => {
+      expect(SETTINGS_ITEMS.some(item => item.id === subpage)).toBe(false)
+      expect(parseRouteToNavigationState(`settings/${subpage}`)).toEqual({
+        navigator: 'settings',
+        subpage: 'app',
+      })
+    },
+  )
 })

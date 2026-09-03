@@ -16,7 +16,11 @@ import type {
   AutomationFilter,
   RightSidebarPanel,
 } from './types'
-import { isValidSettingsSubpage, type SettingsSubpage } from './settings-registry'
+import {
+  isValidSettingsSubpage,
+  isVisibleSettingsSubpage,
+  type SettingsSubpage,
+} from './settings-registry'
 
 // =============================================================================
 // Route Types
@@ -549,7 +553,10 @@ function convertCompoundToNavigationState(compound: ParsedCompoundRoute): Naviga
       return { navigator: 'settings', subpage: null }
     }
     const subpage = compound.details.type as SettingsSubpage
-    return { navigator: 'settings', subpage: subpage === 'labels' ? 'app' : subpage }
+    return {
+      navigator: 'settings',
+      subpage: isVisibleSettingsSubpage(subpage) ? subpage : 'app',
+    }
   }
 
   // Sources - include filter if present
@@ -638,7 +645,7 @@ function convertParsedRouteToNavigationState(parsed: ParsedRoute): NavigationSta
     case 'workspace':
       return { navigator: 'settings', subpage: 'workspace' }
     case 'permissions':
-      return { navigator: 'settings', subpage: 'permissions' }
+      return { navigator: 'settings', subpage: 'app' }
     case 'labels':
       return { navigator: 'settings', subpage: 'app' }
     case 'shortcuts':
