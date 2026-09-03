@@ -714,13 +714,20 @@ class ActiveRun {
     for (let i = 0; i < items.length; i++) {
       if (running >= parallel) break;
       const iid = instanceId(node.id, i);
-      if (this.instances.has(iid)) continue;
+      const existing = this.instances.get(iid);
+      if (existing && existing.state !== 'pending') continue;
       if (this.instanceCount >= MAX_RUN_INSTANCES) {
         this.originalFailed = true;
         this.finish('failed');
         return;
       }
-      this.instances.set(iid, { state: 'running', attempt: 1 });
+      if (existing) {
+        existing.state = 'running';
+        existing.attempt += 1;
+        existing.sessionId = undefined;
+      } else {
+        this.instances.set(iid, { state: 'running', attempt: 1 });
+      }
       this.instanceCount += 1;
       this.inFlight += 1;
       this.log({ kind: 'node-scheduled', nodeId: iid });
@@ -926,7 +933,7 @@ class ActiveRun {
     const values = { ...(payload.values ?? {}) };
     if (declared.length) {
       for (const decl of declared) {
-        if (decl.required !== false && !(decl.name in values) && payload.text == null) {
+        if (decl.required !== false && !(decl.name in values)) {
           return { ok: false, error: `Missing required output "${decl.name}"` };
         }
         if (decl.kind === 'artifact' && values[decl.name] != null) {
@@ -1078,7 +1085,7 @@ class ActiveRun {
 
     // Failure-aware retry: prepend the prior failure so a retried session knows what went wrong
     // instead of blindly repeating a deterministic failure.
-    const st = this.state.get(node.id)!;
+    const st = (instance ? this.instances.get(instance.id) : undefined) ?? this.state.get(node.id)!;
     if (st.attempt > 1 && st.lastFailure) {
       text = `${st.lastFailure}\n\n${text}`;
     }
@@ -1115,12 +1122,18 @@ class ActiveRun {
       const submitted = this.submittedOutputs.get(nodeId) ?? this.submittedOutputs.get(defId);
       const declared = node?.outputs?.length ?? 0;
 
-      if (this.sourceVersion === 2 && declared > 0 && !submitted && node && isSessionLikeKind(node.kind)) {
-        this.failNode(defId, 'completed without submit_task_output', evt.sessionId, 'invalid');
+      if (
+        this.sourceVersion === 2 &&
+        declared > 0 &&
+        !submitted &&
+        node &&
+        (isSessionLikeKind(node.kind) || nodeId !== defId)
+      ) {
+        this.failNode(nodeId, 'completed without submit_task_output', evt.sessionId, 'invalid');
         return;
       }
       if (declared > 0 && !submitted && text.trim() === '') {
-        this.failNode(defId, 'completed without producing declared output', evt.sessionId, 'empty');
+        this.failNode(nodeId, 'completed without producing declared output', evt.sessionId, 'empty');
         return;
       }
 
@@ -1160,7 +1173,7 @@ class ActiveRun {
       this.scheduleReady();
     } else {
       // 'error' | 'timeout'
-      this.failNode(defId, evt.reason, evt.sessionId);
+      this.failNode(nodeId, evt.reason, evt.sessionId);
     }
   }
 
@@ -1169,13 +1182,17 @@ class ActiveRun {
     const st = this.state.get(defId);
     if (!st) return;
     const inst = this.instances.get(nodeId);
+    const node = this.spec.nodes.find((n) => n.id === defId);
+    if (inst && node?.kind === 'map') {
+      this.failMapInstance(node, nodeId, inst, reason, sessionId, failure);
+      return;
+    }
     const expanding = this.mapItems.has(defId) || this.loopIndex.has(defId);
     if (inst?.state === 'running' || (st.state === 'running' && !expanding)) {
       this.inFlight = Math.max(0, this.inFlight - 1);
     }
     if (inst) inst.state = failure === 'invalid' ? 'invalid' : 'failed';
 
-    const node = this.spec.nodes.find((n) => n.id === defId);
     const retry = node?.retry;
     if (retry && st.attempt <= retry.limit && retryMatches(retry.when, failure)) {
       st.lastFailure = `Previous attempt failed: ${reason}. Address the cause before retrying.`;
@@ -1208,6 +1225,56 @@ class ActiveRun {
     if (sid) this.applyCard(sid, FAILED_STATUS);
     this.emitChanged();
     this.coordinatorCheckpoint('node-failed');
+    this.scheduleReady();
+  }
+
+  private failMapInstance(
+    node: TaskNode,
+    instanceKey: string,
+    inst: NodeStateEntry,
+    reason: string,
+    sessionId: string | undefined,
+    failure: 'error' | 'empty' | 'invalid',
+  ): void {
+    if (inst.state === 'running') this.inFlight = Math.max(0, this.inFlight - 1);
+    const failedState = failure === 'invalid' ? 'invalid' : 'failed';
+    const retry = node.retry;
+    const sid = sessionId ?? inst.sessionId;
+
+    if (retry && inst.attempt <= retry.limit && retryMatches(retry.when, failure)) {
+      inst.lastFailure = `Previous attempt failed: ${reason}. Address the cause before retrying.`;
+      this.submittedOutputs.delete(instanceKey);
+      this.instanceOutputs.delete(instanceKey);
+      const delay = retryBackoffMs(retry, inst.attempt);
+      if (sid) this.applyCard(sid, TODO_STATUS);
+      this.log({ kind: 'node-retry', nodeId: instanceKey, attempt: inst.attempt, reason });
+      if (delay > 0) {
+        inst.state = 'retry-wait';
+        const timer = setTimeout(() => {
+          this.retryTimers.delete(timer);
+          if (inst.state === 'retry-wait') {
+            inst.state = 'pending';
+            this.scheduleMapInstances(node);
+            this.emitChanged();
+          }
+        }, delay);
+        this.retryTimers.add(timer);
+      } else {
+        inst.state = 'pending';
+      }
+      this.scheduleMapInstances(node);
+      this.emitChanged();
+      return;
+    }
+
+    inst.state = failedState;
+    this.log({ kind: 'node-finished', nodeId: instanceKey, sessionId: sid ?? '', state: failedState, reason });
+    if (sid) this.applyCard(sid, FAILED_STATUS);
+    const items = this.mapItems.get(node.id) ?? [];
+    const allDone = items.every((_, i) => isTerminalNodeState(this.instances.get(instanceId(node.id, i))?.state));
+    if (allDone) this.finishMap(node);
+    else this.scheduleMapInstances(node);
+    this.emitChanged();
     this.scheduleReady();
   }
 

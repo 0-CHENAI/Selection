@@ -32,6 +32,8 @@ import {
 } from "./submit-helpers"
 import { RemoteModelsPicker } from "./RemoteModelsPicker"
 import {
+  DEFAULT_CUSTOM_CONTEXT_WINDOW,
+  DEFAULT_CUSTOM_MAX_TOKENS,
   fetchOpenAiCompatibleModels,
   parseSelectedModels,
   resolveRemoteModelSupportsImages,
@@ -51,6 +53,7 @@ export type SubmittedConnectionModel = string | {
   shortName?: string
   supportsImages?: boolean
   contextWindow?: number
+  maxTokens?: number
 }
 
 export interface ApiKeySubmitData {
@@ -98,6 +101,7 @@ export interface ApiKeyInputProps {
     models?: string[]
     modelImageCaps?: Record<string, boolean>
     modelContextWindows?: Record<string, number>
+    modelMaxTokens?: Record<string, number>
     /** Pre-fill the protocol toggle for custom endpoints */
     customApi?: CustomEndpointApi
   }
@@ -262,6 +266,12 @@ export function ApiKeyInput({
   const remoteModelsAbortRef = useRef<AbortController | null>(null)
   const [modelImageCaps, setModelImageCaps] = useState<Record<string, boolean>>(
     () => ({ ...initialValues?.modelImageCaps }),
+  )
+  const [modelContextWindows, setModelContextWindows] = useState<Record<string, number>>(
+    () => ({ ...initialValues?.modelContextWindows }),
+  )
+  const [modelMaxTokens, setModelMaxTokens] = useState<Record<string, number>>(
+    () => ({ ...initialValues?.modelMaxTokens }),
   )
 
   const isDisabled = disabled || status === 'validating'
@@ -538,13 +548,19 @@ export function ApiKeyInput({
           remote ?? { id, name: id },
           modelImageCaps[id],
         )
-        const contextWindow = remote?.contextWindow ?? initialValues?.modelContextWindows?.[id]
+        const contextWindow = modelContextWindows[id]
+          ?? remote?.contextWindow
+          ?? DEFAULT_CUSTOM_CONTEXT_WINDOW
+        const maxTokens = modelMaxTokens[id]
+          ?? remote?.maxTokens
+          ?? DEFAULT_CUSTOM_MAX_TOKENS
         return {
           id,
           name: remote?.name ?? id,
           shortName: remote?.name ?? id,
           supportsImages,
-          ...(contextWindow ? { contextWindow } : {}),
+          contextWindow,
+          maxTokens,
         }
       })
       : parsedModels
@@ -924,6 +940,8 @@ export function ApiKeyInput({
             setModelError(null)
           }}
           imageCaps={modelImageCaps}
+          contextWindows={modelContextWindows}
+          maxOutputTokens={modelMaxTokens}
           onToggleImage={(id) => {
             setModelImageCaps((prev) => {
               const remote = remoteModels.find((model) => model.id === id)
@@ -933,6 +951,12 @@ export function ApiKeyInput({
               )
               return { ...prev, [id]: !current }
             })
+          }}
+          onChangeContextWindow={(id, value) => {
+            setModelContextWindows((prev) => ({ ...prev, [id]: value }))
+          }}
+          onChangeMaxOutputTokens={(id, value) => {
+            setModelMaxTokens((prev) => ({ ...prev, [id]: value }))
           }}
           onRetry={() => setRemoteModelsNonce((n) => n + 1)}
         />

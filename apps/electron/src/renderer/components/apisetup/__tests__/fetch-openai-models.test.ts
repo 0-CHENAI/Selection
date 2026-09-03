@@ -80,6 +80,22 @@ describe('parseOpenAiModelsPayload', () => {
     ])
   })
 
+  test('reads maximum output tokens without confusing ambiguous max_tokens fields', () => {
+    expect(parseOpenAiModelsPayload({
+      data: [
+        { id: 'Opus', max_output_tokens: 32_768 },
+        { id: 'Laufry', model_info: { max_completion_tokens: '16384' } },
+        { id: 'Maylo', top_provider: { max_completion_tokens: 65_536 } },
+        { id: 'ambiguous', max_tokens: 999_999 },
+      ],
+    })).toEqual([
+      { id: 'Opus', name: 'Opus', maxTokens: 32_768 },
+      { id: 'Laufry', name: 'Laufry', maxTokens: 16_384 },
+      { id: 'Maylo', name: 'Maylo', maxTokens: 65_536 },
+      { id: 'ambiguous', name: 'ambiguous' },
+    ])
+  })
+
   test('reads LiteLLM model_info and OpenAI modalities arrays', () => {
     expect(parseOpenAiModelsPayload({
       data: [

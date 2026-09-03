@@ -1292,6 +1292,10 @@ describe('TaskRunner (Conductor)', () => {
     const runner = makeRunner();
     runner.run('ver', { runId: 'r1', orchestratorSessionId: 'orch' });
     await tick();
+    expect(runner.submitNodeOutput('sess-a', { text: 'text alone is not the declared value' })).toEqual({
+      ok: false,
+      error: 'Missing required output "summary"',
+    });
     expect(runner.submitNodeOutput('sess-a', { values: { summary: 'ok' } }).ok).toBe(true);
     host.complete('a', { finalText: 'assistant prose' });
     await tick();
@@ -1362,6 +1366,97 @@ describe('TaskRunner (Conductor)', () => {
     expect(runner.getRunState('mp', 'r1')!.status).toBe('completed');
   });
 
+  it('v2 map expands from an upstream structured array output', async () => {
+    saveTaskSpec(
+      root,
+      specOf({
+        schema_version: 2,
+        id: 'mpdynamic',
+        title: 'Dynamic map',
+        goal: 'g',
+        nodes: [
+          { id: 'survey', prompt: 'find zones', outputs: [{ name: 'zones', type: 'json', required: true }] },
+          {
+            id: 'fan',
+            kind: 'map',
+            depends_on: ['survey'],
+            for_each: '${nodes.survey.output.zones}',
+            prompt: 'read ${item}',
+          },
+        ],
+      }),
+    );
+    const runner = makeRunner();
+    runner.run('mpdynamic', { runId: 'r1', verifyOnComplete: false });
+    await tick();
+
+    const zones = [{ id: 'zone-a' }, { id: 'zone-b' }];
+    expect(runner.submitNodeOutput(host.sessionIdFor('survey'), { values: { zones } })).toEqual({ ok: true });
+    host.complete('survey');
+    await tick();
+
+    expect(host.dispatchedNames()).toEqual(['survey', 'fan#0', 'fan#1']);
+    expect(host.promptFor('fan#0')).toContain('read {"id":"zone-a"}');
+    expect(host.promptFor('fan#1')).toContain('read {"id":"zone-b"}');
+  });
+
+  it('v2 map settles as failed when an instance errors', async () => {
+    saveTaskSpec(
+      root,
+      specOf({
+        schema_version: 2,
+        id: 'mpfail',
+        title: 'Map failure',
+        goal: 'g',
+        params: [{ name: 'items', default: '["one","two"]' }],
+        nodes: [{ id: 'fan', kind: 'map', for_each: '${params.items}', max_parallel: 1, prompt: 'do ${item}' }],
+      }),
+    );
+    const runner = makeRunner();
+    runner.run('mpfail', { runId: 'r1', verifyOnComplete: false });
+    await tick();
+
+    host.complete('fan#0', { reason: 'error' });
+    await tick();
+    expect(host.dispatchedNames()).toEqual(['fan#0', 'fan#1']);
+
+    host.complete('fan#1', { finalText: 'B' });
+    await tick();
+    const snap = runner.getRunState('mpfail', 'r1')!;
+    expect(snap.status).toBe('failed');
+    expect(snap.nodes[0]!.state).toBe('failed');
+  });
+
+  it('v2 map retries the failed instance and then completes', async () => {
+    saveTaskSpec(
+      root,
+      specOf({
+        schema_version: 2,
+        id: 'mpretry',
+        title: 'Map retry',
+        goal: 'g',
+        params: [{ name: 'items', default: '["one"]' }],
+        nodes: [
+          { id: 'fan', kind: 'map', for_each: '${params.items}', prompt: 'do ${item}', retry: { limit: 1 } },
+        ],
+      }),
+    );
+    const runner = makeRunner();
+    runner.run('mpretry', { runId: 'r1', verifyOnComplete: false });
+    await tick();
+
+    host.complete('fan#0', { reason: 'error' });
+    await tick();
+    expect(host.dispatchedNames()).toEqual(['fan#0', 'fan#0']);
+    expect(host.sent.filter((s) => s.sessionId === host.sessionIdFor('fan#0'))[1]!.message).toContain(
+      'Previous attempt failed: error',
+    );
+
+    host.complete('fan#0', { finalText: 'A' });
+    await tick();
+    expect(runner.getRunState('mpretry', 'r1')!.status).toBe('completed');
+  });
+
   it('v2 map instance accepts submit_task_output against the definition node', async () => {
     saveTaskSpec(
       root,
@@ -1386,6 +1481,37 @@ describe('TaskRunner (Conductor)', () => {
     runner.run('mpo', { runId: 'r1', verifyOnComplete: false });
     await tick();
     expect(runner.submitNodeOutput(host.sessionIdFor('fan#0'), { values: { item: 'one' } })).toEqual({ ok: true });
+  });
+
+  it('v2 map instance with declared outputs cannot complete with text alone', async () => {
+    saveTaskSpec(
+      root,
+      specOf({
+        schema_version: 2,
+        id: 'mpmissing',
+        title: 'Map missing output',
+        goal: 'g',
+        params: [{ name: 'items', default: '["one"]' }],
+        nodes: [
+          {
+            id: 'fan',
+            kind: 'map',
+            for_each: '${params.items}',
+            prompt: 'do ${item}',
+            outputs: [{ name: 'item', required: true }],
+          },
+        ],
+      }),
+    );
+    const runner = makeRunner();
+    runner.run('mpmissing', { runId: 'r1', verifyOnComplete: false });
+    await tick();
+
+    host.complete('fan#0', { finalText: 'started work in the background' });
+    await tick();
+    const snap = runner.getRunState('mpmissing', 'r1')!;
+    expect(snap.status).toBe('failed');
+    expect(snap.nodes[0]!.state).toBe('failed');
   });
 
   it('v2 map over 256 instances fails the run', async () => {

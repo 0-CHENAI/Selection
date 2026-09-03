@@ -6650,6 +6650,17 @@ export class SessionManager implements ISessionManager {
             return
           }
 
+          // Pi emits agent_end after provider failures as well. The adapter
+          // preserves that outcome so the Conductor can use its existing
+          // error retry/failure path instead of recording a false success.
+          if (event.outcome === 'error') {
+            sessionLog.warn('Chat ended via terminal provider error')
+            sendSpan.mark('chat.error')
+            sendSpan.end()
+            await this.onProcessingStopped(sessionId, 'error')
+            return
+          }
+
           sessionLog.info('Chat completed via complete event')
 
           // Check if we got an assistant response in this turn

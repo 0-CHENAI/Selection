@@ -57,6 +57,16 @@ describe('buildBackendRuntimeSignature', () => {
     expect(withWindow).not.toBe(withoutWindow)
   })
 
+  it('changes when a custom endpoint maximum output limit changes', () => {
+    const defaultLimit = sig(baseCompat)
+    const customLimit = sig({
+      ...baseCompat,
+      models: [{ id: 'gemma', supportsImages: true, maxTokens: 32_768 } as never],
+    })
+
+    expect(customLimit).not.toBe(defaultLimit)
+  })
+
   it('changes when a custom endpoint model image override changes', () => {
     const enabled = sig(baseCompat)
     const disabled = sig({

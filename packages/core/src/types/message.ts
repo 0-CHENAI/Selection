@@ -615,7 +615,7 @@ export type AgentEvent =
     }
   | { type: 'error'; message: string }
   | { type: 'typed_error'; error: TypedError }
-  | { type: 'complete'; usage?: AgentEventUsage }
+  | { type: 'complete'; usage?: AgentEventUsage; outcome?: 'success' | 'error' }
   | { type: 'working_directory_changed'; workingDirectory: string }
   | { type: 'task_backgrounded'; toolUseId: string; taskId: string; intent?: string; turnId?: string; kind?: 'workflow'; workflowId?: string }
   | { type: 'shell_backgrounded'; toolUseId: string; shellId: string; intent?: string; command?: string; turnId?: string }

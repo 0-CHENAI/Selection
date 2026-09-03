@@ -1882,10 +1882,57 @@ function headersToCurl(headers: HeadersInitType | undefined): string {
     .join(' \\\n  ');
 }
 
-/**
- * Format a fetch request as a cURL command
- */
-function toCurl(url: string, init?: RequestInit): string {
+const BASE64_PAYLOAD_MIN_CHARS = 1024;
+
+function base64Placeholder(length: number): string {
+  return `[BASE64 PAYLOAD OMITTED: ${length} chars]`;
+}
+
+function looksLikeBase64Payload(value: string): boolean {
+  return value.length >= BASE64_PAYLOAD_MIN_CHARS && /^[A-Za-z0-9+/_=-]+$/.test(value);
+}
+
+function redactLargePayloads(value: unknown, key?: string, parent?: Record<string, unknown>): unknown {
+  if (typeof value === 'string') {
+    const dataUrl = value.match(/^data:([^;,]+)?;base64,(.*)$/s);
+    if (dataUrl) {
+      const payload = dataUrl[2] ?? '';
+      return `data:${dataUrl[1] ?? 'application/octet-stream'};base64,${base64Placeholder(payload.length)}`;
+    }
+
+    const declaredBase64 = /(?:base64|b64_json)$/i.test(key ?? '')
+      || ((key === 'data' || key === 'content') && (parent?.type === 'base64' || parent?.encoding === 'base64'));
+    if (declaredBase64 || looksLikeBase64Payload(value)) return base64Placeholder(value.length);
+    return value;
+  }
+
+  if (Array.isArray(value)) {
+    return value.map(item => redactLargePayloads(item));
+  }
+
+  if (value && typeof value === 'object') {
+    const record = value as Record<string, unknown>;
+    return Object.fromEntries(
+      Object.entries(record).map(([childKey, childValue]) => [
+        childKey,
+        redactLargePayloads(childValue, childKey, record),
+      ]),
+    );
+  }
+
+  return value;
+}
+
+export function sanitizeRequestBodyForDebug(body: string): string {
+  try {
+    return JSON.stringify(redactLargePayloads(JSON.parse(body)));
+  } catch {
+    return redactLargePayloads(body) as string;
+  }
+}
+
+/** Format a fetch request as a cURL command with bulky encoded payloads omitted. */
+export function toSanitizedCurl(url: string, init?: RequestInit): string {
   const method = init?.method?.toUpperCase() ?? 'GET';
   const headers = headersToCurl(init?.headers as HeadersInitType | undefined);
 
@@ -1894,7 +1941,8 @@ function toCurl(url: string, init?: RequestInit): string {
     curl += ` \\\n  ${headers}`;
   }
   if (init?.body && typeof init.body === 'string') {
-    const escapedBody = init.body.replace(/'/g, "'\\''");
+    const sanitizedBody = sanitizeRequestBodyForDebug(init.body);
+    const escapedBody = sanitizedBody.replace(/'/g, "'\\''");
     curl += ` \\\n  -d '${escapedBody}'`;
   }
   curl += ` \\\n  '${url}'`;
@@ -2099,7 +2147,7 @@ async function interceptedFetch(
   if (DEBUG) {
     debugLog('\n' + '='.repeat(80));
     debugLog('\u2192 REQUEST');
-    debugLog(toCurl(url, init));
+    debugLog(toSanitizedCurl(url, init));
   }
 
   // Find matching adapter for this URL

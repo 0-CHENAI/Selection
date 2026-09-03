@@ -134,6 +134,18 @@ describe('toCustomEndpointModelPayload', () => {
       contextWindow: 200_000,
     })
   })
+
+  it('forwards stored context and maximum output limits', () => {
+    expect(toCustomEndpointModelPayload({
+      id: 'Maylo',
+      contextWindow: 262_144,
+      maxTokens: 32_768,
+    })).toEqual({
+      id: 'Maylo',
+      contextWindow: 262_144,
+      maxTokens: 32_768,
+    })
+  })
 })
 
 describe('resolveConnectionModelContextWindow', () => {

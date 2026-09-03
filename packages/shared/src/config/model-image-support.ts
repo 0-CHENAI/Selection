@@ -49,6 +49,7 @@ export type CustomEndpointModelSource =
       id: string
       name?: string
       contextWindow?: number
+      maxTokens?: number
       supportsImages?: boolean
     }
 
@@ -57,6 +58,7 @@ export type CustomEndpointModelPayload =
   | {
       id: string
       contextWindow?: number
+      maxTokens?: number
       supportsImages?: boolean
     }
 
@@ -70,13 +72,15 @@ export function toCustomEndpointModelPayload(
 ): CustomEndpointModelPayload {
   const id = typeof model === 'string' ? model : model.id
   const contextWindow = typeof model === 'string' ? undefined : model.contextWindow
+  const maxTokens = typeof model === 'string' ? undefined : model.maxTokens
   const explicit = typeof model === 'object' && typeof model.supportsImages === 'boolean'
     ? model.supportsImages
     : undefined
-  if (contextWindow || explicit !== undefined) {
+  if (contextWindow || maxTokens || explicit !== undefined) {
     return {
       id,
       ...(contextWindow ? { contextWindow } : {}),
+      ...(maxTokens ? { maxTokens } : {}),
       ...(explicit !== undefined ? { supportsImages: explicit } : {}),
     }
   }

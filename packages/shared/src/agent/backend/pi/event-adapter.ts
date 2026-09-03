@@ -88,6 +88,10 @@ export class PiEventAdapter extends BaseEventAdapter {
   // Track last usage for emitting with complete event
   private lastUsage: { input: number; output: number; cacheRead: number; cacheWrite: number; totalTokens: number; cost: { total: number } } | undefined;
 
+  // A provider error may still be followed by Pi's normal agent_end event.
+  // Preserve that terminal outcome so callers do not mistake it for success.
+  private terminalErrorPending: boolean = false;
+
   // ============================================================
   // Overflow-recovery state machine
   // ============================================================
@@ -161,6 +165,7 @@ export class PiEventAdapter extends BaseEventAdapter {
     this.overflowState = 'none';
     this.heldOverflowError = null;
     this.pendingQueueComplete = false;
+    this.terminalErrorPending = false;
   }
 
   private armOverflowFallbackTimer(): void {
@@ -212,6 +217,7 @@ export class PiEventAdapter extends BaseEventAdapter {
     this.hasEmittedFinalText = false;
     this.subTurnCounter = 0;
     this.messageSubTurnId = null;
+    this.terminalErrorPending = false;
     this.log.debug('Turn started', { turnIndex: this.turnIndex });
   }
 
@@ -264,10 +270,13 @@ export class PiEventAdapter extends BaseEventAdapter {
           // Recovered turn just finished — fall through to normal completion.
           this.overflowState = 'none';
         }
+        const terminalOutcome = this.terminalErrorPending ? { outcome: 'error' as const } : {};
+        this.terminalErrorPending = false;
         if (this.lastUsage) {
           const contextTokens = this.lastUsage.input + (this.lastUsage.cacheRead || 0);
           yield {
             type: 'complete',
+            ...terminalOutcome,
             usage: {
               inputTokens: this.lastUsage.input,
               outputTokens: this.lastUsage.output,
@@ -279,7 +288,7 @@ export class PiEventAdapter extends BaseEventAdapter {
             },
           };
         } else {
-          yield { type: 'complete' };
+          yield { type: 'complete', ...terminalOutcome };
         }
         break;
 
@@ -355,6 +364,7 @@ export class PiEventAdapter extends BaseEventAdapter {
           // Classify the error — auth/billing errors should be typed so SessionManager
           // can trigger its auth-retry pipeline (refresh token + resend).
           const parsed = parseError(new Error(msg.errorMessage));
+          this.terminalErrorPending = true;
           const isClassified = parsed.code !== 'unknown_error';
           if (isClassified) {
             yield { type: 'typed_error', error: parsed };
@@ -363,6 +373,9 @@ export class PiEventAdapter extends BaseEventAdapter {
           }
           break;
         }
+
+        // A later successful assistant message means Pi recovered internally.
+        this.terminalErrorPending = false;
 
         // Extract text content from the final assistant message
         const textContent = this.extractTextFromMessage(event.message);
@@ -615,7 +628,8 @@ export class PiEventAdapter extends BaseEventAdapter {
             this.overflowState === 'awaiting' ||
             this.overflowState === 'held'
           ) {
-            yield { type: 'complete' };
+            yield { type: 'complete', outcome: 'error' };
+            this.terminalErrorPending = false;
             this.pendingQueueComplete = true;
             this.overflowState = 'none';
             this.heldOverflowError = null;
@@ -637,6 +651,7 @@ export class PiEventAdapter extends BaseEventAdapter {
       case 'auto_retry_end': {
         const retryEndEvent = event as Extract<AgentSessionEvent, { type: 'auto_retry_end' }>;
         if (!retryEndEvent.success && retryEndEvent.finalError) {
+          this.terminalErrorPending = true;
           yield { type: 'error', message: `Retry failed: ${retryEndEvent.finalError}` };
         }
         break;

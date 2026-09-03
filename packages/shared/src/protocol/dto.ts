@@ -694,7 +694,7 @@ export interface LlmConnectionSetup {
   credential?: string
   baseUrl?: string | null
   defaultModel?: string | null
-  models?: Array<string | { id: string; name?: string; shortName?: string; supportsImages?: boolean; contextWindow?: number }> | null
+  models?: Array<string | { id: string; name?: string; shortName?: string; supportsImages?: boolean; contextWindow?: number; maxTokens?: number }> | null
   piAuthProvider?: string
   modelSelectionMode?: 'automaticallySyncedFromProvider' | 'userDefined3Tier'
   /** When true, reject setup if the connection doesn't already exist (reauth guard). */

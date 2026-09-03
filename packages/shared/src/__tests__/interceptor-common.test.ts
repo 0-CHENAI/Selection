@@ -4,7 +4,9 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import {
   getLastApiError,
+  MAX_LOG_SIZE_BYTES,
   setStoredError,
+  shouldRotateInterceptorLog,
   toolMetadataStore,
 } from '../interceptor-common.ts';
 
@@ -70,5 +72,19 @@ describe('interceptor-common', () => {
     const persisted = JSON.parse(readFileSync(join(sessionDirA, 'tool-metadata.json'), 'utf-8')) as Record<string, unknown>;
     expect(persisted.existingTool).toBeDefined();
     expect(persisted.newTool).toBeDefined();
+  });
+
+  it('rotates interceptor logs that exceed the size cap', () => {
+    expect(shouldRotateInterceptorLog({
+      size: MAX_LOG_SIZE_BYTES,
+      mtimeMs: Date.now(),
+    })).toBe(true);
+  });
+
+  it('keeps recent interceptor logs below the size cap', () => {
+    expect(shouldRotateInterceptorLog({
+      size: MAX_LOG_SIZE_BYTES - 1,
+      mtimeMs: Date.now(),
+    })).toBe(false);
   });
 });

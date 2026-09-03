@@ -101,7 +101,7 @@ export function registerLlmConnectionsHandlers(server: RpcServer, deps: HandlerD
       }
       if (setup.models !== undefined) {
         // Setup DTOs store a subset of ModelDefinition (`id`, optional name /
-        // supportsImages / contextWindow). Storage already passthrough-validates
+        // supportsImages / contextWindow / maxTokens). Storage already passthrough-validates
         // that shape; the connection type still lists ModelDefinition.
         updates.models = (setup.models ?? undefined) as LlmConnection['models']
       }

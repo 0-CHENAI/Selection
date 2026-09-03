@@ -3,9 +3,15 @@ import { useTranslation } from 'react-i18next'
 import { Command as CommandPrimitive } from 'cmdk'
 import { Check, ChevronDown, Image as ImageIcon, Loader2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import type { RemoteModel } from './fetch-openai-models.ts'
-import { parseSelectedModels, resolveRemoteModelSupportsImages } from './fetch-openai-models.ts'
+import {
+  DEFAULT_CUSTOM_CONTEXT_WINDOW,
+  DEFAULT_CUSTOM_MAX_TOKENS,
+  parseSelectedModels,
+  resolveRemoteModelSupportsImages,
+} from './fetch-openai-models.ts'
 
 interface RemoteModelsPickerProps {
   models: RemoteModel[]
@@ -18,6 +24,10 @@ interface RemoteModelsPickerProps {
   onToggle: (id: string) => void
   imageCaps?: Record<string, boolean>
   onToggleImage?: (id: string) => void
+  contextWindows?: Record<string, number>
+  maxOutputTokens?: Record<string, number>
+  onChangeContextWindow?: (id: string, value: number) => void
+  onChangeMaxOutputTokens?: (id: string, value: number) => void
   onRetry?: () => void
 }
 
@@ -32,6 +42,10 @@ export function RemoteModelsPicker({
   onToggle,
   imageCaps,
   onToggleImage,
+  contextWindows,
+  maxOutputTokens,
+  onChangeContextWindow,
+  onChangeMaxOutputTokens,
   onRetry,
 }: RemoteModelsPickerProps) {
   const { t } = useTranslation()
@@ -178,6 +192,64 @@ export function RemoteModelsPicker({
             </CommandPrimitive>
           </div>
         </>
+      )}
+
+      {selected.length > 0 && (
+        <div className="space-y-2 rounded-md border border-border/50 p-2.5">
+          {selected.map((id) => {
+            const model = models.find((entry) => entry.id === id)
+            const contextWindow = contextWindows?.[id]
+              ?? model?.contextWindow
+              ?? DEFAULT_CUSTOM_CONTEXT_WINDOW
+            const maxOutputTokensValue = maxOutputTokens?.[id]
+              ?? model?.maxTokens
+              ?? DEFAULT_CUSTOM_MAX_TOKENS
+            return (
+              <div key={id} className="space-y-1.5">
+                <p className="truncate text-xs font-medium" title={model?.name ?? id}>
+                  {model?.name ?? id}
+                </p>
+                <div className="grid grid-cols-2 gap-2">
+                  <label className="space-y-1 text-[11px] text-muted-foreground">
+                    <span>{t('apiSetup.contextWindow')}</span>
+                    <Input
+                      type="number"
+                      min={1_024}
+                      step={1_024}
+                      value={contextWindow}
+                      disabled={disabled}
+                      onChange={(event) => {
+                        const next = Number(event.target.value)
+                        if (Number.isFinite(next) && next >= 1_024) {
+                          onChangeContextWindow?.(id, Math.floor(next))
+                        }
+                      }}
+                      className="h-8 text-xs"
+                    />
+                  </label>
+                  <label className="space-y-1 text-[11px] text-muted-foreground">
+                    <span>{t('apiSetup.maxOutputTokens')}</span>
+                    <Input
+                      type="number"
+                      min={1}
+                      step={1_024}
+                      value={maxOutputTokensValue}
+                      disabled={disabled}
+                      onChange={(event) => {
+                        const next = Number(event.target.value)
+                        if (Number.isFinite(next) && next >= 1) {
+                          onChangeMaxOutputTokens?.(id, Math.floor(next))
+                        }
+                      }}
+                      className="h-8 text-xs"
+                    />
+                  </label>
+                </div>
+              </div>
+            )
+          })}
+          <p className="text-[11px] text-foreground/35">{t('apiSetup.modelLimitsHint')}</p>
+        </div>
       )}
 
       {error && (

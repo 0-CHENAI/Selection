@@ -11,6 +11,7 @@ export interface CustomEndpointModelDefaults {
 
 export interface CustomEndpointModelOverrides {
   contextWindow?: number
+  maxTokens?: number
   supportsImages?: boolean
 }
 
@@ -21,6 +22,7 @@ export interface CustomEndpointModelEntry extends CustomEndpointModelOverrides {
 export type CustomEndpointModelConfig = string | {
   id: string
   contextWindow?: number
+  maxTokens?: number
   supportsImages?: boolean
 }
 
@@ -56,13 +58,14 @@ export function normalizeCustomEndpointModelEntry(model: CustomEndpointModelConf
   return {
     id: stripPiPrefix(model.id),
     ...(model.contextWindow !== undefined ? { contextWindow: model.contextWindow } : {}),
+    ...(model.maxTokens !== undefined ? { maxTokens: model.maxTokens } : {}),
     ...(model.supportsImages !== undefined ? { supportsImages: model.supportsImages } : {}),
   }
 }
 
 /**
  * Build a synthetic model definition for a custom endpoint.
- * Context window comes from the stored catalog when present, otherwise 128k.
+ * Context/output limits come from the stored catalog when present.
  * Image support:
  *   per-model override ?? connection default ?? conservative name heuristic.
  */
@@ -83,6 +86,6 @@ export function buildCustomEndpointModelDef(
     input,
     cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
     contextWindow: overrides?.contextWindow ?? 131_072,
-    maxTokens: 8_192,
+    maxTokens: overrides?.maxTokens ?? 8_192,
   }
 }

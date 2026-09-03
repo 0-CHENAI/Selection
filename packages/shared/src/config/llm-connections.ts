@@ -543,7 +543,7 @@ export function resolveMidStreamBehavior(
  *
  * Pure function — does not mutate the input. Storage round-trip is handled
  * upstream via `saveLlmConnection`. The stored object form for custom-endpoint
- * models is `{ id, name?, shortName?, contextWindow?, supportsImages? }`
+ * models is `{ id, name?, shortName?, contextWindow?, maxTokens?, supportsImages? }`
  * (passthrough-validated by the storage schema). `name` and `shortName` default
  * to the model's `id` when promoting so that downstream renderer surfaces that
  * read `m.name` (the trigger button display, picker row labels) keep showing a

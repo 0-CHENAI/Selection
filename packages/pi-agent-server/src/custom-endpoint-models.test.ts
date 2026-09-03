@@ -37,14 +37,16 @@ describe('normalizeCustomEndpointModelEntry', () => {
     })
   })
 
-  it('preserves context window and image support together', () => {
+  it('preserves token limits and image support together', () => {
     expect(normalizeCustomEndpointModelEntry({
       id: 'pi/vision-model',
       contextWindow: 262_144,
+      maxTokens: 32_768,
       supportsImages: true,
     })).toEqual({
       id: 'vision-model',
       contextWindow: 262_144,
+      maxTokens: 32_768,
       supportsImages: true,
     })
   })
@@ -67,9 +69,20 @@ describe('buildCustomEndpointModelDef', () => {
   })
 
   it('lets per-model overrides enable image input and custom context window', () => {
-    const model = buildCustomEndpointModelDef('vision-model', undefined, { supportsImages: true, contextWindow: 262_144 })
+    const model = buildCustomEndpointModelDef('vision-model', undefined, {
+      supportsImages: true,
+      contextWindow: 262_144,
+      maxTokens: 32_768,
+    })
     expect(model.input).toEqual(['text', 'image'])
     expect(model.contextWindow).toBe(262_144)
+    expect(model.maxTokens).toBe(32_768)
+  })
+
+  it('keeps backward-compatible defaults when no limits are stored', () => {
+    const model = buildCustomEndpointModelDef('plain')
+    expect(model.contextWindow).toBe(131_072)
+    expect(model.maxTokens).toBe(8_192)
   })
 
   it('infers image input for well-known vision names when no flag is set', () => {
@@ -111,6 +124,15 @@ describe('findCustomEndpointModelEntry', () => {
     ])).toEqual({
       id: 'DeepSeek-V4-Flash',
       contextWindow: 262_144,
+    })
+  })
+
+  it('preserves a stored maximum output limit when the runtime ID is prefixed', () => {
+    expect(findCustomEndpointModelEntry('pi/Maylo', [
+      { id: 'Maylo', maxTokens: 65_536 },
+    ])).toEqual({
+      id: 'Maylo',
+      maxTokens: 65_536,
     })
   })
 })

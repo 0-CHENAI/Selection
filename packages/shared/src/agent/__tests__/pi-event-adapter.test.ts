@@ -562,6 +562,42 @@ describe('PiEventAdapter', () => {
       });
     });
 
+    it('marks Stream ended without finish_reason as a terminal error', () => {
+      const errorEvents = collect(adapter.adaptEvent({
+        type: 'message_end',
+        message: {
+          role: 'assistant',
+          stopReason: 'error',
+          errorMessage: 'Stream ended without finish_reason',
+        },
+      } as any));
+      const endEvents = collect(adapter.adaptEvent({ type: 'agent_end' } as any));
+
+      expect(errorEvents).toEqual([
+        { type: 'error', message: 'Stream ended without finish_reason' },
+      ]);
+      expect(endEvents).toEqual([{ type: 'complete', outcome: 'error' }]);
+    });
+
+    it('clears a pending provider error when an internal retry succeeds', () => {
+      collect(adapter.adaptEvent({
+        type: 'message_end',
+        message: {
+          role: 'assistant',
+          stopReason: 'error',
+          errorMessage: 'Temporary upstream failure',
+        },
+      } as any));
+      collect(adapter.adaptEvent({
+        type: 'message_end',
+        message: { role: 'assistant', stopReason: 'stop', content: 'Recovered' },
+      } as any));
+
+      expect(collect(adapter.adaptEvent({ type: 'agent_end' } as any))).toEqual([
+        { type: 'complete' },
+      ]);
+    });
+
     it('should emit typed_error for raw HTML proxy pages', () => {
       const events = collect(adapter.adaptEvent({
         type: 'message_end',
@@ -1400,7 +1436,7 @@ describe('PiEventAdapter', () => {
 
       expect(failureEvents).toEqual([
         { type: 'error', message: 'Context compaction failed: Out of memory during summary' },
-        { type: 'complete' },
+        { type: 'complete', outcome: 'error' },
       ]);
       // Queue should terminate even though the event wasn't agent_end.
       expect(adapter.shouldCompleteQueue(false)).toBe(true);
@@ -1450,7 +1486,7 @@ describe('PiEventAdapter', () => {
       expect(events[0].type).toMatch(/^(error|typed_error)$/);
 
       const agentEndEvents = collect(adapter.adaptEvent({ type: 'agent_end' } as any));
-      expect(agentEndEvents).toMatchObject([{ type: 'complete' }]);
+      expect(agentEndEvents).toEqual([{ type: 'complete', outcome: 'error' }]);
       expect(adapter.shouldCompleteQueue(true)).toBe(true);
     });
 
@@ -1469,7 +1505,7 @@ describe('PiEventAdapter', () => {
 
       expect(events).toEqual([
         { type: 'error', message: 'Auto-compaction hit a transient error. Try /compact manually.' },
-        { type: 'complete' },
+        { type: 'complete', outcome: 'error' },
       ]);
       // The raw `_autoCompactionAbortController.signal` text is not in any yield.
       const allMessages = events.map((e: any) => e.message ?? '').join(' ');
