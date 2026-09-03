@@ -442,6 +442,90 @@ describe('SessionManager spawn_session wait/background', () => {
     expect(internals(sm).sessions.has('child')).toBe(false)
   })
 
+  it('creates a sequential first worker when the user asked for parallel research', async () => {
+    const parent = buildParent()
+    parent.swarmEnabled = true
+    parent.messages = [{
+      id: 'u1',
+      role: 'user',
+      content: '同时调研三个独立模型',
+      timestamp: Date.now(),
+    }]
+    stubCreateChild()
+    await expect(internals(sm).spawnSessionFromTool(parent, {
+      prompt: 'Research Hy4-preview capabilities and citations.',
+      name: '调研 Hy4-preview',
+      spawnReason: 'automatic',
+    })).resolves.toMatchObject({ status: 'started', sessionId: 'child' })
+  })
+
+  it('does not treat coordinator planning text as a qualification contract', async () => {
+    const parent = buildParent()
+    parent.swarmEnabled = true
+    parent.messages = [
+      { id: 'u1', role: 'user', content: '帮我看看这段代码', timestamp: 1 },
+      { id: 'a1', role: 'assistant', content: '我将分别调研 auth、docs。', timestamp: 2 },
+    ]
+    stubCreateChild()
+    await expect(internals(sm).spawnSessionFromTool(parent, {
+      prompt: 'Research auth.',
+      name: '调研 auth',
+      spawnReason: 'automatic',
+    })).rejects.toThrow(/qualification/)
+    expect(internals(sm).sessions.has('child')).toBe(false)
+  })
+
+  it('ignores a queued follow-up when recovering the current-turn parallel request', async () => {
+    const parent = buildParent()
+    parent.swarmEnabled = true
+    parent.messages = [
+      { id: 'u1', role: 'user', content: '同时调研三个独立模型', timestamp: 1 },
+      { id: 'u2', role: 'user', content: '算了先改这句话', timestamp: 2, isQueued: true },
+    ]
+    stubCreateChild()
+    await expect(internals(sm).spawnSessionFromTool(parent, {
+      prompt: 'Research Hy4-preview capabilities and citations.',
+      name: '调研 Hy4-preview',
+      spawnReason: 'automatic',
+    })).resolves.toMatchObject({ status: 'started', sessionId: 'child' })
+  })
+
+  it('still rejects a lone automatic spawn for ordinary work even if the name mentions a contract', async () => {
+    const parent = buildParent()
+    parent.swarmEnabled = true
+    parent.messages = [{
+      id: 'u1',
+      role: 'user',
+      content: '帮我润色这段说明',
+      timestamp: Date.now(),
+    }]
+    stubCreateChild()
+    await expect(internals(sm).spawnSessionFromTool(parent, {
+      prompt: 'Rewrite the paragraph.',
+      name: '润色说明 带任务契约',
+      spawnReason: 'automatic',
+    })).rejects.toThrow(/qualification/)
+    expect(internals(sm).sessions.has('child')).toBe(false)
+  })
+
+  it('does not recover a sequential worker from a negated parallel request', async () => {
+    const parent = buildParent()
+    parent.swarmEnabled = true
+    parent.messages = [{
+      id: 'u1',
+      role: 'user',
+      content: '不要同时调研多个模型',
+      timestamp: Date.now(),
+    }]
+    stubCreateChild()
+    await expect(internals(sm).spawnSessionFromTool(parent, {
+      prompt: 'Research Hy4-preview capabilities and citations.',
+      name: '调研 Hy4-preview',
+      spawnReason: 'automatic',
+    })).rejects.toThrow(/qualification/)
+    expect(internals(sm).sessions.has('child')).toBe(false)
+  })
+
   it('persists orchestration identity, hides workers, and inherits project ownership', async () => {
     const parent = buildParent()
     parent.swarmEnabled = true

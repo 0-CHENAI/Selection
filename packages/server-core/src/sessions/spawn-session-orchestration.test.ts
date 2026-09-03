@@ -3,6 +3,9 @@ import {
   assessSpawnQualification,
   assessSwarmSpawnLimits,
   formatSpawnQualificationFailure,
+  extractParallelTrackNames,
+  readCurrentTurnSpawnContext,
+  synthesizeAutomaticQualification,
   synthesizeFanOutQualification,
   buildBackgroundTaskNudge,
   countLiveSwarmChildren,
@@ -88,6 +91,89 @@ describe('spawn-session orchestration helpers', () => {
       '调研 GLM-5.3',
       '调研 Kimi K3',
     ])
+  })
+
+  it('extracts named parallel subjects from a coordinator plan', () => {
+    expect(extractParallelTrackNames('同时调研三个独立模型')).toEqual([])
+    expect(extractParallelTrackNames('我将分别调研 Hy4-preview、GLM-5.3、Kimi K3。然后汇总。')).toEqual([
+      'Hy4-preview',
+      'GLM-5.3',
+      'Kimi K3',
+    ])
+  })
+
+  it('recovers a sequential first worker from an explicit parallel research request', () => {
+    expect(synthesizeAutomaticQualification({
+      candidates: [{ name: '调研 Hy4-preview', prompt: 'Research Hy4-preview.' }],
+    })).toBeUndefined()
+    expect(synthesizeAutomaticQualification({
+      candidates: [{ name: '调研 Hy4-preview 带任务契约', prompt: 'Research Hy4-preview.' }],
+      userText: '帮我看看这段代码',
+    })).toBeUndefined()
+    expect(synthesizeAutomaticQualification({
+      candidates: [{ name: '调研 Hy4-preview', prompt: 'Research Hy4-preview.' }],
+      userText: '同时帮我调研一下这个 bug',
+    })).toBeUndefined()
+    expect(synthesizeAutomaticQualification({
+      candidates: [{ name: '调研 auth', prompt: 'Research auth.' }],
+      userText: '帮我看看这段代码',
+      planningText: '我将分别调研 auth、docs。',
+    })).toBeUndefined()
+    expect(synthesizeAutomaticQualification({
+      candidates: [{ name: '调研 Hy4-preview', prompt: 'Research Hy4-preview.' }],
+      userText: '不要同时调研多个模型',
+    })).toBeUndefined()
+    expect(synthesizeAutomaticQualification({
+      candidates: [{ name: 'Research Hy4-preview', prompt: 'Research Hy4-preview.' }],
+      userText: 'Research Hy4-preview and GLM-5.3, but not in parallel',
+    })).toBeUndefined()
+
+    const fromUserIntent = synthesizeAutomaticQualification({
+      candidates: [{ name: '调研 Hy4-preview', prompt: 'Research Hy4-preview.' }],
+      userText: '同时调研三个独立模型',
+    })
+    expect(assessSpawnQualification(fromUserIntent).eligible).toBe(true)
+    expect(fromUserIntent?.tracks.map(track => track.name)).toEqual([
+      '调研 Hy4-preview',
+      'Remaining independent tracks',
+    ])
+
+    const fromEnglish = synthesizeAutomaticQualification({
+      candidates: [{ name: 'Research Hy4-preview', prompt: 'Research Hy4-preview.' }],
+      userText: 'Research Hy4-preview, GLM-5.3, and Kimi K3 in parallel',
+    })
+    expect(assessSpawnQualification(fromEnglish).eligible).toBe(true)
+
+    const fromPlan = synthesizeAutomaticQualification({
+      candidates: [{ name: '调研 Hy4-preview', prompt: 'Research Hy4-preview.' }],
+      userText: '同时调研三个独立模型',
+      planningText: '我将分别调研 Hy4-preview、GLM-5.3、Kimi K3。',
+    })
+    expect(fromPlan?.tracks.map(track => track.name)).toEqual([
+      'Hy4-preview',
+      'GLM-5.3',
+      'Kimi K3',
+    ])
+  })
+
+  it('reads spawn context from the live user turn, not queued follow-ups', () => {
+    expect(readCurrentTurnSpawnContext([
+      { role: 'user', content: '同时调研三个独立模型' },
+      { role: 'assistant', content: '我将分别调研 Hy4-preview、GLM-5.3、Kimi K3。' },
+      { role: 'user', content: '算了先改这句话', isQueued: true },
+    ])).toEqual({
+      userText: '同时调研三个独立模型',
+      planningText: '我将分别调研 Hy4-preview、GLM-5.3、Kimi K3。',
+    })
+    expect(readCurrentTurnSpawnContext([
+      { role: 'user', content: 'hidden user', hidden: true },
+      { role: 'user', content: '同时调研三个独立模型' },
+    ]).userText).toBe('同时调研三个独立模型')
+    expect(readCurrentTurnSpawnContext([
+      { role: 'user', content: '同时调研三个独立模型' },
+      { role: 'user', content: '[managed-swarm-settled]', hidden: true },
+      { role: 'assistant', content: '继续派发 worker' },
+    ])).toEqual({ userText: '', planningText: '' })
   })
 
   it('enforces direct concurrency, depth, and whole-swarm live-node limits', () => {

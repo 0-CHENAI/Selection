@@ -186,6 +186,9 @@ export {
   resolveSpawnSessionMode,
   resolveSpawnWaitTimeoutMs,
   synthesizeFanOutQualification,
+  extractParallelTrackNames,
+  readCurrentTurnSpawnContext,
+  synthesizeAutomaticQualification,
   createSpawnSessionTool,
   wrapSpawnSessionToolError,
 } from './spawn-session-tool.ts';
