@@ -59,7 +59,7 @@ describe('issue #87 text stream phases', () => {
     })
   })
 
-  it('streams into the response card only after an explicit final phase', () => {
+  it('buffers an explicit final phase until the complete response arrives', () => {
     const intermediate = handleTextDelta(state(), {
       type: 'text_delta',
       sessionId: 'session-1',
@@ -85,10 +85,51 @@ describe('issue #87 text stream phases', () => {
     const turn = assistantTurn(finalStreaming)
 
     expect(turn.activities.map((activity) => activity.type)).toEqual(['intermediate', 'tool'])
-    expect(turn.response).toMatchObject({
-      text: '测试全部通过',
-      isStreaming: true,
+    expect(turn.response).toBeUndefined()
+    expect(finalStreaming.streaming).toMatchObject({
+      content: '测试全部通过',
+      phase: 'final',
+      turnId: 'message-2',
     })
+
+    const completed = handleTextComplete(finalStreaming, {
+      type: 'text_complete',
+      sessionId: 'session-1',
+      text: '测试全部通过。',
+      isIntermediate: false,
+      turnId: 'message-2',
+      timestamp: 10,
+      messageId: 'answer-1',
+    })
+    const completedTurn = assistantTurn(completed)
+    const completedMessage = completed.session.messages.find(message => message.id === 'answer-1')
+    expect(completedTurn.response).toMatchObject({
+      text: '测试全部通过。',
+      isStreaming: false,
+      completedRevealStartTime: completedMessage?.timestamp,
+      messageId: 'answer-1',
+    })
+  })
+
+  it('uses the local completion time for a legacy final without a timestamp', () => {
+    const pending = handleTextDelta(state(), {
+      type: 'text_delta',
+      sessionId: 'session-1',
+      delta: '旧协议最终正文',
+      turnId: 'legacy-final',
+    })
+    const beforeComplete = Date.now()
+    const completed = handleTextComplete(pending, {
+      type: 'text_complete',
+      sessionId: 'session-1',
+      text: '旧协议最终正文。',
+      isIntermediate: false,
+      turnId: 'legacy-final',
+      messageId: 'legacy-answer',
+    })
+    const turn = assistantTurn(completed)
+
+    expect(turn.response?.completedRevealStartTime).toBeGreaterThanOrEqual(beforeComplete)
   })
 
   it('keeps a streamed final body correlated when commentary completes first', () => {
@@ -112,9 +153,11 @@ describe('issue #87 text stream phases', () => {
       type: 'intermediate',
       content: '我先检查了文件。',
     }])
-    expect(beforeFinalComplete.response).toMatchObject({
-      text: '最终结论。',
-      isStreaming: true,
+    expect(beforeFinalComplete.response).toBeUndefined()
+    expect(commentaryComplete.streaming).toMatchObject({
+      content: '最终结论。',
+      phase: 'final',
+      turnId: 'final-segment',
     })
 
     const completed = handleTextComplete(commentaryComplete, {

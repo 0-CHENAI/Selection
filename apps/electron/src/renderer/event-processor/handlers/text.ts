@@ -40,7 +40,8 @@ function mergeTextStreamPhase(
 /**
  * Handle text_delta - accumulate streaming content
  *
- * Creates a new streaming message if none exists, otherwise updates existing.
+ * Intermediate/unknown text creates a work-chain message. Final-answer deltas
+ * remain in transient state until text_complete starts the local reveal.
  * Uses turnId for lookup, never position.
  */
 export function handleTextDelta(
@@ -53,9 +54,8 @@ export function handleTextDelta(
     return { session, streaming: null }
   }
 
-  // Events from current servers always carry a phase. Missing phase is a
-  // compatibility path for older persisted/live senders, which historically
-  // streamed directly into the response card.
+  // Events from current servers always carry a phase. Treat a missing legacy
+  // phase as final so it cannot flash an unclassified response card.
   const incomingPhase = event.phase ?? 'final'
   const continuesExistingStream = !!streaming
     && (!event.turnId || !streaming.turnId || streaming.turnId === event.turnId)
@@ -78,6 +78,13 @@ export function handleTextDelta(
         turnId: event.turnId,
       }
 
+  // A final-answer phase is authoritative, but its network deltas stay hidden.
+  // The complete payload is revealed locally in one short, deterministic pass,
+  // preventing the formal response card from flashing during generation.
+  if (phase === 'final') {
+    return { session, streaming: newStreaming }
+  }
+
   // Find existing streaming message by turnId
   const streamingIndex = findStreamingMessage(session.messages, event.turnId)
 
@@ -86,7 +93,7 @@ export function handleTextDelta(
     const currentMsg = session.messages[streamingIndex]
     const updatedSession = updateMessageAt(session, streamingIndex, {
       content: currentMsg.content + event.delta,
-      isIntermediate: phase !== 'final',
+      isIntermediate: true,
     })
     return { session: updatedSession, streaming: newStreaming }
   }
@@ -100,7 +107,7 @@ export function handleTextDelta(
     timestamp: timestampAfterVisibleUser(session.messages),
     isStreaming: true,
     isPending: true,
-    isIntermediate: phase !== 'final',
+    isIntermediate: true,
     turnId: event.turnId,
   }
 
@@ -123,6 +130,11 @@ export function handleTextComplete(
   event: TextCompleteEvent
 ): SessionState {
   const { session, streaming } = state
+  const completesActiveStream = !streaming
+    || !event.turnId
+    || !streaming.turnId
+    || streaming.turnId === event.turnId
+  const nextStreaming = completesActiveStream ? null : streaming
 
   if (isSuppressedTurn(session, event.turnId)) {
     return { session, streaming: null }
@@ -157,7 +169,7 @@ export function handleTextComplete(
     )
     const nextTimestamp = timestampAfterVisibleUser(
       session.messages,
-      event.timestamp ?? existingMsg.timestamp,
+      event.timestamp ?? (event.isIntermediate ? existingMsg.timestamp : Date.now()),
     )
     const updatedSession = updateMessageAt(session, msgIndex, {
       // Replace temporary renderer-generated ID with authoritative main-process ID
@@ -171,7 +183,7 @@ export function handleTextComplete(
       parentToolUseId: event.parentToolUseId,
       timestamp: nextTimestamp,
     }, shouldUpdateTimestamp)
-    return { session: updatedSession, streaming: null }
+    return { session: updatedSession, streaming: nextStreaming }
   }
 
   // Message not found - CREATE IT
@@ -194,6 +206,6 @@ export function handleTextComplete(
 
   return {
     session: appendMessage(session, newMessage, shouldUpdateTimestamp),
-    streaming: null,
+    streaming: nextStreaming,
   }
 }
