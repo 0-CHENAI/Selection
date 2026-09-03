@@ -1,0 +1,446 @@
+schema_version: 2
+id: electrical-primary-sld-v39
+title: 变电站电气一次主接线图解读（3.9 分阶段）
+goal: 按原图实际内容完成分区、清单冻结、参数优先读取、顺序补齐、区域收口和正式汇总，不补造图中不存在的区域、设备、参数或拓扑。
+runner: conduct
+skills:
+  - electrical-primary-sld-topology-v3-9
+defaults:
+  permissionMode: allow-all
+nodes:
+  - id: node-1
+    title: 全图分区与大区裁图
+    prompt: |-
+      [skill:electrical-primary-sld-topology-v3-9]
+
+      待识别原图位于当前任务工作目录。
+
+      先查找 jpg、jpeg、png、webp、tif、tiff 或 pdf 图纸文件。若存在多个候选，
+      根据文件名和图框标题选择电气一次主接线图；仍无法唯一确定时，明确报告候选文件并停止，
+      不得随意混用多张图纸。
+
+      本节点只执行技能的“总览分区”和“大区裁图”。
+
+      禁止：
+      - 不叠蓝网格。
+      - 不统计具体间隔或支路。
+      - 不读取设备参数。
+      - 不分析区域内部详细拓扑。
+      - 不启动子代理。
+
+      执行要求：
+
+      1. 在“工作”目录下创建独立目录 run-YYYYMMDD-HHmmss。
+      2. 查看原图并使用图框网确定图中实际存在的区域，不得预设固定电压等级或固定区域。
+      3. 首次确定区域后，立即写入任务清单。
+      4. 使用 crop-zones 批量裁出全部大区。
+      5. 打开每张未叠蓝网格的原始区片，检查区域完整性。
+      6. 如果边界截断区域名称、主要母线、主要图元、参数框或跨区接头，只允许扩大修正一次。
+      7. 每个明显独立的低压母线段优先作为一个工作单元；无法可靠区分时，保留为一个实际大区并记录不确定性，不得猜测拆分。
+      8. 每个工作单元必须有唯一 id 和独立目录，后续不同执行者不得写同一文件。
+
+      创建：
+
+      - 任务清单.md
+      - 分区清单.json
+      - zones/<区域ID>/ 目录
+
+      zones 数组中的每项保存：
+
+      - id
+      - name
+      - zone_kind
+      - zone_dir
+      - crop_files
+      - note_file
+      - state_file
+
+      确认任务清单、分区清单和全部 crop_files 实际存在后，调用 submit_task_output。
+
+      values 必须包含：
+
+      {
+        "zones": <实际分区数组>,
+        "work_dir": "<独立工作目录>",
+        "task_list": "<任务清单实际路径>",
+        "zones_manifest": "<分区清单实际路径>"
+      }
+    kind: session
+    outputs:
+      - name: zones
+        kind: param
+        type: json
+        required: true
+      - name: work_dir
+        kind: param
+        type: string
+        required: true
+      - name: task_list
+        kind: artifact
+        required: true
+      - name: zones_manifest
+        kind: artifact
+        required: true
+    retry:
+      limit: 1
+      when:
+        - error
+        - empty
+        - invalid
+  - id: node-2
+    title: 冻结分区清单
+    prompt: |-
+      [skill:electrical-primary-sld-topology-v3-9]
+
+      当前只处理这个工作单元：
+
+      ${item}
+
+      不得处理其他区域，不得启动子代理。
+
+      本节点只执行“蓝网格计数并冻结清单”，禁止进入逐条参数读取。
+
+      执行要求：
+
+      1. 读取当前 item 的全部原始 crop_files。
+      2. 大区完整性已经由上一节点检查，不得重新裁大区。
+      3. 对区片叠蓝网格。
+      4. 根据独立主通路、名称栏或支路旁注进行计数。
+      5. 立即创建 item.note_file 和 item.state_file。
+      6. 在 note_file 中写入区域信息、扫描方向和完整的间隔表、支路表或主变表。
+      7. 先填写全部编号、名称、类型、状态、证据区域和参数来源，不抄详细参数。
+      8. state_file 必须记录 count、scan_direction 和 rows。
+
+      rows 中每行至少包含：
+
+      - id
+      - order
+      - name
+      - type
+      - status
+      - evidence
+      - parameter_source
+      - analysis_status
+
+      analysis_status 初始为 pending。
+
+      能确认存在完整参数框的行，将 parameter_source 标记为“本框”。
+
+      对账要求：
+
+      计数 = 表行数
+
+      如果不一致，只允许重新查看当前区片总览一次。仍不确定时保留对应行并标记“难辨”，不得反复截图。
+
+      本节点禁止：
+
+      - 为单个条目裁细图。
+      - 开始抄参数。
+      - 分析详细设备拓扑。
+      - 改变已经确定的大区边界。
+
+      完成后，在 item 中保留原字段，并加入：
+
+      - blue_grid_files
+      - note_file
+      - state_file
+      - count
+
+      调用 submit_task_output，values 必须包含：
+
+      {
+        "item": <更新后的当前工作单元对象>,
+        "note": "<note_file 实际路径>",
+        "state": "<state_file 实际路径>"
+      }
+    kind: map
+    depends_on:
+      - node-1
+    outputs:
+      - name: item
+        kind: param
+        type: json
+        required: true
+      - name: note
+        kind: artifact
+        required: true
+      - name: state
+        kind: artifact
+        required: true
+    for_each: ${nodes.node-1.output.zones}
+    max_parallel: 3
+    retry:
+      limit: 1
+      when:
+        - error
+        - empty
+        - invalid
+  - id: node-3
+    title: 参数框优先读取
+    prompt: |-
+      [skill:electrical-primary-sld-topology-v3-9]
+
+      当前只处理这个工作单元：
+
+      ${item}
+
+      不得处理其他区域，不得启动子代理。
+
+      本节点只处理 state_file 中满足以下条件的行：
+
+      - parameter_source 为“本框”。
+      - 或者明确存在完整参数框、铭牌或成套参数框。
+
+      不得处理其他普通行。
+
+      严格规则：
+
+      1. 读取 item.note_file 和 item.state_file。
+      2. 按 state_file 中的 order 顺序处理目标行。
+      3. 每次只处理一行。
+      4. 每读完一行，立即把参数、拓扑和证据写入 note_file。
+      5. 完成落盘后，再把该行 analysis_status 更新为 done。
+      6. 完成当前行落盘后，才能读取下一行。
+      7. 已经是 done 或 done-with-unresolved 的行必须跳过，便于失败重试后从磁盘继续。
+      8. 参数框、名称或单个图元确实难辨时才允许补裁。
+      9. 同一具体目标最多补裁或旋转两次。
+      10. 两次仍无法确认时，写“难辨”、保留证据，并将该行标记为 done-with-unresolved，然后继续。
+      11. 不得因为少量难辨项拒绝提交。
+      12. 最终回复不得复述整份区域笔记。
+
+      所有带参数框的目标行处理完，且 note_file 和 state_file 已经落盘后，调用 submit_task_output。
+
+      values 必须包含：
+
+      {
+        "item": <原工作单元对象>,
+        "note": "<note_file 实际路径>",
+        "state": "<state_file 实际路径>"
+      }
+    kind: map
+    depends_on:
+      - node-2
+    outputs:
+      - name: item
+        kind: param
+        type: json
+        required: true
+      - name: note
+        kind: artifact
+        required: true
+      - name: state
+        kind: artifact
+        required: true
+    for_each: ${nodes.node-2.output.items}
+    max_parallel: 3
+    retry:
+      limit: 1
+      when:
+        - error
+        - empty
+        - invalid
+  - id: node-4
+    title: 按表序补齐
+    prompt: |-
+      [skill:electrical-primary-sld-topology-v3-9]
+
+      当前只处理这个工作单元：
+
+      ${item}
+
+      不得处理其他区域，不得启动子代理。
+
+      读取 note_file 和 state_file，从冻结清单的第一行开始，严格按照 order 顺序处理所有尚未完成的行。
+
+      严格规则：
+
+      1. analysis_status 为 done 或 done-with-unresolved 的行直接跳过，不得重复读图。
+      2. 每次只处理当前一行。
+      3. 读取后立即把设备参数、拓扑、引用关系和证据写入 note_file。
+      4. note_file 落盘后，再更新 state_file。
+      5. 当前行完成后才能进入下一行。
+      6. 本框存在时必须读取本框。
+      7. 只有符合技能参数复用规则时，才能引用同型条目参数。
+      8. 同一具体目标最多补裁或旋转两次。
+      9. 两次仍不清楚时，标记“难辨”并继续。
+      10. 不得重新计数。
+      11. 不得改变已经冻结的编号或扫描方向。
+      12. 如果发现可能漏行，只记录到 unresolved，不在本节点重构整张表。
+      13. 最终回复不得复述整份区域笔记。
+
+      全部行达到 done 或 done-with-unresolved 后，调用 submit_task_output。
+
+      values 必须包含：
+
+      {
+        "item": <原工作单元对象>,
+        "note": "<note_file 实际路径>",
+        "state": "<state_file 实际路径>"
+      }
+    kind: map
+    depends_on:
+      - node-3
+    outputs:
+      - name: item
+        kind: param
+        type: json
+        required: true
+      - name: note
+        kind: artifact
+        required: true
+      - name: state
+        kind: artifact
+        required: true
+    for_each: ${nodes.node-3.output.items}
+    max_parallel: 3
+    retry:
+      limit: 1
+      when:
+        - error
+        - empty
+        - invalid
+  - id: node-5
+    title: 区域收口
+    prompt: |-
+      [skill:electrical-primary-sld-topology-v3-9]
+
+      当前只收口这个工作单元：
+
+      ${item}
+
+      不得处理其他区域，不得启动子代理。
+
+      本节点禁止重新裁图，原则上不再读取原图，只根据 note_file、state_file 和已有证据完成机械性收口。
+
+      检查：
+
+      1. 计数 = 表行数 = 详情小节数。
+      2. 每行均有参数表或合法引用。
+      3. 每行均有拓扑或合法拓扑引用。
+      4. 本期、远期、空白、备用和难辨项均未被删除。
+      5. 所有 pending 行必须转换为 done-with-unresolved。
+      6. pending 行必须写明已有证据和未确认原因。
+      7. 少量难辨不得让节点拒绝交付。
+      8. 在 state_file 中写入 zone_status=complete。
+      9. 在 note_file 中写入未决项摘要。
+
+      确认区域笔记已经具备汇总条件后，调用 submit_task_output。
+
+      values 必须包含：
+
+      {
+        "item": <原工作单元对象>,
+        "note": "<note_file 实际路径>",
+        "state": "<state_file 实际路径>"
+      }
+    kind: map
+    depends_on:
+      - node-4
+    outputs:
+      - name: item
+        kind: param
+        type: json
+        required: true
+      - name: note
+        kind: artifact
+        required: true
+      - name: state
+        kind: artifact
+        required: true
+    for_each: ${nodes.node-4.output.items}
+    max_parallel: 3
+    retry:
+      limit: 1
+      when:
+        - error
+        - empty
+        - invalid
+  - id: node-6
+    title: 汇总正式文档
+    prompt: >-
+      [skill:electrical-primary-sld-topology-v3-9]
+
+
+      所有区域均已完成收口。
+
+
+      禁止：
+
+
+      - 不启动子代理。
+
+      - 不重新裁图。
+
+      - 不重新识别原图。
+
+      - 不重新修改分区和编号。
+
+
+      工作目录：
+
+
+      ${nodes.node-1.output.work_dir}
+
+
+      任务清单：
+
+
+      ${nodes.node-1.output.task_list}
+
+
+      分区清单：
+
+
+      ${nodes.node-1.output.zones_manifest}
+
+
+      已收口区域：
+
+
+      ${nodes.node-5.output.items}
+
+
+      读取分区清单以及所有 item.note_file 和 item.state_file，按照技能中的 standard-template.md
+      汇总为：
+
+
+      ${nodes.node-1.output.work_dir}/电气一次主接线图解读.md
+
+
+      要求：
+
+
+      1. 章节只能来自图中实际存在的区域。
+
+      2. 保留本期、远期、空白、备用、合法引用和难辨项。
+
+      3. 全站总拓扑只能根据各区域笔记构建，不得补造连接。
+
+      4. 更新任务清单中的区域完成状态和正式文档状态。
+
+      5. 最终回复保持简短，不得复述整份正式文档。
+
+
+      确认正式文档实际存在后，调用 submit_task_output。
+
+
+      values 必须包含：
+
+
+      {
+        "report": "${nodes.node-1.output.work_dir}/电气一次主接线图解读.md"
+      }
+    kind: synthesize
+    depends_on:
+      - node-1
+      - node-5
+    outputs:
+      - name: report
+        kind: artifact
+        required: true
+    retry:
+      limit: 1
+      when:
+        - error
+        - empty
+        - invalid

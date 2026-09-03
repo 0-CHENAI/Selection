@@ -49,8 +49,8 @@ import {
   cloneTaskDefinition,
   uniqueTaskSlug,
   allocateUniqueTaskSlug,
-  listTaskTemplates,
-  loadTaskTemplate,
+  listAvailableTaskTemplates,
+  loadAvailableTaskTemplate,
   saveTaskTemplateSpec,
   deleteTaskTemplate,
   SLUG_RE,
@@ -272,9 +272,9 @@ export function registerTasksHandlers(server: RpcServer, deps: HandlerDeps): voi
     return { slug: created.slug, orchestratorSessionId: created.orchestratorSessionId, validation, taskLabelId: created.taskLabelId }
   })
 
-  // tasks:listTemplates — workspace-local library; never scans tasks/.
+  // tasks:listTemplates — app-shipped defaults plus workspace-local overrides; never scans tasks/.
   server.handle(RPC_CHANNELS.tasks.LIST_TEMPLATES, async (_ctx, workspaceId: string): Promise<TaskTemplateSummaryDto[]> => {
-    return listTaskTemplates(workspaceOrThrow(workspaceId).rootPath)
+    return listAvailableTaskTemplates(workspaceOrThrow(workspaceId).rootPath)
   })
 
   // tasks:getTemplate — definition only (no run, no session).
@@ -282,20 +282,22 @@ export function registerTasksHandlers(server: RpcServer, deps: HandlerDeps): voi
     const fail = (message: string): TaskGetTemplateResult => ({
       slug: typeof slug === 'string' ? slug : '',
       title: '',
+      builtIn: false,
       validation: { valid: false, errors: [{ path: 'slug', message, severity: 'error' }], warnings: [] },
     })
     if (typeof slug !== 'string' || !SLUG_RE.test(slug)) {
       return fail(`Template "${slug}" not found`)
     }
-    const loaded = loadTaskTemplate(workspaceOrThrow(workspaceId).rootPath, slug)
+    const loaded = loadAvailableTaskTemplate(workspaceOrThrow(workspaceId).rootPath, slug)
     if (!loaded) return fail(`Template "${slug}" not found`)
     const validation = toValidationDto(loaded)
     if (!loaded.valid || !loaded.spec) {
-      return { slug, title: '', validation }
+      return { slug, title: '', builtIn: loaded.builtIn, validation }
     }
     return {
       slug,
       title: loaded.spec.title.trim() || slug,
+      builtIn: loaded.builtIn,
       validation,
       spec: loaded.spec,
       yaml: loaded.yaml,

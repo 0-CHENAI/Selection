@@ -500,7 +500,7 @@ export interface TaskEditorProps {
   onDuplicated?: (created: { sessionId: string; taskSlug: string }) => void
   /** Spec-backed tasks on the board, used as starting graphs in create mode. */
   existingTasks?: TaskTemplateOption[]
-  /** Workspace-local templates (no session). Shown first in the create-mode picker. */
+  /** Built-in defaults and workspace-local templates (no session). Shown first in create mode. */
   libraryTemplates?: TaskTemplateOption[]
   /** After a library template is deleted, so the create-mode picker drops it. */
   onLibraryTemplatesChange?: (items: TaskTemplateOption[]) => void
@@ -736,7 +736,7 @@ export function TaskEditor({
     void window.electronAPI
       .getTaskTemplate(workspaceId, editSlug)
       .then((res) => {
-        if (!cancelled) setHasLibraryTemplate(!!res.spec && res.validation.valid)
+        if (!cancelled) setHasLibraryTemplate(!!res.spec && res.validation.valid && !res.builtIn)
       })
       .catch(() => {
         if (!cancelled) setHasLibraryTemplate(false)
@@ -1514,7 +1514,9 @@ export function TaskEditor({
               {templateSlug && (
                 <p className="mt-1.5 text-[11px] leading-relaxed text-foreground/45">{t('tasks.templateHint')}</p>
               )}
-              {templateSlug.startsWith('library:') && (
+              {templateSlug.startsWith('library:') && !libraryTemplates.find(
+                (item) => item.slug === templateSlug.slice('library:'.length),
+              )?.builtIn && (
                 <button
                   type="button"
                   disabled={busy}

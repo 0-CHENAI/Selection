@@ -7,8 +7,11 @@ import { cloneTaskDefinition } from './clone.ts';
 import { listTaskSlugs, saveTaskSpec, taskYamlPath } from './storage.ts';
 import {
   deleteTaskTemplate,
+  listAvailableTaskTemplates,
   listTaskTemplates,
   listTaskTemplateSlugs,
+  loadAvailableTaskTemplate,
+  loadBundledTaskTemplate,
   loadTaskTemplate,
   saveTaskTemplateSpec,
   taskTemplateYamlPath,
@@ -132,5 +135,41 @@ describe('task template storage', () => {
     expect(existsSync(taskTemplateYamlPath(root, 'review'))).toBe(false);
     expect(listTaskSlugs(root)).toEqual(['review']);
     expect(existsSync(taskYamlPath(root, 'review'))).toBe(true);
+  });
+
+  it('lists bundled defaults and lets workspace templates override them', () => {
+    const bundledRoot = join(root, 'bundled');
+    const bundledTemplateDir = join(bundledRoot, 'review');
+    mkdirSync(bundledTemplateDir, { recursive: true });
+    writeFileSync(
+      join(bundledTemplateDir, 'template.yaml'),
+      'schema_version: 2\nid: review\ntitle: Built-in Review\ngoal: g\nnodes:\n  - id: read\n    prompt: bundled\n',
+    );
+
+    expect(loadBundledTaskTemplate('review', bundledRoot)?.builtIn).toBe(true);
+    expect(loadAvailableTaskTemplate(root, 'review', bundledRoot)?.spec?.title).toBe('Built-in Review');
+    expect(listAvailableTaskTemplates(root, bundledRoot)).toEqual([
+      { slug: 'review', title: 'Built-in Review', builtIn: true },
+    ]);
+    expect(deleteTaskTemplate(root, 'review')).toBe(false);
+    expect(loadAvailableTaskTemplate(root, 'review', bundledRoot)?.builtIn).toBe(true);
+
+    saveTaskTemplateSpec(
+      root,
+      specOf({
+        id: 'review',
+        title: 'Workspace Review',
+        goal: 'g',
+        nodes: [{ id: 'read', prompt: 'workspace' }],
+      }),
+    );
+
+    expect(loadAvailableTaskTemplate(root, 'review', bundledRoot)?.builtIn).toBe(false);
+    expect(loadAvailableTaskTemplate(root, 'review', bundledRoot)?.spec?.title).toBe('Workspace Review');
+    expect(listAvailableTaskTemplates(root, bundledRoot)).toEqual([
+      { slug: 'review', title: 'Workspace Review', builtIn: false },
+    ]);
+    expect(deleteTaskTemplate(root, 'review')).toBe(true);
+    expect(loadAvailableTaskTemplate(root, 'review', bundledRoot)?.builtIn).toBe(true);
   });
 });

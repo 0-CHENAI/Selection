@@ -254,11 +254,14 @@ export interface TaskDuplicateRequest {
 export interface TaskTemplateSummaryDto {
   slug: string
   title: string
+  /** App-shipped templates are selectable but cannot be deleted from a workspace. */
+  builtIn: boolean
 }
 
 export interface TaskGetTemplateResult {
   slug: string
   title: string
+  builtIn: boolean
   validation: TaskValidationResultDto
   spec?: unknown
   yaml?: string

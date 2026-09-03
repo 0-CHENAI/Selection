@@ -4,6 +4,8 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 
 ## Features
 
+- **Built-in electrical single-line diagram workflow** — New tasks can start from a reusable six-stage v3.9 template that partitions the drawing, freezes per-zone inventories, reads parameter blocks first, completes each zone in parallel, and synthesizes a final report.
+
 ## Improvements
 
 - **Process notes no longer look like the final reply** — intermediate commentary stays in the work chain with the weaker step style instead of occupying the main response card. When tools start, that text remains reviewable as a step rather than a finished Copy / Markdown card. The real final reply still uses the existing response card. (#83)

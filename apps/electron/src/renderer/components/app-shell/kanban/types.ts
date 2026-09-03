@@ -34,10 +34,11 @@ export type TaskEditorTarget =
   | { mode: 'create'; initialProjectId?: string }
   | { mode: 'edit'; sessionId: string; taskSlug?: string; initialTitle?: string }
 
-/** A starting graph for create mode: a live board task or a workspace template. */
+/** A starting graph for create mode: a live board task, built-in default, or workspace template. */
 export interface TaskTemplateOption {
   slug: string
   title: string
+  builtIn?: boolean
 }
 
 export interface KanbanSubtask {
