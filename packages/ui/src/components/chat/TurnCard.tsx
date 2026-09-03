@@ -29,7 +29,6 @@ import {
 import { cn } from '../../lib/utils'
 import { Markdown } from '../markdown'
 import { Spinner } from '../ui/LoadingIndicator'
-import { GenerativeActivityIndicator } from './GenerativeActivityIndicator'
 import { markdownToPlainText } from './markdown-to-plain-text'
 import { BUFFER_CONFIG } from './stream-buffer'
 import { useStreamingReveal } from './useStreamingReveal'
@@ -47,6 +46,7 @@ import { getDiffStats, getUnifiedDiffStats } from '../code-viewer'
 import { TurnCardActionsMenu } from './TurnCardActionsMenu'
 import {
   computeLastChildSet,
+  getRenderedActivityRows,
   groupActivitiesByParent,
   isActivityGroup,
   formatDuration,
@@ -58,7 +58,7 @@ import {
   isVisibleCommentaryCard,
   isMirroredCommentaryActivity,
   shouldShowStreamingFooter,
-  shouldShowThinkingIndicator,
+  shouldShowGenericThinkingIndicator,
   type ActivityGroup,
   type AssistantTurn,
   type TurnPhase,
@@ -236,6 +236,9 @@ export const SIZE_CONFIG = {
   /** Number of items before which we apply staggered animation */
   staggeredAnimationLimit: 10,
 } as const
+
+/** Product-standard label paired with the 3x3 grid activity indicator. */
+const THINKING_STATUS_LABEL = 'Thinking...'
 
 // ============================================================================
 // Types
@@ -832,7 +835,7 @@ function ActivityRow({ activity, onOpenDetails, isLastChild, sessionFolderPath, 
   // Show "Thinking" while streaming, stripped markdown content when complete
   if (activity.type === 'intermediate') {
     const isThinking = activity.status === 'running'
-    const displayContent = isThinking ? 'Thinking...' : stripMarkdown(activity.content || '')
+    const displayContent = isThinking ? THINKING_STATUS_LABEL : stripMarkdown(activity.content || '')
     const isComplete = activity.status === 'completed'
     return (
       <div className="flex items-stretch">
@@ -912,7 +915,7 @@ function ActivityRow({ activity, onOpenDetails, isLastChild, sessionFolderPath, 
   // - Params: Remaining tool input summary
   const toolDisplay = formatToolDisplay(activity)
   const fullDisplayName = toolDisplay.name
-    || (activity.type === 'thinking' ? 'Thinking' : 'Processing')
+    || (activity.type === 'thinking' ? THINKING_STATUS_LABEL : 'Processing')
 
   // Detect MCP/API tools (toolName starts with "mcp__")
   const isMcpOrApiTool = activity.toolName?.startsWith('mcp__') ?? false
@@ -2940,6 +2943,14 @@ export const TurnCard = React.memo(function TurnCard({
     [visibleActivities, hasTaskSubagents]
   )
 
+  const renderedActivityRows = useMemo(
+    () => getRenderedActivityRows(
+      groupedActivities ?? visibleActivities,
+      expandedActivityGroups,
+    ),
+    [expandedActivityGroups, groupedActivities, visibleActivities],
+  )
+
   // Pre-compute which activities are last children - O(n) instead of O(n²) per-render check
   // Only used for flat view (non-grouped)
   const lastChildSet = useMemo(
@@ -2963,7 +2974,8 @@ export const TurnCard = React.memo(function TurnCard({
   // - No response text to show
   // - No plan activities
   // The "Response interrupted" info banner alone is sufficient feedback.
-  const hasNoMeaningfulWork = activities.length > 0
+  const hasNoMeaningfulWork = isComplete
+    && activities.length > 0
     && activities.every(a => {
       // Tool activities must be errors (interrupted/failed)
       if (a.type === 'tool') return a.status === 'error'
@@ -2985,7 +2997,11 @@ export const TurnCard = React.memo(function TurnCard({
   // Determine if thinking indicator should show using the phase-based state machine.
   // This properly handles the "gap" state (awaiting) between tool completion and next action,
   // which was previously causing the turn card to "disappear".
-  const isThinking = shouldShowThinkingIndicator(turnPhase, isBuffering)
+  const showGenericThinkingIndicator = shouldShowGenericThinkingIndicator(
+    turnPhase,
+    isBuffering,
+    renderedActivityRows,
+  )
 
   return (
     <div className="space-y-1">
@@ -3122,7 +3138,7 @@ export const TurnCard = React.memo(function TurnCard({
                     ))
                   )}
                   {/* Thinking/Buffering indicator - shown while waiting for response */}
-                  {isThinking && !animateResponse && (
+                  {showGenericThinkingIndicator && !animateResponse && (
                     <motion.div
                       key="thinking"
                       initial={reduceMotion || !staggerOnThisExpand ? false : { opacity: 0, x: -8 }}
@@ -3136,8 +3152,10 @@ export const TurnCard = React.memo(function TurnCard({
                       }}
                       className={cn("flex items-center gap-2 py-0.5 text-muted-foreground/70", SIZE_CONFIG.fontSize)}
                     >
-                      <GenerativeActivityIndicator size={12} variant={isBuffering ? 'signal' : 'orbit'} />
-                      <span>{isBuffering ? t('turnCard.preparingResponse') : t('turnCard.thinking')}</span>
+                      <div className={cn(SIZE_CONFIG.iconSize, "flex items-center justify-center shrink-0")}>
+                        <Spinner className={SIZE_CONFIG.spinnerSize} />
+                      </div>
+                      <span>{THINKING_STATUS_LABEL}</span>
                     </motion.div>
                   )}
                   </AnimatePresence>
@@ -3151,10 +3169,12 @@ export const TurnCard = React.memo(function TurnCard({
       )}
 
       {/* Standalone thinking indicator - when no activities but still working */}
-      {!hasActivities && isThinking && !animateResponse && (
+      {!hasActivities && showGenericThinkingIndicator && !animateResponse && (
         <div className={cn("flex items-center gap-2 px-3 py-1.5 text-muted-foreground", SIZE_CONFIG.fontSize)}>
-          <GenerativeActivityIndicator size={12} variant={isBuffering ? 'signal' : 'orbit'} />
-          <span>{isBuffering ? t('turnCard.preparingResponse') : t('turnCard.thinking')}</span>
+          <div className={cn(SIZE_CONFIG.iconSize, "flex items-center justify-center shrink-0")}>
+            <Spinner className={SIZE_CONFIG.spinnerSize} />
+          </div>
+          <span>{THINKING_STATUS_LABEL}</span>
         </div>
       )}
 
