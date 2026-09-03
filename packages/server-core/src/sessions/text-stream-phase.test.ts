@@ -77,4 +77,41 @@ describe('SessionManager text stream phases (#87)', () => {
       { delta: '最终结论。', phase: 'final', turnId: 'message-2' },
     ])
   })
+
+  it('consumes streamed text only when the completed segment has the same turn id', async () => {
+    const { manager, managed } = setupSession('session-segment-correlation')
+
+    await (manager as any).processEvent(managed, {
+      type: 'text_delta',
+      text: '最终结论。',
+      phase: 'final',
+      turnId: 'final-segment',
+    })
+    await (manager as any).processEvent(managed, {
+      type: 'text_complete',
+      text: '我先检查了文件。',
+      isIntermediate: true,
+      turnId: 'commentary-segment',
+    })
+
+    expect(managed.streamingText).toBe('最终结论。')
+    expect(managed.messages.at(-1)).toMatchObject({
+      content: '我先检查了文件。',
+      isIntermediate: true,
+      turnId: 'commentary-segment',
+    })
+
+    await (manager as any).processEvent(managed, {
+      type: 'text_complete',
+      text: '最终结论。',
+      isIntermediate: false,
+      turnId: 'final-segment',
+    })
+
+    expect(managed.streamingText).toBe('')
+    expect(managed.messages.slice(-2)).toMatchObject([
+      { content: '我先检查了文件。', isIntermediate: true },
+      { content: '最终结论。', isIntermediate: false },
+    ])
+  })
 })

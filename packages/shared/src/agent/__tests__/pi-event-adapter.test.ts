@@ -161,6 +161,52 @@ describe('PiEventAdapter', () => {
       }]);
     });
 
+    it('should attach a streamed Codex final body to the final segment, not commentary', () => {
+      collect(adapter.adaptEvent({ type: 'turn_start' } as any));
+      const streamed = collect(adapter.adaptEvent({
+        type: 'message_update',
+        assistantMessageEvent: {
+          type: 'text_delta',
+          delta: 'Verified result',
+          partial: {
+            role: 'assistant',
+            api: 'openai-codex-responses',
+            content: [{
+              type: 'text',
+              text: 'Verified result',
+              textSignature: JSON.stringify({ phase: 'final_answer' }),
+            }],
+          },
+        },
+      } as any));
+      const completed = collect(adapter.adaptEvent({
+        type: 'message_end',
+        message: {
+          role: 'assistant',
+          stopReason: 'stop',
+          content: [
+            {
+              type: 'text',
+              text: 'I checked the files.',
+              textSignature: JSON.stringify({ phase: 'commentary' }),
+            },
+            {
+              type: 'text',
+              text: 'Verified result',
+              textSignature: JSON.stringify({ phase: 'final_answer' }),
+            },
+          ],
+        },
+      } as any));
+
+      expect(completed).toMatchObject([
+        { type: 'text_complete', text: 'I checked the files.', isIntermediate: true },
+        { type: 'text_complete', text: 'Verified result', isIntermediate: false },
+      ]);
+      expect(completed[0].turnId).not.toBe(streamed[0].turnId);
+      expect(completed[1].turnId).toBe(streamed[0].turnId);
+    });
+
     it('should skip message_update without text_delta type', () => {
       collect(adapter.adaptEvent({ type: 'turn_start' } as any));
       const events = collect(adapter.adaptEvent({

@@ -109,6 +109,7 @@ export class PiEventAdapter extends BaseEventAdapter {
   // Sub-turnId isolation for tool calls within a single Pi turn
   private subTurnCounter: number = 0;
   private messageSubTurnId: string | null = null;
+  private streamingTextPhase: TextPhase | 'unclassified' | undefined;
 
   // Model context window for usage_update events
   private contextWindow: number | undefined;
@@ -245,6 +246,7 @@ export class PiEventAdapter extends BaseEventAdapter {
     this.hasEmittedFinalText = false;
     this.subTurnCounter = 0;
     this.messageSubTurnId = null;
+    this.streamingTextPhase = undefined;
     this.log.debug('Turn started', { turnIndex: this.turnIndex });
   }
 
@@ -334,6 +336,7 @@ export class PiEventAdapter extends BaseEventAdapter {
         this.hasEmittedFinalText = false;
         this.subTurnCounter = 0;
         this.messageSubTurnId = null;
+        this.streamingTextPhase = undefined;
         break;
 
       // ============================================================
@@ -359,6 +362,7 @@ export class PiEventAdapter extends BaseEventAdapter {
           if (!this.messageSubTurnId) {
             this.messageSubTurnId = this.nextSubTurnId('m');
           }
+          this.streamingTextPhase = textPhase ?? 'unclassified';
           yield {
             type: 'text_delta',
             text: amEvent.delta,
@@ -424,14 +428,26 @@ export class PiEventAdapter extends BaseEventAdapter {
           return type === 'toolCall' || type === 'tool_use';
         });
         const messageIsIntermediate = msg.stopReason === 'toolUse' || hasToolCall;
-        for (const segment of textSegments) {
+        const streamedSegmentIndex = this.messageSubTurnId
+          ? textSegments.findIndex((segment) => (
+              this.streamingTextPhase === 'unclassified'
+                ? segment.phase === undefined
+                : segment.phase === this.streamingTextPhase
+            ))
+          : -1;
+        for (const [index, segment] of textSegments.entries()) {
           const isIntermediate = segment.phase === 'commentary'
             || (segment.phase !== 'final_answer' && messageIsIntermediate);
           if (!isIntermediate && this.hasEmittedFinalText) continue;
           if (!isIntermediate) this.hasEmittedFinalText = true;
 
-          const mTurnId = this.messageSubTurnId ?? this.nextSubTurnId('m');
-          this.messageSubTurnId = null;
+          const usesStreamingTurn = index === streamedSegmentIndex;
+          const mTurnId = usesStreamingTurn
+            ? this.messageSubTurnId!
+            : this.nextSubTurnId('m');
+          if (usesStreamingTurn) {
+            this.messageSubTurnId = null;
+          }
 
           yield {
             type: 'text_complete',
@@ -442,6 +458,8 @@ export class PiEventAdapter extends BaseEventAdapter {
           };
         }
         this.hasStreamedDeltas = false;
+        this.messageSubTurnId = null;
+        this.streamingTextPhase = undefined;
 
         // Emit usage_update if the assistant message includes token usage
         if (msg.usage && typeof msg.usage.input === 'number') {
@@ -598,6 +616,7 @@ export class PiEventAdapter extends BaseEventAdapter {
         // After tool completion, the assistant may generate new text
         this.hasEmittedFinalText = false;
         this.messageSubTurnId = null;
+        this.streamingTextPhase = undefined;
 
         // Check if this was classified as a file read
         const readInfo = this.consumeReadCommand(toolCallId);

@@ -10474,7 +10474,13 @@ export class SessionManager implements ISessionManager {
         // Flush any pending deltas before sending complete (ensures renderer has all content)
         this.flushDelta(sessionId, workspaceId)
 
-        const content = preferRicherAssistantText(event.text, managed.streamingText)
+        const completesActiveStream = !event.turnId
+          || !managed.streamingTurnId
+          || event.turnId === managed.streamingTurnId
+        const content = preferRicherAssistantText(
+          event.text,
+          completesActiveStream ? managed.streamingText : undefined,
+        )
         const assistantMessage: Message = {
           id: generateMessageId(),
           role: 'assistant',
@@ -10485,9 +10491,11 @@ export class SessionManager implements ISessionManager {
           parentToolUseId: event.parentToolUseId,
         }
         managed.messages.push(assistantMessage)
-        managed.streamingText = ''
-        managed.streamingTurnId = undefined
-        managed.streamingStartedAt = undefined
+        if (completesActiveStream) {
+          managed.streamingText = ''
+          managed.streamingTurnId = undefined
+          managed.streamingStartedAt = undefined
+        }
 
         // Update lastMessageRole and lastFinalMessageId for badge/unread display (only for final messages)
         if (!event.isIntermediate && hasRenderableAssistantText(content)) {

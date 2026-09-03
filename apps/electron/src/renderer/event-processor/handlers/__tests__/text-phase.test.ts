@@ -91,6 +91,49 @@ describe('issue #87 text stream phases', () => {
     })
   })
 
+  it('keeps a streamed final body correlated when commentary completes first', () => {
+    const finalStreaming = handleTextDelta(state(), {
+      type: 'text_delta',
+      sessionId: 'session-1',
+      delta: '最终结论。',
+      phase: 'final',
+      turnId: 'final-segment',
+    })
+    const commentaryComplete = handleTextComplete(finalStreaming, {
+      type: 'text_complete',
+      sessionId: 'session-1',
+      text: '我先检查了文件。',
+      isIntermediate: true,
+      turnId: 'commentary-segment',
+      messageId: 'commentary-1',
+    })
+    const beforeFinalComplete = assistantTurn(commentaryComplete)
+    expect(beforeFinalComplete.activities).toMatchObject([{
+      type: 'intermediate',
+      content: '我先检查了文件。',
+    }])
+    expect(beforeFinalComplete.response).toMatchObject({
+      text: '最终结论。',
+      isStreaming: true,
+    })
+
+    const completed = handleTextComplete(commentaryComplete, {
+      type: 'text_complete',
+      sessionId: 'session-1',
+      text: '最终结论。',
+      isIntermediate: false,
+      turnId: 'final-segment',
+      messageId: 'answer-1',
+    })
+    const completedTurn = assistantTurn(completed)
+    expect(completedTurn.activities[0]?.content).toBe('我先检查了文件。')
+    expect(completedTurn.response).toMatchObject({
+      text: '最终结论。',
+      isStreaming: false,
+      messageId: 'answer-1',
+    })
+  })
+
   it('keeps partial text as commentary when the turn is interrupted or fails', () => {
     const partial = handleTextDelta(state(), {
       type: 'text_delta',
