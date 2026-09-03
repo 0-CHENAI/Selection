@@ -3,6 +3,7 @@ import {
   beginMcpJsonImport,
   confirmSkillFileImport,
   getDroppedSkillImportFile,
+  hasFileDragType,
   isSupportedSkillImportFile,
   listenForSkillFilePickerCancel,
   openSkillFilePicker,
@@ -92,6 +93,14 @@ describe('skill file import stages', () => {
     expect(() => getDroppedSkillImportFile([markdown, archive])).toThrow('one SKILL.md')
     expect(() => getDroppedSkillImportFile([text])).toThrow('Only SKILL.md')
     expect(isSupportedSkillImportFile(text)).toBe(false)
+  })
+
+  it('recognizes file drags from array-like Windows/Electron drag type lists', () => {
+    const domStringListLike = { 0: 'Files', length: 1 }
+
+    expect(hasFileDragType(domStringListLike)).toBe(true)
+    expect(hasFileDragType(['text/plain', 'FILES'])).toBe(true)
+    expect(hasFileDragType(['text/plain'])).toBe(false)
   })
 
   it('opens the native picker synchronously and suppresses repeated triggers until release', () => {

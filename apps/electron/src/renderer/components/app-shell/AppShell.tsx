@@ -120,6 +120,7 @@ import { SourcesListPanel } from "./SourcesListPanel"
 import { SkillsListPanel } from "./SkillsListPanel"
 import {
   ExternalResourceImportDialog,
+  SkillFileDropDialog,
   SkillFileImportDialog,
 } from "@/components/resources/ExternalResourceImportDialog"
 import {
@@ -1490,6 +1491,8 @@ function AppShellContent({
   const [copySkillsFromOpen, setCopySkillsFromOpen] = useState(false)
   const [copySourcesFromOpen, setCopySourcesFromOpen] = useState(false)
   const [mcpFileImportOpen, setMcpFileImportOpen] = useState(false)
+  const [skillFileDropOpen, setSkillFileDropOpen] = useState(false)
+  const [skillFilePreparing, setSkillFilePreparing] = useState(false)
   const skillFileInputRef = useRef<HTMLInputElement>(null)
   const skillFileImporting = useRef(false)
   const skillFileCancelCleanupRef = useRef<(() => void) | null>(null)
@@ -1506,48 +1509,63 @@ function AppShellContent({
 
   const finishSkillFileImport = useCallback(() => {
     clearSkillFileCancelListener()
+    setSkillFileDropOpen(false)
+    setSkillFilePreparing(false)
     setPreparedSkillFileImport(null)
     releaseSkillFilePicker(skillFileImporting)
     requestAnimationFrame(() => skillFileImportTriggerRef.current?.focus())
   }, [clearSkillFileCancelListener])
 
   const handleImportSkillFromFile = useCallback((event: React.MouseEvent<HTMLButtonElement>) => {
-    if (!activeWorkspaceId || !skillFileInputRef.current || skillFileImporting.current) return
+    if (!activeWorkspaceId || skillFileImporting.current) return
     skillFileImportTriggerRef.current = event.currentTarget
+    setSkillFileDropOpen(true)
+  }, [activeWorkspaceId])
+
+  const cancelSkillFilePicker = useCallback(() => {
+    clearSkillFileCancelListener()
+    setSkillFilePreparing(false)
+    releaseSkillFilePicker(skillFileImporting)
+  }, [clearSkillFileCancelListener])
+
+  const handleChooseSkillFile = useCallback(() => {
+    if (!activeWorkspaceId || !skillFileInputRef.current || skillFileImporting.current) return
     clearSkillFileCancelListener()
     skillFileCancelCleanupRef.current = listenForSkillFilePickerCancel(
       skillFileInputRef.current,
-      finishSkillFileImport,
+      cancelSkillFilePicker,
     )
+    setSkillFilePreparing(true)
     try {
       openSkillFilePicker(skillFileInputRef.current, skillFileImporting)
     } catch (error) {
-      finishSkillFileImport()
+      cancelSkillFilePicker()
       toast.error(t('fileImport.skillFailed'), {
         description: error instanceof Error ? error.message : String(error),
       })
     }
-  }, [activeWorkspaceId, clearSkillFileCancelListener, finishSkillFileImport, t])
+  }, [activeWorkspaceId, cancelSkillFilePicker, clearSkillFileCancelListener, t])
 
   const handleSkillImportFileChange = useCallback(async (event: React.ChangeEvent<HTMLInputElement>) => {
     clearSkillFileCancelListener()
     const file = event.target.files?.[0]
     event.target.value = ''
     if (!file || !activeWorkspaceId) {
-      finishSkillFileImport()
+      cancelSkillFilePicker()
       return
     }
 
     try {
       const value = await prepareSkillFileImport(window.electronAPI, activeWorkspaceId, file)
+      setSkillFileDropOpen(false)
       setPreparedSkillFileImport({ workspaceId: activeWorkspaceId, value })
     } catch (error) {
-      finishSkillFileImport()
+      cancelSkillFilePicker()
       toast.error(t('fileImport.skillFailed'), {
         description: error instanceof Error ? error.message : String(error),
       })
     }
-  }, [activeWorkspaceId, clearSkillFileCancelListener, finishSkillFileImport, t])
+  }, [activeWorkspaceId, cancelSkillFilePicker, clearSkillFileCancelListener, t])
 
   const handleImportSkillFromDrop = useCallback((files: File[]) => {
     if (!activeWorkspaceId || skillFileImporting.current) return
@@ -1562,20 +1580,23 @@ function AppShellContent({
       return
     }
 
-    skillFileImportTriggerRef.current = null
+    if (!skillFileDropOpen) skillFileImportTriggerRef.current = null
     clearSkillFileCancelListener()
     skillFileImporting.current = true
+    setSkillFilePreparing(true)
     void prepareSkillFileImport(window.electronAPI, activeWorkspaceId, file)
       .then(value => {
+        setSkillFileDropOpen(false)
         setPreparedSkillFileImport({ workspaceId: activeWorkspaceId, value })
       })
       .catch(error => {
-        finishSkillFileImport()
+        setSkillFilePreparing(false)
+        releaseSkillFilePicker(skillFileImporting)
         toast.error(t('fileImport.skillFailed'), {
           description: error instanceof Error ? error.message : String(error),
         })
       })
-  }, [activeWorkspaceId, clearSkillFileCancelListener, finishSkillFileImport, t])
+  }, [activeWorkspaceId, clearSkillFileCancelListener, skillFileDropOpen, t])
 
   useEffect(() => {
     if (
@@ -2807,6 +2828,16 @@ function AppShellContent({
                 accept=".md,.zip"
                 className="hidden"
                 onChange={(event) => void handleSkillImportFileChange(event)}
+              />
+              <SkillFileDropDialog
+                open={skillFileDropOpen}
+                loading={skillFilePreparing}
+                onChooseFile={handleChooseSkillFile}
+                onDropFiles={handleImportSkillFromDrop}
+                onOpenChange={(open) => {
+                  if (open) setSkillFileDropOpen(true)
+                  else finishSkillFileImport()
+                }}
               />
               {preparedSkillFileImport && (
                 <SkillFileImportDialog

@@ -21,6 +21,8 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 
 ## Bug Fixes
 
+- **Skill import keeps drag-and-drop available after opening** — the Skills header action now opens an in-app drop zone for a single `SKILL.md` or Skill Zip, with the native file browser retained as an explicit fallback. Windows/Electron file drags are recognized from array-like drag type lists as well as standard arrays. (#240)
+
 - **Final answers appear only after generation finishes** — network text stays out of the formal response card while the model is working. Once the complete final answer arrives, the UI reveals it locally in a quick pass capped below two seconds; reduced-motion users see it immediately. Commentary, tool steps, cancellation, errors, and reloads preserve their semantic roles without flashing process narration as the answer. Follow-up to #87.
 
 - **Parallel `call_llm` and Swarm workers follow the current session model** — omitting `model` no longer falls through to the connection's Fast / mini tier. Work-chain badges, `spawn_session` children, and Conductor nodes without an explicit model inherit the input-area selection; an explicit tool or task model still wins. Title generation and other utility completions stay on the cheap model. (#192)
