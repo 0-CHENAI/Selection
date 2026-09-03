@@ -21,6 +21,8 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 
 ## Bug Fixes
 
+- **Automation navigation uses the Webhook icon** — the sidebar entry now matches the automation empty state instead of looking like a task list, while scheduled, event, and Agent subcategory icons remain unchanged. (#232)
+
 - **Skill import keeps drag-and-drop available after opening** — the Skills header action now opens an in-app drop zone for a single `SKILL.md` or Skill Zip, with the native file browser retained as an explicit fallback. Windows/Electron file drags are recognized from array-like drag type lists as well as standard arrays. (#240)
 
 - **Final answers appear only after generation finishes** — network text stays out of the formal response card while the model is working. Once the complete final answer arrives, the UI reveals it locally in a quick pass capped below two seconds; reduced-motion users see it immediately. Commentary, tool steps, cancellation, errors, and reloads preserve their semantic roles without flashing process narration as the answer. Follow-up to #87.
