@@ -43,7 +43,7 @@ import { HeaderIconButton } from "@/components/ui/HeaderIconButton"
 import { CreationJobsButton } from "./CreationJobsButton"
 import type { CreationJob } from "@/atoms/creation-jobs"
 import { clearProjectFilter, resolveNewSessionParams, resolveProjectNavigationSessionId, type FilterMode } from "./inherited-filter-params"
-import { filterSessionsByProject, hasIncludedProjectFilter } from "./project-session-filter"
+import { filterSessionsByProject, getIncludedProjectName, hasIncludedProjectFilter } from "./project-session-filter"
 import { Separator } from "@/components/ui/separator"
 import { Tooltip, TooltipTrigger, TooltipContent } from "@craft-agent/ui"
 import {
@@ -1972,6 +1972,8 @@ function AppShellContent({
     if (!sessionFilter) return t("sidebar.allSessions")
 
     switch (sessionFilter.kind) {
+      case 'allSessions':
+        return getIncludedProjectName(projectFilter, projects) ?? t("sidebar.allSessions")
       case 'flagged':
         return t("sidebar.allSessions")
       case 'state': {
@@ -1984,7 +1986,7 @@ function AppShellContent({
       default:
         return t("sidebar.allSessions")
     }
-  }, [navState, t, sessionFilter, automationFilter, viewConfigs])
+  }, [navState, t, sessionFilter, automationFilter, viewConfigs, projectFilter, projects])
 
   return (
     <AppShellProvider value={appShellContextValue}>

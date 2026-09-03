@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'bun:test'
 import type { FilterMode } from './inherited-filter-params'
-import { filterSessionsByProject, hasIncludedProjectFilter } from './project-session-filter'
+import {
+  filterSessionsByProject,
+  getIncludedProjectName,
+  hasIncludedProjectFilter,
+} from './project-session-filter'
 
 const m = (...entries: [string, FilterMode][]) => new Map(entries)
 const sessions = [
@@ -20,6 +24,30 @@ describe('hasIncludedProjectFilter (#165)', () => {
   it('keeps All Sessions active for empty or exclude-only project filters', () => {
     expect(hasIncludedProjectFilter(m())).toBe(false)
     expect(hasIncludedProjectFilter(m(['project-1', 'exclude']))).toBe(false)
+  })
+})
+
+describe('getIncludedProjectName (#243)', () => {
+  const projects = [
+    { config: { id: 'project-1', name: 'Project One' } },
+    { config: { id: 'project-2', name: 'Project Two' } },
+  ]
+
+  it('uses the selected project name for a single included project', () => {
+    expect(getIncludedProjectName(m(['project-1', 'include']), projects)).toBe('Project One')
+  })
+
+  it('does not choose an ambiguous title for multiple included projects', () => {
+    expect(getIncludedProjectName(m(
+      ['project-1', 'include'],
+      ['project-2', 'include'],
+    ), projects)).toBeUndefined()
+  })
+
+  it('falls back when the filter has no included project or the project is missing', () => {
+    expect(getIncludedProjectName(m(), projects)).toBeUndefined()
+    expect(getIncludedProjectName(m(['project-1', 'exclude']), projects)).toBeUndefined()
+    expect(getIncludedProjectName(m(['missing', 'include']), projects)).toBeUndefined()
   })
 })
 
