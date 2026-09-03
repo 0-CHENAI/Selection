@@ -27,14 +27,10 @@ afterAll(() => {
 
 const resources = {
   en: {
-    translation: {
-      'turnCard.thinking': 'Thinking…',
-    },
+    translation: {},
   },
   'zh-Hans': {
-    translation: {
-      'turnCard.thinking': '思考中…',
-    },
+    translation: {},
   },
 }
 
@@ -70,7 +66,7 @@ function countOccurrences(text: string, value: string): number {
 }
 
 describe('TurnCard thinking indicator (#239)', () => {
-  it('renders one localized status when a running intermediate row is visible', async () => {
+  it('renders one dotted-grid Thinking status when an intermediate row is running', async () => {
     const html = await renderTurn('zh-Hans', [{
       id: 'intermediate-1',
       type: 'intermediate',
@@ -79,11 +75,12 @@ describe('TurnCard thinking indicator (#239)', () => {
       content: '',
     }])
 
-    expect(countOccurrences(html, '思考中…')).toBe(1)
-    expect(html).not.toContain('Thinking...')
+    expect(countOccurrences(html, 'Thinking...')).toBe(1)
+    expect(countOccurrences(html, 'class="spinner ')).toBe(1)
+    expect(html).not.toContain('思考中…')
   })
 
-  it('uses the active language for a running intermediate row', async () => {
+  it('keeps the product-standard Thinking label in English UI', async () => {
     const html = await renderTurn('en', [{
       id: 'intermediate-1',
       type: 'intermediate',
@@ -92,13 +89,15 @@ describe('TurnCard thinking indicator (#239)', () => {
       content: '',
     }])
 
-    expect(countOccurrences(html, 'Thinking…')).toBe(1)
+    expect(countOccurrences(html, 'Thinking...')).toBe(1)
+    expect(countOccurrences(html, 'class="spinner ')).toBe(1)
   })
 
   it('keeps one standalone status before the first visible activity', async () => {
     const html = await renderTurn('zh-Hans', [])
 
-    expect(countOccurrences(html, '思考中…')).toBe(1)
+    expect(countOccurrences(html, 'Thinking...')).toBe(1)
+    expect(countOccurrences(html, 'class="spinner ')).toBe(1)
   })
 
   it('keeps one gap status after a tool completes', async () => {
@@ -110,7 +109,21 @@ describe('TurnCard thinking indicator (#239)', () => {
       toolName: 'Read',
     }])
 
-    expect(countOccurrences(html, '思考中…')).toBe(1)
+    expect(countOccurrences(html, 'Thinking...')).toBe(1)
+    expect(countOccurrences(html, 'class="spinner ')).toBe(1)
+  })
+
+  it('does not add a second status below a visible running thinking row', async () => {
+    const html = await renderTurn('zh-Hans', [{
+      id: 'thinking-1',
+      type: 'thinking',
+      status: 'running',
+      timestamp: 1,
+    }])
+
+    expect(countOccurrences(html, 'Thinking...')).toBe(1)
+    expect(countOccurrences(html, 'class="spinner ')).toBe(1)
+    expect(html).not.toContain('思考中…')
   })
 
   it('still hides a completed interrupted turn with no meaningful work', async () => {

@@ -29,7 +29,6 @@ import {
 import { cn } from '../../lib/utils'
 import { Markdown } from '../markdown'
 import { Spinner } from '../ui/LoadingIndicator'
-import { GenerativeActivityIndicator } from './GenerativeActivityIndicator'
 import { markdownToPlainText } from './markdown-to-plain-text'
 import { BUFFER_CONFIG } from './stream-buffer'
 import { useStreamingReveal } from './useStreamingReveal'
@@ -237,6 +236,9 @@ export const SIZE_CONFIG = {
   /** Number of items before which we apply staggered animation */
   staggeredAnimationLimit: 10,
 } as const
+
+/** Product-standard label paired with the 3x3 grid activity indicator. */
+const THINKING_STATUS_LABEL = 'Thinking...'
 
 // ============================================================================
 // Types
@@ -768,8 +770,6 @@ export function ActivityStatusIcon({
 
 interface ActivityRowProps {
   activity: ActivityItem
-  /** Localized label shown while an intermediate activity is running */
-  thinkingLabel: string
   /** Callback to open activity details in Monaco */
   onOpenDetails?: () => void
   /** Whether this is the last child at its depth level (for └ corner in tree view) */
@@ -828,14 +828,14 @@ function TreeViewConnector({ depth }: { depth: number; isLastChild?: boolean }) 
 }
 
 /** Single activity row in expanded view */
-function ActivityRow({ activity, thinkingLabel, onOpenDetails, isLastChild, sessionFolderPath, displayMode = 'detailed' }: ActivityRowProps) {
+function ActivityRow({ activity, onOpenDetails, isLastChild, sessionFolderPath, displayMode = 'detailed' }: ActivityRowProps) {
   const depth = activity.depth || 0
 
   // Intermediate messages (LLM commentary) - render with dashed circle icon
   // Show "Thinking" while streaming, stripped markdown content when complete
   if (activity.type === 'intermediate') {
     const isThinking = activity.status === 'running'
-    const displayContent = isThinking ? thinkingLabel : stripMarkdown(activity.content || '')
+    const displayContent = isThinking ? THINKING_STATUS_LABEL : stripMarkdown(activity.content || '')
     const isComplete = activity.status === 'completed'
     return (
       <div className="flex items-stretch">
@@ -915,7 +915,7 @@ function ActivityRow({ activity, thinkingLabel, onOpenDetails, isLastChild, sess
   // - Params: Remaining tool input summary
   const toolDisplay = formatToolDisplay(activity)
   const fullDisplayName = toolDisplay.name
-    || (activity.type === 'thinking' ? 'Thinking' : 'Processing')
+    || (activity.type === 'thinking' ? THINKING_STATUS_LABEL : 'Processing')
 
   // Detect MCP/API tools (toolName starts with "mcp__")
   const isMcpOrApiTool = activity.toolName?.startsWith('mcp__') ?? false
@@ -1153,8 +1153,6 @@ function ActivityRow({ activity, thinkingLabel, onOpenDetails, isLastChild, sess
 
 interface ActivityGroupRowProps {
   group: ActivityGroup
-  /** Localized label forwarded to running intermediate child rows */
-  thinkingLabel: string
   /** Controlled expansion state for activity groups */
   expandedGroups?: Set<string>
   /** Callback when expansion changes */
@@ -1175,7 +1173,7 @@ interface ActivityGroupRowProps {
  * Renders a Task subagent with its child activities grouped together.
  * Provides visual containment and collapsible children.
  */
-function ActivityGroupRow({ group, thinkingLabel, expandedGroups: externalExpandedGroups, onExpandedGroupsChange, onOpenActivityDetails, animationIndex = 0, animateEntrance = false, sessionFolderPath, displayMode = 'detailed' }: ActivityGroupRowProps) {
+function ActivityGroupRow({ group, expandedGroups: externalExpandedGroups, onExpandedGroupsChange, onOpenActivityDetails, animationIndex = 0, animateEntrance = false, sessionFolderPath, displayMode = 'detailed' }: ActivityGroupRowProps) {
   const reduceMotion = useReducedMotion()
   // Use local state if no controlled state provided
   const [localExpandedGroups, setLocalExpandedGroups] = useState<Set<string>>(new Set())
@@ -1311,7 +1309,6 @@ function ActivityGroupRow({ group, thinkingLabel, expandedGroups: externalExpand
             >
               <ActivityRow
                 activity={child}
-                thinkingLabel={thinkingLabel}
                 onOpenDetails={onOpenActivityDetails ? () => onOpenActivityDetails(child) : undefined}
                 isLastChild={idx === group.children.length - 1}
                 sessionFolderPath={sessionFolderPath}
@@ -2816,7 +2813,6 @@ export const TurnCard = React.memo(function TurnCard({
   annotationInteractionMode = 'interactive',
 }: TurnCardProps) {
   const { t } = useTranslation()
-  const thinkingLabel = t('turnCard.thinking')
   const reduceMotion = useReducedMotion()
   const hasToolActivities = activities.some(activity => activity.type === 'tool')
   const showCommentary = isVisibleCommentaryCard(
@@ -3080,7 +3076,6 @@ export const TurnCard = React.memo(function TurnCard({
                         <ActivityGroupRow
                           key={item.parent.id}
                           group={item}
-                          thinkingLabel={thinkingLabel}
                           expandedGroups={expandedActivityGroups}
                           onExpandedGroupsChange={handleExpandedActivityGroupsChange}
                           onOpenActivityDetails={onOpenActivityDetails}
@@ -3107,7 +3102,6 @@ export const TurnCard = React.memo(function TurnCard({
                         >
                           <ActivityRow
                             activity={item}
-                            thinkingLabel={thinkingLabel}
                             onOpenDetails={onOpenActivityDetails ? () => onOpenActivityDetails(item) : undefined}
                             sessionFolderPath={sessionFolderPath}
                             displayMode={displayMode}
@@ -3135,7 +3129,6 @@ export const TurnCard = React.memo(function TurnCard({
                       >
                         <ActivityRow
                           activity={activity}
-                          thinkingLabel={thinkingLabel}
                           onOpenDetails={onOpenActivityDetails ? () => onOpenActivityDetails(activity) : undefined}
                           isLastChild={lastChildSet.has(activity.id)}
                           sessionFolderPath={sessionFolderPath}
@@ -3159,8 +3152,10 @@ export const TurnCard = React.memo(function TurnCard({
                       }}
                       className={cn("flex items-center gap-2 py-0.5 text-muted-foreground/70", SIZE_CONFIG.fontSize)}
                     >
-                      <GenerativeActivityIndicator size={12} variant={isBuffering ? 'signal' : 'orbit'} />
-                      <span>{isBuffering ? t('turnCard.preparingResponse') : thinkingLabel}</span>
+                      <div className={cn(SIZE_CONFIG.iconSize, "flex items-center justify-center shrink-0")}>
+                        <Spinner className={SIZE_CONFIG.spinnerSize} />
+                      </div>
+                      <span>{THINKING_STATUS_LABEL}</span>
                     </motion.div>
                   )}
                   </AnimatePresence>
@@ -3176,8 +3171,10 @@ export const TurnCard = React.memo(function TurnCard({
       {/* Standalone thinking indicator - when no activities but still working */}
       {!hasActivities && showGenericThinkingIndicator && !animateResponse && (
         <div className={cn("flex items-center gap-2 px-3 py-1.5 text-muted-foreground", SIZE_CONFIG.fontSize)}>
-          <GenerativeActivityIndicator size={12} variant={isBuffering ? 'signal' : 'orbit'} />
-          <span>{isBuffering ? t('turnCard.preparingResponse') : thinkingLabel}</span>
+          <div className={cn(SIZE_CONFIG.iconSize, "flex items-center justify-center shrink-0")}>
+            <Spinner className={SIZE_CONFIG.spinnerSize} />
+          </div>
+          <span>{THINKING_STATUS_LABEL}</span>
         </div>
       )}
 

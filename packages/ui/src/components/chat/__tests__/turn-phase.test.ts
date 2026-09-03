@@ -437,6 +437,13 @@ describe('shouldShowGenericThinkingIndicator', () => {
     }])).toBe(false)
   })
 
+  it('hides the duplicate row when a visible thinking activity is running (#239)', () => {
+    expect(shouldShowGenericThinkingIndicator('awaiting', false, [{
+      type: 'thinking',
+      status: 'running',
+    }])).toBe(false)
+  })
+
   it('keeps the standalone row while there are no visible activities (#239)', () => {
     expect(shouldShowGenericThinkingIndicator('pending', false, [])).toBe(true)
   })

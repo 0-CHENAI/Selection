@@ -246,8 +246,8 @@ export function shouldShowThinkingIndicator(phase: TurnPhase, isBuffering: boole
 
 /**
  * Determines whether the generic thinking row is needed in addition to the
- * visible work-chain activities. A running intermediate activity renders its
- * own localized thinking state, so mounting another row would duplicate it.
+ * visible work-chain activities. A running intermediate/thinking activity
+ * renders its own status, so mounting another row would duplicate it.
  */
 export function shouldShowGenericThinkingIndicator(
   phase: TurnPhase,
@@ -256,7 +256,8 @@ export function shouldShowGenericThinkingIndicator(
 ): boolean {
   return shouldShowThinkingIndicator(phase, isBuffering)
     && !renderedActivities.some(
-      activity => activity.type === 'intermediate' && activity.status === 'running',
+      activity => (activity.type === 'intermediate' || activity.type === 'thinking')
+        && activity.status === 'running',
     )
 }
 
