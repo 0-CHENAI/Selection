@@ -120,7 +120,7 @@ import { restoreFiles } from '@craft-agent/shared/utils/bundle-files'
 import { getCredentialManager } from '@craft-agent/shared/credentials'
 import { CraftMcpClient, McpClientPool, McpPoolServer } from '@craft-agent/shared/mcp'
 import { type Session, type SessionEvent, type FileAttachment, type SendMessageOptions, type UnreadSummary, type RemoteSessionTransferPayload, type ImportRemoteSessionTransferResult, type SwarmRunDetailsDto, type SwarmRunNodeDto, RPC_CHANNELS, generateMessageId } from '@craft-agent/shared/protocol'
-import { applySteerTranscriptBoundary, messageToStored, storedToMessage, type Message, type StoredAttachment, type ToolDisplayMeta } from '@craft-agent/core/types'
+import { applySteerTranscriptBoundary, messageToStored, storedToMessage, type Message, type StoredAttachment, type TextStreamPhase, type ToolDisplayMeta } from '@craft-agent/core/types'
 import { hasRenderableAssistantText, preferRicherAssistantText } from '@craft-agent/core'
 import { formatPathsToRelative, formatToolInputPaths, perf, encodeIconToDataUrlAsync, getEmojiIcon, resetSummarizationClient, resolveToolIcon, readFileAttachment, resolveRegenerateAttachments, selectSpreadMessages, normalizePath } from '@craft-agent/shared/utils'
 import { collectSkillSlugsForSourcePreEnable, filterUserFacingSkills, loadAllSkills, loadSkillBySlug, invalidateSkillsCache, type LoadedSkill } from '@craft-agent/shared/skills'
@@ -865,6 +865,10 @@ interface ManagedSession {
   stopRequested?: boolean
   lastMessageAt: number
   streamingText: string
+  /** Runtime identity for materializing a stream that ends without text_complete. */
+  streamingTurnId?: string
+  /** Timestamp of the first delta, preserved if the stream is materialized after an error. */
+  streamingStartedAt?: number
   // Incremented each time a new message starts processing.
   // Used to detect if a follow-up message has superseded the current one (stale-request guard).
   processingGeneration: number
@@ -1216,6 +1220,8 @@ export function createManagedSession(
     isProcessing: false,
     lastMessageAt: (s.lastMessageAt ?? s.lastUsedAt ?? Date.now()) as number,
     streamingText: '',
+    streamingTurnId: undefined,
+    streamingStartedAt: undefined,
     processingGeneration: 0,
     isFlagged: (s.isFlagged ?? false) as boolean,
     messageQueue: [],
@@ -1359,6 +1365,7 @@ const DELTA_BATCH_INTERVAL_MS = 50  // Flush batched deltas every 50ms
 
 interface PendingDelta {
   delta: string
+  phase: TextStreamPhase
   turnId?: string
 }
 
@@ -6734,6 +6741,8 @@ export class SessionManager implements ISessionManager {
     managed.lastMessageAt = Date.now()
     this.setProcessing(managed, true)
     managed.streamingText = ''
+    managed.streamingTurnId = undefined
+    managed.streamingStartedAt = undefined
     managed.processingGeneration++
     this.prepareSpawnQualificationCredentials(
       managed,
@@ -7965,6 +7974,8 @@ export class SessionManager implements ISessionManager {
     )
     managed.messages = [...transaction.originalMessages, ...diagnostics]
     managed.streamingText = ''
+    managed.streamingTurnId = undefined
+    managed.streamingStartedAt = undefined
     managed.sdkSessionId = transaction.originalSdkSessionId
     managed.branchContextStrategy = transaction.originalBranchContextStrategy
     managed.branchFromSdkSessionId = transaction.originalBranchFromSdkSessionId
@@ -8047,6 +8058,8 @@ export class SessionManager implements ISessionManager {
     const completionReason = regenerateOutcome.reason
 
     sessionLog.info(`Processing stopped for session ${sessionId}: ${completionReason}`)
+
+    this.finalizeDanglingTextStream(managed)
 
     if (managed.activeTurnUsage) {
       const pendingSourceContinuation = managed.autoRetryPending
@@ -10393,15 +10406,68 @@ export class SessionManager implements ISessionManager {
     }
   }
 
+  /**
+   * Preserve partial text when a provider stops without text_complete.
+   * The content is deliberately intermediate: an interrupted/error turn never
+   * earns final-answer semantics merely because it emitted text deltas.
+   */
+  private finalizeDanglingTextStream(managed: ManagedSession): void {
+    if (!managed.streamingText) return
+
+    const content = managed.streamingText
+    const turnId = managed.streamingTurnId
+      ?? this.pendingDeltas.get(managed.id)?.turnId
+    this.flushDelta(managed.id, managed.workspace.id)
+
+    let messageId: string | undefined
+    let timestamp: number | undefined
+    if (hasRenderableAssistantText(content)) {
+      const assistantMessage: Message = {
+        id: generateMessageId(),
+        role: 'assistant',
+        content,
+        timestamp: managed.streamingStartedAt ?? this.monotonic(),
+        isIntermediate: true,
+        turnId,
+      }
+      managed.messages.push(assistantMessage)
+      messageId = assistantMessage.id
+      timestamp = assistantMessage.timestamp
+    }
+
+    managed.streamingText = ''
+    managed.streamingTurnId = undefined
+    managed.streamingStartedAt = undefined
+    this.sendEvent({
+      type: 'text_complete',
+      sessionId: managed.id,
+      text: content,
+      isIntermediate: true,
+      turnId,
+      timestamp,
+      messageId,
+    }, managed.workspace.id)
+  }
+
   private async processEvent(managed: ManagedSession, event: AgentEvent): Promise<void> {
     const sessionId = managed.id
     const workspaceId = managed.workspace.id
 
     switch (event.type) {
       case 'text_delta':
+        if (!managed.streamingText) {
+          managed.streamingStartedAt = this.monotonic()
+        }
         managed.streamingText += event.text
+        managed.streamingTurnId = event.turnId ?? managed.streamingTurnId
         // Queue delta for batched sending (performance: reduces IPC from 50+/sec to ~20/sec)
-        this.queueDelta(sessionId, workspaceId, event.text, event.turnId)
+        this.queueDelta(
+          sessionId,
+          workspaceId,
+          event.text,
+          event.phase ?? 'unclassified',
+          event.turnId,
+        )
         break
 
       case 'text_complete': {
@@ -10420,6 +10486,8 @@ export class SessionManager implements ISessionManager {
         }
         managed.messages.push(assistantMessage)
         managed.streamingText = ''
+        managed.streamingTurnId = undefined
+        managed.streamingStartedAt = undefined
 
         // Update lastMessageRole and lastFinalMessageId for badge/unread display (only for final messages)
         if (!event.isIntermediate && hasRenderableAssistantText(content)) {
@@ -11305,16 +11373,34 @@ export class SessionManager implements ISessionManager {
    * Queue a text delta for batched sending (performance optimization)
    * Instead of sending 50+ IPC events per second, batches deltas and flushes every 50ms
    */
-  private queueDelta(sessionId: string, workspaceId: string, delta: string, turnId?: string): void {
+  private queueDelta(
+    sessionId: string,
+    workspaceId: string,
+    delta: string,
+    phase: TextStreamPhase,
+    turnId?: string,
+  ): void {
     const existing = this.pendingDeltas.get(sessionId)
-    if (existing) {
+    const changesStream = !!existing && (
+      existing.phase !== phase
+      || (!!existing.turnId && !!turnId && existing.turnId !== turnId)
+    )
+    if (changesStream) {
+      // Never merge an unclassified/intermediate body into a final-answer
+      // batch. The renderer needs the boundary to move the existing message
+      // between work-chain and response-card states without duplicating it.
+      this.flushDelta(sessionId, workspaceId)
+    }
+
+    const active = this.pendingDeltas.get(sessionId)
+    if (active) {
       // Append to existing batch
-      existing.delta += delta
+      active.delta += delta
       // Keep the latest turnId (should be the same, but just in case)
-      if (turnId) existing.turnId = turnId
+      if (turnId) active.turnId = turnId
     } else {
       // Start new batch
-      this.pendingDeltas.set(sessionId, { delta, turnId })
+      this.pendingDeltas.set(sessionId, { delta, phase, turnId })
     }
 
     // Schedule flush if not already scheduled
@@ -11345,6 +11431,7 @@ export class SessionManager implements ISessionManager {
         type: 'text_delta',
         sessionId,
         delta: pending.delta,
+        phase: pending.phase,
         turnId: pending.turnId
       }, workspaceId)
       this.pendingDeltas.delete(sessionId)

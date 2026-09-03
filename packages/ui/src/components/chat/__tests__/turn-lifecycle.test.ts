@@ -334,6 +334,7 @@ describe('turn lifecycle scenarios', () => {
       const turn = getLastAssistantTurn(turns)!
       expect(deriveTurnPhase(turn)).toBe('complete')
       expect(turn.response?.text).toBe('Response text') // promoted from the intermediate
+      expect(turn.activities.every(activity => activity.content !== 'Response text')).toBe(true)
     })
 
     it('intermediate text + completed tool + session still processing → phase awaiting', () => {

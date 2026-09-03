@@ -110,6 +110,7 @@ describe('PiEventAdapter', () => {
       expect(events[0]).toMatchObject({
         type: 'text_delta',
         text: 'Hello',
+        phase: 'unclassified',
       });
       expect(events[0].turnId).toMatch(/^pi-turn-1__m0$/);
     });
@@ -131,6 +132,33 @@ describe('PiEventAdapter', () => {
       } as any));
 
       expect(events).toHaveLength(0);
+    });
+
+    it('should stream Codex text only when its final-answer phase is explicit', () => {
+      collect(adapter.adaptEvent({ type: 'turn_start' } as any));
+      const events = collect(adapter.adaptEvent({
+        type: 'message_update',
+        assistantMessageEvent: {
+          type: 'text_delta',
+          delta: 'Verified result',
+          partial: {
+            role: 'assistant',
+            api: 'openai-codex-responses',
+            provider: 'openai-codex',
+            content: [{
+              type: 'text',
+              text: 'Verified result',
+              textSignature: JSON.stringify({ phase: 'final_answer' }),
+            }],
+          },
+        },
+      } as any));
+
+      expect(events).toMatchObject([{
+        type: 'text_delta',
+        text: 'Verified result',
+        phase: 'final',
+      }]);
     });
 
     it('should skip message_update without text_delta type', () => {
@@ -181,7 +209,7 @@ describe('PiEventAdapter', () => {
       });
     });
 
-    it('should exclude Codex commentary from the final assistant body', () => {
+    it('should separate Codex commentary from the final assistant body', () => {
       collect(adapter.adaptEvent({ type: 'turn_start' } as any));
       const events = collect(adapter.adaptEvent({
         type: 'message_end',
@@ -203,15 +231,21 @@ describe('PiEventAdapter', () => {
         },
       } as any));
 
-      expect(events).toHaveLength(1);
-      expect(events[0]).toMatchObject({
-        type: 'text_complete',
-        text: 'The validation errors were already present in the original document.',
-        isIntermediate: false,
-      });
+      expect(events).toMatchObject([
+        {
+          type: 'text_complete',
+          text: 'Let me confirm this against the original file.',
+          isIntermediate: true,
+        },
+        {
+          type: 'text_complete',
+          text: 'The validation errors were already present in the original document.',
+          isIntermediate: false,
+        },
+      ]);
     });
 
-    it('should keep filtering commentary when response signature versions advance', () => {
+    it('should keep separating commentary when response signature versions advance', () => {
       collect(adapter.adaptEvent({ type: 'turn_start' } as any));
       const events = collect(adapter.adaptEvent({
         type: 'message_end',
@@ -233,11 +267,13 @@ describe('PiEventAdapter', () => {
         },
       } as any));
 
-      expect(events).toHaveLength(1);
-      expect(events[0]).toMatchObject({ text: 'Visible answer.', isIntermediate: false });
+      expect(events).toMatchObject([
+        { text: 'Internal process note.', isIntermediate: true },
+        { text: 'Visible answer.', isIntermediate: false },
+      ]);
     });
 
-    it('should not emit a reply body for commentary-only Codex output', () => {
+    it('should emit commentary-only Codex output as intermediate text', () => {
       collect(adapter.adaptEvent({ type: 'turn_start' } as any));
       const events = collect(adapter.adaptEvent({
         type: 'message_end',
@@ -255,7 +291,11 @@ describe('PiEventAdapter', () => {
         },
       } as any));
 
-      expect(events).toHaveLength(0);
+      expect(events).toMatchObject([{
+        type: 'text_complete',
+        text: 'I will inspect the file now.',
+        isIntermediate: true,
+      }]);
     });
 
     it('should attach sdkMessageId from message_end onto the text_complete', () => {

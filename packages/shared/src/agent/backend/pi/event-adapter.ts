@@ -72,6 +72,15 @@ function isCodexResponsesMessage(message: AssistantMessage | undefined): boolean
   return message?.api === 'openai-codex-responses' || message?.provider === 'openai-codex';
 }
 
+function getStreamingTextPhase(message: AssistantMessage | undefined): TextPhase | undefined {
+  if (!isCodexResponsesMessage(message) || !Array.isArray(message?.content)) return undefined;
+  const phases = message.content
+    .filter((part) => part.type === 'text' && typeof part.text === 'string' && part.text.length > 0)
+    .map((part) => getTextPhase((part as { textSignature?: unknown }).textSignature));
+  if (phases.length === 0 || phases.some((phase) => phase === undefined)) return undefined;
+  return phases.every((phase) => phase === phases[0]) ? phases[0] : undefined;
+}
+
 /**
  * Maps Pi SDK events to SelectionEvents for UI compatibility.
  *
@@ -340,9 +349,11 @@ export class PiEventAdapter extends BaseEventAdapter {
         const amEvent: AssistantMessageEvent = event.assistantMessageEvent;
         if (amEvent.type === 'text_delta' && amEvent.delta) {
           // Codex attaches the phase only after the Responses output item
-          // finishes. Hold these deltas until message_end can classify them,
-          // otherwise internal commentary briefly appears as reply text (#135).
-          if (isCodexResponsesMessage(amEvent.partial)) break;
+          // finishes. Hold only phase-less Codex deltas; other providers emit
+          // an explicit unclassified stream that the UI keeps in the work chain
+          // until message_end proves it is the final answer (#87).
+          const textPhase = getStreamingTextPhase(amEvent.partial);
+          if (isCodexResponsesMessage(amEvent.partial) && !textPhase) break;
 
           this.hasStreamedDeltas = true;
           if (!this.messageSubTurnId) {
@@ -351,6 +362,11 @@ export class PiEventAdapter extends BaseEventAdapter {
           yield {
             type: 'text_delta',
             text: amEvent.delta,
+            phase: textPhase === 'commentary'
+              ? 'intermediate'
+              : textPhase === 'final_answer'
+                ? 'final'
+                : 'unclassified',
             turnId: this.messageSubTurnId,
           };
         }
@@ -393,8 +409,11 @@ export class PiEventAdapter extends BaseEventAdapter {
           break;
         }
 
-        // Extract text content from the final assistant message
-        const textContent = this.extractTextFromMessage(event.message);
+        // Extract phase-aware text segments from the completed assistant
+        // message. Codex may return commentary and final-answer parts together;
+        // keep the commentary as a separate work-chain item instead of dropping
+        // it from the transcript.
+        const textSegments = this.extractTextSegments(event.message);
         // Pi SDK stopReason: 'toolUse' means the model will call tools next (intermediate commentary),
         // 'stop'/'end_turn' means final response. Same logic as Claude's stop_reason === 'tool_use'.
         // Some providers still attach toolCall parts with stopReason 'stop'; treat those
@@ -404,22 +423,25 @@ export class PiEventAdapter extends BaseEventAdapter {
           const type = (part as { type?: string } | undefined)?.type;
           return type === 'toolCall' || type === 'tool_use';
         });
-        const isIntermediate = msg.stopReason === 'toolUse' || hasToolCall;
-        if (textContent && (isIntermediate || !this.hasEmittedFinalText)) {
+        const messageIsIntermediate = msg.stopReason === 'toolUse' || hasToolCall;
+        for (const segment of textSegments) {
+          const isIntermediate = segment.phase === 'commentary'
+            || (segment.phase !== 'final_answer' && messageIsIntermediate);
+          if (!isIntermediate && this.hasEmittedFinalText) continue;
           if (!isIntermediate) this.hasEmittedFinalText = true;
 
-          const mTurnId = this.messageSubTurnId || this.nextSubTurnId('m');
+          const mTurnId = this.messageSubTurnId ?? this.nextSubTurnId('m');
           this.messageSubTurnId = null;
 
           yield {
             type: 'text_complete',
-            text: textContent,
+            text: segment.text,
             isIntermediate,
             turnId: mTurnId,
             sdkMessageId,
           };
-          this.hasStreamedDeltas = false;
         }
+        this.hasStreamedDeltas = false;
 
         // Emit usage_update if the assistant message includes token usage
         if (msg.usage && typeof msg.usage.input === 'number') {
@@ -826,8 +848,8 @@ export class PiEventAdapter extends BaseEventAdapter {
    * Extract text content from a Pi AgentMessage.
    * Pi messages use the pi-ai Message format with content arrays.
    */
-  private extractTextFromMessage(message: unknown): string | null {
-    if (!message || typeof message !== 'object') return null;
+  private extractTextSegments(message: unknown): Array<{ text: string; phase?: TextPhase }> {
+    if (!message || typeof message !== 'object') return [];
 
     const msg = message as {
       role?: string;
@@ -835,17 +857,34 @@ export class PiEventAdapter extends BaseEventAdapter {
     };
 
     if (typeof msg.content === 'string') {
-      return msg.content || null;
+      return msg.content ? [{ text: msg.content }] : [];
     }
 
     if (Array.isArray(msg.content)) {
       const textParts = msg.content
-        .filter((c) => c.type === 'text' && c.text && getTextPhase(c.textSignature) !== 'commentary')
-        .map((c) => c.text!);
-      return textParts.length > 0 ? textParts.join('') : null;
+        .filter((part): part is { type: string; text: string; textSignature?: string } => (
+          part.type === 'text' && typeof part.text === 'string' && part.text.length > 0
+        ));
+      if (textParts.length === 0) return [];
+      const hasPhaseMetadata = textParts.some((part) => getTextPhase(part.textSignature) !== undefined);
+      if (!hasPhaseMetadata) {
+        return [{ text: textParts.map((part) => part.text).join('') }];
+      }
+
+      const segments: Array<{ text: string; phase?: TextPhase }> = [];
+      for (const part of textParts) {
+        const phase = getTextPhase(part.textSignature);
+        const previous = segments.at(-1);
+        if (previous && previous.phase === phase) {
+          previous.text += part.text;
+        } else {
+          segments.push({ text: part.text, phase });
+        }
+      }
+      return segments;
     }
 
-    return null;
+    return [];
   }
 
   /**

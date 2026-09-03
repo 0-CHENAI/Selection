@@ -44,6 +44,7 @@ export type {
   TokenUsage,
   AgentEventUsage,
   AgentToolResultContent,
+  TextStreamPhase,
   RecoveryAction,
   ErrorCode,
   TypedError,

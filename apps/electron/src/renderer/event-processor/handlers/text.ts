@@ -7,6 +7,7 @@
 
 import type { SessionState, StreamingState, TextDeltaEvent, TextCompleteEvent } from '../types'
 import type { Message } from '../../../shared/types'
+import type { TextStreamPhase } from '@craft-agent/core/types'
 import { preferRicherAssistantText } from '@craft-agent/core'
 import {
   findStreamingMessage,
@@ -27,6 +28,15 @@ function streamingContentForTurn(
   return streaming.content
 }
 
+function mergeTextStreamPhase(
+  previous: TextStreamPhase | undefined,
+  incoming: TextStreamPhase,
+): TextStreamPhase {
+  if (previous === 'final' || incoming === 'final') return 'final'
+  if (previous === 'intermediate' || incoming === 'intermediate') return 'intermediate'
+  return 'unclassified'
+}
+
 /**
  * Handle text_delta - accumulate streaming content
  *
@@ -43,16 +53,29 @@ export function handleTextDelta(
     return { session, streaming: null }
   }
 
-  // Accumulate in streaming state
-  const newStreaming: StreamingState = streaming
+  // Events from current servers always carry a phase. Missing phase is a
+  // compatibility path for older persisted/live senders, which historically
+  // streamed directly into the response card.
+  const incomingPhase = event.phase ?? 'final'
+  const continuesExistingStream = !!streaming
+    && (!event.turnId || !streaming.turnId || streaming.turnId === event.turnId)
+  const phase = mergeTextStreamPhase(
+    continuesExistingStream ? streaming.phase : undefined,
+    incomingPhase,
+  )
+
+  // Accumulate only within the same classified sub-turn.
+  const newStreaming: StreamingState = continuesExistingStream
     ? {
         ...streaming,
         content: streaming.content + event.delta,
-        turnId: event.turnId ?? streaming.turnId
+        phase,
+        turnId: event.turnId ?? streaming.turnId,
       }
     : {
         content: event.delta,
-        turnId: event.turnId
+        phase,
+        turnId: event.turnId,
       }
 
   // Find existing streaming message by turnId
@@ -63,6 +86,7 @@ export function handleTextDelta(
     const currentMsg = session.messages[streamingIndex]
     const updatedSession = updateMessageAt(session, streamingIndex, {
       content: currentMsg.content + event.delta,
+      isIntermediate: phase !== 'final',
     })
     return { session: updatedSession, streaming: newStreaming }
   }
@@ -76,6 +100,7 @@ export function handleTextDelta(
     timestamp: timestampAfterVisibleUser(session.messages),
     isStreaming: true,
     isPending: true,
+    isIntermediate: phase !== 'final',
     turnId: event.turnId,
   }
 

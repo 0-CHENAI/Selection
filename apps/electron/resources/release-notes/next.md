@@ -21,6 +21,8 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 
 ## Bug Fixes
 
+- **Only final answers stream in the response card** — text whose role is not yet known stays in the work chain, while providers with an explicit final-answer phase can stream directly into the formal response. Commentary, tool steps, cancellation, errors, and reloads preserve their semantic roles without flashing process narration as the answer. (#87)
+
 - **Parallel `call_llm` and Swarm workers follow the current session model** — omitting `model` no longer falls through to the connection's Fast / mini tier. Work-chain badges, `spawn_session` children, and Conductor nodes without an explicit model inherit the input-area selection; an explicit tool or task model still wins. Title generation and other utility completions stay on the cheap model. (#192)
 
 - **All Sessions leaves project scope** — browsing a project now highlights only that project instead of also highlighting All Sessions. Clicking All Sessions clears the project-only filter and restores the global highlight while preserving status, label, and grouping preferences, so the global list shows every conversation again. (#165)
