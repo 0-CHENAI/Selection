@@ -92,6 +92,46 @@ describe('empty response recovery (#182)', () => {
     })
   })
 
+  it('does not report an empty response while a managed Swarm waits for workers', async () => {
+    managed.orchestrationId = 'swarm-1'
+    managed.orchestrationStatus = 'running'
+    managed.orchestrationAggregation = {
+      orchestrationId: 'swarm-1',
+      finalAggregation: 'Synthesize the worker results.',
+      phase: 'waiting-workers',
+      repairAttempts: 0,
+    }
+    const agent = {
+      setAllSources() {},
+      getModel() { return 'test-model' },
+      getSessionId() { return 'sdk-session' },
+      chat() {
+        return (async function* () {
+          yield {
+            type: 'text_complete' as const,
+            text: 'Workers started.',
+            isIntermediate: false,
+          }
+          yield { type: 'complete' as const }
+        })()
+      },
+    }
+    ;(manager as any).getOrCreateAgent = async () => agent
+
+    await manager.sendMessage(managed.id, '并行调研')
+
+    expect(managed.messages.some(message =>
+      message.role === 'assistant'
+      && message.content === 'Workers started.'
+      && message.isIntermediate === true
+    )).toBe(true)
+    expect(managed.messages.some(message => message.role === 'error')).toBe(false)
+    expect(events.some(event => event.type === 'typed_error')).toBe(false)
+    expect(events.find(event => event.type === 'complete')).toMatchObject({
+      orchestrationPending: true,
+    })
+  })
+
   it('does not duplicate an error already emitted by the current turn', async () => {
     const agent = {
       setAllSources() {},

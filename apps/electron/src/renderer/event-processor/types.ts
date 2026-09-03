@@ -102,6 +102,8 @@ export interface CompleteEvent {
   tokenUsage?: Session['tokenUsage']
   /** Explicit unread flag - set by main process based on viewing state */
   hasUnread?: boolean
+  /** The current model run ended, but a managed Swarm is still awaiting aggregation. */
+  orchestrationPending?: boolean
   /**
    * WS2 keep-alive: true when the session's persistent query stays open across
    * turns (`CRAFT_KEEP_BG_AGENTS_ALIVE`). When set, the turn ending does NOT tear

@@ -7120,12 +7120,18 @@ export class SessionManager implements ISessionManager {
           const lastUserMsg = [...managed.messages].reverse().find(m =>
             m.role === 'user' && !m.hidden && !m.isQueued
           )
+          const isManagedSwarmWaitingForWorkers = managed.orchestrationStatus === 'running'
+            && managed.orchestrationAggregation?.orchestrationId === managed.orchestrationId
+            && managed.orchestrationAggregation?.phase === 'waiting-workers'
 
           // If the last user message is newer than any assistant response, we got no reply
           // This can happen due to context overflow or API issues. Skip when a
-          // follow-up is waiting to replay after we aborted a live text stream.
+          // follow-up is waiting to replay after we aborted a live text stream,
+          // or when a managed Swarm has successfully dispatched and is waiting
+          // for workers before its hidden aggregation turn.
           if (
             managed.messageQueue.length === 0
+            && !isManagedSwarmWaitingForWorkers
             && lastUserMsg
             && (!lastAssistantMsg || lastUserMsg.timestamp > lastAssistantMsg.timestamp)
           ) {
@@ -8264,6 +8270,10 @@ export class SessionManager implements ISessionManager {
         sessionId,
         tokenUsage: managed.tokenUsage,
         hasUnread: managed.hasUnread,  // Propagate unread state to renderer
+        // A managed Swarm coordinator can be idle between dispatch and its
+        // hidden aggregation turn. This ends the current model run, not the
+        // user-visible request; non-UI consumers must keep listening.
+        orchestrationPending: managed.orchestrationStatus === 'running',
         // WS2: when keep-alive keeps the persistent query open across turns, the
         // turn ending does NOT kill background sub-agents. Tell the renderer so its
         // chip orphan-backstop does not falsely flip live tasks to `orphaned`; a
@@ -10474,6 +10484,12 @@ export class SessionManager implements ISessionManager {
         // Flush any pending deltas before sending complete (ensures renderer has all content)
         this.flushDelta(sessionId, workspaceId)
 
+        const aggregation = managed.orchestrationAggregation
+        const isManagedSwarmDispatch = managed.orchestrationStatus === 'running'
+          && aggregation !== undefined
+          && aggregation.orchestrationId === managed.orchestrationId
+          && aggregation.phase === 'waiting-workers'
+        const isIntermediate = event.isIntermediate || isManagedSwarmDispatch
         const completesActiveStream = !event.turnId
           || !managed.streamingTurnId
           || event.turnId === managed.streamingTurnId
@@ -10486,7 +10502,7 @@ export class SessionManager implements ISessionManager {
           role: 'assistant',
           content,
           timestamp: this.monotonic(),
-          isIntermediate: event.isIntermediate,
+          isIntermediate,
           turnId: event.turnId,
           parentToolUseId: event.parentToolUseId,
         }
@@ -10498,7 +10514,7 @@ export class SessionManager implements ISessionManager {
         }
 
         // Update lastMessageRole and lastFinalMessageId for badge/unread display (only for final messages)
-        if (!event.isIntermediate && hasRenderableAssistantText(content)) {
+        if (!isIntermediate && hasRenderableAssistantText(content)) {
           managed.lastMessageRole = 'assistant'
           managed.lastFinalMessageId = assistantMessage.id
 
@@ -10534,7 +10550,7 @@ export class SessionManager implements ISessionManager {
           }
         }
 
-        this.sendEvent({ type: 'text_complete', sessionId, text: content, isIntermediate: event.isIntermediate, turnId: event.turnId, parentToolUseId: event.parentToolUseId, timestamp: assistantMessage.timestamp, messageId: assistantMessage.id }, workspaceId)
+        this.sendEvent({ type: 'text_complete', sessionId, text: content, isIntermediate, turnId: event.turnId, parentToolUseId: event.parentToolUseId, timestamp: assistantMessage.timestamp, messageId: assistantMessage.id }, workspaceId)
 
         // Persist session after complete message to prevent data loss on quit
         this.persistSession(managed)
