@@ -33,7 +33,10 @@ describe('spawn_session schema', () => {
 
   it('tells the model to pass a qualification object rather than a name phrase', () => {
     const spawn = getToolDefsAsJsonSchema().find(def => def.name === 'spawn_session')
+    expect(spawn?.description).toContain('Swarm V3 contract')
     expect(spawn?.description).toContain('qualification object')
+    expect(spawn?.description).toContain('same object on every')
+    expect(spawn?.description).toContain('single-track qualification')
     expect(spawn?.description).toContain('not a phrase in name or prompt')
   })
 })
