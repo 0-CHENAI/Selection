@@ -1242,6 +1242,7 @@
   "settings.messaging.lark.domainLark": "Lark（国际版）",
   "settings.messaging.lark.instructions": "1. 打开 Lark 开放平台（国际版）或飞书开放平台并创建自建应用\n2. 复制应用 ID（cli_…）和应用密钥\n3. 启用 im:message、im:message.group_at_msg、im:message:send_as_bot 权限\n4. 使用「长连接模式」订阅 im.message.receive_v1 事件\n5. 「Encrypt Key」字段保持为空 — 长连接模式不使用负载加密",
   "settings.messaging.lark.notConfigured": "未配置",
+  "settings.messaging.lark.notConnected": "未连接",
   "settings.messaging.lark.reconfigureTitle": "替换 Lark / 飞书凭证",
   "settings.messaging.lark.save": "保存",
   "settings.messaging.lark.saveFailed": "无法保存 Lark 凭证",

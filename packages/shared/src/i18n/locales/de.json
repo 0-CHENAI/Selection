@@ -1242,6 +1242,7 @@
   "settings.messaging.lark.domainLark": "Lark (international)",
   "settings.messaging.lark.instructions": "1. Öffne Lark Open Platform (lark) oder Feishu Open Platform (feishu) und erstelle eine Custom App\n2. Kopiere App ID (cli_…) und App Secret\n3. Aktiviere die Berechtigungen im:message + im:message.group_at_msg + im:message:send_as_bot\n4. Abonniere das Event im.message.receive_v1 im 'long connection'-Modus\n5. Lasse das Encrypt-Key-Feld leer — der Long-Connection-Modus nutzt keine Payload-Verschlüsselung",
   "settings.messaging.lark.notConfigured": "Nicht konfiguriert",
+  "settings.messaging.lark.notConnected": "Nicht verbunden",
   "settings.messaging.lark.reconfigureTitle": "Lark / Feishu-Anmeldedaten ersetzen",
   "settings.messaging.lark.save": "Speichern",
   "settings.messaging.lark.saveFailed": "Lark-Anmeldedaten konnten nicht gespeichert werden",

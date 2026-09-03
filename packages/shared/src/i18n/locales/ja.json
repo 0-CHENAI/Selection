@@ -1242,6 +1242,7 @@
   "settings.messaging.lark.domainLark": "Lark（国際版）",
   "settings.messaging.lark.instructions": "1. Lark Open Platform (lark) または Feishu Open Platform (feishu) でカスタムアプリを作成\n2. App ID (cli_…) と App Secret をコピー\n3. im:message + im:message.group_at_msg + im:message:send_as_bot のスコープを有効化\n4. 「long connection」モードで im.message.receive_v1 イベントを購読\n5. Encrypt Key フィールドは空欄のまま — long connection モードではペイロード暗号化は使用されません",
   "settings.messaging.lark.notConfigured": "未設定",
+  "settings.messaging.lark.notConnected": "未接続",
   "settings.messaging.lark.reconfigureTitle": "Lark / Feishu認証情報を置き換え",
   "settings.messaging.lark.save": "保存",
   "settings.messaging.lark.saveFailed": "Lark認証情報を保存できませんでした",
