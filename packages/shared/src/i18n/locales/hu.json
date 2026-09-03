@@ -1242,6 +1242,7 @@
   "settings.messaging.lark.domainLark": "Lark (nemzetközi)",
   "settings.messaging.lark.instructions": "1. Nyisd meg a Lark Open Platform (lark) vagy Feishu Open Platform (feishu) oldalt, és hozz létre egy Custom App-ot\n2. Másold ki az App ID (cli_…) és App Secret értékeket\n3. Engedélyezd az im:message + im:message.group_at_msg + im:message:send_as_bot jogosultságokat\n4. Iratkozz fel az im.message.receive_v1 eseményre 'long connection' módban\n5. Hagyd üresen az Encrypt Key mezőt — a long connection mód nem használ payload-titkosítást",
   "settings.messaging.lark.notConfigured": "Nincs konfigurálva",
+  "settings.messaging.lark.notConnected": "Nincs csatlakoztatva",
   "settings.messaging.lark.reconfigureTitle": "Lark / Feishu hitelesítő adatok cseréje",
   "settings.messaging.lark.save": "Mentés",
   "settings.messaging.lark.saveFailed": "Nem sikerült menteni a Lark hitelesítő adatokat",

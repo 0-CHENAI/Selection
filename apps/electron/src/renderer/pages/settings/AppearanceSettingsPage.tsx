@@ -34,11 +34,7 @@ import { useWorkspaceIcons } from '@/hooks/useWorkspaceIcon'
 import { WorkspaceAvatar } from '@/components/ui/workspace-avatar'
 import { ColorPicker } from '@/components/ui/color-picker'
 import { workspaceAvatarColorsAtom } from '@/atoms/workspace-avatar-colors'
-import { kanbanColumnColorsAtom, kanbanColumnStatusAtom, kanbanLivePulseAtom } from '@/atoms/kanban'
 import { showBackgroundFinishedChipAtom } from '@/atoms/background-finished'
-import { KANBAN_COLUMNS } from '@/components/app-shell/kanban/status-column'
-import { DEFAULT_KANBAN_COLUMN_COLORS } from '@/components/app-shell/kanban/kanban-colors'
-import type { KanbanColumnId } from '@/components/app-shell/kanban/types'
 import { setProjectColorTreatment, useProjectColorTreatment } from '@/hooks/useProjectColorTreatment'
 import { PROJECT_COLOR_PALETTE, type ProjectColorTreatment } from '@/utils/project-colors'
 import { Info_DataTable, SortableHeader } from '@/components/info/Info_DataTable'
@@ -121,7 +117,7 @@ export default function AppearanceSettingsPage() {
     themeLoadError,
     themeResolvedFrom,
   } = useTheme()
-  const { workspaces, sessionStatuses } = useAppShellContext()
+  const { workspaces } = useAppShellContext()
 
   // Fetch workspace icons as data URLs (file:// URLs don't work in renderer)
   const workspaceIconMap = useWorkspaceIcons(workspaces)
@@ -165,39 +161,6 @@ export default function AppearanceSettingsPage() {
       return next
     })
   }, [setWorkspaceAvatarColors])
-
-  // Kanban board appearance (persisted in localStorage via atomWithStorage).
-  const [kanbanColumnColors, setKanbanColumnColors] = useAtom(kanbanColumnColorsAtom)
-  const setKanbanColumnColor = useCallback((column: KanbanColumnId, hex: string) => {
-    setKanbanColumnColors(prev => ({ ...prev, [column]: hex }))
-  }, [setKanbanColumnColors])
-  const resetKanbanColumnColor = useCallback((column: KanbanColumnId) => {
-    setKanbanColumnColors(prev => {
-      const next = { ...prev }
-      delete next[column]
-      return next
-    })
-  }, [setKanbanColumnColors])
-  const [kanbanLivePulse, setKanbanLivePulse] = useAtom(kanbanLivePulseAtom)
-
-  // Per-column status applied when a task is dragged into that column. Empty
-  // selection ('') removes the mapping → status left unchanged on move.
-  const [kanbanColumnStatus, setKanbanColumnStatus] = useAtom(kanbanColumnStatusAtom)
-  const setColumnStatus = useCallback((column: KanbanColumnId, statusId: string) => {
-    setKanbanColumnStatus(prev => {
-      const next = { ...prev }
-      if (statusId) next[column] = statusId
-      else delete next[column]
-      return next
-    })
-  }, [setKanbanColumnStatus])
-  const columnStatusOptions = useMemo(
-    () => [
-      { value: '', label: t("settings.appearance.kanbanColumnStatusNone") },
-      ...(sessionStatuses ?? []).map(s => ({ value: s.id, label: s.label })),
-    ],
-    [sessionStatuses, t]
-  )
 
   // Rich tool descriptions toggle (persisted in config.json, read by SDK subprocess)
   const [richToolDescriptions, setRichToolDescriptions] = useState(true)
@@ -467,55 +430,6 @@ export default function AppearanceSettingsPage() {
                       ]}
                     />
                   </SettingsRow>
-                </SettingsCard>
-              </SettingsSection>
-
-              {/* Kanban board — column colors + live-pulse toggle */}
-              <SettingsSection
-                title={t("settings.appearance.kanbanBoard")}
-                description={t("settings.appearance.kanbanBoardDesc")}
-              >
-                <SettingsCard>
-                  {KANBAN_COLUMNS.map(column => {
-                    const merged = kanbanColumnColors[column.id] ?? DEFAULT_KANBAN_COLUMN_COLORS[column.id]
-                    return (
-                      <SettingsRow key={column.id} label={t(column.labelKey)}>
-                        <ColorPicker
-                          value={merged}
-                          onChange={(hex) => setKanbanColumnColor(column.id, hex)}
-                          onClear={kanbanColumnColors[column.id] ? () => resetKanbanColumnColor(column.id) : undefined}
-                          clearLabel={t("settings.appearance.kanbanColumnColorReset")}
-                          presets={PROJECT_COLOR_PALETTE}
-                          ariaLabel={t("settings.appearance.kanbanColumnColor", { column: t(column.labelKey) })}
-                          align="end"
-                        />
-                      </SettingsRow>
-                    )
-                  })}
-                  <SettingsToggle
-                    label={t("settings.appearance.kanbanLivePulse")}
-                    description={t("settings.appearance.kanbanLivePulseDesc")}
-                    checked={kanbanLivePulse}
-                    onCheckedChange={setKanbanLivePulse}
-                  />
-                </SettingsCard>
-              </SettingsSection>
-
-              {/* Kanban status automation — status applied on drag into a column */}
-              <SettingsSection
-                title={t("settings.appearance.kanbanColumnStatus")}
-                description={t("settings.appearance.kanbanColumnStatusDesc")}
-              >
-                <SettingsCard>
-                  {KANBAN_COLUMNS.map(column => (
-                    <SettingsRow key={column.id} label={t(column.labelKey)}>
-                      <SettingsMenuSelect
-                        value={kanbanColumnStatus[column.id] ?? ''}
-                        onValueChange={(value) => setColumnStatus(column.id, value)}
-                        options={columnStatusOptions}
-                      />
-                    </SettingsRow>
-                  ))}
                 </SettingsCard>
               </SettingsSection>
 

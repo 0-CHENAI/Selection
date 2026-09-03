@@ -37,6 +37,7 @@ import { sourceSelection, skillSelection, automationSelection } from '@/hooks/us
 import { SourceInfoPage, ChatPage } from '@/pages'
 import SkillInfoPage from '@/pages/SkillInfoPage'
 import { getSettingsPageComponent } from '@/pages/settings/settings-pages'
+import { isVisibleSettingsSubpage } from '../../../shared/settings-registry'
 import { AutomationInfoPage } from '../automations/AutomationInfoPage'
 import ProjectInfoPage from '@/pages/ProjectInfoPage'
 import { KanbanBoardContainer } from './kanban/KanbanBoardContainer'
@@ -168,7 +169,9 @@ export function MainContentPanel({
   // PanelStackContainer hides the content panel entirely. On desktop the panel still
   // mounts, so fall back to the App page so it isn't empty.
   if (isSettingsNavigation(navState)) {
-    const subpage = navState.subpage ?? 'app'
+    const subpage = navState.subpage && isVisibleSettingsSubpage(navState.subpage)
+      ? navState.subpage
+      : 'app'
     const SettingsPageComponent = getSettingsPageComponent(subpage)
     return wrapWithStoplight(
       <Panel variant="grow" className={className}>

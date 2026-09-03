@@ -1,7 +1,8 @@
 /**
  * LarkConnectDialog — App ID + App Secret pairing flow for Lark / Feishu.
  *
- * Same modal shape as `TelegramConnectDialog`. Differences:
+ * Credential-based connection dialog for Lark / Feishu. Differences from
+ * token-based messaging setup:
  *   - Two secret fields (App ID + App Secret) instead of one (bot token)
  *   - A region selector — Lark and Feishu are separate Open Platforms;
  *     a bot belongs to one or the other and the choice is permanent.

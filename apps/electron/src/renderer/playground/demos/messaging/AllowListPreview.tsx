@@ -324,7 +324,7 @@ function SupergroupHeader() {
 }
 
 // ---------------------------------------------------------------------------
-// AllowedUsersCollapsible — mirrors TelegramAccessSection's collapsible row
+// AllowedUsersCollapsible — mirrors the legacy Telegram access layout.
 // so the playground demo and production stay visually identical.
 // ---------------------------------------------------------------------------
 
