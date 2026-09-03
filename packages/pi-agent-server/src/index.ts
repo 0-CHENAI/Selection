@@ -678,24 +678,11 @@ async function ensureSession(): Promise<AgentSession> {
   const { modelRuntime, modelRegistry } = await createAuthenticatedRuntime();
 
   // Build tools: coding tools + web tools wrapped with permission hooks + proxy tools.
-  // Search provider is selected based on the user's LLM connection:
-  //   - OpenAI/OpenRouter → Responses API built-in web_search
-  //   - ChatGPT Plus (openai-codex) → ChatGPT backend responses endpoint
-  //   - Google → Gemini API with googleSearch grounding
-  //   - Others → explicit unavailable result (no implicit third-party fallback)
-  //
-  // IMPORTANT: resolve dynamically on each search call so token_update refreshes
-  // are used without recreating the session.
-  const activeSearchModel = () => (initConfig?.model ? stripPiPrefix(initConfig.model) : undefined);
-  const searchProvider = {
-    get name() {
-      return resolveSearchProvider(initConfig?.piAuth, activeSearchModel()).name;
-    },
-    async search(query: string, count: number) {
-      return resolveSearchProvider(initConfig?.piAuth, activeSearchModel()).search(query, count);
-    },
-  };
-  const searchTool = createSearchTool(searchProvider);
+  // Built-in web search uses AnySearch independently from the active LLM
+  // connection. This keeps custom OpenAI-compatible credentials scoped to
+  // their configured model endpoint instead of forwarding them to a search
+  // provider. ANYSEARCH_API_KEY is optional and read by the provider itself.
+  const searchTool = createSearchTool(resolveSearchProvider());
   const webFetchTool = createWebFetchTool(() =>
     initConfig ? getSessionPath(initConfig.workspaceRootPath, initConfig.sessionId) : null
   );

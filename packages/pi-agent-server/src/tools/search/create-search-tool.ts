@@ -34,12 +34,13 @@ function formatResults(
     .join('\n\n');
 
   const noteText = note ? `${note}\n\n` : '';
+  const resultText = formatted || 'No relevant results found.';
 
   return {
     content: [
       {
         type: 'text' as const,
-        text: `${noteText}Search results for "${query}" (via ${providerName}):\n\n${formatted}`,
+        text: `${noteText}Search results for "${query}" (via ${providerName}):\n\n${resultText}`,
       },
     ],
     details: {},

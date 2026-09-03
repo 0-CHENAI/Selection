@@ -37,6 +37,22 @@ describe('createSearchTool', () => {
     expect((result.content[0] as any).text).toContain('(via MockProvider)');
   });
 
+  it('treats an empty result set as a successful search', async () => {
+    const provider: WebSearchProvider = {
+      name: 'AnySearch',
+      async search() {
+        return [];
+      },
+    };
+
+    const result = await createSearchTool(provider).execute('tool-empty', {
+      query: 'no matching documents',
+    });
+
+    expect(result.details?.isError).toBeUndefined();
+    expect((result.content[0] as any).text).toContain('No relevant results found.');
+  });
+
   it('uses an explicitly supplied fallback when the primary provider fails', async () => {
     const provider: WebSearchProvider = {
       name: 'OpenAI',
