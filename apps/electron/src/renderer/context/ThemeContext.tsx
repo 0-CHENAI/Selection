@@ -12,11 +12,17 @@ import {
 } from '@config/theme'
 import { isMac, isWebUI } from '@/lib/platform'
 import { shouldUseVibrancyOverlay } from './theme-chrome'
+import { resolveStartupColorTheme } from './theme-preferences'
 
 export type ThemeMode = 'light' | 'dark' | 'system'
 export type FontFamily = 'inter' | 'system'
 
+const THEME_MODES: readonly ThemeMode[] = ['light', 'dark', 'system']
 const FONT_FAMILIES: readonly FontFamily[] = ['inter', 'system']
+
+function coerceThemeMode(value: unknown, fallback: ThemeMode = 'system'): ThemeMode {
+  return THEME_MODES.includes(value as ThemeMode) ? (value as ThemeMode) : fallback
+}
 
 function coerceFontFamily(value: unknown, fallback: FontFamily = 'system'): FontFamily {
   return FONT_FAMILIES.includes(value as FontFamily) ? (value as FontFamily) : fallback
@@ -76,8 +82,6 @@ interface StoredTheme {
   mode: ThemeMode
   colorTheme: string
   font?: FontFamily
-  /** True when user explicitly changed theme in UI (not auto-saved on startup) */
-  isUserOverride?: boolean
 }
 
 const ThemeContext = createContext<ThemeContextType | undefined>(undefined)
@@ -127,18 +131,17 @@ export function ThemeProvider({
   defaultFont = 'system',
   activeWorkspaceId = null
 }: ThemeProviderProps) {
-  const stored = loadStoredTheme()
+  const [initialStoredTheme] = useState<StoredTheme | null>(() => loadStoredTheme())
 
   // === Preference state (persisted at app level) ===
-  const [mode, setModeState] = useState<ThemeMode>(stored?.mode ?? defaultMode)
-  // Only use localStorage colorTheme if user explicitly set it via UI
-  const [colorTheme, setColorThemeState] = useState<string>(() => {
-    if (stored?.isUserOverride && stored.colorTheme) {
-      return stored.colorTheme
-    }
-    return defaultColorTheme // Will be updated by config.json effect
-  })
-  const [font, setFontState] = useState<FontFamily>(coerceFontFamily(stored?.font, defaultFont))
+  const [mode, setModeState] = useState<ThemeMode>(
+    coerceThemeMode(initialStoredTheme?.mode, defaultMode)
+  )
+  // Use the cache for the first paint; config.json replaces it as the source of truth.
+  const [colorTheme, setColorThemeState] = useState<string>(() =>
+    resolveStartupColorTheme(undefined, initialStoredTheme?.colorTheme, defaultColorTheme)
+  )
+  const [font, setFontState] = useState<FontFamily>(coerceFontFamily(initialStoredTheme?.font, defaultFont))
   const [systemPreference, setSystemPreference] = useState<'light' | 'dark'>(getSystemPreference)
   const [previewColorTheme, setPreviewColorTheme] = useState<string | null>(null)
 
@@ -147,21 +150,43 @@ export function ThemeProvider({
 
   // Track if we're receiving an external update to prevent echo broadcasts
   const isExternalUpdate = useRef(false)
+  // Prevent a slow startup read from overwriting a newer in-app or cross-window change.
+  const colorThemeChangeRevision = useRef(0)
 
-  // Load app-level colorTheme from config.json on mount (only if user hasn't overridden)
+  // Load the authoritative app-level colorTheme from config.json on mount.
   useEffect(() => {
-    // Skip if user has explicitly set a theme via UI
-    if (stored?.isUserOverride) return
+    const electronAPI = window.electronAPI
+    if (!electronAPI?.getColorTheme) return
 
-    window.electronAPI?.getColorTheme?.().then((configTheme) => {
-      if (configTheme && configTheme !== 'default') {
-        setColorThemeState(configTheme)
-      }
+    let cancelled = false
+    const requestRevision = colorThemeChangeRevision.current
+
+    electronAPI.getColorTheme().then((configTheme) => {
+      if (cancelled || colorThemeChangeRevision.current !== requestRevision) return
+
+      const resolvedColorTheme = resolveStartupColorTheme(
+        configTheme,
+        initialStoredTheme?.colorTheme,
+        defaultColorTheme,
+      )
+      setColorThemeState(resolvedColorTheme)
+
+      // Keep localStorage as a warm cache so subsequent launches do not flash
+      // the previously selected theme while config.json is being read.
+      const cached = loadStoredTheme()
+      saveTheme({
+        mode: coerceThemeMode(cached?.mode, defaultMode),
+        colorTheme: resolvedColorTheme,
+        font: coerceFontFamily(cached?.font, defaultFont),
+      })
     }).catch(() => {
-      // Keep default on error
+      // Keep the cached/default theme when config cannot be read.
     })
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []) // Only run on mount
+
+    return () => {
+      cancelled = true
+    }
+  }, [defaultColorTheme, defaultFont, defaultMode, initialStoredTheme?.colorTheme])
 
   // === Preset theme state (singleton) ===
   const [presetTheme, setPresetTheme] = useState<ThemeFile | null>(null)
@@ -438,15 +463,21 @@ export function ThemeProvider({
 
     const cleanup = window.electronAPI.onThemePreferencesChange((preferences) => {
       isExternalUpdate.current = true
-      setModeState(preferences.mode as ThemeMode)
-      setColorThemeState(preferences.colorTheme)
-      setFontState(coerceFontFamily(preferences.font))
-      // When syncing from another window, mark as user override since user explicitly changed theme
+      colorThemeChangeRevision.current += 1
+      const nextMode = coerceThemeMode(preferences.mode)
+      const nextColorTheme = resolveStartupColorTheme(
+        preferences.colorTheme,
+        loadStoredTheme()?.colorTheme,
+        defaultColorTheme,
+      )
+      const nextFont = coerceFontFamily(preferences.font)
+      setModeState(nextMode)
+      setColorThemeState(nextColorTheme)
+      setFontState(nextFont)
       saveTheme({
-        mode: preferences.mode as ThemeMode,
-        colorTheme: preferences.colorTheme,
-        font: preferences.font as FontFamily,
-        isUserOverride: true
+        mode: nextMode,
+        colorTheme: nextColorTheme,
+        font: nextFont,
       })
       setTimeout(() => {
         isExternalUpdate.current = false
@@ -454,33 +485,33 @@ export function ThemeProvider({
     })
 
     return cleanup
-  }, [])
+  }, [defaultColorTheme])
 
   // === Setters with persistence and broadcast ===
   const setMode = useCallback((newMode: ThemeMode) => {
     setModeState(newMode)
-    // Preserve existing isUserOverride flag
-    const existing = loadStoredTheme()
-    saveTheme({ mode: newMode, colorTheme, font, isUserOverride: existing?.isUserOverride })
+    saveTheme({ mode: newMode, colorTheme, font })
     if (!isExternalUpdate.current && window.electronAPI?.broadcastThemePreferences) {
       window.electronAPI.broadcastThemePreferences({ mode: newMode, colorTheme, font })
     }
   }, [colorTheme, font])
 
   const setColorTheme = useCallback((newTheme: string) => {
-    setColorThemeState(newTheme)
-    // Mark as user override - user explicitly changed theme via UI
-    saveTheme({ mode, colorTheme: newTheme, font, isUserOverride: true })
+    const normalizedTheme = resolveStartupColorTheme(newTheme, colorTheme, defaultColorTheme)
+    colorThemeChangeRevision.current += 1
+    setColorThemeState(normalizedTheme)
+    saveTheme({ mode, colorTheme: normalizedTheme, font })
+    window.electronAPI?.setColorTheme?.(normalizedTheme).catch((error) => {
+      console.error('[ThemeContext] Failed to persist color theme to config.json:', error)
+    })
     if (!isExternalUpdate.current && window.electronAPI?.broadcastThemePreferences) {
-      window.electronAPI.broadcastThemePreferences({ mode, colorTheme: newTheme, font })
+      window.electronAPI.broadcastThemePreferences({ mode, colorTheme: normalizedTheme, font })
     }
-  }, [mode, font])
+  }, [colorTheme, defaultColorTheme, mode, font])
 
   const setFont = useCallback((newFont: FontFamily) => {
     setFontState(newFont)
-    // Preserve existing isUserOverride flag
-    const existing = loadStoredTheme()
-    saveTheme({ mode, colorTheme, font: newFont, isUserOverride: existing?.isUserOverride })
+    saveTheme({ mode, colorTheme, font: newFont })
     if (!isExternalUpdate.current && window.electronAPI?.broadcastThemePreferences) {
       window.electronAPI.broadcastThemePreferences({ mode, colorTheme, font: newFont })
     }
