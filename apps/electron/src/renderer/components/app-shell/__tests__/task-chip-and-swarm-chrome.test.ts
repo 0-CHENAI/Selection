@@ -39,6 +39,9 @@ describe('running orchestration composer chrome', () => {
     expect(chatDisplaySrc).toContain('{sessionBusy && (() => {')
     expect(chatDisplaySrc).toContain('stopTask')
     expect(chatDisplaySrc).toContain('stopSessionSwarm')
+    expect(chatDisplaySrc).toContain('pickStoppableTaskRun')
+    expect(chatPageSrc).toContain('canPreviewOrchestrationChild')
+    expect(chatPageSrc).toContain('sessionId={sessionId}')
   })
 })
 

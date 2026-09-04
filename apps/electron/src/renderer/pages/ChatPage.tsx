@@ -11,6 +11,7 @@ import { useAtomValue, useSetAtom } from 'jotai'
 import { AlertCircle, Info, Pencil } from 'lucide-react'
 import { ChatDisplay, type ChatDisplayHandle } from '@/components/app-shell/ChatDisplay'
 import { OrchestrationRunProgress } from '@/components/app-shell/kanban/OrchestrationRunProgress'
+import { canPreviewOrchestrationChild } from '@/components/app-shell/kanban/orchestration-run-progress'
 import { PanelHeader } from '@/components/app-shell/PanelHeader'
 import { SessionMenu } from '@/components/app-shell/SessionMenu'
 import { CompactSessionMenu } from '@/components/app-shell/CompactSessionMenu'
@@ -459,12 +460,18 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
     navigate(routes.view.board())
   }, [taskSlug, sessionId, sessionMeta, setKanbanEditorTarget])
 
+  const handlePreviewOrchestrationNode = React.useCallback((childSessionId: string) => {
+    if (!canPreviewOrchestrationChild(sessionId, sessionMetaMap.get(childSessionId))) return
+    setPreviewChildSessionId(childSessionId)
+  }, [sessionId, sessionMetaMap])
+
   const orchestrationProgress = isTaskOrchestrator && activeWorkspaceId && taskSlug ? (
     <OrchestrationRunProgress
       workspaceId={activeWorkspaceId}
       taskSlug={taskSlug}
+      sessionId={sessionId}
       runningHint={orchestrationStatus === 'running'}
-      onPreviewSession={setPreviewChildSessionId}
+      onPreviewSession={handlePreviewOrchestrationNode}
     />
   ) : null
 

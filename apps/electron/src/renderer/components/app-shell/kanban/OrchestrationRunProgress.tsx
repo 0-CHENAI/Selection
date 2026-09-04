@@ -7,6 +7,8 @@ import {
   buildOrchestrationProgressRows,
   countFinishedProgressRows,
   isActiveTaskRunStatus,
+  isTaskRunEventForProgress,
+  isTaskRunOwnedBySession,
   shouldShowOrchestrationRunProgress,
   type OrchestrationProgressRow,
   type SpecProgressNode,
@@ -27,10 +29,13 @@ export function OrchestrationRunProgressView({
   onPreviewSession,
 }: OrchestrationRunProgressViewProps) {
   const { t } = useTranslation()
-  const status = isActiveTaskRunStatus(liveRun?.status) ? liveRun?.status : runningHint ? 'running' : liveRun?.status
+  const status = isActiveTaskRunStatus(liveRun?.status)
+    ? liveRun?.status
+    : runningHint ? 'running' : liveRun?.status
   const statusKey = runStatusLabelKey(status)
   const finished = countFinishedProgressRows(rows)
   const pulse = status === 'running' || status === 'verifying' || status === 'repairing' || status === 'pausing'
+  const statusLabel = statusKey ? t(statusKey) : t('tasks.starting')
 
   return (
     <div
@@ -48,7 +53,7 @@ export function OrchestrationRunProgressView({
           <span className={cn('relative inline-flex size-2 rounded-full', pulse ? 'bg-indigo-500' : 'bg-foreground/35')} />
         </span>
         <span className="font-medium text-foreground/85">{t('tasks.tabLiveRun')}</span>
-        <span>{statusKey ? t(statusKey) : status === 'running' ? t('tasks.starting') : (status ?? t('tasks.starting'))}</span>
+        <span>{statusLabel}</span>
         {rows.length > 0 && (
           <span className="ml-auto tabular-nums text-foreground/45">
             {finished}/{rows.length}
@@ -60,10 +65,11 @@ export function OrchestrationRunProgressView({
           {rows.map((row) => {
             const pill = resolveNodeStatePill(row.state)
             const label = pill.labelKey ? t(pill.labelKey) : row.state
+            const childSessionId = row.sessionId
             const className = cn(
               'inline-flex max-w-full items-center gap-1.5 rounded-md border px-2 py-1 text-left text-[12px] leading-none',
               pill.className,
-              row.sessionId && onPreviewSession ? 'cursor-pointer hover:brightness-95' : 'cursor-default',
+              childSessionId && onPreviewSession ? 'cursor-pointer hover:brightness-95' : 'cursor-default',
             )
             const content = (
               <>
@@ -71,14 +77,14 @@ export function OrchestrationRunProgressView({
                 <span className="shrink-0 opacity-80">{label}</span>
               </>
             )
-            if (row.sessionId && onPreviewSession) {
+            if (childSessionId && onPreviewSession) {
               return (
                 <button
                   key={row.id}
                   type="button"
                   className={className}
                   title={t('tasks.openSession')}
-                  onClick={() => onPreviewSession(row.sessionId!)}
+                  onClick={() => onPreviewSession(childSessionId)}
                 >
                   {content}
                 </button>
@@ -99,6 +105,7 @@ export function OrchestrationRunProgressView({
 interface OrchestrationRunProgressProps {
   workspaceId: string
   taskSlug: string
+  sessionId?: string
   runningHint?: boolean
   onPreviewSession?: (sessionId: string) => void
 }
@@ -106,6 +113,7 @@ interface OrchestrationRunProgressProps {
 export function OrchestrationRunProgress({
   workspaceId,
   taskSlug,
+  sessionId,
   runningHint = false,
   onPreviewSession,
 }: OrchestrationRunProgressProps) {
@@ -122,20 +130,21 @@ export function OrchestrationRunProgress({
         if (cancelled) return
         const spec = res.spec as { nodes?: SpecProgressNode[] } | undefined
         setSpecNodes(spec?.nodes)
-        setLiveRun(res.latestRun ?? res.run ?? null)
+        const nextRun = res.latestRun ?? res.run ?? null
+        setLiveRun(nextRun && isTaskRunOwnedBySession(nextRun, sessionId) ? nextRun : null)
       })
       .catch(() => {})
     return () => {
       cancelled = true
     }
-  }, [workspaceId, taskSlug])
+  }, [workspaceId, taskSlug, sessionId])
 
   React.useEffect(() => {
-    return window.electronAPI.onTaskRunChanged((_ws, snapshot) => {
-      if (snapshot.slug !== taskSlug) return
+    return window.electronAPI.onTaskRunChanged((eventWorkspaceId, snapshot) => {
+      if (!isTaskRunEventForProgress(workspaceId, taskSlug, sessionId, eventWorkspaceId, snapshot)) return
       setLiveRun(snapshot)
     })
-  }, [taskSlug])
+  }, [workspaceId, taskSlug, sessionId])
 
   const rows = React.useMemo(
     () => buildOrchestrationProgressRows(specNodes, liveRun),

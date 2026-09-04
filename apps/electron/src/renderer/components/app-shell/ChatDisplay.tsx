@@ -76,6 +76,7 @@ import { navigate, routes } from "@/lib/navigate"
 import { CHAT_LAYOUT } from "@/config/layout"
 import { collectFileChangesFromActivities, getFirstFileChangeIdForActivity } from "@/lib/file-changes"
 import { shouldPreviewBackgroundTask } from "./background-task-chip"
+import { pickStoppableTaskRun } from "./kanban/orchestration-run-progress"
 import { resolveBranchNewPanelOption } from "./branching"
 import { handleErrorMessageAction } from "./error-message-actions"
 import {
@@ -1435,12 +1436,16 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
       try {
         const taskSlug = session.taskSlug
         if (workspaceId && taskSlug) {
-          const task = await window.electronAPI.getTask(workspaceId, taskSlug)
-          const run = task.latestRun ?? task.run
-          if (run && !['completed', 'failed', 'stopped'].includes(run.status)) {
-            await window.electronAPI.stopTask(workspaceId, taskSlug, run.runId)
-            if (!silent) onExplicitStop?.()
-            return
+          try {
+            const task = await window.electronAPI.getTask(workspaceId, taskSlug)
+            const run = pickStoppableTaskRun(task.latestRun ?? task.run, session.id)
+            if (run) {
+              await window.electronAPI.stopTask(workspaceId, taskSlug, run.runId)
+              if (!silent) onExplicitStop?.()
+              return
+            }
+          } catch (error) {
+            console.error('[ChatDisplay] Failed to resolve task run for stop:', error)
           }
         }
         await window.electronAPI.stopSessionSwarm(session.id)

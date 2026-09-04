@@ -19,6 +19,43 @@ export function isActiveTaskRunStatus(status?: string | null): boolean {
   return !!status && !TERMINAL_TASK_RUN_STATUSES.has(status)
 }
 
+export function isTaskRunOwnedBySession(
+  run: Pick<TaskRunSnapshotDto, 'orchestratorSessionId'>,
+  sessionId?: string | null,
+): boolean {
+  if (!sessionId || !run.orchestratorSessionId) return true
+  return run.orchestratorSessionId === sessionId
+}
+
+export function isTaskRunEventForProgress(
+  workspaceId: string,
+  taskSlug: string,
+  sessionId: string | undefined,
+  eventWorkspaceId: string,
+  snapshot: Pick<TaskRunSnapshotDto, 'slug' | 'orchestratorSessionId'>,
+): boolean {
+  if (eventWorkspaceId && eventWorkspaceId !== workspaceId) return false
+  if (snapshot.slug !== taskSlug) return false
+  return isTaskRunOwnedBySession(snapshot, sessionId)
+}
+
+export function pickStoppableTaskRun(
+  run: TaskRunSnapshotDto | null | undefined,
+  sessionId: string,
+): TaskRunSnapshotDto | null {
+  if (!run || !isActiveTaskRunStatus(run.status)) return null
+  if (!isTaskRunOwnedBySession(run, sessionId)) return null
+  return run
+}
+
+export function canPreviewOrchestrationChild(
+  parentSessionId: string,
+  childMeta: { parentSessionId?: string } | undefined,
+): boolean {
+  if (!childMeta?.parentSessionId) return true
+  return childMeta.parentSessionId === parentSessionId
+}
+
 export function shouldShowOrchestrationRunProgress(input: {
   isTaskOrchestrator: boolean
   orchestrationStatus?: string | null

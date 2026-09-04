@@ -8,8 +8,11 @@ import type { TaskNodeRunStateDto, TaskRunSnapshotDto } from '@craft-agent/share
 import { OrchestrationRunProgressView } from '../OrchestrationRunProgress'
 import {
   buildOrchestrationProgressRows,
+  canPreviewOrchestrationChild,
   countFinishedProgressRows,
   isActiveTaskRunStatus,
+  isTaskRunEventForProgress,
+  pickStoppableTaskRun,
   sessionIdForProgressRow,
   shouldShowOrchestrationRunProgress,
 } from '../orchestration-run-progress'
@@ -85,6 +88,44 @@ describe('shouldShowOrchestrationRunProgress', () => {
       isTaskOrchestrator: true,
       runStatus: 'completed',
     })).toBe(false)
+  })
+})
+
+describe('task-run ownership guards', () => {
+  it('ignores run events from another workspace or another orchestrator session', () => {
+    const owned = snapshot({ orchestratorSessionId: 'orch-1' })
+    expect(isTaskRunEventForProgress('ws-a', 'research', 'orch-1', 'ws-a', owned)).toBe(true)
+    expect(isTaskRunEventForProgress('ws-a', 'research', 'orch-1', 'ws-b', owned)).toBe(false)
+    expect(isTaskRunEventForProgress('ws-a', 'research', 'orch-1', 'ws-a', snapshot({
+      slug: 'other',
+      orchestratorSessionId: 'orch-1',
+    }))).toBe(false)
+    expect(isTaskRunEventForProgress('ws-a', 'research', 'orch-1', 'ws-a', snapshot({
+      orchestratorSessionId: 'orch-2',
+    }))).toBe(false)
+  })
+
+  it('stops only an active run owned by this orchestrator session', () => {
+    expect(pickStoppableTaskRun(snapshot({
+      status: 'running',
+      orchestratorSessionId: 'orch-1',
+    }), 'orch-1')?.runId).toBe('run-1')
+    expect(pickStoppableTaskRun(snapshot({
+      status: 'completed',
+      orchestratorSessionId: 'orch-1',
+    }), 'orch-1')).toBeNull()
+    expect(pickStoppableTaskRun(snapshot({
+      status: 'running',
+      orchestratorSessionId: 'orch-2',
+    }), 'orch-1')).toBeNull()
+    expect(pickStoppableTaskRun(snapshot({ status: 'running' }), 'orch-1')?.runId).toBe('run-1')
+  })
+
+  it('previews only children of the current orchestrator when parent is known', () => {
+    expect(canPreviewOrchestrationChild('orch-1', undefined)).toBe(true)
+    expect(canPreviewOrchestrationChild('orch-1', {})).toBe(true)
+    expect(canPreviewOrchestrationChild('orch-1', { parentSessionId: 'orch-1' })).toBe(true)
+    expect(canPreviewOrchestrationChild('orch-1', { parentSessionId: 'other' })).toBe(false)
   })
 })
 
