@@ -6,6 +6,8 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 
 ## Improvements
 
+- **Windows title bar now shares a row with the Selection top bar** — The extra native title-bar strip is gone. Minimize, maximize, and close stay on the right via the Windows overlay; the rest of the bar stays draggable and keeps sidebar, back/forward, and workspace controls. ([#260](https://github.com/0-CHENAI/Selection/issues/260))
+
 - **Desktop top bar drops the brand menu, creation-jobs icon, and add-panel plus** — Sidebar, back/forward, workspace, and browser badges stay. Creation jobs still validate and notify in the background; reopen/stop lives on the Sources, Skills, and Automations headers. New chat in a panel still uses its shortcut. Compact keeps the mobile app menu. ([#262](https://github.com/0-CHENAI/Selection/issues/262))
 
 - **Session list title bar is now search, then list / new orchestration** — The magnifier sits to the left of the switcher. After the filter menu was removed, the switcher is the rightmost header control. Search still opens the existing session search field; compact widths hide only the switcher. ([#264](https://github.com/0-CHENAI/Selection/issues/264))
