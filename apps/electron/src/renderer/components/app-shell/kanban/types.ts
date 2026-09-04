@@ -4,8 +4,8 @@
  * `column` (where a tile physically sits) is intentionally separate from
  * `statusId` (what the badge shows). The board has 3 columns but a workspace
  * can have more statuses, so a tile may sit in "In Progress" while showing a
- * "Needs Review" badge. `statusToColumn` (see ./status-column) provides only the
- * default placement; tiles may override it.
+ * "Needs Review" badge. Column placement is a leftover persistence field and
+ * is no longer shown in the UI.
  *
  * These are presentational view-models. The wiring phase maps real
  * `SessionConfig` / `ProjectConfig` / status data onto these shapes.

@@ -69,6 +69,8 @@ export interface AppShellContextType {
    * filters — and selects the session. Used by kanban tile/subtask clicks + post-create.
    */
   onJumpToTaskSessions?: (sessionId: string, scope: { labelId: string; projectId?: string }) => void
+  /** Sidebar/project-navigator include used to bind a new orchestration (#261). */
+  orchestrationProjectId?: string | null
   /** Enabled permission modes for Shift+Tab cycling */
   enabledModes?: PermissionMode[]
   /** Dynamic todo states from workspace config (provided by AppShell, defaults to empty) */

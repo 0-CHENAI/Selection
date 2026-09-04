@@ -6,6 +6,8 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 
 ## Improvements
 
+- **Task board is now a new-orchestration editor** — The list/orchestration switcher stays. Its second view opens the existing create/edit orchestration editor instead of columns, cards, drag-and-drop, or board filters. A project-scoped list binds the new orchestration to that project. ([#261](https://github.com/0-CHENAI/Selection/issues/261))
+
 - **Session list filter and grouping menu is gone** — The title-bar ListFilter control no longer offers project include/exclude or unread/project grouping. The list always groups by date. Saved exclude or multi-project filters are cleared on load so they cannot hide sessions; a single sidebar project include is kept. ([#263](https://github.com/0-CHENAI/Selection/issues/263))
 
 ## Bug Fixes
