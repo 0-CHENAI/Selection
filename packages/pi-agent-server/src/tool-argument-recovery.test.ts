@@ -52,6 +52,31 @@ describe('Pi pre-validation tool argument recovery', () => {
     }
   });
 
+  it('normalizes Write path and _content aliases before strict SDK validation', () => {
+    const args = createRecoveringArgumentPreparer('Write', undefined, false)({
+      file_path: 'notes.md',
+      _content: '# Notes',
+      _intent: 'Write notes',
+      _displayName: 'Write File',
+    }) as Record<string, unknown>;
+    const tool = {
+      name: 'write',
+      description: 'test',
+      parameters: Type.Object({
+        path: Type.String(),
+        content: Type.String(),
+      }, { additionalProperties: false }),
+    };
+
+    expect(args).toEqual({ path: 'notes.md', content: '# Notes' });
+    expect(validateToolArguments(tool, {
+      type: 'toolCall',
+      id: 'call-write',
+      name: 'write',
+      arguments: args,
+    })).toEqual({ path: 'notes.md', content: '# Notes' });
+  });
+
   it('preserves and composes an upstream preparer', () => {
     const prepareArguments = createRecoveringArgumentPreparer('Read', args => ({
       ...(args as Record<string, unknown>),

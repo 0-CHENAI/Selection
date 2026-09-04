@@ -20,6 +20,15 @@ describe('recoverKnownToolInputFromIntent', () => {
     })).toEqual({ _intent: 'Read it', path: 'docs/b.txt' });
     expect(recoverKnownToolInputFromIntent('Bash', { cmd: 'officecli create report.docx' }))
       .toEqual({ command: 'officecli create report.docx' });
+    expect(recoverKnownToolInputFromIntent('Write', {
+      file_path: 'notes.md',
+      _content: '# Notes',
+    })).toEqual({ path: 'notes.md', content: '# Notes' });
+    expect(recoverKnownToolInputFromIntent('Write', {
+      path: 'notes.md',
+      content: 'canonical',
+      _content: 'ignored alias',
+    })).toEqual({ path: 'notes.md', content: 'canonical' });
   });
 
   it('does not recover unknown tools, unknown fields, malformed or oversized markup', () => {

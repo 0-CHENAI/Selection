@@ -13,11 +13,13 @@ interface MarkupNode {
 const RECOVERABLE_FIELDS: Record<string, ReadonlySet<string>> = {
   read: new Set(['path', 'file_path']),
   bash: new Set(['command', 'cmd', 'timeout']),
+  write: new Set(['path', 'file_path', 'content', '_content']),
 };
 
 const FIELD_ALIASES: Record<string, Readonly<Record<string, string>>> = {
   read: { file_path: 'path' },
   bash: { cmd: 'command' },
+  write: { file_path: 'path', _content: 'content' },
 };
 
 function decodeXmlText(value: string): string {
@@ -86,8 +88,11 @@ export function recoverKnownToolInputFromIntent(
   const aliases = FIELD_ALIASES[normalizedToolName] ?? {};
   let normalizedInput = input;
   for (const [alias, canonical] of Object.entries(aliases)) {
-    if (normalizedInput[canonical] !== undefined || normalizedInput[alias] === undefined) continue;
-    normalizedInput = { ...normalizedInput, [canonical]: normalizedInput[alias] };
+    if (normalizedInput[alias] === undefined) continue;
+    normalizedInput = { ...normalizedInput };
+    if (normalizedInput[canonical] === undefined) {
+      normalizedInput[canonical] = normalizedInput[alias];
+    }
     delete normalizedInput[alias];
   }
   const rawIntent = typeof input._intent === 'string' ? input._intent : undefined;

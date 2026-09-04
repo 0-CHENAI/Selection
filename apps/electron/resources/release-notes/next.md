@@ -20,6 +20,8 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 
 ## Bug Fixes
 
+- **Write accepts provider-renamed content fields** — OpenAI-compatible endpoints that emit `_content` (and occasionally `file_path`) for the native Write tool are normalized before strict SDK validation, so valid writes no longer fail with “must have required properties content” and trigger repeated retries.
+
 - **Windows 10 light mode no longer washes the sidebar and top bar gray** — the 50% vibrancy overlay is macOS-only. Windows paints a solid surface matching Appearance, so light mode chrome matches the settings panel instead of sitting as a dark mask over transparent regions. (#53)
 
 - **Work-chain step counts stay on one turn** — a truncated intermediate body (often just `|`) no longer flushes the thinking chain into a finished empty card with Copy / Markdown while the session is still running. The longer streamed text is kept, pipe-only stubs are ignored instead of treated as a final reply, and later tools continue the same step count instead of restarting from 1. (#81)
