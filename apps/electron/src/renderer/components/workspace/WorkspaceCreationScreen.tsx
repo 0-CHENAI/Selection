@@ -11,6 +11,7 @@ import { AddWorkspaceStep_CreateNew } from "./AddWorkspaceStep_CreateNew"
 import { AddWorkspaceStep_OpenFolder } from "./AddWorkspaceStep_OpenFolder"
 import type { Workspace } from "../../../shared/types"
 import { toast } from "sonner"
+import { windowsCaptionInsetStyle } from "@/lib/windows-caption-inset"
 
 type CreationStep = 'choice' | 'create' | 'open'
 
@@ -153,7 +154,10 @@ export function WorkspaceCreationScreen({
         </motion.div>
 
         {/* Header with drag region and close button */}
-        <header className="titlebar-drag-region relative h-[50px] shrink-0 flex items-center justify-end px-6">
+        <header
+          className="titlebar-drag-region relative h-[50px] shrink-0 flex items-center justify-end px-6"
+          style={windowsCaptionInsetStyle()}
+        >
           {/* Close button - explicitly no-drag */}
           <motion.button
             initial={{ opacity: 0 }}

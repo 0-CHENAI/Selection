@@ -15,6 +15,7 @@ import { PanelLeftRounded } from "../icons/PanelLeftRounded"
 import { TopBarButton } from "../ui/TopBarButton"
 import { cn } from "@/lib/utils"
 import { isMac, isWebUI } from "@/lib/platform"
+import { windowsCaptionInsetStyle } from "@/lib/windows-caption-inset"
 import { useActionLabel } from "@/actions"
 import type { SettingsMenuItem } from "../../../shared/menu-schema"
 import { useEffect, useRef, useState } from "react"
@@ -117,13 +118,17 @@ export function TopBar({
   // and has no traffic lights regardless of host OS — collapse to a normal
   // 12px inset so the first control sits at the edge.
   const menuLeftPadding = isMac && !isWebUI ? 86 : 12
+  const captionInset = windowsCaptionInsetStyle()
 
   return (
     <div
       className="fixed top-0 left-0 right-0 z-panel titlebar-drag-region"
       style={{ height: 'var(--topbar-height)' }}
     >
-      <div className="flex h-full w-full items-center justify-between gap-2">
+      <div
+        className="flex h-full w-full items-center justify-between gap-2"
+        style={captionInset}
+      >
       {/* === LEFT: Sidebar + Navigation + Workspace (compact: App menu) === */}
       {/* Keep this container draggable. Only individual interactive controls should use titlebar-no-drag. */}
       {/* In compact mode the right slot is hidden, so we add right padding here
@@ -213,7 +218,7 @@ export function TopBar({
 
       {/* === RIGHT: Browser strip === */}
       {!isCompact && (
-      <div ref={rightSlotRef} className="flex min-w-0 shrink-0 items-center justify-end gap-1" style={{ paddingRight: 12 }}>
+      <div ref={rightSlotRef} className="flex min-w-0 shrink-0 items-center justify-end gap-1" style={{ paddingRight: captionInset ? 0 : 12 }}>
         <div className="min-w-0">
           <BrowserTabStrip activeSessionId={activeSessionId} maxVisibleBadges={maxVisibleBrowserBadges} />
         </div>
