@@ -441,6 +441,7 @@ async function sendAndStream(
         finished = true
         break
       case 'complete':
+        if (ev.orchestrationPending === true) break
         if (!streamJson) process.stdout.write('\n')
         finished = true
         break

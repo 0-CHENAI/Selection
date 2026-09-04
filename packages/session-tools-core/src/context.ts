@@ -360,6 +360,22 @@ export interface SessionToolContext {
   /** Read a Conductor run's verdict and node outputs from disk. Injected by SessionManager. */
   getTaskResults?(slug: string, runId?: string): Promise<TaskResultsPayload>;
 
+  /** Child node structured output. Injected by SessionManager for Conductor sessions. */
+  submitTaskOutput?(input: SubmitTaskOutputInput): Promise<{ ok: boolean; error?: string }>;
+
+  /** Parent-session structured verdict. Injected by SessionManager. */
+  submitTaskVerdict?(input: SubmitTaskVerdictInput): Promise<{ status: string }>;
+
+  submitOrchestrationPatch?(input: OrchestrationPatchInput): Promise<{ status: string; revision?: number }>;
+
+  submitOrchestrationDecision?(input: OrchestrationDecisionInput): Promise<{ status: string; revision?: number }>;
+
+  submitTaskNodeVerdict?(input: SubmitTaskNodeVerdictInput): Promise<{ ok: boolean; error?: string }>;
+
+  submitTaskDefinition?(input: SubmitTaskDefinitionInput): Promise<{ valid: boolean; errors?: string[]; yaml?: string }>;
+
+  controlTaskRun?(input: ControlTaskRunInput): Promise<{ status: string; conflict?: string }>;
+
   // ============================================================
   // Inter-Session Messaging
   // ============================================================
@@ -468,9 +484,11 @@ export interface ResolvedStatusResult {
 /** Input for create_task — structured fields, mapped onto a TaskSpec by the backend. */
 export interface CreateTaskInput {
   /** Short task title shown on the board (also drives the slug). */
-  title: string;
+  title?: string;
   /** What the task should accomplish — becomes the task goal and the initial node prompt. */
-  description: string;
+  description?: string;
+  /** Full v2 spec. Mutually exclusive with the single-node title/description form. */
+  spec?: unknown;
   /** Freeform rubric the final result is verified against. */
   acceptanceCriteria?: string;
   /** Source slugs enabled on the task's sessions. */
@@ -517,6 +535,62 @@ export interface RunTaskResult {
   status: string;
   nodeCount: number;
   nodes: RunTaskNodeState[];
+  tokensUsed?: number;
+  revision?: number;
+  blockers?: string[];
+}
+
+export interface SubmitTaskOutputInput {
+  text?: string;
+  values?: Record<string, unknown>;
+}
+
+export interface SubmitTaskVerdictInput {
+  result: 'pass' | 'fail';
+  reason?: string;
+  nodes?: string[];
+  runId?: string;
+}
+
+export interface OrchestrationPatchInput {
+  runId: string;
+  decisionId: string;
+  baseRevision: number;
+  rationale: string;
+  add?: unknown[];
+  update?: unknown[];
+  cancel?: string[];
+  action?: 'continue' | 'pause';
+}
+
+export interface OrchestrationDecisionInput {
+  runId: string;
+  checkpointId: string;
+  decisionId: string;
+  baseRevision: number;
+  action: 'continue' | 'patch' | 'pause';
+  rationale?: string;
+  add?: unknown[];
+  update?: unknown[];
+  cancel?: string[];
+}
+
+export interface SubmitTaskNodeVerdictInput {
+  result: 'pass' | 'fail';
+  reason?: string;
+  nodes?: string[];
+  evidence?: string;
+  nodeId?: string;
+}
+
+export interface SubmitTaskDefinitionInput {
+  spec: unknown;
+}
+
+export interface ControlTaskRunInput {
+  slug: string;
+  runId: string;
+  action: 'pause' | 'resume' | 'stop' | 'continue';
 }
 
 export interface GetTaskResultsInput {
@@ -539,7 +613,10 @@ export interface TaskResultsPayload {
     state: string;
     sessionId?: string;
     output?: string;
+    outputs?: Record<string, unknown>;
+    artifacts?: unknown[];
   }>;
+  revision?: number;
 }
 
 export interface SessionInfo {
@@ -618,6 +695,14 @@ export interface BackgroundTaskInfo {
   completedAt?: number;
   /** Present for first-class spawn_session children. */
   source?: 'spawn_session';
+  orchestrationId?: string;
+  rootSessionId?: string;
+  parentSessionId?: string;
+  depth?: number;
+  role?: 'coordinator' | 'worker' | 'reviewer';
+  lifecycle?: 'managed' | 'detached';
+  projectId?: string;
+  blocker?: string;
 }
 
 // ============================================================

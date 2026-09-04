@@ -21,13 +21,11 @@ describe('session persistence: shared project memory', () => {
     expect(picked.sharedProjectMemoryEnabled).toBe(false)
   })
 
-  it('treats missing legacy fields as shared while respecting explicit values', () => {
-    expect(isSharedProjectMemoryEnabled(undefined)).toBe(true)
-    expect(isSharedProjectMemoryEnabled({})).toBe(true)
-    expect(isSharedProjectMemoryEnabled({ sharedProjectMemoryEnabled: true })).toBe(true)
+  it('isolates every session, including an explicit stored true', () => {
+    expect(isSharedProjectMemoryEnabled(undefined)).toBe(false)
+    expect(isSharedProjectMemoryEnabled({})).toBe(false)
+    expect(isSharedProjectMemoryEnabled({ sharedProjectMemoryEnabled: true })).toBe(false)
     expect(isSharedProjectMemoryEnabled({ sharedProjectMemoryEnabled: false })).toBe(false)
-    expect(isSharedProjectMemoryEnabled({ sharedProjectMemoryEnabled: 'true' } as any)).toBe(false)
-    expect(isSharedProjectMemoryEnabled({ sharedProjectMemoryEnabled: 1 } as any)).toBe(false)
   })
 
   it('writes a privacy-safe default and preserves explicit shared snapshots', async () => {

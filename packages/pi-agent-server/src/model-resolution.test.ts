@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'bun:test';
-import { resolvePiModel, isDeniedMiniModelId, isModelNotFoundError } from './model-resolution.ts';
+import {
+  resolvePiModel,
+  isDeniedMiniModelId,
+  isModelNotFoundError,
+  isModelRejectionError,
+} from './model-resolution.ts';
 
 /**
  * Minimal mock of PiModelRegistry.
@@ -270,5 +275,22 @@ describe('isModelNotFoundError', () => {
     expect(isModelNotFoundError('rate limit exceeded')).toBe(false);
     expect(isModelNotFoundError('invalid api key')).toBe(false);
     expect(isModelNotFoundError('')).toBe(false);
+  });
+});
+
+describe('isModelRejectionError', () => {
+  it('matches an unsupported response that names the requested model', () => {
+    expect(isModelRejectionError(
+      "The 'gpt-5.6-sol' model is not supported when using Codex with a ChatGPT account.",
+      'gpt-5.6-sol',
+    )).toBe(true);
+  });
+
+  it('does not mistake an unsupported hosted tool for a model rejection', () => {
+    expect(isModelRejectionError("Hosted tool 'web_search' is not supported.", 'gpt-5.6-sol')).toBe(false);
+  });
+
+  it('matches explicit model_not_found errors without requiring the model id', () => {
+    expect(isModelRejectionError('Error code: model_not_found', 'gpt-5.6-sol')).toBe(true);
   });
 });

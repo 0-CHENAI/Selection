@@ -29,6 +29,10 @@ export const HANDLED_CHANNELS = [
   RPC_CHANNELS.appearance.SET_RICH_TOOL_DESCRIPTIONS,
   RPC_CHANNELS.sessions.GET_MODEL,
   RPC_CHANNELS.sessions.SET_MODEL,
+  RPC_CHANNELS.sessions.SET_SWARM_ENABLED,
+  RPC_CHANNELS.sessions.GET_SWARM_RUN_DETAILS,
+  RPC_CHANNELS.sessions.UPDATE_SWARM_BUDGET,
+  RPC_CHANNELS.sessions.STOP_SWARM,
   RPC_CHANNELS.settings.GET_DEFAULT_THINKING_LEVEL,
   RPC_CHANNELS.settings.SET_DEFAULT_THINKING_LEVEL,
   RPC_CHANNELS.settings.GET_SHARED_PROJECT_MEMORY_ENABLED,
@@ -87,6 +91,23 @@ export function registerSettingsHandlers(server: RpcServer, deps: HandlerDeps): 
   server.handle(RPC_CHANNELS.sessions.SET_MODEL, async (_ctx, sessionId: string, workspaceId: string, model: string | null, connection?: string) => {
     await deps.sessionManager.updateSessionModel(sessionId, workspaceId, model, connection)
     deps.platform.logger.info(`Session ${sessionId} model updated to: ${model}${connection ? ` (connection: ${connection})` : ''}`)
+  })
+
+  server.handle(RPC_CHANNELS.sessions.SET_SWARM_ENABLED, async (_ctx, sessionId: string, enabled: boolean) => {
+    if (typeof enabled !== 'boolean') throw new Error('Swarm enabled must be a boolean')
+    await deps.sessionManager.updateSessionSwarmEnabled(sessionId, enabled)
+  })
+
+  server.handle(RPC_CHANNELS.sessions.GET_SWARM_RUN_DETAILS, async (_ctx, sessionId: string, workspaceId: string) => {
+    return deps.sessionManager.getSwarmRunDetails(sessionId, workspaceId)
+  })
+
+  server.handle(RPC_CHANNELS.sessions.UPDATE_SWARM_BUDGET, async (_ctx, sessionId: string, tokenBudget: number) => {
+    await deps.sessionManager.updateSwarmTokenBudget(sessionId, tokenBudget)
+  })
+
+  server.handle(RPC_CHANNELS.sessions.STOP_SWARM, async (_ctx, sessionId: string) => {
+    return deps.sessionManager.stopSwarm(sessionId)
   })
 
   // Open native folder dialog for selecting working directory (routed to client)

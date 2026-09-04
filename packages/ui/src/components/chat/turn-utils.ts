@@ -83,11 +83,12 @@ export type Turn = AssistantTurn | UserTurn | SystemTurn | AuthRequestTurn
  * - Backend turnId can be reused across visually split assistant cards
  *   (e.g., steer/interruption boundaries).
  * - Expansion state must be keyed by UI-card identity, not raw backend turnId.
+ *
+ * Do not include `response.messageId`. That id appears and disappears as
+ * pending text, intermediate rows, and tools arrive, which would remount the
+ * card and replay expand/collapse on every new element.
  */
 export function getAssistantTurnUiKey(turn: AssistantTurn, index: number): string {
-  if (turn.response?.messageId) {
-    return `assistant:msg:${turn.response.messageId}`
-  }
   return `assistant:turn:${turn.turnId}:${turn.timestamp}:${index}`
 }
 
@@ -241,6 +242,41 @@ export function shouldShowThinkingIndicator(phase: TurnPhase, isBuffering: boole
   // - awaiting: gap between tool completion and next action
   // - streaming but buffering: text started but not ready to display
   return phase === 'pending' || phase === 'awaiting' || (phase === 'streaming' && isBuffering)
+}
+
+/**
+ * Determines whether the generic thinking row is needed in addition to the
+ * visible work-chain activities. A running intermediate/thinking activity
+ * renders its own status, so mounting another row would duplicate it.
+ */
+export function shouldShowGenericThinkingIndicator(
+  phase: TurnPhase,
+  isBuffering: boolean,
+  renderedActivities: ReadonlyArray<Pick<ActivityItem, 'type' | 'status'>>,
+): boolean {
+  return shouldShowThinkingIndicator(phase, isBuffering)
+    && !renderedActivities.some(
+      activity => (activity.type === 'intermediate' || activity.type === 'thinking')
+        && activity.status === 'running',
+    )
+}
+
+/**
+ * Desktop `Streaming...` footer means "this card's body is still being typed".
+ * Once tools (including spawn_session) have started, progress belongs on the
+ * work chain / task bar — not a footer that makes a finished preamble look live.
+ * Keep `response.isStreaming` itself unchanged so the live card tree is not remounted.
+ */
+export function shouldShowStreamingFooter(input: {
+  isStreaming: boolean
+  compactMode?: boolean
+  isCommentary?: boolean
+  hasToolActivities?: boolean
+}): boolean {
+  return !!input.isStreaming
+    && !input.compactMode
+    && !input.isCommentary
+    && !input.hasToolActivities
 }
 
 /**
@@ -431,6 +467,50 @@ export interface GroupTurnsOptions {
    * Mirrors the messaging-gateway/renderer.ts lastAssistantText fallback.
    */
   isSessionProcessing?: boolean
+  /**
+   * Keep the latest spawn_session turn visually open while its managed Swarm
+   * workers are still running. The parent agent may be idle between its
+   * dispatch turn and the hidden aggregation turn, but the user-visible task
+   * has not completed yet.
+   */
+  isManagedSwarmRunning?: boolean
+}
+
+/** Normalize only Selection's own session-tool aliases, never third-party namespaces. */
+export function normalizeCraftSessionToolName(toolName: string): string {
+  if (toolName.startsWith('mcp__session__')) return toolName.slice('mcp__session__'.length)
+  if (toolName.startsWith('session__')) return toolName.slice('session__'.length)
+  return toolName
+}
+
+function isSpawnSessionToolName(toolName: string | undefined): boolean {
+  return !!toolName && normalizeCraftSessionToolName(toolName).toLowerCase() === 'spawn_session'
+}
+
+function isManagedAutomaticSpawn(activity: ActivityItem): boolean {
+  if (activity.type !== 'tool' || !isSpawnSessionToolName(activity.toolName)) return false
+  if (!activity.content) return false
+  try {
+    const result = JSON.parse(activity.content) as Record<string, unknown>
+    const keepsRunning = result.status === 'started'
+      || (result.status === 'timeout' && result.mode === 'wait')
+    return keepsRunning
+      && result.spawnReason === 'automatic'
+      && result.lifecycle === 'managed'
+  } catch {
+    return false
+  }
+}
+
+function keepLatestManagedSwarmTurnOpen(turns: Turn[]): void {
+  const latestAssistant = turns.findLast((turn): turn is AssistantTurn => turn.type === 'assistant')
+  if (!latestAssistant) return
+  if (turns.at(-1) !== latestAssistant) return
+  if (!latestAssistant.activities.some(isManagedAutomaticSpawn)) return
+
+  demoteResponseToWorkChain(latestAssistant)
+  latestAssistant.isComplete = false
+  latestAssistant.isStreaming = true
 }
 
 /**
@@ -543,6 +623,11 @@ export function groupMessagesByTurn(messages: Message[], options: GroupTurnsOpti
             isStreaming: false,
             messageId: lastTextActivity.id,
           }
+          // The same body has changed semantic roles from process commentary
+          // to the only available final response. Keep a single visible copy.
+          currentTurn.activities = currentTurn.activities.filter(
+            activity => activity.id !== lastTextActivity.id,
+          )
         }
       }
 
@@ -632,7 +717,7 @@ export function groupMessagesByTurn(messages: Message[], options: GroupTurnsOpti
     // Error/info/warning messages are standalone
     if (message.role === 'error' || message.role === 'info' || message.role === 'warning') {
       // Flush current turn first (mark as interrupted if info message)
-      const isInterruption = message.role === 'info'
+      const isInterruption = message.role === 'info' || message.role === 'error'
       // For error/warning (not info), the previous turn is complete
       if (currentTurn && !isInterruption) currentTurn.isComplete = true
       flushCurrentTurn(isInterruption)
@@ -698,6 +783,15 @@ export function groupMessagesByTurn(messages: Message[], options: GroupTurnsOpti
       // the streaming reply — after a Read/tool step they must not become a
       // gray activity bar that restates the same markdown.
       if (message.isIntermediate) {
+        // Keep an empty pending item as the live thinking indicator, but do not
+        // turn a completed whitespace-only event into a blank work-chain row.
+        if (!message.isPending && !hasRenderableAssistantText(message.content)) {
+          if (currentTurn && !message.isStreaming) {
+            currentTurn.isStreaming = false
+          }
+          continue
+        }
+
         currentTurn = ensureOpenAssistantTurn(message, { isStreaming: !!message.isPending })
         // Always add to current turn as activity (ignoring turnId differences)
         // Pending messages show as 'running' until we know they're complete
@@ -758,6 +852,7 @@ export function groupMessagesByTurn(messages: Message[], options: GroupTurnsOpti
         text: message.content,
         isStreaming: !!message.isStreaming,
         streamStartTime: message.isStreaming ? message.timestamp : undefined,
+        completedRevealStartTime: message.isStreaming ? undefined : message.timestamp,
         messageId: message.id,
         annotations: message.annotations,
       }
@@ -787,6 +882,10 @@ export function groupMessagesByTurn(messages: Message[], options: GroupTurnsOpti
 
   // Flush any remaining turn
   flushCurrentTurn()
+
+  if (options.isManagedSwarmRunning) {
+    keepLatestManagedSwarmTurnOpen(turns)
+  }
 
   return turns
 }
@@ -1113,7 +1212,7 @@ export function formatOrchestrationToolSummary(
   content: string | undefined,
 ): string | null {
   if (!toolName || !content) return null
-  const name = toolName.replace(/^mcp__[^_]+__/, '')
+  const name = normalizeCraftSessionToolName(toolName)
   if (!ORCHESTRATION_TOOL_NAMES.has(name)) return null
 
   const parsed = parseOrchestrationResult(content)
@@ -1205,6 +1304,32 @@ export interface ActivityGroup {
  */
 export function isActivityGroup(item: ActivityItem | ActivityGroup): item is ActivityGroup {
   return 'type' in item && item.type === 'group' && 'parent' in item && 'children' in item
+}
+
+/**
+ * Return only activity rows exposed by the current group expansion state.
+ * Collapsed children stay mounted for animation, but users cannot see them and
+ * they therefore must not suppress higher-level progress feedback.
+ */
+export function getRenderedActivityRows(
+  items: ReadonlyArray<ActivityItem | ActivityGroup>,
+  expandedGroupIds: ReadonlySet<string>,
+): ActivityItem[] {
+  const rows: ActivityItem[] = []
+
+  for (const item of items) {
+    if (!isActivityGroup(item)) {
+      rows.push(item)
+      continue
+    }
+
+    rows.push(item.parent)
+    if (expandedGroupIds.has(item.parent.id)) {
+      rows.push(...item.children)
+    }
+  }
+
+  return rows
 }
 
 /**

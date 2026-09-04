@@ -1,6 +1,6 @@
 import * as React from 'react'
 import { useTranslation } from "react-i18next"
-import { useSetAtom } from 'jotai'
+import { useAtomValue, useSetAtom } from 'jotai'
 import { ChevronDown, Square, ArrowUpRight, CheckCircle2, XCircle, AlertTriangle, X } from 'lucide-react'
 import {
   DropdownMenu,
@@ -13,7 +13,11 @@ import { Spinner } from '@craft-agent/ui'
 import { cn } from '@/lib/utils'
 import { toast } from 'sonner'
 import type { BackgroundTask } from './ActiveTasksBar'
-import { backgroundTasksAtomFamily } from '@/atoms/sessions'
+import { backgroundTasksAtomFamily, sessionMetaMapAtom, type BackgroundTaskStatus } from '@/atoms/sessions'
+import {
+  TASK_CHIP_WIDTH_CLASS,
+  resolveBackgroundTaskChipLabel,
+} from './background-task-chip'
 
 /** Terminal data for overlay display */
 export interface TerminalOverlayData {
@@ -36,11 +40,6 @@ function formatElapsed(seconds: number): string {
   return remainingMinutes > 0 ? `${hours}h ${remainingMinutes}m` : `${hours}h`
 }
 
-/** Shorten task ID for compact display (show first 8 chars) */
-function shortenId(id: string): string {
-  return id.length > 8 ? `${id.slice(0, 8)}...` : id
-}
-
 export interface TaskActionMenuProps {
   /** Background task data */
   task: BackgroundTask
@@ -57,6 +56,23 @@ export interface TaskActionMenuProps {
   className?: string
 }
 
+/** Module-level so elapsed ticks do not remount Spinner and restart its CSS animation. */
+export function TaskStatusIcon({ status }: { status: BackgroundTaskStatus }) {
+  switch (status) {
+    case 'completed':
+      return <CheckCircle2 className="h-3.5 w-3.5 text-green-600 dark:text-green-500" />
+    case 'failed':
+      return <XCircle className="h-3.5 w-3.5 text-destructive" />
+    case 'stopped':
+      return <Square className="h-3 w-3 opacity-60" />
+    case 'orphaned':
+    case 'stale':
+      return <AlertTriangle className="h-3.5 w-3.5 text-amber-600 dark:text-amber-500" />
+    default:
+      return <Spinner className="text-xs" />
+  }
+}
+
 /**
  * TaskActionMenu - Dropdown menu for background task actions
  *
@@ -69,6 +85,7 @@ export function TaskActionMenu({ task, sessionId, onKillTask, onOpenSession, onI
   const { t } = useTranslation()
   const [open, setOpen] = React.useState(false)
   const setTasks = useSetAtom(backgroundTasksAtomFamily(sessionId))
+  const sessionMetaMap = useAtomValue(sessionMetaMapAtom)
 
   const isTerminal = task.status === 'completed'
     || task.status === 'failed'
@@ -95,8 +112,12 @@ export function TaskActionMenu({ task, sessionId, onKillTask, onOpenSession, onI
     ? Math.max(0, Math.floor(((task.completedAt ?? Date.now()) - task.startTime) / 1000))
     : Math.max(localElapsed, task.elapsedSeconds)
 
-  // Prefer the human-readable intent over the opaque task ID for the chip label.
-  const taskLabel = task.intent?.trim() ?? ''
+  const taskLabel = resolveBackgroundTaskChipLabel({
+    taskId: task.id,
+    intent: task.intent,
+    sessionName: sessionMetaMap.get(task.id)?.name,
+  })
+  const fullLabel = task.intent?.trim() || sessionMetaMap.get(task.id)?.name || taskLabel
 
   const handleViewOutput = async () => {
     try {
@@ -149,22 +170,6 @@ export function TaskActionMenu({ task, sessionId, onKillTask, onOpenSession, onI
     (task.status === 'orphaned' || task.status === 'stale') && "bg-amber-500/10 hover:bg-amber-500/15 dark:bg-amber-500/15",
   )
 
-  const StatusIcon = () => {
-    switch (task.status) {
-      case 'completed':
-        return <CheckCircle2 className="h-3.5 w-3.5 text-green-600 dark:text-green-500" />
-      case 'failed':
-        return <XCircle className="h-3.5 w-3.5 text-destructive" />
-      case 'stopped':
-        return <Square className="h-3 w-3 opacity-60" />
-      case 'orphaned':
-      case 'stale':
-        return <AlertTriangle className="h-3.5 w-3.5 text-amber-600 dark:text-amber-500" />
-      default:
-        return <Spinner className="text-xs" />
-    }
-  }
-
   const statusLabel: Record<string, string> = {
     completed: t('chat.taskStatusDone', 'done'),
     failed: t('chat.taskStatusFailed', 'failed'),
@@ -186,11 +191,11 @@ export function TaskActionMenu({ task, sessionId, onKillTask, onOpenSession, onI
     <>
           {/* Status icon */}
           <div className="flex items-center justify-center shrink-0">
-            <StatusIcon />
+            <TaskStatusIcon status={task.status} />
           </div>
 
           {/* Type badge */}
-          <span className="opacity-60">
+          <span className="opacity-60 shrink-0">
             {task.type === 'workflow'
               ? t('chat.taskTypeWorkflow')
               : task.type === 'agent'
@@ -198,18 +203,9 @@ export function TaskActionMenu({ task, sessionId, onKillTask, onOpenSession, onI
                 : t('chat.taskTypeShell')}
           </span>
 
-          {/* Intent (the actual task description) — falls back to the shortened
-              task ID only when no intent was captured. Truncated so a long intent
-              can't blow up the chip; full text shown on hover. */}
-          {taskLabel ? (
-            <span className="opacity-80 truncate max-w-[220px]" title={taskLabel}>
-              {taskLabel}
-            </span>
-          ) : (
-            <span className="font-mono opacity-80">
-              {shortenId(task.id)}
-            </span>
-          )}
+          <span className="opacity-80 truncate min-w-0 flex-1" title={fullLabel}>
+            {taskLabel}
+          </span>
 
           {/* Workflow fan-out progress: live count of completed sub-agents. */}
           {task.type === 'workflow' && (task.agentsCompleted ?? 0) > 0 && (
@@ -223,11 +219,11 @@ export function TaskActionMenu({ task, sessionId, onKillTask, onOpenSession, onI
 
           {/* Elapsed time, or terminal status word */}
           {task.status === 'running' ? (
-            <span className="opacity-60 tabular-nums">
+            <span className="opacity-60 tabular-nums shrink-0">
               {formatElapsed(displayElapsed)}
             </span>
           ) : (
-            <span className="opacity-70">
+            <span className="opacity-70 shrink-0">
               {statusLabel[task.status] ?? task.status}
             </span>
           )}
@@ -239,6 +235,7 @@ export function TaskActionMenu({ task, sessionId, onKillTask, onOpenSession, onI
       className={cn(
         "h-[30px] pl-2.5 pr-1 text-xs font-medium rounded-[8px]",
         "flex items-center gap-1 shrink-0 select-none",
+        task.type === 'agent' && TASK_CHIP_WIDTH_CLASS,
         "transition-all shadow-minimal",
         statusTint,
         className
@@ -246,7 +243,7 @@ export function TaskActionMenu({ task, sessionId, onKillTask, onOpenSession, onI
     >
       <button
         type="button"
-        className="flex items-center gap-1.5 min-w-0 cursor-pointer"
+        className="flex items-center gap-1.5 min-w-0 flex-1 cursor-pointer"
         title={chipTitle}
         onClick={() => {
           if (canOpenSession && onOpenSession) {

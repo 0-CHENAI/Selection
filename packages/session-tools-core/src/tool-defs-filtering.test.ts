@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'bun:test';
 import {
   SESSION_TOOL_DEFS,
+  SubmitOrchestrationDecisionSchema,
+  SubmitTaskNodeVerdictSchema,
   getSessionToolDefs,
   getSessionToolNames,
   getSessionToolRegistry,
@@ -51,5 +53,30 @@ describe('session tool filtering helpers', () => {
     const allowed = getSessionSafeAllowedToolNames();
     const blocked = getSessionSafeBlockedToolNames();
     for (const name of allowed) expect(blocked.has(name)).toBe(false);
+  });
+
+  it('rejects incomplete fail node verdicts and patch decisions at the tool schema', () => {
+    expect(SubmitTaskNodeVerdictSchema.safeParse({ result: 'fail', reason: 'bad' }).success).toBe(false);
+    expect(SubmitTaskNodeVerdictSchema.safeParse({
+      result: 'fail',
+      reason: 'bad',
+      evidence: 'proof',
+      nodes: ['work'],
+    }).success).toBe(true);
+    expect(SubmitOrchestrationDecisionSchema.safeParse({
+      runId: 'r1',
+      checkpointId: 'cp',
+      decisionId: 'd1',
+      baseRevision: 0,
+      action: 'patch',
+    }).success).toBe(false);
+    expect(SubmitOrchestrationDecisionSchema.safeParse({
+      runId: 'r1',
+      checkpointId: 'cp',
+      decisionId: 'd1',
+      baseRevision: 0,
+      action: 'patch',
+      rationale: 'add a missing branch',
+    }).success).toBe(true);
   });
 });

@@ -15,6 +15,7 @@ import type {
   BrowserInstanceInfo,
   DeepLinkNavigation,
   TaskGenerateResult,
+  TaskRunSnapshotDto,
 } from './dto'
 
 export interface BroadcastEventMap {
@@ -31,6 +32,7 @@ export interface BroadcastEventMap {
   [RPC_CHANNELS.skills.CHANGED]: [workspaceId: string, skills: LoadedSkill[]]
   [RPC_CHANNELS.projects.CHANGED]: [workspaceId: string, projects: LoadedProject[]]
   [RPC_CHANNELS.tasks.GENERATED]: [workspaceId: string, result: TaskGenerateResult]
+  [RPC_CHANNELS.tasks.RUN_CHANGED]: [workspaceId: string, snapshot: TaskRunSnapshotDto]
   [RPC_CHANNELS.llmConnections.CHANGED]: []
   [RPC_CHANNELS.permissions.DEFAULTS_CHANGED]: [value: null]
 

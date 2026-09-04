@@ -9,6 +9,9 @@ import {
 
 export type CustomEndpointInput = 'text' | 'image'
 
+/** Custom endpoint protocol — determines which streaming adapter Pi SDK uses. */
+export type CustomEndpointApi = 'openai-completions' | 'anthropic-messages'
+
 export interface CustomEndpointModelDefaults {
   supportsImages?: boolean
 }
@@ -77,6 +80,7 @@ export function buildCustomEndpointModelDef(
   id: string,
   defaults?: CustomEndpointModelDefaults,
   overrides?: CustomEndpointModelOverrides,
+  api?: CustomEndpointApi,
 ) {
   const supportsImages = overrides?.supportsImages
     ?? defaults?.supportsImages
@@ -96,5 +100,6 @@ export function buildCustomEndpointModelDef(
     cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
     contextWindow,
     maxTokens,
+    ...(api === 'openai-completions' ? { compat: { supportsStore: false } } : {}),
   }
 }

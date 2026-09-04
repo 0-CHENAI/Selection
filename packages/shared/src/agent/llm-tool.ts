@@ -24,7 +24,7 @@ type ToolResult = {
 import { readFile } from 'fs/promises';
 import { existsSync, statSync } from 'fs';
 import path from 'node:path';
-import { getModelById, getDefaultSummarizationModel, MODEL_REGISTRY } from '../config/models.ts';
+import { getDefaultSummarizationModel, resolveKnownRegistryModelId } from '../config/models.ts';
 
 // ============================================================================
 // QUERY INTERFACES (used by agent backends to implement queryFn)
@@ -165,6 +165,22 @@ export interface BuildCallLlmOptions {
   validateModel?: (resolvedModelId: string) => string | undefined;
   /** Session directory for resolving relative attachment paths */
   sessionPath?: string;
+  /** Current session model used when the caller omits `model` (#192). */
+  defaultModel?: string;
+}
+
+/**
+ * `call_llm` inherits the current session model unless the caller names another.
+ * Title generation and other utility completions keep their own mini-model path.
+ */
+export function resolveCallLlmModel(
+  requested: string | undefined,
+  sessionModel: string | undefined,
+): string | undefined {
+  const explicit = requested?.trim();
+  if (explicit) return explicit;
+  const inherited = sessionModel?.trim();
+  return inherited || undefined;
 }
 
 /**
@@ -206,15 +222,14 @@ export async function buildCallLlmRequest(
 
   textParts.push(prompt);
 
-  // Resolve model against registry, with optional backend-specific validation
-  let model = input.model as string | undefined;
+  // Resolve known registry ids only — do not map "Opus" onto claude-opus-4-8.
+  // Unspecified call_llm inherits the current session model, not the cheap/fast tier.
+  let model = resolveCallLlmModel(
+    typeof input.model === 'string' ? input.model : undefined,
+    options.defaultModel,
+  );
   if (model) {
-    const modelDef = getModelById(model)
-      || MODEL_REGISTRY.find(m => m.shortName.toLowerCase() === model!.toLowerCase())
-      || MODEL_REGISTRY.find(m => m.name.toLowerCase() === model!.toLowerCase());
-    if (modelDef) {
-      model = modelDef.id;
-    }
+    model = resolveKnownRegistryModelId(model) ?? model
 
     // Backend-specific model validation (e.g., Codex rejects non-OpenAI models)
     if (options.validateModel) {
@@ -547,6 +562,8 @@ export interface LLMToolOptions {
   sessionId: string;
   /** Session directory for resolving relative attachment paths */
   sessionPath?: string;
+  /** Current session model used when the caller omits `model`. */
+  defaultModel?: string;
   /**
    * Lazy resolver for the agent-native query callback.
    * Called at execution time to get the current callback from the session registry.
@@ -586,22 +603,9 @@ export function createLLMTool(options: LLMToolOptions) {
         );
       }
 
-      // --- Validate and resolve model against registry ---
+      // Known Claude ids stay as registry ids. ORDER aliases (Opus, Laufry) pass through.
       if (args.model) {
-        let modelDef = getModelById(args.model);
-        if (!modelDef) {
-          modelDef = MODEL_REGISTRY.find(m => m.shortName.toLowerCase() === args.model!.toLowerCase())
-            || MODEL_REGISTRY.find(m => m.name.toLowerCase() === args.model!.toLowerCase());
-          if (modelDef) {
-            args.model = modelDef.id;
-          } else {
-            const available = MODEL_REGISTRY.map(m => `  - ${m.id} (${m.shortName})`).join('\n');
-            return errorResponse(
-              `Unknown model: "${args.model}"\n\n` +
-              `Available models:\n${available}`
-            );
-          }
-        }
+        args.model = resolveKnownRegistryModelId(args.model) ?? args.model
       }
 
       // ========================================
@@ -663,7 +667,7 @@ export function createLLMTool(options: LLMToolOptions) {
       // EXECUTE QUERY
       // ========================================
 
-      const model = args.model || getDefaultSummarizationModel();
+      const model = resolveCallLlmModel(args.model, options.defaultModel) || getDefaultSummarizationModel();
       const schema = args.outputSchema || (args.outputFormat ? OUTPUT_FORMATS[args.outputFormat] : null);
 
       try {

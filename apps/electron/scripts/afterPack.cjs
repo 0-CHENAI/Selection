@@ -44,10 +44,17 @@ function pruneForeignPlatformRuntimes(context, resourcesRoot) {
   console.log(`Packaged OfficeCLI runtime pruned to ${target}`);
 }
 
+function resolvePackagedResourcesRoot(context) {
+  if (context.electronPlatformName !== 'darwin') {
+    return path.join(context.appOutDir, 'resources');
+  }
+  const productFilename = context.packager.appInfo.productFilename;
+  if (!productFilename) throw new Error('Packaged app product filename is missing');
+  return path.join(context.appOutDir, `${productFilename}.app`, 'Contents', 'Resources');
+}
+
 module.exports = async function afterPack(context) {
-  const resourcesRoot = context.electronPlatformName === 'darwin'
-    ? path.join(context.appOutDir, 'Selection.app', 'Contents', 'Resources')
-    : path.join(context.appOutDir, 'resources');
+  const resourcesRoot = resolvePackagedResourcesRoot(context);
   pruneForeignPlatformRuntimes(context, resourcesRoot);
 
   // Only process macOS builds
@@ -83,3 +90,4 @@ module.exports = async function afterPack(context) {
 };
 
 module.exports.pruneForeignPlatformRuntimes = pruneForeignPlatformRuntimes;
+module.exports.resolvePackagedResourcesRoot = resolvePackagedResourcesRoot;

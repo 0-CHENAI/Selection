@@ -5,8 +5,8 @@
  * until required files (like guide.md) have been read.
  */
 import { describe, it, expect, beforeEach, mock } from 'bun:test';
-import { homedir } from 'node:os';
 import { resolve, join } from 'node:path';
+import { CONFIG_DIR } from '../../../config/paths.ts';
 import { PrerequisiteManager } from '../prerequisite-manager.ts';
 
 let mockExistsPaths: Set<string> = new Set();
@@ -26,10 +26,6 @@ mock.module('node:fs', () => ({
   },
 }));
 
-mock.module('../../../config/storage.ts', () => ({
-  getBrowserToolEnabled: () => true,
-}));
-
 const WORKSPACE_ROOT = '/test/workspace';
 
 function guidePath(slug: string): string {
@@ -37,7 +33,7 @@ function guidePath(slug: string): string {
 }
 
 function browserDocPath(): string {
-  return resolve(join(homedir(), '.selection', 'docs', 'browser-tools.md'));
+  return resolve(join(CONFIG_DIR, 'docs', 'browser-tools.md'));
 }
 
 describe('PrerequisiteManager', () => {
@@ -52,6 +48,7 @@ describe('PrerequisiteManager', () => {
     manager = new PrerequisiteManager({
       workspaceRootPath: WORKSPACE_ROOT,
       onDebug: (msg) => debugMessages.push(msg),
+      browserToolEnabled: true,
     });
   });
 
@@ -122,6 +119,17 @@ describe('PrerequisiteManager', () => {
       const result = manager.checkPrerequisites('mcp__session__browser_tool');
       expect(result.allowed).toBe(false);
       expect(result.blockReason).toContain(docsPath);
+    });
+
+    it('skips browser prerequisites when the built-in browser tool is disabled', () => {
+      const docsPath = browserDocPath();
+      mockExistsPaths.add(docsPath);
+      const disabledManager = new PrerequisiteManager({
+        workspaceRootPath: WORKSPACE_ROOT,
+        browserToolEnabled: false,
+      });
+
+      expect(disabledManager.checkPrerequisites('browser_tool').allowed).toBe(true);
     });
   });
 

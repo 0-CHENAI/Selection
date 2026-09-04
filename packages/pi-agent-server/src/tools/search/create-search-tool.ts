@@ -8,7 +8,6 @@
 import { Type } from '@sinclair/typebox';
 import type { ToolDefinition } from '@earendil-works/pi-coding-agent';
 import type { WebSearchProvider, WebSearchResult } from './types.ts';
-import { DDGSearchProvider } from './providers/ddg.ts';
 
 const schema = Type.Object({
   query: Type.String({ description: 'The search query' }),
@@ -35,12 +34,13 @@ function formatResults(
     .join('\n\n');
 
   const noteText = note ? `${note}\n\n` : '';
+  const resultText = formatted || 'No relevant results found.';
 
   return {
     content: [
       {
         type: 'text' as const,
-        text: `${noteText}Search results for "${query}" (via ${providerName}):\n\n${formatted}`,
+        text: `${noteText}Search results for "${query}" (via ${providerName}):\n\n${resultText}`,
       },
     ],
     details: {},
@@ -55,7 +55,7 @@ function formatErrorSnippet(message: string, max = 180): string {
 
 export function createSearchTool(
   provider: WebSearchProvider,
-  fallbackProvider: WebSearchProvider = new DDGSearchProvider(),
+  fallbackProvider?: WebSearchProvider,
 ): ToolDefinition<typeof schema> {
   return {
     name: 'web_search',
@@ -75,8 +75,7 @@ export function createSearchTool(
       } catch (err) {
         const primaryMsg = err instanceof Error ? err.message : String(err);
 
-        const canFallback = provider.name !== fallbackProvider.name;
-        if (canFallback) {
+        if (fallbackProvider && provider.name !== fallbackProvider.name) {
           try {
             const fallbackResults = await fallbackProvider.search(query, count);
             return formatResults(

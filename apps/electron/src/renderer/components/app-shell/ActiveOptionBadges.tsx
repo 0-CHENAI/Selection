@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next"
 import { cn } from '@/lib/utils'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { SlashCommandMenu, DEFAULT_SLASH_COMMAND_GROUPS, type SlashCommandId } from '@/components/ui/slash-command-menu'
-import { BrainCircuit, ChevronDown, Info } from 'lucide-react'
+import { ChevronDown, Info } from 'lucide-react'
 import { PERMISSION_MODE_CONFIG, type PermissionMode } from '@craft-agent/shared/agent/modes'
 import { ActiveTasksBar, type BackgroundTask } from './ActiveTasksBar'
 import type { TerminalOverlayData } from './TaskActionMenu'
@@ -15,11 +15,10 @@ import { resolveEntityColor } from '@craft-agent/shared/colors'
 import { useTheme } from '@/context/ThemeContext'
 import { useDynamicStack } from '@/hooks/useDynamicStack'
 import type { SessionStatus } from '@/config/session-status-config'
-import { getState } from '@/config/session-status-config'
-import { SessionStatusMenu } from '@/components/ui/session-status-menu'
 import { MetadataBadge } from '@/components/ui/metadata-badge'
 import { openLabelLink } from '@/lib/open-label-link'
 import { SessionInfoPopover } from './SessionInfoPopover'
+import { SwarmToggle } from './input/SwarmToggle'
 
 // ============================================================================
 // Permission Mode Icon Component
@@ -78,10 +77,13 @@ export interface ActiveOptionBadgesProps {
   sessionStatuses?: SessionStatus[]
   /** Current session state ID */
   currentSessionStatus?: string
-  /** Show that this project-bound session shares the project's persistent memory. */
-  showSharedProjectMemory?: boolean
   /** Callback when state changes */
   onSessionStatusChange?: (stateId: string) => void
+  /** Per-session opt-in for autonomous Swarm delegation. */
+  swarmEnabled?: boolean
+  onSwarmEnabledChange?: (enabled: boolean) => void | Promise<void>
+  swarmToggleDisabled?: boolean
+  swarmRunning?: boolean
   /** Additional CSS classes */
   className?: string
 }
@@ -109,10 +111,10 @@ export function ActiveOptionBadges({
   onLabelsChange,
   autoOpenLabelId,
   onAutoOpenConsumed,
-  sessionStatuses = [],
-  currentSessionStatus,
-  showSharedProjectMemory = false,
-  onSessionStatusChange,
+  swarmEnabled = false,
+  onSwarmEnabledChange,
+  swarmToggleDisabled = false,
+  swarmRunning = false,
   className,
 }: ActiveOptionBadgesProps) {
   const { t } = useTranslation()
@@ -136,14 +138,7 @@ export function ActiveOptionBadges({
 
   const hasLabels = resolvedLabels.length > 0
 
-  // Resolve the current state from sessionStatuses for the badge display.
-  // Every session always has a state — fall back to the default state (or 'todo')
-  // when currentSessionStatus isn't explicitly set, matching SessionList's behavior.
-  const effectiveStateId = currentSessionStatus || 'todo'
-  const resolvedState = sessionStatuses.length > 0 ? getState(effectiveStateId, sessionStatuses) : undefined
-  const hasState = !!resolvedState
-
-  // Show the stacking container when there are labels (state badge is now rendered standalone on the left)
+  // Labels keep their existing dynamic stack after the standalone Swarm badge.
   const hasStackContent = hasLabels
 
   // Dynamic stacking with equal visible strips: ResizeObserver computes per-badge
@@ -152,7 +147,7 @@ export function ActiveOptionBadges({
   const stackRef = useDynamicStack({ gap: 8, minVisible: 20, reservedStart: 0 })
 
   // Only render if badges or tasks are active
-  if (!permissionMode && tasks.length === 0 && !hasState && !hasStackContent && !showSharedProjectMemory) {
+  if (!permissionMode && tasks.length === 0 && !onSwarmEnabledChange && !hasStackContent) {
     return null
   }
 
@@ -175,7 +170,7 @@ export function ActiveOptionBadges({
       )}
 
     <div className={cn("flex items-start gap-2 mb-2 px-px pt-px pb-0.5", className)}>
-      {/* Left side: mode → state → labels stack */}
+      {/* Left side: permission → Swarm → labels stack */}
       <div className="flex items-start gap-2 min-w-0 flex-1">
         {/* Permission Mode Badge */}
         {permissionMode && (
@@ -188,25 +183,16 @@ export function ActiveOptionBadges({
           </div>
         )}
 
-        {/* State Badge — standalone on the left, after Mode */}
-        {hasState && resolvedState && (
+        {/* Swarm replaces the workflow-state badge in the composer toolbar. */}
+        {onSwarmEnabledChange && (
           <div className="shrink-0">
-            <StateBadge
-              state={resolvedState}
-              sessionStatuses={sessionStatuses}
-              onSessionStatusChange={onSessionStatusChange}
-              sessionId={sessionId}
+            <SwarmToggle
+              enabled={swarmEnabled}
+              onEnabledChange={onSwarmEnabledChange}
+              disabled={swarmToggleDisabled}
+              running={swarmRunning}
             />
           </div>
-        )}
-
-        {showSharedProjectMemory && (
-          <MetadataBadge
-            label={t('chat.sharedProjectMemory')}
-            icon={<BrainCircuit className="h-3.5 w-3.5" />}
-            shadow="minimal"
-            tabIndex={-1}
-          />
         )}
 
         {/* Stacking container for label badges (left side).
@@ -337,83 +323,6 @@ function LabelBadge({
         className="relative"
       />
     </LabelValuePopover>
-  )
-}
-
-// ============================================================================
-// State Badge Component
-// ============================================================================
-
-/**
- * Renders the current workflow state as a badge in the dynamic stacking container.
- * Click opens a SessionStatusMenu popover for changing the state.
- * Styled consistently with label badges (h-[30px], rounded-[8px], color-mix tinting).
- */
-function StateBadge({
-  state,
-  sessionStatuses,
-  onSessionStatusChange,
-  sessionId,
-}: {
-  state: SessionStatus
-  sessionStatuses: SessionStatus[]
-  onSessionStatusChange?: (stateId: string) => void
-  sessionId?: string
-}) {
-  const { t } = useTranslation()
-  const [open, setOpen] = React.useState(false)
-
-  const handleSelect = React.useCallback((stateId: string) => {
-    setOpen(false)
-    onSessionStatusChange?.(stateId)
-  }, [onSessionStatusChange])
-
-  // Use the state's resolved color for tinting (same color-mix pattern as labels)
-  const badgeColor = state.resolvedColor || 'var(--foreground)'
-  const applyColor = state.iconColorable
-
-  const DEFAULT_STATUS_IDS = new Set(['backlog', 'todo', 'needs-review', 'done', 'cancelled'])
-  const stateLabel = DEFAULT_STATUS_IDS.has(state.id) ? t(`status.${state.id}`, state.label) : state.label
-
-  return (
-    <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger asChild>
-        <MetadataBadge
-          label={stateLabel}
-          badgeColor={badgeColor}
-          interactive
-          isActive={open}
-          showChevron
-          icon={(
-            <span
-              className="shrink-0 flex items-center w-3.5 h-3.5 [&>svg]:w-full [&>svg]:h-full [&>img]:w-full [&>img]:h-full [&>span]:text-xs"
-              style={applyColor ? { color: state.resolvedColor } : undefined}
-            >
-              {state.icon}
-            </span>
-          )}
-          className="pl-2.5"
-        />
-      </PopoverTrigger>
-      <PopoverContent
-        className="w-auto p-0 border-0 shadow-none bg-transparent"
-        side="top"
-        align="end"
-        sideOffset={4}
-        onCloseAutoFocus={(e) => {
-          e.preventDefault()
-          window.dispatchEvent(new CustomEvent('craft:focus-input', {
-            detail: { sessionId }
-          }))
-        }}
-      >
-        <SessionStatusMenu
-          activeState={state.id}
-          onSelect={handleSelect}
-          states={sessionStatuses}
-        />
-      </PopoverContent>
-    </Popover>
   )
 }
 

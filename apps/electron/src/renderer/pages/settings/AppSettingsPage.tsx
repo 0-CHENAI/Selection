@@ -104,10 +104,6 @@ export default function AppSettingsPage() {
   // Tools state
   const [browserToolEnabled, setBrowserToolEnabled] = useState(true)
 
-  // Memory and privacy state (applies only to sessions created afterwards)
-  const [sharedProjectMemoryEnabled, setSharedProjectMemoryEnabled] = useState(false)
-  const [isSavingSharedProjectMemory, setIsSavingSharedProjectMemory] = useState(false)
-
   // Proxy state
   const [proxyForm, setProxyForm] = useState<ProxyFormState>(EMPTY_PROXY_FORM)
   const [savedProxyForm, setSavedProxyForm] = useState<ProxyFormState>(EMPTY_PROXY_FORM)
@@ -132,17 +128,15 @@ export default function AppSettingsPage() {
   const loadSettings = useCallback(async () => {
     if (!window.electronAPI) return
     try {
-      const [notificationsOn, keepAwakeOn, browserToolOn, sharedMemoryOn, proxySettings] = await Promise.all([
+      const [notificationsOn, keepAwakeOn, browserToolOn, proxySettings] = await Promise.all([
         window.electronAPI.getNotificationsEnabled(),
         window.electronAPI.getKeepAwakeWhileRunning(),
         window.electronAPI.getBrowserToolEnabled(),
-        window.electronAPI.getSharedProjectMemoryEnabled(),
         window.electronAPI.getNetworkProxySettings(),
       ])
       setNotificationsEnabled(notificationsOn)
       setKeepAwakeEnabled(keepAwakeOn)
       setBrowserToolEnabled(browserToolOn)
-      setSharedProjectMemoryEnabled(sharedMemoryOn)
       const form = toProxyFormState(proxySettings)
       setProxyForm(form)
       setSavedProxyForm(form)
@@ -169,20 +163,6 @@ export default function AppSettingsPage() {
     setBrowserToolEnabled(enabled)
     await window.electronAPI.setBrowserToolEnabled(enabled)
   }, [])
-
-  const handleSharedProjectMemoryEnabledChange = useCallback(async (enabled: boolean) => {
-    const previous = sharedProjectMemoryEnabled
-    setSharedProjectMemoryEnabled(enabled)
-    setIsSavingSharedProjectMemory(true)
-    try {
-      await window.electronAPI.setSharedProjectMemoryEnabled(enabled)
-    } catch (error) {
-      setSharedProjectMemoryEnabled(previous)
-      console.error('Failed to update shared project memory setting:', error)
-    } finally {
-      setIsSavingSharedProjectMemory(false)
-    }
-  }, [sharedProjectMemoryEnabled])
 
   // Proxy handlers
   const isProxyDirty = useMemo(() => {
@@ -258,19 +238,6 @@ export default function AppSettingsPage() {
                     description={t("settings.tools.builtInBrowserDesc")}
                     checked={browserToolEnabled}
                     onCheckedChange={handleBrowserToolEnabledChange}
-                  />
-                </SettingsCard>
-              </SettingsSection>
-
-              {/* Memory and privacy */}
-              <SettingsSection title={t("settings.memory.title")}>
-                <SettingsCard>
-                  <SettingsToggle
-                    label={t("settings.memory.sharedProjectMemory")}
-                    description={t("settings.memory.sharedProjectMemoryDesc")}
-                    checked={sharedProjectMemoryEnabled}
-                    onCheckedChange={handleSharedProjectMemoryEnabledChange}
-                    disabled={isSavingSharedProjectMemory}
                   />
                 </SettingsCard>
               </SettingsSection>

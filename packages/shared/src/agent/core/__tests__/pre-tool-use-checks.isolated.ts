@@ -451,6 +451,54 @@ describe('runPreToolUseChecks', () => {
       }
     });
 
+    it('intercepts the prompt-facing call_llm short name', () => {
+      const input = { model: 'haiku', prompt: 'summarize' };
+      const result = runPreToolUseChecks(createInput({
+        toolName: 'call_llm',
+        input,
+      }));
+
+      expect(result.type).toBe('call_llm_intercept');
+    });
+
+    it('intercepts mcp__session__spawn_session', () => {
+      mockEffectivePermissionMode = 'allow-all';
+      const input = { prompt: 'research Kimi K3', name: 'Spawn Kimi K3 worker' };
+      const result = runPreToolUseChecks(createInput({
+        toolName: 'mcp__session__spawn_session',
+        input,
+      }));
+
+      expect(result.type).toBe('spawn_session_intercept');
+      if (result.type === 'spawn_session_intercept') {
+        expect(result.input).toEqual(input);
+      }
+    });
+
+    it('intercepts the prompt-facing spawn_session short name', () => {
+      mockEffectivePermissionMode = 'allow-all';
+      const input = { prompt: 'research Kimi K3', name: 'Spawn Kimi K3 worker' };
+      const result = runPreToolUseChecks(createInput({
+        toolName: 'spawn_session',
+        input,
+      }));
+
+      expect(result.type).toBe('spawn_session_intercept');
+      if (result.type === 'spawn_session_intercept') {
+        expect(result.input).toEqual(input);
+      }
+    });
+
+    it('intercepts session__spawn_session', () => {
+      mockEffectivePermissionMode = 'allow-all';
+      const result = runPreToolUseChecks(createInput({
+        toolName: 'session__spawn_session',
+        input: { prompt: 'research' },
+      }));
+
+      expect(result.type).toBe('spawn_session_intercept');
+    });
+
     it('does not intercept other session tools', () => {
       const result = runPreToolUseChecks(createInput({
         toolName: 'mcp__session__SubmitPlan',

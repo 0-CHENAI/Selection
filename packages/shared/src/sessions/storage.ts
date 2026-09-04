@@ -194,6 +194,17 @@ export async function createSession(
     taskRunId?: string;
     taskNodeId?: string;
     taskDraft?: boolean;
+    swarmEnabled?: boolean;
+    orchestrationId?: string;
+    orchestrationRootSessionId?: string;
+    orchestrationDepth?: number;
+    orchestrationRole?: 'coordinator' | 'worker' | 'reviewer';
+    orchestrationLifecycle?: 'managed' | 'detached';
+    orchestrationStatus?: 'running' | 'completed' | 'need-to-check' | 'stopped';
+    orchestrationBlocker?: string;
+    orchestrationTokensUsed?: number;
+    orchestrationTokenBudget?: number;
+    orchestrationAggregation?: SessionConfig['orchestrationAggregation'];
   }
 ): Promise<SessionConfig> {
   ensureSessionsDir(workspaceRootPath);
@@ -226,15 +237,23 @@ export async function createSession(
     labels: options?.labels,
     isFlagged: options?.isFlagged,
     projectId: options?.projectId,
-    // Lower-level callers that do not supply the app setting still get the
-    // privacy-safe default. Legacy compatibility applies only when reading
-    // sessions that already lack the field on disk.
     sharedProjectMemoryEnabled: options?.sharedProjectMemoryEnabled ?? false,
     parentSessionId: options?.parentSessionId,
     taskSlug: options?.taskSlug,
     taskRunId: options?.taskRunId,
     taskNodeId: options?.taskNodeId,
     taskDraft: options?.taskDraft,
+    swarmEnabled: options?.swarmEnabled ?? false,
+    orchestrationId: options?.orchestrationId,
+    orchestrationRootSessionId: options?.orchestrationRootSessionId,
+    orchestrationDepth: options?.orchestrationDepth,
+    orchestrationRole: options?.orchestrationRole,
+    orchestrationLifecycle: options?.orchestrationLifecycle,
+    orchestrationStatus: options?.orchestrationStatus,
+    orchestrationBlocker: options?.orchestrationBlocker,
+    orchestrationTokensUsed: options?.orchestrationTokensUsed,
+    orchestrationTokenBudget: options?.orchestrationTokenBudget,
+    orchestrationAggregation: options?.orchestrationAggregation,
   };
 
   // Save empty session
@@ -488,7 +507,6 @@ export async function clearSessionMessages(workspaceRootPath: string, sessionId:
  */
 export async function getOrCreateLatestSession(
   workspaceRootPath: string,
-  sharedProjectMemoryEnabled = false,
 ): Promise<SessionConfig> {
   const sessions = listActiveSessions(workspaceRootPath);
   if (sessions.length > 0 && sessions[0]) {
@@ -503,7 +521,7 @@ export async function getOrCreateLatestSession(
       sharedProjectMemoryEnabled: latest.sharedProjectMemoryEnabled,
     };
   }
-  return createSession(workspaceRootPath, { sharedProjectMemoryEnabled });
+  return createSession(workspaceRootPath, { sharedProjectMemoryEnabled: false });
 }
 
 // ============================================================
@@ -582,7 +600,7 @@ export async function updateSessionMetadata(
   if ('hasUnread' in updates) session.hasUnread = updates.hasUnread;
   if ('sharedUrl' in updates) session.sharedUrl = updates.sharedUrl;
   if ('sharedId' in updates) session.sharedId = updates.sharedId;
-  if (updates.model !== undefined) session.model = updates.model;
+  if ('model' in updates) session.model = updates.model;
   if (updates.llmConnection !== undefined) session.llmConnection = updates.llmConnection;
   if (updates.isArchived !== undefined) session.isArchived = updates.isArchived;
   if ('archivedAt' in updates) session.archivedAt = updates.archivedAt;

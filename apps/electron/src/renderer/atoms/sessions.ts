@@ -71,7 +71,7 @@ export interface SessionMeta {
   archivedAt?: number
   /** Workspace-scoped project id this session is bound to (undefined = unbound) */
   projectId?: string
-  /** Shared project memory snapshot; missing means a legacy shared session. */
+  /** Persisted snapshot only; runtime no longer shares project MEMORY.md. */
   sharedProjectMemoryEnabled?: boolean
   /** Parent session id — when set, this session is a subtask of the parent (undefined = top-level task) */
   parentSessionId?: string
@@ -87,6 +87,22 @@ export interface SessionMeta {
   taskNodeCount?: number
   /** Tasks Conductor: a generate-time draft orchestrator, hidden from the board until adopted by createTask. */
   taskDraft?: boolean
+  /** Per-session opt-in for autonomous Swarm delegation. Missing means disabled. */
+  swarmEnabled?: boolean
+  orchestrationId?: string
+  orchestrationRootSessionId?: string
+  orchestrationDepth?: number
+  /** Swarm lineage role. Worker and reviewer sessions stay out of ordinary session lists. */
+  orchestrationRole?: 'coordinator' | 'worker' | 'reviewer'
+  orchestrationLifecycle?: 'managed' | 'detached'
+  /** User-facing summary of the internal orchestration state. */
+  orchestrationStatus?: 'running' | 'completed' | 'need-to-check' | 'stopped'
+  /** Human-readable reason for a blocked orchestration. */
+  orchestrationBlocker?: string
+  /** Temporary Swarm usage, independent of DAG run accounting. */
+  orchestrationTokensUsed?: number
+  orchestrationTokenBudget?: number
+  orchestrationAggregation?: Session['orchestrationAggregation']
 }
 
 /**
@@ -732,6 +748,8 @@ export interface BackgroundTask {
   outputFile?: string
   /** Short summary, set when task_completed arrives */
   summary?: string
+  /** Managed Swarm run id. These child chips remain until explicitly dismissed. */
+  orchestrationId?: string
 }
 
 /**

@@ -60,7 +60,7 @@ export interface StoredConfig {
   llmConnections?: LlmConnection[];
   defaultLlmConnection?: string;  // Slug of default connection for new sessions
   defaultThinkingLevel?: ThinkingLevel;  // App-level default thinking level for new sessions
-  sharedProjectMemoryEnabled?: boolean;  // Snapshot source for new sessions (default: false)
+  sharedProjectMemoryEnabled?: boolean;  // Retired; new sessions are always isolated
 
   workspaces: Workspace[];
   activeWorkspaceId: string | null;
@@ -681,10 +681,7 @@ export async function switchWorkspaceAtomic(workspaceId: string): Promise<{ work
   if (!workspace) return null;
 
   // Get or create the latest session for this workspace
-  const session = await getOrCreateLatestSession(
-    workspace.rootPath,
-    getSharedProjectMemoryEnabled(),
-  );
+  const session = await getOrCreateLatestSession(workspace.rootPath);
 
   // Update active workspace in config
   config.activeWorkspaceId = workspaceId;
@@ -2074,25 +2071,6 @@ function migrateWorkspaceSonnet45ToSonnet46(config: StoredConfig): void {
 }
 
 /**
- * Migrate deprecated/previous Opus defaults in workspace default models to the current default Opus model.
- */
-function migrateWorkspaceLegacyOpusToDefaultOpus(config: StoredConfig): void {
-  if (!config.workspaces) return;
-
-  for (const workspace of config.workspaces) {
-    const wsConfig = loadWorkspaceConfig(workspace.rootPath);
-    if (!wsConfig?.defaults?.model) continue;
-
-    const normalized = normalizeDeprecatedModelId(wsConfig.defaults.model);
-    const nextModel = normalized === OPUS_FALLBACK_ID ? OPUS_DEFAULT_ID : normalized;
-    if (nextModel !== wsConfig.defaults.model) {
-      wsConfig.defaults.model = nextModel;
-      saveWorkspaceConfig(workspace.rootPath, wsConfig);
-    }
-  }
-}
-
-/**
  * Migrate legacy provider types to the active set (anthropic, pi, pi_compat).
  *
  * 1. providerType==='bedrock' → 'pi' with piAuthProvider='amazon-bedrock'.
@@ -2353,8 +2331,6 @@ export function migrateLegacyLlmConnectionsConfig(): void {
     if (migrateLegacyOpusToDefaultOpus(config)) {
       needsSave = true;
     }
-    // Phase 1f: Migrate legacy/previous Opus workspace defaults → current default Opus
-    migrateWorkspaceLegacyOpusToDefaultOpus(config);
     // Phase 1g: Migrate Sonnet 4.5 → Sonnet 4.6 for direct Anthropic connections
     if (migrateSonnet45ToSonnet46(config)) {
       needsSave = true;
@@ -2498,7 +2474,6 @@ export function migrateLegacyLlmConnectionsConfig(): void {
   backfillAllConnectionModels(config);
   migrateModelDefaultsToConnections(config);
   migrateLegacyOpusToDefaultOpus(config);
-  migrateWorkspaceLegacyOpusToDefaultOpus(config);
 
   saveConfig(config);
 }

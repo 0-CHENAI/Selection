@@ -140,8 +140,8 @@ function EntityIconComponent({
       <CrossfadeAvatar
         src={icon.value}
         alt={alt}
-        className={cn(sizeClass, !chromeless && containerBase, className)}
-        fallbackClassName={!chromeless ? "bg-muted rounded-[4px]" : undefined}
+        className={cn(sizeClass, !bare && !chromeless && containerBase, className)}
+        fallbackClassName={!bare && !chromeless ? "bg-muted rounded-[4px]" : undefined}
         fallback={fallbackNode}
       />
     )

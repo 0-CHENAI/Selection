@@ -288,6 +288,14 @@ export function getModelById(modelId: string): ModelDefinition | undefined {
 }
 
 /**
+ * Exact / deprecated-id lookup only. Family aliases like ORDER's "Opus"
+ * must not be rewritten to `claude-opus-4-8`.
+ */
+export function resolveKnownRegistryModelId(modelId: string): string | undefined {
+  return getModelById(modelId)?.id;
+}
+
+/**
  * Get display name for a model ID (full name with version).
  */
 export function getModelDisplayName(modelId: string): string {
@@ -341,6 +349,26 @@ export function getModelContextWindow(modelId: string): number | undefined {
  * Default reserve is 16_384 (room for the model's reply).
  */
 export const COMPACTION_RESERVE_TOKENS = 16_384;
+export const SWARM_COMPACTION_TRIGGER_RATIO = 0.8;
+
+/**
+ * Reserve enough space for Pi to compact at 80% of the smaller boundary:
+ * the active model context window or this spawned agent's own token budget.
+ */
+export function swarmCompactionReserveTokens(
+  contextWindow: number,
+  agentTokenBudget?: number,
+): number {
+  if (!Number.isFinite(contextWindow) || contextWindow <= 0) return 0;
+  const validAgentBudget = typeof agentTokenBudget === 'number'
+    && Number.isFinite(agentTokenBudget)
+    && agentTokenBudget > 0
+    ? agentTokenBudget
+    : contextWindow;
+  const triggerBoundary = Math.min(contextWindow, validAgentBudget);
+  const triggerTokens = Math.max(1, Math.floor(triggerBoundary * SWARM_COMPACTION_TRIGGER_RATIO));
+  return Math.max(1, contextWindow - triggerTokens);
+}
 
 export function compactionTriggerTokens(
   contextWindow: number,

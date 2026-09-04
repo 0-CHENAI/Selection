@@ -24,8 +24,8 @@ import { homedir } from 'node:os';
 import {
   createAgentSession,
   SessionManager as PiSessionManager,
-  AuthStorage as PiAuthStorage,
   ModelRegistry as PiModelRegistry,
+  ModelRuntime as PiModelRuntime,
   SettingsManager as PiSettingsManager,
   createBashToolDefinition,
   createEditToolDefinition,
@@ -38,15 +38,16 @@ import type {
   AgentSession,
   AgentSessionEvent,
   AgentToolResult,
-  AuthCredential,
   CreateAgentSessionOptions,
   ToolDefinition,
 } from '@earendil-works/pi-coding-agent';
 
 // Pi AI types
-import type {
-  ImageContent as PiImageContent,
-  TextContent as PiTextContent,
+import {
+  InMemoryCredentialStore,
+  InMemoryModelsStore,
+  type ImageContent as PiImageContent,
+  type TextContent as PiTextContent,
 } from '@earendil-works/pi-ai';
 
 // Pre-register the Bedrock provider module so the Pi SDK doesn't attempt a
@@ -58,6 +59,9 @@ import { setBedrockProviderModule } from '@earendil-works/pi-ai/api/bedrock-conv
 import { bedrockProviderModule } from '@earendil-works/pi-ai/bedrock-provider';
 setBedrockProviderModule(bedrockProviderModule);
 
+import { registerBunOAuthFlows } from '@earendil-works/pi-ai/bun-oauth';
+registerBunOAuthFlows();
+
 // Model resolution (extracted for testability + custom-endpoint precedence)
 import { resolvePiModel, isDeniedMiniModelId, isModelNotFoundError } from './model-resolution.ts';
 import { pickProviderAppropriateMiniModel, resolveUtilityModelId } from './pick-mini-model.ts';
@@ -65,9 +69,12 @@ import {
   buildCustomEndpointModelDef,
   findCustomEndpointModelEntry,
   normalizeCustomEndpointModelEntry,
+  stripPiPrefix,
+  type CustomEndpointApi,
   type CustomEndpointModelEntry,
   type CustomEndpointModelOverrides,
 } from './custom-endpoint-models.ts';
+import { syncCredentialForPiSdk, type PiCredential } from './adapt-credential.ts';
 import { registerMissingOpenRouterModels } from './openrouter-dynamic-models.ts';
 
 // Direct source imports from shared (bundled by bun build)
@@ -76,13 +83,15 @@ import { getSessionPlansPath, getSessionPath } from '../../shared/src/sessions/s
 import { buildCallLlmRequest, withTimeout, LLM_QUERY_TIMEOUT_MS } from '../../shared/src/agent/llm-tool.ts';
 import type { LLMQueryRequest, LLMQueryResult } from '../../shared/src/agent/llm-tool.ts';
 import { PI_TOOL_NAME_MAP, THINKING_TO_PI } from '../../shared/src/agent/backend/pi/constants.ts';
-import { getDefaultSummarizationModel } from '../../shared/src/config/models.ts';
+import { resolveSessionToolProxyName } from '../../shared/src/agent/backend/pi/session-tool-defs.ts';
+import { getDefaultSummarizationModel, swarmCompactionReserveTokens } from '../../shared/src/config/models.ts';
 import { createWebFetchTool } from './tools/web-fetch.ts';
 import { resolveSearchProvider } from './tools/search/resolve-provider.ts';
 import { createSearchTool } from './tools/search/create-search-tool.ts';
 import { allowCraftMetadataProperties, stripCraftMetadata } from './craft-metadata-schema.ts';
 import { createRecoveringArgumentPreparer } from './tool-argument-recovery.ts';
 import { applySystemPromptOverride } from './system-prompt-override.ts';
+import { installContextBudgetGuard } from './context-budget-stream.ts';
 import { resolvePiSessionPaths } from './session-paths.ts';
 import { createPiSessionManager } from './pi-session-manager.ts';
 import { createSelectionReadToolDefinition } from './tools/read/create-read-tool.ts';
@@ -100,19 +109,11 @@ import {
   normalizeProxyToolExecutionEnd,
   proxyToolDetails,
 } from './proxy-tool-protocol.ts';
+import { SpawnFanOutQualificationCache } from './spawn-fan-out-preparation.ts';
 
 // ============================================================
 // Types — JSONL Protocol
 // ============================================================
-
-/** Credential union used in init and token_update messages */
-type PiCredential =
-  | { type: 'api_key'; key: string }
-  | { type: 'oauth'; access: string; refresh: string; expires: number }
-  | { type: 'iam'; accessKeyId: string; secretAccessKey: string; region?: string; sessionToken?: string };
-
-/** Custom endpoint protocol — determines which streaming adapter Pi SDK uses */
-type CustomEndpointApi = 'openai-completions' | 'anthropic-messages';
 
 /** Init message from main process — configures the Pi agent server */
 interface InitMessage {
@@ -137,6 +138,10 @@ interface InitMessage {
   branchFromSdkTurnId?: string;
   resumeSdkSessionId?: string;
   forceFreshSession?: boolean;
+  /** Swarm sessions enable an earlier auto-compaction policy. */
+  swarmEnabled?: boolean;
+  /** Independent budget for a spawned agent; roots omit this value. */
+  swarmAgentTokenBudget?: number;
   customEndpoint?: { api: CustomEndpointApi; supportsImages?: boolean };
   customModels?: Array<string | { id: string; contextWindow?: number; maxTokens?: number; supportsImages?: boolean }>;
   piAuth?: { provider: string; credential: PiCredential };
@@ -298,11 +303,38 @@ type OutboundMessage =
 
 let piSession: AgentSession | null = null;
 let piModelRegistry: PiModelRegistry | null = null;
-let moduleAuthStorage: PiAuthStorage | null = null;
+let piSettingsManager: PiSettingsManager | null = null;
+let moduleCredentialStore: InMemoryCredentialStore | null = null;
+type AuthenticatedRuntime = {
+  modelRuntime: PiModelRuntime;
+  modelRegistry: PiModelRegistry;
+};
+let moduleRuntimePromise: Promise<AuthenticatedRuntime> | null = null;
+let runtimeConfigGeneration = 0;
 let unsubscribeEvents: (() => void) | null = null;
 
 // Init config (set on 'init' message)
 let initConfig: Extract<InboundMessage, { type: 'init' }> | null = null;
+
+function applySwarmCompactionOverride(model: { contextWindow?: number } | undefined): void {
+  if ((!initConfig?.swarmEnabled && initConfig?.swarmAgentTokenBudget === undefined) || !piSettingsManager) return;
+  const contextWindow = model?.contextWindow ?? 0;
+  const reserveTokens = swarmCompactionReserveTokens(
+    contextWindow,
+    initConfig.swarmAgentTokenBudget,
+  );
+  if (reserveTokens <= 0) return;
+  piSettingsManager.applyOverrides({
+    compaction: {
+      enabled: true,
+      reserveTokens,
+    },
+  });
+  const triggerTokens = contextWindow - reserveTokens;
+  debugLog(
+    `Swarm auto-compaction threshold configured at ${triggerTokens} tokens (${reserveTokens} reserved of ${contextWindow})`,
+  );
+}
 
 // Mutable state
 let currentUserMessage = '';
@@ -321,21 +353,11 @@ const pendingToolExecutions = new Map<string, { resolve: (result: ProxyToolExecu
 
 // Pending session MCP tool calls for completion detection
 const pendingSessionToolCalls = new Map<string, { toolName: string; arguments: Record<string, unknown> }>();
+const pendingSpawnFanOutQualifications = new SpawnFanOutQualificationCache();
+let activeSpawnTools: ToolDefinition<any, any>[] = [];
 
 // Proxy tool definitions from main process
 let proxyToolDefs: ProxyToolDef[] = [];
-
-// Speculative prefetch for read-only tools (enables parallel execution despite Pi SDK's sequential loop).
-// When the LLM emits multiple call_llm tool calls in a single message, we fire all requests
-// to the main process in parallel on message_end (before executeToolCalls iterates sequentially).
-// Each proxy tool's execute() then hits the cache instead of sending a new request.
-const PREFETCHABLE_TOOLS = new Set(['call_llm']);
-const prefetchCache = new Map<string, Promise<ProxyToolExecutionResult>>();
-
-function isPrefetchableTool(toolName: string): boolean {
-  const stripped = toolName.replace(/^(mcp__session__|session__)/, '');
-  return PREFETCHABLE_TOOLS.has(stripped);
-}
 
 // Flag: proxy tools changed since last session creation — session needs recreation
 let toolsChanged = false;
@@ -565,60 +587,86 @@ function registerCustomEndpointModels(
         ? { supportsImages: initConfig.customEndpoint.supportsImages }
         : undefined,
       customModelOverrides.get(id),
+      api,
     )),
   });
   debugLog(`Registered custom endpoint: ${baseUrl} with ${allIds.length} model(s) [${allIds.join(', ')}], api: ${api}`);
 }
 
 /**
- * Create an in-memory auth storage pre-loaded with the user's credentials
- * and a model registry backed by it. Used by both the main session and
- * ephemeral queryLlm sessions.
+ * Return the shared Pi runtime and registry, refreshing the mutable credential
+ * store first. Caching avoids rebuilding the provider catalog for every utility
+ * completion while keeping token updates visible to all sessions.
  */
-function createAuthenticatedRegistry(): {
-  authStorage: PiAuthStorage;
-  modelRegistry: PiModelRegistry;
-} {
-  // Reuse module-level authStorage if already created (allows token_update to mutate it).
-  // Only create a new one on first call or after re-init.
-  if (!moduleAuthStorage) {
-    moduleAuthStorage = PiAuthStorage.inMemory();
-  }
-  const authStorage = moduleAuthStorage;
+async function createAuthenticatedRuntime(): Promise<AuthenticatedRuntime> {
+  const generation = runtimeConfigGeneration;
+  if (!moduleCredentialStore) moduleCredentialStore = new InMemoryCredentialStore();
+  const credentials = moduleCredentialStore;
+
   if (initConfig?.piAuth) {
     const { provider, credential } = initConfig.piAuth;
-    // Pi SDK 0.70.0's AuthCredential union (ApiKeyCredential | OAuthCredential) doesn't
-    // include 'iam' as a first-class member, but the auth storage accepts it at runtime
-    // — the Bedrock provider module reads AWS env directly; this `set` keeps Pi SDK's
-    // internal provider-tracking consistent regardless of credential shape.
-    authStorage.set(provider, credential as unknown as AuthCredential);
-    debugLog(`Injected ${credential.type} credential for provider: ${provider}`);
+    const mode = await syncCredentialForPiSdk(credentials, provider, credential);
+    if (mode === 'stored') {
+      debugLog(`Injected ${credential.type} credential for provider: ${provider}`);
+    } else {
+      debugLog(`Using ambient ${credential.type} credential for provider: ${provider}`);
+    }
   } else if (initConfig?.apiKey) {
-    authStorage.set('anthropic', { type: 'api_key', key: initConfig.apiKey });
-    debugLog('Injected API key into auth storage (legacy fallback)');
+    const apiKey = initConfig.apiKey;
+    await credentials.modify('anthropic', async () => ({ type: 'api_key', key: apiKey }));
+    debugLog('Injected API key into credential store (legacy fallback)');
   }
 
-  const modelRegistry = PiModelRegistry.inMemory(authStorage);
+  // A concurrent init/runtime-config update changed the source of truth while
+  // credential synchronization was awaiting its serialized store write.
+  if (generation !== runtimeConfigGeneration) return createAuthenticatedRuntime();
 
-  // Register custom endpoint models dynamically via Pi SDK's registerProvider API.
-  // This makes arbitrary OpenAI/Anthropic-compatible endpoints work through the Pi SDK
-  // by creating synthetic Model<Api> objects that the SDK requires.
-  const hasCustomEndpoint = !!initConfig?.baseUrl?.trim();
-  if (hasCustomEndpoint && initConfig?.customEndpoint) {
-    const { api } = initConfig.customEndpoint;
-    const modelEntries: CustomEndpointModelEntry[] = (initConfig.customModels?.length
-      ? initConfig.customModels
-      : [initConfig.model || 'default']
-    ).map(normalizeCustomEndpointModelEntry);
-    customEndpointModelIds = new Set();  // Reset on fresh registry creation
-    registerCustomEndpointModels(modelRegistry, api, initConfig.baseUrl!.trim(), modelEntries);
-  } else if (hasCustomEndpoint && !initConfig?.customEndpoint) {
-    debugLog('Custom endpoint without protocol config — models may not resolve. Set customEndpoint.api for proper routing.');
+  if (!moduleRuntimePromise) {
+    let guardedBuild: Promise<AuthenticatedRuntime>;
+    const build = (async () => {
+      const modelRuntime = await PiModelRuntime.create({
+        credentials,
+        modelsPath: null,
+        modelsStore: new InMemoryModelsStore(),
+      });
+      installContextBudgetGuard(modelRuntime, (info) => {
+        debugLog(
+          `Context budget ${info.phase}: ${info.model} ` +
+          `${info.requestedMaxTokens} -> ${info.appliedMaxTokens}`,
+        );
+      });
+      if (generation !== runtimeConfigGeneration) {
+        throw new Error('Runtime configuration changed during initialization');
+      }
+      const modelRegistry = new PiModelRegistry(modelRuntime);
+
+      const hasCustomEndpoint = !!initConfig?.baseUrl?.trim();
+      if (hasCustomEndpoint && initConfig?.customEndpoint) {
+        const { api } = initConfig.customEndpoint;
+        const modelEntries: CustomEndpointModelEntry[] = (initConfig.customModels?.length
+          ? initConfig.customModels
+          : [initConfig.model || 'default']
+        ).map(normalizeCustomEndpointModelEntry);
+        customEndpointModelIds = new Set();
+        customModelOverrides.clear();
+        registerCustomEndpointModels(modelRegistry, api, initConfig.baseUrl!.trim(), modelEntries);
+      } else if (hasCustomEndpoint) {
+        debugLog('Custom endpoint without protocol config — models may not resolve. Set customEndpoint.api for proper routing.');
+      }
+
+      registerConfiguredOpenRouterModels(modelRegistry);
+      piModelRegistry = modelRegistry;
+      return { modelRuntime, modelRegistry };
+    })();
+    guardedBuild = build.catch((error) => {
+      // A stale build from a preceding init must not clear a newer cache.
+      if (moduleRuntimePromise === guardedBuild) moduleRuntimePromise = null;
+      throw error;
+    });
+    moduleRuntimePromise = guardedBuild;
   }
 
-  registerConfiguredOpenRouterModels(modelRegistry);
-
-  return { authStorage, modelRegistry };
+  return moduleRuntimePromise;
 }
 
 async function ensureSession(): Promise<AgentSession> {
@@ -627,34 +675,20 @@ async function ensureSession(): Promise<AgentSession> {
 
   const cwd = resolvedCwd();
 
-  const { authStorage, modelRegistry } = createAuthenticatedRegistry();
-  // Store at module scope for set_model handler
-  piModelRegistry = modelRegistry;
+  const { modelRuntime, modelRegistry } = await createAuthenticatedRuntime();
 
   // Build tools: coding tools + web tools wrapped with permission hooks + proxy tools.
-  // Search provider is selected based on the user's LLM connection:
-  //   - OpenAI/OpenRouter → Responses API built-in web_search
-  //   - ChatGPT Plus (openai-codex) → ChatGPT backend responses endpoint
-  //   - Google → Gemini API with googleSearch grounding
-  //   - Others → DuckDuckGo fallback
-  //
-  // IMPORTANT: resolve dynamically on each search call so token_update refreshes
-  // are used without recreating the session.
-  const searchProvider = {
-    get name() {
-      return resolveSearchProvider(initConfig?.piAuth).name;
-    },
-    async search(query: string, count: number) {
-      return resolveSearchProvider(initConfig?.piAuth).search(query, count);
-    },
-  };
-  const searchTool = createSearchTool(searchProvider);
+  // Built-in web search uses AnySearch independently from the active LLM
+  // connection. This keeps custom OpenAI-compatible credentials scoped to
+  // their configured model endpoint instead of forwarding them to a search
+  // provider. ANYSEARCH_API_KEY is optional and read by the provider itself.
+  const searchTool = createSearchTool(resolveSearchProvider());
   const webFetchTool = createWebFetchTool(() =>
     initConfig ? getSessionPath(initConfig.workspaceRootPath, initConfig.sessionId) : null
   );
   const webTools = [searchTool, webFetchTool];
 
-  // Pi SDK 0.70.0 registration contract:
+  // Pi SDK tool registration contract:
   //   - `customTools` accepts ToolDefinition[] — our hook-wrapped objects go here
   //   - `tools` is a string[] name allowlist — MUST include every tool we want active,
   //     otherwise Pi SDK defaults to the built-in [read, bash, edit, write] set and
@@ -677,14 +711,16 @@ async function ensureSession(): Promise<AgentSession> {
   // are fixed for the lifetime of the session. Keep the schemas provider-neutral
   // and strict so a later model switch cannot leave stale metadata requirements.
   const wrappedAll = wrapToolsWithHooks([...builtinDefs, ...webTools, ...proxyTools], false);
+  activeSpawnTools = wrappedAll.filter(
+    tool => resolveSessionToolProxyName(tool.name) === 'mcp__session__spawn_session',
+  );
   const toolAllowlist = wrappedAll.map(t => t.name);
   debugLog(`Session tools: ${builtinDefs.length} builtin + ${webTools.length} web + ${proxyTools.length} proxy = ${wrappedAll.length} total`);
 
   // Build session options
   const sessionOptions: CreateAgentSessionOptions = {
     cwd,
-    authStorage,
-    modelRegistry,
+    modelRuntime,
     customTools: wrappedAll,
     tools: toolAllowlist,
   };
@@ -695,7 +731,8 @@ async function ensureSession(): Promise<AgentSession> {
     const { agentDir, sessionDir } = resolvePiSessionPaths(initConfig.sessionPath, initConfig.agentDir);
     mkdirSync(agentDir, { recursive: true });
     sessionOptions.agentDir = agentDir;
-    sessionOptions.settingsManager = PiSettingsManager.create(cwd, agentDir);
+    piSettingsManager = PiSettingsManager.create(cwd, agentDir);
+    sessionOptions.settingsManager = piSettingsManager;
 
     // Session resume: use a per-Craft-session directory so the Pi SDK can
     // persist and resume its own session across subprocess restarts.
@@ -748,6 +785,8 @@ async function ensureSession(): Promise<AgentSession> {
   if (piThinkingLevel) {
     sessionOptions.thinkingLevel = piThinkingLevel;
   }
+
+  applySwarmCompactionOverride(sessionOptions.model);
 
   // Create the session — tools flow through customTools + allowlist (see comment above).
   const { session } = await createAgentSession(sessionOptions);
@@ -849,7 +888,7 @@ function wrapSingleTool(
   const parameters = allowRichMetadata
     ? allowCraftMetadataProperties(tool.parameters)
     : tool.parameters;
-  const sdkToolName = PI_TOOL_NAME_MAP[tool.name] || tool.name;
+  const sdkToolName = PI_TOOL_NAME_MAP[tool.name] || resolveSessionToolProxyName(tool.name);
   const prepareArguments = createRecoveringArgumentPreparer(
     sdkToolName,
     tool.prepareArguments,
@@ -864,7 +903,6 @@ function wrapSingleTool(
     ctx,
   ) => {
     let inputObj: Record<string, unknown> = { ...(params as Record<string, unknown>) };
-
     // Extract intent before main process strips metadata (used for summarization)
     const intent = typeof inputObj._intent === 'string' ? inputObj._intent : undefined;
 
@@ -872,6 +910,11 @@ function wrapSingleTool(
     if ((sdkToolName === 'Write' || sdkToolName === 'Edit' || sdkToolName === 'MultiEdit' || sdkToolName === 'NotebookEdit')
         && typeof inputObj.path === 'string' && !inputObj.file_path) {
       inputObj = { ...inputObj, file_path: inputObj.path };
+    }
+
+    const fanOutQualification = pendingSpawnFanOutQualifications.consume(toolCallId);
+    if (fanOutQualification && inputObj.qualification == null) {
+      inputObj = { ...inputObj, qualification: fanOutQualification };
     }
 
     // Send to main process for permission checking + transforms
@@ -957,69 +1000,47 @@ function wrapSingleTool(
 function buildProxyTools(): ToolDefinition<any, any>[] {
   debugLog(`Building proxy tools from ${proxyToolDefs.length} definitions: ${proxyToolDefs.map(t => t.name).join(', ')}`);
 
-  return proxyToolDefs.map<ToolDefinition<any, any>>(def => ({
-    name: def.name,
-    label: def.name
-      .replace(/^mcp__.*?__/, '')
-      .replace(/_/g, ' ')
-      .replace(/([a-z])([A-Z])/g, '$1 $2'),
-    description: def.description,
-    // Pi SDK omits tools without promptSnippet from the system prompt's
-    // "Available tools" section, making them invisible to the LLM.
-    // Derive a snippet from the description so proxy tools are listed.
-    promptSnippet: def.description.length > 200
-      ? def.description.slice(0, 197) + '...'
-      : def.description,
-    parameters: def.inputSchema,
-    execute: async (
-      toolCallId: string,
-      params: any,
-    ): Promise<AgentToolResult<any>> => {
-      // Check speculative prefetch cache first (parallel call_llm optimization).
-      // If this tool was prefetched on message_end, the request is already in-flight —
-      // just await the result instead of sending a duplicate request.
-      const prefetched = prefetchCache.get(toolCallId);
-      if (prefetched) {
-        prefetchCache.delete(toolCallId);
-        debugLog(`Prefetch cache hit for ${def.name} (toolCallId: ${toolCallId})`);
-        const result = await prefetched;
+  return proxyToolDefs.map<ToolDefinition<any, any>>(def => {
+    const executionName = resolveSessionToolProxyName(def.name);
+    return {
+      name: def.name,
+      label: def.name
+        .replace(/^mcp__.*?__/, '')
+        .replace(/_/g, ' ')
+        .replace(/([a-z])([A-Z])/g, '$1 $2'),
+      description: def.description,
+      // Pi SDK omits tools without promptSnippet from the system prompt's
+      // "Available tools" section, making them invisible to the LLM.
+      // Short-name aliases stay in the registry for exact-name lookup but are
+      // kept out of that text list so the model does not see duplicates.
+      promptSnippet: executionName !== def.name
+        ? undefined
+        : def.description.length > 200
+          ? def.description.slice(0, 197) + '...'
+          : def.description,
+      parameters: def.inputSchema,
+      execute: async (
+        _toolCallId: string,
+        params: any,
+      ): Promise<AgentToolResult<any>> => {
+        const requestId = `proxy-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+        send({
+          type: 'tool_execute_request',
+          requestId,
+          toolName: executionName,
+          args: params as Record<string, unknown>,
+        });
+        const result = await new Promise<ProxyToolExecutionResult>((resolve) => {
+          pendingToolExecutions.set(requestId, { resolve });
+        });
+
         return {
           content: normalizeProxyToolContent(result.content),
           details: proxyToolDetails(result),
         };
-      }
-
-      const inputObj = params as Record<string, unknown>;
-
-      // Permission checking via main process
-      const approval = await requestPreToolUseApproval(def.name, inputObj, toolCallId);
-      if (approval.action === 'prepare_source_guide') {
-        return {
-          content: [{ type: 'text', text: formatSourceGuidePreparationResult(approval.preparation) }],
-          details: { isError: false },
-        };
-      }
-
-      // Execute via main process
-      const requestId = `proxy-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-
-      send({
-        type: 'tool_execute_request',
-        requestId,
-        toolName: def.name,
-        args: approval.input,
-      });
-
-      const result = await new Promise<ProxyToolExecutionResult>((resolve) => {
-        pendingToolExecutions.set(requestId, { resolve });
-      });
-
-      return {
-        content: normalizeProxyToolContent(result.content),
-        details: proxyToolDetails(result),
-      };
-    },
-  }));
+      },
+    };
+  });
 }
 
 // ============================================================
@@ -1031,8 +1052,8 @@ async function queryLlm(request: LLMQueryRequest): Promise<LLMQueryResult> {
 
   debugLog('[queryLlm] Starting');
 
-  // Create authenticated registry upfront — used by both the provider guard and the ephemeral session.
-  const { authStorage, modelRegistry } = createAuthenticatedRegistry();
+  // Resolve against the shared authenticated runtime used by the main session.
+  const { modelRuntime, modelRegistry } = await createAuthenticatedRuntime();
 
   const piAuthProvider = initConfig.piAuth?.provider;
   let model: string
@@ -1054,23 +1075,27 @@ async function queryLlm(request: LLMQueryRequest): Promise<LLMQueryResult> {
     }
     model = customModel;
   } else {
-    // Pick mini model. If the configured miniModel uses a different provider than
-    // what the user authenticated with (e.g. gemini-2.5-pro when only anthropic
-    // credentials exist), fall back to the default summarization model which uses
-    // the same provider family.
-    model = request.model ?? initConfig.miniModel ?? getDefaultSummarizationModel();
+    // Unspecified call_llm inherits the current session model (#192).
+    // Title generation / summarization pass miniModel explicitly.
+    // If that session model uses a different provider than the user
+    // authenticated with, fall back to a provider-compatible default.
+    const inheritedModel = request.model ?? initConfig.model
+    model = inheritedModel ?? initConfig.miniModel ?? getDefaultSummarizationModel();
 
-    // If piAuth is set, ensure the mini model uses the same provider.
+    // If piAuth is set, the chosen model must resolve under that provider.
     // Pi SDK will fail with "No API key found" if the model requires a different provider.
     // Exception: 'custom-endpoint' provider is always compatible because it has its own
-    // API key configured via resolveCustomEndpointApiKey() and doesn't use authStorage.
+    // API key configured via resolveCustomEndpointApiKey() and doesn't use the credential store.
+    // isDeniedMiniModelId only applies to the utility fallback, not an explicit
+    // or current-session model — those should run as requested (#192).
     if (initConfig.piAuth) {
       const authProvider = initConfig.piAuth.provider;
       const bareModel = model.startsWith('pi/') ? model.slice(3) : model;
       const resolved = resolveSessionPiModel(modelRegistry, bareModel);
       const resolvedProvider = (resolved as any)?.provider;
       const isCompatible = resolvedProvider === authProvider || resolvedProvider === 'custom-endpoint';
-      if (!resolved || !isCompatible || isDeniedMiniModelId(model, piAuthProvider)) {
+      const deniedUtility = !inheritedModel && isDeniedMiniModelId(model, piAuthProvider);
+      if (!resolved || !isCompatible || deniedUtility) {
         // Anthropic: keep Haiku (the cheap/fast mini). For every other provider
         // Haiku is unresolvable, so walk PI_PREFERRED_DEFAULTS for a model that
         // actually works under the user's auth.
@@ -1094,15 +1119,14 @@ async function queryLlm(request: LLMQueryRequest): Promise<LLMQueryResult> {
     const piModel = resolveSessionPiModel(modelRegistry, modelId);
     if (!piModel) {
       throw new Error(
-        `Could not resolve mini model "${modelId}" for provider "${initConfig!.piAuth?.provider ?? '(unknown)'}"`,
+        `Could not resolve model "${modelId}" for provider "${initConfig!.piAuth?.provider ?? '(unknown)'}"`,
       );
     }
 
     // Create minimal ephemeral session
     const ephemeralOptions: CreateAgentSessionOptions = {
       cwd: resolvedCwd(),
-      authStorage,
-      modelRegistry,
+      modelRuntime,
       tools: [],
       sessionManager: PiSessionManager.inMemory(),
       model: piModel,
@@ -1251,13 +1275,20 @@ async function preExecuteCallLlm(input: Record<string, unknown>): Promise<LLMQue
   const sessionPath = initConfig
     ? getSessionPath(initConfig.workspaceRootPath, initConfig.sessionId)
     : undefined;
-  const request = await buildCallLlmRequest(input, { backendName: 'Pi', sessionPath });
+  const request = await buildCallLlmRequest(input, {
+    backendName: 'Pi',
+    sessionPath,
+    defaultModel: initConfig?.model,
+  });
   return queryLlm(request);
 }
 
 async function runMiniCompletion(prompt: string): Promise<string | null> {
   try {
-    const result = await queryLlm({ prompt });
+    const result = await queryLlm({
+      prompt,
+      model: initConfig?.miniModel ?? getDefaultSummarizationModel(),
+    });
     const text = result.text || null;
     debugLog(`[runMiniCompletion] Result: ${text ? `"${text.slice(0, 200)}"` : 'null'}`);
     return text;
@@ -1291,13 +1322,28 @@ function handleSessionEvent(event: AgentSessionEvent): void {
 
   // Log API errors for debugging and attach provider-native turn anchor for branch cutoffs.
   if (event.type === 'message_end') {
-    const msg = event.message as { role?: string; stopReason?: string; errorMessage?: string } | undefined;
+    const msg = event.message as {
+      role?: string;
+      stopReason?: string;
+      errorMessage?: string;
+      content?: Array<{
+        type: string;
+        id?: string;
+        name?: string;
+        arguments?: unknown;
+      }>;
+    } | undefined;
     if (msg?.stopReason === 'error') {
       debugLog(`API error in message_end: ${msg.errorMessage || 'unknown'}`);
     }
 
     if (msg?.role === 'assistant' && piSession) {
       currentAssistantGeneration++;
+      pendingSpawnFanOutQualifications.prepare(
+        msg.stopReason,
+        Array.isArray(msg.content) ? msg.content : [],
+        activeSpawnTools,
+      );
       // CRITICAL: do NOT read `getLeafId()` here.
       //
       // The Pi SDK fires `message_end` synchronously BEFORE calling
@@ -1342,32 +1388,11 @@ function handleSessionEvent(event: AgentSessionEvent): void {
         });
       }
 
-      // Speculative prefetch: if the assistant message contains 2+ prefetchable tool calls,
-      // fire all requests to the main process in parallel NOW, before executeToolCalls
-      // iterates sequentially. Each proxy tool's execute() will hit the cache.
-      const content = (msg as { content?: Array<{ type: string; id?: string; name?: string; arguments?: unknown }> }).content;
-      if (Array.isArray(content)) {
-        const prefetchableToolCalls = content.filter(
-          (c) => c.type === 'toolCall' && c.name && isPrefetchableTool(c.name),
-        );
-        if (prefetchableToolCalls.length >= 2) {
-          debugLog(`Prefetching ${prefetchableToolCalls.length} parallel ${prefetchableToolCalls[0]?.name} calls`);
-          for (const tc of prefetchableToolCalls) {
-            const requestId = `prefetch-${tc.id}`;
-            const promise = new Promise<ProxyToolExecutionResult>((resolve) => {
-              pendingToolExecutions.set(requestId, { resolve });
-            });
-            send({
-              type: 'tool_execute_request',
-              requestId,
-              toolName: tc.name!,
-              args: (tc.arguments ?? {}) as Record<string, unknown>,
-            });
-            prefetchCache.set(tc.id!, promise);
-          }
-        }
-      }
     }
+  }
+
+  if (event.type === 'turn_end' || event.type === 'agent_end') {
+    pendingSpawnFanOutQualifications.clear();
   }
 
   // Detect session MCP tool completions + enrich tool starts with canonical metadata
@@ -1432,6 +1457,9 @@ function handleSessionEvent(event: AgentSessionEvent): void {
 // ============================================================
 
 async function handleInit(msg: Extract<InboundMessage, { type: 'init' }>): Promise<void> {
+  runtimeConfigGeneration += 1;
+  pendingSpawnFanOutQualifications.clear();
+  activeSpawnTools = [];
   // Clean up any existing session from a previous init
   if (piSession) {
     if (unsubscribeEvents) {
@@ -1442,7 +1470,12 @@ async function handleInit(msg: Extract<InboundMessage, { type: 'init' }>): Promi
     piSession = null;
     debugLog('Cleaned up existing session for re-init');
   }
-  moduleAuthStorage = null; // Reset so createAuthenticatedRegistry() creates fresh storage
+  moduleCredentialStore = null;
+  moduleRuntimePromise = null;
+  piModelRegistry = null;
+  piSettingsManager = null;
+  customEndpointModelIds = new Set();
+  customModelOverrides.clear();
 
   initConfig = msg;
 
@@ -1451,6 +1484,8 @@ async function handleInit(msg: Extract<InboundMessage, { type: 'init' }>): Promi
   if (msg.piAuth?.provider === 'azure-openai-responses' && msg.baseUrl) {
     process.env.AZURE_OPENAI_BASE_URL = msg.baseUrl;
     debugLog(`Set AZURE_OPENAI_BASE_URL=${msg.baseUrl}`);
+  } else {
+    delete process.env.AZURE_OPENAI_BASE_URL;
   }
 
   // Start callback server for call_llm (idempotent — skips if already running)
@@ -1608,6 +1643,7 @@ async function handleAbort(): Promise<void> {
     }
   }
   sourceGuideEventGate.clear();
+  pendingSpawnFanOutQualifications.clear();
 
   // Reject all pending pre-tool-use requests
   for (const [, pending] of pendingPreToolUse) {
@@ -1615,8 +1651,6 @@ async function handleAbort(): Promise<void> {
   }
   pendingPreToolUse.clear();
 
-  // Clear speculative prefetch cache — in-flight prefetches will resolve but never be consumed
-  prefetchCache.clear();
 }
 
 async function handleMiniCompletion(msg: Extract<InboundMessage, { type: 'mini_completion' }>): Promise<void> {
@@ -1624,7 +1658,10 @@ async function handleMiniCompletion(msg: Extract<InboundMessage, { type: 'mini_c
   // as 'error' messages instead of being swallowed and returned as null.
   // runMiniCompletion is kept for the summarize callback where null is acceptable.
   try {
-    const result = await queryLlm({ prompt: msg.prompt });
+    const result = await queryLlm({
+      prompt: msg.prompt,
+      model: initConfig?.miniModel ?? getDefaultSummarizationModel(),
+    });
     send({ type: 'mini_completion_result', id: msg.id, text: result.text || null });
   } catch (error) {
     const errorMsg = error instanceof Error ? error.message : String(error);
@@ -1723,6 +1760,8 @@ async function handleUpdateRuntimeConfig(msg: RuntimeConfigUpdateMessage): Promi
       throw new Error('Runtime config update received before init');
     }
 
+    runtimeConfigGeneration += 1;
+    if (!piModelRegistry) moduleRuntimePromise = null;
     initConfig = {
       ...initConfig,
       model: msg.model,
@@ -1733,15 +1772,21 @@ async function handleUpdateRuntimeConfig(msg: RuntimeConfigUpdateMessage): Promi
       customModels: msg.customModels,
     };
 
-    if (piModelRegistry && initConfig.baseUrl?.trim() && initConfig.customEndpoint) {
-      const modelEntries: CustomEndpointModelEntry[] = (initConfig.customModels?.length
-        ? initConfig.customModels
-        : [initConfig.model || 'default']
-      ).map(normalizeCustomEndpointModelEntry);
-
+    if (piModelRegistry) {
       customEndpointModelIds = new Set();
       customModelOverrides.clear();
-      registerCustomEndpointModels(piModelRegistry, initConfig.customEndpoint.api, initConfig.baseUrl.trim(), modelEntries);
+      if (initConfig.baseUrl?.trim() && initConfig.customEndpoint) {
+        const modelEntries: CustomEndpointModelEntry[] = (initConfig.customModels?.length
+          ? initConfig.customModels
+          : [initConfig.model || 'default']
+        ).map(normalizeCustomEndpointModelEntry);
+        registerCustomEndpointModels(piModelRegistry, initConfig.customEndpoint.api, initConfig.baseUrl.trim(), modelEntries);
+      } else {
+        // Runtime updates can move away from a custom endpoint. Leaving the old
+        // synthetic provider registered lets later model resolution route back
+        // to stale URL/capability data.
+        piModelRegistry.unregisterProvider('custom-endpoint');
+      }
     }
 
     if (piSession && piModelRegistry) {
@@ -1758,6 +1803,7 @@ async function handleUpdateRuntimeConfig(msg: RuntimeConfigUpdateMessage): Promi
       }
 
       await piSession.setModel(piModel);
+      applySwarmCompactionOverride(piModel);
       setInterceptorApiHints(piModel as { api?: string; provider?: string; baseUrl?: string });
       debugLog(`[runtime_config] Updated runtime config and active model: ${piModel.provider}/${piModel.id}`);
     } else {
@@ -1797,7 +1843,9 @@ async function handleSetModel(msg: Extract<InboundMessage, { type: 'set_model' }
   }
   try {
     await piSession.setModel(piModel);
+    applySwarmCompactionOverride(piModel);
     setInterceptorApiHints(piModel as { api?: string; provider?: string; baseUrl?: string });
+    if (initConfig) initConfig.model = msg.model;
     debugLog(`[set_model] Model changed to: ${msg.model} (resolved: ${piModel.provider}/${piModel.id})`);
   } catch (error) {
     const errorMsg = error instanceof Error ? error.message : String(error);
@@ -1830,6 +1878,8 @@ async function handleSetThinkingLevel(msg: Extract<InboundMessage, { type: 'set_
 
 function handleShutdown(): void {
   debugLog('Shutdown requested');
+  pendingSpawnFanOutQualifications.clear();
+  activeSpawnTools = [];
 
   // Unsubscribe events
   if (unsubscribeEvents) {
@@ -1932,16 +1982,19 @@ async function processMessage(msg: InboundMessage): Promise<void> {
       break;
 
     case 'token_update':
-      if (moduleAuthStorage) {
+      if (!initConfig) {
+        debugLog('token_update received before init; ignoring');
+        break;
+      }
+      initConfig.piAuth = msg.piAuth;
+      if (moduleCredentialStore) {
         const { provider, credential } = msg.piAuth;
-        // See ambient comment at the initial `authStorage.set` call — same shape reason.
-        moduleAuthStorage.set(provider, credential as unknown as AuthCredential);
-        if (initConfig) {
-          initConfig.piAuth = msg.piAuth;
-        }
+        await syncCredentialForPiSdk(moduleCredentialStore, provider, credential);
         debugLog(`Updated ${credential.type} credential for provider: ${provider}`);
       } else {
-        debugLog('token_update received but no authStorage initialized');
+        // createAuthenticatedRuntime reads initConfig, so retaining the update is
+        // sufficient when the first runtime has not been created yet.
+        debugLog('Stored token_update for pending runtime initialization');
       }
       break;
 

@@ -1,4 +1,8 @@
 import { recoverKnownToolInputFromIntent } from '../../shared/src/agent/core/tool-input-recovery.ts';
+import {
+  isSpawnSessionToolName,
+  recoverSpawnSessionArguments,
+} from '../../shared/src/agent/core/spawn-session-args.ts';
 
 type ArgumentPreparer = (args: unknown) => unknown;
 
@@ -15,9 +19,12 @@ export function createRecoveringArgumentPreparer(
   return args => {
     const recovered = isRecord(args) ? recoverKnownToolInputFromIntent(toolName, args) : args;
     const prepared = original ? original(recovered) : recovered;
-    const finalArgs = isRecord(prepared)
+    const afterIntent = isRecord(prepared)
       ? recoverKnownToolInputFromIntent(toolName, prepared)
       : prepared;
+    const finalArgs = isRecord(afterIntent) && isSpawnSessionToolName(toolName)
+      ? recoverSpawnSessionArguments(afterIntent)
+      : afterIntent;
     if (allowRichMetadata || !isRecord(finalArgs)) return finalArgs;
 
     const sanitized = { ...finalArgs };

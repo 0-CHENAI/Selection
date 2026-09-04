@@ -75,6 +75,7 @@ import { updateSessionAtom } from "@/atoms/sessions"
 import { navigate, routes } from "@/lib/navigate"
 import { CHAT_LAYOUT } from "@/config/layout"
 import { collectFileChangesFromActivities, getFirstFileChangeIdForActivity } from "@/lib/file-changes"
+import { shouldPreviewBackgroundTask } from "./background-task-chip"
 import { resolveBranchNewPanelOption } from "./branching"
 import { handleErrorMessageAction } from "./error-message-actions"
 import {
@@ -209,6 +210,12 @@ interface ChatDisplayProps {
   sessionStatuses?: import('@/config/session-status-config').SessionStatus[]
   /** Callback when session state changes */
   onSessionStatusChange?: (stateId: string) => void
+  /** Per-session opt-in for autonomous Swarm delegation. */
+  swarmEnabled?: boolean
+  onSwarmEnabledChange?: (enabled: boolean) => void | Promise<void>
+  /** Hidden worker/reviewer sessions inherit this setting and cannot edit it. */
+  swarmToggleDisabled?: boolean
+  swarmRunning?: boolean
   /** Workspace ID for loading skill icons */
   workspaceId?: string
   // Working directory (per session)
@@ -258,6 +265,12 @@ interface ChatDisplayProps {
   onBeforeExplicitStop?: () => Promise<boolean>
   /** When true, the session's locked connection has been removed - disables send and shows unavailable state */
   connectionUnavailable?: boolean
+  /** Preview a running child session without navigating away from the parent. */
+  onPreviewSession?: (sessionId: string) => void
+  /** Register the shared chat focus zone. Embedded previews should pass false. */
+  enableFocusZone?: boolean
+  /** Hide the composer (used by read-only child previews). */
+  hideComposer?: boolean
 }
 
 import {
@@ -491,6 +504,10 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
   // States (for # menu and badge)
   sessionStatuses,
   onSessionStatusChange,
+  swarmEnabled = false,
+  onSwarmEnabledChange,
+  swarmToggleDisabled = false,
+  swarmRunning = false,
   workspaceId,
   // Working directory
   workingDirectory,
@@ -517,6 +534,9 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
   onBeforeExplicitStop,
   // Connection unavailable
   connectionUnavailable = false,
+  onPreviewSession,
+  enableFocusZone = true,
+  hideComposer = false,
 }, ref) {
   const { t } = useTranslation()
   const reduceMotion = useReducedMotion()
@@ -604,7 +624,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
   // Guard with isFocusedPanelRef so only the focused panel responds in multi-panel layouts
   const { zoneRef, isFocused } = useFocusZone({
     zoneId: 'chat',
-    enabled: isFocusedPanel,
+    enabled: enableFocusZone && isFocusedPanel,
     focusFirst: () => {
       if (isFocusedPanelRef.current) {
         textareaRef.current?.focus()
@@ -616,6 +636,14 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
   const { tasks: backgroundTasks, killTask } = useBackgroundTasks({
     sessionId: session?.id ?? ''
   })
+  const handleOpenTaskSession = useCallback((taskSessionId: string) => {
+    const task = backgroundTasks.find(item => item.id === taskSessionId)
+    if (onPreviewSession && shouldPreviewBackgroundTask(task)) {
+      onPreviewSession(taskSessionId)
+      return
+    }
+    navigateToSession(taskSessionId)
+  }, [backgroundTasks, navigateToSession, onPreviewSession])
 
   // TurnCard expansion state — persisted to localStorage across session switches
   const {
@@ -1469,10 +1497,15 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
   }, [pendingPermission, pendingCredential])
 
   // Memoize turn grouping - avoids O(n) iteration on every render/keystroke
+  const sessionMessages = session?.messages
+  const sessionIsProcessing = session?.isProcessing
   const allTurns = React.useMemo(() => {
-    if (!session) return []
-    return groupMessagesByTurn(session.messages, { isSessionProcessing: session.isProcessing })
-  }, [session?.messages, session?.isProcessing])
+    if (!sessionMessages) return []
+    return groupMessagesByTurn(sessionMessages, {
+      isSessionProcessing: sessionIsProcessing,
+      isManagedSwarmRunning: swarmRunning,
+    })
+  }, [sessionMessages, sessionIsProcessing, swarmRunning])
 
   const queuedMessages = React.useMemo(
     () => session?.messages.filter(message =>
@@ -1677,8 +1710,10 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
                   {/* Empty state for compact mode - inviting conversational prompt, centered in full popover */}
                   {compactMode && turns.length === 0 && (
                     <div className="pointer-events-none absolute inset-0 overflow-hidden flex flex-col items-center justify-center select-none gap-1">
-                      <span className="text-sm text-muted-foreground">{t("editPopover.whatToChange")}</span>
-                      <span className="text-xs text-muted-foreground/50">{t("editPopover.justDescribe")}</span>
+                      <span className="text-sm text-muted-foreground">{emptyStateLabel || t("editPopover.whatToChange")}</span>
+                      {!emptyStateLabel && (
+                        <span className="text-xs text-muted-foreground/50">{t("editPopover.justDescribe")}</span>
+                      )}
                     </div>
                   )}
                   {!compactMode && hasUnrenderedLoadedMessages && (
@@ -2068,6 +2103,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
           </div>
 
           {/* === INPUT CONTAINER: FreeForm or Structured Input === */}
+          {(!hideComposer || pendingPermission || pendingCredential) && (
           <ChatInputZone
             compactMode={compactMode}
             permissionMode={permissionMode}
@@ -2076,23 +2112,22 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
             sessionId={session.id}
             sessionFolderPath={sessionFolderPath}
             onKillTask={(taskId) => killTask(taskId, backgroundTasks.find(t => t.id === taskId)?.type === 'shell' ? 'shell' : 'agent')}
-            onOpenSession={navigateToSession}
+            onOpenSession={handleOpenTaskSession}
             onInsertMessage={onInputChange}
-            sessionLabels={session.labels}
-            labels={labels}
-            onLabelsChange={onLabelsChange}
-            sessionStatuses={sessionStatuses}
+            sessionLabels={[]}
+            labels={[]}
+            sessionStatuses={[]}
             currentSessionStatus={session.sessionStatus || 'todo'}
-            showSharedProjectMemory={
-              !!session.projectId &&
-              (session.sharedProjectMemoryEnabled === undefined || session.sharedProjectMemoryEnabled === true)
-            }
-            onSessionStatusChange={onSessionStatusChange}
+            swarmEnabled={swarmEnabled}
+            onSwarmEnabledChange={onSwarmEnabledChange}
+            swarmToggleDisabled={swarmToggleDisabled}
+            swarmRunning={swarmRunning}
             queuedMessages={queuedMessages}
             inputProps={{
               placeholder,
               disabled: isInputDisabled,
               isProcessing: session.isProcessing,
+              swarmEnabled,
               onAnimatedHeightChange: handleAnimatedHeightChange,
               onSubmit: handleSubmit,
               onStop: handleStop,
@@ -2132,6 +2167,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
               compactInputMaxHeight,
             }}
           />
+          )}
           </div>
         </div>
       ) : null}
@@ -2204,6 +2240,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
               variant: 'blue',
             }}
             error={activityOutputOverlayData.error}
+            errorLabel={activityOutputOverlayData.toolName === 'Write' ? 'Write Failed' : undefined}
           />
         ) : detectLanguage(activityOutputOverlayData.content) === 'markdown' ? (
           <DocumentFormattedMarkdownOverlay

@@ -44,6 +44,7 @@ import { FEATURE_FLAGS } from '../feature-flags.ts';
 
 // BaseAgent provides common functionality
 import { BaseAgent } from './base-agent.ts';
+import { wrapSpawnSessionToolError } from './spawn-session-tool.ts';
 import type { Workspace } from '../config/storage.ts';
 
 // Event adapter
@@ -55,7 +56,11 @@ import { getSystemPrompt } from '../prompts/system.ts';
 import { getCoAuthorPreference } from '../config/preferences.ts';
 import { loadProjectPromptContext } from '../projects/storage.ts';
 import type { ProjectPromptContext } from '../projects/types.ts';
-import { isSharedProjectMemoryEnabled } from '../sessions/types.ts';
+import {
+  isSharedProjectMemoryEnabled,
+  isSpawnedSwarmAgent,
+  type SessionConfig,
+} from '../sessions/types.ts';
 
 // Credential manager for token storage
 import { getCredentialManager } from '../credentials/manager.ts';
@@ -127,6 +132,18 @@ import { saveBinaryResponse } from '../utils/binary-detection.ts';
 // ============================================================
 // PiAgent Implementation
 // ============================================================
+
+export function buildPiSwarmInitConfig(session: SessionConfig | undefined): {
+  swarmEnabled: boolean;
+  swarmAgentTokenBudget?: number;
+} {
+  return {
+    swarmEnabled: session?.swarmEnabled === true,
+    swarmAgentTokenBudget: session && isSpawnedSwarmAgent(session)
+      ? session.orchestrationTokenBudget
+      : undefined,
+  };
+}
 
 /** Backend-executed session tools currently supported by PiAgent. */
 export const PI_BACKEND_SESSION_TOOL_NAMES = new Set<string>([
@@ -402,9 +419,7 @@ export class PiAgent extends BaseAgent {
     if (contextWindow) {
       this.adapter.setContextWindow(contextWindow);
     }
-    if (config.miniModel) {
-      this.adapter.setMiniModel(config.miniModel);
-    }
+    this.adapter.setCallLlmDefaultModel(this.getModel() || config.miniModel);
 
     // Set session dir on adapter for concurrent-safe toolMetadataStore lookups
     if (config.session?.id && config.workspace.rootPath) {
@@ -636,6 +651,7 @@ export class PiAgent extends BaseAgent {
       baseUrl: runtime.baseUrl,
       customEndpoint: runtime.customEndpoint,
       customModels: runtime.customModels,
+      ...buildPiSwarmInitConfig(this.config.session),
       // Branch params for Pi SDK session fork
       branchFromSdkSessionId: this.config.session?.branchFromSdkSessionId,
       branchFromSessionPath: this.config.session?.branchFromSessionPath,
@@ -671,11 +687,15 @@ export class PiAgent extends BaseAgent {
       sessionToolDefs = sessionToolDefs.filter(d => d.name !== 'mcp__session__browser_tool');
     }
 
-    // Patch call_llm description with provider-specific model hint
-    if (this.config.miniModel) {
-      const callLlmDef = sessionToolDefs.find(d => d.name === 'mcp__session__call_llm');
-      if (callLlmDef) {
-        callLlmDef.description += `\n\nDefault fast model for this session: ${this.config.miniModel}. Omit the model parameter to use it automatically.`;
+    // Patch call_llm description with the current session model (#192).
+    // Both the MCP name and the prompt-facing alias must get the same hint.
+    const callLlmDefault = this.getModel();
+    if (callLlmDefault) {
+      const hint = `\n\nDefault model for this session: ${callLlmDefault}. Omit the model parameter to use it automatically. Pass a different model only when you intentionally want another tier.`;
+      for (const def of sessionToolDefs) {
+        if (def.name === 'mcp__session__call_llm' || def.name === 'call_llm') {
+          def.description += hint;
+        }
       }
     }
 
@@ -800,7 +820,7 @@ export class PiAgent extends BaseAgent {
    * Build AWS environment variables from piAuth credentials for the subprocess.
    *
    * The Pi SDK's Bedrock provider reads from the AWS default credential chain
-   * (env vars), not from Pi AuthStorage. We inject at spawn time so credentials
+   * (env vars), not from Pi's credential store. We inject at spawn time so credentials
    * are scoped to the subprocess and don't leak to the main process.
    *
    * NOTE: IAM credentials (especially STS session tokens) are immutable after
@@ -873,8 +893,8 @@ export class PiAgent extends BaseAgent {
       try {
         if (piAuthProvider === 'github-copilot') {
           // Copilot: refresh the short-lived Copilot token using the GitHub access token
-          const { refreshGitHubCopilotToken } = await import('@earendil-works/pi-ai/oauth');
-          const newCreds = await refreshGitHubCopilotToken(stored.refreshToken);
+          const { refreshGitHubCopilotTokenWithSdk } = await import('../auth/github-copilot-sdk.ts');
+          const newCreds = await refreshGitHubCopilotTokenWithSdk(stored.refreshToken);
           await credentialManager.setLlmOAuth(slug, {
             accessToken: newCreds.access,
             refreshToken: newCreds.refresh,
@@ -1872,7 +1892,7 @@ export class PiAgent extends BaseAgent {
           return { content: JSON.stringify(result, null, 2), isError: false };
         } catch (error) {
           const msg = error instanceof Error ? error.message : String(error);
-          return { content: `spawn_session failed: ${msg}`, isError: true };
+          return { content: wrapSpawnSessionToolError(msg), isError: true };
         }
       }
 
@@ -2405,6 +2425,7 @@ export class PiAgent extends BaseAgent {
         // their registered tool schemas. Keep the prompt aligned with the strict,
         // provider-neutral schemas registered by pi-agent-server.
         false,
+        this.config.session?.swarmEnabled === true,
       );
 
       // Build context from sources
@@ -2595,6 +2616,7 @@ export class PiAgent extends BaseAgent {
       },
     };
     this._model = update.model;
+    this.adapter.setCallLlmDefaultModel(update.model);
     this.applyCatalogContextWindow(update.model);
 
     if (!this.subprocess) {
@@ -2625,6 +2647,7 @@ export class PiAgent extends BaseAgent {
   override setModel(model: string): void {
     const previousModel = this.getModel();
     super.setModel(model);
+    this.adapter.setCallLlmDefaultModel(model);
     this.applyCatalogContextWindow(model);
     // Forward to subprocess so it uses the new model on next turn
     if (this.subprocess) {

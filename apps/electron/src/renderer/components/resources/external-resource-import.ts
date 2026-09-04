@@ -37,6 +37,29 @@ const MAX_SKILL_MARKDOWN_BYTES = 2 * 1024 * 1024
 const MAX_SKILL_ZIP_BYTES = 20 * 1024 * 1024
 const BASE64_CHUNK_BYTES = 0x8000
 
+export function isSupportedSkillImportFile(file: Pick<File, 'name'>): boolean {
+  return /\.(?:md|zip)$/i.test(file.name)
+}
+
+export function hasFileDragType(types: ArrayLike<string>): boolean {
+  return Array.from(types).some(type => type.toLowerCase() === 'files')
+}
+
+export function getDroppedSkillImportFile(files: ArrayLike<File>): File {
+  if (files.length === 0) {
+    throw new Error('Drop a SKILL.md or skill Zip to import')
+  }
+  if (files.length > 1) {
+    throw new Error('Drop one SKILL.md or skill Zip at a time')
+  }
+
+  const file = files[0]
+  if (!file || !isSupportedSkillImportFile(file)) {
+    throw new Error('Only SKILL.md and skill Zip files can be imported')
+  }
+  return file
+}
+
 function hasMcpServerConfig(value: unknown): boolean {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false
   const server = value as Record<string, unknown>
@@ -138,6 +161,10 @@ export async function prepareSkillFileImport(
   workspaceId: string,
   file: File,
 ): Promise<PreparedSkillFileImport> {
+  if (!isSupportedSkillImportFile(file)) {
+    throw new Error('Only SKILL.md and skill Zip files can be imported')
+  }
+
   const isZip = file.name.toLowerCase().endsWith('.zip')
   if (file.size > (isZip ? MAX_SKILL_ZIP_BYTES : MAX_SKILL_MARKDOWN_BYTES)) {
     throw new Error(isZip ? 'Skill zip exceeds the 20 MB limit' : 'SKILL.md exceeds the 2 MB limit')

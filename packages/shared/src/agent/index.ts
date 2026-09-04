@@ -119,6 +119,11 @@ export {
   type MiniAgentConfig,
   type SpawnSessionMode,
   type SpawnSessionResultStatus,
+  type SpawnSessionLifecycle,
+  type SpawnSessionRole,
+  type SpawnSessionReason,
+  type SpawnSessionQualificationTrack,
+  type SpawnSessionQualification,
   type SpawnSessionRequest,
   type SpawnSessionResult,
   type SpawnSessionHelpResult,
@@ -180,7 +185,12 @@ export {
   MAX_SPAWN_WAIT_TIMEOUT_MS,
   resolveSpawnSessionMode,
   resolveSpawnWaitTimeoutMs,
+  synthesizeFanOutQualification,
+  extractParallelTrackNames,
+  readCurrentTurnSpawnContext,
+  synthesizeAutomaticQualification,
   createSpawnSessionTool,
+  wrapSpawnSessionToolError,
 } from './spawn-session-tool.ts';
 
 // WS2 keep-alive: shared flag resolver + pushable streaming-input utility.

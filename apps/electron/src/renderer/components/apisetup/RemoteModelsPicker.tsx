@@ -5,7 +5,7 @@ import { Check, ChevronDown, Loader2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Label } from '@/components/ui/label'
 import type { RemoteModel } from './fetch-openai-models.ts'
-import { parseSelectedModels } from './fetch-openai-models.ts'
+import { findRemoteModel, mergeMissingSelectedModels, parseSelectedModels, setHasModelId } from './fetch-openai-models.ts'
 import { formatModelLimitCaption } from '@/components/app-shell/input/model-picker-helpers'
 
 interface RemoteModelsPickerProps {
@@ -39,13 +39,18 @@ export function RemoteModelsPicker({
 
   const selected = useMemo(() => parseSelectedModels(value), [value])
   const selectedSet = useMemo(() => new Set(selected), [selected])
+  const listed = useMemo(
+    () => mergeMissingSelectedModels(models, selected),
+    [models, selected],
+  )
   const filtered = useMemo(() => {
     const q = filter.trim().toLowerCase()
-    if (!q) return models
-    return models.filter((m) =>
+    if (!q) return listed
+    return listed.filter((m) =>
       m.name.toLowerCase().includes(q) || m.id.toLowerCase().includes(q),
     )
-  }, [models, filter])
+  }, [listed, filter])
+  const canOpen = !disabled && !waitingForKey && listed.length > 0
 
   const summary = selected.length > 0
     ? selected.join(', ')
@@ -68,7 +73,7 @@ export function RemoteModelsPicker({
       ) : (
         <button
           type="button"
-          disabled={disabled || waitingForKey || models.length === 0}
+          disabled={!canOpen}
           onClick={(e) => {
             if (open) {
               setOpen(false)
@@ -85,7 +90,7 @@ export function RemoteModelsPicker({
             'flex h-9 w-full items-center justify-between rounded-md px-3 text-sm',
             'bg-foreground-2 shadow-minimal transition-colors text-left',
             'hover:bg-background focus:outline-none focus:bg-background',
-            (disabled || waitingForKey || models.length === 0) && 'opacity-50 pointer-events-none',
+            !canOpen && 'opacity-50 pointer-events-none',
           )}
         >
           <span className={cn('truncate', selected.length === 0 && 'text-muted-foreground')}>
@@ -123,11 +128,14 @@ export function RemoteModelsPicker({
                   </div>
                 ) : (
                   filtered.map((model) => {
-                    const isOn = selectedSet.has(model.id)
-                    const limitCaption = formatModelLimitCaption(model, {
-                      context: t('chat.context'),
-                      output: t('chat.usage.output'),
-                    })
+                    const isOn = setHasModelId(selectedSet, model.id)
+                    const unavailable = findRemoteModel(models, model.id) === undefined
+                    const limitCaption = unavailable
+                      ? t('chat.modelPicker.unavailable')
+                      : formatModelLimitCaption(model, {
+                          context: t('chat.context'),
+                          output: t('chat.usage.output'),
+                        })
                     return (
                       <CommandPrimitive.Item
                         key={model.id}
@@ -144,7 +152,10 @@ export function RemoteModelsPicker({
                         <span className="min-w-0">
                           <span className="block truncate">{model.name}</span>
                           {limitCaption && (
-                            <span className="block text-[10px] text-foreground/35 tabular-nums">
+                            <span className={cn(
+                              'block text-[10px] tabular-nums',
+                              unavailable ? 'text-destructive/80' : 'text-foreground/35',
+                            )}>
                               {limitCaption}
                             </span>
                           )}

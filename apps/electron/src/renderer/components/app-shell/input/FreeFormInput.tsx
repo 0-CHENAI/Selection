@@ -1,6 +1,7 @@
 import * as React from 'react'
 import { useTranslation } from "react-i18next"
 import { AnimatePresence, motion } from 'motion/react'
+import { toast } from 'sonner'
 import {
   Paperclip,
   ArrowUp,
@@ -53,7 +54,7 @@ import { isMac } from '@/lib/platform'
 import { applySmartTypography } from '@/lib/smart-typography'
 import { AttachmentPreview } from '../AttachmentPreview'
 import { ImageSupportWarningBanner } from './ImageSupportWarningBanner'
-import { getModelShortName, getModelDisplayName, getModelContextWindow, compactionTriggerTokens } from '@config/models'
+import { getModelShortName, getModelDisplayName, getModelContextWindow, compactionTriggerTokens, swarmCompactionReserveTokens } from '@config/models'
 import {
   resolveEffectiveConnectionSlug,
   isCompatProvider,
@@ -80,6 +81,7 @@ import { buildPlanApprovalMessage } from '../plan-approval-message'
 import { shouldHandleScopedInputEvent, shouldRecallPromptOnArrowUp } from './input-event-guards'
 import { clearPendingFocusForSession, consumePendingFocusForSession } from './focus-input-events'
 import { restoreComposerFocus } from './restore-composer-focus'
+import { assessDelegateCommandSubmission, buildDelegateCommandDraft } from './delegate-command'
 import {
   getRecentWorkingDirs,
   addRecentWorkingDir,
@@ -88,11 +90,14 @@ import { WorkingDirectorySelector, formatPathForDisplay } from './WorkingDirecto
 import { CompactPermissionModeSelector } from './CompactPermissionModeSelector'
 import { CompactModelSelector } from './CompactModelSelector'
 import {
+  appendMissingPickerModel,
+  chosenPickerModelId,
   connectionPinnedModelIds,
   formatTokenCount,
   groupConnectionsByProvider,
   isOpenRouterConnection,
   isPickerModelSelected,
+  isUnavailablePickerModel,
   pickerModelId,
   resolvePickerModelsWithLive,
   resolveVisiblePickerModels,
@@ -124,7 +129,11 @@ function SwitcherConnectionModels({
 }) {
   const { t } = useTranslation()
   const [query, setQuery] = React.useState('')
-  const models = resolvePickerModelsWithLive(conn, liveOpenRouterModels)
+  const catalog = resolvePickerModelsWithLive(conn, liveOpenRouterModels)
+  const models = appendMissingPickerModel(
+    catalog,
+    isCurrentConnection ? currentModel : undefined,
+  )
   const visibleCatalog = resolveVisiblePickerModels(models, {
     query,
     currentModel: isCurrentConnection ? currentModel : conn.defaultModel,
@@ -146,17 +155,33 @@ function SwitcherConnectionModels({
             ? stripPiPrefixForDisplay(getModelShortName(model))
             : (model.name ?? stripPiPrefixForDisplay(model.id))
           const isSelectedModel = isCurrentConnection && isPickerModelSelected(currentModel, modelId)
-          const limitCaption = pickerModelLimitCaption(model, t)
+          const unavailable = isUnavailablePickerModel(catalog, modelId)
+          const limitCaption = unavailable
+            ? t('chat.modelPicker.unavailable')
+            : pickerModelLimitCaption(model, t)
           return (
             <StyledDropdownMenuItem
               key={modelId}
-              onSelect={() => onPick(modelId, conn.slug)}
+              onSelect={() => {
+                const next = chosenPickerModelId(
+                  modelId,
+                  isCurrentConnection ? currentModel : '',
+                  catalog,
+                )
+                if (next === undefined) return
+                onPick(next, conn.slug)
+              }}
               className="flex items-center justify-between px-2 py-2 rounded-lg cursor-pointer"
             >
               <div className="min-w-0 text-left">
                 <div className="font-medium text-sm">{modelName}</div>
                 {limitCaption && (
-                  <div className="text-xs text-muted-foreground tabular-nums">{limitCaption}</div>
+                  <div className={cn(
+                    'text-xs tabular-nums',
+                    unavailable ? 'text-destructive/80' : 'text-muted-foreground',
+                  )}>
+                    {limitCaption}
+                  </div>
                 )}
               </div>
               {isSelectedModel && (
@@ -216,8 +241,10 @@ export interface FreeFormInputProps {
   disabled?: boolean
   /** Whether the session is currently processing */
   isProcessing?: boolean
+  /** Swarm sessions compact automatically at 80% of their model context window. */
+  swarmEnabled?: boolean
   /** Callback when message is submitted (skillSlugs from @mentions) */
-  onSubmit: (message: string, attachments?: FileAttachment[], skillSlugs?: string[]) => void
+  onSubmit: (message: string, attachments?: FileAttachment[], skillSlugs?: string[]) => boolean | void | Promise<boolean | void>
   /** Callback to stop processing. Pass silent=true to skip "Response interrupted" message */
   onStop?: (silent?: boolean) => void
   /** External ref for the input */
@@ -346,6 +373,7 @@ export function FreeFormInput({
   placeholder,
   disabled = false,
   isProcessing = false,
+  swarmEnabled = false,
   onSubmit,
   onStop,
   inputRef: externalInputRef,
@@ -427,10 +455,15 @@ export function FreeFormInput({
     !connectionUnavailable && isOpenRouterConnection(effectiveConnectionDetails),
   )
 
-  const availableModels = React.useMemo(() => {
+  const pickerCatalog = React.useMemo(() => {
     if (connectionUnavailable) return []
     return resolvePickerModelsWithLive(effectiveConnectionDetails, liveOpenRouterModels)
   }, [effectiveConnectionDetails, connectionUnavailable, liveOpenRouterModels])
+
+  const availableModels = React.useMemo(
+    () => appendMissingPickerModel(pickerCatalog, currentModel),
+    [pickerCatalog, currentModel],
+  )
 
   const pinnedModelIds = React.useMemo(() => {
     return connectionPinnedModelIds(effectiveConnectionDetails)
@@ -1067,6 +1100,7 @@ export function FreeFormInput({
   }, [onLabelAdd])
 
   const inlineLabel = useInlineLabelMenu({
+    enabled: false,
     inputRef: richInputRef,
     labels,
     sessionLabels,
@@ -1333,9 +1367,19 @@ export function FreeFormInput({
   }
 
   // Submit message - backend handles queueing and interruption
-  const submitMessage = React.useCallback(() => {
+  const submitMessage = React.useCallback(async () => {
     const hasContent = input.trim() || attachments.length > 0 || followUpItems.length > 0
     if (!hasContent || disabled || submitLockRef.current || showVisionWarning) return false
+
+    // `/delegate` is an explicit authorization envelope, not a task by itself.
+    // Keep the draft intact until the user adds a non-empty task.
+    const delegateSubmission = assessDelegateCommandSubmission(input, isProcessing)
+    if (!delegateSubmission.allowed) {
+      toast.warning(delegateSubmission.reason === 'empty-task'
+        ? t('chat.delegateTaskRequired', 'Add a task after /delegate')
+        : t('chat.delegateWaitForIdle', 'Finish or stop the current response before delegating'))
+      return false
+    }
 
     // Tutorial may disable sending to guide user through specific steps
     if (disableSend) return false
@@ -1359,11 +1403,15 @@ export function FreeFormInput({
     const attachmentSnapshot = attachments
 
     try {
-      onSubmit(
+      const admitted = await onSubmit(
         input.trim(),
         attachmentSnapshot.length > 0 ? attachmentSnapshot : undefined,
         mentions.skills.length > 0 ? mentions.skills : undefined
       )
+      if (admitted === false) {
+        submitLockRef.current = false
+        return false
+      }
     } catch (error) {
       submitLockRef.current = false
       throw error
@@ -1389,14 +1437,14 @@ export function FreeFormInput({
     })
 
     return true
-  }, [input, attachments, followUpItems, disabled, disableSend, showVisionWarning, onInputChange, onAttachmentsChange, onSubmit, skills, sources, optimisticSourceSlugs, onSourcesChange, onWorkingDirectoryChange, homeDir])
+  }, [input, attachments, followUpItems, disabled, disableSend, showVisionWarning, onInputChange, onAttachmentsChange, onSubmit, skills, sources, optimisticSourceSlugs, onSourcesChange, onWorkingDirectoryChange, homeDir, isProcessing, t])
 
   // Listen for craft:submit-input events (simulate pressing the Send button)
   React.useEffect(() => {
     const handleSubmitInput = (e: CustomEvent<{ sessionId?: string }>) => {
       const targetSessionId = e.detail?.sessionId
       if (!shouldHandleScopedInputEvent({ sessionId, isFocusedPanel, targetSessionId })) return
-      submitMessage()
+      void submitMessage()
     }
 
     window.addEventListener('craft:submit-input', handleSubmitInput as EventListener)
@@ -1405,7 +1453,7 @@ export function FreeFormInput({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    submitMessage()
+    await submitMessage()
   }
 
   const handleStop = (silent = false) => {
@@ -1491,18 +1539,18 @@ export function FreeFormInput({
       // Enter sends, Shift+Enter adds newline
       if (e.key === 'Enter' && !e.shiftKey && !e.metaKey && !e.ctrlKey && !e.nativeEvent.isComposing) {
         e.preventDefault()
-        submitMessage()
+        void submitMessage()
       }
       // Also allow Cmd/Ctrl+Enter to send (power user shortcut)
       if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && !e.nativeEvent.isComposing) {
         e.preventDefault()
-        submitMessage()
+        void submitMessage()
       }
     } else {
       // cmd-enter mode: ⌘/Ctrl+Enter sends, plain Enter adds newline
       if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && !e.nativeEvent.isComposing) {
         e.preventDefault()
-        submitMessage()
+        void submitMessage()
       }
       // Plain Enter is allowed to pass through (adds newline)
     }
@@ -1567,13 +1615,24 @@ export function FreeFormInput({
     }
   }, [inlineSlash, inlineMention, inlineLabel, syncToParent])
 
-  // Handle inline slash command selection (removes the /command text)
+  // Handle inline slash command selection. Delegate remains visible as an
+  // authorization prefix; immediate commands such as compact are removed.
   const handleInlineSlashCommandSelect = React.useCallback((commandId: SlashCommandId) => {
-    const newValue = inlineSlash.handleSelectCommand(commandId)
+    const remainingInput = inlineSlash.handleSelectCommand(commandId)
+    const newValue = commandId === 'delegate'
+      ? buildDelegateCommandDraft(remainingInput)
+      : remainingInput
     setInput(newValue)
     syncToParent(newValue)
-    richInputRef.current?.focus()
-  }, [inlineSlash, syncToParent])
+    if (commandId === 'delegate') {
+      setTimeout(() => {
+        richInputRef.current?.focus()
+        richInputRef.current?.setSelectionRange(newValue.length, newValue.length)
+      }, 0)
+    } else {
+      richInputRef.current?.focus()
+    }
+  }, [inlineSlash, syncToParent, richInputRef])
 
   // Handle inline slash folder selection (inserts a directory badge)
   const handleInlineSlashFolderSelect = React.useCallback((path: string) => {
@@ -2263,20 +2322,32 @@ export function FreeFormInput({
                       ? stripPiPrefixForDisplay(getModelShortName(model))
                       : (model.name ?? stripPiPrefixForDisplay(model.id))
                     const isSelected = isPickerModelSelected(currentModel, modelId)
+                    const unavailable = isUnavailablePickerModel(pickerCatalog, modelId)
                     const descriptionKey = typeof model !== 'string' && 'descriptionKey' in model ? (model.descriptionKey as string) : undefined
                     const description = descriptionKey ? t(descriptionKey) : (typeof model !== 'string' && 'description' in model ? (model.description as string) : '')
                     const limitCaption = pickerModelLimitCaption(model, t)
-                    const secondary = [description, limitCaption].filter(Boolean).join(' · ')
+                    const secondary = unavailable
+                      ? t('chat.modelPicker.unavailable')
+                      : [description, limitCaption].filter(Boolean).join(' · ')
                     return (
                       <StyledDropdownMenuItem
                         key={modelId}
-                        onSelect={() => onModelChange(modelId, effectiveConnection)}
+                        onSelect={() => {
+                          const next = chosenPickerModelId(modelId, currentModel, pickerCatalog)
+                          if (next === undefined) return
+                          onModelChange(next, effectiveConnection)
+                        }}
                         className="flex items-center justify-between px-2 py-2 rounded-lg cursor-pointer"
                       >
                         <div className="text-left">
                           <div className="font-medium text-sm">{modelName}</div>
                           {secondary && (
-                            <div className="text-xs text-muted-foreground">{secondary}</div>
+                            <div className={cn(
+                              'text-xs',
+                              unavailable ? 'text-destructive/80' : 'text-muted-foreground',
+                            )}>
+                              {secondary}
+                            </div>
                           )}
                         </div>
                         {isSelected && (
@@ -2354,7 +2425,8 @@ export function FreeFormInput({
           {/* 5.5 Context Usage Warning Badge - shows when approaching auto-compaction threshold */}
           {(() => {
             // Warn against the same trigger the backend uses:
-            // Pi / custom endpoints compact at contextWindow - 16k (output reserve);
+            // Pi / custom endpoints compact at contextWindow - 16k by default;
+            // Swarm agents use a 20% reserve so compaction begins at 80%.
             // Anthropic still uses ~77.5% of the window (~155k of 200k).
             const catalogWindow = resolveConnectionModelContextWindow(effectiveConnectionDetails, currentModel)
             const effectiveContextWindow = contextStatus?.contextWindow
@@ -2366,7 +2438,10 @@ export function FreeFormInput({
             )
             const compactionThreshold = effectiveContextWindow
               ? (usePiReserve
-                ? compactionTriggerTokens(effectiveContextWindow)
+                ? compactionTriggerTokens(
+                    effectiveContextWindow,
+                    swarmEnabled ? swarmCompactionReserveTokens(effectiveContextWindow) : undefined,
+                  )
                 : Math.round(effectiveContextWindow * 0.775))
               : null
             const usagePercent = contextStatus?.inputTokens && compactionThreshold

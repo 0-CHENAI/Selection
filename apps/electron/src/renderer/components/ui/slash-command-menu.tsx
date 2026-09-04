@@ -1,7 +1,7 @@
 import * as React from 'react'
 import { useTranslation } from "react-i18next"
 import { Command as CommandPrimitive } from 'cmdk'
-import { Check, Minimize2 } from 'lucide-react'
+import { Check, Minimize2, Sparkles, Users } from 'lucide-react'
 import { Icon_Folder } from '@craft-agent/ui'
 import { cn } from '@/lib/utils'
 import { PERMISSION_MODE_CONFIG, PERMISSION_MODE_ORDER, type PermissionMode } from '@craft-agent/shared/agent/modes'
@@ -14,7 +14,7 @@ import { SkillAvatar } from '@/components/ui/skill-avatar'
 // Types
 // ============================================================================
 
-export type SlashCommandId = PermissionMode | 'compact'
+export type SlashCommandId = PermissionMode | 'compact' | 'delegate'
 
 /** Union type for all item types in the slash menu */
 export type SlashItemType = 'command' | 'folder' | 'skill'
@@ -112,8 +112,16 @@ const compactCommand: SlashCommand = {
   icon: <Minimize2 className={MENU_ICON_SIZE} />,
 }
 
+const delegateCommand: SlashCommand = {
+  id: 'delegate',
+  label: 'Delegate Task',
+  description: 'Explicitly authorize agents to split this task',
+  icon: <Users className={MENU_ICON_SIZE} />,
+}
+
 /** Commands available from the `/` inline menu (modes are NOT included — use the mode badge UI). */
 export const DEFAULT_SLASH_COMMANDS: SlashCommand[] = [
+  delegateCommand,
   compactCommand,
 ]
 
@@ -461,7 +469,12 @@ export function InlineSlashCommand({
       ref={menuRef}
       data-inline-menu
       className={cn('fixed z-dropdown', MENU_CONTAINER_STYLE, className)}
-      style={{ left: Math.round(position.x) - 10, bottom: bottomPosition, minWidth: 220, maxWidth: 260 }}
+      style={{
+        left: Math.round(position.x) - 10,
+        bottom: bottomPosition,
+        width: 'min(400px, calc(100vw - 24px))',
+        maxWidth: 400,
+      }}
     >
       <div ref={listRef} className={MENU_LIST_STYLE}>
         {filteredSections.map((section, sectionIndex) => (
@@ -512,11 +525,34 @@ export function InlineSlashCommand({
                       isSelected && MENU_ITEM_SELECTED
                     )}
                   >
-                    <div className="shrink-0">
-                      <SkillAvatar skill={item.skill} size="sm" workspaceId={workspaceId} />
+                    <div className="shrink-0 text-muted-foreground">
+                      <SkillAvatar
+                        skill={item.skill}
+                        size="sm"
+                        workspaceId={workspaceId}
+                        fallbackIcon={Sparkles}
+                        bare
+                        chromeless
+                      />
                     </div>
-                    <div className="flex-1 min-w-0">
-                      <span className="truncate block">{item.label}</span>
+                    <div className={cn(
+                      'min-w-0 flex-1',
+                      item.description ? 'grid grid-cols-2 gap-y-0.5' : undefined,
+                    )}>
+                      <span
+                        className={cn('block min-w-0 truncate', item.description && 'col-span-2')}
+                        title={item.label}
+                      >
+                        {item.label}
+                      </span>
+                      {item.description && (
+                        <span
+                          className="col-span-2 block min-w-0 truncate text-[11px] leading-4 text-muted-foreground"
+                          title={item.description}
+                        >
+                          {item.description}
+                        </span>
+                      )}
                     </div>
                     <span className="rounded-[4px] shadow-minimal bg-background px-1.5 py-0.5 text-[10px] text-muted-foreground shrink-0">
                       {t('common.skill')}
@@ -652,7 +688,7 @@ export function useInlineSlashCommand({
     result.push({
       id: 'commands',
       label: t('commands.section', 'Commands'),
-      items: [compactCommand],
+      items: DEFAULT_SLASH_COMMANDS,
     })
 
     // Recent folders section - sorted alphabetically by folder name, show all

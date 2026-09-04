@@ -4,7 +4,7 @@
  * task.yaml + orchestrator parent session + reserved TASK label + spec sources.
  * Never starts a run — running is tasks:run / TaskRunner.
  */
-import { saveTaskSpec, type TaskSpec } from '@craft-agent/shared/tasks'
+import { saveTaskDocument, serializeTaskYaml, type TaskSpec } from '@craft-agent/shared/tasks'
 import { createLogger } from '@craft-agent/shared/utils'
 import type { ISessionManager } from '../handlers/session-manager-interface'
 
@@ -32,6 +32,30 @@ export function resolveCreateTaskProjectId(
   currentProjectId: string | undefined,
 ): string | undefined {
   return requestedProjectId ?? currentProjectId
+}
+
+/**
+ * Agent-created Tasks inherit the invoking session's model and connection
+ * unless `spec.defaults` already names them. Node-level overrides still win
+ * at dispatch.
+ */
+export function inheritTaskExecutionDefaults(
+  spec: TaskSpec,
+  session: { model?: string; llmConnection?: string },
+): TaskSpec {
+  const model = spec.defaults?.model || session.model
+  const llmConnection = spec.defaults?.llmConnection || session.llmConnection
+  if (model === spec.defaults?.model && llmConnection === spec.defaults?.llmConnection) {
+    return spec
+  }
+  return {
+    ...spec,
+    defaults: {
+      ...spec.defaults,
+      ...(model ? { model } : {}),
+      ...(llmConnection ? { llmConnection } : {}),
+    },
+  }
 }
 
 /**
@@ -74,7 +98,9 @@ export async function createTaskFromSpec(
   spec: TaskSpec,
   opts?: { save?: boolean },
 ): Promise<CreateTaskFromSpecResult> {
-  if (opts?.save !== false) saveTaskSpec(workspaceRoot, spec)
+  if (opts?.save !== false) {
+    saveTaskDocument(workspaceRoot, serializeTaskYaml({ ...spec, schema_version: 2 }), null)
+  }
 
   const orchestrator = await sessionManager.createSession(workspaceId, {
     name: spec.title,

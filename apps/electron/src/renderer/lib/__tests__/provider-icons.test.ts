@@ -21,4 +21,10 @@ describe('getProviderIcon', () => {
       expect(String(icon)).not.toContain('gstatic.com')
     }
   })
+
+  it('maps both Moonshot API regions to the bundled Kimi icon', () => {
+    expect(getProviderIcon('pi', null, 'moonshotai')).toBe(providerIcons.kimi)
+    expect(getProviderIcon('pi', null, 'moonshotai-cn')).toBe(providerIcons.kimi)
+    expect(getProviderIcon('pi_compat', 'https://api.moonshot.cn/v1')).toBe(providerIcons.kimi)
+  })
 })

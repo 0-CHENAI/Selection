@@ -6,11 +6,11 @@ Invoke a secondary LLM for focused subtasks. The tool loads file content automat
 
 | Use Case | Model | Features |
 |----------|-------|----------|
-| Summarize large file | haiku | `attachments` |
-| Classify content | haiku | `outputFormat: "classification"` |
-| Extract structured data | haiku | `outputSchema` |
-| Deep analysis | sonnet/opus | `thinking: true` (API key only) |
-| Parallel processing | any | Multiple calls in one message |
+| Summarize large file | current session (or a smaller model if you pass one) | `attachments` |
+| Classify content | current session (or a smaller model if you pass one) | `outputFormat: "classification"` |
+| Extract structured data | current session (or a smaller model if you pass one) | `outputSchema` |
+| Deep analysis | current session | `thinking: true` (API key only) |
+| Parallel processing | current session unless you pass `model` | Multiple calls in one message |
 
 ## Authentication Paths
 
@@ -33,7 +33,7 @@ Features depend on how you authenticate:
 |-----------|------|-------------|
 | `prompt` | string | Instructions for the LLM (required) |
 | `attachments` | array | File/image paths to include |
-| `model` | string | Any model from the model registry. Defaults to Haiku (fastest) |
+| `model` | string | Any model from the model registry. Omit to inherit the current session model |
 | `systemPrompt` | string | Optional system prompt |
 | `maxTokens` | number | Max output tokens (1-64000, default 4096) |
 | `temperature` | number | Sampling temperature 0-1 (ignored if thinking=true) |
@@ -221,7 +221,7 @@ The tool provides detailed error messages with recovery suggestions. Common erro
 
 ## When NOT to Use
 
-- You can reason through it yourself without needing a cheaper model
+- You can reason through it yourself without needing a separate call
 - The task requires your conversation context
 - You need tools (Read, Bash, Glob) **and** the work is worth a child session — otherwise do it in the current session. Use `spawn_session` only for explicit split/parallel work or isolation that would pollute this chat. Simple processing of text you already have still belongs in `call_llm`.
 - Simple one-liner responses that don't need isolation

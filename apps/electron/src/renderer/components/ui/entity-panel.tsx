@@ -16,6 +16,7 @@ export interface EntityPanelItem {
   icon?: React.ReactNode
   title: React.ReactNode
   badges?: React.ReactNode
+  badgesEdgeFade?: boolean
   trailing?: React.ReactNode
   menu?: React.ReactNode
   dataAttributes?: Record<string, string | undefined>
@@ -84,6 +85,7 @@ export function EntityPanel<T>({
             icon={mapped.icon}
             title={mapped.title}
             badges={mapped.badges}
+            badgesEdgeFade={mapped.badgesEdgeFade}
             trailing={mapped.trailing}
             isSelected={selectedId === getId(item)}
             isInMultiSelect={rowProps.isInMultiSelect}

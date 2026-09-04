@@ -90,7 +90,7 @@ describe('ChatGPTBackendSearchProvider', () => {
     expect(calledUrl).toBe('https://chatgpt.com/backend-api/codex/responses');
     expect(calledHeaders.Authorization).toBe('Bearer my-access-token');
     expect(calledHeaders['chatgpt-account-id']).toBe('acc_12345');
-    expect(calledBody.model).toBe('gpt-5.3-codex');
+    expect(calledBody.model).toBe('gpt-5.6-sol');
     expect(calledBody.store).toBe(false);
     expect(calledBody.stream).toBe(true);
     expect(calledBody.instructions).toContain('web search assistant');
@@ -352,5 +352,86 @@ describe('ChatGPTBackendSearchProvider', () => {
     expect(message).toContain('tool=web_search');
     expect(message).toContain('stream=true');
     expect(callCount).toBe(1);
+  });
+
+  it('uses the active connection model before shared catalog fallbacks', async () => {
+    let calledModel: string | undefined;
+    globalThis.fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {
+      calledModel = JSON.parse(String(init?.body)).model;
+      return new Response(JSON.stringify({
+        output: [{
+          type: 'message',
+          content: [{
+            type: 'output_text',
+            text: 'Result',
+            annotations: [{ type: 'url_citation', url: 'https://example.com', title: 'Example' }],
+          }],
+        }],
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    }) as typeof fetch;
+
+    await new ChatGPTBackendSearchProvider('token', 'acc_123', { model: 'pi/gpt-5.6-terra' })
+      .search('query', 3);
+    expect(calledModel).toBe('gpt-5.6-terra');
+  });
+
+  it('moves to the next model when the account rejects the active model', async () => {
+    const attempts: Array<{ model: string; tool: string }> = [];
+    globalThis.fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body));
+      attempts.push({ model: body.model, tool: body.tools[0].type });
+      if (attempts.length === 1) {
+        return new Response(JSON.stringify({
+          detail: `The '${body.model}' model is not supported when using Codex with a ChatGPT account.`,
+        }), { status: 400, headers: { 'Content-Type': 'application/json' } });
+      }
+      return new Response(JSON.stringify({
+        output: [{
+          type: 'message',
+          content: [{
+            type: 'output_text',
+            text: 'Recovered',
+            annotations: [{ type: 'url_citation', url: 'https://recovered.example', title: 'Recovered' }],
+          }],
+        }],
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    }) as typeof fetch;
+
+    const results = await new ChatGPTBackendSearchProvider('token', 'acc_123', { model: 'gpt-5.6-sol' })
+      .search('query', 3);
+    expect(attempts).toHaveLength(2);
+    expect(attempts[1]?.model).not.toBe(attempts[0]?.model);
+    expect(attempts[1]?.tool).toBe('web_search');
+    expect(results[0]?.url).toBe('https://recovered.example');
+  });
+
+  it('retries the tool type without changing model for a hosted-tool refusal', async () => {
+    const attempts: Array<{ model: string; tool: string }> = [];
+    globalThis.fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body));
+      attempts.push({ model: body.model, tool: body.tools[0].type });
+      if (attempts.length === 1) {
+        return new Response(JSON.stringify({ detail: "Hosted tool 'web_search' is not supported." }), {
+          status: 400,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+      return new Response(JSON.stringify({
+        output: [{
+          type: 'message',
+          content: [{
+            type: 'output_text',
+            text: 'Recovered',
+            annotations: [{ type: 'url_citation', url: 'https://preview.example', title: 'Preview' }],
+          }],
+        }],
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    }) as typeof fetch;
+
+    await new ChatGPTBackendSearchProvider('token', 'acc_123', { model: 'gpt-5.6-sol' }).search('query', 3);
+    expect(attempts).toEqual([
+      { model: 'gpt-5.6-sol', tool: 'web_search' },
+      { model: 'gpt-5.6-sol', tool: 'web_search_preview' },
+    ]);
   });
 });

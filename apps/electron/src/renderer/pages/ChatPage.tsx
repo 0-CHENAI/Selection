@@ -14,6 +14,7 @@ import { PanelHeader } from '@/components/app-shell/PanelHeader'
 import { SessionMenu } from '@/components/app-shell/SessionMenu'
 import { CompactSessionMenu } from '@/components/app-shell/CompactSessionMenu'
 import { SessionInfoPopover } from '@/components/app-shell/SessionInfoPopover'
+import { ChildSessionPreviewDialog } from '@/components/app-shell/ChildSessionPreviewDialog'
 import { RenameDialog } from '@/components/ui/rename-dialog'
 import { toast } from 'sonner'
 import { PanelHeaderCenterButton } from '@/components/ui/PanelHeaderCenterButton'
@@ -24,7 +25,14 @@ import { resolveMarkdownLinkTarget } from '@craft-agent/ui'
 import { navigate, routes } from '@/lib/navigate'
 import { coerceInputText } from '@/lib/input-text'
 import { deriveSessionMessagesLoadState, formatSessionLoadFailure } from '@/lib/session-load'
-import { ensureSessionMessagesLoadedAtom, forceSessionMessagesReloadAtom, loadedSessionsAtom, sessionMetaMapAtom } from '@/atoms/sessions'
+import {
+  ensureSessionMessagesLoadedAtom,
+  forceSessionMessagesReloadAtom,
+  loadedSessionsAtom,
+  sessionMetaMapAtom,
+  updateSessionAtom,
+  updateSessionMetaAtom,
+} from '@/atoms/sessions'
 import { kanbanEditorTargetAtom } from '@/atoms/kanban'
 import { getSessionTitle } from '@/utils/session'
 // Model resolution: connection.defaultModel (no hardcoded defaults)
@@ -60,17 +68,9 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
     onAttachmentsChange,
     enabledSources,
     skills,
-    labels,
-    onSessionLabelsChange,
     enabledModes,
-    sessionStatuses,
     onSessionSourcesChange,
     onRenameSession,
-    onFlagSession,
-    onUnflagSession,
-    onArchiveSession,
-    onUnarchiveSession,
-    onSessionStatusChange,
     onDeleteSession,
     rightSidebarButton,
     leadingAction,
@@ -103,8 +103,14 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
   // Fallback: ensure messages are loaded when session is viewed
   const ensureMessagesLoaded = useSetAtom(ensureSessionMessagesLoadedAtom)
   const forceMessagesReload = useSetAtom(forceSessionMessagesReloadAtom)
+  const updateSession = useSetAtom(updateSessionAtom)
+  const updateSessionMeta = useSetAtom(updateSessionMetaAtom)
   const [messagesLoadError, setMessagesLoadError] = React.useState<string | null>(null)
   const [messagesRetrying, setMessagesRetrying] = React.useState(false)
+  const [previewChildSessionId, setPreviewChildSessionId] = React.useState<string | null>(null)
+  React.useEffect(() => {
+    setPreviewChildSessionId(null)
+  }, [sessionId])
   const autoForcedReloadSessionRef = React.useRef<string | null>(null)
   const shouldForceInitialMessagesReload = React.useMemo(() => {
     const expectedMessageCount = session?.messageCount ?? sessionMeta?.messageCount ?? 0
@@ -284,7 +290,12 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
   // Session model change handler - persists per-session model and connection
   const handleModelChange = React.useCallback((model: string, connection?: string) => {
     if (activeWorkspaceId) {
-      window.electronAPI.setSessionModel(sessionId, activeWorkspaceId, model, connection)
+      window.electronAPI.setSessionModel(
+        sessionId,
+        activeWorkspaceId,
+        model.trim() ? model : null,
+        connection,
+      )
     }
   }, [sessionId, activeWorkspaceId])
 
@@ -315,7 +326,7 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
     const connection = connectionSlug ? llmConnections.find(c => c.slug === connectionSlug) : null
 
     return connection?.defaultModel ?? ''
-  }, [session?.id, session?.model, session?.llmConnection, workspaceDefaultLlmConnection, llmConnections, connectionUnavailable])
+  }, [session?.model, session?.llmConnection, workspaceDefaultLlmConnection, llmConnections, connectionUnavailable])
 
   // Working directory for this session
   const workingDirectory = session?.workingDirectory
@@ -383,8 +394,6 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
   // Priority: name > first user message > preview > "New chat"
   const displayTitle = session ? getSessionTitle(session) : (sessionMeta ? getSessionTitle(sessionMeta) : t('chat.session'))
   const isFlagged = session?.isFlagged || sessionMeta?.isFlagged || false
-  const isArchived = session?.isArchived || sessionMeta?.isArchived || false
-  const currentSessionStatus = session?.sessionStatus || sessionMeta?.sessionStatus || 'todo'
   const hasMessages = !!(session?.messages?.length || sessionMeta?.lastFinalMessageId)
   const hasUnreadMessages = sessionMeta
     ? !!(sessionMeta.lastFinalMessageId && sessionMeta.lastFinalMessageId !== sessionMeta.lastReadMessageId)
@@ -409,39 +418,33 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
     setRenameDialogOpen(false)
   }, [sessionId, renameName, displayTitle, onRenameSession])
 
-  const handleFlag = React.useCallback(() => {
-    onFlagSession(sessionId)
-  }, [sessionId, onFlagSession])
-
-  const handleUnflag = React.useCallback(() => {
-    onUnflagSession(sessionId)
-  }, [sessionId, onUnflagSession])
-
-  const handleArchive = React.useCallback(() => {
-    onArchiveSession(sessionId)
-  }, [sessionId, onArchiveSession])
-
-  const handleUnarchive = React.useCallback(() => {
-    onUnarchiveSession(sessionId)
-  }, [sessionId, onUnarchiveSession])
-
   const handleMarkUnread = React.useCallback(() => {
     onMarkSessionUnread(sessionId)
   }, [sessionId, onMarkSessionUnread])
 
-  const handleSessionStatusChange = React.useCallback((state: string) => {
-    onSessionStatusChange(sessionId, state)
-  }, [sessionId, onSessionStatusChange])
-
-  const handleLabelsChange = React.useCallback((newLabels: string[]) => {
-    onSessionLabelsChange?.(sessionId, newLabels)
-  }, [sessionId, onSessionLabelsChange])
+  const swarmEnabled = session?.swarmEnabled ?? sessionMeta?.swarmEnabled ?? false
+  const orchestrationStatus = session?.orchestrationStatus ?? sessionMeta?.orchestrationStatus
+  const swarmToggleDisabled = sessionMeta?.orchestrationRole === 'worker'
+    || sessionMeta?.orchestrationRole === 'reviewer'
+  const handleSwarmEnabledChange = React.useCallback(async (enabled: boolean) => {
+    const previous = session?.swarmEnabled ?? sessionMeta?.swarmEnabled ?? false
+    updateSession(sessionId, current => current ? { ...current, swarmEnabled: enabled } : current)
+    updateSessionMeta(sessionId, { swarmEnabled: enabled })
+    try {
+      await window.electronAPI.setSessionSwarmEnabled(sessionId, enabled)
+    } catch (error) {
+      updateSession(sessionId, current => current ? { ...current, swarmEnabled: previous } : current)
+      updateSessionMeta(sessionId, { swarmEnabled: previous })
+      console.error('[ChatPage] Failed to update Swarm mode:', error)
+      toast.error(t('common.error'))
+    }
+  }, [sessionId, session?.swarmEnabled, sessionMeta?.swarmEnabled, updateSession, updateSessionMeta, t])
 
   // Task orchestrator sessions (spec-backed, top-level) get an "Edit task" header action
   // that opens the board's full-pane Task editor prefilled from task.yaml — the same
   // surface as creation, so goal/acceptance criteria/subtasks can change and the whole
   // task can be re-run (Save & Run mints a fresh Conductor run).
-  const taskSlug = sessionMeta?.taskSlug
+  const taskSlug = session?.taskSlug ?? sessionMeta?.taskSlug
   const isTaskOrchestrator = !!taskSlug && !sessionMeta?.parentSessionId
   const setKanbanEditorTarget = useSetAtom(kanbanEditorTargetAtom)
   const handleEditTask = React.useCallback(() => {
@@ -486,7 +489,7 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
         )}
       />
     )
-  }, [isCompactMode, sessionId, session?.sessionFolderPath, sessionMeta])
+  }, [isCompactMode, sessionId, session?.sessionFolderPath, sessionMeta, t])
 
   // Pencil opens the Task editor for orchestrator sessions. Compact mode also
   // shows session info; desktop online-share control has been removed.
@@ -516,32 +519,16 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
   const titleMenu = React.useMemo(() => (sessionMeta && !isCompactMode) ? (
     <SessionMenu
       item={sessionMeta}
-      sessionStatuses={sessionStatuses ?? []}
-      labels={labels ?? []}
-      onLabelsChange={handleLabelsChange}
       onRename={handleRename}
-      onFlag={handleFlag}
-      onUnflag={handleUnflag}
-      onArchive={handleArchive}
-      onUnarchive={handleUnarchive}
       onMarkUnread={handleMarkUnread}
-      onSessionStatusChange={handleSessionStatusChange}
       onOpenInNewWindow={handleOpenInNewWindow}
       onDelete={handleDelete}
     />
   ) : null, [
     sessionMeta,
     isCompactMode,
-    sessionStatuses,
-    labels,
-    handleLabelsChange,
     handleRename,
-    handleFlag,
-    handleUnflag,
-    handleArchive,
-    handleUnarchive,
     handleMarkUnread,
-    handleSessionStatusChange,
     handleOpenInNewWindow,
     handleDelete,
   ])
@@ -551,16 +538,8 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
       title={displayTitle}
       isRegeneratingTitle={isAsyncOperationOngoing}
       item={sessionMeta}
-      sessionStatuses={sessionStatuses ?? []}
-      labels={labels ?? []}
-      onLabelsChange={handleLabelsChange}
       onRename={handleRename}
-      onFlag={handleFlag}
-      onUnflag={handleUnflag}
-      onArchive={handleArchive}
-      onUnarchive={handleUnarchive}
       onMarkUnread={handleMarkUnread}
-      onSessionStatusChange={handleSessionStatusChange}
       onOpenInNewWindow={handleOpenInNewWindow}
       onDelete={handleDelete}
     />
@@ -569,19 +548,21 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
     isCompactMode,
     displayTitle,
     isAsyncOperationOngoing,
-    sessionStatuses,
-    labels,
-    handleLabelsChange,
     handleRename,
-    handleFlag,
-    handleUnflag,
-    handleArchive,
-    handleUnarchive,
     handleMarkUnread,
-    handleSessionStatusChange,
     handleOpenInNewWindow,
     handleDelete,
   ])
+
+  const childPreviewDialog = (
+    <ChildSessionPreviewDialog
+      sessionId={previewChildSessionId}
+      open={previewChildSessionId !== null}
+      onOpenChange={(open) => {
+        if (!open) setPreviewChildSessionId(null)
+      }}
+    />
+  )
 
   // Handle missing session - loading or deleted
   if (!session) {
@@ -601,12 +582,18 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
         enabledSourceSlugs: sessionMeta.enabledSourceSlugs,
         projectId: sessionMeta.projectId,
         sharedProjectMemoryEnabled: sessionMeta.sharedProjectMemoryEnabled,
+        swarmEnabled: sessionMeta.swarmEnabled,
+        orchestrationRole: sessionMeta.orchestrationRole,
+        orchestrationStatus: sessionMeta.orchestrationStatus,
+        orchestrationBlocker: sessionMeta.orchestrationBlocker,
+        orchestrationTokensUsed: sessionMeta.orchestrationTokensUsed,
+        orchestrationTokenBudget: sessionMeta.orchestrationTokenBudget,
       }
 
       return (
         <>
           <div className="h-full flex flex-col">
-            <PanelHeader  title={displayTitle} titleMenu={titleMenu} compactTitleMenu={compactTitleMenu} leadingAction={leadingAction} actions={headerActions} rightSidebarButton={rightSidebarButton} isRegeneratingTitle={isAsyncOperationOngoing} />
+            <PanelHeader title={displayTitle} titleMenu={titleMenu} compactTitleMenu={compactTitleMenu} leadingAction={leadingAction} actions={headerActions} rightSidebarButton={rightSidebarButton} isRegeneratingTitle={isAsyncOperationOngoing} />
             <div className="flex-1 flex flex-col min-h-0">
               <ChatDisplay
                 ref={chatDisplayRef}
@@ -632,8 +619,10 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
                 onAttachmentsChange={handleAttachmentsChange}
                 sources={enabledSources}
                 skills={skills}
-                sessionStatuses={sessionStatuses}
-                onSessionStatusChange={handleSessionStatusChange}
+                swarmEnabled={swarmEnabled}
+                onSwarmEnabledChange={handleSwarmEnabledChange}
+                swarmToggleDisabled={swarmToggleDisabled}
+                swarmRunning={orchestrationStatus === 'running'}
                 workspaceId={activeWorkspaceId || undefined}
                 onSourcesChange={(slugs) => onSessionSourcesChange?.(sessionId, slugs)}
                 workingDirectory={sessionMeta.workingDirectory}
@@ -648,6 +637,7 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
                 connectionUnavailable={connectionUnavailable}
                 compactMode={!!isCompactMode}
                 enableCompactModelPicker={!!isCompactMode}
+                onPreviewSession={setPreviewChildSessionId}
               />
             </div>
           </div>
@@ -660,6 +650,7 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
             onSubmit={handleRenameSubmit}
             placeholder={t('chat.enterSessionName')}
           />
+          {childPreviewDialog}
         </>
       )
     }
@@ -679,7 +670,7 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
   return (
     <>
       <div className="h-full flex flex-col">
-        <PanelHeader  title={displayTitle} titleMenu={titleMenu} compactTitleMenu={compactTitleMenu} leadingAction={leadingAction} actions={headerActions} rightSidebarButton={rightSidebarButton} isRegeneratingTitle={isAsyncOperationOngoing} />
+        <PanelHeader title={displayTitle} titleMenu={titleMenu} compactTitleMenu={compactTitleMenu} leadingAction={leadingAction} actions={headerActions} rightSidebarButton={rightSidebarButton} isRegeneratingTitle={isAsyncOperationOngoing} />
         <div className="flex-1 flex flex-col min-h-0">
           <ChatDisplay
             ref={chatDisplayRef}
@@ -709,10 +700,10 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
             onAttachmentsChange={handleAttachmentsChange}
             sources={enabledSources}
             skills={skills}
-            labels={labels}
-            onLabelsChange={(newLabels) => onSessionLabelsChange?.(sessionId, newLabels)}
-            sessionStatuses={sessionStatuses}
-            onSessionStatusChange={handleSessionStatusChange}
+            swarmEnabled={swarmEnabled}
+            onSwarmEnabledChange={handleSwarmEnabledChange}
+            swarmToggleDisabled={swarmToggleDisabled}
+            swarmRunning={orchestrationStatus === 'running'}
             workspaceId={activeWorkspaceId || undefined}
             onSourcesChange={(slugs) => onSessionSourcesChange?.(sessionId, slugs)}
             workingDirectory={workingDirectory}
@@ -728,6 +719,7 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
             connectionUnavailable={connectionUnavailable}
             compactMode={!!isCompactMode}
             enableCompactModelPicker={!!isCompactMode}
+            onPreviewSession={setPreviewChildSessionId}
           />
         </div>
       </div>
@@ -740,6 +732,7 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
         onSubmit={handleRenameSubmit}
         placeholder={t('chat.enterSessionName')}
       />
+      {childPreviewDialog}
     </>
   )
 })

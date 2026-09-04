@@ -63,6 +63,10 @@ function compactTitleInset(controlCount: number): number {
     + COMPACT_HEADER_TITLE_GAP
 }
 
+// EntityRow: wrapper pl-2 + button pl-2 + title-row icon gap (10px).
+// Start-aligned navigator titles must share this edge with session names.
+const LIST_TITLE_START_PADDING = 26
+
 export interface PanelHeaderProps {
   /** Header title (undefined hides with animation) */
   title?: string
@@ -82,6 +86,8 @@ export interface PanelHeaderProps {
   compactTitleMenu?: React.ReactNode
   /** Optional leading action rendered before the title (e.g., back button in compact mode) */
   leadingAction?: React.ReactNode
+  /** `'start'` aligns the title with list row text; default `'center'` leaves page headers unchanged. */
+  titleAlign?: 'center' | 'start'
   /** Optional center button rendered between title and right actions */
   centerButton?: React.ReactNode
   /** Optional action buttons rendered on the right */
@@ -107,6 +113,7 @@ export function PanelHeader({
   titleMenu,
   compactTitleMenu,
   leadingAction: explicitLeadingAction,
+  titleAlign = 'center',
   centerButton,
   actions,
   rightSidebarButton,
@@ -151,7 +158,6 @@ export function PanelHeader({
         "text-sm font-semibold truncate font-sans leading-tight",
         isRegeneratingTitle && "animate-shimmer-text"
       )}>{title}</h1>
-      {badge}
     </motion.div>
   )
 
@@ -186,7 +192,15 @@ export function PanelHeader({
     </DropdownMenu>
   ) : titleContent
 
-  const titleNode = (isCompactMode && compactTitleMenu) ? compactTitleMenu : desktopTitleNode
+  const selectedTitleNode = (isCompactMode && compactTitleMenu) ? compactTitleMenu : desktopTitleNode
+  // Keep status badges outside the title-menu trigger. Some badges are direct
+  // run-detail controls and must not become nested buttons or open the session menu.
+  const titleNode = badge ? (
+    <div className="flex min-w-0 items-center gap-1.5">
+      <div className="min-w-0 overflow-hidden">{selectedTitleNode}</div>
+      {badge}
+    </div>
+  ) : selectedTitleNode
 
   // Compact (mobile) layout puts the title in an absolute-positioned overlay.
   // The side insets are based on the actual number of control slots so a long
@@ -195,7 +209,9 @@ export function PanelHeader({
   const compactTrailingControlCount = [centerButton, actions, rightSidebarButton].filter(Boolean).length
   const compactTitleInsetStyle = isCompactMode
     ? {
-        left: compactTitleInset(compactLeadingControlCount),
+        left: compactLeadingControlCount === 0 && titleAlign === 'start'
+          ? LIST_TITLE_START_PADDING
+          : compactTitleInset(compactLeadingControlCount),
         right: compactTitleInset(compactTrailingControlCount),
       }
     : undefined
@@ -224,7 +240,10 @@ export function PanelHeader({
         </div>
       )}
       <div
-        className="absolute inset-y-0 flex items-center justify-center pointer-events-none"
+        className={cn(
+          "absolute inset-y-0 flex items-center pointer-events-none",
+          titleAlign === 'start' ? "justify-start" : "justify-center",
+        )}
         style={compactTitleInsetStyle}
       >
         <div className="max-w-full overflow-hidden pointer-events-auto">
@@ -240,7 +259,7 @@ export function PanelHeader({
         </div>
       )}
       <div className="flex-1 min-w-0 flex items-center select-none">
-        <div className={cn("max-w-full overflow-hidden", !leadingAction && "mx-auto")}>
+        <div className={cn("max-w-full overflow-hidden", !leadingAction && titleAlign !== 'start' && "mx-auto")}>
           {titleNode}
         </div>
       </div>
@@ -262,13 +281,13 @@ export function PanelHeader({
     </>
   )
 
-  // Base padding (16px = pl-4, matches pr-2 when leading action present for symmetry)
-  const basePadding = leadingAction ? 8 : 16
+  const startAligned = titleAlign === 'start'
+  const basePadding = leadingAction ? 8 : (startAligned ? LIST_TITLE_START_PADDING : 16)
 
   const baseClassName = cn(
     'flex shrink-0 items-center pr-2 min-w-0 gap-1.5 relative z-panel h-[42px]',
     // Only use static paddingLeft class when not animating
-    !shouldCompensate && (paddingLeft || (leadingAction ? 'pl-2' : 'pl-4')),
+    !shouldCompensate && (paddingLeft || (leadingAction ? 'pl-2' : startAligned ? 'pl-[26px]' : 'pl-4')),
     className
   )
 

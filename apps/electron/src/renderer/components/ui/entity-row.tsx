@@ -63,6 +63,9 @@ export interface EntityRowProps {
   subtitle?: React.ReactNode
   /** Badge/subtitle row beneath the title */
   badges?: React.ReactNode
+  /** Apply the generic trailing fade to the complete badges row. Consumers
+   *  with their own overflow-aware treatment can disable it. */
+  badgesEdgeFade?: boolean
   /** Right-aligned content in the badge row (timestamp, child toggle) */
   trailing?: React.ReactNode
   /** Content rendered below the main button (e.g. expanded child list) */
@@ -127,6 +130,7 @@ export function EntityRow({
   titleSuffix,
   subtitle,
   badges,
+  badgesEdgeFade = true,
   trailing,
   children,
   overlay,
@@ -396,10 +400,10 @@ export function EntityRow({
               {badges && (
                 <div
                   className="flex-1 flex items-center gap-1 min-w-0 overflow-x-auto scrollbar-hide"
-                  style={{
+                  style={badgesEdgeFade ? {
                     maskImage: 'linear-gradient(to right, black calc(100% - 16px), transparent 100%)',
                     WebkitMaskImage: 'linear-gradient(to right, black calc(100% - 16px), transparent 100%)',
-                  }}
+                  } : undefined}
                 >
                   {badges}
                 </div>

@@ -23,6 +23,7 @@ import { PI_TOOL_NAME_MAP } from './constants.ts';
 import { toolMetadataStore } from '../../../interceptor-common.ts';
 import { parseError } from '../../errors.ts';
 import { normalizeToolResultContent } from '../../tool-matching.ts';
+import { ACTIONABLE_CONTEXT_OVERFLOW_MESSAGE } from './context-budget.ts';
 
 /**
  * Pi SDK auto-compaction race signature — the AbortController crash described
@@ -71,6 +72,15 @@ function isCodexResponsesMessage(message: AssistantMessage | undefined): boolean
   return message?.api === 'openai-codex-responses' || message?.provider === 'openai-codex';
 }
 
+function getStreamingTextPhase(message: AssistantMessage | undefined): TextPhase | undefined {
+  if (!isCodexResponsesMessage(message) || !Array.isArray(message?.content)) return undefined;
+  const phases = message.content
+    .filter((part) => part.type === 'text' && typeof part.text === 'string' && part.text.length > 0)
+    .map((part) => getTextPhase((part as { textSignature?: unknown }).textSignature));
+  if (phases.length === 0 || phases.some((phase) => phase === undefined)) return undefined;
+  return phases.every((phase) => phase === phases[0]) ? phases[0] : undefined;
+}
+
 /**
  * Maps Pi SDK events to SelectionEvents for UI compatibility.
  *
@@ -99,15 +109,16 @@ export class PiEventAdapter extends BaseEventAdapter {
   // Sub-turnId isolation for tool calls within a single Pi turn
   private subTurnCounter: number = 0;
   private messageSubTurnId: string | null = null;
+  private streamingTextPhase: TextPhase | 'unclassified' | undefined;
 
   // Model context window for usage_update events
   private contextWindow: number | undefined;
 
-  // Mini model ID for call_llm display default (#596).
+  // Current session model for call_llm display default (#192).
   // Used when the caller didn't specify an explicit model — we fill args.model
   // on the tool_start event so the UI shows the effective default instead of
   // leaving the badge blank.
-  private miniModel: string | undefined;
+  private callLlmDefaultModel: string | undefined;
 
   // Track last usage for emitting with complete event
   private lastUsage: { input: number; output: number; cacheRead: number; cacheWrite: number; totalTokens: number; cost: { total: number } } | undefined;
@@ -194,13 +205,12 @@ export class PiEventAdapter extends BaseEventAdapter {
       // Re-check state at fire time — a late `compaction_start` may have
       // already transitioned us to `compacting`.
       if (this.overflowState !== 'awaiting') return;
-      const errorMessage = this.heldOverflowError ?? 'Context overflow';
       this.heldOverflowError = null;
       this.overflowState = 'none';
       this.log.warn('Overflow recovery fallback fired — SDK emitted no compaction events', {
         timeoutMs: OVERFLOW_FALLBACK_TIMEOUT_MS,
       });
-      this.onFallbackEvent?.({ type: 'error', message: errorMessage });
+      this.onFallbackEvent?.({ type: 'error', message: ACTIONABLE_CONTEXT_OVERFLOW_MESSAGE });
       this.onFallbackComplete?.();
     }, OVERFLOW_FALLBACK_TIMEOUT_MS);
   }
@@ -213,13 +223,13 @@ export class PiEventAdapter extends BaseEventAdapter {
   }
 
   /**
-   * Set the mini model ID for call_llm badge default.
+   * Set the default model shown on the call_llm badge.
    * When the agent's call_llm invocation omits `args.model`, we fill it with
    * this so the UI badge shows the effective default instead of nothing.
    * Explicit `args.model` values from the agent are always preserved.
    */
-  setMiniModel(model: string | undefined): void {
-    this.miniModel = model;
+  setCallLlmDefaultModel(model: string | undefined): void {
+    this.callLlmDefaultModel = model;
   }
 
   /**
@@ -236,6 +246,7 @@ export class PiEventAdapter extends BaseEventAdapter {
     this.hasEmittedFinalText = false;
     this.subTurnCounter = 0;
     this.messageSubTurnId = null;
+    this.streamingTextPhase = undefined;
     this.log.debug('Turn started', { turnIndex: this.turnIndex });
   }
 
@@ -325,6 +336,7 @@ export class PiEventAdapter extends BaseEventAdapter {
         this.hasEmittedFinalText = false;
         this.subTurnCounter = 0;
         this.messageSubTurnId = null;
+        this.streamingTextPhase = undefined;
         break;
 
       // ============================================================
@@ -340,17 +352,25 @@ export class PiEventAdapter extends BaseEventAdapter {
         const amEvent: AssistantMessageEvent = event.assistantMessageEvent;
         if (amEvent.type === 'text_delta' && amEvent.delta) {
           // Codex attaches the phase only after the Responses output item
-          // finishes. Hold these deltas until message_end can classify them,
-          // otherwise internal commentary briefly appears as reply text (#135).
-          if (isCodexResponsesMessage(amEvent.partial)) break;
+          // finishes. Hold only phase-less Codex deltas; other providers emit
+          // an explicit unclassified stream that the UI keeps in the work chain
+          // until message_end proves it is the final answer (#87).
+          const textPhase = getStreamingTextPhase(amEvent.partial);
+          if (isCodexResponsesMessage(amEvent.partial) && !textPhase) break;
 
           this.hasStreamedDeltas = true;
           if (!this.messageSubTurnId) {
             this.messageSubTurnId = this.nextSubTurnId('m');
           }
+          this.streamingTextPhase = textPhase ?? 'unclassified';
           yield {
             type: 'text_delta',
             text: amEvent.delta,
+            phase: textPhase === 'commentary'
+              ? 'intermediate'
+              : textPhase === 'final_answer'
+                ? 'final'
+                : 'unclassified',
             turnId: this.messageSubTurnId,
           };
         }
@@ -393,8 +413,11 @@ export class PiEventAdapter extends BaseEventAdapter {
           break;
         }
 
-        // Extract text content from the final assistant message
-        const textContent = this.extractTextFromMessage(event.message);
+        // Extract phase-aware text segments from the completed assistant
+        // message. Codex may return commentary and final-answer parts together;
+        // keep the commentary as a separate work-chain item instead of dropping
+        // it from the transcript.
+        const textSegments = this.extractTextSegments(event.message);
         // Pi SDK stopReason: 'toolUse' means the model will call tools next (intermediate commentary),
         // 'stop'/'end_turn' means final response. Same logic as Claude's stop_reason === 'tool_use'.
         // Some providers still attach toolCall parts with stopReason 'stop'; treat those
@@ -404,22 +427,39 @@ export class PiEventAdapter extends BaseEventAdapter {
           const type = (part as { type?: string } | undefined)?.type;
           return type === 'toolCall' || type === 'tool_use';
         });
-        const isIntermediate = msg.stopReason === 'toolUse' || hasToolCall;
-        if (textContent && (isIntermediate || !this.hasEmittedFinalText)) {
+        const messageIsIntermediate = msg.stopReason === 'toolUse' || hasToolCall;
+        const streamedSegmentIndex = this.messageSubTurnId
+          ? textSegments.findIndex((segment) => (
+              this.streamingTextPhase === 'unclassified'
+                ? segment.phase === undefined
+                : segment.phase === this.streamingTextPhase
+            ))
+          : -1;
+        for (const [index, segment] of textSegments.entries()) {
+          const isIntermediate = segment.phase === 'commentary'
+            || (segment.phase !== 'final_answer' && messageIsIntermediate);
+          if (!isIntermediate && this.hasEmittedFinalText) continue;
           if (!isIntermediate) this.hasEmittedFinalText = true;
 
-          const mTurnId = this.messageSubTurnId || this.nextSubTurnId('m');
-          this.messageSubTurnId = null;
+          const usesStreamingTurn = index === streamedSegmentIndex;
+          const mTurnId = usesStreamingTurn
+            ? this.messageSubTurnId!
+            : this.nextSubTurnId('m');
+          if (usesStreamingTurn) {
+            this.messageSubTurnId = null;
+          }
 
           yield {
             type: 'text_complete',
-            text: textContent,
+            text: segment.text,
             isIntermediate,
             turnId: mTurnId,
             sdkMessageId,
           };
-          this.hasStreamedDeltas = false;
         }
+        this.hasStreamedDeltas = false;
+        this.messageSubTurnId = null;
+        this.streamingTextPhase = undefined;
 
         // Emit usage_update if the assistant message includes token usage
         if (msg.usage && typeof msg.usage.input === 'number') {
@@ -455,10 +495,11 @@ export class PiEventAdapter extends BaseEventAdapter {
         const args = this.normalizeToolInput(toolName, (event.args ?? {}) as Record<string, unknown>);
 
         // For call_llm, fill in the default display model when the caller didn't
-        // specify one — Pi's call_llm defaults to miniModel. We only fill the gap;
-        // we never overwrite an explicit agent-provided model (that was the #596 bug).
-        if (toolName.includes('call_llm') && this.miniModel && !args.model) {
-          args.model = this.miniModel;
+        // specify one — unspecified call_llm inherits the current session model.
+        // We only fill the gap; we never overwrite an explicit agent-provided
+        // model (that was the #596 bug).
+        if (toolName.includes('call_llm') && this.callLlmDefaultModel && !args.model) {
+          args.model = this.callLlmDefaultModel;
         }
 
         // Canonical metadata from subprocess event payload (interceptor/bridge-authoritative path).
@@ -575,6 +616,7 @@ export class PiEventAdapter extends BaseEventAdapter {
         // After tool completion, the assistant may generate new text
         this.hasEmittedFinalText = false;
         this.messageSubTurnId = null;
+        this.streamingTextPhase = undefined;
 
         // Check if this was classified as a file read
         const readInfo = this.consumeReadCommand(toolCallId);
@@ -613,15 +655,42 @@ export class PiEventAdapter extends BaseEventAdapter {
             this.overflowState = 'recovering';
             this.heldOverflowError = null;
           }
+          const usage = compactionEvent.result.usage;
+          if (usage && typeof usage.input === 'number') {
+            const contextTokens = usage.input + (usage.cacheRead || 0);
+            // Summary generation is a real provider call. Forward its usage so
+            // per-agent budgets include compaction instead of hiding that cost.
+            yield {
+              type: 'usage_update',
+              usage: {
+                inputTokens: usage.input,
+                outputTokens: usage.output,
+                cacheReadTokens: usage.cacheRead,
+                cacheCreationTokens: usage.cacheWrite,
+                costUsd: usage.cost.total,
+                contextTokens,
+                contextWindow: this.contextWindow,
+              },
+            };
+          }
           // Use "Compacted" keyword so session handler detects statusType: 'compaction_complete'
           yield { type: 'info', message: 'Compacted context to fit within limits' };
         } else if (compactionEvent.errorMessage) {
+          const wasRecoveringOverflow =
+            this.overflowState === 'compacting' ||
+            this.overflowState === 'awaiting' ||
+            this.overflowState === 'held';
           // Defensive handler for the Pi SDK auto-compaction race (cause A
           // in plans/fix-pi-gpt-compaction.md). The raw stack
           // `undefined is not an object (evaluating 'this._autoCompactionAbortController.signal')`
           // is unhelpful to the user; convert it to a friendly retry hint and
           // log for diagnostics. Remove once the upstream fix ships.
-          if (SDK_AUTOCOMPACT_RACE_SIGNATURE.test(compactionEvent.errorMessage)) {
+          if (wasRecoveringOverflow) {
+            this.log.warn('Context overflow recovery failed', {
+              errorMessage: compactionEvent.errorMessage,
+            });
+            yield { type: 'error', message: ACTIONABLE_CONTEXT_OVERFLOW_MESSAGE };
+          } else if (SDK_AUTOCOMPACT_RACE_SIGNATURE.test(compactionEvent.errorMessage)) {
             this.log.warn('Pi SDK auto-compaction race; recommend manual /compact', {
               errorMessage: compactionEvent.errorMessage,
             });
@@ -639,11 +708,7 @@ export class PiEventAdapter extends BaseEventAdapter {
           // the turn now — no recovered agent_end will arrive on the failure
           // path. pendingQueueComplete signals the caller to terminate the
           // iterator since this is a non-agent_end event.
-          if (
-            this.overflowState === 'compacting' ||
-            this.overflowState === 'awaiting' ||
-            this.overflowState === 'held'
-          ) {
+          if (wasRecoveringOverflow) {
             yield { type: 'complete' };
             this.pendingQueueComplete = true;
             this.overflowState = 'none';
@@ -802,8 +867,8 @@ export class PiEventAdapter extends BaseEventAdapter {
    * Extract text content from a Pi AgentMessage.
    * Pi messages use the pi-ai Message format with content arrays.
    */
-  private extractTextFromMessage(message: unknown): string | null {
-    if (!message || typeof message !== 'object') return null;
+  private extractTextSegments(message: unknown): Array<{ text: string; phase?: TextPhase }> {
+    if (!message || typeof message !== 'object') return [];
 
     const msg = message as {
       role?: string;
@@ -811,17 +876,34 @@ export class PiEventAdapter extends BaseEventAdapter {
     };
 
     if (typeof msg.content === 'string') {
-      return msg.content || null;
+      return msg.content ? [{ text: msg.content }] : [];
     }
 
     if (Array.isArray(msg.content)) {
       const textParts = msg.content
-        .filter((c) => c.type === 'text' && c.text && getTextPhase(c.textSignature) !== 'commentary')
-        .map((c) => c.text!);
-      return textParts.length > 0 ? textParts.join('') : null;
+        .filter((part): part is { type: string; text: string; textSignature?: string } => (
+          part.type === 'text' && typeof part.text === 'string' && part.text.length > 0
+        ));
+      if (textParts.length === 0) return [];
+      const hasPhaseMetadata = textParts.some((part) => getTextPhase(part.textSignature) !== undefined);
+      if (!hasPhaseMetadata) {
+        return [{ text: textParts.map((part) => part.text).join('') }];
+      }
+
+      const segments: Array<{ text: string; phase?: TextPhase }> = [];
+      for (const part of textParts) {
+        const phase = getTextPhase(part.textSignature);
+        const previous = segments.at(-1);
+        if (previous && previous.phase === phase) {
+          previous.text += part.text;
+        } else {
+          segments.push({ text: part.text, phase });
+        }
+      }
+      return segments;
     }
 
-    return null;
+    return [];
   }
 
   /**

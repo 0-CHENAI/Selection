@@ -65,6 +65,18 @@ export const SESSION_PERSISTENT_FIELDS = [
   'taskNodeId',
   'taskNodeCount',
   'taskDraft',
+  // Per-session Swarm preview state and lineage
+  'swarmEnabled',
+  'orchestrationId',
+  'orchestrationRootSessionId',
+  'orchestrationDepth',
+  'orchestrationRole',
+  'orchestrationLifecycle',
+  'orchestrationStatus',
+  'orchestrationBlocker',
+  'orchestrationTokensUsed',
+  'orchestrationTokenBudget',
+  'orchestrationAggregation',
 ] as const;
 
 export type SessionPersistentField = typeof SESSION_PERSISTENT_FIELDS[number];
@@ -77,6 +89,46 @@ export type SessionPersistentField = typeof SESSION_PERSISTENT_FIELDS[number];
  * Falls back to 'todo' if status doesn't exist.
  */
 export type SessionStatus = string;
+
+export interface SwarmAggregationContract {
+  orchestrationId: string;
+  finalAggregation: string;
+  phase: 'waiting-workers' | 'awaiting-aggregation' | 'repairing';
+  repairAttempts: number;
+  /** Stable references to the exact terminal worker results selected for aggregation. */
+  workers?: Array<{
+    sessionId: string;
+    status: 'completed' | 'failed' | 'stopped';
+    finalMessageId?: string;
+  }>;
+}
+
+export interface SwarmSessionMetadata {
+  /** Autonomous delegation is opt-in per session; missing legacy values resolve to false. */
+  swarmEnabled?: boolean;
+  orchestrationId?: string;
+  orchestrationRootSessionId?: string;
+  orchestrationDepth?: number;
+  orchestrationRole?: 'coordinator' | 'worker' | 'reviewer';
+  orchestrationLifecycle?: 'managed' | 'detached';
+  orchestrationStatus?: 'running' | 'completed' | 'need-to-check' | 'stopped';
+  orchestrationBlocker?: string;
+  orchestrationTokensUsed?: number;
+  orchestrationTokenBudget?: number;
+  /** Durable final-answer contract for the active managed Swarm run. */
+  orchestrationAggregation?: SwarmAggregationContract;
+}
+
+/** True only for an agent spawned inside a Swarm, never for its root coordinator. */
+export function isSpawnedSwarmAgent(
+  session: Pick<SwarmSessionMetadata, 'orchestrationId' | 'orchestrationRootSessionId' | 'orchestrationDepth'> & { id: string },
+): boolean {
+  if (!session.orchestrationId) return false;
+  if (session.orchestrationRootSessionId) {
+    return session.orchestrationRootSessionId !== session.id;
+  }
+  return (session.orchestrationDepth ?? 0) > 0;
+}
 
 /**
  * Built-in status IDs (for TypeScript consumers)
@@ -140,7 +192,7 @@ export type { StoredMessage } from '@craft-agent/core/types';
 /**
  * Session configuration (persisted metadata)
  */
-export interface SessionConfig {
+export interface SessionConfig extends SwarmSessionMetadata {
   id: string;
   /** SDK session ID (captured after first message) */
   sdkSessionId?: string;
@@ -251,10 +303,7 @@ export interface SessionConfig {
   };
   /** Workspace-scoped project id this session belongs to (undefined = unbound). */
   projectId?: string;
-  /**
-   * Snapshot of the app setting at creation time. Missing means a legacy
-   * session and is intentionally interpreted as shared for upgrade safety.
-   */
+  /** When true, this session was created with shared project MEMORY.md. Runtime ignores it. */
   sharedProjectMemoryEnabled?: boolean;
   /** Parent session id — when set, this session is a subtask of the parent (undefined = top-level task). */
   parentSessionId?: string;
@@ -286,7 +335,7 @@ export interface StoredSession extends SessionConfig {
  * Contains all metadata needed for list views (pre-computed at save time).
  * This enables fast session listing without parsing message content.
  */
-export interface SessionHeader {
+export interface SessionHeader extends SwarmSessionMetadata {
   id: string;
   /** SDK session ID (captured after first message) */
   sdkSessionId?: string;
@@ -369,7 +418,7 @@ export interface SessionHeader {
   };
   /** Workspace-scoped project id this session belongs to (undefined = unbound). */
   projectId?: string;
-  /** Per-session shared project memory snapshot; missing means legacy shared. */
+  /** Persisted snapshot only; runtime no longer shares project MEMORY.md. */
   sharedProjectMemoryEnabled?: boolean;
   /** Parent session id — when set, this session is a subtask of the parent (undefined = top-level task). */
   parentSessionId?: string;
@@ -401,7 +450,7 @@ export interface SessionHeader {
 /**
  * Session metadata (lightweight, for lists)
  */
-export interface SessionMetadata {
+export interface SessionMetadata extends SwarmSessionMetadata {
   id: string;
   workspaceRootPath: string;
   name?: string;
@@ -467,7 +516,7 @@ export interface SessionMetadata {
   branchFromMessageId?: string;
   /** Workspace-scoped project id this session belongs to (undefined = unbound). */
   projectId?: string;
-  /** Per-session shared project memory snapshot; missing means legacy shared. */
+  /** Persisted snapshot only; runtime no longer shares project MEMORY.md. */
   sharedProjectMemoryEnabled?: boolean;
   /** Parent session id — when set, this session is a subtask of the parent (undefined = top-level task). */
   parentSessionId?: string;
@@ -485,13 +534,9 @@ export interface SessionMetadata {
   taskDraft?: boolean;
 }
 
-/** Resolve the persisted memory mode while preserving pre-migration behavior. */
+/** Project sessions use independent memory; shared MEMORY.md is retired. */
 export function isSharedProjectMemoryEnabled(
-  session: Pick<SessionConfig, 'sharedProjectMemoryEnabled'> | null | undefined,
+  _session?: Pick<SessionConfig, 'sharedProjectMemoryEnabled'> | null,
 ): boolean {
-  const value = (session as { sharedProjectMemoryEnabled?: unknown } | null | undefined)
-    ?.sharedProjectMemoryEnabled;
-  // Only a genuinely missing legacy field keeps the old shared behavior.
-  // Corrupt/imported non-boolean values fail closed to isolated.
-  return value === undefined ? true : value === true;
+  return false;
 }

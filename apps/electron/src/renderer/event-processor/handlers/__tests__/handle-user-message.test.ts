@@ -258,6 +258,7 @@ describe('handleUserMessage queued replay', () => {
       type: 'text_delta',
       sessionId: 'session-1',
       delta: '1. 前置部分\n',
+      phase: 'final',
       turnId: 'replay-turn',
     })
     const nextComplete = handleTextComplete(nextDelta, {
@@ -301,7 +302,7 @@ describe('handleUserMessage queued replay', () => {
     expect(pendingTurns[2]?.type === 'assistant' && pendingTurns[2].activities.map(activity => activity.content)).toEqual([
       '- **前置部分** - 封面及编制信息',
     ])
-    expect(pendingTurns[2]?.type === 'assistant' && pendingTurns[2].response?.isStreaming).toBe(true)
+    expect(pendingTurns[2]?.type === 'assistant' && pendingTurns[2].response).toBeUndefined()
     expect(turns.map(turn => turn.type)).toEqual(['user', 'user', 'assistant'])
     expect(turns[0]?.type === 'user' && turns[0].message.content).toBe('它有哪几个部分?')
     expect(turns[1]?.type === 'user' && turns[1].message.content).toBe('请使用列表展示')

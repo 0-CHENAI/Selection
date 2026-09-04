@@ -1,6 +1,6 @@
 {
   "name": "@craft-agent/messaging-gateway",
-  "version": "1.1.2",
+  "version": "1.2.0",
   "license": "Apache-2.0",
   "description": "Messaging gateway for Selection — Telegram & WhatsApp",
   "type": "module",

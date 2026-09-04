@@ -1,6 +1,7 @@
 import * as React from 'react'
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import { Upload } from 'lucide-react'
 import { toast } from 'sonner'
 import {
   Dialog,
@@ -12,10 +13,12 @@ import {
 } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
+import { cn } from '@/lib/utils'
 import type { ExternalImportAction } from '../../../shared/types'
 import {
   beginMcpJsonImport,
   confirmSkillFileImport,
+  hasFileDragType,
   type PreparedSkillFileImport,
 } from './external-resource-import'
 
@@ -106,6 +109,108 @@ export function ExternalResourceImportDialog({
           <Button variant="ghost" onClick={() => onOpenChange(false)}>{t('common.cancel')}</Button>
           <Button disabled={!mcpJson.trim()} onClick={confirm}>
             {t('fileImport.confirm')}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+interface SkillFileDropDialogProps {
+  open: boolean
+  loading: boolean
+  onChooseFile: React.MouseEventHandler<HTMLButtonElement>
+  onDropFiles: (files: File[]) => void
+  onOpenChange: (open: boolean) => void
+}
+
+export function SkillFileDropDialog({
+  open,
+  loading,
+  onChooseFile,
+  onDropFiles,
+  onOpenChange,
+}: SkillFileDropDialogProps) {
+  const { t } = useTranslation()
+  const [isDraggingFile, setIsDraggingFile] = useState(false)
+  const dragDepthRef = React.useRef(0)
+
+  useEffect(() => {
+    if (open) return
+    dragDepthRef.current = 0
+    setIsDraggingFile(false)
+  }, [open])
+
+  const handleDragEnter = (event: React.DragEvent<HTMLDivElement>) => {
+    if (loading || !hasFileDragType(event.dataTransfer.types)) return
+    event.preventDefault()
+    event.stopPropagation()
+    dragDepthRef.current += 1
+    setIsDraggingFile(true)
+  }
+
+  const handleDragLeave = (event: React.DragEvent<HTMLDivElement>) => {
+    if (!isDraggingFile) return
+    event.preventDefault()
+    event.stopPropagation()
+    dragDepthRef.current = Math.max(0, dragDepthRef.current - 1)
+    if (dragDepthRef.current === 0) setIsDraggingFile(false)
+  }
+
+  const handleDragOver = (event: React.DragEvent<HTMLDivElement>) => {
+    if (loading || !hasFileDragType(event.dataTransfer.types)) return
+    event.preventDefault()
+    event.stopPropagation()
+    event.dataTransfer.dropEffect = 'copy'
+  }
+
+  const handleDrop = (event: React.DragEvent<HTMLDivElement>) => {
+    if (loading || !hasFileDragType(event.dataTransfer.types)) return
+    event.preventDefault()
+    event.stopPropagation()
+    dragDepthRef.current = 0
+    setIsDraggingFile(false)
+    onDropFiles(Array.from(event.dataTransfer.files))
+  }
+
+  return (
+    <Dialog
+      open={open}
+      onOpenChange={(next) => {
+        if (!loading) onOpenChange(next)
+      }}
+    >
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>{t('fileImport.skillTitle')}</DialogTitle>
+          <DialogDescription>{t('fileImport.skillDescription')}</DialogDescription>
+        </DialogHeader>
+        <div
+          data-testid="skill-file-drop-zone"
+          aria-busy={loading}
+          className={cn(
+            'flex min-h-48 flex-col items-center justify-center gap-3 rounded-xl border-2 border-dashed px-6 py-8 text-center transition-colors',
+            isDraggingFile
+              ? 'border-foreground/50 bg-foreground/5'
+              : 'border-foreground/15 bg-foreground/[0.015]',
+          )}
+          onDragEnter={handleDragEnter}
+          onDragLeave={handleDragLeave}
+          onDragOver={handleDragOver}
+          onDrop={handleDrop}
+        >
+          <Upload className="h-7 w-7 text-muted-foreground" />
+          <div className="space-y-1">
+            <p className="text-sm font-medium">{t('fileImport.skillDropHint')}</p>
+            <p className="text-xs text-muted-foreground">{t('fileImport.skillDescription')}</p>
+          </div>
+          <Button type="button" variant="outline" disabled={loading} onClick={onChooseFile}>
+            {loading ? t('common.loading') : t('common.browse')}
+          </Button>
+        </div>
+        <DialogFooter>
+          <Button variant="ghost" disabled={loading} onClick={() => onOpenChange(false)}>
+            {t('common.cancel')}
           </Button>
         </DialogFooter>
       </DialogContent>

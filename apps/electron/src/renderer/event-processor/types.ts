@@ -6,13 +6,15 @@
  */
 
 import type { Session, Message, PermissionRequest, CredentialRequest, TypedError, PermissionMode, SessionStatus, AuthRequest, ToolDisplayMeta } from '../../shared/types'
-import type { AgentToolResultContent } from '@craft-agent/core/types'
+import type { AgentToolResultContent, TextStreamPhase } from '@craft-agent/core/types'
 
 /**
  * Streaming state for a session - replaces streamingTextRef
  */
 export interface StreamingState {
   content: string
+  /** Missing only for renderer state created by an older application build. */
+  phase?: TextStreamPhase
   turnId?: string
   parentToolUseId?: string
 }
@@ -32,6 +34,8 @@ export interface TextDeltaEvent {
   type: 'text_delta'
   sessionId: string
   delta: string
+  /** Missing only for legacy senders; current backends classify every delta. */
+  phase?: TextStreamPhase
   turnId?: string
 }
 
@@ -98,6 +102,8 @@ export interface CompleteEvent {
   tokenUsage?: Session['tokenUsage']
   /** Explicit unread flag - set by main process based on viewing state */
   hasUnread?: boolean
+  /** The current model run ended, but a managed Swarm is still awaiting aggregation. */
+  orchestrationPending?: boolean
   /**
    * WS2 keep-alive: true when the session's persistent query stays open across
    * turns (`CRAFT_KEEP_BG_AGENTS_ALIVE`). When set, the turn ending does NOT tear
@@ -175,7 +181,7 @@ export interface SessionStatusChangedEvent {
 export interface SessionMetadataChangedEvent {
   type: 'session_metadata_changed'
   sessionId: string
-  changes: Partial<Pick<Session, 'taskNodeCount' | 'kanbanColumn' | 'taskDraft' | 'taskSlug' | 'projectId'>>
+  changes: Partial<Pick<Session, 'taskNodeCount' | 'kanbanColumn' | 'taskDraft' | 'taskSlug' | 'projectId' | 'swarmEnabled' | 'orchestrationId' | 'orchestrationRootSessionId' | 'orchestrationDepth' | 'orchestrationRole' | 'orchestrationLifecycle' | 'orchestrationStatus' | 'orchestrationBlocker' | 'orchestrationTokensUsed' | 'orchestrationTokenBudget' | 'orchestrationAggregation'>>
 }
 
 /**
@@ -376,6 +382,8 @@ export interface TaskBackgroundedEvent {
   kind?: 'workflow'
   /** Workflow run id (wf_...) — correlates workflow_agent_completed events to this chip. */
   workflowId?: string
+  /** Managed Swarm run id. Keeps its child chip visible through aggregation. */
+  orchestrationId?: string
 }
 
 /**
@@ -425,6 +433,7 @@ export interface TaskCompletedEvent {
   outputFile?: string
   summary?: string
   turnId?: string
+  orchestrationId?: string
 }
 
 /**

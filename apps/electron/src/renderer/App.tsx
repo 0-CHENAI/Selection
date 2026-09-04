@@ -81,11 +81,13 @@ import { TransportConnectionBanner, shouldShowTransportConnectionBanner } from '
 import {
   markBackgroundTaskSignal,
   markLiveBackgroundTasksOrphaned,
+  shouldRemoveTaskForToolResult,
 } from '@/components/app-shell/background-task-chip-state'
 import { getFileManagerName } from '@/lib/platform'
 import { rendererLog } from '@/lib/logger'
 import { ActionRegistryProvider } from '@/actions'
 import { toast } from 'sonner'
+import { assessDelegateCommandSubmission } from '@/components/app-shell/input/delegate-command'
 
 type AppState = 'loading' | 'onboarding' | 'reauth' | 'workspace-picker' | 'ready'
 
@@ -150,6 +152,7 @@ function handleBackgroundTaskEvent(
           lastSignalAt: startTime,
           intent: evt.intent as string | undefined,
           status: 'running' as const,
+          orchestrationId: evt.orchestrationId as string | undefined,
           ...(isWorkflow ? { workflowId: evt.workflowId as string | undefined, agentsCompleted: 0 } : {}),
         },
       ])
@@ -206,6 +209,7 @@ function handleBackgroundTaskEvent(
             completedAt: Date.now(),
             outputFile: (evt.outputFile as string | undefined) ?? t.outputFile,
             summary: (evt.summary as string | undefined) ?? t.summary,
+            orchestrationId: (evt.orchestrationId as string | undefined) ?? t.orchestrationId,
           }
         : t
     ))
@@ -222,14 +226,20 @@ function handleBackgroundTaskEvent(
     // Background tasks return immediately with agentId/shell_id/backgroundTaskId,
     // we should only remove when the task actually completes
     const result = typeof evt.result === 'string' ? evt.result : JSON.stringify(evt.result)
-    const isBackgroundingResult = result && (
+    const isBackgroundingResult = Boolean(result && (
       /agentId:\s*[a-zA-Z0-9_-]+/.test(result) ||
       /shell_id:\s*[a-zA-Z0-9_-]+/.test(result) ||
       /"backgroundTaskId":\s*"[a-zA-Z0-9_-]+"/.test(result)
-    )
+    ))
     if (!isBackgroundingResult) {
       const currentTasks = store.get(backgroundTasksAtom)
-      store.set(backgroundTasksAtom, currentTasks.filter(t => t.toolUseId !== evt.toolUseId))
+      const nextTasks = currentTasks.filter(t => !shouldRemoveTaskForToolResult(
+        t,
+        evt.toolUseId as string,
+      ))
+      if (nextTasks.length !== currentTasks.length) {
+        store.set(backgroundTasksAtom, nextTasks)
+      }
     }
   } else if (event.type === 'complete' || event.type === 'interrupted' || event.type === 'error') {
     // Orphan backstop: without keep-alive, turn teardown is authoritative evidence
@@ -1282,12 +1292,16 @@ export default function App() {
   }, [updateSessionById])
 
   const handleSendMessage = useCallback(async (sessionId: string, message: string, attachments?: FileAttachment[], skillSlugs?: string[], externalBadges?: ContentBadge[]) => {
+    let locallyCommitted = false
     try {
       // Capture live generation so composer submits stay in the queue
       // instead of looking like a new transcript turn (#22, #23).
       const sessionSnapshot = store.get(sessionAtomFamily(sessionId))
       const sendingMidStream = sessionHasLiveGeneration(sessionSnapshot)
       const optionSnapshot = sessionOptions.get(sessionId)
+      const delegateSubmission = assessDelegateCommandSubmission(message, sendingMidStream)
+      if (!delegateSubmission.allowed) return false
+      const outgoingMessage = delegateSubmission.message
 
       // Step 1: Store attachments and get persistent metadata
       let storedAttachments: StoredAttachment[] | undefined
@@ -1366,13 +1380,13 @@ export default function App() {
       // Merge with any externally provided badges (e.g., from EditPopover context badges)
       // Use workspace slug (not UUID) for skill qualification - SDK expects "workspaceSlug:skillSlug"
       const mentionBadges: ContentBadge[] = windowWorkspaceSlug
-        ? extractBadges(message, skills, sources, windowWorkspaceSlug)
+        ? extractBadges(outgoingMessage, skills, sources, windowWorkspaceSlug)
         : []
       const badges: ContentBadge[] = [...(externalBadges || []), ...mentionBadges]
 
       // Step 4.1: Detect SDK slash commands (e.g., /compact) and create command badges
       // This makes /compact render as an inline badge rather than raw text
-      const commandMatch = message.match(/^\/([a-z]+)(\s|$)/i)
+      const commandMatch = outgoingMessage.match(/^\/([a-z]+)(\s|$)/i)
       if (commandMatch && commandMatch[1].toLowerCase() === 'compact') {
         const commandText = commandMatch[0].trimEnd() // "/compact" without trailing space
         badges.unshift({
@@ -1388,7 +1402,7 @@ export default function App() {
       // Pattern: "Read the plan at <path> and execute it."
       // This is sent after compaction when accepting a plan, displays as clickable file badge
       // Only the file path is replaced with a badge - surrounding text remains visible
-      const planExecuteMatch = message.match(/^(Read the plan at )(.+?)( and execute it\.?)$/i)
+      const planExecuteMatch = outgoingMessage.match(/^(Read the plan at )(.+?)( and execute it\.?)$/i)
       if (planExecuteMatch) {
         const prefix = planExecuteMatch[1]      // "Read the plan at "
         const filePath = planExecuteMatch[2]    // the actual path
@@ -1411,7 +1425,7 @@ export default function App() {
       const userMessage: Message = {
         id: generateMessageId(),
         role: 'user',
-        content: message,
+        content: outgoingMessage,
         timestamp: Date.now(),
         attachments: storedAttachments,
         badges: badges.length > 0 ? badges : undefined,
@@ -1426,12 +1440,14 @@ export default function App() {
         // Queued content is composer state, not a committed transcript turn.
         lastMessageAt: sendingMidStream ? s.lastMessageAt : Date.now()
       }))
+      locallyCommitted = true
 
       // Step 6: Send to Claude with processed attachments + stored attachments for persistence
-      await window.electronAPI.sendMessage(sessionId, message, processedAttachments, storedAttachments, {
+      await window.electronAPI.sendMessage(sessionId, outgoingMessage, processedAttachments, storedAttachments, {
         skillSlugs,
         badges: badges.length > 0 ? badges : undefined,
         optimisticMessageId: userMessage.id,
+        ...(delegateSubmission.kind === 'delegate' ? { userAuthorizedSpawn: true } : {}),
         queueContext: sendingMidStream ? {
           sourceSlugs: [...(sessionSnapshot?.enabledSourceSlugs ?? [])],
           model: sessionSnapshot?.model ?? null,
@@ -1440,6 +1456,7 @@ export default function App() {
           permissionMode: optionSnapshot?.permissionMode ?? 'ask',
         } : undefined,
       })
+      return true
     } catch (error) {
       console.error('Failed to send message:', error)
       updateSessionById(sessionId, (s) => ({
@@ -1454,6 +1471,7 @@ export default function App() {
           }
         ]
       }))
+      return locallyCommitted
     }
   }, [sessionOptions, updateSessionById, skills, sources, store, windowWorkspaceSlug])
 

@@ -54,6 +54,20 @@ export const SETTINGS_PAGES = [
 export type SettingsSubpage = (typeof SETTINGS_PAGES)[number]['id']
 
 /**
+ * Settings pages that remain registered for type/internal compatibility but
+ * are not currently exposed or rendered through product navigation.
+ */
+export const HIDDEN_SETTINGS_SUBPAGES: readonly SettingsSubpage[] = [
+  'labels',
+  'permissions',
+  'messaging',
+]
+
+export function isVisibleSettingsSubpage(value: SettingsSubpage): boolean {
+  return !HIDDEN_SETTINGS_SUBPAGES.includes(value)
+}
+
+/**
  * Array of valid settings subpage IDs - for runtime validation
  */
 export const VALID_SETTINGS_SUBPAGES: readonly SettingsSubpage[] = SETTINGS_PAGES.map(p => p.id)

@@ -5,7 +5,9 @@ import { describe, expect, it } from 'bun:test';
 import {
   commandSchemaContractsEqual,
   extractExternalDependencies,
+  platformSchemaCrcReviewHint,
   posixRelPath,
+  unexpectedOfficecliRootEntries,
   validateOfficecliReleaseAssetUrl,
   validateManifestFiles,
   type CommandSnapshot,
@@ -39,6 +41,38 @@ describe('OfficeCLI sync governance', () => {
     expect(() => validateManifestFiles(manifest())).not.toThrow();
   });
 
+  it('keeps only the reviewed version directory next to the manifest', () => {
+    expect(unexpectedOfficecliRootEntries(
+      ['officecli-manifest.json', 'officecli-upgrade-report.md', '1.0.146', '.DS_Store'],
+      '1.0.146',
+    )).toEqual([]);
+    expect(unexpectedOfficecliRootEntries(
+      ['officecli-manifest.json', 'officecli-upgrade-report.md', '1.0.144', '1.0.145', '1.0.146'],
+      '1.0.146',
+    )).toEqual(['1.0.144', '1.0.145']);
+  });
+
+  it('explains how to record a platform schema CRC when that is the only drift', () => {
+    expect(platformSchemaCrcReviewHint(
+      ['schemaCrc 69cd35d9 != 909df808'],
+      'win32-x64',
+      '69cd35d9',
+      undefined,
+    )).toContain('assets["win32-x64"].schemaCrc = "69cd35d9"');
+    expect(platformSchemaCrcReviewHint(
+      ['schemaCrc 69cd35d9 != 909df808'],
+      'win32-x64',
+      '69cd35d9',
+      '69cd35d9',
+    )).toBeUndefined();
+    expect(platformSchemaCrcReviewHint(
+      ['schemaCrc 69cd35d9 != 909df808', 'missing commands: import'],
+      'win32-x64',
+      '69cd35d9',
+      undefined,
+    )).toBeUndefined();
+  });
+
   it('prevents reviewed binaries from self-updating through every managed launch path', () => {
     const repositoryRoot = resolve(import.meta.dir, '..');
     const managedLaunchPaths = [
@@ -61,8 +95,8 @@ describe('OfficeCLI sync governance', () => {
 
   it('records the reviewed Windows schema CRC without changing the default CRC', () => {
     const reviewed = manifest();
-    expect(reviewed.schemaCrc).toBe('b2b0b395');
-    expect(reviewed.assets['win32-x64']?.schemaCrc).toBe('22d3fc61');
+    expect(reviewed.schemaCrc).toBe('909df808');
+    expect(reviewed.assets['win32-x64']?.schemaCrc).toBe('69cd35d9');
 
     const invalid = manifest();
     invalid.assets['win32-x64']!.schemaCrc = 'not-a-crc';
@@ -83,7 +117,7 @@ describe('OfficeCLI sync governance', () => {
 
   it('treats platform-specific help hashes as non-blocking when the command contract matches', () => {
     const reviewed = JSON.parse(
-      readFileSync(resolve(import.meta.dir, '../apps/electron/resources/officecli/1.0.144/command-schema.json'), 'utf8'),
+      readFileSync(resolve(import.meta.dir, '../apps/electron/resources/officecli/1.0.146/command-schema.json'), 'utf8'),
     ) as CommandSnapshot;
     const sameContractDifferentHelp: CommandSnapshot = {
       ...reviewed,
@@ -169,14 +203,26 @@ describe('OfficeCLI sync governance', () => {
   });
 
   it('requires compatibility recipes to remain explicit and reviewed', () => {
+    const reviewed = manifest();
+    expect(reviewed.compatibilityRecipes?.importViaAtomicBatch).toBeUndefined();
+
     const invalidImportRecipe = manifest();
-    invalidImportRecipe.compatibilityRecipes!.importViaAtomicBatch!.maxSourceBytes = 0;
+    invalidImportRecipe.compatibilityRecipes = {
+      importViaAtomicBatch: {
+        enabled: true,
+        maxSourceBytes: 0,
+        reason: 'The reviewed OfficeCLI release needs a placeholder reason that is long enough.',
+      },
+    };
     expect(() => validateManifestFiles(invalidImportRecipe)).toThrow('Invalid OfficeCLI import compatibility recipe');
 
     const unknownRecipe = manifest() as OfficecliManifest & {
       compatibilityRecipes: Record<string, unknown>;
     };
-    unknownRecipe.compatibilityRecipes.unreviewedWriter = { enabled: true };
+    unknownRecipe.compatibilityRecipes = {
+      ...(reviewed.compatibilityRecipes ?? {}),
+      unreviewedWriter: { enabled: true },
+    };
     expect(() => validateManifestFiles(unknownRecipe)).toThrow('Unreviewed OfficeCLI compatibility recipes');
   });
 

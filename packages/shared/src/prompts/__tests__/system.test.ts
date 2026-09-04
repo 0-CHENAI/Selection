@@ -9,7 +9,18 @@ mock.module('../../config/preferences.ts', () => ({
   formatPreferencesForPrompt: () => '',
 }))
 
-import { getSystemPrompt, getMiniAgentSystemPrompt, formatProjectContextForPrompt } from '../system'
+// System prompt assertions are independent of persisted app configuration.
+// Keep the browser section at its default-on state without reading ~/.selection.
+mock.module('../../config/storage.ts', () => ({
+  getBrowserToolEnabled: () => true,
+}))
+
+import {
+  getSystemPrompt,
+  getMiniAgentSystemPrompt,
+  formatProjectContextForPrompt,
+  getWorkingDirectoryContext,
+} from '../system'
 import type { ProjectPromptContext } from '../../projects/types.ts'
 import { getBundledOfficecliRouterSkillMd } from '../../utils/officecli.ts'
 
@@ -17,6 +28,88 @@ const GIT_CONVENTIONS_HEADING = '## Git Conventions'
 const CO_AUTHOR_TRAILER = 'Co-Authored-By: Selection <agents-noreply@craft.do>'
 
 describe('system prompt guidance', () => {
+  it('includes Swarm and Conductor DAG in first-party self-knowledge (#189)', () => {
+    const off = getSystemPrompt(undefined, undefined, '/tmp/workspace', '/tmp/workspace')
+    const on = getSystemPrompt(
+      undefined,
+      undefined,
+      '/tmp/workspace',
+      '/tmp/workspace',
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      true,
+      true,
+    )
+
+    for (const prompt of [off, on]) {
+      expect(prompt).toContain('**Swarm**')
+      expect(prompt).toContain('**Tasks / Conductor DAG**')
+      expect(prompt).toContain('built-in product capabilities')
+      expect(prompt).toContain('Do not search the home directory, `~/.selection`')
+      expect(prompt).not.toContain('Task tool with subagents')
+    }
+    expect(off).toContain('explain this even when the toggle is off')
+    expect(off).toContain('Swarm** control in the chat input')
+    expect(off).toContain('session-level parallelism')
+    expect(off).toContain('persisted Task DAG')
+  })
+
+  it('fails closed for autonomous delegation unless the per-session Swarm switch is on', () => {
+    const off = getSystemPrompt(undefined, undefined, '/tmp/workspace', '/tmp/workspace')
+    const on = getSystemPrompt(
+      undefined,
+      undefined,
+      '/tmp/workspace',
+      '/tmp/workspace',
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      true,
+      true,
+    )
+
+    expect(off).toContain('Swarm mode is OFF')
+    expect(off).toContain('Selection still has Swarm')
+    expect(off).toContain('this session will not split work autonomously')
+    expect(on).toContain('Swarm mode is ON')
+    expect(on).toContain('fail closed')
+    expect(on).toContain('final aggregation or verification contract')
+    expect(on).toContain('qualification')
+    expect(on).toContain('Swarm V3 contract')
+    expect(on).toContain('same object on every worker call')
+    expect(on).toContain('never one single-track qualification per worker')
+    expect(on).toContain('not a phrase in the session name or prompt')
+    expect(on).toContain('same-turn fan-out')
+    expect(on).toContain('qualified v3 Task')
+    expect(on).not.toContain('qualified v2 Task')
+  })
+
+  it('keeps scratch artifacts out of the user-selected working directory (#163)', () => {
+    const prompt = getSystemPrompt(undefined, undefined, '/tmp/workspace', '/tmp/deliverables')
+
+    expect(prompt).toContain('## Artifact Hygiene')
+    expect(prompt).toContain('user-visible deliverable location, not a scratch directory')
+    expect(prompt).toContain('every disposable or intermediate artifact')
+    expect(prompt).toContain('exact `dataFolderPath` from `<session_state>`')
+    expect(prompt).toContain('explicitly requests any file as a deliverable')
+    expect(prompt).toContain('including a TXT, JSON, CSV, Markdown, or script file')
+    expect(prompt).toContain('Do not scan or delete pre-existing files')
+  })
+
+  it('labels a user-selected working directory as a non-scratch location (#163)', () => {
+    const context = getWorkingDirectoryContext('/tmp/deliverables', false, '/tmp/deliverables')
+    const changedMidSession = getWorkingDirectoryContext('/tmp/deliverables', false, '/tmp/original')
+
+    expect(context).toContain('user-visible deliverables and project files')
+    expect(context).toContain('not for scratch or intermediate artifacts')
+    expect(changedMidSession).toContain('user-visible deliverables and project files')
+    expect(changedMidSession).toContain('not for scratch or intermediate artifacts')
+    expect(changedMidSession).toContain('bash shell runs from a different directory')
+  })
+
   it('can omit schema-enforced tool metadata guidance for incompatible models', () => {
     const prompt = getSystemPrompt(
       undefined,
@@ -55,6 +148,15 @@ describe('system prompt guidance', () => {
     expect(prompt).not.toContain('The subtask needs tools (Read, Bash, Grep)')
   })
 
+  it('tells call_llm to inherit the current session model (#192)', () => {
+    const prompt = getSystemPrompt(undefined, undefined, '/tmp/workspace', '/tmp/workspace')
+
+    expect(prompt).toContain("omit `model` to inherit this session's current model")
+    expect(prompt).toContain("Omitting `model` uses this session's current model")
+    expect(prompt).not.toContain('Use Haiku for simple tasks')
+    expect(prompt).not.toContain('single completion, no tools, cheap, parallel')
+  })
+
   it('does not advertise a Task/subagent/Workflow tool', () => {
     const prompt = getSystemPrompt(undefined, undefined, '/tmp/workspace', '/tmp/workspace')
 
@@ -68,6 +170,14 @@ describe('system prompt guidance', () => {
     expect(prompt).toContain('Do not spawn another child to collect that result')
     expect(prompt).toContain('do **not** automatically `archive_session`')
     expect(prompt).toContain('`run_task`')
+    expect(prompt).toContain('`control_task_run`')
+    expect(prompt).toContain('`submit_task_definition`')
+    expect(prompt).toContain('mandatory when generating a new v2 task')
+    expect(prompt).toContain('final-text fallback exists only for legacy v1/history')
+    expect(prompt).toContain('`submit_task_output`')
+    expect(prompt).toContain('`submit_task_verdict`')
+    expect(prompt).toContain('`submit_orchestration_decision`')
+    expect(prompt).toContain('`submit_task_node_verdict`')
   })
 
   it('tells the model to speak source titles rather than slugs', () => {

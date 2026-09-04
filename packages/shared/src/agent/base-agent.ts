@@ -63,6 +63,7 @@ import { PathProcessor } from './core/path-processor.ts';
 import { ConfigWatcherManager, type ConfigWatcherManagerCallbacks } from './core/config-watcher-manager.ts';
 import { UsageTracker, type UsageUpdate } from './core/usage-tracker.ts';
 import { PrerequisiteManager } from './core/prerequisite-manager.ts';
+import { recoverSpawnSessionArguments } from './core/spawn-session-args.ts';
 
 // Automation system for agent events
 import type { AutomationSystem } from '../automations/automation-system.ts';
@@ -103,6 +104,23 @@ export interface MiniAgentConfig {
 
 export type SpawnSessionMode = 'wait' | 'background';
 export type SpawnSessionResultStatus = 'started' | 'completed' | 'failed' | 'interrupted' | 'timeout';
+export type SpawnSessionLifecycle = 'managed' | 'detached';
+export type SpawnSessionRole = 'coordinator' | 'worker' | 'reviewer';
+export type SpawnSessionReason = 'user-requested' | 'automatic';
+
+export interface SpawnSessionQualificationTrack {
+  name: string;
+  input: string;
+  expectedOutput: string;
+  evidence: string;
+  toolKinds: string[];
+}
+
+export interface SpawnSessionQualification {
+  tracks: SpawnSessionQualificationTrack[];
+  parallelBenefit: string;
+  finalAggregation: string;
+}
 
 export interface SpawnSessionRequest {
   prompt: string;
@@ -121,6 +139,19 @@ export interface SpawnSessionRequest {
   /** Wait-mode timeout in ms. Clamped to 30 minutes. */
   timeoutMs?: number;
   attachments?: Array<{ path: string; name?: string }>;
+  /** managed children participate in the parent's completion and explicit stop. */
+  lifecycle?: SpawnSessionLifecycle;
+  /** Observation/result ownership only; never grants permissions. */
+  role?: SpawnSessionRole;
+  /** Distinguishes an explicit user delegation from autonomous planning. */
+  spawnReason?: SpawnSessionReason;
+  /** Required evidence contract for autonomous delegation. */
+  qualification?: SpawnSessionQualification;
+  /**
+   * Server-injected, single-use authorization bound to the current session turn.
+   * It is intentionally absent from the public spawn_session tool schema.
+   */
+  qualificationCredential?: string;
 }
 
 export interface SpawnSessionResult {
@@ -131,6 +162,16 @@ export interface SpawnSessionResult {
   model?: string;
   /** Present in wait mode when the child produced a final assistant message. */
   finalText?: string;
+  orchestrationId: string;
+  parentSessionId: string;
+  rootSessionId: string;
+  depth: number;
+  role: SpawnSessionRole;
+  projectId?: string;
+  lifecycle: SpawnSessionLifecycle;
+  /** Effective reason after trusted authorization normalization. */
+  spawnReason?: SpawnSessionReason;
+  mode?: SpawnSessionMode;
 }
 
 export interface SpawnSessionHelpResult {
@@ -1258,6 +1299,7 @@ ${formattedMessages}
       backendName: this.backendName,
       sessionPath,
       validateModel: this.validateCallLlmModel?.bind(this),
+      defaultModel: this.getModel(),
     });
     return this.queryLlm(request);
   }
@@ -1265,7 +1307,7 @@ ${formattedMessages}
   /**
    * Optional model validation hook for call_llm.
    * Override in subclasses to filter models (e.g., Codex rejects non-OpenAI models).
-   * Return undefined to fall back to miniModel.
+   * Return undefined to fall back to the current session model.
    */
   protected validateCallLlmModel?(modelId: string): string | undefined;
 
@@ -1276,6 +1318,8 @@ ${formattedMessages}
   protected async preExecuteSpawnSession(
     input: Record<string, unknown>
   ): Promise<SpawnSessionResult | SpawnSessionHelpResult> {
+    input = recoverSpawnSessionArguments(input)
+
     // Help mode — return available config info
     if (input.help) {
       return this.getSpawnSessionHelp();
@@ -1307,6 +1351,10 @@ ${formattedMessages}
       mode: resolveSpawnSessionMode(input.mode),
       timeoutMs: resolveSpawnWaitTimeoutMs(input.timeoutMs),
       attachments: input.attachments as SpawnSessionRequest['attachments'],
+      lifecycle: input.lifecycle as SpawnSessionRequest['lifecycle'],
+      role: input.role as SpawnSessionRequest['role'],
+      spawnReason: input.spawnReason as SpawnSessionRequest['spawnReason'],
+      qualification: input.qualification as SpawnSessionRequest['qualification'],
     };
 
     return this.onSpawnSession(request);

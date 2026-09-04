@@ -157,6 +157,62 @@ export function attachSessionSelfManagementBindings(
     enumerable: true,
   });
 
+  Object.defineProperty(context, 'submitTaskOutput', {
+    get() {
+      return getSessionScopedToolCallbacks(sessionId)?.submitTaskOutputFn;
+    },
+    configurable: true,
+    enumerable: true,
+  });
+
+  Object.defineProperty(context, 'submitTaskVerdict', {
+    get() {
+      return getSessionScopedToolCallbacks(sessionId)?.submitTaskVerdictFn;
+    },
+    configurable: true,
+    enumerable: true,
+  });
+
+  Object.defineProperty(context, 'submitOrchestrationPatch', {
+    get() {
+      return getSessionScopedToolCallbacks(sessionId)?.submitOrchestrationPatchFn;
+    },
+    configurable: true,
+    enumerable: true,
+  });
+
+  Object.defineProperty(context, 'submitOrchestrationDecision', {
+    get() {
+      return getSessionScopedToolCallbacks(sessionId)?.submitOrchestrationDecisionFn;
+    },
+    configurable: true,
+    enumerable: true,
+  });
+
+  Object.defineProperty(context, 'submitTaskNodeVerdict', {
+    get() {
+      return getSessionScopedToolCallbacks(sessionId)?.submitTaskNodeVerdictFn;
+    },
+    configurable: true,
+    enumerable: true,
+  });
+
+  Object.defineProperty(context, 'submitTaskDefinition', {
+    get() {
+      return getSessionScopedToolCallbacks(sessionId)?.submitTaskDefinitionFn;
+    },
+    configurable: true,
+    enumerable: true,
+  });
+
+  Object.defineProperty(context, 'controlTaskRun', {
+    get() {
+      return getSessionScopedToolCallbacks(sessionId)?.controlTaskRunFn;
+    },
+    configurable: true,
+    enumerable: true,
+  });
+
   // getSessionInfo needs wrapping to default sid → sessionId
   Object.defineProperty(context, 'getSessionInfo', {
     get() {

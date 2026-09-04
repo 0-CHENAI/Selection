@@ -13,21 +13,19 @@ import { useLabels } from '@/hooks/useLabels'
 import { getSessionTitle } from '@/utils/session'
 import { routes } from '@/lib/navigate'
 import { resolveTaskScopeLabelId } from '@craft-agent/shared/labels'
-import { DEFAULT_MODEL, getModelShortName } from '@config/models'
-import { getDefaultModelsForConnection, isUnsupportedLlmConnection, type LlmConnectionWithStatus } from '@config/llm-connections'
 import type { SessionStatus } from '@/config/session-status-config'
 import type { KanbanColumnDef } from '@craft-agent/shared/projects/types'
 import { KanbanBoard } from './KanbanBoard'
-import { KANBAN_COLUMNS, statusToColumn } from './status-column'
+import { KANBAN_COLUMNS, resolveBoardColumn, statusToColumn } from './status-column'
 import { BoardListToggle } from './BoardListToggle'
 import { KanbanProjectFilter, type KanbanProjectFilterOption } from './KanbanProjectFilter'
 import { TaskEditor } from './TaskEditor'
+import { buildModelCatalog, catalogDefaultModel } from './kanban-models'
 import { mergeSubtaskRows, type SpecNodeSummary, type SubtaskChildRow } from './subtask-merge'
 import type { SpecNode } from './task-spec-form'
 import type {
   KanbanColumnId,
   KanbanColumnMeta,
-  KanbanModelProviderGroup,
   KanbanProject,
   KanbanTask,
   SubtaskRunState,
@@ -41,6 +39,21 @@ import type {
  * and that is exactly what the tile's Play button dispatches. `lastMessageAt` can't
  * carry this distinction: the server stamps it at creation time as a sort key.
  */
+function snapshotRunState(
+  live: { nodes: { id: string; state: string }[] } | undefined,
+  taskNodeId: string | undefined,
+): SubtaskRunState | undefined {
+  if (!live || !taskNodeId) return undefined
+  const node = live.nodes.find((n) => n.id === taskNodeId)
+  if (!node) return undefined
+  if (node.state === 'done') return 'done'
+  if (node.state === 'failed' || node.state === 'invalid') return 'failed'
+  if (node.state === 'running' || node.state === 'retry-wait' || node.state === 'waiting-approval' || node.state === 'ready') {
+    return 'running'
+  }
+  return 'pending'
+}
+
 function deriveRunState(child: SessionMeta, statusesById: Map<string, SessionStatus>): SubtaskRunState {
   if (statusesById.get(child.sessionStatus ?? '')?.category === 'closed') return 'done'
   // The Conductor marks a failed node 'needs-review' (there is no 'failed' session
@@ -50,41 +63,6 @@ function deriveRunState(child: SessionMeta, statusesById: Map<string, SessionSta
   if (child.isProcessing) return 'running'
   if ((child.messageCount ?? 0) > 0) return 'done'
   return 'pending'
-}
-
-/**
- * Build the subtask composer's provider→model catalog from the workspace's
- * authenticated LLM connections, plus a model-id → connection-slug map so a
- * spawned subtask routes to the connection that actually serves the model.
- * Model-id collisions across connections are last-wins (acceptable for v1).
- */
-function buildModelCatalog(connections: LlmConnectionWithStatus[]): {
-  groups: KanbanModelProviderGroup[]
-  modelToConnection: Map<string, string>
-} {
-  const groups: KanbanModelProviderGroup[] = []
-  const modelToConnection = new Map<string, string>()
-
-  for (const conn of connections) {
-    if (!conn.isAuthenticated) continue
-    if (isUnsupportedLlmConnection(conn)) continue
-    const rawModels = conn.models?.length
-      ? conn.models
-      : getDefaultModelsForConnection(conn.providerType, conn.piAuthProvider)
-    const models = rawModels.map(m => {
-      const id = typeof m === 'string' ? m : m.id
-      const name = typeof m === 'string' ? getModelShortName(m) : m.name || getModelShortName(m.id)
-      return { id, name }
-    })
-    if (models.length === 0) continue
-    for (const m of models) modelToConnection.set(m.id, conn.slug)
-    // Provider key drives the brand icon: 'anthropic' resolves directly; Pi
-    // connections resolve through their piAuthProvider (see resolveProviderIcon in TaskTile).
-    const provider = conn.providerType === 'anthropic' ? 'anthropic' : conn.piAuthProvider || conn.providerType
-    groups.push({ provider, label: conn.name, models })
-  }
-
-  return { groups, modelToConnection }
 }
 
 /**
@@ -127,6 +105,18 @@ export function KanbanBoardContainer() {
   }, [activeWorkspaceId, projects, setProjectFilter])
 
   const [expandedTaskIds, setExpandedTaskIds] = React.useState<Set<string>>(() => new Set())
+  const [runSnapshots, setRunSnapshots] = React.useState<Map<string, { status: string; runId: string; nodes: { id: string; state: string }[] }>>(() => new Map())
+
+  React.useEffect(() => {
+    return window.electronAPI.onTaskRunChanged((wsId, snapshot) => {
+      if (wsId !== activeWorkspaceId) return
+      setRunSnapshots((prev) => {
+        const next = new Map(prev)
+        next.set(snapshot.slug, snapshot)
+        return next
+      })
+    })
+  }, [activeWorkspaceId])
 
   // Full-pane Task editor overlays the board pane (no global route needed). "Add task" opens it in
   // create mode; the tile "Edit task" affordance opens it in edit mode pointed at that session.
@@ -162,6 +152,7 @@ export function KanbanBoardContainer() {
     () => buildModelCatalog(llmConnections),
     [llmConnections]
   )
+  const catalogDefault = catalogDefaultModel(subtaskModelGroups)
 
   // Per-project columns apply only when exactly one project is in focus — the
   // cross-project "all tasks" view always uses the default 3 columns so it stays
@@ -214,22 +205,31 @@ export function KanbanBoardContainer() {
     }
     let cancelled = false
     void Promise.all(
-      slugs.map(async (slug): Promise<readonly [string, SpecNodeSummary[]]> => {
+      slugs.map(async (slug) => {
         try {
           const res = await window.electronAPI.getTask(activeWorkspaceId, slug)
           const spec = res.spec as { defaults?: { model?: string }; nodes?: SpecNode[] } | undefined
           const defaultModel = spec?.defaults?.model
-          return [
+          return {
             slug,
-            (spec?.nodes ?? []).map(n => ({ id: n.id, title: n.title || n.id, model: n.model ?? defaultModel })),
-          ]
+            nodes: (spec?.nodes ?? []).map(n => ({ id: n.id, title: n.title || n.id, model: n.model ?? defaultModel })),
+            latestRun: res.latestRun ?? null,
+          }
         } catch {
           // Unreadable spec → empty node list: the tile falls back to children-only rows.
-          return [slug, []]
+          return { slug, nodes: [], latestRun: null }
         }
       })
     ).then(entries => {
-      if (!cancelled) setSpecNodesBySlug(new Map(entries))
+      if (cancelled) return
+      setSpecNodesBySlug(new Map(entries.map((e) => [e.slug, e.nodes])))
+      setRunSnapshots((prev) => {
+        const next = new Map(prev)
+        for (const e of entries) {
+          if (e.latestRun) next.set(e.slug, e.latestRun)
+        }
+        return next
+      })
     })
     return () => {
       cancelled = true
@@ -250,28 +250,29 @@ export function KanbanBoardContainer() {
       if (meta.parentSessionId) continue
       if (meta.isArchived || meta.hidden || meta.taskDraft) continue
       const statusId = meta.sessionStatus ?? 'todo'
-      // Placement is the persisted free-string column, else the status' default column.
-      // Validity against the *active* column set is enforced by KanbanBoard (unknown
-      // ids fall back to the first column), so no built-in-only guard is needed here.
-      const column = meta.kanbanColumn ?? statusToColumn(statusId)
+      const projectColumns = projects.find((p) => p.config.id === meta.projectId)?.config.kanbanColumns
+      const column = meta.kanbanColumn ?? resolveBoardColumn(statusId, projectColumns) ?? statusToColumn(statusId)
+      const live = meta.taskSlug ? runSnapshots.get(meta.taskSlug) : undefined
       const children: SubtaskChildRow[] = (childrenByParent.get(meta.id) ?? []).map(child => ({
         id: child.id,
         title: getSessionTitle(child),
-        runState: deriveRunState(child, statusesById),
-        model: child.model ?? DEFAULT_MODEL,
+        runState: child.taskNodeId
+          ? (snapshotRunState(live, child.taskNodeId) ?? 'pending')
+          : deriveRunState(child, statusesById),
+        model: child.model ?? catalogDefault ?? '',
         taskNodeId: child.taskNodeId,
         createdAt: child.createdAt,
       }))
       // Spec-backed tiles show one row per DAG node (bound to its latest child session,
       // or pending when never run) plus unadopted quick-adds; plain tiles show children.
       const specNodes = meta.taskSlug ? specNodesBySlug.get(meta.taskSlug) : undefined
-      const subtasks = mergeSubtaskRows(specNodes, children, DEFAULT_MODEL)
+      const subtasks = mergeSubtaskRows(specNodes, children, catalogDefault ?? '')
       result.push({
         id: meta.id,
         title: getSessionTitle(meta),
         column,
         statusId,
-        model: meta.model ?? DEFAULT_MODEL,
+        model: meta.model ?? catalogDefault ?? '',
         projectId: meta.projectId,
         taskSlug: meta.taskSlug,
         subtasks,
@@ -287,7 +288,7 @@ export function KanbanBoardContainer() {
       })
     }
     return result
-  }, [metaMap, statusesById, specNodesBySlug])
+  }, [metaMap, statusesById, specNodesBySlug, runSnapshots, projects, catalogDefault])
 
   // Project filter: empty selection = show all. While a filter is active, tiles
   // with no project are hidden (an explicit "No project" option is a later add).
@@ -297,7 +298,7 @@ export function KanbanBoardContainer() {
     return tasks.filter(task => task.projectId !== undefined && allow.has(task.projectId))
   }, [tasks, projectFilter])
 
-  const defaultSubtaskModel = modelToConnection.has(DEFAULT_MODEL) ? DEFAULT_MODEL : undefined
+  const defaultSubtaskModel = catalogDefault
 
   const handleToggleSubtasks = React.useCallback((taskId: string) => {
     setExpandedTaskIds(prev => {
@@ -338,13 +339,27 @@ export function KanbanBoardContainer() {
     (taskId: string) => {
       const meta = metaMap.get(taskId)
       if (activeWorkspaceId && meta?.taskSlug) {
+        const live = runSnapshots.get(meta.taskSlug)
+        const fail = (err: unknown) => {
+          toast.error(t('tasks.toastRunFailed'), {
+            description: err instanceof Error ? err.message : String(err),
+          })
+        }
+        if (live && (live.status === 'paused' || live.status === 'pausing')) {
+          void window.electronAPI.resumeTask(activeWorkspaceId, meta.taskSlug, live.runId).catch(fail)
+          return
+        }
+        if (live && live.status === 'interrupted') {
+          void window.electronAPI.continueTask(activeWorkspaceId, meta.taskSlug, live.runId).catch(fail)
+          return
+        }
+        if (live && ['running', 'verifying', 'repairing', 'waiting-approval', 'waiting-budget'].includes(live.status)) {
+          void window.electronAPI.pauseTask(activeWorkspaceId, meta.taskSlug, live.runId).catch(fail)
+          return
+        }
         window.electronAPI
           .runTask(activeWorkspaceId, { slug: meta.taskSlug, orchestratorSessionId: taskId })
-          .catch((err: unknown) => {
-            toast.error(t('tasks.toastRunFailed'), {
-              description: err instanceof Error ? err.message : String(err),
-            })
-          })
+          .catch(fail)
         return
       }
       for (const child of metaMap.values()) {
@@ -359,7 +374,7 @@ export function KanbanBoardContainer() {
         updateSessionMeta(child.id, { isProcessing: true })
       }
     },
-    [metaMap, statusesById, onSendMessage, updateSessionMeta, activeWorkspaceId, t]
+    [metaMap, statusesById, onSendMessage, updateSessionMeta, activeWorkspaceId, t, runSnapshots]
   )
 
   // Create a parent task tile in place — no navigation. It lands in ToDo (no
@@ -552,7 +567,7 @@ export function KanbanBoardContainer() {
         }}
         modelGroups={subtaskModelGroups}
         modelToConnection={modelToConnection}
-        defaultModel={defaultSubtaskModel ?? DEFAULT_MODEL}
+        defaultModel={defaultSubtaskModel ?? ''}
       />
     )
   }
