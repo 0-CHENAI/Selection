@@ -2133,23 +2133,25 @@ function AppShellContent({
               ) : undefined}
               actions={
                 <>
-                  {/* List ⇄ Board view switch (sessions mode, desktop widths only).
-                      In board view the navigator is collapsed, so the board hosts its own copy. */}
-                  {!isAutoCompact && isSessionsNavigation(navState) && (
-                    <BoardListToggle
-                      value="list"
-                      onChange={view => {
-                        if (view === 'board') navigate(routes.view.board())
-                      }}
-                    />
-                  )}
-                  {/* Session search remains available after classification filters are removed. */}
+                  {/* Sessions: search, then list / new-orchestration. Compact
+                      hides the switcher and keeps search so the right edge
+                      does not leave an empty slot. */}
                   {isSessionsNavigation(navState) && (
-                    <HeaderIconButton
-                      icon={<Search className="h-4 w-4" />}
-                      tooltip={t("sidebar.search")}
-                      onClick={() => setSearchActive(true)}
-                    />
+                    <div className="flex items-center gap-1.5">
+                      <HeaderIconButton
+                        icon={<Search className="h-4 w-4" />}
+                        tooltip={t("sidebar.search")}
+                        onClick={() => setSearchActive(true)}
+                      />
+                      {!isAutoCompact && (
+                        <BoardListToggle
+                          value="list"
+                          onChange={view => {
+                            if (view === 'board') navigate(routes.view.board())
+                          }}
+                        />
+                      )}
+                    </div>
                   )}
                   {/* Add Source button (only for sources mode) - uses filter-aware edit config */}
                   {isSourcesNavigation(navState) && activeWorkspace && (
