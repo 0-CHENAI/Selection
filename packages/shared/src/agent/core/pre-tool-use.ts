@@ -764,6 +764,15 @@ export function runPreToolUseChecks(ctx: PreToolUseInput): PreToolUseCheckResult
     );
   }
 
+  // Developer feedback is an external persistent side effect. It always
+  // requires a visible, per-message approval, including in allow-all mode.
+  if (isDeveloperFeedbackTool(toolName)) {
+    return {
+      type: 'prompt',
+      ...developerFeedbackPrompt(toolName, input),
+    };
+  }
+
   // ============================================================
   // 1. PERMISSION MODE CHECK
   // ============================================================
@@ -990,6 +999,32 @@ function toDisplayName(token: string): string {
   return token.replace(/[-_]/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
 }
 
+function isDeveloperFeedbackTool(toolName: string): boolean {
+  return toolName === 'send_developer_feedback'
+    || toolName === 'session__send_developer_feedback'
+    || toolName === 'mcp__session__send_developer_feedback';
+}
+
+function developerFeedbackPrompt(
+  toolName: string,
+  input: Record<string, unknown>,
+): PromptInfo {
+  const message = typeof input.message === 'string' ? input.message.trim() : '';
+  return {
+    promptType: 'mcp_mutation',
+    description: [
+      'Send this feedback to the Selection development team?',
+      '',
+      message || '(empty feedback message)',
+      '',
+      'Only the text above will be persisted. Session and connection metadata are not included.',
+    ].join('\n'),
+    command: toolName.startsWith('mcp__session__')
+      ? toolName
+      : 'send_developer_feedback',
+  };
+}
+
 function classifyAdminApproval(command: string): PromptInfo | null {
   const trimmed = command.trim();
   const normalized = trimmed.toLowerCase();
@@ -1073,6 +1108,10 @@ export function shouldPromptInAskMode(
   plansFolderPath?: string,
   onDebug?: (message: string) => void,
 ): PromptInfo | null {
+
+  if (isDeveloperFeedbackTool(toolName)) {
+    return developerFeedbackPrompt(toolName, input);
+  }
 
   // --- File writes ---
   if (FILE_WRITE_TOOLS.has(toolName)) {

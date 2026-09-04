@@ -161,7 +161,8 @@ export const RenderTemplateSchema = z.object({
 });
 
 export const SendDeveloperFeedbackSchema = z.object({
-  message: z.string().describe('Freeform markdown feedback — be detailed, use headings, lists, code blocks. Include what happened, what you expected, what would help, or any ideas/suggestions.'),
+  message: z.string().describe('The exact markdown feedback shown to the user for approval. Include only details necessary to report the product issue; omit session IDs, credentials, connection details, and unrelated task context.'),
+  approvalToken: z.string().optional().describe('Host-issued one-time approval token. Agents must not invent or reuse this value.'),
 });
 
 // Browser tool schema (single CLI-like tool for all browser actions)
@@ -586,9 +587,9 @@ Optional overrides: \`model\`, \`llmConnection\`, \`permissionMode\`, \`thinking
 Children default to lifecycle="managed" and role="worker". Managed children participate in parent completion and explicit Swarm stop; lifecycle="detached" explicitly leaves both contracts. Workers are hidden from the ordinary session list but remain openable from run details.
 Only use 'attachments' for existing file paths on disk — the tool reads them automatically.`,
 
-  send_developer_feedback: `Send freeform feedback to the Selection development team.
+  send_developer_feedback: `Send user-approved feedback to the Selection development team.
 
-Use this to share anything that would help improve the product — issues you hit, ideas for better tools, suggestions for improved workflows, or patterns you notice. Write in markdown with as much detail as possible. This is your direct line to the developers.`,
+Only call this after the user explicitly asks to submit feedback. The exact message is shown for confirmation before it is persisted. Do not call it automatically because a tool failed; recover or degrade gracefully and tell the user about the limitation instead. Include only details necessary to report the product issue, and omit session IDs, credentials, connection details, and unrelated task context.`,
 
   set_session_labels: `Set labels on the current session or a specific session by ID. Replaces all existing labels.
 
@@ -746,7 +747,7 @@ export const SESSION_TOOL_DEFS: SessionToolDef[] = [
   { name: 'transform_data', description: TOOL_DESCRIPTIONS.transform_data, inputSchema: TransformDataSchema, executionMode: 'registry', safeMode: 'allow', handler: handleTransformData },
   { name: 'script_sandbox', description: TOOL_DESCRIPTIONS.script_sandbox, inputSchema: ScriptSandboxSchema, executionMode: 'registry', safeMode: 'allow', handler: handleScriptSandbox },
   { name: 'render_template', description: TOOL_DESCRIPTIONS.render_template, inputSchema: RenderTemplateSchema, executionMode: 'registry', safeMode: 'allow', handler: handleRenderTemplate },
-  { name: 'send_developer_feedback', description: TOOL_DESCRIPTIONS.send_developer_feedback, inputSchema: SendDeveloperFeedbackSchema, executionMode: 'registry', safeMode: 'allow', handler: handleSendDeveloperFeedback },
+  { name: 'send_developer_feedback', description: TOOL_DESCRIPTIONS.send_developer_feedback, inputSchema: SendDeveloperFeedbackSchema, executionMode: 'registry', safeMode: 'block', handler: handleSendDeveloperFeedback },
   { name: 'call_llm', description: TOOL_DESCRIPTIONS.call_llm, inputSchema: CallLlmSchema, executionMode: 'backend', safeMode: 'allow', readOnly: true, handler: null },
   { name: 'spawn_session', description: TOOL_DESCRIPTIONS.spawn_session, inputSchema: SpawnSessionSchema, executionMode: 'backend', safeMode: 'block', handler: null },
   // Browser tool (backend-specific — requires BrowserPaneManager in Electron)
