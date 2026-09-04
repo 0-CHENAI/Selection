@@ -1,7 +1,7 @@
 import * as React from 'react'
 import { useTranslation } from "react-i18next"
 import { Command as CommandPrimitive } from 'cmdk'
-import { Check, Minimize2, Users, WandSparkles } from 'lucide-react'
+import { Check, Minimize2, Sparkles, Users } from 'lucide-react'
 import { Icon_Folder } from '@craft-agent/ui'
 import { cn } from '@/lib/utils'
 import { PERMISSION_MODE_CONFIG, PERMISSION_MODE_ORDER, type PermissionMode } from '@craft-agent/shared/agent/modes'
@@ -472,8 +472,8 @@ export function InlineSlashCommand({
       style={{
         left: Math.round(position.x) - 10,
         bottom: bottomPosition,
-        width: 480,
-        maxWidth: 'calc(100vw - 24px)',
+        width: 'min(400px, calc(100vw - 24px))',
+        maxWidth: 400,
       }}
     >
       <div ref={listRef} className={MENU_LIST_STYLE}>
@@ -530,15 +530,24 @@ export function InlineSlashCommand({
                         skill={item.skill}
                         size="sm"
                         workspaceId={workspaceId}
-                        fallbackIcon={WandSparkles}
+                        fallbackIcon={Sparkles}
                         bare
+                        chromeless
                       />
                     </div>
-                    <div className="flex-1 min-w-0">
-                      <span className="block truncate" title={item.label}>{item.label}</span>
+                    <div className={cn(
+                      'min-w-0 flex-1',
+                      item.description ? 'grid grid-cols-2 gap-y-0.5' : undefined,
+                    )}>
+                      <span
+                        className={cn('block min-w-0 truncate', item.description && 'col-span-2')}
+                        title={item.label}
+                      >
+                        {item.label}
+                      </span>
                       {item.description && (
                         <span
-                          className="mt-0.5 block truncate text-[11px] leading-4 text-muted-foreground"
+                          className="col-span-2 block min-w-0 truncate text-[11px] leading-4 text-muted-foreground"
                           title={item.description}
                         >
                           {item.description}

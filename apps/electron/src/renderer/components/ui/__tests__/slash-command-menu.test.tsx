@@ -62,17 +62,19 @@ describe('InlineSlashCommand skill rows', () => {
     const description = 'Build core GSAP animations and timelines'
     const html = renderSkillItem(description)
 
-    expect(html).toContain('mt-0.5 block truncate text-[11px]')
+    expect(html).toContain('grid grid-cols-2')
+    expect(html).toContain('col-span-2 block min-w-0 truncate text-[11px]')
     expect(html).toContain('GSAP Core')
     expect(html).toContain(description)
     expect(html).toContain(`title="${description}"`)
   })
 
-  it('uses a bare wand icon and leaves no empty description column', () => {
+  it('uses a bare Sparkles icon and leaves no empty description row', () => {
     const html = renderSkillItem('')
 
-    expect(html).toContain('lucide-wand-sparkles')
+    expect(html).toContain('lucide-sparkles')
     expect(html).not.toContain('lucide-zap')
-    expect(html).not.toContain('mt-0.5 block truncate text-[11px]')
+    expect(html).not.toContain('grid grid-cols-2')
+    expect(html).not.toContain('col-span-2 block min-w-0 truncate text-[11px]')
   })
 })
