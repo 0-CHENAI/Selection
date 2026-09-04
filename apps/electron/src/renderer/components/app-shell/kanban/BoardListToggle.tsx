@@ -1,4 +1,4 @@
-import { LayoutGrid, List } from 'lucide-react'
+import { List, PenLine } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { cn } from '@/lib/utils'
 
@@ -11,9 +11,9 @@ interface BoardListToggleProps {
 }
 
 /**
- * List ⇄ Board view switch. Rendered both in the sessions navigator header (list
- * mode) and in the board's own header (board mode), since the navigator is hidden
- * while the board is open and would otherwise have nowhere to host the switch.
+ * List ⇄ New-orchestration switch. Rendered in the sessions navigator header
+ * (list mode) and in the orchestration pane header (board route), since the
+ * navigator is hidden while that pane is open.
  */
 export function BoardListToggle({ value, onChange, className }: BoardListToggleProps) {
   const { t } = useTranslation()
@@ -27,7 +27,7 @@ export function BoardListToggle({ value, onChange, className }: BoardListToggleP
       <ToggleButton active={value === 'list'} icon={List} label={t('kanban.list')} onClick={() => onChange('list')} />
       <ToggleButton
         active={value === 'board'}
-        icon={LayoutGrid}
+        icon={PenLine}
         label={t('kanban.board')}
         onClick={() => onChange('board')}
       />

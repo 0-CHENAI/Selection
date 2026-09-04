@@ -530,7 +530,7 @@ export interface TaskEditorProps {
   workspaceId: string
   /** What the editor points at: create-new or edit an existing tile. Defaults to create. */
   target?: TaskEditorTarget
-  /** Return to the board. */
+  /** Return to the session list. */
   onClose: () => void
   /** Jump to the underlying orchestrator chat session (edit mode only). */
   onOpenSession?: () => void
@@ -584,9 +584,14 @@ export function TaskEditor({
   const [acceptanceCriteria, setAcceptanceCriteria] = React.useState('')
   // Empty string = "use the runner default"; a number pins the spec's max_iterations.
   const [maxRepairs, setMaxRepairs] = React.useState('')
-  // Create mode seeds the project from the board's active filter (so a new card stays
-  // visible under that filter); edit mode starts empty and is prefilled from the spec below.
+  // Create mode seeds the project from the current sidebar/project scope; edit
+  // mode starts empty and is prefilled from the spec below.
   const [projectId, setProjectId] = React.useState(target.mode === 'create' ? (target.initialProjectId ?? '') : '')
+  const createProjectScope = target.mode === 'create' ? (target.initialProjectId ?? '') : null
+  React.useEffect(() => {
+    if (createProjectScope === null) return
+    setProjectId(createProjectScope)
+  }, [createProjectScope])
   const [orchModel, setOrchModel] = React.useState(fallbackModel)
   // Explicit connection serving the orch model; undefined lets buildSpec derive it from orchModel.
   // Preserved from the loaded spec so an authored connection isn't rewritten on save (round-trip).
@@ -1182,7 +1187,7 @@ export function TaskEditor({
   })
 
   // Create the task (write task.yaml + orchestrator session). When `run` is true, also start a
-  // run; otherwise the task tile just lands on the board in ToDo for the user to run later.
+  // run; otherwise the orchestration is saved as a draft for the user to run later.
   async function submit(run: boolean, confirmV3Migration = false) {
     if (isEdit && !canSafelySaveExistingTask({ taskSlug: editSlug, etag, loadError: taskLoadError })) {
       toast.error(t('tasks.toastLoadFailed'), { description: taskLoadError ?? t('tasks.loadFailedBanner') })
@@ -1314,7 +1319,7 @@ export function TaskEditor({
         generatedDraftRef.current = null
       }
       // After a successful CREATE, hand off to the host so it can land the user on the
-      // task-scoped session list (edit-mode saves stay on the board).
+      // task-scoped session list (edit-mode saves stay in the editor).
       const notifyCreated = () => {
         if (isEdit) return
         onCreated?.({
@@ -1350,7 +1355,7 @@ export function TaskEditor({
       {/* Header */}
       <div className="flex items-center gap-2.5 rounded-xl border border-border bg-card px-3 py-2.5 shadow-minimal">
         <Btn variant="ghost" className="px-2" onClick={requestClose}>
-          <ChevronLeft className="h-4 w-4" strokeWidth={2} /> {t('kanban.board')}
+          <ChevronLeft className="h-4 w-4" strokeWidth={2} /> {t('kanban.list')}
         </Btn>
         <span className="text-foreground/25">/</span>
         <span className="text-sm font-semibold">{isEdit ? t('tasks.editTask') : t('kanban.newTask')}</span>

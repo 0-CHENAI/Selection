@@ -290,7 +290,6 @@ export function registerTasksHandlers(server: RpcServer, deps: HandlerDeps): voi
     workspaceOrThrow(workspaceId) // validate the workspace exists; generate no longer writes task.yaml
     const orchestrator = await deps.sessionManager.createSession(workspaceId, {
       name: req.title?.trim() || 'New task',
-      sessionStatus: 'todo',
       // Hidden until the authored spec is validated and adopted via tasks:create. Keeps the
       // generate-time session off the board so "Generate → Create & Run" can't mint a duplicate
       // top-level tile (#bug1). Promotion clears this flag in adoptGeneratedTaskOrchestrator.

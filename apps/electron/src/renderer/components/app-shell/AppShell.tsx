@@ -512,6 +512,13 @@ function AppShellContent({
     () => projects.map(p => ({ id: p.config.id, slug: p.config.slug, name: p.config.name, color: p.config.color })),
     [projects],
   )
+  const selectedProjectSlug = isProjectsNavigation(navState)
+    ? navState.details?.projectSlug
+    : undefined
+  const selectedProjectId = useMemo(
+    () => projectMenuOptions.find(project => project.slug === selectedProjectSlug)?.id,
+    [projectMenuOptions, selectedProjectSlug],
+  )
   const handleSessionProjectChange = useCallback(async (sessionId: string, projectId: string | null) => {
     try {
       await window.electronAPI.sessionCommand(sessionId, { type: 'setProjectId', projectId })
@@ -1185,6 +1192,7 @@ function AppShellContent({
     sessionStatuses: effectiveSessionStatuses,
     onSessionSourcesChange: handleSessionSourcesChange,
     onJumpToTaskSessions: handleJumpToTaskSessions,
+    orchestrationProjectId: resolveNewSessionParams(listFilter, labelFilter, projectFilter, selectedProjectId)?.project ?? null,
     rightSidebarButton: null,
     isCompactMode: isAutoCompact,
     // Search state for ChatDisplay highlighting
@@ -1200,7 +1208,7 @@ function AppShellContent({
     automationTestResults,
     getAutomationHistory,
     onReplayAutomation: handleReplayAutomation,
-  }), [contextValue, handleDeleteSession, sources, skills, activeSessionWorkingDirectory, displayLabelConfigs, handleSessionLabelsChange, enabledModes, effectiveSessionStatuses, handleSessionSourcesChange, handleJumpToTaskSessions, isAutoCompact, searchActive, searchQuery, handleChatMatchInfoChange, handleTestAutomation, handleSimulateMatch, handleToggleAutomation, handleDuplicateAutomation, handleDeleteAutomation, automationTestResults, getAutomationHistory, handleReplayAutomation])
+  }), [contextValue, handleDeleteSession, sources, skills, activeSessionWorkingDirectory, displayLabelConfigs, handleSessionLabelsChange, enabledModes, effectiveSessionStatuses, handleSessionSourcesChange, handleJumpToTaskSessions, listFilter, labelFilter, projectFilter, selectedProjectId, isAutoCompact, searchActive, searchQuery, handleChatMatchInfoChange, handleTestAutomation, handleSimulateMatch, handleToggleAutomation, handleDuplicateAutomation, handleDeleteAutomation, automationTestResults, getAutomationHistory, handleReplayAutomation])
 
   // Persist expanded folders to localStorage (workspace-scoped)
   React.useEffect(() => {
@@ -1559,14 +1567,6 @@ function AppShellContent({
    * include-mode filters are candidates — an excluded status/label/project must
    * never be inherited (#970). See resolveNewSessionParams.
    */
-  const selectedProjectSlug = isProjectsNavigation(navState)
-    ? navState.details?.projectSlug
-    : undefined
-  const selectedProjectId = useMemo(
-    () => projectMenuOptions.find(project => project.slug === selectedProjectSlug)?.id,
-    [projectMenuOptions, selectedProjectSlug],
-  )
-
   const resolveNewSessionCreationParams = useCallback(
     () => resolveNewSessionParams(listFilter, labelFilter, projectFilter, selectedProjectId),
     [listFilter, labelFilter, projectFilter, selectedProjectId],

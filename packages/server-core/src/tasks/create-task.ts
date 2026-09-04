@@ -105,7 +105,6 @@ export async function createTaskFromSpec(
   const orchestrator = await sessionManager.createSession(workspaceId, {
     name: spec.title,
     projectId: spec.project,
-    sessionStatus: 'todo',
     // Stable linkage: this session orchestrates task `spec.id` across all of its runs.
     taskSlug: spec.id,
     // Explicit cwd from the spec seeds the orchestrator; children inherit it at dispatch.

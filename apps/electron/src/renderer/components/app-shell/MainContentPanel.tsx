@@ -313,7 +313,7 @@ export function MainContentPanel({
 
   // Chats navigator - show chat, multi-select panel, or empty state
   if (isSessionsNavigation(navState)) {
-    // Board view: full-width Kanban over all sessions (placement independent of status)
+    // Board route: full-width new-orchestration editor (#261)
     if (navState.viewMode === 'board') {
       return wrapWithStoplight(
         <Panel variant="grow" className={className}>
