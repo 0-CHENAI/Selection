@@ -469,7 +469,12 @@ export function InlineSlashCommand({
       ref={menuRef}
       data-inline-menu
       className={cn('fixed z-dropdown', MENU_CONTAINER_STYLE, className)}
-      style={{ left: Math.round(position.x) - 10, bottom: bottomPosition, minWidth: 320, maxWidth: 400 }}
+      style={{
+        left: Math.round(position.x) - 10,
+        bottom: bottomPosition,
+        width: 'min(400px, calc(100vw - 24px))',
+        maxWidth: 400,
+      }}
     >
       <div ref={listRef} className={MENU_LIST_STYLE}>
         {filteredSections.map((section, sectionIndex) => (
@@ -525,22 +530,29 @@ export function InlineSlashCommand({
                         skill={item.skill}
                         size="sm"
                         workspaceId={workspaceId}
+                        fallbackIcon={Sparkles}
                         bare
                         chromeless
-                        fallbackIcon={Sparkles}
-                        className="text-muted-foreground"
                       />
                     </div>
                     <div className={cn(
                       'min-w-0 flex-1',
-                      item.description ? 'grid grid-cols-2 gap-2 items-center' : undefined,
+                      item.description ? 'grid grid-cols-2 gap-y-0.5' : undefined,
                     )}>
-                      <span className="block min-w-0 truncate">{item.label}</span>
-                      {item.description ? (
-                        <span className="block min-w-0 truncate text-muted-foreground" title={item.description}>
+                      <span
+                        className={cn('block min-w-0 truncate', item.description && 'col-span-2')}
+                        title={item.label}
+                      >
+                        {item.label}
+                      </span>
+                      {item.description && (
+                        <span
+                          className="col-span-2 block min-w-0 truncate text-[11px] leading-4 text-muted-foreground"
+                          title={item.description}
+                        >
                           {item.description}
                         </span>
-                      ) : null}
+                      )}
                     </div>
                     <span className="rounded-[4px] shadow-minimal bg-background px-1.5 py-0.5 text-[10px] text-muted-foreground shrink-0">
                       {t('common.skill')}
