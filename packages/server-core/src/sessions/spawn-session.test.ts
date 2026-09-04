@@ -6,6 +6,9 @@ import type { SpawnSessionReason, SpawnSessionRequest, SpawnSessionResult } from
 import { SessionManager, createManagedSession, type SessionCompletionEvent } from './SessionManager.ts'
 import {
   buildManagedSwarmCoverageMarker,
+  buildManagedSwarmResultReference,
+  buildManagedSwarmSynthesisSectionMarkers,
+  buildManagedSwarmWorkerSectionMarkers,
   DEFAULT_MANAGED_SWARM_FINAL_AGGREGATION,
   FIXED_SWARM_TOKEN_BUDGET,
   type ManagedSwarmAggregationChild,
@@ -67,11 +70,13 @@ describe('SessionManager spawn_session wait/background', () => {
   let tmpRoot: string
   let sm: SessionManager
   let sendCalls: Array<{ id: string; msg: string; hidden?: boolean }>
+  let workerResults: Map<string, string>
 
   beforeEach(() => {
     tmpRoot = mkdtempSync(join(tmpdir(), 'sm-spawn-'))
     sm = new SessionManager()
     sendCalls = []
+    workerResults = new Map()
     const api = internals(sm)
     api.sendMessage = async (id, msg, _a, _s, opts) => {
       sendCalls.push({ id, msg, hidden: opts?.hidden })
@@ -147,6 +152,7 @@ describe('SessionManager spawn_session wait/background', () => {
     totalTokens?: number,
     options?: { finalMessageId?: string; lastTurnTokens?: number },
   ) {
+    if (finalText) workerResults.set(childId, finalText)
     internals(sm).emitSessionComplete({
       sessionId: childId,
       workspaceId: 'ws_test',
@@ -189,13 +195,38 @@ describe('SessionManager spawn_session wait/background', () => {
     orchestrationId: string,
     children: Array<{ sessionId: string; status: ManagedSwarmAggregationChild['status'] }>,
   ): string {
+    const aggregationChildren = children.map(child => {
+      const session = internals(sm).sessions.get(child.sessionId)
+      const parent = session?.parentSessionId
+        ? internals(sm).sessions.get(session.parentSessionId)
+        : undefined
+      const summary = parent?.backgroundTaskOutputs.get(child.sessionId)?.summary
+        || workerResults.get(child.sessionId)
+        || sm.getSessionFinalText(child.sessionId)
+      return { ...child, summary }
+    })
+    const workerSections = aggregationChildren.flatMap(child => {
+      const resultRef = buildManagedSwarmResultReference(child)
+      if (!resultRef) {
+        return [`${child.sessionId} ${child.status}：没有可用正文，已在风险中披露。`]
+      }
+      const markers = buildManagedSwarmWorkerSectionMarkers(child.sessionId)
+      return [
+        markers.start,
+        `${child.sessionId} ${child.status}：${resultRef}。该 worker 提供了具体发现、证据与建议，已在当前回答中解释并参与综合。`,
+        markers.end,
+      ]
+    })
+    const synthesisMarkers = buildManagedSwarmSynthesisSectionMarkers()
     return [
-      ...children.map(child => `${child.sessionId} ${child.status}：已纳入最终结论。`),
-      '综合结论：已核对全部 worker 结果和状态。',
+      ...workerSections,
+      synthesisMarkers.start,
+      '综合结论：已核对全部 worker 的实际结果、证据和状态，并将共同结论与剩余风险写入当前交付。',
+      synthesisMarkers.end,
       buildManagedSwarmCoverageMarker({
         orchestrationId,
         finalAggregation: DEFAULT_MANAGED_SWARM_FINAL_AGGREGATION,
-        children,
+        children: aggregationChildren,
       }),
     ].join('\n')
   }
@@ -1327,6 +1358,80 @@ describe('SessionManager spawn_session wait/background', () => {
     expect(parent.orchestrationBlocker).toContain('after one repair')
   })
 
+  it('repairs a metadata-only answer that omits the worker deliverable', async () => {
+    const parent = buildParent()
+    parent.isProcessing = false
+    stubCreateChild()
+    await internals(sm).spawnSessionFromTool(parent, {
+      prompt: 'Research authentication durability',
+      mode: 'background',
+      spawnReason: 'user-requested',
+    })
+    const workerResult = [
+      '代码审查确认身份令牌只保存在内存中，刷新页面后会丢失。',
+      '浏览器复现显示登录后刷新立即回到未登录状态，控制台没有持久化恢复记录。',
+      '建议将令牌写入现有安全存储，并继续在退出登录时清理对应记录。',
+    ].join('')
+    emitChild('complete', workerResult)
+
+    const children = [{
+      sessionId: 'child',
+      status: 'completed' as const,
+      summary: workerResult,
+    }]
+    const marker = buildManagedSwarmCoverageMarker({
+      orchestrationId: parent.orchestrationId!,
+      finalAggregation: DEFAULT_MANAGED_SWARM_FINAL_AGGREGATION,
+      children,
+    })
+    parent.processingGeneration += 1
+    internals(sm).emitSessionComplete({
+      sessionId: parent.id,
+      workspaceId: parent.workspace.id,
+      generation: parent.processingGeneration,
+      reason: 'complete',
+      finalMessageId: 'offloaded-aggregation',
+      finalText: [
+        'child completed：已纳入最终结论。',
+        '总体判断：应修复登录状态。',
+        '完整报告见子代理会话的最终回复。',
+        marker,
+      ].join('\n'),
+    })
+
+    expect(parent.orchestrationStatus).toBe('running')
+    expect(parent.orchestrationAggregation).toMatchObject({
+      phase: 'repairing',
+      repairAttempts: 1,
+    })
+    expect(parent.messageQueue[0]?.message).toContain('does not cite the result')
+    expect(parent.messageQueue[0]?.message).toContain('structured result section')
+
+    const resultRef = buildManagedSwarmResultReference(children[0])!
+    const workerMarkers = buildManagedSwarmWorkerSectionMarkers('child')
+    const synthesisMarkers = buildManagedSwarmSynthesisSectionMarkers()
+    parent.processingGeneration += 1
+    internals(sm).emitSessionComplete({
+      sessionId: parent.id,
+      workspaceId: parent.workspace.id,
+      generation: parent.processingGeneration,
+      reason: 'complete',
+      finalMessageId: 'grounded-aggregation',
+      finalText: [
+        workerMarkers.start,
+        `child completed：${resultRef}。代码证据和浏览器复现都指向登录令牌缺少持久化，修复应接入现有安全存储并保留退出清理。`,
+        workerMarkers.end,
+        synthesisMarkers.start,
+        '综合结论：登录状态缺少持久化恢复，应接入现有安全存储，同时保留退出登录时的清理行为。',
+        synthesisMarkers.end,
+        marker,
+      ].join('\n'),
+    })
+
+    expect(parent.orchestrationStatus).toBe('completed')
+    expect(parent.orchestrationBlocker).toBeUndefined()
+  })
+
   it('resets a pending aggregation when the coordinator adds another managed worker', async () => {
     const parent = buildParent()
     parent.isProcessing = false
@@ -1395,7 +1500,8 @@ describe('SessionManager spawn_session wait/background', () => {
 
     expect(parent.backgroundTaskOutputs.get(child.id)?.summary).toBe('persisted worker result')
     expect(sendCalls).toHaveLength(1)
-    expect(sendCalls[0]?.msg).toContain('completed — persisted worker result')
+    expect(sendCalls[0]?.msg).toContain('"status": "completed"')
+    expect(sendCalls[0]?.msg).toContain('"result": "persisted worker result"')
   })
 
   it('waits for a nested coordinator aggregation before reporting its subtree terminal', () => {
@@ -2061,7 +2167,7 @@ describe('SessionManager spawn_session wait/background', () => {
       expect.objectContaining({
         id: parent.id,
         hidden: true,
-        msg: expect.stringContaining('Session ID: child'),
+        msg: expect.stringContaining('"sessionId": "child"'),
       }),
     ])
     expect(sendCalls[0]?.msg).toContain('Found login.ts')
@@ -2106,7 +2212,7 @@ describe('SessionManager spawn_session wait/background', () => {
       expect.objectContaining({
         id: parent.id,
         hidden: true,
-        msg: expect.stringContaining('Session ID: child'),
+        msg: expect.stringContaining('"sessionId": "child"'),
       }),
     ])
     expect(parent.pendingSwarmWakeOrchestrationIds.size).toBe(0)
