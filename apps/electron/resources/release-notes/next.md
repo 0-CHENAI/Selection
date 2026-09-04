@@ -6,6 +6,8 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 
 ## Improvements
 
+- **Session list filter and grouping menu is gone** — The title-bar ListFilter control no longer offers project include/exclude or unread/project grouping. The list always groups by date. Saved exclude or multi-project filters are cleared on load so they cannot hide sessions; a single sidebar project include is kept. ([#263](https://github.com/0-CHENAI/Selection/issues/263))
+
 ## Bug Fixes
 
 - **Child-session Error tooltips stay above the preview dialog** — Failed tool Error badges now open a bounded, scrollable tooltip. When the badge is inside a dialog (including the child-agent preview), the tooltip uses a nested layer above the dialog instead of sitting behind it. Main-session tooltips keep the default layer. ([#254](https://github.com/0-CHENAI/Selection/issues/254))

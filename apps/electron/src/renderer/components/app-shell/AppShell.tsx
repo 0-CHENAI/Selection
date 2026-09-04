@@ -9,27 +9,20 @@ import {
   ChevronDown,
   MoreHorizontal,
   RotateCw,
-  ListFilter,
-  Check,
-  X,
   Search,
   Plus,
   FileUp,
   Copy,
-  Trash2,
   DatabaseZap,
   Sparkles,
   Inbox,
   Globe,
   FolderOpen,
-  Calendar,
-  Layers,
   Webhook,
   Clock,
   Radio,
   Bot,
   Info,
-  MailOpen,
   FolderKanban,
 } from "lucide-react"
 // SessionStatusIcons no longer used - icons come from dynamic sessionStatuses
@@ -37,7 +30,6 @@ import { SourceAvatar } from "@/components/ui/source-avatar"
 import { TopBar } from "./TopBar"
 import { SquarePenRounded } from "../icons/SquarePenRounded"
 import { McpIcon } from "../icons/McpIcon"
-import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { HeaderIconButton } from "@/components/ui/HeaderIconButton"
 import { CreationJobsButton } from "./CreationJobsButton"
@@ -46,16 +38,6 @@ import { clearProjectFilter, resolveNewSessionParams, resolveProjectNavigationSe
 import { filterSessionsByProject, getIncludedProjectName, hasIncludedProjectFilter } from "./project-session-filter"
 import { Separator } from "@/components/ui/separator"
 import { Tooltip, TooltipTrigger, TooltipContent } from "@craft-agent/ui"
-import {
-  DropdownMenu,
-  DropdownMenuTrigger,
-  DropdownMenuSub,
-  StyledDropdownMenuContent,
-  StyledDropdownMenuItem,
-  StyledDropdownMenuSeparator,
-  StyledDropdownMenuSubTrigger,
-  StyledDropdownMenuSubContent,
-} from "@/components/ui/styled-dropdown"
 import {
   ContextMenu,
   ContextMenuTrigger,
@@ -71,7 +53,7 @@ import {
   AnimatedCollapsibleContent,
   springTransition as collapsibleSpring,
 } from "@/components/ui/collapsible"
-import { SessionList, type ChatGroupingMode } from "./SessionList"
+import { SessionList } from "./SessionList"
 import { MainContentPanel } from "./MainContentPanel"
 import { BoardListToggle } from "./kanban/BoardListToggle"
 import { PanelStackContainer } from "./PanelStackContainer"
@@ -163,8 +145,8 @@ import {
 import { dispatchFocusInputEvent } from "./input/focus-input-events"
 import {
   prepareOrdinarySessionSidebarLinks,
-  normalizeSessionGroupingMode,
   sanitizeRemovedSessionFilters,
+  sanitizeSidebarProjectScope,
 } from "./ordinary-session-ui"
 
 /**
@@ -187,108 +169,6 @@ interface AppShellProps {
   menuNewChatTrigger?: number
   /** Focused mode - hides sidebars, shows only the chat content */
   isFocusedMode?: boolean
-}
-
-function FilterModeBadge({ mode }: { mode: FilterMode }) {
-  return (
-    <span
-      className={cn(
-        "flex items-center justify-center h-5 w-5 rounded-[4px] -mr-1",
-        mode === 'include'
-          ? "bg-background text-foreground shadow-minimal"
-          : "bg-destructive/10 text-destructive shadow-tinted",
-      )}
-      style={mode === 'exclude' ? { '--shadow-color': 'var(--destructive-rgb)' } as React.CSSProperties : undefined}
-    >
-      {mode === 'include' ? <Check className="!h-2.5 !w-2.5" /> : <X className="!h-2.5 !w-2.5" />}
-    </span>
-  )
-}
-
-/**
- * FilterModeSubMenuItems - Shared sub-menu content for switching filter mode.
- * Renders Include / Exclude / Remove options using StyledDropdownMenuItem for
- * consistent styling. Used inside StyledDropdownMenuSubContent by both leaf
- * and group label items when they have an active filter mode.
- */
-function FilterModeSubMenuItems({
-  mode,
-  onChangeMode,
-  onRemove,
-}: {
-  mode: FilterMode
-  onChangeMode: (mode: FilterMode) => void
-  onRemove: () => void
-}) {
-  const { t } = useTranslation()
-  return (
-    <>
-      <StyledDropdownMenuItem
-        onClick={(e) => { e.preventDefault(); onChangeMode('include') }}
-        className={cn(mode === 'include' && "bg-foreground/[0.03]")}
-      >
-        <Check className="h-3.5 w-3.5 shrink-0" />
-        <span className="flex-1">{t("filter.include")}</span>
-      </StyledDropdownMenuItem>
-      <StyledDropdownMenuItem
-        onClick={(e) => { e.preventDefault(); onChangeMode('exclude') }}
-        className={cn(mode === 'exclude' && "bg-foreground/[0.03]")}
-      >
-        <X className="h-3.5 w-3.5 shrink-0" />
-        <span className="flex-1">{t("filter.exclude")}</span>
-      </StyledDropdownMenuItem>
-      <StyledDropdownMenuSeparator />
-      <StyledDropdownMenuItem
-        onClick={(e) => { e.preventDefault(); onRemove() }}
-      >
-        <Trash2 className="h-3.5 w-3.5 shrink-0" />
-        <span className="flex-1">{t("common.clear")}</span>
-      </StyledDropdownMenuItem>
-    </>
-  )
-}
-
-/**
- * FilterMenuRow - Consistent layout for filter menu items.
- * Enforces: [icon 14px box] [label flex] [accessory 12px box]
- */
-function FilterMenuRow({
-  icon,
-  label,
-  accessory,
-  iconClassName,
-  iconStyle,
-  noIconContainer,
-}: {
-  icon: React.ReactNode
-  label: React.ReactNode
-  accessory?: React.ReactNode
-  /** Additional classes for icon container (e.g., for status icon scaling) */
-  iconClassName?: string
-  /** Style for icon container (e.g., for status icon color) */
-  iconStyle?: React.CSSProperties
-  /** When true, skip the icon container (for icons that have their own container) */
-  noIconContainer?: boolean
-}) {
-  return (
-    <>
-      {noIconContainer ? (
-        // Wrapper for color inheritance. Clone icon to add bare prop (removes EntityIcon container).
-        <span style={iconStyle}>
-          {React.isValidElement(icon) ? React.cloneElement(icon as React.ReactElement<{ bare?: boolean }>, { bare: true }) : icon}
-        </span>
-      ) : (
-        <span
-          className={cn("h-3.5 w-3.5 flex items-center justify-center shrink-0", iconClassName)}
-          style={iconStyle}
-        >
-          {icon}
-        </span>
-      )}
-      <span className="flex-1">{label}</span>
-      <span className="shrink-0">{accessory}</span>
-    </>
-  )
 }
 
 /**
@@ -442,7 +322,7 @@ function AppShellContent({
   // has its own independent set of status and label filters.
   // Each filter entry stores a mode ('include' or 'exclude') for tri-state filtering.
   type FilterEntry = Record<string, FilterMode> // id → mode
-  type ViewFiltersMap = Record<string, { statuses: FilterEntry, labels: FilterEntry, projects?: FilterEntry, groupingMode?: ChatGroupingMode }>
+  type ViewFiltersMap = Record<string, { statuses: FilterEntry, labels: FilterEntry, projects?: FilterEntry, groupingMode?: 'date' }>
 
   // Compute a stable key for the current chat filter view
   const sessionFilterKey = useMemo(() => {
@@ -498,28 +378,9 @@ function AppShellContent({
   // Derive current view's project filter as a Map<projectId, FilterMode>
   const projectFilter = useMemo(() => {
     if (!sessionFilterKey) return new Map<string, FilterMode>()
-    const entry = viewFiltersMap[sessionFilterKey]?.projects ?? {}
-    return new Map<string, FilterMode>(Object.entries(entry) as [string, FilterMode][])
+    const entry = sanitizeSidebarProjectScope(viewFiltersMap[sessionFilterKey]?.projects)
+    return new Map<string, FilterMode>(Object.entries(entry))
   }, [viewFiltersMap, sessionFilterKey])
-
-  // Setter for project filter — updates only the current view's entry in the map
-  const setProjectFilter = useCallback((updater: Map<string, FilterMode> | ((prev: Map<string, FilterMode>) => Map<string, FilterMode>)) => {
-    setViewFiltersMap(prev => {
-      if (!sessionFilterKey) return prev
-      const current = new Map<string, FilterMode>(Object.entries(prev[sessionFilterKey]?.projects ?? {}) as [string, FilterMode][])
-      const next = typeof updater === 'function' ? updater(current) : updater
-      const existing = prev[sessionFilterKey]
-      return {
-        ...prev,
-        [sessionFilterKey]: {
-          statuses: existing?.statuses ?? {},
-          labels: existing?.labels ?? {},
-          projects: Object.fromEntries(next),
-          groupingMode: existing?.groupingMode,
-        }
-      }
-    })
-  }, [sessionFilterKey])
 
   // Jump to All Sessions scoped to a task: replace the allSessions view's label filter
   // (and project filter, when the task is bound to one) with the task's scope, then open
@@ -536,7 +397,7 @@ function AppShellContent({
             statuses: existing?.statuses ?? {},
             labels: {},
             projects: scope.projectId ? { [scope.projectId]: 'include' } : {},
-            groupingMode: existing?.groupingMode,
+            groupingMode: 'date',
           }
         }
       })
@@ -548,26 +409,6 @@ function AppShellContent({
   // Search state for session list
   const [searchActive, setSearchActive] = React.useState(false)
   const [searchQuery, setSearchQuery] = React.useState('')
-
-  // Grouping mode for chat list: per-view (stored in viewFiltersMap), forced to 'date' for state sub-views
-  const isStateSubView = sessionFilter?.kind === 'state'
-
-  const storedGroupingMode = viewFiltersMap[sessionFilterKey ?? '']?.groupingMode ?? 'date'
-  const chatGroupingMode = normalizeSessionGroupingMode(
-    isStateSubView ? 'date' : storedGroupingMode,
-  )
-
-  const setChatGroupingMode = useCallback((mode: ChatGroupingMode) => {
-    const groupingMode = normalizeSessionGroupingMode(mode)
-    setViewFiltersMap(prev => {
-      if (!sessionFilterKey) return prev
-      const existing = prev[sessionFilterKey] ?? { statuses: {}, labels: {} }
-      return {
-        ...prev,
-        [sessionFilterKey]: { ...existing, groupingMode }
-      }
-    })
-  }, [sessionFilterKey])
 
   // Ref for ChatDisplay navigation (exposed via forwardRef)
   const chatDisplayRef = React.useRef<ChatDisplayHandle>(null)
@@ -724,7 +565,7 @@ function AppShellContent({
     // This fixes CMD+R losing filters - previously only ran on workspace switch
     if (previousWorkspaceId !== activeWorkspaceId) {
       const newViewFilters = storage.get<ViewFiltersMap>(storage.KEYS.viewFilters, {}, activeWorkspaceId)
-      setViewFiltersMap(newViewFilters)
+      setViewFiltersMap(sanitizeRemovedSessionFilters(newViewFilters))
 
       const newExpandedFolders = storage.get<string[]>(storage.KEYS.expandedFolders, [], activeWorkspaceId)
       setExpandedFolders(new Set(newExpandedFolders))
@@ -1178,18 +1019,15 @@ function AppShellContent({
   // Select a project-bound session explicitly, or suppress auto-selection when
   // the project is empty so an unrelated global chat cannot remain on the right.
   const handleJumpToProjectSessions = useCallback((projectId: string) => {
-    setViewFiltersMap(prev => {
-      const existing = prev['allSessions']
-      return {
-        ...prev,
-        allSessions: {
-          statuses: {},
-          labels: {},
-          projects: { [projectId]: 'include' },
-          groupingMode: existing?.groupingMode,
-        }
-      }
-    })
+    setViewFiltersMap(prev => ({
+      ...prev,
+      allSessions: {
+        statuses: {},
+        labels: {},
+        projects: { [projectId]: 'include' },
+        groupingMode: 'date',
+      },
+    }))
 
     const hasOtherSecondaryFilters = false
     const firstProjectSessionId = resolveProjectNavigationSessionId(
@@ -2313,104 +2151,6 @@ function AppShellContent({
                       onClick={() => setSearchActive(true)}
                     />
                   )}
-                  {isSessionsNavigation(navState) && (
-                    <DropdownMenu>
-                      <DropdownMenuTrigger asChild>
-                        <HeaderIconButton
-                          icon={<ListFilter className="h-4 w-4" />}
-                          className={projectFilter.size > 0 ? "bg-accent/5 text-accent rounded-[8px] shadow-tinted" : "rounded-[8px]"}
-                          style={projectFilter.size > 0 ? { '--shadow-color': 'var(--accent-rgb)' } as React.CSSProperties : undefined}
-                          tooltip={t("sidebar.filterChats")}
-                        />
-                      </DropdownMenuTrigger>
-                      <StyledDropdownMenuContent align="end" light minWidth="min-w-[180px]">
-                        {projectMenuOptions.length > 0 && (
-                          <DropdownMenuSub>
-                            <StyledDropdownMenuSubTrigger>
-                              <FolderKanban className="h-3.5 w-3.5" />
-                              <span className="flex-1">{t("sidebar.projects")}</span>
-                            </StyledDropdownMenuSubTrigger>
-                            <StyledDropdownMenuSubContent minWidth="min-w-[180px]">
-                              {projectMenuOptions.map(project => {
-                                const currentMode = projectFilter.get(project.id)
-                                if (currentMode) {
-                                  return (
-                                    <DropdownMenuSub key={project.id}>
-                                      <StyledDropdownMenuSubTrigger onClick={(e) => { e.preventDefault(); setProjectFilter(prev => { const next = new Map(prev); next.delete(project.id); return next }) }}>
-                                        <FilterMenuRow
-                                          icon={<FolderKanban className="h-3.5 w-3.5" />}
-                                          label={project.name}
-                                          accessory={<FilterModeBadge mode={currentMode} />}
-                                        />
-                                      </StyledDropdownMenuSubTrigger>
-                                      <StyledDropdownMenuSubContent minWidth="min-w-[140px]">
-                                        <FilterModeSubMenuItems
-                                          mode={currentMode}
-                                          onChangeMode={(newMode) => setProjectFilter(prev => {
-                                            const next = new Map(prev)
-                                            next.set(project.id, newMode)
-                                            return next
-                                          })}
-                                          onRemove={() => setProjectFilter(prev => {
-                                            const next = new Map(prev)
-                                            next.delete(project.id)
-                                            return next
-                                          })}
-                                        />
-                                      </StyledDropdownMenuSubContent>
-                                    </DropdownMenuSub>
-                                  )
-                                }
-                                return (
-                                  <StyledDropdownMenuItem
-                                    key={project.id}
-                                    onClick={(e) => {
-                                      e.preventDefault()
-                                      setProjectFilter(prev => {
-                                        const next = new Map(prev)
-                                        next.set(project.id, e.altKey ? 'exclude' : 'include')
-                                        return next
-                                      })
-                                    }}
-                                  >
-                                    <FilterMenuRow
-                                      icon={<FolderKanban className="h-3.5 w-3.5" />}
-                                      label={project.name}
-                                    />
-                                  </StyledDropdownMenuItem>
-                                )
-                              })}
-                            </StyledDropdownMenuSubContent>
-                          </DropdownMenuSub>
-                        )}
-                        <DropdownMenuSub>
-                          <StyledDropdownMenuSubTrigger>
-                            <Layers className="h-3.5 w-3.5" />
-                            <span className="flex-1">{t("sidebar.group")}</span>
-                          </StyledDropdownMenuSubTrigger>
-                          <StyledDropdownMenuSubContent minWidth="min-w-[140px]">
-                            <StyledDropdownMenuItem onClick={() => setChatGroupingMode('date')}>
-                              <Calendar className="h-3.5 w-3.5" />
-                              <span className="flex-1">{t("sidebar.groupByDate")}</span>
-                              {chatGroupingMode === 'date' && <Check className="h-3 w-3 text-muted-foreground" />}
-                            </StyledDropdownMenuItem>
-                            <StyledDropdownMenuItem onClick={() => setChatGroupingMode('unread')}>
-                              <MailOpen className="h-3.5 w-3.5" />
-                              <span className="flex-1">{t("sidebar.groupByUnread")}</span>
-                              {chatGroupingMode === 'unread' && <Check className="h-3 w-3 text-muted-foreground" />}
-                            </StyledDropdownMenuItem>
-                            {projectMenuOptions.length > 0 && (
-                              <StyledDropdownMenuItem onClick={() => setChatGroupingMode('project')}>
-                                <FolderKanban className="h-3.5 w-3.5" />
-                                <span className="flex-1">{t("sidebar.groupByProject")}</span>
-                                {chatGroupingMode === 'project' && <Check className="h-3 w-3 text-muted-foreground" />}
-                              </StyledDropdownMenuItem>
-                            )}
-                          </StyledDropdownMenuSubContent>
-                        </DropdownMenuSub>
-                      </StyledDropdownMenuContent>
-                    </DropdownMenu>
-                  )}
                   {/* Add Source button (only for sources mode) - uses filter-aware edit config */}
                   {isSourcesNavigation(navState) && activeWorkspace && (
                     <>
@@ -2601,7 +2341,7 @@ function AppShellContent({
                   onLabelsChange={handleSessionLabelsChange}
                   projects={projectMenuOptions}
                   onSetProjectId={handleSessionProjectChange}
-                  groupingMode={chatGroupingMode}
+                  groupingMode="date"
                   workspaceId={activeWorkspaceId ?? undefined}
                   statusFilter={listFilter}
                   labelFilterMap={labelFilter}
