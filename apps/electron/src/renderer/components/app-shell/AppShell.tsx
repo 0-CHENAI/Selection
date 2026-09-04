@@ -32,7 +32,7 @@ import { SquarePenRounded } from "../icons/SquarePenRounded"
 import { McpIcon } from "../icons/McpIcon"
 import { Button } from "@/components/ui/button"
 import { HeaderIconButton } from "@/components/ui/HeaderIconButton"
-import { CreationJobsButton } from "./CreationJobsButton"
+import { CreationJobsButton, CreationJobsHost } from "./CreationJobsButton"
 import type { CreationJob } from "@/atoms/creation-jobs"
 import { clearProjectFilter, resolveNewSessionParams, resolveProjectNavigationSessionId, type FilterMode } from "./inherited-filter-params"
 import { filterSessionsByProject, getIncludedProjectName, hasIncludedProjectFilter } from "./project-session-filter"
@@ -1601,20 +1601,6 @@ function AppShellContent({
     setTimeout(() => focusZone('chat', { intent: 'programmatic' }), 50)
   }, [activeWorkspace, focusZone, resolveNewSessionCreationParams, selectedProjectId, selectedProjectSlug, t])
 
-  // Create a brand new dedicated browser window and focus it.
-  // Intentionally unbound: this action should always create a NEW window.
-  const handleNewBrowserWindow = useCallback(async () => {
-    try {
-      const instanceId = await window.electronAPI.browserPane.create({
-        show: true,
-      })
-      await window.electronAPI.browserPane.focus(instanceId)
-    } catch (error) {
-      console.error('[Chat] Failed to create browser window:', error)
-      toast.error(t('toast.failedToCreateBrowser'))
-    }
-  }, [])
-
   // Delete Source - simplified since agents system is removed
   const handleDeleteSource = useCallback(async (sourceSlug: string) => {
     if (!activeWorkspace) return
@@ -1829,6 +1815,11 @@ function AppShellContent({
   return (
     <AppShellProvider value={appShellContextValue}>
         {/* === TOP BAR === */}
+        <CreationJobsHost
+          workspaceId={activeWorkspaceId}
+          onReopen={reopenCreationJob}
+          onOpenResult={openCreationResult}
+        />
         <TopBar
           workspaces={workspaces}
           activeWorkspaceId={activeWorkspaceId}
@@ -1849,15 +1840,6 @@ function AppShellContent({
           canGoForward={canGoForward}
           onToggleSidebar={handleToggleSidebar}
           onToggleFocusMode={() => setIsSidebarAndNavigatorHidden(prev => !prev)}
-          onAddSessionPanel={() => handleNewChat(true)}
-          onAddBrowserPanel={() => { void handleNewBrowserWindow() }}
-          workspaceActivity={activeWorkspaceId ? (
-            <CreationJobsButton
-              workspaceId={activeWorkspaceId}
-              onReopen={reopenCreationJob}
-              onOpenResult={openCreationResult}
-            />
-          ) : undefined}
           isCompact={isAutoCompact}
         />
 
@@ -2168,6 +2150,11 @@ function AppShellContent({
                         tooltip={t("fileImport.mcpTitle")}
                         onClick={() => setMcpFileImportOpen(true)}
                       />
+                      <CreationJobsButton
+                        workspaceId={activeWorkspace.id}
+                        onReopen={reopenCreationJob}
+                        onOpenResult={openCreationResult}
+                      />
                       <EditPopover
                         trigger={
                           <HeaderIconButton
@@ -2198,6 +2185,11 @@ function AppShellContent({
                         tooltip={t("fileImport.skillTitle")}
                         onClick={handleImportSkillFromFile}
                       />
+                      <CreationJobsButton
+                        workspaceId={activeWorkspace.id}
+                        onReopen={reopenCreationJob}
+                        onOpenResult={openCreationResult}
+                      />
                       <EditPopover
                         trigger={
                           <HeaderIconButton
@@ -2212,15 +2204,22 @@ function AppShellContent({
                   )}
                   {/* Add Automation button (only for automations mode) */}
                   {isAutomationsNavigation(navState) && activeWorkspace && (
-                    <EditPopover
-                      trigger={
-                        <HeaderIconButton
-                          icon={<Plus className="h-4 w-4" />}
-                          tooltip={t("sidebarMenu.addAutomation")}
-                        />
-                      }
-                      {...getEditConfig('add-automation', activeWorkspace.rootPath)}
-                    />
+                    <>
+                      <CreationJobsButton
+                        workspaceId={activeWorkspace.id}
+                        onReopen={reopenCreationJob}
+                        onOpenResult={openCreationResult}
+                      />
+                      <EditPopover
+                        trigger={
+                          <HeaderIconButton
+                            icon={<Plus className="h-4 w-4" />}
+                            tooltip={t("sidebarMenu.addAutomation")}
+                          />
+                        }
+                        {...getEditConfig('add-automation', activeWorkspace.rootPath)}
+                      />
+                    </>
                   )}
                   {/* Add Project button (only for projects mode) */}
                   {isProjectsNavigation(navState) && activeWorkspace && (

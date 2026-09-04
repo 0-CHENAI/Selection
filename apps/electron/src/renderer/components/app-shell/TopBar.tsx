@@ -1,7 +1,8 @@
 /**
  * TopBar - Persistent top bar above all panels (Slack-style)
  *
- * Layout: [Sidebar] [Menu] [Back] [Forward] [Workspace selector] ... [Browser strip] [+]
+ * Desktop: [Sidebar] [Back] [Forward] [Workspace selector] ... [Browser strip]
+ * Compact: [App menu] [Workspace selector]
  *
  * Fixed at top of window, 48px tall.
  * macOS: offset left to avoid stoplight controls.
@@ -15,16 +16,8 @@ import { TopBarButton } from "../ui/TopBarButton"
 import { cn } from "@/lib/utils"
 import { isMac, isWebUI } from "@/lib/platform"
 import { useActionLabel } from "@/actions"
-import {
-  DropdownMenu,
-  DropdownMenuTrigger,
-  StyledDropdownMenuContent,
-  StyledDropdownMenuItem,
-} from "@/components/ui/styled-dropdown"
 import type { SettingsMenuItem } from "../../../shared/menu-schema"
-import { SquarePenRounded } from "../icons/SquarePenRounded"
 import { useEffect, useRef, useState } from "react"
-import type { ReactNode } from "react"
 import { BrowserTabStrip } from "../browser/BrowserTabStrip"
 import type { Workspace } from "../../../shared/types"
 import { WorkspaceSwitcher } from "./WorkspaceSwitcher"
@@ -54,10 +47,6 @@ interface TopBarProps {
   canGoForward: boolean
   onToggleSidebar: () => void
   onToggleFocusMode: () => void
-  onAddSessionPanel: () => void
-  onAddBrowserPanel: () => void
-  /** Persistent workspace-level status/action surface rendered in every layout. */
-  workspaceActivity?: ReactNode
   /** When true, hides controls that don't apply in compact/mobile layout */
   isCompact?: boolean
 }
@@ -82,9 +71,6 @@ export function TopBar({
   canGoForward,
   onToggleSidebar,
   onToggleFocusMode,
-  onAddSessionPanel,
-  onAddBrowserPanel,
-  workspaceActivity,
   isCompact,
 }: TopBarProps) {
   const { t } = useTranslation()
@@ -129,7 +115,7 @@ export function TopBar({
   // Stoplight padding clears macOS traffic-light controls, which only exist
   // in the Electron desktop window. The webui runs in a regular browser tab
   // and has no traffic lights regardless of host OS — collapse to a normal
-  // 12px inset so the logo sits at the edge.
+  // 12px inset so the first control sits at the edge.
   const menuLeftPadding = isMac && !isWebUI ? 86 : 12
 
   return (
@@ -138,7 +124,7 @@ export function TopBar({
       style={{ height: 'var(--topbar-height)' }}
     >
       <div className="flex h-full w-full items-center justify-between gap-2">
-      {/* === LEFT: Sidebar + Menu + Navigation + Workspace === */}
+      {/* === LEFT: Sidebar + Navigation + Workspace (compact: App menu) === */}
       {/* Keep this container draggable. Only individual interactive controls should use titlebar-no-drag. */}
       {/* In compact mode the right slot is hidden, so we add right padding here
           so the workspace pill doesn't run flush against the viewport edge. */}
@@ -158,6 +144,7 @@ export function TopBar({
         </Tooltip>
         )}
 
+        {isCompact && (
         <AppMenu
           onNewChat={onNewChat}
           onNewWindow={onNewWindow}
@@ -168,6 +155,7 @@ export function TopBar({
           onToggleSidebar={onToggleSidebar}
           onToggleFocusMode={onToggleFocusMode}
         />
+        )}
         </div>
 
         {/* Back / Forward / Workspace selector (moved from center).
@@ -223,35 +211,12 @@ export function TopBar({
         </div>
       </div>
 
-      {workspaceActivity && (
-        <div className="titlebar-no-drag flex shrink-0 items-center">
-          {workspaceActivity}
-        </div>
-      )}
-
-      {/* === RIGHT: Browser strip + add panel === */}
+      {/* === RIGHT: Browser strip === */}
       {!isCompact && (
       <div ref={rightSlotRef} className="flex min-w-0 shrink-0 items-center justify-end gap-1" style={{ paddingRight: 12 }}>
         <div className="min-w-0">
           <BrowserTabStrip activeSessionId={activeSessionId} maxVisibleBadges={maxVisibleBrowserBadges} />
         </div>
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <TopBarButton aria-label={t("menu.addPanelMenu")} className="ml-1 h-[26px] w-[26px] rounded-lg">
-              <Icons.Plus className="h-4 w-4 text-foreground/50" strokeWidth={1.5} />
-            </TopBarButton>
-          </DropdownMenuTrigger>
-          <StyledDropdownMenuContent align="end" minWidth="min-w-56">
-            <StyledDropdownMenuItem onClick={onAddSessionPanel}>
-              <SquarePenRounded className="h-3.5 w-3.5" />
-              {t("session.newSessionInPanel")}
-            </StyledDropdownMenuItem>
-            <StyledDropdownMenuItem onClick={onAddBrowserPanel}>
-              <Icons.Globe className="h-3.5 w-3.5" />
-              {t("browser.newWindow")}
-            </StyledDropdownMenuItem>
-          </StyledDropdownMenuContent>
-        </DropdownMenu>
       </div>
       )}
       </div>
