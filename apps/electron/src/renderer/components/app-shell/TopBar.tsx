@@ -1,7 +1,7 @@
 /**
  * TopBar - Persistent top bar above all panels (Slack-style)
  *
- * Desktop: [Sidebar] [Back] [Forward] [Workspace selector] ... [Browser strip]
+ * Desktop: [Sidebar] [Back] [Forward] [Workspace selector] [afterWorkspace] ... [Browser strip]
  * Compact: [App menu] [Workspace selector]
  *
  * Fixed at top of window, 48px tall.
@@ -18,7 +18,7 @@ import { isMac, isWebUI } from "@/lib/platform"
 import { windowsCaptionInsetStyle } from "@/lib/windows-caption-inset"
 import { useActionLabel } from "@/actions"
 import type { SettingsMenuItem } from "../../../shared/menu-schema"
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useRef, useState, type ReactNode } from "react"
 import { BrowserTabStrip } from "../browser/BrowserTabStrip"
 import type { Workspace } from "../../../shared/types"
 import { WorkspaceSwitcher } from "./WorkspaceSwitcher"
@@ -48,6 +48,8 @@ interface TopBarProps {
   canGoForward: boolean
   onToggleSidebar: () => void
   onToggleFocusMode: () => void
+  /** Desktop-only control rendered immediately after the workspace selector. */
+  afterWorkspace?: ReactNode
   /** When true, hides controls that don't apply in compact/mobile layout */
   isCompact?: boolean
 }
@@ -72,6 +74,7 @@ export function TopBar({
   canGoForward,
   onToggleSidebar,
   onToggleFocusMode,
+  afterWorkspace,
   isCompact,
 }: TopBarProps) {
   const { t } = useTranslation()
@@ -214,6 +217,11 @@ export function TopBar({
             )}
           </div>
         </div>
+        {!isCompact && afterWorkspace && (
+          <div className="titlebar-no-drag ml-2 shrink-0">
+            {afterWorkspace}
+          </div>
+        )}
       </div>
 
       {/* === RIGHT: Browser strip === */}

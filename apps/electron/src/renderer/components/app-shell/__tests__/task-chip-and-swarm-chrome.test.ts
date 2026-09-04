@@ -22,6 +22,24 @@ describe('swarm title chrome (#206)', () => {
     expect(chatPageSrc).not.toContain('SwarmRunDetailsDialog')
     expect(chatPageSrc).not.toContain('setSwarmDetailsOpen')
   })
+
+  it('shows live task-run progress in the chat body after create-and-run', () => {
+    expect(chatPageSrc).toContain('OrchestrationRunProgress')
+    expect(chatPageSrc).toContain('runningHint={orchestrationStatus === \'running\'}')
+    expect(chatPageSrc).toContain('{orchestrationProgress}')
+  })
+})
+
+describe('running orchestration composer chrome', () => {
+  it('treats a running swarm/DAG as busy so the last turn and send button stay in-flight', () => {
+    expect(chatDisplaySrc).toContain('const sessionBusy = Boolean(sessionIsProcessing || swarmRunning)')
+    expect(chatDisplaySrc).toContain('isTaskOrchestrationRunning: Boolean(swarmRunning && sessionTaskSlug && !sessionParentId)')
+    expect(chatDisplaySrc).toContain('isProcessing: sessionBusy')
+    expect(chatDisplaySrc).toContain('onRegenerate={isLastResponse && !turn.isStreaming && !sessionBusy')
+    expect(chatDisplaySrc).toContain('{sessionBusy && (() => {')
+    expect(chatDisplaySrc).toContain('stopTask')
+    expect(chatDisplaySrc).toContain('stopSessionSwarm')
+  })
 })
 
 describe('running child preview (#207)', () => {

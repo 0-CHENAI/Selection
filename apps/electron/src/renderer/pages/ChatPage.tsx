@@ -10,6 +10,7 @@ import { useTranslation } from 'react-i18next'
 import { useAtomValue, useSetAtom } from 'jotai'
 import { AlertCircle, Info, Pencil } from 'lucide-react'
 import { ChatDisplay, type ChatDisplayHandle } from '@/components/app-shell/ChatDisplay'
+import { OrchestrationRunProgress } from '@/components/app-shell/kanban/OrchestrationRunProgress'
 import { PanelHeader } from '@/components/app-shell/PanelHeader'
 import { SessionMenu } from '@/components/app-shell/SessionMenu'
 import { CompactSessionMenu } from '@/components/app-shell/CompactSessionMenu'
@@ -458,6 +459,15 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
     navigate(routes.view.board())
   }, [taskSlug, sessionId, sessionMeta, setKanbanEditorTarget])
 
+  const orchestrationProgress = isTaskOrchestrator && activeWorkspaceId && taskSlug ? (
+    <OrchestrationRunProgress
+      workspaceId={activeWorkspaceId}
+      taskSlug={taskSlug}
+      runningHint={orchestrationStatus === 'running'}
+      onPreviewSession={setPreviewChildSessionId}
+    />
+  ) : null
+
   const handleDelete = React.useCallback(async () => {
     await onDeleteSession(sessionId)
   }, [sessionId, onDeleteSession])
@@ -583,6 +593,8 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
         projectId: sessionMeta.projectId,
         sharedProjectMemoryEnabled: sessionMeta.sharedProjectMemoryEnabled,
         swarmEnabled: sessionMeta.swarmEnabled,
+        taskSlug: sessionMeta.taskSlug,
+        parentSessionId: sessionMeta.parentSessionId,
         orchestrationRole: sessionMeta.orchestrationRole,
         orchestrationStatus: sessionMeta.orchestrationStatus,
         orchestrationBlocker: sessionMeta.orchestrationBlocker,
@@ -595,6 +607,7 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
           <div className="h-full flex flex-col">
             <PanelHeader title={displayTitle} titleMenu={titleMenu} compactTitleMenu={compactTitleMenu} leadingAction={leadingAction} actions={headerActions} rightSidebarButton={rightSidebarButton} isRegeneratingTitle={isAsyncOperationOngoing} />
             <div className="flex-1 flex flex-col min-h-0">
+              {orchestrationProgress}
               <ChatDisplay
                 ref={chatDisplayRef}
                 session={skeletonSession}
@@ -672,6 +685,7 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
       <div className="h-full flex flex-col">
         <PanelHeader title={displayTitle} titleMenu={titleMenu} compactTitleMenu={compactTitleMenu} leadingAction={leadingAction} actions={headerActions} rightSidebarButton={rightSidebarButton} isRegeneratingTitle={isAsyncOperationOngoing} />
         <div className="flex-1 flex flex-col min-h-0">
+          {orchestrationProgress}
           <ChatDisplay
             ref={chatDisplayRef}
             session={session}

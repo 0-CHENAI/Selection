@@ -30,8 +30,8 @@ describe('kanban board UI is removed (#261)', () => {
     const appShell = readFileSync(join(import.meta.dir, '../../AppShell.tsx'), 'utf8')
 
     expect(container).toContain('TaskEditor')
-    expect(container).toContain('BoardListToggle')
     expect(container).toContain('resolveOrchestrationEditorTarget')
+    expect(container).not.toContain('BoardListToggle')
     expect(container).not.toContain("from './KanbanBoard'")
     expect(container).not.toContain('KanbanProjectFilter')
     expect(container).not.toContain("sessionStatus: 'todo'")

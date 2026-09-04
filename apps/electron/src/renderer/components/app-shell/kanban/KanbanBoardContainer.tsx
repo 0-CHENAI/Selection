@@ -4,7 +4,6 @@ import { useAppShellContext } from '@/context/AppShellContext'
 import { kanbanEditorTargetAtom } from '@/atoms/kanban'
 import { useNavigation } from '@/contexts/NavigationContext'
 import { routes } from '@/lib/navigate'
-import { BoardListToggle } from './BoardListToggle'
 import { TaskEditor } from './TaskEditor'
 import { buildModelCatalog, catalogDefaultModel } from './kanban-models'
 import { resolveOrchestrationEditorTarget } from './orchestration-editor-target'
@@ -36,17 +35,6 @@ export function KanbanBoardContainer() {
 
   return (
     <div className="flex h-full flex-col bg-background">
-      <div className="flex items-center justify-end border-b border-border/50 px-4 py-2.5">
-        <BoardListToggle
-          value="board"
-          onChange={view => {
-            if (view === 'list') {
-              setEditorTarget(null)
-              navigate(routes.view.allSessions())
-            }
-          }}
-        />
-      </div>
       {activeWorkspaceId ? (
         <div className="min-h-0 flex-1">
           <TaskEditor
