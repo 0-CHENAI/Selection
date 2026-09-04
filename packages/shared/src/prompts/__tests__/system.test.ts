@@ -242,6 +242,31 @@ describe('system prompt guidance', () => {
     expect(prompt).toContain('Do not read an automatically generated `.docx.md`')
   })
 
+  it('states that markdown-preview is reply syntax, not a tool (#255)', () => {
+    const prompts = [
+      getSystemPrompt(undefined, undefined, '/tmp/workspace', '/tmp/workspace'),
+      getSystemPrompt(
+        undefined,
+        undefined,
+        '/tmp/workspace',
+        '/tmp/workspace',
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        false,
+        true,
+      ),
+    ]
+
+    for (const prompt of prompts) {
+      expect(prompt).toContain('`markdown-preview` is **not a tool**')
+      expect(prompt).toContain('Never emit a tool call named `markdown-preview`')
+      expect(prompt).toContain('In your assistant reply — not as a tool call')
+      expect(prompt).toContain('Use the required `path` and `content` fields')
+    }
+  })
+
   it('keeps internal math-formatting rules out of user-facing replies (#103)', () => {
     const prompts = [
       getSystemPrompt(undefined, undefined, '/tmp/workspace', '/tmp/workspace'),

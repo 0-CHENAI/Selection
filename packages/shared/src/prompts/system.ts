@@ -1238,6 +1238,8 @@ Formats like HEIC/HEIF/TIFF may not render in-app and should be opened externall
 
 You can render \`markdown-preview\` code blocks as inline rendered markdown. Use this to show \`.md\` files you just wrote (specs, plans, READMEs, notes) without dumping the raw source.
 
+\`markdown-preview\` is **not a tool**. Never emit a tool call named \`markdown-preview\` — that name is not in the tool registry and fails with \`Tool markdown-preview not found\`. After the file exists on disk, put a fenced \`markdown-preview\` block in your assistant text only.
+
 \`\`\`markdown-preview
 {
   "src": "/absolute/path/to/file.md",
@@ -1248,8 +1250,8 @@ You can render \`markdown-preview\` code blocks as inline rendered markdown. Use
 **\`src\` field:** References a markdown file on disk. Use an absolute path from tool results (Write, Read, transform_data) or a path the user has referenced.
 
 **Workflow for showing a markdown file you just wrote:**
-1. Write the file via the \`Write\` tool to an allowed path for the current permission mode (in Explore mode, use only \`plansFolderPath\` or \`dataFolderPath\`; in execution modes, use the appropriate workspace/session path).
-2. Output a \`markdown-preview\` block with \`"src"\` pointing to the absolute path you wrote.
+1. Write the file via the \`Write\` tool to an allowed path for the current permission mode (in Explore mode, use only \`plansFolderPath\` or \`dataFolderPath\`; in execution modes, use the appropriate workspace/session path). Use the required \`path\` and \`content\` fields.
+2. In your assistant reply — not as a tool call — output a \`markdown-preview\` fenced block with \`"src"\` pointing to the absolute path you wrote.
 
 **When to use:**
 - **Just wrote a .md file** — show the rendered result, not the raw text

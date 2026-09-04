@@ -13,12 +13,44 @@ interface MarkupNode {
 const RECOVERABLE_FIELDS: Record<string, ReadonlySet<string>> = {
   read: new Set(['path', 'file_path']),
   bash: new Set(['command', 'cmd', 'timeout']),
+  write: new Set(['path', 'content']),
 };
 
 const FIELD_ALIASES: Record<string, Readonly<Record<string, string>>> = {
   read: { file_path: 'path' },
   bash: { cmd: 'command' },
+  write: { _content: 'content' },
 };
+
+/** Aliases that must stay strings. Wrong types are left for schema rejection. */
+const STRING_ONLY_ALIASES: Record<string, ReadonlySet<string>> = {
+  write: new Set(['_content']),
+};
+
+const PREVIEW_FENCE_TOOL_NAMES = new Set([
+  'markdown-preview',
+  'html-preview',
+  'pdf-preview',
+  'image-preview',
+]);
+
+export type ToolCompatEventKind = 'field_alias' | 'intent_markup' | 'preview_fence_tool_call';
+
+export interface ToolCompatEvent {
+  kind: ToolCompatEventKind;
+  toolName: string;
+  provider?: string;
+  model?: string;
+  from?: string;
+  to?: string;
+}
+
+export interface ToolInputRecoveryResult {
+  input: Record<string, unknown>;
+  recoveries: ToolCompatEvent[];
+}
+
+const toolCompatCounts = new Map<string, number>();
 
 function decodeXmlText(value: string): string {
   return value
@@ -77,34 +109,115 @@ function nodeValue(node: MarkupNode): unknown {
   return result;
 }
 
-export function recoverKnownToolInputFromIntent(
+function aliasValueAllowed(toolName: string, alias: string, value: unknown): boolean {
+  if (STRING_ONLY_ALIASES[toolName]?.has(alias)) return typeof value === 'string';
+  return true;
+}
+
+export function toolCompatMetricKey(event: Pick<ToolCompatEvent, 'kind' | 'toolName' | 'provider' | 'model' | 'from' | 'to'>): string {
+  return [
+    event.kind,
+    event.toolName,
+    event.from ?? '-',
+    event.to ?? '-',
+    event.provider ?? '-',
+    event.model ?? '-',
+  ].join('|');
+}
+
+export function noteToolCompatEvent(event: ToolCompatEvent): { key: string; count: number } {
+  const key = toolCompatMetricKey(event);
+  const count = (toolCompatCounts.get(key) ?? 0) + 1;
+  toolCompatCounts.set(key, count);
+  return { key, count };
+}
+
+export function getToolCompatCounts(): Readonly<Record<string, number>> {
+  return Object.fromEntries(toolCompatCounts);
+}
+
+export function resetToolCompatCounts(): void {
+  toolCompatCounts.clear();
+}
+
+export function classifyPreviewFenceToolName(toolName: string): 'preview_fence_tool_call' | undefined {
+  const normalized = toolName.trim().toLowerCase();
+  return PREVIEW_FENCE_TOOL_NAMES.has(normalized) ? 'preview_fence_tool_call' : undefined;
+}
+
+export function noteAssistantPreviewFenceToolCalls(
+  content: ReadonlyArray<{ type?: string; name?: string }>,
+  context?: { provider?: string; model?: string },
+): ToolCompatEvent[] {
+  const noted: ToolCompatEvent[] = [];
+  for (const block of content) {
+    if (block.type !== 'toolCall' && block.type !== 'toolUse') continue;
+    if (typeof block.name !== 'string') continue;
+    const kind = classifyPreviewFenceToolName(block.name);
+    if (!kind) continue;
+    const event: ToolCompatEvent = {
+      kind,
+      toolName: block.name,
+      provider: context?.provider,
+      model: context?.model,
+    };
+    noteToolCompatEvent(event);
+    noted.push(event);
+  }
+  return noted;
+}
+
+export function recoverKnownToolInput(
   toolName: string,
   input: Record<string, unknown>,
-): Record<string, unknown> {
+): ToolInputRecoveryResult {
   const normalizedToolName = toolName.toLowerCase();
   const allowed = RECOVERABLE_FIELDS[normalizedToolName];
   const aliases = FIELD_ALIASES[normalizedToolName] ?? {};
+  const recoveries: ToolCompatEvent[] = [];
   let normalizedInput = input;
   for (const [alias, canonical] of Object.entries(aliases)) {
-    if (normalizedInput[canonical] !== undefined || normalizedInput[alias] === undefined) continue;
-    normalizedInput = { ...normalizedInput, [canonical]: normalizedInput[alias] };
+    const aliasValue = normalizedInput[alias];
+    if (normalizedInput[canonical] !== undefined || aliasValue === undefined) continue;
+    if (!aliasValueAllowed(normalizedToolName, alias, aliasValue)) continue;
+    normalizedInput = { ...normalizedInput, [canonical]: aliasValue };
     delete normalizedInput[alias];
+    recoveries.push({
+      kind: 'field_alias',
+      toolName: normalizedToolName,
+      from: alias,
+      to: canonical,
+    });
   }
   const rawIntent = typeof input._intent === 'string' ? input._intent : undefined;
-  if (!allowed || !rawIntent) return normalizedInput;
+  if (!allowed || !rawIntent) return { input: normalizedInput, recoveries };
   const boundary = rawIntent.indexOf('</intent>');
-  if (boundary < 0) return normalizedInput;
+  if (boundary < 0) return { input: normalizedInput, recoveries };
   const parsed = parseMarkupFragment(rawIntent.slice(boundary + '</intent>'.length));
-  if (!parsed) return normalizedInput;
+  if (!parsed) return { input: normalizedInput, recoveries };
 
   const recovered: Record<string, unknown> = { ...normalizedInput, _intent: rawIntent.slice(0, boundary).trim() };
   for (const child of parsed.children) {
     const canonicalName = aliases[child.name] ?? child.name;
     if (!allowed.has(child.name) || recovered[canonicalName] !== undefined) continue;
     const value = nodeValue(child);
+    if (!aliasValueAllowed(normalizedToolName, child.name, value)) continue;
     recovered[canonicalName] = canonicalName === 'timeout' && typeof value === 'string'
       ? Number(value)
       : value;
+    recoveries.push({
+      kind: 'intent_markup',
+      toolName: normalizedToolName,
+      from: child.name,
+      to: canonicalName,
+    });
   }
-  return recovered;
+  return { input: recovered, recoveries };
+}
+
+export function recoverKnownToolInputFromIntent(
+  toolName: string,
+  input: Record<string, unknown>,
+): Record<string, unknown> {
+  return recoverKnownToolInput(toolName, input).input;
 }
