@@ -866,6 +866,91 @@ describe('pending follow-up replies', () => {
     expect(assistant?.isComplete).toBe(true)
     expect(assistant?.isStreaming).toBe(false)
   })
+
+  it('keeps a task-definition confirmation open while the DAG is still running', () => {
+    resetCounters()
+    const user = createUserMessage('调研三个模型')
+    const submit = createToolMessage('completed', 'submit_task_definition')
+    submit.timestamp = user.timestamp + 10
+    const confirmation: Message = {
+      id: 'task-definition-complete',
+      role: 'assistant',
+      content: '任务定义已提交并通过校验 ✅',
+      timestamp: user.timestamp + 20,
+      isStreaming: false,
+      isPending: false,
+    }
+
+    const turns = groupMessagesByTurn([user, submit, confirmation], {
+      isSessionProcessing: false,
+      isTaskOrchestrationRunning: true,
+    })
+    const assistant = turns[1]
+
+    expect(assistant?.type).toBe('assistant')
+    if (assistant?.type === 'assistant') {
+      expect(assistant.isComplete).toBe(false)
+      expect(assistant.isStreaming).toBe(true)
+      expect(assistant.response?.text).toBe(confirmation.content)
+      expect(assistant.response?.isStreaming).toBe(false)
+    }
+  })
+
+  it('restores completed chrome after the task DAG settles', () => {
+    resetCounters()
+    const user = createUserMessage('调研三个模型')
+    const submit = createToolMessage('completed', 'submit_task_definition')
+    submit.timestamp = user.timestamp + 10
+    const confirmation: Message = {
+      id: 'task-definition-settled',
+      role: 'assistant',
+      content: '任务定义已提交并通过校验 ✅',
+      timestamp: user.timestamp + 20,
+      isStreaming: false,
+      isPending: false,
+    }
+
+    const turns = groupMessagesByTurn([user, submit, confirmation], {
+      isSessionProcessing: false,
+      isTaskOrchestrationRunning: false,
+    })
+    const assistant = turns[1]
+
+    expect(assistant?.type).toBe('assistant')
+    if (assistant?.type === 'assistant') {
+      expect(assistant.isComplete).toBe(true)
+      expect(assistant.isStreaming).toBe(false)
+      expect(assistant.response?.text).toBe(confirmation.content)
+    }
+  })
+
+  it('does not reopen an older task-definition turn after a new visible user message', () => {
+    resetCounters()
+    const firstUser = createUserMessage('调研三个模型')
+    const submit = createToolMessage('completed', 'submit_task_definition')
+    submit.timestamp = firstUser.timestamp + 10
+    const confirmation: Message = {
+      id: 'older-definition',
+      role: 'assistant',
+      content: '任务定义已提交并通过校验 ✅',
+      timestamp: firstUser.timestamp + 20,
+      isStreaming: false,
+    }
+    const secondUser: Message = {
+      ...createUserMessage('先回答另一个问题'),
+      timestamp: firstUser.timestamp + 30,
+    }
+
+    const turns = groupMessagesByTurn([firstUser, submit, confirmation, secondUser], {
+      isSessionProcessing: true,
+      isTaskOrchestrationRunning: true,
+    })
+    const assistant = turns.find((turn): turn is AssistantTurn => turn.type === 'assistant')
+
+    expect(turns.at(-1)?.type).toBe('user')
+    expect(assistant?.isComplete).toBe(true)
+    expect(assistant?.isStreaming).toBe(false)
+  })
 })
 
 describe('queued messages', () => {

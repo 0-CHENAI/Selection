@@ -95,16 +95,24 @@ describe('session list header actions (#264)', () => {
     expect(useSessionSearch).toContain('searchInputRef.current?.focus()')
   })
 
-  it('keeps the orchestration-pane switcher right-aligned without adding board search', () => {
+  it('places the orchestration-pane switcher after the workspace selector, without board search', () => {
     const container = readFileSync(
       join(import.meta.dir, '../kanban/KanbanBoardContainer.tsx'),
       'utf8',
     )
-    expect(container).toContain('justify-end')
-    expect(container).toContain('BoardListToggle')
+    const topBar = readFileSync(join(import.meta.dir, '../TopBar.tsx'), 'utf8')
+    const appShell = readFileSync(join(import.meta.dir, '../AppShell.tsx'), 'utf8')
+    const topBarCall = appShell.slice(appShell.indexOf('<TopBar'), appShell.indexOf('isCompact={isAutoCompact}'))
+
+    expect(container).not.toContain('BoardListToggle')
     expect(container).not.toContain('sidebar.search')
     expect(container).not.toContain('setSearchActive')
     expect(container).not.toContain('SessionSearchHeader')
+    expect(topBar).toContain('afterWorkspace')
+    expect(topBar.lastIndexOf('<WorkspaceSwitcher')).toBeLessThan(topBar.indexOf('{afterWorkspace}'))
+    expect(topBarCall).toContain('isBoardView')
+    expect(topBarCall).toContain('BoardListToggle')
+    expect(topBarCall).toContain('value="board"')
   })
 
   it('pushes header actions to the right and keeps search left of the switcher in the DOM', () => {

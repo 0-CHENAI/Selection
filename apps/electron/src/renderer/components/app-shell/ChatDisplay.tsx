@@ -76,6 +76,7 @@ import { navigate, routes } from "@/lib/navigate"
 import { CHAT_LAYOUT } from "@/config/layout"
 import { collectFileChangesFromActivities, getFirstFileChangeIdForActivity } from "@/lib/file-changes"
 import { shouldPreviewBackgroundTask } from "./background-task-chip"
+import { pickStoppableTaskRun } from "./kanban/orchestration-run-progress"
 import { resolveBranchNewPanelOption } from "./branching"
 import { handleErrorMessageAction } from "./error-message-actions"
 import {
@@ -1402,25 +1403,55 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
   // Handle stop request from InputContainer
   // silent=true when redirecting (sending new message), silent=false when user clicks Stop button
   const handleStop = (silent = false) => {
-    if (!session?.isProcessing) return
+    if (!session) return
+    if (!session.isProcessing && !swarmRunning) return
 
     void (async () => {
       if (!silent && onBeforeExplicitStop && !(await onBeforeExplicitStop())) return
 
-      // Explicit Stop (not a redirect/new-message send): put the in-flight
-      // prompt back in the input so the user can tweak and resend.
-      if (!silent) {
-        const restoredText = getRestorableStoppedPrompt(session.messages)
-        if (restoredText) {
-          onInputChange?.(appendRestoredInput(inputValue, restoredText))
+      if (session.isProcessing) {
+        // Explicit Stop (not a redirect/new-message send): put the in-flight
+        // prompt back in the input so the user can tweak and resend.
+        if (!silent) {
+          const restoredText = getRestorableStoppedPrompt(session.messages)
+          if (restoredText) {
+            onInputChange?.(appendRestoredInput(inputValue, restoredText))
+          }
         }
+
+        try {
+          await window.electronAPI.cancelProcessing(session.id, silent)
+          if (!silent) onExplicitStop?.()
+        } catch (error) {
+          console.error('[ChatDisplay] Failed to cancel processing:', error)
+          if (!silent) {
+            toast.error(t('creationJobs.stopFailed', 'Could not stop creation job'), {
+              description: error instanceof Error ? error.message : String(error),
+            })
+          }
+        }
+        return
       }
 
       try {
-        await window.electronAPI.cancelProcessing(session.id, silent)
+        const taskSlug = session.taskSlug
+        if (workspaceId && taskSlug) {
+          try {
+            const task = await window.electronAPI.getTask(workspaceId, taskSlug)
+            const run = pickStoppableTaskRun(task.latestRun ?? task.run, session.id)
+            if (run) {
+              await window.electronAPI.stopTask(workspaceId, taskSlug, run.runId)
+              if (!silent) onExplicitStop?.()
+              return
+            }
+          } catch (error) {
+            console.error('[ChatDisplay] Failed to resolve task run for stop:', error)
+          }
+        }
+        await window.electronAPI.stopSessionSwarm(session.id)
         if (!silent) onExplicitStop?.()
       } catch (error) {
-        console.error('[ChatDisplay] Failed to cancel processing:', error)
+        console.error('[ChatDisplay] Failed to stop orchestration:', error)
         if (!silent) {
           toast.error(t('creationJobs.stopFailed', 'Could not stop creation job'), {
             description: error instanceof Error ? error.message : String(error),
@@ -1499,13 +1530,17 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
   // Memoize turn grouping - avoids O(n) iteration on every render/keystroke
   const sessionMessages = session?.messages
   const sessionIsProcessing = session?.isProcessing
+  const sessionTaskSlug = session?.taskSlug
+  const sessionParentId = session?.parentSessionId
+  const sessionBusy = Boolean(sessionIsProcessing || swarmRunning)
   const allTurns = React.useMemo(() => {
     if (!sessionMessages) return []
     return groupMessagesByTurn(sessionMessages, {
       isSessionProcessing: sessionIsProcessing,
       isManagedSwarmRunning: swarmRunning,
+      isTaskOrchestrationRunning: Boolean(swarmRunning && sessionTaskSlug && !sessionParentId),
     })
-  }, [sessionMessages, sessionIsProcessing, swarmRunning])
+  }, [sessionMessages, sessionIsProcessing, swarmRunning, sessionTaskSlug, sessionParentId])
 
   const queuedMessages = React.useMemo(
     () => session?.messages.filter(message =>
@@ -1855,7 +1890,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
                         compactMode={compactMode}
                         sendMessageKey={sendMessageKey}
                         openAnnotationRequest={openAnnotationRequest}
-                        onRegenerate={isLastResponse && !turn.isStreaming && !session?.isProcessing
+                        onRegenerate={isLastResponse && !turn.isStreaming && !sessionBusy
                           ? async () => {
                             if (!session) return
                             const lastUser = session.messages.findLast(m => m.role === 'user' && !m.hidden)
@@ -2057,7 +2092,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
                   </motion.div>
                 </AnimatePresence>
                 {/* Processing Indicator - always visible while processing */}
-                {session.isProcessing && (() => {
+                {sessionBusy && (() => {
                   // Prefer the turn-start clock. Regenerating reuses the original
                   // user-message timestamp, which would otherwise keep counting
                   // from the first send.
@@ -2126,7 +2161,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
             inputProps={{
               placeholder,
               disabled: isInputDisabled,
-              isProcessing: session.isProcessing,
+              isProcessing: sessionBusy,
               swarmEnabled,
               onAnimatedHeightChange: handleAnimatedHeightChange,
               onSubmit: handleSubmit,
