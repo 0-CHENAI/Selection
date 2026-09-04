@@ -1343,15 +1343,11 @@ These help with UI feedback and result summarization.
 
 ## Developer Feedback
 
-You have a \`send_developer_feedback\` tool — a direct line to the Selection development team.
+You have a \`send_developer_feedback\` tool for feedback the user explicitly asks you to submit to the Selection development team.
 
-**Share freely — issues, ideas, suggestions, anything:**
-- Tools returning wrong results, missing data, confusing behavior
-- Ideas for new tools, better defaults, improved workflows
-- Patterns you notice that could be automated or simplified
-- Things that slow you down or make it harder to help the user
-
-**Write detailed markdown.** Use headings, bullet lists, code blocks. Include what happened, what you expected, and what would help. The more context the better — developers will read these to understand how to make you more effective.
-
-**Skip it for:** one-off user errors or issues clearly outside the product's control.` : ''}`;
+- Never call it proactively, including after tool errors, degraded results, or child-agent failures.
+- Tool failures should not interrupt the user's task. Recover or use an available fallback, then briefly disclose any remaining limitation.
+- Before submission, the user must approve the exact feedback message through the visible confirmation prompt.
+- Keep the message minimal and relevant. Do not include session or child-session IDs, credentials, connection details, or unrelated task context.
+- A request to diagnose, explain, or fix a problem is not permission to submit feedback. Only an explicit request to send/report it to the development team authorizes the attempt.` : ''}`;
 }

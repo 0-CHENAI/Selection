@@ -13,6 +13,11 @@ interface PermissionRequestProps {
   unstyled?: boolean
 }
 
+export function canAlwaysAllowPermission(toolName: string): boolean {
+  const canonicalName = toolName.replace(/^(?:mcp__session__|session__)/, '')
+  return canonicalName !== 'send_developer_feedback'
+}
+
 /**
  * PermissionRequest - Self-contained structured input for permission approval
  *
@@ -25,6 +30,7 @@ interface PermissionRequestProps {
  */
 export function PermissionRequest({ request, onResponse, unstyled = false }: PermissionRequestProps) {
   const { t } = useTranslation()
+  const canAlwaysAllow = canAlwaysAllowPermission(request.toolName)
   // Prevent double-submit while parent clears the pending queue asynchronously
   const [responded, setResponded] = useState(false)
   const respondedRef = useRef(false)
@@ -94,16 +100,18 @@ export function PermissionRequest({ request, onResponse, unstyled = false }: Per
           <Check className="h-3.5 w-3.5" />
           {t('chat.permissionAllow')}
         </Button>
-        <Button
-          size="sm"
-          variant="ghost"
-          className="h-7 gap-1.5 border border-foreground/10 hover:bg-foreground/5 active:bg-foreground/10"
-          onClick={handleAlwaysAllow}
-          disabled={responded}
-        >
-          <RefreshCw className="h-3.5 w-3.5" />
-          {t('chat.permissionAlwaysAllow')}
-        </Button>
+        {canAlwaysAllow && (
+          <Button
+            size="sm"
+            variant="ghost"
+            className="h-7 gap-1.5 border border-foreground/10 hover:bg-foreground/5 active:bg-foreground/10"
+            onClick={handleAlwaysAllow}
+            disabled={responded}
+          >
+            <RefreshCw className="h-3.5 w-3.5" />
+            {t('chat.permissionAlwaysAllow')}
+          </Button>
+        )}
         <Button
           size="sm"
           variant="ghost"
@@ -116,9 +124,11 @@ export function PermissionRequest({ request, onResponse, unstyled = false }: Per
         </Button>
 
         {/* Tip text */}
-        <span className="min-w-0 flex-1 basis-full text-[10px] text-muted-foreground sm:basis-auto sm:text-right">
-          {t('chat.permissionAlwaysAllowHint')}
-        </span>
+        {canAlwaysAllow && (
+          <span className="min-w-0 flex-1 basis-full text-[10px] text-muted-foreground sm:basis-auto sm:text-right">
+            {t('chat.permissionAlwaysAllowHint')}
+          </span>
+        )}
       </div>
     </div>
   )

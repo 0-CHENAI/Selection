@@ -177,6 +177,12 @@ export interface SessionToolContext {
   /** Current session permission mode, when supplied by the backend. */
   permissionMode?: string;
 
+  /**
+   * Consume a one-shot approval recorded by the host immediately before
+   * executing developer feedback. Missing callbacks fail closed.
+   */
+  consumeDeveloperFeedbackApproval?(approvalToken: string, message: string): boolean;
+
   // ============================================================
   // Callbacks (transport-agnostic)
   // ============================================================

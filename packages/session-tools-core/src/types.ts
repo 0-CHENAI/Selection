@@ -146,7 +146,6 @@ export interface AuthResult {
 export interface DeveloperFeedback {
   id: string;
   timestamp: string;
-  sessionId: string;
   message: string;
 }
 
