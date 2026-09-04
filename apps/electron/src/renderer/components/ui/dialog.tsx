@@ -3,7 +3,7 @@ import * as DialogPrimitive from "@radix-ui/react-dialog"
 import { XIcon } from "lucide-react"
 import { useTranslation } from "react-i18next"
 
-import { OverlayLayerProvider } from "@craft-agent/ui"
+import { OverlayLayerProvider } from "@craft-agent/ui/overlay-layer"
 import { cn } from "@/lib/utils"
 
 function Dialog({
