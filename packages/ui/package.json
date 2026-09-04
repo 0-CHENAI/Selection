@@ -15,6 +15,7 @@
     "./markdown": "./src/components/markdown/index.ts",
     "./annotations/follow-up-state": "./src/components/annotations/follow-up-state.ts",
     "./ui/drawer": "./src/components/ui/drawer.tsx",
+    "./overlay-layer": "./src/components/overlay-layer.tsx",
     "./context": "./src/context/index.ts",
     "./styles": "./src/styles/index.css"
   },

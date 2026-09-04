@@ -155,8 +155,15 @@ export {
   Tooltip,
   TooltipTrigger,
   TooltipContent,
+  ErrorTooltipContent,
   TooltipProvider,
 } from './components/tooltip'
+export {
+  OverlayLayerProvider,
+  useOverlayLayer,
+  tooltipZIndexClass,
+  ERROR_TOOLTIP_CONTENT_CLASS,
+} from './components/overlay-layer'
 
 // Code viewer components
 export {

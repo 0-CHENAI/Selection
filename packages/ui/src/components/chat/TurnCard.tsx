@@ -40,7 +40,7 @@ import {
   buildAnnotationChipEntryTransition,
   buildSelectionEntryTransition,
 } from '../annotations/island-motion'
-import { Tooltip, TooltipTrigger, TooltipContent } from '../tooltip'
+import { Tooltip, TooltipTrigger, ErrorTooltipContent } from '../tooltip'
 import { parseDiffFromFile, type FileContents } from '@pierre/diffs'
 import { getDiffStats, getUnifiedDiffStats } from '../code-viewer'
 import { TurnCardActionsMenu } from './TurnCardActionsMenu'
@@ -809,6 +809,24 @@ function ExpandableHeightPanel({
   )
 }
 
+function ActivityErrorBadge({ error, label }: { error: string; label: string }) {
+  return (
+    <Tooltip disableHoverableContent={false}>
+      <TooltipTrigger asChild>
+        <span
+          tabIndex={0}
+          data-slot="activity-error-badge"
+          className="px-1.5 py-0.5 bg-[color-mix(in_oklab,var(--destructive)_4%,var(--background))] shadow-tinted rounded-[4px] text-[10px] text-destructive font-medium cursor-default shrink-0"
+          style={{ '--shadow-color': 'var(--destructive-rgb)' } as React.CSSProperties}
+        >
+          {label}
+        </span>
+      </TooltipTrigger>
+      <ErrorTooltipContent side="top">{error}</ErrorTooltipContent>
+    </Tooltip>
+  )
+}
+
 /**
  * TreeViewConnector is no longer used - the vertical line from the expanded section
  * already provides visual hierarchy. Keeping this as a no-op for now in case
@@ -969,19 +987,7 @@ function ActivityRow({ activity, onOpenDetails, isLastChild, sessionFolderPath, 
             <span className="shrink-0">{sourceName}</span>
             {/* Error badge for MCP/API tools */}
             {activity.status === 'error' && activity.error && (
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <span
-                    className="px-1.5 py-0.5 bg-[color-mix(in_oklab,var(--destructive)_4%,var(--background))] shadow-tinted rounded-[4px] text-[10px] text-destructive font-medium cursor-default shrink-0"
-                    style={{ '--shadow-color': 'var(--destructive-rgb)' } as React.CSSProperties}
-                  >
-                    {i18n.t('common.error')}
-                  </span>
-                </TooltipTrigger>
-                <TooltipContent side="top" className="max-w-[400px]">
-                  {activity.error}
-                </TooltipContent>
-              </Tooltip>
+              <ActivityErrorBadge error={activity.error} label={i18n.t('common.error')} />
             )}
             {/* Model badge for LLM Query */}
             {activity.toolName === 'mcp__session__call_llm' && activity.toolInput?.model && (
@@ -1073,19 +1079,7 @@ function ActivityRow({ activity, onOpenDetails, isLastChild, sessionFolderPath, 
         )}
         {/* Error badge for native tools */}
         {!isMcpOrApiTool && activity.status === 'error' && activity.error && (
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <span
-                className="px-1.5 py-0.5 bg-[color-mix(in_oklab,var(--destructive)_4%,var(--background))] shadow-tinted rounded-[4px] text-[10px] text-destructive font-medium cursor-default shrink-0"
-                style={{ '--shadow-color': 'var(--destructive-rgb)' } as React.CSSProperties}
-              >
-                Error
-              </span>
-            </TooltipTrigger>
-            <TooltipContent side="top" className="max-w-[400px]">
-              {activity.error}
-            </TooltipContent>
-          </Tooltip>
+          <ActivityErrorBadge error={activity.error} label="Error" />
         )}
         {/* Native tools: Compound label with description + params (flex-1) */}
         {/* In informative mode, hide inputSummary (command details) - only show description */}
