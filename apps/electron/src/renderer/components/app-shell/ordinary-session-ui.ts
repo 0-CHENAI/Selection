@@ -9,8 +9,20 @@ type SidebarLinkLike = {
 
 type SessionGroupingMode = 'date' | 'status' | 'unread' | 'project'
 
-export function normalizeSessionGroupingMode(mode: SessionGroupingMode): SessionGroupingMode {
-  return mode === 'status' ? 'date' : mode
+/** Session lists no longer expose grouping controls; persist and render date only. */
+export function normalizeSessionGroupingMode(_mode?: SessionGroupingMode | string): 'date' {
+  return 'date'
+}
+
+/** Keep a single sidebar include. Drop exclude and multi-project combos (#263). */
+export function sanitizeSidebarProjectScope(
+  projects?: Record<string, 'include' | 'exclude'>,
+): Record<string, 'include'> {
+  if (!projects) return {}
+  const entries = Object.entries(projects)
+  if (entries.length !== 1) return {}
+  const [projectId, mode] = entries[0]
+  return mode === 'include' ? { [projectId]: 'include' } : {}
 }
 
 const REMOVED_ROOT_LINKS = new Set(['nav:labels'])
@@ -62,7 +74,7 @@ export type PersistedSessionViewFilters = Record<string, {
   groupingMode?: string
 }>
 
-/** Drop obsolete persisted filters while retaining project scope and grouping. */
+/** Drop obsolete persisted filters while retaining a single sidebar project scope. */
 export function sanitizeRemovedSessionFilters<T extends PersistedSessionViewFilters>(saved: T): T {
   const sanitized = Object.fromEntries(Object.entries(saved).map(([key, entry]) => [
     key,
@@ -70,7 +82,8 @@ export function sanitizeRemovedSessionFilters<T extends PersistedSessionViewFilt
       ...entry,
       statuses: {},
       labels: {},
-      groupingMode: entry.groupingMode === 'status' ? 'date' : entry.groupingMode,
+      projects: sanitizeSidebarProjectScope(entry.projects),
+      groupingMode: 'date',
     },
   ]))
   return sanitized as T
