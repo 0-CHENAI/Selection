@@ -1,5 +1,5 @@
 {
-  "version": "1.0.146",
+  "version": "1.0.147",
   "schemaCrc": "909df808",
   "generatedFrom": "reviewed-release-binary",
   "rootHelpSha256": "28165ddbd976e5f2aed3f8b1b7dfdb6c06c8340e52da56f9107a10f558087d00",
@@ -121,8 +121,10 @@
       ]
     },
     "import": {
-      "helpSha256": "49b51cae6511abd5e1877549b2465102d5359a581cffd4a0f37f4c6bffa4ea59",
+      "helpSha256": "b6df22a1bb31c2c99f14a10624a7639d746c4d396cdc7fbf71030a6ad5ecaf3e",
       "flags": [
+        "--decimal",
+        "--delimiter",
         "--file",
         "--format",
         "--header",
@@ -176,7 +178,7 @@
       ]
     },
     "query": {
-      "helpSha256": "40b63ea37c825dd7fa2ecc0d515f29e477395b3c899b462b68de00858f9bc55c",
+      "helpSha256": "54f8bfcc95e03d17900d4ea950c1cc544fecabc3e86a8fe45fdb8eee7275d893",
       "flags": [
         "--compact",
         "--fields",
