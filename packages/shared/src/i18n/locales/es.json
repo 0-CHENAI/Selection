@@ -1069,7 +1069,6 @@
   "session.selectConversation": "Selecciona una conversación para comenzar",
   "session.unreadGroup": "No leídos ({{count}})",
   "sessionMenu.archive": "Archivar",
-  "sessionMenu.connectMessaging": "Conectar mensajería",
   "sessionMenu.copyLink": "Copiar enlace",
   "sessionMenu.copyPath": "Copiar ruta",
   "sessionMenu.flag": "Marcar",

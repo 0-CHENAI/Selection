@@ -1069,7 +1069,6 @@
   "session.selectConversation": "Select a conversation to get started",
   "session.unreadGroup": "Unread ({{count}})",
   "sessionMenu.archive": "Archive",
-  "sessionMenu.connectMessaging": "Connect Messaging",
   "sessionMenu.copyLink": "Copy Link",
   "sessionMenu.copyPath": "Copy Path",
   "sessionMenu.flag": "Flag",

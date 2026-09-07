@@ -1069,7 +1069,6 @@
   "session.selectConversation": "Wybierz rozmowę, aby rozpocząć",
   "session.unreadGroup": "Nieprzeczytane ({{count}})",
   "sessionMenu.archive": "Archiwizuj",
-  "sessionMenu.connectMessaging": "Połącz komunikator",
   "sessionMenu.copyLink": "Kopiuj link",
   "sessionMenu.copyPath": "Kopiuj ścieżkę",
   "sessionMenu.flag": "Oznacz flagą",

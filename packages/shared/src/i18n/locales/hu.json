@@ -1069,7 +1069,6 @@
   "session.selectConversation": "Válassz egy beszélgetést a kezdéshez",
   "session.unreadGroup": "Olvasatlan ({{count}})",
   "sessionMenu.archive": "Archiválás",
-  "sessionMenu.connectMessaging": "Üzenetküldő csatlakoztatása",
   "sessionMenu.copyLink": "Link másolása",
   "sessionMenu.copyPath": "Útvonal másolása",
   "sessionMenu.flag": "Megjelölés",
