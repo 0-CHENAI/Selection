@@ -137,18 +137,18 @@ describe('session list header actions (#264)', () => {
     expect(html.indexOf('Search')).toBeLessThan(html.indexOf('List / New orchestration'))
   })
 
-  it('labels the switcher 列表 / 新建编排 in Chinese', () => {
+  it('labels the switcher 列表 / 导入编排 in Chinese', () => {
     const zh = LOCALE_REGISTRY['zh-Hans'].messages
     expect(zh['kanban.list']).toBe('列表')
-    expect(zh['kanban.board']).toBe('新建编排')
+    expect(zh['kanban.board']).toBe('导入编排')
 
     const html = renderWithI18n(
       'zh-Hans',
       <BoardListToggle value="list" onChange={() => {}} />,
     )
     expect(html).toContain('列表')
-    expect(html).toContain('新建编排')
-    expect(html.indexOf('列表')).toBeLessThan(html.indexOf('新建编排'))
+    expect(html).toContain('导入编排')
+    expect(html.indexOf('列表')).toBeLessThan(html.indexOf('导入编排'))
   })
 
   it('still opens the existing search field with close control when search is active', () => {
