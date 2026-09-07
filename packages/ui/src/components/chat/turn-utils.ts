@@ -474,6 +474,12 @@ export interface GroupTurnsOptions {
    * has not completed yet.
    */
   isManagedSwarmRunning?: boolean
+  /**
+   * Task Conductor parent: the definition/confirmation turn is finished, but
+   * child DAG nodes are still running. Keep that latest assistant turn from
+   * showing completed chrome until the run settles.
+   */
+  isTaskOrchestrationRunning?: boolean
 }
 
 /** Normalize only Selection's own session-tool aliases, never third-party namespaces. */
@@ -509,6 +515,14 @@ function keepLatestManagedSwarmTurnOpen(turns: Turn[]): void {
   if (!latestAssistant.activities.some(isManagedAutomaticSpawn)) return
 
   demoteResponseToWorkChain(latestAssistant)
+  latestAssistant.isComplete = false
+  latestAssistant.isStreaming = true
+}
+
+function keepLatestTaskOrchestrationTurnOpen(turns: Turn[]): void {
+  const latestAssistant = turns.findLast((turn): turn is AssistantTurn => turn.type === 'assistant')
+  if (!latestAssistant) return
+  if (turns.at(-1) !== latestAssistant) return
   latestAssistant.isComplete = false
   latestAssistant.isStreaming = true
 }
@@ -885,6 +899,9 @@ export function groupMessagesByTurn(messages: Message[], options: GroupTurnsOpti
 
   if (options.isManagedSwarmRunning) {
     keepLatestManagedSwarmTurnOpen(turns)
+  }
+  if (options.isTaskOrchestrationRunning) {
+    keepLatestTaskOrchestrationTurnOpen(turns)
   }
 
   return turns

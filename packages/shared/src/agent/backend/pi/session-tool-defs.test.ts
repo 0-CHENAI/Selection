@@ -32,6 +32,16 @@ describe('resolveSessionToolProxyName', () => {
 });
 
 describe('getSessionToolProxyDefs', () => {
+  it('does not expose disabled task authoring tools through any proxy name', () => {
+    const names = getSessionToolProxyDefs().map(def => def.name);
+    for (const name of ['create_task', 'submit_task_definition']) {
+      expect(names).not.toContain(name);
+      expect(names).not.toContain(`${PI_SESSION_TOOL_PREFIX}${name}`);
+      expect(resolveSessionToolProxyName(name)).toBe(name);
+      expect(resolveSessionToolProxyName(`session__${name}`)).toBe(`session__${name}`);
+    }
+  });
+
   it('registers prompt-facing aliases next to MCP-prefixed names', () => {
     const defs = getSessionToolProxyDefs();
     const names = defs.map(def => def.name);

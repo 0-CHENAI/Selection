@@ -1,20 +1,19 @@
 import { describe, expect, it } from 'bun:test';
-import { handleSubmitTaskDefinition } from './submit-task-definition.ts';
 import type { SessionToolContext } from '../context.ts';
+import { handleSubmitTaskDefinition } from './submit-task-definition.ts';
 
-describe('handleSubmitTaskDefinition', () => {
-  it('stores a valid spec through the callback', async () => {
-    const ctx = {
-      submitTaskDefinition: async () => ({ valid: true, yaml: 'id: x' }),
-    } as unknown as SessionToolContext;
-    const ok = await handleSubmitTaskDefinition(ctx, { spec: { id: 'x', title: 'X', goal: 'g', nodes: [] } });
-    expect(ok.isError).toBeFalsy();
-    expect(JSON.parse(ok.content[0]?.text ?? '').valid).toBe(true);
+describe('handleSubmitTaskDefinition — YAML import only', () => {
+  it('rejects an otherwise valid request without invoking the backend', async () => {
+    let calls = 0;
+    const ctx = { submitTaskDefinition: async () => { calls++; throw new Error('must not run'); } } as unknown as SessionToolContext;
+    const result = await handleSubmitTaskDefinition(ctx, { spec: { schema_version: 3 } });
+    expect(result.isError).toBe(true);
+    expect(JSON.stringify(result)).toContain('Import a YAML file');
+    expect(calls).toBe(0);
   });
-
-  it('errors without a spec or callback', async () => {
-    expect((await handleSubmitTaskDefinition({} as SessionToolContext, { spec: { id: 'x' } })).isError).toBe(true);
-    const ctx = { submitTaskDefinition: async () => ({ valid: true }) } as unknown as SessionToolContext;
-    expect((await handleSubmitTaskDefinition(ctx, { spec: undefined as never })).isError).toBe(true);
+  it('rejects stale clients even without a callback', async () => {
+    const result = await handleSubmitTaskDefinition({} as SessionToolContext, { spec: { schema_version: 3 } });
+    expect(result.isError).toBe(true);
+    expect(JSON.stringify(result)).toContain('schema_version: 3');
   });
 });
