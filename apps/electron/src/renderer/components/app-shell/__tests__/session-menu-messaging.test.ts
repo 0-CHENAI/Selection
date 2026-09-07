@@ -14,6 +14,8 @@ describe('session menus', () => {
 
     expect(source).not.toContain('MessagingSessionMenuItem')
     expect(source).not.toContain('connectMessaging')
+    expect(source).toContain('hasPreRenameItems')
+    expect(source).toContain('{hasPreRenameItems && <Separator />}')
   })
 
   it('does not expose a messaging drawer or secondary pane in compact mode', () => {

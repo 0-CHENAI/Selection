@@ -140,7 +140,6 @@ export function CompactSessionMenu({
   )
 
   // ---------------------------------------------------------------------------
-  // Drawer header — shared between root + sub-panes. Sub-panes show a back
   // Resolve the trigger node:
   //   - `trigger === null`  → don't render any trigger (row provides its own).
   //   - `trigger` provided  → render the consumer's node inside DrawerTrigger.
