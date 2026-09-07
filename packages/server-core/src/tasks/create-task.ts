@@ -4,7 +4,7 @@
  * task.yaml + orchestrator parent session + reserved TASK label + spec sources.
  * Never starts a run — running is tasks:run / TaskRunner.
  */
-import { saveTaskDocument, serializeTaskYaml, type TaskSpec } from '@craft-agent/shared/tasks'
+import { resolveNewTaskSchemaVersion, saveTaskDocument, serializeTaskYaml, type TaskSpec } from '@craft-agent/shared/tasks'
 import { createLogger } from '@craft-agent/shared/utils'
 import type { ISessionManager } from '../handlers/session-manager-interface'
 
@@ -70,13 +70,13 @@ export async function finishTaskOrchestrator(
   spec: TaskSpec,
 ): Promise<TaskOrchestratorSetupResult> {
   const warnings: string[] = []
-  const applied = await sessionManager.applyTaskLabel(orchestratorSessionId).catch((err: unknown) => {
+  const applied = await Promise.resolve().then(() => sessionManager.applyTaskLabel(orchestratorSessionId)).catch((err: unknown) => {
     log.warn('applyTaskLabel failed for orchestrator', { orchestratorSessionId, err })
     warnings.push('The reserved Task label could not be applied.')
     return undefined
   })
   if (spec.sources?.length) {
-    await Promise.resolve(sessionManager.setSessionSources(orchestratorSessionId, spec.sources)).catch(
+    await Promise.resolve().then(() => sessionManager.setSessionSources(orchestratorSessionId, spec.sources!)).catch(
       (err: unknown) => {
         log.warn('setSessionSources failed for orchestrator', { orchestratorSessionId, err })
         warnings.push(`Sources could not be enabled on the orchestrator: ${spec.sources!.join(', ')}`)
@@ -99,7 +99,15 @@ export async function createTaskFromSpec(
   opts?: { save?: boolean },
 ): Promise<CreateTaskFromSpecResult> {
   if (opts?.save !== false) {
-    saveTaskDocument(workspaceRoot, serializeTaskYaml({ ...spec, schema_version: 2 }), null)
+    const schema_version = resolveNewTaskSchemaVersion(spec.schema_version)
+    saveTaskDocument(
+      workspaceRoot,
+      serializeTaskYaml({ ...spec, schema_version }),
+      null,
+      {
+        confirmV3Migration: schema_version === 3 && spec.nodes.some((node) => node.cache === 'pure'),
+      },
+    )
   }
 
   const orchestrator = await sessionManager.createSession(workspaceId, {

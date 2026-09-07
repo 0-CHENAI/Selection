@@ -15,6 +15,8 @@
 // backend values for the editor's numeric control. Keep the two in sync if the backend caps change.
 export const DEFAULT_REPAIR_ATTEMPTS = 3
 export const MAX_REPAIR_ATTEMPTS_CAP = 10
+import { DEFAULT_TASK_SCHEMA_VERSION } from '@craft-agent/shared/tasks/version'
+export { DEFAULT_TASK_SCHEMA_VERSION } from '@craft-agent/shared/tasks/version'
 
 let _uid = 0
 /** Monotonic local row id (not the task node id). Shared so editor + conversions never collide. */
@@ -297,6 +299,7 @@ export function buildSpec(form: SpecForm, modelToConnection: Map<string, string>
 
   const spec: Record<string, unknown> = {
     ...(form.preservedSpec ?? {}),
+    schema_version: form.preservedSpec?.schema_version === 2 ? 2 : DEFAULT_TASK_SCHEMA_VERSION,
     id: form.fixedId || slugify(form.title) || 'untitled-task',
     title: form.title.trim() || 'Untitled task',
     goal: form.goal.trim() || form.title.trim() || 'Untitled task',
@@ -328,6 +331,26 @@ export function buildSpec(form: SpecForm, modelToConnection: Map<string, string>
   if (!form.runner || form.runner === 'conduct') delete spec.runner
   if (!Object.keys(ui).length) delete spec.ui
   return spec
+}
+
+function hasCachePureNodes(spec: Record<string, unknown>): boolean {
+  if (!Array.isArray(spec.nodes)) return false
+  return spec.nodes.some((node) => (
+    !!node
+    && typeof node === 'object'
+    && !Array.isArray(node)
+    && (node as { cache?: unknown }).cache === 'pure'
+  ))
+}
+
+/** Confirm when saving v3 over an existing v1/v2 file, or when v3 still carries legacy cache: pure. */
+export function specNeedsV3Confirm(
+  sourceVersion: 1 | 2 | 3 | undefined,
+  spec: Record<string, unknown>,
+): boolean {
+  if (spec.schema_version !== 3) return false
+  if (sourceVersion !== undefined && sourceVersion < 3) return true
+  return hasCachePureNodes(spec)
 }
 
 /** Map authored TaskSpec nodes → the editor's multi-dependency subtask rows. */

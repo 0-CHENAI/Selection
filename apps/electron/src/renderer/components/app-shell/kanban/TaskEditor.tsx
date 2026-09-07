@@ -5,6 +5,7 @@ import { useTranslation } from 'react-i18next'
 import { cn } from '@/lib/utils'
 import { Spinner, LoadingIndicator, Markdown } from '@craft-agent/ui'
 import { getModelShortName } from '@config/models'
+import { TaskYamlImport } from './TaskYamlImport'
 import { catalogDefaultModel } from './kanban-models'
 import { useAtomValue, useStore } from 'jotai'
 import { useProjects } from '@/hooks/useProjects'
@@ -21,7 +22,7 @@ import {
   DropdownMenuSeparator,
 } from '@/components/ui/dropdown-menu'
 import type { KanbanModelProviderGroup, TaskEditorTarget } from './types'
-import { uid, buildSpec, specToSubtasks, canDependOn, quickAddNodeId, quickAddChildToSubtask, taskDocumentForSave, canSafelySaveExistingTask, shouldRefreshYamlDraft, DEFAULT_REPAIR_ATTEMPTS, MAX_REPAIR_ATTEMPTS_CAP, SESSION_LIKE_KINDS, type EditorSubtask, type SpecNode, type TaskPermissionMode } from './task-spec-form'
+import { uid, buildSpec, specToSubtasks, canDependOn, quickAddNodeId, quickAddChildToSubtask, taskDocumentForSave, canSafelySaveExistingTask, shouldRefreshYamlDraft, specNeedsV3Confirm, DEFAULT_REPAIR_ATTEMPTS, MAX_REPAIR_ATTEMPTS_CAP, SESSION_LIKE_KINDS, type EditorSubtask, type SpecNode, type TaskPermissionMode } from './task-spec-form'
 import { runnerLabelKey, runStatusLabelKey } from './task-labels'
 import { ConductorWorkbench, type WorkbenchSpec } from './ConductorWorkbench'
 import { ApplyRunRevisionDialog, canConfirmRunRevision } from './ApplyRunRevisionDialog'
@@ -48,10 +49,6 @@ import { buildSensitiveRunParams, sensitiveRunParamNames } from './sensitive-run
 // Client-side fallback for async generate: a touch longer than the server's GENERATE_TIMEOUT_MS
 // (180s) so the orchestrator's own timeout + result push can land before we give up locally.
 const GENERATE_CLIENT_TIMEOUT_MS = 200_000
-
-function specNeedsV3Confirm(sourceVersion: 1 | 2 | 3 | undefined, spec: Record<string, unknown>): boolean {
-  return (sourceVersion ?? 1) < 3 && spec.schema_version === 3
-}
 
 function v3MigrationLines(spec: Record<string, unknown>): string[] {
   const nodes = Array.isArray(spec.nodes) ? spec.nodes as Array<{ id?: string; cache?: string }> : []
@@ -550,7 +547,15 @@ export interface TaskEditorProps {
   defaultModel: string
 }
 
-export function TaskEditor({
+export function TaskEditor(props: TaskEditorProps) {
+  if (props.target?.mode !== 'edit' || !props.target.taskSlug) {
+    const scope = props.target?.mode === 'create' ? props.target.initialProjectId ?? '' : ''
+    return <TaskYamlImport key={`${props.workspaceId}:${scope}`} {...props} />
+  }
+  return <ExistingTaskEditor key={`${props.workspaceId}:${props.target.taskSlug}`} {...props} />
+}
+
+function ExistingTaskEditor({
   workspaceId,
   target = { mode: 'create' },
   onClose,
@@ -1575,7 +1580,7 @@ export function TaskEditor({
           <div className="text-[15px] font-bold">{t('tasks.definition')}</div>
 
           <div className="inline-flex w-fit rounded-[9px] bg-foreground/[0.05] p-0.5">
-            {(['manual', 'generate'] as Mode[]).map((m) => (
+            {(['manual'] as Mode[]).map((m) => (
               <button
                 key={m}
                 onClick={() => setMode(m)}

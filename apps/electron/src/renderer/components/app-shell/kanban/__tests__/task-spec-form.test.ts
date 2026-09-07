@@ -9,6 +9,7 @@ import {
   taskDocumentForSave,
   canSafelySaveExistingTask,
   shouldRefreshYamlDraft,
+  specNeedsV3Confirm,
   MAX_REPAIR_ATTEMPTS_CAP,
   type EditorSubtask,
   type SpecNode,
@@ -130,6 +131,22 @@ describe('task-spec-form round-trip', () => {
         nodes: { review: { x: 30, y: 40 } },
       },
     })
+    expect(spec.schema_version).toBe(2)
+  })
+
+  it('stamps schema_version 3 on new forms and does not treat that as a v3 upgrade', () => {
+    const spec = buildSpec(
+      { title: 'New', goal: 'g', projectId: '', orchModel: '', subtasks: specToSubtasks([{ id: 'a', prompt: 'p' }]) },
+      noConn,
+    )
+    expect(spec.schema_version).toBe(3)
+    expect(specNeedsV3Confirm(undefined, spec)).toBe(false)
+    expect(specNeedsV3Confirm(2, spec)).toBe(true)
+    expect(specNeedsV3Confirm(3, spec)).toBe(false)
+    expect(specNeedsV3Confirm(undefined, {
+      ...spec,
+      nodes: [{ id: 'a', prompt: 'p', cache: 'pure' }],
+    })).toBe(true)
   })
 
   it('does not keep cleared form-owned fields from the preserved spec', () => {

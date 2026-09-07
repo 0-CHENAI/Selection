@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 
-import { parseTaskSpec, nodeDeps, nodeTitle, type TaskSpec } from './schema.ts';
+import { parseTaskSpec, nodeDeps, nodeTitle, resolveNewTaskSchemaVersion, type TaskSpec } from './schema.ts';
 import { extractRefs, interpolateRefs } from './refs.ts';
 import { validateTaskSpec, validateTaskInput, TASK_CAPS } from './validate.ts';
 import { buildGeneratorPrompt, buildRepairPrompt } from './generator-prompt.ts';
@@ -113,6 +113,14 @@ describe('schema', () => {
   it('rejects an invalid slug id', () => {
     const r = parseTaskSpec({ id: 'Bad Id', title: 'X', goal: 'g', nodes: [{ id: 'a', prompt: 'p' }] });
     expect(r.success).toBe(false);
+  });
+
+  it('defaults new tasks to schema_version 3 and keeps an explicit v2', () => {
+    expect(resolveNewTaskSchemaVersion(undefined)).toBe(3);
+    expect(resolveNewTaskSchemaVersion(3)).toBe(3);
+    expect(resolveNewTaskSchemaVersion(1)).toBe(3);
+    expect(resolveNewTaskSchemaVersion('3')).toBe(3);
+    expect(resolveNewTaskSchemaVersion(2)).toBe(2);
   });
 
   it('accepts v2 fields: schema_version, sensitive params, output metadata, when AST, retry.when array, ui.layout', () => {
@@ -418,7 +426,8 @@ describe('generator-prompt', () => {
     const prompt = buildGeneratorPrompt('Decompose the goal', 'My task');
     expect(prompt).toContain('${nodes.<id>.output} reference MUST point to an `id` that you actually declare');
     expect(prompt).toContain('MUST call submit_task_definition');
-    expect(prompt).toContain('schema_version: 2 definition found only in final text is rejected');
+    expect(prompt).toContain('schema_version: 2 or 3 definition found only in final text is rejected');
+    expect(prompt).toContain('schema_version: 3');
     expect(prompt).not.toContain('unless the tool is unavailable');
     expect(prompt).toContain('Goal: Decompose the goal');
     expect(prompt).toContain('Working title: My task');

@@ -13,6 +13,7 @@ import { parseTaskSpec, TaskSpecSchema, type TaskSpec } from './schema.ts';
 import { etagForYaml, TaskEtagConflictError } from './etag.ts';
 import { taskDir, taskYamlPath, serializeTaskYaml } from './storage.ts';
 import { validateTaskSpec } from './validate.ts';
+import { MAX_TASK_IMPORT_BYTES } from './version.ts';
 
 export interface LoadedTaskDocument {
   slug: string;
@@ -302,6 +303,22 @@ export function previewV3Migration(spec: TaskSpec): { warnings: string[]; cacheP
   return { warnings, cachePureNodeIds };
 }
 
+/** Import validation is deliberately stricter than the legacy reader. */
+export function parseTaskImport(yaml: string): LoadedTaskDocument {
+  if (typeof yaml !== 'string' || Buffer.byteLength(yaml, 'utf8') > MAX_TASK_IMPORT_BYTES) {
+    const rejected = parseTaskDocument('');
+    rejected.valid = false;
+    rejected.errors = [issue('yaml', 'Import requires YAML text up to 1 MB.')];
+    return rejected;
+  }
+  const document = parseTaskDocument(yaml);
+  if (document.sourceVersion !== 3) {
+    document.errors.push(issue('schema_version', 'YAML import requires explicit schema_version: 3. Legacy tasks remain readable but cannot be imported.'));
+    document.valid = false;
+  }
+  return document;
+}
+
 export function saveTaskDocument(
   workspaceRoot: string,
   yaml: string,
@@ -331,8 +348,8 @@ export function saveTaskDocument(
     if (existing.etag !== expectedEtag) {
       throw new TaskEtagConflictError(expectedEtag, existing.etag);
     }
-    if (existing.sourceVersion === 1 || (existing.sourceVersion < 3 && incoming.sourceVersion === 3)) {
-      backupTaskYaml(workspaceRoot, slug, existing.yaml);
+    if (existing.sourceVersion === 3 && incoming.sourceVersion !== 3) {
+      throw new Error('Refusing to downgrade a schema_version: 3 task.');
     }
   }
   const wantsV3 = incoming.sourceVersion === 3;
@@ -360,6 +377,9 @@ export function saveTaskDocument(
   };
   const stamped = TaskSpecSchema.parse(spec);
   const body = serializeTaskYaml(stamped);
+  if (existing && (existing.sourceVersion === 1 || (existing.sourceVersion < 3 && wantsV3))) {
+    backupTaskYaml(workspaceRoot, slug, existing.yaml);
+  }
   mkdirSync(taskDir(workspaceRoot, slug), { recursive: true });
   atomicWriteFileSync(taskYamlPath(workspaceRoot, slug), body);
   return parseTaskDocument(body, slug);
