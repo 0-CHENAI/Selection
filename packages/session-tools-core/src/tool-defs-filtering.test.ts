@@ -23,6 +23,13 @@ describe('session tool filtering helpers', () => {
     expect(registry.has('send_developer_feedback')).toBe(false);
   });
 
+  it('classifies developer feedback as a safe-mode mutation', () => {
+    expect(getSessionSafeAllowedToolNames({ includeDeveloperFeedback: true }))
+      .not.toContain('send_developer_feedback');
+    expect(getSessionSafeBlockedToolNames({ includeDeveloperFeedback: true }))
+      .toContain('send_developer_feedback');
+  });
+
   it('does not register native Office document tools', () => {
     const names = getSessionToolNames({ includeDeveloperFeedback: false });
     for (const name of [

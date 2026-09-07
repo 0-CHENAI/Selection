@@ -28,15 +28,11 @@ import { useTranslation } from 'react-i18next'
 import { motion } from 'motion/react'
 import {
   AppWindow,
-  Check,
   ChevronDown,
-  ChevronLeft,
-  ChevronRight,
   Columns2,
   Copy,
   FolderOpen,
   MailOpen,
-  MessageSquare,
   Pencil,
   RefreshCw,
   Send,
@@ -54,10 +50,7 @@ import {
 import type { SessionMeta } from '@/atoms/sessions'
 import { hasUnreadMeta, hasMessagesMeta } from '@/utils/session'
 import { getFileManagerName } from '@/lib/platform'
-import { useMessagingConnect, type MessagingPlatform } from '@/components/messaging/MessagingSessionMenuItem'
 import { useSessionMenuActions } from '@/hooks/useSessionMenuActions'
-
-type View = 'root' | 'messaging'
 
 export interface CompactSessionMenuProps {
   /** Title text shown in the trigger button + drawer header. */
@@ -120,20 +113,11 @@ export function CompactSessionMenu({
     },
     [isControlled, onOpenChange],
   )
-  const [view, setView] = React.useState<View>('root')
-
-  // Reset to root pane every time the drawer closes so the next open
-  // doesn't surprise the user with a sub-pane from the previous session.
-  React.useEffect(() => {
-    if (!open) setView('root')
-  }, [open])
-
   // Close+reset the drawer if the underlying session changes while it's open.
   // Otherwise action handlers retarget to the new session (e.g. user opens
   // menu for A, navigation switches to B, "Delete" deletes B).
   React.useEffect(() => {
     setOpen(false)
-    setView('root')
   }, [item.id, setOpen])
 
   const _hasMessages = hasMessagesMeta(item)
@@ -155,25 +139,7 @@ export function CompactSessionMenu({
     [setOpen],
   )
 
-  const connectMessaging = useMessagingConnect({ sessionId: item.id })
-  const handleConnectMessaging = (platform: MessagingPlatform) => {
-    setOpen(false)
-    void connectMessaging(platform)
-  }
-
   // ---------------------------------------------------------------------------
-  // Drawer header — shared between root + sub-panes. Sub-panes show a back
-  // chevron; the root pane shows the session title.
-  // ---------------------------------------------------------------------------
-  const headerTitle = (() => {
-    switch (view) {
-      case 'messaging': return t('sessionMenu.connectMessaging')
-      default:          return title ?? ''
-    }
-  })()
-
-  const showBack = view !== 'root'
-
   // Resolve the trigger node:
   //   - `trigger === null`  → don't render any trigger (row provides its own).
   //   - `trigger` provided  → render the consumer's node inside DrawerTrigger.
@@ -223,41 +189,24 @@ export function CompactSessionMenu({
 
       <DrawerContent className="max-h-[85vh]">
         <DrawerHeader className="!flex flex-row items-center gap-2 !text-left pr-3">
-          {showBack && (
-            <button
-              type="button"
-              onClick={() => setView('root')}
-              className="-ml-1 h-8 w-8 rounded-md flex items-center justify-center hover:bg-foreground/5 active:bg-foreground/10 transition-colors text-foreground/50"
-              aria-label={t('common.back')}
-            >
-              <ChevronLeft className="h-4 w-4" />
-            </button>
-          )}
-          <DrawerTitle className="flex-1 min-w-0 truncate">{headerTitle}</DrawerTitle>
+          <DrawerTitle className="flex-1 min-w-0 truncate">{title ?? ''}</DrawerTitle>
         </DrawerHeader>
 
         <div className="flex-1 min-h-0 overflow-y-auto px-2 pb-6">
-          {view === 'root' && (
-            <RootPane
-              hasMessages={_hasMessages}
-              hasUnread={_hasUnread}
-              hasTransferTargets={hasTransferTargets}
-              onSendToWorkspace={closeAfter(onSendToWorkspace)}
-              onOpenMessagingSub={() => setView('messaging')}
-              onMarkUnread={closeAfter(onMarkUnread)}
-              onRename={closeAfter(onRename)}
-              onRefreshTitle={closeAfter(actions.refreshTitle)}
-              onOpenInNewPanel={closeAfter(actions.openInNewPanel)}
-              onOpenInNewWindow={closeAfter(onOpenInNewWindow)}
-              onShowInFinder={closeAfter(actions.showInFinder)}
-              onCopyPath={closeAfter(actions.copyPath)}
-              onDelete={closeAfter(onDelete)}
-            />
-          )}
-
-          {view === 'messaging' && (
-            <MessagingPane onConnect={handleConnectMessaging} />
-          )}
+          <RootPane
+            hasMessages={_hasMessages}
+            hasUnread={_hasUnread}
+            hasTransferTargets={hasTransferTargets}
+            onSendToWorkspace={closeAfter(onSendToWorkspace)}
+            onMarkUnread={closeAfter(onMarkUnread)}
+            onRename={closeAfter(onRename)}
+            onRefreshTitle={closeAfter(actions.refreshTitle)}
+            onOpenInNewPanel={closeAfter(actions.openInNewPanel)}
+            onOpenInNewWindow={closeAfter(onOpenInNewWindow)}
+            onShowInFinder={closeAfter(actions.showInFinder)}
+            onCopyPath={closeAfter(actions.copyPath)}
+            onDelete={closeAfter(onDelete)}
+          />
         </div>
       </DrawerContent>
     </Drawer>
@@ -273,7 +222,6 @@ interface RootPaneProps {
   hasUnread: boolean
   hasTransferTargets?: boolean
   onSendToWorkspace?: () => void
-  onOpenMessagingSub: () => void
   onMarkUnread?: () => void
   onRename?: () => void
   onRefreshTitle?: () => void
@@ -289,7 +237,6 @@ function RootPane({
   hasUnread,
   hasTransferTargets,
   onSendToWorkspace,
-  onOpenMessagingSub,
   onMarkUnread,
   onRename,
   onRefreshTitle,
@@ -304,23 +251,18 @@ function RootPane({
   return (
     <div className="flex flex-col">
       {hasTransferTargets && onSendToWorkspace && (
-        <Row icon={<Send className="h-4 w-4" />} label={t('sessionMenu.sendToWorkspace')} onTap={onSendToWorkspace} />
+        <>
+          <Row icon={<Send className="h-4 w-4" />} label={t('sessionMenu.sendToWorkspace')} onTap={onSendToWorkspace} />
+          <Separator />
+        </>
       )}
-
-      <Row
-        icon={<MessageSquare className="h-4 w-4" />}
-        label={t('sessionMenu.connectMessaging')}
-        chevron
-        onTap={onOpenMessagingSub}
-      />
-
-      <Separator />
 
       {!hasUnread && hasMessages && (
-        <Row icon={<MailOpen className="h-4 w-4" />} label={t('sessionMenu.markAsUnread')} onTap={onMarkUnread} />
+        <>
+          <Row icon={<MailOpen className="h-4 w-4" />} label={t('sessionMenu.markAsUnread')} onTap={onMarkUnread} />
+          <Separator />
+        </>
       )}
-
-      <Separator />
 
       <Row icon={<Pencil className="h-4 w-4" />} label={t('common.rename')} onTap={onRename} />
       <Row icon={<RefreshCw className="h-4 w-4" />} label={t('sessionMenu.regenerateTitle')} onTap={onRefreshTitle} />
@@ -418,16 +360,6 @@ function LabelsPane({
 
 
 */
-function MessagingPane({ onConnect }: { onConnect: (platform: MessagingPlatform) => void }) {
-  return (
-    <div className="flex flex-col">
-      <Row icon={<MessageSquare className="h-4 w-4" />} label="Telegram" onTap={() => onConnect('telegram')} />
-      <Row icon={<MessageSquare className="h-4 w-4" />} label="WhatsApp" onTap={() => onConnect('whatsapp')} />
-      <Row icon={<MessageSquare className="h-4 w-4" />} label="Lark / Feishu" onTap={() => onConnect('lark')} />
-    </div>
-  )
-}
-
 // ---------------------------------------------------------------------------
 // Primitives
 // ---------------------------------------------------------------------------
@@ -436,8 +368,6 @@ interface RowProps {
   icon: React.ReactNode
   label: React.ReactNode
   trailing?: React.ReactNode
-  chevron?: boolean
-  radioSelected?: boolean
   destructive?: boolean
   onTap?: () => void
 }
@@ -446,8 +376,6 @@ function Row({
   icon,
   label,
   trailing,
-  chevron,
-  radioSelected,
   destructive,
   onTap,
 }: RowProps) {
@@ -467,20 +395,10 @@ function Row({
       </span>
       <span className="flex-1 min-w-0 text-sm truncate">{label}</span>
       {trailing}
-      {radioSelected && <Check className="h-4 w-4 shrink-0 text-foreground/70" />}
-      {chevron && <ChevronRight className="h-4 w-4 shrink-0 text-foreground/50" />}
     </button>
   )
 }
 
 function Separator() {
   return <div className="my-1 mx-3 h-px bg-foreground/[0.06]" />
-}
-
-function CountBadge({ count }: { count: number }) {
-  return (
-    <span className="text-[11px] tabular-nums text-foreground/50">
-      {count}
-    </span>
-  )
 }

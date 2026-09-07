@@ -51,7 +51,21 @@ import { routes, type Route, type ViewRoute } from '../../shared/routes'
 import { parsePermissionMode } from '@craft-agent/shared/agent/mode-types'
 import { NAVIGATE_EVENT, type NavigateOptions } from '../lib/navigate'
 import { normalizePanelRouteForReconcile } from './navigation-reconcile'
-import { buildSemanticHistoryKey, canRunInitialRestore } from './navigation-history'
+import {
+  INITIAL_NAV_HISTORY,
+  buildSemanticHistoryKey,
+  canRunInitialRestore,
+  isHistoryUrlSyncSuppressed,
+  navHistoryAfterPop,
+  navHistoryAfterPush,
+  navHistoryAfterReload,
+  navHistoryCanGoBack,
+  navHistoryCanGoForward,
+  readPopStateSeq,
+  shouldAutoSelectOnReconcile,
+  shouldRecordSemanticPush,
+  type NavHistoryState,
+} from './navigation-history'
 import * as storage from '@/lib/local-storage'
 import type {
   DeepLinkNavigation,
@@ -132,8 +146,8 @@ interface NavigationProviderProps {
   workspaceId: string | null
   /** Current workspace slug (used for URL ?ws= param and localStorage) */
   workspaceSlug: string | null
-  /** Switch to a workspace by slug (called on popstate when ?ws= changes) */
-  onSwitchWorkspaceBySlug?: (slug: string) => void
+  /** Switch to a workspace by slug (called on popstate when ?ws= changes). Return true if the slug exists. */
+  onSwitchWorkspaceBySlug?: (slug: string) => boolean
   /** Session creation handler */
   onCreateSession: (workspaceId: string, options?: import('../../shared/types').CreateSessionOptions) => Promise<Session>
   /** Input change handler for pre-filling chat input */
@@ -206,13 +220,11 @@ export function NavigationProvider({
   const [canGoBack, setCanGoBack] = useState(false)
   const [canGoForward, setCanGoForward] = useState(false)
 
-  // Sequence numbers stored in history.state for tracking position
-  const historySeqRef = useRef(0)                // Current history position
-  const historyMaxSeqRef = useRef(0)              // Highest pushed seq (for canGoForward)
-  const nextHistorySeqRef = useRef(1)             // Next seq to assign on pushState
+  const historyMachineRef = useRef<NavHistoryState>({ ...INITIAL_NAV_HISTORY })
 
   // Suppress pushState in atom subscriptions during restore/reconciliation
   const suppressPushRef = useRef(false)
+  const restoringHistoryRef = useRef(false)
 
   // Coalesce compound atom writes (e.g. pushPanelAtom sets both panelStackAtom
   // and focusedPanelIdAtom) into a single pushState via microtask debounce
@@ -235,8 +247,9 @@ export function NavigationProvider({
   const lastSemanticHistoryKeyRef = useRef('')
 
   const updateCanGoBackForward = useCallback(() => {
-    setCanGoBack(historySeqRef.current > 0)
-    setCanGoForward(historySeqRef.current < historyMaxSeqRef.current)
+    const machine = historyMachineRef.current
+    setCanGoBack(navHistoryCanGoBack(machine))
+    setCanGoForward(navHistoryCanGoForward(machine))
   }, [])
 
   const getSemanticHistoryKey = useCallback(() => {
@@ -250,6 +263,19 @@ export function NavigationProvider({
       sidebarParam: sidebarKey,
     })
   }, [store, workspaceSlug])
+
+  const endHistoryRestore = useCallback(() => {
+    restoringHistoryRef.current = false
+    suppressPushRef.current = false
+    suppressAutoSelectRef.current = false
+    lastSemanticHistoryKeyRef.current = getSemanticHistoryKey()
+  }, [getSemanticHistoryKey])
+
+  const scheduleEndHistoryRestore = useCallback(() => {
+    requestAnimationFrame(() => {
+      requestAnimationFrame(endHistoryRestore)
+    })
+  }, [endHistoryRestore])
 
   // =========================================================================
   // URL SYNC (builds URL from current state, push or replace)
@@ -305,13 +331,12 @@ export function NavigationProvider({
     const urlStr = url.toString()
 
     if (push) {
-      const seq = nextHistorySeqRef.current++
-      history.pushState({ seq }, '', urlStr)
-      historySeqRef.current = seq
-      historyMaxSeqRef.current = seq // Forward history discarded by browser
+      const pushed = navHistoryAfterPush(historyMachineRef.current)
+      historyMachineRef.current = pushed.state
+      history.pushState({ seq: pushed.seq }, '', urlStr)
       updateCanGoBackForward()
     } else {
-      history.replaceState({ ...history.state, seq: historySeqRef.current }, '', urlStr)
+      history.replaceState({ ...history.state, seq: historyMachineRef.current.seq }, '', urlStr)
     }
 
     // Persist per-workspace URL for workspace switch restoration
@@ -324,8 +349,13 @@ export function NavigationProvider({
   useEffect(() => { syncUrlRef.current = syncUrl }, [syncUrl])
 
   const maybePushHistoryForSemanticChange = useCallback(() => {
+    if (isHistoryUrlSyncSuppressed({
+      suppressPush: suppressPushRef.current,
+      restoringHistory: restoringHistoryRef.current,
+      initialRouteRestored: initialRouteRestoredRef.current,
+    })) return
     const currentSemanticKey = getSemanticHistoryKey()
-    if (currentSemanticKey === lastSemanticHistoryKeyRef.current) return
+    if (!shouldRecordSemanticPush(lastSemanticHistoryKeyRef.current, currentSemanticKey)) return
 
     syncUrlRef.current?.(true)
     lastSemanticHistoryKeyRef.current = currentSemanticKey
@@ -335,7 +365,11 @@ export function NavigationProvider({
   const panelStack = useAtomValue(panelStackAtom)
   const focusedPanelId = useAtomValue(focusedPanelIdAtom)
   useEffect(() => {
-    if (!initialRouteRestoredRef.current) return
+    if (isHistoryUrlSyncSuppressed({
+      suppressPush: suppressPushRef.current,
+      restoringHistory: restoringHistoryRef.current,
+      initialRouteRestored: initialRouteRestoredRef.current,
+    })) return
     syncUrlRef.current(false)
   }, [panelStack, focusedPanelId, rightSidebar])
 
@@ -396,7 +430,13 @@ export function NavigationProvider({
    * Uses reconcilePanelStackAtom for smart matching (preserves React keys).
    */
   const reconcileFromUrlParams = useCallback(
-    (params: URLSearchParams) => {
+    (params: URLSearchParams, options?: { historyRestore?: boolean }) => {
+      const historyRestore = options?.historyRestore === true
+      const resolveForReconcile = (state: NavigationState) => (
+        shouldAutoSelectOnReconcile(historyRestore ? 'history' : 'user')
+          ? resolveAutoSelectionRef.current(state)
+          : state
+      )
       const initialRoute = params.get('route')
       const sidebarParam = params.get('sidebar') || undefined
       const panelsParam = params.get('panels')
@@ -427,12 +467,12 @@ export function NavigationProvider({
             const proportion = parseFloat(entry.slice(colonIdx + 1))
             if (!isNaN(proportion) && proportion > 0 && proportion < 1) {
               const rawRoute = entry.slice(0, colonIdx) as ViewRoute
-              const route = normalizePanelRouteForReconcile(rawRoute, (state) => resolveAutoSelectionRef.current(state))
+              const route = normalizePanelRouteForReconcile(rawRoute, resolveForReconcile)
               return { route, proportion }
             }
           }
           const rawRoute = entry as ViewRoute
-          const route = normalizePanelRouteForReconcile(rawRoute, (state) => resolveAutoSelectionRef.current(state))
+          const route = normalizePanelRouteForReconcile(rawRoute, resolveForReconcile)
           return { route, proportion: 0 }
         })
 
@@ -454,7 +494,7 @@ export function NavigationProvider({
         if (navState) {
           const finalRoute = ('details' in navState && navState.details)
             ? (initialRoute as ViewRoute)
-            : (buildRouteFromNavigationState(resolveAutoSelectionRef.current(navState)) as ViewRoute)
+            : (buildRouteFromNavigationState(resolveForReconcile(navState)) as ViewRoute)
           entries = [{ route: finalRoute, proportion: 1 }]
         }
       }
@@ -880,10 +920,12 @@ export function NavigationProvider({
   // =========================================================================
 
   const goBack = useCallback(() => {
+    if (!navHistoryCanGoBack(historyMachineRef.current)) return
     history.back()
   }, [])
 
   const goForward = useCallback(() => {
+    if (!navHistoryCanGoForward(historyMachineRef.current)) return
     history.forward()
   }, [])
 
@@ -893,9 +935,10 @@ export function NavigationProvider({
 
   useEffect(() => {
     const handlePopState = (event: PopStateEvent) => {
-      // Update sequence tracking
-      const eventSeq = event.state?.seq ?? 0
-      historySeqRef.current = eventSeq
+      historyMachineRef.current = navHistoryAfterPop(
+        historyMachineRef.current,
+        readPopStateSeq(event.state),
+      )
       updateCanGoBackForward()
 
       // Read state from URL (the browser already navigated to it)
@@ -906,8 +949,11 @@ export function NavigationProvider({
       if (wsSlug && wsSlug !== workspaceSlug && onSwitchWorkspaceBySlug) {
         // Workspace boundary crossed — trigger workspace switch
         // The workspace switch effect will handle reconciliation
+        if (!onSwitchWorkspaceBySlug(wsSlug)) {
+          return
+        }
         isPopstateSwitchRef.current = true
-        onSwitchWorkspaceBySlug(wsSlug)
+        restoringHistoryRef.current = true
         return
       }
 
@@ -917,18 +963,19 @@ export function NavigationProvider({
         return
       }
 
-      // Same workspace — reconcile panels from the URL
+      // Same workspace — restore the encoded URL exactly. Auto-select and
+      // replaceState must not immediately overwrite the popped entry.
+      restoringHistoryRef.current = true
       suppressPushRef.current = true
-      reconcileFromUrlParamsRef.current(params)
+      suppressAutoSelectRef.current = true
+      reconcileFromUrlParamsRef.current(params, { historyRestore: true })
       lastSemanticHistoryKeyRef.current = getSemanticHistoryKey()
-      requestAnimationFrame(() => {
-        suppressPushRef.current = false
-      })
+      scheduleEndHistoryRestore()
     }
 
     window.addEventListener('popstate', handlePopState)
     return () => window.removeEventListener('popstate', handlePopState)
-  }, [workspaceSlug, onSwitchWorkspaceBySlug, updateCanGoBackForward, getSemanticHistoryKey, isSessionsReady])
+  }, [workspaceSlug, onSwitchWorkspaceBySlug, updateCanGoBackForward, getSemanticHistoryKey, isSessionsReady, scheduleEndHistoryRestore])
 
   // =========================================================================
   // WORKSPACE SWITCH
@@ -950,11 +997,13 @@ export function NavigationProvider({
 
     // Suppress pushState during reconciliation
     suppressPushRef.current = true
+    restoringHistoryRef.current = true
 
     if (isPopstateSwitchRef.current) {
       // Popstate-triggered: URL is already correct, just reconcile from it
       isPopstateSwitchRef.current = false
-      reconcileFromUrlParamsRef.current(new URLSearchParams(window.location.search))
+      suppressAutoSelectRef.current = true
+      reconcileFromUrlParamsRef.current(new URLSearchParams(window.location.search), { historyRestore: true })
       lastSemanticHistoryKeyRef.current = getSemanticHistoryKey()
     } else {
       // UI-triggered: load stored URL for the new workspace, push history entry
@@ -973,11 +1022,9 @@ export function NavigationProvider({
         url.searchParams.set('route', 'allSessions')
       }
 
-      // Push a new history entry for the workspace switch
-      const seq = nextHistorySeqRef.current++
-      history.pushState({ seq }, '', url.toString())
-      historySeqRef.current = seq
-      historyMaxSeqRef.current = seq
+      const pushed = navHistoryAfterPush(historyMachineRef.current)
+      historyMachineRef.current = pushed.state
+      history.pushState({ seq: pushed.seq }, '', url.toString())
       updateCanGoBackForward()
 
       // Reconcile panels from the new URL
@@ -987,11 +1034,8 @@ export function NavigationProvider({
 
     initialRouteRestoredRef.current = true
 
-    requestAnimationFrame(() => {
-      suppressPushRef.current = false
-      lastSemanticHistoryKeyRef.current = getSemanticHistoryKey()
-    })
-  }, [workspaceId, workspaceSlug, store, updateCanGoBackForward, getSemanticHistoryKey, isSessionsReady])
+    scheduleEndHistoryRestore()
+  }, [workspaceId, workspaceSlug, store, updateCanGoBackForward, getSemanticHistoryKey, isSessionsReady, scheduleEndHistoryRestore])
 
   // =========================================================================
   // INITIAL ROUTE RESTORATION (CMD+R reload)
@@ -1022,14 +1066,16 @@ export function NavigationProvider({
 
     // Initialize history with seq=0 (replaceState so we don't create an extra entry)
     history.replaceState({ seq: 0 }, '', window.location.href)
-    historySeqRef.current = 0
-    historyMaxSeqRef.current = 0
+    historyMachineRef.current = navHistoryAfterReload()
+    updateCanGoBackForward()
 
     requestAnimationFrame(() => {
-      suppressPushRef.current = false
-      lastSemanticHistoryKeyRef.current = getSemanticHistoryKey()
+      requestAnimationFrame(() => {
+        suppressPushRef.current = false
+        lastSemanticHistoryKeyRef.current = getSemanticHistoryKey()
+      })
     })
-  }, [isReady, isSessionsReady, workspaceId, navigate, store, getSemanticHistoryKey])
+  }, [isReady, isSessionsReady, workspaceId, navigate, store, getSemanticHistoryKey, updateCanGoBackForward])
 
   // =========================================================================
   // PENDING NAVIGATION
@@ -1180,7 +1226,7 @@ export function NavigationProvider({
   // =========================================================================
 
   useEffect(() => {
-    if (suppressAutoSelectRef.current) return
+    if (suppressAutoSelectRef.current || restoringHistoryRef.current) return
     if (!isReady || !workspaceId) return
     // Don't auto-select when panel stack is empty (user closed all panels)
     if (store.get(panelStackAtom).length === 0) return

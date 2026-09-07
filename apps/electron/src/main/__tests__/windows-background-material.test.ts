@@ -1,10 +1,16 @@
 import { describe, expect, it } from 'bun:test'
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import {
   getWindowsBackgroundMaterial,
   isWindowsWindowDark,
   nativeThemeSourceForMode,
   parseWindowsBuildNumber,
+  resolveWindowsTitleBarOverlay,
   resolveWindowsWindowBackground,
+  WINDOWS_DARK_TITLEBAR_SYMBOL,
+  WINDOWS_LIGHT_TITLEBAR_SYMBOL,
+  WINDOWS_TITLEBAR_OVERLAY_HEIGHT,
 } from '../windows-background-material.ts'
 
 describe('Windows background material (#53)', () => {
@@ -47,5 +53,30 @@ describe('Windows background material (#53)', () => {
     expect(isWindowsWindowDark('dark', false)).toBe(true)
     expect(isWindowsWindowDark('system', true)).toBe(true)
     expect(isWindowsWindowDark('system', false)).toBe(false)
+  })
+})
+
+describe('Windows title-bar overlay (#260)', () => {
+  it('matches the Selection top-bar height and chrome colors', () => {
+    expect(WINDOWS_TITLEBAR_OVERLAY_HEIGHT).toBe(48)
+    expect(resolveWindowsTitleBarOverlay(false)).toEqual({
+      color: '#fafafb',
+      symbolColor: WINDOWS_LIGHT_TITLEBAR_SYMBOL,
+      height: 48,
+    })
+    expect(resolveWindowsTitleBarOverlay(true)).toEqual({
+      color: '#2b292e',
+      symbolColor: WINDOWS_DARK_TITLEBAR_SYMBOL,
+      height: 48,
+    })
+  })
+
+  it('hides the extra native title-bar row and keeps overlay caption buttons', () => {
+    const windowManager = readFileSync(join(import.meta.dir, '../window-manager.ts'), 'utf8')
+    expect(windowManager).toContain("titleBarStyle: 'hidden'")
+    expect(windowManager).toContain('titleBarOverlay: resolveWindowsTitleBarOverlay')
+    expect(windowManager).toContain('this.applyWindowsWindowChrome(window)')
+    expect(windowManager).toContain('window.setTitleBarOverlay(resolveWindowsTitleBarOverlay(isDark))')
+    expect(windowManager).not.toContain('frame: true, // Keep native frame for better UX')
   })
 })

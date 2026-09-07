@@ -49,14 +49,13 @@ export function isCraftAgentsCliEnabled(): boolean {
 }
 
 /**
- * Restricted orchestrate runner. Defaults off until P4/P5 gates pass.
- * Override with CRAFT_FEATURE_TASKS_ORCHESTRATE=1|0.
+ * Orchestrate runner for v3 coordinator gates and live graph patches.
+ * Defaults off outside the preview build. Override with CRAFT_FEATURE_TASKS_ORCHESTRATE=1|0.
  */
 export function isTasksOrchestrateEnabled(): boolean {
   const override = parseBooleanEnv(getEnv('CRAFT_FEATURE_TASKS_ORCHESTRATE'));
   if (override !== undefined) return override;
-  if (parseBooleanEnv(getEnv('CRAFT_SWARM_PREVIEW_BUILD')) === true) return true;
-  return false;
+  return parseBooleanEnv(getEnv('CRAFT_SWARM_PREVIEW_BUILD')) === true;
 }
 
 /** True only for the separately packaged Swarm/Conductor technical preview. */

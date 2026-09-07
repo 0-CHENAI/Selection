@@ -4,7 +4,6 @@ import { MessagingSettingsPagePreview } from '../demos/messaging/MessagingSettin
 import { MessagingTelegramReworkedPreview } from '../demos/messaging/MessagingTelegramReworkedPreview'
 import { PairingCodeDialogPreview } from '../demos/messaging/PairingCodeDialogPreview'
 import { WhatsAppConnectDialogPreview } from '../demos/messaging/WhatsAppConnectDialogPreview'
-import { MessagingSubmenuPreview } from '../demos/messaging/MessagingSubmenuPreview'
 
 export const messagingComponents: ComponentEntry[] = [
   {
@@ -363,43 +362,6 @@ export const messagingComponents: ComponentEntry[] = [
       {
         name: 'Error',
         props: { phase: 'error', errorMessage: 'Pairing failed: connection timed out' },
-      },
-    ],
-  },
-  {
-    id: 'messaging-submenu',
-    name: 'Messaging Submenu',
-    category: 'Messaging',
-    description: 'Session menu → Connect Messaging submenu (Telegram / WhatsApp)',
-    component: MessagingSubmenuPreview,
-    layout: 'top',
-    previewOverflow: 'visible',
-    props: [
-      {
-        name: 'telegramConnected',
-        description: 'Whether the Telegram bot is connected (changes flow)',
-        control: { type: 'boolean' },
-        defaultValue: true,
-      },
-      {
-        name: 'whatsappConnected',
-        description: 'Whether the WhatsApp adapter is connected (changes flow)',
-        control: { type: 'boolean' },
-        defaultValue: true,
-      },
-    ],
-    variants: [
-      {
-        name: 'Both connected',
-        props: { telegramConnected: true, whatsappConnected: true },
-      },
-      {
-        name: 'Nothing connected',
-        props: { telegramConnected: false, whatsappConnected: false },
-      },
-      {
-        name: 'WhatsApp only',
-        props: { telegramConnected: false, whatsappConnected: true },
       },
     ],
   },
