@@ -28,6 +28,7 @@ export const PI_SESSION_TOOL_SHORT_NAME_ALIASES = [
   'spawn_session',
   'call_llm',
   'run_task',
+  'submit_task_definition',
 ] as const;
 
 export function resolveSessionToolProxyName(toolName: string): string {

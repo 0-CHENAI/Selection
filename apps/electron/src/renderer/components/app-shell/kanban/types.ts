@@ -24,7 +24,7 @@ export type BuiltInKanbanColumnId = 'todo' | 'in-progress' | 'done'
 export type SubtaskRunState = 'done' | 'running' | 'pending' | 'failed'
 
 /**
- * `create` imports a new V3 YAML task; `edit` opens an existing YAML definition.
+ * `create` opens the V3 workflow editor (YAML import remains optional); `edit` opens an existing definition.
  * Legacy targets without taskSlug are rejected, never converted into new tasks.
  * Lives here (not in TaskEditor) so the editor-target atom can reference it
  * without importing a component module.

@@ -88,7 +88,7 @@ import {
 } from '@craft-agent/shared/sessions'
 import { loadWorkspaceSources, loadAllSources, getSourcesBySlugs, isSourceUsable, type LoadedSource, type McpServerConfig, getSourcesNeedingAuth, getSourceCredentialManager, getSourceServerBuilder, type SourceWithCredential, isApiOAuthProvider, hasRenewEndpoint, SERVER_BUILD_ERRORS, TokenRefreshManager, createTokenGetter } from '@craft-agent/shared/sources'
 import { loadTaskResults } from '@craft-agent/shared/tasks'
-import { clearSubmittedDefinition, type TaskRunner } from '../tasks'
+import { clearSubmittedDefinition, validateSubmittedDefinition, rememberSubmittedDefinition, type TaskRunner } from '../tasks'
 import {
   assessSpawnQualification,
   assessSwarmSpawnLimits,
@@ -4771,8 +4771,12 @@ export class SessionManager implements ISessionManager {
           if (!runner) return { ok: false, error: 'Task runner is not available' }
           return runner.submitNodeVerdict(managed.id, input)
         },
-        submitTaskDefinitionFn: async () => {
-          return { valid: false, errors: ['Task generation is disabled. Import a V3 YAML definition.'] }
+        submitTaskDefinitionFn: async (input) => {
+          if (!managed.taskDraft) return { valid: false, errors: ['Only an editor proposal session may submit a definition. Open the workflow editor.'] }
+          const submitted = validateSubmittedDefinition(input.spec)
+          if (!submitted.valid) return submitted
+          rememberSubmittedDefinition(managed.id, managed.processingGeneration, submitted.yaml)
+          return submitted
         },
         controlTaskRunFn: async (input) => {
           const runner = this.taskRunnerLookup?.(managed.workspace.id)

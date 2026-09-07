@@ -4,16 +4,29 @@ import { useTranslation } from 'react-i18next'
 import { MAX_TASK_IMPORT_BYTES } from '@craft-agent/shared/tasks/version'
 import { kanbanEditorDirtyAtom } from '@/atoms/kanban'
 import { prepareTaskImport, taskImportErrorKey } from './task-yaml-import'
+import { TaskTemplateSaveDialog } from './TaskTemplateSave'
+import { taskTemplateErrorKey } from './task-template-library'
 import { toast } from 'sonner'
 import type { TaskEditorProps } from './TaskEditor'
 
-/** New tasks enter through YAML only; existing tasks keep their versioned editor. */
-export function TaskYamlImport({ workspaceId, onClose, onCreated, target }: Pick<TaskEditorProps, 'workspaceId' | 'onClose' | 'onCreated' | 'target'>) {
+/** Optional YAML import. New tasks default to the form editor; existing tasks keep their versioned editor. */
+export function TaskYamlImport({
+  workspaceId,
+  onClose,
+  onCreated,
+  target,
+  onOpenLibrary,
+}: Pick<TaskEditorProps, 'workspaceId' | 'onClose' | 'onCreated' | 'target'> & {
+  onOpenLibrary?: (id: string) => void
+}) {
   const { t } = useTranslation()
   const [yaml, setYaml] = React.useState('')
   const setEditorDirty = useSetAtom(kanbanEditorDirtyAtom)
   const [errors, setErrors] = React.useState<string[]>([])
   const [busy, setBusy] = React.useState(false)
+  const [templateSaveOpen, setTemplateSaveOpen] = React.useState(false)
+  const [templateSaveError, setTemplateSaveError] = React.useState<string | null>(null)
+  const [templateDefaultName, setTemplateDefaultName] = React.useState('')
   const submitting = React.useRef(false)
   const fileRead = React.useRef(0)
   const input = React.useRef<HTMLInputElement>(null)
@@ -94,6 +107,52 @@ export function TaskYamlImport({ workspaceId, onClose, onCreated, target }: Pick
     }
   }
 
+  async function openTemplateSave() {
+    setErrors([])
+    setTemplateSaveError(null)
+    try {
+      const prepared = prepareTaskImport(yaml)
+      const validation = await window.electronAPI.validateTask(workspaceId, prepared.yaml)
+      if (!validation.valid) {
+        setErrors([t('tasks.yamlImportInvalid'), ...validation.errors.map(error => `${error.path}: ${error.message}`)])
+        return
+      }
+      const spec = validation.spec as { title?: string } | undefined
+      setTemplateDefaultName(spec?.title?.trim() || t('tasks.templateLibrary'))
+      setTemplateSaveOpen(true)
+    } catch (error) {
+      setErrors([t(taskImportErrorKey(error))])
+    }
+  }
+
+  async function confirmTemplateSave(input: { name: string; description: string; tags: string[] }) {
+    if (busy) return
+    setBusy(true)
+    setTemplateSaveError(null)
+    try {
+      const prepared = prepareTaskImport(yaml)
+      const saved = await window.electronAPI.saveTaskTemplate(workspaceId, {
+        name: input.name,
+        description: input.description || undefined,
+        tags: input.tags,
+        yaml: prepared.yaml,
+      })
+      if (!saved.validation.valid) {
+        setTemplateSaveError(saved.validation.errors[0]?.message ?? t('tasks.templateInvalid'))
+        return
+      }
+      toast.success(t('tasks.templateSaveSuccess'))
+      setEditorDirty(false)
+      setTemplateSaveOpen(false)
+      if (onOpenLibrary) onOpenLibrary(saved.id)
+      else onClose()
+    } catch (error) {
+      setTemplateSaveError(t(taskTemplateErrorKey(error)))
+    } finally {
+      if (mounted.current) setBusy(false)
+    }
+  }
+
   return (
     <section className="flex h-full min-h-0 flex-col gap-4 p-6" aria-label={t('tasks.yamlImportTitle')} aria-busy={busy}>
       <h2 className="text-lg font-semibold">{t('tasks.yamlImportTitle')}</h2>
@@ -111,11 +170,23 @@ export function TaskYamlImport({ workspaceId, onClose, onCreated, target }: Pick
       </ul>}
       <div className="flex justify-end gap-3">
         <button type="button" disabled={busy} onClick={closeEditor}>{t('common.cancel')}</button>
+        <button type="button" disabled={busy || !yaml.trim()} onClick={() => void openTemplateSave()}
+          className="rounded-md border px-4 py-2 text-sm disabled:opacity-50">
+          {t('tasks.templateSaveToLibrary')}
+        </button>
         <button type="button" disabled={busy || !yaml.trim()} onClick={() => void importTask()}
           className="rounded-md bg-foreground px-4 py-2 text-sm text-background disabled:opacity-50">
           {t(busy ? 'tasks.yamlImportBusy' : 'tasks.yamlImportTitle')}
         </button>
       </div>
+      <TaskTemplateSaveDialog
+        open={templateSaveOpen}
+        defaultName={templateDefaultName || t('tasks.templateLibrary')}
+        busy={busy}
+        error={templateSaveError ?? undefined}
+        onClose={() => { if (!busy) setTemplateSaveOpen(false) }}
+        onSubmit={(input) => void confirmTemplateSave(input)}
+      />
     </section>
   )
 }

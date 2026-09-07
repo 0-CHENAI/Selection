@@ -4,7 +4,9 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 
 ## Features
 
-- **New orchestrations use V3 YAML import** — Import a YAML file or paste a definition with explicit `schema_version: 3`. Invalid definitions, older versions and duplicate task IDs are rejected before saving. Form creation, natural-language generation and Agent task-creation tools are unavailable. Existing tasks retain their versioned editing flow. Imports do not start runs; the default runner remains `conduct`, and `orchestrate` retains its preview/opt-in gate.
+- **V3 workflows with human collaboration** — Create and edit workflows without writing YAML. AI produces a proposal for review; apply it to an unsaved draft, add/edit/remove nodes and dependencies, then explicitly save. YAML import remains optional. Human approval nodes show the running definition and upstream output, persist feedback across restart, and stay gated until approval. Creating does not start a run. Existing tasks retain versioned editing, and `orchestrate` retains its preview/opt-in gate. ([#288](https://github.com/0-CHENAI/Selection/issues/288))
+
+- **Orchestration template library** — Save a validated V3 definition as a reusable workspace template, browse cards, open a read-only graph, inspect node definitions, and create a new workflow instance. Saving or using a template never starts a run, and templates stay outside `tasks/`. ([#286](https://github.com/0-CHENAI/Selection/issues/286))
 
 ## Improvements
 

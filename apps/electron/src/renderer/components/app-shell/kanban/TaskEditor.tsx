@@ -6,6 +6,11 @@ import { cn } from '@/lib/utils'
 import { Spinner, Markdown } from '@craft-agent/ui'
 import { getModelShortName } from '@config/models'
 import { TaskYamlImport } from './TaskYamlImport'
+import { TaskProposal } from './TaskProposal'
+import { TaskApproval } from './TaskApproval'
+import { TaskTemplateLibrary } from './TaskTemplateLibrary'
+import { TaskTemplateSaveDialog } from './TaskTemplateSave'
+import { taskTemplateErrorKey } from './task-template-library'
 import { isUnboundTaskEdit } from './orchestration-editor-target'
 import { catalogDefaultModel } from './kanban-models'
 import { useAtom, useAtomValue, useStore } from 'jotai'
@@ -448,6 +453,13 @@ function SubtaskCard({
             className="mt-1.5 w-full resize-none rounded-md border border-border/60 bg-background px-2 py-1.5 text-[12px] leading-relaxed outline-none focus:border-foreground/25 field-sizing-content max-h-40"
           />
           <div className="mt-2 flex flex-wrap items-center gap-1.5">
+            <select aria-label={t('tasks.inspectorKind')} value={subtask.kind ?? 'session'}
+              onChange={e => onChange({ kind: e.target.value as EditorSubtask['kind'] })}
+              className="rounded-md border bg-background px-2 py-1 text-xs">
+              <option value="session">{t('tasks.nodeKindSession')}</option>
+              <option value="approval">{t('tasks.nodeKindApproval')}</option>
+              {subtask.kind && !['session', 'approval'].includes(subtask.kind) && <option value={subtask.kind}>{subtask.kind}</option>}
+            </select>
             <ModelSelect
               value={subtask.model ?? fallbackModel}
               onChange={(id) => onChange({ model: id, llmConnection: modelToConnection.get(id) })}
@@ -530,21 +542,41 @@ export interface TaskEditorProps {
   modelToConnection: Map<string, string>
   /** Default model id. */
   defaultModel: string
+  /** Current project scope for template instances when the editor is not in create mode. */
+  scopeProjectId?: string
 }
 
 export function TaskEditor(props: TaskEditorProps) {
   const { t } = useTranslation()
+  const [pane, setPane] = React.useState<'editor' | 'import' | 'library'>('editor')
+  const [libraryFocus, setLibraryFocus] = React.useState<string | undefined>()
+  const projectId = props.target?.mode === 'create' ? props.target.initialProjectId : props.scopeProjectId
   if (isUnboundTaskEdit(props.target)) {
     return <section className="flex h-full flex-col items-start gap-4 p-6">
       <p role="alert">{t('tasks.yamlImportUnbound')}</p>
       <Button onClick={props.onClose}>{t('common.cancel')}</Button>
     </section>
   }
-  if (props.target?.mode !== 'edit' || !props.target.taskSlug) {
-    const scope = props.target?.mode === 'create' ? props.target.initialProjectId ?? '' : ''
-    return <TaskYamlImport key={`${props.workspaceId}:${scope}`} {...props} />
+  if (pane === 'import' && props.target?.mode !== 'edit') {
+    const scope = projectId ?? ''
+    return <TaskYamlImport key={`${props.workspaceId}:${scope}`} {...props} onClose={() => setPane('editor')} onOpenLibrary={(id) => { setLibraryFocus(id); setPane('library') }} />
   }
-  return <ExistingTaskEditor key={`${props.workspaceId}:${props.target.taskSlug}`} {...props} />
+  if (pane === 'library') {
+    return <TaskTemplateLibrary
+      workspaceId={props.workspaceId}
+      projectId={projectId}
+      initialId={libraryFocus}
+      onClose={() => { setLibraryFocus(undefined); setPane('editor') }}
+      onCreated={props.onCreated}
+    />
+  }
+  return <ExistingTaskEditor
+    key={`${props.workspaceId}:${props.target?.mode === 'edit' ? props.target.taskSlug : projectId ?? ''}`}
+    {...props}
+    onImport={() => setPane('import')}
+    onOpenLibrary={() => setPane('library')}
+    onSavedTemplate={(id) => { setLibraryFocus(id); setPane('library') }}
+  />
 }
 
 function ExistingTaskEditor({
@@ -553,10 +585,14 @@ function ExistingTaskEditor({
   onClose,
   onOpenSession,
   onOpenChildSession,
+  onCreated,
+  onImport,
+  onOpenLibrary,
+  onSavedTemplate,
   modelGroups,
   modelToConnection,
   defaultModel,
-}: TaskEditorProps) {
+}: TaskEditorProps & { onImport: () => void; onOpenLibrary: () => void; onSavedTemplate: (id: string) => void }) {
   const { t } = useTranslation()
   const isEdit = target.mode === 'edit'
   // The slug to pin on save (edit mode). Undefined for create and for quick-add tiles with no slug;
@@ -608,6 +644,12 @@ function ExistingTaskEditor({
   const [sourceSlugs, setSourceSlugs] = React.useState<string[]>([])
   const [skillSlugs, setSkillSlugs] = React.useState<string[]>([])
   const [busy, setBusy] = React.useState(false)
+  const [templateSaveOpen, setTemplateSaveOpen] = React.useState(false)
+  const [templateSaveError, setTemplateSaveError] = React.useState<string | null>(null)
+  const [pendingTemplateYaml, setPendingTemplateYaml] = React.useState<string | null>(null)
+  const submitLock = React.useRef(false)
+  const mounted = React.useRef(true)
+  React.useEffect(() => { mounted.current = true; return () => { mounted.current = false } }, [])
 
   // Pickable catalogs from the active workspace (AppShell keeps these atoms populated).
   const workspaceSources = useAtomValue(sourcesAtom)
@@ -624,6 +666,7 @@ function ExistingTaskEditor({
   const [resultsLoading, setResultsLoading] = React.useState(false)
   const [selectedRunId, setSelectedRunId] = React.useState<string | null>(null)
   const [liveRun, setLiveRun] = React.useState<Awaited<ReturnType<typeof window.electronAPI.runTask>> | null>(null)
+  const hasActiveRun = !!liveRun && !['completed', 'failed', 'stopped'].includes(liveRun.status)
   const [tokenBudgetDraft, setTokenBudgetDraft] = React.useState('')
   const [sensitiveParamDrafts, setSensitiveParamDrafts] = React.useState<Record<string, string>>({})
   const [etag, setEtag] = React.useState<string | null>(null)
@@ -789,10 +832,10 @@ function ExistingTaskEditor({
   React.useEffect(() => {
     if (!editSlug) return
     return window.electronAPI.onTaskRunChanged((_ws, snapshot) => {
-      if (snapshot.slug !== editSlug) return
+      if (_ws !== workspaceId || snapshot.slug !== editSlug) return
       setLiveRun(snapshot)
     })
-  }, [editSlug])
+  }, [editSlug, workspaceId])
 
   const controlRun = React.useCallback(
     async (op: 'pause' | 'resume' | 'stop' | 'continue') => {
@@ -1053,6 +1096,7 @@ function ExistingTaskEditor({
 
   // Save only an existing, successfully loaded task. Running remains an explicit action.
   async function submit(run: boolean, confirmV3Migration = false) {
+    if (submitLock.current) return
     if (isEdit && !canSafelySaveExistingTask({ taskSlug: editSlug, etag, loadError: taskLoadError })) {
       toast.error(t('tasks.toastLoadFailed'), { description: taskLoadError ?? t('tasks.loadFailedBanner') })
       return
@@ -1071,6 +1115,7 @@ function ExistingTaskEditor({
         return
       }
     }
+    submitLock.current = true
     setBusy(true)
     try {
       let spec: Record<string, unknown>
@@ -1159,10 +1204,76 @@ function ExistingTaskEditor({
         onClose()
         return
       }
+      if (!isEdit) {
+        const created = await window.electronAPI.createTask(workspaceId, { yaml })
+        if (!created.validation.valid) {
+          setYamlDiagnostics(created.validation.errors.map(e => `${e.path}: ${e.message}`))
+          toast.error(t('tasks.toastInvalid'), { description: created.validation.errors[0]?.message })
+          return
+        }
+        toast.success(t('tasks.workflowCreated'))
+        if (mounted.current) {
+          onCreated?.({ sessionId: created.orchestratorSessionId, taskLabelId: created.taskLabelId, projectId: typeof spec.project === 'string' ? spec.project : undefined })
+          onClose()
+        }
+      }
     } catch (err) {
       toast.error(t('tasks.toastCreateFailed'), { description: err instanceof Error ? err.message : String(err) })
     } finally {
+      submitLock.current = false
       setBusy(false)
+    }
+  }
+
+  async function openTemplateSave() {
+    try {
+      let yaml: string
+      if (tab === 'yaml') {
+        const validation = await window.electronAPI.validateTask(workspaceId, yamlDraft)
+        if (!validation.valid || !validation.spec) {
+          toast.error(t('tasks.toastInvalid'), { description: validation.errors[0]?.message })
+          return
+        }
+        yaml = taskDocumentForSave('yaml', yamlDraft, validation.spec as Record<string, unknown>)
+      } else {
+        if (!title.trim() || subtasks.length === 0) {
+          toast.error(t(!title.trim() ? 'tasks.toastNeedTitle' : 'tasks.toastNeedSubtask'))
+          return
+        }
+        yaml = taskDocumentForSave('form', yamlDraft, currentSpec() as unknown as Record<string, unknown>)
+      }
+      setPendingTemplateYaml(yaml)
+      setTemplateSaveError(null)
+      setTemplateSaveOpen(true)
+    } catch (err) {
+      toast.error(t(taskTemplateErrorKey(err)), { description: err instanceof Error ? err.message : String(err) })
+    }
+  }
+
+  async function confirmTemplateSave(input: { name: string; description: string; tags: string[] }) {
+    if (!pendingTemplateYaml || busy) return
+    setBusy(true)
+    setTemplateSaveError(null)
+    try {
+      const saved = await window.electronAPI.saveTaskTemplate(workspaceId, {
+        name: input.name,
+        description: input.description || undefined,
+        tags: input.tags,
+        sourceTaskSlug: editSlug,
+        yaml: pendingTemplateYaml,
+      })
+      if (!saved.validation.valid) {
+        setTemplateSaveError(saved.validation.errors[0]?.message ?? t('tasks.templateInvalid'))
+        return
+      }
+      toast.success(t('tasks.templateSaveSuccess'))
+      setTemplateSaveOpen(false)
+      setPendingTemplateYaml(null)
+      onSavedTemplate(saved.id)
+    } catch (err) {
+      setTemplateSaveError(t(taskTemplateErrorKey(err)))
+    } finally {
+      if (mounted.current) setBusy(false)
     }
   }
 
@@ -1222,36 +1333,6 @@ function ExistingTaskEditor({
               <Btn variant="secondary" onClick={() => void controlRun('stop')}>{t('tasks.stopRun')}</Btn>
             </div>
           )}
-          {isEdit && liveRun?.nodes.some((n) => n.state === 'waiting-approval') && (
-            <div className="flex items-center gap-1.5">
-              {liveRun.nodes.filter((n) => n.state === 'waiting-approval').map((n) => (
-                <span key={n.id} className="flex items-center gap-1">
-                  <Btn
-                    variant="secondary"
-                    onClick={() => void window.electronAPI.respondTaskApproval(workspaceId, {
-                      slug: editSlug!,
-                      runId: liveRun.runId,
-                      nodeId: n.id,
-                      approved: true,
-                    }).then((res) => { if (!res.conflict) setLiveRun(res.snapshot) })}
-                  >
-                    {t('tasks.approveNode', { id: n.id })}
-                  </Btn>
-                  <Btn
-                    variant="secondary"
-                    onClick={() => void window.electronAPI.respondTaskApproval(workspaceId, {
-                      slug: editSlug!,
-                      runId: liveRun.runId,
-                      nodeId: n.id,
-                      approved: false,
-                    }).then((res) => { if (!res.conflict) setLiveRun(res.snapshot) })}
-                  >
-                    {t('tasks.rejectNode', { id: n.id })}
-                  </Btn>
-                </span>
-              ))}
-            </div>
-          )}
           {isEdit && liveRun?.status === 'waiting-budget' && (
             <div className="flex items-center gap-1.5">
               <input
@@ -1299,10 +1380,10 @@ function ExistingTaskEditor({
               <Btn variant="secondary" onClick={() => submit(false)} disabled={busy || !!taskLoadError}>
                 {isEdit ? t('common.save') : t('common.create')}
               </Btn>
-              <Btn variant="primary" onClick={() => submit(true)} disabled={busy || !!taskLoadError}>
+              {isEdit && <Btn variant="primary" onClick={() => submit(true)} disabled={busy || !!taskLoadError || hasActiveRun}>
                 {busy ? <Spinner /> : <Sparkles className="h-3.5 w-3.5" strokeWidth={2.5} />}
                 {busy ? t('tasks.starting') : isEdit ? t('tasks.saveAndRun') : t('tasks.createAndRun')}
-              </Btn>
+              </Btn>}
             </>
           )}
           {tab === 'results' && (
@@ -1313,10 +1394,36 @@ function ExistingTaskEditor({
         </div>
       </div>
 
+      {hasActiveRun && <p className="text-xs text-muted-foreground">{t('tasks.runDefinitionFrozen')}</p>}
+      {liveRun?.nodes.filter(n => n.state === 'waiting-approval').map(n =>
+        <TaskApproval key={`${liveRun.runId}:${n.id}`} workspaceId={workspaceId} run={liveRun} nodeId={n.id} onChange={setLiveRun} />
+      )}
       {taskLoadError && (
         <div role="alert" className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-[12.5px] text-red-700 dark:text-red-300">
           <span className="font-semibold">{t('tasks.loadFailedBanner')}</span>{' '}
           <span>{taskLoadError}</span>
+        </div>
+      )}
+
+      {tab === 'definition' && <TaskProposal
+        workspaceId={workspaceId}
+        draftIdentity={JSON.stringify(currentSpec())}
+        currentYaml={title.trim() && subtasks.length ? taskDocumentForSave('form', yamlDraft, currentSpec() as unknown as Record<string, unknown>) : undefined}
+        projectId={projectId}
+        model={orchModel}
+        llmConnection={orchConnection ?? modelToConnection.get(orchModel)}
+        disabled={busy || !!taskLoadError}
+        onApply={(spec) => {
+          const next = spec as EditableTaskSpec
+          applyWorkbenchSpec({ ...next, project: next.project ?? projectId,
+            defaults: { model: orchModel, llmConnection: orchConnection ?? modelToConnection.get(orchModel), permissionMode, ...next.defaults } })
+        }}
+      />}
+      {tab === 'definition' && (
+        <div className="flex flex-wrap gap-2">
+          <Button variant="ghost" className="self-start" onClick={() => { if (!dirty || window.confirm(t('tasks.discardUnsaved'))) onOpenLibrary() }}>{t('tasks.templateLibrary')}</Button>
+          {!isEdit && <Button variant="ghost" className="self-start" onClick={() => { if (!dirty || window.confirm(t('tasks.discardUnsaved'))) onImport() }}>{t('tasks.yamlImportTitle')}</Button>}
+          <Button variant="ghost" className="self-start" disabled={busy} onClick={() => void openTemplateSave()}>{t('tasks.templateSave')}</Button>
         </div>
       )}
 
@@ -1615,6 +1722,14 @@ function ExistingTaskEditor({
           }
         }}
         onConfirm={() => void confirmRunRevision()}
+      />
+      <TaskTemplateSaveDialog
+        open={templateSaveOpen}
+        defaultName={title.trim() || t('tasks.templateLibrary')}
+        busy={busy}
+        error={templateSaveError ?? undefined}
+        onClose={() => { if (!busy) { setTemplateSaveOpen(false); setPendingTemplateYaml(null) } }}
+        onSubmit={(input) => void confirmTemplateSave(input)}
       />
       <Dialog open={v3Confirm !== null} onOpenChange={(open) => { if (!open) setV3Confirm(null) }}>
         <DialogContent className="max-h-[82vh] overflow-y-auto sm:max-w-[560px]">
