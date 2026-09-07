@@ -6,7 +6,7 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 
 ## Improvements
 
-- **List / new-orchestration controls no longer jump between views** — Desktop keeps search and the switcher together in one top-bar slot immediately after the workspace selector. Opening or leaving the orchestration editor now changes only the selected switcher item and main content, while project context and return navigation stay intact. ([#283](https://github.com/0-CHENAI/Selection/issues/283))
+- **List / new-orchestration controls no longer jump between views** — Desktop keeps search and the switcher together in one top-bar slot immediately after the workspace selector. Opening or leaving the orchestration editor now changes only the selected switcher item and main content, while project context and return navigation stay intact; unsaved editor changes are confirmed before either control leaves the editor. ([#283](https://github.com/0-CHENAI/Selection/issues/283))
 
 - **Windows title bar now shares a row with the Selection top bar** — The extra native title-bar strip is gone. Minimize, maximize, and close stay on the right via the Windows overlay; the rest of the bar stays draggable and keeps sidebar, back/forward, and workspace controls. ([#260](https://github.com/0-CHENAI/Selection/issues/260))
 

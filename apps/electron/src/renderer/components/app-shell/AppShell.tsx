@@ -72,7 +72,7 @@ import { getSessionTitle } from "@/utils/session"
 import { useSetAtom } from "jotai"
 import type { Session, Workspace, FileAttachment, PermissionRequest, LoadedSource, LoadedSkill, PermissionMode, SourceFilter, AutomationFilter } from "../../../shared/types"
 import { sessionMetaMapAtom, sendToWorkspaceAtom, type SessionMeta } from "@/atoms/sessions"
-import { kanbanEditorTargetAtom } from "@/atoms/kanban"
+import { kanbanEditorDirtyAtom, kanbanEditorTargetAtom } from "@/atoms/kanban"
 import { isOrdinarySessionVisible } from '@/lib/swarm-session'
 import { sourcesAtom } from "@/atoms/sources"
 import { skillsAtom } from "@/atoms/skills"
@@ -313,6 +313,7 @@ function AppShellContent({
   // so the navigator (and its resize handle) collapse to zero width while it's active.
   const isBoardView = isSessionsNavigation(navState) && navState.viewMode === 'board'
   const setKanbanEditorTarget = useSetAtom(kanbanEditorTargetAtom)
+  const kanbanEditorDirty = useAtomValue(kanbanEditorDirtyAtom)
 
   // Derive source filter from navigation state (only when in sources navigator)
   const sourceFilter: SourceFilter | null = isSourcesNavigation(navState) ? navState.filter ?? null : null
@@ -412,6 +413,18 @@ function AppShellContent({
   const [searchActive, setSearchActive] = React.useState(false)
   const [searchQuery, setSearchQuery] = React.useState('')
 
+  const leaveOrchestrationView = React.useCallback(() => {
+    if (kanbanEditorDirty && !window.confirm(t('tasks.discardUnsaved'))) return false
+    setKanbanEditorTarget(null)
+    navigate(routes.view.allSessions())
+    return true
+  }, [kanbanEditorDirty, setKanbanEditorTarget, t])
+
+  const openSessionSearch = React.useCallback(() => {
+    if (isBoardView && !leaveOrchestrationView()) return
+    setSearchActive(true)
+  }, [isBoardView, leaveOrchestrationView])
+
   // Ref for ChatDisplay navigation (exposed via forwardRef)
   const chatDisplayRef = React.useRef<ChatDisplayHandle>(null)
   // Track match count and index from ChatDisplay (for SessionList navigation UI)
@@ -450,7 +463,7 @@ function AppShellContent({
   }, [navFilterKey])
 
   // Cmd+F to activate search
-  useAction('app.search', () => setSearchActive(true))
+  useAction('app.search', openSessionSearch)
 
   // Unified sidebar keyboard navigation state
   // Load expanded folders from localStorage (default: all collapsed)
@@ -1847,20 +1860,13 @@ function AppShellContent({
               <HeaderIconButton
                 icon={<Search className="h-4 w-4" />}
                 tooltip={t("sidebar.search")}
-                onClick={() => {
-                  if (isBoardView) {
-                    setKanbanEditorTarget(null)
-                    navigate(routes.view.allSessions())
-                  }
-                  setSearchActive(true)
-                }}
+                onClick={openSessionSearch}
               />
               <BoardListToggle
                 value={isBoardView ? 'board' : 'list'}
                 onChange={view => {
                   if (view === 'list' && isBoardView) {
-                    setKanbanEditorTarget(null)
-                    navigate(routes.view.allSessions())
+                    leaveOrchestrationView()
                   } else if (view === 'board' && !isBoardView) {
                     navigate(routes.view.board())
                   }
@@ -2149,7 +2155,7 @@ function AppShellContent({
                     <HeaderIconButton
                       icon={<Search className="h-4 w-4" />}
                       tooltip={t("sidebar.search")}
-                      onClick={() => setSearchActive(true)}
+                      onClick={openSessionSearch}
                     />
                   ) : undefined
                 ) : (

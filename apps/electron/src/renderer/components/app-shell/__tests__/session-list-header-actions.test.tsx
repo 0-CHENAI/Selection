@@ -80,7 +80,8 @@ describe('session list and orchestration view controls (#264, #283)', () => {
     expect(controls).toContain("value={isBoardView ? 'board' : 'list'}")
     expect(controls).toContain("view === 'list' && isBoardView")
     expect(controls).toContain("view === 'board' && !isBoardView")
-    expect(controls).toContain('setSearchActive(true)')
+    expect(controls).toContain('onClick={openSessionSearch}')
+    expect(controls).toContain('leaveOrchestrationView()')
     expect(controls).toContain('flex items-center gap-1.5')
   })
 
@@ -89,7 +90,7 @@ describe('session list and orchestration view controls (#264, #283)', () => {
 
     expect(actions).toContain('isAutoCompact ? (')
     expect(actions).toContain('sidebar.search')
-    expect(actions).toContain('setSearchActive(true)')
+    expect(actions).toContain('onClick={openSessionSearch}')
     expect(actions).not.toContain('BoardListToggle')
     expect(actions).not.toContain('ListFilter')
     expect(actions).not.toContain('sidebar.filterChats')
@@ -103,12 +104,23 @@ describe('session list and orchestration view controls (#264, #283)', () => {
       'utf8',
     )
 
-    expect(appShell).toContain("useAction('app.search', () => setSearchActive(true))")
+    expect(appShell).toContain("useAction('app.search', openSessionSearch)")
     expect(appShell).toContain('titleAlign="start"')
     expect(appShell).toContain('searchActive={searchActive}')
     expect(sessionList).toContain('searchActive && (')
     expect(sessionList).toContain('<SessionSearchHeader')
     expect(useSessionSearch).toContain('searchInputRef.current?.focus()')
+  })
+
+  it('protects unsaved orchestration edits for both search and list navigation', () => {
+    const appShell = readFileSync(join(import.meta.dir, '../AppShell.tsx'), 'utf8')
+    const taskEditor = readFileSync(join(import.meta.dir, '../kanban/TaskEditor.tsx'), 'utf8')
+
+    expect(appShell).toContain('useAtomValue(kanbanEditorDirtyAtom)')
+    expect(appShell).toContain("kanbanEditorDirty && !window.confirm(t('tasks.discardUnsaved'))")
+    expect(appShell).toContain('if (isBoardView && !leaveOrchestrationView()) return')
+    expect(taskEditor).toContain('useAtom(kanbanEditorDirtyAtom)')
+    expect(taskEditor).toContain('return () => setDirty(false)')
   })
 
   it('uses exactly one desktop switcher for list and orchestration views', () => {
@@ -131,17 +143,12 @@ describe('session list and orchestration view controls (#264, #283)', () => {
     expect(topBarCall).toContain("value={isBoardView ? 'board' : 'list'}")
   })
 
-  it('pushes header actions to the right and keeps search left of the switcher in the DOM', () => {
+  it('keeps compact search clear of the start-aligned list title', () => {
     const html = renderWithShell(
       <PanelHeader
         title="所有会话"
         titleAlign="start"
-        actions={
-          <div className="flex items-center gap-1.5">
-            <button type="button">Search</button>
-            <button type="button">List / New orchestration</button>
-          </div>
-        }
+        actions={<button type="button">Search</button>}
       />,
     )
 
@@ -150,7 +157,6 @@ describe('session list and orchestration view controls (#264, #283)', () => {
     expect(html).toContain('shrink-0')
     expect(html).toContain('pr-2')
     expect(html.indexOf('所有会话')).toBeLessThan(html.indexOf('Search'))
-    expect(html.indexOf('Search')).toBeLessThan(html.indexOf('List / New orchestration'))
   })
 
   it('labels the switcher 列表 / 新建编排 in Chinese', () => {
@@ -165,6 +171,8 @@ describe('session list and orchestration view controls (#264, #283)', () => {
     expect(html).toContain('列表')
     expect(html).toContain('新建编排')
     expect(html.indexOf('列表')).toBeLessThan(html.indexOf('新建编排'))
+    expect((html.match(/aria-pressed="true"/g) ?? []).length).toBe(1)
+    expect((html.match(/aria-pressed="false"/g) ?? []).length).toBe(1)
   })
 
   it('still opens the existing search field with close control when search is active', () => {

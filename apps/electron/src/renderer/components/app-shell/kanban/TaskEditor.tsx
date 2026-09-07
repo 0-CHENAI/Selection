@@ -6,7 +6,7 @@ import { cn } from '@/lib/utils'
 import { Spinner, LoadingIndicator, Markdown } from '@craft-agent/ui'
 import { getModelShortName } from '@config/models'
 import { catalogDefaultModel } from './kanban-models'
-import { useAtomValue, useStore } from 'jotai'
+import { useAtom, useAtomValue, useStore } from 'jotai'
 import { useProjects } from '@/hooks/useProjects'
 import { sourcesAtom } from '@/atoms/sources'
 import { skillsAtom } from '@/atoms/skills'
@@ -44,6 +44,7 @@ import { WorkingDirectorySelector } from '../input/WorkingDirectorySelector'
 import type { LoadedSource, LoadedSkill } from '../../../../shared/types'
 import { resolveSkillTitle, resolveSourceTitle } from '@craft-agent/shared/display-titles'
 import { buildSensitiveRunParams, sensitiveRunParamNames } from './sensitive-run-params'
+import { kanbanEditorDirtyAtom } from '@/atoms/kanban'
 
 // Client-side fallback for async generate: a touch longer than the server's GENERATE_TIMEOUT_MS
 // (180s) so the orchestrator's own timeout + result push can land before we give up locally.
@@ -578,7 +579,11 @@ export function TaskEditor({
   const [yamlDiagnostics, setYamlDiagnostics] = React.useState<string[]>([])
   const [yamlHasLocalSource, setYamlHasLocalSource] = React.useState(false)
   const [formChangedSinceYaml, setFormChangedSinceYaml] = React.useState(false)
-  const [dirty, setDirty] = React.useState(false)
+  const [dirty, setDirty] = useAtom(kanbanEditorDirtyAtom)
+
+  React.useEffect(() => {
+    return () => setDirty(false)
+  }, [setDirty])
   const [title, setTitle] = React.useState('')
   const [goal, setGoal] = React.useState('')
   const [acceptanceCriteria, setAcceptanceCriteria] = React.useState('')
@@ -643,7 +648,7 @@ export function TaskEditor({
   const markFormChanged = React.useCallback(() => {
     setDirty(true)
     setFormChangedSinceYaml(true)
-  }, [])
+  }, [setDirty])
 
   // Jotai store handle for one-shot reads (no subscription — the editor must not re-render
   // on every streaming metadata tick just to have read children once at open).
@@ -948,7 +953,7 @@ export function TaskEditor({
     } finally {
       setRevisionApplying(false)
     }
-  }, [editSlug, etag, revisionPreview, revisionPreviewRunId, t, workspaceId])
+  }, [editSlug, etag, revisionPreview, revisionPreviewRunId, setDirty, t, workspaceId])
 
   // Async generate: tasks:generate returns the orchestrator session id immediately and the
   // authored spec arrives later via the onTaskGenerated push event. We track the pending
@@ -1041,7 +1046,7 @@ export function TaskEditor({
       // the visible signal. A top-right toast would also overlap the editor's top-right
       // Cancel/Create/Create & Run buttons and swallow their clicks.
     },
-    [t, discardDraft],
+    [t, discardDraft, setDirty],
   )
 
   // Subscribe once for async generate results; ignore events for other generations/sessions.
@@ -1159,7 +1164,7 @@ export function TaskEditor({
     setPermissionMode(next.defaults?.permissionMode ?? 'safe')
     setLayout(next.ui?.layout?.nodes ?? {})
     setSubtasks(specToSubtasks(next.nodes ?? []))
-  }, [])
+  }, [setDirty])
 
   const validateYamlDraft = React.useCallback(async () => {
     try {
