@@ -87,8 +87,8 @@ import {
   isSpawnedSwarmAgent,
 } from '@craft-agent/shared/sessions'
 import { loadWorkspaceSources, loadAllSources, getSourcesBySlugs, isSourceUsable, type LoadedSource, type McpServerConfig, getSourcesNeedingAuth, getSourceCredentialManager, getSourceServerBuilder, type SourceWithCredential, isApiOAuthProvider, hasRenewEndpoint, SERVER_BUILD_ERRORS, TokenRefreshManager, createTokenGetter } from '@craft-agent/shared/sources'
-import { listTaskSlugs, parseTaskSpec, parseTaskYaml, serializeTaskYaml, uniqueTaskSlug, loadTaskResults } from '@craft-agent/shared/tasks'
-import { clearSubmittedDefinition, createTaskFromSpec, inheritTaskExecutionDefaults, resolveCreateTaskProjectId, rememberSubmittedDefinition, validateSubmittedDefinition, type TaskRunner } from '../tasks'
+import { loadTaskResults } from '@craft-agent/shared/tasks'
+import { clearSubmittedDefinition, type TaskRunner } from '../tasks'
 import {
   assessSpawnQualification,
   assessSwarmSpawnLimits,
@@ -4719,80 +4719,8 @@ export class SessionManager implements ISessionManager {
             await this.unarchiveSession(sessionId)
           }
         },
-        // create_task — create a Task (board card + task.yaml + orchestrator session)
-        // WITHOUT running it. Spec building happens here (not in session-tools-core,
-        // which must stay dependency-free of @craft-agent/shared); the creation flow
-        // itself is createTaskFromSpec, shared verbatim with the tasks:create RPC.
-        createTaskFn: async (input) => {
-          const ws = managed.workspace
-          const sessionExecution = {
-            model: this.sessionExecutionModel(managed),
-            llmConnection: managed.llmConnection,
-          }
-          // Match spawn_session: an explicit project wins, otherwise keep newly
-          // captured work in the project that owns the invoking session.
-          const projectId = resolveCreateTaskProjectId(input.projectId, managed.projectId)
-          // Slug is derived from the title and must never overwrite an existing task
-          // (unlike the TaskEditor, where re-saving the same slug is the edit flow).
-          if (input.spec) {
-            const raw = input.spec as Record<string, unknown>
-            const slug = uniqueTaskSlug(String(raw.title ?? raw.id ?? 'task'), new Set(listTaskSlugs(ws.rootPath)))
-            const parsed = parseTaskSpec({ ...raw, id: slug, schema_version: 2, ...(projectId ? { project: projectId } : {}) })
-            if (!parsed.success) {
-              throw new Error(`Invalid task spec: ${parsed.error.issues.map(i => i.message).join('; ')}`)
-            }
-            const created = await createTaskFromSpec(
-              this,
-              ws.id,
-              ws.rootPath,
-              inheritTaskExecutionDefaults(parsed.data, sessionExecution),
-            )
-            return { ...created, warnings: [...created.warnings] }
-          }
-          const slug = uniqueTaskSlug(input.title ?? 'untitled-task', new Set(listTaskSlugs(ws.rootPath)))
-
-          // Fail-soft reference checks: unknown slugs warn, they don't block creation
-          // (matching the finish() philosophy in the tasks:create handler).
-          const warnings: string[] = []
-          if (input.sources?.length) {
-            const available = new Set(loadWorkspaceSources(ws.rootPath).map(s => s.config.slug))
-            const missing = input.sources.filter(s => !available.has(s))
-            if (missing.length) warnings.push(`Unknown sources (kept in the spec, but they don't exist in this workspace): ${missing.join(', ')}`)
-          }
-          if (input.skills?.length) {
-            // loadAllSkills matches dispatch-time [skill:slug] resolution (global, bundled, workspace).
-            const available = new Set(loadAllSkills(ws.rootPath).map(s => s.slug))
-            const missing = input.skills.filter(s => !available.has(s))
-            if (missing.length) warnings.push(`Unknown skills (kept in the spec, but they don't exist in this workspace): ${missing.join(', ')}`)
-          }
-
-          // A spec requires ≥1 node; synthesize the single executable node from the
-          // description. Multi-node DAG authoring stays with the TaskEditor/generate flow.
-          const parsed = parseTaskSpec({
-            id: slug,
-            title: input.title,
-            goal: input.description,
-            ...(input.acceptanceCriteria ? { acceptance_criteria: input.acceptanceCriteria } : {}),
-            ...(projectId ? { project: projectId } : {}),
-            ...(input.workingDirectory ? { cwd: input.workingDirectory } : {}),
-            ...(input.sources?.length ? { sources: input.sources } : {}),
-            ...(input.skills?.length ? { skills: input.skills } : {}),
-            ...(input.model || input.llmConnection
-              ? { defaults: { ...(input.model ? { model: input.model } : {}), ...(input.llmConnection ? { llmConnection: input.llmConnection } : {}) } }
-              : {}),
-            nodes: [{ id: 'main', title: input.title ?? slug, prompt: input.description ?? '' }],
-          })
-          if (!parsed.success) {
-            throw new Error(`Invalid task spec: ${parsed.error.issues.map(i => i.message).join('; ')}`)
-          }
-
-          const created = await createTaskFromSpec(
-            this,
-            ws.id,
-            ws.rootPath,
-            inheritTaskExecutionDefaults(parsed.data, sessionExecution),
-          )
-          return { ...created, warnings: [...warnings, ...created.warnings] }
+        createTaskFn: async () => {
+          throw new Error('Agent task creation is disabled. Import a V3 YAML definition in the application.')
         },
         runTaskFn: async (input) => this.runTaskFromTool(managed.workspace.id, input),
         getTaskResultsFn: async (slug, runId) => loadTaskResults(managed.workspace.rootPath, slug, runId),
@@ -4843,11 +4771,8 @@ export class SessionManager implements ISessionManager {
           if (!runner) return { ok: false, error: 'Task runner is not available' }
           return runner.submitNodeVerdict(managed.id, input)
         },
-        submitTaskDefinitionFn: async (input) => {
-          const submitted = validateSubmittedDefinition(input.spec)
-          if (!submitted.valid) return submitted
-          rememberSubmittedDefinition(managed.id, managed.processingGeneration, submitted.yaml)
-          return submitted
+        submitTaskDefinitionFn: async () => {
+          return { valid: false, errors: ['Task generation is disabled. Import a V3 YAML definition.'] }
         },
         controlTaskRunFn: async (input) => {
           const runner = this.taskRunnerLookup?.(managed.workspace.id)

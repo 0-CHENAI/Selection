@@ -4,6 +4,8 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 
 ## Features
 
+- **New orchestrations use V3 YAML import** — Import a YAML file or paste a definition with explicit `schema_version: 3`. Invalid definitions, older versions and duplicate task IDs are rejected before saving. Form creation, natural-language generation and Agent task-creation tools are unavailable. Existing tasks retain their versioned editing flow. Imports do not start runs; the default runner remains `conduct`, and `orchestrate` retains its preview/opt-in gate.
+
 ## Improvements
 
 - **New-orchestration switcher sits next to the workspace selector** — On the create/edit orchestration view, List / New orchestration moves from the editor chrome’s right edge into the window top bar, immediately after the workspace pill. The session-list header still keeps search, then the switcher.

@@ -1,20 +1,21 @@
 /**
  * Generator prompt for Generate mode (#2 / architecture §3a).
  *
- * The task's persistent orchestrator session is asked to AUTHOR a v2 task spec
+ * The task's persistent orchestrator session is asked to AUTHOR a v3 task spec
  * from a natural-language goal. The result is a human-editable artifact, so the
  * prompt is legibility-first (#7): bias toward the simplest graph that achieves
  * the goal, with clear titles and explicit dependencies — not the cleverest one.
  */
 export function buildGeneratorPrompt(goal: string, title?: string): string {
   return [
-    'You are authoring a v2 task spec that decomposes a goal into a small DAG of subtasks.',
+    'You are authoring a v3 task spec that decomposes a goal into a small DAG of subtasks.',
     'Each node becomes a child AI session; a `depends_on` edge passes the upstream node\'s output to the dependent.',
     '',
     'Rules:',
-    '- You MUST call submit_task_definition with the COMPLETE v2 spec object (schema_version: 2). This is the only accepted submission path for a new v2 definition.',
-    '- Never paste the v2 spec as YAML or JSON in the final response. A schema_version: 2 definition found only in final text is rejected, even when fenced.',
+    '- You MUST call submit_task_definition with the COMPLETE v3 spec object (schema_version: 3). This is the only accepted submission path for a new definition.',
+    '- Never paste the spec as YAML or JSON in the final response. A schema_version: 2 or 3 definition found only in final text is rejected, even when fenced.',
     '- After submit_task_definition succeeds, reply only with a brief confirmation; the tool payload is the authored definition.',
+    '- Keep runner as conduct unless the user asked for live orchestration. Do not set runner: orchestrate by default.',
     '- Prefer the SIMPLEST graph that achieves the goal: few nodes, clear titles, explicit dependencies. A human will read and edit this.',
     '- Make nodes parallel (no `depends_on` between them) ONLY when the steps are genuinely independent.',
     '- Reference an upstream result inside a prompt with ${nodes.<id>.output}.',
@@ -22,6 +23,7 @@ export function buildGeneratorPrompt(goal: string, title?: string): string {
     '- Add `acceptance_criteria`: a short, checkable rubric for the FINISHED task (what "done and correct" means). It is what you will grade the result against when the run finishes — make it concrete and testable, not a restatement of the goal.',
     '',
     'Schema:',
+    '  schema_version: 3',
     '  id: kebab-case-slug',
     '  title: short human title',
     '  goal: one-line restatement of the goal',
@@ -33,6 +35,7 @@ export function buildGeneratorPrompt(goal: string, title?: string): string {
     '      depends_on: [other-node-id]   # omit when the node has no dependencies',
     '',
     'Example:',
+    '  schema_version: 3',
     '  id: migrate-auth',
     '  title: Migrate auth',
     '  goal: Migrate the auth layer to the new session model.',
@@ -63,10 +66,10 @@ export function buildGeneratorPrompt(goal: string, title?: string): string {
  */
 export function buildRepairPrompt(errors: { path: string; message: string }[]): string {
   return [
-    'The v2 task definition you produced failed validation with these errors:',
+    'The v3 task definition you produced failed validation with these errors:',
     ...errors.map((e) => `- ${e.path}: ${e.message}`),
     '',
-    'Fix every error and call submit_task_definition again with the COMPLETE corrected v2 spec. Do not paste YAML or JSON into the final response.',
+    'Fix every error and call submit_task_definition again with the COMPLETE corrected v3 spec. Do not paste YAML or JSON into the final response.',
     'Most common cause: a ${nodes.<id>.output} reference whose <id> is not declared under `nodes`. Either add the missing node or change the reference to an id you actually declare.',
     'You have at most one more correction after the first failure.',
   ].join('\n')

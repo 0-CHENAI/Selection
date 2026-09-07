@@ -1,4 +1,4 @@
-# Tasks / Conductor v2 Architecture
+# Tasks / Conductor Architecture
 
 Frozen contracts for the Tasks kanban Conductor. Implementation lives in
 `@craft-agent/shared/tasks` (spec, validation, storage) and
@@ -7,18 +7,19 @@ Frozen contracts for the Tasks kanban Conductor. Implementation lives in
 
 The technical preview is developed on `codex/swarm-conductor-preview`, based
 on `origin/test`. Do not commit Conductor work directly onto `test`.
-User-facing copy lives in `USER-GUIDE.md`. `orchestrate` stays Beta behind
-`CRAFT_FEATURE_TASKS_ORCHESTRATE`; the separate preview build enables it with
-`CRAFT_SWARM_PREVIEW_BUILD=1`. Promotion still requires packaged Electron and
-real-model acceptance.
+User-facing copy lives in `USER-GUIDE.md`. New tasks enter only through explicit V3 YAML import.
+The import RPC rejects older/missing versions and existing task IDs. The save RPC requires
+an existing document. Legacy reading and explicit migration remain separate contracts.
+Agent creation and natural-language generation are disabled at the tool and RPC boundaries.
+`orchestrate` is off outside preview builds unless explicitly enabled.
 
 ## 1. Product modes
 
 - `runner` is a run *strategy*, not a node kind.
 - `conduct`: freeze revision 0 at start; schedule only that graph.
 - `orchestrate`: the task parent session (system Coordinator) may apply
-  constrained patches to pending nodes of the current run. Off behind
-  `CRAFT_FEATURE_TASKS_ORCHESTRATE` until P4/P5 gates pass.
+  constrained patches to pending nodes of the current run. Requires the feature
+  flag (or preview build) and a Swarm-enabled parent session.
 - `kind: orchestrator` migrates to a normal `session` in v2. Dynamic coordination
   is never a DAG node.
 - Automations / Agent Events are out of scope.

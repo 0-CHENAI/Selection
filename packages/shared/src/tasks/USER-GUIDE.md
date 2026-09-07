@@ -4,18 +4,18 @@
 
 ## 入口
 
-打开看板任务 → 定义 / 画布 / YAML / 结果。保存后才把 v1 文件写成 v2。画布只展示拓扑和运行态，不编辑节点；增删改在定义或 YAML。
+新建任务只允许导入或粘贴 YAML，必须显式声明 `schema_version: 3`。导入前校验结构、节点依赖和运行配置；旧版、缺少版本号、同名任务均拒绝导入。导入只保存任务，不自动运行。已有任务仍可打开定义 / 画布 / YAML / 结果，不会因为导入功能上线而自动迁移。
 
 普通会话输入区的 Swarm 开关默认关闭，只影响当前会话及其后代。开启不代表一定拆分：只有至少两个独立工具工作轨、并行有收益、输入/输出/证据合同完整且父级定义了汇总或验证时才会创建 worker；资格不足会留在当前会话。worker 默认隐藏，可从父会话运行详情进入。
 
 Swarm Token 预算与 DAG run 预算独立计量。`spawn_session` Swarm 的上限固定为 262144 Token，用户不能改。输入区会显示当前 Swarm 用量；达到上限后当前 worker 允许收尾，但不会再派发或唤醒新工作，父会话进入 `need-to-check`。看板 Task 的 `token_budget` 仍由用户提高。
 
-用「生成」时优先走 `submit_task_definition`（结构化 v2 spec），服务端最多修正两次。只有工具不可用时才回退到从回复里截 YAML。
+表单新建、自然语言生成、`create_task` 和 `submit_task_definition` 创建入口已关闭。旧客户端的生成请求也会被服务端拒绝。编辑器表单仅用于编辑已有任务。
 
 ## conduct 与 orchestrate
 
-- **conduct**：启动时冻结 revision 0，只按该图跑。
-- **orchestrate**（Beta）：协调器可补丁尚未执行的节点。仅在当前会话开启 Swarm 且通过资格门槛时作为默认策略；还需 `CRAFT_FEATURE_TASKS_ORCHESTRATE=1`，未开旗标时选择器禁用。
+- **conduct**：启动时冻结 revision 0，只按该图跑。新建任务默认仍用 conduct，避免一开跑就停在协调器门。
+- **orchestrate**（技术预览）：协调器可补丁尚未执行的节点，v3 在关键点等待 `submit_orchestration_decision`。普通构建默认关闭，需显式开启 `CRAFT_FEATURE_TASKS_ORCHESTRATE=1`，且父会话开启 Swarm；独立预览构建保留原有开放条件。
 
 `runner` 是运行策略，不是节点种类。任务父会话是系统 Coordinator。
 
@@ -34,7 +34,7 @@ Swarm Token 预算与 DAG run 预算独立计量。`spawn_session` Swarm 的上�
 - 预算用尽后停派发，空闲时 `waiting-budget`。只有用户能加预算或停止。
 - 审批：拒绝或超时 = 节点失败。绝不自动批准。
 
-## v1 迁移
+## 历史任务的 v1 迁移（不适用于新导入）
 
 没有 `schema_version` 的文件是 v1。编辑器可内存迁移并显示警告。**未首次保存为 v2 之前，运行仍按 v1**：只执行 session / 旧 orchestrator，其余 kind skip。
 
@@ -63,4 +63,4 @@ v3 首次保存同样备份历史并校验 ETag，不改写旧 run log。`cache:
 - macOS 独立包：`bun run electron:dist:swarm-preview:mac`
 - 独立身份：`Selection Swarm Preview` / `com.lukilabs.craft-agent.swarm-preview`，产物写入 `apps/electron/release-swarm-preview`，不发布到正式更新通道。
 
-真实模型门槛固定使用 ORDER 连接 `pi-api-key-2` 和 `Laufry`，七个场景各连续运行三次。未完成打包 Electron 与真实模型门槛前不得合入 `test`，也不得默认开放给普通用户。
+真实模型门槛固定使用 ORDER 连接 `pi-api-key-2` 和 `Laufry`，七个场景各连续运行三次。打包 Electron、真实模型 21/21 与 dogfood 必须单独记录，单测不能替代默认开放 orchestrate 的验收。
