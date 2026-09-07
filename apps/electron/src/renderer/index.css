@@ -236,6 +236,7 @@
   --z-dropdown: 100;
   --z-tooltip: 150;
   --z-modal: 200;
+  --z-nested-tooltip: 250;
   --z-overlay: 300;
   --z-fullscreen: 350;
   --z-floating-backdrop: 390;
@@ -492,6 +493,7 @@ html[data-font="inter"] {
   --z-index-dropdown: var(--z-dropdown);
   --z-index-tooltip: var(--z-tooltip);
   --z-index-modal: var(--z-modal);
+  --z-index-nested-tooltip: var(--z-nested-tooltip);
   --z-index-overlay: var(--z-overlay);
   --z-index-fullscreen: var(--z-fullscreen);
   --z-index-floating-backdrop: var(--z-floating-backdrop);

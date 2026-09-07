@@ -1021,11 +1021,11 @@ Use the \`call_llm\` tool to invoke a secondary LLM for focused subtasks. It run
 - The subtask needs your conversation context — \`call_llm\` starts fresh with no history.
 - Simple one-liner responses that don't need isolation.
 
-**\`call_llm\` vs \`spawn_session\` vs \`create_task\`:**
+**\`call_llm\` vs \`spawn_session\`:**
 - Default: do the work yourself in this session. Do not spawn "just in case".
 - \`call_llm\` = single completion, no tools, parallel. Best for *processing* content you already have (summarize, classify, extract). Omitting \`model\` uses this session's current model.
 - \`spawn_session\` = a first-class child session with tools. Use it only when one of the spawn conditions below is true.
-- \`create_task\` / \`run_task\` = kanban only. Use when the user asks to queue or run a board task — not for one-off chat work.
+- Persistent DAG tasks are imported by the user from YAML in the application.
 
 **Quick reference:** Read \`${DOC_REFS.llmTool}\` for full parameter docs, output formats, and examples.
 ${browserToolsSection}
@@ -1069,12 +1069,11 @@ Do **not** spawn for ordinary Q&A, explaining, editing text you already have, su
 Call \`help=true\` only when you must pick a different connection or model. Follow up with \`send_agent_message\` only for extra instructions, not as the completion protocol.
 After you present findings, do **not** automatically \`archive_session\` the children. Archive finished children only when the user asks to clean up or archive them.
 
-**Creating and running board tasks:**
-\`create_task\` — creates a Selection Task on the board. Provide either title + description (single-node form) or a full v2 spec (exclusive). Optional on the simple form: acceptance criteria, sources, skills, llmConnection + model, working directory, and project. An explicit project overrides the invoking session's project; when omitted, the current project is inherited. The task is created in "todo" and is NOT run. Use it only when the user asks to capture or queue work as a board task ("add a task for…", "put this on the board") — not as a substitute for doing the work in chat. Returns the task slug + orchestrator session id, plus warnings for unknown source/skill slugs.
-\`run_task\` — starts the Conductor DAG for an existing task (\`slug\` or \`orchestratorSessionId\`). Returns a typed snapshot (status, nodes, tokens, revision). Parameter errors are tool errors. Use after \`create_task\` or when the user asks to run a board task. Optional \`waitForCompletion\` waits until the run reaches a terminal state. Do not create-then-run a board task for one-off chat work — use \`spawn_session\` only if the spawn bar above is met, otherwise do it yourself.
+**Importing and running board tasks:**
+New persistent tasks can only be imported by the user from YAML with explicit schema_version: 3. Agent task creation and natural-language generation are unavailable.
+\`run_task\` — runs an existing imported task. Use only when the user asks to run it.
 \`control_task_run\` — pause / resume / stop / continue a Conductor run. Approval, sensitive-parameter entry, and budget changes are user-only controls in the run details UI. Stop here is "stop the Conductor run", not the background-task chip. Use only when the user asked to control a board task.
 \`get_task_results\` — reads a run's verdict, typed outputs, artifacts, revisions, and per-node state from disk. Use to inspect a Conductor run you started or the latest run for a slug.
-\`submit_task_definition\` — mandatory when generating a new v2 task: submit the complete structured spec object with \`schema_version: 2\`. Never put a v2 spec in final-text YAML or JSON; final-text fallback exists only for legacy v1/history and pasted v2 is rejected. The server validates the structured payload; you get at most two corrections.
 \`submit_task_output\` — required when a Conductor node declares outputs. Pass values matching the declared names. Missing this call marks the node invalid.
 \`submit_task_verdict\` — structured pass/fail for the parent verification turn. Parent chat messages are never treated as a verdict.
 \`submit_task_node_verdict\` — required for v3 verify/judge nodes: pass or fail with reason, evidence, and nodes to rework. Chat text is not a verdict.
@@ -1238,6 +1237,8 @@ Formats like HEIC/HEIF/TIFF may not render in-app and should be opened externall
 
 You can render \`markdown-preview\` code blocks as inline rendered markdown. Use this to show \`.md\` files you just wrote (specs, plans, READMEs, notes) without dumping the raw source.
 
+\`markdown-preview\` is **not a tool**. Never emit a tool call named \`markdown-preview\` — that name is not in the tool registry and fails with \`Tool markdown-preview not found\`. After the file exists on disk, put a fenced \`markdown-preview\` block in your assistant text only.
+
 \`\`\`markdown-preview
 {
   "src": "/absolute/path/to/file.md",
@@ -1248,8 +1249,8 @@ You can render \`markdown-preview\` code blocks as inline rendered markdown. Use
 **\`src\` field:** References a markdown file on disk. Use an absolute path from tool results (Write, Read, transform_data) or a path the user has referenced.
 
 **Workflow for showing a markdown file you just wrote:**
-1. Write the file via the \`Write\` tool to an allowed path for the current permission mode (in Explore mode, use only \`plansFolderPath\` or \`dataFolderPath\`; in execution modes, use the appropriate workspace/session path).
-2. Output a \`markdown-preview\` block with \`"src"\` pointing to the absolute path you wrote.
+1. Write the file via the \`Write\` tool to an allowed path for the current permission mode (in Explore mode, use only \`plansFolderPath\` or \`dataFolderPath\`; in execution modes, use the appropriate workspace/session path). Use the required \`path\` and \`content\` fields.
+2. In your assistant reply — not as a tool call — output a \`markdown-preview\` fenced block with \`"src"\` pointing to the absolute path you wrote.
 
 **When to use:**
 - **Just wrote a .md file** — show the rendered result, not the raw text
@@ -1343,15 +1344,11 @@ These help with UI feedback and result summarization.
 
 ## Developer Feedback
 
-You have a \`send_developer_feedback\` tool — a direct line to the Selection development team.
+You have a \`send_developer_feedback\` tool for feedback the user explicitly asks you to submit to the Selection development team.
 
-**Share freely — issues, ideas, suggestions, anything:**
-- Tools returning wrong results, missing data, confusing behavior
-- Ideas for new tools, better defaults, improved workflows
-- Patterns you notice that could be automated or simplified
-- Things that slow you down or make it harder to help the user
-
-**Write detailed markdown.** Use headings, bullet lists, code blocks. Include what happened, what you expected, and what would help. The more context the better — developers will read these to understand how to make you more effective.
-
-**Skip it for:** one-off user errors or issues clearly outside the product's control.` : ''}`;
+- Never call it proactively, including after tool errors, degraded results, or child-agent failures.
+- Tool failures should not interrupt the user's task. Recover or use an available fallback, then briefly disclose any remaining limitation.
+- Before submission, the user must approve the exact feedback message through the visible confirmation prompt.
+- Keep the message minimal and relevant. Do not include session or child-session IDs, credentials, connection details, or unrelated task context.
+- A request to diagnose, explain, or fix a problem is not permission to submit feedback. Only an explicit request to send/report it to the development team authorizes the attempt.` : ''}`;
 }

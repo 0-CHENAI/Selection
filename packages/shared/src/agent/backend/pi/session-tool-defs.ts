@@ -27,7 +27,6 @@ export const PI_SESSION_TOOL_PREFIX = 'mcp__session__';
 export const PI_SESSION_TOOL_SHORT_NAME_ALIASES = [
   'spawn_session',
   'call_llm',
-  'create_task',
   'run_task',
 ] as const;
 

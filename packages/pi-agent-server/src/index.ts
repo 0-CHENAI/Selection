@@ -90,6 +90,11 @@ import { resolveSearchProvider } from './tools/search/resolve-provider.ts';
 import { createSearchTool } from './tools/search/create-search-tool.ts';
 import { allowCraftMetadataProperties, stripCraftMetadata } from './craft-metadata-schema.ts';
 import { createRecoveringArgumentPreparer } from './tool-argument-recovery.ts';
+import {
+  noteAssistantPreviewFenceToolCalls,
+  noteToolCompatEvent,
+  type ToolCompatEvent,
+} from '../../shared/src/agent/core/tool-input-recovery.ts';
 import { applySystemPromptOverride } from './system-prompt-override.ts';
 import { installContextBudgetGuard } from './context-budget-stream.ts';
 import { resolvePiSessionPaths } from './session-paths.ts';
@@ -378,6 +383,25 @@ function send(msg: OutboundMessage): void {
 function debugLog(message: string): void {
   // Write debug messages to stderr so they don't interfere with JSONL protocol
   process.stderr.write(`[pi-server] ${message}\n`);
+}
+
+function currentToolCompatContext(): { provider?: string; model?: string } {
+  const provider = initConfig?.piAuth?.provider
+    ?? initConfig?.customEndpoint?.api
+    ?? initConfig?.providerType;
+  const model = initConfig?.model;
+  return {
+    ...(typeof provider === 'string' && provider ? { provider } : {}),
+    ...(typeof model === 'string' && model ? { model } : {}),
+  };
+}
+
+function reportToolCompatEvents(events: ToolCompatEvent[]): void {
+  const context = currentToolCompatContext();
+  for (const event of events) {
+    const recorded = noteToolCompatEvent({ ...event, ...context });
+    debugLog(`tool-compat ${JSON.stringify({ ...event, ...context, count: recorded.count })}`);
+  }
 }
 
 // ============================================================
@@ -893,6 +917,7 @@ function wrapSingleTool(
     sdkToolName,
     tool.prepareArguments,
     allowRichMetadata,
+    reportToolCompatEvents,
   );
 
   const wrappedExecute: ToolDefinition<any, any>['execute'] = async (
@@ -1335,6 +1360,16 @@ function handleSessionEvent(event: AgentSessionEvent): void {
     } | undefined;
     if (msg?.stopReason === 'error') {
       debugLog(`API error in message_end: ${msg.errorMessage || 'unknown'}`);
+    }
+
+    if (msg?.role === 'assistant' && Array.isArray(msg.content)) {
+      const previewFenceCalls = noteAssistantPreviewFenceToolCalls(
+        msg.content,
+        currentToolCompatContext(),
+      );
+      for (const event of previewFenceCalls) {
+        debugLog(`tool-compat ${JSON.stringify(event)}`);
+      }
     }
 
     if (msg?.role === 'assistant' && piSession) {

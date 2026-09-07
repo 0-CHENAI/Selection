@@ -208,11 +208,20 @@ function phaseLabel(job: CreationJob, t: ReturnType<typeof useTranslation>['t'])
   }
 }
 
-export interface CreationJobsButtonProps {
+export interface CreationJobsControllerProps {
   workspaceId: string | null
   onReopen: (contextKey: string) => void
   onOpenResult?: (job: CreationJob, resultId: string) => void
+}
+
+export interface CreationJobsButtonProps extends CreationJobsControllerProps {
   className?: string
+}
+
+/** Always-mounted host: validates results and emits toasts without a top-bar button. */
+export function CreationJobsHost({ workspaceId, onReopen, onOpenResult }: CreationJobsControllerProps) {
+  useCreationJobReconciler(workspaceId, onReopen, onOpenResult)
+  return null
 }
 
 export function CreationJobsButton({ workspaceId, onReopen, onOpenResult, className }: CreationJobsButtonProps) {
@@ -224,8 +233,6 @@ export function CreationJobsButton({ workspaceId, onReopen, onOpenResult, classN
   const [open, setOpen] = React.useState(false)
   const [cancelTarget, setCancelTarget] = React.useState<CreationJob | null>(null)
   const triggerRef = React.useRef<HTMLButtonElement>(null)
-
-  useCreationJobReconciler(workspaceId, onReopen, onOpenResult)
 
   const jobs = React.useMemo(
     () => allJobs

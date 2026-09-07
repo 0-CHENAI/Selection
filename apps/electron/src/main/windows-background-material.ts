@@ -34,3 +34,21 @@ export function isWindowsWindowDark(mode: string, systemIsDark: boolean): boolea
   const source = nativeThemeSourceForMode(mode)
   return source === 'dark' || (source === 'system' && systemIsDark)
 }
+
+/** Matches `--topbar-height` so caption buttons sit on the Selection top bar. */
+export const WINDOWS_TITLEBAR_OVERLAY_HEIGHT = 48
+
+export const WINDOWS_LIGHT_TITLEBAR_SYMBOL = '#3f3f46'
+export const WINDOWS_DARK_TITLEBAR_SYMBOL = '#f5f5f6'
+
+export function resolveWindowsTitleBarOverlay(isDark: boolean): {
+  color: string
+  symbolColor: string
+  height: number
+} {
+  return {
+    color: resolveWindowsWindowBackground(isDark),
+    symbolColor: isDark ? WINDOWS_DARK_TITLEBAR_SYMBOL : WINDOWS_LIGHT_TITLEBAR_SYMBOL,
+    height: WINDOWS_TITLEBAR_OVERLAY_HEIGHT,
+  }
+}
