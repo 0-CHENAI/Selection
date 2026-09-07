@@ -149,6 +149,15 @@ describe('task-spec-form round-trip', () => {
     })).toBe(true)
   })
 
+  it('keeps an existing unversioned v1 definition on the v2 save path', () => {
+    const spec = buildSpec({ title: 'Legacy', goal: 'g', projectId: '', orchModel: '',
+      subtasks: specToSubtasks([{ id: 'a', prompt: 'p' }]),
+      preservedSpec: { id: 'legacy', title: 'Legacy', goal: 'g' },
+    }, noConn)
+    expect(spec.schema_version).toBe(2)
+    expect(specNeedsV3Confirm(1, spec)).toBe(false)
+  })
+
   it('does not keep cleared form-owned fields from the preserved spec', () => {
     const spec = buildSpec(
       {

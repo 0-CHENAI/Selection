@@ -299,7 +299,7 @@ export function buildSpec(form: SpecForm, modelToConnection: Map<string, string>
 
   const spec: Record<string, unknown> = {
     ...(form.preservedSpec ?? {}),
-    schema_version: form.preservedSpec?.schema_version === 2 ? 2 : DEFAULT_TASK_SCHEMA_VERSION,
+    schema_version: form.preservedSpec && form.preservedSpec.schema_version !== 3 ? 2 : DEFAULT_TASK_SCHEMA_VERSION,
     id: form.fixedId || slugify(form.title) || 'untitled-task',
     title: form.title.trim() || 'Untitled task',
     goal: form.goal.trim() || form.title.trim() || 'Untitled task',

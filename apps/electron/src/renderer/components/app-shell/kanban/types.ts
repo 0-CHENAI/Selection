@@ -24,10 +24,9 @@ export type BuiltInKanbanColumnId = 'todo' | 'in-progress' | 'done'
 export type SubtaskRunState = 'done' | 'running' | 'pending' | 'failed'
 
 /**
- * What the Task editor points at. `create` authors a brand-new task; `edit` opens an
- * existing tile — either spec-backed (`taskSlug` present → prefill from its task.yaml)
- * or a plain quick-add tile (`taskSlug` absent → start from the title, bind the spec
- * on save). Lives here (not in TaskEditor) so the editor-target atom can reference it
+ * `create` imports a new V3 YAML task; `edit` opens an existing YAML definition.
+ * Legacy targets without taskSlug are rejected, never converted into new tasks.
+ * Lives here (not in TaskEditor) so the editor-target atom can reference it
  * without importing a component module.
  */
 export type TaskEditorTarget =

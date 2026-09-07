@@ -37,7 +37,7 @@ function setup(failSession = false, failSetup = false) {
       setSessionSources() { if (failSetup) throw new Error('sources setup failed') },
     },
   } as unknown as HandlerDeps)
-  return { root, sessions: () => sessions, call: (channel: string, req: unknown) => handlers.get(channel)!({}, 'test', req) }
+  return { root, sessions: () => sessions, recover: () => { failSession = false }, call: (channel: string, req: unknown) => handlers.get(channel)!({}, 'test', req) }
 }
 
 describe('YAML-only task RPC', () => {
@@ -53,6 +53,11 @@ describe('YAML-only task RPC', () => {
     const app = setup(true)
     await expect(app.call(RPC_CHANNELS.tasks.CREATE, { yaml })).rejects.toThrow('session creation failed')
     expect(existsSync(taskYamlPath(app.root, 'imported'))).toBe(false)
+    app.recover()
+    const retried = await app.call(RPC_CHANNELS.tasks.CREATE, { yaml })
+    expect(retried.validation.valid).toBe(true)
+    expect(app.sessions()).toBe(1)
+    expect(existsSync(taskYamlPath(app.root, 'imported'))).toBe(true)
   })
   it('imports V3 once and refuses overwrite without creating another session', async () => {
     const app = setup()
