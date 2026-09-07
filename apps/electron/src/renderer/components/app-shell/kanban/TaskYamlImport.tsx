@@ -1,6 +1,8 @@
 import * as React from 'react'
+import { useSetAtom } from 'jotai'
 import { useTranslation } from 'react-i18next'
 import { MAX_TASK_IMPORT_BYTES } from '@craft-agent/shared/tasks/version'
+import { kanbanEditorDirtyAtom } from '@/atoms/kanban'
 import { prepareTaskImport, taskImportErrorKey } from './task-yaml-import'
 import { toast } from 'sonner'
 import type { TaskEditorProps } from './TaskEditor'
@@ -9,6 +11,7 @@ import type { TaskEditorProps } from './TaskEditor'
 export function TaskYamlImport({ workspaceId, onClose, onCreated, target }: Pick<TaskEditorProps, 'workspaceId' | 'onClose' | 'onCreated' | 'target'>) {
   const { t } = useTranslation()
   const [yaml, setYaml] = React.useState('')
+  const setEditorDirty = useSetAtom(kanbanEditorDirtyAtom)
   const [errors, setErrors] = React.useState<string[]>([])
   const [busy, setBusy] = React.useState(false)
   const submitting = React.useRef(false)
@@ -17,8 +20,22 @@ export function TaskYamlImport({ workspaceId, onClose, onCreated, target }: Pick
   const mounted = React.useRef(true)
   React.useEffect(() => {
     mounted.current = true
-    return () => { mounted.current = false }
-  }, [])
+    return () => {
+      mounted.current = false
+      setEditorDirty(false)
+    }
+  }, [setEditorDirty])
+
+  function updateYaml(value: string) {
+    setYaml(value)
+    setEditorDirty(value.trim().length > 0)
+  }
+
+  function closeEditor() {
+    if (yaml.trim() && !window.confirm(t('tasks.discardUnsaved'))) return
+    setEditorDirty(false)
+    onClose()
+  }
 
   async function loadFile(file?: File) {
     if (!file) return
@@ -31,7 +48,7 @@ export function TaskYamlImport({ workspaceId, onClose, onCreated, target }: Pick
     setBusy(true)
     try {
       const text = await file.text()
-      if (mounted.current && read === fileRead.current) setYaml(text)
+      if (mounted.current && read === fileRead.current) updateYaml(text)
     } catch (error) {
       if (mounted.current && read === fileRead.current) setErrors([t('tasks.yamlImportReadFailed'), String(error)])
     } finally {
@@ -57,6 +74,7 @@ export function TaskYamlImport({ workspaceId, onClose, onCreated, target }: Pick
         toast.warning(t('tasks.yamlImportTitle'), { description: result.validation.warnings.map(warning => warning.message).join('\n') })
       }
       toast.success(t('tasks.yamlImportSuccess'))
+      setEditorDirty(false)
       onClose()
       onCreated?.({
         sessionId: result.orchestratorSessionId,
@@ -87,12 +105,12 @@ export function TaskYamlImport({ workspaceId, onClose, onCreated, target }: Pick
         disabled={busy} onClick={() => input.current?.click()}>{t('tasks.yamlImportChoose')}</button>
       <textarea className="min-h-40 flex-1 resize-none rounded-md border bg-background p-3 font-mono text-sm"
         aria-label={t('tasks.tabYaml')} aria-describedby="yaml-import-hint" aria-invalid={errors.length > 0} spellCheck={false} disabled={busy} value={yaml}
-        onChange={event => { setYaml(event.target.value); setErrors([]) }} />
+        onChange={event => { updateYaml(event.target.value); setErrors([]) }} />
       {errors.length > 0 && <ul role="alert" className="max-h-40 overflow-auto break-words text-sm text-destructive">
         {errors.map((error, index) => <li key={index}>{error}</li>)}
       </ul>}
       <div className="flex justify-end gap-3">
-        <button type="button" disabled={busy} onClick={onClose}>{t('common.cancel')}</button>
+        <button type="button" disabled={busy} onClick={closeEditor}>{t('common.cancel')}</button>
         <button type="button" disabled={busy || !yaml.trim()} onClick={() => void importTask()}
           className="rounded-md bg-foreground px-4 py-2 text-sm text-background disabled:opacity-50">
           {t(busy ? 'tasks.yamlImportBusy' : 'tasks.yamlImportTitle')}

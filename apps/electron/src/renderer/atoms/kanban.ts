@@ -8,3 +8,9 @@ import { atom } from 'jotai'
 import type { TaskEditorTarget } from '@/components/app-shell/kanban/types'
 
 export const kanbanEditorTargetAtom = atom<TaskEditorTarget | null>(null)
+
+/**
+ * Shared dirty state owned by TaskEditor so navigation controls outside the
+ * editor cannot discard an unsaved orchestration without confirmation.
+ */
+export const kanbanEditorDirtyAtom = atom(false)

@@ -72,7 +72,7 @@ import { getSessionTitle } from "@/utils/session"
 import { useSetAtom } from "jotai"
 import type { Session, Workspace, FileAttachment, PermissionRequest, LoadedSource, LoadedSkill, PermissionMode, SourceFilter, AutomationFilter } from "../../../shared/types"
 import { sessionMetaMapAtom, sendToWorkspaceAtom, type SessionMeta } from "@/atoms/sessions"
-import { kanbanEditorTargetAtom } from "@/atoms/kanban"
+import { kanbanEditorDirtyAtom, kanbanEditorTargetAtom } from "@/atoms/kanban"
 import { isOrdinarySessionVisible } from '@/lib/swarm-session'
 import { sourcesAtom } from "@/atoms/sources"
 import { skillsAtom } from "@/atoms/skills"
@@ -313,6 +313,7 @@ function AppShellContent({
   // so the navigator (and its resize handle) collapse to zero width while it's active.
   const isBoardView = isSessionsNavigation(navState) && navState.viewMode === 'board'
   const setKanbanEditorTarget = useSetAtom(kanbanEditorTargetAtom)
+  const kanbanEditorDirty = useAtomValue(kanbanEditorDirtyAtom)
 
   // Derive source filter from navigation state (only when in sources navigator)
   const sourceFilter: SourceFilter | null = isSourcesNavigation(navState) ? navState.filter ?? null : null
@@ -412,6 +413,18 @@ function AppShellContent({
   const [searchActive, setSearchActive] = React.useState(false)
   const [searchQuery, setSearchQuery] = React.useState('')
 
+  const leaveOrchestrationView = React.useCallback(() => {
+    if (kanbanEditorDirty && !window.confirm(t('tasks.discardUnsaved'))) return false
+    setKanbanEditorTarget(null)
+    navigate(routes.view.allSessions())
+    return true
+  }, [kanbanEditorDirty, setKanbanEditorTarget, t])
+
+  const openSessionSearch = React.useCallback(() => {
+    if (isBoardView && !leaveOrchestrationView()) return
+    setSearchActive(true)
+  }, [isBoardView, leaveOrchestrationView])
+
   // Ref for ChatDisplay navigation (exposed via forwardRef)
   const chatDisplayRef = React.useRef<ChatDisplayHandle>(null)
   // Track match count and index from ChatDisplay (for SessionList navigation UI)
@@ -450,7 +463,7 @@ function AppShellContent({
   }, [navFilterKey])
 
   // Cmd+F to activate search
-  useAction('app.search', () => setSearchActive(true))
+  useAction('app.search', openSessionSearch)
 
   // Unified sidebar keyboard navigation state
   // Load expanded folders from localStorage (default: all collapsed)
@@ -1842,16 +1855,24 @@ function AppShellContent({
           canGoForward={canGoForward}
           onToggleSidebar={handleToggleSidebar}
           onToggleFocusMode={() => setIsSidebarAndNavigatorHidden(prev => !prev)}
-          afterWorkspace={isBoardView ? (
-            <BoardListToggle
-              value="board"
-              onChange={view => {
-                if (view === 'list') {
-                  setKanbanEditorTarget(null)
-                  navigate(routes.view.allSessions())
-                }
-              }}
-            />
+          afterWorkspace={isSessionsNavigation(navState) ? (
+            <div className="flex items-center gap-1.5">
+              <HeaderIconButton
+                icon={<Search className="h-4 w-4" />}
+                tooltip={t("sidebar.search")}
+                onClick={openSessionSearch}
+              />
+              <BoardListToggle
+                value={isBoardView ? 'board' : 'list'}
+                onChange={view => {
+                  if (view === 'list' && isBoardView) {
+                    leaveOrchestrationView()
+                  } else if (view === 'board' && !isBoardView) {
+                    navigate(routes.view.board())
+                  }
+                }}
+              />
+            </div>
           ) : undefined}
           isCompact={isAutoCompact}
         />
@@ -2127,27 +2148,18 @@ function AppShellContent({
                 </Tooltip>
               ) : undefined}
               actions={
-                <>
-                  {/* Sessions: search, then list / new-orchestration. Compact
-                      hides the switcher and keeps search so the right edge
-                      does not leave an empty slot. */}
-                  {isSessionsNavigation(navState) && (
-                    <div className="flex items-center gap-1.5">
-                      <HeaderIconButton
-                        icon={<Search className="h-4 w-4" />}
-                        tooltip={t("sidebar.search")}
-                        onClick={() => setSearchActive(true)}
-                      />
-                      {!isAutoCompact && (
-                        <BoardListToggle
-                          value="list"
-                          onChange={view => {
-                            if (view === 'board') navigate(routes.view.board())
-                          }}
-                        />
-                      )}
-                    </div>
-                  )}
+                isSessionsNavigation(navState) ? (
+                  /* Compact mode keeps its existing list-header search affordance.
+                     The desktop search and view switcher share one stable TopBar slot. */
+                  isAutoCompact ? (
+                    <HeaderIconButton
+                      icon={<Search className="h-4 w-4" />}
+                      tooltip={t("sidebar.search")}
+                      onClick={openSessionSearch}
+                    />
+                  ) : undefined
+                ) : (
+                  <>
                   {/* Add Source button (only for sources mode) - uses filter-aware edit config */}
                   {isSourcesNavigation(navState) && activeWorkspace && (
                     <>
@@ -2242,7 +2254,8 @@ function AppShellContent({
                       onClick={openAddProject}
                     />
                   )}
-                </>
+                  </>
+                )
               }
             />
             {/* Content: SessionList, SourcesListPanel, or SettingsNavigator based on navigation state */}

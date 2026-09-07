@@ -61,20 +61,37 @@ function sessionNavigatorActionsSource(): string {
   return actions.slice(0, actions.indexOf('isSourcesNavigation'))
 }
 
-describe('session list header actions (#264)', () => {
-  it('places search before the list / new-orchestration switcher after #263', () => {
-    const actions = sessionNavigatorActionsSource()
-    const searchIdx = actions.indexOf('sidebar.search')
-    const toggleIdx = actions.indexOf('BoardListToggle')
-    const compactIdx = actions.indexOf('!isAutoCompact')
+function sessionTopBarControlsSource(): string {
+  const appShell = readFileSync(join(import.meta.dir, '../AppShell.tsx'), 'utf8')
+  const topBarCall = appShell.slice(appShell.indexOf('<TopBar'), appShell.indexOf('isCompact={isAutoCompact}'))
+  return topBarCall.slice(topBarCall.indexOf('afterWorkspace='))
+}
+
+describe('session list and orchestration view controls (#264, #283)', () => {
+  it('keeps desktop search before the switcher in one stable TopBar slot', () => {
+    const controls = sessionTopBarControlsSource()
+    const searchIdx = controls.indexOf('sidebar.search')
+    const toggleIdx = controls.indexOf('BoardListToggle')
 
     expect(searchIdx).toBeGreaterThan(-1)
     expect(toggleIdx).toBeGreaterThan(-1)
     expect(searchIdx).toBeLessThan(toggleIdx)
-    expect(compactIdx).toBeGreaterThan(searchIdx)
-    expect(compactIdx).toBeLessThan(toggleIdx)
-    expect(actions).toContain('setSearchActive(true)')
-    expect(actions).toContain('flex items-center gap-1.5')
+    expect(controls).toContain('afterWorkspace={isSessionsNavigation(navState)')
+    expect(controls).toContain("value={isBoardView ? 'board' : 'list'}")
+    expect(controls).toContain("view === 'list' && isBoardView")
+    expect(controls).toContain("view === 'board' && !isBoardView")
+    expect(controls).toContain('onClick={openSessionSearch}')
+    expect(controls).toContain('leaveOrchestrationView()')
+    expect(controls).toContain('flex items-center gap-1.5')
+  })
+
+  it('keeps only compact search in the navigator header', () => {
+    const actions = sessionNavigatorActionsSource()
+
+    expect(actions).toContain('isAutoCompact ? (')
+    expect(actions).toContain('sidebar.search')
+    expect(actions).toContain('onClick={openSessionSearch}')
+    expect(actions).not.toContain('BoardListToggle')
     expect(actions).not.toContain('ListFilter')
     expect(actions).not.toContain('sidebar.filterChats')
   })
@@ -87,7 +104,7 @@ describe('session list header actions (#264)', () => {
       'utf8',
     )
 
-    expect(appShell).toContain("useAction('app.search', () => setSearchActive(true))")
+    expect(appShell).toContain("useAction('app.search', openSessionSearch)")
     expect(appShell).toContain('titleAlign="start"')
     expect(appShell).toContain('searchActive={searchActive}')
     expect(sessionList).toContain('searchActive && (')
@@ -95,7 +112,23 @@ describe('session list header actions (#264)', () => {
     expect(useSessionSearch).toContain('searchInputRef.current?.focus()')
   })
 
-  it('places the orchestration-pane switcher after the workspace selector, without board search', () => {
+  it('protects unsaved orchestration edits for both search and list navigation', () => {
+    const appShell = readFileSync(join(import.meta.dir, '../AppShell.tsx'), 'utf8')
+    const taskEditor = readFileSync(join(import.meta.dir, '../kanban/TaskEditor.tsx'), 'utf8')
+    const taskYamlImport = readFileSync(join(import.meta.dir, '../kanban/TaskYamlImport.tsx'), 'utf8')
+
+    expect(appShell).toContain('useAtomValue(kanbanEditorDirtyAtom)')
+    expect(appShell).toContain("kanbanEditorDirty && !window.confirm(t('tasks.discardUnsaved'))")
+    expect(appShell).toContain('if (isBoardView && !leaveOrchestrationView()) return')
+    expect(taskEditor).toContain('useAtom(kanbanEditorDirtyAtom)')
+    expect(taskEditor).toContain('return () => setDirty(false)')
+    expect(taskYamlImport).toContain('useSetAtom(kanbanEditorDirtyAtom)')
+    expect(taskYamlImport).toContain('setEditorDirty(value.trim().length > 0)')
+    expect(taskYamlImport).toContain("yaml.trim() && !window.confirm(t('tasks.discardUnsaved'))")
+    expect(taskYamlImport).toContain('setEditorDirty(false)')
+  })
+
+  it('uses exactly one desktop switcher for list and orchestration views', () => {
     const container = readFileSync(
       join(import.meta.dir, '../kanban/KanbanBoardContainer.tsx'),
       'utf8',
@@ -110,22 +143,17 @@ describe('session list header actions (#264)', () => {
     expect(container).not.toContain('SessionSearchHeader')
     expect(topBar).toContain('afterWorkspace')
     expect(topBar.lastIndexOf('<WorkspaceSwitcher')).toBeLessThan(topBar.indexOf('{afterWorkspace}'))
-    expect(topBarCall).toContain('isBoardView')
-    expect(topBarCall).toContain('BoardListToggle')
-    expect(topBarCall).toContain('value="board"')
+    expect((appShell.match(/<BoardListToggle/g) ?? []).length).toBe(1)
+    expect(topBarCall).toContain('afterWorkspace={isSessionsNavigation(navState)')
+    expect(topBarCall).toContain("value={isBoardView ? 'board' : 'list'}")
   })
 
-  it('pushes header actions to the right and keeps search left of the switcher in the DOM', () => {
+  it('keeps compact search clear of the start-aligned list title', () => {
     const html = renderWithShell(
       <PanelHeader
         title="所有会话"
         titleAlign="start"
-        actions={
-          <div className="flex items-center gap-1.5">
-            <button type="button">Search</button>
-            <button type="button">List / New orchestration</button>
-          </div>
-        }
+        actions={<button type="button">Search</button>}
       />,
     )
 
@@ -134,7 +162,6 @@ describe('session list header actions (#264)', () => {
     expect(html).toContain('shrink-0')
     expect(html).toContain('pr-2')
     expect(html.indexOf('所有会话')).toBeLessThan(html.indexOf('Search'))
-    expect(html.indexOf('Search')).toBeLessThan(html.indexOf('List / New orchestration'))
   })
 
   it('labels the switcher 列表 / 导入编排 in Chinese', () => {
@@ -149,6 +176,8 @@ describe('session list header actions (#264)', () => {
     expect(html).toContain('列表')
     expect(html).toContain('导入编排')
     expect(html.indexOf('列表')).toBeLessThan(html.indexOf('导入编排'))
+    expect((html.match(/aria-pressed="true"/g) ?? []).length).toBe(1)
+    expect((html.match(/aria-pressed="false"/g) ?? []).length).toBe(1)
   })
 
   it('still opens the existing search field with close control when search is active', () => {

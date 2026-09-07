@@ -8,7 +8,7 @@ import { getModelShortName } from '@config/models'
 import { TaskYamlImport } from './TaskYamlImport'
 import { isUnboundTaskEdit } from './orchestration-editor-target'
 import { catalogDefaultModel } from './kanban-models'
-import { useAtomValue, useStore } from 'jotai'
+import { useAtom, useAtomValue, useStore } from 'jotai'
 import { useProjects } from '@/hooks/useProjects'
 import { sourcesAtom } from '@/atoms/sources'
 import { skillsAtom } from '@/atoms/skills'
@@ -46,6 +46,7 @@ import { WorkingDirectorySelector } from '../input/WorkingDirectorySelector'
 import type { LoadedSource, LoadedSkill } from '../../../../shared/types'
 import { resolveSkillTitle, resolveSourceTitle } from '@craft-agent/shared/display-titles'
 import { buildSensitiveRunParams, sensitiveRunParamNames } from './sensitive-run-params'
+import { kanbanEditorDirtyAtom } from '@/atoms/kanban'
 
 
 function v3MigrationLines(spec: Record<string, unknown>): string[] {
@@ -572,7 +573,11 @@ function ExistingTaskEditor({
   const [yamlDiagnostics, setYamlDiagnostics] = React.useState<string[]>([])
   const [yamlHasLocalSource, setYamlHasLocalSource] = React.useState(false)
   const [formChangedSinceYaml, setFormChangedSinceYaml] = React.useState(false)
-  const [dirty, setDirty] = React.useState(false)
+  const [dirty, setDirty] = useAtom(kanbanEditorDirtyAtom)
+
+  React.useEffect(() => {
+    return () => setDirty(false)
+  }, [setDirty])
   const [title, setTitle] = React.useState('')
   const [goal, setGoal] = React.useState('')
   const [acceptanceCriteria, setAcceptanceCriteria] = React.useState('')
@@ -637,7 +642,7 @@ function ExistingTaskEditor({
   const markFormChanged = React.useCallback(() => {
     setDirty(true)
     setFormChangedSinceYaml(true)
-  }, [])
+  }, [setDirty])
 
   // Jotai store handle for one-shot reads (no subscription — the editor must not re-render
   // on every streaming metadata tick just to have read children once at open).
@@ -942,7 +947,7 @@ function ExistingTaskEditor({
     } finally {
       setRevisionApplying(false)
     }
-  }, [editSlug, etag, revisionPreview, revisionPreviewRunId, t, workspaceId])
+  }, [editSlug, etag, revisionPreview, revisionPreviewRunId, setDirty, t, workspaceId])
 
 
   const project = projects.find((p) => p.config.id === projectId)
@@ -966,7 +971,6 @@ function ExistingTaskEditor({
       return [...prev, { uid: uid(), title: '', prompt: '', dependsOn: last ? [last.uid] : [] }]
     })
   }
-
 
   const currentSpec = React.useCallback((): WorkbenchSpec => {
     return buildSpec(
@@ -1020,7 +1024,7 @@ function ExistingTaskEditor({
     setPermissionMode(next.defaults?.permissionMode ?? 'safe')
     setLayout(next.ui?.layout?.nodes ?? {})
     setSubtasks(specToSubtasks(next.nodes ?? []))
-  }, [])
+  }, [setDirty])
 
   const validateYamlDraft = React.useCallback(async () => {
     try {
