@@ -3,7 +3,7 @@
  * Use `fluid` for fill-parent sizing.
  */
 
-import { Zap } from 'lucide-react'
+import { Sparkles } from 'lucide-react'
 import { EntityIcon, type IconComponent } from '@/components/ui/entity-icon'
 import { useEntityIcon } from '@/lib/icon-cache'
 import type { IconSize } from '@craft-agent/shared/icons'
@@ -25,7 +25,7 @@ interface SkillAvatarProps {
   chromeless?: boolean
   /** Render icon content with no container div. */
   bare?: boolean
-  /** Override the default Zap fallback icon. */
+  /** Override the default Sparkles fallback icon. */
   fallbackIcon?: IconComponent
 }
 
@@ -51,7 +51,7 @@ export function SkillAvatar({
     <EntityIcon
       icon={icon}
       size={size}
-      fallbackIcon={fallbackIcon ?? Zap}
+      fallbackIcon={fallbackIcon ?? Sparkles}
       alt={resolveSkillTitle(skill)}
       className={className}
       containerClassName={fluid ? 'h-full w-full' : undefined}
