@@ -1,6 +1,6 @@
 {
   "name": "@craft-agent/viewer",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "license": "Apache-2.0",
   "description": "Web viewer for Selection sessions - upload and share session transcripts",
   "private": true,
