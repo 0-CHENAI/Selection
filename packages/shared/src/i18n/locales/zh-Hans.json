@@ -1069,7 +1069,6 @@
   "session.selectConversation": "选择一个对话开始",
   "session.unreadGroup": "未读 ({{count}})",
   "sessionMenu.archive": "归档",
-  "sessionMenu.connectMessaging": "连接消息平台",
   "sessionMenu.copyLink": "复制链接",
   "sessionMenu.copyPath": "复制路径",
   "sessionMenu.flag": "标记",

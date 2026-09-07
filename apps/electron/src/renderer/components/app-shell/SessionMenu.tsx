@@ -18,7 +18,6 @@ import { useMenuComponents } from '@/components/ui/menu-context'
 import { getFileManagerName } from '@/lib/platform'
 import type { SessionMeta } from '@/atoms/sessions'
 import { hasMessagesMeta, hasUnreadMeta } from '@/utils/session'
-import { MessagingSessionMenuItem } from '@/components/messaging/MessagingSessionMenuItem'
 import { useSessionMenuActions } from '@/hooks/useSessionMenuActions'
 
 export interface SessionMenuProjectOption {
@@ -63,9 +62,6 @@ export function SessionMenu({
           <span className="flex-1">{t('sessionMenu.sendToWorkspace')}</span>
         </MenuItem>
       )}
-
-      <MessagingSessionMenuItem sessionId={item.id} />
-      <Separator />
 
       {projects.length > 0 && onSetProjectId && (
         <Sub>

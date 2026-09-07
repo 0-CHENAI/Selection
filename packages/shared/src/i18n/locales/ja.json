@@ -1069,7 +1069,6 @@
   "session.selectConversation": "会話を選択して開始",
   "session.unreadGroup": "未読 ({{count}})",
   "sessionMenu.archive": "アーカイブ",
-  "sessionMenu.connectMessaging": "メッセージングを接続",
   "sessionMenu.copyLink": "リンクをコピー",
   "sessionMenu.copyPath": "パスをコピー",
   "sessionMenu.flag": "フラグ",
