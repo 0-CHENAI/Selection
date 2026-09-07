@@ -47,7 +47,7 @@ function patch(over: Partial<OrchestrationPatch> = {}): OrchestrationPatch {
 
 describe('orchestration patch', () => {
   it('rejects when the feature flag is off', () => {
-    delete process.env.CRAFT_FEATURE_TASKS_ORCHESTRATE;
+    process.env.CRAFT_FEATURE_TASKS_ORCHESTRATE = '0';
     const res = validateOrchestrationPatch(patch({ add: [{ id: 'c', kind: 'session', prompt: 'c' }] }), ctx());
     expect(res.ok).toBe(false);
     if (!res.ok) expect(res.error).toMatch(/disabled/);

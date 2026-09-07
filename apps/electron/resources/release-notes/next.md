@@ -4,9 +4,11 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 
 ## Features
 
+- **New orchestrations use V3 YAML import** — Import a YAML file or paste a definition with explicit `schema_version: 3`. Invalid definitions, older versions and duplicate task IDs are rejected before saving. Form creation, natural-language generation and Agent task-creation tools are unavailable. Existing tasks retain their versioned editing flow. Imports do not start runs; the default runner remains `conduct`, and `orchestrate` retains its preview/opt-in gate.
+
 ## Improvements
 
-- **List / new-orchestration controls no longer jump between views** — Desktop keeps search and the switcher together in one top-bar slot immediately after the workspace selector. Opening or leaving the orchestration editor now changes only the selected switcher item and main content, while project context and return navigation stay intact; unsaved editor changes are confirmed before either control leaves the editor. ([#283](https://github.com/0-CHENAI/Selection/issues/283))
+- **List / import-orchestration controls no longer jump between views** — Desktop keeps search and the switcher together in one top-bar slot immediately after the workspace selector. Opening or leaving the YAML import editor now changes only the selected switcher item and main content, while project context and return navigation stay intact; unsaved YAML or existing-task edits are confirmed before either control leaves the editor. ([#283](https://github.com/0-CHENAI/Selection/issues/283))
 
 - **Windows title bar now shares a row with the Selection top bar** — The extra native title-bar strip is gone. Minimize, maximize, and close stay on the right via the Windows overlay; the rest of the bar stays draggable and keeps sidebar, back/forward, and workspace controls. ([#260](https://github.com/0-CHENAI/Selection/issues/260))
 

@@ -493,7 +493,7 @@ export interface CreateTaskInput {
   title?: string;
   /** What the task should accomplish — becomes the task goal and the initial node prompt. */
   description?: string;
-  /** Full v2 spec. Mutually exclusive with the single-node title/description form. */
+  /** Full task spec. Mutually exclusive with the single-node title/description form. */
   spec?: unknown;
   /** Freeform rubric the final result is verified against. */
   acceptanceCriteria?: string;

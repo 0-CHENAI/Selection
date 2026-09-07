@@ -23,6 +23,21 @@ describe('task document v1/v2', () => {
     rmSync(root, { recursive: true, force: true });
   });
 
+  it('refuses explicit and implicit v3 downgrades without changing the saved task', () => {
+    const saved = saveTaskDocument(root, `schema_version: 3\n${V1}`, null);
+    for (const yaml of [V1, `schema_version: 2\n${V1}`]) {
+      expect(() => saveTaskDocument(root, yaml, saved.etag)).toThrow('Refusing to downgrade');
+      expect(loadTaskDocument(root, 'demo')!.yaml).toBe(saved.yaml);
+    }
+  });
+
+  it('does not create migration history when confirmation is missing', () => {
+    const saved = saveTaskDocument(root, `schema_version: 2\n${V1}`, null);
+    expect(() => saveTaskDocument(root, `schema_version: 3\n${V1}`, saved.etag)).toThrow('without confirmation');
+    expect(existsSync(join(taskDir(root, 'demo'), '.history'))).toBe(false);
+    expect(loadTaskDocument(root, 'demo')!.yaml).toBe(saved.yaml);
+  });
+
   it('reads a v1 file as sourceVersion 1 and does not rewrite it', () => {
     mkdirSync(taskDir(root, 'demo'), { recursive: true });
     writeFileSync(taskYamlPath(root, 'demo'), V1);

@@ -1021,11 +1021,11 @@ Use the \`call_llm\` tool to invoke a secondary LLM for focused subtasks. It run
 - The subtask needs your conversation context — \`call_llm\` starts fresh with no history.
 - Simple one-liner responses that don't need isolation.
 
-**\`call_llm\` vs \`spawn_session\` vs \`create_task\`:**
+**\`call_llm\` vs \`spawn_session\`:**
 - Default: do the work yourself in this session. Do not spawn "just in case".
 - \`call_llm\` = single completion, no tools, parallel. Best for *processing* content you already have (summarize, classify, extract). Omitting \`model\` uses this session's current model.
 - \`spawn_session\` = a first-class child session with tools. Use it only when one of the spawn conditions below is true.
-- \`create_task\` / \`run_task\` = kanban only. Use when the user asks to queue or run a board task — not for one-off chat work.
+- Persistent DAG tasks are imported by the user from YAML in the application.
 
 **Quick reference:** Read \`${DOC_REFS.llmTool}\` for full parameter docs, output formats, and examples.
 ${browserToolsSection}
@@ -1069,12 +1069,11 @@ Do **not** spawn for ordinary Q&A, explaining, editing text you already have, su
 Call \`help=true\` only when you must pick a different connection or model. Follow up with \`send_agent_message\` only for extra instructions, not as the completion protocol.
 After you present findings, do **not** automatically \`archive_session\` the children. Archive finished children only when the user asks to clean up or archive them.
 
-**Creating and running board tasks:**
-\`create_task\` — creates a Selection Task on the board. Provide either title + description (single-node form) or a full v2 spec (exclusive). Optional on the simple form: acceptance criteria, sources, skills, llmConnection + model, working directory, and project. An explicit project overrides the invoking session's project; when omitted, the current project is inherited. The task is created in "todo" and is NOT run. Use it only when the user asks to capture or queue work as a board task ("add a task for…", "put this on the board") — not as a substitute for doing the work in chat. Returns the task slug + orchestrator session id, plus warnings for unknown source/skill slugs.
-\`run_task\` — starts the Conductor DAG for an existing task (\`slug\` or \`orchestratorSessionId\`). Returns a typed snapshot (status, nodes, tokens, revision). Parameter errors are tool errors. Use after \`create_task\` or when the user asks to run a board task. Optional \`waitForCompletion\` waits until the run reaches a terminal state. Do not create-then-run a board task for one-off chat work — use \`spawn_session\` only if the spawn bar above is met, otherwise do it yourself.
+**Importing and running board tasks:**
+New persistent tasks can only be imported by the user from YAML with explicit schema_version: 3. Agent task creation and natural-language generation are unavailable.
+\`run_task\` — runs an existing imported task. Use only when the user asks to run it.
 \`control_task_run\` — pause / resume / stop / continue a Conductor run. Approval, sensitive-parameter entry, and budget changes are user-only controls in the run details UI. Stop here is "stop the Conductor run", not the background-task chip. Use only when the user asked to control a board task.
 \`get_task_results\` — reads a run's verdict, typed outputs, artifacts, revisions, and per-node state from disk. Use to inspect a Conductor run you started or the latest run for a slug.
-\`submit_task_definition\` — mandatory when generating a new v2 task: submit the complete structured spec object with \`schema_version: 2\`. Never put a v2 spec in final-text YAML or JSON; final-text fallback exists only for legacy v1/history and pasted v2 is rejected. The server validates the structured payload; you get at most two corrections.
 \`submit_task_output\` — required when a Conductor node declares outputs. Pass values matching the declared names. Missing this call marks the node invalid.
 \`submit_task_verdict\` — structured pass/fail for the parent verification turn. Parent chat messages are never treated as a verdict.
 \`submit_task_node_verdict\` — required for v3 verify/judge nodes: pass or fail with reason, evidence, and nodes to rework. Chat text is not a verdict.

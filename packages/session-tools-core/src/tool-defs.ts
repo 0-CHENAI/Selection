@@ -39,7 +39,6 @@ import { handleSetSessionStatus } from './handlers/set-session-status.ts';
 import { handleGetSessionInfo } from './handlers/get-session-info.ts';
 import { handleListSessions } from './handlers/list-sessions.ts';
 import { handleListBackgroundTasks } from './handlers/list-background-tasks.ts';
-import { handleCreateTask } from './handlers/create-task.ts';
 import { handleRunTask } from './handlers/run-task.ts';
 import { handleGetTaskResults } from './handlers/get-task-results.ts';
 import { handleSubmitTaskOutput } from './handlers/submit-task-output.ts';
@@ -47,7 +46,6 @@ import { handleSubmitTaskVerdict } from './handlers/submit-task-verdict.ts';
 import { handleSubmitOrchestrationPatch } from './handlers/submit-orchestration-patch.ts';
 import { handleSubmitOrchestrationDecision } from './handlers/submit-orchestration-decision.ts';
 import { handleSubmitTaskNodeVerdict } from './handlers/submit-task-node-verdict.ts';
-import { handleSubmitTaskDefinition } from './handlers/submit-task-definition.ts';
 import { handleControlTaskRun } from './handlers/control-task-run.ts';
 import { handleArchiveSession } from './handlers/archive-session.ts';
 import { handleSendAgentMessage } from './handlers/send-agent-message.ts';
@@ -252,7 +250,7 @@ export const CreateTaskSchema = z.object({
 
 export const RunTaskSchema = z.object({
   slug: z.string().optional().describe('Task slug to run. Required unless orchestratorSessionId is set.'),
-  orchestratorSessionId: z.string().optional().describe('Orchestrator session id (from create_task). Used to find the slug when omitted.'),
+  orchestratorSessionId: z.string().optional().describe('Orchestrator session id of an existing board task. Used to find the slug when omitted.'),
   params: z.record(z.string(), z.unknown()).optional().describe('Optional task params forwarded to TaskRunner'),
   waitForCompletion: z.boolean().optional().describe('If true, wait until the run reaches a terminal state (default false)'),
 });
@@ -610,21 +608,21 @@ Requires an explicit sessionId and cannot target your own session. Use list_sess
 
   create_task: `Create a Selection Task on the kanban board — writes tasks/<slug>/task.yaml and creates its orchestrator session. CREATION ONLY: the task lands in "todo" and is NOT run.
 
-Provide either title + description (single-node form) OR a full v2 spec (exclusive). Optional on the simple form: acceptanceCriteria, sources / skills, llmConnection + model, workingDirectory, projectId. Omitted model and connection inherit from the current session.
+Provide either title + description (single-node form) OR a full task spec (exclusive). New tasks default to schema_version 3. Optional on the simple form: acceptanceCriteria, sources / skills, llmConnection + model, workingDirectory, projectId. Omitted model and connection inherit from the current session.
 
 Returns { slug, orchestratorSessionId, taskLabelId, warnings } — unknown source/skill slugs are reported as warnings, not errors. Use it only when the user asks to capture or queue work as a board task. Do not create a board task for one-off chat work. To execute immediately in chat, do the work yourself or (if the spawn bar is met) use spawn_session. To start this board task's Conductor DAG, call run_task with the returned slug.`,
 
   run_task: `Start the Conductor DAG for an existing Selection Task on the kanban board.
 
-Provide slug (from create_task or the board) and/or orchestratorSessionId. Optional params are forwarded to the runner. waitForCompletion (default false) waits until the run is completed, failed, or stopped.
+Provide slug (from the board) and/or orchestratorSessionId. Optional params are forwarded to the runner. waitForCompletion (default false) waits until the run is completed, failed, or stopped.
 
-Returns a typed snapshot { slug, runId, status, nodeCount, nodes }. Parameter errors are returned as tool errors. This does not create a task — use create_task first. Use only when the user asked to run a board task.`,
+Returns a typed snapshot { slug, runId, status, nodeCount, nodes }. Parameter errors are returned as tool errors. This does not create a task — the user must import new tasks from YAML first. Use only when the user asked to run a board task.`,
 
   control_task_run: `Control an active Conductor run: pause, resume, stop, or continue.
 
 Approval, sensitive-parameter entry, and budget changes are user-only controls in the run details UI. Use only when the user asked to control a board task run. Stop here is "stop the Conductor run", not the background-task chip.`,
 
-  submit_task_definition: `Submit a structured v2 task spec instead of pasting YAML in chat.
+  submit_task_definition: `Submit a structured v3 task spec instead of pasting YAML in chat.
 
 The server validates the spec. On errors, fix and submit again (generation allows at most two corrections).`,
 
@@ -757,7 +755,6 @@ export const SESSION_TOOL_DEFS: SessionToolDef[] = [
   { name: 'set_session_labels', description: TOOL_DESCRIPTIONS.set_session_labels, inputSchema: SetSessionLabelsSchema, executionMode: 'registry', safeMode: 'block', handler: handleSetSessionLabels },
   { name: 'set_session_status', description: TOOL_DESCRIPTIONS.set_session_status, inputSchema: SetSessionStatusSchema, executionMode: 'registry', safeMode: 'block', handler: handleSetSessionStatus },
   { name: 'archive_session', description: TOOL_DESCRIPTIONS.archive_session, inputSchema: ArchiveSessionSchema, executionMode: 'registry', safeMode: 'block', handler: handleArchiveSession },
-  { name: 'create_task', description: TOOL_DESCRIPTIONS.create_task, inputSchema: CreateTaskSchema, executionMode: 'registry', safeMode: 'block', handler: handleCreateTask },
   { name: 'run_task', description: TOOL_DESCRIPTIONS.run_task, inputSchema: RunTaskSchema, executionMode: 'registry', safeMode: 'block', handler: handleRunTask },
   { name: 'get_task_results', description: TOOL_DESCRIPTIONS.get_task_results, inputSchema: GetTaskResultsSchema, executionMode: 'registry', safeMode: 'allow', readOnly: true, handler: handleGetTaskResults },
   { name: 'submit_task_output', description: TOOL_DESCRIPTIONS.submit_task_output, inputSchema: SubmitTaskOutputSchema, executionMode: 'registry', safeMode: 'allow', handler: handleSubmitTaskOutput },
@@ -765,7 +762,6 @@ export const SESSION_TOOL_DEFS: SessionToolDef[] = [
   { name: 'submit_orchestration_patch', description: TOOL_DESCRIPTIONS.submit_orchestration_patch, inputSchema: SubmitOrchestrationPatchSchema, executionMode: 'registry', safeMode: 'allow', handler: handleSubmitOrchestrationPatch },
   { name: 'submit_orchestration_decision', description: TOOL_DESCRIPTIONS.submit_orchestration_decision, inputSchema: SubmitOrchestrationDecisionSchema, executionMode: 'registry', safeMode: 'allow', handler: handleSubmitOrchestrationDecision },
   { name: 'submit_task_node_verdict', description: TOOL_DESCRIPTIONS.submit_task_node_verdict, inputSchema: SubmitTaskNodeVerdictSchema, executionMode: 'registry', safeMode: 'allow', handler: handleSubmitTaskNodeVerdict },
-  { name: 'submit_task_definition', description: TOOL_DESCRIPTIONS.submit_task_definition, inputSchema: SubmitTaskDefinitionSchema, executionMode: 'registry', safeMode: 'allow', handler: handleSubmitTaskDefinition },
   { name: 'control_task_run', description: TOOL_DESCRIPTIONS.control_task_run, inputSchema: ControlTaskRunSchema, executionMode: 'registry', safeMode: 'block', handler: handleControlTaskRun },
   { name: 'get_session_info', description: TOOL_DESCRIPTIONS.get_session_info, inputSchema: GetSessionInfoSchema, executionMode: 'registry', safeMode: 'allow', readOnly: true, handler: handleGetSessionInfo },
   { name: 'list_sessions', description: TOOL_DESCRIPTIONS.list_sessions, inputSchema: ListSessionsSchema, executionMode: 'registry', safeMode: 'allow', readOnly: true, handler: handleListSessions },

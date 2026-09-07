@@ -115,12 +115,17 @@ describe('session list and orchestration view controls (#264, #283)', () => {
   it('protects unsaved orchestration edits for both search and list navigation', () => {
     const appShell = readFileSync(join(import.meta.dir, '../AppShell.tsx'), 'utf8')
     const taskEditor = readFileSync(join(import.meta.dir, '../kanban/TaskEditor.tsx'), 'utf8')
+    const taskYamlImport = readFileSync(join(import.meta.dir, '../kanban/TaskYamlImport.tsx'), 'utf8')
 
     expect(appShell).toContain('useAtomValue(kanbanEditorDirtyAtom)')
     expect(appShell).toContain("kanbanEditorDirty && !window.confirm(t('tasks.discardUnsaved'))")
     expect(appShell).toContain('if (isBoardView && !leaveOrchestrationView()) return')
     expect(taskEditor).toContain('useAtom(kanbanEditorDirtyAtom)')
     expect(taskEditor).toContain('return () => setDirty(false)')
+    expect(taskYamlImport).toContain('useSetAtom(kanbanEditorDirtyAtom)')
+    expect(taskYamlImport).toContain('setEditorDirty(value.trim().length > 0)')
+    expect(taskYamlImport).toContain("yaml.trim() && !window.confirm(t('tasks.discardUnsaved'))")
+    expect(taskYamlImport).toContain('setEditorDirty(false)')
   })
 
   it('uses exactly one desktop switcher for list and orchestration views', () => {
@@ -159,18 +164,18 @@ describe('session list and orchestration view controls (#264, #283)', () => {
     expect(html.indexOf('所有会话')).toBeLessThan(html.indexOf('Search'))
   })
 
-  it('labels the switcher 列表 / 新建编排 in Chinese', () => {
+  it('labels the switcher 列表 / 导入编排 in Chinese', () => {
     const zh = LOCALE_REGISTRY['zh-Hans'].messages
     expect(zh['kanban.list']).toBe('列表')
-    expect(zh['kanban.board']).toBe('新建编排')
+    expect(zh['kanban.board']).toBe('导入编排')
 
     const html = renderWithI18n(
       'zh-Hans',
       <BoardListToggle value="list" onChange={() => {}} />,
     )
     expect(html).toContain('列表')
-    expect(html).toContain('新建编排')
-    expect(html.indexOf('列表')).toBeLessThan(html.indexOf('新建编排'))
+    expect(html).toContain('导入编排')
+    expect(html.indexOf('列表')).toBeLessThan(html.indexOf('导入编排'))
     expect((html.match(/aria-pressed="true"/g) ?? []).length).toBe(1)
     expect((html.match(/aria-pressed="false"/g) ?? []).length).toBe(1)
   })

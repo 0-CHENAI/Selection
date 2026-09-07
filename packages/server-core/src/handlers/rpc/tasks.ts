@@ -18,9 +18,6 @@ import type {
   TaskCreateResult,
   TaskSaveRequest,
   TaskSaveResult,
-  TaskGenerateRequest,
-  TaskGenerateAck,
-  TaskGenerateResult,
   TaskRunRequest,
   TaskValidationResultDto,
   TaskGetResult,
@@ -33,16 +30,17 @@ import type {
   TaskApplyRunRevisionResult,
 } from '@craft-agent/shared/protocol'
 import { createHash } from 'node:crypto'
+import { unlinkSync } from 'node:fs'
 import { getWorkspaceByNameOrId, getLlmConnections } from '@craft-agent/shared/config'
 import {
   parseTaskYaml,
   parseTaskDocument,
+  parseTaskImport,
   loadTaskDocument,
   saveTaskDocument,
+  taskYamlPath,
   listTaskSlugs,
   listRunIds,
-  buildGeneratorPrompt,
-  buildRepairPrompt,
   loadTaskResults,
   TaskEtagConflictError,
   definitionDiff,
@@ -51,12 +49,9 @@ import {
   readLatestSpecRevision,
   serializeTaskYaml,
 } from '@craft-agent/shared/tasks'
-import { createLogger } from '@craft-agent/shared/utils'
 import { pushTyped, type RpcServer } from '@craft-agent/server-core/transport'
 import type { HandlerDeps } from '../handler-deps'
-import { TaskRunner, TaskControlError, clearSubmittedDefinition, createTaskFromSpec, finishTaskOrchestrator, resolveGeneratedYaml } from '../../tasks'
-
-const tasksLog = createLogger('tasks-generate')
+import { TaskRunner, TaskControlError, createTaskFromSpec } from '../../tasks'
 
 export const HANDLED_CHANNELS = [
   RPC_CHANNELS.tasks.VALIDATE,
@@ -94,12 +89,6 @@ function toValidationDto(result: ReturnType<typeof parseTaskYaml>): TaskValidati
     ...(result.spec ? { spec: result.spec } : {}),
   }
 }
-
-const GENERATE_TIMEOUT_MS = 180_000
-
-// One initial generation plus up to one feedback-driven repair turn. Bounded so a model
-// that keeps emitting invalid specs can't loop forever; the last attempt is returned as-is.
-const MAX_GENERATE_ATTEMPTS = 2
 
 export function registerTasksHandlers(server: RpcServer, deps: HandlerDeps): void {
   // One Conductor per workspace, created on demand. Holds active runs in memory.
@@ -176,78 +165,43 @@ export function registerTasksHandlers(server: RpcServer, deps: HandlerDeps): voi
   // tasks:create — write task.yaml + create the orchestrator parent session.
   server.handle(RPC_CHANNELS.tasks.CREATE, async (_ctx, workspaceId: string, req: TaskCreateRequest): Promise<TaskCreateResult> => {
     const ws = workspaceOrThrow(workspaceId)
-    const parsed = parseTaskDocument(req.yaml)
+    if (req.attachToExistingSession || req.orchestratorSessionId) {
+      throw new Error('Import cannot adopt or bind an existing session. Import a new task instead.')
+    }
+    const parsed = parseTaskImport(req.yaml)
     const validation = toValidationDto(parsed)
     if (!parsed.valid || !parsed.spec) {
       return { slug: '', orchestratorSessionId: '', validation }
     }
     const spec = parsed.spec
     const existing = loadTaskDocument(ws.rootPath, spec.id)
-    saveTaskDocument(ws.rootPath, req.yaml, existing?.etag ?? null, {
+    if (existing) throw new Error('A task with this id already exists. Import with a new id or edit the existing task.')
+    const saved = saveTaskDocument(ws.rootPath, req.yaml, null, {
       confirmV3Migration: req.confirmV3Migration,
     })
 
-    // Single choke point for ALL orchestrator paths (attach / adopt / fresh): apply the reserved
-    // "Task" label (surfacing its resolved id so the renderer can navigate to the label filter)
-    // and enable the spec's sources on the orchestrator session. Fail-soft — neither a label nor
-    // a sources problem may fail task creation. The body lives in finishTaskOrchestrator
-    // (../../tasks/create-task) so the create_task session tool shares it verbatim.
-    const finish = async (orchestratorSessionId: string): Promise<TaskCreateResult> => {
-      const setup = await finishTaskOrchestrator(deps.sessionManager, orchestratorSessionId, spec)
-      return { slug: spec.id, orchestratorSessionId, validation, taskLabelId: setup.taskLabelId }
-    }
-
-    // Edit-mode bind: the user saved this spec onto an existing, visible tile (e.g. a quick-add
-    // session). Bind that session to the slug. Unlike adoption this HARD-ERRORS on failure — it
-    // must never fall through to createSession, which would leave a duplicate orchestrator tile.
-    if (req.attachToExistingSession) {
-      const bound = await deps.sessionManager.bindExistingSessionToTask(req.attachToExistingSession, spec.id, {
-        name: spec.title,
-        projectId: spec.project,
-        ...(spec.cwd ? { workingDirectory: spec.cwd } : {}),
-        ...(spec.defaults?.model ? { model: spec.defaults.model } : {}),
-        ...(spec.defaults?.llmConnection ? { llmConnection: spec.defaults.llmConnection } : {}),
-        ...(spec.defaults?.permissionMode ? { permissionMode: spec.defaults.permissionMode } : {}),
-      })
-      if (!bound) {
-        throw new Error(
-          `Cannot attach task "${spec.id}" to session ${req.attachToExistingSession}: ` +
-            `session is missing or already bound to a different task.`,
-        )
+    // YAML imports create a fresh orchestrator without adopting generation drafts.
+    try {
+      const created = await createTaskFromSpec(deps.sessionManager, workspaceId, ws.rootPath, saved.spec!, { save: false })
+      validation.warnings.push(...created.warnings.map(message => ({ path: 'session', message, severity: 'warning' as const })))
+      return { slug: created.slug, orchestratorSessionId: created.orchestratorSessionId, validation, taskLabelId: created.taskLabelId }
+    } catch (error) {
+      // Remove only this import's unchanged file, allowing retry after session creation fails.
+      if (loadTaskDocument(ws.rootPath, spec.id)?.etag === saved.etag) {
+        unlinkSync(taskYamlPath(ws.rootPath, spec.id))
       }
-      return finish(req.attachToExistingSession)
+      throw error
     }
-
-    // Adoption path: when the YAML was authored by a generate orchestrator, promote that hidden
-    // draft in place instead of creating a second top-level session (#bug1). Falls back to a fresh
-    // session if the draft is gone / already adopted / bound to another slug.
-    if (req.orchestratorSessionId) {
-      const adopted = await deps.sessionManager.adoptGeneratedTaskOrchestrator(req.orchestratorSessionId, spec.id, {
-        name: spec.title,
-        projectId: spec.project,
-        ...(spec.cwd ? { workingDirectory: spec.cwd } : {}),
-        ...(spec.defaults?.model ? { model: spec.defaults.model } : {}),
-        // Reconcile the connection + permission mode from the saved spec (bind already does this) so an
-        // orch model/mode changed after generation actually takes effect on the promoted orchestrator.
-        ...(spec.defaults?.llmConnection ? { llmConnection: spec.defaults.llmConnection } : {}),
-        ...(spec.defaults?.permissionMode ? { permissionMode: spec.defaults.permissionMode } : {}),
-      })
-      if (adopted) {
-        return finish(req.orchestratorSessionId)
-      }
-    }
-
-    // Fresh create — shared core with the create_task session tool. The spec was already saved
-    // above (all three paths persist first), so skip the core's save. createSession announces the
-    // orchestrator to the renderer by default, so its tile appears on the board immediately.
-    const created = await createTaskFromSpec(deps.sessionManager, workspaceId, ws.rootPath, spec, { save: false })
-    return { slug: created.slug, orchestratorSessionId: created.orchestratorSessionId, validation, taskLabelId: created.taskLabelId }
   })
 
-  // tasks:save — etag-guarded write that stamps schema_version: 2 and backups a v1 original.
+  // tasks:save — etag-guarded write that stamps schema_version 2 or 3 and backups a v1 original.
   server.handle(RPC_CHANNELS.tasks.SAVE, async (_ctx, workspaceId: string, req: TaskSaveRequest): Promise<TaskSaveResult> => {
     const ws = workspaceOrThrow(workspaceId)
     try {
+      const incoming = parseTaskDocument(req.yaml)
+      if (!incoming.spec || !loadTaskDocument(ws.rootPath, incoming.spec.id)) {
+        throw new Error('Save requires an existing task. Import a V3 YAML definition to create a task.')
+      }
       const saved = saveTaskDocument(ws.rootPath, req.yaml, req.expectedEtag, {
         confirmV3Migration: req.confirmV3Migration,
       })
@@ -277,136 +231,12 @@ export function registerTasksHandlers(server: RpcServer, deps: HandlerDeps): voi
     }
   })
 
-  // tasks:generate — the persistent orchestrator session AUTHORS the task.yaml from a goal (#2).
-  // It also remains the home for "ask the agent to revise it" (it holds the conversation).
-  //
-  // ASYNC: the orchestrator session is created synchronously (cheap) and its id is returned
-  // immediately so the RPC never approaches the uniform client timeout. The authored spec is
-  // streamed back via the `tasks:generated` push event keyed by orchestratorSessionId. The
-  // session is a hidden taskDraft (off the board) until adopted by tasks:create; the editor
-  // discards an unadopted draft on close, and because drafts are hidden a give-up-early client
-  // never leaves a visible orphan tile.
-  server.handle(RPC_CHANNELS.tasks.GENERATE, async (_ctx, workspaceId: string, req: TaskGenerateRequest): Promise<TaskGenerateAck> => {
-    workspaceOrThrow(workspaceId) // validate the workspace exists; generate no longer writes task.yaml
-    const orchestrator = await deps.sessionManager.createSession(workspaceId, {
-      name: req.title?.trim() || 'New task',
-      // Hidden until the authored spec is validated and adopted via tasks:create. Keeps the
-      // generate-time session off the board so "Generate → Create & Run" can't mint a duplicate
-      // top-level tile (#bug1). Promotion clears this flag in adoptGeneratedTaskOrchestrator.
-      taskDraft: true,
-      // Bind the draft to the project so it authors against the project's <project_context>.
-      ...(req.projectId ? { projectId: req.projectId } : {}),
-      // Seed the orchestrator with the cwd chosen in the composer so the authored spec and any
-      // dispatched children inherit it. Omitted → project/workspace default working directory.
-      ...(req.cwd ? { workingDirectory: req.cwd } : {}),
-      ...(req.model ? { model: req.model } : {}),
-      // Non-default (pi/*) models need their serving connection to resolve a backend — without it the
-      // authoring turn completes instantly with no output, producing an invalid/empty spec.
-      ...(req.llmConnection ? { llmConnection: req.llmConnection } : {}),
-      // Task-level sources become the draft's enabled set (omitted → workspace default).
-      ...(req.enabledSourceSlugs?.length ? { enabledSourceSlugs: req.enabledSourceSlugs } : {}),
-      // Seed the visible task autonomy so authoring runs at the chosen mode, not the workspace default.
-      ...(req.permissionMode ? { permissionMode: req.permissionMode } : {}),
-    })
-    const sessionId = orchestrator.id
-    tasksLog.info('generate started', {
-      workspaceId,
-      sessionId,
-      hasCwd: Boolean(req.cwd),
-      model: req.model,
-      projectId: req.projectId,
-      hasConnection: Boolean(req.llmConnection),
-      permissionMode: req.permissionMode,
-    })
-
-    // Send `prompt` to the orchestrator and await its next final turn. Subscribe BEFORE
-    // sending so a fast turn can't complete before we listen; a timeout keeps a hung turn
-    // from blocking forever.
-    const askOrchestrator = (prompt: string) =>
-      new Promise<{ text: string; generation: number }>((resolve, reject) => {
-        clearSubmittedDefinition(sessionId)
-        let settled = false
-        let off: (() => void) | undefined
-        let timer: ReturnType<typeof setTimeout> | undefined
-        const finish = (fn: () => void) => {
-          if (settled) return
-          settled = true
-          off?.()
-          if (timer) clearTimeout(timer)
-          fn()
-        }
-        off = deps.sessionManager.onSessionComplete((evt) => {
-          if (evt.sessionId !== sessionId) return
-          const text = evt.finalText ?? deps.sessionManager.getSessionFinalText(sessionId) ?? ''
-          finish(() => resolve({ text, generation: evt.generation }))
-        })
-        timer = setTimeout(() => finish(() => {
-          clearSubmittedDefinition(sessionId)
-          reject(new Error('Task generation timed out'))
-        }), GENERATE_TIMEOUT_MS)
-        void Promise.resolve(deps.sessionManager.sendMessage(sessionId, prompt))
-          .catch((err: unknown) => finish(() => reject(err instanceof Error ? err : new Error(String(err)))))
-      })
-
-    // Run the generate→repair loop in the background and push the result when done. Awaiting
-    // here would re-introduce the synchronous-RPC-over-WS timeout this async path exists to avoid.
-    void (async () => {
-      const startedAt = Date.now()
-      try {
-        // Generate, then auto-repair: the orchestrator still holds the conversation, so if the
-        // authored spec fails validation (commonly a ${nodes.X.output} ref to an undeclared
-        // node) hand the concrete errors back and re-validate. Bounded so a model that can't
-        // self-correct can't loop forever — the last attempt's validation is returned as-is.
-        let prompt = buildGeneratorPrompt(req.goal, req.title)
-        let yaml = ''
-        let parsed = parseTaskYaml(yaml)
-        let attempts = 0
-        for (let attempt = 0; attempt < MAX_GENERATE_ATTEMPTS; attempt++) {
-          attempts = attempt + 1
-          const turn = await askOrchestrator(prompt)
-          yaml = resolveGeneratedYaml(sessionId, turn.generation, turn.text)
-          parsed = parseTaskYaml(yaml)
-          if (parsed.valid) break
-          prompt = buildRepairPrompt(parsed.errors)
-        }
-        const validation = toValidationDto(parsed)
-        // Do NOT persist here. tasks:create is the only writer of the live task.yaml — writing
-        // eagerly on generation would clobber an existing task before the user confirms the edit.
-        // The authored spec is delivered below via tasks:generated and saved on save/create.
-        tasksLog.info('generate finished', {
-          sessionId,
-          valid: parsed.valid,
-          attempts,
-          elapsedMs: Date.now() - startedAt,
-          slug: parsed.spec?.id ?? '',
-        })
-        pushTyped(server, RPC_CHANNELS.tasks.GENERATED, { to: 'workspace', workspaceId }, workspaceId, {
-          orchestratorSessionId: sessionId,
-          slug: parsed.spec?.id ?? '',
-          spec: parsed.spec,
-          yaml,
-          validation,
-        })
-      } catch (err) {
-        const message = err instanceof Error ? err.message : String(err)
-        tasksLog.error('generate failed', { sessionId, elapsedMs: Date.now() - startedAt, error: message })
-        // Deliver the failure so the client can stop its spinner and surface a toast. The
-        // orchestrator stays a hidden taskDraft (never shown on the board); the editor discards
-        // it on close, so a failed generation leaves nothing for the user to clean up.
-        pushTyped(server, RPC_CHANNELS.tasks.GENERATED, { to: 'workspace', workspaceId }, workspaceId, {
-          orchestratorSessionId: sessionId,
-          slug: '',
-          yaml: '',
-          validation: { valid: false, errors: [], warnings: [] },
-          error: message,
-        })
-      }
-    })()
-
-    return { orchestratorSessionId: sessionId }
+  // Retain the channel to reject stale clients without creating draft sessions.
+  server.handle(RPC_CHANNELS.tasks.GENERATE, async () => {
+    throw new Error('Task generation is disabled. Import a YAML file with schema_version: 3.');
   })
 
-  // tasks:run — start a run.
+  // tasks:run — start an existing run.
   server.handle(RPC_CHANNELS.tasks.RUN, async (_ctx, workspaceId: string, req: TaskRunRequest) => {
     const orchestrator = req.orchestratorSessionId
       ? await deps.sessionManager.getSession(req.orchestratorSessionId)
