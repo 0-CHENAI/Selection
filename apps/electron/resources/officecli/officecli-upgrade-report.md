@@ -114,7 +114,8 @@
       "after": {
         "name": "officecli-win-x64.exe",
         "url": "https://github.com/iOfficeAI/OfficeCLI/releases/download/v1.0.147/officecli-win-x64.exe",
-        "sha256": "724056e5ff079c3585df79c8afc386f08ef7d5f956cf4e2723534e129aab6e80"
+        "sha256": "724056e5ff079c3585df79c8afc386f08ef7d5f956cf4e2723534e129aab6e80",
+        "schemaCrc": "69cd35d9"
       }
     }
   ]
@@ -132,5 +133,7 @@
 ```json
 {}
 ```
+
+人工复验：v1.0.147 的 `import` 新增 `--delimiter` 与 `--decimal`，CSV/TSV 默认导入行为保持兼容；Windows x64 二进制 schema CRC 为 `69cd35d9`，与默认审查值 `909df808` 不同，已单独记录，不覆盖默认 CRC。
 
 > 此报告只用于人工审查。运行时自更新保持禁用，draft PR 不会自动合并。
