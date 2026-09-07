@@ -1842,16 +1842,31 @@ function AppShellContent({
           canGoForward={canGoForward}
           onToggleSidebar={handleToggleSidebar}
           onToggleFocusMode={() => setIsSidebarAndNavigatorHidden(prev => !prev)}
-          afterWorkspace={isBoardView ? (
-            <BoardListToggle
-              value="board"
-              onChange={view => {
-                if (view === 'list') {
-                  setKanbanEditorTarget(null)
-                  navigate(routes.view.allSessions())
-                }
-              }}
-            />
+          afterWorkspace={isSessionsNavigation(navState) ? (
+            <div className="flex items-center gap-1.5">
+              <HeaderIconButton
+                icon={<Search className="h-4 w-4" />}
+                tooltip={t("sidebar.search")}
+                onClick={() => {
+                  if (isBoardView) {
+                    setKanbanEditorTarget(null)
+                    navigate(routes.view.allSessions())
+                  }
+                  setSearchActive(true)
+                }}
+              />
+              <BoardListToggle
+                value={isBoardView ? 'board' : 'list'}
+                onChange={view => {
+                  if (view === 'list' && isBoardView) {
+                    setKanbanEditorTarget(null)
+                    navigate(routes.view.allSessions())
+                  } else if (view === 'board' && !isBoardView) {
+                    navigate(routes.view.board())
+                  }
+                }}
+              />
+            </div>
           ) : undefined}
           isCompact={isAutoCompact}
         />
@@ -2127,27 +2142,18 @@ function AppShellContent({
                 </Tooltip>
               ) : undefined}
               actions={
-                <>
-                  {/* Sessions: search, then list / new-orchestration. Compact
-                      hides the switcher and keeps search so the right edge
-                      does not leave an empty slot. */}
-                  {isSessionsNavigation(navState) && (
-                    <div className="flex items-center gap-1.5">
-                      <HeaderIconButton
-                        icon={<Search className="h-4 w-4" />}
-                        tooltip={t("sidebar.search")}
-                        onClick={() => setSearchActive(true)}
-                      />
-                      {!isAutoCompact && (
-                        <BoardListToggle
-                          value="list"
-                          onChange={view => {
-                            if (view === 'board') navigate(routes.view.board())
-                          }}
-                        />
-                      )}
-                    </div>
-                  )}
+                isSessionsNavigation(navState) ? (
+                  /* Compact mode keeps its existing list-header search affordance.
+                     The desktop search and view switcher share one stable TopBar slot. */
+                  isAutoCompact ? (
+                    <HeaderIconButton
+                      icon={<Search className="h-4 w-4" />}
+                      tooltip={t("sidebar.search")}
+                      onClick={() => setSearchActive(true)}
+                    />
+                  ) : undefined
+                ) : (
+                  <>
                   {/* Add Source button (only for sources mode) - uses filter-aware edit config */}
                   {isSourcesNavigation(navState) && activeWorkspace && (
                     <>
@@ -2242,7 +2248,8 @@ function AppShellContent({
                       onClick={openAddProject}
                     />
                   )}
-                </>
+                  </>
+                )
               }
             />
             {/* Content: SessionList, SourcesListPanel, or SettingsNavigator based on navigation state */}

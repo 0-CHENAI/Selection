@@ -6,13 +6,13 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 
 ## Improvements
 
-- **New-orchestration switcher sits next to the workspace selector** — On the create/edit orchestration view, List / New orchestration moves from the editor chrome’s right edge into the window top bar, immediately after the workspace pill. The session-list header still keeps search, then the switcher.
+- **List / new-orchestration controls no longer jump between views** — Desktop keeps search and the switcher together in one top-bar slot immediately after the workspace selector. Opening or leaving the orchestration editor now changes only the selected switcher item and main content, while project context and return navigation stay intact. ([#283](https://github.com/0-CHENAI/Selection/issues/283))
 
 - **Windows title bar now shares a row with the Selection top bar** — The extra native title-bar strip is gone. Minimize, maximize, and close stay on the right via the Windows overlay; the rest of the bar stays draggable and keeps sidebar, back/forward, and workspace controls. ([#260](https://github.com/0-CHENAI/Selection/issues/260))
 
 - **Desktop top bar drops the brand menu, creation-jobs icon, and add-panel plus** — Sidebar, back/forward, workspace, and browser badges stay. Creation jobs still validate and notify in the background; reopen/stop lives on the Sources, Skills, and Automations headers. New chat in a panel still uses its shortcut. Compact keeps the mobile app menu. ([#262](https://github.com/0-CHENAI/Selection/issues/262))
 
-- **Session list title bar is now search, then list / new orchestration** — The magnifier sits to the left of the switcher. After the filter menu was removed, the switcher is the rightmost header control. Search still opens the existing session search field; compact widths hide only the switcher. ([#264](https://github.com/0-CHENAI/Selection/issues/264))
+- **Session controls are now search, then list / new orchestration** — The magnifier stays immediately left of the switcher and still opens the existing session search field. Compact widths keep search in the list header and hide the switcher. ([#264](https://github.com/0-CHENAI/Selection/issues/264))
 
 - **Task board is now a new-orchestration editor** — The list/orchestration switcher stays. Its second view opens the existing create/edit orchestration editor instead of columns, cards, drag-and-drop, or board filters. A project-scoped list binds the new orchestration to that project. ([#261](https://github.com/0-CHENAI/Selection/issues/261))
 

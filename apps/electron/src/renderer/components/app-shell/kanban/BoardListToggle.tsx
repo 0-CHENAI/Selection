@@ -11,9 +11,8 @@ interface BoardListToggleProps {
 }
 
 /**
- * List ⇄ New-orchestration switch. Rendered in the sessions navigator header
- * (list mode) and in the orchestration pane header (board route), since the
- * navigator is hidden while that pane is open.
+ * List ⇄ New-orchestration switch. Desktop layouts keep one persistent TopBar
+ * instance so changing views only updates the selected state and main content.
  */
 export function BoardListToggle({ value, onChange, className }: BoardListToggleProps) {
   const { t } = useTranslation()

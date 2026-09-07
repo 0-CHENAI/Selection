@@ -61,20 +61,36 @@ function sessionNavigatorActionsSource(): string {
   return actions.slice(0, actions.indexOf('isSourcesNavigation'))
 }
 
-describe('session list header actions (#264)', () => {
-  it('places search before the list / new-orchestration switcher after #263', () => {
-    const actions = sessionNavigatorActionsSource()
-    const searchIdx = actions.indexOf('sidebar.search')
-    const toggleIdx = actions.indexOf('BoardListToggle')
-    const compactIdx = actions.indexOf('!isAutoCompact')
+function sessionTopBarControlsSource(): string {
+  const appShell = readFileSync(join(import.meta.dir, '../AppShell.tsx'), 'utf8')
+  const topBarCall = appShell.slice(appShell.indexOf('<TopBar'), appShell.indexOf('isCompact={isAutoCompact}'))
+  return topBarCall.slice(topBarCall.indexOf('afterWorkspace='))
+}
+
+describe('session list and orchestration view controls (#264, #283)', () => {
+  it('keeps desktop search before the switcher in one stable TopBar slot', () => {
+    const controls = sessionTopBarControlsSource()
+    const searchIdx = controls.indexOf('sidebar.search')
+    const toggleIdx = controls.indexOf('BoardListToggle')
 
     expect(searchIdx).toBeGreaterThan(-1)
     expect(toggleIdx).toBeGreaterThan(-1)
     expect(searchIdx).toBeLessThan(toggleIdx)
-    expect(compactIdx).toBeGreaterThan(searchIdx)
-    expect(compactIdx).toBeLessThan(toggleIdx)
+    expect(controls).toContain('afterWorkspace={isSessionsNavigation(navState)')
+    expect(controls).toContain("value={isBoardView ? 'board' : 'list'}")
+    expect(controls).toContain("view === 'list' && isBoardView")
+    expect(controls).toContain("view === 'board' && !isBoardView")
+    expect(controls).toContain('setSearchActive(true)')
+    expect(controls).toContain('flex items-center gap-1.5')
+  })
+
+  it('keeps only compact search in the navigator header', () => {
+    const actions = sessionNavigatorActionsSource()
+
+    expect(actions).toContain('isAutoCompact ? (')
+    expect(actions).toContain('sidebar.search')
     expect(actions).toContain('setSearchActive(true)')
-    expect(actions).toContain('flex items-center gap-1.5')
+    expect(actions).not.toContain('BoardListToggle')
     expect(actions).not.toContain('ListFilter')
     expect(actions).not.toContain('sidebar.filterChats')
   })
@@ -95,7 +111,7 @@ describe('session list header actions (#264)', () => {
     expect(useSessionSearch).toContain('searchInputRef.current?.focus()')
   })
 
-  it('places the orchestration-pane switcher after the workspace selector, without board search', () => {
+  it('uses exactly one desktop switcher for list and orchestration views', () => {
     const container = readFileSync(
       join(import.meta.dir, '../kanban/KanbanBoardContainer.tsx'),
       'utf8',
@@ -110,9 +126,9 @@ describe('session list header actions (#264)', () => {
     expect(container).not.toContain('SessionSearchHeader')
     expect(topBar).toContain('afterWorkspace')
     expect(topBar.lastIndexOf('<WorkspaceSwitcher')).toBeLessThan(topBar.indexOf('{afterWorkspace}'))
-    expect(topBarCall).toContain('isBoardView')
-    expect(topBarCall).toContain('BoardListToggle')
-    expect(topBarCall).toContain('value="board"')
+    expect((appShell.match(/<BoardListToggle/g) ?? []).length).toBe(1)
+    expect(topBarCall).toContain('afterWorkspace={isSessionsNavigation(navState)')
+    expect(topBarCall).toContain("value={isBoardView ? 'board' : 'list'}")
   })
 
   it('pushes header actions to the right and keeps search left of the switcher in the DOM', () => {
