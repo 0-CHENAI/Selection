@@ -79,7 +79,6 @@ import { shouldPreviewBackgroundTask } from "./background-task-chip"
 import { pickStoppableTaskRun } from "./kanban/orchestration-run-progress"
 import { resolveBranchNewPanelOption } from "./branching"
 import { handleErrorMessageAction } from "./error-message-actions"
-import { NewSessionBrand, shouldShowNewSessionBrand } from "./NewSessionBrand"
 import {
   forceStickToBottomState,
   isAtBottom,
@@ -1647,14 +1646,6 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
   const hasUnrenderedLoadedMessages = !messagesLoading
     && turns.length === 0
     && session?.messages.some(message => !message.hidden && !message.isQueued)
-  const showNewSessionBrand = shouldShowNewSessionBrand({
-    compactMode,
-    hideComposer,
-    messagesLoading,
-    messagesLoadError,
-    messageCount: session?.messages.length ?? 0,
-    sessionBusy,
-  })
 
   return (
     <div ref={zoneRef} className="flex h-full flex-col min-w-0" data-focus-zone="chat">
@@ -1664,7 +1655,6 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
           <div className="flex flex-1 flex-col min-h-0 min-w-0 relative z-10">
           {/* === MESSAGES AREA: Scrollable list of message bubbles === */}
           <div className="relative flex-1 min-h-0">
-            {showNewSessionBrand && <NewSessionBrand />}
             {/* Mask wrapper - fades content at top and bottom over transparent/image backgrounds */}
             <div
               className="h-full"

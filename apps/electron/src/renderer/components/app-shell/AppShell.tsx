@@ -45,6 +45,7 @@ import {
 } from "@/components/ui/styled-context-menu"
 import { ContextMenuProvider } from "@/components/ui/menu-context"
 import { SidebarMenu } from "./SidebarMenu"
+import { SelectionSidebarBrand } from "./SelectionSidebarBrand"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { FadingText } from "@/components/ui/fading-text"
 import {
@@ -1902,6 +1903,9 @@ function AppShellContent({
             <div className="flex h-full flex-col select-none">
               {/* Sidebar Top Section */}
               <div className="flex-1 flex flex-col min-h-0">
+                <div className="px-2 pb-1 shrink-0">
+                  <SelectionSidebarBrand />
+                </div>
                 {/* New Session Button - Gmail-style, with context menu for "Open in New Window" */}
                 <div className="px-2 pb-2 shrink-0">
                   <Tooltip>
