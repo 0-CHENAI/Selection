@@ -255,20 +255,14 @@ export interface TaskCreateRequest {
   /** task.yaml source text (authoritative). */
   yaml: string
   /**
-   * When this YAML was authored by a `tasks:generate` orchestrator, the id of that hidden
-   * draft session. tasks:create promotes it in place (clears taskDraft, binds taskSlug)
-   * instead of minting a second top-level session — preventing duplicate board tiles (#bug1).
-   * Only honored when the draft is still unadopted and its slug matches; otherwise ignored.
+   * Deprecated client field. CREATE rejects adoption; proposal sessions are temporary.
    */
   orchestratorSessionId?: string
   /**
-   * Edit-mode bind: the id of an existing, board-visible session (e.g. a quick-add tile) that the
-   * user is saving this spec onto. tasks:create calls `bindExistingSessionToTask` and HARD-ERRORS
-   * if the bind fails — it must never fall through to minting a fresh orchestrator (that would
-   * leave a duplicate tile). Distinct from `orchestratorSessionId`, which adopts a hidden draft.
+   * Deprecated client field. CREATE rejects implicit binding to existing sessions.
    */
   attachToExistingSession?: string
-  /** Required when creating schema_version: 3 over an existing v1/v2 file or converting cache: pure. */
+  /** Legacy migration acknowledgement; CREATE still rejects existing task IDs. */
   confirmV3Migration?: boolean
 }
 
@@ -287,6 +281,8 @@ export interface TaskCreateResult {
 }
 
 export interface TaskGenerateRequest {
+  /** Existing definition to revise; never saved without user confirmation. */
+  currentYaml?: string
   /** Natural-language goal the orchestrator turns into a task.yaml DAG. */
   goal: string
   /** Optional working title for the task / orchestrator session. */
@@ -316,12 +312,12 @@ export interface TaskGenerateRequest {
  * takes longer than the request budget.
  */
 export interface TaskGenerateAck {
-  /** The persistent orchestrator session, reachable immediately so its work is never lost. */
+  /** Temporary proposal session used to correlate events; deleted after generation. */
   orchestratorSessionId: string
 }
 
 export interface TaskGenerateResult {
-  /** The persistent orchestrator session that authored the spec (also handles revisions). */
+  /** Temporary proposal session that authored the spec; not a saved task binding. */
   orchestratorSessionId: string
   /** Slug of the authored spec; empty when generation produced an invalid spec. */
   slug: string
@@ -339,6 +335,40 @@ export interface TaskRunRequest {
   runId?: string
   orchestratorSessionId?: string
   params?: Record<string, unknown>
+}
+
+export interface TaskTemplateSummaryDto {
+  id: string
+  name: string
+  description?: string
+  tags?: string[]
+  nodeCount: number
+  createdAt: string
+  updatedAt: string
+  sourceTaskSlug?: string
+}
+
+export interface TaskTemplateDetailDto extends TaskTemplateSummaryDto {
+  spec: unknown
+  yaml: string
+}
+
+export interface TaskTemplateSaveRequest {
+  name: string
+  description?: string
+  tags?: string[]
+  sourceTaskSlug?: string
+  yaml: string
+}
+
+export interface TaskTemplateSaveResult {
+  id: string
+  validation: TaskValidationResultDto
+}
+
+export interface TaskCreateFromTemplateRequest {
+  templateId: string
+  projectId?: string
 }
 
 export interface SwarmRunNodeDto {
@@ -374,6 +404,8 @@ export interface SwarmRunDetailsDto {
 }
 
 export interface TaskNodeRunStateDto {
+  approvalFeedback?: string
+  approvalDefinition?: { title: string; prompt: string; dependsOn: string[] }
   id: string
   /** Definition id for dynamic map/loop/replica instances. */
   definitionId?: string
@@ -436,6 +468,9 @@ export interface TaskRespondApprovalRequest {
   runId: string
   nodeId: string
   approved: boolean
+  /** Feedback-only submissions never release the approval gate. */
+  feedbackOnly?: boolean
+  feedback?: string
 }
 
 export interface TaskApplyRunRevisionRequest {

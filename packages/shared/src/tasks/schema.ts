@@ -83,6 +83,14 @@ export function isStructuredSchemaVersion(version: number | undefined): boolean 
   return version === 2 || version === 3;
 }
 
+/** New tasks are authored as v3. Existing v1/v2 files stay until an explicit confirmed migration. */
+export { DEFAULT_TASK_SCHEMA_VERSION } from './version.ts';
+import { DEFAULT_TASK_SCHEMA_VERSION } from './version.ts';
+
+export function resolveNewTaskSchemaVersion(explicit?: unknown): 2 | 3 {
+  return explicit === 2 ? 2 : DEFAULT_TASK_SCHEMA_VERSION;
+}
+
 export function taskSourceVersion(spec: { schema_version?: number } | undefined): 1 | 2 | 3 {
   if (spec?.schema_version === 3) return 3;
   if (spec?.schema_version === 2) return 2;

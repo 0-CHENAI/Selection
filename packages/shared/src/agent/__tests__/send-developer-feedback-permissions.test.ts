@@ -1,21 +1,31 @@
 /**
  * Tests for send_developer_feedback tool permission handling across permission modes.
  *
- * send_developer_feedback is a session-scoped MCP tool that, *when its feature
- * flag is enabled*, should be allowed in ALL permission modes — including
- * safe/Explore — so product issues can be reported without requiring mode
- * switches. The flag (FEATURE_FLAGS.developerFeedback) defaults off in
- * production runtimes; we force it on here so the test exercises the
- * intended end-state contract regardless of NODE_ENV.
+ * send_developer_feedback is an external persistent side effect. When its
+ * feature flag is enabled it must remain blocked in safe mode and require a
+ * visible, per-message confirmation in every executable permission mode.
  */
 import { afterAll, beforeAll, describe, it, expect } from 'bun:test';
 import { shouldAllowToolInMode } from '../../agent/mode-manager.ts';
+import {
+  runPreToolUseChecks,
+  shouldPromptInAskMode,
+  type PermissionManagerLike,
+} from '../../agent/core/pre-tool-use.ts';
+import { setPermissionMode } from '../../agent/mode-manager.ts';
 
 const FLAG_ENV = 'CRAFT_FEATURE_DEVELOPER_FEEDBACK';
 
 describe('send_developer_feedback permission mode handling', () => {
   const toolName = 'mcp__session__send_developer_feedback';
   const input = { message: 'Feedback content' };
+  const permissionManager: PermissionManagerLike = {
+    isCommandWhitelisted: () => false,
+    isDangerousCommand: () => false,
+    getBaseCommand: command => command,
+    extractDomainFromNetworkCommand: () => null,
+    isDomainWhitelisted: () => false,
+  };
 
   let originalFlag: string | undefined;
 
@@ -29,26 +39,77 @@ describe('send_developer_feedback permission mode handling', () => {
     else process.env[FLAG_ENV] = originalFlag;
   });
 
-  it('is allowed in safe (Explore) mode', () => {
+  it('is blocked in safe (Explore) mode', () => {
     const result = shouldAllowToolInMode(toolName, input, 'safe');
-    expect(result.allowed).toBe(true);
+    expect(result.allowed).toBe(false);
   });
 
-  it('is allowed in ask mode', () => {
-    const result = shouldAllowToolInMode(toolName, input, 'ask');
-    expect(result.allowed).toBe(true);
+  it('requires a prompt in ask mode and previews the exact message', () => {
+    const result = shouldPromptInAskMode(
+      toolName,
+      input,
+      permissionManager,
+      { workspaceRootPath: '/workspace' },
+    );
+    expect(result).toMatchObject({
+      promptType: 'mcp_mutation',
+      command: toolName,
+    });
+    expect(result?.description).toContain(input.message);
+    expect(result?.description).toContain('Session and connection metadata are not included');
   });
 
-  it('is allowed in allow-all (Execute) mode', () => {
-    const result = shouldAllowToolInMode(toolName, input, 'allow-all');
-    expect(result.allowed).toBe(true);
+  for (const mode of ['safe', 'ask', 'allow-all'] as const) {
+    it(`requires a per-message prompt in ${mode} mode`, () => {
+      const sessionId = `feedback-${mode}`;
+      setPermissionMode(sessionId, mode);
+      const result = runPreToolUseChecks({
+        toolName,
+        input,
+        sessionId,
+        permissionMode: mode,
+        workspaceRootPath: '/workspace',
+        workspaceId: 'workspace',
+        activeSourceSlugs: [],
+        allSourceSlugs: [],
+        hasSourceActivation: false,
+        permissionManager,
+      });
+      expect(result).toMatchObject({
+        type: 'prompt',
+        promptType: 'mcp_mutation',
+        command: toolName,
+      });
+      if (result.type === 'prompt') {
+        expect(result.description).toContain(input.message);
+      }
+    });
+  }
+
+  it('does not let a stored whitelist bypass the confirmation', () => {
+    const whitelistedManager: PermissionManagerLike = {
+      ...permissionManager,
+      isCommandWhitelisted: () => true,
+    };
+    const result = shouldPromptInAskMode(
+      toolName,
+      input,
+      whitelistedManager,
+      { workspaceRootPath: '/workspace' },
+    );
+    expect(result?.description).toContain(input.message);
   });
 
-  it('does not require permission prompt in ask mode', () => {
-    const result = shouldAllowToolInMode(toolName, input, 'ask');
-    expect(result.allowed).toBe(true);
-    if (result.allowed) {
-      expect(result.requiresPermission).toBeFalsy();
-    }
+  it('applies the same prompt contract to the canonical tool name', () => {
+    const result = shouldPromptInAskMode(
+      'send_developer_feedback',
+      input,
+      permissionManager,
+      { workspaceRootPath: '/workspace' },
+    );
+    expect(result).toMatchObject({
+      promptType: 'mcp_mutation',
+      command: 'send_developer_feedback',
+    });
   });
 });

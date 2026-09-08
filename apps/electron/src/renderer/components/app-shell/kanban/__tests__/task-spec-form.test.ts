@@ -9,6 +9,7 @@ import {
   taskDocumentForSave,
   canSafelySaveExistingTask,
   shouldRefreshYamlDraft,
+  specNeedsV3Confirm,
   MAX_REPAIR_ATTEMPTS_CAP,
   type EditorSubtask,
   type SpecNode,
@@ -17,6 +18,32 @@ import {
 const noConn = new Map<string, string>()
 
 describe('task-spec-form round-trip', () => {
+  it('lets a human add, delete and edit a V3 proposal without mutating the proposal or losing advanced fields', () => {
+    const proposal = { schema_version: 3, id: 'proposal', title: 'Plan', goal: 'g', token_budget: 9000, nodes: [
+      { id: 'keep', title: 'Keep', prompt: 'old', timeout: 60 },
+      { id: 'remove', title: 'Remove', prompt: 'remove', depends_on: ['keep'] },
+      { id: 'finish', title: 'Finish', prompt: 'finish', depends_on: ['remove'] },
+    ] }
+    const rows = specToSubtasks(proposal.nodes)
+    const removed = rows.find(row => row.nodeId === 'remove')!.uid
+    const edited = rows.filter(row => row.uid !== removed).map(row => ({ ...row,
+      prompt: row.nodeId === 'keep' ? 'Human edited instructions' : row.prompt,
+      dependsOn: row.dependsOn.filter(id => id !== removed),
+    }))
+    edited.push({ uid: 'human-gate', title: 'Review', prompt: 'Approve the result', kind: 'approval', dependsOn: [edited[0]!.uid] })
+    const saved = buildSpec({ title: 'Edited', goal: 'g', projectId: '', orchModel: '', preservedSpec: proposal, subtasks: edited }, noConn)
+    const nodes = saved.nodes as SpecNode[]
+    expect(saved.schema_version).toBe(3)
+    expect(saved.id).toBe('proposal')
+    expect(saved.token_budget).toBe(9000)
+    expect(nodes.map(n => n.id)).not.toContain('remove')
+    expect(nodes.find(n => n.id === 'keep')?.prompt).toBe('Human edited instructions')
+    expect(nodes.find(n => n.id === 'keep')?.timeout).toBe(60)
+    expect(nodes.find(n => n.kind === 'approval')?.depends_on).toEqual(['keep'])
+    expect(nodes.find(n => n.id === 'finish')?.depends_on).toBeUndefined()
+    expect(proposal.nodes[0]!.prompt).toBe('old')
+    expect(proposal.nodes).toHaveLength(3)
+  })
   it('saves validated YAML verbatim instead of serializing the form projection', () => {
     const yaml = 'schema_version: 2\nid: demo\ntoken_budget: 9000\n'
     const formSpec = { id: 'demo', title: 'Form only' }
@@ -130,6 +157,31 @@ describe('task-spec-form round-trip', () => {
         nodes: { review: { x: 30, y: 40 } },
       },
     })
+    expect(spec.schema_version).toBe(2)
+  })
+
+  it('stamps schema_version 3 on new forms and does not treat that as a v3 upgrade', () => {
+    const spec = buildSpec(
+      { title: 'New', goal: 'g', projectId: '', orchModel: '', subtasks: specToSubtasks([{ id: 'a', prompt: 'p' }]) },
+      noConn,
+    )
+    expect(spec.schema_version).toBe(3)
+    expect(specNeedsV3Confirm(undefined, spec)).toBe(false)
+    expect(specNeedsV3Confirm(2, spec)).toBe(true)
+    expect(specNeedsV3Confirm(3, spec)).toBe(false)
+    expect(specNeedsV3Confirm(undefined, {
+      ...spec,
+      nodes: [{ id: 'a', prompt: 'p', cache: 'pure' }],
+    })).toBe(true)
+  })
+
+  it('keeps an existing unversioned v1 definition on the v2 save path', () => {
+    const spec = buildSpec({ title: 'Legacy', goal: 'g', projectId: '', orchModel: '',
+      subtasks: specToSubtasks([{ id: 'a', prompt: 'p' }]),
+      preservedSpec: { id: 'legacy', title: 'Legacy', goal: 'g' },
+    }, noConn)
+    expect(spec.schema_version).toBe(2)
+    expect(specNeedsV3Confirm(1, spec)).toBe(false)
   })
 
   it('does not keep cleared form-owned fields from the preserved spec', () => {

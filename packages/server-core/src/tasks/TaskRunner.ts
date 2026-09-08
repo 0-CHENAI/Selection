@@ -183,6 +183,8 @@ export class TaskControlError extends Error {
 }
 
 export interface NodeRunStatus {
+  approvalFeedback?: string;
+  approvalDefinition?: { title: string; prompt: string; dependsOn: string[] };
   id: string;
   definitionId?: string;
   state: NodeRunState;
@@ -294,6 +296,7 @@ type DistributiveOmit<T, K extends keyof T> = T extends unknown ? Omit<T, K> : n
 type RunLogEntryInput = DistributiveOmit<RunLogEntry, 't'>;
 
 interface NodeStateEntry {
+  approvalFeedback?: string;
   state: NodeRunState;
   sessionId?: string;
   attempt: number;
@@ -545,6 +548,19 @@ class ActiveRun {
           st.state = 'waiting-approval';
           st.approvalDeadline = e.deadline;
         }
+      } else if (e.kind === 'approval-response') {
+        const st = this.state.get(e.nodeId);
+        if (st) {
+          st.approvalFeedback = e.feedback;
+          if (e.approved === undefined) st.lastFailure = 'feedback-delivery-unknown';
+          else if (st.lastFailure?.startsWith('feedback-delivery-')) delete st.lastFailure;
+        }
+      } else if (e.kind === 'approval-feedback-delivery') {
+        const st = this.state.get(e.nodeId);
+        if (st?.approvalFeedback === e.feedback) {
+          if (e.status === 'failed') st.lastFailure = 'feedback-delivery-failed';
+          else if (st.lastFailure?.startsWith('feedback-delivery-')) delete st.lastFailure;
+        }
       } else if (e.kind === 'verdict') {
         if (e.result === 'fail') this.repairsUsed += 1;
         else if (e.result === 'unparsed') this.unparsedReAsks += 1;
@@ -770,6 +786,8 @@ class ActiveRun {
         state: st.state,
         sessionId: st.sessionId,
         attempt: st.attempt,
+        approvalFeedback: st.approvalFeedback,
+        approvalDefinition: node?.kind === 'approval' ? { title: node.title || node.id, prompt: node.prompt ?? '', dependsOn: [...(this.edges.get(node.id) ?? [])] } : undefined,
         retryCount: Math.max(0, st.attempt - 1),
         role: node?.kind === 'verify' || node?.kind === 'judge' ? 'reviewer' as const : 'worker' as const,
         model: this.resolveNodeModel(node),
@@ -1428,13 +1446,51 @@ class ActiveRun {
     this.emitChanged();
   }
 
-  respondApproval(nodeId: string, approved: boolean): RunSnapshot {
+  respondApproval(nodeId: string, approved: boolean, feedback?: string, feedbackOnly = false): RunSnapshot {
+    if (typeof approved !== 'boolean' || typeof feedbackOnly !== 'boolean' || (feedback !== undefined && (typeof feedback !== 'string' || feedback.length > 4000))) {
+      throw new TaskControlError(this.runStatus, 'Invalid approval response');
+    }
+    if (this.isTerminal()) throw new TaskControlError(this.runStatus, 'Run is already terminal');
+    if (!['running', 'waiting-approval'].includes(this.runStatus)) {
+      throw new TaskControlError(this.runStatus, 'Resume the run before responding to approval');
+    }
+    this.expireApprovals();
     const st = this.state.get(nodeId);
     if (!st || st.state !== 'waiting-approval') {
       throw new TaskControlError(this.runStatus, `Node ${nodeId} is not waiting for approval`);
     }
+    const message = feedback?.trim() ?? st.approvalFeedback ?? '';
+    if (feedbackOnly && !message) throw new TaskControlError(this.runStatus, 'Feedback is required');
+    if (message !== st.approvalFeedback || !feedbackOnly || st.lastFailure === 'feedback-delivery-failed' || st.lastFailure === 'feedback-delivery-unknown') {
+      st.approvalFeedback = message;
+      if (st.lastFailure?.startsWith('feedback-delivery-')) delete st.lastFailure;
+      this.log({ kind: 'approval-response', nodeId, feedback: message, ...(feedbackOnly ? {} : { approved }) });
+      if (feedbackOnly && this.opts.orchestratorSessionId) {
+        const coordinatorId = this.opts.orchestratorSessionId;
+        void Promise.resolve().then(() => this.deps.host.sendMessage(coordinatorId,
+          `Human feedback for approval node ${nodeId} in run ${this.runId}:\n${message}\nThe human approval gate remains CLOSED. Discuss the requested changes with the user. Do not approve or resume on their behalf. Definition changes require explicit user confirmation and do not alter this run snapshot.`
+        )).then(() => {
+          if (st.state === 'waiting-approval' && st.approvalFeedback === message) {
+            this.log({ kind: 'approval-feedback-delivery', nodeId, feedback: message, status: 'delivered' });
+            if (st.lastFailure?.startsWith('feedback-delivery-')) delete st.lastFailure;
+            this.emitChanged();
+          }
+        }).catch(error => {
+          if (st.state === 'waiting-approval' && st.approvalFeedback === message) {
+            st.lastFailure = 'feedback-delivery-failed';
+            this.log({ kind: 'approval-feedback-delivery', nodeId, feedback: message, status: 'failed' });
+          }
+          conductorLog.warn('approval-feedback-delivery-failed', { nodeId, error });
+          this.emitChanged();
+        });
+      }
+    }
+    if (feedbackOnly) {
+      this.emitChanged();
+      return this.snapshot();
+    }
     if (approved) {
-      this.completeControlNode(nodeId, 'approved', { approved: true });
+      this.completeControlNode(nodeId, message ? `Approved by the user. Feedback:\n${message}` : 'approved', { approved: true, feedback: message });
     } else {
       this.failNode(nodeId, 'approval-rejected', st.sessionId, 'error');
     }
@@ -3245,10 +3301,10 @@ export class TaskRunner {
     return this.rehydrate(slug, runId, 'scan').stop();
   }
 
-  respondApproval(slug: string, runId: string, nodeId: string, approved: boolean): RunSnapshot {
+  respondApproval(slug: string, runId: string, nodeId: string, approved: boolean, feedback?: string, feedbackOnly = false): RunSnapshot {
     const existing = this.runs.get(this.key(slug, runId));
-    if (existing) return existing.respondApproval(nodeId, approved);
-    return this.rehydrate(slug, runId, 'hydrate').respondApproval(nodeId, approved);
+    if (existing) return existing.respondApproval(nodeId, approved, feedback, feedbackOnly);
+    return this.rehydrate(slug, runId, 'hydrate').respondApproval(nodeId, approved, feedback, feedbackOnly);
   }
 
   updateRunLimits(slug: string, runId: string, tokenBudget?: number, params?: Record<string, unknown>): RunSnapshot {

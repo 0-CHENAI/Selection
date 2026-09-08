@@ -4,8 +4,8 @@
  * `column` (where a tile physically sits) is intentionally separate from
  * `statusId` (what the badge shows). The board has 3 columns but a workspace
  * can have more statuses, so a tile may sit in "In Progress" while showing a
- * "Needs Review" badge. `statusToColumn` (see ./status-column) provides only the
- * default placement; tiles may override it.
+ * "Needs Review" badge. Column placement is a leftover persistence field and
+ * is no longer shown in the UI.
  *
  * These are presentational view-models. The wiring phase maps real
  * `SessionConfig` / `ProjectConfig` / status data onto these shapes.
@@ -24,10 +24,9 @@ export type BuiltInKanbanColumnId = 'todo' | 'in-progress' | 'done'
 export type SubtaskRunState = 'done' | 'running' | 'pending' | 'failed'
 
 /**
- * What the Task editor points at. `create` authors a brand-new task; `edit` opens an
- * existing tile — either spec-backed (`taskSlug` present → prefill from its task.yaml)
- * or a plain quick-add tile (`taskSlug` absent → start from the title, bind the spec
- * on save). Lives here (not in TaskEditor) so the editor-target atom can reference it
+ * `create` opens the V3 workflow editor (YAML import remains optional); `edit` opens an existing definition.
+ * Legacy targets without taskSlug are rejected, never converted into new tasks.
+ * Lives here (not in TaskEditor) so the editor-target atom can reference it
  * without importing a component module.
  */
 export type TaskEditorTarget =

@@ -10,6 +10,7 @@ export * from './slug.ts';
 export * from './refs.ts';
 export * from './validate.ts';
 export * from './storage.ts';
+export * from './templates.ts';
 export * from './kanban-column.ts';
 export * from './conditions.ts';
 export * from './etag.ts';
