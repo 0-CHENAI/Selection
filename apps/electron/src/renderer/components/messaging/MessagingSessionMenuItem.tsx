@@ -1,22 +1,3 @@
-/**
- * MessagingSessionMenuItem
- *
- * The "Connect Messaging → Telegram / WhatsApp" submenu block shared by
- * SessionMenu (real context/dropdown menus) and the playground preview.
- *
- * Behavior:
- *  - If the target platform isn't connected yet, route the user to the right
- *    setup entry point (WhatsApp opens the connect dialog; Telegram defaults
- *    to navigating to messaging settings + toasting — callers can override
- *    that via `onTelegramNotConfigured`).
- *  - If the platform is connected, dispatch `messagingDialogAtom` with a
- *    pairing-code dialog and kick off `generateMessagingPairingCode`.
- *
- * Renders the `<Sub>` block only — the caller decides placement and
- * separators. Reads menu primitives from `useMenuComponents()` so it works
- * identically inside a DropdownMenu or ContextMenu.
- */
-
 import * as React from 'react'
 import { useTranslation } from 'react-i18next'
 import { useSetAtom } from 'jotai'
@@ -27,99 +8,65 @@ import { navigate, routes } from '@/lib/navigate'
 import { useMenuComponents } from '@/components/ui/menu-context'
 import { messagingDialogAtom } from '@/atoms/messaging'
 
-export type MessagingPlatform = 'telegram' | 'whatsapp' | 'lark'
+export type MessagingPlatform = 'lark'
 
 export interface UseMessagingConnectOptions {
-  /** Session to bind the pairing code to. */
   sessionId: string
-  /**
-   * Called when the user clicks Telegram or Lark but the platform isn't
-   * connected yet. Default: navigate to messaging settings + toast.
-   * Playground overrides this to toast only (it has no router).
-   */
-  onTelegramNotConfigured?: () => void
-  /**
-   * Override the error classifier used when pairing-code generation fails.
-   * Default: {@link classifyMessagingError} — matches "not connected" and
-   * "rate limit" messages into i18n keys.
-   */
-  classifyError?: (err: unknown, t: TFunction) => string
+  onNotConfigured?: () => void
+  classifyError?: (error: unknown, t: TFunction) => string
 }
 
-/**
- * Shared connect-and-pair handler used by both the dropdown/context-menu
- * `MessagingSessionMenuItem` and the drawer-based `CompactSessionMenu`.
- */
 export function useMessagingConnect({
   sessionId,
-  onTelegramNotConfigured,
+  onNotConfigured,
   classifyError = classifyMessagingError,
 }: UseMessagingConnectOptions) {
   const { t } = useTranslation()
-  const setMessagingDialog = useSetAtom(messagingDialogAtom)
+  const setDialog = useSetAtom(messagingDialogAtom)
 
-  return React.useCallback(async (platform: MessagingPlatform) => {
-    // First-run check — avoid hitting the server if the platform is not
-    // connected. Failure to read config is treated as "unknown" and falls
-    // through to attempting pairing so the server surfaces a real error.
+  return React.useCallback(async (_platform: MessagingPlatform = 'lark') => {
     try {
-      const cfg = await window.electronAPI.getMessagingConfig()
-      const runtime = cfg?.runtime?.[platform]
-      const isConnected = Boolean(runtime?.connected)
-      if (!isConnected) {
-        if (platform === 'whatsapp') {
-          setMessagingDialog({ kind: 'wa_connect', continueToPairingSessionId: sessionId })
-        } else if (onTelegramNotConfigured) {
-          onTelegramNotConfigured()
-        } else {
-          // Telegram + Lark share the "open Settings" path — both use
-          // a Settings dialog rather than an inline connect flow.
+      const config = await window.electronAPI.getMessagingConfig()
+      if (!config?.runtime?.lark?.connected) {
+        if (onNotConfigured) onNotConfigured()
+        else {
           navigate(routes.view.settings('messaging'))
-          toast.info(t('toast.telegramNotConfiguredOpenSettings'))
+          toast.info(t('toast.messagingNotConfigured'))
         }
         return
       }
     } catch {
-      // Fall through to attempting pairing code generation.
+      // Let the pairing request surface a concrete server error.
     }
 
-    setMessagingDialog({
-      kind: 'pairing',
-      platform,
-      sessionId,
-      code: null,
-      expiresAt: null,
-    })
+    setDialog({ kind: 'pairing', platform: 'lark', sessionId, code: null, expiresAt: null })
     try {
-      const result = await window.electronAPI.generateMessagingPairingCode(sessionId, platform)
-      setMessagingDialog({
+      const result = await window.electronAPI.generateMessagingPairingCode(sessionId, 'lark')
+      setDialog({
         kind: 'pairing',
-        platform,
+        platform: 'lark',
         sessionId,
         code: result.code,
         expiresAt: result.expiresAt,
         botUsername: result.botUsername,
       })
-    } catch (err) {
-      setMessagingDialog({
+    } catch (error) {
+      setDialog({
         kind: 'pairing',
-        platform,
+        platform: 'lark',
         sessionId,
         code: null,
         expiresAt: null,
-        error: classifyError(err, t),
+        error: classifyError(error, t),
       })
     }
-  }, [sessionId, onTelegramNotConfigured, classifyError, setMessagingDialog, t])
+  }, [classifyError, onNotConfigured, sessionId, setDialog, t])
 }
 
-export interface MessagingSessionMenuItemProps extends UseMessagingConnectOptions {}
-
-export function MessagingSessionMenuItem(props: MessagingSessionMenuItemProps) {
+export function MessagingSessionMenuItem(props: UseMessagingConnectOptions) {
   const { t } = useTranslation()
   const { MenuItem, Sub, SubTrigger, SubContent } = useMenuComponents()
-  const handleConnectMessaging = useMessagingConnect(props)
-
+  const connect = useMessagingConnect(props)
   return (
     <Sub>
       <SubTrigger className="pr-2">
@@ -127,13 +74,7 @@ export function MessagingSessionMenuItem(props: MessagingSessionMenuItemProps) {
         <span className="flex-1">{t('sessionMenu.connectMessaging')}</span>
       </SubTrigger>
       <SubContent>
-        <MenuItem onClick={() => handleConnectMessaging('telegram')}>
-          <span>Telegram</span>
-        </MenuItem>
-        <MenuItem onClick={() => handleConnectMessaging('whatsapp')}>
-          <span>WhatsApp</span>
-        </MenuItem>
-        <MenuItem onClick={() => handleConnectMessaging('lark')}>
+        <MenuItem onClick={() => connect('lark')}>
           <span>Lark / Feishu</span>
         </MenuItem>
       </SubContent>
@@ -141,18 +82,11 @@ export function MessagingSessionMenuItem(props: MessagingSessionMenuItemProps) {
   )
 }
 
-/**
- * Translate raw errors from the pairing-code RPC into user-facing text.
- * Narrow on purpose — only classifies well-known failure modes; anything else
- * is surfaced verbatim so real errors aren't hidden.
- */
-export function classifyMessagingError(err: unknown, t: TFunction): string {
-  const msg = err instanceof Error ? err.message : String(err)
-  if (/platform not connected|no adapter|not configured/i.test(msg)) {
+export function classifyMessagingError(error: unknown, t: TFunction): string {
+  const message = error instanceof Error ? error.message : String(error)
+  if (/platform not connected|no adapter|not configured/i.test(message)) {
     return t('toast.messagingNotConfigured')
   }
-  if (/rate.?limit/i.test(msg)) {
-    return t('toast.messagingRateLimited')
-  }
-  return msg
+  if (/rate.?limit/i.test(message)) return t('toast.messagingRateLimited')
+  return message
 }

@@ -21,7 +21,6 @@ import { customShadowsComponents } from './custom-shadows'
 import { transportBannerComponents } from './transport-banner'
 import { containerTransitionsComponents } from './container-transitions'
 import { apiKeyInputComponents } from './api-key-input'
-import { messagingComponents } from './messaging'
 import { imageSupportComponents } from './image-support'
 import { mobileWebUIComponents } from './mobile-webui'
 import { kanbanComponents } from './kanban'
@@ -56,7 +55,6 @@ export const componentRegistry: ComponentEntry[] = [
   ...customShadowsComponents,
   ...transportBannerComponents,
   ...containerTransitionsComponents,
-  ...messagingComponents,
   ...imageSupportComponents,
 ]
 

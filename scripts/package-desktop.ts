@@ -39,7 +39,6 @@ import {
   buildMcpServers,
   copySessionServer,
   copyPiAgentServer,
-  buildWhatsAppWorker,
   buildElectronApp,
   loadEnvFile,
   curlDownload,
@@ -176,18 +175,6 @@ async function prepareAndBuildApp(config: BuildConfig): Promise<void> {
   buildMcpServers(config)
   copySessionServer(config)
   copyPiAgentServer(config)
-  try {
-    buildWhatsAppWorker(config)
-  } catch (err) {
-    // OOM on constrained hosts: reuse existing worker.cjs if present
-    const workerOut = join(ROOT_DIR, 'packages', 'messaging-whatsapp-worker', 'dist', 'worker.cjs')
-    if (existsSync(workerOut)) {
-      console.warn('buildWhatsAppWorker failed; reusing existing worker.cjs:', workerOut)
-    } else {
-      throw err
-    }
-  }
-
   await buildElectronApp(config)
 }
 

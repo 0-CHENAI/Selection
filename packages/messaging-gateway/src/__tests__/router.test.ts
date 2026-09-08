@@ -49,7 +49,7 @@ function writeTinyPng(): string {
 
 function baseMsg(overrides: Partial<IncomingMessage> = {}): IncomingMessage {
   return {
-    platform: 'telegram',
+    platform: 'lark',
     channelId: 'chat-1',
     messageId: '1',
     senderId: 'user-1',
@@ -66,7 +66,7 @@ function makeFakeAdapter(): PlatformAdapter {
     throw new Error('unused')
   }
   return {
-    platform: 'telegram',
+    platform: 'lark',
     capabilities: {
       messageEditing: true,
       inlineButtons: true,
@@ -80,7 +80,7 @@ function makeFakeAdapter(): PlatformAdapter {
     isConnected: () => true,
     onMessage: () => {},
     onButtonPress: () => {},
-    sendText: mock(async () => ({ platform: 'telegram', channelId: 'chat-1', messageId: 'm' })),
+    sendText: mock(async () => ({ platform: 'lark', channelId: 'chat-1', messageId: 'm' })),
     editMessage: noop,
     sendButtons: noop,
     sendTyping: async () => {},
@@ -98,7 +98,7 @@ function makeFakeCommands(): { handle: ReturnType<typeof mock> } {
 
 function makeRouter() {
   const store = new BindingStore(storeDir)
-  store.bind('ws1', 'sess-A', 'telegram', 'chat-1')
+  store.bind('ws1', 'sess-A', 'lark', 'chat-1')
   const sessionManager = makeFakeSessionManager()
   const commands = makeFakeCommands()
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -197,14 +197,14 @@ describe('Router', () => {
   })
 
   // -------------------------------------------------------------------------
-  // Telegram supergroup forum topics — Phase A
+  // Lark supergroup forum topics — Phase A
   // -------------------------------------------------------------------------
 
   it('routes the same chatId + different threadIds to the per-topic session', async () => {
     // Two topics in the same supergroup → two distinct sessions
     const store = new BindingStore(storeDir)
-    store.bind('ws1', 'sess-Topic5', 'telegram', '-1001', undefined, undefined, 5)
-    store.bind('ws1', 'sess-Topic7', 'telegram', '-1001', undefined, undefined, 7)
+    store.bind('ws1', 'sess-Topic5', 'lark', '-1001', undefined, undefined, 5)
+    store.bind('ws1', 'sess-Topic7', 'lark', '-1001', undefined, undefined, 7)
 
     const sessionManager = makeFakeSessionManager()
     const commands = makeFakeCommands()
@@ -223,7 +223,7 @@ describe('Router', () => {
   it('falls through to Commands when message lands in an unbound topic', async () => {
     const store = new BindingStore(storeDir)
     // Only topic 5 is bound; topic 7 inbound has no binding
-    store.bind('ws1', 'sess-A', 'telegram', '-1001', undefined, undefined, 5)
+    store.bind('ws1', 'sess-A', 'lark', '-1001', undefined, undefined, 5)
     const sessionManager = makeFakeSessionManager()
     const commands = makeFakeCommands()
     // eslint-disable-next-line @typescript-eslint/no-explicit-any

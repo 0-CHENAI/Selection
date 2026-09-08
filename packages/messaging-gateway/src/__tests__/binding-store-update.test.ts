@@ -23,7 +23,7 @@ afterEach(() => {
 describe('BindingStore.updateBindingConfig', () => {
   it('preserves id and createdAt across config patch', () => {
     const store = new BindingStore(dir)
-    const original = store.bind('ws1', 'sess-A', 'telegram', 'chat-1')
+    const original = store.bind('ws1', 'sess-A', 'lark', 'chat-1')
     const next = store.updateBindingConfig(original.id, {
       accessMode: 'allow-list',
       allowedSenderIds: ['42'],
@@ -45,7 +45,7 @@ describe('BindingStore.updateBindingConfig', () => {
 
   it('persists across a fresh BindingStore instance', () => {
     const a = new BindingStore(dir)
-    const original = a.bind('ws1', 'sess-A', 'telegram', 'chat-1')
+    const original = a.bind('ws1', 'sess-A', 'lark', 'chat-1')
     a.updateBindingConfig(original.id, { accessMode: 'allow-list', allowedSenderIds: ['7'] })
 
     const b = new BindingStore(dir)
@@ -58,7 +58,7 @@ describe('BindingStore.updateBindingConfig', () => {
 
   it('fires onChange listener after persisting', () => {
     const store = new BindingStore(dir)
-    const original = store.bind('ws1', 'sess-A', 'telegram', 'chat-1')
+    const original = store.bind('ws1', 'sess-A', 'lark', 'chat-1')
     let calls = 0
     store.onChange(() => {
       calls++
@@ -69,8 +69,8 @@ describe('BindingStore.updateBindingConfig', () => {
 
   it('does not affect unrelated bindings', () => {
     const store = new BindingStore(dir)
-    const a = store.bind('ws1', 'sess-A', 'telegram', 'chat-A')
-    const b = store.bind('ws1', 'sess-B', 'telegram', 'chat-B')
+    const a = store.bind('ws1', 'sess-A', 'lark', 'chat-A')
+    const b = store.bind('ws1', 'sess-B', 'lark', 'chat-B')
     store.updateBindingConfig(a.id, { accessMode: 'open' })
     const all = store.getAll()
     expect(all).toHaveLength(2)

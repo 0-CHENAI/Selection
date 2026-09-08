@@ -966,8 +966,6 @@ export interface TestAutomationPayload {
   actions: TestAutomationAction[]
   permissionMode?: PermissionMode
   labels?: string[]
-  /** Forwarded from the matcher; routes test-run sessions into a Telegram topic when paired. */
-  telegramTopic?: string
   /** When true, only evaluate matcher/conditions — do not execute actions. */
   dryRun?: boolean
   /** Agent/app event name used for dry-run matching. */

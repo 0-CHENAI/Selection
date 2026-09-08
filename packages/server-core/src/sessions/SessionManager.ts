@@ -229,7 +229,7 @@ const METADATA_WRITE_GUARD_MS = 5000
 
 /**
  * Text sent to the session when a plan is approved from outside the desktop
- * UI (e.g. Telegram button). Mirrors the English `plan.approved` i18n key
+ * UI (for example, a chat approval button). Mirrors the English `plan.approved` i18n key
  * used by the desktop flow at `plan-approval-message.ts`. Not localized —
  * the agent reads this, not the end user.
  */
@@ -1521,19 +1521,6 @@ export class SessionManager implements ISessionManager {
   private lastTimestamp = 0
 
   /**
-   * Optional binder installed by the messaging-gateway bootstrap. When set,
-   * `executePromptAutomation` calls it after creating a session whose matcher
-   * declared `telegramTopic`, so the new session is bound to a Telegram forum
-   * topic in the workspace's paired supergroup. Best-effort — failures must
-   * not block the session.
-   */
-  private automationBinder?: (input: {
-    workspaceId: string
-    sessionId: string
-    topicName: string
-  }) => Promise<void>
-
-  /**
    * Centralized setter for session processing state.
    * Automatically notifies the power manager on transitions (true→false, false→true)
    * so callers don't need to remember to call onSessionStarted/onSessionStopped.
@@ -1556,17 +1543,6 @@ export class SessionManager implements ISessionManager {
    *  Resolves immediately if already initialized. */
   waitForInit(): Promise<void> {
     return this.initGate.wait()
-  }
-
-  /**
-   * Install the automation→topic binder. Wired by the messaging-gateway
-   * bootstrap so SessionManager doesn't need to import the messaging
-   * package (avoids a package-level circular dependency).
-   */
-  setAutomationBinder(
-    fn: (input: { workspaceId: string; sessionId: string; topicName: string }) => Promise<void>,
-  ): void {
-    this.automationBinder = fn
   }
 
   private browserPaneManager: IBrowserPaneManager | null = null
@@ -11480,7 +11456,6 @@ export class SessionManager implements ISessionManager {
           model: pending.model,
           thinkingLevel: pending.thinkingLevel,
           automationName: pending.automationName,
-          telegramTopic: pending.telegramTopic,
           waitForCompletion: pending.waitForCompletion,
           reportBack: pending.reportBack,
           timeoutMs: pending.timeoutMs,
@@ -11549,7 +11524,6 @@ export class SessionManager implements ISessionManager {
       model,
       thinkingLevel,
       automationName,
-      telegramTopic,
       waitForCompletion,
       reportBack,
       timeoutMs,
@@ -11607,26 +11581,6 @@ export class SessionManager implements ISessionManager {
 
     // (session_created is emitted by createSession above; triggeredBy is set synchronously
     // before the renderer's hydrate round-trip resolves, so it is observed.)
-
-    // Bind the new session to its Telegram forum topic if the matcher
-    // declared `telegramTopic`. Done before `sendMessage` so the first
-    // assistant tokens already route through the bound topic. Failure
-    // is logged inside the binder; the session continues unbound.
-    if (this.automationBinder && telegramTopic && telegramTopic.trim().length > 0) {
-      try {
-        await this.automationBinder({
-          workspaceId,
-          sessionId: session.id,
-          topicName: telegramTopic.trim(),
-        })
-      } catch (err) {
-        sessionLog.warn('[Automations] automation binder threw', {
-          sessionId: session.id,
-          telegramTopic,
-          error: err instanceof Error ? err.message : String(err),
-        })
-      }
-    }
 
     // Send the prompt.
     // Test runs pass `waitForCompletion: false` so we return as soon as the

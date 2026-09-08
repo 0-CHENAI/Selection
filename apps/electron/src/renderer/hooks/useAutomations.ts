@@ -322,7 +322,6 @@ export function useAutomations(
       actions: executable,
       permissionMode: automation.permissionMode,
       labels: automation.labels,
-      telegramTopic: automation.telegramTopic,
     }).then((result) => {
       if (!isCurrentRequest()) return
       const resolved = resolveAutomationTestResult(result, executable.some(action => action.type === 'prompt'))

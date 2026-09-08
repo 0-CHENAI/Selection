@@ -6,4 +6,6 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 
 ## Improvements
 
+- **Streamlined messaging integrations** — Removed the retired Telegram and WhatsApp integrations, their setup surfaces, background worker, and packaged dependencies. Existing installations now discard only those integrations' obsolete credentials and local state while preserving Lark / Feishu configuration and bindings. (#280)
+
 ## Bug Fixes

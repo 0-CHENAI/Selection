@@ -11,8 +11,6 @@ const CJS_ENTRIES: Array<{ name: string; options: BuildOptions }> = [
       entryPoints: [join(repoRoot, 'apps/electron/src/main/index.ts')],
       external: ['electron'],
       alias: {
-        'node-fetch': join(repoRoot, 'apps/electron/src/main/shims/node-fetch.cjs'),
-        'abort-controller': join(repoRoot, 'apps/electron/src/main/shims/abort-controller.cjs'),
       },
     },
   },
