@@ -1857,11 +1857,6 @@ function AppShellContent({
           onToggleFocusMode={() => setIsSidebarAndNavigatorHidden(prev => !prev)}
           afterWorkspace={isSessionsNavigation(navState) ? (
             <div className="flex items-center gap-1.5">
-              <HeaderIconButton
-                icon={<Search className="h-4 w-4" />}
-                tooltip={t("sidebar.search")}
-                onClick={openSessionSearch}
-              />
               <BoardListToggle
                 value={isBoardView ? 'board' : 'list'}
                 onChange={view => {
@@ -2149,15 +2144,11 @@ function AppShellContent({
               ) : undefined}
               actions={
                 isSessionsNavigation(navState) ? (
-                  /* Compact mode keeps its existing list-header search affordance.
-                     The desktop search and view switcher share one stable TopBar slot. */
-                  isAutoCompact ? (
-                    <HeaderIconButton
-                      icon={<Search className="h-4 w-4" />}
-                      tooltip={t("sidebar.search")}
-                      onClick={openSessionSearch}
-                    />
-                  ) : undefined
+                  <HeaderIconButton
+                    icon={<Search className="h-4 w-4" />}
+                    tooltip={t("sidebar.search")}
+                    onClick={openSessionSearch}
+                  />
                 ) : (
                   <>
                   {/* Add Source button (only for sources mode) - uses filter-aware edit config */}

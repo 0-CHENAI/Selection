@@ -33,10 +33,15 @@ function renderWithShell(
 }
 
 describe('PanelHeader title alignment', () => {
-  it('centers the title by default so chat and file pages stay unchanged', () => {
-    const html = renderWithShell(<PanelHeader title="Session name" />)
+  it('centers desktop titles with symmetric side slots even with a trailing action', () => {
+    const html = renderWithShell(
+      <PanelHeader title="Session name" actions={<button type="button">Close</button>} />,
+    )
 
-    expect(html).toContain('mx-auto')
+    expect(html).toContain('grid-cols-[minmax(0,1fr)_minmax(0,2fr)_minmax(0,1fr)]')
+    expect(html).toContain('justify-center')
+    expect(html).toContain('padding-left:16px;padding-right:16px')
+    expect(html).toContain('Close')
     expect(html).toContain('Session name')
     expect(html).toContain('truncate')
     expect(html).toContain('pl-4')
