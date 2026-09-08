@@ -158,7 +158,7 @@ If you modify `resources/icon.icon`, regenerate the Assets.car:
 ```bash
 cd apps/electron
 xcrun actool "resources/icon.icon" --compile "resources" \
-  --app-icon AppIcon --minimum-deployment-target 26.0 \
+  --app-icon icon --minimum-deployment-target 26.0 \
   --platform macosx --output-partial-info-plist /dev/null
 ```
 

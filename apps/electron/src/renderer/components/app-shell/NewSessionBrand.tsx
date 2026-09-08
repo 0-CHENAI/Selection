@@ -35,7 +35,7 @@ export function NewSessionBrand() {
       data-testid="new-session-brand"
       className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center overflow-hidden px-6 select-none"
     >
-      <div className="flex max-w-full items-center justify-center gap-3 text-foreground sm:gap-4">
+      <div className="flex max-w-full items-end justify-center gap-3 text-foreground sm:gap-4">
         <img
           src={swanBlack}
           alt=""
