@@ -54,6 +54,7 @@ it('keeps the editor, import page and library as parallel reuse entries', () => 
   expect(library).toContain('<ConductorWorkbench spec={spec} />')
   expect(library).not.toContain('liveRun')
   expect(library).toContain('createTaskFromTemplate')
+  expect(library).toContain('!detail.builtIn')
 })
 
 it('keeps save-as-template copy independent of create-and-run', () => {

@@ -57,11 +57,11 @@ import {
   previewV3Migration,
   readLatestSpecRevision,
   serializeTaskYaml,
-  listTaskTemplateSummaries,
-  loadTaskTemplate,
+  listAvailableTaskTemplateSummaries,
+  loadAvailableTaskTemplate,
   saveTaskTemplate,
   deleteTaskTemplate,
-  specFromTemplate,
+  specFromAvailableTemplate,
   redactTemplateSource,
 } from '@craft-agent/shared/tasks'
 import { pushTyped, type RpcServer } from '@craft-agent/server-core/transport'
@@ -467,11 +467,11 @@ export function registerTasksHandlers(server: RpcServer, deps: HandlerDeps): voi
   })
 
   server.handle(RPC_CHANNELS.tasks.LIST_TEMPLATES, async (_ctx, workspaceId: string): Promise<TaskTemplateSummaryDto[]> => {
-    return listTaskTemplateSummaries(workspaceOrThrow(workspaceId).rootPath)
+    return listAvailableTaskTemplateSummaries(workspaceOrThrow(workspaceId).rootPath)
   })
 
   server.handle(RPC_CHANNELS.tasks.GET_TEMPLATE, async (_ctx, workspaceId: string, id: string): Promise<TaskTemplateDetailDto> => {
-    const loaded = loadTaskTemplate(workspaceOrThrow(workspaceId).rootPath, id)
+    const loaded = loadAvailableTaskTemplate(workspaceOrThrow(workspaceId).rootPath, id)
     if (!loaded) throw new Error(`Template "${id}" was not found.`)
     const { spec, yaml, ...summary } = loaded
     return { ...summary, spec, yaml }
@@ -500,7 +500,7 @@ export function registerTasksHandlers(server: RpcServer, deps: HandlerDeps): voi
 
   server.handle(RPC_CHANNELS.tasks.CREATE_FROM_TEMPLATE, async (_ctx, workspaceId: string, req: TaskCreateFromTemplateRequest): Promise<TaskCreateResult> => {
     if (typeof req?.templateId !== 'string' || !req.templateId.trim()) throw new Error('Template id is required.')
-    const spec = specFromTemplate(workspaceOrThrow(workspaceId).rootPath, req.templateId, req.projectId)
+    const spec = specFromAvailableTemplate(workspaceOrThrow(workspaceId).rootPath, req.templateId, req.projectId)
     return persistImportedYaml(workspaceId, serializeTaskYaml(spec))
   })
 

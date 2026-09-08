@@ -8,6 +8,8 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 
 - **Orchestration template library** — Save a validated V3 definition as a reusable workspace template, browse cards, open a read-only graph, inspect node definitions, and create a new workflow instance. Saving or using a template never starts a run, and templates stay outside `tasks/`. ([#286](https://github.com/0-CHENAI/Selection/issues/286))
 
+- **Built-in electrical single-line diagram workflow** — The V3 template library now includes a read-only six-stage workflow for partitioning, parallel region analysis, evidence-backed completion, and final report synthesis with the `electrical-primary-sld-topology-v4-0` skill.
+
 ## Improvements
 
 - **List / import-orchestration controls no longer jump between views** — Desktop keeps search and the switcher together in one top-bar slot immediately after the workspace selector. Opening or leaving the YAML import editor now changes only the selected switcher item and main content, while project context and return navigation stay intact; unsaved YAML or existing-task edits are confirmed before either control leaves the editor. ([#283](https://github.com/0-CHENAI/Selection/issues/283))
@@ -23,6 +25,8 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 - **Session list filter and grouping menu is gone** — The title-bar ListFilter control no longer offers project include/exclude or unread/project grouping. The list always groups by date. Saved exclude or multi-project filters are cleared on load so they cannot hide sessions; a single sidebar project include is kept. ([#263](https://github.com/0-CHENAI/Selection/issues/263))
 
 ## Bug Fixes
+
+- **Image-heavy debug logs stay usable** — Request logging keeps ordinary diagnostic fields while replacing large Base64 payloads with length-bearing placeholders, rotates at 10 MiB as well as daily, and explicitly tells models that `image-preview` is reply syntax rather than a callable tool.
 
 - **升级内置 OfficeCLI 至 v1.0.147**：桌面运行时、官方 Schema/Guides/Skills 和六个平台资产已同步到上游稳定版；`import` 新增的 `--delimiter` 与 `--decimal` 参数已纳入命令分类审查，运行时自更新仍保持禁用（#276）。
 

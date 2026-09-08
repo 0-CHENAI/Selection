@@ -340,6 +340,7 @@ export interface TaskRunRequest {
 export interface TaskTemplateSummaryDto {
   id: string
   name: string
+  builtIn: boolean
   description?: string
   tags?: string[]
   nodeCount: number

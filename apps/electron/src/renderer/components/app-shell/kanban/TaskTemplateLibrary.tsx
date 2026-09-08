@@ -115,7 +115,9 @@ export function TaskTemplateLibrary({
           <h2 className="text-lg font-semibold">{detail.name}</h2>
           <div className="ml-auto flex flex-wrap gap-2">
             <Button variant="outline" size="sm" disabled={busy} onClick={() => void exportYaml()}>{t('tasks.templateExport')}</Button>
-            <Button variant="outline" size="sm" disabled={busy} onClick={() => void removeTemplate()}>{t('tasks.templateDelete')}</Button>
+            {!detail.builtIn && (
+              <Button variant="outline" size="sm" disabled={busy} onClick={() => void removeTemplate()}>{t('tasks.templateDelete')}</Button>
+            )}
             <Button size="sm" disabled={busy} onClick={() => void createFromSelectedTemplate()}>{t('tasks.templateUse')}</Button>
           </div>
         </div>

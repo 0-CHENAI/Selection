@@ -12,6 +12,7 @@ import { isAbsolute, join, relative, resolve } from 'path';
 import { parse as parseYaml, stringify as stringifyYaml } from 'yaml';
 import { z } from 'zod';
 import { atomicWriteFileSync, stripBom } from '../utils/files.ts';
+import { getBundledAssetsDir } from '../utils/paths.ts';
 import { SLUG_RE, type TaskSpec } from './schema.ts';
 import { uniqueTaskSlug } from './slug.ts';
 import { parseTaskImport } from './document.ts';
@@ -47,6 +48,7 @@ const TemplateDocumentSchema = z.object({
 export interface TaskTemplateSummary {
   id: string;
   name: string;
+  builtIn: boolean;
   description?: string;
   tags?: string[];
   nodeCount: number;
@@ -167,10 +169,11 @@ function toSummary(id: string, name: string, spec: TaskSpec, meta: {
   created_at: string;
   updated_at: string;
   source_task_slug?: string;
-}): TaskTemplateSummary {
+}, builtIn = false): TaskTemplateSummary {
   return {
     id,
     name,
+    builtIn,
     description: meta.description,
     tags: meta.tags,
     nodeCount: spec.nodes.length,
@@ -182,7 +185,7 @@ function toSummary(id: string, name: string, spec: TaskSpec, meta: {
   };
 }
 
-function parseTemplateFile(yaml: string): TaskTemplateRecord | null {
+function parseTemplateFile(yaml: string, builtIn = false): TaskTemplateRecord | null {
   let raw: unknown;
   try {
     raw = parseYaml(stripBom(yaml));
@@ -195,7 +198,7 @@ function parseTemplateFile(yaml: string): TaskTemplateRecord | null {
   if (!imported.valid || !imported.spec || imported.sourceVersion !== 3) return null;
   const spec = sanitizeTemplateSpec(imported.spec);
   return {
-    ...toSummary(parsed.data.id, parsed.data.name, spec, parsed.data),
+    ...toSummary(parsed.data.id, parsed.data.name, spec, parsed.data, builtIn),
     spec,
     yaml: serializeTaskYaml(spec),
   };
@@ -209,6 +212,31 @@ export function loadTaskTemplate(workspaceRoot: string, id: string): TaskTemplat
   return loaded?.id === id ? loaded : null;
 }
 
+/** App-shipped, read-only templates. */
+export function getBundledTaskTemplatesRoot(): string | undefined {
+  return getBundledAssetsDir('task-templates');
+}
+
+export function loadBundledTaskTemplate(
+  id: string,
+  bundledRoot = getBundledTaskTemplatesRoot(),
+): TaskTemplateRecord | null {
+  if (!SLUG_RE.test(id) || id.includes('..') || !bundledRoot) return null;
+  const path = join(bundledRoot, id, TEMPLATE_FILE);
+  if (!existsSync(path)) return null;
+  const loaded = parseTemplateFile(readFileSync(path, 'utf-8'), true);
+  return loaded?.id === id ? loaded : null;
+}
+
+/** Workspace templates shadow an app-shipped template with the same id. */
+export function loadAvailableTaskTemplate(
+  workspaceRoot: string,
+  id: string,
+  bundledRoot = getBundledTaskTemplatesRoot(),
+): TaskTemplateRecord | null {
+  return loadTaskTemplate(workspaceRoot, id) ?? loadBundledTaskTemplate(id, bundledRoot);
+}
+
 export function listTaskTemplateSummaries(workspaceRoot: string): TaskTemplateSummary[] {
   const root = taskTemplatesRoot(workspaceRoot);
   if (!existsSync(root)) return [];
@@ -217,6 +245,27 @@ export function listTaskTemplateSummaries(workspaceRoot: string): TaskTemplateSu
     .map((entry) => loadTaskTemplate(workspaceRoot, entry.name))
     .filter((item): item is TaskTemplateRecord => item != null)
     .map(({ spec: _spec, yaml: _yaml, ...summary }) => summary)
+    .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt) || a.name.localeCompare(b.name));
+}
+
+export function listAvailableTaskTemplateSummaries(
+  workspaceRoot: string,
+  bundledRoot = getBundledTaskTemplatesRoot(),
+): TaskTemplateSummary[] {
+  const byId = new Map<string, TaskTemplateSummary>();
+  if (bundledRoot && existsSync(bundledRoot)) {
+    for (const entry of readdirSync(bundledRoot, { withFileTypes: true })) {
+      if (!entry.isDirectory() || !SLUG_RE.test(entry.name)) continue;
+      const loaded = loadBundledTaskTemplate(entry.name, bundledRoot);
+      if (!loaded) continue;
+      const { spec: _spec, yaml: _yaml, ...summary } = loaded;
+      byId.set(summary.id, summary);
+    }
+  }
+  for (const summary of listTaskTemplateSummaries(workspaceRoot)) {
+    byId.set(summary.id, summary);
+  }
+  return [...byId.values()]
     .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt) || a.name.localeCompare(b.name));
 }
 
@@ -291,6 +340,21 @@ export function specFromTemplate(
   projectId?: string,
 ): TaskSpec {
   const loaded = loadTaskTemplate(workspaceRoot, templateId);
+  if (!loaded) throw new Error(`Template "${templateId}" was not found.`);
+  return instantiateTemplateSpec(
+    loaded.spec,
+    new Set(listTaskSlugs(workspaceRoot)),
+    { name: loaded.name, projectId },
+  );
+}
+
+export function specFromAvailableTemplate(
+  workspaceRoot: string,
+  templateId: string,
+  projectId?: string,
+  bundledRoot = getBundledTaskTemplatesRoot(),
+): TaskSpec {
+  const loaded = loadAvailableTaskTemplate(workspaceRoot, templateId, bundledRoot);
   if (!loaded) throw new Error(`Template "${templateId}" was not found.`);
   return instantiateTemplateSpec(
     loaded.spec,

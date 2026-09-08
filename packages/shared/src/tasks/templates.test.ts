@@ -7,10 +7,14 @@ import { listTaskSlugs, saveTaskSpec, taskYamlPath } from './storage.ts';
 import {
   deleteTaskTemplate,
   instantiateTemplateSpec,
+  listAvailableTaskTemplateSummaries,
   listTaskTemplateSummaries,
+  loadAvailableTaskTemplate,
+  loadBundledTaskTemplate,
   loadTaskTemplate,
   sanitizeTemplateSpec,
   saveTaskTemplate,
+  specFromAvailableTemplate,
   specFromTemplate,
   taskTemplateYamlPath,
   TaskTemplateConflictError,
@@ -153,5 +157,39 @@ nodes:
     expect(next.id).toBe('review-3');
     expect(next.project).toBe('p');
     expect(spec.id).toBe('review');
+  });
+
+  it('lists and instantiates read-only app-shipped V3 templates', () => {
+    const bundledRoot = join(root, 'bundled');
+    const templateDir = join(bundledRoot, 'bundled-review');
+    mkdirSync(templateDir, { recursive: true });
+    writeFileSync(join(templateDir, 'template.yaml'), `
+id: bundled-review
+name: Bundled Review
+description: App-shipped workflow
+tags: [review]
+created_at: 2026-09-08T00:00:00.000Z
+updated_at: 2026-09-08T00:00:00.000Z
+spec:
+  schema_version: 3
+  id: bundled-review
+  title: Bundled Review
+  goal: review the change
+  nodes:
+    - id: read
+      prompt: read it
+`);
+
+    expect(loadBundledTaskTemplate('bundled-review', bundledRoot)?.builtIn).toBe(true);
+    expect(loadAvailableTaskTemplate(root, 'bundled-review', bundledRoot)?.name).toBe('Bundled Review');
+    expect(listAvailableTaskTemplateSummaries(root, bundledRoot)).toEqual([
+      expect.objectContaining({ id: 'bundled-review', builtIn: true, nodeCount: 1 }),
+    ]);
+    expect(specFromAvailableTemplate(root, 'bundled-review', 'proj-1', bundledRoot)).toMatchObject({
+      schema_version: 3,
+      id: 'bundled-review',
+      project: 'proj-1',
+    });
+    expect(deleteTaskTemplate(root, 'bundled-review')).toBe(false);
   });
 });
