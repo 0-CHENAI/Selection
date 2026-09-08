@@ -49,16 +49,31 @@ try {
   // Ignore - logging will silently fail if dir can't be created
 }
 
-// Rotate log file if older than 1 day
+// Keep debug logging bounded. Request-heavy sessions can emit thousands of
+// entries, so age-only rotation is not enough.
 const MAX_LOG_AGE_MS = 24 * 60 * 60 * 1000;
+export const MAX_LOG_SIZE_BYTES = 10 * 1024 * 1024;
+
+export function shouldRotateInterceptorLog(
+  stat: { size: number; mtimeMs: number },
+  now = Date.now(),
+): boolean {
+  return stat.size >= MAX_LOG_SIZE_BYTES || now - stat.mtimeMs > MAX_LOG_AGE_MS;
+}
+
+function rotateLogFileIfNeeded(): void {
+  if (!existsSync(LOG_FILE)) return;
+
+  const stat = statSync(LOG_FILE);
+  if (!shouldRotateInterceptorLog(stat)) return;
+
+  const prevLog = LOG_FILE + '.prev';
+  if (existsSync(prevLog)) unlinkSync(prevLog);
+  renameSync(LOG_FILE, prevLog);
+}
+
 try {
-  if (existsSync(LOG_FILE)) {
-    const stat = statSync(LOG_FILE);
-    if (Date.now() - stat.mtimeMs > MAX_LOG_AGE_MS) {
-      const prevLog = LOG_FILE + '.prev';
-      renameSync(LOG_FILE, prevLog);
-    }
-  }
+  rotateLogFileIfNeeded();
 } catch {
   // Ignore — rotation is best-effort
 }
@@ -78,6 +93,7 @@ export function debugLog(...args: unknown[]) {
     return String(a);
   }).join(' ')}`;
   try {
+    rotateLogFileIfNeeded();
     appendFileSync(LOG_FILE, message + '\n');
   } catch {
     // Silently fail if can't write to log file

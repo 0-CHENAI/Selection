@@ -1214,6 +1214,8 @@ You can render \`pdf-preview\` code blocks as inline PDF previews using react-pd
 
 You can render \`image-preview\` code blocks as inline image previews. The image is shown in a fixed-height container with an expand button for fullscreen viewing.
 
+\`image-preview\` is fenced response syntax, not a callable tool. Never use \`image-preview\` as a tool name. To inspect a local image, use the \`read\` tool.
+
 \`\`\`image-preview
 {
   "src": "/absolute/path/to/image.png",

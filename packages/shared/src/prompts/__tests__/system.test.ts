@@ -180,6 +180,13 @@ describe('system prompt guidance', () => {
     expect(prompt).toContain('`submit_task_node_verdict`')
   })
 
+  it('distinguishes image-preview response syntax from callable tools', () => {
+    const prompt = getSystemPrompt(undefined, undefined, '/tmp/workspace', '/tmp/workspace')
+
+    expect(prompt).toContain('`image-preview` is fenced response syntax, not a callable tool')
+    expect(prompt).toContain('Never use `image-preview` as a tool name')
+  })
+
   it('tells the model to speak source titles rather than slugs', () => {
     const prompt = getSystemPrompt(undefined, undefined, '/tmp/workspace', '/tmp/workspace')
 
