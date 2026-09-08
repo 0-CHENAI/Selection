@@ -108,6 +108,8 @@ type RunLogPayload =
   | { t: string; kind: 'node-spawned'; nodeId: string; sessionId: string }
   | { t: string; kind: 'node-finished'; nodeId: string; sessionId: string; state: NodeRunState; reason?: string }
   | { t: string; kind: 'node-waiting-approval'; nodeId: string; deadline?: string }
+  | { t: string; kind: 'approval-response'; nodeId: string; approved?: boolean; feedback: string }
+  | { t: string; kind: 'approval-feedback-delivery'; nodeId: string; feedback: string; status: 'delivered' | 'failed' }
   | { t: string; kind: 'node-retry'; nodeId: string; attempt: number; reason: string }
   | {
       t: string;

@@ -6,9 +6,11 @@ const pending = new Map<string, { generation: number; yaml: string }>();
 export function validateSubmittedDefinition(spec: unknown):
   | { valid: true; yaml: string }
   | { valid: false; errors: string[] } {
-  if (!spec || typeof spec !== 'object' || Array.isArray(spec)
-    || (spec as Record<string, unknown>).schema_version !== 2) {
-    return { valid: false, errors: ['schema_version: submit_task_definition requires the numeric value 2'] };
+  const version = spec && typeof spec === 'object' && !Array.isArray(spec)
+    ? (spec as Record<string, unknown>).schema_version
+    : undefined;
+  if (version !== 3) {
+    return { valid: false, errors: ['schema_version: submit_task_definition requires the numeric value 3'] };
   }
   const raw = spec;
   // JSON is a YAML subset and preserves every input key for the strict v2
@@ -48,9 +50,9 @@ export function extractYamlFromModelText(text: string): string {
 /**
  * Resolve one generator turn.
  *
- * New v2 definitions have exactly one trusted ingress: submit_task_definition.
+ * New structured definitions have exactly one trusted ingress: submit_task_definition.
  * Free-text YAML remains readable only for legacy/v1 generator transcripts, so
- * historical sessions can still be repaired without making pasted v2 YAML a
+ * historical sessions can still be repaired without making pasted v2/v3 YAML a
  * second, less-strict authoring path.
  */
 export function resolveGeneratedYaml(
@@ -66,9 +68,9 @@ export function resolveGeneratedYaml(
     throw new Error('New task definitions must be submitted with submit_task_definition in the current generation.');
   }
   const fallback = extractYamlFromModelText(finalText);
-  if (parseTaskDocument(fallback).sourceVersion === 2) {
+  if (parseTaskDocument(fallback).sourceVersion >= 2) {
     throw new Error(
-      'New schema_version: 2 task definitions must be submitted with submit_task_definition; free-text v2 YAML is not accepted.',
+      'New structured task definitions must be submitted with submit_task_definition; free-text YAML is not accepted.',
     );
   }
   return fallback;

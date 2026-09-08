@@ -14,13 +14,12 @@
  */
 import { RPC_CHANNELS } from '@craft-agent/shared/protocol'
 import type {
+  TaskGenerateRequest,
+  TaskGenerateAck,
   TaskCreateRequest,
   TaskCreateResult,
   TaskSaveRequest,
   TaskSaveResult,
-  TaskGenerateRequest,
-  TaskGenerateAck,
-  TaskGenerateResult,
   TaskRunRequest,
   TaskValidationResultDto,
   TaskGetResult,
@@ -31,18 +30,26 @@ import type {
   TaskUpdateRunLimitsRequest,
   TaskApplyRunRevisionRequest,
   TaskApplyRunRevisionResult,
+  TaskTemplateSaveRequest,
+  TaskTemplateSaveResult,
+  TaskTemplateSummaryDto,
+  TaskTemplateDetailDto,
+  TaskCreateFromTemplateRequest,
 } from '@craft-agent/shared/protocol'
 import { createHash } from 'node:crypto'
+import { unlinkSync } from 'node:fs'
 import { getWorkspaceByNameOrId, getLlmConnections } from '@craft-agent/shared/config'
 import {
-  parseTaskYaml,
-  parseTaskDocument,
-  loadTaskDocument,
-  saveTaskDocument,
-  listTaskSlugs,
-  listRunIds,
   buildGeneratorPrompt,
   buildRepairPrompt,
+  parseTaskYaml,
+  parseTaskDocument,
+  parseTaskImport,
+  loadTaskDocument,
+  saveTaskDocument,
+  taskYamlPath,
+  listTaskSlugs,
+  listRunIds,
   loadTaskResults,
   TaskEtagConflictError,
   definitionDiff,
@@ -50,13 +57,21 @@ import {
   previewV3Migration,
   readLatestSpecRevision,
   serializeTaskYaml,
+  listTaskTemplateSummaries,
+  loadTaskTemplate,
+  saveTaskTemplate,
+  deleteTaskTemplate,
+  specFromTemplate,
+  redactTemplateSource,
 } from '@craft-agent/shared/tasks'
-import { createLogger } from '@craft-agent/shared/utils'
 import { pushTyped, type RpcServer } from '@craft-agent/server-core/transport'
 import type { HandlerDeps } from '../handler-deps'
-import { TaskRunner, TaskControlError, clearSubmittedDefinition, createTaskFromSpec, finishTaskOrchestrator, resolveGeneratedYaml } from '../../tasks'
+import { TaskRunner, TaskControlError, createTaskFromSpec, clearSubmittedDefinition, resolveGeneratedYaml } from '../../tasks'
 
+import { createLogger } from '@craft-agent/shared/utils'
 const tasksLog = createLogger('tasks-generate')
+const GENERATE_TIMEOUT_MS = 180_000
+const MAX_GENERATE_ATTEMPTS = 2
 
 export const HANDLED_CHANNELS = [
   RPC_CHANNELS.tasks.VALIDATE,
@@ -72,6 +87,11 @@ export const HANDLED_CHANNELS = [
   RPC_CHANNELS.tasks.UPDATE_RUN_LIMITS,
   RPC_CHANNELS.tasks.GET,
   RPC_CHANNELS.tasks.LIST,
+  RPC_CHANNELS.tasks.LIST_TEMPLATES,
+  RPC_CHANNELS.tasks.GET_TEMPLATE,
+  RPC_CHANNELS.tasks.SAVE_TEMPLATE,
+  RPC_CHANNELS.tasks.DELETE_TEMPLATE,
+  RPC_CHANNELS.tasks.CREATE_FROM_TEMPLATE,
   RPC_CHANNELS.tasks.LIST_RUNS,
   RPC_CHANNELS.tasks.APPLY_RUN_REVISION,
   RPC_CHANNELS.tasks.GET_RESULTS,
@@ -94,12 +114,6 @@ function toValidationDto(result: ReturnType<typeof parseTaskYaml>): TaskValidati
     ...(result.spec ? { spec: result.spec } : {}),
   }
 }
-
-const GENERATE_TIMEOUT_MS = 180_000
-
-// One initial generation plus up to one feedback-driven repair turn. Bounded so a model
-// that keeps emitting invalid specs can't loop forever; the last attempt is returned as-is.
-const MAX_GENERATE_ATTEMPTS = 2
 
 export function registerTasksHandlers(server: RpcServer, deps: HandlerDeps): void {
   // One Conductor per workspace, created on demand. Holds active runs in memory.
@@ -173,81 +187,48 @@ export function registerTasksHandlers(server: RpcServer, deps: HandlerDeps): voi
     return toValidationDto(parseTaskDocument(yaml))
   })
 
-  // tasks:create — write task.yaml + create the orchestrator parent session.
-  server.handle(RPC_CHANNELS.tasks.CREATE, async (_ctx, workspaceId: string, req: TaskCreateRequest): Promise<TaskCreateResult> => {
+  async function persistImportedYaml(workspaceId: string, yaml: string, confirmV3Migration?: boolean): Promise<TaskCreateResult> {
     const ws = workspaceOrThrow(workspaceId)
-    const parsed = parseTaskDocument(req.yaml)
+    const parsed = parseTaskImport(yaml)
     const validation = toValidationDto(parsed)
     if (!parsed.valid || !parsed.spec) {
       return { slug: '', orchestratorSessionId: '', validation }
     }
     const spec = parsed.spec
     const existing = loadTaskDocument(ws.rootPath, spec.id)
-    saveTaskDocument(ws.rootPath, req.yaml, existing?.etag ?? null, {
-      confirmV3Migration: req.confirmV3Migration,
-    })
+    if (existing) throw new Error('A task with this id already exists. Import with a new id or edit the existing task.')
+    const saved = saveTaskDocument(ws.rootPath, yaml, null, { confirmV3Migration })
 
-    // Single choke point for ALL orchestrator paths (attach / adopt / fresh): apply the reserved
-    // "Task" label (surfacing its resolved id so the renderer can navigate to the label filter)
-    // and enable the spec's sources on the orchestrator session. Fail-soft — neither a label nor
-    // a sources problem may fail task creation. The body lives in finishTaskOrchestrator
-    // (../../tasks/create-task) so the create_task session tool shares it verbatim.
-    const finish = async (orchestratorSessionId: string): Promise<TaskCreateResult> => {
-      const setup = await finishTaskOrchestrator(deps.sessionManager, orchestratorSessionId, spec)
-      return { slug: spec.id, orchestratorSessionId, validation, taskLabelId: setup.taskLabelId }
-    }
-
-    // Edit-mode bind: the user saved this spec onto an existing, visible tile (e.g. a quick-add
-    // session). Bind that session to the slug. Unlike adoption this HARD-ERRORS on failure — it
-    // must never fall through to createSession, which would leave a duplicate orchestrator tile.
-    if (req.attachToExistingSession) {
-      const bound = await deps.sessionManager.bindExistingSessionToTask(req.attachToExistingSession, spec.id, {
-        name: spec.title,
-        projectId: spec.project,
-        ...(spec.cwd ? { workingDirectory: spec.cwd } : {}),
-        ...(spec.defaults?.model ? { model: spec.defaults.model } : {}),
-        ...(spec.defaults?.llmConnection ? { llmConnection: spec.defaults.llmConnection } : {}),
-        ...(spec.defaults?.permissionMode ? { permissionMode: spec.defaults.permissionMode } : {}),
-      })
-      if (!bound) {
-        throw new Error(
-          `Cannot attach task "${spec.id}" to session ${req.attachToExistingSession}: ` +
-            `session is missing or already bound to a different task.`,
-        )
+    // YAML imports create a fresh orchestrator without adopting generation drafts.
+    try {
+      const created = await createTaskFromSpec(deps.sessionManager, workspaceId, ws.rootPath, saved.spec!, { save: false })
+      validation.warnings.push(...created.warnings.map(message => ({ path: 'session', message, severity: 'warning' as const })))
+      return { slug: created.slug, orchestratorSessionId: created.orchestratorSessionId, validation, taskLabelId: created.taskLabelId }
+    } catch (error) {
+      // Remove only this import's unchanged file, allowing retry after session creation fails.
+      if (loadTaskDocument(ws.rootPath, spec.id)?.etag === saved.etag) {
+        unlinkSync(taskYamlPath(ws.rootPath, spec.id))
       }
-      return finish(req.attachToExistingSession)
+      throw error
     }
+  }
 
-    // Adoption path: when the YAML was authored by a generate orchestrator, promote that hidden
-    // draft in place instead of creating a second top-level session (#bug1). Falls back to a fresh
-    // session if the draft is gone / already adopted / bound to another slug.
-    if (req.orchestratorSessionId) {
-      const adopted = await deps.sessionManager.adoptGeneratedTaskOrchestrator(req.orchestratorSessionId, spec.id, {
-        name: spec.title,
-        projectId: spec.project,
-        ...(spec.cwd ? { workingDirectory: spec.cwd } : {}),
-        ...(spec.defaults?.model ? { model: spec.defaults.model } : {}),
-        // Reconcile the connection + permission mode from the saved spec (bind already does this) so an
-        // orch model/mode changed after generation actually takes effect on the promoted orchestrator.
-        ...(spec.defaults?.llmConnection ? { llmConnection: spec.defaults.llmConnection } : {}),
-        ...(spec.defaults?.permissionMode ? { permissionMode: spec.defaults.permissionMode } : {}),
-      })
-      if (adopted) {
-        return finish(req.orchestratorSessionId)
-      }
+  // tasks:create — write task.yaml + create the orchestrator parent session.
+  server.handle(RPC_CHANNELS.tasks.CREATE, async (_ctx, workspaceId: string, req: TaskCreateRequest): Promise<TaskCreateResult> => {
+    if (req.attachToExistingSession || req.orchestratorSessionId) {
+      throw new Error('Import cannot adopt or bind an existing session. Import a new task instead.')
     }
-
-    // Fresh create — shared core with the create_task session tool. The spec was already saved
-    // above (all three paths persist first), so skip the core's save. createSession announces the
-    // orchestrator to the renderer by default, so its tile appears on the board immediately.
-    const created = await createTaskFromSpec(deps.sessionManager, workspaceId, ws.rootPath, spec, { save: false })
-    return { slug: created.slug, orchestratorSessionId: created.orchestratorSessionId, validation, taskLabelId: created.taskLabelId }
+    return persistImportedYaml(workspaceId, req.yaml, req.confirmV3Migration)
   })
 
-  // tasks:save — etag-guarded write that stamps schema_version: 2 and backups a v1 original.
+  // tasks:save — etag-guarded write that stamps schema_version 2 or 3 and backups a v1 original.
   server.handle(RPC_CHANNELS.tasks.SAVE, async (_ctx, workspaceId: string, req: TaskSaveRequest): Promise<TaskSaveResult> => {
     const ws = workspaceOrThrow(workspaceId)
     try {
+      const incoming = parseTaskDocument(req.yaml)
+      if (!incoming.spec || !loadTaskDocument(ws.rootPath, incoming.spec.id)) {
+        throw new Error('Save requires an existing task. Create the workflow in the editor first.')
+      }
       const saved = saveTaskDocument(ws.rootPath, req.yaml, req.expectedEtag, {
         confirmV3Migration: req.confirmV3Migration,
       })
@@ -277,23 +258,15 @@ export function registerTasksHandlers(server: RpcServer, deps: HandlerDeps): voi
     }
   })
 
-  // tasks:generate — the persistent orchestrator session AUTHORS the task.yaml from a goal (#2).
-  // It also remains the home for "ask the agent to revise it" (it holds the conversation).
-  //
-  // ASYNC: the orchestrator session is created synchronously (cheap) and its id is returned
-  // immediately so the RPC never approaches the uniform client timeout. The authored spec is
-  // streamed back via the `tasks:generated` push event keyed by orchestratorSessionId. The
-  // session is a hidden taskDraft (off the board) until adopted by tasks:create; the editor
-  // discards an unadopted draft on close, and because drafts are hidden a give-up-early client
-  // never leaves a visible orphan tile.
+  // Proposal only: acknowledge a temporary safe-mode session, publish its validated
+  // definition asynchronously, then dispose it. CREATE is a separate user action.
   server.handle(RPC_CHANNELS.tasks.GENERATE, async (_ctx, workspaceId: string, req: TaskGenerateRequest): Promise<TaskGenerateAck> => {
-    workspaceOrThrow(workspaceId) // validate the workspace exists; generate no longer writes task.yaml
+    workspaceOrThrow(workspaceId)
+    if (!req.goal?.trim() || req.goal.length > 50_000) throw new Error('A goal of 1–50000 characters is required')
+    if (req.currentYaml !== undefined && (typeof req.currentYaml !== 'string' || req.currentYaml.length > 1_000_000)) throw new Error('Invalid proposal input')
     const orchestrator = await deps.sessionManager.createSession(workspaceId, {
       name: req.title?.trim() || 'New task',
-      sessionStatus: 'todo',
-      // Hidden until the authored spec is validated and adopted via tasks:create. Keeps the
-      // generate-time session off the board so "Generate → Create & Run" can't mint a duplicate
-      // top-level tile (#bug1). Promotion clears this flag in adoptGeneratedTaskOrchestrator.
+      // Hidden and never adopted into a persistent task.
       taskDraft: true,
       // Bind the draft to the project so it authors against the project's <project_context>.
       ...(req.projectId ? { projectId: req.projectId } : {}),
@@ -307,7 +280,7 @@ export function registerTasksHandlers(server: RpcServer, deps: HandlerDeps): voi
       // Task-level sources become the draft's enabled set (omitted → workspace default).
       ...(req.enabledSourceSlugs?.length ? { enabledSourceSlugs: req.enabledSourceSlugs } : {}),
       // Seed the visible task autonomy so authoring runs at the chosen mode, not the workspace default.
-      ...(req.permissionMode ? { permissionMode: req.permissionMode } : {}),
+      permissionMode: 'safe',
     })
     const sessionId = orchestrator.id
     tasksLog.info('generate started', {
@@ -338,6 +311,10 @@ export function registerTasksHandlers(server: RpcServer, deps: HandlerDeps): voi
         }
         off = deps.sessionManager.onSessionComplete((evt) => {
           if (evt.sessionId !== sessionId) return
+          if (evt.reason && evt.reason !== 'complete') {
+            finish(() => reject(new Error(`Proposal session ended with ${evt.reason}. Check the model connection and retry.`)))
+            return
+          }
           const text = evt.finalText ?? deps.sessionManager.getSessionFinalText(sessionId) ?? ''
           finish(() => resolve({ text, generation: evt.generation }))
         })
@@ -359,13 +336,20 @@ export function registerTasksHandlers(server: RpcServer, deps: HandlerDeps): voi
         // node) hand the concrete errors back and re-validate. Bounded so a model that can't
         // self-correct can't loop forever — the last attempt's validation is returned as-is.
         let prompt = buildGeneratorPrompt(req.goal, req.title)
+        if (req.currentYaml) prompt += '\nRevise this existing definition according to the user goal. Preserve its id and untouched fields:\n' + req.currentYaml
         let yaml = ''
         let parsed = parseTaskYaml(yaml)
         let attempts = 0
         for (let attempt = 0; attempt < MAX_GENERATE_ATTEMPTS; attempt++) {
           attempts = attempt + 1
           const turn = await askOrchestrator(prompt)
-          yaml = resolveGeneratedYaml(sessionId, turn.generation, turn.text)
+          try {
+            yaml = resolveGeneratedYaml(sessionId, turn.generation, turn.text)
+          } catch (error) {
+            if (attempt + 1 >= MAX_GENERATE_ATTEMPTS) throw error
+            prompt = 'Submit the COMPLETE V3 definition with submit_task_definition. No task has been created.'
+            continue
+          }
           parsed = parseTaskYaml(yaml)
           if (parsed.valid) break
           prompt = buildRepairPrompt(parsed.errors)
@@ -391,9 +375,7 @@ export function registerTasksHandlers(server: RpcServer, deps: HandlerDeps): voi
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err)
         tasksLog.error('generate failed', { sessionId, elapsedMs: Date.now() - startedAt, error: message })
-        // Deliver the failure so the client can stop its spinner and surface a toast. The
-        // orchestrator stays a hidden taskDraft (never shown on the board); the editor discards
-        // it on close, so a failed generation leaves nothing for the user to clean up.
+        // Preserve the caller's draft and report failure; cleanup runs in finally.
         pushTyped(server, RPC_CHANNELS.tasks.GENERATED, { to: 'workspace', workspaceId }, workspaceId, {
           orchestratorSessionId: sessionId,
           slug: '',
@@ -401,13 +383,16 @@ export function registerTasksHandlers(server: RpcServer, deps: HandlerDeps): voi
           validation: { valid: false, errors: [], warnings: [] },
           error: message,
         })
+      } finally {
+        clearSubmittedDefinition(sessionId)
+        await deps.sessionManager.deleteSession(sessionId).catch(error => tasksLog.error('draft cleanup failed', { sessionId, error: String(error) }))
       }
     })()
 
     return { orchestratorSessionId: sessionId }
   })
 
-  // tasks:run — start a run.
+  // tasks:run — start an existing run.
   server.handle(RPC_CHANNELS.tasks.RUN, async (_ctx, workspaceId: string, req: TaskRunRequest) => {
     const orchestrator = req.orchestratorSessionId
       ? await deps.sessionManager.getSession(req.orchestratorSessionId)
@@ -442,7 +427,7 @@ export function registerTasksHandlers(server: RpcServer, deps: HandlerDeps): voi
 
   server.handle(RPC_CHANNELS.tasks.RESPOND_APPROVAL, async (_ctx, workspaceId: string, req: TaskRespondApprovalRequest) => {
     const runner = runnerFor(workspaceId)
-    return controlResult(runner, req.slug, req.runId, () => runner.respondApproval(req.slug, req.runId, req.nodeId, req.approved))
+    return controlResult(runner, req.slug, req.runId, () => runner.respondApproval(req.slug, req.runId, req.nodeId, req.approved, req.feedback, req.feedbackOnly))
   })
 
   server.handle(RPC_CHANNELS.tasks.UPDATE_RUN_LIMITS, async (_ctx, workspaceId: string, req: TaskUpdateRunLimitsRequest) => {
@@ -479,6 +464,44 @@ export function registerTasksHandlers(server: RpcServer, deps: HandlerDeps): voi
   // tasks:list — slugs with a task.yaml.
   server.handle(RPC_CHANNELS.tasks.LIST, async (_ctx, workspaceId: string): Promise<string[]> => {
     return listTaskSlugs(workspaceOrThrow(workspaceId).rootPath)
+  })
+
+  server.handle(RPC_CHANNELS.tasks.LIST_TEMPLATES, async (_ctx, workspaceId: string): Promise<TaskTemplateSummaryDto[]> => {
+    return listTaskTemplateSummaries(workspaceOrThrow(workspaceId).rootPath)
+  })
+
+  server.handle(RPC_CHANNELS.tasks.GET_TEMPLATE, async (_ctx, workspaceId: string, id: string): Promise<TaskTemplateDetailDto> => {
+    const loaded = loadTaskTemplate(workspaceOrThrow(workspaceId).rootPath, id)
+    if (!loaded) throw new Error(`Template "${id}" was not found.`)
+    const { spec, yaml, ...summary } = loaded
+    return { ...summary, spec, yaml }
+  })
+
+  server.handle(RPC_CHANNELS.tasks.SAVE_TEMPLATE, async (_ctx, workspaceId: string, req: TaskTemplateSaveRequest): Promise<TaskTemplateSaveResult> => {
+    if (typeof req?.yaml !== 'string' || !req.yaml.trim()) throw new Error('Template YAML is required.')
+    if (typeof req.name !== 'string' || !req.name.trim()) throw new Error('A template name is required.')
+    const yaml = redactTemplateSource(req.yaml)
+    const imported = parseTaskImport(yaml)
+    const validation = toValidationDto(imported)
+    if (!imported.valid || !imported.spec) return { id: '', validation }
+    const saved = saveTaskTemplate(workspaceOrThrow(workspaceId).rootPath, {
+      name: req.name,
+      description: req.description,
+      tags: req.tags,
+      sourceTaskSlug: req.sourceTaskSlug,
+      yaml,
+    })
+    return { id: saved.id, validation }
+  })
+
+  server.handle(RPC_CHANNELS.tasks.DELETE_TEMPLATE, async (_ctx, workspaceId: string, id: string): Promise<{ deleted: boolean }> => {
+    return { deleted: deleteTaskTemplate(workspaceOrThrow(workspaceId).rootPath, id) }
+  })
+
+  server.handle(RPC_CHANNELS.tasks.CREATE_FROM_TEMPLATE, async (_ctx, workspaceId: string, req: TaskCreateFromTemplateRequest): Promise<TaskCreateResult> => {
+    if (typeof req?.templateId !== 'string' || !req.templateId.trim()) throw new Error('Template id is required.')
+    const spec = specFromTemplate(workspaceOrThrow(workspaceId).rootPath, req.templateId, req.projectId)
+    return persistImportedYaml(workspaceId, serializeTaskYaml(spec))
   })
 
   server.handle(RPC_CHANNELS.tasks.LIST_RUNS, async (_ctx, workspaceId: string, slug: string): Promise<string[]> => {

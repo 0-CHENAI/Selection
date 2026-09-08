@@ -77,6 +77,11 @@ export const RPC_CHANNELS = {
     UPDATE_RUN_LIMITS: 'tasks:updateRunLimits',
     GET: 'tasks:get',
     LIST: 'tasks:list',
+    LIST_TEMPLATES: 'tasks:listTemplates',
+    GET_TEMPLATE: 'tasks:getTemplate',
+    SAVE_TEMPLATE: 'tasks:saveTemplate',
+    DELETE_TEMPLATE: 'tasks:deleteTemplate',
+    CREATE_FROM_TEMPLATE: 'tasks:createFromTemplate',
     LIST_RUNS: 'tasks:listRuns',
     APPLY_RUN_REVISION: 'tasks:applyRunRevision',
     // Storage-backed read of a run's outcome (verdict + per-node output). Survives restart.

@@ -4,18 +4,18 @@
 
 ## 入口
 
-打开看板任务 → 定义 / 画布 / YAML / 结果。保存后才把 v1 文件写成 v2。画布只展示拓扑和运行态，不编辑节点；增删改在定义或 YAML。
+新建编排默认打开工作流表单，可增删改节点、模型和依赖并查看 DAG。新建统一写出 V3。AI 辅助编排先生成提案，用户查看 DAG/完整定义后应用到未保存草稿，再增删改并明确保存。创建不自动运行。YAML 导入仍为可选入口，要求显式 `schema_version: 3`；旧版、缺版本、同名任务拒绝导入。模板库与表单、提案、YAML 并列：可把合法 V3 定义存为工作区模板，卡片浏览后打开只读架构图，再创建新实例；保存或使用模板都不会自动运行。历史任务仍可编辑，不自动迁移。
 
 普通会话输入区的 Swarm 开关默认关闭，只影响当前会话及其后代。开启不代表一定拆分：只有至少两个独立工具工作轨、并行有收益、输入/输出/证据合同完整且父级定义了汇总或验证时才会创建 worker；资格不足会留在当前会话。worker 默认隐藏，可从父会话运行详情进入。
 
 Swarm Token 预算与 DAG run 预算独立计量。`spawn_session` Swarm 的上限固定为 262144 Token，用户不能改。输入区会显示当前 Swarm 用量；达到上限后当前 worker 允许收尾，但不会再派发或唤醒新工作，父会话进入 `need-to-check`。看板 Task 的 `token_budget` 仍由用户提高。
 
-用「生成」时优先走 `submit_task_definition`（结构化 v2 spec），服务端最多修正两次。只有工具不可用时才回退到从回复里截 YAML。
+`create_task` 仍关闭。`submit_task_definition` 仅允许编辑器生成的临时提案会话提交合法 V3 定义，不落盘、不运行；普通会话调用会被拒绝。提案会话使用只读权限，完成或取消后清理。应用提案不等于保存，保存不等于运行。生成期间人工改动草稿后，旧提案不可覆盖新改动。
 
 ## conduct 与 orchestrate
 
-- **conduct**：启动时冻结 revision 0，只按该图跑。
-- **orchestrate**（Beta）：协调器可补丁尚未执行的节点。仅在当前会话开启 Swarm 且通过资格门槛时作为默认策略；还需 `CRAFT_FEATURE_TASKS_ORCHESTRATE=1`，未开旗标时选择器禁用。
+- **conduct**：启动时冻结 revision 0，只按该图跑。新建任务默认仍用 conduct，避免一开跑就停在协调器门。
+- **orchestrate**（技术预览）：协调器可补丁尚未执行的节点，v3 在关键点等待 `submit_orchestration_decision`。普通构建默认关闭，需显式开启 `CRAFT_FEATURE_TASKS_ORCHESTRATE=1`，且父会话开启 Swarm；独立预览构建保留原有开放条件。
 
 `runner` 是运行策略，不是节点种类。任务父会话是系统 Coordinator。
 
@@ -33,8 +33,10 @@ Swarm Token 预算与 DAG run 预算独立计量。`spawn_session` Swarm 的上�
 - **停止运行**：取消 in-flight；若有就绪 `finally` 先跑再 `stopped`。与后台任务芯片的 Stop Task 不是同一动作。
 - 预算用尽后停派发，空闲时 `waiting-budget`。只有用户能加预算或停止。
 - 审批：拒绝或超时 = 节点失败。绝不自动批准。
+- 审批意见可记录并发送给父会话讨论，门保持关闭；同一意见重复提交不重复发送。意见随运行日志持久化，重启仍显示。明确批准后意见进入节点输出供下游使用；拒绝不放行下游。请勿在意见中填写凭据。
+- 保存定义不会改变当前 run 的冻结图；修改后的定义用于下一次显式运行。orchestrate 的运行期修改仍受 revision、pending-only 和权限边界保护。
 
-## v1 迁移
+## 历史任务的 v1 迁移（不适用于新导入）
 
 没有 `schema_version` 的文件是 v1。编辑器可内存迁移并显示警告。**未首次保存为 v2 之前，运行仍按 v1**：只执行 session / 旧 orchestrator，其余 kind skip。
 
@@ -63,4 +65,4 @@ v3 首次保存同样备份历史并校验 ETag，不改写旧 run log。`cache:
 - macOS 独立包：`bun run electron:dist:swarm-preview:mac`
 - 独立身份：`Selection Swarm Preview` / `com.lukilabs.craft-agent.swarm-preview`，产物写入 `apps/electron/release-swarm-preview`，不发布到正式更新通道。
 
-真实模型门槛固定使用 ORDER 连接 `pi-api-key-2` 和 `Laufry`，七个场景各连续运行三次。未完成打包 Electron 与真实模型门槛前不得合入 `test`，也不得默认开放给普通用户。
+真实模型门槛固定使用 ORDER 连接 `pi-api-key-2` 和 `Laufry`，七个场景各连续运行三次。打包 Electron、真实模型 21/21 与 dogfood 必须单独记录，单测不能替代默认开放 orchestrate 的验收。

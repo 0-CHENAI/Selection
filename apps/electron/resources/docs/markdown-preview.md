@@ -16,6 +16,8 @@ The `markdown-preview` block renders a markdown file inline in chat messages —
 
 **Key principle:** Like `pdf-preview` and `image-preview`, the file is already on disk — just reference the absolute path. No extraction step needed.
 
+`markdown-preview` is reply syntax, not a tool. Never emit a tool call named `markdown-preview`. After writing the `.md` file, output a fenced `markdown-preview` block in assistant text.
+
 ## When to Use
 
 Use `markdown-preview` when:

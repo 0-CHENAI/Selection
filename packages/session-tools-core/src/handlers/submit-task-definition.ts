@@ -14,6 +14,7 @@ export async function handleSubmitTaskDefinition(
   }
   try {
     const result = await ctx.submitTaskDefinition(args);
+    if (!result.valid) return errorResponse(JSON.stringify(result));
     return successResponse(JSON.stringify(result, null, 2));
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unknown error';

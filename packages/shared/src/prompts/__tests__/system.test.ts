@@ -171,9 +171,9 @@ describe('system prompt guidance', () => {
     expect(prompt).toContain('do **not** automatically `archive_session`')
     expect(prompt).toContain('`run_task`')
     expect(prompt).toContain('`control_task_run`')
-    expect(prompt).toContain('`submit_task_definition`')
-    expect(prompt).toContain('mandatory when generating a new v2 task')
-    expect(prompt).toContain('final-text fallback exists only for legacy v1/history')
+    expect(prompt).toContain('explicit user confirmation in the workflow editor')
+    expect(prompt).toContain('Only editor proposal sessions may call submit_task_definition')
+    expect(prompt).not.toContain('mandatory when generating a new task')
     expect(prompt).toContain('`submit_task_output`')
     expect(prompt).toContain('`submit_task_verdict`')
     expect(prompt).toContain('`submit_orchestration_decision`')
@@ -240,6 +240,31 @@ describe('system prompt guidance', () => {
     expect(prompt).not.toContain('**pptx-tool**')
     expect(prompt).toContain('doc-diff old.md new.md')
     expect(prompt).toContain('Do not read an automatically generated `.docx.md`')
+  })
+
+  it('states that markdown-preview is reply syntax, not a tool (#255)', () => {
+    const prompts = [
+      getSystemPrompt(undefined, undefined, '/tmp/workspace', '/tmp/workspace'),
+      getSystemPrompt(
+        undefined,
+        undefined,
+        '/tmp/workspace',
+        '/tmp/workspace',
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        false,
+        true,
+      ),
+    ]
+
+    for (const prompt of prompts) {
+      expect(prompt).toContain('`markdown-preview` is **not a tool**')
+      expect(prompt).toContain('Never emit a tool call named `markdown-preview`')
+      expect(prompt).toContain('In your assistant reply — not as a tool call')
+      expect(prompt).toContain('Use the required `path` and `content` fields')
+    }
   })
 
   it('keeps internal math-formatting rules out of user-facing replies (#103)', () => {

@@ -257,6 +257,11 @@ export interface ElectronAPI {
   updateTaskRunLimits(workspaceId: string, req: TaskUpdateRunLimitsRequest): Promise<TaskControlResultDto>
   getTask(workspaceId: string, slug: string, runId?: string): Promise<TaskGetResult>
   listTasks(workspaceId: string): Promise<string[]>
+  listTaskTemplates(workspaceId: string): Promise<import('@craft-agent/shared/protocol').TaskTemplateSummaryDto[]>
+  getTaskTemplate(workspaceId: string, id: string): Promise<import('@craft-agent/shared/protocol').TaskTemplateDetailDto>
+  saveTaskTemplate(workspaceId: string, req: import('@craft-agent/shared/protocol').TaskTemplateSaveRequest): Promise<import('@craft-agent/shared/protocol').TaskTemplateSaveResult>
+  deleteTaskTemplate(workspaceId: string, id: string): Promise<{ deleted: boolean }>
+  createTaskFromTemplate(workspaceId: string, req: import('@craft-agent/shared/protocol').TaskCreateFromTemplateRequest): Promise<TaskCreateResult>
   listTaskRuns(workspaceId: string, slug: string): Promise<string[]>
   applyTaskRunRevision(workspaceId: string, req: import('@craft-agent/shared/protocol').TaskApplyRunRevisionRequest): Promise<import('@craft-agent/shared/protocol').TaskApplyRunRevisionResult>
   getTaskResults(workspaceId: string, slug: string, runId?: string): Promise<TaskResultsDto>
