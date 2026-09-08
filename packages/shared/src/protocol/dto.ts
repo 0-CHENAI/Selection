@@ -434,6 +434,7 @@ export interface TaskRunSnapshotDto {
   status: string
   orchestratorSessionId?: string
   nodes: TaskNodeRunStateDto[]
+  canRetryFailedNodes?: boolean
   /** Sum of each child's (input + output) tokens observed at completion. */
   tokensUsed: number
   /** Current user-controlled run ceiling. Missing means unlimited. */

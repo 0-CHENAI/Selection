@@ -127,6 +127,8 @@ type RunLogPayload =
         | 'run-waiting-coordinator'
         | 'run-repairing';
       tokensUsed?: number;
+      /** Explicit recovery transaction: preserve completed nodes, reset only these ids. */
+      retryNodeIds?: string[];
     }
   | { t: string; kind: 'verdict'; result: 'pass' | 'fail' | 'unparsed'; reason?: string; nodes?: string[]; evidence?: string }
   | { t: string; kind: 'node-verdict'; nodeId: string; result: 'pass' | 'fail'; reason?: string; nodes?: string[]; evidence?: string }

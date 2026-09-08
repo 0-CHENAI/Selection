@@ -41,3 +41,5 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 - **Swarm Markdown delivery no longer dies on `_content` / fake preview tools** — Compatible endpoints that emit `write({ path, _content })` are recovered to `{ path, content }` before schema validation, without loosening extra-field rejection or bypassing PreToolUse / path permissions. The system prompt now states that `markdown-preview` is fenced reply syntax, not a tool, and those pseudo-tool calls are counted by provider/model instead of being rewritten into text. ([#255](https://github.com/0-CHENAI/Selection/issues/255))
 
 - **空回复诊断与恢复提示** — 区分工具执行后缺少最终回复、上下文限制、流中断与代理进程退出，保留本轮具体错误并提供中英文说明；工具执行后不再提供可能重复操作的重放式重试。（#295）
+
+- **编排超时诊断与失败恢复** — 区分模型服务超时，为瞬时连接错误提供默认退避并修复等待重试时提前结束的问题；普通会话 DAG 可只重试失败节点，保留成功依赖与累计预算。新增脱敏 SSE 阶段日志以辅助定位上游连接问题。（#297）

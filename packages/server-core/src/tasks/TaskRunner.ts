@@ -210,6 +210,7 @@ export interface RunSnapshot {
   status: RunStatus;
   orchestratorSessionId?: string;
   nodes: NodeRunStatus[];
+  canRetryFailedNodes?: boolean;
   /** Sum of each child's (input + output) tokens observed at completion. */
   tokensUsed: number;
   /** Current user-controlled run ceiling. Missing means unlimited. */
@@ -469,6 +470,7 @@ class ActiveRun {
 
   continueAfterInterrupt(): RunSnapshot {
     if (this.runStatus === 'running') return this.snapshot();
+    if (this.runStatus === 'failed') return this.retryFailedNodes();
     if (this.runStatus !== 'interrupted') {
       throw new TaskControlError(this.runStatus, `Cannot continue a ${this.runStatus} run`);
     }
@@ -481,6 +483,33 @@ class ActiveRun {
     }
     this.runStatus = 'running';
     this.log({ kind: 'run-resumed' });
+    this.scheduleReady();
+    this.emitChanged();
+    return this.snapshot();
+  }
+
+  /** Explicit user recovery for session DAGs; completed outputs and total budget remain intact. */
+  private retryFailedNodes(): RunSnapshot {
+    if (this.spec.nodes.some(node => node.kind !== 'session')) {
+      throw new TaskControlError('failed', 'Partial retry currently requires a session-only DAG');
+    }
+    const retryIds = [...this.state].filter(([, st]) => st.state === 'failed' || st.state === 'cancelled').map(([id]) => id);
+    if (!retryIds.length) throw new TaskControlError('failed', 'No failed execution nodes to retry');
+    this.assertSensitiveReady();
+    // One durable event makes recovery atomic across a process restart.
+    this.log({ kind: 'run-resumed', retryNodeIds: retryIds });
+    this.originalFailed = false;
+    this.settled = false;
+    this.verdictLocked = false;
+    this.unsubscribe?.();
+    this.unsubscribe = this.deps.host.onSessionComplete(evt => this.onSessionComplete(evt));
+    for (const id of retryIds) {
+      const st = this.state.get(id)!;
+      st.state = 'pending';
+      this.submittedOutputs.delete(id);
+      delete this.outputs[id];
+    }
+    this.runStatus = 'running';
     this.scheduleReady();
     this.emitChanged();
     return this.snapshot();
@@ -533,6 +562,11 @@ class ActiveRun {
           st.sessionId = e.sessionId;
           this.sessionToNode.set(e.sessionId, e.nodeId);
         }
+      } else if (e.kind === 'run-resumed' && e.retryNodeIds) {
+        for (const id of e.retryNodeIds) {
+          const st = this.state.get(id);
+          if (st) st.state = 'pending';
+        }
       } else if (e.kind === 'node-scheduled') {
         const st = this.state.get(e.nodeId) ?? this.ensureInstanceState(e.nodeId);
         if (st) {
@@ -541,7 +575,10 @@ class ActiveRun {
         }
       } else if (e.kind === 'node-finished') {
         const st = this.state.get(e.nodeId) ?? this.ensureInstanceState(e.nodeId);
-        if (st) st.state = e.state;
+        if (st) {
+          st.state = e.state;
+          if (e.reason) st.lastFailure = e.reason;
+        }
       } else if (e.kind === 'node-waiting-approval') {
         const st = this.state.get(e.nodeId);
         if (st) {
@@ -808,6 +845,7 @@ class ActiveRun {
       runId: this.runId,
       taskId: this.spec.id,
       status: this.runStatus,
+      canRetryFailedNodes: this.runStatus === 'failed' && this.spec.nodes.every(node => node.kind === 'session') && [...this.state.values()].some(st => st.state === 'failed'),
       orchestratorSessionId: this.opts.orchestratorSessionId,
       tokensUsed: this.tokensUsed,
       tokenBudget: this.tokenBudget,
@@ -1864,7 +1902,7 @@ class ActiveRun {
       this.scheduleReady();
     } else {
       // 'error' | 'timeout'
-      this.failNode(nodeId, evt.reason, evt.sessionId);
+      this.failNode(nodeId, evt.errorCode ? `${evt.reason}:${evt.errorCode}` : evt.reason, evt.sessionId);
     }
   }
 
@@ -1883,7 +1921,7 @@ class ActiveRun {
     const retry = node?.retry;
     if (inst && expanding && retry && inst.attempt <= retry.limit && retryMatches(retry.when, failure)) {
       inst.lastFailure = `Previous attempt failed: ${reason}. Address the cause before retrying.`;
-      const delay = retryBackoffMs(retry, inst.attempt);
+      const delay = retryBackoffMs(retry, inst.attempt, reason);
       const sid = sessionId ?? inst.sessionId;
       if (sid) this.applyCard(sid, TODO_STATUS);
       this.log({ kind: 'node-retry', nodeId, attempt: inst.attempt, reason });
@@ -1907,7 +1945,7 @@ class ActiveRun {
     }
     if (!inst && retry && st.attempt <= retry.limit && retryMatches(retry.when, failure)) {
       st.lastFailure = `Previous attempt failed: ${reason}. Address the cause before retrying.`;
-      const delay = retryBackoffMs(retry, st.attempt);
+      const delay = retryBackoffMs(retry, st.attempt, reason);
       const sid = sessionId ?? st.sessionId;
       if (sid) this.applyCard(sid, TODO_STATUS);
       this.log({ kind: 'node-retry', nodeId: defId, attempt: st.attempt, reason });
@@ -2763,6 +2801,7 @@ class ActiveRun {
   }
 
   private hasUnsettledRunningNode(): boolean {
+    if ([...this.state.values(), ...this.instances.values()].some(st => st.state === 'retry-wait')) return true;
     return this.spec.nodes.some((node) => {
       if (this.state.get(node.id)?.state !== 'running') return false;
       return !this.mapItems.has(node.id) && !this.replicaCounts.has(node.id) && !this.loopIndex.has(node.id);
@@ -2992,8 +3031,10 @@ function skillsPreamble(skills: string[] | undefined): string {
 function retryBackoffMs(
   retry: { backoff?: { base?: number; factor?: number; max?: number } },
   attempt: number,
+  reason?: string,
 ): number {
-  const base = retry.backoff?.base ?? 0;
+  const transient = reason === 'timeout' || /^error:(provider_timeout|network_error|service_error|stream_interrupted)$/.test(reason ?? '');
+  const base = retry.backoff?.base ?? (transient ? 1000 : 0);
   if (base <= 0) return 0;
   const factor = retry.backoff?.factor ?? 2;
   const max = retry.backoff?.max ?? base * 16;

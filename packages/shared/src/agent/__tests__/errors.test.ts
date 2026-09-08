@@ -104,6 +104,7 @@ describe('parseError image-input classification', () => {
 
 describe('terminal response diagnostics (#295)', () => {
   it.each([
+    ['The model service is taking too long to respond.', 'provider_timeout'],
     ['context_length_exceeded: private payload', 'context_limit'],
     ['Response stream closed unexpectedly: secret endpoint', 'stream_interrupted'],
     ['Pi subprocess exited unexpectedly (code 1): private path', 'agent_process_exited'],

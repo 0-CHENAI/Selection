@@ -276,6 +276,9 @@ export class PiEventAdapter extends BaseEventAdapter {
       // Agent lifecycle events
       // ============================================================
 
+      case 'agent_settled':
+        break;
+
       case 'agent_start':
         // Internal — agent run has started
         break;

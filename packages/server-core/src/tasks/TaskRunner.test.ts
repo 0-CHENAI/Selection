@@ -120,6 +120,31 @@ describe('TaskRunner (Conductor)', () => {
     rmSync(root, { recursive: true, force: true });
   });
 
+  it.each([false, true])('retries failed nodes while preserving completed dependencies (restart=%s)', async restart => {
+    saveTaskSpec(root, specOf({ id: 'partial', title: 'Partial', goal: 'g', nodes: [
+      { id: 'a', prompt: 'a' }, { id: 'b', prompt: 'b', depends_on: ['a'] }, { id: 'c', prompt: 'c', depends_on: ['b'] },
+    ] }));
+    let runner = makeRunner();
+    runner.run('partial', { runId: 'r1', verifyOnComplete: false });
+    await tick();
+    host.complete('a', { finalText: 'A', tokenUsage: tu(10, 5) });
+    await tick();
+    host.complete('b', { reason: 'error' });
+    await tick();
+    expect(runner.getRunState('partial', 'r1')?.status).toBe('failed');
+    if (restart) runner = makeRunner();
+    runner.continue('partial', 'r1');
+    await tick();
+    expect(host.dispatchedNames().filter(name => name === 'a')).toHaveLength(1);
+    expect(host.dispatchedNames().filter(name => name === 'b')).toHaveLength(2);
+    host.complete('b', { finalText: 'B' });
+    await tick();
+    host.complete('c', { finalText: 'C' });
+    await tick();
+    expect(runner.getRunState('partial', 'r1')?.status).toBe('completed');
+    expect(runner.getRunState('partial', 'r1')?.tokensUsed).toBe(15);
+  });
+
   function makeRunner() {
     return new TaskRunner({ host, workspaceId: 'ws', workspaceRoot: root, now: () => '2026-06-07T00:00:00.000Z' });
   }
@@ -615,6 +640,8 @@ describe('TaskRunner (Conductor)', () => {
 
     host.complete('a', { reason: 'timeout' });
     await tick();
+    expect(host.sent.filter(s => s.sessionId === 'sess-a')).toHaveLength(1);
+    await Bun.sleep(1050);
     const retryPrompt = host.sent.filter((s) => s.sessionId === 'sess-a')[1]!.message;
     expect(retryPrompt).toContain('Previous attempt failed: timeout');
     expect(retryPrompt).toContain('do a');
