@@ -1,8 +1,7 @@
 import { useState, useCallback, useEffect, useMemo, useRef } from "react"
 import { useTranslation } from "react-i18next"
 import { useSetAtom } from "jotai"
-import { isToday, isYesterday, format, startOfDay } from "date-fns"
-import { getDateLocale } from "@craft-agent/shared/i18n"
+import { startOfDay } from "date-fns"
 import { useAction } from "@/actions"
 import { Inbox, Archive } from "lucide-react"
 
@@ -31,6 +30,7 @@ import { sendToWorkspaceAtom, type SessionMeta } from "@/atoms/sessions"
 import type { ViewConfig } from "@craft-agent/shared/views"
 import type { SessionStatusId, SessionStatus } from "@/config/session-status-config"
 import { buildCollapsedGroupsScopeSuffix } from "@/utils/session-list-collapse"
+import { formatSessionDateGroupLabel } from "@/utils/session-date"
 import { resolveSessionListNewSessionParams } from "./inherited-filter-params"
 
 export interface SessionListRow {
@@ -103,13 +103,6 @@ interface SessionListProps {
 // Re-export SessionStatusId for use by parent components
 export type { SessionStatusId }
 
-// Note: uses date-fns format for non-today/yesterday dates; Today/Yesterday translated at render time
-function formatDateGroupLabel(date: Date, t: (key: string) => string, lang: string): string {
-  if (isToday(date)) return t('common.today')
-  if (isYesterday(date)) return t('common.yesterday')
-  return format(date, 'MMM d', { locale: getDateLocale(lang) })
-}
-
 /**
  * SessionList - Scrollable list of session cards with keyboard navigation
  *
@@ -153,6 +146,7 @@ export function SessionList({
   activeChatMatchInfo,
 }: SessionListProps) {
   const { t, i18n } = useTranslation()
+  const language = i18n.resolvedLanguage ?? i18n.language ?? 'en'
   const setSendToWorkspace = useSetAtom(sendToWorkspaceAtom)
 
   // --- Selection (atom-backed, shared with ChatDisplay + BatchActionPanel) ---
@@ -469,7 +463,7 @@ export function SessionList({
       if (!groupsByKey.has(groupKey)) {
         groupsByKey.set(groupKey, {
           key: groupKey,
-          label: formatDateGroupLabel(day, t, i18n.resolvedLanguage ?? 'en'),
+          label: formatSessionDateGroupLabel(day, t, language),
           items: [],
           collapsible: true,
         })
@@ -484,7 +478,7 @@ export function SessionList({
         const date = new Date(meta.key)
         groupsByKey.set(meta.key, {
           key: meta.key,
-          label: formatDateGroupLabel(date, t, i18n.resolvedLanguage ?? 'en'),
+          label: formatSessionDateGroupLabel(date, t, language),
           items: [],
           collapsible: true,
           collapsedCount: meta.count,
@@ -509,7 +503,7 @@ export function SessionList({
       rows,
       groups: orderedGroups,
     }
-  }, [isSearchMode, matchingFilterItems, otherResultItems, flatItems, groupingMode, sessionStatuses, projects, collapsedGroupsMeta, t, i18n.resolvedLanguage])
+  }, [isSearchMode, matchingFilterItems, otherResultItems, flatItems, groupingMode, sessionStatuses, projects, collapsedGroupsMeta, t, language])
 
   const flatRows = rowData.rows
 

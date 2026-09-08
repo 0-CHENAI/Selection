@@ -191,24 +191,43 @@ export function hasMessagesMeta(session: SessionMeta): boolean {
 // Display helpers
 // ---------------------------------------------------------------------------
 
+const compactTimeTokenToKey: Record<string, string> = {
+  xSeconds: 'time.compact.seconds',
+  xMinutes: 'time.compact.minutes',
+  xHours: 'time.compact.hours',
+  xDays: 'time.compact.days',
+  xWeeks: 'time.compact.weeks',
+  xMonths: 'time.compact.months',
+  xYears: 'time.compact.years',
+}
+
+type CompactTimeTranslator = (key: string, options: { count: number }) => string
+const defaultCompactTimeTranslator: CompactTimeTranslator = (key, options) => i18next.t(key, options)
+
+/** Translate a date-fns distance token into the compact session-list form. */
+export function formatCompactRelativeTime(
+  token: string,
+  count: number,
+  translate: CompactTimeTranslator = defaultCompactTimeTranslator,
+): string {
+  const key = compactTimeTokenToKey[token]
+  return key ? translate(key, { count }) : `${count}`
+}
+
+/** Build the minimal date-fns locale adapter, with injectable translations for tests. */
+export function createShortTimeLocale(
+  translate: CompactTimeTranslator = defaultCompactTimeTranslator,
+) {
+  return {
+    formatDistance: (token: string, count: number) =>
+      formatCompactRelativeTime(token, count, translate),
+  }
+}
+
 /** Short relative time locale for date-fns formatDistanceToNowStrict.
  *  Produces compact strings: "7m", "2h", "3d", "2w", "5mo", "1y"
  *  Uses i18n keys (time.compact.*) so output is localized. */
-export const shortTimeLocale = {
-  formatDistance: (token: string, count: number) => {
-    const tokenToKey: Record<string, string> = {
-      xSeconds: 'time.compact.seconds',
-      xMinutes: 'time.compact.minutes',
-      xHours: 'time.compact.hours',
-      xDays: 'time.compact.days',
-      xWeeks: 'time.compact.weeks',
-      xMonths: 'time.compact.months',
-      xYears: 'time.compact.years',
-    }
-    const key = tokenToKey[token]
-    return key ? i18next.t(key, { count }) : `${count}`
-  },
-}
+export const shortTimeLocale = createShortTimeLocale()
 
 /** Highlight matching text in a string with yellow background spans. */
 export function highlightMatch(text: string, query: string): React.ReactNode {
