@@ -5,7 +5,7 @@ import { I18nextProvider } from 'react-i18next'
 import { LOCALE_REGISTRY } from '@craft-agent/shared/i18n'
 import { TaskYamlImport } from '../TaskYamlImport'
 
-it('renders a localized YAML-only import surface with no generation controls', () => {
+it('renders a localized optional YAML import surface with no generation controls', () => {
   const instance = i18next.createInstance()
   void instance.init({
     lng: 'zh-Hans', fallbackLng: 'en', initImmediate: false,
@@ -15,6 +15,7 @@ it('renders a localized YAML-only import surface with no generation controls', (
     <TaskYamlImport workspaceId="test" onClose={() => {}} />
   </I18nextProvider>)
   expect(html).toContain('导入 YAML')
+  expect(html).toContain('保存到模板库')
   expect(html).toContain('schema_version: 3')
   expect(html).toContain('accept=".yaml,.yml"')
   expect(html).toContain('<textarea')

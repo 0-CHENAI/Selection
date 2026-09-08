@@ -7,10 +7,14 @@ Frozen contracts for the Tasks kanban Conductor. Implementation lives in
 
 The technical preview is developed on `codex/swarm-conductor-preview`, based
 on `origin/test`. Do not commit Conductor work directly onto `test`.
-User-facing copy lives in `USER-GUIDE.md`. New tasks enter only through explicit V3 YAML import.
+User-facing copy lives in `USER-GUIDE.md`. New tasks use the V3 form or optional V3 YAML import.
 The import RPC rejects older/missing versions and existing task IDs. The save RPC requires
 an existing document. Legacy reading and explicit migration remain separate contracts.
-Agent creation and natural-language generation are disabled at the tool and RPC boundaries.
+Agent creation remains disabled. Editor generation is proposal-only: a temporary safe-mode
+draft can submit a validated V3 definition, but cannot persist or run it. The user applies
+the proposal to the unsaved editor, edits it, and explicitly creates/saves. Drafts are disposed.
+Reusable definitions live in `{workspaceRoot}/templates/<slug>/template.yaml` (not `tasks/`).
+Saving or instantiating a template never starts a run.
 `orchestrate` is off outside preview builds unless explicitly enabled.
 
 ## 1. Product modes

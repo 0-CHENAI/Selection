@@ -12,6 +12,8 @@ export function buildGeneratorPrompt(goal: string, title?: string): string {
     'Each node becomes a child AI session; a `depends_on` edge passes the upstream node\'s output to the dependent.',
     '',
     'Rules:',
+    '- This is a proposal only. Never create files, execute work, or start a run. The user will review, edit, and explicitly save it.',
+    '- For human review, use kind: approval with a clear title/prompt and depends_on referencing the work to review. Put dependent execution after that gate. Feedback does not equal approval.',
     '- You MUST call submit_task_definition with the COMPLETE v3 spec object (schema_version: 3). This is the only accepted submission path for a new definition.',
     '- Never paste the spec as YAML or JSON in the final response. A schema_version: 2 or 3 definition found only in final text is rejected, even when fenced.',
     '- After submit_task_definition succeeds, reply only with a brief confirmation; the tool payload is the authored definition.',

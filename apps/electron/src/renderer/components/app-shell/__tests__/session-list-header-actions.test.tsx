@@ -164,18 +164,18 @@ describe('session list and orchestration view controls (#264, #283)', () => {
     expect(html.indexOf('所有会话')).toBeLessThan(html.indexOf('Search'))
   })
 
-  it('labels the switcher 列表 / 导入编排 in Chinese', () => {
+  it('labels the switcher 列表 / 新建编排 in Chinese', () => {
     const zh = LOCALE_REGISTRY['zh-Hans'].messages
     expect(zh['kanban.list']).toBe('列表')
-    expect(zh['kanban.board']).toBe('导入编排')
+    expect(zh['kanban.board']).toBe('新建编排')
 
     const html = renderWithI18n(
       'zh-Hans',
       <BoardListToggle value="list" onChange={() => {}} />,
     )
     expect(html).toContain('列表')
-    expect(html).toContain('导入编排')
-    expect(html.indexOf('列表')).toBeLessThan(html.indexOf('导入编排'))
+    expect(html).toContain('新建编排')
+    expect(html.indexOf('列表')).toBeLessThan(html.indexOf('新建编排'))
     expect((html.match(/aria-pressed="true"/g) ?? []).length).toBe(1)
     expect((html.match(/aria-pressed="false"/g) ?? []).length).toBe(1)
   })

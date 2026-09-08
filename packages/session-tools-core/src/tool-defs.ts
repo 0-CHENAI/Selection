@@ -47,6 +47,7 @@ import { handleSubmitOrchestrationPatch } from './handlers/submit-orchestration-
 import { handleSubmitOrchestrationDecision } from './handlers/submit-orchestration-decision.ts';
 import { handleSubmitTaskNodeVerdict } from './handlers/submit-task-node-verdict.ts';
 import { handleControlTaskRun } from './handlers/control-task-run.ts';
+import { handleSubmitTaskDefinition } from './handlers/submit-task-definition.ts';
 import { handleArchiveSession } from './handlers/archive-session.ts';
 import { handleSendAgentMessage } from './handlers/send-agent-message.ts';
 import { handleListMessagingChannels, handleUnbindMessagingChannel } from './handlers/messaging.ts';
@@ -266,7 +267,7 @@ export const SubmitTaskOutputSchema = z.object({
 });
 
 export const SubmitTaskDefinitionSchema = z.object({
-  spec: z.record(z.string(), z.unknown()).describe('Complete v2 task spec. Server validates; do not paste free-text YAML.'),
+  spec: z.record(z.string(), z.unknown()).describe('Complete v3 proposal. Does not create or run a task; the user must confirm it in the editor.'),
 });
 
 export const ControlTaskRunSchema = z.object({
@@ -616,7 +617,7 @@ Returns { slug, orchestratorSessionId, taskLabelId, warnings } — unknown sourc
 
 Provide slug (from the board) and/or orchestratorSessionId. Optional params are forwarded to the runner. waitForCompletion (default false) waits until the run is completed, failed, or stopped.
 
-Returns a typed snapshot { slug, runId, status, nodeCount, nodes }. Parameter errors are returned as tool errors. This does not create a task — the user must import new tasks from YAML first. Use only when the user asked to run a board task.`,
+Returns a typed snapshot { slug, runId, status, nodeCount, nodes }. Parameter errors are returned as tool errors. This does not create a task — the user must save a workflow in the editor or import YAML first. Use only when the user asked to run a board task.`,
 
   control_task_run: `Control an active Conductor run: pause, resume, stop, or continue.
 
@@ -624,7 +625,7 @@ Approval, sensitive-parameter entry, and budget changes are user-only controls i
 
   submit_task_definition: `Submit a structured v3 task spec instead of pasting YAML in chat.
 
-The server validates the spec. On errors, fix and submit again (generation allows at most two corrections).`,
+Only editor proposal sessions may call this tool. It validates an unsaved proposal, never creates or runs a task. The user must review and explicitly save it. On errors, fix and submit again.`,
 
   get_task_results: `Read a Conductor run's verdict and per-node outputs from disk.
 
@@ -731,6 +732,7 @@ export type SessionToolDef = RegistrySessionToolDef | BackendSessionToolDef;
 // ============================================================
 
 export const SESSION_TOOL_DEFS: SessionToolDef[] = [
+  { name: 'submit_task_definition', description: TOOL_DESCRIPTIONS.submit_task_definition, inputSchema: SubmitTaskDefinitionSchema, executionMode: 'registry', safeMode: 'allow', handler: handleSubmitTaskDefinition },
   { name: 'SubmitPlan', description: TOOL_DESCRIPTIONS.SubmitPlan, inputSchema: SubmitPlanSchema, executionMode: 'registry', safeMode: 'allow', handler: handleSubmitPlan },
   { name: 'config_validate', description: TOOL_DESCRIPTIONS.config_validate, inputSchema: ConfigValidateSchema, executionMode: 'registry', safeMode: 'allow', readOnly: true, handler: handleConfigValidate },
   { name: 'skill_validate', description: TOOL_DESCRIPTIONS.skill_validate, inputSchema: SkillValidateSchema, executionMode: 'registry', safeMode: 'allow', readOnly: true, handler: handleSkillValidate },

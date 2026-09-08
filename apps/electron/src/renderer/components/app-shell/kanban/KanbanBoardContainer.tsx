@@ -64,6 +64,7 @@ export function KanbanBoardContainer() {
             modelGroups={groups}
             modelToConnection={modelToConnection}
             defaultModel={defaultModel ?? ''}
+            scopeProjectId={orchestrationProjectId ?? undefined}
           />
         </div>
       ) : null}

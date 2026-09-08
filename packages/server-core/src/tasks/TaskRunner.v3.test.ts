@@ -154,6 +154,71 @@ describe('TaskRunner v3 quality/efficiency', () => {
     return request.checkpointId;
   }
 
+  it('persists human feedback without releasing the gate, deduplicates feedback, and resumes only on approval', async () => {
+    saveTaskSpec(root, v3Spec({ runner: 'conduct', nodes: [
+      { id: 'gate', kind: 'approval', prompt: 'Review the plan' },
+      { id: 'work', prompt: 'Use the human response: ${nodes.gate.output}', depends_on: ['gate'] },
+    ] }));
+    const first = runner();
+    first.run('v3demo', { runId: 'human', orchestratorSessionId: 'orch', verifyOnComplete: false });
+    await tick();
+    expect(first.getRunState('v3demo', 'human')?.status).toBe('waiting-approval');
+    expect(first.getRunState('v3demo', 'human')?.nodes[0]?.approvalDefinition?.prompt).toBe('Review the plan');
+    saveTaskSpec(root, v3Spec({ runner: 'conduct', nodes: [{ id: 'gate', kind: 'approval', prompt: 'Different future plan' }] }));
+    expect(first.getRunState('v3demo', 'human')?.nodes[0]?.approvalDefinition?.prompt).toBe('Review the plan');
+    const feedback = first.respondApproval('v3demo', 'human', 'gate', false, 'Add a concrete example', true);
+    expect(feedback.status).toBe('waiting-approval');
+    expect(feedback.nodes.find(n => n.id === 'gate')?.approvalFeedback).toBe('Add a concrete example');
+    first.respondApproval('v3demo', 'human', 'gate', false, 'Add a concrete example', true);
+    expect(readRunLog(root, 'v3demo', 'human').filter(e => e.kind === 'approval-response')).toHaveLength(1);
+    expect(host.dispatchedNames()).not.toContain('work');
+    await tick();
+    expect(host.sent.some(s => s.message.includes('gate remains CLOSED'))).toBe(true);
+    const restored = runner();
+    restored.scanUnfinished();
+    expect(restored.getRunState('v3demo', 'human')?.nodes[0]?.approvalDefinition?.prompt).toBe('Review the plan');
+    expect(restored.getRunState('v3demo', 'human')?.nodes.find(n => n.id === 'gate')?.approvalFeedback).toBe('Add a concrete example');
+    restored.respondApproval('v3demo', 'human', 'gate', true);
+    await tick();
+    expect(host.dispatchedNames()).toContain('work');
+    expect(host.sent.some(s => s.message.includes('Add a concrete example'))).toBe(true);
+    expect(() => restored.respondApproval('v3demo', 'human', 'gate', true)).toThrow('not waiting');
+  });
+
+  it('rejects a human gate without dispatching its dependent and audits the reason', async () => {
+    saveTaskSpec(root, v3Spec({ runner: 'conduct', nodes: [
+      { id: 'gate', kind: 'approval' }, { id: 'work', prompt: 'work', depends_on: ['gate'] },
+    ] }));
+    const r = runner();
+    r.run('v3demo', { runId: 'reject', orchestratorSessionId: 'orch', verifyOnComplete: false });
+    await tick();
+    expect(() => r.respondApproval('v3demo', 'reject', 'gate', 'yes' as unknown as boolean)).toThrow('Invalid');
+    r.respondApproval('v3demo', 'reject', 'gate', false, 'Not authorized');
+    await tick();
+    expect(host.dispatchedNames()).not.toContain('work');
+    expect(readRunLog(root, 'v3demo', 'reject').some(e => e.kind === 'approval-response' && e.approved === false && e.feedback === 'Not authorized')).toBe(true);
+  });
+
+  it('allows explicit feedback retry after delivery failure and restart without opening the gate', async () => {
+    saveTaskSpec(root, v3Spec({ runner: 'conduct', nodes: [{ id: 'gate', kind: 'approval' }, { id: 'work', prompt: 'work', depends_on: ['gate'] }] }));
+    const send = host.sendMessage.bind(host);
+    host.sendMessage = async () => { throw new Error('offline'); };
+    const first = runner();
+    first.run('v3demo', { runId: 'delivery', orchestratorSessionId: 'orch', verifyOnComplete: false });
+    first.respondApproval('v3demo', 'delivery', 'gate', false, 'Please revise', true);
+    await tick();
+    expect(first.getRunState('v3demo', 'delivery')?.nodes[0]?.blocker).toBe('feedback-delivery-failed');
+    host.sendMessage = send;
+    const restored = runner();
+    restored.scanUnfinished();
+    expect(restored.getRunState('v3demo', 'delivery')?.nodes[0]?.blocker).toBe('feedback-delivery-failed');
+    restored.respondApproval('v3demo', 'delivery', 'gate', false, 'Please revise', true);
+    await tick();
+    expect(restored.getRunState('v3demo', 'delivery')?.nodes[0]?.blocker).toBeUndefined();
+    expect(restored.getRunState('v3demo', 'delivery')?.status).toBe('waiting-approval');
+    expect(host.dispatchedNames()).not.toContain('work');
+  });
+
   it('records metrics without dispatching before the first coordinator decision', () => {
     const snap = startV3();
     expect(snap.status).toBe('waiting-coordinator');

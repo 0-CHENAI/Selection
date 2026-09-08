@@ -31,18 +31,49 @@ import {
   type CanvasGraph,
 } from './conductor-graph'
 
+export type WorkbenchNode = {
+  id: string
+  title?: string
+  kind?: EditorNodeKind
+  prompt?: string
+  depends_on?: string[]
+  permissionMode?: string
+  model?: string
+  outputs?: Array<{ name?: string; kind?: string; type?: string }>
+  loop?: unknown
+  for_each?: string
+  route?: unknown
+  when?: unknown
+}
+
 export interface WorkbenchSpec {
   id?: string
   title?: string
   goal?: string
   runner?: 'conduct' | 'orchestrate'
-  nodes: Array<{ id: string; title?: string; kind?: EditorNodeKind; prompt?: string; depends_on?: string[] }>
+  nodes: WorkbenchNode[]
   ui?: { layout?: { direction?: 'TB' | 'LR'; nodes?: Record<string, { x: number; y: number }> } }
+}
+
+export function nodeDefinitionRows(node: WorkbenchNode): Array<{ key: string; labelKey: string; value: string }> {
+  const rows: Array<{ key: string; labelKey: string; value: string }> = []
+  if (node.title && node.title !== node.id) rows.push({ key: 'title', labelKey: 'tasks.title', value: node.title })
+  if (node.depends_on?.length) rows.push({ key: 'depends', labelKey: 'tasks.nodeDependsOn', value: node.depends_on.join(', ') })
+  if (node.permissionMode) rows.push({ key: 'permission', labelKey: 'tasks.nodePermission', value: node.permissionMode })
+  if (node.model) rows.push({ key: 'model', labelKey: 'tasks.nodeModel', value: node.model })
+  const outputs = node.outputs?.map((output) => output.name).filter(Boolean)
+  if (outputs?.length) rows.push({ key: 'outputs', labelKey: 'tasks.nodeOutputs', value: outputs.join(', ') })
+  if (node.for_each) rows.push({ key: 'for_each', labelKey: 'tasks.nodeControlFlow', value: `for_each: ${node.for_each}` })
+  if (node.loop != null) rows.push({ key: 'loop', labelKey: 'tasks.nodeControlFlow', value: `loop: ${JSON.stringify(node.loop)}` })
+  if (node.route != null) rows.push({ key: 'route', labelKey: 'tasks.nodeControlFlow', value: `route: ${JSON.stringify(node.route)}` })
+  if (node.when != null) rows.push({ key: 'when', labelKey: 'tasks.nodeControlFlow', value: `when: ${JSON.stringify(node.when)}` })
+  return rows
 }
 
 interface ConductorWorkbenchProps {
   spec: WorkbenchSpec
   liveRun?: TaskRunSnapshotDto | null
+  compact?: boolean
 }
 
 export function runtimeNodesForDefinition(nodes: TaskNodeRunStateDto[], nodeId: string): TaskNodeRunStateDto[] {
@@ -93,7 +124,7 @@ function displayFlow(spec: WorkbenchSpec, live: ConductorWorkbenchProps['liveRun
   return toFlow(laid, spec, live, translate)
 }
 
-function WorkbenchInner({ spec, liveRun }: ConductorWorkbenchProps) {
+function WorkbenchInner({ spec, liveRun, compact }: ConductorWorkbenchProps) {
   const { t } = useTranslation()
   const { fitView } = useReactFlow()
   const orchestrateOn = isTasksOrchestrateEnabled()
@@ -161,7 +192,7 @@ function WorkbenchInner({ spec, liveRun }: ConductorWorkbenchProps) {
           </span>
         )}
       </div>
-      <div className="grid min-h-[420px] flex-1 grid-cols-[minmax(0,1fr)_220px] gap-2">
+      <div className={`grid flex-1 grid-cols-[minmax(0,1fr)_220px] gap-2 ${compact ? 'min-h-0' : 'min-h-[420px]'}`}>
         <div className="overflow-hidden rounded-lg border border-border bg-card">
           <ReactFlow
             nodes={nodes}
@@ -194,6 +225,12 @@ function WorkbenchInner({ spec, liveRun }: ConductorWorkbenchProps) {
                   {selectedPill.labelKey ? t(selectedPill.labelKey) : selectedLive}
                 </div>
               )}
+              {nodeDefinitionRows(selectedSpec).map((row) => (
+                <div key={row.key} className="text-foreground/55">
+                  <span className="font-medium text-foreground/70">{t(row.labelKey)}: </span>
+                  <span className="break-words text-foreground/80">{row.value}</span>
+                </div>
+              ))}
               {selectedSpec.prompt && <p className="whitespace-pre-wrap text-foreground/80">{selectedSpec.prompt}</p>}
               {selectedInstances.length > 0 && (
                 <section className="mt-1 border-t border-border/70 pt-2">

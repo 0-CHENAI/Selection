@@ -9,5 +9,5 @@ export async function handleCreateTask(
   _ctx: SessionToolContext,
   _args: CreateTaskInput,
 ): Promise<ToolResult> {
-  return errorResponse('Task creation by Agent is disabled. Import a YAML file with schema_version: 3 in the application.');
+  return errorResponse('Task creation by Agent is disabled. Create or import a V3 workflow in the editor.');
 }

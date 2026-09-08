@@ -70,11 +70,11 @@ describe('YAML-only task RPC', () => {
     expect(readFileSync(taskYamlPath(app.root, 'imported'), 'utf8')).toBe(original)
     expect(app.sessions()).toBe(1)
   })
-  it('rejects legacy import, generation and save-as-create without writing', async () => {
+  it('rejects legacy import, empty proposals and save-as-create without writing', async () => {
     const app = setup()
     const result = await app.call(RPC_CHANNELS.tasks.CREATE, { yaml: yaml.replace('schema_version: 3\n', '') })
     expect(result.validation.valid).toBe(false)
-    await expect(app.call(RPC_CHANNELS.tasks.GENERATE, { goal: 'test' })).rejects.toThrow('disabled')
+    await expect(app.call(RPC_CHANNELS.tasks.GENERATE, { goal: '' })).rejects.toThrow('goal')
     await expect(app.call(RPC_CHANNELS.tasks.SAVE, { yaml, expectedEtag: null })).rejects.toThrow('existing task')
     expect(existsSync(taskYamlPath(app.root, 'imported'))).toBe(false)
     expect(app.sessions()).toBe(0)
