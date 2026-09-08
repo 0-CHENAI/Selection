@@ -1,5 +1,6 @@
+import { getSessionPath } from '@craft-agent/shared/sessions'
 import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test'
-import { mkdtempSync, rmSync } from 'fs'
+import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import { SessionManager, createManagedSession } from './SessionManager.ts'
@@ -39,7 +40,7 @@ describe('empty response recovery (#182)', () => {
     rmSync(rootPath, { recursive: true, force: true })
   })
 
-  it('surfaces a retryable error when a turn completes without a reply', async () => {
+  it('surfaces a classified error without replaying the user prompt', async () => {
     const agent = {
       setAllSources() {},
       getModel() { return 'test-model' },
@@ -56,12 +57,12 @@ describe('empty response recovery (#182)', () => {
 
     expect(managed.messages.at(-1)).toMatchObject({
       role: 'error',
-      errorCode: 'unknown_error',
-      errorCanRetry: true,
-      errorActions: [expect.objectContaining({ action: 'retry' })],
+      errorCode: 'no_response',
+      errorCanRetry: false,
+      errorActions: [],
     })
     expect(events.find(event => event.type === 'typed_error')).toMatchObject({
-      error: { code: 'unknown_error', canRetry: true },
+      error: { code: 'no_response', canRetry: false },
     })
     expect(managed.isProcessing).toBe(false)
   })
@@ -87,8 +88,8 @@ describe('empty response recovery (#182)', () => {
     )).toBe(true)
     expect(managed.messages.at(-1)).toMatchObject({
       role: 'error',
-      errorCode: 'unknown_error',
-      errorCanRetry: true,
+      errorCode: 'no_response',
+      errorCanRetry: false,
     })
   })
 
@@ -130,6 +131,69 @@ describe('empty response recovery (#182)', () => {
     expect(events.find(event => event.type === 'complete')).toMatchObject({
       orchestrationPending: true,
     })
+  })
+
+  it.each([false, true])('keeps tool results and prevents replay after tools (providerError=%s)', async providerError => {
+    let calls = 0
+    const agent = {
+      setAllSources() {},
+      getModel() { return 'test-model' },
+      getSessionId() { return 'sdk-session' },
+      chat() {
+        calls++
+        return (async function* () {
+          yield { type: 'tool_start', toolUseId: 'write-1', toolName: 'Write', input: { path: '/tmp/result.txt', content: 'result' } }
+          yield { type: 'tool_result', toolUseId: 'write-1', toolName: 'Write', result: 'File written', isError: false }
+          if (providerError) yield { type: 'typed_error', error: { code: 'service_error', title: 'Service error', message: 'Unavailable', canRetry: true, actions: [{ key: 'r', label: 'Retry', action: 'retry' }] } }
+          yield { type: 'complete' }
+        })()
+      },
+    }
+    ;(manager as any).getOrCreateAgent = async () => agent
+    await manager.sendMessage(managed.id, 'Write the result')
+    expect(calls).toBe(1)
+    expect(managed.messages.filter(message => message.role === 'user')).toHaveLength(1)
+    expect(managed.messages.find(message => message.toolUseId === 'write-1')?.toolResult).toBe('File written')
+    expect(managed.messages.at(-1)).toMatchObject({ errorCode: providerError ? 'service_error' : 'tool_only_response', errorCanRetry: false, errorActions: [] })
+  })
+
+  it.each([
+    ['Pi subprocess exited unexpectedly (code 1)', 'agent_process_exited'],
+    ['Response stream closed unexpectedly', 'stream_interrupted'],
+    ['Maximum context length exceeded', 'context_limit'],
+  ])('preserves terminal classification for %s', async (message, code) => {
+    const agent = {
+      setAllSources() {},
+      getModel() { return 'test-model' },
+      getSessionId() { return 'sdk-session' },
+      chat() { return (async function* () {
+        yield { type: 'error', message }
+        yield { type: 'complete' }
+      })() },
+    }
+    ;(manager as any).getOrCreateAgent = async () => agent
+    await manager.sendMessage(managed.id, 'Continue')
+    expect(managed.messages.filter(message => message.role === 'error')).toHaveLength(1)
+    expect(managed.messages.at(-1)?.errorCode).toBe(code)
+  })
+
+  it.each([true, false])('does not let cached HTTP errors override current diagnostics (stale=%s)', async stale => {
+    const agent = {
+      setAllSources() {},
+      getModel() { return 'test-model' },
+      getSessionId() { return 'sdk-session' },
+      chat() { return (async function* () {
+        const path = getSessionPath(rootPath, managed.id)
+        mkdirSync(path, { recursive: true })
+        writeFileSync(join(path, 'api-error.json'), JSON.stringify({ status: 400, message: 'old request', timestamp: stale ? Date.now() - 60000 : Date.now() }))
+        if (!stale) yield { type: 'error', message: 'Pi subprocess exited unexpectedly (code 1)' }
+        yield { type: 'complete' }
+      })() },
+    }
+    ;(manager as any).getOrCreateAgent = async () => agent
+    await manager.sendMessage(managed.id, 'Continue')
+    expect(managed.messages.filter(message => message.role === 'error')).toHaveLength(1)
+    expect(managed.messages.at(-1)?.errorCode).toBe(stale ? 'no_response' : 'agent_process_exited')
   })
 
   it('does not duplicate an error already emitted by the current turn', async () => {

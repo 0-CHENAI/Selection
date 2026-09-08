@@ -39,3 +39,5 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 - **Top-bar back/forward follows the real in-app history again** — Returning from a session or project no longer gets immediately overwritten by auto-select or a `replaceState` sync. Button enabled state tracks the same cursor as `pushState` / `popstate`, and a new navigation after back drops the old forward branch. ([#259](https://github.com/0-CHENAI/Selection/issues/259))
 
 - **Swarm Markdown delivery no longer dies on `_content` / fake preview tools** — Compatible endpoints that emit `write({ path, _content })` are recovered to `{ path, content }` before schema validation, without loosening extra-field rejection or bypassing PreToolUse / path permissions. The system prompt now states that `markdown-preview` is fenced reply syntax, not a tool, and those pseudo-tool calls are counted by provider/model instead of being rewritten into text. ([#255](https://github.com/0-CHENAI/Selection/issues/255))
+
+- **空回复诊断与恢复提示** — 区分工具执行后缺少最终回复、上下文限制、流中断与代理进程退出，保留本轮具体错误并提供中英文说明；工具执行后不再提供可能重复操作的重放式重试。（#295）

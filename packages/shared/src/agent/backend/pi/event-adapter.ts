@@ -21,7 +21,7 @@ import { isContextOverflow } from '@earendil-works/pi-ai';
 import { BaseEventAdapter } from '../base-event-adapter.ts';
 import { PI_TOOL_NAME_MAP } from './constants.ts';
 import { toolMetadataStore } from '../../../interceptor-common.ts';
-import { parseError } from '../../errors.ts';
+import { parseError, createTypedError } from '../../errors.ts';
 import { normalizeToolResultContent } from '../../tool-matching.ts';
 import { ACTIONABLE_CONTEXT_OVERFLOW_MESSAGE } from './context-budget.ts';
 
@@ -410,6 +410,13 @@ export class PiEventAdapter extends BaseEventAdapter {
           } else {
             yield { type: 'error', message: msg.errorMessage };
           }
+          break;
+        }
+
+        // A failed/truncated terminal message may carry no provider error text.
+        // Preserve its terminal meaning instead of degrading to an empty reply.
+        if (msg.stopReason === 'error' || msg.stopReason === 'length' || msg.stopReason === 'max_tokens') {
+          yield { type: 'typed_error', error: createTypedError('stream_interrupted') };
           break;
         }
 
