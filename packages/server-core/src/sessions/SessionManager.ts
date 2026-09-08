@@ -1384,6 +1384,8 @@ export interface SessionCompletionEvent {
   /** Monotonic in-memory turn identity used to bind ephemeral tool submissions. */
   generation: number
   reason: 'complete' | 'interrupted' | 'error' | 'timeout'
+  /** Safe terminal category for node diagnostics; never provider payloads. */
+  errorCode?: string
   /** The final (non-intermediate) assistant message id for this turn, if any. */
   finalMessageId?: string
   /** Convenience copy of the final assistant message text (same as getSessionFinalText). */
@@ -8108,6 +8110,9 @@ export class SessionManager implements ISessionManager {
         workspaceId: managed.workspace.id,
         generation: managed.processingGeneration,
         reason: completionReason,
+        errorCode: completionReason === 'error'
+          ? managed.messages.slice(managed.messages.findLastIndex(m => m.role === 'user' && !m.hidden) + 1).findLast(m => m.role === 'error')?.errorCode
+          : undefined,
         finalMessageId: currentFinalMessageId,
         finalText: currentFinalMessageId
           ? managed.messages.find(m => m.id === currentFinalMessageId)?.content
@@ -8169,6 +8174,9 @@ export class SessionManager implements ISessionManager {
         workspaceId: managed.workspace.id,
         generation: managed.processingGeneration,
         reason: completionReason,
+        errorCode: completionReason === 'error'
+          ? managed.messages.slice(managed.messages.findLastIndex(m => m.role === 'user' && !m.hidden) + 1).findLast(m => m.role === 'error')?.errorCode
+          : undefined,
         finalMessageId: currentFinalMessageId,
         finalText: currentFinalMessageId
           ? managed.messages.find(m => m.id === currentFinalMessageId)?.content

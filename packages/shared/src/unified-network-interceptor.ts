@@ -1,3 +1,4 @@
+import { observeSseResponse } from './sse-diagnostics.ts';
 /**
  * Unified fetch interceptor for all AI API requests (Anthropic + OpenAI format).
  *
@@ -2165,7 +2166,8 @@ async function interceptedFetch(
         if (contentType.includes('text/event-stream') && response.body) {
           debugLog(`[${adapter.name}] Creating SSE processor (${adapter.stripsSseMetadata ? 'strip' : 'capture'})`);
           const processor = adapter.createSseProcessor();
-          const processedBody = response.body.pipeThrough(processor);
+          const observed = observeSseResponse(response, startTime, event => debugLog('[SSE diagnostic]', event));
+          const processedBody = observed.body!.pipeThrough(processor);
           const processedResponse = new Response(processedBody, {
             status: response.status,
             statusText: response.statusText,

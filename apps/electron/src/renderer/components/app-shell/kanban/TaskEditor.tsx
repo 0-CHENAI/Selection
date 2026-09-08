@@ -1333,6 +1333,11 @@ function ExistingTaskEditor({
               <Btn variant="secondary" onClick={() => void controlRun('stop')}>{t('tasks.stopRun')}</Btn>
             </div>
           )}
+          {isEdit && liveRun?.status === 'failed' && liveRun.canRetryFailedNodes && (
+            <Btn variant="secondary" disabled={busy} onClick={() => void controlRun('continue')}>
+              {t('tasks.retryFailedNodes')}
+            </Btn>
+          )}
           {isEdit && liveRun?.status === 'waiting-budget' && (
             <div className="flex items-center gap-1.5">
               <input
