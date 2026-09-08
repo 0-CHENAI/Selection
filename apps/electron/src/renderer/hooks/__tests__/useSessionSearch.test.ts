@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'bun:test'
-import { computeCollapsedPagination } from '../useSessionSearch'
+import { computeCollapsedPagination, groupSessionsByDate } from '../useSessionSearch'
 import type { SessionMeta } from '@/atoms/sessions'
 
 function makeSession(id: string, opts: Partial<SessionMeta> = {}): SessionMeta {
@@ -65,5 +65,22 @@ describe('computeCollapsedPagination', () => {
 
     expect(result.paginatedItems.map(s => s.id)).toEqual(['a', 'b'])
     expect(result.collapsedGroupsMeta).toEqual([])
+  })
+})
+
+describe('groupSessionsByDate', () => {
+  const labels = {
+    'common.today': '今天',
+    'common.yesterday': '昨天',
+  } as const
+  const t = (key: keyof typeof labels) => labels[key]
+
+  it('formats search result date groups using the selected language', () => {
+    const sessions = [
+      makeSession('older', { lastMessageAt: new Date(2020, 8, 2, 10).getTime() }),
+    ]
+
+    expect(groupSessionsByDate(sessions, t, 'zh-Hans')[0]?.label).toBe('9月2日')
+    expect(groupSessionsByDate(sessions, t, 'en')[0]?.label).toBe('Sep 2')
   })
 })

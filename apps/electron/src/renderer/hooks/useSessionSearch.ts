@@ -1,11 +1,13 @@
 import { useState, useCallback, useEffect, useRef, useMemo } from "react"
-import { isToday, isYesterday, format, startOfDay } from "date-fns"
+import { useTranslation } from "react-i18next"
+import { startOfDay } from "date-fns"
 
 import { searchLog } from "@/lib/logger"
 import { parseLabelEntry, matchesLabelFilter } from "@craft-agent/shared/labels"
 import type { LabelConfig } from "@craft-agent/shared/labels"
 import { fuzzyScore } from "@craft-agent/shared/search"
 import { getSessionTitle, getSessionStatus } from "@/utils/session"
+import { formatSessionDateGroupLabel } from "@/utils/session-date"
 import type { SessionMeta } from "@/atoms/sessions"
 import type { ViewConfig } from "@craft-agent/shared/views"
 import type { SessionFilter } from "@/contexts/NavigationContext"
@@ -94,13 +96,11 @@ export interface UseSessionSearchResult {
 // Pure helpers (moved from SessionList)
 // ---------------------------------------------------------------------------
 
-function formatDateHeader(date: Date): string {
-  if (isToday(date)) return "Today"
-  if (isYesterday(date)) return "Yesterday"
-  return format(date, "MMM d")
-}
-
-function groupSessionsByDate(sessions: SessionMeta[]): DateGroup[] {
+export function groupSessionsByDate(
+  sessions: SessionMeta[],
+  t: (key: 'common.today' | 'common.yesterday') => string,
+  language: string,
+): DateGroup[] {
   const groups = new Map<string, { date: Date; sessions: SessionMeta[] }>()
 
   for (const session of sessions) {
@@ -118,7 +118,7 @@ function groupSessionsByDate(sessions: SessionMeta[]): DateGroup[] {
     .sort((a, b) => b.date.getTime() - a.date.getTime())
     .map(group => ({
       ...group,
-      label: formatDateHeader(group.date),
+      label: formatSessionDateGroupLabel(group.date, t, language),
     }))
 }
 
@@ -299,6 +299,8 @@ export function useSessionSearch({
   groupingMode,
   scrollViewportRef,
 }: UseSessionSearchOptions): UseSessionSearchResult {
+
+  const { t, i18n } = useTranslation()
 
   const [contentSearchResults, setContentSearchResults] = useState<Map<string, ContentSearchResult>>(new Map())
   const [isSearchingContent, setIsSearchingContent] = useState(false)
@@ -510,7 +512,11 @@ export function useSessionSearch({
 
   // --- Derived render data ---
 
-  const dateGroups = useMemo(() => groupSessionsByDate(paginatedItems), [paginatedItems])
+  const language = i18n.resolvedLanguage ?? i18n.language ?? 'en'
+  const dateGroups = useMemo(
+    () => groupSessionsByDate(paginatedItems, t, language),
+    [paginatedItems, t, language],
+  )
 
   const flatItems = useMemo(() => {
     if (isSearchMode) {
