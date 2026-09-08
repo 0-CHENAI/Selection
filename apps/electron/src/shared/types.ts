@@ -741,28 +741,16 @@ export interface ElectronAPI {
     runtime: Record<string, MessagingPlatformRuntimeInfo | undefined>
   } | null>
   updateMessagingConfig(config: Record<string, unknown>): Promise<void>
-  testTelegramToken(token: string): Promise<{ success: boolean; botName?: string; botUsername?: string; error?: string }>
-  saveTelegramToken(token: string): Promise<void>
   testLarkCredentials(creds: { appId: string; appSecret: string; domain: 'lark' | 'feishu' }): Promise<{ success: boolean; botName?: string; error?: string }>
   saveLarkCredentials(creds: { appId: string; appSecret: string; domain: 'lark' | 'feishu' }): Promise<void>
   disconnectMessagingPlatform(platform: string): Promise<void>
   forgetMessagingPlatform(platform: string): Promise<void>
   getMessagingBindings(): Promise<Array<{ id: string; workspaceId: string; sessionId: string; platform: string; channelId: string; threadId?: number; channelName?: string; enabled: boolean; createdAt: number; accessMode?: MessagingBindingAccessMode; allowedSenderIds?: string[] }>>
   generateMessagingPairingCode(sessionId: string, platform: string): Promise<{ code: string; expiresAt: number; botUsername?: string }>
-  /** Telegram supergroup pairing — returns a code typed in the supergroup to capture its chatId. */
-  generateMessagingSupergroupCode(platform: string): Promise<{ code: string; expiresAt: number; botUsername?: string }>
-  /** Read the workspace's currently paired Telegram supergroup, if any. */
-  getMessagingSupergroup(): Promise<{ chatId: string; title: string; capturedAt: number } | null>
-  /** Forget the paired Telegram supergroup (existing topic bindings stay on disk but stop matching). */
-  unbindMessagingSupergroup(): Promise<{ success: boolean }>
   unbindMessagingSession(sessionId: string, platform?: string): Promise<void>
   unbindMessagingBinding(bindingId: string): Promise<{ success: boolean }>
   onMessagingBindingChanged(callback: (workspaceId: string) => void): () => void
   onMessagingPlatformStatus(callback: (workspaceId: string, platform: string, status: MessagingPlatformRuntimeInfo) => void): () => void
-  // WhatsApp (subprocess-based Baileys adapter)
-  startWhatsAppConnect(): Promise<{ success: boolean }>
-  submitWhatsAppPhone(phoneNumber: string): Promise<{ success: boolean }>
-  onWhatsAppEvent(callback: (payload: { workspaceId: string; event: WhatsAppUiEvent }) => void): () => void
   // Messaging access control (Phase 3)
   getMessagingPlatformOwners(platform: string): Promise<MessagingPlatformOwnerInfo[]>
   setMessagingPlatformOwners(platform: string, owners: MessagingPlatformOwnerInfo[]): Promise<MessagingPlatformOwnerInfo[]>
@@ -820,15 +808,6 @@ export interface MessagingPendingSenderInfo {
   channelId?: string
   threadId?: number
 }
-
-/** Event payloads broadcast from the WhatsApp subprocess to the UI. */
-export type WhatsAppUiEvent =
-  | { type: 'qr'; qr: string }
-  | { type: 'pairing_code'; code: string }
-  | { type: 'connected'; jid?: string; name?: string }
-  | { type: 'disconnected'; loggedOut: boolean; reason?: string }
-  | { type: 'unavailable'; reason: string; message: string }
-  | { type: 'error'; message: string }
 
 // =============================================================================
 // Navigation types (renderer-only)

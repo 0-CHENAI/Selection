@@ -232,12 +232,6 @@ export interface AutomationListItem {
   conditions?: AutomationConditionUI[]
   /** The actions this automation performs */
   actions: AutomationAction[]
-  /**
-   * Optional Telegram forum-topic name. When set, sessions spawned by this
-   * matcher are bound to a topic of this name in the workspace's paired
-   * supergroup (created on first use).
-   */
-  telegramTopic?: string
   /** Timestamp of last execution (ms since epoch) */
   lastExecutedAt?: number
 }
@@ -485,10 +479,6 @@ export function parseAutomationsConfig(json: unknown): AutomationListItem[] {
         .filter((a): a is AutomationAction => a.type === 'prompt' || a.type === 'webhook' || a.type === 'decision')
       if (actions.length === 0) continue
 
-      const rawTopic = (matcher as { telegramTopic?: unknown }).telegramTopic
-      const telegramTopic =
-        typeof rawTopic === 'string' && rawTopic.trim().length > 0 ? rawTopic.trim() : undefined
-
       items.push({
         id: matcher.id ?? `${eventName}-${index}`,
         event,
@@ -503,7 +493,6 @@ export function parseAutomationsConfig(json: unknown): AutomationListItem[] {
         labels: matcher.labels,
         conditions: matcher.conditions,
         actions,
-        telegramTopic,
       })
       index++
     }

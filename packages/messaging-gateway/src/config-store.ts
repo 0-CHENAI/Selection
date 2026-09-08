@@ -33,20 +33,32 @@ export class ConfigStore {
     this.filePath = join(storageDir, 'config.json')
     this.log = logger
     this.migrateLegacy(legacyDir)
-    this.config = this.load()
+    const loaded = this.load()
+    this.config = loaded.config
+    if (loaded.shouldRewrite) this.save()
   }
 
   get(): MessagingConfig {
-    return { ...this.config, platforms: { ...this.config.platforms } }
+    const lark = this.config.platforms.lark
+    return {
+      ...this.config,
+      platforms: lark
+        ? {
+            lark: {
+              ...lark,
+              ...(lark.owners ? { owners: lark.owners.map((owner) => ({ ...owner })) } : {}),
+            },
+          }
+        : {},
+    }
   }
 
   update(partial: Partial<MessagingConfig>): MessagingConfig {
     const next: MessagingConfig = {
       enabled: partial.enabled ?? this.config.enabled,
-      platforms: {
-        ...this.config.platforms,
-        ...(partial.platforms ?? {}),
-      },
+      platforms: partial.platforms?.lark
+        ? { lark: { ...(this.config.platforms.lark ?? { enabled: false }), ...partial.platforms.lark } }
+        : { ...this.config.platforms },
     }
     this.config = next
     this.save()
@@ -76,14 +88,20 @@ export class ConfigStore {
     }
   }
 
-  private load(): MessagingConfig {
+  private load(): { config: MessagingConfig; shouldRewrite: boolean } {
     try {
       if (existsSync(this.filePath)) {
         const raw = readFileSync(this.filePath, 'utf-8')
         const parsed = JSON.parse(raw) as Partial<MessagingConfig>
+        const platforms = parsed.platforms && typeof parsed.platforms === 'object'
+          ? parsed.platforms as Record<string, unknown>
+          : {}
         return {
-          enabled: parsed.enabled ?? DEFAULT_MESSAGING_CONFIG.enabled,
-          platforms: parsed.platforms ?? { ...DEFAULT_MESSAGING_CONFIG.platforms },
+          config: {
+            enabled: parsed.enabled ?? DEFAULT_MESSAGING_CONFIG.enabled,
+            platforms: parsed.platforms?.lark ? { lark: parsed.platforms.lark } : {},
+          },
+          shouldRewrite: Object.keys(platforms).some((platform) => platform !== 'lark'),
         }
       }
     } catch (err) {
@@ -93,7 +111,10 @@ export class ConfigStore {
         error: err,
       })
     }
-    return { ...DEFAULT_MESSAGING_CONFIG, platforms: {} }
+    return {
+      config: { ...DEFAULT_MESSAGING_CONFIG, platforms: {} },
+      shouldRewrite: false,
+    }
   }
 
   private save(): void {

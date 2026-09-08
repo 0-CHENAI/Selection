@@ -1,13 +1,13 @@
 /**
- * Renderer — plan_submitted handling for Telegram + Lark.
+ * Renderer — plan_submitted handling for Lark + Lark.
  *
  * Covers:
- *   - Telegram + short plan: single sendButtons with inline content
- *   - Telegram + long plan: sendButtons with summary + sendFile attachment
- *   - Telegram without token registry: falls back to plain text
- *   - WhatsApp: keeps the legacy plain-text pointer (no buttons, no file)
- *   - Lark: same rich-card flow as Telegram (buttons + optional file)
- *   - recordPlanMessage callback fires for both Telegram and Lark
+ *   - Lark + short plan: single sendButtons with inline content
+ *   - Lark + long plan: sendButtons with summary + sendFile attachment
+ *   - Lark without token registry: falls back to plain text
+ *   - Lark: keeps the legacy plain-text pointer (no buttons, no file)
+ *   - Lark: same rich-card flow as Lark (buttons + optional file)
+ *   - recordPlanMessage callback fires for both Lark and Lark
  */
 
 import { describe, expect, it } from 'bun:test'
@@ -33,25 +33,19 @@ interface Call {
   fileSize?: number
 }
 
-function makeAdapter(platform: PlatformType = 'telegram'): PlatformAdapter & { calls: Call[] } {
+function makeAdapter(platform: PlatformType = 'lark'): PlatformAdapter & { calls: Call[] } {
   const calls: Call[] = []
   let nextId = 100
 
-  // Telegram + Lark both support inline buttons via the same `sendButtons`
-  // contract; WhatsApp does not. Markdown flavour is informational here —
+  // Lark + Lark both support inline buttons via the same `sendButtons`
+  // contract; Lark does not. Markdown flavour is informational here —
   // the renderer doesn't gate on it.
-  const supportsButtons = platform === 'telegram' || platform === 'lark'
-  const markdownByPlatform: Record<PlatformType, AdapterCapabilities['markdown']> = {
-    telegram: 'v2',
-    lark: 'lark-post',
-    whatsapp: 'whatsapp',
-  }
   const caps: AdapterCapabilities = {
     messageEditing: true,
-    inlineButtons: supportsButtons,
+    inlineButtons: true,
     maxButtons: 3,
     maxMessageLength: 4096,
-    markdown: markdownByPlatform[platform],
+    markdown: 'lark-post',
     webhookSupport: false,
   }
 
@@ -117,11 +111,11 @@ function planEvent(content: string, planPath = '/tmp/plan.md'): SessionEvent {
 }
 
 describe('Renderer — plan_submitted', () => {
-  it('Telegram short plan: sends buttons with inline content', async () => {
+  it('Lark short plan: sends buttons with inline content', async () => {
     const tokens = new PlanTokenRegistry()
     const renderer = new Renderer({ planTokens: tokens })
-    const adapter = makeAdapter('telegram')
-    const binding = makeBinding('telegram')
+    const adapter = makeAdapter('lark')
+    const binding = makeBinding('lark')
 
     await renderer.handle(planEvent('# Plan\n\nStep 1'), binding, adapter)
 
@@ -137,11 +131,11 @@ describe('Renderer — plan_submitted', () => {
     expect(adapter.calls.some((c) => c.kind === 'sendFile')).toBe(false)
   })
 
-  it('Telegram long plan: sends buttons + attached file', async () => {
+  it('Lark long plan: sends buttons + attached file', async () => {
     const tokens = new PlanTokenRegistry()
     const renderer = new Renderer({ planTokens: tokens })
-    const adapter = makeAdapter('telegram')
-    const binding = makeBinding('telegram')
+    const adapter = makeAdapter('lark')
+    const binding = makeBinding('lark')
 
     const longPlan = 'line\n'.repeat(1000) // ~5000 chars, above inline limit
     await renderer.handle(planEvent(longPlan), binding, adapter)
@@ -156,85 +150,16 @@ describe('Renderer — plan_submitted', () => {
     expect(sendFile?.fileSize).toBe(Buffer.byteLength(longPlan, 'utf-8'))
   })
 
-  it('Telegram without token registry: falls back to plain text', async () => {
+  it('Lark without token registry: falls back to plain text', async () => {
     const renderer = new Renderer() // no planTokens
-    const adapter = makeAdapter('telegram')
-    const binding = makeBinding('telegram')
+    const adapter = makeAdapter('lark')
+    const binding = makeBinding('lark')
 
     await renderer.handle(planEvent('# Plan'), binding, adapter)
 
     const text = adapter.calls.find((c) => c.kind === 'sendText')
     expect(text?.text).toContain('Open the desktop app')
     expect(adapter.calls.some((c) => c.kind === 'sendButtons')).toBe(false)
-  })
-
-  it('WhatsApp: legacy plain-text pointer, no buttons, no file', async () => {
-    const tokens = new PlanTokenRegistry()
-    const renderer = new Renderer({ planTokens: tokens })
-    const adapter = makeAdapter('whatsapp')
-    const binding = makeBinding('whatsapp')
-
-    await renderer.handle(planEvent('# Plan'), binding, adapter)
-
-    expect(adapter.calls).toHaveLength(1)
-    expect(adapter.calls[0]?.kind).toBe('sendText')
-    expect(adapter.calls[0]?.text).toContain('Open the desktop app')
-  })
-
-  it('Lark short plan: sends buttons with inline content (same rich path as Telegram)', async () => {
-    const tokens = new PlanTokenRegistry()
-    const renderer = new Renderer({ planTokens: tokens })
-    const adapter = makeAdapter('lark')
-    const binding = makeBinding('lark')
-
-    await renderer.handle(planEvent('# Plan\n\nStep 1'), binding, adapter)
-
-    const sendButtons = adapter.calls.find((c) => c.kind === 'sendButtons')
-    expect(sendButtons).toBeTruthy()
-    expect(sendButtons?.text).toContain('Plan ready for review')
-    expect(sendButtons?.text).toContain('Step 1')
-    expect(sendButtons?.buttons).toHaveLength(2)
-    expect(sendButtons?.buttons?.[0]?.id).toMatch(/^plan:accept:/)
-    expect(sendButtons?.buttons?.[1]?.id).toMatch(/^plan:compact:/)
-    expect(adapter.calls.some((c) => c.kind === 'sendFile')).toBe(false)
-  })
-
-  it('Lark long plan: sends buttons + attached file', async () => {
-    const tokens = new PlanTokenRegistry()
-    const renderer = new Renderer({ planTokens: tokens })
-    const adapter = makeAdapter('lark')
-    const binding = makeBinding('lark')
-
-    const longPlan = 'line\n'.repeat(1000)
-    await renderer.handle(planEvent(longPlan), binding, adapter)
-
-    const sendButtons = adapter.calls.find((c) => c.kind === 'sendButtons')
-    const sendFile = adapter.calls.find((c) => c.kind === 'sendFile')
-    expect(sendButtons).toBeTruthy()
-    expect(sendFile).toBeTruthy()
-    expect(sendFile?.fileName).toBe('plan.md')
-    expect(sendFile?.fileSize).toBe(Buffer.byteLength(longPlan, 'utf-8'))
-  })
-
-  it('Lark recordPlanMessage callback fires with the rendering binding, token, messageId', async () => {
-    const tokens = new PlanTokenRegistry()
-    const recorded: Array<{ bindingId: string; token: string; messageId: string }> = []
-    const renderer = new Renderer({
-      planTokens: tokens,
-      recordPlanMessage: (b, t, m) => {
-        recorded.push({ bindingId: b.id, token: t, messageId: m })
-      },
-    })
-    const adapter = makeAdapter('lark')
-    const binding = makeBinding('lark')
-
-    await renderer.handle(planEvent('plan'), binding, adapter)
-
-    expect(recorded).toHaveLength(1)
-    expect(recorded[0]?.bindingId).toBe(binding.id)
-    expect(recorded[0]?.token).toMatch(/^[A-Za-z0-9_-]{8}$/)
-    const resolved = tokens.resolve(recorded[0]!.token)
-    expect(resolved?.bindingId).toBe(binding.id)
   })
 
   it('recordPlanMessage callback fires with the rendering binding, token, messageId', async () => {
@@ -246,8 +171,8 @@ describe('Renderer — plan_submitted', () => {
         recorded.push({ bindingId: b.id, sessionId: b.sessionId, token: t, messageId: m })
       },
     })
-    const adapter = makeAdapter('telegram')
-    const binding = makeBinding('telegram')
+    const adapter = makeAdapter('lark')
+    const binding = makeBinding('lark')
 
     await renderer.handle(planEvent('plan'), binding, adapter)
 
@@ -264,11 +189,11 @@ describe('Renderer — plan_submitted', () => {
     expect(resolved?.bindingId).toBe(binding.id)
   })
 
-  it('Telegram with empty plan content: buttons + hint, no file', async () => {
+  it('Lark with empty plan content: buttons + hint, no file', async () => {
     const tokens = new PlanTokenRegistry()
     const renderer = new Renderer({ planTokens: tokens })
-    const adapter = makeAdapter('telegram')
-    const binding = makeBinding('telegram')
+    const adapter = makeAdapter('lark')
+    const binding = makeBinding('lark')
 
     await renderer.handle(planEvent(''), binding, adapter)
 

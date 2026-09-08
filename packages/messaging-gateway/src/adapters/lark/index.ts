@@ -3,7 +3,7 @@
  *
  * Transport: long-polling via `@larksuiteoapi/node-sdk`'s `WSClient`. No public
  * webhook URL needed (correct fit for desktop / electron). Same lifecycle
- * shape as the Telegram adapter, just a different SDK underneath.
+ * shared platform-adapter contract using the Lark SDK.
  *
  * Phase 1 scope (text only): receive text in DMs and group @mentions, send
  * text replies, support `/pair`-style commands. Phase 2 layers on edits,
@@ -40,7 +40,7 @@ import {
 } from './card'
 
 /**
- * Hard cap for downloaded attachment size. Matches Telegram's MAX_ATTACHMENT_BYTES
+ * Hard cap for downloaded attachment size.
  * — files larger than this would be rejected by `readFileAttachment` anyway, so
  * we fail fast in the adapter with a user-visible reply.
  */
@@ -355,7 +355,7 @@ export class LarkAdapter implements PlatformAdapter {
     if (originalType === 'interactive') {
       // Editing an active card replaces its text body but keeps the buttons.
       // For the text-only edit path the renderer takes, we fall back to a
-      // cleared-card patch (text without buttons), matching the Telegram
+      // cleared-card patch (text without buttons), matching the standard
       // behaviour where a final-text edit removes the button row.
       try {
         await this.client.im.message.patch({
@@ -713,7 +713,7 @@ export class LarkAdapter implements PlatformAdapter {
    *
    * Lark resource URLs require bearer-token auth; we can't hand a URL to the
    * router. Instead we stream the binary to a temp file and emit `localPath`,
-   * matching the Telegram pattern.
+   * matching the adapter contract.
    */
   private async downloadResource(args: {
     messageId: string

@@ -58,7 +58,7 @@ export class Router {
   }
 
   async route(adapter: PlatformAdapter, msg: IncomingMessage): Promise<void> {
-    // Threads (Telegram supergroup forum topics) participate in the binding
+    // Thread identifiers participate in the binding
     // lookup key, so two topics in the same supergroup route to different
     // sessions even though they share `chat.id`.
     const binding = this.bindingStore.findByChannel(msg.platform, msg.channelId, msg.threadId)

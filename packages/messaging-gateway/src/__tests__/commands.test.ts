@@ -33,7 +33,7 @@ function makeSessionManager(sessions: Session[]): ISessionManager {
   } as unknown as ISessionManager
 }
 
-function makeAdapter(platform: 'telegram' | 'whatsapp', inlineButtons: boolean): PlatformAdapter & { sent: string[] } {
+function makeAdapter(platform: 'lark', inlineButtons: boolean): PlatformAdapter & { sent: string[] } {
   const sent: string[] = []
   return {
     platform,
@@ -42,7 +42,7 @@ function makeAdapter(platform: 'telegram' | 'whatsapp', inlineButtons: boolean):
       inlineButtons,
       maxButtons: 10,
       maxMessageLength: 4096,
-      markdown: platform === 'telegram' ? 'v2' : 'whatsapp',
+      markdown: 'lark-post',
       webhookSupport: false,
     },
     sent,
@@ -69,7 +69,7 @@ function makeAdapter(platform: 'telegram' | 'whatsapp', inlineButtons: boolean):
 
 function makeMessage(text: string): IncomingMessage {
   return {
-    platform: 'whatsapp',
+    platform: 'lark',
     channelId: 'chan-1',
     messageId: 'm1',
     senderId: 'u1',
@@ -100,22 +100,22 @@ describe('Commands', () => {
     ]
     const store = makeStore()
     const commands = new Commands(makeSessionManager(sessions), store, 'ws1')
-    const adapter = makeAdapter('whatsapp', false)
+    const adapter = makeAdapter('lark', false)
 
     await commands.handleCommand(adapter, makeMessage('/bind 1'))
 
-    expect(store.findByChannel('whatsapp', 'chan-1')?.sessionId).toBe('sess-2')
+    expect(store.findByChannel('lark', 'chan-1')?.sessionId).toBe('sess-2')
     expect(adapter.sent.at(-1)).toContain('Newest')
   })
 
-  it('lists numbered recent sessions with usable /bind instructions on WhatsApp', async () => {
+  it('lists numbered recent sessions with usable /bind instructions on Lark', async () => {
     const sessions = [
       makeSession('sess-1', 'Alpha', 100),
       makeSession('sess-2', 'Beta', 200),
     ]
     const store = makeStore()
     const commands = new Commands(makeSessionManager(sessions), store, 'ws1')
-    const adapter = makeAdapter('whatsapp', false)
+    const adapter = makeAdapter('lark', false)
 
     await commands.handleCommand(adapter, makeMessage('/bind'))
 

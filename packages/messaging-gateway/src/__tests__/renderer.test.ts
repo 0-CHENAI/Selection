@@ -45,13 +45,13 @@ function makeAdapter(
     inlineButtons: true,
     maxButtons: 3,
     maxMessageLength: 4096,
-    markdown: 'v2',
+    markdown: 'lark-post',
     webhookSupport: false,
     ...capabilities,
   }
 
   const adapter: PlatformAdapter & { calls: Call[] } = {
-    platform: 'telegram',
+    platform: 'lark',
     capabilities: caps,
     calls,
     async initialize() {},
@@ -64,7 +64,7 @@ function makeAdapter(
     async sendText(channelId: string, text: string): Promise<SentMessage> {
       const messageId = String(nextId++)
       calls.push({ kind: 'sendText', channelId, text, messageId })
-      return { platform: 'telegram', channelId, messageId }
+      return { platform: 'lark', channelId, messageId }
     },
     async editMessage(channelId: string, messageId: string, text: string): Promise<void> {
       calls.push({ kind: 'editMessage', channelId, messageId, text })
@@ -72,14 +72,14 @@ function makeAdapter(
     async sendButtons(channelId: string, text: string): Promise<SentMessage> {
       const messageId = String(nextId++)
       calls.push({ kind: 'sendButtons', channelId, text, messageId })
-      return { platform: 'telegram', channelId, messageId }
+      return { platform: 'lark', channelId, messageId }
     },
     async sendTyping(channelId: string): Promise<void> {
       calls.push({ kind: 'sendTyping', channelId })
     },
     async sendFile(channelId: string): Promise<SentMessage> {
       const messageId = String(nextId++)
-      return { platform: 'telegram', channelId, messageId }
+      return { platform: 'lark', channelId, messageId }
     },
   }
 
@@ -95,7 +95,7 @@ function makeBinding(overrides: Partial<BindingConfig> = {}): ChannelBinding {
     id: 'bind-1',
     workspaceId: 'ws-1',
     sessionId: 'sess-1',
-    platform: 'telegram',
+    platform: 'lark',
     channelId: 'chan-1',
     enabled: true,
     createdAt: Date.now(),
@@ -267,7 +267,7 @@ describe('Renderer — progress mode (default)', () => {
     // and never emits a clean non-intermediate final text_complete.
     await play(renderer, binding, adapter, [
       ev.intermediate('Sending the report now.'),
-      ev.toolStart('SendTelegram'),
+      ev.toolStart('SendLark'),
       ev.toolResult(),
       ev.complete(),
     ])
@@ -289,7 +289,7 @@ describe('Renderer — progress mode (default)', () => {
     const all = adapter.calls
       .filter((c) => c.kind === 'sendText' || c.kind === 'editMessage')
       .map((c) => c.text ?? '')
-    // No empty-string edit on complete (would trip Telegram "not modified").
+    // No empty-string edit on complete (would trip Lark "not modified").
     expect(all.every((t) => t.length > 0)).toBe(true)
   })
 
@@ -369,7 +369,7 @@ describe('Renderer — final_only mode', () => {
     const binding = makeBinding({ responseMode: 'final_only' as ResponseMode })
     await play(renderer, binding, adapter, [
       ev.intermediate('Here is the summary you asked for.'),
-      ev.toolStart('SendTelegram'),
+      ev.toolStart('SendLark'),
       ev.toolResult(),
       ev.complete(),
     ])
@@ -550,64 +550,5 @@ describe('Renderer — permissions and errors', () => {
     expect(sends.length).toBe(2)
     expect(sends[1]!.text).toContain('❌')
     expect(sends[1]!.text).toContain('boom')
-  })
-})
-
-
-describe('Renderer — WhatsApp desktop-only approvals', () => {
-  it('permission_request on WhatsApp sends an informational desktop-only message', async () => {
-    const renderer = new Renderer()
-    const adapter = makeAdapter({ inlineButtons: false, messageEditing: false, markdown: 'whatsapp' })
-    ;(adapter as any).platform = 'whatsapp'
-    const binding = {
-      ...makeBinding({ approvalChannel: 'chat' }),
-      platform: 'whatsapp' as const,
-      channelId: 'wa-1',
-    }
-
-    await renderer.handle(
-      {
-        type: 'permission_request',
-        sessionId: 's',
-        request: {
-          requestId: 'r1',
-          toolName: 'bash',
-          description: 'run tests',
-        },
-      } as SessionEvent,
-      binding,
-      adapter,
-    )
-
-    expect(adapter.calls.filter((c) => c.kind === 'sendButtons')).toHaveLength(0)
-    const sends = adapter.calls.filter((c) => c.kind === 'sendText')
-    expect(sends).toHaveLength(1)
-    expect(sends[0]!.text).toContain('desktop app')
-  })
-
-  it('plan_submitted on WhatsApp sends an informational desktop-only message', async () => {
-    const renderer = new Renderer()
-    const adapter = makeAdapter({ inlineButtons: false, messageEditing: false, markdown: 'whatsapp' })
-    ;(adapter as any).platform = 'whatsapp'
-    const binding = {
-      ...makeBinding(),
-      platform: 'whatsapp' as const,
-      channelId: 'wa-1',
-    }
-
-    await renderer.handle(
-      {
-        type: 'plan_submitted',
-        sessionId: 's',
-        message: { id: 'm1', role: 'assistant', content: 'Plan ready' } as any,
-      } as SessionEvent,
-      binding,
-      adapter,
-    )
-
-    const sends = adapter.calls.filter((c) => c.kind === 'sendText')
-    expect(sends).toHaveLength(1)
-    expect(sends[0]!.text).toContain('plan is ready')
-    expect(sends[0]!.text).toContain('desktop app')
   })
 })

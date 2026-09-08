@@ -3,7 +3,7 @@
  *
  * Three modes selected per binding via `BindingConfig.responseMode`:
  *
- *   - `streaming` (legacy): on Telegram, posts on first `text_delta` and
+ *   - `streaming` (legacy): posts on first `text_delta` and
  *     edits every ~editIntervalMs as tokens arrive; each `text_complete`
  *     finalises the current message, so one agent run with multiple turns
  *     produces multiple messages. On platforms without editing, accumulates
@@ -35,10 +35,8 @@ import type {
 } from './types'
 
 /**
- * Build the per-call options bag from a binding. Currently only `threadId`
- * (Telegram supergroup forum topic) flows through. WhatsApp and DMs leave
- * `threadId` undefined, which the adapters' `threadParams()` helper turns
- * into a no-op spread.
+ * Build the per-call options bag from a binding. A missing `threadId` is
+ * omitted from the adapter call.
  */
 function bindingOpts(binding: ChannelBinding): SendOptions {
   return binding.threadId !== undefined ? { threadId: binding.threadId } : {}
@@ -67,7 +65,7 @@ interface RenderState {
   textBuffer: string
   /** Whether the agent is currently processing. */
   processing: boolean
-  /** Streaming: the message ID being edited (Telegram only). */
+  /** Streaming: the message ID being edited. */
   streamingMessageId: string | null
   /** Streaming: timer for next edit. */
   editTimer: ReturnType<typeof setTimeout> | null
@@ -100,8 +98,8 @@ const THINKING_LABEL = '💭 thinking…'
 
 /**
  * Max characters rendered inline with the buttons before we spill the full
- * plan into an attached file. Telegram's hard cap is 4096 — leaving margin
- * for the header, buttons, and formatting.
+ * plan into an attached file. Keep margin for the header, buttons, and
+ * formatting.
  */
 const PLAN_INLINE_LIMIT = 3500
 
@@ -109,7 +107,7 @@ const PLAN_INLINE_LIMIT = 3500
  * Hook the renderer calls when it wants to remember a plan message id.
  * Passes the full `ChannelBinding` so callers can attribute the message
  * to the exact chat that rendered it — not just the session, which may
- * have multiple Telegram bindings.
+ * have multiple channel bindings.
  */
 export type PlanMessageRecorder = (
   binding: ChannelBinding,
@@ -400,9 +398,9 @@ export class Renderer {
           }
           // If the run produced no assistant text at all, leave the last
           // status in place rather than editing to an empty string — avoids
-          // Telegram "message is not modified" errors and keeps a trace.
+          // "Message is not modified" errors and keeps a trace.
         } else if (finalText) {
-          // Adapter can't edit (WhatsApp) — send one message at the end.
+          // Adapter can't edit — send one message at the end.
           await this.sendText(adapter, binding, finalText)
         }
         this.resetRun(state)
@@ -414,7 +412,7 @@ export class Renderer {
   /**
    * Post the progress bubble if needed, and edit it to `status` if the
    * status has changed since the last write. Collapses redundant edits so
-   * we stay under Telegram's per-chat edit budget.
+   * we stay under the platform's per-chat edit budget.
    */
   private async ensureProgressBubble(
     state: RenderState,
@@ -515,16 +513,6 @@ export class Renderer {
       state.lastEditedLength = 0
     }
 
-    if (binding.platform === 'whatsapp') {
-      await adapter.sendText(
-        binding.channelId,
-        `⏸ Permission required: ${request.description}
-Approve it in the desktop app to continue.`,
-        bindingOpts(binding),
-      )
-      return
-    }
-
     if (binding.config.approvalChannel === 'chat' && adapter.capabilities.inlineButtons) {
       const text = formatPermissionText(request)
       const buttons: InlineButton[] = [
@@ -547,7 +535,6 @@ Approve in the desktop app to continue.`,
     binding: ChannelBinding,
     adapter: PlatformAdapter,
   ): Promise<void> {
-    if (binding.platform !== 'whatsapp') return
     await adapter.sendText(
       binding.channelId,
       '🔐 Credentials are required to continue. Open the desktop app to review and submit them securely.',
@@ -560,21 +547,6 @@ Approve in the desktop app to continue.`,
     binding: ChannelBinding,
     adapter: PlatformAdapter,
   ): Promise<void> {
-    // WhatsApp: no interactive buttons yet — keep the generic pointer.
-    if (binding.platform === 'whatsapp') {
-      await adapter.sendText(
-        binding.channelId,
-        '📝 A plan is ready for review. Open the desktop app to inspect and approve it.',
-        bindingOpts(binding),
-      )
-      return
-    }
-
-    // Telegram + Lark both support inline buttons through the same
-    // `sendButtons` contract; either gets the rich plan card. Anything else
-    // is treated like WhatsApp above and gated out earlier.
-    if (binding.platform !== 'telegram' && binding.platform !== 'lark') return
-
     // Token registry is optional for backwards compatibility; without it we
     // degrade to the generic pointer so the bot still sees *something*.
     if (!this.planTokens) {
@@ -658,7 +630,7 @@ Approve in the desktop app to continue.`,
     const truncated = truncateForAdapter(text, adapter)
 
     try {
-      // editMessage on Telegram is keyed by (chat_id, message_id) and ignores
+      // editMessage is keyed by channel and message identifiers and ignores
       // message_thread_id, but we pass it for caller uniformity.
       await adapter.editMessage(binding.channelId, messageId, truncated, bindingOpts(binding))
       state.currentEditIntervalMs = DEFAULT_EDIT_INTERVAL_MS

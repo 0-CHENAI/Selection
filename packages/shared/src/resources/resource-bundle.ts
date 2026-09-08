@@ -33,6 +33,7 @@ import { invalidateSkillsCache, loadSkillBySlug } from '../skills/storage.ts'
 import { validateSourceConfig } from '../config/validators.ts'
 import { AUTOMATIONS_CONFIG_FILE, AUTOMATIONS_HISTORY_FILE, AUTOMATIONS_RETRY_QUEUE_FILE } from '../automations/constants.ts'
 import { validateAutomationsConfig } from '../automations/validation.ts'
+import { LEGACY_AUTOMATION_MATCHER_FIELDS } from '../automations/legacy-migration.ts'
 import { generateShortId } from '../automations/resolve-config-path.ts'
 import { VALID_EVENTS } from '../automations/schemas.ts'
 import { parsePromptReferences } from '../automations/utils.ts'
@@ -1079,7 +1080,7 @@ export function validateResourceBundle(bundle: unknown): { valid: boolean; error
           errors.push(`${prefix}: missing or invalid matcher`)
         } else {
           const m = e.matcher as Record<string, unknown>
-          rejectUnknownKeys(m, ['id', 'name', 'matcher', 'cron', 'timezone', 'permissionMode', 'labels', 'enabled', 'conditions', 'telegramTopic', 'maxDepth', 'actions'], `${prefix}.matcher`, errors)
+          rejectUnknownKeys(m, ['id', 'name', 'matcher', 'cron', 'timezone', 'permissionMode', 'labels', 'enabled', 'conditions', ...LEGACY_AUTOMATION_MATCHER_FIELDS, 'maxDepth', 'actions'], `${prefix}.matcher`, errors)
           if (typeof m.id === 'string' && m.id !== e.id) errors.push(`${prefix}: matcher.id '${m.id}' does not match entry id '${e.id}'`)
           if (!Array.isArray(m.actions) || m.actions.length === 0) {
             errors.push(`${prefix}: matcher must have at least one action`)

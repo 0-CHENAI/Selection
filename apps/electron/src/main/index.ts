@@ -710,17 +710,6 @@ app.whenReady().then(async () => {
             // Route messaging diagnostics through the dedicated messaging log
             // at ~/.selection/logs/messaging-gateway.log.
             logger: messagingGatewayLog,
-            // WhatsApp worker runs under Electron's embedded Node via
-            // ELECTRON_RUN_AS_NODE (WhatsAppAdapter defaults nodeBin to
-            // process.execPath). In dev we resolve worker.cjs from the
-            // monorepo; in packaged builds it's shipped via extraResources
-            // (see apps/electron/electron-builder.yml).
-            whatsapp: {
-              workerEntry: app.isPackaged
-                ? join(process.resourcesPath, 'messaging-whatsapp-worker', 'worker.cjs')
-                : join(process.cwd(), 'packages', 'messaging-whatsapp-worker', 'dist', 'worker.cjs'),
-              pairingMode: 'qr',
-            },
           })
           return {
             sessionManager: sm,
@@ -1304,7 +1293,7 @@ async function performQuitCleanup(): Promise<void> {
   // Stop all model refresh timers
   getModelRefreshService().stopAll()
 
-  // Stop messaging gateways so the WhatsApp worker subprocess exits cleanly.
+  // Stop messaging gateways before the app exits.
   if (messagingHandle) {
     try {
       await messagingHandle.dispose()

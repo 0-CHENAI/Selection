@@ -117,7 +117,7 @@ interface PendingCompactAccept {
   bindingId: string
   platform: PlatformType
   channelId: string
-  /** Forum topic id where the press came from (Telegram supergroup), if any. */
+  /** Thread id where the press came from, if any. */
   threadId?: number
   messageId: string
   planPath: string
@@ -208,7 +208,7 @@ export class MessagingGateway {
       planTokens: this.planTokens,
       // The renderer hands us the exact binding that sent the message.
       // We must not resolve it ourselves — `findBySession` returns every
-      // binding and picking the first Telegram binding attributes the
+      // binding and picking the first channel binding attributes the
       // message to the wrong chat whenever the session has more than one.
       recordPlanMessage: (binding, token, messageId) => {
         this.planMessages.set(token, {
@@ -359,7 +359,7 @@ export class MessagingGateway {
     // a permission is pending, so any non-permission_request event implies
     // the prior prompt was resolved (from the desktop, an MCP allow-list,
     // remember-window auto-approval, etc.). Without this sweep the inline
-    // keyboard stays live in Telegram and users keep tapping stale buttons,
+    // interactive controls stay live and users keep tapping stale buttons,
     // which is the visible side of #726.
     this.sweepStalePermissions(event)
 
@@ -394,7 +394,7 @@ export class MessagingGateway {
    * Drop entries from `permissionMessages` whose requestId differs from the
    * event's current permission request (or all of them, for non-permission
    * events). For each dropped entry we also fire-and-forget a `clearButtons`
-   * so Telegram won't deliver any further callbacks for the stale prompt.
+   * so the platform won't deliver further callbacks for the stale prompt.
    *
    * Same-requestId `permission_request` events are preserved so a re-render
    * (rare but possible when the renderer retries) doesn't blow away the
@@ -435,7 +435,7 @@ export class MessagingGateway {
     if (!adapter) return
 
     // Press metadata reused across all branches so responses post back into
-    // the same topic (Telegram supergroup) the button was tapped from.
+    // the same thread the button was tapped from.
     const pressOpts = press.threadId !== undefined ? { threadId: press.threadId } : {}
 
     // Access gate. Inline buttons in supergroup topics are visible to
@@ -474,20 +474,6 @@ export class MessagingGateway {
     }
 
     if (press.buttonId.startsWith('perm:')) {
-      if (platform === 'whatsapp') {
-        this.log.warn('ignored chat-side permission interaction for WhatsApp', {
-          event: 'whatsapp_permission_button_ignored',
-          channelId: press.channelId,
-          buttonId: press.buttonId,
-        })
-        await adapter.sendText(
-          press.channelId,
-          '⏸ Permission required. Approve it in the desktop app to continue.',
-          pressOpts,
-        )
-        return
-      }
-
       await this.handlePermissionButton(adapter, press)
       return
     }
@@ -503,7 +489,7 @@ export class MessagingGateway {
    *
    * Brought to parity with `handlePlanButton` (#726): claim the prompt via
    * `permissionMessages.delete()` before any visible action so a second tap
-   * silently no-ops, clear the inline keyboard so Telegram won't even
+   * silently no-ops, clear the interactive controls so the platform won't
    * deliver further callbacks for it, and only post the user-facing
    * `✅ Allowed / ❌ Denied` confirmation when `respondToPermission` reports
    * the response was actually delivered to a live agent.
@@ -535,7 +521,7 @@ export class MessagingGateway {
     }
     this.permissionMessages.delete(requestId)
 
-    // Clear the inline keyboard before doing anything else so Telegram won't
+    // Clear the interactive controls before doing anything else so the platform won't
     // deliver further callbacks for this prompt at all.
     if (adapter.clearButtons) {
       await adapter.clearButtons(record.channelId, record.messageId).catch(() => {})

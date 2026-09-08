@@ -214,18 +214,6 @@ export interface AutomationMatcher {
   /** Optional conditions that must all pass (AND) after matcher matches, before actions fire */
   conditions?: AutomationCondition[];
   /**
-   * Optional Telegram forum-topic name. When set, sessions spawned by this
-   * matcher are bound to a forum topic of this name in the workspace's paired
-   * supergroup. The topic is created on first use and reused thereafter.
-   * Multiple matchers using the same value share one topic.
-   *
-   * Silently ignored when:
-   *   - No supergroup is paired in Settings → Messaging → Telegram
-   *   - The Telegram bot is not connected
-   *   - The bot lacks "Manage Topics" permission in the supergroup
-   */
-  telegramTopic?: string;
-  /**
    * Per-matcher automation depth cap (1–5). Defaults to MAX_AUTOMATION_DEPTH (3).
    * An event at `depth >= maxDepth` is suppressed.
    */
@@ -307,8 +295,6 @@ export interface PendingPrompt {
   model?: string;
   /** Thinking level for the created session (falls back to workspace default when omitted) */
   thinkingLevel?: ThinkingLevel;
-  /** Forum-topic name to bind the new session to (Telegram supergroup, when paired). */
-  telegramTopic?: string;
   /** When false, SessionManager returns after dispatching the prompt (Agent Events). */
   waitForCompletion?: boolean;
   /** When true, write the spawned session's result back to the source session. */

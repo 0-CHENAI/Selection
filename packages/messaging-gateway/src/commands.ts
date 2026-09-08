@@ -38,12 +38,9 @@ const NOOP_LOGGER: MessagingLogger = {
 
 /**
  * Result of consuming a pairing code. The `kind` discriminator tells the
- * caller which downstream flow to run (bind a session, or register the
- * supergroup chat at the workspace level).
+ * caller which workspace session should be bound.
  */
-export type PairingConsumeResult =
-  | { kind: 'session'; workspaceId: string; sessionId: string }
-  | { kind: 'workspace-supergroup'; workspaceId: string }
+export type PairingConsumeResult = { workspaceId: string; sessionId: string }
 
 /**
  * Supplied by the registry. The gateway passes the consumer down to Commands so
@@ -59,18 +56,6 @@ export interface PairingCodeConsumer {
   canConsume(platform: PlatformType, senderId: string): boolean
   /** Returns the pending pairing if the code is valid, or null. */
   consume(platform: PlatformType, code: string): PairingConsumeResult | null
-  /**
-   * Register the supergroup that just paired itself. Invoked from
-   * Commands.handlePair when the consumed code's kind is
-   * `workspace-supergroup`. Performs the persistence + adapter-reconfigure
-   * dance that lives in the registry.
-   */
-  bindWorkspaceSupergroup?(args: {
-    platform: PlatformType
-    chatId: string
-    /** Optional fall-back display name; the registry can fetch a real one via getChat. */
-    fallbackTitle?: string
-  }): Promise<{ title: string }>
 }
 
 /**
@@ -102,10 +87,10 @@ export interface AccessControlDeps {
 const ALWAYS_ALLOWED_COMMANDS = new Set(['/pair', '/help'])
 
 /**
- * Telegram (and other Bot-API platforms) lets users address commands to
- * specific bots in shared chats: `/pair@MyBot 123456`. Without stripping
+ * Some chat platforms let users address commands to specific bots in shared
+ * chats: `/pair@MyBot 123456`. Without stripping
  * the `@BotName` suffix, the cmd token doesn't match our switch cases and
- * supergroup pairing breaks for users typing the canonical group form.
+ * pairing breaks for users typing the canonical group form.
  *
  * Returns `{ cmd: '', args: '' }` for non-command text. Lower-cases the
  * cmd so callsites can do exact-string comparisons.
@@ -191,7 +176,7 @@ export class Commands {
     const text = msg.text.trim()
     if (!text.startsWith('/')) return false
 
-    // Strip the optional `@BotName` suffix Telegram uses to disambiguate
+    // Strip the optional `@BotName` suffix used to disambiguate
     // commands in shared chats. Without this, `/pair@MyBot 123456` would
     // never match the switch case below.
     const { cmd } = parseCommand(text)
@@ -417,7 +402,7 @@ export class Commands {
     }
 
     // Use the centralized parser so `/pair@MyBot 123456` works the same
-    // as `/pair 123456` — Telegram routes commands by bot suffix in
+    // as `/pair 123456` when the platform routes commands by bot suffix in
     // group chats and many users will type the canonical form.
     const { args } = parseCommand(msg.text)
     const code = args.replace(/\s+/g, '')
@@ -425,7 +410,7 @@ export class Commands {
     if (!/^\d{6}$/.test(code)) {
       await adapter.sendText(
         msg.channelId,
-        'Usage: /pair <6-digit code>\n\nGenerate a code from the session menu or the Telegram supergroup setup in the Selection app.',
+        'Usage: /pair <6-digit code>\n\nGenerate a code from the session menu in the Selection app.',
         replyOpts,
       )
       return
@@ -485,12 +470,6 @@ export class Commands {
       })
     }
 
-    if (entry.kind === 'workspace-supergroup') {
-      await this.handleSupergroupPair(adapter, msg, entry, replyOpts)
-      return
-    }
-
-    // entry.kind === 'session'
     const session = await this.sessionManager.getSession(entry.sessionId)
     if (!session) {
       await adapter.sendText(msg.channelId, 'Session no longer exists.', replyOpts)
@@ -509,7 +488,6 @@ export class Commands {
 
     this.log.info('pairing code redeemed', {
       event: 'pairing_redeemed',
-      kind: 'session',
       workspaceId: entry.workspaceId,
       sessionId: entry.sessionId,
       platform: adapter.platform,
@@ -517,80 +495,11 @@ export class Commands {
       threadId: msg.threadId,
     })
 
-    const topicHint = msg.threadId !== undefined
-      ? ` (topic #${msg.threadId})`
-      : ''
     await adapter.sendText(
       msg.channelId,
-      `✅ Paired with "${session.name || session.id}"${topicHint}. You can start chatting now.`,
+      `✅ Paired with "${session.name || session.id}". You can start chatting now.`,
       replyOpts,
     )
-  }
-
-  /**
-   * Workspace-supergroup pairing: a `/pair <code>` typed in a Telegram
-   * supergroup with a workspace-supergroup-kind code. We register the
-   * supergroup's chat_id at the workspace level so the adapter starts
-   * accepting messages from it (in addition to DMs).
-   */
-  private async handleSupergroupPair(
-    adapter: PlatformAdapter,
-    msg: IncomingMessage,
-    entry: { workspaceId: string },
-    replyOpts: { threadId?: number },
-  ): Promise<void> {
-    if (adapter.platform !== 'telegram') {
-      await adapter.sendText(
-        msg.channelId,
-        'Workspace-supergroup pairing is only supported on Telegram.',
-        replyOpts,
-      )
-      return
-    }
-
-    if (!this.pairingConsumer?.bindWorkspaceSupergroup) {
-      await adapter.sendText(
-        msg.channelId,
-        'Supergroup pairing is not enabled in this build.',
-        replyOpts,
-      )
-      return
-    }
-
-    try {
-      const result = await this.pairingConsumer.bindWorkspaceSupergroup({
-        platform: adapter.platform,
-        chatId: msg.channelId,
-        fallbackTitle: msg.senderName,
-      })
-      this.log.info('pairing code redeemed', {
-        event: 'pairing_redeemed',
-        kind: 'workspace-supergroup',
-        workspaceId: entry.workspaceId,
-        platform: adapter.platform,
-        channelId: msg.channelId,
-        title: result.title,
-      })
-      await adapter.sendText(
-        msg.channelId,
-        `✅ Supergroup *${result.title}* paired. Sessions can now be bound to topics in this group.`,
-        replyOpts,
-      )
-    } catch (err) {
-      const message = err instanceof Error ? err.message : 'Unknown error'
-      this.log.error('workspace supergroup bind failed', {
-        event: 'workspace_supergroup_bind_failed',
-        workspaceId: entry.workspaceId,
-        platform: adapter.platform,
-        channelId: msg.channelId,
-        error: err,
-      })
-      await adapter.sendText(
-        msg.channelId,
-        `❌ Couldn't pair this supergroup: ${message}`,
-        replyOpts,
-      )
-    }
   }
 
   private async handleUnbind(adapter: PlatformAdapter, msg: IncomingMessage): Promise<void> {
@@ -640,16 +549,13 @@ export class Commands {
   }
 
   private async handleHelp(adapter: PlatformAdapter, msg: IncomingMessage): Promise<void> {
-    const bindLine = adapter.platform === 'whatsapp'
-      ? '/bind — list recent sessions (then use /bind <number>)\n'
-      : '/bind — pick from recent sessions\n'
     const replyOpts = msg.threadId !== undefined ? { threadId: msg.threadId } : {}
 
     await adapter.sendText(
       msg.channelId,
       'Commands:\n' +
       '/new [name] — create + bind new session\n' +
-      bindLine +
+      '/bind — pick from recent sessions\n' +
       '/bind <id> — bind to specific session\n' +
       '/pair <code> — redeem an app-generated pairing code\n' +
       '/unbind — disconnect this chat\n' +

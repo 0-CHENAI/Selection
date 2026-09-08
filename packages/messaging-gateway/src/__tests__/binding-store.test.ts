@@ -31,78 +31,69 @@ afterEach(() => {
 describe('BindingStore', () => {
   it('binds and finds a channel', () => {
     const store = new BindingStore(dir)
-    const b = store.bind('ws1', 'session-A', 'telegram', 'chat-1', 'Alice')
+    const b = store.bind('ws1', 'session-A', 'lark', 'chat-1', 'Alice')
 
     expect(b.sessionId).toBe('session-A')
-    expect(b.platform).toBe('telegram')
+    expect(b.platform).toBe('lark')
     expect(b.channelId).toBe('chat-1')
     expect(b.channelName).toBe('Alice')
     expect(b.enabled).toBe(true)
 
-    const hit = store.findByChannel('telegram', 'chat-1')
+    const hit = store.findByChannel('lark', 'chat-1')
     expect(hit?.sessionId).toBe('session-A')
-    expect(store.findByChannel('telegram', 'unknown')).toBeUndefined()
+    expect(store.findByChannel('lark', 'unknown')).toBeUndefined()
   })
 
   it('evicts prior binding when same channel binds again', () => {
     const store = new BindingStore(dir)
-    store.bind('ws1', 'sess-1', 'telegram', 'chat-1')
-    store.bind('ws1', 'sess-2', 'telegram', 'chat-1')
+    store.bind('ws1', 'sess-1', 'lark', 'chat-1')
+    store.bind('ws1', 'sess-2', 'lark', 'chat-1')
 
-    const hit = store.findByChannel('telegram', 'chat-1')
+    const hit = store.findByChannel('lark', 'chat-1')
     expect(hit?.sessionId).toBe('sess-2')
     expect(store.getAll()).toHaveLength(1)
   })
 
   it('lists bindings by session, only enabled', () => {
     const store = new BindingStore(dir)
-    store.bind('ws1', 'sess', 'telegram', 'c1')
-    store.bind('ws1', 'sess', 'whatsapp', 'c2')
-    store.bind('ws1', 'other', 'telegram', 'c3')
+    store.bind('ws1', 'sess', 'lark', 'c1')
+    store.bind('ws1', 'sess', 'lark', 'c2')
+    store.bind('ws1', 'other', 'lark', 'c3')
 
     const mine = store.findBySession('sess')
     expect(mine).toHaveLength(2)
-    expect(new Set(mine.map((b) => b.platform))).toEqual(new Set(['telegram', 'whatsapp']))
+    expect(new Set(mine.map((b) => b.platform))).toEqual(new Set(['lark', 'lark']))
   })
 
   it('unbind returns true only when a row was removed', () => {
     const store = new BindingStore(dir)
-    store.bind('ws1', 'sess', 'telegram', 'c1')
+    store.bind('ws1', 'sess', 'lark', 'c1')
 
-    expect(store.unbind('telegram', 'c1')).toBe(true)
-    expect(store.unbind('telegram', 'c1')).toBe(false)
+    expect(store.unbind('lark', 'c1')).toBe(true)
+    expect(store.unbind('lark', 'c1')).toBe(false)
     expect(store.getAll()).toHaveLength(0)
   })
 
   it('unbindSession removes correct count with optional platform filter', () => {
     const store = new BindingStore(dir)
-    store.bind('ws1', 'sess', 'telegram', 'c1')
-    store.bind('ws1', 'sess', 'whatsapp', 'c2')
-    store.bind('ws1', 'other', 'telegram', 'c3')
+    store.bind('ws1', 'sess', 'lark', 'c1')
+    store.bind('ws1', 'sess', 'lark', 'c2')
+    store.bind('ws1', 'other', 'lark', 'c3')
 
-    expect(store.unbindSession('sess', 'telegram')).toBe(1)
-    expect(store.getAll()).toHaveLength(2)
-
-    expect(store.unbindSession('sess')).toBe(1)
+    expect(store.unbindSession('sess', 'lark')).toBe(2)
     expect(store.getAll()).toHaveLength(1)
     expect(store.getAll()[0]?.sessionId).toBe('other')
   })
 
   it('unbindById removes only the selected binding row', () => {
     const store = new BindingStore(dir)
-    const a = store.bind('ws1', 'sess', 'telegram', 'c1')
-    const b = store.bind('ws1', 'sess', 'whatsapp', 'c2')
+    const a = store.bind('ws1', 'sess', 'lark', 'c1')
+    const b = store.bind('ws1', 'sess', 'lark', 'c2')
 
     expect(store.unbindById(a.id)).toBe(true)
-    expect(store.findByChannel('telegram', 'c1')).toBeUndefined()
-    expect(store.findByChannel('whatsapp', 'c2')?.id).toBe(b.id)
+    expect(store.findByChannel('lark', 'c1')).toBeUndefined()
+    expect(store.findByChannel('lark', 'c2')?.id).toBe(b.id)
     expect(store.unbindById(a.id)).toBe(false)
-  })
-
-  it('forces WhatsApp bindings to use desktop-only approvals', () => {
-    const store = new BindingStore(dir)
-    const binding = store.bind('ws1', 'sess', 'whatsapp', 'c2')
-    expect(binding.config.approvalChannel).toBe('app')
   })
 
   it('fires change listener after mutation', () => {
@@ -110,18 +101,18 @@ describe('BindingStore', () => {
     let calls = 0
     store.onChange(() => calls++)
 
-    store.bind('ws1', 'sess', 'telegram', 'c1')
-    store.unbind('telegram', 'c1')
+    store.bind('ws1', 'sess', 'lark', 'c1')
+    store.unbind('lark', 'c1')
 
     expect(calls).toBe(2)
   })
 
   it('persists across instances via bindings.json', () => {
     const a = new BindingStore(dir)
-    a.bind('ws1', 'sess', 'telegram', 'c1', 'name')
+    a.bind('ws1', 'sess', 'lark', 'c1', 'name')
 
     const b = new BindingStore(dir)
-    const hit = b.findByChannel('telegram', 'c1')
+    const hit = b.findByChannel('lark', 'c1')
     expect(hit?.channelName).toBe('name')
   })
 
@@ -132,7 +123,7 @@ describe('BindingStore', () => {
         id: 'legacy-1',
         workspaceId: 'ws1',
         sessionId: 'sess',
-        platform: 'telegram',
+        platform: 'lark',
         channelId: 'c1',
         enabled: true,
         createdAt: 1,
@@ -142,7 +133,7 @@ describe('BindingStore', () => {
     writeFileSync(legacyFile, JSON.stringify(sample))
 
     const store = new BindingStore(dir, legacyDir)
-    expect(store.findByChannel('telegram', 'c1')?.id).toBe('legacy-1')
+    expect(store.findByChannel('lark', 'c1')?.id).toBe('legacy-1')
     expect(existsSync(join(dir, 'bindings.json'))).toBe(true)
   })
 
@@ -156,7 +147,7 @@ describe('BindingStore', () => {
           id: 'new-1',
           workspaceId: 'ws1',
           sessionId: 'sess-new',
-          platform: 'telegram',
+          platform: 'lark',
           channelId: 'c1',
           enabled: true,
           createdAt: 2,
@@ -172,7 +163,7 @@ describe('BindingStore', () => {
           id: 'legacy-1',
           workspaceId: 'ws1',
           sessionId: 'sess-legacy',
-          platform: 'telegram',
+          platform: 'lark',
           channelId: 'c1',
           enabled: true,
           createdAt: 1,
@@ -182,7 +173,7 @@ describe('BindingStore', () => {
     )
 
     const store = new BindingStore(dir, legacyDir)
-    expect(store.findByChannel('telegram', 'c1')?.sessionId).toBe('sess-new')
+    expect(store.findByChannel('lark', 'c1')?.sessionId).toBe('sess-new')
   })
 
   it('recovers from corrupt bindings.json as an empty store', () => {
@@ -190,36 +181,36 @@ describe('BindingStore', () => {
     const store = new BindingStore(dir)
     expect(store.getAll()).toEqual([])
     // Subsequent write should succeed
-    store.bind('ws1', 'sess', 'telegram', 'c1')
+    store.bind('ws1', 'sess', 'lark', 'c1')
     const raw = readFileSync(join(dir, 'bindings.json'), 'utf-8')
     expect(JSON.parse(raw)).toHaveLength(1)
   })
 })
 
 // ---------------------------------------------------------------------------
-// Telegram supergroup forum topics (Phase A)
+// Lark supergroup forum topics (Phase A)
 // ---------------------------------------------------------------------------
 
-describe('BindingStore — threadId (Telegram supergroup topics)', () => {
+describe('BindingStore — threadId (Lark supergroup topics)', () => {
   it('treats different topics in the same supergroup as separate bindings', () => {
     const store = new BindingStore(dir)
-    const a = store.bind('ws1', 'sess-A', 'telegram', '-1001', undefined, undefined, 5)
-    const b = store.bind('ws1', 'sess-B', 'telegram', '-1001', undefined, undefined, 7)
+    const a = store.bind('ws1', 'sess-A', 'lark', '-1001', undefined, undefined, 5)
+    const b = store.bind('ws1', 'sess-B', 'lark', '-1001', undefined, undefined, 7)
 
     expect(store.getAll()).toHaveLength(2)
-    expect(store.findByChannel('telegram', '-1001', 5)?.id).toBe(a.id)
-    expect(store.findByChannel('telegram', '-1001', 7)?.id).toBe(b.id)
+    expect(store.findByChannel('lark', '-1001', 5)?.id).toBe(a.id)
+    expect(store.findByChannel('lark', '-1001', 7)?.id).toBe(b.id)
   })
 
   it('rebinding the same (chat, topic) tuple evicts only that tuple', () => {
     const store = new BindingStore(dir)
-    store.bind('ws1', 'sess-A', 'telegram', '-1001', undefined, undefined, 5)
-    store.bind('ws1', 'sess-B', 'telegram', '-1001', undefined, undefined, 7)
-    store.bind('ws1', 'sess-C', 'telegram', '-1001', undefined, undefined, 5)
+    store.bind('ws1', 'sess-A', 'lark', '-1001', undefined, undefined, 5)
+    store.bind('ws1', 'sess-B', 'lark', '-1001', undefined, undefined, 7)
+    store.bind('ws1', 'sess-C', 'lark', '-1001', undefined, undefined, 5)
 
     // Topic 5: latest binding wins (sess-C). Topic 7: untouched (sess-B).
-    expect(store.findByChannel('telegram', '-1001', 5)?.sessionId).toBe('sess-C')
-    expect(store.findByChannel('telegram', '-1001', 7)?.sessionId).toBe('sess-B')
+    expect(store.findByChannel('lark', '-1001', 5)?.sessionId).toBe('sess-C')
+    expect(store.findByChannel('lark', '-1001', 7)?.sessionId).toBe('sess-B')
     expect(store.getAll()).toHaveLength(2)
   })
 
@@ -228,42 +219,42 @@ describe('BindingStore — threadId (Telegram supergroup topics)', () => {
     // DM (no threadId) and a topic in the same chatId — implausible in real
     // life (DMs and supergroups have disjoint chatIds) but the eviction key
     // must still treat them as distinct.
-    store.bind('ws1', 'sess-DM', 'telegram', 'shared', undefined, undefined, undefined)
-    store.bind('ws1', 'sess-Topic', 'telegram', 'shared', undefined, undefined, 9)
+    store.bind('ws1', 'sess-DM', 'lark', 'shared', undefined, undefined, undefined)
+    store.bind('ws1', 'sess-Topic', 'lark', 'shared', undefined, undefined, 9)
 
-    expect(store.findByChannel('telegram', 'shared')?.sessionId).toBe('sess-DM')
-    expect(store.findByChannel('telegram', 'shared', 9)?.sessionId).toBe('sess-Topic')
+    expect(store.findByChannel('lark', 'shared')?.sessionId).toBe('sess-DM')
+    expect(store.findByChannel('lark', 'shared', 9)?.sessionId).toBe('sess-Topic')
     expect(store.getAll()).toHaveLength(2)
   })
 
   it('findByChannel without threadId does not match topic-bound entries', () => {
     const store = new BindingStore(dir)
-    store.bind('ws1', 'sess-Topic', 'telegram', '-1001', undefined, undefined, 5)
+    store.bind('ws1', 'sess-Topic', 'lark', '-1001', undefined, undefined, 5)
 
-    // The Telegram General topic (no message_thread_id) → no DM binding here
-    expect(store.findByChannel('telegram', '-1001')).toBeUndefined()
-    expect(store.findByChannel('telegram', '-1001', 5)?.sessionId).toBe('sess-Topic')
+    // The Lark General topic (no message_thread_id) → no DM binding here
+    expect(store.findByChannel('lark', '-1001')).toBeUndefined()
+    expect(store.findByChannel('lark', '-1001', 5)?.sessionId).toBe('sess-Topic')
   })
 
   it('persists threadId across BindingStore instances', () => {
     const a = new BindingStore(dir)
-    a.bind('ws1', 'sess-T', 'telegram', '-1001', 'topic-name', undefined, 12)
+    a.bind('ws1', 'sess-T', 'lark', '-1001', 'topic-name', undefined, 12)
 
     const b = new BindingStore(dir)
-    const hit = b.findByChannel('telegram', '-1001', 12)
+    const hit = b.findByChannel('lark', '-1001', 12)
     expect(hit?.sessionId).toBe('sess-T')
     expect(hit?.threadId).toBe(12)
   })
 
   it('unbind targeted at a specific topic leaves sibling topics intact', () => {
     const store = new BindingStore(dir)
-    store.bind('ws1', 'sess-A', 'telegram', '-1001', undefined, undefined, 5)
-    store.bind('ws1', 'sess-B', 'telegram', '-1001', undefined, undefined, 7)
+    store.bind('ws1', 'sess-A', 'lark', '-1001', undefined, undefined, 5)
+    store.bind('ws1', 'sess-B', 'lark', '-1001', undefined, undefined, 7)
 
-    expect(store.unbind('telegram', '-1001', 5)).toBe(true)
-    expect(store.findByChannel('telegram', '-1001', 5)).toBeUndefined()
-    expect(store.findByChannel('telegram', '-1001', 7)?.sessionId).toBe('sess-B')
-    expect(store.unbind('telegram', '-1001', 5)).toBe(false)
+    expect(store.unbind('lark', '-1001', 5)).toBe(true)
+    expect(store.findByChannel('lark', '-1001', 5)).toBeUndefined()
+    expect(store.findByChannel('lark', '-1001', 7)?.sessionId).toBe('sess-B')
+    expect(store.unbind('lark', '-1001', 5)).toBe(false)
   })
 
   it('legacy bindings without threadId continue to match DM lookups', () => {
@@ -275,7 +266,7 @@ describe('BindingStore — threadId (Telegram supergroup topics)', () => {
           id: 'legacy-1',
           workspaceId: 'ws1',
           sessionId: 'sess-old',
-          platform: 'telegram',
+          platform: 'lark',
           channelId: 'dm-chat',
           enabled: true,
           createdAt: 1,
@@ -284,7 +275,7 @@ describe('BindingStore — threadId (Telegram supergroup topics)', () => {
       ]),
     )
     const store = new BindingStore(dir)
-    expect(store.findByChannel('telegram', 'dm-chat')?.sessionId).toBe('sess-old')
-    expect(store.findByChannel('telegram', 'dm-chat', 5)).toBeUndefined()
+    expect(store.findByChannel('lark', 'dm-chat')?.sessionId).toBe('sess-old')
+    expect(store.findByChannel('lark', 'dm-chat', 5)).toBeUndefined()
   })
 })

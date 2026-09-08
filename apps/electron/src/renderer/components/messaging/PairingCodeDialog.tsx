@@ -5,7 +5,7 @@
  */
 
 import * as React from 'react'
-import { Copy, ExternalLink } from 'lucide-react'
+import { Copy } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import {
@@ -19,11 +19,9 @@ import {
 interface PairingCodeDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
-  platform: 'telegram' | 'whatsapp' | 'lark'
+  platform: 'lark'
   code: string | null
   expiresAt: number | null
-  /** Bot username (without @) — enables the "Open bot" deep link. */
-  botUsername?: string
   /** Error text to show in place of the code (e.g., rate limit, adapter down). */
   error?: string
 }
@@ -34,7 +32,6 @@ export function PairingCodeDialog({
   platform,
   code,
   expiresAt,
-  botUsername,
   error,
 }: PairingCodeDialogProps) {
   const { t } = useTranslation()
@@ -55,9 +52,6 @@ export function PairingCodeDialog({
   const seconds = secondsLeft % 60
 
   const pairCommand = code ? `/pair ${code}` : ''
-  const botLink = botUsername && platform === 'telegram'
-    ? `https://t.me/${botUsername}`
-    : null
   const instructionsKey = `dialog.pairingCode.instructions.${platform}` as const
   const sendCommandKey = `dialog.pairingCode.sendCommand.${platform}` as const
 
@@ -103,24 +97,6 @@ export function PairingCodeDialog({
               <p className="text-center text-sm text-muted-foreground">
                 {t(sendCommandKey)}
               </p>
-
-              {platform === 'whatsapp' && (
-                <p className="text-center text-xs text-muted-foreground">
-                  {t('dialog.pairingCode.whatsappSelfHint')}
-                </p>
-              )}
-
-              {botLink && (
-                <a
-                  href={botLink}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex items-center gap-1 text-sm text-primary hover:underline"
-                >
-                  <ExternalLink className="h-3.5 w-3.5" />
-                  t.me/{botUsername}
-                </a>
-              )}
 
               {secondsLeft > 0 && (
                 <p className="text-xs text-muted-foreground">
