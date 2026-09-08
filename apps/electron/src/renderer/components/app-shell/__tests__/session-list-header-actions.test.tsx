@@ -68,27 +68,25 @@ function sessionTopBarControlsSource(): string {
 }
 
 describe('session list and orchestration view controls (#264, #283)', () => {
-  it('keeps desktop search before the switcher in one stable TopBar slot', () => {
+  it('keeps the switcher in the TopBar without the search button', () => {
     const controls = sessionTopBarControlsSource()
     const searchIdx = controls.indexOf('sidebar.search')
     const toggleIdx = controls.indexOf('BoardListToggle')
 
-    expect(searchIdx).toBeGreaterThan(-1)
+    expect(searchIdx).toBe(-1)
     expect(toggleIdx).toBeGreaterThan(-1)
-    expect(searchIdx).toBeLessThan(toggleIdx)
     expect(controls).toContain('afterWorkspace={isSessionsNavigation(navState)')
     expect(controls).toContain("value={isBoardView ? 'board' : 'list'}")
     expect(controls).toContain("view === 'list' && isBoardView")
     expect(controls).toContain("view === 'board' && !isBoardView")
-    expect(controls).toContain('onClick={openSessionSearch}')
     expect(controls).toContain('leaveOrchestrationView()')
     expect(controls).toContain('flex items-center gap-1.5')
   })
 
-  it('keeps only compact search in the navigator header', () => {
+  it('keeps search in the navigator header on desktop and compact layouts', () => {
     const actions = sessionNavigatorActionsSource()
 
-    expect(actions).toContain('isAutoCompact ? (')
+    expect(actions).not.toContain('isAutoCompact ? (')
     expect(actions).toContain('sidebar.search')
     expect(actions).toContain('onClick={openSessionSearch}')
     expect(actions).not.toContain('BoardListToggle')

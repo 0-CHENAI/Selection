@@ -216,7 +216,20 @@ export function PanelHeader({
       }
     : undefined
 
-  const content = isCompactMode ? (
+  const desktopCentered = !isCompactMode && titleAlign === 'center'
+  const content = desktopCentered ? (
+    <div className="grid w-full min-w-0 grid-cols-[minmax(0,1fr)_minmax(0,2fr)_minmax(0,1fr)] items-center gap-1.5">
+      <div className="titlebar-no-drag flex min-w-0 items-center">{leadingAction}</div>
+      <div className="flex min-w-0 justify-center select-none">
+        <div className="max-w-full overflow-hidden">{titleNode}</div>
+      </div>
+      <div className="titlebar-no-drag flex items-center justify-end gap-1.5">
+        {centerButton}
+        {actions}
+        {rightSidebarButton}
+      </div>
+    </div>
+  ) : isCompactMode ? (
     <>
       {leadingAction && (
         <div className="titlebar-no-drag shrink-0 z-[1]">
@@ -295,7 +308,7 @@ export function PanelHeader({
   return (
     <motion.div
       initial={false}
-      animate={{ paddingLeft: shouldCompensate ? STOPLIGHT_PADDING : basePadding }}
+      animate={{ paddingLeft: shouldCompensate ? STOPLIGHT_PADDING : basePadding, paddingRight: desktopCentered ? (shouldCompensate ? STOPLIGHT_PADDING : basePadding) : 8 }}
       transition={springTransition}
       className={baseClassName}
     >

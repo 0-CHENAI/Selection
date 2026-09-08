@@ -34,7 +34,7 @@ export function NewSessionBrand() {
       data-testid="new-session-brand"
       className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center overflow-hidden px-6 select-none"
     >
-      <div className="flex max-w-full items-end justify-center gap-3.5 text-foreground sm:gap-5">
+      <div className="flex max-w-full scale-[0.75] items-end justify-center gap-3.5 text-foreground sm:gap-5">
         {/* Tight SVG bounds keep spacing precise; lift the wordmark slightly for optical balance. */}
         <img
           src={swan}

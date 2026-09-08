@@ -129,7 +129,7 @@ export function TopBar({
       style={{ height: 'var(--topbar-height)' }}
     >
       <div
-        className="flex h-full w-full items-center justify-between gap-2"
+        className={cn("h-full w-full items-center gap-2", isCompact ? "flex justify-between" : "grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)]")}
         style={captionInset}
       >
       {/* === LEFT: Sidebar + Navigation + Workspace (compact: App menu) === */}
@@ -171,7 +171,7 @@ export function TopBar({
             drill-in chevron in PanelHeader plus the browser's native back gesture
             cover that affordance, and the freed width lets the workspace pill
             actually fit on phone-width viewports. */}
-        <div className={cn("ml-1 flex min-w-0 items-center gap-1", isCompact ? "flex-1" : "w-[clamp(220px,42vw,640px)]")}>
+        <div className={cn("ml-1 flex min-w-0 items-center gap-1", isCompact ? "flex-1" : "flex-1")}>
           {!isCompact && (
             <>
               <Tooltip>
@@ -217,12 +217,12 @@ export function TopBar({
             )}
           </div>
         </div>
-        {!isCompact && afterWorkspace && (
-          <div className="titlebar-no-drag ml-2 shrink-0">
-            {afterWorkspace}
-          </div>
-        )}
       </div>
+      {!isCompact && (
+        <div className="titlebar-no-drag flex justify-center">
+          {afterWorkspace}
+        </div>
+      )}
 
       {/* === RIGHT: Browser strip === */}
       {!isCompact && (
