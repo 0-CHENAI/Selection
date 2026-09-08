@@ -1,3 +1,4 @@
+import { cn } from "@/lib/utils"
 import selectionIcon from "@/assets/selection-icon.svg"
 
 interface CraftAppIconProps {
@@ -13,7 +14,7 @@ export function CraftAppIcon({ className, size = 64 }: CraftAppIconProps) {
       alt="Selection"
       width={size}
       height={size}
-      className={className}
+      className={cn("object-contain dark:invert", className)}
     />
   )
 }

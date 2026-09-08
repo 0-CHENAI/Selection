@@ -10,7 +10,7 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 
 ## Improvements
 
-- **New conversations open with the Selection wordmark** — Ready, empty desktop sessions now show the supplied swan mark beside the CATHALIE Selection name above the composer, with dedicated light and dark artwork. The wordmark disappears on the first message and stays out of compact, loading, failed, and read-only states. ([#275](https://github.com/0-CHENAI/Selection/issues/275))
+- **Selection now uses the swan mark throughout the product** — Ready, empty desktop sessions show the supplied swan beside the CATHALIE Selection name above the composer, with the two marks aligned along their lower edge. The same swan replaces the previous circular Selection mark across onboarding, splash screens, menus, viewers, desktop assets, and WebUI/PWA icons. The new-session wordmark disappears on the first message and stays out of compact, loading, failed, and read-only states. ([#275](https://github.com/0-CHENAI/Selection/issues/275))
 
 - **Streamlined messaging integrations** — Removed the retired Telegram and WhatsApp integrations, their setup surfaces, background worker, and packaged dependencies. Existing installations now discard only those integrations' obsolete credentials and local state while preserving Lark / Feishu configuration and bindings. (#280)
 
