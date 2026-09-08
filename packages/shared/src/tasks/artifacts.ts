@@ -3,6 +3,8 @@ import { existsSync, lstatSync, readFileSync, realpathSync, statSync } from 'fs'
 import { extname, isAbsolute, relative, resolve, sep } from 'path';
 
 export interface ArtifactMeta {
+  /** Path base. Omitted for backward-compatible workspace-relative artifacts. */
+  scope?: 'workspace' | 'cwd';
   path: string;
   mime: string;
   size: number;
@@ -38,8 +40,8 @@ function isInside(root: string, candidate: string): boolean {
 
 /**
  * Resolve a declared artifact path against workspace/cwd. Symlinks are followed
- * via realpath; the real file must stay inside workspaceRoot. A task cwd is a
- * resolution convenience, never a second trusted artifact root.
+ * via realpath; the real file must stay inside workspaceRoot or the explicit
+ * task cwd. Relative declarations resolve from cwd when one is configured.
  */
 export function resolveArtifact(
   workspaceRoot: string,
@@ -47,9 +49,8 @@ export function resolveArtifact(
   declared: string,
 ): ArtifactResolveResult {
   if (!declared || typeof declared !== 'string') return { ok: false, error: 'artifact path is empty' };
-  if (isAbsolute(declared)) return { ok: false, error: 'artifact path must be workspace-relative' };
   const base = cwd && cwd.trim() ? cwd : workspaceRoot;
-  const abs = resolve(base, declared);
+  const abs = isAbsolute(declared) ? resolve(declared) : resolve(base, declared);
   if (!existsSync(abs)) return { ok: false, error: 'artifact not found' };
   if (lstatSync(abs).isSymbolicLink()) {
     // Follow, then reject if the real path escaped.
@@ -61,16 +62,25 @@ export function resolveArtifact(
     return { ok: false, error: 'artifact not found' };
   }
   const rootReal = realpathSync(workspaceRoot);
-  if (!isInside(rootReal, real)) {
-    return { ok: false, error: 'artifact escapes workspace' };
+  let cwdReal: string | undefined;
+  if (cwd && cwd.trim()) {
+    try {
+      cwdReal = realpathSync(cwd);
+    } catch {
+      // An invalid cwd cannot serve as a trusted artifact root.
+    }
   }
+  const inWorkspace = isInside(rootReal, real);
+  const inCwd = cwdReal ? isInside(cwdReal, real) : false;
+  if (!inWorkspace && !inCwd) return { ok: false, error: 'artifact escapes allowed roots' };
   const st = statSync(real);
   if (!st.isFile()) return { ok: false, error: 'artifact is not a file' };
   const buf = readFileSync(real);
   return {
     ok: true,
     artifact: {
-      path: relative(rootReal, real),
+      ...(inWorkspace ? {} : { scope: 'cwd' as const }),
+      path: relative(inWorkspace ? rootReal : cwdReal!, real),
       mime: mimeFromExt(real),
       size: st.size,
       hash: createHash('sha256').update(buf).digest('hex'),

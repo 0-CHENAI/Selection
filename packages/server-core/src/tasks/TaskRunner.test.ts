@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
-import { existsSync, mkdtempSync, rmSync } from 'fs';
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import type { TokenUsage } from '@craft-agent/core/types';
@@ -1457,6 +1457,34 @@ describe('TaskRunner (Conductor)', () => {
     expect(runner.getRunState('ver', 'r1')!.status).toBe('verifying');
     runner.submitVerdict('orch', { result: 'pass' });
     expect(runner.getRunState('ver', 'r1')!.status).toBe('completed');
+  });
+
+  it('v2 accepts an artifact from an external task cwd and records its scope', async () => {
+    const cwd = mkdtempSync(join(tmpdir(), 'conductor-cwd-'));
+    writeFileSync(join(cwd, 'result.md'), 'done');
+    saveTaskSpec(
+      root,
+      specOf({
+        schema_version: 2,
+        id: 'cwd-artifact',
+        title: 'Cwd artifact',
+        goal: 'g',
+        cwd,
+        nodes: [{ id: 'a', prompt: 'a', outputs: [{ name: 'result', kind: 'artifact' }] }],
+      }),
+    );
+    const runner = makeRunner();
+    runner.run('cwd-artifact', { runId: 'r1', verifyOnComplete: false });
+    await tick();
+    expect(runner.submitNodeOutput('sess-a', { values: { result: 'result.md' } }).ok).toBe(true);
+    host.complete('a', { finalText: 'done' });
+    await tick();
+    expect(readNodeOutput(root, 'cwd-artifact', 'r1', 'a')?.params?.result).toMatchObject({
+      scope: 'cwd',
+      path: 'result.md',
+      mime: 'text/markdown',
+    });
+    rmSync(cwd, { recursive: true, force: true });
   });
 
   it('v2 rejects missing and incorrectly typed structured outputs', async () => {
