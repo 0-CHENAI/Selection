@@ -58,7 +58,7 @@ export function TaskTemplateLibrary({
   const visible = filterTemplates(templates, query)
   const spec = detail ? asWorkbenchSpec(detail.spec) : null
 
-  async function useTemplate() {
+  async function createFromSelectedTemplate() {
     if (!selectedId || busy) return
     setBusy(true)
     setError(null)
@@ -116,7 +116,7 @@ export function TaskTemplateLibrary({
           <div className="ml-auto flex flex-wrap gap-2">
             <Button variant="outline" size="sm" disabled={busy} onClick={() => void exportYaml()}>{t('tasks.templateExport')}</Button>
             <Button variant="outline" size="sm" disabled={busy} onClick={() => void removeTemplate()}>{t('tasks.templateDelete')}</Button>
-            <Button size="sm" disabled={busy} onClick={() => void useTemplate()}>{t('tasks.templateUse')}</Button>
+            <Button size="sm" disabled={busy} onClick={() => void createFromSelectedTemplate()}>{t('tasks.templateUse')}</Button>
           </div>
         </div>
         {detail.description && <p className="text-sm text-muted-foreground">{detail.description}</p>}
