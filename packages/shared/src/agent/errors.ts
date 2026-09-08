@@ -290,6 +290,36 @@ const ERROR_DEFINITIONS: Record<ErrorCode, Omit<AgentError, 'code' | 'originalEr
     canRetry: true,
     retryDelayMs: 1000,
   },
+  no_response: {
+    title: 'No final response',
+    message: 'The agent ended without a final response. Send a follow-up in this conversation to continue from the existing history.',
+    actions: [],
+    canRetry: false,
+  },
+  tool_only_response: {
+    title: 'Tools ran without a final response',
+    message: 'Tool activity was recorded, but the agent did not provide a final response. Review the tool results before continuing; completed operations may have changed files or external state.',
+    actions: [],
+    canRetry: false,
+  },
+  context_limit: {
+    title: 'Context limit reached',
+    message: 'The conversation exceeded the model context limit. Compact the conversation or start a new session before continuing.',
+    actions: [],
+    canRetry: false,
+  },
+  stream_interrupted: {
+    title: 'Response stream interrupted',
+    message: 'The response stream ended unexpectedly. Review the recorded results before continuing from this conversation.',
+    actions: [],
+    canRetry: false,
+  },
+  agent_process_exited: {
+    title: 'Agent process exited',
+    message: 'The agent process exited before completing the response. Review the recorded results before continuing.',
+    actions: [],
+    canRetry: false,
+  },
   unknown_error: {
     title: 'Error',
     message: 'Something went wrong. If this persists, check the provider status page or retry.',
@@ -433,7 +463,13 @@ export function parseError(
   let code: ErrorCode = 'unknown_error';
 
   // Check for OpenRouter data policy errors first (these contain "no endpoints" which could confuse other checks)
-  if (lowerMessage.includes('data policy') || lowerMessage.includes('privacy')) {
+  if (lowerMessage.includes('pi subprocess exited unexpectedly')) {
+    code = 'agent_process_exited';
+  } else if (/context[ _](window|length|limit)|maximum context|prompt is too long/.test(lowerMessage)) {
+    code = 'context_limit';
+  } else if (/stream.*(premature|unexpected|closed|truncat)|unexpected.*(eof|end of stream)/.test(lowerMessage)) {
+    code = 'stream_interrupted';
+  } else if (lowerMessage.includes('data policy') || lowerMessage.includes('privacy')) {
     code = 'data_policy_error';
   // Check for model-specific errors (OpenRouter, etc.)
   // Tool support errors must be checked BEFORE model errors since tool errors often contain "model"
@@ -542,6 +578,11 @@ export function parseError(
         providerContext.piAuthProvider,
       ) ?? undefined
     : undefined;
+
+  // Terminal diagnostics must not expose provider payloads, paths, or subprocess arguments.
+  if (code === 'context_limit' || code === 'stream_interrupted' || code === 'agent_process_exited') {
+    return { code, ...definition, providerInfo };
+  }
 
   // For proxy_error, prefer safe user-facing text over raw HTML payloads.
   if (code === 'proxy_error') {

@@ -137,7 +137,7 @@ import { ensureLabelsExist, ensureTaskItemLabel } from '@craft-agent/shared/labe
 import { loadStatusConfig } from '@craft-agent/shared/statuses/storage'
 import { AutomationSystem, createPromptHistoryEntry, appendAutomationHistoryEntry, enrichAgentEventInput, DEFAULT_PROMPT_WAIT_TIMEOUT_MS, MAX_PROMPT_WAIT_TIMEOUT_MS, type AutomationSystemMetadataSnapshot, type AgentEvent as AutomationAgentEvent, type SdkAutomationInput, type PendingPrompt } from '@craft-agent/shared/automations'
 import { waitForAutomationSessionCompletion } from './wait-automation-session.ts'
-import { createTypedError } from '@craft-agent/shared/agent/errors'
+import { createTypedError, parseError } from '@craft-agent/shared/agent/errors'
 import { buildBackendRuntimeSignature, buildRestartRequiredSignature, prepareModelImageAttachments } from './runtime-config'
 import { validateArchiveTarget } from './archive-guards'
 import {
@@ -7048,76 +7048,51 @@ export class SessionManager implements ISessionManager {
             const sessionErrorPath = getSessionStoragePath(managed.workspace.rootPath, managed.id)
             const apiError = getLastApiError(sessionErrorPath)
 
-            if (apiError && apiError.status === 400) {
-              const isImageError = apiError.message?.includes('image exceeds')
-
+            // Never replace a current error with a cached HTTP failure or a generic fallback.
+            const turnMessages = managed.messages.slice(managed.messages.indexOf(lastUserMsg) + 1)
+            const hasCurrentTurnError = turnMessages.some(message => message.role === 'error' && !message.hidden)
+            if (hasCurrentTurnError) {
+              sessionLog.warn('Empty response preserved terminal error', {
+                sessionId,
+                userMessageId: lastUserMsg.id,
+                code: turnMessages.findLast(message => message.role === 'error')?.errorCode ?? 'unclassified',
+              })
+            }
+            if (!hasCurrentTurnError) {
+              const hasToolActivity = turnMessages.some(message => message.role === 'tool')
+              const currentApiError = apiError && apiError.timestamp >= lastUserMsg.timestamp ? apiError : undefined
+              const typedError = currentApiError
+                ? parseError(new Error(`HTTP ${currentApiError.status}: ${currentApiError.message}`))
+                : createTypedError(hasToolActivity ? 'tool_only_response' : 'no_response')
+              // Replaying a prompt can repeat side effects. Recovery must use the retained
+              // conversation and explicit follow-up, not silently resend the original input.
+              typedError.canRetry = false
+              typedError.actions = typedError.actions.filter(action => action.action !== 'retry')
+              sessionLog.warn('Empty response terminal diagnostic', {
+                sessionId,
+                userMessageId: lastUserMsg.id,
+                code: typedError.code,
+                toolActivity: hasToolActivity,
+                httpStatus: currentApiError?.status,
+              })
               const errorMessage: Message = {
                 id: generateMessageId(),
                 role: 'error',
-                content: isImageError
-                  ? `Image Too Large: ${apiError.message}`
-                  : `Request Error: ${apiError.message}`,
+                content: typedError.message,
                 timestamp: this.monotonic(),
-                errorCode: isImageError ? 'image_too_large' : 'invalid_request',
-                errorTitle: isImageError ? 'Image Too Large' : 'Invalid Request',
-                errorDetails: isImageError
-                  ? ['An image in the conversation exceeds the 5 MB API limit.',
-                     'This session cannot recover — the image is embedded in the history.',
-                     'Please start a new session to continue.']
-                  : [apiError.message],
-                errorCanRetry: false,
+                errorCode: typedError.code,
+                errorTitle: typedError.title,
+                errorCanRetry: typedError.canRetry,
+                errorActions: typedError.actions,
               }
               managed.messages.push(errorMessage)
-              this.sendEvent({
-                type: 'typed_error',
-                sessionId,
-                error: {
-                  code: isImageError ? 'image_too_large' as const : 'invalid_request' as const,
-                  title: errorMessage.errorTitle!,
-                  message: apiError.message,
-                  actions: [],
-                  canRetry: false,
-                  details: errorMessage.errorDetails,
-                },
-              }, managed.workspace.id)
-            } else {
-              const hasCurrentTurnError = managed.messages.some(message =>
-                message.role === 'error'
-                && !message.hidden
-                && message.timestamp > lastUserMsg.timestamp
-              )
-
-              if (!hasCurrentTurnError) {
-                const typedError = createTypedError('unknown_error', {
-                  title: 'No response received',
-                  message: 'The agent ended this turn without returning a response. Retry to continue.',
-                })
-                const errorMessage: Message = {
-                  id: generateMessageId(),
-                  role: 'error',
-                  content: `${typedError.title}: ${typedError.message}`,
-                  timestamp: this.monotonic(),
-                  errorCode: typedError.code,
-                  errorTitle: typedError.title,
-                  errorDetails: typedError.details,
-                  errorCanRetry: typedError.canRetry,
-                  errorActions: typedError.actions,
-                }
-                managed.messages.push(errorMessage)
-                this.sendEvent({
-                  type: 'typed_error',
-                  sessionId,
-                  error: {
-                    code: typedError.code,
-                    title: typedError.title,
-                    message: typedError.message,
-                    actions: typedError.actions,
-                    canRetry: typedError.canRetry,
-                    details: typedError.details,
-                  },
-                  timestamp: errorMessage.timestamp,
-                }, managed.workspace.id)
-              }
+              this.sendEvent({ type: 'typed_error', sessionId, error: {
+                code: typedError.code,
+                title: typedError.title,
+                message: typedError.message,
+                canRetry: typedError.canRetry,
+                actions: typedError.actions,
+              }, timestamp: errorMessage.timestamp }, managed.workspace.id)
             }
           }
 
@@ -10787,7 +10762,7 @@ export class SessionManager implements ISessionManager {
         }
 
         // Skip abort errors - these are expected when force-aborting via Query.close()
-        if (event.message.includes('aborted') || event.message.includes('AbortError')) {
+        if (managed.stopRequested && (event.message.includes('aborted') || event.message.includes('AbortError'))) {
           sessionLog.info('Skipping abort error event (expected during interrupt)')
           break
         }
@@ -10802,6 +10777,12 @@ export class SessionManager implements ISessionManager {
           (lowerErr.includes('401') && (lowerErr.includes('unauthorized') || lowerErr.includes('auth')))
 
         if (isPlainAuthError && this.attemptAuthRetry(sessionId, managed, workspaceId)) {
+          break
+        }
+
+        const classified = parseError(new Error(event.message))
+        if (classified.code !== 'unknown_error') {
+          await this.processEvent(managed, { type: 'typed_error', error: classified })
           break
         }
 
@@ -10826,7 +10807,7 @@ export class SessionManager implements ISessionManager {
 
         // Skip abort errors - these are expected when force-aborting via Query.close()
         const typedErrorMsg = event.error.message || event.error.title || ''
-        if (typedErrorMsg.includes('aborted') || typedErrorMsg.includes('AbortError')) {
+        if (managed.stopRequested && (typedErrorMsg.includes('aborted') || typedErrorMsg.includes('AbortError'))) {
           sessionLog.info('Skipping typed abort error event (expected during interrupt)')
           break
         }
@@ -10847,19 +10828,26 @@ export class SessionManager implements ISessionManager {
           break
         }
 
+        const currentUserIndex = managed.messages.findLastIndex(message => message.role === 'user' && !message.hidden && !message.isQueued)
+        const hasExecutedTools = managed.messages.slice(currentUserIndex + 1).some(message => message.role === 'tool')
+        const deliveredError = hasExecutedTools
+          ? { ...event.error, canRetry: false, actions: event.error.actions.filter(action => action.action !== 'retry') }
+          : event.error
+
         // Build rich error message with all diagnostic fields for persistence and UI display
         const typedErrorMessage: Message = {
           id: generateMessageId(),
           role: 'error',
           // Combine title and message for content display (handles undefined gracefully)
-          content: [event.error.title, event.error.message].filter(Boolean).join(': ') || 'An error occurred',
+          content: [deliveredError.title, deliveredError.message].filter(Boolean).join(': ') || 'An error occurred',
           timestamp: this.monotonic(),
           // Rich error fields for diagnostics and retry functionality
-          errorCode: event.error.code,
-          errorTitle: event.error.title,
-          errorDetails: event.error.details,
-          errorOriginal: event.error.originalError,
-          errorCanRetry: event.error.canRetry,
+          errorCode: deliveredError.code,
+          errorTitle: deliveredError.title,
+          errorDetails: deliveredError.details,
+          errorOriginal: deliveredError.originalError,
+          errorCanRetry: deliveredError.canRetry,
+          errorActions: deliveredError.actions,
         }
         managed.messages.push(typedErrorMessage)
         // Send typed_error event with full structure for renderer to handle
@@ -10867,13 +10855,13 @@ export class SessionManager implements ISessionManager {
           type: 'typed_error',
           sessionId,
           error: {
-            code: event.error.code,
-            title: event.error.title,
-            message: event.error.message,
-            actions: event.error.actions,
-            canRetry: event.error.canRetry,
-            details: event.error.details,
-            originalError: event.error.originalError,
+            code: deliveredError.code,
+            title: deliveredError.title,
+            message: deliveredError.message,
+            actions: deliveredError.actions,
+            canRetry: deliveredError.canRetry,
+            details: deliveredError.details,
+            originalError: deliveredError.originalError,
           },
           timestamp: typedErrorMessage.timestamp,
         }, workspaceId)

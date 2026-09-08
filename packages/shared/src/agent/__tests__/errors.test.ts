@@ -100,3 +100,18 @@ describe('parseError image-input classification', () => {
       .not.toBe('image_remote_rejected')
   })
 })
+
+
+describe('terminal response diagnostics (#295)', () => {
+  it.each([
+    ['context_length_exceeded: private payload', 'context_limit'],
+    ['Response stream closed unexpectedly: secret endpoint', 'stream_interrupted'],
+    ['Pi subprocess exited unexpectedly (code 1): private path', 'agent_process_exited'],
+  ])('classifies %s without exposing raw details', (message, code) => {
+    const error = parseError(new Error(message))
+    expect(error.code).toBe(code)
+    expect(error.originalError).toBeUndefined()
+    expect(error.canRetry).toBe(false)
+    expect(error.actions).toEqual([])
+  })
+})

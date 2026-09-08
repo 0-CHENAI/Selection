@@ -510,6 +510,11 @@ export type ErrorCode =
   | 'queued_message_replay_failed'  // A message queued during an active turn could not be auto-replayed (#616)
   | 'sdk_binary_missing'     // SDK subprocess binary not present on disk (incomplete bundle)
   | 'sdk_cwd_missing'        // SDK subprocess cwd not present on disk (stale cross-machine import)
+  | 'no_response'
+  | 'tool_only_response'
+  | 'context_limit'
+  | 'stream_interrupted'
+  | 'agent_process_exited'
   | 'unknown_error';
 
 /**

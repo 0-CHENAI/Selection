@@ -1,3 +1,4 @@
+import { isTerminalResponseError } from '@/utils/terminal-error'
 import * as React from "react"
 import { useSetAtom } from "jotai"
 import { useTranslation } from "react-i18next"
@@ -2391,9 +2392,11 @@ interface MessageBubbleProps {
  */
 function ErrorMessage({ message, onOpenUrl, sessionId, onRetry }: { message: Message; onOpenUrl?: (url: string) => void; sessionId?: string; onRetry?: () => void }) {
   const { t } = useTranslation()
+  const terminalCode = isTerminalResponseError(message.errorCode) ? message.errorCode : undefined
   const hasDetails = (message.errorDetails && message.errorDetails.length > 0) || message.errorOriginal
   const [detailsOpen, setDetailsOpen] = React.useState(false)
   const actions = message.errorActions?.filter(a => {
+    if (a.action === 'retry' && (terminalCode || message.errorCanRetry === false)) return false
     if (a.action === 'open_url') return !!a.url && !!onOpenUrl
     return true
   })
@@ -2409,9 +2412,9 @@ function ErrorMessage({ message, onOpenUrl, sessionId, onRetry }: { message: Mes
         } as React.CSSProperties}
       >
         <div className="text-xs text-destructive/50 mb-0.5 font-semibold">
-          {message.errorTitle || t('common.error')}
+          {terminalCode ? t(`chat.terminal.${terminalCode}.title`) : message.errorTitle || t('common.error')}
         </div>
-        <p className="text-sm text-destructive">{message.content}</p>
+        <p className="text-sm text-destructive">{terminalCode ? t(`chat.terminal.${terminalCode}.message`) : message.content}</p>
 
         {/* Action buttons */}
         {actions && actions.length > 0 && (
@@ -2428,7 +2431,7 @@ function ErrorMessage({ message, onOpenUrl, sessionId, onRetry }: { message: Mes
                 }}
                 className="text-xs px-2 py-0.5 rounded border border-destructive/20 text-destructive/70 hover:text-destructive hover:border-destructive/40 transition-colors"
               >
-                {action.label}{action.action === 'open_url' ? ' ↗' : ''}
+                {action.action === 'retry' ? t('common.retry') : action.label}{action.action === 'open_url' ? ' ↗' : ''}
               </button>
             ))}
           </div>

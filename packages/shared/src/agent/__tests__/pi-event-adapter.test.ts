@@ -869,21 +869,20 @@ describe('PiEventAdapter', () => {
       expect(events.every(event => event.type !== 'error')).toBe(true);
     });
 
-    it('should not emit error without errorMessage even if stopReason is error', () => {
+    it('preserves a terminal failure even without provider errorMessage', () => {
       collect(adapter.adaptEvent({ type: 'turn_start' } as any));
       const events = collect(adapter.adaptEvent({
         type: 'message_end',
         message: {
           role: 'assistant',
           stopReason: 'error',
-          // No errorMessage — fall through to normal text extraction
+          // No errorMessage: do not promote partial text to a successful final.
           content: 'Some partial content',
         },
       } as any));
 
-      // Should emit as text_complete, not error
       expect(events).toHaveLength(1);
-      expect(events[0].type).toBe('text_complete');
+      expect(events[0]).toMatchObject({ type: 'typed_error', error: { code: 'stream_interrupted', canRetry: false } });
     });
   });
 
