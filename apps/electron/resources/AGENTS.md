@@ -16,7 +16,7 @@ This folder contains assets that are bundled with the Electron app and synced to
 | `docs/` | `~/.selection/docs/` | Always overwrite on launch |
 | `themes/` | `~/.selection/themes/` | Always overwrite on launch |
 | `permissions/` | `~/.selection/permissions/` | Always overwrite on launch |
-| `tool-icons/` | `~/.selection/tool-icons/` | Always overwrite on launch |
+| `tool-icons/` | `~/.selection/tool-icons/` | Copy missing files; refresh `craft-agent.svg` when stale |
 | `release-notes/` | `~/.selection/release-notes/` | Always overwrite on launch |
 | `config-defaults.json` | `~/.selection/config-defaults.json` | Always overwrite on launch |
 

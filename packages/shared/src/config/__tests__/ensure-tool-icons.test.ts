@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, statSync, utimesSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import { pathToFileURL } from 'url'
@@ -65,5 +65,42 @@ describe('ensureToolIcons (#307)', () => {
     const userDir = join(configDir, 'tool-icons')
     expect(readFileSync(join(userDir, 'craft-agent.svg'), 'utf-8')).toBe('<svg id="swan" />')
     expect(readFileSync(join(userDir, 'git.svg'), 'utf-8')).toBe('<svg id="git" />')
+  })
+
+  it('does not rewrite a Selection icon that already matches the bundle', () => {
+    const assetsRoot = mkdtempSync(join(tmpdir(), 'tool-icons-same-'))
+    const bundledDir = join(assetsRoot, 'resources', 'tool-icons')
+    mkdirSync(bundledDir, { recursive: true })
+    const swan = '<svg id="swan" />'
+    writeFileSync(join(bundledDir, 'craft-agent.svg'), swan)
+
+    const configDir = mkdtempSync(join(tmpdir(), 'tool-icons-current-'))
+    const dest = join(configDir, 'tool-icons', 'craft-agent.svg')
+    mkdirSync(join(configDir, 'tool-icons'), { recursive: true })
+    writeFileSync(dest, swan)
+    utimesSync(dest, 1_600_000_000, 1_600_000_000)
+
+    runEnsureToolIcons(configDir, assetsRoot)
+
+    expect(readFileSync(dest, 'utf-8')).toBe(swan)
+    expect(statSync(dest).mtimeMs).toBe(1_600_000_000_000)
+  })
+
+  it('still refreshes the Selection icon when another bundled copy fails', () => {
+    const assetsRoot = mkdtempSync(join(tmpdir(), 'tool-icons-sibling-'))
+    const bundledDir = join(assetsRoot, 'resources', 'tool-icons')
+    mkdirSync(bundledDir, { recursive: true })
+    writeFileSync(join(bundledDir, 'craft-agent.svg'), '<svg id="swan" />')
+    writeFileSync(join(bundledDir, 'git.svg'), '<svg id="git-bundled" />')
+
+    const configDir = mkdtempSync(join(tmpdir(), 'tool-icons-blocked-'))
+    const userDir = join(configDir, 'tool-icons')
+    mkdirSync(join(userDir, 'git.svg'), { recursive: true })
+    writeFileSync(join(userDir, 'craft-agent.svg'), '<svg id="old-s" />')
+
+    runEnsureToolIcons(configDir, assetsRoot)
+
+    expect(readFileSync(join(userDir, 'craft-agent.svg'), 'utf-8')).toBe('<svg id="swan" />')
+    expect(statSync(join(userDir, 'git.svg')).isDirectory()).toBe(true)
   })
 })
