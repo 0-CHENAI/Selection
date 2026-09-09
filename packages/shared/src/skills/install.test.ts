@@ -1,4 +1,5 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import * as fs from "node:fs";
+import { afterEach, describe, expect, test, spyOn } from "bun:test";
 import {
   mkdtempSync,
   mkdirSync,
@@ -50,6 +51,28 @@ function fixture() {
   };
 }
 describe("skill installation contract", () => {
+  test("failed transaction initialization releases its lock for retry", () => {
+    const f = fixture();
+    const sync = spyOn(fs, "fsyncSync").mockImplementationOnce(() => {
+      throw Object.assign(new Error("injected sync failure"), { code: "EPERM" });
+    });
+    try {
+      expect(() => acquireInstallLock(f.workspacePath, "sample")).toThrow("injected sync failure");
+      expect(existsSync(join(f.workspacePath, ".skill-install", "sample"))).toBe(false);
+    } finally {
+      sync.mockRestore();
+    }
+    const lock = acquireInstallLock(f.workspacePath, "sample");
+    try {
+      writeRecord(lock.dir, { pid: process.pid, phase: "prepared", hadTarget: false });
+      expect(JSON.parse(readFileSync(join(lock.dir, "record.json"), "utf8")).phase).toBe("prepared");
+      expect(() => acquireInstallLock(f.workspacePath, "sample")).toThrow();
+      expect(existsSync(lock.dir)).toBe(true);
+    } finally {
+      lock.release();
+    }
+  });
+
   test("one invocation validates and loads; identical install is idempotent", async () => {
     const f = fixture();
     let refresh = 0;
@@ -63,7 +86,7 @@ describe("skill installation contract", () => {
       },
       true,
     );
-    expect(result.status).toBe("installed");
+    expect(result.status, JSON.stringify(result)).toBe("installed");
     expect(result.validation?.runtime).toBe("not_verified");
     expect(loadWorkspaceSkills(f.workspacePath).map((s) => s.slug)).toEqual([
       "sample",
@@ -195,7 +218,7 @@ describe("skill installation contract", () => {
       { ...f.ctx, workingDirectory: project },
       true,
     );
-    expect(result.status).toBe("installed");
+    expect(result.status, JSON.stringify(result)).toBe("installed");
     expect(result.shadowed).toBe(true);
     expect(result.effectivePath).toContain(join(".agents", "skills", "sample"));
   });

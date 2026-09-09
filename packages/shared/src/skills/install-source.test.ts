@@ -73,7 +73,7 @@ test("real HTTP fixture resolves commit and downloads archive without GitHub HTM
       "run.sh",
     ]);
     expect(result.files.find((f) => f.path === "run.sh")!.mode & 0o111).toBe(
-      0o111,
+      process.platform === "win32" ? 0 : 0o111,
     );
     expect(urls).toEqual([
       "/repos/a/repo",

@@ -68,9 +68,10 @@ export function readRecord(dir: string): InstallRecord | undefined {
 }
 export function writeRecord(dir: string, record: InstallRecord): void {
   const file = join(dir, "record.tmp");
-  writeFileSync(file, JSON.stringify(record));
-  const fd = openSync(file, "r");
+  // Windows requires a writable handle for FlushFileBuffers (fsync).
+  const fd = openSync(file, "w");
   try {
+    writeFileSync(fd, JSON.stringify(record));
     fsyncSync(fd);
   } finally {
     closeSync(fd);
@@ -175,18 +176,23 @@ export function acquireInstallLock(
   mkdirSync(root, { recursive: true });
   const dir = join(root, slug);
   mkdirSync(dir); // EEXIST means busy; never steal an active operation.
-  // Check after mkdir: a dead transaction may have moved into recovery concurrently.
-  if (recoveryDirectory(workspace, slug)) {
-    rmSync(dir, { recursive: true, force: true });
-    throw Object.assign(new Error("Skill recovery is in progress"), {
-      code: "EEXIST",
+  try {
+    // Check after mkdir: a dead transaction may have moved into recovery concurrently.
+    if (recoveryDirectory(workspace, slug)) {
+      throw Object.assign(new Error("Skill recovery is in progress"), {
+        code: "EEXIST",
+      });
+    }
+    writeRecord(dir, {
+      pid: process.pid,
+      phase: "staging",
+      hadTarget: existsSync(join(workspace, "skills", slug)),
     });
+  } catch (error) {
+    // We own this newly created directory; no publish or backup has started yet.
+    rmSync(dir, { recursive: true, force: true });
+    throw error;
   }
-  writeRecord(dir, {
-    pid: process.pid,
-    phase: "staging",
-    hadTarget: existsSync(join(workspace, "skills", slug)),
-  });
   return { dir, release: () => rmSync(dir, { recursive: true, force: true }) };
 }
 /** Stable old view while a replacement is prepared; never expose a new half-install. */
