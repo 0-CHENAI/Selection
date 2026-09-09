@@ -580,6 +580,62 @@ describe('TaskRunner v3 quality/efficiency', () => {
     expect(host.dispatchedNames()).toContain('next');
   });
 
+  it('publishes structured output before a pool wake expands a dependent map', async () => {
+    const pool = new LlmConnectionPool(1);
+    saveTaskSpec(root, v3Spec({
+      id: 'v3demo',
+      runner: 'conduct',
+      defaults: { llmConnection: 'shared' },
+      max_parallel: 2,
+      nodes: [
+        {
+          id: 'source',
+          prompt: 'produce zones',
+          outputs: [{ name: 'zones', kind: 'param', type: 'json' }],
+        },
+        {
+          id: 'fan',
+          kind: 'map',
+          depends_on: ['source'],
+          for_each: '${nodes.source.output.zones}',
+          prompt: 'read ${item}',
+        },
+      ],
+    }));
+    const r = new TaskRunner({
+      host,
+      workspaceId: 'ws',
+      workspaceRoot: root,
+      now: () => '2026-06-07T00:00:00.000Z',
+      connectionPool: pool,
+    });
+    r.run('v3demo', { runId: 'r1', orchestratorSessionId: 'orch', orchestrateAllowed: true, verifyOnComplete: false });
+    await tick();
+    expect(r.submitNodeOutput(host.sessionIdFor('source'), {
+      values: { zones: ['zone-a', 'zone-b', 'zone-c'] },
+    }).ok).toBe(true);
+    host.complete('source', { finalText: 'done', tokenUsage: tu(2, 1) });
+    await tick();
+
+    const firstMapPrompt = host.sent.find((sent) => sent.sessionId === host.sessionIdFor('fan#0'))?.message ?? '';
+    expect(firstMapPrompt).toContain('read zone-a');
+    expect(firstMapPrompt).not.toContain('${nodes.source.output.zones}');
+
+    host.complete('fan#0', { finalText: 'A', tokenUsage: tu(2, 1) });
+    await tick();
+    const secondMapPrompt = host.sent.find((sent) => sent.sessionId === host.sessionIdFor('fan#1'))?.message ?? '';
+    expect(secondMapPrompt).toContain('read zone-b');
+
+    host.complete('fan#1', { finalText: 'B', tokenUsage: tu(2, 1) });
+    await tick();
+    const thirdMapPrompt = host.sent.find((sent) => sent.sessionId === host.sessionIdFor('fan#2'))?.message ?? '';
+    expect(thirdMapPrompt).toContain('read zone-c');
+
+    host.complete('fan#2', { finalText: 'C', tokenUsage: tu(2, 1) });
+    await tick();
+    expect(r.getRunState('v3demo', 'r1')?.nodes.find((node) => node.id === 'fan')?.state).toBe('done');
+  });
+
   it('acquires map instances through the connection pool', async () => {
     const pool = new LlmConnectionPool(1);
     saveTaskSpec(root, v3Spec({
