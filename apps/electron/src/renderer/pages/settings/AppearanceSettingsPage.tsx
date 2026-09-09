@@ -2,23 +2,20 @@
  * AppearanceSettingsPage
  *
  * Visual customization settings: theme mode, color theme, font,
- * workspace-specific theme overrides, and CLI tool icon mappings.
+ * and workspace-specific theme overrides.
  */
 
 import { useState, useEffect, useMemo, useCallback } from 'react'
 import { useTranslation } from 'react-i18next'
 import { LANGUAGES, type LanguageCode } from '@craft-agent/shared/i18n'
-import type { ColumnDef } from '@tanstack/react-table'
 import { PanelHeader } from '@/components/app-shell/PanelHeader'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { HeaderMenu } from '@/components/ui/HeaderMenu'
-import { EditPopover, EditButton, getEditConfig } from '@/components/ui/EditPopover'
 import { useTheme } from '@/context/ThemeContext'
 import { useAppShellContext } from '@/context/AppShellContext'
 import { routes } from '@/lib/navigate'
 import { Monitor, Sun, Moon } from 'lucide-react'
 import type { DetailsPageMeta } from '@/lib/navigation-registry'
-import type { ToolIconMapping } from '../../../shared/types'
 
 import {
   SettingsSection,
@@ -37,8 +34,6 @@ import { workspaceAvatarColorsAtom } from '@/atoms/workspace-avatar-colors'
 import { showBackgroundFinishedChipAtom } from '@/atoms/background-finished'
 import { setProjectColorTreatment, useProjectColorTreatment } from '@/hooks/useProjectColorTreatment'
 import { PROJECT_COLOR_PALETTE, type ProjectColorTreatment } from '@/utils/project-colors'
-import { Info_DataTable, SortableHeader } from '@/components/info/Info_DataTable'
-import { Info_Badge } from '@/components/info/Info_Badge'
 import type { PresetTheme } from '@config/theme'
 
 export const meta: DetailsPageMeta = {
@@ -46,64 +41,8 @@ export const meta: DetailsPageMeta = {
   slug: 'appearance',
 }
 
-// ============================================
-// Tool Icons Table
-// ============================================
-
-/**
- * Column definitions for the tool icon mappings table.
- * Shows a preview icon, tool name, and the CLI commands that trigger it.
- */
-const getToolIconColumns = (t: (key: string) => string): ColumnDef<ToolIconMapping>[] => [
-  {
-    accessorKey: 'iconDataUrl',
-    header: () => <span className="p-1.5 pl-2.5">{t("settings.appearance.iconHeader")}</span>,
-    cell: ({ row }) => (
-      <div className="p-1.5 pl-2.5">
-        <img
-          src={row.original.iconDataUrl}
-          alt={row.original.displayName}
-          className="w-5 h-5 object-contain"
-        />
-      </div>
-    ),
-    size: 60,
-    enableSorting: false,
-  },
-  {
-    accessorKey: 'displayName',
-    header: ({ column }) => <SortableHeader column={column} title={t("settings.appearance.toolHeader")} />,
-    cell: ({ row }) => (
-      <div className="p-1.5 pl-2.5 font-medium">
-        {row.original.displayName}
-      </div>
-    ),
-    size: 150,
-  },
-  {
-    accessorKey: 'commands',
-    header: () => <span className="p-1.5 pl-2.5">{t("settings.appearance.commandsHeader")}</span>,
-    cell: ({ row }) => (
-      <div className="p-1.5 pl-2.5 flex flex-wrap gap-1">
-        {row.original.commands.map(cmd => (
-          <Info_Badge key={cmd} color="muted" className="font-mono">
-            {cmd}
-          </Info_Badge>
-        ))}
-      </div>
-    ),
-    meta: { fillWidth: true },
-    enableSorting: false,
-  },
-]
-
-// ============================================
-// Main Component
-// ============================================
-
 export default function AppearanceSettingsPage() {
   const { t, i18n } = useTranslation()
-  const toolIconColumns = useMemo(() => getToolIconColumns(t), [t])
 
   const {
     mode,
@@ -127,12 +66,6 @@ export default function AppearanceSettingsPage() {
 
   // Per-workspace theme overrides (workspaceId -> themeId or undefined)
   const [workspaceThemes, setWorkspaceThemes] = useState<Record<string, string | undefined>>({})
-
-  // Tool icon mappings loaded from main process
-  const [toolIcons, setToolIcons] = useState<ToolIconMapping[]>([])
-
-  // Resolved path to tool-icons.json (needed for EditPopover and "Edit File" action)
-  const [toolIconsJsonPath, setToolIconsJsonPath] = useState<string | null>(null)
 
   // Connection icon visibility toggle
   const [showConnectionIcons, setShowConnectionIcons] = useState(() =>
@@ -206,24 +139,6 @@ export default function AppearanceSettingsPage() {
       }
     }
     loadWorkspaceThemes()
-  }, [])
-
-  // Load tool icon mappings and resolve the config file path on mount
-  useEffect(() => {
-    const load = async () => {
-      if (!window.electronAPI) return
-      try {
-        const [mappings, homeDir] = await Promise.all([
-          window.electronAPI.getToolIconMappings(),
-          window.electronAPI.getHomeDir(),
-        ])
-        setToolIcons(mappings)
-        setToolIconsJsonPath(`${homeDir}/.selection/tool-icons/tool-icons.json`)
-      } catch (error) {
-        console.error('Failed to load tool icon mappings:', error)
-      }
-    }
-    load()
   }, [])
 
   // Handler for workspace theme change
@@ -430,34 +345,6 @@ export default function AppearanceSettingsPage() {
                       ]}
                     />
                   </SettingsRow>
-                </SettingsCard>
-              </SettingsSection>
-
-              {/* Tool Icons — shows the command → icon mapping used in turn cards */}
-              <SettingsSection
-                title={t("settings.appearance.toolIcons")}
-                description={t("settings.appearance.toolIconsDesc")}
-                action={
-                  toolIconsJsonPath ? (
-                    <EditPopover
-                      trigger={<EditButton />}
-                      {...getEditConfig('edit-tool-icons', toolIconsJsonPath)}
-                      secondaryAction={{
-                        label: t("settings.appearance.editFile"),
-                        filePath: toolIconsJsonPath,
-                      }}
-                    />
-                  ) : undefined
-                }
-              >
-                <SettingsCard>
-                  <Info_DataTable
-                    columns={toolIconColumns}
-                    data={toolIcons}
-                    searchable={{ placeholder: t("settings.appearance.searchTools") }}
-                    maxHeight={480}
-                    emptyContent={t("settings.appearance.noToolIcons")}
-                  />
                 </SettingsCard>
               </SettingsSection>
 
