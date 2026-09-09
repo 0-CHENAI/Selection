@@ -467,8 +467,8 @@ app.whenReady().then(async () => {
     // In packaged app, resources are at dist/resources/ (same level as __dirname)
     // In dev, resources are at ../resources/ (sibling of dist/)
     const dockIconPath = [
-      join(__dirname, 'resources/icon.png'),
-      join(__dirname, '../resources/icon.png'),
+      join(__dirname, 'resources/icon-dock.png'),
+      join(__dirname, '../resources/icon-dock.png'),
     ].find(p => existsSync(p))
 
     if (dockIconPath) {
