@@ -35,6 +35,8 @@ it.each([false, true])('accepts a first token after 10 seconds through the inter
   let timer: ReturnType<typeof setTimeout> | undefined;
   const server = Bun.serve({
     port: 0,
+    // Keep the fixture alive beyond the deliberately slow upstream prefill.
+    idleTimeout: 30,
     fetch() {
       return new Response(new ReadableStream({
         start(controller) {
