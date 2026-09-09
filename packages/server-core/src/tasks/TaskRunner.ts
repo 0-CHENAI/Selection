@@ -151,7 +151,7 @@ export interface TaskRunnerDeps {
   /** Workspace-level LLM connection concurrency pool. Shared across runs. */
   connectionPool?: LlmConnectionPool;
   /** Fired after a pool slot is released so sibling runs can retry acquire. */
-  onConnectionReleased?: () => void;
+  onConnectionReleased?: (sourceRunKey?: string) => void;
 }
 
 export interface RunOptions {
@@ -1132,10 +1132,10 @@ class ActiveRun {
 
   private completeControlNode(nodeId: string, text: string, values?: Record<string, unknown>): void {
     const st = this.state.get(nodeId)!;
-    st.state = 'done';
     const output: NodeOutput = { text, ...(values ? { params: values } : {}) };
     this.outputs[nodeId] = output;
     writeNodeOutput(this.deps.workspaceRoot, this.slug, this.runId, nodeId, output);
+    st.state = 'done';
     this.log({ kind: 'node-finished', nodeId, sessionId: '', state: 'done' });
     this.emitChanged();
   }
@@ -1385,8 +1385,6 @@ class ActiveRun {
   }
 
   private afterLoopInstance(node: TaskNode, instanceKey: string, output: NodeOutput): void {
-    this.instanceOutputs.set(instanceKey, output);
-    writeNodeAttempt(this.deps.workspaceRoot, this.slug, this.runId, instanceKey, 1, output);
     const until = node.loop?.until;
     if (
       until &&
@@ -1895,13 +1893,34 @@ class ActiveRun {
       }
       if (this.requeueFailedNodeVerdict(nodeId, evt.sessionId, defId, st)) return;
       const output: NodeOutput = submitted ?? { text };
-      st.state = 'done';
+      // Publish the completed output before marking the node done or releasing
+      // its pool slot. Releasing can synchronously wake dependent schedulers.
       writeNodeAttempt(this.deps.workspaceRoot, this.slug, this.runId, nodeId, st.attempt || 1, output);
+      const expandingInstance = node && (
+        this.replicaCounts.has(defId)
+        || node.kind === 'map'
+        || node.kind === 'loop'
+      );
+      if (expandingInstance) {
+        this.instanceOutputs.set(nodeId, output);
+      } else {
+        this.outputs[defId] = output;
+        writeNodeOutput(this.deps.workspaceRoot, this.slug, this.runId, defId, output);
+        if (node) {
+          if (this.shouldBypassWorkspaceCache(node, evt.sessionId)) {
+            this.markCache(node.id, 'bypass');
+            this.cacheBypasses += 1;
+            this.log({ kind: 'cache-bypass', nodeId: node.id, reason: 'tool-or-dynamic' });
+          } else {
+            this.rememberCache(node, output);
+          }
+        }
+      }
+      st.state = 'done';
       this.log({ kind: 'node-finished', nodeId, sessionId: evt.sessionId, state: 'done' });
       this.applyCard(evt.sessionId, DONE_STATUS);
       this.settleSessionSlot(nodeId, evt.sessionId);
       if (node && this.replicaCounts.has(defId)) {
-        this.instanceOutputs.set(nodeId, output);
         const count = this.replicaCounts.get(defId)!;
         const allDone = Array.from({ length: count }, (_, i) => this.instances.get(instanceId(defId, i)))
           .every((instance) => isTerminalNodeState(instance?.state));
@@ -1912,7 +1931,6 @@ class ActiveRun {
         return;
       }
       if (node && (node.kind === 'map' || node.kind === 'loop')) {
-        this.instanceOutputs.set(nodeId, output);
         if (node.kind === 'map') {
           const items = this.mapItems.get(defId) ?? [];
           const allDone = items.every((_, i) => isTerminalNodeState(this.instances.get(instanceId(defId, i))?.state));
@@ -1924,17 +1942,6 @@ class ActiveRun {
         this.emitChanged();
         this.scheduleReady();
         return;
-      }
-      this.outputs[defId] = output;
-      writeNodeOutput(this.deps.workspaceRoot, this.slug, this.runId, defId, output);
-      if (node) {
-        if (this.shouldBypassWorkspaceCache(node, evt.sessionId)) {
-          this.markCache(node.id, 'bypass');
-          this.cacheBypasses += 1;
-          this.log({ kind: 'cache-bypass', nodeId: node.id, reason: 'tool-or-dynamic' });
-        } else {
-          this.rememberCache(node, output);
-        }
       }
       this.emitChanged();
       this.scheduleReady();
@@ -2797,7 +2804,7 @@ class ActiveRun {
     if (!key) return;
     this.acquiredConnections.delete(nodeId);
     this.deps.connectionPool?.release(key);
-    if (notify) this.deps.onConnectionReleased?.();
+    if (notify) this.notifyConnectionReleased();
   }
 
   private settleSessionSlot(nodeId: string, sessionId?: string, notify = true): void {
@@ -2807,7 +2814,7 @@ class ActiveRun {
   }
 
   private notifyConnectionReleased(): void {
-    this.deps.onConnectionReleased?.();
+    this.deps.onConnectionReleased?.(`${this.slug}:${this.runId}`);
   }
 
   private hasExpandingWork(): boolean {
@@ -3182,15 +3189,19 @@ export class TaskRunner {
     this.deps = {
       ...deps,
       connectionPool: pool,
-      onConnectionReleased: () => {
+      onConnectionReleased: (sourceRunKey?: string) => {
         deps.onConnectionReleased?.();
-        this.wakeRunnableRuns();
+        this.wakeRunnableRuns(sourceRunKey);
       },
     };
   }
 
-  private wakeRunnableRuns(): void {
-    for (const run of this.runs.values()) run.nudgeSchedule();
+  private wakeRunnableRuns(sourceRunKey?: string): void {
+    // The source run schedules itself after its completion transaction. A pool
+    // release only needs to wake sibling runs that may be waiting for this slot.
+    for (const [key, run] of this.runs) {
+      if (key !== sourceRunKey) run.nudgeSchedule();
+    }
   }
 
   private key(slug: string, runId: string): string {
