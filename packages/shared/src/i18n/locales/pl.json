@@ -1743,6 +1743,7 @@
   "tasks.resultsEmpty": "Brak wyników. Uruchom zadanie, aby zobaczyć tutaj wynik.",
   "tasks.resumeRun": "Wznów przebieg",
   "tasks.retryFailedNodes": "Ponów nieudane węzły",
+  "tasks.retryFailedNodesHint": "Ponawia nieudane kroki i zależne od nich kroki. Operacje narzędzi mogą zostać powtórzone; pozostałe poprawne wyniki są zachowane.",
   "tasks.revisionAdded": "Dodano",
   "tasks.revisionApplyConfirm": "Zastosuj rewizję",
   "tasks.revisionApplyFailed": "Nie udało się zastosować rewizji.",

@@ -134,6 +134,43 @@ describe('TaskRunner v3 quality/efficiency', () => {
     else process.env.CRAFT_FEATURE_TASKS_ORCHESTRATE = prevFlag;
   });
 
+  it.each([false, true])('requires a fresh reviewer verdict after transport failure (restart=%s)', async restart => {
+    saveTaskSpec(root, v3Spec({ runner: 'conduct', execution: { verification: { required: false } }, nodes: [
+      { id: 'work', prompt: 'work' }, { id: 'review', kind: 'verify', prompt: 'review', depends_on: ['work'] },
+      { id: 'after', prompt: 'after', depends_on: ['review'] },
+    ] }));
+    let r = runner(); r.run('v3demo', { runId: 'r1', verifyOnComplete: false }); await tick();
+    host.complete('work', { finalText: 'kept' }); await tick();
+    expect(r.submitNodeVerdict(host.sessionIdFor('review'), { result: 'pass', reason: 'old', evidence: 'old' }).ok).toBe(true);
+    host.complete('review', { reason: 'error' }); await tick();
+    expect(r.getRunState('v3demo', 'r1')?.status).toBe('failed');
+    if (restart) r = runner();
+    r.continue('v3demo', 'r1'); await tick();
+    expect(r.getRunState('v3demo', 'r1')?.nodes.find(n => n.id === 'review')?.verdict).toBeUndefined();
+    expect(host.dispatchedNames().filter(n => n === 'work')).toHaveLength(1);
+    expect(r.submitNodeVerdict(host.sessionIdFor('review'), { result: 'pass', reason: 'new', evidence: 'new' }).ok).toBe(true);
+    host.complete('review', { finalText: 'reviewed' }); await tick();
+    host.complete('after'); await tick();
+    expect(r.getRunState('v3demo', 'r1')?.status).toBe('completed');
+  });
+
+  it('requires a new coordinator decision before dispatching a recovered run', async () => {
+    saveTaskSpec(root, v3Spec({ nodes: [{ id: 'a', prompt: 'A' }] }));
+    const r = runner(); r.run('v3demo', { runId: 'r1', orchestratorSessionId: 'orch', orchestrateAllowed: true });
+    const advance = (id: string) => r.applyOrchestrationDecisionByRunId('orch', {
+      runId: 'r1', checkpointId: readRunLog(root, 'v3demo', 'r1').findLast(e => e.kind === 'coordinator-request')!.checkpointId, decisionId: id, baseRevision: 0, action: 'continue',
+    });
+    advance('start'); await tick(); host.complete('a', { reason: 'error' }); await tick();
+    advance('settle'); await tick();
+    expect(r.getRunState('v3demo', 'r1')?.status).toBe('failed');
+    const snapshot = r.continue('v3demo', 'r1');
+    expect(snapshot.status).toBe('waiting-coordinator');
+    expect(host.dispatchedNames()).toEqual(['a']);
+    advance('retry'); await tick();
+    expect(host.dispatchedNames()).toEqual(['a', 'a']);
+    await r.stop('v3demo', 'r1');
+  });
+
   function runner() {
     return new TaskRunner({ host, workspaceId: 'ws', workspaceRoot: root, now: () => '2026-06-07T00:00:00.000Z' });
   }

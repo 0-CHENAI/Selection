@@ -383,12 +383,15 @@ export class PiEventAdapter extends BaseEventAdapter {
       case 'message_end': {
         // Pi SDK emits message_end for ALL messages (user, assistant, toolResult).
         // Only process assistant messages — skip user prompts and tool results.
-        const msg = event.message as { role?: string; stopReason?: string; errorMessage?: string; usage?: { input: number; output: number; cacheRead: number; cacheWrite: number; totalTokens: number; cost: { total: number } }; id?: string } | undefined;
+        const msg = event.message as { role?: string; stopReason?: string; errorMessage?: string; craftTransportDiagnostics?: string[]; usage?: { input: number; output: number; cacheRead: number; cacheWrite: number; totalTokens: number; cost: { total: number } }; id?: string } | undefined;
         // SDK message id, set by pi-agent-server when forwarding the event.
         // SessionManager uses this to correlate the follow-up `pi_turn_anchor`
         // event to the Craft assistant message created here (#782).
         const sdkMessageId = (event as { sdkMessageId?: string }).sdkMessageId ?? msg?.id;
         if (msg?.role !== 'assistant') break;
+        const transportDetails = Array.isArray(msg.craftTransportDiagnostics)
+          ? msg.craftTransportDiagnostics.filter(detail => typeof detail === 'string').slice(0, 8).map(detail => detail.slice(0, 4096))
+          : undefined;
 
         // Surface API errors — Pi SDK sets stopReason: 'error' and errorMessage on failures.
         if (msg.stopReason === 'error' && msg.errorMessage) {
@@ -407,7 +410,8 @@ export class PiEventAdapter extends BaseEventAdapter {
           // Classify the error — auth/billing errors should be typed so SessionManager
           // can trigger its auth-retry pipeline (refresh token + resend).
           const parsed = parseError(new Error(msg.errorMessage));
-          const isClassified = parsed.code !== 'unknown_error';
+          if (transportDetails?.length) parsed.details = transportDetails;
+          const isClassified = parsed.code !== 'unknown_error' || !!parsed.details?.length;
           if (isClassified) {
             yield { type: 'typed_error', error: parsed };
           } else {
@@ -419,7 +423,9 @@ export class PiEventAdapter extends BaseEventAdapter {
         // A failed/truncated terminal message may carry no provider error text.
         // Preserve its terminal meaning instead of degrading to an empty reply.
         if (msg.stopReason === 'error' || msg.stopReason === 'length' || msg.stopReason === 'max_tokens') {
-          yield { type: 'typed_error', error: createTypedError('stream_interrupted') };
+          yield { type: 'typed_error', error: createTypedError('stream_interrupted', {
+            details: transportDetails,
+          }) };
           break;
         }
 

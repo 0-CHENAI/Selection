@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
-import { existsSync, mkdtempSync, rmSync } from 'fs';
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import type { TokenUsage } from '@craft-agent/core/types';
@@ -143,6 +143,110 @@ describe('TaskRunner (Conductor)', () => {
     await tick();
     expect(runner.getRunState('partial', 'r1')?.status).toBe('completed');
     expect(runner.getRunState('partial', 'r1')?.tokensUsed).toBe(15);
+  });
+
+  it.each([[false, false, false], [true, false, false], [false, true, false], [true, true, false], [true, false, true], [true, true, true]])('recovers failed parallel instances (restart=%s, replicas=%s, legacy=%s)', async (restart, replicas, legacy) => {
+    saveTaskSpec(root, specOf({ schema_version: 2, id: 'recover-map', title: 'Map', goal: 'g',
+      params: [{ name: 'items', default: '["one","two"]' }],
+      nodes: [replicas ? { id: 'fan', prompt: '${index}', replicas: 2, aggregate: 'concat' } : { id: 'fan', kind: 'map', for_each: '${params.items}', prompt: '${item}' },
+        { id: 'after', depends_on: ['fan'], prompt: '${nodes.fan.output}' }],
+    }));
+    let runner = makeRunner();
+    runner.run('recover-map', { runId: 'r1', verifyOnComplete: false });
+    await tick();
+    host.complete('fan#0', { finalText: 'kept', tokenUsage: tu(10, 5) });
+    host.complete('fan#1', { reason: 'error' });
+    await tick();
+    expect(runner.getRunState('recover-map', 'r1')?.status).toBe('failed');
+    expect(runner.getRunState('recover-map', 'r1')?.canRetryFailedNodes).toBe(true);
+    if (legacy) {
+      // Older versions recorded only the parent stage failure, leaving the instance running on disk.
+      const log = readRunLog(root, 'recover-map', 'r1').filter(e => !(e.kind === 'node-finished' && e.nodeId === 'fan#1'));
+      writeFileSync(join(root, 'tasks/recover-map/runs/r1/run-log.jsonl'), log.map(e => JSON.stringify(e)).join('\n') + '\n');
+    }
+    if (restart) runner = makeRunner();
+    runner.continue('recover-map', 'r1');
+    await tick();
+    expect(host.dispatchedNames().filter(name => name === 'fan#0')).toHaveLength(1);
+    expect(host.dispatchedNames().filter(name => name === 'fan#1')).toHaveLength(2);
+    host.complete('fan#1', { finalText: 'recovered' });
+    await tick();
+    expect(host.promptFor('after')).toContain('kept');
+    expect(host.promptFor('after')).toContain('recovered');
+    host.complete('after');
+    await tick();
+    expect(runner.getRunState('recover-map', 'r1')?.status).toBe('completed');
+    expect(runner.getRunState('recover-map', 'r1')?.tokensUsed).toBe(15);
+  });
+
+  it.each([false, true])('retries a failed loop iteration while preserving successful iterations (restart=%s)', async restart => {
+    saveTaskSpec(root, specOf({ schema_version: 2, id: 'retry-loop', title: 'Loop', goal: 'g', nodes: [
+      { id: 'iter', kind: 'loop', loop: { max: 3, until: { ref: 'nodes.iter.output', op: 'contains', value: 'STOP' } }, prompt: '${prev}' },
+    ] }));
+    let runner = makeRunner(); runner.run('retry-loop', { runId: 'r1', verifyOnComplete: false }); await tick();
+    host.complete('iter#0', { finalText: 'kept' }); await tick();
+    host.complete('iter#1', { reason: 'error' }); await tick();
+    expect(runner.getRunState('retry-loop', 'r1')?.status).toBe('failed');
+    if (restart) runner = makeRunner();
+    runner.continue('retry-loop', 'r1'); await tick();
+    expect(host.dispatchedNames().filter(n => n === 'iter#0')).toHaveLength(1);
+    expect(host.dispatchedNames().filter(n => n === 'iter#1')).toHaveLength(2);
+    host.complete('iter#1', { finalText: 'STOP' }); await tick();
+    expect(runner.getRunState('retry-loop', 'r1')?.status).toBe('completed');
+  });
+
+  it.each([false, true])('reopens failed approval without implicitly approving it (restart=%s)', async restart => {
+    saveTaskSpec(root, specOf({ schema_version: 2, id: 'retry-approval', title: 'Approval', goal: 'g', nodes: [
+      { id: 'gate', kind: 'approval' }, { id: 'work', depends_on: ['gate'], prompt: 'work' },
+    ] }));
+    let runner = makeRunner(); runner.run('retry-approval', { runId: 'r1', verifyOnComplete: false });
+    runner.respondApproval('retry-approval', 'r1', 'gate', false); await tick();
+    if (restart) runner = makeRunner();
+    runner.continue('retry-approval', 'r1'); await tick();
+    expect(runner.getRunState('retry-approval', 'r1')?.status).toBe('waiting-approval');
+    expect(host.dispatchedNames()).toHaveLength(0);
+    runner.respondApproval('retry-approval', 'r1', 'gate', true); await tick();
+    host.complete('work'); await tick();
+    expect(runner.getRunState('retry-approval', 'r1')?.status).toBe('completed');
+  });
+
+  it.each([false, true])('invalidates completed all_done descendants but preserves unrelated successes (restart=%s)', async restart => {
+    saveTaskSpec(root, specOf({ schema_version: 2, id: 'retry-dependent', title: 'Dependent', goal: 'g', nodes: [
+      { id: 'bad', prompt: 'bad' }, { id: 'good', prompt: 'good' },
+      { id: 'after', depends_on: ['bad'], trigger: 'all_done', prompt: '${nodes.bad.output}' },
+    ] }));
+    let runner = makeRunner(); runner.run('retry-dependent', { runId: 'r1', verifyOnComplete: false }); await tick();
+    host.complete('good', { finalText: 'kept' }); host.complete('bad', { reason: 'error' }); await tick();
+    host.complete('after', { finalText: 'stale failure report' }); await tick();
+    expect(runner.getRunState('retry-dependent', 'r1')?.status).toBe('failed');
+    if (restart) runner = makeRunner();
+    runner.continue('retry-dependent', 'r1'); await tick();
+    expect(host.dispatchedNames().filter(n => n === 'good')).toHaveLength(1);
+    host.complete('bad', { finalText: 'recovered' }); await tick();
+    expect(host.dispatchedNames().filter(n => n === 'after')).toHaveLength(2);
+    host.complete('after', { finalText: 'new result' }); await tick();
+    expect(runner.getRunState('retry-dependent', 'r1')?.status).toBe('completed');
+  });
+
+  it.each([false, true])('rebuilds affected expanded descendants with fresh attempts (restart=%s)', async restart => {
+    saveTaskSpec(root, specOf({ schema_version: 2, id: 'retry-map-desc', title: 'Map', goal: 'g',
+      params: [{ name: 'items', default: '["one","two"]' }], nodes: [
+        { id: 'bad', prompt: 'bad' },
+        { id: 'fan', kind: 'map', trigger: 'all_done', depends_on: ['bad'], for_each: '${params.items}', prompt: '${item}' },
+      ],
+    }));
+    let runner = makeRunner(); runner.run('retry-map-desc', { runId: 'r1', verifyOnComplete: false }); await tick();
+    host.complete('bad', { reason: 'error' }); await tick();
+    host.complete('fan#0', { finalText: 'old-0' }); host.complete('fan#1', { finalText: 'old-1' }); await tick();
+    expect(runner.getRunState('retry-map-desc', 'r1')?.status).toBe('failed');
+    if (restart) runner = makeRunner();
+    runner.continue('retry-map-desc', 'r1'); await tick();
+    host.complete('bad', { finalText: 'new' }); await tick();
+    expect(host.dispatchedNames().filter(n => n === 'fan#0')).toHaveLength(2);
+    expect(runner.getRunState('retry-map-desc', 'r1')?.nodes.find(n => n.id === 'fan#0')?.attempt).toBe(2);
+    host.complete('fan#0', { finalText: 'new-0' }); host.complete('fan#1', { finalText: 'new-1' }); await tick();
+    expect(runner.getRunState('retry-map-desc', 'r1')?.status).toBe('completed');
+    expect(readNodeOutput(root, 'retry-map-desc', 'r1', 'fan')?.text).toBe('new-0\nnew-1');
   });
 
   function makeRunner() {

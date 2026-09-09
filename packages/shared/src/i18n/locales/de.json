@@ -1743,6 +1743,7 @@
   "tasks.resultsEmpty": "Noch keine Ergebnisse. Führe die Aufgabe aus, um die Ausgabe hier zu sehen.",
   "tasks.resumeRun": "Lauf fortsetzen",
   "tasks.retryFailedNodes": "Fehlgeschlagene Knoten erneut versuchen",
+  "tasks.retryFailedNodesHint": "Wiederholt fehlgeschlagene und betroffene nachfolgende Schritte. Werkzeugaktionen können erneut ausgeführt werden; unbetroffene erfolgreiche Ergebnisse bleiben erhalten.",
   "tasks.revisionAdded": "Hinzugefügt",
   "tasks.revisionApplyConfirm": "Revision anwenden",
   "tasks.revisionApplyFailed": "Die Revision konnte nicht angewendet werden.",

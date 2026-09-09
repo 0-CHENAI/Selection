@@ -1743,6 +1743,7 @@
   "tasks.resultsEmpty": "Még nincsenek eredmények. Futtasd a feladatot, hogy itt lásd a kimenetet.",
   "tasks.resumeRun": "Futtatás folytatása",
   "tasks.retryFailedNodes": "Sikertelen csomópontok újrapróbálása",
+  "tasks.retryFailedNodesHint": "Újrapróbálja a sikertelen és az érintett további lépéseket. Az eszközműveletek megismétlődhetnek; a nem érintett sikeres eredmények megmaradnak.",
   "tasks.revisionAdded": "Hozzáadva",
   "tasks.revisionApplyConfirm": "Revízió alkalmazása",
   "tasks.revisionApplyFailed": "A revízió nem alkalmazható.",
