@@ -1743,6 +1743,7 @@
   "tasks.resultsEmpty": "尚无结果。运行任务以在此处查看输出。",
   "tasks.resumeRun": "恢复运行",
   "tasks.retryFailedNodes": "重试失败节点",
+  "tasks.retryFailedNodesHint": "重试失败步骤及受影响的后续步骤，可能再次执行工具操作；保留不受影响的成功结果。",
   "tasks.revisionAdded": "新增",
   "tasks.revisionApplyConfirm": "应用 Revision",
   "tasks.revisionApplyFailed": "无法应用该 Revision。",

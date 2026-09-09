@@ -5,7 +5,7 @@
  * Each test provides mock Pi SDK event objects and verifies the AgentEvents produced.
  */
 import { describe, it, expect, beforeEach, afterEach, jest } from 'bun:test';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { PiEventAdapter } from '../backend/pi/event-adapter.ts';
@@ -32,6 +32,29 @@ describe('PiEventAdapter', () => {
   afterEach(() => {
     toolMetadataStore._clearForTesting();
     rmSync(sessionDir, { recursive: true, force: true });
+  });
+
+  it('attaches current session SSE diagnostics to a typed timeout', () => {
+    const details = ['{"httpStatus":200,"phase":"provider-error","errorCategory":"timeout","requestId":"req-297"}'];
+    const events = collect(adapter.adaptEvent({ type: 'message_end', message: {
+      role: 'assistant', stopReason: 'error', errorMessage: 'The model service is taking too long to respond.', craftTransportDiagnostics: details,
+    } } as any));
+    expect(events[0]).toMatchObject({ type: 'typed_error', error: { code: 'provider_timeout', details } });
+  });
+  it('does not attach a stale SSE diagnostic from another request in the same turn', () => {
+    writeFileSync(join(sessionDir, 'api-error.json'), JSON.stringify({ status: 200, statusText: 'OK', message: 'Request timed out', timestamp: Date.now(), details: ['stale'] }));
+    const events = collect(adapter.adaptEvent({ type: 'message_end', message: {
+      role: 'assistant', stopReason: 'error', errorMessage: 'The model service is taking too long to respond.',
+    } } as any));
+    expect(events[0].error.details).toBeUndefined();
+  });
+
+  it('preserves structured diagnostics for unknown upstream errors', () => {
+    const details = ['{"phase":"provider-error","httpStatus":200}'];
+    const events = collect(adapter.adaptEvent({ type: 'message_end', message: {
+      role: 'assistant', stopReason: 'error', errorMessage: 'Custom stream failure', craftTransportDiagnostics: details,
+    } } as any));
+    expect(events[0]).toMatchObject({ type: 'typed_error', error: { code: 'unknown_error', details } });
   });
 
   // ============================================================

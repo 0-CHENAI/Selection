@@ -1743,6 +1743,7 @@
   "tasks.resultsEmpty": "結果はまだありません。タスクを実行すると、ここに出力が表示されます。",
   "tasks.resumeRun": "実行を再開",
   "tasks.retryFailedNodes": "失敗したノードを再試行",
+  "tasks.retryFailedNodesHint": "失敗したステップと影響を受ける後続ステップを再試行します。ツール操作が再実行される場合があります。影響のない成功結果は保持されます。",
   "tasks.revisionAdded": "追加",
   "tasks.revisionApplyConfirm": "Revision を適用",
   "tasks.revisionApplyFailed": "Revision を適用できませんでした。",

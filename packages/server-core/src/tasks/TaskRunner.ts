@@ -342,6 +342,7 @@ class ActiveRun {
   private readonly submittedOutputs = new Map<string, NodeOutput>();
   private verdictLocked = false;
   private readonly instances = new Map<string, NodeStateEntry>();
+  private readonly retiredInstanceAttempts = new Map<string, number>();
   private readonly instanceOutputs = new Map<string, NodeOutput>();
   private readonly mapItems = new Map<string, unknown[]>();
   private readonly replicaCounts = new Map<string, number>();
@@ -488,31 +489,83 @@ class ActiveRun {
     return this.snapshot();
   }
 
-  /** Explicit user recovery for session DAGs; completed outputs and total budget remain intact. */
+  /** Explicit recovery follows dependency edges; unrelated successful work remains intact. */
   private retryFailedNodes(): RunSnapshot {
-    if (this.spec.nodes.some(node => node.kind !== 'session')) {
-      throw new TaskControlError('failed', 'Partial retry currently requires a session-only DAG');
+    const roots = new Set([...this.state].filter(([, st]) => st.state === 'failed' || st.state === 'invalid').map(([id]) => id));
+    const affected = new Set(roots);
+    // all_done/cleanup nodes may already have produced outputs based on a failed predecessor.
+    // Those outputs must be invalidated too; retaining them would certify stale results.
+    let changed = true;
+    while (changed) {
+      changed = false;
+      for (const node of this.spec.nodes) {
+        if (affected.has(node.id)) continue;
+        const deps = this.edges.get(node.id) ?? new Set<string>();
+        if ([...deps].some(id => affected.has(id)) || (node.kind === 'finally' && deps.size === 0 && affected.size > 0)) {
+          affected.add(node.id); changed = true;
+        }
+      }
     }
-    const retryIds = [...this.state].filter(([, st]) => st.state === 'failed' || st.state === 'cancelled').map(([id]) => id);
-    if (!retryIds.length) throw new TaskControlError('failed', 'No failed execution nodes to retry');
+    const retryIds = [...affected];
+    const discardIds: string[] = [];
+    for (const [id, st] of this.instances) {
+      const defId = definitionId(id);
+      if (!affected.has(defId)) continue;
+      if (!roots.has(defId) || this.state.get(defId)?.lastFailure === 'loop-exhausted') discardIds.push(id);
+      else if (st.state !== 'done') retryIds.push(id);
+    }
+    if (!retryIds.length && ![...this.state.values()].every(st => st.state === 'done' || st.state === 'skipped')) {
+      throw new TaskControlError('failed', 'No failed execution nodes to retry');
+    }
     this.assertSensitiveReady();
-    // One durable event makes recovery atomic across a process restart.
-    this.log({ kind: 'run-resumed', retryNodeIds: retryIds });
+    // One durable event also invalidates stale reviewer decisions and expanded descendants.
+    this.log({ kind: 'run-resumed', retryNodeIds: retryIds, discardInstanceIds: discardIds });
+    this.applyRetryReset(retryIds, discardIds);
     this.originalFailed = false;
     this.settled = false;
     this.verdictLocked = false;
     this.unsubscribe?.();
     this.unsubscribe = this.deps.host.onSessionComplete(evt => this.onSessionComplete(evt));
-    for (const id of retryIds) {
-      const st = this.state.get(id)!;
-      st.state = 'pending';
-      this.submittedOutputs.delete(id);
-      delete this.outputs[id];
-    }
     this.runStatus = 'running';
-    this.scheduleReady();
+    // Recovery does not bypass a V3 coordinator checkpoint.
+    if (!this.enterCoordinatorGate('node-failed')) this.scheduleReady();
     this.emitChanged();
     return this.snapshot();
+  }
+
+  private applyRetryReset(retryIds: readonly string[], discardIds: readonly string[] = []): void {
+    for (const id of [...retryIds, ...discardIds]) {
+      const st = this.state.get(id) ?? this.instances.get(id);
+      if (st) {
+        st.state = 'pending';
+        delete st.approvalFeedback;
+        delete st.approvalDeadline;
+      }
+      this.instanceOutputs.delete(id);
+      this.submittedOutputs.delete(id);
+      this.nodeVerdicts.delete(id);
+      if (this.nodeTimings.has(id)) delete this.nodeTimings.get(id)!.verdict;
+      delete this.outputs[id];
+      if (discardIds.includes(id)) {
+        this.retiredInstanceAttempts.set(id, st?.attempt ?? this.retiredInstanceAttempts.get(id) ?? 0);
+        this.instances.delete(id);
+      }
+    }
+    for (const id of retryIds) {
+      if (id.includes('#')) continue;
+      this.mapItems.delete(id);
+      this.replicaCounts.delete(id);
+      this.loopIndex.delete(id);
+    }
+    this.coordinatorGate = null;
+    this.lastCoordinatorTimeout = false;
+    // Restore the first unfinished loop iteration, preserving its successful prefix.
+    for (const node of this.spec.nodes) {
+      if (node.kind !== 'loop' || !retryIds.includes(node.id)) continue;
+      let index = 0;
+      while (this.instances.get(instanceId(node.id, index))?.state === 'done') index++;
+      this.loopIndex.set(node.id, index);
+    }
   }
 
   restoreCheckpoint(
@@ -563,10 +616,7 @@ class ActiveRun {
           this.sessionToNode.set(e.sessionId, e.nodeId);
         }
       } else if (e.kind === 'run-resumed' && e.retryNodeIds) {
-        for (const id of e.retryNodeIds) {
-          const st = this.state.get(id);
-          if (st) st.state = 'pending';
-        }
+        this.applyRetryReset(e.retryNodeIds, e.discardInstanceIds);
       } else if (e.kind === 'node-scheduled') {
         const st = this.state.get(e.nodeId) ?? this.ensureInstanceState(e.nodeId);
         if (st) {
@@ -698,7 +748,7 @@ class ActiveRun {
     if (!nodeId.includes('#')) return undefined;
     let st = this.instances.get(nodeId);
     if (!st) {
-      st = { state: 'pending', attempt: 0 };
+      st = { state: 'pending', attempt: this.retiredInstanceAttempts.get(nodeId) ?? 0 };
       this.instances.set(nodeId, st);
       this.instanceCount += 1;
     }
@@ -720,13 +770,9 @@ class ActiveRun {
         }
       }
       if (node.kind === 'loop') {
-        let maxIdx = -1;
-        for (const iid of this.instances.keys()) {
-          if (definitionId(iid) !== node.id) continue;
-          const idx = Number(iid.slice(node.id.length + 1));
-          if (Number.isInteger(idx)) maxIdx = Math.max(maxIdx, idx);
-        }
-        if (maxIdx >= 0) this.loopIndex.set(node.id, maxIdx + (this.instances.get(instanceId(node.id, maxIdx))?.state === 'done' ? 1 : 0));
+        let index = 0;
+        while (this.instances.get(instanceId(node.id, index))?.state === 'done') index++;
+        this.loopIndex.set(node.id, index);
       }
       if ((node.replicas ?? 1) > 1) {
         this.replicaCounts.set(node.id, node.replicas!);
@@ -845,7 +891,8 @@ class ActiveRun {
       runId: this.runId,
       taskId: this.spec.id,
       status: this.runStatus,
-      canRetryFailedNodes: this.runStatus === 'failed' && this.spec.nodes.every(node => node.kind === 'session') && [...this.state.values()].some(st => st.state === 'failed'),
+      canRetryFailedNodes: this.runStatus === 'failed' && ([...this.state.values()].some(st => st.state === 'failed' || st.state === 'invalid')
+        || [...this.state.values()].every(st => st.state === 'done' || st.state === 'skipped')),
       orchestratorSessionId: this.opts.orchestratorSessionId,
       tokensUsed: this.tokensUsed,
       tokenBudget: this.tokenBudget,
@@ -1132,7 +1179,7 @@ class ActiveRun {
 
   private executeMap(node: TaskNode): void {
     const items = parseForEach(this.resolveForEach(node));
-    if (this.instanceCount + Math.max(items.length, 1) > MAX_RUN_INSTANCES) {
+    if (this.instanceCount + items.filter((_, i) => !this.instances.has(instanceId(node.id, i))).length > MAX_RUN_INSTANCES) {
       this.originalFailed = true;
       this.finish('failed');
       return;
@@ -1284,7 +1331,7 @@ class ActiveRun {
       st.state = 'running';
       st.attempt += 1;
       this.log({ kind: 'node-scheduled', nodeId: node.id });
-      this.loopIndex.set(node.id, 0);
+      if (!this.loopIndex.has(node.id)) this.loopIndex.set(node.id, 0);
     }
     this.startLoopIteration(node);
   }
@@ -1324,7 +1371,7 @@ class ActiveRun {
       return false;
     }
     const existing = this.instances.get(iid);
-    const instance = existing ?? { state: 'pending' as const, attempt: 0 };
+    const instance = existing ?? { state: 'pending' as const, attempt: this.retiredInstanceAttempts.get(iid) ?? 0 };
     this.submittedOutputs.delete(iid);
     instance.state = 'running';
     instance.attempt += 1;
@@ -1968,6 +2015,10 @@ class ActiveRun {
       return;
     }
 
+    if (inst) {
+      inst.lastFailure = reason;
+      this.log({ kind: 'node-finished', nodeId, sessionId: sessionId ?? inst.sessionId ?? '', state: inst.state, reason });
+    }
     st.state = failure === 'invalid' ? 'invalid' : 'failed';
     st.lastFailure = reason;
     if (node?.kind !== 'finally') this.originalFailed = true;

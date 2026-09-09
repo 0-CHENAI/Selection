@@ -1743,6 +1743,7 @@
   "tasks.resultsEmpty": "No results yet. Run the task to see output here.",
   "tasks.resumeRun": "Resume run",
   "tasks.retryFailedNodes": "Retry failed nodes",
+  "tasks.retryFailedNodesHint": "Retries failed steps and affected downstream steps. Tool actions may run again; unaffected successful results are preserved.",
   "tasks.revisionAdded": "Added",
   "tasks.revisionApplyConfirm": "Apply revision",
   "tasks.revisionApplyFailed": "The revision could not be applied.",

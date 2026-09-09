@@ -1743,6 +1743,7 @@
   "tasks.resultsEmpty": "Aún no hay resultados. Ejecuta la tarea para ver la salida aquí.",
   "tasks.resumeRun": "Reanudar ejecución",
   "tasks.retryFailedNodes": "Reintentar nodos fallidos",
+  "tasks.retryFailedNodesHint": "Reintenta los pasos fallidos y los posteriores afectados. Las acciones de herramientas pueden repetirse; se conservan los resultados correctos no afectados.",
   "tasks.revisionAdded": "Añadido",
   "tasks.revisionApplyConfirm": "Aplicar revisión",
   "tasks.revisionApplyFailed": "No se pudo aplicar la revisión.",

@@ -26,10 +26,12 @@ afterAll(() => {
   if (scratchDir) rmSync(scratchDir, { recursive: true, force: true });
 });
 
-function driveBundle(messages: object[], done: (output: string) => boolean): Promise<string> {
+function driveBundle(messages: object[], done: (output: string) => boolean, preload = false): Promise<string> {
   return new Promise((resolve, reject) => {
-    const child = spawn(process.execPath, [bundlePath], {
+    const args = preload ? ['--preload', join(packageDir, '../shared/src/unified-network-interceptor.ts'), bundlePath] : [bundlePath];
+    const child = spawn(process.execPath, args, {
       cwd: scratchDir,
+      env: { ...process.env, CRAFT_SESSION_DIR: scratchDir, CRAFT_INTERCEPTOR_DISABLE_AUTO_INSTALL: '0', NO_PROXY: '127.0.0.1,localhost', no_proxy: '127.0.0.1,localhost' },
       stdio: ['pipe', 'pipe', 'pipe'],
     });
     let output = '';
@@ -56,6 +58,29 @@ function driveBundle(messages: object[], done: (output: string) => boolean): Pro
 }
 
 describe('pi-agent-server bundle', () => {
+  it('carries request diagnostics from the preload through bundled SDK message_end', async () => {
+    const server = Bun.serve({ port: 0, fetch() {
+      return new Response('data: {"error":{"message":"The model service is taking too long to respond."}}\n\n',
+        { headers: { 'content-type': 'text/event-stream', 'x-request-id': 'bundle-297' } });
+    } });
+    try {
+      const output = await driveBundle([
+        { type: 'init', apiKey: 'test-only', model: 'local-model', cwd: scratchDir, thinkingLevel: 'off',
+          workspaceRootPath: scratchDir, sessionId: 'bundle-297', sessionPath: scratchDir,
+          workingDirectory: scratchDir, plansFolderPath: join(scratchDir, 'plans'),
+          providerType: 'pi_compat', authType: 'api_key', baseUrl: `http://127.0.0.1:${server.port}/v1`,
+          customEndpoint: { api: 'openai-completions' }, customModels: [{id:'local-model',contextWindow:8192,maxTokens:128}] },
+        { type: 'prompt', id: 'p297', message: 'hello', systemPrompt: 'Local protocol test.' },
+      ], output => output.split('\n').some(line => {
+        try { const e = JSON.parse(line); return e.type === 'event' && e.event?.type === 'message_end' && !!e.event.message?.craftTransportDiagnostics; } catch { return false; }
+      }), true);
+      const events = output.split('\n').flatMap(line => { try { return [JSON.parse(line)]; } catch { return []; } });
+      const terminal = events.find(e => e.type === 'event' && e.event?.type === 'message_end' && e.event.message?.craftTransportDiagnostics);
+      expect(terminal).toBeDefined();
+      expect(JSON.parse(terminal.event.message.craftTransportDiagnostics[0])).toMatchObject({ providerRequestId: 'bundle-297', phase: 'provider-error', httpStatus: 200 });
+    } finally { server.stop(true); }
+  }, RUN_TIMEOUT_MS + 130_000);
+
   it('resolves a ChatGPT bearer credential through the bundled Pi auth pipeline', async () => {
     const output = await driveBundle([
       {

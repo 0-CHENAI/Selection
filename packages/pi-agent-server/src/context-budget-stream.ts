@@ -1,3 +1,4 @@
+import { createRequestDiagnosticScope, runWithRequestDiagnostics, requestDiagnosticDetails } from '../../shared/src/request-diagnostics.ts';
 import {
   createAssistantMessageEventStream,
   isContextOverflow,
@@ -95,6 +96,10 @@ export function createContextBudgetedStream(
   options?: ModelsSimpleStreamOptions,
   debug?: DebugLogger,
 ): AssistantMessageEventStream {
+  const diagnosticScope = createRequestDiagnosticScope();
+  const withDiagnostic = (message: AssistantMessage): AssistantMessage & { craftTransportDiagnostics: string[] } => ({
+    ...message, craftTransportDiagnostics: requestDiagnosticDetails(diagnosticScope),
+  });
   const output = createAssistantMessageEventStream();
   const configuredMaxTokens = options?.maxTokens ?? model.maxTokens;
   const requestedMaxTokens = Number.isFinite(configuredMaxTokens)
@@ -124,8 +129,9 @@ export function createContextBudgetedStream(
       let retryMaxTokens: number | undefined;
 
       try {
-        const stream = streamSimple(model, context, attemptOptions);
-        for await (const event of stream) {
+        const stream = runWithRequestDiagnostics(diagnosticScope, () => streamSimple(model, context, attemptOptions));
+        for await (const rawEvent of stream) {
+          const event = rawEvent.type === 'error' ? { ...rawEvent, error: withDiagnostic(rawEvent.error) } : rawEvent;
           if (attempt > 0 || emittedIrreversibleOutput) {
             output.push(event);
             continue;
@@ -160,7 +166,7 @@ export function createContextBudgetedStream(
           }
         }
       } catch (error) {
-        const message = createThrownErrorMessage(model, error);
+        const message = withDiagnostic(createThrownErrorMessage(model, error));
         if (
           attempt === 0 &&
           !emittedIrreversibleOutput &&
@@ -188,7 +194,7 @@ export function createContextBudgetedStream(
         output.push({
           type: 'error',
           reason: 'error',
-          error: createThrownErrorMessage(model, 'Provider stream ended without a terminal event'),
+          error: withDiagnostic(createThrownErrorMessage(model, 'Provider stream ended without a terminal event')),
         });
         return;
       }

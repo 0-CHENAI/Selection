@@ -1334,9 +1334,12 @@ function ExistingTaskEditor({
             </div>
           )}
           {isEdit && liveRun?.status === 'failed' && liveRun.canRetryFailedNodes && (
-            <Btn variant="secondary" disabled={busy} onClick={() => void controlRun('continue')}>
-              {t('tasks.retryFailedNodes')}
-            </Btn>
+            <div className="flex flex-col items-start gap-1">
+              <Btn variant="secondary" disabled={busy} onClick={() => void controlRun('continue')}>
+                {t('tasks.retryFailedNodes')}
+              </Btn>
+              <span className="max-w-sm text-xs text-muted-foreground">{t('tasks.retryFailedNodesHint')}</span>
+            </div>
           )}
           {isEdit && liveRun?.status === 'waiting-budget' && (
             <div className="flex items-center gap-1.5">
