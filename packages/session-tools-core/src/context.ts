@@ -149,6 +149,10 @@ export interface ValidatorInterface {
  * - Codex: createCodexContext() with callback IPC and limited capabilities
  */
 export interface SessionToolContext {
+  /** Cancellation for this invocation, never shared across concurrent calls. */
+  signal?: AbortSignal;
+  /** Refresh host and current agent skill catalogs after a committed install. */
+  refreshSkills?: () => void | Promise<void>;
   // ============================================================
   // Session Info
   // ============================================================

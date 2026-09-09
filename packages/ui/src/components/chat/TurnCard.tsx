@@ -421,6 +421,8 @@ function getToolDisplayName(name: string): string {
 
   // Friendly display names for specific tools
   const displayNames: Record<string, string> = {
+    'skill_inspect': i18n.t('tools.skillInspect'),
+    'skill_install': i18n.t('tools.skillInstall'),
     'TodoWrite': 'Todo List Updated',
     'set_session_labels': 'Set Session Labels',
     'set_session_status': 'Set Session Status',
@@ -932,8 +934,10 @@ function ActivityRow({ activity, onOpenDetails, isLastChild, sessionFolderPath, 
   // - Intent: For MCP tools (activity.intent), for Bash (toolInput.description)
   // - Params: Remaining tool input summary
   const toolDisplay = formatToolDisplay(activity)
-  const fullDisplayName = toolDisplay.name
-    || (activity.type === 'thinking' ? THINKING_STATUS_LABEL : 'Processing')
+  const normalizedToolName = normalizeCraftSessionToolName(activity.toolName ?? '')
+  const fullDisplayName = normalizedToolName === 'skill_inspect' ? i18n.t('tools.skillInspect')
+    : normalizedToolName === 'skill_install' ? i18n.t('tools.skillInstall')
+    : toolDisplay.name || (activity.type === 'thinking' ? THINKING_STATUS_LABEL : 'Processing')
 
   // Detect MCP/API tools (toolName starts with "mcp__")
   const isMcpOrApiTool = activity.toolName?.startsWith('mcp__') ?? false

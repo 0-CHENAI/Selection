@@ -333,3 +333,15 @@ This is useful for:
 - File must be named `icon.{ext}` (not `my-icon.svg`)
 - Check icon file is not corrupted
 - For SVG, ensure valid XML structure
+
+
+## Install an existing skill
+
+Use `skill_inspect({ source })` for compatibility questions and candidate discovery.
+For an explicit installation request, use `skill_install({ source })`. Public GitHub repositories and local paths are supported; use `ref` and `skillPath` for branches/subdirectories or a returned candidate. Private authentication is not supported.
+
+The installer snapshots content, validates SKILL.md and explicit local Markdown references, publishes into the current workspace, and confirms which skill is loaded. It does not run scripts or install dependencies. Successful static validation is not a runtime compatibility guarantee. No additional `skill_validate` call is needed.
+
+Identical content returns `already_installed`. Different content returns `conflict`; only when the user explicitly asks for an update, retry with `replace: true` and the returned `targetFingerprint` as `expectedTargetFingerprint`. A changed target is rejected. Project-level skills may shadow workspace installations; the result reports the effective path.
+
+Do not replace this workflow with WebFetch/Bash installation or silently overwrite a conflict. Missing resources, unsupported symbolic links, unsafe paths, cancellation and size limits return explicit failures. Downloads are limited to 50 MiB, unpacked content to 200 MiB and 20,000 entries; operation timeout is 120 seconds. A failed replacement restores the old skill. Crash recovery only restores filesystem consistency and never sends a hidden continuation message.

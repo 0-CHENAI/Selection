@@ -1970,6 +1970,8 @@
   "toast.webhookReplayCompleted": "Webhook visszajátszás befejezve",
   "toast.workspaceReconnected": "Munkaterület újracsatlakoztatva",
   "toolbar.escapeToInterrupt": "Nyomd meg az <kbd>Esc</kbd> gombot ismét a megszakításhoz",
+  "tools.skillInspect": "Készség ellenőrzése",
+  "tools.skillInstall": "Készség telepítése",
   "transport.authFailed": "Hitelesítés sikertelen. Ellenőrizd a CRAFT_SERVER_TOKEN értékét.",
   "transport.connecting": "Csatlakozás a távoli szerverhez",
   "transport.connectingDesc": "Csatlakozás ide: {{url}}...",
