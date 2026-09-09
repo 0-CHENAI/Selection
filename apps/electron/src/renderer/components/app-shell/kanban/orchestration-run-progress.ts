@@ -13,6 +13,9 @@ export interface OrchestrationProgressRow {
   title: string
   state: string
   sessionId?: string
+  attempt?: number
+  attempts?: TaskNodeRunStateDto["attempts"]
+  children?: OrchestrationProgressRow[]
 }
 
 export function isActiveTaskRunStatus(status?: string | null): boolean {
@@ -63,7 +66,7 @@ export function shouldShowOrchestrationRunProgress(input: {
 }): boolean {
   if (!input.isTaskOrchestrator) return false
   if (input.orchestrationStatus === 'running') return true
-  return isActiveTaskRunStatus(input.runStatus)
+  return !!input.runStatus
 }
 
 function relatedRunNodes(nodes: TaskNodeRunStateDto[], nodeId: string): TaskNodeRunStateDto[] {
@@ -71,30 +74,38 @@ function relatedRunNodes(nodes: TaskNodeRunStateDto[], nodeId: string): TaskNode
 }
 
 export function sessionIdForProgressRow(nodes: TaskNodeRunStateDto[], nodeId: string): string | undefined {
-  const related = relatedRunNodes(nodes, nodeId)
-  return related.find((node) => node.sessionId && (node.state === 'running' || node.state === 'retry-wait'))?.sessionId
-    ?? related.find((node) => node.sessionId)?.sessionId
+  return nodes.find(node => node.id === nodeId)?.sessionId
 }
 
 export function buildOrchestrationProgressRows(
   specNodes: SpecProgressNode[] | undefined,
   liveRun: TaskRunSnapshotDto | null | undefined,
 ): OrchestrationProgressRow[] {
-  if (specNodes && specNodes.length > 0) {
-    return specNodes.map((node) => ({
-      id: node.id,
-      title: node.title?.trim() || node.id,
-      state: overlayState(node.id, liveRun) ?? 'pending',
-      sessionId: liveRun ? sessionIdForProgressRow(liveRun.nodes, node.id) : undefined,
-    }))
-  }
-  if (!liveRun?.nodes.length) return []
-  return liveRun.nodes.map((node) => ({
-    id: node.id,
-    title: node.id,
-    state: node.state,
-    sessionId: node.sessionId,
-  }))
+  const nodes = liveRun?.nodes ?? []
+  const toRow = (node: TaskNodeRunStateDto, title: string): OrchestrationProgressRow => ({
+    id: node.id, title, state: node.state, sessionId: node.sessionId,
+    ...(node.attempt > 1 ? { attempt: node.attempt } : {}),
+    ...(node.attempts?.length ? { attempts: node.attempts } : {}),
+  })
+  // Run titles/definitions come from its frozen spec, not today's edited task.
+  const definitions = liveRun?.nodes.length
+    ? nodes.filter(node => !node.definitionId || node.definitionId === node.id).filter(node => !node.id.includes('#'))
+        .map(node => ({ id: node.id, title: node.title ?? specNodes?.find(spec => spec.id === node.id)?.title }))
+    : specNodes ?? []
+  const seen = new Set<string>()
+  const rows = definitions.map(node => {
+    seen.add(node.id)
+    const current = nodes.find(item => item.id === node.id)
+    const children = relatedRunNodes(nodes, node.id).filter(item => item.id !== node.id)
+      .sort((a, b) => a.id.localeCompare(b.id, undefined, { numeric: true }))
+      .map(item => { seen.add(item.id); return toRow(item, item.id) })
+    const row = current ? toRow(current, node.title?.trim() || node.id)
+      : { id: node.id, title: node.title?.trim() || node.id, state: overlayState(node.id, liveRun) ?? 'pending', sessionId: undefined }
+    return children.length ? { ...row, sessionId: undefined, children } : row
+  })
+  // Keep orphaned/dynamic nodes visible even if a later graph revision removed them.
+  for (const node of nodes) if (!seen.has(node.id)) rows.push(toRow(node, node.title ?? node.id))
+  return rows
 }
 
 export function countFinishedProgressRows(rows: OrchestrationProgressRow[]): number {

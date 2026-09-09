@@ -120,6 +120,78 @@ describe('TaskRunner (Conductor)', () => {
     rmSync(root, { recursive: true, force: true });
   });
 
+
+  it('reads all owned terminal runs and attempts after restart without side effects', async () => {
+    saveTaskSpec(root, specOf({ id: 'history', title: 'History', goal: 'g', nodes: [
+      { id: 'a', title: 'Original title', prompt: 'a' }, { id: 'b', prompt: 'b', depends_on: ['a'] },
+    ] }));
+    const runner = makeRunner();
+    let serial = 0;
+    host.createSession = async (_ws, options) => {
+      const id = `attempt-${++serial}`;
+      host.created.push({ id, options });
+      return { id };
+    };
+    runner.run('history', { runId: 'r1', orchestratorSessionId: 'owner', verifyOnComplete: false });
+    await tick();
+    // Drive distinct session ids for the initial failure and its manual retry.
+    const complete = (id: string, reason: 'error' | 'complete', finalText?: string) => {
+      for (const listener of (host as unknown as { listeners: Set<(event: SessionCompletionEvent) => void> }).listeners)
+        listener({ sessionId: id, workspaceId: 'ws', generation: 0, reason, finalText });
+    };
+    complete('attempt-1', 'error');
+    await tick();
+    runner.continue('history', 'r1');
+    await tick();
+    await runner.stop('history', 'r1');
+    runner.run('history', { runId: 'r2', orchestratorSessionId: 'owner', verifyOnComplete: false });
+    await tick();
+    await runner.stop('history', 'r2');
+    runner.run('history', { runId: 'r3', orchestratorSessionId: 'other', verifyOnComplete: false });
+    await tick();
+    await runner.stop('history', 'r3');
+    const freshHost = new MockHost();
+    const reader = new TaskRunner({ host: freshHost, workspaceId: 'ws', workspaceRoot: root });
+    const before = JSON.stringify(readRunLog(root, 'history', 'r1'));
+    const history = reader.getRunHistory('history', 'owner');
+    expect(history.map(run => run.runId)).toEqual(['r1', 'r2']);
+    expect(history[0]?.nodes[0]).toMatchObject({ title: 'Original title', state: 'cancelled', attempt: 2,
+      attempts: [{ attempt: 1, sessionId: 'attempt-1', state: 'failed' }, { attempt: 2, sessionId: 'attempt-2', state: 'cancelled' }] });
+    expect(history[0]?.nodes[1]?.state).toBe('cancelled');
+    expect(reader.getRunState('history', 'r1')).toBeNull();
+    expect(reader.getRunHistory('history', 'unknown')).toEqual([]);
+    expect(reader.getRunHistory('history', 'owner')).toEqual(history);
+    expect(JSON.stringify(readRunLog(root, 'history', 'r1'))).toBe(before);
+    expect(freshHost.created).toHaveLength(0);
+    expect(freshHost.orchestrationStatuses).toHaveLength(0);
+    expect((freshHost as unknown as { listeners: Set<unknown> }).listeners.size).toBe(0);
+  });
+
+  it('broadcasts a running child link before completion', async () => {
+    saveTaskSpec(root, specOf({ id: 'links', title: 'Links', goal: 'g', nodes: [{ id: 'a', prompt: 'a' }] }));
+    const snapshots: Array<{ nodes: Array<{ sessionId?: string; state: string }> }> = [];
+    const runner = new TaskRunner({ host, workspaceId: 'ws', workspaceRoot: root, onRunChanged: snapshot => snapshots.push(snapshot) });
+    runner.run('links', { runId: 'r1', orchestratorSessionId: 'owner', verifyOnComplete: false });
+    await tick();
+    expect(snapshots.some(snapshot => snapshot.nodes.some(node => node.sessionId === 'sess-a' && node.state === 'running'))).toBe(true);
+    await runner.stop('links', 'r1');
+  });
+
+  it('does not send work when session creation completes after Stop', async () => {
+    saveTaskSpec(root, specOf({ id: 'late', title: 'Late', goal: 'g', nodes: [{ id: 'a', prompt: 'a' }] }));
+    let finishCreate!: (value: { id: string }) => void;
+    host.createSession = () => new Promise(resolve => { finishCreate = resolve; });
+    const runner = makeRunner();
+    runner.run('late', { runId: 'r1', orchestratorSessionId: 'owner', verifyOnComplete: false });
+    await tick();
+    await runner.stop('late', 'r1');
+    finishCreate({ id: 'late-child' });
+    await tick();
+    expect(host.sent).toHaveLength(0);
+    expect(runner.getRunState('late', 'r1')).toMatchObject({ status: 'stopped', nodes: [{ state: 'cancelled', sessionId: 'late-child' }] });
+    expect(runner.getRunHistory('late', 'owner')[0]?.nodes[0]?.attempts).toEqual([{ attempt: 1, sessionId: 'late-child', state: 'cancelled' }]);
+  });
+
   it.each([false, true])('retries failed nodes while preserving completed dependencies (restart=%s)', async restart => {
     saveTaskSpec(root, specOf({ id: 'partial', title: 'Partial', goal: 'g', nodes: [
       { id: 'a', prompt: 'a' }, { id: 'b', prompt: 'b', depends_on: ['a'] }, { id: 'c', prompt: 'c', depends_on: ['b'] },

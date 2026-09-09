@@ -80,14 +80,14 @@ describe('shouldShowOrchestrationRunProgress', () => {
     })).toBe(true)
   })
 
-  it('hides completed, failed, and stopped runs', () => {
+  it('retains completed, failed, and stopped runs as history', () => {
     expect(isActiveTaskRunStatus('completed')).toBe(false)
     expect(isActiveTaskRunStatus('failed')).toBe(false)
     expect(isActiveTaskRunStatus('stopped')).toBe(false)
     expect(shouldShowOrchestrationRunProgress({
       isTaskOrchestrator: true,
       runStatus: 'completed',
-    })).toBe(false)
+    })).toBe(true)
   })
 })
 
@@ -171,11 +171,11 @@ describe('buildOrchestrationProgressRows', () => {
     ])
   })
 
-  it('prefers a running replica session over a finished sibling', () => {
+  it('does not silently choose one sibling for a definition row', () => {
     expect(sessionIdForProgressRow([
       node({ id: 'hy4#0', definitionId: 'hy4', state: 'done', sessionId: 'old' }),
       node({ id: 'hy4#1', definitionId: 'hy4', state: 'running', sessionId: 'live' }),
-    ], 'hy4')).toBe('live')
+    ], 'hy4')).toBeUndefined()
   })
 })
 
@@ -201,5 +201,38 @@ describe('OrchestrationRunProgressView', () => {
     expect(html).toContain('待处理')
     expect(html).toContain('0/2')
     expect(html).toContain('<button')
+  })
+})
+
+
+describe('instance and history visibility', () => {
+  it('keeps all instances, retries and frozen titles addressable', () => {
+    const rows = buildOrchestrationProgressRows([{ id: 'map', title: 'Edited later' }], snapshot({
+      status: 'stopped', nodes: [
+        node({ id: 'map', title: 'Original title', state: 'cancelled' }),
+        node({ id: 'map#2', definitionId: 'map', state: 'cancelled', sessionId: 's2' }),
+        node({ id: 'map#0', definitionId: 'map', state: 'done', sessionId: 's0' }),
+        node({ id: 'map#1', definitionId: 'map', state: 'failed', sessionId: 's1-new', attempt: 2,
+          attempts: [{ attempt: 1, sessionId: 's1-old', state: 'failed' }, { attempt: 2, sessionId: 's1-new', state: 'failed' }] }),
+      ],
+    }))
+    expect(rows[0]!.title).toBe('Original title')
+    expect(rows[0]!.sessionId).toBeUndefined()
+    expect(rows[0]!.children!.map(row => row.sessionId)).toEqual(['s0', 's1-new', 's2'])
+    const html = renderWithI18n('zh-Hans', <OrchestrationRunProgressView runningHint liveRun={snapshot({ status: 'stopped' })} rows={rows} onPreviewSession={() => {}} />)
+    for (const id of ['s0', 's1-old', 's1-new', 's2']) expect(html).toContain(`data-session-id="${id}"`)
+    expect(html).toContain('运行历史')
+    expect(html).toContain('已停止')
+    expect(html).not.toContain('animate-ping')
+    expect(html).not.toContain('重试失败节点')
+  })
+
+  it('offers distinct run ids without reviving terminal status from the parent hint', () => {
+    const runs = [snapshot({ runId: 'old', status: 'stopped' }), snapshot({ runId: 'new', status: 'running' })]
+    const html = renderWithI18n('en', <OrchestrationRunProgressView runningHint liveRun={runs[0]} runs={runs} onSelectRun={() => {}} rows={[]} />)
+    expect(html).toContain('value="old"')
+    expect(html).toContain('value="new"')
+    expect(html).toContain('Stopped')
+    expect(html).not.toContain('animate-ping')
   })
 })

@@ -255,7 +255,7 @@ export interface ElectronAPI {
   continueTask(workspaceId: string, slug: string, runId: string): Promise<TaskControlResultDto>
   respondTaskApproval(workspaceId: string, req: TaskRespondApprovalRequest): Promise<TaskControlResultDto>
   updateTaskRunLimits(workspaceId: string, req: TaskUpdateRunLimitsRequest): Promise<TaskControlResultDto>
-  getTask(workspaceId: string, slug: string, runId?: string): Promise<TaskGetResult>
+  getTask(workspaceId: string, slug: string, runId?: string, orchestratorSessionId?: string): Promise<TaskGetResult>
   listTasks(workspaceId: string): Promise<string[]>
   listTaskTemplates(workspaceId: string): Promise<import('@craft-agent/shared/protocol').TaskTemplateSummaryDto[]>
   getTaskTemplate(workspaceId: string, id: string): Promise<import('@craft-agent/shared/protocol').TaskTemplateDetailDto>
