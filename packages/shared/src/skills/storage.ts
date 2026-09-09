@@ -15,6 +15,7 @@ import {
 import { homedir } from 'os';
 import { join } from 'path';
 import matter from 'gray-matter';
+import { recoverSkillInstalls, skillReadDirectory, pendingSkillSlugs } from './install-transaction.ts';
 import type { LoadedSkill, SkillMetadata, SkillSource } from './types.ts';
 import { clearDisplayTitle, loadDisplayTitles } from '../display-titles-storage.ts';
 import { getWorkspaceSkillsPath } from '../workspaces/storage.ts';
@@ -231,8 +232,9 @@ function withSkillDisplayTitle(workspaceRoot: string, skill: LoadedSkill): Loade
  * @param slug - Skill directory name
  */
 export function loadSkill(workspaceRoot: string, slug: string): LoadedSkill | null {
-  const skillsDir = getWorkspaceSkillsPath(workspaceRoot);
-  const skill = loadSkillFromDir(skillsDir, slug, 'workspace');
+  recoverSkillInstalls(workspaceRoot);
+  const skillsDir = skillReadDirectory(workspaceRoot, slug);
+  const skill = skillsDir ? loadSkillFromDir(skillsDir, slug, 'workspace') : null;
   return skill ? withSkillDisplayTitle(workspaceRoot, skill) : null;
 }
 
@@ -242,7 +244,13 @@ export function loadSkill(workspaceRoot: string, slug: string): LoadedSkill | nu
  */
 export function loadWorkspaceSkills(workspaceRoot: string): LoadedSkill[] {
   const skillsDir = getWorkspaceSkillsPath(workspaceRoot);
-  return loadSkillsFromDir(skillsDir, 'workspace');
+  recoverSkillInstalls(workspaceRoot);
+  const slugs = new Set([...(existsSync(skillsDir) ? readdirSync(skillsDir).filter(slug => !slug.startsWith('.')) : []), ...pendingSkillSlugs(workspaceRoot)]);
+  return [...slugs].flatMap(slug => {
+    const dir = skillReadDirectory(workspaceRoot, slug);
+    const skill = dir ? loadSkillFromDir(dir, slug, 'workspace') : null;
+    return skill ? [skill] : [];
+  });
 }
 
 // ── Skills cache ────────────────────────────────────────────────────────
@@ -397,7 +405,7 @@ export function loadSkillBySlug(workspaceRoot: string, slug: string, projectRoot
 
   // Medium priority: workspace
   if (!skill) {
-    skill = loadSkillFromDir(getWorkspaceSkillsPath(workspaceRoot), slug, 'workspace');
+    skill = loadSkill(workspaceRoot, slug);
   }
 
   // App-bundled overrides global for shipped slugs

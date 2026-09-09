@@ -19,6 +19,7 @@ import type { ToolResult } from './types.ts';
 // Handlers
 import { handleSubmitPlan } from './handlers/submit-plan.ts';
 import { handleConfigValidate } from './handlers/config-validate.ts';
+import { handleSkillInstall, handleSkillInspect } from './handlers/skill-install.ts';
 import { handleSkillValidate } from './handlers/skill-validate.ts';
 import { handleMermaidValidate } from './handlers/mermaid-validate.ts';
 import { handleSourceTest } from './handlers/source-test.ts';
@@ -64,6 +65,17 @@ export const ConfigValidateSchema = z.object({
   target: z.enum(['config', 'sources', 'statuses', 'preferences', 'permissions', 'automations', 'tool-icons', 'all'])
     .describe('Which config file(s) to validate'),
   sourceSlug: z.string().optional().describe('Validate a specific source by slug'),
+});
+
+export const SkillInspectSchema = z.object({
+  source: z.string().min(1).describe('Public GitHub HTTPS URL or local skill path'),
+  ref: z.string().min(1).optional().describe('Git ref; required for ambiguous tree/blob URLs'),
+  skillPath: z.string().optional().describe('Relative skill directory; choose from inspection candidates'),
+  slug: z.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/).optional(),
+});
+export const SkillInstallSchema = SkillInspectSchema.extend({
+  replace: z.boolean().optional().default(false).describe('Only true when the user explicitly requested replacing an existing skill'),
+  expectedTargetFingerprint: z.string().regex(/^[a-f0-9]{64}$/).optional().describe('Required for replacement; fingerprint returned by conflict/inspection'),
 });
 
 export const SkillValidateSchema = z.object({
@@ -735,6 +747,8 @@ export const SESSION_TOOL_DEFS: SessionToolDef[] = [
   { name: 'submit_task_definition', description: TOOL_DESCRIPTIONS.submit_task_definition, inputSchema: SubmitTaskDefinitionSchema, executionMode: 'registry', safeMode: 'allow', handler: handleSubmitTaskDefinition },
   { name: 'SubmitPlan', description: TOOL_DESCRIPTIONS.SubmitPlan, inputSchema: SubmitPlanSchema, executionMode: 'registry', safeMode: 'allow', handler: handleSubmitPlan },
   { name: 'config_validate', description: TOOL_DESCRIPTIONS.config_validate, inputSchema: ConfigValidateSchema, executionMode: 'registry', safeMode: 'allow', readOnly: true, handler: handleConfigValidate },
+  { name: 'skill_inspect', description: 'Inspect a public GitHub or local skill without installing. Returns candidates, static validation and conflicts. Use for compatibility questions. Runtime scripts are not executed.', inputSchema: SkillInspectSchema, executionMode: 'registry', safeMode: 'allow', readOnly: true, handler: handleSkillInspect },
+  { name: 'skill_install', description: 'Install a public GitHub or local skill into this workspace. One call snapshots, validates, publishes and confirms loading. Use for explicit installation requests instead of WebFetch/Bash. Never replace without user intent and expectedTargetFingerprint. Do not run skill_validate afterward; installation already validates the exact content. Runtime dependencies are not tested.', inputSchema: SkillInstallSchema, executionMode: 'registry', safeMode: 'block', readOnly: false, handler: handleSkillInstall },
   { name: 'skill_validate', description: TOOL_DESCRIPTIONS.skill_validate, inputSchema: SkillValidateSchema, executionMode: 'registry', safeMode: 'allow', readOnly: true, handler: handleSkillValidate },
   { name: 'mermaid_validate', description: TOOL_DESCRIPTIONS.mermaid_validate, inputSchema: MermaidValidateSchema, executionMode: 'registry', safeMode: 'allow', readOnly: true, handler: handleMermaidValidate },
   { name: 'source_test', description: TOOL_DESCRIPTIONS.source_test, inputSchema: SourceTestSchema, executionMode: 'registry', safeMode: 'allow', handler: handleSourceTest },

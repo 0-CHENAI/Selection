@@ -1970,6 +1970,8 @@
   "toast.webhookReplayCompleted": "Webhook 回放完成",
   "toast.workspaceReconnected": "工作区已重新连接",
   "toolbar.escapeToInterrupt": "再次按 <kbd>Esc</kbd> 以中断",
+  "tools.skillInspect": "检查技能",
+  "tools.skillInstall": "安装技能",
   "transport.authFailed": "身份验证失败，请检查 CRAFT_SERVER_TOKEN。",
   "transport.connecting": "正在连接远程服务器",
   "transport.connectingDesc": "正在连接 {{url}}…",

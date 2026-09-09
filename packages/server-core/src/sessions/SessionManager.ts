@@ -651,6 +651,8 @@ async function resolveToolDisplayMeta(
           'call_llm': 'LLM Query',
           'config_validate': 'Validate Config',
           'skill_validate': 'Validate Skill',
+          'skill_inspect': 'Inspect Skill',
+          'skill_install': 'Install Skill',
           'mermaid_validate': 'Validate Mermaid',
           'source_test': 'Test Source',
           'source_oauth_trigger': 'OAuth',

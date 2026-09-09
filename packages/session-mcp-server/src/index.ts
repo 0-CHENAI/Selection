@@ -560,7 +560,7 @@ async function main() {
   }));
 
   // Handle tool calls — route via canonical registry, call_llm, or docs upstream
-  server.setRequestHandler(CallToolRequestSchema, async (request) => {
+  server.setRequestHandler(CallToolRequestSchema, async (request, extra) => {
     const { name, arguments: toolArgs } = request.params;
 
     try {
@@ -580,7 +580,7 @@ async function main() {
         if (config.permissionMode === 'safe' && SESSION_SAFE_BLOCKED_TOOL_NAMES.has(name)) {
           return errorResponse(`Tool '${name}' is blocked in Safe mode.`);
         }
-        return await def.handler(ctx, toolArgs);
+        return await def.handler({ ...ctx, signal: extra.signal }, name === 'skill_install' || name === 'skill_inspect' ? def.inputSchema.parse(toolArgs) : toolArgs);
       }
 
       // Route to docs upstream if it's a docs tool

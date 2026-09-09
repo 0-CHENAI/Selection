@@ -1919,6 +1919,8 @@ export class PiAgent extends BaseAgent {
    * Execute a session-scoped tool by name.
    * Uses the canonical registry from @craft-agent/session-tools-core.
    */
+  private readonly sessionToolControllers = new Set<AbortController>();
+
   private async executeSessionTool(
     toolName: string,
     args: Record<string, unknown>,
@@ -2010,7 +2012,14 @@ export class PiAgent extends BaseAgent {
       }
 
       const ctx = this.getSessionToolContext();
-      const result: SessionToolResult = await def.handler(ctx, args);
+      const controller = new AbortController();
+      this.sessionToolControllers.add(controller);
+      let result: SessionToolResult;
+      try {
+        result = await def.handler({ ...ctx, signal: controller.signal,
+          refreshSkills: () => this.noteSkillMarkdownMutation(join(ctx.workspacePath, 'skills', String(args.slug ?? 'installed'), 'SKILL.md')),
+        }, toolName === 'skill_install' || toolName === 'skill_inspect' ? def.inputSchema.parse(args) : args);
+      } finally { this.sessionToolControllers.delete(controller); }
       // Preserve MCP-compatible text/image blocks all the way into Pi's model
       // context. The first block is always text, so older string-only event/UI
       // consumers still receive the structured envelope and artifact paths.
@@ -2774,6 +2783,7 @@ export class PiAgent extends BaseAgent {
   }
 
   async abort(reason?: string): Promise<void> {
+    for (const controller of this.sessionToolControllers) controller.abort();
     this.emitStopOnce('abort');
 
     // Deny all pending permissions
@@ -2794,6 +2804,7 @@ export class PiAgent extends BaseAgent {
   }
 
   forceAbort(reason: AbortReason): void {
+    for (const controller of this.sessionToolControllers) controller.abort();
     this.emitStopOnce('abort');
 
     this.abortReason = reason;
@@ -2986,6 +2997,7 @@ export class PiAgent extends BaseAgent {
    * Kill the subprocess and clean up resources.
    */
   private killSubprocess(): void {
+    for (const controller of this.sessionToolControllers) controller.abort();
     if (this.readline) {
       this.readline.close();
       this.readline = null;
