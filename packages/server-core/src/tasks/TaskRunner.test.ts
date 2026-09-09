@@ -2009,7 +2009,10 @@ describe('TaskRunner (Conductor)', () => {
     }));
     const runner = new TaskRunner({ host, workspaceId: 'ws', workspaceRoot: root });
     runner.run('node-timeout', { runId: 'r1', verifyOnComplete: false });
-    await new Promise((resolve) => setTimeout(resolve, 30));
+    const deadline = Date.now() + 3000;
+    while (!host.cancelled.includes('sess-slow') && Date.now() < deadline) {
+      await new Promise(resolve => setTimeout(resolve, 10));
+    }
     expect(runner.getRunState('node-timeout', 'r1')).toMatchObject({ status: 'failed' });
     expect(runner.getRunState('node-timeout', 'r1')?.nodes[0]).toMatchObject({ state: 'failed', blocker: 'node-timeout' });
     expect(host.cancelled).toContain('sess-slow');
