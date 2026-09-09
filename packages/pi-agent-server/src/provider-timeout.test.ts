@@ -3,6 +3,7 @@ import type { Model } from '@earendil-works/pi-ai';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
 
 async function requestThroughInterceptor(model: Model<'openai-completions'>) {
   const sessionDir = mkdtempSync(join(tmpdir(), 'provider-297-'));
@@ -10,7 +11,7 @@ async function requestThroughInterceptor(model: Model<'openai-completions'>) {
   const budget = resolve(import.meta.dir, './context-budget-stream.ts');
   const code = `
     import { streamSimple } from '@earendil-works/pi-ai/api/openai-completions';
-    import { createContextBudgetedStream } from ${JSON.stringify(budget)};
+    import { createContextBudgetedStream } from ${JSON.stringify(pathToFileURL(budget).href)};
     const response = await createContextBudgetedStream(streamSimple, ${JSON.stringify(model)},
       { messages: [{ role: 'user', content: 'Hello', timestamp: Date.now() }] },
       { apiKey: 'local-test-only', timeoutMs: 15000 }).result();
@@ -34,6 +35,8 @@ it.each([false, true])('accepts a first token after 10 seconds through the inter
   let timer: ReturnType<typeof setTimeout> | undefined;
   const server = Bun.serve({
     port: 0,
+    // Keep the fixture alive beyond the deliberately slow upstream prefill.
+    idleTimeout: 30,
     fetch() {
       return new Response(new ReadableStream({
         start(controller) {

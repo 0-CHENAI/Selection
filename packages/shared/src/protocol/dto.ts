@@ -404,6 +404,8 @@ export interface SwarmRunDetailsDto {
 }
 
 export interface TaskNodeRunStateDto {
+  title?: string
+  attempts?: { attempt: number; sessionId: string; state: string }[]
   approvalFeedback?: string
   approvalDefinition?: { title: string; prompt: string; dependsOn: string[] }
   id: string
@@ -512,6 +514,8 @@ export interface TaskUpdateRunLimitsRequest {
 }
 
 export interface TaskGetResult {
+  /** Only populated when an orchestrator session is supplied; oldest first. */
+  runHistory?: TaskRunSnapshotDto[]
   slug: string
   validation: TaskValidationResultDto
   /** The parsed TaskSpec (from @craft-agent/shared/tasks) when valid; consumers cast. */

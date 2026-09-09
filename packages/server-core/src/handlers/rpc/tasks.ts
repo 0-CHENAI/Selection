@@ -436,14 +436,16 @@ export function registerTasksHandlers(server: RpcServer, deps: HandlerDeps): voi
   })
 
   // tasks:get — spec + (optional) active run-state.
-  server.handle(RPC_CHANNELS.tasks.GET, async (_ctx, workspaceId: string, slug: string, runId?: string): Promise<TaskGetResult> => {
+  server.handle(RPC_CHANNELS.tasks.GET, async (_ctx, workspaceId: string, slug: string, runId?: string, orchestratorSessionId?: string): Promise<TaskGetResult> => {
     const ws = workspaceOrThrow(workspaceId)
+    const runHistory = orchestratorSessionId ? runnerFor(workspaceId).getRunHistory(slug, orchestratorSessionId) : undefined
     const loaded = loadTaskDocument(ws.rootPath, slug)
     if (!loaded) {
       return {
         slug,
         validation: { valid: false, errors: [{ path: 'root', message: `Task "${slug}" not found`, severity: 'error' }], warnings: [] },
         run: null,
+        runHistory,
       }
     }
     const runner = runnerFor(workspaceId)
@@ -457,7 +459,8 @@ export function registerTasksHandlers(server: RpcServer, deps: HandlerDeps): voi
       sourceVersion: loaded.sourceVersion,
       migrationWarnings: loaded.migrationWarnings,
       run,
-      latestRun: run ?? runner.getLatestRun(slug),
+      latestRun: run ?? (runHistory ? runHistory.at(-1) ?? null : runner.getLatestRun(slug)),
+      runHistory,
     }
   })
 

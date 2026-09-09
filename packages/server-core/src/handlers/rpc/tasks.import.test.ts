@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import * as config from '@craft-agent/shared/config'
 import { RPC_CHANNELS } from '@craft-agent/shared/protocol'
-import { taskYamlPath } from '@craft-agent/shared/tasks'
+import { taskYamlPath, saveTaskSpec, parseTaskSpec, writeSpecRevision, appendRunLog } from '@craft-agent/shared/tasks'
 import { registerTasksHandlers } from './tasks'
 import type { RpcServer } from '../../transport'
 import type { HandlerDeps } from '../handler-deps'
@@ -37,10 +37,29 @@ function setup(failSession = false, failSetup = false) {
       setSessionSources() { if (failSetup) throw new Error('sources setup failed') },
     },
   } as unknown as HandlerDeps)
-  return { root, sessions: () => sessions, recover: () => { failSession = false }, call: (channel: string, req: unknown) => handlers.get(channel)!({}, 'test', req) }
+  return { root, sessions: () => sessions, recover: () => { failSession = false }, call: (channel: string, ...args: unknown[]) => handlers.get(channel)!({}, 'test', ...args) }
 }
 
 describe('YAML-only task RPC', () => {
+  it('returns parent-scoped history from frozen specs even when the live task was removed', async () => {
+    const app = setup()
+    const parsed = parseTaskSpec({ id: 'history', title: 'History', goal: 'g', nodes: [{ id: 'one', prompt: 'one' }] })
+    if (!parsed.success) throw new Error('bad fixture')
+    saveTaskSpec(app.root, parsed.data)
+    for (const [runId, parent] of [['r1', 'parent'], ['r2', 'other']]) {
+      writeSpecRevision(app.root, 'history', runId!, 0, parsed.data)
+      appendRunLog(app.root, 'history', runId!, { t: '2026-09-09T00:00:00Z', kind: 'run-started', taskId: 'history', runId: runId!, orchestratorSessionId: parent })
+      appendRunLog(app.root, 'history', runId!, { t: '2026-09-09T00:00:01Z', kind: 'run-stopped', tokensUsed: 0 })
+    }
+    const result = await app.call(RPC_CHANNELS.tasks.GET, 'history', undefined, 'parent')
+    expect(result.runHistory.map((run: { runId: string }) => run.runId)).toEqual(['r1'])
+    rmSync(taskYamlPath(app.root, 'history'))
+    const removed = await app.call(RPC_CHANNELS.tasks.GET, 'history', undefined, 'parent')
+    expect(removed.runHistory[0].status).toBe('stopped')
+    expect(removed.runHistory[0].nodes[0].id).toBe('one')
+    expect(app.sessions()).toBe(0)
+  })
+
   it('keeps a successfully created task when optional setup throws synchronously', async () => {
     const app = setup(false, true)
     const result = await app.call(RPC_CHANNELS.tasks.CREATE, { yaml: yaml + 'sources: [test-source]\n' })

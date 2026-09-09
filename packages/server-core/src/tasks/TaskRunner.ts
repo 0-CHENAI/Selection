@@ -183,6 +183,8 @@ export class TaskControlError extends Error {
 }
 
 export interface NodeRunStatus {
+  title?: string;
+  attempts?: { attempt: number; sessionId: string; state: string }[];
   approvalFeedback?: string;
   approvalDefinition?: { title: string; prompt: string; dependsOn: string[] };
   id: string;
@@ -311,6 +313,9 @@ interface NodeStateEntry {
 // ---------------------------------------------------------------------------
 
 class ActiveRun {
+  private historicalMetrics?: TaskRunMetrics;
+  private readonly attemptHistory = new Map<string, { attempt: number; sessionId: string; state: string }[]>();
+  private readonly attemptNumbers = new Map<string, number>();
   private readonly state = new Map<string, NodeStateEntry>();
   private readonly sessionToNode = new Map<string, string>();
   private readonly outputs: Record<string, NodeOutput> = {};
@@ -602,10 +607,12 @@ class ActiveRun {
   hydrate(
     log: RunLogEntry[],
     loadOutput: (nodeId: string) => NodeOutput | null,
-    mode: 'scan' | 'hydrate' = 'hydrate',
+    mode: 'scan' | 'hydrate' | 'view' = 'hydrate',
+    persistedMetrics?: TaskRunMetrics,
   ): void {
     this.suppressSchedule = true;
     for (const e of log) {
+      this.recordAttempt(e);
       const entrySeq = (e as RunLogEntry & { seq?: number }).seq;
       if (typeof entrySeq === 'number') this.nextSeq = Math.max(this.nextSeq, entrySeq + 1);
       if ('tokensUsed' in e && typeof e.tokensUsed === 'number') this.tokensUsed = e.tokensUsed;
@@ -705,6 +712,16 @@ class ActiveRun {
       }
     }
     this.runStatus = deriveRunStatusFromLog(log);
+    // History reads must never subscribe, start timers, change states or write logs.
+    if (mode === 'view') {
+      const start = Date.parse(log[0]?.t ?? '');
+      const end = Date.parse(log.at(-1)?.t ?? '');
+      this.historicalMetrics = persistedMetrics ?? {
+        ...this.buildMetrics(),
+        elapsedMs: Number.isFinite(start) && Number.isFinite(end) ? Math.max(0, end - start) : 0,
+      };
+      return;
+    }
     for (const [nodeId, st] of this.state) {
       if (st.state === 'done') {
         const out = loadOutput(nodeId);
@@ -858,13 +875,15 @@ class ActiveRun {
     if (this.isOverBudget() && this.hasPendingNodes()) blockers.push('budget');
     if (this.runStatus === 'waiting-coordinator') blockers.push(this.coordinatorGate?.reason ?? 'coordinator');
     if (this.runStatus === 'paused' && this.lastCoordinatorTimeout) blockers.push(COORDINATOR_TIMEOUT_BLOCKER);
-    const metrics = this.buildMetrics();
+    const metrics = this.historicalMetrics ?? this.buildMetrics();
     const toNodeStatus = (id: string, st: NodeStateEntry, node?: TaskNode): NodeRunStatus => {
       const timing = this.nodeTimings.get(id);
       const recorded = this.nodeVerdicts.get(id) ?? this.nodeVerdicts.get(definitionId(id));
       const verdict = recorded ?? timing?.verdict;
       return {
         id,
+        title: node ? nodeTitle(node) : id,
+        attempts: this.attemptHistory.get(id)?.map(attempt => ({ ...attempt })),
         definitionId: node?.id ?? definitionId(id),
         state: st.state,
         sessionId: st.sessionId,
@@ -1728,6 +1747,11 @@ class ActiveRun {
   }
 
   private async dispatch(node: TaskNode, instance?: { id: string; item?: unknown; index?: number; prev?: string }): Promise<void> {
+    const key = instance?.id ?? node.id;
+    const state = this.instances.get(key) ?? this.state.get(node.id)!;
+    const attempt = state.attempt;
+    const canDispatch = () => state.state === 'running' && state.attempt === attempt
+      && !this.settled && (!this.stopRequested || node.kind === 'finally');
     try {
       const ceiling = this.spec.defaults?.permissionMode ?? DEFAULT_TASK_PERMISSION_MODE;
       const requested = node.permissionMode ?? ceiling;
@@ -1742,6 +1766,7 @@ class ActiveRun {
       // Task-level skills ride as [skill:slug] mentions on every child prompt — the agent
       // pipeline resolves each SKILL.md and blocks tools until it is read (skills-as-context).
       const prompt = skillsPreamble(this.spec.skills) + (await this.buildPrompt(node, instance));
+      if (!canDispatch()) return;
       // Children run where the parent runs: inherit the orchestrator's resolved working directory,
       // falling back to the spec's declared `cwd`. Without this they default to the workspace cwd
       // rather than the parent session's (project) directory.
@@ -1777,15 +1802,23 @@ class ActiveRun {
       // Hidden workers remain persisted/queryable by their task/run/node linkage,
       // but do not appear as ordinary project sessions.
       const child = await this.deps.host.createSession(this.deps.workspaceId, options);
-      const key = instance?.id ?? node.id;
       const st = this.instances.get(key) ?? this.state.get(node.id)!;
       st.sessionId = child.id;
       this.sessionToNode.set(child.id, key);
       this.log({ kind: 'node-spawned', nodeId: key, sessionId: child.id });
+      if (!canDispatch()) {
+        // Creation may finish after Stop. Preserve its history, but never send the prompt.
+        this.log({ kind: 'node-finished', nodeId: key, sessionId: child.id, state: 'cancelled', reason: 'stopped-before-dispatch' });
+        this.applyCard(child.id, TODO_STATUS);
+        this.emitChanged();
+        return;
+      }
       const timing = this.timing(key);
       timing.startedAtMs = this.nowMs();
       if (timing.scheduledAtMs !== undefined) timing.queueMs = Math.max(0, timing.startedAtMs - timing.scheduledAtMs);
       this.applyCard(child.id, RUNNING_STATUS);
+      this.emitChanged(); // Publish the new child link while the node is still running.
+      if (!canDispatch()) return;
       if (node.timeout && node.timeout > 0) {
         const timer = setTimeout(() => {
           this.sessionTimers.delete(child.id);
@@ -1809,7 +1842,7 @@ class ActiveRun {
       }
       await this.deps.host.sendMessage(child.id, prompt);
     } catch (err) {
-      this.failNode(instance?.id ?? node.id, `dispatch failed: ${(err as Error).message}`);
+      if (canDispatch()) this.failNode(key, `dispatch failed: ${(err as Error).message}`);
     }
   }
 
@@ -3019,6 +3052,22 @@ class ActiveRun {
     return ['## Inputs by dependency', ...sections].join('\n\n');
   }
 
+  private recordAttempt(entry: RunLogEntryInput): void {
+    if (entry.kind === 'node-scheduled') {
+      this.attemptNumbers.set(entry.nodeId, (this.attemptNumbers.get(entry.nodeId) ?? 0) + 1);
+    } else if (entry.kind === 'node-spawned') {
+      const attempts = this.attemptHistory.get(entry.nodeId) ?? [];
+      attempts.push({ attempt: this.attemptNumbers.get(entry.nodeId) ?? 1, sessionId: entry.sessionId, state: 'running' });
+      this.attemptHistory.set(entry.nodeId, attempts);
+    } else if (entry.kind === 'node-finished' || entry.kind === 'node-retry') {
+      const attempts = this.attemptHistory.get(entry.nodeId);
+      const attempt = entry.kind === 'node-finished'
+        ? attempts?.find(item => item.sessionId === entry.sessionId)
+        : attempts?.at(-1);
+      if (attempt) attempt.state = entry.kind === 'node-retry' ? 'failed' : entry.state;
+    }
+  }
+
   private log(entry: RunLogEntryInput): void {
     const t = this.deps.now ? this.deps.now() : new Date().toISOString();
     const seq = this.nextSeq++;
@@ -3028,6 +3077,7 @@ class ActiveRun {
       seq,
       revision: this.revision,
     });
+    this.recordAttempt(entry);
     this.writeCheckpoint(seq);
     if (
       entry.kind === 'run-started' ||
@@ -3356,7 +3406,7 @@ export class TaskRunner {
   }
 
   /** Reconstruct an in-memory run from the run spec snapshot + run-log. Never reads live YAML for the graph. */
-  private rehydrate(slug: string, runId: string, mode: 'scan' | 'hydrate'): ActiveRun {
+  private rehydrate(slug: string, runId: string, mode: 'scan' | 'hydrate' | 'view'): ActiveRun {
     const checkpoint = readRunState(this.deps.workspaceRoot, slug, runId);
     const log = readRunLog(this.deps.workspaceRoot, slug, runId);
     if (log.length === 0) throw new Error(`Cannot restore "${slug}:${runId}": no run-log found`);
@@ -3387,8 +3437,8 @@ export class TaskRunner {
       this.deps,
     );
     run.restoreCheckpoint(checkpoint, durableRevision);
-    run.hydrate(log, (nodeId) => readNodeOutput(this.deps.workspaceRoot, slug, runId, nodeId), mode);
-    this.runs.set(this.key(slug, runId), run);
+    run.hydrate(log, (nodeId) => readNodeOutput(this.deps.workspaceRoot, slug, runId, nodeId), mode, checkpoint?.metrics);
+    if (mode !== 'view') this.runs.set(this.key(slug, runId), run);
     return run;
   }
 
@@ -3448,19 +3498,25 @@ export class TaskRunner {
     return this.runs.get(this.key(slug, runId))?.snapshot() ?? null;
   }
 
+  /** Read any durable run without registering it as active or executing recovery. */
+  getRunHistory(slug: string, orchestratorSessionId: string): RunSnapshot[] {
+    return listRunIds(this.deps.workspaceRoot, slug).flatMap(runId => {
+      const log = readRunLog(this.deps.workspaceRoot, slug, runId);
+      const start = log.find(entry => entry.kind === 'run-started');
+      if (start?.kind !== 'run-started' || start.orchestratorSessionId !== orchestratorSessionId) return [];
+      const snapshot = this.getRunState(slug, runId) ?? this.rehydrate(slug, runId, 'view').snapshot();
+      return [snapshot];
+    });
+  }
+
   getLatestRun(slug: string): RunSnapshot | null {
-    let latest: RunSnapshot | null = null;
-    for (const run of this.runs.values()) {
-      const snap = run.snapshot();
-      if (snap.slug === slug) latest = snap;
-    }
-    if (latest) return latest;
     const last = listRunIds(this.deps.workspaceRoot, slug).at(-1);
     if (!last) return null;
+    const active = this.getRunState(slug, last);
+    if (active) return active;
     try {
-      const snap = this.rehydrate(slug, last, isTerminalRunStatus(deriveRunStatusFromLog(readRunLog(this.deps.workspaceRoot, slug, last))) ? 'hydrate' : 'scan').snapshot();
-      if (isTerminalRunStatus(snap.status)) this.runs.delete(this.key(slug, last));
-      return snap;
+      const terminal = isTerminalRunStatus(deriveRunStatusFromLog(readRunLog(this.deps.workspaceRoot, slug, last)));
+      return this.rehydrate(slug, last, terminal ? 'view' : 'scan').snapshot();
     } catch {
       return null;
     }
