@@ -14,27 +14,9 @@ fi
 
 echo "Generating icons from: $SOURCE"
 
-# Create temporary iconset directory for macOS
-ICONSET="icon.iconset"
-rm -rf "$ICONSET"
-mkdir -p "$ICONSET"
-
-# Generate all sizes for macOS iconset
-echo "Generating macOS iconset..."
-sips -z 16 16 "$SOURCE" --out "$ICONSET/icon_16x16.png" > /dev/null
-sips -z 32 32 "$SOURCE" --out "$ICONSET/icon_16x16@2x.png" > /dev/null
-sips -z 32 32 "$SOURCE" --out "$ICONSET/icon_32x32.png" > /dev/null
-sips -z 64 64 "$SOURCE" --out "$ICONSET/icon_32x32@2x.png" > /dev/null
-sips -z 128 128 "$SOURCE" --out "$ICONSET/icon_128x128.png" > /dev/null
-sips -z 256 256 "$SOURCE" --out "$ICONSET/icon_128x128@2x.png" > /dev/null
-sips -z 256 256 "$SOURCE" --out "$ICONSET/icon_256x256.png" > /dev/null
-sips -z 512 512 "$SOURCE" --out "$ICONSET/icon_256x256@2x.png" > /dev/null
-sips -z 512 512 "$SOURCE" --out "$ICONSET/icon_512x512.png" > /dev/null
-sips -z 1024 1024 "$SOURCE" --out "$ICONSET/icon_512x512@2x.png" > /dev/null
-
-# Generate .icns for macOS
-echo "Creating icon.icns..."
-iconutil -c icns "$ICONSET" -o icon.icns
+# Keep macOS plate sizing separate from the other platform assets.
+# The generator scales the whole source onto a transparent canvas.
+bun ../scripts/generate-macos-icon.cjs "$SOURCE"
 
 # Generate icon.png for Linux (512x512)
 echo "Creating icon.png for Linux..."
@@ -62,9 +44,6 @@ else
     echo "Install with: brew install imagemagick"
     echo "Or use an online converter with the 256x256 PNG."
 fi
-
-# Clean up iconset directory
-rm -rf "$ICONSET"
 
 echo ""
 echo "✅ Icons generated:"
