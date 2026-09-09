@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync, rmSync, statSync, readdirSync } from 'fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync, rmSync, statSync, readdirSync, copyFileSync } from 'fs';
 import { join, dirname, basename } from 'path';
 import { getCredentialManager } from '../credentials/index.ts';
 import { getOrCreateLatestSession, type SessionConfig } from '../sessions/index.ts';
@@ -3005,12 +3005,11 @@ export function setSetupDeferred(deferred: boolean): void {
 // Tool Icons (CLI tool icons for turn card display)
 // ============================================
 
-import { copyFileSync } from 'fs';
-
 const TOOL_ICONS_DIR_NAME = 'tool-icons';
+const SELECTION_BRAND_TOOL_ICON = 'craft-agent.svg';
 
 /**
- * Returns the path to the tool-icons directory: ~/.craft-agent/tool-icons/
+ * Returns the path to the tool-icons directory: ~/.selection/tool-icons/
  */
 export function getToolIconsDir(): string {
   return join(CONFIG_DIR, TOOL_ICONS_DIR_NAME);
@@ -3019,8 +3018,9 @@ export function getToolIconsDir(): string {
 /**
  * Ensure tool-icons directory exists and has bundled defaults.
  * Resolves bundled path automatically via getBundledAssetsDir('tool-icons').
- * Copies bundled tool-icons.json and icon files on first run.
- * Only copies files that don't already exist (preserves user customizations).
+ * Copies missing bundled files on first run, and always refreshes the Selection
+ * brand icon so a stale first-run S mark cannot keep covering the swan.
+ * Other existing files are left alone so user customizations stay intact.
  */
 export function ensureToolIcons(): void {
   const toolIconsDir = getToolIconsDir();
@@ -3037,13 +3037,14 @@ export function ensureToolIcons(): void {
   }
 
   // Copy each bundled file if it doesn't exist in the target dir
-  // This includes tool-icons.json and all icon files (png, ico, svg, jpg)
+  // This includes tool-icons.json and all icon files (png, ico, svg, jpg).
+  // craft-agent.svg is the product mark and is always replaced from the bundle.
   try {
     const bundledFiles = readdirSync(bundledToolIconsDir);
     for (const file of bundledFiles) {
       const destPath = join(toolIconsDir, file);
-      if (!existsSync(destPath)) {
-        const srcPath = join(bundledToolIconsDir, file);
+      const srcPath = join(bundledToolIconsDir, file);
+      if (file === SELECTION_BRAND_TOOL_ICON || !existsSync(destPath)) {
         copyFileSync(srcPath, destPath);
       }
     }

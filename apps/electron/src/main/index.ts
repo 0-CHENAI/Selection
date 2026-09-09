@@ -445,7 +445,7 @@ app.whenReady().then(async () => {
   // Ensure default permissions file exists (copies bundled default.json on first run)
   ensureDefaultPermissions()
 
-  // Seed tool icons to ~/.selection/tool-icons/ (copies bundled SVGs on first run)
+  // Seed tool icons to ~/.selection/tool-icons/ (copy missing files; refresh Selection swan)
   ensureToolIcons()
 
   // Seed preset themes to ~/.selection/themes/ (copies bundled theme JSONs on first run)
