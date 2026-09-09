@@ -10,6 +10,8 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 
 ## Improvements
 
+- **Appearance no longer exposes tool-icon mappings** — Settings → Appearance hides the Tool Icons table and edit entry. Chat still resolves CLI icons from `~/.selection/tool-icons/`, and a stale first-run Selection / `craft-agent` S mark is replaced with the bundled swan on launch. ([#307](https://github.com/0-CHENAI/Selection/issues/307))
+
 - **Selection now uses the swan mark throughout the product** — Ready, empty desktop sessions show the supplied swan beside the CATHALIE Selection name above the composer, with the two marks aligned along their lower edge. The same swan replaces the previous circular Selection mark across onboarding, splash screens, menus, viewers, desktop assets, and WebUI/PWA icons. The new-session wordmark disappears on the first message and stays out of compact, loading, failed, and read-only states. ([#275](https://github.com/0-CHENAI/Selection/issues/275))
 
 - **Streamlined messaging integrations** — Removed the retired Telegram and WhatsApp integrations, their setup surfaces, background worker, and packaged dependencies. Existing installations now discard only those integrations' obsolete credentials and local state while preserving Lark / Feishu configuration and bindings. (#280)
@@ -48,4 +50,5 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 
 - **编排超时诊断与并行恢复** — 区分 SSE 心跳、模型输出和上游流内错误，在错误详情中保留脱敏请求标识与阶段耗时；诊断与具体请求及重试次数绑定，避免错误串用和隐式重发；编排可恢复失败步骤及受影响下游，保留不受影响的成功结果和累计预算，并重新执行必要的审批与验收。（#297）
 
+- **完整的技能安装链路** — 新增技能检查与安装工具，一次调用完成获取、静态校验、安装及加载确认；同名更新要求明确指令和内容指纹，失败恢复旧版本，无需发送“继续”补校验。（#310）
 - **统一 macOS 图标尺寸** — 为 Dock 和 ICNS 图标添加透明外边距，将白色底板与天鹅整体缩至约 83%，改善与其他应用并排时明显偏大的问题。

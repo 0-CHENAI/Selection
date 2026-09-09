@@ -352,6 +352,8 @@
         "gray-matter": "^4.0.3",
         "i18next": "^26.0.3",
         "incr-regex-package": "^1.0.4",
+        "marked": "^17.0.1",
+        "tar": "^7.5.2",
         "shell-quote": "^1.8.3",
         "yaml": "^2.8.2",
       },
