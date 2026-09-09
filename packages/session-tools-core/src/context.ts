@@ -149,6 +149,10 @@ export interface ValidatorInterface {
  * - Codex: createCodexContext() with callback IPC and limited capabilities
  */
 export interface SessionToolContext {
+  /** Cancellation for this invocation, never shared across concurrent calls. */
+  signal?: AbortSignal;
+  /** Refresh host and current agent skill catalogs after a committed install. */
+  refreshSkills?: () => void | Promise<void>;
   // ============================================================
   // Session Info
   // ============================================================
@@ -176,6 +180,12 @@ export interface SessionToolContext {
 
   /** Current session permission mode, when supplied by the backend. */
   permissionMode?: string;
+
+  /**
+   * Consume a one-shot approval recorded by the host immediately before
+   * executing developer feedback. Missing callbacks fail closed.
+   */
+  consumeDeveloperFeedbackApproval?(approvalToken: string, message: string): boolean;
 
   // ============================================================
   // Callbacks (transport-agnostic)
@@ -416,7 +426,7 @@ export interface SessionToolContext {
   getMessagingBindings?(sessionId: string): Array<{
     platform: string;
     channelId: string;
-    /** Telegram supergroup forum topic id; undefined for DMs / non-Telegram. */
+    /** Optional platform-native conversation thread identifier. */
     threadId?: number;
     channelName?: string;
     enabled: boolean;
@@ -487,7 +497,7 @@ export interface CreateTaskInput {
   title?: string;
   /** What the task should accomplish — becomes the task goal and the initial node prompt. */
   description?: string;
-  /** Full v2 spec. Mutually exclusive with the single-node title/description form. */
+  /** Full task spec. Mutually exclusive with the single-node title/description form. */
   spec?: unknown;
   /** Freeform rubric the final result is verified against. */
   acceptanceCriteria?: string;

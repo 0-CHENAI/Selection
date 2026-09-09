@@ -1,0 +1,25 @@
+name: Conductor Recovery Contract
+on:
+  pull_request:
+    paths:
+      - 'packages/server-core/src/tasks/**'
+      - 'packages/server-core/src/handlers/rpc/tasks*'
+      - 'packages/pi-agent-server/src/**'
+      - 'packages/shared/src/sse-diagnostics*'
+      - 'apps/electron/src/renderer/components/app-shell/kanban/**'
+      - '.github/workflows/conductor-recovery.yml'
+  workflow_dispatch:
+jobs:
+  recovery:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: '1.3.10'
+      - run: bun install --frozen-lockfile
+      - run: bun test packages/server-core/src/tasks packages/pi-agent-server/src/provider-timeout.test.ts apps/electron/src/renderer/components/app-shell/kanban/__tests__/orchestration-run-progress.test.tsx

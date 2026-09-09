@@ -21,10 +21,8 @@ import { customShadowsComponents } from './custom-shadows'
 import { transportBannerComponents } from './transport-banner'
 import { containerTransitionsComponents } from './container-transitions'
 import { apiKeyInputComponents } from './api-key-input'
-import { messagingComponents } from './messaging'
 import { imageSupportComponents } from './image-support'
 import { mobileWebUIComponents } from './mobile-webui'
-import { kanbanComponents } from './kanban'
 import { taskEditorComponents } from './task-editor'
 
 export * from './types'
@@ -45,7 +43,6 @@ export const componentRegistry: ComponentEntry[] = [
   ...iconComponents,
   ...oauthComponents,
   ...sessionListComponents,
-  ...kanbanComponents,
   ...taskEditorComponents,
   ...projectColorsComponents,
   ...editPopoverComponents,
@@ -56,7 +53,6 @@ export const componentRegistry: ComponentEntry[] = [
   ...customShadowsComponents,
   ...transportBannerComponents,
   ...containerTransitionsComponents,
-  ...messagingComponents,
   ...imageSupportComponents,
 ]
 

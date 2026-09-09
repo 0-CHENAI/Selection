@@ -59,11 +59,7 @@ export class BindingStore {
 
   /**
    * Find the active binding for a (platform, channelId, threadId) tuple.
-   * `threadId` distinguishes Telegram supergroup forum topics from each
-   * other and from the supergroup's General topic / DMs (undefined).
-   *
-   * Bindings created without `threadId` (DMs, pre-topics-feature data)
-   * only match calls passing `threadId === undefined`.
+   * `threadId` distinguishes platform-native conversation threads.
    */
   findByChannel(platform: PlatformType, channelId: string, threadId?: number): ChannelBinding | undefined {
     return this.bindings.find(
@@ -97,8 +93,7 @@ export class BindingStore {
     threadId?: number,
   ): ChannelBinding {
     // One channel → one session: evict any existing binding for the
-    // (platform, channelId, threadId) tuple. Different topics in the same
-    // supergroup are independently bindable.
+    // (platform, channelId, threadId) tuple.
     this.bindings = this.bindings.filter(
       (b) => !(b.platform === platform && b.channelId === channelId && (b.threadId ?? undefined) === threadId),
     )
@@ -248,7 +243,9 @@ export class BindingStore {
         const raw = readFileSync(this.filePath, 'utf-8')
         const parsed = JSON.parse(raw)
         if (Array.isArray(parsed)) {
-          this.bindings = parsed.map(normalizeBinding)
+          const supported = parsed.filter(isSupportedBinding)
+          this.bindings = supported.map(normalizeBinding)
+          if (supported.length !== parsed.length) this.save()
         }
       }
     } catch (err) {
@@ -290,4 +287,10 @@ function normalizeBinding(raw: ChannelBinding): ChannelBinding {
     ...raw,
     config: normalizeBindingConfig(raw.platform, raw.config ?? {}),
   }
+}
+
+function isSupportedBinding(value: unknown): value is ChannelBinding {
+  return typeof value === 'object'
+    && value !== null
+    && (value as { platform?: unknown }).platform === 'lark'
 }

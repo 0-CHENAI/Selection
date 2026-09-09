@@ -379,7 +379,7 @@ export function registerWorkspaceCoreHandlers(server: RpcServer, deps: HandlerDe
   // ============================================================
 
   // Tool icon mappings — loads tool-icons.json and resolves each entry's icon to a data URL
-  // for display in the Appearance settings page
+  // for chat activity CLI badges. The Appearance settings table no longer surfaces this.
   server.handle(RPC_CHANNELS.toolIcons.GET_MAPPINGS, async () => {
     const { getToolIconsDir } = await import('@craft-agent/shared/config/storage')
     const { loadToolIconConfig } = await import('@craft-agent/shared/utils/cli-icon-resolver')

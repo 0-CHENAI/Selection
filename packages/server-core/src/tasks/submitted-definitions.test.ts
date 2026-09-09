@@ -26,6 +26,15 @@ describe('resolveGeneratedYaml', () => {
     expect(() => resolveGeneratedYaml('new-v1', 1, 'schema_version: 1\nid: old')).toThrow('current generation');
   });
 
+  it('rejects a v3 definition found only in final text', () => {
+    expect(() => resolveGeneratedYaml(
+      'text-v3',
+      1,
+      '```yaml\nschema_version: 3\nid: pasted\ntitle: Pasted\ngoal: g\nnodes:\n  - id: work\n    prompt: work\n```',
+      { allowLegacyFallback: true },
+    )).toThrow('must be submitted with submit_task_definition');
+  });
+
   it('rejects a v2 definition found only in final text', () => {
     expect(() => resolveGeneratedYaml(
       'text-v2',
@@ -43,7 +52,7 @@ describe('resolveGeneratedYaml', () => {
 
   it('rejects unknown v2 fields before permissive schema parsing can strip them', () => {
     const invalid = validateSubmittedDefinition({
-      schema_version: 2,
+      schema_version: 3,
       id: 'strict',
       title: 'Strict',
       goal: 'g',
@@ -54,7 +63,7 @@ describe('resolveGeneratedYaml', () => {
     if (!invalid.valid) expect(invalid.errors.join('\n')).toContain('token_buget');
 
     const valid = validateSubmittedDefinition({
-      schema_version: 2,
+      schema_version: 3,
       id: 'strict',
       title: 'Strict',
       goal: 'g',
@@ -62,20 +71,21 @@ describe('resolveGeneratedYaml', () => {
       nodes: [{ id: 'work', prompt: 'work' }],
     });
     expect(valid.valid).toBe(true);
-    if (valid.valid) expect(valid.yaml).toContain('schema_version: 2');
+    if (valid.valid) expect(valid.yaml).toContain('schema_version: 3');
   });
 
-  it('requires an explicit numeric schema_version 2 in structured submissions', () => {
+  it('requires an explicit numeric schema_version 3 in structured submissions', () => {
     const base = { id: 'strict', title: 'Strict', goal: 'g', nodes: [{ id: 'work', prompt: 'work' }] };
     expect(validateSubmittedDefinition(base).valid).toBe(false);
     expect(validateSubmittedDefinition({ ...base, schema_version: 1 }).valid).toBe(false);
-    expect(validateSubmittedDefinition({ ...base, schema_version: '2' }).valid).toBe(false);
-    expect(validateSubmittedDefinition({ ...base, schema_version: 2 }).valid).toBe(true);
+    expect(validateSubmittedDefinition({ ...base, schema_version: 2 }).valid).toBe(false);
+    expect(validateSubmittedDefinition({ ...base, schema_version: '3' }).valid).toBe(false);
+    expect(validateSubmittedDefinition({ ...base, schema_version: 3 }).valid).toBe(true);
   });
 
-  it('rejects the legacy type alias in v2 even when kind is also present', () => {
+  it('rejects the legacy type alias in v3 even when kind is also present', () => {
     const result = validateSubmittedDefinition({
-      schema_version: 2,
+      schema_version: 3,
       id: 'kind-conflict',
       title: 'Kind conflict',
       goal: 'g',

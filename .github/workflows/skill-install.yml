@@ -1,0 +1,24 @@
+name: Skill Install Contract
+on:
+  pull_request:
+    paths:
+      - 'packages/shared/src/skills/**'
+      - 'packages/shared/src/agent/**'
+      - 'packages/session-tools-core/**'
+      - 'packages/session-mcp-server/**'
+      - '.github/workflows/skill-install.yml'
+  workflow_dispatch:
+jobs:
+  skill-install:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v6
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: '1.3.10'
+      - run: bun install --frozen-lockfile
+      - run: bun test packages/shared/src/skills/install.test.ts packages/shared/src/skills/install-source.test.ts packages/shared/src/agent/__tests__/pi-skill-install.test.ts

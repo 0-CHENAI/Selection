@@ -42,13 +42,14 @@ describe('OfficeCLI sync governance', () => {
   });
 
   it('keeps only the reviewed version directory next to the manifest', () => {
+    const reviewedVersion = manifest().version;
     expect(unexpectedOfficecliRootEntries(
-      ['officecli-manifest.json', 'officecli-upgrade-report.md', '1.0.146', '.DS_Store'],
-      '1.0.146',
+      ['officecli-manifest.json', 'officecli-upgrade-report.md', reviewedVersion, '.DS_Store'],
+      reviewedVersion,
     )).toEqual([]);
     expect(unexpectedOfficecliRootEntries(
-      ['officecli-manifest.json', 'officecli-upgrade-report.md', '1.0.144', '1.0.145', '1.0.146'],
-      '1.0.146',
+      ['officecli-manifest.json', 'officecli-upgrade-report.md', '1.0.144', '1.0.145', reviewedVersion],
+      reviewedVersion,
     )).toEqual(['1.0.144', '1.0.145']);
   });
 
@@ -116,8 +117,9 @@ describe('OfficeCLI sync governance', () => {
   });
 
   it('treats platform-specific help hashes as non-blocking when the command contract matches', () => {
+    const reviewedManifest = manifest();
     const reviewed = JSON.parse(
-      readFileSync(resolve(import.meta.dir, '../apps/electron/resources/officecli/1.0.146/command-schema.json'), 'utf8'),
+      readFileSync(resolve(import.meta.dir, `../apps/electron/resources/officecli/${reviewedManifest.version}/command-schema.json`), 'utf8'),
     ) as CommandSnapshot;
     const sameContractDifferentHelp: CommandSnapshot = {
       ...reviewed,

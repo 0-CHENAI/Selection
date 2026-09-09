@@ -6,15 +6,15 @@ interface CraftAgentsSymbolProps {
 }
 
 /**
- * Selection product mark (circular serif I).
- * Brand fills come from the SVG; theme accent is not applied.
+ * Selection swan product mark.
+ * The black source artwork is inverted for dark surfaces.
  */
 export function CraftAgentsSymbol({ className }: CraftAgentsSymbolProps) {
   return (
     <img
       src={selectionIcon}
       alt=""
-      className={cn("aspect-square object-contain", className)}
+      className={cn("aspect-square object-contain dark:invert", className)}
     />
   )
 }

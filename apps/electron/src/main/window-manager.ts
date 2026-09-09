@@ -13,6 +13,7 @@ import {
   isWindowsWindowDark,
   nativeThemeSourceForMode,
   parseWindowsBuildNumber,
+  resolveWindowsTitleBarOverlay,
   resolveWindowsWindowBackground,
 } from './windows-background-material'
 
@@ -238,10 +239,17 @@ export class WindowManager {
         vibrancy: 'under-window',
         visualEffectState: 'active',
       }),
-      // Windows 11: native frame + Mica. Windows 10 Acrylic is skipped (#53).
+      // Windows: hide the extra native title-bar row and overlay caption
+      // buttons on the Selection top bar. Keep the native frame/border.
+      // Windows 11 still uses Mica; Windows 10 Acrylic is skipped (#53).
       ...(isWindows && {
-        frame: true, // Keep native frame for better UX
-        autoHideMenuBar: true, // Menu is null on Windows, this is just for safety
+        titleBarStyle: 'hidden',
+        autoHideMenuBar: true,
+        titleBarOverlay: resolveWindowsTitleBarOverlay(
+          this.lastThemeMode
+            ? isWindowsWindowDark(this.lastThemeMode, nativeTheme.shouldUseDarkColors)
+            : nativeTheme.shouldUseDarkColors,
+        ),
         // Note: Don't use transparent:true with backgroundMaterial - it hides the window frame
         ...(windowsBackgroundMaterial && {
           backgroundMaterial: windowsBackgroundMaterial,
@@ -409,6 +417,7 @@ export class WindowManager {
     // Listen for system theme changes and notify this window's renderer
     const themeHandler = () => {
       this.pushToWindow(window, RPC_CHANNELS.theme.SYSTEM_CHANGED, nativeTheme.shouldUseDarkColors)
+      this.applyWindowsWindowChrome(window)
     }
     nativeTheme.on('updated', themeHandler)
 
@@ -522,12 +531,19 @@ export class WindowManager {
     this.lastThemeMode = mode
     if (process.platform !== 'win32') return
     nativeTheme.themeSource = nativeThemeSourceForMode(mode)
-    const backgroundColor = resolveWindowsWindowBackground(
-      isWindowsWindowDark(mode, nativeTheme.shouldUseDarkColors),
-    )
     for (const { window } of this.getAllWindows()) {
-      if (!window.isDestroyed()) window.setBackgroundColor(backgroundColor)
+      this.applyWindowsWindowChrome(window)
     }
+  }
+
+  /** Sync Windows frame fill and overlay caption colors with Appearance + OS theme. */
+  private applyWindowsWindowChrome(window: BrowserWindow): void {
+    if (process.platform !== 'win32' || window.isDestroyed()) return
+    const isDark = this.lastThemeMode
+      ? isWindowsWindowDark(this.lastThemeMode, nativeTheme.shouldUseDarkColors)
+      : nativeTheme.shouldUseDarkColors
+    window.setBackgroundColor(resolveWindowsWindowBackground(isDark))
+    window.setTitleBarOverlay(resolveWindowsTitleBarOverlay(isDark))
   }
 
   /** Get window by webContents.id (used by IPC handlers instead of BrowserWindow.fromId) */

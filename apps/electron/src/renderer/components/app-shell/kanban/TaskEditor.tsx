@@ -3,10 +3,17 @@ import { ChevronLeft, ChevronDown, Sparkles, Plus, Trash2, Check, X, ExternalLin
 import { toast } from 'sonner'
 import { useTranslation } from 'react-i18next'
 import { cn } from '@/lib/utils'
-import { Spinner, LoadingIndicator, Markdown } from '@craft-agent/ui'
+import { Spinner, Markdown } from '@craft-agent/ui'
 import { getModelShortName } from '@config/models'
+import { TaskYamlImport } from './TaskYamlImport'
+import { TaskProposal } from './TaskProposal'
+import { TaskApproval } from './TaskApproval'
+import { TaskTemplateLibrary } from './TaskTemplateLibrary'
+import { TaskTemplateSaveDialog } from './TaskTemplateSave'
+import { taskTemplateErrorKey } from './task-template-library'
+import { isUnboundTaskEdit } from './orchestration-editor-target'
 import { catalogDefaultModel } from './kanban-models'
-import { useAtomValue, useStore } from 'jotai'
+import { useAtom, useAtomValue, useStore } from 'jotai'
 import { useProjects } from '@/hooks/useProjects'
 import { sourcesAtom } from '@/atoms/sources'
 import { skillsAtom } from '@/atoms/skills'
@@ -21,7 +28,7 @@ import {
   DropdownMenuSeparator,
 } from '@/components/ui/dropdown-menu'
 import type { KanbanModelProviderGroup, TaskEditorTarget } from './types'
-import { uid, buildSpec, specToSubtasks, canDependOn, quickAddNodeId, quickAddChildToSubtask, taskDocumentForSave, canSafelySaveExistingTask, shouldRefreshYamlDraft, DEFAULT_REPAIR_ATTEMPTS, MAX_REPAIR_ATTEMPTS_CAP, SESSION_LIKE_KINDS, type EditorSubtask, type SpecNode, type TaskPermissionMode } from './task-spec-form'
+import { uid, buildSpec, specToSubtasks, canDependOn, quickAddNodeId, quickAddChildToSubtask, taskDocumentForSave, canSafelySaveExistingTask, shouldRefreshYamlDraft, specNeedsV3Confirm, DEFAULT_REPAIR_ATTEMPTS, MAX_REPAIR_ATTEMPTS_CAP, SESSION_LIKE_KINDS, type EditorSubtask, type SpecNode, type TaskPermissionMode } from './task-spec-form'
 import { runnerLabelKey, runStatusLabelKey } from './task-labels'
 import { ConductorWorkbench, type WorkbenchSpec } from './ConductorWorkbench'
 import { ApplyRunRevisionDialog, canConfirmRunRevision } from './ApplyRunRevisionDialog'
@@ -44,14 +51,8 @@ import { WorkingDirectorySelector } from '../input/WorkingDirectorySelector'
 import type { LoadedSource, LoadedSkill } from '../../../../shared/types'
 import { resolveSkillTitle, resolveSourceTitle } from '@craft-agent/shared/display-titles'
 import { buildSensitiveRunParams, sensitiveRunParamNames } from './sensitive-run-params'
+import { kanbanEditorDirtyAtom } from '@/atoms/kanban'
 
-// Client-side fallback for async generate: a touch longer than the server's GENERATE_TIMEOUT_MS
-// (180s) so the orchestrator's own timeout + result push can land before we give up locally.
-const GENERATE_CLIENT_TIMEOUT_MS = 200_000
-
-function specNeedsV3Confirm(sourceVersion: 1 | 2 | 3 | undefined, spec: Record<string, unknown>): boolean {
-  return (sourceVersion ?? 1) < 3 && spec.schema_version === 3
-}
 
 function v3MigrationLines(spec: Record<string, unknown>): string[] {
   const nodes = Array.isArray(spec.nodes) ? spec.nodes as Array<{ id?: string; cache?: string }> : []
@@ -67,19 +68,6 @@ function v3MigrationLines(spec: Record<string, unknown>): string[] {
   return lines
 }
 
-/**
- * TaskEditor — full-pane authoring surface for a Tasks DAG (graduated from the
- * playground demo). Manual mode authors the node list by hand; it serializes to a
- * TaskSpec and (via tasks:create + tasks:run) writes a task.yaml, creates the
- * orchestrator parent session, and starts the Conductor.
- *
- * The spec is sent as JSON (a valid YAML subset) so there is no hand-rolled YAML
- * escaping; the backend re-serializes it to real YAML on save.
- *
- * Generate scaffolds an editable research→plan→implement chain from the goal so
- * you start from a runnable shape and refine it. (LLM-authored generation — the
- * orchestrator drafting the graph — is the next increment.)
- */
 
 function resolveModelName(groups: KanbanModelProviderGroup[], id: string): string {
   for (const g of groups) {
@@ -89,7 +77,6 @@ function resolveModelName(groups: KanbanModelProviderGroup[], id: string): strin
   return getModelShortName(id)
 }
 
-type Mode = 'generate' | 'manual'
 type Tab = 'definition' | 'canvas' | 'yaml' | 'results'
 
 // The target type lives in ./types so the editor-target atom can import it without
@@ -466,6 +453,13 @@ function SubtaskCard({
             className="mt-1.5 w-full resize-none rounded-md border border-border/60 bg-background px-2 py-1.5 text-[12px] leading-relaxed outline-none focus:border-foreground/25 field-sizing-content max-h-40"
           />
           <div className="mt-2 flex flex-wrap items-center gap-1.5">
+            <select aria-label={t('tasks.inspectorKind')} value={subtask.kind ?? 'session'}
+              onChange={e => onChange({ kind: e.target.value as EditorSubtask['kind'] })}
+              className="rounded-md border bg-background px-2 py-1 text-xs">
+              <option value="session">{t('tasks.nodeKindSession')}</option>
+              <option value="approval">{t('tasks.nodeKindApproval')}</option>
+              {subtask.kind && !['session', 'approval'].includes(subtask.kind) && <option value={subtask.kind}>{subtask.kind}</option>}
+            </select>
             <ModelSelect
               value={subtask.model ?? fallbackModel}
               onChange={(id) => onChange({ model: id, llmConnection: modelToConnection.get(id) })}
@@ -530,7 +524,7 @@ export interface TaskEditorProps {
   workspaceId: string
   /** What the editor points at: create-new or edit an existing tile. Defaults to create. */
   target?: TaskEditorTarget
-  /** Return to the board. */
+  /** Return to the session list. */
   onClose: () => void
   /** Jump to the underlying orchestrator chat session (edit mode only). */
   onOpenSession?: () => void
@@ -548,19 +542,57 @@ export interface TaskEditorProps {
   modelToConnection: Map<string, string>
   /** Default model id. */
   defaultModel: string
+  /** Current project scope for template instances when the editor is not in create mode. */
+  scopeProjectId?: string
 }
 
-export function TaskEditor({
+export function TaskEditor(props: TaskEditorProps) {
+  const { t } = useTranslation()
+  const [pane, setPane] = React.useState<'editor' | 'import' | 'library'>('editor')
+  const [libraryFocus, setLibraryFocus] = React.useState<string | undefined>()
+  const projectId = props.target?.mode === 'create' ? props.target.initialProjectId : props.scopeProjectId
+  if (isUnboundTaskEdit(props.target)) {
+    return <section className="flex h-full flex-col items-start gap-4 p-6">
+      <p role="alert">{t('tasks.yamlImportUnbound')}</p>
+      <Button onClick={props.onClose}>{t('common.cancel')}</Button>
+    </section>
+  }
+  if (pane === 'import' && props.target?.mode !== 'edit') {
+    const scope = projectId ?? ''
+    return <TaskYamlImport key={`${props.workspaceId}:${scope}`} {...props} onClose={() => setPane('editor')} onOpenLibrary={(id) => { setLibraryFocus(id); setPane('library') }} />
+  }
+  if (pane === 'library') {
+    return <TaskTemplateLibrary
+      workspaceId={props.workspaceId}
+      projectId={projectId}
+      initialId={libraryFocus}
+      onClose={() => { setLibraryFocus(undefined); setPane('editor') }}
+      onCreated={props.onCreated}
+    />
+  }
+  return <ExistingTaskEditor
+    key={`${props.workspaceId}:${props.target?.mode === 'edit' ? props.target.taskSlug : projectId ?? ''}`}
+    {...props}
+    onImport={() => setPane('import')}
+    onOpenLibrary={() => setPane('library')}
+    onSavedTemplate={(id) => { setLibraryFocus(id); setPane('library') }}
+  />
+}
+
+function ExistingTaskEditor({
   workspaceId,
   target = { mode: 'create' },
   onClose,
   onOpenSession,
   onOpenChildSession,
   onCreated,
+  onImport,
+  onOpenLibrary,
+  onSavedTemplate,
   modelGroups,
   modelToConnection,
   defaultModel,
-}: TaskEditorProps) {
+}: TaskEditorProps & { onImport: () => void; onOpenLibrary: () => void; onSavedTemplate: (id: string) => void }) {
   const { t } = useTranslation()
   const isEdit = target.mode === 'edit'
   // The slug to pin on save (edit mode). Undefined for create and for quick-add tiles with no slug;
@@ -571,22 +603,30 @@ export function TaskEditor({
   const fallbackModel = catalogDefaultModel(groups, defaultModel) ?? ''
   const { projects } = useProjects(workspaceId)
   const [tab, setTab] = React.useState<Tab>('definition')
-  const [mode, setMode] = React.useState<Mode>('manual')
   const [runner, setRunner] = React.useState<'conduct' | 'orchestrate'>('conduct')
   const [layout, setLayout] = React.useState<Record<string, { x: number; y: number }>>({})
   const [yamlDraft, setYamlDraft] = React.useState('')
   const [yamlDiagnostics, setYamlDiagnostics] = React.useState<string[]>([])
   const [yamlHasLocalSource, setYamlHasLocalSource] = React.useState(false)
   const [formChangedSinceYaml, setFormChangedSinceYaml] = React.useState(false)
-  const [dirty, setDirty] = React.useState(false)
+  const [dirty, setDirty] = useAtom(kanbanEditorDirtyAtom)
+
+  React.useEffect(() => {
+    return () => setDirty(false)
+  }, [setDirty])
   const [title, setTitle] = React.useState('')
   const [goal, setGoal] = React.useState('')
   const [acceptanceCriteria, setAcceptanceCriteria] = React.useState('')
   // Empty string = "use the runner default"; a number pins the spec's max_iterations.
   const [maxRepairs, setMaxRepairs] = React.useState('')
-  // Create mode seeds the project from the board's active filter (so a new card stays
-  // visible under that filter); edit mode starts empty and is prefilled from the spec below.
+  // Create mode seeds the project from the current sidebar/project scope; edit
+  // mode starts empty and is prefilled from the spec below.
   const [projectId, setProjectId] = React.useState(target.mode === 'create' ? (target.initialProjectId ?? '') : '')
+  const createProjectScope = target.mode === 'create' ? (target.initialProjectId ?? '') : null
+  React.useEffect(() => {
+    if (createProjectScope === null) return
+    setProjectId(createProjectScope)
+  }, [createProjectScope])
   const [orchModel, setOrchModel] = React.useState(fallbackModel)
   // Explicit connection serving the orch model; undefined lets buildSpec derive it from orchModel.
   // Preserved from the loaded spec so an authored connection isn't rewritten on save (round-trip).
@@ -604,6 +644,12 @@ export function TaskEditor({
   const [sourceSlugs, setSourceSlugs] = React.useState<string[]>([])
   const [skillSlugs, setSkillSlugs] = React.useState<string[]>([])
   const [busy, setBusy] = React.useState(false)
+  const [templateSaveOpen, setTemplateSaveOpen] = React.useState(false)
+  const [templateSaveError, setTemplateSaveError] = React.useState<string | null>(null)
+  const [pendingTemplateYaml, setPendingTemplateYaml] = React.useState<string | null>(null)
+  const submitLock = React.useRef(false)
+  const mounted = React.useRef(true)
+  React.useEffect(() => { mounted.current = true; return () => { mounted.current = false } }, [])
 
   // Pickable catalogs from the active workspace (AppShell keeps these atoms populated).
   const workspaceSources = useAtomValue(sourcesAtom)
@@ -620,6 +666,7 @@ export function TaskEditor({
   const [resultsLoading, setResultsLoading] = React.useState(false)
   const [selectedRunId, setSelectedRunId] = React.useState<string | null>(null)
   const [liveRun, setLiveRun] = React.useState<Awaited<ReturnType<typeof window.electronAPI.runTask>> | null>(null)
+  const hasActiveRun = !!liveRun && !['completed', 'failed', 'stopped'].includes(liveRun.status)
   const [tokenBudgetDraft, setTokenBudgetDraft] = React.useState('')
   const [sensitiveParamDrafts, setSensitiveParamDrafts] = React.useState<Record<string, string>>({})
   const [etag, setEtag] = React.useState<string | null>(null)
@@ -638,7 +685,7 @@ export function TaskEditor({
   const markFormChanged = React.useCallback(() => {
     setDirty(true)
     setFormChangedSinceYaml(true)
-  }, [])
+  }, [setDirty])
 
   // Jotai store handle for one-shot reads (no subscription — the editor must not re-render
   // on every streaming metadata tick just to have read children once at open).
@@ -785,10 +832,10 @@ export function TaskEditor({
   React.useEffect(() => {
     if (!editSlug) return
     return window.electronAPI.onTaskRunChanged((_ws, snapshot) => {
-      if (snapshot.slug !== editSlug) return
+      if (_ws !== workspaceId || snapshot.slug !== editSlug) return
       setLiveRun(snapshot)
     })
-  }, [editSlug])
+  }, [editSlug, workspaceId])
 
   const controlRun = React.useCallback(
     async (op: 'pause' | 'resume' | 'stop' | 'continue') => {
@@ -943,33 +990,8 @@ export function TaskEditor({
     } finally {
       setRevisionApplying(false)
     }
-  }, [editSlug, etag, revisionPreview, revisionPreviewRunId, t, workspaceId])
+  }, [editSlug, etag, revisionPreview, revisionPreviewRunId, setDirty, t, workspaceId])
 
-  // Async generate: tasks:generate returns the orchestrator session id immediately and the
-  // authored spec arrives later via the onTaskGenerated push event. We track the pending
-  // orchestrator id so the listener only reacts to *our* generation, plus a client-side
-  // fallback timer so the spinner can't hang forever if the event never lands.
-  const pendingGenRef = React.useRef<string | null>(null)
-  const genTimeoutRef = React.useRef<ReturnType<typeof setTimeout> | null>(null)
-
-  // A completed-but-unadopted generate orchestrator (hidden `taskDraft` session). Submit adopts it
-  // in place — editing the authored spec is fine, since the draft is just the conductor orchestrator
-  // and spec edits run on it. Discarded on regenerate/close; cleared once adopted so the unmount
-  // cleanup never deletes a live orchestrator (#bug1).
-  const generatedDraftRef = React.useRef<string | null>(null)
-
-  const discardDraft = React.useCallback((sessionId: string) => {
-    void window.electronAPI.deleteSession(sessionId).catch(() => {})
-  }, [])
-
-  const finishGenerate = React.useCallback(() => {
-    pendingGenRef.current = null
-    if (genTimeoutRef.current) {
-      clearTimeout(genTimeoutRef.current)
-      genTimeoutRef.current = null
-    }
-    setBusy(false)
-  }, [])
 
   const project = projects.find((p) => p.config.id === projectId)
 
@@ -991,115 +1013,6 @@ export function TaskEditor({
       // that effective model). Picking a model in the row makes it explicit.
       return [...prev, { uid: uid(), title: '', prompt: '', dependsOn: last ? [last.uid] : [] }]
     })
-  }
-
-  // Generate mode: the persistent orchestrator session AUTHORS the task.yaml from the goal,
-  // then we drop into Manual so the user reviews/edits the AI's plan before running — the
-  // generate → edit → run loop (#2 / architecture §3a).
-  // Apply a generated spec to the editor (or surface its failure). Runs from the
-  // onTaskGenerated listener once the orchestrator finishes authoring.
-  const applyGeneratedSpec = React.useCallback(
-    (res: { orchestratorSessionId: string; spec?: unknown; validation: { valid: boolean; errors: Array<{ path: string; message: string }> }; error?: string }) => {
-      if (res.error) {
-        // The hidden draft orchestrator can't produce a usable spec — discard it so it doesn't
-        // linger off-board.
-        discardDraft(res.orchestratorSessionId)
-        toast.error(t('tasks.toastCreateFailed'), { description: res.error })
-        return
-      }
-      const spec = res.spec as
-        | { title?: string; goal?: string; acceptance_criteria?: string; max_iterations?: number; defaults?: { model?: string; llmConnection?: string; permissionMode?: TaskPermissionMode }; nodes?: Array<{ id: string; title?: string; prompt?: string; model?: string; llmConnection?: string; depends_on?: string[] }> }
-        | undefined
-      if (!spec || !res.validation.valid) {
-        discardDraft(res.orchestratorSessionId)
-        const first = res.validation.errors[0]
-        toast.error(t('tasks.toastInvalid'), { description: first ? `${first.path}: ${first.message}` : undefined })
-        return
-      }
-      setPreservedSpec(spec as Record<string, unknown>)
-      if (spec.title) setTitle(spec.title)
-      if (spec.goal) setGoal(spec.goal)
-      setAcceptanceCriteria(spec.acceptance_criteria ?? '')
-      setMaxRepairs(spec.max_iterations != null ? String(spec.max_iterations) : '')
-      // Adopt the generator's routing only when it explicitly authored it — don't wipe the user's picks.
-      if (spec.defaults?.model) setOrchModel(spec.defaults.model)
-      if (spec.defaults?.llmConnection) setOrchConnection(spec.defaults.llmConnection)
-      if (spec.defaults?.permissionMode) setPermissionMode(spec.defaults.permissionMode)
-      setSubtasks(specToSubtasks(spec.nodes ?? []))
-      setYamlHasLocalSource(false)
-      setFormChangedSinceYaml(true)
-      setDirty(true)
-      setMode('manual')
-      // Record the draft as adoptable: submit reuses it in place (edits are fine to run on it).
-      generatedDraftRef.current = res.orchestratorSessionId
-      // No success toast here: switching to Manual mode and populating the Subtasks panel is
-      // the visible signal. A top-right toast would also overlap the editor's top-right
-      // Cancel/Create/Create & Run buttons and swallow their clicks.
-    },
-    [t, discardDraft],
-  )
-
-  // Subscribe once for async generate results; ignore events for other generations/sessions.
-  React.useEffect(() => {
-    const off = window.electronAPI.onTaskGenerated((_wsId, res) => {
-      if (res.orchestratorSessionId !== pendingGenRef.current) return
-      finishGenerate()
-      applyGeneratedSpec(res)
-    })
-    return off
-  }, [finishGenerate, applyGeneratedSpec])
-
-  // Clear any pending fallback timer on unmount, and discard a draft orchestrator that was never
-  // adopted (editor closed/cancelled after generating). Best-effort — a dropped delete only leaves
-  // a hidden draft, never a visible board tile.
-  React.useEffect(() => () => {
-    if (genTimeoutRef.current) clearTimeout(genTimeoutRef.current)
-    const draftId = generatedDraftRef.current
-    if (draftId) {
-      generatedDraftRef.current = null
-      void window.electronAPI.deleteSession(draftId).catch(() => {})
-    }
-  }, [])
-
-  async function generatePlan() {
-    const g = goal.trim() || title.trim()
-    if (!g) {
-      toast.error(t('tasks.toastNeedTitle'))
-      return
-    }
-    // Regenerating abandons any previously authored draft — discard it before minting a new one.
-    if (generatedDraftRef.current) {
-      discardDraft(generatedDraftRef.current)
-      generatedDraftRef.current = null
-    }
-    setBusy(true)
-    try {
-      const ack = await window.electronAPI.generateTask(workspaceId, {
-        goal: g,
-        title: title.trim() || undefined,
-        model: orchModel,
-        // Route the authoring turn through the preserved connection (falls back to the model's default),
-        // and give the draft the project context + sources + autonomy it will author against — else a
-        // pi/* model produces nothing and the draft runs at the workspace-default permission mode.
-        llmConnection: orchConnection ?? modelToConnection.get(orchModel),
-        permissionMode,
-        ...(projectId ? { projectId } : {}),
-        ...(sourceSlugs.length ? { enabledSourceSlugs: sourceSlugs } : {}),
-        cwd: cwd.trim() || undefined,
-      })
-      // Authoring continues on the server; the spec arrives via onTaskGenerated. Keep busy until
-      // then, with a fallback timer that releases the spinner if the event never lands.
-      pendingGenRef.current = ack.orchestratorSessionId
-      if (genTimeoutRef.current) clearTimeout(genTimeoutRef.current)
-      genTimeoutRef.current = setTimeout(() => {
-        if (pendingGenRef.current !== ack.orchestratorSessionId) return
-        finishGenerate()
-        toast.error(t('tasks.toastCreateFailed'), { description: t('tasks.toastGenerateTimeout') })
-      }, GENERATE_CLIENT_TIMEOUT_MS)
-    } catch (err) {
-      finishGenerate()
-      toast.error(t('tasks.toastCreateFailed'), { description: err instanceof Error ? err.message : String(err) })
-    }
   }
 
   const currentSpec = React.useCallback((): WorkbenchSpec => {
@@ -1154,7 +1067,7 @@ export function TaskEditor({
     setPermissionMode(next.defaults?.permissionMode ?? 'safe')
     setLayout(next.ui?.layout?.nodes ?? {})
     setSubtasks(specToSubtasks(next.nodes ?? []))
-  }, [])
+  }, [setDirty])
 
   const validateYamlDraft = React.useCallback(async () => {
     try {
@@ -1181,9 +1094,9 @@ export function TaskEditor({
     return () => window.removeEventListener('keydown', onKey)
   })
 
-  // Create the task (write task.yaml + orchestrator session). When `run` is true, also start a
-  // run; otherwise the task tile just lands on the board in ToDo for the user to run later.
+  // Save only an existing, successfully loaded task. Running remains an explicit action.
   async function submit(run: boolean, confirmV3Migration = false) {
+    if (submitLock.current) return
     if (isEdit && !canSafelySaveExistingTask({ taskSlug: editSlug, etag, loadError: taskLoadError })) {
       toast.error(t('tasks.toastLoadFailed'), { description: taskLoadError ?? t('tasks.loadFailedBanner') })
       return
@@ -1202,9 +1115,7 @@ export function TaskEditor({
         return
       }
     }
-    // Adopt the generate draft in place whenever we have one — spec edits run fine on the draft
-    // orchestrator, so there's no need to mint a fresh session.
-    const draftId = generatedDraftRef.current
+    submitLock.current = true
     setBusy(true)
     try {
       let spec: Record<string, unknown>
@@ -1293,55 +1204,76 @@ export function TaskEditor({
         onClose()
         return
       }
-      // Edit mode binds the authored spec onto the tile's existing session; create mode reuses
-      // a generate draft if present, else mints a fresh orchestrator.
-      const created = await window.electronAPI.createTask(workspaceId, {
-        yaml,
-        confirmV3Migration,
-        ...(isEdit && editSessionId
-          ? { attachToExistingSession: editSessionId }
-          : { orchestratorSessionId: draftId ?? undefined }),
-      })
-      if (!created.validation.valid) {
-        const first = created.validation.errors[0]
-        toast.error(t('tasks.toastInvalid'), { description: first ? `${first.path}: ${first.message}` : undefined })
-        return
+      if (!isEdit) {
+        const created = await window.electronAPI.createTask(workspaceId, { yaml })
+        if (!created.validation.valid) {
+          setYamlDiagnostics(created.validation.errors.map(e => `${e.path}: ${e.message}`))
+          toast.error(t('tasks.toastInvalid'), { description: created.validation.errors[0]?.message })
+          return
+        }
+        toast.success(t('tasks.workflowCreated'))
+        if (mounted.current) {
+          onCreated?.({ sessionId: created.orchestratorSessionId, taskLabelId: created.taskLabelId, projectId: typeof spec.project === 'string' ? spec.project : undefined })
+          onClose()
+        }
       }
-      // Resolve the draft: if the server reused it, it's now a live orchestrator — stop tracking it.
-      // If it minted a fresh session instead (draft gone server-side), discard the orphan.
-      if (draftId) {
-        if (created.orchestratorSessionId !== draftId) discardDraft(draftId)
-        generatedDraftRef.current = null
-      }
-      // After a successful CREATE, hand off to the host so it can land the user on the
-      // task-scoped session list (edit-mode saves stay on the board).
-      const notifyCreated = () => {
-        if (isEdit) return
-        onCreated?.({
-          sessionId: created.orchestratorSessionId,
-          taskLabelId: created.taskLabelId,
-          projectId: projectId || undefined,
-        })
-      }
-      if (!run) {
-        toast.success(t('tasks.toastCreated'), { description: t('tasks.toastCreatedDesc', { slug: created.slug }) })
-        onClose()
-        notifyCreated()
-        return
-      }
-      const runResult = await window.electronAPI.runTask(workspaceId, {
-        slug: created.slug,
-        orchestratorSessionId: created.orchestratorSessionId,
-      })
-      toast.success(t('tasks.toastStarted'), {
-        description: t('tasks.toastStartedDesc', { slug: created.slug, runId: runResult.runId, count: runResult.nodes.length }),
-      })
-      onClose()
-      notifyCreated()
     } catch (err) {
       toast.error(t('tasks.toastCreateFailed'), { description: err instanceof Error ? err.message : String(err) })
     } finally {
+      submitLock.current = false
       setBusy(false)
+    }
+  }
+
+  async function openTemplateSave() {
+    try {
+      let yaml: string
+      if (tab === 'yaml') {
+        const validation = await window.electronAPI.validateTask(workspaceId, yamlDraft)
+        if (!validation.valid || !validation.spec) {
+          toast.error(t('tasks.toastInvalid'), { description: validation.errors[0]?.message })
+          return
+        }
+        yaml = taskDocumentForSave('yaml', yamlDraft, validation.spec as Record<string, unknown>)
+      } else {
+        if (!title.trim() || subtasks.length === 0) {
+          toast.error(t(!title.trim() ? 'tasks.toastNeedTitle' : 'tasks.toastNeedSubtask'))
+          return
+        }
+        yaml = taskDocumentForSave('form', yamlDraft, currentSpec() as unknown as Record<string, unknown>)
+      }
+      setPendingTemplateYaml(yaml)
+      setTemplateSaveError(null)
+      setTemplateSaveOpen(true)
+    } catch (err) {
+      toast.error(t(taskTemplateErrorKey(err)), { description: err instanceof Error ? err.message : String(err) })
+    }
+  }
+
+  async function confirmTemplateSave(input: { name: string; description: string; tags: string[] }) {
+    if (!pendingTemplateYaml || busy) return
+    setBusy(true)
+    setTemplateSaveError(null)
+    try {
+      const saved = await window.electronAPI.saveTaskTemplate(workspaceId, {
+        name: input.name,
+        description: input.description || undefined,
+        tags: input.tags,
+        sourceTaskSlug: editSlug,
+        yaml: pendingTemplateYaml,
+      })
+      if (!saved.validation.valid) {
+        setTemplateSaveError(saved.validation.errors[0]?.message ?? t('tasks.templateInvalid'))
+        return
+      }
+      toast.success(t('tasks.templateSaveSuccess'))
+      setTemplateSaveOpen(false)
+      setPendingTemplateYaml(null)
+      onSavedTemplate(saved.id)
+    } catch (err) {
+      setTemplateSaveError(t(taskTemplateErrorKey(err)))
+    } finally {
+      if (mounted.current) setBusy(false)
     }
   }
 
@@ -1350,7 +1282,7 @@ export function TaskEditor({
       {/* Header */}
       <div className="flex items-center gap-2.5 rounded-xl border border-border bg-card px-3 py-2.5 shadow-minimal">
         <Btn variant="ghost" className="px-2" onClick={requestClose}>
-          <ChevronLeft className="h-4 w-4" strokeWidth={2} /> {t('kanban.board')}
+          <ChevronLeft className="h-4 w-4" strokeWidth={2} /> {t('kanban.list')}
         </Btn>
         <span className="text-foreground/25">/</span>
         <span className="text-sm font-semibold">{isEdit ? t('tasks.editTask') : t('kanban.newTask')}</span>
@@ -1401,34 +1333,12 @@ export function TaskEditor({
               <Btn variant="secondary" onClick={() => void controlRun('stop')}>{t('tasks.stopRun')}</Btn>
             </div>
           )}
-          {isEdit && liveRun?.nodes.some((n) => n.state === 'waiting-approval') && (
-            <div className="flex items-center gap-1.5">
-              {liveRun.nodes.filter((n) => n.state === 'waiting-approval').map((n) => (
-                <span key={n.id} className="flex items-center gap-1">
-                  <Btn
-                    variant="secondary"
-                    onClick={() => void window.electronAPI.respondTaskApproval(workspaceId, {
-                      slug: editSlug!,
-                      runId: liveRun.runId,
-                      nodeId: n.id,
-                      approved: true,
-                    }).then((res) => { if (!res.conflict) setLiveRun(res.snapshot) })}
-                  >
-                    {t('tasks.approveNode', { id: n.id })}
-                  </Btn>
-                  <Btn
-                    variant="secondary"
-                    onClick={() => void window.electronAPI.respondTaskApproval(workspaceId, {
-                      slug: editSlug!,
-                      runId: liveRun.runId,
-                      nodeId: n.id,
-                      approved: false,
-                    }).then((res) => { if (!res.conflict) setLiveRun(res.snapshot) })}
-                  >
-                    {t('tasks.rejectNode', { id: n.id })}
-                  </Btn>
-                </span>
-              ))}
+          {isEdit && liveRun?.status === 'failed' && liveRun.canRetryFailedNodes && (
+            <div className="flex flex-col items-start gap-1">
+              <Btn variant="secondary" disabled={busy} onClick={() => void controlRun('continue')}>
+                {t('tasks.retryFailedNodes')}
+              </Btn>
+              <span className="max-w-sm text-xs text-muted-foreground">{t('tasks.retryFailedNodesHint')}</span>
             </div>
           )}
           {isEdit && liveRun?.status === 'waiting-budget' && (
@@ -1478,10 +1388,10 @@ export function TaskEditor({
               <Btn variant="secondary" onClick={() => submit(false)} disabled={busy || !!taskLoadError}>
                 {isEdit ? t('common.save') : t('common.create')}
               </Btn>
-              <Btn variant="primary" onClick={() => submit(true)} disabled={busy || !!taskLoadError}>
+              {isEdit && <Btn variant="primary" onClick={() => submit(true)} disabled={busy || !!taskLoadError || hasActiveRun}>
                 {busy ? <Spinner /> : <Sparkles className="h-3.5 w-3.5" strokeWidth={2.5} />}
                 {busy ? t('tasks.starting') : isEdit ? t('tasks.saveAndRun') : t('tasks.createAndRun')}
-              </Btn>
+              </Btn>}
             </>
           )}
           {tab === 'results' && (
@@ -1492,10 +1402,36 @@ export function TaskEditor({
         </div>
       </div>
 
+      {hasActiveRun && <p className="text-xs text-muted-foreground">{t('tasks.runDefinitionFrozen')}</p>}
+      {liveRun?.nodes.filter(n => n.state === 'waiting-approval').map(n =>
+        <TaskApproval key={`${liveRun.runId}:${n.id}`} workspaceId={workspaceId} run={liveRun} nodeId={n.id} onChange={setLiveRun} />
+      )}
       {taskLoadError && (
         <div role="alert" className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-[12.5px] text-red-700 dark:text-red-300">
           <span className="font-semibold">{t('tasks.loadFailedBanner')}</span>{' '}
           <span>{taskLoadError}</span>
+        </div>
+      )}
+
+      {tab === 'definition' && <TaskProposal
+        workspaceId={workspaceId}
+        draftIdentity={JSON.stringify(currentSpec())}
+        currentYaml={title.trim() && subtasks.length ? taskDocumentForSave('form', yamlDraft, currentSpec() as unknown as Record<string, unknown>) : undefined}
+        projectId={projectId}
+        model={orchModel}
+        llmConnection={orchConnection ?? modelToConnection.get(orchModel)}
+        disabled={busy || !!taskLoadError}
+        onApply={(spec) => {
+          const next = spec as EditableTaskSpec
+          applyWorkbenchSpec({ ...next, project: next.project ?? projectId,
+            defaults: { model: orchModel, llmConnection: orchConnection ?? modelToConnection.get(orchModel), permissionMode, ...next.defaults } })
+        }}
+      />}
+      {tab === 'definition' && (
+        <div className="flex flex-wrap gap-2">
+          <Button variant="ghost" className="self-start" onClick={() => { if (!dirty || window.confirm(t('tasks.discardUnsaved'))) onOpenLibrary() }}>{t('tasks.templateLibrary')}</Button>
+          {!isEdit && <Button variant="ghost" className="self-start" onClick={() => { if (!dirty || window.confirm(t('tasks.discardUnsaved'))) onImport() }}>{t('tasks.yamlImportTitle')}</Button>}
+          <Button variant="ghost" className="self-start" disabled={busy} onClick={() => void openTemplateSave()}>{t('tasks.templateSave')}</Button>
         </div>
       )}
 
@@ -1569,21 +1505,6 @@ export function TaskEditor({
         <div className="flex min-h-0 flex-col gap-4 overflow-y-auto rounded-xl border border-border bg-card p-4 shadow-minimal">
           <div className="text-[15px] font-bold">{t('tasks.definition')}</div>
 
-          <div className="inline-flex w-fit rounded-[9px] bg-foreground/[0.05] p-0.5">
-            {(['manual', 'generate'] as Mode[]).map((m) => (
-              <button
-                key={m}
-                onClick={() => setMode(m)}
-                className={cn(
-                  'inline-flex items-center gap-1.5 rounded-[7px] px-3 py-1.5 text-[12.5px] font-semibold transition-colors',
-                  mode === m ? 'bg-card text-foreground shadow-minimal' : 'text-foreground/55 hover:text-foreground/80',
-                )}
-              >
-                {m === 'generate' && <Sparkles className="h-3.5 w-3.5" strokeWidth={2.5} />}
-                {m === 'generate' ? t('tasks.modeGenerate') : t('tasks.modeManual')}
-              </button>
-            ))}
-          </div>
 
           <div>
             <div className="mb-1.5 text-[12px] font-semibold text-foreground/55">{t('tasks.title')}</div>
@@ -1749,9 +1670,8 @@ export function TaskEditor({
           </div>
         </div>
 
-        {/* Right — subtasks (Manual) / scaffold (Generate) */}
+        {/* Right — editable nodes of the existing task */}
         <div className="flex min-h-0 flex-col rounded-xl border border-border bg-card shadow-minimal">
-          {mode === 'manual' ? (
             <>
               <div className="flex shrink-0 items-center gap-2 px-4 pt-4">
                 <span className="text-[15px] font-bold">{t('kanban.subtasks')}</span>
@@ -1791,42 +1711,6 @@ export function TaskEditor({
                 {t('tasks.subtaskFooter')}
               </div>
             </>
-          ) : busy ? (
-            <div className="flex min-h-full flex-col gap-3 p-4">
-              <div className="flex items-center gap-2 text-[13px] font-semibold text-foreground/70">
-                <LoadingIndicator label={t('tasks.generatingTitle')} showElapsed />
-              </div>
-              <p className="text-[12px] leading-relaxed text-foreground/50">{t('tasks.generatingBody')}</p>
-              {/* Skeleton subtask cards: the long author wait reads as "drafting nodes", not frozen. */}
-              {[0, 1, 2].map((i) => (
-                <div key={i} className="animate-pulse rounded-[10px] border border-border/70 bg-foreground/[0.015] p-3">
-                  <div className="flex items-start gap-2">
-                    <div className="mt-0.5 h-6 w-6 shrink-0 rounded-full bg-foreground/[0.06]" />
-                    <div className="min-w-0 flex-1 space-y-2">
-                      <div className="h-3.5 w-1/2 rounded bg-foreground/[0.06]" />
-                      <div className="h-8 w-full rounded bg-foreground/[0.04]" />
-                      <div className="flex gap-1.5">
-                        <div className="h-7 w-[128px] rounded-lg bg-foreground/[0.05]" />
-                        <div className="h-7 w-[144px] rounded-lg bg-foreground/[0.05]" />
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <div className="flex min-h-full flex-col items-center justify-center gap-3 px-6 py-8 text-center">
-              <div className="grid h-12 w-12 place-items-center rounded-full bg-indigo-500/10 text-indigo-500 dark:text-indigo-300">
-                <Sparkles className="h-6 w-6" strokeWidth={2} />
-              </div>
-              <div className="text-[14px] font-bold">{t('tasks.generatePlan')}</div>
-              <p className="max-w-[360px] text-[12.5px] leading-relaxed text-foreground/55">{t('tasks.generateBody')}</p>
-              <Btn variant="primary" onClick={generatePlan} disabled={busy}>
-                <Sparkles className="h-3.5 w-3.5" strokeWidth={2.5} /> {t('tasks.generatePlan')}
-              </Btn>
-              <span className="text-[11px] text-foreground/40">{t('tasks.generateHint')}</span>
-            </div>
-          )}
         </div>
       </div>
       )}
@@ -1846,6 +1730,14 @@ export function TaskEditor({
           }
         }}
         onConfirm={() => void confirmRunRevision()}
+      />
+      <TaskTemplateSaveDialog
+        open={templateSaveOpen}
+        defaultName={title.trim() || t('tasks.templateLibrary')}
+        busy={busy}
+        error={templateSaveError ?? undefined}
+        onClose={() => { if (!busy) { setTemplateSaveOpen(false); setPendingTemplateYaml(null) } }}
+        onSubmit={(input) => void confirmTemplateSave(input)}
       />
       <Dialog open={v3Confirm !== null} onOpenChange={(open) => { if (!open) setV3Confirm(null) }}>
         <DialogContent className="max-h-[82vh] overflow-y-auto sm:max-w-[560px]">

@@ -1,16 +1,11 @@
 /**
  * @craft-agent/messaging-gateway
  *
- * Messaging gateway for Selection — Telegram & WhatsApp.
+ * Messaging gateway for Selection's Lark / Feishu integration.
  */
 
 export { MessagingGateway, type GatewayOptions } from './gateway'
-export { TelegramAdapter } from './adapters/telegram/index'
-export {
-  WhatsAppAdapter,
-  type WhatsAppConfig,
-  type WhatsAppEvent,
-} from './adapters/whatsapp/index'
+export { LarkAdapter, type LarkCredentials } from './adapters/lark/index'
 export { BindingStore } from './binding-store'
 export { ConfigStore } from './config-store'
 export { PairingCodeManager, PAIRING_TTL_MS, PAIRING_RATE_LIMIT_PER_MINUTE } from './pairing'

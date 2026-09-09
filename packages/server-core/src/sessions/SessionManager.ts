@@ -87,8 +87,8 @@ import {
   isSpawnedSwarmAgent,
 } from '@craft-agent/shared/sessions'
 import { loadWorkspaceSources, loadAllSources, getSourcesBySlugs, isSourceUsable, type LoadedSource, type McpServerConfig, getSourcesNeedingAuth, getSourceCredentialManager, getSourceServerBuilder, type SourceWithCredential, isApiOAuthProvider, hasRenewEndpoint, SERVER_BUILD_ERRORS, TokenRefreshManager, createTokenGetter } from '@craft-agent/shared/sources'
-import { listTaskSlugs, parseTaskSpec, parseTaskYaml, serializeTaskYaml, uniqueTaskSlug, loadTaskResults } from '@craft-agent/shared/tasks'
-import { clearSubmittedDefinition, createTaskFromSpec, inheritTaskExecutionDefaults, resolveCreateTaskProjectId, rememberSubmittedDefinition, validateSubmittedDefinition, type TaskRunner } from '../tasks'
+import { loadTaskResults } from '@craft-agent/shared/tasks'
+import { clearSubmittedDefinition, validateSubmittedDefinition, rememberSubmittedDefinition, type TaskRunner } from '../tasks'
 import {
   assessSpawnQualification,
   assessSwarmSpawnLimits,
@@ -137,7 +137,7 @@ import { ensureLabelsExist, ensureTaskItemLabel } from '@craft-agent/shared/labe
 import { loadStatusConfig } from '@craft-agent/shared/statuses/storage'
 import { AutomationSystem, createPromptHistoryEntry, appendAutomationHistoryEntry, enrichAgentEventInput, DEFAULT_PROMPT_WAIT_TIMEOUT_MS, MAX_PROMPT_WAIT_TIMEOUT_MS, type AutomationSystemMetadataSnapshot, type AgentEvent as AutomationAgentEvent, type SdkAutomationInput, type PendingPrompt } from '@craft-agent/shared/automations'
 import { waitForAutomationSessionCompletion } from './wait-automation-session.ts'
-import { createTypedError } from '@craft-agent/shared/agent/errors'
+import { createTypedError, parseError } from '@craft-agent/shared/agent/errors'
 import { buildBackendRuntimeSignature, buildRestartRequiredSignature, prepareModelImageAttachments } from './runtime-config'
 import { validateArchiveTarget } from './archive-guards'
 import {
@@ -229,7 +229,7 @@ const METADATA_WRITE_GUARD_MS = 5000
 
 /**
  * Text sent to the session when a plan is approved from outside the desktop
- * UI (e.g. Telegram button). Mirrors the English `plan.approved` i18n key
+ * UI (for example, a chat approval button). Mirrors the English `plan.approved` i18n key
  * used by the desktop flow at `plan-approval-message.ts`. Not localized —
  * the agent reads this, not the end user.
  */
@@ -651,6 +651,8 @@ async function resolveToolDisplayMeta(
           'call_llm': 'LLM Query',
           'config_validate': 'Validate Config',
           'skill_validate': 'Validate Skill',
+          'skill_inspect': 'Inspect Skill',
+          'skill_install': 'Install Skill',
           'mermaid_validate': 'Validate Mermaid',
           'source_test': 'Test Source',
           'source_oauth_trigger': 'OAuth',
@@ -1384,6 +1386,8 @@ export interface SessionCompletionEvent {
   /** Monotonic in-memory turn identity used to bind ephemeral tool submissions. */
   generation: number
   reason: 'complete' | 'interrupted' | 'error' | 'timeout'
+  /** Safe terminal category for node diagnostics; never provider payloads. */
+  errorCode?: string
   /** The final (non-intermediate) assistant message id for this turn, if any. */
   finalMessageId?: string
   /** Convenience copy of the final assistant message text (same as getSessionFinalText). */
@@ -1521,19 +1525,6 @@ export class SessionManager implements ISessionManager {
   private lastTimestamp = 0
 
   /**
-   * Optional binder installed by the messaging-gateway bootstrap. When set,
-   * `executePromptAutomation` calls it after creating a session whose matcher
-   * declared `telegramTopic`, so the new session is bound to a Telegram forum
-   * topic in the workspace's paired supergroup. Best-effort — failures must
-   * not block the session.
-   */
-  private automationBinder?: (input: {
-    workspaceId: string
-    sessionId: string
-    topicName: string
-  }) => Promise<void>
-
-  /**
    * Centralized setter for session processing state.
    * Automatically notifies the power manager on transitions (true→false, false→true)
    * so callers don't need to remember to call onSessionStarted/onSessionStopped.
@@ -1556,17 +1547,6 @@ export class SessionManager implements ISessionManager {
    *  Resolves immediately if already initialized. */
   waitForInit(): Promise<void> {
     return this.initGate.wait()
-  }
-
-  /**
-   * Install the automation→topic binder. Wired by the messaging-gateway
-   * bootstrap so SessionManager doesn't need to import the messaging
-   * package (avoids a package-level circular dependency).
-   */
-  setAutomationBinder(
-    fn: (input: { workspaceId: string; sessionId: string; topicName: string }) => Promise<void>,
-  ): void {
-    this.automationBinder = fn
   }
 
   private browserPaneManager: IBrowserPaneManager | null = null
@@ -4719,80 +4699,8 @@ export class SessionManager implements ISessionManager {
             await this.unarchiveSession(sessionId)
           }
         },
-        // create_task — create a Task (board card + task.yaml + orchestrator session)
-        // WITHOUT running it. Spec building happens here (not in session-tools-core,
-        // which must stay dependency-free of @craft-agent/shared); the creation flow
-        // itself is createTaskFromSpec, shared verbatim with the tasks:create RPC.
-        createTaskFn: async (input) => {
-          const ws = managed.workspace
-          const sessionExecution = {
-            model: this.sessionExecutionModel(managed),
-            llmConnection: managed.llmConnection,
-          }
-          // Match spawn_session: an explicit project wins, otherwise keep newly
-          // captured work in the project that owns the invoking session.
-          const projectId = resolveCreateTaskProjectId(input.projectId, managed.projectId)
-          // Slug is derived from the title and must never overwrite an existing task
-          // (unlike the TaskEditor, where re-saving the same slug is the edit flow).
-          if (input.spec) {
-            const raw = input.spec as Record<string, unknown>
-            const slug = uniqueTaskSlug(String(raw.title ?? raw.id ?? 'task'), new Set(listTaskSlugs(ws.rootPath)))
-            const parsed = parseTaskSpec({ ...raw, id: slug, schema_version: 2, ...(projectId ? { project: projectId } : {}) })
-            if (!parsed.success) {
-              throw new Error(`Invalid task spec: ${parsed.error.issues.map(i => i.message).join('; ')}`)
-            }
-            const created = await createTaskFromSpec(
-              this,
-              ws.id,
-              ws.rootPath,
-              inheritTaskExecutionDefaults(parsed.data, sessionExecution),
-            )
-            return { ...created, warnings: [...created.warnings] }
-          }
-          const slug = uniqueTaskSlug(input.title ?? 'untitled-task', new Set(listTaskSlugs(ws.rootPath)))
-
-          // Fail-soft reference checks: unknown slugs warn, they don't block creation
-          // (matching the finish() philosophy in the tasks:create handler).
-          const warnings: string[] = []
-          if (input.sources?.length) {
-            const available = new Set(loadWorkspaceSources(ws.rootPath).map(s => s.config.slug))
-            const missing = input.sources.filter(s => !available.has(s))
-            if (missing.length) warnings.push(`Unknown sources (kept in the spec, but they don't exist in this workspace): ${missing.join(', ')}`)
-          }
-          if (input.skills?.length) {
-            // loadAllSkills matches dispatch-time [skill:slug] resolution (global, bundled, workspace).
-            const available = new Set(loadAllSkills(ws.rootPath).map(s => s.slug))
-            const missing = input.skills.filter(s => !available.has(s))
-            if (missing.length) warnings.push(`Unknown skills (kept in the spec, but they don't exist in this workspace): ${missing.join(', ')}`)
-          }
-
-          // A spec requires ≥1 node; synthesize the single executable node from the
-          // description. Multi-node DAG authoring stays with the TaskEditor/generate flow.
-          const parsed = parseTaskSpec({
-            id: slug,
-            title: input.title,
-            goal: input.description,
-            ...(input.acceptanceCriteria ? { acceptance_criteria: input.acceptanceCriteria } : {}),
-            ...(projectId ? { project: projectId } : {}),
-            ...(input.workingDirectory ? { cwd: input.workingDirectory } : {}),
-            ...(input.sources?.length ? { sources: input.sources } : {}),
-            ...(input.skills?.length ? { skills: input.skills } : {}),
-            ...(input.model || input.llmConnection
-              ? { defaults: { ...(input.model ? { model: input.model } : {}), ...(input.llmConnection ? { llmConnection: input.llmConnection } : {}) } }
-              : {}),
-            nodes: [{ id: 'main', title: input.title ?? slug, prompt: input.description ?? '' }],
-          })
-          if (!parsed.success) {
-            throw new Error(`Invalid task spec: ${parsed.error.issues.map(i => i.message).join('; ')}`)
-          }
-
-          const created = await createTaskFromSpec(
-            this,
-            ws.id,
-            ws.rootPath,
-            inheritTaskExecutionDefaults(parsed.data, sessionExecution),
-          )
-          return { ...created, warnings: [...warnings, ...created.warnings] }
+        createTaskFn: async () => {
+          throw new Error('Agent task creation is disabled. Import a V3 YAML definition in the application.')
         },
         runTaskFn: async (input) => this.runTaskFromTool(managed.workspace.id, input),
         getTaskResultsFn: async (slug, runId) => loadTaskResults(managed.workspace.rootPath, slug, runId),
@@ -4844,6 +4752,7 @@ export class SessionManager implements ISessionManager {
           return runner.submitNodeVerdict(managed.id, input)
         },
         submitTaskDefinitionFn: async (input) => {
+          if (!managed.taskDraft) return { valid: false, errors: ['Only an editor proposal session may submit a definition. Open the workflow editor.'] }
           const submitted = validateSubmittedDefinition(input.spec)
           if (!submitted.valid) return submitted
           rememberSubmittedDefinition(managed.id, managed.processingGeneration, submitted.yaml)
@@ -7143,76 +7052,51 @@ export class SessionManager implements ISessionManager {
             const sessionErrorPath = getSessionStoragePath(managed.workspace.rootPath, managed.id)
             const apiError = getLastApiError(sessionErrorPath)
 
-            if (apiError && apiError.status === 400) {
-              const isImageError = apiError.message?.includes('image exceeds')
-
+            // Never replace a current error with a cached HTTP failure or a generic fallback.
+            const turnMessages = managed.messages.slice(managed.messages.indexOf(lastUserMsg) + 1)
+            const hasCurrentTurnError = turnMessages.some(message => message.role === 'error' && !message.hidden)
+            if (hasCurrentTurnError) {
+              sessionLog.warn('Empty response preserved terminal error', {
+                sessionId,
+                userMessageId: lastUserMsg.id,
+                code: turnMessages.findLast(message => message.role === 'error')?.errorCode ?? 'unclassified',
+              })
+            }
+            if (!hasCurrentTurnError) {
+              const hasToolActivity = turnMessages.some(message => message.role === 'tool')
+              const currentApiError = apiError && apiError.timestamp >= lastUserMsg.timestamp ? apiError : undefined
+              const typedError = currentApiError
+                ? parseError(new Error(`HTTP ${currentApiError.status}: ${currentApiError.message}`))
+                : createTypedError(hasToolActivity ? 'tool_only_response' : 'no_response')
+              // Replaying a prompt can repeat side effects. Recovery must use the retained
+              // conversation and explicit follow-up, not silently resend the original input.
+              typedError.canRetry = false
+              typedError.actions = typedError.actions.filter(action => action.action !== 'retry')
+              sessionLog.warn('Empty response terminal diagnostic', {
+                sessionId,
+                userMessageId: lastUserMsg.id,
+                code: typedError.code,
+                toolActivity: hasToolActivity,
+                httpStatus: currentApiError?.status,
+              })
               const errorMessage: Message = {
                 id: generateMessageId(),
                 role: 'error',
-                content: isImageError
-                  ? `Image Too Large: ${apiError.message}`
-                  : `Request Error: ${apiError.message}`,
+                content: typedError.message,
                 timestamp: this.monotonic(),
-                errorCode: isImageError ? 'image_too_large' : 'invalid_request',
-                errorTitle: isImageError ? 'Image Too Large' : 'Invalid Request',
-                errorDetails: isImageError
-                  ? ['An image in the conversation exceeds the 5 MB API limit.',
-                     'This session cannot recover — the image is embedded in the history.',
-                     'Please start a new session to continue.']
-                  : [apiError.message],
-                errorCanRetry: false,
+                errorCode: typedError.code,
+                errorTitle: typedError.title,
+                errorCanRetry: typedError.canRetry,
+                errorActions: typedError.actions,
               }
               managed.messages.push(errorMessage)
-              this.sendEvent({
-                type: 'typed_error',
-                sessionId,
-                error: {
-                  code: isImageError ? 'image_too_large' as const : 'invalid_request' as const,
-                  title: errorMessage.errorTitle!,
-                  message: apiError.message,
-                  actions: [],
-                  canRetry: false,
-                  details: errorMessage.errorDetails,
-                },
-              }, managed.workspace.id)
-            } else {
-              const hasCurrentTurnError = managed.messages.some(message =>
-                message.role === 'error'
-                && !message.hidden
-                && message.timestamp > lastUserMsg.timestamp
-              )
-
-              if (!hasCurrentTurnError) {
-                const typedError = createTypedError('unknown_error', {
-                  title: 'No response received',
-                  message: 'The agent ended this turn without returning a response. Retry to continue.',
-                })
-                const errorMessage: Message = {
-                  id: generateMessageId(),
-                  role: 'error',
-                  content: `${typedError.title}: ${typedError.message}`,
-                  timestamp: this.monotonic(),
-                  errorCode: typedError.code,
-                  errorTitle: typedError.title,
-                  errorDetails: typedError.details,
-                  errorCanRetry: typedError.canRetry,
-                  errorActions: typedError.actions,
-                }
-                managed.messages.push(errorMessage)
-                this.sendEvent({
-                  type: 'typed_error',
-                  sessionId,
-                  error: {
-                    code: typedError.code,
-                    title: typedError.title,
-                    message: typedError.message,
-                    actions: typedError.actions,
-                    canRetry: typedError.canRetry,
-                    details: typedError.details,
-                  },
-                  timestamp: errorMessage.timestamp,
-                }, managed.workspace.id)
-              }
+              this.sendEvent({ type: 'typed_error', sessionId, error: {
+                code: typedError.code,
+                title: typedError.title,
+                message: typedError.message,
+                canRetry: typedError.canRetry,
+                actions: typedError.actions,
+              }, timestamp: errorMessage.timestamp }, managed.workspace.id)
             }
           }
 
@@ -8228,6 +8112,9 @@ export class SessionManager implements ISessionManager {
         workspaceId: managed.workspace.id,
         generation: managed.processingGeneration,
         reason: completionReason,
+        errorCode: completionReason === 'error'
+          ? managed.messages.slice(managed.messages.findLastIndex(m => m.role === 'user' && !m.hidden) + 1).findLast(m => m.role === 'error')?.errorCode
+          : undefined,
         finalMessageId: currentFinalMessageId,
         finalText: currentFinalMessageId
           ? managed.messages.find(m => m.id === currentFinalMessageId)?.content
@@ -8289,6 +8176,9 @@ export class SessionManager implements ISessionManager {
         workspaceId: managed.workspace.id,
         generation: managed.processingGeneration,
         reason: completionReason,
+        errorCode: completionReason === 'error'
+          ? managed.messages.slice(managed.messages.findLastIndex(m => m.role === 'user' && !m.hidden) + 1).findLast(m => m.role === 'error')?.errorCode
+          : undefined,
         finalMessageId: currentFinalMessageId,
         finalText: currentFinalMessageId
           ? managed.messages.find(m => m.id === currentFinalMessageId)?.content
@@ -10882,7 +10772,7 @@ export class SessionManager implements ISessionManager {
         }
 
         // Skip abort errors - these are expected when force-aborting via Query.close()
-        if (event.message.includes('aborted') || event.message.includes('AbortError')) {
+        if (managed.stopRequested && (event.message.includes('aborted') || event.message.includes('AbortError'))) {
           sessionLog.info('Skipping abort error event (expected during interrupt)')
           break
         }
@@ -10897,6 +10787,12 @@ export class SessionManager implements ISessionManager {
           (lowerErr.includes('401') && (lowerErr.includes('unauthorized') || lowerErr.includes('auth')))
 
         if (isPlainAuthError && this.attemptAuthRetry(sessionId, managed, workspaceId)) {
+          break
+        }
+
+        const classified = parseError(new Error(event.message))
+        if (classified.code !== 'unknown_error') {
+          await this.processEvent(managed, { type: 'typed_error', error: classified })
           break
         }
 
@@ -10921,7 +10817,7 @@ export class SessionManager implements ISessionManager {
 
         // Skip abort errors - these are expected when force-aborting via Query.close()
         const typedErrorMsg = event.error.message || event.error.title || ''
-        if (typedErrorMsg.includes('aborted') || typedErrorMsg.includes('AbortError')) {
+        if (managed.stopRequested && (typedErrorMsg.includes('aborted') || typedErrorMsg.includes('AbortError'))) {
           sessionLog.info('Skipping typed abort error event (expected during interrupt)')
           break
         }
@@ -10942,19 +10838,26 @@ export class SessionManager implements ISessionManager {
           break
         }
 
+        const currentUserIndex = managed.messages.findLastIndex(message => message.role === 'user' && !message.hidden && !message.isQueued)
+        const hasExecutedTools = managed.messages.slice(currentUserIndex + 1).some(message => message.role === 'tool')
+        const deliveredError = hasExecutedTools
+          ? { ...event.error, canRetry: false, actions: event.error.actions.filter(action => action.action !== 'retry') }
+          : event.error
+
         // Build rich error message with all diagnostic fields for persistence and UI display
         const typedErrorMessage: Message = {
           id: generateMessageId(),
           role: 'error',
           // Combine title and message for content display (handles undefined gracefully)
-          content: [event.error.title, event.error.message].filter(Boolean).join(': ') || 'An error occurred',
+          content: [deliveredError.title, deliveredError.message].filter(Boolean).join(': ') || 'An error occurred',
           timestamp: this.monotonic(),
           // Rich error fields for diagnostics and retry functionality
-          errorCode: event.error.code,
-          errorTitle: event.error.title,
-          errorDetails: event.error.details,
-          errorOriginal: event.error.originalError,
-          errorCanRetry: event.error.canRetry,
+          errorCode: deliveredError.code,
+          errorTitle: deliveredError.title,
+          errorDetails: deliveredError.details,
+          errorOriginal: deliveredError.originalError,
+          errorCanRetry: deliveredError.canRetry,
+          errorActions: deliveredError.actions,
         }
         managed.messages.push(typedErrorMessage)
         // Send typed_error event with full structure for renderer to handle
@@ -10962,13 +10865,13 @@ export class SessionManager implements ISessionManager {
           type: 'typed_error',
           sessionId,
           error: {
-            code: event.error.code,
-            title: event.error.title,
-            message: event.error.message,
-            actions: event.error.actions,
-            canRetry: event.error.canRetry,
-            details: event.error.details,
-            originalError: event.error.originalError,
+            code: deliveredError.code,
+            title: deliveredError.title,
+            message: deliveredError.message,
+            actions: deliveredError.actions,
+            canRetry: deliveredError.canRetry,
+            details: deliveredError.details,
+            originalError: deliveredError.originalError,
           },
           timestamp: typedErrorMessage.timestamp,
         }, workspaceId)
@@ -11480,7 +11383,6 @@ export class SessionManager implements ISessionManager {
           model: pending.model,
           thinkingLevel: pending.thinkingLevel,
           automationName: pending.automationName,
-          telegramTopic: pending.telegramTopic,
           waitForCompletion: pending.waitForCompletion,
           reportBack: pending.reportBack,
           timeoutMs: pending.timeoutMs,
@@ -11549,7 +11451,6 @@ export class SessionManager implements ISessionManager {
       model,
       thinkingLevel,
       automationName,
-      telegramTopic,
       waitForCompletion,
       reportBack,
       timeoutMs,
@@ -11607,26 +11508,6 @@ export class SessionManager implements ISessionManager {
 
     // (session_created is emitted by createSession above; triggeredBy is set synchronously
     // before the renderer's hydrate round-trip resolves, so it is observed.)
-
-    // Bind the new session to its Telegram forum topic if the matcher
-    // declared `telegramTopic`. Done before `sendMessage` so the first
-    // assistant tokens already route through the bound topic. Failure
-    // is logged inside the binder; the session continues unbound.
-    if (this.automationBinder && telegramTopic && telegramTopic.trim().length > 0) {
-      try {
-        await this.automationBinder({
-          workspaceId,
-          sessionId: session.id,
-          topicName: telegramTopic.trim(),
-        })
-      } catch (err) {
-        sessionLog.warn('[Automations] automation binder threw', {
-          sessionId: session.id,
-          telegramTopic,
-          error: err instanceof Error ? err.message : String(err),
-        })
-      }
-    }
 
     // Send the prompt.
     // Test runs pass `waitForCompletion: false` so we return as soon as the

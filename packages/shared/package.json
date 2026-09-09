@@ -1,6 +1,6 @@
 {
   "name": "@craft-agent/shared",
-  "version": "1.2.1",
+  "version": "2.0.0",
   "license": "Apache-2.0",
   "description": "Shared business logic for Selection - agent, auth, config, credentials, MCP integration",
   "type": "module",
@@ -69,8 +69,10 @@
     "./automations/resolve-config-path": "./src/automations/resolve-config-path.ts",
     "./protocol": "./src/protocol/index.ts",
     "./tasks": "./src/tasks/index.ts",
+    "./tasks/version": "./src/tasks/version.ts",
     "./i18n": "./src/i18n/index.ts",
-    "./resources": "./src/resources/index.ts"
+    "./resources": "./src/resources/index.ts",
+    "./skills/install": "./src/skills/install.ts"
   },
   "dependencies": {
     "@craft-agent/core": "workspace:*",
@@ -90,7 +92,9 @@
     "yaml": "^2.8.2",
     "@earendil-works/pi-agent-core": "0.81.1",
     "@earendil-works/pi-ai": "0.81.1",
-    "@earendil-works/pi-coding-agent": "0.81.1"
+    "@earendil-works/pi-coding-agent": "0.81.1",
+    "tar": "^7.5.2",
+    "marked": "^17.0.1"
   },
   "peerDependencies": {
     "@modelcontextprotocol/sdk": ">=1.29.0",

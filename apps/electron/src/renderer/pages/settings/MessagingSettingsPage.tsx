@@ -3,7 +3,7 @@
  *
  * The settings entry is currently hidden, but the Lark / Feishu configuration
  * remains available for future re-exposure and backwards-compatible routes.
- * Telegram and WhatsApp configuration are intentionally not rendered here.
+ * Lark / Feishu is the only supported messaging integration.
  */
 
 import * as React from 'react'

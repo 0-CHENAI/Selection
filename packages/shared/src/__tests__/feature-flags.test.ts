@@ -105,14 +105,19 @@ describe('feature-flags runtime helpers', () => {
     expect(isEmbeddedServerEnabled()).toBe(false);
   });
 
-  it('isTasksOrchestrateEnabled defaults to false', () => {
+  it('isTasksOrchestrateEnabled defaults off outside preview', () => {
     delete process.env.CRAFT_FEATURE_TASKS_ORCHESTRATE;
-    expect(isTasksOrchestrateEnabled()).toBe(false);
+    expect(isTasksOrchestrateEnabled()).toBe(process.env.CRAFT_SWARM_PREVIEW_BUILD === '1');
   });
 
   it('isTasksOrchestrateEnabled honors explicit override true', () => {
     process.env.CRAFT_FEATURE_TASKS_ORCHESTRATE = '1';
     expect(isTasksOrchestrateEnabled()).toBe(true);
+  });
+
+  it('isTasksOrchestrateEnabled honors explicit override false', () => {
+    process.env.CRAFT_FEATURE_TASKS_ORCHESTRATE = '0';
+    expect(isTasksOrchestrateEnabled()).toBe(false);
   });
 
 });

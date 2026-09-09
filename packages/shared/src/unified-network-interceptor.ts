@@ -1,3 +1,5 @@
+import { beginRequestDiagnostic } from './request-diagnostics.ts';
+import { observeSseResponse } from './sse-diagnostics.ts';
 /**
  * Unified fetch interceptor for all AI API requests (Anthropic + OpenAI format).
  *
@@ -2102,6 +2104,8 @@ async function interceptedFetch(
     debugLog(toCurl(url, init));
   }
 
+  const diagnostic = beginRequestDiagnostic();
+  let requestSent = false;
   // Find matching adapter for this URL
   const adapter = findAdapter(url);
 
@@ -2158,14 +2162,20 @@ async function interceptedFetch(
         rememberLastOutgoingRequest(url, parsed, adapter);
 
         debugLog(`[${adapter.name}] Intercepted request to ${url}`);
+        requestSent = true;
         const response = await originalFetch(url, finalInit);
+        diagnostic({ phase: response.status >= 400 ? 'http-error' : 'headers', httpStatus: response.status, requestId: response.headers.get('x-request-id') ?? response.headers.get('request-id') });
 
         // Process SSE response through adapter's stream processor
         const contentType = response.headers.get('content-type') ?? '';
         if (contentType.includes('text/event-stream') && response.body) {
           debugLog(`[${adapter.name}] Creating SSE processor (${adapter.stripsSseMetadata ? 'strip' : 'capture'})`);
           const processor = adapter.createSseProcessor();
-          const processedBody = response.body.pipeThrough(processor);
+          const observed = observeSseResponse(response, startTime, event => {
+            diagnostic(event);
+            debugLog('[SSE diagnostic]', event);
+          });
+          const processedBody = observed.body!.pipeThrough(processor);
           const processedResponse = new Response(processedBody, {
             status: response.status,
             statusText: response.statusText,
@@ -2188,14 +2198,24 @@ async function interceptedFetch(
         return logResponse(response, url, startTime, adapter);
       }
     } catch (e) {
+      if (requestSent) {
+        diagnostic({ phase: 'transport-error' });
+        throw e; // Never replay an already dispatched request from the modification fallback.
+      }
       debugLog(`[${adapter?.name}] FETCH modification failed:`, e);
     }
   }
 
   const proxy = getProxyForUrl(url);
   const proxyInit = proxy ? { ...init, proxy } : init;
-  const response = await originalFetch(input, proxyInit);
-  return logResponse(response, url, startTime);
+  try {
+    const response = await originalFetch(input, proxyInit);
+    diagnostic({ phase: response.status >= 400 ? 'http-error' : 'headers', httpStatus: response.status, requestId: response.headers.get('x-request-id') ?? response.headers.get('request-id') });
+    return await logResponse(response, url, startTime);
+  } catch (error) {
+    diagnostic({ phase: 'transport-error' });
+    throw error;
+  }
 }
 
 // Create proxy to handle both function calls and static properties (e.g., fetch.preconnect in Bun)

@@ -27,16 +27,6 @@ export function registerMessagingHandlers(server: RpcServer, deps: HandlerDeps):
     return { success: true }
   })
 
-  server.handle(RPC_CHANNELS.messaging.TEST_TELEGRAM, async (_ctx, token: string) => {
-    return registry.testTelegramToken(token)
-  })
-
-  server.handle(RPC_CHANNELS.messaging.SAVE_TELEGRAM, async (ctx, token: string) => {
-    if (!ctx.workspaceId) throw new Error('Missing workspaceId')
-    await registry.saveTelegramToken(ctx.workspaceId, token)
-    return { success: true }
-  })
-
   server.handle(RPC_CHANNELS.messaging.TEST_LARK, async (
     _ctx,
     creds: { appId: string; appSecret: string; domain: 'lark' | 'feishu' },
@@ -84,35 +74,6 @@ export function registerMessagingHandlers(server: RpcServer, deps: HandlerDeps):
   server.handle(RPC_CHANNELS.messaging.UNBIND_BINDING, async (ctx, bindingId: string) => {
     if (!ctx.workspaceId) throw new Error('Missing workspaceId')
     return { success: registry.unbindBinding(ctx.workspaceId, bindingId) }
-  })
-
-  // Workspace-supergroup pairing (Telegram forum support — Phase A)
-  server.handle(RPC_CHANNELS.messaging.GENERATE_SUPERGROUP_CODE, async (ctx, platform: string) => {
-    if (!ctx.workspaceId) throw new Error('Missing workspaceId')
-    return registry.generateSupergroupPairingCode(ctx.workspaceId, platform)
-  })
-
-  server.handle(RPC_CHANNELS.messaging.GET_SUPERGROUP, async (ctx) => {
-    if (!ctx.workspaceId) throw new Error('Missing workspaceId')
-    return registry.getWorkspaceSupergroup(ctx.workspaceId)
-  })
-
-  server.handle(RPC_CHANNELS.messaging.UNBIND_SUPERGROUP, async (ctx) => {
-    if (!ctx.workspaceId) throw new Error('Missing workspaceId')
-    await registry.unbindWorkspaceSupergroup(ctx.workspaceId)
-    return { success: true }
-  })
-
-  server.handle(RPC_CHANNELS.messaging.WA_START_CONNECT, async (ctx) => {
-    if (!ctx.workspaceId) throw new Error('Missing workspaceId')
-    await registry.startWhatsAppConnect(ctx.workspaceId)
-    return { success: true }
-  })
-
-  server.handle(RPC_CHANNELS.messaging.WA_SUBMIT_PHONE, async (ctx, phoneNumber: string) => {
-    if (!ctx.workspaceId) throw new Error('Missing workspaceId')
-    await registry.submitWhatsAppPhone(ctx.workspaceId, phoneNumber)
-    return { success: true }
   })
 
   // -------------------------------------------------------------------------

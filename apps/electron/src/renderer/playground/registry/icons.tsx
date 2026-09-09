@@ -9,7 +9,7 @@ export const iconComponents: ComponentEntry[] = [
     id: 'craft-agents-logo',
     name: 'CraftAgentsLogo',
     category: 'Icons',
-    description: 'Selection circular product mark',
+    description: 'Selection swan product mark',
     component: CraftAgentsLogo,
     props: [
       {
@@ -29,7 +29,7 @@ export const iconComponents: ComponentEntry[] = [
     id: 'craft-agents-symbol',
     name: 'CraftAgentsSymbol',
     category: 'Icons',
-    description: 'Selection circular product mark',
+    description: 'Selection swan product mark',
     component: CraftAgentsSymbol,
     props: [
       {

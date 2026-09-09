@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
-import { existsSync, mkdtempSync, rmSync } from 'fs';
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import type { TokenUsage } from '@craft-agent/core/types';
@@ -118,6 +118,207 @@ describe('TaskRunner (Conductor)', () => {
   });
   afterEach(() => {
     rmSync(root, { recursive: true, force: true });
+  });
+
+
+  it('reads all owned terminal runs and attempts after restart without side effects', async () => {
+    saveTaskSpec(root, specOf({ id: 'history', title: 'History', goal: 'g', nodes: [
+      { id: 'a', title: 'Original title', prompt: 'a' }, { id: 'b', prompt: 'b', depends_on: ['a'] },
+    ] }));
+    const runner = makeRunner();
+    let serial = 0;
+    host.createSession = async (_ws, options) => {
+      const id = `attempt-${++serial}`;
+      host.created.push({ id, options });
+      return { id };
+    };
+    runner.run('history', { runId: 'r1', orchestratorSessionId: 'owner', verifyOnComplete: false });
+    await tick();
+    // Drive distinct session ids for the initial failure and its manual retry.
+    const complete = (id: string, reason: 'error' | 'complete', finalText?: string) => {
+      for (const listener of (host as unknown as { listeners: Set<(event: SessionCompletionEvent) => void> }).listeners)
+        listener({ sessionId: id, workspaceId: 'ws', generation: 0, reason, finalText });
+    };
+    complete('attempt-1', 'error');
+    await tick();
+    runner.continue('history', 'r1');
+    await tick();
+    await runner.stop('history', 'r1');
+    runner.run('history', { runId: 'r2', orchestratorSessionId: 'owner', verifyOnComplete: false });
+    await tick();
+    await runner.stop('history', 'r2');
+    runner.run('history', { runId: 'r3', orchestratorSessionId: 'other', verifyOnComplete: false });
+    await tick();
+    await runner.stop('history', 'r3');
+    const freshHost = new MockHost();
+    const reader = new TaskRunner({ host: freshHost, workspaceId: 'ws', workspaceRoot: root });
+    const before = JSON.stringify(readRunLog(root, 'history', 'r1'));
+    const history = reader.getRunHistory('history', 'owner');
+    expect(history.map(run => run.runId)).toEqual(['r1', 'r2']);
+    expect(history[0]?.nodes[0]).toMatchObject({ title: 'Original title', state: 'cancelled', attempt: 2,
+      attempts: [{ attempt: 1, sessionId: 'attempt-1', state: 'failed' }, { attempt: 2, sessionId: 'attempt-2', state: 'cancelled' }] });
+    expect(history[0]?.nodes[1]?.state).toBe('cancelled');
+    expect(reader.getRunState('history', 'r1')).toBeNull();
+    expect(reader.getRunHistory('history', 'unknown')).toEqual([]);
+    expect(reader.getRunHistory('history', 'owner')).toEqual(history);
+    expect(JSON.stringify(readRunLog(root, 'history', 'r1'))).toBe(before);
+    expect(freshHost.created).toHaveLength(0);
+    expect(freshHost.orchestrationStatuses).toHaveLength(0);
+    expect((freshHost as unknown as { listeners: Set<unknown> }).listeners.size).toBe(0);
+  });
+
+  it('broadcasts a running child link before completion', async () => {
+    saveTaskSpec(root, specOf({ id: 'links', title: 'Links', goal: 'g', nodes: [{ id: 'a', prompt: 'a' }] }));
+    const snapshots: Array<{ nodes: Array<{ sessionId?: string; state: string }> }> = [];
+    const runner = new TaskRunner({ host, workspaceId: 'ws', workspaceRoot: root, onRunChanged: snapshot => snapshots.push(snapshot) });
+    runner.run('links', { runId: 'r1', orchestratorSessionId: 'owner', verifyOnComplete: false });
+    await tick();
+    expect(snapshots.some(snapshot => snapshot.nodes.some(node => node.sessionId === 'sess-a' && node.state === 'running'))).toBe(true);
+    await runner.stop('links', 'r1');
+  });
+
+  it('does not send work when session creation completes after Stop', async () => {
+    saveTaskSpec(root, specOf({ id: 'late', title: 'Late', goal: 'g', nodes: [{ id: 'a', prompt: 'a' }] }));
+    let finishCreate!: (value: { id: string }) => void;
+    host.createSession = () => new Promise(resolve => { finishCreate = resolve; });
+    const runner = makeRunner();
+    runner.run('late', { runId: 'r1', orchestratorSessionId: 'owner', verifyOnComplete: false });
+    await tick();
+    await runner.stop('late', 'r1');
+    finishCreate({ id: 'late-child' });
+    await tick();
+    expect(host.sent).toHaveLength(0);
+    expect(runner.getRunState('late', 'r1')).toMatchObject({ status: 'stopped', nodes: [{ state: 'cancelled', sessionId: 'late-child' }] });
+    expect(runner.getRunHistory('late', 'owner')[0]?.nodes[0]?.attempts).toEqual([{ attempt: 1, sessionId: 'late-child', state: 'cancelled' }]);
+  });
+
+  it.each([false, true])('retries failed nodes while preserving completed dependencies (restart=%s)', async restart => {
+    saveTaskSpec(root, specOf({ id: 'partial', title: 'Partial', goal: 'g', nodes: [
+      { id: 'a', prompt: 'a' }, { id: 'b', prompt: 'b', depends_on: ['a'] }, { id: 'c', prompt: 'c', depends_on: ['b'] },
+    ] }));
+    let runner = makeRunner();
+    runner.run('partial', { runId: 'r1', verifyOnComplete: false });
+    await tick();
+    host.complete('a', { finalText: 'A', tokenUsage: tu(10, 5) });
+    await tick();
+    host.complete('b', { reason: 'error' });
+    await tick();
+    expect(runner.getRunState('partial', 'r1')?.status).toBe('failed');
+    if (restart) runner = makeRunner();
+    runner.continue('partial', 'r1');
+    await tick();
+    expect(host.dispatchedNames().filter(name => name === 'a')).toHaveLength(1);
+    expect(host.dispatchedNames().filter(name => name === 'b')).toHaveLength(2);
+    host.complete('b', { finalText: 'B' });
+    await tick();
+    host.complete('c', { finalText: 'C' });
+    await tick();
+    expect(runner.getRunState('partial', 'r1')?.status).toBe('completed');
+    expect(runner.getRunState('partial', 'r1')?.tokensUsed).toBe(15);
+  });
+
+  it.each([[false, false, false], [true, false, false], [false, true, false], [true, true, false], [true, false, true], [true, true, true]])('recovers failed parallel instances (restart=%s, replicas=%s, legacy=%s)', async (restart, replicas, legacy) => {
+    saveTaskSpec(root, specOf({ schema_version: 2, id: 'recover-map', title: 'Map', goal: 'g',
+      params: [{ name: 'items', default: '["one","two"]' }],
+      nodes: [replicas ? { id: 'fan', prompt: '${index}', replicas: 2, aggregate: 'concat' } : { id: 'fan', kind: 'map', for_each: '${params.items}', prompt: '${item}' },
+        { id: 'after', depends_on: ['fan'], prompt: '${nodes.fan.output}' }],
+    }));
+    let runner = makeRunner();
+    runner.run('recover-map', { runId: 'r1', verifyOnComplete: false });
+    await tick();
+    host.complete('fan#0', { finalText: 'kept', tokenUsage: tu(10, 5) });
+    host.complete('fan#1', { reason: 'error' });
+    await tick();
+    expect(runner.getRunState('recover-map', 'r1')?.status).toBe('failed');
+    expect(runner.getRunState('recover-map', 'r1')?.canRetryFailedNodes).toBe(true);
+    if (legacy) {
+      // Older versions recorded only the parent stage failure, leaving the instance running on disk.
+      const log = readRunLog(root, 'recover-map', 'r1').filter(e => !(e.kind === 'node-finished' && e.nodeId === 'fan#1'));
+      writeFileSync(join(root, 'tasks/recover-map/runs/r1/run-log.jsonl'), log.map(e => JSON.stringify(e)).join('\n') + '\n');
+    }
+    if (restart) runner = makeRunner();
+    runner.continue('recover-map', 'r1');
+    await tick();
+    expect(host.dispatchedNames().filter(name => name === 'fan#0')).toHaveLength(1);
+    expect(host.dispatchedNames().filter(name => name === 'fan#1')).toHaveLength(2);
+    host.complete('fan#1', { finalText: 'recovered' });
+    await tick();
+    expect(host.promptFor('after')).toContain('kept');
+    expect(host.promptFor('after')).toContain('recovered');
+    host.complete('after');
+    await tick();
+    expect(runner.getRunState('recover-map', 'r1')?.status).toBe('completed');
+    expect(runner.getRunState('recover-map', 'r1')?.tokensUsed).toBe(15);
+  });
+
+  it.each([false, true])('retries a failed loop iteration while preserving successful iterations (restart=%s)', async restart => {
+    saveTaskSpec(root, specOf({ schema_version: 2, id: 'retry-loop', title: 'Loop', goal: 'g', nodes: [
+      { id: 'iter', kind: 'loop', loop: { max: 3, until: { ref: 'nodes.iter.output', op: 'contains', value: 'STOP' } }, prompt: '${prev}' },
+    ] }));
+    let runner = makeRunner(); runner.run('retry-loop', { runId: 'r1', verifyOnComplete: false }); await tick();
+    host.complete('iter#0', { finalText: 'kept' }); await tick();
+    host.complete('iter#1', { reason: 'error' }); await tick();
+    expect(runner.getRunState('retry-loop', 'r1')?.status).toBe('failed');
+    if (restart) runner = makeRunner();
+    runner.continue('retry-loop', 'r1'); await tick();
+    expect(host.dispatchedNames().filter(n => n === 'iter#0')).toHaveLength(1);
+    expect(host.dispatchedNames().filter(n => n === 'iter#1')).toHaveLength(2);
+    host.complete('iter#1', { finalText: 'STOP' }); await tick();
+    expect(runner.getRunState('retry-loop', 'r1')?.status).toBe('completed');
+  });
+
+  it.each([false, true])('reopens failed approval without implicitly approving it (restart=%s)', async restart => {
+    saveTaskSpec(root, specOf({ schema_version: 2, id: 'retry-approval', title: 'Approval', goal: 'g', nodes: [
+      { id: 'gate', kind: 'approval' }, { id: 'work', depends_on: ['gate'], prompt: 'work' },
+    ] }));
+    let runner = makeRunner(); runner.run('retry-approval', { runId: 'r1', verifyOnComplete: false });
+    runner.respondApproval('retry-approval', 'r1', 'gate', false); await tick();
+    if (restart) runner = makeRunner();
+    runner.continue('retry-approval', 'r1'); await tick();
+    expect(runner.getRunState('retry-approval', 'r1')?.status).toBe('waiting-approval');
+    expect(host.dispatchedNames()).toHaveLength(0);
+    runner.respondApproval('retry-approval', 'r1', 'gate', true); await tick();
+    host.complete('work'); await tick();
+    expect(runner.getRunState('retry-approval', 'r1')?.status).toBe('completed');
+  });
+
+  it.each([false, true])('invalidates completed all_done descendants but preserves unrelated successes (restart=%s)', async restart => {
+    saveTaskSpec(root, specOf({ schema_version: 2, id: 'retry-dependent', title: 'Dependent', goal: 'g', nodes: [
+      { id: 'bad', prompt: 'bad' }, { id: 'good', prompt: 'good' },
+      { id: 'after', depends_on: ['bad'], trigger: 'all_done', prompt: '${nodes.bad.output}' },
+    ] }));
+    let runner = makeRunner(); runner.run('retry-dependent', { runId: 'r1', verifyOnComplete: false }); await tick();
+    host.complete('good', { finalText: 'kept' }); host.complete('bad', { reason: 'error' }); await tick();
+    host.complete('after', { finalText: 'stale failure report' }); await tick();
+    expect(runner.getRunState('retry-dependent', 'r1')?.status).toBe('failed');
+    if (restart) runner = makeRunner();
+    runner.continue('retry-dependent', 'r1'); await tick();
+    expect(host.dispatchedNames().filter(n => n === 'good')).toHaveLength(1);
+    host.complete('bad', { finalText: 'recovered' }); await tick();
+    expect(host.dispatchedNames().filter(n => n === 'after')).toHaveLength(2);
+    host.complete('after', { finalText: 'new result' }); await tick();
+    expect(runner.getRunState('retry-dependent', 'r1')?.status).toBe('completed');
+  });
+
+  it.each([false, true])('rebuilds affected expanded descendants with fresh attempts (restart=%s)', async restart => {
+    saveTaskSpec(root, specOf({ schema_version: 2, id: 'retry-map-desc', title: 'Map', goal: 'g',
+      params: [{ name: 'items', default: '["one","two"]' }], nodes: [
+        { id: 'bad', prompt: 'bad' },
+        { id: 'fan', kind: 'map', trigger: 'all_done', depends_on: ['bad'], for_each: '${params.items}', prompt: '${item}' },
+      ],
+    }));
+    let runner = makeRunner(); runner.run('retry-map-desc', { runId: 'r1', verifyOnComplete: false }); await tick();
+    host.complete('bad', { reason: 'error' }); await tick();
+    host.complete('fan#0', { finalText: 'old-0' }); host.complete('fan#1', { finalText: 'old-1' }); await tick();
+    expect(runner.getRunState('retry-map-desc', 'r1')?.status).toBe('failed');
+    if (restart) runner = makeRunner();
+    runner.continue('retry-map-desc', 'r1'); await tick();
+    host.complete('bad', { finalText: 'new' }); await tick();
+    expect(host.dispatchedNames().filter(n => n === 'fan#0')).toHaveLength(2);
+    expect(runner.getRunState('retry-map-desc', 'r1')?.nodes.find(n => n.id === 'fan#0')?.attempt).toBe(2);
+    host.complete('fan#0', { finalText: 'new-0' }); host.complete('fan#1', { finalText: 'new-1' }); await tick();
+    expect(runner.getRunState('retry-map-desc', 'r1')?.status).toBe('completed');
+    expect(readNodeOutput(root, 'retry-map-desc', 'r1', 'fan')?.text).toBe('new-0\nnew-1');
   });
 
   function makeRunner() {
@@ -615,6 +816,8 @@ describe('TaskRunner (Conductor)', () => {
 
     host.complete('a', { reason: 'timeout' });
     await tick();
+    expect(host.sent.filter(s => s.sessionId === 'sess-a')).toHaveLength(1);
+    await Bun.sleep(1050);
     const retryPrompt = host.sent.filter((s) => s.sessionId === 'sess-a')[1]!.message;
     expect(retryPrompt).toContain('Previous attempt failed: timeout');
     expect(retryPrompt).toContain('do a');
@@ -1806,7 +2009,10 @@ describe('TaskRunner (Conductor)', () => {
     }));
     const runner = new TaskRunner({ host, workspaceId: 'ws', workspaceRoot: root });
     runner.run('node-timeout', { runId: 'r1', verifyOnComplete: false });
-    await new Promise((resolve) => setTimeout(resolve, 30));
+    const deadline = Date.now() + 3000;
+    while (!host.cancelled.includes('sess-slow') && Date.now() < deadline) {
+      await new Promise(resolve => setTimeout(resolve, 10));
+    }
     expect(runner.getRunState('node-timeout', 'r1')).toMatchObject({ status: 'failed' });
     expect(runner.getRunState('node-timeout', 'r1')?.nodes[0]).toMatchObject({ state: 'failed', blocker: 'node-timeout' });
     expect(host.cancelled).toContain('sess-slow');

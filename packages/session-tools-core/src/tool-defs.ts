@@ -19,6 +19,7 @@ import type { ToolResult } from './types.ts';
 // Handlers
 import { handleSubmitPlan } from './handlers/submit-plan.ts';
 import { handleConfigValidate } from './handlers/config-validate.ts';
+import { handleSkillInstall, handleSkillInspect } from './handlers/skill-install.ts';
 import { handleSkillValidate } from './handlers/skill-validate.ts';
 import { handleMermaidValidate } from './handlers/mermaid-validate.ts';
 import { handleSourceTest } from './handlers/source-test.ts';
@@ -39,7 +40,6 @@ import { handleSetSessionStatus } from './handlers/set-session-status.ts';
 import { handleGetSessionInfo } from './handlers/get-session-info.ts';
 import { handleListSessions } from './handlers/list-sessions.ts';
 import { handleListBackgroundTasks } from './handlers/list-background-tasks.ts';
-import { handleCreateTask } from './handlers/create-task.ts';
 import { handleRunTask } from './handlers/run-task.ts';
 import { handleGetTaskResults } from './handlers/get-task-results.ts';
 import { handleSubmitTaskOutput } from './handlers/submit-task-output.ts';
@@ -47,8 +47,8 @@ import { handleSubmitTaskVerdict } from './handlers/submit-task-verdict.ts';
 import { handleSubmitOrchestrationPatch } from './handlers/submit-orchestration-patch.ts';
 import { handleSubmitOrchestrationDecision } from './handlers/submit-orchestration-decision.ts';
 import { handleSubmitTaskNodeVerdict } from './handlers/submit-task-node-verdict.ts';
-import { handleSubmitTaskDefinition } from './handlers/submit-task-definition.ts';
 import { handleControlTaskRun } from './handlers/control-task-run.ts';
+import { handleSubmitTaskDefinition } from './handlers/submit-task-definition.ts';
 import { handleArchiveSession } from './handlers/archive-session.ts';
 import { handleSendAgentMessage } from './handlers/send-agent-message.ts';
 import { handleListMessagingChannels, handleUnbindMessagingChannel } from './handlers/messaging.ts';
@@ -65,6 +65,17 @@ export const ConfigValidateSchema = z.object({
   target: z.enum(['config', 'sources', 'statuses', 'preferences', 'permissions', 'automations', 'tool-icons', 'all'])
     .describe('Which config file(s) to validate'),
   sourceSlug: z.string().optional().describe('Validate a specific source by slug'),
+});
+
+export const SkillInspectSchema = z.object({
+  source: z.string().min(1).describe('Public GitHub HTTPS URL or local skill path'),
+  ref: z.string().min(1).optional().describe('Git ref; required for ambiguous tree/blob URLs'),
+  skillPath: z.string().optional().describe('Relative skill directory; choose from inspection candidates'),
+  slug: z.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/).optional(),
+});
+export const SkillInstallSchema = SkillInspectSchema.extend({
+  replace: z.boolean().optional().default(false).describe('Only true when the user explicitly requested replacing an existing skill'),
+  expectedTargetFingerprint: z.string().regex(/^[a-f0-9]{64}$/).optional().describe('Required for replacement; fingerprint returned by conflict/inspection'),
 });
 
 export const SkillValidateSchema = z.object({
@@ -161,7 +172,8 @@ export const RenderTemplateSchema = z.object({
 });
 
 export const SendDeveloperFeedbackSchema = z.object({
-  message: z.string().describe('Freeform markdown feedback — be detailed, use headings, lists, code blocks. Include what happened, what you expected, what would help, or any ideas/suggestions.'),
+  message: z.string().describe('The exact markdown feedback shown to the user for approval. Include only details necessary to report the product issue; omit session IDs, credentials, connection details, and unrelated task context.'),
+  approvalToken: z.string().optional().describe('Host-issued one-time approval token. Agents must not invent or reuse this value.'),
 });
 
 // Browser tool schema (single CLI-like tool for all browser actions)
@@ -251,7 +263,7 @@ export const CreateTaskSchema = z.object({
 
 export const RunTaskSchema = z.object({
   slug: z.string().optional().describe('Task slug to run. Required unless orchestratorSessionId is set.'),
-  orchestratorSessionId: z.string().optional().describe('Orchestrator session id (from create_task). Used to find the slug when omitted.'),
+  orchestratorSessionId: z.string().optional().describe('Orchestrator session id of an existing board task. Used to find the slug when omitted.'),
   params: z.record(z.string(), z.unknown()).optional().describe('Optional task params forwarded to TaskRunner'),
   waitForCompletion: z.boolean().optional().describe('If true, wait until the run reaches a terminal state (default false)'),
 });
@@ -267,7 +279,7 @@ export const SubmitTaskOutputSchema = z.object({
 });
 
 export const SubmitTaskDefinitionSchema = z.object({
-  spec: z.record(z.string(), z.unknown()).describe('Complete v2 task spec. Server validates; do not paste free-text YAML.'),
+  spec: z.record(z.string(), z.unknown()).describe('Complete v3 proposal. Does not create or run a task; the user must confirm it in the editor.'),
 });
 
 export const ControlTaskRunSchema = z.object({
@@ -351,7 +363,7 @@ export const ListMessagingChannelsSchema = z.object({
 });
 
 export const UnbindMessagingChannelSchema = z.object({
-  platform: z.enum(['telegram', 'whatsapp']).optional().describe('Platform to unbind. If omitted, unbinds all.'),
+  platform: z.enum(['lark']).optional().describe('Platform to unbind. If omitted, unbinds all.'),
 });
 
 // ============================================================
@@ -586,9 +598,9 @@ Optional overrides: \`model\`, \`llmConnection\`, \`permissionMode\`, \`thinking
 Children default to lifecycle="managed" and role="worker". Managed children participate in parent completion and explicit Swarm stop; lifecycle="detached" explicitly leaves both contracts. Workers are hidden from the ordinary session list but remain openable from run details.
 Only use 'attachments' for existing file paths on disk — the tool reads them automatically.`,
 
-  send_developer_feedback: `Send freeform feedback to the Selection development team.
+  send_developer_feedback: `Send user-approved feedback to the Selection development team.
 
-Use this to share anything that would help improve the product — issues you hit, ideas for better tools, suggestions for improved workflows, or patterns you notice. Write in markdown with as much detail as possible. This is your direct line to the developers.`,
+Only call this after the user explicitly asks to submit feedback. The exact message is shown for confirmation before it is persisted. Do not call it automatically because a tool failed; recover or degrade gracefully and tell the user about the limitation instead. Include only details necessary to report the product issue, and omit session IDs, credentials, connection details, and unrelated task context.`,
 
   set_session_labels: `Set labels on the current session or a specific session by ID. Replaces all existing labels.
 
@@ -609,23 +621,23 @@ Requires an explicit sessionId and cannot target your own session. Use list_sess
 
   create_task: `Create a Selection Task on the kanban board — writes tasks/<slug>/task.yaml and creates its orchestrator session. CREATION ONLY: the task lands in "todo" and is NOT run.
 
-Provide either title + description (single-node form) OR a full v2 spec (exclusive). Optional on the simple form: acceptanceCriteria, sources / skills, llmConnection + model, workingDirectory, projectId. Omitted model and connection inherit from the current session.
+Provide either title + description (single-node form) OR a full task spec (exclusive). New tasks default to schema_version 3. Optional on the simple form: acceptanceCriteria, sources / skills, llmConnection + model, workingDirectory, projectId. Omitted model and connection inherit from the current session.
 
 Returns { slug, orchestratorSessionId, taskLabelId, warnings } — unknown source/skill slugs are reported as warnings, not errors. Use it only when the user asks to capture or queue work as a board task. Do not create a board task for one-off chat work. To execute immediately in chat, do the work yourself or (if the spawn bar is met) use spawn_session. To start this board task's Conductor DAG, call run_task with the returned slug.`,
 
   run_task: `Start the Conductor DAG for an existing Selection Task on the kanban board.
 
-Provide slug (from create_task or the board) and/or orchestratorSessionId. Optional params are forwarded to the runner. waitForCompletion (default false) waits until the run is completed, failed, or stopped.
+Provide slug (from the board) and/or orchestratorSessionId. Optional params are forwarded to the runner. waitForCompletion (default false) waits until the run is completed, failed, or stopped.
 
-Returns a typed snapshot { slug, runId, status, nodeCount, nodes }. Parameter errors are returned as tool errors. This does not create a task — use create_task first. Use only when the user asked to run a board task.`,
+Returns a typed snapshot { slug, runId, status, nodeCount, nodes }. Parameter errors are returned as tool errors. This does not create a task — the user must save a workflow in the editor or import YAML first. Use only when the user asked to run a board task.`,
 
   control_task_run: `Control an active Conductor run: pause, resume, stop, or continue.
 
 Approval, sensitive-parameter entry, and budget changes are user-only controls in the run details UI. Use only when the user asked to control a board task run. Stop here is "stop the Conductor run", not the background-task chip.`,
 
-  submit_task_definition: `Submit a structured v2 task spec instead of pasting YAML in chat.
+  submit_task_definition: `Submit a structured v3 task spec instead of pasting YAML in chat.
 
-The server validates the spec. On errors, fix and submit again (generation allows at most two corrections).`,
+Only editor proposal sessions may call this tool. It validates an unsaved proposal, never creates or runs a task. The user must review and explicitly save it. On errors, fix and submit again.`,
 
   get_task_results: `Read a Conductor run's verdict and per-node outputs from disk.
 
@@ -682,7 +694,7 @@ Use list_sessions to find session IDs, or use the sessionId returned by spawn_se
 
 The target session receives your message with a sender envelope containing your session ID, so it can use send_agent_message to reply.`,
 
-  list_messaging_channels: `List messaging channels (Telegram, WhatsApp) bound to a session.
+  list_messaging_channels: `List Lark / Feishu messaging channels bound to a session.
 Shows which external chat apps are connected and can send/receive messages.`,
 
   unbind_messaging_channel: `Disconnect a messaging channel from the current session.
@@ -732,8 +744,11 @@ export type SessionToolDef = RegistrySessionToolDef | BackendSessionToolDef;
 // ============================================================
 
 export const SESSION_TOOL_DEFS: SessionToolDef[] = [
+  { name: 'submit_task_definition', description: TOOL_DESCRIPTIONS.submit_task_definition, inputSchema: SubmitTaskDefinitionSchema, executionMode: 'registry', safeMode: 'allow', handler: handleSubmitTaskDefinition },
   { name: 'SubmitPlan', description: TOOL_DESCRIPTIONS.SubmitPlan, inputSchema: SubmitPlanSchema, executionMode: 'registry', safeMode: 'allow', handler: handleSubmitPlan },
   { name: 'config_validate', description: TOOL_DESCRIPTIONS.config_validate, inputSchema: ConfigValidateSchema, executionMode: 'registry', safeMode: 'allow', readOnly: true, handler: handleConfigValidate },
+  { name: 'skill_inspect', description: 'Inspect a public GitHub or local skill without installing. Returns candidates, static validation and conflicts. Use for compatibility questions. Runtime scripts are not executed.', inputSchema: SkillInspectSchema, executionMode: 'registry', safeMode: 'allow', readOnly: true, handler: handleSkillInspect },
+  { name: 'skill_install', description: 'Install a public GitHub or local skill into this workspace. One call snapshots, validates, publishes and confirms loading. Use for explicit installation requests instead of WebFetch/Bash. Never replace without user intent and expectedTargetFingerprint. Do not run skill_validate afterward; installation already validates the exact content. Runtime dependencies are not tested.', inputSchema: SkillInstallSchema, executionMode: 'registry', safeMode: 'block', readOnly: false, handler: handleSkillInstall },
   { name: 'skill_validate', description: TOOL_DESCRIPTIONS.skill_validate, inputSchema: SkillValidateSchema, executionMode: 'registry', safeMode: 'allow', readOnly: true, handler: handleSkillValidate },
   { name: 'mermaid_validate', description: TOOL_DESCRIPTIONS.mermaid_validate, inputSchema: MermaidValidateSchema, executionMode: 'registry', safeMode: 'allow', readOnly: true, handler: handleMermaidValidate },
   { name: 'source_test', description: TOOL_DESCRIPTIONS.source_test, inputSchema: SourceTestSchema, executionMode: 'registry', safeMode: 'allow', handler: handleSourceTest },
@@ -746,7 +761,7 @@ export const SESSION_TOOL_DEFS: SessionToolDef[] = [
   { name: 'transform_data', description: TOOL_DESCRIPTIONS.transform_data, inputSchema: TransformDataSchema, executionMode: 'registry', safeMode: 'allow', handler: handleTransformData },
   { name: 'script_sandbox', description: TOOL_DESCRIPTIONS.script_sandbox, inputSchema: ScriptSandboxSchema, executionMode: 'registry', safeMode: 'allow', handler: handleScriptSandbox },
   { name: 'render_template', description: TOOL_DESCRIPTIONS.render_template, inputSchema: RenderTemplateSchema, executionMode: 'registry', safeMode: 'allow', handler: handleRenderTemplate },
-  { name: 'send_developer_feedback', description: TOOL_DESCRIPTIONS.send_developer_feedback, inputSchema: SendDeveloperFeedbackSchema, executionMode: 'registry', safeMode: 'allow', handler: handleSendDeveloperFeedback },
+  { name: 'send_developer_feedback', description: TOOL_DESCRIPTIONS.send_developer_feedback, inputSchema: SendDeveloperFeedbackSchema, executionMode: 'registry', safeMode: 'block', handler: handleSendDeveloperFeedback },
   { name: 'call_llm', description: TOOL_DESCRIPTIONS.call_llm, inputSchema: CallLlmSchema, executionMode: 'backend', safeMode: 'allow', readOnly: true, handler: null },
   { name: 'spawn_session', description: TOOL_DESCRIPTIONS.spawn_session, inputSchema: SpawnSessionSchema, executionMode: 'backend', safeMode: 'block', handler: null },
   // Browser tool (backend-specific — requires BrowserPaneManager in Electron)
@@ -756,7 +771,6 @@ export const SESSION_TOOL_DEFS: SessionToolDef[] = [
   { name: 'set_session_labels', description: TOOL_DESCRIPTIONS.set_session_labels, inputSchema: SetSessionLabelsSchema, executionMode: 'registry', safeMode: 'block', handler: handleSetSessionLabels },
   { name: 'set_session_status', description: TOOL_DESCRIPTIONS.set_session_status, inputSchema: SetSessionStatusSchema, executionMode: 'registry', safeMode: 'block', handler: handleSetSessionStatus },
   { name: 'archive_session', description: TOOL_DESCRIPTIONS.archive_session, inputSchema: ArchiveSessionSchema, executionMode: 'registry', safeMode: 'block', handler: handleArchiveSession },
-  { name: 'create_task', description: TOOL_DESCRIPTIONS.create_task, inputSchema: CreateTaskSchema, executionMode: 'registry', safeMode: 'block', handler: handleCreateTask },
   { name: 'run_task', description: TOOL_DESCRIPTIONS.run_task, inputSchema: RunTaskSchema, executionMode: 'registry', safeMode: 'block', handler: handleRunTask },
   { name: 'get_task_results', description: TOOL_DESCRIPTIONS.get_task_results, inputSchema: GetTaskResultsSchema, executionMode: 'registry', safeMode: 'allow', readOnly: true, handler: handleGetTaskResults },
   { name: 'submit_task_output', description: TOOL_DESCRIPTIONS.submit_task_output, inputSchema: SubmitTaskOutputSchema, executionMode: 'registry', safeMode: 'allow', handler: handleSubmitTaskOutput },
@@ -764,7 +778,6 @@ export const SESSION_TOOL_DEFS: SessionToolDef[] = [
   { name: 'submit_orchestration_patch', description: TOOL_DESCRIPTIONS.submit_orchestration_patch, inputSchema: SubmitOrchestrationPatchSchema, executionMode: 'registry', safeMode: 'allow', handler: handleSubmitOrchestrationPatch },
   { name: 'submit_orchestration_decision', description: TOOL_DESCRIPTIONS.submit_orchestration_decision, inputSchema: SubmitOrchestrationDecisionSchema, executionMode: 'registry', safeMode: 'allow', handler: handleSubmitOrchestrationDecision },
   { name: 'submit_task_node_verdict', description: TOOL_DESCRIPTIONS.submit_task_node_verdict, inputSchema: SubmitTaskNodeVerdictSchema, executionMode: 'registry', safeMode: 'allow', handler: handleSubmitTaskNodeVerdict },
-  { name: 'submit_task_definition', description: TOOL_DESCRIPTIONS.submit_task_definition, inputSchema: SubmitTaskDefinitionSchema, executionMode: 'registry', safeMode: 'allow', handler: handleSubmitTaskDefinition },
   { name: 'control_task_run', description: TOOL_DESCRIPTIONS.control_task_run, inputSchema: ControlTaskRunSchema, executionMode: 'registry', safeMode: 'block', handler: handleControlTaskRun },
   { name: 'get_session_info', description: TOOL_DESCRIPTIONS.get_session_info, inputSchema: GetSessionInfoSchema, executionMode: 'registry', safeMode: 'allow', readOnly: true, handler: handleGetSessionInfo },
   { name: 'list_sessions', description: TOOL_DESCRIPTIONS.list_sessions, inputSchema: ListSessionsSchema, executionMode: 'registry', safeMode: 'allow', readOnly: true, handler: handleListSessions },

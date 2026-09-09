@@ -11,7 +11,7 @@ export function CraftAgentsLogo({ className }: CraftAgentsLogoProps) {
     <img
       src={selectionIcon}
       alt="Selection"
-      className={cn("aspect-square object-contain", className)}
+      className={cn("aspect-square object-contain dark:invert", className)}
     />
   )
 }

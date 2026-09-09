@@ -134,6 +134,43 @@ describe('TaskRunner v3 quality/efficiency', () => {
     else process.env.CRAFT_FEATURE_TASKS_ORCHESTRATE = prevFlag;
   });
 
+  it.each([false, true])('requires a fresh reviewer verdict after transport failure (restart=%s)', async restart => {
+    saveTaskSpec(root, v3Spec({ runner: 'conduct', execution: { verification: { required: false } }, nodes: [
+      { id: 'work', prompt: 'work' }, { id: 'review', kind: 'verify', prompt: 'review', depends_on: ['work'] },
+      { id: 'after', prompt: 'after', depends_on: ['review'] },
+    ] }));
+    let r = runner(); r.run('v3demo', { runId: 'r1', verifyOnComplete: false }); await tick();
+    host.complete('work', { finalText: 'kept' }); await tick();
+    expect(r.submitNodeVerdict(host.sessionIdFor('review'), { result: 'pass', reason: 'old', evidence: 'old' }).ok).toBe(true);
+    host.complete('review', { reason: 'error' }); await tick();
+    expect(r.getRunState('v3demo', 'r1')?.status).toBe('failed');
+    if (restart) r = runner();
+    r.continue('v3demo', 'r1'); await tick();
+    expect(r.getRunState('v3demo', 'r1')?.nodes.find(n => n.id === 'review')?.verdict).toBeUndefined();
+    expect(host.dispatchedNames().filter(n => n === 'work')).toHaveLength(1);
+    expect(r.submitNodeVerdict(host.sessionIdFor('review'), { result: 'pass', reason: 'new', evidence: 'new' }).ok).toBe(true);
+    host.complete('review', { finalText: 'reviewed' }); await tick();
+    host.complete('after'); await tick();
+    expect(r.getRunState('v3demo', 'r1')?.status).toBe('completed');
+  });
+
+  it('requires a new coordinator decision before dispatching a recovered run', async () => {
+    saveTaskSpec(root, v3Spec({ nodes: [{ id: 'a', prompt: 'A' }] }));
+    const r = runner(); r.run('v3demo', { runId: 'r1', orchestratorSessionId: 'orch', orchestrateAllowed: true });
+    const advance = (id: string) => r.applyOrchestrationDecisionByRunId('orch', {
+      runId: 'r1', checkpointId: readRunLog(root, 'v3demo', 'r1').findLast(e => e.kind === 'coordinator-request')!.checkpointId, decisionId: id, baseRevision: 0, action: 'continue',
+    });
+    advance('start'); await tick(); host.complete('a', { reason: 'error' }); await tick();
+    advance('settle'); await tick();
+    expect(r.getRunState('v3demo', 'r1')?.status).toBe('failed');
+    const snapshot = r.continue('v3demo', 'r1');
+    expect(snapshot.status).toBe('waiting-coordinator');
+    expect(host.dispatchedNames()).toEqual(['a']);
+    advance('retry'); await tick();
+    expect(host.dispatchedNames()).toEqual(['a', 'a']);
+    await r.stop('v3demo', 'r1');
+  });
+
   function runner() {
     return new TaskRunner({ host, workspaceId: 'ws', workspaceRoot: root, now: () => '2026-06-07T00:00:00.000Z' });
   }
@@ -153,6 +190,71 @@ describe('TaskRunner v3 quality/efficiency', () => {
     if (!request || request.kind !== 'coordinator-request') throw new Error('missing coordinator-request');
     return request.checkpointId;
   }
+
+  it('persists human feedback without releasing the gate, deduplicates feedback, and resumes only on approval', async () => {
+    saveTaskSpec(root, v3Spec({ runner: 'conduct', nodes: [
+      { id: 'gate', kind: 'approval', prompt: 'Review the plan' },
+      { id: 'work', prompt: 'Use the human response: ${nodes.gate.output}', depends_on: ['gate'] },
+    ] }));
+    const first = runner();
+    first.run('v3demo', { runId: 'human', orchestratorSessionId: 'orch', verifyOnComplete: false });
+    await tick();
+    expect(first.getRunState('v3demo', 'human')?.status).toBe('waiting-approval');
+    expect(first.getRunState('v3demo', 'human')?.nodes[0]?.approvalDefinition?.prompt).toBe('Review the plan');
+    saveTaskSpec(root, v3Spec({ runner: 'conduct', nodes: [{ id: 'gate', kind: 'approval', prompt: 'Different future plan' }] }));
+    expect(first.getRunState('v3demo', 'human')?.nodes[0]?.approvalDefinition?.prompt).toBe('Review the plan');
+    const feedback = first.respondApproval('v3demo', 'human', 'gate', false, 'Add a concrete example', true);
+    expect(feedback.status).toBe('waiting-approval');
+    expect(feedback.nodes.find(n => n.id === 'gate')?.approvalFeedback).toBe('Add a concrete example');
+    first.respondApproval('v3demo', 'human', 'gate', false, 'Add a concrete example', true);
+    expect(readRunLog(root, 'v3demo', 'human').filter(e => e.kind === 'approval-response')).toHaveLength(1);
+    expect(host.dispatchedNames()).not.toContain('work');
+    await tick();
+    expect(host.sent.some(s => s.message.includes('gate remains CLOSED'))).toBe(true);
+    const restored = runner();
+    restored.scanUnfinished();
+    expect(restored.getRunState('v3demo', 'human')?.nodes[0]?.approvalDefinition?.prompt).toBe('Review the plan');
+    expect(restored.getRunState('v3demo', 'human')?.nodes.find(n => n.id === 'gate')?.approvalFeedback).toBe('Add a concrete example');
+    restored.respondApproval('v3demo', 'human', 'gate', true);
+    await tick();
+    expect(host.dispatchedNames()).toContain('work');
+    expect(host.sent.some(s => s.message.includes('Add a concrete example'))).toBe(true);
+    expect(() => restored.respondApproval('v3demo', 'human', 'gate', true)).toThrow('not waiting');
+  });
+
+  it('rejects a human gate without dispatching its dependent and audits the reason', async () => {
+    saveTaskSpec(root, v3Spec({ runner: 'conduct', nodes: [
+      { id: 'gate', kind: 'approval' }, { id: 'work', prompt: 'work', depends_on: ['gate'] },
+    ] }));
+    const r = runner();
+    r.run('v3demo', { runId: 'reject', orchestratorSessionId: 'orch', verifyOnComplete: false });
+    await tick();
+    expect(() => r.respondApproval('v3demo', 'reject', 'gate', 'yes' as unknown as boolean)).toThrow('Invalid');
+    r.respondApproval('v3demo', 'reject', 'gate', false, 'Not authorized');
+    await tick();
+    expect(host.dispatchedNames()).not.toContain('work');
+    expect(readRunLog(root, 'v3demo', 'reject').some(e => e.kind === 'approval-response' && e.approved === false && e.feedback === 'Not authorized')).toBe(true);
+  });
+
+  it('allows explicit feedback retry after delivery failure and restart without opening the gate', async () => {
+    saveTaskSpec(root, v3Spec({ runner: 'conduct', nodes: [{ id: 'gate', kind: 'approval' }, { id: 'work', prompt: 'work', depends_on: ['gate'] }] }));
+    const send = host.sendMessage.bind(host);
+    host.sendMessage = async () => { throw new Error('offline'); };
+    const first = runner();
+    first.run('v3demo', { runId: 'delivery', orchestratorSessionId: 'orch', verifyOnComplete: false });
+    first.respondApproval('v3demo', 'delivery', 'gate', false, 'Please revise', true);
+    await tick();
+    expect(first.getRunState('v3demo', 'delivery')?.nodes[0]?.blocker).toBe('feedback-delivery-failed');
+    host.sendMessage = send;
+    const restored = runner();
+    restored.scanUnfinished();
+    expect(restored.getRunState('v3demo', 'delivery')?.nodes[0]?.blocker).toBe('feedback-delivery-failed');
+    restored.respondApproval('v3demo', 'delivery', 'gate', false, 'Please revise', true);
+    await tick();
+    expect(restored.getRunState('v3demo', 'delivery')?.nodes[0]?.blocker).toBeUndefined();
+    expect(restored.getRunState('v3demo', 'delivery')?.status).toBe('waiting-approval');
+    expect(host.dispatchedNames()).not.toContain('work');
+  });
 
   it('records metrics without dispatching before the first coordinator decision', () => {
     const snap = startV3();
@@ -476,6 +578,62 @@ describe('TaskRunner v3 quality/efficiency', () => {
     host.complete('long', { finalText: 'done', tokenUsage: tu(3, 1) });
     await tick();
     expect(host.dispatchedNames()).toContain('next');
+  });
+
+  it('publishes structured output before a pool wake expands a dependent map', async () => {
+    const pool = new LlmConnectionPool(1);
+    saveTaskSpec(root, v3Spec({
+      id: 'v3demo',
+      runner: 'conduct',
+      defaults: { llmConnection: 'shared' },
+      max_parallel: 2,
+      nodes: [
+        {
+          id: 'source',
+          prompt: 'produce zones',
+          outputs: [{ name: 'zones', kind: 'param', type: 'json' }],
+        },
+        {
+          id: 'fan',
+          kind: 'map',
+          depends_on: ['source'],
+          for_each: '${nodes.source.output.zones}',
+          prompt: 'read ${item}',
+        },
+      ],
+    }));
+    const r = new TaskRunner({
+      host,
+      workspaceId: 'ws',
+      workspaceRoot: root,
+      now: () => '2026-06-07T00:00:00.000Z',
+      connectionPool: pool,
+    });
+    r.run('v3demo', { runId: 'r1', orchestratorSessionId: 'orch', orchestrateAllowed: true, verifyOnComplete: false });
+    await tick();
+    expect(r.submitNodeOutput(host.sessionIdFor('source'), {
+      values: { zones: ['zone-a', 'zone-b', 'zone-c'] },
+    }).ok).toBe(true);
+    host.complete('source', { finalText: 'done', tokenUsage: tu(2, 1) });
+    await tick();
+
+    const firstMapPrompt = host.sent.find((sent) => sent.sessionId === host.sessionIdFor('fan#0'))?.message ?? '';
+    expect(firstMapPrompt).toContain('read zone-a');
+    expect(firstMapPrompt).not.toContain('${nodes.source.output.zones}');
+
+    host.complete('fan#0', { finalText: 'A', tokenUsage: tu(2, 1) });
+    await tick();
+    const secondMapPrompt = host.sent.find((sent) => sent.sessionId === host.sessionIdFor('fan#1'))?.message ?? '';
+    expect(secondMapPrompt).toContain('read zone-b');
+
+    host.complete('fan#1', { finalText: 'B', tokenUsage: tu(2, 1) });
+    await tick();
+    const thirdMapPrompt = host.sent.find((sent) => sent.sessionId === host.sessionIdFor('fan#2'))?.message ?? '';
+    expect(thirdMapPrompt).toContain('read zone-c');
+
+    host.complete('fan#2', { finalText: 'C', tokenUsage: tu(2, 1) });
+    await tick();
+    expect(r.getRunState('v3demo', 'r1')?.nodes.find((node) => node.id === 'fan')?.state).toBe('done');
   });
 
   it('acquires map instances through the connection pool', async () => {

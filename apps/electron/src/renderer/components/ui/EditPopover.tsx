@@ -624,7 +624,7 @@ const EDIT_CONFIGS: Record<EditContextKey, (location: string) => Omit<EditConfig
       filePath: `${location}/automations.json`,
       context:
         'The user is editing automations.json which configures automations. ' +
-        'Structure: { version: 2, automations: { EventName: [{ name?, matcher?, cron?, timezone?, permissionMode?, labels?, conditions?, maxDepth?, telegramTopic?, actions: [...] }] } }. ' +
+        'Structure: { version: 2, automations: { EventName: [{ name?, matcher?, cron?, timezone?, permissionMode?, labels?, conditions?, maxDepth?, actions: [...] }] } }. ' +
         'Each event maps to an array of matcher entries. Actions may be: ' +
         '{ type: "prompt", prompt, waitForCompletion?, reportBack?, timeoutMs?, llmConnection?, model?, thinkingLevel? }, ' +
         '{ type: "webhook", url, method?, headers?, body?, bodyFormat?, auth?, captureResponse? }, or ' +

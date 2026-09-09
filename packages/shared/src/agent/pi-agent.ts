@@ -14,6 +14,7 @@
  */
 
 import { spawn, type ChildProcess } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 import { createInterface, type Interface as ReadlineInterface } from 'node:readline';
 import type { AgentEvent } from '@craft-agent/core/types';
 import type { FileAttachment } from '../utils/files.ts';
@@ -298,6 +299,9 @@ export class PiAgent extends BaseAgent {
     resolve: (allowed: boolean) => void;
     toolName: string;
   }> = new Map();
+
+  // One-shot host tokens bound to the exact feedback text shown in the permission UI.
+  private approvedDeveloperFeedbackMessages = new Map<string, string>();
 
   // Pending tool executions (correlation map for subprocess tool_execute_request -> main process -> tool_execute_response)
   private pendingToolExecutions: Map<string, {
@@ -1531,12 +1535,17 @@ export class PiAgent extends BaseAgent {
       this.send({ type: 'pre_tool_use_response', requestId, action: 'block', reason });
     };
 
-    const finishAllowedTool = async (candidateInput: Record<string, unknown>, alreadyModified: boolean) => {
+    const finishAllowedTool = async (
+      candidateInput: Record<string, unknown>,
+      alreadyModified: boolean,
+      approvedDeveloperFeedbackMessage?: string,
+    ) => {
       const decided = this.applyAutomationToolDecision(toolName, candidateInput, toolCallId, sessionId);
       if (decided.type === 'block') {
         sendPermissionBlock(decided.reason);
         return;
       }
+      let hostModified = false;
       const shellCommand = toolName === 'Bash' && typeof decided.input.command === 'string'
         ? decided.input.command
         : null;
@@ -1554,8 +1563,23 @@ export class PiAgent extends BaseAgent {
           return;
         }
       }
-      await emitPreToolUse(decided.input);
-      if (decided.modified || alreadyModified) {
+      if (approvedDeveloperFeedbackMessage !== undefined) {
+        const finalMessage = typeof decided.input.message === 'string'
+          ? decided.input.message.trim()
+          : '';
+        if (finalMessage !== approvedDeveloperFeedbackMessage) {
+          sendPermissionBlock('Developer feedback changed after approval and must be approved again.');
+          return;
+        }
+        const approvalToken = `feedback-approval-${randomUUID()}`;
+        this.approvedDeveloperFeedbackMessages.set(approvalToken, approvedDeveloperFeedbackMessage);
+        decided.input.approvalToken = approvalToken;
+        hostModified = true;
+      }
+      const eventInput = { ...decided.input };
+      delete eventInput.approvalToken;
+      await emitPreToolUse(eventInput);
+      if (decided.modified || alreadyModified || hostModified) {
         this.send({ type: 'pre_tool_use_response', requestId, action: 'modify', input: decided.input });
       } else {
         this.send({ type: 'pre_tool_use_response', requestId, action: 'allow' });
@@ -1566,7 +1590,13 @@ export class PiAgent extends BaseAgent {
       result: Extract<PreToolUseCheckResult, { type: 'prompt' }>,
     ): Promise<void> => {
       if (!this.onPermissionRequest) {
-        // No permission handler — retain existing headless behavior.
+        if (toolName === 'send_developer_feedback'
+          || toolName === 'session__send_developer_feedback'
+          || toolName === 'mcp__session__send_developer_feedback') {
+          sendPermissionBlock('Developer feedback requires explicit user approval, but no permission handler is available.');
+          return;
+        }
+        // No permission handler — retain existing headless behavior for other tools.
         await finishAllowedTool(result.modifiedInput ?? input, !!result.modifiedInput);
         return;
       }
@@ -1609,7 +1639,17 @@ export class PiAgent extends BaseAgent {
         return;
       }
 
-      await finishAllowedTool(result.modifiedInput ?? input, !!result.modifiedInput);
+      const approvedDeveloperFeedbackMessage = (toolName === 'send_developer_feedback'
+        || toolName === 'session__send_developer_feedback'
+        || toolName === 'mcp__session__send_developer_feedback')
+        ? (typeof input.message === 'string' ? input.message.trim() : '')
+        : undefined;
+
+      await finishAllowedTool(
+        result.modifiedInput ?? input,
+        !!result.modifiedInput,
+        approvedDeveloperFeedbackMessage,
+      );
     };
 
     switch (checkResult.type) {
@@ -1836,6 +1876,11 @@ export class PiAgent extends BaseAgent {
       this._sessionToolContext.workingDirectory = this.config.session?.workingDirectory;
       this._sessionToolContext.supportsImages = this.resolveCurrentModelSupportsImages();
       this._sessionToolContext.permissionMode = this.permissionManager.getPermissionMode();
+      this._sessionToolContext.consumeDeveloperFeedbackApproval = (approvalToken: string, message: string) => {
+        if (this.approvedDeveloperFeedbackMessages.get(approvalToken) !== message) return false;
+        this.approvedDeveloperFeedbackMessages.delete(approvalToken);
+        return true;
+      };
       return this._sessionToolContext;
     }
 
@@ -1858,6 +1903,11 @@ export class PiAgent extends BaseAgent {
         this.onAuthRequest?.(request as any);
       },
     });
+    this._sessionToolContext.consumeDeveloperFeedbackApproval = (approvalToken: string, message: string) => {
+      if (this.approvedDeveloperFeedbackMessages.get(approvalToken) !== message) return false;
+      this.approvedDeveloperFeedbackMessages.delete(approvalToken);
+      return true;
+    };
 
     // Attach session self-management bindings (lazy getters from callback registry)
     attachSessionSelfManagementBindings(this._sessionToolContext, sessionId);
@@ -1869,6 +1919,8 @@ export class PiAgent extends BaseAgent {
    * Execute a session-scoped tool by name.
    * Uses the canonical registry from @craft-agent/session-tools-core.
    */
+  private readonly sessionToolControllers = new Set<AbortController>();
+
   private async executeSessionTool(
     toolName: string,
     args: Record<string, unknown>,
@@ -1960,7 +2012,14 @@ export class PiAgent extends BaseAgent {
       }
 
       const ctx = this.getSessionToolContext();
-      const result: SessionToolResult = await def.handler(ctx, args);
+      const controller = new AbortController();
+      this.sessionToolControllers.add(controller);
+      let result: SessionToolResult;
+      try {
+        result = await def.handler({ ...ctx, signal: controller.signal,
+          refreshSkills: () => this.noteSkillMarkdownMutation(join(ctx.workspacePath, 'skills', String(args.slug ?? 'installed'), 'SKILL.md')),
+        }, toolName === 'skill_install' || toolName === 'skill_inspect' ? def.inputSchema.parse(args) : args);
+      } finally { this.sessionToolControllers.delete(controller); }
       // Preserve MCP-compatible text/image blocks all the way into Pi's model
       // context. The first block is always text, so older string-only event/UI
       // consumers still receive the structured envelope and artifact paths.
@@ -2724,6 +2783,7 @@ export class PiAgent extends BaseAgent {
   }
 
   async abort(reason?: string): Promise<void> {
+    for (const controller of this.sessionToolControllers) controller.abort();
     this.emitStopOnce('abort');
 
     // Deny all pending permissions
@@ -2744,6 +2804,7 @@ export class PiAgent extends BaseAgent {
   }
 
   forceAbort(reason: AbortReason): void {
+    for (const controller of this.sessionToolControllers) controller.abort();
     this.emitStopOnce('abort');
 
     this.abortReason = reason;
@@ -2936,6 +2997,7 @@ export class PiAgent extends BaseAgent {
    * Kill the subprocess and clean up resources.
    */
   private killSubprocess(): void {
+    for (const controller of this.sessionToolControllers) controller.abort();
     if (this.readline) {
       this.readline.close();
       this.readline = null;
