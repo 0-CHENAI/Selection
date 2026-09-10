@@ -1,3 +1,5 @@
+import { ANSWER_RECOVERY_PROMPT } from '@craft-agent/shared/prompts/answer-delivery'
+import type { AnswerDeliveryControl, AnswerSubmission, ChatOptions } from '@craft-agent/shared/agent/backend/types'
 import type { EventSink, RpcServer } from '@craft-agent/server-core/transport'
 import { CLIENT_BROWSER_INVOKE } from '@craft-agent/server-core/transport'
 import type { ISessionManager, IBrowserPaneManager, ExecutePromptAutomationInput, ExecutePromptAutomationResult } from '@craft-agent/server-core/handlers'
@@ -858,6 +860,15 @@ interface RunningBackgroundTask {
 }
 
 interface ManagedSession {
+  answerDelivery?: {
+    runId: string
+    generation: number
+    userMessageId: string
+    recovery: boolean
+    accepting?: boolean
+    committedMessageId?: string
+  }
+
   id: string
   workspace: Workspace
   agent: AgentInstance | null  // Lazy-loaded - null until first message
@@ -3990,6 +4001,7 @@ export class SessionManager implements ISessionManager {
           sourceSessionName: managed.name,
           rootSessionId: managed.triggeredBy?.rootSessionId ?? managed.triggeredBy?.sourceSessionId,
         },
+        explicitAnswerDelivery: !managed.parentSessionId && !managed.taskSlug && (!managed.systemPromptPreset || managed.systemPromptPreset === 'default'),
         systemPromptPreset: managed.systemPromptPreset,
         debugMode: _platform?.isDebugMode ? { enabled: true, logFilePath: _platform.getLogFilePath?.() } : undefined,
         // Image resize callback — prevents oversized images from entering conversation history
@@ -6825,6 +6837,28 @@ export class SessionManager implements ISessionManager {
       }
       return
     }
+    if (agent.configureAnswerDelivery && !managed.parentSessionId && !managed.taskSlug && (!managed.systemPromptPreset || managed.systemPromptPreset === 'default')) {
+      const continuingAnswer = isUserTaskContinuation || (options?.hidden && managed.orchestrationStatus === 'running')
+      const owner = continuingAnswer
+        ? managed.messages.findLast(m => m.role === 'user' && !m.hidden && !m.isQueued) ?? userMessage
+        : userMessage
+      // Retain identity across source/auth/Swarm continuation, not SDK subturn ids.
+      const runId = continuingAnswer ? owner.answerRunId ?? owner.id : generateMessageId()
+      if (!continuingAnswer) owner.answerRecoveryAttempted = false
+      owner.answerProtocol = 'explicit-v1'
+      owner.answerRunId = runId
+      managed.answerDelivery = {
+        runId, generation: myGeneration, userMessageId: owner.id,
+        recovery: !!owner.answerRecoveryAttempted,
+        committedMessageId: managed.messages.find(m => m.answerRunId === runId && m.answerCommitted)?.id,
+      }
+      agent.configureAnswerDelivery(this.answerDeliveryControl(managed))
+      this.persistSession(managed)
+      await this.flushSession(managed.id)
+    } else {
+      managed.answerDelivery = undefined
+      agent.configureAnswerDelivery?.(undefined)
+    }
     sendSpan.mark('agent.ready')
 
     // Always set all sources for context (even if none are enabled), including built-ins
@@ -6944,10 +6978,8 @@ export class SessionManager implements ISessionManager {
       }
 
       sendSpan.mark('chat.starting')
-      const chatIterator = agent.chat(message, preparedImages.attachments, {
-        previousResponseInterrupted,
-        continueUserTask: isUserTaskContinuation,
-      })
+      const chatOptions = { previousResponseInterrupted, continueUserTask: isUserTaskContinuation }
+      const chatIterator = this.runAnswerDelivery(managed, agent, agent.chat(message, preparedImages.attachments, chatOptions), chatOptions)
       this.announceRegenerateReplacement(managed)
       sessionLog.info('Got chat iterator, starting iteration...')
       managed.usedExternalToolsThisTurn = false
@@ -7177,6 +7209,142 @@ export class SessionManager implements ISessionManager {
         await this.onProcessingStopped(sessionId, 'interrupted', myGeneration)
       }
     }
+  }
+
+  private answerDeliveryControl(managed: ManagedSession): AnswerDeliveryControl {
+    const state = managed.answerDelivery!
+    return {
+      runId: state.runId,
+      recovery: state.recovery,
+      isActive: () => managed.answerDelivery === state && managed.isProcessing
+        && !state.accepting && !state.committedMessageId && !managed.stopRequested && managed.processingGeneration === state.generation,
+      submit: submission => this.acceptAnswer(managed, state, submission),
+    }
+  }
+
+  private async acceptAnswer(
+    managed: ManagedSession,
+    state: NonNullable<ManagedSession['answerDelivery']>,
+    submission: AnswerSubmission,
+  ): Promise<void> {
+    if (managed.answerDelivery !== state || !managed.isProcessing || managed.stopRequested || managed.processingGeneration !== state.generation) {
+      throw new Error('This answer delivery turn is no longer active.')
+    }
+    if (state.accepting || state.committedMessageId) throw new Error('An answer has already been submitted for this turn.')
+    if (!hasRenderableAssistantText(submission.markdown)) throw new Error('Submit a complete, non-empty Markdown answer.')
+    if (!submission.toolCallId || !submission.sdkMessageId || !submission.sdkTurnAnchor) throw new Error('Missing SDK answer anchor.')
+    const userIndex = managed.messages.findIndex(m => m.id === state.userMessageId)
+    if (userIndex < 0) throw new Error('The originating user turn no longer exists.')
+    if (managed.messages.slice(userIndex + 1).some(m => m.role === 'tool' && m.toolUseId !== submission.toolCallId && (m.toolStatus === 'executing' || m.toolStatus === 'pending'))) {
+      throw new Error('Finish all foreground tools before submitting the answer.')
+    }
+    if ((this.pendingSwarmChildren.get(managed.id) ?? 0) > 0
+      || this.getManagedSwarmChildren(managed.id).some(child => child.isProcessing || child.orchestrationStatus === 'running')
+      || (managed.orchestrationStatus === 'running' && managed.orchestrationAggregation?.phase === 'waiting-workers')) {
+      throw new Error('Wait for all Swarm workers and aggregate their results before submitting the answer.')
+    }
+    const aggregation = managed.orchestrationAggregation
+    if (managed.orchestrationStatus === 'running' && aggregation && aggregation.orchestrationId === managed.orchestrationId) {
+      const assessment = assessManagedSwarmAggregation({
+        finalText: submission.markdown,
+        orchestrationId: aggregation.orchestrationId,
+        finalAggregation: aggregation.finalAggregation,
+        children: this.getManagedSwarmAggregationChildren(managed, aggregation.orchestrationId),
+      })
+      if (!assessment.valid) throw new Error(`Answer does not satisfy Swarm aggregation: ${assessment.reasons.join('; ')}`)
+    }
+    state.accepting = true
+    const previousLastRole = managed.lastMessageRole
+    const previousFinalId = managed.lastFinalMessageId
+    const answer: Message = {
+      id: generateMessageId(), role: 'assistant', content: submission.markdown,
+      timestamp: this.monotonic(), isIntermediate: false, phase: 'final',
+      answerProtocol: 'explicit-v1', answerRunId: state.runId, answerCommitted: true,
+      turnId: `answer-${state.runId}`,
+    }
+    try {
+      // Save the provider anchor before publishing. The SDK has already appended
+      // the assistant tool-call message; its arguments contain this exact answer.
+      await savePiTurnAnchor(getSessionStoragePath(managed.workspace.rootPath, managed.id), answer.id, submission.sdkTurnAnchor)
+      if (managed.stopRequested || managed.processingGeneration !== state.generation || managed.answerDelivery !== state) throw new Error('Answer delivery was interrupted.')
+      this.flushDelta(managed.id, managed.workspace.id)
+      managed.streamingText = ''
+      managed.streamingTurnId = undefined
+      managed.streamingStartedAt = undefined
+      managed.messages.push(answer)
+      state.committedMessageId = answer.id
+      managed.piSdkMessageToCraftMessage ??= new Map()
+      managed.piSdkMessageToCraftMessage.set(submission.sdkMessageId, answer.id)
+      managed.lastMessageRole = 'assistant'
+      managed.lastFinalMessageId = answer.id
+      this.persistSession(managed)
+      await this.flushSession(managed.id)
+      if (managed.stopRequested || !managed.isProcessing || managed.processingGeneration !== state.generation || managed.answerDelivery !== state) throw new Error('Answer delivery was interrupted.')
+      const storedAnswer = loadStoredSession(managed.workspace.rootPath, managed.id)?.messages.find(m => m.id === answer.id)
+      if (!storedAnswer?.answerCommitted || storedAnswer.answerRunId !== state.runId || !hasRenderableAssistantText(storedAnswer.content)) throw new Error('Answer could not be persisted. No answer was published.')
+      this.sendEvent({ type: 'text_complete', sessionId: managed.id, text: answer.content,
+        isIntermediate: false, phase: 'final', answerProtocol: answer.answerProtocol,
+        answerRunId: state.runId, answerCommitted: true, turnId: answer.turnId,
+        messageId: answer.id, timestamp: answer.timestamp }, managed.workspace.id)
+    } catch (error) {
+      managed.messages = managed.messages.filter(m => m.id !== answer.id)
+      state.committedMessageId = undefined
+      managed.piSdkMessageToCraftMessage?.delete(submission.sdkMessageId)
+      // An obsolete submission must not roll back a newer turn's metadata.
+      if (managed.lastFinalMessageId === answer.id) {
+        managed.lastMessageRole = previousLastRole
+        managed.lastFinalMessageId = previousFinalId
+      }
+      this.persistSession(managed)
+      throw error
+    } finally {
+      state.accepting = false
+    }
+  }
+
+  private async *runAnswerDelivery(
+    managed: ManagedSession,
+    agent: AgentInstance,
+    initial: AsyncGenerator<AgentEvent>,
+    options: ChatOptions,
+  ): AsyncGenerator<AgentEvent> {
+    const state = managed.answerDelivery
+    if (!state) { yield* initial; return }
+    let complete: Extract<AgentEvent, { type: 'complete' }> | undefined
+    for await (const event of initial) {
+      if (event.type === 'complete') complete = event
+      else yield event
+    }
+    const owner = managed.messages.find(m => m.id === state.userMessageId)
+    const hasError = managed.messages.slice(managed.messages.findIndex(m => m.id === state.userMessageId) + 1).some(m => m.role === 'error')
+    const waiting = managed.orchestrationStatus === 'running' && managed.orchestrationAggregation?.phase === 'waiting-workers'
+    if (complete && !state.committedMessageId && !state.recovery && !hasError && !waiting
+      && managed.isProcessing && !managed.stopRequested && managed.answerDelivery === state
+      && managed.processingGeneration === state.generation && !managed.authRetryInProgress) {
+      // Account for the first call before starting the one allowed recovery call.
+      await this.processEvent(managed, complete)
+      state.recovery = true
+      if (owner) owner.answerRecoveryAttempted = true
+      this.persistSession(managed)
+      await this.flushSession(managed.id)
+      // Cancellation or a replacement turn can arrive while the checkpoint flushes.
+      // The first completion was already accounted for above; do not replay it.
+      if (!managed.isProcessing || managed.stopRequested || managed.answerDelivery !== state
+        || managed.processingGeneration !== state.generation || managed.authRetryInProgress) return
+      agent.configureAnswerDelivery?.(this.answerDeliveryControl(managed))
+      complete = undefined
+      for await (const event of agent.chat(ANSWER_RECOVERY_PROMPT, undefined, { ...options, previousResponseInterrupted: false, continueUserTask: true })) {
+        if (event.type === 'complete') complete = event
+        else yield event
+      }
+    }
+    if (!state.committedMessageId && state.recovery && managed.isProcessing && !managed.stopRequested
+      && managed.answerDelivery === state && managed.processingGeneration === state.generation
+      && !managed.messages.slice(managed.messages.findIndex(m => m.id === state.userMessageId) + 1).some(m => m.role === 'error')) {
+      yield { type: 'error', message: '未完成答案交付：模型未提交完整正文。已有工作内容已保留，请继续此任务。' }
+    }
+    if (complete) yield complete
+    else if (state.committedMessageId) yield { type: 'complete' }
   }
 
   /**
@@ -10326,6 +10494,7 @@ export class SessionManager implements ISessionManager {
         id: generateMessageId(),
         role: 'assistant',
         content,
+        ...(managed.answerDelivery ? { answerProtocol: 'explicit-v1' as const, answerRunId: managed.answerDelivery.runId } : {}),
         timestamp: managed.streamingStartedAt ?? this.monotonic(),
         isIntermediate: true,
         turnId,
@@ -10355,6 +10524,7 @@ export class SessionManager implements ISessionManager {
 
     switch (event.type) {
       case 'text_delta':
+        if (managed.answerDelivery?.committedMessageId) break
         if (!managed.streamingText) {
           managed.streamingStartedAt = this.monotonic()
         }
@@ -10371,6 +10541,7 @@ export class SessionManager implements ISessionManager {
         break
 
       case 'text_complete': {
+        if (managed.answerDelivery?.committedMessageId) break
         // Flush any pending deltas before sending complete (ensures renderer has all content)
         this.flushDelta(sessionId, workspaceId)
 
@@ -10379,7 +10550,7 @@ export class SessionManager implements ISessionManager {
           && aggregation !== undefined
           && aggregation.orchestrationId === managed.orchestrationId
           && aggregation.phase === 'waiting-workers'
-        const isIntermediate = event.isIntermediate || isManagedSwarmDispatch
+        const isIntermediate = !!managed.answerDelivery || event.isIntermediate || isManagedSwarmDispatch
         const completesActiveStream = !event.turnId
           || !managed.streamingTurnId
           || event.turnId === managed.streamingTurnId
@@ -10393,6 +10564,8 @@ export class SessionManager implements ISessionManager {
           content,
           timestamp: this.monotonic(),
           isIntermediate,
+          phase: event.phase,
+          ...(managed.answerDelivery ? { answerProtocol: 'explicit-v1' as const, answerRunId: managed.answerDelivery.runId } : {}),
           turnId: event.turnId,
           parentToolUseId: event.parentToolUseId,
         }
@@ -10440,7 +10613,7 @@ export class SessionManager implements ISessionManager {
           }
         }
 
-        this.sendEvent({ type: 'text_complete', sessionId, text: content, isIntermediate, turnId: event.turnId, parentToolUseId: event.parentToolUseId, timestamp: assistantMessage.timestamp, messageId: assistantMessage.id }, workspaceId)
+        this.sendEvent({ type: 'text_complete', sessionId, text: content, isIntermediate, phase: event.phase, answerProtocol: assistantMessage.answerProtocol, answerRunId: assistantMessage.answerRunId, turnId: event.turnId, parentToolUseId: event.parentToolUseId, timestamp: assistantMessage.timestamp, messageId: assistantMessage.id }, workspaceId)
 
         // Persist session after complete message to prevent data loss on quit
         this.persistSession(managed)
@@ -10469,11 +10642,12 @@ export class SessionManager implements ISessionManager {
       }
 
       case 'tool_start': {
+        if (managed.answerDelivery?.committedMessageId) break
         if (toolCallBypassesWorkspaceCache(event.toolName)) {
           managed.usedExternalToolsThisTurn = true
         }
         // Format tool input paths to relative for better readability
-        const formattedToolInput = formatToolInputPaths(event.input)
+        const formattedToolInput = /^(?:mcp__session__|session__)?submit_answer$/.test(event.toolName) ? {} : formatToolInputPaths(event.input)
 
         // Resolve call_llm model for TurnCard badge display.
         // Known registry ids only — do not rewrite ORDER aliases like "Opus".
@@ -10541,6 +10715,7 @@ export class SessionManager implements ISessionManager {
           const toolStartMessage: Message = {
             id: generateMessageId(),
             role: 'tool',
+            ...(managed.answerDelivery ? { answerProtocol: 'explicit-v1' as const, answerRunId: managed.answerDelivery.runId } : {}),
             content: `Running ${event.toolName}...`,
             timestamp: this.monotonic(),
             toolName: event.toolName,
@@ -10647,6 +10822,7 @@ export class SessionManager implements ISessionManager {
           const toolMessage: Message = {
             id: generateMessageId(),
             role: 'tool',
+            ...(managed.answerDelivery ? { answerProtocol: 'explicit-v1' as const, answerRunId: managed.answerDelivery.runId } : {}),
             content: '',
             timestamp: this.monotonic(),
             toolName: toolName,
@@ -11283,6 +11459,10 @@ export class SessionManager implements ISessionManager {
   }
 
   private sendEvent(event: SessionEvent, workspaceId?: string): void {
+    if (event.type === 'text_delta' || event.type === 'tool_start' || event.type === 'tool_result') {
+      const state = this.sessions.get(event.sessionId)?.answerDelivery
+      if (state) event = { ...event, answerProtocol: 'explicit-v1', answerRunId: state.runId }
+    }
     if (!this.eventSink) {
       sessionLog.warn('Cannot send event - no event sink')
       return

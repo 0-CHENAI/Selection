@@ -17,6 +17,7 @@ import type { SessionToolContext } from './context.ts';
 import type { ToolResult } from './types.ts';
 
 // Handlers
+import { SubmitAnswerSchema, handleSubmitAnswer } from './handlers/submit-answer.ts';
 import { handleSubmitPlan } from './handlers/submit-plan.ts';
 import { handleConfigValidate } from './handlers/config-validate.ts';
 import { handleSkillInstall, handleSkillInspect } from './handlers/skill-install.ts';
@@ -744,6 +745,7 @@ export type SessionToolDef = RegistrySessionToolDef | BackendSessionToolDef;
 // ============================================================
 
 export const SESSION_TOOL_DEFS: SessionToolDef[] = [
+  { name: 'submit_answer', description: 'Deliver the complete final Markdown answer to the user. Include all explanation and verification results; correct superseded claims. Short answers and clarification questions are valid. Call alone, after all work, and stop after success. Never just refer to an earlier explanation.', inputSchema: SubmitAnswerSchema, executionMode: 'registry', safeMode: 'allow', readOnly: false, handler: handleSubmitAnswer },
   { name: 'submit_task_definition', description: TOOL_DESCRIPTIONS.submit_task_definition, inputSchema: SubmitTaskDefinitionSchema, executionMode: 'registry', safeMode: 'allow', handler: handleSubmitTaskDefinition },
   { name: 'SubmitPlan', description: TOOL_DESCRIPTIONS.SubmitPlan, inputSchema: SubmitPlanSchema, executionMode: 'registry', safeMode: 'allow', handler: handleSubmitPlan },
   { name: 'config_validate', description: TOOL_DESCRIPTIONS.config_validate, inputSchema: ConfigValidateSchema, executionMode: 'registry', safeMode: 'allow', readOnly: true, handler: handleConfigValidate },
@@ -792,6 +794,7 @@ export const SESSION_TOOL_DEFS: SessionToolDef[] = [
 export interface SessionToolFilterOptions {
   /** Include the experimental send_developer_feedback tool. */
   includeDeveloperFeedback?: boolean;
+  includeAnswerDelivery?: boolean;
 }
 
 /**
@@ -804,6 +807,7 @@ export function getSessionToolDefs(options?: SessionToolFilterOptions): SessionT
   const includeDeveloperFeedback = options?.includeDeveloperFeedback ?? true;
 
   return SESSION_TOOL_DEFS.filter(def => {
+    if (def.name === 'submit_answer' && options?.includeAnswerDelivery === false) return false;
     if (!includeDeveloperFeedback && def.name === 'send_developer_feedback') {
       return false;
     }
@@ -919,10 +923,12 @@ export interface JsonSchemaToolDef {
 export function getToolDefsAsJsonSchema(opts?: {
   prefix?: string;
   includeDeveloperFeedback?: boolean;
+  includeAnswerDelivery?: boolean;
 }): JsonSchemaToolDef[] {
   const prefix = opts?.prefix || '';
   const defs = getSessionToolDefs({
     includeDeveloperFeedback: opts?.includeDeveloperFeedback,
+    includeAnswerDelivery: opts?.includeAnswerDelivery,
   });
 
   return defs.map(def => {

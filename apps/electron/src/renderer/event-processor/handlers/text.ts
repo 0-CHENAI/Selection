@@ -50,13 +50,17 @@ export function handleTextDelta(
 ): SessionState {
   const { session, streaming } = state
 
+  if (event.answerRunId && session.messages.some(m => m.answerCommitted && m.answerRunId === event.answerRunId)) {
+    return state
+  }
+
   if (isSuppressedTurn(session, event.turnId)) {
     return { session, streaming: null }
   }
 
   // Events from current servers always carry a phase. Treat a missing legacy
   // phase as final so it cannot flash an unclassified response card.
-  const incomingPhase = event.phase ?? 'final'
+  const incomingPhase = event.answerProtocol === 'explicit-v1' ? 'intermediate' : event.phase ?? 'final'
   const continuesExistingStream = !!streaming
     && (!event.turnId || !streaming.turnId || streaming.turnId === event.turnId)
   const phase = mergeTextStreamPhase(
@@ -104,6 +108,8 @@ export function handleTextDelta(
     id: generateMessageId(),
     role: 'assistant',
     content: event.delta,
+    answerProtocol: event.answerProtocol,
+    answerRunId: event.answerRunId,
     timestamp: timestampAfterVisibleUser(session.messages),
     isStreaming: true,
     isPending: true,
@@ -134,17 +140,22 @@ export function handleTextComplete(
     || !event.turnId
     || !streaming.turnId
     || streaming.turnId === event.turnId
-  const nextStreaming = completesActiveStream ? null : streaming
+  const nextStreaming = event.answerCommitted || completesActiveStream ? null : streaming
 
   if (isSuppressedTurn(session, event.turnId)) {
     return { session, streaming: null }
   }
+
+  const committed = event.answerRunId && session.messages.find(m => m.answerCommitted && m.answerRunId === event.answerRunId)
+  if (committed) return state
 
   // Find message by turnId (try streaming first, then any assistant)
   let msgIndex = findStreamingMessage(session.messages, event.turnId)
   if (msgIndex === -1) {
     msgIndex = findAssistantMessage(session.messages, event.turnId)
   }
+
+  if (event.answerCommitted) msgIndex = -1
 
   if (msgIndex !== -1) {
     const existingMsg = session.messages[msgIndex]
@@ -179,6 +190,10 @@ export function handleTextComplete(
       isStreaming: false,
       isPending: false,
       isIntermediate: event.isIntermediate,
+      phase: event.phase,
+      answerProtocol: event.answerProtocol,
+      answerRunId: event.answerRunId,
+      answerCommitted: event.answerCommitted,
       turnId: event.turnId,
       parentToolUseId: event.parentToolUseId,
       timestamp: nextTimestamp,
@@ -192,11 +207,15 @@ export function handleTextComplete(
   const newMessage: Message = {
     id: event.messageId ?? generateMessageId(),
     role: 'assistant',
-    content: preferRicherAssistantText(event.text, streamingContentForTurn(streaming, event.turnId)),
+    content: event.answerCommitted ? event.text : preferRicherAssistantText(event.text, streamingContentForTurn(streaming, event.turnId)),
     timestamp: timestampAfterVisibleUser(session.messages, event.timestamp ?? Date.now()),
     isStreaming: false,
     isPending: false,
     isIntermediate: event.isIntermediate,
+    phase: event.phase,
+    answerProtocol: event.answerProtocol,
+    answerRunId: event.answerRunId,
+    answerCommitted: event.answerCommitted,
     turnId: event.turnId,
     parentToolUseId: event.parentToolUseId,
   }

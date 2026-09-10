@@ -4,6 +4,7 @@ import {
   SubmitOrchestrationDecisionSchema,
   SubmitTaskNodeVerdictSchema,
   getSessionToolDefs,
+  getToolDefsAsJsonSchema,
   getSessionToolNames,
   getSessionToolRegistry,
   getSessionSafeAllowedToolNames,
@@ -86,4 +87,9 @@ describe('session tool filtering helpers', () => {
       rationale: 'add a missing branch',
     }).success).toBe(true);
   });
+});
+
+it('does not expose answer delivery through JSON Schema when disabled', () => {
+  expect(getToolDefsAsJsonSchema({ includeAnswerDelivery: false }).map(def => def.name)).not.toContain('submit_answer');
+  expect(getToolDefsAsJsonSchema({ includeAnswerDelivery: true }).map(def => def.name)).toContain('submit_answer');
 });

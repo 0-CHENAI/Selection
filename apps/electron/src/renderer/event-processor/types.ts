@@ -32,6 +32,8 @@ export interface SessionState {
  */
 export interface TextDeltaEvent {
   type: 'text_delta'
+  answerProtocol?: 'explicit-v1'
+  answerRunId?: string
   sessionId: string
   delta: string
   /** Missing only for legacy senders; current backends classify every delta. */
@@ -44,6 +46,13 @@ export interface TextDeltaEvent {
  */
 export interface TextCompleteEvent {
   type: 'text_complete'
+  /** Explicit answer identity; absent on legacy turns. */
+  answerProtocol?: 'explicit-v1';
+  answerRunId?: string;
+  answerCommitted?: boolean;
+  /** Persisted on the originating user message before the single recovery call. */
+  phase?: import('@craft-agent/core').TextStreamPhase;
+
   sessionId: string
   text: string
   turnId?: string
@@ -61,6 +70,8 @@ export interface TextCompleteEvent {
  */
 export interface ToolStartEvent {
   type: 'tool_start'
+  answerProtocol?: 'explicit-v1'
+  answerRunId?: string
   sessionId: string
   toolUseId: string
   toolName: string
@@ -80,6 +91,8 @@ export interface ToolStartEvent {
  */
 export interface ToolResultEvent {
   type: 'tool_result'
+  answerProtocol?: 'explicit-v1'
+  answerRunId?: string
   sessionId: string
   toolUseId: string
   toolName?: string

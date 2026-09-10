@@ -14,6 +14,7 @@
  * separate process, avoiding bundling issues in the Electron main process.
  */
 
+import { answerExecutionError, isAnswerTool } from './answer-delivery-guard.ts';
 import http from 'node:http';
 import { createInterface } from 'node:readline';
 import { join } from 'node:path';
@@ -179,7 +180,7 @@ function normalizeProxyToolContent(content: ProxyToolExecutionResult['content'])
 /** Messages from main process (stdin) */
 type InboundMessage =
   | InitMessage
-  | { type: 'prompt'; id: string; message: string; systemPrompt: string; images?: Array<{ type: 'image'; data: string; mimeType: string }> }
+  | { type: 'prompt'; answerRunId?: string; answerRecovery?: boolean; id: string; message: string; systemPrompt: string; images?: Array<{ type: 'image'; data: string; mimeType: string }> }
   | { type: 'register_tools'; tools: ProxyToolDef[] }
   | { type: 'tool_execute_response'; requestId: string; result: ProxyToolExecutionResult }
   | {
@@ -233,6 +234,7 @@ interface OutboundPreToolUseReq {
   toolCallId?: string;
   input: Record<string, unknown>;
   assistantGeneration?: number;
+  answerRunId?: string;
 }
 interface OutboundSourceGuidePrepared {
   type: 'source_guide_prepared';
@@ -241,12 +243,13 @@ interface OutboundSourceGuidePrepared {
   guidePath: string;
   guideVersion: string;
   assistantGeneration?: number;
+  answerRunId?: string;
 }
 interface OutboundSourceGuideFailed extends Omit<OutboundSourceGuidePrepared, 'type'> {
   type: 'source_guide_failed';
   reason: string;
 }
-interface OutboundToolExecReq { type: 'tool_execute_request'; requestId: string; toolName: string; args: Record<string, unknown> }
+interface OutboundToolExecReq { answerRunId?: string; toolCallId?: string; sdkMessageId?: string; sdkTurnAnchor?: string; type: 'tool_execute_request'; requestId: string; toolName: string; args: Record<string, unknown> }
 interface OutboundSessionToolCompleted { type: 'session_tool_completed'; toolName: string; args: Record<string, unknown>; isError: boolean }
 interface OutboundMiniResult { type: 'mini_completion_result'; id: string; text: string | null }
 interface OutboundLlmQueryResult {
@@ -344,6 +347,14 @@ function applySwarmCompactionOverride(model: { contextWindow?: number } | undefi
 // Mutable state
 let currentUserMessage = '';
 let currentAssistantGeneration = 0;
+let answerRunId: string | undefined;
+let answerRecovery = false;
+let answerAccepted = false;
+let answerSdkMessageId: string | undefined;
+let answerBatchSize = 0;
+let answerSubmissionSdkMessageId: string | undefined;
+let answerRecoveryToolNames: string[] | undefined;
+
 const sourceGuideEventGate = new SourceGuideEventGate<OutboundAgentEvent>();
 
 // Pending promises for async handshakes
@@ -848,10 +859,13 @@ async function requestPreToolUseApproval(
   | { action: 'execute'; input: Record<string, unknown> }
   | { action: 'prepare_source_guide'; preparation: SourceGuidePreparation }
 > {
+  const answerError = answerExecutionError({ runId: answerRunId, accepted: answerAccepted, recovery: answerRecovery, batchSize: answerBatchSize }, sdkToolName);
+  if (answerError) throw new Error(answerError);
   const requestId = `pi-ptu-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
   send({
     type: 'pre_tool_use_request',
+    answerRunId,
     requestId,
     toolName: sdkToolName,
     ...(toolCallId ? { toolCallId } : {}),
@@ -942,6 +956,7 @@ function wrapSingleTool(
       inputObj = { ...inputObj, qualification: fanOutQualification };
     }
 
+    const executingRunId = answerRunId;
     // Send to main process for permission checking + transforms
     const approval = await requestPreToolUseApproval(sdkToolName, inputObj, toolCallId);
     if (approval.action === 'prepare_source_guide') {
@@ -957,6 +972,8 @@ function wrapSingleTool(
     // even if a future pre-tool-use path returns `allow` without modification.
     inputObj = stripCraftMetadata(inputObj);
 
+    if (signal?.aborted || answerAccepted || executingRunId !== answerRunId) throw new Error('Tool execution was interrupted.');
+    if (answerRecovery && !isAnswerTool(sdkToolName)) throw new Error('Only submit_answer is allowed during answer recovery.');
     // Execute original tool with (potentially modified) input
     const result = await originalExecute(toolCallId, inputObj, signal, onUpdate, ctx);
 
@@ -1048,9 +1065,14 @@ function buildProxyTools(): ToolDefinition<any, any>[] {
         _toolCallId: string,
         params: any,
       ): Promise<AgentToolResult<any>> => {
+        if (isAnswerTool(executionName)) answerSubmissionSdkMessageId = answerSdkMessageId ?? piSession?.sessionManager.getLeafId() ?? undefined;
         const requestId = `proxy-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
         send({
           type: 'tool_execute_request',
+          answerRunId,
+          toolCallId: _toolCallId,
+          sdkMessageId: answerSubmissionSdkMessageId ?? answerSdkMessageId,
+          sdkTurnAnchor: piSession?.sessionManager.getLeafId() ?? undefined,
           requestId,
           toolName: executionName,
           args: params as Record<string, unknown>,
@@ -1059,6 +1081,7 @@ function buildProxyTools(): ToolDefinition<any, any>[] {
           pendingToolExecutions.set(requestId, { resolve });
         });
 
+        if (isAnswerTool(executionName) && !result.isError) answerAccepted = true;
         return {
           content: normalizeProxyToolContent(result.content),
           details: proxyToolDetails(result),
@@ -1344,6 +1367,19 @@ function extractToolExecutionMetadata(args: Record<string, unknown> | undefined)
 
 function handleSessionEvent(event: AgentSessionEvent): void {
   let forwardedEvent: OutboundAgentEvent = event;
+  if (event.type === 'message_end' && event.message.role === 'toolResult' && answerAccepted && isAnswerTool(event.message.toolName)) {
+    const currentSession = piSession;
+    const correlation = answerSubmissionSdkMessageId;
+    // Run after the SDK appends the successful tool result. A branch at this
+    // entry contains both the answer arguments and the matching tool receipt.
+    queueMicrotask(() => {
+      const anchor = currentSession?.sessionManager.getLeafId();
+      if (currentSession && currentSession === piSession && correlation && anchor) {
+        send({ type: 'event', event: { type: 'pi_turn_anchor', sdkMessageId: correlation, sdkTurnAnchor: anchor } as unknown as OutboundAgentEvent });
+        void currentSession.abort();
+      }
+    });
+  }
 
   // Log API errors for debugging and attach provider-native turn anchor for branch cutoffs.
   if (event.type === 'message_end') {
@@ -1373,6 +1409,8 @@ function handleSessionEvent(event: AgentSessionEvent): void {
     }
 
     if (msg?.role === 'assistant' && piSession) {
+      answerSdkMessageId = (msg as { id?: string }).id;
+      answerBatchSize = msg.content?.filter(part => part.type === 'toolCall' || part.type === 'tool_use').length ?? 0;
       currentAssistantGeneration++;
       pendingSpawnFanOutQualifications.prepare(
         msg.stopReason,
@@ -1559,6 +1597,12 @@ async function waitForCompaction(session: { isCompacting: boolean }, timeoutMs =
 
 async function handlePrompt(msg: Extract<InboundMessage, { type: 'prompt' }>): Promise<void> {
   currentUserMessage = msg.message;
+  answerRunId = msg.answerRunId;
+  answerRecovery = !!msg.answerRecovery;
+  answerAccepted = false;
+  answerSdkMessageId = undefined;
+  answerSubmissionSdkMessageId = undefined;
+  answerBatchSize = 0;
 
   try {
     // If proxy tools changed since last session creation, dispose and recreate.
@@ -1566,6 +1610,7 @@ async function handlePrompt(msg: Extract<InboundMessage, { type: 'prompt' }>): P
     // we create a fresh session via continueRecent() with all tools known upfront.
     if (toolsChanged && piSession) {
       debugLog('Recreating session due to tool changes');
+      answerRecoveryToolNames = undefined; // The rebuilt session has the newly registered tool set.
       if (unsubscribeEvents) {
         unsubscribeEvents();
         unsubscribeEvents = null;
@@ -1575,6 +1620,14 @@ async function handlePrompt(msg: Extract<InboundMessage, { type: 'prompt' }>): P
     }
 
     const session = await ensureSession();
+    if (answerRecoveryToolNames) {
+      session.setActiveToolsByName(answerRecoveryToolNames);
+      answerRecoveryToolNames = undefined;
+    }
+    if (answerRecovery) {
+      answerRecoveryToolNames = session.getActiveToolNames();
+      session.setActiveToolsByName(answerRecoveryToolNames.filter(isAnswerTool));
+    }
 
     // Force the Craft-built system prompt onto the Pi session. Direct assignment
     // to `state.systemPrompt` is wiped on every `session.prompt()` call by the Pi
