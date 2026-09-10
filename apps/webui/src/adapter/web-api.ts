@@ -8,6 +8,7 @@
  * on the WebSocket upgrade request — no bearer token needed.
  */
 
+import { confirmClientDialog } from '../../../electron/src/renderer/lib/confirmation'
 import i18n from 'i18next'
 import { toast } from 'sonner'
 import { openExternalUrl } from '@craft-agent/ui'
@@ -73,8 +74,11 @@ export function createWebApi(options: WebApiOptions): {
     workspaceId,
     autoReconnect: true,
     mode: 'remote',
+    clientCapabilities: ['client:confirmDialog'],
     // No token — auth is via session cookie sent on WebSocket upgrade
   })
+
+  client.handleCapability('client:confirmDialog', confirmClientDialog)
 
   // Build the API proxy from the same channel map the Electron app uses
   const baseApi = buildClientApi(
@@ -212,9 +216,9 @@ export function createWebApi(options: WebApiOptions): {
     openSkillInEditor: () => Promise.resolve(),
     openSkillInFinder: () => Promise.resolve(),
 
-    // Confirmation dialogs — use browser confirm()
-    showLogoutConfirmation: () => Promise.resolve(window.confirm(i18n.t('dialog.logoutConfirmation'))),
-    showDeleteSessionConfirmation: (name: string) => Promise.resolve(window.confirm(i18n.t('dialog.deleteSessionConfirmation', { name }))),
+    // Business confirmations share the application dialog contract.
+    showLogoutConfirmation: async () => (await confirmClientDialog({ kind: 'logout', title: '', message: '', buttons: ['', ''], cancelId: 0 })).response === 1,
+    showDeleteSessionConfirmation: async (name: string) => (await confirmClientDialog({ kind: 'deleteSession', name, title: '', message: '', buttons: ['', ''], cancelId: 0 })).response === 1,
 
     // Power settings — not applicable
     getKeepAwakeWhileRunning: () => Promise.resolve(false),

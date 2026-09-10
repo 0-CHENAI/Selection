@@ -1,3 +1,4 @@
+import { confirmAction } from '@/lib/confirmation'
 /**
  * ProjectsListPanel
  *
@@ -47,7 +48,7 @@ export function ProjectsListPanel({
   const handleDelete = React.useCallback(async (project: LoadedProject) => {
     // Deleting a project rm -rf's its folder + all assets, so confirm first — mirrors the
     // ProjectInfoPage delete (shares the same wording key) instead of deleting on a single click.
-    if (!window.confirm(t('projectInfo.deleteConfirm', { name: project.config.name }))) return
+    if (!await confirmAction(t('projectInfo.deleteConfirm', { name: project.config.name }))) return
     try {
       await window.electronAPI.deleteProject(workspaceId, project.config.slug)
       toast.success(t('projectsList.deleted', { name: project.config.name }))

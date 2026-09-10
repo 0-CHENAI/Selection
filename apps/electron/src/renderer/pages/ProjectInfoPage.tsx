@@ -1,3 +1,4 @@
+import { confirmAction } from '@/lib/confirmation'
 /**
  * ProjectInfoPage
  *
@@ -167,7 +168,7 @@ export default function ProjectInfoPage({ projectSlug }: ProjectInfoPageProps) {
 
   const handleDeleteProject = useCallback(async () => {
     if (!workspaceId || !project) return
-    if (!window.confirm(t('projectInfo.deleteConfirm', { name: project.config.name }))) return
+    if (!await confirmAction(t('projectInfo.deleteConfirm', { name: project.config.name }))) return
     try {
       await window.electronAPI.deleteProject(workspaceId, project.config.slug)
       navigate(routes.view.projects())
@@ -196,7 +197,7 @@ export default function ProjectInfoPage({ projectSlug }: ProjectInfoPageProps) {
 
   const handleDeleteAsset = useCallback(async (asset: ProjectAsset) => {
     if (!workspaceId || !project) return
-    if (!window.confirm(t('projectInfo.deleteAssetConfirm', { name: asset.filename }))) return
+    if (!await confirmAction(t('projectInfo.deleteAssetConfirm', { name: asset.filename }))) return
     try {
       await window.electronAPI.deleteProjectAsset(workspaceId, project.config.slug, asset.filename)
       await refreshAssets()

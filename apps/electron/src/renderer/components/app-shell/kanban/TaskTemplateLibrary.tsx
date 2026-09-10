@@ -1,3 +1,4 @@
+import { confirmAction } from '@/lib/confirmation'
 import * as React from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
@@ -93,7 +94,7 @@ export function TaskTemplateLibrary({
 
   async function removeTemplate() {
     if (!selectedId || busy) return
-    if (!window.confirm(t('tasks.templateDeleteConfirm', { name: detail?.name ?? selectedId }))) return
+    if (!await confirmAction(t('tasks.templateDeleteConfirm', { name: detail?.name ?? selectedId }))) return
     setBusy(true)
     try {
       await window.electronAPI.deleteTaskTemplate(workspaceId, selectedId)

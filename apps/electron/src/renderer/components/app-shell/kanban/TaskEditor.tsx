@@ -1,3 +1,4 @@
+import { confirmAction } from '@/lib/confirmation'
 import * as React from 'react'
 import { ChevronLeft, ChevronDown, Sparkles, Plus, Trash2, Check, X, ExternalLink, RefreshCw, CheckCircle2, XCircle, CircleSlash, DatabaseZap, Zap, Folder } from 'lucide-react'
 import { toast } from 'sonner'
@@ -1043,8 +1044,8 @@ function ExistingTaskEditor({
     boundProjectId, subtasks, cwd, sourceSlugs, skillSlugs, editSlug, runner, layout, preservedSpec, modelToConnection,
   ])
 
-  const requestClose = React.useCallback(() => {
-    if (dirty && !window.confirm(t('tasks.discardUnsaved'))) return
+  const requestClose = React.useCallback(async () => {
+    if (dirty && !await confirmAction(t('tasks.discardUnsaved'))) return
     onClose()
   }, [dirty, onClose, t])
 
@@ -1429,8 +1430,8 @@ function ExistingTaskEditor({
       />}
       {tab === 'definition' && (
         <div className="flex flex-wrap gap-2">
-          <Button variant="ghost" className="self-start" onClick={() => { if (!dirty || window.confirm(t('tasks.discardUnsaved'))) onOpenLibrary() }}>{t('tasks.templateLibrary')}</Button>
-          {!isEdit && <Button variant="ghost" className="self-start" onClick={() => { if (!dirty || window.confirm(t('tasks.discardUnsaved'))) onImport() }}>{t('tasks.yamlImportTitle')}</Button>}
+          <Button variant="ghost" className="self-start" onClick={async () => { if (!dirty || await confirmAction(t('tasks.discardUnsaved'))) onOpenLibrary() }}>{t('tasks.templateLibrary')}</Button>
+          {!isEdit && <Button variant="ghost" className="self-start" onClick={async () => { if (!dirty || await confirmAction(t('tasks.discardUnsaved'))) onImport() }}>{t('tasks.yamlImportTitle')}</Button>}
           <Button variant="ghost" className="self-start" disabled={busy} onClick={() => void openTemplateSave()}>{t('tasks.templateSave')}</Button>
         </div>
       )}

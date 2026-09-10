@@ -1,3 +1,4 @@
+import { ConfirmationHost } from '../../electron/src/renderer/components/ConfirmationHost'
 import React from 'react'
 import ReactDOM from 'react-dom/client'
 import { Provider as JotaiProvider, useAtomValue } from 'jotai'
@@ -44,6 +45,7 @@ function Root() {
   return (
     <ThemeProvider activeWorkspaceId={workspaceId}>
       <App />
+      <ConfirmationHost />
       <Toaster />
     </ThemeProvider>
   )
