@@ -44,7 +44,12 @@
 
 ## 提交前审查
 
-- 新增的接线测试按「模型菜单区块」切片，改为从 `<DropdownMenu open={modelDropdownOpen}` 切到**其后**的 `</StyledDropdownMenuContent>`，并在区块为空时直接失败，避免 `indexOf` 返回 -1 时静默通过。
-- `disabled` 分支：输入栏被禁用时 `focusComposerAfterPicker` 直接返回（模型按钮此时仍可点开，与来源/工作目录/附件按钮不同），所以焦点会落到 `body`。仍选择无条件拒绝焦点回收，让「提示不残留」在所有状态下成立；这一取舍由代码推导，未在 Playground 中复现该状态。
-- 相邻选择器现状（实测）：来源选择器是自定义 popover，关闭后输入框保持焦点，无需改动；工作目录 popover 关闭后焦点落在 `<body>`，没有残留提示，若要让光标也回到输入框需要单独接线，未纳入本次修复；附件按钮按 #33 的既有设计主动 blur 触发器。
+独立审查（另一个会话对提交 `1d15c166` 的对抗式复核）与自查的结论与处理：
+
+- 接线测试里的 `if (!open) focusComposerAfterPicker()` 原本是空断言：同一字符串在来源选择器的处理器中也存在。已改为先切出 `handleModelDropdownOpenChange` 本体再断言，顺带锁定「拦截焦点回收 + 关闭时交还输入框」这一对组合；测试名改为描述实际断言的内容。
+- `disabled` 分支：输入栏被禁用时 `focusComposerAfterPicker` 直接返回，而模型按钮当时仍可点开（同排的来源、工作目录、附件按钮都有 `disabled={disabled}`），关闭菜单会把焦点落到 `body`。已给模型按钮补上 `disabled={disabled}`，与同排按钮一致，该状态不再可能发生，焦点契约因此只依赖「输入框能接受焦点」这一前提。
+- 注释精度：`onCloseAutoFocus` 的焦点回收对非 modal popover 是有条件的，「没有 pointer 事件关闭提示」也只在指针驱动的关闭路径上成立。`restore-composer-focus.ts` 的两处措辞已按此修正。
 - 未删除 Tooltip（提示是模型按钮唯一的用途说明），接线测试同时锁定这一点。
+- 相邻选择器现状（实测）：来源选择器是 hand-rolled popover（不依赖 Radix），关闭后输入框保持焦点，无需改动；工作目录 popover 关闭后焦点落在 `<body>`，原因是 `PopoverTrigger` 的 ref 落在不可聚焦的 `<span>` 上，与 #332 无关，未纳入本次修复；附件按钮按 #33 的既有设计主动 blur 触发器。
+- 仓库内只有两处 `<TooltipTrigger>` 包住 overlay 触发器：本次修复的模型按钮，以及 AppShell 的 ContextMenu 触发器；Radix ContextMenu 不做触发器焦点回收，不受此问题影响。
+- 未纳入本次修复的既有问题：switcher 模式下（多连接、且当前连接模型数超过折叠阈值）`onOpenAutoFocus` 聚焦的是 flat 分支的搜索框 ref，此时为 null，菜单会以「内部无焦点」打开，方向键不可用；该路径需要多连接环境才能复现，建议另开 issue。

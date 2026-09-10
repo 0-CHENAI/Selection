@@ -37,7 +37,13 @@ describe('composer model picker close focus (#332)', () => {
     )
   })
 
-  test('still hands the caret back to the composer as soon as the menu closes', () => {
-    expect(source).toContain('if (!open) focusComposerAfterPicker()')
+  test('pairs the guard with the close handler that hands the caret back', () => {
+    const closeHandler = source.slice(
+      source.indexOf('const handleModelDropdownOpenChange'),
+      source.indexOf('// Track last caret position'),
+    )
+    expect(closeHandler).not.toBe('')
+    expect(closeHandler).toContain('setModelDropdownOpen(open)')
+    expect(closeHandler).toContain('if (!open) focusComposerAfterPicker()')
   })
 })

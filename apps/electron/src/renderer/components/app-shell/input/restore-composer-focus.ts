@@ -31,13 +31,13 @@ export function restoreComposerFocus(
 /**
  * Keep typing focus in the composer when an overlay-backed picker closes.
  *
- * Radix menus and popovers hand focus back to their trigger from
+ * Radix menus — and modal popovers — hand focus back to their trigger from
  * `onCloseAutoFocus`. That runs once the exit animation unmounts the content —
  * later than the deferred hand-off above — and it costs twice in the composer:
  * the trigger takes the caret out of the input (#26), and `TooltipTrigger`
- * opens the trigger's tooltip from that same focus event. The pointer has left
- * the button by then, so no pointer-leave or blur event remains to close the
- * tooltip and it stays on screen (#332). The picker's close handler already owns
+ * opens the trigger's tooltip from that same focus event. With the pointer
+ * already elsewhere, no pointer-leave or blur event remains to close that
+ * tooltip, so it stays on screen (#332). The picker's close handler already owns
  * the caret, so refuse the trigger's restore.
  */
 export function keepComposerFocusOnPickerClose(event: { preventDefault: () => void }): void {
