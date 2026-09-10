@@ -85,3 +85,29 @@ it('waits for in-flight runtime initialization before deleting files', async () 
   await deletion
   expect(existsSync(getSessionPath(root, source.id))).toBe(false)
 })
+
+it('preserves the directory when runtime shutdown fails', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'failed-delete-'))
+  roots.push(root)
+  const source = await createSession(root)
+  const manager = new SessionManager()
+  const managed = createManagedSession(source, { id: 'workspace', slug: 'workspace', name: 'Workspace', rootPath: root, createdAt: Date.now() })
+  managed.agent = { disposeForRestart: async () => { throw new Error('shutdown failed') } } as any
+  ;(manager as any).sessions.set(source.id, managed)
+  await expect(manager.deleteSession(source.id)).rejects.toThrow('directory was preserved')
+  expect(existsSync(getSessionPath(root, source.id))).toBe(true)
+  expect(managed.deleting).toBe(false)
+  expect((manager as any).sessions.get(source.id)).toBe(managed)
+})
+
+it('archives without removing the session directory', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'archive-preserve-'))
+  roots.push(root)
+  const source = await createSession(root)
+  const manager = new SessionManager()
+  const managed = createManagedSession(source, { id: 'workspace', slug: 'workspace', name: 'Workspace', rootPath: root, createdAt: Date.now() })
+  ;(manager as any).sessions.set(source.id, managed)
+  await manager.archiveSession(source.id)
+  expect(existsSync(getSessionPath(root, source.id))).toBe(true)
+  expect(loadSession(root, source.id)?.isArchived).toBe(true)
+})

@@ -3574,8 +3574,9 @@ export class SessionManager implements ISessionManager {
     return managed.agent?.getModel() || managed.model
   }
 
-  private async disposeManagedAgentRuntime(managed: ManagedSession, reason: string): Promise<void> {
+  private async disposeManagedAgentRuntime(managed: ManagedSession, reason: string, requireStopped = false): Promise<void> {
     const sessionId = managed.id
+    const failures: unknown[] = []
 
     if (managed.agent) {
       try {
@@ -3585,6 +3586,7 @@ export class SessionManager implements ISessionManager {
           managed.agent.dispose()
         }
       } catch (error) {
+        failures.push(error)
         sessionLog.warn(`Failed to dispose agent for ${sessionId} during ${reason}: ${error instanceof Error ? error.message : error}`)
       }
     }
@@ -3593,6 +3595,7 @@ export class SessionManager implements ISessionManager {
       try {
         await managed.poolServer.stop()
       } catch (error) {
+        failures.push(error)
         sessionLog.warn(`Failed to stop pool server for ${sessionId} during ${reason}: ${error instanceof Error ? error.message : error}`)
       }
     }
@@ -3601,10 +3604,14 @@ export class SessionManager implements ISessionManager {
       try {
         await managed.mcpPool.disconnectAll()
       } catch (error) {
+        failures.push(error)
         sessionLog.warn(`Failed to disconnect MCP pool for ${sessionId} during ${reason}: ${error instanceof Error ? error.message : error}`)
       }
     }
 
+    if (requireStopped && failures.length > 0) {
+      throw new Error(`Could not stop all runtime resources for session ${sessionId}; directory was preserved.`)
+    }
     managed.agent = null
     managed.poolServer = undefined
     managed.mcpPool = undefined
@@ -6232,9 +6239,8 @@ export class SessionManager implements ISessionManager {
     managed.isProcessing = false
     // Initialization may still be creating source artifacts or a pool server.
     await managed.agentCreation?.catch(() => undefined)
-    await this.disposeManagedAgentRuntime(managed, 'session deletion')
-
     try {
+      await this.disposeManagedAgentRuntime(managed, 'session deletion', true)
       await this.detachLegacyBranches(workspaceRootPath, sessionId)
     } catch (error) {
       managed.deleting = false
