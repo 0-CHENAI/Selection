@@ -8,7 +8,7 @@
 import * as React from 'react'
 import { useTranslation } from 'react-i18next'
 import { useAtomValue, useSetAtom } from 'jotai'
-import { AlertCircle, Info, Pencil } from 'lucide-react'
+import { AlertCircle, Info } from 'lucide-react'
 import { ChatDisplay, type ChatDisplayHandle } from '@/components/app-shell/ChatDisplay'
 import { OrchestrationRunProgress } from '@/components/app-shell/kanban/OrchestrationRunProgress'
 import { canPreviewOrchestrationChild } from '@/components/app-shell/kanban/orchestration-run-progress'
@@ -20,6 +20,7 @@ import { ChildSessionPreviewDialog } from '@/components/app-shell/ChildSessionPr
 import { RenameDialog } from '@/components/ui/rename-dialog'
 import { toast } from 'sonner'
 import { PanelHeaderCenterButton } from '@/components/ui/PanelHeaderCenterButton'
+import { TaskOrchestrationEditButton } from '@/components/ui/TaskOrchestrationEditButton'
 import { useAppShellContext, usePendingPermission, usePendingCredential, useSessionOptionsFor, useSession as useSessionData } from '@/context/AppShellContext'
 import { rendererPerf } from '@/lib/perf'
 import { generatedFileBaseDir, resolveOpenableGeneratedFile } from '@/lib/generated-file-path'
@@ -447,7 +448,7 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
   // surface as creation, so goal/acceptance criteria/subtasks can change and the whole
   // task can be re-run (Save & Run mints a fresh Conductor run).
   const taskSlug = session?.taskSlug ?? sessionMeta?.taskSlug
-  const isTaskOrchestrator = !!taskSlug && !sessionMeta?.parentSessionId
+  const isTaskOrchestrator = !!taskSlug && !(session?.parentSessionId || sessionMeta?.parentSessionId)
   const setKanbanEditorTarget = useSetAtom(kanbanEditorTargetAtom)
   const handleEditTask = React.useCallback(() => {
     if (!taskSlug) return
@@ -508,18 +509,17 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
     )
   }, [isCompactMode, sessionId, session?.sessionFolderPath, sessionMeta, t])
 
-  // Pencil opens the Task editor for orchestrator sessions. Compact mode also
+  // Topology action opens the definition editor for orchestrator sessions. Compact mode also
   // shows session info; desktop online-share control has been removed.
   const editTaskButton = React.useMemo(() => {
     if (!isTaskOrchestrator) return undefined
     return (
-      <PanelHeaderCenterButton
-        icon={<Pencil className="h-4 w-4" />}
-        tooltip={t('kanban.editTask')}
-        onClick={handleEditTask}
+      <TaskOrchestrationEditButton
+        compact={!!isCompactMode}
+        onEdit={handleEditTask}
       />
     )
-  }, [isTaskOrchestrator, handleEditTask, t])
+  }, [isTaskOrchestrator, handleEditTask, isCompactMode])
 
   const primaryHeaderAction = isCompactMode ? compactInfoButton : undefined
   const headerActions = editTaskButton && primaryHeaderAction ? (

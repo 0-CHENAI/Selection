@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test'
+import { readFileSync } from 'node:fs'
 import {
   PROGRAMMATIC_SMOOTH_SCROLL_MS,
   SHOW_SCROLL_BUTTON_THRESHOLD_PX,
@@ -10,6 +11,32 @@ import {
   shouldLoadEarlierTurns,
   type ScrollMetrics,
 } from '../ChatDisplay.scroll-to-bottom'
+
+describe('streaming resize debounce respects reader intent (#279)', () => {
+  // Execute the production callback with mutable refs: the race is between
+  // scheduling and execution, not the pure distance-to-bottom calculation.
+  const source = readFileSync(new URL('../ChatDisplay.tsx', import.meta.url), 'utf8')
+  const callback = source.match(/debounceTimer = setTimeout\(\(\) => \{([\s\S]*?)\}, 200\)/)?.[1]
+
+  test('rechecks sticky state after scheduling and honors the smooth-scroll lock', () => {
+    expect(callback).toBeDefined()
+    const focused = { current: true }
+    const sticky = { current: true }
+    const skipUntil = { current: 0 }
+    let scrolls = 0
+    const end = { current: { scrollIntoView: () => { scrolls++ } } }
+    const fire = new Function('isFocusedPanelRef', 'isStickToBottomRef', 'skipSmoothScrollUntilRef', 'messagesEndRef', callback!)
+    sticky.current = false
+    fire(focused, sticky, skipUntil, end)
+    expect(scrolls).toBe(0)
+    sticky.current = true
+    fire(focused, sticky, skipUntil, end)
+    expect(scrolls).toBe(1)
+    skipUntil.current = Date.now() + 10_000
+    fire(focused, sticky, skipUntil, end)
+    expect(scrolls).toBe(1)
+  })
+})
 
 function metrics(overrides: Partial<ScrollMetrics> = {}): ScrollMetrics {
   return {

@@ -25,6 +25,7 @@ import { useCollapsibleMarkdown } from './CollapsibleMarkdownContext'
 import { wrapWithSafeProxy } from './safe-components'
 import { MARKDOWN_MATH_OPTIONS, protectCurrencyDollars } from './math-options'
 import { markdownUrlTransform } from './url-transform'
+import { useSemanticReveal } from './useSemanticReveal'
 
 /**
  * Names of preview-block code-fence types that recursive `Markdown` callers
@@ -54,6 +55,9 @@ export type RenderMode = 'terminal' | 'minimal' | 'full'
 
 export interface MarkdownProps {
   children: string
+  /** Cosmetic only: complete Markdown stays available to selection/copy. */
+  revealStartTime?: number
+  isStreaming?: boolean
   /**
    * Render mode controlling formatting level
    * @default 'minimal'
@@ -61,8 +65,7 @@ export interface MarkdownProps {
   mode?: RenderMode
   className?: string
   /**
-   * Message ID for memoization (optional)
-   * When provided, memoizes parsed blocks to avoid re-parsing during streaming
+   * Stable message identity (optional), used to avoid replaying visual reveal.
    */
   id?: string
   /**
@@ -585,7 +588,11 @@ export function Markdown({
   collapsible = false,
   hideFirstMermaidExpand = true,
   disablePreviewBlocks,
+  revealStartTime,
+  isStreaming = false,
 }: MarkdownProps) {
+  const revealRoot = React.useRef<HTMLDivElement>(null)
+  useSemanticReveal(revealRoot, children, revealStartTime, isStreaming, id)
   // Get collapsible context if enabled
   const collapsibleContext = useCollapsibleMarkdown()
 
@@ -628,7 +635,7 @@ export function Markdown({
   )
 
   return (
-    <div className={cn('markdown-content', className)}>
+    <div ref={revealRoot} className={cn('markdown-content', className)}>
       <ReactMarkdown
         remarkPlugins={remarkPlugins}
         rehypePlugins={[[rehypeKatex, { throwOnError: false, strict: false }], rehypeRaw]}
@@ -641,32 +648,8 @@ export function Markdown({
   )
 }
 
-/**
- * MemoizedMarkdown - Optimized for streaming scenarios
- *
- * Splits content into blocks and memoizes each block separately,
- * so only new/changed blocks re-render during streaming.
- */
-export const MemoizedMarkdown = React.memo(
-  Markdown,
-  (prevProps, nextProps) => {
-    // If id is provided, use it for memoization
-    if (prevProps.id && nextProps.id) {
-      return (
-        prevProps.id === nextProps.id &&
-        prevProps.children === nextProps.children &&
-        prevProps.mode === nextProps.mode &&
-        prevProps.disablePreviewBlocks === nextProps.disablePreviewBlocks
-      )
-    }
-    // Otherwise compare content and mode
-    return (
-      prevProps.children === nextProps.children &&
-      prevProps.mode === nextProps.mode &&
-      prevProps.disablePreviewBlocks === nextProps.disablePreviewBlocks
-    )
-  }
-)
+/** Skip unchanged documents while honoring every rendering and interaction prop. */
+export const MemoizedMarkdown = React.memo(Markdown)
 MemoizedMarkdown.displayName = 'MemoizedMarkdown'
 
 // Re-export for convenience

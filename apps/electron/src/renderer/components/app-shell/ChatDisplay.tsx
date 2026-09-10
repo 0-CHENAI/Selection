@@ -20,7 +20,7 @@ import { toast } from "sonner"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { cn } from "@/lib/utils"
 import { appendRestoredInput, getRestorableStoppedPrompt } from "@/lib/input-text"
-import { Markdown, CollapsibleMarkdownProvider, StreamingMarkdown, type RenderMode } from "@/components/markdown"
+import { Markdown, CollapsibleMarkdownProvider, type RenderMode } from "@/components/markdown"
 import { AnimatedCollapsibleContent } from "@/components/ui/collapsible"
 import {
   Spinner,
@@ -1272,6 +1272,8 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
       // Clear pending scroll and wait for layout to settle
       if (debounceTimer) clearTimeout(debounceTimer)
       debounceTimer = setTimeout(() => {
+        // The reader may have scrolled away while layout was settling.
+        if (isFocusedPanelRef.current && !isStickToBottomRef.current) return
         // Skip smooth scroll if we just did an instant scroll (session switch/lazy load)
         if (Date.now() < skipSmoothScrollUntilRef.current) return
         messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -2509,29 +2511,21 @@ function MessageBubble({
               <ExternalLink className="w-4 h-4 text-muted-foreground hover:text-foreground" />
             </button>
           )}
-          {/* Use StreamingMarkdown for block-level memoization during streaming */}
-          {message.isStreaming ? (
-            <StreamingMarkdown
-              content={message.content}
-              isStreaming={true}
+          {/* Keep one document tree across streaming and completion. */}
+          <CollapsibleMarkdownProvider>
+            <Markdown
               mode={renderMode}
               onUrlClick={onOpenUrl}
               onFileClick={onOpenFile}
-            />
-          ) : (
-            <CollapsibleMarkdownProvider>
-              <Markdown
-                mode={renderMode}
-                onUrlClick={onOpenUrl}
-                onFileClick={onOpenFile}
-                id={message.id}
-                className="text-sm"
-                collapsible
-              >
-                {message.content}
-              </Markdown>
-            </CollapsibleMarkdownProvider>
-          )}
+              id={message.id}
+              isStreaming={message.isStreaming}
+              revealStartTime={message.isStreaming ? undefined : message.timestamp}
+              className="text-sm"
+              collapsible
+            >
+              {message.content}
+            </Markdown>
+          </CollapsibleMarkdownProvider>
         </div>
       </div>
     )

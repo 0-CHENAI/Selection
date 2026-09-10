@@ -1,31 +1,29 @@
-import { describe, expect, it } from 'bun:test'
-import {
-  COMPLETED_REVEAL_MAX_MS,
-  COMPLETED_REVEAL_MIN_MS,
-  getCompletedRevealDurationMs,
-  getCompletedRevealUnitCount,
-} from '../useCompletedResponseReveal'
+import { beforeAll, describe, expect, it, mock } from 'bun:test'
+import * as React from 'react'
+import { renderToStaticMarkup } from 'react-dom/server'
 
-describe('completed response pseudo-stream reveal', () => {
-  it('keeps every reveal within the two-second contract', () => {
-    expect(getCompletedRevealDurationMs(0)).toBe(0)
-    expect(getCompletedRevealDurationMs(10)).toBe(COMPLETED_REVEAL_MIN_MS)
-    expect(getCompletedRevealDurationMs(500)).toBe(1_000)
-    expect(getCompletedRevealDurationMs(10_000)).toBe(COMPLETED_REVEAL_MAX_MS)
-    expect(COMPLETED_REVEAL_MAX_MS).toBeLessThan(2_000)
-  })
+// Inspect the text and lifecycle passed by the actual response card. Markdown's
+// document structure and animation behavior have separate renderer tests.
+mock.module('../../markdown', () => ({
+  Markdown: ({ children }: { children: string }) => React.createElement('pre', null, children),
+}))
+mock.module('../../overlay', () => ({ DocumentFormattedMarkdownOverlay: () => null }))
+let ResponseCard: typeof import('../TurnCard').ResponseCard
+beforeAll(async () => { ({ ResponseCard } = await import('../TurnCard')) })
 
-  it('reveals at least one unit immediately and all units at the deadline', () => {
-    expect(getCompletedRevealUnitCount(100, 0, 1_000)).toBe(1)
-    expect(getCompletedRevealUnitCount(100, 500, 1_000)).toBe(50)
-    expect(getCompletedRevealUnitCount(100, 1_000, 1_000)).toBe(100)
-    expect(getCompletedRevealUnitCount(100, 5_000, 1_000)).toBe(100)
-  })
+const document = '# 完整🙂\n\n[引用][ref]\n\n```ts\nconst value = 1\n```\n\n[ref]: https://example.com\n'
 
-  it('never splits the surrogate pairs used by emoji', () => {
-    const units = Array.from('结论🙂完成')
-    const visibleUnits = getCompletedRevealUnitCount(units.length, 80, 160)
-
-    expect(units.slice(0, visibleUnits).join('')).toBe('结论🙂')
+describe('completed response semantic reveal boundary', () => {
+  it('renders full source and completed actions immediately for fresh and historical replies', () => {
+    for (const start of [undefined, 1, Date.now()]) {
+      const html = renderToStaticMarkup(React.createElement(ResponseCard, {
+        text: document.repeat(100), isStreaming: false, isTurnComplete: true,
+        completedRevealStartTime: start, onRegenerate: () => {},
+      }))
+      expect(html).toContain(document.repeat(100))
+      expect(html).toContain('common.copy')
+      expect(html).toContain('chat.regenerate')
+      expect(html).not.toContain('Streaming...')
+    }
   })
 })
