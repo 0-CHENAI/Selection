@@ -42,6 +42,7 @@ function stripErrorTags(content: string | undefined): string | undefined {
 /** Represents one complete assistant turn */
 export interface AssistantTurn {
   type: 'assistant'
+  answerRunId?: string
   turnId: string
   activities: ActivityItem[]
   response?: ResponseContent
@@ -545,10 +546,24 @@ function keepLatestTaskOrchestrationTurnOpen(turns: Turn[]): void {
 export function groupMessagesByTurn(messages: Message[], options: GroupTurnsOptions = {}): Turn[] {
   // Drop hidden and queued messages before grouping. Queued user content belongs
   // to the composer queue until replay starts; it is not yet a transcript turn.
-  const visibleMessages = messages.filter(m => !m.hidden && !m.isQueued)
+  const deliveredRuns = new Set<string>()
+  let activeRunId: string | undefined
+  const protocolMessages = [...messages].sort((a, b) => a.timestamp - b.timestamp).flatMap(message => {
+    if (message.hidden && message.role !== 'user') return []
+    if (message.role === 'user' && !message.hidden && !message.isQueued) activeRunId = undefined
+    if (message.answerRunId) activeRunId = message.answerRunId
+    const runId = message.answerRunId ?? activeRunId
+    if (runId && deliveredRuns.has(runId) && (message.role === 'assistant' || message.role === 'tool')) return []
+    if (message.answerProtocol === 'explicit-v1' && message.answerCommitted && runId) deliveredRuns.add(runId)
+    const classified = message.answerProtocol === 'explicit-v1' && message.role === 'assistant'
+      ? { ...message, isIntermediate: !message.answerCommitted }
+      : message
+    return [classified]
+  })
+  const visibleMessages = protocolMessages.filter(m => !m.hidden && !m.isQueued)
   // Sort by timestamp for correct chronological order
   // This ensures correct turn grouping even if messages are added out of order during streaming
-  const sortedMessages = [...visibleMessages].sort((a, b) => a.timestamp - b.timestamp)
+  const sortedMessages = visibleMessages // Protocol normalization above already sorted chronologically.
 
   const turns: Turn[] = []
   let currentTurn: AssistantTurn | null = null
@@ -558,10 +573,11 @@ export function groupMessagesByTurn(messages: Message[], options: GroupTurnsOpti
    * work arrives without a new user message, reopen that turn so step
    * numbering does not restart (#81).
    */
-  const adoptFlushedAssistantTurn = (): AssistantTurn | null => {
+  const adoptFlushedAssistantTurn = (runId?: string): AssistantTurn | null => {
     if (currentTurn) return currentTurn
     const lastTurn = turns[turns.length - 1]
     if (lastTurn?.type !== 'assistant') return null
+    if (runId && lastTurn.answerRunId && runId !== lastTurn.answerRunId) return null
     turns.pop()
     currentTurn = lastTurn
     currentTurn.isComplete = false
@@ -573,10 +589,15 @@ export function groupMessagesByTurn(messages: Message[], options: GroupTurnsOpti
     message: Message,
     init: { isStreaming: boolean; isComplete?: boolean; intent?: string },
   ): AssistantTurn => {
-    const adopted = adoptFlushedAssistantTurn()
-    if (adopted) return adopted
+    if (currentTurn?.answerRunId && message.answerRunId && currentTurn.answerRunId !== message.answerRunId) flushCurrentTurn()
+    const adopted = adoptFlushedAssistantTurn(message.answerRunId)
+    if (adopted) {
+      adopted.answerRunId ??= message.answerRunId
+      return adopted
+    }
     currentTurn = {
       type: 'assistant',
+      answerRunId: message.answerRunId,
       turnId: message.turnId || message.id,
       activities: [],
       response: undefined,
@@ -624,7 +645,7 @@ export function groupMessagesByTurn(messages: Message[], options: GroupTurnsOpti
       // Don't do this for turns with plans - the plan is the final output
       // Only promote when turn is complete (processing indicator hidden)
       const hasPlan = currentTurn.activities.some(a => a.type === 'plan')
-      if (!interrupted && !hasPlan && !currentTurn.response && currentTurn.isComplete && currentTurn.activities.length > 0) {
+      if (!currentTurn.answerRunId && !interrupted && !hasPlan && !currentTurn.response && currentTurn.isComplete && currentTurn.activities.length > 0) {
         // Find the last intermediate text activity (reverse to get most recent)
         const lastTextActivity = [...currentTurn.activities]
           .reverse()

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test'
-import { handleTextComplete } from '../text'
+import { handleTextComplete, handleTextDelta } from '../text'
 import type { SessionState, TextCompleteEvent } from '../../types'
 
 function makeState(messages: any[]): SessionState {
@@ -157,4 +157,30 @@ describe('handleTextComplete messageId synchronization', () => {
     expect(id.startsWith('msg-')).toBe(true)
     expect(id).not.toBe('')
   })
+})
+
+describe('explicit answer identity (#330)', () => {
+  it('preserves exact committed content and ignores duplicate and late completions', () => {
+    const state = makeState([{ id: 'draft', role: 'assistant', content: '旧草稿', turnId: 'draft-turn', isIntermediate: true }])
+    const event: TextCompleteEvent = { type: 'text_complete', sessionId: 'session-1', text: '完整正文\n\n| A | B |\n| - | - |\n| 1 | 2 |', messageId: 'answer', turnId: 'answer-run', timestamp: 400,
+      answerProtocol: 'explicit-v1', answerRunId: 'run', answerCommitted: true, phase: 'final', isIntermediate: false }
+    const accepted = handleTextComplete(state, event)
+    expect(accepted.session.messages.at(-1)).toMatchObject({ id: 'answer', answerCommitted: true, answerRunId: 'run', content: event.text })
+    expect(handleTextComplete(accepted, event).session.messages).toHaveLength(2)
+    expect(handleTextComplete(accepted, { ...event, answerCommitted: false, messageId: 'late', text: '短句' }).session.messages.at(-1)?.content).toBe(event.text)
+  })
+})
+
+it('never extends a committed answer with a longer unclassified streaming draft', () => {
+  const state = makeState([])
+  state.streaming = { content: '答案。旧草稿尾部不能进入正式正文。' }
+  const next = handleTextComplete(state, { type: 'text_complete', sessionId: 'session-1', text: '答案。', messageId: 'answer', turnId: 'answer-run', answerProtocol: 'explicit-v1', answerRunId: 'run', answerCommitted: true })
+  expect(next.session.messages[0]?.content).toBe('答案。')
+  expect(next.streaming).toBeNull()
+})
+
+it('ignores replayed deltas after delivery without disturbing another stream', () => {
+  const state = makeState([{ id: 'answer', role: 'assistant', content: '答案', answerCommitted: true, answerRunId: 'run' }])
+  state.streaming = { content: '下一轮过程', turnId: 'new-turn' }
+  expect(handleTextDelta(state, { type: 'text_delta', sessionId: 'session-1', delta: '迟到文本', answerRunId: 'run', answerProtocol: 'explicit-v1' })).toBe(state)
 })

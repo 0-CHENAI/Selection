@@ -38,6 +38,8 @@ export function handleToolStart(
       toolIntent: event.toolIntent,
       toolDisplayName: event.toolDisplayName,
       toolDisplayMeta: event.toolDisplayMeta,
+      answerProtocol: event.answerProtocol,
+      answerRunId: event.answerRunId,
       turnId: event.turnId,
       parentToolUseId: event.parentToolUseId,
     })
@@ -54,6 +56,8 @@ export function handleToolStart(
     toolName: event.toolName,
     toolInput: event.toolInput,
     toolStatus: 'executing',
+    answerProtocol: event.answerProtocol,
+    answerRunId: event.answerRunId,
     turnId: event.turnId,
     parentToolUseId: event.parentToolUseId,
     toolIntent: event.toolIntent,
@@ -162,6 +166,8 @@ export function handleToolResult(
     toolStatus: effectiveIsError ? 'error' : 'completed',
     isError: effectiveIsError,
     errorCode: isPersistedOutput ? 'response_too_large' : undefined,
+    answerProtocol: event.answerProtocol,
+    answerRunId: event.answerRunId,
     turnId: event.turnId,
     parentToolUseId: event.parentToolUseId,
   }

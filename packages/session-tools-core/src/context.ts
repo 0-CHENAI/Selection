@@ -149,6 +149,8 @@ export interface ValidatorInterface {
  * - Codex: createCodexContext() with callback IPC and limited capabilities
  */
 export interface SessionToolContext {
+  /** Host-validated terminal answer delivery; never trust a subprocess-only callback. */
+  submitAnswer?: (markdown: string) => Promise<void>;
   /** Cancellation for this invocation, never shared across concurrent calls. */
   signal?: AbortSignal;
   /** Refresh host and current agent skill catalogs after a committed install. */

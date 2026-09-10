@@ -167,7 +167,21 @@ export interface BackendHostRuntimeContext {
  * Provider-agnostic backend configuration used by the session layer.
  * Provider-specific runtime details are resolved by backend drivers internally.
  */
+export interface AnswerSubmission {
+  markdown: string;
+  toolCallId: string;
+  sdkMessageId: string;
+  sdkTurnAnchor: string;
+}
+export interface AnswerDeliveryControl {
+  runId: string;
+  recovery: boolean;
+  isActive: () => boolean;
+  submit: (submission: AnswerSubmission) => Promise<void>;
+}
+
 export interface CoreBackendConfig {
+  explicitAnswerDelivery?: boolean;
   /** Workspace configuration */
   workspace: Workspace;
 
@@ -631,6 +645,7 @@ export interface AgentBackend {
 
   /** Called when agent submits a plan */
   onPlanSubmitted: PlanCallback | null;
+  configureAnswerDelivery?: (control: AnswerDeliveryControl | undefined) => void;
 
   /** Called when a source requires authentication */
   onAuthRequest: AuthCallback | null;

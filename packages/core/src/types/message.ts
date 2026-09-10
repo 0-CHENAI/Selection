@@ -311,6 +311,14 @@ export interface Message {
   queuedContext?: QueuedMessageContext;
   // Intermediate text (commentary between tool calls, not final response)
   isIntermediate?: boolean;
+  /** Explicit answer identity; absent on legacy turns. */
+  answerProtocol?: 'explicit-v1';
+  answerRunId?: string;
+  answerCommitted?: boolean;
+  /** Persisted on the originating user message before the single recovery call. */
+  answerRecoveryAttempted?: boolean;
+  phase?: TextStreamPhase;
+
   // Hidden: a system-generated message that must reach the model (it drives a
   // turn) but must NOT render as a bubble in the transcript — e.g. the WS2
   // background-task-completion nudge that wakes an idle session to present a
@@ -399,6 +407,14 @@ export interface StoredMessage {
   annotations?: AnnotationV1[];
   // Turn grouping - critical for TurnCard rendering after reload
   isIntermediate?: boolean;
+  /** Explicit answer identity; absent on legacy turns. */
+  answerProtocol?: 'explicit-v1';
+  answerRunId?: string;
+  answerCommitted?: boolean;
+  /** Persisted on the originating user message before the single recovery call. */
+  answerRecoveryAttempted?: boolean;
+  phase?: TextStreamPhase;
+
   turnId?: string;
   // Status type for compaction messages (persisted for reload)
   statusType?: 'compacting' | 'compaction_complete';
@@ -608,7 +624,7 @@ export type AgentEvent =
   | { type: 'status'; message: string }
   | { type: 'info'; message: string }
   | { type: 'text_delta'; text: string; phase?: TextStreamPhase; turnId?: string; parentToolUseId?: string }
-  | { type: 'text_complete'; text: string; isIntermediate?: boolean; turnId?: string; parentToolUseId?: string; sdkMessageId?: string }
+  | { type: 'text_complete'; text: string; phase?: TextStreamPhase; answerProtocol?: 'explicit-v1'; answerRunId?: string; answerCommitted?: boolean; isIntermediate?: boolean; turnId?: string; parentToolUseId?: string; sdkMessageId?: string }
   | { type: 'pi_turn_anchor'; sdkMessageId: string; sdkTurnAnchor: string }
   | { type: 'tool_start'; toolName: string; toolUseId: string; input: Record<string, unknown>; intent?: string; displayName?: string; turnId?: string; parentToolUseId?: string; toolDisplayMeta?: ToolDisplayMeta }
   | { type: 'tool_result'; toolUseId: string; toolName?: string; result: string; content?: AgentToolResultContent[]; isError: boolean; input?: Record<string, unknown>; turnId?: string; parentToolUseId?: string }
