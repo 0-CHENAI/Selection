@@ -1,11 +1,11 @@
 import * as React from 'react'
 import { renderMermaidSVG } from 'beautiful-mermaid'
-import { Maximize2 } from 'lucide-react'
+import { Maximize2, RotateCcw } from 'lucide-react'
 import { cn } from '../../lib/utils'
 import { CodeBlock } from './CodeBlock'
 import { MermaidPreviewOverlay } from '../overlay/MermaidPreviewOverlay'
 import { normalizeMermaidSource } from './mermaid-source'
-import { useScrollFade } from './useScrollFade'
+import { useRichBlockInteractions } from '../overlay/useRichBlockInteractions'
 import { useTranslation } from 'react-i18next'
 
 // ============================================================================
@@ -23,15 +23,12 @@ import { useTranslation } from 'react-i18next'
 // unreadably small when fit to container width. To fix this, we enforce a
 // minimum rendered height (MIN_READABLE_HEIGHT). If the natural scale would
 // produce a height below this threshold, we scale up and allow horizontal
-// scroll. A CSS mask gradient fades the edges to indicate scrollable content.
+// panning. Zoom is applied around the viewport center without changing layout.
 // ============================================================================
 
 // Minimum rendered height for diagrams. Wide horizontal diagrams are scaled
 // up to at least this height to keep text readable, with horizontal scroll.
 const MIN_READABLE_HEIGHT = 280
-
-// Fade zone size for scroll indicators (px)
-const FADE_SIZE = 32
 
 // Small overflow threshold — if diagram overflows by less than this, scale to fit
 const SMALL_OVERFLOW_THRESHOLD = 200
@@ -85,7 +82,10 @@ export function MarkdownMermaidBlock({ code, className, showExpandButton = true,
   }, [code])
 
   const [isFullscreen, setIsFullscreen] = React.useState(false)
-  const { scrollRef, maskImage } = useScrollFade(FADE_SIZE)
+  const scrollRef = React.useRef<HTMLDivElement>(null)
+  const interaction = useRichBlockInteractions({ isOpen: !!svg && !isFullscreen, containerRef: scrollRef, keyboardShortcuts: false })
+  const isDefaultView = interaction.scale === 1 && interaction.translate.x === 0 && interaction.translate.y === 0
+  React.useEffect(() => { interaction.reset() }, [code, interaction.reset])
 
   // Stable container width — measured via useLayoutEffect (before browser paint)
   // to avoid the flash caused by scrollRef.current being null on first render.
@@ -102,7 +102,7 @@ export function MarkdownMermaidBlock({ code, className, showExpandButton = true,
     const ro = new ResizeObserver(() => setContainerWidth(el.clientWidth))
     ro.observe(el)
     return () => ro.disconnect()
-  }, [])
+  }, [svg])
 
   // Calculate scaled dimensions for wide diagrams.
   // If the natural height at container width would be below MIN_READABLE_HEIGHT,
@@ -188,6 +188,13 @@ export function MarkdownMermaidBlock({ code, className, showExpandButton = true,
         {/* Expand button — matches code block expand button style (TurnCard pattern).
             Hidden when showExpandButton is false (first block in message, where
             TurnCard's own fullscreen button occupies the same top-right position). */}
+        {!isDefaultView && (
+          <button type="button" onClick={interaction.reset} title={t('overlay.zoomReset')}
+            aria-label="Reset Mermaid view"
+            className="absolute top-2 left-2 z-10 rounded p-1 bg-background shadow-minimal">
+            <RotateCcw className="w-3.5 h-3.5" />
+          </button>
+        )}
         {showExpandButton && (
           <button
             onClick={() => setIsFullscreen(true)}
@@ -204,18 +211,23 @@ export function MarkdownMermaidBlock({ code, className, showExpandButton = true,
           </button>
         )}
 
-        {/* Scroll container with fade mask for overflow indication.
-            CSS mask gradient fades the edges when content is scrollable. */}
+        {/* Clip the interactive canvas so zoom/pan cannot move the chat layout. */}
         <div
-          ref={scrollRef}
+          ref={interaction.attachContainerRef}
+          onMouseDown={interaction.onMouseDown}
           style={{
-            overflowX: 'auto',
+            overflowX: 'hidden',
             overflowY: 'hidden',
-            maskImage,
-            WebkitMaskImage: maskImage,
+            cursor: interaction.isDragging ? 'grabbing' : 'grab',
+            userSelect: 'none',
             ...minHeightStyle,
           }}
         >
+          <div style={{
+            transform: `translate(${interaction.translate.x}px, ${interaction.translate.y}px) scale(${interaction.scale})`,
+            transformOrigin: 'center center',
+            transition: interaction.isAnimating ? 'transform 150ms ease-out' : 'none',
+          }} onTransitionEnd={() => interaction.setIsAnimating(false)}>
           {/* Size wrapper — uses explicit dimensions when scaling or scrolling.
               Block display for scaled/scrolling content, flex center for natural fit. */}
           <div
@@ -225,9 +237,9 @@ export function MarkdownMermaidBlock({ code, className, showExpandButton = true,
               display: needsScaling ? 'block' : 'flex',
               justifyContent: needsScaling ? undefined : 'center',
               margin: needsScaling && !scaledDims?.needsScroll ? '0 auto' : undefined,
-              cursor: tapToOpen ? 'pointer' : undefined,
+
             }}
-            onClick={tapToOpen ? () => setIsFullscreen(true) : undefined}
+            onClick={tapToOpen ? () => { if (!interaction.didDrag()) setIsFullscreen(true) } : undefined}
             role={tapToOpen ? 'button' : undefined}
             aria-label={tapToOpen ? 'Open Mermaid diagram fullscreen' : undefined}
             tabIndex={tapToOpen ? 0 : undefined}
@@ -247,6 +259,7 @@ export function MarkdownMermaidBlock({ code, className, showExpandButton = true,
                 transform: scaledDims && scaledDims.scale !== 1 ? `scale(${scaledDims.scale})` : undefined,
               }}
             />
+          </div>
           </div>
         </div>
       </div>
