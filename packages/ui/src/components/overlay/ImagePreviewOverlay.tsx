@@ -54,6 +54,7 @@ export function ImagePreviewOverlay({
   const containerRef = React.useRef<HTMLDivElement>(null)
 
   const {
+    attachContainerRef,
     scale,
     translate,
     isDragging,
@@ -164,7 +165,7 @@ export function ImagePreviewOverlay({
       headerActions={headerActions}
     >
       <div
-        ref={containerRef}
+        ref={attachContainerRef}
         className="min-h-full flex items-center justify-center p-4 select-none"
         onMouseDown={onMouseDown}
         onDoubleClick={onDoubleClick}
