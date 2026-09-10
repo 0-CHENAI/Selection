@@ -421,6 +421,7 @@ export interface ElectronAPI {
 
   // Auth
   showLogoutConfirmation(): Promise<boolean>
+  onConfirmDialog?(handler: (spec: import('@craft-agent/server-core/transport').ConfirmDialogSpec) => Promise<{ response: number }>): () => void
   showDeleteSessionConfirmation(name: string): Promise<boolean>
   logout(): Promise<void>
 

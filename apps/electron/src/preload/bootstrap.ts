@@ -24,6 +24,7 @@ import { RoutedClient } from '../transport/routed-client'
 import { buildClientApi } from '../transport/build-api'
 import { CHANNEL_MAP } from '../transport/channel-map'
 import { dispatchDetachedOpenPath, dispatchOpenPath } from './shell-capabilities'
+import { createConfirmationBridge } from './confirmation-bridge'
 import { createCallbackServer } from '@craft-agent/shared/auth/callback-server'
 import { CHATGPT_OAUTH_CONFIG } from '@craft-agent/shared/auth/chatgpt-oauth-config'
 import {
@@ -172,9 +173,8 @@ client.handleCapability(CLIENT_SHOW_IN_FOLDER, (path: string) => {
   shell.showItemInFolder(path)
 })
 
-client.handleCapability(CLIENT_CONFIRM_DIALOG, async (spec: ConfirmDialogSpec) => {
-  return await ipcRenderer.invoke('__dialog:showMessageBox', spec)
-})
+const confirmationBridge = createConfirmationBridge()
+client.handleCapability(CLIENT_CONFIRM_DIALOG, (spec: ConfirmDialogSpec) => confirmationBridge.request(spec))
 
 client.handleCapability(CLIENT_OPEN_FILE_DIALOG, async (spec: FileDialogSpec) => {
   return await ipcRenderer.invoke('__dialog:showOpenDialog', spec)
@@ -193,6 +193,7 @@ client.handleCapability(CLIENT_BROWSER_INVOKE, async (req: BrowserCapabilityRequ
 // ---------------------------------------------------------------------------
 
 const api = buildClientApi(client, CHANNEL_MAP, (ch) => client.isChannelAvailable(ch))
+;(api as ElectronAPI).onConfirmDialog = handler => confirmationBridge.register(handler)
 
 ;(api as any).getRuntimeEnvironment = (): 'electron' | 'web' => 'electron'
 

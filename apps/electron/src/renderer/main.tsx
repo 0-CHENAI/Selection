@@ -1,3 +1,4 @@
+import { ConfirmationHost } from './components/ConfirmationHost'
 import React from 'react'
 import ReactDOM from 'react-dom/client'
 import { init as sentryInit } from '@sentry/electron/renderer'
@@ -123,6 +124,7 @@ function Root() {
   return (
     <ThemeProvider activeWorkspaceId={workspaceId}>
       <App />
+      <ConfirmationHost />
       <Toaster />
     </ThemeProvider>
   )

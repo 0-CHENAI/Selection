@@ -1,3 +1,4 @@
+import { confirmAction } from '@/lib/confirmation'
 import * as React from "react"
 import { useTranslation } from "react-i18next"
 import { useState, useCallback } from "react"
@@ -80,7 +81,7 @@ export function WorkspaceSwitcher({
       toast.error(t('toast.cannotRemoveActiveWorkspace'))
       return
     }
-    if (!window.confirm(t('workspace.removeWorkspaceConfirm', { name: workspace.name }))) {
+    if (!await confirmAction(t('workspace.removeWorkspaceConfirm', { name: workspace.name }))) {
       return
     }
     try {
