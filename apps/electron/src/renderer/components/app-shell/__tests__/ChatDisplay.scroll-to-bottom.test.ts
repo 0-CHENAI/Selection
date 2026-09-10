@@ -12,29 +12,43 @@ import {
   type ScrollMetrics,
 } from '../ChatDisplay.scroll-to-bottom'
 
-describe('streaming resize debounce respects reader intent (#279)', () => {
-  // Execute the production callback with mutable refs: the race is between
-  // scheduling and execution, not the pure distance-to-bottom calculation.
+describe('streaming resize follows frames and reader intent (#328)', () => {
   const source = readFileSync(new URL('../ChatDisplay.tsx', import.meta.url), 'utf8')
-  const callback = source.match(/debounceTimer = setTimeout\(\(\) => \{([\s\S]*?)\}, 200\)/)?.[1]
+  const body = source.match(/const resizeObserver = new ResizeObserver\(\(\) => \{([\s\S]*?)\n    \}\)/)?.[1]
 
-  test('rechecks sticky state after scheduling and honors the smooth-scroll lock', () => {
-    expect(callback).toBeDefined()
-    const focused = { current: true }
+  test('upward wheel input suspends follow before native scrolling fires', () => {
+    const wheelBody = source.match(/const handleWheel = \(event: WheelEvent\) => \{([\s\S]*?)\n    \}/)?.[1]
+    expect(wheelBody).toBeDefined()
     const sticky = { current: true }
-    const skipUntil = { current: 0 }
-    let scrolls = 0
-    const end = { current: { scrollIntoView: () => { scrolls++ } } }
-    const fire = new Function('isFocusedPanelRef', 'isStickToBottomRef', 'skipSmoothScrollUntilRef', 'messagesEndRef', callback!)
+    let unlocks = 0
+    const wheel = new Function('event', 'isStickToBottomRef', 'cancelProgrammaticLock', wheelBody!)
+    wheel({ deltaY: 20 }, sticky, () => unlocks++)
+    expect(sticky.current).toBe(true)
+    wheel({ deltaY: -1 }, sticky, () => unlocks++)
+    expect(sticky.current).toBe(false)
+    expect(unlocks).toBe(2)
+  })
+
+  test('coalesces continuous resize events and rechecks reader intent before scrolling', () => {
+    expect(body).toBeDefined()
+    const focused = { current: true }, sticky = { current: true }
+    const frames: Array<() => void> = []
+    const scrolls: unknown[] = []
+    const viewport = { scrollHeight: 2000, scrollTo: (options: unknown) => scrolls.push(options) }
+    const makeObserver = new Function('requestAnimationFrame', 'isFocusedPanelRef', 'isStickToBottomRef', 'viewport', 'applyStickState',
+      `let scrollFrame = null; return () => { ${body} };`)
+    const resize = makeObserver((fn: () => void) => { frames.push(fn); return frames.length }, focused, sticky, viewport, () => {})
+    for (let i = 0; i < 20; i++) resize()
+    expect(frames.length).toBe(1)
     sticky.current = false
-    fire(focused, sticky, skipUntil, end)
-    expect(scrolls).toBe(0)
+    frames.shift()!()
+    expect(scrolls).toEqual([])
     sticky.current = true
-    fire(focused, sticky, skipUntil, end)
-    expect(scrolls).toBe(1)
-    skipUntil.current = Date.now() + 10_000
-    fire(focused, sticky, skipUntil, end)
-    expect(scrolls).toBe(1)
+    resize(); frames.shift()!()
+    expect(scrolls).toEqual([{ top: 2000, behavior: 'instant' }])
+    viewport.scrollHeight = 2400
+    resize(); frames.shift()!()
+    expect(scrolls[1]).toEqual({ top: 2400, behavior: 'instant' })
   })
 })
 
