@@ -10,6 +10,9 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 
 ## Improvements
 
+- **最终正文按语义块渐显**：保留完整 Markdown 文档，以短促的段落渐显和长块按行呈现替代字符裁切；历史内容不重播，选择文本、手动滚动和减少动态效果设置会停止动画。复制与完成状态不再等待视觉播放，修复流式布局等待期间用户离开底部仍被拉回的问题。（[#279](https://github.com/0-CHENAI/Selection/issues/279)）
+- **编排编辑入口说明更明确**：使用节点连线图标及“编辑任务编排”名称，说明修改任务定义而非会话内容或运行历史。键盘可发现用途说明，触屏和紧凑布局先说明、再明确进入编辑器，保持原定义预填与导航行为。（[#282](https://github.com/0-CHENAI/Selection/issues/282)）
+
 - **Appearance no longer exposes tool-icon mappings** — Settings → Appearance hides the Tool Icons table and edit entry. Chat still resolves CLI icons from `~/.selection/tool-icons/`, and a stale first-run Selection / `craft-agent` S mark is replaced with the bundled swan on launch. ([#307](https://github.com/0-CHENAI/Selection/issues/307))
 
 - **Selection now uses the swan mark throughout the product** — Ready, empty desktop sessions show the supplied swan beside the CATHALIE Selection name above the composer, with the two marks aligned along their lower edge. The same swan replaces the previous circular Selection mark across onboarding, splash screens, menus, viewers, desktop assets, and WebUI/PWA icons. The new-session wordmark disappears on the first message and stays out of compact, loading, failed, and read-only states. ([#275](https://github.com/0-CHENAI/Selection/issues/275))

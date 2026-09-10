@@ -136,8 +136,13 @@ function findInlineMarkdownLinkRanges(text: string): InlineMarkdownLinkRange[] {
 function findMarkdownLinkRanges(text: string): CodeRange[] {
   const ranges: CodeRange[] = findInlineMarkdownLinkRanges(text)
 
-  // Match [text](url) — inline links
+  // Reference definition destinations are Markdown syntax, not bare URLs.
+  // Linkifying them would turn [ref]: https://... into an invalid destination.
   let match
+  const definitionRegex = /^ {0,3}\[(?!\^)[^\]\n]+\]:[^\n]*(?:\n[ \t]+[^\n]+)*/gm
+  while ((match = definitionRegex.exec(text)) !== null) {
+    ranges.push({ start: match.index, end: match.index + match[0].length })
+  }
 
   // Match [text][ref] — reference links
   const refLinkRegex = /\[(?:[^\[\]]|\\\[|\\\])*\]\[[^\]]*\]/g
