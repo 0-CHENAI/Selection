@@ -328,3 +328,22 @@ describe('Pi tool image persistence', () => {
     expect(readdirSync(join(childSessionDir, TOOL_IMAGE_SIDECAR_DIR)).length).toBeGreaterThan(0)
   })
 })
+
+it('resumes the child after its source is deleted instead of forking again', () => {
+  const root = tempRoot()
+  const parentDir = join(root, 'parent')
+  const childDir = join(root, 'child', '.pi-sessions')
+  mkdirSync(join(parentDir, '.pi-sessions'), { recursive: true })
+  mkdirSync(childDir, { recursive: true })
+  const parent = createPiSessionManager({ cwd: root, sessionDir: join(parentDir, '.pi-sessions') })
+  parent.appendMessage(user('parent question', 1))
+  parent.appendMessage(assistant('parent answer', 2))
+  const options = { cwd: root, sessionDir: childDir, branchFromSessionPath: parentDir, branchFromSdkSessionId: parent.getSessionId() }
+  const child = createPiSessionManager(options)
+  child.appendMessage(user('child question', 3))
+  child.appendMessage(assistant('child answer', 4))
+  rmSync(parentDir, { recursive: true })
+  const resumed = createPiSessionManager({ ...options, resumeSdkSessionId: child.getSessionId() })
+  expect(resumed.getSessionId()).toBe(child.getSessionId())
+  expect(textFromContext(resumed)).toEqual(['parent question', 'parent answer', 'child question', 'child answer'])
+})

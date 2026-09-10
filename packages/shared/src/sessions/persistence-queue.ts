@@ -77,7 +77,7 @@ class SessionPersistenceQueue {
     }
 
     const timer = setTimeout(() => {
-      void this.write(session.id)
+      void this.flush(session.id)
     }, this.debounceMs)
 
     this.pending.set(session.id, { data: session, timer })
@@ -171,15 +171,13 @@ class SessionPersistenceQueue {
    * to prevent race conditions on the shared .tmp file.
    */
   async flush(sessionId: string): Promise<void> {
+    // Re-read pending work after the previous writer settles: concurrent flushes
+    // must not start another write using the same temporary file.
+    const inProgress = this.writeInProgress.get(sessionId)
+    if (inProgress) await inProgress
     const entry = this.pending.get(sessionId)
     if (entry) {
       clearTimeout(entry.timer)
-
-      // Wait for any in-progress write to complete first
-      const inProgress = this.writeInProgress.get(sessionId)
-      if (inProgress) {
-        await inProgress
-      }
 
       // Start new write and track it
       const writePromise = this.write(sessionId)
@@ -204,6 +202,13 @@ class SessionPersistenceQueue {
       debug(`[PersistenceQueue] Cancelled pending write for session ${sessionId}`)
     }
     this.lastWrittenHeaderSignature.delete(sessionId)
+  }
+
+  /** Drain an already-started write before the caller removes its directory. */
+  async cancelAndWait(sessionId: string): Promise<void> {
+    this.cancel(sessionId)
+    await this.writeInProgress.get(sessionId)
+    this.cancel(sessionId)
   }
 
   /**

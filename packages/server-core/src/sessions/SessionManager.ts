@@ -1,3 +1,4 @@
+import { copyBranchFiles } from './branch-files'
 import { ANSWER_RECOVERY_PROMPT } from '@craft-agent/shared/prompts/answer-delivery'
 import type { AnswerDeliveryControl, AnswerSubmission, ChatOptions } from '@craft-agent/shared/agent/backend/types'
 import type { EventSink, RpcServer } from '@craft-agent/server-core/transport'
@@ -66,6 +67,7 @@ import {
   getPendingPlanExecution as getStoredPendingPlanExecution,
   getSessionAttachmentsPath,
   getSessionPath as getSessionStoragePath,
+  validateSessionId,
   ensureSessionDir,
   getSessionFilePath,
   generateSessionId,
@@ -874,6 +876,8 @@ interface ManagedSession {
   agent: AgentInstance | null  // Lazy-loaded - null until first message
   messages: Message[]
   isProcessing: boolean
+  deleting?: boolean
+  agentCreation?: Promise<AgentInstance>
   /** Set when user requests stop - allows event loop to drain before clearing isProcessing */
   stopRequested?: boolean
   lastMessageAt: number
@@ -2403,6 +2407,7 @@ export class SessionManager implements ISessionManager {
    * stays sync — no microtask race window between the load and the enqueue.
    */
   private persistSession(managed: ManagedSession): void {
+    if (managed.deleting) return
     if (!managed.messagesLoaded) {
       this.hydrateMessagesForColdPersist(managed)
     }
@@ -3119,6 +3124,7 @@ export class SessionManager implements ISessionManager {
       }
 
       const sourceManaged = this.sessions.get(options.branchFromSessionId)
+      if (sourceManaged?.deleting) throw new Error('Cannot branch from a session being deleted')
       if (sourceManaged) {
         if (sourceManaged.workspace.rootPath !== workspaceRootPath) {
           sessionLog.warn('Branch validation failed: source session belongs to different workspace', {
@@ -3349,6 +3355,12 @@ export class SessionManager implements ISessionManager {
       // Fix: replace source dir paths with branch dir paths so tokenization works on save.
       const sourceDir = normalizePath(getSessionStoragePath(workspaceRootPath, validatedBranch.sourceSessionId))
       const branchDir = normalizePath(getSessionStoragePath(workspaceRootPath, storedSession.id))
+      try {
+        validatedBranch.branchFromSessionPath = await copyBranchFiles(sourceDir, branchDir)
+      } catch (error) {
+        deleteStoredSession(workspaceRootPath, storedSession.id)
+        throw error
+      }
       if (sourceDir !== branchDir) {
         branchedStored.messages = sourceMessages.map(m => {
           const json = JSON.stringify(m)
@@ -3562,8 +3574,9 @@ export class SessionManager implements ISessionManager {
     return managed.agent?.getModel() || managed.model
   }
 
-  private async disposeManagedAgentRuntime(managed: ManagedSession, reason: string): Promise<void> {
+  private async disposeManagedAgentRuntime(managed: ManagedSession, reason: string, requireStopped = false): Promise<void> {
     const sessionId = managed.id
+    const failures: unknown[] = []
 
     if (managed.agent) {
       try {
@@ -3573,6 +3586,7 @@ export class SessionManager implements ISessionManager {
           managed.agent.dispose()
         }
       } catch (error) {
+        failures.push(error)
         sessionLog.warn(`Failed to dispose agent for ${sessionId} during ${reason}: ${error instanceof Error ? error.message : error}`)
       }
     }
@@ -3581,6 +3595,7 @@ export class SessionManager implements ISessionManager {
       try {
         await managed.poolServer.stop()
       } catch (error) {
+        failures.push(error)
         sessionLog.warn(`Failed to stop pool server for ${sessionId} during ${reason}: ${error instanceof Error ? error.message : error}`)
       }
     }
@@ -3589,10 +3604,14 @@ export class SessionManager implements ISessionManager {
       try {
         await managed.mcpPool.disconnectAll()
       } catch (error) {
+        failures.push(error)
         sessionLog.warn(`Failed to disconnect MCP pool for ${sessionId} during ${reason}: ${error instanceof Error ? error.message : error}`)
       }
     }
 
+    if (requireStopped && failures.length > 0) {
+      throw new Error(`Could not stop all runtime resources for session ${sessionId}; directory was preserved.`)
+    }
     managed.agent = null
     managed.poolServer = undefined
     managed.mcpPool = undefined
@@ -3756,6 +3775,15 @@ export class SessionManager implements ISessionManager {
    * 4. fallback: no connection configured
    */
   private async getOrCreateAgent(managed: ManagedSession): Promise<AgentInstance> {
+    if (managed.deleting) throw new Error(`Session ${managed.id} is being deleted`)
+    if (managed.agentCreation) return managed.agentCreation
+    const creation = this.initializeAgent(managed)
+    managed.agentCreation = creation
+    try { return await creation }
+    finally { if (managed.agentCreation === creation) managed.agentCreation = undefined }
+  }
+
+  private async initializeAgent(managed: ManagedSession): Promise<AgentInstance> {
     // Refresh runtime config in-place when the connection has drifted since
     // the agent was created. May null out `managed.agent` if the in-place
     // refresh fails, in which case the create branch below rebuilds it.
@@ -6160,12 +6188,46 @@ export class SessionManager implements ISessionManager {
     this.sendEvent({ type: 'message_annotations_updated', sessionId, messageId, annotations: message.annotations }, managed.workspace.id)
   }
 
-  async deleteSession(sessionId: string): Promise<void> {
-    const managed = this.sessions.get(sessionId)
-    if (!managed) {
-      sessionLog.warn(`Cannot delete session: ${sessionId} not found`)
-      return
+  /** Migrate old ordinary branches before removing their source directory. */
+  private async detachLegacyBranches(workspaceRootPath: string, sourceSessionId: string): Promise<void> {
+    const sourceDir = getSessionStoragePath(workspaceRootPath, sourceSessionId)
+    for (const metadata of listStoredSessions(workspaceRootPath)) {
+      if (metadata.id === sourceSessionId) continue
+      const branch = loadStoredSession(workspaceRootPath, metadata.id)
+      if (!branch || branch.parentSessionId || !branch.branchFromMessageId
+        || branch.branchFromSessionPath !== sourceDir) continue
+      const snapshot = await copyBranchFiles(sourceDir, getSessionStoragePath(workspaceRootPath, branch.id))
+      const runtime = this.sessions.get(branch.id)
+      if (runtime) {
+        runtime.branchFromSessionPath = snapshot
+        this.persistSession(runtime)
+      } else {
+        branch.branchFromSessionPath = snapshot
+        await saveStoredSession(branch)
+      }
+      await sessionPersistenceQueue.flush(branch.id)
+      if (loadStoredSession(workspaceRootPath, branch.id)?.branchFromSessionPath !== snapshot) {
+        throw new Error(`Could not preserve branch ${branch.id}; source session was not deleted.`)
+      }
     }
+  }
+
+  async deleteSession(sessionId: string): Promise<void> {
+    validateSessionId(sessionId)
+    let managed = this.sessions.get(sessionId)
+    if (!managed) {
+      const candidates = this.getWorkspaces().filter(workspace => existsSync(getSessionStoragePath(workspace.rootPath, sessionId)))
+      if (candidates.length > 1) throw new Error(`Ambiguous session ID: ${sessionId}`)
+      const workspace = candidates[0]
+      if (!workspace) return
+      const metadata = listStoredSessions(workspace.rootPath).find(session => session.id === sessionId)
+      managed = createManagedSession(metadata ?? { id: sessionId }, workspace)
+    }
+    if (managed.deleting) throw new Error(`Session ${sessionId} is already being deleted`)
+    managed.deleting = true
+    managed.stopRequested = true
+    managed.processingGeneration += 1
+    managed.messageQueue = []
 
     // Get workspace slug before deleting
     const workspaceRootPath = managed.workspace.rootPath
@@ -6173,9 +6235,16 @@ export class SessionManager implements ISessionManager {
     // If processing is in progress, force-abort via Query.close() and wait for cleanup
     if (managed.isProcessing && managed.agent) {
       managed.agent.forceAbort(AbortReason.UserStop)
-      // Brief wait for the query to finish tearing down before we delete session files.
-      // Prevents file corruption from overlapping writes during rapid delete operations.
-      await new Promise(resolve => setTimeout(resolve, 100))
+    }
+    managed.isProcessing = false
+    // Initialization may still be creating source artifacts or a pool server.
+    await managed.agentCreation?.catch(() => undefined)
+    try {
+      await this.disposeManagedAgentRuntime(managed, 'session deletion', true)
+      await this.detachLegacyBranches(workspaceRootPath, sessionId)
+    } catch (error) {
+      managed.deleting = false
+      throw error
     }
 
     // Revoke share if session was shared (prevent orphaned viewer copies)
@@ -6207,7 +6276,7 @@ export class SessionManager implements ISessionManager {
     this.clearPendingPermissionRequestsForSession(sessionId)
 
     // Cancel any pending persistence write (session is being deleted, no need to save)
-    sessionPersistenceQueue.cancel(sessionId)
+    await sessionPersistenceQueue.cancelAndWait(sessionId)
 
     // Clean up session-scoped tool callbacks to prevent memory accumulation
     unregisterSessionScopedToolCallbacks(sessionId)
@@ -6221,18 +6290,6 @@ export class SessionManager implements ISessionManager {
     this.remoteBpms.delete(sessionId)
     this.browserHostByCanvas.delete(sessionId)
 
-    // Dispose agent to clean up ConfigWatchers, event listeners, MCP connections
-    if (managed.agent) {
-      managed.agent.dispose()
-    }
-
-    // Stop pool server (HTTP MCP server for external SDK subprocesses)
-    if (managed.poolServer) {
-      managed.poolServer.stop().catch(err => {
-        sessionLog.warn(`Failed to stop pool server for ${sessionId}: ${err instanceof Error ? err.message : err}`)
-      })
-    }
-
     // Cancel any pending source-activation auto-retry timer (craft-agents-oss#804).
     if (managed.autoRetryTimer) {
       clearTimeout(managed.autoRetryTimer)
@@ -6241,6 +6298,10 @@ export class SessionManager implements ISessionManager {
     managed.autoRetryPending = undefined
 
     clearSubmittedDefinition(sessionId)
+    if (!deleteStoredSession(workspaceRootPath, sessionId)) {
+      managed.deleting = false
+      throw new Error(`Could not delete session directory: ${sessionId}`)
+    }
     this.sessions.delete(sessionId)
 
     // Clean up session metadata in AutomationSystem (prevents memory leak)
@@ -6248,9 +6309,6 @@ export class SessionManager implements ISessionManager {
     if (automationSystem) {
       automationSystem.removeSessionMetadata(sessionId)
     }
-
-    // Delete from disk too
-    deleteStoredSession(workspaceRootPath, sessionId)
 
     // Notify all windows for this workspace that the session was deleted
     this.sendEvent({ type: 'session_deleted', sessionId }, managed.workspace.id)
@@ -6322,6 +6380,7 @@ export class SessionManager implements ISessionManager {
     if (!managed) {
       throw new Error(`Session ${sessionId} not found`)
     }
+    if (managed.deleting) throw new Error(`Session ${sessionId} is being deleted`)
     // Captured before any await so a Stop during regenerate dispose / agent
     // create can invalidate this call (cancel bumps processingGeneration).
     const generationAtEntry = managed.processingGeneration
@@ -10519,6 +10578,7 @@ export class SessionManager implements ISessionManager {
   }
 
   private async processEvent(managed: ManagedSession, event: AgentEvent): Promise<void> {
+    if (managed.deleting) return
     const sessionId = managed.id
     const workspaceId = managed.workspace.id
 

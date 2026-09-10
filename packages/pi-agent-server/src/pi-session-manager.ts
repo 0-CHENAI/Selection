@@ -256,6 +256,13 @@ export function createPiSessionManager(options: CreatePiSessionManagerOptions): 
     forceFreshSession,
   } = options
 
+  // Once a fork has its own SDK identity, restarts must resume its later turns.
+  // Regeneration still forks when the requested identity is the source itself.
+  const existingChild = branchFromSessionPath && !forceFreshSession
+    && resumeSdkSessionId !== branchFromSdkSessionId
+    ? findSessionFileById(sessionDir, resumeSdkSessionId) : null
+  if (existingChild) return protectSessionJsonl(PiSessionManager.open(existingChild, sessionDir, cwd))
+
   if (branchFromSessionPath) {
     const parentSessionDir = join(branchFromSessionPath, '.pi-sessions')
     const parentSessionFile = findSessionFileById(parentSessionDir, branchFromSdkSessionId)
