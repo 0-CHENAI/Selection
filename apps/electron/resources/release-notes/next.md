@@ -35,6 +35,8 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 
 ## Bug Fixes
 
+- **模型选择器的「模型」提示不再滞留在按钮上方**：桌面输入栏关闭模型下拉框时（点击别处、选中模型、按 Esc、或关闭思考等级子菜单后关闭）不再把焦点交还给触发器，因此提示不会残留、输入框保持可输入，悬停与键盘聚焦时的提示行为不变（#332）。
+
 - **升级内置 OfficeCLI 至 v1.0.147**：桌面运行时、官方 Schema/Guides/Skills 和六个平台资产已同步到上游稳定版；`import` 新增的 `--delimiter` 与 `--decimal` 参数已纳入命令分类审查，运行时自更新仍保持禁用（#276）。
 
 - **Orchestration chat shows live node progress while a run is active** — Create-and-run still opens the orchestrator session. That session now lists each node’s live state in the main pane, instead of leaving only the composer Swarm pill while the transcript stays on the definition confirmation.
