@@ -36,7 +36,7 @@ export const PanelHeaderCenterButton = forwardRef<HTMLButtonElement, PanelHeader
       return (
         <Tooltip>
           <TooltipTrigger asChild>{button}</TooltipTrigger>
-          <TooltipContent>{tooltip}</TooltipContent>
+          <TooltipContent side="bottom">{tooltip}</TooltipContent>
         </Tooltip>
       )
     }

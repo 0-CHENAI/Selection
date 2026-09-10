@@ -57,15 +57,15 @@ describe('Windows background material (#53)', () => {
 })
 
 describe('Windows title-bar overlay (#260)', () => {
-  it('matches the Selection top-bar height and chrome colors', () => {
+  it('keeps the top-bar height and themed symbols without an opaque caption strip (#319)', () => {
     expect(WINDOWS_TITLEBAR_OVERLAY_HEIGHT).toBe(48)
     expect(resolveWindowsTitleBarOverlay(false)).toEqual({
-      color: '#fafafb',
+      color: '#00000000',
       symbolColor: WINDOWS_LIGHT_TITLEBAR_SYMBOL,
       height: 48,
     })
     expect(resolveWindowsTitleBarOverlay(true)).toEqual({
-      color: '#2b292e',
+      color: '#00000000',
       symbolColor: WINDOWS_DARK_TITLEBAR_SYMBOL,
       height: 48,
     })
