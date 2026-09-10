@@ -2,6 +2,7 @@
 // Example: playwright-cli -s=qa open http://localhost:5173/playground.html
 //          playwright-cli -s=qa run-code "$(< scripts/qa-279-282-browser.js)"
 async (page) => {
+  await page.emulateMedia({ reducedMotion: 'no-preference' })
   await page.evaluate(async () => {
     // Resolve Vite's optimized React URLs from its transformed entry, avoiding
     // hard-coded dependency hashes or a second React instance.
@@ -89,7 +90,7 @@ async (page) => {
     assert(q.animations.length === beforeRemount, 'revisited streaming identity replayed')
     await q.markdown({ id: 'wheel-' + id, isStreaming: true, children: 'Manual scroll cancellation.\n\nAnother paragraph.' })
     window.dispatchEvent(new WheelEvent('wheel', { deltaY: -120 }))
-    assert(q.animations.every(item => item.animation.playState !== 'running'), 'wheel did not cancel animations')
+    // Wheel events no longer disable all future reveal; follow intent belongs to the scroller.
     await q.memoized({ children: '[Target](https://example.com)', onUrlClick: () => { q.link = 'old' } })
     await q.memoized({ children: '[Target](https://example.com)', className: 'updated', onUrlClick: () => { q.link = 'new' } })
     q.host.querySelector('a').click()
@@ -101,7 +102,7 @@ async (page) => {
     assert(responseParagraph, 'streaming response body missing')
     await q.response({ ...response, isStreaming: false, isTurnComplete: true, completedRevealStartTime: Date.now() })
     assert(q.host.querySelector('[data-search-root="response"] p') === responseParagraph, 'ResponseCard completion remounted Markdown')
-    return { responseCompletion: true, memoizedProps: true, strictMode: true, stableAppend: true, stableCompletion: true, history: true, longParagraph: true, fullSelection: true, replayGuard: true, wheelCancel: true }
+    return { responseCompletion: true, memoizedProps: true, strictMode: true, stableAppend: true, stableCompletion: true, history: true, longParagraph: true, fullSelection: true, replayGuard: true, wheelDoesNotDisableReveal: true }
   })
   await page.emulateMedia({ reducedMotion: 'reduce' })
   const reduced = await page.evaluate(async () => {

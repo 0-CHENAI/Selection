@@ -1,97 +1,83 @@
 import { describe, expect, it } from 'bun:test'
 
-// Run module mocks in a disposable Bun process: mocking React in this test
-// process would contaminate the real React/SSR tests beside this file.
-const hookUrl = new URL('../useSemanticReveal.ts', import.meta.url).href
+const moduleUrl = new URL('../semantic-reveal.ts', import.meta.url).href
+// DOM/controller tests run in a disposable process so browser globals cannot
+// contaminate the neighboring real React/SSR tests.
 const harness = String.raw`
-import { mock } from 'bun:test';
 import assert from 'node:assert/strict';
-let refs = [], cursor = 0, layouts = [], effects = [];
-mock.module('react', () => ({
-  useRef(value) { const index = cursor++; return refs[index] ??= { current: value }; },
-  useCallback: fn => fn,
-  useLayoutEffect: fn => layouts.push(fn),
-  useEffect: fn => effects.push(fn),
-}));
-const { useSemanticReveal } = await import(HOOK_URL);
-function target() {
-  const events = new Map();
+const { createSemanticReveal, appendedRevealInset } = await import(MODULE_URL);
+function events() {
+  const listeners = new Map();
   return {
-    addEventListener(type, fn) { if (!events.has(type)) events.set(type, new Set()); events.get(type).add(fn); },
-    removeEventListener(type, fn) { events.get(type)?.delete(fn); },
-    emit(type) { events.get(type)?.forEach(fn => fn()); },
+    addEventListener(type, fn) { if (!listeners.has(type)) listeners.set(type, new Set()); listeners.get(type).add(fn); },
+    removeEventListener(type, fn) { listeners.get(type)?.delete(fn); },
+    emit(type) { listeners.get(type)?.forEach(fn => fn()); },
   };
 }
-const motion = Object.assign(target(), { matches: false });
-const win = Object.assign(target(), {
-  innerHeight: 800, matchMedia: () => motion, getSelection: () => null,
-  getComputedStyle: () => ({ lineHeight: '22px' }),
-});
-globalThis.window = win;
-globalThis.document = target();
-let reads = 0, animations = [], operations = [];
-function unit(top = 0) {
-  return {
-    parentElement: null,
-    getBoundingClientRect() { reads++; operations.push('read'); return { top, bottom: top + 22, height: 22 }; },
-    animate() { operations.push('write'); const animation = { cancelled: false, cancel() { this.cancelled = true; } }; animations.push(animation); return animation; },
-  };
+const motion = Object.assign(events(), {matches:false});
+globalThis.window = Object.assign(events(), {innerHeight:800, matchMedia:()=>motion, getSelection:()=>null});
+globalThis.document = events();
+globalThis.getComputedStyle = () => ({overflowY:'visible'});
+let reads=0, animations=[], operations=[];
+function unit(text='first', height=22) {
+  const el = {textContent:text, height, top:0, width:600, parentElement:null, style:{clipPath:''},
+    getBoundingClientRect() { reads++; operations.push('read'); return {top:this.top,bottom:this.top+this.height,height:this.height,width:this.width}; },
+    animate(frames, options) { operations.push('write'); const a={frames, options, cancelled:false,cancel(){this.cancelled=true}}; animations.push(a); return a; },
+  };return el;
 }
-function mount(identity, { streaming = false, start = Date.now(), count = 1, top = 0 } = {}) {
-  refs = []; cursor = 0; layouts = []; effects = [];
-  const units = Array.from({ length: count }, () => unit(top));
-  const root = { current: Object.assign(target(), { querySelectorAll: () => units, contains: () => false }) };
-  useSemanticReveal(root, 'complete source', start, streaming, identity);
-  const setups = [...layouts, ...effects];
-  let cleanups = setups.map(fn => fn());
-  return {
-    strictReplay() { cleanups.forEach(fn => fn?.()); cleanups = setups.map(fn => fn()); },
-    unmount() { cleanups.forEach(fn => fn?.()); },
-  };
-}
-const first = mount('strict');
-assert.equal(animations.length, 1);
-first.strictReplay();
-assert.equal(animations.length, 2, 'StrictMode setup must restart cosmetic animation');
-assert.equal(animations[0].cancelled, true);
-assert.equal(animations[1].cancelled, false);
-first.unmount();
-assert.equal(animations[1].cancelled, true, 'unmount cancels WAAPI');
-let before = animations.length;
-mount('strict').unmount();
-assert.equal(animations.length, before, 'same identity remount must not replay');
-mount('history', { start: 1 }).unmount();
-assert.equal(animations.length, before, 'historical reply must not animate');
-motion.matches = true;
-mount('reduced').unmount();
-assert.equal(animations.length, before, 'initial reduced motion must not animate');
-motion.matches = false;
-const changingMotion = mount('motion-change');
-motion.matches = true; motion.emit('change');
-assert.equal(animations.at(-1).cancelled, true, 'dynamic reduced motion cancels active animation');
-changingMotion.unmount(); motion.matches = false;
-const navigating = mount('navigation');
-win.emit('wheel');
-assert.equal(animations.at(-1).cancelled, true, 'manual wheel cancels active animation');
-navigating.unmount();
-reads = 0; operations = []; before = animations.length;
-mount('large', { count: 1000 }).unmount();
-assert.ok(reads <= 32, 'geometry reads must be bounded');
-assert.ok(animations.length - before <= 32, 'animation fanout must be bounded');
-const firstWrite = operations.indexOf('write');
-assert.ok(firstWrite >= 0);
-assert.equal(operations.slice(firstWrite).includes('read'), false, 'all geometry reads precede animation writes');
-before = animations.length;
-mount('offscreen', { top: 2000 }).unmount();
-assert.equal(animations.length, before, 'offscreen units must not animate');
+let units=[unit()];
+const root=Object.assign(events(), {parentElement:null,querySelectorAll:()=>units,contains:el=>units.includes(el)});
+const c=createSemanticReveal(root,true);
+c.update(true,true);
+assert.equal(animations.length,1);
+const first=units[0];
+first.textContent+=' tail';
+c.update(true,true);
+assert.equal(animations.length,1,'growth within a line must not fade the old line');
+first.textContent+=' next line'; first.height=44;
+c.update(true,true);
+assert.equal(animations.length,2,'new visual line must animate');
+assert.equal(animations[1].frames[0].clipPath,'inset(0 0 50% 0)');
+assert.equal(animations[1].frames[0].opacity,undefined,'old text must stay opaque');
+window.emit('keydown');
+units.push(unit('new paragraph'));
+c.update(true,true);
+assert.equal(animations.length,3,'ordinary keys cannot disable future paragraphs');
+reads=0;
+first.textContent+=' third line'; first.height=66;
+c.update(true,true);
+assert.equal(reads,1,'unchanged completed blocks do not require layout reads');
+const count=animations.length;
+first.width=400; first.textContent+=' resize'; first.height=100;
+c.update(true,true);
+assert.equal(animations.length,count,'reflow must not replay old lines');
+motion.matches=true;motion.emit('change');
+assert.ok(animations.every(a=>a.cancelled));
+units.push(unit('reduced'));c.update(true,true);
+assert.equal(animations.length,count);
+c.dispose();motion.matches=false;
+units=[unit('history')];
+const history=createSemanticReveal(root,false);history.update(false,false);
+assert.equal(animations.length,count,'history is immediate');history.dispose();
+units=Array.from({length:1000},(_,i)=>unit('unit'+i));
+reads=0; operations=[];
+const large=createSemanticReveal(root,true);large.update(true,true);
+assert.equal(reads,32);
+const firstWrite=operations.indexOf('write');
+assert.ok(firstWrite>=0);assert.ok(!operations.slice(firstWrite).includes('read'));
+large.update(false,true);
+await new Promise(resolve=>setTimeout(resolve,320));
+assert.ok(animations.every(a=>a.cancelled),'completion must flush within bounded time');
+large.dispose();
+assert.equal(appendedRevealInset(60,80),25);
+assert.equal(appendedRevealInset(80,80),0);
+assert.equal(appendedRevealInset(80,40),0);
 console.log('lifecycle assertions passed');
 `
 
-describe('semantic reveal lifecycle (isolated hook harness)', () => {
-  it('preserves replay, cancellation, motion and bounded-layout contracts', () => {
-    const result = Bun.spawnSync([process.execPath, '--eval', harness.replace('HOOK_URL', JSON.stringify(hookUrl))], {
-      stdout: 'pipe', stderr: 'pipe',
-    })
+describe('incremental semantic reveal lifecycle (#328)', () => {
+  it('tracks new lines, preserves old text and bounds work/completion', () => {
+    const result = Bun.spawnSync([process.execPath, '--eval', harness.replace('MODULE_URL', JSON.stringify(moduleUrl))], { stdout: 'pipe', stderr: 'pipe' })
     expect(new TextDecoder().decode(result.stderr)).toBe('')
     expect(result.exitCode).toBe(0)
     expect(new TextDecoder().decode(result.stdout)).toContain('lifecycle assertions passed')
