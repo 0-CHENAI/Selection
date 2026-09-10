@@ -510,9 +510,8 @@ function isManagedAutomaticSpawn(activity: ActivityItem): boolean {
 }
 
 function keepLatestManagedSwarmTurnOpen(turns: Turn[]): void {
-  const latestAssistant = turns.findLast((turn): turn is AssistantTurn => turn.type === 'assistant')
-  if (!latestAssistant) return
-  if (turns.at(-1) !== latestAssistant) return
+  const latestAssistant = turns[turns.length - 1]
+  if (!latestAssistant || latestAssistant.type !== 'assistant') return
   if (!latestAssistant.activities.some(isManagedAutomaticSpawn)) return
 
   demoteResponseToWorkChain(latestAssistant)
@@ -521,9 +520,8 @@ function keepLatestManagedSwarmTurnOpen(turns: Turn[]): void {
 }
 
 function keepLatestTaskOrchestrationTurnOpen(turns: Turn[]): void {
-  const latestAssistant = turns.findLast((turn): turn is AssistantTurn => turn.type === 'assistant')
-  if (!latestAssistant) return
-  if (turns.at(-1) !== latestAssistant) return
+  const latestAssistant = turns[turns.length - 1]
+  if (!latestAssistant || latestAssistant.type !== 'assistant') return
   latestAssistant.isComplete = false
   latestAssistant.isStreaming = true
 }
@@ -918,10 +916,15 @@ export function groupMessagesByTurn(messages: Message[], options: GroupTurnsOpti
   // Flush any remaining turn
   flushCurrentTurn()
 
-  if (options.isManagedSwarmRunning) {
+  // Session-level orchestration metadata may lag behind the accepted answer.
+  // Only the latest run's delivery settles it; an older answer cannot settle a new run.
+  const latestTurn = turns[turns.length - 1]
+  const latestAnswerDelivered = latestTurn?.type === 'assistant'
+    && !!latestTurn.answerRunId && deliveredRuns.has(latestTurn.answerRunId)
+  if (options.isManagedSwarmRunning && !latestAnswerDelivered) {
     keepLatestManagedSwarmTurnOpen(turns)
   }
-  if (options.isTaskOrchestrationRunning) {
+  if (options.isTaskOrchestrationRunning && !latestAnswerDelivered) {
     keepLatestTaskOrchestrationTurnOpen(turns)
   }
 

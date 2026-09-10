@@ -43,6 +43,27 @@ describe('explicit answer delivery (#330)', () => {
     const messages: Message[] = [{ id: 'legacy', role: 'assistant', content: '旧答案', timestamp: 1 }]
     expect(groupMessagesByTurn(messages)[0]).toMatchObject({ response: { text: '旧答案' } })
   })
+  it('does not fold an accepted answer when orchestration status arrives late', () => {
+    const messages = transcript()
+    messages[2] = { ...messages[2]!, toolName: 'spawn_session', toolResult: JSON.stringify({ status: 'started', spawnReason: 'automatic', lifecycle: 'managed' }) }
+    for (const options of [{ isManagedSwarmRunning: true }, { isTaskOrchestrationRunning: true }, { isManagedSwarmRunning: true, isTaskOrchestrationRunning: true }]) {
+      const turn = groupMessagesByTurn(messages, options).find(t => t.type === 'assistant')!
+      expect(turn.response?.text).toBe(answer)
+      expect(turn.isComplete).toBe(true)
+      expect(turn.isStreaming).toBe(false)
+    }
+  })
+  it('still keeps a later undelivered orchestration turn open', () => {
+    const messages: Message[] = [...transcript(),
+      { id: 'new-user', role: 'user', content: '继续检查', timestamp: 8, answerProtocol: 'explicit-v1', answerRunId: 'new-run' },
+      { id: 'new-tool', role: 'tool', content: '', toolName: 'spawn_session', toolStatus: 'completed', toolResult: JSON.stringify({ status: 'started', spawnReason: 'automatic', lifecycle: 'managed' }), timestamp: 9, answerProtocol: 'explicit-v1', answerRunId: 'new-run' },
+    ]
+    const turns = groupMessagesByTurn(messages, { isManagedSwarmRunning: true, isTaskOrchestrationRunning: true }).filter(t => t.type === 'assistant')
+    expect(turns[0]?.response?.text).toBe(answer)
+    expect(turns[1]?.response).toBeUndefined()
+    expect(turns[1]?.isComplete).toBe(false)
+    expect(turns[1]?.isStreaming).toBe(true)
+  })
 })
 
 it('keeps a later explicit delivery run separate, even after a hidden wake', () => {
