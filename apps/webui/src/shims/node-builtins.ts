@@ -14,6 +14,7 @@ export const readFileSync = () => { throw new Error('readFileSync not available 
 export const writeFileSync = () => { throw new Error('writeFileSync not available in browser') }
 export const existsSync = () => false
 export const statSync = () => { throw new Error('statSync not available in browser') }
+export const realpathSync = () => { throw new Error('realpathSync not available in browser') }
 export const unlinkSync = () => {}
 export const mkdtempSync = () => ''
 export const renameSync = () => {}
