@@ -16,6 +16,10 @@ import { Globe } from 'lucide-react'
 import { PreviewOverlay } from './PreviewOverlay'
 import { CopyButton } from './CopyButton'
 import { ItemNavigator } from './ItemNavigator'
+import { ZoomControls } from './ZoomControls'
+import { useRichBlockInteractions } from './useRichBlockInteractions'
+import { RICH_BLOCK_DEFAULTS } from './rich-block-interaction-spec'
+import { bindHtmlPreviewInteractions } from './html-preview-interactions'
 
 /**
  * Inject `<base target="_top">` so in-page links navigate the top frame
@@ -87,6 +91,10 @@ export function HTMLPreviewOverlay({
 
   const [activeIdx, setActiveIdx] = React.useState(initialIndex)
   const iframeRef = React.useRef<HTMLIFrameElement>(null)
+  const containerRef = React.useRef<HTMLDivElement>(null)
+  const interactions = useRichBlockInteractions({ isOpen, containerRef })
+  const { reset } = interactions
+  const bridgeCleanup = React.useRef<(() => void) | undefined>(undefined)
   const [contentSize, setContentSize] = React.useState<{ width: number; height: number } | null>(null)
 
   // Internal content cache (merges external + locally loaded)
@@ -117,24 +125,32 @@ export function HTMLPreviewOverlay({
   React.useEffect(() => {
     setContentSize(null)
     setLoadError(null)
-  }, [activeIdx])
+    reset()
+    bridgeCleanup.current?.()
+  }, [activeItem?.src, html, reset])
+
+  React.useEffect(() => () => bridgeCleanup.current?.(), [isOpen])
 
   // Load content for active item if not cached
   React.useEffect(() => {
     if (!isOpen || !activeItem?.src) return
-    if (mergedCache[activeItem.src]) return
+    if (mergedCache[activeItem.src]) { setLoadingItem(false); return }
     if (!onLoadContent) return
 
+    let cancelled = false
     setLoadingItem(true)
     setLoadError(null)
     onLoadContent(activeItem.src)
       .then((content) => {
+        if (cancelled) return
         setInternalCache((prev) => ({ ...prev, [activeItem.src]: content }))
       })
       .catch((err) => {
+        if (cancelled) return
         setLoadError(err instanceof Error ? err.message : 'Failed to load content')
       })
-      .finally(() => setLoadingItem(false))
+      .finally(() => { if (!cancelled) setLoadingItem(false) })
+    return () => { cancelled = true }
   }, [isOpen, activeItem?.src, mergedCache, onLoadContent])
 
   // Preprocess active HTML
@@ -148,6 +164,8 @@ export function HTMLPreviewOverlay({
   const handleLoad = React.useCallback(() => {
     const iframe = iframeRef.current
     if (!iframe) return
+    bridgeCleanup.current?.()
+    if (containerRef.current) bridgeCleanup.current = bindHtmlPreviewInteractions(iframe, containerRef.current, interactions.didDrag)
     try {
       const doc = iframe.contentDocument
       if (doc?.body) {
@@ -165,7 +183,7 @@ export function HTMLPreviewOverlay({
       // Cross-origin or empty document — fall through to a visible default.
     }
     setContentSize({ width: 800, height: 600 })
-  }, [])
+  }, [interactions.didDrag])
 
   const iframeHeight = contentSize
     ? `${contentSize.height}px`
@@ -176,6 +194,18 @@ export function HTMLPreviewOverlay({
   // Header actions: item navigation + copy button
   const headerActions = (
     <div className="flex items-center gap-2">
+      <ZoomControls
+        scale={interactions.scale}
+        minScale={RICH_BLOCK_DEFAULTS.minScale}
+        maxScale={RICH_BLOCK_DEFAULTS.maxScale}
+        zoomPresets={RICH_BLOCK_DEFAULTS.zoomPresets}
+        onZoomIn={() => interactions.zoomByStep('in')}
+        onZoomOut={() => interactions.zoomByStep('out')}
+        onZoomToPreset={interactions.zoomToPreset}
+        onZoomToFit={() => interactions.zoomToFit(contentSize ? { width: contentSize.width + 128, height: Math.max(400, contentSize.height) + 60 } : null)}
+        onReset={reset}
+        resetDisabled={interactions.scale === 1 && interactions.translate.x === 0 && interactions.translate.y === 0}
+      />
       <ItemNavigator items={resolvedItems} activeIndex={activeIdx} onSelect={setActiveIdx} size="md" />
       <CopyButton content={activeContent || ''} label="Copy HTML" className="bg-background shadow-minimal" />
     </div>
@@ -196,7 +226,9 @@ export function HTMLPreviewOverlay({
       error={error ? { label: t('preview.htmlPreview'), message: error } : undefined}
       headerActions={headerActions}
     >
-      <div className="px-6 pb-6">
+      <div ref={interactions.attachContainerRef} className="flex items-center justify-center overflow-hidden"
+        onMouseDown={interactions.onMouseDown} onDoubleClick={interactions.onDoubleClick}
+        style={{ height: 'calc(100vh - 120px)', cursor: interactions.isDragging ? 'grabbing' : 'grab' }}>
         {loadingItem && !activeContent && (
           <div className="py-12 text-center text-muted-foreground text-sm">{t('common.loading')}</div>
         )}
@@ -205,15 +237,17 @@ export function HTMLPreviewOverlay({
         )}
         {processedHtml && (
           <div
-            className="bg-white rounded-[12px] overflow-hidden shadow-minimal mx-auto"
+            className="bg-white rounded-[12px] overflow-hidden shadow-minimal shrink-0"
             style={{
-              maxWidth: contentSize?.width ? `${contentSize.width + 128}px` : undefined,
+              width: contentSize?.width ? `${contentSize.width + 128}px` : 'calc(100% - 48px)',
               padding: '24px 64px 36px',
               opacity: measured ? 1 : 0,
-              transition: 'opacity 200ms ease-in',
+              transform: `translate(${interactions.translate.x}px, ${interactions.translate.y}px) scale(${interactions.scale})`,
+              transformOrigin: 'center center',
             }}
           >
             <iframe
+              key={activeItem?.src}
               ref={iframeRef}
               sandbox="allow-same-origin allow-top-navigation-by-user-activation"
               srcDoc={processedHtml}
