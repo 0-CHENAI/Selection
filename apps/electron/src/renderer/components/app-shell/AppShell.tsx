@@ -117,6 +117,7 @@ import {
 } from "@/components/resources/external-resource-import"
 import { AutomationsListPanel } from "../automations/AutomationsListPanel"
 import { ProjectsListPanel } from "./ProjectsListPanel"
+import { ProjectFolderActions } from "../projects/ProjectFolderActions"
 import { APP_EVENTS, AGENT_EVENTS, type AutomationFilterKind, AUTOMATION_TYPE_TO_FILTER_KIND } from "../automations/types"
 import { useAutomations } from "@/hooks/useAutomations"
 import { useProjects } from "@/hooks/useProjects"
@@ -2058,6 +2059,9 @@ function AppShellContent({
                         // Highlight when on allSessions view AND filter includes this project (the jump-to state)
                         variant: (sessionFilter?.kind === 'allSessions' && projectFilter.get(p.config.id) === 'include') ? "default" as const : "ghost" as const,
                         onClick: () => handleJumpToProjectSessions(p.config.id),
+                        actions: activeWorkspaceId ? (
+                          <ProjectFolderActions key={`${activeWorkspaceId}:${p.config.id}`} project={p} workspaceId={activeWorkspaceId} />
+                        ) : undefined,
                       })),
                     },
                     {
