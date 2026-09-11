@@ -228,3 +228,25 @@ export function handleTextComplete(
     streaming: nextStreaming,
   }
 }
+
+
+/** Transient SDK argument preview; only accepted text_complete creates a durable answer. */
+export function handleAnswerPreview(
+  state: SessionState,
+  event: Extract<import('../types').AgentEvent, { type: 'answer_preview' }>,
+): SessionState {
+  const { session } = state
+  const owner = session.messages.filter(m => m.role === 'user' && !m.isQueued && !m.hidden).pop()
+  if (!session.isProcessing || owner?.id !== event.userMessageId
+    || session.messages.some(m => m.answerCommitted && m.answerRunId === event.answerRunId)) return state
+  const previous = session.messages.find(m => m.answerPreview && m.answerRunId === event.answerRunId)
+  if (!event.text && previous?.id !== `answer-preview-${event.answerRunId}-${event.toolCallId}`) return state
+  const messages = session.messages.filter(m => !m.answerPreview)
+  if (event.text) messages.push({
+    id: `answer-preview-${event.answerRunId}-${event.toolCallId}`, role: 'assistant', content: event.text,
+    timestamp: previous?.timestamp ?? timestampAfterVisibleUser(messages),
+    answerProtocol: 'explicit-v1', answerRunId: event.answerRunId, answerPreview: true,
+    isStreaming: true, isPending: true, isIntermediate: false,
+  })
+  return { ...state, session: { ...session, messages } }
+}

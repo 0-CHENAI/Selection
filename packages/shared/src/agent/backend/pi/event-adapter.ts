@@ -19,6 +19,7 @@ import type {
 import type { AssistantMessage, AssistantMessageEvent } from '@earendil-works/pi-ai';
 import { isContextOverflow } from '@earendil-works/pi-ai';
 import { BaseEventAdapter } from '../base-event-adapter.ts';
+import { AnswerArgumentStream } from '../../../answer-argument-stream';
 import { PI_TOOL_NAME_MAP } from './constants.ts';
 import { toolMetadataStore } from '../../../interceptor-common.ts';
 import { parseError, createTypedError } from '../../errors.ts';
@@ -98,6 +99,8 @@ function getStreamingTextPhase(message: AssistantMessage | undefined): TextPhase
  */
 export class PiEventAdapter extends BaseEventAdapter {
   // Track tool names from execution_start for proper tool_result correlation
+  private answerPreviewTimes = new Map<string, number>();
+  private answerStreams = new Map<string, AnswerArgumentStream>();
   private toolNames: Map<string, string> = new Map();
 
   // Track whether streaming deltas have been received for the current message
@@ -326,6 +329,8 @@ export class PiEventAdapter extends BaseEventAdapter {
       // ============================================================
 
       case 'turn_start':
+        this.answerStreams.clear();
+        this.answerPreviewTimes.clear();
         // Pi SDK turn_start has no ID, so generate one for event correlation
         this.currentTurnId = `pi-turn-${this.turnIndex}`;
         yield { type: 'model_call_start' };
@@ -353,6 +358,23 @@ export class PiEventAdapter extends BaseEventAdapter {
       case 'message_update': {
         // Pi SDK emits message_update only for assistant messages (streaming deltas)
         const amEvent: AssistantMessageEvent = event.assistantMessageEvent;
+        if (amEvent.type === 'toolcall_delta') {
+          const part = amEvent.partial.content[amEvent.contentIndex];
+          if (part?.type === 'toolCall' && /^(?:mcp__session__|session__)?submit_answer$/.test(part.name)) {
+            let decoder = this.answerStreams.get(part.id);
+            if (!decoder) { decoder = new AnswerArgumentStream(); this.answerStreams.set(part.id, decoder); }
+            const text = decoder.push(amEvent.delta);
+            const now = Date.now();
+            if (!text || now - (this.answerPreviewTimes.get(part.id) ?? 0) >= 50) {
+              this.answerPreviewTimes.set(part.id, now);
+              yield { type: 'answer_preview', toolCallId: part.id, text };
+            }
+          }
+        }
+        if (amEvent.type === 'toolcall_end' && /^(?:mcp__session__|session__)?submit_answer$/.test(amEvent.toolCall.name)) {
+          const markdown = amEvent.toolCall.arguments.markdown;
+          yield { type: 'answer_preview', toolCallId: amEvent.toolCall.id, text: typeof markdown === 'string' ? markdown : '' };
+        }
         if (amEvent.type === 'text_delta' && amEvent.delta) {
           // Codex attaches the phase only after the Responses output item
           // finishes. Hold only phase-less Codex deltas; other providers emit

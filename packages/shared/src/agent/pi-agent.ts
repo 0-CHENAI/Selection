@@ -1266,6 +1266,13 @@ export class PiAgent extends BaseAgent {
 
     // Detect session MCP tool completions (same pattern as in-process version)
     const eventType = event.type as string;
+    if (eventType === 'answer_preview') {
+      if (event.answerRunId === this.answerDelivery?.runId && !this.answerAccepted
+        && typeof event.text === 'string' && typeof event.toolCallId === 'string') {
+        this.eventQueue.enqueue({ type: 'answer_preview', text: event.text, toolCallId: event.toolCallId });
+      }
+      return;
+    }
     let adaptedEvent = event;
 
     if (eventType === 'tool_execution_start') {

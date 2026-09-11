@@ -731,6 +731,10 @@ export function copyInterceptor(config: BuildConfig): void {
   mkdirSync(destDir, { recursive: true });
   copyFileSync(interceptorSource, join(destDir, 'unified-network-interceptor.ts'));
 
+  for (const dependency of ['answer-preview-context.ts', 'answer-argument-stream.ts']) {
+    copyFileSync(join(sourceDir, dependency), join(destDir, dependency));
+  }
+
   // Also copy shared infrastructure (imported by unified-network-interceptor.ts at runtime)
   const commonSource = join(sourceDir, 'interceptor-common.ts');
   if (existsSync(commonSource)) {

@@ -1,5 +1,5 @@
 import * as React from 'react'
-import { createSemanticReveal, SEMANTIC_REVEAL_MAX_MS } from './semantic-reveal'
+import { createSemanticReveal } from './semantic-reveal'
 export { getRevealUnits, SEMANTIC_REVEAL_MS, SEMANTIC_REVEAL_MAX_MS } from './semantic-reveal'
 
 const played = new Set<string>()
@@ -18,7 +18,7 @@ export function useSemanticReveal(
     if (!root.current) return
     if (!admission.current || admission.current.identity !== identity) {
       const key = identity ?? (startTime != null ? `time:${startTime}` : undefined)
-      const fresh = streaming || (startTime != null && Date.now() - startTime < SEMANTIC_REVEAL_MAX_MS)
+      const fresh = streaming
       admission.current = { identity, initial: fresh && (key == null || !played.has(key)) }
       if (fresh && key != null) {
         played.add(key)
@@ -30,6 +30,6 @@ export function useSemanticReveal(
     // Admission belongs to the message lifetime; content updates use the effect below.
   }, [root, identity])
   useBrowserLayoutEffect(() => {
-    controller.current?.update(streaming, streaming || !!admission.current?.initial)
+    controller.current?.update(streaming, streaming)
   }, [root, content, startTime, streaming, identity])
 }

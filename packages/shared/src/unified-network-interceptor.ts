@@ -1,3 +1,5 @@
+import { answerPreviewContext } from './answer-preview-context.ts';
+import { AnswerArgumentStream } from './answer-argument-stream.ts';
 import { beginRequestDiagnostic } from './request-diagnostics.ts';
 import { observeSseResponse } from './sse-diagnostics.ts';
 /**
@@ -422,12 +424,37 @@ interface TrackedToolBlock {
 const SSE_EVENT_RE = /^event:\s*(.+)$/;
 const SSE_DATA_RE = /^data:\s*(.+)$/;
 
+/** Observe decoded previews without changing the SDK tool-call stream. */
+function createAnswerPreviewEmitter() {
+  const previewObserver = answerPreviewContext.getStore();
+  const previews = new Map<string, { decoder: AnswerArgumentStream; offset: number; text: string; sentAt: number }>();
+  function previewCall(tc: { id: string; name: string; arguments: string }): void {
+    if (!previewObserver || !/^(?:mcp__session__|session__)?submit_answer$/.test(tc.name)) return;
+    let state = previews.get(tc.id);
+    if (!state) {
+      state = { decoder: new AnswerArgumentStream(), offset: 0, text: '', sentAt: 0 };
+      previews.set(tc.id, state);
+    }
+    const text = state.decoder.push(tc.arguments.slice(state.offset));
+    state.offset = tc.arguments.length;
+    if (text !== state.text && (!text || Date.now() - state.sentAt >= 50)) {
+      state.text = text;
+      state.sentAt = Date.now();
+      // Preview failures must never affect SDK parsing or tool execution.
+      try { previewObserver({ toolCallId: tc.id, text }); } catch { /* best effort */ }
+    }
+  }
+
+  return previewCall;
+}
+
 /**
  * Creates a TransformStream that intercepts Anthropic SSE events,
  * buffers tool_use input deltas, extracts _intent/_displayName into the metadata
  * store, and re-emits clean events without those fields.
  */
 export function createAnthropicSseStrippingStream(): TransformStream<Uint8Array, Uint8Array> {
+  const previewCall = createAnswerPreviewEmitter();
   const encoder = new TextEncoder();
   const decoder = new TextDecoder();
 
@@ -469,6 +496,7 @@ export function createAnthropicSseStrippingStream(): TransformStream<Uint8Array,
       if (delta?.type === 'input_json_delta' && trackedBlocks.has(index)) {
         const block = trackedBlocks.get(index)!;
         block.bufferedJson += delta.partial_json ?? '';
+        previewCall({ id: block.id, name: block.name, arguments: block.bufferedJson });
         return;
       }
       emitSseEvent(eventType, dataStr, controller);
@@ -788,6 +816,7 @@ interface TrackedToolCall {
  *   are emitted just before the original `[DONE]` / `finish_reason` event.
  */
 export function createOpenAiSseStrippingStream(): TransformStream<Uint8Array, Uint8Array> {
+  const previewCall = createAnswerPreviewEmitter();
   const encoder = new TextEncoder();
   const decoder = new TextDecoder();
 
@@ -1034,6 +1063,7 @@ export function createOpenAiSseStrippingStream(): TransformStream<Uint8Array, Ui
     // Suppress all upstream tool_call delta payloads. Consolidated events
     // are emitted on flush.
     if (handledToolCalls) {
+      for (const call of trackedCalls.values()) previewCall(call);
       return;
     }
 
