@@ -37,16 +37,17 @@ describe('desktop top bar entries (#262)', () => {
     expect(topBar).not.toContain('SquarePenRounded')
   })
 
-  it('mounts creation-job validation off the top bar and keeps manage/stop on resource pages', () => {
+  it('mounts creation-job validation off the top bar and omits manage/stop from skills', () => {
     const appShell = read('../AppShell.tsx')
     const host = appShell.indexOf('<CreationJobsHost')
     const topBar = appShell.indexOf('<TopBar')
     const sources = appShell.indexOf('isSourcesNavigation(navState) && activeWorkspace')
     const skills = appShell.indexOf('isSkillsNavigation(navState) && activeWorkspace')
     const automations = appShell.indexOf('isAutomationsNavigation(navState) && activeWorkspace')
-    const firstButton = appShell.indexOf('<CreationJobsButton')
-    const secondButton = appShell.indexOf('<CreationJobsButton', firstButton + 1)
-    const thirdButton = appShell.indexOf('<CreationJobsButton', secondButton + 1)
+    const projects = appShell.indexOf('isProjectsNavigation(navState) && activeWorkspace')
+    const sourcesSection = appShell.slice(sources, skills)
+    const skillsSection = appShell.slice(skills, automations)
+    const automationsSection = appShell.slice(automations, projects)
 
     expect(host).toBeGreaterThan(-1)
     expect(host).toBeLessThan(topBar)
@@ -55,9 +56,9 @@ describe('desktop top bar entries (#262)', () => {
     expect(appShell).not.toContain('onAddSessionPanel')
     expect(appShell).not.toContain('onAddBrowserPanel')
     expect(appShell).not.toContain('handleNewBrowserWindow')
-    expect(firstButton).toBeGreaterThan(sources)
-    expect(secondButton).toBeGreaterThan(skills)
-    expect(thirdButton).toBeGreaterThan(automations)
+    expect(sourcesSection).toContain('<CreationJobsButton')
+    expect(skillsSection).not.toContain('<CreationJobsButton')
+    expect(automationsSection).toContain('<CreationJobsButton')
   })
 
   it('runs creation-job reconciliation in the host, not the visual button', () => {
