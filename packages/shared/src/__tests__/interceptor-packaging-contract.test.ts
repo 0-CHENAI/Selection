@@ -19,5 +19,8 @@ describe('interceptor packaging contract', () => {
     expect(dmgScript).toContain('interceptor-request-utils.ts');
     expect(linuxScript).toContain('interceptor-request-utils.ts');
     expect(winScript).toContain('interceptor-request-utils.ts');
+    for (const dependency of ['answer-preview-context.ts', 'answer-argument-stream.ts']) {
+      for (const manifest of [builderYml, dmgScript, linuxScript, winScript, readRepoFile('scripts/build/common.ts')]) expect(manifest).toContain(dependency);
+    }
   });
 });

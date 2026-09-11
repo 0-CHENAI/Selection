@@ -37,6 +37,10 @@ describe('#330 service → renderer → durable reload → turn grouping', () =>
               yield { type: 'text_complete', text: '模拟确认了结论。', phase, turnId: 'provider-2' }
             }
             if (!recover || calls === 2) {
+              yield { type: 'answer_preview', toolCallId: 'delivery', text: answer.slice(0, 30) }
+              await manager.flushSession(managed.id)
+              expect(loadSession(root, managed.id)?.messages.some(m => m.content === answer.slice(0, 30))).toBe(false)
+              yield { type: 'answer_preview', toolCallId: 'delivery', text: answer }
               yield { type: 'tool_start', toolName: 'submit_answer', toolUseId: 'delivery', input: { markdown: answer } }
               await control!.submit({ markdown: answer, toolCallId: 'delivery', sdkMessageId: 'sdk-answer', sdkTurnAnchor: 'sdk-entry' })
               yield { type: 'tool_result', toolName: 'submit_answer', toolUseId: 'delivery', result: 'Answer delivered.', isError: false }
@@ -61,11 +65,18 @@ describe('#330 service → renderer → durable reload → turn grouping', () =>
             streaming: null,
           }
           let delivered = false
+          let previewSeen = false
           for (const event of events) {
             state = processEvent(state, event).state
+            if (event.type === 'answer_preview' && event.text) {
+              previewSeen = true
+              expect(assistantTurns(state.session.messages)[0]?.response?.isAnswerPreview).toBe(true)
+              expect(assistantTurns(state.session.messages)[0]?.isComplete).toBe(false)
+            }
             if (event.type === 'text_complete' && event.answerCommitted) delivered = true
-            if (!delivered) expect(assistantTurns(state.session.messages).every(t => !t.response)).toBe(true)
+            if (!delivered && !previewSeen) expect(assistantTurns(state.session.messages).every(t => !t.response)).toBe(true)
           }
+          expect(previewSeen).toBe(true)
           const stored = loadSession(root, managed.id)!
           const reloaded = stored.messages.map(storedToMessage)
           const liveTurns = assistantTurns(state.session.messages)

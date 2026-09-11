@@ -48,7 +48,7 @@ export function generateMessageId(): string {
 export function timestampAfterVisibleUser(messages: Message[], fallback = Date.now()): number {
   let latestVisible = 0
   for (const message of messages) {
-    if (message.hidden || message.isQueued) continue
+    if (message.hidden || message.isQueued || message.answerPreview) continue
     if (
       message.role === 'user'
       || message.role === 'assistant'

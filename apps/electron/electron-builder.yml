@@ -28,6 +28,8 @@ files:
   - packages/shared/src/interceptor-common.ts
   - packages/shared/src/feature-flags.ts
   - packages/shared/src/interceptor-request-utils.ts
+  - packages/shared/src/answer-preview-context.ts
+  - packages/shared/src/answer-argument-stream.ts
   # Include CLI tool Python scripts (platform-independent)
   - resources/scripts/**/*
   # Runtime bundles must not ship the CLI smoke-test harness or bytecode caches.

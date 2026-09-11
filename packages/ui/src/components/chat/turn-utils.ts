@@ -547,6 +547,7 @@ export function groupMessagesByTurn(messages: Message[], options: GroupTurnsOpti
   const deliveredRuns = new Set<string>()
   let activeRunId: string | undefined
   const protocolMessages = [...messages].sort((a, b) => a.timestamp - b.timestamp).flatMap(message => {
+    if (message.answerPreview && options.isSessionProcessing === false) return []
     if (message.hidden && message.role !== 'user') return []
     if (message.role === 'user' && !message.hidden && !message.isQueued) activeRunId = undefined
     if (message.answerRunId) activeRunId = message.answerRunId
@@ -554,7 +555,7 @@ export function groupMessagesByTurn(messages: Message[], options: GroupTurnsOpti
     if (runId && deliveredRuns.has(runId) && (message.role === 'assistant' || message.role === 'tool')) return []
     if (message.answerProtocol === 'explicit-v1' && message.answerCommitted && runId) deliveredRuns.add(runId)
     const classified = message.answerProtocol === 'explicit-v1' && message.role === 'assistant'
-      ? { ...message, isIntermediate: !message.answerCommitted }
+      ? { ...message, isIntermediate: !message.answerCommitted && !message.answerPreview }
       : message
     return [classified]
   })
@@ -596,7 +597,7 @@ export function groupMessagesByTurn(messages: Message[], options: GroupTurnsOpti
     currentTurn = {
       type: 'assistant',
       answerRunId: message.answerRunId,
-      turnId: message.turnId || message.id,
+      turnId: message.answerRunId ? `answer-${message.answerRunId}` : message.turnId || message.id,
       activities: [],
       response: undefined,
       intent: init.intent,
@@ -769,7 +770,7 @@ export function groupMessagesByTurn(messages: Message[], options: GroupTurnsOpti
         // Edge case: plan without preceding activities
         currentTurn = {
           type: 'assistant',
-          turnId: message.turnId || message.id,
+          turnId: message.answerRunId ? `answer-${message.answerRunId}` : message.turnId || message.id,
           activities: [],
           response: undefined,
           intent: undefined,
@@ -883,9 +884,10 @@ export function groupMessagesByTurn(messages: Message[], options: GroupTurnsOpti
       // Set as response on current turn (ignoring turnId differences)
       currentTurn.response = {
         text: message.content,
+        isAnswerPreview: message.answerPreview,
         isStreaming: !!message.isStreaming,
         streamStartTime: message.isStreaming ? message.timestamp : undefined,
-        completedRevealStartTime: message.isStreaming ? undefined : message.timestamp,
+        completedRevealStartTime: message.answerProtocol === 'explicit-v1' || message.isStreaming ? undefined : message.timestamp,
         messageId: message.id,
         annotations: message.annotations,
       }
@@ -921,10 +923,11 @@ export function groupMessagesByTurn(messages: Message[], options: GroupTurnsOpti
   const latestTurn = turns[turns.length - 1]
   const latestAnswerDelivered = latestTurn?.type === 'assistant'
     && !!latestTurn.answerRunId && deliveredRuns.has(latestTurn.answerRunId)
-  if (options.isManagedSwarmRunning && !latestAnswerDelivered) {
+  const latestAnswerPreview = latestTurn?.type === 'assistant' && latestTurn.response?.isAnswerPreview
+  if (options.isManagedSwarmRunning && !latestAnswerDelivered && !latestAnswerPreview) {
     keepLatestManagedSwarmTurnOpen(turns)
   }
-  if (options.isTaskOrchestrationRunning && !latestAnswerDelivered) {
+  if (options.isTaskOrchestrationRunning && !latestAnswerDelivered && !latestAnswerPreview) {
     keepLatestTaskOrchestrationTurnOpen(turns)
   }
 

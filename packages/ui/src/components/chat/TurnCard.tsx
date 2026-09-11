@@ -294,6 +294,7 @@ export interface ActivityItem {
 }
 
 export interface ResponseContent {
+  isAnswerPreview?: boolean
   text: string
   isStreaming: boolean
   streamStartTime?: number
@@ -1324,6 +1325,7 @@ function ActivityGroupRow({ group, expandedGroups: externalExpandedGroups, onExp
 // ============================================================================
 
 export interface ResponseCardProps {
+  isAnswerPreview?: boolean
   /** The content to display (markdown) */
   text: string
   /** Whether the content is still streaming */
@@ -1623,6 +1625,7 @@ function applyTextHighlightRange(
  * Performance: markdown re-renders throttled (~50ms) while streaming.
  */
 export function ResponseCard({
+  isAnswerPreview = false,
   text,
   isStreaming,
   isTurnComplete,
@@ -2412,7 +2415,7 @@ export function ResponseCard({
   // Both card branches retain the keyed body when final responses complete.
   const showCompletedChrome = (isCompleted && !isCommentary)
     || variant === 'plan'
-  const showStreamingFooter = shouldShowStreamingFooter({
+  const showStreamingFooter = (isAnswerPreview && isStreaming) || shouldShowStreamingFooter({
     isStreaming,
     compactMode,
     isCommentary,
@@ -3216,6 +3219,7 @@ export const TurnCard = React.memo(function TurnCard({
               <ResponseCard
                 text={response.text}
                 isStreaming={response.isStreaming}
+                isAnswerPreview={response.isAnswerPreview}
                 isTurnComplete={isComplete}
                 streamStartTime={response.streamStartTime}
                 completedRevealStartTime={response.completedRevealStartTime}
@@ -3253,6 +3257,7 @@ export const TurnCard = React.memo(function TurnCard({
           <ResponseCard
             text={response.text}
             isStreaming={response.isStreaming}
+                isAnswerPreview={response.isAnswerPreview}
             isTurnComplete={isComplete}
             streamStartTime={response.streamStartTime}
             completedRevealStartTime={response.completedRevealStartTime}

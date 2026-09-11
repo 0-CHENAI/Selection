@@ -2,6 +2,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from
 import { mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
+import { answerPreviewContext } from '../answer-preview-context.ts';
 import { toolMetadataStore } from '../interceptor-common.ts';
 
 let createOpenAiSseStrippingStream: typeof import('../unified-network-interceptor.ts').createOpenAiSseStrippingStream;
@@ -59,6 +60,55 @@ describe('unified-network-interceptor SSE processors', () => {
   afterEach(() => {
     toolMetadataStore._clearForTesting();
     rmSync(sessionDir, { recursive: true, force: true });
+  });
+
+  it('previews Anthropic arguments while SDK metadata stripping is still buffering (#350)', async () => {
+    const previews: unknown[] = [];
+    const processor = answerPreviewContext.run(p => previews.push(p), createAnthropicSseStrippingStream);
+    const writer = processor.writable.getWriter();
+    let output = '';
+    const drained = (async () => {
+      const reader = processor.readable.getReader();
+      while (true) {
+        const chunk = await reader.read();
+        if (chunk.done) break;
+        output += decoder.decode(chunk.value);
+      }
+    })();
+    await writer.write(encoder.encode('event: content_block_start\ndata: {"index":0,"content_block":{"type":"tool_use","id":"answer","name":"submit_answer"}}\n\n'));
+    await writer.write(encoder.encode(`event: content_block_delta\ndata: ${JSON.stringify({ index: 0, delta: { type: 'input_json_delta', partial_json: '{"markdown":"Early' } })}\n\n`));
+    expect(previews).toEqual([{ toolCallId: 'answer', text: 'Early' }]);
+    expect(output).not.toContain('Early');
+    await writer.close();
+    await drained;
+  });
+
+  it('streams isolated answer previews before finish without duplicating SDK tool calls (#350)', async () => {
+    const previews: Array<{ toolCallId: string; text: string }> = [];
+    const unrelated: unknown[] = [];
+    const processor = answerPreviewContext.run(p => previews.push(p), createOpenAiSseStrippingStream);
+    const writer = processor.writable.getWriter();
+    const reader = processor.readable.getReader();
+    let output = '';
+    const drained = (async () => {
+      while (true) {
+        const item = await reader.read();
+        if (item.done) break;
+        output += decoder.decode(item.value);
+      }
+    })();
+    const chunk = (args: string, first = false) => encoder.encode(`data: ${JSON.stringify({ choices: [{ index: 0, delta: { tool_calls: [{ index: 0, ...(first ? { id: 'answer', function: { name: 'session__submit_answer', arguments: args } } : { function: { arguments: args } }) }] } }] })}\n\n`);
+    await answerPreviewContext.run(p => unrelated.push(p), () => writer.write(chunk('{"_intent":"deliver", "markdown":"# Early', true)));
+    expect(previews).toEqual([{ toolCallId: 'answer', text: '# Early' }]);
+    expect(unrelated).toEqual([]);
+    expect(output).toBe('');
+    await writer.write(chunk(' answer"}'));
+    await writer.write(encoder.encode('data: {"choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}\n\ndata: [DONE]\n\n'));
+    await writer.close();
+    await drained;
+    const toolChunks = output.split('\n').filter(line => line.startsWith('data: {')).map(line => JSON.parse(line.slice(6))).filter(event => event.choices[0].delta.tool_calls);
+    expect(toolChunks).toHaveLength(1);
+    expect(JSON.parse(toolChunks[0].choices[0].delta.tool_calls[0].function.arguments)).toEqual({ markdown: '# Early answer' });
   });
 
   it('OpenAI: does not drop the terminal chunk when delta.tool_calls is an empty array (#995)', async () => {

@@ -314,6 +314,8 @@ export interface Message {
   /** Explicit answer identity; absent on legacy turns. */
   answerProtocol?: 'explicit-v1';
   answerRunId?: string;
+  /** Renderer-only, uncommitted answer preview; never persisted. */
+  answerPreview?: boolean;
   answerCommitted?: boolean;
   /** Persisted on the originating user message before the single recovery call. */
   answerRecoveryAttempted?: boolean;
@@ -623,6 +625,7 @@ export type TextStreamPhase = 'unclassified' | 'intermediate' | 'final';
 export type AgentEvent =
   | { type: 'status'; message: string }
   | { type: 'info'; message: string }
+  | { type: 'answer_preview'; text: string; toolCallId: string }
   | { type: 'text_delta'; text: string; phase?: TextStreamPhase; turnId?: string; parentToolUseId?: string }
   | { type: 'text_complete'; text: string; phase?: TextStreamPhase; answerProtocol?: 'explicit-v1'; answerRunId?: string; answerCommitted?: boolean; isIntermediate?: boolean; turnId?: string; parentToolUseId?: string; sdkMessageId?: string }
   | { type: 'pi_turn_anchor'; sdkMessageId: string; sdkTurnAnchor: string }
