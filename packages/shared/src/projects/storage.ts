@@ -364,7 +364,7 @@ export function updateProject(
 
 /**
  * Delete a project (removes folder and all assets).
- * Caller is responsible for unsetting `projectId` on sessions that referenced it.
+ * Caller is responsible for deleting sessions that reference this project first.
  */
 export function deleteProject(workspaceRootPath: string, projectSlug: string): void {
   const dir = getProjectPath(workspaceRootPath, projectSlug);

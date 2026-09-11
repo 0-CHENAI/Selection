@@ -924,7 +924,7 @@
   "projectInfo.colorHint": "Sesje w tym projekcie będą wyróżnione tym kolorem na liście sesji.",
   "projectInfo.deleteAssetConfirm": "Usunąć zasób {{name}}?",
   "projectInfo.deleteAssetFailed": "Nie udało się usunąć zasobu",
-  "projectInfo.deleteConfirm": "Usunąć projekt {{name}}? Sesje zostaną odłączone, ale nie usunięte.",
+  "projectInfo.deleteConfirm": "Usunąć projekt {{name}}? Folder projektu, zasoby i wszystkie sesje zostaną trwale usunięte. Sesje znikną również ze zwykłych rozmów i wyników wyszukiwania. Skonfigurowany katalog roboczy nie zostanie usunięty.",
   "projectInfo.deleteFailed": "Nie udało się usunąć projektu",
   "projectInfo.deleteProject": "Usuń projekt",
   "projectInfo.description": "Opis",
