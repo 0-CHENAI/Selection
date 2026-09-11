@@ -32,7 +32,6 @@ import { Spinner } from '../ui/LoadingIndicator'
 import { markdownToPlainText } from './markdown-to-plain-text'
 import { BUFFER_CONFIG } from './stream-buffer'
 import { useStreamingReveal } from './useStreamingReveal'
-import { useCompletedResponseReveal } from './useCompletedResponseReveal'
 import { type IslandTransitionConfig } from '../ui'
 import { AnnotationIslandMenu } from '../annotations/AnnotationIslandMenu'
 import {
@@ -1660,13 +1659,6 @@ export function ResponseCard({
     [text, isStreaming],
   )
   const responseText = parsedSkillUsage.content
-  const reduceMotion = useReducedMotion()
-  const completedReveal = useCompletedResponseReveal(
-    responseText,
-    !isStreaming && variant === 'response' ? completedRevealStartTime : undefined,
-    reduceMotion === true,
-  )
-  const isVisuallyStreaming = isStreaming || completedReveal.isRevealing
   // Throttled content for display - updates every CONTENT_THROTTLE_MS during streaming
   const [displayedText, setDisplayedText] = useState(responseText)
   const lastUpdateRef = useRef(Date.now())
@@ -1710,7 +1702,7 @@ export function ResponseCard({
   const canAnnotate = canAnnotateMessage({
     hasAddAnnotationHandler: !!onAddAnnotation,
     hasMessageId: !!messageId,
-    isStreaming: isVisuallyStreaming,
+    isStreaming,
   })
   const allowAnnotationIsland = annotationInteractionMode === 'interactive'
 
@@ -1857,7 +1849,7 @@ export function ResponseCard({
       window.removeEventListener('resize', scheduleCoordsRecompute)
       root.removeEventListener('scroll', scheduleCoordsRecompute, { capture: true } as EventListenerOptions)
     }
-  }, [annotations, renderedAnnotations, responseText, displayedText, isStreaming, completedReveal.text])
+  }, [annotations, renderedAnnotations, responseText, displayedText, isStreaming])
 
   useEffect(() => {
     if (!canAnnotate) {
@@ -2414,14 +2406,11 @@ export function ResponseCard({
 
   const isCompleted = isTurnComplete ?? !isStreaming
   const isBuffering = isStreaming && !reveal.shouldShow
-  const bodyText = completedReveal.isRevealing
-    ? completedReveal.text
-    : isStreaming
-      ? displayedText
-      : responseText
-  // Commentary must stay on the live card tree. Switching to the completed
-  // chrome remounts markdown and pops a final-reply footer the moment tools start.
-  const showCompletedChrome = (isCompleted && !isCommentary && !completedReveal.isRevealing)
+  // Completion uses the full received text immediately; reveal stays cosmetic.
+  const bodyText = isStreaming ? displayedText : responseText
+  // Commentary must not gain final-reply actions the moment tools start.
+  // Both card branches retain the keyed body when final responses complete.
+  const showCompletedChrome = (isCompleted && !isCommentary)
     || variant === 'plan'
   const showStreamingFooter = shouldShowStreamingFooter({
     isStreaming,
@@ -2474,6 +2463,7 @@ export function ResponseCard({
 
           {/* Content expands fully — outer session list is the only vertical scroller */}
           <div
+            key="response-content"
             ref={contentRef}
             data-search-root="response"
             onMouseDown={handleSelectionPointerDown}
@@ -2483,6 +2473,8 @@ export function ResponseCard({
             <SkillUsedIndicator skills={parsedSkillUsage.skills} />
             <div ref={contentLayerRef} className="relative">
               <Markdown
+                id={messageId ? `${sessionId}:${messageId}` : undefined}
+                revealStartTime={variant === 'response' ? completedRevealStartTime : undefined}
                 mode="minimal"
                 onUrlClick={onOpenUrl}
                 onFileClick={onOpenFile}
@@ -2579,7 +2571,7 @@ export function ResponseCard({
               Uses a bottom-sheet drawer to match the CompactPermissionModeSelector
               / CompactModelSelector pattern. Guarded by isLastResponse so older
               plans don't render an empty strip with a hidden-but-focusable button. */}
-          {compactMode && onRegenerate && !isVisuallyStreaming && !isCommentary && (
+          {compactMode && onRegenerate && !isStreaming && !isCommentary && (
             <div
               className={cn(
                 "pl-3 pr-2 py-1.5 border-t border-border/30 flex items-center bg-muted/20",
@@ -2632,7 +2624,7 @@ export function ResponseCard({
           onUpdateAnnotation={onUpdateAnnotation}
           sendMessageKey={sendMessageKey}
           openAnnotationRequest={openAnnotationRequest}
-          isStreaming={isVisuallyStreaming}
+          isStreaming={isStreaming}
         />
         {selectionMenu}
       </>
@@ -2646,6 +2638,7 @@ export function ResponseCard({
         {/* Content expands fully — outer session list is the only vertical scroller */}
         {/* Uses displayedText (throttled) for performance while streaming */}
         <div
+          key="response-content"
           ref={contentRef}
           data-search-root="response"
           onMouseDown={handleSelectionPointerDown}
@@ -2655,6 +2648,8 @@ export function ResponseCard({
           <SkillUsedIndicator skills={parsedSkillUsage.skills} />
           <div ref={contentLayerRef} className="relative">
             <Markdown
+              id={messageId ? `${sessionId}:${messageId}` : undefined}
+              isStreaming={isStreaming && variant === 'response'}
               mode="minimal"
               onUrlClick={onOpenUrl}
               onFileClick={onOpenFile}

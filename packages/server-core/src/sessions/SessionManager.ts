@@ -1,3 +1,6 @@
+import { copyBranchFiles } from './branch-files'
+import { ANSWER_RECOVERY_PROMPT } from '@craft-agent/shared/prompts/answer-delivery'
+import type { AnswerDeliveryControl, AnswerSubmission, ChatOptions } from '@craft-agent/shared/agent/backend/types'
 import type { EventSink, RpcServer } from '@craft-agent/server-core/transport'
 import { CLIENT_BROWSER_INVOKE } from '@craft-agent/server-core/transport'
 import type { ISessionManager, IBrowserPaneManager, ExecutePromptAutomationInput, ExecutePromptAutomationResult } from '@craft-agent/server-core/handlers'
@@ -64,6 +67,7 @@ import {
   getPendingPlanExecution as getStoredPendingPlanExecution,
   getSessionAttachmentsPath,
   getSessionPath as getSessionStoragePath,
+  validateSessionId,
   ensureSessionDir,
   getSessionFilePath,
   generateSessionId,
@@ -858,11 +862,22 @@ interface RunningBackgroundTask {
 }
 
 interface ManagedSession {
+  answerDelivery?: {
+    runId: string
+    generation: number
+    userMessageId: string
+    recovery: boolean
+    accepting?: boolean
+    committedMessageId?: string
+  }
+
   id: string
   workspace: Workspace
   agent: AgentInstance | null  // Lazy-loaded - null until first message
   messages: Message[]
   isProcessing: boolean
+  deleting?: boolean
+  agentCreation?: Promise<AgentInstance>
   /** Set when user requests stop - allows event loop to drain before clearing isProcessing */
   stopRequested?: boolean
   lastMessageAt: number
@@ -2392,6 +2407,7 @@ export class SessionManager implements ISessionManager {
    * stays sync — no microtask race window between the load and the enqueue.
    */
   private persistSession(managed: ManagedSession): void {
+    if (managed.deleting) return
     if (!managed.messagesLoaded) {
       this.hydrateMessagesForColdPersist(managed)
     }
@@ -3108,6 +3124,7 @@ export class SessionManager implements ISessionManager {
       }
 
       const sourceManaged = this.sessions.get(options.branchFromSessionId)
+      if (sourceManaged?.deleting) throw new Error('Cannot branch from a session being deleted')
       if (sourceManaged) {
         if (sourceManaged.workspace.rootPath !== workspaceRootPath) {
           sessionLog.warn('Branch validation failed: source session belongs to different workspace', {
@@ -3338,6 +3355,12 @@ export class SessionManager implements ISessionManager {
       // Fix: replace source dir paths with branch dir paths so tokenization works on save.
       const sourceDir = normalizePath(getSessionStoragePath(workspaceRootPath, validatedBranch.sourceSessionId))
       const branchDir = normalizePath(getSessionStoragePath(workspaceRootPath, storedSession.id))
+      try {
+        validatedBranch.branchFromSessionPath = await copyBranchFiles(sourceDir, branchDir)
+      } catch (error) {
+        deleteStoredSession(workspaceRootPath, storedSession.id)
+        throw error
+      }
       if (sourceDir !== branchDir) {
         branchedStored.messages = sourceMessages.map(m => {
           const json = JSON.stringify(m)
@@ -3551,8 +3574,9 @@ export class SessionManager implements ISessionManager {
     return managed.agent?.getModel() || managed.model
   }
 
-  private async disposeManagedAgentRuntime(managed: ManagedSession, reason: string): Promise<void> {
+  private async disposeManagedAgentRuntime(managed: ManagedSession, reason: string, requireStopped = false): Promise<void> {
     const sessionId = managed.id
+    const failures: unknown[] = []
 
     if (managed.agent) {
       try {
@@ -3562,6 +3586,7 @@ export class SessionManager implements ISessionManager {
           managed.agent.dispose()
         }
       } catch (error) {
+        failures.push(error)
         sessionLog.warn(`Failed to dispose agent for ${sessionId} during ${reason}: ${error instanceof Error ? error.message : error}`)
       }
     }
@@ -3570,6 +3595,7 @@ export class SessionManager implements ISessionManager {
       try {
         await managed.poolServer.stop()
       } catch (error) {
+        failures.push(error)
         sessionLog.warn(`Failed to stop pool server for ${sessionId} during ${reason}: ${error instanceof Error ? error.message : error}`)
       }
     }
@@ -3578,10 +3604,14 @@ export class SessionManager implements ISessionManager {
       try {
         await managed.mcpPool.disconnectAll()
       } catch (error) {
+        failures.push(error)
         sessionLog.warn(`Failed to disconnect MCP pool for ${sessionId} during ${reason}: ${error instanceof Error ? error.message : error}`)
       }
     }
 
+    if (requireStopped && failures.length > 0) {
+      throw new Error(`Could not stop all runtime resources for session ${sessionId}; directory was preserved.`)
+    }
     managed.agent = null
     managed.poolServer = undefined
     managed.mcpPool = undefined
@@ -3745,6 +3775,15 @@ export class SessionManager implements ISessionManager {
    * 4. fallback: no connection configured
    */
   private async getOrCreateAgent(managed: ManagedSession): Promise<AgentInstance> {
+    if (managed.deleting) throw new Error(`Session ${managed.id} is being deleted`)
+    if (managed.agentCreation) return managed.agentCreation
+    const creation = this.initializeAgent(managed)
+    managed.agentCreation = creation
+    try { return await creation }
+    finally { if (managed.agentCreation === creation) managed.agentCreation = undefined }
+  }
+
+  private async initializeAgent(managed: ManagedSession): Promise<AgentInstance> {
     // Refresh runtime config in-place when the connection has drifted since
     // the agent was created. May null out `managed.agent` if the in-place
     // refresh fails, in which case the create branch below rebuilds it.
@@ -3990,6 +4029,7 @@ export class SessionManager implements ISessionManager {
           sourceSessionName: managed.name,
           rootSessionId: managed.triggeredBy?.rootSessionId ?? managed.triggeredBy?.sourceSessionId,
         },
+        explicitAnswerDelivery: !managed.parentSessionId && !managed.taskSlug && (!managed.systemPromptPreset || managed.systemPromptPreset === 'default'),
         systemPromptPreset: managed.systemPromptPreset,
         debugMode: _platform?.isDebugMode ? { enabled: true, logFilePath: _platform.getLogFilePath?.() } : undefined,
         // Image resize callback — prevents oversized images from entering conversation history
@@ -6148,12 +6188,46 @@ export class SessionManager implements ISessionManager {
     this.sendEvent({ type: 'message_annotations_updated', sessionId, messageId, annotations: message.annotations }, managed.workspace.id)
   }
 
-  async deleteSession(sessionId: string): Promise<void> {
-    const managed = this.sessions.get(sessionId)
-    if (!managed) {
-      sessionLog.warn(`Cannot delete session: ${sessionId} not found`)
-      return
+  /** Migrate old ordinary branches before removing their source directory. */
+  private async detachLegacyBranches(workspaceRootPath: string, sourceSessionId: string): Promise<void> {
+    const sourceDir = getSessionStoragePath(workspaceRootPath, sourceSessionId)
+    for (const metadata of listStoredSessions(workspaceRootPath)) {
+      if (metadata.id === sourceSessionId) continue
+      const branch = loadStoredSession(workspaceRootPath, metadata.id)
+      if (!branch || branch.parentSessionId || !branch.branchFromMessageId
+        || branch.branchFromSessionPath !== sourceDir) continue
+      const snapshot = await copyBranchFiles(sourceDir, getSessionStoragePath(workspaceRootPath, branch.id))
+      const runtime = this.sessions.get(branch.id)
+      if (runtime) {
+        runtime.branchFromSessionPath = snapshot
+        this.persistSession(runtime)
+      } else {
+        branch.branchFromSessionPath = snapshot
+        await saveStoredSession(branch)
+      }
+      await sessionPersistenceQueue.flush(branch.id)
+      if (loadStoredSession(workspaceRootPath, branch.id)?.branchFromSessionPath !== snapshot) {
+        throw new Error(`Could not preserve branch ${branch.id}; source session was not deleted.`)
+      }
     }
+  }
+
+  async deleteSession(sessionId: string): Promise<void> {
+    validateSessionId(sessionId)
+    let managed = this.sessions.get(sessionId)
+    if (!managed) {
+      const candidates = this.getWorkspaces().filter(workspace => existsSync(getSessionStoragePath(workspace.rootPath, sessionId)))
+      if (candidates.length > 1) throw new Error(`Ambiguous session ID: ${sessionId}`)
+      const workspace = candidates[0]
+      if (!workspace) return
+      const metadata = listStoredSessions(workspace.rootPath).find(session => session.id === sessionId)
+      managed = createManagedSession(metadata ?? { id: sessionId }, workspace)
+    }
+    if (managed.deleting) throw new Error(`Session ${sessionId} is already being deleted`)
+    managed.deleting = true
+    managed.stopRequested = true
+    managed.processingGeneration += 1
+    managed.messageQueue = []
 
     // Get workspace slug before deleting
     const workspaceRootPath = managed.workspace.rootPath
@@ -6161,9 +6235,16 @@ export class SessionManager implements ISessionManager {
     // If processing is in progress, force-abort via Query.close() and wait for cleanup
     if (managed.isProcessing && managed.agent) {
       managed.agent.forceAbort(AbortReason.UserStop)
-      // Brief wait for the query to finish tearing down before we delete session files.
-      // Prevents file corruption from overlapping writes during rapid delete operations.
-      await new Promise(resolve => setTimeout(resolve, 100))
+    }
+    managed.isProcessing = false
+    // Initialization may still be creating source artifacts or a pool server.
+    await managed.agentCreation?.catch(() => undefined)
+    try {
+      await this.disposeManagedAgentRuntime(managed, 'session deletion', true)
+      await this.detachLegacyBranches(workspaceRootPath, sessionId)
+    } catch (error) {
+      managed.deleting = false
+      throw error
     }
 
     // Revoke share if session was shared (prevent orphaned viewer copies)
@@ -6195,7 +6276,7 @@ export class SessionManager implements ISessionManager {
     this.clearPendingPermissionRequestsForSession(sessionId)
 
     // Cancel any pending persistence write (session is being deleted, no need to save)
-    sessionPersistenceQueue.cancel(sessionId)
+    await sessionPersistenceQueue.cancelAndWait(sessionId)
 
     // Clean up session-scoped tool callbacks to prevent memory accumulation
     unregisterSessionScopedToolCallbacks(sessionId)
@@ -6209,18 +6290,6 @@ export class SessionManager implements ISessionManager {
     this.remoteBpms.delete(sessionId)
     this.browserHostByCanvas.delete(sessionId)
 
-    // Dispose agent to clean up ConfigWatchers, event listeners, MCP connections
-    if (managed.agent) {
-      managed.agent.dispose()
-    }
-
-    // Stop pool server (HTTP MCP server for external SDK subprocesses)
-    if (managed.poolServer) {
-      managed.poolServer.stop().catch(err => {
-        sessionLog.warn(`Failed to stop pool server for ${sessionId}: ${err instanceof Error ? err.message : err}`)
-      })
-    }
-
     // Cancel any pending source-activation auto-retry timer (craft-agents-oss#804).
     if (managed.autoRetryTimer) {
       clearTimeout(managed.autoRetryTimer)
@@ -6229,6 +6298,10 @@ export class SessionManager implements ISessionManager {
     managed.autoRetryPending = undefined
 
     clearSubmittedDefinition(sessionId)
+    if (!deleteStoredSession(workspaceRootPath, sessionId)) {
+      managed.deleting = false
+      throw new Error(`Could not delete session directory: ${sessionId}`)
+    }
     this.sessions.delete(sessionId)
 
     // Clean up session metadata in AutomationSystem (prevents memory leak)
@@ -6236,9 +6309,6 @@ export class SessionManager implements ISessionManager {
     if (automationSystem) {
       automationSystem.removeSessionMetadata(sessionId)
     }
-
-    // Delete from disk too
-    deleteStoredSession(workspaceRootPath, sessionId)
 
     // Notify all windows for this workspace that the session was deleted
     this.sendEvent({ type: 'session_deleted', sessionId }, managed.workspace.id)
@@ -6310,6 +6380,7 @@ export class SessionManager implements ISessionManager {
     if (!managed) {
       throw new Error(`Session ${sessionId} not found`)
     }
+    if (managed.deleting) throw new Error(`Session ${sessionId} is being deleted`)
     // Captured before any await so a Stop during regenerate dispose / agent
     // create can invalidate this call (cancel bumps processingGeneration).
     const generationAtEntry = managed.processingGeneration
@@ -6825,6 +6896,28 @@ export class SessionManager implements ISessionManager {
       }
       return
     }
+    if (agent.configureAnswerDelivery && !managed.parentSessionId && !managed.taskSlug && (!managed.systemPromptPreset || managed.systemPromptPreset === 'default')) {
+      const continuingAnswer = isUserTaskContinuation || (options?.hidden && managed.orchestrationStatus === 'running')
+      const owner = continuingAnswer
+        ? managed.messages.findLast(m => m.role === 'user' && !m.hidden && !m.isQueued) ?? userMessage
+        : userMessage
+      // Retain identity across source/auth/Swarm continuation, not SDK subturn ids.
+      const runId = continuingAnswer ? owner.answerRunId ?? owner.id : generateMessageId()
+      if (!continuingAnswer) owner.answerRecoveryAttempted = false
+      owner.answerProtocol = 'explicit-v1'
+      owner.answerRunId = runId
+      managed.answerDelivery = {
+        runId, generation: myGeneration, userMessageId: owner.id,
+        recovery: !!owner.answerRecoveryAttempted,
+        committedMessageId: managed.messages.find(m => m.answerRunId === runId && m.answerCommitted)?.id,
+      }
+      agent.configureAnswerDelivery(this.answerDeliveryControl(managed))
+      this.persistSession(managed)
+      await this.flushSession(managed.id)
+    } else {
+      managed.answerDelivery = undefined
+      agent.configureAnswerDelivery?.(undefined)
+    }
     sendSpan.mark('agent.ready')
 
     // Always set all sources for context (even if none are enabled), including built-ins
@@ -6944,10 +7037,8 @@ export class SessionManager implements ISessionManager {
       }
 
       sendSpan.mark('chat.starting')
-      const chatIterator = agent.chat(message, preparedImages.attachments, {
-        previousResponseInterrupted,
-        continueUserTask: isUserTaskContinuation,
-      })
+      const chatOptions = { previousResponseInterrupted, continueUserTask: isUserTaskContinuation }
+      const chatIterator = this.runAnswerDelivery(managed, agent, agent.chat(message, preparedImages.attachments, chatOptions), chatOptions)
       this.announceRegenerateReplacement(managed)
       sessionLog.info('Got chat iterator, starting iteration...')
       managed.usedExternalToolsThisTurn = false
@@ -7177,6 +7268,142 @@ export class SessionManager implements ISessionManager {
         await this.onProcessingStopped(sessionId, 'interrupted', myGeneration)
       }
     }
+  }
+
+  private answerDeliveryControl(managed: ManagedSession): AnswerDeliveryControl {
+    const state = managed.answerDelivery!
+    return {
+      runId: state.runId,
+      recovery: state.recovery,
+      isActive: () => managed.answerDelivery === state && managed.isProcessing
+        && !state.accepting && !state.committedMessageId && !managed.stopRequested && managed.processingGeneration === state.generation,
+      submit: submission => this.acceptAnswer(managed, state, submission),
+    }
+  }
+
+  private async acceptAnswer(
+    managed: ManagedSession,
+    state: NonNullable<ManagedSession['answerDelivery']>,
+    submission: AnswerSubmission,
+  ): Promise<void> {
+    if (managed.answerDelivery !== state || !managed.isProcessing || managed.stopRequested || managed.processingGeneration !== state.generation) {
+      throw new Error('This answer delivery turn is no longer active.')
+    }
+    if (state.accepting || state.committedMessageId) throw new Error('An answer has already been submitted for this turn.')
+    if (!hasRenderableAssistantText(submission.markdown)) throw new Error('Submit a complete, non-empty Markdown answer.')
+    if (!submission.toolCallId || !submission.sdkMessageId || !submission.sdkTurnAnchor) throw new Error('Missing SDK answer anchor.')
+    const userIndex = managed.messages.findIndex(m => m.id === state.userMessageId)
+    if (userIndex < 0) throw new Error('The originating user turn no longer exists.')
+    if (managed.messages.slice(userIndex + 1).some(m => m.role === 'tool' && m.toolUseId !== submission.toolCallId && (m.toolStatus === 'executing' || m.toolStatus === 'pending'))) {
+      throw new Error('Finish all foreground tools before submitting the answer.')
+    }
+    if ((this.pendingSwarmChildren.get(managed.id) ?? 0) > 0
+      || this.getManagedSwarmChildren(managed.id).some(child => child.isProcessing || child.orchestrationStatus === 'running')
+      || (managed.orchestrationStatus === 'running' && managed.orchestrationAggregation?.phase === 'waiting-workers')) {
+      throw new Error('Wait for all Swarm workers and aggregate their results before submitting the answer.')
+    }
+    const aggregation = managed.orchestrationAggregation
+    if (managed.orchestrationStatus === 'running' && aggregation && aggregation.orchestrationId === managed.orchestrationId) {
+      const assessment = assessManagedSwarmAggregation({
+        finalText: submission.markdown,
+        orchestrationId: aggregation.orchestrationId,
+        finalAggregation: aggregation.finalAggregation,
+        children: this.getManagedSwarmAggregationChildren(managed, aggregation.orchestrationId),
+      })
+      if (!assessment.valid) throw new Error(`Answer does not satisfy Swarm aggregation: ${assessment.reasons.join('; ')}`)
+    }
+    state.accepting = true
+    const previousLastRole = managed.lastMessageRole
+    const previousFinalId = managed.lastFinalMessageId
+    const answer: Message = {
+      id: generateMessageId(), role: 'assistant', content: submission.markdown,
+      timestamp: this.monotonic(), isIntermediate: false, phase: 'final',
+      answerProtocol: 'explicit-v1', answerRunId: state.runId, answerCommitted: true,
+      turnId: `answer-${state.runId}`,
+    }
+    try {
+      // Save the provider anchor before publishing. The SDK has already appended
+      // the assistant tool-call message; its arguments contain this exact answer.
+      await savePiTurnAnchor(getSessionStoragePath(managed.workspace.rootPath, managed.id), answer.id, submission.sdkTurnAnchor)
+      if (managed.stopRequested || managed.processingGeneration !== state.generation || managed.answerDelivery !== state) throw new Error('Answer delivery was interrupted.')
+      this.flushDelta(managed.id, managed.workspace.id)
+      managed.streamingText = ''
+      managed.streamingTurnId = undefined
+      managed.streamingStartedAt = undefined
+      managed.messages.push(answer)
+      state.committedMessageId = answer.id
+      managed.piSdkMessageToCraftMessage ??= new Map()
+      managed.piSdkMessageToCraftMessage.set(submission.sdkMessageId, answer.id)
+      managed.lastMessageRole = 'assistant'
+      managed.lastFinalMessageId = answer.id
+      this.persistSession(managed)
+      await this.flushSession(managed.id)
+      if (managed.stopRequested || !managed.isProcessing || managed.processingGeneration !== state.generation || managed.answerDelivery !== state) throw new Error('Answer delivery was interrupted.')
+      const storedAnswer = loadStoredSession(managed.workspace.rootPath, managed.id)?.messages.find(m => m.id === answer.id)
+      if (!storedAnswer?.answerCommitted || storedAnswer.answerRunId !== state.runId || !hasRenderableAssistantText(storedAnswer.content)) throw new Error('Answer could not be persisted. No answer was published.')
+      this.sendEvent({ type: 'text_complete', sessionId: managed.id, text: answer.content,
+        isIntermediate: false, phase: 'final', answerProtocol: answer.answerProtocol,
+        answerRunId: state.runId, answerCommitted: true, turnId: answer.turnId,
+        messageId: answer.id, timestamp: answer.timestamp }, managed.workspace.id)
+    } catch (error) {
+      managed.messages = managed.messages.filter(m => m.id !== answer.id)
+      state.committedMessageId = undefined
+      managed.piSdkMessageToCraftMessage?.delete(submission.sdkMessageId)
+      // An obsolete submission must not roll back a newer turn's metadata.
+      if (managed.lastFinalMessageId === answer.id) {
+        managed.lastMessageRole = previousLastRole
+        managed.lastFinalMessageId = previousFinalId
+      }
+      this.persistSession(managed)
+      throw error
+    } finally {
+      state.accepting = false
+    }
+  }
+
+  private async *runAnswerDelivery(
+    managed: ManagedSession,
+    agent: AgentInstance,
+    initial: AsyncGenerator<AgentEvent>,
+    options: ChatOptions,
+  ): AsyncGenerator<AgentEvent> {
+    const state = managed.answerDelivery
+    if (!state) { yield* initial; return }
+    let complete: Extract<AgentEvent, { type: 'complete' }> | undefined
+    for await (const event of initial) {
+      if (event.type === 'complete') complete = event
+      else yield event
+    }
+    const owner = managed.messages.find(m => m.id === state.userMessageId)
+    const hasError = managed.messages.slice(managed.messages.findIndex(m => m.id === state.userMessageId) + 1).some(m => m.role === 'error')
+    const waiting = managed.orchestrationStatus === 'running' && managed.orchestrationAggregation?.phase === 'waiting-workers'
+    if (complete && !state.committedMessageId && !state.recovery && !hasError && !waiting
+      && managed.isProcessing && !managed.stopRequested && managed.answerDelivery === state
+      && managed.processingGeneration === state.generation && !managed.authRetryInProgress) {
+      // Account for the first call before starting the one allowed recovery call.
+      await this.processEvent(managed, complete)
+      state.recovery = true
+      if (owner) owner.answerRecoveryAttempted = true
+      this.persistSession(managed)
+      await this.flushSession(managed.id)
+      // Cancellation or a replacement turn can arrive while the checkpoint flushes.
+      // The first completion was already accounted for above; do not replay it.
+      if (!managed.isProcessing || managed.stopRequested || managed.answerDelivery !== state
+        || managed.processingGeneration !== state.generation || managed.authRetryInProgress) return
+      agent.configureAnswerDelivery?.(this.answerDeliveryControl(managed))
+      complete = undefined
+      for await (const event of agent.chat(ANSWER_RECOVERY_PROMPT, undefined, { ...options, previousResponseInterrupted: false, continueUserTask: true })) {
+        if (event.type === 'complete') complete = event
+        else yield event
+      }
+    }
+    if (!state.committedMessageId && state.recovery && managed.isProcessing && !managed.stopRequested
+      && managed.answerDelivery === state && managed.processingGeneration === state.generation
+      && !managed.messages.slice(managed.messages.findIndex(m => m.id === state.userMessageId) + 1).some(m => m.role === 'error')) {
+      yield { type: 'error', message: '未完成答案交付：模型未提交完整正文。已有工作内容已保留，请继续此任务。' }
+    }
+    if (complete) yield complete
+    else if (state.committedMessageId) yield { type: 'complete' }
   }
 
   /**
@@ -10326,6 +10553,7 @@ export class SessionManager implements ISessionManager {
         id: generateMessageId(),
         role: 'assistant',
         content,
+        ...(managed.answerDelivery ? { answerProtocol: 'explicit-v1' as const, answerRunId: managed.answerDelivery.runId } : {}),
         timestamp: managed.streamingStartedAt ?? this.monotonic(),
         isIntermediate: true,
         turnId,
@@ -10350,11 +10578,13 @@ export class SessionManager implements ISessionManager {
   }
 
   private async processEvent(managed: ManagedSession, event: AgentEvent): Promise<void> {
+    if (managed.deleting) return
     const sessionId = managed.id
     const workspaceId = managed.workspace.id
 
     switch (event.type) {
       case 'text_delta':
+        if (managed.answerDelivery?.committedMessageId) break
         if (!managed.streamingText) {
           managed.streamingStartedAt = this.monotonic()
         }
@@ -10371,6 +10601,7 @@ export class SessionManager implements ISessionManager {
         break
 
       case 'text_complete': {
+        if (managed.answerDelivery?.committedMessageId) break
         // Flush any pending deltas before sending complete (ensures renderer has all content)
         this.flushDelta(sessionId, workspaceId)
 
@@ -10379,7 +10610,7 @@ export class SessionManager implements ISessionManager {
           && aggregation !== undefined
           && aggregation.orchestrationId === managed.orchestrationId
           && aggregation.phase === 'waiting-workers'
-        const isIntermediate = event.isIntermediate || isManagedSwarmDispatch
+        const isIntermediate = !!managed.answerDelivery || event.isIntermediate || isManagedSwarmDispatch
         const completesActiveStream = !event.turnId
           || !managed.streamingTurnId
           || event.turnId === managed.streamingTurnId
@@ -10393,6 +10624,8 @@ export class SessionManager implements ISessionManager {
           content,
           timestamp: this.monotonic(),
           isIntermediate,
+          phase: event.phase,
+          ...(managed.answerDelivery ? { answerProtocol: 'explicit-v1' as const, answerRunId: managed.answerDelivery.runId } : {}),
           turnId: event.turnId,
           parentToolUseId: event.parentToolUseId,
         }
@@ -10440,7 +10673,7 @@ export class SessionManager implements ISessionManager {
           }
         }
 
-        this.sendEvent({ type: 'text_complete', sessionId, text: content, isIntermediate, turnId: event.turnId, parentToolUseId: event.parentToolUseId, timestamp: assistantMessage.timestamp, messageId: assistantMessage.id }, workspaceId)
+        this.sendEvent({ type: 'text_complete', sessionId, text: content, isIntermediate, phase: event.phase, answerProtocol: assistantMessage.answerProtocol, answerRunId: assistantMessage.answerRunId, turnId: event.turnId, parentToolUseId: event.parentToolUseId, timestamp: assistantMessage.timestamp, messageId: assistantMessage.id }, workspaceId)
 
         // Persist session after complete message to prevent data loss on quit
         this.persistSession(managed)
@@ -10469,11 +10702,12 @@ export class SessionManager implements ISessionManager {
       }
 
       case 'tool_start': {
+        if (managed.answerDelivery?.committedMessageId) break
         if (toolCallBypassesWorkspaceCache(event.toolName)) {
           managed.usedExternalToolsThisTurn = true
         }
         // Format tool input paths to relative for better readability
-        const formattedToolInput = formatToolInputPaths(event.input)
+        const formattedToolInput = /^(?:mcp__session__|session__)?submit_answer$/.test(event.toolName) ? {} : formatToolInputPaths(event.input)
 
         // Resolve call_llm model for TurnCard badge display.
         // Known registry ids only — do not rewrite ORDER aliases like "Opus".
@@ -10541,6 +10775,7 @@ export class SessionManager implements ISessionManager {
           const toolStartMessage: Message = {
             id: generateMessageId(),
             role: 'tool',
+            ...(managed.answerDelivery ? { answerProtocol: 'explicit-v1' as const, answerRunId: managed.answerDelivery.runId } : {}),
             content: `Running ${event.toolName}...`,
             timestamp: this.monotonic(),
             toolName: event.toolName,
@@ -10647,6 +10882,7 @@ export class SessionManager implements ISessionManager {
           const toolMessage: Message = {
             id: generateMessageId(),
             role: 'tool',
+            ...(managed.answerDelivery ? { answerProtocol: 'explicit-v1' as const, answerRunId: managed.answerDelivery.runId } : {}),
             content: '',
             timestamp: this.monotonic(),
             toolName: toolName,
@@ -11283,6 +11519,10 @@ export class SessionManager implements ISessionManager {
   }
 
   private sendEvent(event: SessionEvent, workspaceId?: string): void {
+    if (event.type === 'text_delta' || event.type === 'tool_start' || event.type === 'tool_result') {
+      const state = this.sessions.get(event.sessionId)?.answerDelivery
+      if (state) event = { ...event, answerProtocol: 'explicit-v1', answerRunId: state.runId }
+    }
     if (!this.eventSink) {
       sessionLog.warn('Cannot send event - no event sink')
       return

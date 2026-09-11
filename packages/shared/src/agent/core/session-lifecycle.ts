@@ -23,6 +23,9 @@ export enum AbortReason {
   /** User clicked stop button */
   UserStop = 'user_stop',
 
+  /** Ordinary answer committed; normal completion, not user cancellation. */
+  AnswerSubmitted = 'answer_submitted',
+
   /** Agent submitted a plan and is awaiting review */
   PlanSubmitted = 'plan_submitted',
 

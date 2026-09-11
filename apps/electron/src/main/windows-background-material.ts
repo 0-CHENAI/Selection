@@ -47,7 +47,9 @@ export function resolveWindowsTitleBarOverlay(isDark: boolean): {
   height: number
 } {
   return {
-    color: resolveWindowsWindowBackground(isDark),
+    // Let the renderer's theme/scenic background continue under the native
+    // caption buttons instead of painting a fixed light/dark rectangle (#319).
+    color: '#00000000',
     symbolColor: isDark ? WINDOWS_DARK_TITLEBAR_SYMBOL : WINDOWS_LIGHT_TITLEBAR_SYMBOL,
     height: WINDOWS_TITLEBAR_OVERLAY_HEIGHT,
   }

@@ -8,10 +8,15 @@ interface PanelHeaderCenterButtonProps extends React.ButtonHTMLAttributes<HTMLBu
   icon: React.ReactNode
   /** Optional tooltip text */
   tooltip?: string
+  /** Additional purpose text below the tooltip title. */
+  tooltipDescription?: string
+  /** Hide a tooltip while another explanation surface is open, without remounting the button. */
+  tooltipDisabled?: boolean
 }
 
 export const PanelHeaderCenterButton = forwardRef<HTMLButtonElement, PanelHeaderCenterButtonProps>(
-  ({ icon, tooltip, className, ...props }, ref) => {
+  ({ icon, tooltip, tooltipDescription, tooltipDisabled, className, ...props }, ref) => {
+    const [tooltipOpen, setTooltipOpen] = React.useState(false)
     const button = (
       <button
         ref={ref}
@@ -34,9 +39,12 @@ export const PanelHeaderCenterButton = forwardRef<HTMLButtonElement, PanelHeader
 
     if (tooltip) {
       return (
-        <Tooltip>
+        <Tooltip open={!tooltipDisabled && tooltipOpen} onOpenChange={setTooltipOpen}>
           <TooltipTrigger asChild>{button}</TooltipTrigger>
-          <TooltipContent>{tooltip}</TooltipContent>
+          <TooltipContent side="bottom" className={tooltipDescription ? 'max-w-80' : undefined}>
+            <div className={tooltipDescription ? 'font-medium' : undefined}>{tooltip}</div>
+            {tooltipDescription && <p className="mt-1 text-xs leading-relaxed font-normal">{tooltipDescription}</p>}
+          </TooltipContent>
         </Tooltip>
       )
     }

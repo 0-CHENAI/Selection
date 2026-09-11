@@ -53,6 +53,9 @@ import { PiEventAdapter } from './backend/pi/event-adapter.ts';
 import { EventQueue } from './backend/event-queue.ts';
 
 // System prompt for Selection context
+import { ANSWER_DELIVERY_PROMPT } from '../prompts/answer-delivery.ts';
+import { answerToolBlock, isSubmitAnswer } from './answer-delivery.ts';
+import type { AnswerDeliveryControl } from './backend/types.ts';
 import { getSystemPrompt } from '../prompts/system.ts';
 import { getCoAuthorPreference } from '../config/preferences.ts';
 import { loadProjectPromptContext } from '../projects/storage.ts';
@@ -383,6 +386,14 @@ export class PiAgent extends BaseAgent {
 
   // Cached session tool context (lazy-created on first session tool call)
   private _sessionToolContext: SessionToolContext | null = null;
+  private answerDelivery: AnswerDeliveryControl | undefined;
+  private answerAccepted = false;
+
+  configureAnswerDelivery(control: AnswerDeliveryControl | undefined): void {
+    this.answerDelivery = control;
+    this.answerAccepted = false;
+  }
+
 
   // RPC request counter for unique IDs
   private rpcIdCounter: number = 0;
@@ -682,6 +693,9 @@ export class PiAgent extends BaseAgent {
     // are executed in the main process when the LLM calls them.
     this.assertBackendSessionToolParity();
     let sessionToolDefs = getSessionToolProxyDefs();
+    if (!this.config.explicitAnswerDelivery) {
+      sessionToolDefs = sessionToolDefs.filter(def => !isSubmitAnswer(def.name));
+    }
 
     // Mirror Claude's gate: hide `browser_tool` when the user has disabled
     // the built-in browser tool. Without this filter, Pi would still advertise
@@ -1422,8 +1436,14 @@ export class PiAgent extends BaseAgent {
     toolCallId?: string;
     input: Record<string, unknown>;
     assistantGeneration?: number;
+    answerRunId?: string;
   }): Promise<void> {
     const { requestId, toolName, toolCallId, assistantGeneration } = req;
+    const answerBlock = answerToolBlock(this.answerDelivery, this.answerAccepted, toolName, req.answerRunId);
+    if (answerBlock) {
+      this.send({ type: 'pre_tool_use_response', requestId, action: 'block', reason: answerBlock });
+      return;
+    }
     const input = recoverKnownToolInputFromIntent(toolName, req.input);
     const inputWasRecovered = input !== req.input;
     const debugSessionId = this.config.session?.id || this._sessionId;
@@ -1781,7 +1801,31 @@ export class PiAgent extends BaseAgent {
     requestId: string;
     toolName: string;
     args: Record<string, unknown>;
+    toolCallId?: string;
+    sdkMessageId?: string;
+    sdkTurnAnchor?: string;
+    answerRunId?: string;
   }): Promise<void> {
+    const control = this.answerDelivery;
+    const answerBlock = answerToolBlock(control, this.answerAccepted, request.toolName, request.answerRunId);
+    if (answerBlock) {
+      this.send({ type: 'tool_execute_response', requestId: request.requestId, result: { content: answerBlock, isError: true } });
+      return;
+    }
+    if (isSubmitAnswer(request.toolName)) {
+      const ctx = { ...this.getSessionToolContext(), submitAnswer: async (markdown: string) => {
+        if (!control || !request.toolCallId || !request.sdkMessageId || !request.sdkTurnAnchor) {
+          throw new Error('Answer delivery requires an active SDK message and branch anchor.');
+        }
+        await control.submit({ markdown, toolCallId: request.toolCallId, sdkMessageId: request.sdkMessageId, sdkTurnAnchor: request.sdkTurnAnchor });
+        this.answerAccepted = true;
+        this.abortReason = AbortReason.AnswerSubmitted;
+      } };
+      const def = SESSION_TOOL_REGISTRY.get('submit_answer');
+      const result = await def!.handler!(ctx, request.args);
+      this.send({ type: 'tool_execute_response', requestId: request.requestId, result: { content: result.content, isError: !!result.isError } });
+      return;
+    }
     // Defense in depth: source execution is never allowed to bypass preparation.
     const prereqResult = this.prerequisiteManager.checkPrerequisites(request.toolName);
     if (!prereqResult.allowed) {
@@ -2553,6 +2597,7 @@ export class PiAgent extends BaseAgent {
       // does (buildTextPrompt / buildSDKUserMessage append context to the tail).
       const fullSystemPrompt = [
         systemPrompt,
+        this.answerDelivery ? ANSWER_DELIVERY_PROMPT : undefined,
         ...stableParts,
       ].filter(Boolean).join('\n\n');
 
@@ -2569,6 +2614,8 @@ export class PiAgent extends BaseAgent {
       const turnId = `turn-${++this.rpcIdCounter}`;
       this.send({
         type: 'prompt',
+        answerRunId: this.answerDelivery?.runId,
+        answerRecovery: this.answerDelivery?.recovery,
         id: turnId,
         message: userMessage,
         systemPrompt: fullSystemPrompt,

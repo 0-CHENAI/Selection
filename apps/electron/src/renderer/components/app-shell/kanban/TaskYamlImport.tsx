@@ -1,3 +1,4 @@
+import { confirmAction } from '@/lib/confirmation'
 import * as React from 'react'
 import { useSetAtom } from 'jotai'
 import { useTranslation } from 'react-i18next'
@@ -44,8 +45,8 @@ export function TaskYamlImport({
     setEditorDirty(value.trim().length > 0)
   }
 
-  function closeEditor() {
-    if (yaml.trim() && !window.confirm(t('tasks.discardUnsaved'))) return
+  async function closeEditor() {
+    if (yaml.trim() && !await confirmAction(t('tasks.discardUnsaved'))) return
     setEditorDirty(false)
     onClose()
   }

@@ -96,3 +96,27 @@ describe('session persistence header conflict helpers', () => {
     expect(merged.labels).toEqual(['external'])
   })
 })
+
+describe('deletion write barrier', () => {
+  it('waits for an automatic write already in flight, then cancels new pending work', async () => {
+    const { SessionPersistenceQueue } = await import('../persistence-queue')
+    const queue = new SessionPersistenceQueue(0)
+    let release!: () => void
+    let began!: () => void
+    const started = new Promise<void>(resolve => { began = resolve })
+    const barrier = new Promise<void>(resolve => { release = resolve })
+    // Keep the writer in flight to deterministically exercise the deletion race.
+    ;(queue as any).write = async () => { began(); await barrier }
+    queue.enqueue({ id: 'deleting' } as any)
+    await started
+    let drained = false
+    const wait = queue.cancelAndWait('deleting').then(() => { drained = true })
+    await Promise.resolve()
+    expect(drained).toBe(false)
+    queue.enqueue({ id: 'deleting' } as any)
+    release()
+    await wait
+    expect(drained).toBe(true)
+    expect(queue.hasPending('deleting')).toBe(false)
+  })
+})

@@ -1,4 +1,5 @@
 /** Context menu for the non-classification batch actions that remain. */
+import { confirmAction } from '@/lib/confirmation'
 import { useCallback } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useSetAtom } from 'jotai'
@@ -32,14 +33,13 @@ export function BatchSessionMenu({ onSendToWorkspace }: BatchSessionMenuProps = 
   const handleBatchDelete = useCallback(async () => {
     const ids = [...selectedIds]
     if (ids.length === 0) return
-    const firstDeleted = await onDeleteSession(ids[0])
-    if (!firstDeleted) return
-    for (let index = 1; index < ids.length; index++) {
+    if (!await confirmAction(t('dialog.deleteSessionsConfirmation', { count: ids.length }), { title: t('common.delete'), confirmLabel: t('common.delete') })) return
+    for (let index = 0; index < ids.length; index++) {
       await onDeleteSession(ids[index], true)
     }
     clearMultiSelect()
-    toast(`${ids.length} ${ids.length === 1 ? 'session' : 'sessions'} deleted`)
-  }, [selectedIds, onDeleteSession, clearMultiSelect])
+    toast(t('dialog.deletedSessions', { count: ids.length }))
+  }, [selectedIds, onDeleteSession, clearMultiSelect, t])
 
   return (
     <>

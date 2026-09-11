@@ -18,6 +18,7 @@ type ApiToChannelMapKeys = Exclude<
   | 'getTransportConnectionState'
   | 'getRuntimeEnvironment'
   | 'onTransportConnectionStateChanged'
+  | 'onConfirmDialog' // renderer callback registered directly in preload
   | 'reconnectTransport'
   | 'isChannelAvailable'
   | 'getSystemWarnings' // reads env var set at startup — no IPC needed

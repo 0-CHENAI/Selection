@@ -1,6 +1,10 @@
-import { beforeEach, describe, expect, it, mock } from 'bun:test'
+import { afterAll, beforeEach, describe, expect, it, mock } from 'bun:test'
+import { rmSync } from 'node:fs'
+import { mkdir, mkdtemp, readdir, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 
-const workspaceRootPath = '/tmp/ws-rollback'
+const workspaceRootPath = await mkdtemp(join(tmpdir(), 'session-branch-rollback-'))
 const workspace = {
   id: 'ws-1',
   name: 'Workspace',
@@ -233,9 +237,11 @@ mock.module('@craft-agent/shared/sessions', () => ({
     storedById.set(id, session)
     return session
   },
-  deleteSession: async (_root: string, id: string) => {
+  deleteSession: (_root: string, id: string) => {
     deletedIds.push(id)
     storedById.delete(id)
+    rmSync(join(workspaceRootPath, 'sessions', id), { recursive: true, force: true })
+    return true
   },
   updateSessionMetadata: async () => {},
   canUpdateSdkCwd: () => false,
@@ -270,7 +276,14 @@ mock.module('@craft-agent/shared/sessions', () => ({
 const { SessionManager } = await import('@craft-agent/server-core/sessions')
 
 describe('session branch rollback on preflight failure', () => {
-  beforeEach(() => {
+  afterAll(async () => {
+    await rm(workspaceRootPath, { recursive: true, force: true })
+  })
+
+  beforeEach(async () => {
+    // Branch creation now snapshots files before SDK preflight. Supply a real,
+    // isolated source directory so these tests still reach the intended failure.
+    await mkdir(join(workspaceRootPath, 'sessions', 'source-1'), { recursive: true })
     mockedProvider = 'anthropic'
     idCounter = 0
     storedById.clear()
@@ -342,6 +355,24 @@ describe('session branch rollback on preflight failure', () => {
 
     expect(deletedIds).toEqual([])
     expect(storedById.has('child-1')).toBe(false)
+  })
+
+  it('rolls back the child before SDK startup when source snapshot fails', async () => {
+    await rm(join(workspaceRootPath, 'sessions', 'source-1'), { recursive: true })
+    const manager = new SessionManager()
+    const startAgent = mock(async () => { throw new Error('SDK must not start') })
+    ;(manager as any).getOrCreateAgent = startAgent
+
+    await expect(manager.createSession('ws-1', {
+      branchFromSessionId: 'source-1',
+      branchFromMessageId: 'm1',
+    } as any)).rejects.toThrow('ENOENT')
+
+    expect(startAgent).not.toHaveBeenCalled()
+    expect(deletedIds).toEqual(['child-1'])
+    expect(storedById.has('child-1')).toBe(false)
+    expect((manager as any).sessions.has('child-1')).toBe(false)
+    await expect(readdir(join(workspaceRootPath, 'sessions', 'child-1'))).rejects.toThrow('ENOENT')
   })
 
   it('runs backend preflight for pi branches and rolls back on failure', async () => {

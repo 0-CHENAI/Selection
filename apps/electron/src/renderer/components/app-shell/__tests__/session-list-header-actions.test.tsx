@@ -116,13 +116,13 @@ describe('session list and orchestration view controls (#264, #283)', () => {
     const taskYamlImport = readFileSync(join(import.meta.dir, '../kanban/TaskYamlImport.tsx'), 'utf8')
 
     expect(appShell).toContain('useAtomValue(kanbanEditorDirtyAtom)')
-    expect(appShell).toContain("kanbanEditorDirty && !window.confirm(t('tasks.discardUnsaved'))")
-    expect(appShell).toContain('if (isBoardView && !leaveOrchestrationView()) return')
+    expect(appShell).toContain("kanbanEditorDirty && !await confirmAction(t('tasks.discardUnsaved'))")
+    expect(appShell).toContain('if (isBoardView && !(await leaveOrchestrationView())) return')
     expect(taskEditor).toContain('useAtom(kanbanEditorDirtyAtom)')
     expect(taskEditor).toContain('return () => setDirty(false)')
     expect(taskYamlImport).toContain('useSetAtom(kanbanEditorDirtyAtom)')
     expect(taskYamlImport).toContain('setEditorDirty(value.trim().length > 0)')
-    expect(taskYamlImport).toContain("yaml.trim() && !window.confirm(t('tasks.discardUnsaved'))")
+    expect(taskYamlImport).toContain("yaml.trim() && !await confirmAction(t('tasks.discardUnsaved'))")
     expect(taskYamlImport).toContain('setEditorDirty(false)')
   })
 

@@ -469,6 +469,7 @@ export class PiEventAdapter extends BaseEventAdapter {
             type: 'text_complete',
             text: segment.text,
             isIntermediate,
+            phase: segment.phase === 'commentary' ? 'intermediate' : segment.phase === 'final_answer' ? 'final' : 'unclassified',
             turnId: mTurnId,
             sdkMessageId,
           };

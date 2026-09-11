@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { restoreComposerFocus } from '../restore-composer-focus'
+import { keepComposerFocusOnPickerClose, restoreComposerFocus } from '../restore-composer-focus'
 
 describe('restoreComposerFocus', () => {
   test('defers focus until after an overlay finishes restoring trigger focus', () => {
@@ -30,5 +30,14 @@ describe('restoreComposerFocus', () => {
     targetRef.current = null
 
     expect(() => scheduled?.()).not.toThrow()
+  })
+})
+
+describe('keepComposerFocusOnPickerClose (#332)', () => {
+  test('refuses the overlay focus restore that would re-open the trigger tooltip', () => {
+    const prevented: boolean[] = []
+    keepComposerFocusOnPickerClose({ preventDefault: () => prevented.push(true) })
+
+    expect(prevented).toEqual([true])
   })
 })

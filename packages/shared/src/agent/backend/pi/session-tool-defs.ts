@@ -25,6 +25,7 @@ export const PI_SESSION_TOOL_PREFIX = 'mcp__session__';
  * Do not alias browser_tool — pi-agent filters only the prefixed name.
  */
 export const PI_SESSION_TOOL_SHORT_NAME_ALIASES = [
+  'submit_answer',
   'spawn_session',
   'call_llm',
   'run_task',

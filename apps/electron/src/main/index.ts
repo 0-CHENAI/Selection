@@ -571,13 +571,6 @@ app.whenReady().then(async () => {
 
     // Dialog bridge — preload capability handlers use ipcRenderer.invoke to
     // call main-process-only dialog APIs (dialog, BrowserWindow).
-    ipcMain.handle('__dialog:showMessageBox', async (event, spec) => {
-      const win = BrowserWindow.fromWebContents(event.sender)
-        || BrowserWindow.getFocusedWindow()
-        || BrowserWindow.getAllWindows()[0]
-      const result = await dialog.showMessageBox(win, spec)
-      return { response: result.response }
-    })
     ipcMain.handle('__dialog:showOpenDialog', async (event, spec) => {
       const win = BrowserWindow.fromWebContents(event.sender)
         || BrowserWindow.getFocusedWindow()

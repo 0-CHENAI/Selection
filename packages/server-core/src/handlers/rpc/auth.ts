@@ -19,6 +19,7 @@ export function registerAuthHandlers(server: RpcServer, deps: HandlerDeps): void
   // Show logout confirmation dialog (routed to client)
   server.handle(RPC_CHANNELS.auth.SHOW_LOGOUT_CONFIRMATION, async (ctx) => {
     const result = await requestClientConfirmDialog(server, ctx.clientId, {
+      kind: 'logout',
       type: 'warning',
       buttons: ['Cancel', 'Log Out'],
       defaultId: 0,
@@ -35,6 +36,8 @@ export function registerAuthHandlers(server: RpcServer, deps: HandlerDeps): void
   // Show delete session confirmation dialog (routed to client)
   server.handle(RPC_CHANNELS.auth.SHOW_DELETE_SESSION_CONFIRMATION, async (ctx, name: string) => {
     const result = await requestClientConfirmDialog(server, ctx.clientId, {
+      kind: 'deleteSession',
+      name,
       type: 'warning',
       buttons: ['Cancel', 'Delete'],
       defaultId: 0,

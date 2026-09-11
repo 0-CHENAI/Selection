@@ -1,3 +1,4 @@
+import { confirmAction } from '@/lib/confirmation'
 import * as React from "react"
 import { useTranslation, Trans } from "react-i18next"
 import { useRef, useState, useEffect, useCallback, useMemo } from "react"
@@ -265,6 +266,8 @@ function AppShellContent({
   const resizeHandleRef = React.useRef<HTMLDivElement>(null)
   const sessionListHandleRef = React.useRef<HTMLDivElement>(null)
   const [session, setSession] = useSession()
+  const selectedSessionRef = React.useRef(session.selected)
+  selectedSessionRef.current = session.selected
   const { resolvedMode, isDark, setMode } = useTheme()
   const { canGoBack, canGoForward, goBack, goForward, navigateToSource, navigateToSession } = useNavigation()
 
@@ -413,15 +416,15 @@ function AppShellContent({
   const [searchActive, setSearchActive] = React.useState(false)
   const [searchQuery, setSearchQuery] = React.useState('')
 
-  const leaveOrchestrationView = React.useCallback(() => {
-    if (kanbanEditorDirty && !window.confirm(t('tasks.discardUnsaved'))) return false
+  const leaveOrchestrationView = React.useCallback(async () => {
+    if (kanbanEditorDirty && !await confirmAction(t('tasks.discardUnsaved'))) return false
     setKanbanEditorTarget(null)
     navigate(routes.view.allSessions())
     return true
   }, [kanbanEditorDirty, setKanbanEditorTarget, t])
 
-  const openSessionSearch = React.useCallback(() => {
-    if (isBoardView && !leaveOrchestrationView()) return
+  const openSessionSearch = React.useCallback(async () => {
+    if (isBoardView && !(await leaveOrchestrationView())) return
     setSearchActive(true)
   }, [isBoardView, leaveOrchestrationView])
 
@@ -1187,12 +1190,13 @@ function AppShellContent({
   // Wrap delete handler to clear selection when deleting the currently selected session
   // This prevents stale state during re-renders that could cause crashes
   const handleDeleteSession = useCallback(async (sessionId: string, skipConfirmation?: boolean): Promise<boolean> => {
-    // Clear selection first if this is the selected session
-    if (session.selected === sessionId) {
+    const deleted = await onDeleteSession(sessionId, skipConfirmation)
+    // Cancellation must preserve selection; do not clear a newly selected session.
+    if (deleted && selectedSessionRef.current === sessionId) {
       setSession({ selected: null })
     }
-    return onDeleteSession(sessionId, skipConfirmation)
-  }, [session.selected, setSession, onDeleteSession])
+    return deleted
+  }, [setSession, onDeleteSession])
 
   // Extend context value with local overrides (wrapped onDeleteSession, sources, skills, labels, enabledModes, rightSidebarOpenButton, effectiveSessionStatuses)
   const appShellContextValue = React.useMemo<AppShellContextType>(() => ({

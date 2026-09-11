@@ -20,7 +20,7 @@ import { toast } from "sonner"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { cn } from "@/lib/utils"
 import { appendRestoredInput, getRestorableStoppedPrompt } from "@/lib/input-text"
-import { Markdown, CollapsibleMarkdownProvider, StreamingMarkdown, type RenderMode } from "@/components/markdown"
+import { Markdown, CollapsibleMarkdownProvider, type RenderMode } from "@/components/markdown"
 import { AnimatedCollapsibleContent } from "@/components/ui/collapsible"
 import {
   Spinner,
@@ -445,17 +445,14 @@ function ProcessingIndicator({ startTime, statusMessage }: ProcessingIndicatorPr
  */
 function ScrollOnMount({
   targetRef,
-  onScroll,
   skip = false
 }: {
   targetRef: React.RefObject<HTMLDivElement | null>
-  onScroll?: () => void
   skip?: boolean
 }) {
   React.useLayoutEffect(() => {
     if (skip) return
     targetRef.current?.scrollIntoView({ behavior: 'instant' })
-    onScroll?.()
   }, [skip])
   return null
 }
@@ -596,8 +593,6 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
   // Mirror isFocusedPanel into a ref so the ResizeObserver closure reads the latest value
   const isFocusedPanelRef = React.useRef(isFocusedPanel)
   isFocusedPanelRef.current = isFocusedPanel
-  // Skip smooth scroll briefly after session switch (instant scroll already happened)
-  const skipSmoothScrollUntilRef = React.useRef(0)
   // Track message commit boundaries so we can auto-scroll when a new user message
   // actually lands in state (important when attachments delay optimistic insertion).
   const prevLastMessageIdRef = React.useRef<string | null>(null)
@@ -1230,12 +1225,32 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
     const cancelProgrammaticLock = () => {
       ignoreScrollUnstickUntilRef.current = 0
     }
+    const handleWheel = (event: WheelEvent) => {
+      cancelProgrammaticLock()
+      // Hand control back before the next animation frame, even if the native
+      // scroll event has not yet updated the distance-to-bottom state.
+      if (event.deltaY < 0) isStickToBottomRef.current = false
+    }
+    const handleTouchMove = () => {
+      cancelProgrammaticLock()
+      isStickToBottomRef.current = false
+    }
+    const handleScrollKey = (event: KeyboardEvent) => {
+      if (!['ArrowUp', 'PageUp', 'Home'].includes(event.key)) return
+      if (event.target instanceof Element && event.target.closest('input,textarea,[contenteditable="true"]')) return
+      cancelProgrammaticLock()
+      isStickToBottomRef.current = false
+    }
+    viewport.addEventListener('keydown', handleScrollKey)
     viewport.addEventListener('scroll', handleScroll, { passive: true })
-    viewport.addEventListener('wheel', cancelProgrammaticLock, { passive: true })
+    viewport.addEventListener('wheel', handleWheel, { passive: true })
+    viewport.addEventListener('touchmove', handleTouchMove, { passive: true })
     viewport.addEventListener('touchstart', cancelProgrammaticLock, { passive: true })
     return () => {
+      viewport.removeEventListener('keydown', handleScrollKey)
       viewport.removeEventListener('scroll', handleScroll)
-      viewport.removeEventListener('wheel', cancelProgrammaticLock)
+      viewport.removeEventListener('wheel', handleWheel)
+      viewport.removeEventListener('touchmove', handleTouchMove)
       viewport.removeEventListener('touchstart', cancelProgrammaticLock)
     }
   }, [handleScroll])
@@ -1255,27 +1270,17 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
     const viewport = scrollViewportRef.current
     if (!viewport) return
 
-    // Debounced scroll for streaming - waits for layout to settle
-    let debounceTimer: ReturnType<typeof setTimeout> | null = null
-
+    // Coalesce layout changes into one frame. Continuous output must not reset
+    // a debounce timer forever, or queue overlapping smooth-scroll animations.
+    let scrollFrame: number | null = null
     const resizeObserver = new ResizeObserver(() => {
-      // Unfocused panels: always scroll to bottom instantly (user isn't reading them)
-      if (!isFocusedPanelRef.current) {
-        applyStickState(null, { forceStick: true })
-        messagesEndRef.current?.scrollIntoView({ behavior: 'instant' })
-        return
-      }
-
-      // Focused panel: respect sticky-bottom preference
-      if (!isStickToBottomRef.current) return
-
-      // Clear pending scroll and wait for layout to settle
-      if (debounceTimer) clearTimeout(debounceTimer)
-      debounceTimer = setTimeout(() => {
-        // Skip smooth scroll if we just did an instant scroll (session switch/lazy load)
-        if (Date.now() < skipSmoothScrollUntilRef.current) return
-        messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
-      }, 200)
+      if (scrollFrame != null) return
+      scrollFrame = requestAnimationFrame(() => {
+        scrollFrame = null
+        if (isFocusedPanelRef.current && !isStickToBottomRef.current) return
+        if (!isFocusedPanelRef.current) applyStickState(null, { forceStick: true })
+        viewport.scrollTo({ top: viewport.scrollHeight, behavior: 'instant' })
+      })
     })
 
     // Observe the scroll content container (first child of viewport)
@@ -1286,7 +1291,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
 
     return () => {
       resizeObserver.disconnect()
-      if (debounceTimer) clearTimeout(debounceTimer)
+      if (scrollFrame != null) cancelAnimationFrame(scrollFrame)
     }
   }, [session?.id, applyStickState])
 
@@ -1749,9 +1754,6 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
                   <ScrollOnMount
                     targetRef={messagesEndRef}
                     skip={skipScrollToBottom}
-                    onScroll={() => {
-                      skipSmoothScrollUntilRef.current = Date.now() + 500
-                    }}
                   />
                   {/* Empty state for compact mode - inviting conversational prompt, centered in full popover */}
                   {compactMode && turns.length === 0 && (
@@ -2509,29 +2511,21 @@ function MessageBubble({
               <ExternalLink className="w-4 h-4 text-muted-foreground hover:text-foreground" />
             </button>
           )}
-          {/* Use StreamingMarkdown for block-level memoization during streaming */}
-          {message.isStreaming ? (
-            <StreamingMarkdown
-              content={message.content}
-              isStreaming={true}
+          {/* Keep one document tree across streaming and completion. */}
+          <CollapsibleMarkdownProvider>
+            <Markdown
               mode={renderMode}
               onUrlClick={onOpenUrl}
               onFileClick={onOpenFile}
-            />
-          ) : (
-            <CollapsibleMarkdownProvider>
-              <Markdown
-                mode={renderMode}
-                onUrlClick={onOpenUrl}
-                onFileClick={onOpenFile}
-                id={message.id}
-                className="text-sm"
-                collapsible
-              >
-                {message.content}
-              </Markdown>
-            </CollapsibleMarkdownProvider>
-          )}
+              id={message.id}
+              isStreaming={message.isStreaming}
+              revealStartTime={message.isStreaming ? undefined : message.timestamp}
+              className="text-sm"
+              collapsible
+            >
+              {message.content}
+            </Markdown>
+          </CollapsibleMarkdownProvider>
         </div>
       </div>
     )
