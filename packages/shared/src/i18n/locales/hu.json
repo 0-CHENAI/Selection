@@ -924,7 +924,7 @@
   "projectInfo.colorHint": "A projekt munkamenetei ezzel a színnel lesznek kiemelve a munkamenet-listában.",
   "projectInfo.deleteAssetConfirm": "Törlöd a(z) {{name}} fájlt?",
   "projectInfo.deleteAssetFailed": "A fájl törlése nem sikerült",
-  "projectInfo.deleteConfirm": "Törlöd a(z) {{name}} projektet? A munkamenetek leválasztásra kerülnek, de nem törlődnek.",
+  "projectInfo.deleteConfirm": "Törlöd a(z) {{name}} projektet? A projektmappa, az erőforrások és az összes munkamenet véglegesen törlődik. Ezek a munkamenetek a normál beszélgetésekből és a keresési eredményekből is eltűnnek. A beállított munkakönyvtár nem törlődik.",
   "projectInfo.deleteFailed": "A projekt törlése nem sikerült",
   "projectInfo.deleteProject": "Projekt törlése",
   "projectInfo.description": "Leírás",

@@ -661,7 +661,7 @@ export async function setSessionProjectId(
 
 /**
  * Unbind every session that referenced a given projectId.
- * Called when a project is deleted — sessions are preserved, just unlinked.
+ * Preserves sessions while removing their project association.
  * Returns the number of sessions touched.
  */
 export async function unbindProjectFromSessions(
