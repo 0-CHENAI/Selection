@@ -2209,11 +2209,6 @@ function AppShellContent({
                         tooltip={t("fileImport.skillTitle")}
                         onClick={handleImportSkillFromFile}
                       />
-                      <CreationJobsButton
-                        workspaceId={activeWorkspace.id}
-                        onReopen={reopenCreationJob}
-                        onOpenResult={openCreationResult}
-                      />
                       <EditPopover
                         trigger={
                           <HeaderIconButton
