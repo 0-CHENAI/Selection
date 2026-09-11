@@ -924,7 +924,7 @@
   "projectInfo.colorHint": "Sitzungen in diesem Projekt werden in der Sitzungsliste mit dieser Farbe hervorgehoben.",
   "projectInfo.deleteAssetConfirm": "Datei {{name}} löschen?",
   "projectInfo.deleteAssetFailed": "Datei konnte nicht gelöscht werden",
-  "projectInfo.deleteConfirm": "Projekt {{name}} löschen? Sitzungen werden entkoppelt, aber nicht gelöscht.",
+  "projectInfo.deleteConfirm": "Projekt {{name}} löschen? Der Projektordner, seine Dateien und alle Sitzungen werden dauerhaft gelöscht. Diese Sitzungen verschwinden auch aus den normalen Chats und Suchergebnissen. Das konfigurierte Arbeitsverzeichnis wird nicht gelöscht.",
   "projectInfo.deleteFailed": "Projekt konnte nicht gelöscht werden",
   "projectInfo.deleteProject": "Projekt löschen",
   "projectInfo.description": "Beschreibung",

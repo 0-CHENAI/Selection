@@ -75,7 +75,7 @@ export function registerProjectsHandlers(server: RpcServer, deps: HandlerDeps): 
     return updated
   })
 
-  // Delete a project; unbinds projectId from any sessions that referenced it.
+  // Delete a project and its sessions through the normal session lifecycle.
   server.handle(RPC_CHANNELS.projects.DELETE, async (_ctx, workspaceId: string, projectSlug: string) => {
     const workspace = getWorkspaceByNameOrId(workspaceId)
     if (!workspace) throw new Error(`Workspace not found: ${workspaceId}`)
@@ -87,11 +87,23 @@ export function registerProjectsHandlers(server: RpcServer, deps: HandlerDeps): 
       return
     }
 
-    const { unbindProjectFromSessions } = await import('@craft-agent/shared/sessions')
-    const touched = await unbindProjectFromSessions(workspace.rootPath, project.config.id)
+    await deps.sessionManager.waitForInit()
+    const { listSessions } = await import('@craft-agent/shared/sessions')
+    const sessions = new Map(listSessions(workspace.rootPath).map(session => [session.id, session.projectId]))
+    // Live metadata wins over pending disk writes; include disk-only sessions too.
+    for (const session of deps.sessionManager.getSessions(workspace.id)) {
+      sessions.set(session.id, session.projectId)
+    }
+    let deleted = 0
+    for (const [sessionId, projectId] of sessions) {
+      if (projectId !== project.config.id) continue
+      await deps.sessionManager.deleteSession(sessionId)
+      deleted++
+    }
+    // Keep the project if session cleanup fails so deletion can be retried.
     deleteProject(workspace.rootPath, projectSlug)
     await broadcastChanged(workspaceId, workspace.rootPath)
-    log.info(`Deleted project ${projectSlug} (unbound ${touched} sessions)`)
+    log.info(`Deleted project ${projectSlug} (${deleted} sessions deleted)`)
   })
 
   // List assets in a project

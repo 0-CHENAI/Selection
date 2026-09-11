@@ -924,7 +924,7 @@
   "projectInfo.colorHint": "Las sesiones de este proyecto se resaltarán con este color en la lista de sesiones.",
   "projectInfo.deleteAssetConfirm": "¿Eliminar el recurso {{name}}?",
   "projectInfo.deleteAssetFailed": "Error al eliminar el recurso",
-  "projectInfo.deleteConfirm": "¿Eliminar el proyecto {{name}}? Las sesiones se desvincularán pero no se eliminarán.",
+  "projectInfo.deleteConfirm": "¿Eliminar el proyecto {{name}}? Su carpeta, sus recursos y todas sus sesiones se eliminarán permanentemente. Estas sesiones también desaparecerán de los chats normales y los resultados de búsqueda. El directorio de trabajo configurado no se eliminará.",
   "projectInfo.deleteFailed": "Error al eliminar el proyecto",
   "projectInfo.deleteProject": "Eliminar proyecto",
   "projectInfo.description": "Descripción",

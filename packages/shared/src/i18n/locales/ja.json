@@ -924,7 +924,7 @@
   "projectInfo.colorHint": "このプロジェクトのセッションは、セッション一覧でこの色でハイライトされます。",
   "projectInfo.deleteAssetConfirm": "アセット {{name}} を削除しますか?",
   "projectInfo.deleteAssetFailed": "アセットの削除に失敗しました",
-  "projectInfo.deleteConfirm": "プロジェクト {{name}} を削除しますか? セッションはリンク解除されますが削除はされません。",
+  "projectInfo.deleteConfirm": "プロジェクト {{name}} を削除しますか？プロジェクトフォルダー、リソース、すべてのセッションが完全に削除され、通常のチャットと検索結果にも表示されなくなります。設定された作業ディレクトリは削除されません。",
   "projectInfo.deleteFailed": "プロジェクトの削除に失敗しました",
   "projectInfo.deleteProject": "プロジェクトを削除",
   "projectInfo.description": "説明",
