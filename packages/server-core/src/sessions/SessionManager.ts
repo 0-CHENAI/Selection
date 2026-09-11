@@ -10583,6 +10583,13 @@ export class SessionManager implements ISessionManager {
     const workspaceId = managed.workspace.id
 
     switch (event.type) {
+      case 'answer_preview': {
+        const delivery = managed.answerDelivery
+        if (!delivery || delivery.committedMessageId || managed.stopRequested || !managed.isProcessing
+          || delivery.generation !== managed.processingGeneration) break
+        this.sendEvent({ ...event, sessionId, answerRunId: delivery.runId, userMessageId: delivery.userMessageId }, workspaceId)
+        break
+      }
       case 'text_delta':
         if (managed.answerDelivery?.committedMessageId) break
         if (!managed.streamingText) {
@@ -10834,6 +10841,11 @@ export class SessionManager implements ISessionManager {
       }
 
       case 'tool_result': {
+        const previewToolName = event.toolName ?? managed.messages.find(m => m.toolUseId === event.toolUseId)?.toolName ?? ''
+        if (managed.answerDelivery && !managed.answerDelivery.committedMessageId
+          && /^(?:mcp__session__|session__)?submit_answer$/.test(previewToolName)) {
+          this.sendEvent({ type: 'answer_preview', sessionId, answerRunId: managed.answerDelivery.runId, userMessageId: managed.answerDelivery.userMessageId, toolCallId: event.toolUseId, text: '' }, workspaceId)
+        }
         // toolName comes directly from CraftAgent (resolved via ToolIndex)
         const toolName = event.toolName || 'unknown'
 

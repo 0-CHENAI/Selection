@@ -962,6 +962,7 @@
   "projectsList.deleted": "Projekt {{name}} gelöscht",
   "projectsList.empty": "Noch keine Projekte",
   "projectsList.emptyDescription": "Gruppiere Sitzungen, Dateien und Projektkontext in Projekten. Die Einstellungen eines Projekts — Arbeitsverzeichnis, Details und Dateien — werden automatisch in den Systemprompt des Agenten eingefügt.",
+  "projectsList.folderActions": "Aktionen für Projekt {{name}}",
   "projectsList.jumpToSessions": "Zu Sitzungen springen",
   "projectsList.noProjectSelected": "Wähle ein Projekt aus, um Details anzuzeigen",
   "resourceTransfer.actions.import": "Import",

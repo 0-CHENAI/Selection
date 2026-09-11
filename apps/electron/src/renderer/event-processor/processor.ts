@@ -13,7 +13,7 @@
  */
 
 import type { SessionState, AgentEvent, ProcessResult } from './types'
-import { handleTextDelta, handleTextComplete } from './handlers/text'
+import { handleTextDelta, handleTextComplete, handleAnswerPreview } from './handlers/text'
 import { handleToolStart, handleToolResult, handleTaskBackgrounded, handleShellBackgrounded, handleTaskProgress, handleTaskCompleted } from './handlers/tool'
 import {
   handleComplete,
@@ -69,7 +69,13 @@ export function processEvent(
   state: SessionState,
   event: AgentEvent
 ): ProcessResult {
+  if (['complete', 'error', 'typed_error', 'interrupted', 'plan_submitted', 'auth_request', 'regenerate_started', 'messages_restored', 'messages_truncated'].includes(event.type)
+    || (event.type === 'text_complete' && event.answerCommitted)) {
+    state = { ...state, session: { ...state.session, messages: state.session.messages.filter(m => !m.answerPreview) } }
+  }
   switch (event.type) {
+    case 'answer_preview':
+      return { state: handleAnswerPreview(state, event), effects: [] }
     case 'text_delta': {
       const newState = handleTextDelta(state, event)
       return { state: newState, effects: [] }

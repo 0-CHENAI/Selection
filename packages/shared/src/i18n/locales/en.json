@@ -962,6 +962,7 @@
   "projectsList.deleted": "Deleted project {{name}}",
   "projectsList.empty": "No projects yet",
   "projectsList.emptyDescription": "Group sessions, assets, and project context into Projects. Each project's settings — working directory, details, and assets — are automatically injected into the agent's system prompt.",
+  "projectsList.folderActions": "Actions for project {{name}}",
   "projectsList.jumpToSessions": "Jump to sessions",
   "projectsList.noProjectSelected": "Select a project to view its details",
   "resourceTransfer.actions.import": "Import",

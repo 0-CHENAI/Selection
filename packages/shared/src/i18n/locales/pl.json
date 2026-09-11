@@ -962,6 +962,7 @@
   "projectsList.deleted": "Usunięto projekt {{name}}",
   "projectsList.empty": "Brak projektów",
   "projectsList.emptyDescription": "Grupuj sesje, zasoby i kontekst projektu w Projekty. Ustawienia projektu — katalog roboczy, szczegóły i zasoby — są automatycznie wstrzykiwane do promptu systemowego agenta.",
+  "projectsList.folderActions": "Działania dla projektu {{name}}",
   "projectsList.jumpToSessions": "Przejdź do sesji",
   "projectsList.noProjectSelected": "Wybierz projekt, aby zobaczyć szczegóły",
   "resourceTransfer.actions.import": "Import",

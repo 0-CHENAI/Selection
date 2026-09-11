@@ -129,7 +129,7 @@ require_path "$INTERCEPTOR_SOURCE" "Interceptor" "Ensure packages/shared/src/uni
 echo "Copying interceptor (for Pi subprocess)..."
 mkdir -p "$ELECTRON_DIR/packages/shared/src"
 cp "$INTERCEPTOR_SOURCE" "$ELECTRON_DIR/packages/shared/src/"
-for dep in interceptor-common.ts feature-flags.ts interceptor-request-utils.ts; do
+for dep in interceptor-common.ts feature-flags.ts interceptor-request-utils.ts answer-preview-context.ts answer-argument-stream.ts; do
   if [ -f "$ROOT_DIR/packages/shared/src/$dep" ]; then
     cp "$ROOT_DIR/packages/shared/src/$dep" "$ELECTRON_DIR/packages/shared/src/"
   fi

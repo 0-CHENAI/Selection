@@ -14,6 +14,7 @@
  * separate process, avoiding bundling issues in the Electron main process.
  */
 
+import { answerPreviewContext } from '../../shared/src/answer-preview-context.ts';
 import { answerExecutionError, isAnswerTool } from './answer-delivery-guard.ts';
 import http from 'node:http';
 import { createInterface } from 'node:readline';
@@ -222,7 +223,8 @@ type EnrichedToolExecutionStartEvent = Extract<AgentSessionEvent, { type: 'tool_
   toolMetadata?: ToolExecutionMetadata;
 };
 
-type OutboundAgentEvent = AgentSessionEvent | EnrichedToolExecutionStartEvent;
+type OutboundAgentEvent = AgentSessionEvent | EnrichedToolExecutionStartEvent
+  | { type: 'answer_preview'; answerRunId: string; toolCallId: string; text: string };
 
 /** Messages to main process (stdout) */
 interface OutboundReady { type: 'ready'; sessionId: string | null; callbackPort: number }
@@ -1656,10 +1658,14 @@ async function handlePrompt(msg: Extract<InboundMessage, { type: 'prompt' }>): P
 
     // Fire prompt — use followUp when session is already streaming so the
     // message is queued instead of throwing "Agent is already processing".
-    await session.prompt(msg.message, {
+    const previewRunId = msg.answerRunId;
+    await answerPreviewContext.run(({ toolCallId, text }) => {
+      if (!previewRunId || previewRunId !== answerRunId || answerAccepted) return;
+      send({ type: 'event', event: { type: 'answer_preview', answerRunId: previewRunId, toolCallId, text } });
+    }, () => session!.prompt(msg.message, {
       images: promptImages,
       streamingBehavior: 'followUp',
-    });
+    }));
   } catch (error) {
     const errorMsg = error instanceof Error ? error.message : String(error);
 

@@ -10,6 +10,7 @@ import {
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { useRegisterModal } from "@/context/ModalContext"
+import { isImeComposingEvent } from "@/components/ui/ime-input-guards"
 
 interface RenameDialogProps {
   open: boolean
@@ -39,6 +40,7 @@ export function RenameDialog({
   const { t } = useTranslation()
   const effectivePlaceholder = placeholder ?? t("common.enterName")
   const inputRef = useRef<HTMLInputElement>(null)
+  const composingRef = useRef(false)
   const [isSubmitting, setIsSubmitting] = useState(false)
 
   // Register with modal context so X button / Cmd+W closes this dialog first
@@ -47,6 +49,7 @@ export function RenameDialog({
   // Focus input after dialog opens (avoids Radix Dialog focus race condition)
   useEffect(() => {
     if (open) {
+      composingRef.current = false
       setIsSubmitting(false)
       const timer = setTimeout(() => {
         inputRef.current?.focus()
@@ -81,8 +84,11 @@ export function RenameDialog({
             onChange={(e) => onValueChange(e.target.value)}
             placeholder={effectivePlaceholder}
             maxLength={maxLength}
+            onCompositionStart={() => { composingRef.current = true }}
+            onCompositionEnd={() => { composingRef.current = false }}
             onKeyDown={(e) => {
-              if (e.key === "Enter") {
+              if (e.key === "Enter" && !isImeComposingEvent(e.nativeEvent, composingRef.current)) {
+                e.preventDefault()
                 handleSubmit()
               }
             }}
