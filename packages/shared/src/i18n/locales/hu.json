@@ -962,6 +962,7 @@
   "projectsList.deleted": "{{name}} projekt törölve",
   "projectsList.empty": "Még nincsenek projektek",
   "projectsList.emptyDescription": "Csoportosítsd a munkameneteket, fájlokat és projektkontextust projektekbe. A projekt beállításai — munkakönyvtár, részletek és fájlok — automatikusan bekerülnek az ügynök rendszerpromptjába.",
+  "projectsList.folderActions": "A(z) {{name}} projekt műveletei",
   "projectsList.jumpToSessions": "Ugrás a munkamenetekhez",
   "projectsList.noProjectSelected": "Válassz egy projektet a részletek megtekintéséhez",
   "resourceTransfer.actions.import": "Import",

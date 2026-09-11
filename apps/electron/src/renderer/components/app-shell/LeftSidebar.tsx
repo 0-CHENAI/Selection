@@ -83,6 +83,8 @@ export interface LinkItem {
   sortable?: SortableConfig
   // Optional element rendered after the title (e.g., label type icon), revealed on hover
   afterTitle?: React.ReactNode
+  /** Independent controls rendered beside the navigation button. */
+  actions?: React.ReactNode
 }
 
 export interface SeparatorItem {
@@ -210,12 +212,24 @@ export function LeftSidebar({ links, isCollapsed, getItemProps, focusedItemId, i
           const isFocused = focusedItemId === link.id
 
           // Button element shared by both expandable and non-expandable items
-          const buttonElement = (
+          const navigationButton = (
             <SidebarButton
               link={link}
               itemProps={itemProps}
             />
           )
+          const buttonElement = link.actions ? (
+            <div className="group/project-row relative">
+              {React.cloneElement(navigationButton, { className: 'pr-9' })}
+              <div
+                className="absolute right-1 top-1/2 -translate-y-1/2"
+                onKeyDown={(event) => event.stopPropagation()}
+                onClick={(event) => event.stopPropagation()}
+              >
+                {link.actions}
+              </div>
+            </div>
+          ) : navigationButton
 
           // Determine which expanded content to render (sortable vs regular)
           const expandedContent = link.expandable && link.items && link.expanded
@@ -531,7 +545,7 @@ const SidebarButton = React.forwardRef<HTMLButtonElement, SidebarButtonProps & R
             renderIcon(link)
           )}
         </span>
-        {link.title}
+        {link.actions ? <span className="min-w-0 truncate">{link.title}</span> : link.title}
         {/* After-title element: type indicator icon, right-aligned before count badge, revealed on hover */}
         {link.afterTitle && (
           <span data-touch-reveal="true" className="ml-auto opacity-0 group-hover/section:opacity-100 group-data-[state=open]:opacity-100 group-data-[edit-active=true]:opacity-100 transition-opacity">

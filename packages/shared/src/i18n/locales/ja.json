@@ -962,6 +962,7 @@
   "projectsList.deleted": "プロジェクト {{name}} を削除しました",
   "projectsList.empty": "まだプロジェクトがありません",
   "projectsList.emptyDescription": "セッション、アセット、プロジェクトコンテキストをプロジェクトにまとめます。各プロジェクトの設定(作業ディレクトリ、詳細、アセット)は、エージェントのシステムプロンプトに自動的に挿入されます。",
+  "projectsList.folderActions": "プロジェクト {{name}} の操作",
   "projectsList.jumpToSessions": "セッションへジャンプ",
   "projectsList.noProjectSelected": "プロジェクトを選択して詳細を表示",
   "resourceTransfer.actions.import": "Import",

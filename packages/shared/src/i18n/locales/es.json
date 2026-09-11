@@ -962,6 +962,7 @@
   "projectsList.deleted": "Proyecto {{name}} eliminado",
   "projectsList.empty": "Aún no hay proyectos",
   "projectsList.emptyDescription": "Agrupa sesiones, recursos y contexto en proyectos. La configuración de cada proyecto — directorio de trabajo, detalles y recursos — se inyecta automáticamente en el prompt del sistema del agente.",
+  "projectsList.folderActions": "Acciones para el proyecto {{name}}",
   "projectsList.jumpToSessions": "Ir a las sesiones",
   "projectsList.noProjectSelected": "Selecciona un proyecto para ver sus detalles",
   "resourceTransfer.actions.import": "Import",
