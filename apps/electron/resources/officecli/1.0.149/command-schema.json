@@ -1,9 +1,9 @@
 {
-  "version": "1.0.147",
-  "schemaCrc": "909df808",
+  "version": "1.0.149",
+  "schemaCrc": "7a7d408f",
   "generatedFrom": "reviewed-release-binary",
   "rootHelpSha256": "28165ddbd976e5f2aed3f8b1b7dfdb6c06c8340e52da56f9107a10f558087d00",
-  "helpAllSha256": "800a97893edd9426eb3bb3bebba6115564af5bfa38a2fd033551f5a2836540de",
+  "helpAllSha256": "043f1ede834eb58d83360a1fcfbd5db5ba07724abfb8a807da3d32d5d3d7fe85",
   "helpAllEntries": 2466,
   "rootCommands": [
     "add",
@@ -135,7 +135,7 @@
       ]
     },
     "install": {
-      "helpSha256": "3a93a10f891b04422baaebb814d9c83f0f732e1b8cab5bb9607f4dc9d3989c81",
+      "helpSha256": "8ac988135604a06d008fda4ffdf33b11a11bd04a0759937de7fcafa904a78194",
       "flags": []
     },
     "mcp": {
@@ -243,7 +243,7 @@
       ]
     },
     "skills": {
-      "helpSha256": "61dbd575913ca7ab51e213df415bda0cee7bab29dfd9a93965d299ed067de530",
+      "helpSha256": "a2499a3660dd46fd95886e9f3640cc54de3a11547d54fd67f991a80a828cbe1b",
       "flags": []
     },
     "swap": {
