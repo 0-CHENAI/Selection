@@ -1,0 +1,37 @@
+{
+  "ready": {
+    "edit": true,
+    "text": "M\nM\nMy Workspace\n列表\n新建编排\n新建会话\n普通会话\n0\n项目\n0\n数据源\n0\nAPI\n0\nMCP\n0\n本地文件夹\n0\n技能\n20\n自动化\n0\n定时任务\n0\n事件触发\n0\n智能事件\n0\n设置\n普通会话\n暂无会话\n与智能体的会话将显示在这里。开始一个吧。\n新建会话\n列表\n/\n编辑任务\nLegacy V2 cache-pure\n5cdd11ba-cc1c-48aa-97e3-5c2a7a51b6c0\nLegacy V2\na553b065-6c3f-4d59-864f-9017fd1357bd\n3bbe902a-2d8d-4efa-a2e1-62eaf5cfd32f\n99024664-59d8-419f-b349-08577630885f\ne173169d-a9a8-46fc-9971-6039a8521134\nlocal-conflict-qa\n3f0b6066-8a15-41"
+  },
+  "yamlTab": {
+    "ok": true,
+    "elapsed": 576
+  },
+  "switched": {
+    "ok": true
+  },
+  "edited": {
+    "ok": true,
+    "length": 162
+  },
+  "dialogAfterSave": {
+    "title": true,
+    "cachePure": true,
+    "confirm": true
+  },
+  "afterCancel": {
+    "yaml": "schema_version: 2\nid: legacy-v2-pure\ntitle: Legacy V2 cache-pure\ngoal: review a note\nnodes:\n  - id: a\n    prompt: hello\n    cache: pure\n",
+    "unchanged": true,
+    "history": []
+  },
+  "confirmed": true,
+  "afterConfirm": {
+    "yaml": "schema_version: 3\nid: legacy-v2-pure\ntitle: Legacy V2 cache-pure\ngoal: review a note\nacceptance_criteria: done\nrunner: conduct\nnodes:\n  - id: a\n    prompt: hello\n    kind: session\n    cache: run-pure\n",
+    "isV3": true,
+    "runPure": true,
+    "stillPure": false,
+    "history": [
+      "2026-09-14T01-35-26-904Z.yaml"
+    ]
+  }
+}

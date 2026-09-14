@@ -1,0 +1,115 @@
+{
+  "startedAt": "2026-09-14T02:13:29.450Z",
+  "samplePdf": {
+    "imported": {
+      "ok": true,
+      "failed": false,
+      "elapsed": 456
+    },
+    "heapBefore": {
+      "usedSize": 74734224,
+      "totalSize": 164544512,
+      "embedderHeapUsedSize": 6088824,
+      "backingStorageSize": 89531661
+    },
+    "heapAfter": {
+      "usedSize": 80623584,
+      "totalSize": 164544512,
+      "embedderHeapUsedSize": 8059392,
+      "backingStorageSize": 72100220
+    },
+    "wallMs": 475
+  },
+  "sampleReader": {
+    "canvas": true,
+    "width": 765,
+    "height": 990,
+    "css": {
+      "w": 318,
+      "h": 411
+    },
+    "pages": [],
+    "textChars": 687
+  },
+  "zoom150": true,
+  "sampleZoomed": {
+    "width": 1147,
+    "height": 1485,
+    "label": "150%"
+  },
+  "largePdf": {
+    "imported": {
+      "ok": true,
+      "failed": false,
+      "elapsed": 167
+    },
+    "heapBefore": {
+      "usedSize": 80983088,
+      "totalSize": 164544512,
+      "embedderHeapUsedSize": 8404144,
+      "backingStorageSize": 72109992
+    },
+    "heapAfter": {
+      "usedSize": 82246120,
+      "totalSize": 152649728,
+      "embedderHeapUsedSize": 8931904,
+      "backingStorageSize": 75197726
+    },
+    "wallMs": 189
+  },
+  "pdfPeak": {
+    "samples": 151,
+    "usedMin": 148500419,
+    "usedMax": 148580035,
+    "usedLast": 148580035,
+    "canvas": {
+      "width": 765,
+      "height": 990
+    },
+    "pages": 0,
+    "textChars": 4080
+  },
+  "page2": {
+    "ok": true,
+    "value": "2",
+    "textLen": 1272,
+    "canvas": { "w": 765, "h": 990 },
+    "note": "Clicked sample-invoice.pdf material, select aria-label 页码. Page 2 text starts Terms & Conditions.",
+    "quote": {
+      "ok": true,
+      "label": "33e5c324-f8c9-4d0b-bdb5-b54a8a581086 · 0–1272"
+    }
+  },
+  "largeText": {
+    "imported": {
+      "ok": true,
+      "failed": false,
+      "elapsed": 955
+    },
+    "heapBefore": {
+      "usedSize": 76008760,
+      "totalSize": 150863872,
+      "embedderHeapUsedSize": 6808488,
+      "backingStorageSize": 72612689
+    },
+    "heapAfter": {
+      "usedSize": 135304600,
+      "totalSize": 213827584,
+      "embedderHeapUsedSize": 311143944,
+      "backingStorageSize": 114557149
+    },
+    "wallMs": 1137
+  },
+  "textFrames": {
+    "ok": true,
+    "frames": 45,
+    "p50": 16.69999999999891,
+    "p95": 18.700000000000728,
+    "max": 33.399999999999636,
+    "over33ms": 1,
+    "over16ms": 20,
+    "chars": 2736000,
+    "scrollHeight": 1791599
+  },
+  "finishedAt": "2026-09-14T02:13:45.047Z"
+}

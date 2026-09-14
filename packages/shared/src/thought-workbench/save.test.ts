@@ -36,4 +36,15 @@ it('rebases task linkage over independent graph edits but rejects competing task
   } });
   expect(linked).toMatchObject({ taskSlug: 'task', taskEtag: 'saved-task', title: 'concurrent graph edit', revision: 3 });
   await expect(saveThoughtWithMerge({ base, local, load: async () => ({ ...base, revision: 2, taskSlug: 'task', taskEtag: 'different-task-version' }), write: async () => { throw new Error('Workbench revision conflict'); } })).rejects.toThrow('Workbench edit conflict');
+  let writes = 0;
+  const resolved = await saveThoughtWithMerge({
+    base, local,
+    resolutions: { '/taskEtag': 'local' },
+    load: async () => ({ ...base, revision: 2, taskSlug: 'task', taskEtag: 'different-task-version' }),
+    write: async document => {
+      if (!writes++) throw new Error('Workbench revision conflict');
+      return { ...document, revision: 3 };
+    },
+  });
+  expect(resolved).toMatchObject({ taskSlug: 'task', taskEtag: 'saved-task', revision: 3 });
 });

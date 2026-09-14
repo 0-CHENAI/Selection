@@ -1,0 +1,64 @@
+{
+  "file": "/tmp/selection-thought-wb-qa-materials/large-material.txt",
+  "importMs": 1267,
+  "imported": {
+    "ok": true,
+    "failed": false,
+    "elapsed": 751,
+    "text": "M\nM\nMy Workspace\n列表\n新建编排\n新建会话\n普通会话\n0\n项目\n0\n数据源\n0\nAPI\n0\nMCP\n0\n本地文件夹\n0\n技能\n20\n自动化\n0\n定时任务\n0\n事件触发\n0\n智能事件\n0\n设置\n普通会话\n暂无会话\n与智能体的会话将显示在这里。开始一个吧。\n新建会话\n列表\n/\n新建编排\n草稿\n2cdc755f-e3d0-4e4b-93eb-b44d1cc02031\n96608238-98e0-4752-a52d-736a64fc4f80\nLegacy V2 cache-pure\n5cdd11ba-cc1c-48aa-97e3-5c2a7a51b6c0\nLegacy V2\na553b065-6c3f-4d59-864f-9017fd1357bd\n3bbe902a-2d8d-4efa-a2e1-62eaf5cfd32f\n99024664-59d8-419f-b349-0857763"
+  },
+  "readerReady": {
+    "ok": true,
+    "elapsed": 0
+  },
+  "disk": {
+    "id": "9932dcd4-162c-48da-b37a-42cdd0242c09",
+    "documentBytes": 2820633,
+    "blobs": [
+      {
+        "name": "blob-242aa2d5071c1e75e028bef884222ba6f7551460bc3682d83e8bbdfc5a36b9e9",
+        "bytes": 2808000
+      }
+    ],
+    "mtime": 1789349885726
+  },
+  "heapBefore": {
+    "usedSize": 93187368,
+    "totalSize": 170426368,
+    "embedderHeapUsedSize": 6753920,
+    "backingStorageSize": 75749877
+  },
+  "heapAfter": {
+    "usedSize": 62637860,
+    "totalSize": 143081472,
+    "embedderHeapUsedSize": 139090024,
+    "backingStorageSize": 75685029
+  },
+  "heapDeltaBytes": -30549508,
+  "memory": {
+    "jsHeap": {
+      "used": 160594525,
+      "total": 240975373,
+      "limit": 4294705152
+    },
+    "nodes": 407
+  },
+  "scroll": {
+    "openedReader": true,
+    "readerChars": 2736000,
+    "beforeTop": 0,
+    "afterTop": 1791451,
+    "scrolled": true,
+    "asideHeight": 878,
+    "frames": [
+      {
+        "at": 0.2999999998137355,
+        "top": 400
+      },
+      {
+        "at": 0.39999999944120646,
+        "top": 1791451
+      }
+    ]
+  }
+}

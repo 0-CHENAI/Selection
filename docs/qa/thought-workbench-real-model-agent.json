@@ -1,0 +1,25 @@
+{
+  "startedAt": "2026-09-14T01:42:00.863Z",
+  "preview": {
+    "ready": true,
+    "hasTools": true,
+    "toolCount": 61,
+    "noToolsLine": false,
+    "excerpt": "[model]\n{\n  \"id\": \"Laufry\",\n  \"api\": \"openai-completions\",\n  \"provider\": \"custom-endpoint\",\n  \"contextWindow\": 262144\n}\n\n[system]\n<craft_agent_environment version=\"2.2.0\" platform=\"darwin\" arch=\"arm64\" os_version=\"25.6.0\" />\n\nYou are Selection - an AI assistant that helps users connect and work across their data sources through a desktop interface.\n\n**Product naming (strict):**\n- Always call this product **Selection** (never \"Craft Agent\", \"Craft Agents\", or \"craft-agent\" as a product name).\n- Workspace data folders (with `config.json`, `labels/`, `skills/`, `sessions/`, etc.) are **Selection workspaces**.\n- Internal package names, CLI binary names (`craft-agent`), env tags, or paths that still contain \"craft\" are legacy implementation details — do not surface them as the product brand when talking to the user.\n\n**Core capabilities:**\n- **Connect external sources** - MCP servers, REST AP"
+  },
+  "permission": {
+    "shown": false,
+    "text": "M\nM\nMy Workspace\n列表\n新建编排\n新建会话\n普通会话\n3\n项目\n0\n数据源\n0\nAPI\n0\nMCP\n0\n本地文件夹\n0\n技能\n20\n自动化\n0\n定时任务\n0\n事件触发\n0\n智能事件\n0\n设置\n普通会话\n今天\n请使用工具列出当前工作区根目录的文件名，只返回文件名。不要修改任何文件。\n1分钟前\n请使用工具列出当前工作区根目录的文件名，只返回文件名。不要修改任何文件。\n4分钟前\nmanual-edit-stale\n4分钟前\n请使用工具列出当前工作区根目录的文件名，只返回文件名。不要修改任何文件。\n\n[user]\n请使用工具列出当前工作区根目录的文件名，只返回文件名。不要修改任何文件。\n\n2\n列出当前工作区根目录的文件名\nList Workspace Files\n· 列出当前工作区根目录的文件名 · /tmp/selection-thought-wb-qa/workspaces/my-workspace\n提交文件名列表\n· 返回工作区根目录中的条目名称\n\n工作区根目录 /tmp/selection-thought-wb-qa/workspaces/my-workspace 下的条目：\n\nPLAIN TEXT\n.claude-plugin\nconfig.json\nevents.jsonl\nlabels\nprojects\nsessions\nskills\nsources\nstatuses\ntasks\nthought-workbenches\nviews.json\n\n带 / 的为目录。未修改任何文件。\n\n重新生成\n复制\nMarkdown\n询问修改\nSwarm\n并行协作\n信息\n​\n\n输入 @ 提及文件、文件夹或技能\nLaufry"
+  },
+  "denied": false,
+  "recover": {
+    "permissionAutoShown": false,
+    "excerpt": "M\nM\nMy Workspace\n列表\n新建编排\n新建会话\n普通会话\n3\n项目\n0\n数据源\n0\nAPI\n0\nMCP\n0\n本地文件夹\n0\n技能\n20\n自动化\n0\n定时任务\n0\n事件触发\n0\n智能事件\n0\n设置\n普通会话\n今天\n请使用工具列出当前工作区根目录的文件名，只返回文件名。不要修改任何文件。\n3分钟前\n请使用工具列出当前工作区根目录的文件名，只返回文件名。不要修改任何文件。\n5分钟前\nmanual-edit-stale\n5分钟前\n列表\n/\n新建编排\nAgent permission QA\nbd712bc4-1b88-4184-9ca3-9705232e3372\nmanual-edit-stale\n89d5e4c5-1705-4a08-8cc2-28678aa690fe\ne28e405b-1d99-4354-bc1d-87d381d97a13\neb693d1f-38a2-4b95-b691-b7a87e472e6f\n14f562f2-4297-478d-b0a7-f1307d55f381\n9932dcd4-162c-48da-b37a-42cdd0242c09\n2cdc755f-e3d0-4e4b-93eb-b44d1cc02031\n96608238-98e0-4752-a52d-736a64fc4f80\nLegacy V2 cache-pure\n5cdd11ba-cc1c-48aa-97e3-5c2a7a51b6c0\nLegacy V2\na553b065-6c3f-4d59-864f-9017fd1357bd\n3bbe902a-2d8d-4efa-a2e1-62eaf5cf"
+  },
+  "allow": {
+    "allowed": false,
+    "done": false,
+    "text": "M\nM\nMy Workspace\n列表\n新建编排\n新建会话\n普通会话\n4\n项目\n0\n数据源\n0\nAPI\n0\nMCP\n0\n本地文件夹\n0\n技能\n20\n自动化\n0\n定时任务\n0\n事件触发\n0\n智能事件\n0\n设置\n普通会话\n今天\n请使用工具列出当前工作区根目录的文件名，只返回文件名。不要修改任何文件。\n4分钟前\n请使用工具列出当前工作区根目录的文件名，只返回文件名。不要修改任何文件。\n8分钟前\n请使用工具列出当前工作区根目录的文件名，只返回文件名。不要修改任何文件。\n10分钟前\nmanual-edit-stale\n10分钟前\n请使用工具列出当前工作区根目录的文件名，只返回文件名。不要修改任何文件。\n\n[user]\n请使用工具列出当前工作区根目录的文件名，只返回文件名。不要修改任何文件。\n\n2\nList file names in the current working directory root without modifying anything.\nList Workspace Root\n· List file names in the current working directory root without modifying anything. · /tmp/selection-thought-wb-qa/workspaces/my-workspace/sessions/260914-deep-waterfall\nSubmit File List\n· Deliver the plain list of file and folder names found in the workspace root.\n\n工作区根目录内容：\n\n.pi-agent/\n.pi-sessions/\nattachments/\ndata/\ndownloads/\nlong_responses/\nplans/\nsession.jsonl\ntool-metadata.json\n\n（未修改任何文件，仅执行了列目录操作。）\n\n重新生成\n复制\nMarkdown\n询问修改\nSwarm\n并行协作\n信息\n​\n\n按 ⌘ + B 切换侧栏\nLaufry"
+  },
+  "finishedAt": "2026-09-14T01:51:14.499Z"
+}

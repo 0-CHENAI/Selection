@@ -20,6 +20,8 @@ export function TaskProposal(props: {
   prepareWorkbench?: (yaml: string) => Promise<WorkbenchProposalBaseline>;
   assertWorkbenchCurrent?: (baseline: WorkbenchProposalBaseline) => void;
   onWorkbenchApplied?: (document: ThoughtDocument) => void;
+  /** Keep the authoring surface shut so the thought canvas stays primary. */
+  collapsed?: boolean;
 }) {
   const { t } = useTranslation()
   const [goal, setGoal] = React.useState('')
@@ -167,7 +169,7 @@ export function TaskProposal(props: {
   }
 
   return <section className="space-y-2" aria-busy={busy}>
-    <details open={!props.currentYaml || Boolean(props.context)}>
+    <details open={props.collapsed ? Boolean(props.context) : (!props.currentYaml || Boolean(props.context))}>
       <summary className="cursor-pointer text-sm font-medium">{t('tasks.proposalTitle')}</summary>
       <p className="py-2 text-xs text-muted-foreground">{t('tasks.proposalHint')}</p>
       <textarea aria-label={t('tasks.proposalGoal')} value={goal} onChange={e => setGoal(e.target.value)} disabled={busy}

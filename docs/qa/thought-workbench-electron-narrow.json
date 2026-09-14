@@ -1,0 +1,90 @@
+{
+  "viewportRequested": "800x700 window",
+  "target": {
+    "title": "Selection",
+    "url": "http://localhost:5183/?workspaceId=9d693955-0315-6bfd-18f1-4b6d5ef3fdfd&ws=my-workspace&route=board",
+    "id": "E2F9554C493448F33B5C0A339F30C73A"
+  },
+  "windowBefore": {
+    "error": "Error: {\"code\":-32601,\"message\":\"'Browser.getWindowForTarget' wasn't found\"}"
+  },
+  "windowAfter": null,
+  "dismissOnboarding": {
+    "skipped": true,
+    "label": "稍后设置"
+  },
+  "clickBoard": {
+    "clicked": true,
+    "label": "新建编排",
+    "pressed": "true"
+  },
+  "opened": {
+    "found": true,
+    "title": "Selection",
+    "href": "http://localhost:5183/?workspaceId=9d693955-0315-6bfd-18f1-4b6d5ef3fdfd&ws=my-workspace&route=board"
+  },
+  "metrics": {
+    "viewport": {
+      "width": 800,
+      "height": 700
+    },
+    "rem": 15,
+    "chrome": {
+      "title": "Selection",
+      "thoughtTitle": true,
+      "proposalOpen": false,
+      "toolbarButtons": 4
+    },
+    "toolbar": {
+      "height": 30,
+      "width": 546,
+      "top": 258,
+      "bottom": 288,
+      "minHeight": "auto",
+      "overflowY": "hidden",
+      "scrollHeight": 30,
+      "clientHeight": 30
+    },
+    "split": {
+      "height": 387,
+      "width": 546,
+      "top": 296,
+      "bottom": 683,
+      "minHeight": "0px",
+      "overflowY": "auto",
+      "scrollHeight": 548,
+      "clientHeight": 387
+    },
+    "stage": {
+      "height": 240,
+      "width": 538,
+      "top": 296,
+      "bottom": 536,
+      "minHeight": "auto",
+      "overflowY": "hidden",
+      "scrollHeight": 238,
+      "clientHeight": 238
+    },
+    "editor": {
+      "height": 300,
+      "width": 538,
+      "top": 543,
+      "bottom": 843,
+      "minHeight": "300px",
+      "overflowY": "auto",
+      "scrollHeight": 298,
+      "clientHeight": 298
+    },
+    "crushed": false
+  },
+  "scrolled": {
+    "splitScrollTop": 160.5,
+    "editorInView": true,
+    "editorHeight": 300
+  },
+  "editorUsable": true,
+  "editorNotCrushed": true,
+  "stageBounded": true,
+  "toolbarSingleRow": true,
+  "proposalCollapsed": true
+}

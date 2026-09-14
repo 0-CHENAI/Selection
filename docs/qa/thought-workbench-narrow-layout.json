@@ -1,0 +1,22 @@
+{
+  "viewport": "800x700",
+  "source": "http://127.0.0.1:8765/thought-canvas-narrow-preview.html with TaskEditor-like chrome",
+  "legacy": {
+    "splitHeight": 434,
+    "stageHeight": 288,
+    "editorHeight": 138,
+    "note": "min-h-72 locks the canvas at 288px; editor is leftover 138px. Full AppShell chrome would leave even less (handoff ~24px)."
+  },
+  "current": {
+    "splitHeight": 434,
+    "splitScrollHeight": 584,
+    "canScroll": true,
+    "stageHeight": 256,
+    "editorHeight": 320,
+    "editorExtendsBelowViewport": true
+  },
+  "legacyEditorCrushed": true,
+  "currentEditorUsable": true,
+  "currentStageBounded": true,
+  "unitTest": "apps/electron/src/renderer/components/app-shell/kanban/__tests__/thought-canvas-layout.test.ts passed 2/2"
+}

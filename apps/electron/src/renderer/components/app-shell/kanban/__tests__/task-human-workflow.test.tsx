@@ -21,6 +21,8 @@ const { ThoughtGenerationOutput } = await import('../ThoughtGenerationOutput')
 const { ExecutionThoughtSources } = await import('../ExecutionThoughtSources')
 const { newThoughtNode } = await import('@craft-agent/shared/thought-workbench/types')
 const { PROPOSAL_UI_TIMEOUT_MS, TaskProposal } = await import('../TaskProposal')
+const { ThoughtConflictPanel } = await import('../ThoughtConflictPanel')
+const { WorkbenchEditConflict } = await import('@craft-agent/shared/thought-workbench/merge')
 
 function editorSource(): string {
   return readFileSync(join(import.meta.dir, '../TaskEditor.tsx'), 'utf8')
@@ -81,8 +83,10 @@ it('makes an unapplied answer discoverable without rendering hidden history eage
   expect(html).not.toContain('LONG_HISTORY_CONTENT')
 })
 
-it('opens the form editor first and keeps YAML import optional', () => {
+it('defaults new orchestration to the thought canvas and keeps YAML import optional', () => {
   const source = editorSource()
+  expect(source).toContain("thoughtEnabled ? (isEdit ? 'canvas' : 'thought') : 'definition'")
+  expect(source).toContain("isEdit ? (['thought', 'canvas', 'yaml', 'results'] as Tab[]) : (['thought', 'canvas', 'yaml'] as Tab[])")
   expect(source).toContain("useState<'editor' | 'import' | 'library'>('editor')")
   expect(source).toContain('onImport={() => setPane(\'import\')}')
   expect(source).toContain("t('tasks.yamlImportTitle')")
@@ -138,6 +142,32 @@ it('reveals proposal authoring when thought context is selected for an existing 
   const base = { workspaceId: 'ws', draftIdentity: 'v1', currentYaml: 'id: existing', onApply: () => {} }
   expect(renderZh(<TaskProposal {...base} />)).not.toContain('<details open')
   expect(renderZh(<TaskProposal {...base} context="Selected thought answer" />)).toContain('<details open')
+})
+
+it('renders a conflict panel that does not choose a side while rendering', () => {
+  let chosen = ''
+  const html = renderZh(
+    <ThoughtConflictPanel
+      conflict={new WorkbenchEditConflict('/title', 'mine', 'theirs')}
+      onKeepMine={() => { chosen = 'local' }}
+      onKeepTheirs={() => { chosen = 'remote' }}
+      onDismiss={() => { chosen = 'dismiss' }}
+    />,
+  )
+  expect(html).toContain('thought-conflict-panel')
+  expect(html).toContain('编辑冲突')
+  expect(html).toContain('mine')
+  expect(html).toContain('theirs')
+  expect(html).toContain('保留当前')
+  expect(html).toContain('保留已保存')
+  expect(html).toContain('不会保存任务或启动运行')
+  expect(chosen).toBe('')
+})
+
+it('keeps the empty-draft proposal shut on the thought canvas', () => {
+  expect(renderZh(<TaskProposal workspaceId="ws" draftIdentity="{}" collapsed onApply={() => {}} />)).not.toContain('<details open')
+  expect(editorSource()).toContain('collapsed={thoughtEnabled && tab === \'thought\' && !thoughtContext}')
+  expect(editorSource()).toContain('tab !== \'thought\' && (')
 })
 
 it('renders approval actions that distinguish approve, reject, and feedback-only', () => {

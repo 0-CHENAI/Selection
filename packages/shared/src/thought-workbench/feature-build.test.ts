@@ -8,6 +8,6 @@ it('honors the workbench build switch in a browser without process.env', async (
     expect(result.success).toBe(true);
     const module = { exports: {} as { isThoughtWorkbenchEnabled(): boolean } };
     runInNewContext(await result.outputs[0]!.text(), { module, exports: module.exports });
-    expect(module.exports.isThoughtWorkbenchEnabled()).toBe(setting === '1');
+    expect(module.exports.isThoughtWorkbenchEnabled()).toBe(setting !== '0');
   }
 });

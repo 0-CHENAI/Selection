@@ -895,8 +895,12 @@ class ActiveRun {
         model: this.resolveNodeModel(node),
         tokensUsed: st.sessionId ? this.sessionTokens.get(st.sessionId) : undefined,
         // Failure history is retained for retry prompts, but a past failure is
-        // not an active blocker after retry or successful completion.
-        blocker: st.state === 'failed' || st.state === 'invalid' || st.state === 'interrupted' ? st.lastFailure : undefined,
+        // not an active blocker after retry or successful completion. Delivery
+        // failure while the gate is still closed stays visible so the human can
+        // resend feedback without opening the gate.
+        blocker: st.state === 'failed' || st.state === 'invalid' || st.state === 'interrupted'
+          || (st.state === 'waiting-approval' && !!st.lastFailure?.startsWith('feedback-delivery-'))
+          ? st.lastFailure : undefined,
         elapsedMs: timing?.elapsedMs,
         queueMs: timing?.queueMs,
         cacheStatus: timing?.cacheStatus,

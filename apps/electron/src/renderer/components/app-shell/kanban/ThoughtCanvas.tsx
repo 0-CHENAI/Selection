@@ -8,18 +8,32 @@ import { acceptGenerationReceipt, recoverLiveGeneration, isNewerGeneration } fro
 import { ReactFlow, Background, Controls, MiniMap, applyNodeChanges, type ReactFlowInstance, type NodeProps, type Node, type NodeChange, type Connection } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 import { useTranslation } from 'react-i18next'
+import { MoreHorizontal } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { DropdownMenu, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
+import { StyledDropdownMenuContent, StyledDropdownMenuItem, StyledDropdownMenuSeparator } from '@/components/ui/styled-dropdown'
 import { useTheme } from '@/context/ThemeContext'
 import { Markdown } from '@craft-agent/ui'
 import { readWorkbenchFile } from './workbench-material-file'
 import { WorkbenchMaterialReader } from './WorkbenchMaterialReader'
 import { ThoughtAnswerHistory } from './ThoughtAnswerHistory'
 import { compileThoughtContext, validateThoughtGraph, contentHash } from '@craft-agent/shared/thought-workbench/context'
-import { mergeThoughtDocuments } from '@craft-agent/shared/thought-workbench/merge'
+import { mergeThoughtDocuments, isWorkbenchEditConflict, type ThoughtConflictChoice, type WorkbenchEditConflict } from '@craft-agent/shared/thought-workbench/merge'
 import { saveThoughtWithMerge } from '@craft-agent/shared/thought-workbench/save'
+import { ThoughtConflictPanel } from './ThoughtConflictPanel'
 import { restoreThoughtEdit, layoutThoughtGraph, thoughtUpstreamPath, groupThoughtNodes, thoughtGroupBounds, addThoughtSummary } from '@craft-agent/shared/thought-workbench/editing'
 import { workbenchMarkdown, workbenchSvg } from '@craft-agent/shared/thought-workbench/export'
 import type { ThoughtReplay } from '@craft-agent/shared/thought-workbench/types'
+import {
+  THOUGHT_CANVAS_EDITOR_CLASS,
+  THOUGHT_CANVAS_EDITOR_TEST_ID,
+  THOUGHT_CANVAS_SPLIT_CLASS,
+  THOUGHT_CANVAS_SPLIT_TEST_ID,
+  THOUGHT_CANVAS_STAGE_CLASS,
+  THOUGHT_CANVAS_STAGE_TEST_ID,
+  THOUGHT_CANVAS_TOOLBAR_CLASS,
+  THOUGHT_CANVAS_TOOLBAR_TEST_ID,
+} from './thought-canvas-layout'
 import type { KanbanModelProviderGroup } from './types'
 import { newThoughtDocument, newThoughtNode, type ThoughtDocument, type ThoughtNode, type ThoughtMaterial, type CompiledThoughtContext, type ThoughtGeneration, type WorkbenchProposalBaseline } from '@craft-agent/shared/thought-workbench/types'
 
@@ -77,6 +91,8 @@ export function ThoughtCanvas(props: Props) {
   const bundleInput = React.useRef<HTMLInputElement>(null)
   const [readerMaterialId, setReaderMaterialId] = React.useState<string>()
   const [error, setError] = React.useState('')
+  const [conflict, setConflict] = React.useState<WorkbenchEditConflict | null>(null)
+  const resolutions = React.useRef<Record<string, ThoughtConflictChoice>>({})
   const [dirty, setDirty] = React.useState(false)
   const [busy, setBusy] = React.useState(false)
   const [previewContext, setContext] = React.useState<CompiledThoughtContext | null>(null)
@@ -157,6 +173,7 @@ export function ThoughtCanvas(props: Props) {
     try {
       const saved = await saveThoughtWithMerge({
         base: persisted.current ?? snapshot, local: snapshot,
+        resolutions: resolutions.current,
         write: async pending => {
           const result = await request({ action: 'save', document: pending, expectedRevision: pending.revision })
           if (!result.document) throw new Error('Workbench save returned no document')
@@ -178,7 +195,7 @@ export function ThoughtCanvas(props: Props) {
           // edit before accepting the server revision, never a stale UI snapshot.
           while (mounted.current && current.current?.id === snapshot.id) {
             const pendingSerial = editSerial.current
-            const merged = await mergeThoughtDocuments(snapshot, current.current, result.document)
+            const merged = await mergeThoughtDocuments(snapshot, current.current, result.document, resolutions.current)
             if (pendingSerial !== editSerial.current) continue
             persisted.current = result.document
             install(merged, false)
@@ -187,8 +204,13 @@ export function ThoughtCanvas(props: Props) {
         }
         setDocuments(items => [result.document!, ...items.filter(item => item.id !== result.document!.id)])
       }
+      resolutions.current = {}
+      setConflict(null)
       return result.document ?? null
-    } catch (reason) { fail(reason); return null }
+    } catch (reason) {
+      if (isWorkbenchEditConflict(reason)) { setConflict(reason); return null }
+      fail(reason); return null
+    }
     finally { saving.current = false }
   }, [request, install, fail])
 
@@ -259,6 +281,7 @@ export function ThoughtCanvas(props: Props) {
           const next = { ...snapshot, title: workbenchExecutionTitle(executionYaml, snapshot.title), projectId: workbenchExecutionProject(executionYaml, snapshot.projectId), taskSlug, taskEtag, executionYaml }
           const linked = await saveThoughtWithMerge({
             base: persisted.current ?? snapshot, local: next,
+            resolutions: resolutions.current,
             write: async document => {
               if (!mounted.current || current.current?.id !== snapshot.id) throw new Error('Workbench changed while linking')
               const result = await request({ action: 'save', document, expectedRevision: document.revision })
@@ -273,13 +296,16 @@ export function ThoughtCanvas(props: Props) {
           })
           while (mounted.current && current.current?.id === snapshot.id) {
             const serial = editSerial.current
-            const merged = await mergeThoughtDocuments(snapshot, current.current, linked)
+            const merged = await mergeThoughtDocuments(snapshot, current.current, linked, resolutions.current)
             if (serial !== editSerial.current) continue
             persisted.current = linked
             install(merged, false); setDirty(JSON.stringify(merged) !== JSON.stringify(linked))
             return
           }
           throw new Error('Workbench changed while linking the saved task')
+        } catch (reason) {
+          if (isWorkbenchEditConflict(reason)) { setConflict(reason); return }
+          throw reason
         } finally { saving.current = false }
       },
     }
@@ -287,10 +313,17 @@ export function ThoughtCanvas(props: Props) {
   }, [props.controllerRef, request, install, save, selected, busy, dirty, generation?.status, replay?.status, t])
 
   React.useEffect(() => {
-    if (!dirty || replay?.status === 'running' || error) return
+    if (!dirty || replay?.status === 'running' || error || conflict) return
     const timer = setTimeout(() => { void save() }, 600)
     return () => clearTimeout(timer)
-  }, [dirty, document, generation?.status, replay?.status, error, save])
+  }, [dirty, document, generation?.status, replay?.status, error, conflict, save])
+
+  const resolveConflict = React.useCallback((choice: ThoughtConflictChoice) => {
+    if (!conflict) return
+    resolutions.current = { ...resolutions.current, [conflict.path]: choice }
+    setConflict(null)
+    void save()
+  }, [conflict, save])
 
   const reconcileRemote = React.useCallback(async (remote: ThoughtDocument, active: () => boolean): Promise<boolean> => {
     if (!active() || saving.current || current.current?.id !== remote.id) return false
@@ -301,7 +334,7 @@ export function ThoughtCanvas(props: Props) {
     try {
       while (active() && mounted.current && current.current?.id === remote.id) {
         const serial = editSerial.current
-        const merged = await mergeThoughtDocuments(base, current.current, remote)
+        const merged = await mergeThoughtDocuments(base, current.current, remote, resolutions.current)
         if (!active()) return false
         if (serial !== editSerial.current) continue
         persisted.current = remote
@@ -310,6 +343,9 @@ export function ThoughtCanvas(props: Props) {
         return true
       }
       return false
+    } catch (reason) {
+      if (isWorkbenchEditConflict(reason)) { setConflict(reason); return false }
+      throw reason
     } finally { saving.current = false }
   }, [install])
 
@@ -581,42 +617,53 @@ export function ThoughtCanvas(props: Props) {
   </>
   return <div className="flex min-h-0 flex-1 flex-col gap-2">
     {props.headerContainer && createPortal(documentControls, props.headerContainer)}
-    <div className="flex flex-wrap items-center gap-2">
+    <div data-testid={THOUGHT_CANVAS_TOOLBAR_TEST_ID} className={THOUGHT_CANVAS_TOOLBAR_CLASS}>
       {!props.headerContainer && documentControls}
-      <Button variant="outline" disabled={running} onClick={() => add()}>{selected.length > 1 ? t('thought.merge') : t('thought.question')}</Button>
-      <Button variant="outline" disabled={running} onClick={() => add('note')}>{t('thought.note')}</Button>
-      <Button variant="outline" disabled={busy || running || !selected.length} onClick={() => {
-        const id = crypto.randomUUID()
-        const next = addThoughtSummary(document, selected, id, t('thought.summary'), t('thought.summaryPrompt'))
-        edit({ ...next, nodes: next.nodes.map(item => item.id === id ? { ...item, model: props.model, llmConnection: props.llmConnection } : item) })
-        setSelected([id])
-      }}>{t('thought.summary')}</Button>
-      <Button variant="ghost" disabled={busy || running || !selected.length} onClick={() => edit(groupThoughtNodes(document, selected, crypto.randomUUID(), t('thought.group')))}>{t('thought.group')}</Button>
-      <Button variant="ghost" disabled={busy || running} onClick={() => { edit(layoutThoughtGraph(document)); requestAnimationFrame(() => { void flow.current?.fitView({ padding: 0.15 }) }) }}>{t('thought.autoLayout')}</Button>
-      <Button variant="ghost" disabled={!selected.length} aria-pressed={pathFocus} onClick={() => {
-        setPathFocus(!pathFocus)
-        if (!pathFocus) { setSearch(''); void flow.current?.fitView({ nodes: [...thoughtUpstreamPath(document, selected)].map(id => ({ id })), padding: 0.2 }) }
-      }}>{t('thought.locatePath')}</Button>
-      <Button variant="outline" disabled={busy || running || !selected.length} onClick={() => void startReplay()}>{t('thought.replay')}</Button>
-      {replay && <span role="status" className="text-xs">{replay.completedNodeIds.length} / {replay.nodeIds.length}</span>}
-      {replay?.status === 'running' && <Button variant="outline" onClick={() => { void request({ action: 'cancelReplay', id: replay.documentId, replayId: replay.id }).then(result => setReplay(result.replay ?? null)).catch(fail) }}>{t('common.cancel')}</Button>}
-      <Button variant="ghost" disabled={running || !history.length} onClick={() => { const previous = history.at(-1); if (previous) { edit(restoreThoughtEdit(document, previous), false); setHistory(history.slice(0, -1)) } }}>{t('thought.undo')}</Button>
-      <Button variant="ghost" disabled={busy || running} onClick={() => void download()}>{t('common.export')}</Button>
-      <Button variant="ghost" disabled={busy || running} onClick={() => void exportView('md')}>{t('common.export')} Markdown</Button>
-      <Button variant="ghost" disabled={busy || running} onClick={() => void exportView('svg')}>{t('common.export')} SVG</Button>
-      <input ref={bundleInput} type="file" accept=".json" className="hidden" aria-label={t('thought.importBundle')} onChange={event => { const file = event.target.files?.[0]; if (file) void importBundle(file) }} />
-      <Button variant="ghost" disabled={busy || running} onClick={() => bundleInput.current?.click()}>{t('thought.importBundle')}</Button>
+      <Button size="sm" variant="outline" disabled={running} onClick={() => add()}>{selected.length > 1 ? t('thought.merge') : t('thought.question')}</Button>
+      <Button size="sm" variant="outline" disabled={running} onClick={() => add('note')}>{t('thought.note')}</Button>
       <input ref={fileInput} type="file" multiple className="hidden" aria-label={t('thought.addMaterial')} accept=".pdf,.docx,.html,.htm,.md,.txt,.json,.yaml,.yml,.csv,.ts,.tsx,.js,.jsx,.py,.rs,.go,.java,.cpp,.c,.h,.sh,.css,.xml,image/*" onChange={event => { void importFiles(Array.from(event.target.files ?? [])) }} />
-      <Button variant="outline" disabled={busy || running} onClick={() => fileInput.current?.click()}>{t('thought.addMaterial')}</Button>
+      <Button size="sm" variant="outline" disabled={busy || running} onClick={() => fileInput.current?.click()}>{t('thought.addMaterial')}</Button>
+      <input ref={bundleInput} type="file" accept=".json" className="hidden" aria-label={t('thought.importBundle')} onChange={event => { const file = event.target.files?.[0]; if (file) void importBundle(file) }} />
+      {replay && <span role="status" className="truncate text-xs text-muted-foreground">{replay.completedNodeIds.length} / {replay.nodeIds.length}</span>}
+      {replay?.status === 'running' && <Button size="sm" variant="outline" onClick={() => { void request({ action: 'cancelReplay', id: replay.documentId, replayId: replay.id }).then(result => setReplay(result.replay ?? null)).catch(fail) }}>{t('common.cancel')}</Button>}
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button size="sm" variant="ghost" className="ml-auto px-2" aria-label={t('common.more')}>
+            <MoreHorizontal />
+          </Button>
+        </DropdownMenuTrigger>
+        <StyledDropdownMenuContent align="end">
+          <StyledDropdownMenuItem disabled={busy || running || !selected.length} onSelect={() => {
+            const id = crypto.randomUUID()
+            const next = addThoughtSummary(document, selected, id, t('thought.summary'), t('thought.summaryPrompt'))
+            edit({ ...next, nodes: next.nodes.map(item => item.id === id ? { ...item, model: props.model, llmConnection: props.llmConnection } : item) })
+            setSelected([id])
+          }}>{t('thought.summary')}</StyledDropdownMenuItem>
+          <StyledDropdownMenuItem disabled={busy || running || !selected.length} onSelect={() => edit(groupThoughtNodes(document, selected, crypto.randomUUID(), t('thought.group')))}>{t('thought.group')}</StyledDropdownMenuItem>
+          <StyledDropdownMenuItem disabled={busy || running} onSelect={() => { edit(layoutThoughtGraph(document)); requestAnimationFrame(() => { void flow.current?.fitView({ padding: 0.15 }) }) }}>{t('thought.autoLayout')}</StyledDropdownMenuItem>
+          <StyledDropdownMenuItem disabled={!selected.length} onSelect={() => {
+            setPathFocus(!pathFocus)
+            if (!pathFocus) { setSearch(''); void flow.current?.fitView({ nodes: [...thoughtUpstreamPath(document, selected)].map(id => ({ id })), padding: 0.2 }) }
+          }}>{t('thought.locatePath')}</StyledDropdownMenuItem>
+          <StyledDropdownMenuItem disabled={busy || running || !selected.length} onSelect={() => { void startReplay() }}>{t('thought.replay')}</StyledDropdownMenuItem>
+          <StyledDropdownMenuItem disabled={running || !history.length} onSelect={() => { const previous = history.at(-1); if (previous) { edit(restoreThoughtEdit(document, previous), false); setHistory(history.slice(0, -1)) } }}>{t('thought.undo')}</StyledDropdownMenuItem>
+          <StyledDropdownMenuSeparator />
+          <StyledDropdownMenuItem disabled={busy || running} onSelect={() => { void download() }}>{t('common.export')}</StyledDropdownMenuItem>
+          <StyledDropdownMenuItem disabled={busy || running} onSelect={() => { void exportView('md') }}>{t('common.export')} Markdown</StyledDropdownMenuItem>
+          <StyledDropdownMenuItem disabled={busy || running} onSelect={() => { void exportView('svg') }}>{t('common.export')} SVG</StyledDropdownMenuItem>
+          <StyledDropdownMenuItem disabled={busy || running} onSelect={() => bundleInput.current?.click()}>{t('thought.importBundle')}</StyledDropdownMenuItem>
+        </StyledDropdownMenuContent>
+      </DropdownMenu>
     </div>
+    {conflict && <ThoughtConflictPanel conflict={conflict} onKeepMine={() => resolveConflict('local')} onKeepTheirs={() => resolveConflict('remote')} onDismiss={() => setConflict(null)} />}
     {error && <div role="alert" className="flex items-center gap-2 text-sm text-destructive">{error}<Button variant="ghost" onClick={() => setError('')}>{t('common.close')}</Button></div>}
     {!!document.groups?.length && <details><summary className="text-sm">{t('thought.groups')}</summary><div className="flex flex-wrap gap-3 py-2">{document.groups.map(group => <div key={group.id} className="flex items-center gap-2 rounded-md border p-2">
       <input aria-label={t('thought.group')} className={`${fieldClass} max-w-40`} disabled={busy || running} value={group.title} onChange={event => edit({ ...document, groups: document.groups!.map(item => item.id === group.id ? { ...item, title: event.target.value } : item) })} />
       <Button variant="ghost" disabled={busy || running} onClick={() => edit({ ...document, groups: document.groups!.map(item => item.id === group.id ? { ...item, collapsed: !item.collapsed } : item) })}>{group.collapsed ? t('thought.expandGroup') : t('thought.collapseGroup')}</Button>
       <Button variant="ghost" disabled={busy || running} onClick={() => edit({ ...document, groups: document.groups!.filter(item => item.id !== group.id) })}>{t('thought.ungroup')}</Button>
     </div>)}</div></details>}
-    <div className="grid min-h-0 flex-1 grid-cols-1 gap-2 lg:grid-cols-[minmax(0,1fr)_minmax(280px,360px)]">
-      <div className="relative min-h-72 overflow-hidden rounded-lg border bg-background">
+    <div data-testid={THOUGHT_CANVAS_SPLIT_TEST_ID} className={THOUGHT_CANVAS_SPLIT_CLASS}>
+      <div data-testid={THOUGHT_CANVAS_STAGE_TEST_ID} className={THOUGHT_CANVAS_STAGE_CLASS}>
         <input aria-label={t('common.search')} className="absolute left-3 top-3 z-10 w-48 rounded-md border bg-background px-3 py-2 text-sm" value={search} onChange={event => setSearch(event.target.value)} placeholder={t('common.search')} />
         <ReactFlow onInit={instance => { flow.current = instance }} nodes={flowNodes} edges={document.edges.map(edge => ({ ...edge, style: { strokeDasharray: edge.kind === 'reference' ? '5 5' : undefined, opacity: focusedPath && (!focusedPath.has(edge.source) || !focusedPath.has(edge.target)) ? 0.15 : 1 } }))}
           nodeTypes={thoughtNodeTypes} colorMode={isDark ? 'dark' : 'light'}
@@ -624,7 +671,7 @@ export function ThoughtCanvas(props: Props) {
           onNodeClick={(event, item) => { if (item.id.startsWith('group:')) return; if (!event.metaKey && !event.ctrlKey && !event.shiftKey) setSelected([item.id]); setContext(null) }} deleteKeyCode={null} minZoom={0.001} fitView fitViewOptions={{ minZoom: 0.001, maxZoom: 1.2 }} onlyRenderVisibleElements>
           <Background /><Controls /><MiniMap /></ReactFlow>
       </div>
-      <aside className="flex min-h-0 flex-col gap-3 overflow-auto rounded-lg border bg-card p-3">
+      <aside data-testid={THOUGHT_CANVAS_EDITOR_TEST_ID} className={THOUGHT_CANVAS_EDITOR_CLASS}>
         {!node ? <p className="text-sm leading-relaxed text-muted-foreground">{t('thought.empty')}</p> : <>
           <input aria-label={t('tasks.title')} className={fieldClass} value={node.title} disabled={inputLocked} onChange={event => changeNode({ title: event.target.value })} />
           <textarea aria-label={t('thought.question')} className={`${fieldClass} min-h-28`} value={node.question} disabled={inputLocked || node.kind === 'result'} onChange={event => changeNode({ question: event.target.value })} />

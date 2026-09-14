@@ -1,0 +1,169 @@
+{
+  "startedAt": "2026-09-14T02:00:59.618Z",
+  "light": {
+    "className": "dark",
+    "theme": null,
+    "colorScheme": "normal",
+    "htmlBg": "rgba(0, 0, 0, 0)",
+    "split": {
+      "bg": "rgba(0, 0, 0, 0)",
+      "fg": "oklch(0.95 0.01 270)",
+      "w": 720,
+      "h": 626
+    },
+    "stage": {
+      "bg": "oklch(0.145 0.015 270)",
+      "fg": "oklch(0.95 0.01 270)",
+      "w": 352,
+      "h": 626
+    },
+    "editor": {
+      "bg": "oklch(0.145 0.015 270)",
+      "fg": "oklch(0.95 0.01 270)",
+      "w": 360,
+      "h": 626
+    },
+    "toolbar": {
+      "bg": "rgba(0, 0, 0, 0)",
+      "fg": "oklch(0.95 0.01 270)",
+      "w": 720,
+      "h": 30
+    },
+    "testids": {
+      "split": true,
+      "stage": true,
+      "editor": true,
+      "toolbar": true
+    }
+  },
+  "a11y": {
+    "unlabeledVisibleControls": 0,
+    "ariaLabels": {
+      "标题": true,
+      "草稿": true,
+      "问答": false,
+      "添加材料": true,
+      "YAML": false
+    },
+    "roles": {
+      "status": 1,
+      "alert": 0
+    }
+  },
+  "settingsNav": {
+    "clicked": true,
+    "text": "外观主题、字体与界面"
+  },
+  "darkClick": {
+    "clicked": true,
+    "text": "深色"
+  },
+  "dark": {
+    "className": "dark",
+    "theme": null,
+    "colorScheme": "normal",
+    "htmlBg": "rgba(0, 0, 0, 0)",
+    "split": {
+      "bg": "rgba(0, 0, 0, 0)",
+      "fg": "oklch(0.95 0.01 270)",
+      "w": 965,
+      "h": 626
+    },
+    "stage": {
+      "bg": "oklch(0.145 0.015 270)",
+      "fg": "oklch(0.95 0.01 270)",
+      "w": 598,
+      "h": 626
+    },
+    "editor": {
+      "bg": "oklch(0.145 0.015 270)",
+      "fg": "oklch(0.95 0.01 270)",
+      "w": 360,
+      "h": 626
+    },
+    "toolbar": {
+      "bg": "rgba(0, 0, 0, 0)",
+      "fg": "oklch(0.95 0.01 270)",
+      "w": 965,
+      "h": 30
+    },
+    "testids": {
+      "split": true,
+      "stage": true,
+      "editor": true,
+      "toolbar": true
+    }
+  },
+  "selectedNodeA11y": {
+    "question": false,
+    "yaml": false,
+    "title": true
+  },
+  "keyboard": {
+    "focused": "标题",
+    "tabStops": [
+      {
+        "tag": "BUTTON",
+        "label": "思考",
+        "testid": null
+      },
+      {
+        "tag": "DIV",
+        "label": "新建会话普通会话7项目0数据源0API0MCP0本地文件夹0技能",
+        "testid": null
+      },
+      {
+        "tag": "BUTTON",
+        "label": "必须调用 Bash 执行：touch /tmp/selectio",
+        "testid": null
+      },
+      {
+        "tag": "BUTTON",
+        "label": "必须调用 Bash 执行：touch /tmp/selectio",
+        "testid": null
+      },
+      {
+        "tag": "BUTTON",
+        "label": "必须调用 Bash 执行：touch /tmp/selectio",
+        "testid": null
+      },
+      {
+        "tag": "BUTTON",
+        "label": "必须调用 Bash 执行：touch /tmp/selectio",
+        "testid": null
+      },
+      {
+        "tag": "BUTTON",
+        "label": "必须调用 Bash 执行：touch /tmp/selectio",
+        "testid": null
+      },
+      {
+        "tag": "BUTTON",
+        "label": "必须调用 Bash 执行：touch /tmp/selectio",
+        "testid": null
+      },
+      {
+        "tag": "BUTTON",
+        "label": "必须调用 Bash 执行：touch /tmp/selectio",
+        "testid": null
+      },
+      {
+        "tag": "BUTTON",
+        "label": "必须调用 Bash 执行：touch /tmp/selectio",
+        "testid": null
+      },
+      {
+        "tag": "BUTTON",
+        "label": "必须调用 Bash 执行：touch /tmp/selectio",
+        "testid": null
+      },
+      {
+        "tag": "BUTTON",
+        "label": "必须调用 Bash 执行：touch /tmp/selectio",
+        "testid": null
+      }
+    ]
+  },
+  "restoreLight": true,
+  "finishedAt": "2026-09-14T02:01:10.791Z"
+}

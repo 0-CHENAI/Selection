@@ -1,0 +1,12 @@
+{
+  "switched": {
+    "switched": true
+  },
+  "canvas": {
+    "clicked": true
+  },
+  "banner": true,
+  "yamlUnchanged": true,
+  "yaml": "id: legacy-v1\ntitle: Legacy V1\ngoal: g\nnodes:\n  - id: a\n    prompt: hello\n",
+  "snippet": "M\nM\nMy Workspace\n列表\n新建编排\n新建会话\n普通会话\n0\n项目\n0\n数据源\n0\nAPI\n0\nMCP\n0\n本地文件夹\n0\n技能\n20\n自动化\n0\n定时任务\n0\n事件触发\n0\n智能事件\n0\n设置\n普通会话\n暂无会话\n与智能体的会话将显示在这里。开始一个吧。\n新建会话\n列表\n/\n编辑任务\nLegacy V1 workbench\ne173169d-a9a8-46fc-9971-6039a8521134\nlocal-conflict-qa\n3f0b6066-8a15-4187-b83c-c27c09810045\nde54d518-588e-4efa-a15f-d70b3b1280c9\n17155c50-5718-4df4-8a16-335e84e2051d\nfe20cb44-b27d-4de6-98ac-1297362663c4\n9d310803-040e-4f6a-a9b1-2de13010229c\n5cd68ed4-7b9c-4d8f-b629-50cb820fe6a3\nec04881b-18fe-41ca-a44d-2c87cdc8b3e6\nb1e0b074-9798-46bc-a2a9-65f7759a6f60\n3c3ed135-d6b2-4989-aeac-61c297a2ed45\n43629d3d-5358-4c0e-b251-8c857b97bd71\nbd98a939-77f5-406c-99b2-bd6d53b6ab3d\ndab00a2c-ac2d-43b6-957d-01f1a4a2420f\nd3120a94-91b5-4ff4-a30f-01b045651b9e\n6c29b7ed-3ec5-476d-abc2-cfb92c47459b\n60e06d58-5b9b-49eb-bdb9-cf846fbe701b\nabd46d3a-95d4-4383-8be4-2df4f7f76463\n05b6f7f4-2f13-4384-af53-56561fb8dd62\n8cfa614b-1236-4f07-83ad-622500ff9ee6\ndb134405-66d8-4741-95c7-2e2627f250b3\n53155677-a11c-45a2-bf2f-83f55928231c\n思考 · 未保存的修改\n项目: 无项目\n思考\n编排图\n编排图\nYAML\n结果\n取消\n保存\n保存并运行\nAI 辅助编排\n模板库\n保存为模板\n此文件为 v1。保存将写入 schema_version: 2，并备份原始 YAML。\nNo schema_version; treated as v1. First save will write schema_version: 2 and backup the original YAML.\n高级 · 任务定义\n固定编排\n会话\n"
+}

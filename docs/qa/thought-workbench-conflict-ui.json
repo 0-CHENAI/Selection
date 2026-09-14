@@ -1,0 +1,42 @@
+{
+  "opened": {
+    "found": true,
+    "labels": [
+      "标题",
+      "添加材料",
+      "导入工作台副本",
+      "搜索",
+      null
+    ]
+  },
+  "identity": {
+    "id": "a07ff31e-6e2d-4491-9f6e-2cf1b3994ede",
+    "saved": true
+  },
+  "document": {
+    "id": "a07ff31e-6e2d-4491-9f6e-2cf1b3994ede",
+    "revision": 1
+  },
+  "typed": {
+    "typed": true,
+    "value": "local-conflict-qa"
+  },
+  "panel": {
+    "found": true,
+    "text": "编辑冲突同一字段在两处被改过。请选择保留哪一边。选择本身不会保存任务或启动运行。字段 /title当前编辑local-conflict-qa已保存版本remote-conflict-qa保留当前保留已保存关闭",
+    "buttons": [
+      "保留当前",
+      "保留已保存",
+      "关闭"
+    ]
+  },
+  "resolved": {
+    "id": "a07ff31e-6e2d-4491-9f6e-2cf1b3994ede",
+    "revision": 3,
+    "title": "local-conflict-qa",
+    "taskSlug": null
+  },
+  "createdTask": [],
+  "keptMine": true,
+  "noTaskStarted": true
+}

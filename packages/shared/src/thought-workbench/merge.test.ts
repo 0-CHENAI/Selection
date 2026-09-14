@@ -1,5 +1,5 @@
 import { expect, it } from 'bun:test';
-import { mergeThoughtDocuments } from './merge.ts';
+import { mergeThoughtDocuments, WorkbenchEditConflict } from './merge.ts';
 import { compileThoughtContext } from './context.ts';
 import { newThoughtDocument, newThoughtNode } from './types.ts';
 
@@ -22,6 +22,18 @@ it('rejects competing same-field edits and deletion racing with a delivered answ
   const base = { ...newThoughtDocument('doc'), nodes: [newThoughtNode('a')] };
   await expect(mergeThoughtDocuments(base, { ...base, title: 'local' }, { ...base, title: 'remote', revision: 2 })).rejects.toThrow('conflict: /title');
   await expect(mergeThoughtDocuments(base, { ...base, nodes: [] }, { ...base, revision: 2, nodes: [{ ...base.nodes[0]!, answer: 'remote' }] })).rejects.toThrow('conflict: /nodes/a');
+});
+
+it('applies an explicit field choice and still refuses an unresolved sibling conflict', async () => {
+  const base = { ...newThoughtDocument('doc'), title: 'base', projectId: 'p' };
+  const local = { ...base, title: 'local', projectId: 'mine' };
+  const remote = { ...base, revision: 2, title: 'remote', projectId: 'theirs' };
+  const titled = await mergeThoughtDocuments(base, { ...base, title: 'local' }, { ...base, title: 'remote', revision: 2 }, { '/title': 'local' });
+  expect(titled.title).toBe('local');
+  await expect(mergeThoughtDocuments(base, local, remote, { '/title': 'local' })).rejects.toBeInstanceOf(WorkbenchEditConflict);
+  await expect(mergeThoughtDocuments(base, local, remote, { '/title': 'local' })).rejects.toThrow('conflict: /projectId');
+  const both = await mergeThoughtDocuments(base, local, remote, { '/title': 'remote', '/projectId': 'local' });
+  expect(both).toMatchObject({ title: 'remote', projectId: 'mine', revision: 2 });
 });
 
 it('merges independent node additions and retains intentional deletions', async () => {

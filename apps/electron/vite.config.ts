@@ -11,8 +11,8 @@ import { resolve } from 'path'
 export default defineConfig({
   define: {
     'process.env.CRAFT_FEATURE_TASKS_ORCHESTRATE': JSON.stringify(process.env.CRAFT_FEATURE_TASKS_ORCHESTRATE ?? ''),
-    'process.env.CRAFT_FEATURE_THOUGHT_WORKBENCH': JSON.stringify(process.env.CRAFT_FEATURE_THOUGHT_WORKBENCH ?? ''),
-    '__CRAFT_THOUGHT_WORKBENCH__': JSON.stringify(process.env.CRAFT_FEATURE_THOUGHT_WORKBENCH ?? ''),
+    'process.env.CRAFT_FEATURE_THOUGHT_WORKBENCH': JSON.stringify(process.env.CRAFT_FEATURE_THOUGHT_WORKBENCH ?? '1'),
+    '__CRAFT_THOUGHT_WORKBENCH__': JSON.stringify(process.env.CRAFT_FEATURE_THOUGHT_WORKBENCH ?? '1'),
     'process.env.CRAFT_SWARM_PREVIEW_BUILD': JSON.stringify(process.env.CRAFT_SWARM_PREVIEW_BUILD ?? ''),
   },
   plugins: [

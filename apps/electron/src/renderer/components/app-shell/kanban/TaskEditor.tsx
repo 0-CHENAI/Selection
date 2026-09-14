@@ -1607,15 +1607,17 @@ function ExistingTaskEditor({
 
         {/* Definition / Results tabs — edit mode only (results need a backing task to read). */}
         <div className="ml-3 inline-flex rounded-[9px] bg-foreground/[0.05] p-0.5">
-          {(thoughtEnabled ? (['thought', 'canvas'] as Tab[]) : isEdit ? (['definition', 'canvas', 'yaml', 'results'] as Tab[]) : (['definition', 'canvas', 'yaml'] as Tab[])).map((tb) => (
+          {(thoughtEnabled
+            ? (isEdit ? (['thought', 'canvas', 'yaml', 'results'] as Tab[]) : (['thought', 'canvas', 'yaml'] as Tab[]))
+            : isEdit ? (['definition', 'canvas', 'yaml', 'results'] as Tab[]) : (['definition', 'canvas', 'yaml'] as Tab[])).map((tb) => (
             <button
               key={tb}
               onClick={() => selectEditorTab(tb)}
               disabled={busy}
-              aria-pressed={tab === tb || (thoughtEnabled && tb === 'canvas' && tab !== 'thought')}
+              aria-pressed={tab === tb}
               className={cn(
                 'rounded-[7px] px-3 py-1 text-[12.5px] font-semibold transition-colors',
-                tab === tb || (thoughtEnabled && tb === 'canvas' && tab !== 'thought') ? 'bg-card text-foreground shadow-minimal' : 'text-foreground/55 hover:text-foreground/80',
+                tab === tb ? 'bg-card text-foreground shadow-minimal' : 'text-foreground/55 hover:text-foreground/80',
               )}
             >
               {tb === 'thought' && t('thought.view')}
@@ -1626,15 +1628,6 @@ function ExistingTaskEditor({
             </button>
           ))}
         </div>
-
-        {thoughtEnabled && tab !== 'thought' && <select
-          aria-label={t('tasks.tabDefinition')}
-          className="rounded-md border border-border bg-background px-2 py-1 text-sm"
-          disabled={busy} value={tab} onChange={event => selectEditorTab(event.target.value as Tab)}>
-          <option value="canvas">{t('tasks.tabCanvas')}</option>
-          <option value="yaml">{t('tasks.tabYaml')}</option>
-          {isEdit && <option value="results">{t('tasks.tabResults')}</option>}
-        </select>}
 
         <div className="ml-auto flex items-center gap-2">
           {isEdit && onOpenSession && (
@@ -1737,6 +1730,7 @@ function ExistingTaskEditor({
       )}
 
       {(thoughtEnabled || tab === 'definition') && <TaskProposal
+        collapsed={thoughtEnabled && tab === 'thought' && !thoughtContext}
         workbenchId={thoughtEnabled ? workbenchDocumentId : undefined}
         prepareWorkbench={thoughtEnabled ? async yaml => {
           if (!thoughtController.current) throw new Error('Workbench is not ready')
@@ -1759,7 +1753,7 @@ function ExistingTaskEditor({
             defaults: { model: orchModel, llmConnection: orchConnection ?? modelToConnection.get(orchModel), permissionMode, ...next.defaults } })
         }}
       />}
-      {(thoughtEnabled || tab === 'definition') && (
+      {(thoughtEnabled || tab === 'definition') && tab !== 'thought' && (
         <div className="flex flex-wrap gap-2">
           <Button variant="ghost" className="self-start" disabled={busy || pendingNodeConfig} onClick={async () => { if (!dirty || await confirmAction(t('tasks.discardUnsaved'))) onOpenLibrary() }}>{t('tasks.templateLibrary')}</Button>
           {!isEdit && <Button variant="ghost" className="self-start" disabled={busy || pendingNodeConfig} onClick={async () => { if (!dirty || await confirmAction(t('tasks.discardUnsaved'))) onImport() }}>{t('tasks.yamlImportTitle')}</Button>}
