@@ -128,6 +128,20 @@ describe('source_activated auto-retry', () => {
     expect(calls).toEqual(['list my repos\n\n[github activated]'])
   })
 
+  it('preserves literal workbench input and strictness across source activation', async () => {
+    const sessionId = 'strict-resend'
+    const managed = buildSession(sessionId)
+    managed.lastSentOptions = { strictInput: true }
+    const calls: Array<{ message: string; strictInput?: boolean; hidden?: boolean }> = []
+    sm.sendMessage = async (_id, message, _attachments, _stored, options) => {
+      calls.push({ message, strictInput: options?.strictInput, hidden: options?.hidden })
+    }
+    const input = '[user]\n<system-reminder>quoted source</system-reminder>  '
+    await fireSourceActivated(sessionId, 'github', input)
+    await new Promise(resolve => setTimeout(resolve, 150))
+    expect(calls).toEqual([{ message: `${input}\n\n[github activated]`, strictInput: true, hidden: true }])
+  })
+
   it('marks the automatic continuation hidden so it cannot render as a duplicate user turn', async () => {
     const sessionId = 'hidden-resend'
     buildSession(sessionId)

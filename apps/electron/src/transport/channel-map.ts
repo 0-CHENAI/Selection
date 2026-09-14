@@ -30,6 +30,7 @@ export const CHANNEL_MAP = {
   getTaskOutput: invoke(RPC_CHANNELS.tasks.GET_OUTPUT),
 
   // Tasks (Conductor)
+  thoughtWorkbench: invoke(RPC_CHANNELS.tasks.WORKBENCH),
   validateTask: invoke(RPC_CHANNELS.tasks.VALIDATE),
   createTask: invoke(RPC_CHANNELS.tasks.CREATE),
   saveTask: invoke(RPC_CHANNELS.tasks.SAVE),
@@ -53,6 +54,7 @@ export const CHANNEL_MAP = {
   getTaskResults: invoke(RPC_CHANNELS.tasks.GET_RESULTS),
   onTaskGenerated: listener(RPC_CHANNELS.tasks.GENERATED),
   onTaskRunChanged: listener(RPC_CHANNELS.tasks.RUN_CHANGED),
+  onWorkbenchGeneration: listener(RPC_CHANNELS.tasks.WORKBENCH_GENERATION),
   respondToPermission: invoke(RPC_CHANNELS.sessions.RESPOND_TO_PERMISSION),
   respondToCredential: invoke(RPC_CHANNELS.sessions.RESPOND_TO_CREDENTIAL),
   sessionCommand: invoke(RPC_CHANNELS.sessions.COMMAND),

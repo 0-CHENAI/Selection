@@ -90,23 +90,23 @@ export function shouldRefreshYamlDraft(hasLocalSource: boolean, formChangedSince
   return !hasLocalSource || formChangedSinceYaml
 }
 
+/** Proposal input and staleness identity must use the same authored definition. */
+export function taskDocumentForProposal(input: {
+  yamlDraft: string
+  hasLocalSource: boolean
+  formChangedSinceYaml: boolean
+  formSpec: Record<string, unknown>
+  hasFormDefinition: boolean
+}): string | undefined {
+  if (!shouldRefreshYamlDraft(input.hasLocalSource, input.formChangedSinceYaml)) return input.yamlDraft
+  return input.hasFormDefinition ? taskDocumentForSave('form', input.yamlDraft, input.formSpec) : undefined
+}
+
 /** Permission modes are fixed (safe|ask|allow-all); mirrored here to avoid a shared Node import in the renderer. */
 export type TaskPermissionMode = 'safe' | 'ask' | 'allow-all'
 
-export type EditorNodeKind =
-  | 'session'
-  | 'orchestrator'
-  | 'route'
-  | 'parallel'
-  | 'map'
-  | 'loop'
-  | 'approval'
-  | 'synthesize'
-  | 'verify'
-  | 'judge'
-  | 'filter'
-  | 'aggregate'
-  | 'finally'
+export const EDITOR_NODE_KINDS = ['session', 'orchestrator', 'route', 'parallel', 'map', 'loop', 'approval', 'synthesize', 'verify', 'judge', 'filter', 'aggregate', 'finally'] as const
+export type EditorNodeKind = typeof EDITOR_NODE_KINDS[number]
 
 export const SESSION_LIKE_KINDS = new Set<EditorNodeKind>([
   'session',

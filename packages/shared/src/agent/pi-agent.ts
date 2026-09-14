@@ -18,7 +18,7 @@ import { randomUUID } from 'node:crypto';
 import { createInterface, type Interface as ReadlineInterface } from 'node:readline';
 import type { AgentEvent } from '@craft-agent/core/types';
 import type { FileAttachment } from '../utils/files.ts';
-import { hydrateAttachmentBytes, imageAttachmentsMissingBytes } from '../utils/files.ts';
+import { assemblePiTurnInput, type AgentPromptInput, type AgentInputSnapshot } from './pi-turn-input.ts';
 import { getProxyEnvVars } from '../config/proxy-env.ts';
 
 import type {
@@ -324,7 +324,14 @@ export class PiAgent extends BaseAgent {
   private pendingLlmQueries: Map<string, {
     resolve: (result: LLMQueryResult) => void;
     reject: (error: Error) => void;
+    onTextDelta?: (text: string) => void;
+    sequence: number;
   }> = new Map();
+
+  private pendingInputPreviews = new Map<string, {
+    resolve: (snapshot: AgentInputSnapshot) => void;
+    reject: (error: Error) => void;
+  }>();
 
   // Pending ensure_session_ready requests (branch preflight handshake)
   private pendingEnsureSessionReady: Map<string, {
@@ -1113,6 +1120,18 @@ export class PiAgent extends BaseAgent {
         this.handleMiniCompletionResult(msg);
         break;
 
+      case 'llm_query_delta': {
+        const pending = this.pendingLlmQueries.get(msg.id as string);
+        const sequence = msg.sequence;
+        if (pending && typeof sequence === 'number' && Number.isSafeInteger(sequence)
+          && sequence > pending.sequence && typeof msg.text === 'string') {
+          pending.sequence = sequence;
+          // Preview consumers must not prevent delivery of the authoritative result.
+          try { pending.onTextDelta?.(msg.text); } catch { /* isolate observers */ }
+        }
+        break;
+      }
+
       case 'llm_query_result': {
         // Response to an llm_query request
         const id = msg.id as string;
@@ -1127,6 +1146,15 @@ export class PiAgent extends BaseAgent {
             pending.reject(new Error(errorMessage));
           }
         }
+        break;
+      }
+
+      case 'preview_prompt_result': {
+        const pending = this.pendingInputPreviews.get(msg.id as string);
+        if (!pending) break;
+        this.pendingInputPreviews.delete(msg.id as string);
+        if (msg.snapshot) pending.resolve(msg.snapshot as AgentInputSnapshot);
+        else pending.reject(new Error(typeof msg.errorMessage === 'string' ? msg.errorMessage : 'Agent input preview failed'));
         break;
       }
 
@@ -1197,6 +1225,8 @@ export class PiAgent extends BaseAgent {
           pending.reject(new Error(rawMessage));
           this.pendingLlmQueries.delete(id);
         }
+        for (const pending of this.pendingInputPreviews.values()) pending.reject(new Error(rawMessage));
+        this.pendingInputPreviews.clear();
 
         if (errorCode === 'mini_completion_error' || errorCode === 'llm_query_error') {
           this.debug(`Ignoring ${errorCode} subprocess error in chat stream`);
@@ -2205,6 +2235,8 @@ export class PiAgent extends BaseAgent {
    * Handle subprocess exit.
    */
   private handleSubprocessExit(code: number | null, signal: string | null): void {
+    this.preparedThoughtInput = undefined;
+    this.thoughtPreparation++;
     this.debug(`Pi subprocess exited: code=${code}, signal=${signal}`);
 
     this.subprocess = null;
@@ -2238,6 +2270,11 @@ export class PiAgent extends BaseAgent {
       pending.reject(new Error(`Pi subprocess exited unexpectedly (${exitReason})`));
     }
     this.pendingLlmQueries.clear();
+
+    for (const pending of this.pendingInputPreviews.values()) {
+      pending.reject(new Error(`Pi subprocess exited unexpectedly (${exitReason})`));
+    }
+    this.pendingInputPreviews.clear();
 
     // Reject pending ensure_session_ready requests
     for (const [, pending] of this.pendingEnsureSessionReady) {
@@ -2445,6 +2482,78 @@ export class PiAgent extends BaseAgent {
   // Chat (AsyncGenerator backed by the subprocess event queue)
   // ============================================================
 
+  private preparedThoughtInput?: { hash: string; input: AgentPromptInput; message: string; attachments: string };
+  private thoughtPreparation = 0;
+
+  private attachmentInputSignature(attachments?: FileAttachment[]): string {
+    return JSON.stringify(assemblePiTurnInput({ systemPrompt: '', stableParts: [], volatileParts: [], message: '', attachments }));
+  }
+
+  async prepareThoughtInput(message: string, attachments?: FileAttachment[]): Promise<AgentInputSnapshot> {
+    if (this._isProcessing) throw new Error('Cannot preview a running Agent');
+    const preparation = ++this.thoughtPreparation;
+    this.preparedThoughtInput = undefined;
+    await this.ensureSubprocess();
+    const effective = this.prepareStrictInput(message, attachments).message;
+    const input = this.buildTurnInput(effective, attachments, true);
+    const attachmentSignature = this.attachmentInputSignature(attachments);
+    const snapshot = await this.previewInput(input);
+    if (preparation !== this.thoughtPreparation || this._isProcessing) throw new Error('Agent input preview was superseded');
+    this.preparedThoughtInput = { hash: snapshot.hash, input: structuredClone(input), message: effective, attachments: attachmentSignature };
+    return snapshot;
+  }
+
+  private buildTurnInput(message: string, attachments?: FileAttachment[], answerDelivery = Boolean(this.answerDelivery)): AgentPromptInput {
+    // Build system prompt
+    const projectContext = this.getPinnedProjectContext();
+    const systemPrompt = getSystemPrompt(
+      undefined, // pinnedPreferencesPrompt
+      this.config.debugMode,
+      this.config.workspace.rootPath,
+      this.config.session?.workingDirectory,
+      this.config.systemPromptPreset,
+      'Selection Backend', // backendName
+      getCoAuthorPreference(), // respect user's includeCoAuthoredBy preference (#576)
+      projectContext ?? undefined,
+      // Pi sessions support runtime model switching but cannot safely rebuild
+      // their registered tool schemas. Keep the prompt aligned with the strict,
+      // provider-neutral schemas registered by pi-agent-server.
+      false,
+      this.config.session?.swarmEnabled === true,
+    );
+
+    // Build context from sources
+    const sourceContext = this.sourceManager.formatSourceState();
+
+    const promptModeDiagnostics = getPermissionModeDiagnostics(this._sessionId)
+    this.debug(
+      `[ModeSnapshot] sessionId=${this._sessionId} chatPrompt mode=${promptModeDiagnostics.permissionMode} ` +
+      `modeVersion=${promptModeDiagnostics.modeVersion} changedBy=${promptModeDiagnostics.lastChangedBy} changedAt=${promptModeDiagnostics.lastChangedAt}`
+    )
+
+    // Build context parts using centralized PromptBuilder, split into stable
+    // vs volatile (issue #862). Stable blocks (workspace capabilities, working
+    // directory) stay in the cached system prefix; volatile blocks (date/time,
+    // session_state, source state) ride the user-message tail so a per-turn
+    // re-stamp doesn't invalidate the prompt cache. buildVolatileContextParts
+    // consumes the one-shot mode-change signal, so it is called exactly once.
+    const plansFolderPath = getSessionPlansPath(this.config.workspace.rootPath, this._sessionId);
+    const stableParts = this.promptBuilder.buildStableContextParts();
+    const volatileParts = this.promptBuilder.buildVolatileContextParts(
+      { plansFolderPath },
+      sourceContext
+    );
+
+    return assemblePiTurnInput({
+      systemPrompt,
+      answerDeliveryPrompt: answerDelivery ? ANSWER_DELIVERY_PROMPT : undefined,
+      stableParts,
+      volatileParts,
+      message,
+      attachments,
+    });
+  }
+
   protected async *chatImpl(
     messageParam: string,
     attachments?: FileAttachment[],
@@ -2460,7 +2569,7 @@ export class PiAgent extends BaseAgent {
     this.adapter.startTurn();
 
     // Fire UserPromptSubmit hook event (fire-and-forget)
-    this.emitAutomationEvent('UserPromptSubmit', {
+    if (!options?.inputHash) this.emitAutomationEvent('UserPromptSubmit', {
       hook_event_name: 'UserPromptSubmit',
       prompt: message,
     });
@@ -2505,7 +2614,7 @@ export class PiAgent extends BaseAgent {
 
       const trimmedMessage = message.trim();
       const compactMatch = trimmedMessage.match(/^\/compact(?:\s+([\s\S]+))?$/i);
-      if (compactMatch) {
+      if (compactMatch && !options?.strictInput) {
         const customInstructions = compactMatch[1]?.trim() || undefined;
         const compactResult = await this.requestCompact(customInstructions);
         if (compactResult) {
@@ -2520,113 +2629,27 @@ export class PiAgent extends BaseAgent {
         return;
       }
 
-      // Build system prompt
-      const projectContext = this.getPinnedProjectContext();
-      const systemPrompt = getSystemPrompt(
-        undefined, // pinnedPreferencesPrompt
-        this.config.debugMode,
-        this.config.workspace.rootPath,
-        this.config.session?.workingDirectory,
-        this.config.systemPromptPreset,
-        'Selection Backend', // backendName
-        getCoAuthorPreference(), // respect user's includeCoAuthoredBy preference (#576)
-        projectContext ?? undefined,
-        // Pi sessions support runtime model switching but cannot safely rebuild
-        // their registered tool schemas. Keep the prompt aligned with the strict,
-        // provider-neutral schemas registered by pi-agent-server.
-        false,
-        this.config.session?.swarmEnabled === true,
-      );
-
-      // Build context from sources
-      const sourceContext = this.sourceManager.formatSourceState();
-
-      const promptModeDiagnostics = getPermissionModeDiagnostics(this._sessionId)
-      this.debug(
-        `[ModeSnapshot] sessionId=${this._sessionId} chatPrompt mode=${promptModeDiagnostics.permissionMode} ` +
-        `modeVersion=${promptModeDiagnostics.modeVersion} changedBy=${promptModeDiagnostics.lastChangedBy} changedAt=${promptModeDiagnostics.lastChangedAt}`
-      )
-
-      // Build context parts using centralized PromptBuilder, split into stable
-      // vs volatile (issue #862). Stable blocks (workspace capabilities, working
-      // directory) stay in the cached system prefix; volatile blocks (date/time,
-      // session_state, source state) ride the user-message tail so a per-turn
-      // re-stamp doesn't invalidate the prompt cache. buildVolatileContextParts
-      // consumes the one-shot mode-change signal, so it is called exactly once.
-      const plansFolderPath = getSessionPlansPath(this.config.workspace.rootPath, this._sessionId);
-      const stableParts = this.promptBuilder.buildStableContextParts();
-      const volatileParts = this.promptBuilder.buildVolatileContextParts(
-        { plansFolderPath },
-        sourceContext
-      );
-
-      // Process attachments
-      const attachmentParts: string[] = [];
-      const images: Array<{ type: string; data: string; mimeType: string }> = [];
-      const hydratedAttachments = hydrateAttachmentBytes(attachments) || [];
-      const missingImages = imageAttachmentsMissingBytes(hydratedAttachments);
-      if (missingImages.length > 0) {
-        const names = missingImages.map(att => att.name).join(', ');
-        throw new Error(`image_bytes_unavailable: Image bytes could not be loaded for the model request: ${names}.`);
+      const prepared = options?.inputHash ? this.preparedThoughtInput : undefined;
+      if (options?.inputHash && (!prepared || prepared.hash !== options.inputHash
+        || prepared.message !== message || prepared.attachments !== this.attachmentInputSignature(attachments))) {
+        throw new Error('Agent input changed or preview expired; refresh the preview before generating');
       }
-      for (const att of hydratedAttachments) {
-        const isImage = att.type === 'image' || att.mimeType?.startsWith('image/') === true
-        if (isImage && att.base64) {
-          images.push({
-            type: 'image',
-            data: att.base64,
-            mimeType: att.mimeType || 'image/png',
-          });
-          const stored = att.storedPath || att.path
-          if (stored) {
-            attachmentParts.push(`[Attached image: ${att.name}]\nThe image is included as visual input — look at it. Path: ${stored}`);
-          }
-        } else if (att.mimeType === 'application/pdf' && att.storedPath) {
-          attachmentParts.push(`[Attached PDF: ${att.name}]\n[Stored at: ${att.storedPath}]`);
-        } else if (att.type === 'office' && att.storedPath) {
-          attachmentParts.push(
-            `[Attached Office document: ${att.name}]\n` +
-            `[Stored at: ${att.storedPath}]`,
-          );
-        } else if (att.storedPath) {
-          let pathInfo = `[Attached file: ${att.name}]\n[Stored at: ${att.storedPath}]`;
-          if (att.markdownPath) {
-            pathInfo += `\n[Markdown version: ${att.markdownPath}]`;
-          }
-          attachmentParts.push(pathInfo);
-        }
-      }
-
-      // System prompt carries only stable context (issue #862): the system block
-      // is pi-ai's cache prefix before all history, so anything volatile here
-      // re-stamps the prefix every turn and drops cacheRead to 0. Volatile blocks
-      // ride the user-message tail instead — exactly as the Claude path already
-      // does (buildTextPrompt / buildSDKUserMessage append context to the tail).
-      const fullSystemPrompt = [
-        systemPrompt,
-        this.answerDelivery ? ANSWER_DELIVERY_PROMPT : undefined,
-        ...stableParts,
-      ].filter(Boolean).join('\n\n');
-
-      // User message: volatile context + attachments + the actual message
-      // (skill read directive is already prepended to message by BaseAgent.chat())
-      const userParts = [
-        ...volatileParts,
-        ...attachmentParts,
-        message,
-      ].filter(Boolean);
-      const userMessage = userParts.join('\n\n');
+      const turnInput = prepared?.input ?? this.buildTurnInput(message, attachments);
+      if (prepared) this.preparedThoughtInput = undefined;
+      if (prepared) this.emitAutomationEvent('UserPromptSubmit', { hook_event_name: 'UserPromptSubmit', prompt: message });
 
       // Send prompt to subprocess
       const turnId = `turn-${++this.rpcIdCounter}`;
       this.send({
         type: 'prompt',
+        strictInput: options?.strictInput,
+        inputHash: options?.inputHash,
         answerRunId: this.answerDelivery?.runId,
         answerRecovery: this.answerDelivery?.recovery,
         id: turnId,
-        message: userMessage,
-        systemPrompt: fullSystemPrompt,
-        images: images.length > 0 ? images : undefined,
+        message: turnInput.message,
+        systemPrompt: turnInput.systemPrompt,
+        images: turnInput.images,
       });
 
       // Yield events as they arrive. The source-activation drain controller
@@ -2837,6 +2860,8 @@ export class PiAgent extends BaseAgent {
   }
 
   async abort(reason?: string): Promise<void> {
+    this.preparedThoughtInput = undefined;
+    this.thoughtPreparation++;
     for (const controller of this.sessionToolControllers) controller.abort();
     this.emitStopOnce('abort');
 
@@ -2858,6 +2883,8 @@ export class PiAgent extends BaseAgent {
   }
 
   forceAbort(reason: AbortReason): void {
+    this.preparedThoughtInput = undefined;
+    this.thoughtPreparation++;
     for (const controller of this.sessionToolControllers) controller.abort();
     this.emitStopOnce('abort');
 
@@ -3117,31 +3144,41 @@ export class PiAgent extends BaseAgent {
     return text;
   }
 
-  /**
-   * Execute an LLM query via the subprocess.
-   * Used by session-scoped tool callbacks (call_llm).
-   *
-   * Sends the full LLMQueryRequest over the `llm_query` RPC so the subprocess's
-   * model-aware queryLlm() can honor `request.model`, `request.systemPrompt`,
-   * and (transitively via buildCallLlmRequest) `request.outputSchema`.
-   * See packages/shared/CLAUDE.md → "queryLlm backend contract" and
-   * packages/pi-agent-server/src/index.ts → handleLlmQuery for the invariant.
-   */
-  async queryLlm(request: LLMQueryRequest): Promise<LLMQueryResult> {
+  /** Inspect assembled input and registered runtime tools without dispatching a model call. */
+  async previewInput(input: AgentPromptInput): Promise<AgentInputSnapshot> {
+    await this.ensureSubprocess();
+    const id = `input-${++this.rpcIdCounter}`;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      return await new Promise<AgentInputSnapshot>((resolve, reject) => {
+        this.pendingInputPreviews.set(id, { resolve, reject });
+        timer = setTimeout(() => {
+          this.pendingInputPreviews.delete(id);
+          reject(new Error('Agent input preview timed out'));
+        }, 30_000);
+        this.send({ type: 'preview_prompt', id, ...input });
+      });
+    } finally {
+      clearTimeout(timer);
+      this.pendingInputPreviews.delete(id);
+    }
+  }
+
+  /** Forward the complete query contract (including model, system and schema) to call_llm's isolated runtime. */
+  async queryLlm(request: LLMQueryRequest, onTextDelta?: (text: string) => void): Promise<LLMQueryResult> {
     this.debug('[PiAgent.queryLlm] Starting');
 
     await this.ensureSubprocess();
 
     const id = `llm-${++this.rpcIdCounter}`;
     const resultPromise = new Promise<LLMQueryResult>((resolve, reject) => {
-      this.pendingLlmQueries.set(id, { resolve, reject });
+      this.pendingLlmQueries.set(id, { resolve, reject, onTextDelta, sequence: 0 });
     });
 
-    this.send({ type: 'llm_query', id, request });
-
     // Keep this aligned with the subprocess-side queryLlm timeout.
+    let timer: ReturnType<typeof setTimeout> | undefined;
     const timeout = new Promise<LLMQueryResult>((_, reject) => {
-      setTimeout(() => {
+      timer = setTimeout(() => {
         if (this.pendingLlmQueries.has(id)) {
           this.pendingLlmQueries.delete(id);
           reject(new Error(`queryLlm timed out after ${LLM_QUERY_TIMEOUT_MS / 1000}s`));
@@ -3149,7 +3186,13 @@ export class PiAgent extends BaseAgent {
       }, LLM_QUERY_TIMEOUT_MS);
     });
 
-    return Promise.race([resultPromise, timeout]);
+    try {
+      this.send({ type: 'llm_query', id, request, ...(onTextDelta ? { stream: true } : {}) });
+      return await Promise.race([resultPromise, timeout]);
+    } finally {
+      clearTimeout(timer);
+      this.pendingLlmQueries.delete(id);
+    }
   }
 
   // ============================================================

@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import type { TaskApplyRunRevisionResult } from '@craft-agent/shared/protocol'
 import { canConfirmRunRevision, revisionRequiresV3Ack } from '../ApplyRunRevisionDialog'
-import { runtimeNodesForDefinition } from '../ConductorWorkbench'
+import { runtimeNodesForDefinition } from '../conductor-inspector'
 
 function preview(overrides: Partial<TaskApplyRunRevisionResult> = {}): TaskApplyRunRevisionResult {
   return {

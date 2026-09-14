@@ -273,13 +273,16 @@ describe('TaskRunner (Conductor)', () => {
     ] }));
     let runner = makeRunner(); runner.run('retry-approval', { runId: 'r1', verifyOnComplete: false });
     runner.respondApproval('retry-approval', 'r1', 'gate', false); await tick();
+    expect(runner.getRunState('retry-approval', 'r1')?.nodes.find(node => node.id === 'gate')?.blocker).toBe('approval-rejected');
     if (restart) runner = makeRunner();
     runner.continue('retry-approval', 'r1'); await tick();
     expect(runner.getRunState('retry-approval', 'r1')?.status).toBe('waiting-approval');
+    expect(runner.getRunState('retry-approval', 'r1')?.nodes.find(node => node.id === 'gate')?.blocker).toBeUndefined();
     expect(host.dispatchedNames()).toHaveLength(0);
     runner.respondApproval('retry-approval', 'r1', 'gate', true); await tick();
     host.complete('work'); await tick();
     expect(runner.getRunState('retry-approval', 'r1')?.status).toBe('completed');
+    expect(runner.getRunState('retry-approval', 'r1')?.nodes.find(node => node.id === 'gate')?.blocker).toBeUndefined();
   });
 
   it.each([false, true])('invalidates completed all_done descendants but preserves unrelated successes (restart=%s)', async restart => {
@@ -2322,6 +2325,20 @@ describe('TaskRunner (Conductor)', () => {
     host.complete('a', { reason: 'error' }); await tick();
     host.complete('a', { finalText: 'new text only' }); await tick();
     expect(runner.getRunState('stale-output', 'r1')?.nodes[0]?.state).toBe('invalid');
+  });
+
+  it.each([2, 3])('settles a failed structured verifier without treating ordinary text as a verdict (V%s)', async version => {
+    saveTaskSpec(root, specOf({ schema_version: version, id: 'verifier-error', title: 'Verifier', goal: 'g', nodes: [{ id: 'a', prompt: 'a' }] }));
+    const runner = makeRunner();
+    runner.run('verifier-error', { runId: 'r1', orchestratorSessionId: 'orch' });
+    await tick(); host.complete('a', { finalText: 'A' }); await tick();
+    host.completeSession('unrelated', { reason: 'error' });
+    host.completeSession('orch', { finalText: 'Not a structured verdict' });
+    expect(runner.getRunState('verifier-error', 'r1')?.status).toBe('verifying');
+    host.completeSession('orch', { reason: 'error' });
+    expect(runner.getRunState('verifier-error', 'r1')?.status).toBe('failed');
+    expect(makeRunner().getRunHistory('verifier-error', 'orch')[0]?.status).toBe('failed');
+    expect(host.sent.filter(item => item.sessionId === 'orch')).toHaveLength(1);
   });
 
   it('allows only the parent coordinator to submit the structured verdict', async () => {

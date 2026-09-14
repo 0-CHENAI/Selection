@@ -305,10 +305,10 @@ export abstract class BaseAgent implements AgentBackend {
     return this._currentTurnUserMessage;
   }
 
-  protected setCurrentTurnUserMessage(message: string | null): void {
+  protected setCurrentTurnUserMessage(message: string | null, literalInput = false): void {
     // Capture user intent only — never model-only system-reminder / activation suffixes
     this._currentTurnUserMessage =
-      message == null ? null : sanitizeUserMessageForRetry(message);
+      message == null ? null : literalInput ? message : sanitizeUserMessageForRetry(message);
   }
 
   // ============================================================
@@ -1018,7 +1018,7 @@ ${formattedMessages}
    *   - cleanMessage: Message with mentions stripped, or default directive
    *   - missingSkills: Array of skill slugs that were mentioned but not found
    */
-  protected extractSkillPaths(message: string, attachments?: FileAttachment[]): {
+  protected extractSkillPaths(message: string, attachments?: FileAttachment[], literalInput = false): {
     skillPaths: Map<string, string>;
     cleanMessage: string;
     missingSkills: string[];
@@ -1030,7 +1030,9 @@ ${formattedMessages}
 
     this.debug(`[extractSkillPaths] Available skills: ${skillSlugs.join(', ')}`);
 
-    const parsed = parseMentions(message, skillSlugs, []);
+    // Compiled graph text can quote mention syntax from ancestors/materials.
+    // It is input data, not a new UI mention command. Keep attachment routing.
+    const parsed = parseMentions(literalInput ? '' : message, skillSlugs, []);
     this.debug(`[extractSkillPaths] Parsed skills: ${JSON.stringify(parsed.skills)}`);
     if (parsed.invalidSkills && parsed.invalidSkills.length > 0) {
       this.debug(`[extractSkillPaths] Invalid skills: ${JSON.stringify(parsed.invalidSkills)}`);
@@ -1072,6 +1074,8 @@ ${formattedMessages}
       skillPaths.delete('officecli');
       resolveBundledSlug('officecli');
     }
+
+    if (literalInput) return { skillPaths, cleanMessage: message, missingSkills: [] };
 
     // Resolve mentions to semantic markers (like file mentions) instead of stripping them.
     // This preserves sentence structure: "find the bug in [skill:datadog-api]"
@@ -1141,7 +1145,16 @@ ${formattedMessages}
     attachments?: FileAttachment[],
     options?: ChatOptions
   ): AsyncGenerator<AgentEvent> {
-    const { skillPaths, cleanMessage, missingSkills } = this.extractSkillPaths(message, attachments);
+    if (options?.strictInput || options?.inputHash) {
+      const prepared = this.prepareStrictInput(message, attachments);
+      this.prerequisiteManager.setCatalogSkills(prepared.catalog);
+      if (prepared.skillPaths.size) this.prerequisiteManager.registerSkillPrerequisites([...prepared.skillPaths.values()]);
+      this.setCurrentTurnUserMessage(message, true);
+      try { yield* this.chatImpl(prepared.message, attachments, options); }
+      finally { this.setCurrentTurnUserMessage(null); }
+      return;
+    }
+    const { skillPaths, cleanMessage, missingSkills } = this.extractSkillPaths(message, attachments, options?.strictInput);
     if (missingSkills.length > 0) {
       yield { type: 'error', message: `Skill(s) not found: ${missingSkills.join(', ')}` };
       yield { type: 'complete' };
@@ -1183,7 +1196,7 @@ ${formattedMessages}
     const directive = this.formatSkillDirective(skillPaths);
     // Strip any system-reminder that a caller accidentally embedded in `message`
     // so retry capture and model injection stay separated.
-    const userFacingMessage = sanitizeUserMessageForRetry(cleanMessage);
+    const userFacingMessage = options?.strictInput ? cleanMessage : sanitizeUserMessageForRetry(cleanMessage);
     const messageParts = [branchSeedContext, transferredSessionContext, directive, suggestion, userFacingMessage].filter(Boolean);
     let effectiveMessage = messageParts.join('\n\n');
 
@@ -1194,12 +1207,25 @@ ${formattedMessages}
 
     // Capture the raw user message for source-activation auto-retry. This is the
     // user-facing text only (no system-reminder, no prior activation suffix).
-    this.setCurrentTurnUserMessage(userFacingMessage);
+    this.setCurrentTurnUserMessage(userFacingMessage, options?.strictInput);
     try {
       yield* this.chatImpl(effectiveMessage, attachments, options);
     } finally {
       this.setCurrentTurnUserMessage(null);
     }
+  }
+
+  /** Read-only preparation for a fresh, explicitly compiled graph context.
+   * Used both by preflight and execution; does not consume session seed state.
+   */
+  protected prepareStrictInput(message: string, attachments?: FileAttachment[]) {
+    const { skillPaths } = this.extractSkillPaths(message, attachments, true);
+    const workspaceRoot = this.config.workspace?.rootPath ?? this.workingDirectory;
+    const catalog = toSkillCatalogEntries(loadAllSkills(workspaceRoot, this.config.session?.workingDirectory));
+    const excluded = new Set(skillPaths.keys());
+    if (shouldLoadBundledOfficecliRouter(message, attachments)) excluded.add('officecli');
+    const suggestion = formatSkillSuggestions(matchSkillsByGlobs(catalog, { message, attachments }), excluded);
+    return { catalog, skillPaths, message: [this.formatSkillDirective(skillPaths), suggestion, message].filter(Boolean).join('\n\n') };
   }
 
   // ============================================================
@@ -1287,7 +1313,7 @@ ${formattedMessages}
    * @param request - The query request (prompt, model, systemPrompt, etc.)
    * @returns The model's response text and optional token usage
    */
-  abstract queryLlm(request: LLMQueryRequest): Promise<LLMQueryResult>;
+  abstract queryLlm(request: LLMQueryRequest, onTextDelta?: (text: string) => void): Promise<LLMQueryResult>;
 
   /**
    * Pre-execute a call_llm request: resolve attachments, validate model, run query.

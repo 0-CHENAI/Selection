@@ -139,10 +139,10 @@ export function applyGraphToSpec<T extends SpecLike>(spec: T, graph: CanvasGraph
       return {
         ...prev,
         id: n.id,
-        title: n.title,
-        kind: n.kind,
+        ...(prev && n.title === (prev.title ?? prev.id) ? {} : { title: n.title }),
+        ...(prev && n.kind === (prev.kind || 'session') ? {} : { kind: n.kind }),
         prompt: n.prompt ?? prev?.prompt,
-        depends_on: deps[n.id]?.length ? deps[n.id] : undefined,
+        depends_on: JSON.stringify(deps[n.id] ?? []) === JSON.stringify(prev?.depends_on ?? []) ? prev?.depends_on : deps[n.id]?.length ? deps[n.id] : undefined,
       }
     }),
     ui: {
@@ -187,6 +187,28 @@ export function wouldCycle(edges: CanvasEdge[]): boolean {
 
 export function deleteImpact(graph: CanvasGraph, nodeId: string): { dependents: string[] } {
   return { dependents: graph.edges.filter((e) => e.source === nodeId).map((e) => e.target) }
+}
+
+/** Conservative reference check: do not silently rewrite prompts, route expressions or outputs. */
+export function referencedBy(spec: SpecLike, nodeId: string): string[] {
+  const escaped = nodeId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  const reference = new RegExp(`\\bnodes\\.${escaped}(?=[.\\[\\s}]|$)`)
+  const containsReference = (value: unknown): boolean => {
+    const pending: unknown[] = [value]
+    const visited = new Set<object>()
+    while (pending.length) {
+      const item = pending.pop()
+      if (typeof item === 'string') { if (reference.test(item)) return true }
+      else if (item && typeof item === 'object' && !visited.has(item)) {
+        visited.add(item)
+        pending.push(...Object.values(item))
+      }
+    }
+    return false
+  }
+  // Inspect actual scalar text: JSON serialization inserts quotes/escapes that
+  // hide terminal condition refs such as { ref: 'nodes.review', op: 'exists' }.
+  return spec.nodes.filter(node => node.id !== nodeId && containsReference(node)).map(node => node.id)
 }
 
 export function autoLayout(graph: CanvasGraph, direction: 'TB' | 'LR' = 'TB'): CanvasGraph {

@@ -33,6 +33,7 @@ export interface BroadcastEventMap {
   [RPC_CHANNELS.projects.CHANGED]: [workspaceId: string, projects: LoadedProject[]]
   [RPC_CHANNELS.tasks.GENERATED]: [workspaceId: string, result: TaskGenerateResult]
   [RPC_CHANNELS.tasks.RUN_CHANGED]: [workspaceId: string, snapshot: TaskRunSnapshotDto]
+  [RPC_CHANNELS.tasks.WORKBENCH_GENERATION]: [workspaceId: string, generation: import('../thought-workbench/types').ThoughtGeneration]
   [RPC_CHANNELS.llmConnections.CHANGED]: []
   [RPC_CHANNELS.permissions.DEFAULTS_CHANGED]: [value: null]
 

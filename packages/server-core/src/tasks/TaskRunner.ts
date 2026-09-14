@@ -894,7 +894,9 @@ class ActiveRun {
         role: node?.kind === 'verify' || node?.kind === 'judge' ? 'reviewer' as const : 'worker' as const,
         model: this.resolveNodeModel(node),
         tokensUsed: st.sessionId ? this.sessionTokens.get(st.sessionId) : undefined,
-        blocker: st.lastFailure,
+        // Failure history is retained for retry prompts, but a past failure is
+        // not an active blocker after retry or successful completion.
+        blocker: st.state === 'failed' || st.state === 'invalid' || st.state === 'interrupted' ? st.lastFailure : undefined,
         elapsedMs: timing?.elapsedMs,
         queueMs: timing?.queueMs,
         cacheStatus: timing?.cacheStatus,
@@ -1878,6 +1880,13 @@ class ActiveRun {
   // --- completion ---
 
   private onSessionComplete(evt: SessionCompletionEvent): void {
+    // SessionManager reports provider failures as terminal events even when
+    // sendMessage resolves. A failed verifier cannot deliver a structured verdict.
+    if (evt.sessionId === this.opts.orchestratorSessionId && this.runStatus === 'verifying'
+      && (evt.reason === 'error' || evt.reason === 'timeout')) {
+      this.finish('failed');
+      return;
+    }
     const nodeId = this.sessionToNode.get(evt.sessionId);
     if (!nodeId) return; // not one of our child nodes
     const defId = definitionId(nodeId);

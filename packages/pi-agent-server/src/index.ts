@@ -15,6 +15,10 @@
  */
 
 import { answerPreviewContext } from '../../shared/src/answer-preview-context.ts';
+import { assertExplicitQueryFits, assertImmutableContextFits, explicitQueryHistory, snapshotExplicitQuery } from './explicit-query-input.ts';
+import { QueryCancellation } from './query-cancellation.ts';
+import { convertToLlm } from '@earendil-works/pi-coding-agent';
+import { snapshotAgentInput, type AgentPromptInput } from './agent-input-snapshot.ts';
 import { answerExecutionError, isAnswerTool } from './answer-delivery-guard.ts';
 import http from 'node:http';
 import { createInterface } from 'node:readline';
@@ -181,7 +185,8 @@ function normalizeProxyToolContent(content: ProxyToolExecutionResult['content'])
 /** Messages from main process (stdin) */
 type InboundMessage =
   | InitMessage
-  | { type: 'prompt'; answerRunId?: string; answerRecovery?: boolean; id: string; message: string; systemPrompt: string; images?: Array<{ type: 'image'; data: string; mimeType: string }> }
+  | { type: 'prompt'; inputHash?: string; strictInput?: boolean; answerRunId?: string; answerRecovery?: boolean; id: string; message: string; systemPrompt: string; images?: Array<{ type: 'image'; data: string; mimeType: string }> }
+  | ({ type: 'preview_prompt'; id: string } & AgentPromptInput)
   | { type: 'register_tools'; tools: ProxyToolDef[] }
   | { type: 'tool_execute_response'; requestId: string; result: ProxyToolExecutionResult }
   | {
@@ -194,7 +199,7 @@ type InboundMessage =
     }
   | { type: 'abort' }
   | { type: 'mini_completion'; id: string; prompt: string }
-  | { type: 'llm_query'; id: string; request: LLMQueryRequest }
+  | { type: 'llm_query'; id: string; request: LLMQueryRequest; stream?: boolean }
   | { type: 'ensure_session_ready'; id: string }
   | { type: 'set_model'; model: string }
   | { type: 'set_thinking_level'; level: string }
@@ -300,6 +305,8 @@ type OutboundMessage =
   | OutboundSessionToolCompleted
   | OutboundMiniResult
   | OutboundLlmQueryResult
+  | { type: 'preview_prompt_result'; id: string; snapshot?: Awaited<ReturnType<typeof snapshotAgentInput>>; errorMessage?: string }
+  | { type: 'llm_query_delta'; id: string; sequence: number; text: string }
   | OutboundEnsureSessionReadyResult
   | OutboundCompactResult
   | OutboundSetAutoCompactionResult
@@ -312,6 +319,7 @@ type OutboundMessage =
 // ============================================================
 
 let piSession: AgentSession | null = null;
+const strictQueries = new QueryCancellation<AgentSession>();
 let piModelRegistry: PiModelRegistry | null = null;
 let piSettingsManager: PiSettingsManager | null = null;
 let moduleCredentialStore: InMemoryCredentialStore | null = null;
@@ -1097,8 +1105,9 @@ function buildProxyTools(): ToolDefinition<any, any>[] {
 // LLM Query (ephemeral session for call_llm + mini completions)
 // ============================================================
 
-async function queryLlm(request: LLMQueryRequest): Promise<LLMQueryResult> {
+async function queryLlm(request: LLMQueryRequest, onTextDelta?: (text: string) => void): Promise<LLMQueryResult> {
   if (!initConfig) throw new Error('Cannot run queryLlm: init not received');
+  if (request.previewOnly || request.inputHash) request = { ...request, strictInput: true };
 
   debugLog('[queryLlm] Starting');
 
@@ -1146,6 +1155,7 @@ async function queryLlm(request: LLMQueryRequest): Promise<LLMQueryResult> {
       const isCompatible = resolvedProvider === authProvider || resolvedProvider === 'custom-endpoint';
       const deniedUtility = !inheritedModel && isDeniedMiniModelId(model, piAuthProvider);
       if (!resolved || !isCompatible || deniedUtility) {
+        if (request.strictInput) throw new Error(`Requested model ${model} is unavailable on this connection`);
         // Anthropic: keep Haiku (the cheap/fast mini). For every other provider
         // Haiku is unresolvable, so walk PI_PREFERRED_DEFAULTS for a model that
         // actually works under the user's auth.
@@ -1159,7 +1169,14 @@ async function queryLlm(request: LLMQueryRequest): Promise<LLMQueryResult> {
     }
   }
 
-  const runQueryWithModel = async (modelId: string): Promise<string> => {
+  if (request.strictInput) {
+    const requested = request.model || initConfig.model;
+    if (!requested) throw new Error('Select a model before compiling an exact-input request');
+    model = requested;
+  }
+
+  const runQueryWithModel = async (modelId: string): Promise<string | ReturnType<typeof snapshotExplicitQuery>> => {
+    const abortEpoch = strictQueries.snapshot();
     debugLog(`[queryLlm] Using model: ${modelId}`);
 
     // Resolve model — fail fast if unresolvable so we don't let the Pi SDK
@@ -1172,6 +1189,17 @@ async function queryLlm(request: LLMQueryRequest): Promise<LLMQueryResult> {
         `Could not resolve model "${modelId}" for provider "${initConfig!.piAuth?.provider ?? '(unknown)'}"`,
       );
     }
+    if (request.images?.length && !piModel.input.includes('image')) throw new Error('The selected model does not support image input');
+    if (request.strictInput) assertExplicitQueryFits(request, { api: piModel.api, provider: piModel.provider, model: piModel.id, contextWindow: piModel.contextWindow });
+    const captureQueryInput = () => snapshotExplicitQuery(request, { api: piModel.api, provider: piModel.provider, model: piModel.id, contextWindow: piModel.contextWindow }, {
+      model: piModel, configuredModel: initConfig?.model,
+      endpoint: initConfig?.customEndpoint, baseUrl: initConfig?.baseUrl,
+    });
+    const assertQueryInput = () => {
+      if (request.inputHash && captureQueryInput().hash !== request.inputHash) throw new Error('Query input preview changed; refresh preview before generation');
+    };
+    if (request.previewOnly) return captureQueryInput();
+    assertQueryInput();
 
     // Create minimal ephemeral session
     const ephemeralOptions: CreateAgentSessionOptions = {
@@ -1179,16 +1207,24 @@ async function queryLlm(request: LLMQueryRequest): Promise<LLMQueryResult> {
       modelRuntime,
       tools: [],
       sessionManager: PiSessionManager.inMemory(),
+      ...(request.strictInput ? { settingsManager: PiSettingsManager.inMemory() } : {}),
       model: piModel,
     };
 
     const { session: ephemeralSession } = await createAgentSession(ephemeralOptions);
+    if (request.strictInput) {
+      try { strictQueries.attach(abortEpoch, ephemeralSession); }
+      catch (error) { ephemeralSession.dispose(); throw error; }
+    }
+    ephemeralSession.setActiveToolsByName([]);
+    if (request.strictInput) ephemeralSession.setAutoCompactionEnabled(false);
 
     // Pi SDK ignores options.model for ephemeral sessions (same issue as options.tools).
     // Explicitly set the model after creation to ensure the mini model is used.
     try {
       await ephemeralSession.setModel(piModel);
-    } catch {
+    } catch (error) {
+      if (request.strictInput) { strictQueries.release(ephemeralSession); ephemeralSession.dispose(); throw error; }
       debugLog(`[queryLlm] Failed to set model on ephemeral session, proceeding with default`);
     }
 
@@ -1199,6 +1235,7 @@ async function queryLlm(request: LLMQueryRequest): Promise<LLMQueryResult> {
     const promptForSession =
       request.systemPrompt ?? 'Reply with ONLY the requested text. No explanation.';
     applySystemPromptOverride(ephemeralSession, promptForSession);
+    if (request.messages) ephemeralSession.agent.state.messages = explicitQueryHistory(request, { api: piModel.api, provider: piModel.provider, model: piModel.id });
 
     // Collect response text and errors from events
     let result = '';
@@ -1209,6 +1246,10 @@ async function queryLlm(request: LLMQueryRequest): Promise<LLMQueryResult> {
     });
 
     const unsub = ephemeralSession.subscribe((event: AgentSessionEvent) => {
+      if (event.type === 'message_update' && event.assistantMessageEvent.type === 'text_delta'
+        && (!request.strictInput || strictQueries.isActive(abortEpoch))) {
+        onTextDelta?.(event.assistantMessageEvent.delta);
+      }
       if (event.type === 'message_end') {
         // Only capture assistant messages — Pi SDK emits message_end for user messages too
         const msg = event.message as {
@@ -1240,22 +1281,38 @@ async function queryLlm(request: LLMQueryRequest): Promise<LLMQueryResult> {
     });
 
     try {
-      await ephemeralSession.prompt(request.prompt);
+      const queryImages: PiImageContent[] | undefined = request.images?.map(image => ({ type: 'image', ...image }));
+      const runPrompt = () => {
+        if (request.strictInput) {
+          strictQueries.assertActive(abortEpoch);
+          assertQueryInput();
+          // Bypass command, skill-template and extension-input expansion for a previewed snapshot.
+          ephemeralSession.agent.transformContext = undefined;
+          return ephemeralSession.agent.prompt(request.prompt, queryImages);
+        }
+        return ephemeralSession.prompt(request.prompt, { expandPromptTemplates: false, images: queryImages });
+      };
       await withTimeout(
-        completionPromise,
+        Promise.all([runPrompt(), completionPromise]),
         LLM_QUERY_TIMEOUT_MS,
         `queryLlm timed out after ${LLM_QUERY_TIMEOUT_MS / 1000}s`
       );
       debugLog(`[queryLlm] Result length: ${result.trim().length}`);
 
+      // The SDK resolves prompt() on abort and may retain a partial message.
+      // Such text is a preview, never a successful exact-input query result.
+      if (request.strictInput) strictQueries.assertActive(abortEpoch);
+
       // If we got no text but captured an error, throw so callers see the real issue
-      if (!result.trim() && lastError) {
+      if (lastError && (request.strictInput || !result.trim())) {
         throw new Error(lastError);
       }
 
       return result.trim();
     } finally {
+      strictQueries.release(ephemeralSession);
       unsub();
+      await ephemeralSession.abort();
       ephemeralSession.dispose();
     }
   };
@@ -1281,11 +1338,11 @@ async function queryLlm(request: LLMQueryRequest): Promise<LLMQueryResult> {
   while (true) {
     triedModels.add(currentModel);
     try {
-      const text = await runQueryWithModel(currentModel);
-      return { text, model: currentModel };
+      const result = await runQueryWithModel(currentModel);
+      return typeof result === 'string' ? { text: result, model: currentModel } : { text: '', model: currentModel, inputSnapshot: result };
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : String(error);
-      const shouldRetry = isModelNotFoundError(errorMsg);
+      const shouldRetry = !request.strictInput && isModelNotFoundError(errorMsg);
 
       if (!shouldRetry) {
         throw error;
@@ -1597,7 +1654,40 @@ async function waitForCompaction(session: { isCompacting: boolean }, timeoutMs =
   }
 }
 
+async function ensureCurrentToolSession(): Promise<AgentSession> {
+  if (toolsChanged && piSession) {
+    answerRecoveryToolNames = undefined;
+    unsubscribeEvents?.();
+    unsubscribeEvents = null;
+    piSession.dispose();
+    piSession = null;
+  }
+  return ensureSession();
+}
+
+function captureAgentInput(session: AgentSession, input: AgentPromptInput) {
+  const model = session.agent.state.model;
+  if (!model) throw new Error('Configure a model before previewing Agent input');
+  return snapshotAgentInput(input, {
+    messages: convertToLlm(session.agent.state.messages), tools: session.agent.state.tools, model,
+    configuration: { model, thinkingLevel: session.thinkingLevel, endpoint: initConfig?.customEndpoint, baseUrl: initConfig?.baseUrl },
+  });
+}
+
+async function handlePreviewPrompt(msg: Extract<InboundMessage, { type: 'preview_prompt' }>) {
+  try {
+    if (piSession?.isStreaming || piSession?.isCompacting) throw new Error('Cannot preview input while the Agent is running');
+    const session = await ensureCurrentToolSession();
+    if (session.isStreaming || session.isCompacting) throw new Error('Cannot preview input while the Agent is running');
+    const snapshot = captureAgentInput(session, msg);
+    send({ type: 'preview_prompt_result', id: msg.id, snapshot });
+  } catch (error) {
+    send({ type: 'preview_prompt_result', id: msg.id, errorMessage: error instanceof Error ? error.message : String(error) });
+  }
+}
+
 async function handlePrompt(msg: Extract<InboundMessage, { type: 'prompt' }>): Promise<void> {
+  const strictInput = msg.strictInput || Boolean(msg.inputHash);
   currentUserMessage = msg.message;
   answerRunId = msg.answerRunId;
   answerRecovery = !!msg.answerRecovery;
@@ -1610,18 +1700,7 @@ async function handlePrompt(msg: Extract<InboundMessage, { type: 'prompt' }>): P
     // If proxy tools changed since last session creation, dispose and recreate.
     // This avoids calling _buildRuntime() for dynamic tool updates — instead
     // we create a fresh session via continueRecent() with all tools known upfront.
-    if (toolsChanged && piSession) {
-      debugLog('Recreating session due to tool changes');
-      answerRecoveryToolNames = undefined; // The rebuilt session has the newly registered tool set.
-      if (unsubscribeEvents) {
-        unsubscribeEvents();
-        unsubscribeEvents = null;
-      }
-      piSession.dispose();
-      piSession = null;
-    }
-
-    const session = await ensureSession();
+    const session = await ensureCurrentToolSession();
     if (answerRecoveryToolNames) {
       session.setActiveToolsByName(answerRecoveryToolNames);
       answerRecoveryToolNames = undefined;
@@ -1648,6 +1727,25 @@ async function handlePrompt(msg: Extract<InboundMessage, { type: 'prompt' }>): P
     await waitForCompaction(session);
 
     const promptImages = msg.images && msg.images.length > 0 ? msg.images : undefined
+    if (msg.inputHash) {
+      const snapshot = captureAgentInput(session, msg);
+      if (snapshot.hash !== msg.inputHash) throw new Error('Agent input changed after preview; refresh the preview before generating');
+    }
+    if (strictInput) {
+      // Workbench generations must not silently rewrite their selected context.
+      // Leave ordinary sessions' configured compaction behavior untouched.
+      session.setAutoCompactionEnabled(false);
+      assertImmutableContextFits({
+        systemPrompt: msg.systemPrompt,
+        messages: [...convertToLlm(session.agent.state.messages), {
+          role: 'user', timestamp: 0, content: [
+            { type: 'text', text: msg.message },
+            ...(promptImages ?? []),
+          ],
+        }],
+        tools: session.agent.state.tools,
+      }, session.agent.state.model?.contextWindow ?? 0);
+    }
     if (promptImages) {
       debugLog(`image-input ${JSON.stringify({
         requestId: msg.id,
@@ -1665,6 +1763,7 @@ async function handlePrompt(msg: Extract<InboundMessage, { type: 'prompt' }>): P
     }, () => session!.prompt(msg.message, {
       images: promptImages,
       streamingBehavior: 'followUp',
+      ...(strictInput ? { expandPromptTemplates: false } : {}),
     }));
   } catch (error) {
     const errorMsg = error instanceof Error ? error.message : String(error);
@@ -1729,6 +1828,7 @@ function handlePreToolUseResponse(msg: Extract<InboundMessage, { type: 'pre_tool
 }
 
 async function handleAbort(): Promise<void> {
+  for (const error of await strictQueries.abort()) debugLog(`Query abort failed: ${error instanceof Error ? error.message : String(error)}`);
   if (piSession) {
     try {
       await piSession.abort();
@@ -1770,7 +1870,10 @@ async function handleMiniCompletion(msg: Extract<InboundMessage, { type: 'mini_c
 // request-propagation + request-honoring are independent (see #596).
 async function handleLlmQuery(msg: Extract<InboundMessage, { type: 'llm_query' }>): Promise<void> {
   try {
-    const result = await queryLlm(msg.request);
+    let sequence = 0;
+    const result = await queryLlm(msg.request, msg.stream
+      ? text => send({ type: 'llm_query_delta', id: msg.id, sequence: ++sequence, text })
+      : undefined);
     send({ type: 'llm_query_result', id: msg.id, result });
   } catch (error) {
     const errorMsg = error instanceof Error ? error.message : String(error);
@@ -2016,6 +2119,10 @@ async function processMessage(msg: InboundMessage): Promise<void> {
 
     case 'prompt':
       await handlePrompt(msg);
+      break;
+
+    case 'preview_prompt':
+      await handlePreviewPrompt(msg);
       break;
 
     case 'register_tools':

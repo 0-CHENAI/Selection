@@ -1452,6 +1452,7 @@ export function resolveMidStreamDeliveryOutcome(
 
 export class SessionManager implements ISessionManager {
   private sessions: Map<string, ManagedSession> = new Map()
+  private thoughtQueries = new Set<string>()
   // Delta batching for performance - reduces IPC events from 50+/sec to ~20/sec
   private pendingDeltas: Map<string, PendingDelta> = new Map()
   private deltaFlushTimers: Map<string, NodeJS.Timeout> = new Map()
@@ -3774,6 +3775,54 @@ export class SessionManager implements ISessionManager {
    * 3. global defaultLlmConnection
    * 4. fallback: no connection configured
    */
+  /** Expire an unused preview without deleting subsequent user activity. */
+  async discardThoughtPreview(sessionId: string): Promise<void> {
+    const managed = this.sessions.get(sessionId)
+    // A draft may have been opened or used elsewhere while its lease was alive.
+    // Expiring a preview never authorizes deleting a conversation or running tools.
+    if (!managed || managed.deleting || !managed.taskDraft || managed.isProcessing || managed.messages.length > 0) return
+    await this.deleteSession(sessionId)
+  }
+
+  /** Prepare a fresh Agent's complete input without starting its chat or tools. */
+  async prepareThoughtAgentInput(sessionId: string, message: string, attachments?: FileAttachment[]): Promise<import('@craft-agent/shared/agent/pi-turn-input').AgentInputSnapshot> {
+    const managed = this.sessions.get(sessionId)
+    if (!managed || !managed.taskDraft || managed.messages.length > 0 || managed.isProcessing) throw new Error('Expected a fresh workbench Agent session')
+    if (this.thoughtQueries.has(sessionId)) throw new Error('Workbench input preparation is already running')
+    this.thoughtQueries.add(sessionId)
+    const generation = managed.processingGeneration
+    const assertCurrent = () => {
+      if (this.sessions.get(sessionId) !== managed || managed.deleting || managed.stopRequested || managed.processingGeneration !== generation || managed.messages.length > 0) throw new Error('Workbench input preparation was cancelled')
+    }
+    try {
+      const agent = await this.getOrCreateAgent(managed)
+      assertCurrent()
+      if (!agent.prepareThoughtInput) throw new Error('Backend does not support Agent input previews')
+      await this.reloadSessionSources(managed)
+      assertCurrent()
+      const snapshot = await agent.prepareThoughtInput(message, attachments)
+      assertCurrent()
+      return snapshot
+    } finally { this.thoughtQueries.delete(sessionId) }
+  }
+
+  /** A fresh workbench-only session uses the backend's stateless, tool-free query path. */
+  async queryThoughtContext(sessionId: string, request: import('@craft-agent/shared/agent/llm-tool').LLMQueryRequest, onTextDelta?: (text: string) => void): Promise<import('@craft-agent/shared/agent/llm-tool').LLMQueryResult> {
+    const managed = this.sessions.get(sessionId)
+    if (!managed || !managed.taskDraft || managed.messages.length > 0) throw new Error('Expected a fresh workbench query session')
+    if (this.thoughtQueries.has(sessionId)) throw new Error('Workbench query is already running')
+    this.thoughtQueries.add(sessionId)
+    try {
+      const generation = managed.processingGeneration
+      const agent = await this.getOrCreateAgent(managed)
+      // Cancellation/deletion can win while provider initialization is awaiting
+      // credentials or spawning its backend. Never dispatch a late model request.
+      if (this.sessions.get(sessionId) !== managed || managed.deleting || managed.stopRequested || managed.processingGeneration !== generation) throw new Error('Workbench query was cancelled before model dispatch')
+      if (!agent.queryLlm) throw new Error('Backend does not support isolated model queries')
+      return await agent.queryLlm(request, onTextDelta)
+    } finally { this.thoughtQueries.delete(sessionId) }
+  }
+
   private async getOrCreateAgent(managed: ManagedSession): Promise<AgentInstance> {
     if (managed.deleting) throw new Error(`Session ${managed.id} is being deleted`)
     if (managed.agentCreation) return managed.agentCreation
@@ -6381,6 +6430,7 @@ export class SessionManager implements ISessionManager {
       throw new Error(`Session ${sessionId} not found`)
     }
     if (managed.deleting) throw new Error(`Session ${sessionId} is being deleted`)
+    if (options?.inputHash && (!managed.taskDraft || managed.isProcessing || managed.messages.length > 0)) throw new Error('Agent preview session is no longer fresh; refresh the preview')
     // Captured before any await so a Stop during regenerate dispose / agent
     // create can invalidate this call (cancel bumps processingGeneration).
     const generationAtEntry = managed.processingGeneration
@@ -7037,7 +7087,7 @@ export class SessionManager implements ISessionManager {
       }
 
       sendSpan.mark('chat.starting')
-      const chatOptions = { previousResponseInterrupted, continueUserTask: isUserTaskContinuation }
+      const chatOptions = { previousResponseInterrupted, continueUserTask: isUserTaskContinuation, strictInput: options?.strictInput, inputHash: options?.inputHash }
       const chatIterator = this.runAnswerDelivery(managed, agent, agent.chat(message, preparedImages.attachments, chatOptions), chatOptions)
       this.announceRegenerateReplacement(managed)
       sessionLog.info('Got chat iterator, starting iteration...')
@@ -7392,7 +7442,7 @@ export class SessionManager implements ISessionManager {
         || managed.processingGeneration !== state.generation || managed.authRetryInProgress) return
       agent.configureAnswerDelivery?.(this.answerDeliveryControl(managed))
       complete = undefined
-      for await (const event of agent.chat(ANSWER_RECOVERY_PROMPT, undefined, { ...options, previousResponseInterrupted: false, continueUserTask: true })) {
+      for await (const event of agent.chat(ANSWER_RECOVERY_PROMPT, undefined, { ...options, inputHash: undefined, previousResponseInterrupted: false, continueUserTask: true })) {
         if (event.type === 'complete') complete = event
         else yield event
       }
@@ -7420,6 +7470,7 @@ export class SessionManager implements ISessionManager {
     if (!managed) {
       throw new Error(`Session ${sessionId} not found`)
     }
+    if (managed.lastSentOptions?.strictInput) throw new Error('Replay this node from the workbench with a fresh input preview')
     if (managed.isProcessing) {
       throw new Error('Cannot regenerate while a response is still generating')
     }
@@ -7744,6 +7795,12 @@ export class SessionManager implements ISessionManager {
 
   async cancelProcessing(sessionId: string, silent = false): Promise<void> {
     const managed = this.sessions.get(sessionId)
+    if (managed && this.thoughtQueries.has(sessionId)) {
+      managed.stopRequested = true
+      managed.processingGeneration++
+      managed.agent?.forceAbort(AbortReason.UserStop)
+      return
+    }
     if (!managed?.isProcessing) {
       return // Not processing, nothing to cancel
     }
@@ -7939,6 +7996,10 @@ export class SessionManager implements ISessionManager {
     workspaceId: string,
     failureErrorCode?: string,
   ): boolean {
+    // Rebuilding the runtime invalidates a prepared workbench input. Let the
+    // normal terminal error path preserve the failed attempt, then require an
+    // explicit fresh preview rather than deleting/replaying its user message.
+    if (managed.lastSentOptions?.strictInput || managed.lastSentOptions?.inputHash) return false
     if (managed.authRetryAttempted || !managed.lastSentMessage) return false
 
     sessionLog.info(`Auth error detected, attempting token refresh and retry for session ${sessionId}`)
@@ -8026,6 +8087,18 @@ export class SessionManager implements ISessionManager {
    * Used by the Tasks Conductor; empty until something subscribes, so zero overhead otherwise.
    */
   private sessionCompletionListeners = new Set<(evt: SessionCompletionEvent) => void>()
+  private thoughtOutputListeners = new Map<string, Set<(output: { kind: 'process' | 'preview'; text: string }) => void>>()
+
+  /** Observe an explicitly started workbench session; never activates execution. */
+  onThoughtOutput(sessionId: string, listener: (output: { kind: 'process' | 'preview'; text: string }) => void): () => void {
+    const listeners = this.thoughtOutputListeners.get(sessionId) ?? new Set()
+    listeners.add(listener)
+    this.thoughtOutputListeners.set(sessionId, listeners)
+    return () => {
+      listeners.delete(listener)
+      if (listeners.size === 0 && this.thoughtOutputListeners.get(sessionId) === listeners) this.thoughtOutputListeners.delete(sessionId)
+    }
+  }
 
   /**
    * Subscribe to in-process session completion (Tasks Conductor seam).
@@ -11346,7 +11419,8 @@ export class SessionManager implements ISessionManager {
 
         // Sanitize so a polluted originalMessage (legacy system-reminder embed)
         // cannot re-enter the transcript on auto-retry.
-        const originalMessage = sanitizeUserMessageForRetry(event.originalMessage ?? '')
+        const strictInput = managed.lastSentOptions?.strictInput
+        const originalMessage = strictInput ? (event.originalMessage ?? '') : sanitizeUserMessageForRetry(event.originalMessage ?? '')
         if (!originalMessage.trim()) {
           sessionLog.warn(`Source "${event.sourceSlug}" activated for session ${sessionId}, but originalMessage was empty; skipping auto-retry`)
           break
@@ -11393,7 +11467,7 @@ export class SessionManager implements ISessionManager {
           // so a legacy renderer's duplicate RPC arriving ~50ms later gets dropped.
           // The pending slot is cleared by the deadline check in sendMessage, by the
           // next matching sendMessage that drops as a duplicate, or by session deletion.
-          this.sendMessage(sessionId, messageWithSuffix, undefined, undefined, { hidden: true }).catch(err => {
+          this.sendMessage(sessionId, messageWithSuffix, undefined, undefined, { hidden: true, strictInput }).catch(err => {
             sessionLog.error(`Auto-retry sendMessage failed for ${sessionId}:`, err)
           })
         }, 100)
@@ -11531,6 +11605,12 @@ export class SessionManager implements ISessionManager {
   }
 
   private sendEvent(event: SessionEvent, workspaceId?: string): void {
+    if (event.type === 'text_delta' || event.type === 'answer_preview') {
+      for (const listener of this.thoughtOutputListeners.get(event.sessionId) ?? []) {
+        try { listener(event.type === 'text_delta' ? { kind: 'process', text: event.delta } : { kind: 'preview', text: event.text }) }
+        catch (error) { sessionLog.error('Workbench output observer failed:', error) }
+      }
+    }
     if (event.type === 'text_delta' || event.type === 'tool_start' || event.type === 'tool_result') {
       const state = this.sessions.get(event.sessionId)?.answerDelivery
       if (state) event = { ...event, answerProtocol: 'explicit-v1', answerRunId: state.runId }

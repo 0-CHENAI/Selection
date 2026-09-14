@@ -316,6 +316,10 @@ export interface CoreBackendConfig {
  * Options for the chat method.
  */
 export interface ChatOptions {
+  /** A server-owned preflight hash, usable once by its originating Agent instance. */
+  inputHash?: string;
+  /** Disable implicit input rewriting/compaction for compiled workbench turns. */
+  strictInput?: boolean;
   /** Retry flag (internal use for session recovery) */
   isRetry?: boolean;
   /** Internal continuation of the same user-authored task (source/auth retry). */
@@ -646,6 +650,8 @@ export interface AgentBackend {
   /** Called when agent submits a plan */
   onPlanSubmitted: PlanCallback | null;
   configureAnswerDelivery?: (control: AnswerDeliveryControl | undefined) => void;
+  queryLlm?: (request: import('../llm-tool.ts').LLMQueryRequest, onTextDelta?: (text: string) => void) => Promise<import('../llm-tool.ts').LLMQueryResult>;
+  prepareThoughtInput?: (message: string, attachments?: FileAttachment[]) => Promise<import('../pi-turn-input.ts').AgentInputSnapshot>;
 
   /** Called when a source requires authentication */
   onAuthRequest: AuthCallback | null;

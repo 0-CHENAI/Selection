@@ -242,6 +242,7 @@ export interface ElectronAPI {
   getTaskOutput(taskId: string): Promise<string | null>
 
   // Tasks (Conductor)
+  thoughtWorkbench(workspaceId: string, request: import('@craft-agent/shared/thought-workbench/types').WorkbenchRequest): Promise<import('@craft-agent/shared/thought-workbench/types').WorkbenchResult>
   validateTask(workspaceId: string, yaml: string): Promise<TaskValidationResultDto>
   createTask(workspaceId: string, req: TaskCreateRequest): Promise<TaskCreateResult>
   saveTask(workspaceId: string, req: TaskSaveRequest): Promise<TaskSaveResult>
@@ -266,6 +267,7 @@ export interface ElectronAPI {
   applyTaskRunRevision(workspaceId: string, req: import('@craft-agent/shared/protocol').TaskApplyRunRevisionRequest): Promise<import('@craft-agent/shared/protocol').TaskApplyRunRevisionResult>
   getTaskResults(workspaceId: string, slug: string, runId?: string): Promise<TaskResultsDto>
   onTaskRunChanged(callback: (workspaceId: string, snapshot: TaskRunSnapshotDto) => void): () => void
+  onWorkbenchGeneration(callback: (workspaceId: string, generation: import('@craft-agent/shared/thought-workbench/types').ThoughtGeneration) => void): () => void
 
   respondToPermission(sessionId: string, requestId: string, allowed: boolean, alwaysAllow: boolean, options?: PermissionResponseOptions): Promise<boolean>
   respondToCredential(sessionId: string, requestId: string, response: CredentialResponse): Promise<boolean>

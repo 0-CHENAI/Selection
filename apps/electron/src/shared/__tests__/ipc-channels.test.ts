@@ -294,6 +294,8 @@ const EXPECTED_CHANNELS: string[] = [
   'tasks:stop',
   'tasks:updateRunLimits',
   'tasks:validate',
+  'tasks:workbench',
+  'tasks:workbenchGeneration',
   'theme:appChanged',
   'theme:broadcastPreferences',
   'theme:broadcastWorkspaceTheme',

@@ -73,6 +73,7 @@ export default defineConfig({
     dedupe: ['react', 'react-dom'],
   },
   define: {
+    '__CRAFT_THOUGHT_WORKBENCH__': JSON.stringify(process.env.CRAFT_FEATURE_THOUGHT_WORKBENCH ?? ''),
     // Flag to detect web UI context in shared code
     'import.meta.env.IS_WEBUI': 'true',
   },

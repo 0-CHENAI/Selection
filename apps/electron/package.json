@@ -37,6 +37,9 @@
     "lint:fix": "eslint src/ --fix"
   },
   "dependencies": {
+    "pdfjs-dist": "5.4.296",
+    "mammoth": "1.11.0",
+    "parse5": "7.3.0",
     "@craft-agent/core": "workspace:*",
     "@craft-agent/messaging-gateway": "workspace:*",
     "@craft-agent/server-core": "workspace:*",

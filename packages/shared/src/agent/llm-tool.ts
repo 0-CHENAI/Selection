@@ -37,6 +37,16 @@ import { getDefaultSummarizationModel, resolveKnownRegistryModelId } from '../co
 export interface LLMQueryRequest {
   /** Full prompt including serialized file content */
   prompt: string;
+  /** Explicit multimodal input; callers must supply verified original bytes. */
+  images?: Array<{ mimeType: string; data: string }>;
+  /** Ordered explicit history, excluding the final user prompt; never restored from a session. */
+  messages?: Array<{ role: 'user' | 'assistant'; content: string }>;
+  /** Exact-input workflows must not silently fall back to another model or compact input. */
+  strictInput?: boolean;
+  /** Internal exact-input preflight: resolve and return input without model dispatch. */
+  previewOnly?: boolean;
+  /** Require the runtime input to match a previously returned preflight. */
+  inputHash?: string;
   /** Optional system prompt */
   systemPrompt?: string;
   /** Model to use (validated against registry) */
@@ -54,6 +64,7 @@ export interface LLMQueryRequest {
  */
 export interface LLMQueryResult {
   text: string;
+  inputSnapshot?: import('./pi-turn-input.ts').AgentInputSnapshot;
   model?: string;
   inputTokens?: number;
   outputTokens?: number;

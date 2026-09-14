@@ -257,6 +257,7 @@ export const REMOTE_ELIGIBLE_CHANNELS = new Set<string>([
   RPC_CHANNELS.transfer.ABORT,
 
   // tasks — workspace content (Conductor DAG runs on the workspace server)
+  RPC_CHANNELS.tasks.WORKBENCH,
   RPC_CHANNELS.tasks.GET_OUTPUT,
   RPC_CHANNELS.tasks.VALIDATE,
   RPC_CHANNELS.tasks.CREATE,
@@ -281,6 +282,7 @@ export const REMOTE_ELIGIBLE_CHANNELS = new Set<string>([
   RPC_CHANNELS.tasks.APPLY_RUN_REVISION,
   RPC_CHANNELS.tasks.GET_RESULTS,
   RPC_CHANNELS.tasks.RUN_CHANGED,
+  RPC_CHANNELS.tasks.WORKBENCH_GENERATION,
 
   // file — workspace files (not openDialog which is native)
   RPC_CHANNELS.file.READ,

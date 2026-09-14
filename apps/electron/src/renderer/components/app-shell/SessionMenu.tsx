@@ -19,6 +19,7 @@ import { getFileManagerName } from '@/lib/platform'
 import type { SessionMeta } from '@/atoms/sessions'
 import { hasMessagesMeta, hasUnreadMeta } from '@/utils/session'
 import { useSessionMenuActions } from '@/hooks/useSessionMenuActions'
+import { SessionWorkbenchMenu } from './SessionWorkbenchMenu'
 
 export interface SessionMenuProjectOption {
   id: string
@@ -61,6 +62,7 @@ export function SessionMenu({
 
   return (
     <>
+      <SessionWorkbenchMenu item={item} />
       {hasTransferTargets && onSendToWorkspace && (
         <MenuItem onClick={onSendToWorkspace}>
           <Send className="h-3.5 w-3.5" />

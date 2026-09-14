@@ -54,12 +54,96 @@ async function flushMicrotasks(): Promise<void> {
 }
 
 describe('PiAgent.queryLlm — subprocess RPC round-trip', () => {
+  it('cleans up query correlation when transport dispatch throws', async () => {
+    const agent = new PiAgent(createConfig());
+    installFakeSubprocess(agent);
+    (agent as any).send = () => { throw new Error('transport closed'); };
+    await expect(agent.queryLlm({ prompt: 'preview', previewOnly: true })).rejects.toThrow('transport closed');
+    expect((agent as any).pendingLlmQueries.size).toBe(0);
+    agent.destroy();
+  });
+
+  it('uses the frozen prepared input once and refuses changed graph text before hooks or dispatch', async () => {
+    const agent = new PiAgent(createConfig());
+    installFakeSubprocess(agent);
+    let assemblies = 0;
+    let hooks = 0;
+    const sent: any[] = [];
+    (agent as any).buildTurnInput = (message: string) => ({ systemPrompt: `platform-${++assemblies}`, message });
+    (agent as any).emitAutomationEvent = (name: string) => { if (name === 'UserPromptSubmit') hooks++; };
+    agent.previewInput = async input => ({ context: { systemPrompt: input.systemPrompt, messages: [], tools: [] }, model: { id: 'test', api: 'test', provider: 'test', contextWindow: 8192 }, hash: 'frozen-hash' });
+    (agent as any).send = (message: any) => { sent.push(message); (agent as any).eventQueue.complete(); };
+    const snapshot = await agent.prepareThoughtInput('graph');
+    expect(hooks).toBe(0);
+    for await (const _event of agent.chat('graph', undefined, { strictInput: true, inputHash: snapshot.hash })) { /* drain */ }
+    expect(assemblies).toBe(1);
+    expect(sent).toEqual([expect.objectContaining({ type: 'prompt', systemPrompt: 'platform-1', message: 'graph', inputHash: snapshot.hash })]);
+    expect(hooks).toBe(1);
+    const errors: unknown[] = [];
+    for await (const event of agent.chat('changed graph', undefined, { strictInput: true, inputHash: snapshot.hash })) errors.push(event);
+    expect(JSON.stringify(errors)).toContain('preview expired');
+    expect(sent).toHaveLength(1);
+    expect(hooks).toBe(1);
+    agent.destroy();
+  });
+
+  it('correlates concurrent input previews without sending a model prompt', async () => {
+    const agent = new PiAgent(createConfig());
+    const { sent } = installFakeSubprocess(agent);
+    const first = agent.previewInput({ systemPrompt: 'system', message: 'first' });
+    const second = agent.previewInput({ systemPrompt: 'system', message: 'second' });
+    await flushMicrotasks();
+    expect(sent.map(message => message.type)).toEqual(['preview_prompt', 'preview_prompt']);
+    const snapshot = { context: { systemPrompt: 'system', messages: [], tools: [] }, model: { id: 'test', api: 'test', provider: 'test', contextWindow: 8192 }, hash: 'second-hash' };
+    (agent as any).handleLine(JSON.stringify({ type: 'preview_prompt_result', id: sent[1]!.id, snapshot }));
+    expect(await second).toEqual(snapshot);
+    (agent as any).handleLine(JSON.stringify({ type: 'preview_prompt_result', id: sent[0]!.id, errorMessage: 'preview rejected' }));
+    await expect(first).rejects.toThrow('preview rejected');
+    expect((agent as any).pendingInputPreviews.size).toBe(0);
+    agent.destroy();
+  });
+
+  it('rejects input previews on subprocess exit and clears their timers', async () => {
+    const agent = new PiAgent(createConfig());
+    installFakeSubprocess(agent);
+    const pending = agent.previewInput({ systemPrompt: 'system', message: 'graph' });
+    await flushMicrotasks();
+    (agent as any).handleSubprocessExit(1, null);
+    await expect(pending).rejects.toThrow('subprocess exited');
+    expect((agent as any).pendingInputPreviews.size).toBe(0);
+    agent.destroy();
+  });
+
+  it('isolates preview sequences by query and ignores duplicate and late deltas', async () => {
+    const agent = new PiAgent(createConfig());
+    const { sent } = installFakeSubprocess(agent);
+    const preview: string[] = [];
+    const pending = agent.queryLlm({ prompt: 'hi' }, text => preview.push(text));
+    await flushMicrotasks();
+    const id = sent[0]!.id;
+    expect(sent[0]!.stream).toBe(true);
+    const receive = (message: object) => (agent as any).handleLine(JSON.stringify(message));
+    receive({ type: 'llm_query_delta', id: 'foreign', sequence: 1, text: 'wrong' });
+    receive({ type: 'llm_query_delta', id, sequence: 1, text: 'hello' });
+    receive({ type: 'llm_query_delta', id, sequence: 1, text: 'duplicate' });
+    receive({ type: 'llm_query_delta', id, sequence: 0, text: 'old' });
+    receive({ type: 'llm_query_delta', id, sequence: 2, text: ' world' });
+    receive({ type: 'llm_query_result', id, result: { text: 'final', model: 'test' } });
+    receive({ type: 'llm_query_delta', id, sequence: 3, text: 'late' });
+    expect((await pending).text).toBe('final');
+    expect(preview).toEqual(['hello', ' world']);
+    agent.destroy();
+  });
+
   it('propagates the full LLMQueryRequest shape over the llm_query RPC unchanged', async () => {
     const agent = new PiAgent(createConfig());
     const { sent } = installFakeSubprocess(agent);
 
     const request: LLMQueryRequest = {
       prompt: 'Summarize this transcript',
+      images: [{ mimeType: 'image/png', data: 'aW1hZ2U=' }],
+      strictInput: true,
+      messages: [{ role: 'user', content: 'Earlier question' }, { role: 'assistant', content: 'Earlier answer' }],
       systemPrompt: 'You are a concise summarizer.',
       model: 'pi/gpt-5-mini',
       maxTokens: 512,

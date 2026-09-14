@@ -56,7 +56,7 @@ export function buildModelCatalog(connections: LlmConnectionWithStatus[]): {
     })
     if (models.length === 0) continue
     for (const m of models) modelToConnection.set(m.id, conn.slug)
-    groups.push({ provider: catalogProviderKey(conn), label: conn.name, models })
+    groups.push({ provider: catalogProviderKey(conn), label: conn.name, connectionSlug: conn.slug, models })
   }
 
   return { groups, modelToConnection }

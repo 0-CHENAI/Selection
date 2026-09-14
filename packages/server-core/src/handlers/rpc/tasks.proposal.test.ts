@@ -8,6 +8,9 @@ import { rememberSubmittedDefinition } from '../../tasks/submitted-definitions'
 import { registerTasksHandlers } from './tasks'
 import type { HandlerDeps } from '../handler-deps'
 import type { RpcServer } from '../../transport'
+import { newThoughtDocument } from '@craft-agent/shared/thought-workbench/types'
+import { saveThoughtDocument } from '@craft-agent/shared/thought-workbench/storage'
+import { executionDraftHash, listWorkbenchProposals } from '@craft-agent/shared/thought-workbench/proposals'
 
 const roots: string[] = []
 const mocks: Array<{ mockRestore(): void }> = []
@@ -55,4 +58,39 @@ it('refuses to save a missing task with an editor-first error', async () => {
   await expect(handlers.get(RPC_CHANNELS.tasks.SAVE)!({}, 'ws', {
     yaml: 'schema_version: 3\nid: missing\ntitle: Missing\ngoal: g\nnodes:\n  - id: a\n    prompt: p\n',
   })).rejects.toThrow('Create the workflow in the editor first')
+})
+
+it('persists workbench proposal history and rejects a stale baseline before creating a session', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'proposal-workbench-')); roots.push(root)
+  mocks.push(spyOn(config, 'getWorkspaceByNameOrId').mockReturnValue({ id: 'ws', rootPath: root } as ReturnType<typeof config.getWorkspaceByNameOrId>))
+  const document = saveThoughtDocument(root, newThoughtDocument('draft'), 0)
+  const handlers = new Map<string, (...args: any[]) => any>()
+  let listener: ((event: any) => void) | undefined
+  let creates = 0
+  const prompts: string[] = []
+  const pushed: any[][] = []
+  registerTasksHandlers({ handle: (name: string, fn: any) => handlers.set(name, fn), push: (...args: any[]) => pushed.push(args) } as unknown as RpcServer, {
+    sessionManager: {
+      setTaskRunnerLookup() {},
+      async createSession() { creates++; return { id: 'draft-session' } },
+      onSessionComplete(fn: any) { listener = fn; return () => { listener = undefined } },
+      async sendMessage(_id: string, prompt: string) {
+        prompts.push(prompt)
+        rememberSubmittedDefinition('draft-session', 1, 'schema_version: 3\nid: proposal\ntitle: Proposal\ngoal: g\nnodes:\n  - id: review\n    kind: approval\n')
+        listener?.({ sessionId: 'draft-session', generation: 1, finalText: 'Submitted' })
+      },
+      async deleteSession() {},
+    },
+  } as unknown as HandlerDeps)
+  const baseline = { documentId: document.id, documentRevision: document.revision, executionHash: executionDraftHash(''), nodeIds: [] }
+  const ack = await handlers.get(RPC_CHANNELS.tasks.GENERATE)!({}, 'ws', { goal: 'Round one', workbench: baseline })
+  await new Promise(resolve => setTimeout(resolve, 0))
+  expect(ack.workbenchProposalId).toBeDefined()
+  expect(listWorkbenchProposals(root, document.id)[0]?.status).toBe('ready')
+  expect(pushed[0]?.[3]?.workbenchProposalId).toBe(ack.workbenchProposalId)
+  expect(prompts[0]).toContain('Workbench authoring history')
+  saveThoughtDocument(root, { ...document, title: 'Changed' }, document.revision)
+  await expect(handlers.get(RPC_CHANNELS.tasks.GENERATE)!({}, 'ws', { goal: 'Stale', workbench: baseline })).rejects.toThrow('baseline changed')
+  expect(creates).toBe(1)
+  expect(readdirSync(root)).toEqual(['thought-workbenches'])
 })

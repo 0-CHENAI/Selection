@@ -121,6 +121,7 @@ export interface KanbanModelOption {
  * a static catalog.
  */
 export interface KanbanModelProviderGroup {
+  connectionSlug?: string
   /** Provider key for the brand icon (e.g. 'anthropic', 'openai', 'xai'). */
   provider: string
   /** Section-header label (e.g. "Anthropic", "OpenAI"). */

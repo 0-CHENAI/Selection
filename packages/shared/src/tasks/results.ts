@@ -63,7 +63,21 @@ export function loadTaskResults(root: string, slug: string, runId?: string): Loa
   let tokensUsed: number | undefined
   for (const entry of log) {
     if (entry.kind === 'node-scheduled') {
-      ensure(entry.nodeId).attempt += 1
+      const node = ensure(entry.nodeId)
+      node.attempt += 1
+      node.state = 'running'
+      delete node.failureReason
+    } else if (entry.kind === 'node-waiting-approval') {
+      const node = ensure(entry.nodeId)
+      node.state = 'waiting-approval'
+      delete node.failureReason
+    } else if (entry.kind === 'run-resumed' && entry.retryNodeIds) {
+      for (const id of entry.retryNodeIds) {
+        const node = ensure(id)
+        node.state = 'pending'
+        delete node.failureReason
+      }
+      for (const id of entry.discardInstanceIds ?? []) byId.delete(id)
     } else if (entry.kind === 'node-spawned') {
       ensure(entry.nodeId).sessionId = entry.sessionId
     } else if (entry.kind === 'node-finished') {
@@ -72,7 +86,7 @@ export function loadTaskResults(root: string, slug: string, runId?: string): Loa
       if (entry.sessionId) e.sessionId = entry.sessionId
       if (entry.reason && (entry.state === 'failed' || entry.state === 'invalid' || entry.state === 'interrupted')) {
         e.failureReason = entry.reason
-      }
+      } else delete e.failureReason
     } else if (entry.kind === 'verdict') {
       verdicts.push({
         result: entry.result,

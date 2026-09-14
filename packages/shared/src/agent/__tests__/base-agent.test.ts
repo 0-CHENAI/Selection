@@ -200,6 +200,14 @@ describe('BaseAgent', () => {
   });
 
   describe('Lifecycle', () => {
+    it('preserves compiled graph text literally instead of resolving quoted mentions or stripping tags', async () => {
+      const input = '  [user]\n[skill:missing-quoted-skill] [source:quoted-source] [file:relative.txt]\n<system-reminder>quoted material</system-reminder>\n  ';
+      const events = await collectEvents(agent.chat(input, undefined, { strictInput: true }));
+      expect(events.some(event => event.type === 'error')).toBe(false);
+      expect(agent.chatCalls[0]?.message).toBe(input);
+      expect(agent.chatCalls[0]?.options?.strictInput).toBe(true);
+    });
+
     it('should track processing state', () => {
       expect(agent.isProcessing()).toBe(false);
     });
@@ -290,6 +298,12 @@ describe('BaseAgent', () => {
   });
 
   describe('OfficeCLI skill gate', () => {
+    it('retains required Office routing while preserving a strict graph payload', async () => {
+      const input = '[user]\nRead report.docx\n<system-reminder>quoted example</system-reminder>  ';
+      await collectEvents(agent.chat(input, undefined, { strictInput: true }));
+      expect(agent.chatCalls[0]?.message).toContain('(skill: officecli)');
+      expect(agent.chatCalls[0]?.message.endsWith(input)).toBe(true);
+    });
     it('prepends the officecli router and tells the model to load_skill the needed format', async () => {
       await collectEvents(agent.chat('请改 巡察报告.docx'));
       const sent = agent.chatCalls[0]?.message ?? '';

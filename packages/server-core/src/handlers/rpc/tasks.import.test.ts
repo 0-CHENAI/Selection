@@ -8,6 +8,9 @@ import { taskYamlPath, saveTaskSpec, parseTaskSpec, writeSpecRevision, appendRun
 import { registerTasksHandlers } from './tasks'
 import type { RpcServer } from '../../transport'
 import type { HandlerDeps } from '../handler-deps'
+import { newThoughtDocument } from '@craft-agent/shared/thought-workbench/types'
+import { saveThoughtDocument, readWorkbenchRecord } from '@craft-agent/shared/thought-workbench/storage'
+import { loadTaskDocument } from '@craft-agent/shared/tasks/document'
 
 const yaml = 'schema_version: 3\nid: imported\ntitle: Imported\ngoal: Test\nnodes:\n  - id: one\n    prompt: Test\n'
 const roots: string[] = []
@@ -41,6 +44,39 @@ function setup(failSession = false, failSetup = false) {
 }
 
 describe('YAML-only task RPC', () => {
+  it('journals an existing task update and rejects stale ETags before replacing that journal', async () => {
+    const app = setup()
+    await app.call(RPC_CHANNELS.tasks.CREATE, { yaml })
+    const original = loadTaskDocument(app.root, 'imported')!
+    const edited = yaml.replace('title: Imported', 'title: Updated')
+    const document = saveThoughtDocument(app.root, { ...newThoughtDocument('draft'), taskSlug: original.slug, taskEtag: original.etag, executionYaml: edited }, 0)
+    const request = { yaml: edited, expectedEtag: original.etag, workbench: { documentId: document.id, documentRevision: document.revision } }
+    const saved = await app.call(RPC_CHANNELS.tasks.SAVE, request)
+    expect(saved.validation.valid).toBe(true)
+    const journal = readWorkbenchRecord(app.root, document.id, 'link', 'pending')
+    expect(journal).toMatchObject({ taskEtag: saved.etag, beforeTaskEtag: original.etag, status: 'pending' })
+    expect((await app.call(RPC_CHANNELS.tasks.SAVE, request)).conflict?.code).toBe('etag-conflict')
+    expect(readWorkbenchRecord(app.root, document.id, 'link', 'pending')).toEqual(journal)
+    const recovered = await app.call(RPC_CHANNELS.tasks.WORKBENCH, { action: 'get', id: document.id })
+    expect(recovered.document.taskEtag).toBe(saved.etag)
+    expect(app.sessions()).toBe(1)
+  })
+
+  it('recovers a workbench association after parent creation fails without duplicating the task', async () => {
+    const app = setup(true)
+    const document = saveThoughtDocument(app.root, { ...newThoughtDocument('draft'), executionYaml: yaml }, 0)
+    const request = { yaml, workbench: { documentId: document.id, documentRevision: document.revision } }
+    await expect(app.call(RPC_CHANNELS.tasks.CREATE, request)).rejects.toThrow('was saved')
+    expect(existsSync(taskYamlPath(app.root, 'imported'))).toBe(true)
+    expect(readWorkbenchRecord(app.root, document.id, 'link', 'pending')).toMatchObject({ taskSlug: 'imported', status: 'pending' })
+    const recovered = await app.call(RPC_CHANNELS.tasks.WORKBENCH, { action: 'get', id: document.id })
+    expect(recovered.document.taskSlug).toBe('imported')
+    expect(recovered.document.taskEtag).toBeTruthy()
+    app.recover()
+    await expect(app.call(RPC_CHANNELS.tasks.CREATE, request)).rejects.toThrow('already exists')
+    expect(app.sessions()).toBe(0)
+  })
+
   it('returns parent-scoped history from frozen specs even when the live task was removed', async () => {
     const app = setup()
     const parsed = parseTaskSpec({ id: 'history', title: 'History', goal: 'g', nodes: [{ id: 'one', prompt: 'one' }] })

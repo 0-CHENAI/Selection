@@ -2,7 +2,7 @@ import { expect, it } from 'bun:test'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { filterTemplates, taskTemplateErrorKey } from '../task-template-library'
-import { nodeDefinitionRows } from '../ConductorWorkbench'
+import { nodeDefinitionRows } from '../conductor-inspector'
 
 function saveDialogSource(): string {
   return readFileSync(join(import.meta.dir, '../TaskTemplateSave.tsx'), 'utf8')

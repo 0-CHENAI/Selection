@@ -143,8 +143,12 @@ export interface ISessionManager {
   onSessionComplete(
     listener: (evt: import('../sessions/SessionManager').SessionCompletionEvent) => void,
   ): () => void
+  onThoughtOutput(sessionId: string, listener: (output: { kind: 'process' | 'preview'; text: string }) => void): () => void
   /** Read a session's final assistant message text (Conductor output reader). */
   getSessionFinalText(sessionId: string): string | undefined
+  queryThoughtContext(sessionId: string, request: import('@craft-agent/shared/agent/llm-tool').LLMQueryRequest, onTextDelta?: (text: string) => void): Promise<import('@craft-agent/shared/agent/llm-tool').LLMQueryResult>
+  prepareThoughtAgentInput(sessionId: string, message: string, attachments?: FileAttachment[]): Promise<import('@craft-agent/shared/agent/pi-turn-input').AgentInputSnapshot>
+  discardThoughtPreview(sessionId: string): Promise<void>
   addMessageAnnotation(sessionId: string, messageId: string, annotation: AnnotationV1): void
   removeMessageAnnotation(sessionId: string, messageId: string, annotationId: string): void
   updateMessageAnnotation(

@@ -110,6 +110,8 @@ mac:
   entitlementsInherit: build/entitlements.mac.plist
   extraResources:
     # ripgrep (used by packages/server-core/src/services/search.ts).
+    - from: ../../packages/shared/src/thought-workbench/THIRD_PARTY.md
+      to: third-party/ThoughtDAG-NOTICE.txt
     - from: node_modules/@vscode/ripgrep
       to: app/node_modules/@vscode/ripgrep
   # Exclude binaries for other platforms
@@ -176,6 +178,8 @@ win:
     - "!release-swarm-preview/**"
   # Copy executables as extraResources to avoid EBUSY file locking (see comment above)
   extraResources:
+    - from: ../../packages/shared/src/thought-workbench/THIRD_PARTY.md
+      to: third-party/ThoughtDAG-NOTICE.txt
     - from: node_modules/@vscode/ripgrep
       to: app/node_modules/@vscode/ripgrep
     - from: vendor/bun/bun.exe
@@ -203,6 +207,8 @@ linux:
         - x64
   artifactName: "Selection-${arch}.${ext}"
   extraResources:
+    - from: ../../packages/shared/src/thought-workbench/THIRD_PARTY.md
+      to: third-party/ThoughtDAG-NOTICE.txt
     - from: node_modules/@vscode/ripgrep
       to: app/node_modules/@vscode/ripgrep
   # Exclude binaries for other platforms

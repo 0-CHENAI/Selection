@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { parseTaskSpec, type TaskSpec } from './schema.ts';
-import { appendRunLog, writeNodeOutput, type RunLogEntry } from './storage.ts';
+import { appendRunLog, readRunLog, writeNodeOutput, type RunLogEntry } from './storage.ts';
 import { writeSpecRevision } from './revisions.ts';
 import { loadTaskResults } from './results.ts';
 
@@ -54,5 +54,20 @@ describe('loadTaskResults', () => {
     expect(results.nodes[0]?.artifacts).toEqual([
       { path: 'out/a.txt', hash: 'abc', mime: 'text/plain', size: 2 },
     ]);
+  });
+
+  it('shows the current retry state without relabeling historical failures as current failures', () => {
+    const t = '2026-09-14T00:00:00.000Z';
+    const append = (entry: RunLogEntry) => appendRunLog(root, 'demo', 'r1', entry);
+    append({ t, kind: 'node-finished', nodeId: 'audit', sessionId: '', state: 'failed', reason: 'approval-rejected' });
+    expect(loadTaskResults(root, 'demo', 'r1').nodes[0]?.failureReason).toBe('approval-rejected');
+    append({ t, kind: 'run-resumed', retryNodeIds: ['audit'] });
+    expect(loadTaskResults(root, 'demo', 'r1').nodes[0]).toMatchObject({ state: 'pending' });
+    expect(loadTaskResults(root, 'demo', 'r1').nodes[0]?.failureReason).toBeUndefined();
+    append({ t, kind: 'node-waiting-approval', nodeId: 'audit' });
+    expect(loadTaskResults(root, 'demo', 'r1').nodes[0]?.state).toBe('waiting-approval');
+    append({ t, kind: 'node-finished', nodeId: 'audit', sessionId: '', state: 'done' });
+    expect(loadTaskResults(root, 'demo', 'r1').nodes[0]?.failureReason).toBeUndefined();
+    expect(readRunLog(root, 'demo', 'r1')[0]).toMatchObject({ state: 'failed', reason: 'approval-rejected' });
   });
 });

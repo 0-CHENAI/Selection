@@ -16,7 +16,7 @@
  * `packages/shared/src/config/__tests__/storage-startup-migration.test.ts`).
  */
 import { describe, it, expect } from 'bun:test'
-import { mkdtempSync, rmSync, writeFileSync, existsSync } from 'fs'
+import { mkdtempSync, rmSync, writeFileSync, existsSync, readFileSync } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'
 
@@ -40,6 +40,13 @@ function runScript(configDir: string, script: string): RunResult {
 }
 
 describe('main-process i18n bootstrap', () => {
+  it('registers the local language handler before the server-only branch', () => {
+    const source = readFileSync(join(import.meta.dir, '../index.ts'), 'utf8')
+    const handler = source.indexOf("ipcMain.handle('i18n:changeLanguage'")
+    expect(handler).toBeGreaterThan(0)
+    expect(handler).toBeLessThan(source.indexOf('if (!isClientOnly)'))
+    expect(source.match(/ipcMain\.handle\('i18n:changeLanguage'/g)).toHaveLength(1)
+  })
   it('hydrates main i18n from persisted uiLanguage', () => {
     const configDir = mkdtempSync(join(tmpdir(), 'i18n-bootstrap-'))
     try {

@@ -40,10 +40,15 @@ describe('catalogDefaultModel', () => {
 })
 
 describe('buildModelCatalog', () => {
+  it('retains connection identities when two connections serve the same model id', () => {
+    const { groups } = buildModelCatalog([order, { ...order, slug: 'order-secondary', name: 'Secondary' }])
+    expect(groups.map(group => group.connectionSlug)).toEqual(['order', 'order-secondary'])
+    expect(groups[0]!.models[0]!.id).toBe(groups[1]!.models[0]!.id)
+  })
   it('lists ORDER aliases without injecting claude-opus-4-8', () => {
     const { groups, modelToConnection } = buildModelCatalog([order])
     expect(groups).toEqual([
-      { provider: 'order', label: 'ORDER', models: [{ id: 'Opus', name: 'Opus' }, { id: 'Laufry', name: 'Laufry' }] },
+      { provider: 'order', label: 'ORDER', connectionSlug: 'order', models: [{ id: 'Opus', name: 'Opus' }, { id: 'Laufry', name: 'Laufry' }] },
     ])
     expect(modelToConnection.get('Opus')).toBe('order')
     expect([...modelToConnection.keys()]).not.toContain('claude-opus-4-8')

@@ -28,6 +28,9 @@ import { useTranslation } from 'react-i18next'
 import { motion } from 'motion/react'
 import {
   AppWindow,
+  ArrowLeft,
+  GitBranch,
+  Plus,
   ChevronDown,
   Columns2,
   Copy,
@@ -51,6 +54,8 @@ import type { SessionMeta } from '@/atoms/sessions'
 import { hasUnreadMeta, hasMessagesMeta } from '@/utils/session'
 import { getFileManagerName } from '@/lib/platform'
 import { useSessionMenuActions } from '@/hooks/useSessionMenuActions'
+import { useSessionWorkbenchImport } from './SessionWorkbenchMenu'
+import { isThoughtWorkbenchEnabled } from '@craft-agent/shared/feature-flags'
 
 export interface CompactSessionMenuProps {
   /** Title text shown in the trigger button + drawer header. */
@@ -104,6 +109,8 @@ export function CompactSessionMenu({
 }: CompactSessionMenuProps) {
   const { t } = useTranslation()
   const [uncontrolledOpen, setUncontrolledOpen] = React.useState(false)
+  const [workbenchPane, setWorkbenchPane] = React.useState(false)
+  const workbench = useSessionWorkbenchImport(item)
   const isControlled = controlledOpen !== undefined
   const open = isControlled ? controlledOpen : uncontrolledOpen
   const setOpen = React.useCallback(
@@ -118,6 +125,7 @@ export function CompactSessionMenu({
   // menu for A, navigation switches to B, "Delete" deletes B).
   React.useEffect(() => {
     setOpen(false)
+    setWorkbenchPane(false)
   }, [item.id, setOpen])
 
   const _hasMessages = hasMessagesMeta(item)
@@ -193,6 +201,12 @@ export function CompactSessionMenu({
         </DrawerHeader>
 
         <div className="flex-1 min-h-0 overflow-y-auto px-2 pb-6">
+          {workbenchPane ? <div className="flex flex-col">
+            <Row icon={<ArrowLeft className="h-4 w-4" />} label={t('common.back')} onTap={() => setWorkbenchPane(false)} />
+            <Row icon={<Plus className="h-4 w-4" />} label={t('thought.newDraft')} onTap={() => { void workbench.add().then(ok => { if (ok) { setWorkbenchPane(false); setOpen(false) } }) }} />
+            {workbench.loading ? <p role="status" className="p-3 text-sm">{t('common.loading')}</p> : workbench.documents.map(document => <Row key={document.id} icon={<GitBranch className="h-4 w-4" />} label={document.title || t('thought.newDraft')} onTap={() => { void workbench.add(document).then(ok => { if (ok) { setWorkbenchPane(false); setOpen(false) } }) }} />)}
+          </div> : <>
+          {isThoughtWorkbenchEnabled() && <Row icon={<GitBranch className="h-4 w-4" />} label={t('thought.addSession')} onTap={() => { setWorkbenchPane(true); void workbench.load() }} />}
           <RootPane
             hasMessages={_hasMessages}
             hasUnread={_hasUnread}
@@ -207,6 +221,7 @@ export function CompactSessionMenu({
             onCopyPath={closeAfter(actions.copyPath)}
             onDelete={closeAfter(onDelete)}
           />
+          </>}
         </div>
       </DrawerContent>
     </Drawer>

@@ -234,6 +234,7 @@ export interface TaskValidationResultDto {
 }
 
 export interface TaskSaveRequest {
+  workbench?: { documentId: string; documentRevision: number }
   yaml: string
   expectedEtag: string
   /** Required when first saving schema_version: 3 over a v1/v2 file that still uses cache: pure. */
@@ -252,6 +253,8 @@ export interface TaskSaveResult {
 }
 
 export interface TaskCreateRequest {
+  /** Durable workbench baseline for crash-safe first-save association. */
+  workbench?: { documentId: string; documentRevision: number }
   /** task.yaml source text (authoritative). */
   yaml: string
   /**
@@ -281,6 +284,8 @@ export interface TaskCreateResult {
 }
 
 export interface TaskGenerateRequest {
+  /** Durable authoring provenance; checked against the server-owned workbench before generation. */
+  workbench?: import('../thought-workbench/types.ts').WorkbenchProposalBaseline
   /** Existing definition to revise; never saved without user confirmation. */
   currentYaml?: string
   /** Natural-language goal the orchestrator turns into a task.yaml DAG. */
@@ -312,11 +317,13 @@ export interface TaskGenerateRequest {
  * takes longer than the request budget.
  */
 export interface TaskGenerateAck {
+  workbenchProposalId?: string
   /** Temporary proposal session used to correlate events; deleted after generation. */
   orchestratorSessionId: string
 }
 
 export interface TaskGenerateResult {
+  workbenchProposalId?: string
   /** Temporary proposal session that authored the spec; not a saved task binding. */
   orchestratorSessionId: string
   /** Slug of the authored spec; empty when generation produced an invalid spec. */
@@ -639,6 +646,10 @@ export type SessionEvent =
   | { type: 'messages_restored'; sessionId: string; messages: Message[]; runId: string }
 
 export interface SendMessageOptions {
+  /** Binds a workbench generation to a one-shot Agent input preview. */
+  inputHash?: string
+  /** Preserve an explicitly compiled workbench input; reject overflow instead of compacting. */
+  strictInput?: boolean
   skillSlugs?: string[]
   badges?: ContentBadge[]
   optimisticMessageId?: string

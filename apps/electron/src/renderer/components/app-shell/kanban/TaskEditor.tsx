@@ -8,11 +8,15 @@ import { Spinner, Markdown } from '@craft-agent/ui'
 import { getModelShortName } from '@config/models'
 import { TaskYamlImport } from './TaskYamlImport'
 import { TaskProposal } from './TaskProposal'
+import { ThoughtCanvas, type ThoughtCanvasController } from './ThoughtCanvas'
+import { finishWorkbenchCreation } from './workbench-first-run'
+import { renameWorkbenchExecution } from './workbench-title'
+import type { ThoughtDocument } from '@craft-agent/shared/thought-workbench/types'
 import { TaskApproval } from './TaskApproval'
 import { TaskTemplateLibrary } from './TaskTemplateLibrary'
 import { TaskTemplateSaveDialog } from './TaskTemplateSave'
 import { taskTemplateErrorKey } from './task-template-library'
-import { isUnboundTaskEdit } from './orchestration-editor-target'
+import { isUnboundTaskEdit, workbenchEditorTarget } from './orchestration-editor-target'
 import { catalogDefaultModel } from './kanban-models'
 import { useAtom, useAtomValue, useStore } from 'jotai'
 import { useProjects } from '@/hooks/useProjects'
@@ -29,9 +33,10 @@ import {
   DropdownMenuSeparator,
 } from '@/components/ui/dropdown-menu'
 import type { KanbanModelProviderGroup, TaskEditorTarget } from './types'
-import { uid, buildSpec, specToSubtasks, canDependOn, quickAddNodeId, quickAddChildToSubtask, taskDocumentForSave, canSafelySaveExistingTask, shouldRefreshYamlDraft, specNeedsV3Confirm, DEFAULT_REPAIR_ATTEMPTS, MAX_REPAIR_ATTEMPTS_CAP, SESSION_LIKE_KINDS, type EditorSubtask, type SpecNode, type TaskPermissionMode } from './task-spec-form'
+import { uid, buildSpec, specToSubtasks, canDependOn, quickAddNodeId, quickAddChildToSubtask, taskDocumentForSave, taskDocumentForProposal, canSafelySaveExistingTask, shouldRefreshYamlDraft, specNeedsV3Confirm, DEFAULT_REPAIR_ATTEMPTS, MAX_REPAIR_ATTEMPTS_CAP, SESSION_LIKE_KINDS, type EditorSubtask, type SpecNode, type TaskPermissionMode } from './task-spec-form'
 import { runnerLabelKey, runStatusLabelKey } from './task-labels'
 import { ConductorWorkbench, type WorkbenchSpec } from './ConductorWorkbench'
+import { ExecutionThoughtSources } from './ExecutionThoughtSources'
 import { ApplyRunRevisionDialog, canConfirmRunRevision } from './ApplyRunRevisionDialog'
 import { Button } from '@/components/ui/button'
 import {
@@ -42,7 +47,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
-import { isTasksOrchestrateEnabled } from '@craft-agent/shared/feature-flags'
+import { isTasksOrchestrateEnabled, isThoughtWorkbenchEnabled } from '@craft-agent/shared/feature-flags'
 import { resolveNodeStatePill } from './node-state-pill'
 import { SourceAvatar } from '@/components/ui/source-avatar'
 import { SkillAvatar } from '@/components/ui/skill-avatar'
@@ -78,7 +83,7 @@ function resolveModelName(groups: KanbanModelProviderGroup[], id: string): strin
   return getModelShortName(id)
 }
 
-type Tab = 'definition' | 'canvas' | 'yaml' | 'results'
+type Tab = 'thought' | 'definition' | 'canvas' | 'yaml' | 'results'
 
 // The target type lives in ./types so the editor-target atom can import it without
 // pulling in this component module; re-exported here for existing consumers.
@@ -551,14 +556,18 @@ export function TaskEditor(props: TaskEditorProps) {
   const { t } = useTranslation()
   const [pane, setPane] = React.useState<'editor' | 'import' | 'library'>('editor')
   const [libraryFocus, setLibraryFocus] = React.useState<string | undefined>()
-  const projectId = props.target?.mode === 'create' ? props.target.initialProjectId : props.scopeProjectId
-  if (isUnboundTaskEdit(props.target)) {
+  const routeKey = `${props.workspaceId}:${props.target?.mode === 'edit' ? props.target.taskSlug : props.target?.initialProjectId ?? ''}`
+  const [selection, setSelection] = React.useState<{ routeKey: string; document: ThoughtDocument }>()
+  const selectedDocument = selection?.routeKey === routeKey ? selection.document : undefined
+  const selectedTarget = selectedDocument ? workbenchEditorTarget(selectedDocument) : props.target
+  const projectId = selectedTarget?.mode === 'create' ? selectedTarget.initialProjectId : props.scopeProjectId
+  if (isUnboundTaskEdit(selectedTarget)) {
     return <section className="flex h-full flex-col items-start gap-4 p-6">
       <p role="alert">{t('tasks.yamlImportUnbound')}</p>
       <Button onClick={props.onClose}>{t('common.cancel')}</Button>
     </section>
   }
-  if (pane === 'import' && props.target?.mode !== 'edit') {
+  if (pane === 'import' && selectedTarget?.mode !== 'edit') {
     const scope = projectId ?? ''
     return <TaskYamlImport key={`${props.workspaceId}:${scope}`} {...props} onClose={() => setPane('editor')} onOpenLibrary={(id) => { setLibraryFocus(id); setPane('library') }} />
   }
@@ -572,8 +581,12 @@ export function TaskEditor(props: TaskEditorProps) {
     />
   }
   return <ExistingTaskEditor
-    key={`${props.workspaceId}:${props.target?.mode === 'edit' ? props.target.taskSlug : projectId ?? ''}`}
+    key={`${routeKey}:${selectedDocument?.id ?? ''}`}
     {...props}
+    target={selectedTarget}
+    onOpenSession={selectedDocument ? undefined : props.onOpenSession}
+    initialWorkbenchDocument={selectedDocument}
+    onSwitchWorkbench={document => setSelection({ routeKey, document })}
     onImport={() => setPane('import')}
     onOpenLibrary={() => setPane('library')}
     onSavedTemplate={(id) => { setLibraryFocus(id); setPane('library') }}
@@ -581,6 +594,8 @@ export function TaskEditor(props: TaskEditorProps) {
 }
 
 function ExistingTaskEditor({
+  initialWorkbenchDocument,
+  onSwitchWorkbench,
   workspaceId,
   target = { mode: 'create' },
   onClose,
@@ -593,7 +608,7 @@ function ExistingTaskEditor({
   modelGroups,
   modelToConnection,
   defaultModel,
-}: TaskEditorProps & { onImport: () => void; onOpenLibrary: () => void; onSavedTemplate: (id: string) => void }) {
+}: TaskEditorProps & { initialWorkbenchDocument?: ThoughtDocument; onSwitchWorkbench: (document: ThoughtDocument) => void; onImport: () => void; onOpenLibrary: () => void; onSavedTemplate: (id: string) => void }) {
   const { t } = useTranslation()
   const isEdit = target.mode === 'edit'
   // The slug to pin on save (edit mode). Undefined for create and for quick-add tiles with no slug;
@@ -603,7 +618,12 @@ function ExistingTaskEditor({
   const groups = modelGroups
   const fallbackModel = catalogDefaultModel(groups, defaultModel) ?? ''
   const { projects } = useProjects(workspaceId)
-  const [tab, setTab] = React.useState<Tab>('definition')
+  const thoughtEnabled = isThoughtWorkbenchEnabled()
+  const thoughtController = React.useRef<ThoughtCanvasController | null>(null)
+  const [workbenchHeader, setWorkbenchHeader] = React.useState<HTMLDivElement | null>(null)
+  const [workbenchDocumentId, setWorkbenchDocumentId] = React.useState<string>()
+  const [thoughtContext, setThoughtContext] = React.useState('')
+  const [tab, setTab] = React.useState<Tab>(thoughtEnabled ? (isEdit ? 'canvas' : 'thought') : 'definition')
   const [runner, setRunner] = React.useState<'conduct' | 'orchestrate'>('conduct')
   const [layout, setLayout] = React.useState<Record<string, { x: number; y: number }>>({})
   const [yamlDraft, setYamlDraft] = React.useState('')
@@ -645,6 +665,8 @@ function ExistingTaskEditor({
   const [sourceSlugs, setSourceSlugs] = React.useState<string[]>([])
   const [skillSlugs, setSkillSlugs] = React.useState<string[]>([])
   const [busy, setBusy] = React.useState(false)
+  const [submitPhase, setSubmitPhase] = React.useState<'saving' | 'starting' | null>(null)
+  const [pendingNodeConfig, setPendingNodeConfig] = React.useState(false)
   const [templateSaveOpen, setTemplateSaveOpen] = React.useState(false)
   const [templateSaveError, setTemplateSaveError] = React.useState<string | null>(null)
   const [pendingTemplateYaml, setPendingTemplateYaml] = React.useState<string | null>(null)
@@ -1045,11 +1067,15 @@ function ExistingTaskEditor({
   ])
 
   const requestClose = React.useCallback(async () => {
-    if (dirty && !await confirmAction(t('tasks.discardUnsaved'))) return
+    if (busy || submitLock.current) return
+    if ((dirty || pendingNodeConfig) && !await confirmAction(t('tasks.discardUnsaved'))) return
+    if (submitLock.current) return
     onClose()
-  }, [dirty, onClose, t])
+  }, [busy, dirty, pendingNodeConfig, onClose, t])
 
+  const yamlValidationRevision = React.useRef(0)
   const applyWorkbenchSpec = React.useCallback((next: EditableTaskSpec, source: 'form' | 'yaml' = 'form') => {
+    yamlValidationRevision.current++
     setPreservedSpec(next)
     setDirty(true)
     setFormChangedSinceYaml(source === 'form')
@@ -1071,18 +1097,43 @@ function ExistingTaskEditor({
   }, [setDirty])
 
   const validateYamlDraft = React.useCallback(async () => {
+    const revision = ++yamlValidationRevision.current
     try {
       const res = await window.electronAPI.validateTask(workspaceId, yamlDraft)
-      if (!res.valid) {
+      if (!mounted.current || revision !== yamlValidationRevision.current) return false
+      if (!res.valid || !res.spec) {
         setYamlDiagnostics(res.errors.map((e) => `${e.path}: ${e.message}`))
-        return
+        return false
       }
       setYamlDiagnostics([])
-      if (res.spec) applyWorkbenchSpec(res.spec as EditableTaskSpec, 'yaml')
+      applyWorkbenchSpec(res.spec as EditableTaskSpec, 'yaml')
+      return true
     } catch (err) {
+      if (!mounted.current || revision !== yamlValidationRevision.current) return false
       setYamlDiagnostics([err instanceof Error ? err.message : String(err)])
+      return false
     }
   }, [workspaceId, yamlDraft, applyWorkbenchSpec])
+
+  const restoredWorkbench = React.useRef<string>()
+  React.useEffect(() => {
+    if (!initialWorkbenchDocument?.executionYaml || restoredWorkbench.current === initialWorkbenchDocument.id || (isEdit && !etag)) return
+    restoredWorkbench.current = initialWorkbenchDocument.id
+    // Keep both versions visible on conflict; never restore a stale draft over a changed task.
+    if (isEdit && initialWorkbenchDocument.taskEtag !== etag) {
+      setTaskLoadError('Workbench task definition changed; resolve the draft baseline before saving')
+      return
+    }
+    let active = true
+    const yaml = initialWorkbenchDocument.executionYaml
+    setYamlDraft(yaml); setYamlHasLocalSource(true)
+    void window.electronAPI.validateTask(workspaceId, yaml).then(result => {
+      if (!active) return
+      if (result.spec) applyWorkbenchSpec(result.spec as EditableTaskSpec, 'yaml')
+      if (!result.valid) { setYamlDiagnostics(result.errors.map(error => `${error.path}: ${error.message}`)); setTab('yaml') }
+    }).catch(error => { if (active) setTaskLoadError(String(error)) })
+    return () => { active = false }
+  }, [initialWorkbenchDocument, isEdit, etag, workspaceId, applyWorkbenchSpec])
 
   React.useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -1097,12 +1148,34 @@ function ExistingTaskEditor({
 
   // Save only an existing, successfully loaded task. Running remains an explicit action.
   async function submit(run: boolean, confirmV3Migration = false) {
-    if (submitLock.current) return
+    if (busy || submitLock.current) return
+    if (pendingNodeConfig) { toast.error(t('thought.unsaved')); setTab('canvas'); return }
+    const useYamlSource = tab === 'yaml' || (thoughtEnabled && yamlHasLocalSource && !formChangedSinceYaml)
+    // A thinking-only document is not a runnable task. Keep the keyboard and
+    // header save paths identical, without inventing an empty TaskSpec.
+    if (thoughtEnabled && !isEdit && !run && subtasks.length === 0 && !yamlHasLocalSource) {
+      submitLock.current = true
+      setBusy(true)
+      setSubmitPhase('saving')
+      try {
+        if (!thoughtController.current) throw new Error('Workbench is not ready')
+        await thoughtController.current.flush()
+        setDirty(false)
+        toast.success(t('tasks.toastSaved'))
+      } catch (err) {
+        toast.error(t('tasks.toastCreateFailed'), { description: err instanceof Error ? err.message : String(err) })
+      } finally {
+        submitLock.current = false
+        setSubmitPhase(null)
+        if (mounted.current) setBusy(false)
+      }
+      return
+    }
     if (isEdit && !canSafelySaveExistingTask({ taskSlug: editSlug, etag, loadError: taskLoadError })) {
       toast.error(t('tasks.toastLoadFailed'), { description: taskLoadError ?? t('tasks.loadFailedBanner') })
       return
     }
-    if (tab !== 'yaml') {
+    if (!useYamlSource) {
       if (!title.trim()) {
         toast.error(t('tasks.toastNeedTitle'))
         return
@@ -1118,10 +1191,13 @@ function ExistingTaskEditor({
     }
     submitLock.current = true
     setBusy(true)
+    setSubmitPhase('saving')
+    let startingRun = false
+    let savedTaskSlug: string | undefined
     try {
       let spec: Record<string, unknown>
       let yaml: string
-      if (tab === 'yaml') {
+      if (useYamlSource) {
         const validation = await window.electronAPI.validateTask(workspaceId, yamlDraft)
         if (!validation.valid || !validation.spec) {
           setYamlDiagnostics(validation.errors.map((e) => `${e.path}: ${e.message}`))
@@ -1173,8 +1249,11 @@ function ExistingTaskEditor({
         return
       }
       if (isEdit && etag) {
+        const baseline = thoughtEnabled ? await thoughtController.current?.prepareProposal(yaml) : undefined
+        if (thoughtEnabled && !baseline) throw new Error('Workbench is not ready')
         const saved = await window.electronAPI.saveTask(workspaceId, {
           yaml,
+          workbench: baseline ? { documentId: baseline.documentId, documentRevision: baseline.documentRevision } : undefined,
           expectedEtag: etag,
           confirmV3Migration: confirmV3Migration || specNeedsV3Confirm(sourceVersion, spec),
         })
@@ -1188,6 +1267,8 @@ function ExistingTaskEditor({
           return
         }
         setEtag(saved.etag ?? null)
+        savedTaskSlug = saved.slug
+        if (thoughtEnabled) await thoughtController.current?.link(saved.slug, saved.etag, yaml)
         setSourceVersion(saved.sourceVersion)
         setMigrationWarnings(saved.migrationWarnings ?? [])
         if (!run) {
@@ -1195,9 +1276,11 @@ function ExistingTaskEditor({
           onClose()
           return
         }
+        startingRun = true
+        setSubmitPhase('starting')
         const runResult = await window.electronAPI.runTask(workspaceId, {
           slug: saved.slug,
-          orchestratorSessionId: editSessionId,
+          orchestratorSessionId: editSessionId || undefined,
         })
         toast.success(t('tasks.toastStarted'), {
           description: t('tasks.toastStartedDesc', { slug: saved.slug, runId: runResult.runId, count: runResult.nodes.length }),
@@ -1206,22 +1289,44 @@ function ExistingTaskEditor({
         return
       }
       if (!isEdit) {
-        const created = await window.electronAPI.createTask(workspaceId, { yaml })
+        const baseline = thoughtEnabled ? await thoughtController.current?.prepareProposal(yaml) : undefined
+        if (thoughtEnabled && !baseline) throw new Error('Workbench is not ready')
+        const created = await window.electronAPI.createTask(workspaceId, { yaml, workbench: baseline ? { documentId: baseline.documentId, documentRevision: baseline.documentRevision } : undefined })
         if (!created.validation.valid) {
           setYamlDiagnostics(created.validation.errors.map(e => `${e.path}: ${e.message}`))
           toast.error(t('tasks.toastInvalid'), { description: created.validation.errors[0]?.message })
           return
         }
-        toast.success(t('tasks.workflowCreated'))
-        if (mounted.current) {
-          onCreated?.({ sessionId: created.orchestratorSessionId, taskLabelId: created.taskLabelId, projectId: typeof spec.project === 'string' ? spec.project : undefined })
-          onClose()
-        }
+        savedTaskSlug = created.slug
+        await finishWorkbenchCreation(run, async () => {
+          startingRun = true
+          setSubmitPhase('starting')
+          const runResult = await window.electronAPI.runTask(workspaceId, {
+            slug: created.slug,
+            orchestratorSessionId: created.orchestratorSessionId || undefined,
+          })
+          toast.success(t('tasks.toastStarted'), {
+            description: t('tasks.toastStartedDesc', { slug: created.slug, runId: runResult.runId, count: runResult.nodes.length }),
+          })
+        }, () => {
+          if (mounted.current) {
+            onCreated?.({ sessionId: created.orchestratorSessionId, taskLabelId: created.taskLabelId, projectId: typeof spec.project === 'string' ? spec.project : undefined })
+            onClose()
+          }
+        }, async () => {
+          if (thoughtEnabled) {
+            if (!thoughtController.current) throw new Error('Workbench is not ready')
+            const loaded = await window.electronAPI.getTask(workspaceId, created.slug)
+            await thoughtController.current.link(created.slug, loaded.etag, yaml)
+          }
+          toast.success(t('tasks.workflowCreated'))
+        })
       }
     } catch (err) {
-      toast.error(t('tasks.toastCreateFailed'), { description: err instanceof Error ? err.message : String(err) })
+      toast.error(savedTaskSlug ? t('tasks.toastSavedFollowupFailed', { slug: savedTaskSlug }) : t(startingRun ? 'tasks.toastRunFailed' : 'tasks.toastCreateFailed'), { description: err instanceof Error ? err.message : String(err) })
     } finally {
       submitLock.current = false
+      setSubmitPhase(null)
       setBusy(false)
     }
   }
@@ -1278,231 +1383,45 @@ function ExistingTaskEditor({
     }
   }
 
-  return (
-    <div className="flex h-full flex-col gap-3 bg-background p-3 text-foreground">
-      {/* Header */}
-      <div className="flex items-center gap-2.5 rounded-xl border border-border bg-card px-3 py-2.5 shadow-minimal">
-        <Btn variant="ghost" className="px-2" onClick={requestClose}>
-          <ChevronLeft className="h-4 w-4" strokeWidth={2} /> {t('kanban.list')}
-        </Btn>
-        <span className="text-foreground/25">/</span>
-        <span className="text-sm font-semibold">{isEdit ? t('tasks.editTask') : t('kanban.newTask')}</span>
+  async function selectEditorTab(tb: Tab) {
+    if (busy) return
+    if (pendingNodeConfig && tb !== 'canvas') { toast.error(t('thought.unsaved')); return }
+    // Do not expose an old graph while the authored YAML is being validated.
+    if ((tb === 'canvas' || tb === 'definition') && yamlHasLocalSource && !formChangedSinceYaml) {
+      setBusy(true)
+      try {
+        if (!await validateYamlDraft()) { if (mounted.current) setTab('yaml'); return }
+      } finally { if (mounted.current) setBusy(false) }
+      if (!mounted.current) return
+    }
+    if (tb === 'yaml' && shouldRefreshYamlDraft(yamlHasLocalSource, formChangedSinceYaml)) {
+      setYamlDraft(JSON.stringify(currentSpec(), null, 2))
+      // Viewing generated YAML is not authoring an execution draft.
+      setFormChangedSinceYaml(false)
+    }
+    setTab(tb)
+  }
 
-        {/* Definition / Results tabs — edit mode only (results need a backing task to read). */}
-        <div className="ml-3 inline-flex rounded-[9px] bg-foreground/[0.05] p-0.5">
-          {(isEdit ? (['definition', 'canvas', 'yaml', 'results'] as Tab[]) : (['definition', 'canvas', 'yaml'] as Tab[])).map((tb) => (
-            <button
-              key={tb}
-              onClick={() => {
-                if (tb === 'yaml' && shouldRefreshYamlDraft(yamlHasLocalSource, formChangedSinceYaml)) {
-                  setYamlDraft(JSON.stringify(currentSpec(), null, 2))
-                  setYamlHasLocalSource(true)
-                  setFormChangedSinceYaml(false)
-                }
-                setTab(tb)
-              }}
-              className={cn(
-                'rounded-[7px] px-3 py-1 text-[12.5px] font-semibold transition-colors',
-                tab === tb ? 'bg-card text-foreground shadow-minimal' : 'text-foreground/55 hover:text-foreground/80',
-              )}
-            >
-              {tb === 'definition' && t('tasks.tabDefinition')}
-              {tb === 'canvas' && t('tasks.tabCanvas')}
-              {tb === 'yaml' && t('tasks.tabYaml')}
-              {tb === 'results' && t('tasks.tabResults')}
-            </button>
-          ))}
-        </div>
+  const proposalYaml = taskDocumentForProposal({
+    yamlDraft, hasLocalSource: yamlHasLocalSource, formChangedSinceYaml,
+    formSpec: currentSpec() as unknown as Record<string, unknown>,
+    hasFormDefinition: Boolean(title.trim() && subtasks.length),
+  })
 
-        <div className="ml-auto flex items-center gap-2">
-          {isEdit && onOpenSession && (
-            <Btn variant="secondary" onClick={onOpenSession} disabled={busy}>
-              <ExternalLink className="h-3.5 w-3.5" strokeWidth={2} /> {t('tasks.openSession')}
-            </Btn>
-          )}
-          {isEdit && liveRun && !['completed', 'failed', 'stopped'].includes(liveRun.status) && (
-            <div className="flex items-center gap-1.5">
-              {(liveRun.status === 'running' || liveRun.status === 'verifying' || liveRun.status === 'repairing') && (
-                <Btn variant="secondary" onClick={() => void controlRun('pause')}>{t('tasks.pauseRun')}</Btn>
-              )}
-              {(liveRun.status === 'paused' || liveRun.status === 'pausing') && (
-                <Btn variant="secondary" onClick={() => void controlRun('resume')}>{t('tasks.resumeRun')}</Btn>
-              )}
-              {liveRun.status === 'interrupted' && (
-                <Btn variant="secondary" onClick={() => void controlRun('continue')}>{t('tasks.continueRun')}</Btn>
-              )}
-              <Btn variant="secondary" onClick={() => void controlRun('stop')}>{t('tasks.stopRun')}</Btn>
-            </div>
-          )}
-          {isEdit && liveRun?.status === 'failed' && liveRun.canRetryFailedNodes && (
-            <div className="flex flex-col items-start gap-1">
-              <Btn variant="secondary" disabled={busy} onClick={() => void controlRun('continue')}>
-                {t('tasks.retryFailedNodes')}
-              </Btn>
-              <span className="max-w-sm text-xs text-muted-foreground">{t('tasks.retryFailedNodesHint')}</span>
-            </div>
-          )}
-          {isEdit && liveRun?.status === 'waiting-budget' && (
-            <div className="flex items-center gap-1.5">
-              <input
-                type="number"
-                min={(liveRun.tokenBudget ?? liveRun.tokensUsed) + 1}
-                step="1"
-                value={tokenBudgetDraft}
-                onChange={(event) => setTokenBudgetDraft(event.target.value)}
-                placeholder={String((liveRun.tokenBudget ?? liveRun.tokensUsed) + 1)}
-                aria-label={t('tasks.newTokenBudget')}
-                className="h-7 w-28 rounded-md border border-border bg-background px-2 text-[11.5px]"
-              />
-              <Btn variant="secondary" onClick={() => void increaseTokenBudget()}>
-                {t('tasks.increaseBudget')}
-              </Btn>
-            </div>
-          )}
-          {isEdit && liveRun?.status === 'interrupted' && sensitiveParams.length > 0 && (
-            <div className="flex items-center gap-1.5" aria-label={t('tasks.sensitiveParamsTitle')}>
-              {sensitiveParams.map((name) => (
-                <input
-                  key={name}
-                  type="password"
-                  autoComplete="off"
-                  value={sensitiveParamDrafts[name] ?? ''}
-                  onChange={(event) => setSensitiveParamDrafts((current) => ({
-                    ...current,
-                    [name]: event.target.value,
-                  }))}
-                  placeholder={name}
-                  aria-label={t('tasks.sensitiveParamInput', { name })}
-                  className="h-7 w-28 rounded-md border border-border bg-background px-2 text-[11.5px]"
-                />
-              ))}
-              <Btn variant="secondary" onClick={() => void restoreSensitiveParams()}>
-                {t('tasks.restoreSensitiveParams')}
-              </Btn>
-            </div>
-          )}
-          {(tab === 'definition' || tab === 'canvas' || tab === 'yaml') && (
-            <>
-              <Btn variant="secondary" onClick={requestClose} disabled={busy}>
-                {t('common.cancel')}
-              </Btn>
-              <Btn variant="secondary" onClick={() => submit(false)} disabled={busy || !!taskLoadError}>
-                {isEdit ? t('common.save') : t('common.create')}
-              </Btn>
-              {isEdit && <Btn variant="primary" onClick={() => submit(true)} disabled={busy || !!taskLoadError || hasActiveRun}>
-                {busy ? <Spinner /> : <Sparkles className="h-3.5 w-3.5" strokeWidth={2.5} />}
-                {busy ? t('tasks.starting') : isEdit ? t('tasks.saveAndRun') : t('tasks.createAndRun')}
-              </Btn>}
-            </>
-          )}
-          {tab === 'results' && (
-            <Btn variant="secondary" onClick={() => loadResults()} disabled={resultsLoading}>
-              {resultsLoading ? <Spinner /> : <RefreshCw className="h-3.5 w-3.5" strokeWidth={2} />} {t('common.refresh')}
-            </Btn>
-          )}
-        </div>
-      </div>
+  function changeWorkbenchProject(nextProjectId: string) {
+    try {
+      if (thoughtEnabled) {
+        if (!thoughtController.current) throw new Error(t('tasks.notAvailable'))
+        thoughtController.current.setProject(nextProjectId || boundProjectId || undefined)
+      }
+      setProjectId(nextProjectId)
+      markFormChanged()
+    } catch (error) {
+      toast.error(t('thought.unsaved'), { description: String(error) })
+    }
+  }
 
-      {hasActiveRun && <p className="text-xs text-muted-foreground">{t('tasks.runDefinitionFrozen')}</p>}
-      {liveRun?.nodes.filter(n => n.state === 'waiting-approval').map(n =>
-        <TaskApproval key={`${liveRun.runId}:${n.id}`} workspaceId={workspaceId} run={liveRun} nodeId={n.id} onChange={setLiveRun} />
-      )}
-      {taskLoadError && (
-        <div role="alert" className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-[12.5px] text-red-700 dark:text-red-300">
-          <span className="font-semibold">{t('tasks.loadFailedBanner')}</span>{' '}
-          <span>{taskLoadError}</span>
-        </div>
-      )}
-
-      {tab === 'definition' && <TaskProposal
-        workspaceId={workspaceId}
-        draftIdentity={JSON.stringify(currentSpec())}
-        currentYaml={title.trim() && subtasks.length ? taskDocumentForSave('form', yamlDraft, currentSpec() as unknown as Record<string, unknown>) : undefined}
-        projectId={projectId}
-        model={orchModel}
-        llmConnection={orchConnection ?? modelToConnection.get(orchModel)}
-        disabled={busy || !!taskLoadError}
-        onApply={(spec) => {
-          const next = spec as EditableTaskSpec
-          applyWorkbenchSpec({ ...next, project: next.project ?? projectId,
-            defaults: { model: orchModel, llmConnection: orchConnection ?? modelToConnection.get(orchModel), permissionMode, ...next.defaults } })
-        }}
-      />}
-      {tab === 'definition' && (
-        <div className="flex flex-wrap gap-2">
-          <Button variant="ghost" className="self-start" onClick={async () => { if (!dirty || await confirmAction(t('tasks.discardUnsaved'))) onOpenLibrary() }}>{t('tasks.templateLibrary')}</Button>
-          {!isEdit && <Button variant="ghost" className="self-start" onClick={async () => { if (!dirty || await confirmAction(t('tasks.discardUnsaved'))) onImport() }}>{t('tasks.yamlImportTitle')}</Button>}
-          <Button variant="ghost" className="self-start" disabled={busy} onClick={() => void openTemplateSave()}>{t('tasks.templateSave')}</Button>
-        </div>
-      )}
-
-      {liveRun && ((liveRun.blockers?.length ?? 0) > 0 || liveRun.nodes.some((node) => node.blocker)) && (
-        <div role="alert" className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[12.5px] text-foreground/80">
-          <div className="font-semibold">{t('tasks.runBlockers')}</div>
-          <ul className="mt-1 list-disc space-y-0.5 pl-4">
-            {(liveRun.blockers ?? []).map((blocker, index) => <li key={`run:${index}:${blocker}`}>{blocker}</li>)}
-            {liveRun.nodes.filter((node) => node.blocker).map((node) => (
-              <li key={`node:${node.id}:${node.blocker}`}>
-                <span className="font-mono">{node.id}</span>: {node.blocker}
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
-
-      {tab === 'definition' && migrationWarnings.length > 0 && (
-        <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[12.5px] text-foreground/80">
-          {t(sourceVersion === 3 ? 'tasks.migrationBannerV3' : 'tasks.migrationBanner', { version: sourceVersion ?? 1 })}
-          <ul className="mt-1 list-disc pl-4">
-            {migrationWarnings.map((w) => (
-              <li key={w}>{w}</li>
-            ))}
-          </ul>
-        </div>
-      )}
-
-      {tab === 'results' ? (
-        <ResultsPanel
-          results={results}
-          loading={resultsLoading}
-          selectedRunId={selectedRunId}
-          onSelectRun={(id) => {
-            setSelectedRunId(id)
-            loadResults(id)
-          }}
-          onOpenChildSession={onOpenChildSession}
-          onApplyRunRevision={() => void previewRunRevision()}
-          canApplyRunRevision={Boolean(editSlug && etag && (selectedRunId ?? results?.runId ?? liveRun?.runId))}
-        />
-      ) : tab === 'yaml' ? (
-        <div className="flex min-h-0 flex-1 flex-col gap-2">
-          <textarea
-            className="min-h-[280px] flex-1 rounded-xl border border-border bg-card p-3 font-mono text-[12px]"
-            value={yamlDraft}
-            onChange={(e) => {
-              setDirty(true)
-              setYamlHasLocalSource(true)
-              setFormChangedSinceYaml(false)
-              setYamlDraft(e.target.value)
-            }}
-            onBlur={() => void validateYamlDraft()}
-            spellCheck={false}
-            aria-label={t('tasks.tabYaml')}
-          />
-          {yamlDiagnostics.length > 0 && (
-            <ul className="rounded-lg border border-red-500/30 bg-red-500/10 p-2 text-[12px] text-red-700">
-              {yamlDiagnostics.map((d) => (
-                <li key={d}>{d}</li>
-              ))}
-            </ul>
-          )}
-        </div>
-      ) : tab === 'canvas' ? (
-        <ConductorWorkbench spec={currentSpec()} liveRun={liveRun} />
-      ) : (
-      /* Body */
-      <div className="grid min-h-0 flex-1 grid-cols-[minmax(360px,2fr)_3fr] gap-3">
-        {/* Left — definition */}
+  const globalConfiguration = (
         <div className="flex min-h-0 flex-col gap-4 overflow-y-auto rounded-xl border border-border bg-card p-4 shadow-minimal">
           <div className="text-[15px] font-bold">{t('tasks.definition')}</div>
 
@@ -1558,13 +1477,13 @@ function ExistingTaskEditor({
                       never unbinds on save, and buildSpec floors a blank pick to the existing project,
                       so showing it for a bound task would be a no-op that implies clearing works. */}
                   {!boundProjectId && (
-                    <DropdownMenuItem className="text-xs" onSelect={() => { setProjectId(''); markFormChanged() }}>
+                    <DropdownMenuItem className="text-xs" onSelect={() => changeWorkbenchProject('')}>
                       {t('tasks.noProject')}
                       {!projectId && <Check className="ml-auto h-3.5 w-3.5" strokeWidth={2} />}
                     </DropdownMenuItem>
                   )}
                   {projects.map((p) => (
-                    <DropdownMenuItem key={p.config.id} className="text-xs" onSelect={() => { setProjectId(p.config.id); markFormChanged() }}>
+                    <DropdownMenuItem key={p.config.id} className="text-xs" onSelect={() => changeWorkbenchProject(p.config.id)}>
                       <span className="truncate">{p.config.name}</span>
                       {projectId === p.config.id && <Check className="ml-auto h-3.5 w-3.5 shrink-0" strokeWidth={2} />}
                     </DropdownMenuItem>
@@ -1670,6 +1589,305 @@ function ExistingTaskEditor({
             </FieldRow>
           </div>
         </div>
+  )
+
+  return (
+    <div className="flex h-full flex-col gap-3 bg-background p-3 text-foreground">
+      {/* Header */}
+      <div className="flex flex-wrap items-center gap-2.5 rounded-xl border border-border bg-card px-3 py-2.5 shadow-minimal">
+        <Btn variant="ghost" className="px-2" onClick={requestClose} disabled={busy}>
+          <ChevronLeft className="h-4 w-4" strokeWidth={2} /> {t('kanban.list')}
+        </Btn>
+        <span className="text-foreground/25">/</span>
+        <span className="text-sm font-semibold">{isEdit ? t('tasks.editTask') : t('kanban.newTask')}</span>
+        {thoughtEnabled && <>
+          <div ref={setWorkbenchHeader} className="flex min-w-0 flex-wrap items-center gap-2" />
+          <span className="max-w-40 truncate text-xs text-muted-foreground" title={project?.config.name}>{t('tasks.project')}: {project?.config.name ?? t('tasks.noProject')}</span>
+        </>}
+
+        {/* Definition / Results tabs — edit mode only (results need a backing task to read). */}
+        <div className="ml-3 inline-flex rounded-[9px] bg-foreground/[0.05] p-0.5">
+          {(thoughtEnabled ? (['thought', 'canvas'] as Tab[]) : isEdit ? (['definition', 'canvas', 'yaml', 'results'] as Tab[]) : (['definition', 'canvas', 'yaml'] as Tab[])).map((tb) => (
+            <button
+              key={tb}
+              onClick={() => selectEditorTab(tb)}
+              disabled={busy}
+              aria-pressed={tab === tb || (thoughtEnabled && tb === 'canvas' && tab !== 'thought')}
+              className={cn(
+                'rounded-[7px] px-3 py-1 text-[12.5px] font-semibold transition-colors',
+                tab === tb || (thoughtEnabled && tb === 'canvas' && tab !== 'thought') ? 'bg-card text-foreground shadow-minimal' : 'text-foreground/55 hover:text-foreground/80',
+              )}
+            >
+              {tb === 'thought' && t('thought.view')}
+              {tb === 'definition' && t('tasks.tabDefinition')}
+              {tb === 'canvas' && t('tasks.tabCanvas')}
+              {tb === 'yaml' && t('tasks.tabYaml')}
+              {tb === 'results' && t('tasks.tabResults')}
+            </button>
+          ))}
+        </div>
+
+        {thoughtEnabled && tab !== 'thought' && <select
+          aria-label={t('tasks.tabDefinition')}
+          className="rounded-md border border-border bg-background px-2 py-1 text-sm"
+          disabled={busy} value={tab} onChange={event => selectEditorTab(event.target.value as Tab)}>
+          <option value="canvas">{t('tasks.tabCanvas')}</option>
+          <option value="yaml">{t('tasks.tabYaml')}</option>
+          {isEdit && <option value="results">{t('tasks.tabResults')}</option>}
+        </select>}
+
+        <div className="ml-auto flex items-center gap-2">
+          {isEdit && onOpenSession && (
+            <Btn variant="secondary" onClick={onOpenSession} disabled={busy}>
+              <ExternalLink className="h-3.5 w-3.5" strokeWidth={2} /> {t('tasks.openSession')}
+            </Btn>
+          )}
+          {isEdit && liveRun && !['completed', 'failed', 'stopped'].includes(liveRun.status) && (
+            <div className="flex items-center gap-1.5">
+              {(liveRun.status === 'running' || liveRun.status === 'verifying' || liveRun.status === 'repairing') && (
+                <Btn variant="secondary" onClick={() => void controlRun('pause')}>{t('tasks.pauseRun')}</Btn>
+              )}
+              {(liveRun.status === 'paused' || liveRun.status === 'pausing') && (
+                <Btn variant="secondary" onClick={() => void controlRun('resume')}>{t('tasks.resumeRun')}</Btn>
+              )}
+              {liveRun.status === 'interrupted' && (
+                <Btn variant="secondary" onClick={() => void controlRun('continue')}>{t('tasks.continueRun')}</Btn>
+              )}
+              <Btn variant="secondary" onClick={() => void controlRun('stop')}>{t('tasks.stopRun')}</Btn>
+            </div>
+          )}
+          {isEdit && liveRun?.status === 'failed' && liveRun.canRetryFailedNodes && (
+            <div className="flex flex-col items-start gap-1">
+              <Btn variant="secondary" disabled={busy} onClick={() => void controlRun('continue')}>
+                {t('tasks.retryFailedNodes')}
+              </Btn>
+              <span className="max-w-sm text-xs text-muted-foreground">{t('tasks.retryFailedNodesHint')}</span>
+            </div>
+          )}
+          {isEdit && liveRun?.status === 'waiting-budget' && (
+            <div className="flex items-center gap-1.5">
+              <input
+                type="number"
+                min={(liveRun.tokenBudget ?? liveRun.tokensUsed) + 1}
+                step="1"
+                value={tokenBudgetDraft}
+                onChange={(event) => setTokenBudgetDraft(event.target.value)}
+                placeholder={String((liveRun.tokenBudget ?? liveRun.tokensUsed) + 1)}
+                aria-label={t('tasks.newTokenBudget')}
+                className="h-7 w-28 rounded-md border border-border bg-background px-2 text-[11.5px]"
+              />
+              <Btn variant="secondary" onClick={() => void increaseTokenBudget()}>
+                {t('tasks.increaseBudget')}
+              </Btn>
+            </div>
+          )}
+          {isEdit && liveRun?.status === 'interrupted' && sensitiveParams.length > 0 && (
+            <div className="flex items-center gap-1.5" aria-label={t('tasks.sensitiveParamsTitle')}>
+              {sensitiveParams.map((name) => (
+                <input
+                  key={name}
+                  type="password"
+                  autoComplete="off"
+                  value={sensitiveParamDrafts[name] ?? ''}
+                  onChange={(event) => setSensitiveParamDrafts((current) => ({
+                    ...current,
+                    [name]: event.target.value,
+                  }))}
+                  placeholder={name}
+                  aria-label={t('tasks.sensitiveParamInput', { name })}
+                  className="h-7 w-28 rounded-md border border-border bg-background px-2 text-[11.5px]"
+                />
+              ))}
+              <Btn variant="secondary" onClick={() => void restoreSensitiveParams()}>
+                {t('tasks.restoreSensitiveParams')}
+              </Btn>
+            </div>
+          )}
+          {(thoughtEnabled || tab === 'definition' || tab === 'canvas' || tab === 'yaml') && (
+            <>
+              <Btn variant="secondary" onClick={requestClose} disabled={busy}>
+                {t('common.cancel')}
+              </Btn>
+              <Btn variant="secondary" onClick={() => submit(false)} disabled={busy || !!taskLoadError}>
+                {thoughtEnabled || isEdit ? t('common.save') : t('common.create')}
+              </Btn>
+              {(isEdit || thoughtEnabled) && <Btn variant="primary" onClick={() => submit(true)} disabled={busy || !!taskLoadError || hasActiveRun || (!isEdit && subtasks.length === 0 && !yamlHasLocalSource)}>
+                {busy ? <Spinner /> : <Sparkles className="h-3.5 w-3.5" strokeWidth={2.5} />}
+                {busy ? t(submitPhase === 'starting' ? 'tasks.starting' : submitPhase === 'saving' ? 'common.saving' : 'common.loading') : isEdit ? t('tasks.saveAndRun') : t('tasks.createAndRun')}
+              </Btn>}
+            </>
+          )}
+          {tab === 'results' && (
+            <Btn variant="secondary" onClick={() => loadResults()} disabled={resultsLoading}>
+              {resultsLoading ? <Spinner /> : <RefreshCw className="h-3.5 w-3.5" strokeWidth={2} />} {t('common.refresh')}
+            </Btn>
+          )}
+        </div>
+      </div>
+
+      {hasActiveRun && <p className="text-xs text-muted-foreground">{t('tasks.runDefinitionFrozen')}</p>}
+      {liveRun?.nodes.filter(n => n.state === 'waiting-approval').map(n =>
+        <TaskApproval key={`${liveRun.runId}:${n.id}`} workspaceId={workspaceId} run={liveRun} nodeId={n.id} onChange={setLiveRun} />
+      )}
+      {taskLoadError && (
+        <div role="alert" className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-[12.5px] text-red-700 dark:text-red-300">
+          <span className="font-semibold">{t('tasks.loadFailedBanner')}</span>{' '}
+          <span>{taskLoadError}</span>
+        </div>
+      )}
+
+      {(thoughtEnabled || tab === 'definition') && <TaskProposal
+        workbenchId={thoughtEnabled ? workbenchDocumentId : undefined}
+        prepareWorkbench={thoughtEnabled ? async yaml => {
+          if (!thoughtController.current) throw new Error('Workbench is not ready')
+          return thoughtController.current.prepareProposal(yaml)
+        } : undefined}
+        onWorkbenchApplied={document => thoughtController.current?.acceptDocument(document)}
+        assertWorkbenchCurrent={baseline => thoughtController.current?.assertProposalCurrent(baseline)}
+        context={thoughtContext}
+        workspaceId={workspaceId}
+        draftIdentity={proposalYaml ?? ''}
+        currentYaml={proposalYaml}
+        projectId={projectId}
+        model={orchModel}
+        llmConnection={orchConnection ?? modelToConnection.get(orchModel)}
+        disabled={busy || pendingNodeConfig || !!taskLoadError}
+        onApply={(spec) => {
+          const next = spec as EditableTaskSpec
+          if (thoughtEnabled) { applyWorkbenchSpec(next); return }
+          applyWorkbenchSpec({ ...next, project: next.project ?? projectId,
+            defaults: { model: orchModel, llmConnection: orchConnection ?? modelToConnection.get(orchModel), permissionMode, ...next.defaults } })
+        }}
+      />}
+      {(thoughtEnabled || tab === 'definition') && (
+        <div className="flex flex-wrap gap-2">
+          <Button variant="ghost" className="self-start" disabled={busy || pendingNodeConfig} onClick={async () => { if (!dirty || await confirmAction(t('tasks.discardUnsaved'))) onOpenLibrary() }}>{t('tasks.templateLibrary')}</Button>
+          {!isEdit && <Button variant="ghost" className="self-start" disabled={busy || pendingNodeConfig} onClick={async () => { if (!dirty || await confirmAction(t('tasks.discardUnsaved'))) onImport() }}>{t('tasks.yamlImportTitle')}</Button>}
+          <Button variant="ghost" className="self-start" disabled={busy} onClick={() => void openTemplateSave()}>{t('tasks.templateSave')}</Button>
+        </div>
+      )}
+
+      {liveRun && ((liveRun.blockers?.length ?? 0) > 0 || liveRun.nodes.some((node) => node.blocker)) && (
+        <div role="alert" className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[12.5px] text-foreground/80">
+          <div className="font-semibold">{t('tasks.runBlockers')}</div>
+          <ul className="mt-1 list-disc space-y-0.5 pl-4">
+            {(liveRun.blockers ?? []).map((blocker, index) => <li key={`run:${index}:${blocker}`}>{blocker}</li>)}
+            {liveRun.nodes.filter((node) => node.blocker).map((node) => (
+              <li key={`node:${node.id}:${node.blocker}`}>
+                <span className="font-mono">{node.id}</span>: {node.blocker}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {(thoughtEnabled || tab === 'definition') && migrationWarnings.length > 0 && (
+        <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[12.5px] text-foreground/80">
+          {t(sourceVersion === 3 ? 'tasks.migrationBannerV3' : 'tasks.migrationBanner', { version: sourceVersion ?? 1 })}
+          <ul className="mt-1 list-disc pl-4">
+            {migrationWarnings.map((w) => (
+              <li key={w}>{w}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {thoughtEnabled && <div ref={element => { if (element) element.inert = busy }} aria-busy={busy} className={tab === 'thought' ? 'flex min-h-0 flex-1 flex-col' : 'hidden'}>
+        <ThoughtCanvas headerContainer={workbenchHeader} disabled={busy || pendingNodeConfig} controllerRef={thoughtController} onDocumentId={setWorkbenchDocumentId} workspaceId={workspaceId} taskSlug={editSlug} taskEtag={etag ?? undefined}
+          executionTitle={subtasks.length > 0 ? title : undefined}
+          executionDirty={dirty || pendingNodeConfig}
+          onTitleChange={nextTitle => {
+            try {
+              if (yamlHasLocalSource && !formChangedSinceYaml) {
+                const nextYaml = renameWorkbenchExecution(yamlDraft, nextTitle)
+                yamlValidationRevision.current++
+                setYamlDraft(nextYaml)
+                setDirty(true)
+              } else if (isEdit || subtasks.length > 0) { markFormChanged() }
+              setTitle(nextTitle)
+              return true
+            } catch (error) {
+              toast.error(t('tasks.toastInvalid'), { description: String(error) })
+              return false
+            }
+          }}
+          initialDocument={initialWorkbenchDocument} onSwitchDocument={onSwitchWorkbench}
+          onBeforeSwitch={async () => {
+            if (pendingNodeConfig) throw new Error(t('thought.unsaved'))
+            if (!isEdit && subtasks.length === 0 && !yamlHasLocalSource) {
+              // Empty editor scaffolding is not an authored execution definition.
+              // Persist only the thought document, so reopening stays in thinking.
+              await thoughtController.current?.flush()
+              return
+            }
+            await thoughtController.current?.prepareProposal(yamlHasLocalSource && !formChangedSinceYaml ? yamlDraft : JSON.stringify(currentSpec(), null, 2))
+          }}
+          projectId={projectId || undefined} model={orchModel} modelGroups={groups} llmConnection={orchConnection ?? modelToConnection.get(orchModel)}
+          onOpenSession={onOpenChildSession} onPropose={(context) => { setThoughtContext(context); void selectEditorTab('canvas') }} />
+      </div>}
+      {tab === 'thought' ? null : tab === 'results' ? (
+        <ResultsPanel
+          onImportResult={thoughtEnabled ? async nodeId => {
+            if (!results?.runId || !thoughtController.current || busy) return
+            setBusy(true)
+            try { await thoughtController.current.importResult(results.slug, results.runId, nodeId); setTab('thought') }
+            catch (error) { toast.error(t('thought.importFailed'), { description: String(error) }) }
+            finally { setBusy(false) }
+          } : undefined}
+          results={results}
+          loading={resultsLoading}
+          selectedRunId={selectedRunId}
+          onSelectRun={(id) => {
+            setSelectedRunId(id)
+            loadResults(id)
+          }}
+          onOpenChildSession={onOpenChildSession}
+          onApplyRunRevision={() => void previewRunRevision()}
+          canApplyRunRevision={Boolean(editSlug && etag && (selectedRunId ?? results?.runId ?? liveRun?.runId))}
+        />
+      ) : tab === 'yaml' ? (
+        <div className="flex min-h-0 flex-1 flex-col gap-2">
+          <textarea
+            className="min-h-[280px] flex-1 rounded-xl border border-border bg-card p-3 font-mono text-[12px]"
+            value={yamlDraft}
+            onChange={(e) => {
+              yamlValidationRevision.current++
+              setDirty(true)
+              setYamlHasLocalSource(true)
+              setFormChangedSinceYaml(false)
+              setYamlDraft(e.target.value)
+            }}
+            onBlur={() => void validateYamlDraft()}
+            spellCheck={false}
+            aria-label={t('tasks.tabYaml')}
+          />
+          {yamlDiagnostics.length > 0 && (
+            <ul className="rounded-lg border border-red-500/30 bg-red-500/10 p-2 text-[12px] text-red-700">
+              {yamlDiagnostics.map((d) => (
+                <li key={d}>{d}</li>
+              ))}
+            </ul>
+          )}
+        </div>
+      ) : tab === 'canvas' ? (
+        <div className="flex min-h-0 flex-1 flex-col gap-2">
+        {thoughtEnabled && <details className="max-h-[40vh] shrink-0 overflow-y-auto rounded-lg border border-border">
+          <summary className="cursor-pointer px-3 py-2 text-sm font-medium">{t('settings.workspace.advanced')} · {t('tasks.definition')}</summary>
+          <fieldset disabled={busy || pendingNodeConfig} className="min-w-0">{globalConfiguration}</fieldset>
+        </details>}
+        <ConductorWorkbench spec={currentSpec()} liveRun={liveRun} modelGroups={groups} onPendingChange={setPendingNodeConfig} onChange={thoughtEnabled ? next => applyWorkbenchSpec(next as EditableTaskSpec) : undefined}
+          renderNodeSources={thoughtEnabled && workbenchDocumentId ? nodeId => <ExecutionThoughtSources key={`${workbenchDocumentId}:${nodeId}`} workspaceId={workspaceId} documentId={workbenchDocumentId} nodeId={nodeId} onLocate={(documentId, thoughtNodeId) => {
+            if (pendingNodeConfig) throw new Error(t('thought.unsaved'))
+            if (!thoughtController.current) throw new Error(t('tasks.notAvailable'))
+            thoughtController.current.locateNode(documentId, thoughtNodeId)
+            setTab('thought')
+          }} /> : undefined} />
+        </div>
+      ) : (
+      /* Body */
+      <div className="grid min-h-0 flex-1 grid-cols-[minmax(360px,2fr)_3fr] gap-3">
+        {/* Left — definition */}
+        {globalConfiguration}
 
         {/* Right — editable nodes of the existing task */}
         <div className="flex min-h-0 flex-col rounded-xl border border-border bg-card shadow-minimal">
@@ -1778,6 +1996,7 @@ function ExistingTaskEditor({
 // Results panel — storage-backed run outcome (verdict + per-node output).
 // ---------------------------------------------------------------------------
 function ResultsPanel({
+  onImportResult,
   results,
   loading,
   selectedRunId,
@@ -1786,6 +2005,7 @@ function ResultsPanel({
   onApplyRunRevision,
   canApplyRunRevision,
 }: {
+  onImportResult?: (nodeId: string) => Promise<void>
   results: TaskResults | null
   loading: boolean
   selectedRunId: string | null
@@ -1933,6 +2153,7 @@ function ResultsPanel({
                 <ExternalLink className="h-3 w-3" strokeWidth={2.5} /> {t('tasks.openSession')}
               </button>
             )}
+            {node.state === 'done' && node.output && onImportResult && <Button size="sm" variant="ghost" onClick={() => void onImportResult(node.id)}>{t('thought.addResult')}</Button>}
           </div>
           {node.failureReason && (
             <p className="mt-1.5 text-[11.5px] text-red-500/80">{t('tasks.failureReason')}: {node.failureReason}</p>

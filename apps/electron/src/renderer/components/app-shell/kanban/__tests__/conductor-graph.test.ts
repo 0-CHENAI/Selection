@@ -1,10 +1,13 @@
 import { describe, expect, it } from 'bun:test'
+import { NODE_KINDS } from '@craft-agent/shared/tasks'
+import { EDITOR_NODE_KINDS } from '../task-spec-form'
 import {
   specToGraph,
   applyGraphToSpec,
   autoLayout,
   classifyEdge,
   deleteImpact,
+  referencedBy,
   hasCompleteLayout,
   layerLayout,
   overlayState,
@@ -21,6 +24,40 @@ const SPEC: SpecLike = {
 }
 
 describe('conductor-graph', () => {
+  it('offers every node kind supported by the task schema', () => {
+    expect([...EDITOR_NODE_KINDS].sort()).toEqual([...NODE_KINDS].sort())
+  })
+  it('preserves optional and advanced fields during layout-only edits', () => {
+    const spec = { nodes: [{ id: 'a', depends_on: [], inputs: { file: 'x' }, retry: { limit: 3 }, permissionMode: 'ask' }], defaults: { model: 'test' } }
+    const graph = specToGraph(spec)
+    graph.nodes[0]!.x = 200
+    expect(applyGraphToSpec(spec, graph).nodes).toEqual(spec.nodes)
+    expect(applyGraphToSpec(spec, graph).defaults).toEqual(spec.defaults)
+  })
+
+  it('retains structured conditions and retry policy while changing dependencies', () => {
+    const policy = { limit: 3, when: ['error', 'invalid'], backoff: { base: 1, factor: 2, max: 30 } }
+    const condition = { ref: 'params.token', op: 'exists' }
+    const spec = { nodes: [{ id: 'a' }, { id: 'b', when: condition, retry: policy, model: 'same-name', llmConnection: 'selected-provider', timeout: 60, depends_on: [] as string[] }] }
+    const graph = specToGraph(spec)
+    graph.edges.push({ source: 'a', target: 'b' })
+    const updated = applyGraphToSpec(spec, graph)
+    expect(updated.nodes[1]).toMatchObject({ when: condition, retry: policy, model: 'same-name', llmConnection: 'selected-provider', timeout: 60, depends_on: ['a'] })
+    expect(spec.nodes[1]!.depends_on).toEqual([])
+  })
+
+  it('finds output references without matching node id prefixes', () => {
+    const spec = { nodes: [{ id: 'a' }, { id: 'b', prompt: '${nodes.a.output}' }, { id: 'c', prompt: '${nodes.ab.output}' }] }
+    expect(referencedBy(spec, 'a')).toEqual(['b'])
+  })
+  it('finds terminal structured references and nested bindings without serialization artifacts', () => {
+    const spec = { nodes: [{ id: 'review' },
+      { id: 'condition', when: { ref: 'nodes.review', op: 'exists' } },
+      { id: 'binding', inputs: { nested: [{ value: '${ nodes.review.output }' }] } },
+      { id: 'unrelated', when: { ref: 'nodes.review-extra', op: 'exists' } },
+    ] }
+    expect(referencedBy(spec, 'review')).toEqual(['condition', 'binding'])
+  })
   it('round-trips depends_on through canvas edges', () => {
     const graph = specToGraph(SPEC)
     expect(graph.edges).toEqual([

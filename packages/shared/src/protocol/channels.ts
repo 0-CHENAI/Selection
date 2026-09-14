@@ -59,6 +59,8 @@ export const RPC_CHANNELS = {
     ABORT: 'transfer:abort',
   },
   tasks: {
+    WORKBENCH: 'tasks:workbench',
+    WORKBENCH_GENERATION: 'tasks:workbenchGeneration',
     // Legacy: background-task output (disabled-feature remnant). Kept for back-compat; retire later.
     GET_OUTPUT: 'tasks:getOutput',
     // Conductor — the Tasks DAG runner.

@@ -495,6 +495,22 @@ app.whenReady().then(async () => {
     // Create the application menu (needs windowManager for New Window action)
     createApplicationMenu(windowManager)
 
+    // Native language/menu state belongs to this desktop client, including
+    // thin-client connections that intentionally skip server initialization.
+    ipcMain.handle('i18n:changeLanguage', async (_event, lang: unknown) => {
+      const previousResolved = i18n.resolvedLanguage ?? null
+      if (typeof lang !== 'string' || !SUPPORTED_LANGUAGE_CODES.includes(lang as LanguageCode)) {
+        mainLog.warn('[i18n] changeLanguage IPC rejected — unsupported code', { incoming: lang, previousResolved })
+        return
+      }
+      const code = lang as LanguageCode
+      await i18n.changeLanguage(code)
+      setPersistedUiLanguage(code)
+      mainLog.info('[i18n] changeLanguage IPC applied', { incoming: code, previousResolved, newResolved: i18n.resolvedLanguage ?? null })
+      const { rebuildMenu } = await import('./menu')
+      await rebuildMenu()
+    })
+
     // When CRAFT_SERVER_URL is set, this Electron instance is a thin client —
     // it only creates windows whose preload connects to the remote server.
     // Skip server-side initialization (SessionManager, model refresh, platform injection).
@@ -949,32 +965,6 @@ app.whenReady().then(async () => {
       ipcMain.handle('app:relaunch', () => {
         app.relaunch()
         app.exit(0)
-      })
-
-      // Language change: sync from renderer to main process, persist, and rebuild native menu.
-      // Persistence here is what lets the next app launch hydrate main's i18n correctly —
-      // see the `getPersistedUiLanguage()` block at the top of this file.
-      ipcMain.handle('i18n:changeLanguage', async (_event, lang: unknown) => {
-        const previousResolved = i18n.resolvedLanguage ?? null
-        if (typeof lang !== 'string' || !SUPPORTED_LANGUAGE_CODES.includes(lang as LanguageCode)) {
-          // Defense-in-depth: renderer guarantees a supported code, but if a renegade
-          // caller hands us garbage we drop it silently rather than poison i18n state.
-          mainLog.warn('[i18n] changeLanguage IPC rejected — unsupported code', {
-            incoming: lang,
-            previousResolved,
-          })
-          return
-        }
-        const code = lang as LanguageCode
-        await i18n.changeLanguage(code)
-        setPersistedUiLanguage(code)
-        mainLog.info('[i18n] changeLanguage IPC applied', {
-          incoming: code,
-          previousResolved,
-          newResolved: i18n.resolvedLanguage ?? null,
-        })
-        const { rebuildMenu } = await import('./menu')
-        await rebuildMenu()
       })
 
       ipcMain.on('__get-ws-port', (e) => {

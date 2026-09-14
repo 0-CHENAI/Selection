@@ -63,6 +63,14 @@ export function isSwarmPreviewBuild(): boolean {
   return parseBooleanEnv(getEnv('CRAFT_SWARM_PREVIEW_BUILD')) === true;
 }
 
+/** Kept opt-in until packaged workbench and real-model acceptance are complete. */
+declare const __CRAFT_THOUGHT_WORKBENCH__: string | undefined;
+export function isThoughtWorkbenchEnabled(): boolean {
+  const configured = typeof __CRAFT_THOUGHT_WORKBENCH__ !== 'undefined'
+    ? __CRAFT_THOUGHT_WORKBENCH__ : getEnv('CRAFT_FEATURE_THOUGHT_WORKBENCH');
+  return parseBooleanEnv(configured) === true;
+}
+
 /**
  * Runtime-evaluated check for embedded server settings page.
  *

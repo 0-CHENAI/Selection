@@ -323,7 +323,7 @@ export function saveTaskDocument(
   workspaceRoot: string,
   yaml: string,
   expectedEtag: string | null,
-  options: { confirmV3Migration?: boolean } = {},
+  options: { confirmV3Migration?: boolean; beforeWrite?: (document: LoadedTaskDocument) => void } = {},
 ): LoadedTaskDocument {
   const incoming = parseTaskDocument(yaml);
   if (!incoming.valid || !incoming.spec) {
@@ -377,6 +377,9 @@ export function saveTaskDocument(
   };
   const stamped = TaskSpecSchema.parse(spec);
   const body = serializeTaskYaml(stamped);
+  // A caller can durably record a cross-document association before publishing
+  // the exact normalized bytes. A failed journal prevents the task write.
+  options.beforeWrite?.(parseTaskDocument(body, slug));
   if (existing && (existing.sourceVersion === 1 || (existing.sourceVersion < 3 && wantsV3))) {
     backupTaskYaml(workspaceRoot, slug, existing.yaml);
   }

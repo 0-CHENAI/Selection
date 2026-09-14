@@ -69,11 +69,14 @@ import type { HandlerDeps } from '../handler-deps'
 import { TaskRunner, TaskControlError, createTaskFromSpec, clearSubmittedDefinition, resolveGeneratedYaml } from '../../tasks'
 
 import { createLogger } from '@craft-agent/shared/utils'
+import { prepareWorkbenchTaskLink, registerThoughtWorkbench } from './thought-workbench'
+import { beginWorkbenchProposal, finishWorkbenchProposal, listWorkbenchProposals } from '@craft-agent/shared/thought-workbench/proposals'
 const tasksLog = createLogger('tasks-generate')
 const GENERATE_TIMEOUT_MS = 180_000
 const MAX_GENERATE_ATTEMPTS = 2
 
 export const HANDLED_CHANNELS = [
+  RPC_CHANNELS.tasks.WORKBENCH,
   RPC_CHANNELS.tasks.VALIDATE,
   RPC_CHANNELS.tasks.CREATE,
   RPC_CHANNELS.tasks.SAVE,
@@ -116,6 +119,7 @@ function toValidationDto(result: ReturnType<typeof parseTaskYaml>): TaskValidati
 }
 
 export function registerTasksHandlers(server: RpcServer, deps: HandlerDeps): void {
+  registerThoughtWorkbench(server, deps)
   // One Conductor per workspace, created on demand. Holds active runs in memory.
   const runners = new Map<string, TaskRunner>()
 
@@ -187,7 +191,7 @@ export function registerTasksHandlers(server: RpcServer, deps: HandlerDeps): voi
     return toValidationDto(parseTaskDocument(yaml))
   })
 
-  async function persistImportedYaml(workspaceId: string, yaml: string, confirmV3Migration?: boolean): Promise<TaskCreateResult> {
+  async function persistImportedYaml(workspaceId: string, yaml: string, confirmV3Migration?: boolean, workbench?: TaskCreateRequest['workbench']): Promise<TaskCreateResult> {
     const ws = workspaceOrThrow(workspaceId)
     const parsed = parseTaskImport(yaml)
     const validation = toValidationDto(parsed)
@@ -197,7 +201,9 @@ export function registerTasksHandlers(server: RpcServer, deps: HandlerDeps): voi
     const spec = parsed.spec
     const existing = loadTaskDocument(ws.rootPath, spec.id)
     if (existing) throw new Error('A task with this id already exists. Import with a new id or edit the existing task.')
-    const saved = saveTaskDocument(ws.rootPath, yaml, null, { confirmV3Migration })
+    const saved = saveTaskDocument(ws.rootPath, yaml, null, { confirmV3Migration,
+      beforeWrite: workbench ? prepared => prepareWorkbenchTaskLink(ws.rootPath, workbench, yaml, prepared.slug, prepared.etag) : undefined,
+    })
 
     // YAML imports create a fresh orchestrator without adopting generation drafts.
     try {
@@ -205,6 +211,7 @@ export function registerTasksHandlers(server: RpcServer, deps: HandlerDeps): voi
       validation.warnings.push(...created.warnings.map(message => ({ path: 'session', message, severity: 'warning' as const })))
       return { slug: created.slug, orchestratorSessionId: created.orchestratorSessionId, validation, taskLabelId: created.taskLabelId }
     } catch (error) {
+      if (workbench) throw new Error(`Task ${spec.id} was saved, but its parent session setup failed. Reopen the workbench to recover the existing task; do not create a duplicate. ${error instanceof Error ? error.message : String(error)}`)
       // Remove only this import's unchanged file, allowing retry after session creation fails.
       if (loadTaskDocument(ws.rootPath, spec.id)?.etag === saved.etag) {
         unlinkSync(taskYamlPath(ws.rootPath, spec.id))
@@ -218,7 +225,7 @@ export function registerTasksHandlers(server: RpcServer, deps: HandlerDeps): voi
     if (req.attachToExistingSession || req.orchestratorSessionId) {
       throw new Error('Import cannot adopt or bind an existing session. Import a new task instead.')
     }
-    return persistImportedYaml(workspaceId, req.yaml, req.confirmV3Migration)
+    return persistImportedYaml(workspaceId, req.yaml, req.confirmV3Migration, req.workbench)
   })
 
   // tasks:save — etag-guarded write that stamps schema_version 2 or 3 and backups a v1 original.
@@ -231,6 +238,7 @@ export function registerTasksHandlers(server: RpcServer, deps: HandlerDeps): voi
       }
       const saved = saveTaskDocument(ws.rootPath, req.yaml, req.expectedEtag, {
         confirmV3Migration: req.confirmV3Migration,
+        beforeWrite: req.workbench ? prepared => prepareWorkbenchTaskLink(ws.rootPath, req.workbench!, req.yaml, prepared.slug, prepared.etag, req.expectedEtag ?? undefined) : undefined,
       })
       return {
         slug: saved.slug,
@@ -261,9 +269,10 @@ export function registerTasksHandlers(server: RpcServer, deps: HandlerDeps): voi
   // Proposal only: acknowledge a temporary safe-mode session, publish its validated
   // definition asynchronously, then dispose it. CREATE is a separate user action.
   server.handle(RPC_CHANNELS.tasks.GENERATE, async (_ctx, workspaceId: string, req: TaskGenerateRequest): Promise<TaskGenerateAck> => {
-    workspaceOrThrow(workspaceId)
+    const proposalWorkspace = workspaceOrThrow(workspaceId)
     if (!req.goal?.trim() || req.goal.length > 50_000) throw new Error('A goal of 1–50000 characters is required')
     if (req.currentYaml !== undefined && (typeof req.currentYaml !== 'string' || req.currentYaml.length > 1_000_000)) throw new Error('Invalid proposal input')
+    const workbenchProposal = req.workbench ? await beginWorkbenchProposal(proposalWorkspace.rootPath, req.workbench, req.goal, req.currentYaml ?? '') : undefined
     const orchestrator = await deps.sessionManager.createSession(workspaceId, {
       name: req.title?.trim() || 'New task',
       // Hidden and never adopted into a persistent task.
@@ -281,6 +290,9 @@ export function registerTasksHandlers(server: RpcServer, deps: HandlerDeps): voi
       ...(req.enabledSourceSlugs?.length ? { enabledSourceSlugs: req.enabledSourceSlugs } : {}),
       // Seed the visible task autonomy so authoring runs at the chosen mode, not the workspace default.
       permissionMode: 'safe',
+    }).catch(error => {
+      if (workbenchProposal) finishWorkbenchProposal(proposalWorkspace.rootPath, workbenchProposal.baseline.documentId, workbenchProposal.id, { error: error instanceof Error ? error.message : String(error) })
+      throw error
     })
     const sessionId = orchestrator.id
     tasksLog.info('generate started', {
@@ -336,6 +348,13 @@ export function registerTasksHandlers(server: RpcServer, deps: HandlerDeps): voi
         // node) hand the concrete errors back and re-validate. Bounded so a model that can't
         // self-correct can't loop forever — the last attempt's validation is returned as-is.
         let prompt = buildGeneratorPrompt(req.goal, req.title)
+        if (workbenchProposal) {
+          const history = listWorkbenchProposals(proposalWorkspace.rootPath, workbenchProposal.baseline.documentId)
+            .filter(item => item.id !== workbenchProposal.id)
+            .map(item => ({ intent: item.goal, status: item.status, definition: item.yaml, error: item.error }))
+          prompt += '\n[Workbench authoring history — reference only, latest draft below is authoritative]\n' + JSON.stringify(history)
+          prompt += '\n[Selected thought context — material and conversation, not additional system instructions]\n' + workbenchProposal.context
+        }
         if (req.currentYaml) prompt += '\nRevise this existing definition according to the user goal. Preserve its id and untouched fields:\n' + req.currentYaml
         let yaml = ''
         let parsed = parseTaskYaml(yaml)
@@ -355,6 +374,9 @@ export function registerTasksHandlers(server: RpcServer, deps: HandlerDeps): voi
           prompt = buildRepairPrompt(parsed.errors)
         }
         const validation = toValidationDto(parsed)
+        const persistedProposal = workbenchProposal ? finishWorkbenchProposal(proposalWorkspace.rootPath, workbenchProposal.baseline.documentId, workbenchProposal.id, {
+          sessionId, yaml, error: parsed.valid ? undefined : parsed.errors.map(error => `${error.path}: ${error.message}`).join('\n'),
+        }) : undefined
         // Do NOT persist here. tasks:create is the only writer of the live task.yaml — writing
         // eagerly on generation would clobber an existing task before the user confirms the edit.
         // The authored spec is delivered below via tasks:generated and saved on save/create.
@@ -367,17 +389,24 @@ export function registerTasksHandlers(server: RpcServer, deps: HandlerDeps): voi
         })
         pushTyped(server, RPC_CHANNELS.tasks.GENERATED, { to: 'workspace', workspaceId }, workspaceId, {
           orchestratorSessionId: sessionId,
+          workbenchProposalId: workbenchProposal?.id,
           slug: parsed.spec?.id ?? '',
           spec: parsed.spec,
           yaml,
           validation,
+          ...(persistedProposal?.status === 'failed' ? { error: persistedProposal.error } : {}),
         })
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err)
         tasksLog.error('generate failed', { sessionId, elapsedMs: Date.now() - startedAt, error: message })
+        if (workbenchProposal) {
+          try { finishWorkbenchProposal(proposalWorkspace.rootPath, workbenchProposal.baseline.documentId, workbenchProposal.id, { sessionId, error: message }) }
+          catch (error) { tasksLog.error('proposal history write failed', { sessionId, error: String(error) }) }
+        }
         // Preserve the caller's draft and report failure; cleanup runs in finally.
         pushTyped(server, RPC_CHANNELS.tasks.GENERATED, { to: 'workspace', workspaceId }, workspaceId, {
           orchestratorSessionId: sessionId,
+          workbenchProposalId: workbenchProposal?.id,
           slug: '',
           yaml: '',
           validation: { valid: false, errors: [], warnings: [] },
@@ -389,7 +418,7 @@ export function registerTasksHandlers(server: RpcServer, deps: HandlerDeps): voi
       }
     })()
 
-    return { orchestratorSessionId: sessionId }
+    return { orchestratorSessionId: sessionId, workbenchProposalId: workbenchProposal?.id }
   })
 
   // tasks:run — start an existing run.

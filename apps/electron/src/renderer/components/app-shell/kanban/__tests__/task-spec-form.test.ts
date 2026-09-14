@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'bun:test'
+import { TaskNodeSchema, NODE_KINDS } from '@craft-agent/shared/tasks/schema'
 import {
   buildSpec,
   specToSubtasks,
@@ -7,17 +8,52 @@ import {
   quickAddSessionId,
   quickAddChildToSubtask,
   taskDocumentForSave,
+  taskDocumentForProposal,
   canSafelySaveExistingTask,
   shouldRefreshYamlDraft,
   specNeedsV3Confirm,
   MAX_REPAIR_ATTEMPTS_CAP,
+  EDITOR_NODE_KINDS,
   type EditorSubtask,
   type SpecNode,
 } from '../task-spec-form'
 
 const noConn = new Map<string, string>()
 
+it('binds proposals to authored YAML even before a form projection exists', () => {
+  const input = { yamlDraft: 'goal: latest\n', hasLocalSource: true, formChangedSinceYaml: false,
+    formSpec: { goal: 'old' }, hasFormDefinition: false }
+  expect(taskDocumentForProposal(input)).toBe(input.yamlDraft)
+  expect(taskDocumentForProposal({ ...input, yamlDraft: 'goal: edited\n' })).not.toBe(taskDocumentForProposal(input))
+  expect(taskDocumentForProposal({ ...input, yamlDraft: '' })).toBe('')
+  expect(taskDocumentForProposal({ ...input, hasLocalSource: false })).toBeUndefined()
+  expect(taskDocumentForProposal({ ...input, formChangedSinceYaml: true, hasFormDefinition: true }))
+    .toBe(JSON.stringify(input.formSpec, null, 2))
+})
+
 describe('task-spec-form round-trip', () => {
+  it('covers every supported node kind and preserves advanced fields through a title-only V3 edit', () => {
+    expect([...EDITOR_NODE_KINDS].sort()).toEqual([...NODE_KINDS].sort())
+    for (const kind of NODE_KINDS) {
+      const original = TaskNodeSchema.parse({
+        id: 'node', kind, title: 'Original', prompt: 'Instructions', model: 'model', llmConnection: 'connection',
+        permissionMode: 'ask', labels: ['review'], status: 'todo',
+        inputs: { material: { from: '${params.material}', summarize: true } },
+        outputs: [{ name: 'answer', required: true, description: 'Evidence' }],
+        when: { ref: 'params.enabled', op: 'eq', value: true },
+        replicas: 2, for_each: '${params.items}', max_parallel: 2, trigger: 'all_done', aggregate: 'concat', cache: 'none',
+        loop: { until: { ref: 'output.done', op: 'eq', value: true }, max: 3, carry: 'answer' },
+        retry: { limit: 2, when: ['error', 'invalid'], backoff: { base: 1, factor: 2, max: 10 } }, timeout: 90, approval: true,
+        route: { cases: [{ when: 'true', goto: 'end' }], default: 'end' },
+      })
+      const subtasks = specToSubtasks([original])
+      subtasks[0]!.title = 'Edited'
+      const result = buildSpec({ title: 'Workflow', goal: 'Goal', projectId: '', orchModel: '', subtasks,
+        preservedSpec: { schema_version: 3, id: 'workflow', nodes: [original] } }, noConn)
+      expect(TaskNodeSchema.parse((result.nodes as unknown[])[0])).toEqual({ ...original, title: 'Edited' })
+    }
+  })
+
   it('lets a human add, delete and edit a V3 proposal without mutating the proposal or losing advanced fields', () => {
     const proposal = { schema_version: 3, id: 'proposal', title: 'Plan', goal: 'g', token_budget: 9000, nodes: [
       { id: 'keep', title: 'Keep', prompt: 'old', timeout: 60 },
