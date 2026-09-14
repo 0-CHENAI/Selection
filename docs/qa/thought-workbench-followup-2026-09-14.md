@@ -113,6 +113,8 @@
 
 已将 `isThoughtWorkbenchEnabled()` 改为默认开启；Vite / WebUI 未设置环境变量时 bake `1`。`CRAFT_FEATURE_THOUGHT_WORKBENCH=0` 仍回到定义表单旧入口，不删除工作台文档。定义表单代码保留作回退，不是把桌面片段写成全量通过。
 
+正式 PR：https://github.com/0-CHENAI/Selection/pull/355（面向 `test`）。#354 / #320 已写隔离验收评论。
+
 ## 数据边界
 
 未对用户 `~/.selection` 跑 Agent。未绕过审批、未静默迁旧任务、未重跑中断工具。
