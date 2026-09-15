@@ -232,6 +232,8 @@ export function processEvent(
       // just receives the event for UI feedback. See SessionManager.processEvent.
       return { state, effects: [] }
 
+    case 'progress_supervision':
+      return { state: { ...state, session: { ...state.session, progressSupervision: event.state } }, effects: [] }
     case 'usage_update':
       return handleUsageUpdate(state, event)
 
