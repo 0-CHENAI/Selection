@@ -868,6 +868,7 @@ interface ManagedSession {
     userMessageId: string
     recovery: boolean
     accepting?: boolean
+    persistenceFailed?: boolean
     committedMessageId?: string
   }
 
@@ -1082,6 +1083,7 @@ interface ManagedSession {
     runId: string
     keepThroughMessageId: string
     rendererTruncated: boolean
+    pendingAnswerId?: string
     originalMessages: Message[]
     originalSdkSessionId?: string
     originalBranchContextStrategy?: 'sdk-fork' | 'seeded-fresh-session'
@@ -2472,13 +2474,18 @@ export class SessionManager implements ISessionManager {
     try {
       // Filter out transient status messages (progress indicators like "Compacting...")
       // Error messages are now persisted with rich fields for diagnostics
-      const messagesForPersistence = managed.regenerateTransaction?.originalMessages ?? managed.messages
+      const regenerateTransaction = managed.regenerateTransaction
+      // A complete answer is the commit candidate: atomically persist its transcript
+      // together with the new SDK identity, while retaining the rollback snapshot.
+      const publishingAnswer = regenerateTransaction?.pendingAnswerId !== undefined
+        && managed.messages.some(m => m.id === regenerateTransaction.pendingAnswerId && m.answerCommitted)
+      const messagesForPersistence = regenerateTransaction && !publishingAnswer
+        ? regenerateTransaction.originalMessages : managed.messages
       const persistableMessages = messagesForPersistence.filter(m =>
         m.role !== 'status'
       )
       const persistentFields = pickSessionFields(managed)
-      const regenerateTransaction = managed.regenerateTransaction
-      if (regenerateTransaction) {
+      if (regenerateTransaction && !publishingAnswer) {
         // Keep the last committed native history identity on disk until the
         // replacement response commits. A crash during regenerate must reopen
         // the old transcript and its matching Pi session, never a half-run.
@@ -2487,6 +2494,13 @@ export class SessionManager implements ISessionManager {
         persistentFields.branchFromSessionPath = regenerateTransaction.originalBranchFromSessionPath
         persistentFields.branchFromSdkCwd = regenerateTransaction.originalBranchFromSdkCwd
         persistentFields.branchFromSdkTurnId = regenerateTransaction.originalBranchFromSdkTurnId
+      }
+
+      if (regenerateTransaction && publishingAnswer) {
+        persistentFields.branchFromSdkSessionId = undefined
+        persistentFields.branchFromSessionPath = undefined
+        persistentFields.branchFromSdkCwd = undefined
+        persistentFields.branchFromSdkTurnId = undefined
       }
 
       const storedSession: StoredSession = {
@@ -7276,7 +7290,7 @@ export class SessionManager implements ISessionManager {
       runId: state.runId,
       recovery: state.recovery,
       isActive: () => managed.answerDelivery === state && managed.isProcessing
-        && !state.accepting && !state.committedMessageId && !managed.stopRequested && managed.processingGeneration === state.generation,
+        && !state.persistenceFailed && !state.accepting && !state.committedMessageId && !managed.stopRequested && managed.processingGeneration === state.generation,
       submit: submission => this.acceptAnswer(managed, state, submission),
     }
   }
@@ -7289,6 +7303,7 @@ export class SessionManager implements ISessionManager {
     if (managed.answerDelivery !== state || !managed.isProcessing || managed.stopRequested || managed.processingGeneration !== state.generation) {
       throw new Error('This answer delivery turn is no longer active.')
     }
+    if (state.persistenceFailed) throw new Error('Answer persistence failed. Do not retry submission in this turn.')
     if (state.accepting || state.committedMessageId) throw new Error('An answer has already been submitted for this turn.')
     if (!hasRenderableAssistantText(submission.markdown)) throw new Error('Submit a complete, non-empty Markdown answer.')
     if (!submission.toolCallId || !submission.sdkMessageId || !submission.sdkTurnAnchor) throw new Error('Missing SDK answer anchor.')
@@ -7313,6 +7328,7 @@ export class SessionManager implements ISessionManager {
       if (!assessment.valid) throw new Error(`Answer does not satisfy Swarm aggregation: ${assessment.reasons.join('; ')}`)
     }
     state.accepting = true
+    const regenerateTransaction = managed.regenerateTransaction
     const previousLastRole = managed.lastMessageRole
     const previousFinalId = managed.lastFinalMessageId
     const answer: Message = {
@@ -7336,16 +7352,21 @@ export class SessionManager implements ISessionManager {
       managed.piSdkMessageToCraftMessage.set(submission.sdkMessageId, answer.id)
       managed.lastMessageRole = 'assistant'
       managed.lastFinalMessageId = answer.id
+      if (regenerateTransaction) regenerateTransaction.pendingAnswerId = answer.id
       this.persistSession(managed)
       await this.flushSession(managed.id)
       if (managed.stopRequested || !managed.isProcessing || managed.processingGeneration !== state.generation || managed.answerDelivery !== state) throw new Error('Answer delivery was interrupted.')
       const storedAnswer = loadStoredSession(managed.workspace.rootPath, managed.id)?.messages.find(m => m.id === answer.id)
       if (!storedAnswer?.answerCommitted || storedAnswer.answerRunId !== state.runId || !hasRenderableAssistantText(storedAnswer.content)) throw new Error('Answer could not be persisted. No answer was published.')
-      this.sendEvent({ type: 'text_complete', sessionId: managed.id, text: answer.content,
-        isIntermediate: false, phase: 'final', answerProtocol: answer.answerProtocol,
-        answerRunId: state.runId, answerCommitted: true, turnId: answer.turnId,
-        messageId: answer.id, timestamp: answer.timestamp }, managed.workspace.id)
+      if (regenerateTransaction && managed.regenerateTransaction === regenerateTransaction) this.commitRegenerateTransaction(managed)
     } catch (error) {
+      if (regenerateTransaction?.pendingAnswerId === answer.id) regenerateTransaction.pendingAnswerId = undefined
+      const stillActive = managed.answerDelivery === state && managed.isProcessing
+        && !managed.stopRequested && managed.processingGeneration === state.generation
+      if (stillActive) {
+        state.persistenceFailed = true
+        sessionLog.error('Answer persistence failed', { sessionId: managed.id, answerRunId: state.runId, error: error instanceof Error ? error.message : String(error) })
+      }
       managed.messages = managed.messages.filter(m => m.id !== answer.id)
       state.committedMessageId = undefined
       managed.piSdkMessageToCraftMessage?.delete(submission.sdkMessageId)
@@ -7355,9 +7376,21 @@ export class SessionManager implements ISessionManager {
         managed.lastFinalMessageId = previousFinalId
       }
       this.persistSession(managed)
+      // Restore the durable transcript before returning the failed submission.
+      // Keep the original error if the storage itself remains unavailable.
+      await this.flushSession(managed.id).catch(rollbackError => sessionLog.error('Answer rollback persistence failed', rollbackError))
       throw error
     } finally {
       state.accepting = false
+    }
+    // Publication cannot undo a durable commit (for example, a disconnected window).
+    try {
+      this.sendEvent({ type: 'text_complete', sessionId: managed.id, text: answer.content,
+        isIntermediate: false, phase: 'final', answerProtocol: answer.answerProtocol,
+        answerRunId: state.runId, answerCommitted: true, turnId: answer.turnId,
+        messageId: answer.id, timestamp: answer.timestamp }, managed.workspace.id)
+    } catch (error) {
+      sessionLog.error('Committed answer event delivery failed', { sessionId: managed.id, messageId: answer.id, error })
     }
   }
 
@@ -7377,7 +7410,7 @@ export class SessionManager implements ISessionManager {
     const owner = managed.messages.find(m => m.id === state.userMessageId)
     const hasError = managed.messages.slice(managed.messages.findIndex(m => m.id === state.userMessageId) + 1).some(m => m.role === 'error')
     const waiting = managed.orchestrationStatus === 'running' && managed.orchestrationAggregation?.phase === 'waiting-workers'
-    if (complete && !state.committedMessageId && !state.recovery && !hasError && !waiting
+    if (complete && !state.committedMessageId && !state.persistenceFailed && !state.recovery && !hasError && !waiting
       && managed.isProcessing && !managed.stopRequested && managed.answerDelivery === state
       && managed.processingGeneration === state.generation && !managed.authRetryInProgress) {
       // Account for the first call before starting the one allowed recovery call.
@@ -7397,10 +7430,12 @@ export class SessionManager implements ISessionManager {
         else yield event
       }
     }
-    if (!state.committedMessageId && state.recovery && managed.isProcessing && !managed.stopRequested
+    if (!state.committedMessageId && (state.persistenceFailed || state.recovery) && managed.isProcessing && !managed.stopRequested
       && managed.answerDelivery === state && managed.processingGeneration === state.generation
       && !managed.messages.slice(managed.messages.findIndex(m => m.id === state.userMessageId) + 1).some(m => m.role === 'error')) {
-      yield { type: 'error', message: '未完成答案交付：模型未提交完整正文。已有工作内容已保留，请继续此任务。' }
+      yield { type: 'error', message: state.persistenceFailed
+        ? '答案保存失败：系统未能保存已提交的正文。请稍后继续此任务；重新生成失败时将恢复原答案。'
+        : '未完成答案交付：模型未提交完整正文。已有工作文件已保留；重新生成失败时将恢复原答案，请继续此任务。' }
     }
     if (complete) yield complete
     else if (state.committedMessageId) yield { type: 'complete' }
@@ -7456,7 +7491,7 @@ export class SessionManager implements ISessionManager {
       )
       const options = managed.lastSentOptions
 
-      const originalMessages = [...managed.messages]
+      const originalMessages = structuredClone(managed.messages)
       const previousAssistant = originalMessages
         .slice(0, lastUserIdx)
         .findLast(message => message.role === 'assistant' && !message.isIntermediate && !message.hidden)
@@ -8049,6 +8084,24 @@ export class SessionManager implements ISessionManager {
     }
   }
 
+  private commitRegenerateTransaction(managed: ManagedSession): void {
+    const transaction = managed.regenerateTransaction
+    if (!transaction) return
+    managed.regenerateTransaction = undefined
+    managed.forceFreshSdkSession = false
+    managed.regenerateSeedPending = false
+    managed.regenerateSeedApplied = false
+    managed.branchContextStrategy = transaction.originalBranchContextStrategy
+    managed.branchFromSdkSessionId = undefined
+    managed.branchFromSessionPath = undefined
+    managed.branchFromSdkCwd = undefined
+    managed.branchFromSdkTurnId = undefined
+    sessionLog.info('Regenerate transaction committed', {
+      sessionId: managed.id,
+      runId: transaction.runId,
+    })
+  }
+
   private async settleRegenerateTransaction(
     managed: ManagedSession,
     reason: 'complete' | 'interrupted' | 'error' | 'timeout',
@@ -8068,19 +8121,7 @@ export class SessionManager implements ISessionManager {
     )
 
     if (reason === 'complete' && hasNonEmptyFinalResponse) {
-      managed.regenerateTransaction = undefined
-      managed.forceFreshSdkSession = false
-      managed.regenerateSeedPending = false
-      managed.regenerateSeedApplied = false
-      managed.branchContextStrategy = transaction.originalBranchContextStrategy
-      managed.branchFromSdkSessionId = undefined
-      managed.branchFromSessionPath = undefined
-      managed.branchFromSdkCwd = undefined
-      managed.branchFromSdkTurnId = undefined
-      sessionLog.info('Regenerate transaction committed', {
-        sessionId: managed.id,
-        runId: transaction.runId,
-      })
+      this.commitRegenerateTransaction(managed)
       return { reason, rolledBack: false }
     }
 
