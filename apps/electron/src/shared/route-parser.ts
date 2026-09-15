@@ -196,16 +196,16 @@ export function parseCompoundRoute(route: string): ParsedCompoundRoute | null {
     return null
   }
 
-  // Automations navigator - supports type filters (scheduled, event, agentic)
+  // Automations navigator - supports type filters (scheduled, event)
   if (first === 'automations') {
     if (segments.length === 1) {
       return { navigator: 'automations', details: null }
     }
 
-    // Check for type filter: automations/scheduled, automations/event, automations/agentic
-    const validAutomationTypes = ['scheduled', 'event', 'agentic']
+    // Check for type filter: automations/scheduled, automations/event
+    const validAutomationTypes = ['scheduled', 'event']
     if (validAutomationTypes.includes(segments[1])) {
-      const automationType = segments[1] as 'scheduled' | 'event' | 'agentic'
+      const automationType = segments[1] as 'scheduled' | 'event'
       const automationFilter: AutomationFilter = { kind: 'type', automationType }
 
       // Check for automation selection within filtered view: automations/scheduled/automation/{automationId}
@@ -315,7 +315,7 @@ export function buildCompoundRoute(parsed: ParsedCompoundRoute): string {
   }
 
   if (parsed.navigator === 'automations') {
-    // Build base from filter (automations, automations/scheduled, automations/event, automations/agentic)
+    // Build base from filter (automations, automations/scheduled, automations/event)
     let base = 'automations'
     if (parsed.automationFilter?.kind === 'type') {
       base = `automations/${parsed.automationFilter.automationType}`

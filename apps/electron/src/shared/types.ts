@@ -868,7 +868,7 @@ export interface SourceFilter {
  */
 export interface AutomationFilter {
   kind: 'type'
-  automationType: 'scheduled' | 'event' | 'agentic'
+  automationType: 'scheduled' | 'event'
 }
 
 /**

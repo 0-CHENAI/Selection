@@ -27,19 +27,13 @@ describe('PiAgent developer feedback consent', () => {
   let workspaceRootPath: string
   let agent: PiAgent
   let sent: Array<Record<string, unknown>>
-  let automationEvents: Array<{ event: string; input?: Record<string, unknown> }>
 
   beforeEach(() => {
     workspaceRootPath = mkdtempSync(join(tmpdir(), 'selection-feedback-consent-'))
     agent = new PiAgent(createConfig(workspaceRootPath))
     agent.setPermissionMode('allow-all')
     sent = []
-    automationEvents = []
     ;(agent as any).send = (message: Record<string, unknown>) => sent.push(message)
-    ;(agent as any).emitAutomationEvent = async (
-      event: string,
-      input?: Record<string, unknown>,
-    ) => automationEvents.push({ event, input })
   })
 
   afterEach(() => {
@@ -70,8 +64,6 @@ describe('PiAgent developer feedback consent', () => {
     const approvedInput = response?.input as Record<string, unknown>
     expect(approvedInput.message).toBe(message)
     expect(approvedInput.approvalToken).toMatch(/^feedback-approval-/)
-    expect(automationEvents.map(({ event }) => event)).toEqual(['PermissionRequest', 'PreToolUse'])
-    expect(automationEvents.at(-1)?.input?.tool_input).toEqual({ message })
 
     const context = (agent as any).getSessionToolContext()
     expect(context.consumeDeveloperFeedbackApproval(approvedInput.approvalToken, message)).toBe(true)

@@ -1020,17 +1020,10 @@ export interface TestAutomationPayload {
   labels?: string[]
   /** When true, only evaluate matcher/conditions — do not execute actions. */
   dryRun?: boolean
-  /** Agent/app event name used for dry-run matching. */
+  /** App event name used for dry-run matching. */
   event?: string
-  /** Sample Agent Event payload for dry-run matching. */
-  sample?: {
-    tool_name?: string
-    tool_input?: Record<string, unknown>
-    prompt?: string
-    stop_reason?: string
-    source?: string
-    agent_type?: string
-  }
+  /** App payload fields used for dry-run matching. */
+  sample?: Record<string, unknown>
 }
 
 export interface TestAutomationMatch {

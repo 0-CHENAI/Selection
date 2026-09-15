@@ -234,10 +234,10 @@ describe('resource-bundle', () => {
     it('exports automations as per-entry array', () => {
       const wsDir = createTestWorkspace(tmpDir)
       createTestAutomations(wsDir, {
-        UserPromptSubmit: [
+        SessionStatusChange: [
           { id: 'aaa111', name: 'Greeting', actions: [{ type: 'prompt', prompt: 'hello' }] },
         ],
-        SessionStart: [
+        LabelRemove: [
           { id: 'bbb222', name: 'Init', actions: [{ type: 'prompt', prompt: 'init' }] },
         ],
       })
@@ -251,14 +251,14 @@ describe('resource-bundle', () => {
 
       const greeting = bundle.resources.automations!.find(a => a.id === 'aaa111')!
       expect(greeting.name).toBe('Greeting')
-      expect(greeting.event).toBe('UserPromptSubmit')
+      expect(greeting.event).toBe('SessionStatusChange')
       expect(greeting.matcher.actions).toHaveLength(1)
     })
 
     it('exports automations selectively by ID', () => {
       const wsDir = createTestWorkspace(tmpDir)
       createTestAutomations(wsDir, {
-        UserPromptSubmit: [
+        SessionStatusChange: [
           { id: 'aaa111', name: 'First', actions: [{ type: 'prompt', prompt: 'a' }] },
           { id: 'bbb222', name: 'Second', actions: [{ type: 'prompt', prompt: 'b' }] },
         ],
@@ -273,7 +273,7 @@ describe('resource-bundle', () => {
     it('exports automations selectively by name', () => {
       const wsDir = createTestWorkspace(tmpDir)
       createTestAutomations(wsDir, {
-        UserPromptSubmit: [
+        SessionStatusChange: [
           { id: 'aaa111', name: 'My Automation', actions: [{ type: 'prompt', prompt: 'a' }] },
           { id: 'bbb222', name: 'Other', actions: [{ type: 'prompt', prompt: 'b' }] },
         ],
@@ -288,7 +288,7 @@ describe('resource-bundle', () => {
     it('warns when name selector matches multiple automations', () => {
       const wsDir = createTestWorkspace(tmpDir)
       createTestAutomations(wsDir, {
-        UserPromptSubmit: [
+        SessionStatusChange: [
           { id: 'aaa111', name: 'Dup Name', actions: [{ type: 'prompt', prompt: 'a' }] },
           { id: 'bbb222', name: 'Dup Name', actions: [{ type: 'prompt', prompt: 'b' }] },
         ],
@@ -304,7 +304,7 @@ describe('resource-bundle', () => {
     it('warns for unmatched automation selector', () => {
       const wsDir = createTestWorkspace(tmpDir)
       createTestAutomations(wsDir, {
-        UserPromptSubmit: [
+        SessionStatusChange: [
           { id: 'aaa111', name: 'Real', actions: [{ type: 'prompt', prompt: 'a' }] },
         ],
       })
@@ -317,7 +317,7 @@ describe('resource-bundle', () => {
     it('sanitizes webhook auth on export', () => {
       const wsDir = createTestWorkspace(tmpDir)
       createTestAutomations(wsDir, {
-        UserPromptSubmit: [{
+        SessionStatusChange: [{
           id: 'aaa111',
           name: 'Webhook Test',
           actions: [{
@@ -346,7 +346,7 @@ describe('resource-bundle', () => {
     it('preserves templated header values on export', () => {
       const wsDir = createTestWorkspace(tmpDir)
       createTestAutomations(wsDir, {
-        UserPromptSubmit: [{
+        SessionStatusChange: [{
           id: 'aaa111',
           actions: [{
             type: 'webhook',
@@ -366,7 +366,7 @@ describe('resource-bundle', () => {
     it('strips webhook URL and body credentials while preserving CRAFT_WH variables', () => {
       const wsDir = createTestWorkspace(tmpDir)
       createTestAutomations(wsDir, {
-        UserPromptSubmit: [{
+        SessionStatusChange: [{
           id: 'aaa111',
           actions: [{
             type: 'webhook',
@@ -391,7 +391,7 @@ describe('resource-bundle', () => {
     it('automations: true is backward-compatible with "all"', () => {
       const wsDir = createTestWorkspace(tmpDir)
       createTestAutomations(wsDir, {
-        UserPromptSubmit: [
+        SessionStatusChange: [
           { id: 'aaa111', actions: [{ type: 'prompt', prompt: 'a' }] },
         ],
       })
@@ -440,7 +440,7 @@ requiredSources:
 Use the source.
 `)
       createTestAutomations(wsDir, {
-        UserPromptSubmit: [{ id: 'abc123', name: 'Review request', actions: [{ type: 'prompt', prompt: '@review inspect this' }] }],
+        SessionStatusChange: [{ id: 'abc123', name: 'Review request', actions: [{ type: 'prompt', prompt: '@review inspect this' }] }],
       })
 
       const { bundle } = exportResources(wsDir, { automations: ['abc123'] })
@@ -590,7 +590,7 @@ Use the source.
         resources: {
           automations: [{
             id: 'abc123',
-            event: 'UserPromptSubmit',
+            event: 'SessionStatusChange',
             matcher: { id: 'abc123', actions: [{ type: 'execute-arbitrary', command: 'oops' }] },
           }],
         },
@@ -692,7 +692,7 @@ Use the source.
         exportedAt: Date.now(),
         resources: {
           automations: [
-            { id: 'aaa111', event: 'UserPromptSubmit', matcher: { id: 'aaa111', actions: [{ type: 'prompt', prompt: 'hi' }] } },
+            { id: 'aaa111', event: 'SessionStatusChange', matcher: { id: 'aaa111', actions: [{ type: 'prompt', prompt: 'hi' }] } },
           ],
         },
       }
@@ -707,8 +707,8 @@ Use the source.
         exportedAt: Date.now(),
         resources: {
           automations: [
-            { id: 'aaa111', event: 'UserPromptSubmit', matcher: { id: 'aaa111', actions: [{ type: 'prompt', prompt: 'a' }] } },
-            { id: 'aaa111', event: 'SessionStart', matcher: { id: 'aaa111', actions: [{ type: 'prompt', prompt: 'b' }] } },
+            { id: 'aaa111', event: 'SessionStatusChange', matcher: { id: 'aaa111', actions: [{ type: 'prompt', prompt: 'a' }] } },
+            { id: 'aaa111', event: 'LabelRemove', matcher: { id: 'aaa111', actions: [{ type: 'prompt', prompt: 'b' }] } },
           ],
         },
       }
@@ -724,8 +724,8 @@ Use the source.
         exportedAt: Date.now(),
         resources: {
           automations: [
-            { id: 'aaa111', name: 'Same Name', event: 'UserPromptSubmit', matcher: { id: 'aaa111', actions: [{ type: 'prompt', prompt: 'a' }] } },
-            { id: 'bbb222', name: 'Same Name', event: 'SessionStart', matcher: { id: 'bbb222', actions: [{ type: 'prompt', prompt: 'b' }] } },
+            { id: 'aaa111', name: 'Same Name', event: 'SessionStatusChange', matcher: { id: 'aaa111', actions: [{ type: 'prompt', prompt: 'a' }] } },
+            { id: 'bbb222', name: 'Same Name', event: 'LabelRemove', matcher: { id: 'bbb222', actions: [{ type: 'prompt', prompt: 'b' }] } },
           ],
         },
       }
@@ -756,7 +756,7 @@ Use the source.
         exportedAt: Date.now(),
         resources: {
           automations: [
-            { id: 'aaa111', event: 'UserPromptSubmit', matcher: { id: 'aaa111', actions: [] } },
+            { id: 'aaa111', event: 'SessionStatusChange', matcher: { id: 'aaa111', actions: [] } },
           ],
         },
       }
@@ -816,7 +816,7 @@ requiredSources:
 Use the source.
 `)
       createTestAutomations(srcDir, {
-        UserPromptSubmit: [{ id: 'abc123', name: 'Review request', actions: [{ type: 'prompt', prompt: '@review use @github' }] }],
+        SessionStatusChange: [{ id: 'abc123', name: 'Review request', actions: [{ type: 'prompt', prompt: '@review use @github' }] }],
       })
       const { bundle } = exportResources(srcDir, { automations: ['abc123'] })
 
@@ -824,7 +824,7 @@ Use the source.
       createTestSource(dstDir, 'github')
       createTestSkill(dstDir, 'review')
       createTestAutomations(dstDir, {
-        UserPromptSubmit: [{ id: 'abc123', name: 'Existing', actions: [{ type: 'prompt', prompt: 'existing' }] }],
+        SessionStatusChange: [{ id: 'abc123', name: 'Existing', actions: [{ type: 'prompt', prompt: 'existing' }] }],
       })
       const preview = previewResourceImport(dstDir, bundle)
       expect(preview.items.map(item => `${item.type}:${item.status}`).sort()).toEqual([
@@ -847,7 +847,7 @@ Use the source.
       const skillMd = readFileSync(join(dstDir, 'skills', 'review-copy', 'SKILL.md'), 'utf8')
       expect(skillMd).toContain('github-copy')
       const config = JSON.parse(readFileSync(join(dstDir, 'automations.json'), 'utf8'))
-      const imported = config.automations.UserPromptSubmit.find((item: AutomationMatcher) => item.id === 'def456')
+      const imported = config.automations.SessionStatusChange.find((item: AutomationMatcher) => item.id === 'def456')
       expect(imported.actions[0].prompt).toContain('@review-copy')
       expect(imported.actions[0].prompt).toContain('@github-copy')
       expect(imported.enabled).toBe(false)
@@ -891,7 +891,7 @@ Use the source.
     it('only enables an imported automation after an explicit low-risk decision', async () => {
       const srcDir = createTestWorkspace(join(tmpDir, 'src-enable'))
       createTestAutomations(srcDir, {
-        UserPromptSubmit: [{ id: 'abc123', name: 'Safe prompt', actions: [{ type: 'prompt', prompt: 'hello' }] }],
+        SessionStatusChange: [{ id: 'abc123', name: 'Safe prompt', actions: [{ type: 'prompt', prompt: 'hello' }] }],
       })
       const { bundle } = exportResources(srcDir, { automations: 'all' })
       const dstDir = createTestWorkspace(join(tmpDir, 'dst-enable'))
@@ -901,7 +901,7 @@ Use the source.
       }, noopDeps)
 
       const config = JSON.parse(readFileSync(join(dstDir, 'automations.json'), 'utf8'))
-      expect(config.automations.UserPromptSubmit[0].enabled).toBe(true)
+      expect(config.automations.SessionStatusChange[0].enabled).toBe(true)
     })
   })
 
@@ -1115,7 +1115,7 @@ Use the source.
         exportedAt: Date.now(),
         resources: {
           automations: [
-            makeAutomationEntry({ id: 'aaa111', name: 'Auto 1', event: 'UserPromptSubmit' }),
+            makeAutomationEntry({ id: 'aaa111', name: 'Auto 1', event: 'SessionStatusChange' }),
           ],
         },
       }
@@ -1125,14 +1125,14 @@ Use the source.
       expect(result.automations.imported).toEqual(['Auto 1'])
       const config = JSON.parse(readFileSync(join(wsDir, 'automations.json'), 'utf-8'))
       expect(config.version).toBe(2)
-      expect(config.automations.UserPromptSubmit).toHaveLength(1)
-      expect(config.automations.UserPromptSubmit[0].id).toBe('aaa111')
+      expect(config.automations.SessionStatusChange).toHaveLength(1)
+      expect(config.automations.SessionStatusChange[0].id).toBe('aaa111')
     })
 
     it('merges automations into existing config', async () => {
       const wsDir = createTestWorkspace(tmpDir)
       createTestAutomations(wsDir, {
-        UserPromptSubmit: [
+        SessionStatusChange: [
           { id: 'existing1', name: 'Existing', actions: [{ type: 'prompt', prompt: 'old' }] },
         ],
       })
@@ -1142,7 +1142,7 @@ Use the source.
         exportedAt: Date.now(),
         resources: {
           automations: [
-            makeAutomationEntry({ id: 'new1', name: 'New Auto', event: 'SessionStart' }),
+            makeAutomationEntry({ id: 'new1', name: 'New Auto', event: 'LabelRemove' }),
           ],
         },
       }
@@ -1152,17 +1152,17 @@ Use the source.
       expect(result.automations.imported).toEqual(['New Auto'])
       const config = JSON.parse(readFileSync(join(wsDir, 'automations.json'), 'utf-8'))
       // Existing automation should be preserved
-      expect(config.automations.UserPromptSubmit).toHaveLength(1)
-      expect(config.automations.UserPromptSubmit[0].id).toBe('existing1')
+      expect(config.automations.SessionStatusChange).toHaveLength(1)
+      expect(config.automations.SessionStatusChange[0].id).toBe('existing1')
       // New automation should be added
-      expect(config.automations.SessionStart).toHaveLength(1)
-      expect(config.automations.SessionStart[0].id).toBe('new1')
+      expect(config.automations.LabelRemove).toHaveLength(1)
+      expect(config.automations.LabelRemove[0].id).toBe('new1')
     })
 
     it('skips automations with existing ID in skip mode', async () => {
       const wsDir = createTestWorkspace(tmpDir)
       createTestAutomations(wsDir, {
-        UserPromptSubmit: [
+        SessionStatusChange: [
           { id: 'aaa111', name: 'Original', actions: [{ type: 'prompt', prompt: 'original' }] },
         ],
       })
@@ -1172,7 +1172,7 @@ Use the source.
         exportedAt: Date.now(),
         resources: {
           automations: [
-            makeAutomationEntry({ id: 'aaa111', name: 'Updated', event: 'UserPromptSubmit' }),
+            makeAutomationEntry({ id: 'aaa111', name: 'Updated', event: 'SessionStatusChange' }),
           ],
         },
       }
@@ -1182,13 +1182,13 @@ Use the source.
       expect(result.automations.skipped).toEqual(['Updated'])
       // Original should be preserved
       const config = JSON.parse(readFileSync(join(wsDir, 'automations.json'), 'utf-8'))
-      expect(config.automations.UserPromptSubmit[0].name).toBe('Original')
+      expect(config.automations.SessionStatusChange[0].name).toBe('Original')
     })
 
     it('overwrites automation by ID in overwrite mode', async () => {
       const wsDir = createTestWorkspace(tmpDir)
       createTestAutomations(wsDir, {
-        UserPromptSubmit: [
+        SessionStatusChange: [
           { id: 'aaa111', name: 'Original', actions: [{ type: 'prompt', prompt: 'original' }] },
           { id: 'bbb222', name: 'Untouched', actions: [{ type: 'prompt', prompt: 'keep' }] },
         ],
@@ -1199,7 +1199,7 @@ Use the source.
         exportedAt: Date.now(),
         resources: {
           automations: [
-            makeAutomationEntry({ id: 'aaa111', name: 'Replaced', event: 'UserPromptSubmit' }),
+            makeAutomationEntry({ id: 'aaa111', name: 'Replaced', event: 'SessionStatusChange' }),
           ],
         },
       }
@@ -1209,7 +1209,7 @@ Use the source.
       expect(result.automations.imported).toEqual(['Replaced'])
       const config = JSON.parse(readFileSync(join(wsDir, 'automations.json'), 'utf-8'))
       // Replaced automation
-      const names = config.automations.UserPromptSubmit.map((m: any) => m.name)
+      const names = config.automations.SessionStatusChange.map((m: any) => m.name)
       expect(names).toContain('Replaced')
       // Untouched automation should survive
       expect(names).toContain('Untouched')
@@ -1218,7 +1218,7 @@ Use the source.
     it('preserves existing version field on import', async () => {
       const wsDir = createTestWorkspace(tmpDir)
       createTestAutomations(wsDir, {
-        UserPromptSubmit: [
+        SessionStatusChange: [
           { id: 'existing1', actions: [{ type: 'prompt', prompt: 'old' }] },
         ],
       }, 2)
@@ -1228,7 +1228,7 @@ Use the source.
         exportedAt: Date.now(),
         resources: {
           automations: [
-            makeAutomationEntry({ id: 'new1', event: 'SessionStart' }),
+            makeAutomationEntry({ id: 'new1', event: 'LabelRemove' }),
           ],
         },
       }
@@ -1242,7 +1242,7 @@ Use the source.
     it('selectively clears history and retry queue for overwritten IDs', async () => {
       const wsDir = createTestWorkspace(tmpDir)
       createTestAutomations(wsDir, {
-        UserPromptSubmit: [
+        SessionStatusChange: [
           { id: 'aaa111', actions: [{ type: 'prompt', prompt: 'old' }] },
           { id: 'bbb222', actions: [{ type: 'prompt', prompt: 'keep' }] },
         ],
@@ -1268,7 +1268,7 @@ Use the source.
         exportedAt: Date.now(),
         resources: {
           automations: [
-            makeAutomationEntry({ id: 'aaa111', event: 'UserPromptSubmit' }),
+            makeAutomationEntry({ id: 'aaa111', event: 'SessionStatusChange' }),
           ],
         },
       }
@@ -1295,7 +1295,7 @@ Use the source.
         exportedAt: Date.now(),
         resources: {
           automations: [
-            makeAutomationEntry({ id: 'aaa111', event: 'UserPromptSubmit' }),
+            makeAutomationEntry({ id: 'aaa111', event: 'SessionStatusChange' }),
           ],
         },
       }
@@ -1315,7 +1315,7 @@ Use the source.
         exportedAt: Date.now(),
         resources: {
           automations: [
-            makeAutomationEntry({ id: 'aaa111', name: 'Fresh Start', event: 'UserPromptSubmit' }),
+            makeAutomationEntry({ id: 'aaa111', name: 'Fresh Start', event: 'SessionStatusChange' }),
           ],
         },
       }
@@ -1325,7 +1325,7 @@ Use the source.
       expect(result.automations.imported).toEqual(['Fresh Start'])
       const config = JSON.parse(readFileSync(join(wsDir, 'automations.json'), 'utf-8'))
       expect(config.version).toBe(2)
-      expect(config.automations.UserPromptSubmit[0].id).toBe('aaa111')
+      expect(config.automations.SessionStatusChange[0].id).toBe('aaa111')
     })
 
     it('rejects import when merged config has invalid regex', async () => {
@@ -1337,7 +1337,7 @@ Use the source.
         resources: {
           automations: [{
             id: 'aaa111',
-            event: 'UserPromptSubmit',
+            event: 'SessionStatusChange',
             matcher: {
               id: 'aaa111',
               matcher: '(a+)+$', // ReDoS pattern
@@ -1466,7 +1466,7 @@ Use the source.
     it('preserves automations through round-trip', async () => {
       const srcDir = createTestWorkspace(join(tmpDir, 'src'))
       createTestAutomations(srcDir, {
-        UserPromptSubmit: [
+        SessionStatusChange: [
           { id: 'aaa111', name: 'Greet', actions: [{ type: 'prompt', prompt: 'hello' }] },
         ],
         SchedulerTick: [
@@ -1486,8 +1486,8 @@ Use the source.
 
       const config = JSON.parse(readFileSync(join(dstDir, 'automations.json'), 'utf-8'))
       expect(config.version).toBe(2)
-      expect(config.automations.UserPromptSubmit).toHaveLength(1)
-      expect(config.automations.UserPromptSubmit[0].name).toBe('Greet')
+      expect(config.automations.SessionStatusChange).toHaveLength(1)
+      expect(config.automations.SessionStatusChange[0].name).toBe('Greet')
       expect(config.automations.SchedulerTick).toHaveLength(1)
       expect(config.automations.SchedulerTick[0].cron).toBe('0 9 * * 1-5')
     })

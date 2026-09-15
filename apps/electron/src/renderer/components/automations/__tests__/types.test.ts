@@ -2,6 +2,10 @@ import { describe, it, expect } from 'bun:test'
 import { getEventCategory, parseAutomationsConfig } from '../types'
 
 describe('parseAutomationsConfig', () => {
+  it('does not display retired or unknown events from old configurations', () => {
+    const rule = { actions: [{ type: 'prompt', prompt: 'Review' }] }
+    expect(parseAutomationsConfig({ automations: { Stop: [rule], PreToolUse: [rule], Unknown: [rule], LabelAdd: [rule] } }).map(item => item.event)).toEqual(['LabelAdd'])
+  })
   it('returns [] for null input', () => {
     expect(parseAutomationsConfig(null)).toEqual([])
   })
@@ -84,7 +88,7 @@ describe('parseAutomationsConfig', () => {
     const config = {
       version: 2,
       automations: {
-        UserPromptSubmit: [{
+        SessionStatusChange: [{
           actions: [{ type: 'prompt', prompt: 'Run @daily-standup task' }],
         }],
       },
@@ -97,7 +101,7 @@ describe('parseAutomationsConfig', () => {
     const config = {
       version: 2,
       automations: {
-        SessionStart: [{
+        LabelRemove: [{
           actions: [{ type: 'prompt', prompt: 'echo "hello world"' }],
         }],
       },
@@ -111,7 +115,7 @@ describe('parseAutomationsConfig', () => {
     const config = {
       version: 2,
       automations: {
-        SessionStart: [{
+        LabelRemove: [{
           actions: [{ type: 'prompt', prompt: longPrompt }],
         }],
       },
@@ -124,7 +128,7 @@ describe('parseAutomationsConfig', () => {
     const config = {
       version: 2,
       automations: {
-        SessionStart: [{
+        LabelRemove: [{
           actions: [{ type: 'prompt', prompt: 'Run test' }],
         }],
       },
@@ -137,7 +141,7 @@ describe('parseAutomationsConfig', () => {
     const config = {
       version: 2,
       automations: {
-        SessionStart: [{
+        LabelRemove: [{
           enabled: false,
           actions: [{ type: 'prompt', prompt: 'Run test' }],
         }],
@@ -151,7 +155,7 @@ describe('parseAutomationsConfig', () => {
     const config = {
       version: 2,
       automations: {
-        SessionStart: [
+        LabelRemove: [
           { actions: [] },
           { actions: [{ type: 'prompt', prompt: 'valid' }] },
         ],
@@ -185,7 +189,7 @@ describe('parseAutomationsConfig', () => {
       automations: {
         SchedulerTick: [{ actions: [{ type: 'prompt', prompt: 'a' }] }],
         LabelAdd: [{ actions: [{ type: 'prompt', prompt: 'b' }] }],
-        SessionStart: [{ actions: [{ type: 'prompt', prompt: 'c' }] }],
+        LabelRemove: [{ actions: [{ type: 'prompt', prompt: 'c' }] }],
       },
     }
     const items = parseAutomationsConfig(config)
@@ -213,9 +217,7 @@ describe('parseAutomationsConfig', () => {
 })
 
 describe('getEventCategory', () => {
-  it('classifies PermissionRequest as permission, not a duplicate session case', () => {
-    expect(getEventCategory('PermissionRequest')).toBe('permission')
+  it('classifies permission changes', () => {
     expect(getEventCategory('PermissionModeChange')).toBe('permission')
-    expect(getEventCategory('SessionStart')).toBe('session')
   })
 })

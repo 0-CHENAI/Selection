@@ -301,8 +301,6 @@ export interface SessionConfig extends SwarmSessionMetadata {
     automationName?: string;
     event?: string;
     timestamp?: number;
-    sourceSessionId?: string;
-    automationDepth?: number;
   };
   /** Workspace-scoped project id this session belongs to (undefined = unbound). */
   projectId?: string;
@@ -416,8 +414,6 @@ export interface SessionHeader extends SwarmSessionMetadata {
     automationName?: string;
     event?: string;
     timestamp?: number;
-    sourceSessionId?: string;
-    automationDepth?: number;
   };
   /** Workspace-scoped project id this session belongs to (undefined = unbound). */
   projectId?: string;

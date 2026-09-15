@@ -142,8 +142,7 @@ import { listLabels, loadLabelConfig } from '@craft-agent/shared/labels/storage'
 import { extractLabelId, resolveSessionLabels, findTaskItemLabelId } from '@craft-agent/shared/labels'
 import { ensureLabelsExist, ensureTaskItemLabel } from '@craft-agent/shared/labels/crud'
 import { loadStatusConfig } from '@craft-agent/shared/statuses/storage'
-import { AutomationSystem, createPromptHistoryEntry, appendAutomationHistoryEntry, enrichAgentEventInput, DEFAULT_PROMPT_WAIT_TIMEOUT_MS, MAX_PROMPT_WAIT_TIMEOUT_MS, type AutomationSystemMetadataSnapshot, type AgentEvent as AutomationAgentEvent, type SdkAutomationInput, type PendingPrompt } from '@craft-agent/shared/automations'
-import { waitForAutomationSessionCompletion } from './wait-automation-session.ts'
+import { AutomationSystem, createPromptHistoryEntry, appendAutomationHistoryEntry, type AutomationSystemMetadataSnapshot, type PendingPrompt } from '@craft-agent/shared/automations'
 import { createTypedError, parseError } from '@craft-agent/shared/agent/errors'
 import { buildBackendRuntimeSignature, buildRestartRequiredSignature, prepareModelImageAttachments } from './runtime-config'
 import { validateArchiveTarget } from './archive-guards'
@@ -1115,9 +1114,6 @@ interface ManagedSession {
     automationName?: string
     event?: string
     timestamp?: number
-    sourceSessionId?: string
-    automationDepth?: number
-    rootSessionId?: string
   }
   // Promise that resolves when the agent instance is ready (for title gen to await)
   agentReady?: Promise<void>
@@ -2033,17 +2029,7 @@ export class SessionManager implements ISessionManager {
         workspaceId,
         enableScheduler: true,
         onPromptsReady: async (prompts) => {
-          const immediate = prompts.filter((pending) => pending.waitForCompletion !== true && pending.reportBack !== true)
-          const deferred = prompts.filter((pending) => pending.waitForCompletion === true || pending.reportBack === true)
-          // Release Agent Event prompt slots as soon as fire-and-forget
-          // sessions are dispatched. Wait/reportBack must not hold the
-          // concurrency cap for up to 30 minutes.
-          if (immediate.length > 0) {
-            await this.runPendingPromptAutomations(workspaceId, workspaceRootPath, immediate)
-          }
-          if (deferred.length > 0) {
-            void this.runPendingPromptAutomations(workspaceId, workspaceRootPath, deferred)
-          }
+          await this.runPendingPromptAutomations(workspaceId, workspaceRootPath, prompts)
         },
         onError: (event, error) => {
           sessionLog.error(`Automation failed for ${event}:`, error.message)
@@ -4106,14 +4092,6 @@ export class SessionManager implements ISessionManager {
         // Claude-specific
         isHeadless: !AGENT_FLAGS.defaultModesEnabled,
         skipConfigWatcher: true, // Server owns workspace-level ConfigWatcher — don't duplicate in agents
-        automationSystem: this.automationSystems.get(managed.workspace.rootPath),
-        automationContext: {
-          triggeredByAutomation: !!managed.triggeredBy,
-          automationDepth: managed.triggeredBy?.automationDepth ?? 0,
-          sourceSessionId: managed.triggeredBy?.sourceSessionId,
-          sourceSessionName: managed.name,
-          rootSessionId: managed.triggeredBy?.rootSessionId ?? managed.triggeredBy?.sourceSessionId,
-        },
         explicitAnswerDelivery: !managed.parentSessionId && !managed.taskSlug && (!managed.systemPromptPreset || managed.systemPromptPreset === 'default'),
         systemPromptPreset: managed.systemPromptPreset,
         debugMode: _platform?.isDebugMode ? { enabled: true, logFilePath: _platform.getLogFilePath?.() } : undefined,
@@ -9269,34 +9247,6 @@ export class SessionManager implements ISessionManager {
     this.taskRunnerLookup = lookup
   }
 
-  /**
-   * Fire a Pi Agent Event from session-layer orchestration (spawn_session).
-   * Failures stay isolated — delegation must not break the parent session.
-   */
-  private emitSessionAgentEvent(
-    managed: ManagedSession,
-    event: AutomationAgentEvent,
-    input: SdkAutomationInput,
-  ): void {
-    const system = this.automationSystems.get(managed.workspace.rootPath)
-    if (!system) return
-    const enriched = enrichAgentEventInput(event, input, {
-      workspaceId: managed.workspace.id,
-      sessionId: managed.id,
-      sessionName: managed.name,
-      triggeredByAutomation: !!managed.triggeredBy,
-      automationDepth: managed.triggeredBy?.automationDepth ?? 0,
-      rootSessionId: managed.triggeredBy?.rootSessionId ?? managed.triggeredBy?.sourceSessionId,
-    })
-    void system.executeAgentEvent(event, enriched).catch(error => {
-      sessionLog.warn('[Automations] session-layer agent event failed', {
-        event,
-        sessionId: managed.id,
-        error: error instanceof Error ? error.message : String(error),
-      })
-    })
-  }
-
   private updateOrchestrationMetadata(
     managed: ManagedSession,
     changes: Partial<Pick<ManagedSession,
@@ -9902,11 +9852,6 @@ export class SessionManager implements ISessionManager {
       mode,
     }
 
-    this.emitSessionAgentEvent(managed, 'SubagentStart', {
-      hook_event_name: 'SubagentStart',
-      agent_id: session.id,
-      agent_type: 'spawn_session',
-    })
     // Every spawned session is independently inspectable in the parent UI.
     // Register before starting the child so both wait and background modes use
     // the same running -> terminal chip lifecycle.
@@ -10127,12 +10072,6 @@ export class SessionManager implements ISessionManager {
         ?? finalText
         ?? `Spawned session subtree ended with ${child.orchestrationStatus}`
     if (!this.finalizeSpawnBackgroundTask(parent, child.id, status, summary)) return
-    this.emitSessionAgentEvent(parent, 'SubagentStop', {
-      hook_event_name: 'SubagentStop',
-      agent_id: child.id,
-      agent_type: 'spawn_session',
-      ...(status !== 'completed' && summary ? { error: summary } : {}),
-    })
     if (child.orchestrationLifecycle === 'detached') return
 
     const siblings = this.getManagedSwarmChildren(parent.id)
@@ -11674,14 +11613,6 @@ export class SessionManager implements ISessionManager {
             status: event.status,
           })
 
-          if (!wasAlreadyTerminal && priorEntry?.source === 'spawn_session') {
-            this.emitSessionAgentEvent(managed, 'SubagentStop', {
-              hook_event_name: 'SubagentStop',
-              agent_id: event.taskId,
-              agent_type: 'spawn_session',
-              ...(event.status === 'failed' && event.summary ? { error: event.summary } : {}),
-            })
-          }
 
           this.evictStaleBackgroundTasks(managed)
         }
@@ -12065,13 +11996,6 @@ export class SessionManager implements ISessionManager {
           model: pending.model,
           thinkingLevel: pending.thinkingLevel,
           automationName: pending.automationName,
-          waitForCompletion: pending.waitForCompletion,
-          reportBack: pending.reportBack,
-          timeoutMs: pending.timeoutMs,
-          sourceEvent: pending.sourceEvent,
-          sourceSessionId: pending.sourceSessionId,
-          rootSessionId: pending.rootSessionId,
-          automationDepth: pending.automationDepth,
         })
       )
     )
@@ -12081,12 +12005,10 @@ export class SessionManager implements ISessionManager {
       if (!pending?.matcherId) continue
 
       const value = result.status === 'fulfilled' ? result.value : undefined
-      const waitFailed = value?.waitReason === 'timeout' || value?.waitReason === 'interrupted' || value?.waitReason === 'error'
-      const reportFailed = Boolean(value?.reportBackError)
-      const ok = result.status === 'fulfilled' && !waitFailed && !reportFailed
+      const ok = result.status === 'fulfilled'
       const error = result.status === 'rejected'
         ? String(result.reason)
-        : value?.reportBackError ?? (waitFailed ? value?.waitReason : undefined)
+        : undefined
       const entry = createPromptHistoryEntry({
         matcherId: pending.matcherId,
         ok,
@@ -12094,11 +12016,6 @@ export class SessionManager implements ISessionManager {
         prompt: pending.prompt,
         error,
         status: ok ? 'succeeded' : 'failed',
-        event: pending.sourceEvent,
-        sourceSessionId: pending.sourceSessionId,
-        reason: value?.waitReason,
-        finalText: value?.finalText,
-        durationMs: value?.durationMs,
       })
 
       appendAutomationHistoryEntry(workspaceRootPath, entry).catch(e => sessionLog.warn('[Automations] Failed to write history:', e))
@@ -12134,12 +12051,6 @@ export class SessionManager implements ISessionManager {
       thinkingLevel,
       automationName,
       waitForCompletion,
-      reportBack,
-      timeoutMs,
-      sourceEvent,
-      sourceSessionId,
-      rootSessionId,
-      automationDepth,
     } = input
 
     // Warn if llmConnection was specified but doesn't resolve
@@ -12179,11 +12090,7 @@ export class SessionManager implements ISessionManager {
     if (managed) {
       managed.triggeredBy = {
         automationName,
-        event: sourceEvent,
         timestamp: Date.now(),
-        sourceSessionId,
-        automationDepth: automationDepth ?? (sourceEvent ? 1 : undefined),
-        rootSessionId: rootSessionId ?? sourceSessionId,
       }
       this.persistSession(managed)
     }
@@ -12197,8 +12104,7 @@ export class SessionManager implements ISessionManager {
     // until the entire turn (including tool calls) finishes and trips the 30s
     // client timeout (craft-agents-oss#943). The session streams live either
     // way; a background failure surfaces in the session UI and is logged here.
-    const shouldWait = waitForCompletion === true || reportBack === true
-    if (waitForCompletion === false && !shouldWait) {
+    if (waitForCompletion === false) {
       void this.sendMessage(session.id, prompt, undefined, undefined, {
         skillSlugs: resolved?.skillSlugs,
       }).catch((err) => {
@@ -12210,106 +12116,10 @@ export class SessionManager implements ISessionManager {
       return { sessionId: session.id }
     }
 
-    if (!shouldWait) {
-      await this.sendMessage(session.id, prompt, undefined, undefined, {
-        skillSlugs: resolved?.skillSlugs,
-      })
-      return { sessionId: session.id }
-    }
-
-    const clampedTimeout = Math.min(
-      Math.max(timeoutMs ?? DEFAULT_PROMPT_WAIT_TIMEOUT_MS, 1),
-      MAX_PROMPT_WAIT_TIMEOUT_MS,
-    )
-    const startedAt = Date.now()
-    const waitPromise = waitForAutomationSessionCompletion({
-      sessionId: session.id,
-      timeoutMs: clampedTimeout,
-      subscribe: (listener) => this.onSessionComplete(listener),
-    })
-
-    const sendResult = this.sendMessage(session.id, prompt, undefined, undefined, {
+    await this.sendMessage(session.id, prompt, undefined, undefined, {
       skillSlugs: resolved?.skillSlugs,
-    }).then(
-      () => 'sent' as const,
-      (err) => {
-        sessionLog.error('[Automations] sendMessage failed while waiting for completion', {
-          sessionId: session.id,
-          error: err instanceof Error ? err.message : String(err),
-        })
-        return 'failed' as const
-      },
-    )
-
-    const outcome = await Promise.race([
-      waitPromise,
-      sendResult.then((result) => {
-        if (result === 'failed') return { reason: 'error' as const }
-        return waitPromise
-      }),
-    ])
-    const durationMs = Date.now() - startedAt
-    let reportBackError: string | undefined
-
-    if (reportBack === true) {
-      reportBackError = await this.deliverAutomationReportBack({
-        sourceSessionId,
-        automationName,
-        finalText: outcome.finalText,
-        waitReason: outcome.reason,
-        idleTimeoutMs: Math.min(Math.max(clampedTimeout - (Date.now() - startedAt), 1), 60_000),
-      })
-    }
-
-    return {
-      sessionId: session.id,
-      waitReason: outcome.reason,
-      finalText: outcome.finalText,
-      durationMs,
-      reportBackError,
-    }
-  }
-
-  /**
-   * Write an automation result into the source session only when it is idle.
-   * Never call sendMessage while the source is processing — that steers or
-   * queues into the live user turn.
-   */
-  private async deliverAutomationReportBack(opts: {
-    sourceSessionId?: string
-    automationName?: string
-    finalText?: string
-    waitReason?: ExecutePromptAutomationResult['waitReason']
-    idleTimeoutMs: number
-  }): Promise<string | undefined> {
-    if (opts.waitReason !== 'complete') return undefined
-    if (!opts.sourceSessionId) return 'source session unavailable'
-
-    let source = this.sessions.get(opts.sourceSessionId)
-    if (!source) return 'source session unavailable'
-
-    if (source.isProcessing) {
-      const idle = await waitForAutomationSessionCompletion({
-        sessionId: opts.sourceSessionId,
-        timeoutMs: opts.idleTimeoutMs,
-        subscribe: (listener) => this.onSessionComplete(listener),
-      })
-      if (idle.reason === 'timeout') return 'source session unavailable'
-      source = this.sessions.get(opts.sourceSessionId)
-      if (!source || source.isProcessing) return 'source session unavailable'
-    }
-
-    const name = opts.automationName || 'automation'
-    const body = [
-      `[Automation "${name}" result]`,
-      opts.finalText?.trim() || '(no output)',
-    ].join('\n\n')
-    try {
-      await this.sendMessage(opts.sourceSessionId, body)
-      return undefined
-    } catch {
-      return 'source session unavailable'
-    }
+    })
+    return { sessionId: session.id }
   }
 
   /**

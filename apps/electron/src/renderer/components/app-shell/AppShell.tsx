@@ -22,7 +22,6 @@ import {
   Webhook,
   Clock,
   Radio,
-  Bot,
   Info,
   FolderKanban,
 } from "lucide-react"
@@ -118,7 +117,7 @@ import {
 import { AutomationsListPanel } from "../automations/AutomationsListPanel"
 import { ProjectsListPanel } from "./ProjectsListPanel"
 import { ProjectFolderActions } from "../projects/ProjectFolderActions"
-import { APP_EVENTS, AGENT_EVENTS, type AutomationFilterKind, AUTOMATION_TYPE_TO_FILTER_KIND } from "../automations/types"
+import { APP_EVENTS, type AutomationFilterKind, AUTOMATION_TYPE_TO_FILTER_KIND } from "../automations/types"
 import { useAutomations } from "@/hooks/useAutomations"
 import { useProjects } from "@/hooks/useProjects"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog"
@@ -1122,11 +1121,10 @@ function AppShellContent({
 
   // Count automations by type for the Automations dropdown subcategories
   const automationTypeCounts = useMemo(() => {
-    const counts = { scheduled: 0, event: 0, agentic: 0 }
+    const counts = { scheduled: 0, event: 0 }
     for (const automation of automations) {
       if (automation.event === 'SchedulerTick') counts.scheduled++
       else if ((APP_EVENTS as string[]).includes(automation.event)) counts.event++
-      else if ((AGENT_EVENTS as string[]).includes(automation.event)) counts.agentic++
     }
     return counts
   }, [automations])
@@ -1334,10 +1332,6 @@ function AppShellContent({
 
   const handleAutomationsEventClick = useCallback(() => {
     navigate(routes.view.automationsEvent())
-  }, [])
-
-  const handleAutomationsAgenticClick = useCallback(() => {
-    navigate(routes.view.automationsAgentic())
   }, [])
 
   // Handler for settings view. With no arg → bare `settings` route (navigator-only
@@ -1805,7 +1799,6 @@ function AppShellContent({
       switch (automationFilter.automationType) {
         case 'scheduled': return t("sidebar.scheduled")
         case 'event': return t("sidebar.eventBased")
-        case 'agentic': return t("sidebar.agentEvents")
         default: return t("sidebar.allAutomations")
       }
     }
@@ -2097,15 +2090,6 @@ function AppShellContent({
                           variant: (automationFilter?.kind === 'type' && automationFilter.automationType === 'event') ? "default" : "ghost",
                           onClick: handleAutomationsEventClick,
                           contextMenu: { type: 'automations' as const, onAddAutomation: () => openAddAutomation('event') },
-                        },
-                        {
-                          id: "nav:automations:agentic",
-                          title: t("sidebar.agentEvents"),
-                          label: String(automationTypeCounts.agentic),
-                          icon: Bot,
-                          variant: (automationFilter?.kind === 'type' && automationFilter.automationType === 'agentic') ? "default" : "ghost",
-                          onClick: handleAutomationsAgenticClick,
-                          contextMenu: { type: 'automations' as const, onAddAutomation: () => openAddAutomation('agentic') },
                         },
                       ],
                     },

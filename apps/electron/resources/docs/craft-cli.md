@@ -205,7 +205,7 @@ Manage workspace automations stored in `automations.json`.
 
 | Flag | Description |
 |------|-------------|
-| `--event <EventName>` | **(required for create)** Event trigger (e.g., `UserPromptSubmit`, `SchedulerTick`, `LabelAdd`) |
+| `--event <EventName>` | **(required for create)** Event trigger (e.g., `SessionStatusChange`, `SchedulerTick`, `LabelAdd`) |
 | `--name "<name>"` | Display name for the automation |
 | `--matcher "<regex>"` | Regex pattern for event matching |
 | `--cron "<expression>"` | Cron expression (for `SchedulerTick` events) |
@@ -223,7 +223,7 @@ Manage workspace automations stored in `automations.json`.
 craft-agent automation list
 craft-agent automation validate
 # Simple prompt automation with flat flags
-craft-agent automation create --event UserPromptSubmit --prompt "Summarize this prompt"
+craft-agent automation create --event SessionStatusChange --prompt "Summarize the status change"
 # Scheduled automation with flat flags
 craft-agent automation create --event SchedulerTick --cron "0 9 * * 1-5" --timezone "Europe/Budapest" --prompt "Give me a morning briefing" --labels "Scheduled" --permission-mode safe
 # Complex automation with --json
@@ -234,7 +234,7 @@ craft-agent automation enable abc123
 craft-agent automation duplicate abc123
 craft-agent automation history abc123 --limit 10
 craft-agent automation last-executed abc123
-craft-agent automation test abc123 --match "UserPromptSubmit"
+craft-agent automation test abc123 --match "SessionStatusChange"
 craft-agent automation lint
 craft-agent automation delete abc123
 ```
