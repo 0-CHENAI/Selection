@@ -65,10 +65,8 @@ describe('SessionManager progress integration', () => {
     expect(f.managed.progressSupervision?.evaluationTokens).toBe(120)
   })
   it('continues a saved checkpoint once and keeps the answer identity', async () => {
-    const f = setup(); const run = f.manager.sendMessage(f.managed.id, '画图'); await f.entered.promise;
-    const supervisor = f.managed.progressSupervisor!; const snapshot = (supervisor as any).options.snapshot;
-    (supervisor as any).options.snapshot = () => ({ ...snapshot(), elapsedMs: 600_000 });
-    await supervisor.tick(); await run;
+    const f = setup('model_request_timeout'); const run = f.manager.sendMessage(f.managed.id, '画图'); await f.entered.promise;
+    f.interrupted.resolve(); await run;
     const runId = f.managed.messages.find(m => m.role === 'user')!.answerRunId;
     await f.manager.continueProgress(f.managed.id);
     expect(f.prompts).toHaveLength(2);
@@ -90,16 +88,14 @@ describe('SessionManager progress integration', () => {
   });
 
   it('restores the old answer on regeneration pause and resumes the candidate history', async () => {
-    const f = setup();
+    const f = setup('model_request_timeout');
     f.managed.sdkSessionId = 'sdk-old';
     f.managed.messages = [
       { id: 'user', role: 'user', content: '画图', timestamp: 1, answerRunId: 'old-run' },
       { id: 'old', role: 'assistant', content: '旧答案', timestamp: 2, answerRunId: 'old-run', answerCommitted: true },
     ];
     await f.manager.regenerateLastResponse(f.managed.id); await f.entered.promise;
-    const supervisor = f.managed.progressSupervisor!; const snapshot = (supervisor as any).options.snapshot;
-    (supervisor as any).options.snapshot = () => ({ ...snapshot(), elapsedMs: 600_000 });
-    await supervisor.tick();
+    f.interrupted.resolve();
     for (let i = 0; i < 100 && f.managed.isProcessing; i++) await new Promise(r => setTimeout(r, 5));
     expect(f.managed.isProcessing).toBe(false);
     expect(f.managed.messages.some(m => m.id === 'old')).toBe(true);
@@ -132,17 +128,16 @@ describe('SessionManager progress integration', () => {
     f.interrupted.resolve(); await run; await f.manager.flushSession(f.managed.id)
   })
 
-  it('pauses at the resource boundary without replaying the original prompt', async () => {
+  it('does not pause a long model call just because wall time elapsed', async () => {
     const f = setup(); const run = f.manager.sendMessage(f.managed.id, '画图')
     await f.entered.promise
     const supervisor = f.managed.progressSupervisor!
     const snapshot = (supervisor as any).options.snapshot
     ;(supervisor as any).options.snapshot = () => ({ ...snapshot(), elapsedMs: 600_000 })
-    await supervisor.tick(); await run; await f.manager.flushSession(f.managed.id)
+    await supervisor.tick()
     expect(f.prompts).toHaveLength(1)
-    expect(f.managed.messages.some(m => m.errorCode === 'call_time_limit')).toBe(true)
-    const saved = readProgressCheckpoint(getSessionPath(f.root, f.managed.id))!
-    expect(saved.continuation?.sdkSessionId).toBe('sdk-candidate')
-    expect(saved.continuation?.consumed).toBe(false)
+    expect(f.managed.isProcessing).toBe(true)
+    expect(f.managed.messages.some(m => m.errorCode === 'call_time_limit')).toBe(false)
+    f.interrupted.resolve(); await run; await f.manager.flushSession(f.managed.id)
   })
 })
