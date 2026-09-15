@@ -29,4 +29,18 @@ describe('snapshotContextBreakdown', () => {
     expect(breakdown?.tools).toBeGreaterThan(0);
     expect(breakdown?.messages).toBeGreaterThan(0);
   });
+
+  it('does not treat empty arrays as a real context snapshot', () => {
+    const session = {
+      agent: {
+        state: {
+          systemPrompt: '',
+          tools: [],
+          messages: [],
+        },
+      },
+    } as unknown as AgentSession;
+
+    expect(snapshotContextBreakdown(session)).toBeUndefined();
+  });
 });

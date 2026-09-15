@@ -2402,6 +2402,7 @@ export function FreeFormInput({
           <ContextUsageIndicator
             contextStatus={contextStatus}
             compact={compactMode}
+            sessionId={sessionId}
           />
 
           {/* 6. Send/Stop Button - Always show stop when processing */}

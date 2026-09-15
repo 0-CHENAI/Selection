@@ -30,19 +30,40 @@ function normalizeCounter(value: number | undefined): number {
 /** Last-call cache hit rate: cache reads over the current request input footprint. */
 export function cacheHitRateFromUsage(usage: Pick<AgentEventUsage, 'inputTokens' | 'cacheReadTokens' | 'contextTokens'>): number | undefined {
   const cacheRead = normalizeCounter(usage.cacheReadTokens)
-  const totalInput = normalizeCounter(usage.contextTokens) || (normalizeCounter(usage.inputTokens) + cacheRead)
+  const reportedContext = normalizeCounter(usage.contextTokens)
+  const totalInput = reportedContext > 0
+    ? reportedContext
+    : normalizeCounter(usage.inputTokens) + cacheRead
   if (totalInput <= 0) return undefined
   return Math.min(1, cacheRead / totalInput)
+}
+
+export function normalizeContextBreakdown(
+  breakdown: AgentEventUsage['contextBreakdown'],
+): AgentEventUsage['contextBreakdown'] | undefined {
+  if (!breakdown) return undefined
+  const systemPrompt = normalizeCounter(breakdown.systemPrompt)
+  const tools = normalizeCounter(breakdown.tools)
+  const messages = normalizeCounter(breakdown.messages)
+  if (systemPrompt + tools + messages <= 0) return undefined
+  return { systemPrompt, tools, messages }
 }
 
 export function applyContextUsageFields(
   tokenUsage: { cacheHitRate?: number; contextBreakdown?: AgentEventUsage['contextBreakdown'] },
   usage: AgentEventUsage,
 ): void {
-  tokenUsage.cacheHitRate = usage.cacheHitRate ?? cacheHitRateFromUsage(usage)
-  if (usage.contextBreakdown) {
-    tokenUsage.contextBreakdown = usage.contextBreakdown
+  if (typeof usage.cacheHitRate === 'number' && Number.isFinite(usage.cacheHitRate)) {
+    tokenUsage.cacheHitRate = Math.min(1, Math.max(0, usage.cacheHitRate))
+  } else if (usage.cacheReadTokens != null) {
+    const rate = cacheHitRateFromUsage(usage)
+    if (rate != null) tokenUsage.cacheHitRate = rate
   }
+
+  if (!Object.hasOwn(usage, 'contextBreakdown')) return
+  const next = normalizeContextBreakdown(usage.contextBreakdown)
+  if (next) tokenUsage.contextBreakdown = next
+  else delete tokenUsage.contextBreakdown
 }
 
 export function normalizeModelCallUsage(usage: AgentEventUsage): SessionModelCallUsage {

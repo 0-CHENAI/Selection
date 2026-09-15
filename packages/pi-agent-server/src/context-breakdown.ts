@@ -11,7 +11,7 @@ function asContext(session: AgentSession): Context | undefined {
     tools?: Context['tools'];
     messages?: Context['messages'];
   };
-  if (!state.messages && !state.systemPrompt && !state.tools) return undefined;
+  if (!state.systemPrompt && !state.tools?.length && !state.messages?.length) return undefined;
   return {
     systemPrompt: state.systemPrompt,
     tools: state.tools,
@@ -19,10 +19,15 @@ function asContext(session: AgentSession): Context | undefined {
   };
 }
 
+function isEmptyBreakdown(breakdown: ContextInputBreakdown): boolean {
+  return breakdown.systemPrompt + breakdown.tools + breakdown.messages <= 0;
+}
+
 /** Estimate the live Pi context split for the context-usage popover. */
 export function snapshotContextBreakdown(session: AgentSession | null): ContextInputBreakdown | undefined {
   if (!session) return undefined;
   const context = asContext(session);
   if (!context) return undefined;
-  return estimateContextInputBreakdown(context);
+  const breakdown = estimateContextInputBreakdown(context);
+  return isEmptyBreakdown(breakdown) ? undefined : breakdown;
 }

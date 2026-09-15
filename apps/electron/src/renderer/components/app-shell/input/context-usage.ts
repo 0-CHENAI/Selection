@@ -14,8 +14,24 @@ export interface ContextStatus {
 
 export type ContextUsageTone = 'default' | 'info' | 'critical'
 
-export function shouldShowContextUsage(status?: ContextStatus): boolean {
-  return status?.inputTokens != null && status.inputTokens > 0
+export function shouldShowContextUsage(
+  status?: ContextStatus,
+): status is ContextStatus & { inputTokens: number } {
+  return status?.inputTokens != null && Number.isFinite(status.inputTokens) && status.inputTokens > 0
+}
+
+export function cacheHitRateFromTokenUsage(usage?: {
+  cacheHitRate?: number
+  lastCall?: { inputTokens: number; cacheReadTokens?: number }
+}): number | undefined {
+  if (usage?.cacheHitRate != null && Number.isFinite(usage.cacheHitRate)) {
+    return Math.min(1, Math.max(0, usage.cacheHitRate))
+  }
+  const call = usage?.lastCall
+  if (!call || call.cacheReadTokens == null) return undefined
+  const total = Math.max(0, call.inputTokens) + Math.max(0, call.cacheReadTokens)
+  if (total <= 0) return undefined
+  return Math.min(1, Math.max(0, call.cacheReadTokens) / total)
 }
 
 /** Share of the model window, not the compaction threshold. */

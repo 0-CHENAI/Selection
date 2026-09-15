@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'bun:test'
 import {
   breakdownShare,
+  cacheHitRateFromTokenUsage,
   contextUsagePercent,
   contextUsageRatio,
   contextUsageTone,
@@ -34,5 +35,18 @@ describe('context usage display', () => {
     expect(formatCacheHitRate(undefined)).toBeUndefined()
     expect(breakdownShare(20, 80)).toBe(0.25)
     expect(breakdownShare(10, 0)).toBe(0)
+  })
+
+  it('falls back to last-call cache reads for sessions that predate cacheHitRate', () => {
+    expect(cacheHitRateFromTokenUsage({
+      lastCall: { inputTokens: 200, cacheReadTokens: 150 },
+    })).toBe(150 / 350)
+    expect(cacheHitRateFromTokenUsage({
+      cacheHitRate: 0.8,
+      lastCall: { inputTokens: 200, cacheReadTokens: 150 },
+    })).toBe(0.8)
+    expect(cacheHitRateFromTokenUsage({
+      lastCall: { inputTokens: 200 },
+    })).toBeUndefined()
   })
 })

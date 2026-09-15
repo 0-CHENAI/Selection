@@ -1594,6 +1594,13 @@ function handleSessionEvent(event: AgentSessionEvent): void {
     const contextBreakdown = snapshotContextBreakdown(piSession);
     if (contextBreakdown) {
       forwardedEvent = { ...forwardedEvent, contextBreakdown };
+    } else if (event.type === 'compaction_end') {
+      // Compaction rewrote history. Clear a stale pre-compact split if we
+      // cannot estimate the new one yet.
+      forwardedEvent = {
+        ...forwardedEvent,
+        contextBreakdown: { systemPrompt: 0, tools: 0, messages: 0 },
+      };
     }
   }
 

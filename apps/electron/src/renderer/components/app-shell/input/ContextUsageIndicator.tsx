@@ -34,32 +34,51 @@ const DRAWER_CONTENT_CLASS = [
 export function ContextUsageIndicator({
   contextStatus,
   compact = false,
+  sessionId,
 }: {
   contextStatus?: ContextStatus
   compact?: boolean
+  sessionId?: string
 }) {
   const { t } = useTranslation()
   const [open, setOpen] = React.useState(false)
 
+  const handleOpenChange = React.useCallback((nextOpen: boolean) => {
+    setOpen(nextOpen)
+    if (nextOpen || !sessionId) return
+    requestAnimationFrame(() => {
+      window.dispatchEvent(new CustomEvent('craft:focus-input', {
+        detail: { sessionId },
+      }))
+    })
+  }, [sessionId])
+
+  const visible = shouldShowContextUsage(contextStatus)
+  React.useEffect(() => {
+    if (!visible) setOpen(false)
+  }, [visible])
+
   if (!shouldShowContextUsage(contextStatus)) return null
 
-  const inputTokens = contextStatus!.inputTokens!
-  const ratio = contextUsageRatio(inputTokens, contextStatus?.contextWindow)
+  const inputTokens = contextStatus.inputTokens
+  const ratio = contextUsageRatio(inputTokens, contextStatus.contextWindow)
   const percent = contextUsagePercent(ratio)
   const tone = contextUsageTone(ratio)
   const fill = Math.min(1, Math.max(0, ratio ?? 0))
-  const ringColor = contextUsageRingColor(tone)
-  const usedLabel = `~${formatTokenCount(inputTokens)}`
-  const windowLabel = contextStatus?.contextWindow
+  const used = formatTokenCount(inputTokens)
+  const windowLabel = contextStatus.contextWindow
     ? formatTokenCount(contextStatus.contextWindow)
     : undefined
   const title = percent != null
     ? t('chat.contextUsed', { percent: `${percent}%` })
     : t('chat.context')
+  const usedOf = windowLabel
+    ? t('chat.contextUsedOf', { used, window: windowLabel })
+    : `~${used}`
   const trigger = (
     <button
       type="button"
-      aria-label={title}
+      aria-label={`${title}, ${usedOf}`}
       className={cn(
         'relative inline-flex h-7 w-7 items-center justify-center rounded-[6px] text-muted-foreground hover:bg-foreground/5 transition-colors',
         open && 'bg-foreground/5',
@@ -71,7 +90,7 @@ export function ContextUsageIndicator({
         width={RING_SIZE}
         height={RING_SIZE}
         viewBox={`0 0 ${RING_SIZE} ${RING_SIZE}`}
-        className={cn(contextStatus?.isCompacting && 'opacity-30')}
+        className={cn(contextStatus.isCompacting && 'opacity-30')}
         aria-hidden
       >
         <circle
@@ -88,7 +107,7 @@ export function ContextUsageIndicator({
           cy={RING_SIZE / 2}
           r={RING_RADIUS}
           fill="none"
-          stroke={ringColor}
+          stroke={contextUsageRingColor(tone)}
           strokeWidth={RING_STROKE}
           strokeLinecap="round"
           strokeDasharray={RING_CIRCUMFERENCE}
@@ -96,7 +115,7 @@ export function ContextUsageIndicator({
           transform={`rotate(-90 ${RING_SIZE / 2} ${RING_SIZE / 2})`}
         />
       </svg>
-      {contextStatus?.isCompacting && (
+      {contextStatus.isCompacting && (
         <Spinner className="absolute h-3 w-3" />
       )}
     </button>
@@ -104,15 +123,15 @@ export function ContextUsageIndicator({
 
   const details = {
     title,
-    usedLabel,
-    windowLabel,
-    breakdown: contextStatus?.contextBreakdown,
-    cacheHitRate: contextStatus?.cacheHitRate,
+    usedOf,
+    showTitle: !compact,
+    breakdown: contextStatus.contextBreakdown,
+    cacheHitRate: contextStatus.cacheHitRate,
   }
 
   if (compact) {
     return (
-      <Drawer open={open} onOpenChange={setOpen} direction="bottom">
+      <Drawer open={open} onOpenChange={handleOpenChange} direction="bottom">
         <DrawerTrigger asChild>
           {trigger}
         </DrawerTrigger>
@@ -124,7 +143,7 @@ export function ContextUsageIndicator({
             <DrawerTitle className="text-sm font-medium">{title}</DrawerTitle>
           </DrawerHeader>
           <div className="px-4 py-3">
-            <ContextUsagePopoverBody {...details} hideTitle />
+            <ContextUsagePopoverBody {...details} />
           </div>
         </DrawerContent>
       </Drawer>
@@ -132,7 +151,7 @@ export function ContextUsageIndicator({
   }
 
   return (
-    <Popover open={open} onOpenChange={setOpen}>
+    <Popover open={open} onOpenChange={handleOpenChange}>
       <PopoverTrigger asChild>
         {trigger}
       </PopoverTrigger>
@@ -152,18 +171,16 @@ export function ContextUsageIndicator({
 
 function ContextUsagePopoverBody({
   title,
-  usedLabel,
-  windowLabel,
+  usedOf,
+  showTitle,
   breakdown,
   cacheHitRate,
-  hideTitle = false,
 }: {
   title: string
-  usedLabel: string
-  windowLabel?: string
+  usedOf: string
+  showTitle: boolean
   breakdown?: ContextUsageBreakdown
   cacheHitRate?: number
-  hideTitle?: boolean
 }) {
   const { t } = useTranslation()
   const cacheLabel = formatCacheHitRate(cacheHitRate)
@@ -171,20 +188,13 @@ function ContextUsagePopoverBody({
 
   return (
     <div className="space-y-3">
-      {!hideTitle && (
+      {showTitle ? (
         <div className="flex items-baseline justify-between gap-3">
           <div className="text-sm font-medium text-foreground">{title}</div>
-          <div className="shrink-0 font-mono text-xs text-muted-foreground">
-            {windowLabel
-              ? t('chat.contextUsedOf', { used: usedLabel.replace(/^~/, ''), window: windowLabel })
-              : usedLabel}
-          </div>
+          <div className="shrink-0 font-mono text-xs text-muted-foreground">{usedOf}</div>
         </div>
-      )}
-      {hideTitle && windowLabel && (
-        <div className="font-mono text-xs text-muted-foreground">
-          {t('chat.contextUsedOf', { used: usedLabel.replace(/^~/, ''), window: windowLabel })}
-        </div>
+      ) : (
+        <div className="font-mono text-xs text-muted-foreground">{usedOf}</div>
       )}
       {breakdown && total > 0 && (
         <>

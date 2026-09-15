@@ -130,4 +130,31 @@ describe('context usage fields', () => {
     expect(tokenUsage.cacheHitRate).toBe(50 / 250)
     expect(tokenUsage.contextBreakdown).toEqual({ systemPrompt: 10, tools: 20, messages: 30 })
   })
+
+  it('does not invent a 0% cache hit when the provider omitted cache fields', () => {
+    const tokenUsage = {
+      cacheHitRate: 0.4,
+      contextBreakdown: { systemPrompt: 10, tools: 20, messages: 30 },
+    }
+    applyContextUsageFields(tokenUsage, {
+      inputTokens: 200,
+      outputTokens: 10,
+    })
+    expect(tokenUsage.cacheHitRate).toBe(0.4)
+    expect(tokenUsage.contextBreakdown).toEqual({ systemPrompt: 10, tools: 20, messages: 30 })
+  })
+
+  it('clears a stale breakdown when the next event sends an empty split', () => {
+    const tokenUsage = {
+      cacheHitRate: 0.2,
+      contextBreakdown: { systemPrompt: 10, tools: 20, messages: 30 },
+    }
+    applyContextUsageFields(tokenUsage, {
+      inputTokens: 80,
+      outputTokens: 5,
+      contextBreakdown: { systemPrompt: 0, tools: 0, messages: 0 },
+    })
+    expect(tokenUsage.contextBreakdown).toBeUndefined()
+    expect(tokenUsage.cacheHitRate).toBe(0.2)
+  })
 })
