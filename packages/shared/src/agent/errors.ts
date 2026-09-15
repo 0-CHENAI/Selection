@@ -291,8 +291,8 @@ const ERROR_DEFINITIONS: Record<ErrorCode, Omit<AgentError, 'code' | 'originalEr
     retryDelayMs: 1000,
   },
   model_request_timeout: {
-    title: 'Model request time limit reached',
-    message: 'This model request reached its time limit. Recorded work is retained. Continue this conversation to resume.',
+    title: 'Model request stayed silent too long',
+    message: 'This model request stayed silent too long. Recorded work is retained. Continue this conversation to resume.',
     actions: [],
     canRetry: false,
   },
@@ -327,7 +327,7 @@ const ERROR_DEFINITIONS: Record<ErrorCode, Omit<AgentError, 'code' | 'originalEr
   answer_persistence_failed: { title: 'Answer save failed', message: 'The submitted answer could not be saved. Model retries cannot resolve this storage failure.', actions: [], canRetry: false },
   progress_needs_user: { title: 'User input required', message: 'Task paused pending required user input.', actions: [], canRetry: false },
   call_time_limit: {
-    title: 'Model call paused', message: 'This model call reached its time limit. Review recorded results before continuing.', actions: [], canRetry: false,
+    title: 'Model call paused', message: 'The model stream stayed silent too long. Review recorded results before continuing.', actions: [], canRetry: false,
   },
   stream_interrupted: {
     title: 'Response stream interrupted',

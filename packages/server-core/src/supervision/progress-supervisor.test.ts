@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test'
-import { ProgressSupervisor, createProgressBudget, PROGRESS_POLICY, type ProgressAssessment, type ProgressSnapshot } from './progress-supervisor'
+import { ProgressSupervisor, createProgressBudget, type ProgressAssessment, type ProgressSnapshot } from './progress-supervisor'
 
 const assessment = (action: ProgressAssessment['action']): ProgressAssessment => ({ action, summary: '工具结果表明约束已经明确',
   evidenceIds: ['tool-1'], basis: 'task-evidence', scope: 'execution', nextStep: '写入初版文件',
@@ -44,10 +44,10 @@ describe('semantic progress supervision', () => {
       expect(f.budget.checks).toBe(['tool', 'waiting'].includes(status) ? 1 : 0); expect(f.decisions).toHaveLength(0)
     }
   })
-  it('keeps resource bounds in off mode', async () => {
-    const f = fixture(); f.snap.elapsedMs = PROGRESS_POLICY.callTimeoutMs
+  it('does not pause a long model call just because wall time elapsed', async () => {
+    const f = fixture(); f.snap.elapsedMs = 600_000
     await new ProgressSupervisor({ ...f.options, mode: 'off' }).tick()
-    expect(f.pauses).toHaveLength(1); expect(f.decisions).toHaveLength(0)
+    expect(f.pauses).toHaveLength(0); expect(f.decisions).toHaveLength(0)
   })
   it('never executes an observe-mode decision', async () => {
     const f = fixture(); await new ProgressSupervisor({ ...f.options, mode: 'observe' }).tick()

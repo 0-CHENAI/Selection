@@ -10,10 +10,10 @@ describe('preview header Windows caption inset (#356)', () => {
       height: 48,
       paddingRight: '138px',
     })
-    expect(mergePreviewHeaderStyle(48, '138px', { paddingRight: '12px', zIndex: 2 })).toEqual({
+    const callerStyle = { paddingRight: '12px', zIndex: 'var(--z-local, 10)' }
+    expect(mergePreviewHeaderStyle(48, '138px', callerStyle)).toEqual({
       height: 48,
-      paddingRight: '12px',
-      zIndex: 2,
+      ...callerStyle,
     })
   })
 

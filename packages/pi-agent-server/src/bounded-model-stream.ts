@@ -1,4 +1,8 @@
-/** A per-request resource bound, independent of semantic progress and tool duration. */
+/**
+ * Idle bound for a single model request. Thinking/text/tool chunks reset the
+ * clock, so a long reasoning stream is not cut at a wall-clock deadline.
+ * A silent open connection still expires after this idle window.
+ */
 export const MODEL_REQUEST_TIMEOUT_MS = 10 * 60_000;
 
 export async function* boundedModelStream<T>(
@@ -12,12 +16,17 @@ export async function* boundedModelStream<T>(
     error.name = 'AbortError';
     controller.abort(error);
   };
-  parentSignal?.addEventListener('abort', abort, { once: true });
-  const timer = setTimeout(() => {
+  const expire = () => {
     const error = new Error('Model request time limit reached. Continue this session to resume from recorded work.');
     error.name = 'TimeoutError';
     controller.abort(error);
-  }, timeoutMs);
+  };
+  parentSignal?.addEventListener('abort', abort, { once: true });
+  let timer = setTimeout(expire, timeoutMs);
+  const bumpIdle = () => {
+    clearTimeout(timer);
+    if (!controller.signal.aborted) timer = setTimeout(expire, timeoutMs);
+  };
   let iterator: AsyncIterator<T> | undefined;
   try {
     if (parentSignal?.aborted) abort();
@@ -37,6 +46,7 @@ export async function* boundedModelStream<T>(
         );
       });
       if (next.done) return;
+      bumpIdle();
       yield next.value;
     }
   } finally {

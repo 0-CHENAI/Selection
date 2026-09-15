@@ -16,6 +16,7 @@ import { waitForCompaction } from './wait-for-compaction.ts';
  */
 
 import { answerPreviewContext } from '../../shared/src/answer-preview-context.ts';
+import { AnswerBatchGate, collectAnswerBatchParts } from './answer-batch-gate.ts';
 import { answerExecutionError, isAnswerTool } from './answer-delivery-guard.ts';
 import http from 'node:http';
 import { createInterface } from 'node:readline';
@@ -360,6 +361,7 @@ let answerRecovery = false;
 let answerAccepted = false;
 let answerSdkMessageId: string | undefined;
 let answerBatchSize = 0;
+const answerBatchGate = new AnswerBatchGate();
 let answerSubmissionSdkMessageId: string | undefined;
 let answerRecoveryToolNames: string[] | undefined;
 
@@ -867,7 +869,14 @@ async function requestPreToolUseApproval(
   | { action: 'execute'; input: Record<string, unknown> }
   | { action: 'prepare_source_guide'; preparation: SourceGuidePreparation }
 > {
-  const answerError = answerExecutionError({ runId: answerRunId, accepted: answerAccepted, recovery: answerRecovery, batchSize: answerBatchSize }, sdkToolName);
+  const answerError = answerExecutionError({
+    runId: answerRunId,
+    accepted: answerAccepted,
+    recovery: answerRecovery,
+    batchSize: answerBatchSize,
+    siblingsSettled: isAnswerTool(sdkToolName) && answerBatchGate.canSettleAnswer,
+    answerCalls: answerBatchGate.answerCount,
+  }, sdkToolName);
   if (answerError) throw new Error(answerError);
   const requestId = `pi-ptu-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
@@ -949,90 +958,100 @@ function wrapSingleTool(
     onUpdate,
     ctx,
   ) => {
-    let inputObj: Record<string, unknown> = { ...(params as Record<string, unknown>) };
-    // Extract intent before main process strips metadata (used for summarization)
-    const intent = typeof inputObj._intent === 'string' ? inputObj._intent : undefined;
+    try {
+      let inputObj: Record<string, unknown> = { ...(params as Record<string, unknown>) };
+      // Extract intent before main process strips metadata (used for summarization)
+      const intent = typeof inputObj._intent === 'string' ? inputObj._intent : undefined;
 
-    // Normalize Pi SDK parameter names: path → file_path
-    if ((sdkToolName === 'Write' || sdkToolName === 'Edit' || sdkToolName === 'MultiEdit' || sdkToolName === 'NotebookEdit')
-        && typeof inputObj.path === 'string' && !inputObj.file_path) {
-      inputObj = { ...inputObj, file_path: inputObj.path };
-    }
-
-    const fanOutQualification = pendingSpawnFanOutQualifications.consume(toolCallId);
-    if (fanOutQualification && inputObj.qualification == null) {
-      inputObj = { ...inputObj, qualification: fanOutQualification };
-    }
-
-    const executingRunId = answerRunId;
-    // Send to main process for permission checking + transforms
-    const approval = await requestPreToolUseApproval(sdkToolName, inputObj, toolCallId);
-    if (approval.action === 'prepare_source_guide') {
-      return {
-        content: [{ type: 'text', text: formatSourceGuidePreparationResult(approval.preparation) }],
-        details: { isError: false },
-      };
-    }
-    inputObj = approval.input;
-
-    // Metadata is for Craft UI only. Keep a final defensive strip here so the
-    // upstream Pi tool implementation always receives clean executable args,
-    // even if a future pre-tool-use path returns `allow` without modification.
-    inputObj = stripCraftMetadata(inputObj);
-
-    if (signal?.aborted || answerAccepted || executingRunId !== answerRunId) throw new Error('Tool execution was interrupted.');
-    if (answerRecovery && !isAnswerTool(sdkToolName)) throw new Error('Only submit_answer is allowed during answer recovery.');
-    // Execute original tool with (potentially modified) input
-    const result = await originalExecute(toolCallId, inputObj, signal, onUpdate, ctx);
-
-    // --- Post-execute: large response summarization ---
-
-    const resultText = result.content
-      .filter((c): c is PiTextContent => c.type === 'text')
-      .map(c => c.text)
-      .join('');
-
-    // Source the active model's contextWindow each call so the threshold
-    // tracks set_model mid-session, not the model that was active at session
-    // creation. Falls back to the fixed default when the model isn't set yet.
-    const modelContextWindow = piSession?.agent.state.model?.contextWindow;
-    const command = typeof inputObj.command === 'string' ? inputObj.command : '';
-    const preserveBundledOfficecliGuide = /bash/i.test(sdkToolName)
-      && isBundledOfficecliLoadSkillCommand(command);
-    if (!preserveBundledOfficecliGuide && estimateTokens(resultText) > tokenLimitFor(modelContextWindow) && initConfig) {
-      try {
-        const sessionPath = getSessionPath(
-          initConfig.workspaceRootPath,
-          initConfig.sessionId,
-        );
-
-        const largeResult = await handleLargeResponse({
-          text: resultText,
-          sessionPath,
-          context: {
-            toolName: sdkToolName,
-            input: inputObj,
-            intent,
-            userRequest: currentUserMessage,
-          },
-          summarize: runMiniCompletion,
-          contextWindow: modelContextWindow,
-        });
-
-        if (largeResult) {
-          return {
-            content: mergeSummarizedToolResult(largeResult.message, result.content),
-            details: result.details,
-          };
-        }
-      } catch (error) {
-        debugLog(
-          `Large response handling failed: ${error instanceof Error ? error.message : String(error)}`,
-        );
+      // Normalize Pi SDK parameter names: path → file_path
+      if ((sdkToolName === 'Write' || sdkToolName === 'Edit' || sdkToolName === 'MultiEdit' || sdkToolName === 'NotebookEdit')
+          && typeof inputObj.path === 'string' && !inputObj.file_path) {
+        inputObj = { ...inputObj, file_path: inputObj.path };
       }
-    }
 
-    return result;
+      const fanOutQualification = pendingSpawnFanOutQualifications.consume(toolCallId);
+      if (fanOutQualification && inputObj.qualification == null) {
+        inputObj = { ...inputObj, qualification: fanOutQualification };
+      }
+
+      const executingRunId = answerRunId;
+      if (isAnswerTool(sdkToolName) && answerBatchSize > 1) {
+        await answerBatchGate.waitForSiblings(signal);
+      }
+      if (signal?.aborted || answerAccepted || executingRunId !== answerRunId) {
+        throw new Error('Tool execution was interrupted.');
+      }
+      // Send to main process for permission checking + transforms
+      const approval = await requestPreToolUseApproval(sdkToolName, inputObj, toolCallId);
+      if (approval.action === 'prepare_source_guide') {
+        return {
+          content: [{ type: 'text', text: formatSourceGuidePreparationResult(approval.preparation) }],
+          details: { isError: false },
+        };
+      }
+      inputObj = approval.input;
+
+      // Metadata is for Craft UI only. Keep a final defensive strip here so the
+      // upstream Pi tool implementation always receives clean executable args,
+      // even if a future pre-tool-use path returns `allow` without modification.
+      inputObj = stripCraftMetadata(inputObj);
+
+      if (signal?.aborted || answerAccepted || executingRunId !== answerRunId) throw new Error('Tool execution was interrupted.');
+      if (answerRecovery && !isAnswerTool(sdkToolName)) throw new Error('Only submit_answer is allowed during answer recovery.');
+      // Execute original tool with (potentially modified) input
+      const result = await originalExecute(toolCallId, inputObj, signal, onUpdate, ctx);
+
+      // --- Post-execute: large response summarization ---
+
+      const resultText = result.content
+        .filter((c): c is PiTextContent => c.type === 'text')
+        .map(c => c.text)
+        .join('');
+
+      // Source the active model's contextWindow each call so the threshold
+      // tracks set_model mid-session, not the model that was active at session
+      // creation. Falls back to the fixed default when the model isn't set yet.
+      const modelContextWindow = piSession?.agent.state.model?.contextWindow;
+      const command = typeof inputObj.command === 'string' ? inputObj.command : '';
+      const preserveBundledOfficecliGuide = /bash/i.test(sdkToolName)
+        && isBundledOfficecliLoadSkillCommand(command);
+      if (!preserveBundledOfficecliGuide && estimateTokens(resultText) > tokenLimitFor(modelContextWindow) && initConfig) {
+        try {
+          const sessionPath = getSessionPath(
+            initConfig.workspaceRootPath,
+            initConfig.sessionId,
+          );
+
+          const largeResult = await handleLargeResponse({
+            text: resultText,
+            sessionPath,
+            context: {
+              toolName: sdkToolName,
+              input: inputObj,
+              intent,
+              userRequest: currentUserMessage,
+            },
+            summarize: runMiniCompletion,
+            contextWindow: modelContextWindow,
+          });
+
+          if (largeResult) {
+            return {
+              content: mergeSummarizedToolResult(largeResult.message, result.content),
+              details: result.details,
+            };
+          }
+        } catch (error) {
+          debugLog(
+            `Large response handling failed: ${error instanceof Error ? error.message : String(error)}`,
+          );
+        }
+      }
+
+      return result;
+    } finally {
+      answerBatchGate.markDone(toolCallId, sdkToolName);
+    }
   };
 
   return {
@@ -1456,7 +1475,9 @@ function handleSessionEvent(event: AgentSessionEvent): void {
 
     if (msg?.role === 'assistant' && piSession) {
       answerSdkMessageId = (msg as { id?: string }).id;
-      answerBatchSize = msg.content?.filter(part => part.type === 'toolCall' || part.type === 'tool_use').length ?? 0;
+      const batchParts = collectAnswerBatchParts(msg.content);
+      answerBatchSize = batchParts.length;
+      answerBatchGate.begin(batchParts);
       currentAssistantGeneration++;
       pendingSpawnFanOutQualifications.prepare(
         msg.stopReason,
@@ -1634,6 +1655,7 @@ async function handlePrompt(msg: Extract<InboundMessage, { type: 'prompt' }>): P
   answerSdkMessageId = undefined;
   answerSubmissionSdkMessageId = undefined;
   answerBatchSize = 0;
+  answerBatchGate.reset();
 
   try {
     // If proxy tools changed since last session creation, dispose and recreate.

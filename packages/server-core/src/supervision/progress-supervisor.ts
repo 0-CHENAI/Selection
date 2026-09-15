@@ -6,7 +6,7 @@ export type ProgressMode = 'off' | 'observe' | 'assist'
 export const PROGRESS_POLICY = Object.freeze({
   firstCheckMs: 90_000, minCheckMs: 60_000, queryTimeoutMs: 45_000,
   inputTokens: 6000, outputTokens: 2048, maxChecks: 12, evaluationTokens: 32_000,
-  maxRedirects: 2, rootRedirects: 6, callTimeoutMs: 600_000,
+  maxRedirects: 2, rootRedirects: 6,
 })
 export interface ProgressEvidence { id: string; kind: 'goal' | 'text' | 'tool' | 'orchestration'; text: string }
 export interface ProgressSnapshot {
@@ -65,7 +65,6 @@ export class ProgressSupervisor {
   private disposed = false
   private callId = ''
   private nextCheck = 0
-  private exhaustedCall = ''
   private readonly now: () => number
   private readonly policy: typeof PROGRESS_POLICY
   constructor(private readonly options: ProgressSupervisorOptions) {
@@ -79,7 +78,7 @@ export class ProgressSupervisor {
     if (this.timer || this.disposed) return
     this.update('observing')
     this.timer = setInterval(() => {
-      if (this.pending) { void this.checkResourceBoundary().catch(() => undefined); return }
+      if (this.pending) return
       this.pending = this.tick().catch(() => { if (!this.disposed) this.update('unavailable', '评估暂不可用') }).finally(() => { this.pending = undefined })
     }, 1000)
     this.timer.unref?.()
@@ -97,14 +96,6 @@ export class ProgressSupervisor {
     this.state.phase = phase; this.state.reason = reason
     this.options.change(structuredClone(this.state))
   }
-  private async checkResourceBoundary(snap = this.options.snapshot()): Promise<boolean> {
-    if (this.disposed || snap.status !== 'model' || snap.elapsedMs < this.policy.callTimeoutMs || this.exhaustedCall === snap.callId) return false
-    this.exhaustedCall = snap.callId
-    this.controller?.abort()
-    this.update('paused', '单次模型调用达到时长限制；这不代表任务没有进展。')
-    await this.options.pause(this.state.reason!)
-    return true
-  }
   async tick(): Promise<void> {
     if (this.disposed) return
     const snap = structuredClone(this.options.snapshot())
@@ -114,7 +105,6 @@ export class ProgressSupervisor {
       if (!this.callId) this.nextCheck = this.now() + Math.max(0, this.policy.firstCheckMs - snap.elapsedMs)
       this.callId = snap.callId
     }
-    if (snap.status === 'model' && snap.elapsedMs >= this.policy.callTimeoutMs) { await this.checkResourceBoundary(snap); return }
     if (this.options.mode === 'off' || this.controller || this.now() < this.nextCheck) return
     const budget = this.options.rootBudget
     if (budget.checks >= this.policy.maxChecks) return
