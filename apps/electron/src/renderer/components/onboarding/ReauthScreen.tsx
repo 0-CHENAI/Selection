@@ -4,6 +4,7 @@ import { AlertCircle, RefreshCw } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@craft-agent/ui"
 import { CraftAgentsSymbol } from "@/components/icons/CraftAgentsSymbol"
+import { windowsCaptionEdgeStyle } from "@/lib/windows-caption-inset"
 import { StepFormLayout } from "./primitives"
 
 interface ReauthScreenProps {
@@ -35,8 +36,11 @@ export function ReauthScreen({ onLogin, onReset }: ReauthScreenProps) {
 
   return (
     <div className="flex min-h-screen flex-col bg-foreground-2">
-      {/* Draggable title bar region for transparent window (macOS) */}
-      <div className="titlebar-drag-region fixed top-0 left-0 right-0 h-[50px] z-titlebar" />
+      {/* Draggable title bar — keep it off the Windows overlay caption buttons. */}
+      <div
+        className="titlebar-drag-region fixed top-0 left-0 right-0 h-[50px] z-titlebar"
+        style={windowsCaptionEdgeStyle()}
+      />
 
       {/* Main content */}
       <main className="flex flex-1 items-center justify-center p-8">

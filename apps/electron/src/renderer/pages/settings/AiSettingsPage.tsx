@@ -38,6 +38,7 @@ import {
   StyledDropdownMenuSubContent,
 } from '@/components/ui/styled-dropdown'
 import { cn } from '@/lib/utils'
+import { windowsCaptionEdgeStyle } from '@/lib/windows-caption-inset'
 import { ConnectionIcon } from '@/components/icons/ConnectionIcon'
 
 import {
@@ -1233,7 +1234,7 @@ export default function AiSettingsPage() {
                 />
                 <div
                   className="fixed top-0 right-0 h-[50px] flex items-center pr-5 [-webkit-app-region:no-drag]"
-                  style={{ zIndex: 'var(--z-fullscreen, 350)' }}
+                  style={{ zIndex: 'var(--z-fullscreen, 350)', ...windowsCaptionEdgeStyle() }}
                 >
                   <button
                     onClick={handleCloseApiSetup}

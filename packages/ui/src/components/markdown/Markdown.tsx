@@ -13,6 +13,7 @@ import { MarkdownMermaidBlock } from './MarkdownMermaidBlock'
 import { MarkdownDatatableBlock } from './MarkdownDatatableBlock'
 import { MarkdownSpreadsheetBlock } from './MarkdownSpreadsheetBlock'
 import { MarkdownHtmlBlock } from './MarkdownHtmlBlock'
+import { MarkdownImage } from './MarkdownImage'
 import { MarkdownImageBlock } from './MarkdownImageBlock'
 import { MarkdownLatexBlock } from './MarkdownLatexBlock'
 import { MarkdownPdfBlock } from './MarkdownPdfBlock'
@@ -249,6 +250,9 @@ function createComponents(
         </a>
       )
     },
+    img: ({ src, alt }) => (
+      <MarkdownImage src={src} alt={alt} onFileClick={onFileClick} />
+    ),
   }
 
   // Terminal mode: minimal formatting

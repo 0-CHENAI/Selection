@@ -16,6 +16,8 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 
 - **Diagram HTML delivery hang** — When a model writes an architecture HTML file and calls `submit_answer` in the same turn, the host now waits for the file write to finish and then accepts delivery instead of rejecting with “call submit_answer alone” and looping. Large HTML/SVG answers should submit a short Markdown link to the saved file. A model call that is still emitting thinking or text is no longer paused at a 10-minute wall-clock limit; only a silent idle stream still expires. Fixes #361, #363.
 
-- **Windows image preview caption overlap** — Fullscreen preview headers now reserve the Windows overlay caption-button strip, so zoom, copy, and close controls no longer sit under the native min/max/close buttons. Long file paths shrink instead of pushing those actions into the caption area. Fixes #356.
+- **Windows caption button overlap** — Preview headers, the fused top bar, workspace-creation chrome, onboarding/reauth/workspace-picker drag regions, and the connection-setup close control now share one overlay-caption inset so in-app close and zoom controls stay clear of the native min/max/close buttons. Fixes #356, #359.
+
+- **Broken chat images** — Markdown `![]()` images now keep local, `file:`, and `data:` sources and load them as data URLs instead of being stripped or fetched as web paths. Missing or unreadable files show an explicit error. Fixes #358.
 
 - **Automation creation context isolation** — Scheduled, app-event, and agent-event creation dialogs now use separate category contexts and titles. Unfinished drafts remain resumable, new automation requests no longer inherit completed creation conversations, and detail edits target the selected rule ID. Fixes #362.

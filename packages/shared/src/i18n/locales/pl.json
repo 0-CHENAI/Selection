@@ -226,6 +226,7 @@
   "chat.followUp": "Kontynuuj",
   "chat.followUpSaveAndSend": "Zapisz i wyślij",
   "chat.hideTechnicalDetails": "Ukryj szczegóły techniczne",
+  "chat.imageLoadFailed": "Nie udało się wczytać obrazu",
   "chat.imageWarning.action": "Włącz obsługę obrazów",
   "chat.imageWarning.title": "{{modelName}} jest skonfigurowany jako wyłącznie tekstowy. Obrazy zostaną usunięte przed wysłaniem.",
   "chat.inputFailedDescription": "Reszta tego czatu jest nadal dostępna. Możesz spróbować ponownie albo wyczyścić lokalny szkic, jeśli został uszkodzony.",
