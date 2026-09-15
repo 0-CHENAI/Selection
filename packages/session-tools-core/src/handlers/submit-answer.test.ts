@@ -11,7 +11,7 @@ it('delivers the complete body when a provider echoes UI metadata', async () => 
 it('still rejects missing or empty markdown without invoking delivery', async () => {
   let calls = 0
   const ctx = { submitAnswer: async () => { calls++ } } as unknown as SessionToolContext
-  for (const args of [{ intent: 'done' }, { markdown: '  ' }, { markdown: 123 }]) {
+  for (const args of [{ intent: 'done' }, { markdown: '  ' }, { markdown: 123 }, { markdown: 'complete', sessionId: 'another-session' }, { markdown: 'complete', runId: 'forged' }]) {
     expect((await handleSubmitAnswer(ctx, args)).isError).toBe(true)
   }
   expect(calls).toBe(0)
