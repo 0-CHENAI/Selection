@@ -2104,29 +2104,18 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
                     </AnimatePresence>
                   </motion.div>
                 </AnimatePresence>
-                {session.progressSupervision && (
-                  <details className="px-6 py-2 text-xs text-muted-foreground">
-                    <summary className="cursor-pointer focus-visible:outline focus-visible:outline-2">
-                      {t('chat.progress.label')} · {session.progressSupervision.reason || t(`chat.progress.${session.progressSupervision.phase}`)}
-                    </summary>
-                    <div className="mt-2 space-y-2">
-                      {session.progressSupervision.nextStep && <p>{session.progressSupervision.nextStep}</p>}
-                      {!!session.progressSupervision.evidenceIds?.length && <p>{t('chat.progress.evidence')}: {session.progressSupervision.evidenceIds.join(', ')}</p>}
-                      {!!session.progressSupervision.evidence?.length && <ul className="list-disc pl-4">{session.progressSupervision.evidence.map(evidence => <li key={evidence.id} className="break-words">{evidence.summary}</li>)}</ul>}
-                      <p>{t('chat.progress.usage')}: {session.progressSupervision.evaluationTokens.toLocaleString()} tokens
-                        {session.progressSupervision.estimatedTokens > 0 && ` (${t('chat.progress.estimated')}: ${session.progressSupervision.estimatedTokens.toLocaleString()})`}</p>
-                      <label className="flex items-center gap-2">
-                        <input type="checkbox" checked={session.progressSupervision.mode !== 'off'}
-                          onChange={event => { void window.electronAPI.sessionCommand(session.id, { type: 'setProgressSupervision', enabled: event.target.checked }).catch(error => toast.error(String(error))) }} />
-                        {t('chat.progress.enabled')}
-                      </label>
-                      {!session.isProcessing && session.progressSupervision.phase === 'paused' && (
-                        <button type="button" className="underline underline-offset-4" onClick={() => {
-                          void window.electronAPI.sessionCommand(session.id, { type: 'continueProgress' }).catch(error => toast.error(String(error)))
-                        }}>{t('chat.progress.continue')}</button>
-                      )}
-                    </div>
-                  </details>
+                {!session.isProcessing && session.progressSupervision?.phase === 'paused' && (
+                  <div className="px-6 py-2">
+                    <button
+                      type="button"
+                      className="text-xs text-muted-foreground underline underline-offset-4"
+                      onClick={() => {
+                        void window.electronAPI.sessionCommand(session.id, { type: 'continueProgress' }).catch(error => toast.error(String(error)))
+                      }}
+                    >
+                      {t('chat.progress.continue')}
+                    </button>
+                  </div>
                 )}
                 {/* Processing Indicator - always visible while processing */}
                 {sessionBusy && (() => {
