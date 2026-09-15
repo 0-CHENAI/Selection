@@ -114,6 +114,9 @@ export class PiEventAdapter extends BaseEventAdapter {
   private messageSubTurnId: string | null = null;
   private streamingTextPhase: TextPhase | 'unclassified' | undefined;
 
+  private activityAt = 0;
+  private reasoningBytes = 0;
+  private visibleBytes = 0;
   // Model context window for usage_update events
   private contextWindow: number | undefined;
 
@@ -333,6 +336,7 @@ export class PiEventAdapter extends BaseEventAdapter {
         this.answerPreviewTimes.clear();
         // Pi SDK turn_start has no ID, so generate one for event correlation
         this.currentTurnId = `pi-turn-${this.turnIndex}`;
+        this.reasoningBytes = 0; this.visibleBytes = 0; this.activityAt = 0;
         yield { type: 'model_call_start' };
         break;
 
@@ -358,6 +362,12 @@ export class PiEventAdapter extends BaseEventAdapter {
       case 'message_update': {
         // Pi SDK emits message_update only for assistant messages (streaming deltas)
         const amEvent: AssistantMessageEvent = event.assistantMessageEvent;
+        if (amEvent.type === 'thinking_delta') this.reasoningBytes += new TextEncoder().encode(amEvent.delta).byteLength;
+        if (amEvent.type === 'text_delta') this.visibleBytes += new TextEncoder().encode(amEvent.delta).byteLength;
+        if (amEvent.type === 'thinking_delta' && amEvent.delta && Date.now() - this.activityAt >= 1000) {
+          this.activityAt = Date.now();
+          yield { type: 'model_activity', reasoningBytes: this.reasoningBytes, textBytes: this.visibleBytes };
+        }
         if (amEvent.type === 'toolcall_delta') {
           const part = amEvent.partial.content[amEvent.contentIndex];
           if (part?.type === 'toolCall' && /^(?:mcp__session__|session__)?submit_answer$/.test(part.name)) {
@@ -445,7 +455,7 @@ export class PiEventAdapter extends BaseEventAdapter {
         // A failed/truncated terminal message may carry no provider error text.
         // Preserve its terminal meaning instead of degrading to an empty reply.
         if (msg.stopReason === 'error' || msg.stopReason === 'length' || msg.stopReason === 'max_tokens') {
-          yield { type: 'typed_error', error: createTypedError('stream_interrupted', {
+          yield { type: 'typed_error', error: createTypedError(msg.stopReason === 'error' ? 'stream_interrupted' : 'output_limit', {
             details: transportDetails,
           }) };
           break;

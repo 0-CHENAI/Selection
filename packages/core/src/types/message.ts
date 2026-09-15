@@ -533,6 +533,11 @@ export type ErrorCode =
   | 'no_response'
   | 'tool_only_response'
   | 'context_limit'
+  | 'output_limit'
+  | 'answer_delivery_missing'
+  | 'answer_persistence_failed'
+  | 'progress_needs_user'
+  | 'call_time_limit'
   | 'stream_interrupted'
   | 'agent_process_exited'
   | 'unknown_error';
@@ -624,6 +629,7 @@ export type TextStreamPhase = 'unclassified' | 'intermediate' | 'final';
  * turnId: Correlation ID from the API's message.id, groups all events in an assistant turn
  */
 export type AgentEvent =
+  | { type: 'model_activity'; reasoningBytes: number; textBytes: number }
   | { type: 'status'; message: string }
   | { type: 'info'; message: string }
   | { type: 'answer_preview'; text: string; toolCallId: string }

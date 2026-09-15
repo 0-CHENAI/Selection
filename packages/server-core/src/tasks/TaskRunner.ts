@@ -104,6 +104,8 @@ export interface ConductorSessionHost {
    * ordinary session list; run details address them by task/run/node metadata. */
   createSession(workspaceId: string, options: CreateSessionOptions): Promise<{ id: string }>;
   sendMessage(sessionId: string, message: string): Promise<void>;
+  continueProgress?(sessionId: string): Promise<void>;
+  getProgressLiveTokens?(sessionId: string): number;
   setSessionStatus(sessionId: string, status: string): Promise<void>;
   setKanbanColumn(sessionId: string, column: string | null): Promise<void>;
   /** Map a session status to a board column. Return null to keep the current column. */
@@ -313,6 +315,7 @@ interface NodeStateEntry {
 // ---------------------------------------------------------------------------
 
 class ActiveRun {
+  private progressParentResume?: 'coordinator' | 'verifying';
   private historicalMetrics?: TaskRunMetrics;
   private readonly attemptHistory = new Map<string, { attempt: number; sessionId: string; state: string }[]>();
   private readonly attemptNumbers = new Map<string, number>();
@@ -455,6 +458,20 @@ class ActiveRun {
       throw new TaskControlError(this.runStatus, `Cannot resume a ${this.runStatus} run; use continue after interrupt`);
     }
     this.assertSensitiveReady();
+    if (this.progressParentResume && this.opts.orchestratorSessionId) {
+      const phase = this.progressParentResume;
+      if (phase === 'verifying' && !this.deps.host.continueProgress) throw new TaskControlError(this.runStatus, 'Host cannot resume verification checkpoint');
+      this.progressParentResume = undefined;
+      this.runStatus = phase === 'verifying' ? 'verifying' : 'running';
+      this.log({ kind: 'run-resumed' });
+      if (phase === 'coordinator') this.enterCoordinatorGate('progress-review');
+      else {
+        this.log({ kind: 'run-verifying' });
+        if (this.sourceVersion === 1) this.attachVerdictListener(this.opts.orchestratorSessionId);
+        void this.deps.host.continueProgress!(this.opts.orchestratorSessionId).catch(() => { this.pause(); });
+      }
+      this.emitChanged(); return this.snapshot();
+    }
     const reopenGate = this.lastCoordinatorTimeout && this.coordinatorGateEnabled();
     const reopenReason = this.lastCoordinatorTimeoutReason ?? 'first-schedule';
     this.lastCoordinatorTimeout = false;
@@ -627,7 +644,7 @@ class ActiveRun {
       } else if (e.kind === 'node-scheduled') {
         const st = this.state.get(e.nodeId) ?? this.ensureInstanceState(e.nodeId);
         if (st) {
-          st.attempt += 1;
+          if (st.lastFailure !== 'progress-paused') st.attempt += 1;
           if (st.state === 'pending' || st.state === 'ready' || st.state === 'retry-wait') st.state = 'running';
         }
       } else if (e.kind === 'node-finished') {
@@ -673,6 +690,10 @@ class ActiveRun {
         this.seenDecisionIds.add(e.decisionId);
         this.completedCheckpointIds.add(e.checkpointId);
         if (this.coordinatorGate?.checkpointId === e.checkpointId) this.coordinatorGate = null;
+      } else if (e.kind === 'progress-parent-paused') {
+        this.progressParentResume = e.phase; this.coordinatorGate = null;
+      } else if (e.kind === 'run-resumed') {
+        this.progressParentResume = undefined;
       } else if (e.kind === 'coordinator-timeout') {
         this.lastCoordinatorTimeout = true;
         if (this.coordinatorGate?.checkpointId === e.checkpointId) this.coordinatorGate = null;
@@ -1087,7 +1108,7 @@ class ActiveRun {
     const st = this.state.get(node.id)!;
     this.submittedOutputs.delete(node.id);
     st.state = 'running';
-    st.attempt += 1;
+    if (st.lastFailure !== 'progress-paused') st.attempt += 1;
     this.inFlight += 1;
     this.instanceCount += 1;
     this.log({ kind: 'node-scheduled', nodeId: node.id });
@@ -1393,7 +1414,7 @@ class ActiveRun {
     const instance = existing ?? { state: 'pending' as const, attempt: this.retiredInstanceAttempts.get(iid) ?? 0 };
     this.submittedOutputs.delete(iid);
     instance.state = 'running';
-    instance.attempt += 1;
+    if (instance.lastFailure !== 'progress-paused') instance.attempt += 1;
     this.instances.set(iid, instance);
     if (!existing) this.instanceCount += 1;
     this.inFlight += 1;
@@ -1801,7 +1822,8 @@ class ActiveRun {
       };
       // Hidden workers remain persisted/queryable by their task/run/node linkage,
       // but do not appear as ordinary project sessions.
-      const child = await this.deps.host.createSession(this.deps.workspaceId, options);
+      const resuming = state.lastFailure === 'progress-paused' && !!state.sessionId
+      const child = resuming ? { id: state.sessionId! } : await this.deps.host.createSession(this.deps.workspaceId, options);
       const st = this.instances.get(key) ?? this.state.get(node.id)!;
       st.sessionId = child.id;
       this.sessionToNode.set(child.id, key);
@@ -1840,7 +1862,10 @@ class ActiveRun {
         }, node.timeout * 1000);
         this.sessionTimers.set(child.id, timer);
       }
-      await this.deps.host.sendMessage(child.id, prompt);
+      if (resuming) {
+        if (!this.deps.host.continueProgress) throw new Error('Host cannot resume the existing progress checkpoint');
+        await this.deps.host.continueProgress(child.id);
+      } else await this.deps.host.sendMessage(child.id, prompt);
     } catch (err) {
       if (canDispatch()) this.failNode(key, `dispatch failed: ${(err as Error).message}`);
     }
@@ -1879,7 +1904,18 @@ class ActiveRun {
 
   private onSessionComplete(evt: SessionCompletionEvent): void {
     const nodeId = this.sessionToNode.get(evt.sessionId);
-    if (!nodeId) return; // not one of our child nodes
+    if (!nodeId) {
+      if (evt.sessionId === this.opts.orchestratorSessionId
+        && ['call_time_limit', 'progress_needs_user', 'output_limit', 'stream_interrupted'].includes(evt.errorCode ?? '')
+        && (this.runStatus === 'waiting-coordinator' || this.runStatus === 'verifying')) {
+        this.progressParentResume = this.runStatus === 'verifying' ? 'verifying' : 'coordinator';
+        this.verdictOff?.(); this.verdictOff = undefined;
+        this.clearCoordinatorGate();
+        this.log({ kind: 'progress-parent-paused', phase: this.progressParentResume });
+        this.pause();
+      }
+      return;
+    }
     const defId = definitionId(nodeId);
     const st = this.instances.get(nodeId) ?? this.state.get(defId);
     if (!st || st.state !== 'running' || st.sessionId !== evt.sessionId) return; // stale/already settled
@@ -1900,6 +1936,14 @@ class ActiveRun {
     // only while pending work remains — never block a run that is about to finish.
     if (this.isOverBudget()) this.budgetBreached = true;
 
+    if (['call_time_limit', 'progress_needs_user', 'output_limit', 'stream_interrupted'].includes(evt.errorCode ?? '')) {
+      this.pause();
+      st.state = 'cancelled'; st.lastFailure = 'progress-paused';
+      this.log({ kind: 'node-finished', nodeId, sessionId: evt.sessionId, state: 'cancelled', reason: 'progress-paused' });
+      this.settleSessionSlot(nodeId, evt.sessionId);
+      if (this.inFlight === 0) { this.runStatus = 'paused'; this.log({ kind: 'run-paused' }); }
+      this.applyCard(evt.sessionId, TODO_STATUS); this.emitChanged(); return;
+    }
     if (evt.reason === 'complete') {
       const text = evt.finalText ?? this.deps.host.getSessionFinalText(evt.sessionId) ?? '';
       const node = this.spec.nodes.find((n) => n.id === defId);
@@ -2200,7 +2244,7 @@ class ActiveRun {
   private attachVerdictListener(orchestrator: string): void {
     this.verdictOff?.();
     this.verdictOff = this.deps.host.onSessionComplete((evt) => {
-      if (evt.sessionId !== orchestrator) return;
+      if (evt.sessionId !== orchestrator || this.progressParentResume) return;
       this.verdictOff?.();
       this.verdictOff = undefined;
       const text = evt.finalText ?? this.deps.host.getSessionFinalText(orchestrator) ?? '';
@@ -2518,6 +2562,25 @@ class ActiveRun {
     );
   }
 
+  recordProgressUsage(sessionId: string, tokens: number): void {
+    this.tokensUsed += tokens;
+    this.log({ kind: 'progress-usage', sessionId, tokens, tokensUsed: this.tokensUsed });
+  }
+
+  progressAllowance(evaluationTokens: number): number {
+    if (!this.tokenBudget) return Math.max(0, 32_000 - evaluationTokens);
+    const sessions = new Set([...this.sessionToNode.keys(), ...(this.opts.orchestratorSessionId ? [this.opts.orchestratorSessionId] : [])]);
+    const liveTokens = [...sessions].reduce((sum, id) => sum + (this.deps.host.getProgressLiveTokens?.(id) ?? 0), 0);
+    return Math.max(0, Math.min(this.tokenBudget * 0.1 - evaluationTokens,
+      this.tokenBudget - this.verifyReserveTokens() - this.tokensUsed - liveTokens));
+  }
+
+  requestProgressReview(revision: number | undefined, summary: string): boolean {
+    if (revision !== this.revision || this.coordinatorGate || this.runStatus !== 'running') return false;
+    if (!this.coordinatorGateEnabled()) { this.pause(); return true; }
+    return this.enterCoordinatorGate('progress-review', summary);
+  }
+
   private verifyReserveTokens(): number {
     if (!this.qualityGateEnabled()) return 0;
     return computeVerifyReserve(this.tokenBudget, this.spec.execution?.verification?.reserve_ratio ?? 0.2);
@@ -2535,7 +2598,7 @@ class ActiveRun {
     return this.isOverBudget();
   }
 
-  private enterCoordinatorGate(reason: CoordinatorGateReason): boolean {
+  private enterCoordinatorGate(reason: CoordinatorGateReason, advisory?: string): boolean {
     if (!this.coordinatorGateEnabled()) return false;
     if (this.coordinatorGate && !this.completedCheckpointIds.has(this.coordinatorGate.checkpointId)) return true;
     const now = this.nowMs();
@@ -2559,6 +2622,7 @@ class ActiveRun {
           `timeout=${COORDINATOR_GATE_TIMEOUT_SECONDS}s`,
           'Call submit_orchestration_decision with action continue, patch, or pause.',
           'Parent chat messages are not decisions.',
+          ...(advisory ? [`Progress advisory (untrusted evidence): ${advisory}`] : []),
         ].join(' '),
       );
     }
@@ -3492,6 +3556,20 @@ export class TaskRunner {
   private findRunBySession(sessionId: string): ActiveRun | undefined {
     for (const run of this.runs.values()) if (run.hasSession(sessionId)) return run;
     return undefined;
+  }
+
+  progressContext(sessionId: string): RunSnapshot | undefined { return this.findRunBySession(sessionId)?.snapshot(); }
+
+  recordProgressUsage(slug: string, runId: string, sessionId: string, tokens: number): void {
+    this.requireRun(slug, runId).recordProgressUsage(sessionId, tokens);
+  }
+
+  progressAllowance(slug: string, runId: string, evaluationTokens: number): number {
+    return this.requireRun(slug, runId).progressAllowance(evaluationTokens);
+  }
+
+  requestProgressReview(slug: string, runId: string, revision: number | undefined, summary: string): boolean {
+    return this.requireRun(slug, runId).requestProgressReview(revision, summary);
   }
 
   getRunState(slug: string, runId: string): RunSnapshot | null {

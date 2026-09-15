@@ -182,6 +182,8 @@ export interface AnswerDeliveryControl {
 
 export interface CoreBackendConfig {
   explicitAnswerDelivery?: boolean;
+  /** Isolated utility backend: skip execution-session/tool initialization. */
+  queryOnly?: boolean;
   /** Workspace configuration */
   workspace: Workspace;
 
@@ -363,6 +365,9 @@ export type SdkMcpServerConfig =
  * 4. Allow capability-based UI adaptation
  */
 export interface AgentBackend {
+  queryLlm?(request: import('../llm-tool').LLMQueryRequest, signal?: AbortSignal): Promise<import('../llm-tool').LLMQueryResult>;
+  /** Interrupt only the current model request; resolves after SDK abort drains. */
+  interruptForProgress?(): Promise<void>;
   // ============================================================
   // Chat & Lifecycle
   // ============================================================

@@ -566,6 +566,7 @@ export interface MessagesRestoredEvent {
  * Union of all agent events
  */
 export type AgentEvent =
+  | { type: 'progress_supervision'; sessionId: string; state: import('@craft-agent/shared/protocol/dto').ProgressSupervisionView }
   | { type: 'answer_preview'; sessionId: string; answerRunId: string; userMessageId: string; text: string; toolCallId: string }
   | TextDeltaEvent
   | TextCompleteEvent

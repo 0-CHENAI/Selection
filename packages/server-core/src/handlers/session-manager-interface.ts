@@ -76,6 +76,8 @@ export interface ISessionManager {
   // Session configuration
   // ---------------------------------------------------------------------------
 
+  setProgressSupervision?(sessionId: string, enabled: boolean): void
+  continueProgress?(sessionId: string): Promise<void>
   setSessionPermissionMode(sessionId: string, mode: PermissionMode): void
   setSessionThinkingLevel(sessionId: string, level: ThinkingLevel): void
   updateWorkingDirectory(sessionId: string, path: string): void

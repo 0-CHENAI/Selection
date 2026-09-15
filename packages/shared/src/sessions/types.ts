@@ -140,6 +140,9 @@ export type BuiltInStatusId = 'todo' | 'in-progress' | 'needs-review' | 'done' |
  * Session token usage tracking
  */
 export interface SessionTokenUsage {
+  /** Independent progress assessment usage; included in totalTokens and costUsd. */
+  evaluationTokens?: number;
+  evaluationCostUsd?: number;
   inputTokens: number;
   outputTokens: number;
   totalTokens: number;

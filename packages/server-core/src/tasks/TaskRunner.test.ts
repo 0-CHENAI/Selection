@@ -92,16 +92,17 @@ class MockHost implements ConductorSessionHost {
   dispatchedNames(): string[] {
     return this.created.map((c) => c.options.name!).filter(Boolean);
   }
-  complete(nodeId: string, opts: { reason?: SessionCompletionEvent['reason']; finalText?: string; tokenUsage?: TokenUsage } = {}): void {
+  complete(nodeId: string, opts: { reason?: SessionCompletionEvent['reason']; errorCode?: SessionCompletionEvent['errorCode']; finalText?: string; tokenUsage?: SessionCompletionEvent['tokenUsage'] } = {}): void {
     this.completeSession(this.sessionIdFor(nodeId), opts);
   }
   /** Fire a completion for an arbitrary session id (e.g. the orchestrator's verification verdict). */
-  completeSession(sessionId: string, opts: { reason?: SessionCompletionEvent['reason']; finalText?: string; tokenUsage?: TokenUsage } = {}): void {
+  completeSession(sessionId: string, opts: { reason?: SessionCompletionEvent['reason']; errorCode?: SessionCompletionEvent['errorCode']; finalText?: string; tokenUsage?: SessionCompletionEvent['tokenUsage'] } = {}): void {
     const evt: SessionCompletionEvent = {
       sessionId,
       workspaceId: 'ws',
       generation: 0,
       reason: opts.reason ?? 'complete',
+      errorCode: opts.errorCode,
       finalText: opts.finalText,
       tokenUsage: opts.tokenUsage,
     };
@@ -324,6 +325,36 @@ describe('TaskRunner (Conductor)', () => {
   function makeRunner() {
     return new TaskRunner({ host, workspaceId: 'ws', workspaceRoot: root, now: () => '2026-06-07T00:00:00.000Z' });
   }
+
+  it('pauses a supervised node and resumes the same session without another attempt', async () => {
+    saveTaskSpec(root, specOf({ id: 'progress', title: 'Progress', goal: 'generate', nodes: [{ id: 'work', prompt: 'Generate' }] }));
+    const resumed: string[] = [];
+    Object.assign(host, { continueProgress: async (id: string) => { resumed.push(id); } });
+    const runner = makeRunner(); runner.run('progress', { runId: 'r1' }); await tick();
+    runner.recordProgressUsage('progress', 'r1', 'sess-work', 20);
+    host.complete('work', { reason: 'error', errorCode: 'call_time_limit', tokenUsage: { ...tu(10, 5), evaluationTokens: 20 } });
+    expect(runner.getRunState('progress', 'r1')?.status).toBe('paused');
+    expect(runner.getRunState('progress', 'r1')?.tokensUsed).toBe(35);
+    runner.resume('progress', 'r1'); await tick();
+    expect(resumed).toEqual(['sess-work']); expect(host.created).toHaveLength(1);
+    expect(runner.getRunState('progress', 'r1')?.nodes[0]?.attempt).toBe(1);
+    host.complete('work', { finalText: 'done' }); await tick();
+  });
+
+  it('pauses final verification without converting interruption into a failed verdict', async () => {
+    saveTaskSpec(root, specOf({ id: 'progress-verify', title: 'Verify', goal: 'generate', nodes: [{ id: 'work', prompt: 'Generate' }] }));
+    const resumed: string[] = [];
+    Object.assign(host, { continueProgress: async (id: string) => { resumed.push(id); } });
+    const runner = makeRunner(); runner.run('progress-verify', { runId: 'r1', orchestratorSessionId: 'orch' }); await tick();
+    host.complete('work', { finalText: 'done' }); await tick();
+    expect(runner.getRunState('progress-verify', 'r1')?.status).toBe('verifying');
+    host.completeSession('orch', { reason: 'error', errorCode: 'output_limit' });
+    expect(runner.getRunState('progress-verify', 'r1')?.status).toBe('paused');
+    runner.resume('progress-verify', 'r1'); await tick();
+    expect(resumed).toEqual(['orch']);
+    host.completeSession('orch', { finalText: 'VERDICT: PASS' }); await tick();
+    expect(runner.getRunState('progress-verify', 'r1')?.status).toBe('completed');
+  });
 
   it('runs a dependency chain, feeding each output into the next', async () => {
     saveTaskSpec(

@@ -326,6 +326,8 @@ export class PiAgent extends BaseAgent {
   // Pending llm_query calls (correlation map for subprocess llm_query_result).
   // Separate from pendingMiniCompletions because the payload shape differs:
   // queryLlm returns a full LLMQueryResult, not just text.
+  private pendingProgressInterrupts = new Map<string, (error?: string) => void>();
+
   private pendingLlmQueries: Map<string, {
     resolve: (result: LLMQueryResult) => void;
     reject: (error: Error) => void;
@@ -607,6 +609,8 @@ export class PiAgent extends BaseAgent {
       ? `${officecliWrapperDir}${inheritedPath ? `${delimiter}${inheritedPath}` : ''}`
       : inheritedPath;
 
+    // Cancellation during asynchronous credential loading must not spawn an orphan.
+    if (epoch !== this.subprocessEpoch) throw new Error('Pi subprocess startup was cancelled');
     // Spawn the subprocess
     const child = spawn(nodePath, args, {
       cwd,
@@ -713,6 +717,7 @@ export class PiAgent extends BaseAgent {
     await ready;
     if (epoch !== this.subprocessEpoch) throw new Error('Pi startup cancelled');
     this.debug('Pi subprocess is ready');
+    if (this.config.queryOnly) return;
 
     // Ensure auto-compaction is explicitly enabled for embedded sessions.
     // PI defaults this to enabled, but we set it proactively for clarity and resilience.
@@ -1153,6 +1158,10 @@ export class PiAgent extends BaseAgent {
       case 'mini_completion_result':
         // Response to a mini_completion request
         this.handleMiniCompletionResult(msg);
+        break;
+
+      case 'progress_interrupt_result':
+        this.pendingProgressInterrupts.get(msg.id as string)?.(msg.error as string | undefined);
         break;
 
       case 'llm_query_result': {
@@ -2298,6 +2307,8 @@ export class PiAgent extends BaseAgent {
       pending.reject(new Error(`Pi subprocess exited unexpectedly (${exitReason})`));
     }
     this.pendingLlmQueries.clear();
+    for (const reject of this.pendingProgressInterrupts.values()) reject(`Pi subprocess exited unexpectedly (${exitReason})`);
+    this.pendingProgressInterrupts.clear();
 
     // Reject pending ensure_session_ready requests
     for (const [, pending] of this.pendingEnsureSessionReady) {
@@ -2919,6 +2930,22 @@ export class PiAgent extends BaseAgent {
     this.readToolInputsByCallId.clear();
   }
 
+  async interruptForProgress(): Promise<void> {
+    this.abortReason = AbortReason.ProgressRedirect;
+    const id = `progress-interrupt-${++this.rpcIdCounter}`;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      await new Promise<void>((resolve, reject) => {
+        this.pendingProgressInterrupts.set(id, error => error ? reject(new Error(error)) : resolve());
+        timer = setTimeout(() => reject(new Error('Progress interrupt did not drain')), 30_000);
+        this.send({ type: 'progress_interrupt', id });
+      });
+    } finally {
+      if (timer) clearTimeout(timer);
+      this.pendingProgressInterrupts.delete(id);
+    }
+  }
+
   forceAbort(reason: AbortReason): void {
     for (const controller of this.sessionToolControllers) controller.abort();
     this.emitStopOnce('abort');
@@ -3212,29 +3239,52 @@ export class PiAgent extends BaseAgent {
    * See packages/shared/CLAUDE.md → "queryLlm backend contract" and
    * packages/pi-agent-server/src/index.ts → handleLlmQuery for the invariant.
    */
-  async queryLlm(request: LLMQueryRequest): Promise<LLMQueryResult> {
-    this.debug('[PiAgent.queryLlm] Starting');
-
-    await this.ensureSubprocess();
-
+  async queryLlm(request: LLMQueryRequest, signal?: AbortSignal): Promise<LLMQueryResult> {
+    signal?.throwIfAborted();
+    const startedAt = Date.now();
+    const timeoutMs = request.timeoutMs ?? LLM_QUERY_TIMEOUT_MS;
+    let startupTimer: ReturnType<typeof setTimeout> | undefined;
+    let abortStartup: (() => void) | undefined;
+    try {
+      await Promise.race([
+        this.ensureSubprocess(),
+        new Promise<never>((_, reject) => {
+          abortStartup = () => reject(new Error('LLM query cancelled during startup'));
+          signal?.addEventListener('abort', abortStartup, { once: true });
+          startupTimer = setTimeout(() => reject(new Error(`queryLlm timed out after ${timeoutMs / 1000}s`)), timeoutMs);
+          if (signal?.aborted) abortStartup();
+        }),
+      ]);
+    } catch (error) {
+      if (this.config.queryOnly) this.killSubprocess();
+      throw error;
+    } finally {
+      if (startupTimer) clearTimeout(startupTimer);
+      if (abortStartup) signal?.removeEventListener('abort', abortStartup);
+    }
+    signal?.throwIfAborted();
     const id = `llm-${++this.rpcIdCounter}`;
-    const resultPromise = new Promise<LLMQueryResult>((resolve, reject) => {
-      this.pendingLlmQueries.set(id, { resolve, reject });
-    });
-
-    this.send({ type: 'llm_query', id, request });
-
-    // Keep this aligned with the subprocess-side queryLlm timeout.
-    const timeout = new Promise<LLMQueryResult>((_, reject) => {
-      setTimeout(() => {
-        if (this.pendingLlmQueries.has(id)) {
-          this.pendingLlmQueries.delete(id);
-          reject(new Error(`queryLlm timed out after ${LLM_QUERY_TIMEOUT_MS / 1000}s`));
-        }
-      }, LLM_QUERY_TIMEOUT_MS);
-    });
-
-    return Promise.race([resultPromise, timeout]);
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const cancel = (timedOut = false) => {
+      this.send({ type: 'cancel_llm_query', id });
+      const pending = this.pendingLlmQueries.get(id);
+      this.pendingLlmQueries.delete(id);
+      pending?.reject(new Error(timedOut ? `queryLlm timed out after ${(request.timeoutMs ?? LLM_QUERY_TIMEOUT_MS) / 1000}s` : 'LLM query cancelled'));
+    };
+    const onAbort = () => cancel();
+    try {
+      return await new Promise<LLMQueryResult>((resolve, reject) => {
+        this.pendingLlmQueries.set(id, { resolve, reject });
+        signal?.addEventListener('abort', onAbort, { once: true });
+        timer = setTimeout(() => cancel(true), Math.max(1, timeoutMs - (Date.now() - startedAt)));
+        this.send({ type: 'llm_query', id, request });
+        if (signal?.aborted) cancel();
+      });
+    } finally {
+      if (timer) clearTimeout(timer);
+      signal?.removeEventListener('abort', onAbort);
+      this.pendingLlmQueries.delete(id);
+    }
   }
 
   // ============================================================

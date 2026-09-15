@@ -59,6 +59,36 @@ function driveBundle(messages: object[], done: (output: string, send: (message: 
 }
 
 describe('pi-agent-server bundle', () => {
+  it('cancels the underlying HTTP evaluation without running business tools', async () => {
+    let started!: () => void; let disconnected!: () => void;
+    const requestStarted = new Promise<void>(resolve => { started = resolve; });
+    const requestDisconnected = new Promise<void>(resolve => { disconnected = resolve; });
+    const server = Bun.serve({ port: 0, fetch(request) {
+      request.signal.addEventListener('abort', disconnected, { once: true });
+      started();
+      return new Response(new ReadableStream({
+        start(controller) { controller.enqueue(new TextEncoder().encode('data: {"id":"test","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"role":"assistant"}}]}\n\n')); },
+        cancel() { disconnected(); },
+      }), { headers: { 'content-type': 'text/event-stream' } });
+    } });
+    const child = spawn(process.execPath, [bundlePath], { cwd: scratchDir, stdio: ['pipe', 'pipe', 'pipe'],
+      env: { ...process.env, NO_PROXY: '127.0.0.1,localhost', no_proxy: '127.0.0.1,localhost' } });
+    let output = ''; child.stdout.on('data', chunk => { output += chunk.toString(); });
+    const send = (message: object) => child.stdin.write(JSON.stringify(message) + '\n');
+    try {
+      send({ type: 'init', apiKey: 'test-only', model: 'Laufry', cwd: scratchDir, workspaceRootPath: scratchDir,
+        sessionId: 'evaluation', sessionPath: scratchDir, providerType: 'pi_compat', authType: 'api_key',
+        baseUrl: `http://127.0.0.1:${server.port}/v1`, customEndpoint: { api: 'openai-completions' },
+        customModels: [{ id: 'Laufry', contextWindow: 8192, maxTokens: 2048 }] });
+      send({ type: 'llm_query', id: 'evaluation-1', request: { purpose: 'progress-evaluation', model: 'Laufry', prompt: 'Evaluate.', maxTokens: 2048, timeoutMs: 5000 } });
+      await requestStarted;
+      send({ type: 'cancel_llm_query', id: 'evaluation-1' });
+      await requestDisconnected;
+      expect(output).not.toContain('pre_tool_use');
+      expect(output).not.toContain('session_tool_completed');
+    } finally { child.kill(); server.stop(true); }
+  }, 10_000);
+
   it('carries request diagnostics from the preload through bundled SDK message_end', async () => {
     const server = Bun.serve({ port: 0, fetch() {
       return new Response('data: {"error":{"message":"The model service is taking too long to respond."}}\n\n',

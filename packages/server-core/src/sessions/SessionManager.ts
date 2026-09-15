@@ -1,3 +1,5 @@
+import { ProgressSupervisor, createProgressBudget, type ProgressBudget, type ProgressDecision, type ProgressSnapshot } from '../supervision/progress-supervisor'
+import { saveProgressCandidate, loadProgressCandidate, readProgressCheckpoint, writeProgressCheckpoint, type ProgressCheckpoint } from '../supervision/progress-store'
 import { waitForRuntimeCleanup } from './runtime-cleanup.ts'
 import { copyBranchFiles } from './branch-files'
 import { ANSWER_RECOVERY_PROMPT } from '@craft-agent/shared/prompts/answer-delivery'
@@ -11,7 +13,7 @@ import { createScopedLogger, CONSOLE_LOGGER, type PlatformServices, type Logger 
 import { basename, dirname, join } from 'path'
 import { existsSync } from 'fs'
 import { readFile, writeFile, mkdir } from 'fs/promises'
-import { randomUUID } from 'node:crypto'
+import { randomUUID, createHash } from 'node:crypto'
 import { type AgentEvent, setPermissionMode, hydratePreviousPermissionMode, getPermissionModeDiagnostics, type PermissionMode, unregisterSessionScopedToolCallbacks, mergeSessionScopedToolCallbacks, AbortReason, type AuthRequest, type AuthResult, type CredentialAuthRequest, type BrowserPaneFns, generateConversationSummary, resolveKeepBackgroundTasksAlive, sanitizeUserMessageForRetry, resolveSpawnWaitTimeoutMs, type SpawnSessionLifecycle, type SpawnSessionRequest, type SpawnSessionResult, type SpawnSessionRole, type SpawnSessionReason } from '@craft-agent/shared/agent'
 import {
   resolveSessionConnection,
@@ -863,6 +865,13 @@ interface RunningBackgroundTask {
 }
 
 interface ManagedSession {
+  progressAdvisories?: Array<{ id: string; text: string }>
+  progressLiveEvaluationTokens?: number
+  progressReviewer?: AgentInstance
+  progressSupervisor?: ProgressSupervisor
+  progressSupervision?: import('@craft-agent/shared/protocol/dto').ProgressSupervisionView
+  progressDisabled?: boolean
+
   answerDelivery?: {
     runId: string
     generation: number
@@ -1369,6 +1378,7 @@ function managedToSession(m: ManagedSession, overrides?: Partial<Session>): Sess
     preview: m.preview,
     lastMessageRole: m.lastMessageRole,
     tokenUsage: m.tokenUsage,
+    progressSupervision: m.progressSupervision,
     messageCount: m.messageCount,
     lastFinalMessageId: m.lastFinalMessageId,
     // Runtime-only fields
@@ -1523,6 +1533,9 @@ export class SessionManager implements ISessionManager {
    * can never disagree about whether keep-alive is on.
    */
   private readonly keepBackgroundTasksAlive: boolean = resolveKeepBackgroundTasksAlive()
+  private progressShuttingDown = false
+  private progressBudgets = new Map<string, ProgressBudget>()
+  private progressArbiters = new Set<string>()
   private taskRunnerLookup?: (workspaceId: string) => TaskRunner
   private spawnCompletionUnsub?: () => void
   /**
@@ -2894,6 +2907,13 @@ export class SessionManager implements ISessionManager {
 
     // Lazy-load messages from disk if not yet loaded
     await this.ensureMessagesLoaded(m)
+    if (!m.progressSupervision) {
+      const checkpoint = readProgressCheckpoint(getSessionStoragePath(m.workspace.rootPath, m.id))
+      if (checkpoint) m.progressSupervision = { phase: checkpoint.continuation && !checkpoint.continuation.consumed ? 'paused' : 'stopped',
+        reason: checkpoint.state.reason, mode: 'observe', evaluationTokens: checkpoint.state.evaluationTokens,
+        estimatedTokens: checkpoint.state.estimatedTokens, redirects: checkpoint.state.redirects,
+        nextStep: checkpoint.state.lastDecision?.assessment.nextStep, evidenceIds: checkpoint.state.lastDecision?.assessment.evidenceIds }
+    }
 
     return managedToSession(m, { messages: m.messages })
   }
@@ -6290,6 +6310,7 @@ export class SessionManager implements ISessionManager {
       managed = createManagedSession(metadata ?? { id: sessionId }, workspace)
     }
     if (managed.deleting) throw new Error(`Session ${sessionId} is already being deleted`)
+    managed.progressSupervisor?.stop()
     managed.deleting = true
     managed.stopRequested = true
     managed.processingGeneration += 1
@@ -6448,6 +6469,7 @@ export class SessionManager implements ISessionManager {
     rpcContext?: { callerClientId?: string },
     /** Internal queue replay marker; never supplied by RPC callers. */
     _isSourceContinuationReplay = false,
+    _isProgressContinuation = false,
   ): Promise<void> {
     const managed = this.sessions.get(sessionId)
     if (!managed) {
@@ -6494,7 +6516,8 @@ export class SessionManager implements ISessionManager {
     const isPendingAutoRetry = _isSourceContinuationReplay || (!!pendingAutoRetry
       && message === pendingAutoRetry.content
       && Date.now() < pendingAutoRetry.deadlineMs)
-    const isUserTaskContinuation = _isAuthRetry === true || isPendingAutoRetry
+    const isUserTaskContinuation = _isAuthRetry === true || isPendingAutoRetry || _isProgressContinuation
+    if (!isUserTaskContinuation && !options?.hidden && !existingMessageId) managed.progressDisabled = false
     if (!_isSourceContinuationReplay && claimAutoRetryPending(managed, message) === 'drop') {
       sessionLog.info(`sendMessage: dropped duplicate source-activation retry for ${sessionId}`)
       const existingRetry = [...managed.messages].reverse().find(candidate =>
@@ -7111,14 +7134,14 @@ export class SessionManager implements ISessionManager {
 
       sendSpan.mark('chat.starting')
       const chatOptions = { previousResponseInterrupted, continueUserTask: isUserTaskContinuation }
-      const chatIterator = this.runAnswerDelivery(managed, agent, agent.chat(message, preparedImages.attachments, chatOptions), chatOptions)
+      const chatIterator = this.runAnswerDelivery(managed, agent, this.runProgressExecution(managed, agent, message, preparedImages.attachments, chatOptions), chatOptions)
       this.announceRegenerateReplacement(managed)
       sessionLog.info('Got chat iterator, starting iteration...')
       managed.usedExternalToolsThisTurn = false
 
       for await (const event of chatIterator) {
         // Log events (skip noisy text_delta)
-        if (event.type !== 'text_delta') {
+        if (event.type !== 'text_delta' && event.type !== 'model_activity') {
           if (event.type === 'tool_start') {
             sessionLog.info(`tool_start: ${event.toolName} (${event.toolUseId})`)
           } else if (event.type === 'tool_result') {
@@ -7343,6 +7366,275 @@ export class SessionManager implements ISessionManager {
     }
   }
 
+  getProgressLiveTokens(sessionId: string): number {
+    const managed = this.sessions.get(sessionId)
+    return Math.max(0, (managed?.activeTurnUsage?.totalTokens ?? 0) - (managed?.progressLiveEvaluationTokens ?? 0))
+  }
+
+  setProgressSupervision(sessionId: string, enabled: boolean): void {
+    const managed = this.sessions.get(sessionId)
+    if (!managed) throw new Error('Session not found')
+    managed.progressDisabled = !enabled
+    const requested = loadWorkspaceConfig(managed.workspace.rootPath)?.progressSupervision?.mode ?? 'observe'
+    const mode = !enabled ? 'off' : requested === 'assist' && process.env.CRAFT_PROGRESS_ASSIST_ENABLED === '1' ? 'assist' : 'observe'
+    managed.progressSupervisor?.setMode(mode)
+    const path = getSessionStoragePath(managed.workspace.rootPath, sessionId)
+    const checkpoint = readProgressCheckpoint(path)
+    if (checkpoint) { checkpoint.mode = mode; writeProgressCheckpoint(path, checkpoint) }
+    if (managed.progressSupervision) {
+      managed.progressSupervision.mode = mode
+      this.sendEvent({ type: 'progress_supervision', sessionId, state: managed.progressSupervision }, managed.workspace.id)
+    }
+  }
+
+  async continueProgress(sessionId: string): Promise<void> {
+    const managed = this.sessions.get(sessionId)
+    if (!managed || managed.isProcessing) throw new Error('Session must be idle to continue')
+    const task = this.taskRunnerLookup?.(managed.workspace.id)?.progressContext(sessionId)
+    if (task && !['running', 'verifying'].includes(task.status)) throw new Error('请先通过任务控制入口恢复 DAG；会话继续不能绕过 Coordinator。')
+    await this.ensureMessagesLoaded(managed)
+    if (managed.isProcessing) throw new Error('Session became active while loading the checkpoint')
+    const path = getSessionStoragePath(managed.workspace.rootPath, sessionId)
+    const checkpoint = readProgressCheckpoint(path)
+    const continuation = checkpoint?.continuation
+    if (!checkpoint || !continuation || continuation.consumed) throw new Error('No pending progress checkpoint')
+    if (managed.messages.findLast(m => m.role === 'user' && !m.hidden && !m.isQueued)?.id !== continuation.userMessageId) throw new Error('Progress checkpoint belongs to an older task')
+    const candidate = continuation.candidateContext ? loadProgressCandidate(path) : undefined
+    // Explicit user continuation consumes once; crashes never auto-replay this action.
+    managed.stopRequested = false
+    this.setProcessing(managed, true)
+    managed.processingGeneration++
+    const resumeGeneration = managed.processingGeneration
+    try {
+      await this.disposeManagedAgentRuntime(managed, 'resume progress checkpoint')
+    } catch (error) {
+      await this.onProcessingStopped(sessionId, 'error', resumeGeneration)
+      throw error
+    }
+    if (managed.stopRequested || managed.processingGeneration !== resumeGeneration) {
+      await this.onProcessingStopped(sessionId, 'interrupted', resumeGeneration)
+      return
+    }
+    continuation.consumed = true
+    writeProgressCheckpoint(path, checkpoint)
+    this.setProcessing(managed, false)
+    if (candidate) {
+      if (continuation.regenerate) {
+        managed.regenerateTransaction = { runId: randomUUID(), keepThroughMessageId: continuation.userMessageId,
+          rendererTruncated: false, originalMessages: structuredClone(managed.messages), originalSdkSessionId: managed.sdkSessionId,
+          originalBranchContextStrategy: managed.branchContextStrategy, originalBranchFromSdkSessionId: managed.branchFromSdkSessionId,
+          originalBranchFromSessionPath: managed.branchFromSessionPath, originalBranchFromSdkCwd: managed.branchFromSdkCwd,
+          originalBranchFromSdkTurnId: managed.branchFromSdkTurnId }
+        this.sendEvent({ type: 'regenerate_started', sessionId, runId: managed.regenerateTransaction.runId }, managed.workspace.id)
+      }
+      managed.messages = candidate
+    }
+    managed.sdkSessionId = continuation.sdkSessionId
+    managed.forceFreshSdkSession = false
+    managed.regenerateSeedPending = false
+    managed.branchFromSdkSessionId = undefined
+    managed.branchFromSessionPath = undefined
+    managed.branchFromSdkTurnId = undefined
+    await this.sendMessage(sessionId, continuation.prompt, undefined, undefined, { hidden: true }, undefined, false, undefined, undefined, false, true)
+  }
+
+  private createProgressReviewer(managed: ManagedSession, connectionSlug?: string): AgentInstance {
+    const connections = getLlmConnections().filter(c => c.models?.some(m => (typeof m === 'string' ? m : m.id).replace(/^pi\//, '').toLowerCase() === 'laufry'))
+    const selected = connectionSlug ? connections.find(c => c.slug === connectionSlug)
+      : connections.find(c => c.slug === managed.llmConnection) ?? (connections.length === 1 ? connections[0] : undefined)
+    if (!selected) throw new Error('未找到唯一的 Laufry 评估连接，请在工作区配置指定 connectionSlug')
+    return createBackendFromConnection(selected.slug, { workspace: managed.workspace, model: 'Laufry', miniModel: 'Laufry',
+      isHeadless: true, skipConfigWatcher: true, explicitAnswerDelivery: false, queryOnly: true }, buildBackendHostRuntimeContext())
+  }
+
+  private async *runProgressExecution(
+    managed: ManagedSession, agent: AgentInstance, message: string,
+    attachments: FileAttachment[] | undefined, options: ChatOptions,
+  ): AsyncGenerator<AgentEvent> {
+    // Backends without a drain barrier cannot safely support automatic intervention.
+    if (!agent.interruptForProgress) { yield* agent.chat(message, attachments, options); return }
+    const generation = managed.processingGeneration
+    managed.progressLiveEvaluationTokens = 0
+    const user = managed.messages.findLast(m => m.role === 'user' && !m.hidden && !m.isQueued)
+    if (!user) { yield* agent.chat(message, attachments, options); return }
+    const dag = this.taskRunnerLookup?.(managed.workspace.id)?.progressContext(managed.id)
+    const root = this.sessions.get(dag?.orchestratorSessionId ?? managed.orchestrationRootSessionId ?? managed.parentSessionId ?? managed.id) ?? managed
+    const taskId = dag?.runId ?? managed.taskRunId ?? root.messages.findLast(m => m.role === 'user' && !m.hidden && !m.isQueued)?.id ?? user.id
+    const key = `${root.id}:${taskId}`
+    const path = getSessionStoragePath(managed.workspace.rootPath, managed.id)
+    const rootPath = getSessionStoragePath(root.workspace.rootPath, root.id)
+    const stored = readProgressCheckpoint(path)
+    const rootStored = readProgressCheckpoint(rootPath)
+    let budget = this.progressBudgets.get(key)
+    if (!budget) {
+      budget = rootStored?.taskId === taskId ? { ...rootStored.budget, tokens: rootStored.budget.tokens + rootStored.budget.reserved, reserved: 0 } : createProgressBudget()
+      for (const oldKey of this.progressBudgets.keys()) {
+        if (oldKey.startsWith(`${root.id}:`) && oldKey !== key && !this.progressArbiters.has(oldKey)) this.progressBudgets.delete(oldKey)
+      }
+      this.progressBudgets.set(key, budget)
+    }
+    const config = loadWorkspaceConfig(managed.workspace.rootPath)?.progressSupervision
+    // assist remains gated until the real-model/platform acceptance matrix is complete.
+    const requestedMode = managed.progressDisabled || (stored?.taskId === taskId && stored.mode === 'off') ? 'off' : config?.mode ?? 'observe'
+    const mode = requestedMode === 'assist' && process.env.CRAFT_PROGRESS_ASSIST_ENABLED !== '1' ? 'observe' : requestedMode
+    const executionId = randomUUID()
+    let revision = 0, call = 0, began = Date.now()
+    let status: ProgressSnapshot['status'] = 'model'
+    let modelInFlight = false
+    let activity = { reasoningBytes: 0, textBytes: 0 }
+    let pending: ProgressDecision | undefined
+    let pauseReason: string | undefined
+    let pauseCode: 'call_time_limit' | 'output_limit' | 'stream_interrupted' | 'progress_needs_user' = 'call_time_limit'
+    let barrier: Promise<void> | undefined
+    let reviewer: AgentInstance | undefined
+    const busyTools = new Set<string>()
+    const active = () => !this.progressShuttingDown && managed.isProcessing && !managed.stopRequested && !managed.deleting
+      && managed.processingGeneration === generation && !managed.answerDelivery?.committedMessageId
+      && !managed.authRetryInProgress && !managed.autoRetryPending
+    const snapshot = (): ProgressSnapshot => {
+      const run = this.taskRunnerLookup?.(managed.workspace.id)?.progressContext(managed.id)
+      const waiting = !modelInFlight && (managed.orchestrationAggregation?.phase === 'waiting-workers' || run?.status === 'waiting-coordinator')
+      const priorRequests = managed.messages.slice(0, managed.messages.indexOf(user)).filter(m => m.role === 'user' && !m.hidden && !m.isQueued).slice(-2).map(m => ({ id: m.id, request: m.content }))
+      const evidence: ProgressSnapshot['evidence'] = [{ id: user.id, kind: 'goal', text: JSON.stringify({ currentRequest: user.content, priorRequests }) }]
+      for (const m of managed.messages.slice(managed.messages.indexOf(user) + 1).slice(-24)) {
+        if ((m.role === 'assistant' && m.content.trim()) || m.role === 'tool') evidence.push({ id: m.id, kind: m.role === 'tool' ? 'tool' : 'text', text: m.role === 'tool' ? JSON.stringify({ name: m.toolName, status: m.toolStatus, result: m.toolResult, input: m.toolInput }) : m.content })
+      }
+      for (const advisory of managed.progressAdvisories ?? []) evidence.push({ ...advisory, kind: 'orchestration' })
+      if (run) evidence.push({ id: `dag-${run.runId}-${run.revision}`, kind: 'orchestration', text: JSON.stringify(run) })
+      for (const child of this.getManagedSwarmChildren(managed.id)) evidence.push({ id: `child-${child.id}-${child.orchestrationStatus}`, kind: 'orchestration', text: JSON.stringify({ id: child.id, status: child.orchestrationStatus, output: child.messages.findLast(m => m.role === 'assistant' && !m.isIntermediate)?.content?.slice(0, 500) }) })
+      const evidenceRevision = Number.parseInt(createHash('sha256').update(JSON.stringify([revision, evidence])).digest('hex').slice(0, 12), 16)
+      return { sessionId: managed.id, taskId, generation, revision: evidenceRevision, callId: `${executionId}-${call}`,
+        status: !active() ? 'complete' : waiting ? 'waiting' : busyTools.size ? 'tool' : status,
+        evidence, activity, elapsedMs: Date.now() - began, executionTokens: managed.activeTurnUsage?.totalTokens ?? 0,
+        orchestrationRevision: run?.revision }
+    }
+    const checkpoint: ProgressCheckpoint = { version: 1, taskId, rootId: root.id, mode,
+      state: stored?.taskId === taskId ? stored.state : { phase: 'observing', checks: 0, redirects: 0, evaluationTokens: 0, estimatedTokens: 0 }, budget }
+    const persist = () => {
+      if (managed.deleting) return
+      writeProgressCheckpoint(path, checkpoint)
+      if (root !== managed) {
+        const saved = readProgressCheckpoint(rootPath)
+        writeProgressCheckpoint(rootPath, saved?.taskId === taskId ? { ...saved, budget: budget! }
+          : { version: 1, taskId, rootId: root.id, budget: budget!, state: { phase: 'observing', checks: 0, redirects: 0, evaluationTokens: 0, estimatedTokens: 0 } })
+      }
+    }
+    const interrupt = () => { barrier = agent.interruptForProgress!(); barrier.catch(() => { pauseReason = '旧模型请求未确认停止，未启动新的执行。'; agent.forceAbort(AbortReason.ProgressRedirect) }) }
+    const supervisor = new ProgressSupervisor({ mode, rootBudget: budget, state: checkpoint.state,
+      snapshot,
+      query: async (request, signal) => {
+        signal.throwIfAborted()
+        if (!reviewer) {
+          reviewer = this.createProgressReviewer(managed, config?.connectionSlug)
+          managed.progressReviewer = reviewer
+        }
+        if (!reviewer.queryLlm) throw new Error('Laufry evaluation is unavailable')
+        return reviewer.queryLlm(request, signal)
+      },
+      evaluationAllowance: () => {
+        if (dag) return this.taskRunnerLookup?.(managed.workspace.id)?.progressAllowance(dag.slug, dag.runId, budget!.tokens + budget!.reserved) ?? 0
+        if (managed.parentSessionId || this.getManagedSwarmChildren(root.id).length > 0) return Math.max(0, Math.min(FIXED_SWARM_TOKEN_BUDGET * 0.1 - budget!.tokens - budget!.reserved, FIXED_SWARM_TOKEN_BUDGET - getSwarmAgentBudgetState(managed).projectedTokensUsed - budget!.reserved))
+        return 32_000 - checkpoint.state.evaluationTokens
+      },
+      charge: (tokens, costUsd) => {
+        if (dag) this.taskRunnerLookup?.(managed.workspace.id)?.recordProgressUsage(dag.slug, dag.runId, managed.id, tokens)
+        managed.progressLiveEvaluationTokens = (managed.progressLiveEvaluationTokens ?? 0) + tokens
+        if (managed.processingGeneration === generation) {
+          managed.activeTurnUsage = recordModelCallUsage(managed.activeTurnUsage ?? createTurnUsageAccumulator(Date.now()), { inputTokens: tokens, outputTokens: 0, costUsd }).accumulator
+        }
+        managed.tokenUsage ??= { ...DEFAULT_TOKEN_USAGE }
+        managed.tokenUsage.evaluationTokens = (managed.tokenUsage.evaluationTokens ?? 0) + tokens
+        managed.tokenUsage.evaluationCostUsd = (managed.tokenUsage.evaluationCostUsd ?? 0) + costUsd
+        managed.tokenUsage.totalTokens += tokens; managed.tokenUsage.costUsd += costUsd
+        if (managed.processingGeneration === generation && managed.activeTurnUsage) managed.tokenUsage.currentTurn = snapshotTurnUsage(managed.activeTurnUsage, Date.now())
+        this.sendEvent({ type: 'usage_update', sessionId: managed.id, tokenUsage: managed.tokenUsage }, managed.workspace.id)
+        this.persistSession(managed)
+        persist()
+      },
+      change: state => {
+        checkpoint.state = state; checkpoint.mode = supervisor.mode; persist()
+        managed.progressSupervision = { phase: state.phase, reason: state.reason, mode: supervisor.mode,
+          evaluationTokens: state.evaluationTokens, estimatedTokens: state.estimatedTokens, redirects: state.redirects,
+          nextStep: state.lastDecision?.assessment.nextStep, evidenceIds: state.lastDecision?.assessment.evidenceIds,
+          evidence: snapshot().evidence.filter(e => state.lastDecision?.assessment.evidenceIds.includes(e.id)).map(e => ({ id: e.id, summary: e.text.slice(0, 240) })) }
+        this.sendEvent({ type: 'progress_supervision', sessionId: managed.id, state: managed.progressSupervision }, managed.workspace.id)
+      },
+      decide: async decision => {
+        if (!active() || managed.progressDisabled || busyTools.size || pending || this.progressArbiters.has(key)) return false
+        if (decision.assessment.scope === 'orchestration' && dag) {
+          return this.taskRunnerLookup?.(managed.workspace.id)?.requestProgressReview(dag.slug, dag.runId, decision.snapshot.orchestrationRevision, decision.assessment.summary) ?? false
+        }
+        if (decision.assessment.scope === 'orchestration' && managed.parentSessionId) {
+          const parent = this.sessions.get(managed.parentSessionId)
+          if (!parent || parent.stopRequested || parent.deleting) return false
+          parent.progressAdvisories = [...(parent.progressAdvisories ?? []), { id: decision.id,
+            text: JSON.stringify({ worker: managed.id, assessment: decision.assessment }) }].slice(-8)
+          parent.progressSupervisor?.invalidate()
+          return true
+        }
+        this.progressArbiters.add(key); pending = decision
+        if (decision.assessment.action === 'need_user') { pauseReason = decision.assessment.nextStep; pauseCode = 'progress_needs_user' }
+        interrupt()
+        return true
+      },
+      pause: async reason => { if (active() && !busyTools.size && !pending) { pauseReason = reason; interrupt() } },
+    })
+    managed.progressSupervisor = supervisor
+    supervisor.start()
+    let prompt = message
+    try {
+      while (active()) {
+        let completed: Extract<AgentEvent, { type: 'complete' }> | undefined
+        for await (const event of agent.chat(prompt, attachments, options)) {
+          if (event.type === 'model_activity') activity = { reasoningBytes: event.reasoningBytes, textBytes: event.textBytes }
+          if (event.type === 'model_call_start') { modelInFlight = true; call++; began = Date.now(); status = 'model'; activity = { reasoningBytes: 0, textBytes: 0 } }
+          if (event.type === 'usage_update' || event.type === 'complete') modelInFlight = false
+          if (event.type === 'tool_start') { busyTools.add(event.toolUseId); revision++; supervisor.invalidate() }
+          if (event.type === 'tool_result') { busyTools.delete(event.toolUseId); revision++; supervisor.invalidate() }
+          if (event.type === 'text_delta' || event.type === 'text_complete') {
+            if (event.text.trim()) { revision++; supervisor.invalidate() }
+            if (event.type === 'text_delta') activity.textBytes += Buffer.byteLength(event.text)
+          }
+          if (event.type === 'status') status = 'compacting'
+          if (event.type === 'permission_request') { status = 'handoff'; supervisor.invalidate() }
+          if (event.type === 'typed_error' && (event.error.code === 'output_limit' || event.error.code === 'stream_interrupted' || event.error.code === 'model_request_timeout')) {
+            pauseReason = event.error.message; pauseCode = event.error.code === 'model_request_timeout' ? 'call_time_limit' : event.error.code
+          } else if (event.type === 'complete') completed = event
+          else yield event
+        }
+        if (barrier) await barrier.catch(() => undefined)
+        if (!active() || (!pending && !pauseReason)) { if (completed) yield completed; return }
+        if (completed) await this.processEvent(managed, completed)
+        const decision = pending
+        const continuation = decision ? `Continue the current task using retained tool results. Do not repeat completed side effects or retry operations whose outcomes are unknown. Verify uncertain outcomes through read-only status checks first.\nAssessment: ${decision.assessment.summary}\nNext step: ${decision.assessment.nextStep}\nExpected evidence: ${decision.assessment.expectedResult}`
+          : 'Continue the current user task from retained results. First inspect the current state; do not repeat completed side effects or retry operations with unknown outcomes. Verify uncertain outcomes through read-only status checks first. Execute the next concrete step.'
+        if (pauseReason && managed.regenerateTransaction) saveProgressCandidate(path, managed.messages)
+        checkpoint.continuation = { candidateContext: !!pauseReason && !!managed.regenerateTransaction, regenerate: !!managed.regenerateTransaction, answerRunId: managed.answerDelivery?.runId, prompt: continuation, sdkSessionId: agent.getSessionId() ?? undefined, userMessageId: user.id, consumed: !pauseReason }
+        persist()
+        if (pauseReason) {
+          supervisor.markPaused(pauseReason)
+          yield { type: 'typed_error', error: createTypedError(pauseCode, { message: pauseReason }) }
+          yield { type: 'complete' }; return
+        }
+        // Tool completions after the assessment invalidate its suggested action.
+        if (decision && decision.snapshot.revision !== snapshot().revision) {
+          checkpoint.continuation.consumed = false; supervisor.markPaused('执行状态已变化，旧纠偏建议已取消。'); persist()
+          yield { type: 'error', message: '执行状态已变化，旧纠偏建议已取消。请检查已记录结果后继续。' }
+          yield { type: 'complete' }; return
+        }
+        prompt = continuation; attachments = undefined
+        options = { ...options, continueUserTask: true, previousResponseInterrupted: false }
+        pending = undefined; barrier = undefined; this.progressArbiters.delete(key)
+      }
+    } finally {
+      await supervisor.drain()
+      this.progressArbiters.delete(key)
+      if (managed.progressSupervisor === supervisor) managed.progressSupervisor = undefined
+      reviewer?.destroy()
+      if (managed.progressReviewer === reviewer) managed.progressReviewer = undefined
+    }
+  }
+
   private answerDeliveryControl(managed: ManagedSession): AnswerDeliveryControl {
     const state = managed.answerDelivery!
     return {
@@ -7484,7 +7776,7 @@ export class SessionManager implements ISessionManager {
         || managed.processingGeneration !== state.generation || managed.authRetryInProgress) return
       agent.configureAnswerDelivery?.(this.answerDeliveryControl(managed))
       complete = undefined
-      for await (const event of agent.chat(ANSWER_RECOVERY_PROMPT, undefined, { ...options, previousResponseInterrupted: false, continueUserTask: true })) {
+      for await (const event of this.runProgressExecution(managed, agent, ANSWER_RECOVERY_PROMPT, undefined, { ...options, previousResponseInterrupted: false, continueUserTask: true })) {
         if (event.type === 'complete') complete = event
         else yield event
       }
@@ -7492,9 +7784,9 @@ export class SessionManager implements ISessionManager {
     if (!state.committedMessageId && (state.persistenceFailed || state.recovery) && managed.isProcessing && !managed.stopRequested
       && managed.answerDelivery === state && managed.processingGeneration === state.generation
       && !managed.messages.slice(managed.messages.findIndex(m => m.id === state.userMessageId) + 1).some(m => m.role === 'error')) {
-      yield { type: 'error', message: state.persistenceFailed
-        ? '答案保存失败：系统未能保存已提交的正文。请稍后继续此任务；重新生成失败时将恢复原答案。'
-        : '未完成答案交付：模型未提交完整正文。已有工作文件已保留；重新生成失败时将恢复原答案，请继续此任务。' }
+      yield { type: 'typed_error', error: createTypedError(state.persistenceFailed ? 'answer_persistence_failed' : 'answer_delivery_missing', { message: state.persistenceFailed
+        ? '答案保存失败：系统未能保存已提交的正文。已保留执行记录；请先排查存储问题。'
+        : '未完成答案交付：模型未提交完整正文。已保留执行记录，请继续此任务。' }) }
     }
     if (complete) yield complete
     else if (state.committedMessageId) yield { type: 'complete' }
@@ -7844,6 +8136,7 @@ export class SessionManager implements ISessionManager {
 
     sessionLog.info('Cancelling processing for session:', sessionId, silent ? '(silent)' : '')
 
+    managed.progressSupervisor?.stop()
     // Stop is authoritative over an automatic source continuation. Clear both
     // the not-yet-fired timer and any usage accumulator waiting to cross that
     // logical boundary so the cancelled task cannot resurrect itself.
@@ -11561,7 +11854,7 @@ export class SessionManager implements ISessionManager {
           managed.tokenUsage.inputTokens = event.usage.contextTokens ?? event.usage.inputTokens
           // outputTokens and costUsd are accumulated across all turns (total session usage)
           managed.tokenUsage.outputTokens += event.usage.outputTokens
-          managed.tokenUsage.totalTokens = managed.tokenUsage.inputTokens + managed.tokenUsage.outputTokens
+          managed.tokenUsage.totalTokens = managed.tokenUsage.inputTokens + managed.tokenUsage.outputTokens + (managed.tokenUsage.evaluationTokens ?? 0)
           managed.tokenUsage.costUsd += event.usage.costUsd ?? 0
           // Cache tokens reflect current state, not accumulated
           managed.tokenUsage.cacheReadTokens = event.usage.cacheReadTokens ?? 0
@@ -12429,6 +12722,14 @@ export class SessionManager implements ISessionManager {
    * Should be called on app shutdown to prevent resource leaks.
    */
   cleanup(): void {
+    this.progressShuttingDown = true
+    for (const managed of this.sessions.values()) {
+      managed.progressSupervisor?.stop()
+      managed.progressReviewer?.destroy()
+      managed.progressReviewer = undefined
+    }
+    this.progressArbiters.clear()
+    this.progressBudgets.clear()
     this.spawnCompletionUnsub?.()
     this.spawnCompletionUnsub = undefined
     sessionLog.info('Cleaning up resources...')
