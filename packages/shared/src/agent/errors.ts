@@ -290,6 +290,12 @@ const ERROR_DEFINITIONS: Record<ErrorCode, Omit<AgentError, 'code' | 'originalEr
     canRetry: true,
     retryDelayMs: 1000,
   },
+  model_request_timeout: {
+    title: 'Model request time limit reached',
+    message: 'This model request reached its time limit. Recorded work is retained. Continue this conversation to resume.',
+    actions: [],
+    canRetry: false,
+  },
   provider_timeout: {
     title: 'Model response timed out',
     message: 'The model service did not respond in time. This may be an upstream timeout. Check the node results before retrying.',
@@ -478,7 +484,9 @@ export function parseError(
   let code: ErrorCode = 'unknown_error';
 
   // Check for OpenRouter data policy errors first (these contain "no endpoints" which could confuse other checks)
-  if (lowerMessage.includes('taking too long to respond') || lowerMessage.includes('request timed out') || lowerMessage.includes('etimedout')) {
+  if (lowerMessage.includes('model request time limit reached')) {
+    code = 'model_request_timeout';
+  } else if (lowerMessage.includes('taking too long to respond') || lowerMessage.includes('request timed out') || lowerMessage.includes('etimedout')) {
     code = 'provider_timeout';
   } else if (lowerMessage.includes('pi subprocess exited unexpectedly')) {
     code = 'agent_process_exited';
@@ -597,7 +605,7 @@ export function parseError(
     : undefined;
 
   // Terminal diagnostics must not expose provider payloads, paths, or subprocess arguments.
-  if (code === 'provider_timeout' || code === 'context_limit' || code === 'stream_interrupted' || code === 'agent_process_exited') {
+  if (code === 'model_request_timeout' || code === 'provider_timeout' || code === 'context_limit' || code === 'stream_interrupted' || code === 'agent_process_exited') {
     return { code, ...definition, providerInfo };
   }
 

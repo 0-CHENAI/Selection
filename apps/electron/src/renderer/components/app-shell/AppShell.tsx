@@ -128,6 +128,7 @@ import { SendToWorkspaceDialog } from "./SendToWorkspaceDialog"
 import { CreateProjectDialog } from "../projects/CreateProjectDialog"
 import { MessagingDialogHost } from "@/components/messaging/MessagingDialogHost"
 import { EditPopover, getEditConfig, type EditContextKey } from "@/components/ui/EditPopover"
+import { AUTOMATION_CREATION_KEYS, automationCreationKey, type AutomationCreationKey, type AutomationCreationCategory } from "@/components/automations/creation-context"
 import SettingsNavigator from "@/pages/settings/SettingsNavigator"
 import {
   PANEL_GAP,
@@ -1352,7 +1353,7 @@ function AppShellContent({
   // We use controlled popovers instead of deep links so the user can type
   // their request in the popover UI before opening a new chat window.
   // add-source variants: add-source (generic), add-source-api, add-source-mcp, add-source-local
-  type ControlledEditPopoverKey = 'statuses' | 'labels' | 'views' | 'add-source' | 'add-source-api' | 'add-source-mcp' | 'add-source-local' | 'add-skill' | 'add-label' | 'add-automation' | 'add-project'
+  type ControlledEditPopoverKey = 'statuses' | 'labels' | 'views' | 'add-source' | 'add-source-api' | 'add-source-mcp' | 'add-source-local' | 'add-skill' | 'add-label' | AutomationCreationKey | 'add-project'
   const [editPopoverOpen, setEditPopoverOpen] = useState<ControlledEditPopoverKey | null>(null)
   const [copySkillsFromOpen, setCopySkillsFromOpen] = useState(false)
   const [copySourcesFromOpen, setCopySourcesFromOpen] = useState(false)
@@ -1529,9 +1530,9 @@ function AppShellContent({
 
   // Handler for "Add Automation" context menu action
   // Opens the EditPopover for adding a new automation
-  const openAddAutomation = useCallback(() => {
+  const openAddAutomation = useCallback((category?: AutomationCreationCategory) => {
     captureContextMenuPosition()
-    setTimeout(() => setEditPopoverOpen('add-automation'), 50)
+    setTimeout(() => setEditPopoverOpen(automationCreationKey(category)), 50)
   }, [captureContextMenuPosition])
 
   const reopenCreationJob = useCallback((contextKey: string) => {
@@ -1541,7 +1542,7 @@ function AppShellContent({
       'add-source-mcp',
       'add-source-local',
       'add-skill',
-      'add-automation',
+      ...AUTOMATION_CREATION_KEYS,
     ]
     if (!supportedKeys.includes(contextKey as ControlledEditPopoverKey)) return
     editPopoverAnchorY.current = 52
@@ -2086,7 +2087,7 @@ function AppShellContent({
                           icon: Clock,
                           variant: (automationFilter?.kind === 'type' && automationFilter.automationType === 'scheduled') ? "default" : "ghost",
                           onClick: handleAutomationsScheduledClick,
-                          contextMenu: { type: 'automations' as const, onAddAutomation: openAddAutomation },
+                          contextMenu: { type: 'automations' as const, onAddAutomation: () => openAddAutomation('scheduled') },
                         },
                         {
                           id: "nav:automations:event",
@@ -2095,7 +2096,7 @@ function AppShellContent({
                           icon: Radio,
                           variant: (automationFilter?.kind === 'type' && automationFilter.automationType === 'event') ? "default" : "ghost",
                           onClick: handleAutomationsEventClick,
-                          contextMenu: { type: 'automations' as const, onAddAutomation: openAddAutomation },
+                          contextMenu: { type: 'automations' as const, onAddAutomation: () => openAddAutomation('event') },
                         },
                         {
                           id: "nav:automations:agentic",
@@ -2104,7 +2105,7 @@ function AppShellContent({
                           icon: Bot,
                           variant: (automationFilter?.kind === 'type' && automationFilter.automationType === 'agentic') ? "default" : "ghost",
                           onClick: handleAutomationsAgenticClick,
-                          contextMenu: { type: 'automations' as const, onAddAutomation: openAddAutomation },
+                          contextMenu: { type: 'automations' as const, onAddAutomation: () => openAddAutomation('agentic') },
                         },
                       ],
                     },
@@ -2230,13 +2231,14 @@ function AppShellContent({
                         onOpenResult={openCreationResult}
                       />
                       <EditPopover
+                        key={`${activeWorkspace.id}:${automationCreationKey(automationFilter?.automationType)}`}
                         trigger={
                           <HeaderIconButton
                             icon={<Plus className="h-4 w-4" />}
                             tooltip={t("sidebarMenu.addAutomation")}
                           />
                         }
-                        {...getEditConfig('add-automation', activeWorkspace.rootPath)}
+                        {...getEditConfig(automationCreationKey(automationFilter?.automationType), activeWorkspace.rootPath)}
                       />
                     </>
                   )}
@@ -2619,22 +2621,25 @@ function AppShellContent({
               />
             </>
           )}
-          {/* Add Automation EditPopover - triggered from "Add Automation" context menu in automations */}
-          <EditPopover
-            open={editPopoverOpen === 'add-automation'}
-            onOpenChange={(isOpen) => setEditPopoverOpen(isOpen ? 'add-automation' : null)}
-            modal={true}
-            trigger={
-              <div
-                className="fixed w-0 h-0 pointer-events-none"
-                style={{ left: sidebarWidth + 20, top: editPopoverAnchorY.current }}
-                aria-hidden="true"
-              />
-            }
-            side="bottom"
-            align="start"
-            {...getEditConfig('add-automation', activeWorkspace.rootPath)}
-          />
+          {/* Durable creation dialogs are scoped by workspace and trigger category. */}
+          {AUTOMATION_CREATION_KEYS.map((variant) => (
+            <EditPopover
+              key={`${activeWorkspace.id}:${variant}`}
+              open={editPopoverOpen === variant}
+              onOpenChange={(isOpen) => setEditPopoverOpen(isOpen ? variant : null)}
+              modal={true}
+              trigger={
+                <div
+                  className="fixed w-0 h-0 pointer-events-none"
+                  style={{ left: sidebarWidth + 20, top: editPopoverAnchorY.current }}
+                  aria-hidden="true"
+                />
+              }
+              side="bottom"
+              align="start"
+              {...getEditConfig(variant, activeWorkspace.rootPath)}
+            />
+          ))}
           {/* Add Label EditPopover - triggered from "Add New Label" context menu on labels */}
           <EditPopover
             open={editPopoverOpen === 'add-label'}

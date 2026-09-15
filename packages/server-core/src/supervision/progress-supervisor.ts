@@ -136,12 +136,20 @@ export class ProgressSupervisor {
     const timeout = setTimeout(() => controller.abort(), this.policy.queryTimeoutMs)
     this.nextCheck = this.now() + this.policy.minCheckMs
     let charge = reservation; let estimated = true; let cost = 0
+    let onAbort: (() => void) | undefined
     try {
       this.update('evaluating')
-      const result = await this.options.query({ purpose: 'progress-evaluation', model: 'Laufry',
+      const cancelled = new Promise<never>((_, reject) => {
+        onAbort = () => reject(new Error('Progress evaluation cancelled'))
+        controller.signal.addEventListener('abort', onAbort, { once: true })
+        if (controller.signal.aborted) onAbort()
+      })
+      // Cancellation reaches the adapter, but a broken adapter must not hold
+      // session cleanup forever. Unknown usage retains the reservation estimate.
+      const result = await Promise.race([this.options.query({ purpose: 'progress-evaluation', model: 'Laufry',
         prompt, systemPrompt: SYSTEM, maxTokens: this.policy.outputTokens, timeoutMs: this.policy.queryTimeoutMs,
         outputSchema,
-      }, controller.signal)
+      }, controller.signal), cancelled])
       if (result.inputTokens !== undefined && result.outputTokens !== undefined) {
         charge = result.inputTokens + result.outputTokens; cost = result.costUsd ?? 0; estimated = false
       }
@@ -173,6 +181,7 @@ export class ProgressSupervisor {
     } catch (error) {
       if (!this.disposed && this.state.phase !== 'paused') this.update('unavailable', controller.signal.aborted ? '评估已取消或超时，未执行纠偏' : error instanceof Error ? error.message : '评估暂不可用')
     } finally {
+      if (onAbort) controller.signal.removeEventListener('abort', onAbort)
       clearTimeout(timeout); budget.reserved -= reservation; budget.tokens += charge
       this.state.evaluationTokens += charge
       if (estimated) this.state.estimatedTokens += charge

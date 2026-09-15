@@ -78,3 +78,15 @@ describe('semantic progress supervision', () => {
     await new ProgressSupervisor(f.options).tick(); expect(f.decisions).toHaveLength(0)
   })
 })
+
+it('settles cancellation even when the evaluator ignores its abort signal', async () => {
+  const f = fixture()
+  f.options.query = async () => new Promise(() => {})
+  const supervisor = new ProgressSupervisor(f.options)
+  const evaluation = supervisor.tick()
+  supervisor.stop()
+  await evaluation
+  expect(f.decisions).toHaveLength(0)
+  expect(f.budget.reserved).toBe(0)
+  expect(f.budget.tokens).toBeGreaterThan(0)
+})

@@ -10,7 +10,7 @@ import { getSessionPath } from '@craft-agent/shared/sessions'
 const roots: string[] = []
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }) })
 function deferred() { let resolve!: () => void; const promise = new Promise<void>(r => { resolve = r }); return { promise, resolve } }
-function setup(terminal?: 'output_limit' | 'stream_interrupted') {
+function setup(terminal?: 'output_limit' | 'stream_interrupted' | 'model_request_timeout') {
   const root = mkdtempSync(join(tmpdir(), 'progress-integration-')); roots.push(root)
   writeFileSync(join(root, 'config.json'), JSON.stringify({ id: 'ws', name: 'test', slug: 'test', progressSupervision: { mode: 'observe' } }))
   const manager = new SessionManager()
@@ -110,15 +110,27 @@ describe('SessionManager progress integration', () => {
     await f.manager.flushSession(f.managed.id);
   });
 
-  it.each(['output_limit', 'stream_interrupted'] as const)('preserves a resumable checkpoint for %s without answer-only retry', async terminal => {
+  it.each(['output_limit', 'stream_interrupted', 'model_request_timeout'] as const)('preserves a resumable checkpoint for %s without answer-only retry', async terminal => {
     const f = setup(terminal); const run = f.manager.sendMessage(f.managed.id, '画图');
     await f.entered.promise; f.interrupted.resolve(); await run;
     expect(f.prompts).toHaveLength(1);
     expect(f.managed.progressSupervision?.phase).toBe('paused');
-    expect(f.managed.messages.filter(m => m.errorCode === terminal)).toHaveLength(1);
+    expect(f.managed.messages.filter(m => m.errorCode === (terminal === 'model_request_timeout' ? 'call_time_limit' : terminal))).toHaveLength(1);
     expect(readProgressCheckpoint(getSessionPath(f.root, f.managed.id))?.continuation?.consumed).toBe(false);
     await f.manager.flushSession(f.managed.id);
   });
+
+  it('limits Swarm parent evaluation by the shared root usage and reservations', async () => {
+    const f = setup(); const run = f.manager.sendMessage(f.managed.id, '画图')
+    await f.entered.promise
+    const options = (f.managed.progressSupervisor as any).options
+    ;(f.manager as any).getManagedSwarmChildren = () => [{ id: 'worker', messages: [], orchestrationStatus: 'running' }]
+    const initial = options.evaluationAllowance()
+    options.rootBudget.tokens = initial - 100
+    options.rootBudget.reserved = 60
+    expect(options.evaluationAllowance()).toBeCloseTo(40)
+    f.interrupted.resolve(); await run; await f.manager.flushSession(f.managed.id)
+  })
 
   it('pauses at the resource boundary without replaying the original prompt', async () => {
     const f = setup(); const run = f.manager.sendMessage(f.managed.id, '画图')

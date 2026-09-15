@@ -80,15 +80,27 @@ describe('PiAgent.queryLlm — subprocess RPC round-trip', () => {
     await expect(result).rejects.toThrow('abort failed'); agent.destroy();
   });
 
+  it('rejects a pending progress interrupt immediately when its subprocess exits', async () => {
+    const agent = new PiAgent(createConfig()); installFakeSubprocess(agent);
+    const result = agent.interruptForProgress();
+    (agent as any).handleSubprocessExit(1, null);
+    await expect(result).rejects.toThrow('exited unexpectedly');
+    expect((agent as any).pendingProgressInterrupts.size).toBe(0);
+    agent.destroy();
+  });
+
   it('does not spawn after disposal during credential loading', async () => {
     const config = Object.assign(createConfig(), { runtime: { paths: { piServer: '/unused/server.js', node: process.execPath } } });
     const agent = new PiAgent(config);
     let credentialsReady!: (value: unknown) => void;
     (agent as any).getPiAuth = () => new Promise(resolve => { credentialsReady = resolve; });
-    const startup = (agent as any).spawnSubprocess();
+    const startup = (agent as any).ensureSubprocess();
+    const settled = Promise.allSettled([startup]);
     await flushMicrotasks(); agent.destroy();
     credentialsReady({ provider: 'custom-endpoint', credential: { type: 'api_key', key: 'test-only' } });
-    await expect(startup).rejects.toThrow('startup was cancelled');
+    const [result] = await settled;
+    expect(result?.status).toBe('rejected');
+    if (result?.status === 'rejected') expect(result.reason.message).toContain('startup cancelled');
     expect((agent as any).subprocess).toBeNull();
   });
 

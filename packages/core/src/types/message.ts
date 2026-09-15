@@ -529,6 +529,7 @@ export type ErrorCode =
   | 'sdk_binary_missing'     // SDK subprocess binary not present on disk (incomplete bundle)
   | 'sdk_cwd_missing'        // SDK subprocess cwd not present on disk (stale cross-machine import)
   | 'provider_timeout'
+  | 'model_request_timeout'
   | 'no_response'
   | 'tool_only_response'
   | 'context_limit'

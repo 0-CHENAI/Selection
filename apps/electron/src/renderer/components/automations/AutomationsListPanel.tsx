@@ -18,6 +18,7 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import { EntityListEmptyScreen } from '@/components/ui/entity-list-empty'
 import { EntityRow } from '@/components/ui/entity-row'
 import { EditPopover, getEditConfig } from '@/components/ui/EditPopover'
+import { automationCreationKey } from './creation-context'
 import { SessionSearchHeader } from '@/components/app-shell/SessionSearchHeader'
 import { AutomationMenu } from './AutomationMenu'
 import { BatchAutomationMenu } from './BatchAutomationMenu'
@@ -294,13 +295,14 @@ export function AutomationsListPanel({
         >
           {workspaceRootPath && (
             <EditPopover
+              key={`${workspaceRootPath}:${automationCreationKey(automationFilter?.kind)}`}
               align="center"
               trigger={
                 <button className="inline-flex items-center h-7 px-3 text-xs font-medium rounded-[8px] bg-background shadow-minimal hover:bg-foreground/[0.03] transition-colors">
                   {t('automations.addAutomation')}
                 </button>
               }
-              {...getEditConfig('add-automation', workspaceRootPath)}
+              {...getEditConfig(automationCreationKey(automationFilter?.kind), workspaceRootPath)}
             />
           )}
         </EntityListEmptyScreen>

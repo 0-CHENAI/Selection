@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { waitForCompaction } from './wait-for-compaction.ts';
 /**
  * Pi Agent Server
  *
@@ -1624,20 +1625,6 @@ async function handleInit(msg: Extract<InboundMessage, { type: 'init' }>): Promi
  * in PiAgent.requestCompact (300 s), since GPT compactions can legitimately
  * take 60–120 s.
  */
-async function waitForCompaction(session: { isCompacting: boolean }, timeoutMs = 300_000): Promise<void> {
-  if (!session.isCompacting) return;
-  debugLog('Waiting for in-flight compaction to finish before prompt...');
-  const start = Date.now();
-  while (session.isCompacting) {
-    if (Date.now() - start > timeoutMs) {
-      throw new Error(`Compaction is still running after ${Math.floor(timeoutMs / 1000)}s; refusing to start a concurrent model request`);
-    }
-    await new Promise(resolve => setTimeout(resolve, 200));
-  }
-  if (Date.now() - start < timeoutMs) {
-    debugLog('Compaction finished, proceeding with prompt');
-  }
-}
 
 async function handlePrompt(msg: Extract<InboundMessage, { type: 'prompt' }>): Promise<void> {
   currentUserMessage = msg.message;
@@ -1771,24 +1758,25 @@ function handlePreToolUseResponse(msg: Extract<InboundMessage, { type: 'pre_tool
 }
 
 async function handleAbort(strict = false): Promise<void> {
-  let abortError: unknown;
-  if (piSession) {
-    try {
-      await piSession.abort();
-    } catch (error) {
-      debugLog(`Abort failed: ${error instanceof Error ? error.message : String(error)}`);
-      abortError = error;
-    }
-  }
-  sourceGuideEventGate.clear();
-  pendingSpawnFanOutQualifications.clear();
-
-  // Reject all pending pre-tool-use requests
-  for (const [, pending] of pendingPreToolUse) {
+  // SDK abort waits for tools. Release bridge waits first to break the cycle
+  // where the pending tool is itself waiting for the abort handler to finish.
+  for (const pending of pendingPreToolUse.values()) {
     pending.resolve({ action: 'block', reason: 'Aborted' });
   }
   pendingPreToolUse.clear();
-  if (strict && abortError) throw abortError;
+  for (const pending of pendingToolExecutions.values()) {
+    pending.resolve({ isError: true, content: [{ type: 'text', text: 'Tool wait interrupted. The operation outcome may be unknown; do not automatically retry.' }] });
+  }
+  pendingToolExecutions.clear();
+  sourceGuideEventGate.clear();
+  pendingSpawnFanOutQualifications.clear();
+  if (piSession) {
+    try { await piSession.abort(); }
+    catch (error) {
+      debugLog(`Abort failed: ${error instanceof Error ? error.message : String(error)}`);
+      if (strict) throw error;
+    }
+  }
 }
 
 async function handleMiniCompletion(msg: Extract<InboundMessage, { type: 'mini_completion' }>): Promise<void> {

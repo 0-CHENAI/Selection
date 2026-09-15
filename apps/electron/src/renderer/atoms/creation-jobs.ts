@@ -132,6 +132,14 @@ export function findLatestCreationJob(
     .sort((a, b) => b.updatedAt - a.updatedAt)[0]
 }
 
+/** New automation requests must not inherit a successfully created rule's conversation. */
+export function findResumableCreationJob(
+  jobs: CreationJob[], workspaceId: string, contextKey: string,
+): CreationJob | undefined {
+  const latest = findLatestCreationJob(jobs, workspaceId, contextKey)
+  return latest?.kind === 'automation' && latest.status === 'completed' ? undefined : latest
+}
+
 export function claimCreationJob(
   jobs: CreationJob[],
   input: ClaimCreationJobInput,

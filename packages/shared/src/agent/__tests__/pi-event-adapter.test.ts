@@ -34,6 +34,14 @@ describe('PiEventAdapter', () => {
     rmSync(sessionDir, { recursive: true, force: true });
   });
 
+  it('surfaces the local request limit and allows the failed turn to complete', () => {
+    const events = collect(adapter.adaptEvent({ type: 'message_end', message: {
+      role: 'assistant', stopReason: 'error', errorMessage: 'Model request time limit reached.',
+    } } as any));
+    expect(events[0]).toMatchObject({ type: 'typed_error', error: { code: 'model_request_timeout', canRetry: false } });
+    expect(adapter.shouldCompleteQueue(true)).toBe(true);
+  });
+
   it('attaches current session SSE diagnostics to a typed timeout', () => {
     const details = ['{"httpStatus":200,"phase":"provider-error","errorCategory":"timeout","requestId":"req-297"}'];
     const events = collect(adapter.adaptEvent({ type: 'message_end', message: {
