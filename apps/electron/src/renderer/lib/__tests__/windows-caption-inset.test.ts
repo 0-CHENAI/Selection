@@ -28,4 +28,11 @@ describe('Windows caption inset (#260)', () => {
     expect(topBar).toContain('titlebar-no-drag')
     expect(workspace).toContain('windowsCaptionInsetStyle')
   })
+
+  it('feeds the same inset into overlay preview headers (#356)', () => {
+    const app = readFileSync(join(import.meta.dir, '../../App.tsx'), 'utf8')
+    expect(app).toContain('windowsCaptionInsetStyle')
+    expect(app).toContain('windowsCaptionInsetPadding')
+  })
 })
+
