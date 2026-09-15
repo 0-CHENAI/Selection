@@ -609,6 +609,14 @@ export interface AgentEventUsage {
   contextTokens?: number;
   /** Model's context window size in tokens (from SDK modelUsage) */
   contextWindow?: number;
+  /** Cache read share of the current request input (0-1). */
+  cacheHitRate?: number;
+  /** Estimated system / tools / messages split. Display with a ~ prefix. */
+  contextBreakdown?: {
+    systemPrompt: number;
+    tools: number;
+    messages: number;
+  };
 }
 
 /** Live multimodal tool-result blocks. Image payloads are never persisted in Selection session JSONL. */

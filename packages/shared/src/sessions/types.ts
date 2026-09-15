@@ -152,6 +152,14 @@ export interface SessionTokenUsage {
   cacheCreationTokens?: number;
   /** Model's context window size in tokens (from SDK modelUsage) */
   contextWindow?: number;
+  /** Cache read share of the latest request input (0-1). */
+  cacheHitRate?: number;
+  /** Estimated system / tools / messages split. Display with a ~ prefix. */
+  contextBreakdown?: {
+    systemPrompt: number;
+    tools: number;
+    messages: number;
+  };
   /** Usage reported by the most recent individual model call. Absent on legacy sessions. */
   lastCall?: SessionModelCallUsage;
   /** Live aggregate for the user task that is currently processing. Runtime-only in normal operation. */

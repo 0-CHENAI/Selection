@@ -498,6 +498,35 @@ describe('PiEventAdapter', () => {
           costUsd: 0.0033,
           contextTokens: 350,
           contextWindow: undefined,
+          cacheHitRate: 150 / 350,
+        },
+      });
+    });
+
+    it('should forward estimated context breakdown on usage_update', () => {
+      const events = collect(adapter.adaptEvent({
+        type: 'message_end',
+        message: {
+          role: 'assistant',
+          stopReason: 'stop',
+          content: 'Done',
+          usage: {
+            input: 200,
+            output: 30,
+            cacheRead: 50,
+            cacheWrite: 0,
+            totalTokens: 280,
+            cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+          },
+        },
+        contextBreakdown: { systemPrompt: 12, tools: 34, messages: 56 },
+      } as any));
+
+      expect(events.at(-1)).toMatchObject({
+        type: 'usage_update',
+        usage: {
+          cacheHitRate: 50 / 250,
+          contextBreakdown: { systemPrompt: 12, tools: 34, messages: 56 },
         },
       });
     });
@@ -1438,6 +1467,7 @@ describe('PiEventAdapter', () => {
             costUsd: 0.1,
             contextTokens: 12_000,
             contextWindow: 262_144,
+            cacheHitRate: 2_000 / 12_000,
           },
         },
         { type: 'info', message: 'Compacted context to fit within limits' },

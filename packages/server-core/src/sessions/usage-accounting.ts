@@ -27,6 +27,24 @@ function normalizeCounter(value: number | undefined): number {
   return typeof value === 'number' && Number.isFinite(value) ? Math.max(0, value) : 0
 }
 
+/** Last-call cache hit rate: cache reads over the current request input footprint. */
+export function cacheHitRateFromUsage(usage: Pick<AgentEventUsage, 'inputTokens' | 'cacheReadTokens' | 'contextTokens'>): number | undefined {
+  const cacheRead = normalizeCounter(usage.cacheReadTokens)
+  const totalInput = normalizeCounter(usage.contextTokens) || (normalizeCounter(usage.inputTokens) + cacheRead)
+  if (totalInput <= 0) return undefined
+  return Math.min(1, cacheRead / totalInput)
+}
+
+export function applyContextUsageFields(
+  tokenUsage: { cacheHitRate?: number; contextBreakdown?: AgentEventUsage['contextBreakdown'] },
+  usage: AgentEventUsage,
+): void {
+  tokenUsage.cacheHitRate = usage.cacheHitRate ?? cacheHitRateFromUsage(usage)
+  if (usage.contextBreakdown) {
+    tokenUsage.contextBreakdown = usage.contextBreakdown
+  }
+}
+
 export function normalizeModelCallUsage(usage: AgentEventUsage): SessionModelCallUsage {
   const inputTokens = normalizeCounter(usage.inputTokens)
   const outputTokens = normalizeCounter(usage.outputTokens)

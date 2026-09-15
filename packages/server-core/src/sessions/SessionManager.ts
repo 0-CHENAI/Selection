@@ -148,6 +148,7 @@ import { createTypedError, parseError } from '@craft-agent/shared/agent/errors'
 import { buildBackendRuntimeSignature, buildRestartRequiredSignature, prepareModelImageAttachments } from './runtime-config'
 import { validateArchiveTarget } from './archive-guards'
 import {
+  applyContextUsageFields,
   createTurnUsageAccumulator,
   finalizeTurnUsage,
   recordModelCallStart,
@@ -11863,6 +11864,7 @@ export class SessionManager implements ISessionManager {
           if (event.usage.contextWindow) {
             managed.tokenUsage.contextWindow = event.usage.contextWindow
           }
+          applyContextUsageFields(managed.tokenUsage, event.usage)
         }
         break
 
@@ -11909,6 +11911,7 @@ export class SessionManager implements ISessionManager {
           if (event.usage.contextWindow) {
             managed.tokenUsage.contextWindow = event.usage.contextWindow
           }
+          applyContextUsageFields(managed.tokenUsage, event.usage)
 
           // Send to renderer for immediate UI update
           this.sendEvent({

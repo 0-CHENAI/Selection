@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'bun:test'
 import {
+  applyContextUsageFields,
+  cacheHitRateFromUsage,
   createTurnUsageAccumulator,
   finalizeTurnUsage,
   normalizeModelCallUsage,
@@ -101,5 +103,31 @@ describe('turn usage accounting', () => {
     expect(turn.modelCallCount).toBe(2)
     expect(turn.inputTokens).toBe(100)
     expect(turn.outputTokens).toBe(10)
+  })
+})
+
+describe('context usage fields', () => {
+  it('computes last-call cache hit rate from the request footprint', () => {
+    expect(cacheHitRateFromUsage({
+      inputTokens: 200,
+      cacheReadTokens: 150,
+      contextTokens: 350,
+    })).toBe(150 / 350)
+    expect(cacheHitRateFromUsage({ inputTokens: 0, cacheReadTokens: 0 })).toBeUndefined()
+  })
+
+  it('keeps an earlier breakdown when a later usage event omits it', () => {
+    const tokenUsage = {
+      cacheHitRate: 0.1,
+      contextBreakdown: { systemPrompt: 10, tools: 20, messages: 30 },
+    }
+    applyContextUsageFields(tokenUsage, {
+      inputTokens: 200,
+      outputTokens: 10,
+      cacheReadTokens: 50,
+      contextTokens: 250,
+    })
+    expect(tokenUsage.cacheHitRate).toBe(50 / 250)
+    expect(tokenUsage.contextBreakdown).toEqual({ systemPrompt: 10, tools: 20, messages: 30 })
   })
 })

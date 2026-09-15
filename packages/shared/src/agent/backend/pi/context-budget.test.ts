@@ -5,6 +5,7 @@ import {
   buildContextBudget,
   calculateContextBudget,
   calculateOverflowRetryMaxTokens,
+  estimateContextInputBreakdown,
   estimateContextInputTokens,
   estimateTextTokensConservatively,
   parseContextOverflow,
@@ -91,6 +92,13 @@ describe('context input estimation', () => {
 
     expect(estimateTextTokensConservatively('中文abcde')).toBe(4);
     expect(estimateContextInputTokens(context)).toBeGreaterThan(50_000);
+
+    const breakdown = estimateContextInputBreakdown(context);
+    expect(breakdown.systemPrompt).toBeGreaterThan(0);
+    expect(breakdown.tools).toBeGreaterThan(0);
+    expect(breakdown.messages).toBeGreaterThan(0);
+    expect(breakdown.systemPrompt + breakdown.tools + breakdown.messages)
+      .toBeLessThanOrEqual(estimateContextInputTokens(context));
   });
 });
 

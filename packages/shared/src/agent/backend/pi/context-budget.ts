@@ -28,6 +28,13 @@ export interface ParsedContextOverflow {
   requestedOutputTokens?: number;
 }
 
+/** Estimated request composition. Provider usage is not segmented, so UI should prefix these with ~. */
+export interface ContextInputBreakdown {
+  systemPrompt: number;
+  tools: number;
+  messages: number;
+}
+
 function safeJson(value: unknown): string {
   try {
     return JSON.stringify(value) ?? '';
@@ -120,12 +127,21 @@ function estimateFromLatestUsage(context: Context): number {
   return latestUsage + trailing + estimateTools(addedTools);
 }
 
+export function estimateContextInputBreakdown(context: Context): ContextInputBreakdown {
+  return {
+    systemPrompt: estimateTextTokensConservatively(context.systemPrompt ?? ''),
+    tools: estimateTools(context.tools),
+    messages: context.messages.reduce((total, message) => total + estimateMessage(message), 0),
+  };
+}
+
+function breakdownTotal(breakdown: ContextInputBreakdown): number {
+  return breakdown.systemPrompt + breakdown.tools + breakdown.messages;
+}
+
 /** Estimate the complete request, including system prompt, tool schemas and images. */
 export function estimateContextInputTokens(context: Context): number {
-  const fullEstimate =
-    estimateTextTokensConservatively(context.systemPrompt ?? '') +
-    estimateTools(context.tools) +
-    context.messages.reduce((total, message) => total + estimateMessage(message), 0);
+  const fullEstimate = breakdownTotal(estimateContextInputBreakdown(context));
 
   // Provider usage is the best signal for an already-sent prefix. The full
   // estimate protects new sessions and changed system/tool payloads. Taking
