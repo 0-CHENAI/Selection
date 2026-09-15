@@ -9,9 +9,8 @@
 import { createLogger } from '../../utils/debug.ts';
 import type { EventBus, BaseEventPayload } from '../event-bus.ts';
 import type { AutomationHandler, AutomationsConfigProvider } from './types.ts';
-import { APP_EVENTS, type AutomationEvent, type WebhookAction, type WebhookActionResult, type AppEvent, type AgentEvent, type AutomationMatcher, type SdkAutomationInput } from '../types.ts';
+import { APP_EVENTS, type AutomationEvent, type WebhookAction, type WebhookActionResult, type AppEvent } from '../types.ts';
 import { matcherMatches, buildWebhookEnv, expandEnvVars } from '../utils.ts';
-import { buildWebhookEnvFromSdkInput } from '../sdk-bridge.ts';
 import { executeWithRetry, redactUrl, isTransientFailure, createWebhookHistoryEntry, expandWebhookAction } from '../webhook-utils.ts';
 import { RetryScheduler } from '../retry-scheduler.ts';
 import { appendAutomationHistoryEntry } from '../history-store.ts';
@@ -116,7 +115,10 @@ export class WebhookHandler implements AutomationHandler {
   constructor(options: WebhookHandlerOptions, configProvider: AutomationsConfigProvider) {
     this.options = options;
     this.configProvider = configProvider;
-    this.retryScheduler = new RetryScheduler({ workspaceRootPath: options.workspaceRootPath });
+    this.retryScheduler = new RetryScheduler({
+      workspaceRootPath: options.workspaceRootPath,
+      isMatcherActive: id => APP_EVENTS.some(event => this.configProvider.getMatchersForEvent(event).some(m => m.id === id && m.enabled !== false)),
+    });
   }
 
   /**
@@ -161,35 +163,10 @@ export class WebhookHandler implements AutomationHandler {
     await this.executeWebhookTasks(event, env, webhookTasks);
   }
 
-  /**
-   * Dispatch webhook actions for Agent Events that already passed matcher/conditions.
-   */
-  async dispatchSdkEvent(
-    event: AgentEvent,
-    input: SdkAutomationInput,
-    matchers: AutomationMatcher[],
-  ): Promise<WebhookActionResult[]> {
-    const webhookTasks: WebhookTask[] = [];
-    for (const matcher of matchers) {
-      for (const action of matcher.actions) {
-        if (action.type === 'webhook') {
-          webhookTasks.push({ action, matcherId: matcher.id ?? 'unknown' });
-        }
-      }
-    }
-    if (webhookTasks.length === 0) return [];
-
-    const env = buildWebhookEnvFromSdkInput(event, input);
-    return this.executeWebhookTasks(event, env, webhookTasks, {
-      sourceSessionId: input.source_session_id,
-    });
-  }
-
   private async executeWebhookTasks(
     event: AutomationEvent,
     env: Record<string, string>,
     webhookTasks: WebhookTask[],
-    extra?: { sourceSessionId?: string },
   ): Promise<WebhookActionResult[]> {
     log.debug(`[WebhookHandler] Processing ${webhookTasks.length} webhooks for ${event}`);
 
@@ -260,7 +237,6 @@ export class WebhookHandler implements AutomationHandler {
         responseBody: result.responseBody,
         status: result.success ? 'succeeded' : (result.error?.startsWith('Rate-limited') ? 'rate-limited' : 'failed'),
         event,
-        sourceSessionId: extra?.sourceSessionId,
       });
       try {
         await appendAutomationHistoryEntry(this.options.workspaceRootPath, entry);

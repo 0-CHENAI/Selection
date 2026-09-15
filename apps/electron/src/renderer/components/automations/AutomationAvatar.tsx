@@ -12,9 +12,6 @@ import {
   Shield,
   Flag,
   ListChecks,
-  Zap,
-  CheckCircle2,
-  AlertTriangle,
   MessageSquare,
   Webhook,
 } from 'lucide-react'
@@ -44,9 +41,6 @@ const categoryConfig: Record<EventCategory, { icon: React.ElementType; bg: strin
   permission:   { icon: Shield,         bg: 'bg-warning/10',      text: 'text-warning' },
   flag:         { icon: Flag,           bg: 'bg-info/10',         text: 'text-info' },
   todo:         { icon: ListChecks,     bg: 'bg-info/10',         text: 'text-info' },
-  'agent-pre':  { icon: Zap,            bg: 'bg-warning/10',      text: 'text-warning' },
-  'agent-post': { icon: CheckCircle2,   bg: 'bg-success/10',      text: 'text-success' },
-  'agent-error':{ icon: AlertTriangle,  bg: 'bg-destructive/10',  text: 'text-destructive' },
   session:      { icon: MessageSquare,  bg: 'bg-foreground/10',   text: 'text-foreground/70' },
   other:        { icon: Webhook,        bg: 'bg-foreground/10',   text: 'text-foreground/70' },
 }

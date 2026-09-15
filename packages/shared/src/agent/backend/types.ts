@@ -46,7 +46,6 @@ export interface BackendRuntimeUpdate {
     [key: string]: unknown;
   };
 }
-import type { AutomationSystem } from '../../automations/index.ts';
 
 /**
  * Provider identifier for AI backends.
@@ -213,18 +212,6 @@ export interface CoreBackendConfig {
 
   /** System prompt preset ('default' | 'mini' | custom string) */
   systemPromptPreset?: 'default' | 'mini' | string;
-
-  /** Workspace-level automation system for user-defined automations (automations.json) */
-  automationSystem?: AutomationSystem;
-
-  /** Marks sessions created by Agent Event automations so they cannot recurse. */
-  automationContext?: {
-    triggeredByAutomation: boolean;
-    automationDepth: number;
-    sourceSessionId?: string;
-    sourceSessionName?: string;
-    rootSessionId?: string;
-  };
 
   /**
    * Per-session environment variable overrides for the SDK subprocess.
@@ -720,9 +707,6 @@ export interface BackendConfig extends CoreBackendConfig {
    * Used to read/write credentials under the correct key.
    */
   connectionSlug?: string;
-
-  /** Workspace-level automation system for user-defined SDK hooks (automations.json) */
-  automationSystem?: AutomationSystem;
 
   /**
    * Opaque runtime payload resolved by backend drivers.

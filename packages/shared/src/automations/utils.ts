@@ -6,7 +6,7 @@
  */
 
 import type { BaseEventPayload } from './event-bus.ts';
-import type { AutomationEvent, AutomationMatcher, PromptReferences, AgentEvent, SdkAutomationInput } from './types.ts';
+import type { AutomationEvent, AutomationMatcher, PromptReferences } from './types.ts';
 import { matchesCron } from './cron-matcher.ts';
 import { sanitizeForShell } from './security.ts';
 import { evaluateConditions } from './conditions.ts';
@@ -97,36 +97,11 @@ export function getMatchValue(event: AutomationEvent, data: Record<string, unkno
       return String(data.isFlagged ?? false);
     case 'SessionStatusChange':
       return String(data.newStatus ?? data.newState ?? '');
-    case 'PreToolUse':
-    case 'PostToolUse':
-      return String(data.toolName ?? (data.data as Record<string, unknown>)?.tool_name ?? '');
     case 'SchedulerTick':
       // SchedulerTick uses cron matching, not regex
       return '';
     default:
       return JSON.stringify(data);
-  }
-}
-
-/**
- * Get the match value for Pi Agent Events.
- * Each event type matches against a specific field from the input.
- */
-export function getMatchValueForSdkInput(event: AgentEvent, input: SdkAutomationInput): string {
-  switch (event) {
-    case 'PreToolUse':
-    case 'PostToolUse':
-    case 'PostToolUseFailure':
-    case 'PermissionRequest':
-      return input.tool_name ?? '';
-    case 'SessionStart':
-      return input.source ?? '';
-    case 'SubagentStart':
-    case 'SubagentStop':
-      return input.agent_type ?? '';
-    default:
-      // UserPromptSubmit, Stop, SessionEnd — no meaningful match field
-      return '';
   }
 }
 
@@ -185,29 +160,6 @@ export function matcherMatches(matcher: AutomationMatcher, event: AutomationEven
   return matcherMatchesWithContext(matcher, event, {
     matchValue: getMatchValue(event, data),
     payload: data,
-    matcherTimezone: matcher.timezone,
-  });
-}
-
-/**
- * SDK agent-event adapter for canonical matcher evaluation.
- */
-/**
- * Project an Agent Event payload so state conditions can read camelCase
- * aliases (`toolName`, `toolInput`) and dotted paths (`tool_input.command`).
- */
-export function projectAgentEventPayload(input: SdkAutomationInput): Record<string, unknown> {
-  return {
-    ...(input as unknown as Record<string, unknown>),
-    toolName: input.tool_name,
-    toolInput: input.tool_input,
-  };
-}
-
-export function matcherMatchesSdk(matcher: AutomationMatcher, event: AgentEvent, input: SdkAutomationInput): boolean {
-  return matcherMatchesWithContext(matcher, event, {
-    matchValue: getMatchValueForSdkInput(event, input),
-    payload: projectAgentEventPayload(input),
     matcherTimezone: matcher.timezone,
   });
 }

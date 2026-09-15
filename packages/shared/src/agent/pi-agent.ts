@@ -345,12 +345,6 @@ export class PiAgent extends BaseAgent {
     reject: (error: Error) => void;
   }> = new Map();
 
-  private setupEmitted = false;
-  private sessionStartEmitted = false;
-  private sessionEndEmitted = false;
-  private stopEmitted = false;
-  private preCompactEmitted = false;
-
   // Pending auto-compaction toggle requests
   private pendingAutoCompactionToggles: Map<string, {
     resolve: (enabled: boolean) => void;
@@ -767,7 +761,6 @@ export class PiAgent extends BaseAgent {
 
     // If pool has source tools, register them with the subprocess.
     this.registerPoolToolsWithSubprocess();
-    this.emitLifecycleReadyOnce();
   }
 
   /**
@@ -1406,31 +1399,6 @@ export class PiAgent extends BaseAgent {
         }
       }
 
-      // Fire PostToolUse / PostToolUseFailure hook events (fire-and-forget)
-      if (agentEvent.type === 'tool_result') {
-        const hookEvent = agentEvent.isError ? 'PostToolUseFailure' : 'PostToolUse';
-        this.emitAutomationEvent(hookEvent, {
-          hook_event_name: hookEvent,
-          tool_name: agentEvent.toolName ?? (event.toolName as string) ?? 'unknown',
-          tool_input: (agentEvent.input as Record<string, unknown> | undefined),
-          tool_use_id: (event.toolCallId as string | undefined),
-          ...(agentEvent.isError
-            ? { error: typeof agentEvent.result === 'string' ? agentEvent.result : undefined }
-            : { tool_response: typeof agentEvent.result === 'string' ? agentEvent.result : undefined }),
-        });
-      }
-
-      if (agentEvent.type === 'info' && typeof agentEvent.message === 'string' && agentEvent.message.includes('Compacting') && !this.preCompactEmitted) {
-        this.preCompactEmitted = true;
-        this.emitAutomationEvent('PreCompact', {
-          hook_event_name: 'PreCompact',
-          compact_trigger: 'auto',
-        });
-      }
-      if (agentEvent.type === 'info' && typeof agentEvent.message === 'string' && agentEvent.message.startsWith('Compacted')) {
-        this.preCompactEmitted = false;
-      }
-
       this.eventQueue.enqueue(agentEvent);
     }
 
@@ -1443,45 +1411,6 @@ export class PiAgent extends BaseAgent {
     if (this.adapter.shouldCompleteQueue(eventType === 'agent_end')) {
       this.eventQueue.complete();
     }
-  }
-
-  /**
-   * Tighten-only PreToolUse automation. Fail-open: exceptions leave the
-   * built-in allow/modify result unchanged.
-   */
-  private applyAutomationToolDecision(
-    toolName: string,
-    input: Record<string, unknown>,
-    toolCallId: string | undefined,
-    sessionId: string,
-  ): { type: 'block'; reason: string } | { type: 'continue'; input: Record<string, unknown>; modified: boolean } {
-    try {
-      const decision = this.automationSystem?.evaluateToolDecision({
-        hook_event_name: 'PreToolUse',
-        tool_name: toolName,
-        tool_input: input,
-        tool_use_id: toolCallId,
-      });
-      if (decision?.decision === 'block') {
-        const label = decision.automationName ?? decision.matcherId;
-        const reason = decision.reason
-          ? `Blocked by automation "${label}": ${decision.reason}`
-          : `Blocked by automation "${label}"`;
-        void this.automationSystem?.recordDecisionHistory({
-          matcherId: decision.matcherId,
-          event: 'PreToolUse',
-          sourceSessionId: sessionId,
-          reason,
-        });
-        return { type: 'block', reason };
-      }
-      if (decision?.decision === 'modify' && decision.updatedInput && Object.keys(decision.updatedInput).length > 0) {
-        return { type: 'continue', input: { ...input, ...decision.updatedInput }, modified: true };
-      }
-    } catch (err) {
-      this.debug(`Automation tool decision failed: ${err}`);
-    }
-    return { type: 'continue', input, modified: false };
   }
 
   /**
@@ -1590,15 +1519,6 @@ export class PiAgent extends BaseAgent {
       });
     };
 
-    const emitPreToolUse = async (toolInput: Record<string, unknown>) => {
-      await this.emitAutomationEvent('PreToolUse', {
-        hook_event_name: 'PreToolUse',
-        tool_name: toolName,
-        tool_input: toolInput,
-        tool_use_id: toolCallId,
-      });
-    };
-
     const sendPermissionBlock = (reason: string) => {
       const diagnostics = getPermissionModeDiagnostics(sessionId);
       this.debug(`__PERMISSION_BLOCK__${JSON.stringify({
@@ -1618,14 +1538,9 @@ export class PiAgent extends BaseAgent {
       alreadyModified: boolean,
       approvedDeveloperFeedbackMessage?: string,
     ) => {
-      const decided = this.applyAutomationToolDecision(toolName, candidateInput, toolCallId, sessionId);
-      if (decided.type === 'block') {
-        sendPermissionBlock(decided.reason);
-        return;
-      }
       let hostModified = false;
-      const shellCommand = toolName === 'Bash' && typeof decided.input.command === 'string'
-        ? decided.input.command
+      const shellCommand = toolName === 'Bash' && typeof candidateInput.command === 'string'
+        ? candidateInput.command
         : null;
       if (shellCommand && isOfficecliShellCommand(shellCommand) && !this.managedOfficecliShellAvailable) {
         sendPermissionBlock('Selection\'s app-managed OfficeCLI runtime or official resources are unavailable. Repair or reinstall Selection before running OfficeCLI shell commands.');
@@ -1642,8 +1557,8 @@ export class PiAgent extends BaseAgent {
         }
       }
       if (approvedDeveloperFeedbackMessage !== undefined) {
-        const finalMessage = typeof decided.input.message === 'string'
-          ? decided.input.message.trim()
+        const finalMessage = typeof candidateInput.message === 'string'
+          ? candidateInput.message.trim()
           : '';
         if (finalMessage !== approvedDeveloperFeedbackMessage) {
           sendPermissionBlock('Developer feedback changed after approval and must be approved again.');
@@ -1651,14 +1566,11 @@ export class PiAgent extends BaseAgent {
         }
         const approvalToken = `feedback-approval-${randomUUID()}`;
         this.approvedDeveloperFeedbackMessages.set(approvalToken, approvedDeveloperFeedbackMessage);
-        decided.input.approvalToken = approvalToken;
+        candidateInput.approvalToken = approvalToken;
         hostModified = true;
       }
-      const eventInput = { ...decided.input };
-      delete eventInput.approvalToken;
-      await emitPreToolUse(eventInput);
-      if (decided.modified || alreadyModified || hostModified) {
-        this.send({ type: 'pre_tool_use_response', requestId, action: 'modify', input: decided.input });
+      if (alreadyModified || hostModified) {
+        this.send({ type: 'pre_tool_use_response', requestId, action: 'modify', input: candidateInput });
       } else {
         this.send({ type: 'pre_tool_use_response', requestId, action: 'allow' });
       }
@@ -1687,11 +1599,6 @@ export class PiAgent extends BaseAgent {
           resolve,
           toolName,
         });
-      });
-
-      this.emitAutomationEvent('PermissionRequest', {
-        hook_event_name: 'PermissionRequest',
-        tool_name: toolName,
       });
 
       this.onPermissionRequest({
@@ -1740,8 +1647,6 @@ export class PiAgent extends BaseAgent {
         return;
 
       case 'block': {
-        // Built-in permission block: keep the #62 observation event.
-        await emitPreToolUse(input);
         sendPermissionBlock(checkResult.reason);
         return;
       }
@@ -1816,7 +1721,6 @@ export class PiAgent extends BaseAgent {
         if (postResult.type === 'source_guide_required') {
           prepareSourceGuide(postResult);
         } else if (postResult.type === 'block') {
-          await emitPreToolUse(input);
           sendPermissionBlock(postResult.reason);
         } else if (postResult.type === 'modify') {
           await finishAllowedTool(postResult.input, true);
@@ -1838,7 +1742,6 @@ export class PiAgent extends BaseAgent {
       case 'call_llm_intercept':
       case 'spawn_session_intercept':
         // These tools are proxy tools handled via tool_execute_request — just allow
-        await emitPreToolUse(input);
         this.send({ type: 'pre_tool_use_response', requestId, action: 'allow' });
         return;
 
@@ -2291,7 +2194,6 @@ export class PiAgent extends BaseAgent {
         message: `Pi subprocess exited unexpectedly (${exitReason})`,
       });
       this.eventQueue.complete();
-      this.emitStopOnce('error');
     }
 
     // Reject pending mini completions with error (not null) so callers
@@ -2381,13 +2283,6 @@ export class PiAgent extends BaseAgent {
    * Ask subprocess to compact the active session context.
    */
   private async requestCompact(customInstructions?: string): Promise<{ summary: string; firstKeptEntryId: string; tokensBefore: number } | null> {
-    if (!this.preCompactEmitted) {
-      this.preCompactEmitted = true;
-      this.emitAutomationEvent('PreCompact', {
-        hook_event_name: 'PreCompact',
-        compact_trigger: 'manual',
-      });
-    }
     await this.ensureSubprocess();
 
     const id = `compact-${++this.rpcIdCounter}`;
@@ -2525,16 +2420,9 @@ export class PiAgent extends BaseAgent {
     // Reset state for new turn
     this._isProcessing = true;
     this.abortReason = undefined;
-    this.stopEmitted = false;
     this.eventQueue.reset();
     this.currentUserMessage = message;
     this.adapter.startTurn();
-
-    // Fire UserPromptSubmit hook event (fire-and-forget)
-    this.emitAutomationEvent('UserPromptSubmit', {
-      hook_event_name: 'UserPromptSubmit',
-      prompt: message,
-    });
 
     // Refresh session-scoped tool callbacks (for SubmitPlan, source auth, etc.)
     // IMPORTANT: merge (don't replace) so SessionManager-provided browserPaneFns
@@ -2762,7 +2650,6 @@ export class PiAgent extends BaseAgent {
       yield { type: 'complete' };
     } finally {
       this._isProcessing = false;
-      this.emitStopOnce('complete');
     }
   }
 
@@ -2881,37 +2768,9 @@ export class PiAgent extends BaseAgent {
     return this._isProcessing;
   }
 
-  private emitLifecycleReadyOnce(): void {
-    if (!this.setupEmitted) {
-      this.setupEmitted = true;
-      this.emitAutomationEvent('Setup', { hook_event_name: 'Setup', source: 'startup' });
-    }
-    if (!this.sessionStartEmitted) {
-      this.sessionStartEmitted = true;
-      this.emitAutomationEvent('SessionStart', {
-        hook_event_name: 'SessionStart',
-        source: this.config.session?.sdkSessionId ? 'resume' : 'startup',
-        model: this._model,
-      });
-    }
-  }
-
-  private emitStopOnce(reason: 'complete' | 'abort' | 'error'): void {
-    if (this.stopEmitted) return;
-    this.stopEmitted = true;
-    this.emitAutomationEvent('Stop', { hook_event_name: 'Stop', stop_reason: reason });
-  }
-
-  private emitSessionEndOnce(): void {
-    if (this.sessionEndEmitted) return;
-    this.sessionEndEmitted = true;
-    this.emitAutomationEvent('SessionEnd', { hook_event_name: 'SessionEnd' });
-  }
-
   async abort(reason?: string): Promise<void> {
     if (this.subprocessStartup) { this._isProcessing = false; this.killSubprocess(); }
     for (const controller of this.sessionToolControllers) controller.abort();
-    this.emitStopOnce('abort');
 
     // Deny all pending permissions
     for (const [, pending] of this.pendingPermissions) {
@@ -2948,7 +2807,6 @@ export class PiAgent extends BaseAgent {
 
   forceAbort(reason: AbortReason): void {
     for (const controller of this.sessionToolControllers) controller.abort();
-    this.emitStopOnce('abort');
 
     this.abortReason = reason;
     this._isProcessing = false;
@@ -3038,7 +2896,6 @@ export class PiAgent extends BaseAgent {
   }
 
   destroy(): void {
-    this.emitSessionEndOnce();
     this.stopConfigWatcher();
 
     // Unregister session-scoped tool callbacks

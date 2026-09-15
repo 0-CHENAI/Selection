@@ -7,9 +7,9 @@
 
 import { z } from 'zod';
 import type { ValidationIssue } from '../config/validators.ts';
-import { APP_EVENTS, AGENT_EVENTS } from './types.ts';
+import { APP_EVENTS } from './types.ts';
 import { THINKING_LEVEL_IDS, normalizeThinkingLevel } from '../agent/thinking-levels.ts';
-import { MAX_PROMPT_WAIT_TIMEOUT_MS } from './constants.ts';
+import { omitRetiredAutomations } from './legacy-migration.ts';
 
 // ============================================================================
 // Zod Schemas
@@ -28,16 +28,6 @@ export const PromptActionSchema = z.object({
   llmConnection: z.string().min(1).optional(),
   model: z.string().min(1).optional(),
   thinkingLevel: ThinkingLevelInputSchema,
-  waitForCompletion: z.boolean().optional(),
-  reportBack: z.boolean().optional(),
-  timeoutMs: z.number().int().min(1).max(MAX_PROMPT_WAIT_TIMEOUT_MS).optional(),
-});
-
-export const DecisionActionSchema = z.object({
-  type: z.literal('decision'),
-  decision: z.enum(['block', 'modify']),
-  reason: z.string().optional(),
-  updatedInput: z.record(z.string(), z.unknown()).optional(),
 });
 
 export const WebhookActionSchema = z.object({
@@ -74,12 +64,11 @@ export const WebhookActionSchema = z.object({
   ]).optional(),
 });
 
-/** Accepts prompt, webhook, and decision actions strictly; passes through legacy/unknown action types without erroring */
+/** Accepts prompt and webhook actions strictly; passes through legacy/unknown action types without erroring */
 export const ActionDefinitionSchema = z.union([
   PromptActionSchema,
   WebhookActionSchema,
-  DecisionActionSchema,
-  z.object({ type: z.string() }).passthrough(),
+  z.object({ type: z.string().refine(type => !['prompt', 'webhook', 'decision'].includes(type), 'Unsupported action type') }).passthrough(),
 ]);
 
 // ============================================================================
@@ -159,7 +148,6 @@ export const AutomationMatcherSchema = z.object({
   labels: z.array(z.string()).optional(),
   enabled: z.boolean().optional(),
   conditions: z.array(AutomationConditionSchema).optional(),
-  maxDepth: z.number().int().min(1).max(5).optional(),
   actions: z.array(ActionDefinitionSchema).min(1, 'At least one action required'),
 });
 
@@ -175,11 +163,10 @@ export const DEPRECATED_EVENT_ALIASES: Record<string, string> = {
 /** All valid event names: canonical events + deprecated aliases. Derived from types.ts. */
 export const VALID_EVENTS: readonly string[] = [
   ...APP_EVENTS,
-  ...AGENT_EVENTS,
   ...Object.keys(DEPRECATED_EVENT_ALIASES),
 ];
 
-export const AutomationsConfigSchema = z.object({
+export const AutomationsConfigSchema = z.preprocess(omitRetiredAutomations, z.object({
   version: z.number().optional(),
   automations: z.record(z.string(), z.array(AutomationMatcherSchema)).optional(),
 }).transform((data) => {
@@ -209,7 +196,7 @@ export const AutomationsConfigSchema = z.object({
   }
 
   return { version: data.version, automations: validAutomations };
-});
+}));
 
 // ============================================================================
 // Schema Utilities

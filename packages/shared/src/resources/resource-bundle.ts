@@ -1080,7 +1080,7 @@ export function validateResourceBundle(bundle: unknown): { valid: boolean; error
           errors.push(`${prefix}: missing or invalid matcher`)
         } else {
           const m = e.matcher as Record<string, unknown>
-          rejectUnknownKeys(m, ['id', 'name', 'matcher', 'cron', 'timezone', 'permissionMode', 'labels', 'enabled', 'conditions', ...LEGACY_AUTOMATION_MATCHER_FIELDS, 'maxDepth', 'actions'], `${prefix}.matcher`, errors)
+          rejectUnknownKeys(m, ['id', 'name', 'matcher', 'cron', 'timezone', 'permissionMode', 'labels', 'enabled', 'conditions', ...LEGACY_AUTOMATION_MATCHER_FIELDS, 'actions'], `${prefix}.matcher`, errors)
           if (typeof m.id === 'string' && m.id !== e.id) errors.push(`${prefix}: matcher.id '${m.id}' does not match entry id '${e.id}'`)
           if (!Array.isArray(m.actions) || m.actions.length === 0) {
             errors.push(`${prefix}: matcher must have at least one action`)
@@ -1093,9 +1093,8 @@ export function validateResourceBundle(bundle: unknown): { valid: boolean; error
                 continue
               }
               const actionObject = action as Record<string, unknown>
-              if (actionObject.type === 'prompt') rejectUnknownKeys(actionObject, ['type', 'prompt', 'llmConnection', 'model', 'thinkingLevel', 'waitForCompletion', 'reportBack', 'timeoutMs'], actionPath, errors)
+              if (actionObject.type === 'prompt') rejectUnknownKeys(actionObject, ['type', 'prompt', 'llmConnection', 'model', 'thinkingLevel'], actionPath, errors)
               else if (actionObject.type === 'webhook') rejectUnknownKeys(actionObject, ['type', 'url', 'method', 'headers', 'bodyFormat', 'body', 'captureResponse'], actionPath, errors)
-              else if (actionObject.type === 'decision') rejectUnknownKeys(actionObject, ['type', 'decision', 'reason', 'updatedInput'], actionPath, errors)
               else errors.push(`${actionPath}: unknown action type '${String(actionObject.type)}'`)
             }
             if (typeof e.event === 'string' && VALID_EVENTS.includes(e.event as string)) {
@@ -1178,7 +1177,7 @@ function loadExistingAutomations(workspaceRootPath: string): AutomationBundleEnt
     const raw = JSON.parse(readFileSync(path, 'utf-8')) as { automations?: Record<string, unknown> }
     const entries: AutomationBundleEntry[] = []
     for (const [event, matchers] of Object.entries(raw.automations ?? {})) {
-      if (!Array.isArray(matchers)) continue
+      if (!Array.isArray(matchers) || !VALID_EVENTS.includes(event)) continue
       for (const value of matchers) {
         if (!value || typeof value !== 'object') continue
         const matcher = value as AutomationMatcher
@@ -1193,7 +1192,7 @@ function loadExistingAutomations(workspaceRootPath: string): AutomationBundleEnt
 
 function isHighRiskAutomation(entry: AutomationBundleEntry): boolean {
   return entry.matcher.permissionMode === 'allow-all' || entry.matcher.actions.some(action =>
-    action.type === 'webhook' || action.type === 'decision',
+    action.type === 'webhook',
   )
 }
 

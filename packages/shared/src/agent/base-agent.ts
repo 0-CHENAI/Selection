@@ -66,9 +66,6 @@ import { PrerequisiteManager } from './core/prerequisite-manager.ts';
 import { recoverSpawnSessionArguments } from './core/spawn-session-args.ts';
 
 // Automation system for agent events
-import type { AutomationSystem } from '../automations/automation-system.ts';
-import type { AgentEvent as AutomationAgentEvent, SdkAutomationInput } from '../automations/types.ts';
-import { enrichAgentEventInput } from '../automations/agent-event-envelope.ts';
 import { getSessionPlansPath, getSessionDataPath, getSessionPath } from '../sessions/storage.ts';
 import { getMiniAgentSystemPrompt } from '../prompts/system.ts';
 import { buildTitlePrompt, buildRegenerateTitlePrompt, validateTitle } from '../utils/title-generator.ts';
@@ -255,7 +252,6 @@ export abstract class BaseAgent implements AgentBackend {
   protected configWatcherManager: ConfigWatcherManager | null = null;
   protected usageTracker: UsageTracker;
   protected prerequisiteManager: PrerequisiteManager;
-  protected automationSystem?: AutomationSystem;
 
   // ============================================================
   // Additional State (protected for subclass access)
@@ -381,7 +377,6 @@ export abstract class BaseAgent implements AgentBackend {
     });
 
     // AutomationSystem: workspace-level automations from automations.json
-    this.automationSystem = config.automationSystem;
   }
 
   // ============================================================
@@ -452,31 +447,6 @@ export abstract class BaseAgent implements AgentBackend {
    */
   protected debug(message: string): void {
     this.onDebug?.(message);
-  }
-
-  /**
-   * Fire an automation agent event (from automations.json) via AutomationSystem.
-   * Catches all errors — automations must never break the agent flow.
-   *
-   * Non-Claude backends call this directly. ClaudeAgent uses SDK's buildSdkHooks() instead.
-   *
-   * @param signal - Optional AbortSignal for cancelling automation execution on abort
-   */
-  protected async emitAutomationEvent(event: AutomationAgentEvent, input: SdkAutomationInput, signal?: AbortSignal): Promise<void> {
-    try {
-      const enriched = enrichAgentEventInput(event, input, {
-        workspaceId: this.config.workspace.id,
-        sessionId: this.config.session?.id ?? this._sessionId,
-        sessionName: this.config.automationContext?.sourceSessionName,
-        triggeredByAutomation: this.config.automationContext?.triggeredByAutomation,
-        automationDepth: this.config.automationContext?.automationDepth,
-        rootSessionId: this.config.automationContext?.rootSessionId
-          ?? this.config.automationContext?.sourceSessionId,
-      });
-      await this.automationSystem?.executeAgentEvent(event, enriched, signal);
-    } catch (err) {
-      this.debug(`Automation event ${event} failed: ${err}`);
-    }
   }
 
   // ============================================================

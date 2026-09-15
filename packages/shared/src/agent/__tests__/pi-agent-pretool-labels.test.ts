@@ -52,7 +52,6 @@ describe('PiAgent pre-tool labels guard', () => {
     ;(agent as any).send = (message: Record<string, unknown>) => {
       sent.push(message)
     }
-    ;(agent as any).emitAutomationEvent = async () => {}
 
     await (agent as any).handlePreToolUseRequest({
       requestId: 'req-1',
@@ -81,7 +80,6 @@ describe('PiAgent pre-tool labels guard', () => {
     ;(agent as any).send = (message: Record<string, unknown>) => {
       sent.push(message)
     }
-    ;(agent as any).emitAutomationEvent = async () => {}
 
     await (agent as any).handlePreToolUseRequest({
       requestId: 'req-officecli-raw-binary',
@@ -104,7 +102,6 @@ describe('PiAgent pre-tool labels guard', () => {
     agent.setPermissionMode('allow-all')
     const sent: Array<Record<string, unknown>> = []
     ;(agent as any).send = (message: Record<string, unknown>) => sent.push(message)
-    ;(agent as any).emitAutomationEvent = async () => {}
 
     await (agent as any).handlePreToolUseRequest({
       requestId: 'req-recover-read',
