@@ -7,3 +7,5 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 ## Improvements
 
 ## Bug Fixes
+
+- **Automation creation context isolation** — Scheduled, app-event, and agent-event creation dialogs now use separate category contexts and titles. Unfinished drafts remain resumable, new automation requests no longer inherit completed creation conversations, and detail edits target the selected rule ID. Fixes #362.
