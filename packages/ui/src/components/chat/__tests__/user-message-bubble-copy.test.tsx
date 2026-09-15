@@ -10,10 +10,12 @@ mock.module('../../markdown', () => ({
 }))
 
 let UserMessageBubble: typeof import('../UserMessageBubble').UserMessageBubble
+let formatUserMessageTime: typeof import('../UserMessageBubble').formatUserMessageTime
 
 beforeAll(async () => {
   const module = await import('../UserMessageBubble')
   UserMessageBubble = module.UserMessageBubble
+  formatUserMessageTime = module.formatUserMessageTime
 })
 
 afterAll(() => {
@@ -24,6 +26,7 @@ async function renderBubble(props: {
   content: string
   attachments?: StoredAttachment[]
   isQueued?: boolean
+  timestamp?: number
 }) {
   const testI18n = createInstance()
   await testI18n.use(initReactI18next).init({
@@ -51,17 +54,17 @@ async function renderBubble(props: {
 }
 
 describe('UserMessageBubble copy control (#372)', () => {
-  it('renders a hover-fading copy button on the text bubble', async () => {
-    const html = await renderBubble({ content: 'Please backup this prompt' })
+  it('places time and copy under the bubble, not over the text', async () => {
+    const sentAt = Date.UTC(2026, 8, 15, 6, 36)
+    const html = await renderBubble({ content: 'Please backup this prompt', timestamp: sentAt })
     expect(html).toContain('aria-label="Copy"')
-    expect(html).toContain('group ')
-    expect(html).toContain('opacity-0')
-    expect(html).toContain('group-hover:opacity-100')
-    expect(html).toContain('focus-visible:opacity-100')
+    expect(html).toContain(formatUserMessageTime(sentAt, 'en'))
+    expect(html).toContain('<time')
+    expect(html).not.toContain('absolute bottom-1.5 right-1.5')
+    expect(html).toContain('flex items-center justify-end gap-2 pt-1')
     expect(html).toContain('transition-opacity')
     expect(html).toContain('duration-150')
     expect(html).toContain('motion-reduce:transition-none')
-    expect(html).toContain('absolute bottom-1.5 right-1.5')
   })
 
   it('hides the button when the visible body is empty', async () => {
@@ -79,10 +82,10 @@ describe('UserMessageBubble copy control (#372)', () => {
     expect(html).not.toContain('aria-label="Copy"')
   })
 
-  it('does not change queued layout classes when the copy button is present', async () => {
+  it('does not overlay queued text when the copy button is present', async () => {
     const html = await renderBubble({ content: 'queued prompt', isQueued: true })
     expect(html).toContain('Queued')
     expect(html).toContain('aria-label="Copy"')
-    expect(html).toContain('absolute bottom-1.5 right-1.5')
+    expect(html).not.toContain('absolute bottom-1.5 right-1.5')
   })
 })

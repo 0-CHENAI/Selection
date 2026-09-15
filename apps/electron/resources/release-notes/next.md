@@ -6,7 +6,7 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 
 ## Improvements
 
-- **User message copy** — Hovering a sent user bubble shows a bottom-right copy control that fades in and out. It copies the visible plain-text body (not hidden context or attachments). Fixes #372.
+- **User message copy** — Sent user bubbles keep a time and copy control under the bubble, so the icon no longer covers the text. Copy still uses the visible plain-text body (not hidden context or attachments). Fixes #372.
 
 ## Bug Fixes
 
