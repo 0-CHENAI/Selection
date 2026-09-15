@@ -314,6 +314,15 @@ const ERROR_DEFINITIONS: Record<ErrorCode, Omit<AgentError, 'code' | 'originalEr
     actions: [],
     canRetry: false,
   },
+  output_limit: {
+    title: 'Output limit reached', message: 'This model call exhausted its output budget. Continue from recorded results; no completed artifact is guaranteed.', actions: [], canRetry: false,
+  },
+  answer_delivery_missing: { title: 'Answer not submitted', message: 'The model did not formally submit its answer. Recorded work is retained.', actions: [], canRetry: false },
+  answer_persistence_failed: { title: 'Answer save failed', message: 'The submitted answer could not be saved. Model retries cannot resolve this storage failure.', actions: [], canRetry: false },
+  progress_needs_user: { title: 'User input required', message: 'Task paused pending required user input.', actions: [], canRetry: false },
+  call_time_limit: {
+    title: 'Model call paused', message: 'This model call reached its time limit. Review recorded results before continuing.', actions: [], canRetry: false,
+  },
   stream_interrupted: {
     title: 'Response stream interrupted',
     message: 'The response stream ended unexpectedly. Review the recorded results before continuing from this conversation.',

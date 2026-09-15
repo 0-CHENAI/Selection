@@ -23,6 +23,8 @@ export enum AbortReason {
   /** User clicked stop button */
   UserStop = 'user_stop',
 
+  ProgressRedirect = 'progress_redirect',
+
   /** Ordinary answer committed; normal completion, not user cancellation. */
   AnswerSubmitted = 'answer_submitted',
 

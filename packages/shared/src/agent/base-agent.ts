@@ -1287,7 +1287,7 @@ ${formattedMessages}
    * @param request - The query request (prompt, model, systemPrompt, etc.)
    * @returns The model's response text and optional token usage
    */
-  abstract queryLlm(request: LLMQueryRequest): Promise<LLMQueryResult>;
+  abstract queryLlm(request: LLMQueryRequest, signal?: AbortSignal): Promise<LLMQueryResult>;
 
   /**
    * Pre-execute a call_llm request: resolve attachments, validate model, run query.
