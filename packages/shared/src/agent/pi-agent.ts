@@ -208,6 +208,7 @@ export class PiAgent extends BaseAgent {
   // ============================================================
 
   // Subprocess process handle
+  private subprocessEpoch = 0;
   private subprocess: ChildProcess | null = null;
   private readline: ReadlineInterface | null = null;
   private subprocessReady: Promise<void> | null = null;
@@ -496,6 +497,7 @@ export class PiAgent extends BaseAgent {
    * Spawn the pi-agent-server subprocess and set up JSONL communication.
    */
   private async spawnSubprocess(): Promise<void> {
+    const epoch = this.subprocessEpoch;
     const runtime = getBackendRuntime(this.config);
     const piServerPath = runtime.paths?.piServer;
     if (!piServerPath) {
@@ -580,6 +582,8 @@ export class PiAgent extends BaseAgent {
       ? `${officecliWrapperDir}${inheritedPath ? `${delimiter}${inheritedPath}` : ''}`
       : inheritedPath;
 
+    // Cancellation during asynchronous credential loading must not spawn an orphan.
+    if (epoch !== this.subprocessEpoch) throw new Error('Pi subprocess startup was cancelled');
     // Spawn the subprocess
     const child = spawn(nodePath, args, {
       cwd,
@@ -3074,6 +3078,7 @@ export class PiAgent extends BaseAgent {
    * Kill the subprocess and clean up resources.
    */
   private killSubprocess(): void {
+    this.subprocessEpoch++;
     for (const controller of this.sessionToolControllers) controller.abort();
     if (this.readline) {
       this.readline.close();
@@ -3166,6 +3171,9 @@ export class PiAgent extends BaseAgent {
           if (signal?.aborted) abortStartup();
         }),
       ]);
+    } catch (error) {
+      if (this.config.queryOnly) this.killSubprocess();
+      throw error;
     } finally {
       if (startupTimer) clearTimeout(startupTimer);
       if (abortStartup) signal?.removeEventListener('abort', abortStartup);

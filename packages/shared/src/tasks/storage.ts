@@ -155,6 +155,8 @@ type RunLogPayload =
   | { t: string; kind: 'cache-hit'; nodeId: string; fingerprint: string; createdAt: string; sourceRunId: string }
   | { t: string; kind: 'cache-bypass'; nodeId: string; reason: string }
   | { t: string; kind: 'metrics'; metrics: TaskRunMetrics }
+  | { t: string; kind: 'progress-parent-paused'; phase: 'coordinator' | 'verifying' }
+  | { t: string; kind: 'progress-usage'; sessionId: string; tokens: number; tokensUsed: number }
   | { t: string; kind: 'budget-breach'; metric: 'tokens' | 'parallel' | 'iterations'; value: number; limit: number };
 
 export type RunLogEntry = RunLogPayload & { seq?: number; revision?: number };

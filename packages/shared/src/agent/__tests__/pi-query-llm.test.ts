@@ -80,6 +80,18 @@ describe('PiAgent.queryLlm — subprocess RPC round-trip', () => {
     await expect(result).rejects.toThrow('abort failed'); agent.destroy();
   });
 
+  it('does not spawn after disposal during credential loading', async () => {
+    const config = Object.assign(createConfig(), { runtime: { paths: { piServer: '/unused/server.js', node: process.execPath } } });
+    const agent = new PiAgent(config);
+    let credentialsReady!: (value: unknown) => void;
+    (agent as any).getPiAuth = () => new Promise(resolve => { credentialsReady = resolve; });
+    const startup = (agent as any).spawnSubprocess();
+    await flushMicrotasks(); agent.destroy();
+    credentialsReady({ provider: 'custom-endpoint', credential: { type: 'api_key', key: 'test-only' } });
+    await expect(startup).rejects.toThrow('startup was cancelled');
+    expect((agent as any).subprocess).toBeNull();
+  });
+
   it('propagates the full LLMQueryRequest shape over the llm_query RPC unchanged', async () => {
     const agent = new PiAgent(createConfig());
     const { sent } = installFakeSubprocess(agent);

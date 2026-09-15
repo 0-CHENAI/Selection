@@ -5,6 +5,7 @@
 export type CacheStatus = 'none' | 'hit' | 'miss' | 'bypass';
 
 export type CoordinatorGateReason =
+  | 'progress-review'
   | 'first-schedule'
   | 'node-failed'
   | 'approval'
