@@ -2,10 +2,14 @@ import { describe, expect, it } from 'bun:test'
 import {
   breakdownShare,
   cacheHitRateFromTokenUsage,
+  contextBarShares,
   contextUsagePercent,
   contextUsageRatio,
+  contextUsageRows,
   contextUsageTone,
   formatCacheHitRate,
+  formatContextTokenCount,
+  resolveContextUsageTokens,
   shouldShowContextUsage,
 } from '../context-usage'
 
@@ -14,6 +18,19 @@ describe('context usage display', () => {
     expect(shouldShowContextUsage(undefined)).toBe(false)
     expect(shouldShowContextUsage({ inputTokens: 0 })).toBe(false)
     expect(shouldShowContextUsage({ inputTokens: 12 })).toBe(true)
+  })
+
+  it('falls back to last-turn occupancy when the live counter was wiped to 0', () => {
+    expect(resolveContextUsageTokens({
+      inputTokens: 0,
+      contextTokens: 0,
+      lastCall: { inputTokens: 0, cacheReadTokens: 0 },
+      lastTurn: { inputTokens: 180_774 },
+    })).toBe(180_774)
+    expect(resolveContextUsageTokens({
+      inputTokens: 12_000,
+      lastTurn: { inputTokens: 180_774 },
+    })).toBe(12_000)
   })
 
   it('measures the ring against the model window, not a compaction threshold', () => {
@@ -48,5 +65,28 @@ describe('context usage display', () => {
     expect(cacheHitRateFromTokenUsage({
       lastCall: { inputTokens: 200 },
     })).toBeUndefined()
+  })
+
+  it('formats card token counts and hides empty composition rows', () => {
+    expect(formatContextTokenCount(1_100)).toBe('1.1K')
+    expect(formatContextTokenCount(222_400)).toBe('222.4K')
+    expect(formatContextTokenCount(262_144, 'window')).toBe('256K')
+    expect(contextUsageRows({
+      systemPrompt: 12,
+      tools: 0,
+      messages: 80,
+      skills: 9,
+    }).map((row) => row.id)).toEqual(['systemPrompt', 'skills', 'messages'])
+  })
+
+  it('sizes the bar against the model window and keeps unused room', () => {
+    const rows = contextUsageRows({
+      systemPrompt: 25,
+      tools: 25,
+      messages: 50,
+    })
+    const shares = contextBarShares(rows, 80, 100)
+    expect(shares.used.reduce((sum, share) => sum + share, 0)).toBeCloseTo(0.8)
+    expect(shares.remaining).toBeCloseTo(0.2)
   })
 })

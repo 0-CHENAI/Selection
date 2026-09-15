@@ -24,7 +24,7 @@ import { PI_TOOL_NAME_MAP } from './constants.ts';
 import { toolMetadataStore } from '../../../interceptor-common.ts';
 import { parseError, createTypedError } from '../../errors.ts';
 import { normalizeToolResultContent } from '../../tool-matching.ts';
-import { ACTIONABLE_CONTEXT_OVERFLOW_MESSAGE } from './context-budget.ts';
+import { ACTIONABLE_CONTEXT_OVERFLOW_MESSAGE, readContextBreakdownFields } from './context-budget.ts';
 
 /**
  * Pi SDK auto-compaction race signature — the AbortController crash described
@@ -53,23 +53,7 @@ function cacheHitRateFromPiUsage(usage: PiUsage): number | undefined {
 }
 
 function readContextBreakdown(event: object): AgentEventUsage['contextBreakdown'] | undefined {
-  const raw = (event as { contextBreakdown?: unknown }).contextBreakdown;
-  if (!raw || typeof raw !== 'object') return undefined;
-  const systemPrompt = (raw as { systemPrompt?: unknown }).systemPrompt;
-  const tools = (raw as { tools?: unknown }).tools;
-  const messages = (raw as { messages?: unknown }).messages;
-  if (
-    typeof systemPrompt !== 'number' || !Number.isFinite(systemPrompt) ||
-    typeof tools !== 'number' || !Number.isFinite(tools) ||
-    typeof messages !== 'number' || !Number.isFinite(messages)
-  ) {
-    return undefined;
-  }
-  return {
-    systemPrompt: Math.max(0, Math.floor(systemPrompt)),
-    tools: Math.max(0, Math.floor(tools)),
-    messages: Math.max(0, Math.floor(messages)),
-  };
+  return readContextBreakdownFields((event as { contextBreakdown?: unknown }).contextBreakdown);
 }
 
 function toAgentUsage(usage: PiUsage, contextWindow: number | undefined, contextBreakdown?: AgentEventUsage['contextBreakdown']): AgentEventUsage {

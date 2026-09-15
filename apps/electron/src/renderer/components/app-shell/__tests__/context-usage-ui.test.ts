@@ -16,4 +16,14 @@ describe('context usage UI entry points', () => {
     expect(compactPicker).not.toContain('chat.modelPicker.contextSection')
     expect(info).not.toContain('chat.usage.title')
   })
+
+  it('keeps the usage card on the Cursor-style title, percent, and close control', () => {
+    const card = readFileSync(resolve(root, 'input/ContextUsageIndicator.tsx'), 'utf8')
+    expect(card).toContain('chat.contextUsage')
+    expect(card).toContain('chat.contextFull')
+    expect(card).toContain('common.close')
+    expect(card).toContain('contextUsageRows')
+    expect(card).toContain('TooltipContent')
+    expect(card).toContain('TooltipTrigger')
+  })
 })

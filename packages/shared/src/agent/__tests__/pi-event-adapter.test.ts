@@ -519,14 +519,14 @@ describe('PiEventAdapter', () => {
             cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
           },
         },
-        contextBreakdown: { systemPrompt: 12, tools: 34, messages: 56 },
+        contextBreakdown: { systemPrompt: 12, tools: 34, messages: 56, skills: 7 },
       } as any));
 
       expect(events.at(-1)).toMatchObject({
         type: 'usage_update',
         usage: {
           cacheHitRate: 50 / 250,
-          contextBreakdown: { systemPrompt: 12, tools: 34, messages: 56 },
+          contextBreakdown: { systemPrompt: 12, tools: 34, messages: 56, skills: 7 },
         },
       });
     });

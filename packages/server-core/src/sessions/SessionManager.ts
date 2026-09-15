@@ -148,6 +148,7 @@ import { createTypedError, parseError } from '@craft-agent/shared/agent/errors'
 import { buildBackendRuntimeSignature, buildRestartRequiredSignature, prepareModelImageAttachments } from './runtime-config'
 import { validateArchiveTarget } from './archive-guards'
 import {
+  applyContextOccupancy,
   applyContextUsageFields,
   createTurnUsageAccumulator,
   finalizeTurnUsage,
@@ -11851,8 +11852,9 @@ export class SessionManager implements ISessionManager {
             managed.tokenUsage.currentTurn = snapshotTurnUsage(recorded.accumulator, Date.now())
           }
           // inputTokens = current context size (full conversation sent this turn), NOT accumulated
-          // Each API call sends the full conversation history, so we use the latest value
-          managed.tokenUsage.inputTokens = event.usage.contextTokens ?? event.usage.inputTokens
+          // Each API call sends the full conversation history, so we use the latest value.
+          // Do not write 0 over a previous occupancy — that hides the context ring.
+          applyContextOccupancy(managed.tokenUsage, event.usage)
           // outputTokens and costUsd are accumulated across all turns (total session usage)
           managed.tokenUsage.outputTokens += event.usage.outputTokens
           managed.tokenUsage.totalTokens = managed.tokenUsage.inputTokens + managed.tokenUsage.outputTokens + (managed.tokenUsage.evaluationTokens ?? 0)
@@ -11906,8 +11908,8 @@ export class SessionManager implements ISessionManager {
           managed.activeTurnSawUsageUpdate = true
           managed.tokenUsage.lastCall = recorded.lastCall
           managed.tokenUsage.currentTurn = snapshotTurnUsage(recorded.accumulator, Date.now())
-          // Update only inputTokens (current context size) - other fields accumulate on complete
-          managed.tokenUsage.inputTokens = event.usage.contextTokens ?? event.usage.inputTokens
+          // Update only current occupancy — skip empty usage so the ring stays visible.
+          applyContextOccupancy(managed.tokenUsage, event.usage)
           if (event.usage.contextWindow) {
             managed.tokenUsage.contextWindow = event.usage.contextWindow
           }

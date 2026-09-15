@@ -2,6 +2,11 @@ export interface ContextUsageBreakdown {
   systemPrompt: number
   tools: number
   messages: number
+  rules?: number
+  skills?: number
+  mcpTools?: number
+  subagents?: number
+  summarized?: number
 }
 
 export interface ContextStatus {
@@ -13,6 +18,37 @@ export interface ContextStatus {
 }
 
 export type ContextUsageTone = 'default' | 'info' | 'critical'
+
+export const CONTEXT_USAGE_CATEGORIES = [
+  { id: 'systemPrompt', color: '#A3A3A3', labelKey: 'chat.contextSystemPrompt' },
+  { id: 'tools', color: '#A78BFA', labelKey: 'chat.contextTools' },
+  { id: 'rules', color: '#4ADE80', labelKey: 'chat.contextRules' },
+  { id: 'skills', color: '#FBBF24', labelKey: 'chat.contextSkills' },
+  { id: 'mcpTools', color: '#E879F9', labelKey: 'chat.contextMcpTools' },
+  { id: 'subagents', color: '#60A5FA', labelKey: 'chat.contextSubagents' },
+  { id: 'summarized', color: '#FB7185', labelKey: 'chat.contextSummarized' },
+  { id: 'messages', color: '#F87171', labelKey: 'chat.contextMessages' },
+] as const
+
+export type ContextUsageCategoryId = (typeof CONTEXT_USAGE_CATEGORIES)[number]['id']
+
+function positiveTokens(value: number | undefined): number | undefined {
+  if (value == null || !Number.isFinite(value) || value <= 0) return undefined
+  return value
+}
+
+/** Current context occupancy. Top-level inputTokens can be wiped to 0 after a turn. */
+export function resolveContextUsageTokens(usage?: {
+  inputTokens?: number
+  contextTokens?: number
+  lastCall?: { inputTokens?: number; cacheReadTokens?: number }
+  lastTurn?: { inputTokens?: number }
+}): number | undefined {
+  return positiveTokens(usage?.inputTokens)
+    ?? positiveTokens(usage?.contextTokens)
+    ?? positiveTokens((usage?.lastCall?.inputTokens ?? 0) + (usage?.lastCall?.cacheReadTokens ?? 0))
+    ?? positiveTokens(usage?.lastTurn?.inputTokens)
+}
 
 export function shouldShowContextUsage(
   status?: ContextStatus,
@@ -65,10 +101,57 @@ export function formatCacheHitRate(rate: number | undefined): string | undefined
 }
 
 export function breakdownTotal(breakdown: ContextUsageBreakdown): number {
-  return Math.max(0, breakdown.systemPrompt) + Math.max(0, breakdown.tools) + Math.max(0, breakdown.messages)
+  return CONTEXT_USAGE_CATEGORIES.reduce((sum, category) => (
+    sum + Math.max(0, breakdown[category.id] ?? 0)
+  ), 0)
 }
 
 export function breakdownShare(value: number, total: number): number {
   if (total <= 0) return 0
   return Math.max(0, value) / total
+}
+
+export function contextUsageRows(breakdown?: ContextUsageBreakdown) {
+  if (!breakdown) return []
+  return CONTEXT_USAGE_CATEGORIES
+    .map((category) => ({
+      ...category,
+      tokens: Math.max(0, breakdown[category.id] ?? 0),
+    }))
+    .filter((row) => row.tokens > 0)
+}
+
+export function formatContextTokenCount(tokens: number, kind: 'used' | 'window' = 'used'): string {
+  if (kind === 'window' && tokens >= 1024 && tokens % 1024 === 0) {
+    const kib = tokens / 1024
+    if (kib >= 1024 && kib % 1024 === 0) return `${kib / 1024}M`
+    return `${kib}K`
+  }
+  if (tokens >= 1_000_000) {
+    const millions = tokens / 1_000_000
+    return Number.isInteger(millions) ? `${millions}M` : `${millions.toFixed(1)}M`
+  }
+  if (tokens >= 1000) {
+    const thousands = tokens / 1000
+    return Number.isInteger(thousands) ? `${thousands}K` : `${thousands.toFixed(1)}K`
+  }
+  return String(Math.round(tokens))
+}
+
+export function contextBarShares(
+  rows: Array<{ tokens: number }>,
+  inputTokens: number,
+  contextWindow?: number,
+): { used: number[]; remaining: number } {
+  const rowTotal = rows.reduce((sum, row) => sum + row.tokens, 0)
+  const usedRatio = contextWindow != null && Number.isFinite(contextWindow) && contextWindow > 0
+    ? Math.min(1, Math.max(0, inputTokens / contextWindow))
+    : 1
+  if (rowTotal <= 0) {
+    return { used: inputTokens > 0 ? [usedRatio] : [], remaining: 1 - usedRatio }
+  }
+  return {
+    used: rows.map((row) => (row.tokens / rowTotal) * usedRatio),
+    remaining: 1 - usedRatio,
+  }
 }

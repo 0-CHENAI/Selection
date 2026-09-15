@@ -611,11 +611,16 @@ export interface AgentEventUsage {
   contextWindow?: number;
   /** Cache read share of the current request input (0-1). */
   cacheHitRate?: number;
-  /** Estimated system / tools / messages split. Display with a ~ prefix. */
+  /** Estimated context composition. Optional fields appear only when Selection can measure them. */
   contextBreakdown?: {
     systemPrompt: number;
     tools: number;
     messages: number;
+    rules?: number;
+    skills?: number;
+    mcpTools?: number;
+    subagents?: number;
+    summarized?: number;
   };
 }
 

@@ -1,6 +1,7 @@
 import type { AgentSession } from '@earendil-works/pi-coding-agent';
 import type { Context } from '@earendil-works/pi-ai';
 import {
+  contextBreakdownTotal,
   estimateContextInputBreakdown,
   type ContextInputBreakdown,
 } from '../../shared/src/agent/backend/pi/context-budget.ts';
@@ -20,7 +21,7 @@ function asContext(session: AgentSession): Context | undefined {
 }
 
 function isEmptyBreakdown(breakdown: ContextInputBreakdown): boolean {
-  return breakdown.systemPrompt + breakdown.tools + breakdown.messages <= 0;
+  return contextBreakdownTotal(breakdown) <= 0;
 }
 
 /** Estimate the live Pi context split for the context-usage popover. */

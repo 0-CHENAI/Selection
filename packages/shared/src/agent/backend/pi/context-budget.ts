@@ -28,12 +28,32 @@ export interface ParsedContextOverflow {
   requestedOutputTokens?: number;
 }
 
-/** Estimated request composition. Provider usage is not segmented, so UI should prefix these with ~. */
+/** Estimated request composition. Optional fields are omitted when Selection has no matching content. */
 export interface ContextInputBreakdown {
   systemPrompt: number;
   tools: number;
   messages: number;
+  rules?: number;
+  skills?: number;
+  mcpTools?: number;
+  subagents?: number;
+  summarized?: number;
 }
+
+export const OPTIONAL_CONTEXT_BREAKDOWN_KEYS = [
+  'rules',
+  'skills',
+  'mcpTools',
+  'subagents',
+  'summarized',
+] as const;
+
+export type OptionalContextBreakdownKey = (typeof OPTIONAL_CONTEXT_BREAKDOWN_KEYS)[number];
+
+const RULE_TAGS = ['project_context', 'project_context_files'] as const;
+const SKILL_TAGS = ['available_skills'] as const;
+const SOURCE_TAGS = ['sources'] as const;
+const SUMMARY_TAGS = ['session_transfer_summary', 'conversation_recovery'] as const;
 
 function safeJson(value: unknown): string {
   try {
@@ -90,6 +110,126 @@ function estimateTools(tools: Tool[] | undefined): number {
   return estimateTextTokensConservatively(safeJson(tools));
 }
 
+function takeTaggedBlocks(text: string, tags: readonly string[]): { extracted: string; rest: string } {
+  let extracted = '';
+  let rest = text;
+  for (const tag of tags) {
+    const re = new RegExp(`<${tag}(?:\\s[^>]*)?>[\\s\\S]*?<\\/${tag}>`, 'gi');
+    rest = rest.replace(re, (block) => {
+      extracted += extracted ? `\n${block}` : block;
+      return '';
+    });
+  }
+  return { extracted, rest };
+}
+
+function takePreferences(text: string): { extracted: string; rest: string } {
+  const re = /## User Preferences[\s\S]*?(?=\n## |\n<[A-Za-z/]|$)/;
+  const match = text.match(re);
+  if (!match) return { extracted: '', rest: text };
+  return { extracted: match[0], rest: text.replace(re, '') };
+}
+
+function splitPromptText(text: string): {
+  rest: string;
+  rules: string;
+  skills: string;
+  mcp: string;
+  summarized: string;
+} {
+  const skills = takeTaggedBlocks(text, SKILL_TAGS);
+  const rulesTagged = takeTaggedBlocks(skills.rest, RULE_TAGS);
+  const prefs = takePreferences(rulesTagged.rest);
+  const sources = takeTaggedBlocks(prefs.rest, SOURCE_TAGS);
+  const summarized = takeTaggedBlocks(sources.rest, SUMMARY_TAGS);
+  return {
+    rest: summarized.rest,
+    rules: [rulesTagged.extracted, prefs.extracted].filter(Boolean).join('\n'),
+    skills: skills.extracted,
+    mcp: sources.extracted,
+    summarized: summarized.extracted,
+  };
+}
+
+function addOptional(
+  breakdown: ContextInputBreakdown,
+  key: OptionalContextBreakdownKey,
+  tokens: number,
+): void {
+  if (tokens <= 0) return;
+  breakdown[key] = (breakdown[key] ?? 0) + tokens;
+}
+
+function classifyToolName(name: string): OptionalContextBreakdownKey | 'tools' {
+  const lower = name.toLowerCase();
+  const bare = lower.replace(/^mcp__session__/, '').replace(/^session__/, '');
+  if (bare === 'spawn_session' || bare === 'wait_for_session') return 'subagents';
+  if (lower.startsWith('mcp__source__')) return 'mcpTools';
+  if (lower.startsWith('mcp__') && !lower.startsWith('mcp__session__')) return 'mcpTools';
+  return 'tools';
+}
+
+function estimatePromptCategories(text: string, breakdown: ContextInputBreakdown, into: 'system' | 'message'): void {
+  const parts = splitPromptText(text);
+  addOptional(breakdown, 'rules', estimateTextTokensConservatively(parts.rules));
+  addOptional(breakdown, 'skills', estimateTextTokensConservatively(parts.skills));
+  addOptional(breakdown, 'mcpTools', estimateTextTokensConservatively(parts.mcp));
+  addOptional(breakdown, 'summarized', estimateTextTokensConservatively(parts.summarized));
+  const rest = estimateTextTokensConservatively(parts.rest);
+  if (into === 'system') breakdown.systemPrompt += rest;
+  else breakdown.messages += rest;
+}
+
+function estimateStructuredContent(content: Exclude<Message['content'], string>, breakdown: ContextInputBreakdown): void {
+  for (const block of content) {
+    if (block.type === 'image') breakdown.messages += IMAGE_RESERVE_TOKENS;
+    else if (block.type === 'text') estimatePromptCategories(block.text, breakdown, 'message');
+    else if (block.type === 'thinking') {
+      breakdown.messages += estimateTextTokensConservatively(block.thinking);
+    } else {
+      breakdown.messages += estimateTextTokensConservatively(block.name);
+      breakdown.messages += estimateTextTokensConservatively(safeJson(block.arguments));
+    }
+  }
+}
+
+export function contextBreakdownTotal(breakdown: ContextInputBreakdown): number {
+  return Math.max(0, breakdown.systemPrompt)
+    + Math.max(0, breakdown.tools)
+    + Math.max(0, breakdown.messages)
+    + OPTIONAL_CONTEXT_BREAKDOWN_KEYS.reduce(
+      (sum, key) => sum + Math.max(0, breakdown[key] ?? 0),
+      0,
+    );
+}
+
+export function readContextBreakdownFields(raw: unknown): ContextInputBreakdown | undefined {
+  if (!raw || typeof raw !== 'object') return undefined;
+  const record = raw as Record<string, unknown>;
+  const systemPrompt = record.systemPrompt;
+  const tools = record.tools;
+  const messages = record.messages;
+  if (
+    typeof systemPrompt !== 'number' || !Number.isFinite(systemPrompt) ||
+    typeof tools !== 'number' || !Number.isFinite(tools) ||
+    typeof messages !== 'number' || !Number.isFinite(messages)
+  ) {
+    return undefined;
+  }
+  const breakdown: ContextInputBreakdown = {
+    systemPrompt: Math.max(0, Math.floor(systemPrompt)),
+    tools: Math.max(0, Math.floor(tools)),
+    messages: Math.max(0, Math.floor(messages)),
+  };
+  for (const key of OPTIONAL_CONTEXT_BREAKDOWN_KEYS) {
+    const value = record[key];
+    if (typeof value === 'number' && Number.isFinite(value) && value > 0) {
+      breakdown[key] = Math.max(0, Math.floor(value));
+    }
+  }
+  return breakdown;
+}
+
 function estimateFromLatestUsage(context: Context): number {
   let lastUsageIndex = -1;
   let latestUsage = 0;
@@ -128,20 +268,36 @@ function estimateFromLatestUsage(context: Context): number {
 }
 
 export function estimateContextInputBreakdown(context: Context): ContextInputBreakdown {
-  return {
-    systemPrompt: estimateTextTokensConservatively(context.systemPrompt ?? ''),
-    tools: estimateTools(context.tools),
-    messages: context.messages.reduce((total, message) => total + estimateMessage(message), 0),
+  const breakdown: ContextInputBreakdown = {
+    systemPrompt: 0,
+    tools: 0,
+    messages: 0,
   };
-}
 
-function breakdownTotal(breakdown: ContextInputBreakdown): number {
-  return breakdown.systemPrompt + breakdown.tools + breakdown.messages;
+  estimatePromptCategories(context.systemPrompt ?? '', breakdown, 'system');
+
+  for (const tool of context.tools ?? []) {
+    const tokens = estimateTextTokensConservatively(safeJson(tool));
+    const bucket = classifyToolName(typeof tool.name === 'string' ? tool.name : '');
+    if (bucket === 'tools') breakdown.tools += tokens;
+    else addOptional(breakdown, bucket, tokens);
+  }
+
+  for (const message of context.messages) {
+    breakdown.messages += MESSAGE_OVERHEAD_TOKENS;
+    if (typeof message.content === 'string') {
+      estimatePromptCategories(message.content, breakdown, 'message');
+    } else {
+      estimateStructuredContent(message.content, breakdown);
+    }
+  }
+
+  return breakdown;
 }
 
 /** Estimate the complete request, including system prompt, tool schemas and images. */
 export function estimateContextInputTokens(context: Context): number {
-  const fullEstimate = breakdownTotal(estimateContextInputBreakdown(context));
+  const fullEstimate = contextBreakdownTotal(estimateContextInputBreakdown(context));
 
   // Provider usage is the best signal for an already-sent prefix. The full
   // estimate protects new sessions and changed system/tool payloads. Taking

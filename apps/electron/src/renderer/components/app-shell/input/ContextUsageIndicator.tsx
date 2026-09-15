@@ -1,21 +1,21 @@
 import * as React from 'react'
 import { useTranslation } from 'react-i18next'
-import { Spinner } from '@craft-agent/ui'
-import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
-import { Drawer, DrawerContent, DrawerHeader, DrawerTitle, DrawerTrigger } from '@/components/ui/drawer'
+import { X } from 'lucide-react'
+import { Spinner, Tooltip, TooltipContent, TooltipTrigger } from '@craft-agent/ui'
+import { Popover, PopoverAnchor, PopoverContent } from '@/components/ui/popover'
+import { Drawer, DrawerContent, DrawerTitle } from '@/components/ui/drawer'
 import { cn } from '@/lib/utils'
-import { formatTokenCount } from './model-picker-helpers'
 import {
-  breakdownShare,
-  breakdownTotal,
+  contextBarShares,
   contextUsagePercent,
   contextUsageRatio,
   contextUsageRingColor,
+  contextUsageRows,
   contextUsageTone,
   formatCacheHitRate,
+  formatContextTokenCount,
   shouldShowContextUsage,
   type ContextStatus,
-  type ContextUsageBreakdown,
 } from './context-usage'
 
 const RING_SIZE = 16
@@ -27,7 +27,7 @@ const DRAWER_CONTENT_CLASS = [
   'data-[vaul-drawer-direction=bottom]:inset-x-2',
   'data-[vaul-drawer-direction=bottom]:bottom-2',
   'data-[vaul-drawer-direction=bottom]:mt-0',
-  'data-[vaul-drawer-direction=bottom]:max-h-[min(82vh,24rem)]',
+  'data-[vaul-drawer-direction=bottom]:max-h-[min(82vh,28rem)]',
   'overflow-hidden rounded-[14px] border border-border/60 bg-background shadow-modal-small',
 ].join(' ')
 
@@ -65,20 +65,23 @@ export function ContextUsageIndicator({
   const percent = contextUsagePercent(ratio)
   const tone = contextUsageTone(ratio)
   const fill = Math.min(1, Math.max(0, ratio ?? 0))
-  const used = formatTokenCount(inputTokens)
+  const used = formatContextTokenCount(inputTokens)
   const windowLabel = contextStatus.contextWindow
-    ? formatTokenCount(contextStatus.contextWindow)
+    ? formatContextTokenCount(contextStatus.contextWindow, 'window')
     : undefined
-  const title = percent != null
-    ? t('chat.contextUsed', { percent: `${percent}%` })
-    : t('chat.context')
+  const title = t('chat.contextUsage')
+  const fullLabel = percent != null ? t('chat.contextFull', { percent: `${percent}%` }) : undefined
   const usedOf = windowLabel
     ? t('chat.contextUsedOf', { used, window: windowLabel })
-    : `~${used}`
+    : t('chat.contextUsedTokens', { used })
+  const hint = [title, fullLabel].filter(Boolean).join(' · ')
   const trigger = (
     <button
       type="button"
-      aria-label={`${title}, ${usedOf}`}
+      aria-label={[title, fullLabel, usedOf].filter(Boolean).join(', ')}
+      aria-expanded={open}
+      aria-haspopup="dialog"
+      onClick={() => handleOpenChange(!open)}
       className={cn(
         'relative inline-flex h-7 w-7 items-center justify-center rounded-[6px] text-muted-foreground hover:bg-foreground/5 transition-colors',
         open && 'bg-foreground/5',
@@ -123,26 +126,34 @@ export function ContextUsageIndicator({
 
   const details = {
     title,
+    fullLabel,
     usedOf,
-    showTitle: !compact,
+    inputTokens,
+    contextWindow: contextStatus.contextWindow,
     breakdown: contextStatus.contextBreakdown,
     cacheHitRate: contextStatus.cacheHitRate,
+    onClose: () => handleOpenChange(false),
   }
+
+  const ring = open ? trigger : (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        {trigger}
+      </TooltipTrigger>
+      <TooltipContent side="top">{hint}</TooltipContent>
+    </Tooltip>
+  )
 
   if (compact) {
     return (
       <Drawer open={open} onOpenChange={handleOpenChange} direction="bottom">
-        <DrawerTrigger asChild>
-          {trigger}
-        </DrawerTrigger>
+        {ring}
         <DrawerContent
           className={DRAWER_CONTENT_CLASS}
           onOpenAutoFocus={(event) => event.preventDefault()}
         >
-          <DrawerHeader className="border-b border-border/50 px-4 py-3 group-data-[vaul-drawer-direction=bottom]/drawer-content:text-left">
-            <DrawerTitle className="text-sm font-medium">{title}</DrawerTitle>
-          </DrawerHeader>
-          <div className="px-4 py-3">
+          <DrawerTitle className="sr-only">{title}</DrawerTitle>
+          <div className="px-4 py-4">
             <ContextUsagePopoverBody {...details} />
           </div>
         </DrawerContent>
@@ -152,11 +163,11 @@ export function ContextUsageIndicator({
 
   return (
     <Popover open={open} onOpenChange={handleOpenChange}>
-      <PopoverTrigger asChild>
-        {trigger}
-      </PopoverTrigger>
+      <PopoverAnchor asChild>
+        <span className="inline-flex">{ring}</span>
+      </PopoverAnchor>
       <PopoverContent
-        className="w-[280px] rounded-[8px] bg-background p-3 text-foreground shadow-modal-small"
+        className="w-[min(28rem,calc(100vw-1.5rem))] rounded-[8px] bg-background p-4 text-foreground shadow-modal-small"
         side="top"
         align="end"
         sideOffset={6}
@@ -171,65 +182,104 @@ export function ContextUsageIndicator({
 
 function ContextUsagePopoverBody({
   title,
+  fullLabel,
   usedOf,
-  showTitle,
+  inputTokens,
+  contextWindow,
   breakdown,
   cacheHitRate,
+  onClose,
 }: {
   title: string
+  fullLabel?: string
   usedOf: string
-  showTitle: boolean
-  breakdown?: ContextUsageBreakdown
+  inputTokens: number
+  contextWindow?: number
+  breakdown?: ContextStatus['contextBreakdown']
   cacheHitRate?: number
+  onClose: () => void
 }) {
   const { t } = useTranslation()
   const cacheLabel = formatCacheHitRate(cacheHitRate)
-  const total = breakdown ? breakdownTotal(breakdown) : 0
+  const rows = contextUsageRows(breakdown)
+  const shares = contextBarShares(rows, inputTokens, contextWindow)
 
   return (
     <div className="space-y-3">
-      {showTitle ? (
-        <div className="flex items-baseline justify-between gap-3">
-          <div className="text-sm font-medium text-foreground">{title}</div>
-          <div className="shrink-0 font-mono text-xs text-muted-foreground">{usedOf}</div>
-        </div>
-      ) : (
-        <div className="font-mono text-xs text-muted-foreground">{usedOf}</div>
-      )}
-      {breakdown && total > 0 && (
-        <>
-          <div className="flex h-1.5 overflow-hidden rounded-full bg-foreground/8">
-            <BreakdownSegment share={breakdownShare(breakdown.systemPrompt, total)} className="bg-foreground/35" />
-            <BreakdownSegment share={breakdownShare(breakdown.tools, total)} className="bg-foreground/55" />
-            <BreakdownSegment share={breakdownShare(breakdown.messages, total)} className="bg-foreground/80" />
-          </div>
-          <dl className="grid grid-cols-[minmax(0,1fr)_auto] gap-x-3 gap-y-1.5 text-xs">
-            <UsageStat label={t('chat.contextSystemPrompt')} value={`~${formatTokenCount(breakdown.systemPrompt)}`} />
-            <UsageStat label={t('chat.contextTools')} value={`~${formatTokenCount(breakdown.tools)}`} />
-            <UsageStat label={t('chat.contextMessages')} value={`~${formatTokenCount(breakdown.messages)}`} />
-          </dl>
-        </>
+      <div className="flex items-center justify-between gap-3">
+        <div className="text-sm text-foreground">{title}</div>
+        <button
+          type="button"
+          aria-label={t('common.close')}
+          onClick={onClose}
+          className="-mr-1 inline-flex h-7 w-7 items-center justify-center rounded-[6px] text-muted-foreground transition-opacity hover:bg-foreground/5 hover:opacity-100"
+        >
+          <X className="h-3.5 w-3.5" />
+        </button>
+      </div>
+      <div className="flex items-baseline justify-between gap-3 text-xs text-muted-foreground">
+        <div>{fullLabel}</div>
+        <div className="shrink-0 font-mono">{usedOf}</div>
+      </div>
+      <div className="flex h-1 overflow-hidden rounded-full bg-foreground/10">
+        {rows.length > 0 ? rows.map((row, index) => (
+          <BreakdownSegment
+            key={row.id}
+            share={shares.used[index] ?? 0}
+            color={row.color}
+          />
+        )) : (
+          <BreakdownSegment share={shares.used[0] ?? 0} color="#F87171" />
+        )}
+        <BreakdownSegment share={shares.remaining} className="bg-foreground/12" />
+      </div>
+      {rows.length > 0 && (
+        <ul className="grid gap-2 text-xs">
+          {rows.map((row) => (
+            <li key={row.id} className="flex items-center justify-between gap-3">
+              <div className="flex min-w-0 items-center gap-2">
+                <span
+                  aria-hidden
+                  className="size-2 shrink-0 rounded-full"
+                  style={{ backgroundColor: row.color }}
+                />
+                <span className="truncate text-muted-foreground">{t(row.labelKey)}</span>
+              </div>
+              <span className="shrink-0 font-mono text-foreground/80">
+                {formatContextTokenCount(row.tokens)}
+              </span>
+            </li>
+          ))}
+        </ul>
       )}
       {cacheLabel && (
-        <dl className="grid grid-cols-[minmax(0,1fr)_auto] gap-x-3 text-xs">
-          <UsageStat label={t('chat.contextCacheHitRate')} value={cacheLabel} />
-        </dl>
+        <div className="flex items-center justify-between gap-3 border-t border-border/50 pt-2 text-xs">
+          <span className="text-muted-foreground">{t('chat.contextCacheHitRate')}</span>
+          <span className="font-mono text-foreground/80">{cacheLabel}</span>
+        </div>
       )}
     </div>
   )
 }
 
-function BreakdownSegment({ share, className }: { share: number; className: string }) {
+function BreakdownSegment({
+  share,
+  color,
+  className,
+}: {
+  share: number
+  color?: string
+  className?: string
+}) {
   if (share <= 0) return null
-  return <div className={cn('h-full min-w-0', className)} style={{ width: `${share * 100}%` }} />
-}
-
-function UsageStat({ label, value }: { label: string; value: string }) {
   return (
-    <>
-      <dt className="truncate text-muted-foreground">{label}</dt>
-      <dd className="truncate font-mono text-foreground">{value}</dd>
-    </>
+    <div
+      className={cn('h-full min-w-[2px]', className)}
+      style={{
+        width: `${share * 100}%`,
+        ...(color ? { backgroundColor: color } : {}),
+      }}
+    />
   )
 }
 

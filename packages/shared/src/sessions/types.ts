@@ -154,11 +154,16 @@ export interface SessionTokenUsage {
   contextWindow?: number;
   /** Cache read share of the latest request input (0-1). */
   cacheHitRate?: number;
-  /** Estimated system / tools / messages split. Display with a ~ prefix. */
+  /** Estimated context composition. Optional fields appear only when Selection can measure them. */
   contextBreakdown?: {
     systemPrompt: number;
     tools: number;
     messages: number;
+    rules?: number;
+    skills?: number;
+    mcpTools?: number;
+    subagents?: number;
+    summarized?: number;
   };
   /** Usage reported by the most recent individual model call. Absent on legacy sessions. */
   lastCall?: SessionModelCallUsage;

@@ -67,7 +67,7 @@ import {
 } from "@craft-agent/ui"
 import { MemoizedAuthRequestCard } from "@/components/chat/AuthRequestCard"
 import { ChatInputZone, type StructuredInputState, type StructuredResponse, type PermissionResponse, type AdminApprovalResponse } from "./input"
-import { cacheHitRateFromTokenUsage } from "./input/context-usage"
+import { cacheHitRateFromTokenUsage, resolveContextUsageTokens } from "./input/context-usage"
 import type { RichTextInputHandle } from "@/components/ui/rich-text-input"
 import { useBackgroundTasks } from "@/hooks/useBackgroundTasks"
 import { useTurnCardExpansion } from "@/hooks/useTurnCardExpansion"
@@ -2219,7 +2219,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
               onConnectionChange,
               contextStatus: {
                 isCompacting: session.currentStatus?.statusType === 'compacting',
-                inputTokens: session.tokenUsage?.inputTokens,
+                inputTokens: resolveContextUsageTokens(session.tokenUsage),
                 contextWindow: session.tokenUsage?.contextWindow,
                 cacheHitRate: cacheHitRateFromTokenUsage(session.tokenUsage),
                 contextBreakdown: session.tokenUsage?.contextBreakdown,
