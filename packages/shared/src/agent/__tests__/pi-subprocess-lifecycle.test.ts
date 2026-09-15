@@ -1,8 +1,9 @@
-import { describe, expect, it } from 'bun:test';
+import { describe, expect, it, spyOn } from 'bun:test';
 import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { PiAgent } from '../pi-agent.ts';
+import * as configStorage from '../../config/storage.ts';
 
 function fixture(code: string) {
   const root = mkdtempSync(join(tmpdir(), 'pi-lifecycle-'));
@@ -84,6 +85,8 @@ it('a failed async bridge handler terminates only its owning process', async () 
 
 
 it('a failed startup can be followed by a successful request without late-exit corruption', async () => {
+  // The transport fixture needs no browser and must not read machine-wide defaults.
+  const browserSetting = spyOn(configStorage, 'getBrowserToolEnabled').mockReturnValue(false);
   const f = fixture('setInterval(() => {}, 1000)');
   try {
     const startup = f.internal.ensureSubprocess(150);
@@ -106,5 +109,5 @@ it('a failed startup can be followed by a successful request without late-exit c
     old.emit('exit', 1, null);
     expect(f.internal.subprocess).toBe(current);
     expect(await f.agent.runMiniCompletion('test')).toBe('recovered');
-  } finally { f.cleanup(); }
+  } finally { f.cleanup(); browserSetting.mockRestore(); }
 });
