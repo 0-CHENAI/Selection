@@ -226,6 +226,7 @@
   "chat.followUp": "追问",
   "chat.followUpSaveAndSend": "保存并发送",
   "chat.hideTechnicalDetails": "隐藏技术详情",
+  "chat.imageLoadFailed": "图片加载失败",
   "chat.imageWarning.action": "启用图像支持",
   "chat.imageWarning.title": "{{modelName}} 配置为纯文本模型，图像将在发送前被移除。",
   "chat.inputFailedDescription": "此聊天的其余部分仍可使用。你可以重试，或者在本地草稿损坏时将其清除。",

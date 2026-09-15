@@ -226,6 +226,7 @@
   "chat.followUp": "Follow-up",
   "chat.followUpSaveAndSend": "Save & Send",
   "chat.hideTechnicalDetails": "Hide technical details",
+  "chat.imageLoadFailed": "Image failed to load",
   "chat.imageWarning.action": "Enable image support",
   "chat.imageWarning.title": "{{modelName}} is configured as text-only. Images will be stripped before sending.",
   "chat.inputFailedDescription": "The rest of this chat is still available. You can retry, or clear the local draft if it became corrupted.",

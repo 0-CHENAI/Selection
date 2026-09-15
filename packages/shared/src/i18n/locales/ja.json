@@ -226,6 +226,7 @@
   "chat.followUp": "フォローアップ",
   "chat.followUpSaveAndSend": "保存して送信",
   "chat.hideTechnicalDetails": "技術的な詳細を非表示",
+  "chat.imageLoadFailed": "画像を読み込めませんでした",
   "chat.imageWarning.action": "画像入力を有効化",
   "chat.imageWarning.title": "{{modelName}} はテキスト専用として設定されています。画像は送信前に削除されます。",
   "chat.inputFailedDescription": "このチャットの他の部分は引き続き利用できます。再試行するか、ローカルの下書きが壊れている場合は削除してください。",

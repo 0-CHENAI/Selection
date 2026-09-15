@@ -226,6 +226,7 @@
   "chat.followUp": "Követő kérdés",
   "chat.followUpSaveAndSend": "Mentés és küldés",
   "chat.hideTechnicalDetails": "Technikai részletek elrejtése",
+  "chat.imageLoadFailed": "A kép betöltése nem sikerült",
   "chat.imageWarning.action": "Képtámogatás engedélyezése",
   "chat.imageWarning.title": "A(z) {{modelName}} csak szöveges modellként van beállítva. A képek küldés előtt eltávolításra kerülnek.",
   "chat.inputFailedDescription": "A beszélgetés többi része továbbra is elérhető. Megpróbálhatod újra, vagy törölheted a helyi piszkozatot, ha megsérült.",
