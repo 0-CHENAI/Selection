@@ -116,3 +116,10 @@ describe('terminal response diagnostics (#295)', () => {
     expect(error.actions).toEqual([])
   })
 })
+
+it('classifies the local request resource limit without offering automatic retry', () => {
+  const error = parseError(new Error('Model request time limit reached. Continue this session to resume from recorded work.'));
+  expect(error.code).toBe('model_request_timeout');
+  expect(error.canRetry).toBe(false);
+  expect(error.actions).toEqual([]);
+});

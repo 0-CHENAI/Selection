@@ -1,3 +1,4 @@
+import { isRetryableAssistantError } from '@earendil-works/pi-ai/compat';
 import { describe, expect, it } from 'bun:test';
 import {
   createAssistantMessageEventStream,
@@ -166,5 +167,65 @@ describe('createContextBudgetedStream', () => {
     const events = await collect(stream);
     expect(events.map(event => event.type)).toEqual(['start', 'error']);
     expect((await stream.result()).errorMessage).toContain('without a terminal event');
+  });
+});
+
+describe('request lifecycle bounds (#360)', () => {
+  it('terminates a silent provider and cancels its underlying request without retrying', async () => {
+    let signal: AbortSignal | undefined;
+    let calls = 0;
+    const result = await createContextBudgetedStream((_model, _context, options) => {
+      calls++;
+      signal = options?.signal;
+      return createAssistantMessageEventStream();
+    }, model, emptyContext, { timeoutMs: 20 }).result();
+    expect(result.stopReason).toBe('error');
+    expect(result.errorMessage).toContain('time limit');
+    expect(isRetryableAssistantError(result)).toBe(false);
+    expect(signal?.aborted).toBe(true);
+    expect(calls).toBe(1);
+  });
+
+  it('unblocks user cancellation even when the provider ignores abort', async () => {
+    const controller = new AbortController();
+    const stream = createContextBudgetedStream(() => createAssistantMessageEventStream(), model, emptyContext,
+      { signal: controller.signal, timeoutMs: 1000 });
+    controller.abort();
+    const result = await stream.result();
+    expect(result.stopReason).toBe('aborted');
+  });
+
+  it('does not start a request after user cancellation', async () => {
+    const controller = new AbortController();
+    controller.abort();
+    let calls = 0;
+    const result = await createContextBudgetedStream(() => {
+      calls++;
+      return createAssistantMessageEventStream();
+    }, model, emptyContext, { signal: controller.signal }).result();
+    expect(calls).toBe(0);
+    expect(result.stopReason).toBe('aborted');
+  });
+
+  it('keeps partial output, refuses a truncated tool call, and permits a subsequent request', async () => {
+    const partial = message('stop');
+    partial.content = [{ type: 'text', text: 'Recorded work' }];
+    partial.usage.output = 17;
+    const events = await collect(createContextBudgetedStream(() => eventsStream([
+      { type: 'start', partial },
+      { type: 'text_delta', contentIndex: 0, delta: 'Recorded work', partial },
+      { type: 'toolcall_delta', contentIndex: 1, delta: '{"path":', partial },
+    ]), model, emptyContext, { timeoutMs: 20 }));
+    expect(events.map(event => event.type)).toEqual(['start', 'text_delta', 'toolcall_delta', 'error']);
+    const terminal = events.at(-1);
+    expect(terminal?.type).toBe('error');
+    if (terminal?.type === 'error') {
+      expect(terminal.error.content).toEqual(partial.content);
+      expect(terminal.error.usage.output).toBe(17);
+    }
+    const result = await createContextBudgetedStream(() => eventsStream([
+      { type: 'done', reason: 'stop', message: message('stop') },
+    ]), model, emptyContext, { timeoutMs: 20 }).result();
+    expect(result.stopReason).toBe('stop');
   });
 });

@@ -356,6 +356,8 @@
   "chat.terminal.agent_process_exited.title": "Agent-Prozess beendet",
   "chat.terminal.context_limit.message": "Komprimieren Sie die Unterhaltung oder beginnen Sie eine neue Sitzung.",
   "chat.terminal.context_limit.title": "Kontextlimit erreicht",
+  "chat.terminal.model_request_timeout.message": "This model request reached its time limit. Recorded work is retained. Continue this conversation to resume.",
+  "chat.terminal.model_request_timeout.title": "Model request time limit reached",
   "chat.terminal.no_response.message": "Der Agent hat ohne abschließende Antwort beendet. Setzen Sie die Unterhaltung mit einer weiteren Nachricht fort.",
   "chat.terminal.no_response.title": "Keine abschließende Antwort",
   "chat.terminal.provider_timeout.message": "Der Modelldienst hat nicht rechtzeitig geantwortet. Prüfen Sie die Knotenergebnisse vor einem erneuten Versuch.",

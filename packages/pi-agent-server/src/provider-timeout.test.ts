@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
-async function requestThroughInterceptor(model: Model<'openai-completions'>) {
+async function requestThroughInterceptor(model: Model<'openai-completions'>, requestTimeoutMs = 15000) {
   const sessionDir = mkdtempSync(join(tmpdir(), 'provider-297-'));
   const interceptor = resolve(import.meta.dir, '../../shared/src/unified-network-interceptor.ts');
   const budget = resolve(import.meta.dir, './context-budget-stream.ts');
@@ -14,8 +14,10 @@ async function requestThroughInterceptor(model: Model<'openai-completions'>) {
     import { createContextBudgetedStream } from ${JSON.stringify(pathToFileURL(budget).href)};
     const response = await createContextBudgetedStream(streamSimple, ${JSON.stringify(model)},
       { messages: [{ role: 'user', content: 'Hello', timestamp: Date.now() }] },
-      { apiKey: 'local-test-only', timeoutMs: 15000 }).result();
-    console.log(JSON.stringify({ response }));
+      { apiKey: 'local-test-only', timeoutMs: ${requestTimeoutMs} }).result();
+    console.log(JSON.stringify({ response, settledAt: Date.now() }));
+    // Keep the process alive so the test distinguishes cancellation from process exit.
+    if (${requestTimeoutMs} < 15000) await new Promise(resolve => setTimeout(resolve, 600));
   `;
   const proc = Bun.spawn([process.execPath, '--preload', interceptor, '--eval', code], {
     cwd: resolve(import.meta.dir, '../../..'),
@@ -107,5 +109,35 @@ it.each(['unknown', 'malformed', 'http-error', 'truncated'])('retains structured
     expect(diagnostic.phase).toBe(failure === 'unknown' ? 'provider-error' : failure === 'malformed' ? 'invalid-event' : failure === 'truncated' ? 'eof' : 'http-error');
     expect(diagnostic.attempt).toBeGreaterThan(0);
     expect(diagnostic.providerRequestId).toBe(failure === 'http-error' ? 'http-297' : 'req-297');
+  } finally { server.stop(true); }
+}, 20000);
+
+
+it.each([false, true])('bounds an open SSE connection and cancels HTTP transport (partial=%s)', async partial => {
+  let cancelledAt = 0;
+  const server = Bun.serve({ port: 0, idleTimeout: 30, fetch() {
+    return new Response(new ReadableStream({
+      start(controller) {
+        const data = partial
+          ? 'data: {"choices":[{"index":0,"delta":{"content":"Recorded work"},"finish_reason":null}]}\n\n'
+          : ': connected\n\n';
+        controller.enqueue(new TextEncoder().encode(data));
+      },
+      cancel() { cancelledAt = Date.now(); },
+    }), { headers: { 'content-type': 'text/event-stream' } });
+  } });
+  try {
+    const model: Model<'openai-completions'> = {
+      id: 'local-test', name: 'Local test', api: 'openai-completions', provider: 'openai',
+      baseUrl: `http://127.0.0.1:${server.port}/v1`, reasoning: false, input: ['text'],
+      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, contextWindow: 8192, maxTokens: 128,
+    };
+    const { response, settledAt } = await requestThroughInterceptor(model, 500);
+    expect(response.stopReason).toBe('error');
+    expect(response.errorMessage).toContain('time limit');
+    // Cancellation must reach the server while the child is still alive.
+    expect(cancelledAt).toBeGreaterThan(0);
+    expect(cancelledAt - settledAt).toBeLessThan(400);
+    if (partial) expect(response.content).toContainEqual({ type: 'text', text: 'Recorded work' });
   } finally { server.stop(true); }
 }, 20000);
