@@ -16,7 +16,7 @@ import {
   Info_Badge,
   Info_Markdown,
 } from '@/components/info'
-import { EditPopover, EditButton, getEditConfig } from '@/components/ui/EditPopover'
+import { EditPopover, EditButton, getAutomationEditConfig } from '@/components/ui/EditPopover'
 import { useActiveWorkspace } from '@/context/AppShellContext'
 import { AutomationAvatar } from './AutomationAvatar'
 import { AutomationMenu } from './AutomationMenu'
@@ -64,8 +64,9 @@ export function AutomationInfoPage({
 
   const editActions = workspace?.rootPath ? (
     <EditPopover
+      key={`${workspace.id}:${automation.id}`}
       trigger={<EditButton />}
-      {...getEditConfig('automation-config', workspace.rootPath)}
+      {...getAutomationEditConfig(workspace.rootPath, automation)}
       secondaryAction={{ label: t('automations.editFile'), filePath: `${workspace.rootPath}/automations.json` }}
     />
   ) : undefined

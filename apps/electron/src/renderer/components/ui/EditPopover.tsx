@@ -38,6 +38,7 @@ import {
   creationJobsAtom,
   findActiveCreationJob,
   findLatestCreationJob,
+  findResumableCreationJob,
   getOrCreateCreationSession,
   patchCreationJobAtom,
   restartCreationJobAttemptAtom,
@@ -45,6 +46,7 @@ import {
   type CreationKind,
 } from '@/atoms/creation-jobs'
 import { readCreationIds } from '@/lib/creation-job-validation'
+import type { AutomationCreationKey } from '../automations/creation-context'
 import { ChatDisplay } from '../app-shell/ChatDisplay'
 import { HeaderIconButton } from './HeaderIconButton'
 import {
@@ -127,7 +129,7 @@ export type EditContextKey =
   | 'add-label'
   | 'edit-views'
   | 'edit-tool-icons'
-  | 'add-automation'
+  | AutomationCreationKey
   | 'automation-config'
 
 /**
@@ -618,6 +620,10 @@ const EDIT_CONFIGS: Record<EditContextKey, (location: string) => Omit<EditConfig
     creationKind: 'automation',
   }),
 
+  'add-automation-scheduled': (location) => automationCreationConfig(location, 'scheduled'),
+  'add-automation-event': (location) => automationCreationConfig(location, 'event'),
+  'add-automation-agentic': (location) => automationCreationConfig(location, 'agentic'),
+
   'automation-config': (location) => ({
     context: {
       label: 'Automation Configuration',
@@ -639,6 +645,38 @@ const EDIT_CONFIGS: Record<EditContextKey, (location: string) => Omit<EditConfig
     systemPromptPreset: 'mini',
     inlineExecution: true,
   }),
+}
+
+function automationCreationConfig(location: string, category: 'scheduled' | 'event' | 'agentic') {
+  const base = EDIT_CONFIGS['add-automation'](location)
+  const variants = {
+    scheduled: { label: 'Add Scheduled Automation', title: 'editPopover.label.addScheduledAutomation', example: 'editPopover.example.addScheduledAutomation',
+      instruction: 'Create a scheduled automation using SchedulerTick, cron and an explicit timezone.' },
+    event: { label: 'Add Event Automation', title: 'editPopover.label.addEventAutomation', example: 'editPopover.example.addEventAutomation',
+      instruction: 'Create an app-event automation (LabelAdd, LabelRemove, LabelConfigChange, PermissionModeChange, FlagChange or SessionStatusChange), not a scheduled or agent-event rule.' },
+    agentic: { label: 'Add Agent Event Automation', title: 'editPopover.label.addAgentAutomation', example: 'editPopover.example.addAgentAutomation',
+      instruction: 'Create an agent-runtime event automation, such as PreToolUse, PostToolUse, PostToolUseFailure or Stop, not a scheduled or app-event rule.' },
+  }
+  const variant = variants[category]
+  return {
+    ...base,
+    context: { ...base.context, label: variant.label,
+      context: `${base.context.context} ${variant.instruction} Preserve all existing automation IDs and configurations. This is a new rule, not an edit of a previous rule.` },
+    displayLabelKey: variant.title,
+    exampleKey: variant.example,
+  }
+}
+
+/** Scope detail edits to one stable rule while retaining the shared configuration file. */
+export function getAutomationEditConfig(location: string, automation: { id: string; name: string }) {
+  const config = getEditConfig('automation-config', location)
+  return {
+    ...config,
+    contextKey: `automation-config:${automation.id}`,
+    displayLabel: `${config.displayLabel}: ${automation.name}`,
+    context: { ...config.context,
+      context: `${config.context.context} Edit only the automation with ID ${JSON.stringify(automation.id)} and name ${JSON.stringify(automation.name)}. Preserve its ID and all other automation entries. If this ID is missing, report that rather than editing another rule.` },
+  }
 }
 
 /**
@@ -872,6 +910,7 @@ export function EditPopover({
   const restartCreationAttempt = useSetAtom(restartCreationJobAttemptAtom)
   const resolvedContextKey = contextKey || `${context.label}:${context.filePath}`
   const creationSessionPromiseRef = useRef<Promise<string> | null>(null)
+  const restoredCreationScopeRef = useRef<string | null>(null)
 
   // Session ID for inline execution (created on first message)
   const [inlineSessionId, setInlineSessionId] = useState<string | null>(null)
@@ -1202,9 +1241,17 @@ export function EditPopover({
   // Reopening a creation context reattaches to its latest hidden session. Keep
   // listening while open so a concurrently-created session can attach here too.
   useEffect(() => {
-    if (!open || !creationKind || !workspace?.id) return
-    const latest = findLatestCreationJob(creationJobs, workspace.id, resolvedContextKey)
-    setInlineSessionId(latest?.sessionId || null)
+    if (!open || !creationKind || !workspace?.id) {
+      restoredCreationScopeRef.current = null
+      return
+    }
+    const scope = `${workspace.id}:${resolvedContextKey}`
+    const reopening = restoredCreationScopeRef.current !== scope
+    restoredCreationScopeRef.current = scope
+    const latest = findResumableCreationJob(creationJobs, workspace.id, resolvedContextKey)
+    // Keep the final response visible while this dialog is open. On the next
+    // opening (or next creation request), a completed automation starts fresh.
+    if (reopening || latest) setInlineSessionId(latest?.sessionId || null)
     if (latest?.status === 'failed' && latest.request) {
       setInputDraft((current) => current || latest.request || '')
     }
@@ -1277,6 +1324,9 @@ export function EditPopover({
         sessionId = acquired.sessionId || null
         setInlineSessionId(sessionId)
       } else {
+        // A new automation gets a fresh hidden session, even when the previous
+        // successful creation is still displayed until the restore effect runs.
+        if (creationKind === 'automation') sessionId = null
         let baseline: string[]
         try {
           baseline = await readCreationIds(creationKind, workspace.id)
