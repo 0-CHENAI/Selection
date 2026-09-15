@@ -356,6 +356,8 @@
   "chat.terminal.agent_process_exited.title": "Az ügynökfolyamat kilépett",
   "chat.terminal.context_limit.message": "Folytatás előtt tömörítsd a beszélgetést, vagy kezdj új munkamenetet.",
   "chat.terminal.context_limit.title": "Elérte a kontextuskorlátot",
+  "chat.terminal.model_request_timeout.message": "This model request reached its time limit. Recorded work is retained. Continue this conversation to resume.",
+  "chat.terminal.model_request_timeout.title": "Model request time limit reached",
   "chat.terminal.no_response.message": "Az ügynök végső válasz nélkül fejezte be a kört. Küldj új üzenetet ebben a beszélgetésben a meglévő előzmények folytatásához.",
   "chat.terminal.no_response.title": "Nem érkezett végső válasz",
   "chat.terminal.provider_timeout.message": "A modellszolgáltatás nem válaszolt időben. Újrapróbálkozás előtt ellenőrizd a csomópont eredményeit.",

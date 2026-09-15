@@ -1,5 +1,5 @@
 const terminalCodes = new Set<string>([
-  'provider_timeout', 'no_response', 'tool_only_response', 'context_limit', 'stream_interrupted', 'agent_process_exited',
+  'model_request_timeout', 'provider_timeout', 'no_response', 'tool_only_response', 'context_limit', 'stream_interrupted', 'agent_process_exited',
 ])
 
 /** Terminal failures require a follow-up against retained history, not prompt replay. */

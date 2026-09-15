@@ -356,6 +356,8 @@
   "chat.terminal.agent_process_exited.title": "Agent process exited",
   "chat.terminal.context_limit.message": "Compact the conversation or start a new session before continuing.",
   "chat.terminal.context_limit.title": "Context limit reached",
+  "chat.terminal.model_request_timeout.message": "This model request reached its time limit. Recorded work is retained. Continue this conversation to resume.",
+  "chat.terminal.model_request_timeout.title": "Model request time limit reached",
   "chat.terminal.no_response.message": "The agent ended without a final response. Send a follow-up in this conversation to continue from the existing history.",
   "chat.terminal.no_response.title": "No final response",
   "chat.terminal.provider_timeout.message": "The model service did not respond in time. This may be an upstream timeout. Check the node results before retrying.",
