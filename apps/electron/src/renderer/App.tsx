@@ -85,6 +85,7 @@ import {
   shouldRemoveTaskForToolResult,
 } from '@/components/app-shell/background-task-chip-state'
 import { getFileManagerName } from '@/lib/platform'
+import { windowsCaptionInsetStyle } from '@/lib/windows-caption-inset'
 import { rendererLog } from '@/lib/logger'
 import { ActionRegistryProvider } from '@/actions'
 import { toast } from 'sonner'
@@ -2000,6 +2001,8 @@ export default function App() {
     onSetTrafficLightsVisible: (visible: boolean) => {
       window.electronAPI.setTrafficLightsVisible(visible)
     },
+    // Keep overlay headers (image preview, close, zoom) left of Windows caption buttons (#356)
+    windowsCaptionInsetPadding: windowsCaptionInsetStyle()?.paddingRight,
   }), [handleOpenFile, handleOpenUrl, linkInterceptor.openFileExternal])
 
   // Loading state - show splash screen
