@@ -9,7 +9,7 @@
  * Claude / Codex / Copilot backends.
  */
 
-import type { AgentEvent as CraftAgentEvent } from '@craft-agent/core/types';
+import type { AgentEvent as CraftAgentEvent, AgentEventUsage } from '@craft-agent/core/types';
 import type {
   AgentEvent as PiAgentEvent,
 } from '@earendil-works/pi-agent-core';
@@ -24,7 +24,7 @@ import { PI_TOOL_NAME_MAP } from './constants.ts';
 import { toolMetadataStore } from '../../../interceptor-common.ts';
 import { parseError, createTypedError } from '../../errors.ts';
 import { normalizeToolResultContent } from '../../tool-matching.ts';
-import { ACTIONABLE_CONTEXT_OVERFLOW_MESSAGE } from './context-budget.ts';
+import { ACTIONABLE_CONTEXT_OVERFLOW_MESSAGE, readContextBreakdownFields } from './context-budget.ts';
 
 /**
  * Pi SDK auto-compaction race signature — the AbortController crash described
@@ -36,6 +36,40 @@ import { ACTIONABLE_CONTEXT_OVERFLOW_MESSAGE } from './context-budget.ts';
  * raw stack until the upstream fix lands. See plans/fix-pi-gpt-compaction.md.
  */
 const SDK_AUTOCOMPACT_RACE_SIGNATURE = /_autoCompactionAbortController\.signal/;
+
+type PiUsage = {
+  input: number;
+  output: number;
+  cacheRead?: number;
+  cacheWrite?: number;
+  cost: { total: number };
+};
+
+function cacheHitRateFromPiUsage(usage: PiUsage): number | undefined {
+  const cacheRead = usage.cacheRead || 0;
+  const totalInput = usage.input + cacheRead;
+  if (totalInput <= 0) return undefined;
+  return Math.min(1, cacheRead / totalInput);
+}
+
+function readContextBreakdown(event: object): AgentEventUsage['contextBreakdown'] | undefined {
+  return readContextBreakdownFields((event as { contextBreakdown?: unknown }).contextBreakdown);
+}
+
+function toAgentUsage(usage: PiUsage, contextWindow: number | undefined, contextBreakdown?: AgentEventUsage['contextBreakdown']): AgentEventUsage {
+  const cacheRead = usage.cacheRead || 0;
+  return {
+    inputTokens: usage.input,
+    outputTokens: usage.output,
+    cacheReadTokens: usage.cacheRead,
+    cacheCreationTokens: usage.cacheWrite,
+    costUsd: usage.cost.total,
+    contextTokens: usage.input + cacheRead,
+    contextWindow,
+    cacheHitRate: cacheHitRateFromPiUsage(usage),
+    ...(contextBreakdown ? { contextBreakdown } : {}),
+  };
+}
 
 /** How long to wait after a held overflow `agent_end` for a `compaction_start`
  *  before giving up and surfacing the original error. The SDK fires
@@ -128,6 +162,7 @@ export class PiEventAdapter extends BaseEventAdapter {
 
   // Track last usage for emitting with complete event
   private lastUsage: { input: number; output: number; cacheRead: number; cacheWrite: number; totalTokens: number; cost: { total: number } } | undefined;
+  private lastContextBreakdown: AgentEventUsage['contextBreakdown'];
 
   // ============================================================
   // Overflow-recovery state machine
@@ -309,18 +344,9 @@ export class PiEventAdapter extends BaseEventAdapter {
           this.overflowState = 'none';
         }
         if (this.lastUsage) {
-          const contextTokens = this.lastUsage.input + (this.lastUsage.cacheRead || 0);
           yield {
             type: 'complete',
-            usage: {
-              inputTokens: this.lastUsage.input,
-              outputTokens: this.lastUsage.output,
-              cacheReadTokens: this.lastUsage.cacheRead,
-              cacheCreationTokens: this.lastUsage.cacheWrite,
-              costUsd: this.lastUsage.cost.total,
-              contextTokens,
-              contextWindow: this.contextWindow,
-            },
+            usage: toAgentUsage(this.lastUsage, this.contextWindow, this.lastContextBreakdown),
           };
         } else {
           yield { type: 'complete' };
@@ -513,18 +539,10 @@ export class PiEventAdapter extends BaseEventAdapter {
         // Emit usage_update if the assistant message includes token usage
         if (msg.usage && typeof msg.usage.input === 'number') {
           this.lastUsage = msg.usage;
-          const contextTokens = msg.usage.input + (msg.usage.cacheRead || 0);
+          this.lastContextBreakdown = readContextBreakdown(event);
           yield {
             type: 'usage_update',
-            usage: {
-              inputTokens: msg.usage.input,
-              outputTokens: msg.usage.output,
-              cacheReadTokens: msg.usage.cacheRead,
-              cacheCreationTokens: msg.usage.cacheWrite,
-              costUsd: msg.usage.cost.total,
-              contextTokens,
-              contextWindow: this.contextWindow,
-            },
+            usage: toAgentUsage(msg.usage, this.contextWindow, this.lastContextBreakdown),
           };
         }
         break;
@@ -706,20 +724,13 @@ export class PiEventAdapter extends BaseEventAdapter {
           }
           const usage = compactionEvent.result.usage;
           if (usage && typeof usage.input === 'number') {
-            const contextTokens = usage.input + (usage.cacheRead || 0);
+            this.lastUsage = usage;
+            this.lastContextBreakdown = readContextBreakdown(event);
             // Summary generation is a real provider call. Forward its usage so
             // per-agent budgets include compaction instead of hiding that cost.
             yield {
               type: 'usage_update',
-              usage: {
-                inputTokens: usage.input,
-                outputTokens: usage.output,
-                cacheReadTokens: usage.cacheRead,
-                cacheCreationTokens: usage.cacheWrite,
-                costUsd: usage.cost.total,
-                contextTokens,
-                contextWindow: this.contextWindow,
-              },
+              usage: toAgentUsage(usage, this.contextWindow, this.lastContextBreakdown),
             };
           }
           // Use "Compacted" keyword so session handler detects statusType: 'compaction_complete'

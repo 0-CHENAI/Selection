@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { waitForCompaction } from './wait-for-compaction.ts';
+import { snapshotContextBreakdown } from './context-breakdown.ts';
 /**
  * Pi Agent Server
  *
@@ -229,8 +230,9 @@ type EnrichedToolExecutionStartEvent = Extract<AgentSessionEvent, { type: 'tool_
   toolMetadata?: ToolExecutionMetadata;
 };
 
-type OutboundAgentEvent = AgentSessionEvent | EnrichedToolExecutionStartEvent
-  | { type: 'answer_preview'; answerRunId: string; toolCallId: string; text: string };
+type OutboundAgentEvent = (AgentSessionEvent | EnrichedToolExecutionStartEvent
+  | { type: 'answer_preview'; answerRunId: string; toolCallId: string; text: string })
+  & { contextBreakdown?: ReturnType<typeof snapshotContextBreakdown> };
 
 /** Messages to main process (stdout) */
 interface OutboundReady { type: 'ready'; sessionId: string | null; callbackPort: number }
@@ -1586,6 +1588,20 @@ function handleSessionEvent(event: AgentSessionEvent): void {
   if (event.type === 'tool_execution_start' && getSourceSlugForTool(event.toolName)) {
     sourceGuideEventGate.bufferStart(event.toolCallId, forwardedEvent);
     return;
+  }
+
+  if (event.type === 'message_end' || event.type === 'compaction_end') {
+    const contextBreakdown = snapshotContextBreakdown(piSession);
+    if (contextBreakdown) {
+      forwardedEvent = { ...forwardedEvent, contextBreakdown };
+    } else if (event.type === 'compaction_end') {
+      // Compaction rewrote history. Clear a stale pre-compact split if we
+      // cannot estimate the new one yet.
+      forwardedEvent = {
+        ...forwardedEvent,
+        contextBreakdown: { systemPrompt: 0, tools: 0, messages: 0 },
+      };
+    }
   }
 
   // Forward all events to main process

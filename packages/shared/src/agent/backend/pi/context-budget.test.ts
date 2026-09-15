@@ -5,6 +5,7 @@ import {
   buildContextBudget,
   calculateContextBudget,
   calculateOverflowRetryMaxTokens,
+  estimateContextInputBreakdown,
   estimateContextInputTokens,
   estimateTextTokensConservatively,
   parseContextOverflow,
@@ -91,6 +92,58 @@ describe('context input estimation', () => {
 
     expect(estimateTextTokensConservatively('中文abcde')).toBe(4);
     expect(estimateContextInputTokens(context)).toBeGreaterThan(50_000);
+
+    const breakdown = estimateContextInputBreakdown(context);
+    expect(breakdown.systemPrompt).toBeGreaterThan(0);
+    expect(breakdown.tools).toBeGreaterThan(0);
+    expect(breakdown.messages).toBeGreaterThan(0);
+    expect(breakdown.systemPrompt + breakdown.tools + breakdown.messages)
+      .toBeLessThanOrEqual(estimateContextInputTokens(context));
+  });
+
+  it('splits Selection-owned prompt tags and tool names into optional rows', () => {
+    const context = {
+      systemPrompt: [
+        'You are a concise assistant.',
+        '## User Preferences - User has explicitly set these preferences, so adhere to them',
+        '',
+        '- Name: Ada',
+        '<project_context project="acme">',
+        'Keep replies short.',
+        '</project_context>',
+        '<available_skills>',
+        '- officecli (officecli): Read this skill first',
+        '  path: /tmp/SKILL.md',
+        '</available_skills>',
+      ].join('\n'),
+      tools: [
+        { name: 'bash', description: 'Run a shell command', parameters: { type: 'object' } },
+        { name: 'mcp__source__search', description: 'Search a connected source', parameters: { type: 'object' } },
+        { name: 'spawn_session', description: 'Start a child session', parameters: { type: 'object' } },
+      ],
+      messages: [
+        {
+          role: 'user',
+          content: '<session_transfer_summary>\nPrior workspace work.\n</session_transfer_summary>\nHello',
+          timestamp: 1,
+        },
+        {
+          role: 'user',
+          content: '<sources>\n知识库 (slug: cortex)\n</sources>\nWhat next?',
+          timestamp: 2,
+        },
+      ],
+    } as Context;
+
+    const breakdown = estimateContextInputBreakdown(context);
+    expect(breakdown.systemPrompt).toBeGreaterThan(0);
+    expect(breakdown.tools).toBeGreaterThan(0);
+    expect(breakdown.rules).toBeGreaterThan(0);
+    expect(breakdown.skills).toBeGreaterThan(0);
+    expect(breakdown.mcpTools).toBeGreaterThan(0);
+    expect(breakdown.subagents).toBeGreaterThan(0);
+    expect(breakdown.summarized).toBeGreaterThan(0);
+    expect(breakdown.messages).toBeGreaterThan(0);
   });
 });
 

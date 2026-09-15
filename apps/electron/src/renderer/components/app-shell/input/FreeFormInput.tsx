@@ -12,7 +12,7 @@ import {
   ChevronUp,
   AlertCircle,
 } from 'lucide-react'
-import { Icon_Home, Spinner } from '@craft-agent/ui'
+import { Icon_Home } from '@craft-agent/ui'
 
 import * as storage from '@/lib/local-storage'
 import { Button } from '@/components/ui/button'
@@ -54,12 +54,11 @@ import { isMac } from '@/lib/platform'
 import { applySmartTypography } from '@/lib/smart-typography'
 import { AttachmentPreview } from '../AttachmentPreview'
 import { ImageSupportWarningBanner } from './ImageSupportWarningBanner'
-import { getModelShortName, getModelDisplayName, getModelContextWindow, compactionTriggerTokens, swarmCompactionReserveTokens } from '@config/models'
+import { getModelShortName, getModelDisplayName } from '@config/models'
 import {
   resolveEffectiveConnectionSlug,
   isCompatProvider,
   modelSupportsImages,
-  resolveConnectionModelContextWindow,
 } from '@config/llm-connections'
 import { useOptionalAppShellContext } from '@/context/AppShellContext'
 import { EditPopover, getEditConfig } from '@/components/ui/EditPopover'
@@ -93,7 +92,6 @@ import {
   appendMissingPickerModel,
   chosenPickerModelId,
   connectionPinnedModelIds,
-  formatTokenCount,
   groupConnectionsByProvider,
   isOpenRouterConnection,
   isPickerModelSelected,
@@ -104,6 +102,7 @@ import {
   stripPiPrefixForDisplay,
 } from './model-picker-helpers'
 import { useLiveOpenRouterModels } from '@/hooks/useLiveOpenRouterModels'
+import { ContextUsageIndicator, type ContextStatus } from './ContextUsageIndicator'
 import {
   ModelPickerEmptyResults,
   ModelPickerOverflowHint,
@@ -241,8 +240,6 @@ export interface FreeFormInputProps {
   disabled?: boolean
   /** Whether the session is currently processing */
   isProcessing?: boolean
-  /** Swarm sessions compact automatically at 80% of their model context window. */
-  swarmEnabled?: boolean
   /** Callback when message is submitted (skillSlugs from @mentions) */
   onSubmit: (message: string, attachments?: FileAttachment[], skillSlugs?: string[]) => boolean | void | Promise<boolean | void>
   /** Callback to stop processing. Pass silent=true to skip "Response interrupted" message */
@@ -311,15 +308,8 @@ export interface FreeFormInputProps {
   disableSend?: boolean
   /** Whether the session is empty (no messages yet) - affects context badge prominence */
   isEmptySession?: boolean
-  /** Context status for showing compaction indicator and token usage */
-  contextStatus?: {
-    /** True when SDK is actively compacting the conversation */
-    isCompacting?: boolean
-    /** Input tokens used so far in this session */
-    inputTokens?: number
-    /** Model's context window size in tokens */
-    contextWindow?: number
-  }
+  /** Context status for the send-adjacent usage ring */
+  contextStatus?: ContextStatus
   /** Follow-up annotations shown as context chips above the input */
   followUpItems?: FollowUpInputItem[]
   /** Callback when user clicks a follow-up chip body */
@@ -373,7 +363,6 @@ export function FreeFormInput({
   placeholder,
   disabled = false,
   isProcessing = false,
-  swarmEnabled = false,
   onSubmit,
   onStop,
   inputRef: externalInputRef,
@@ -1961,7 +1950,6 @@ export function FreeFormInput({
               onThinkingLevelChange={onThinkingLevelChange}
               isEmptySession={isEmptySession}
               connectionUnavailable={connectionUnavailable}
-              contextStatus={contextStatus}
             />
           )}
           <FreeFormInputContextBadge
@@ -2407,90 +2395,15 @@ export function FreeFormInput({
                   </DropdownMenuSub>
                 </>
               )}
-
-              {/* Context usage footer - only show when we have token data */}
-              {contextStatus?.inputTokens != null && contextStatus.inputTokens > 0 && (
-                <>
-                  <StyledDropdownMenuSeparator className="my-1" />
-                  <div className="px-2 py-1.5 select-none">
-                    <div className="flex items-center justify-between text-xs text-muted-foreground">
-                      <span>{t('chat.context')}</span>
-                      <span className="flex items-center gap-1.5">
-                        {contextStatus.isCompacting && (
-                          <Spinner className="h-3 w-3" />
-                        )}
-                        {t('chat.tokensUsed', { displayCount: formatTokenCount(contextStatus.inputTokens) })}
-                      </span>
-                    </div>
-                  </div>
-                </>
-              )}
             </StyledDropdownMenuContent>
           </DropdownMenu>
           )}
 
-          {/* 5.5 Context Usage Warning Badge - shows when approaching auto-compaction threshold */}
-          {(() => {
-            // Warn against the same trigger the backend uses:
-            // Pi / custom endpoints compact at contextWindow - 16k by default;
-            // Swarm agents use a 20% reserve so compaction begins at 80%.
-            // Anthropic still uses ~77.5% of the window (~155k of 200k).
-            const catalogWindow = resolveConnectionModelContextWindow(effectiveConnectionDetails, currentModel)
-            const effectiveContextWindow = contextStatus?.contextWindow
-              || catalogWindow
-              || getModelContextWindow(currentModel)
-            const usePiReserve = !!effectiveConnectionDetails && (
-              isCompatProvider(effectiveConnectionDetails.providerType)
-              || effectiveConnectionDetails.providerType === 'pi'
-            )
-            const compactionThreshold = effectiveContextWindow
-              ? (usePiReserve
-                ? compactionTriggerTokens(
-                    effectiveContextWindow,
-                    swarmEnabled ? swarmCompactionReserveTokens(effectiveContextWindow) : undefined,
-                  )
-                : Math.round(effectiveContextWindow * 0.775))
-              : null
-            const usagePercent = contextStatus?.inputTokens && compactionThreshold
-              ? Math.min(99, Math.round((contextStatus.inputTokens / compactionThreshold) * 100))
-              : null
-            // Show badge when >= 80% of compaction threshold AND not currently compacting
-            // Hide for Codex and Copilot models which don't support context compaction
-            const showWarning = usagePercent !== null && usagePercent >= 80 && !contextStatus?.isCompacting
-
-            if (!showWarning) return null
-
-            const handleCompactClick = () => {
-              if (!isProcessing) {
-                onSubmit('/compact', [])
-              }
-            }
-
-            return (
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <button
-                    type="button"
-                    onClick={handleCompactClick}
-                    disabled={isProcessing}
-                    className="inline-flex items-center h-6 px-2 text-[12px] font-medium bg-info/10 rounded-[6px] shadow-tinted select-none cursor-pointer hover:bg-info/20 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                    style={{
-                      '--shadow-color': 'var(--info-rgb)',
-                      color: 'color-mix(in oklab, var(--info) 30%, var(--foreground))',
-                    } as React.CSSProperties}
-                  >
-                    {usagePercent}%
-                  </button>
-                </TooltipTrigger>
-                <TooltipContent side="top">
-                  {isProcessing
-                    ? `${usagePercent}% context used — wait for current operation`
-                    : `${usagePercent}% context used — click to compact`
-                  }
-                </TooltipContent>
-              </Tooltip>
-            )
-          })()}
+          <ContextUsageIndicator
+            contextStatus={contextStatus}
+            compact={compactMode}
+            sessionId={sessionId}
+          />
 
           {/* 6. Send/Stop Button - Always show stop when processing */}
           {isProcessing ? (

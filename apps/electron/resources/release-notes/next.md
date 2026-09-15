@@ -6,6 +6,8 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 
 ## Improvements
 
+- **Context usage ring** — Token usage now lives on a send-adjacent ring and a composition card (percent full, estimated categories Selection can measure, cache hit rate). The model picker footer, info-panel usage block, and click-to-compact percent badge are gone; manual compact is still `/compact`. Fixes #368.
+
 - **User message copy** — Sent user bubbles keep a time and copy control under the bubble, so the icon no longer covers the text. Copy still uses the visible plain-text body (not hidden context or attachments). Fixes #372.
 
 - **Progress evaluation chrome** — The chat transcript no longer shows the progress-evaluation status, token usage, or per-task enable checkbox. A continue link still appears if a task is actually paused.
@@ -13,6 +15,8 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 - **Simplified automations** — Removed Agent Events and their runtime actions, tool decisions, and report-back support. Existing retired rules are ignored, imports cannot recreate them, and queued retries for inactive rules are discarded. Scheduled and app-event automations remain available. Fixes #371.
 
 ## Bug Fixes
+
+- **Context usage ring missing after a turn** — The send-adjacent ring now falls back to the last turn's occupancy when a later empty usage event zeros the live counter, so a finished session still shows context used. Fixes a regression against #368.
 
 - **Diagram HTML delivery hang** — When a model writes an architecture HTML file and calls `submit_answer` in the same turn, the host now waits for the file write to finish and then accepts delivery instead of rejecting with “call submit_answer alone” and looping. Large HTML/SVG answers should submit a short Markdown link to the saved file. A model call that is still emitting thinking or text is no longer paused at a 10-minute wall-clock limit; only a silent idle stream still expires. Fixes #361, #363.
 

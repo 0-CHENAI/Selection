@@ -6,7 +6,6 @@ import {
   ChevronDown,
   ChevronRight,
 } from 'lucide-react'
-import { Spinner } from '@craft-agent/ui'
 import {
   Drawer,
   DrawerTrigger,
@@ -36,7 +35,6 @@ import {
   appendMissingPickerModel,
   chosenPickerModelId,
   connectionPinnedModelIds,
-  formatTokenCount,
   groupConnectionsByProvider,
   isOpenRouterConnection,
   isPickerModelSelected,
@@ -159,11 +157,6 @@ interface CompactModelSelectorProps {
   onThinkingLevelChange?: (level: ThinkingLevel) => void
   isEmptySession?: boolean
   connectionUnavailable?: boolean
-  contextStatus?: {
-    isCompacting?: boolean
-    inputTokens?: number
-    contextWindow?: number
-  }
 }
 
 export function CompactModelSelector({
@@ -174,7 +167,6 @@ export function CompactModelSelector({
   thinkingLevel = 'medium',
   onThinkingLevelChange,
   connectionUnavailable = false,
-  contextStatus,
 }: CompactModelSelectorProps) {
   const { t } = useTranslation()
   const [open, setOpen] = React.useState(false)
@@ -508,24 +500,6 @@ export function CompactModelSelector({
                   </DrawerClose>
                 )
               })}
-            </>
-          )}
-
-          {/* === Context section === */}
-          {contextStatus?.inputTokens != null && contextStatus.inputTokens > 0 && (
-            <>
-              <div className="px-3 pt-4 pb-1 text-xs font-medium text-foreground/60 uppercase tracking-wide select-none">
-                {t('chat.modelPicker.contextSection')}
-              </div>
-              <div className="flex items-center justify-between px-3 py-2 text-xs text-foreground/60 select-none">
-                <span>{t('chat.context')}</span>
-                <span className="flex items-center gap-1.5">
-                  {contextStatus.isCompacting && <Spinner className="h-3 w-3" />}
-                  {t('chat.tokensUsed', {
-                    displayCount: formatTokenCount(contextStatus.inputTokens),
-                  })}
-                </span>
-              </div>
             </>
           )}
         </div>
