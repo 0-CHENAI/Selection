@@ -26,7 +26,7 @@ afterAll(() => {
   if (scratchDir) rmSync(scratchDir, { recursive: true, force: true });
 });
 
-function driveBundle(messages: object[], done: (output: string) => boolean, preload = false): Promise<string> {
+function driveBundle(messages: object[], done: (output: string, send: (message: object) => void) => boolean, preload = false): Promise<string> {
   return new Promise((resolve, reject) => {
     const args = preload ? ['--preload', join(packageDir, '../shared/src/unified-network-interceptor.ts'), bundlePath] : [bundlePath];
     const child = spawn(process.execPath, args, {
@@ -34,6 +34,7 @@ function driveBundle(messages: object[], done: (output: string) => boolean, prel
       env: { ...process.env, CRAFT_SESSION_DIR: scratchDir, CRAFT_INTERCEPTOR_DISABLE_AUTO_INSTALL: '0', NO_PROXY: '127.0.0.1,localhost', no_proxy: '127.0.0.1,localhost' },
       stdio: ['pipe', 'pipe', 'pipe'],
     });
+    const send = (message: object) => child.stdin.write(`${JSON.stringify(message)}\n`);
     let output = '';
     const finish = (error?: Error) => {
       clearTimeout(timer);
@@ -45,13 +46,13 @@ function driveBundle(messages: object[], done: (output: string) => boolean, prel
     }, RUN_TIMEOUT_MS);
     const onData = (chunk: Buffer) => {
       output += chunk.toString();
-      if (done(output)) finish();
+      if (done(output, send)) finish();
     };
     child.stdout.on('data', onData);
     child.stderr.on('data', onData);
     child.on('error', error => finish(error));
     child.on('exit', () => {
-      if (!done(output)) finish(new Error(`bundle exited early; output:\n${output.slice(-2000)}`));
+      if (!done(output, send)) finish(new Error(`bundle exited early; output:\n${output.slice(-2000)}`));
     });
     for (const message of messages) child.stdin.write(`${JSON.stringify(message)}\n`);
   });
@@ -114,3 +115,39 @@ describe('pi-agent-server bundle', () => {
     expect(output).toContain('Failed to extract accountId from token');
   }, RUN_TIMEOUT_MS + 130_000);
 });
+
+
+it.each(['permission', 'proxy'])('abort releases a pending %s bridge before waiting on the SDK', async stage => {
+  const server = Bun.serve({ port: 0, fetch() {
+    const chunks = [
+      { choices: [{ index: 0, delta: { role: 'assistant', tool_calls: [{ index: 0, id: 'call_wait', type: 'function', function: { name: 'test_wait', arguments: '{}' } }] }, finish_reason: null }] },
+      { choices: [{ index: 0, delta: {}, finish_reason: 'tool_calls' }] },
+    ];
+    return new Response(chunks.map(chunk => `data: ${JSON.stringify(chunk)}\n\n`).join('') + 'data: [DONE]\n\n', { headers: { 'content-type': 'text/event-stream' } });
+  } });
+  let aborted = false;
+  let acknowledged = false;
+  try {
+    const output = await driveBundle([
+      { type: 'init', apiKey: 'test-only', model: 'local-model', cwd: scratchDir, thinkingLevel: 'off',
+        workspaceRootPath: scratchDir, sessionId: `abort-${stage}`, sessionPath: scratchDir,
+        workingDirectory: scratchDir, plansFolderPath: join(scratchDir, 'plans'),
+        providerType: 'pi_compat', authType: 'api_key', baseUrl: `http://127.0.0.1:${server.port}/v1`,
+        customEndpoint: { api: 'openai-completions' }, customModels: [{ id: 'local-model', contextWindow: 8192, maxTokens: 128 }] },
+      { type: 'register_tools', tools: [{ name: 'test_wait', description: 'Test pending bridge.', inputSchema: { type: 'object', properties: {} } }] },
+      { type: 'prompt', id: `abort-${stage}`, message: 'Run test_wait.', systemPrompt: 'Local protocol test.' },
+    ], (output, send) => {
+      const events = output.split('\n').flatMap(line => { try { return [JSON.parse(line)]; } catch { return []; } });
+      const permission = events.find(event => event.type === 'pre_tool_use_request');
+      if (permission && !acknowledged && stage === 'proxy') {
+        acknowledged = true;
+        send({ type: 'pre_tool_use_response', requestId: permission.requestId, action: 'continue' });
+      }
+      const waiting = stage === 'permission' ? permission : events.find(event => event.type === 'tool_execute_request');
+      if (waiting && !aborted) { aborted = true; send({ type: 'abort' }); }
+      return aborted && events.some(event => event.type === 'event' && event.event?.type === 'agent_end');
+    });
+    expect(aborted).toBe(true);
+    expect(output).toContain('agent_end');
+  } finally { server.stop(true); }
+}, RUN_TIMEOUT_MS + 1000);
