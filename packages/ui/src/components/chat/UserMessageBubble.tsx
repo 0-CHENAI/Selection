@@ -11,17 +11,19 @@
  * - Pending/queued states (Electron only)
  */
 
-import { useEffect, useRef, useState, type ReactNode } from 'react'
-import { Clock } from 'lucide-react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { Check, Clock, Copy } from 'lucide-react'
 import type { StoredAttachment, ContentBadge } from '@craft-agent/core'
 import { normalizePath } from '@craft-agent/core/utils'
 // Lightweight path — do NOT import @craft-agent/shared/agent (pulls bash-parser into Vite)
 import { sanitizeUserMessageForDisplay } from '@craft-agent/shared/agent/user-message-sanitize'
 import { cn } from '../../lib/utils'
+import { usePlatform } from '../../context/PlatformContext'
 import { Markdown } from '../markdown'
 import { FileTypeIcon, getFileTypeLabel } from './attachment-helpers'
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from '../tooltip'
 import { useTranslation } from 'react-i18next'
+import { getUserMessageCopyText } from './visible-user-message-text'
 
 // Fallback text icons for badges without iconDataUrl
 // Using simple characters since SVG rendering may not work in all contexts
@@ -324,6 +326,16 @@ export interface UserMessageBubbleProps {
   isQueued?: boolean
   /** Compact mode - reduces padding for popover embedding */
   compactMode?: boolean
+  /** Message send time, shown under the bubble as HH:mm */
+  timestamp?: number
+}
+
+export function formatUserMessageTime(timestamp: number, locale?: string): string {
+  return new Intl.DateTimeFormat(locale || 'en', {
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  }).format(new Date(timestamp))
 }
 
 /** Minimum visible duration of the "Queued" chip. Both backends ack
@@ -341,9 +353,19 @@ export function UserMessageBubble({
   badges,
   isQueued,
   compactMode,
+  timestamp,
 }: UserMessageBubbleProps) {
-  const { t } = useTranslation()
+  const { t, i18n } = useTranslation()
+  const { onCopyToClipboard } = usePlatform()
   const hasAttachments = attachments && attachments.length > 0
+  const copyText = useMemo(() => getUserMessageCopyText(content, badges ?? []), [content, badges])
+  const canCopy = copyText.length > 0
+  const timeLabel = timestamp != null && !compactMode
+    ? formatUserMessageTime(timestamp, i18n.language)
+    : ''
+  const showMeta = canCopy || !!timeLabel
+  const [copied, setCopied] = useState(false)
+  const copiedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   // Show the queued chip while `isQueued` is true AND for at least
   // QUEUED_MIN_VISIBLE_MS after it first became true — even if the backend
@@ -356,8 +378,25 @@ export function UserMessageBubble({
   useEffect(() => {
     return () => {
       if (clearTimerRef.current) clearTimeout(clearTimerRef.current)
+      if (copiedTimerRef.current) clearTimeout(copiedTimerRef.current)
     }
   }, [])
+
+  const handleCopy = useCallback(async () => {
+    if (!copyText) return
+    try {
+      if (onCopyToClipboard) await onCopyToClipboard(copyText)
+      else await navigator.clipboard.writeText(copyText)
+      setCopied(true)
+      if (copiedTimerRef.current) clearTimeout(copiedTimerRef.current)
+      copiedTimerRef.current = setTimeout(() => {
+        setCopied(false)
+        copiedTimerRef.current = null
+      }, 2000)
+    } catch {
+      // Clipboard can be denied; keep the idle copy icon.
+    }
+  }, [copyText, onCopyToClipboard])
 
   useEffect(() => {
     if (clearTimerRef.current) {
@@ -417,7 +456,7 @@ export function UserMessageBubble({
   displayContent = sanitizeUserMessageForDisplay(displayContent)
 
   return (
-    <div className={cn("flex flex-col items-end gap-3 w-full", className)}>
+    <div className={cn("group flex flex-col items-end gap-3 w-full", className)}>
       {/* Attachment preview row - stored attachments with thumbnails */}
       {hasAttachments && (
         <div className="flex gap-2 justify-end max-w-[80%] flex-wrap">
@@ -491,9 +530,10 @@ export function UserMessageBubble({
           separate pill below — keeps the chat to one bubble per message
           while the chip and pulsing icon make the waiting state obvious
           (#616 follow-up). */}
+      <div className="flex flex-col items-end max-w-[80%] min-w-0">
       <div
         className={cn(
-          "max-w-[80%] bg-user-message-bubble rounded-[16px] break-words min-w-0 select-text [&_p]:m-0",
+          "bg-user-message-bubble rounded-[16px] break-words min-w-0 select-text [&_p]:m-0",
           compactMode ? "px-4 py-2" : "px-5 py-3.5"
         )}
       >
@@ -520,6 +560,51 @@ export function UserMessageBubble({
             </Markdown>
           )
         }
+      </div>
+      {showMeta && (
+        <div className="flex items-center justify-end gap-2 pt-1">
+          {timeLabel && (
+            <time
+              dateTime={timestamp != null ? new Date(timestamp).toISOString() : undefined}
+              className="text-[11px] leading-none text-muted-foreground/70 tabular-nums"
+            >
+              {timeLabel}
+            </time>
+          )}
+          {canCopy && (
+            <button
+              type="button"
+              onClick={handleCopy}
+              aria-label={copied ? t('common.copied') : t('common.copy')}
+              aria-live="polite"
+              title={copied ? t('common.copied') : t('common.copy')}
+              className={cn(
+                "p-0.5 rounded-[4px] select-none",
+                "text-muted-foreground/70 hover:text-foreground",
+                "transition-opacity duration-150 ease-out motion-reduce:transition-none",
+                "focus:outline-none focus-visible:ring-1 focus-visible:ring-ring",
+              )}
+            >
+              <span className="relative block h-3.5 w-3.5">
+                <Copy
+                  aria-hidden="true"
+                  className={cn(
+                    "absolute inset-0 h-3.5 w-3.5 transition-opacity duration-150 ease-out motion-reduce:transition-none",
+                    copied ? "opacity-0 motion-reduce:hidden" : "opacity-100",
+                  )}
+                />
+                <Check
+                  aria-hidden="true"
+                  className={cn(
+                    "absolute inset-0 h-3.5 w-3.5 text-success transition-opacity duration-150 ease-out motion-reduce:transition-none",
+                    copied ? "opacity-100" : "opacity-0 motion-reduce:hidden",
+                  )}
+                />
+              </span>
+            </button>
+          )}
+        </div>
+      )}
       </div>
     </div>
   )
