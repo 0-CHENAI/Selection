@@ -19,6 +19,7 @@ import { MarkdownLatexBlock } from './MarkdownLatexBlock'
 import { MarkdownPdfBlock } from './MarkdownPdfBlock'
 import { MarkdownDocBlock } from './MarkdownDocBlock'
 import { preprocessLinks } from './linkify'
+import { promoteBarePreviewBlocks } from './promote-preview-blocks'
 import { resolveMarkdownLinkTarget } from './link-target'
 import remarkCollapsibleSections from './remarkCollapsibleSections'
 import { CollapsibleSection } from './CollapsibleSection'
@@ -620,7 +621,7 @@ export function Markdown({
 
   // Linkify first, then shield currency `$` so `$A$` can be inline math.
   const processedContent = React.useMemo(
-    () => protectCurrencyDollars(preprocessLinks(children)),
+    () => protectCurrencyDollars(preprocessLinks(promoteBarePreviewBlocks(children))),
     [children]
   )
 

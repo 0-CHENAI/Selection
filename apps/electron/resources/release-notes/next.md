@@ -22,6 +22,6 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 
 - **Windows caption button overlap** — Preview headers, the fused top bar, workspace-creation chrome, onboarding/reauth/workspace-picker drag regions, and the connection-setup close control now share one overlay-caption inset so in-app close and zoom controls stay clear of the native min/max/close buttons. Fixes #356, #359.
 
-- **Broken chat images** — Markdown `![]()` images now keep local, `file:`, and `data:` sources and load them as data URLs instead of being stripped or fetched as web paths. Missing or unreadable files show an explicit error. Fixes #358.
+- **Broken chat images** — Markdown `![]()` images now keep local, `file:`, and `data:` sources and load them as data URLs instead of being stripped or fetched as web paths. A bare `image-preview` JSON spec without fences is promoted into the existing preview renderer so screenshots show as images instead of a code block. Missing or unreadable files show an explicit error. Fixes #358.
 
 - **Automation creation context isolation** — Scheduled, app-event, and agent-event creation dialogs now use separate category contexts and titles. Unfinished drafts remain resumable, new automation requests no longer inherit completed creation conversations, and detail edits target the selected rule ID. Fixes #362.
