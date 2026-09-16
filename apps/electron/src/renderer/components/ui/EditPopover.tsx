@@ -1110,8 +1110,8 @@ export function EditPopover({
     e.preventDefault()
     e.stopPropagation()
     if (collapsed) return
-    setIsResizing(true)
     const origin = readPlacement()?.origin ?? { x: e.clientX, y: e.clientY }
+    pinOriginRef.current = { left: origin.x, top: origin.y }
     resizeStartRef.current = {
       x: e.clientX,
       y: e.clientY,
@@ -1120,6 +1120,7 @@ export function EditPopover({
       originX: origin.x,
       originY: origin.y,
     }
+    setIsResizing(true)
   }, [containerSize, collapsed, readPlacement])
 
   useEffect(() => {
@@ -1166,12 +1167,27 @@ export function EditPopover({
     if (reduceMotion) setBodyHidden(true)
   }, [collapsed, containerSize, readViewport, reduceMotion])
 
-  // Only correct a user-dragged card after collapse/expand. Running on first
-  // open would clamp an unpositioned portal (0,0) and jump the window (#123).
-  // Radix can flip sides after the size change, so keep the pinned origin
+  // Only correct a user-dragged card after collapse/expand/resize. Running on
+  // first open would clamp an unpositioned portal (0,0) and jump the window (#123).
+  // Radix can flip or re-center after the size change, so keep the pinned origin
   // through its positioning frame instead of clearing it synchronously.
   useLayoutEffect(() => {
-    if (!open || isDragging || dragArmed || isResizing) return
+    if (!open || isDragging || dragArmed) return
+    if (isResizing) {
+      const pin = pinOriginRef.current
+      const rect = popoverRef.current?.getBoundingClientRect()
+      if (!pin || !rect) return
+      const offset = dragOffsetRef.current
+      const next = offsetToPinVisualOrigin(
+        offset,
+        pin,
+        { left: rect.left, top: rect.top },
+        containerSize,
+        readViewport(),
+      )
+      if (next.x !== offset.x || next.y !== offset.y) applyOffset(next)
+      return
+    }
     const pin = pinOriginRef.current
     if (pin) {
       let frame = 0
@@ -1466,7 +1482,13 @@ export function EditPopover({
     setOpen(false)
   }, [context, displayLabel, workingDirectory, model, systemPromptPreset, permissionMode, setOpen])
 
-  const positioningSize = collapsed ? expandedSizeRef.current : containerSize
+  // Freeze the Radix box while resizing so align=center / avoidCollisions
+  // cannot re-anchor the top-left. The painted card still follows containerSize.
+  const positioningSize = isResizing
+    ? { width: resizeStartRef.current.width, height: resizeStartRef.current.height }
+    : collapsed
+      ? expandedSizeRef.current
+      : containerSize
 
   return (
     <>
@@ -1609,13 +1631,14 @@ export function EditPopover({
               {!collapsed && (
                 <button
                   type="button"
+                  data-testid="edit-popover-resize"
                   onMouseDown={handleResizeStart}
-                  className="absolute bottom-0 right-0 z-50 flex size-4 cursor-nwse-resize items-end justify-end p-0.5 text-muted-foreground/40 hover:text-muted-foreground"
+                  className="absolute bottom-1 right-1 z-50 flex size-6 cursor-nwse-resize items-center justify-center rounded-md bg-foreground/10 text-foreground/60 hover:bg-foreground/16 hover:text-foreground"
                   aria-label={t('editPopover.resize')}
                   title={t('editPopover.resize')}
                 >
-                  <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true">
-                    <path d="M9 1L1 9M9 5L5 9" stroke="currentColor" strokeWidth="1.4" fill="none" strokeLinecap="round" />
+                  <svg width="12" height="12" viewBox="0 0 10 10" aria-hidden="true">
+                    <path d="M9 1L1 9M9 5L5 9" stroke="currentColor" strokeWidth="1.8" fill="none" strokeLinecap="round" />
                   </svg>
                 </button>
               )}
