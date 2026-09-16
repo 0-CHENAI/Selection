@@ -37,7 +37,7 @@ describe('desktop top bar entries (#262)', () => {
     expect(topBar).not.toContain('SquarePenRounded')
   })
 
-  it('mounts creation-job validation without visual management entries (#357)', () => {
+  it('mounts creation-job validation off the top bar and omits manage/stop from skills', () => {
     const appShell = read('../AppShell.tsx')
     const host = appShell.indexOf('<CreationJobsHost')
     const topBar = appShell.indexOf('<TopBar')
@@ -56,10 +56,9 @@ describe('desktop top bar entries (#262)', () => {
     expect(appShell).not.toContain('onAddSessionPanel')
     expect(appShell).not.toContain('onAddBrowserPanel')
     expect(appShell).not.toContain('handleNewBrowserWindow')
-    expect(appShell).not.toContain('<CreationJobsButton')
-    expect(sourcesSection).not.toContain('<CreationJobsButton')
+    expect(sourcesSection).toContain('<CreationJobsButton')
     expect(skillsSection).not.toContain('<CreationJobsButton')
-    expect(automationsSection).not.toContain('<CreationJobsButton')
+    expect(automationsSection).toContain('<CreationJobsButton')
   })
 
   it('runs creation-job reconciliation in the host, not the visual button', () => {
