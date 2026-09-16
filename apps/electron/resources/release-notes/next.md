@@ -22,6 +22,8 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 
 ## Bug Fixes
 
+- **Conversation navigation previews** — Hover previews on the left conversation rail now keep only the first line of the user message while preserving the gray response summary, so long multi-line prompts no longer fill the card. Fixes #397.
+
 - **User copy icon fade** — The checkmark and copy glyph on a sent user bubble now cross-fade in one 200 ms ease-in-out, instead of two clipped opacity swaps. Fixes #386.
 
 - **Edit popover resize drift** — Dragging the skill/MCP edit window handle now grows only the right and bottom edges. The top-left stays pinned, and the handle is larger and higher-contrast. Fixes #382.
