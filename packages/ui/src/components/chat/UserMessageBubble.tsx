@@ -581,7 +581,6 @@ export function UserMessageBubble({
               className={cn(
                 "p-0.5 rounded-[4px] select-none",
                 "text-muted-foreground/70 hover:text-foreground",
-                "transition-opacity duration-150 ease-out motion-reduce:transition-none",
                 "focus:outline-none focus-visible:ring-1 focus-visible:ring-ring",
               )}
             >
@@ -589,15 +588,15 @@ export function UserMessageBubble({
                 <Copy
                   aria-hidden="true"
                   className={cn(
-                    "absolute inset-0 h-3.5 w-3.5 transition-opacity duration-150 ease-out motion-reduce:transition-none",
-                    copied ? "opacity-0 motion-reduce:hidden" : "opacity-100",
+                    "absolute inset-0 h-3.5 w-3.5 pointer-events-none transition-opacity duration-200 ease-in-out motion-reduce:transition-none",
+                    copied ? "opacity-0" : "opacity-100",
                   )}
                 />
                 <Check
                   aria-hidden="true"
                   className={cn(
-                    "absolute inset-0 h-3.5 w-3.5 text-success transition-opacity duration-150 ease-out motion-reduce:transition-none",
-                    copied ? "opacity-100" : "opacity-0 motion-reduce:hidden",
+                    "absolute inset-0 h-3.5 w-3.5 pointer-events-none text-success transition-opacity duration-200 ease-in-out motion-reduce:transition-none",
+                    copied ? "opacity-100" : "opacity-0",
                   )}
                 />
               </span>

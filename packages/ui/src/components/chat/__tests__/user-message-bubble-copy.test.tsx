@@ -62,8 +62,9 @@ describe('UserMessageBubble copy control (#372)', () => {
     expect(html).toContain('<time')
     expect(html).not.toContain('absolute bottom-1.5 right-1.5')
     expect(html).toContain('flex items-center justify-end gap-2 pt-1')
-    expect(html).toContain('transition-opacity')
-    expect(html).toContain('duration-150')
+    expect(html).toContain('transition-opacity duration-200 ease-in-out')
+    expect(html).not.toContain('duration-150')
+    expect(html).not.toContain('motion-reduce:hidden')
     expect(html).toContain('motion-reduce:transition-none')
   })
 

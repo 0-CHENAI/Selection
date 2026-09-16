@@ -6,6 +6,10 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 
 ## Improvements
 
+- **Edit popover stays on blur** — Clicking outside the skill / MCP / automation edit window unfocuses it instead of dismissing it. Only the title-bar close control (or leaving after a legacy send) closes the window. Fixes #384.
+
+- **Edit popover edge resize** — The corner grip is gone. Drag the right edge, bottom edge, or bottom-right corner to resize; the top-left stays pinned and the Radix box no longer recenters on release. Fixes #385.
+
 - **Settings header chrome** — Settings windows no longer show a leftover more (`...`) button whose only action was “Open in new window.” The unused `HeaderMenu` control is removed; Skills, Sources, and session menus keep their own open-in-new-window actions. Fixes #380.
 
 - **Context usage ring** — Token usage now lives on a send-adjacent ring and a composition card (percent full, estimated categories Selection can measure, cache hit rate). The model picker footer, info-panel usage block, and click-to-compact percent badge are gone; manual compact is still `/compact`. Fixes #368.
@@ -17,6 +21,8 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 - **Simplified automations** — Removed Agent Events and their runtime actions, tool decisions, and report-back support. Existing retired rules are ignored, imports cannot recreate them, and queued retries for inactive rules are discarded. Scheduled and app-event automations remain available. Fixes #371.
 
 ## Bug Fixes
+
+- **User copy icon fade** — The checkmark and copy glyph on a sent user bubble now cross-fade in one 200 ms ease-in-out, instead of two clipped opacity swaps. Fixes #386.
 
 - **Edit popover resize drift** — Dragging the skill/MCP edit window handle now grows only the right and bottom edges. The top-left stays pinned, and the handle is larger and higher-contrast. Fixes #382.
 

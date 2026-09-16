@@ -20,6 +20,10 @@ export const POPOVER_INPUT_CHROME = 56
 export const POPOVER_MESSAGE_RESERVE = 64
 /** Clicks on the drag handle must not start a drag or flip Radix collision. */
 export const POPOVER_DRAG_THRESHOLD = 4
+/** Invisible hit strip for east / south / south-east border resize. */
+export const POPOVER_RESIZE_EDGE_PX = 6
+
+export type PopoverResizeEdge = 'e' | 's' | 'se'
 
 /** Keep Radix collision padding aligned with the app title-bar inset. */
 export const POPOVER_COLLISION_PADDING = {
@@ -154,6 +158,30 @@ export function clampPopoverSizeFromOrigin(
     width: Math.min(fitted.width, maxWidth),
     height: Math.min(fitted.height, maxHeight),
   }
+}
+
+/** Grow only the right and/or bottom edge so the painted top-left stays put. */
+export function sizeFromResizeEdge(
+  start: Size,
+  pointerDelta: Point,
+  edge: PopoverResizeEdge,
+): Size {
+  return {
+    width: edge === 's' ? start.width : start.width + pointerDelta.x,
+    height: edge === 'e' ? start.height : start.height + pointerDelta.y,
+  }
+}
+
+/**
+ * Outside clicks and trigger toggles blur the floating window.
+ * Only an explicit close (title-bar X, or leaving after send) may dismiss it.
+ */
+export function resolveEditPopoverOpenChange(
+  next: boolean,
+  allowClose: boolean,
+): 'open' | 'close' | 'blur' {
+  if (next) return 'open'
+  return allowClose ? 'close' : 'blur'
 }
 
 /** Textarea cap so the send row stays on-screen inside the popover. */
