@@ -28,5 +28,6 @@ export {
   type MarkdownPreviewItem,
   type MarkdownPreviewSpec,
 } from './markdown-preview-helpers'
+export { promoteBarePreviewBlocks } from './promote-preview-blocks'
 export { ImageCardStack, type ImageCardStackProps, type ImageCardStackItem } from './ImageCardStack'
 export { TiptapMarkdownEditor, type TiptapMarkdownEditorProps, type MarkdownEngine } from './TiptapMarkdownEditor'

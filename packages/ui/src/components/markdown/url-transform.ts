@@ -14,7 +14,7 @@ export const markdownUrlTransform: UrlTransform = (value, key, node) => {
 
   // Images use the same preserve-then-load path: local/file/data sources must
   // reach MarkdownImage. javascript:/vbscript:/blob: stay stripped.
-  if (key === 'src' && tagName === 'img') {
+  if (key === 'src' && (tagName === 'img' || tagName === '')) {
     return isPreservedMarkdownImageSrc(value) ? value : ''
   }
 
