@@ -14,6 +14,7 @@ import { CopyResourcesFromWorkspaceDialog } from './CopyResourcesFromWorkspaceDi
 import { ResourceTransferDialog } from '@/components/resources/ResourceTransferDialog'
 import { useAppShellContext } from '@/context/AppShellContext'
 import { EditPopover, getEditConfig, type EditContextKey } from '@/components/ui/EditPopover'
+import { readEditPopoverTriggerAnchor } from '@/components/ui/edit-popover-layout'
 import { useDisplayTitleRename } from '@/hooks/useDisplayTitleRename'
 import { resolveSourceTitle } from '@craft-agent/shared/display-titles'
 import type { LoadedSource, SourceConnectionStatus, SourceFilter } from '../../../shared/types'
@@ -83,6 +84,17 @@ export function SourcesListPanel({
   const copyFromOpen = copyFromOpenProp ?? copyFromOpenInternal
   const setCopyFromOpen = onCopyFromOpenChange ?? setCopyFromOpenInternal
   const rename = useDisplayTitleRename('source', activeWorkspaceId)
+  const [addSourceOpen, setAddSourceOpen] = React.useState(false)
+  const [addSourceAnchor, setAddSourceAnchor] = React.useState<{ left: number; top: number } | null>(null)
+  const addSourceButtonRef = React.useRef<HTMLButtonElement>(null)
+  const addSourceKey = sourceFilter?.kind === 'type'
+    ? `add-source-${sourceFilter.sourceType}` as EditContextKey
+    : 'add-source'
+
+  const openAddSource = React.useCallback(() => {
+    setAddSourceAnchor(readEditPopoverTriggerAnchor(addSourceButtonRef.current?.getBoundingClientRect()))
+    setAddSourceOpen(true)
+  }, [])
 
   const filteredSources = React.useMemo(() => {
     if (!sourceFilter) return sources
@@ -100,6 +112,21 @@ export function SourcesListPanel({
 
   return (
     <>
+    {workspaceRootPath && addSourceOpen && (
+      <EditPopover
+        align="center"
+        open={addSourceOpen}
+        onOpenChange={setAddSourceOpen}
+        trigger={
+          <span
+            aria-hidden="true"
+            className="pointer-events-none fixed h-0 w-0"
+            style={{ left: addSourceAnchor?.left ?? 0, top: addSourceAnchor?.top ?? 0 }}
+          />
+        }
+        {...getEditConfig(addSourceKey, workspaceRootPath)}
+      />
+    )}
     <EntityPanel<LoadedSource>
       items={filteredSources}
       getId={(s) => s.config.slug}
@@ -117,18 +144,14 @@ export function SourcesListPanel({
         >
           <div className="flex flex-wrap items-center justify-center gap-2">
             {workspaceRootPath && (
-              <EditPopover
-                align="center"
-                trigger={
-                  <button className="inline-flex items-center h-7 px-3 text-xs font-medium rounded-[8px] bg-background shadow-minimal hover:bg-foreground/[0.03] transition-colors">
-                    {t('sourcesList.addSource')}
-                  </button>
-                }
-                {...getEditConfig(
-                  sourceFilter?.kind === 'type' ? `add-source-${sourceFilter.sourceType}` as EditContextKey : 'add-source',
-                  workspaceRootPath
-                )}
-              />
+              <button
+                ref={addSourceButtonRef}
+                type="button"
+                onClick={openAddSource}
+                className="inline-flex items-center h-7 px-3 text-xs font-medium rounded-[8px] bg-background shadow-minimal hover:bg-foreground/[0.03] transition-colors"
+              >
+                {t('sourcesList.addSource')}
+              </button>
             )}
             {onImportFromFile && (
               <button

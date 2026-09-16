@@ -8,7 +8,7 @@
 
 import * as React from 'react'
 import { useTranslation } from 'react-i18next'
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useRef } from 'react'
 import { Check, X, Minus } from 'lucide-react'
 import { EditPopover, EditButton, getEditConfig } from '@/components/ui/EditPopover'
 import { toast } from 'sonner'
@@ -37,6 +37,8 @@ interface SkillInfoPageProps {
 export default function SkillInfoPage({ skillSlug, workspaceId, workingDirectory }: SkillInfoPageProps) {
   const { t } = useTranslation()
   const [skill, setSkill] = useState<LoadedSkill | null>(null)
+  const skillRef = useRef<LoadedSkill | null>(null)
+  skillRef.current = skill
   const [loading, setLoading] = useState(true)
   const [exportOpen, setExportOpen] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -62,7 +64,7 @@ export default function SkillInfoPage({ skillSlug, workspaceId, workingDirectory
         if (found) {
           setSkill(found)
           setError(null)
-        } else {
+        } else if (!skillRef.current) {
           setSkill(null)
           setError(t('skillInfo.notFound'))
         }
@@ -75,7 +77,8 @@ export default function SkillInfoPage({ skillSlug, workspaceId, workingDirectory
     }
 
     // Broadcast payloads can belong to a different session working directory.
-    // Re-read this page's scoped catalog and clear stale deleted Skills.
+    // Re-read this page's scoped catalog. A transient miss during a rewrite
+    // must not unmount an open config popover (#394).
     const unsubscribe = window.electronAPI.onSkillsChanged?.((changedWorkspaceId) => {
       if (changedWorkspaceId !== workspaceId) return
       void loadSkill()
