@@ -10,7 +10,6 @@ import {
   ChevronRight,
   ChevronUp,
   CircleAlert,
-  ExternalLink,
   Info,
   X,
 } from "lucide-react"
@@ -2565,17 +2564,6 @@ function MessageBubble({
     return (
       <div className="flex justify-start group">
         <div className="relative max-w-[90%] bg-background shadow-minimal rounded-[8px] pl-6 pr-4 py-3 break-words min-w-0 select-text">
-          {/* Pop-out button - visible on hover */}
-          {onPopOut && !message.isStreaming && (
-            <button
-              onClick={() => onPopOut(message)}
-              data-touch-reveal="true"
-              className="absolute top-2 right-2 p-1.5 rounded-md opacity-0 group-hover:opacity-100 transition-opacity hover:bg-foreground/5"
-              title={t("sidebarMenu.openInNewWindow")}
-            >
-              <ExternalLink className="w-4 h-4 text-muted-foreground hover:text-foreground" />
-            </button>
-          )}
           {/* Keep one document tree across streaming and completion. */}
           <CollapsibleMarkdownProvider>
             <Markdown

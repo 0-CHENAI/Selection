@@ -2,7 +2,7 @@ import { confirmAction } from '@/lib/confirmation'
 import * as React from "react"
 import { useTranslation } from "react-i18next"
 import { useState, useCallback } from "react"
-import { Check, FolderPlus, ExternalLink, ChevronDown, Trash2 } from "lucide-react"
+import { Check, FolderPlus, ChevronDown, Trash2 } from "lucide-react"
 import { AnimatePresence } from "motion/react"
 import { useSetAtom } from "jotai"
 import { toast } from "sonner"
@@ -173,16 +173,6 @@ export function CompactWorkspaceSwitcher({
                       aria-label={t("workspace.removeWorkspace")}
                     >
                       <Trash2 className="h-4 w-4" />
-                    </button>
-                  )}
-                  {!isActive && (
-                    <button
-                      type="button"
-                      onClick={() => { onSelect(workspace.id, true); setOpen(false) }}
-                      className="shrink-0 h-9 w-9 rounded-[8px] flex items-center justify-center text-foreground/50 hover:text-foreground hover:bg-foreground/10 transition-colors"
-                      aria-label={t("sidebarMenu.openInNewWindow")}
-                    >
-                      <ExternalLink className="h-4 w-4" />
                     </button>
                   )}
                   {isActive && (
