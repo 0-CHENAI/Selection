@@ -1,4 +1,6 @@
 import { describe, expect, it } from 'bun:test'
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import {
   COLLAPSED_POPOVER_HEIGHT,
   COLLAPSED_POPOVER_WIDTH,
@@ -224,6 +226,18 @@ describe('offsetToPinVisualOrigin', () => {
     )).toEqual({ x: -80, y: 0 })
   })
 
+  it('keeps the top-left pinned when a centered popover grows (#382)', () => {
+    const origin = { left: 200, top: 120 }
+    const recentered = { left: 160, top: 100 }
+    expect(offsetToPinVisualOrigin(
+      { x: 0, y: 0 },
+      origin,
+      recentered,
+      { width: 480, height: 520 },
+      desktop,
+    )).toEqual({ x: 40, y: 20 })
+  })
+
   it('pulls an expanded window back when the pinned origin would overflow', () => {
     const previous = { left: 1184, top: 80 }
     const next = offsetToPinVisualOrigin(
@@ -266,5 +280,18 @@ describe('getCompactInputMaxHeight (#8)', () => {
     const height = DEFAULT_POPOVER_HEIGHT
     const input = getCompactInputMaxHeight(height)
     expect(POPOVER_HEADER_HEIGHT + POPOVER_INPUT_CHROME + input).toBeLessThan(height)
+  })
+})
+
+describe('EditPopover resize handle (#382)', () => {
+  const source = readFileSync(join(import.meta.dir, '../EditPopover.tsx'), 'utf8')
+
+  it('pins the painted origin while resizing and freezes the Radix box', () => {
+    expect(source).toContain('pinOriginRef.current = { left: origin.x, top: origin.y }')
+    expect(source).toContain('if (isResizing)')
+    expect(source).toContain('resizeStartRef.current.width')
+    expect(source).toContain('data-testid="edit-popover-resize"')
+    expect(source).toContain('size-6 cursor-nwse-resize')
+    expect(source).toContain('bg-foreground/10')
   })
 })
