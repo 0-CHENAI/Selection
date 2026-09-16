@@ -1,6 +1,6 @@
 import * as React from 'react'
 import { renderMermaidSVG } from 'beautiful-mermaid'
-import { Maximize2, RotateCcw } from 'lucide-react'
+import { Hand, Maximize2, RotateCcw } from 'lucide-react'
 import { cn } from '../../lib/utils'
 import { CodeBlock } from './CodeBlock'
 import { MermaidPreviewOverlay } from '../overlay/MermaidPreviewOverlay'
@@ -28,6 +28,8 @@ import { useTranslation } from 'react-i18next'
 
 // Minimum rendered height for diagrams. Wide horizontal diagrams are scaled
 // up to at least this height to keep text readable, with horizontal scroll.
+const INLINE_CONTROL_CLASS = 'absolute top-2 z-10 inline-flex size-6 items-center justify-center rounded-[6px] bg-background shadow-minimal select-none transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring'
+
 const MIN_READABLE_HEIGHT = 280
 
 // Small overflow threshold — if diagram overflows by less than this, scale to fit
@@ -82,8 +84,10 @@ export function MarkdownMermaidBlock({ code, className, showExpandButton = true,
   }, [code])
 
   const [isFullscreen, setIsFullscreen] = React.useState(false)
+  const [unlockedCode, setUnlockedCode] = React.useState<string | null>(null)
+  const gesturesEnabled = unlockedCode === code
   const scrollRef = React.useRef<HTMLDivElement>(null)
-  const interaction = useRichBlockInteractions({ isOpen: !!svg && !isFullscreen, containerRef: scrollRef, keyboardShortcuts: false })
+  const interaction = useRichBlockInteractions({ isOpen: !!svg && !isFullscreen && gesturesEnabled, containerRef: scrollRef, keyboardShortcuts: false })
   const isDefaultView = interaction.scale === 1 && interaction.translate.x === 0 && interaction.translate.y === 0
   React.useEffect(() => { interaction.reset() }, [code, interaction.reset])
 
@@ -195,15 +199,27 @@ export function MarkdownMermaidBlock({ code, className, showExpandButton = true,
             <RotateCcw className="w-3.5 h-3.5" />
           </button>
         )}
+        <button
+          type="button"
+          aria-pressed={gesturesEnabled}
+          aria-label={t(gesturesEnabled ? 'mermaid.lockGestures' : 'mermaid.unlockGestures')}
+          title={t(gesturesEnabled ? 'mermaid.lockGestures' : 'mermaid.unlockGestures')}
+          onClick={() => setUnlockedCode(gesturesEnabled ? null : code)}
+          className={cn(
+            INLINE_CONTROL_CLASS,
+            'right-10',
+            gesturesEnabled ? 'text-success hover:text-success' : 'text-muted-foreground/50 hover:text-foreground',
+          )}
+        >
+          <Hand className="w-3.5 h-3.5" />
+        </button>
         {showExpandButton && (
           <button
+            type="button"
             onClick={() => setIsFullscreen(true)}
             className={cn(
-              "absolute top-2 right-2 p-1 rounded-[6px] transition-all z-10 select-none",
-              "opacity-0 group-hover:opacity-100",
-              "bg-background shadow-minimal",
-              "text-muted-foreground/50 hover:text-foreground",
-              "focus:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:opacity-100"
+              INLINE_CONTROL_CLASS,
+              "right-2 text-muted-foreground/50 hover:text-foreground"
             )}
             title={t('common.viewFullscreen')}
           >
@@ -218,7 +234,7 @@ export function MarkdownMermaidBlock({ code, className, showExpandButton = true,
           style={{
             overflowX: 'hidden',
             overflowY: 'hidden',
-            cursor: interaction.isDragging ? 'grabbing' : 'grab',
+            cursor: gesturesEnabled ? (interaction.isDragging ? 'grabbing' : 'grab') : undefined,
             userSelect: 'none',
             ...minHeightStyle,
           }}

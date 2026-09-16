@@ -810,6 +810,8 @@
   "menu.window": "Okno",
   "menu.zoomIn": "Powiększ",
   "menu.zoomOut": "Pomniejsz",
+  "mermaid.lockGestures": "Zablokuj przesuwanie i powiększanie",
+  "mermaid.unlockGestures": "Włącz przesuwanie i powiększanie",
   "mode.allow-all": "Pełna kontrola",
   "mode.ask": "Pytaj przed edycją",
   "mode.askDesc": "Pyta przed edycją",

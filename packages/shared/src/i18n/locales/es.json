@@ -810,6 +810,8 @@
   "menu.window": "Ventana",
   "menu.zoomIn": "Acercar",
   "menu.zoomOut": "Alejar",
+  "mermaid.lockGestures": "Bloquear desplazamiento y zoom",
+  "mermaid.unlockGestures": "Activar desplazamiento y zoom",
   "mode.allow-all": "Control total",
   "mode.ask": "Preguntar al editar",
   "mode.askDesc": "Pregunta antes de editar",

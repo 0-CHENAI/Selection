@@ -810,6 +810,8 @@
   "menu.window": "Window",
   "menu.zoomIn": "Zoom In",
   "menu.zoomOut": "Zoom Out",
+  "mermaid.lockGestures": "Lock diagram pan and zoom",
+  "mermaid.unlockGestures": "Enable diagram pan and zoom",
   "mode.allow-all": "Full Takeover",
   "mode.ask": "Ask to Edit",
   "mode.askDesc": "Ask before making edits",

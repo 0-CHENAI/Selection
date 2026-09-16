@@ -810,6 +810,8 @@
   "menu.window": "Ablak",
   "menu.zoomIn": "Nagyítás",
   "menu.zoomOut": "Kicsinyítés",
+  "mermaid.lockGestures": "Mozgatás és nagyítás zárolása",
+  "mermaid.unlockGestures": "Mozgatás és nagyítás engedélyezése",
   "mode.allow-all": "Teljes átvétel",
   "mode.ask": "Kérdezzen szerkesztés előtt",
   "mode.askDesc": "Szerkesztés előtt kérdez",

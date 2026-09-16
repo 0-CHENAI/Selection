@@ -810,6 +810,8 @@
   "menu.window": "ウィンドウ",
   "menu.zoomIn": "拡大",
   "menu.zoomOut": "縮小",
+  "mermaid.lockGestures": "図の移動とズームをロックする",
+  "mermaid.unlockGestures": "図の移動とズームを有効にする",
   "mode.allow-all": "完全委任",
   "mode.ask": "編集前に確認",
   "mode.askDesc": "編集前に確認する",

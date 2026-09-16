@@ -810,6 +810,8 @@
   "menu.window": "窗口",
   "menu.zoomIn": "放大",
   "menu.zoomOut": "缩小",
+  "mermaid.lockGestures": "锁定图表拖动和缩放",
+  "mermaid.unlockGestures": "解锁图表拖动和缩放",
   "mode.allow-all": "完全接管",
   "mode.ask": "询问修改",
   "mode.askDesc": "修改前询问确认",
