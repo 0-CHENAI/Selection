@@ -21,7 +21,11 @@ import {
   hasPopoverDragMoved,
   offsetToPinVisualOrigin,
   popoverBodyClassName,
+  readEditPopoverTriggerAnchor,
+  resolveEditPopoverJobStatus,
   resolveEditPopoverOpenChange,
+  resolveEditPopoverPositioningSize,
+  shouldAvoidEditPopoverCollisions,
   sizeFromResizeEdge,
 } from '../edit-popover-layout'
 
@@ -315,6 +319,66 @@ describe('resolveEditPopoverOpenChange (#384)', () => {
   })
 })
 
+describe('resolveEditPopoverJobStatus (#394)', () => {
+  it('prefers waiting-for-input over an in-flight turn', () => {
+    expect(resolveEditPopoverJobStatus({
+      isProcessing: true,
+      waitingInput: true,
+      hasWork: true,
+    })).toBe('waiting-input')
+  })
+
+  it('keeps a finished session visible as completed', () => {
+    expect(resolveEditPopoverJobStatus({
+      isProcessing: false,
+      hasWork: true,
+    })).toBe('completed')
+  })
+
+  it('surfaces error and cancelled creation as failed', () => {
+    expect(resolveEditPopoverJobStatus({
+      isProcessing: false,
+      hasWork: true,
+      lastMessageRole: 'error',
+    })).toBe('failed')
+    expect(resolveEditPopoverJobStatus({
+      isProcessing: false,
+      hasWork: true,
+      creationStatus: 'cancelled',
+    })).toBe('failed')
+  })
+
+  it('stays idle before any work starts', () => {
+    expect(resolveEditPopoverJobStatus({ isProcessing: false })).toBe('idle')
+  })
+})
+
+describe('collapsed popover placement (#394)', () => {
+  it('collides the painted strip instead of the frozen 480px radix box', () => {
+    expect(resolveEditPopoverPositioningSize(
+      true,
+      { width: COLLAPSED_POPOVER_WIDTH, height: COLLAPSED_POPOVER_HEIGHT },
+      { width: DEFAULT_POPOVER_WIDTH, height: DEFAULT_POPOVER_HEIGHT },
+    )).toEqual({ width: COLLAPSED_POPOVER_WIDTH, height: COLLAPSED_POPOVER_HEIGHT })
+    expect(resolveEditPopoverPositioningSize(
+      false,
+      { width: 480, height: 520 },
+      { width: DEFAULT_POPOVER_WIDTH, height: DEFAULT_POPOVER_HEIGHT },
+    )).toEqual({ width: DEFAULT_POPOVER_WIDTH, height: DEFAULT_POPOVER_HEIGHT })
+  })
+
+  it('stops following the trigger after collapse so page reflow cannot hide the strip', () => {
+    expect(shouldAvoidEditPopoverCollisions(true)).toBe(false)
+    expect(shouldAvoidEditPopoverCollisions(false)).toBe(true)
+  })
+
+  it('anchors a durable add-source trigger under the empty-state button', () => {
+    expect(readEditPopoverTriggerAnchor({ left: 100, top: 80, width: 80, height: 28 }))
+      .toEqual({ left: 140, top: 108 })
+    expect(readEditPopoverTriggerAnchor(null)).toEqual({ left: 0, top: 0 })
+  })
+})
+
 describe('EditPopover floating window (#384, #385)', () => {
   const source = readFileSync(join(import.meta.dir, '../EditPopover.tsx'), 'utf8')
 
@@ -334,5 +398,37 @@ describe('EditPopover floating window (#384, #385)', () => {
     expect(source).not.toMatch(/data-testid="edit-popover-resize"(?!-)/)
     expect(source).not.toContain('size-6 cursor-nwse-resize')
     expect(source).toContain('sizeFromResizeEdge')
+  })
+})
+
+describe('EditPopover MCP/skill config (#394)', () => {
+  const source = readFileSync(join(import.meta.dir, '../EditPopover.tsx'), 'utf8')
+  const sourcesList = readFileSync(join(import.meta.dir, '../../app-shell/SourcesListPanel.tsx'), 'utf8')
+  const skillsList = readFileSync(join(import.meta.dir, '../../app-shell/SkillsListPanel.tsx'), 'utf8')
+
+  it('hides the record navigator and its placeholder column in compact config chats', () => {
+    expect(source).toContain('showRecordNavigation={false}')
+  })
+
+  it('keeps the collapsed strip after completion and shows the job status', () => {
+    expect(source).toContain('resolveEditPopoverJobStatus')
+    expect(source).toContain('avoidCollisions={shouldAvoidEditPopoverCollisions(collapsed)}')
+    expect(source).toContain('data-testid="edit-popover-status"')
+    expect(source).toContain('resolveEditPopoverPositioningSize')
+    expect(source).toContain('clampVisualPopoverOffset')
+  })
+
+  it('does not replace a loaded skill page with not-found during a config rewrite', () => {
+    const skillInfo = readFileSync(join(import.meta.dir, '../../../pages/SkillInfoPage.tsx'), 'utf8')
+    expect(skillInfo).toContain('else if (!skillRef.current)')
+  })
+
+  it('does not unmount add-source/add-skill popovers when the empty list fills', () => {
+    expect(sourcesList).toContain('addSourceOpen && (')
+    expect(sourcesList).toContain('openAddSource')
+    expect(sourcesList).not.toMatch(/emptyState=\{[\s\S]*<EditPopover/)
+    expect(skillsList).toContain('addSkillOpen && (')
+    expect(skillsList).toContain('openAddSkill')
+    expect(skillsList).not.toMatch(/emptyState=\{[\s\S]*<EditPopover/)
   })
 })

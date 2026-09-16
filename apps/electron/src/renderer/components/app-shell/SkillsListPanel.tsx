@@ -11,6 +11,7 @@ import { SendResourceToWorkspaceDialog } from './SendResourceToWorkspaceDialog'
 import { CopyResourcesFromWorkspaceDialog } from './CopyResourcesFromWorkspaceDialog'
 import { ResourceTransferDialog } from '@/components/resources/ResourceTransferDialog'
 import { EditPopover, getEditConfig } from '@/components/ui/EditPopover'
+import { readEditPopoverTriggerAnchor } from '@/components/ui/edit-popover-layout'
 import { FadingText } from '@/components/ui/fading-text'
 import { useActiveWorkspace, useAppShellContext } from '@/context/AppShellContext'
 import { getFileManagerName } from '@/lib/platform'
@@ -71,6 +72,14 @@ export function SkillsListPanel({
   const rename = useDisplayTitleRename('skill', workspaceId ?? activeWorkspaceId, workingDirectory)
   const [isDraggingFile, setIsDraggingFile] = React.useState(false)
   const dragDepthRef = React.useRef(0)
+  const [addSkillOpen, setAddSkillOpen] = React.useState(false)
+  const [addSkillAnchor, setAddSkillAnchor] = React.useState<{ left: number; top: number } | null>(null)
+  const addSkillButtonRef = React.useRef<HTMLButtonElement>(null)
+
+  const openAddSkill = React.useCallback(() => {
+    setAddSkillAnchor(readEditPopoverTriggerAnchor(addSkillButtonRef.current?.getBoundingClientRect()))
+    setAddSkillOpen(true)
+  }, [])
 
   const handleDragEnter = (event: React.DragEvent<HTMLDivElement>) => {
     if (!onImportDroppedFiles || !hasFileDragType(event.dataTransfer.types)) return
@@ -113,6 +122,21 @@ export function SkillsListPanel({
       onDragOver={handleDragOver}
       onDrop={handleDrop}
     >
+    {workspaceRootPath && addSkillOpen && (
+      <EditPopover
+        align="center"
+        open={addSkillOpen}
+        onOpenChange={setAddSkillOpen}
+        trigger={
+          <span
+            aria-hidden="true"
+            className="pointer-events-none fixed h-0 w-0"
+            style={{ left: addSkillAnchor?.left ?? 0, top: addSkillAnchor?.top ?? 0 }}
+          />
+        }
+        {...getEditConfig('add-skill', workspaceRootPath)}
+      />
+    )}
     <EntityPanel<LoadedSkill>
       items={skills}
       getId={(s) => s.slug}
@@ -129,15 +153,14 @@ export function SkillsListPanel({
         >
           <div className="flex flex-wrap items-center justify-center gap-2">
             {workspaceRootPath && (
-              <EditPopover
-                align="center"
-                trigger={
-                  <button className="inline-flex items-center h-7 px-3 text-xs font-medium rounded-[8px] bg-background shadow-minimal hover:bg-foreground/[0.03] transition-colors">
-                    {t('skillsList.addSkill')}
-                  </button>
-                }
-                {...getEditConfig('add-skill', workspaceRootPath)}
-              />
+              <button
+                ref={addSkillButtonRef}
+                type="button"
+                onClick={openAddSkill}
+                className="inline-flex items-center h-7 px-3 text-xs font-medium rounded-[8px] bg-background shadow-minimal hover:bg-foreground/[0.03] transition-colors"
+              >
+                {t('skillsList.addSkill')}
+              </button>
             )}
             {onImportFromFile && (
               <button

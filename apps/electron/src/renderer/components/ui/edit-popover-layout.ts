@@ -11,8 +11,8 @@ export const MIN_POPOVER_WIDTH = 320
 export const MIN_POPOVER_HEIGHT = 280
 /** Matches the `h-10` title bar. */
 export const COLLAPSED_POPOVER_HEIGHT = 40
-/** Hug the title + header buttons; ignore the 320 expanded minimum. */
-export const COLLAPSED_POPOVER_WIDTH = 240
+/** Hug the title, status, and header buttons; ignore the 320 expanded minimum. */
+export const COLLAPSED_POPOVER_WIDTH = 280
 export const VIEWPORT_MARGIN = 16
 export const VIEWPORT_MARGIN_TOP = 52
 export const POPOVER_HEADER_HEIGHT = 40
@@ -182,6 +182,56 @@ export function resolveEditPopoverOpenChange(
 ): 'open' | 'close' | 'blur' {
   if (next) return 'open'
   return allowClose ? 'close' : 'blur'
+}
+
+export type EditPopoverJobStatus = 'idle' | 'running' | 'waiting-input' | 'completed' | 'failed'
+
+export const EDIT_POPOVER_STATUS_I18N = {
+  running: 'editPopover.status.running',
+  'waiting-input': 'editPopover.status.waitingInput',
+  completed: 'editPopover.status.completed',
+  failed: 'editPopover.status.failed',
+} as const
+
+/**
+ * Collapsed title-bar status. Task completion must not look like a dismiss:
+ * success, failure, and waiting-for-input stay visible until the user closes.
+ */
+export function resolveEditPopoverJobStatus(input: {
+  isProcessing: boolean
+  waitingInput?: boolean
+  hasWork?: boolean
+  lastMessageRole?: string | null
+  creationStatus?: 'running' | 'waiting-input' | 'completed' | 'failed' | 'cancelled'
+}): EditPopoverJobStatus {
+  if (input.waitingInput || input.creationStatus === 'waiting-input') return 'waiting-input'
+  if (input.isProcessing || input.creationStatus === 'running') return 'running'
+  if (input.lastMessageRole === 'error' || input.creationStatus === 'failed' || input.creationStatus === 'cancelled') {
+    return 'failed'
+  }
+  if (input.hasWork || input.creationStatus === 'completed') return 'completed'
+  return 'idle'
+}
+
+/** A collapsed 40px strip must not collide as a 480px box or it can leave the viewport. */
+export function resolveEditPopoverPositioningSize(
+  collapsed: boolean,
+  containerSize: Size,
+  radixBox: Size,
+): Size {
+  return collapsed ? containerSize : radixBox
+}
+
+/** After collapse, keep the strip where the user left it when the page reflows. */
+export function shouldAvoidEditPopoverCollisions(collapsed: boolean): boolean {
+  return !collapsed
+}
+
+export function readEditPopoverTriggerAnchor(
+  rect: { left: number; top: number; width: number; height: number } | null | undefined,
+): { left: number; top: number } {
+  if (!rect) return { left: 0, top: 0 }
+  return { left: rect.left + rect.width / 2, top: rect.top + rect.height }
 }
 
 /** Textarea cap so the send row stays on-screen inside the popover. */

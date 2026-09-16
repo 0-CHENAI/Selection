@@ -17,6 +17,7 @@ import { motion, AnimatePresence, useReducedMotion } from "motion/react"
 import { toast } from "sonner"
 
 import { ConversationNavigation, type ConversationNavigationItem } from "./ConversationNavigation"
+import { shouldShowConversationNavigation } from "./conversation-navigation"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { cn } from "@/lib/utils"
 import { appendRestoredInput, getRestorableStoppedPrompt } from "@/lib/input-text"
@@ -259,6 +260,11 @@ interface ChatDisplayProps {
   enableCompactModelPicker?: boolean
   /** Cap the compact composer so long pastes cannot squeeze the popover chrome (#8). */
   compactInputMaxHeight?: number
+  /**
+   * Record-navigation rail. Hidden in EditPopover config windows so MCP/skill
+   * setup does not keep the left-side ticks or their 2rem placeholder (#394).
+   */
+  showRecordNavigation?: boolean
   /** Custom placeholder for input (used in compact mode for edit context) */
   placeholder?: string | string[]
   /** Label shown as empty state in compact mode (e.g., "Permission Settings") */
@@ -529,6 +535,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
   compactMode = false,
   enableCompactModelPicker = false,
   compactInputMaxHeight,
+  showRecordNavigation = true,
   placeholder,
   emptyStateLabel,
   onExplicitStop,
@@ -1566,6 +1573,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
   const hasMoreAbove = startIndex > 0
 
   const navigationItems = useMemo(() => {
+    if (!showRecordNavigation) return []
     const items: ConversationNavigationItem[] = []
     allTurns.forEach((turn, index) => {
       if (turn.type === 'user') {
@@ -1576,7 +1584,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
       }
     })
     return items
-  }, [allTurns])
+  }, [allTurns, showRecordNavigation])
   const [navigationTarget, setNavigationTarget] = useState<{ sessionId: string; key: string } | null>(null)
   const navigateToRecord = useCallback((item: ConversationNavigationItem) => {
     if (!activeSessionId) return
@@ -1708,6 +1716,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
     messageCount: session?.messages.length ?? 0,
     sessionBusy,
   })
+  const showNavigationRail = shouldShowConversationNavigation(showRecordNavigation, navigationItems.length)
 
   return (
     <div ref={zoneRef} className="flex h-full flex-col min-w-0" data-focus-zone="chat">
@@ -1716,9 +1725,11 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
           {/* Content layer */}
           <div className="flex flex-1 flex-col min-h-0 min-w-0 relative z-10">
           {/* Center the rail across the conversation, including the composer. */}
-            <ConversationNavigation key={session.id} items={navigationItems} viewportRef={scrollViewportRef} turnRefs={turnRefs} onNavigate={navigateToRecord} />
-          <div className={cn("grid flex-1 min-h-0 min-w-0", navigationItems.length > 0 && "grid-cols-[2rem_minmax(0,1fr)]")}>
-          <div className={cn("flex flex-col min-h-0 min-w-0", navigationItems.length > 0 && "col-start-2")}>
+            {showNavigationRail && (
+              <ConversationNavigation key={session.id} items={navigationItems} viewportRef={scrollViewportRef} turnRefs={turnRefs} onNavigate={navigateToRecord} />
+            )}
+          <div className={cn("grid flex-1 min-h-0 min-w-0", showNavigationRail && "grid-cols-[2rem_minmax(0,1fr)]")}>
+          <div className={cn("flex flex-col min-h-0 min-w-0", showNavigationRail && "col-start-2")}>
           {/* === MESSAGES AREA: Scrollable list of message bubbles === */}
           <div className="relative flex-1 min-h-0">
             {showNewSessionBrand && <NewSessionBrand />}
