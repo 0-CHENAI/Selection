@@ -40,8 +40,8 @@ function mergeTextStreamPhase(
 /**
  * Handle text_delta - accumulate streaming content
  *
- * Intermediate/unknown text creates a work-chain message. Final-answer deltas
- * remain in transient state until text_complete starts the local reveal.
+ * Explicit commentary creates a work-chain message. Native text deltas update
+ * the visible response immediately; text_complete finalizes its classification.
  * Uses turnId for lookup, never position.
  */
 export function handleTextDelta(
@@ -60,7 +60,12 @@ export function handleTextDelta(
 
   // Events from current servers always carry a phase. Treat a missing legacy
   // phase as final so it cannot flash an unclassified response card.
-  const incomingPhase = event.answerProtocol === 'explicit-v1' ? 'intermediate' : event.phase ?? 'final'
+  // Native completion APIs do not identify the final phase until message_end.
+  // Show their text provisionally; completion can move it into the work chain
+  // if the model goes on to call a tool.
+  const incomingPhase = event.answerProtocol === 'explicit-v1'
+    ? 'intermediate'
+    : event.phase === 'intermediate' ? 'intermediate' : 'final'
   const continuesExistingStream = !!streaming
     && (!event.turnId || !streaming.turnId || streaming.turnId === event.turnId)
   const phase = mergeTextStreamPhase(
@@ -82,13 +87,6 @@ export function handleTextDelta(
         turnId: event.turnId,
       }
 
-  // A final-answer phase is authoritative, but its network deltas stay hidden.
-  // The complete payload is revealed locally in one short, deterministic pass,
-  // preventing the formal response card from flashing during generation.
-  if (phase === 'final') {
-    return { session, streaming: newStreaming }
-  }
-
   // Find existing streaming message by turnId
   const streamingIndex = findStreamingMessage(session.messages, event.turnId)
 
@@ -97,7 +95,7 @@ export function handleTextDelta(
     const currentMsg = session.messages[streamingIndex]
     const updatedSession = updateMessageAt(session, streamingIndex, {
       content: currentMsg.content + event.delta,
-      isIntermediate: true,
+      isIntermediate: phase !== 'final',
     })
     return { session: updatedSession, streaming: newStreaming }
   }
@@ -113,7 +111,7 @@ export function handleTextDelta(
     timestamp: timestampAfterVisibleUser(session.messages),
     isStreaming: true,
     isPending: true,
-    isIntermediate: true,
+    isIntermediate: phase !== 'final',
     turnId: event.turnId,
   }
 

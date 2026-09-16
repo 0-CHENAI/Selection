@@ -59,12 +59,16 @@ import {
   clampPopoverSize,
   clampPopoverSizeFromOrigin,
   clampVisualPopoverOffset,
+  EDIT_POPOVER_STATUS_I18N,
   getCompactInputMaxHeight,
   hasPopoverDragMoved,
   offsetToPinVisualOrigin,
   popoverBodyClassName,
   POPOVER_RESIZE_EDGE_PX,
+  resolveEditPopoverJobStatus,
   resolveEditPopoverOpenChange,
+  resolveEditPopoverPositioningSize,
+  shouldAvoidEditPopoverCollisions,
   sizeFromResizeEdge,
   type PopoverResizeEdge,
 } from './edit-popover-layout'
@@ -1102,10 +1106,22 @@ export function EditPopover({
         if (!collapsed) expandedSizeRef.current = next
         return next
       })
+      const rect = popoverRef.current?.getBoundingClientRect()
+      if (!rect) return
+      const size = collapsed
+        ? clampPopoverSize(expandedSizeRef.current, viewport, true)
+        : clampPopoverSize(expandedSizeRef.current, viewport)
+      const next = clampVisualPopoverOffset(
+        dragOffsetRef.current,
+        { left: rect.left, top: rect.top },
+        size,
+        viewport,
+      )
+      if (next.x !== dragOffsetRef.current.x || next.y !== dragOffsetRef.current.y) applyOffset(next)
     }
     window.addEventListener('resize', onResize)
     return () => window.removeEventListener('resize', onResize)
-  }, [open, collapsed, readViewport])
+  }, [applyOffset, collapsed, open, readViewport])
 
   const handleDragStart = useCallback((e: React.MouseEvent) => {
     if ((e.target as HTMLElement).closest('button')) return
@@ -1527,9 +1543,25 @@ export function EditPopover({
     closePopover()
   }, [closePopover, context, displayLabel, workingDirectory, model, systemPromptPreset, permissionMode])
 
+  const jobStatus = resolveEditPopoverJobStatus({
+    isProcessing,
+    waitingInput: Boolean(pendingPermission || pendingCredential),
+    hasWork: Boolean(inlineSessionId),
+    lastMessageRole: inlineSession?.lastMessageRole,
+    creationStatus: creationKind
+      ? findLatestCreationJob(creationJobs, workspace?.id || '', resolvedContextKey)?.status
+      : undefined,
+  })
+
   // Keep the Radix box at the size from last open so growing the painted card
   // cannot re-center a `align=center` popover and flash the top-left (#385).
-  const positioningSize = radixBoxRef.current
+  // Collapsed strips must collide as themselves, or a 480px box can leave the
+  // viewport when the host page reflows after MCP/skill setup finishes (#394).
+  const positioningSize = resolveEditPopoverPositioningSize(
+    collapsed,
+    containerSize,
+    radixBoxRef.current,
+  )
 
   return (
     <>
@@ -1556,7 +1588,7 @@ export function EditPopover({
             // Keep Radix on one positioning coordinate system while dragging.
             // Flipping collision handling on the first move rebases the popover
             // before our translate is applied, which makes it jump to an edge.
-            avoidCollisions
+            avoidCollisions={shouldAvoidEditPopoverCollisions(collapsed)}
             className="pointer-events-none overflow-visible p-0"
             data-testid="edit-popover"
             data-focused={focused ? 'true' : 'false'}
@@ -1613,6 +1645,21 @@ export function EditPopover({
                 <span className="min-w-0 flex-1 truncate px-1 text-xs text-foreground/70 select-none">
                   {displayLabel || context.label}
                 </span>
+                {collapsed && jobStatus !== 'idle' && (
+                  <span
+                    data-testid="edit-popover-status"
+                    data-job-status={jobStatus}
+                    className={cn(
+                      "shrink-0 px-1 text-[10px] font-medium select-none",
+                      jobStatus === 'completed' && "text-success",
+                      jobStatus === 'failed' && "text-destructive",
+                      jobStatus === 'waiting-input' && "text-warning",
+                      jobStatus === 'running' && "text-muted-foreground",
+                    )}
+                  >
+                    {t(EDIT_POPOVER_STATUS_I18N[jobStatus])}
+                  </span>
+                )}
                 {collapsed && isProcessing && (
                   <HeaderIconButton
                     icon={<Square className="size-3 fill-current" />}
@@ -1643,6 +1690,7 @@ export function EditPopover({
               <motion.div
                 hidden={bodyHidden}
                 aria-hidden={collapsed}
+                {...(bodyHidden ? { inert: '' } : {})}
                 initial={false}
                 animate={{ opacity: collapsed ? 0 : 1, y: collapsed ? -4 : 0 }}
                 transition={{
@@ -1667,6 +1715,7 @@ export function EditPopover({
                   pendingCredential={pendingCredential}
                   onRespondToCredential={onRespondToCredential}
                   compactMode={true}
+                  showRecordNavigation={false}
                   compactInputMaxHeight={getCompactInputMaxHeight(expandedSizeRef.current.height)}
                   placeholder={placeholder}
                   emptyStateLabel={displayLabel || context.label}

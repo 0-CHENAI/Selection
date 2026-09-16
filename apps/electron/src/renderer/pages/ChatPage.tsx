@@ -8,7 +8,7 @@
 import * as React from 'react'
 import { useTranslation } from 'react-i18next'
 import { useAtomValue, useSetAtom } from 'jotai'
-import { AlertCircle, Info } from 'lucide-react'
+import { AlertCircle, FolderOpen } from 'lucide-react'
 import { ChatDisplay, type ChatDisplayHandle } from '@/components/app-shell/ChatDisplay'
 import { OrchestrationRunProgress } from '@/components/app-shell/kanban/OrchestrationRunProgress'
 import { canPreviewOrchestrationChild } from '@/components/app-shell/kanban/orchestration-run-progress'
@@ -501,7 +501,7 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
         presentation="drawer"
         trigger={(
           <PanelHeaderCenterButton
-            icon={<Info className="h-4 w-4" />}
+            icon={<FolderOpen className="h-4 w-4" />}
             aria-label={t("chat.sessionInfo")}
           />
         )}

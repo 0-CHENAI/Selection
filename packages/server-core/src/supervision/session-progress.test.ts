@@ -50,6 +50,34 @@ function setup(terminal?: 'output_limit' | 'stream_interrupted' | 'model_request
   return { root, manager, managed, agent, entered, interrupted, prompts }
 }
 describe('SessionManager progress integration', () => {
+  it('executes a claimed source continuation while retaining duplicate-request protection', async () => {
+    const f = setup()
+    f.managed.messages.push({ id: 'original', role: 'user', content: '查询数据库', timestamp: Date.now() })
+    const prompt = '查询数据库\n\n[cortex-mcp activated]'
+    f.managed.autoRetryPending = { content: prompt, deadlineMs: Date.now() + 2000, committed: false }
+    // Let the fixture finish immediately; answer recovery submits the final text.
+    f.interrupted.resolve()
+    await f.manager.sendMessage(f.managed.id, prompt, undefined, undefined, { hidden: true })
+    expect(f.prompts[0]).toBe(prompt)
+    expect(f.managed.messages.filter(m => m.answerCommitted)).toHaveLength(1)
+    const callCount = f.prompts.length
+    await f.manager.sendMessage(f.managed.id, prompt, undefined, undefined, { hidden: true })
+    expect(f.prompts).toHaveLength(callCount)
+    await f.manager.flushSession(f.managed.id)
+  })
+
+  it('still stops an execution when a new source continuation is scheduled', async () => {
+    const f = setup()
+    const run = f.manager.sendMessage(f.managed.id, '查询数据库')
+    await f.entered.promise
+    f.managed.autoRetryPending = { content: '查询数据库\n\n[cortex-mcp activated]', deadlineMs: Date.now() + 2000, committed: false }
+    f.interrupted.resolve()
+    await run
+    expect(f.prompts).toHaveLength(1)
+    expect(f.managed.messages.filter(m => m.answerCommitted)).toHaveLength(0)
+    await f.manager.flushSession(f.managed.id)
+  })
+
   it('drains the original call and delivers once within the same user turn', async () => {
     const f = setup(); const run = f.manager.sendMessage(f.managed.id, '画图')
     await f.entered.promise

@@ -293,7 +293,7 @@ export function getActiveTurnPreview(
   activities: ActivityItem[],
   phase: TurnPhase,
 ): string | undefined {
-  if (phase === 'complete' || phase === 'streaming') return undefined
+  if (phase === 'complete') return undefined
 
   let latest: { text: string; timestamp: number; index: number } | undefined
 

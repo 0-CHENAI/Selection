@@ -4,6 +4,7 @@
  */
 
 import { spawn } from "bun";
+import { build } from "esbuild";
 import { existsSync, readFileSync, statSync, mkdirSync } from "fs";
 import { join } from "path";
 
@@ -46,7 +47,7 @@ function loadEnvFile(): void {
 // To enable in the future, add @sentry/esbuild-plugin. See apps/electron/CLAUDE.md.
 // NOTE: Google OAuth credentials are NOT baked into the build - users provide their own
 // via source config. See README_FOR_OSS.md for setup instructions.
-function getBuildDefines(): string[] {
+function getBuildDefines(): Record<string, string> {
   const definedVars = [
     "SLACK_OAUTH_CLIENT_ID",
     "SLACK_OAUTH_CLIENT_SECRET",
@@ -58,10 +59,10 @@ function getBuildDefines(): string[] {
     "CRAFT_SWARM_PREVIEW_BUILD",
   ];
 
-  return definedVars.map((varName) => {
+  return Object.fromEntries(definedVars.map((varName) => {
     const value = process.env[varName] || "";
-    return `--define:process.env.${varName}="${value}"`;
-  });
+    return [`process.env.${varName}`, JSON.stringify(value)];
+  }));
 }
 
 // Wait for file to stabilize (no size changes)
@@ -274,29 +275,17 @@ async function main(): Promise<void> {
 
   console.log("🔨 Building main process...");
 
-  const proc = spawn({
-    cmd: [
-      "bun", "run", "esbuild",
-      "apps/electron/src/main/index.ts",
-      "--bundle",
-      "--platform=node",
-      "--format=cjs",
-      "--outfile=apps/electron/dist/main.cjs",
-      "--external:electron",
-      ...buildDefines,
-    ],
-    cwd: ROOT_DIR,
-    stdout: "inherit",
-    stderr: "inherit",
+  // The API preserves JSON define values without Windows CLI quote parsing.
+  await build({
+    entryPoints: [join(ROOT_DIR, "apps/electron/src/main/index.ts")],
+    bundle: true,
+    platform: "node",
+    format: "cjs",
+    outfile: OUTPUT_FILE,
+    external: ["electron"],
+    define: buildDefines,
+    absWorkingDir: ROOT_DIR,
   });
-
-  const exitCode = await proc.exited;
-
-  if (exitCode !== 0) {
-    console.error("❌ esbuild failed with exit code", exitCode);
-    process.exit(exitCode);
-  }
-
   // Wait for file to stabilize
   console.log("⏳ Waiting for file to stabilize...");
   const stable = await waitForFileStable(OUTPUT_FILE);
