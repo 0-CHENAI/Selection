@@ -33,7 +33,7 @@ import { SquarePenRounded } from "../icons/SquarePenRounded"
 import { McpIcon } from "../icons/McpIcon"
 import { Button } from "@/components/ui/button"
 import { HeaderIconButton } from "@/components/ui/HeaderIconButton"
-import { CreationJobsHost } from "./CreationJobsButton"
+import { CreationJobsButton, CreationJobsHost } from "./CreationJobsButton"
 import type { CreationJob } from "@/atoms/creation-jobs"
 import { clearProjectFilter, resolveNewSessionParams, resolveProjectNavigationSessionId, type FilterMode } from "./inherited-filter-params"
 import { filterSessionsByProject, getIncludedProjectName, hasIncludedProjectFilter } from "./project-session-filter"
@@ -2174,6 +2174,11 @@ function AppShellContent({
                         tooltip={t("fileImport.mcpTitle")}
                         onClick={() => setMcpFileImportOpen(true)}
                       />
+                      <CreationJobsButton
+                        workspaceId={activeWorkspace.id}
+                        onReopen={reopenCreationJob}
+                        onOpenResult={openCreationResult}
+                      />
                       <EditPopover
                         trigger={
                           <HeaderIconButton
@@ -2219,6 +2224,11 @@ function AppShellContent({
                   {/* Add Automation button (only for automations mode) */}
                   {isAutomationsNavigation(navState) && activeWorkspace && (
                     <>
+                      <CreationJobsButton
+                        workspaceId={activeWorkspace.id}
+                        onReopen={reopenCreationJob}
+                        onOpenResult={openCreationResult}
+                      />
                       <EditPopover
                         trigger={
                           <HeaderIconButton
