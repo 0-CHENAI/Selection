@@ -432,7 +432,6 @@
   "chat.workflowAgentsDone_other": "{{count}} agents",
   "chat.workingDirectory": "Working directory",
   "chatInput.placeholder.focusMode": "Press {{key}} + . for focus mode",
-  "chatInput.placeholder.labels": "Type # to apply labels to this conversation",
   "chatInput.placeholder.mention": "Type @ to mention files, folders, or skills",
   "chatInput.placeholder.newLine": "Press Shift + Return to add a new line",
   "chatInput.placeholder.shiftTab": "Use Shift + Tab to switch between Read-only Explore and Full Takeover",

@@ -432,7 +432,6 @@
   "chat.workflowAgentsDone_other": "{{count}} agentes",
   "chat.workingDirectory": "Directorio de trabajo",
   "chatInput.placeholder.focusMode": "Pulsa {{key}} + . para el modo enfoque",
-  "chatInput.placeholder.labels": "Escribe # para aplicar etiquetas a esta conversación",
   "chatInput.placeholder.mention": "Escribe @ para mencionar archivos, carpetas o skills",
   "chatInput.placeholder.newLine": "Pulsa Shift + Return para añadir una nueva línea",
   "chatInput.placeholder.shiftTab": "Usa Shift + Tab para cambiar entre Explorar y Ejecutar",

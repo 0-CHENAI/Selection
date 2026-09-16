@@ -432,7 +432,6 @@
   "chat.workflowAgentsDone_other": "{{count}} agentów",
   "chat.workingDirectory": "Katalog roboczy",
   "chatInput.placeholder.focusMode": "Naciśnij {{key}} + . aby włączyć tryb skupienia",
-  "chatInput.placeholder.labels": "Wpisz #, aby dodać etykiety do tej rozmowy",
   "chatInput.placeholder.mention": "Wpisz @, aby wskazać pliki, foldery lub umiejętności",
   "chatInput.placeholder.newLine": "Naciśnij Shift + Return, aby dodać nowy wiersz",
   "chatInput.placeholder.shiftTab": "Użyj Shift + Tab, aby przełączać między trybem Eksploruj a Wykonuj",

@@ -432,7 +432,6 @@
   "chat.workflowAgentsDone_other": "{{count}} 個のエージェント",
   "chat.workingDirectory": "作業ディレクトリ",
   "chatInput.placeholder.focusMode": "{{key}} + . でフォーカスモード",
-  "chatInput.placeholder.labels": "# を入力してこの会話にラベルを適用",
   "chatInput.placeholder.mention": "@ を入力してファイル、フォルダー、またはスキルをメンション",
   "chatInput.placeholder.newLine": "Shift + Return で改行",
   "chatInput.placeholder.shiftTab": "Shift + Tab で Explore と Execute を切り替え",

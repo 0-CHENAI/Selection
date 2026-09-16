@@ -415,7 +415,6 @@ export function FreeFormInput({
     t("chatInput.placeholder.workOn"),
     t("chatInput.placeholder.shiftTab"),
     t("chatInput.placeholder.mention"),
-    t("chatInput.placeholder.labels"),
     t("chatInput.placeholder.newLine"),
     t("chatInput.placeholder.sidebar", { key: cmdKey }),
     t("chatInput.placeholder.focusMode", { key: cmdKey }),
