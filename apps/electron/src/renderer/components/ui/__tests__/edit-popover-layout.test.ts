@@ -21,6 +21,8 @@ import {
   hasPopoverDragMoved,
   offsetToPinVisualOrigin,
   popoverBodyClassName,
+  resolveEditPopoverOpenChange,
+  sizeFromResizeEdge,
 } from '../edit-popover-layout'
 
 const desktop = { width: 1440, height: 900 }
@@ -283,15 +285,54 @@ describe('getCompactInputMaxHeight (#8)', () => {
   })
 })
 
-describe('EditPopover resize handle (#382)', () => {
+describe('sizeFromResizeEdge (#385)', () => {
+  const start = { width: 400, height: 480 }
+
+  it('grows only width from the east edge', () => {
+    expect(sizeFromResizeEdge(start, { x: 80, y: 40 }, 'e')).toEqual({ width: 480, height: 480 })
+  })
+
+  it('grows only height from the south edge', () => {
+    expect(sizeFromResizeEdge(start, { x: 80, y: 40 }, 's')).toEqual({ width: 400, height: 520 })
+  })
+
+  it('grows both from the south-east corner', () => {
+    expect(sizeFromResizeEdge(start, { x: 80, y: 40 }, 'se')).toEqual({ width: 480, height: 520 })
+  })
+})
+
+describe('resolveEditPopoverOpenChange (#384)', () => {
+  it('opens normally', () => {
+    expect(resolveEditPopoverOpenChange(true, false)).toBe('open')
+  })
+
+  it('blurs instead of closing when dismiss was not requested', () => {
+    expect(resolveEditPopoverOpenChange(false, false)).toBe('blur')
+  })
+
+  it('closes only when the title-bar close (or send leave) allowed it', () => {
+    expect(resolveEditPopoverOpenChange(false, true)).toBe('close')
+  })
+})
+
+describe('EditPopover floating window (#384, #385)', () => {
   const source = readFileSync(join(import.meta.dir, '../EditPopover.tsx'), 'utf8')
 
-  it('pins the painted origin while resizing and freezes the Radix box', () => {
-    expect(source).toContain('pinOriginRef.current = { left: origin.x, top: origin.y }')
-    expect(source).toContain('if (isResizing)')
-    expect(source).toContain('resizeStartRef.current.width')
-    expect(source).toContain('data-testid="edit-popover-resize"')
-    expect(source).toContain('size-6 cursor-nwse-resize')
-    expect(source).toContain('bg-foreground/10')
+  it('keeps the window on outside click and only closes explicitly', () => {
+    expect(source).toContain('resolveEditPopoverOpenChange')
+    expect(source).toContain('onPointerDownOutside={preventDismiss}')
+    expect(source).toContain('onFocusOutside={preventDismiss}')
+    expect(source).toContain('onClick={closePopover}')
+    expect(source).toContain('data-focused={focused ? \'true\' : \'false\'}')
+  })
+
+  it('resizes from invisible borders and freezes the Radix box', () => {
+    expect(source).toContain('radixBoxRef.current = next')
+    expect(source).toContain('data-testid="edit-popover-resize-e"')
+    expect(source).toContain('data-testid="edit-popover-resize-s"')
+    expect(source).toContain('data-testid="edit-popover-resize-se"')
+    expect(source).not.toMatch(/data-testid="edit-popover-resize"(?!-)/)
+    expect(source).not.toContain('size-6 cursor-nwse-resize')
+    expect(source).toContain('sizeFromResizeEdge')
   })
 })

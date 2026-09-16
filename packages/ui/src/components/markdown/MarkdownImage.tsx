@@ -84,7 +84,7 @@ export function MarkdownImage({ src, alt, onFileClick }: MarkdownImageProps) {
       src={displaySrc}
       alt={alt || ''}
       draggable={false}
-      className={cn('my-2 max-h-[480px] max-w-full rounded-[8px] object-contain', clickable && 'cursor-pointer')}
+      className={cn('block mx-auto my-2 max-h-[480px] max-w-full rounded-[8px] object-contain', clickable && 'cursor-pointer')}
       onError={() => setStatus('error')}
       onClick={clickable && filePath && onFileClick ? () => onFileClick(filePath) : undefined}
     />

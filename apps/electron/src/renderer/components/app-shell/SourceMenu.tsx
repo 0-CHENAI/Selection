@@ -9,7 +9,6 @@
  * primitives, allowing the same component to work in both scenarios.
  *
  * Provides consistent source actions:
- * - Open in New Window
  * - Show in file manager
  * - Delete
  */
@@ -19,7 +18,6 @@ import { useTranslation } from "react-i18next"
 import {
   Trash2,
   FolderOpen,
-  AppWindow,
   Send,
   Pencil,
   Download,
@@ -52,7 +50,6 @@ export interface SourceMenuProps {
 export function SourceMenu({
   sourceSlug,
   sourceName,
-  onOpenInNewWindow,
   onShowInFinder,
   onDelete,
   onSendToWorkspace,
@@ -74,11 +71,6 @@ export function SourceMenu({
         </MenuItem>
       )}
 
-      {/* Open in New Window */}
-      <MenuItem onClick={onOpenInNewWindow}>
-        <AppWindow className="h-3.5 w-3.5" />
-        <span className="flex-1">{t("sidebarMenu.openInNewWindow")}</span>
-      </MenuItem>
 
       {/* Show in file manager */}
       <MenuItem onClick={onShowInFinder}>

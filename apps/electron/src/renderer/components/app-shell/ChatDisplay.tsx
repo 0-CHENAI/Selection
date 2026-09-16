@@ -10,13 +10,13 @@ import {
   ChevronRight,
   ChevronUp,
   CircleAlert,
-  ExternalLink,
   Info,
   X,
 } from "lucide-react"
 import { motion, AnimatePresence, useReducedMotion } from "motion/react"
 import { toast } from "sonner"
 
+import { ConversationNavigation, type ConversationNavigationItem } from "./ConversationNavigation"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { cn } from "@/lib/utils"
 import { appendRestoredInput, getRestorableStoppedPrompt } from "@/lib/input-text"
@@ -1565,6 +1565,52 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
   const turns = allTurns.slice(startIndex)
   const hasMoreAbove = startIndex > 0
 
+  const navigationItems = useMemo(() => {
+    const items: ConversationNavigationItem[] = []
+    allTurns.forEach((turn, index) => {
+      if (turn.type === 'user') {
+        items.push({ key: getTurnKey(turn), index, title: turn.message.content, badges: turn.message.badges, preview: '' })
+      } else if (turn.type === 'assistant' && turn.response?.text && items.length) {
+        const item = items[items.length - 1]!
+        item.preview = (item.preview + '\n' + turn.response.text).trim()
+      }
+    })
+    return items
+  }, [allTurns])
+  const [navigationTarget, setNavigationTarget] = useState<{ sessionId: string; key: string } | null>(null)
+  const navigateToRecord = useCallback((item: ConversationNavigationItem) => {
+    if (!activeSessionId) return
+    isStickToBottomRef.current = false
+    ignoreScrollUnstickUntilRef.current = 0
+    setVisibleTurnCount(count => Math.max(count, allTurns.length - item.index))
+    setNavigationTarget({ sessionId: activeSessionId, key: item.key })
+  }, [activeSessionId, allTurns.length])
+
+  React.useLayoutEffect(() => {
+    if (!navigationTarget) return
+    if (navigationTarget.sessionId !== activeSessionId) {
+      setNavigationTarget(null)
+      return
+    }
+    const viewport = scrollViewportRef.current
+    if (!viewport) return
+    const jump = () => {
+      const target = turnRefs.current.get(navigationTarget.key)
+      if (!target || !viewport.contains(target)) return false
+      isStickToBottomRef.current = false
+      viewport.scrollTo({
+        top: viewport.scrollTop + target.getBoundingClientRect().top - viewport.getBoundingClientRect().top - 32,
+        behavior: 'instant',
+      })
+      setNavigationTarget(null)
+      return true
+    }
+    if (jump()) return
+    const observer = new MutationObserver(() => { if (jump()) observer.disconnect() })
+    observer.observe(viewport, { childList: true, subtree: true })
+    return () => observer.disconnect()
+  }, [navigationTarget, activeSessionId, visibleTurnCount])
+
   const assistantTurnIndexByMessageId = useMemo(() => {
     const map = new Map<string, number>()
     allTurns.forEach((turn, index) => {
@@ -1669,6 +1715,10 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
         <div className="flex flex-1 flex-col min-h-0 min-w-0 relative">
           {/* Content layer */}
           <div className="flex flex-1 flex-col min-h-0 min-w-0 relative z-10">
+          {/* Center the rail across the conversation, including the composer. */}
+            <ConversationNavigation key={session.id} items={navigationItems} viewportRef={scrollViewportRef} turnRefs={turnRefs} onNavigate={navigateToRecord} />
+          <div className={cn("grid flex-1 min-h-0 min-w-0", navigationItems.length > 0 && "grid-cols-[2rem_minmax(0,1fr)]")}>
+          <div className={cn("flex flex-col min-h-0 min-w-0", navigationItems.length > 0 && "col-start-2")}>
           {/* === MESSAGES AREA: Scrollable list of message bubbles === */}
           <div className="relative flex-1 min-h-0">
             {showNewSessionBrand && <NewSessionBrand />}
@@ -2167,6 +2217,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
           {/* === INPUT CONTAINER: FreeForm or Structured Input === */}
           {(!hideComposer || pendingPermission || pendingCredential) && (
           <ChatInputZone
+            className={compactMode ? "px-3" : "px-5 @xs/panel:px-5"}
             compactMode={compactMode}
             permissionMode={permissionMode}
             onPermissionModeChange={onPermissionModeChange}
@@ -2231,6 +2282,8 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
             }}
           />
           )}
+          </div>
+          </div>
           </div>
         </div>
       ) : null}
@@ -2516,17 +2569,6 @@ function MessageBubble({
     return (
       <div className="flex justify-start group">
         <div className="relative max-w-[90%] bg-background shadow-minimal rounded-[8px] pl-6 pr-4 py-3 break-words min-w-0 select-text">
-          {/* Pop-out button - visible on hover */}
-          {onPopOut && !message.isStreaming && (
-            <button
-              onClick={() => onPopOut(message)}
-              data-touch-reveal="true"
-              className="absolute top-2 right-2 p-1.5 rounded-md opacity-0 group-hover:opacity-100 transition-opacity hover:bg-foreground/5"
-              title={t("sidebarMenu.openInNewWindow")}
-            >
-              <ExternalLink className="w-4 h-4 text-muted-foreground hover:text-foreground" />
-            </button>
-          )}
           {/* Keep one document tree across streaming and completion. */}
           <CollapsibleMarkdownProvider>
             <Markdown

@@ -12,13 +12,11 @@
  * - "Configure Statuses" (for allSessions/status/flagged items) - triggers EditPopover callback
  * - "Add Source" (for sources) - triggers EditPopover callback
  * - "Add Skill" (for skills) - triggers EditPopover callback
- * - "Open in New Window" (for newSession only) - uses deep link
  */
 
 import * as React from 'react'
 import { useTranslation } from "react-i18next"
 import {
-  AppWindow,
   CheckCheck,
   Settings2,
   Plus,
@@ -89,16 +87,6 @@ export function SidebarMenu({
 
   // Get menu components from context (works with both DropdownMenu and ContextMenu)
   const { MenuItem, Separator } = useMenuComponents()
-
-  // New Session: only shows "Open in New Window"
-  if (type === 'newSession') {
-    return (
-      <MenuItem onClick={() => window.electronAPI.openUrl('craftagents://action/new-session?window=focused')}>
-        <AppWindow className="h-3.5 w-3.5" />
-        <span className="flex-1">{t("sidebarMenu.openInNewWindow")}</span>
-      </MenuItem>
-    )
-  }
 
   // Ordinary sessions retain the unrelated "Mark All Read" action without
   // exposing the removed status configuration workflow.

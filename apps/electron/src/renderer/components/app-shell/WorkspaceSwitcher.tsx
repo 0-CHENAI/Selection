@@ -2,7 +2,7 @@ import { confirmAction } from '@/lib/confirmation'
 import * as React from "react"
 import { useTranslation } from "react-i18next"
 import { useState, useCallback } from "react"
-import { Check, FolderPlus, ExternalLink, ChevronDown, Trash2 } from "lucide-react"
+import { Check, FolderPlus, ChevronDown, Trash2 } from "lucide-react"
 import { AnimatePresence } from "motion/react"
 import { useSetAtom } from "jotai"
 import { toast } from "sonner"
@@ -206,19 +206,6 @@ export function WorkspaceSwitcher({
                       title={t("workspace.removeWorkspace")}
                     >
                       <Trash2 className="h-3.5 w-3.5" />
-                    </button>
-                  )}
-                  {activeWorkspaceId !== workspace.id && (
-                    <button
-                      data-touch-reveal="true"
-                      className="opacity-0 group-hover:opacity-100 p-0.5 rounded hover:bg-foreground/10 transition-opacity"
-                      onClick={(e) => {
-                        e.stopPropagation()
-                        onSelect(workspace.id, true)
-                      }}
-                      title={t("sidebarMenu.openInNewWindow")}
-                    >
-                      <ExternalLink className="h-3.5 w-3.5" />
                     </button>
                   )}
                   {activeWorkspaceId === workspace.id && (
