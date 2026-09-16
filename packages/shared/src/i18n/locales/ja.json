@@ -360,7 +360,7 @@
   "chat.sessionFiles": "セッションファイル",
   "chat.sessionFilesEmpty": "このチャットで添付または作成されたファイルがここに表示されます。",
   "chat.sessionFilesLoading": "読み込み中...",
-  "chat.sessionInfo": "セッション情報",
+  "chat.sessionInfo": "セッションファイル",
   "chat.sessionNoLongerExists": "このセッションはすでに存在しません",
   "chat.shareOnline": "オンラインで共有",
   "chat.shareUpdated": "共有を更新しました",

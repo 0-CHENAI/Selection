@@ -12,6 +12,15 @@ function createActivity(overrides: Partial<ActivityItem>): ActivityItem {
 }
 
 describe('getActiveTurnPreview', () => {
+  it('keeps the latest step title when native answer streaming begins', () => {
+    const activities = [
+      createActivity({ intent: '列出知识库', timestamp: 1 }),
+      createActivity({ intent: '查看设计规范文件夹', timestamp: 2 }),
+    ]
+    expect(getActiveTurnPreview(activities, 'streaming'))
+      .toBe(getActiveTurnPreview(activities, 'tool_active'))
+    expect(getActiveTurnPreview(activities, 'streaming')).toBe('查看设计规范文件夹')
+  })
   it('过程正文不会覆盖该轮已有的语义标题（#141）', () => {
     const activities = [
       createActivity({
@@ -84,7 +93,7 @@ describe('getActiveTurnPreview', () => {
       .toBe('正在压缩上下文')
   })
 
-  it('完成态和最终回复流式阶段不再使用活动进展标题', () => {
+  it('does not use raw commentary as the streaming step title', () => {
     const activities = [
       createActivity({
         type: 'intermediate',

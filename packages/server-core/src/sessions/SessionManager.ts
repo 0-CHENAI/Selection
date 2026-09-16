@@ -4094,7 +4094,7 @@ export class SessionManager implements ISessionManager {
         // Claude-specific
         isHeadless: !AGENT_FLAGS.defaultModesEnabled,
         skipConfigWatcher: true, // Server owns workspace-level ConfigWatcher — don't duplicate in agents
-        explicitAnswerDelivery: !managed.parentSessionId && !managed.taskSlug && (!managed.systemPromptPreset || managed.systemPromptPreset === 'default'),
+        explicitAnswerDelivery: connection?.answerDelivery !== 'streaming' && !managed.parentSessionId && !managed.taskSlug && (!managed.systemPromptPreset || managed.systemPromptPreset === 'default'),
         systemPromptPreset: managed.systemPromptPreset,
         debugMode: _platform?.isDebugMode ? { enabled: true, logFilePath: _platform.getLogFilePath?.() } : undefined,
         // Image resize callback — prevents oversized images from entering conversation history
@@ -6972,7 +6972,10 @@ export class SessionManager implements ISessionManager {
       }
       return
     }
-    if (agent.configureAnswerDelivery && !managed.parentSessionId && !managed.taskSlug && (!managed.systemPromptPreset || managed.systemPromptPreset === 'default')) {
+    const nativeTextAnswers = managed.llmConnection
+      ? getLlmConnection(managed.llmConnection)?.answerDelivery === 'streaming'
+      : false
+    if (!nativeTextAnswers && agent.configureAnswerDelivery && !managed.parentSessionId && !managed.taskSlug && (!managed.systemPromptPreset || managed.systemPromptPreset === 'default')) {
       const continuingAnswer = isUserTaskContinuation || (options?.hidden && managed.orchestrationStatus === 'running')
       const owner = continuingAnswer
         ? managed.messages.findLast(m => m.role === 'user' && !m.hidden && !m.isQueued) ?? userMessage
@@ -7468,9 +7471,13 @@ export class SessionManager implements ISessionManager {
     let barrier: Promise<void> | undefined
     let reviewer: AgentInstance | undefined
     const busyTools = new Set<string>()
+    // A claimed source continuation retains its slot for duplicate-RPC dedup.
+    // That slot belongs to this execution; only a newly scheduled retry should
+    // stop it. Otherwise the continuation exits before calling agent.chat().
+    const claimedSourceRetry = managed.autoRetryPending?.committed ? managed.autoRetryPending : undefined
     const active = () => !this.progressShuttingDown && managed.isProcessing && !managed.stopRequested && !managed.deleting
       && managed.processingGeneration === generation && !managed.answerDelivery?.committedMessageId
-      && !managed.authRetryInProgress && !managed.autoRetryPending
+      && !managed.authRetryInProgress && (!managed.autoRetryPending || managed.autoRetryPending === claimedSourceRetry)
     const snapshot = (): ProgressSnapshot => {
       const run = this.taskRunnerLookup?.(managed.workspace.id)?.progressContext(managed.id)
       const waiting = !modelInFlight && (managed.orchestrationAggregation?.phase === 'waiting-workers' || run?.status === 'waiting-coordinator')

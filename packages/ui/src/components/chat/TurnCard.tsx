@@ -618,9 +618,6 @@ function getPreviewText(
   intent: string | undefined,
   turnPhase: TurnPhase,
 ): string {
-  // Final response streaming is the newest user-visible phase.
-  if (turnPhase === 'streaming') return i18n.t('turnCard.responding')
-
   // During an active turn, prefer the newest thinking/tool intent over the
   // turn-level intent captured when the turn was first created. The latter is
   // intentionally stable and otherwise leaves the title stuck on step one.
@@ -660,6 +657,10 @@ function getPreviewText(
       : ''
     return `${firstTask.toolInput.description as string}${errorSuffix}`
   }
+
+  // Response generation must not replace the work-chain's descriptive title.
+  // Use a generic status only when no activity provides a meaningful label.
+  if (turnPhase === 'streaming') return i18n.t('turnCard.responding')
 
   // When complete, show summary (badge already shows count)
   if (turnPhase === 'complete') {

@@ -2704,6 +2704,7 @@ export function updateLlmConnection(slug: string, updates: Partial<Omit<LlmConne
     createdAt: updates.createdAt ?? existing.createdAt,
     // Optional fields from updates or existing
     baseUrl: updates.baseUrl !== undefined ? updates.baseUrl : existing.baseUrl,
+    answerDelivery: updates.answerDelivery ?? existing.answerDelivery,
     models: updates.models !== undefined ? updates.models : existing.models,
     defaultModel: updates.defaultModel !== undefined ? updates.defaultModel : existing.defaultModel,
     modelSelectionMode: updates.modelSelectionMode !== undefined ? updates.modelSelectionMode : existing.modelSelectionMode,
