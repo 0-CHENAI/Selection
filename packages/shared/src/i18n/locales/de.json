@@ -432,7 +432,6 @@
   "chat.workflowAgentsDone_other": "{{count}} Agenten",
   "chat.workingDirectory": "Arbeitsverzeichnis",
   "chatInput.placeholder.focusMode": "{{key}} + . für Fokusmodus drücken",
-  "chatInput.placeholder.labels": "# eingeben, um Labels auf diese Unterhaltung anzuwenden",
   "chatInput.placeholder.mention": "@ eingeben, um Dateien, Ordner oder Skills zu erwähnen",
   "chatInput.placeholder.newLine": "Shift + Return für eine neue Zeile drücken",
   "chatInput.placeholder.shiftTab": "Shift + Tab verwenden, um zwischen Erkunden und Ausführen zu wechseln",
