@@ -1569,10 +1569,10 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
     const items: ConversationNavigationItem[] = []
     allTurns.forEach((turn, index) => {
       if (turn.type === 'user') {
-        items.push({ key: getTurnKey(turn), index, title: turn.message.content.slice(0, 240), preview: '' })
+        items.push({ key: getTurnKey(turn), index, title: turn.message.content, badges: turn.message.badges, preview: '' })
       } else if (turn.type === 'assistant' && turn.response?.text && items.length) {
         const item = items[items.length - 1]!
-        item.preview = (item.preview + ' ' + turn.response.text).trim().slice(0, 400)
+        item.preview = (item.preview + '\n' + turn.response.text).trim()
       }
     })
     return items
@@ -1717,8 +1717,10 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
           <div className="flex flex-1 flex-col min-h-0 min-w-0 relative z-10">
           {/* Center the rail across the conversation, including the composer. */}
             <ConversationNavigation key={session.id} items={navigationItems} viewportRef={scrollViewportRef} turnRefs={turnRefs} onNavigate={navigateToRecord} />
+          <div className={cn("grid flex-1 min-h-0 min-w-0", navigationItems.length > 0 && "grid-cols-[2rem_minmax(0,1fr)]")}>
+          <div className={cn("flex flex-col min-h-0 min-w-0", navigationItems.length > 0 && "col-start-2")}>
           {/* === MESSAGES AREA: Scrollable list of message bubbles === */}
-          <div className={cn("relative flex-1 min-h-0", navigationItems.length > 0 && "ml-8")}>
+          <div className="relative flex-1 min-h-0">
             {showNewSessionBrand && <NewSessionBrand />}
             {/* Mask wrapper - fades content at top and bottom over transparent/image backgrounds */}
             <div
@@ -2215,6 +2217,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
           {/* === INPUT CONTAINER: FreeForm or Structured Input === */}
           {(!hideComposer || pendingPermission || pendingCredential) && (
           <ChatInputZone
+            className={compactMode ? "px-3" : "px-5 @xs/panel:px-5"}
             compactMode={compactMode}
             permissionMode={permissionMode}
             onPermissionModeChange={onPermissionModeChange}
@@ -2279,6 +2282,8 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
             }}
           />
           )}
+          </div>
+          </div>
           </div>
         </div>
       ) : null}

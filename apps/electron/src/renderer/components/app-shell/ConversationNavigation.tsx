@@ -1,12 +1,15 @@
 import * as React from 'react'
 import * as Tooltip from '@radix-ui/react-tooltip'
 import { useTranslation } from 'react-i18next'
+import { renderContentWithBadges, markdownToPlainText } from '@craft-agent/ui'
+import type { ContentBadge } from '@craft-agent/core'
 import { cn } from '@/lib/utils'
 
 export interface ConversationNavigationItem {
   key: string
   index: number
   title: string
+  badges?: ContentBadge[]
   preview: string
 }
 
@@ -75,12 +78,13 @@ export function ConversationNavigation({ items, viewportRef, turnRefs, onNavigat
 
   return (
     <Tooltip.Provider delayDuration={180} disableHoverableContent>
+      <div className="pointer-events-none absolute left-0 top-[calc(20%-12px)] bottom-[calc(20%+12px)] flex w-8 min-w-8 items-center">
       <nav ref={railRef} aria-label={t('chat.recordNavigation')}
-        className="absolute left-0 top-[calc(50%-12px)] -translate-y-1/2 max-h-[calc(100%-4rem)] w-8 overflow-y-auto overscroll-contain [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+        className="pointer-events-auto relative max-h-full w-8 min-w-8 overflow-y-auto overscroll-contain [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
         {items.map((item, index) => (
           <Tooltip.Root key={item.key}>
             <Tooltip.Trigger asChild>
-              <button type="button" aria-label={t('chat.goToRecord', { number: index + 1, title: item.title })}
+              <button type="button" aria-label={t('chat.goToRecord', { number: index + 1, title: markdownToPlainText(item.title) })}
                 aria-current={activeKey === item.key ? 'step' : undefined}
                 onClick={() => onNavigate(item)}
                 className="group flex h-3 w-8 items-center pl-2 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring">
@@ -90,14 +94,21 @@ export function ConversationNavigation({ items, viewportRef, turnRefs, onNavigat
             </Tooltip.Trigger>
             <Tooltip.Portal>
               <Tooltip.Content side="right" sideOffset={12} collisionPadding={16}
-                className="z-dropdown w-80 max-w-[calc(100vw-4rem)] rounded-2xl border border-border bg-background p-4 text-sm text-foreground shadow-modal-small">
-                <div className="line-clamp-2 break-words font-medium">{item.title || t('chat.recordFallback', { number: index + 1 })}</div>
-                {item.preview && <div className="mt-2 line-clamp-3 break-words text-muted-foreground">{item.preview}</div>}
+                className="z-dropdown w-80 max-w-[min(calc(100vw-4rem),var(--radix-tooltip-content-available-width))] max-h-[var(--radix-tooltip-content-available-height)] overflow-hidden rounded-2xl border border-border bg-background p-4 text-sm text-foreground shadow-modal-small">
+                <div className="min-w-0 truncate font-medium [&_p]:inline [&_p]:whitespace-nowrap [&_div]:inline [&_pre]:inline [&_img]:max-h-5">
+                  {item.title ? renderContentWithBadges(item.title, item.badges ?? []) : t('chat.recordFallback', { number: index + 1 })}
+                </div>
+                {item.preview && (
+                  <div className="mt-2 line-clamp-3 [overflow-wrap:anywhere] text-muted-foreground">
+                    {markdownToPlainText(item.preview).replace(/\s+/g, ' ')}
+                  </div>
+                )}
               </Tooltip.Content>
             </Tooltip.Portal>
           </Tooltip.Root>
         ))}
       </nav>
+      </div>
     </Tooltip.Provider>
   )
 }

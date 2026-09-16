@@ -306,3 +306,6 @@ export {
   Icon_Inbox,
   type IconProps,
 } from './components/icons'
+
+export { renderContentWithBadges } from './components/chat/UserMessageBubble'
+export { markdownToPlainText } from './components/chat/markdown-to-plain-text'

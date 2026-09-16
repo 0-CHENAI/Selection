@@ -223,7 +223,7 @@ function InlineFileBadge({
  * File badges (type='file') render inline as clickable badges:
  * - Used for plan execution messages where file path appears inline with text
  */
-function renderContentWithBadges(
+export function renderContentWithBadges(
   content: string,
   badges: ContentBadge[],
   onUrlClick?: (url: string) => void,
