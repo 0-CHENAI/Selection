@@ -1,6 +1,10 @@
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { describe, expect, it } from 'bun:test'
 import type { ContentBadge } from '@craft-agent/core'
 import { getConversationNavigationTitlePreview } from '../conversation-navigation-preview'
+
+const navigationSource = readFileSync(join(import.meta.dir, '../ConversationNavigation.tsx'), 'utf8')
 
 function badge(overrides: Partial<ContentBadge> = {}): ContentBadge {
   return {
@@ -14,6 +18,10 @@ function badge(overrides: Partial<ContentBadge> = {}): ContentBadge {
 }
 
 describe('conversation navigation title preview', () => {
+  it('visually clamps the user message to one line with an ellipsis', () => {
+    expect(navigationSource).toContain('min-w-0 line-clamp-1 font-medium')
+  })
+
   it('keeps only the first line of a multi-line user message', () => {
     const preview = getConversationNavigationTitlePreview(
       'Please generate an architecture diagram. Requirements:\n\n1. Create a complete HTML file.\n2. Save it.',

@@ -99,7 +99,7 @@ export function ConversationNavigation({ items, viewportRef, turnRefs, onNavigat
               <Tooltip.Portal>
                 <Tooltip.Content side="right" sideOffset={12} collisionPadding={16}
                   className="z-dropdown w-80 max-w-[min(calc(100vw-4rem),var(--radix-tooltip-content-available-width))] max-h-[var(--radix-tooltip-content-available-height)] overflow-hidden rounded-2xl border border-border bg-background p-4 text-sm text-foreground shadow-modal-small">
-                  <div className="min-w-0 truncate font-medium [&_p]:inline [&_p]:whitespace-nowrap [&_div]:inline [&_pre]:inline [&_img]:max-h-5">
+                  <div className="min-w-0 line-clamp-1 font-medium [&_p]:inline [&_div]:inline [&_pre]:inline [&_img]:max-h-5">
                     {titlePreview.content ? renderContentWithBadges(titlePreview.content, titlePreview.badges) : t('chat.recordFallback', { number: index + 1 })}
                   </div>
                   {item.preview && (
