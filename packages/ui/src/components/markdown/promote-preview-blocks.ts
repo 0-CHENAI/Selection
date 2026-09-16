@@ -57,7 +57,11 @@ export function promoteBarePreviewBlocks(text: string): string {
   let match: RegExpExecArray | null
 
   while ((match = nameRe.exec(text)) !== null) {
-    const keywordStart = match.index + match[1].length
+    const prefix = match[1] ?? ''
+    const name = match[2]
+    if (!name) continue
+
+    const keywordStart = match.index + prefix.length
     if (fences.some((range) => keywordStart >= range.start && keywordStart < range.end)) {
       continue
     }
@@ -67,7 +71,7 @@ export function promoteBarePreviewBlocks(text: string): string {
     if (!json || !parseMarkdownPreviewSpec(json)) continue
 
     result += text.slice(lastIndex, keywordStart)
-    result += `\`\`\`${match[2]}\n${json}\n\`\`\``
+    result += `\`\`\`${name}\n${json}\n\`\`\``
     lastIndex = braceStart + json.length
     nameRe.lastIndex = lastIndex
   }
