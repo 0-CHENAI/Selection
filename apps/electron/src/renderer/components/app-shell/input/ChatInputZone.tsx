@@ -17,7 +17,7 @@ interface ChatInputZoneProps {
   permissionMode?: PermissionMode
   onPermissionModeChange?: (mode: PermissionMode) => void
   tasks?: BackgroundTask[]
-  sessionId: string
+  sessionId?: string
   sessionFolderPath?: string
   onKillTask?: (taskId: string) => void
   onOpenSession?: (sessionId: string) => void
@@ -64,7 +64,7 @@ export function ChatInputZone({
 }: ChatInputZoneProps) {
   const [autoOpenLabelId, setAutoOpenLabelId] = React.useState<string | null>(null)
   const shouldShowOptionBadges = showOptionBadges ?? !compactMode
-  const inputResetKey = `${sessionId}::${inputProps.structuredInput?.type ?? 'freeform'}`
+  const inputResetKey = `${sessionId ?? 'draft'}::${inputProps.structuredInput?.type ?? 'freeform'}`
 
   const handleClearDraft = React.useCallback(() => {
     inputProps.onInputChange?.('')
@@ -119,11 +119,13 @@ export function ChatInputZone({
         />
       )}
 
-      <QueuedMessagePanel
-        sessionId={sessionId}
-        messages={queuedMessages}
-        compactMode={compactMode}
-      />
+      {sessionId && (
+        <QueuedMessagePanel
+          sessionId={sessionId}
+          messages={queuedMessages}
+          compactMode={compactMode}
+        />
+      )}
 
       <InputErrorBoundary
         sessionId={sessionId}

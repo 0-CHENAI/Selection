@@ -1,5 +1,17 @@
 import { expect, test } from 'bun:test'
-import { createDraftSubmission } from './draft-session'
+import { createDraftDisplaySession, createDraftSubmission, DRAFT_SESSION_OPTIONS_ID } from './draft-session'
+
+test('draft display session keeps a stable id so ChatDisplay can stay mounted', () => {
+  const session = createDraftDisplaySession({
+    workspaceId: 'ws',
+    model: 'laufry',
+    llmConnection: 'default',
+  })
+  expect(session.id).toBe(DRAFT_SESSION_OPTIONS_ID)
+  expect(session.messages).toEqual([])
+  expect(session.model).toBe('laufry')
+})
+
 
 test('draft is lazy and concurrent submissions create and send only once', async () => {
   let creates = 0

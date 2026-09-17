@@ -230,6 +230,12 @@ interface ChatDisplayProps {
   onWorkingDirectoryChange?: (path: string) => void
   /** Session folder path (for "Reset to Session Root" option) */
   sessionFolderPath?: string
+  /**
+   * Session id bound to the composer (files, queue, drafts).
+   * Pass null on the pre-create draft so the input stays mounted
+   * without treating the placeholder session as real.
+   */
+  composerSessionId?: string | null
   // Lazy loading
   /** When true, messages are still loading - show spinner in messages area */
   messagesLoading?: boolean
@@ -520,6 +526,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
   workingDirectory,
   onWorkingDirectoryChange,
   sessionFolderPath,
+  composerSessionId,
   // Lazy loading
   messagesLoading = false,
   messagesLoadError,
@@ -2234,7 +2241,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
             permissionMode={permissionMode}
             onPermissionModeChange={onPermissionModeChange}
             tasks={backgroundTasks}
-            sessionId={session.id}
+            sessionId={composerSessionId !== undefined ? composerSessionId ?? undefined : session.id}
             sessionFolderPath={sessionFolderPath}
             onKillTask={(taskId) => killTask(taskId, backgroundTasks.find(t => t.id === taskId)?.type === 'shell' ? 'shell' : 'agent')}
             onOpenSession={handleOpenTaskSession}

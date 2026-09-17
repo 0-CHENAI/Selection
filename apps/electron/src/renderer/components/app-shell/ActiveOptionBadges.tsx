@@ -330,7 +330,23 @@ function FilesPopoverButton({ sessionId, sessionFolderPath }: { sessionId?: stri
   const { t } = useTranslation()
   const [open, setOpen] = React.useState(false)
 
-  if (!sessionId) return null
+  if (!sessionId) {
+    return (
+      <button
+        type="button"
+        disabled
+        className={cn(
+          "h-[30px] pl-[12px] pr-[14px] text-xs font-medium rounded-[8px] flex items-center gap-1.5 shrink-0",
+          "outline-none select-none shadow-minimal",
+          "bg-[color-mix(in_srgb,var(--background)_97%,var(--foreground)_3%)]",
+          "text-foreground/80 disabled:cursor-default disabled:opacity-100",
+        )}
+      >
+        <FolderOpen className="h-3.5 w-3.5 shrink-0" />
+        <span className="whitespace-nowrap">{t("chat.sessionInfo")}</span>
+      </button>
+    )
+  }
 
   return (
     <SessionInfoPopover
