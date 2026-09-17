@@ -74,7 +74,7 @@ describe('task orchestration edit entry (#282)', () => {
     expect(chatSource).toContain('compact={!!isCompactMode}')
     expect(chatSource).toContain('onEdit={handleEditTask}')
     const handler = chatSource.slice(chatSource.indexOf('const handleEditTask ='), chatSource.indexOf('const handlePreviewOrchestrationNode ='))
-    expect(handler).toContain('if (!taskSlug) return')
+    expect(handler).toContain('if (!taskSlug || !sessionId) return')
     expect(handler).toContain("mode: 'edit'")
     expect(handler).toContain('sessionId,')
     expect(handler).toContain('taskSlug,')

@@ -2,7 +2,7 @@
  * MainContentPanel - Right panel component for displaying content
  *
  * Renders content based on the unified NavigationState:
- * - Chats navigator: ChatPage for selected session, or empty state
+ * - Chats navigator: ChatPage for the selected session, or the same page in draft mode
  * - Sources navigator: SourceInfoPage for selected source, or empty state
  * - Settings navigator: Settings, Preferences, or Shortcuts page
  *
@@ -35,7 +35,6 @@ import {
 import { useSessionSelection, useIsMultiSelectActive, useSelectionCount } from '@/hooks/useSession'
 import { sourceSelection, skillSelection, automationSelection } from '@/hooks/useEntitySelection'
 import { SourceInfoPage, ChatPage } from '@/pages'
-import { DraftChatPage } from '@/pages/DraftChatPage'
 import SkillInfoPage from '@/pages/SkillInfoPage'
 import { getSettingsPageComponent } from '@/pages/settings/settings-pages'
 import { isVisibleSettingsSubpage } from '../../../shared/settings-registry'
@@ -79,7 +78,6 @@ export function MainContentPanel({
     automationTestResults,
     getAutomationHistory,
     activeSessionWorkingDirectory,
-    orchestrationProjectId,
   } = useAppShellContext()
 
   // Session multi-select state
@@ -313,7 +311,7 @@ export function MainContentPanel({
     )
   }
 
-  // Chats navigator - show chat, multi-select panel, or empty state
+  // Chats navigator - show chat, multi-select panel, or draft composer
   if (isSessionsNavigation(navState)) {
     // Board route: full-width new-orchestration editor (#261)
     if (navState.viewMode === 'board') {
@@ -336,17 +334,9 @@ export function MainContentPanel({
       )
     }
 
-    if (navState.details) {
-      return wrapWithStoplight(
-        <Panel variant="grow" className={className}>
-          <ChatPage sessionId={navState.details.sessionId} />
-        </Panel>
-      )
-    }
-    // No session selected - empty state
     return wrapWithStoplight(
       <Panel variant="grow" className={className}>
-        <DraftChatPage key={`${activeWorkspaceId}:${orchestrationProjectId ?? ''}`} />
+        <ChatPage sessionId={navState.details?.sessionId ?? null} />
       </Panel>
     )
   }
