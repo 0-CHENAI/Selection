@@ -1,6 +1,6 @@
 import * as React from 'react'
 import { cn } from '@/lib/utils'
-import { CHAT_LAYOUT } from '@/config/layout'
+import { CHAT_CLASSES } from '@/config/layout'
 import { flattenLabels, type LabelConfig } from '@craft-agent/shared/labels'
 import type { PermissionMode } from '@craft-agent/shared/agent/modes'
 import type { SessionStatus } from '@/config/session-status-config'
@@ -85,8 +85,8 @@ export function ChatInputZone({
 
   return (
     <div className={cn(
-      CHAT_LAYOUT.maxWidth,
-      'mx-auto w-full mt-1',
+      CHAT_CLASSES.composerColumn,
+      'mt-1',
       compactMode ? 'px-2 pb-3' : 'px-3 @xs/panel:px-4 pb-4',
       className,
     )}>

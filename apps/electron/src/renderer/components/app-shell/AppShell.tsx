@@ -79,7 +79,7 @@ import { findLabelById, sortLabelsForDisplay } from "@craft-agent/shared/labels"
 import { resolveEntityColor } from "@craft-agent/shared/colors"
 import * as storage from "@/lib/local-storage"
 import { toast } from "sonner"
-import { navigate, routes } from "@/lib/navigate"
+import { draftSessionNavigateOptions, navigate, routes } from "@/lib/navigate"
 import {
   useNavigation,
   useNavigationState,
@@ -1569,18 +1569,7 @@ function AppShellContent({
     }
   }, [activeWorkspace?.id, navigate, t])
 
-  /**
-   * Resolve the current project's explicit context first, then fall back to
-   * the "inherit sole active filter" rule for session-list views. Only
-   * include-mode filters are candidates — an excluded status/label/project must
-   * never be inherited (#970). See resolveNewSessionParams.
-   */
-  const resolveNewSessionCreationParams = useCallback(
-    () => resolveNewSessionParams(listFilter, labelFilter, projectFilter, selectedProjectId),
-    [listFilter, labelFilter, projectFilter, selectedProjectId],
-  )
-
-  // Create a new chat and select it
+  // Show a local draft; the first submission creates the session.
   const handleNewChat = useCallback((newPanel: boolean = false) => {
     if (!activeWorkspace) return
 
@@ -1596,18 +1585,11 @@ function AppShellContent({
     setSearchActive(false)
     setSearchQuery('')
 
-    // Inherit sole-active filter into the new session when unambiguous.
-    const inherited = resolveNewSessionCreationParams()
-
-    // Delegate to NavigationContext which handles session creation
-    navigate(
-      routes.action.newSession(inherited ?? undefined),
-      newPanel ? { newPanel: true, targetLaneId: 'main' } : undefined
-    )
+    navigate(routes.view.allSessions(), draftSessionNavigateOptions(newPanel))
 
     // Focus the chat input after navigation completes
     setTimeout(() => focusZone('chat', { intent: 'programmatic' }), 50)
-  }, [activeWorkspace, focusZone, resolveNewSessionCreationParams, selectedProjectId, selectedProjectSlug, t])
+  }, [activeWorkspace, focusZone, selectedProjectId, selectedProjectSlug, t])
 
   // Delete Source - simplified since agents system is removed
   const handleDeleteSource = useCallback(async (sourceSlug: string) => {

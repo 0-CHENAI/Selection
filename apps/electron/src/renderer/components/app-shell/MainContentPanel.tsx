@@ -35,6 +35,7 @@ import {
 import { useSessionSelection, useIsMultiSelectActive, useSelectionCount } from '@/hooks/useSession'
 import { sourceSelection, skillSelection, automationSelection } from '@/hooks/useEntitySelection'
 import { SourceInfoPage, ChatPage } from '@/pages'
+import { DraftChatPage } from '@/pages/DraftChatPage'
 import SkillInfoPage from '@/pages/SkillInfoPage'
 import { getSettingsPageComponent } from '@/pages/settings/settings-pages'
 import { isVisibleSettingsSubpage } from '../../../shared/settings-registry'
@@ -78,6 +79,7 @@ export function MainContentPanel({
     automationTestResults,
     getAutomationHistory,
     activeSessionWorkingDirectory,
+    orchestrationProjectId,
   } = useAppShellContext()
 
   // Session multi-select state
@@ -344,9 +346,7 @@ export function MainContentPanel({
     // No session selected - empty state
     return wrapWithStoplight(
       <Panel variant="grow" className={className}>
-        <div className="flex items-center justify-center h-full text-muted-foreground">
-          <p className="text-sm">{t("session.noSessionSelected")}</p>
-        </div>
+        <DraftChatPage key={`${activeWorkspaceId}:${orchestrationProjectId ?? ''}`} />
       </Panel>
     )
   }

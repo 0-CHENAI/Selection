@@ -17,7 +17,7 @@ import { motion, AnimatePresence, useReducedMotion } from "motion/react"
 import { toast } from "sonner"
 
 import { ConversationNavigation, type ConversationNavigationItem } from "./ConversationNavigation"
-import { shouldShowConversationNavigation } from "./conversation-navigation"
+import { shouldReserveConversationNavigationColumn, shouldShowConversationNavigation } from "./conversation-navigation"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { cn } from "@/lib/utils"
 import { appendRestoredInput, getRestorableStoppedPrompt } from "@/lib/input-text"
@@ -76,7 +76,7 @@ import { useNavigation } from "@/contexts/NavigationContext"
 import { useAppShellContext } from "@/context/AppShellContext"
 import { updateSessionAtom } from "@/atoms/sessions"
 import { navigate, routes } from "@/lib/navigate"
-import { CHAT_LAYOUT } from "@/config/layout"
+import { CHAT_CLASSES, CHAT_LAYOUT } from "@/config/layout"
 import { collectFileChangesFromActivities, getFirstFileChangeIdForActivity } from "@/lib/file-changes"
 import { shouldPreviewBackgroundTask } from "./background-task-chip"
 import { pickStoppableTaskRun } from "./kanban/orchestration-run-progress"
@@ -1717,6 +1717,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
     sessionBusy,
   })
   const showNavigationRail = shouldShowConversationNavigation(showRecordNavigation, navigationItems.length)
+  const reserveNavigationColumn = shouldReserveConversationNavigationColumn(showRecordNavigation)
 
   return (
     <div ref={zoneRef} className="flex h-full flex-col min-w-0" data-focus-zone="chat">
@@ -1728,8 +1729,8 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
             {showNavigationRail && (
               <ConversationNavigation key={session.id} items={navigationItems} viewportRef={scrollViewportRef} turnRefs={turnRefs} onNavigate={navigateToRecord} />
             )}
-          <div className={cn("grid flex-1 min-h-0 min-w-0", showNavigationRail && "grid-cols-[2rem_minmax(0,1fr)]")}>
-          <div className={cn("flex flex-col min-h-0 min-w-0", showNavigationRail && "col-start-2")}>
+          <div className={reserveNavigationColumn ? CHAT_CLASSES.recordRailGrid : "flex flex-1 min-h-0 min-w-0 flex-col"}>
+          <div className={reserveNavigationColumn ? CHAT_CLASSES.recordRailContent : "flex min-h-0 min-w-0 flex-col"}>
           {/* === MESSAGES AREA: Scrollable list of message bubbles === */}
           <div className="relative flex-1 min-h-0">
             {showNewSessionBrand && <NewSessionBrand />}

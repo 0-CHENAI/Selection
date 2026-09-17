@@ -49,7 +49,7 @@ import {
 } from '../../shared/route-parser'
 import { routes, type Route, type ViewRoute } from '../../shared/routes'
 import { parsePermissionMode } from '@craft-agent/shared/agent/mode-types'
-import { NAVIGATE_EVENT, type NavigateOptions } from '../lib/navigate'
+import { NAVIGATE_EVENT, navigateOptionsFromEventDetail, type NavigateEventDetail, type NavigateOptions } from '../lib/navigate'
 import { normalizePanelRouteForReconcile } from './navigation-reconcile'
 import {
   INITIAL_NAV_HISTORY,
@@ -871,6 +871,12 @@ export function NavigationProvider({
         return
       }
 
+      // Suppress auto-select before any panel mutation so new-panel drafts
+      // are not immediately resolved back to the last session.
+      if (options?.skipAutoSelect) {
+        suppressAutoSelectRef.current = true
+      }
+
       // For view routes with newPanel: push a panel using lane-aware routing.
       //
       // Important distinction:
@@ -891,11 +897,6 @@ export function NavigationProvider({
       // intentionally do NOT auto-redirect to the last-visited subpage; doing so
       // would defeat the compact-mode drill-in UX.
       const newNavState = parseRouteToNavigationState(route)
-
-      // Suppress auto-select effect
-      if (options?.skipAutoSelect) {
-        suppressAutoSelectRef.current = true
-      }
 
       if (newNavState) {
         // Resolve auto-selection (pure — no side effects)
@@ -1147,10 +1148,10 @@ export function NavigationProvider({
 
   useEffect(() => {
     const handleNavigateEvent = (event: Event) => {
-      const customEvent = event as CustomEvent<{ route: Route; newPanel?: boolean; targetLaneId?: 'main' }>
+      const customEvent = event as CustomEvent<NavigateEventDetail>
       if (customEvent.detail?.route) {
-        const { route: r, newPanel, targetLaneId } = customEvent.detail
-        navigate(r, newPanel ? { newPanel, targetLaneId } : undefined)
+        const { route: r } = customEvent.detail
+        navigate(r, navigateOptionsFromEventDetail(customEvent.detail))
       }
     }
 
