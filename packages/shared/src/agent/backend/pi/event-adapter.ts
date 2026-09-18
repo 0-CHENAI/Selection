@@ -512,7 +512,10 @@ export class PiEventAdapter extends BaseEventAdapter {
 
         // A failed/truncated terminal message may carry no provider error text.
         // Preserve its terminal meaning instead of degrading to an empty reply.
-        if (msg.stopReason === 'error' || msg.stopReason === 'aborted' || msg.stopReason === 'length' || msg.stopReason === 'max_tokens') {
+        // A user stop is abort-by-design, not an unexpected stream failure.
+        const userStopped = msg.stopReason === 'aborted'
+          && /aborted by the user/i.test(msg.errorMessage ?? '')
+        if (!userStopped && (msg.stopReason === 'error' || msg.stopReason === 'aborted' || msg.stopReason === 'length' || msg.stopReason === 'max_tokens')) {
           yield { type: 'typed_error', error: createTypedError(msg.stopReason === 'error' || msg.stopReason === 'aborted' ? 'stream_interrupted' : 'output_limit', {
             details: transportDetails,
           }) };
