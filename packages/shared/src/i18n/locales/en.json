@@ -2112,6 +2112,7 @@
   "workspace.serverAuthToken": "Server authentication token",
   "workspace.underDefaultFolder": "under .selection folder",
   "apiSetup.supportedThinkingLevels": "Supported reasoning levels",
+  "apiSetup.thinkingLevelsUnchangedHint": "Leave unchanged to preserve existing model capabilities; select levels to override them.",
   "apiSetup.supportedThinkingLevelsHint": "Select the levels supported by this model. No levels selected means reasoning is unsupported.",
   "apiSetup.thinkingAutomatic": "Automatic (keep default capabilities)",
   "apiSetup.tokenInputError": "Enter {{min}}–{{max}} tokens; formats such as 128K and 500k are supported",

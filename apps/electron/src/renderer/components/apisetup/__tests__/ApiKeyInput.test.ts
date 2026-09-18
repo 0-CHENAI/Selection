@@ -224,3 +224,12 @@ it('persists explicit supported reasoning levels with an exact context limit', (
     contextWindow: 123456, maxTokens: 8192, supportedThinkingLevels: ['low', 'high'] }))
     .toMatchObject({ contextWindow: 123456, supportedThinkingLevels: ['low', 'high'], supportsThinking: true })
 })
+
+it('preserves unspecified thinking capability and distinguishes explicitly disabled thinking', () => {
+  const input = { id: 'legacy', supportsImages: false, contextWindow: 500000, maxTokens: 131072 }
+  const legacy = buildCustomEndpointModelSubmission(input)
+  expect(legacy).not.toHaveProperty('supportedThinkingLevels')
+  expect(legacy).not.toHaveProperty('supportsThinking')
+  expect(buildCustomEndpointModelSubmission({ ...input, supportedThinkingLevels: [] }))
+    .toMatchObject({ supportedThinkingLevels: [], supportsThinking: false })
+})

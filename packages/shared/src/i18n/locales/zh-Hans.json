@@ -2112,6 +2112,7 @@
   "workspace.serverAuthToken": "服务器认证令牌",
   "workspace.underDefaultFolder": ".selection 文件夹下",
   "apiSetup.supportedThinkingLevels": "支持的思考强度",
+  "apiSetup.thinkingLevelsUnchangedHint": "未修改时保留现有模型能力；勾选后按所选档位保存。",
   "apiSetup.supportedThinkingLevelsHint": "选择此模型实际支持的档位；不勾选任何档位表示不支持思考。",
   "apiSetup.thinkingAutomatic": "自动（保持默认能力）",
   "apiSetup.tokenInputError": "请输入 {{min}}–{{max}} tokens，支持 128K、500k 等写法",

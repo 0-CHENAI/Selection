@@ -943,7 +943,7 @@ export default function AiSettingsPage() {
       activePreset,
       models: modelIds,
       modelImageCaps,
-      modelThinkingLevels: Object.fromEntries((connection.models ?? []).flatMap(m => typeof m !== 'string' && m.supportedThinkingLevels !== undefined ? [[m.id, m.supportedThinkingLevels]] : [])),
+      modelThinkingLevels: Object.fromEntries((connection.models ?? []).flatMap(m => typeof m !== 'string' && (m.supportedThinkingLevels !== undefined || m.supportsThinking !== undefined) ? [[m.id, m.supportedThinkingLevels ?? (m.supportsThinking ? THINKING_LEVELS.map(level => level.id) : [])]] : [])),
       modelContextWindows,
       modelMaxTokens,
       customApi: connection.customEndpoint?.api,

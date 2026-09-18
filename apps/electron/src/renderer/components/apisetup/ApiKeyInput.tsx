@@ -56,14 +56,12 @@ import {
   resolveCatalogOrOverrideLimit,
   resolveModelLimitSource,
   resolveModelLimitsStatus,
-  resolveMaxTokensForContext,
   resolveRemoteModelSupportsImages,
   setHasModelId,
   toggleSelectedModel,
   type ModelLimitSource,
   type RemoteModel,
 } from "./fetch-openai-models.ts"
-import { formatModelTokenLimit } from '@/components/app-shell/input/model-picker-helpers'
 
 import {
   DEFAULT_CUSTOM_CONTEXT_WINDOW,
@@ -377,7 +375,6 @@ export function ApiKeyInput({
   const [editedContextIds, setEditedContextIds] = useState<Set<string>>(() => new Set())
   const [editedMaxTokenIds, setEditedMaxTokenIds] = useState<Set<string>>(() => new Set())
   const [limitError, setLimitError] = useState<string | null>(null)
-  const [limitNotice, setLimitNotice] = useState<string | null>(null)
 
   const isDisabled = disabled || status === 'validating'
 
@@ -540,7 +537,6 @@ export function ApiKeyInput({
     }
     setModelError(null)
     setLimitError(null)
-    setLimitNotice(null)
     // Pre-fill recommended model for Ollama; clear for all others
     // (Default provider presets hide the field entirely, others default to provider model IDs when empty)
     if (preset.key === 'ollama') {
@@ -720,7 +716,7 @@ export function ApiKeyInput({
           name: remote?.name,
           includeDisplayNames: isOrderPreset,
           supportsImages,
-          supportedThinkingLevels: modelThinkingLevels[id] ?? [],
+          supportedThinkingLevels: modelThinkingLevels[id] ?? (initialValues ? undefined : []),
           contextWindow,
           maxTokens,
         })
@@ -1123,7 +1119,6 @@ export function ApiKeyInput({
             setConnectionDefaultModel((prev) => toggleSelectedModel(prev, id))
             setModelError(null)
             setLimitError(null)
-            setLimitNotice(null)
           }}
           onRetry={() => setRemoteModelsNonce((n) => n + 1)}
         />
@@ -1148,7 +1143,6 @@ export function ApiKeyInput({
                 setConnectionDefaultModel(e.target.value)
                 setModelError(null)
                 setLimitError(null)
-                setLimitNotice(null)
               }}
               placeholder={
                 activePreset === 'order-openai'
@@ -1213,17 +1207,8 @@ export function ApiKeyInput({
                       onChange={(next) => {
                         setEditedContextIds((prev) => new Set(prev).add(id))
                         setModelContextWindows((prev) => ({ ...prev, [id]: next }))
-                        const adjustedMax = resolveMaxTokensForContext(maxTokens, next)
-                        if (adjustedMax !== maxTokens) {
-                          setEditedMaxTokenIds((prev) => new Set(prev).add(id))
-                          setModelMaxTokens((prev) => ({ ...prev, [id]: adjustedMax }))
-                          setLimitNotice(t('apiSetup.modelLimitAdjusted', {
-                            model: remote?.name ?? id,
-                            value: formatModelTokenLimit(adjustedMax),
-                          }))
-                        } else {
-                          setLimitNotice(null)
-                        }
+                        // Do not mutate output capacity while the user is typing
+                        // a context limit. Validate both fields on submission.
                         setLimitError(null)
                       }}
                     />
@@ -1239,7 +1224,6 @@ export function ApiKeyInput({
                         setEditedMaxTokenIds((prev) => new Set(prev).add(id))
                         setModelMaxTokens((prev) => ({ ...prev, [id]: next }))
                         setLimitError(null)
-                        setLimitNotice(null)
                       }}
                     />
                 </div>
@@ -1252,7 +1236,7 @@ export function ApiKeyInput({
 
                   <fieldset className="space-y-2" disabled={isDisabled}>
                     <legend className="text-xs">{t('apiSetup.supportedThinkingLevels')}</legend>
-                    <p className="text-xs text-muted-foreground">{t('apiSetup.supportedThinkingLevelsHint')}</p>
+                    <p className="text-xs text-muted-foreground">{t(initialValues && modelThinkingLevels[id] === undefined ? 'apiSetup.thinkingLevelsUnchangedHint' : 'apiSetup.supportedThinkingLevelsHint')}</p>
 
                     <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
                       {THINKING_LEVELS.map(level => <label key={level.id} className={cn("relative flex cursor-pointer items-center gap-2 rounded-lg border px-3 py-2.5 text-xs transition-colors focus-within:ring-2 focus-within:ring-ring", modelThinkingLevels[id]?.includes(level.id) ? "border-primary bg-primary/5 text-primary" : "border-border hover:bg-foreground/5")}>
@@ -1271,9 +1255,6 @@ export function ApiKeyInput({
           })}
           {limitError && (
             <p className="text-xs text-destructive" role="alert">{limitError}</p>
-          )}
-          {limitNotice && !limitError && (
-            <p className="text-xs text-foreground/50" role="status">{limitNotice}</p>
           )}
         </div>
       )}
