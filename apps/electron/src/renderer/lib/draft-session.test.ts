@@ -1,5 +1,11 @@
 import { expect, test } from 'bun:test'
-import { createDraftDisplaySession, createDraftSubmission, DRAFT_SESSION_OPTIONS_ID } from './draft-session'
+import { createDraftDisplaySession, createDraftSubmission, DRAFT_SESSION_OPTIONS_ID, isDraftSessionOptionsId } from './draft-session'
+
+test('draft option ids are not real sessions', () => {
+  expect(isDraftSessionOptionsId(DRAFT_SESSION_OPTIONS_ID)).toBe(true)
+  expect(isDraftSessionOptionsId('session-1')).toBe(false)
+  expect(isDraftSessionOptionsId(undefined)).toBe(false)
+})
 
 test('draft display session keeps a stable id so ChatDisplay can stay mounted', () => {
   const session = createDraftDisplaySession({
