@@ -898,6 +898,7 @@ interface ManagedSession {
   streamingText: string
   /** Runtime identity for materializing a stream that ends without text_complete. */
   streamingTurnId?: string
+  streamingPresentationProtocol?: 'native' | 'marker-v1' | 'legacy'
   /** Timestamp of the first delta, preserved if the stream is materialized after an error. */
   streamingStartedAt?: number
   // Incremented each time a new message starts processing.
@@ -1396,6 +1397,7 @@ const DELTA_BATCH_INTERVAL_MS = 50  // Flush batched deltas every 50ms
 interface PendingDelta {
   delta: string
   phase: TextStreamPhase
+  presentationProtocol?: 'native' | 'marker-v1' | 'legacy'
   turnId?: string
 }
 
@@ -4094,6 +4096,7 @@ export class SessionManager implements ISessionManager {
         // Claude-specific
         isHeadless: !AGENT_FLAGS.defaultModesEnabled,
         skipConfigWatcher: true, // Server owns workspace-level ConfigWatcher — don't duplicate in agents
+        presentationProtocol: connection?.answerDelivery === 'streaming' && !managed.parentSessionId && !managed.taskSlug && (!managed.systemPromptPreset || managed.systemPromptPreset === 'default') ? (connection.presentationProtocol ?? 'legacy') : 'legacy',
         explicitAnswerDelivery: connection?.answerDelivery !== 'streaming' && !managed.parentSessionId && !managed.taskSlug && (!managed.systemPromptPreset || managed.systemPromptPreset === 'default'),
         systemPromptPreset: managed.systemPromptPreset,
         debugMode: _platform?.isDebugMode ? { enabled: true, logFilePath: _platform.getLogFilePath?.() } : undefined,
@@ -6975,6 +6978,9 @@ export class SessionManager implements ISessionManager {
     const nativeTextAnswers = managed.llmConnection
       ? getLlmConnection(managed.llmConnection)?.answerDelivery === 'streaming'
       : false
+    agent.configurePresentationProtocol?.(nativeTextAnswers && !managed.parentSessionId && !managed.taskSlug
+      && (!managed.systemPromptPreset || managed.systemPromptPreset === 'default')
+      ? (getLlmConnection(managed.llmConnection!)?.presentationProtocol ?? 'legacy') : 'legacy')
     if (!nativeTextAnswers && agent.configureAnswerDelivery && !managed.parentSessionId && !managed.taskSlug && (!managed.systemPromptPreset || managed.systemPromptPreset === 'default')) {
       const continuingAnswer = isUserTaskContinuation || (options?.hidden && managed.orchestrationStatus === 'running')
       const owner = continuingAnswer
@@ -10914,6 +10920,7 @@ export class SessionManager implements ISessionManager {
     if (!managed.streamingText) return
 
     const content = managed.streamingText
+    const presentationProtocol = managed.streamingPresentationProtocol
     const turnId = managed.streamingTurnId
       ?? this.pendingDeltas.get(managed.id)?.turnId
     this.flushDelta(managed.id, managed.workspace.id)
@@ -10928,6 +10935,8 @@ export class SessionManager implements ISessionManager {
         ...(managed.answerDelivery ? { answerProtocol: 'explicit-v1' as const, answerRunId: managed.answerDelivery.runId } : {}),
         timestamp: managed.streamingStartedAt ?? this.monotonic(),
         isIntermediate: true,
+        phase: 'intermediate',
+        presentationProtocol,
         turnId,
       }
       managed.messages.push(assistantMessage)
@@ -10942,6 +10951,8 @@ export class SessionManager implements ISessionManager {
       type: 'text_complete',
       sessionId: managed.id,
       text: content,
+      phase: 'intermediate',
+      presentationProtocol,
       isIntermediate: true,
       turnId,
       timestamp,
@@ -10969,6 +10980,7 @@ export class SessionManager implements ISessionManager {
         }
         managed.streamingText += event.text
         managed.streamingTurnId = event.turnId ?? managed.streamingTurnId
+        managed.streamingPresentationProtocol = event.presentationProtocol
         // Queue delta for batched sending (performance: reduces IPC from 50+/sec to ~20/sec)
         this.queueDelta(
           sessionId,
@@ -10976,6 +10988,7 @@ export class SessionManager implements ISessionManager {
           event.text,
           event.phase ?? 'unclassified',
           event.turnId,
+          event.presentationProtocol,
         )
         break
 
@@ -10997,13 +11010,23 @@ export class SessionManager implements ISessionManager {
           event.text,
           completesActiveStream ? managed.streamingText : undefined,
         )
+        // A boundary can close commentary before the SDK id arrives. Attach
+        // the original message identity once, without re-emitting its text.
+        if (event.sdkMessageId && event.relatedTurnIds?.length) {
+          const related = new Set(event.relatedTurnIds)
+          for (const fragment of managed.messages) {
+            if (fragment.turnId && related.has(fragment.turnId)) fragment.sourceSdkMessageId = event.sdkMessageId
+          }
+        }
         const assistantMessage: Message = {
           id: generateMessageId(),
           role: 'assistant',
           content,
+          sourceSdkMessageId: event.sdkMessageId,
           timestamp: this.monotonic(),
           isIntermediate,
           phase: event.phase,
+          presentationProtocol: event.presentationProtocol,
           ...(managed.answerDelivery ? { answerProtocol: 'explicit-v1' as const, answerRunId: managed.answerDelivery.runId } : {}),
           turnId: event.turnId,
           parentToolUseId: event.parentToolUseId,
@@ -11052,7 +11075,7 @@ export class SessionManager implements ISessionManager {
           }
         }
 
-        this.sendEvent({ type: 'text_complete', sessionId, text: content, isIntermediate, phase: event.phase, answerProtocol: assistantMessage.answerProtocol, answerRunId: assistantMessage.answerRunId, turnId: event.turnId, parentToolUseId: event.parentToolUseId, timestamp: assistantMessage.timestamp, messageId: assistantMessage.id }, workspaceId)
+        this.sendEvent({ type: 'text_complete', sessionId, text: content, isIntermediate, phase: event.phase, presentationProtocol: event.presentationProtocol, answerProtocol: assistantMessage.answerProtocol, answerRunId: assistantMessage.answerRunId, turnId: event.turnId, parentToolUseId: event.parentToolUseId, timestamp: assistantMessage.timestamp, messageId: assistantMessage.id }, workspaceId)
 
         // Persist session after complete message to prevent data loss on quit
         this.persistSession(managed)
@@ -11931,10 +11954,11 @@ export class SessionManager implements ISessionManager {
     delta: string,
     phase: TextStreamPhase,
     turnId?: string,
+    presentationProtocol?: 'native' | 'marker-v1' | 'legacy',
   ): void {
     const existing = this.pendingDeltas.get(sessionId)
     const changesStream = !!existing && (
-      existing.phase !== phase
+      existing.phase !== phase || existing.presentationProtocol !== presentationProtocol
       || (!!existing.turnId && !!turnId && existing.turnId !== turnId)
     )
     if (changesStream) {
@@ -11952,7 +11976,7 @@ export class SessionManager implements ISessionManager {
       if (turnId) active.turnId = turnId
     } else {
       // Start new batch
-      this.pendingDeltas.set(sessionId, { delta, phase, turnId })
+      this.pendingDeltas.set(sessionId, { delta, phase, turnId, presentationProtocol })
     }
 
     // Schedule flush if not already scheduled
@@ -11984,6 +12008,7 @@ export class SessionManager implements ISessionManager {
         sessionId,
         delta: pending.delta,
         phase: pending.phase,
+        presentationProtocol: pending.presentationProtocol,
         turnId: pending.turnId
       }, workspaceId)
       this.pendingDeltas.delete(sessionId)

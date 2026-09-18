@@ -58,14 +58,14 @@ export function handleTextDelta(
     return { session, streaming: null }
   }
 
-  // Events from current servers always carry a phase. Treat a missing legacy
-  // phase as final so it cannot flash an unclassified response card.
-  // Native completion APIs do not identify the final phase until message_end.
-  // Show their text provisionally; completion can move it into the work chain
-  // if the model goes on to call a tool.
+  // Native providers classify commentary only at message_end. Keep their
+  // provisional text visible while it arrives; completion can demote it.
+  // Explicit commentary and tool-delivery prose remain in the work chain.
   const incomingPhase = event.answerProtocol === 'explicit-v1'
     ? 'intermediate'
-    : event.phase === 'intermediate' ? 'intermediate' : 'final'
+    : event.presentationProtocol && event.presentationProtocol !== 'legacy'
+      ? event.phase ?? 'unclassified'
+      : event.phase === 'intermediate' ? 'intermediate' : 'final'
   const continuesExistingStream = !!streaming
     && (!event.turnId || !streaming.turnId || streaming.turnId === event.turnId)
   const phase = mergeTextStreamPhase(
@@ -96,6 +96,8 @@ export function handleTextDelta(
     const updatedSession = updateMessageAt(session, streamingIndex, {
       content: currentMsg.content + event.delta,
       isIntermediate: phase !== 'final',
+      phase,
+      presentationProtocol: event.presentationProtocol,
     })
     return { session: updatedSession, streaming: newStreaming }
   }
@@ -112,6 +114,8 @@ export function handleTextDelta(
     isStreaming: true,
     isPending: true,
     isIntermediate: phase !== 'final',
+    phase,
+    presentationProtocol: event.presentationProtocol,
     turnId: event.turnId,
   }
 
@@ -189,6 +193,7 @@ export function handleTextComplete(
       isPending: false,
       isIntermediate: event.isIntermediate,
       phase: event.phase,
+      presentationProtocol: event.presentationProtocol,
       answerProtocol: event.answerProtocol,
       answerRunId: event.answerRunId,
       answerCommitted: event.answerCommitted,
@@ -211,6 +216,7 @@ export function handleTextComplete(
     isPending: false,
     isIntermediate: event.isIntermediate,
     phase: event.phase,
+    presentationProtocol: event.presentationProtocol,
     answerProtocol: event.answerProtocol,
     answerRunId: event.answerRunId,
     answerCommitted: event.answerCommitted,

@@ -3,6 +3,7 @@ import ReactMarkdown, { defaultUrlTransform, type Components } from 'react-markd
 import rehypeKatex from 'rehype-katex'
 import rehypeRaw from 'rehype-raw'
 import remarkGfm from 'remark-gfm'
+import { remarkLiteralTildes } from './remark-literal-tildes'
 import remarkMath from 'remark-math'
 import 'katex/dist/katex.min.css'
 import { cn } from '../../lib/utils'
@@ -28,6 +29,7 @@ import { wrapWithSafeProxy } from './safe-components'
 import { MARKDOWN_MATH_OPTIONS, protectCurrencyDollars } from './math-options'
 import { markdownUrlTransform } from './url-transform'
 import { useSemanticReveal } from './useSemanticReveal'
+import { rehypeStreamChunks } from './rehype-stream-chunks'
 
 /**
  * Names of preview-block code-fence types that recursive `Markdown` callers
@@ -633,8 +635,8 @@ export function Markdown({
         MARKDOWN_MATH_OPTIONS
       ]
       return collapsible
-        ? [remarkGfm, mathPlugin, remarkCollapsibleSections]
-        : [remarkGfm, mathPlugin]
+        ? [remarkGfm, remarkLiteralTildes, mathPlugin, remarkCollapsibleSections]
+        : [remarkGfm, remarkLiteralTildes, mathPlugin]
     },
     [collapsible]
   )
@@ -643,7 +645,7 @@ export function Markdown({
     <div ref={revealRoot} className={cn('markdown-content', className)}>
       <ReactMarkdown
         remarkPlugins={remarkPlugins}
-        rehypePlugins={[[rehypeKatex, { throwOnError: false, strict: false }], rehypeRaw]}
+        rehypePlugins={[[rehypeKatex, { throwOnError: false, strict: false }], rehypeRaw, rehypeStreamChunks]}
         components={components}
         urlTransform={markdownUrlTransform}
       >

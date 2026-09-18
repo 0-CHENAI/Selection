@@ -379,6 +379,7 @@
         "fflate": "^0.8.2",
         "generative-loaders": "^0.1.1",
         "nice-ticks": "^1.0.2",
+        "remark-parse": "^11.0.0",
         "unified": "^11.0.0",
         "unist-util-visit": "^5.0.0",
       },

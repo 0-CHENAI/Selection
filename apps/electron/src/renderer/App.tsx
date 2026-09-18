@@ -31,6 +31,7 @@ import { navigate, routes } from './lib/navigate'
 import { attachmentFromContentRef, toDraftRef } from './lib/drafts'
 import { stripMarkdown } from './utils/text'
 import { coerceInputText, sessionHasLiveGeneration } from './lib/input-text'
+import { isDraftSessionOptionsId } from './lib/draft-session'
 import { getSessionsToRefreshAfterStaleReconnect } from './lib/reconnect-recovery'
 import { formatSessionLoadFailure, shouldTreatSessionLoadFailureAsTransportFallback } from './lib/session-load'
 import { createSessionWithConfirmedProject } from './lib/create-session-with-project'
@@ -1485,6 +1486,9 @@ export default function App() {
       return next
     })
 
+    // Draft composer options live only in memory until the first send creates a session.
+    if (isDraftSessionOptionsId(sessionId)) return
+
     // Handle persistence/backend for specific options
     if (updates.permissionMode !== undefined) {
       // Sync permission mode change with backend
@@ -1494,7 +1498,7 @@ export default function App() {
       // Sync thinking level change with backend (session-level, persisted)
       window.electronAPI.sessionCommand(sessionId, { type: 'setThinkingLevel', level: updates.thinkingLevel })
     }
-  }, [sessionOptions])
+  }, [])
 
   // Handle input draft changes per session with debounced persistence
   const draftSaveTimeoutRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map())

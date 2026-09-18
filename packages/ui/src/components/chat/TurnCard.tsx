@@ -1,6 +1,11 @@
 import * as React from 'react'
 import { useMemo, useEffect, useRef, useCallback, useState } from 'react'
 import i18n from 'i18next'
+import { localizedToolLabel } from './tool-labels'
+import { completedParagraphs, streamingResponseBody } from './paragraph-stream'
+import { useFrameSource } from './useFrameSource'
+import { ResponseBodyGrowth } from './ResponseBodyGrowth'
+import { useCompletionActions } from './useCompletionActions'
 import { useTranslation } from 'react-i18next'
 import type { ToolDisplayMeta, AnnotationV1, AgentToolResultContent } from '@craft-agent/core'
 import { normalizePath, pathStartsWith, stripPathPrefix, hasRenderableAssistantText } from '@craft-agent/core/utils'
@@ -30,8 +35,6 @@ import { cn } from '../../lib/utils'
 import { Markdown } from '../markdown'
 import { Spinner } from '../ui/LoadingIndicator'
 import { markdownToPlainText } from './markdown-to-plain-text'
-import { BUFFER_CONFIG } from './stream-buffer'
-import { useStreamingReveal } from './useStreamingReveal'
 import { type IslandTransitionConfig } from '../ui'
 import { AnnotationIslandMenu } from '../annotations/AnnotationIslandMenu'
 import {
@@ -54,9 +57,9 @@ import {
   normalizeCraftSessionToolName,
   deriveTurnPhase,
   getActiveTurnPreview,
+  countWorkRecords,
   isVisibleCommentaryCard,
   isMirroredCommentaryActivity,
-  shouldShowStreamingFooter,
   shouldShowGenericThinkingIndicator,
   type ActivityGroup,
   type AssistantTurn,
@@ -237,7 +240,7 @@ export const SIZE_CONFIG = {
 } as const
 
 /** Product-standard label paired with the 3x3 grid activity indicator. */
-const THINKING_STATUS_LABEL = 'Thinking...'
+const thinkingStatusLabel = () => i18n.t('chat.processing.thinking')
 
 // ============================================================================
 // Types
@@ -441,7 +444,7 @@ function getToolDisplayName(name: string): string {
     'spawn_session': 'Spawn Session',
   }
 
-  return displayNames[stripped] || stripped
+  return localizedToolLabel(stripped) || displayNames[stripped] || stripped
 }
 
 /**
@@ -592,7 +595,7 @@ function formatToolDisplay(
     }
 
     return {
-      name: toolDisplayMeta.displayName,
+      name: (toolDisplayMeta.category === 'native' ? localizedToolLabel(toolName) : undefined) || toolDisplayMeta.displayName,
       icon: toolDisplayMeta.iconDataUrl,
       description: toolDisplayMeta.description,
     }
@@ -613,11 +616,15 @@ function formatToolDisplay(
 }
 
 /** Get the primary preview text for collapsed state */
-function getPreviewText(
+export function getPreviewText(
   activities: ActivityItem[],
   intent: string | undefined,
   turnPhase: TurnPhase,
 ): string {
+  // The header describes the live phase, not the last finished tool.
+  if (turnPhase === 'pending' || turnPhase === 'awaiting') return thinkingStatusLabel()
+  if (turnPhase === 'streaming') return i18n.t('turnCard.responding')
+
   // During an active turn, prefer the newest thinking/tool intent over the
   // turn-level intent captured when the turn was first created. The latter is
   // intentionally stable and otherwise leaves the title stuck on step one.
@@ -658,10 +665,6 @@ function getPreviewText(
     return `${firstTask.toolInput.description as string}${errorSuffix}`
   }
 
-  // Response generation must not replace the work-chain's descriptive title.
-  // Use a generic status only when no activity provides a meaningful label.
-  if (turnPhase === 'streaming') return i18n.t('turnCard.responding')
-
   // When complete, show summary (badge already shows count)
   if (turnPhase === 'complete') {
     const errorSuffix = errorCount > 0
@@ -669,10 +672,6 @@ function getPreviewText(
       : ''
     return `${i18n.t('turnCard.stepsCompleted')}${errorSuffix}`
   }
-
-  // An open turn may contain commentary before it has a semantic tool intent.
-  // Keep the header accurate without duplicating that commentary (#141).
-  if (turnPhase === 'awaiting') return i18n.t('turnCard.processing')
 
   return i18n.t('turnCard.starting')
 }
@@ -848,6 +847,11 @@ function TreeViewConnector({ depth }: { depth: number; isLastChild?: boolean }) 
   )
 }
 
+/** Keep the response slot in flow so received blocks grow the card without a height tween. */
+function GrowingResponse({ children }: { children: React.ReactNode }) {
+  return <div className="flow-root">{children}</div>
+}
+
 /** Single activity row in expanded view */
 function ActivityRow({ activity, onOpenDetails, isLastChild, sessionFolderPath, displayMode = 'detailed' }: ActivityRowProps) {
   const depth = activity.depth || 0
@@ -856,7 +860,7 @@ function ActivityRow({ activity, onOpenDetails, isLastChild, sessionFolderPath, 
   // Show "Thinking" while streaming, stripped markdown content when complete
   if (activity.type === 'intermediate') {
     const isThinking = activity.status === 'running'
-    const displayContent = isThinking ? THINKING_STATUS_LABEL : stripMarkdown(activity.content || '')
+    const displayContent = stripMarkdown(activity.content || '') || (isThinking ? thinkingStatusLabel() : '')
     const isComplete = activity.status === 'completed'
     return (
       <div className="flex items-stretch">
@@ -938,7 +942,7 @@ function ActivityRow({ activity, onOpenDetails, isLastChild, sessionFolderPath, 
   const normalizedToolName = normalizeCraftSessionToolName(activity.toolName ?? '')
   const fullDisplayName = normalizedToolName === 'skill_inspect' ? i18n.t('tools.skillInspect')
     : normalizedToolName === 'skill_install' ? i18n.t('tools.skillInstall')
-    : toolDisplay.name || (activity.type === 'thinking' ? THINKING_STATUS_LABEL : 'Processing')
+    : toolDisplay.name || (activity.type === 'thinking' ? thinkingStatusLabel() : 'Processing')
 
   // Detect MCP/API tools (toolName starts with "mcp__")
   const isMcpOrApiTool = activity.toolName?.startsWith('mcp__') ?? false
@@ -1348,6 +1352,7 @@ export interface ResponseCardProps {
   /** Parent session ID (used to reset local annotation/island UI state on session switches) */
   sessionId?: string
   /** Underlying message ID for annotation actions */
+  revealIdentity?: string
   messageId?: string
   /** Persisted annotations for this response */
   annotations?: AnnotationV1[]
@@ -1384,8 +1389,6 @@ export interface ResponseCardProps {
   annotationInteractionMode?: AnnotationInteractionMode
   /** Tool-bound commentary — keep the body readable, hide final-reply actions */
   isCommentary?: boolean
-  /** Tools have started on this turn; hide Streaming... on a finished preamble. */
-  hasToolActivities?: boolean
 }
 
 interface BranchDropdownProps {
@@ -1615,29 +1618,24 @@ function applyTextHighlightRange(
  * ResponseCard - Unified card component for AI responses and plans
  *
  * Variants:
- * - 'response': Buffered streaming response with smart content gating
+ * - 'response': Incremental complete Markdown blocks
  * - 'plan': Plan message with header and Accept Plan button
  *
- * Response variant implements smart buffering (see stream-buffer.ts):
- * - Short anti-flash min window, then CJK-aware unit thresholds
- * - High-confidence patterns (code / headers / lists) show earlier
- * - Max wait forces reveal; time gates re-check via useStreamingReveal timers
+ * Response blocks appear as they arrive; unfinished tails occupy no space.
  *
  * Performance: markdown re-renders throttled (~50ms) while streaming.
  */
 export function ResponseCard({
-  isAnswerPreview = false,
   text,
   isStreaming,
   isTurnComplete,
-  streamStartTime,
-  completedRevealStartTime,
   onOpenFile,
   onOpenUrl,
   onPopOut,
   variant = 'response',
   sessionId,
   messageId,
+  revealIdentity,
   annotations,
   onAccept,
   onAcceptWithCompact,
@@ -1655,17 +1653,17 @@ export function ResponseCard({
   openAnnotationRequest,
   annotationInteractionMode = 'interactive',
   isCommentary = false,
-  hasToolActivities = false,
 }: ResponseCardProps) {
   const { t } = useTranslation()
   const parsedSkillUsage = useMemo(
     () => parseSkillUsedMarkers(text, isStreaming),
     [text, isStreaming],
   )
+  const actionsVisible = useCompletionActions(
+    ((isTurnComplete ?? !isStreaming) && !isCommentary) || variant === 'plan',
+  )
   const responseText = parsedSkillUsage.content
-  // Throttled content for display - updates every CONTENT_THROTTLE_MS during streaming
-  const [displayedText, setDisplayedText] = useState(responseText)
-  const lastUpdateRef = useRef(Date.now())
+  const frameText = useFrameSource(responseText, isStreaming)
   // Copy to clipboard state
   const [copied, setCopied] = useState(false)
   // Fullscreen state
@@ -1853,7 +1851,7 @@ export function ResponseCard({
       window.removeEventListener('resize', scheduleCoordsRecompute)
       root.removeEventListener('scroll', scheduleCoordsRecompute, { capture: true } as EventListenerOptions)
     }
-  }, [annotations, renderedAnnotations, responseText, displayedText, isStreaming])
+  }, [annotations, renderedAnnotations, responseText, isStreaming])
 
   useEffect(() => {
     if (!canAnnotate) {
@@ -2379,64 +2377,28 @@ export function ResponseCard({
     />
   )
 
-  // Throttle content updates during streaming for performance
-  // Updates immediately when streaming ends to show final content
-  useEffect(() => {
-    if (!isStreaming) {
-      // Streaming ended - show final content immediately
-      setDisplayedText(responseText)
-      return
-    }
-
-    const now = Date.now()
-    const elapsed = now - lastUpdateRef.current
-
-    if (elapsed >= BUFFER_CONFIG.CONTENT_THROTTLE_MS) {
-      // Enough time passed - update immediately
-      setDisplayedText(responseText)
-      lastUpdateRef.current = now
-    } else {
-      // Schedule update for remaining time
-      const timeout = setTimeout(() => {
-        setDisplayedText(responseText)
-        lastUpdateRef.current = Date.now()
-      }, BUFFER_CONFIG.CONTENT_THROTTLE_MS - elapsed)
-      return () => clearTimeout(timeout)
-    }
-  }, [responseText, isStreaming])
-
-  // Time-aware buffer gate (re-checks on min/max window even if tokens stall)
-  const reveal = useStreamingReveal(responseText, isStreaming, streamStartTime)
-
   const isCompleted = isTurnComplete ?? !isStreaming
-  const isBuffering = isStreaming && !reveal.shouldShow
-  // Completion uses the full received text immediately; reveal stays cosmetic.
-  const bodyText = isStreaming ? displayedText : responseText
+  // Completion releases only the final incomplete Markdown block.
+  const bodyText = streamingResponseBody(isStreaming ? frameText : responseText, isStreaming)
   // Commentary must not gain final-reply actions the moment tools start.
   // Both card branches retain the keyed body when final responses complete.
   const showCompletedChrome = (isCompleted && !isCommentary)
     || variant === 'plan'
-  const showStreamingFooter = (isAnswerPreview && isStreaming) || shouldShowStreamingFooter({
-    isStreaming,
-    compactMode,
-    isCommentary,
-    hasToolActivities,
-  })
+  // Hold the action-row height while the body is still arriving so the card
+  // bottom does not jump when regenerate / copy / Markdown mount.
+  const reserveDesktopFooter = !compactMode && !isCommentary
+    && (showCompletedChrome || (isStreaming && variant === 'response'))
 
-  // While buffering, return null - TurnCard will show a subtle indicator instead
-  if (isBuffering) {
-    return null
-  }
-
-  // Completed response or plan - show with max height and footer
-  if (showCompletedChrome) {
+  // Keep one content tree throughout streaming and completion. Only chrome
+  // changes after classification; Markdown and embedded diagrams stay mounted.
+  {
     const isPlan = variant === 'plan'
 
     return (
       <>
-        <div className="bg-background shadow-minimal rounded-[8px] overflow-hidden relative group">
+        <div className="rounded-[8px] overflow-hidden relative group transition-colors duration-200 bg-background ring-1 ring-inset ring-foreground/5">
           {/* Fullscreen button - desktop only; compact mode keeps message chrome minimal */}
-          {!compactMode && (
+          {showCompletedChrome && !compactMode && (
           <button
             onClick={() => setIsFullscreen(true)}
             className={cn(
@@ -2465,7 +2427,8 @@ export function ResponseCard({
             </div>
           )}
 
-          {/* Content expands fully — outer session list is the only vertical scroller */}
+          {/* Smooth received-block growth while the outer viewport stays pinned. */}
+          <ResponseBodyGrowth streaming={isStreaming && variant === 'response'}>
           <div
             key="response-content"
             ref={contentRef}
@@ -2477,27 +2440,34 @@ export function ResponseCard({
             <SkillUsedIndicator skills={parsedSkillUsage.skills} />
             <div ref={contentLayerRef} className="relative">
               <Markdown
-                id={messageId ? `${sessionId}:${messageId}` : undefined}
-                revealStartTime={variant === 'response' ? completedRevealStartTime : undefined}
+                id={revealIdentity ?? (messageId ? `${sessionId}:${messageId}` : undefined)}
+                isStreaming={isStreaming && variant === 'response'}
                 mode="minimal"
                 onUrlClick={onOpenUrl}
                 onFileClick={onOpenFile}
               >
-                {responseText}
+                {bodyText}
               </Markdown>
               {annotationOverlayLayer}
             </div>
           </div>
 
+          </ResponseBodyGrowth>
+
           {/* Desktop footer with actions (Copy / Markdown / Accept Plan / Branch).
-              Compact mode falls through to the slim Accept-Plan-only footer below. */}
-          {!compactMode && (
-            <div className={cn(
-              "pl-4 pr-2.5 py-2 border-t border-border/30 flex items-center justify-between bg-muted/20",
+              Compact mode falls through to the slim Accept-Plan-only footer below.
+              Streaming reserves the same row so completion only reveals actions. */}
+          {reserveDesktopFooter && (
+            <div
+              aria-hidden={!actionsVisible}
+              style={{ opacity: actionsVisible ? 1 : 0 }}
+              className={cn(
+              "pl-4 pr-2.5 py-2 border-t flex items-center justify-between transition-opacity duration-[650ms] ease-in-out motion-reduce:transition-none",
+              showCompletedChrome ? "border-border/30 bg-muted/20" : "border-transparent",
               SIZE_CONFIG.fontSize
             )}>
               {/* Left side - Copy, View as Markdown, Annotation hint */}
-              <div className="flex items-center gap-3">
+              <div className={cn("flex items-center gap-3", !actionsVisible && "invisible pointer-events-none")}>
                 {onRegenerate && !isCommentary && (
                   <button
                     onClick={onRegenerate}
@@ -2547,7 +2517,7 @@ export function ResponseCard({
               </div>
 
               {/* Right side */}
-              <div className="flex items-center gap-3">
+              <div className={cn("flex items-center gap-3", !actionsVisible && "invisible pointer-events-none")}>
                 {/* Accept Plan dropdown (plan variant only, last response) */}
                 {isPlan && showAcceptPlan && onAccept && onAcceptWithCompact && (
                   <div
@@ -2575,7 +2545,7 @@ export function ResponseCard({
               Uses a bottom-sheet drawer to match the CompactPermissionModeSelector
               / CompactModelSelector pattern. Guarded by isLastResponse so older
               plans don't render an empty strip with a hidden-but-focusable button. */}
-          {compactMode && onRegenerate && !isStreaming && !isCommentary && (
+          {showCompletedChrome && compactMode && onRegenerate && !isStreaming && !isCommentary && (
             <div
               className={cn(
                 "pl-3 pr-2 py-1.5 border-t border-border/30 flex items-center bg-muted/20",
@@ -2635,49 +2605,6 @@ export function ResponseCard({
     )
   }
 
-  // Streaming response - show throttled content with spinner
-  return (
-    <>
-      <div className="bg-background shadow-minimal rounded-[8px] overflow-hidden group">
-        {/* Content expands fully — outer session list is the only vertical scroller */}
-        {/* Uses displayedText (throttled) for performance while streaming */}
-        <div
-          key="response-content"
-          ref={contentRef}
-          data-search-root="response"
-          onMouseDown={handleSelectionPointerDown}
-          onMouseUp={handleTextSelection}
-          className="pl-[22px] pr-4 py-3 text-sm"
-        >
-          <SkillUsedIndicator skills={parsedSkillUsage.skills} />
-          <div ref={contentLayerRef} className="relative">
-            <Markdown
-              id={messageId ? `${sessionId}:${messageId}` : undefined}
-              isStreaming={isStreaming && variant === 'response'}
-              mode="minimal"
-              onUrlClick={onOpenUrl}
-              onFileClick={onOpenFile}
-            >
-              {bodyText}
-            </Markdown>
-            {annotationOverlayLayer}
-          </div>
-        </div>
-
-        {/* Desktop streaming footer: only while this card's body is still
-            being typed. Compact mode and tool-bound preambles omit it. */}
-        {showStreamingFooter && (
-          <div className={cn("px-4 py-2 border-t border-border/30 flex items-center bg-muted/20", SIZE_CONFIG.fontSize)}>
-            <div className="flex items-center gap-2 text-muted-foreground">
-              <Spinner className={SIZE_CONFIG.spinnerSize} />
-              <span>Streaming...</span>
-            </div>
-          </div>
-        )}
-      </div>
-      {selectionMenu}
-    </>
-  )
 }
 
 // ============================================================================
@@ -2884,13 +2811,8 @@ export const TurnCard = React.memo(function TurnCard({
   const expandedActivityGroups = externalExpandedActivityGroups ?? localExpandedActivityGroups
   const handleExpandedActivityGroupsChange = onExpandedActivityGroupsChange ?? setLocalExpandedActivityGroups
 
-  // Time-aware buffer gate — must re-fire after MAX_BUFFER_MS even if stream stalls
-  const responseReveal = useStreamingReveal(
-    response?.text,
-    !!response?.isStreaming,
-    response?.streamStartTime,
-  )
-  const isBuffering = !!response?.isStreaming && !responseReveal.shouldShow
+  // A complete Markdown block, not elapsed time, opens the response.
+  const isBuffering = !!response?.isStreaming && !completedParagraphs(response.text, true).trim()
 
 
   // Compute preview text with cross-fade animation
@@ -2956,7 +2878,7 @@ export const TurnCard = React.memo(function TurnCard({
   )
 
   const hasVisibleResponse = !!response && (
-    !!response.isStreaming || hasRenderableAssistantText(response.text)
+    hasRenderableAssistantText(streamingResponseBody(response.text, !!response.isStreaming))
   )
 
   // Don't render if nothing to show and turn is complete
@@ -2990,13 +2912,14 @@ export const TurnCard = React.memo(function TurnCard({
 
   // Only count rows the user will actually see in the collapsible section
   const hasActivities = visibleActivities.length > 0
+  const stepCount = countWorkRecords(visibleActivities)
 
   // Determine if thinking indicator should show using the phase-based state machine.
   // This properly handles the "gap" state (awaiting) between tool completion and next action,
   // which was previously causing the turn card to "disappear".
   const showGenericThinkingIndicator = shouldShowGenericThinkingIndicator(
     turnPhase,
-    isBuffering,
+    isBuffering && !(response && hasVisibleResponse),
     renderedActivityRows,
   )
 
@@ -3026,10 +2949,10 @@ export const TurnCard = React.memo(function TurnCard({
               <ChevronRight className={SIZE_CONFIG.iconSize} />
             </motion.div>
 
-            {/* Step count badge */}
-            <span className="-ml-0.5 shrink-0 px-1.5 py-0.5 rounded-[4px] bg-background shadow-minimal text-[10px] font-medium tabular-nums">
-              {visibleActivities.length}
-            </span>
+            {/* Count actual tool calls, not transient streaming rows. */}
+            {stepCount > 0 && <span className="-ml-0.5 shrink-0 px-1.5 py-0.5 rounded-[4px] bg-background shadow-minimal text-[10px] font-medium tabular-nums">
+              {stepCount}
+            </span>}
 
             {/* Preview text with crossfade + inline failure count */}
             <span className="relative flex-1 min-w-0 h-5 flex items-center">
@@ -3152,7 +3075,7 @@ export const TurnCard = React.memo(function TurnCard({
                       <div className={cn(SIZE_CONFIG.iconSize, "flex items-center justify-center shrink-0")}>
                         <Spinner className={SIZE_CONFIG.spinnerSize} />
                       </div>
-                      <span>{THINKING_STATUS_LABEL}</span>
+                      <span>{thinkingStatusLabel()}</span>
                     </motion.div>
                   )}
                   </AnimatePresence>
@@ -3171,7 +3094,7 @@ export const TurnCard = React.memo(function TurnCard({
           <div className={cn(SIZE_CONFIG.iconSize, "flex items-center justify-center shrink-0")}>
             <Spinner className={SIZE_CONFIG.spinnerSize} />
           </div>
-          <span>{THINKING_STATUS_LABEL}</span>
+          <span>{thinkingStatusLabel()}</span>
         </div>
       )}
 
@@ -3206,11 +3129,12 @@ export const TurnCard = React.memo(function TurnCard({
         </div>
       ))}
 
-      {/* Response Section - only shown when not buffering */}
+      <GrowingResponse>
+      {/* Response Section — keep the white frame mounted once a final stream exists */}
       {/* Animated version for playground demos */}
       {animateResponse && (
         <AnimatePresence>
-          {response && hasVisibleResponse && !isBuffering && (
+          {response && hasVisibleResponse && (
             <motion.div
               initial={reduceMotion ? false : { opacity: 0, y: 8 }}
               animate={{ opacity: 1, y: 0 }}
@@ -3229,6 +3153,7 @@ export const TurnCard = React.memo(function TurnCard({
                 onOpenUrl={onOpenUrl}
                 onPopOut={onPopOut ? () => onPopOut(response.text) : undefined}
                 variant={response.isPlan ? 'plan' : 'response'}
+                revealIdentity={`${sessionId}:${turnId}:response`}
                 messageId={response.messageId}
                 annotations={response.annotations}
                 onAddAnnotation={onAddAnnotation}
@@ -3240,7 +3165,6 @@ export const TurnCard = React.memo(function TurnCard({
                 isLastResponse={isLastResponse}
                 compactMode={compactMode}
                 isCommentary={showCommentary}
-                hasToolActivities={hasToolActivities}
                 onBranch={onBranch && response.messageId ? (options?: { newPanel?: boolean }) => onBranch(response.messageId!, options) : undefined}
                 onRegenerate={onRegenerate}
                 sendMessageKey={sendMessageKey}
@@ -3253,7 +3177,7 @@ export const TurnCard = React.memo(function TurnCard({
         </AnimatePresence>
       )}
       {/* Non-animated version for regular app use */}
-      {!animateResponse && response && hasVisibleResponse && !isBuffering && (
+      {!animateResponse && response && hasVisibleResponse && (
         <div className={cn("select-text", hasActivities && "mt-2")}>
           <ResponseCard
             text={response.text}
@@ -3267,6 +3191,7 @@ export const TurnCard = React.memo(function TurnCard({
             onOpenUrl={onOpenUrl}
             onPopOut={onPopOut ? () => onPopOut(response.text) : undefined}
             variant={response.isPlan ? 'plan' : 'response'}
+            revealIdentity={`${sessionId}:${turnId}:response`}
             messageId={response.messageId}
             annotations={response.annotations}
             onAddAnnotation={onAddAnnotation}
@@ -3278,7 +3203,6 @@ export const TurnCard = React.memo(function TurnCard({
             isLastResponse={isLastResponse}
             compactMode={compactMode}
             isCommentary={showCommentary}
-            hasToolActivities={hasToolActivities}
             onBranch={onBranch && response.messageId ? (options?: { newPanel?: boolean }) => onBranch(response.messageId!, options) : undefined}
             onRegenerate={onRegenerate}
             sendMessageKey={sendMessageKey}
@@ -3288,6 +3212,7 @@ export const TurnCard = React.memo(function TurnCard({
           />
         </div>
       )}
+      </GrowingResponse>
     </div>
   )
 }, (prev, next) => {

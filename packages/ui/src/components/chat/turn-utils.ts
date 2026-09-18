@@ -7,7 +7,9 @@
 
 import type { Message, StoredMessage, MessageRole } from '@craft-agent/core'
 import { storedToMessage, hasRenderableAssistantText } from '@craft-agent/core'
-import { isParentTaskTool } from '@craft-agent/shared/utils/toolNames'
+import { isParentTaskTool, getToolDisplayName } from '@craft-agent/shared/utils/toolNames'
+
+import { localizedToolLabel } from './tool-labels'
 
 export { storedToMessage }
 import type { ActivityItem, ActivityStatus, ActivityType, ResponseContent, TodoItem } from './TurnCard'
@@ -42,6 +44,7 @@ function stripErrorTags(content: string | undefined): string | undefined {
 /** Represents one complete assistant turn */
 export interface AssistantTurn {
   type: 'assistant'
+  presentationProtocol?: 'native' | 'marker-v1' | 'legacy'
   answerRunId?: string
   turnId: string
   activities: ActivityItem[]
@@ -89,8 +92,10 @@ export type Turn = AssistantTurn | UserTurn | SystemTurn | AuthRequestTurn
  * pending text, intermediate rows, and tools arrive, which would remount the
  * card and replay expand/collapse on every new element.
  */
+// Pass the index in the complete turn list, not a paginated slice. Completion
+// may replace timestamps, but must preserve both the card and expansion state.
 export function getAssistantTurnUiKey(turn: AssistantTurn, index: number): string {
-  return `assistant:turn:${turn.turnId}:${turn.timestamp}:${index}`
+  return `assistant:turn:${turn.turnId}:${index}`
 }
 
 // ============================================================================
@@ -289,6 +294,16 @@ export function shouldShowStreamingFooter(input: {
  * live activities can briefly be received out of array order; array order only
  * breaks timestamp ties.
  */
+export function countWorkRecords(activities: ReadonlyArray<ActivityItem>): number {
+  return new Set(activities
+    // Empty live placeholders are transient indicators, not work records.
+    .filter(activity => !['intermediate', 'thinking'].includes(activity.type)
+      || hasRenderableAssistantText(activity.content))
+    .map(activity => activity.type === 'tool'
+      ? `tool:${activity.toolUseId ?? activity.id}`
+      : `${activity.type}:${activity.id}`)).size
+}
+
 export function getActiveTurnPreview(
   activities: ActivityItem[],
   phase: TurnPhase,
@@ -298,7 +313,26 @@ export function getActiveTurnPreview(
   let latest: { text: string; timestamp: number; index: number } | undefined
 
   activities.forEach((activity, index) => {
-    const toolIntent = activity.type === 'tool' ? activity.intent?.trim() : undefined
+    let toolIntent: string | undefined
+    if (activity.type === 'tool') {
+      toolIntent = activity.intent?.trim()
+      if (!toolIntent && activity.toolName) {
+        const name = activity.displayName?.trim()
+          || ((!activity.toolDisplayMeta || activity.toolDisplayMeta.category === 'native')
+            ? localizedToolLabel(activity.toolName) : undefined)
+          || activity.toolDisplayMeta?.displayName
+          || getToolDisplayName(activity.toolName)
+        // Use only recognizable input fields, never raw output or arbitrary
+        // argument JSON. Native tools often have no generated intent metadata.
+        const input = activity.toolInput
+        const detail = ['description', 'query', 'file_path', 'path', 'url', 'command', 'pattern']
+          .map(key => input?.[key])
+          .find(value => typeof value === 'string' && value.trim())
+        toolIntent = typeof detail === 'string'
+          ? `${name} · ${detail.replace(/\s+/g, ' ').trim()}`
+          : name
+      }
+    }
     const statusText = activity.type === 'status' ? activity.content?.trim() : undefined
     const text = toolIntent || statusText
     if (!text) return
@@ -592,10 +626,12 @@ export function groupMessagesByTurn(messages: Message[], options: GroupTurnsOpti
     const adopted = adoptFlushedAssistantTurn(message.answerRunId)
     if (adopted) {
       adopted.answerRunId ??= message.answerRunId
+      adopted.presentationProtocol ??= message.presentationProtocol
       return adopted
     }
     currentTurn = {
       type: 'assistant',
+      presentationProtocol: message.presentationProtocol,
       answerRunId: message.answerRunId,
       turnId: message.answerRunId ? `answer-${message.answerRunId}` : message.turnId || message.id,
       activities: [],
@@ -644,7 +680,7 @@ export function groupMessagesByTurn(messages: Message[], options: GroupTurnsOpti
       // Don't do this for turns with plans - the plan is the final output
       // Only promote when turn is complete (processing indicator hidden)
       const hasPlan = currentTurn.activities.some(a => a.type === 'plan')
-      if (!currentTurn.answerRunId && !interrupted && !hasPlan && !currentTurn.response && currentTurn.isComplete && currentTurn.activities.length > 0) {
+      if (currentTurn.presentationProtocol !== 'marker-v1' && !currentTurn.answerRunId && !interrupted && !hasPlan && !currentTurn.response && currentTurn.isComplete && currentTurn.activities.length > 0) {
         // Find the last intermediate text activity (reverse to get most recent)
         const lastTextActivity = [...currentTurn.activities]
           .reverse()
@@ -924,6 +960,11 @@ export function groupMessagesByTurn(messages: Message[], options: GroupTurnsOpti
   const latestAnswerDelivered = latestTurn?.type === 'assistant'
     && !!latestTurn.answerRunId && deliveredRuns.has(latestTurn.answerRunId)
   const latestAnswerPreview = latestTurn?.type === 'assistant' && latestTurn.response?.isAnswerPreview
+  // A text message ending is not the agent run ending: it may still reason
+  // or call another tool. Only session completion settles the latest turn.
+  if (options.isSessionProcessing && latestTurn?.type === 'assistant' && !latestAnswerDelivered) {
+    latestTurn.isComplete = false
+  }
   if (options.isManagedSwarmRunning && !latestAnswerDelivered && !latestAnswerPreview) {
     keepLatestManagedSwarmTurnOpen(turns)
   }

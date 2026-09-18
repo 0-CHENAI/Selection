@@ -927,6 +927,7 @@ describe('PiEventAdapter', () => {
       } as any));
 
       expect(events.every(event => event.type !== 'error')).toBe(true);
+      expect(events.some(event => event.type === 'typed_error' && event.error.code === 'stream_interrupted')).toBe(true);
     });
 
     it('preserves a terminal failure even without provider errorMessage', () => {

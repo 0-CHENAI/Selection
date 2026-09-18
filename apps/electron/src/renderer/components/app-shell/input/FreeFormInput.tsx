@@ -1,6 +1,7 @@
+import { modelThinkingLevels } from '@craft-agent/shared/agent/thinking-levels'
 import * as React from 'react'
 import { useTranslation } from "react-i18next"
-import { AnimatePresence, motion } from 'motion/react'
+import { AnimatePresence, motion, useReducedMotion } from 'motion/react'
 import { toast } from 'sonner'
 import {
   Paperclip,
@@ -71,7 +72,7 @@ import { FreeFormInputContextBadge } from './FreeFormInputContextBadge'
 import { derivePickerMode } from './picker-mode'
 import type { FileAttachment, LoadedSource, LoadedSkill } from '../../../../shared/types'
 import type { PermissionMode } from '@craft-agent/shared/agent/modes'
-import { type ThinkingLevel, THINKING_LEVELS, getThinkingLevelNameKey } from '@craft-agent/shared/agent/thinking-levels'
+import { type ThinkingLevel, getThinkingLevelNameKey } from '@craft-agent/shared/agent/thinking-levels'
 import { resolveSourceTitle } from '@craft-agent/shared/display-titles'
 import { useEscapeInterrupt } from '@/context/EscapeInterruptContext'
 import { hasOpenOverlay } from '@/lib/overlay-detection'
@@ -408,6 +409,7 @@ export function FreeFormInput({
   isCollapsedInCompact = false,
   onRequestExpand,
 }: FreeFormInputProps) {
+  const reduceMotion = useReducedMotion()
   const { t } = useTranslation()
 
   // Default rotating placeholders for onboarding/empty state (i18n-aware)
@@ -457,7 +459,9 @@ export function FreeFormInput({
     return connectionPinnedModelIds(effectiveConnectionDetails)
   }, [effectiveConnectionDetails])
 
-  const availableThinkingLevels = THINKING_LEVELS
+  const configuredThinkingModel = effectiveConnectionDetails?.models?.find(m => isPickerModelSelected(currentModel, typeof m === 'string' ? m : m.id))
+  const availableThinkingLevels = modelThinkingLevels(typeof configuredThinkingModel === 'object' ? configuredThinkingModel : undefined)
+
 
   // Disable thinking selector when the current model explicitly doesn't support it
   const thinkingDisabled = React.useMemo(() => {
@@ -2405,29 +2409,31 @@ export function FreeFormInput({
           />
 
           {/* 6. Send/Stop Button - Always show stop when processing */}
-          {isProcessing ? (
-            <Button
-              type="button"
-              size="icon"
-              variant="secondary"
-              aria-label={t('chat.stopResponse')}
-              className="send-btn h-7 w-7 rounded-full shrink-0 hover:bg-foreground/15 active:bg-foreground/20 ml-2"
-              onClick={() => handleStop(false)}
-            >
-              <Square className="h-3 w-3 fill-current" />
-            </Button>
-          ) : (
-            <Button
-              type="submit"
-              size="icon"
-              aria-label={t('shortcuts.sendMessage')}
-              className="send-btn h-7 w-7 rounded-full shrink-0 ml-2"
-              disabled={!hasContent || disabled || disableSend || showVisionWarning}
-              data-tutorial="send-button"
-            >
-              <ArrowUp className="h-4 w-4" />
-            </Button>
-          )}
+          <Button
+            type={isProcessing ? 'button' : 'submit'}
+            size="icon"
+            variant={isProcessing ? 'secondary' : 'default'}
+            aria-label={isProcessing ? t('chat.stopResponse') : t('shortcuts.sendMessage')}
+            className={cn('send-btn h-7 w-7 rounded-full shrink-0 ml-2', isProcessing && 'hover:bg-foreground/15 active:bg-foreground/20')}
+            disabled={!isProcessing && (!hasContent || disabled || disableSend || showVisionWarning)}
+            data-tutorial={isProcessing ? undefined : 'send-button'}
+            onClick={isProcessing ? () => handleStop(false) : undefined}
+          >
+            <span className="relative flex h-4 w-4 items-center justify-center" aria-hidden="true">
+              <AnimatePresence initial={false} mode="sync">
+                <motion.span
+                  key={isProcessing ? 'stop' : 'send'}
+                  className="absolute inset-0 flex items-center justify-center"
+                  initial={{ opacity: 0, scale: reduceMotion ? 1 : 0.65 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  exit={{ opacity: 0, scale: reduceMotion ? 1 : 0.65 }}
+                  transition={{ duration: reduceMotion ? 0 : 0.18, ease: 'easeOut' }}
+                >
+                  {isProcessing ? <Square className="h-3 w-3 fill-current" /> : <ArrowUp className="h-4 w-4" />}
+                </motion.span>
+              </AnimatePresence>
+            </span>
+          </Button>
           </div>
           </div>
         </div>

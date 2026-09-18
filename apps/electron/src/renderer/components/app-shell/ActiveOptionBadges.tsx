@@ -1,10 +1,9 @@
 import * as React from 'react'
 import { useTranslation } from "react-i18next"
 import { cn } from '@/lib/utils'
-import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
-import { SlashCommandMenu, DEFAULT_SLASH_COMMAND_GROUPS, type SlashCommandId } from '@/components/ui/slash-command-menu'
-import { ChevronDown, FolderOpen } from 'lucide-react'
-import { PERMISSION_MODE_CONFIG, type PermissionMode } from '@craft-agent/shared/agent/modes'
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
+import { Check, ChevronDown, FolderOpen } from 'lucide-react'
+import { PERMISSION_MODE_CONFIG, PERMISSION_MODE_ORDER, type PermissionMode } from '@craft-agent/shared/agent/modes'
 import { ActiveTasksBar, type BackgroundTask } from './ActiveTasksBar'
 import type { TerminalOverlayData } from './TaskActionMenu'
 import { LabelIcon, LabelValueTypeIcon } from '@/components/ui/label-icon'
@@ -377,6 +376,12 @@ interface PermissionModeDropdownProps {
   sessionId?: string
 }
 
+const MODE_DESC_KEYS: Record<PermissionMode, string> = {
+  safe: 'mode.exploreFullDesc',
+  ask: 'mode.askFullDesc',
+  'allow-all': 'mode.executeFullDesc',
+}
+
 function PermissionModeDropdown({ permissionMode, onPermissionModeChange, sessionId }: PermissionModeDropdownProps) {
   const { t } = useTranslation()
   const [open, setOpen] = React.useState(false)
@@ -388,21 +393,11 @@ function PermissionModeDropdown({ permissionMode, onPermissionModeChange, sessio
     setOptimisticMode(permissionMode)
   }, [permissionMode])
 
-  const activeCommands = React.useMemo((): SlashCommandId[] => {
-    return [optimisticMode as SlashCommandId]
-  }, [optimisticMode])
-
-  // Handle command selection from dropdown
-  const handleSelect = React.useCallback((commandId: SlashCommandId) => {
-    if (commandId === 'safe' || commandId === 'ask' || commandId === 'allow-all') {
-      setOptimisticMode(commandId)
-      onPermissionModeChange?.(commandId)
-    }
+  const handleSelect = React.useCallback((mode: PermissionMode) => {
+    setOptimisticMode(mode)
+    onPermissionModeChange?.(mode)
     setOpen(false)
   }, [onPermissionModeChange])
-
-  // Get config for current mode (use optimistic state for instant UI update)
-  const config = PERMISSION_MODE_CONFIG[optimisticMode]
 
   // Mode-specific styling using CSS variables (theme-aware)
   // - safe (Explore): foreground at 60% opacity - subtle, read-only feel
@@ -425,8 +420,8 @@ function PermissionModeDropdown({ permissionMode, onPermissionModeChange, sessio
   const currentStyle = modeStyles[optimisticMode]
 
   return (
-    <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger asChild>
+    <DropdownMenu open={open} onOpenChange={setOpen} modal>
+      <DropdownMenuTrigger asChild>
         <button
           type="button"
           data-tutorial="permission-mode-dropdown"
@@ -440,9 +435,9 @@ function PermissionModeDropdown({ permissionMode, onPermissionModeChange, sessio
           <span>{t(`mode.${optimisticMode}`)}</span>
           <ChevronDown className="h-3.5 w-3.5 opacity-60" />
         </button>
-      </PopoverTrigger>
-      <PopoverContent
-        className="w-auto p-0 rounded-[8px] bg-background text-foreground shadow-modal-small"
+      </DropdownMenuTrigger>
+      <DropdownMenuContent
+        className="min-w-[240px] p-1 rounded-[8px]"
         side="top"
         align="start"
         sideOffset={4}
@@ -457,13 +452,22 @@ function PermissionModeDropdown({ permissionMode, onPermissionModeChange, sessio
           }
         }}
       >
-        <SlashCommandMenu
-          commandGroups={DEFAULT_SLASH_COMMAND_GROUPS}
-          activeCommands={activeCommands}
-          onSelect={handleSelect}
-          showFilter
-        />
-      </PopoverContent>
-    </Popover>
+        {PERMISSION_MODE_ORDER.map((mode) => (
+          <DropdownMenuItem
+            key={mode}
+            data-tutorial={`permission-mode-${mode}`}
+            onSelect={() => handleSelect(mode)}
+            className="items-start gap-2 rounded-[6px] py-2"
+          >
+            <PermissionModeIcon mode={mode} className="mt-0.5 h-3.5 w-3.5" />
+            <div className="min-w-0 flex-1">
+              <div className="text-[13px] font-medium">{t(`mode.${mode}`)}</div>
+              <div className="text-xs text-muted-foreground">{t(MODE_DESC_KEYS[mode])}</div>
+            </div>
+            {mode === optimisticMode && <Check className="mt-0.5 h-3.5 w-3.5" />}
+          </DropdownMenuItem>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
   )
 }

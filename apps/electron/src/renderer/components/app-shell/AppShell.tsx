@@ -1,3 +1,4 @@
+import { recoverMissingSession } from '@/lib/recover-missing-session'
 import { confirmAction } from '@/lib/confirmation'
 import * as React from "react"
 import { useTranslation, Trans } from "react-i18next"
@@ -1590,6 +1591,18 @@ function AppShellContent({
     // Focus the chat input after navigation completes
     setTimeout(() => focusZone('chat', { intent: 'programmatic' }), 50)
   }, [activeWorkspace, focusZone, selectedProjectId, selectedProjectSlug, t])
+
+  React.useEffect(() => {
+    // Only recover an actual focused chat, never a stale selection behind a
+    // settings/project page. Ask the backend before treating loading as deletion.
+    if (!focusedSessionId || !activeWorkspace || sessionMetaMap.has(focusedSessionId)) return
+    if (selectedProjectSlug && !selectedProjectId) return
+    return recoverMissingSession(
+      () => window.electronAPI.getSessionMessages(focusedSessionId),
+      () => navigate(routes.view.allSessions()),
+      error => console.error('[Chat] Failed to verify missing session:', error),
+    )
+  }, [focusedSessionId, activeWorkspace, sessionMetaMap, selectedProjectSlug, selectedProjectId])
 
   // Delete Source - simplified since agents system is removed
   const handleDeleteSource = useCallback(async (sourceSlug: string) => {

@@ -595,8 +595,8 @@ export interface PermissionModeState {
 export type SessionEvent =
   | { type: 'progress_supervision'; sessionId: string; state: ProgressSupervisionView }
   | { type: 'answer_preview'; sessionId: string; answerRunId: string; userMessageId: string; text: string; toolCallId: string }
-  | { type: 'text_delta'; sessionId: string; answerProtocol?: 'explicit-v1'; answerRunId?: string; delta: string; phase?: TextStreamPhase; turnId?: string }
-  | { type: 'text_complete'; sessionId: string; text: string; phase?: TextStreamPhase; answerProtocol?: 'explicit-v1'; answerRunId?: string; answerCommitted?: boolean; isIntermediate?: boolean; turnId?: string; parentToolUseId?: string; timestamp?: number; messageId?: string }
+  | { type: 'text_delta'; sessionId: string; answerProtocol?: 'explicit-v1'; answerRunId?: string; delta: string; phase?: TextStreamPhase; presentationProtocol?: 'native' | 'marker-v1' | 'legacy'; turnId?: string }
+  | { type: 'text_complete'; sessionId: string; text: string; phase?: TextStreamPhase; presentationProtocol?: 'native' | 'marker-v1' | 'legacy'; answerProtocol?: 'explicit-v1'; answerRunId?: string; answerCommitted?: boolean; isIntermediate?: boolean; turnId?: string; parentToolUseId?: string; timestamp?: number; messageId?: string }
   | { type: 'tool_start'; sessionId: string; answerProtocol?: 'explicit-v1'; answerRunId?: string; toolName: string; toolUseId: string; toolInput: Record<string, unknown>; toolIntent?: string; toolDisplayName?: string; toolDisplayMeta?: ToolDisplayMeta; turnId?: string; parentToolUseId?: string; timestamp?: number }
   | { type: 'tool_result'; sessionId: string; answerProtocol?: 'explicit-v1'; answerRunId?: string; toolUseId: string; toolName: string; result: string; content?: AgentToolResultContent[]; turnId?: string; parentToolUseId?: string; isError?: boolean; timestamp?: number }
   | { type: 'error'; sessionId: string; error: string; timestamp?: number }

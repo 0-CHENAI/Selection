@@ -4,11 +4,17 @@ import {
   PROGRAMMATIC_SMOOTH_SCROLL_MS,
   SHOW_SCROLL_BUTTON_THRESHOLD_PX,
   STICK_TO_BOTTOM_THRESHOLD_PX,
+  FOLLOW_PAINT_SHIFT_MAX_STEP_PX,
+  applyFollowPaintTransform,
+  compensateFollowPaintShift,
+  decayFollowPaintShift,
   forceStickToBottomState,
   isProgrammaticScrollLocked,
   resolveStickToBottomState,
   shouldApplyUserScroll,
   shouldLoadEarlierTurns,
+  followStickyViewportToBottom,
+  snapStickyViewportToBottom,
   type ScrollMetrics,
 } from '../ChatDisplay.scroll-to-bottom'
 
@@ -29,26 +35,94 @@ describe('streaming resize follows frames and reader intent (#328)', () => {
     expect(unlocks).toBe(2)
   })
 
-  test('coalesces continuous resize events and rechecks reader intent before scrolling', () => {
-    expect(body).toBeDefined()
-    const focused = { current: true }, sticky = { current: true }
-    const frames: Array<() => void> = []
-    const scrolls: unknown[] = []
-    const viewport = { scrollHeight: 2000, scrollTo: (options: unknown) => scrolls.push(options) }
-    const makeObserver = new Function('requestAnimationFrame', 'isFocusedPanelRef', 'isStickToBottomRef', 'viewport', 'applyStickState',
-      `let scrollFrame = null; return () => { ${body} };`)
-    const resize = makeObserver((fn: () => void) => { frames.push(fn); return frames.length }, focused, sticky, viewport, () => {})
-    for (let i = 0; i < 20; i++) resize()
-    expect(frames.length).toBe(1)
+  test('resize follows until reader pauses, including when the panel loses focus', () => {
+    const resize = new Function('isStickToBottomRef', 'snapStickyViewportToBottom', 'viewport', 'isFocusedPanelRef', body!)
+    const sticky = { current: true }
+    const focused = { current: true }
+    const viewport = { scrollTop: 0, scrollHeight: 1200, clientHeight: 600 }
+    resize(sticky, snapStickyViewportToBottom, viewport, focused)
+    expect(viewport.scrollTop).toBe(600)
+    viewport.clientHeight = 400
+    resize(sticky, snapStickyViewportToBottom, viewport, focused)
+    expect(viewport.scrollTop).toBe(800)
     sticky.current = false
-    frames.shift()!()
-    expect(scrolls).toEqual([])
-    sticky.current = true
-    resize(); frames.shift()!()
-    expect(scrolls).toEqual([{ top: 2000, behavior: 'instant' }])
-    viewport.scrollHeight = 2400
-    resize(); frames.shift()!()
-    expect(scrolls[1]).toEqual({ top: 2400, behavior: 'instant' })
+    focused.current = false
+    viewport.scrollTop = 300
+    viewport.scrollHeight = 1500
+    resize(sticky, snapStickyViewportToBottom, viewport, focused)
+    expect(viewport.scrollTop).toBe(300)
+  })
+
+  test('pins growth before paint without translating the transcript', () => {
+    expect(body).toBeDefined()
+    expect(source).toContain('snapStickyViewportToBottom')
+    expect(body).toContain('snapStickyViewportToBottom')
+    expect(body).not.toContain('requestAnimationFrame')
+    expect(body).not.toContain('applyFollowPaintTransform')
+    expect(body).not.toContain('compensateFollowPaintShift')
+    expect(source).not.toContain('applyFollowPaintTransform')
+  })
+})
+
+describe('followStickyViewportToBottom', () => {
+  test('approaches the bottom over several frames instead of snapping', () => {
+    const viewport = { scrollTop: 0, scrollHeight: 2000, clientHeight: 800 }
+    expect(followStickyViewportToBottom(viewport, {
+      focused: true, sticky: true, reduceMotion: false, elapsedMs: 16, target: 1200,
+    })).toBe(true)
+    expect(viewport.scrollTop).toBeGreaterThan(0)
+    expect(viewport.scrollTop).toBeLessThan(400)
+  })
+
+  test('snaps when motion is reduced and leaves a reader who scrolled away', () => {
+    const reduced = { scrollTop: 0, scrollHeight: 2000, clientHeight: 800 }
+    expect(followStickyViewportToBottom(reduced, {
+      focused: true, sticky: true, reduceMotion: true, elapsedMs: 16,
+    })).toBe(false)
+    expect(reduced.scrollTop).toBe(1200)
+
+    const away = { scrollTop: 100, scrollHeight: 2000, clientHeight: 800 }
+    expect(followStickyViewportToBottom(away, {
+      focused: true, sticky: false, reduceMotion: false, elapsedMs: 16,
+    })).toBe(false)
+    expect(away.scrollTop).toBe(100)
+  })
+})
+
+describe('follow paint shift', () => {
+  test('compensates a wrap in full then decays at most 8px per frame', () => {
+    const compensated = compensateFollowPaintShift({ shift: 0, velocity: 0 }, 24)
+    expect(compensated.shift).toBe(24)
+    const next = decayFollowPaintShift(compensated, 16.67, false)
+    expect(compensated.shift - next.shift).toBeLessThanOrEqual(FOLLOW_PAINT_SHIFT_MAX_STEP_PX + 0.01)
+    expect(next.shift).toBeGreaterThan(14)
+    expect(next.more).toBe(true)
+  })
+
+  test('clears the compositor layer when motion is reduced or lag is gone', () => {
+    expect(decayFollowPaintShift({ shift: 24, velocity: 0 }, 16, true)).toEqual({
+      shift: 0, velocity: 0, more: false,
+    })
+    const element = { style: { transform: 'translate3d(0, 12px, 0)', willChange: 'transform' } }
+    applyFollowPaintTransform(element, 12)
+    expect(element.style.transform).toBe('translate3d(0, 12px, 0)')
+    applyFollowPaintTransform(element, 0)
+    expect(element.style.transform).toBe('')
+    expect(element.style.willChange).toBe('')
+  })
+})
+
+describe('snapStickyViewportToBottom', () => {
+  test('snaps immediately when the reader is sticky or the panel is unfocused', () => {
+    const viewport = { scrollTop: 100, scrollHeight: 2000, clientHeight: 800 }
+    expect(snapStickyViewportToBottom(viewport, { focused: true, sticky: true })).toBe(true)
+    expect(viewport.scrollTop).toBe(1200)
+  })
+
+  test('leaves the viewport alone when the focused reader has scrolled away', () => {
+    const viewport = { scrollTop: 100, scrollHeight: 2000, clientHeight: 800 }
+    expect(snapStickyViewportToBottom(viewport, { focused: true, sticky: false })).toBe(false)
+    expect(viewport.scrollTop).toBe(100)
   })
 })
 
@@ -145,3 +219,17 @@ describe('shouldLoadEarlierTurns — do not fight scroll-to-bottom', () => {
     expect(shouldLoadEarlierTurns(400, false)).toBe(false)
   })
 })
+
+ test('response bottom remains fixed through successive paragraph growth; scrolling up interrupts it', () => {
+   const viewport = { scrollTop: 400, scrollHeight: 1000, clientHeight: 600 }
+   for (const growth of [24, 160, 480, 32]) {
+     viewport.scrollHeight += growth
+     snapStickyViewportToBottom(viewport, { focused: true, sticky: true })
+     expect(viewport.scrollHeight - viewport.scrollTop).toBe(viewport.clientHeight)
+   }
+   viewport.scrollTop -= 200
+   const readingPosition = viewport.scrollTop
+   viewport.scrollHeight += 300
+   snapStickyViewportToBottom(viewport, { focused: true, sticky: false })
+   expect(viewport.scrollTop).toBe(readingPosition)
+ })

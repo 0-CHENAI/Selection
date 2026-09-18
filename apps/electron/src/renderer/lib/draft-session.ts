@@ -3,6 +3,10 @@ import type { Session } from '../../shared/types'
 /** In-memory key for draft composer options. Never persisted as a real session. */
 export const DRAFT_SESSION_OPTIONS_ID = '__draft__'
 
+export function isDraftSessionOptionsId(sessionId?: string | null): boolean {
+  return sessionId === DRAFT_SESSION_OPTIONS_ID
+}
+
 export function createDraftDisplaySession(input: {
   workspaceId: string
   model?: string

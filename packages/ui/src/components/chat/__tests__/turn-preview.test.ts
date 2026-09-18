@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test'
-import { getActiveTurnPreview, type ActivityItem } from '../turn-utils'
+import { getActiveTurnPreview, countWorkRecords, type ActivityItem } from '../turn-utils'
 
 function createActivity(overrides: Partial<ActivityItem>): ActivityItem {
   return {
@@ -12,6 +12,28 @@ function createActivity(overrides: Partial<ActivityItem>): ActivityItem {
 }
 
 describe('getActiveTurnPreview', () => {
+  it('没有意图的搜索调用在等待下一步时保留查询摘要', () => {
+    const activities = [createActivity({
+      toolName: 'WebSearch', displayName: '搜索网页',
+      toolInput: { query: 'AnySearch\n使用方法', count: 5 },
+    })]
+    for (const phase of ['tool_active', 'awaiting', 'streaming'] as const) {
+      expect(getActiveTurnPreview(activities, phase)).toBe('搜索网页 · AnySearch 使用方法')
+    }
+  })
+
+  it('新的无意图工具覆盖旧摘要，且不会展示原始结果或任意参数', () => {
+    const activities = [
+      createActivity({ intent: '旧步骤', timestamp: 1 }),
+      createActivity({ toolName: 'Read', displayName: '读取文件',
+        toolInput: { file_path: '/tmp/report.md' }, timestamp: 2 }),
+    ]
+    expect(getActiveTurnPreview(activities, 'awaiting')).toBe('读取文件 · /tmp/report.md')
+    activities.push(createActivity({ toolName: 'custom_tool', displayName: '检查状态',
+      toolInput: { token: 'secret' }, content: '原始结果', timestamp: 3 }))
+    expect(getActiveTurnPreview(activities, 'awaiting')).toBe('检查状态')
+  })
+
   it('keeps the latest step title when native answer streaming begins', () => {
     const activities = [
       createActivity({ intent: '列出知识库', timestamp: 1 }),
@@ -115,4 +137,14 @@ describe('getActiveTurnPreview', () => {
 
     expect(getActiveTurnPreview(activities, 'awaiting')).toBeUndefined()
   })
+})
+
+
+it('记录总数包含过程说明，忽略空占位并对工具更新去重', () => {
+  const tools = Array.from({ length: 2 }, (_, i) => createActivity({ id: `tool-${i}`, toolUseId: `call-${i}` }))
+  const notes = Array.from({ length: 3 }, (_, i) => createActivity({ id: `note-${i}`, type: 'intermediate', content: `过程说明${i}` }))
+  expect(countWorkRecords([...tools, ...notes])).toBe(5)
+  expect(countWorkRecords([...tools, ...notes, createActivity({ id: 'empty', type: 'intermediate', content: '\n', status: 'running' })])).toBe(5)
+  expect(countWorkRecords([...tools, ...notes.map(note => ({ ...note, status: 'completed' as const }))])).toBe(5)
+  expect(countWorkRecords([...tools, ...notes, { ...tools[0]!, id: 'updated', status: 'completed' }])).toBe(5)
 })

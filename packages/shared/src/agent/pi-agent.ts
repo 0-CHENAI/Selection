@@ -1,3 +1,4 @@
+import { constrainThinkingLevel } from './thinking-levels.ts';
 /**
  * Pi Backend (Subprocess RPC Client)
  *
@@ -49,6 +50,7 @@ import { wrapSpawnSessionToolError } from './spawn-session-tool.ts';
 import type { Workspace } from '../config/storage.ts';
 
 // Event adapter
+import { MARKER_ANSWER_PROMPT } from './backend/pi/answer-boundary.ts';
 import { PiEventAdapter } from './backend/pi/event-adapter.ts';
 import { EventQueue } from './backend/event-queue.ts';
 
@@ -391,6 +393,10 @@ export class PiAgent extends BaseAgent {
   private answerDelivery: AnswerDeliveryControl | undefined;
   private answerAccepted = false;
 
+  configurePresentationProtocol(protocol: 'native' | 'marker-v1' | 'legacy'): void {
+    this.config.presentationProtocol = protocol;
+  }
+
   configureAnswerDelivery(control: AnswerDeliveryControl | undefined): void {
     this.answerDelivery = control;
     this.answerAccepted = false;
@@ -685,7 +691,7 @@ export class PiAgent extends BaseAgent {
       apiKey: legacyApiKey || '',
       model: this._model,
       cwd,
-      thinkingLevel: this._thinkingLevel,
+      thinkingLevel: this.resolveConfiguredThinkingLevel(this._thinkingLevel),
       workspaceRootPath: this.config.workspace.rootPath,
       sessionId,
       sessionPath,
@@ -2438,6 +2444,7 @@ export class PiAgent extends BaseAgent {
     this.eventQueue.reset();
     this.currentUserMessage = message;
     this.adapter.startTurn();
+    this.adapter.setPresentationProtocol(this.config.presentationProtocol ?? 'legacy');
 
     // Refresh session-scoped tool callbacks (for SubmitPlan, source auth, etc.)
     // IMPORTANT: merge (don't replace) so SessionManager-provided browserPaneFns
@@ -2579,8 +2586,8 @@ export class PiAgent extends BaseAgent {
       // does (buildTextPrompt / buildSDKUserMessage append context to the tail).
       const fullSystemPrompt = [
         systemPrompt,
-        this.answerDelivery ? ANSWER_DELIVERY_PROMPT : undefined,
         ...stableParts,
+        this.answerDelivery ? ANSWER_DELIVERY_PROMPT : this.config.presentationProtocol === 'marker-v1' ? MARKER_ANSWER_PROMPT : undefined,
       ].filter(Boolean).join('\n\n');
 
       // User message: volatile context + attachments + the actual message
@@ -2596,6 +2603,7 @@ export class PiAgent extends BaseAgent {
       const turnId = `turn-${++this.rpcIdCounter}`;
       this.send({
         type: 'prompt',
+        presentationProtocol: this.config.presentationProtocol,
         answerRunId: this.answerDelivery?.runId,
         answerRecovery: this.answerDelivery?.recovery,
         id: turnId,
@@ -2717,6 +2725,7 @@ export class PiAgent extends BaseAgent {
       authType: this.config.authType,
       runtime: getBackendRuntime(this.config),
     });
+    if (updated) this.setThinkingLevel(this.getThinkingLevel());
     this.debug(`Runtime config refreshed in subprocess: ${previousModel} → ${update.model}`);
     return updated;
   }
@@ -2740,12 +2749,20 @@ export class PiAgent extends BaseAgent {
     if (this.subprocess) {
       this.debug(`Forwarding model change to subprocess: ${previousModel} → ${model}`);
       this.send({ type: 'set_model', model });
+      this.setThinkingLevel(this.getThinkingLevel());
     } else {
       this.debug(`Model updated but no subprocess to forward to: ${previousModel} → ${model}`);
     }
   }
 
+  private resolveConfiguredThinkingLevel(level: ThinkingLevel): ThinkingLevel {
+    const model = getBackendRuntime(this.config).customModels?.find(entry =>
+      connectionModelIdsMatch(typeof entry === 'string' ? entry : entry.id, this.getModel()));
+    return constrainThinkingLevel(level, typeof model === 'object' ? model.supportedThinkingLevels : undefined);
+  }
+
   override setThinkingLevel(level: ThinkingLevel): void {
+    level = this.resolveConfiguredThinkingLevel(level);
     const previousLevel = this.getThinkingLevel();
     super.setThinkingLevel(level);
     // Forward to subprocess so it uses the new thinking level on next turn
