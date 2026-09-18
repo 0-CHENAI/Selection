@@ -1,6 +1,29 @@
-export const SEMANTIC_REVEAL_MS = 200
-export const SEMANTIC_REVEAL_MAX_MS = 300
+export const SEMANTIC_REVEAL_MS = 240
+export const SEMANTIC_REVEAL_MAX_MS = 320
+export const SEMANTIC_REVEAL_EASING = 'linear'
 const MAX_UNITS_PER_FRAME = 32
+
+/** Reverse-log fade: stay translucent early, settle to ink. */
+export function logarithmicOpacity(progress: number): number {
+  const p = Number.isFinite(progress) ? Math.max(0, Math.min(1, progress)) : 1
+  return 1 - Math.log1p(5 * (1 - p)) / Math.log(6)
+}
+
+export function semanticRevealFrames() {
+  return [0, 0.2, 0.4, 0.6, 0.8, 1].map(offset => ({
+    offset,
+    opacity: logarithmicOpacity(offset),
+  }))
+}
+
+export function semanticRevealTiming() {
+  return {
+    duration: SEMANTIC_REVEAL_MS,
+    delay: 0,
+    easing: SEMANTIC_REVEAL_EASING,
+    fill: 'backwards' as FillMode,
+  }
+}
 
 export function getRevealUnits(root: HTMLElement): HTMLElement[] {
   const selector = 'p,h1,h2,h3,h4,h5,h6,li,blockquote,pre,tr,[data-ca-block-type]'
@@ -113,14 +136,15 @@ export function createSemanticReveal(root: HTMLElement, animateInitial: boolean)
         continue
       }
       const rect = unit.getBoundingClientRect()
-      const append = previous && text.startsWith(previous.text) && Math.abs(rect.width - previous.width) < 1
-      const inset = previous && !previous.pending ? (append ? appendedRevealInset(previous.height, rect.height) : 0) : 100
+      // A paragraph fades only on admission. Appending tokens or wrapping
+      // onto another line must not replay an effect over text being read.
+      const inset = previous && !previous.pending ? 0 : 100
       const state = previous ?? { text, height: 0, width: 0, pending: false, clip: unit.style.clipPath }
       state.text = text
       states.set(unit, state)
       measurements.push({ unit, state, height: rect.height, width: rect.width, inset, below: rect.top >= bottom, animate: rect.bottom > top && rect.height > 0 })
     }
-    measurements.forEach(({ unit, state, height, width, inset, below, animate }, index) => {
+    measurements.forEach(({ unit, state, height, width, inset, below, animate }) => {
       state.height = height
       state.width = width
       if (below && observer && inset === 100) {
@@ -135,16 +159,7 @@ export function createSemanticReveal(root: HTMLElement, animateInitial: boolean)
       if (inset <= 0) return
       expose(unit)
       if (!animate) return
-      const frames = inset < 100
-        ? [{ clipPath: `inset(0 0 ${inset}% 0)` }, { clipPath: 'inset(0 0 0% 0)' }]
-        : height > 132
-          ? [{ clipPath: 'inset(0 0 100% 0)' }, { clipPath: 'inset(0 0 0% 0)' }]
-          : [{ opacity: 0 }, { opacity: 1 }]
-      const animation = unit.animate(frames, {
-        duration: SEMANTIC_REVEAL_MS,
-        delay: inset < 100 ? 0 : Math.min(index * 35, 100),
-        easing: 'ease-out', fill: 'backwards',
-      })
+      const animation = unit.animate(semanticRevealFrames(), semanticRevealTiming())
       active.set(unit, animation)
       animation.onfinish = () => { if (active.get(unit) === animation) active.delete(unit) }
     })

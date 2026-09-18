@@ -28,6 +28,7 @@ import { wrapWithSafeProxy } from './safe-components'
 import { MARKDOWN_MATH_OPTIONS, protectCurrencyDollars } from './math-options'
 import { markdownUrlTransform } from './url-transform'
 import { useSemanticReveal } from './useSemanticReveal'
+import { useProgressiveDomText } from './useProgressiveDomText'
 
 /**
  * Names of preview-block code-fence types that recursive `Markdown` callers
@@ -598,6 +599,7 @@ export function Markdown({
 }: MarkdownProps) {
   const revealRoot = React.useRef<HTMLDivElement>(null)
   useSemanticReveal(revealRoot, children, revealStartTime, isStreaming, id)
+  useProgressiveDomText(revealRoot, isStreaming)
   // Get collapsible context if enabled
   const collapsibleContext = useCollapsibleMarkdown()
 

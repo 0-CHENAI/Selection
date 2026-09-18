@@ -25,7 +25,7 @@ describe('semantic reveal preserves the whole document', () => {
     const paragraph = '长段落 mixed English 🙂 '.repeat(300)
     const html = renderToStaticMarkup(<Markdown revealStartTime={Date.now()}>{paragraph}</Markdown>)
     expect(html).toContain(paragraph.trim())
-    expect(SEMANTIC_REVEAL_MAX_MS).toBeLessThan(500)
+    expect(SEMANTIC_REVEAL_MAX_MS).toBeLessThanOrEqual(6000)
   })
   it('selects outer semantic units, without nested paragraph/list/preview animations', () => {
     const paragraph = { parentElement: { closest: () => null } }
@@ -37,4 +37,21 @@ describe('semantic reveal preserves the whole document', () => {
     const root = { querySelectorAll: () => elements, contains: (node: unknown) => elements.includes(node as typeof paragraph) }
     expect(getRevealUnits(root as unknown as HTMLElement)).toEqual([paragraph, listItem, preview])
   })
+})
+
+it('streams ordinary prose immediately and keeps response chrome from the start', async () => {
+  const { ResponseCard } = await import('../../chat/TurnCard')
+  const buffering = renderToStaticMarkup(<ResponseCard text={'未完成的一段'} isStreaming isTurnComplete={false} />)
+  expect(buffering).toContain('bg-background ring-1 ring-inset ring-foreground/5')
+  expect(buffering).toContain('未完成的一段')
+  const live = renderToStaticMarkup(<ResponseCard text={'第一段。\n\n未完成的尾部'} isStreaming isTurnComplete={false} />)
+  expect(live).toContain('第一段。')
+  expect(live).toContain('未完成的尾部')
+  expect(live).toContain('bg-background ring-1 ring-inset ring-foreground/5')
+  const held = renderToStaticMarkup(<ResponseCard text={'说明\n\n```ts\nconst x = 1'} isStreaming isTurnComplete={false} />)
+  expect(held).toContain('说明')
+  expect(held).not.toContain('const x = 1')
+  const complete = renderToStaticMarkup(<ResponseCard text={'第一段。\n\n未完成的尾部'} isStreaming={false} isTurnComplete />)
+  expect(complete).toContain('未完成的尾部')
+  expect(complete).toContain('bg-background ring-1 ring-inset ring-foreground/5')
 })

@@ -5,7 +5,7 @@ const moduleUrl = new URL('../semantic-reveal.ts', import.meta.url).href
 // contaminate the neighboring real React/SSR tests.
 const harness = String.raw`
 import assert from 'node:assert/strict';
-const { createSemanticReveal, appendedRevealInset } = await import(MODULE_URL);
+const { createSemanticReveal, appendedRevealInset, SEMANTIC_REVEAL_MAX_MS, SEMANTIC_REVEAL_MS, SEMANTIC_REVEAL_EASING, semanticRevealFrames } = await import(MODULE_URL);
 function events() {
   const listeners = new Map();
   return {
@@ -36,13 +36,16 @@ c.update(true,true);
 assert.equal(animations.length,1,'growth within a line must not fade the old line');
 first.textContent+=' next line'; first.height=44;
 c.update(true,true);
-assert.equal(animations.length,2,'new visual line must animate');
-assert.equal(animations[1].frames[0].clipPath,'inset(0 0 50% 0)');
-assert.equal(animations[1].frames[0].opacity,undefined,'old text must stay opaque');
+assert.equal(animations.length,1,'growing paragraphs must not animate again');
 window.emit('keydown');
 units.push(unit('new paragraph'));
 c.update(true,true);
-assert.equal(animations.length,3,'ordinary keys cannot disable future paragraphs');
+assert.equal(animations.length,2,'ordinary keys cannot disable future paragraphs');
+assert.deepEqual(animations[1].frames, semanticRevealFrames());
+assert.equal(animations[1].options.duration, SEMANTIC_REVEAL_MS);
+assert.equal(animations[1].options.easing, SEMANTIC_REVEAL_EASING);
+assert.ok(!('transform' in animations[1].frames[0]), 'new paragraphs fade in place; they must not lift');
+assert.ok(animations[1].frames[1].opacity < 0.45, 'early fade stays translucent');
 reads=0;
 first.textContent+=' third line'; first.height=66;
 c.update(true,true);
@@ -63,10 +66,11 @@ units=Array.from({length:1000},(_,i)=>unit('unit'+i));
 reads=0; operations=[];
 const large=createSemanticReveal(root,true);large.update(true,true);
 assert.equal(reads,32);
+assert.ok(animations.slice(-32).every(a => a.options.delay === 0), 'incoming paragraphs animate immediately, without replaying a completed answer');
 const firstWrite=operations.indexOf('write');
 assert.ok(firstWrite>=0);assert.ok(!operations.slice(firstWrite).includes('read'));
 large.update(false,true);
-await new Promise(resolve=>setTimeout(resolve,320));
+await new Promise(resolve=>setTimeout(resolve,SEMANTIC_REVEAL_MAX_MS + 20));
 assert.ok(animations.every(a=>a.cancelled),'completion must flush within bounded time');
 large.dispose();
 assert.equal(appendedRevealInset(60,80),25);
@@ -76,10 +80,10 @@ console.log('lifecycle assertions passed');
 `
 
 describe('incremental semantic reveal lifecycle (#328)', () => {
-  it('tracks new lines, preserves old text and bounds work/completion', () => {
+  it('fades new paragraphs once, preserves old text and bounds work/completion', () => {
     const result = Bun.spawnSync([process.execPath, '--eval', harness.replace('MODULE_URL', JSON.stringify(moduleUrl))], { stdout: 'pipe', stderr: 'pipe' })
     expect(new TextDecoder().decode(result.stderr)).toBe('')
     expect(result.exitCode).toBe(0)
     expect(new TextDecoder().decode(result.stdout)).toContain('lifecycle assertions passed')
-  })
+  }, 10000)
 })

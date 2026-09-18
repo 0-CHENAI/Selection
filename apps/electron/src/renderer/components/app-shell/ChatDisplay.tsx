@@ -92,6 +92,7 @@ import {
   resolveStickToBottomState,
   shouldApplyUserScroll,
   shouldLoadEarlierTurns,
+  snapStickyViewportToBottom,
   type ScrollMetrics,
 } from "./ChatDisplay.scroll-to-bottom"
 
@@ -579,6 +580,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
   const showScrollToBottomRef = React.useRef(false)
   showScrollToBottomRef.current = showScrollToBottom
   const ignoreScrollUnstickUntilRef = React.useRef(0)
+  const followRafRef = React.useRef<number | null>(null)
   const applyStickState = React.useCallback((
     metrics: ScrollMetrics | null,
     options?: { forceStick?: boolean; ignoreUnstickMs?: number },
@@ -598,11 +600,16 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
     ))
   }, [])
   const scrollToLatest = React.useCallback((behavior: ScrollBehavior) => {
-    const resolved: ScrollBehavior = reduceMotion ? 'instant' : behavior
+    const resolved: ScrollBehavior = reduceMotion || behavior === 'instant' ? 'instant' : behavior
     applyStickState(null, {
       forceStick: true,
       ignoreUnstickMs: programmaticScrollLockMs(resolved),
     })
+    const viewport = scrollViewportRef.current
+    if (resolved === 'instant' && viewport) {
+      snapStickyViewportToBottom(viewport, { focused: true, sticky: true })
+      return
+    }
     messagesEndRef.current?.scrollIntoView({ behavior: resolved })
   }, [applyStickState, reduceMotion])
   // Mirror isFocusedPanel into a ref so the ResizeObserver closure reads the latest value
@@ -1203,6 +1210,8 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
   const handleScroll = React.useCallback(() => {
     const viewport = scrollViewportRef.current
     if (!viewport) return
+    // A same-frame pin already wrote scrollTop. Reading layout here drops FPS.
+    if (followRafRef.current != null) return
     const metrics = readScrollMetrics(viewport)
     const { scrollTop } = metrics
     const atBottom = isAtBottom(metrics)
@@ -1285,28 +1294,28 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
     const viewport = scrollViewportRef.current
     if (!viewport) return
 
-    // Coalesce layout changes into one frame. Continuous output must not reset
-    // a debounce timer forever, or queue overlapping smooth-scroll animations.
-    let scrollFrame: number | null = null
+    const previousOverflowAnchor = viewport.style.overflowAnchor
+    viewport.style.overflowAnchor = 'none'
+    const content = viewport.firstElementChild
     const resizeObserver = new ResizeObserver(() => {
-      if (scrollFrame != null) return
-      scrollFrame = requestAnimationFrame(() => {
-        scrollFrame = null
-        if (isFocusedPanelRef.current && !isStickToBottomRef.current) return
-        if (!isFocusedPanelRef.current) applyStickState(null, { forceStick: true })
-        viewport.scrollTo({ top: viewport.scrollHeight, behavior: 'instant' })
+      if (isFocusedPanelRef.current && !isStickToBottomRef.current) return
+      if (!isFocusedPanelRef.current) applyStickState(null, { forceStick: true })
+      followRafRef.current = 1
+      snapStickyViewportToBottom(viewport, {
+        focused: isFocusedPanelRef.current,
+        sticky: isStickToBottomRef.current,
       })
+      followRafRef.current = null
     })
 
-    // Observe the scroll content container (first child of viewport)
-    const content = viewport.firstElementChild
     if (content) {
       resizeObserver.observe(content)
     }
 
     return () => {
+      viewport.style.overflowAnchor = previousOverflowAnchor
       resizeObserver.disconnect()
-      if (scrollFrame != null) cancelAnimationFrame(scrollFrame)
+      followRafRef.current = null
     }
   }, [session?.id, applyStickState])
 
@@ -1336,9 +1345,10 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
     if (!messageActuallyChanged || !countIncreased) return
     if (lastMessageRole !== 'user') return
 
-    // Sending a message should always re-stick to bottom.
+    // Instant pin — a smooth scrollIntoView here fights the same-frame
+    // resize snap while the first assistant tokens arrive.
     requestAnimationFrame(() => {
-      scrollToLatest(isFocusedPanelRef.current ? 'smooth' : 'instant')
+      scrollToLatest('instant')
     })
   }, [session?.id, messageCount, lastMessageId, lastMessageRole, scrollToLatest])
 
@@ -1392,10 +1402,8 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
       })
     }
 
-    // Immediately scroll to bottom after sending - use requestAnimationFrame
-    // to ensure the DOM has updated with the new message
     requestAnimationFrame(() => {
-      scrollToLatest('smooth')
+      scrollToLatest('instant')
     })
   }
 

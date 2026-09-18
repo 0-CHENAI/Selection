@@ -11,6 +11,7 @@ export {
   BUFFER_CONFIG,
 } from './stream-buffer'
 export { useStreamingReveal } from './useStreamingReveal'
+export { useFrameSource } from './useFrameSource'
 
 // Components
 export { TurnCard, ResponseCard, SIZE_CONFIG, ActivityStatusIcon, type TurnCardProps, type ResponseCardProps, type ActivityItem, type ActivityStatus, type ResponseContent, type TodoItem } from './TurnCard'
