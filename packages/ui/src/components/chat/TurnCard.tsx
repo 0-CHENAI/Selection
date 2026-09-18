@@ -1659,9 +1659,6 @@ export function ResponseCard({
     () => parseSkillUsedMarkers(text, isStreaming),
     [text, isStreaming],
   )
-  const actionsVisible = useCompletionActions(
-    ((isTurnComplete ?? !isStreaming) && !isCommentary) || variant === 'plan',
-  )
   const responseText = parsedSkillUsage.content
   const frameText = useFrameSource(responseText, isStreaming)
   // Copy to clipboard state
@@ -1696,6 +1693,11 @@ export function ResponseCard({
   )
   const [annotationOverlay, setAnnotationOverlay] = useState<{ rects: AnnotationOverlayRect[]; chips: AnnotationOverlayChip[] }>({ rects: [], chips: [] })
   const contentRef = useRef<HTMLDivElement>(null)
+  const actionsVisible = useCompletionActions(
+    ((!isStreaming && (isTurnComplete ?? true)) && !isCommentary) || variant === 'plan',
+    contentRef,
+    responseText,
+  )
   const contentLayerRef = useRef<HTMLDivElement>(null)
   const lastPointerRef = useRef<PointerSnapshot | null>(null)
   const dragStartPointerRef = useRef<PointerSnapshot | null>(null)

@@ -38,5 +38,5 @@ export function ResponseBodyGrowth({ streaming, children }: { streaming: boolean
     }
   }, [reduceMotion, animateGrowth])
 
-  return <div ref={outer}><div ref={inner} className="flow-root">{children}</div></div>
+  return <div ref={outer} data-response-body-growth=""><div ref={inner} className="flow-root">{children}</div></div>
 }
