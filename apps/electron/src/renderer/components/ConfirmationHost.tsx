@@ -18,6 +18,7 @@ export function ConfirmationHost() {
 
   return <AlertDialog open={!!request} onOpenChange={open => { if (!open) confirmationController.settle(false) }}>
     <AlertDialogContent
+      overlayClassName="bg-black/15 dark:bg-black/35"
       onEscapeKeyDown={event => event.stopPropagation()}
       onOpenAutoFocus={event => {
         event.preventDefault()
