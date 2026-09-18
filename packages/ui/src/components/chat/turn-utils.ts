@@ -92,8 +92,10 @@ export type Turn = AssistantTurn | UserTurn | SystemTurn | AuthRequestTurn
  * pending text, intermediate rows, and tools arrive, which would remount the
  * card and replay expand/collapse on every new element.
  */
+// Pass the index in the complete turn list, not a paginated slice. Completion
+// may replace timestamps, but must preserve both the card and expansion state.
 export function getAssistantTurnUiKey(turn: AssistantTurn, index: number): string {
-  return `assistant:turn:${turn.turnId}:${turn.timestamp}:${index}`
+  return `assistant:turn:${turn.turnId}:${index}`
 }
 
 // ============================================================================

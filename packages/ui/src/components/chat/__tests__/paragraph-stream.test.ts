@@ -31,9 +31,9 @@ it('keeps the white response frame mounted and does not tween its height', () =>
   expect(src).not.toContain('if (isStreaming && !bodyText.trim())')
 })
 
-it('ordinary prose grows token by token; lists and fences stay held until complete', () => {
-  expect(streamingResponseBody('第一段', true)).toBe('第一段')
-  expect(streamingResponseBody('第一段\n\n第二', true)).toBe('第一段\n\n第二')
+it('publishes complete blocks before completion and flushes only the tail', () => {
+  expect(streamingResponseBody('第一段', true)).toBe('')
+  expect(streamingResponseBody('第一段\n\n第二', true)).toBe('第一段\n\n')
   expect(streamingResponseBody('介绍\n\n- 第一项', true)).toBe('介绍\n\n')
   expect(streamingResponseBody('说明\n\n```ts\nconst x = 1\n', true)).toBe('说明\n\n')
   expect(streamingResponseBody('第一段\n\n第二段', false)).toBe('第一段\n\n第二段')
@@ -42,5 +42,21 @@ it('ordinary prose grows token by token; lists and fences stay held until comple
 it('reserves the desktop action row while the response is still streaming', () => {
   const src = readFileSync(join(import.meta.dir, '../TurnCard.tsx'), 'utf8')
   expect(src).toContain('reserveDesktopFooter')
-  expect(src).toContain('!showCompletedChrome && "invisible pointer-events-none"')
+  expect(src).toContain('!actionsVisible && "invisible pointer-events-none"')
 })
+
+ it('holds tables without outer pipes, parenthesized lists and indented code', () => {
+  for (const block of ['名称 | 数值\n--- | ---\nA | 1\n', '1) 第一项\n\n2) 第二项', '    code\n\n    more']) {
+    expect(streamingResponseBody('前言\n\n' + block, true)).toBe('前言\n\n')
+    expect(streamingResponseBody('前言\n\n' + block, false)).toBe('前言\n\n' + block)
+  }
+ })
+ it('never rewrites a committed prefix across transport chunks', () => {
+  const text = '前言\n\n名称 | 数值\n--- | ---\nA | 1\n\n结束。'
+  let previous = ''
+  for (let n = 0; n <= text.length; n++) {
+    const visible = streamingResponseBody(text.slice(0, n), true)
+    expect(visible.startsWith(previous)).toBe(true)
+    previous = visible
+  }
+ })

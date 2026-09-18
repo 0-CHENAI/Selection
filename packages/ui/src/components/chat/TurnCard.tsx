@@ -4,6 +4,8 @@ import i18n from 'i18next'
 import { localizedToolLabel } from './tool-labels'
 import { completedParagraphs, streamingResponseBody } from './paragraph-stream'
 import { useFrameSource } from './useFrameSource'
+import { ResponseBodyGrowth } from './ResponseBodyGrowth'
+import { useCompletionActions } from './useCompletionActions'
 import { useTranslation } from 'react-i18next'
 import type { ToolDisplayMeta, AnnotationV1, AgentToolResultContent } from '@craft-agent/core'
 import { normalizePath, pathStartsWith, stripPathPrefix, hasRenderableAssistantText } from '@craft-agent/core/utils'
@@ -1350,6 +1352,7 @@ export interface ResponseCardProps {
   /** Parent session ID (used to reset local annotation/island UI state on session switches) */
   sessionId?: string
   /** Underlying message ID for annotation actions */
+  revealIdentity?: string
   messageId?: string
   /** Persisted annotations for this response */
   annotations?: AnnotationV1[]
@@ -1634,6 +1637,7 @@ export function ResponseCard({
   variant = 'response',
   sessionId,
   messageId,
+  revealIdentity,
   annotations,
   onAccept,
   onAcceptWithCompact,
@@ -1656,6 +1660,9 @@ export function ResponseCard({
   const parsedSkillUsage = useMemo(
     () => parseSkillUsedMarkers(text, isStreaming),
     [text, isStreaming],
+  )
+  const actionsVisible = useCompletionActions(
+    ((isTurnComplete ?? !isStreaming) && !isCommentary) || variant === 'plan',
   )
   const responseText = parsedSkillUsage.content
   const frameText = useFrameSource(responseText, isStreaming)
@@ -2373,7 +2380,7 @@ export function ResponseCard({
   )
 
   const isCompleted = isTurnComplete ?? !isStreaming
-  // Completion uses the full received text immediately; reveal stays cosmetic.
+  // Completion releases only the final incomplete Markdown block.
   const bodyText = streamingResponseBody(isStreaming ? frameText : responseText, isStreaming)
   // Commentary must not gain final-reply actions the moment tools start.
   // Both card branches retain the keyed body when final responses complete.
@@ -2422,7 +2429,8 @@ export function ResponseCard({
             </div>
           )}
 
-          {/* Content expands fully — outer session list is the only vertical scroller */}
+          {/* Smooth received-block growth while the outer viewport stays pinned. */}
+          <ResponseBodyGrowth streaming={isStreaming && variant === 'response'}>
           <div
             key="response-content"
             ref={contentRef}
@@ -2434,7 +2442,7 @@ export function ResponseCard({
             <SkillUsedIndicator skills={parsedSkillUsage.skills} />
             <div ref={contentLayerRef} className="relative">
               <Markdown
-                id={messageId ? `${sessionId}:${messageId}` : undefined}
+                id={revealIdentity ?? (messageId ? `${sessionId}:${messageId}` : undefined)}
                 isStreaming={isStreaming && variant === 'response'}
                 mode="minimal"
                 onUrlClick={onOpenUrl}
@@ -2446,17 +2454,22 @@ export function ResponseCard({
             </div>
           </div>
 
+          </ResponseBodyGrowth>
+
           {/* Desktop footer with actions (Copy / Markdown / Accept Plan / Branch).
               Compact mode falls through to the slim Accept-Plan-only footer below.
               Streaming reserves the same row so completion only reveals actions. */}
           {reserveDesktopFooter && (
-            <div className={cn(
-              "pl-4 pr-2.5 py-2 border-t flex items-center justify-between",
+            <div
+              aria-hidden={!actionsVisible}
+              style={{ opacity: actionsVisible ? 1 : 0 }}
+              className={cn(
+              "pl-4 pr-2.5 py-2 border-t flex items-center justify-between transition-opacity duration-[650ms] ease-in-out motion-reduce:transition-none",
               showCompletedChrome ? "border-border/30 bg-muted/20" : "border-transparent",
               SIZE_CONFIG.fontSize
             )}>
               {/* Left side - Copy, View as Markdown, Annotation hint */}
-              <div className={cn("flex items-center gap-3", !showCompletedChrome && "invisible pointer-events-none")}>
+              <div className={cn("flex items-center gap-3", !actionsVisible && "invisible pointer-events-none")}>
                 {onRegenerate && !isCommentary && (
                   <button
                     onClick={onRegenerate}
@@ -2506,7 +2519,7 @@ export function ResponseCard({
               </div>
 
               {/* Right side */}
-              <div className={cn("flex items-center gap-3", !showCompletedChrome && "invisible pointer-events-none")}>
+              <div className={cn("flex items-center gap-3", !actionsVisible && "invisible pointer-events-none")}>
                 {/* Accept Plan dropdown (plan variant only, last response) */}
                 {isPlan && showAcceptPlan && onAccept && onAcceptWithCompact && (
                   <div
@@ -2867,7 +2880,7 @@ export const TurnCard = React.memo(function TurnCard({
   )
 
   const hasVisibleResponse = !!response && (
-    !!response.isStreaming || hasRenderableAssistantText(response.text)
+    hasRenderableAssistantText(streamingResponseBody(response.text, !!response.isStreaming))
   )
 
   // Don't render if nothing to show and turn is complete
@@ -3142,6 +3155,7 @@ export const TurnCard = React.memo(function TurnCard({
                 onOpenUrl={onOpenUrl}
                 onPopOut={onPopOut ? () => onPopOut(response.text) : undefined}
                 variant={response.isPlan ? 'plan' : 'response'}
+                revealIdentity={`${sessionId}:${turnId}:response`}
                 messageId={response.messageId}
                 annotations={response.annotations}
                 onAddAnnotation={onAddAnnotation}
@@ -3180,6 +3194,7 @@ export const TurnCard = React.memo(function TurnCard({
             onOpenUrl={onOpenUrl}
             onPopOut={onPopOut ? () => onPopOut(response.text) : undefined}
             variant={response.isPlan ? 'plan' : 'response'}
+            revealIdentity={`${sessionId}:${turnId}:response`}
             messageId={response.messageId}
             annotations={response.annotations}
             onAddAnnotation={onAddAnnotation}

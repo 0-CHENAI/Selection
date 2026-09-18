@@ -142,11 +142,12 @@ function isStackedActivityTool(activity: ActivityItem): boolean {
   return toolName === 'bash' || toolName.startsWith('mcp__') || toolName.startsWith('browser_')
 }
 
-function getTurnKey(turn: Turn): string {
+function getTurnKey(turn: Turn, index: number): string {
   if (turn.type === 'user') return `user-${turn.message.id}`
   if (turn.type === 'system') return `system-${turn.message.id}`
   if (turn.type === 'auth-request') return `auth-${turn.message.id}`
-  return `turn-${turn.turnId}-${turn.timestamp}`
+  // Completion replaces message IDs and timestamps; neither is a React identity.
+  return getAssistantTurnUiKey(turn, index)
 }
 
 interface ChatDisplayProps {
@@ -580,7 +581,6 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
   const showScrollToBottomRef = React.useRef(false)
   showScrollToBottomRef.current = showScrollToBottom
   const ignoreScrollUnstickUntilRef = React.useRef(0)
-  const followRafRef = React.useRef<number | null>(null)
   const applyStickState = React.useCallback((
     metrics: ScrollMetrics | null,
     options?: { forceStick?: boolean; ignoreUnstickMs?: number },
@@ -778,7 +778,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
       let turnId = ''
 
       // Use getTurnKey() for consistent IDs between text scan and DOM refs
-      turnId = getTurnKey(turn)
+      turnId = getTurnKey(turn, turnIndex)
 
       if (turn.type === 'user') {
         const content = turn.message.content as unknown
@@ -1210,14 +1210,14 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
   const handleScroll = React.useCallback(() => {
     const viewport = scrollViewportRef.current
     if (!viewport) return
-    // A same-frame pin already wrote scrollTop. Reading layout here drops FPS.
-    if (followRafRef.current != null) return
     const metrics = readScrollMetrics(viewport)
     const { scrollTop } = metrics
     const atBottom = isAtBottom(metrics)
     const now = Date.now()
     if (atBottom) ignoreScrollUnstickUntilRef.current = 0
-    if (shouldApplyUserScroll(now, ignoreScrollUnstickUntilRef.current, atBottom)) {
+    // Layout/stream growth can also emit scroll events. Only reader intent
+    // may release the sticky bottom; geometry alone must not switch it off.
+    if ((!isStickToBottomRef.current || atBottom) && shouldApplyUserScroll(now, ignoreScrollUnstickUntilRef.current, atBottom)) {
       applyStickState(metrics)
     }
 
@@ -1265,12 +1265,20 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
       cancelProgrammaticLock()
       isStickToBottomRef.current = false
     }
+    // Pointer interaction (including dragging the scrollbar) hands scrolling
+    // back to the user even while a follow frame is scheduled.
+    const handlePointerDown = () => {
+      cancelProgrammaticLock()
+      isStickToBottomRef.current = false
+    }
+    viewport.addEventListener('pointerdown', handlePointerDown)
     viewport.addEventListener('keydown', handleScrollKey)
     viewport.addEventListener('scroll', handleScroll, { passive: true })
     viewport.addEventListener('wheel', handleWheel, { passive: true })
     viewport.addEventListener('touchmove', handleTouchMove, { passive: true })
     viewport.addEventListener('touchstart', cancelProgrammaticLock, { passive: true })
     return () => {
+      viewport.removeEventListener('pointerdown', handlePointerDown)
       viewport.removeEventListener('keydown', handleScrollKey)
       viewport.removeEventListener('scroll', handleScroll)
       viewport.removeEventListener('wheel', handleWheel)
@@ -1298,24 +1306,25 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
     viewport.style.overflowAnchor = 'none'
     const content = viewport.firstElementChild
     const resizeObserver = new ResizeObserver(() => {
-      if (isFocusedPanelRef.current && !isStickToBottomRef.current) return
-      if (!isFocusedPanelRef.current) applyStickState(null, { forceStick: true })
-      followRafRef.current = 1
+      if (!isStickToBottomRef.current) return
+      // Match content growth before paint: an eased scroll lets the card's
+      // bottom drift away from the composer. Only the new content fades in.
       snapStickyViewportToBottom(viewport, {
         focused: isFocusedPanelRef.current,
         sticky: isStickToBottomRef.current,
       })
-      followRafRef.current = null
     })
 
     if (content) {
       resizeObserver.observe(content)
     }
+    // Composer/window resizing changes the available height without changing
+    // the transcript height. Keep following in that case as well.
+    resizeObserver.observe(viewport)
 
     return () => {
       viewport.style.overflowAnchor = previousOverflowAnchor
       resizeObserver.disconnect()
-      followRafRef.current = null
     }
   }, [session?.id, applyStickState])
 
@@ -1592,7 +1601,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
     const items: ConversationNavigationItem[] = []
     allTurns.forEach((turn, index) => {
       if (turn.type === 'user') {
-        items.push({ key: getTurnKey(turn), index, title: turn.message.content, badges: turn.message.badges, preview: '' })
+        items.push({ key: getTurnKey(turn, index), index, title: turn.message.content, badges: turn.message.badges, preview: '' })
       } else if (turn.type === 'assistant' && turn.response?.text && items.length) {
         const item = items[items.length - 1]!
         item.preview = (item.preview + '\n' + turn.response.text).trim()
@@ -1657,7 +1666,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
       const targetTurn = allTurns[targetTurnIndex]
       if (!targetTurn) return false
 
-      const turnKey = getTurnKey(targetTurn)
+      const turnKey = getTurnKey(targetTurn, targetTurnIndex)
       const turnContainer = turnRefs.current.get(turnKey)
       if (!turnContainer) return false
 
@@ -1859,7 +1868,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
                   )}
                   {turns.map((turn, index) => {
                     // Compute turn key and check if it's a search match
-                    const turnKey = getTurnKey(turn)
+                    const turnKey = getTurnKey(turn, startIndex + index)
                     const isCurrentMatch = isSearchActive && matchingTurnIds[currentMatchIndex] === turnKey
                     const isAnyMatch = isSearchActive && matchingTurnIds.includes(turnKey)
 
@@ -1948,7 +1957,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
                     const isLastResponse = index === turns.length - 1 || !turns.slice(index + 1).some(t => t.type === 'user')
 
                     // Assistant turns - render with TurnCard (buffered streaming)
-                    const assistantUiKey = getAssistantTurnUiKey(turn, index)
+                    const assistantUiKey = getAssistantTurnUiKey(turn, startIndex + index)
                     return (
                       <div
                         key={turnKey}

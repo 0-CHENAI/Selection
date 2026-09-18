@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'bun:test'
+import { describe, expect, it, test } from 'bun:test'
 import type { Message } from '@craft-agent/core'
 import { getAssistantTurnUiKey, groupMessagesByTurn, type AssistantTurn } from '../turn-utils'
 
@@ -31,9 +31,10 @@ describe('getAssistantTurnUiKey', () => {
     const afterDemote = makeAssistantTurn({ isStreaming: true, isComplete: false })
 
     const key = getAssistantTurnUiKey(withoutResponse, 4)
+    expect(getAssistantTurnUiKey({ ...withResponse, timestamp: 999 }, 4)).toBe(key)
     expect(getAssistantTurnUiKey(withResponse, 4)).toBe(key)
     expect(getAssistantTurnUiKey(afterDemote, 4)).toBe(key)
-    expect(key).toBe('assistant:turn:pi-turn-1:123:4')
+    expect(key).toBe('assistant:turn:pi-turn-1:4')
   })
 
   it('disambiguates split cards with same turnId/timestamp via index fallback', () => {
@@ -44,8 +45,8 @@ describe('getAssistantTurnUiKey', () => {
     const keyB = getAssistantTurnUiKey(turnB, 3)
 
     expect(keyA).not.toBe(keyB)
-    expect(keyA).toBe('assistant:turn:pi-turn-1:555:2')
-    expect(keyB).toBe('assistant:turn:pi-turn-1:555:3')
+    expect(keyA).toBe('assistant:turn:pi-turn-1:2')
+    expect(keyB).toBe('assistant:turn:pi-turn-1:3')
   })
 })
 
@@ -195,4 +196,17 @@ describe('assistant expansion key through a live generation', () => {
     expect(complete.key).toBe(first.key)
     expect(complete.index).toBe(1)
   })
+})
+
+test('reused provider turn IDs remain distinct across user interruption boundaries', () => {
+  const turns = groupMessagesByTurn([
+    userMessage(),
+    finalAssistant('answer-1', 1100, '第一段回答', false),
+    { ...userMessage(), id: 'user-2', timestamp: 1200 },
+    finalAssistant('answer-2', 1300, '第二段回答', false),
+  ])
+  const keys = turns.flatMap((turn, index) => turn.type === 'assistant'
+    ? [getAssistantTurnUiKey(turn, index)] : [])
+  expect(keys).toHaveLength(2)
+  expect(new Set(keys).size).toBe(2)
 })

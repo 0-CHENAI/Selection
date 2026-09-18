@@ -35,11 +35,29 @@ describe('streaming resize follows frames and reader intent (#328)', () => {
     expect(unlocks).toBe(2)
   })
 
-  test('pins the white frame to the composer instead of translating the transcript', () => {
+  test('resize follows until reader pauses, including when the panel loses focus', () => {
+    const resize = new Function('isStickToBottomRef', 'snapStickyViewportToBottom', 'viewport', 'isFocusedPanelRef', body!)
+    const sticky = { current: true }
+    const focused = { current: true }
+    const viewport = { scrollTop: 0, scrollHeight: 1200, clientHeight: 600 }
+    resize(sticky, snapStickyViewportToBottom, viewport, focused)
+    expect(viewport.scrollTop).toBe(600)
+    viewport.clientHeight = 400
+    resize(sticky, snapStickyViewportToBottom, viewport, focused)
+    expect(viewport.scrollTop).toBe(800)
+    sticky.current = false
+    focused.current = false
+    viewport.scrollTop = 300
+    viewport.scrollHeight = 1500
+    resize(sticky, snapStickyViewportToBottom, viewport, focused)
+    expect(viewport.scrollTop).toBe(300)
+  })
+
+  test('pins growth before paint without translating the transcript', () => {
     expect(body).toBeDefined()
     expect(source).toContain('snapStickyViewportToBottom')
-    expect(source).toContain('if (followRafRef.current != null) return')
     expect(body).toContain('snapStickyViewportToBottom')
+    expect(body).not.toContain('requestAnimationFrame')
     expect(body).not.toContain('applyFollowPaintTransform')
     expect(body).not.toContain('compensateFollowPaintShift')
     expect(source).not.toContain('applyFollowPaintTransform')
@@ -201,3 +219,17 @@ describe('shouldLoadEarlierTurns — do not fight scroll-to-bottom', () => {
     expect(shouldLoadEarlierTurns(400, false)).toBe(false)
   })
 })
+
+ test('response bottom remains fixed through successive paragraph growth; scrolling up interrupts it', () => {
+   const viewport = { scrollTop: 400, scrollHeight: 1000, clientHeight: 600 }
+   for (const growth of [24, 160, 480, 32]) {
+     viewport.scrollHeight += growth
+     snapStickyViewportToBottom(viewport, { focused: true, sticky: true })
+     expect(viewport.scrollHeight - viewport.scrollTop).toBe(viewport.clientHeight)
+   }
+   viewport.scrollTop -= 200
+   const readingPosition = viewport.scrollTop
+   viewport.scrollHeight += 300
+   snapStickyViewportToBottom(viewport, { focused: true, sticky: false })
+   expect(viewport.scrollTop).toBe(readingPosition)
+ })

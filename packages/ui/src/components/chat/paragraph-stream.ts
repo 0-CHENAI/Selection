@@ -1,7 +1,9 @@
 import { unified } from 'unified'
 import remarkParse from 'remark-parse'
+import remarkGfm from 'remark-gfm'
+import { remarkLiteralTildes } from '../markdown/remark-literal-tildes'
 
-const parser = unified().use(remarkParse)
+const parser = unified().use(remarkParse).use(remarkGfm).use(remarkLiteralTildes)
 
 /** Only mount complete incoming paragraphs; never reserve space for the tail. */
 export function completedParagraphs(text: string, streaming: boolean): string {
@@ -19,30 +21,21 @@ export function completedParagraphs(text: string, streaming: boolean): string {
     offset += line.length
     if (!fence && /^\s*\n$/.test(line)) boundary = offset
   }
-  // Lists and blockquotes may continue across blank lines. Keep the whole
+  // Lists, blockquotes and indented code may continue across blank lines. Keep the whole
   // trailing container until a subsequent top-level block proves its boundary.
   if (boundary > 0) {
     const last = parser.parse(text).children.at(-1)
-    if (last && (last.type === 'list' || last.type === 'blockquote')) {
+    const lastStart = last?.position?.start.offset ?? boundary
+    const indentedCode = last?.type === 'code'
+      && !/^ {0,3}(`{3,}|~{3,})/.test(text.slice(lastStart))
+    if (last && (last.type === 'list' || last.type === 'blockquote' || indentedCode)) {
       boundary = Math.min(boundary, last.position?.start.offset ?? boundary)
     }
   }
   return text.slice(0, boundary)
 }
 
-function isUnsafeStreamingTail(tail: string): boolean {
-  const start = tail.match(/[^\s].*/)?.[0] ?? ''
-  return /^(?:`{3,}|~{3,}|(?:[-*+] |\d+\. |>)|\|| {4}|\t)/.test(start)
-}
-
-/**
- * Keep incomplete lists / fences / tables out of Markdown so they cannot
- * remount earlier blocks, but let ordinary prose grow token-by-token.
- */
+/** Publish complete Markdown blocks as they arrive, without a replay queue. */
 export function streamingResponseBody(text: string, streaming: boolean): string {
-  if (!streaming) return text
-  const committed = completedParagraphs(text, true)
-  const tail = text.slice(committed.length)
-  if (!tail.trim() || isUnsafeStreamingTail(tail)) return committed
-  return committed + tail
+  return completedParagraphs(text, streaming)
 }

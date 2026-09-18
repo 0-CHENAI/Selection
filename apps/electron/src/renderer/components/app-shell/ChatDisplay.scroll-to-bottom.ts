@@ -38,8 +38,8 @@ export function getDistanceFromBottom(metrics: ScrollMetrics): number {
 }
 
 /**
- * Pin the viewport on the same frame. Used for send / return-to-bottom,
- * not for token growth — that path eases so in-card text does not hard-jump.
+ * Pin the viewport before paint, including streaming growth, so the response
+ * bottom stays against the composer. A reader who scrolled up keeps control.
  */
 export function snapStickyViewportToBottom(
   viewport: Pick<HTMLElement, 'scrollTop' | 'scrollHeight' | 'clientHeight'>,
