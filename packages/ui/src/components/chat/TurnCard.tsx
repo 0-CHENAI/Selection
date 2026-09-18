@@ -1389,8 +1389,6 @@ export interface ResponseCardProps {
   annotationInteractionMode?: AnnotationInteractionMode
   /** Tool-bound commentary — keep the body readable, hide final-reply actions */
   isCommentary?: boolean
-  /** Tools have started on this turn; hide Streaming... on a finished preamble. */
-  hasToolActivities?: boolean
 }
 
 interface BranchDropdownProps {
@@ -3167,7 +3165,6 @@ export const TurnCard = React.memo(function TurnCard({
                 isLastResponse={isLastResponse}
                 compactMode={compactMode}
                 isCommentary={showCommentary}
-                hasToolActivities={hasToolActivities}
                 onBranch={onBranch && response.messageId ? (options?: { newPanel?: boolean }) => onBranch(response.messageId!, options) : undefined}
                 onRegenerate={onRegenerate}
                 sendMessageKey={sendMessageKey}
@@ -3206,7 +3203,6 @@ export const TurnCard = React.memo(function TurnCard({
             isLastResponse={isLastResponse}
             compactMode={compactMode}
             isCommentary={showCommentary}
-            hasToolActivities={hasToolActivities}
             onBranch={onBranch && response.messageId ? (options?: { newPanel?: boolean }) => onBranch(response.messageId!, options) : undefined}
             onRegenerate={onRegenerate}
             sendMessageKey={sendMessageKey}
