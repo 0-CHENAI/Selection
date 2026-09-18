@@ -154,8 +154,8 @@ interface InitMessage {
   swarmEnabled?: boolean;
   /** Independent budget for a spawned agent; roots omit this value. */
   swarmAgentTokenBudget?: number;
-  customEndpoint?: { api: CustomEndpointApi; supportsImages?: boolean };
-  customModels?: Array<string | { id: string; contextWindow?: number; maxTokens?: number; supportsImages?: boolean }>;
+  customEndpoint?: { api: CustomEndpointApi; supportedThinkingLevels?: Array<'off' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'>; supportsImages?: boolean };
+  customModels?: Array<string | { id: string; contextWindow?: number; maxTokens?: number; supportedThinkingLevels?: Array<'off' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'>; supportsImages?: boolean }>;
   piAuth?: { provider: string; credential: PiCredential };
 }
 
@@ -166,8 +166,8 @@ interface RuntimeConfigUpdateMessage {
   providerType?: string;
   authType?: string;
   baseUrl?: string;
-  customEndpoint?: { api: CustomEndpointApi; supportsImages?: boolean };
-  customModels?: Array<string | { id: string; contextWindow?: number; maxTokens?: number; supportsImages?: boolean }>;
+  customEndpoint?: { api: CustomEndpointApi; supportedThinkingLevels?: Array<'off' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'>; supportsImages?: boolean };
+  customModels?: Array<string | { id: string; contextWindow?: number; maxTokens?: number; supportedThinkingLevels?: Array<'off' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'>; supportsImages?: boolean }>;
 }
 
 type ProxyToolContent = PiTextContent | PiImageContent;
@@ -186,7 +186,7 @@ function normalizeProxyToolContent(content: ProxyToolExecutionResult['content'])
 /** Messages from main process (stdin) */
 type InboundMessage =
   | InitMessage
-  | { type: 'prompt'; answerRunId?: string; answerRecovery?: boolean; id: string; message: string; systemPrompt: string; images?: Array<{ type: 'image'; data: string; mimeType: string }> }
+  | { type: 'prompt'; presentationProtocol?: 'native' | 'marker-v1' | 'legacy'; answerRunId?: string; answerRecovery?: boolean; id: string; message: string; systemPrompt: string; images?: Array<{ type: 'image'; data: string; mimeType: string }> }
   | { type: 'register_tools'; tools: ProxyToolDef[] }
   | { type: 'tool_execute_response'; requestId: string; result: ProxyToolExecutionResult }
   | {
@@ -614,8 +614,9 @@ function registerCustomEndpointModels(
 ): void {
   for (const m of models) {
     customEndpointModelIds.add(m.id);
-    if (m.contextWindow || m.maxTokens || m.supportsImages !== undefined) {
+    if (m.contextWindow || m.maxTokens || m.supportsImages !== undefined || m.supportedThinkingLevels !== undefined) {
       customModelOverrides.set(m.id, {
+        ...(m.supportedThinkingLevels !== undefined ? { supportedThinkingLevels: m.supportedThinkingLevels } : {}),
         ...(m.contextWindow ? { contextWindow: m.contextWindow } : {}),
         ...(m.maxTokens ? { maxTokens: m.maxTokens } : {}),
         ...(m.supportsImages !== undefined ? { supportsImages: m.supportsImages } : {}),

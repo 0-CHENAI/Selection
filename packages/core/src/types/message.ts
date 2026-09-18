@@ -320,6 +320,9 @@ export interface Message {
   /** Persisted on the originating user message before the single recovery call. */
   answerRecoveryAttempted?: boolean;
   phase?: TextStreamPhase;
+  presentationProtocol?: 'native' | 'marker-v1' | 'legacy';
+  /** Original provider message shared by presentation fragments. */
+  sourceSdkMessageId?: string;
 
   // Hidden: a system-generated message that must reach the model (it drives a
   // turn) but must NOT render as a bubble in the transcript — e.g. the WS2
@@ -416,6 +419,9 @@ export interface StoredMessage {
   /** Persisted on the originating user message before the single recovery call. */
   answerRecoveryAttempted?: boolean;
   phase?: TextStreamPhase;
+  presentationProtocol?: 'native' | 'marker-v1' | 'legacy';
+  /** Original provider message shared by presentation fragments. */
+  sourceSdkMessageId?: string;
 
   turnId?: string;
   // Status type for compaction messages (persisted for reload)
@@ -646,8 +652,8 @@ export type AgentEvent =
   | { type: 'status'; message: string }
   | { type: 'info'; message: string }
   | { type: 'answer_preview'; text: string; toolCallId: string }
-  | { type: 'text_delta'; text: string; phase?: TextStreamPhase; turnId?: string; parentToolUseId?: string }
-  | { type: 'text_complete'; text: string; phase?: TextStreamPhase; answerProtocol?: 'explicit-v1'; answerRunId?: string; answerCommitted?: boolean; isIntermediate?: boolean; turnId?: string; parentToolUseId?: string; sdkMessageId?: string }
+  | { type: 'text_delta'; text: string; phase?: TextStreamPhase; presentationProtocol?: 'native' | 'marker-v1' | 'legacy'; turnId?: string; parentToolUseId?: string }
+  | { type: 'text_complete'; text: string; phase?: TextStreamPhase; presentationProtocol?: 'native' | 'marker-v1' | 'legacy'; answerProtocol?: 'explicit-v1'; answerRunId?: string; answerCommitted?: boolean; isIntermediate?: boolean; turnId?: string; parentToolUseId?: string; sdkMessageId?: string; relatedTurnIds?: string[] }
   | { type: 'pi_turn_anchor'; sdkMessageId: string; sdkTurnAnchor: string }
   | { type: 'tool_start'; toolName: string; toolUseId: string; input: Record<string, unknown>; intent?: string; displayName?: string; turnId?: string; parentToolUseId?: string; toolDisplayMeta?: ToolDisplayMeta }
   | { type: 'tool_result'; toolUseId: string; toolName?: string; result: string; content?: AgentToolResultContent[]; isError: boolean; input?: Record<string, unknown>; turnId?: string; parentToolUseId?: string }

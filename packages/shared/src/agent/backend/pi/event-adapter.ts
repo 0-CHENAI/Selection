@@ -1,3 +1,4 @@
+import { AnswerBoundary } from './answer-boundary.ts';
 /**
  * Pi SDK Event Adapter
  *
@@ -132,6 +133,20 @@ function getStreamingTextPhase(message: AssistantMessage | undefined): TextPhase
  * - queue_update → ignored (no current UI consumer)
  */
 export class PiEventAdapter extends BaseEventAdapter {
+  private presentationProtocol: 'native' | 'marker-v1' | 'legacy' = 'legacy';
+  private boundary?: AnswerBoundary;
+  private boundaryStreamed = false;
+  private markerAnswerStarted = false;
+  setPresentationProtocol(protocol: 'native' | 'marker-v1' | 'legacy'): void {
+    this.presentationProtocol = protocol;
+    this.boundary = undefined;
+    this.boundaryStreamed = false;
+  }
+  private answerBoundary(): AnswerBoundary {
+    return this.boundary ??= new AnswerBoundary(() => this.nextSubTurnId('m'),
+      name => console.warn('[answer-boundary]', name));
+  }
+
   // Track tool names from execution_start for proper tool_result correlation
   private answerPreviewTimes = new Map<string, number>();
   private answerStreams = new Map<string, AnswerArgumentStream>();
@@ -282,6 +297,9 @@ export class PiEventAdapter extends BaseEventAdapter {
   }
 
   protected onTurnStart(): void {
+    this.boundary = undefined;
+    this.boundaryStreamed = false;
+    this.markerAnswerStarted = false;
     this.toolNames.clear();
     this.hasStreamedDeltas = false;
     this.hasEmittedFinalText = false;
@@ -412,6 +430,14 @@ export class PiEventAdapter extends BaseEventAdapter {
           yield { type: 'answer_preview', toolCallId: amEvent.toolCall.id, text: typeof markdown === 'string' ? markdown : '' };
         }
         if (amEvent.type === 'text_delta' && amEvent.delta) {
+          if (this.presentationProtocol === 'marker-v1') {
+            this.boundaryStreamed = true;
+            const chunks = this.answerBoundary().push(amEvent.delta);
+            if (chunks.some(chunk => chunk.type === 'text_delta' && chunk.phase === 'final')) this.markerAnswerStarted = true;
+            yield* chunks;
+            break;
+          }
+
           // Codex attaches the phase only after the Responses output item
           // finishes. Hold only phase-less Codex deltas; other providers emit
           // an explicit unclassified stream that the UI keeps in the work chain
@@ -426,6 +452,7 @@ export class PiEventAdapter extends BaseEventAdapter {
           this.streamingTextPhase = textPhase ?? 'unclassified';
           yield {
             type: 'text_delta',
+            presentationProtocol: this.presentationProtocol,
             text: amEvent.delta,
             phase: textPhase === 'commentary'
               ? 'intermediate'
@@ -451,6 +478,11 @@ export class PiEventAdapter extends BaseEventAdapter {
           ? msg.craftTransportDiagnostics.filter(detail => typeof detail === 'string').slice(0, 8).map(detail => detail.slice(0, 4096))
           : undefined;
 
+        if (this.boundary && ['error', 'aborted', 'length', 'max_tokens'].includes(msg.stopReason ?? '')) {
+          yield* this.boundary.finish(false, sdkMessageId, true);
+          this.boundary = undefined;
+          this.boundaryStreamed = false;
+        }
         // Surface API errors — Pi SDK sets stopReason: 'error' and errorMessage on failures.
         if (msg.stopReason === 'error' && msg.errorMessage) {
           // Context overflow: hand recovery to the SDK's _runAutoCompaction
@@ -480,8 +512,8 @@ export class PiEventAdapter extends BaseEventAdapter {
 
         // A failed/truncated terminal message may carry no provider error text.
         // Preserve its terminal meaning instead of degrading to an empty reply.
-        if (msg.stopReason === 'error' || msg.stopReason === 'length' || msg.stopReason === 'max_tokens') {
-          yield { type: 'typed_error', error: createTypedError(msg.stopReason === 'error' ? 'stream_interrupted' : 'output_limit', {
+        if (msg.stopReason === 'error' || msg.stopReason === 'aborted' || msg.stopReason === 'length' || msg.stopReason === 'max_tokens') {
+          yield { type: 'typed_error', error: createTypedError(msg.stopReason === 'error' || msg.stopReason === 'aborted' ? 'stream_interrupted' : 'output_limit', {
             details: transportDetails,
           }) };
           break;
@@ -509,6 +541,13 @@ export class PiEventAdapter extends BaseEventAdapter {
                 : segment.phase === this.streamingTextPhase
             ))
           : -1;
+        if (this.presentationProtocol === 'marker-v1') {
+          if (!this.boundaryStreamed) yield* this.answerBoundary().push(textSegments.map(segment => segment.text).join('\n'));
+          yield* this.answerBoundary().finish(!messageIsIntermediate, sdkMessageId);
+          if (messageIsIntermediate) this.markerAnswerStarted = false;
+          this.boundary = undefined;
+          this.boundaryStreamed = false;
+        } else {
         for (const [index, segment] of textSegments.entries()) {
           const isIntermediate = segment.phase === 'commentary'
             || (segment.phase !== 'final_answer' && messageIsIntermediate);
@@ -525,12 +564,14 @@ export class PiEventAdapter extends BaseEventAdapter {
 
           yield {
             type: 'text_complete',
+            presentationProtocol: this.presentationProtocol,
             text: segment.text,
             isIntermediate,
             phase: segment.phase === 'commentary' ? 'intermediate' : segment.phase === 'final_answer' ? 'final' : 'unclassified',
             turnId: mTurnId,
             sdkMessageId,
           };
+        }
         }
         this.hasStreamedDeltas = false;
         this.messageSubTurnId = null;
@@ -553,6 +594,10 @@ export class PiEventAdapter extends BaseEventAdapter {
       // ============================================================
 
       case 'tool_execution_start': {
+        if (this.markerAnswerStarted) {
+          console.warn('[answer-boundary]', 'tool_after_boundary');
+          this.markerAnswerStarted = false;
+        }
         const toolCallId = event.toolCallId;
         const toolName = this.resolveToolName(event.toolName);
         this.toolNames.set(toolCallId, toolName);

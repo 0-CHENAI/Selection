@@ -42,7 +42,7 @@ export interface BackendRuntimeUpdate {
     baseUrl?: string;
     piAuthProvider?: string;
     customEndpoint?: { api: string; supportsImages?: boolean };
-    customModels?: Array<string | { id: string; contextWindow?: number; maxTokens?: number; supportsImages?: boolean }>;
+    customModels?: Array<string | { id: string; contextWindow?: number; maxTokens?: number; supportedThinkingLevels?: Array<'off' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'>; supportsImages?: boolean }>;
     [key: string]: unknown;
   };
 }
@@ -181,6 +181,7 @@ export interface AnswerDeliveryControl {
 
 export interface CoreBackendConfig {
   explicitAnswerDelivery?: boolean;
+  presentationProtocol?: 'native' | 'marker-v1' | 'legacy';
   /** Isolated utility backend: skip execution-session/tool initialization. */
   queryOnly?: boolean;
   /** Workspace configuration */
@@ -638,6 +639,7 @@ export interface AgentBackend {
   /** Called when agent submits a plan */
   onPlanSubmitted: PlanCallback | null;
   configureAnswerDelivery?: (control: AnswerDeliveryControl | undefined) => void;
+  configurePresentationProtocol?: (protocol: 'native' | 'marker-v1' | 'legacy') => void;
 
   /** Called when a source requires authentication */
   onAuthRequest: AuthCallback | null;

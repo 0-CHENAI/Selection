@@ -1,5 +1,7 @@
+import { AnswerBoundary } from '../../../../../../../packages/shared/src/agent/backend/pi/answer-boundary'
 import { describe, expect, it } from 'bun:test'
-import { groupMessagesByTurn } from '@craft-agent/ui/chat/turn-utils'
+import { deriveTurnPhase, groupMessagesByTurn } from '@craft-agent/ui/chat/turn-utils'
+import { completedParagraphs } from '../../../../../../../packages/ui/src/components/chat/paragraph-stream'
 import { handleTextComplete, handleTextDelta } from '../text'
 import { handleToolStart } from '../tool'
 import { handleComplete, handleError, handleInterrupted } from '../session'
@@ -31,7 +33,7 @@ describe('issue #87 text stream phases', () => {
       type: 'text_delta', sessionId: 'session-1', delta: '先查询数据库。',
       phase: 'unclassified', turnId: 'native-draft',
     })
-    expect(assistantTurn(draft).response?.isStreaming).toBe(true)
+    expect(assistantTurn(draft).response).toMatchObject({ text: '先查询数据库。', isStreaming: true })
     const commentary = handleTextComplete(draft, {
       type: 'text_complete', sessionId: 'session-1', text: '先查询数据库。',
       isIntermediate: true, turnId: 'native-draft', messageId: 'commentary',
@@ -231,4 +233,60 @@ describe('issue #87 text stream phases', () => {
     expect(turn.response?.text).toBe('这是本轮唯一可交付内容。')
     expect(turn.activities).toEqual([])
   })
+})
+
+
+it('原生正文在完成事件之前逐段可见，尚未收到的尾部不参与布局', () => {
+  let current = state()
+  current = handleTextDelta(current, { type: 'text_delta', sessionId: 'session-1', turnId: 'native', phase: 'unclassified', delta: '第一段。\n\n第二' })
+  const first = assistantTurn(current).response!
+  expect(completedParagraphs(first.text, first.isStreaming)).toBe('第一段。\n\n')
+  current = handleTextDelta(current, { type: 'text_delta', sessionId: 'session-1', turnId: 'native', phase: 'unclassified', delta: '段。\n\n第三' })
+  const second = assistantTurn(current).response!
+  expect(completedParagraphs(second.text, second.isStreaming)).toBe('第一段。\n\n第二段。\n\n')
+  expect(second.isStreaming).toBe(true)
+})
+
+it('marker-v1 keeps unclassified text out of the response and does not promote an empty final', () => {
+  const current = handleTextDelta(state(), { type: 'text_delta', sessionId: 'session-1', turnId: 'process',
+    presentationProtocol: 'marker-v1', phase: 'unclassified', delta: '查询完成，但尚未产生最终答案。' })
+  expect(assistantTurn(current).response).toBeUndefined()
+  const finished = handleTextComplete(current, { type: 'text_complete', sessionId: 'session-1', turnId: 'process',
+    presentationProtocol: 'marker-v1', phase: 'intermediate', isIntermediate: true, text: '查询完成，但尚未产生最终答案。' })
+  expect(assistantTurn(finished, false).response).toBeUndefined()
+})
+
+
+it('closes whitespace commentary before final streaming and leaves no stale thinking row', () => {
+  let id = 0
+  const decoder = new AnswerBoundary(() => `fragment-${++id}`)
+  let current = state()
+  const apply = (events: ReturnType<AnswerBoundary['push']>) => {
+    for (const event of events) {
+      if (event.type === 'text_delta') {
+        current = handleTextDelta(current, { ...event, sessionId: 'session-1', delta: event.text })
+      } else if (event.type === 'text_complete') {
+        current = handleTextComplete(current, { ...event, sessionId: 'session-1' })
+      }
+    }
+  }
+  apply(decoder.push('\n\r\n'))
+  expect(assistantTurn(current).activities.some(a => a.status === 'running')).toBe(true)
+  apply(decoder.push('<<<FINAL_ANSWER>>>\n第一段正文。\n\n'))
+  const live = assistantTurn(current)
+  expect(live.activities).toEqual([])
+  expect(live.response).toMatchObject({ text: '第一段正文。\n\n', isStreaming: true })
+  apply(decoder.finish(true))
+  expect(assistantTurn(current, false).activities).toEqual([])
+  expect(current.session.messages.some(m => m.isPending)).toBe(false)
+})
+
+
+it('message completion does not complete the work header while the agent is processing', () => {
+  const current = handleTextComplete(state(), {
+    type: 'text_complete', sessionId: 'session-1', text: '已有内容',
+    turnId: 'answer', isIntermediate: false,
+  })
+  expect(deriveTurnPhase(assistantTurn(current, true))).toBe('pending')
+  expect(deriveTurnPhase(assistantTurn(current, false))).toBe('complete')
 })
