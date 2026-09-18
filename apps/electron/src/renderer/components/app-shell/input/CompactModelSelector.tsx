@@ -1,3 +1,4 @@
+import { modelThinkingLevels } from '@craft-agent/shared/agent/thinking-levels'
 import * as React from 'react'
 import { useTranslation } from 'react-i18next'
 import {
@@ -26,7 +27,6 @@ import {
   resolveEffectiveConnectionSlug,
 } from '@config/llm-connections'
 import {
-  THINKING_LEVELS,
   type ThinkingLevel,
 } from '@craft-agent/shared/agent/thinking-levels'
 import { ConnectionIcon } from '@/components/icons/ConnectionIcon'
@@ -227,6 +227,9 @@ export function CompactModelSelector({
     if (typeof model === 'string') return stripPiPrefixForDisplay(model)
     return model.name ?? stripPiPrefixForDisplay(model.id)
   }, [availableModels, currentModel])
+
+  const configuredThinkingModel = effectiveConnectionDetails?.models?.find(m => isPickerModelSelected(currentModel, typeof m === 'string' ? m : m.id))
+  const availableThinkingLevels = modelThinkingLevels(typeof configuredThinkingModel === 'object' ? configuredThinkingModel : undefined)
 
   const thinkingDisabled = React.useMemo(() => {
     const model = availableModels.find(
@@ -467,12 +470,12 @@ export function CompactModelSelector({
           )}
 
           {/* === Thinking section === */}
-          {THINKING_LEVELS.length > 0 && pickerMode !== 'unavailable' && (
+          {availableThinkingLevels.length > 0 && pickerMode !== 'unavailable' && (
             <>
               <div className="px-3 pt-4 pb-1 text-xs font-medium text-foreground/60 uppercase tracking-wide select-none">
                 {t('chat.modelPicker.thinkingSection')}
               </div>
-              {THINKING_LEVELS.map(({ id, nameKey, descriptionKey }) => {
+              {availableThinkingLevels.map(({ id, nameKey, descriptionKey }) => {
                 const isSelected = thinkingLevel === id
                 return (
                   <DrawerClose asChild key={id}>

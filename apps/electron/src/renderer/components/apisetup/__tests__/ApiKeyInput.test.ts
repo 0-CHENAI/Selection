@@ -217,3 +217,10 @@ describe('buildCustomEndpointModelSubmission', () => {
     })
   })
 })
+
+
+it('persists explicit supported reasoning levels with an exact context limit', () => {
+  expect(buildCustomEndpointModelSubmission({ id: 'custom', supportsImages: false,
+    contextWindow: 123456, maxTokens: 8192, supportedThinkingLevels: ['low', 'high'] }))
+    .toMatchObject({ contextWindow: 123456, supportedThinkingLevels: ['low', 'high'], supportsThinking: true })
+})
