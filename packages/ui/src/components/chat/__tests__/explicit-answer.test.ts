@@ -65,6 +65,26 @@ describe('explicit answer delivery (#330)', () => {
     expect(turn.response?.text).toBe('好的，以下是完整说明。')
     expect(turn.activities.some(a => a.id === 'ack')).toBe(true)
   })
+  it('folds commentary that carries a superseded draft of the committed answer', () => {
+    const committed = '# 对比结论\n\n最终修订后的正文。'
+    const messages: Message[] = [
+      { id: 'user', role: 'user', content: '对比两个模型', timestamp: 1, ...protocol },
+      { id: 'stale-draft', role: 'assistant', content: '我已经拿到了足够的信息。\n\n# 对比结论\n\n被改写的旧草稿。', timestamp: 2, ...protocol },
+      { id: 'answer', role: 'assistant', content: committed, timestamp: 3, answerCommitted: true, ...protocol },
+    ]
+    const turn = groupMessagesByTurn(messages).find(t => t.type === 'assistant')!
+    expect(turn.response?.text).toBe(committed)
+    expect(turn.activities.some(a => a.id === 'stale-draft')).toBe(false)
+  })
+  it('keeps commentary when the committed answer heading differs', () => {
+    const messages: Message[] = [
+      { id: 'user', role: 'user', content: '对比两个模型', timestamp: 1, ...protocol },
+      { id: 'note', role: 'assistant', content: '查完了，下面给出结论。', timestamp: 2, ...protocol },
+      { id: 'answer', role: 'assistant', content: '# 对比结论\n\n最终正文。', timestamp: 3, answerCommitted: true, ...protocol },
+    ]
+    const turn = groupMessagesByTurn(messages).find(t => t.type === 'assistant')!
+    expect(turn.activities.some(a => a.id === 'note')).toBe(true)
+  })
   it('keeps legacy behavior for messages without protocol metadata', () => {
     const messages: Message[] = [{ id: 'legacy', role: 'assistant', content: '旧答案', timestamp: 1 }]
     expect(groupMessagesByTurn(messages)[0]).toMatchObject({ response: { text: '旧答案' } })

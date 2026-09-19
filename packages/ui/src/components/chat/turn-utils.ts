@@ -602,6 +602,11 @@ export function groupMessagesByTurn(messages: Message[], options: GroupTurnsOpti
     if (committedAnswer && message.role === 'assistant' && !message.answerCommitted && !message.answerPreview) {
       const draft = message.content.trim()
       if (draft.length >= 2 && committedAnswer.startsWith(draft)) return []
+      // Commentary carrying the answer's own top-level heading is a superseded
+      // draft of that answer (narration + rewritten body), not process notes.
+      const committedHeading = committedAnswer.split('\n')
+        .find(line => /^#{1,6}\s/.test(line.trim()))?.trim()
+      if (committedHeading && committedHeading.length >= 6 && draft.includes(committedHeading)) return []
     }
     if (message.answerProtocol === 'explicit-v1' && message.answerCommitted && runId) deliveredRuns.add(runId)
     const classified = message.answerProtocol === 'explicit-v1' && message.role === 'assistant'
