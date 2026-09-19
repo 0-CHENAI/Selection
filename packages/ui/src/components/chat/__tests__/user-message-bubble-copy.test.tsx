@@ -1,13 +1,15 @@
-import { afterAll, beforeAll, describe, expect, it, mock } from 'bun:test'
+import { beforeAll, describe, expect, it, mock } from 'bun:test'
 import { createInstance } from 'i18next'
 import { I18nextProvider, initReactI18next } from 'react-i18next'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { TooltipProvider } from '../../tooltip'
 import type { StoredAttachment } from '@craft-agent/core'
 
-mock.module('../../markdown', () => ({
-  Markdown: ({ children }: { children: string }) => <p>{children}</p>,
-}))
+// Match the Vite asset loader in the Bun test environment. Module mocks are
+// process-wide in Bun, so never null out shared UI modules (../../markdown)
+// — sibling test files need the real implementation.
+mock.module('pdfjs-dist/build/pdf.worker.min.mjs?url', () => ({ default: 'pdf.worker.mjs' }))
+mock.module('react-pdf', () => ({ pdfjs: { GlobalWorkerOptions: {} }, Document: () => null, Page: () => null }))
 
 let UserMessageBubble: typeof import('../UserMessageBubble').UserMessageBubble
 let formatUserMessageTime: typeof import('../UserMessageBubble').formatUserMessageTime
@@ -16,10 +18,6 @@ beforeAll(async () => {
   const module = await import('../UserMessageBubble')
   UserMessageBubble = module.UserMessageBubble
   formatUserMessageTime = module.formatUserMessageTime
-})
-
-afterAll(() => {
-  mock.restore()
 })
 
 async function renderBubble(props: {

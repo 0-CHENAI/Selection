@@ -1,5 +1,5 @@
 import * as React from 'react'
-import { afterAll, beforeAll, describe, expect, it, mock } from 'bun:test'
+import { beforeAll, describe, expect, it, mock } from 'bun:test'
 import testI18n from 'i18next'
 import en from '../../../../../shared/src/i18n/locales/en.json'
 import zh from '../../../../../shared/src/i18n/locales/zh-Hans.json'
@@ -10,23 +10,17 @@ import type { ActivityItem } from '../TurnCard'
 // TurnCard's pure preview helpers use the shared i18next singleton, so the
 // provider and helpers must use the same initialized instance and real locales.
 // TurnCard's markdown/overlay modules import Vite `?url` PDF workers, which
-// Bun's server renderer cannot load. These branches are outside this test.
-mock.module('../../markdown', () => ({
-  Markdown: () => null,
-}))
-mock.module('../../overlay', () => ({
-  DocumentFormattedMarkdownOverlay: () => null,
-}))
+// Bun's server renderer cannot load — match the Vite asset loader instead.
+// Module mocks are process-wide in Bun, so never null out shared UI modules
+// (../../markdown): sibling test files need the real implementation.
+mock.module('pdfjs-dist/build/pdf.worker.min.mjs?url', () => ({ default: 'pdf.worker.mjs' }))
+mock.module('react-pdf', () => ({ pdfjs: { GlobalWorkerOptions: {} }, Document: () => null, Page: () => null }))
 
 let TurnCard: typeof import('../TurnCard').TurnCard
 
 beforeAll(async () => {
   const turnCardModule = await import('../TurnCard')
   TurnCard = turnCardModule.TurnCard
-})
-
-afterAll(() => {
-  mock.restore()
 })
 
 const resources = {
