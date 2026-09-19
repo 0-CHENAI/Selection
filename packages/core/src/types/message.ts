@@ -317,6 +317,8 @@ export interface Message {
   /** Renderer-only, uncommitted answer preview; never persisted. */
   answerPreview?: boolean;
   answerCommitted?: boolean;
+  /** Promoted from an unsubmitted draft after delivery recovery failed (#403). */
+  answerSalvaged?: boolean;
   /** Persisted on the originating user message before the single recovery call. */
   answerRecoveryAttempted?: boolean;
   phase?: TextStreamPhase;
@@ -416,6 +418,8 @@ export interface StoredMessage {
   answerProtocol?: 'explicit-v1';
   answerRunId?: string;
   answerCommitted?: boolean;
+  /** Promoted from an unsubmitted draft after delivery recovery failed (#403). */
+  answerSalvaged?: boolean;
   /** Persisted on the originating user message before the single recovery call. */
   answerRecoveryAttempted?: boolean;
   phase?: TextStreamPhase;

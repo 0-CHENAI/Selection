@@ -7738,6 +7738,58 @@ export class SessionManager implements ISessionManager {
     }
   }
 
+  /**
+   * Promote the newest substantive draft of this run into the final answer when
+   * the model never submits one, even after the single recovery call (#403).
+   * The run's recorded work stays in the transcript; the salvaged answer is
+   * marked so clients can tell it was not formally delivered.
+   */
+  private async salvageUndeliveredAnswer(
+    managed: ManagedSession,
+    state: NonNullable<ManagedSession['answerDelivery']>,
+  ): Promise<Message | undefined> {
+    // Regenerate bookkeeping expects an SDK-anchored submission; keep its
+    // explicit error path instead of synthesizing an answer.
+    if (managed.regenerateTransaction) return undefined
+    const userIndex = managed.messages.findIndex(m => m.id === state.userMessageId)
+    if (userIndex < 0) return undefined
+    const draft = [...managed.messages.slice(userIndex + 1)].reverse().find(m =>
+      m.role === 'assistant' && !m.hidden && m.isIntermediate
+      && m.answerRunId === state.runId && hasRenderableAssistantText(m.content))
+    if (!draft) return undefined
+    const previousLastRole = managed.lastMessageRole
+    const previousFinalId = managed.lastFinalMessageId
+    const answer: Message = {
+      id: generateMessageId(), role: 'assistant', content: draft.content,
+      timestamp: this.monotonic(), isIntermediate: false, phase: 'final',
+      answerProtocol: 'explicit-v1', answerRunId: state.runId, answerCommitted: true,
+      answerSalvaged: true,
+      turnId: `answer-${state.runId}`,
+    }
+    try {
+      managed.messages.push(answer)
+      state.committedMessageId = answer.id
+      managed.lastMessageRole = 'assistant'
+      managed.lastFinalMessageId = answer.id
+      this.persistSession(managed)
+      await this.flushSession(managed.id)
+      const stored = loadStoredSession(managed.workspace.rootPath, managed.id)?.messages.find(m => m.id === answer.id)
+      if (!stored?.answerCommitted || stored.answerRunId !== state.runId || !hasRenderableAssistantText(stored.content)) {
+        throw new Error('Salvaged answer could not be persisted.')
+      }
+    } catch (error) {
+      sessionLog.warn('Answer salvage failed', { sessionId: managed.id, answerRunId: state.runId, error: error instanceof Error ? error.message : String(error) })
+      managed.messages = managed.messages.filter(m => m.id !== answer.id)
+      state.committedMessageId = undefined
+      managed.lastMessageRole = previousLastRole
+      managed.lastFinalMessageId = previousFinalId
+      this.persistSession(managed)
+      await this.flushSession(managed.id).catch(rollbackError => sessionLog.error('Salvaged answer rollback persistence failed', rollbackError))
+      return undefined
+    }
+    return answer
+  }
+
   private async *runAnswerDelivery(
     managed: ManagedSession,
     agent: AgentInstance,
@@ -7777,9 +7829,22 @@ export class SessionManager implements ISessionManager {
     if (!state.committedMessageId && (state.persistenceFailed || state.recovery) && managed.isProcessing && !managed.stopRequested
       && managed.answerDelivery === state && managed.processingGeneration === state.generation
       && !managed.messages.slice(managed.messages.findIndex(m => m.id === state.userMessageId) + 1).some(m => m.role === 'error')) {
-      yield { type: 'typed_error', error: createTypedError(state.persistenceFailed ? 'answer_persistence_failed' : 'answer_delivery_missing', { message: state.persistenceFailed
-        ? '答案保存失败：系统未能保存已提交的正文。已保留执行记录；请先排查存储问题。'
-        : '未完成答案交付：模型未提交完整正文。已保留执行记录，请继续此任务。' }) }
+      const salvaged = state.persistenceFailed ? undefined : await this.salvageUndeliveredAnswer(managed, state)
+      if (salvaged) {
+        // Publication cannot undo a durable commit (for example, a disconnected window).
+        try {
+          this.sendEvent({ type: 'text_complete', sessionId: managed.id, text: salvaged.content,
+            isIntermediate: false, phase: 'final', answerProtocol: salvaged.answerProtocol,
+            answerRunId: state.runId, answerCommitted: true, turnId: salvaged.turnId,
+            messageId: salvaged.id, timestamp: salvaged.timestamp }, managed.workspace.id)
+        } catch (error) {
+          sessionLog.error('Salvaged answer event delivery failed', { sessionId: managed.id, messageId: salvaged.id, error })
+        }
+      } else {
+        yield { type: 'typed_error', error: createTypedError(state.persistenceFailed ? 'answer_persistence_failed' : 'answer_delivery_missing', { message: state.persistenceFailed
+          ? '答案保存失败：系统未能保存已提交的正文。已保留执行记录；请先排查存储问题。'
+          : '未完成答案交付：模型未提交完整正文。已保留执行记录，请继续此任务。' }) }
+      }
     }
     if (complete) yield complete
     else if (state.committedMessageId) yield { type: 'complete' }

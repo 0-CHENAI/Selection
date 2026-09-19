@@ -86,8 +86,25 @@ describe('explicit answer delivery lifecycle (#330)', () => {
     expect(loadStoredSession(root, managed.id)?.messages.find(m => m.type === 'user')?.answerRecoveryAttempted).toBe(true)
     expect(managed.messages.find(m => m.answerCommitted)?.content).toBe(markdown)
   })
-  it('ends with an explicit error when recovery also omits delivery', async () => {
+  it('promotes the latest draft when recovery also omits delivery (#403)', async () => {
     install(async function* () { yield { type: 'text_complete', text: '一句补充' }; yield { type: 'complete' } })
+    await manager.sendMessage(managed.id, '解释并验证')
+    expect(prompts).toHaveLength(2)
+    const committed = managed.messages.filter(m => m.answerCommitted)
+    expect(committed).toHaveLength(1)
+    expect(committed[0]?.content).toBe('一句补充')
+    expect(committed[0]?.answerSalvaged).toBe(true)
+    expect(managed.messages.some(m => m.role === 'error')).toBe(false)
+    expect(managed.isProcessing).toBe(false)
+    const stored = loadStoredSession(root, managed.id)!
+    const storedCommitted = stored.messages.filter(m => m.answerCommitted)
+    expect(storedCommitted).toHaveLength(1)
+    expect(storedCommitted[0]?.answerSalvaged).toBe(true)
+    expect(stored.messages.some(m => m.isIntermediate && m.content === '一句补充')).toBe(true)
+    expect(events.filter(e => e.answerCommitted)).toHaveLength(1)
+  })
+  it('ends with an explicit error when recovery omits delivery and no draft can be salvaged', async () => {
+    install(async function* () { yield { type: 'complete' } })
     await manager.sendMessage(managed.id, '解释并验证')
     expect(prompts).toHaveLength(2)
     expect(managed.messages.some(m => m.answerCommitted)).toBe(false)
