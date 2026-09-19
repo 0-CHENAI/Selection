@@ -20,6 +20,7 @@ import { answerPreviewContext } from '../../shared/src/answer-preview-context.ts
 import { AnswerBatchGate, collectAnswerBatchParts } from './answer-batch-gate.ts';
 import { answerExecutionError, isAnswerTool } from './answer-delivery-guard.ts';
 import http from 'node:http';
+import { randomUUID } from 'node:crypto';
 import { createInterface } from 'node:readline';
 import { join } from 'node:path';
 import { mkdirSync } from 'node:fs';
@@ -1477,7 +1478,10 @@ function handleSessionEvent(event: AgentSessionEvent): void {
     }
 
     if (msg?.role === 'assistant' && piSession) {
-      answerSdkMessageId = (msg as { id?: string }).id;
+      // Pi AssistantMessage need not retain the provider's message id. This
+      // correlation token is separate from the real persisted SDK entry below.
+      const sdkMessageId = (msg as { id?: string }).id || `assistant-${randomUUID()}`;
+      answerSdkMessageId = sdkMessageId;
       const batchParts = collectAnswerBatchParts(msg.content);
       answerBatchSize = batchParts.length;
       answerBatchGate.begin(batchParts);
@@ -1498,38 +1502,37 @@ function handleSessionEvent(event: AgentSessionEvent): void {
       // turn a sibling of the assistant message, dropping the assistant reply
       // from the LLM's view of history (craft-agents-oss#782).
       //
-      // Instead, attach the SDK's message id to the forwarded event so the main
+      // Instead, attach a correlation id to the forwarded event so the main
       // process can correlate this turn, then queue a microtask to read the
       // correct leaf AFTER `appendMessage` has run. The microtask drains before
       // any subsequent SDK event is dispatched, so the follow-up
       // `pi_turn_anchor` event is delivered to the main process in the right
       // order (after this `message_end`, before the next event).
-      const sdkMessageId = (msg as { id?: string }).id;
-      if (sdkMessageId) {
-        forwardedEvent = {
-          ...(event as Record<string, unknown>),
-          sdkMessageId,
-        } as unknown as OutboundAgentEvent;
+      forwardedEvent = {
+        ...(event as Record<string, unknown>),
+        sdkMessageId,
+      } as unknown as OutboundAgentEvent;
 
-        const sessionManagerSnapshot = piSession.sessionManager;
-        queueMicrotask(() => {
-          // Defensive: session may have been disposed between the message_end
-          // emit and the microtask drain.
-          if (!piSession || piSession.sessionManager !== sessionManagerSnapshot) {
-            return;
-          }
-          const sdkTurnAnchor = sessionManagerSnapshot.getLeafId();
-          if (!sdkTurnAnchor) return;
-          send({
-            type: 'event',
-            event: {
-              type: 'pi_turn_anchor',
-              sdkMessageId,
-              sdkTurnAnchor,
-            } as unknown as OutboundAgentEvent,
-          });
+      const sessionManagerSnapshot = piSession.sessionManager;
+      queueMicrotask(() => {
+        // Defensive: session may have been disposed between the message_end
+        // emit and the microtask drain.
+        if (!piSession || piSession.sessionManager !== sessionManagerSnapshot) {
+          return;
+        }
+        const sdkTurnAnchor = sessionManagerSnapshot.getLeafId();
+        if (!sdkTurnAnchor) return;
+        const entry = sessionManagerSnapshot.getEntry(sdkTurnAnchor);
+        if (entry?.type !== 'message' || entry.message !== event.message) return;
+        send({
+          type: 'event',
+          event: {
+            type: 'pi_turn_anchor',
+            sdkMessageId,
+            sdkTurnAnchor,
+          } as unknown as OutboundAgentEvent,
         });
-      }
+      });
 
     }
   }
