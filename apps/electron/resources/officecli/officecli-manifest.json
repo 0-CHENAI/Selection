@@ -1,48 +1,47 @@
 {
   "manifestVersion": 1,
-  "version": "1.0.147",
-  "tag": "v1.0.147",
-  "tagCommit": "b94f3906fd52d450c64f8e40370e376b9e15079e",
-  "schemaCrc": "909df808",
+  "version": "1.0.151",
+  "tag": "v1.0.151",
+  "tagCommit": "70df924f79ca174ba6cdafcc0f363f0fa3ab8ac7",
+  "schemaCrc": "7a7d408f",
   "sourceRepository": "https://github.com/iOfficeAI/OfficeCLI",
   "license": {
     "spdx": "Apache-2.0",
-    "licenseFile": "1.0.147/LICENSE",
+    "licenseFile": "1.0.151/LICENSE",
     "licenseSha256": "7e282402a5a6db33995fe638bb3fe79013f9884d8f7d15a42e481c1e86aadda1",
-    "noticeFile": "1.0.147/NOTICE",
+    "noticeFile": "1.0.151/NOTICE",
     "noticeSha256": "3a4715b268e148a8e9566f5e835f766f5c95c3da4d6e5ddd908806a258a2f07b"
   },
   "assets": {
     "darwin-arm64": {
       "name": "officecli-mac-arm64",
-      "url": "https://github.com/iOfficeAI/OfficeCLI/releases/download/v1.0.147/officecli-mac-arm64",
-      "sha256": "55569d8a7430c1d8d7872c1661ff8cfea2eeef03ffc4fa8dbee437a4c91ee1ed"
+      "url": "https://github.com/iOfficeAI/OfficeCLI/releases/download/v1.0.151/officecli-mac-arm64",
+      "sha256": "ff6834c0b4aa8a37ed78232373ed8f3acb656e1bbac4cb61ee475681cb32bec6"
     },
     "darwin-x64": {
       "name": "officecli-mac-x64",
-      "url": "https://github.com/iOfficeAI/OfficeCLI/releases/download/v1.0.147/officecli-mac-x64",
-      "sha256": "9f957b9439b922916360189bedfb780defc471b95ab8670f2a5a9630e7c9c253"
+      "url": "https://github.com/iOfficeAI/OfficeCLI/releases/download/v1.0.151/officecli-mac-x64",
+      "sha256": "f24b200675ff88ce289e079bdaa34a16fabe425444c7b6d906541dae26745792"
     },
     "linux-x64": {
       "name": "officecli-linux-x64",
-      "url": "https://github.com/iOfficeAI/OfficeCLI/releases/download/v1.0.147/officecli-linux-x64",
-      "sha256": "e8bfe04f670139f526fe4e81f11acc1bc8629e421a20c5ba7a6e25f7a54a31f7"
+      "url": "https://github.com/iOfficeAI/OfficeCLI/releases/download/v1.0.151/officecli-linux-x64",
+      "sha256": "8e2512234ae1111e51ad3a9fadbdeca266adfa7f683773469aa45b83fe06dc7f"
     },
     "linux-arm64": {
       "name": "officecli-linux-arm64",
-      "url": "https://github.com/iOfficeAI/OfficeCLI/releases/download/v1.0.147/officecli-linux-arm64",
-      "sha256": "f90c734722fd2f41ae76e72878329f033ed36c132aa741ec44dc3827066c55b9"
+      "url": "https://github.com/iOfficeAI/OfficeCLI/releases/download/v1.0.151/officecli-linux-arm64",
+      "sha256": "fccb7d7841c9ec93593a62181544c893ee184455421cf15bd76110bf0ad29c41"
     },
     "win32-x64": {
       "name": "officecli-win-x64.exe",
-      "url": "https://github.com/iOfficeAI/OfficeCLI/releases/download/v1.0.147/officecli-win-x64.exe",
-      "sha256": "724056e5ff079c3585df79c8afc386f08ef7d5f956cf4e2723534e129aab6e80",
-      "schemaCrc": "69cd35d9"
+      "url": "https://github.com/iOfficeAI/OfficeCLI/releases/download/v1.0.151/officecli-win-x64.exe",
+      "sha256": "57cd0e597514a4948ca034ea187637a18ad5b44a6e6729dfb7799414e06a083f"
     },
     "win32-arm64": {
       "name": "officecli-win-arm64.exe",
-      "url": "https://github.com/iOfficeAI/OfficeCLI/releases/download/v1.0.147/officecli-win-arm64.exe",
-      "sha256": "7ff0195c32405bac9cf6a32589d984fa7a863adfabbc6e42dfef47a7839264cf"
+      "url": "https://github.com/iOfficeAI/OfficeCLI/releases/download/v1.0.151/officecli-win-arm64.exe",
+      "sha256": "7fa92da0f1a4c988e8884cc878016a3acd2b110e5afbef0a5b1e51aaa75ff5b1"
     }
   },
   "commandPolicy": {
@@ -237,13 +236,13 @@
     }
   },
   "commandSchema": {
-    "file": "1.0.147/command-schema.json",
-    "sha256": "8c86f34769dbb6b927813398d9b46815e46ecc1b7f3f1b31b0a59dffef09d026",
+    "file": "1.0.151/command-schema.json",
+    "sha256": "9711f118fbea8958902f077dde4bdb842baba53e903bfa379b0f5c8ea0473f5a",
     "unclassifiedCommands": [],
     "staleClassifications": []
   },
   "guideIndex": {
-    "file": "1.0.147/guide-index.json",
-    "sha256": "7ce29c0eb14a86c104eb6524e9c0080e7fcfe042dc0331d26f1fec91fe91f64e"
+    "file": "1.0.151/guide-index.json",
+    "sha256": "534f9dd064f0753228d1dd7c329b2b18fce440a61657898eb23af8beca4f636c"
   }
 }
