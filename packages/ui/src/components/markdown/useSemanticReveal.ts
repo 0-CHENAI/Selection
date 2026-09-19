@@ -1,5 +1,5 @@
 import * as React from 'react'
-import { createSemanticReveal } from './semantic-reveal'
+import { createSemanticReveal, SEMANTIC_REVEAL_MAX_MS } from './semantic-reveal'
 export { getRevealUnits, SEMANTIC_REVEAL_MS, SEMANTIC_REVEAL_MAX_MS } from './semantic-reveal'
 
 const played = new Set<string>()
@@ -25,7 +25,10 @@ export function useSemanticReveal(
     if (!root.current) return
     if (!admission.current || admission.current.identity !== identity) {
       const key = identity ?? (startTime != null ? `time:${startTime}` : undefined)
-      const fresh = streaming
+      // Only the renderer supplies this clock, at live completion. A burst may
+      // commit before React ever paints a streaming frame. Never use message time.
+      const age = startTime == null ? Infinity : Date.now() - startTime
+      const fresh = streaming || (age >= 0 && age < SEMANTIC_REVEAL_MAX_MS)
       admission.current = { identity, initial: fresh && (key == null || !played.has(key)) }
       if (fresh && key != null) {
         played.add(key)
@@ -39,6 +42,6 @@ export function useSemanticReveal(
   useBrowserLayoutEffect(() => {
     // A live response retains its admission through completion so the last
     // paragraph can finish fading. Restored history remains immediate.
-    controller.current?.update(streaming, streaming || sawLive.current)
+    controller.current?.update(streaming, streaming || sawLive.current || !!admission.current?.initial)
   }, [root, content, startTime, streaming, identity])
 }

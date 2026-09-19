@@ -16,8 +16,9 @@ const assistantTurns = (messages: Message[]) => groupMessagesByTurn(messages).fi
 
 describe('#330 service → renderer → durable reload → turn grouping', () => {
   for (const phase of ['final', 'unclassified'] as const) {
-    for (const recover of [false, true]) {
-      it(`${phase}, recovery=${recover}: retains one complete answer and its work chain`, async () => {
+    for (const delivery of ['direct', 'recovered', 'salvaged'] as const) {
+      const recover = delivery !== 'direct'
+      it(`${phase}, delivery=${delivery}: retains one complete answer and its work chain`, async () => {
         const root = mkdtempSync(join(tmpdir(), 'answer-pipeline-'))
         const manager = new SessionManager()
         const managed = createManagedSession({ id: 'pipeline' },
@@ -35,8 +36,20 @@ describe('#330 service → renderer → durable reload → turn grouping', () =>
               yield { type: 'tool_start', toolName: 'Bash', toolUseId: 'simulation', input: {} }
               yield { type: 'tool_result', toolName: 'Bash', toolUseId: 'simulation', result: '0.6667', isError: false }
               yield { type: 'text_complete', text: '模拟确认了结论。', phase, turnId: 'provider-2' }
+              expect(events.some(e => e.type === 'answer_preview')).toBe(false)
             }
-            if (!recover || calls === 2) {
+            if (delivery === 'salvaged' && calls === 2) {
+              const split = answer.indexOf('\n\n')
+              yield { type: 'text_delta', text: answer.slice(0, split), phase, turnId: 'provider-recovery' }
+              ;(manager as any).flushDelta(managed.id, managed.workspace.id)
+              expect(events.filter(e => e.type === 'answer_preview').at(-1)).toMatchObject({ text: answer.slice(0, split) })
+              expect(managed.messages.some(m => m.answerCommitted || m.answerPreview)).toBe(false)
+              yield { type: 'text_delta', text: answer.slice(split), phase, turnId: 'provider-recovery' }
+              ;(manager as any).flushDelta(managed.id, managed.workspace.id)
+              expect(events.filter(e => e.type === 'answer_preview').at(-1)).toMatchObject({ text: answer })
+              yield { type: 'text_complete', text: answer, phase, turnId: 'provider-recovery', sdkMessageId: 'sdk-recovery' }
+              yield { type: 'pi_turn_anchor', sdkMessageId: 'sdk-recovery', sdkTurnAnchor: 'recovery-entry' }
+            } else if (delivery !== 'salvaged' && (!recover || calls === 2)) {
               yield { type: 'answer_preview', toolCallId: 'delivery', text: answer.slice(0, 30) }
               await manager.flushSession(managed.id)
               expect(loadSession(root, managed.id)?.messages.some(m => m.content === answer.slice(0, 30))).toBe(false)
@@ -85,9 +98,11 @@ describe('#330 service → renderer → durable reload → turn grouping', () =>
           expect(stored.messages.find(m => m.type === 'user')?.answerRecoveryAttempted).toBe(recover)
           expect(liveTurns).toHaveLength(1)
           expect(loadedTurns).toHaveLength(1)
-          expect(loadedTurns[0]!.response).toEqual(liveTurns[0]!.response)
+          expect(liveTurns[0]!.response?.completedRevealStartTime).toBeNumber()
+          expect(loadedTurns[0]!.response).toEqual({ ...liveTurns[0]!.response, completedRevealStartTime: undefined })
           expect(loadedTurns[0]!.response?.text).toBe(answer)
-          expect(loadedTurns[0]!.activities.some(a => a.type === 'intermediate' && a.content === explanation)).toBe(true)
+          // Drafts folded by the UI must still survive in the durable execution record.
+          expect(reloaded.some(m => m.isIntermediate && m.content === explanation)).toBe(true)
           expect(loadedTurns[0]!.activities.some(a => a.type === 'tool')).toBe(true)
           expect(reloaded.filter(m => m.answerCommitted)).toHaveLength(1)
           // Replayed completion/receipt events must not duplicate or demote it.

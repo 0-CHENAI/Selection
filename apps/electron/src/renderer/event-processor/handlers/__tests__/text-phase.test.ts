@@ -117,7 +117,7 @@ describe('issue #87 text stream phases', () => {
     expect(completedTurn.response).toMatchObject({
       text: '测试全部通过。',
       isStreaming: false,
-      completedRevealStartTime: completedMessage?.timestamp,
+      completedRevealStartTime: completedMessage?.completedRevealStartTime,
       messageId: 'answer-1',
     })
   })

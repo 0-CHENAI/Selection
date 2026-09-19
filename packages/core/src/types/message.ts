@@ -316,6 +316,8 @@ export interface Message {
   answerRunId?: string;
   /** Renderer-only, uncommitted answer preview; never persisted. */
   answerPreview?: boolean;
+  /** Renderer-only live completion clock; never restored from persisted history. */
+  completedRevealStartTime?: number;
   answerCommitted?: boolean;
   /** Promoted from an unsubmitted draft after delivery recovery failed (#403). */
   answerSalvaged?: boolean;

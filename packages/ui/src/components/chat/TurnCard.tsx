@@ -2,8 +2,7 @@ import * as React from 'react'
 import { useMemo, useEffect, useRef, useCallback, useState } from 'react'
 import i18n from 'i18next'
 import { isSubmitAnswerTool, localizedToolLabel } from './tool-labels'
-import { streamingResponseBody } from './paragraph-stream'
-import { useFrameSource } from './useFrameSource'
+import { usePacedSource } from './usePacedSource'
 import { ResponseBodyGrowth } from './ResponseBodyGrowth'
 import { useCompletionActions } from './useCompletionActions'
 import { useTranslation } from 'react-i18next'
@@ -1624,15 +1623,16 @@ function applyTextHighlightRange(
  * ResponseCard - Unified card component for AI responses and plans
  *
  * Variants:
- * - 'response': Incremental complete Markdown blocks
+ * - 'response': Progressively displayed Markdown
  * - 'plan': Plan message with header and Accept Plan button
  *
- * Response blocks appear as they arrive; unfinished tails occupy no space.
+ * Received text advances in small runs, including bursts that arrive at completion.
  *
- * Performance: markdown re-renders throttled (~50ms) while streaming.
+ * Presentation updates are frame-paced; copy/export retain the authoritative source.
  */
 export function ResponseCard({
   text,
+  completedRevealStartTime,
   isStreaming,
   isTurnComplete,
   onOpenFile,
@@ -1666,7 +1666,8 @@ export function ResponseCard({
     [text, isStreaming],
   )
   const responseText = parsedSkillUsage.content
-  const frameText = useFrameSource(responseText, isStreaming)
+  const paced = usePacedSource(responseText, isStreaming, completedRevealStartTime, revealIdentity ?? messageId)
+  const presentationStreaming = isStreaming || paced.revealing
   // Copy to clipboard state
   const [copied, setCopied] = useState(false)
   // Fullscreen state
@@ -2386,8 +2387,8 @@ export function ResponseCard({
   )
 
   const isCompleted = isTurnComplete ?? !isStreaming
-  // Completion releases only the final incomplete Markdown block.
-  const bodyText = streamingResponseBody(isStreaming ? frameText : responseText, isStreaming)
+  // A network completion leaves received text in the presentation queue.
+  const bodyText = paced.text
   // Commentary must not gain final-reply actions the moment tools start.
   // Both card branches retain the keyed body when final responses complete.
   const showCompletedChrome = (isCompleted && !isCommentary)
@@ -2436,7 +2437,7 @@ export function ResponseCard({
           )}
 
           {/* Smooth received-block growth while the outer viewport stays pinned. */}
-          <ResponseBodyGrowth streaming={isStreaming && variant === 'response'}>
+          <ResponseBodyGrowth streaming={presentationStreaming && variant === 'response'}>
           <div
             key="response-content"
             ref={contentRef}
@@ -2449,7 +2450,8 @@ export function ResponseCard({
             <div ref={contentLayerRef} className="relative">
               <Markdown
                 id={revealIdentity ?? (messageId ? `${sessionId}:${messageId}` : undefined)}
-                isStreaming={isStreaming && variant === 'response'}
+                isStreaming={presentationStreaming && variant === 'response'}
+                revealStartTime={variant === 'response' ? completedRevealStartTime : undefined}
                 mode="minimal"
                 onUrlClick={onOpenUrl}
                 onFileClick={onOpenFile}
@@ -2820,7 +2822,7 @@ export const TurnCard = React.memo(function TurnCard({
   const handleExpandedActivityGroupsChange = onExpandedActivityGroupsChange ?? setLocalExpandedActivityGroups
 
   // Visible prose, not elapsed time, opens the response and ends buffering.
-  const isBuffering = !!response?.isStreaming && !streamingResponseBody(response.text, true).trim()
+  const isBuffering = !!response?.isStreaming && !response.text.trim()
 
 
   // Compute preview text with cross-fade animation
@@ -2886,7 +2888,7 @@ export const TurnCard = React.memo(function TurnCard({
   )
 
   const hasVisibleResponse = !!response && (
-    hasRenderableAssistantText(streamingResponseBody(response.text, !!response.isStreaming))
+    hasRenderableAssistantText(response.text)
   )
 
   // Don't render if nothing to show and turn is complete

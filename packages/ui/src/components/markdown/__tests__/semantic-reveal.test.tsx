@@ -39,7 +39,7 @@ describe('semantic reveal preserves the whole document', () => {
   })
 })
 
-it('renders prose tails live and holds unsafe tails, with identical live and completed chrome', async () => {
+it('renders received Markdown tails live, with identical live and completed chrome', async () => {
   const { ResponseCard } = await import('../../chat/TurnCard')
   const prose = renderToStaticMarkup(<ResponseCard text={'未完成的一段'} isStreaming isTurnComplete={false} />)
   expect(prose).toContain('bg-background ring-1 ring-inset ring-foreground/5')
@@ -50,7 +50,7 @@ it('renders prose tails live and holds unsafe tails, with identical live and com
   expect(live).toContain('bg-background ring-1 ring-inset ring-foreground/5')
   const held = renderToStaticMarkup(<ResponseCard text={'说明\n\n```ts\nconst x = 1'} isStreaming isTurnComplete={false} />)
   expect(held).toContain('说明')
-  expect(held).not.toContain('const x = 1')
+  expect(held).toContain('const x = 1')
   const complete = renderToStaticMarkup(<ResponseCard text={'第一段。\n\n未完成的尾部'} isStreaming={false} isTurnComplete />)
   expect(complete).toContain('未完成的尾部')
   expect(complete).toContain('bg-background ring-1 ring-inset ring-foreground/5')

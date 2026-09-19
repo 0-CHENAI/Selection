@@ -7639,6 +7639,35 @@ export class SessionManager implements ISessionManager {
     }
   }
 
+  /** Both explicit submission and recovery must satisfy the same business gates. */
+  private assertAnswerReady(
+    managed: ManagedSession,
+    state: NonNullable<ManagedSession['answerDelivery']>,
+    markdown: string,
+    toolCallId?: string,
+  ): void {
+    const userIndex = managed.messages.findIndex(m => m.id === state.userMessageId)
+    if (userIndex < 0) throw new Error('The originating user turn no longer exists.')
+    if (managed.messages.slice(userIndex + 1).some(m => m.role === 'tool' && (!toolCallId || m.toolUseId !== toolCallId) && (m.toolStatus === 'executing' || m.toolStatus === 'pending'))) {
+      throw new Error('Finish all foreground tools before submitting the answer.')
+    }
+    if ((this.pendingSwarmChildren.get(managed.id) ?? 0) > 0
+      || this.getManagedSwarmChildren(managed.id).some(child => child.isProcessing || child.orchestrationStatus === 'running')
+      || (managed.orchestrationStatus === 'running' && managed.orchestrationAggregation?.phase === 'waiting-workers')) {
+      throw new Error('Wait for all Swarm workers and aggregate their results before submitting the answer.')
+    }
+    const aggregation = managed.orchestrationAggregation
+    if (managed.orchestrationStatus === 'running' && aggregation && aggregation.orchestrationId === managed.orchestrationId) {
+      const assessment = assessManagedSwarmAggregation({
+        finalText: markdown,
+        orchestrationId: aggregation.orchestrationId,
+        finalAggregation: aggregation.finalAggregation,
+        children: this.getManagedSwarmAggregationChildren(managed, aggregation.orchestrationId),
+      })
+      if (!assessment.valid) throw new Error(`Answer does not satisfy Swarm aggregation: ${assessment.reasons.join('; ')}`)
+    }
+  }
+
   private async acceptAnswer(
     managed: ManagedSession,
     state: NonNullable<ManagedSession['answerDelivery']>,
@@ -7651,26 +7680,7 @@ export class SessionManager implements ISessionManager {
     if (state.accepting || state.committedMessageId) throw new Error('An answer has already been submitted for this turn.')
     if (!hasRenderableAssistantText(submission.markdown)) throw new Error('Submit a complete, non-empty Markdown answer.')
     if (!submission.toolCallId || !submission.sdkMessageId || !submission.sdkTurnAnchor) throw new Error('Missing SDK answer anchor.')
-    const userIndex = managed.messages.findIndex(m => m.id === state.userMessageId)
-    if (userIndex < 0) throw new Error('The originating user turn no longer exists.')
-    if (managed.messages.slice(userIndex + 1).some(m => m.role === 'tool' && m.toolUseId !== submission.toolCallId && (m.toolStatus === 'executing' || m.toolStatus === 'pending'))) {
-      throw new Error('Finish all foreground tools before submitting the answer.')
-    }
-    if ((this.pendingSwarmChildren.get(managed.id) ?? 0) > 0
-      || this.getManagedSwarmChildren(managed.id).some(child => child.isProcessing || child.orchestrationStatus === 'running')
-      || (managed.orchestrationStatus === 'running' && managed.orchestrationAggregation?.phase === 'waiting-workers')) {
-      throw new Error('Wait for all Swarm workers and aggregate their results before submitting the answer.')
-    }
-    const aggregation = managed.orchestrationAggregation
-    if (managed.orchestrationStatus === 'running' && aggregation && aggregation.orchestrationId === managed.orchestrationId) {
-      const assessment = assessManagedSwarmAggregation({
-        finalText: submission.markdown,
-        orchestrationId: aggregation.orchestrationId,
-        finalAggregation: aggregation.finalAggregation,
-        children: this.getManagedSwarmAggregationChildren(managed, aggregation.orchestrationId),
-      })
-      if (!assessment.valid) throw new Error(`Answer does not satisfy Swarm aggregation: ${assessment.reasons.join('; ')}`)
-    }
+    this.assertAnswerReady(managed, state, submission.markdown, submission.toolCallId)
     state.accepting = true
     const regenerateTransaction = managed.regenerateTransaction
     const previousLastRole = managed.lastMessageRole
@@ -7748,15 +7758,22 @@ export class SessionManager implements ISessionManager {
     managed: ManagedSession,
     state: NonNullable<ManagedSession['answerDelivery']>,
   ): Promise<Message | undefined> {
-    // Regenerate bookkeeping expects an SDK-anchored submission; keep its
-    // explicit error path instead of synthesizing an answer.
-    if (managed.regenerateTransaction) return undefined
     const userIndex = managed.messages.findIndex(m => m.id === state.userMessageId)
     if (userIndex < 0) return undefined
     const draft = [...managed.messages.slice(userIndex + 1)].reverse().find(m =>
       m.role === 'assistant' && !m.hidden && m.isIntermediate
       && m.answerRunId === state.runId && hasRenderableAssistantText(m.content))
     if (!draft) return undefined
+    try { this.assertAnswerReady(managed, state, draft.content) }
+    catch { return undefined }
+    const regenerateTransaction = managed.regenerateTransaction
+    const sessionPath = getSessionStoragePath(managed.workspace.rootPath, managed.id)
+    const draftAnchor = (await loadPiTurnAnchors(sessionPath)).anchors[draft.id]
+    // A regenerated answer must retain a real SDK branch boundary.
+    if (regenerateTransaction && !draftAnchor) return undefined
+    const isActive = () => managed.answerDelivery === state && managed.isProcessing
+      && !managed.stopRequested && managed.processingGeneration === state.generation
+    if (!isActive()) return undefined
     const previousLastRole = managed.lastMessageRole
     const previousFinalId = managed.lastFinalMessageId
     const answer: Message = {
@@ -7767,22 +7784,32 @@ export class SessionManager implements ISessionManager {
       turnId: `answer-${state.runId}`,
     }
     try {
+      if (draftAnchor) await savePiTurnAnchor(sessionPath, answer.id, draftAnchor)
+      if (!isActive()) return undefined
+      this.assertAnswerReady(managed, state, draft.content)
       managed.messages.push(answer)
       state.committedMessageId = answer.id
       managed.lastMessageRole = 'assistant'
       managed.lastFinalMessageId = answer.id
+      if (regenerateTransaction) regenerateTransaction.pendingAnswerId = answer.id
       this.persistSession(managed)
       await this.flushSession(managed.id)
+      if (!isActive()) throw new Error('Answer delivery was interrupted.')
       const stored = loadStoredSession(managed.workspace.rootPath, managed.id)?.messages.find(m => m.id === answer.id)
       if (!stored?.answerCommitted || stored.answerRunId !== state.runId || !hasRenderableAssistantText(stored.content)) {
         throw new Error('Salvaged answer could not be persisted.')
       }
+      if (regenerateTransaction && managed.regenerateTransaction === regenerateTransaction) this.commitRegenerateTransaction(managed)
     } catch (error) {
+      if (regenerateTransaction?.pendingAnswerId === answer.id) regenerateTransaction.pendingAnswerId = undefined
+      if (isActive()) state.persistenceFailed = true
       sessionLog.warn('Answer salvage failed', { sessionId: managed.id, answerRunId: state.runId, error: error instanceof Error ? error.message : String(error) })
       managed.messages = managed.messages.filter(m => m.id !== answer.id)
       state.committedMessageId = undefined
-      managed.lastMessageRole = previousLastRole
-      managed.lastFinalMessageId = previousFinalId
+      if (managed.lastFinalMessageId === answer.id) {
+        managed.lastMessageRole = previousLastRole
+        managed.lastFinalMessageId = previousFinalId
+      }
       this.persistSession(managed)
       await this.flushSession(managed.id).catch(rollbackError => sessionLog.error('Salvaged answer rollback persistence failed', rollbackError))
       return undefined
@@ -7840,7 +7867,8 @@ export class SessionManager implements ISessionManager {
         } catch (error) {
           sessionLog.error('Salvaged answer event delivery failed', { sessionId: managed.id, messageId: salvaged.id, error })
         }
-      } else {
+      } else if (managed.isProcessing && !managed.stopRequested && managed.answerDelivery === state
+        && managed.processingGeneration === state.generation) {
         yield { type: 'typed_error', error: createTypedError(state.persistenceFailed ? 'answer_persistence_failed' : 'answer_delivery_missing', { message: state.persistenceFailed
           ? '答案保存失败：系统未能保存已提交的正文。已保留执行记录；请先排查存储问题。'
           : '未完成答案交付：模型未提交完整正文。已保留执行记录，请继续此任务。' }) }
@@ -11025,6 +11053,20 @@ export class SessionManager implements ISessionManager {
     }, managed.workspace.id)
   }
 
+  /** Recovery permits only answer delivery, so its prose can use the same live
+   * preview as submit_answer arguments without committing commentary as an answer. */
+  private previewRecoveryAnswer(managed: ManagedSession, text: string): void {
+    const delivery = managed.answerDelivery
+    if (!delivery?.recovery || delivery.committedMessageId || delivery.persistenceFailed
+      || managed.stopRequested || !managed.isProcessing
+      || delivery.generation !== managed.processingGeneration || !hasRenderableAssistantText(text)) return
+    try { this.assertAnswerReady(managed, delivery, text) }
+    catch { return }
+    this.sendEvent({ type: 'answer_preview', sessionId: managed.id,
+      answerRunId: delivery.runId, userMessageId: delivery.userMessageId,
+      toolCallId: `recovery-${delivery.runId}`, text }, managed.workspace.id)
+  }
+
   private async processEvent(managed: ManagedSession, event: AgentEvent): Promise<void> {
     if (managed.deleting) return
     const sessionId = managed.id
@@ -11075,6 +11117,9 @@ export class SessionManager implements ISessionManager {
           event.text,
           completesActiveStream ? managed.streamingText : undefined,
         )
+        // Some providers emit only text_complete; keep that body on the same
+        // transient preview path until the durable delivery decision is made.
+        this.previewRecoveryAnswer(managed, content)
         // A boundary can close commentary before the SDK id arrives. Attach
         // the original message identity once, without re-emitting its text.
         if (event.sdkMessageId && event.relatedTurnIds?.length) {
@@ -11120,10 +11165,11 @@ export class SessionManager implements ISessionManager {
             }
           }
 
-          // Pi branch-cutoff support: remember the SDK message id → Craft
-          // assistant message id mapping. The actual anchor arrives as a
-          // separate `pi_turn_anchor` event one microtask later — the SDK
-          // updates its leaf only AFTER firing message_end (see #782).
+        }
+
+        // Preserve SDK boundaries for final answers and recoverable drafts.
+        // The SDK sends pi_turn_anchor after appending its assistant entry.
+        if (hasRenderableAssistantText(content) && (!isIntermediate || assistantMessage.answerProtocol === 'explicit-v1')) {
           if (event.sdkMessageId) {
             let cache = managed.piSdkMessageToCraftMessage
             if (!cache) {
@@ -12077,6 +12123,8 @@ export class SessionManager implements ISessionManager {
         turnId: pending.turnId
       }, workspaceId)
       this.pendingDeltas.delete(sessionId)
+      const managed = this.sessions.get(sessionId)
+      if (managed) this.previewRecoveryAnswer(managed, managed.streamingText)
     }
   }
 

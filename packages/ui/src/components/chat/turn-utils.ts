@@ -944,7 +944,7 @@ export function groupMessagesByTurn(messages: Message[], options: GroupTurnsOpti
         isAnswerPreview: message.answerPreview,
         isStreaming: !!message.isStreaming,
         streamStartTime: message.isStreaming ? message.timestamp : undefined,
-        completedRevealStartTime: message.answerProtocol === 'explicit-v1' || message.isStreaming ? undefined : message.timestamp,
+        completedRevealStartTime: message.isStreaming ? undefined : message.completedRevealStartTime,
         messageId: message.id,
         annotations: message.annotations,
       }

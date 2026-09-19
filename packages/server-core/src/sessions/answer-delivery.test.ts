@@ -103,6 +103,103 @@ describe('explicit answer delivery lifecycle (#330)', () => {
     expect(stored.messages.some(m => m.isIntermediate && m.content === '一句补充')).toBe(true)
     expect(events.filter(e => e.answerCommitted)).toHaveLength(1)
   })
+  it('recovers the screenshot sequence after four invalid searches without losing the answer', async () => {
+    install(async function* (index) {
+      if (index === 1) {
+        for (let n = 0; n < 4; n++) {
+          yield { type: 'tool_start', toolName: 'WebSearch', toolUseId: `search-${n}`, input: {} }
+          yield { type: 'tool_result', toolUseId: `search-${n}`, result: 'query is required', isError: true }
+        }
+        yield { type: 'text_complete', text: explanation, sdkMessageId: 'draft-sdk' }
+        yield { type: 'pi_turn_anchor', sdkMessageId: 'draft-sdk', sdkTurnAnchor: 'draft-anchor' }
+      } else {
+        yield { type: 'text_complete', text: markdown, sdkMessageId: 'recovery-sdk' }
+        yield { type: 'pi_turn_anchor', sdkMessageId: 'recovery-sdk', sdkTurnAnchor: 'recovery-anchor' }
+      }
+      yield { type: 'complete' }
+    })
+    await manager.sendMessage(managed.id, '解释并验证')
+    const answer = managed.messages.find(m => m.answerCommitted)!
+    expect(answer.content).toBe(markdown)
+    expect(answer.answerSalvaged).toBe(true)
+    expect(managed.messages.filter(m => m.role === 'tool' && m.isError)).toHaveLength(4)
+    expect(managed.messages.some(m => m.role === 'error')).toBe(false)
+    expect((await loadPiTurnAnchors(getSessionPath(root, managed.id))).anchors[answer.id]).toBe('recovery-anchor')
+    expect(loadStoredSession(root, managed.id)?.messages.find(m => m.id === answer.id)?.content).toBe(markdown)
+  })
+  it('durably recovers a regenerated draft with its SDK anchor before publication', async () => {
+    managed.messages = [
+      { id: 'user', role: 'user', content: '解释', timestamp: 1 },
+      { id: 'old', role: 'assistant', content: '旧答案', timestamp: 2 },
+    ]
+    managed.sdkSessionId = 'old-sdk'
+    managed.regenerateTransaction = { runId: 'regenerate', keepThroughMessageId: 'user', rendererTruncated: false,
+      originalMessages: structuredClone(managed.messages), originalSdkSessionId: 'old-sdk' }
+    manager.setEventSink((_channel, _target, event: any) => {
+      events.push(event)
+      if (event.answerCommitted) {
+        expect(managed.regenerateTransaction).toBeUndefined()
+        expect(loadStoredSession(root, managed.id)?.messages.find(m => m.id === event.messageId)?.content).toBe(markdown)
+      }
+    })
+    install(async function* (index) {
+      managed.sdkSessionId = 'new-sdk'
+      yield { type: 'text_complete', text: index === 1 ? explanation : markdown, sdkMessageId: `sdk-${index}` }
+      yield { type: 'pi_turn_anchor', sdkMessageId: `sdk-${index}`, sdkTurnAnchor: `anchor-${index}` }
+      yield { type: 'complete' }
+    })
+    await manager.sendMessage(managed.id, '解释', undefined, undefined, undefined, 'user')
+    const answer = managed.messages.find(m => m.answerCommitted)!
+    expect(answer.content).toBe(markdown)
+    expect(answer.answerSalvaged).toBe(true)
+    expect((await loadPiTurnAnchors(getSessionPath(root, managed.id))).anchors[answer.id]).toBe('anchor-2')
+    expect(managed.messages.some(m => m.id === 'old')).toBe(false)
+    expect(loadStoredSession(root, managed.id)?.sdkSessionId).toBe('new-sdk')
+    expect(events.filter(e => e.answerCommitted)).toHaveLength(1)
+  })
+  for (const waitingFor of ['tool', 'worker', 'aggregation'] as const) {
+    it(`does not salvage around an unfinished ${waitingFor} during recovery`, async () => {
+      install(async function* (index) {
+        yield { type: 'text_complete', text: markdown }
+        if (index === 2) {
+          if (waitingFor === 'tool') yield { type: 'tool_start', toolName: 'Bash', toolUseId: 'pending', input: {} }
+          else if (waitingFor === 'worker') (manager as any).pendingSwarmChildren.set(managed.id, 1)
+          else {
+            managed.orchestrationStatus = 'running'
+            managed.orchestrationId = 'swarm'
+            managed.orchestrationAggregation = { phase: 'waiting-workers', orchestrationId: 'swarm' } as any
+          }
+        }
+        yield { type: 'complete' }
+      })
+      await manager.sendMessage(managed.id, '解释')
+      expect(managed.messages.some(m => m.answerCommitted)).toBe(false)
+      expect(events.some(e => e.answerCommitted)).toBe(false)
+    })
+  }
+  for (const failure of ['cancel', 'storage'] as const) {
+    it(`does not publish a recovered answer after ${failure} during its flush`, async () => {
+      const flush = manager.flushSession.bind(manager)
+      install(async function* () {
+        yield { type: 'text_complete', text: markdown }
+        yield { type: 'complete' }
+      })
+      manager.flushSession = async id => {
+        if (managed.messages.some(m => m.answerSalvaged)) {
+          if (failure === 'cancel') managed.stopRequested = true
+          else throw new Error('disk unavailable')
+        }
+        await flush(id)
+      }
+      await manager.sendMessage(managed.id, '解释')
+      expect(managed.messages.some(m => m.answerCommitted)).toBe(false)
+      expect(events.some(e => e.answerCommitted)).toBe(false)
+      expect(loadStoredSession(root, managed.id)?.messages.some(m => m.answerCommitted)).toBe(false)
+      const errors = managed.messages.filter(m => m.role === 'error')
+      if (failure === 'storage') expect(errors.some(m => m.errorCode === 'answer_persistence_failed')).toBe(true)
+      else expect(errors.some(m => m.errorCode === 'answer_delivery_missing')).toBe(false)
+    })
+  }
   it('ends with an explicit error when recovery omits delivery and no draft can be salvaged', async () => {
     install(async function* () { yield { type: 'complete' } })
     await manager.sendMessage(managed.id, '解释并验证')

@@ -197,6 +197,7 @@ export function handleTextComplete(
       answerProtocol: event.answerProtocol,
       answerRunId: event.answerRunId,
       answerCommitted: event.answerCommitted,
+      completedRevealStartTime: session.isProcessing && !event.isIntermediate ? Date.now() : undefined,
       turnId: event.turnId,
       parentToolUseId: event.parentToolUseId,
       timestamp: nextTimestamp,
@@ -220,6 +221,7 @@ export function handleTextComplete(
     answerProtocol: event.answerProtocol,
     answerRunId: event.answerRunId,
     answerCommitted: event.answerCommitted,
+    completedRevealStartTime: session.isProcessing && !event.isIntermediate ? Date.now() : undefined,
     turnId: event.turnId,
     parentToolUseId: event.parentToolUseId,
   }

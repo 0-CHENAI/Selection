@@ -2613,7 +2613,7 @@ function MessageBubble({
               onFileClick={onOpenFile}
               id={message.id}
               isStreaming={message.isStreaming}
-              revealStartTime={message.isStreaming ? undefined : message.timestamp}
+              revealStartTime={message.isStreaming ? undefined : message.completedRevealStartTime}
               className="text-sm"
               collapsible
             >
