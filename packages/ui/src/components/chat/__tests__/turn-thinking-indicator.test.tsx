@@ -136,7 +136,7 @@ describe('TurnCard thinking indicator (#239)', () => {
       toolInput: { answer: '最终正文' },
     }])
 
-    expect(html).toContain('现在给你正式回复')
+    expect(html).toContain('现在让我来给你正式回复......')
     expect(html).not.toContain('提交 GPT-6 与 Fable 5.1 对比的完整回答')
     expect(html).not.toContain('submit_answer')
   })
