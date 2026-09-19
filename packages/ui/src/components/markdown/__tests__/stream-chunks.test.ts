@@ -3,11 +3,12 @@ import { unified } from 'unified'
 import type { Root } from 'hast'
 import { rehypeStreamChunks, splitRevealText } from '../rehype-stream-chunks'
 
-test('preserves whitespace and complete emoji graphemes with bounded runs', () => {
+test('preserves whitespace and complete emoji graphemes with stable small runs', () => {
   const text = '范围 0.8~1.2，👨‍👩‍👧‍👦 é '.repeat(20)
   const chunks = splitRevealText(text)
   expect(chunks.join('')).toBe(text)
-  expect(chunks.length).toBeLessThanOrEqual(24)
+  const segmenter = new Intl.Segmenter(undefined, { granularity: 'grapheme' })
+  expect(chunks.every(chunk => [...segmenter.segment(chunk)].length <= 8)).toBe(true)
   expect(chunks.some(chunk => chunk.includes('👨‍👩‍👧‍👦'))).toBe(true)
 })
 test('text becomes inline runs while code and math stay untouched', () => {
@@ -20,4 +21,13 @@ test('text becomes inline runs while code and math stay untouched', () => {
   unified().use(rehypeStreamChunks).runSync(tree)
   expect(tree.children[0]).toMatchObject({ children: [{ tagName: 'span' }, { tagName: 'span' }] })
   expect(JSON.stringify(tree.children.slice(1))).toBe(originalCode)
+})
+
+
+test('keeps completed inline runs stable as a long paragraph grows', () => {
+  const prefix = 'abcdefghijklmnop'.repeat(30)
+  const old = splitRevealText(prefix)
+  const next = splitRevealText(prefix + 'qrstuvwxyz'.repeat(20))
+  expect(next.slice(0, old.length - 1)).toEqual(old.slice(0, -1))
+  expect(next.length).toBeGreaterThan(old.length)
 })

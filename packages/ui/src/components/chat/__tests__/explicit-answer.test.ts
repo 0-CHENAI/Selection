@@ -127,3 +127,37 @@ it('never promotes an undelivered answer when processing stops', () => {
   expect(turns[0]?.response).toBeUndefined()
   expect(turns[0]?.activities.some(a => a.content === explanation)).toBe(true)
 })
+
+
+it('keeps process notes that only mention the answer heading, or contain it inside code', () => {
+  const heading = '# 对比结论'
+  for (const note of [
+    '接下来会使用标题 "# 对比结论"，目前还在查证。',
+    '# 对比结论的验证计划\n\n仍需查证实际指标。',
+    '检查模板示例：\n\n```markdown\n# 对比结论\n这里是占位符。\n```',
+    '    # 对比结论\n    这是缩进代码示例。',
+    '> # 对比结论\n> 这是引用的文档标题。',
+    '<pre>\n# 对比结论\n这是 HTML 代码示例。\n</pre>',
+  ]) {
+    const messages: Message[] = [
+      { id: 'user', role: 'user', content: '对比', timestamp: 1, ...protocol },
+      { id: 'note', role: 'assistant', content: note, timestamp: 2, ...protocol },
+      { id: 'answer', role: 'assistant', content: heading + '\n\n最终正文。', timestamp: 3, answerCommitted: true, ...protocol },
+    ]
+    const turn = groupMessagesByTurn(messages).find(t => t.type === 'assistant')!
+    expect(turn.activities.some(a => a.id === 'note')).toBe(true)
+    expect(turn.response?.text).toBe(heading + '\n\n最终正文。')
+  }
+})
+
+
+it('does not fold a draft against an invisible committed message', () => {
+  const messages: Message[] = [
+    { id: 'user', role: 'user', content: '对比', timestamp: 1, ...protocol },
+    { id: 'draft', role: 'assistant', content: '# 对比结论\n\n正在查证。', timestamp: 2, ...protocol },
+    { id: 'hidden-answer', role: 'assistant', hidden: true, content: '# 对比结论\n\n不可见的内部答案。', timestamp: 3, answerCommitted: true, ...protocol },
+  ]
+  const turn = groupMessagesByTurn(messages).find(t => t.type === 'assistant')!
+  expect(turn.activities.some(a => a.id === 'draft')).toBe(true)
+  expect(turn.response).toBeUndefined()
+})

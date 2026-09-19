@@ -99,7 +99,7 @@ describe('#330 service → renderer → durable reload → turn grouping', () =>
           expect(liveTurns).toHaveLength(1)
           expect(loadedTurns).toHaveLength(1)
           expect(liveTurns[0]!.response?.completedRevealStartTime).toBeNumber()
-          expect(loadedTurns[0]!.response).toEqual({ ...liveTurns[0]!.response, completedRevealStartTime: undefined })
+          expect(loadedTurns[0]!.response).toEqual({ ...liveTurns[0]!.response!, completedRevealStartTime: undefined })
           expect(loadedTurns[0]!.response?.text).toBe(answer)
           // Drafts folded by the UI must still survive in the durable execution record.
           expect(reloaded.some(m => m.isIntermediate && m.content === explanation)).toBe(true)

@@ -7,7 +7,9 @@ const segmenter = new Intl.Segmenter(undefined, { granularity: 'grapheme' })
 /** Stable inline runs: preserve text, whitespace and the React tree at completion. */
 export function splitRevealText(text: string): string[] {
   const letters = Array.from(segmenter.segment(text), part => part.segment)
-  const size = Math.max(8, Math.ceil(letters.length / 24))
+  // Fixed boundaries keep already-visible runs intact as the paragraph grows.
+  // The animation controller separately bounds layout reads per frame.
+  const size = 8
   const runs: string[] = []
   for (let index = 0; index < letters.length; index += size) {
     runs.push(letters.slice(index, index + size).join(''))

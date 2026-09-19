@@ -10,6 +10,24 @@ import { storedToMessage, hasRenderableAssistantText } from '@craft-agent/core'
 import { isParentTaskTool, getToolDisplayName } from '@craft-agent/shared/utils/toolNames'
 
 import { isSubmitAnswerTool, localizedToolLabel } from './tool-labels'
+import { unified } from 'unified'
+import remarkParse from 'remark-parse'
+
+const headingParser = unified().use(remarkParse)
+const headingCache = new WeakMap<Message, { content: string; headings: string[] }>()
+
+/** Only actual document headings identify a draft, not quotes or code examples. */
+function messageHeadings(message: Message): string[] {
+  const cached = headingCache.get(message)
+  if (cached?.content === message.content) return cached.headings
+  const headings = headingParser.parse(message.content).children.flatMap(node => {
+    if (node.type !== 'heading') return []
+    const source = message.content.slice(node.position?.start.offset, node.position?.end.offset).trim()
+    return /^#{1,6}\s/.test(source) ? [source] : []
+  })
+  headingCache.set(message, { content: message.content, headings })
+  return headings
+}
 
 export { storedToMessage }
 import type { ActivityItem, ActivityStatus, ActivityType, ResponseContent, TodoItem } from './TurnCard'
@@ -583,9 +601,12 @@ export function groupMessagesByTurn(messages: Message[], options: GroupTurnsOpti
   // Committed answer text per run, so commentary that turns out to be the
   // drafted opening of the final answer can be folded into the final card.
   const committedAnswerByRun = new Map<string, string>()
+  const committedHeadingByRun = new Map<string, string>()
   for (const message of messages) {
-    if (message.answerProtocol === 'explicit-v1' && message.answerCommitted && message.answerRunId && message.content) {
+    if (message.role === 'assistant' && !message.hidden && !message.isQueued && message.answerProtocol === 'explicit-v1' && message.answerCommitted && message.answerRunId && message.content) {
       committedAnswerByRun.set(message.answerRunId, message.content.trim())
+      const heading = messageHeadings(message)[0]
+      if (heading) committedHeadingByRun.set(message.answerRunId, heading)
     }
   }
   const protocolMessages = [...messages].sort((a, b) => a.timestamp - b.timestamp).flatMap(message => {
@@ -604,9 +625,8 @@ export function groupMessagesByTurn(messages: Message[], options: GroupTurnsOpti
       if (draft.length >= 2 && committedAnswer.startsWith(draft)) return []
       // Commentary carrying the answer's own top-level heading is a superseded
       // draft of that answer (narration + rewritten body), not process notes.
-      const committedHeading = committedAnswer.split('\n')
-        .find(line => /^#{1,6}\s/.test(line.trim()))?.trim()
-      if (committedHeading && committedHeading.length >= 6 && draft.includes(committedHeading)) return []
+      const committedHeading = runId ? committedHeadingByRun.get(runId) : undefined
+      if (committedHeading && committedHeading.length >= 6 && messageHeadings(message).includes(committedHeading)) return []
     }
     if (message.answerProtocol === 'explicit-v1' && message.answerCommitted && runId) deliveredRuns.add(runId)
     const classified = message.answerProtocol === 'explicit-v1' && message.role === 'assistant'
