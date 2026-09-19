@@ -621,15 +621,18 @@ export function getPreviewText(
   intent: string | undefined,
   turnPhase: TurnPhase,
 ): string {
-  // The header describes the live phase, not the last finished tool.
-  if (turnPhase === 'pending' || turnPhase === 'awaiting') return thinkingStatusLabel()
   if (turnPhase === 'streaming') return i18n.t('turnCard.responding')
 
   // During an active turn, prefer the newest thinking/tool intent over the
   // turn-level intent captured when the turn was first created. The latter is
   // intentionally stable and otherwise leaves the title stuck on step one.
+  // This check runs before the pending/awaiting fallback so the header follows
+  // the latest step while the model works between steps (#402).
   const latestActivePreview = getActiveTurnPreview(activities, turnPhase)
   if (latestActivePreview) return latestActivePreview
+
+  // No step provides a label yet — describe the live phase.
+  if (turnPhase === 'pending' || turnPhase === 'awaiting') return thinkingStatusLabel()
 
   // If we have an explicit intent, use it
   if (intent) return intent

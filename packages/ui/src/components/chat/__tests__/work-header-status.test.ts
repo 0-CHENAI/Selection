@@ -5,14 +5,16 @@ mock.module('pdfjs-dist/build/pdf.worker.min.mjs?url', () => ({ default: 'pdf.wo
 mock.module('react-pdf', () => ({ pdfjs: { GlobalWorkerOptions: {} }, Document: () => null, Page: () => null }))
 const { getPreviewText } = await import('../TurnCard')
 
-it('主栏优先展示当前思考和正文阶段，不沿用已完成工具摘要', async () => {
+it('主栏跟随最新步骤，仅在无步骤标签时回退到阶段状态', async () => {
   await i18n.init({ lng: 'zh', resources: { zh: { translation: {
     'chat.processing.thinking': '思考中…',
     'turnCard.responding': '正在回复',
   } } } })
   const activities = [{ id: 'fetch', type: 'tool' as const, status: 'completed' as const,
     toolName: 'WebFetch', intent: '读取网页', timestamp: 1 }]
-  expect(getPreviewText(activities, '读取网页', 'awaiting')).toBe('思考中…')
+  expect(getPreviewText(activities, '读取网页', 'awaiting')).toBe('读取网页')
   expect(getPreviewText(activities, '读取网页', 'streaming')).toBe('正在回复')
   expect(getPreviewText([{ ...activities[0]!, status: 'running' }], undefined, 'tool_active')).toBe('读取网页')
+  expect(getPreviewText([], undefined, 'pending')).toBe('思考中…')
+  expect(getPreviewText([], undefined, 'awaiting')).toBe('思考中…')
 })

@@ -104,7 +104,7 @@ describe('TurnCard thinking indicator (#239)', () => {
     expect(countOccurrences(html, 'class="spinner ')).toBe(1)
   })
 
-  it('shows the waiting phase in the header with one gap spinner after a tool completes', async () => {
+  it('shows the latest step in the header with one gap spinner after a tool completes', async () => {
     const html = await renderTurn('zh-Hans', [{
       id: 'tool-1',
       type: 'tool',
@@ -113,7 +113,8 @@ describe('TurnCard thinking indicator (#239)', () => {
       toolName: 'Read',
     }])
 
-    expect(countOccurrences(html, '思考中…')).toBe(2)
+    expect(html).toContain('读取文件')
+    expect(countOccurrences(html, '思考中…')).toBe(1)
     expect(countOccurrences(html, 'class="spinner ')).toBe(1)
   })
 
