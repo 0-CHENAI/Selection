@@ -580,6 +580,14 @@ export function groupMessagesByTurn(messages: Message[], options: GroupTurnsOpti
   // to the composer queue until replay starts; it is not yet a transcript turn.
   const deliveredRuns = new Set<string>()
   let activeRunId: string | undefined
+  // Committed answer text per run, so commentary that turns out to be the
+  // drafted opening of the final answer can be folded into the final card.
+  const committedAnswerByRun = new Map<string, string>()
+  for (const message of messages) {
+    if (message.answerProtocol === 'explicit-v1' && message.answerCommitted && message.answerRunId && message.content) {
+      committedAnswerByRun.set(message.answerRunId, message.content.trim())
+    }
+  }
   const protocolMessages = [...messages].sort((a, b) => a.timestamp - b.timestamp).flatMap(message => {
     if (message.answerPreview && options.isSessionProcessing === false) return []
     if (message.hidden && message.role !== 'user') return []
@@ -587,6 +595,14 @@ export function groupMessagesByTurn(messages: Message[], options: GroupTurnsOpti
     if (message.answerRunId) activeRunId = message.answerRunId
     const runId = message.answerRunId ?? activeRunId
     if (runId && deliveredRuns.has(runId) && (message.role === 'assistant' || message.role === 'tool')) return []
+    // The model sometimes drafts its final answer as ordinary text before
+    // formally submitting it. Once that run is committed, the draft's work
+    // chain row would restate the answer's opening — keep one visible copy.
+    const committedAnswer = runId ? committedAnswerByRun.get(runId) : undefined
+    if (committedAnswer && message.role === 'assistant' && !message.answerCommitted && !message.answerPreview) {
+      const draft = message.content.trim()
+      if (draft.length >= 2 && committedAnswer.startsWith(draft)) return []
+    }
     if (message.answerProtocol === 'explicit-v1' && message.answerCommitted && runId) deliveredRuns.add(runId)
     const classified = message.answerProtocol === 'explicit-v1' && message.role === 'assistant'
       ? { ...message, isIntermediate: !message.answerCommitted && !message.answerPreview }

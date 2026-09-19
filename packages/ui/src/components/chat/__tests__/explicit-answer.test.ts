@@ -39,6 +39,32 @@ describe('explicit answer delivery (#330)', () => {
     messages[4]!.content = '修正：主持人随机开门的条件不同，不能直接使用上述结论。'
     expect(groupMessagesByTurn(messages).find(t => t.type === 'assistant')?.response?.text).toBe(messages[4]!.content)
   })
+  it('folds commentary that drafted the committed answer into the final card', () => {
+    const committed = '直接说结论：没有绝对的胜负，要看你的工作负载。\n\n详细对比……'
+    const messages: Message[] = [
+      { id: 'user', role: 'user', content: '对比两个模型', timestamp: 1, ...protocol },
+      { id: 'note', role: 'assistant', content: '我来查一下资料。', timestamp: 2, ...protocol },
+      { id: 'search', role: 'tool', content: '', toolName: 'WebSearch', toolUseId: 'ws', toolStatus: 'completed', toolResult: '…', timestamp: 3, ...protocol },
+      { id: 'draft', role: 'assistant', content: '直接说结论：没有绝对的胜负，要看你的工作负载。', timestamp: 4, ...protocol },
+      { id: 'answer', role: 'assistant', content: committed, timestamp: 5, answerCommitted: true, ...protocol },
+    ]
+    for (const variant of [messages, messages.map(messageToStored).map(storedToMessage)]) {
+      const turn = groupMessagesByTurn(variant).find(t => t.type === 'assistant')!
+      expect(turn.response?.text).toBe(committed)
+      expect(turn.activities.some(a => a.content === '我来查一下资料。')).toBe(true)
+      expect(turn.activities.some(a => a.id === 'draft')).toBe(false)
+    }
+  })
+  it('keeps tiny commentary that merely prefixes the committed answer', () => {
+    const messages: Message[] = [
+      { id: 'user', role: 'user', content: '继续', timestamp: 1, ...protocol },
+      { id: 'ack', role: 'assistant', content: '好', timestamp: 2, ...protocol },
+      { id: 'answer', role: 'assistant', content: '好的，以下是完整说明。', timestamp: 3, answerCommitted: true, ...protocol },
+    ]
+    const turn = groupMessagesByTurn(messages).find(t => t.type === 'assistant')!
+    expect(turn.response?.text).toBe('好的，以下是完整说明。')
+    expect(turn.activities.some(a => a.id === 'ack')).toBe(true)
+  })
   it('keeps legacy behavior for messages without protocol metadata', () => {
     const messages: Message[] = [{ id: 'legacy', role: 'assistant', content: '旧答案', timestamp: 1 }]
     expect(groupMessagesByTurn(messages)[0]).toMatchObject({ response: { text: '旧答案' } })
