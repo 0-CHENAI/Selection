@@ -2,7 +2,7 @@ import * as React from 'react'
 import { useMemo, useEffect, useRef, useCallback, useState } from 'react'
 import i18n from 'i18next'
 import { localizedToolLabel } from './tool-labels'
-import { completedParagraphs, streamingResponseBody } from './paragraph-stream'
+import { streamingResponseBody } from './paragraph-stream'
 import { useFrameSource } from './useFrameSource'
 import { ResponseBodyGrowth } from './ResponseBodyGrowth'
 import { useCompletionActions } from './useCompletionActions'
@@ -2816,8 +2816,8 @@ export const TurnCard = React.memo(function TurnCard({
   const expandedActivityGroups = externalExpandedActivityGroups ?? localExpandedActivityGroups
   const handleExpandedActivityGroupsChange = onExpandedActivityGroupsChange ?? setLocalExpandedActivityGroups
 
-  // A complete Markdown block, not elapsed time, opens the response.
-  const isBuffering = !!response?.isStreaming && !completedParagraphs(response.text, true).trim()
+  // Visible prose, not elapsed time, opens the response and ends buffering.
+  const isBuffering = !!response?.isStreaming && !streamingResponseBody(response.text, true).trim()
 
 
   // Compute preview text with cross-fade animation
