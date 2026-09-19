@@ -1,7 +1,7 @@
 import * as React from 'react'
 import { useMemo, useEffect, useRef, useCallback, useState } from 'react'
 import i18n from 'i18next'
-import { localizedToolLabel } from './tool-labels'
+import { isSubmitAnswerTool, localizedToolLabel } from './tool-labels'
 import { streamingResponseBody } from './paragraph-stream'
 import { useFrameSource } from './useFrameSource'
 import { ResponseBodyGrowth } from './ResponseBodyGrowth'
@@ -965,8 +965,11 @@ function ActivityRow({ activity, onOpenDetails, isLastChild, sessionFolderPath, 
   // For non-MCP tools or informative mode, use the appropriate display name
   const displayedName: string = isMcpOrApiTool ? sourceName : fullDisplayName
 
-  // Intent for MCP tools, description for Bash commands
-  const intentOrDescription = activity.intent || (activity.toolInput?.description as string | undefined)
+  // Intent for MCP tools, description for Bash commands.
+  // submit_answer delivers the final reply itself; its intent just restates that.
+  const intentOrDescription = isSubmitAnswerTool(activity.toolName)
+    ? undefined
+    : activity.intent || (activity.toolInput?.description as string | undefined)
   const inputSummary = formatToolInput(activity.toolInput, activity.toolName, sessionFolderPath)
   const diffStats = computeEditWriteDiffStats(activity.toolName, activity.toolInput)
   const isComplete = activity.status === 'completed' || activity.status === 'error'

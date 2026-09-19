@@ -70,6 +70,23 @@ describe('getActiveTurnPreview', () => {
       .toBe('定位第五章和第六章')
   })
 
+  it('submit_answer 只显示本地化标签，不带复述性的提交意图', () => {
+    const activities = [
+      createActivity({ intent: '查找资料', timestamp: 1 }),
+      createActivity({
+        toolName: 'submit_answer',
+        intent: '提交完整回答',
+        toolInput: { answer: '正文' },
+        timestamp: 2,
+      }),
+    ]
+
+    const preview = getActiveTurnPreview(activities, 'awaiting')
+    expect(preview).toBeTruthy()
+    expect(preview).not.toContain('提交完整回答')
+    expect(preview).not.toContain('正文')
+  })
+
   it('根据时间戳选择最新工具意图，不依赖活动数组的暂时顺序', () => {
     const activities = [
       createActivity({

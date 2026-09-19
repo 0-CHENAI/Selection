@@ -125,6 +125,22 @@ describe('TurnCard thinking indicator (#239)', () => {
     expect(html).not.toContain('Thinking...')
   })
 
+  it('renders submit_answer with the localized delivery label and no intent suffix', async () => {
+    const html = await renderTurn('zh-Hans', [{
+      id: 'submit-1',
+      type: 'tool',
+      status: 'completed',
+      timestamp: 1,
+      toolName: 'submit_answer',
+      intent: '提交 GPT-6 与 Fable 5.1 对比的完整回答',
+      toolInput: { answer: '最终正文' },
+    }])
+
+    expect(html).toContain('现在给你正式回复')
+    expect(html).not.toContain('提交 GPT-6 与 Fable 5.1 对比的完整回答')
+    expect(html).not.toContain('submit_answer')
+  })
+
   it('still hides a completed interrupted turn with no meaningful work', async () => {
     const html = await renderTurn('zh-Hans', [{
       id: 'tool-1',

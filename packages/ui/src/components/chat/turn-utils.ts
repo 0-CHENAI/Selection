@@ -9,7 +9,7 @@ import type { Message, StoredMessage, MessageRole } from '@craft-agent/core'
 import { storedToMessage, hasRenderableAssistantText } from '@craft-agent/core'
 import { isParentTaskTool, getToolDisplayName } from '@craft-agent/shared/utils/toolNames'
 
-import { localizedToolLabel } from './tool-labels'
+import { isSubmitAnswerTool, localizedToolLabel } from './tool-labels'
 
 export { storedToMessage }
 import type { ActivityItem, ActivityStatus, ActivityType, ResponseContent, TodoItem } from './TurnCard'
@@ -315,7 +315,7 @@ export function getActiveTurnPreview(
   activities.forEach((activity, index) => {
     let toolIntent: string | undefined
     if (activity.type === 'tool') {
-      toolIntent = activity.intent?.trim()
+      toolIntent = isSubmitAnswerTool(activity.toolName) ? undefined : activity.intent?.trim()
       if (!toolIntent && activity.toolName) {
         const name = activity.displayName?.trim()
           || ((!activity.toolDisplayMeta || activity.toolDisplayMeta.category === 'native')
