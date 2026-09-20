@@ -1,5 +1,5 @@
 import * as React from 'react'
-import { useMemo, useEffect, useLayoutEffect, useRef, useCallback, useState } from 'react'
+import { useMemo, useEffect, useRef, useCallback, useState } from 'react'
 import i18n from 'i18next'
 import { isSubmitAnswerTool, localizedToolLabel } from './tool-labels'
 import { usePacedSource } from './usePacedSource'
@@ -60,6 +60,7 @@ import {
   isVisibleCommentaryCard,
   isMirroredCommentaryActivity,
   shouldShowGenericThinkingIndicator,
+  shouldShowThinkingIndicator,
   type ActivityGroup,
   type AssistantTurn,
   type TurnPhase,
@@ -646,9 +647,8 @@ export function getPreviewText(
     return runningTask.toolInput.description as string
   }
 
-  // Get running and completed tools (not intermediate messages)
+  // Get running tools (not intermediate messages)
   const runningTools = activities.filter(a => a.status === 'running' && a.toolName)
-  const errorCount = activities.filter(a => a.status === 'error').length
 
   // Show running tool names
   if (runningTools.length > 0) {
@@ -661,18 +661,12 @@ export function getPreviewText(
   // When complete, show first Task's description if available
   const firstTask = activities.find(a => isParentTaskTool(a.toolName ?? ''))
   if (firstTask?.toolInput?.description) {
-    const errorSuffix = errorCount > 0
-      ? i18n.t('turnCard.errorCount', { count: errorCount })
-      : ''
-    return `${firstTask.toolInput.description as string}${errorSuffix}`
+    return firstTask.toolInput.description as string
   }
 
   // When complete, show summary (badge already shows count)
   if (turnPhase === 'complete') {
-    const errorSuffix = errorCount > 0
-      ? i18n.t('turnCard.errorCount', { count: errorCount })
-      : ''
-    return `${i18n.t('turnCard.stepsCompleted')}${errorSuffix}`
+    return i18n.t('turnCard.stepsCompleted')
   }
 
   return i18n.t('turnCard.starting')
@@ -800,7 +794,7 @@ function ExpandableHeightPanel({
 }) {
   const wasOpen = useRef(open)
   const toggling = wasOpen.current !== open
-  useLayoutEffect(() => {
+  useEffect(() => {
     wasOpen.current = open
   }, [open])
 
@@ -824,6 +818,135 @@ function ExpandableHeightPanel({
 }
 
 const WORK_CHAIN_EASE = [0.22, 1, 0.36, 1] as const
+
+/** Spinner and chevron share one 12px slot so thinking → work does not shift the title. */
+function WorkHeaderIcon({
+  mode,
+  expanded,
+  reduceMotion,
+}: {
+  mode: 'spinner' | 'chevron'
+  expanded: boolean
+  reduceMotion: boolean | null
+}) {
+  const instant = !!reduceMotion
+  // Same in-flow chevron as origin/main. An absolutely positioned 12px slot
+  // clips the stroke against any rounded overflow ancestor.
+  if (mode === 'chevron') {
+    return (
+      <motion.span
+        initial={false}
+        animate={{ rotate: expanded ? 90 : 0 }}
+        transition={{ duration: instant ? 0 : 0.15, ease: 'easeOut' }}
+        className={cn(SIZE_CONFIG.iconSize, 'flex items-center justify-center shrink-0')}
+      >
+        <ChevronRight className={SIZE_CONFIG.iconSize} />
+      </motion.span>
+    )
+  }
+  return (
+    <span className={cn(SIZE_CONFIG.iconSize, 'flex items-center justify-center shrink-0')}>
+      <Spinner className={SIZE_CONFIG.spinnerSize} />
+    </span>
+  )
+}
+
+/**
+ * Same badge as origin/main. When it joins an already-visible “思考中” header it
+ * slides open from 0 width (plus the flex gap it introduces) so the title glides
+ * right instead of jumping. Width is measured by motion, not a 0fr grid track.
+ */
+function WorkHeaderStepCount({
+  count,
+  animateIn,
+  reduceMotion,
+}: {
+  count: number
+  animateIn: boolean
+  reduceMotion: boolean | null
+}) {
+  if (count <= 0) return null
+  const instant = !!reduceMotion || !animateIn
+  const ref = useRef<HTMLSpanElement>(null)
+  const clip = () => { if (ref.current) ref.current.style.overflow = 'hidden' }
+  const unclip = () => { if (ref.current) ref.current.style.overflow = '' }
+  return (
+    <motion.span
+      ref={ref}
+      initial={instant ? false : { width: 0, opacity: 0, marginRight: '-0.5rem' }}
+      animate={{ width: 'auto', opacity: 1, marginRight: '0rem' }}
+      transition={{
+        duration: instant ? 0 : 0.24,
+        ease: WORK_CHAIN_EASE,
+        opacity: { duration: instant ? 0 : 0.18, delay: instant ? 0 : 0.06 },
+      }}
+      onAnimationStart={instant ? undefined : clip}
+      onAnimationComplete={unclip}
+      className="-ml-0.5 inline-flex shrink-0"
+    >
+      <span className="shrink-0 px-1.5 py-0.5 rounded-[4px] bg-background shadow-minimal text-[10px] font-medium tabular-nums">
+        {count}
+      </span>
+    </motion.span>
+  )
+}
+
+/**
+ * Height/opacity presence for a block that joins or leaves a live turn: the
+ * work header, the response card, and the chat's processing row all use it so
+ * a card demoted into the chain collapses at the same pace the chain grows.
+ * Clips only while the tween runs so shadows and focus rings are not cut later.
+ */
+export function HeightPresence({
+  containerRef,
+  animateIn,
+  reduceMotion,
+  className,
+  children,
+  ...rest
+}: {
+  containerRef?: React.RefObject<HTMLDivElement>
+  animateIn: boolean
+  reduceMotion: boolean | null
+  className?: string
+  children: React.ReactNode
+} & Record<`data-${string}`, string>) {
+  const ownRef = useRef<HTMLDivElement>(null)
+  const ref = containerRef ?? ownRef
+  const instant = !!reduceMotion
+  const tween = { duration: instant ? 0 : 0.28, ease: WORK_CHAIN_EASE }
+  const clip = () => { if (ref.current) ref.current.style.overflow = 'hidden' }
+  const unclip = () => {
+    if (!ref.current) return
+    ref.current.style.overflow = ''
+    ref.current.style.height = ''
+  }
+  return (
+    <motion.div
+      ref={ref}
+      initial={instant || !animateIn ? false : { height: 0, opacity: 0 }}
+      animate={{ height: 'auto', opacity: 1 }}
+      exit={instant ? undefined : { height: 0, opacity: 0 }}
+      transition={{ height: tween, opacity: { duration: instant ? 0 : 0.2, ease: WORK_CHAIN_EASE } }}
+      onAnimationStart={instant || !animateIn ? undefined : clip}
+      onAnimationComplete={unclip}
+      className={className}
+      {...rest}
+    >
+      {children}
+    </motion.div>
+  )
+}
+
+/** The work header block. */
+function WorkChrome(props: {
+  containerRef: React.RefObject<HTMLDivElement>
+  animateIn: boolean
+  reduceMotion: boolean | null
+  children: React.ReactNode
+}) {
+  return <HeightPresence {...props} className="group select-none" data-search-exclude="true" />
+}
 
 /** Per-row enter/exit so “思考中” can collapse into the next tool without a hard cut. */
 function WorkChainRow({
@@ -871,7 +994,9 @@ function WorkChainRow({
       }}
       className="overflow-hidden"
     >
-      {children}
+      {/* Row spacing lives inside the tween. A container space-y margin stays
+          at full size while the height collapses, then pops 2px on unmount. */}
+      <div className="py-px">{children}</div>
     </motion.div>
   )
 }
@@ -2500,7 +2625,7 @@ export function ResponseCard({
           )}
 
           {/* Received blocks grow in flow; the outer viewport stays pinned. */}
-          <ResponseBodyGrowth streaming={presentationStreaming && variant === 'response'}>
+          <ResponseBodyGrowth>
           <div
             key="response-content"
             ref={contentRef}
@@ -2846,6 +2971,21 @@ export const TurnCard = React.memo(function TurnCard({
   // Ref for scrollable activities container (to scroll to bottom on expand)
   const activitiesContainerRef = useRef<HTMLDivElement>(null)
 
+  // Was the work header already in the DOM after the last commit? Read during
+  // render so a badge arriving later slides in, while a header that mounts
+  // together with its badge animates once as a whole.
+  const chromeRef = useRef<HTMLDivElement>(null)
+  const chromeMountedRef = useRef(false)
+  useEffect(() => {
+    chromeMountedRef.current = chromeRef.current !== null
+  })
+  // Latched once this card has rendered a live turn, so the committed final
+  // answer still slides in while a turn loaded from history renders at rest.
+  const wasLiveRef = useRef(false)
+  useEffect(() => {
+    if (!isComplete) wasLiveRef.current = true
+  }, [isComplete])
+
   const toggleExpanded = useCallback(() => {
     hasUserToggled.current = true
     const newExpanded = !isExpanded
@@ -2984,8 +3124,8 @@ export const TurnCard = React.memo(function TurnCard({
   }
 
   // Only count rows the user will actually see in the collapsible section
-  const hasActivities = visibleActivities.length > 0
   const stepCount = countWorkRecords(visibleActivities)
+  const hasWorkRecords = stepCount > 0
 
   // Determine if thinking indicator should show using the phase-based state machine.
   // This properly handles the "gap" state (awaiting) between tool completion and next action,
@@ -2995,37 +3135,56 @@ export const TurnCard = React.memo(function TurnCard({
     isBuffering && !(response && hasVisibleResponse),
     renderedActivityRows,
   )
+  // Header chrome stays for every turn with real work records (live or complete).
+  // Before the first record it doubles as the thinking row for the live turn.
+  const showLiveThinkingHeader = !animateResponse
+    && !isComplete
+    && shouldShowThinkingIndicator(turnPhase, isBuffering && !(response && hasVisibleResponse))
+  const showWorkChrome = hasWorkRecords || showLiveThinkingHeader
+  // True once the header has been on screen for a committed render, so a badge
+  // that arrives later slides in while a header that mounts with its badge does not.
+  const chromeWasMounted = chromeMountedRef.current
+  const animateLiveBlocks = !isComplete || wasLiveRef.current
 
+  // No space-y on the root: a sibling margin sits outside the height tweens and
+  // pops 4px whenever the header or card mounts/unmounts. Blocks pad inside.
   return (
-    <div className="space-y-1">
-      {/* Activity Section - excluded from search highlighting (matches ripgrep behavior) */}
-      {hasActivities && (
-        <div className="group select-none" data-search-exclude="true">
+    <div>
+      {/* One header chrome for thinking and numbered work — no standalone swap. */}
+      <AnimatePresence>
+      {showWorkChrome && (
+        <WorkChrome
+          key="work-chrome"
+          containerRef={chromeRef}
+          animateIn={!isComplete}
+          reduceMotion={reduceMotion}
+        >
           {/* Collapsed Header / Toggle */}
           <button
-            onClick={toggleExpanded}
+            type="button"
+            onClick={hasWorkRecords ? toggleExpanded : undefined}
+            aria-expanded={hasWorkRecords ? isExpanded : undefined}
+            aria-disabled={!hasWorkRecords}
+            tabIndex={hasWorkRecords ? 0 : -1}
             className={cn(
               "flex items-center gap-2 w-full pl-2.5 pr-1.5 py-1.5 rounded-[8px] text-left",
               SIZE_CONFIG.fontSize,
               "text-muted-foreground",
-              "hover:bg-muted/50 transition-colors",
+              hasWorkRecords && "hover:bg-muted/50 transition-colors",
+              !hasWorkRecords && "pointer-events-none",
               "focus:outline-none focus-visible:ring-1 focus-visible:ring-ring"
             )}
           >
-            {/* Chevron with rotation animation - aligned with activity row icons */}
-            <motion.div
-              initial={false}
-              animate={{ rotate: isExpanded ? 90 : 0 }}
-              transition={{ duration: reduceMotion ? 0 : 0.15, ease: 'easeOut' }}
-              className={cn(SIZE_CONFIG.iconSize, "flex items-center justify-center shrink-0")}
-            >
-              <ChevronRight className={SIZE_CONFIG.iconSize} />
-            </motion.div>
-
-            {/* Count actual tool calls, not transient streaming rows. */}
-            {stepCount > 0 && <span className="-ml-0.5 shrink-0 px-1.5 py-0.5 rounded-[4px] bg-background shadow-minimal text-[10px] font-medium tabular-nums">
-              {stepCount}
-            </span>}
+            <WorkHeaderIcon
+              mode={hasWorkRecords ? 'chevron' : 'spinner'}
+              expanded={isExpanded}
+              reduceMotion={reduceMotion}
+            />
+            <WorkHeaderStepCount
+              count={stepCount}
+              animateIn={chromeWasMounted && !isComplete}
+              reduceMotion={reduceMotion}
+            />
 
             {/* Preview text with crossfade + inline failure count */}
             <span className="relative flex-1 min-w-0 h-5 flex items-center">
@@ -3043,25 +3202,27 @@ export const TurnCard = React.memo(function TurnCard({
               </AnimatePresence>
             </span>
 
-            {/* Turn actions menu - use platform override or default */}
-            {renderActionsMenu ? renderActionsMenu() : (
+            {hasWorkRecords && (renderActionsMenu ? renderActionsMenu() : (
               <TurnCardActionsMenu
                 onOpenDetails={onOpenDetails}
                 onOpenMultiFileDiff={onOpenMultiFileDiff}
                 hasEditOrWriteActivities={hasEditOrWriteActivities}
               />
-            )}
+            ))}
           </button>
 
-          {/* Expanded Activity List */}
+          {/* Expanded Activity List — only after a real work record exists */}
+          {hasWorkRecords && (
           <ExpandableHeightPanel open={isExpanded} reduceMotion={reduceMotion}>
                 {/* Activities expand fully — no nested vertical scroll (outer chat scrolls) */}
                 {/* ml-[15px] positions the border-l under the chevron */}
                 <div
                   ref={activitiesContainerRef}
-                  className="pl-4 pr-2 py-0 space-y-0.5 border-l-2 border-muted ml-[13px]"
+                  className="pl-4 pr-2 py-0 border-l-2 border-muted ml-[13px]"
                 >
-                  <AnimatePresence mode="sync" initial={false}>
+                  {/* Rows joining a header that is already on screen slide in;
+                      history and a header mounting with its rows do not. */}
+                  <AnimatePresence mode="sync" initial={chromeWasMounted && !isComplete}>
                   {/* Grouped view for Task subagents */}
                   {groupedActivities ? (
                     groupedActivities.map((item, index) => (
@@ -3141,26 +3302,14 @@ export const TurnCard = React.memo(function TurnCard({
                   <TodoList todos={todos} />
                 )}
           </ExpandableHeightPanel>
-        </div>
+          )}
+        </WorkChrome>
       )}
-
-      {/* Standalone thinking indicator - when no activities but still working */}
-      <AnimatePresence initial={false}>
-        {!hasActivities && showGenericThinkingIndicator && !animateResponse && (
-          <WorkChainRow key="standalone-thinking" reduceMotion={reduceMotion} stagger={false}>
-            <div className={cn("flex items-center gap-2 px-3 py-1.5 text-muted-foreground", SIZE_CONFIG.fontSize)}>
-              <div className={cn(SIZE_CONFIG.iconSize, "flex items-center justify-center shrink-0")}>
-                <Spinner className={SIZE_CONFIG.spinnerSize} />
-              </div>
-              <span>{thinkingStatusLabel()}</span>
-            </div>
-          </WorkChainRow>
-        )}
       </AnimatePresence>
 
       {/* Plan Activities - rendered as full ResponseCards, time-sorted with other activities */}
       {planActivities.map((planActivity, index) => (
-        <div key={planActivity.id} className={cn("select-text", (hasActivities || index > 0) && "mt-2")}>
+        <div key={planActivity.id} className={cn("select-text", (showWorkChrome || index > 0) && "mt-3")}>
           <ResponseCard
             text={planActivity.content || ''}
             isStreaming={false}
@@ -3199,7 +3348,7 @@ export const TurnCard = React.memo(function TurnCard({
               initial={reduceMotion ? false : { opacity: 0, y: 8 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: reduceMotion ? 0 : 0.3, ease: "easeOut" }}
-              className={cn("select-text", hasActivities && "mt-2")}
+              className={cn("select-text", showWorkChrome && "mt-3")}
             >
               <ResponseCard
                 text={response.text}
@@ -3236,9 +3385,20 @@ export const TurnCard = React.memo(function TurnCard({
           )}
         </AnimatePresence>
       )}
-      {/* Non-animated version for regular app use */}
-      {!animateResponse && response && hasVisibleResponse && (
-        <div className={cn("select-text", hasActivities && "mt-2")}>
+      {/* Regular app path: the card slides in with its first visible token and
+          collapses when commentary is demoted into the chain, instead of popping. */}
+      {!animateResponse && (
+      <AnimatePresence>
+      {response && hasVisibleResponse && (
+        <HeightPresence
+          key="response"
+          animateIn={animateLiveBlocks}
+          reduceMotion={reduceMotion}
+          className="select-text"
+        >
+          {/* Gap lives inside the tween; border-box padding on the tweened
+              element would floor the collapsed height at the padding. */}
+          <div className={cn((showWorkChrome || planActivities.length > 0) && "pt-3")}>
           <ResponseCard
             text={response.text}
             isStreaming={response.isStreaming}
@@ -3270,7 +3430,10 @@ export const TurnCard = React.memo(function TurnCard({
             openAnnotationRequest={openAnnotationRequest}
             annotationInteractionMode={annotationInteractionMode}
           />
-        </div>
+          </div>
+        </HeightPresence>
+      )}
+      </AnimatePresence>
       )}
       </GrowingResponse>
     </div>

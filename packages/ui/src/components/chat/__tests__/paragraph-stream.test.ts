@@ -32,7 +32,7 @@ it('keeps the white response frame mounted and does not tween its height', () =>
   const bodyGrowth = readFileSync(join(import.meta.dir, '../ResponseBodyGrowth.tsx'), 'utf8')
   expect(bodyGrowth).not.toContain('ResizeObserver')
   expect(bodyGrowth).not.toContain('height 620ms')
-  const panel = src.slice(src.indexOf('function ExpandableHeightPanel'), src.indexOf('function WorkChainRow'))
+  const panel = src.slice(src.indexOf('function ExpandableHeightPanel'), src.indexOf('const WORK_CHAIN_EASE'))
   expect(panel).not.toContain("height: 'auto'")
   expect(panel).toContain('toggling')
   expect(panel).toContain('gridTemplateRows')

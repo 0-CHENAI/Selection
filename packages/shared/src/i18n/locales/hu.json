@@ -2072,8 +2072,6 @@
   "transport.waitingForConnection": "Várakozás a távoli szerver kapcsolatára.",
   "transport.wsClosedReason": " ({{reason}})",
   "transport.wsClosedWithCode": "WebSocket lezárva, kód: {{code}}{{reason}}.",
-  "turnCard.errorCount_one": " · {{count}} hiba",
-  "turnCard.errorCount_other": " · {{count}} hiba",
   "turnCard.preparingResponse": "Válasz előkészítése…",
   "turnCard.processing": "Feldolgozás",
   "turnCard.responding": "Válaszolás...",

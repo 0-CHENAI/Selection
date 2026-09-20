@@ -2072,8 +2072,6 @@
   "transport.waitingForConnection": "等待远程服务器连接。",
   "transport.wsClosedReason": "（{{reason}}）",
   "transport.wsClosedWithCode": "WebSocket 已关闭，代码 {{code}}{{reason}}。",
-  "turnCard.errorCount_one": " · {{count}} 个错误",
-  "turnCard.errorCount_other": " · {{count}} 个错误",
   "turnCard.preparingResponse": "正在准备回复…",
   "turnCard.processing": "处理中",
   "turnCard.responding": "回复中…",

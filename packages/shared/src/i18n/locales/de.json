@@ -2072,8 +2072,6 @@
   "transport.waitingForConnection": "Warten auf Remote-Server-Verbindung.",
   "transport.wsClosedReason": " ({{reason}})",
   "transport.wsClosedWithCode": "WebSocket mit Code {{code}}{{reason}} geschlossen.",
-  "turnCard.errorCount_one": " · {{count}} Fehler",
-  "turnCard.errorCount_other": " · {{count}} Fehler",
   "turnCard.preparingResponse": "Antwort wird vorbereitet…",
   "turnCard.processing": "Verarbeitung",
   "turnCard.responding": "Antworten...",

@@ -2072,8 +2072,6 @@
   "transport.waitingForConnection": "リモートサーバーの接続を待機中です。",
   "transport.wsClosedReason": " ({{reason}})",
   "transport.wsClosedWithCode": "WebSocketがコード {{code}}{{reason}} で閉じました。",
-  "turnCard.errorCount_one": " · {{count}}件のエラー",
-  "turnCard.errorCount_other": " · {{count}}件のエラー",
   "turnCard.preparingResponse": "回答を準備中…",
   "turnCard.processing": "処理中",
   "turnCard.responding": "応答中...",

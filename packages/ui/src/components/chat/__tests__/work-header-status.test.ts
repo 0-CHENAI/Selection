@@ -9,6 +9,7 @@ it('主栏跟随最新步骤，仅在无步骤标签时回退到阶段状态', a
   await i18n.init({ lng: 'zh', resources: { zh: { translation: {
     'chat.processing.thinking': '思考中…',
     'turnCard.responding': '正在回复',
+    'turnCard.stepsCompleted': '步骤已完成',
   } } } })
   const activities = [{ id: 'fetch', type: 'tool' as const, status: 'completed' as const,
     toolName: 'WebFetch', intent: '读取网页', timestamp: 1 }]
@@ -17,4 +18,8 @@ it('主栏跟随最新步骤，仅在无步骤标签时回退到阶段状态', a
   expect(getPreviewText([{ ...activities[0]!, status: 'running' }], undefined, 'tool_active')).toBe('读取网页')
   expect(getPreviewText([], undefined, 'pending')).toBe('思考中…')
   expect(getPreviewText([], undefined, 'awaiting')).toBe('思考中…')
+  expect(getPreviewText([
+    { id: 'ok', type: 'tool' as const, status: 'completed' as const, toolName: 'Read', timestamp: 1 },
+    { id: 'err', type: 'tool' as const, status: 'error' as const, toolName: 'Write', timestamp: 2 },
+  ], undefined, 'complete')).toBe('步骤已完成')
 })

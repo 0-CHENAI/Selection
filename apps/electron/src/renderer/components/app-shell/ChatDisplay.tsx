@@ -50,6 +50,7 @@ import type { PermissionMode } from "@craft-agent/shared/agent/modes"
 import type { ThinkingLevel } from "@craft-agent/shared/agent/thinking-levels"
 import {
   TurnCard,
+  HeightPresence,
   UserMessageBubble,
   groupMessagesByTurn,
   formatTurnAsMarkdown,
@@ -426,7 +427,8 @@ function ProcessingIndicator({ startTime, statusMessage }: ProcessingIndicatorPr
   const displayMessage = statusMessage || t(PROCESSING_MESSAGE_KEYS[messageIndex])
 
   return (
-    <div className="flex items-center gap-2 px-3 py-1 -mb-1 text-[13px] text-muted-foreground">
+    // No -mb-1: a margin outside the presence tween pops 4px on unmount.
+    <div className="flex items-center gap-2 px-3 py-1 text-[13px] text-muted-foreground">
       {/* Spinner in same location as TurnCard chevron */}
       <div className="w-3 h-3 flex items-center justify-center shrink-0">
         <Spinner className="text-[10px]" />
@@ -2204,19 +2206,25 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
                     </button>
                   </div>
                 )}
-                {/* Processing Indicator - always visible while processing */}
+                {/* Processing Indicator - always visible while processing.
+                    Slides in/out on the same curve as the turn card blocks so the
+                    turn boundary does not pop the transcript by one row. */}
+                <AnimatePresence initial={false}>
                 {sessionBusy && (() => {
                   // Prefer the turn-start clock. Regenerating reuses the original
                   // user-message timestamp, which would otherwise keep counting
                   // from the first send.
                   const lastUserMsg = [...session.messages].reverse().find(m => m.role === 'user' && !m.isQueued)
                   return (
-                    <ProcessingIndicator
-                      startTime={session.processingStartedAt ?? lastUserMsg?.timestamp}
-                      statusMessage={session.currentStatus?.message}
-                    />
+                    <HeightPresence key="processing-indicator" animateIn reduceMotion={reduceMotion}>
+                      <ProcessingIndicator
+                        startTime={session.processingStartedAt ?? lastUserMsg?.timestamp}
+                        statusMessage={session.currentStatus?.message}
+                      />
+                    </HeightPresence>
                   )
                 })()}
+                </AnimatePresence>
                 {/* Scroll Anchor: For auto-scroll to bottom */}
                 <div ref={messagesEndRef} />
               </div>

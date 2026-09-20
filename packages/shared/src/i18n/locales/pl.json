@@ -2074,8 +2074,6 @@
   "transport.waitingForConnection": "Oczekiwanie na połączenie z serwerem zdalnym.",
   "transport.wsClosedReason": " ({{reason}})",
   "transport.wsClosedWithCode": "WebSocket zamknięty z kodem {{code}}{{reason}}.",
-  "turnCard.errorCount_one": " · {{count}} błąd",
-  "turnCard.errorCount_other": " · {{count}} błędów",
   "turnCard.preparingResponse": "Przygotowywanie odpowiedzi…",
   "turnCard.processing": "Przetwarzanie",
   "turnCard.responding": "Odpowiadanie...",
