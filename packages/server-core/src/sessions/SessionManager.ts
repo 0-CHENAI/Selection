@@ -128,7 +128,7 @@ import { getCredentialManager } from '@craft-agent/shared/credentials'
 import { CraftMcpClient, McpClientPool, McpPoolServer } from '@craft-agent/shared/mcp'
 import { type Session, type SessionEvent, type FileAttachment, type SendMessageOptions, type UnreadSummary, type RemoteSessionTransferPayload, type ImportRemoteSessionTransferResult, type SwarmRunDetailsDto, type SwarmRunNodeDto, RPC_CHANNELS, generateMessageId } from '@craft-agent/shared/protocol'
 import { applySteerTranscriptBoundary, messageToStored, storedToMessage, type Message, type StoredAttachment, type TextStreamPhase, type ToolDisplayMeta } from '@craft-agent/core/types'
-import { hasRenderableAssistantText, preferRicherAssistantText } from '@craft-agent/core'
+import { hasRenderableAssistantText, isAnswerDeliveryReceipt, preferRicherAssistantText } from '@craft-agent/core'
 import { formatPathsToRelative, formatToolInputPaths, perf, encodeIconToDataUrlAsync, getEmojiIcon, resetSummarizationClient, resolveToolIcon, readFileAttachment, resolveRegenerateAttachments, selectSpreadMessages, normalizePath } from '@craft-agent/shared/utils'
 import { collectSkillSlugsForSourcePreEnable, filterUserFacingSkills, loadAllSkills, loadSkillBySlug, invalidateSkillsCache, type LoadedSkill } from '@craft-agent/shared/skills'
 import { invalidateContextFileCache } from '@craft-agent/shared/prompts/system'
@@ -7678,7 +7678,7 @@ export class SessionManager implements ISessionManager {
     }
     if (state.persistenceFailed) throw new Error('Answer persistence failed. Do not retry submission in this turn.')
     if (state.accepting || state.committedMessageId) throw new Error('An answer has already been submitted for this turn.')
-    if (!hasRenderableAssistantText(submission.markdown)) throw new Error('Submit a complete, non-empty Markdown answer.')
+    if (!hasRenderableAssistantText(submission.markdown) || isAnswerDeliveryReceipt(submission.markdown)) throw new Error('Submit a complete, non-empty Markdown answer.')
     if (!submission.toolCallId || !submission.sdkMessageId || !submission.sdkTurnAnchor) throw new Error('Missing SDK answer anchor.')
     this.assertAnswerReady(managed, state, submission.markdown, submission.toolCallId)
     state.accepting = true

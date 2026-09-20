@@ -638,7 +638,7 @@ export function getPreviewText(
   if (intent) return intent
 
   // Find the most relevant activity intent
-  const activityWithIntent = activities.find(a => a.intent)
+  const activityWithIntent = activities.find(a => a.intent && !isSubmitAnswerTool(a.toolName))
   if (activityWithIntent?.intent) return activityWithIntent.intent
 
   // Find running Task tools and show their description
@@ -648,7 +648,7 @@ export function getPreviewText(
   }
 
   // Get running tools (not intermediate messages)
-  const runningTools = activities.filter(a => a.status === 'running' && a.toolName)
+  const runningTools = activities.filter(a => a.status === 'running' && a.toolName && !isSubmitAnswerTool(a.toolName))
 
   // Show running tool names
   if (runningTools.length > 0) {
@@ -3057,7 +3057,8 @@ export const TurnCard = React.memo(function TurnCard({
   // at all) until a tool or older commentary actually needs a row.
   const visibleActivities = useMemo(
     () => sortedActivities.filter(
-      activity => !isMirroredCommentaryActivity(activity, response, isComplete),
+      activity => !isSubmitAnswerTool(activity.toolName)
+        && !isMirroredCommentaryActivity(activity, response, isComplete),
     ),
     [sortedActivities, response, isComplete],
   )
@@ -3109,6 +3110,8 @@ export const TurnCard = React.memo(function TurnCard({
   const hasNoMeaningfulWork = isComplete
     && activities.length > 0
     && activities.every(a => {
+      // Delivery is the card body, not a work record that should keep an empty turn.
+      if (isSubmitAnswerTool(a.toolName)) return true
       // Tool activities must be errors (interrupted/failed)
       if (a.type === 'tool') return a.status === 'error'
       // Intermediate activities must have no meaningful content

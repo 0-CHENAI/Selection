@@ -8,7 +8,7 @@
 import type { SessionState, StreamingState, TextDeltaEvent, TextCompleteEvent } from '../types'
 import type { Message } from '../../../shared/types'
 import type { TextStreamPhase } from '@craft-agent/core/types'
-import { preferRicherAssistantText } from '@craft-agent/core'
+import { hasRenderableAssistantText, isAnswerDeliveryReceipt, preferRicherAssistantText } from '@craft-agent/core'
 import {
   findStreamingMessage,
   findAssistantMessage,
@@ -167,6 +167,7 @@ export function handleTextComplete(
 
   const committed = event.answerRunId && session.messages.find(m => m.answerCommitted && m.answerRunId === event.answerRunId)
   if (committed) return state
+  if (event.answerCommitted && (!hasRenderableAssistantText(event.text) || isAnswerDeliveryReceipt(event.text))) return state
 
   // Find message by turnId (try streaming first, then any assistant)
   let msgIndex = findStreamingMessage(session.messages, event.turnId)

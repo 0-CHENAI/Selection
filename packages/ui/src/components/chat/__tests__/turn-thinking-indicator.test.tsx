@@ -127,18 +127,32 @@ describe('TurnCard thinking indicator (#239)', () => {
     expect(html).not.toContain('Thinking...')
   })
 
-  it('renders submit_answer with the localized delivery label and no intent suffix', async () => {
-    const html = await renderTurn('zh-Hans', [{
-      id: 'submit-1',
-      type: 'tool',
-      status: 'completed',
-      timestamp: 1,
-      toolName: 'submit_answer',
-      intent: '提交 GPT-6 与 Fable 5.1 对比的完整回答',
-      toolInput: { answer: '最终正文' },
-    }])
+  it('does not render submit_answer as a work-chain step', async () => {
+    const html = await renderTurn('zh-Hans', [
+      {
+        id: 'search-1',
+        type: 'tool',
+        status: 'completed',
+        timestamp: 1,
+        toolName: 'WebSearch',
+        displayName: '搜索网页',
+        intent: '查找 DeepSeek V4.1 Flash',
+      },
+      {
+        id: 'submit-1',
+        type: 'tool',
+        status: 'completed',
+        timestamp: 2,
+        toolName: 'submit_answer',
+        displayName: 'Submit V4.1 Flash Research',
+        intent: '提交 GPT-6 与 Fable 5.1 对比的完整回答',
+        toolInput: { answer: '最终正文' },
+      },
+    ], { isComplete: true, isStreaming: false })
 
-    expect(html).toContain('现在让我来给你正式回复......')
+    expect(html).toContain('查找 DeepSeek V4.1 Flash')
+    expect(html).not.toContain('现在让我来给你正式回复')
+    expect(html).not.toContain('Submit V4.1 Flash Research')
     expect(html).not.toContain('提交 GPT-6 与 Fable 5.1 对比的完整回答')
     expect(html).not.toContain('submit_answer')
   })

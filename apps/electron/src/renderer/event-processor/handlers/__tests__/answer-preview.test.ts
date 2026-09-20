@@ -52,6 +52,12 @@ describe('transient answer preview (#350)', () => {
 })
 
 
+it('ignores a committed delivery receipt so it cannot close the run', () => {
+  const next = send(initial(), { type: 'text_complete', sessionId: 's', text: 'Answer delivered. Stop here.', answerProtocol: 'explicit-v1', answerRunId: 'run', answerCommitted: true, messageId: 'receipt', timestamp: 10 })
+  expect(next.session.messages.some(m => m.answerCommitted)).toBe(false)
+  expect(next).toEqual(initial())
+})
+
 it('admits live completion even without a painted preview, but never persisted history', () => {
   const event = { type: 'text_complete', sessionId: 's', text: '```ts\nconst x = 1\n```', answerProtocol: 'explicit-v1', answerRunId: 'run', answerCommitted: true, messageId: 'accepted', timestamp: 10 } as const
   for (const base of [initial(), send(initial(), preview)]) {

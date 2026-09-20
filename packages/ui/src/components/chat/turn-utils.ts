@@ -6,7 +6,7 @@
  */
 
 import type { Message, StoredMessage, MessageRole } from '@craft-agent/core'
-import { storedToMessage, hasRenderableAssistantText } from '@craft-agent/core'
+import { storedToMessage, hasRenderableAssistantText, isAnswerDeliveryReceipt } from '@craft-agent/core'
 import { isParentTaskTool, getToolDisplayName } from '@craft-agent/shared/utils/toolNames'
 
 import { isSubmitAnswerTool, localizedToolLabel } from './tool-labels'
@@ -73,6 +73,8 @@ export interface AssistantTurn {
   timestamp: number
   /** Extracted from TodoWrite tool - latest todo state in this turn */
   todos?: TodoItem[]
+  /** Successful submit_answer. Delivery is not a work-chain row. */
+  answerDelivered?: boolean
 }
 
 /** Represents a user message */
@@ -260,6 +262,15 @@ function isLiveAnswerDraft(message: Message): boolean {
     && !message.answerPreview
 }
 
+function isAuthoritativeCommit(message: Message): boolean {
+  return message.role === 'assistant'
+    && message.answerProtocol === 'explicit-v1'
+    && !!message.answerCommitted
+    && !!message.answerRunId
+    && hasRenderableAssistantText(message.content)
+    && !isAnswerDeliveryReceipt(message.content)
+}
+
 /**
  * Live tokens occupy the white card. Completed process text uses `isIntermediate`.
  * marker-v1 unclassified stays in the work chain until a final boundary.
@@ -356,6 +367,8 @@ export function shouldShowStreamingFooter(input: {
  */
 export function countWorkRecords(activities: ReadonlyArray<ActivityItem>): number {
   return new Set(activities
+    // Delivery is the card body, not a numbered work step.
+    .filter(activity => !isSubmitAnswerTool(activity.toolName))
     // Empty live placeholders are transient indicators, not work records.
     .filter(activity => !['intermediate', 'thinking'].includes(activity.type)
       || hasRenderableAssistantText(activity.content))
@@ -373,9 +386,10 @@ export function getActiveTurnPreview(
   let latest: { text: string; timestamp: number; index: number } | undefined
 
   activities.forEach((activity, index) => {
+    if (isSubmitAnswerTool(activity.toolName)) return
     let toolIntent: string | undefined
     if (activity.type === 'tool') {
-      toolIntent = isSubmitAnswerTool(activity.toolName) ? undefined : activity.intent?.trim()
+      toolIntent = activity.intent?.trim()
       if (!toolIntent && activity.toolName) {
         const name = activity.displayName?.trim()
           || ((!activity.toolDisplayMeta || activity.toolDisplayMeta.category === 'native')
@@ -639,13 +653,14 @@ export function groupMessagesByTurn(messages: Message[], options: GroupTurnsOpti
   // Drop hidden and queued messages before grouping. Queued user content belongs
   // to the composer queue until replay starts; it is not yet a transcript turn.
   const deliveredRuns = new Set<string>()
+  const submittedRuns = new Set<string>()
   let activeRunId: string | undefined
   // Committed answer text per run, so commentary that turns out to be the
   // drafted opening of the final answer can be folded into the final card.
   const committedAnswerByRun = new Map<string, string>()
   const committedHeadingByRun = new Map<string, string>()
   for (const message of messages) {
-    if (message.role === 'assistant' && !message.hidden && !message.isQueued && message.answerProtocol === 'explicit-v1' && message.answerCommitted && message.answerRunId && message.content) {
+    if (!message.hidden && !message.isQueued && isAuthoritativeCommit(message)) {
       committedAnswerByRun.set(message.answerRunId, message.content.trim())
       const heading = messageHeadings(message)[0]
       if (heading) committedHeadingByRun.set(message.answerRunId, heading)
@@ -670,8 +685,40 @@ export function groupMessagesByTurn(messages: Message[], options: GroupTurnsOpti
       const committedHeading = runId ? committedHeadingByRun.get(runId) : undefined
       if (committedHeading && committedHeading.length >= 6 && messageHeadings(message).includes(committedHeading)) return []
     }
-    if (message.answerProtocol === 'explicit-v1' && message.answerCommitted && runId) deliveredRuns.add(runId)
-    return [classifyForTurnGrouping(message)]
+    if (
+      message.role === 'tool'
+      && isSubmitAnswerTool(message.toolName)
+      && !message.isError
+      && (message.toolStatus === 'completed' || message.toolResult !== undefined)
+      && runId
+    ) {
+      submittedRuns.add(runId)
+    }
+    // After a successful submit, finished uncommitted text is not a second final.
+    // Live tokens and previews stay on the card until the committed body arrives.
+    if (
+      message.role === 'assistant'
+      && runId
+      && submittedRuns.has(runId)
+      && !message.answerCommitted
+      && !message.answerPreview
+      && !message.isStreaming
+      && !message.isPending
+    ) {
+      return []
+    }
+    let normalized = message
+    if (
+      message.role === 'assistant'
+      && runId
+      && !message.answerCommitted
+      && !message.answerPreview
+      && !message.answerProtocol
+    ) {
+      normalized = { ...message, answerProtocol: 'explicit-v1', answerRunId: runId }
+    }
+    if (isAuthoritativeCommit(normalized) && runId) deliveredRuns.add(runId)
+    return [classifyForTurnGrouping(normalized)]
   })
   const visibleMessages = protocolMessages.filter(m => !m.hidden && !m.isQueued)
   // Sort by timestamp for correct chronological order
@@ -767,14 +814,18 @@ export function groupMessagesByTurn(messages: Message[], options: GroupTurnsOpti
       // Don't do this for turns with plans - the plan is the final output
       // Only promote when turn is complete (processing indicator hidden)
       const hasPlan = currentTurn.activities.some(a => a.type === 'plan')
-      if (currentTurn.presentationProtocol !== 'marker-v1' && !currentTurn.answerRunId && !interrupted && !hasPlan && !currentTurn.response && currentTurn.isComplete && currentTurn.activities.length > 0) {
+      // Native turns promote the last thought when nothing else landed.
+      // explicit-v1 waits for a successful submit_answer — if that finished
+      // and the committed body never arrived, keep the last real draft.
+      if (currentTurn.presentationProtocol !== 'marker-v1' && !interrupted && !hasPlan && !currentTurn.response && currentTurn.isComplete && currentTurn.activities.length > 0
+        && (!currentTurn.answerRunId || currentTurn.answerDelivered)) {
         // Find the last intermediate text activity (reverse to get most recent)
         const lastTextActivity = [...currentTurn.activities]
           .reverse()
-          .find(a => a.type === 'intermediate' && a.content)
+          .find(a => a.type === 'intermediate' && hasRenderableAssistantText(a.content))
 
         const promotedText = lastTextActivity?.content
-        if (lastTextActivity && hasRenderableAssistantText(promotedText)) {
+        if (lastTextActivity && promotedText) {
           currentTurn.response = {
             text: promotedText,
             isStreaming: false,
@@ -925,18 +976,26 @@ export function groupMessagesByTurn(messages: Message[], options: GroupTurnsOpti
     if (message.role === 'tool') {
       // Tool is complete if toolStatus is 'completed' OR toolResult exists (but NOT if backgrounded)
       const isToolComplete = (message.toolStatus === 'completed' || message.toolResult !== undefined) && message.toolStatus !== 'backgrounded'
+      const isDelivery = isSubmitAnswerTool(message.toolName ?? '')
       currentTurn = ensureOpenAssistantTurn(message, {
         isStreaming: !isToolComplete,
-        intent: message.toolIntent,
+        intent: isDelivery ? undefined : message.toolIntent,
       })
       if (
         currentTurn.response
         && !currentTurn.response.isAnswerPreview
-        && !isSubmitAnswerTool(message.toolName ?? '')
+        && !isDelivery
         && (currentTurn.response.isCommentary || currentTurn.answerRunId)
         && !currentTurn.response.isStreaming
       ) {
         demoteResponseToWorkChain(currentTurn)
+      }
+      // submit_answer is the delivery channel for the streamed card, not a
+      // user-visible work step. Only a successful call unlocks salvage.
+      if (isDelivery) {
+        if (isToolComplete && !message.isError) currentTurn.answerDelivered = true
+        currentTurn.isStreaming = !isToolComplete
+        continue
       }
       // Always add to current turn (ignoring turnId differences)
       // Pass existing activities for incremental depth calculation

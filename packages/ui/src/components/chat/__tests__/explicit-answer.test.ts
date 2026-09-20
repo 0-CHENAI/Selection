@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'bun:test'
 import type { Message } from '@craft-agent/core'
 import { messageToStored, storedToMessage } from '@craft-agent/core'
-import { countWorkRecords, groupMessagesByTurn } from '../turn-utils'
+import { countWorkRecords, getActiveTurnPreview, groupMessagesByTurn } from '../turn-utils'
 
 const explanation = '蒙提霍尔问题：\n\n1. 三扇门中有一辆车。\n2. 主持人知道奖品位置，并打开一扇有羊的门。\n\n| 策略 | 胜率 |\n| --- | --- |\n| 不换 | 1/3 |\n| 换门 | 2/3 |'
 const answer = `${explanation}\n\n模拟结果：换门胜率约为 2/3。`
@@ -194,6 +194,77 @@ describe('explicit answer delivery (#330)', () => {
     expect(turn.activities.some(a => a.toolUseId === 'wf')).toBe(true)
   })
 
+  it('does not put the submit_answer receipt on the card; salvages the draft if commit never arrives', () => {
+    const draft = '知道了，DeepSeek V4.1 Flash 是新架构系列中最小的一款。'
+    const messages: Message[] = [
+      { id: 'user', role: 'user', content: '介绍', timestamp: 1, ...protocol },
+      { id: 'search', role: 'tool', content: '', toolName: 'WebSearch', toolUseId: 'ws', toolStatus: 'completed', toolResult: '…', timestamp: 2, ...protocol },
+      { id: 'draft', role: 'assistant', content: draft, timestamp: 3, isIntermediate: true, ...protocol },
+      { id: 'submit', role: 'tool', content: '', toolName: 'submit_answer', toolUseId: 'sa', toolStatus: 'completed', toolResult: 'Answer delivered. Stop here.', timestamp: 4, ...protocol },
+      { id: 'receipt', role: 'assistant', content: 'Answer delivered. Stop here.', timestamp: 5 },
+    ]
+    const turn = groupMessagesByTurn(messages, { isSessionProcessing: false }).find(t => t.type === 'assistant')!
+    expect(turn.response?.text).toBe(draft)
+    expect(turn.activities.some(a => a.type === 'intermediate' && a.content?.includes('Answer delivered'))).toBe(false)
+    expect(turn.activities.some(a => a.toolName === 'submit_answer')).toBe(false)
+    expect(turn.answerDelivered).toBe(true)
+  })
+
+  it('does not close the run when a committed receipt is already in the transcript', () => {
+    const draft = '知道了，DeepSeek V4.1 Flash 是新架构系列中最小的一款。'
+    const messages: Message[] = [
+      { id: 'user', role: 'user', content: '介绍', timestamp: 1, ...protocol },
+      { id: 'search', role: 'tool', content: '', toolName: 'WebSearch', toolUseId: 'ws', toolStatus: 'completed', toolResult: '…', timestamp: 2, ...protocol },
+      { id: 'draft', role: 'assistant', content: draft, timestamp: 3, isIntermediate: true, ...protocol },
+      { id: 'fake-commit', role: 'assistant', content: 'Answer delivered. Stop here.', timestamp: 4, answerCommitted: true, ...protocol },
+      { id: 'submit', role: 'tool', content: '', toolName: 'submit_answer', toolUseId: 'sa', toolStatus: 'completed', toolResult: 'Answer delivered. Stop here.', timestamp: 5, ...protocol },
+    ]
+    const turn = groupMessagesByTurn(messages, { isSessionProcessing: false }).find(t => t.type === 'assistant')!
+    expect(turn.response?.text).toBe(draft)
+    expect(turn.answerDelivered).toBe(true)
+  })
+
+  it('keeps a live uncommitted stream on the card after submit_answer completes', () => {
+    const draft = '知道了，DeepSeek V4.1 Flash 是新架构系列中最小的一款。'
+    const messages: Message[] = [
+      { id: 'user', role: 'user', content: '介绍', timestamp: 1, ...protocol },
+      { id: 'search', role: 'tool', content: '', toolName: 'WebSearch', toolUseId: 'ws', toolStatus: 'completed', toolResult: '…', timestamp: 2, ...protocol },
+      { id: 'submit', role: 'tool', content: '', toolName: 'submit_answer', toolUseId: 'sa', toolStatus: 'completed', toolResult: 'Answer delivered. Stop here.', timestamp: 3, ...protocol },
+      { id: 'draft', role: 'assistant', content: draft, timestamp: 4, isStreaming: true, isPending: true, ...protocol },
+    ]
+    const turn = groupMessagesByTurn(messages, { isSessionProcessing: true }).find(t => t.type === 'assistant')!
+    expect(turn.response).toMatchObject({ text: draft, isStreaming: true })
+    expect(turn.activities.some(a => a.toolName === 'submit_answer')).toBe(false)
+  })
+
+  it('drops untagged assistant text after a successful submit_answer instead of treating it as a native final', () => {
+    const draft = '知道了，DeepSeek V4.1 Flash 是新架构系列中最小的一款。'
+    const messages: Message[] = [
+      { id: 'user', role: 'user', content: '介绍', timestamp: 1, ...protocol },
+      { id: 'search', role: 'tool', content: '', toolName: 'WebSearch', toolUseId: 'ws', toolStatus: 'completed', toolResult: '…', timestamp: 2, ...protocol },
+      { id: 'draft', role: 'assistant', content: draft, timestamp: 3, isIntermediate: true, ...protocol },
+      { id: 'submit', role: 'tool', content: '', toolName: 'submit_answer', toolUseId: 'sa', toolStatus: 'completed', toolResult: 'Answer delivered. Stop here.', timestamp: 4, ...protocol },
+      { id: 'echo', role: 'assistant', content: '随便一句未交付的收尾。', timestamp: 5 },
+    ]
+    const turn = groupMessagesByTurn(messages, { isSessionProcessing: false }).find(t => t.type === 'assistant')!
+    expect(turn.response?.text).toBe(draft)
+    expect(turn.activities.some(a => a.content === '随便一句未交付的收尾。')).toBe(false)
+    expect(turn.answerDelivered).toBe(true)
+  })
+
+  it('does not salvage a draft after submit_answer fails', () => {
+    const draft = '知道了，DeepSeek V4.1 Flash 是新架构系列中最小的一款。'
+    const messages: Message[] = [
+      { id: 'user', role: 'user', content: '介绍', timestamp: 1, ...protocol },
+      { id: 'draft', role: 'assistant', content: draft, timestamp: 2, isIntermediate: true, ...protocol },
+      { id: 'submit', role: 'tool', content: '', toolName: 'submit_answer', toolUseId: 'sa', toolStatus: 'completed', isError: true, toolResult: 'Submit the Markdown answer itself, not the delivery receipt.', timestamp: 3, ...protocol },
+    ]
+    const turn = groupMessagesByTurn(messages, { isSessionProcessing: false }).find(t => t.type === 'assistant')!
+    expect(turn.response).toBeUndefined()
+    expect(turn.answerDelivered).toBeUndefined()
+    expect(turn.activities.some(a => a.content === draft)).toBe(true)
+  })
+
   it('keeps completed uncommitted text in the work chain when submit_answer starts', () => {
     const draft = '知道了，DeepSeek V4.1 Flash 是新架构系列中最小的一款。'
     const messages: Message[] = [
@@ -204,7 +275,25 @@ describe('explicit answer delivery (#330)', () => {
     const turn = groupMessagesByTurn(messages).find(t => t.type === 'assistant')!
     expect(turn.response).toBeUndefined()
     expect(turn.activities.some(a => a.content === draft)).toBe(true)
-    expect(turn.activities.some(a => a.toolName === 'submit_answer')).toBe(true)
+    expect(turn.activities.some(a => a.toolName === 'submit_answer')).toBe(false)
+    expect(countWorkRecords(turn.activities)).toBe(1)
+  })
+
+  it('does not add submit_answer to the work chain after real tools', () => {
+    const answer = '# DeepSeek V4.1 Flash\n\n2026 年 9 月 10 日发布。'
+    const messages: Message[] = [
+      { id: 'user', role: 'user', content: '介绍', timestamp: 1, ...protocol },
+      { id: 'search', role: 'tool', content: '', toolName: 'WebSearch', toolUseId: 'ws', toolStatus: 'completed', toolResult: '…', timestamp: 2, ...protocol },
+      { id: 'submit', role: 'tool', content: '', toolName: 'submit_answer', toolUseId: 'sa', toolStatus: 'completed', toolDisplayName: 'Submit V4.1 Flash Research', toolIntent: '提交正式回复', toolResult: 'Answer delivered. Stop here.', timestamp: 3, ...protocol },
+      { id: 'answer', role: 'assistant', content: answer, timestamp: 4, answerCommitted: true, ...protocol },
+    ]
+    const turn = groupMessagesByTurn(messages).find(t => t.type === 'assistant')!
+    expect(turn.response?.text).toBe(answer)
+    expect(turn.activities.some(a => a.toolName === 'submit_answer')).toBe(false)
+    expect(turn.activities.some(a => a.displayName === 'Submit V4.1 Flash Research')).toBe(false)
+    expect(countWorkRecords(turn.activities)).toBe(1)
+    expect(getActiveTurnPreview(turn.activities, 'awaiting')).not.toContain('正式回复')
+    expect(getActiveTurnPreview(turn.activities, 'awaiting')).not.toContain('Submit V4.1')
   })
   it('does not assemble superseded explanations into the committed answer', () => {
     const messages = transcript()
