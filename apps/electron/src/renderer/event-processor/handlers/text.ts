@@ -37,11 +37,28 @@ function mergeTextStreamPhase(
   return 'unclassified'
 }
 
+function incomingTextPhase(event: TextDeltaEvent): TextStreamPhase {
+  if (event.answerProtocol === 'explicit-v1') return event.phase ?? 'unclassified'
+  if (event.presentationProtocol && event.presentationProtocol !== 'legacy') {
+    return event.phase ?? 'unclassified'
+  }
+  return event.phase === 'intermediate' ? 'intermediate' : 'final'
+}
+
+function isLiveDeltaIntermediate(
+  event: Pick<TextDeltaEvent, 'answerProtocol' | 'presentationProtocol'>,
+  phase: TextStreamPhase,
+): boolean {
+  if (event.answerProtocol === 'explicit-v1') return false
+  if (event.presentationProtocol === 'marker-v1') return phase !== 'final'
+  return phase === 'intermediate'
+}
+
 /**
  * Handle text_delta - accumulate streaming content
  *
- * Explicit commentary creates a work-chain message. Native text deltas update
- * the visible response immediately; text_complete finalizes its classification.
+ * Live tokens stay on the card unless the stream is already commentary
+ * (or marker-v1 unclassified). text_complete finalizes that classification.
  * Uses turnId for lookup, never position.
  */
 export function handleTextDelta(
@@ -58,14 +75,9 @@ export function handleTextDelta(
     return { session, streaming: null }
   }
 
-  // Native providers classify commentary only at message_end. Keep their
-  // provisional text visible while it arrives; completion can demote it.
-  // Explicit commentary and tool-delivery prose remain in the work chain.
-  const incomingPhase = event.answerProtocol === 'explicit-v1'
-    ? 'intermediate'
-    : event.presentationProtocol && event.presentationProtocol !== 'legacy'
-      ? event.phase ?? 'unclassified'
-      : event.phase === 'intermediate' ? 'intermediate' : 'final'
+  // Live tokens stay on the card unless this stream is already commentary
+  // (or marker-v1 unclassified). text_complete reclassifies the finished body.
+  const incomingPhase = incomingTextPhase(event)
   const continuesExistingStream = !!streaming
     && (!event.turnId || !streaming.turnId || streaming.turnId === event.turnId)
   const phase = mergeTextStreamPhase(
@@ -95,13 +107,12 @@ export function handleTextDelta(
     const currentMsg = session.messages[streamingIndex]
     const updatedSession = updateMessageAt(session, streamingIndex, {
       content: currentMsg.content + event.delta,
-      // Live explicit-v1 tokens are the reply. Marking them intermediate here
-      // makes the first frame a work-chain step before grouping can promote it.
-      isIntermediate: (event.answerProtocol ?? currentMsg.answerProtocol) === 'explicit-v1'
-        ? false
-        : phase !== 'final',
+      isIntermediate: isLiveDeltaIntermediate({
+        answerProtocol: event.answerProtocol ?? currentMsg.answerProtocol,
+        presentationProtocol: event.presentationProtocol ?? currentMsg.presentationProtocol,
+      }, phase),
       phase,
-      presentationProtocol: event.presentationProtocol,
+      presentationProtocol: event.presentationProtocol ?? currentMsg.presentationProtocol,
       answerProtocol: event.answerProtocol ?? currentMsg.answerProtocol,
       answerRunId: event.answerRunId ?? currentMsg.answerRunId,
     })
@@ -119,7 +130,7 @@ export function handleTextDelta(
     timestamp: timestampAfterVisibleUser(session.messages),
     isStreaming: true,
     isPending: true,
-    isIntermediate: event.answerProtocol === 'explicit-v1' ? false : phase !== 'final',
+    isIntermediate: isLiveDeltaIntermediate(event, phase),
     phase,
     presentationProtocol: event.presentationProtocol,
     turnId: event.turnId,

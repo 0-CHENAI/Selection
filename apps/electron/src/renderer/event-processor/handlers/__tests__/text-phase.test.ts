@@ -247,6 +247,41 @@ it('原生正文在完成事件之前逐段可见，尚未收到的尾部不参�
   expect(second.isStreaming).toBe(true)
 })
 
+it('does not force explicit-v1 live tokens into an intermediate phase', () => {
+  const pending = handleTextDelta(state(), {
+    type: 'text_delta',
+    sessionId: 'session-1',
+    delta: '知道了',
+    answerProtocol: 'explicit-v1',
+    answerRunId: 'run-1',
+    turnId: 'explicit-1',
+  })
+  expect(pending.session.messages.find(message => message.role === 'assistant')).toMatchObject({
+    isIntermediate: false,
+    isStreaming: true,
+    answerProtocol: 'explicit-v1',
+    phase: 'unclassified',
+  })
+  expect(assistantTurn(pending).response).toMatchObject({ text: '知道了', isStreaming: true })
+})
+
+it('keeps native unclassified live tokens on the card when presentationProtocol is set', () => {
+  const pending = handleTextDelta(state(), {
+    type: 'text_delta',
+    sessionId: 'session-1',
+    delta: 'Ponytail 是',
+    presentationProtocol: 'native',
+    phase: 'unclassified',
+    turnId: 'native-1',
+  })
+  expect(pending.session.messages.find(message => message.role === 'assistant')).toMatchObject({
+    isIntermediate: false,
+    phase: 'unclassified',
+    isStreaming: true,
+  })
+  expect(assistantTurn(pending).response).toMatchObject({ text: 'Ponytail 是', isStreaming: true })
+})
+
 it('marker-v1 keeps unclassified text out of the response and does not promote an empty final', () => {
   const current = handleTextDelta(state(), { type: 'text_delta', sessionId: 'session-1', turnId: 'process',
     presentationProtocol: 'marker-v1', phase: 'unclassified', delta: '查询完成，但尚未产生最终答案。' })

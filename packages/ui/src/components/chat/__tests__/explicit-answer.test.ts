@@ -37,7 +37,7 @@ describe('explicit answer delivery (#330)', () => {
     expect(turns[0]?.activities.some(a => a.content === '模拟证实了结果。')).toBe(true)
   })
 
-  it('keeps a live answer-sized draft on the card and out of the work chain', () => {
+  it('keeps a live explicit-v1 stream on the card; completed uncommitted text goes to the work chain', () => {
     const draft = '知道了，这是 DeepSeek 在2026年9月10日正式发布的模型（属于全新架构系列里尺寸最小的一款）。我查了官方公告和 Hugging Face。'
     const answer = '# DeepSeek V4.1 Flash\n\n2026 年 9 月 10 日发布，是新架构系列中最小的一款。'
     const streaming: Message[] = [
@@ -53,8 +53,8 @@ describe('explicit answer delivery (#330)', () => {
       ...streaming.slice(0, 2),
       { id: 'draft', role: 'assistant', content: draft, timestamp: 3, isIntermediate: true, ...protocol },
     ], { isSessionProcessing: true }).find(t => t.type === 'assistant')!
-    expect(finished.response).toMatchObject({ text: draft, isCommentary: true })
-    expect(finished.activities.some(a => a.type === 'intermediate')).toBe(false)
+    expect(finished.response).toBeUndefined()
+    expect(finished.activities.some(a => a.content === draft)).toBe(true)
 
     const committed = groupMessagesByTurn([
       ...streaming.slice(0, 2),
@@ -63,7 +63,61 @@ describe('explicit answer delivery (#330)', () => {
       { id: 'answer', role: 'assistant', content: answer, timestamp: 5, answerCommitted: true, ...protocol },
     ], { isSessionProcessing: true }).find(t => t.type === 'assistant')!
     expect(committed.response?.text).toBe(answer)
-    expect(committed.activities.some(a => a.type === 'intermediate')).toBe(false)
+    expect(committed.activities.some(a => a.id === 'draft')).toBe(true)
+  })
+
+  it('places completed text by isIntermediate / answerCommitted, not by length', () => {
+    const draft = 'Ponytail(ponytail) 是一个“最懒方案”编码风格技能——它强制 AI 用最简单、最短、最小的可行方案来写代码。'
+    const commentary = groupMessagesByTurn([
+      { id: 'user', role: 'user', content: '这个技能是做什么的', timestamp: 1 },
+      { id: 'read', role: 'tool', content: '', toolName: 'Read', toolUseId: 'rd', toolStatus: 'completed', toolResult: '…', timestamp: 2 },
+      { id: 'draft', role: 'assistant', content: draft, timestamp: 3, isIntermediate: true },
+    ], { isSessionProcessing: true }).find(t => t.type === 'assistant')!
+    expect(commentary.response).toBeUndefined()
+    expect(commentary.activities.some(a => a.content === draft)).toBe(true)
+
+    const final = groupMessagesByTurn([
+      { id: 'user', role: 'user', content: '这个技能是做什么的', timestamp: 1 },
+      { id: 'read', role: 'tool', content: '', toolName: 'Read', toolUseId: 'rd', toolStatus: 'completed', toolResult: '…', timestamp: 2 },
+      { id: 'answer', role: 'assistant', content: draft, timestamp: 3, isIntermediate: false },
+    ], { isSessionProcessing: true }).find(t => t.type === 'assistant')!
+    expect(final.response).toMatchObject({ text: draft })
+    expect(final.activities.some(a => a.content === draft)).toBe(false)
+
+    const committed = groupMessagesByTurn([
+      { id: 'user', role: 'user', content: '这个技能是做什么的', timestamp: 1, ...protocol },
+      { id: 'read', role: 'tool', content: '', toolName: 'Read', toolUseId: 'rd', toolStatus: 'completed', toolResult: '…', timestamp: 2, ...protocol },
+      { id: 'answer', role: 'assistant', content: draft, timestamp: 3, answerCommitted: true, ...protocol },
+    ], { isSessionProcessing: true }).find(t => t.type === 'assistant')!
+    expect(committed.response).toMatchObject({ text: draft })
+    expect(committed.activities.some(a => a.content === draft)).toBe(false)
+  })
+
+  it('places live tokens by phase / protocol fields, not by whether tools already ran', () => {
+    const draft = 'Ponytail 用来约束实现复杂度。'
+    const leftover = groupMessagesByTurn([
+      { id: 'user', role: 'user', content: '这个技能是做什么的', timestamp: 1 },
+      // Native live text as handleTextDelta emits it: unclassified, not flagged intermediate.
+      { id: 'draft', role: 'assistant', content: draft, timestamp: 2, isStreaming: true, isPending: true, isIntermediate: false, phase: 'unclassified' },
+    ], { isSessionProcessing: true }).find(t => t.type === 'assistant')!
+    expect(leftover.response).toMatchObject({ text: draft, isStreaming: true })
+    expect(leftover.activities.some(a => a.type === 'intermediate')).toBe(false)
+
+    // A legacy sender that only sets isIntermediate (no phase) is process text even while live.
+    const legacy = groupMessagesByTurn([
+      { id: 'user', role: 'user', content: '这个技能是做什么的', timestamp: 1 },
+      { id: 'draft', role: 'assistant', content: draft, timestamp: 2, isStreaming: true, isPending: true, isIntermediate: true },
+    ], { isSessionProcessing: true }).find(t => t.type === 'assistant')!
+    expect(legacy.response).toBeUndefined()
+    expect(legacy.activities.some(a => a.type === 'intermediate' && a.content === draft)).toBe(true)
+
+    const commentary = groupMessagesByTurn([
+      { id: 'user', role: 'user', content: '这个技能是做什么的', timestamp: 1 },
+      { id: 'read', role: 'tool', content: '', toolName: 'Read', toolUseId: 'rd', toolStatus: 'completed', toolResult: '…', timestamp: 2 },
+      { id: 'note', role: 'assistant', content: '我先读技能说明。', timestamp: 3, isStreaming: true, isPending: true, isIntermediate: true, phase: 'intermediate' },
+    ], { isSessionProcessing: true }).find(t => t.type === 'assistant')!
+    expect(commentary.response).toBeUndefined()
+    expect(commentary.activities.some(a => a.content === '我先读技能说明。')).toBe(true)
   })
 
   it('does not add a work-chain step for the first streamed token after tools', () => {
@@ -75,7 +129,7 @@ describe('explicit answer delivery (#330)', () => {
     ]
     for (const draft of [
       { id: 'draft', role: 'assistant' as const, content: '知', timestamp: 5, isStreaming: true, isPending: true, isIntermediate: true, ...protocol },
-      { id: 'draft', role: 'assistant' as const, content: '知', timestamp: 5, isStreaming: true, isPending: true, isIntermediate: true },
+      { id: 'draft', role: 'assistant' as const, content: '知', timestamp: 5, isStreaming: true, isPending: true, isIntermediate: false, phase: 'unclassified' as const },
     ]) {
       const turn = groupMessagesByTurn([...tools, draft], { isSessionProcessing: true }).find(t => t.type === 'assistant')!
       expect(turn.response).toMatchObject({ text: '知', isStreaming: true })
@@ -98,7 +152,7 @@ describe('explicit answer delivery (#330)', () => {
     expect(turn.activities.some(a => a.type === 'intermediate')).toBe(false)
   })
 
-  it('keeps a live answer-sized draft on the card when more tools start', () => {
+  it('keeps completed uncommitted explicit text in the work chain when more tools start', () => {
     const draft = '知道了，DeepSeek V4.1 Flash 是新架构系列中最小的一款。'
     const messages: Message[] = [
       { id: 'user', role: 'user', content: '介绍', timestamp: 1, ...protocol },
@@ -107,8 +161,8 @@ describe('explicit answer delivery (#330)', () => {
       { id: 'read', role: 'tool', content: '', toolName: 'WebFetch', toolUseId: 'wf', toolStatus: undefined, timestamp: 4, ...protocol },
     ]
     const turn = groupMessagesByTurn(messages).find(t => t.type === 'assistant')!
-    expect(turn.response).toMatchObject({ text: draft })
-    expect(turn.activities.some(a => a.content === draft)).toBe(false)
+    expect(turn.response).toBeUndefined()
+    expect(turn.activities.some(a => a.content === draft)).toBe(true)
     expect(turn.activities.some(a => a.toolUseId === 'wf')).toBe(true)
   })
 
@@ -140,7 +194,7 @@ describe('explicit answer delivery (#330)', () => {
     expect(turn.activities.some(a => a.toolUseId === 'wf')).toBe(true)
   })
 
-  it('keeps the live draft on the card when submit_answer starts', () => {
+  it('keeps completed uncommitted text in the work chain when submit_answer starts', () => {
     const draft = '知道了，DeepSeek V4.1 Flash 是新架构系列中最小的一款。'
     const messages: Message[] = [
       { id: 'user', role: 'user', content: '介绍', timestamp: 1, ...protocol },
@@ -148,7 +202,8 @@ describe('explicit answer delivery (#330)', () => {
       { id: 'submit', role: 'tool', content: '', toolName: 'submit_answer', toolUseId: 'sa', toolStatus: undefined, timestamp: 3, ...protocol },
     ]
     const turn = groupMessagesByTurn(messages).find(t => t.type === 'assistant')!
-    expect(turn.response).toMatchObject({ text: draft, isCommentary: true })
+    expect(turn.response).toBeUndefined()
+    expect(turn.activities.some(a => a.content === draft)).toBe(true)
     expect(turn.activities.some(a => a.toolName === 'submit_answer')).toBe(true)
   })
   it('does not assemble superseded explanations into the committed answer', () => {

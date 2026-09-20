@@ -198,6 +198,60 @@ describe('assistant expansion key through a live generation', () => {
   })
 })
 
+describe('whitespace-only leading thought (pi backend)', () => {
+  const thoughtTurnId = 'pi-turn-1_thought'
+  const pendingThought: Message = {
+    id: 'thought-1', role: 'assistant', content: ' ', timestamp: 1050,
+    isStreaming: true, isPending: true, isIntermediate: true, phase: 'intermediate', turnId: thoughtTurnId,
+  }
+  const completedThought: Message = { ...pendingThought, isStreaming: false, isPending: false }
+
+  it('keeps one card key from the pending thought through its completion and the first tool', () => {
+    const live = (messages: Message[]) => {
+      const turns = groupMessagesByTurn(messages, { isSessionProcessing: true })
+      const index = turns.findIndex(turn => turn.type === 'assistant')
+      const turn = turns[index]
+      if (!turn || turn.type !== 'assistant') throw new Error('expected an assistant turn')
+      return { turn, key: getAssistantTurnUiKey(turn, index) }
+    }
+
+    const pending = live([userMessage(), pendingThought])
+    expect(pending.turn.activities.map(a => a.type)).toEqual(['intermediate'])
+
+    // The thought completed but no tool has arrived: the turn (and its key) must survive the gap.
+    const gap = live([userMessage(), completedThought])
+    expect(gap.key).toBe(pending.key)
+    expect(gap.turn.activities).toEqual([])
+    expect(gap.turn.isComplete).toBe(false)
+
+    const withTool = live([userMessage(), completedThought, toolMessage('tool-1', 1100, 'running')])
+    expect(withTool.key).toBe(pending.key)
+    expect(withTool.turn.activities.map(a => a.id)).toEqual(['tool-1'])
+  })
+
+  it('drops an empty anchored turn once the session is no longer processing', () => {
+    const turns = groupMessagesByTurn([userMessage(), completedThought], { isSessionProcessing: false })
+    expect(turns.map(turn => turn.type)).toEqual(['user'])
+    const historical = groupMessagesByTurn([
+      userMessage(), completedThought,
+      { ...userMessage(), id: 'user-2', timestamp: 1200 },
+      finalAssistant('answer-2', 1300, '第二段回答', false),
+    ])
+    expect(historical.map(turn => turn.type)).toEqual(['user', 'user', 'assistant'])
+  })
+
+  it('does not reopen a finished turn for a stray empty thought', () => {
+    const turns = groupMessagesByTurn([
+      userMessage(),
+      finalAssistant('answer-1', 1100, '第一段回答', false),
+      { ...completedThought, timestamp: 1150 },
+    ], { isSessionProcessing: true })
+    const assistant = turns.filter(turn => turn.type === 'assistant')
+    expect(assistant).toHaveLength(1)
+    expect(assistant[0]?.type === 'assistant' && assistant[0].response?.text).toBe('第一段回答')
+  })
+})
+
 test('reused provider turn IDs remain distinct across user interruption boundaries', () => {
   const turns = groupMessagesByTurn([
     userMessage(),
