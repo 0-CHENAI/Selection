@@ -20,6 +20,8 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 
 - **Simplified automations** — Removed Agent Events and their runtime actions, tool decisions, and report-back support. Existing retired rules are ignored, imports cannot recreate them, and queued retries for inactive rules are discarded. Scheduled and app-event automations remain available. Fixes #371.
 
+- **Unified work-chain header** — Thinking and numbered steps share one title row and enter or leave on the same height curve as the processing indicator. The collapsed title no longer appends an error count, and the chevron stays in document flow so the rounded chrome does not clip it. Fixes #405.
+
 ## Bug Fixes
 
 - **Conversation navigation previews** — Hover previews on the left conversation rail now keep only one visual line of the user message, add an ellipsis when it overflows, and preserve the gray response summary. Fixes #397.
@@ -37,3 +39,5 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 - **Broken chat images** — Markdown `![]()` images now keep local, `file:`, and `data:` sources and load them as data URLs instead of being stripped or fetched as web paths. A bare `image-preview` JSON spec without fences is promoted into the existing preview renderer so screenshots show as images instead of a code block. Missing or unreadable files show an explicit error. Fixes #358.
 
 - **Automation creation context isolation** — Scheduled, app-event, and agent-event creation dialogs now use separate category contexts and titles. Unfinished drafts remain resumable, new automation requests no longer inherit completed creation conversations, and detail edits target the selected rule ID. Fixes #362.
+
+- **Live answer stays on the card** — Unclassified streaming tokens grow on the main reply instead of being marked as commentary and replayed after `submit_answer`. Finished text is classified only by protocol fields, and a whitespace-only thought keeps the live header identity until the first tool joins. Fixes #404.
