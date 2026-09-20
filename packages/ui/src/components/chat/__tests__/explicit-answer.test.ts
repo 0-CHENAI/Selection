@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'bun:test'
 import type { Message } from '@craft-agent/core'
 import { messageToStored, storedToMessage } from '@craft-agent/core'
-import { groupMessagesByTurn } from '../turn-utils'
+import { countWorkRecords, groupMessagesByTurn } from '../turn-utils'
 
 const explanation = '蒙提霍尔问题：\n\n1. 三扇门中有一辆车。\n2. 主持人知道奖品位置，并打开一扇有羊的门。\n\n| 策略 | 胜率 |\n| --- | --- |\n| 不换 | 1/3 |\n| 换门 | 2/3 |'
 const answer = `${explanation}\n\n模拟结果：换门胜率约为 2/3。`
@@ -28,11 +28,128 @@ describe('explicit answer delivery (#330)', () => {
       expect(turns[0]?.activities.some(a => a.toolUseId === 'sim')).toBe(true)
     }
   })
-  it('does not expose uncommitted provider finals as a response', () => {
+  it('keeps short uncommitted notes in the work chain until submit_answer', () => {
     const turns = groupMessagesByTurn(transcript().slice(0, 4)).filter(t => t.type === 'assistant')
     expect(turns).toHaveLength(1)
     expect(turns[0]?.response).toBeUndefined()
+    expect(turns[0]?.isComplete).toBe(false)
     expect(turns[0]?.activities.some(a => a.content === explanation)).toBe(true)
+    expect(turns[0]?.activities.some(a => a.content === '模拟证实了结果。')).toBe(true)
+  })
+
+  it('keeps a live answer-sized draft on the card and out of the work chain', () => {
+    const draft = '知道了，这是 DeepSeek 在2026年9月10日正式发布的模型（属于全新架构系列里尺寸最小的一款）。我查了官方公告和 Hugging Face。'
+    const answer = '# DeepSeek V4.1 Flash\n\n2026 年 9 月 10 日发布，是新架构系列中最小的一款。'
+    const streaming: Message[] = [
+      { id: 'user', role: 'user', content: '介绍', timestamp: 1, ...protocol },
+      { id: 'search', role: 'tool', content: '', toolName: 'WebSearch', toolUseId: 'ws', toolStatus: 'completed', toolResult: '…', timestamp: 2, ...protocol },
+      { id: 'draft', role: 'assistant', content: draft, timestamp: 3, isStreaming: true, isPending: true, isIntermediate: true, ...protocol },
+    ]
+    const live = groupMessagesByTurn(streaming, { isSessionProcessing: true }).find(t => t.type === 'assistant')!
+    expect(live.response).toMatchObject({ text: draft, isStreaming: true })
+    expect(live.activities.some(a => a.type === 'intermediate')).toBe(false)
+
+    const finished = groupMessagesByTurn([
+      ...streaming.slice(0, 2),
+      { id: 'draft', role: 'assistant', content: draft, timestamp: 3, isIntermediate: true, ...protocol },
+    ], { isSessionProcessing: true }).find(t => t.type === 'assistant')!
+    expect(finished.response).toMatchObject({ text: draft, isCommentary: true })
+    expect(finished.activities.some(a => a.type === 'intermediate')).toBe(false)
+
+    const committed = groupMessagesByTurn([
+      ...streaming.slice(0, 2),
+      { id: 'draft', role: 'assistant', content: draft, timestamp: 3, isIntermediate: true, ...protocol },
+      { id: 'submit', role: 'tool', content: '', toolName: 'submit_answer', toolUseId: 'sa', toolStatus: 'completed', toolResult: 'Answer delivered.', timestamp: 4, ...protocol },
+      { id: 'answer', role: 'assistant', content: answer, timestamp: 5, answerCommitted: true, ...protocol },
+    ], { isSessionProcessing: true }).find(t => t.type === 'assistant')!
+    expect(committed.response?.text).toBe(answer)
+    expect(committed.activities.some(a => a.type === 'intermediate')).toBe(false)
+  })
+
+  it('does not add a work-chain step for the first streamed token after tools', () => {
+    const tools: Message[] = [
+      { id: 'user', role: 'user', content: '介绍', timestamp: 1, ...protocol },
+      { id: 's1', role: 'tool', content: '', toolName: 'WebSearch', toolUseId: 'ws1', toolStatus: 'completed', toolResult: '…', timestamp: 2, ...protocol },
+      { id: 's2', role: 'tool', content: '', toolName: 'WebSearch', toolUseId: 'ws2', toolStatus: 'completed', toolResult: '…', timestamp: 3, ...protocol },
+      { id: 'f1', role: 'tool', content: '', toolName: 'WebFetch', toolUseId: 'wf1', toolStatus: 'completed', toolResult: '…', timestamp: 4, ...protocol },
+    ]
+    for (const draft of [
+      { id: 'draft', role: 'assistant' as const, content: '知', timestamp: 5, isStreaming: true, isPending: true, isIntermediate: true, ...protocol },
+      { id: 'draft', role: 'assistant' as const, content: '知', timestamp: 5, isStreaming: true, isPending: true, isIntermediate: true },
+    ]) {
+      const turn = groupMessagesByTurn([...tools, draft], { isSessionProcessing: true }).find(t => t.type === 'assistant')!
+      expect(turn.response).toMatchObject({ text: '知', isStreaming: true })
+      expect(turn.activities.some(a => a.type === 'intermediate')).toBe(false)
+      expect(countWorkRecords(turn.activities)).toBe(3)
+    }
+  })
+
+  it('streams uncommitted explicit text on the card after tools, not a thought row', () => {
+    const messages: Message[] = [
+      { id: 'user', role: 'user', content: '介绍', timestamp: 1, ...protocol },
+      { id: 'search', role: 'tool', content: '', toolName: 'WebSearch', toolUseId: 'ws', toolStatus: 'completed', toolResult: '…', timestamp: 2, ...protocol },
+      { id: 'draft', role: 'assistant', content: '知道了，DeepSeek V4.1 Flash 是新架构系列中最小的一款。', timestamp: 3, isStreaming: true, isPending: true, ...protocol },
+    ]
+    const turn = groupMessagesByTurn(messages).find(t => t.type === 'assistant')!
+    expect(turn.response).toMatchObject({
+      text: '知道了，DeepSeek V4.1 Flash 是新架构系列中最小的一款。',
+      isStreaming: true,
+    })
+    expect(turn.activities.some(a => a.type === 'intermediate')).toBe(false)
+  })
+
+  it('keeps a live answer-sized draft on the card when more tools start', () => {
+    const draft = '知道了，DeepSeek V4.1 Flash 是新架构系列中最小的一款。'
+    const messages: Message[] = [
+      { id: 'user', role: 'user', content: '介绍', timestamp: 1, ...protocol },
+      { id: 'search', role: 'tool', content: '', toolName: 'WebSearch', toolUseId: 'ws', toolStatus: 'completed', toolResult: '…', timestamp: 2, ...protocol },
+      { id: 'draft', role: 'assistant', content: draft, timestamp: 3, ...protocol },
+      { id: 'read', role: 'tool', content: '', toolName: 'WebFetch', toolUseId: 'wf', toolStatus: undefined, timestamp: 4, ...protocol },
+    ]
+    const turn = groupMessagesByTurn(messages).find(t => t.type === 'assistant')!
+    expect(turn.response).toMatchObject({ text: draft })
+    expect(turn.activities.some(a => a.content === draft)).toBe(false)
+    expect(turn.activities.some(a => a.toolUseId === 'wf')).toBe(true)
+  })
+
+  it('keeps a streaming draft on the card when more tools start', () => {
+    const draft = '知道了，DeepSeek V4.1 Flash 是新架构系列中最小的一款。'
+    const messages: Message[] = [
+      { id: 'user', role: 'user', content: '介绍', timestamp: 1, ...protocol },
+      { id: 'search', role: 'tool', content: '', toolName: 'WebSearch', toolUseId: 'ws', toolStatus: 'completed', toolResult: '…', timestamp: 2, ...protocol },
+      { id: 'draft', role: 'assistant', content: draft, timestamp: 3, isStreaming: true, isPending: true, ...protocol },
+      { id: 'read', role: 'tool', content: '', toolName: 'WebFetch', toolUseId: 'wf', toolStatus: undefined, timestamp: 4, ...protocol },
+    ]
+    const turn = groupMessagesByTurn(messages).find(t => t.type === 'assistant')!
+    expect(turn.response).toMatchObject({ text: draft, isStreaming: true })
+    expect(turn.activities.some(a => a.content === draft)).toBe(false)
+    expect(turn.activities.some(a => a.toolUseId === 'wf')).toBe(true)
+  })
+
+  it('demotes a short process note when more business tools start', () => {
+    const note = '我先再查一下。'
+    const messages: Message[] = [
+      { id: 'user', role: 'user', content: '介绍', timestamp: 1, ...protocol },
+      { id: 'search', role: 'tool', content: '', toolName: 'WebSearch', toolUseId: 'ws', toolStatus: 'completed', toolResult: '…', timestamp: 2, ...protocol },
+      { id: 'note', role: 'assistant', content: note, timestamp: 3, ...protocol },
+      { id: 'read', role: 'tool', content: '', toolName: 'WebFetch', toolUseId: 'wf', toolStatus: undefined, timestamp: 4, ...protocol },
+    ]
+    const turn = groupMessagesByTurn(messages).find(t => t.type === 'assistant')!
+    expect(turn.response).toBeUndefined()
+    expect(turn.activities.some(a => a.content === note)).toBe(true)
+    expect(turn.activities.some(a => a.toolUseId === 'wf')).toBe(true)
+  })
+
+  it('keeps the live draft on the card when submit_answer starts', () => {
+    const draft = '知道了，DeepSeek V4.1 Flash 是新架构系列中最小的一款。'
+    const messages: Message[] = [
+      { id: 'user', role: 'user', content: '介绍', timestamp: 1, ...protocol },
+      { id: 'draft', role: 'assistant', content: draft, timestamp: 2, ...protocol },
+      { id: 'submit', role: 'tool', content: '', toolName: 'submit_answer', toolUseId: 'sa', toolStatus: undefined, timestamp: 3, ...protocol },
+    ]
+    const turn = groupMessagesByTurn(messages).find(t => t.type === 'assistant')!
+    expect(turn.response).toMatchObject({ text: draft, isCommentary: true })
+    expect(turn.activities.some(a => a.toolName === 'submit_answer')).toBe(true)
   })
   it('does not assemble superseded explanations into the committed answer', () => {
     const messages = transcript()
@@ -126,6 +243,7 @@ it('never promotes an undelivered answer when processing stops', () => {
   const turns = groupMessagesByTurn(transcript().slice(0, 4), { isSessionProcessing: false }).filter(t => t.type === 'assistant')
   expect(turns[0]?.response).toBeUndefined()
   expect(turns[0]?.activities.some(a => a.content === explanation)).toBe(true)
+  expect(turns[0]?.activities.some(a => a.content === '模拟证实了结果。')).toBe(true)
 })
 
 

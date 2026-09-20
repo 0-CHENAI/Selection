@@ -203,13 +203,13 @@ export function deriveTurnPhase(turn: AssistantTurn): TurnPhase {
 export function isVisibleCommentaryCard(
   response: AssistantTurn['response'],
   isComplete: boolean,
-  hasToolActivities = false,
+  hasRunningTools = false,
 ): boolean {
-  // #83: once tools are running, intermediate text belongs in the work chain,
-  // not a main-slot card that looks like the final reply.
+  // #83: a running tool owns the work chain. Finished tools do not hide a
+  // later draft — that text is the live reply until submit_answer or the next tool.
   return !!response?.isCommentary
     && !isComplete
-    && !hasToolActivities
+    && !hasRunningTools
     && hasRenderableAssistantText(response?.text)
 }
 
@@ -237,6 +237,42 @@ export function demoteResponseToWorkChain(turn: AssistantTurn): void {
     }
   }
   turn.response = undefined
+}
+
+const LIVE_DRAFT_MIN_CHARS = 24
+
+function isSubstantialDraft(text: string): boolean {
+  return text.trim().length >= LIVE_DRAFT_MIN_CHARS
+}
+
+/** A later preview or commit replaces the live draft; do not restate it in the work chain. */
+function replaceLiveDraft(turn: AssistantTurn, nextText: string): void {
+  const previous = turn.response
+  if (!previous || previous.isAnswerPreview) return
+  const draft = previous.text.trim()
+  const absorbed = draft.length >= 2 && nextText.trim().startsWith(draft)
+  if (
+    absorbed
+    || previous.isStreaming
+    || (isSubstantialDraft(previous.text) && turn.activities.some(activity => activity.type === 'tool'))
+  ) {
+    turn.activities = turn.activities.filter(activity => activity.id !== previous.messageId)
+    turn.response = undefined
+    return
+  }
+  demoteResponseToWorkChain(turn)
+}
+
+function isLiveAnswerDraft(message: Message): boolean {
+  return message.role === 'assistant'
+    && message.answerProtocol === 'explicit-v1'
+    && !message.answerCommitted
+    && !message.answerPreview
+}
+
+function occupiesResponseCard(message: Message): boolean {
+  if (!isLiveAnswerDraft(message) || !hasRenderableAssistantText(message.content)) return false
+  return !!message.isStreaming || !!message.isPending || isSubstantialDraft(message.content)
 }
 
 /** The live card already shows this intermediate body — don't also insert a row. */
@@ -629,8 +665,8 @@ export function groupMessagesByTurn(messages: Message[], options: GroupTurnsOpti
       if (committedHeading && committedHeading.length >= 6 && messageHeadings(message).includes(committedHeading)) return []
     }
     if (message.answerProtocol === 'explicit-v1' && message.answerCommitted && runId) deliveredRuns.add(runId)
-    const classified = message.answerProtocol === 'explicit-v1' && message.role === 'assistant'
-      ? { ...message, isIntermediate: !message.answerCommitted && !message.answerPreview }
+    const classified = isLiveAnswerDraft(message)
+      ? { ...message, isIntermediate: !occupiesResponseCard(message) }
       : message
     return [classified]
   })
@@ -743,8 +779,10 @@ export function groupMessagesByTurn(messages: Message[], options: GroupTurnsOpti
       }
 
       // Completed turns treat leftover commentary as the visible final body.
+      // explicit-v1 still requires submit_answer; never promote an undelivered draft.
       if (currentTurn.isComplete && currentTurn.response?.isCommentary) {
-        currentTurn.response = { ...currentTurn.response, isCommentary: false }
+        if (currentTurn.answerRunId) demoteResponseToWorkChain(currentTurn)
+        else currentTurn.response = { ...currentTurn.response, isCommentary: false }
       }
 
       turns.push(currentTurn)
@@ -881,6 +919,16 @@ export function groupMessagesByTurn(messages: Message[], options: GroupTurnsOpti
         isStreaming: !isToolComplete,
         intent: message.toolIntent,
       })
+      if (
+        currentTurn.response
+        && !currentTurn.response.isAnswerPreview
+        && !isSubmitAnswerTool(message.toolName ?? '')
+        && (currentTurn.response.isCommentary || currentTurn.answerRunId)
+        && !currentTurn.response.isStreaming
+        && !isSubstantialDraft(currentTurn.response.text)
+      ) {
+        demoteResponseToWorkChain(currentTurn)
+      }
       // Always add to current turn (ignoring turnId differences)
       // Pass existing activities for incremental depth calculation
       currentTurn.activities.push(messageToActivity(message, currentTurn.activities))
@@ -903,7 +951,12 @@ export function groupMessagesByTurn(messages: Message[], options: GroupTurnsOpti
           continue
         }
 
-        currentTurn = ensureOpenAssistantTurn(message, { isStreaming: !!message.isPending })
+        currentTurn = ensureOpenAssistantTurn(message, { isStreaming: !!message.isPending || !!message.isStreaming })
+        const liveAfterTools = (message.isPending || message.isStreaming)
+          && hasRenderableAssistantText(message.content)
+          && currentTurn.activities.some(activity => activity.type === 'tool')
+          && message.presentationProtocol !== 'marker-v1'
+        const keepOnCard = occupiesResponseCard(message) || liveAfterTools
         // Always add to current turn as activity (ignoring turnId differences)
         // Pending messages show as 'running' until we know they're complete
         // Include parentId for intermediate messages to support nesting within subagents
@@ -922,12 +975,21 @@ export function groupMessagesByTurn(messages: Message[], options: GroupTurnsOpti
         } else {
           intermediateActivity.depth = 0
         }
-        currentTurn.activities.push(intermediateActivity)
+        if (!keepOnCard) currentTurn.activities.push(intermediateActivity)
 
-        // #83: intermediate text stays in the work chain. If this body was
-        // occupying the main card (pending tokens or leftover commentary),
-        // demote it so tools do not leave a fake final reply on screen.
-        if (
+        // Live drafts stay on the card only. Pushing a thought-row and hiding
+        // it later still leaks the answer into the expanded work chain.
+        if (keepOnCard) {
+          currentTurn.response = {
+            text: message.content,
+            isStreaming: !!(message.isStreaming || message.isPending),
+            isCommentary: !message.isStreaming && !message.isPending,
+            streamStartTime: (message.isStreaming || message.isPending) ? message.timestamp : undefined,
+            messageId: message.id,
+            annotations: message.annotations,
+          }
+          currentTurn.isStreaming = !!(message.isStreaming || message.isPending)
+        } else if (
           currentTurn.response
           && (currentTurn.response.isCommentary || currentTurn.response.messageId === message.id)
         ) {
@@ -957,22 +1019,25 @@ export function groupMessagesByTurn(messages: Message[], options: GroupTurnsOpti
         isStreaming: !!message.isStreaming,
         isComplete: !message.isStreaming,
       })
+      replaceLiveDraft(currentTurn, message.content)
+      const liveDraft = occupiesResponseCard(message) && !message.isStreaming
 
       // Set as response on current turn (ignoring turnId differences)
       currentTurn.response = {
         text: message.content,
         isAnswerPreview: message.answerPreview,
         isStreaming: !!message.isStreaming,
+        isCommentary: liveDraft,
         streamStartTime: message.isStreaming ? message.timestamp : undefined,
         completedRevealStartTime: message.isStreaming ? undefined : message.completedRevealStartTime,
         messageId: message.id,
         annotations: message.annotations,
       }
       currentTurn.isStreaming = !!message.isStreaming
-      currentTurn.isComplete = !message.isStreaming
+      currentTurn.isComplete = !message.isStreaming && !liveDraft
 
       // Flush when turn is complete (non-streaming = final response received)
-      if (!message.isStreaming) {
+      if (!message.isStreaming && !liveDraft) {
         flushCurrentTurn()
       }
       continue

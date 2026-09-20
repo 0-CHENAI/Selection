@@ -95,9 +95,15 @@ export function handleTextDelta(
     const currentMsg = session.messages[streamingIndex]
     const updatedSession = updateMessageAt(session, streamingIndex, {
       content: currentMsg.content + event.delta,
-      isIntermediate: phase !== 'final',
+      // Live explicit-v1 tokens are the reply. Marking them intermediate here
+      // makes the first frame a work-chain step before grouping can promote it.
+      isIntermediate: (event.answerProtocol ?? currentMsg.answerProtocol) === 'explicit-v1'
+        ? false
+        : phase !== 'final',
       phase,
       presentationProtocol: event.presentationProtocol,
+      answerProtocol: event.answerProtocol ?? currentMsg.answerProtocol,
+      answerRunId: event.answerRunId ?? currentMsg.answerRunId,
     })
     return { session: updatedSession, streaming: newStreaming }
   }
@@ -113,7 +119,7 @@ export function handleTextDelta(
     timestamp: timestampAfterVisibleUser(session.messages),
     isStreaming: true,
     isPending: true,
-    isIntermediate: phase !== 'final',
+    isIntermediate: event.answerProtocol === 'explicit-v1' ? false : phase !== 'final',
     phase,
     presentationProtocol: event.presentationProtocol,
     turnId: event.turnId,

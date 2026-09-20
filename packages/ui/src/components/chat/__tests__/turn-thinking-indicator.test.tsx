@@ -1,5 +1,7 @@
 import * as React from 'react'
 import { beforeAll, describe, expect, it, mock } from 'bun:test'
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import testI18n from 'i18next'
 import en from '../../../../../shared/src/i18n/locales/en.json'
 import zh from '../../../../../shared/src/i18n/locales/zh-Hans.json'
@@ -139,6 +141,15 @@ describe('TurnCard thinking indicator (#239)', () => {
     expect(html).toContain('现在让我来给你正式回复......')
     expect(html).not.toContain('提交 GPT-6 与 Fable 5.1 对比的完整回答')
     expect(html).not.toContain('submit_answer')
+  })
+
+  it('crossfades the thinking placeholder when a new tool takes its slot', () => {
+    const src = readFileSync(join(import.meta.dir, '../TurnCard.tsx'), 'utf8')
+    const row = src.slice(src.indexOf('function WorkChainRow'), src.indexOf('function ActivityErrorBadge'))
+    expect(row).toContain('height: 0')
+    expect(row).toContain("height: 'auto'")
+    expect(src).toContain('key="thinking"')
+    expect(src).toContain('<AnimatePresence mode="sync" initial={false}>')
   })
 
   it('still hides a completed interrupted turn with no meaningful work', async () => {

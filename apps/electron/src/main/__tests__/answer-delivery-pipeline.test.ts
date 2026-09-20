@@ -87,7 +87,13 @@ describe('#330 service → renderer → durable reload → turn grouping', () =>
               expect(assistantTurns(state.session.messages)[0]?.isComplete).toBe(false)
             }
             if (event.type === 'text_complete' && event.answerCommitted) delivered = true
-            if (!delivered && !previewSeen) expect(assistantTurns(state.session.messages).every(t => !t.response)).toBe(true)
+            if (!delivered && !previewSeen) {
+              for (const turn of assistantTurns(state.session.messages)) {
+                expect(turn.isComplete).toBe(false)
+                expect(turn.response?.isAnswerPreview).toBeFalsy()
+                if (turn.response) expect(!!(turn.response.isCommentary || turn.response.isStreaming)).toBe(true)
+              }
+            }
           }
           expect(previewSeen).toBe(true)
           const stored = loadSession(root, managed.id)!

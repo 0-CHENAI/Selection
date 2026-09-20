@@ -1,5 +1,5 @@
 import * as React from 'react'
-import { useMemo, useEffect, useRef, useCallback, useState } from 'react'
+import { useMemo, useEffect, useLayoutEffect, useRef, useCallback, useState } from 'react'
 import i18n from 'i18next'
 import { isSubmitAnswerTool, localizedToolLabel } from './tool-labels'
 import { usePacedSource } from './usePacedSource'
@@ -785,8 +785,9 @@ interface ActivityRowProps {
 }
 
 /**
- * Keep the height wrapper mounted so adding rows does not remount it and
- * replay height 0 → auto (looks like collapse then expand).
+ * Tween height only while the panel is opening or closing.
+ * A persistent `1fr` transition interpolates the used pixel height, so a
+ * burst of parallel tools retargets the same 250ms ease and the list jitters.
  */
 function ExpandableHeightPanel({
   open,
@@ -797,16 +798,78 @@ function ExpandableHeightPanel({
   reduceMotion: boolean | null
   children: React.ReactNode
 }) {
+  const wasOpen = useRef(open)
+  const toggling = wasOpen.current !== open
+  useLayoutEffect(() => {
+    wasOpen.current = open
+  }, [open])
+
+  return (
+    <div
+      className={cn('grid', !open && 'pointer-events-none')}
+      style={{
+        gridTemplateRows: open ? '1fr' : '0fr',
+        opacity: open ? 1 : 0,
+        transition: reduceMotion || !toggling
+          ? undefined
+          : 'grid-template-rows 250ms cubic-bezier(0.4, 0, 0.2, 1), opacity 150ms ease',
+      }}
+      aria-hidden={!open}
+    >
+      <div className={cn('min-h-0', (toggling || !open) && 'overflow-hidden')}>
+        {children}
+      </div>
+    </div>
+  )
+}
+
+const WORK_CHAIN_EASE = [0.22, 1, 0.36, 1] as const
+
+/** Per-row enter/exit so “思考中” can collapse into the next tool without a hard cut. */
+function WorkChainRow({
+  reduceMotion,
+  stagger,
+  staggerIndex = 0,
+  children,
+}: {
+  reduceMotion: boolean | null
+  stagger: boolean
+  staggerIndex?: number
+  children: React.ReactNode
+}) {
+  const instant = !!reduceMotion
+  const delay = !instant && stagger
+    ? (staggerIndex < SIZE_CONFIG.staggeredAnimationLimit
+      ? staggerIndex * 0.03
+      : SIZE_CONFIG.staggeredAnimationLimit * 0.03)
+    : 0
+  const heightTween = { duration: instant ? 0 : 0.28, ease: WORK_CHAIN_EASE }
+  const fadeIn = { duration: instant ? 0 : 0.22, ease: WORK_CHAIN_EASE, delay: instant ? 0 : 0.06 }
+  const fadeOut = { duration: instant ? 0 : 0.16, ease: WORK_CHAIN_EASE }
+
   return (
     <motion.div
-      initial={false}
-      animate={open ? { height: 'auto', opacity: 1 } : { height: 0, opacity: 0 }}
-      transition={{
-        height: { duration: reduceMotion ? 0 : 0.25, ease: [0.4, 0, 0.2, 1] },
-        opacity: { duration: reduceMotion ? 0 : 0.15 },
+      initial={instant ? false : stagger ? { opacity: 0, x: -8 } : { opacity: 0, height: 0, y: 3 }}
+      animate={{
+        opacity: 1,
+        x: 0,
+        y: 0,
+        height: 'auto',
+        transition: {
+          delay,
+          height: heightTween,
+          opacity: stagger ? { duration: instant ? 0 : 0.2, delay } : fadeIn,
+          x: { duration: instant ? 0 : stagger ? 0.22 : 0, ease: WORK_CHAIN_EASE, delay },
+          y: heightTween,
+        },
       }}
-      className={cn("overflow-hidden", !open && "pointer-events-none")}
-      aria-hidden={!open}
+      exit={instant ? undefined : {
+        opacity: 0,
+        height: 0,
+        y: -2,
+        transition: { height: heightTween, opacity: fadeOut, y: heightTween },
+      }}
+      className="overflow-hidden"
     >
       {children}
     </motion.div>
@@ -2436,7 +2499,7 @@ export function ResponseCard({
             </div>
           )}
 
-          {/* Smooth received-block growth while the outer viewport stays pinned. */}
+          {/* Received blocks grow in flow; the outer viewport stays pinned. */}
           <ResponseBodyGrowth streaming={presentationStreaming && variant === 'response'}>
           <div
             key="response-content"
@@ -2748,11 +2811,11 @@ export const TurnCard = React.memo(function TurnCard({
 }: TurnCardProps) {
   const { t } = useTranslation()
   const reduceMotion = useReducedMotion()
-  const hasToolActivities = activities.some(activity => activity.type === 'tool')
+  const hasRunningTools = activities.some(activity => activity.type === 'tool' && activity.status === 'running')
   const showCommentary = isVisibleCommentaryCard(
     response,
     isComplete,
-    hasToolActivities,
+    hasRunningTools,
   )
 
   // Derive the turn phase from props using the state machine.
@@ -2972,7 +3035,7 @@ export const TurnCard = React.memo(function TurnCard({
                   initial={reduceMotion ? false : { opacity: 0 }}
                   animate={{ opacity: 1 }}
                   exit={reduceMotion ? undefined : { opacity: 0 }}
-                  transition={{ duration: reduceMotion ? 0 : 0.2 }}
+                  transition={{ duration: reduceMotion ? 0 : 0.22, ease: WORK_CHAIN_EASE }}
                   className="absolute inset-0 truncate"
                 >
                   {previewText}
@@ -2998,37 +3061,34 @@ export const TurnCard = React.memo(function TurnCard({
                   ref={activitiesContainerRef}
                   className="pl-4 pr-2 py-0 space-y-0.5 border-l-2 border-muted ml-[13px]"
                 >
-                  <AnimatePresence mode="sync">
+                  <AnimatePresence mode="sync" initial={false}>
                   {/* Grouped view for Task subagents */}
                   {groupedActivities ? (
                     groupedActivities.map((item, index) => (
                       isActivityGroup(item) ? (
-                        <ActivityGroupRow
+                        <WorkChainRow
                           key={item.parent.id}
-                          group={item}
-                          expandedGroups={expandedActivityGroups}
-                          onExpandedGroupsChange={handleExpandedActivityGroupsChange}
-                          onOpenActivityDetails={onOpenActivityDetails}
-                          animationIndex={index}
-                          animateEntrance={staggerOnThisExpand}
-                          sessionFolderPath={sessionFolderPath}
-                          displayMode={displayMode}
-                        />
+                          reduceMotion={reduceMotion}
+                          stagger={!!staggerOnThisExpand}
+                          staggerIndex={index}
+                        >
+                          <ActivityGroupRow
+                            group={item}
+                            expandedGroups={expandedActivityGroups}
+                            onExpandedGroupsChange={handleExpandedActivityGroupsChange}
+                            onOpenActivityDetails={onOpenActivityDetails}
+                            animationIndex={index}
+                            animateEntrance={false}
+                            sessionFolderPath={sessionFolderPath}
+                            displayMode={displayMode}
+                          />
+                        </WorkChainRow>
                       ) : (
-                        <motion.div
+                        <WorkChainRow
                           key={item.id}
-                          initial={
-                            reduceMotion || !staggerOnThisExpand
-                              ? false
-                              : { opacity: 0, x: -8 }
-                          }
-                          animate={{ opacity: 1, x: 0 }}
-                          transition={{
-                            delay: reduceMotion || !staggerOnThisExpand
-                              ? 0
-                              : (index < SIZE_CONFIG.staggeredAnimationLimit ? index * 0.03 : SIZE_CONFIG.staggeredAnimationLimit * 0.03),
-                            duration: reduceMotion ? 0 : undefined,
-                          }}
+                          reduceMotion={reduceMotion}
+                          stagger={!!staggerOnThisExpand}
+                          staggerIndex={index}
                         >
                           <ActivityRow
                             activity={item}
@@ -3036,26 +3096,17 @@ export const TurnCard = React.memo(function TurnCard({
                             sessionFolderPath={sessionFolderPath}
                             displayMode={displayMode}
                           />
-                        </motion.div>
+                        </WorkChainRow>
                       )
                     ))
                   ) : (
                     /* Flat view for simple tool calls */
                     visibleActivities.map((activity, index) => (
-                      <motion.div
+                      <WorkChainRow
                         key={activity.id}
-                        initial={
-                          reduceMotion || !staggerOnThisExpand
-                            ? false
-                            : { opacity: 0, x: -8 }
-                        }
-                        animate={{ opacity: 1, x: 0 }}
-                        transition={{
-                          delay: reduceMotion || !staggerOnThisExpand
-                            ? 0
-                            : (index < SIZE_CONFIG.staggeredAnimationLimit ? index * 0.03 : SIZE_CONFIG.staggeredAnimationLimit * 0.03),
-                          duration: reduceMotion ? 0 : undefined,
-                        }}
+                        reduceMotion={reduceMotion}
+                        stagger={!!staggerOnThisExpand}
+                        staggerIndex={index}
                       >
                         <ActivityRow
                           activity={activity}
@@ -3064,29 +3115,24 @@ export const TurnCard = React.memo(function TurnCard({
                           sessionFolderPath={sessionFolderPath}
                           displayMode={displayMode}
                         />
-                      </motion.div>
+                      </WorkChainRow>
                     ))
                   )}
                   {/* Thinking/Buffering indicator - shown while waiting for response */}
                   {showGenericThinkingIndicator && !animateResponse && (
-                    <motion.div
+                    <WorkChainRow
                       key="thinking"
-                      initial={reduceMotion || !staggerOnThisExpand ? false : { opacity: 0, x: -8 }}
-                      animate={{ opacity: 1, x: 0 }}
-                      transition={{
-                        delay: reduceMotion || !staggerOnThisExpand
-                          ? 0
-                          : Math.min(visibleActivities.length, SIZE_CONFIG.staggeredAnimationLimit) * 0.03,
-                        duration: reduceMotion ? 0 : 0.3,
-                        ease: "easeOut"
-                      }}
-                      className={cn("flex items-center gap-2 py-0.5 text-muted-foreground/70", SIZE_CONFIG.fontSize)}
+                      reduceMotion={reduceMotion}
+                      stagger={!!staggerOnThisExpand}
+                      staggerIndex={visibleActivities.length}
                     >
-                      <div className={cn(SIZE_CONFIG.iconSize, "flex items-center justify-center shrink-0")}>
-                        <Spinner className={SIZE_CONFIG.spinnerSize} />
+                      <div className={cn("flex items-center gap-2 py-0.5 text-muted-foreground/70", SIZE_CONFIG.fontSize)}>
+                        <div className={cn(SIZE_CONFIG.iconSize, "flex items-center justify-center shrink-0")}>
+                          <Spinner className={SIZE_CONFIG.spinnerSize} />
+                        </div>
+                        <span>{thinkingStatusLabel()}</span>
                       </div>
-                      <span>{thinkingStatusLabel()}</span>
-                    </motion.div>
+                    </WorkChainRow>
                   )}
                   </AnimatePresence>
                 </div>
@@ -3099,14 +3145,18 @@ export const TurnCard = React.memo(function TurnCard({
       )}
 
       {/* Standalone thinking indicator - when no activities but still working */}
-      {!hasActivities && showGenericThinkingIndicator && !animateResponse && (
-        <div className={cn("flex items-center gap-2 px-3 py-1.5 text-muted-foreground", SIZE_CONFIG.fontSize)}>
-          <div className={cn(SIZE_CONFIG.iconSize, "flex items-center justify-center shrink-0")}>
-            <Spinner className={SIZE_CONFIG.spinnerSize} />
-          </div>
-          <span>{thinkingStatusLabel()}</span>
-        </div>
-      )}
+      <AnimatePresence initial={false}>
+        {!hasActivities && showGenericThinkingIndicator && !animateResponse && (
+          <WorkChainRow key="standalone-thinking" reduceMotion={reduceMotion} stagger={false}>
+            <div className={cn("flex items-center gap-2 px-3 py-1.5 text-muted-foreground", SIZE_CONFIG.fontSize)}>
+              <div className={cn(SIZE_CONFIG.iconSize, "flex items-center justify-center shrink-0")}>
+                <Spinner className={SIZE_CONFIG.spinnerSize} />
+              </div>
+              <span>{thinkingStatusLabel()}</span>
+            </div>
+          </WorkChainRow>
+        )}
+      </AnimatePresence>
 
       {/* Plan Activities - rendered as full ResponseCards, time-sorted with other activities */}
       {planActivities.map((planActivity, index) => (

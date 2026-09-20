@@ -29,6 +29,13 @@ it('keeps the white response frame mounted and does not tween its height', () =>
   expect(grow).not.toContain('animate={{ height')
   expect(src).not.toContain('hasVisibleResponse && !isBuffering')
   expect(src).not.toContain('if (isStreaming && !bodyText.trim())')
+  const bodyGrowth = readFileSync(join(import.meta.dir, '../ResponseBodyGrowth.tsx'), 'utf8')
+  expect(bodyGrowth).not.toContain('ResizeObserver')
+  expect(bodyGrowth).not.toContain('height 620ms')
+  const panel = src.slice(src.indexOf('function ExpandableHeightPanel'), src.indexOf('function WorkChainRow'))
+  expect(panel).not.toContain("height: 'auto'")
+  expect(panel).toContain('toggling')
+  expect(panel).toContain('gridTemplateRows')
 })
 
 it('publishes complete blocks and lets prose tails grow, holding only unsafe tails', () => {
