@@ -3098,6 +3098,10 @@ export const TurnCard = React.memo(function TurnCard({
   const visibleActivities = useMemo(
     () => sortedActivities.filter(
       activity => !isSubmitAnswerTool(activity.toolName)
+        // Empty SDK thinking messages are status placeholders, not work rows.
+        // The stable header/footer status owns their presentation.
+        && !((activity.type === 'intermediate' || activity.type === 'thinking')
+          && !hasRenderableAssistantText(activity.content))
         && !isMirroredCommentaryActivity(activity, response, isComplete),
     ),
     [sortedActivities, response, isComplete],
@@ -3173,7 +3177,7 @@ export const TurnCard = React.memo(function TurnCard({
   // Determine if thinking indicator should show using the phase-based state machine.
   // This properly handles the "gap" state (awaiting) between tool completion and next action,
   // which was previously causing the turn card to "disappear".
-  const showGenericThinkingIndicator = shouldShowGenericThinkingIndicator(
+  const showGenericThinkingIndicator = previewText !== thinkingStatusLabel() && shouldShowGenericThinkingIndicator(
     turnPhase,
     isBuffering && !(response && hasVisibleResponse),
     renderedActivityRows,
@@ -3184,6 +3188,10 @@ export const TurnCard = React.memo(function TurnCard({
     && !isComplete
     && shouldShowThinkingIndicator(turnPhase, isBuffering && !(response && hasVisibleResponse))
   const showWorkChrome = hasWorkRecords || showLiveThinkingHeader
+  // Keep one status slot across tool -> awaiting -> tool transitions. Toggling
+  // its visibility must not repeatedly expand and collapse the work chain.
+  const reserveThinkingSlot = !animateResponse && hasWorkRecords && !isComplete
+    && !(response && hasVisibleResponse)
   // True once the header has been on screen for a committed render, so a badge
   // that arrives later slides in while a header that mounts with its badge does not.
   const chromeWasMounted = chromeMountedRef.current
@@ -3236,7 +3244,8 @@ export const TurnCard = React.memo(function TurnCard({
                   key={previewText}
                   initial={reduceMotion ? false : { opacity: 0 }}
                   animate={{ opacity: 1 }}
-                  exit={reduceMotion ? undefined : { opacity: 0 }}
+                  // Do not retain a fading thinking label when its status row takes over.
+                  exit={reduceMotion ? undefined : { opacity: 0, transition: previewText === thinkingStatusLabel() ? { duration: 0 } : undefined }}
                   transition={{ duration: reduceMotion ? 0 : 0.22, ease: WORK_CHAIN_EASE }}
                   className="absolute inset-0 truncate"
                 >
@@ -3323,18 +3332,23 @@ export const TurnCard = React.memo(function TurnCard({
                     ))
                   )}
                   {/* Thinking/Buffering indicator - shown while waiting for response */}
-                  {showGenericThinkingIndicator && !animateResponse && (
+                  {reserveThinkingSlot && (
                     <WorkChainRow
                       key="thinking"
                       reduceMotion={reduceMotion}
                       stagger={!!staggerOnThisExpand}
                       staggerIndex={visibleActivities.length}
                     >
-                      <div className={cn("flex items-center gap-2 py-0.5 text-muted-foreground/70", SIZE_CONFIG.fontSize)}>
+                      <div
+                        data-thinking-slot=""
+                        aria-hidden={!showGenericThinkingIndicator || undefined}
+                        style={{ visibility: showGenericThinkingIndicator ? 'visible' : 'hidden' }}
+                        className={cn("flex items-center gap-2 py-0.5 text-muted-foreground/70", SIZE_CONFIG.fontSize)}
+                      >
                         <div className={cn(SIZE_CONFIG.iconSize, "flex items-center justify-center shrink-0")}>
                           <Spinner className={SIZE_CONFIG.spinnerSize} />
                         </div>
-                        <span>{thinkingStatusLabel()}</span>
+                        <span>{showGenericThinkingIndicator ? thinkingStatusLabel() : null}</span>
                       </div>
                     </WorkChainRow>
                   )}

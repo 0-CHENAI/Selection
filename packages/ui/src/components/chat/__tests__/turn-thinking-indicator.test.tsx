@@ -231,3 +231,35 @@ describe('TurnCard thinking indicator (#239)', () => {
     expect(html).toBe('')
   })
 })
+
+it('reserves one status slot across tool/awaiting cycles and removes it on completion', async () => {
+  const tool: ActivityItem = { id: 'fetch', type: 'tool', toolName: 'WebFetch', status: 'running', timestamp: 1 }
+  for (const status of ['running', 'completed', 'running', 'completed'] as const) {
+    const html = await renderTurn('zh-Hans', [{ ...tool, status }])
+    expect(countOccurrences(html, 'data-thinking-slot=""')).toBe(1)
+    expect(html).toContain(`visibility:${status === 'completed' ? 'visible' : 'hidden'}`)
+    if (status === 'running') expect(html).toContain('data-thinking-slot="" aria-hidden="true"')
+  }
+  const completed = await renderTurn('zh-Hans', [{ ...tool, status: 'completed' }], { isComplete: true, isStreaming: false })
+  expect(completed).not.toContain('data-thinking-slot')
+})
+
+it('renders one thinking label after tools even when multiple SDK placeholders overlap', async () => {
+  const tool: ActivityItem = { id: 'fetch', type: 'tool', toolName: 'WebFetch', status: 'completed', timestamp: 1 }
+  const placeholders: ActivityItem[] = [
+    { id: 'thinking', type: 'thinking', status: 'running', content: '', timestamp: 2 },
+    { id: 'intermediate', type: 'intermediate', status: 'running', content: '  ', timestamp: 3 },
+  ]
+  for (const rows of [[tool], [tool, placeholders[0]!], [tool, ...placeholders], [tool, placeholders[1]!]]) {
+    const html = await renderTurn('zh-Hans', rows)
+    expect(countOccurrences(html, '思考中…')).toBe(1)
+    expect(countOccurrences(html, 'class="spinner ')).toBe(1)
+  }
+})
+
+it('does not repeat a thinking header in the status slot', async () => {
+  const html = await renderTurn('zh-Hans', [{
+    id: 'status', type: 'status', status: 'completed', timestamp: 1,
+  }])
+  expect(countOccurrences(html, '思考中…')).toBe(1)
+})

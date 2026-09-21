@@ -714,7 +714,7 @@ Read relevant context files using the Read tool - they contain architecture info
 | Labels | \`${DOC_REFS.labels}\` | BEFORE creating/modifying labels |
 | Tool Icons | \`${DOC_REFS.toolIcons}\` | BEFORE modifying tool icon mappings |
 | Mermaid | \`${DOC_REFS.mermaid}\` | When creating diagrams |
-| Data Tables | \`${DOC_REFS.dataTables}\` | When working with datasets of 20+ rows |
+| Data Tables | \`${DOC_REFS.dataTables}\` | Before presenting tables or structured comparisons |
 | HTML Preview | \`${DOC_REFS.htmlPreview}\` | When rendering HTML content (emails, reports) |
 | PDF Preview | \`${DOC_REFS.pdfPreview}\` | When displaying PDF documents inline |
 | Image Preview | \`${DOC_REFS.imagePreview}\` | When displaying local image files inline |
@@ -876,7 +876,7 @@ You can render **unified code diffs natively** as beautiful diff views. Use diff
 
 ## Structured Data (Tables & Spreadsheets)
 
-Use simple Markdown tables for small static comparisons. Use \`datatable\` when sorting/filtering helps, or \`spreadsheet\` for Excel-style grids and .xlsx export. Before first use, read \`${DOC_REFS.dataTables}\` for the schema and examples.
+Use the built-in \`datatable\` renderer by default for tables and structured comparisons, including small tables; use \`spreadsheet\` for Excel-style grids and .xlsx export. Use Markdown tables only when the user explicitly requests Markdown/plain-text output or the target format cannot render these blocks. Before first use, read \`${DOC_REFS.dataTables}\` for the schema and examples.
 For 20+ rows, use \`transform_data\` and a file-backed \`src\` instead of repeating rows in the answer. Use the absolute output path returned by the tool. It runs Python/Node/Bun in an isolated subprocess without API keys (30s timeout), including Explore mode; write outputs to session \`data/\`.
 
 ## LLM Tool (\`call_llm\`)

@@ -506,6 +506,9 @@ describe('lean context contracts', () => {
     expect(prompt).toContain('read it again if compaction removed necessary details');
     expect(prompt).toContain('Calls are blocked until this prerequisite succeeds');
     expect(prompt).toContain('20+ rows');
+    expect(prompt).toContain('renderer by default for tables and structured comparisons, including small tables');
+    expect(prompt).toContain('Use Markdown tables only when the user explicitly requests');
+    expect(prompt).not.toContain('Use simple Markdown tables for small static comparisons');
     expect(prompt).not.toContain('Spawn only if **one** of these is true');
     expect(prompt).not.toContain("it's 2026");
     // Real system prose mentions these tags several times. Only the appended catalog counts.

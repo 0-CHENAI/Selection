@@ -37,7 +37,7 @@ describe('explicit answer delivery (#330)', () => {
     expect(turns[0]?.activities.some(a => a.content === '模拟证实了结果。')).toBe(true)
   })
 
-  it('keeps a live explicit-v1 stream on the card; completed uncommitted text goes to the work chain', () => {
+  it('keeps the explicit draft on the card between text completion and answer delivery', () => {
     const draft = '知道了，这是 DeepSeek 在2026年9月10日正式发布的模型（属于全新架构系列里尺寸最小的一款）。我查了官方公告和 Hugging Face。'
     const answer = '# DeepSeek V4.1 Flash\n\n2026 年 9 月 10 日发布，是新架构系列中最小的一款。'
     const streaming: Message[] = [
@@ -53,8 +53,9 @@ describe('explicit answer delivery (#330)', () => {
       ...streaming.slice(0, 2),
       { id: 'draft', role: 'assistant', content: draft, timestamp: 3, isIntermediate: true, ...protocol },
     ], { isSessionProcessing: true }).find(t => t.type === 'assistant')!
-    expect(finished.response).toBeUndefined()
-    expect(finished.activities.some(a => a.content === draft)).toBe(true)
+    expect(finished.response).toMatchObject({ text: draft, isCommentary: true, isStreaming: false })
+    expect(finished.isComplete).toBe(false)
+    expect(finished.activities.some(a => a.content === draft)).toBe(false)
 
     const committed = groupMessagesByTurn([
       ...streaming.slice(0, 2),
@@ -422,4 +423,24 @@ it('does not fold a draft against an invisible committed message', () => {
   const turn = groupMessagesByTurn(messages).find(t => t.type === 'assistant')!
   expect(turn.activities.some(a => a.id === 'draft')).toBe(true)
   expect(turn.response).toBeUndefined()
+})
+
+it('reserves only the active unclassified tail without mutating stored messages', () => {
+  const user: Message = { id: 'u', role: 'user', content: '研究', timestamp: 1, ...protocol }
+  const draft: Message = { id: 'draft', role: 'assistant', content: explanation, timestamp: 2, isIntermediate: true, phase: 'unclassified', ...protocol }
+  const snapshot = JSON.stringify(draft)
+  const active = groupMessagesByTurn([user, draft], { isSessionProcessing: true }).find(t => t.type === 'assistant')!
+  expect(active.response?.text).toBe(explanation)
+  expect(active.isComplete).toBe(false)
+  expect(JSON.stringify(draft)).toBe(snapshot)
+  for (const processing of [false, undefined]) {
+    const stopped = groupMessagesByTurn([user, draft], { isSessionProcessing: processing }).find(t => t.type === 'assistant')!
+    expect(stopped.response).toBeUndefined()
+  }
+  const commentary = groupMessagesByTurn([user, { ...draft, phase: 'intermediate' }], { isSessionProcessing: true }).find(t => t.type === 'assistant')!
+  expect(commentary.response).toBeUndefined()
+  const tool: Message = { id: 'tool', role: 'tool', content: '', toolName: 'WebFetch', toolUseId: 'fetch', toolStatus: 'executing', timestamp: 3, ...protocol }
+  const resumed = groupMessagesByTurn([user, draft, tool], { isSessionProcessing: true }).find(t => t.type === 'assistant')!
+  expect(resumed.response).toBeUndefined()
+  expect(resumed.activities.some(a => a.content === explanation)).toBe(true)
 })

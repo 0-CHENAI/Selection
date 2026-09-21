@@ -721,6 +721,15 @@ export function groupMessagesByTurn(messages: Message[], options: GroupTurnsOpti
     return [classifyForTurnGrouping(normalized)]
   })
   const visibleMessages = protocolMessages.filter(m => !m.hidden && !m.isQueued)
+  // message_end only closes a text segment, not the agent run. Keep its
+  // unclassified draft on the card while waiting for the delivery boundary.
+  // A subsequent tool/message naturally removes this tail-only reservation.
+  const tail = visibleMessages.at(-1)
+  if (options.isSessionProcessing && tail && isLiveAnswerDraft(tail)
+    && tail.phase !== 'intermediate' && tail.presentationProtocol !== 'marker-v1'
+    && hasRenderableAssistantText(tail.content) && !tail.isStreaming && !tail.isPending) {
+    visibleMessages[visibleMessages.length - 1] = { ...tail, isPending: true, isIntermediate: false }
+  }
   // Sort by timestamp for correct chronological order
   // This ensures correct turn grouping even if messages are added out of order during streaming
   const sortedMessages = visibleMessages // Protocol normalization above already sorted chronologically.

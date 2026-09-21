@@ -2,7 +2,7 @@
 
 ## Quick start
 
-Use a Markdown table for small static comparisons, `datatable` for sorting/filtering, or `spreadsheet` for Excel-style display/export. These are fenced reply formats, not tool names.
+Use the built-in `datatable` renderer by default for tables and structured comparisons, including small tables. Use `spreadsheet` for Excel-style display/export. Use Markdown tables only when the user explicitly requests Markdown/plain-text output or the target format cannot render these blocks. These are fenced reply formats, not tool names.
 
 ````
 ```datatable
@@ -20,8 +20,8 @@ Selection supports three ways to display tabular data:
 
 | Format | Best For | Interactivity |
 |--------|----------|---------------|
-| **Markdown table** | Small, simple data (3-4 rows) | None |
-| **`datatable` block** | Query results, comparisons, any data users may sort/filter | Sort, filter, group-by, search |
+| **Markdown table** | Explicit Markdown/plain-text requests or targets without rich rendering | None |
+| **`datatable` block** | Default for tables, query results and comparisons, including small datasets | Sort, filter, group-by, search |
 | **`spreadsheet` block** | Financial reports, exports, data users may download as .xlsx | Sort, export to Excel/CSV |
 
 **Key principle:** For datasets with 20+ rows, use the `transform_data` tool to write data to a JSON file and reference it via `"src"` instead of inlining all rows. This dramatically reduces token usage and cost.

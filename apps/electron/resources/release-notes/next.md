@@ -6,6 +6,8 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 
 ## Improvements
 
+- **Interactive tables by default** — Tabular answers and comparisons prefer the built-in datatable renderer, including small datasets. Spreadsheet export and explicitly requested Markdown output remain available.
+
 - **Stable reference sources** — Numbered, emphasized, bare-URL and reference-style citations no longer flash in streaming replies. Known sources reserve their footer space so completion does not resize the answer card.
 
 - **Leaner agent context** — Rendering guides load on demand, duplicate Pi tool aliases are omitted from model requests while remaining executable, and context usage distinguishes estimated skill catalogs from loaded content. Swarm delegation follows one session policy.
