@@ -482,7 +482,7 @@ export function UserMessageBubble({
                       />
                     ) : (
                       <div className="h-full w-full flex items-center justify-center">
-                        <FileTypeIcon type={att.type} mimeType={att.mimeType} className="h-5 w-5" />
+                        <FileTypeIcon type={att.type} mimeType={att.mimeType} fileName={att.name} className="h-5 w-5" />
                       </div>
                     )}
                   </div>
@@ -497,7 +497,7 @@ export function UserMessageBubble({
                           className="h-full w-full object-cover object-top"
                         />
                       ) : (
-                        <FileTypeIcon type={att.type} mimeType={att.mimeType} className="h-5 w-5" />
+                        <FileTypeIcon type={att.type} mimeType={att.mimeType} fileName={att.name} className="h-5 w-5" />
                       )}
                     </div>
                     <div className="flex flex-col min-w-0 max-w-[120px]">
