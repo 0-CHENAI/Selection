@@ -11,6 +11,7 @@
  */
 
 import { createHash } from 'node:crypto';
+import { parse as shellParse } from 'shell-quote';
 import { existsSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, relative, resolve, sep } from 'node:path';
@@ -335,7 +336,7 @@ export class PrerequisiteManager {
   }
 
   /**
-   * Track a Read tool call. Extracts file_path from tool input,
+   * Track a successful Read result. Extracts file_path from tool input,
    * normalizes it, and adds to the read set.
    * Also clears matching pending skill paths.
    */
@@ -357,23 +358,19 @@ export class PrerequisiteManager {
 
   /**
    * Check if a Bash command is reading a pending skill file.
-   * If it matches, clear the prerequisite and return true.
-   * Called from the pre-tool-use pipeline to allow targeted Bash reads through.
+   * Called before execution; does not mark an attempted read as successful.
    */
-  trackBashSkillRead(input: Record<string, unknown>): boolean {
-    const command = input.command as string;
-    if (!command || this.pendingSkillPaths.size === 0) return false;
+  isPendingSkillReadCommand(input: Record<string, unknown>): boolean {
+    return extractSkillReadCandidates('Bash', input)
+      .some(path => this.pendingSkillPaths.has(expandPath(path)));
+  }
 
-    let matched = false;
-    for (const path of this.pendingSkillPaths) {
-      if (command.includes(path)) {
-        this.pendingSkillPaths.delete(path);
-        this.readFiles.add(path);
-        this.onDebug?.(`Prerequisite: cleared skill prerequisite via Bash: ${path}`);
-        matched = true;
+  trackSuccessfulBashSkillRead(input: Record<string, unknown>): void {
+    for (const path of extractSkillReadCandidates('Bash', input)) {
+      if (this.pendingSkillPaths.has(expandPath(path)) || this.catalogByPath.has(catalogPathKey(path))) {
+        this.trackReadTool({ file_path: path });
       }
     }
-    return matched;
   }
 
   /**
@@ -399,16 +396,38 @@ export class PrerequisiteManager {
   }
 }
 
-const SKILL_MD_IN_COMMAND_RE = /(?:^|[\s"'`])((?:~|\/|[A-Za-z]:[\\/])[^\s"'`;|&]+SKILL\.md)/gi;
-
 export function extractSkillMdPathsFromCommand(command: string): string[] {
-  const paths: string[] = [];
-  const matcher = new RegExp(SKILL_MD_IN_COMMAND_RE.source, 'gi');
-  let match: RegExpExecArray | null;
-  while ((match = matcher.exec(command))) {
-    paths.push(match[1]!);
+  // Only complete cat reads count. Mentioning a path in echo/ls, redirecting
+  // output, or reading a snippet must not satisfy a skill prerequisite.
+  if (/[$`\n\r]/.test(command)) return [];
+  try {
+    const paths: string[] = [];
+    let needsCommand = true;
+    let hasOperand = false;
+    for (const token of shellParse(command)) {
+      if (typeof token !== 'string') {
+        if ('op' in token && token.op === '&&' && hasOperand) {
+          needsCommand = true;
+          hasOperand = false;
+          continue;
+        }
+        return [];
+      }
+      if (needsCommand) {
+        if (!['cat', '/bin/cat', '/usr/bin/cat'].includes(token)) return [];
+        needsCommand = false;
+      } else if (token === '--' && !hasOperand) {
+        continue;
+      } else {
+        if (!/^(?:\/|~\/|[A-Za-z]:[\\/]).*[/\\]SKILL\.md$/.test(token)) return [];
+        paths.push(token);
+        hasOperand = true;
+      }
+    }
+    return hasOperand ? paths : [];
+  } catch {
+    return [];
   }
-  return paths;
 }
 
 export function extractSkillReadCandidates(toolName: string, input: Record<string, unknown>): string[] {
