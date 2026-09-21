@@ -12,7 +12,7 @@ describe('file type icons (#407)', () => {
     ['说明.txt', 'text'], ['index.tsx', 'code'], ['backup.zip', 'archive'],
     ['录音.mp3', 'audio'], ['视频.mp4', 'video'], ['unknown.bin', 'file'],
     ['README', 'file'], ['/folder.pdf/README', 'file'], ['C:\\folder.docx\\README', 'file'],
-  ])('%s has a dedicated %s icon', (fileName, kind) => {
+  ] as const)('%s has a dedicated %s icon', (fileName, kind) => {
     expect(getFileIconKind({ fileName })).toBe(kind)
     expect(renderToStaticMarkup(<FileTypeIcon fileName={fileName} />)).toContain(`data-file-kind="${kind}"`)
   })
@@ -29,7 +29,7 @@ describe('file type icons (#407)', () => {
     ['application/vnd.ms-powerpoint', 'powerpoint'],
     ['APPLICATION/PDF; charset=utf-8', 'pdf'],
     ['text/markdown', 'markdown'], ['text/plain', 'text'], ['image/jpeg', 'image'],
-  ])('supports MIME-only attachments: %s', (mimeType, kind) => {
+  ] as const)('supports MIME-only attachments: %s', (mimeType, kind) => {
     expect(getFileIconKind({ mimeType })).toBe(kind)
   })
 

@@ -262,7 +262,7 @@ function isLiveAnswerDraft(message: Message): boolean {
     && !message.answerPreview
 }
 
-function isAuthoritativeCommit(message: Message): boolean {
+function isAuthoritativeCommit(message: Message): message is Message & { answerRunId: string } {
   return message.role === 'assistant'
     && message.answerProtocol === 'explicit-v1'
     && !!message.answerCommitted
