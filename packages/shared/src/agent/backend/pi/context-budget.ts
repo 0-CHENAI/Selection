@@ -110,24 +110,45 @@ function estimateTools(tools: Tool[] | undefined): number {
   return estimateTextTokensConservatively(safeJson(tools));
 }
 
+/** Preserve offsets while ignoring fenced examples when locating envelope tags. */
+function maskFencedExamples(text: string): string {
+  let fence: { char: string; length: number } | undefined;
+  return text.split(/(?<=\n)/).map(line => {
+    const marker = line.match(/^ {0,3}(`{3,}|~{3,})([^\r\n]*)/);
+    const inside = !!fence;
+    if (marker) {
+      if (!fence) fence = { char: marker[1]![0]!, length: marker[1]!.length };
+      else if (marker[1]![0] === fence.char && marker[1]!.length >= fence.length && !marker[2]!.trim()) fence = undefined;
+    }
+    return inside || !!fence ? line.replace(/[^\r\n]/g, ' ') : line;
+  }).join('');
+}
+
 function takeTaggedBlocks(text: string, tags: readonly string[]): { extracted: string; rest: string } {
   let extracted = '';
   let rest = text;
   for (const tag of tags) {
-    const re = new RegExp(`<${tag}(?:\\s[^>]*)?>[\\s\\S]*?<\\/${tag}>`, 'gi');
-    rest = rest.replace(re, (block) => {
+    // Only standalone envelopes count, never a tag mentioned in prose/code.
+    const re = new RegExp(`^[ \\t]*<${tag}(?:[ \\t][^>\\r\\n]*)?>[\\s\\S]*?<\\/${tag}>[ \\t]*(?=\\r?$)`, 'gim');
+    const matches = [...maskFencedExamples(rest).matchAll(re)];
+    for (const match of matches.reverse()) {
+      const start = match.index!;
+      const end = start + match[0].length;
+      const block = rest.slice(start, end);
       extracted += extracted ? `\n${block}` : block;
-      return '';
-    });
+      rest = rest.slice(0, start) + rest.slice(end);
+    }
   }
   return { extracted, rest };
 }
 
 function takePreferences(text: string): { extracted: string; rest: string } {
-  const re = /## User Preferences[\s\S]*?(?=\n## |\n<[A-Za-z/]|$)/;
-  const match = text.match(re);
+  const re = /^## User Preferences[^\r\n]*[\s\S]*?(?=^## |^<[A-Za-z/]|$(?![\s\S]))/m;
+  const match = maskFencedExamples(text).match(re);
   if (!match) return { extracted: '', rest: text };
-  return { extracted: match[0], rest: text.replace(re, '') };
+  const start = match.index!;
+  const end = start + match[0].length;
+  return { extracted: text.slice(start, end), rest: text.slice(0, start) + text.slice(end) };
 }
 
 function splitPromptText(text: string): {
@@ -284,6 +305,12 @@ export function estimateContextInputBreakdown(context: Context): ContextInputBre
   }
 
   for (const message of context.messages) {
+    // Tool output is data, not a trusted context envelope. Skill bodies read
+    // through tools remain here; the skills bucket measures the catalog only.
+    if (message.role === 'toolResult' || message.role === 'assistant') {
+      breakdown.messages += estimateMessage(message);
+      continue;
+    }
     breakdown.messages += MESSAGE_OVERHEAD_TOKENS;
     if (typeof message.content === 'string') {
       estimatePromptCategories(message.content, breakdown, 'message');

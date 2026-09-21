@@ -252,6 +252,9 @@ function ContextUsagePopoverBody({
           ))}
         </ul>
       )}
+      {rows.length > 0 && (
+        <p className="text-[11px] leading-relaxed text-muted-foreground">{t('chat.contextEstimateNote')}</p>
+      )}
       {cacheLabel && (
         <div className="flex items-center justify-between gap-3 border-t border-border/50 pt-2 text-xs">
           <span className="text-muted-foreground">{t('chat.contextCacheHitRate')}</span>

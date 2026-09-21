@@ -152,7 +152,6 @@ describe('system prompt guidance', () => {
     const prompt = getSystemPrompt(undefined, undefined, '/tmp/workspace', '/tmp/workspace')
 
     expect(prompt).toContain("omit `model` to inherit this session's current model")
-    expect(prompt).toContain("Omitting `model` uses this session's current model")
     expect(prompt).not.toContain('Use Haiku for simple tasks')
     expect(prompt).not.toContain('single completion, no tools, cheap, parallel')
   })
@@ -162,7 +161,9 @@ describe('system prompt guidance', () => {
 
     expect(prompt).not.toContain('Task tool with subagents')
     expect(prompt).not.toContain('call_llm vs Task (subagents)')
-    expect(prompt).toContain('meets the spawn bar below')
+    expect(prompt).toContain("apply the session's Swarm policy")
+    expect(prompt).not.toContain('Spawn only if **one** of these is true')
+    expect(prompt).toContain('context isolation or a long task alone never grants permission')
     expect(prompt).toContain('Default: do the work yourself in this session')
     expect(prompt).toContain('Do not spawn "just in case"')
     expect(prompt).toContain('summarizing/classifying/extracting fields from existing text')
@@ -493,3 +494,24 @@ describe('formatProjectContextForPrompt', () => {
     expect(occurrences(block, '</project_assets>')).toBe(1)
   })
 })
+
+describe('lean context contracts', () => {
+  it('keeps a compact prompt with discoverable guides and no unconditional fan-out rule', async () => {
+    const { estimateTextTokensConservatively, estimateContextInputBreakdown } = await import('../../agent/backend/pi/context-budget.ts');
+    const prompt = getSystemPrompt('', undefined, '/evaluation/workspace', undefined, 'default', 'Selection Backend', false, undefined, false, false);
+    expect(estimateTextTokensConservatively(prompt)).toBeLessThan(8000);
+    for (const guide of ['browser-tools.md', 'data-tables.md', 'html-preview.md', 'pdf-preview.md', 'image-preview.md', 'markdown-preview.md', 'mermaid.md', 'llm-tool.md']) {
+      expect(prompt).toContain(`/docs/${guide}`);
+    }
+    expect(prompt).toContain('read it again if compaction removed necessary details');
+    expect(prompt).toContain('Calls are blocked until this prerequisite succeeds');
+    expect(prompt).toContain('20+ rows');
+    expect(prompt).not.toContain('Spawn only if **one** of these is true');
+    expect(prompt).not.toContain("it's 2026");
+    // Real system prose mentions these tags several times. Only the appended catalog counts.
+    const catalog = '<available_skills>\n- natural-writing: /skills/natural-writing/SKILL.md\n</available_skills>';
+    const stats = estimateContextInputBreakdown({ systemPrompt: prompt + '\n' + catalog, messages: [] });
+    expect(stats.skills).toBe(estimateTextTokensConservatively(catalog));
+    expect(stats.systemPrompt).toBeGreaterThan(6000);
+  });
+});

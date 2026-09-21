@@ -173,3 +173,33 @@ describe('provider overflow parsing and retry cap', () => {
     expect(calculateOverflowRetryMaxTokens(message, 10_000, 2_000)).toBeUndefined();
   });
 });
+
+describe('context envelope classification', () => {
+  it('ignores inline and fenced examples before the actual catalog', () => {
+    const catalog = '<available_skills>\n- officecli: /skills/officecli/SKILL.md\n</available_skills>';
+    for (const fence of ['```', '~~~~']) {
+      const examples = `Read \`<available_skills>\` when needed.\n${fence}xml\n<available_skills>\nexample\n</available_skills>\n${fence}\nSystem rules stay here.`;
+      const result = estimateContextInputBreakdown({ systemPrompt: examples + '\n' + catalog, messages: [] });
+      expect(result.skills).toBe(estimateTextTokensConservatively(catalog));
+      expect(result.systemPrompt).toBeGreaterThanOrEqual(estimateTextTokensConservatively(examples));
+      expect(estimateContextInputBreakdown({ systemPrompt: examples, messages: [] }).skills).toBeUndefined();
+    }
+  });
+
+  it('counts tags in tool output and assistant text as conversation content', () => {
+    const content = [{ type: 'text', text: '<available_skills>\nnot a catalog\n</available_skills>' }];
+    const result = estimateContextInputBreakdown({ messages: [
+      { role: 'toolResult', toolName: 'Read', toolCallId: 'read-1', content, isError: false, timestamp: 1 },
+      { role: 'assistant', content, timestamp: 2 },
+    ] } as Context);
+    expect(result.skills).toBeUndefined();
+    expect(result.messages).toBeGreaterThan(0);
+  });
+});
+
+it('leaves fenced preferences examples in the system bucket', () => {
+  const systemPrompt = '```md\n## User Preferences\nExample preference\n```\nNormal instructions';
+  const result = estimateContextInputBreakdown({ systemPrompt, messages: [] });
+  expect(result.rules).toBeUndefined();
+  expect(result.systemPrompt).toBe(estimateTextTokensConservatively(systemPrompt));
+});

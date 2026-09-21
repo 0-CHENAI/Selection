@@ -3,7 +3,8 @@
  *
  * Thin wrapper around the canonical tool definitions in @craft-agent/session-tools-core.
  * Session tools keep the `mcp__session__` namespace for MCP-style dispatch, plus
- * short-name aliases for names the system prompt uses without a prefix.
+ * legacy short-name aliases for exact-name execution of existing calls.
+ * Model requests advertise only the canonical name when both are registered.
  */
 
 import {
@@ -12,6 +13,7 @@ import {
   type JsonSchemaToolDef,
 } from '@craft-agent/session-tools-core';
 import { FEATURE_FLAGS } from '../../../feature-flags.ts';
+import { PI_SESSION_TOOL_SHORT_NAME_ALIASES } from './model-visible-tools.ts';
 
 export type SessionToolProxyDef = JsonSchemaToolDef;
 
@@ -19,18 +21,7 @@ export { SESSION_TOOL_NAMES };
 
 export const PI_SESSION_TOOL_PREFIX = 'mcp__session__';
 
-/**
- * Prompt-facing orchestration names. The system prompt tells the model to call
- * these without an MCP prefix; Pi's registry lookup is exact-name.
- * Do not alias browser_tool — pi-agent filters only the prefixed name.
- */
-export const PI_SESSION_TOOL_SHORT_NAME_ALIASES = [
-  'submit_answer',
-  'spawn_session',
-  'call_llm',
-  'run_task',
-  'submit_task_definition',
-] as const;
+export { PI_SESSION_TOOL_SHORT_NAME_ALIASES } from './model-visible-tools.ts';
 
 export function resolveSessionToolProxyName(toolName: string): string {
   if (toolName.startsWith(PI_SESSION_TOOL_PREFIX)) return toolName;

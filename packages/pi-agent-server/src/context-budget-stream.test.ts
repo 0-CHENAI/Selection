@@ -229,3 +229,61 @@ describe('request lifecycle bounds (#360)', () => {
     expect(result.stopReason).toBe('stop');
   });
 });
+
+describe('model-visible tool schemas', () => {
+  it('deduplicates the actual provider request on first call and overflow retry', async () => {
+    const tools = [
+      { name: 'mcp__session__call_llm', description: 'Delegate', parameters: { type: 'object' as const } },
+      { name: 'call_llm', description: 'Delegate', parameters: { type: 'object' as const } },
+      { name: 'Read', description: 'Read', parameters: { type: 'object' as const } },
+    ];
+    const original: Context = { systemPrompt: 'Instructions', messages: [], tools };
+    const requests: Context[] = [];
+    const stream = createContextBudgetedStream((_model, context) => {
+      requests.push(context);
+      const output = createAssistantMessageEventStream();
+      const result = requests.length === 1
+        ? message('error', 'context_length_exceeded')
+        : message('stop');
+      if (result.stopReason === 'error') output.push({ type: 'error', reason: 'error', error: result });
+      else output.push({ type: 'done', reason: 'stop', message: result });
+      output.end(result);
+      return output;
+    }, model, original);
+    await collect(stream);
+    expect(requests.length).toBe(2);
+    for (const request of requests) {
+      expect(request.tools?.map(tool => tool.name)).toEqual(['mcp__session__call_llm', 'Read']);
+      expect(request.messages).toBe(original.messages);
+      expect(request.tools?.[0]).toBe(tools[0]);
+    }
+    expect(original.tools).toHaveLength(3);
+  });
+});
+
+it('executes legacy aliases through the real Agent registry after hiding their schemas', async () => {
+  const { Agent } = await import('@earendil-works/pi-agent-core');
+  const { Type } = await import('@sinclair/typebox');
+  const executed: string[] = [];
+  const tools = ['mcp__session__call_llm', 'call_llm'].map(name => ({
+    name, label: name, description: 'Legacy execution test', parameters: Type.Object({}),
+    execute: async () => { executed.push(name); return { content: [{ type: 'text' as const, text: 'ok' }], details: {} }; },
+  }));
+  let requests = 0;
+  const agent = new Agent({
+    initialState: { model, tools, systemPrompt: 'Test' },
+    streamFn: (_model, context) => createContextBudgetedStream((_model, request) => {
+      expect(request.tools?.map(tool => tool.name)).toEqual(['mcp__session__call_llm']);
+      const output = createAssistantMessageEventStream();
+      const result = message(requests++ === 0 ? 'toolUse' : 'stop');
+      if (result.stopReason === 'toolUse') result.content = [{ type: 'toolCall', id: 'legacy-call', name: 'call_llm', arguments: {} }];
+      output.push({ type: 'done', reason: result.stopReason as 'toolUse' | 'stop', message: result });
+      output.end(result);
+      return output;
+    }, model, context),
+  });
+  await agent.prompt('Continue the legacy call');
+  expect(executed).toEqual(['call_llm']);
+  expect(agent.state.tools).toHaveLength(2);
+  expect(agent.state.messages.some(m => m.role === 'toolResult' && m.toolName === 'call_llm' && !m.isError)).toBe(true);
+});
