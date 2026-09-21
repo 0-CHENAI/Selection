@@ -41,7 +41,7 @@ import {
 } from './panel-constants'
 
 /** Spring transition matching AppShell's sidebar/navigator animation */
-const PANEL_SPRING = { type: 'spring' as const, stiffness: 600, damping: 49 }
+import { PANEL_SPRING } from '@craft-agent/ui'
 
 /** Visual breathing room between the fixed compact TopBar and the first panel. */
 const COMPACT_PANEL_TOP_GAP = 8

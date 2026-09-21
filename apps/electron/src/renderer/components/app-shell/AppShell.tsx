@@ -36,7 +36,7 @@ import { HeaderIconButton } from "@/components/ui/HeaderIconButton"
 import { CreationJobsHost } from "./CreationJobsButton"
 import type { CreationJob } from "@/atoms/creation-jobs"
 import { clearProjectFilter, resolveNewSessionParams, resolveProjectNavigationSessionId, type FilterMode } from "./inherited-filter-params"
-import { filterSessionsByProject, getIncludedProjectName, hasIncludedProjectFilter } from "./project-session-filter"
+import { filterSessionsBySidebarProjectScope, getIncludedProjectName, hasIncludedProjectFilter } from "./project-session-filter"
 import { Separator } from "@/components/ui/separator"
 import { Tooltip, TooltipTrigger, TooltipContent } from "@craft-agent/ui"
 import { ScrollArea } from "@/components/ui/scroll-area"
@@ -1167,9 +1167,7 @@ function AppShellContent({
         result = activeSessionMetas
     }
 
-    if (projectFilter.size > 0) {
-      result = filterSessionsByProject(result, projectFilter)
-    }
+    result = filterSessionsBySidebarProjectScope(result, projectFilter)
 
     return result
   }, [workspaceSessionMetas, activeSessionMetas, sessionFilter, projectFilter])
@@ -1914,7 +1912,7 @@ function AppShellContent({
                     {
                       id: "nav:allSessions",
                       title: t("sidebar.allSessions"),
-                      label: String(workspaceSessionMetas.length),
+                      label: String(workspaceSessionMetas.filter(session => !session.projectId).length),
                       icon: Inbox,
                       // Project children reuse the allSessions route, so an
                       // included project owns the active state instead of the
@@ -2280,7 +2278,7 @@ function AppShellContent({
                 {/* Key on sidebarMode forces full remount when switching views, skipping animations */}
                 <SessionList
                   key={sessionFilter?.kind}
-                  items={searchActive ? workspaceSessionMetas : filteredSessionMetas}
+                  items={searchActive ? filterSessionsBySidebarProjectScope(workspaceSessionMetas, projectFilter) : filteredSessionMetas}
                   onDelete={handleDeleteSession}
                   onFlag={onFlagSession}
                   onUnflag={onUnflagSession}

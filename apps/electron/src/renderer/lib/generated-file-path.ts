@@ -190,7 +190,8 @@ function pickFromHits(
   const named = requestedName
     ? files.filter((m) => m.name === requestedName || m.name.toLowerCase() === requestedName.toLowerCase())
     : files
-  const pool = named.length > 0 ? named : files
+  const pool = named
+  if (pool.length === 0) return null
 
   const suffixes = [normalizeGeneratedFilePath(requestedPath), ...candidates]
 
@@ -239,6 +240,7 @@ async function probeCandidate(
  * Prefers a candidate that searchFiles can see; last resorts search the
  * workspace (and its ASCII ancestor) so a doubled Chinese folder name
  * or a failed parent-dir probe still opens the real file.
+ * Reject missing/ambiguous targets; never send an unverified fallback to preview.
  */
 export async function resolveOpenableGeneratedFile(opts: {
   requestedPath: string
@@ -277,7 +279,7 @@ export async function resolveOpenableGeneratedFile(opts: {
     }
   }
 
-  return { path: candidates[0] ?? opts.requestedPath }
+  throw new Error('File not found: ' + opts.requestedPath)
 }
 
 export function pathsLikelySame(a: string, b: string): boolean {

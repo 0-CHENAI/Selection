@@ -41,3 +41,13 @@ export function filterSessionsByProject<T extends { projectId?: string }>(
     return projectId === undefined || !excludes.has(projectId)
   })
 }
+
+/** Ordinary conversations are the unassigned scope, parallel to named projects. */
+export function filterSessionsBySidebarProjectScope<T extends { projectId?: string }>(
+  sessions: T[],
+  projectFilter: Map<string, FilterMode>,
+): T[] {
+  return hasIncludedProjectFilter(projectFilter)
+    ? filterSessionsByProject(sessions, projectFilter)
+    : sessions.filter(session => !session.projectId)
+}
