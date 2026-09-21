@@ -154,16 +154,19 @@ export function MarkdownHtmlBlock({ code, className }: MarkdownHtmlBlockProps) {
 
   return (
     <HtmlBlockErrorBoundary fallback={fallback}>
-      <div className={cn('relative group rounded-[8px] overflow-hidden border bg-muted/10', className)}>
+      <div className={cn('relative group my-4 rounded-xl overflow-hidden border border-foreground/15 bg-background shadow-minimal', className)}>
         {/* Header */}
         <div className="px-3 py-2 bg-muted/50 border-b flex items-center gap-2">
           <Globe className="w-3.5 h-3.5 text-muted-foreground/50" />
-          <span className="text-[12px] text-muted-foreground font-medium flex-1">
-            {spec.title || t('preview.htmlPreview')}
+          <span title={activeItem?.src} className="min-w-0 truncate text-[12px] text-foreground font-medium flex-1">
+            {activeItem?.src.split(/[\\/]/).pop() || spec.title || t('preview.htmlPreview')}
           </span>
+          <span className="text-xs text-muted-foreground">HTML</span>
           <div className="flex items-center gap-1">
             <ItemNavigator items={items} activeIndex={selectedIndex} onSelect={setActiveIndex} />
             <button
+              type="button"
+              aria-label={t('common.viewFullscreen')}
               onClick={() => setIsFullscreen(true)}
               className={cn(
                 "p-1 rounded-[6px] transition-all select-none",
@@ -208,6 +211,7 @@ export function MarkdownHtmlBlock({ code, className }: MarkdownHtmlBlockProps) {
 
       {/* Fullscreen overlay — passes items for multi-item navigation */}
       <HTMLPreviewOverlay
+        readingMode
         isOpen={isFullscreen}
         onClose={() => setIsFullscreen(false)}
         items={items}

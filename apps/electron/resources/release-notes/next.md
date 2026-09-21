@@ -6,6 +6,8 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 
 ## Improvements
 
+- **Document previews** — HTML and Markdown inline cards show file identity and clear boundaries; full content opens in a scrollable preview dialog without expanding the conversation. Keyboard focus returns to the opener after closing. Fixes #409.
+
 - **Interactive tables by default** — Tabular answers and comparisons prefer the built-in datatable renderer, including small datasets. Spreadsheet export and explicitly requested Markdown output remain available.
 
 - **Stable reference sources** — Numbered, emphasized, bare-URL and reference-style citations no longer flash in streaming replies. Known sources reserve their footer space so completion does not resize the answer card.
