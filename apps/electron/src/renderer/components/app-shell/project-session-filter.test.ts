@@ -71,3 +71,12 @@ describe('filterSessionsByProject (#149)', () => {
     expect(matchingIds(m())).toEqual(['in-project-1', 'in-project-2', 'unbound'])
   })
 })
+
+import { filterSessionsBySidebarProjectScope } from './project-session-filter'
+
+it('ordinary scope excludes all project conversations, including in search', () => {
+  const sessions = [{id:'ordinary'}, {id:'project-a',projectId:'a'}, {id:'project-b',projectId:'b'}]
+  expect(filterSessionsBySidebarProjectScope(sessions,new Map())).toEqual([{id:'ordinary'}])
+  expect(filterSessionsBySidebarProjectScope(sessions,new Map([['a','include']]))).toEqual([{id:'project-a',projectId:'a'}])
+  expect(filterSessionsBySidebarProjectScope(sessions,new Map([['a','exclude']]))).toEqual([{id:'ordinary'}])
+})

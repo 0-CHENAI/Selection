@@ -1,3 +1,5 @@
+import { PanelResizeHandle } from '@/components/app-shell/PanelResizeHandle'
+import { ResponseSourcesLayout } from '@craft-agent/ui/chat'
 /**
  * ChatPage
  *
@@ -8,7 +10,7 @@
 import * as React from 'react'
 import { useTranslation } from 'react-i18next'
 import { useAtomValue, useSetAtom } from 'jotai'
-import { AlertCircle, FolderOpen } from 'lucide-react'
+import { AlertCircle, FolderOpen, X } from 'lucide-react'
 import { ChatDisplay, type ChatDisplayHandle } from '@/components/app-shell/ChatDisplay'
 import { OrchestrationRunProgress } from '@/components/app-shell/kanban/OrchestrationRunProgress'
 import { canPreviewOrchestrationChild } from '@/components/app-shell/kanban/orchestration-run-progress'
@@ -44,6 +46,10 @@ import { defaultSessionOptions } from '@/hooks/useSessionOptions'
 import { getSessionTitle } from '@/utils/session'
 // Model resolution: connection.defaultModel (no hardcoded defaults)
 import { resolveEffectiveConnectionSlug, isSessionConnectionUnavailable } from '@config/llm-connections'
+
+function SourcesResizeHandle(props: React.HTMLAttributes<HTMLDivElement>) {
+  return <PanelResizeHandle {...props} standalone />
+}
 
 export interface ChatPageProps {
   sessionId: string | null
@@ -486,15 +492,19 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
         sessionFolderPath: session?.sessionFolderPath,
         workspaceRootPath: activeWorkspace?.rootPath,
       })
-      const pick = await resolveOpenableGeneratedFile({
-        requestedPath: path,
-        baseDir,
-        searchFiles: (dir, query) => window.electronAPI.searchFiles(dir, query),
-      })
-      if (pick.closestMatchRelativePath) {
-        toast.info(t('chat.openedClosestMatch', { path: pick.closestMatchRelativePath }))
+      try {
+        const pick = await resolveOpenableGeneratedFile({
+          requestedPath: path,
+          baseDir,
+          searchFiles: (dir, query) => window.electronAPI.searchFiles(dir, query),
+        })
+        if (pick.closestMatchRelativePath) {
+          toast.info(t('chat.openedClosestMatch', { path: pick.closestMatchRelativePath }))
+        }
+        onOpenFile(pick.path)
+      } catch (error) {
+        toast.error(t('toast.failedToOpenFile'), { description: error instanceof Error ? error.message : String(error) })
       }
-      onOpenFile(pick.path)
     },
     [onOpenFile, workingDirectory, session?.sessionFolderPath, activeWorkspace?.rootPath, t]
   )
@@ -887,7 +897,8 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
   }
 
   return (
-    <>
+    <ResponseSourcesLayout resizeHandle={SourcesResizeHandle} key={sessionId ?? 'draft'} messages={(displaySession ?? draftSession).messages} onOpenUrl={handleOpenUrl}
+      renderHeader={(title, onClose) => <PanelHeader title={title} leadingAction={<></>} compensateForStoplight={false} rightSidebarButton={<PanelHeaderCenterButton icon={<X className="size-4" />} onClick={onClose} tooltip={t('common.close')} />} />}>
       <div className="h-full flex flex-col">
         <PanelHeader title={displayTitle} titleMenu={titleMenu} compactTitleMenu={compactTitleMenu} leadingAction={leadingAction} actions={headerActions} rightSidebarButton={rightSidebarButton} isRegeneratingTitle={isAsyncOperationOngoing} />
         <div className="flex-1 flex flex-col min-h-0">
@@ -951,7 +962,7 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
         placeholder={t('chat.enterSessionName')}
       />
       {childPreviewDialog}
-    </>
+    </ResponseSourcesLayout>
   )
 })
 

@@ -1,4 +1,7 @@
 #!/usr/bin/env node
+import { compactionSettings, installCompactionPolicy } from './compaction-policy.ts';
+import { installUnknownToolGuard } from './unknown-tool-guard.ts';
+import { runManualCompaction } from './manual-compaction.ts';
 import { waitForCompaction } from './wait-for-compaction.ts';
 import { snapshotContextBreakdown } from './context-breakdown.ts';
 /**
@@ -92,7 +95,7 @@ import { buildCallLlmRequest, withTimeout, LLM_QUERY_TIMEOUT_MS } from '../../sh
 import type { LLMQueryRequest, LLMQueryResult } from '../../shared/src/agent/llm-tool.ts';
 import { PI_TOOL_NAME_MAP, THINKING_TO_PI } from '../../shared/src/agent/backend/pi/constants.ts';
 import { resolveSessionToolProxyName } from '../../shared/src/agent/backend/pi/session-tool-defs.ts';
-import { getDefaultSummarizationModel, swarmCompactionReserveTokens } from '../../shared/src/config/models.ts';
+import { getDefaultSummarizationModel } from '../../shared/src/config/models.ts';
 import { createWebFetchTool } from './tools/web-fetch.ts';
 import { resolveSearchProvider } from './tools/search/resolve-provider.ts';
 import { createSearchTool } from './tools/search/create-search-tool.ts';
@@ -336,23 +339,17 @@ let unsubscribeEvents: (() => void) | null = null;
 // Init config (set on 'init' message)
 let initConfig: Extract<InboundMessage, { type: 'init' }> | null = null;
 
-function applySwarmCompactionOverride(model: { contextWindow?: number } | undefined): void {
-  if ((!initConfig?.swarmEnabled && initConfig?.swarmAgentTokenBudget === undefined) || !piSettingsManager) return;
+function applyCompactionPolicy(model: { contextWindow?: number } | undefined): void {
+  if (!piSettingsManager) return;
   const contextWindow = model?.contextWindow ?? 0;
-  const reserveTokens = swarmCompactionReserveTokens(
-    contextWindow,
-    initConfig.swarmAgentTokenBudget,
-  );
-  if (reserveTokens <= 0) return;
+  const settings = compactionSettings(contextWindow, initConfig?.swarmAgentTokenBudget);
+  if (!settings) return;
   piSettingsManager.applyOverrides({
-    compaction: {
-      enabled: true,
-      reserveTokens,
-    },
+    compaction: settings,
   });
-  const triggerTokens = contextWindow - reserveTokens;
+  const triggerTokens = contextWindow - settings.reserveTokens + 1;
   debugLog(
-    `Swarm auto-compaction threshold configured at ${triggerTokens} tokens (${reserveTokens} reserved of ${contextWindow})`,
+    `Auto-compaction threshold configured at ${triggerTokens} tokens (80% policy, ${settings.keepRecentTokens} recent tokens retained)`,
   );
 }
 
@@ -835,10 +832,16 @@ async function ensureSession(): Promise<AgentSession> {
     sessionOptions.thinkingLevel = piThinkingLevel;
   }
 
-  applySwarmCompactionOverride(sessionOptions.model);
+  piSettingsManager ??= PiSettingsManager.inMemory();
+  sessionOptions.settingsManager = piSettingsManager;
+  piSettingsManager.setCompactionEnabled(true);
+  applyCompactionPolicy(sessionOptions.model);
 
   // Create the session — tools flow through customTools + allowlist (see comment above).
   const { session } = await createAgentSession(sessionOptions);
+  installUnknownToolGuard(session);
+  installCompactionPolicy(session);
+  applyCompactionPolicy(session.model);
   piSession = session;
 
   toolsChanged = false;
@@ -1594,6 +1597,14 @@ function handleSessionEvent(event: AgentSessionEvent): void {
     return;
   }
 
+  if (event.type === 'compaction_start') {
+    debugLog('[compaction] started');
+  } else if (event.type === 'compaction_end') {
+    debugLog(event.result
+      ? `[compaction] succeeded: before=${event.result.tokensBefore}, after=${event.result.estimatedTokensAfter ?? 'unknown'}`
+      : `[compaction] ${event.aborted ? 'cancelled' : 'failed'}: ${event.errorMessage ?? 'no result'}`);
+  }
+
   if (event.type === 'message_end' || event.type === 'compaction_end') {
     const contextBreakdown = snapshotContextBreakdown(piSession);
     if (contextBreakdown) {
@@ -1879,10 +1890,9 @@ async function handleCompact(msg: Extract<InboundMessage, { type: 'compact' }>):
     // session.compact() calls agent.abort() and uses its own controller; if
     // it runs while _runAutoCompaction is suspended, agent state churns and
     // the SDK's race surface widens. Wait for the auto-compaction to drain
-    // before starting a manual one. waitForCompaction has its own timeout
-    // fallback so we don't deadlock on a stuck subprocess.
-    await waitForCompaction(session);
-    const result = await session.compact(msg.customInstructions);
+    // before starting a manual one. Reserve the request before the SDK awaits
+    // abort(), and fail on timeout rather than overlap another compaction.
+    const result = await runManualCompaction(session, msg.customInstructions);
     send({
       type: 'compact_result',
       id: msg.id,
@@ -1977,7 +1987,7 @@ async function handleUpdateRuntimeConfig(msg: RuntimeConfigUpdateMessage): Promi
       }
 
       await piSession.setModel(piModel);
-      applySwarmCompactionOverride(piModel);
+      applyCompactionPolicy(piModel);
       setInterceptorApiHints(piModel as { api?: string; provider?: string; baseUrl?: string });
       debugLog(`[runtime_config] Updated runtime config and active model: ${piModel.provider}/${piModel.id}`);
     } else {
@@ -2017,7 +2027,7 @@ async function handleSetModel(msg: Extract<InboundMessage, { type: 'set_model' }
   }
   try {
     await piSession.setModel(piModel);
-    applySwarmCompactionOverride(piModel);
+    applyCompactionPolicy(piModel);
     setInterceptorApiHints(piModel as { api?: string; provider?: string; baseUrl?: string });
     if (initConfig) initConfig.model = msg.model;
     debugLog(`[set_model] Model changed to: ${msg.model} (resolved: ${piModel.provider}/${piModel.id})`);

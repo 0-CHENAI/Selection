@@ -26,3 +26,5 @@ export { FileTypeIcon, getFileTypeLabel, type FileTypeIconProps } from './attach
 
 // Accept plan dropdown (for plan cards)
 export { AcceptPlanDropdown } from './AcceptPlanDropdown'
+
+export { ResponseSourcesLayout } from './ResponseSourcesLayout'

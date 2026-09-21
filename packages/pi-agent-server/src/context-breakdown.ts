@@ -1,3 +1,4 @@
+import { modelVisibleTools } from '../../shared/src/agent/backend/pi/model-visible-tools.ts';
 import type { AgentSession } from '@earendil-works/pi-coding-agent';
 import type { Context } from '@earendil-works/pi-ai';
 import {
@@ -15,7 +16,7 @@ function asContext(session: AgentSession): Context | undefined {
   if (!state.systemPrompt && !state.tools?.length && !state.messages?.length) return undefined;
   return {
     systemPrompt: state.systemPrompt,
-    tools: state.tools,
+    tools: state.tools ? modelVisibleTools(state.tools) : undefined,
     messages: state.messages ?? [],
   };
 }

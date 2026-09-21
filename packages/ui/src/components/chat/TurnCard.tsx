@@ -1,8 +1,13 @@
+import { collectTurnResearchSources, sourceUrlKey } from './source-metadata'
+import { ResponseSources } from './ResponseSources'
+import { extractResponseSources } from './response-sources'
 import * as React from 'react'
 import { useMemo, useEffect, useRef, useCallback, useState } from 'react'
 import i18n from 'i18next'
 import { isSubmitAnswerTool, localizedToolLabel } from './tool-labels'
 import { usePacedSource } from './usePacedSource'
+import { ResponseArtifacts } from './ResponseArtifacts'
+import { extractResponseArtifacts } from './response-artifacts'
 import { ResponseBodyGrowth } from './ResponseBodyGrowth'
 import { useCompletionActions } from './useCompletionActions'
 import { useTranslation } from 'react-i18next'
@@ -1523,6 +1528,7 @@ function ActivityGroupRow({ group, expandedGroups: externalExpandedGroups, onExp
 // ============================================================================
 
 export interface ResponseCardProps {
+  researchActivities?: ActivityItem[]
   isAnswerPreview?: boolean
   /** The content to display (markdown) */
   text: string
@@ -1819,7 +1825,9 @@ function applyTextHighlightRange(
  * Presentation updates are frame-paced; copy/export retain the authoritative source.
  */
 export function ResponseCard({
+  researchActivities,
   text,
+  isAnswerPreview = false,
   completedRevealStartTime,
   isStreaming,
   isTurnComplete,
@@ -1853,7 +1861,28 @@ export function ResponseCard({
     () => parseSkillUsedMarkers(text, isStreaming),
     [text, isStreaming],
   )
-  const responseText = parsedSkillUsage.content
+  const canCollectSources = variant === 'response' && !isCommentary && !isAnswerPreview
+  const showArtifacts = canCollectSources
+    && !isStreaming && (isTurnComplete ?? true)
+  const turnSources = useMemo(() => collectTurnResearchSources(researchActivities ?? []), [researchActivities])
+  const sourceEvidence = useMemo(() => new Set(turnSources.map(source => sourceUrlKey(source.url))), [turnSources])
+  const sourceSummary = useMemo(
+    () => canCollectSources ? extractResponseSources(parsedSkillUsage.content, sourceEvidence, isStreaming) : { content: parsedSkillUsage.content, sources: [] },
+    [canCollectSources, parsedSkillUsage.content, sourceEvidence, isStreaming],
+  )
+  const displayedSources = useMemo(() => {
+    const merged = new Map(turnSources.map(source => [sourceUrlKey(source.url), source]))
+    for (const source of sourceSummary.sources) {
+      const key = sourceUrlKey(source.url)
+      merged.set(key, { ...merged.get(key), ...source })
+    }
+    return [...merged.values()]
+  }, [turnSources, sourceSummary.sources])
+  const responseText = sourceSummary.content
+  const artifacts = useMemo(
+    () => showArtifacts ? extractResponseArtifacts(responseText) : [],
+    [showArtifacts, responseText],
+  )
   const paced = usePacedSource(responseText, isStreaming, completedRevealStartTime, revealIdentity ?? messageId)
   const presentationStreaming = isStreaming || paced.revealing
   // Copy to clipboard state
@@ -1944,13 +1973,13 @@ export function ResponseCard({
   const handleCopy = useCallback(async () => {
     try {
       // Copy plain text — not markdown source (user expects what they see)
-      await navigator.clipboard.writeText(markdownToPlainText(responseText))
+      await navigator.clipboard.writeText(markdownToPlainText(parsedSkillUsage.content))
       setCopied(true)
       setTimeout(() => setCopied(false), 2000)
     } catch (err) {
       console.error('Failed to copy:', err)
     }
-  }, [responseText])
+  }, [parsedSkillUsage.content])
 
   const renderedAnnotations = useMemo(() => {
     const persisted = annotations ?? []
@@ -2652,6 +2681,17 @@ export function ResponseCard({
 
           </ResponseBodyGrowth>
 
+          {showArtifacts && !presentationStreaming && (
+            <ResponseArtifacts key={messageId ?? revealIdentity} artifacts={artifacts} onOpenFile={onOpenFile} />
+          )}
+
+          {/* Reserve known research sources while text streams. Completion only
+              reveals the shelf, rather than growing the card under sticky scroll. */}
+          {canCollectSources && (
+            <ResponseSources key={`sources-${messageId ?? revealIdentity}`} sources={displayedSources}
+              pending={!showArtifacts || presentationStreaming} />
+          )}
+
           {/* Desktop footer with actions (Copy / Markdown / Accept Plan / Branch).
               Compact mode falls through to the slim Accept-Plan-only footer below.
               Streaming reserves the same row so completion only reveals actions. */}
@@ -2782,7 +2822,7 @@ export function ResponseCard({
 
         {/* Fullscreen overlay for reading/annotating response and plan content. */}
         <DocumentFormattedMarkdownOverlay
-          content={responseText}
+          content={parsedSkillUsage.content}
           isOpen={isFullscreen}
           onClose={() => setIsFullscreen(false)}
           variant={isPlan ? 'plan' : undefined}
@@ -3355,6 +3395,7 @@ export const TurnCard = React.memo(function TurnCard({
             >
               <ResponseCard
                 text={response.text}
+                researchActivities={activities}
                 isStreaming={response.isStreaming}
                 isAnswerPreview={response.isAnswerPreview}
                 isTurnComplete={isComplete}
@@ -3404,6 +3445,7 @@ export const TurnCard = React.memo(function TurnCard({
           <div className={cn((showWorkChrome || planActivities.length > 0) && "pt-3")}>
           <ResponseCard
             text={response.text}
+            researchActivities={activities}
             isStreaming={response.isStreaming}
                 isAnswerPreview={response.isAnswerPreview}
             isTurnComplete={isComplete}

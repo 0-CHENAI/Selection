@@ -1,3 +1,4 @@
+import { modelVisibleTools } from '../../shared/src/agent/backend/pi/model-visible-tools.ts';
 import { boundedModelStream, MODEL_REQUEST_TIMEOUT_MS } from './bounded-model-stream.ts';
 import { createRequestDiagnosticScope, runWithRequestDiagnostics, requestDiagnosticDetails } from '../../shared/src/request-diagnostics.ts';
 import {
@@ -97,6 +98,8 @@ export function createContextBudgetedStream(
   options?: ModelsSimpleStreamOptions,
   debug?: DebugLogger,
 ): AssistantMessageEventStream {
+  // Keep Agent.state.tools intact: old short-name tool calls must still execute.
+  context = { ...context, tools: context.tools ? modelVisibleTools(context.tools) : undefined };
   const diagnosticScope = createRequestDiagnosticScope();
   const withDiagnostic = (message: AssistantMessage): AssistantMessage & { craftTransportDiagnostics: string[] } => ({
     ...message, craftTransportDiagnostics: requestDiagnosticDetails(diagnosticScope),

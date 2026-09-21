@@ -44,3 +44,12 @@ describe('snapshotContextBreakdown', () => {
     expect(snapshotContextBreakdown(session)).toBeUndefined();
   });
 });
+
+it('counts only model-visible schemas while leaving runtime aliases registered', () => {
+  const canonical = { name: 'mcp__session__call_llm', description: 'Delegate', parameters: { type: 'object' } };
+  const state = { systemPrompt: 'System', tools: [canonical, { ...canonical, name: 'call_llm' }], messages: [] };
+  const session = { agent: { state } } as unknown as AgentSession;
+  const stats = snapshotContextBreakdown(session);
+  expect(stats).toEqual(snapshotContextBreakdown({ agent: { state: { ...state, tools: [canonical] } } } as unknown as AgentSession));
+  expect(state.tools).toHaveLength(2);
+});

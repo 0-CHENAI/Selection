@@ -367,7 +367,7 @@ export class PiAgent extends BaseAgent {
     displayName?: string;
     capturedAt: number;
   }> = new Map();
-  private readToolInputsByCallId = new Map<string, Record<string, unknown>>();
+  private readToolInputsByCallId = new Map<string, { toolName: 'Read' | 'Bash'; input: Record<string, unknown> }>();
   private pendingSourceGuidePreparations = new Map<string, {
     sourceSlug: string;
     filePath: string;
@@ -1375,18 +1375,22 @@ export class PiAgent extends BaseAgent {
     // The event adapter expects typed PiAgentEvent/AgentSessionEvent objects,
     // but since we're receiving plain JSON, we cast through unknown.
     for (const agentEvent of this.adapter.adaptEvent(adaptedEvent as any)) {
-      // Track Read tool calls for prerequisite checking
-      if (agentEvent.type === 'tool_start' && agentEvent.toolName === 'Read') {
+      // A read attempt is not evidence that the instructions reached the model.
+      if (agentEvent.type === 'tool_start' && (agentEvent.toolName === 'Read' || agentEvent.toolName === 'Bash')) {
         const readInput = agentEvent.input as Record<string, unknown>;
-        this.prerequisiteManager.trackReadTool(readInput);
-        this.readToolInputsByCallId.set(agentEvent.toolUseId, readInput);
+        this.readToolInputsByCallId.set(agentEvent.toolUseId, { toolName: agentEvent.toolName, input: readInput });
       }
       if (agentEvent.type === 'tool_result') {
-        const readInput = this.readToolInputsByCallId.get(agentEvent.toolUseId);
-        if (readInput) {
+        const readCall = this.readToolInputsByCallId.get(agentEvent.toolUseId);
+        if (readCall) {
           this.readToolInputsByCallId.delete(agentEvent.toolUseId);
           if (!agentEvent.isError) {
-            this.prerequisiteManager.trackSuccessfulSourceGuideRead(readInput);
+            if (readCall.toolName === 'Read') {
+              this.prerequisiteManager.trackReadTool(readCall.input);
+              this.prerequisiteManager.trackSuccessfulSourceGuideRead(readCall.input);
+            } else {
+              this.prerequisiteManager.trackSuccessfulBashSkillRead(readCall.input);
+            }
           }
         }
       }

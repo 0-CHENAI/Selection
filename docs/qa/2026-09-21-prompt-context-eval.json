@@ -1,0 +1,753 @@
+{
+  "measurement": {
+    "baseline": "0ad04d4a",
+    "system": {
+      "before": 11295,
+      "after": 7466
+    },
+    "toolFactory": {
+      "before": 12834,
+      "after": 10198
+    }
+  },
+  "scope": "30 synthetic policy-comprehension questions, batched per request; three repetitions per prompt/model. Not end-to-end agent execution or document quality.",
+  "runs": [
+    {
+      "model": "Laufry",
+      "repetition": 0,
+      "variant": "baseline",
+      "passed": 30,
+      "exactFormat": true,
+      "failures": [],
+      "answers": [
+        "A",
+        "B",
+        "B",
+        "A",
+        "A",
+        "B",
+        "B",
+        "A",
+        "A",
+        "B",
+        "B",
+        "B",
+        "A",
+        "A",
+        "B",
+        "B",
+        "A",
+        "A",
+        "B",
+        "B",
+        "A",
+        "A",
+        "A",
+        "B",
+        "B",
+        "A",
+        "A",
+        "B",
+        "B",
+        "A"
+      ],
+      "rawText": "\n\n[\n  \"A\",\n  \"B\",\n  \"B\",\n  \"A\",\n  \"A\",\n  \"B\",\n  \"B\",\n  \"A\",\n  \"A\",\n  \"B\",\n  \"B\",\n  \"B\",\n  \"A\",\n  \"A\",\n  \"B\",\n  \"B\",\n  \"A\",\n  \"A\",\n  \"B\",\n  \"B\",\n  \"A\",\n  \"A\",\n  \"A\",\n  \"B\",\n  \"B\",\n  \"A\",\n  \"A\",\n  \"B\",\n  \"B\",\n  \"A\"\n]",
+      "latencyMs": 8633,
+      "usage": {
+        "prompt_tokens": 12074,
+        "total_tokens": 13785,
+        "completion_tokens": 1711,
+        "prompt_tokens_details": {
+          "cached_tokens": 10880
+        },
+        "reasoning_tokens": 1556
+      }
+    },
+    {
+      "model": "Laufry",
+      "repetition": 0,
+      "variant": "optimized",
+      "passed": 30,
+      "exactFormat": true,
+      "failures": [],
+      "answers": [
+        "A",
+        "B",
+        "B",
+        "A",
+        "A",
+        "B",
+        "B",
+        "A",
+        "A",
+        "B",
+        "B",
+        "B",
+        "A",
+        "A",
+        "B",
+        "B",
+        "A",
+        "A",
+        "B",
+        "B",
+        "A",
+        "A",
+        "A",
+        "B",
+        "B",
+        "A",
+        "A",
+        "B",
+        "B",
+        "A"
+      ],
+      "rawText": "\n\n[\n  \"A\",\n  \"B\",\n  \"B\",\n  \"A\",\n  \"A\",\n  \"B\",\n  \"B\",\n  \"A\",\n  \"A\",\n  \"B\",\n  \"B\",\n  \"B\",\n  \"A\",\n  \"A\",\n  \"B\",\n  \"B\",\n  \"A\",\n  \"A\",\n  \"B\",\n  \"B\",\n  \"A\",\n  \"A\",\n  \"A\",\n  \"B\",\n  \"B\",\n  \"A\",\n  \"A\",\n  \"B\",\n  \"B\",\n  \"A\"\n]",
+      "latencyMs": 5219,
+      "usage": {
+        "prompt_tokens": 7906,
+        "total_tokens": 8912,
+        "completion_tokens": 1006,
+        "prompt_tokens_details": null,
+        "reasoning_tokens": 851
+      }
+    },
+    {
+      "model": "Laufry",
+      "repetition": 1,
+      "variant": "baseline",
+      "passed": 30,
+      "exactFormat": false,
+      "failures": [],
+      "answers": [
+        "B",
+        "A",
+        "A",
+        "A",
+        "B",
+        "B",
+        "A",
+        "A",
+        "B",
+        "B",
+        "A",
+        "A",
+        "A",
+        "B",
+        "B",
+        "A",
+        "A",
+        "B",
+        "B",
+        "A",
+        "A",
+        "B",
+        "B",
+        "B",
+        "A",
+        "A",
+        "B",
+        "B",
+        "A",
+        "A"
+      ],
+      "rawText": "\n\n```json\n[\"B\",\"A\",\"A\",\"A\",\"B\",\"B\",\"A\",\"A\",\"B\",\"B\",\"A\",\"A\",\"A\",\"B\",\"B\",\"A\",\"A\",\"B\",\"B\",\"A\",\"A\",\"B\",\"B\",\"B\",\"A\",\"A\",\"B\",\"B\",\"A\",\"A\"]\n```",
+      "latencyMs": 9406,
+      "usage": {
+        "prompt_tokens": 12074,
+        "total_tokens": 14168,
+        "completion_tokens": 2094,
+        "prompt_tokens_details": {
+          "cached_tokens": 10880
+        },
+        "reasoning_tokens": 2026
+      }
+    },
+    {
+      "model": "Laufry",
+      "repetition": 1,
+      "variant": "optimized",
+      "passed": 30,
+      "exactFormat": true,
+      "failures": [],
+      "answers": [
+        "B",
+        "A",
+        "A",
+        "A",
+        "B",
+        "B",
+        "A",
+        "A",
+        "B",
+        "B",
+        "A",
+        "A",
+        "A",
+        "B",
+        "B",
+        "A",
+        "A",
+        "B",
+        "B",
+        "A",
+        "A",
+        "B",
+        "B",
+        "B",
+        "A",
+        "A",
+        "B",
+        "B",
+        "A",
+        "A"
+      ],
+      "rawText": "\n\n[\"B\",\"A\",\"A\",\"A\",\"B\",\"B\",\"A\",\"A\",\"B\",\"B\",\"A\",\"A\",\"A\",\"B\",\"B\",\"A\",\"A\",\"B\",\"B\",\"A\",\"A\",\"B\",\"B\",\"B\",\"A\",\"A\",\"B\",\"B\",\"A\",\"A\"]",
+      "latencyMs": 4918,
+      "usage": {
+        "prompt_tokens": 7906,
+        "total_tokens": 8772,
+        "completion_tokens": 866,
+        "prompt_tokens_details": {
+          "cached_tokens": 2368
+        },
+        "reasoning_tokens": 803
+      }
+    },
+    {
+      "model": "Laufry",
+      "repetition": 2,
+      "variant": "baseline",
+      "passed": 30,
+      "exactFormat": false,
+      "failures": [],
+      "answers": [
+        "A",
+        "A",
+        "B",
+        "B",
+        "B",
+        "A",
+        "A",
+        "B",
+        "B",
+        "A",
+        "A",
+        "B",
+        "B",
+        "A",
+        "A",
+        "A",
+        "B",
+        "B",
+        "A",
+        "A",
+        "B",
+        "B",
+        "A",
+        "A",
+        "A",
+        "B",
+        "B",
+        "A",
+        "A",
+        "B"
+      ],
+      "rawText": "\n\n```json\n[\"A\",\"A\",\"B\",\"B\",\"B\",\"A\",\"A\",\"B\",\"B\",\"A\",\"A\",\"B\",\"B\",\"A\",\"A\",\"A\",\"B\",\"B\",\"A\",\"A\",\"B\",\"B\",\"A\",\"A\",\"A\",\"B\",\"B\",\"A\",\"A\",\"B\"]\n```",
+      "latencyMs": 9365,
+      "usage": {
+        "prompt_tokens": 12074,
+        "total_tokens": 14211,
+        "completion_tokens": 2137,
+        "prompt_tokens_details": {
+          "cached_tokens": 10880
+        },
+        "reasoning_tokens": 2069
+      }
+    },
+    {
+      "model": "Laufry",
+      "repetition": 2,
+      "variant": "optimized",
+      "passed": 30,
+      "exactFormat": false,
+      "failures": [],
+      "answers": [
+        {
+          "id": "swarm-off",
+          "choice": "A"
+        },
+        {
+          "id": "swarm-long",
+          "choice": "A"
+        },
+        {
+          "id": "swarm-simple",
+          "choice": "B"
+        },
+        {
+          "id": "swarm-contract",
+          "choice": "B"
+        },
+        {
+          "id": "swarm-timeout",
+          "choice": "B"
+        },
+        {
+          "id": "swarm-archive",
+          "choice": "A"
+        },
+        {
+          "id": "preview-tool",
+          "choice": "A"
+        },
+        {
+          "id": "preview-inspect",
+          "choice": "B"
+        },
+        {
+          "id": "preview-path",
+          "choice": "B"
+        },
+        {
+          "id": "preview-tabs",
+          "choice": "A"
+        },
+        {
+          "id": "preview-markdown",
+          "choice": "A"
+        },
+        {
+          "id": "unknown-tool",
+          "choice": "B"
+        },
+        {
+          "id": "office-router",
+          "choice": "B"
+        },
+        {
+          "id": "office-convert",
+          "choice": "A"
+        },
+        {
+          "id": "scratch",
+          "choice": "A"
+        },
+        {
+          "id": "deliverable",
+          "choice": "A"
+        },
+        {
+          "id": "safe-write",
+          "choice": "B"
+        },
+        {
+          "id": "board-close",
+          "choice": "B"
+        },
+        {
+          "id": "browser-guide",
+          "choice": "A"
+        },
+        {
+          "id": "browser-refs",
+          "choice": "A"
+        },
+        {
+          "id": "browser-visual",
+          "choice": "B"
+        },
+        {
+          "id": "browser-lifecycle",
+          "choice": "B"
+        },
+        {
+          "id": "large-table",
+          "choice": "A"
+        },
+        {
+          "id": "simple-table",
+          "choice": "A"
+        },
+        {
+          "id": "llm-model",
+          "choice": "A"
+        },
+        {
+          "id": "llm-tools",
+          "choice": "B"
+        },
+        {
+          "id": "writing-load",
+          "choice": "B"
+        },
+        {
+          "id": "writing-skip",
+          "choice": "A"
+        },
+        {
+          "id": "writing-verbatim",
+          "choice": "A"
+        },
+        {
+          "id": "source-ack",
+          "choice": "B"
+        }
+      ],
+      "rawText": "\n\n[{\"id\":\"swarm-off\",\"choice\":\"A\"},{\"id\":\"swarm-long\",\"choice\":\"A\"},{\"id\":\"swarm-simple\",\"choice\":\"B\"},{\"id\":\"swarm-contract\",\"choice\":\"B\"},{\"id\":\"swarm-timeout\",\"choice\":\"B\"},{\"id\":\"swarm-archive\",\"choice\":\"A\"},{\"id\":\"preview-tool\",\"choice\":\"A\"},{\"id\":\"preview-inspect\",\"choice\":\"B\"},{\"id\":\"preview-path\",\"choice\":\"B\"},{\"id\":\"preview-tabs\",\"choice\":\"A\"},{\"id\":\"preview-markdown\",\"choice\":\"A\"},{\"id\":\"unknown-tool\",\"choice\":\"B\"},{\"id\":\"office-router\",\"choice\":\"B\"},{\"id\":\"office-convert\",\"choice\":\"A\"},{\"id\":\"scratch\",\"choice\":\"A\"},{\"id\":\"deliverable\",\"choice\":\"A\"},{\"id\":\"safe-write\",\"choice\":\"B\"},{\"id\":\"board-close\",\"choice\":\"B\"},{\"id\":\"browser-guide\",\"choice\":\"A\"},{\"id\":\"browser-refs\",\"choice\":\"A\"},{\"id\":\"browser-visual\",\"choice\":\"B\"},{\"id\":\"browser-lifecycle\",\"choice\":\"B\"},{\"id\":\"large-table\",\"choice\":\"A\"},{\"id\":\"simple-table\",\"choice\":\"A\"},{\"id\":\"llm-model\",\"choice\":\"A\"},{\"id\":\"llm-tools\",\"choice\":\"B\"},{\"id\":\"writing-load\",\"choice\":\"B\"},{\"id\":\"writing-skip\",\"choice\":\"A\"},{\"id\":\"writing-verbatim\",\"choice\":\"A\"},{\"id\":\"source-ack\",\"choice\":\"B\"}]",
+      "latencyMs": 7239,
+      "usage": {
+        "prompt_tokens": 7906,
+        "total_tokens": 9477,
+        "completion_tokens": 1571,
+        "prompt_tokens_details": {
+          "cached_tokens": 2368
+        },
+        "reasoning_tokens": 1278
+      }
+    },
+    {
+      "model": "Opus",
+      "repetition": 0,
+      "variant": "baseline",
+      "passed": 30,
+      "exactFormat": false,
+      "failures": [],
+      "answers": [
+        "A",
+        "B",
+        "B",
+        "A",
+        "A",
+        "B",
+        "B",
+        "A",
+        "A",
+        "B",
+        "B",
+        "B",
+        "A",
+        "A",
+        "B",
+        "B",
+        "A",
+        "A",
+        "B",
+        "B",
+        "A",
+        "A",
+        "A",
+        "B",
+        "B",
+        "A",
+        "A",
+        "B",
+        "B",
+        "A"
+      ],
+      "rawText": "```json\n[\"A\",\"B\",\"B\",\"A\",\"A\",\"B\",\"B\",\"A\",\"A\",\"B\",\"B\",\"B\",\"A\",\"A\",\"B\",\"B\",\"A\",\"A\",\"B\",\"B\",\"A\",\"A\",\"A\",\"B\",\"B\",\"A\",\"A\",\"B\",\"B\",\"A\"]\n```",
+      "latencyMs": 48385,
+      "usage": {
+        "prompt_tokens": 11608,
+        "completion_tokens": 2140,
+        "total_tokens": 13748,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        },
+        "completion_tokens_details": {
+          "reasoning_tokens": 2073
+        }
+      }
+    },
+    {
+      "model": "Opus",
+      "repetition": 0,
+      "variant": "optimized",
+      "passed": 30,
+      "exactFormat": false,
+      "failures": [],
+      "answers": [
+        "A",
+        "B",
+        "B",
+        "A",
+        "A",
+        "B",
+        "B",
+        "A",
+        "A",
+        "B",
+        "B",
+        "B",
+        "A",
+        "A",
+        "B",
+        "B",
+        "A",
+        "A",
+        "B",
+        "B",
+        "A",
+        "A",
+        "A",
+        "B",
+        "B",
+        "A",
+        "A",
+        "B",
+        "B",
+        "A"
+      ],
+      "rawText": "```json\n[\"A\",\"B\",\"B\",\"A\",\"A\",\"B\",\"B\",\"A\",\"A\",\"B\",\"B\",\"B\",\"A\",\"A\",\"B\",\"B\",\"A\",\"A\",\"B\",\"B\",\"A\",\"A\",\"A\",\"B\",\"B\",\"A\",\"A\",\"B\",\"B\",\"A\"]\n```",
+      "latencyMs": 54235,
+      "usage": {
+        "prompt_tokens": 7736,
+        "completion_tokens": 1942,
+        "total_tokens": 9678,
+        "prompt_tokens_details": {
+          "cached_tokens": 2304
+        },
+        "completion_tokens_details": {
+          "reasoning_tokens": 1875
+        }
+      }
+    },
+    {
+      "model": "Opus",
+      "repetition": 1,
+      "variant": "baseline",
+      "passed": 30,
+      "exactFormat": true,
+      "failures": [],
+      "answers": [
+        "B",
+        "A",
+        "A",
+        "A",
+        "B",
+        "B",
+        "A",
+        "A",
+        "B",
+        "B",
+        "A",
+        "A",
+        "A",
+        "B",
+        "B",
+        "A",
+        "A",
+        "B",
+        "B",
+        "A",
+        "A",
+        "B",
+        "B",
+        "B",
+        "A",
+        "A",
+        "B",
+        "B",
+        "A",
+        "A"
+      ],
+      "rawText": "[\"B\",\"A\",\"A\",\"A\",\"B\",\"B\",\"A\",\"A\",\"B\",\"B\",\"A\",\"A\",\"A\",\"B\",\"B\",\"A\",\"A\",\"B\",\"B\",\"A\",\"A\",\"B\",\"B\",\"B\",\"A\",\"A\",\"B\",\"B\",\"A\",\"A\"]",
+      "latencyMs": 86981,
+      "usage": {
+        "prompt_tokens": 11608,
+        "completion_tokens": 3140,
+        "total_tokens": 14748,
+        "prompt_tokens_details": {
+          "cached_tokens": 10240
+        },
+        "completion_tokens_details": {
+          "reasoning_tokens": 3077
+        }
+      }
+    },
+    {
+      "model": "Opus",
+      "repetition": 1,
+      "variant": "optimized",
+      "passed": 30,
+      "exactFormat": true,
+      "failures": [],
+      "answers": [
+        "B",
+        "A",
+        "A",
+        "A",
+        "B",
+        "B",
+        "A",
+        "A",
+        "B",
+        "B",
+        "A",
+        "A",
+        "A",
+        "B",
+        "B",
+        "A",
+        "A",
+        "B",
+        "B",
+        "A",
+        "A",
+        "B",
+        "B",
+        "B",
+        "A",
+        "A",
+        "B",
+        "B",
+        "A",
+        "A"
+      ],
+      "rawText": "[\"B\", \"A\", \"A\", \"A\", \"B\", \"B\", \"A\", \"A\", \"B\", \"B\", \"A\", \"A\", \"A\", \"B\", \"B\", \"A\", \"A\", \"B\", \"B\", \"A\", \"A\", \"B\", \"B\", \"B\", \"A\", \"A\", \"B\", \"B\", \"A\", \"A\"]",
+      "latencyMs": 24592,
+      "usage": {
+        "prompt_tokens": 7736,
+        "completion_tokens": 920,
+        "total_tokens": 8656,
+        "prompt_tokens_details": {
+          "cached_tokens": 2304
+        },
+        "completion_tokens_details": {
+          "reasoning_tokens": 828
+        }
+      }
+    },
+    {
+      "model": "Opus",
+      "repetition": 2,
+      "variant": "optimized",
+      "passed": 30,
+      "exactFormat": false,
+      "failures": [],
+      "answers": [
+        "A",
+        "A",
+        "B",
+        "B",
+        "B",
+        "A",
+        "A",
+        "B",
+        "B",
+        "A",
+        "A",
+        "B",
+        "B",
+        "A",
+        "A",
+        "A",
+        "B",
+        "B",
+        "A",
+        "A",
+        "B",
+        "B",
+        "A",
+        "A",
+        "A",
+        "B",
+        "B",
+        "A",
+        "A",
+        "B"
+      ],
+      "rawText": "```json\n[\"A\",\"A\",\"B\",\"B\",\"B\",\"A\",\"A\",\"B\",\"B\",\"A\",\"A\",\"B\",\"B\",\"A\",\"A\",\"A\",\"B\",\"B\",\"A\",\"A\",\"B\",\"B\",\"A\",\"A\",\"A\",\"B\",\"B\",\"A\",\"A\",\"B\"]\n```",
+      "latencyMs": 34339,
+      "usage": {
+        "prompt_tokens": 7736,
+        "completion_tokens": 1342,
+        "total_tokens": 9078,
+        "prompt_tokens_details": {
+          "cached_tokens": 6400
+        },
+        "completion_tokens_details": {
+          "reasoning_tokens": 1275
+        }
+      }
+    },
+    {
+      "model": "Opus",
+      "repetition": 2,
+      "variant": "baseline",
+      "passed": 30,
+      "exactFormat": false,
+      "failures": [],
+      "answers": [
+        "A",
+        "A",
+        "B",
+        "B",
+        "B",
+        "A",
+        "A",
+        "B",
+        "B",
+        "A",
+        "A",
+        "B",
+        "B",
+        "A",
+        "A",
+        "A",
+        "B",
+        "B",
+        "A",
+        "A",
+        "B",
+        "B",
+        "A",
+        "A",
+        "A",
+        "B",
+        "B",
+        "A",
+        "A",
+        "B"
+      ],
+      "rawText": "```json\n[\"A\",\"A\",\"B\",\"B\",\"B\",\"A\",\"A\",\"B\",\"B\",\"A\",\"A\",\"B\",\"B\",\"A\",\"A\",\"A\",\"B\",\"B\",\"A\",\"A\",\"B\",\"B\",\"A\",\"A\",\"A\",\"B\",\"B\",\"A\",\"A\",\"B\"]\n```",
+      "latencyMs": 37569,
+      "usage": {
+        "prompt_tokens": 11608,
+        "completion_tokens": 1604,
+        "total_tokens": 13212,
+        "prompt_tokens_details": {
+          "cached_tokens": 11520
+        },
+        "completion_tokens_details": {
+          "reasoning_tokens": 1537
+        }
+      }
+    }
+  ],
+  "initialRequestFailures": [
+    {
+      "model": "Opus",
+      "repetition": 2,
+      "variant": "baseline",
+      "error": "request, timeout or response parse failure"
+    }
+  ],
+  "summary": [
+    {
+      "variant": "baseline",
+      "policyCorrect": 180,
+      "policyTotal": 180,
+      "exactOutputFormat": 2,
+      "requests": 6
+    },
+    {
+      "variant": "optimized",
+      "policyCorrect": 180,
+      "policyTotal": 180,
+      "exactOutputFormat": 3,
+      "requests": 6
+    }
+  ],
+  "scoringNote": "Whitespace and code fences are normalized for policy scoring. Exact output format requires a bare JSON string array. The original request timeout is preserved separately; one targeted retry completed it."
+}

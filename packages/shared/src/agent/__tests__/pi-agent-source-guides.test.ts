@@ -47,6 +47,32 @@ describe('PiAgent source guide preparation', () => {
     rmSync(workspaceRootPath, { recursive: true, force: true });
   });
 
+  it.each(['read', 'bash'])('keeps skill prerequisites pending until %s succeeds', toolName => {
+    const skillPath = join(workspaceRootPath, 'skills', 'writing', 'SKILL.md');
+    const manager = (agent as any).prerequisiteManager;
+    manager.registerSkillPrerequisites([skillPath]);
+    const args = toolName === 'read' ? { path: skillPath } : { command: `cat "${skillPath}"` };
+    const start = (id: string) => (agent as any).handleSubprocessEvent({
+      type: 'tool_execution_start', toolCallId: id, toolName, args,
+    });
+    const end = (id: string, isError: boolean) => (agent as any).handleSubprocessEvent({
+      type: 'tool_execution_end', toolCallId: id, toolName, isError,
+      result: { content: [{ type: 'text', text: isError ? 'read failed' : 'Writing rules' }] },
+    });
+    start('failed-read');
+    expect(manager.hasRead(skillPath)).toBe(false);
+    expect(manager.pendingSkillPaths.has(skillPath)).toBe(true);
+    end('failed-read', true);
+    expect(manager.hasRead(skillPath)).toBe(false);
+    expect(manager.checkPrerequisites('Write').allowed).toBe(false);
+    start('successful-read');
+    end('successful-read', false);
+    expect(manager.hasRead(skillPath)).toBe(true);
+    expect(manager.checkPrerequisites('Write').allowed).toBe(true);
+    agent.resetPrerequisiteState();
+    expect(manager.hasRead(skillPath)).toBe(false);
+  });
+
   it('executes source tools immediately when their guide is an empty skeleton', async () => {
     writeFileSync(guidePath,
       '# anysearch\n\n## Guidelines\n\n(Add usage guidelines here)\n\n## Context\n\n(Add context about this source)',

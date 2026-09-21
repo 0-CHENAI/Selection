@@ -1,5 +1,17 @@
 # Data Tables Guide
 
+## Quick start
+
+Use a Markdown table for small static comparisons, `datatable` for sorting/filtering, or `spreadsheet` for Excel-style display/export. These are fenced reply formats, not tool names.
+
+````
+```datatable
+{"columns":[{"key":"name","label":"Name","type":"text"},{"key":"value","label":"Value","type":"number"}],"rows":[{"name":"Example","value":1}]}
+```
+````
+
+For 20+ rows, use `transform_data` to write JSON in session data, then reference its returned absolute path via `src` instead of inline `rows`. The file contains a rows array or `{"rows":[...]}`; inline columns/title override file metadata. Percent values are decimals (0.15 = 15%); currency values are raw numbers. Consult the relevant section below for transformations, spreadsheet export, and troubleshooting.
+
 This guide covers how to present structured data using datatable and spreadsheet blocks, and how to use the `transform_data` tool for large datasets.
 
 ## Overview
