@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test'
-import { createDraftDisplaySession, createDraftSubmission, DRAFT_SESSION_OPTIONS_ID, isDraftSessionOptionsId } from './draft-session'
+import { createDraftDisplaySession, createDraftSubmission, resolveDraftWorkingDirectory, DRAFT_SESSION_OPTIONS_ID, isDraftSessionOptionsId } from './draft-session'
 
 test('draft option ids are not real sessions', () => {
   expect(isDraftSessionOptionsId(DRAFT_SESSION_OPTIONS_ID)).toBe(true)
@@ -48,4 +48,26 @@ test('failed create can retry; failed send reuses the created session', async ()
   expect(await submit(id => { sent = id })).toBe(true)
   expect(sent).toBe('project-session')
   expect(creates).toBe(2)
+})
+
+// Windows paths must be preserved verbatim even when tests run on macOS/Linux.
+const projectDirectory = String.raw`D:\work-space\输出成果`
+
+test('project drafts display the project directory before workspace settings arrive', () => {
+  expect(resolveDraftWorkingDirectory(undefined, projectDirectory, undefined)).toBe(projectDirectory)
+  expect(resolveDraftWorkingDirectory(undefined, projectDirectory, '/workspace')).toBe(projectDirectory)
+})
+
+test('manual draft directory survives asynchronous default hydration', () => {
+  expect(resolveDraftWorkingDirectory('/chosen', projectDirectory, undefined)).toBe('/chosen')
+  expect(resolveDraftWorkingDirectory('/chosen', projectDirectory, '/workspace')).toBe('/chosen')
+  expect(resolveDraftWorkingDirectory('none', projectDirectory, '/workspace')).toBeUndefined()
+  expect(resolveDraftWorkingDirectory('user_default', projectDirectory, '/workspace')).toBe(projectDirectory)
+})
+
+test('switching project defaults and missing defaults resolve without stale project directories', () => {
+  expect(resolveDraftWorkingDirectory(undefined, '/project-b', '/workspace')).toBe('/project-b')
+  expect(resolveDraftWorkingDirectory(undefined, undefined, '/workspace')).toBe('/workspace')
+  expect(resolveDraftWorkingDirectory(undefined, '', '/workspace')).toBe('/workspace')
+  expect(resolveDraftWorkingDirectory(undefined, undefined, undefined)).toBeUndefined()
 })

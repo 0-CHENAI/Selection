@@ -26,7 +26,7 @@ import { rendererPerf } from '@/lib/perf'
 import { generatedFileBaseDir, resolveOpenableGeneratedFile } from '@/lib/generated-file-path'
 import { resolveMarkdownLinkTarget } from '@craft-agent/ui'
 import { navigate, routes } from '@/lib/navigate'
-import { createDraftDisplaySession, createDraftSubmission, DRAFT_SESSION_OPTIONS_ID } from '@/lib/draft-session'
+import { createDraftDisplaySession, createDraftSubmission, resolveDraftWorkingDirectory, DRAFT_SESSION_OPTIONS_ID } from '@/lib/draft-session'
 import { coerceInputText } from '@/lib/input-text'
 import type { Session } from '../../shared/types'
 import { deriveSessionMessagesLoadState, formatSessionLoadFailure } from '@/lib/session-load'
@@ -38,6 +38,7 @@ import {
   updateSessionAtom,
   updateSessionMetaAtom,
 } from '@/atoms/sessions'
+import { projectsAtom } from '@/atoms/projects'
 import { kanbanEditorTargetAtom } from '@/atoms/kanban'
 import { defaultSessionOptions } from '@/hooks/useSessionOptions'
 import { getSessionTitle } from '@/utils/session'
@@ -235,7 +236,14 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
     ?? llmConnections.find(c => c.isDefault) ?? llmConnections[0]
   const [draftModel, setDraftModel] = React.useState(initialDraftConnection?.defaultModel ?? '')
   const [draftConnection, setDraftConnection] = React.useState(initialDraftConnection?.slug)
-  const [draftWorkingDirectory, setDraftWorkingDirectory] = React.useState<string | undefined>(undefined)
+  const projects = useAtomValue(projectsAtom)
+  const [draftWorkingDirectoryOverride, setDraftWorkingDirectory] = React.useState<string | undefined>(undefined)
+  const [workspaceWorkingDirectory, setWorkspaceWorkingDirectory] = React.useState<string | undefined>(undefined)
+  const draftWorkingDirectory = resolveDraftWorkingDirectory(
+    draftWorkingDirectoryOverride,
+    projects.find(project => project.config.id === orchestrationProjectId)?.config.workingDirectory,
+    workspaceWorkingDirectory,
+  )
   const [draftSwarmEnabled, setDraftSwarmEnabled] = React.useState(false)
   const [draftSourceSlugs, setDraftSourceSlugs] = React.useState<string[]>(
     () => enabledSources?.map(source => source.config.slug) ?? [],
@@ -249,7 +257,7 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
     connection: draftConnection,
     permissionMode: sessionOpts.permissionMode,
     thinkingLevel: sessionOpts.thinkingLevel,
-    workingDirectory: draftWorkingDirectory,
+    workingDirectory: draftWorkingDirectoryOverride,
     swarmEnabled: draftSwarmEnabled,
     sourceSlugs: draftSourceSlugs,
   })
@@ -261,7 +269,7 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
     connection: draftConnection,
     permissionMode: sessionOpts.permissionMode,
     thinkingLevel: sessionOpts.thinkingLevel,
-    workingDirectory: draftWorkingDirectory,
+    workingDirectory: draftWorkingDirectoryOverride,
     swarmEnabled: draftSwarmEnabled,
     sourceSlugs: draftSourceSlugs,
   }
@@ -300,6 +308,7 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
     setDraftConnection(initial?.slug)
     setDraftSwarmEnabled(false)
     setDraftWorkingDirectory(undefined)
+    setWorkspaceWorkingDirectory(undefined)
     setDraftSourceSlugs(enabledSources?.map(source => source.config.slug) ?? [])
     setDraftBusy(false)
     setPermissionMode(defaultSessionOptions.permissionMode)
@@ -317,13 +326,13 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
       settingsHydrated.current = activeWorkspaceId
       if (settings.permissionMode) setPermissionMode(settings.permissionMode)
       if (settings.thinkingLevel) setOption('thinkingLevel', settings.thinkingLevel)
-      if (settings.workingDirectory) setDraftWorkingDirectory(settings.workingDirectory)
+      setWorkspaceWorkingDirectory(settings.workingDirectory)
       if (settings.enabledSourceSlugs) setDraftSourceSlugs(settings.enabledSourceSlugs)
     }).catch(error => {
       console.error('[ChatPage] Failed to load workspace settings:', error)
     })
     return () => { cancelled = true }
-  }, [isDraft, activeWorkspaceId, setPermissionMode, setOption])
+  }, [isDraft, activeWorkspaceId, orchestrationProjectId, setPermissionMode, setOption])
 
   // Track draft value for this session
   const [inputValue, setInputValue] = React.useState(() => coerceInputText(sessionId ? getDraft(sessionId) : ''))

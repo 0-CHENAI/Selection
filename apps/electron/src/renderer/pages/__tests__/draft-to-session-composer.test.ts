@@ -7,6 +7,17 @@ function read(relative: string): string {
 }
 
 describe('draft to live session composer', () => {
+  it('keeps inherited directories out of explicit creation overrides (#406)', () => {
+    const chatPage = read('../ChatPage.tsx')
+    // Both the initial submission and draft-reset submission read this ref.
+    expect(chatPage.match(/workingDirectory: draftWorkingDirectoryOverride,/g)).toHaveLength(2)
+    expect(chatPage.match(/workingDirectory: ctx.workingDirectory \?\? 'user_default'/g)).toHaveLength(2)
+    expect(chatPage).toContain('setWorkspaceWorkingDirectory(settings.workingDirectory)')
+    expect(chatPage).not.toContain('setDraftWorkingDirectory(settings.workingDirectory)')
+    expect(chatPage).toContain('projects.find(project => project.config.id === orchestrationProjectId)?.config.workingDirectory')
+    expect(chatPage).toContain('[isDraft, activeWorkspaceId, orchestrationProjectId, setPermissionMode, setOption]')
+  })
+
   it('keeps ChatPage mounted so the composer is not swapped on first send', () => {
     const panel = read('../../components/app-shell/MainContentPanel.tsx')
     const chatPage = read('../ChatPage.tsx')

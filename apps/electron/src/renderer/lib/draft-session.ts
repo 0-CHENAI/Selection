@@ -7,6 +7,17 @@ export function isDraftSessionOptionsId(sessionId?: string | null): boolean {
   return sessionId === DRAFT_SESSION_OPTIONS_ID
 }
 
+/** Display inherited defaults without turning them into explicit creation overrides. */
+export function resolveDraftWorkingDirectory(
+  override: string | undefined,
+  projectDirectory: string | undefined,
+  workspaceDirectory: string | undefined,
+): string | undefined {
+  if (override === 'none') return undefined
+  if (override !== undefined && override !== 'user_default') return override
+  return projectDirectory || workspaceDirectory || undefined
+}
+
 export function createDraftDisplaySession(input: {
   workspaceId: string
   model?: string
