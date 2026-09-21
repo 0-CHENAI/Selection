@@ -28,13 +28,14 @@
  */
 
 import * as React from 'react'
-import { FileText, Maximize2 } from 'lucide-react'
+import { FileText } from 'lucide-react'
 import { cn } from '../../lib/utils'
 import { CodeBlock } from './CodeBlock'
 import { ItemNavigator } from '../overlay/ItemNavigator'
 import { usePlatform } from '../../context/PlatformContext'
 import { useTranslation } from 'react-i18next'
 import { Markdown } from './Markdown'
+import { InlineDocumentPreview } from './InlineDocumentPreview'
 import {
   parseMarkdownPreviewSpec,
   normalizePreviewItems,
@@ -73,28 +74,20 @@ export function MarkdownDocBlock({ code, className, onUrlClick, onFileClick }: M
   const items = React.useMemo<MarkdownPreviewItem[]>(() => normalizePreviewItems(spec), [spec])
 
   const [activeIndex, setActiveIndex] = React.useState(0)
-  const [isFullscreen, setIsFullscreen] = React.useState(false)
 
   const [contentCache, setContentCache] = React.useState<Record<string, string>>({})
   const [loading, setLoading] = React.useState(false)
   const [error, setError] = React.useState<string | null>(null)
 
-  const activeItem = items[activeIndex]
+  const selectedIndex = activeIndex < items.length ? activeIndex : 0
+  const activeItem = items[selectedIndex]
   const activeContent = activeItem ? contentCache[activeItem.src] : undefined
-
-  React.useEffect(() => {
-    if (!activeItem) {
-      setActiveIndex(0)
-      return
-    }
-    if (activeIndex > items.length - 1) {
-      setActiveIndex(0)
-    }
-  }, [activeIndex, activeItem, items.length])
+  React.useEffect(() => { setActiveIndex(selectedIndex) }, [selectedIndex])
 
   React.useEffect(() => {
     if (!activeItem?.src || !onReadFile) return
-    if (contentCache[activeItem.src] !== undefined) {
+    if (activeContent !== undefined) {
+      setLoading(false)
       setError(null)
       return
     }
@@ -114,7 +107,7 @@ export function MarkdownDocBlock({ code, className, onUrlClick, onFileClick }: M
         if (!cancelled) setLoading(false)
       })
     return () => { cancelled = true }
-  }, [activeItem?.src, onReadFile, contentCache])
+  }, [activeItem?.src, onReadFile, activeContent])
 
   const fallback = <CodeBlock code={code} language="json" mode="full" className={className} />
 
@@ -122,7 +115,6 @@ export function MarkdownDocBlock({ code, className, onUrlClick, onFileClick }: M
     return fallback
   }
 
-  const hasMultiple = items.length > 1
   const headerTitle = spec.title || t('preview.markdownPreview')
 
   return (
@@ -132,50 +124,32 @@ export function MarkdownDocBlock({ code, className, onUrlClick, onFileClick }: M
           <FileText className="w-3.5 h-3.5 text-muted-foreground/50" />
           <span className="text-[12px] text-muted-foreground font-medium flex-1">{headerTitle}</span>
           <div className="flex items-center gap-1">
-            <ItemNavigator items={items} activeIndex={activeIndex} onSelect={setActiveIndex} />
-            <button
-              onClick={() => setIsFullscreen((v) => !v)}
-              className={cn(
-                "p-1 rounded-[6px] transition-all select-none",
-                "bg-background shadow-minimal",
-                "text-muted-foreground/50 hover:text-foreground",
-                "focus:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:opacity-100",
-                hasMultiple ? "opacity-100" : "opacity-0 group-hover:opacity-100"
-              )}
-              title={isFullscreen ? t('common.close') : t('preview.expandPreview')}
-            >
-              <Maximize2 className="w-3.5 h-3.5" />
-            </button>
+            <ItemNavigator items={items} activeIndex={selectedIndex} onSelect={setActiveIndex} />
           </div>
         </div>
 
-        <div
-          className={cn(
-            'relative px-3 py-2',
-            // Fullscreen overlay may cap height; inline chat cards expand with content
-            // to avoid nested vertical scroll against the session list.
-            isFullscreen ? 'max-h-[80vh] overflow-auto' : 'overflow-x-auto'
-          )}
-        >
-          {activeContent !== undefined && (
-            <Markdown
-              mode="minimal"
-              disablePreviewBlocks={DISABLE_INNER_MARKDOWN_PREVIEW}
-              onUrlClick={onUrlClick}
-              onFileClick={onFileClick}
-            >
-              {activeContent}
-            </Markdown>
-          )}
+        <InlineDocumentPreview key={activeItem?.src}>
+          <div className="relative px-3 py-2 overflow-x-auto">
+            {activeContent !== undefined && (
+              <Markdown
+                mode="minimal"
+                disablePreviewBlocks={DISABLE_INNER_MARKDOWN_PREVIEW}
+                onUrlClick={onUrlClick}
+                onFileClick={onFileClick}
+              >
+                {activeContent}
+              </Markdown>
+            )}
 
-          {activeContent === undefined && loading && (
-            <div className="py-8 text-center text-muted-foreground text-[13px]">{t('common.loading')}</div>
-          )}
+            {activeContent === undefined && loading && (
+              <div className="py-8 text-center text-muted-foreground text-[13px]">{t('common.loading')}</div>
+            )}
 
-          {activeContent === undefined && !loading && error && (
-            <div className="py-6 text-center text-destructive/70 text-[13px]">{error}</div>
-          )}
-        </div>
+            {activeContent === undefined && !loading && error && (
+              <div className="py-6 text-center text-destructive/70 text-[13px]">{error}</div>
+            )}
+          </div>
+        </InlineDocumentPreview>
       </div>
     </MarkdownDocBlockErrorBoundary>
   )

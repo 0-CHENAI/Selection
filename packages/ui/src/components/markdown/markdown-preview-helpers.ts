@@ -1,9 +1,8 @@
 /**
- * Pure helpers for MarkdownDocBlock.
+ * Shared file-preview spec validation for MarkdownDocBlock and MarkdownHtmlBlock.
  *
  * Extracted so we can unit-test the JSON-spec → preview-items normalization
- * without spinning up React. Component DOM behavior is covered by manual
- * Electron smoke (see plan).
+ * without spinning up React. Component DOM behavior is verified separately in the browser.
  */
 
 export interface MarkdownPreviewItem {
@@ -21,7 +20,7 @@ export interface MarkdownPreviewSpec {
  * Parse a `markdown-preview` JSON spec string.
  *
  * Returns `null` for invalid JSON or specs that lack both `src` and a non-empty
- * `items` array. Mirrors `MarkdownHtmlBlock`/`MarkdownPdfBlock` so the same
+ * `items` array. Uses the shared HTML/Markdown preview schema so the same
  * spec shape works across preview block types.
  */
 export function parseMarkdownPreviewSpec(code: string): MarkdownPreviewSpec | null {
@@ -40,7 +39,10 @@ export function parseMarkdownPreviewSpec(code: string): MarkdownPreviewSpec | nu
     const items = itemsField.filter(
       (item): item is MarkdownPreviewItem =>
         !!item && typeof item === 'object' && typeof (item as { src?: unknown }).src === 'string' && (item as { src: string }).src.length > 0
-    )
+    ).map(item => ({
+      src: item.src,
+      ...(typeof item.label === 'string' ? { label: item.label } : {}),
+    }))
     if (items.length === 0) return null
     return {
       src: typeof spec.src === 'string' ? spec.src : undefined,
