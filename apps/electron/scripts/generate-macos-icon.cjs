@@ -11,7 +11,7 @@ const { execFileSync } = require('node:child_process');
 async function main() {
   if (process.platform !== 'darwin') throw new Error('ICNS generation requires macOS iconutil');
   const resources = resolve(__dirname, '../resources');
-  const source = process.argv[2] ? resolve(process.argv[2]) : join(resources, 'icon.svg');
+  const source = process.argv[2] ? resolve(process.argv[2]) : join(resources, 'icon.png');
   const temp = mkdtempSync(join(tmpdir(), 'selection-macos-icon-'));
   const iconset = join(temp, 'icon.iconset');
   mkdirSync(iconset);

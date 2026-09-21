@@ -6,6 +6,8 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 
 ## Improvements
 
+- **App icon** — Windows and macOS now use the macOS 27 Liquid Glass conversion of the Selection swan (live `.icon` on recent macOS, flattened PNG/ICO/ICNS elsewhere).
+
 - **Edit popover stays on blur** — Clicking outside the skill / MCP / automation edit window unfocuses it instead of dismissing it. Only the title-bar close control (or leaving after a legacy send) closes the window. Fixes #384.
 
 - **Edit popover edge resize** — The corner grip is gone. Drag the right edge, bottom edge, or bottom-right corner to resize; the top-left stays pinned and the Radix box no longer recenters on release. Fixes #385.
