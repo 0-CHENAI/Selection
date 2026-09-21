@@ -290,10 +290,12 @@ class DatatableErrorBoundary extends React.Component<
 
 export interface MarkdownDatatableBlockProps {
   code: string
+  renderHeader?: (columnKey: string) => React.ReactNode
+  renderCell?: (row: Record<string, unknown>, columnKey: string) => React.ReactNode
   className?: string
 }
 
-export function MarkdownDatatableBlock({ code, className }: MarkdownDatatableBlockProps) {
+export function MarkdownDatatableBlock({ code, className, renderCell, renderHeader }: MarkdownDatatableBlockProps) {
   const { t } = useTranslation()
   const { onReadFile } = usePlatform()
 
@@ -475,7 +477,7 @@ export function MarkdownDatatableBlock({ code, className }: MarkdownDatatableBlo
       <tr key={i} className="border-b border-foreground/[0.03] last:border-0 hover:bg-foreground/[0.015] transition-colors">
         {parsed.columns.map((col) => (
           <td key={col.key} className={cn('py-2 px-3 whitespace-nowrap', colAlign(col.type, col.align))}>
-            {formatCell(row[col.key], col.type)}
+            {renderCell ? renderCell(row, col.key) : formatCell(row[col.key], col.type)}
           </td>
         ))}
       </tr>
@@ -502,9 +504,17 @@ export function MarkdownDatatableBlock({ code, className }: MarkdownDatatableBlo
                 key={col.key}
                 className={cn('py-2 px-3 text-[12px] cursor-pointer select-none whitespace-nowrap', colAlign(col.type, col.align))}
                 onClick={() => handleSort(col.key)}
+                tabIndex={0}
+                aria-sort={sortKey === col.key && sortDir ? (sortDir === 'asc' ? 'ascending' : 'descending') : 'none'}
+                onKeyDown={event => {
+                  if (event.target === event.currentTarget && (event.key === 'Enter' || event.key === ' ')) {
+                    event.preventDefault()
+                    handleSort(col.key)
+                  }
+                }}
               >
                 <span className="inline-flex items-center gap-1 font-medium text-muted-foreground hover:text-foreground transition-colors">
-                  {col.label}
+                  {renderHeader ? renderHeader(col.key) : col.label}
                   <SortIcon dir={sortKey === col.key ? sortDir : null} />
                 </span>
               </th>

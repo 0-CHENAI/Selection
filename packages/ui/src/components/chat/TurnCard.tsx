@@ -805,7 +805,7 @@ function ExpandableHeightPanel({
 
   return (
     <div
-      className={cn('grid', !open && 'pointer-events-none')}
+      className={cn('grid min-w-0 grid-cols-[minmax(0,1fr)]', !open && 'pointer-events-none')}
       style={{
         gridTemplateRows: open ? '1fr' : '0fr',
         opacity: open ? 1 : 0,
@@ -815,7 +815,7 @@ function ExpandableHeightPanel({
       }}
       aria-hidden={!open}
     >
-      <div className={cn('min-h-0', (toggling || !open) && 'overflow-hidden')}>
+      <div className={cn('min-h-0 min-w-0', (toggling || !open) && 'overflow-hidden')}>
         {children}
       </div>
     </div>

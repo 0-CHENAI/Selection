@@ -93,8 +93,8 @@ function getModelOptionsForConnection(
     }
     return {
       value: m.id,
-      label: m.name,
-      description: m.description,
+      label: m.name?.trim() || m.id,
+      description: m.description ?? '',
       descriptionKey: unavailable ? 'chat.modelPicker.unavailable' : m.descriptionKey,
       unavailable,
     }

@@ -7,13 +7,22 @@ import type { RootContent, Nodes } from 'mdast'
 
 export interface ResponseSource { url: string; title: string; hostname: string; description?: string }
 const parser = unified().use(remarkParse).use(remarkGfm)
-const sourceLabels = ['主要来源', '参考资料', '参考来源', '参考文献', '资料来源', '来源', 'sources', 'references']
-const sourceLabel = /^(?:主要来源|参考资料|参考来源|参考文献|资料来源|来源|sources|references)\s*[:：]?\s*$/i
+const sourceLabels = ['官方来源', '主要来源', '参考资料', '参考来源', '参考文献', '资料来源', '来源', 'sources', 'references']
+const sourceLabel = /^(?:官方来源|主要来源|参考资料|参考来源|参考文献|资料来源|来源|sources|references)\s*[:：]?\s*$/i
 
 function textOutsideLinks(node: Nodes): string {
   if (node.type === 'link' || node.type === 'linkReference') return ''
   if (node.type === 'text' || node.type === 'inlineCode') return node.value
   return 'children' in node ? node.children.map(child => textOutsideLinks(child)).join('') : ''
+}
+
+function isPartialCitation(pendingText: string): boolean {
+  const partialUrl = ['h', 'ht', 'htt', 'http', 'https', 'http:', 'https:', 'http:/', 'https:/'].includes(pendingText)
+    || /^https?:\/\/\S*$/.test(pendingText)
+  return /^[\s、，,;；:：.。()（）\[\]\d-]*$/.test(pendingText)
+    || /^[\s、，,;；:：.。\d-]*\[[^\]]*(?:\](?:\([^)]*\)?|\[[^\]]*\]?)?)?$/.test(pendingText)
+    || /^\[[^\]]+\]:\s*\S*$/.test(pendingText)
+    || partialUrl
 }
 
 /** Collapse explicit source sections only; ordinary links remain in their original context. */
@@ -56,7 +65,7 @@ export function extractResponseSources(text: string, evidence: ReadonlySet<strin
       continue
     }
     const first = block.type === 'paragraph' ? block.children[0] : undefined
-    const explicit = (first?.type === 'text' || first?.type === 'strong') && /^(?:主要来源|参考资料|参考来源|参考文献|资料来源|来源|sources|references)\s*[:：]/i.test(first.type === 'text' ? first.value : textOutsideLinks(first))
+    const explicit = (first?.type === 'text' || first?.type === 'strong') && /^(?:官方来源|主要来源|参考资料|参考来源|参考文献|资料来源|来源|sources|references)\s*[:：]/i.test(first.type === 'text' ? first.value : textOutsideLinks(first))
     const isSourceBlock = explicit || sectionDepth !== undefined
     if (block.type === 'definition') continue
     if (block.type === 'code') {
@@ -67,7 +76,7 @@ export function extractResponseSources(text: string, evidence: ReadonlySet<strin
     let count = 0
     let invalid = false
     let nonCitation = false
-    visit(block, node => {
+    visit(block, (node, _index, parent) => {
       if (['image', 'imageReference', 'code', 'inlineCode', 'html', 'table', 'blockquote'].includes(node.type)) nonCitation = true
       if (node.type !== 'link' && node.type !== 'linkReference') return
       const target = node.type === 'link' ? node.url : definitions.get(node.identifier)
@@ -86,11 +95,14 @@ export function extractResponseSources(text: string, evidence: ReadonlySet<strin
         count++
         if (seen.has(url.href)) return
         seen.add(url.href)
-        sources.push({ url: openUrl, title: title.join('') || url.hostname, hostname: url.hostname })
+        const suffix = parent?.type === 'paragraph' ? textOutsideLinks(parent).trim() : ''
+        const description = isSourceBlock && /^(?:—|–|-|:|：)\s*/.test(suffix)
+          ? suffix.replace(/^(?:—|–|-|:|：)\s*/, '').trim() || undefined : undefined
+        sources.push({ url: openUrl, title: title.join('') || url.hostname, hostname: url.hostname, ...(description ? { description } : {}) })
       } catch { invalid = true }
     })
     const remaining = textOutsideLinks(block)
-      .replace(/^(?:主要来源|参考资料|参考来源|参考文献|资料来源|来源|sources|references)\s*[:：]/i, '')
+      .replace(/^(?:官方来源|主要来源|参考资料|参考来源|参考文献|资料来源|来源|sources|references)\s*[:：]/i, '')
     // Parenthesized publisher labels are citation metadata, not body prose.
     const citationRemainder = remaining.replace(/[（(][^()（）\n]{1,80}[)）]/g, '')
     // A publisher suffix is still metadata while its closing bracket is in flight.
@@ -99,20 +111,30 @@ export function extractResponseSources(text: string, evidence: ReadonlySet<strin
     // Markdown emphasis and list markers are often incomplete between deltas.
     // Strip them only for buffering, never when deciding final removal.
     const pendingText = streamingRemainder.replace(/[*_~]/g, '').trim()
-    const partialUrl = ['h', 'ht', 'htt', 'http', 'https', 'http:', 'https:', 'http:/', 'https:/'].includes(pendingText)
-      || /^https?:\/\/\S*$/.test(pendingText)
-    const partialCitation = /^[\s、，,;；:：.。()（）\[\]\d-]*$/.test(pendingText)
-      || /^[\s、，,;；:：.。\d-]*\[[^\]]*(?:\](?:\([^)]*\)?|\[[^\]]*\]?)?)?$/.test(pendingText)
-      || /^\[[^\]]+\]:\s*\S*$/.test(pendingText)
-      || partialUrl
+    const partialCitation = isPartialCitation(pendingText)
+    // A bibliography entry may annotate its leading link with a description.
+    // Keep arbitrary prose, nested blocks and instructions in the answer.
+    const annotatedList = isSourceBlock && block.type === 'list' && block.children.every((item, index) => {
+      const pendingLast = isStreaming && index === block.children.length - 1
+      if (!item.children.length) return pendingLast
+      if (item.children.length !== 1 || item.children[0]?.type !== 'paragraph') return false
+      const paragraph = item.children[0]
+      if (!['link', 'linkReference'].includes(paragraph.children[0]?.type ?? '')) {
+        const raw = paragraph.position ? text.slice(paragraph.position.start.offset, paragraph.position.end.offset) : ''
+        return pendingLast && isPartialCitation(raw.replace(/[*_~]/g, '').trim())
+      }
+      if (paragraph.children.slice(1).some(child => child.type !== 'text')) return false
+      const suffix = textOutsideLinks(paragraph).trim()
+      return !suffix || /^(?:—|–|-|:|：)\s*/.test(suffix)
+    })
     const onlyCitation = /^[\s、，,;；:：.。()（）\[\]\d-]*$/.test(citationRemainder)
     // Buffer citation-shaped blocks while definitions may still arrive later.
     // Never buffer explanatory prose, images or code.
     const pending = isStreaming && isSourceBlock
       && !invalid && !nonCitation
       && (block.type === 'list' || explicit || block.type === 'paragraph')
-      && partialCitation
-    const folded = isSourceBlock && count > 0 && !invalid && !nonCitation && onlyCitation
+      && (partialCitation || annotatedList)
+    const folded = isSourceBlock && count > 0 && !invalid && !nonCitation && (onlyCitation || annotatedList)
     if ((pending || folded) && block.position) {
       ranges.push([block.position.start.offset!, block.position.end.offset!])
       if (sectionHeading?.position) {

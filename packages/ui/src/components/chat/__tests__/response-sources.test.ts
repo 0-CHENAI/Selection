@@ -172,3 +172,29 @@ it('preserves source headings for explanatory or non-citation content while stre
     }
   }
 })
+
+it('moves annotated official source lists into the source shelf without losing descriptions', () => {
+  const text = '正文\n\n## 官方来源\n\n- [仓库](https://github.com/example/project) — SDK、CLI 与部署方式\n- [安全政策](https://example.com/security) — 漏洞报告及安全建议\n\n## 注意事项\n\n后续正文'
+  for (const streaming of [false, true]) {
+    const result = extractResponseSources(text, new Set(), streaming)
+    expect(result.content).not.toContain('官方来源')
+    expect(result.content).not.toContain('[仓库]')
+    expect(result.sources.map(source => source.description)).toEqual(['SDK、CLI 与部署方式', '漏洞报告及安全建议'])
+    expect(result.content.indexOf('后续正文')).toBe(text.indexOf('后续正文'))
+  }
+})
+
+it('keeps annotated official sources folded for every streamed prefix', () => {
+  const tail = '## 官方来源\n\n- [仓库](https://github.com/example/project) — SDK 与部署方式'
+  for (let end = 1; end <= tail.length; end++) {
+    const result = extractResponseSources(tail.slice(0, end), new Set(), true)
+    expect(result.content.trim()).toBe('')
+  }
+})
+
+it('keeps previous annotated citations folded while the next entry streams in', () => {
+  const text = '## 官方来源\n\n- [官网](https://example.com) — 官方文档\n- [仓库](https://github.com/example/project) — 项目代码'
+  for (let end = 1; end <= text.length; end++) {
+    expect(extractResponseSources(text.slice(0, end), new Set(), true).content.trim()).toBe('')
+  }
+})

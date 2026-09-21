@@ -12,6 +12,7 @@ import { CodeBlock, InlineCode } from './CodeBlock'
 import { MarkdownDiffBlock } from './MarkdownDiffBlock'
 import { MarkdownJsonBlock } from './MarkdownJsonBlock'
 import { MarkdownMermaidBlock } from './MarkdownMermaidBlock'
+import { NativeMarkdownTable } from './NativeMarkdownTable'
 import { MarkdownDatatableBlock } from './MarkdownDatatableBlock'
 import { MarkdownSpreadsheetBlock } from './MarkdownSpreadsheetBlock'
 import { MarkdownHtmlBlock } from './MarkdownHtmlBlock'
@@ -420,16 +421,14 @@ function createComponents(
       },
       // Clean tables
       table: ({ children }) => (
-        <div className="my-3 overflow-x-auto">
-          <table className="min-w-full text-sm">{children}</table>
-        </div>
+        <NativeMarkdownTable>{children}</NativeMarkdownTable>
       ),
       thead: ({ children }) => <thead className="border-b">{children}</thead>,
-      th: ({ children }) => (
-        <th className="text-left py-2 px-3 font-semibold text-muted-foreground">{children}</th>
+      th: ({ children, colSpan, rowSpan }) => (
+        <th colSpan={colSpan} rowSpan={rowSpan} className="text-left py-2 px-3 font-semibold text-muted-foreground">{children}</th>
       ),
-      td: ({ children }) => (
-        <td className="py-2 px-3 border-b border-border/50">{children}</td>
+      td: ({ children, colSpan, rowSpan }) => (
+        <td colSpan={colSpan} rowSpan={rowSpan} className="py-2 px-3 border-b border-border/50">{children}</td>
       ),
       // Headings - H1/H2 same size, differentiated by weight
       h1: ({ children }) => <h1 className="font-sans text-[16px] font-bold mt-5 mb-3">{children}</h1>,
@@ -540,17 +539,15 @@ function createComponents(
     ),
     // Beautiful tables
     table: ({ children }) => (
-      <div className="my-4 overflow-x-auto rounded-md border">
-        <table className="min-w-full divide-y divide-border">{children}</table>
-      </div>
+      <NativeMarkdownTable>{children}</NativeMarkdownTable>
     ),
     thead: ({ children }) => <thead className="bg-muted/50">{children}</thead>,
     tbody: ({ children }) => <tbody className="divide-y divide-border">{children}</tbody>,
-    th: ({ children }) => (
-      <th className="text-left py-3 px-4 font-semibold text-sm">{children}</th>
+    th: ({ children, colSpan, rowSpan }) => (
+      <th colSpan={colSpan} rowSpan={rowSpan} className="text-left py-3 px-4 font-semibold text-sm">{children}</th>
     ),
-    td: ({ children }) => (
-      <td className="py-3 px-4 text-sm">{children}</td>
+    td: ({ children, colSpan, rowSpan }) => (
+      <td colSpan={colSpan} rowSpan={rowSpan} className="py-3 px-4 text-sm">{children}</td>
     ),
     tr: ({ children }) => (
       <tr className="hover:bg-muted/30 transition-colors">{children}</tr>
