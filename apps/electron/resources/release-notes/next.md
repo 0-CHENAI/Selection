@@ -6,6 +6,8 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 
 ## Improvements
 
+- **Stable reference sources** — Numbered, emphasized, bare-URL and reference-style citations no longer flash in streaming replies. Known sources reserve their footer space so completion does not resize the answer card.
+
 - **Leaner agent context** — Rendering guides load on demand, duplicate Pi tool aliases are omitted from model requests while remaining executable, and context usage distinguishes estimated skill catalogs from loaded content. Swarm delegation follows one session policy.
 
 - **Natural document writing** — Prose drafting and revision can load a compact built-in writing skill to reduce formulaic language while preserving facts, citations, and the requested voice. Ordinary chat, code, and formatting-only tasks do not automatically load its body.

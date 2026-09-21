@@ -23,6 +23,8 @@ export function extractResponseSources(text: string, evidence: ReadonlySet<strin
   visit(tree, 'definition', node => {
     if (!definitions.has(node.identifier)) definitions.set(node.identifier, node.url)
   })
+  const lastBlock = tree.children.at(-1)
+  const trailingDefinition = isStreaming && lastBlock?.type === 'definition' ? lastBlock : undefined
   const sources: ResponseSource[] = []
   const seen = new Set<string>()
   const ranges: Array<[number, number]> = []
@@ -45,14 +47,12 @@ export function extractResponseSources(text: string, evidence: ReadonlySet<strin
     if (block.type === 'heading') {
       sectionDepth = sourceLabel.test(plain.join('')) ? block.depth : undefined
       sectionHeading = sectionDepth ? block : undefined
-      if (isStreaming && sectionHeading?.position) ranges.push([sectionHeading.position.start.offset!, sectionHeading.position.end.offset!])
       continue
     }
     // Models commonly use a bold standalone label instead of a Markdown heading.
     if (block.type === 'paragraph' && sourceLabel.test(plain.join(''))) {
       sectionDepth = 7
       sectionHeading = block
-      if (isStreaming && block.position) ranges.push([block.position.start.offset!, block.position.end.offset!])
       continue
     }
     const first = block.type === 'paragraph' ? block.children[0] : undefined
@@ -71,6 +71,8 @@ export function extractResponseSources(text: string, evidence: ReadonlySet<strin
       if (['image', 'imageReference', 'code', 'inlineCode', 'html', 'table', 'blockquote'].includes(node.type)) nonCitation = true
       if (node.type !== 'link' && node.type !== 'linkReference') return
       const target = node.type === 'link' ? node.url : definitions.get(node.identifier)
+      // A reference definition may arrive after its list during streaming.
+      if (isStreaming && node.type === 'linkReference' && (!target || node.identifier === trailingDefinition?.identifier)) return
       try {
         const url = new URL(target ?? '')
         if (!['https:', 'http:'].includes(url.protocol) || url.username || url.password) { invalid = true; return }
@@ -94,13 +96,22 @@ export function extractResponseSources(text: string, evidence: ReadonlySet<strin
     // A publisher suffix is still metadata while its closing bracket is in flight.
     // Classify the unfinished suffix only for buffering, never for final removal.
     const streamingRemainder = citationRemainder.replace(/[（(][^()（）\n]{0,80}$/, '')
+    // Markdown emphasis and list markers are often incomplete between deltas.
+    // Strip them only for buffering, never when deciding final removal.
+    const pendingText = streamingRemainder.replace(/[*_~]/g, '').trim()
+    const partialUrl = ['h', 'ht', 'htt', 'http', 'https', 'http:', 'https:', 'http:/', 'https:/'].includes(pendingText)
+      || /^https?:\/\/\S*$/.test(pendingText)
+    const partialCitation = /^[\s、，,;；:：.。()（）\[\]\d-]*$/.test(pendingText)
+      || /^[\s、，,;；:：.。\d-]*\[[^\]]*(?:\](?:\([^)]*\)?|\[[^\]]*\]?)?)?$/.test(pendingText)
+      || /^\[[^\]]+\]:\s*\S*$/.test(pendingText)
+      || partialUrl
     const onlyCitation = /^[\s、，,;；:：.。()（）\[\]\d-]*$/.test(citationRemainder)
-    // Buffer only citation-shaped unfinished blocks, never prose, images or code.
-    const pending = isStreaming && isSourceBlock && block === tree.children.at(-1)
+    // Buffer citation-shaped blocks while definitions may still arrive later.
+    // Never buffer explanatory prose, images or code.
+    const pending = isStreaming && isSourceBlock
       && !invalid && !nonCitation
-      && (block.type === 'list' || explicit || (block.type === 'paragraph'
-        && text.slice(block.position?.start.offset).trimStart().startsWith('[')))
-      && (/^[\s、，,;；:：.。()（）\[\]\d-]*$/.test(streamingRemainder) || /^[\s、，,;；:：.。\d-]*\[[^\]]*(?:\](?:\([^)]*)?)?$/.test(streamingRemainder))
+      && (block.type === 'list' || explicit || block.type === 'paragraph')
+      && partialCitation
     const folded = isSourceBlock && count > 0 && !invalid && !nonCitation && onlyCitation
     if ((pending || folded) && block.position) {
       ranges.push([block.position.start.offset!, block.position.end.offset!])

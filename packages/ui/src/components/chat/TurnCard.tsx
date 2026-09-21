@@ -2682,10 +2682,14 @@ export function ResponseCard({
           </ResponseBodyGrowth>
 
           {showArtifacts && !presentationStreaming && (
-            <>
-              <ResponseArtifacts key={messageId ?? revealIdentity} artifacts={artifacts} onOpenFile={onOpenFile} />
-              <ResponseSources key={`sources-${messageId ?? revealIdentity}`} sources={displayedSources} />
-            </>
+            <ResponseArtifacts key={messageId ?? revealIdentity} artifacts={artifacts} onOpenFile={onOpenFile} />
+          )}
+
+          {/* Reserve known research sources while text streams. Completion only
+              reveals the shelf, rather than growing the card under sticky scroll. */}
+          {canCollectSources && (
+            <ResponseSources key={`sources-${messageId ?? revealIdentity}`} sources={displayedSources}
+              pending={!showArtifacts || presentationStreaming} />
           )}
 
           {/* Desktop footer with actions (Copy / Markdown / Accept Plan / Branch).

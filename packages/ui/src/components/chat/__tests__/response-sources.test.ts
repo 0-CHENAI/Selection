@@ -113,3 +113,62 @@ it('restores unfinished metadata and ordinary headings when a stream ends', () =
   const ordinary = '## 参考架构\n\n正常正文'
   expect(extractResponseSources(ordinary, new Set(), true).content).toBe(ordinary)
 })
+
+it('never flashes numbered, emphasized or bare-URL citations at any streamed prefix', () => {
+  const body = '已完成正文。\n\n'
+  for (const bibliography of [
+    '1. **[官网](https://official.com)**\n2. **[报道](https://news.com)**',
+    '- _[官网](https://official.com)_\n- **[报道](https://news.com)**',
+    '- https://official.com\n- https://news.com',
+    'https://official.com',
+  ]) {
+    const tail = '## 参考来源\n\n' + bibliography
+    for (let end = 1; end <= tail.length; end++) {
+      const text = body + tail.slice(0, end)
+      const result = extractResponseSources(text, new Set(), true)
+      expect(result.content.trim()).toBe(body.trim())
+      expect(result.content.length).toBe(text.length)
+    }
+    expect(extractResponseSources(body + tail).content.trim()).toBe(body.trim())
+  }
+})
+
+it('keeps reference-style citations hidden while their later definition is incomplete', async () => {
+  const { unified } = await import('unified')
+  const { default: remarkParse } = await import('remark-parse')
+  const parser = unified().use(remarkParse)
+  const body = '正文。\n\n'
+  const tail = '## 参考来源\n\n- [官网][ref]\n\n[ref]: https://official.com'
+  for (let end = 1; end <= tail.length; end++) {
+    const result = extractResponseSources(body + tail.slice(0, end), new Set(), true)
+    const visible = parser.parse(result.content).children.filter(node => node.type !== 'definition')
+    expect(visible).toHaveLength(1)
+    expect(visible[0]?.type).toBe('paragraph')
+  }
+  expect(extractResponseSources(body + tail).sources).toHaveLength(1)
+})
+
+it('restores unfinished citations and rejects unsafe reference definitions on completion', () => {
+  for (const suffix of ['1.', '- **[未完成', '- [官网][ref]\n\n[ref]: javascript:alert(1)']) {
+    const text = '## 参考来源\n\n' + suffix
+    const result = extractResponseSources(text)
+    expect(result.content).toBe(text)
+    expect(result.sources).toHaveLength(0)
+  }
+})
+
+
+it('preserves source headings for explanatory or non-citation content while streaming', () => {
+  for (const heading of ['## 参考来源', '**参考来源**']) {
+    for (const body of [
+      '根据[官网](https://official.com)，数据仅代表测试条件。',
+      '![图示](/figure.png)',
+      '```text\n示例\n```',
+      '- [下载](https://example.com/report.docx)',
+      '## 下一节\n\n普通正文',
+    ]) {
+      const text = `${heading}\n\n${body}`
+      expect(extractResponseSources(text, new Set(), true).content).toBe(text)
+    }
+  }
+})
