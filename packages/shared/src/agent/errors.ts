@@ -290,6 +290,12 @@ const ERROR_DEFINITIONS: Record<ErrorCode, Omit<AgentError, 'code' | 'originalEr
     canRetry: true,
     retryDelayMs: 1000,
   },
+  model_request_timeout: {
+    title: 'Model request stayed silent too long',
+    message: 'This model request stayed silent too long. Recorded work is retained. Continue this conversation to resume.',
+    actions: [],
+    canRetry: false,
+  },
   provider_timeout: {
     title: 'Model response timed out',
     message: 'The model service did not respond in time. This may be an upstream timeout. Check the node results before retrying.',
@@ -313,6 +319,15 @@ const ERROR_DEFINITIONS: Record<ErrorCode, Omit<AgentError, 'code' | 'originalEr
     message: 'The conversation exceeded the model context limit. Compact the conversation or start a new session before continuing.',
     actions: [],
     canRetry: false,
+  },
+  output_limit: {
+    title: 'Output limit reached', message: 'This model call exhausted its output budget. Continue from recorded results; no completed artifact is guaranteed.', actions: [], canRetry: false,
+  },
+  answer_delivery_missing: { title: 'Answer not submitted', message: 'The model did not formally submit its answer. Recorded work is retained.', actions: [], canRetry: false },
+  answer_persistence_failed: { title: 'Answer save failed', message: 'The submitted answer could not be saved. Model retries cannot resolve this storage failure.', actions: [], canRetry: false },
+  progress_needs_user: { title: 'User input required', message: 'Task paused pending required user input.', actions: [], canRetry: false },
+  call_time_limit: {
+    title: 'Model call paused', message: 'The model stream stayed silent too long. Review recorded results before continuing.', actions: [], canRetry: false,
   },
   stream_interrupted: {
     title: 'Response stream interrupted',
@@ -469,7 +484,9 @@ export function parseError(
   let code: ErrorCode = 'unknown_error';
 
   // Check for OpenRouter data policy errors first (these contain "no endpoints" which could confuse other checks)
-  if (lowerMessage.includes('taking too long to respond') || lowerMessage.includes('request timed out') || lowerMessage.includes('etimedout')) {
+  if (lowerMessage.includes('model request time limit reached')) {
+    code = 'model_request_timeout';
+  } else if (lowerMessage.includes('taking too long to respond') || lowerMessage.includes('request timed out') || lowerMessage.includes('etimedout')) {
     code = 'provider_timeout';
   } else if (lowerMessage.includes('pi subprocess exited unexpectedly')) {
     code = 'agent_process_exited';
@@ -588,7 +605,7 @@ export function parseError(
     : undefined;
 
   // Terminal diagnostics must not expose provider payloads, paths, or subprocess arguments.
-  if (code === 'provider_timeout' || code === 'context_limit' || code === 'stream_interrupted' || code === 'agent_process_exited') {
+  if (code === 'model_request_timeout' || code === 'provider_timeout' || code === 'context_limit' || code === 'stream_interrupted' || code === 'agent_process_exited') {
     return { code, ...definition, providerInfo };
   }
 

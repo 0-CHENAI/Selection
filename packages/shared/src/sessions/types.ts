@@ -140,6 +140,9 @@ export type BuiltInStatusId = 'todo' | 'in-progress' | 'needs-review' | 'done' |
  * Session token usage tracking
  */
 export interface SessionTokenUsage {
+  /** Independent progress assessment usage; included in totalTokens and costUsd. */
+  evaluationTokens?: number;
+  evaluationCostUsd?: number;
   inputTokens: number;
   outputTokens: number;
   totalTokens: number;
@@ -149,6 +152,19 @@ export interface SessionTokenUsage {
   cacheCreationTokens?: number;
   /** Model's context window size in tokens (from SDK modelUsage) */
   contextWindow?: number;
+  /** Cache read share of the latest request input (0-1). */
+  cacheHitRate?: number;
+  /** Estimated context composition. Optional fields appear only when Selection can measure them. */
+  contextBreakdown?: {
+    systemPrompt: number;
+    tools: number;
+    messages: number;
+    rules?: number;
+    skills?: number;
+    mcpTools?: number;
+    subagents?: number;
+    summarized?: number;
+  };
   /** Usage reported by the most recent individual model call. Absent on legacy sessions. */
   lastCall?: SessionModelCallUsage;
   /** Live aggregate for the user task that is currently processing. Runtime-only in normal operation. */
@@ -298,8 +314,6 @@ export interface SessionConfig extends SwarmSessionMetadata {
     automationName?: string;
     event?: string;
     timestamp?: number;
-    sourceSessionId?: string;
-    automationDepth?: number;
   };
   /** Workspace-scoped project id this session belongs to (undefined = unbound). */
   projectId?: string;
@@ -413,8 +427,6 @@ export interface SessionHeader extends SwarmSessionMetadata {
     automationName?: string;
     event?: string;
     timestamp?: number;
-    sourceSessionId?: string;
-    automationDepth?: number;
   };
   /** Workspace-scoped project id this session belongs to (undefined = unbound). */
   projectId?: string;

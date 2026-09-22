@@ -6,8 +6,28 @@
  */
 
 import type { Message, StoredMessage, MessageRole } from '@craft-agent/core'
-import { storedToMessage, hasRenderableAssistantText } from '@craft-agent/core'
-import { isParentTaskTool } from '@craft-agent/shared/utils/toolNames'
+import { storedToMessage, hasRenderableAssistantText, isAnswerDeliveryReceipt } from '@craft-agent/core'
+import { isParentTaskTool, getToolDisplayName } from '@craft-agent/shared/utils/toolNames'
+
+import { isSubmitAnswerTool, localizedToolLabel } from './tool-labels'
+import { unified } from 'unified'
+import remarkParse from 'remark-parse'
+
+const headingParser = unified().use(remarkParse)
+const headingCache = new WeakMap<Message, { content: string; headings: string[] }>()
+
+/** Only actual document headings identify a draft, not quotes or code examples. */
+function messageHeadings(message: Message): string[] {
+  const cached = headingCache.get(message)
+  if (cached?.content === message.content) return cached.headings
+  const headings = headingParser.parse(message.content).children.flatMap(node => {
+    if (node.type !== 'heading') return []
+    const source = message.content.slice(node.position?.start.offset, node.position?.end.offset).trim()
+    return /^#{1,6}\s/.test(source) ? [source] : []
+  })
+  headingCache.set(message, { content: message.content, headings })
+  return headings
+}
 
 export { storedToMessage }
 import type { ActivityItem, ActivityStatus, ActivityType, ResponseContent, TodoItem } from './TurnCard'
@@ -42,6 +62,7 @@ function stripErrorTags(content: string | undefined): string | undefined {
 /** Represents one complete assistant turn */
 export interface AssistantTurn {
   type: 'assistant'
+  presentationProtocol?: 'native' | 'marker-v1' | 'legacy'
   answerRunId?: string
   turnId: string
   activities: ActivityItem[]
@@ -52,6 +73,8 @@ export interface AssistantTurn {
   timestamp: number
   /** Extracted from TodoWrite tool - latest todo state in this turn */
   todos?: TodoItem[]
+  /** Successful submit_answer. Delivery is not a work-chain row. */
+  answerDelivered?: boolean
 }
 
 /** Represents a user message */
@@ -89,8 +112,10 @@ export type Turn = AssistantTurn | UserTurn | SystemTurn | AuthRequestTurn
  * pending text, intermediate rows, and tools arrive, which would remount the
  * card and replay expand/collapse on every new element.
  */
+// Pass the index in the complete turn list, not a paginated slice. Completion
+// may replace timestamps, but must preserve both the card and expansion state.
 export function getAssistantTurnUiKey(turn: AssistantTurn, index: number): string {
-  return `assistant:turn:${turn.turnId}:${turn.timestamp}:${index}`
+  return `assistant:turn:${turn.turnId}:${index}`
 }
 
 // ============================================================================
@@ -180,13 +205,13 @@ export function deriveTurnPhase(turn: AssistantTurn): TurnPhase {
 export function isVisibleCommentaryCard(
   response: AssistantTurn['response'],
   isComplete: boolean,
-  hasToolActivities = false,
+  hasRunningTools = false,
 ): boolean {
-  // #83: once tools are running, intermediate text belongs in the work chain,
-  // not a main-slot card that looks like the final reply.
+  // #83: a running tool owns the work chain. Finished tools do not hide a
+  // later draft — that text is the live reply until submit_answer or the next tool.
   return !!response?.isCommentary
     && !isComplete
-    && !hasToolActivities
+    && !hasRunningTools
     && hasRenderableAssistantText(response?.text)
 }
 
@@ -214,6 +239,58 @@ export function demoteResponseToWorkChain(turn: AssistantTurn): void {
     }
   }
   turn.response = undefined
+}
+
+/** A later preview or commit replaces the live draft; do not restate it in the work chain. */
+function replaceLiveDraft(turn: AssistantTurn, nextText: string): void {
+  const previous = turn.response
+  if (!previous || previous.isAnswerPreview) return
+  const draft = previous.text.trim()
+  const absorbed = draft.length >= 2 && nextText.trim().startsWith(draft)
+  if (absorbed || previous.isStreaming) {
+    turn.activities = turn.activities.filter(activity => activity.id !== previous.messageId)
+    turn.response = undefined
+    return
+  }
+  demoteResponseToWorkChain(turn)
+}
+
+function isLiveAnswerDraft(message: Message): boolean {
+  return message.role === 'assistant'
+    && message.answerProtocol === 'explicit-v1'
+    && !message.answerCommitted
+    && !message.answerPreview
+}
+
+function isAuthoritativeCommit(message: Message): message is Message & { answerRunId: string } {
+  return message.role === 'assistant'
+    && message.answerProtocol === 'explicit-v1'
+    && !!message.answerCommitted
+    && !!message.answerRunId
+    && hasRenderableAssistantText(message.content)
+    && !isAnswerDeliveryReceipt(message.content)
+}
+
+/**
+ * Live tokens occupy the white card. Completed process text uses `isIntermediate`.
+ * marker-v1 unclassified stays in the work chain until a final boundary.
+ */
+function isLiveCardStream(message: Message): boolean {
+  if (message.role !== 'assistant') return false
+  if (!(message.isStreaming || message.isPending)) return false
+  if (!hasRenderableAssistantText(message.content)) return false
+  if (message.presentationProtocol === 'marker-v1') return false
+  if (isLiveAnswerDraft(message)) return true
+  // Legacy senders flag process text with isIntermediate alone (no phase).
+  return message.phase !== 'intermediate' && !message.isIntermediate
+}
+
+/** explicit-v1: live tokens are the reply; a finished uncommitted draft is process text. */
+function classifyForTurnGrouping(message: Message): Message {
+  if (message.answerCommitted || message.answerPreview) return message
+  if (!isLiveAnswerDraft(message)) return message
+  const live = !!(message.isStreaming || message.isPending)
+  return message.isIntermediate === !live ? message : { ...message, isIntermediate: !live }
 }
 
 /** The live card already shows this intermediate body — don't also insert a row. */
@@ -261,7 +338,6 @@ export function shouldShowGenericThinkingIndicator(
         && activity.status === 'running',
     )
 }
-
 /**
  * Desktop `Streaming...` footer means "this card's body is still being typed".
  * Once tools (including spawn_session) have started, progress belongs on the
@@ -289,16 +365,48 @@ export function shouldShowStreamingFooter(input: {
  * live activities can briefly be received out of array order; array order only
  * breaks timestamp ties.
  */
+export function countWorkRecords(activities: ReadonlyArray<ActivityItem>): number {
+  return new Set(activities
+    // Delivery is the card body, not a numbered work step.
+    .filter(activity => !isSubmitAnswerTool(activity.toolName))
+    // Empty live placeholders are transient indicators, not work records.
+    .filter(activity => !['intermediate', 'thinking'].includes(activity.type)
+      || hasRenderableAssistantText(activity.content))
+    .map(activity => activity.type === 'tool'
+      ? `tool:${activity.toolUseId ?? activity.id}`
+      : `${activity.type}:${activity.id}`)).size
+}
+
 export function getActiveTurnPreview(
   activities: ActivityItem[],
   phase: TurnPhase,
 ): string | undefined {
-  if (phase === 'complete' || phase === 'streaming') return undefined
+  if (phase === 'complete') return undefined
 
   let latest: { text: string; timestamp: number; index: number } | undefined
 
   activities.forEach((activity, index) => {
-    const toolIntent = activity.type === 'tool' ? activity.intent?.trim() : undefined
+    if (isSubmitAnswerTool(activity.toolName)) return
+    let toolIntent: string | undefined
+    if (activity.type === 'tool') {
+      toolIntent = activity.intent?.trim()
+      if (!toolIntent && activity.toolName) {
+        const name = activity.displayName?.trim()
+          || ((!activity.toolDisplayMeta || activity.toolDisplayMeta.category === 'native')
+            ? localizedToolLabel(activity.toolName) : undefined)
+          || activity.toolDisplayMeta?.displayName
+          || getToolDisplayName(activity.toolName)
+        // Use only recognizable input fields, never raw output or arbitrary
+        // argument JSON. Native tools often have no generated intent metadata.
+        const input = activity.toolInput
+        const detail = ['description', 'query', 'file_path', 'path', 'url', 'command', 'pattern']
+          .map(key => input?.[key])
+          .find(value => typeof value === 'string' && value.trim())
+        toolIntent = typeof detail === 'string'
+          ? `${name} · ${detail.replace(/\s+/g, ' ').trim()}`
+          : name
+      }
+    }
     const statusText = activity.type === 'status' ? activity.content?.trim() : undefined
     const text = toolIntent || statusText
     if (!text) return
@@ -545,7 +653,19 @@ export function groupMessagesByTurn(messages: Message[], options: GroupTurnsOpti
   // Drop hidden and queued messages before grouping. Queued user content belongs
   // to the composer queue until replay starts; it is not yet a transcript turn.
   const deliveredRuns = new Set<string>()
+  const submittedRuns = new Set<string>()
   let activeRunId: string | undefined
+  // Committed answer text per run, so commentary that turns out to be the
+  // drafted opening of the final answer can be folded into the final card.
+  const committedAnswerByRun = new Map<string, string>()
+  const committedHeadingByRun = new Map<string, string>()
+  for (const message of messages) {
+    if (!message.hidden && !message.isQueued && isAuthoritativeCommit(message)) {
+      committedAnswerByRun.set(message.answerRunId, message.content.trim())
+      const heading = messageHeadings(message)[0]
+      if (heading) committedHeadingByRun.set(message.answerRunId, heading)
+    }
+  }
   const protocolMessages = [...messages].sort((a, b) => a.timestamp - b.timestamp).flatMap(message => {
     if (message.answerPreview && options.isSessionProcessing === false) return []
     if (message.hidden && message.role !== 'user') return []
@@ -553,13 +673,63 @@ export function groupMessagesByTurn(messages: Message[], options: GroupTurnsOpti
     if (message.answerRunId) activeRunId = message.answerRunId
     const runId = message.answerRunId ?? activeRunId
     if (runId && deliveredRuns.has(runId) && (message.role === 'assistant' || message.role === 'tool')) return []
-    if (message.answerProtocol === 'explicit-v1' && message.answerCommitted && runId) deliveredRuns.add(runId)
-    const classified = message.answerProtocol === 'explicit-v1' && message.role === 'assistant'
-      ? { ...message, isIntermediate: !message.answerCommitted && !message.answerPreview }
-      : message
-    return [classified]
+    // The model sometimes drafts its final answer as ordinary text before
+    // formally submitting it. Once that run is committed, the draft's work
+    // chain row would restate the answer's opening — keep one visible copy.
+    const committedAnswer = runId ? committedAnswerByRun.get(runId) : undefined
+    if (committedAnswer && message.role === 'assistant' && !message.answerCommitted && !message.answerPreview) {
+      const draft = message.content.trim()
+      if (draft.length >= 2 && committedAnswer.startsWith(draft)) return []
+      // Commentary carrying the answer's own top-level heading is a superseded
+      // draft of that answer (narration + rewritten body), not process notes.
+      const committedHeading = runId ? committedHeadingByRun.get(runId) : undefined
+      if (committedHeading && committedHeading.length >= 6 && messageHeadings(message).includes(committedHeading)) return []
+    }
+    if (
+      message.role === 'tool'
+      && isSubmitAnswerTool(message.toolName)
+      && !message.isError
+      && (message.toolStatus === 'completed' || message.toolResult !== undefined)
+      && runId
+    ) {
+      submittedRuns.add(runId)
+    }
+    // After a successful submit, finished uncommitted text is not a second final.
+    // Live tokens and previews stay on the card until the committed body arrives.
+    if (
+      message.role === 'assistant'
+      && runId
+      && submittedRuns.has(runId)
+      && !message.answerCommitted
+      && !message.answerPreview
+      && !message.isStreaming
+      && !message.isPending
+    ) {
+      return []
+    }
+    let normalized = message
+    if (
+      message.role === 'assistant'
+      && runId
+      && !message.answerCommitted
+      && !message.answerPreview
+      && !message.answerProtocol
+    ) {
+      normalized = { ...message, answerProtocol: 'explicit-v1', answerRunId: runId }
+    }
+    if (isAuthoritativeCommit(normalized) && runId) deliveredRuns.add(runId)
+    return [classifyForTurnGrouping(normalized)]
   })
   const visibleMessages = protocolMessages.filter(m => !m.hidden && !m.isQueued)
+  // message_end only closes a text segment, not the agent run. Keep its
+  // unclassified draft on the card while waiting for the delivery boundary.
+  // A subsequent tool/message naturally removes this tail-only reservation.
+  const tail = visibleMessages.at(-1)
+  if (options.isSessionProcessing && tail && isLiveAnswerDraft(tail)
+    && tail.phase !== 'intermediate' && tail.presentationProtocol !== 'marker-v1'
+    && hasRenderableAssistantText(tail.content) && !tail.isStreaming && !tail.isPending) {
+    visibleMessages[visibleMessages.length - 1] = { ...tail, isPending: true, isIntermediate: false }
+  }
   // Sort by timestamp for correct chronological order
   // This ensures correct turn grouping even if messages are added out of order during streaming
   const sortedMessages = visibleMessages // Protocol normalization above already sorted chronologically.
@@ -592,10 +762,12 @@ export function groupMessagesByTurn(messages: Message[], options: GroupTurnsOpti
     const adopted = adoptFlushedAssistantTurn(message.answerRunId)
     if (adopted) {
       adopted.answerRunId ??= message.answerRunId
+      adopted.presentationProtocol ??= message.presentationProtocol
       return adopted
     }
     currentTurn = {
       type: 'assistant',
+      presentationProtocol: message.presentationProtocol,
       answerRunId: message.answerRunId,
       turnId: message.answerRunId ? `answer-${message.answerRunId}` : message.turnId || message.id,
       activities: [],
@@ -608,8 +780,15 @@ export function groupMessagesByTurn(messages: Message[], options: GroupTurnsOpti
     return currentTurn
   }
 
-  const flushCurrentTurn = (interrupted = false) => {
+  const flushCurrentTurn = (interrupted = false, keepEmptyTail = false) => {
     if (currentTurn) {
+      // A turn anchored only by a dropped whitespace thought has nothing to
+      // show. Keep it solely as the live tail so the thinking header persists
+      // (and the key stays put) until the next tool joins.
+      if (currentTurn.activities.length === 0 && !currentTurn.response && !keepEmptyTail) {
+        currentTurn = null
+        return
+      }
       // Sort activities by timestamp to ensure correct chronological order
       // This is necessary because buffering can delay when messages are added
       // to the array, causing commentary to appear after tools that started later
@@ -644,14 +823,18 @@ export function groupMessagesByTurn(messages: Message[], options: GroupTurnsOpti
       // Don't do this for turns with plans - the plan is the final output
       // Only promote when turn is complete (processing indicator hidden)
       const hasPlan = currentTurn.activities.some(a => a.type === 'plan')
-      if (!currentTurn.answerRunId && !interrupted && !hasPlan && !currentTurn.response && currentTurn.isComplete && currentTurn.activities.length > 0) {
+      // Native turns promote the last thought when nothing else landed.
+      // explicit-v1 waits for a successful submit_answer — if that finished
+      // and the committed body never arrived, keep the last real draft.
+      if (currentTurn.presentationProtocol !== 'marker-v1' && !interrupted && !hasPlan && !currentTurn.response && currentTurn.isComplete && currentTurn.activities.length > 0
+        && (!currentTurn.answerRunId || currentTurn.answerDelivered)) {
         // Find the last intermediate text activity (reverse to get most recent)
         const lastTextActivity = [...currentTurn.activities]
           .reverse()
-          .find(a => a.type === 'intermediate' && a.content)
+          .find(a => a.type === 'intermediate' && hasRenderableAssistantText(a.content))
 
         const promotedText = lastTextActivity?.content
-        if (lastTextActivity && hasRenderableAssistantText(promotedText)) {
+        if (lastTextActivity && promotedText) {
           currentTurn.response = {
             text: promotedText,
             isStreaming: false,
@@ -666,8 +849,10 @@ export function groupMessagesByTurn(messages: Message[], options: GroupTurnsOpti
       }
 
       // Completed turns treat leftover commentary as the visible final body.
+      // explicit-v1 still requires submit_answer; never promote an undelivered draft.
       if (currentTurn.isComplete && currentTurn.response?.isCommentary) {
-        currentTurn.response = { ...currentTurn.response, isCommentary: false }
+        if (currentTurn.answerRunId) demoteResponseToWorkChain(currentTurn)
+        else currentTurn.response = { ...currentTurn.response, isCommentary: false }
       }
 
       turns.push(currentTurn)
@@ -800,10 +985,27 @@ export function groupMessagesByTurn(messages: Message[], options: GroupTurnsOpti
     if (message.role === 'tool') {
       // Tool is complete if toolStatus is 'completed' OR toolResult exists (but NOT if backgrounded)
       const isToolComplete = (message.toolStatus === 'completed' || message.toolResult !== undefined) && message.toolStatus !== 'backgrounded'
+      const isDelivery = isSubmitAnswerTool(message.toolName ?? '')
       currentTurn = ensureOpenAssistantTurn(message, {
         isStreaming: !isToolComplete,
-        intent: message.toolIntent,
+        intent: isDelivery ? undefined : message.toolIntent,
       })
+      if (
+        currentTurn.response
+        && !currentTurn.response.isAnswerPreview
+        && !isDelivery
+        && (currentTurn.response.isCommentary || currentTurn.answerRunId)
+        && !currentTurn.response.isStreaming
+      ) {
+        demoteResponseToWorkChain(currentTurn)
+      }
+      // submit_answer is the delivery channel for the streamed card, not a
+      // user-visible work step. Only a successful call unlocks salvage.
+      if (isDelivery) {
+        if (isToolComplete && !message.isError) currentTurn.answerDelivered = true
+        currentTurn.isStreaming = !isToolComplete
+        continue
+      }
       // Always add to current turn (ignoring turnId differences)
       // Pass existing activities for incremental depth calculation
       currentTurn.activities.push(messageToActivity(message, currentTurn.activities))
@@ -813,20 +1015,27 @@ export function groupMessagesByTurn(messages: Message[], options: GroupTurnsOpti
 
     // Assistant messages are the response part of a turn
     if (message.role === 'assistant') {
-      // Only explicit intermediate text is a thought-row. Pending tokens are
-      // the streaming reply — after a Read/tool step they must not become a
-      // gray activity bar that restates the same markdown.
+      // Classified intermediate text is a thought-row. Live tokens stay on
+      // the card by protocol fields, not by whether tools already ran.
       if (message.isIntermediate) {
         // Keep an empty pending item as the live thinking indicator, but do not
         // turn a completed whitespace-only event into a blank work-chain row.
         if (!message.isPending && !hasRenderableAssistantText(message.content)) {
-          if (currentTurn && !message.isStreaming) {
-            currentTurn.isStreaming = false
+          if (currentTurn) {
+            if (!message.isStreaming) currentTurn.isStreaming = false
+          } else if (turns[turns.length - 1]?.type !== 'assistant') {
+            // Some backends open every tool batch with a whitespace-only thought.
+            // While pending it created the turn (and its React key); keep that
+            // identity once it completes, or the card remounts when the first
+            // tool arrives and every header/row transition is cut. Empty turns
+            // are dropped at flush unless they are the live tail.
+            ensureOpenAssistantTurn(message, { isStreaming: false })
           }
           continue
         }
 
-        currentTurn = ensureOpenAssistantTurn(message, { isStreaming: !!message.isPending })
+        currentTurn = ensureOpenAssistantTurn(message, { isStreaming: !!message.isPending || !!message.isStreaming })
+        const keepOnCard = isLiveCardStream(message)
         // Always add to current turn as activity (ignoring turnId differences)
         // Pending messages show as 'running' until we know they're complete
         // Include parentId for intermediate messages to support nesting within subagents
@@ -845,12 +1054,21 @@ export function groupMessagesByTurn(messages: Message[], options: GroupTurnsOpti
         } else {
           intermediateActivity.depth = 0
         }
-        currentTurn.activities.push(intermediateActivity)
+        if (!keepOnCard) currentTurn.activities.push(intermediateActivity)
 
-        // #83: intermediate text stays in the work chain. If this body was
-        // occupying the main card (pending tokens or leftover commentary),
-        // demote it so tools do not leave a fake final reply on screen.
-        if (
+        // Live drafts stay on the card only. Pushing a thought-row and hiding
+        // it later still leaks the answer into the expanded work chain.
+        if (keepOnCard) {
+          currentTurn.response = {
+            text: message.content,
+            isStreaming: !!(message.isStreaming || message.isPending),
+            isCommentary: false,
+            streamStartTime: (message.isStreaming || message.isPending) ? message.timestamp : undefined,
+            messageId: message.id,
+            annotations: message.annotations,
+          }
+          currentTurn.isStreaming = !!(message.isStreaming || message.isPending)
+        } else if (
           currentTurn.response
           && (currentTurn.response.isCommentary || currentTurn.response.messageId === message.id)
         ) {
@@ -880,22 +1098,25 @@ export function groupMessagesByTurn(messages: Message[], options: GroupTurnsOpti
         isStreaming: !!message.isStreaming,
         isComplete: !message.isStreaming,
       })
+      replaceLiveDraft(currentTurn, message.content)
+      const pendingCardStream = isLiveCardStream(message) && !message.isStreaming
 
       // Set as response on current turn (ignoring turnId differences)
       currentTurn.response = {
         text: message.content,
         isAnswerPreview: message.answerPreview,
         isStreaming: !!message.isStreaming,
+        isCommentary: pendingCardStream,
         streamStartTime: message.isStreaming ? message.timestamp : undefined,
-        completedRevealStartTime: message.answerProtocol === 'explicit-v1' || message.isStreaming ? undefined : message.timestamp,
+        completedRevealStartTime: message.isStreaming ? undefined : message.completedRevealStartTime,
         messageId: message.id,
         annotations: message.annotations,
       }
       currentTurn.isStreaming = !!message.isStreaming
-      currentTurn.isComplete = !message.isStreaming
+      currentTurn.isComplete = !message.isStreaming && !pendingCardStream
 
       // Flush when turn is complete (non-streaming = final response received)
-      if (!message.isStreaming) {
+      if (!message.isStreaming && !pendingCardStream) {
         flushCurrentTurn()
       }
       continue
@@ -916,7 +1137,7 @@ export function groupMessagesByTurn(messages: Message[], options: GroupTurnsOpti
   }
 
   // Flush any remaining turn
-  flushCurrentTurn()
+  flushCurrentTurn(false, options.isSessionProcessing === true)
 
   // Session-level orchestration metadata may lag behind the accepted answer.
   // Only the latest run's delivery settles it; an older answer cannot settle a new run.
@@ -924,6 +1145,11 @@ export function groupMessagesByTurn(messages: Message[], options: GroupTurnsOpti
   const latestAnswerDelivered = latestTurn?.type === 'assistant'
     && !!latestTurn.answerRunId && deliveredRuns.has(latestTurn.answerRunId)
   const latestAnswerPreview = latestTurn?.type === 'assistant' && latestTurn.response?.isAnswerPreview
+  // A text message ending is not the agent run ending: it may still reason
+  // or call another tool. Only session completion settles the latest turn.
+  if (options.isSessionProcessing && latestTurn?.type === 'assistant' && !latestAnswerDelivered) {
+    latestTurn.isComplete = false
+  }
   if (options.isManagedSwarmRunning && !latestAnswerDelivered && !latestAnswerPreview) {
     keepLatestManagedSwarmTurnOpen(turns)
   }

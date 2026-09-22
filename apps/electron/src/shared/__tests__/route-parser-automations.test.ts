@@ -2,6 +2,10 @@ import { describe, it, expect } from 'bun:test'
 import { parseCompoundRoute, buildCompoundRoute } from '../route-parser'
 
 describe('route-parser: automations routes', () => {
+  it('rejects retired runtime automation routes', () => {
+    expect(parseCompoundRoute('automations/agentic')).toBeNull()
+    expect(parseCompoundRoute('automations/agentic/automation/retired')).toBeNull()
+  })
   it('parses "automations" as automations navigator with no filter or details', () => {
     const result = parseCompoundRoute('automations')
     expect(result).not.toBeNull()
@@ -23,14 +27,6 @@ describe('route-parser: automations routes', () => {
     expect(result).not.toBeNull()
     expect(result!.navigator).toBe('automations')
     expect(result!.automationFilter).toEqual({ kind: 'type', automationType: 'event' })
-    expect(result!.details).toBeNull()
-  })
-
-  it('parses "automations/agentic" as automations with agentic filter', () => {
-    const result = parseCompoundRoute('automations/agentic')
-    expect(result).not.toBeNull()
-    expect(result!.navigator).toBe('automations')
-    expect(result!.automationFilter).toEqual({ kind: 'type', automationType: 'agentic' })
     expect(result!.details).toBeNull()
   })
 

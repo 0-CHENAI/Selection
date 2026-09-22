@@ -61,6 +61,13 @@ export const CHAT_CLASSES = {
 
   /** Bottom branding container */
   brandingContainer: `flex justify-center ${CHAT_LAYOUT.brandingPadding}`,
+
+  /** Draft and live composers share this column so the first send does not resize the input. */
+  composerColumn: `${CHAT_LAYOUT.maxWidth} mx-auto w-full`,
+
+  /** Leave the record-navigation gutter in place so the composer does not shift when ticks appear. */
+  recordRailGrid: 'grid flex-1 min-h-0 min-w-0 grid-cols-[2rem_minmax(0,1fr)]',
+  recordRailContent: 'col-start-2 flex min-h-0 min-w-0 flex-col',
 } as const
 
 // ============================================================================

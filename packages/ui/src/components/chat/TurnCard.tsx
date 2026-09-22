@@ -1,6 +1,15 @@
+import { collectTurnResearchSources, sourceUrlKey } from './source-metadata'
+import { ResponseSources } from './ResponseSources'
+import { extractResponseSources } from './response-sources'
 import * as React from 'react'
 import { useMemo, useEffect, useRef, useCallback, useState } from 'react'
 import i18n from 'i18next'
+import { isSubmitAnswerTool, localizedToolLabel } from './tool-labels'
+import { usePacedSource } from './usePacedSource'
+import { ResponseArtifacts } from './ResponseArtifacts'
+import { extractResponseArtifacts } from './response-artifacts'
+import { ResponseBodyGrowth } from './ResponseBodyGrowth'
+import { useCompletionActions } from './useCompletionActions'
 import { useTranslation } from 'react-i18next'
 import type { ToolDisplayMeta, AnnotationV1, AgentToolResultContent } from '@craft-agent/core'
 import { normalizePath, pathStartsWith, stripPathPrefix, hasRenderableAssistantText } from '@craft-agent/core/utils'
@@ -30,8 +39,6 @@ import { cn } from '../../lib/utils'
 import { Markdown } from '../markdown'
 import { Spinner } from '../ui/LoadingIndicator'
 import { markdownToPlainText } from './markdown-to-plain-text'
-import { BUFFER_CONFIG } from './stream-buffer'
-import { useStreamingReveal } from './useStreamingReveal'
 import { type IslandTransitionConfig } from '../ui'
 import { AnnotationIslandMenu } from '../annotations/AnnotationIslandMenu'
 import {
@@ -54,10 +61,11 @@ import {
   normalizeCraftSessionToolName,
   deriveTurnPhase,
   getActiveTurnPreview,
+  countWorkRecords,
   isVisibleCommentaryCard,
   isMirroredCommentaryActivity,
-  shouldShowStreamingFooter,
   shouldShowGenericThinkingIndicator,
+  shouldShowThinkingIndicator,
   type ActivityGroup,
   type AssistantTurn,
   type TurnPhase,
@@ -237,7 +245,7 @@ export const SIZE_CONFIG = {
 } as const
 
 /** Product-standard label paired with the 3x3 grid activity indicator. */
-const THINKING_STATUS_LABEL = 'Thinking...'
+const thinkingStatusLabel = () => i18n.t('chat.processing.thinking')
 
 // ============================================================================
 // Types
@@ -441,7 +449,7 @@ function getToolDisplayName(name: string): string {
     'spawn_session': 'Spawn Session',
   }
 
-  return displayNames[stripped] || stripped
+  return localizedToolLabel(stripped) || displayNames[stripped] || stripped
 }
 
 /**
@@ -592,7 +600,7 @@ function formatToolDisplay(
     }
 
     return {
-      name: toolDisplayMeta.displayName,
+      name: (toolDisplayMeta.category === 'native' ? localizedToolLabel(toolName) : undefined) || toolDisplayMeta.displayName,
       icon: toolDisplayMeta.iconDataUrl,
       description: toolDisplayMeta.description,
     }
@@ -613,25 +621,29 @@ function formatToolDisplay(
 }
 
 /** Get the primary preview text for collapsed state */
-function getPreviewText(
+export function getPreviewText(
   activities: ActivityItem[],
   intent: string | undefined,
   turnPhase: TurnPhase,
 ): string {
-  // Final response streaming is the newest user-visible phase.
   if (turnPhase === 'streaming') return i18n.t('turnCard.responding')
 
   // During an active turn, prefer the newest thinking/tool intent over the
   // turn-level intent captured when the turn was first created. The latter is
   // intentionally stable and otherwise leaves the title stuck on step one.
+  // This check runs before the pending/awaiting fallback so the header follows
+  // the latest step while the model works between steps (#402).
   const latestActivePreview = getActiveTurnPreview(activities, turnPhase)
   if (latestActivePreview) return latestActivePreview
+
+  // No step provides a label yet — describe the live phase.
+  if (turnPhase === 'pending' || turnPhase === 'awaiting') return thinkingStatusLabel()
 
   // If we have an explicit intent, use it
   if (intent) return intent
 
   // Find the most relevant activity intent
-  const activityWithIntent = activities.find(a => a.intent)
+  const activityWithIntent = activities.find(a => a.intent && !isSubmitAnswerTool(a.toolName))
   if (activityWithIntent?.intent) return activityWithIntent.intent
 
   // Find running Task tools and show their description
@@ -640,9 +652,8 @@ function getPreviewText(
     return runningTask.toolInput.description as string
   }
 
-  // Get running and completed tools (not intermediate messages)
-  const runningTools = activities.filter(a => a.status === 'running' && a.toolName)
-  const errorCount = activities.filter(a => a.status === 'error').length
+  // Get running tools (not intermediate messages)
+  const runningTools = activities.filter(a => a.status === 'running' && a.toolName && !isSubmitAnswerTool(a.toolName))
 
   // Show running tool names
   if (runningTools.length > 0) {
@@ -655,23 +666,13 @@ function getPreviewText(
   // When complete, show first Task's description if available
   const firstTask = activities.find(a => isParentTaskTool(a.toolName ?? ''))
   if (firstTask?.toolInput?.description) {
-    const errorSuffix = errorCount > 0
-      ? i18n.t('turnCard.errorCount', { count: errorCount })
-      : ''
-    return `${firstTask.toolInput.description as string}${errorSuffix}`
+    return firstTask.toolInput.description as string
   }
 
   // When complete, show summary (badge already shows count)
   if (turnPhase === 'complete') {
-    const errorSuffix = errorCount > 0
-      ? i18n.t('turnCard.errorCount', { count: errorCount })
-      : ''
-    return `${i18n.t('turnCard.stepsCompleted')}${errorSuffix}`
+    return i18n.t('turnCard.stepsCompleted')
   }
-
-  // An open turn may contain commentary before it has a semantic tool intent.
-  // Keep the header accurate without duplicating that commentary (#141).
-  if (turnPhase === 'awaiting') return i18n.t('turnCard.processing')
 
   return i18n.t('turnCard.starting')
 }
@@ -783,8 +784,9 @@ interface ActivityRowProps {
 }
 
 /**
- * Keep the height wrapper mounted so adding rows does not remount it and
- * replay height 0 → auto (looks like collapse then expand).
+ * Tween height only while the panel is opening or closing.
+ * A persistent `1fr` transition interpolates the used pixel height, so a
+ * burst of parallel tools retargets the same 250ms ease and the list jitters.
  */
 function ExpandableHeightPanel({
   open,
@@ -795,18 +797,211 @@ function ExpandableHeightPanel({
   reduceMotion: boolean | null
   children: React.ReactNode
 }) {
+  const wasOpen = useRef(open)
+  const toggling = wasOpen.current !== open
+  useEffect(() => {
+    wasOpen.current = open
+  }, [open])
+
   return (
-    <motion.div
-      initial={false}
-      animate={open ? { height: 'auto', opacity: 1 } : { height: 0, opacity: 0 }}
-      transition={{
-        height: { duration: reduceMotion ? 0 : 0.25, ease: [0.4, 0, 0.2, 1] },
-        opacity: { duration: reduceMotion ? 0 : 0.15 },
+    <div
+      className={cn('grid min-w-0 grid-cols-[minmax(0,1fr)]', !open && 'pointer-events-none')}
+      style={{
+        gridTemplateRows: open ? '1fr' : '0fr',
+        opacity: open ? 1 : 0,
+        transition: reduceMotion || !toggling
+          ? undefined
+          : 'grid-template-rows 250ms cubic-bezier(0.4, 0, 0.2, 1), opacity 150ms ease',
       }}
-      className={cn("overflow-hidden", !open && "pointer-events-none")}
       aria-hidden={!open}
     >
+      <div className={cn('min-h-0 min-w-0', (toggling || !open) && 'overflow-hidden')}>
+        {children}
+      </div>
+    </div>
+  )
+}
+
+const WORK_CHAIN_EASE = [0.22, 1, 0.36, 1] as const
+
+/** Spinner and chevron share one 12px slot so thinking → work does not shift the title. */
+function WorkHeaderIcon({
+  mode,
+  expanded,
+  reduceMotion,
+}: {
+  mode: 'spinner' | 'chevron'
+  expanded: boolean
+  reduceMotion: boolean | null
+}) {
+  const instant = !!reduceMotion
+  // Same in-flow chevron as origin/main. An absolutely positioned 12px slot
+  // clips the stroke against any rounded overflow ancestor.
+  if (mode === 'chevron') {
+    return (
+      <motion.span
+        initial={false}
+        animate={{ rotate: expanded ? 90 : 0 }}
+        transition={{ duration: instant ? 0 : 0.15, ease: 'easeOut' }}
+        className={cn(SIZE_CONFIG.iconSize, 'flex items-center justify-center shrink-0')}
+      >
+        <ChevronRight className={SIZE_CONFIG.iconSize} />
+      </motion.span>
+    )
+  }
+  return (
+    <span className={cn(SIZE_CONFIG.iconSize, 'flex items-center justify-center shrink-0')}>
+      <Spinner className={SIZE_CONFIG.spinnerSize} />
+    </span>
+  )
+}
+
+/**
+ * Same badge as origin/main. When it joins an already-visible “思考中” header it
+ * slides open from 0 width (plus the flex gap it introduces) so the title glides
+ * right instead of jumping. Width is measured by motion, not a 0fr grid track.
+ */
+function WorkHeaderStepCount({
+  count,
+  animateIn,
+  reduceMotion,
+}: {
+  count: number
+  animateIn: boolean
+  reduceMotion: boolean | null
+}) {
+  if (count <= 0) return null
+  const instant = !!reduceMotion || !animateIn
+  const ref = useRef<HTMLSpanElement>(null)
+  const clip = () => { if (ref.current) ref.current.style.overflow = 'hidden' }
+  const unclip = () => { if (ref.current) ref.current.style.overflow = '' }
+  return (
+    <motion.span
+      ref={ref}
+      initial={instant ? false : { width: 0, opacity: 0, marginRight: '-0.5rem' }}
+      animate={{ width: 'auto', opacity: 1, marginRight: '0rem' }}
+      transition={{
+        duration: instant ? 0 : 0.24,
+        ease: WORK_CHAIN_EASE,
+        opacity: { duration: instant ? 0 : 0.18, delay: instant ? 0 : 0.06 },
+      }}
+      onAnimationStart={instant ? undefined : clip}
+      onAnimationComplete={unclip}
+      className="-ml-0.5 inline-flex shrink-0"
+    >
+      <span className="shrink-0 px-1.5 py-0.5 rounded-[4px] bg-background shadow-minimal text-[10px] font-medium tabular-nums">
+        {count}
+      </span>
+    </motion.span>
+  )
+}
+
+/**
+ * Height/opacity presence for a block that joins or leaves a live turn: the
+ * work header, the response card, and the chat's processing row all use it so
+ * a card demoted into the chain collapses at the same pace the chain grows.
+ * Clips only while the tween runs so shadows and focus rings are not cut later.
+ */
+export function HeightPresence({
+  containerRef,
+  animateIn,
+  reduceMotion,
+  className,
+  children,
+  ...rest
+}: {
+  containerRef?: React.RefObject<HTMLDivElement>
+  animateIn: boolean
+  reduceMotion: boolean | null
+  className?: string
+  children: React.ReactNode
+} & Record<`data-${string}`, string>) {
+  const ownRef = useRef<HTMLDivElement>(null)
+  const ref = containerRef ?? ownRef
+  const instant = !!reduceMotion
+  const tween = { duration: instant ? 0 : 0.28, ease: WORK_CHAIN_EASE }
+  const clip = () => { if (ref.current) ref.current.style.overflow = 'hidden' }
+  const unclip = () => {
+    if (!ref.current) return
+    ref.current.style.overflow = ''
+    ref.current.style.height = ''
+  }
+  return (
+    <motion.div
+      ref={ref}
+      initial={instant || !animateIn ? false : { height: 0, opacity: 0 }}
+      animate={{ height: 'auto', opacity: 1 }}
+      exit={instant ? undefined : { height: 0, opacity: 0 }}
+      transition={{ height: tween, opacity: { duration: instant ? 0 : 0.2, ease: WORK_CHAIN_EASE } }}
+      onAnimationStart={instant || !animateIn ? undefined : clip}
+      onAnimationComplete={unclip}
+      className={className}
+      {...rest}
+    >
       {children}
+    </motion.div>
+  )
+}
+
+/** The work header block. */
+function WorkChrome(props: {
+  containerRef: React.RefObject<HTMLDivElement>
+  animateIn: boolean
+  reduceMotion: boolean | null
+  children: React.ReactNode
+}) {
+  return <HeightPresence {...props} className="group select-none" data-search-exclude="true" />
+}
+
+/** Per-row enter/exit so “思考中” can collapse into the next tool without a hard cut. */
+function WorkChainRow({
+  reduceMotion,
+  stagger,
+  staggerIndex = 0,
+  children,
+}: {
+  reduceMotion: boolean | null
+  stagger: boolean
+  staggerIndex?: number
+  children: React.ReactNode
+}) {
+  const instant = !!reduceMotion
+  const delay = !instant && stagger
+    ? (staggerIndex < SIZE_CONFIG.staggeredAnimationLimit
+      ? staggerIndex * 0.03
+      : SIZE_CONFIG.staggeredAnimationLimit * 0.03)
+    : 0
+  const heightTween = { duration: instant ? 0 : 0.28, ease: WORK_CHAIN_EASE }
+  const fadeIn = { duration: instant ? 0 : 0.22, ease: WORK_CHAIN_EASE, delay: instant ? 0 : 0.06 }
+  const fadeOut = { duration: instant ? 0 : 0.16, ease: WORK_CHAIN_EASE }
+
+  return (
+    <motion.div
+      initial={instant ? false : stagger ? { opacity: 0, x: -8 } : { opacity: 0, height: 0, y: 3 }}
+      animate={{
+        opacity: 1,
+        x: 0,
+        y: 0,
+        height: 'auto',
+        transition: {
+          delay,
+          height: heightTween,
+          opacity: stagger ? { duration: instant ? 0 : 0.2, delay } : fadeIn,
+          x: { duration: instant ? 0 : stagger ? 0.22 : 0, ease: WORK_CHAIN_EASE, delay },
+          y: heightTween,
+        },
+      }}
+      exit={instant ? undefined : {
+        opacity: 0,
+        height: 0,
+        y: -2,
+        transition: { height: heightTween, opacity: fadeOut, y: heightTween },
+      }}
+      className="overflow-hidden"
+    >
+      {/* Row spacing lives inside the tween. A container space-y margin stays
+          at full size while the height collapses, then pops 2px on unmount. */}
+      <div className="py-px">{children}</div>
     </motion.div>
   )
 }
@@ -847,6 +1042,11 @@ function TreeViewConnector({ depth }: { depth: number; isLastChild?: boolean }) 
   )
 }
 
+/** Keep the response slot in flow so received blocks grow the card without a height tween. */
+function GrowingResponse({ children }: { children: React.ReactNode }) {
+  return <div className="flow-root">{children}</div>
+}
+
 /** Single activity row in expanded view */
 function ActivityRow({ activity, onOpenDetails, isLastChild, sessionFolderPath, displayMode = 'detailed' }: ActivityRowProps) {
   const depth = activity.depth || 0
@@ -855,7 +1055,7 @@ function ActivityRow({ activity, onOpenDetails, isLastChild, sessionFolderPath, 
   // Show "Thinking" while streaming, stripped markdown content when complete
   if (activity.type === 'intermediate') {
     const isThinking = activity.status === 'running'
-    const displayContent = isThinking ? THINKING_STATUS_LABEL : stripMarkdown(activity.content || '')
+    const displayContent = stripMarkdown(activity.content || '') || (isThinking ? thinkingStatusLabel() : '')
     const isComplete = activity.status === 'completed'
     return (
       <div className="flex items-stretch">
@@ -937,7 +1137,7 @@ function ActivityRow({ activity, onOpenDetails, isLastChild, sessionFolderPath, 
   const normalizedToolName = normalizeCraftSessionToolName(activity.toolName ?? '')
   const fullDisplayName = normalizedToolName === 'skill_inspect' ? i18n.t('tools.skillInspect')
     : normalizedToolName === 'skill_install' ? i18n.t('tools.skillInstall')
-    : toolDisplay.name || (activity.type === 'thinking' ? THINKING_STATUS_LABEL : 'Processing')
+    : toolDisplay.name || (activity.type === 'thinking' ? thinkingStatusLabel() : 'Processing')
 
   // Detect MCP/API tools (toolName starts with "mcp__")
   const isMcpOrApiTool = activity.toolName?.startsWith('mcp__') ?? false
@@ -957,8 +1157,11 @@ function ActivityRow({ activity, onOpenDetails, isLastChild, sessionFolderPath, 
   // For non-MCP tools or informative mode, use the appropriate display name
   const displayedName: string = isMcpOrApiTool ? sourceName : fullDisplayName
 
-  // Intent for MCP tools, description for Bash commands
-  const intentOrDescription = activity.intent || (activity.toolInput?.description as string | undefined)
+  // Intent for MCP tools, description for Bash commands.
+  // submit_answer delivers the final reply itself; its intent just restates that.
+  const intentOrDescription = isSubmitAnswerTool(activity.toolName)
+    ? undefined
+    : activity.intent || (activity.toolInput?.description as string | undefined)
   const inputSummary = formatToolInput(activity.toolInput, activity.toolName, sessionFolderPath)
   const diffStats = computeEditWriteDiffStats(activity.toolName, activity.toolInput)
   const isComplete = activity.status === 'completed' || activity.status === 'error'
@@ -1325,6 +1528,7 @@ function ActivityGroupRow({ group, expandedGroups: externalExpandedGroups, onExp
 // ============================================================================
 
 export interface ResponseCardProps {
+  researchActivities?: ActivityItem[]
   isAnswerPreview?: boolean
   /** The content to display (markdown) */
   text: string
@@ -1347,6 +1551,7 @@ export interface ResponseCardProps {
   /** Parent session ID (used to reset local annotation/island UI state on session switches) */
   sessionId?: string
   /** Underlying message ID for annotation actions */
+  revealIdentity?: string
   messageId?: string
   /** Persisted annotations for this response */
   annotations?: AnnotationV1[]
@@ -1383,8 +1588,6 @@ export interface ResponseCardProps {
   annotationInteractionMode?: AnnotationInteractionMode
   /** Tool-bound commentary — keep the body readable, hide final-reply actions */
   isCommentary?: boolean
-  /** Tools have started on this turn; hide Streaming... on a finished preamble. */
-  hasToolActivities?: boolean
 }
 
 interface BranchDropdownProps {
@@ -1614,29 +1817,27 @@ function applyTextHighlightRange(
  * ResponseCard - Unified card component for AI responses and plans
  *
  * Variants:
- * - 'response': Buffered streaming response with smart content gating
+ * - 'response': Progressively displayed Markdown
  * - 'plan': Plan message with header and Accept Plan button
  *
- * Response variant implements smart buffering (see stream-buffer.ts):
- * - Short anti-flash min window, then CJK-aware unit thresholds
- * - High-confidence patterns (code / headers / lists) show earlier
- * - Max wait forces reveal; time gates re-check via useStreamingReveal timers
+ * Received text advances in small runs, including bursts that arrive at completion.
  *
- * Performance: markdown re-renders throttled (~50ms) while streaming.
+ * Presentation updates are frame-paced; copy/export retain the authoritative source.
  */
 export function ResponseCard({
-  isAnswerPreview = false,
+  researchActivities,
   text,
+  isAnswerPreview = false,
+  completedRevealStartTime,
   isStreaming,
   isTurnComplete,
-  streamStartTime,
-  completedRevealStartTime,
   onOpenFile,
   onOpenUrl,
   onPopOut,
   variant = 'response',
   sessionId,
   messageId,
+  revealIdentity,
   annotations,
   onAccept,
   onAcceptWithCompact,
@@ -1654,17 +1855,36 @@ export function ResponseCard({
   openAnnotationRequest,
   annotationInteractionMode = 'interactive',
   isCommentary = false,
-  hasToolActivities = false,
 }: ResponseCardProps) {
   const { t } = useTranslation()
   const parsedSkillUsage = useMemo(
     () => parseSkillUsedMarkers(text, isStreaming),
     [text, isStreaming],
   )
-  const responseText = parsedSkillUsage.content
-  // Throttled content for display - updates every CONTENT_THROTTLE_MS during streaming
-  const [displayedText, setDisplayedText] = useState(responseText)
-  const lastUpdateRef = useRef(Date.now())
+  const canCollectSources = variant === 'response' && !isCommentary && !isAnswerPreview
+  const showArtifacts = canCollectSources
+    && !isStreaming && (isTurnComplete ?? true)
+  const turnSources = useMemo(() => collectTurnResearchSources(researchActivities ?? []), [researchActivities])
+  const sourceEvidence = useMemo(() => new Set(turnSources.map(source => sourceUrlKey(source.url))), [turnSources])
+  const sourceSummary = useMemo(
+    () => canCollectSources ? extractResponseSources(parsedSkillUsage.content, sourceEvidence, isStreaming) : { content: parsedSkillUsage.content, sources: [] },
+    [canCollectSources, parsedSkillUsage.content, sourceEvidence, isStreaming],
+  )
+  const displayedSources = useMemo(() => {
+    const merged = new Map(turnSources.map(source => [sourceUrlKey(source.url), source]))
+    for (const source of sourceSummary.sources) {
+      const key = sourceUrlKey(source.url)
+      merged.set(key, { ...merged.get(key), ...source })
+    }
+    return [...merged.values()]
+  }, [turnSources, sourceSummary.sources])
+  const responseText = sourceSummary.content
+  const artifacts = useMemo(
+    () => showArtifacts ? extractResponseArtifacts(responseText) : [],
+    [showArtifacts, responseText],
+  )
+  const paced = usePacedSource(responseText, isStreaming, completedRevealStartTime, revealIdentity ?? messageId)
+  const presentationStreaming = isStreaming || paced.revealing
   // Copy to clipboard state
   const [copied, setCopied] = useState(false)
   // Fullscreen state
@@ -1697,6 +1917,11 @@ export function ResponseCard({
   )
   const [annotationOverlay, setAnnotationOverlay] = useState<{ rects: AnnotationOverlayRect[]; chips: AnnotationOverlayChip[] }>({ rects: [], chips: [] })
   const contentRef = useRef<HTMLDivElement>(null)
+  const actionsVisible = useCompletionActions(
+    ((!isStreaming && (isTurnComplete ?? true)) && !isCommentary) || variant === 'plan',
+    contentRef,
+    responseText,
+  )
   const contentLayerRef = useRef<HTMLDivElement>(null)
   const lastPointerRef = useRef<PointerSnapshot | null>(null)
   const dragStartPointerRef = useRef<PointerSnapshot | null>(null)
@@ -1748,13 +1973,13 @@ export function ResponseCard({
   const handleCopy = useCallback(async () => {
     try {
       // Copy plain text — not markdown source (user expects what they see)
-      await navigator.clipboard.writeText(markdownToPlainText(responseText))
+      await navigator.clipboard.writeText(markdownToPlainText(parsedSkillUsage.content))
       setCopied(true)
       setTimeout(() => setCopied(false), 2000)
     } catch (err) {
       console.error('Failed to copy:', err)
     }
-  }, [responseText])
+  }, [parsedSkillUsage.content])
 
   const renderedAnnotations = useMemo(() => {
     const persisted = annotations ?? []
@@ -1852,7 +2077,7 @@ export function ResponseCard({
       window.removeEventListener('resize', scheduleCoordsRecompute)
       root.removeEventListener('scroll', scheduleCoordsRecompute, { capture: true } as EventListenerOptions)
     }
-  }, [annotations, renderedAnnotations, responseText, displayedText, isStreaming])
+  }, [annotations, renderedAnnotations, responseText, isStreaming])
 
   useEffect(() => {
     if (!canAnnotate) {
@@ -2378,64 +2603,28 @@ export function ResponseCard({
     />
   )
 
-  // Throttle content updates during streaming for performance
-  // Updates immediately when streaming ends to show final content
-  useEffect(() => {
-    if (!isStreaming) {
-      // Streaming ended - show final content immediately
-      setDisplayedText(responseText)
-      return
-    }
-
-    const now = Date.now()
-    const elapsed = now - lastUpdateRef.current
-
-    if (elapsed >= BUFFER_CONFIG.CONTENT_THROTTLE_MS) {
-      // Enough time passed - update immediately
-      setDisplayedText(responseText)
-      lastUpdateRef.current = now
-    } else {
-      // Schedule update for remaining time
-      const timeout = setTimeout(() => {
-        setDisplayedText(responseText)
-        lastUpdateRef.current = Date.now()
-      }, BUFFER_CONFIG.CONTENT_THROTTLE_MS - elapsed)
-      return () => clearTimeout(timeout)
-    }
-  }, [responseText, isStreaming])
-
-  // Time-aware buffer gate (re-checks on min/max window even if tokens stall)
-  const reveal = useStreamingReveal(responseText, isStreaming, streamStartTime)
-
   const isCompleted = isTurnComplete ?? !isStreaming
-  const isBuffering = isStreaming && !reveal.shouldShow
-  // Completion uses the full received text immediately; reveal stays cosmetic.
-  const bodyText = isStreaming ? displayedText : responseText
+  // A network completion leaves received text in the presentation queue.
+  const bodyText = paced.text
   // Commentary must not gain final-reply actions the moment tools start.
   // Both card branches retain the keyed body when final responses complete.
   const showCompletedChrome = (isCompleted && !isCommentary)
     || variant === 'plan'
-  const showStreamingFooter = (isAnswerPreview && isStreaming) || shouldShowStreamingFooter({
-    isStreaming,
-    compactMode,
-    isCommentary,
-    hasToolActivities,
-  })
+  // Hold the action-row height while the body is still arriving so the card
+  // bottom does not jump when regenerate / copy / Markdown mount.
+  const reserveDesktopFooter = !compactMode && !isCommentary
+    && (showCompletedChrome || (isStreaming && variant === 'response'))
 
-  // While buffering, return null - TurnCard will show a subtle indicator instead
-  if (isBuffering) {
-    return null
-  }
-
-  // Completed response or plan - show with max height and footer
-  if (showCompletedChrome) {
+  // Keep one content tree throughout streaming and completion. Only chrome
+  // changes after classification; Markdown and embedded diagrams stay mounted.
+  {
     const isPlan = variant === 'plan'
 
     return (
       <>
-        <div className="bg-background shadow-minimal rounded-[8px] overflow-hidden relative group">
+        <div className="rounded-[8px] overflow-hidden relative group transition-colors duration-200 bg-background ring-1 ring-inset ring-foreground/5">
           {/* Fullscreen button - desktop only; compact mode keeps message chrome minimal */}
-          {!compactMode && (
+          {showCompletedChrome && !compactMode && (
           <button
             onClick={() => setIsFullscreen(true)}
             className={cn(
@@ -2464,7 +2653,8 @@ export function ResponseCard({
             </div>
           )}
 
-          {/* Content expands fully — outer session list is the only vertical scroller */}
+          {/* Received blocks grow in flow; the outer viewport stays pinned. */}
+          <ResponseBodyGrowth>
           <div
             key="response-content"
             ref={contentRef}
@@ -2476,27 +2666,46 @@ export function ResponseCard({
             <SkillUsedIndicator skills={parsedSkillUsage.skills} />
             <div ref={contentLayerRef} className="relative">
               <Markdown
-                id={messageId ? `${sessionId}:${messageId}` : undefined}
+                id={revealIdentity ?? (messageId ? `${sessionId}:${messageId}` : undefined)}
+                isStreaming={presentationStreaming && variant === 'response'}
                 revealStartTime={variant === 'response' ? completedRevealStartTime : undefined}
                 mode="minimal"
                 onUrlClick={onOpenUrl}
                 onFileClick={onOpenFile}
               >
-                {responseText}
+                {bodyText}
               </Markdown>
               {annotationOverlayLayer}
             </div>
           </div>
 
+          </ResponseBodyGrowth>
+
+          {showArtifacts && !presentationStreaming && (
+            <ResponseArtifacts key={messageId ?? revealIdentity} artifacts={artifacts} onOpenFile={onOpenFile} />
+          )}
+
+          {/* Reserve known research sources while text streams. Completion only
+              reveals the shelf, rather than growing the card under sticky scroll. */}
+          {canCollectSources && (
+            <ResponseSources key={`sources-${messageId ?? revealIdentity}`} sources={displayedSources}
+              pending={!showArtifacts || presentationStreaming} />
+          )}
+
           {/* Desktop footer with actions (Copy / Markdown / Accept Plan / Branch).
-              Compact mode falls through to the slim Accept-Plan-only footer below. */}
-          {!compactMode && (
-            <div className={cn(
-              "pl-4 pr-2.5 py-2 border-t border-border/30 flex items-center justify-between bg-muted/20",
+              Compact mode falls through to the slim Accept-Plan-only footer below.
+              Streaming reserves the same row so completion only reveals actions. */}
+          {reserveDesktopFooter && (
+            <div
+              aria-hidden={!actionsVisible}
+              style={{ opacity: actionsVisible ? 1 : 0 }}
+              className={cn(
+              "pl-4 pr-2.5 py-2 border-t flex items-center justify-between transition-opacity duration-[650ms] ease-in-out motion-reduce:transition-none",
+              showCompletedChrome ? "border-border/30 bg-muted/20" : "border-transparent",
               SIZE_CONFIG.fontSize
             )}>
               {/* Left side - Copy, View as Markdown, Annotation hint */}
-              <div className="flex items-center gap-3">
+              <div className={cn("flex items-center gap-3", !actionsVisible && "invisible pointer-events-none")}>
                 {onRegenerate && !isCommentary && (
                   <button
                     onClick={onRegenerate}
@@ -2546,7 +2755,7 @@ export function ResponseCard({
               </div>
 
               {/* Right side */}
-              <div className="flex items-center gap-3">
+              <div className={cn("flex items-center gap-3", !actionsVisible && "invisible pointer-events-none")}>
                 {/* Accept Plan dropdown (plan variant only, last response) */}
                 {isPlan && showAcceptPlan && onAccept && onAcceptWithCompact && (
                   <div
@@ -2574,7 +2783,7 @@ export function ResponseCard({
               Uses a bottom-sheet drawer to match the CompactPermissionModeSelector
               / CompactModelSelector pattern. Guarded by isLastResponse so older
               plans don't render an empty strip with a hidden-but-focusable button. */}
-          {compactMode && onRegenerate && !isStreaming && !isCommentary && (
+          {showCompletedChrome && compactMode && onRegenerate && !isStreaming && !isCommentary && (
             <div
               className={cn(
                 "pl-3 pr-2 py-1.5 border-t border-border/30 flex items-center bg-muted/20",
@@ -2613,7 +2822,7 @@ export function ResponseCard({
 
         {/* Fullscreen overlay for reading/annotating response and plan content. */}
         <DocumentFormattedMarkdownOverlay
-          content={responseText}
+          content={parsedSkillUsage.content}
           isOpen={isFullscreen}
           onClose={() => setIsFullscreen(false)}
           variant={isPlan ? 'plan' : undefined}
@@ -2634,49 +2843,6 @@ export function ResponseCard({
     )
   }
 
-  // Streaming response - show throttled content with spinner
-  return (
-    <>
-      <div className="bg-background shadow-minimal rounded-[8px] overflow-hidden group">
-        {/* Content expands fully — outer session list is the only vertical scroller */}
-        {/* Uses displayedText (throttled) for performance while streaming */}
-        <div
-          key="response-content"
-          ref={contentRef}
-          data-search-root="response"
-          onMouseDown={handleSelectionPointerDown}
-          onMouseUp={handleTextSelection}
-          className="pl-[22px] pr-4 py-3 text-sm"
-        >
-          <SkillUsedIndicator skills={parsedSkillUsage.skills} />
-          <div ref={contentLayerRef} className="relative">
-            <Markdown
-              id={messageId ? `${sessionId}:${messageId}` : undefined}
-              isStreaming={isStreaming && variant === 'response'}
-              mode="minimal"
-              onUrlClick={onOpenUrl}
-              onFileClick={onOpenFile}
-            >
-              {bodyText}
-            </Markdown>
-            {annotationOverlayLayer}
-          </div>
-        </div>
-
-        {/* Desktop streaming footer: only while this card's body is still
-            being typed. Compact mode and tool-bound preambles omit it. */}
-        {showStreamingFooter && (
-          <div className={cn("px-4 py-2 border-t border-border/30 flex items-center bg-muted/20", SIZE_CONFIG.fontSize)}>
-            <div className="flex items-center gap-2 text-muted-foreground">
-              <Spinner className={SIZE_CONFIG.spinnerSize} />
-              <span>Streaming...</span>
-            </div>
-          </div>
-        )}
-      </div>
-      {selectionMenu}
-    </>
-  )
 }
 
 // ============================================================================
@@ -2810,11 +2976,11 @@ export const TurnCard = React.memo(function TurnCard({
 }: TurnCardProps) {
   const { t } = useTranslation()
   const reduceMotion = useReducedMotion()
-  const hasToolActivities = activities.some(activity => activity.type === 'tool')
+  const hasRunningTools = activities.some(activity => activity.type === 'tool' && activity.status === 'running')
   const showCommentary = isVisibleCommentaryCard(
     response,
     isComplete,
-    hasToolActivities,
+    hasRunningTools,
   )
 
   // Derive the turn phase from props using the state machine.
@@ -2844,6 +3010,21 @@ export const TurnCard = React.memo(function TurnCard({
 
   // Ref for scrollable activities container (to scroll to bottom on expand)
   const activitiesContainerRef = useRef<HTMLDivElement>(null)
+
+  // Was the work header already in the DOM after the last commit? Read during
+  // render so a badge arriving later slides in, while a header that mounts
+  // together with its badge animates once as a whole.
+  const chromeRef = useRef<HTMLDivElement>(null)
+  const chromeMountedRef = useRef(false)
+  useEffect(() => {
+    chromeMountedRef.current = chromeRef.current !== null
+  })
+  // Latched once this card has rendered a live turn, so the committed final
+  // answer still slides in while a turn loaded from history renders at rest.
+  const wasLiveRef = useRef(false)
+  useEffect(() => {
+    if (!isComplete) wasLiveRef.current = true
+  }, [isComplete])
 
   const toggleExpanded = useCallback(() => {
     hasUserToggled.current = true
@@ -2883,13 +3064,8 @@ export const TurnCard = React.memo(function TurnCard({
   const expandedActivityGroups = externalExpandedActivityGroups ?? localExpandedActivityGroups
   const handleExpandedActivityGroupsChange = onExpandedActivityGroupsChange ?? setLocalExpandedActivityGroups
 
-  // Time-aware buffer gate — must re-fire after MAX_BUFFER_MS even if stream stalls
-  const responseReveal = useStreamingReveal(
-    response?.text,
-    !!response?.isStreaming,
-    response?.streamStartTime,
-  )
-  const isBuffering = !!response?.isStreaming && !responseReveal.shouldShow
+  // Visible prose, not elapsed time, opens the response and ends buffering.
+  const isBuffering = !!response?.isStreaming && !response.text.trim()
 
 
   // Compute preview text with cross-fade animation
@@ -2921,7 +3097,12 @@ export const TurnCard = React.memo(function TurnCard({
   // at all) until a tool or older commentary actually needs a row.
   const visibleActivities = useMemo(
     () => sortedActivities.filter(
-      activity => !isMirroredCommentaryActivity(activity, response, isComplete),
+      activity => !isSubmitAnswerTool(activity.toolName)
+        // Empty SDK thinking messages are status placeholders, not work rows.
+        // The stable header/footer status owns their presentation.
+        && !((activity.type === 'intermediate' || activity.type === 'thinking')
+          && !hasRenderableAssistantText(activity.content))
+        && !isMirroredCommentaryActivity(activity, response, isComplete),
     ),
     [sortedActivities, response, isComplete],
   )
@@ -2955,7 +3136,7 @@ export const TurnCard = React.memo(function TurnCard({
   )
 
   const hasVisibleResponse = !!response && (
-    !!response.isStreaming || hasRenderableAssistantText(response.text)
+    hasRenderableAssistantText(response.text)
   )
 
   // Don't render if nothing to show and turn is complete
@@ -2973,6 +3154,8 @@ export const TurnCard = React.memo(function TurnCard({
   const hasNoMeaningfulWork = isComplete
     && activities.length > 0
     && activities.every(a => {
+      // Delivery is the card body, not a work record that should keep an empty turn.
+      if (isSubmitAnswerTool(a.toolName)) return true
       // Tool activities must be errors (interrupted/failed)
       if (a.type === 'tool') return a.status === 'error'
       // Intermediate activities must have no meaningful content
@@ -2988,47 +3171,71 @@ export const TurnCard = React.memo(function TurnCard({
   }
 
   // Only count rows the user will actually see in the collapsible section
-  const hasActivities = visibleActivities.length > 0
+  const stepCount = countWorkRecords(visibleActivities)
+  const hasWorkRecords = stepCount > 0
 
   // Determine if thinking indicator should show using the phase-based state machine.
   // This properly handles the "gap" state (awaiting) between tool completion and next action,
   // which was previously causing the turn card to "disappear".
-  const showGenericThinkingIndicator = shouldShowGenericThinkingIndicator(
+  const showGenericThinkingIndicator = previewText !== thinkingStatusLabel() && shouldShowGenericThinkingIndicator(
     turnPhase,
-    isBuffering,
+    isBuffering && !(response && hasVisibleResponse),
     renderedActivityRows,
   )
+  // Header chrome stays for every turn with real work records (live or complete).
+  // Before the first record it doubles as the thinking row for the live turn.
+  const showLiveThinkingHeader = !animateResponse
+    && !isComplete
+    && shouldShowThinkingIndicator(turnPhase, isBuffering && !(response && hasVisibleResponse))
+  const showWorkChrome = hasWorkRecords || showLiveThinkingHeader
+  // Keep one status slot across tool -> awaiting -> tool transitions. Toggling
+  // its visibility must not repeatedly expand and collapse the work chain.
+  const reserveThinkingSlot = !animateResponse && hasWorkRecords && !isComplete
+    && !(response && hasVisibleResponse)
+  // True once the header has been on screen for a committed render, so a badge
+  // that arrives later slides in while a header that mounts with its badge does not.
+  const chromeWasMounted = chromeMountedRef.current
+  const animateLiveBlocks = !isComplete || wasLiveRef.current
 
+  // No space-y on the root: a sibling margin sits outside the height tweens and
+  // pops 4px whenever the header or card mounts/unmounts. Blocks pad inside.
   return (
-    <div className="space-y-1">
-      {/* Activity Section - excluded from search highlighting (matches ripgrep behavior) */}
-      {hasActivities && (
-        <div className="group select-none" data-search-exclude="true">
+    <div>
+      {/* One header chrome for thinking and numbered work — no standalone swap. */}
+      <AnimatePresence>
+      {showWorkChrome && (
+        <WorkChrome
+          key="work-chrome"
+          containerRef={chromeRef}
+          animateIn={!isComplete}
+          reduceMotion={reduceMotion}
+        >
           {/* Collapsed Header / Toggle */}
           <button
-            onClick={toggleExpanded}
+            type="button"
+            onClick={hasWorkRecords ? toggleExpanded : undefined}
+            aria-expanded={hasWorkRecords ? isExpanded : undefined}
+            aria-disabled={!hasWorkRecords}
+            tabIndex={hasWorkRecords ? 0 : -1}
             className={cn(
               "flex items-center gap-2 w-full pl-2.5 pr-1.5 py-1.5 rounded-[8px] text-left",
               SIZE_CONFIG.fontSize,
               "text-muted-foreground",
-              "hover:bg-muted/50 transition-colors",
+              hasWorkRecords && "hover:bg-muted/50 transition-colors",
+              !hasWorkRecords && "pointer-events-none",
               "focus:outline-none focus-visible:ring-1 focus-visible:ring-ring"
             )}
           >
-            {/* Chevron with rotation animation - aligned with activity row icons */}
-            <motion.div
-              initial={false}
-              animate={{ rotate: isExpanded ? 90 : 0 }}
-              transition={{ duration: reduceMotion ? 0 : 0.15, ease: 'easeOut' }}
-              className={cn(SIZE_CONFIG.iconSize, "flex items-center justify-center shrink-0")}
-            >
-              <ChevronRight className={SIZE_CONFIG.iconSize} />
-            </motion.div>
-
-            {/* Step count badge */}
-            <span className="-ml-0.5 shrink-0 px-1.5 py-0.5 rounded-[4px] bg-background shadow-minimal text-[10px] font-medium tabular-nums">
-              {visibleActivities.length}
-            </span>
+            <WorkHeaderIcon
+              mode={hasWorkRecords ? 'chevron' : 'spinner'}
+              expanded={isExpanded}
+              reduceMotion={reduceMotion}
+            />
+            <WorkHeaderStepCount
+              count={stepCount}
+              animateIn={chromeWasMounted && !isComplete}
+              reduceMotion={reduceMotion}
+            />
 
             {/* Preview text with crossfade + inline failure count */}
             <span className="relative flex-1 min-w-0 h-5 flex items-center">
@@ -3037,8 +3244,9 @@ export const TurnCard = React.memo(function TurnCard({
                   key={previewText}
                   initial={reduceMotion ? false : { opacity: 0 }}
                   animate={{ opacity: 1 }}
-                  exit={reduceMotion ? undefined : { opacity: 0 }}
-                  transition={{ duration: reduceMotion ? 0 : 0.2 }}
+                  // Do not retain a fading thinking label when its status row takes over.
+                  exit={reduceMotion ? undefined : { opacity: 0, transition: previewText === thinkingStatusLabel() ? { duration: 0 } : undefined }}
+                  transition={{ duration: reduceMotion ? 0 : 0.22, ease: WORK_CHAIN_EASE }}
                   className="absolute inset-0 truncate"
                 >
                   {previewText}
@@ -3046,55 +3254,54 @@ export const TurnCard = React.memo(function TurnCard({
               </AnimatePresence>
             </span>
 
-            {/* Turn actions menu - use platform override or default */}
-            {renderActionsMenu ? renderActionsMenu() : (
+            {hasWorkRecords && (renderActionsMenu ? renderActionsMenu() : (
               <TurnCardActionsMenu
                 onOpenDetails={onOpenDetails}
                 onOpenMultiFileDiff={onOpenMultiFileDiff}
                 hasEditOrWriteActivities={hasEditOrWriteActivities}
               />
-            )}
+            ))}
           </button>
 
-          {/* Expanded Activity List */}
+          {/* Expanded Activity List — only after a real work record exists */}
+          {hasWorkRecords && (
           <ExpandableHeightPanel open={isExpanded} reduceMotion={reduceMotion}>
                 {/* Activities expand fully — no nested vertical scroll (outer chat scrolls) */}
                 {/* ml-[15px] positions the border-l under the chevron */}
                 <div
                   ref={activitiesContainerRef}
-                  className="pl-4 pr-2 py-0 space-y-0.5 border-l-2 border-muted ml-[13px]"
+                  className="pl-4 pr-2 py-0 border-l-2 border-muted ml-[13px]"
                 >
-                  <AnimatePresence mode="sync">
+                  {/* Rows joining a header that is already on screen slide in;
+                      history and a header mounting with its rows do not. */}
+                  <AnimatePresence mode="sync" initial={chromeWasMounted && !isComplete}>
                   {/* Grouped view for Task subagents */}
                   {groupedActivities ? (
                     groupedActivities.map((item, index) => (
                       isActivityGroup(item) ? (
-                        <ActivityGroupRow
+                        <WorkChainRow
                           key={item.parent.id}
-                          group={item}
-                          expandedGroups={expandedActivityGroups}
-                          onExpandedGroupsChange={handleExpandedActivityGroupsChange}
-                          onOpenActivityDetails={onOpenActivityDetails}
-                          animationIndex={index}
-                          animateEntrance={staggerOnThisExpand}
-                          sessionFolderPath={sessionFolderPath}
-                          displayMode={displayMode}
-                        />
+                          reduceMotion={reduceMotion}
+                          stagger={!!staggerOnThisExpand}
+                          staggerIndex={index}
+                        >
+                          <ActivityGroupRow
+                            group={item}
+                            expandedGroups={expandedActivityGroups}
+                            onExpandedGroupsChange={handleExpandedActivityGroupsChange}
+                            onOpenActivityDetails={onOpenActivityDetails}
+                            animationIndex={index}
+                            animateEntrance={false}
+                            sessionFolderPath={sessionFolderPath}
+                            displayMode={displayMode}
+                          />
+                        </WorkChainRow>
                       ) : (
-                        <motion.div
+                        <WorkChainRow
                           key={item.id}
-                          initial={
-                            reduceMotion || !staggerOnThisExpand
-                              ? false
-                              : { opacity: 0, x: -8 }
-                          }
-                          animate={{ opacity: 1, x: 0 }}
-                          transition={{
-                            delay: reduceMotion || !staggerOnThisExpand
-                              ? 0
-                              : (index < SIZE_CONFIG.staggeredAnimationLimit ? index * 0.03 : SIZE_CONFIG.staggeredAnimationLimit * 0.03),
-                            duration: reduceMotion ? 0 : undefined,
-                          }}
+                          reduceMotion={reduceMotion}
+                          stagger={!!staggerOnThisExpand}
+                          staggerIndex={index}
                         >
                           <ActivityRow
                             activity={item}
@@ -3102,26 +3309,17 @@ export const TurnCard = React.memo(function TurnCard({
                             sessionFolderPath={sessionFolderPath}
                             displayMode={displayMode}
                           />
-                        </motion.div>
+                        </WorkChainRow>
                       )
                     ))
                   ) : (
                     /* Flat view for simple tool calls */
                     visibleActivities.map((activity, index) => (
-                      <motion.div
+                      <WorkChainRow
                         key={activity.id}
-                        initial={
-                          reduceMotion || !staggerOnThisExpand
-                            ? false
-                            : { opacity: 0, x: -8 }
-                        }
-                        animate={{ opacity: 1, x: 0 }}
-                        transition={{
-                          delay: reduceMotion || !staggerOnThisExpand
-                            ? 0
-                            : (index < SIZE_CONFIG.staggeredAnimationLimit ? index * 0.03 : SIZE_CONFIG.staggeredAnimationLimit * 0.03),
-                          duration: reduceMotion ? 0 : undefined,
-                        }}
+                        reduceMotion={reduceMotion}
+                        stagger={!!staggerOnThisExpand}
+                        staggerIndex={index}
                       >
                         <ActivityRow
                           activity={activity}
@@ -3130,29 +3328,29 @@ export const TurnCard = React.memo(function TurnCard({
                           sessionFolderPath={sessionFolderPath}
                           displayMode={displayMode}
                         />
-                      </motion.div>
+                      </WorkChainRow>
                     ))
                   )}
                   {/* Thinking/Buffering indicator - shown while waiting for response */}
-                  {showGenericThinkingIndicator && !animateResponse && (
-                    <motion.div
+                  {reserveThinkingSlot && (
+                    <WorkChainRow
                       key="thinking"
-                      initial={reduceMotion || !staggerOnThisExpand ? false : { opacity: 0, x: -8 }}
-                      animate={{ opacity: 1, x: 0 }}
-                      transition={{
-                        delay: reduceMotion || !staggerOnThisExpand
-                          ? 0
-                          : Math.min(visibleActivities.length, SIZE_CONFIG.staggeredAnimationLimit) * 0.03,
-                        duration: reduceMotion ? 0 : 0.3,
-                        ease: "easeOut"
-                      }}
-                      className={cn("flex items-center gap-2 py-0.5 text-muted-foreground/70", SIZE_CONFIG.fontSize)}
+                      reduceMotion={reduceMotion}
+                      stagger={!!staggerOnThisExpand}
+                      staggerIndex={visibleActivities.length}
                     >
-                      <div className={cn(SIZE_CONFIG.iconSize, "flex items-center justify-center shrink-0")}>
-                        <Spinner className={SIZE_CONFIG.spinnerSize} />
+                      <div
+                        data-thinking-slot=""
+                        aria-hidden={!showGenericThinkingIndicator || undefined}
+                        style={{ visibility: showGenericThinkingIndicator ? 'visible' : 'hidden' }}
+                        className={cn("flex items-center gap-2 py-0.5 text-muted-foreground/70", SIZE_CONFIG.fontSize)}
+                      >
+                        <div className={cn(SIZE_CONFIG.iconSize, "flex items-center justify-center shrink-0")}>
+                          <Spinner className={SIZE_CONFIG.spinnerSize} />
+                        </div>
+                        <span>{showGenericThinkingIndicator ? thinkingStatusLabel() : null}</span>
                       </div>
-                      <span>{THINKING_STATUS_LABEL}</span>
-                    </motion.div>
+                    </WorkChainRow>
                   )}
                   </AnimatePresence>
                 </div>
@@ -3161,22 +3359,14 @@ export const TurnCard = React.memo(function TurnCard({
                   <TodoList todos={todos} />
                 )}
           </ExpandableHeightPanel>
-        </div>
+          )}
+        </WorkChrome>
       )}
-
-      {/* Standalone thinking indicator - when no activities but still working */}
-      {!hasActivities && showGenericThinkingIndicator && !animateResponse && (
-        <div className={cn("flex items-center gap-2 px-3 py-1.5 text-muted-foreground", SIZE_CONFIG.fontSize)}>
-          <div className={cn(SIZE_CONFIG.iconSize, "flex items-center justify-center shrink-0")}>
-            <Spinner className={SIZE_CONFIG.spinnerSize} />
-          </div>
-          <span>{THINKING_STATUS_LABEL}</span>
-        </div>
-      )}
+      </AnimatePresence>
 
       {/* Plan Activities - rendered as full ResponseCards, time-sorted with other activities */}
       {planActivities.map((planActivity, index) => (
-        <div key={planActivity.id} className={cn("select-text", (hasActivities || index > 0) && "mt-2")}>
+        <div key={planActivity.id} className={cn("select-text", (showWorkChrome || index > 0) && "mt-3")}>
           <ResponseCard
             text={planActivity.content || ''}
             isStreaming={false}
@@ -3205,19 +3395,21 @@ export const TurnCard = React.memo(function TurnCard({
         </div>
       ))}
 
-      {/* Response Section - only shown when not buffering */}
+      <GrowingResponse>
+      {/* Response Section — keep the white frame mounted once a final stream exists */}
       {/* Animated version for playground demos */}
       {animateResponse && (
         <AnimatePresence>
-          {response && hasVisibleResponse && !isBuffering && (
+          {response && hasVisibleResponse && (
             <motion.div
               initial={reduceMotion ? false : { opacity: 0, y: 8 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: reduceMotion ? 0 : 0.3, ease: "easeOut" }}
-              className={cn("select-text", hasActivities && "mt-2")}
+              className={cn("select-text", showWorkChrome && "mt-3")}
             >
               <ResponseCard
                 text={response.text}
+                researchActivities={activities}
                 isStreaming={response.isStreaming}
                 isAnswerPreview={response.isAnswerPreview}
                 isTurnComplete={isComplete}
@@ -3228,6 +3420,7 @@ export const TurnCard = React.memo(function TurnCard({
                 onOpenUrl={onOpenUrl}
                 onPopOut={onPopOut ? () => onPopOut(response.text) : undefined}
                 variant={response.isPlan ? 'plan' : 'response'}
+                revealIdentity={`${sessionId}:${turnId}:response`}
                 messageId={response.messageId}
                 annotations={response.annotations}
                 onAddAnnotation={onAddAnnotation}
@@ -3239,7 +3432,6 @@ export const TurnCard = React.memo(function TurnCard({
                 isLastResponse={isLastResponse}
                 compactMode={compactMode}
                 isCommentary={showCommentary}
-                hasToolActivities={hasToolActivities}
                 onBranch={onBranch && response.messageId ? (options?: { newPanel?: boolean }) => onBranch(response.messageId!, options) : undefined}
                 onRegenerate={onRegenerate}
                 sendMessageKey={sendMessageKey}
@@ -3251,11 +3443,23 @@ export const TurnCard = React.memo(function TurnCard({
           )}
         </AnimatePresence>
       )}
-      {/* Non-animated version for regular app use */}
-      {!animateResponse && response && hasVisibleResponse && !isBuffering && (
-        <div className={cn("select-text", hasActivities && "mt-2")}>
+      {/* Regular app path: the card slides in with its first visible token and
+          collapses when commentary is demoted into the chain, instead of popping. */}
+      {!animateResponse && (
+      <AnimatePresence>
+      {response && hasVisibleResponse && (
+        <HeightPresence
+          key="response"
+          animateIn={animateLiveBlocks}
+          reduceMotion={reduceMotion}
+          className="select-text"
+        >
+          {/* Gap lives inside the tween; border-box padding on the tweened
+              element would floor the collapsed height at the padding. */}
+          <div className={cn((showWorkChrome || planActivities.length > 0) && "pt-3")}>
           <ResponseCard
             text={response.text}
+            researchActivities={activities}
             isStreaming={response.isStreaming}
                 isAnswerPreview={response.isAnswerPreview}
             isTurnComplete={isComplete}
@@ -3266,6 +3470,7 @@ export const TurnCard = React.memo(function TurnCard({
             onOpenUrl={onOpenUrl}
             onPopOut={onPopOut ? () => onPopOut(response.text) : undefined}
             variant={response.isPlan ? 'plan' : 'response'}
+            revealIdentity={`${sessionId}:${turnId}:response`}
             messageId={response.messageId}
             annotations={response.annotations}
             onAddAnnotation={onAddAnnotation}
@@ -3277,7 +3482,6 @@ export const TurnCard = React.memo(function TurnCard({
             isLastResponse={isLastResponse}
             compactMode={compactMode}
             isCommentary={showCommentary}
-            hasToolActivities={hasToolActivities}
             onBranch={onBranch && response.messageId ? (options?: { newPanel?: boolean }) => onBranch(response.messageId!, options) : undefined}
             onRegenerate={onRegenerate}
             sendMessageKey={sendMessageKey}
@@ -3285,8 +3489,12 @@ export const TurnCard = React.memo(function TurnCard({
             openAnnotationRequest={openAnnotationRequest}
             annotationInteractionMode={annotationInteractionMode}
           />
-        </div>
+          </div>
+        </HeightPresence>
       )}
+      </AnimatePresence>
+      )}
+      </GrowingResponse>
     </div>
   )
 }, (prev, next) => {

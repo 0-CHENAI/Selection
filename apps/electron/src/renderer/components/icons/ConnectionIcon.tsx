@@ -12,7 +12,7 @@
  */
 
 import { Brain } from 'lucide-react'
-import { getProviderIcon } from '@/lib/provider-icons'
+import { getProviderIcon, providerIcons } from '@/lib/provider-icons'
 import { getModelDisplayName } from '@config/models'
 import { isOrderGatewayUrl } from '@config/order-gateway'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@craft-agent/ui'
@@ -39,13 +39,15 @@ export function ConnectionIcon({ connection, size = 16, className = '', showTool
     connection.piAuthProvider
   )
 
+  // Bundled marks are black monochrome except Claude's orange brand mark.
+  // External SVG images cannot inherit the surrounding foreground color.
   const iconElement = providerIcon ? (
     <img
       src={providerIcon}
       alt=""
       width={size}
       height={size}
-      className={`rounded-[3px] flex-shrink-0 object-contain ${className}`}
+      className={`rounded-[3px] flex-shrink-0 object-contain ${providerIcon !== providerIcons.anthropic ? 'dark:invert' : ''} ${className}`}
       style={{ width: size, height: size }}
     />
   ) : (

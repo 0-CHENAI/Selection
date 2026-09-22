@@ -1,8 +1,10 @@
+import { remarkFileMentions } from './remark-file-mentions'
 import * as React from 'react'
 import ReactMarkdown, { defaultUrlTransform, type Components } from 'react-markdown'
 import rehypeKatex from 'rehype-katex'
 import rehypeRaw from 'rehype-raw'
 import remarkGfm from 'remark-gfm'
+import { remarkLiteralTildes } from './remark-literal-tildes'
 import remarkMath from 'remark-math'
 import 'katex/dist/katex.min.css'
 import { cn } from '../../lib/utils'
@@ -10,14 +12,19 @@ import { CodeBlock, InlineCode } from './CodeBlock'
 import { MarkdownDiffBlock } from './MarkdownDiffBlock'
 import { MarkdownJsonBlock } from './MarkdownJsonBlock'
 import { MarkdownMermaidBlock } from './MarkdownMermaidBlock'
+import { NativeMarkdownTable } from './NativeMarkdownTable'
 import { MarkdownDatatableBlock } from './MarkdownDatatableBlock'
 import { MarkdownSpreadsheetBlock } from './MarkdownSpreadsheetBlock'
 import { MarkdownHtmlBlock } from './MarkdownHtmlBlock'
+import { FileTypeIcon, getFileIconKind } from '../chat/attachment-helpers'
+import { WebsiteIcon } from './WebsiteIcon'
+import { MarkdownImage } from './MarkdownImage'
 import { MarkdownImageBlock } from './MarkdownImageBlock'
 import { MarkdownLatexBlock } from './MarkdownLatexBlock'
 import { MarkdownPdfBlock } from './MarkdownPdfBlock'
 import { MarkdownDocBlock } from './MarkdownDocBlock'
 import { preprocessLinks } from './linkify'
+import { promoteBarePreviewBlocks } from './promote-preview-blocks'
 import { resolveMarkdownLinkTarget } from './link-target'
 import remarkCollapsibleSections from './remarkCollapsibleSections'
 import { CollapsibleSection } from './CollapsibleSection'
@@ -26,6 +33,7 @@ import { wrapWithSafeProxy } from './safe-components'
 import { MARKDOWN_MATH_OPTIONS, protectCurrencyDollars } from './math-options'
 import { markdownUrlTransform } from './url-transform'
 import { useSemanticReveal } from './useSemanticReveal'
+import { rehypeStreamChunks } from './rehype-stream-chunks'
 
 /**
  * Names of preview-block code-fence types that recursive `Markdown` callers
@@ -217,6 +225,23 @@ function createComponents(
       const trimmedHref = href?.trim() ?? ''
       const sanitized = trimmedHref ? defaultUrlTransform(trimmedHref) : ''
       const safeHref = sanitized ? sanitized : undefined
+      const resolved = resolveMarkdownLinkTarget(trimmedHref)
+      let fileName = resolved.kind === 'file' ? resolved.path.replace(/\\/g, '/').split('/').pop() : undefined
+      if (!fileName && /^https?:\/\//i.test(trimmedHref)) {
+        try {
+          const name = decodeURIComponent(new URL(trimmedHref).pathname.split('/').pop() ?? '')
+          if (/\.(?:docx?|docm|xlsx?|xlsm|pptx?|pptm|pdf|txt|md|markdown|png|jpe?g|gif|webp|svg|csv|rtf|odt|ods|odp)$/i.test(name)) fileName = name
+        } catch { /* Malformed URLs retain ordinary link rendering. */ }
+      }
+
+      const fileKind = fileName ? getFileIconKind({ fileName }) : undefined
+      const fileTint = fileKind === 'word' ? 'bg-blue-500/[0.07] hover:bg-blue-500/[0.12]'
+        : fileKind === 'excel' ? 'bg-green-500/[0.07] hover:bg-green-500/[0.12]'
+        : fileKind === 'powerpoint' ? 'bg-orange-500/[0.07] hover:bg-orange-500/[0.12]'
+        : fileKind === 'pdf' ? 'bg-destructive/[0.07] hover:bg-destructive/[0.12]'
+        : fileKind === 'image' ? 'bg-accent/[0.07] hover:bg-accent/[0.12]'
+        : fileKind === 'code' ? 'bg-success/[0.07] hover:bg-success/[0.12]'
+        : 'bg-foreground/[0.06] hover:bg-foreground/[0.10]'
 
       const handleClick = (e: React.MouseEvent) => {
         e.preventDefault()
@@ -243,12 +268,20 @@ function createComponents(
         <a
           href={safeHref}
           onClick={handleClick}
-          className="text-accent hover:underline cursor-pointer"
+          title={fileName}
+          className={fileName
+            ? cn('inline-flex max-w-full cursor-pointer items-center gap-2 rounded-lg py-1 pl-1 pr-2.5 align-middle text-[0.9em] font-bold !text-foreground !no-underline transition-colors hover:!no-underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring', fileTint)
+            : 'text-accent hover:underline cursor-pointer'}
         >
-          {children}
+          {fileName ? <span aria-hidden="true" className="inline-flex size-6 shrink-0 items-center justify-center rounded-md bg-background/80"><FileTypeIcon fileName={fileName} className="size-4" /></span>
+            : safeHref && /^https?:\/\//i.test(safeHref) && <WebsiteIcon key={safeHref} href={safeHref} />}
+          {fileName ? <span className="min-w-0 break-all font-bold leading-snug">{children}</span> : children}
         </a>
       )
     },
+    img: ({ src, alt }) => (
+      <MarkdownImage src={src} alt={alt} onFileClick={onFileClick} />
+    ),
   }
 
   // Terminal mode: minimal formatting
@@ -388,16 +421,14 @@ function createComponents(
       },
       // Clean tables
       table: ({ children }) => (
-        <div className="my-3 overflow-x-auto">
-          <table className="min-w-full text-sm">{children}</table>
-        </div>
+        <NativeMarkdownTable>{children}</NativeMarkdownTable>
       ),
       thead: ({ children }) => <thead className="border-b">{children}</thead>,
-      th: ({ children }) => (
-        <th className="text-left py-2 px-3 font-semibold text-muted-foreground">{children}</th>
+      th: ({ children, colSpan, rowSpan }) => (
+        <th colSpan={colSpan} rowSpan={rowSpan} className="text-left py-2 px-3 font-semibold text-muted-foreground">{children}</th>
       ),
-      td: ({ children }) => (
-        <td className="py-2 px-3 border-b border-border/50">{children}</td>
+      td: ({ children, colSpan, rowSpan }) => (
+        <td colSpan={colSpan} rowSpan={rowSpan} className="py-2 px-3 border-b border-border/50">{children}</td>
       ),
       // Headings - H1/H2 same size, differentiated by weight
       h1: ({ children }) => <h1 className="font-sans text-[16px] font-bold mt-5 mb-3">{children}</h1>,
@@ -508,17 +539,15 @@ function createComponents(
     ),
     // Beautiful tables
     table: ({ children }) => (
-      <div className="my-4 overflow-x-auto rounded-md border">
-        <table className="min-w-full divide-y divide-border">{children}</table>
-      </div>
+      <NativeMarkdownTable>{children}</NativeMarkdownTable>
     ),
     thead: ({ children }) => <thead className="bg-muted/50">{children}</thead>,
     tbody: ({ children }) => <tbody className="divide-y divide-border">{children}</tbody>,
-    th: ({ children }) => (
-      <th className="text-left py-3 px-4 font-semibold text-sm">{children}</th>
+    th: ({ children, colSpan, rowSpan }) => (
+      <th colSpan={colSpan} rowSpan={rowSpan} className="text-left py-3 px-4 font-semibold text-sm">{children}</th>
     ),
-    td: ({ children }) => (
-      <td className="py-3 px-4 text-sm">{children}</td>
+    td: ({ children, colSpan, rowSpan }) => (
+      <td colSpan={colSpan} rowSpan={rowSpan} className="py-3 px-4 text-sm">{children}</td>
     ),
     tr: ({ children }) => (
       <tr className="hover:bg-muted/30 transition-colors">{children}</tr>
@@ -616,7 +645,7 @@ export function Markdown({
 
   // Linkify first, then shield currency `$` so `$A$` can be inline math.
   const processedContent = React.useMemo(
-    () => protectCurrencyDollars(preprocessLinks(children)),
+    () => protectCurrencyDollars(preprocessLinks(promoteBarePreviewBlocks(children))),
     [children]
   )
 
@@ -628,8 +657,8 @@ export function Markdown({
         MARKDOWN_MATH_OPTIONS
       ]
       return collapsible
-        ? [remarkGfm, mathPlugin, remarkCollapsibleSections]
-        : [remarkGfm, mathPlugin]
+        ? [remarkGfm, remarkFileMentions, remarkLiteralTildes, mathPlugin, remarkCollapsibleSections]
+        : [remarkGfm, remarkFileMentions, remarkLiteralTildes, mathPlugin]
     },
     [collapsible]
   )
@@ -638,7 +667,7 @@ export function Markdown({
     <div ref={revealRoot} className={cn('markdown-content', className)}>
       <ReactMarkdown
         remarkPlugins={remarkPlugins}
-        rehypePlugins={[[rehypeKatex, { throwOnError: false, strict: false }], rehypeRaw]}
+        rehypePlugins={[[rehypeKatex, { throwOnError: false, strict: false }], rehypeRaw, rehypeStreamChunks]}
         components={components}
         urlTransform={markdownUrlTransform}
       >

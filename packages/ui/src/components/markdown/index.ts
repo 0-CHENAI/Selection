@@ -15,7 +15,12 @@ export { CollapsibleSection } from './CollapsibleSection'
 export { CollapsibleMarkdownProvider, useCollapsibleMarkdown } from './CollapsibleMarkdownContext'
 export { MarkdownDatatableBlock, type MarkdownDatatableBlockProps } from './MarkdownDatatableBlock'
 export { MarkdownSpreadsheetBlock, type MarkdownSpreadsheetBlockProps } from './MarkdownSpreadsheetBlock'
+export { MarkdownImage, type MarkdownImageProps } from './MarkdownImage'
 export { MarkdownImageBlock, type MarkdownImageBlockProps } from './MarkdownImageBlock'
+export {
+  resolveMarkdownImageSource,
+  type MarkdownImageSource,
+} from './markdown-image-source'
 export { MarkdownDocBlock, type MarkdownDocBlockProps } from './MarkdownDocBlock'
 export {
   parseMarkdownPreviewSpec,
@@ -23,5 +28,6 @@ export {
   type MarkdownPreviewItem,
   type MarkdownPreviewSpec,
 } from './markdown-preview-helpers'
+export { promoteBarePreviewBlocks } from './promote-preview-blocks'
 export { ImageCardStack, type ImageCardStackProps, type ImageCardStackItem } from './ImageCardStack'
 export { TiptapMarkdownEditor, type TiptapMarkdownEditorProps, type MarkdownEngine } from './TiptapMarkdownEditor'

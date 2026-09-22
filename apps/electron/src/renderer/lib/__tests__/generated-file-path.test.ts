@@ -201,15 +201,14 @@ describe('resolveOpenableGeneratedFile', () => {
   })
 
   test('does not guess among several same-named files', async () => {
-    const pick = await resolveOpenableGeneratedFile({
+    await expect(resolveOpenableGeneratedFile({
       requestedPath: 'SKILL.md',
       baseDir: workspace,
       searchFiles: async () => [
         hit(`${workspace}\\skills\\a\\SKILL.md`, 'skills/a/SKILL.md'),
         hit(`${workspace}\\skills\\b\\SKILL.md`, 'skills/b/SKILL.md'),
       ],
-    })
-    expect(pick).toEqual({ path: `${workspace}\\SKILL.md` })
+    })).rejects.toThrow('File not found')
   })
 
   test('opens the unique workspace match when parent probes fail', async () => {
@@ -228,16 +227,14 @@ describe('resolveOpenableGeneratedFile', () => {
   })
 
   test('does not treat a POSIX case-variant as the same suffix', async () => {
-    const pick = await resolveOpenableGeneratedFile({
+    await expect(resolveOpenableGeneratedFile({
       requestedPath: 'docs/SKILL.md',
       baseDir: '/Users/me/proj',
       searchFiles: async () => [
         { type: 'file', name: 'skill.md', path: '/Users/me/proj/other/skill.md', relativePath: 'other/skill.md' },
         { type: 'file', name: 'skill.md', path: '/Users/me/proj/docs/skill.md', relativePath: 'docs/skill.md' },
       ],
-    })
-    expect(pick.path).toBe('/Users/me/proj/docs/SKILL.md')
-    expect(pick.closestMatchRelativePath).toBeUndefined()
+    })).rejects.toThrow('File not found')
   })
 
   test('probes the unix root when the file lives at /name', async () => {
@@ -270,4 +267,11 @@ describe('resolveOpenableGeneratedFile', () => {
     })
     expect(pick.path).toBe(realPath)
   })
+})
+
+test('rejects missing files instead of returning an invented path', async () => {
+  await expect(resolveOpenableGeneratedFile({requestedPath:'AGENTS.md',baseDir:'/workspace',searchFiles:async()=>[]})).rejects.toThrow('File not found')
+})
+test('does not open a fuzzy search result with a different filename', async () => {
+  await expect(resolveOpenableGeneratedFile({requestedPath:'AGENTS.md',baseDir:'/workspace',searchFiles:async()=>[{type:'file',name:'AGENTS-backup.md',path:'/workspace/AGENTS-backup.md',relativePath:'AGENTS-backup.md'}]})).rejects.toThrow('File not found')
 })

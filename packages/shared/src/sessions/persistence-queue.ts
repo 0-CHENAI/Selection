@@ -1,4 +1,4 @@
-import { writeFile, rename, unlink } from 'fs/promises'
+import { writeFile, rename } from 'fs/promises'
 import { dirname } from 'path'
 import type { StoredSession, SessionHeader } from './types.js'
 import { getSessionFilePath, ensureSessionsDir, ensureSessionDir } from './storage.js'
@@ -156,8 +156,8 @@ class SessionPersistenceQueue {
 
       const tmpFile = filePath + '.tmp'
       await writeFile(tmpFile, lines.join('\n') + '\n', 'utf-8')
-      // On Windows, rename fails if target exists. Delete first for cross-platform compatibility.
-      try { await unlink(filePath) } catch { /* ignore if doesn't exist */ }
+      // Replace directly: deleting first loses the last committed transcript if
+      // rename fails or the process exits between the two operations.
       await rename(tmpFile, filePath)
       debug(`[PersistenceQueue] Wrote session ${sessionId}`)
     } catch (error) {

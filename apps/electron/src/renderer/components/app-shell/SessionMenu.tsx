@@ -1,7 +1,6 @@
 /** Shared session menu after the classification workflow removal (#180). */
 import { useTranslation } from 'react-i18next'
 import {
-  AppWindow,
   Check,
   Columns2,
   Copy,
@@ -42,7 +41,6 @@ export function SessionMenu({
   item,
   onRename,
   onMarkUnread,
-  onOpenInNewWindow,
   onSendToWorkspace,
   onDelete,
   hasTransferTargets,
@@ -116,10 +114,6 @@ export function SessionMenu({
       <MenuItem onClick={actions.openInNewPanel}>
         <Columns2 className="h-3.5 w-3.5" />
         <span className="flex-1">{t('sessionMenu.openInNewPanel')}</span>
-      </MenuItem>
-      <MenuItem onClick={onOpenInNewWindow}>
-        <AppWindow className="h-3.5 w-3.5" />
-        <span className="flex-1">{t('sessionMenu.openInNewWindow')}</span>
       </MenuItem>
       <MenuItem onClick={actions.showInFinder}>
         <FolderOpen className="h-3.5 w-3.5" />

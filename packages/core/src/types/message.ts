@@ -316,10 +316,17 @@ export interface Message {
   answerRunId?: string;
   /** Renderer-only, uncommitted answer preview; never persisted. */
   answerPreview?: boolean;
+  /** Renderer-only live completion clock; never restored from persisted history. */
+  completedRevealStartTime?: number;
   answerCommitted?: boolean;
+  /** Promoted from an unsubmitted draft after delivery recovery failed (#403). */
+  answerSalvaged?: boolean;
   /** Persisted on the originating user message before the single recovery call. */
   answerRecoveryAttempted?: boolean;
   phase?: TextStreamPhase;
+  presentationProtocol?: 'native' | 'marker-v1' | 'legacy';
+  /** Original provider message shared by presentation fragments. */
+  sourceSdkMessageId?: string;
 
   // Hidden: a system-generated message that must reach the model (it drives a
   // turn) but must NOT render as a bubble in the transcript — e.g. the WS2
@@ -413,9 +420,14 @@ export interface StoredMessage {
   answerProtocol?: 'explicit-v1';
   answerRunId?: string;
   answerCommitted?: boolean;
+  /** Promoted from an unsubmitted draft after delivery recovery failed (#403). */
+  answerSalvaged?: boolean;
   /** Persisted on the originating user message before the single recovery call. */
   answerRecoveryAttempted?: boolean;
   phase?: TextStreamPhase;
+  presentationProtocol?: 'native' | 'marker-v1' | 'legacy';
+  /** Original provider message shared by presentation fragments. */
+  sourceSdkMessageId?: string;
 
   turnId?: string;
   // Status type for compaction messages (persisted for reload)
@@ -529,9 +541,15 @@ export type ErrorCode =
   | 'sdk_binary_missing'     // SDK subprocess binary not present on disk (incomplete bundle)
   | 'sdk_cwd_missing'        // SDK subprocess cwd not present on disk (stale cross-machine import)
   | 'provider_timeout'
+  | 'model_request_timeout'
   | 'no_response'
   | 'tool_only_response'
   | 'context_limit'
+  | 'output_limit'
+  | 'answer_delivery_missing'
+  | 'answer_persistence_failed'
+  | 'progress_needs_user'
+  | 'call_time_limit'
   | 'stream_interrupted'
   | 'agent_process_exited'
   | 'unknown_error';
@@ -603,6 +621,19 @@ export interface AgentEventUsage {
   contextTokens?: number;
   /** Model's context window size in tokens (from SDK modelUsage) */
   contextWindow?: number;
+  /** Cache read share of the current request input (0-1). */
+  cacheHitRate?: number;
+  /** Estimated context composition. Optional fields appear only when Selection can measure them. */
+  contextBreakdown?: {
+    systemPrompt: number;
+    tools: number;
+    messages: number;
+    rules?: number;
+    skills?: number;
+    mcpTools?: number;
+    subagents?: number;
+    summarized?: number;
+  };
 }
 
 /** Live multimodal tool-result blocks. Image payloads are never persisted in Selection session JSONL. */
@@ -623,11 +654,12 @@ export type TextStreamPhase = 'unclassified' | 'intermediate' | 'final';
  * turnId: Correlation ID from the API's message.id, groups all events in an assistant turn
  */
 export type AgentEvent =
+  | { type: 'model_activity'; reasoningBytes: number; textBytes: number }
   | { type: 'status'; message: string }
   | { type: 'info'; message: string }
   | { type: 'answer_preview'; text: string; toolCallId: string }
-  | { type: 'text_delta'; text: string; phase?: TextStreamPhase; turnId?: string; parentToolUseId?: string }
-  | { type: 'text_complete'; text: string; phase?: TextStreamPhase; answerProtocol?: 'explicit-v1'; answerRunId?: string; answerCommitted?: boolean; isIntermediate?: boolean; turnId?: string; parentToolUseId?: string; sdkMessageId?: string }
+  | { type: 'text_delta'; text: string; phase?: TextStreamPhase; presentationProtocol?: 'native' | 'marker-v1' | 'legacy'; turnId?: string; parentToolUseId?: string }
+  | { type: 'text_complete'; text: string; phase?: TextStreamPhase; presentationProtocol?: 'native' | 'marker-v1' | 'legacy'; answerProtocol?: 'explicit-v1'; answerRunId?: string; answerCommitted?: boolean; isIntermediate?: boolean; turnId?: string; parentToolUseId?: string; sdkMessageId?: string; relatedTurnIds?: string[] }
   | { type: 'pi_turn_anchor'; sdkMessageId: string; sdkTurnAnchor: string }
   | { type: 'tool_start'; toolName: string; toolUseId: string; input: Record<string, unknown>; intent?: string; displayName?: string; turnId?: string; parentToolUseId?: string; toolDisplayMeta?: ToolDisplayMeta }
   | { type: 'tool_result'; toolUseId: string; toolName?: string; result: string; content?: AgentToolResultContent[]; isError: boolean; input?: Record<string, unknown>; turnId?: string; parentToolUseId?: string }

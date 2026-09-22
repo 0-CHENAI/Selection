@@ -125,6 +125,13 @@ export const DEFAULT_SLASH_COMMANDS: SlashCommand[] = [
   compactCommand,
 ]
 
+/** Drop the sub-agent command when Advanced → Swarm agents is off. */
+export function slashCommandsForSwarm(swarmAgentsEnabled: boolean): SlashCommand[] {
+  return swarmAgentsEnabled
+    ? DEFAULT_SLASH_COMMANDS
+    : DEFAULT_SLASH_COMMANDS.filter(command => command.id !== 'delegate')
+}
+
 /**
  * Permission-mode groups for the mode dropdown badge (ActiveOptionBadges).
  * Not shown in the `/` slash autocomplete.
@@ -632,6 +639,8 @@ export interface UseInlineSlashCommandOptions {
   skills?: LoadedSkill[]
   /** Workspace slug for fully-qualified skill mentions */
   workspaceId?: string
+  /** Hide `/delegate` when the app-level Swarm switch is off. */
+  swarmAgentsEnabled?: boolean
 }
 
 export interface UseInlineSlashCommandReturn {
@@ -656,6 +665,7 @@ export function useInlineSlashCommand({
   homeDir,
   skills = [],
   workspaceId,
+  swarmAgentsEnabled = false,
 }: UseInlineSlashCommandOptions): UseInlineSlashCommandReturn {
   const { t } = useTranslation()
   const [isOpen, setIsOpen] = React.useState(false)
@@ -688,7 +698,7 @@ export function useInlineSlashCommand({
     result.push({
       id: 'commands',
       label: t('commands.section', 'Commands'),
-      items: DEFAULT_SLASH_COMMANDS,
+      items: slashCommandsForSwarm(swarmAgentsEnabled),
     })
 
     // Recent folders section - sorted alphabetically by folder name, show all

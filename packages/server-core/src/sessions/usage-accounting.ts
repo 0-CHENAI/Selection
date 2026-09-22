@@ -27,6 +27,78 @@ function normalizeCounter(value: number | undefined): number {
   return typeof value === 'number' && Number.isFinite(value) ? Math.max(0, value) : 0
 }
 
+/** Last-call cache hit rate: cache reads over the current request input footprint. */
+export function cacheHitRateFromUsage(usage: Pick<AgentEventUsage, 'inputTokens' | 'cacheReadTokens' | 'contextTokens'>): number | undefined {
+  const cacheRead = normalizeCounter(usage.cacheReadTokens)
+  const reportedContext = normalizeCounter(usage.contextTokens)
+  const totalInput = reportedContext > 0
+    ? reportedContext
+    : normalizeCounter(usage.inputTokens) + cacheRead
+  if (totalInput <= 0) return undefined
+  return Math.min(1, cacheRead / totalInput)
+}
+
+const OPTIONAL_CONTEXT_BREAKDOWN_KEYS = [
+  'rules',
+  'skills',
+  'mcpTools',
+  'subagents',
+  'summarized',
+] as const
+
+export function normalizeContextBreakdown(
+  breakdown: AgentEventUsage['contextBreakdown'],
+): AgentEventUsage['contextBreakdown'] | undefined {
+  if (!breakdown) return undefined
+  const systemPrompt = normalizeCounter(breakdown.systemPrompt)
+  const tools = normalizeCounter(breakdown.tools)
+  const messages = normalizeCounter(breakdown.messages)
+  const next: NonNullable<AgentEventUsage['contextBreakdown']> = { systemPrompt, tools, messages }
+  for (const key of OPTIONAL_CONTEXT_BREAKDOWN_KEYS) {
+    const value = normalizeCounter(breakdown[key])
+    if (value > 0) next[key] = value
+  }
+  if (systemPrompt + tools + messages + OPTIONAL_CONTEXT_BREAKDOWN_KEYS.reduce((sum, key) => sum + (next[key] ?? 0), 0) <= 0) {
+    return undefined
+  }
+  return next
+}
+
+/** Latest request occupancy. Ignore 0 so a trailing empty usage event cannot hide the ring. */
+export function contextOccupancyFromUsage(usage: Pick<AgentEventUsage, 'contextTokens' | 'inputTokens'>): number | undefined {
+  const context = normalizeCounter(usage.contextTokens)
+  if (context > 0) return context
+  const input = normalizeCounter(usage.inputTokens)
+  return input > 0 ? input : undefined
+}
+
+export function applyContextOccupancy(
+  tokenUsage: { inputTokens: number; contextTokens?: number },
+  usage: AgentEventUsage,
+): void {
+  const next = contextOccupancyFromUsage(usage)
+  if (next == null) return
+  tokenUsage.inputTokens = next
+  tokenUsage.contextTokens = next
+}
+
+export function applyContextUsageFields(
+  tokenUsage: { cacheHitRate?: number; contextBreakdown?: AgentEventUsage['contextBreakdown'] },
+  usage: AgentEventUsage,
+): void {
+  if (typeof usage.cacheHitRate === 'number' && Number.isFinite(usage.cacheHitRate)) {
+    tokenUsage.cacheHitRate = Math.min(1, Math.max(0, usage.cacheHitRate))
+  } else if (usage.cacheReadTokens != null) {
+    const rate = cacheHitRateFromUsage(usage)
+    if (rate != null) tokenUsage.cacheHitRate = rate
+  }
+
+  if (!Object.hasOwn(usage, 'contextBreakdown')) return
+  const next = normalizeContextBreakdown(usage.contextBreakdown)
+  if (next) tokenUsage.contextBreakdown = next
+  else delete tokenUsage.contextBreakdown
+}
+
 export function normalizeModelCallUsage(usage: AgentEventUsage): SessionModelCallUsage {
   const inputTokens = normalizeCounter(usage.inputTokens)
   const outputTokens = normalizeCounter(usage.outputTokens)

@@ -297,7 +297,7 @@ describe('issue #81 — false-final `|` must not break the work chain', () => {
 })
 
 describe('isVisibleCommentaryCard', () => {
-  it('is only visible while the turn is still open and no tools have started', () => {
+  it('is only visible while the turn is still open and no tools are running', () => {
     const response = { text: '说明', isStreaming: false, isCommentary: true, messageId: 'm1' }
     expect(isVisibleCommentaryCard(response, false)).toBe(true)
     expect(isVisibleCommentaryCard(response, false, true)).toBe(false)

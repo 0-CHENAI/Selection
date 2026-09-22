@@ -66,6 +66,8 @@ export interface HTMLPreviewOverlayProps {
   error?: string
   /** Theme mode for dark/light styling */
   theme?: 'light' | 'dark'
+  /** Use natural document height in the overlay scroll container. */
+  readingMode?: boolean
 }
 
 export function HTMLPreviewOverlay({
@@ -80,6 +82,7 @@ export function HTMLPreviewOverlay({
   filePath,
   error,
   theme,
+  readingMode = false,
 }: HTMLPreviewOverlayProps) {
   // Normalize: single html prop → single item, or use items array
   const { t } = useTranslation()
@@ -92,7 +95,7 @@ export function HTMLPreviewOverlay({
   const [activeIdx, setActiveIdx] = React.useState(initialIndex)
   const iframeRef = React.useRef<HTMLIFrameElement>(null)
   const containerRef = React.useRef<HTMLDivElement>(null)
-  const interactions = useRichBlockInteractions({ isOpen, containerRef })
+  const interactions = useRichBlockInteractions({ isOpen: isOpen && !readingMode, containerRef })
   const { reset } = interactions
   const bridgeCleanup = React.useRef<(() => void) | undefined>(undefined)
   const [contentSize, setContentSize] = React.useState<{ width: number; height: number } | null>(null)
@@ -165,7 +168,7 @@ export function HTMLPreviewOverlay({
     const iframe = iframeRef.current
     if (!iframe) return
     bridgeCleanup.current?.()
-    if (containerRef.current) bridgeCleanup.current = bindHtmlPreviewInteractions(iframe, containerRef.current, interactions.didDrag)
+    if (containerRef.current) bridgeCleanup.current = bindHtmlPreviewInteractions(iframe, containerRef.current, interactions.didDrag, readingMode)
     try {
       const doc = iframe.contentDocument
       if (doc?.body) {
@@ -183,7 +186,7 @@ export function HTMLPreviewOverlay({
       // Cross-origin or empty document — fall through to a visible default.
     }
     setContentSize({ width: 800, height: 600 })
-  }, [interactions.didDrag])
+  }, [interactions.didDrag, readingMode])
 
   const iframeHeight = contentSize
     ? `${contentSize.height}px`
@@ -194,7 +197,7 @@ export function HTMLPreviewOverlay({
   // Header actions: item navigation + copy button
   const headerActions = (
     <div className="flex items-center gap-2">
-      <ZoomControls
+      {!readingMode && <ZoomControls
         scale={interactions.scale}
         minScale={RICH_BLOCK_DEFAULTS.minScale}
         maxScale={RICH_BLOCK_DEFAULTS.maxScale}
@@ -205,7 +208,7 @@ export function HTMLPreviewOverlay({
         onZoomToFit={() => interactions.zoomToFit(contentSize ? { width: contentSize.width + 128, height: Math.max(400, contentSize.height) + 60 } : null)}
         onReset={reset}
         resetDisabled={interactions.scale === 1 && interactions.translate.x === 0 && interactions.translate.y === 0}
-      />
+      />}
       <ItemNavigator items={resolvedItems} activeIndex={activeIdx} onSelect={setActiveIdx} size="md" />
       <CopyButton content={activeContent || ''} label="Copy HTML" className="bg-background shadow-minimal" />
     </div>
@@ -221,14 +224,14 @@ export function HTMLPreviewOverlay({
         label: 'HTML',
         variant: 'blue',
       }}
-      filePath={filePath}
+      filePath={activeItem?.src !== '__single__' ? activeItem?.src || filePath : filePath}
       title={title || activeItem?.label || t('preview.htmlPreview')}
       error={error ? { label: t('preview.htmlPreview'), message: error } : undefined}
       headerActions={headerActions}
     >
-      <div ref={interactions.attachContainerRef} className="flex items-center justify-center overflow-hidden"
-        onMouseDown={interactions.onMouseDown} onDoubleClick={interactions.onDoubleClick}
-        style={{ height: 'calc(100vh - 120px)', cursor: interactions.isDragging ? 'grabbing' : 'grab' }}>
+      <div ref={interactions.attachContainerRef} className={readingMode ? "px-6 py-4" : "flex items-center justify-center overflow-hidden"}
+        onMouseDown={readingMode ? undefined : interactions.onMouseDown} onDoubleClick={readingMode ? undefined : interactions.onDoubleClick}
+        style={readingMode ? undefined : { height: 'calc(100vh - 120px)', cursor: interactions.isDragging ? 'grabbing' : 'grab' }}>
         {loadingItem && !activeContent && (
           <div className="py-12 text-center text-muted-foreground text-sm">{t('common.loading')}</div>
         )}
@@ -238,7 +241,7 @@ export function HTMLPreviewOverlay({
         {processedHtml && (
           <div
             className="bg-white rounded-[12px] overflow-hidden shadow-minimal shrink-0"
-            style={{
+            style={readingMode ? { width: '100%' } : {
               width: contentSize?.width ? `${contentSize.width + 128}px` : 'calc(100% - 48px)',
               padding: '24px 64px 36px',
               opacity: measured ? 1 : 0,

@@ -1,3 +1,6 @@
+import { ProgressSupervisor, createProgressBudget, type ProgressBudget, type ProgressDecision, type ProgressSnapshot } from '../supervision/progress-supervisor'
+import { saveProgressCandidate, loadProgressCandidate, readProgressCheckpoint, writeProgressCheckpoint, type ProgressCheckpoint } from '../supervision/progress-store'
+import { waitForRuntimeCleanup } from './runtime-cleanup.ts'
 import { copyBranchFiles } from './branch-files'
 import { ANSWER_RECOVERY_PROMPT } from '@craft-agent/shared/prompts/answer-delivery'
 import type { AnswerDeliveryControl, AnswerSubmission, ChatOptions } from '@craft-agent/shared/agent/backend/types'
@@ -10,7 +13,7 @@ import { createScopedLogger, CONSOLE_LOGGER, type PlatformServices, type Logger 
 import { basename, dirname, join } from 'path'
 import { existsSync } from 'fs'
 import { readFile, writeFile, mkdir } from 'fs/promises'
-import { randomUUID } from 'node:crypto'
+import { randomUUID, createHash } from 'node:crypto'
 import { type AgentEvent, setPermissionMode, hydratePreviousPermissionMode, getPermissionModeDiagnostics, type PermissionMode, unregisterSessionScopedToolCallbacks, mergeSessionScopedToolCallbacks, AbortReason, type AuthRequest, type AuthResult, type CredentialAuthRequest, type BrowserPaneFns, generateConversationSummary, resolveKeepBackgroundTasksAlive, sanitizeUserMessageForRetry, resolveSpawnWaitTimeoutMs, type SpawnSessionLifecycle, type SpawnSessionRequest, type SpawnSessionResult, type SpawnSessionRole, type SpawnSessionReason } from '@craft-agent/shared/agent'
 import {
   resolveSessionConnection,
@@ -125,7 +128,7 @@ import { getCredentialManager } from '@craft-agent/shared/credentials'
 import { CraftMcpClient, McpClientPool, McpPoolServer } from '@craft-agent/shared/mcp'
 import { type Session, type SessionEvent, type FileAttachment, type SendMessageOptions, type UnreadSummary, type RemoteSessionTransferPayload, type ImportRemoteSessionTransferResult, type SwarmRunDetailsDto, type SwarmRunNodeDto, RPC_CHANNELS, generateMessageId } from '@craft-agent/shared/protocol'
 import { applySteerTranscriptBoundary, messageToStored, storedToMessage, type Message, type StoredAttachment, type TextStreamPhase, type ToolDisplayMeta } from '@craft-agent/core/types'
-import { hasRenderableAssistantText, preferRicherAssistantText } from '@craft-agent/core'
+import { hasRenderableAssistantText, isAnswerDeliveryReceipt, preferRicherAssistantText } from '@craft-agent/core'
 import { formatPathsToRelative, formatToolInputPaths, perf, encodeIconToDataUrlAsync, getEmojiIcon, resetSummarizationClient, resolveToolIcon, readFileAttachment, resolveRegenerateAttachments, selectSpreadMessages, normalizePath } from '@craft-agent/shared/utils'
 import { collectSkillSlugsForSourcePreEnable, filterUserFacingSkills, loadAllSkills, loadSkillBySlug, invalidateSkillsCache, type LoadedSkill } from '@craft-agent/shared/skills'
 import { invalidateContextFileCache } from '@craft-agent/shared/prompts/system'
@@ -139,12 +142,13 @@ import { listLabels, loadLabelConfig } from '@craft-agent/shared/labels/storage'
 import { extractLabelId, resolveSessionLabels, findTaskItemLabelId } from '@craft-agent/shared/labels'
 import { ensureLabelsExist, ensureTaskItemLabel } from '@craft-agent/shared/labels/crud'
 import { loadStatusConfig } from '@craft-agent/shared/statuses/storage'
-import { AutomationSystem, createPromptHistoryEntry, appendAutomationHistoryEntry, enrichAgentEventInput, DEFAULT_PROMPT_WAIT_TIMEOUT_MS, MAX_PROMPT_WAIT_TIMEOUT_MS, type AutomationSystemMetadataSnapshot, type AgentEvent as AutomationAgentEvent, type SdkAutomationInput, type PendingPrompt } from '@craft-agent/shared/automations'
-import { waitForAutomationSessionCompletion } from './wait-automation-session.ts'
+import { AutomationSystem, createPromptHistoryEntry, appendAutomationHistoryEntry, type AutomationSystemMetadataSnapshot, type PendingPrompt } from '@craft-agent/shared/automations'
 import { createTypedError, parseError } from '@craft-agent/shared/agent/errors'
 import { buildBackendRuntimeSignature, buildRestartRequiredSignature, prepareModelImageAttachments } from './runtime-config'
 import { validateArchiveTarget } from './archive-guards'
 import {
+  applyContextOccupancy,
+  applyContextUsageFields,
   createTurnUsageAccumulator,
   finalizeTurnUsage,
   recordModelCallStart,
@@ -862,12 +866,20 @@ interface RunningBackgroundTask {
 }
 
 interface ManagedSession {
+  progressAdvisories?: Array<{ id: string; text: string }>
+  progressLiveEvaluationTokens?: number
+  progressReviewer?: AgentInstance
+  progressSupervisor?: ProgressSupervisor
+  progressSupervision?: import('@craft-agent/shared/protocol/dto').ProgressSupervisionView
+  progressDisabled?: boolean
+
   answerDelivery?: {
     runId: string
     generation: number
     userMessageId: string
     recovery: boolean
     accepting?: boolean
+    persistenceFailed?: boolean
     committedMessageId?: string
   }
 
@@ -878,12 +890,15 @@ interface ManagedSession {
   isProcessing: boolean
   deleting?: boolean
   agentCreation?: Promise<AgentInstance>
+  cancelAgentCreation?: () => void
+  agentInitializations?: Set<Promise<AgentInstance>>
   /** Set when user requests stop - allows event loop to drain before clearing isProcessing */
   stopRequested?: boolean
   lastMessageAt: number
   streamingText: string
   /** Runtime identity for materializing a stream that ends without text_complete. */
   streamingTurnId?: string
+  streamingPresentationProtocol?: 'native' | 'marker-v1' | 'legacy'
   /** Timestamp of the first delta, preserved if the stream is materialized after an error. */
   streamingStartedAt?: number
   // Incremented each time a new message starts processing.
@@ -1082,6 +1097,7 @@ interface ManagedSession {
     runId: string
     keepThroughMessageId: string
     rendererTruncated: boolean
+    pendingAnswerId?: string
     originalMessages: Message[]
     originalSdkSessionId?: string
     originalBranchContextStrategy?: 'sdk-fork' | 'seeded-fresh-session'
@@ -1101,9 +1117,6 @@ interface ManagedSession {
     automationName?: string
     event?: string
     timestamp?: number
-    sourceSessionId?: string
-    automationDepth?: number
-    rootSessionId?: string
   }
   // Promise that resolves when the agent instance is ready (for title gen to await)
   agentReady?: Promise<void>
@@ -1364,6 +1377,7 @@ function managedToSession(m: ManagedSession, overrides?: Partial<Session>): Sess
     preview: m.preview,
     lastMessageRole: m.lastMessageRole,
     tokenUsage: m.tokenUsage,
+    progressSupervision: m.progressSupervision,
     messageCount: m.messageCount,
     lastFinalMessageId: m.lastFinalMessageId,
     // Runtime-only fields
@@ -1383,6 +1397,7 @@ const DELTA_BATCH_INTERVAL_MS = 50  // Flush batched deltas every 50ms
 interface PendingDelta {
   delta: string
   phase: TextStreamPhase
+  presentationProtocol?: 'native' | 'marker-v1' | 'legacy'
   turnId?: string
 }
 
@@ -1518,6 +1533,9 @@ export class SessionManager implements ISessionManager {
    * can never disagree about whether keep-alive is on.
    */
   private readonly keepBackgroundTasksAlive: boolean = resolveKeepBackgroundTasksAlive()
+  private progressShuttingDown = false
+  private progressBudgets = new Map<string, ProgressBudget>()
+  private progressArbiters = new Set<string>()
   private taskRunnerLookup?: (workspaceId: string) => TaskRunner
   private spawnCompletionUnsub?: () => void
   /**
@@ -2015,17 +2033,7 @@ export class SessionManager implements ISessionManager {
         workspaceId,
         enableScheduler: true,
         onPromptsReady: async (prompts) => {
-          const immediate = prompts.filter((pending) => pending.waitForCompletion !== true && pending.reportBack !== true)
-          const deferred = prompts.filter((pending) => pending.waitForCompletion === true || pending.reportBack === true)
-          // Release Agent Event prompt slots as soon as fire-and-forget
-          // sessions are dispatched. Wait/reportBack must not hold the
-          // concurrency cap for up to 30 minutes.
-          if (immediate.length > 0) {
-            await this.runPendingPromptAutomations(workspaceId, workspaceRootPath, immediate)
-          }
-          if (deferred.length > 0) {
-            void this.runPendingPromptAutomations(workspaceId, workspaceRootPath, deferred)
-          }
+          await this.runPendingPromptAutomations(workspaceId, workspaceRootPath, prompts)
         },
         onError: (event, error) => {
           sessionLog.error(`Automation failed for ${event}:`, error.message)
@@ -2472,13 +2480,18 @@ export class SessionManager implements ISessionManager {
     try {
       // Filter out transient status messages (progress indicators like "Compacting...")
       // Error messages are now persisted with rich fields for diagnostics
-      const messagesForPersistence = managed.regenerateTransaction?.originalMessages ?? managed.messages
+      const regenerateTransaction = managed.regenerateTransaction
+      // A complete answer is the commit candidate: atomically persist its transcript
+      // together with the new SDK identity, while retaining the rollback snapshot.
+      const publishingAnswer = regenerateTransaction?.pendingAnswerId !== undefined
+        && managed.messages.some(m => m.id === regenerateTransaction.pendingAnswerId && m.answerCommitted)
+      const messagesForPersistence = regenerateTransaction && !publishingAnswer
+        ? regenerateTransaction.originalMessages : managed.messages
       const persistableMessages = messagesForPersistence.filter(m =>
         m.role !== 'status'
       )
       const persistentFields = pickSessionFields(managed)
-      const regenerateTransaction = managed.regenerateTransaction
-      if (regenerateTransaction) {
+      if (regenerateTransaction && !publishingAnswer) {
         // Keep the last committed native history identity on disk until the
         // replacement response commits. A crash during regenerate must reopen
         // the old transcript and its matching Pi session, never a half-run.
@@ -2487,6 +2500,13 @@ export class SessionManager implements ISessionManager {
         persistentFields.branchFromSessionPath = regenerateTransaction.originalBranchFromSessionPath
         persistentFields.branchFromSdkCwd = regenerateTransaction.originalBranchFromSdkCwd
         persistentFields.branchFromSdkTurnId = regenerateTransaction.originalBranchFromSdkTurnId
+      }
+
+      if (regenerateTransaction && publishingAnswer) {
+        persistentFields.branchFromSdkSessionId = undefined
+        persistentFields.branchFromSessionPath = undefined
+        persistentFields.branchFromSdkCwd = undefined
+        persistentFields.branchFromSdkTurnId = undefined
       }
 
       const storedSession: StoredSession = {
@@ -2877,6 +2897,13 @@ export class SessionManager implements ISessionManager {
 
     // Lazy-load messages from disk if not yet loaded
     await this.ensureMessagesLoaded(m)
+    if (!m.progressSupervision) {
+      const checkpoint = readProgressCheckpoint(getSessionStoragePath(m.workspace.rootPath, m.id))
+      if (checkpoint) m.progressSupervision = { phase: checkpoint.continuation && !checkpoint.continuation.consumed ? 'paused' : 'stopped',
+        reason: checkpoint.state.reason, mode: 'observe', evaluationTokens: checkpoint.state.evaluationTokens,
+        estimatedTokens: checkpoint.state.estimatedTokens, redirects: checkpoint.state.redirects,
+        nextStep: checkpoint.state.lastDecision?.assessment.nextStep, evidenceIds: checkpoint.state.lastDecision?.assessment.evidenceIds }
+    }
 
     return managedToSession(m, { messages: m.messages })
   }
@@ -3071,7 +3098,12 @@ export class SessionManager implements ISessionManager {
     if (options?.parentSessionId && options.swarmEnabled === true && !parentForInheritance?.swarmEnabled) {
       throw new Error('Cannot enable Swarm for a child whose parent has Swarm disabled')
     }
-    const resolvedSwarmEnabled = resolveInheritedSwarmEnabled({
+    const { getSwarmAgentsEnabled } = await import('@craft-agent/shared/config/storage')
+    const swarmAgentsEnabled = getSwarmAgentsEnabled()
+    if (options?.swarmEnabled === true && !swarmAgentsEnabled) {
+      throw new Error('Swarm agents are disabled in Advanced settings')
+    }
+    const resolvedSwarmEnabled = !swarmAgentsEnabled ? false : resolveInheritedSwarmEnabled({
       requested: options?.swarmEnabled,
       parent: parentForInheritance?.swarmEnabled,
       branchSource: branchSourceForSwarm?.swarmEnabled,
@@ -3577,13 +3609,17 @@ export class SessionManager implements ISessionManager {
   private async disposeManagedAgentRuntime(managed: ManagedSession, reason: string, requireStopped = false): Promise<void> {
     const sessionId = managed.id
     const failures: unknown[] = []
+    const agent = managed.agent
+    const poolServer = managed.poolServer
+    const mcpPool = managed.mcpPool
+    const readyResolve = managed.agentReadyResolve
 
-    if (managed.agent) {
+    if (agent) {
       try {
-        if (managed.agent.disposeForRestart) {
-          await managed.agent.disposeForRestart()
+        if (agent.disposeForRestart) {
+          await waitForRuntimeCleanup(agent.disposeForRestart(), 'agent')
         } else {
-          managed.agent.dispose()
+          agent.dispose()
         }
       } catch (error) {
         failures.push(error)
@@ -3591,18 +3627,18 @@ export class SessionManager implements ISessionManager {
       }
     }
 
-    if (managed.poolServer) {
+    if (poolServer) {
       try {
-        await managed.poolServer.stop()
+        await waitForRuntimeCleanup(poolServer.stop(), 'pool server')
       } catch (error) {
         failures.push(error)
         sessionLog.warn(`Failed to stop pool server for ${sessionId} during ${reason}: ${error instanceof Error ? error.message : error}`)
       }
     }
 
-    if (managed.mcpPool) {
+    if (mcpPool) {
       try {
-        await managed.mcpPool.disconnectAll()
+        await waitForRuntimeCleanup(mcpPool.disconnectAll(), 'MCP connections')
       } catch (error) {
         failures.push(error)
         sessionLog.warn(`Failed to disconnect MCP pool for ${sessionId} during ${reason}: ${error instanceof Error ? error.message : error}`)
@@ -3612,12 +3648,16 @@ export class SessionManager implements ISessionManager {
     if (requireStopped && failures.length > 0) {
       throw new Error(`Could not stop all runtime resources for session ${sessionId}; directory was preserved.`)
     }
+    if (managed.poolServer === poolServer) managed.poolServer = undefined
+    if (managed.mcpPool === mcpPool) managed.mcpPool = undefined
+    readyResolve?.()
+    if (managed.agentReadyResolve === readyResolve) {
+      managed.agentReady = undefined
+      managed.agentReadyResolve = undefined
+    }
+    if (managed.agent !== agent) return
     managed.agent = null
-    managed.poolServer = undefined
-    managed.mcpPool = undefined
     managed.envOverrides = undefined
-    managed.agentReady = undefined
-    managed.agentReadyResolve = undefined
     managed.backendRuntimeSignature = undefined
     managed.backendRestartSignature = undefined
     unregisterSessionScopedToolCallbacks(sessionId)
@@ -3777,17 +3817,54 @@ export class SessionManager implements ISessionManager {
   private async getOrCreateAgent(managed: ManagedSession): Promise<AgentInstance> {
     if (managed.deleting) throw new Error(`Session ${managed.id} is being deleted`)
     if (managed.agentCreation) return managed.agentCreation
-    const creation = this.initializeAgent(managed)
+    if (managed.agentInitializations?.size) {
+      await waitForRuntimeCleanup(Promise.allSettled([...managed.agentInitializations]), 'previous initialization')
+      return this.getOrCreateAgent(managed)
+    }
+    const generation = managed.processingGeneration
+    let invalidated = false
+    let timer: ReturnType<typeof setTimeout>
+    let cancel!: () => void
+    const interrupted = new Promise<never>((_, reject) => {
+      cancel = () => { invalidated = true; reject(new Error('Agent initialization cancelled')) }
+      timer = setTimeout(() => { invalidated = true; reject(new Error('Agent initialization timed out')) }, 60_000)
+    })
+    const ensureCurrent = () => {
+      if (invalidated || managed.deleting || managed.stopRequested || managed.processingGeneration !== generation) {
+        throw new Error('Agent initialization cancelled')
+      }
+    }
+    const initialization = Promise.resolve().then(() => this.initializeAgent(managed, ensureCurrent))
+    managed.agentInitializations ??= new Set()
+    managed.agentInitializations.add(initialization)
+    void initialization.finally(() => managed.agentInitializations?.delete(initialization)).catch(() => {})
+    const creation = Promise.race([initialization, interrupted])
     managed.agentCreation = creation
+    managed.cancelAgentCreation = cancel
     try { return await creation }
-    finally { if (managed.agentCreation === creation) managed.agentCreation = undefined }
+    catch (error) {
+      if (managed.agentCreation === creation && !managed.stopRequested && !managed.deleting && managed.processingGeneration === generation) {
+        await this.disposeManagedAgentRuntime(managed, 'failed initialization')
+      }
+      throw error
+    }
+    finally {
+      clearTimeout(timer!)
+      if (managed.agentCreation === creation) {
+        managed.agentReadyResolve?.()
+        managed.agentCreation = undefined
+        managed.cancelAgentCreation = undefined
+      }
+    }
   }
 
-  private async initializeAgent(managed: ManagedSession): Promise<AgentInstance> {
+  private async initializeAgent(managed: ManagedSession, ensureCurrent: () => void = () => {}): Promise<AgentInstance> {
+    ensureCurrent()
     // Refresh runtime config in-place when the connection has drifted since
     // the agent was created. May null out `managed.agent` if the in-place
     // refresh fails, in which case the create branch below rebuilds it.
     await this.tryRefreshAgentRuntime(managed, 'send-path refresh')
+    ensureCurrent()
 
     const workspaceConfig = loadWorkspaceConfig(managed.workspace.rootPath)
     const backendContext = resolveBackendContext({
@@ -3859,6 +3936,7 @@ export class SessionManager implements ISessionManager {
 
       // Build server configs for enabled sources
       const { mcpServers, apiServers } = await buildServersFromSources(enabledSources, sessionPath, managed.tokenRefreshManager)
+      ensureCurrent()
 
       // Create centralized MCP client pool (all backends use it)
       managed.mcpPool = new McpClientPool({ debug: (msg) => sessionLog.debug(msg), workspaceRootPath: managed.workspace.rootPath, sessionPath })
@@ -3869,7 +3947,9 @@ export class SessionManager implements ISessionManager {
         managed.poolServer = new McpPoolServer(managed.mcpPool, { debug: (msg) => sessionLog.debug(msg) })
         managed.mcpPool.onToolsChanged = () => managed.poolServer?.notifyToolsChanged()
         poolServerUrl = await managed.poolServer.start()
+        ensureCurrent()
         await managed.mcpPool.sync(mcpServers) // Ensure pool has tools before SDK connects
+        ensureCurrent()
       }
 
       // Per-session env overrides
@@ -4021,15 +4101,8 @@ export class SessionManager implements ISessionManager {
         // Claude-specific
         isHeadless: !AGENT_FLAGS.defaultModesEnabled,
         skipConfigWatcher: true, // Server owns workspace-level ConfigWatcher — don't duplicate in agents
-        automationSystem: this.automationSystems.get(managed.workspace.rootPath),
-        automationContext: {
-          triggeredByAutomation: !!managed.triggeredBy,
-          automationDepth: managed.triggeredBy?.automationDepth ?? 0,
-          sourceSessionId: managed.triggeredBy?.sourceSessionId,
-          sourceSessionName: managed.name,
-          rootSessionId: managed.triggeredBy?.rootSessionId ?? managed.triggeredBy?.sourceSessionId,
-        },
-        explicitAnswerDelivery: !managed.parentSessionId && !managed.taskSlug && (!managed.systemPromptPreset || managed.systemPromptPreset === 'default'),
+        presentationProtocol: connection?.answerDelivery === 'streaming' && !managed.parentSessionId && !managed.taskSlug && (!managed.systemPromptPreset || managed.systemPromptPreset === 'default') ? (connection.presentationProtocol ?? 'legacy') : 'legacy',
+        explicitAnswerDelivery: connection?.answerDelivery !== 'streaming' && !managed.parentSessionId && !managed.taskSlug && (!managed.systemPromptPreset || managed.systemPromptPreset === 'default'),
         systemPromptPreset: managed.systemPromptPreset,
         debugMode: _platform?.isDebugMode ? { enabled: true, logFilePath: _platform.getLogFilePath?.() } : undefined,
         // Image resize callback — prevents oversized images from entering conversation history
@@ -4122,6 +4195,7 @@ export class SessionManager implements ISessionManager {
 
       // Run post-init (auth injection) — each backend handles its own
       const postInitResult = await managed.agent.postInit()
+      ensureCurrent()
       if (postInitResult.authWarning) {
         sessionLog.warn(`Auth warning for session ${managed.id}: ${postInitResult.authWarning}`)
         this.sendEvent({
@@ -6224,6 +6298,7 @@ export class SessionManager implements ISessionManager {
       managed = createManagedSession(metadata ?? { id: sessionId }, workspace)
     }
     if (managed.deleting) throw new Error(`Session ${sessionId} is already being deleted`)
+    managed.progressSupervisor?.stop()
     managed.deleting = true
     managed.stopRequested = true
     managed.processingGeneration += 1
@@ -6238,12 +6313,19 @@ export class SessionManager implements ISessionManager {
     }
     managed.isProcessing = false
     // Initialization may still be creating source artifacts or a pool server.
-    await managed.agentCreation?.catch(() => undefined)
+    managed.cancelAgentCreation?.()
     try {
+      // Cancelling the caller is not proof that source preparation stopped
+      // touching files. Preserve the directory if the real work has not settled.
+      await waitForRuntimeCleanup(Promise.allSettled([
+        ...(managed.agentInitializations ?? []),
+        ...(managed.agentCreation ? [managed.agentCreation] : []),
+      ]), 'initialization before deletion')
       await this.disposeManagedAgentRuntime(managed, 'session deletion', true)
       await this.detachLegacyBranches(workspaceRootPath, sessionId)
     } catch (error) {
       managed.deleting = false
+      managed.stopRequested = false
       throw error
     }
 
@@ -6375,6 +6457,7 @@ export class SessionManager implements ISessionManager {
     rpcContext?: { callerClientId?: string },
     /** Internal queue replay marker; never supplied by RPC callers. */
     _isSourceContinuationReplay = false,
+    _isProgressContinuation = false,
   ): Promise<void> {
     const managed = this.sessions.get(sessionId)
     if (!managed) {
@@ -6421,7 +6504,8 @@ export class SessionManager implements ISessionManager {
     const isPendingAutoRetry = _isSourceContinuationReplay || (!!pendingAutoRetry
       && message === pendingAutoRetry.content
       && Date.now() < pendingAutoRetry.deadlineMs)
-    const isUserTaskContinuation = _isAuthRetry === true || isPendingAutoRetry
+    const isUserTaskContinuation = _isAuthRetry === true || isPendingAutoRetry || _isProgressContinuation
+    if (!isUserTaskContinuation && !options?.hidden && !existingMessageId) managed.progressDisabled = false
     if (!_isSourceContinuationReplay && claimAutoRetryPending(managed, message) === 'drop') {
       sessionLog.info(`sendMessage: dropped duplicate source-activation retry for ${sessionId}`)
       const existingRetry = [...managed.messages].reverse().find(candidate =>
@@ -6896,7 +6980,13 @@ export class SessionManager implements ISessionManager {
       }
       return
     }
-    if (agent.configureAnswerDelivery && !managed.parentSessionId && !managed.taskSlug && (!managed.systemPromptPreset || managed.systemPromptPreset === 'default')) {
+    const nativeTextAnswers = managed.llmConnection
+      ? getLlmConnection(managed.llmConnection)?.answerDelivery === 'streaming'
+      : false
+    agent.configurePresentationProtocol?.(nativeTextAnswers && !managed.parentSessionId && !managed.taskSlug
+      && (!managed.systemPromptPreset || managed.systemPromptPreset === 'default')
+      ? (getLlmConnection(managed.llmConnection!)?.presentationProtocol ?? 'legacy') : 'legacy')
+    if (!nativeTextAnswers && agent.configureAnswerDelivery && !managed.parentSessionId && !managed.taskSlug && (!managed.systemPromptPreset || managed.systemPromptPreset === 'default')) {
       const continuingAnswer = isUserTaskContinuation || (options?.hidden && managed.orchestrationStatus === 'running')
       const owner = continuingAnswer
         ? managed.messages.findLast(m => m.role === 'user' && !m.hidden && !m.isQueued) ?? userMessage
@@ -7038,14 +7128,14 @@ export class SessionManager implements ISessionManager {
 
       sendSpan.mark('chat.starting')
       const chatOptions = { previousResponseInterrupted, continueUserTask: isUserTaskContinuation }
-      const chatIterator = this.runAnswerDelivery(managed, agent, agent.chat(message, preparedImages.attachments, chatOptions), chatOptions)
+      const chatIterator = this.runAnswerDelivery(managed, agent, this.runProgressExecution(managed, agent, message, preparedImages.attachments, chatOptions), chatOptions)
       this.announceRegenerateReplacement(managed)
       sessionLog.info('Got chat iterator, starting iteration...')
       managed.usedExternalToolsThisTurn = false
 
       for await (const event of chatIterator) {
         // Log events (skip noisy text_delta)
-        if (event.type !== 'text_delta') {
+        if (event.type !== 'text_delta' && event.type !== 'model_activity') {
           if (event.type === 'tool_start') {
             sessionLog.info(`tool_start: ${event.toolName} (${event.toolUseId})`)
           } else if (event.type === 'tool_result') {
@@ -7270,14 +7360,316 @@ export class SessionManager implements ISessionManager {
     }
   }
 
+  getProgressLiveTokens(sessionId: string): number {
+    const managed = this.sessions.get(sessionId)
+    return Math.max(0, (managed?.activeTurnUsage?.totalTokens ?? 0) - (managed?.progressLiveEvaluationTokens ?? 0))
+  }
+
+  setProgressSupervision(sessionId: string, enabled: boolean): void {
+    const managed = this.sessions.get(sessionId)
+    if (!managed) throw new Error('Session not found')
+    managed.progressDisabled = !enabled
+    const requested = loadWorkspaceConfig(managed.workspace.rootPath)?.progressSupervision?.mode ?? 'observe'
+    const mode = !enabled ? 'off' : requested === 'assist' && process.env.CRAFT_PROGRESS_ASSIST_ENABLED === '1' ? 'assist' : 'observe'
+    managed.progressSupervisor?.setMode(mode)
+    const path = getSessionStoragePath(managed.workspace.rootPath, sessionId)
+    const checkpoint = readProgressCheckpoint(path)
+    if (checkpoint) { checkpoint.mode = mode; writeProgressCheckpoint(path, checkpoint) }
+    if (managed.progressSupervision) {
+      managed.progressSupervision.mode = mode
+      this.sendEvent({ type: 'progress_supervision', sessionId, state: managed.progressSupervision }, managed.workspace.id)
+    }
+  }
+
+  async continueProgress(sessionId: string): Promise<void> {
+    const managed = this.sessions.get(sessionId)
+    if (!managed || managed.isProcessing) throw new Error('Session must be idle to continue')
+    const task = this.taskRunnerLookup?.(managed.workspace.id)?.progressContext(sessionId)
+    if (task && !['running', 'verifying'].includes(task.status)) throw new Error('请先通过任务控制入口恢复 DAG；会话继续不能绕过 Coordinator。')
+    await this.ensureMessagesLoaded(managed)
+    if (managed.isProcessing) throw new Error('Session became active while loading the checkpoint')
+    const path = getSessionStoragePath(managed.workspace.rootPath, sessionId)
+    const checkpoint = readProgressCheckpoint(path)
+    const continuation = checkpoint?.continuation
+    if (!checkpoint || !continuation || continuation.consumed) throw new Error('No pending progress checkpoint')
+    if (managed.messages.findLast(m => m.role === 'user' && !m.hidden && !m.isQueued)?.id !== continuation.userMessageId) throw new Error('Progress checkpoint belongs to an older task')
+    const candidate = continuation.candidateContext ? loadProgressCandidate(path) : undefined
+    // Explicit user continuation consumes once; crashes never auto-replay this action.
+    managed.stopRequested = false
+    this.setProcessing(managed, true)
+    managed.processingGeneration++
+    const resumeGeneration = managed.processingGeneration
+    try {
+      await this.disposeManagedAgentRuntime(managed, 'resume progress checkpoint')
+    } catch (error) {
+      await this.onProcessingStopped(sessionId, 'error', resumeGeneration)
+      throw error
+    }
+    if (managed.stopRequested || managed.processingGeneration !== resumeGeneration) {
+      await this.onProcessingStopped(sessionId, 'interrupted', resumeGeneration)
+      return
+    }
+    continuation.consumed = true
+    writeProgressCheckpoint(path, checkpoint)
+    this.setProcessing(managed, false)
+    if (candidate) {
+      if (continuation.regenerate) {
+        managed.regenerateTransaction = { runId: randomUUID(), keepThroughMessageId: continuation.userMessageId,
+          rendererTruncated: false, originalMessages: structuredClone(managed.messages), originalSdkSessionId: managed.sdkSessionId,
+          originalBranchContextStrategy: managed.branchContextStrategy, originalBranchFromSdkSessionId: managed.branchFromSdkSessionId,
+          originalBranchFromSessionPath: managed.branchFromSessionPath, originalBranchFromSdkCwd: managed.branchFromSdkCwd,
+          originalBranchFromSdkTurnId: managed.branchFromSdkTurnId }
+        this.sendEvent({ type: 'regenerate_started', sessionId, runId: managed.regenerateTransaction.runId }, managed.workspace.id)
+      }
+      managed.messages = candidate
+    }
+    managed.sdkSessionId = continuation.sdkSessionId
+    managed.forceFreshSdkSession = false
+    managed.regenerateSeedPending = false
+    managed.branchFromSdkSessionId = undefined
+    managed.branchFromSessionPath = undefined
+    managed.branchFromSdkTurnId = undefined
+    await this.sendMessage(sessionId, continuation.prompt, undefined, undefined, { hidden: true }, undefined, false, undefined, undefined, false, true)
+  }
+
+  private createProgressReviewer(managed: ManagedSession, connectionSlug?: string): AgentInstance {
+    const connections = getLlmConnections().filter(c => c.models?.some(m => (typeof m === 'string' ? m : m.id).replace(/^pi\//, '').toLowerCase() === 'laufry'))
+    const selected = connectionSlug ? connections.find(c => c.slug === connectionSlug)
+      : connections.find(c => c.slug === managed.llmConnection) ?? (connections.length === 1 ? connections[0] : undefined)
+    if (!selected) throw new Error('未找到唯一的 Laufry 评估连接，请在工作区配置指定 connectionSlug')
+    return createBackendFromConnection(selected.slug, { workspace: managed.workspace, model: 'Laufry', miniModel: 'Laufry',
+      isHeadless: true, skipConfigWatcher: true, explicitAnswerDelivery: false, queryOnly: true }, buildBackendHostRuntimeContext())
+  }
+
+  private async *runProgressExecution(
+    managed: ManagedSession, agent: AgentInstance, message: string,
+    attachments: FileAttachment[] | undefined, options: ChatOptions,
+  ): AsyncGenerator<AgentEvent> {
+    // Backends without a drain barrier cannot safely support automatic intervention.
+    if (!agent.interruptForProgress) { yield* agent.chat(message, attachments, options); return }
+    const generation = managed.processingGeneration
+    managed.progressLiveEvaluationTokens = 0
+    const user = managed.messages.findLast(m => m.role === 'user' && !m.hidden && !m.isQueued)
+    if (!user) { yield* agent.chat(message, attachments, options); return }
+    const dag = this.taskRunnerLookup?.(managed.workspace.id)?.progressContext(managed.id)
+    const root = this.sessions.get(dag?.orchestratorSessionId ?? managed.orchestrationRootSessionId ?? managed.parentSessionId ?? managed.id) ?? managed
+    const taskId = dag?.runId ?? managed.taskRunId ?? root.messages.findLast(m => m.role === 'user' && !m.hidden && !m.isQueued)?.id ?? user.id
+    const key = `${root.id}:${taskId}`
+    const path = getSessionStoragePath(managed.workspace.rootPath, managed.id)
+    const rootPath = getSessionStoragePath(root.workspace.rootPath, root.id)
+    const stored = readProgressCheckpoint(path)
+    const rootStored = readProgressCheckpoint(rootPath)
+    let budget = this.progressBudgets.get(key)
+    if (!budget) {
+      budget = rootStored?.taskId === taskId ? { ...rootStored.budget, tokens: rootStored.budget.tokens + rootStored.budget.reserved, reserved: 0 } : createProgressBudget()
+      for (const oldKey of this.progressBudgets.keys()) {
+        if (oldKey.startsWith(`${root.id}:`) && oldKey !== key && !this.progressArbiters.has(oldKey)) this.progressBudgets.delete(oldKey)
+      }
+      this.progressBudgets.set(key, budget)
+    }
+    const config = loadWorkspaceConfig(managed.workspace.rootPath)?.progressSupervision
+    // assist remains gated until the real-model/platform acceptance matrix is complete.
+    const requestedMode = managed.progressDisabled || (stored?.taskId === taskId && stored.mode === 'off') ? 'off' : config?.mode ?? 'observe'
+    const mode = requestedMode === 'assist' && process.env.CRAFT_PROGRESS_ASSIST_ENABLED !== '1' ? 'observe' : requestedMode
+    const executionId = randomUUID()
+    let revision = 0, call = 0, began = Date.now()
+    let status: ProgressSnapshot['status'] = 'model'
+    let modelInFlight = false
+    let activity = { reasoningBytes: 0, textBytes: 0 }
+    let pending: ProgressDecision | undefined
+    let pauseReason: string | undefined
+    let pauseCode: 'call_time_limit' | 'output_limit' | 'stream_interrupted' | 'progress_needs_user' = 'call_time_limit'
+    let barrier: Promise<void> | undefined
+    let reviewer: AgentInstance | undefined
+    const busyTools = new Set<string>()
+    // A claimed source continuation retains its slot for duplicate-RPC dedup.
+    // That slot belongs to this execution; only a newly scheduled retry should
+    // stop it. Otherwise the continuation exits before calling agent.chat().
+    const claimedSourceRetry = managed.autoRetryPending?.committed ? managed.autoRetryPending : undefined
+    const active = () => !this.progressShuttingDown && managed.isProcessing && !managed.stopRequested && !managed.deleting
+      && managed.processingGeneration === generation && !managed.answerDelivery?.committedMessageId
+      && !managed.authRetryInProgress && (!managed.autoRetryPending || managed.autoRetryPending === claimedSourceRetry)
+    const snapshot = (): ProgressSnapshot => {
+      const run = this.taskRunnerLookup?.(managed.workspace.id)?.progressContext(managed.id)
+      const waiting = !modelInFlight && (managed.orchestrationAggregation?.phase === 'waiting-workers' || run?.status === 'waiting-coordinator')
+      const priorRequests = managed.messages.slice(0, managed.messages.indexOf(user)).filter(m => m.role === 'user' && !m.hidden && !m.isQueued).slice(-2).map(m => ({ id: m.id, request: m.content }))
+      const evidence: ProgressSnapshot['evidence'] = [{ id: user.id, kind: 'goal', text: JSON.stringify({ currentRequest: user.content, priorRequests }) }]
+      for (const m of managed.messages.slice(managed.messages.indexOf(user) + 1).slice(-24)) {
+        if ((m.role === 'assistant' && m.content.trim()) || m.role === 'tool') evidence.push({ id: m.id, kind: m.role === 'tool' ? 'tool' : 'text', text: m.role === 'tool' ? JSON.stringify({ name: m.toolName, status: m.toolStatus, result: m.toolResult, input: m.toolInput }) : m.content })
+      }
+      for (const advisory of managed.progressAdvisories ?? []) evidence.push({ ...advisory, kind: 'orchestration' })
+      if (run) evidence.push({ id: `dag-${run.runId}-${run.revision}`, kind: 'orchestration', text: JSON.stringify(run) })
+      for (const child of this.getManagedSwarmChildren(managed.id)) evidence.push({ id: `child-${child.id}-${child.orchestrationStatus}`, kind: 'orchestration', text: JSON.stringify({ id: child.id, status: child.orchestrationStatus, output: child.messages.findLast(m => m.role === 'assistant' && !m.isIntermediate)?.content?.slice(0, 500) }) })
+      const evidenceRevision = Number.parseInt(createHash('sha256').update(JSON.stringify([revision, evidence])).digest('hex').slice(0, 12), 16)
+      return { sessionId: managed.id, taskId, generation, revision: evidenceRevision, callId: `${executionId}-${call}`,
+        status: !active() ? 'complete' : waiting ? 'waiting' : busyTools.size ? 'tool' : status,
+        evidence, activity, elapsedMs: Date.now() - began, executionTokens: managed.activeTurnUsage?.totalTokens ?? 0,
+        orchestrationRevision: run?.revision }
+    }
+    const checkpoint: ProgressCheckpoint = { version: 1, taskId, rootId: root.id, mode,
+      state: stored?.taskId === taskId ? stored.state : { phase: 'observing', checks: 0, redirects: 0, evaluationTokens: 0, estimatedTokens: 0 }, budget }
+    const persist = () => {
+      if (managed.deleting) return
+      writeProgressCheckpoint(path, checkpoint)
+      if (root !== managed) {
+        const saved = readProgressCheckpoint(rootPath)
+        writeProgressCheckpoint(rootPath, saved?.taskId === taskId ? { ...saved, budget: budget! }
+          : { version: 1, taskId, rootId: root.id, budget: budget!, state: { phase: 'observing', checks: 0, redirects: 0, evaluationTokens: 0, estimatedTokens: 0 } })
+      }
+    }
+    const interrupt = () => { barrier = agent.interruptForProgress!(); barrier.catch(() => { pauseReason = '旧模型请求未确认停止，未启动新的执行。'; agent.forceAbort(AbortReason.ProgressRedirect) }) }
+    const supervisor = new ProgressSupervisor({ mode, rootBudget: budget, state: checkpoint.state,
+      snapshot,
+      query: async (request, signal) => {
+        signal.throwIfAborted()
+        if (!reviewer) {
+          reviewer = this.createProgressReviewer(managed, config?.connectionSlug)
+          managed.progressReviewer = reviewer
+        }
+        if (!reviewer.queryLlm) throw new Error('Laufry evaluation is unavailable')
+        return reviewer.queryLlm(request, signal)
+      },
+      evaluationAllowance: () => {
+        if (dag) return this.taskRunnerLookup?.(managed.workspace.id)?.progressAllowance(dag.slug, dag.runId, budget!.tokens + budget!.reserved) ?? 0
+        if (managed.parentSessionId || this.getManagedSwarmChildren(root.id).length > 0) return Math.max(0, Math.min(FIXED_SWARM_TOKEN_BUDGET * 0.1 - budget!.tokens - budget!.reserved, FIXED_SWARM_TOKEN_BUDGET - getSwarmAgentBudgetState(managed).projectedTokensUsed - budget!.reserved))
+        return 32_000 - checkpoint.state.evaluationTokens
+      },
+      charge: (tokens, costUsd) => {
+        if (dag) this.taskRunnerLookup?.(managed.workspace.id)?.recordProgressUsage(dag.slug, dag.runId, managed.id, tokens)
+        managed.progressLiveEvaluationTokens = (managed.progressLiveEvaluationTokens ?? 0) + tokens
+        if (managed.processingGeneration === generation) {
+          managed.activeTurnUsage = recordModelCallUsage(managed.activeTurnUsage ?? createTurnUsageAccumulator(Date.now()), { inputTokens: tokens, outputTokens: 0, costUsd }).accumulator
+        }
+        managed.tokenUsage ??= { ...DEFAULT_TOKEN_USAGE }
+        managed.tokenUsage.evaluationTokens = (managed.tokenUsage.evaluationTokens ?? 0) + tokens
+        managed.tokenUsage.evaluationCostUsd = (managed.tokenUsage.evaluationCostUsd ?? 0) + costUsd
+        managed.tokenUsage.totalTokens += tokens; managed.tokenUsage.costUsd += costUsd
+        if (managed.processingGeneration === generation && managed.activeTurnUsage) managed.tokenUsage.currentTurn = snapshotTurnUsage(managed.activeTurnUsage, Date.now())
+        this.sendEvent({ type: 'usage_update', sessionId: managed.id, tokenUsage: managed.tokenUsage }, managed.workspace.id)
+        this.persistSession(managed)
+        persist()
+      },
+      change: state => {
+        checkpoint.state = state; checkpoint.mode = supervisor.mode; persist()
+        managed.progressSupervision = { phase: state.phase, reason: state.reason, mode: supervisor.mode,
+          evaluationTokens: state.evaluationTokens, estimatedTokens: state.estimatedTokens, redirects: state.redirects,
+          nextStep: state.lastDecision?.assessment.nextStep, evidenceIds: state.lastDecision?.assessment.evidenceIds,
+          evidence: snapshot().evidence.filter(e => state.lastDecision?.assessment.evidenceIds.includes(e.id)).map(e => ({ id: e.id, summary: e.text.slice(0, 240) })) }
+        this.sendEvent({ type: 'progress_supervision', sessionId: managed.id, state: managed.progressSupervision }, managed.workspace.id)
+      },
+      decide: async decision => {
+        if (!active() || managed.progressDisabled || busyTools.size || pending || this.progressArbiters.has(key)) return false
+        if (decision.assessment.scope === 'orchestration' && dag) {
+          return this.taskRunnerLookup?.(managed.workspace.id)?.requestProgressReview(dag.slug, dag.runId, decision.snapshot.orchestrationRevision, decision.assessment.summary) ?? false
+        }
+        if (decision.assessment.scope === 'orchestration' && managed.parentSessionId) {
+          const parent = this.sessions.get(managed.parentSessionId)
+          if (!parent || parent.stopRequested || parent.deleting) return false
+          parent.progressAdvisories = [...(parent.progressAdvisories ?? []), { id: decision.id,
+            text: JSON.stringify({ worker: managed.id, assessment: decision.assessment }) }].slice(-8)
+          parent.progressSupervisor?.invalidate()
+          return true
+        }
+        this.progressArbiters.add(key); pending = decision
+        if (decision.assessment.action === 'need_user') { pauseReason = decision.assessment.nextStep; pauseCode = 'progress_needs_user' }
+        interrupt()
+        return true
+      },
+      pause: async reason => { if (active() && !busyTools.size && !pending) { pauseReason = reason; interrupt() } },
+    })
+    managed.progressSupervisor = supervisor
+    supervisor.start()
+    let prompt = message
+    try {
+      while (active()) {
+        let completed: Extract<AgentEvent, { type: 'complete' }> | undefined
+        for await (const event of agent.chat(prompt, attachments, options)) {
+          if (event.type === 'model_activity') activity = { reasoningBytes: event.reasoningBytes, textBytes: event.textBytes }
+          if (event.type === 'model_call_start') { modelInFlight = true; call++; began = Date.now(); status = 'model'; activity = { reasoningBytes: 0, textBytes: 0 } }
+          if (event.type === 'usage_update' || event.type === 'complete') modelInFlight = false
+          if (event.type === 'tool_start') { busyTools.add(event.toolUseId); revision++; supervisor.invalidate() }
+          if (event.type === 'tool_result') { busyTools.delete(event.toolUseId); revision++; supervisor.invalidate() }
+          if (event.type === 'text_delta' || event.type === 'text_complete') {
+            if (event.text.trim()) { revision++; supervisor.invalidate() }
+            if (event.type === 'text_delta') activity.textBytes += Buffer.byteLength(event.text)
+          }
+          if (event.type === 'status') status = 'compacting'
+          if (event.type === 'permission_request') { status = 'handoff'; supervisor.invalidate() }
+          if (event.type === 'typed_error' && (event.error.code === 'output_limit' || event.error.code === 'stream_interrupted' || event.error.code === 'model_request_timeout')) {
+            pauseReason = event.error.message; pauseCode = event.error.code === 'model_request_timeout' ? 'call_time_limit' : event.error.code
+          } else if (event.type === 'complete') completed = event
+          else yield event
+        }
+        if (barrier) await barrier.catch(() => undefined)
+        if (!active() || (!pending && !pauseReason)) { if (completed) yield completed; return }
+        if (completed) await this.processEvent(managed, completed)
+        const decision = pending
+        const continuation = decision ? `Continue the current task using retained tool results. Do not repeat completed side effects or retry operations whose outcomes are unknown. Verify uncertain outcomes through read-only status checks first.\nAssessment: ${decision.assessment.summary}\nNext step: ${decision.assessment.nextStep}\nExpected evidence: ${decision.assessment.expectedResult}`
+          : 'Continue the current user task from retained results. First inspect the current state; do not repeat completed side effects or retry operations with unknown outcomes. Verify uncertain outcomes through read-only status checks first. Execute the next concrete step.'
+        if (pauseReason && managed.regenerateTransaction) saveProgressCandidate(path, managed.messages)
+        checkpoint.continuation = { candidateContext: !!pauseReason && !!managed.regenerateTransaction, regenerate: !!managed.regenerateTransaction, answerRunId: managed.answerDelivery?.runId, prompt: continuation, sdkSessionId: agent.getSessionId() ?? undefined, userMessageId: user.id, consumed: !pauseReason }
+        persist()
+        if (pauseReason) {
+          supervisor.markPaused(pauseReason)
+          yield { type: 'typed_error', error: createTypedError(pauseCode, { message: pauseReason }) }
+          yield { type: 'complete' }; return
+        }
+        // Tool completions after the assessment invalidate its suggested action.
+        if (decision && decision.snapshot.revision !== snapshot().revision) {
+          checkpoint.continuation.consumed = false; supervisor.markPaused('执行状态已变化，旧纠偏建议已取消。'); persist()
+          yield { type: 'error', message: '执行状态已变化，旧纠偏建议已取消。请检查已记录结果后继续。' }
+          yield { type: 'complete' }; return
+        }
+        prompt = continuation; attachments = undefined
+        options = { ...options, continueUserTask: true, previousResponseInterrupted: false }
+        pending = undefined; barrier = undefined; this.progressArbiters.delete(key)
+      }
+    } finally {
+      await supervisor.drain()
+      this.progressArbiters.delete(key)
+      if (managed.progressSupervisor === supervisor) managed.progressSupervisor = undefined
+      reviewer?.destroy()
+      if (managed.progressReviewer === reviewer) managed.progressReviewer = undefined
+    }
+  }
+
   private answerDeliveryControl(managed: ManagedSession): AnswerDeliveryControl {
     const state = managed.answerDelivery!
     return {
       runId: state.runId,
       recovery: state.recovery,
       isActive: () => managed.answerDelivery === state && managed.isProcessing
-        && !state.accepting && !state.committedMessageId && !managed.stopRequested && managed.processingGeneration === state.generation,
+        && !state.persistenceFailed && !state.accepting && !state.committedMessageId && !managed.stopRequested && managed.processingGeneration === state.generation,
       submit: submission => this.acceptAnswer(managed, state, submission),
+    }
+  }
+
+  /** Both explicit submission and recovery must satisfy the same business gates. */
+  private assertAnswerReady(
+    managed: ManagedSession,
+    state: NonNullable<ManagedSession['answerDelivery']>,
+    markdown: string,
+    toolCallId?: string,
+  ): void {
+    const userIndex = managed.messages.findIndex(m => m.id === state.userMessageId)
+    if (userIndex < 0) throw new Error('The originating user turn no longer exists.')
+    if (managed.messages.slice(userIndex + 1).some(m => m.role === 'tool' && (!toolCallId || m.toolUseId !== toolCallId) && (m.toolStatus === 'executing' || m.toolStatus === 'pending'))) {
+      throw new Error('Finish all foreground tools before submitting the answer.')
+    }
+    if ((this.pendingSwarmChildren.get(managed.id) ?? 0) > 0
+      || this.getManagedSwarmChildren(managed.id).some(child => child.isProcessing || child.orchestrationStatus === 'running')
+      || (managed.orchestrationStatus === 'running' && managed.orchestrationAggregation?.phase === 'waiting-workers')) {
+      throw new Error('Wait for all Swarm workers and aggregate their results before submitting the answer.')
+    }
+    const aggregation = managed.orchestrationAggregation
+    if (managed.orchestrationStatus === 'running' && aggregation && aggregation.orchestrationId === managed.orchestrationId) {
+      const assessment = assessManagedSwarmAggregation({
+        finalText: markdown,
+        orchestrationId: aggregation.orchestrationId,
+        finalAggregation: aggregation.finalAggregation,
+        children: this.getManagedSwarmAggregationChildren(managed, aggregation.orchestrationId),
+      })
+      if (!assessment.valid) throw new Error(`Answer does not satisfy Swarm aggregation: ${assessment.reasons.join('; ')}`)
     }
   }
 
@@ -7289,30 +7681,13 @@ export class SessionManager implements ISessionManager {
     if (managed.answerDelivery !== state || !managed.isProcessing || managed.stopRequested || managed.processingGeneration !== state.generation) {
       throw new Error('This answer delivery turn is no longer active.')
     }
+    if (state.persistenceFailed) throw new Error('Answer persistence failed. Do not retry submission in this turn.')
     if (state.accepting || state.committedMessageId) throw new Error('An answer has already been submitted for this turn.')
-    if (!hasRenderableAssistantText(submission.markdown)) throw new Error('Submit a complete, non-empty Markdown answer.')
+    if (!hasRenderableAssistantText(submission.markdown) || isAnswerDeliveryReceipt(submission.markdown)) throw new Error('Submit a complete, non-empty Markdown answer.')
     if (!submission.toolCallId || !submission.sdkMessageId || !submission.sdkTurnAnchor) throw new Error('Missing SDK answer anchor.')
-    const userIndex = managed.messages.findIndex(m => m.id === state.userMessageId)
-    if (userIndex < 0) throw new Error('The originating user turn no longer exists.')
-    if (managed.messages.slice(userIndex + 1).some(m => m.role === 'tool' && m.toolUseId !== submission.toolCallId && (m.toolStatus === 'executing' || m.toolStatus === 'pending'))) {
-      throw new Error('Finish all foreground tools before submitting the answer.')
-    }
-    if ((this.pendingSwarmChildren.get(managed.id) ?? 0) > 0
-      || this.getManagedSwarmChildren(managed.id).some(child => child.isProcessing || child.orchestrationStatus === 'running')
-      || (managed.orchestrationStatus === 'running' && managed.orchestrationAggregation?.phase === 'waiting-workers')) {
-      throw new Error('Wait for all Swarm workers and aggregate their results before submitting the answer.')
-    }
-    const aggregation = managed.orchestrationAggregation
-    if (managed.orchestrationStatus === 'running' && aggregation && aggregation.orchestrationId === managed.orchestrationId) {
-      const assessment = assessManagedSwarmAggregation({
-        finalText: submission.markdown,
-        orchestrationId: aggregation.orchestrationId,
-        finalAggregation: aggregation.finalAggregation,
-        children: this.getManagedSwarmAggregationChildren(managed, aggregation.orchestrationId),
-      })
-      if (!assessment.valid) throw new Error(`Answer does not satisfy Swarm aggregation: ${assessment.reasons.join('; ')}`)
-    }
+    this.assertAnswerReady(managed, state, submission.markdown, submission.toolCallId)
     state.accepting = true
+    const regenerateTransaction = managed.regenerateTransaction
     const previousLastRole = managed.lastMessageRole
     const previousFinalId = managed.lastFinalMessageId
     const answer: Message = {
@@ -7336,16 +7711,21 @@ export class SessionManager implements ISessionManager {
       managed.piSdkMessageToCraftMessage.set(submission.sdkMessageId, answer.id)
       managed.lastMessageRole = 'assistant'
       managed.lastFinalMessageId = answer.id
+      if (regenerateTransaction) regenerateTransaction.pendingAnswerId = answer.id
       this.persistSession(managed)
       await this.flushSession(managed.id)
       if (managed.stopRequested || !managed.isProcessing || managed.processingGeneration !== state.generation || managed.answerDelivery !== state) throw new Error('Answer delivery was interrupted.')
       const storedAnswer = loadStoredSession(managed.workspace.rootPath, managed.id)?.messages.find(m => m.id === answer.id)
       if (!storedAnswer?.answerCommitted || storedAnswer.answerRunId !== state.runId || !hasRenderableAssistantText(storedAnswer.content)) throw new Error('Answer could not be persisted. No answer was published.')
-      this.sendEvent({ type: 'text_complete', sessionId: managed.id, text: answer.content,
-        isIntermediate: false, phase: 'final', answerProtocol: answer.answerProtocol,
-        answerRunId: state.runId, answerCommitted: true, turnId: answer.turnId,
-        messageId: answer.id, timestamp: answer.timestamp }, managed.workspace.id)
+      if (regenerateTransaction && managed.regenerateTransaction === regenerateTransaction) this.commitRegenerateTransaction(managed)
     } catch (error) {
+      if (regenerateTransaction?.pendingAnswerId === answer.id) regenerateTransaction.pendingAnswerId = undefined
+      const stillActive = managed.answerDelivery === state && managed.isProcessing
+        && !managed.stopRequested && managed.processingGeneration === state.generation
+      if (stillActive) {
+        state.persistenceFailed = true
+        sessionLog.error('Answer persistence failed', { sessionId: managed.id, answerRunId: state.runId, error: error instanceof Error ? error.message : String(error) })
+      }
       managed.messages = managed.messages.filter(m => m.id !== answer.id)
       state.committedMessageId = undefined
       managed.piSdkMessageToCraftMessage?.delete(submission.sdkMessageId)
@@ -7355,10 +7735,91 @@ export class SessionManager implements ISessionManager {
         managed.lastFinalMessageId = previousFinalId
       }
       this.persistSession(managed)
+      // Restore the durable transcript before returning the failed submission.
+      // Keep the original error if the storage itself remains unavailable.
+      await this.flushSession(managed.id).catch(rollbackError => sessionLog.error('Answer rollback persistence failed', rollbackError))
       throw error
     } finally {
       state.accepting = false
     }
+    // Publication cannot undo a durable commit (for example, a disconnected window).
+    try {
+      this.sendEvent({ type: 'text_complete', sessionId: managed.id, text: answer.content,
+        isIntermediate: false, phase: 'final', answerProtocol: answer.answerProtocol,
+        answerRunId: state.runId, answerCommitted: true, turnId: answer.turnId,
+        messageId: answer.id, timestamp: answer.timestamp }, managed.workspace.id)
+    } catch (error) {
+      sessionLog.error('Committed answer event delivery failed', { sessionId: managed.id, messageId: answer.id, error })
+    }
+  }
+
+  /**
+   * Promote the newest substantive draft of this run into the final answer when
+   * the model never submits one, even after the single recovery call (#403).
+   * The run's recorded work stays in the transcript; the salvaged answer is
+   * marked so clients can tell it was not formally delivered.
+   */
+  private async salvageUndeliveredAnswer(
+    managed: ManagedSession,
+    state: NonNullable<ManagedSession['answerDelivery']>,
+  ): Promise<Message | undefined> {
+    const userIndex = managed.messages.findIndex(m => m.id === state.userMessageId)
+    if (userIndex < 0) return undefined
+    const draft = [...managed.messages.slice(userIndex + 1)].reverse().find(m =>
+      m.role === 'assistant' && !m.hidden && m.isIntermediate
+      && m.answerRunId === state.runId && hasRenderableAssistantText(m.content))
+    if (!draft) return undefined
+    try { this.assertAnswerReady(managed, state, draft.content) }
+    catch { return undefined }
+    const regenerateTransaction = managed.regenerateTransaction
+    const sessionPath = getSessionStoragePath(managed.workspace.rootPath, managed.id)
+    const draftAnchor = (await loadPiTurnAnchors(sessionPath)).anchors[draft.id]
+    // A regenerated answer must retain a real SDK branch boundary.
+    if (regenerateTransaction && !draftAnchor) return undefined
+    const isActive = () => managed.answerDelivery === state && managed.isProcessing
+      && !managed.stopRequested && managed.processingGeneration === state.generation
+    if (!isActive()) return undefined
+    const previousLastRole = managed.lastMessageRole
+    const previousFinalId = managed.lastFinalMessageId
+    const answer: Message = {
+      id: generateMessageId(), role: 'assistant', content: draft.content,
+      timestamp: this.monotonic(), isIntermediate: false, phase: 'final',
+      answerProtocol: 'explicit-v1', answerRunId: state.runId, answerCommitted: true,
+      answerSalvaged: true,
+      turnId: `answer-${state.runId}`,
+    }
+    try {
+      if (draftAnchor) await savePiTurnAnchor(sessionPath, answer.id, draftAnchor)
+      if (!isActive()) return undefined
+      this.assertAnswerReady(managed, state, draft.content)
+      managed.messages.push(answer)
+      state.committedMessageId = answer.id
+      managed.lastMessageRole = 'assistant'
+      managed.lastFinalMessageId = answer.id
+      if (regenerateTransaction) regenerateTransaction.pendingAnswerId = answer.id
+      this.persistSession(managed)
+      await this.flushSession(managed.id)
+      if (!isActive()) throw new Error('Answer delivery was interrupted.')
+      const stored = loadStoredSession(managed.workspace.rootPath, managed.id)?.messages.find(m => m.id === answer.id)
+      if (!stored?.answerCommitted || stored.answerRunId !== state.runId || !hasRenderableAssistantText(stored.content)) {
+        throw new Error('Salvaged answer could not be persisted.')
+      }
+      if (regenerateTransaction && managed.regenerateTransaction === regenerateTransaction) this.commitRegenerateTransaction(managed)
+    } catch (error) {
+      if (regenerateTransaction?.pendingAnswerId === answer.id) regenerateTransaction.pendingAnswerId = undefined
+      if (isActive()) state.persistenceFailed = true
+      sessionLog.warn('Answer salvage failed', { sessionId: managed.id, answerRunId: state.runId, error: error instanceof Error ? error.message : String(error) })
+      managed.messages = managed.messages.filter(m => m.id !== answer.id)
+      state.committedMessageId = undefined
+      if (managed.lastFinalMessageId === answer.id) {
+        managed.lastMessageRole = previousLastRole
+        managed.lastFinalMessageId = previousFinalId
+      }
+      this.persistSession(managed)
+      await this.flushSession(managed.id).catch(rollbackError => sessionLog.error('Salvaged answer rollback persistence failed', rollbackError))
+      return undefined
+    }
+    return answer
   }
 
   private async *runAnswerDelivery(
@@ -7377,7 +7838,7 @@ export class SessionManager implements ISessionManager {
     const owner = managed.messages.find(m => m.id === state.userMessageId)
     const hasError = managed.messages.slice(managed.messages.findIndex(m => m.id === state.userMessageId) + 1).some(m => m.role === 'error')
     const waiting = managed.orchestrationStatus === 'running' && managed.orchestrationAggregation?.phase === 'waiting-workers'
-    if (complete && !state.committedMessageId && !state.recovery && !hasError && !waiting
+    if (complete && !state.committedMessageId && !state.persistenceFailed && !state.recovery && !hasError && !waiting
       && managed.isProcessing && !managed.stopRequested && managed.answerDelivery === state
       && managed.processingGeneration === state.generation && !managed.authRetryInProgress) {
       // Account for the first call before starting the one allowed recovery call.
@@ -7392,15 +7853,31 @@ export class SessionManager implements ISessionManager {
         || managed.processingGeneration !== state.generation || managed.authRetryInProgress) return
       agent.configureAnswerDelivery?.(this.answerDeliveryControl(managed))
       complete = undefined
-      for await (const event of agent.chat(ANSWER_RECOVERY_PROMPT, undefined, { ...options, previousResponseInterrupted: false, continueUserTask: true })) {
+      for await (const event of this.runProgressExecution(managed, agent, ANSWER_RECOVERY_PROMPT, undefined, { ...options, previousResponseInterrupted: false, continueUserTask: true })) {
         if (event.type === 'complete') complete = event
         else yield event
       }
     }
-    if (!state.committedMessageId && state.recovery && managed.isProcessing && !managed.stopRequested
+    if (!state.committedMessageId && (state.persistenceFailed || state.recovery) && managed.isProcessing && !managed.stopRequested
       && managed.answerDelivery === state && managed.processingGeneration === state.generation
       && !managed.messages.slice(managed.messages.findIndex(m => m.id === state.userMessageId) + 1).some(m => m.role === 'error')) {
-      yield { type: 'error', message: '未完成答案交付：模型未提交完整正文。已有工作内容已保留，请继续此任务。' }
+      const salvaged = state.persistenceFailed ? undefined : await this.salvageUndeliveredAnswer(managed, state)
+      if (salvaged) {
+        // Publication cannot undo a durable commit (for example, a disconnected window).
+        try {
+          this.sendEvent({ type: 'text_complete', sessionId: managed.id, text: salvaged.content,
+            isIntermediate: false, phase: 'final', answerProtocol: salvaged.answerProtocol,
+            answerRunId: state.runId, answerCommitted: true, turnId: salvaged.turnId,
+            messageId: salvaged.id, timestamp: salvaged.timestamp }, managed.workspace.id)
+        } catch (error) {
+          sessionLog.error('Salvaged answer event delivery failed', { sessionId: managed.id, messageId: salvaged.id, error })
+        }
+      } else if (managed.isProcessing && !managed.stopRequested && managed.answerDelivery === state
+        && managed.processingGeneration === state.generation) {
+        yield { type: 'typed_error', error: createTypedError(state.persistenceFailed ? 'answer_persistence_failed' : 'answer_delivery_missing', { message: state.persistenceFailed
+          ? '答案保存失败：系统未能保存已提交的正文。已保留执行记录；请先排查存储问题。'
+          : '未完成答案交付：模型未提交完整正文。已保留执行记录，请继续此任务。' }) }
+      }
     }
     if (complete) yield complete
     else if (state.committedMessageId) yield { type: 'complete' }
@@ -7456,7 +7933,7 @@ export class SessionManager implements ISessionManager {
       )
       const options = managed.lastSentOptions
 
-      const originalMessages = [...managed.messages]
+      const originalMessages = structuredClone(managed.messages)
       const previousAssistant = originalMessages
         .slice(0, lastUserIdx)
         .findLast(message => message.role === 'assistant' && !message.isIntermediate && !message.hidden)
@@ -7750,6 +8227,7 @@ export class SessionManager implements ISessionManager {
 
     sessionLog.info('Cancelling processing for session:', sessionId, silent ? '(silent)' : '')
 
+    managed.progressSupervisor?.stop()
     // Stop is authoritative over an automatic source continuation. Clear both
     // the not-yet-fired timer and any usage accumulator waiting to cross that
     // logical boundary so the cancelled task cannot resurrect itself.
@@ -7788,6 +8266,8 @@ export class SessionManager implements ISessionManager {
     // Signal intent to stop - let the event loop drain remaining events before clearing isProcessing
     // This prevents losing in-flight messages after soft interrupt
     managed.stopRequested = true
+    managed.cancelAgentCreation?.()
+    managed.authRetryInProgress = false
 
     // Track interruption so the next user message gets a context note
     // telling the LLM the previous response was cut short
@@ -7850,9 +8330,11 @@ export class SessionManager implements ISessionManager {
     // This handles cases where the generator gets stuck
     const stopGeneration = managed.processingGeneration
     setTimeout(() => {
-      if (managed.stopRequested && managed.isProcessing) {
+      if (managed.stopRequested && managed.isProcessing && managed.processingGeneration === stopGeneration) {
         sessionLog.warn('Generator did not complete after stop request, forcing cleanup')
-        this.onProcessingStopped(sessionId, 'timeout', stopGeneration)
+        void this.onProcessingStopped(sessionId, 'timeout', stopGeneration).catch(error => {
+          sessionLog.error(`Stop cleanup failed for ${sessionId}:`, error)
+        })
       }
     }, 5000)
 
@@ -7939,7 +8421,11 @@ export class SessionManager implements ISessionManager {
     workspaceId: string,
     failureErrorCode?: string,
   ): boolean {
-    if (managed.authRetryAttempted || !managed.lastSentMessage) return false
+    if (managed.authRetryAttempted || !managed.lastSentMessage || managed.stopRequested || managed.answerDelivery?.committedMessageId) return false
+    const retryGeneration = managed.processingGeneration
+    const ownsRetry = () => this.sessions.get(sessionId) === managed
+      && managed.processingGeneration === retryGeneration && !managed.stopRequested
+      && managed.authRetryInProgress && !managed.answerDelivery?.committedMessageId
 
     sessionLog.info(`Auth error detected, attempting token refresh and retry for session ${sessionId}`)
     managed.authRetryAttempted = true
@@ -7954,6 +8440,7 @@ export class SessionManager implements ISessionManager {
     }, workspaceId)
 
     setImmediate(async () => {
+      if (!ownsRetry()) return
       try {
         // 1. Reset summarization client so it picks up fresh credentials
         sessionLog.info(`[auth-retry] Resetting summarization client for session ${sessionId}`)
@@ -7961,8 +8448,8 @@ export class SessionManager implements ISessionManager {
 
         // 2. Destroy the agent — the new agent's postInit() will refresh auth
         sessionLog.info(`[auth-retry] Destroying agent for session ${sessionId}`)
-        managed.agent?.dispose()
-        managed.agent = null
+        await this.disposeManagedAgentRuntime(managed, 'authentication retry')
+        if (!ownsRetry()) return
 
         // 3. Retry the message
         const retryMessage = managed.lastSentMessage
@@ -7997,6 +8484,7 @@ export class SessionManager implements ISessionManager {
           managed.authRetryInProgress = false
         }
       } catch (retryError) {
+        if (!ownsRetry()) return
         managed.authRetryInProgress = false
         sessionLog.error(`[auth-retry] Failed to retry after auth refresh for session ${sessionId}:`, retryError)
         sessionRuntimeHooks.captureException(retryError, { errorSource: 'auth-retry', sessionId })
@@ -8049,6 +8537,24 @@ export class SessionManager implements ISessionManager {
     }
   }
 
+  private commitRegenerateTransaction(managed: ManagedSession): void {
+    const transaction = managed.regenerateTransaction
+    if (!transaction) return
+    managed.regenerateTransaction = undefined
+    managed.forceFreshSdkSession = false
+    managed.regenerateSeedPending = false
+    managed.regenerateSeedApplied = false
+    managed.branchContextStrategy = transaction.originalBranchContextStrategy
+    managed.branchFromSdkSessionId = undefined
+    managed.branchFromSessionPath = undefined
+    managed.branchFromSdkCwd = undefined
+    managed.branchFromSdkTurnId = undefined
+    sessionLog.info('Regenerate transaction committed', {
+      sessionId: managed.id,
+      runId: transaction.runId,
+    })
+  }
+
   private async settleRegenerateTransaction(
     managed: ManagedSession,
     reason: 'complete' | 'interrupted' | 'error' | 'timeout',
@@ -8068,19 +8574,7 @@ export class SessionManager implements ISessionManager {
     )
 
     if (reason === 'complete' && hasNonEmptyFinalResponse) {
-      managed.regenerateTransaction = undefined
-      managed.forceFreshSdkSession = false
-      managed.regenerateSeedPending = false
-      managed.regenerateSeedApplied = false
-      managed.branchContextStrategy = transaction.originalBranchContextStrategy
-      managed.branchFromSdkSessionId = undefined
-      managed.branchFromSessionPath = undefined
-      managed.branchFromSdkCwd = undefined
-      managed.branchFromSdkTurnId = undefined
-      sessionLog.info('Regenerate transaction committed', {
-        sessionId: managed.id,
-        runId: transaction.runId,
-      })
+      this.commitRegenerateTransaction(managed)
       return { reason, rolledBack: false }
     }
 
@@ -8168,10 +8662,13 @@ export class SessionManager implements ISessionManager {
     reason: 'complete' | 'interrupted' | 'error' | 'timeout'
   ): Promise<void> {
     const sessionId = managed.id
+    const generation = managed.processingGeneration
+    const ownsCompletion = () => managed.processingGeneration === generation && this.sessions.get(sessionId) === managed
     let completedTurnTokens: number | undefined
     let swarmTurnUsageRecorded = false
 
     const regenerateOutcome = await this.settleRegenerateTransaction(managed, reason)
+    if (!ownsCompletion()) return
     const completionReason = regenerateOutcome.reason
 
     sessionLog.info(`Processing stopped for session ${sessionId}: ${completionReason}`)
@@ -8246,6 +8743,7 @@ export class SessionManager implements ISessionManager {
     const mustRestartRuntime = completionReason === 'interrupted' || completionReason === 'timeout'
     if (mustRestartRuntime) {
       await this.disposeManagedAgentRuntime(managed, `${completionReason} response`)
+      if (!ownsCompletion()) return
     }
 
     // 1. Cleanup state
@@ -8259,6 +8757,7 @@ export class SessionManager implements ISessionManager {
       managed.swarmRuntimeRefreshPending = false
       if (!mustRestartRuntime) {
         await this.disposeManagedAgentRuntime(managed, 'deferred Swarm setting change')
+        if (!ownsCompletion()) return
       }
     }
 
@@ -8280,11 +8779,13 @@ export class SessionManager implements ISessionManager {
       // Same guard as the queue-empty teardown below: a remote BPM throw on a
       // headless server must not abort processing-stop handling.
       try {
-        await turnBpm.clearVisualsForSession(sessionId)
+        await waitForRuntimeCleanup(turnBpm.clearVisualsForSession(sessionId), 'browser visuals')
       } catch (err) {
         sessionLog.warn(`Browser-pane visual clear failed for ${sessionId} (continuing):`, err)
       }
     }
+
+    if (!ownsCompletion()) return
 
     // 2. Handle unread state based on whether user is viewing this session
     //    This is the explicit state machine for NEW badge:
@@ -8295,27 +8796,38 @@ export class SessionManager implements ISessionManager {
     const currentFinalMessageId = this.getLastFinalAssistantMessageId(managed.messages)
     const didReceiveNewFinalMessage = !!currentFinalMessageId && currentFinalMessageId !== turnStartFinalMessageId
 
-    if (completionReason === 'complete' && didReceiveNewFinalMessage && !regenerateOutcome.rolledBack) {
-      if (isViewing) {
-        // User is watching - mark as read immediately
-        await this.markSessionRead(sessionId)
-      } else {
-        // User is not watching - mark as unread for NEW badge
-        if (!managed.hasUnread) {
-          managed.hasUnread = true
-          await updateSessionMetadata(managed.workspace.rootPath, sessionId, { hasUnread: true })
-          this.emitUnreadSummaryChanged()
+    try {
+      if (completionReason === 'complete' && didReceiveNewFinalMessage && !regenerateOutcome.rolledBack) {
+        if (isViewing) {
+          // User is watching - mark as read immediately
+          await this.markSessionRead(sessionId)
+        } else {
+          // User is not watching - mark as unread for NEW badge
+          if (!managed.hasUnread) {
+            managed.hasUnread = true
+            await updateSessionMetadata(managed.workspace.rootPath, sessionId, { hasUnread: true })
+            this.emitUnreadSummaryChanged()
+          }
         }
       }
+
+    } catch (error) {
+      sessionLog.warn(`Unread metadata update failed for ${sessionId}:`, error)
     }
+
+    if (!ownsCompletion()) return
 
     // 3. Auto-complete mini agent sessions to avoid session list clutter
     //    Mini agents are spawned from EditPopovers for quick config edits
     //    and should automatically move to 'done' when finished
     if (completionReason === 'complete' && managed.systemPromptPreset === 'mini' && managed.sessionStatus !== 'done') {
       sessionLog.info(`Auto-completing mini agent session ${sessionId}`)
-      await this.setSessionStatus(sessionId, 'done')
+      await this.setSessionStatus(sessionId, 'done').catch(error => {
+        sessionLog.warn(`Mini session status update failed for ${sessionId}:`, error)
+      })
     }
+
+    if (!ownsCompletion()) return
 
     // 4. Apply deferred external metadata updates captured while processing.
     if (managed.pendingExternalMetadata) {
@@ -8371,12 +8883,15 @@ export class SessionManager implements ISessionManager {
         // browser client is connected — which previously aborted onProcessingStopped
         // before emitSessionComplete, hanging the Tasks Conductor completion seam.
         try {
-          await doneBpm.clearVisualsForSession(sessionId)
+          await waitForRuntimeCleanup(doneBpm.clearVisualsForSession(sessionId), 'browser teardown')
+          if (!ownsCompletion()) return
           doneBpm.unbindAllForSession(sessionId)
         } catch (err) {
           sessionLog.warn(`Browser-pane teardown failed for ${sessionId} (continuing to completion):`, err)
         }
       }
+
+      if (!ownsCompletion()) return
 
       // No queue - emit complete to UI (include tokenUsage and hasUnread for state updates)
       this.sendEvent({
@@ -8845,34 +9360,6 @@ export class SessionManager implements ISessionManager {
     this.taskRunnerLookup = lookup
   }
 
-  /**
-   * Fire a Pi Agent Event from session-layer orchestration (spawn_session).
-   * Failures stay isolated — delegation must not break the parent session.
-   */
-  private emitSessionAgentEvent(
-    managed: ManagedSession,
-    event: AutomationAgentEvent,
-    input: SdkAutomationInput,
-  ): void {
-    const system = this.automationSystems.get(managed.workspace.rootPath)
-    if (!system) return
-    const enriched = enrichAgentEventInput(event, input, {
-      workspaceId: managed.workspace.id,
-      sessionId: managed.id,
-      sessionName: managed.name,
-      triggeredByAutomation: !!managed.triggeredBy,
-      automationDepth: managed.triggeredBy?.automationDepth ?? 0,
-      rootSessionId: managed.triggeredBy?.rootSessionId ?? managed.triggeredBy?.sourceSessionId,
-    })
-    void system.executeAgentEvent(event, enriched).catch(error => {
-      sessionLog.warn('[Automations] session-layer agent event failed', {
-        event,
-        sessionId: managed.id,
-        error: error instanceof Error ? error.message : String(error),
-      })
-    })
-  }
-
   private updateOrchestrationMetadata(
     managed: ManagedSession,
     changes: Partial<Pick<ManagedSession,
@@ -9263,6 +9750,10 @@ export class SessionManager implements ISessionManager {
     request: SpawnSessionRequest,
   ): Promise<SpawnSessionResult> {
     sessionLog.info(`Spawn session request from session ${managed.id}:`, request.name || '(unnamed)')
+    const { getSwarmAgentsEnabled } = await import('@craft-agent/shared/config/storage')
+    if (!getSwarmAgentsEnabled()) {
+      throw new Error('Swarm agents are disabled in Advanced settings')
+    }
     const requestedSpawnReason = request.spawnReason ?? 'automatic'
     if (requestedSpawnReason === 'automatic' && !managed.swarmEnabled) {
       throw new Error('Automatic spawn_session is disabled for this session; enable Swarm or use the current session')
@@ -9478,11 +9969,6 @@ export class SessionManager implements ISessionManager {
       mode,
     }
 
-    this.emitSessionAgentEvent(managed, 'SubagentStart', {
-      hook_event_name: 'SubagentStart',
-      agent_id: session.id,
-      agent_type: 'spawn_session',
-    })
     // Every spawned session is independently inspectable in the parent UI.
     // Register before starting the child so both wait and background modes use
     // the same running -> terminal chip lifecycle.
@@ -9703,12 +10189,6 @@ export class SessionManager implements ISessionManager {
         ?? finalText
         ?? `Spawned session subtree ended with ${child.orchestrationStatus}`
     if (!this.finalizeSpawnBackgroundTask(parent, child.id, status, summary)) return
-    this.emitSessionAgentEvent(parent, 'SubagentStop', {
-      hook_event_name: 'SubagentStop',
-      agent_id: child.id,
-      agent_type: 'spawn_session',
-      ...(status !== 'completed' && summary ? { error: summary } : {}),
-    })
     if (child.orchestrationLifecycle === 'detached') return
 
     const siblings = this.getManagedSwarmChildren(parent.id)
@@ -9794,6 +10274,10 @@ export class SessionManager implements ISessionManager {
       orchestratorSessionId = this.findTaskOrchestratorSessionId(workspaceId, slug)
     }
 
+    const { getDagOrchestrationEnabled } = await import('@craft-agent/shared/config/storage')
+    if (!getDagOrchestrationEnabled()) {
+      throw new Error('DAG orchestration is disabled in Advanced settings')
+    }
     const snapshot = runner.run(slug, {
       orchestratorSessionId,
       params: input.params,
@@ -10153,6 +10637,12 @@ export class SessionManager implements ISessionManager {
   async updateSessionSwarmEnabled(sessionId: string, enabled: boolean): Promise<void> {
     const managed = this.sessions.get(sessionId)
     if (!managed) throw new Error(`Session ${sessionId} not found`)
+    if (enabled) {
+      const { getSwarmAgentsEnabled } = await import('@craft-agent/shared/config/storage')
+      if (!getSwarmAgentsEnabled()) {
+        throw new Error('Swarm agents are disabled in Advanced settings')
+      }
+    }
     if (enabled && managed.parentSessionId) {
       const parent = this.sessions.get(managed.parentSessionId)
       if (!parent?.swarmEnabled) {
@@ -10542,6 +11032,7 @@ export class SessionManager implements ISessionManager {
     if (!managed.streamingText) return
 
     const content = managed.streamingText
+    const presentationProtocol = managed.streamingPresentationProtocol
     const turnId = managed.streamingTurnId
       ?? this.pendingDeltas.get(managed.id)?.turnId
     this.flushDelta(managed.id, managed.workspace.id)
@@ -10556,6 +11047,8 @@ export class SessionManager implements ISessionManager {
         ...(managed.answerDelivery ? { answerProtocol: 'explicit-v1' as const, answerRunId: managed.answerDelivery.runId } : {}),
         timestamp: managed.streamingStartedAt ?? this.monotonic(),
         isIntermediate: true,
+        phase: 'intermediate',
+        presentationProtocol,
         turnId,
       }
       managed.messages.push(assistantMessage)
@@ -10570,11 +11063,27 @@ export class SessionManager implements ISessionManager {
       type: 'text_complete',
       sessionId: managed.id,
       text: content,
+      phase: 'intermediate',
+      presentationProtocol,
       isIntermediate: true,
       turnId,
       timestamp,
       messageId,
     }, managed.workspace.id)
+  }
+
+  /** Recovery permits only answer delivery, so its prose can use the same live
+   * preview as submit_answer arguments without committing commentary as an answer. */
+  private previewRecoveryAnswer(managed: ManagedSession, text: string): void {
+    const delivery = managed.answerDelivery
+    if (!delivery?.recovery || delivery.committedMessageId || delivery.persistenceFailed
+      || managed.stopRequested || !managed.isProcessing
+      || delivery.generation !== managed.processingGeneration || !hasRenderableAssistantText(text)) return
+    try { this.assertAnswerReady(managed, delivery, text) }
+    catch { return }
+    this.sendEvent({ type: 'answer_preview', sessionId: managed.id,
+      answerRunId: delivery.runId, userMessageId: delivery.userMessageId,
+      toolCallId: `recovery-${delivery.runId}`, text }, managed.workspace.id)
   }
 
   private async processEvent(managed: ManagedSession, event: AgentEvent): Promise<void> {
@@ -10597,6 +11106,7 @@ export class SessionManager implements ISessionManager {
         }
         managed.streamingText += event.text
         managed.streamingTurnId = event.turnId ?? managed.streamingTurnId
+        managed.streamingPresentationProtocol = event.presentationProtocol
         // Queue delta for batched sending (performance: reduces IPC from 50+/sec to ~20/sec)
         this.queueDelta(
           sessionId,
@@ -10604,6 +11114,7 @@ export class SessionManager implements ISessionManager {
           event.text,
           event.phase ?? 'unclassified',
           event.turnId,
+          event.presentationProtocol,
         )
         break
 
@@ -10625,13 +11136,26 @@ export class SessionManager implements ISessionManager {
           event.text,
           completesActiveStream ? managed.streamingText : undefined,
         )
+        // Some providers emit only text_complete; keep that body on the same
+        // transient preview path until the durable delivery decision is made.
+        this.previewRecoveryAnswer(managed, content)
+        // A boundary can close commentary before the SDK id arrives. Attach
+        // the original message identity once, without re-emitting its text.
+        if (event.sdkMessageId && event.relatedTurnIds?.length) {
+          const related = new Set(event.relatedTurnIds)
+          for (const fragment of managed.messages) {
+            if (fragment.turnId && related.has(fragment.turnId)) fragment.sourceSdkMessageId = event.sdkMessageId
+          }
+        }
         const assistantMessage: Message = {
           id: generateMessageId(),
           role: 'assistant',
           content,
+          sourceSdkMessageId: event.sdkMessageId,
           timestamp: this.monotonic(),
           isIntermediate,
           phase: event.phase,
+          presentationProtocol: event.presentationProtocol,
           ...(managed.answerDelivery ? { answerProtocol: 'explicit-v1' as const, answerRunId: managed.answerDelivery.runId } : {}),
           turnId: event.turnId,
           parentToolUseId: event.parentToolUseId,
@@ -10660,10 +11184,11 @@ export class SessionManager implements ISessionManager {
             }
           }
 
-          // Pi branch-cutoff support: remember the SDK message id → Craft
-          // assistant message id mapping. The actual anchor arrives as a
-          // separate `pi_turn_anchor` event one microtask later — the SDK
-          // updates its leaf only AFTER firing message_end (see #782).
+        }
+
+        // Preserve SDK boundaries for final answers and recoverable drafts.
+        // The SDK sends pi_turn_anchor after appending its assistant entry.
+        if (hasRenderableAssistantText(content) && (!isIntermediate || assistantMessage.answerProtocol === 'explicit-v1')) {
           if (event.sdkMessageId) {
             let cache = managed.piSdkMessageToCraftMessage
             if (!cache) {
@@ -10680,7 +11205,7 @@ export class SessionManager implements ISessionManager {
           }
         }
 
-        this.sendEvent({ type: 'text_complete', sessionId, text: content, isIntermediate, phase: event.phase, answerProtocol: assistantMessage.answerProtocol, answerRunId: assistantMessage.answerRunId, turnId: event.turnId, parentToolUseId: event.parentToolUseId, timestamp: assistantMessage.timestamp, messageId: assistantMessage.id }, workspaceId)
+        this.sendEvent({ type: 'text_complete', sessionId, text: content, isIntermediate, phase: event.phase, presentationProtocol: event.presentationProtocol, answerProtocol: assistantMessage.answerProtocol, answerRunId: assistantMessage.answerRunId, turnId: event.turnId, parentToolUseId: event.parentToolUseId, timestamp: assistantMessage.timestamp, messageId: assistantMessage.id }, workspaceId)
 
         // Persist session after complete message to prevent data loss on quit
         this.persistSession(managed)
@@ -11250,14 +11775,6 @@ export class SessionManager implements ISessionManager {
             status: event.status,
           })
 
-          if (!wasAlreadyTerminal && priorEntry?.source === 'spawn_session') {
-            this.emitSessionAgentEvent(managed, 'SubagentStop', {
-              hook_event_name: 'SubagentStop',
-              agent_id: event.taskId,
-              agent_type: 'spawn_session',
-              ...(event.status === 'failed' && event.summary ? { error: event.summary } : {}),
-            })
-          }
 
           this.evictStaleBackgroundTasks(managed)
         }
@@ -11426,11 +11943,12 @@ export class SessionManager implements ISessionManager {
             managed.tokenUsage.currentTurn = snapshotTurnUsage(recorded.accumulator, Date.now())
           }
           // inputTokens = current context size (full conversation sent this turn), NOT accumulated
-          // Each API call sends the full conversation history, so we use the latest value
-          managed.tokenUsage.inputTokens = event.usage.contextTokens ?? event.usage.inputTokens
+          // Each API call sends the full conversation history, so we use the latest value.
+          // Do not write 0 over a previous occupancy — that hides the context ring.
+          applyContextOccupancy(managed.tokenUsage, event.usage)
           // outputTokens and costUsd are accumulated across all turns (total session usage)
           managed.tokenUsage.outputTokens += event.usage.outputTokens
-          managed.tokenUsage.totalTokens = managed.tokenUsage.inputTokens + managed.tokenUsage.outputTokens
+          managed.tokenUsage.totalTokens = managed.tokenUsage.inputTokens + managed.tokenUsage.outputTokens + (managed.tokenUsage.evaluationTokens ?? 0)
           managed.tokenUsage.costUsd += event.usage.costUsd ?? 0
           // Cache tokens reflect current state, not accumulated
           managed.tokenUsage.cacheReadTokens = event.usage.cacheReadTokens ?? 0
@@ -11439,6 +11957,7 @@ export class SessionManager implements ISessionManager {
           if (event.usage.contextWindow) {
             managed.tokenUsage.contextWindow = event.usage.contextWindow
           }
+          applyContextUsageFields(managed.tokenUsage, event.usage)
         }
         break
 
@@ -11480,11 +11999,12 @@ export class SessionManager implements ISessionManager {
           managed.activeTurnSawUsageUpdate = true
           managed.tokenUsage.lastCall = recorded.lastCall
           managed.tokenUsage.currentTurn = snapshotTurnUsage(recorded.accumulator, Date.now())
-          // Update only inputTokens (current context size) - other fields accumulate on complete
-          managed.tokenUsage.inputTokens = event.usage.contextTokens ?? event.usage.inputTokens
+          // Update only current occupancy — skip empty usage so the ring stays visible.
+          applyContextOccupancy(managed.tokenUsage, event.usage)
           if (event.usage.contextWindow) {
             managed.tokenUsage.contextWindow = event.usage.contextWindow
           }
+          applyContextUsageFields(managed.tokenUsage, event.usage)
 
           // Send to renderer for immediate UI update
           this.sendEvent({
@@ -11545,7 +12065,13 @@ export class SessionManager implements ISessionManager {
       return
     }
 
-    this.eventSink(RPC_CHANNELS.sessions.EVENT, { to: 'workspace', workspaceId }, event)
+    try {
+      this.eventSink(RPC_CHANNELS.sessions.EVENT, { to: 'workspace', workspaceId }, event)
+    } catch (error) {
+      // Client delivery is not the execution transaction. Persisted state can
+      // be reloaded after reconnect; a broken sink must not strand cleanup.
+      sessionLog.error(`Failed to deliver ${event.type} for ${event.sessionId}:`, error)
+    }
   }
 
   /**
@@ -11558,10 +12084,11 @@ export class SessionManager implements ISessionManager {
     delta: string,
     phase: TextStreamPhase,
     turnId?: string,
+    presentationProtocol?: 'native' | 'marker-v1' | 'legacy',
   ): void {
     const existing = this.pendingDeltas.get(sessionId)
     const changesStream = !!existing && (
-      existing.phase !== phase
+      existing.phase !== phase || existing.presentationProtocol !== presentationProtocol
       || (!!existing.turnId && !!turnId && existing.turnId !== turnId)
     )
     if (changesStream) {
@@ -11579,7 +12106,7 @@ export class SessionManager implements ISessionManager {
       if (turnId) active.turnId = turnId
     } else {
       // Start new batch
-      this.pendingDeltas.set(sessionId, { delta, phase, turnId })
+      this.pendingDeltas.set(sessionId, { delta, phase, turnId, presentationProtocol })
     }
 
     // Schedule flush if not already scheduled
@@ -11611,9 +12138,12 @@ export class SessionManager implements ISessionManager {
         sessionId,
         delta: pending.delta,
         phase: pending.phase,
+        presentationProtocol: pending.presentationProtocol,
         turnId: pending.turnId
       }, workspaceId)
       this.pendingDeltas.delete(sessionId)
+      const managed = this.sessions.get(sessionId)
+      if (managed) this.previewRecoveryAnswer(managed, managed.streamingText)
     }
   }
 
@@ -11635,13 +12165,6 @@ export class SessionManager implements ISessionManager {
           model: pending.model,
           thinkingLevel: pending.thinkingLevel,
           automationName: pending.automationName,
-          waitForCompletion: pending.waitForCompletion,
-          reportBack: pending.reportBack,
-          timeoutMs: pending.timeoutMs,
-          sourceEvent: pending.sourceEvent,
-          sourceSessionId: pending.sourceSessionId,
-          rootSessionId: pending.rootSessionId,
-          automationDepth: pending.automationDepth,
         })
       )
     )
@@ -11651,12 +12174,10 @@ export class SessionManager implements ISessionManager {
       if (!pending?.matcherId) continue
 
       const value = result.status === 'fulfilled' ? result.value : undefined
-      const waitFailed = value?.waitReason === 'timeout' || value?.waitReason === 'interrupted' || value?.waitReason === 'error'
-      const reportFailed = Boolean(value?.reportBackError)
-      const ok = result.status === 'fulfilled' && !waitFailed && !reportFailed
+      const ok = result.status === 'fulfilled'
       const error = result.status === 'rejected'
         ? String(result.reason)
-        : value?.reportBackError ?? (waitFailed ? value?.waitReason : undefined)
+        : undefined
       const entry = createPromptHistoryEntry({
         matcherId: pending.matcherId,
         ok,
@@ -11664,11 +12185,6 @@ export class SessionManager implements ISessionManager {
         prompt: pending.prompt,
         error,
         status: ok ? 'succeeded' : 'failed',
-        event: pending.sourceEvent,
-        sourceSessionId: pending.sourceSessionId,
-        reason: value?.waitReason,
-        finalText: value?.finalText,
-        durationMs: value?.durationMs,
       })
 
       appendAutomationHistoryEntry(workspaceRootPath, entry).catch(e => sessionLog.warn('[Automations] Failed to write history:', e))
@@ -11704,12 +12220,6 @@ export class SessionManager implements ISessionManager {
       thinkingLevel,
       automationName,
       waitForCompletion,
-      reportBack,
-      timeoutMs,
-      sourceEvent,
-      sourceSessionId,
-      rootSessionId,
-      automationDepth,
     } = input
 
     // Warn if llmConnection was specified but doesn't resolve
@@ -11749,11 +12259,7 @@ export class SessionManager implements ISessionManager {
     if (managed) {
       managed.triggeredBy = {
         automationName,
-        event: sourceEvent,
         timestamp: Date.now(),
-        sourceSessionId,
-        automationDepth: automationDepth ?? (sourceEvent ? 1 : undefined),
-        rootSessionId: rootSessionId ?? sourceSessionId,
       }
       this.persistSession(managed)
     }
@@ -11767,8 +12273,7 @@ export class SessionManager implements ISessionManager {
     // until the entire turn (including tool calls) finishes and trips the 30s
     // client timeout (craft-agents-oss#943). The session streams live either
     // way; a background failure surfaces in the session UI and is logged here.
-    const shouldWait = waitForCompletion === true || reportBack === true
-    if (waitForCompletion === false && !shouldWait) {
+    if (waitForCompletion === false) {
       void this.sendMessage(session.id, prompt, undefined, undefined, {
         skillSlugs: resolved?.skillSlugs,
       }).catch((err) => {
@@ -11780,106 +12285,10 @@ export class SessionManager implements ISessionManager {
       return { sessionId: session.id }
     }
 
-    if (!shouldWait) {
-      await this.sendMessage(session.id, prompt, undefined, undefined, {
-        skillSlugs: resolved?.skillSlugs,
-      })
-      return { sessionId: session.id }
-    }
-
-    const clampedTimeout = Math.min(
-      Math.max(timeoutMs ?? DEFAULT_PROMPT_WAIT_TIMEOUT_MS, 1),
-      MAX_PROMPT_WAIT_TIMEOUT_MS,
-    )
-    const startedAt = Date.now()
-    const waitPromise = waitForAutomationSessionCompletion({
-      sessionId: session.id,
-      timeoutMs: clampedTimeout,
-      subscribe: (listener) => this.onSessionComplete(listener),
-    })
-
-    const sendResult = this.sendMessage(session.id, prompt, undefined, undefined, {
+    await this.sendMessage(session.id, prompt, undefined, undefined, {
       skillSlugs: resolved?.skillSlugs,
-    }).then(
-      () => 'sent' as const,
-      (err) => {
-        sessionLog.error('[Automations] sendMessage failed while waiting for completion', {
-          sessionId: session.id,
-          error: err instanceof Error ? err.message : String(err),
-        })
-        return 'failed' as const
-      },
-    )
-
-    const outcome = await Promise.race([
-      waitPromise,
-      sendResult.then((result) => {
-        if (result === 'failed') return { reason: 'error' as const }
-        return waitPromise
-      }),
-    ])
-    const durationMs = Date.now() - startedAt
-    let reportBackError: string | undefined
-
-    if (reportBack === true) {
-      reportBackError = await this.deliverAutomationReportBack({
-        sourceSessionId,
-        automationName,
-        finalText: outcome.finalText,
-        waitReason: outcome.reason,
-        idleTimeoutMs: Math.min(Math.max(clampedTimeout - (Date.now() - startedAt), 1), 60_000),
-      })
-    }
-
-    return {
-      sessionId: session.id,
-      waitReason: outcome.reason,
-      finalText: outcome.finalText,
-      durationMs,
-      reportBackError,
-    }
-  }
-
-  /**
-   * Write an automation result into the source session only when it is idle.
-   * Never call sendMessage while the source is processing — that steers or
-   * queues into the live user turn.
-   */
-  private async deliverAutomationReportBack(opts: {
-    sourceSessionId?: string
-    automationName?: string
-    finalText?: string
-    waitReason?: ExecutePromptAutomationResult['waitReason']
-    idleTimeoutMs: number
-  }): Promise<string | undefined> {
-    if (opts.waitReason !== 'complete') return undefined
-    if (!opts.sourceSessionId) return 'source session unavailable'
-
-    let source = this.sessions.get(opts.sourceSessionId)
-    if (!source) return 'source session unavailable'
-
-    if (source.isProcessing) {
-      const idle = await waitForAutomationSessionCompletion({
-        sessionId: opts.sourceSessionId,
-        timeoutMs: opts.idleTimeoutMs,
-        subscribe: (listener) => this.onSessionComplete(listener),
-      })
-      if (idle.reason === 'timeout') return 'source session unavailable'
-      source = this.sessions.get(opts.sourceSessionId)
-      if (!source || source.isProcessing) return 'source session unavailable'
-    }
-
-    const name = opts.automationName || 'automation'
-    const body = [
-      `[Automation "${name}" result]`,
-      opts.finalText?.trim() || '(no output)',
-    ].join('\n\n')
-    try {
-      await this.sendMessage(opts.sourceSessionId, body)
-      return undefined
-    } catch {
-      return 'source session unavailable'
-    }
+    })
+    return { sessionId: session.id }
   }
 
   /**
@@ -12292,6 +12701,14 @@ export class SessionManager implements ISessionManager {
    * Should be called on app shutdown to prevent resource leaks.
    */
   cleanup(): void {
+    this.progressShuttingDown = true
+    for (const managed of this.sessions.values()) {
+      managed.progressSupervisor?.stop()
+      managed.progressReviewer?.destroy()
+      managed.progressReviewer = undefined
+    }
+    this.progressArbiters.clear()
+    this.progressBudgets.clear()
     this.spawnCompletionUnsub?.()
     this.spawnCompletionUnsub = undefined
     sessionLog.info('Cleaning up resources...')

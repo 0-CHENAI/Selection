@@ -1,4 +1,6 @@
+import { recoverMissingSession } from '@/lib/recover-missing-session'
 import { confirmAction } from '@/lib/confirmation'
+import { useAdvancedSettings } from '@/hooks/useAdvancedSettings'
 import * as React from "react"
 import { useTranslation, Trans } from "react-i18next"
 import { useRef, useState, useEffect, useCallback, useMemo } from "react"
@@ -22,7 +24,6 @@ import {
   Webhook,
   Clock,
   Radio,
-  Bot,
   Info,
   FolderKanban,
 } from "lucide-react"
@@ -33,19 +34,12 @@ import { SquarePenRounded } from "../icons/SquarePenRounded"
 import { McpIcon } from "../icons/McpIcon"
 import { Button } from "@/components/ui/button"
 import { HeaderIconButton } from "@/components/ui/HeaderIconButton"
-import { CreationJobsButton, CreationJobsHost } from "./CreationJobsButton"
+import { CreationJobsHost } from "./CreationJobsButton"
 import type { CreationJob } from "@/atoms/creation-jobs"
 import { clearProjectFilter, resolveNewSessionParams, resolveProjectNavigationSessionId, type FilterMode } from "./inherited-filter-params"
-import { filterSessionsByProject, getIncludedProjectName, hasIncludedProjectFilter } from "./project-session-filter"
+import { filterSessionsBySidebarProjectScope, getIncludedProjectName, hasIncludedProjectFilter } from "./project-session-filter"
 import { Separator } from "@/components/ui/separator"
 import { Tooltip, TooltipTrigger, TooltipContent } from "@craft-agent/ui"
-import {
-  ContextMenu,
-  ContextMenuTrigger,
-  StyledContextMenuContent,
-} from "@/components/ui/styled-context-menu"
-import { ContextMenuProvider } from "@/components/ui/menu-context"
-import { SidebarMenu } from "./SidebarMenu"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { FadingText } from "@/components/ui/fading-text"
 import {
@@ -87,7 +81,7 @@ import { findLabelById, sortLabelsForDisplay } from "@craft-agent/shared/labels"
 import { resolveEntityColor } from "@craft-agent/shared/colors"
 import * as storage from "@/lib/local-storage"
 import { toast } from "sonner"
-import { navigate, routes } from "@/lib/navigate"
+import { draftSessionNavigateOptions, navigate, routes } from "@/lib/navigate"
 import {
   useNavigation,
   useNavigationState,
@@ -118,7 +112,7 @@ import {
 import { AutomationsListPanel } from "../automations/AutomationsListPanel"
 import { ProjectsListPanel } from "./ProjectsListPanel"
 import { ProjectFolderActions } from "../projects/ProjectFolderActions"
-import { APP_EVENTS, AGENT_EVENTS, type AutomationFilterKind, AUTOMATION_TYPE_TO_FILTER_KIND } from "../automations/types"
+import { APP_EVENTS, type AutomationFilterKind, AUTOMATION_TYPE_TO_FILTER_KIND } from "../automations/types"
 import { useAutomations } from "@/hooks/useAutomations"
 import { useProjects } from "@/hooks/useProjects"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog"
@@ -128,6 +122,7 @@ import { SendToWorkspaceDialog } from "./SendToWorkspaceDialog"
 import { CreateProjectDialog } from "../projects/CreateProjectDialog"
 import { MessagingDialogHost } from "@/components/messaging/MessagingDialogHost"
 import { EditPopover, getEditConfig, type EditContextKey } from "@/components/ui/EditPopover"
+import { AUTOMATION_CREATION_KEYS, automationCreationKey, type AutomationCreationKey, type AutomationCreationCategory } from "@/components/automations/creation-context"
 import SettingsNavigator from "@/pages/settings/SettingsNavigator"
 import {
   PANEL_GAP,
@@ -315,7 +310,8 @@ function AppShellContent({
 
   // Board view replaces the session-list navigator with the full-width Kanban panel,
   // so the navigator (and its resize handle) collapse to zero width while it's active.
-  const isBoardView = isSessionsNavigation(navState) && navState.viewMode === 'board'
+  const { dagOrchestrationEnabled } = useAdvancedSettings()
+  const isBoardView = dagOrchestrationEnabled && isSessionsNavigation(navState) && navState.viewMode === 'board'
   const setKanbanEditorTarget = useSetAtom(kanbanEditorTargetAtom)
   const kanbanEditorDirty = useAtomValue(kanbanEditorDirtyAtom)
 
@@ -423,6 +419,12 @@ function AppShellContent({
     navigate(routes.view.allSessions())
     return true
   }, [kanbanEditorDirty, setKanbanEditorTarget, t])
+
+  useEffect(() => {
+    if (!dagOrchestrationEnabled && isSessionsNavigation(navState) && navState.viewMode === 'board') {
+      void leaveOrchestrationView()
+    }
+  }, [dagOrchestrationEnabled, navState, leaveOrchestrationView])
 
   const openSessionSearch = React.useCallback(async () => {
     if (isBoardView && !(await leaveOrchestrationView())) return
@@ -1121,11 +1123,10 @@ function AppShellContent({
 
   // Count automations by type for the Automations dropdown subcategories
   const automationTypeCounts = useMemo(() => {
-    const counts = { scheduled: 0, event: 0, agentic: 0 }
+    const counts = { scheduled: 0, event: 0 }
     for (const automation of automations) {
       if (automation.event === 'SchedulerTick') counts.scheduled++
       else if ((APP_EVENTS as string[]).includes(automation.event)) counts.event++
-      else if ((AGENT_EVENTS as string[]).includes(automation.event)) counts.agentic++
     }
     return counts
   }, [automations])
@@ -1174,9 +1175,7 @@ function AppShellContent({
         result = activeSessionMetas
     }
 
-    if (projectFilter.size > 0) {
-      result = filterSessionsByProject(result, projectFilter)
-    }
+    result = filterSessionsBySidebarProjectScope(result, projectFilter)
 
     return result
   }, [workspaceSessionMetas, activeSessionMetas, sessionFilter, projectFilter])
@@ -1335,10 +1334,6 @@ function AppShellContent({
     navigate(routes.view.automationsEvent())
   }, [])
 
-  const handleAutomationsAgenticClick = useCallback(() => {
-    navigate(routes.view.automationsAgentic())
-  }, [])
-
   // Handler for settings view. With no arg → bare `settings` route (navigator-only
   // in compact mode, App fallback on desktop). With an arg → `settings/<subpage>`.
   const handleSettingsClick = useCallback((subpage?: SettingsSubpage) => {
@@ -1352,7 +1347,7 @@ function AppShellContent({
   // We use controlled popovers instead of deep links so the user can type
   // their request in the popover UI before opening a new chat window.
   // add-source variants: add-source (generic), add-source-api, add-source-mcp, add-source-local
-  type ControlledEditPopoverKey = 'statuses' | 'labels' | 'views' | 'add-source' | 'add-source-api' | 'add-source-mcp' | 'add-source-local' | 'add-skill' | 'add-label' | 'add-automation' | 'add-project'
+  type ControlledEditPopoverKey = 'statuses' | 'labels' | 'views' | 'add-source' | 'add-source-api' | 'add-source-mcp' | 'add-source-local' | 'add-skill' | 'add-label' | AutomationCreationKey | 'add-project'
   const [editPopoverOpen, setEditPopoverOpen] = useState<ControlledEditPopoverKey | null>(null)
   const [copySkillsFromOpen, setCopySkillsFromOpen] = useState(false)
   const [copySourcesFromOpen, setCopySourcesFromOpen] = useState(false)
@@ -1529,9 +1524,9 @@ function AppShellContent({
 
   // Handler for "Add Automation" context menu action
   // Opens the EditPopover for adding a new automation
-  const openAddAutomation = useCallback(() => {
+  const openAddAutomation = useCallback((category?: AutomationCreationCategory) => {
     captureContextMenuPosition()
-    setTimeout(() => setEditPopoverOpen('add-automation'), 50)
+    setTimeout(() => setEditPopoverOpen(automationCreationKey(category)), 50)
   }, [captureContextMenuPosition])
 
   const reopenCreationJob = useCallback((contextKey: string) => {
@@ -1541,7 +1536,7 @@ function AppShellContent({
       'add-source-mcp',
       'add-source-local',
       'add-skill',
-      'add-automation',
+      ...AUTOMATION_CREATION_KEYS,
     ]
     if (!supportedKeys.includes(contextKey as ControlledEditPopoverKey)) return
     editPopoverAnchorY.current = 52
@@ -1581,18 +1576,7 @@ function AppShellContent({
     }
   }, [activeWorkspace?.id, navigate, t])
 
-  /**
-   * Resolve the current project's explicit context first, then fall back to
-   * the "inherit sole active filter" rule for session-list views. Only
-   * include-mode filters are candidates — an excluded status/label/project must
-   * never be inherited (#970). See resolveNewSessionParams.
-   */
-  const resolveNewSessionCreationParams = useCallback(
-    () => resolveNewSessionParams(listFilter, labelFilter, projectFilter, selectedProjectId),
-    [listFilter, labelFilter, projectFilter, selectedProjectId],
-  )
-
-  // Create a new chat and select it
+  // Show a local draft; the first submission creates the session.
   const handleNewChat = useCallback((newPanel: boolean = false) => {
     if (!activeWorkspace) return
 
@@ -1608,18 +1592,23 @@ function AppShellContent({
     setSearchActive(false)
     setSearchQuery('')
 
-    // Inherit sole-active filter into the new session when unambiguous.
-    const inherited = resolveNewSessionCreationParams()
-
-    // Delegate to NavigationContext which handles session creation
-    navigate(
-      routes.action.newSession(inherited ?? undefined),
-      newPanel ? { newPanel: true, targetLaneId: 'main' } : undefined
-    )
+    navigate(routes.view.allSessions(), draftSessionNavigateOptions(newPanel))
 
     // Focus the chat input after navigation completes
     setTimeout(() => focusZone('chat', { intent: 'programmatic' }), 50)
-  }, [activeWorkspace, focusZone, resolveNewSessionCreationParams, selectedProjectId, selectedProjectSlug, t])
+  }, [activeWorkspace, focusZone, selectedProjectId, selectedProjectSlug, t])
+
+  React.useEffect(() => {
+    // Only recover an actual focused chat, never a stale selection behind a
+    // settings/project page. Ask the backend before treating loading as deletion.
+    if (!focusedSessionId || !activeWorkspace || sessionMetaMap.has(focusedSessionId)) return
+    if (selectedProjectSlug && !selectedProjectId) return
+    return recoverMissingSession(
+      () => window.electronAPI.getSessionMessages(focusedSessionId),
+      () => navigate(routes.view.allSessions()),
+      error => console.error('[Chat] Failed to verify missing session:', error),
+    )
+  }, [focusedSessionId, activeWorkspace, sessionMetaMap, selectedProjectSlug, selectedProjectId])
 
   // Delete Source - simplified since agents system is removed
   const handleDeleteSource = useCallback(async (sourceSlug: string) => {
@@ -1804,7 +1793,6 @@ function AppShellContent({
       switch (automationFilter.automationType) {
         case 'scheduled': return t("sidebar.scheduled")
         case 'event': return t("sidebar.eventBased")
-        case 'agentic': return t("sidebar.agentEvents")
         default: return t("sidebar.allAutomations")
       }
     }
@@ -1860,7 +1848,7 @@ function AppShellContent({
           canGoForward={canGoForward}
           onToggleSidebar={handleToggleSidebar}
           onToggleFocusMode={() => setIsSidebarAndNavigatorHidden(prev => !prev)}
-          afterWorkspace={isSessionsNavigation(navState) ? (
+          afterWorkspace={dagOrchestrationEnabled && isSessionsNavigation(navState) ? (
             <div className="flex items-center gap-1.5">
               <BoardListToggle
                 value={isBoardView ? 'board' : 'list'}
@@ -1902,13 +1890,11 @@ function AppShellContent({
             <div className="flex h-full flex-col select-none">
               {/* Sidebar Top Section */}
               <div className="flex-1 flex flex-col min-h-0">
-                {/* New Session Button - Gmail-style, with context menu for "Open in New Window" */}
+                {/* New Session Button */}
                 <div className="px-2 pb-2 shrink-0">
                   <Tooltip>
                     <TooltipTrigger asChild>
                       <div>
-                        <ContextMenu modal={true}>
-                          <ContextMenuTrigger asChild>
                             <Button
                               variant="ghost"
                               onClick={(e) => handleNewChat(e.metaKey || e.ctrlKey)}
@@ -1918,13 +1904,6 @@ function AppShellContent({
                               <SquarePenRounded className="h-3.5 w-3.5 shrink-0" />
                               {t("session.newSession")}
                             </Button>
-                          </ContextMenuTrigger>
-                          <StyledContextMenuContent>
-                            <ContextMenuProvider>
-                              <SidebarMenu type="newSession" />
-                            </ContextMenuProvider>
-                          </StyledContextMenuContent>
-                        </ContextMenu>
                       </div>
                     </TooltipTrigger>
                     <TooltipContent side="right">{newChatHotkey}</TooltipContent>
@@ -1941,7 +1920,7 @@ function AppShellContent({
                     {
                       id: "nav:allSessions",
                       title: t("sidebar.allSessions"),
-                      label: String(workspaceSessionMetas.length),
+                      label: String(workspaceSessionMetas.filter(session => !session.projectId).length),
                       icon: Inbox,
                       // Project children reuse the allSessions route, so an
                       // included project owns the active state instead of the
@@ -2086,7 +2065,7 @@ function AppShellContent({
                           icon: Clock,
                           variant: (automationFilter?.kind === 'type' && automationFilter.automationType === 'scheduled') ? "default" : "ghost",
                           onClick: handleAutomationsScheduledClick,
-                          contextMenu: { type: 'automations' as const, onAddAutomation: openAddAutomation },
+                          contextMenu: { type: 'automations' as const, onAddAutomation: () => openAddAutomation('scheduled') },
                         },
                         {
                           id: "nav:automations:event",
@@ -2095,16 +2074,7 @@ function AppShellContent({
                           icon: Radio,
                           variant: (automationFilter?.kind === 'type' && automationFilter.automationType === 'event') ? "default" : "ghost",
                           onClick: handleAutomationsEventClick,
-                          contextMenu: { type: 'automations' as const, onAddAutomation: openAddAutomation },
-                        },
-                        {
-                          id: "nav:automations:agentic",
-                          title: t("sidebar.agentEvents"),
-                          label: String(automationTypeCounts.agentic),
-                          icon: Bot,
-                          variant: (automationFilter?.kind === 'type' && automationFilter.automationType === 'agentic') ? "default" : "ghost",
-                          onClick: handleAutomationsAgenticClick,
-                          contextMenu: { type: 'automations' as const, onAddAutomation: openAddAutomation },
+                          contextMenu: { type: 'automations' as const, onAddAutomation: () => openAddAutomation('event') },
                         },
                       ],
                     },
@@ -2174,11 +2144,6 @@ function AppShellContent({
                         tooltip={t("fileImport.mcpTitle")}
                         onClick={() => setMcpFileImportOpen(true)}
                       />
-                      <CreationJobsButton
-                        workspaceId={activeWorkspace.id}
-                        onReopen={reopenCreationJob}
-                        onOpenResult={openCreationResult}
-                      />
                       <EditPopover
                         trigger={
                           <HeaderIconButton
@@ -2224,19 +2189,15 @@ function AppShellContent({
                   {/* Add Automation button (only for automations mode) */}
                   {isAutomationsNavigation(navState) && activeWorkspace && (
                     <>
-                      <CreationJobsButton
-                        workspaceId={activeWorkspace.id}
-                        onReopen={reopenCreationJob}
-                        onOpenResult={openCreationResult}
-                      />
                       <EditPopover
+                        key={`${activeWorkspace.id}:${automationCreationKey(automationFilter?.automationType)}`}
                         trigger={
                           <HeaderIconButton
                             icon={<Plus className="h-4 w-4" />}
                             tooltip={t("sidebarMenu.addAutomation")}
                           />
                         }
-                        {...getEditConfig('add-automation', activeWorkspace.rootPath)}
+                        {...getEditConfig(automationCreationKey(automationFilter?.automationType), activeWorkspace.rootPath)}
                       />
                     </>
                   )}
@@ -2325,7 +2286,7 @@ function AppShellContent({
                 {/* Key on sidebarMode forces full remount when switching views, skipping animations */}
                 <SessionList
                   key={sessionFilter?.kind}
-                  items={searchActive ? workspaceSessionMetas : filteredSessionMetas}
+                  items={searchActive ? filterSessionsBySidebarProjectScope(workspaceSessionMetas, projectFilter) : filteredSessionMetas}
                   onDelete={handleDeleteSession}
                   onFlag={onFlagSession}
                   onUnflag={onUnflagSession}
@@ -2619,22 +2580,25 @@ function AppShellContent({
               />
             </>
           )}
-          {/* Add Automation EditPopover - triggered from "Add Automation" context menu in automations */}
-          <EditPopover
-            open={editPopoverOpen === 'add-automation'}
-            onOpenChange={(isOpen) => setEditPopoverOpen(isOpen ? 'add-automation' : null)}
-            modal={true}
-            trigger={
-              <div
-                className="fixed w-0 h-0 pointer-events-none"
-                style={{ left: sidebarWidth + 20, top: editPopoverAnchorY.current }}
-                aria-hidden="true"
-              />
-            }
-            side="bottom"
-            align="start"
-            {...getEditConfig('add-automation', activeWorkspace.rootPath)}
-          />
+          {/* Durable creation dialogs are scoped by workspace and trigger category. */}
+          {AUTOMATION_CREATION_KEYS.map((variant) => (
+            <EditPopover
+              key={`${activeWorkspace.id}:${variant}`}
+              open={editPopoverOpen === variant}
+              onOpenChange={(isOpen) => setEditPopoverOpen(isOpen ? variant : null)}
+              modal={true}
+              trigger={
+                <div
+                  className="fixed w-0 h-0 pointer-events-none"
+                  style={{ left: sidebarWidth + 20, top: editPopoverAnchorY.current }}
+                  aria-hidden="true"
+                />
+              }
+              side="bottom"
+              align="start"
+              {...getEditConfig(variant, activeWorkspace.rootPath)}
+            />
+          ))}
           {/* Add Label EditPopover - triggered from "Add New Label" context menu on labels */}
           <EditPopover
             open={editPopoverOpen === 'add-label'}

@@ -1,4 +1,6 @@
 import { describe, expect, it } from 'bun:test'
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import {
   COLLAPSED_POPOVER_HEIGHT,
   COLLAPSED_POPOVER_WIDTH,
@@ -19,6 +21,12 @@ import {
   hasPopoverDragMoved,
   offsetToPinVisualOrigin,
   popoverBodyClassName,
+  readEditPopoverTriggerAnchor,
+  resolveEditPopoverJobStatus,
+  resolveEditPopoverOpenChange,
+  resolveEditPopoverPositioningSize,
+  shouldAvoidEditPopoverCollisions,
+  sizeFromResizeEdge,
 } from '../edit-popover-layout'
 
 const desktop = { width: 1440, height: 900 }
@@ -224,6 +232,18 @@ describe('offsetToPinVisualOrigin', () => {
     )).toEqual({ x: -80, y: 0 })
   })
 
+  it('keeps the top-left pinned when a centered popover grows (#382)', () => {
+    const origin = { left: 200, top: 120 }
+    const recentered = { left: 160, top: 100 }
+    expect(offsetToPinVisualOrigin(
+      { x: 0, y: 0 },
+      origin,
+      recentered,
+      { width: 480, height: 520 },
+      desktop,
+    )).toEqual({ x: 40, y: 20 })
+  })
+
   it('pulls an expanded window back when the pinned origin would overflow', () => {
     const previous = { left: 1184, top: 80 }
     const next = offsetToPinVisualOrigin(
@@ -266,5 +286,149 @@ describe('getCompactInputMaxHeight (#8)', () => {
     const height = DEFAULT_POPOVER_HEIGHT
     const input = getCompactInputMaxHeight(height)
     expect(POPOVER_HEADER_HEIGHT + POPOVER_INPUT_CHROME + input).toBeLessThan(height)
+  })
+})
+
+describe('sizeFromResizeEdge (#385)', () => {
+  const start = { width: 400, height: 480 }
+
+  it('grows only width from the east edge', () => {
+    expect(sizeFromResizeEdge(start, { x: 80, y: 40 }, 'e')).toEqual({ width: 480, height: 480 })
+  })
+
+  it('grows only height from the south edge', () => {
+    expect(sizeFromResizeEdge(start, { x: 80, y: 40 }, 's')).toEqual({ width: 400, height: 520 })
+  })
+
+  it('grows both from the south-east corner', () => {
+    expect(sizeFromResizeEdge(start, { x: 80, y: 40 }, 'se')).toEqual({ width: 480, height: 520 })
+  })
+})
+
+describe('resolveEditPopoverOpenChange (#384)', () => {
+  it('opens normally', () => {
+    expect(resolveEditPopoverOpenChange(true, false)).toBe('open')
+  })
+
+  it('blurs instead of closing when dismiss was not requested', () => {
+    expect(resolveEditPopoverOpenChange(false, false)).toBe('blur')
+  })
+
+  it('closes only when the title-bar close (or send leave) allowed it', () => {
+    expect(resolveEditPopoverOpenChange(false, true)).toBe('close')
+  })
+})
+
+describe('resolveEditPopoverJobStatus (#394)', () => {
+  it('prefers waiting-for-input over an in-flight turn', () => {
+    expect(resolveEditPopoverJobStatus({
+      isProcessing: true,
+      waitingInput: true,
+      hasWork: true,
+    })).toBe('waiting-input')
+  })
+
+  it('keeps a finished session visible as completed', () => {
+    expect(resolveEditPopoverJobStatus({
+      isProcessing: false,
+      hasWork: true,
+    })).toBe('completed')
+  })
+
+  it('surfaces error and cancelled creation as failed', () => {
+    expect(resolveEditPopoverJobStatus({
+      isProcessing: false,
+      hasWork: true,
+      lastMessageRole: 'error',
+    })).toBe('failed')
+    expect(resolveEditPopoverJobStatus({
+      isProcessing: false,
+      hasWork: true,
+      creationStatus: 'cancelled',
+    })).toBe('failed')
+  })
+
+  it('stays idle before any work starts', () => {
+    expect(resolveEditPopoverJobStatus({ isProcessing: false })).toBe('idle')
+  })
+})
+
+describe('collapsed popover placement (#394)', () => {
+  it('collides the painted strip instead of the frozen 480px radix box', () => {
+    expect(resolveEditPopoverPositioningSize(
+      true,
+      { width: COLLAPSED_POPOVER_WIDTH, height: COLLAPSED_POPOVER_HEIGHT },
+      { width: DEFAULT_POPOVER_WIDTH, height: DEFAULT_POPOVER_HEIGHT },
+    )).toEqual({ width: COLLAPSED_POPOVER_WIDTH, height: COLLAPSED_POPOVER_HEIGHT })
+    expect(resolveEditPopoverPositioningSize(
+      false,
+      { width: 480, height: 520 },
+      { width: DEFAULT_POPOVER_WIDTH, height: DEFAULT_POPOVER_HEIGHT },
+    )).toEqual({ width: DEFAULT_POPOVER_WIDTH, height: DEFAULT_POPOVER_HEIGHT })
+  })
+
+  it('stops following the trigger after collapse so page reflow cannot hide the strip', () => {
+    expect(shouldAvoidEditPopoverCollisions(true)).toBe(false)
+    expect(shouldAvoidEditPopoverCollisions(false)).toBe(true)
+  })
+
+  it('anchors a durable add-source trigger under the empty-state button', () => {
+    expect(readEditPopoverTriggerAnchor({ left: 100, top: 80, width: 80, height: 28 }))
+      .toEqual({ left: 140, top: 108 })
+    expect(readEditPopoverTriggerAnchor(null)).toEqual({ left: 0, top: 0 })
+  })
+})
+
+describe('EditPopover floating window (#384, #385)', () => {
+  const source = readFileSync(join(import.meta.dir, '../EditPopover.tsx'), 'utf8')
+
+  it('keeps the window on outside click and only closes explicitly', () => {
+    expect(source).toContain('resolveEditPopoverOpenChange')
+    expect(source).toContain('onPointerDownOutside={preventDismiss}')
+    expect(source).toContain('onFocusOutside={preventDismiss}')
+    expect(source).toContain('onClick={closePopover}')
+    expect(source).toContain('data-focused={focused ? \'true\' : \'false\'}')
+  })
+
+  it('resizes from invisible borders and freezes the Radix box', () => {
+    expect(source).toContain('radixBoxRef.current = next')
+    expect(source).toContain('data-testid="edit-popover-resize-e"')
+    expect(source).toContain('data-testid="edit-popover-resize-s"')
+    expect(source).toContain('data-testid="edit-popover-resize-se"')
+    expect(source).not.toMatch(/data-testid="edit-popover-resize"(?!-)/)
+    expect(source).not.toContain('size-6 cursor-nwse-resize')
+    expect(source).toContain('sizeFromResizeEdge')
+  })
+})
+
+describe('EditPopover MCP/skill config (#394)', () => {
+  const source = readFileSync(join(import.meta.dir, '../EditPopover.tsx'), 'utf8')
+  const sourcesList = readFileSync(join(import.meta.dir, '../../app-shell/SourcesListPanel.tsx'), 'utf8')
+  const skillsList = readFileSync(join(import.meta.dir, '../../app-shell/SkillsListPanel.tsx'), 'utf8')
+
+  it('hides the record navigator and its placeholder column in compact config chats', () => {
+    expect(source).toContain('showRecordNavigation={false}')
+  })
+
+  it('keeps the collapsed strip after completion and shows the job status', () => {
+    expect(source).toContain('resolveEditPopoverJobStatus')
+    expect(source).toContain('avoidCollisions={shouldAvoidEditPopoverCollisions(collapsed)}')
+    expect(source).toContain('data-testid="edit-popover-status"')
+    expect(source).toContain('resolveEditPopoverPositioningSize')
+    expect(source).toContain('clampVisualPopoverOffset')
+  })
+
+  it('does not replace a loaded skill page with not-found during a config rewrite', () => {
+    const skillInfo = readFileSync(join(import.meta.dir, '../../../pages/SkillInfoPage.tsx'), 'utf8')
+    expect(skillInfo).toContain('else if (!skillRef.current)')
+  })
+
+  it('does not unmount add-source/add-skill popovers when the empty list fills', () => {
+    expect(sourcesList).toContain('addSourceOpen && (')
+    expect(sourcesList).toContain('openAddSource')
+    expect(sourcesList).not.toMatch(/emptyState=\{[\s\S]*<EditPopover/)
+    expect(skillsList).toContain('addSkillOpen && (')
+    expect(skillsList).toContain('openAddSkill')
+    expect(skillsList).not.toMatch(/emptyState=\{[\s\S]*<EditPopover/)
   })
 })

@@ -173,6 +173,10 @@ export interface LlmConnection {
   /** Custom base URL (required for *_compat providers, optional override for others) */
   baseUrl?: string;
 
+  /** Use native text for endpoints that buffer tool arguments until completion. */
+  answerDelivery?: 'tool' | 'streaming';
+  presentationProtocol?: 'native' | 'marker-v1' | 'legacy';
+
   /** Authentication mechanism */
   authType: LlmAuthType;
 

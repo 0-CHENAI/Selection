@@ -686,7 +686,7 @@ export interface PermissionManagerLike {
  */
 export interface PrerequisiteManagerLike {
   checkPrerequisites(toolName: string, assistantGeneration?: number): PrerequisiteCheckResult;
-  trackBashSkillRead(input: Record<string, unknown>): boolean;
+  isPendingSkillReadCommand(input: Record<string, unknown>): boolean;
   findCatalogSkillForTool?(toolName: string, input: Record<string, unknown>): { requiredSources?: string[] } | null;
 }
 
@@ -813,9 +813,9 @@ export function runPreToolUseChecks(ctx: PreToolUseInput): PreToolUseCheckResult
   // 3. PREREQUISITE CHECK (on-demand source guides and Skill/browser requirements)
   // ============================================================
   if (prerequisiteManager) {
-    // Allow Bash through if it's reading a pending skill file (clears the prerequisite)
-    if (toolName === 'Bash' && prerequisiteManager.trackBashSkillRead(input)) {
-      // Prerequisite cleared — fall through to remaining pipeline steps
+    // Allow a skill read attempt; only successful results satisfy prerequisites.
+    if (toolName === 'Bash' && prerequisiteManager.isPendingSkillReadCommand(input)) {
+      // Read attempt allowed — continue permission checks before execution
     } else {
       const prereqResult = prerequisiteManager.checkPrerequisites(toolName, assistantGeneration);
       if (!prereqResult.allowed) {

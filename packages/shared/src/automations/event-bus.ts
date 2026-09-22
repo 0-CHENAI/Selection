@@ -13,7 +13,7 @@
  */
 
 import { createLogger } from '../utils/debug.ts';
-import type { AppEvent, AgentEvent, AutomationEvent } from './types.ts';
+import type { AutomationEvent } from './types.ts';
 
 const log = createLogger('event-bus');
 
@@ -63,11 +63,6 @@ export interface LabelConfigChangePayload extends BaseEventPayload {
   // No additional fields - just signals that config changed
 }
 
-/** Generic event payload for agent events */
-export interface GenericEventPayload extends BaseEventPayload {
-  data: Record<string, unknown>;
-}
-
 // ============================================================================
 // Event Payload Map
 // ============================================================================
@@ -85,19 +80,6 @@ export interface EventPayloadMap {
   SessionStatusChange: SessionStatusChangePayload;
   SchedulerTick: SchedulerTickPayload;
 
-  // Agent events (generic payload)
-  PreToolUse: GenericEventPayload;
-  PostToolUse: GenericEventPayload;
-  PostToolUseFailure: GenericEventPayload;
-  UserPromptSubmit: GenericEventPayload;
-  SessionStart: GenericEventPayload;
-  SessionEnd: GenericEventPayload;
-  Stop: GenericEventPayload;
-  SubagentStart: GenericEventPayload;
-  SubagentStop: GenericEventPayload;
-  PreCompact: GenericEventPayload;
-  PermissionRequest: GenericEventPayload;
-  Setup: GenericEventPayload;
 }
 
 // ============================================================================

@@ -298,9 +298,7 @@ export function useAutomations(
 
     const executable = automation.actions.filter((a): a is Extract<typeof a, { type: 'prompt' | 'webhook' }> => a.type === 'prompt' || a.type === 'webhook')
     if (executable.length === 0) {
-      const message = automation.actions.some(a => a.type === 'decision')
-        ? 'Decision actions cannot be executed by Run Test. Use Simulate match.'
-        : AUTOMATION_TEST_NO_ACTIONS_ERROR
+      const message = AUTOMATION_TEST_NO_ACTIONS_ERROR
       setAutomationTestResults(prev => ({
         ...prev,
         [automationId]: {
@@ -319,6 +317,7 @@ export function useAutomations(
       workspaceId: requestWorkspaceId,
       automationId: automation.id,
       automationName: automation.name,
+      event: automation.event,
       actions: executable,
       permissionMode: automation.permissionMode,
       labels: automation.labels,
@@ -359,7 +358,7 @@ export function useAutomations(
 
     setAutomationTestResults(prev => ({ ...prev, [automationId]: { state: 'running', mode: 'match' } }))
 
-    const exactTool = automation.matcher?.match(/^\^([A-Za-z][A-Za-z0-9_-]*)\$$/)?.[1]
+    const exactValue = automation.matcher?.match(/^\^([A-Za-z][A-Za-z0-9_-]*)\$$/)?.[1]
     void window.electronAPI.testAutomation({
       workspaceId: requestWorkspaceId,
       automationId: automation.id,
@@ -367,14 +366,7 @@ export function useAutomations(
       actions: automation.actions.filter((a): a is Extract<typeof a, { type: 'prompt' | 'webhook' }> => a.type === 'prompt' || a.type === 'webhook'),
       dryRun: true,
       event: automation.event,
-      sample: {
-        tool_name: exactTool ?? 'Bash',
-        tool_input: { command: inferSimulateCommand(automation.conditions) ?? 'echo hi' },
-        prompt: 'test',
-        stop_reason: 'complete',
-        source: 'startup',
-        agent_type: 'session',
-      },
+      sample: { label: exactValue, newMode: exactValue, newState: exactValue, isFlagged: exactValue === 'true' },
     }).then((result) => {
       if (!isCurrentRequest()) return
       const matches = result.matches ?? []

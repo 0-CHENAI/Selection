@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'bun:test'
+import type { AgentEventUsage } from '@craft-agent/core/types'
 import {
+  applyContextOccupancy,
+  applyContextUsageFields,
+  cacheHitRateFromUsage,
   createTurnUsageAccumulator,
   finalizeTurnUsage,
   normalizeModelCallUsage,
@@ -101,5 +105,97 @@ describe('turn usage accounting', () => {
     expect(turn.modelCallCount).toBe(2)
     expect(turn.inputTokens).toBe(100)
     expect(turn.outputTokens).toBe(10)
+  })
+})
+
+describe('context usage fields', () => {
+  it('computes last-call cache hit rate from the request footprint', () => {
+    expect(cacheHitRateFromUsage({
+      inputTokens: 200,
+      cacheReadTokens: 150,
+      contextTokens: 350,
+    })).toBe(150 / 350)
+    expect(cacheHitRateFromUsage({ inputTokens: 0, cacheReadTokens: 0 })).toBeUndefined()
+  })
+
+  it('keeps an earlier breakdown when a later usage event omits it', () => {
+    const tokenUsage = {
+      cacheHitRate: 0.1,
+      contextBreakdown: { systemPrompt: 10, tools: 20, messages: 30 },
+    }
+    applyContextUsageFields(tokenUsage, {
+      inputTokens: 200,
+      outputTokens: 10,
+      cacheReadTokens: 50,
+      contextTokens: 250,
+    })
+    expect(tokenUsage.cacheHitRate).toBe(50 / 250)
+    expect(tokenUsage.contextBreakdown).toEqual({ systemPrompt: 10, tools: 20, messages: 30 })
+  })
+
+  it('does not invent a 0% cache hit when the provider omitted cache fields', () => {
+    const tokenUsage = {
+      cacheHitRate: 0.4,
+      contextBreakdown: { systemPrompt: 10, tools: 20, messages: 30 },
+    }
+    applyContextUsageFields(tokenUsage, {
+      inputTokens: 200,
+      outputTokens: 10,
+    })
+    expect(tokenUsage.cacheHitRate).toBe(0.4)
+    expect(tokenUsage.contextBreakdown).toEqual({ systemPrompt: 10, tools: 20, messages: 30 })
+  })
+
+  it('does not let a zero usage event wipe current context occupancy', () => {
+    const tokenUsage = { inputTokens: 180_774, contextTokens: 180_774 }
+    applyContextOccupancy(tokenUsage, {
+      inputTokens: 0,
+      outputTokens: 0,
+      contextTokens: 0,
+    })
+    expect(tokenUsage.inputTokens).toBe(180_774)
+    applyContextOccupancy(tokenUsage, {
+      inputTokens: 12_000,
+      outputTokens: 20,
+      contextTokens: 190_000,
+    })
+    expect(tokenUsage.inputTokens).toBe(190_000)
+    expect(tokenUsage.contextTokens).toBe(190_000)
+  })
+
+  it('keeps optional composition rows that Selection can measure', () => {
+    const tokenUsage: { contextBreakdown?: AgentEventUsage['contextBreakdown'] } = {}
+    applyContextUsageFields(tokenUsage, {
+      inputTokens: 80,
+      outputTokens: 5,
+      contextBreakdown: {
+        systemPrompt: 10,
+        tools: 20,
+        messages: 30,
+        skills: 8,
+        mcpTools: 4,
+      },
+    })
+    expect(tokenUsage.contextBreakdown).toEqual({
+      systemPrompt: 10,
+      tools: 20,
+      messages: 30,
+      skills: 8,
+      mcpTools: 4,
+    })
+  })
+
+  it('clears a stale breakdown when the next event sends an empty split', () => {
+    const tokenUsage = {
+      cacheHitRate: 0.2,
+      contextBreakdown: { systemPrompt: 10, tools: 20, messages: 30 },
+    }
+    applyContextUsageFields(tokenUsage, {
+      inputTokens: 80,
+      outputTokens: 5,
+      contextBreakdown: { systemPrompt: 0, tools: 0, messages: 0 },
+    })
+    expect(tokenUsage.contextBreakdown).toBeUndefined()
+    expect(tokenUsage.cacheHitRate).toBe(0.2)
   })
 })

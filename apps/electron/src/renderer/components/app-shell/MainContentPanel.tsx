@@ -2,7 +2,7 @@
  * MainContentPanel - Right panel component for displaying content
  *
  * Renders content based on the unified NavigationState:
- * - Chats navigator: ChatPage for selected session, or empty state
+ * - Chats navigator: ChatPage for the selected session, or the same page in draft mode
  * - Sources navigator: SourceInfoPage for selected source, or empty state
  * - Settings navigator: Settings, Preferences, or Shortcuts page
  *
@@ -38,6 +38,7 @@ import { SourceInfoPage, ChatPage } from '@/pages'
 import SkillInfoPage from '@/pages/SkillInfoPage'
 import { getSettingsPageComponent } from '@/pages/settings/settings-pages'
 import { isVisibleSettingsSubpage } from '../../../shared/settings-registry'
+import { useAdvancedSettings } from '@/hooks/useAdvancedSettings'
 import { AutomationInfoPage } from '../automations/AutomationInfoPage'
 import ProjectInfoPage from '@/pages/ProjectInfoPage'
 import { KanbanBoardContainer } from './kanban/KanbanBoardContainer'
@@ -138,6 +139,7 @@ export function MainContentPanel({
   const [sendResourceIds, setSendResourceIds] = useState<string[]>([])
   const [sendResourceLabel, setSendResourceLabel] = useState('')
   const hasOtherWorkspaces = workspaces.length > 1
+  const { dagOrchestrationEnabled } = useAdvancedSettings()
 
   const openSendDialog = useCallback((type: SendResourceType, ids: Set<string>) => {
     const count = ids.size
@@ -311,10 +313,11 @@ export function MainContentPanel({
     )
   }
 
-  // Chats navigator - show chat, multi-select panel, or empty state
+  // Chats navigator - show chat, multi-select panel, or draft composer
   if (isSessionsNavigation(navState)) {
-    // Board route: full-width new-orchestration editor (#261)
-    if (navState.viewMode === 'board') {
+    // Board route: full-width new-orchestration editor (#261).
+    // A disabled advanced switch falls through to the ordinary session view.
+    if (dagOrchestrationEnabled && navState.viewMode === 'board') {
       return wrapWithStoplight(
         <Panel variant="grow" className={className}>
           <KanbanBoardContainer />
@@ -334,19 +337,9 @@ export function MainContentPanel({
       )
     }
 
-    if (navState.details) {
-      return wrapWithStoplight(
-        <Panel variant="grow" className={className}>
-          <ChatPage sessionId={navState.details.sessionId} />
-        </Panel>
-      )
-    }
-    // No session selected - empty state
     return wrapWithStoplight(
       <Panel variant="grow" className={className}>
-        <div className="flex items-center justify-center h-full text-muted-foreground">
-          <p className="text-sm">{t("session.noSessionSelected")}</p>
-        </div>
+        <ChatPage sessionId={navState.details?.sessionId ?? null} />
       </Panel>
     )
   }

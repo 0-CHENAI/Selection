@@ -1,6 +1,6 @@
 {
   "name": "@craft-agent/ui",
-  "version": "2.1.1",
+  "version": "2.2.0",
   "license": "Apache-2.0",
   "description": "Shared React UI components for Selection - session viewer, chat display, markdown rendering",
   "type": "module",
@@ -30,7 +30,8 @@
     "generative-loaders": "^0.1.1",
     "nice-ticks": "^1.0.2",
     "unified": "^11.0.0",
-    "unist-util-visit": "^5.0.0"
+    "unist-util-visit": "^5.0.0",
+    "remark-parse": "^11.0.0"
   },
   "peerDependencies": {
     "@radix-ui/react-context-menu": ">=2.0.0",

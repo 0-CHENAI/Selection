@@ -1,10 +1,31 @@
-export const SEMANTIC_REVEAL_MS = 200
-export const SEMANTIC_REVEAL_MAX_MS = 300
+export const SEMANTIC_REVEAL_MS = 560
+export const SEMANTIC_REVEAL_MAX_MS = 1600
+export const SEMANTIC_REVEAL_EASING = 'cubic-bezier(0.25, 0.1, 0.25, 1)'
+const REVEAL_STAGGER_MS = 60
+const MAX_REVEAL_DELAY_MS = 180
 const MAX_UNITS_PER_FRAME = 32
 
+export function semanticRevealFrames() {
+  return [0, 0.2, 0.4, 0.6, 0.8, 1].map(offset => ({
+    offset,
+    opacity: offset,
+  }))
+}
+
+export function semanticRevealTiming(index = 0, textRun = false) {
+  return {
+    duration: SEMANTIC_REVEAL_MS,
+    delay: Math.min(textRun ? 240 : MAX_REVEAL_DELAY_MS, Math.max(0, index) * (textRun ? 20 : REVEAL_STAGGER_MS)),
+    easing: SEMANTIC_REVEAL_EASING,
+    fill: 'backwards' as FillMode,
+  }
+}
+
 export function getRevealUnits(root: HTMLElement): HTMLElement[] {
-  const selector = 'p,h1,h2,h3,h4,h5,h6,li,blockquote,pre,tr,[data-ca-block-type]'
+  const selector = '[data-stream-chunk],p,h1,h2,h3,h4,h5,h6,li,blockquote,pre,tr,[data-ca-block-type]'
   return Array.from(root.querySelectorAll<HTMLElement>(selector)).filter(element => {
+    if (element.hasAttribute?.('data-stream-chunk')) return true
+    if (element.querySelector?.('[data-stream-chunk]')) return false
     const parent = element.parentElement?.closest(selector)
     return !parent || !root.contains(parent)
   })
@@ -91,7 +112,13 @@ export function createSemanticReveal(root: HTMLElement, animateInitial: boolean)
     enabled = canAnimate
     if (enabled && !completionExpired) mutations?.observe(root, { subtree: true, childList: true, characterData: true })
     const immediate = !enabled || motion.matches || selectionIntersects() || completionExpired || (initial && !animateInitial)
-    if (immediate) flush()
+    if (immediate) {
+      // Completion closes admission, not animations already playing.
+      // User interaction/reduced motion still exposes everything immediately.
+      if (completionExpired && enabled && !motion.matches && !selectionIntersects()) {
+        for (const unit of pending) expose(unit)
+      } else flush()
+    }
     const bounds = viewport?.getBoundingClientRect()
     const top = Math.max(0, bounds?.top ?? 0)
     const bottom = Math.min(window.innerHeight, bounds?.bottom ?? window.innerHeight)
@@ -113,14 +140,16 @@ export function createSemanticReveal(root: HTMLElement, animateInitial: boolean)
         continue
       }
       const rect = unit.getBoundingClientRect()
-      const append = previous && text.startsWith(previous.text) && Math.abs(rect.width - previous.width) < 1
-      const inset = previous && !previous.pending ? (append ? appendedRevealInset(previous.height, rect.height) : 0) : 100
+      // A paragraph fades only on admission. Appending tokens or wrapping
+      // onto another line must not replay an effect over text being read.
+      const inset = previous && !previous.pending ? 0 : 100
       const state = previous ?? { text, height: 0, width: 0, pending: false, clip: unit.style.clipPath }
       state.text = text
       states.set(unit, state)
       measurements.push({ unit, state, height: rect.height, width: rect.width, inset, below: rect.top >= bottom, animate: rect.bottom > top && rect.height > 0 })
     }
-    measurements.forEach(({ unit, state, height, width, inset, below, animate }, index) => {
+    let admitted = 0
+    measurements.forEach(({ unit, state, height, width, inset, below, animate }) => {
       state.height = height
       state.width = width
       if (below && observer && inset === 100) {
@@ -135,23 +164,20 @@ export function createSemanticReveal(root: HTMLElement, animateInitial: boolean)
       if (inset <= 0) return
       expose(unit)
       if (!animate) return
-      const frames = inset < 100
-        ? [{ clipPath: `inset(0 0 ${inset}% 0)` }, { clipPath: 'inset(0 0 0% 0)' }]
-        : height > 132
-          ? [{ clipPath: 'inset(0 0 100% 0)' }, { clipPath: 'inset(0 0 0% 0)' }]
-          : [{ opacity: 0 }, { opacity: 1 }]
-      const animation = unit.animate(frames, {
-        duration: SEMANTIC_REVEAL_MS,
-        delay: inset < 100 ? 0 : Math.min(index * 35, 100),
-        easing: 'ease-out', fill: 'backwards',
-      })
+      const animation = unit.animate(semanticRevealFrames(), semanticRevealTiming(admitted++, unit.hasAttribute?.('data-stream-chunk')))
       active.set(unit, animation)
       animation.onfinish = () => { if (active.get(unit) === animation) active.delete(unit) }
     })
     initial = false
     // The deadline starts once, not again for each delta/IntersectionObserver.
     if (enabled && !streaming && deadline == null) {
-      deadline = setTimeout(() => { completionExpired = true; flush(); mutations?.disconnect() }, SEMANTIC_REVEAL_MAX_MS)
+      deadline = setTimeout(() => {
+        completionExpired = true
+        // A late-entering tail may have just started fading. Only release
+        // offscreen pending content; active animations finish on their own.
+        for (const unit of pending) expose(unit)
+        mutations?.disconnect()
+      }, SEMANTIC_REVEAL_MAX_MS)
     }
     for (const unit of new Set([...pending, ...active.keys()])) {
       if (!root.contains(unit)) expose(unit)

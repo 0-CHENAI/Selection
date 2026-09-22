@@ -18,6 +18,7 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import { EntityListEmptyScreen } from '@/components/ui/entity-list-empty'
 import { EntityRow } from '@/components/ui/entity-row'
 import { EditPopover, getEditConfig } from '@/components/ui/EditPopover'
+import { automationCreationKey } from './creation-context'
 import { SessionSearchHeader } from '@/components/app-shell/SessionSearchHeader'
 import { AutomationMenu } from './AutomationMenu'
 import { BatchAutomationMenu } from './BatchAutomationMenu'
@@ -27,7 +28,7 @@ import { ResourceTransferDialog } from '@/components/resources/ResourceTransferD
 import { useAppShellContext } from '@/context/AppShellContext'
 import { cn } from '@/lib/utils'
 import { automationSelection } from '@/hooks/useEntitySelection'
-import { APP_EVENTS, AGENT_EVENTS, getEventDisplayName, type AutomationListItem, type AutomationListFilter, type TestResult } from './types'
+import { APP_EVENTS, getEventDisplayName, type AutomationListItem, type AutomationListFilter, type TestResult } from './types'
 import { formatShortRelativeTime } from './utils'
 
 const {
@@ -243,7 +244,6 @@ export function AutomationsListPanel({
     if (kind === 'all') return automations
     if (kind === 'scheduled') return automations.filter(a => a.event === 'SchedulerTick')
     if (kind === 'app') return automations.filter(a => (APP_EVENTS as string[]).includes(a.event) && a.event !== 'SchedulerTick')
-    if (kind === 'agent') return automations.filter(a => (AGENT_EVENTS as string[]).includes(a.event))
     return automations
   }, [automations, automationFilter?.kind])
 
@@ -294,13 +294,14 @@ export function AutomationsListPanel({
         >
           {workspaceRootPath && (
             <EditPopover
+              key={`${workspaceRootPath}:${automationCreationKey(automationFilter?.kind)}`}
               align="center"
               trigger={
                 <button className="inline-flex items-center h-7 px-3 text-xs font-medium rounded-[8px] bg-background shadow-minimal hover:bg-foreground/[0.03] transition-colors">
                   {t('automations.addAutomation')}
                 </button>
               }
-              {...getEditConfig('add-automation', workspaceRootPath)}
+              {...getEditConfig(automationCreationKey(automationFilter?.kind), workspaceRootPath)}
             />
           )}
         </EntityListEmptyScreen>

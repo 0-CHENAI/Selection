@@ -8,7 +8,7 @@
 import type { SessionState, StreamingState, TextDeltaEvent, TextCompleteEvent } from '../types'
 import type { Message } from '../../../shared/types'
 import type { TextStreamPhase } from '@craft-agent/core/types'
-import { preferRicherAssistantText } from '@craft-agent/core'
+import { hasRenderableAssistantText, isAnswerDeliveryReceipt, preferRicherAssistantText } from '@craft-agent/core'
 import {
   findStreamingMessage,
   findAssistantMessage,
@@ -37,11 +37,28 @@ function mergeTextStreamPhase(
   return 'unclassified'
 }
 
+function incomingTextPhase(event: TextDeltaEvent): TextStreamPhase {
+  if (event.answerProtocol === 'explicit-v1') return event.phase ?? 'unclassified'
+  if (event.presentationProtocol && event.presentationProtocol !== 'legacy') {
+    return event.phase ?? 'unclassified'
+  }
+  return event.phase === 'intermediate' ? 'intermediate' : 'final'
+}
+
+function isLiveDeltaIntermediate(
+  event: Pick<TextDeltaEvent, 'answerProtocol' | 'presentationProtocol'>,
+  phase: TextStreamPhase,
+): boolean {
+  if (event.answerProtocol === 'explicit-v1') return false
+  if (event.presentationProtocol === 'marker-v1') return phase !== 'final'
+  return phase === 'intermediate'
+}
+
 /**
  * Handle text_delta - accumulate streaming content
  *
- * Intermediate/unknown text creates a work-chain message. Final-answer deltas
- * remain in transient state until text_complete starts the local reveal.
+ * Live tokens stay on the card unless the stream is already commentary
+ * (or marker-v1 unclassified). text_complete finalizes that classification.
  * Uses turnId for lookup, never position.
  */
 export function handleTextDelta(
@@ -58,9 +75,9 @@ export function handleTextDelta(
     return { session, streaming: null }
   }
 
-  // Events from current servers always carry a phase. Treat a missing legacy
-  // phase as final so it cannot flash an unclassified response card.
-  const incomingPhase = event.answerProtocol === 'explicit-v1' ? 'intermediate' : event.phase ?? 'final'
+  // Live tokens stay on the card unless this stream is already commentary
+  // (or marker-v1 unclassified). text_complete reclassifies the finished body.
+  const incomingPhase = incomingTextPhase(event)
   const continuesExistingStream = !!streaming
     && (!event.turnId || !streaming.turnId || streaming.turnId === event.turnId)
   const phase = mergeTextStreamPhase(
@@ -82,13 +99,6 @@ export function handleTextDelta(
         turnId: event.turnId,
       }
 
-  // A final-answer phase is authoritative, but its network deltas stay hidden.
-  // The complete payload is revealed locally in one short, deterministic pass,
-  // preventing the formal response card from flashing during generation.
-  if (phase === 'final') {
-    return { session, streaming: newStreaming }
-  }
-
   // Find existing streaming message by turnId
   const streamingIndex = findStreamingMessage(session.messages, event.turnId)
 
@@ -97,7 +107,14 @@ export function handleTextDelta(
     const currentMsg = session.messages[streamingIndex]
     const updatedSession = updateMessageAt(session, streamingIndex, {
       content: currentMsg.content + event.delta,
-      isIntermediate: true,
+      isIntermediate: isLiveDeltaIntermediate({
+        answerProtocol: event.answerProtocol ?? currentMsg.answerProtocol,
+        presentationProtocol: event.presentationProtocol ?? currentMsg.presentationProtocol,
+      }, phase),
+      phase,
+      presentationProtocol: event.presentationProtocol ?? currentMsg.presentationProtocol,
+      answerProtocol: event.answerProtocol ?? currentMsg.answerProtocol,
+      answerRunId: event.answerRunId ?? currentMsg.answerRunId,
     })
     return { session: updatedSession, streaming: newStreaming }
   }
@@ -113,7 +130,9 @@ export function handleTextDelta(
     timestamp: timestampAfterVisibleUser(session.messages),
     isStreaming: true,
     isPending: true,
-    isIntermediate: true,
+    isIntermediate: isLiveDeltaIntermediate(event, phase),
+    phase,
+    presentationProtocol: event.presentationProtocol,
     turnId: event.turnId,
   }
 
@@ -148,6 +167,7 @@ export function handleTextComplete(
 
   const committed = event.answerRunId && session.messages.find(m => m.answerCommitted && m.answerRunId === event.answerRunId)
   if (committed) return state
+  if (event.answerCommitted && (!hasRenderableAssistantText(event.text) || isAnswerDeliveryReceipt(event.text))) return state
 
   // Find message by turnId (try streaming first, then any assistant)
   let msgIndex = findStreamingMessage(session.messages, event.turnId)
@@ -191,9 +211,11 @@ export function handleTextComplete(
       isPending: false,
       isIntermediate: event.isIntermediate,
       phase: event.phase,
+      presentationProtocol: event.presentationProtocol,
       answerProtocol: event.answerProtocol,
       answerRunId: event.answerRunId,
       answerCommitted: event.answerCommitted,
+      completedRevealStartTime: session.isProcessing && !event.isIntermediate ? Date.now() : undefined,
       turnId: event.turnId,
       parentToolUseId: event.parentToolUseId,
       timestamp: nextTimestamp,
@@ -213,9 +235,11 @@ export function handleTextComplete(
     isPending: false,
     isIntermediate: event.isIntermediate,
     phase: event.phase,
+    presentationProtocol: event.presentationProtocol,
     answerProtocol: event.answerProtocol,
     answerRunId: event.answerRunId,
     answerCommitted: event.answerCommitted,
+    completedRevealStartTime: session.isProcessing && !event.isIntermediate ? Date.now() : undefined,
     turnId: event.turnId,
     parentToolUseId: event.parentToolUseId,
   }

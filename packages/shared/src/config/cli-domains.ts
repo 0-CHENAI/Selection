@@ -54,7 +54,7 @@ const POLICIES: Record<CliDomainNamespace, CliDomainPolicy> = {
     readActions: ['list', 'get', 'validate', 'history', 'last-executed', 'test', 'lint'],
     quickExamples: [
       'craft-agent automation list',
-      'craft-agent automation create --event UserPromptSubmit --prompt "Summarize this prompt"',
+      'craft-agent automation create --event SessionStatusChange --prompt "Summarize the status change"',
       'craft-agent automation update <id> --json "{\"enabled\":false}"',
       'craft-agent automation history <id> --limit 20',
       'craft-agent automation validate',

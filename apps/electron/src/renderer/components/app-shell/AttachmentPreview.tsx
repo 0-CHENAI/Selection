@@ -114,7 +114,7 @@ function AttachmentBubble({ attachment, onRemove, disabled }: AttachmentBubblePr
                 className="h-full w-full object-cover object-top"
               />
             ) : (
-              <FileTypeIcon type={attachment.type} mimeType={attachment.mimeType} className="h-5 w-5" />
+              <FileTypeIcon type={attachment.type} mimeType={attachment.mimeType} fileName={attachment.name} className="h-5 w-5" />
             )}
           </div>
           {/* 2-line filename + type */}

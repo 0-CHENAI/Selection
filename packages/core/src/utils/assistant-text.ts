@@ -5,6 +5,14 @@
  * streamed body, and a pipe-only stub must not render as a finished card.
  */
 
+/** Success payload returned by submit_answer — not publishable markdown. */
+export function isAnswerDeliveryReceipt(text: string | undefined | null): boolean {
+  const compact = (text ?? '').replace(/\s+/g, '').toLowerCase()
+  return compact === 'answerdelivered.'
+    || compact === 'answerdelivered.stophere.'
+    || compact === 'answerdelivered.stophere'
+}
+
 export function hasRenderableAssistantText(text: string | undefined | null): text is string {
   if (!text) return false
   const trimmed = text.trim()

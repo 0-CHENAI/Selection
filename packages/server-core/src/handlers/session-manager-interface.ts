@@ -76,6 +76,8 @@ export interface ISessionManager {
   // Session configuration
   // ---------------------------------------------------------------------------
 
+  setProgressSupervision?(sessionId: string, enabled: boolean): void
+  continueProgress?(sessionId: string): Promise<void>
   setSessionPermissionMode(sessionId: string, mode: PermissionMode): void
   setSessionThinkingLevel(sessionId: string, level: ThinkingLevel): void
   updateWorkingDirectory(sessionId: string, path: string): void
@@ -317,18 +319,8 @@ export interface ExecutePromptAutomationInput {
    * still streams live and run errors are logged. Defaults to awaiting completion.
    */
   waitForCompletion?: boolean
-  reportBack?: boolean
-  timeoutMs?: number
-  sourceEvent?: string
-  sourceSessionId?: string
-  rootSessionId?: string
-  automationDepth?: number
 }
 
 export interface ExecutePromptAutomationResult {
   sessionId: string
-  waitReason?: 'complete' | 'interrupted' | 'error' | 'timeout'
-  finalText?: string
-  durationMs?: number
-  reportBackError?: string
 }

@@ -1,5 +1,19 @@
 # HTML Preview Guide
 
+## Quick start
+
+This is assistant reply syntax, not a tool call. First create or verify the file; use its actual absolute path. A preview displays content to the user and does not inspect it for you.
+
+````
+```html-preview
+{"src":"/absolute/path/to/file.html","title":"Result"}
+```
+````
+
+For tabs, replace `src` with `"items":[{"src":"/absolute/path/to/first.html","label":"First"},{"src":"/absolute/path/to/second.html","label":"Second"}]`. Each path must exist. Use permission-allowed locations; Explore writes are restricted to the session's plans/data folders.
+
+Read the sections below only for additional options or troubleshooting.
+
 This guide covers how to render rich HTML content inline using `html-preview` code blocks, and how to use `transform_data` to prepare HTML files from various sources.
 
 ## Overview

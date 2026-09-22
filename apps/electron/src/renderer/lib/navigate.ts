@@ -31,8 +31,28 @@ export interface NavigateOptions {
    * can reuse the same API without introducing per-feature navigation flags.
    */
   targetLaneId?: 'main'
-  /** Skip auto-selecting first item when navigating to a list view (used when closing panels) */
+  /**
+   * Skip auto-selecting the last/first item when navigating to a list view.
+   * Required for draft composers and empty project views; otherwise
+   * `allSessions` immediately resolves back to an existing session.
+   */
   skipAutoSelect?: boolean
+}
+
+export type NavigateEventDetail = { route: Route } & NavigateOptions
+
+/** Keep event-bridge options aligned with `navigate()` callers. */
+export function navigateOptionsFromEventDetail(detail: NavigateEventDetail): NavigateOptions {
+  const { route: _route, ...options } = detail
+  return options
+}
+
+/** Open the local draft composer. The first send creates the session. */
+export function draftSessionNavigateOptions(newPanel = false): NavigateOptions {
+  return {
+    skipAutoSelect: true,
+    ...(newPanel ? { newPanel: true, targetLaneId: 'main' as const } : {}),
+  }
 }
 
 /**

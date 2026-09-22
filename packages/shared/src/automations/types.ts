@@ -21,35 +21,14 @@ export type AppEvent =
   | 'SessionStatusChange'
   | 'SchedulerTick';
 
-/** Agent events produced by the Pi runtime and executed by AutomationSystem */
-export type AgentEvent =
-  | 'PreToolUse'
-  | 'PostToolUse'
-  | 'PostToolUseFailure'
-  | 'UserPromptSubmit'
-  | 'SessionStart'
-  | 'SessionEnd'
-  | 'Stop'
-  | 'SubagentStart'
-  | 'SubagentStop'
-  | 'PreCompact'
-  | 'PermissionRequest'
-  | 'Setup';
-
-export type AutomationEvent = AppEvent | AgentEvent;
+export type AutomationEvent = AppEvent;
 
 export const APP_EVENTS: AppEvent[] = [
   'LabelAdd', 'LabelRemove', 'LabelConfigChange',
   'PermissionModeChange', 'FlagChange', 'SessionStatusChange', 'SchedulerTick'
 ];
 
-export const AGENT_EVENTS: AgentEvent[] = [
-  'PreToolUse', 'PostToolUse', 'PostToolUseFailure',
-  'UserPromptSubmit', 'SessionStart', 'SessionEnd', 'Stop',
-  'SubagentStart', 'SubagentStop', 'PreCompact', 'PermissionRequest', 'Setup'
-];
-
-/** Execution-history status for App and Agent actions */
+/** Execution-history status for automation actions */
 export type AutomationHistoryStatus =
   | 'matched'
   | 'scheduled'
@@ -77,21 +56,6 @@ export interface PromptAction {
    * When omitted, falls back to the workspace default (then DEFAULT_THINKING_LEVEL).
    */
   thinkingLevel?: ThinkingLevel;
-  /**
-   * When true, wait until the spawned session completes (via onSessionComplete).
-   * Defaults to false (fire-and-forget for Agent Events).
-   */
-  waitForCompletion?: boolean;
-  /**
-   * When true, write the spawned session's result back to the source session.
-   * Implies waitForCompletion.
-   */
-  reportBack?: boolean;
-  /**
-   * Wait timeout in milliseconds when waitForCompletion or reportBack is set.
-   * Default 5 minutes; maximum 30 minutes.
-   */
-  timeoutMs?: number;
 }
 
 /** HTTP method for webhook actions */
@@ -124,28 +88,7 @@ export interface WebhookAction {
   auth?: WebhookAuth;
 }
 
-/**
- * Synchronous PreToolUse decision. Tighten-only: can block or modify a tool
- * after the built-in permission pipeline has already allowed/modified it.
- * `allow` is intentionally omitted — not intercepting already means allow.
- */
-export interface DecisionAction {
-  type: 'decision';
-  decision: 'block' | 'modify';
-  reason?: string;
-  updatedInput?: Record<string, unknown>;
-}
-
-export type AutomationAction = PromptAction | WebhookAction | DecisionAction;
-
-/** Result of a synchronous PreToolUse automation decision. */
-export interface ToolDecisionResult {
-  decision: 'block' | 'modify';
-  reason?: string;
-  updatedInput?: Record<string, unknown>;
-  matcherId: string;
-  automationName?: string;
-}
+export type AutomationAction = PromptAction | WebhookAction;
 
 // ============================================================================
 // Condition Types
@@ -213,11 +156,6 @@ export interface AutomationMatcher {
   enabled?: boolean;
   /** Optional conditions that must all pass (AND) after matcher matches, before actions fire */
   conditions?: AutomationCondition[];
-  /**
-   * Per-matcher automation depth cap (1–5). Defaults to MAX_AUTOMATION_DEPTH (3).
-   * An event at `depth >= maxDepth` is suppressed.
-   */
-  maxDepth?: number;
   actions: AutomationAction[];
 }
 
@@ -295,18 +233,6 @@ export interface PendingPrompt {
   model?: string;
   /** Thinking level for the created session (falls back to workspace default when omitted) */
   thinkingLevel?: ThinkingLevel;
-  /** When false, SessionManager returns after dispatching the prompt (Agent Events). */
-  waitForCompletion?: boolean;
-  /** When true, write the spawned session's result back to the source session. */
-  reportBack?: boolean;
-  /** Wait timeout in milliseconds when waitForCompletion or reportBack is set. */
-  timeoutMs?: number;
-  /** Agent Event that produced this prompt, when applicable */
-  sourceEvent?: AgentEvent;
-  sourceSessionId?: string;
-  /** Root session of the automation chain (for chain-level spawn caps). */
-  rootSessionId?: string;
-  automationDepth?: number;
 }
 
 export interface AutomationResult {
@@ -327,66 +253,6 @@ export type AutomationsValidationResult = {
   errors: string[];
   config: AutomationsConfig | null;
 };
-
-// ============================================================================
-// SDK Types
-// ============================================================================
-
-/**
- * SDK automation input type - union of all possible SDK event inputs
- */
-export interface SdkAutomationInput {
-  hook_event_name: string;
-  // Envelope
-  event_id?: string;
-  workspace_id?: string;
-  source_session_id?: string;
-  source_session_name?: string;
-  /** Root session of the automation chain (depth-0 source). */
-  source_root_session_id?: string;
-  source_backend?: 'pi';
-  automation_depth?: number;
-  triggered_by_automation?: boolean;
-  // Tool events
-  tool_name?: string;
-  tool_input?: Record<string, unknown>;
-  tool_response?: string;
-  tool_use_id?: string;
-  // Session events
-  source?: string;  // startup, resume, clear, compact
-  model?: string;
-  // Subagent events
-  agent_id?: string;
-  agent_type?: string;
-  // User prompt events
-  prompt?: string;
-  // Compact / stop / permission extras
-  message?: string;
-  title?: string;
-  compact_trigger?: 'manual' | 'auto';
-  stop_reason?: 'complete' | 'abort' | 'error';
-  // Error events
-  error?: string;
-}
-
-/**
- * SDK automation callback signature (matches Claude SDK HookCallback type)
- */
-export type SdkAutomationCallback = (
-  input: SdkAutomationInput,
-  toolUseId: string,
-  options: { signal?: AbortSignal }
-) => Promise<{ continue: boolean; reason?: string }>;
-
-/**
- * SDK automation matcher format (matches Claude SDK HookCallbackMatcher type)
- * Note: The `hooks` field name is kept as-is to match the Claude SDK interface.
- */
-export interface SdkAutomationCallbackMatcher {
-  matcher?: string;
-  timeout?: number;
-  hooks: SdkAutomationCallback[];
-}
 
 // ============================================================================
 // Session Metadata

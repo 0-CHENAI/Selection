@@ -29,31 +29,11 @@ export type AppEvent =
   | 'SessionStatusChange'
   | 'SchedulerTick'
 
-export type AgentEvent =
-  | 'PreToolUse'
-  | 'PostToolUse'
-  | 'PostToolUseFailure'
-  | 'UserPromptSubmit'
-  | 'SessionStart'
-  | 'SessionEnd'
-  | 'Stop'
-  | 'SubagentStart'
-  | 'SubagentStop'
-  | 'PreCompact'
-  | 'PermissionRequest'
-  | 'Setup'
-
-export type AutomationTrigger = AppEvent | AgentEvent
+export type AutomationTrigger = AppEvent
 
 export const APP_EVENTS: AppEvent[] = [
   'LabelAdd', 'LabelRemove', 'LabelConfigChange',
   'PermissionModeChange', 'FlagChange', 'TodoStateChange', 'SessionStatusChange', 'SchedulerTick'
-]
-
-export const AGENT_EVENTS: AgentEvent[] = [
-  'PreToolUse', 'PostToolUse', 'PostToolUseFailure',
-  'UserPromptSubmit', 'SessionStart', 'SessionEnd', 'Stop',
-  'SubagentStart', 'SubagentStop', 'PreCompact', 'PermissionRequest', 'Setup'
 ]
 
 export interface PromptAction {
@@ -65,16 +45,6 @@ export interface PromptAction {
   model?: string
   /** Thinking level override for the spawned session */
   thinkingLevel?: ThinkingLevel
-  waitForCompletion?: boolean
-  reportBack?: boolean
-  timeoutMs?: number
-}
-
-export interface DecisionAction {
-  type: 'decision'
-  decision: 'block' | 'modify'
-  reason?: string
-  updatedInput?: Record<string, unknown>
 }
 
 export interface WebhookAction {
@@ -88,7 +58,7 @@ export interface WebhookAction {
   auth?: { type: 'basic'; username: string; password: string } | { type: 'bearer'; token: string }
 }
 
-export type AutomationAction = PromptAction | WebhookAction | DecisionAction
+export type AutomationAction = PromptAction | WebhookAction
 
 // ============================================================================
 // Conditions (mirrored from packages/shared/src/automations/types.ts)
@@ -240,7 +210,7 @@ export interface AutomationListItem {
 // Filter
 // ============================================================================
 
-export type AutomationFilterKind = 'all' | 'app' | 'agent' | 'scheduled'
+export type AutomationFilterKind = 'all' | 'app' | 'scheduled'
 
 export interface AutomationListFilter {
   kind: AutomationFilterKind
@@ -250,7 +220,6 @@ export interface AutomationListFilter {
 export const AUTOMATION_TYPE_TO_FILTER_KIND: Record<string, AutomationFilterKind> = {
   scheduled: 'scheduled',
   event: 'app',
-  agentic: 'agent',
 }
 
 // ============================================================================
@@ -326,19 +295,6 @@ export const EVENT_DISPLAY_NAMES: Record<AutomationTrigger, string> = {
   SessionStatusChange:  'Status Changed',
   SchedulerTick:        'Scheduled',
 
-  // Agent events
-  PreToolUse:           'Before Tool Runs',
-  PostToolUse:          'After Tool Runs',
-  PostToolUseFailure:   'When Tool Fails',
-  UserPromptSubmit:     'Message Sent',
-  SessionStart:         'Session Started',
-  SessionEnd:           'Session Ended',
-  Stop:                 'Agent Stopped',
-  SubagentStart:        'Sub-agent Started',
-  SubagentStop:         'Sub-agent Stopped',
-  PreCompact:           'Before Memory Cleanup',
-  PermissionRequest:    'Permission Requested',
-  Setup:                'Initial Setup',
 }
 
 export function getEventDisplayName(event: AutomationTrigger): string {
@@ -367,9 +323,6 @@ export type EventCategory =
   | 'permission'
   | 'flag'
   | 'todo'
-  | 'agent-pre'
-  | 'agent-post'
-  | 'agent-error'
   | 'session'
   | 'other'
 
@@ -384,9 +337,8 @@ interface AutomationsConfigFile {
 }
 
 type RawAction =
-  | { type: 'prompt'; prompt: string; llmConnection?: string; model?: string; thinkingLevel?: ThinkingLevel; waitForCompletion?: boolean; reportBack?: boolean; timeoutMs?: number }
+  | { type: 'prompt'; prompt: string; llmConnection?: string; model?: string; thinkingLevel?: ThinkingLevel; }
   | { type: 'webhook'; url: string; method?: string; headers?: Record<string, string>; bodyFormat?: 'json' | 'form' | 'raw'; body?: unknown; captureResponse?: boolean; auth?: WebhookAction['auth'] }
-  | { type: 'decision'; decision: 'block' | 'modify'; reason?: string; updatedInput?: Record<string, unknown> }
 
 interface AutomationsConfigMatcher {
   id?: string
@@ -413,9 +365,6 @@ function deriveAutomationName(event: string, matcher: AutomationsConfigMatcher):
     return label.length > 40 ? label.slice(0, 40) + '...' : label
   }
 
-  if (firstAction.type === 'decision') {
-    return firstAction.decision === 'block' ? 'Block tool' : 'Modify tool input'
-  }
 
   if (firstAction.type !== 'prompt') return getEventDisplayName(event as AutomationTrigger)
 
@@ -462,13 +411,13 @@ export function parseAutomationsConfig(json: unknown): AutomationListItem[] {
   const eventMap = config.automations
   if (!eventMap || typeof eventMap !== 'object') return []
 
-  const allEvents = [...APP_EVENTS, ...AGENT_EVENTS] as string[]
+  const allEvents = APP_EVENTS as string[]
   const items: AutomationListItem[] = []
   let index = 0
 
   for (const [eventName, matchers] of Object.entries(eventMap)) {
-    if (!Array.isArray(matchers)) continue
-    const event = (allEvents.includes(eventName) ? eventName : eventName) as AutomationTrigger
+    if (!Array.isArray(matchers) || !allEvents.includes(eventName)) continue
+    const event = eventName as AutomationTrigger
 
     for (let matcherIdx = 0; matcherIdx < matchers.length; matcherIdx++) {
       const matcher = matchers[matcherIdx]
@@ -476,7 +425,7 @@ export function parseAutomationsConfig(json: unknown): AutomationListItem[] {
       if (!rawActions || !Array.isArray(rawActions) || rawActions.length === 0) continue
 
       const actions: AutomationAction[] = rawActions
-        .filter((a): a is AutomationAction => a.type === 'prompt' || a.type === 'webhook' || a.type === 'decision')
+        .filter((a): a is AutomationAction => a.type === 'prompt' || a.type === 'webhook')
       if (actions.length === 0) continue
 
       items.push({
@@ -510,28 +459,12 @@ export function getEventCategory(event: AutomationTrigger): EventCategory {
     case 'LabelConfigChange':
       return 'label'
     case 'PermissionModeChange':
-    case 'PermissionRequest':
       return 'permission'
     case 'FlagChange':
       return 'flag'
     case 'TodoStateChange':
     case 'SessionStatusChange':
       return 'todo'
-    case 'PreToolUse':
-    case 'UserPromptSubmit':
-    case 'Setup':
-    case 'PreCompact':
-    case 'SubagentStart':
-      return 'agent-pre'
-    case 'PostToolUse':
-    case 'SessionEnd':
-    case 'SubagentStop':
-    case 'Stop':
-      return 'agent-post'
-    case 'PostToolUseFailure':
-      return 'agent-error'
-    case 'SessionStart':
-      return 'session'
     default:
       return 'other'
   }

@@ -105,7 +105,7 @@ describe('buildCustomEndpointModelDef', () => {
 
   it('omits the OpenAI-specific store parameter for compatible custom endpoints', () => {
     const model = buildCustomEndpointModelDef('strict-gateway', undefined, undefined, 'openai-completions')
-    expect(model.compat).toEqual({ supportsStore: false })
+    expect(model.compat).toEqual({ supportsStore: false, supportsDeveloperRole: false })
   })
 
   it('does not attach OpenAI compatibility flags to Anthropic endpoints', () => {
