@@ -61,6 +61,15 @@ describe('delegate command', () => {
     })
   })
 
+  it('rejects delegation while the app-level Swarm switch is off', () => {
+    expect(assessDelegateCommandSubmission('/delegate inspect both modules', false, false)).toEqual({
+      allowed: false,
+      kind: 'delegate',
+      message: 'inspect both modules',
+      reason: 'swarm-disabled',
+    })
+  })
+
   it('fails closed for an empty delegated task before submission', () => {
     expect(assessDelegateCommandSubmission('/delegate ', false)).toEqual({
       allowed: false,

@@ -33,7 +33,9 @@ export type CredentialType =
   | 'source_apikey'      // API keys
   | 'source_basic'       // Basic auth (base64 encoded user:pass)
   // Messaging gateway credentials (keyed by workspaceId + platform)
-  | 'messaging_bearer';  // Messaging platform credentials
+  | 'messaging_bearer'   // Messaging platform credentials
+  // App-level search provider credentials
+  | 'anysearch_api_key'; // AnySearch API key for built-in web search
 
 /** Valid credential types for validation */
 const VALID_CREDENTIAL_TYPES: readonly CredentialType[] = [
@@ -49,6 +51,7 @@ const VALID_CREDENTIAL_TYPES: readonly CredentialType[] = [
   'source_apikey',
   'source_basic',
   'messaging_bearer',
+  'anysearch_api_key',
 ] as const;
 
 /** Check if a string is a valid CredentialType */

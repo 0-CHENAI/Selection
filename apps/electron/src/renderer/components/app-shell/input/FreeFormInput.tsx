@@ -82,6 +82,7 @@ import { shouldHandleScopedInputEvent, shouldRecallPromptOnArrowUp } from './inp
 import { clearPendingFocusForSession, consumePendingFocusForSession } from './focus-input-events'
 import { keepComposerFocusOnPickerClose, restoreComposerFocus } from './restore-composer-focus'
 import { assessDelegateCommandSubmission, buildDelegateCommandDraft } from './delegate-command'
+import { useAdvancedSettings } from '@/hooks/useAdvancedSettings'
 import {
   getRecentWorkingDirs,
   addRecentWorkingDir,
@@ -658,27 +659,10 @@ export function FreeFormInput({
   )
   const showModelSearch = shouldShowPickerSearch(availableModels.length, modelSearchQuery)
 
-  // Input settings (loaded from config)
-  const [sendMessageKey, setSendMessageKey] = React.useState<'enter' | 'cmd-enter'>('enter')
-  const [spellCheck, setSpellCheck] = React.useState(false)
-
-  // Load input settings on mount
-  React.useEffect(() => {
-    const loadInputSettings = async () => {
-      if (!window.electronAPI) return
-      try {
-        const [sendKey, spellCheckEnabled] = await Promise.all([
-          window.electronAPI.getSendMessageKey(),
-          window.electronAPI.getSpellCheck(),
-        ])
-        setSendMessageKey(sendKey ?? 'enter')
-        setSpellCheck(spellCheckEnabled)
-      } catch (error) {
-        console.error('Failed to load input settings:', error)
-      }
-    }
-    loadInputSettings()
-  }, [])
+  // Input settings. The removed Input page leaves Enter-to-send and spell check off.
+  const [sendMessageKey] = React.useState<'enter' | 'cmd-enter'>('enter')
+  const [spellCheck] = React.useState(false)
+  const { swarmAgentsEnabled } = useAdvancedSettings()
 
   // Double-Esc interrupt: show warning overlay on first Esc, interrupt on second
   const { showEscapeOverlay } = useEscapeInterrupt()
@@ -1072,6 +1056,7 @@ export function FreeFormInput({
     skills,
     // Use workspace slug (not UUID) for SDK skill qualification
     workspaceId: workspaceSlug,
+    swarmAgentsEnabled,
   })
 
   // Handle mention selection (files only)
@@ -1365,11 +1350,13 @@ export function FreeFormInput({
 
     // `/delegate` is an explicit authorization envelope, not a task by itself.
     // Keep the draft intact until the user adds a non-empty task.
-    const delegateSubmission = assessDelegateCommandSubmission(input, isProcessing)
+    const delegateSubmission = assessDelegateCommandSubmission(input, isProcessing, swarmAgentsEnabled)
     if (!delegateSubmission.allowed) {
       toast.warning(delegateSubmission.reason === 'empty-task'
         ? t('chat.delegateTaskRequired', 'Add a task after /delegate')
-        : t('chat.delegateWaitForIdle', 'Finish or stop the current response before delegating'))
+        : delegateSubmission.reason === 'swarm-disabled'
+          ? t('chat.delegateDisabled', 'Turn on Swarm agents in Advanced settings before delegating')
+          : t('chat.delegateWaitForIdle', 'Finish or stop the current response before delegating'))
       return false
     }
 

@@ -3098,7 +3098,12 @@ export class SessionManager implements ISessionManager {
     if (options?.parentSessionId && options.swarmEnabled === true && !parentForInheritance?.swarmEnabled) {
       throw new Error('Cannot enable Swarm for a child whose parent has Swarm disabled')
     }
-    const resolvedSwarmEnabled = resolveInheritedSwarmEnabled({
+    const { getSwarmAgentsEnabled } = await import('@craft-agent/shared/config/storage')
+    const swarmAgentsEnabled = getSwarmAgentsEnabled()
+    if (options?.swarmEnabled === true && !swarmAgentsEnabled) {
+      throw new Error('Swarm agents are disabled in Advanced settings')
+    }
+    const resolvedSwarmEnabled = !swarmAgentsEnabled ? false : resolveInheritedSwarmEnabled({
       requested: options?.swarmEnabled,
       parent: parentForInheritance?.swarmEnabled,
       branchSource: branchSourceForSwarm?.swarmEnabled,
@@ -9745,6 +9750,10 @@ export class SessionManager implements ISessionManager {
     request: SpawnSessionRequest,
   ): Promise<SpawnSessionResult> {
     sessionLog.info(`Spawn session request from session ${managed.id}:`, request.name || '(unnamed)')
+    const { getSwarmAgentsEnabled } = await import('@craft-agent/shared/config/storage')
+    if (!getSwarmAgentsEnabled()) {
+      throw new Error('Swarm agents are disabled in Advanced settings')
+    }
     const requestedSpawnReason = request.spawnReason ?? 'automatic'
     if (requestedSpawnReason === 'automatic' && !managed.swarmEnabled) {
       throw new Error('Automatic spawn_session is disabled for this session; enable Swarm or use the current session')
@@ -10265,6 +10274,10 @@ export class SessionManager implements ISessionManager {
       orchestratorSessionId = this.findTaskOrchestratorSessionId(workspaceId, slug)
     }
 
+    const { getDagOrchestrationEnabled } = await import('@craft-agent/shared/config/storage')
+    if (!getDagOrchestrationEnabled()) {
+      throw new Error('DAG orchestration is disabled in Advanced settings')
+    }
     const snapshot = runner.run(slug, {
       orchestratorSessionId,
       params: input.params,
@@ -10624,6 +10637,12 @@ export class SessionManager implements ISessionManager {
   async updateSessionSwarmEnabled(sessionId: string, enabled: boolean): Promise<void> {
     const managed = this.sessions.get(sessionId)
     if (!managed) throw new Error(`Session ${sessionId} not found`)
+    if (enabled) {
+      const { getSwarmAgentsEnabled } = await import('@craft-agent/shared/config/storage')
+      if (!getSwarmAgentsEnabled()) {
+        throw new Error('Swarm agents are disabled in Advanced settings')
+      }
+    }
     if (enabled && managed.parentSessionId) {
       const parent = this.sessions.get(managed.parentSessionId)
       if (!parent?.swarmEnabled) {

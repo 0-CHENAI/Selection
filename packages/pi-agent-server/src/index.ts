@@ -97,7 +97,7 @@ import { PI_TOOL_NAME_MAP, THINKING_TO_PI } from '../../shared/src/agent/backend
 import { resolveSessionToolProxyName } from '../../shared/src/agent/backend/pi/session-tool-defs.ts';
 import { getDefaultSummarizationModel } from '../../shared/src/config/models.ts';
 import { createWebFetchTool } from './tools/web-fetch.ts';
-import { resolveSearchProvider } from './tools/search/resolve-provider.ts';
+import { requestAnySearchApiKey, resolveSearchProvider } from './tools/search/resolve-provider.ts';
 import { createSearchTool } from './tools/search/create-search-tool.ts';
 import { allowCraftMetadataProperties, stripCraftMetadata } from './craft-metadata-schema.ts';
 import { createRecoveringArgumentPreparer } from './tool-argument-recovery.ts';
@@ -214,6 +214,7 @@ type InboundMessage =
   | RuntimeConfigUpdateMessage
   | { type: 'steer'; message: string }
   | { type: 'token_update'; piAuth: { provider: string; credential: PiCredential } }
+  | { type: 'anysearch_api_key_result'; id: string; apiKey: string }
   | { type: 'shutdown' };
 
 /** Proxy tool definition from main process */
@@ -300,6 +301,7 @@ interface OutboundRuntimeConfigUpdateResult {
   errorMessage?: string;
 }
 interface OutboundSessionIdUpdate { type: 'session_id_update'; sessionId: string }
+interface OutboundAnySearchApiKeyRequest { type: 'anysearch_api_key_request'; id: string }
 interface OutboundError { type: 'error'; message: string; code?: string }
 
 type OutboundMessage =
@@ -317,6 +319,7 @@ type OutboundMessage =
   | OutboundCompactResult
   | OutboundSetAutoCompactionResult
   | OutboundRuntimeConfigUpdateResult
+  | OutboundAnySearchApiKeyRequest
   | OutboundSessionIdUpdate
   | OutboundError;
 
@@ -334,6 +337,7 @@ type AuthenticatedRuntime = {
 };
 let moduleRuntimePromise: Promise<AuthenticatedRuntime> | null = null;
 let runtimeConfigGeneration = 0;
+const pendingAnySearchApiKeys = new Map<string, (apiKey: string) => void>();
 let unsubscribeEvents: (() => void) | null = null;
 
 // Init config (set on 'init' message)
@@ -727,8 +731,11 @@ async function ensureSession(): Promise<AgentSession> {
   // Built-in web search uses AnySearch independently from the active LLM
   // connection. This keeps custom OpenAI-compatible credentials scoped to
   // their configured model endpoint instead of forwarding them to a search
-  // provider. ANYSEARCH_API_KEY is optional and read by the provider itself.
-  const searchTool = createSearchTool(resolveSearchProvider());
+  // provider. The optional key comes from the current init payload, then the
+  // process environment. An empty configured value stays anonymous.
+  const searchTool = createSearchTool(resolveSearchProvider(() =>
+    requestAnySearchApiKey(send, pendingAnySearchApiKeys),
+  ));
   const webFetchTool = createWebFetchTool(() =>
     initConfig ? getSessionPath(initConfig.workspaceRootPath, initConfig.sessionId) : null
   );
@@ -2168,6 +2175,13 @@ async function processMessage(msg: InboundMessage): Promise<void> {
     case 'update_runtime_config':
       await handleUpdateRuntimeConfig(msg);
       break;
+
+    case 'anysearch_api_key_result': {
+      const resolve = pendingAnySearchApiKeys.get(msg.id);
+      pendingAnySearchApiKeys.delete(msg.id);
+      resolve?.(typeof msg.apiKey === 'string' ? msg.apiKey : '');
+      break;
+    }
 
     case 'steer':
       if (piSession) {

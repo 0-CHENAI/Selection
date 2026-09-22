@@ -20,7 +20,7 @@ describe('draft chat composer width', () => {
     expect(chatDisplay).toContain('CHAT_CLASSES.recordRailContent')
     expect(chatDisplay).toContain('<ChatInputZone')
     expect(chatPage).toContain('onPermissionModeChange={setPermissionMode}')
-    expect(chatPage).toContain('onSwarmEnabledChange={handleSwarmEnabledChange}')
+    expect(chatPage).toContain('onSwarmEnabledChange={swarmAgentsEnabled ? handleSwarmEnabledChange : undefined}')
     expect(chatPage).toContain('onWorkingDirectoryChange={handleWorkingDirectoryChange}')
     expect(chatPage).toContain('onSourcesChange={handleSourcesChange}')
     expect(chatPage).not.toContain('max-w-[960px]')

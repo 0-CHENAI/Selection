@@ -1,5 +1,6 @@
 import { recoverMissingSession } from '@/lib/recover-missing-session'
 import { confirmAction } from '@/lib/confirmation'
+import { useAdvancedSettings } from '@/hooks/useAdvancedSettings'
 import * as React from "react"
 import { useTranslation, Trans } from "react-i18next"
 import { useRef, useState, useEffect, useCallback, useMemo } from "react"
@@ -309,7 +310,8 @@ function AppShellContent({
 
   // Board view replaces the session-list navigator with the full-width Kanban panel,
   // so the navigator (and its resize handle) collapse to zero width while it's active.
-  const isBoardView = isSessionsNavigation(navState) && navState.viewMode === 'board'
+  const { dagOrchestrationEnabled } = useAdvancedSettings()
+  const isBoardView = dagOrchestrationEnabled && isSessionsNavigation(navState) && navState.viewMode === 'board'
   const setKanbanEditorTarget = useSetAtom(kanbanEditorTargetAtom)
   const kanbanEditorDirty = useAtomValue(kanbanEditorDirtyAtom)
 
@@ -417,6 +419,12 @@ function AppShellContent({
     navigate(routes.view.allSessions())
     return true
   }, [kanbanEditorDirty, setKanbanEditorTarget, t])
+
+  useEffect(() => {
+    if (!dagOrchestrationEnabled && isSessionsNavigation(navState) && navState.viewMode === 'board') {
+      void leaveOrchestrationView()
+    }
+  }, [dagOrchestrationEnabled, navState, leaveOrchestrationView])
 
   const openSessionSearch = React.useCallback(async () => {
     if (isBoardView && !(await leaveOrchestrationView())) return
@@ -1840,7 +1848,7 @@ function AppShellContent({
           canGoForward={canGoForward}
           onToggleSidebar={handleToggleSidebar}
           onToggleFocusMode={() => setIsSidebarAndNavigatorHidden(prev => !prev)}
-          afterWorkspace={isSessionsNavigation(navState) ? (
+          afterWorkspace={dagOrchestrationEnabled && isSessionsNavigation(navState) ? (
             <div className="flex items-center gap-1.5">
               <BoardListToggle
                 value={isBoardView ? 'board' : 'list'}

@@ -83,6 +83,10 @@ export interface StoredConfig {
   // Tools
   browserToolEnabled?: boolean;  // Enable built-in browser tool (default: true). Disable for Playwright/Puppeteer.
   allowRemoteEvaluate?: boolean;  // Allow remote agents to call `browser_tool evaluate` on local browser (default: true).
+  // Advanced capabilities. Absent means off, including for configs written
+  // before these settings existed.
+  dagOrchestrationEnabled?: boolean;
+  swarmAgentsEnabled?: boolean;
   // Network proxy
   networkProxy?: import('./types.ts').NetworkProxySettings;
   // Windows: path to Git Bash (bash.exe) for the SDK subprocess
@@ -124,6 +128,8 @@ const FALLBACK_CONFIG_DEFAULTS: ConfigDefaults = {
     richToolDescriptions: true,
     browserToolEnabled: true,
     allowRemoteEvaluate: true,
+    dagOrchestrationEnabled: false,
+    swarmAgentsEnabled: false,
   },
   workspaceDefaults: {
     thinkingLevel: 'medium',
@@ -473,6 +479,36 @@ export function setBrowserToolEnabled(enabled: boolean): void {
   // Clear session tool caches so all sessions pick up the change immediately.
   // Lazy import to avoid circular dependency (storage ← session-scoped-tools ← storage).
   import('../agent/session-scoped-tools.ts').then(m => m.invalidateAllSessionToolsCaches()).catch(() => {});
+}
+
+/**
+ * Whether the list / new-orchestration switch and board route are available.
+ * Missing values stay off so existing installs do not inherit the old UI.
+ */
+export function getDagOrchestrationEnabled(): boolean {
+  return loadStoredConfig()?.dagOrchestrationEnabled === true;
+}
+
+export function setDagOrchestrationEnabled(enabled: boolean): void {
+  const config = loadStoredConfig();
+  if (!config) return;
+  config.dagOrchestrationEnabled = enabled;
+  saveConfig(config);
+}
+
+/**
+ * Whether Swarm controls, `/delegate`, and spawn_session are available.
+ * Missing values stay off so existing installs do not inherit the old UI.
+ */
+export function getSwarmAgentsEnabled(): boolean {
+  return loadStoredConfig()?.swarmAgentsEnabled === true;
+}
+
+export function setSwarmAgentsEnabled(enabled: boolean): void {
+  const config = loadStoredConfig();
+  if (!config) return;
+  config.swarmAgentsEnabled = enabled;
+  saveConfig(config);
 }
 
 /**

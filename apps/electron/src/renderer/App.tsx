@@ -91,6 +91,7 @@ import { rendererLog } from '@/lib/logger'
 import { ActionRegistryProvider } from '@/actions'
 import { toast } from 'sonner'
 import { assessDelegateCommandSubmission } from '@/components/app-shell/input/delegate-command'
+import { useAdvancedSettings } from '@/hooks/useAdvancedSettings'
 
 type AppState = 'loading' | 'onboarding' | 'reauth' | 'workspace-picker' | 'ready'
 
@@ -293,6 +294,7 @@ function SessionLoadErrorScreen({
 
 export default function App() {
   const { t } = useTranslation()
+  const { swarmAgentsEnabled } = useAdvancedSettings()
 
   // Initialize renderer perf tracking early (debug mode = running from source)
   // Uses useEffect with empty deps to run once on mount before any session switches
@@ -1298,7 +1300,7 @@ export default function App() {
       const sessionSnapshot = store.get(sessionAtomFamily(sessionId))
       const sendingMidStream = sessionHasLiveGeneration(sessionSnapshot)
       const optionSnapshot = sessionOptions.get(sessionId)
-      const delegateSubmission = assessDelegateCommandSubmission(message, sendingMidStream)
+      const delegateSubmission = assessDelegateCommandSubmission(message, sendingMidStream, swarmAgentsEnabled)
       if (!delegateSubmission.allowed) return false
       const outgoingMessage = delegateSubmission.message
 
@@ -1472,7 +1474,7 @@ export default function App() {
       }))
       return locallyCommitted
     }
-  }, [sessionOptions, updateSessionById, skills, sources, store, windowWorkspaceSlug])
+  }, [sessionOptions, updateSessionById, skills, sources, store, swarmAgentsEnabled, windowWorkspaceSlug])
 
   /**
    * Unified handler for all session option changes.

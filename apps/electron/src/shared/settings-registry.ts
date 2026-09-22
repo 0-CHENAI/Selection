@@ -38,8 +38,9 @@ export const SETTINGS_PAGES = [
   { id: 'app' as const, labelKey: 'settings.app.title', descriptionKey: 'settings.app.description' },
   { id: 'ai' as const, labelKey: 'settings.ai.title', descriptionKey: 'settings.ai.description' },
   { id: 'appearance' as const, labelKey: 'settings.appearance.title', descriptionKey: 'settings.appearance.description' },
-  { id: 'input' as const, labelKey: 'settings.input.title', descriptionKey: 'settings.input.description' },
+  { id: 'input' as const, labelKey: 'settings.app.title', descriptionKey: 'settings.app.description' },
   { id: 'workspace' as const, labelKey: 'settings.workspace.title', descriptionKey: 'settings.workspace.description' },
+  { id: 'advanced' as const, labelKey: 'settings.advanced.title', descriptionKey: 'settings.advanced.description' },
   { id: 'permissions' as const, labelKey: 'settings.permissions.title', descriptionKey: 'settings.permissions.description' },
   { id: 'labels' as const, labelKey: 'settings.labels.title', descriptionKey: 'settings.labels.description' },
   { id: 'messaging' as const, labelKey: 'settings.messaging.title', descriptionKey: 'settings.messaging.description' },
@@ -58,6 +59,7 @@ export type SettingsSubpage = (typeof SETTINGS_PAGES)[number]['id']
  * are not currently exposed or rendered through product navigation.
  */
 export const HIDDEN_SETTINGS_SUBPAGES: readonly SettingsSubpage[] = [
+  'input',
   'labels',
   'permissions',
   'messaging',

@@ -67,6 +67,7 @@ import {
   type NavHistoryState,
 } from './navigation-history'
 import * as storage from '@/lib/local-storage'
+import { useAdvancedSettings } from '@/hooks/useAdvancedSettings'
 import type {
   DeepLinkNavigation,
   Session,
@@ -178,6 +179,9 @@ export function NavigationProvider({
   remoteWorkspaceId,
 }: NavigationProviderProps) {
   const { t } = useTranslation()
+  const { dagOrchestrationEnabled } = useAdvancedSettings()
+  const dagOrchestrationEnabledRef = useRef(dagOrchestrationEnabled)
+  useEffect(() => { dagOrchestrationEnabledRef.current = dagOrchestrationEnabled }, [dagOrchestrationEnabled])
   const [, setSession] = useSession()
 
   // Read session metadata directly from atom (reactive to session changes)
@@ -437,7 +441,10 @@ export function NavigationProvider({
           ? resolveAutoSelectionRef.current(state)
           : state
       )
-      const initialRoute = params.get('route')
+      const requestedRoute = params.get('route')
+      const initialRoute = requestedRoute === 'board' && !dagOrchestrationEnabledRef.current
+        ? routes.view.allSessions()
+        : requestedRoute
       const sidebarParam = params.get('sidebar') || undefined
       const panelsParam = params.get('panels')
       const focusedIndexParam = params.get('fi')
@@ -466,12 +473,18 @@ export function NavigationProvider({
           if (colonIdx > 0) {
             const proportion = parseFloat(entry.slice(colonIdx + 1))
             if (!isNaN(proportion) && proportion > 0 && proportion < 1) {
-              const rawRoute = entry.slice(0, colonIdx) as ViewRoute
+              const encodedRoute = entry.slice(0, colonIdx) as ViewRoute
+              const rawRoute = encodedRoute === 'board' && !dagOrchestrationEnabledRef.current
+                ? routes.view.allSessions()
+                : encodedRoute
               const route = normalizePanelRouteForReconcile(rawRoute, resolveForReconcile)
               return { route, proportion }
             }
           }
-          const rawRoute = entry as ViewRoute
+          const encodedRoute = entry as ViewRoute
+          const rawRoute = encodedRoute === 'board' && !dagOrchestrationEnabledRef.current
+            ? routes.view.allSessions()
+            : encodedRoute
           const route = normalizePanelRouteForReconcile(rawRoute, resolveForReconcile)
           return { route, proportion: 0 }
         })
@@ -854,7 +867,10 @@ export function NavigationProvider({
         suppressAutoSelectRef.current = false
       }
 
-      const parsed = parseRoute(route)
+      const requested = parseRoute(route)
+      const parsed = requested?.type === 'view' && requested.name === 'board' && !dagOrchestrationEnabledRef.current
+        ? parseRoute(routes.view.allSessions())
+        : requested
       if (!parsed) {
         console.warn('[Navigation] Invalid route:', route)
         return
@@ -1092,7 +1108,9 @@ export function NavigationProvider({
         return
       }
 
-      const routeStr = `${pending.name}${pending.id ? `/${pending.id}` : ''}`
+      const routeStr = pending.name === 'board' && !dagOrchestrationEnabledRef.current
+        ? routes.view.allSessions()
+        : `${pending.name}${pending.id ? `/${pending.id}` : ''}`
       const navState = parseRouteToNavigationState(routeStr)
       if (navState) {
         const resolved = resolveAutoSelection(navState)

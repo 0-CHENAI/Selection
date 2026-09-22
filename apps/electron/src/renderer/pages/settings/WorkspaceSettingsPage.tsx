@@ -548,7 +548,12 @@ export default function WorkspaceSettingsPage() {
                   ))}
                 </SettingsCard>
               ) : (
-                <p className="text-sm text-muted-foreground">{t("settings.workspace.noSourcesConfigured")}</p>
+                <SettingsCard>
+                  <SettingsRow
+                    label={t("settings.workspace.defaultSources")}
+                    description={t("settings.workspace.noSourcesConfigured")}
+                  />
+                </SettingsCard>
               )}
             </SettingsSection>
 

@@ -12,7 +12,7 @@ import { BatchSessionMenu } from "./BatchSessionMenu"
 import { CompactSessionMenu } from "./CompactSessionMenu"
 import { SessionProjectColorWrapper } from "./SessionProjectColorWrapper"
 import { hasTransferTargets } from "./transfer-targets"
-import { useProjectColorTreatment } from "@/hooks/useProjectColorTreatment"
+import { DEFAULT_PROJECT_COLOR_TREATMENT } from "@/utils/project-colors"
 import { getSessionTitle, getSessionPreviewText, highlightMatch, hasUnreadMeta, shortTimeLocale } from "@/utils/session"
 import { useSessionListContext } from "@/context/SessionListContext"
 import { useAppShellContext } from "@/context/AppShellContext"
@@ -68,10 +68,8 @@ export function SessionItem({
   const sessionBindings = messagingBindingsBySession.get(item.id) ?? []
   const hasMessagingBinding = sessionBindings.length > 0
 
-  // Resolve the bound project so the row can show a project-themed stripe /
-  // tint and reveal the project name on hover. Treatment is a user preference
-  // under Appearance.
-  const projectColorTreatment = useProjectColorTreatment()
+  // Resolve the bound project so the row can show a project stripe and reveal
+  // the project name on hover. Highlight treatment is no longer configurable.
   const boundProject = item.projectId
     ? ctx.projects?.find(p => p.id === item.projectId)
     : undefined
@@ -105,7 +103,7 @@ export function SessionItem({
   }
 
   return (
-    <SessionProjectColorWrapper color={projectColor} treatment={projectColorTreatment}>
+    <SessionProjectColorWrapper color={projectColor} treatment={DEFAULT_PROJECT_COLOR_TREATMENT}>
     <EntityRow
       className="session-item"
       dataAttributes={{ 'data-session-id': item.id }}

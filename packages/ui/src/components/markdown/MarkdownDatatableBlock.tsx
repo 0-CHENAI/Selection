@@ -33,6 +33,7 @@ import { cn } from '../../lib/utils'
 import { CodeBlock } from './CodeBlock'
 import { DataTableOverlay } from '../overlay/DataTableOverlay'
 import { useScrollFade } from './useScrollFade'
+import { compareDatatableText, isDatatableColumnSortable } from './datatable-sort'
 import { TableExportDropdown } from './TableExportDropdown'
 import { usePlatform } from '../../context/PlatformContext'
 import {
@@ -380,11 +381,18 @@ export function MarkdownDatatableBlock({ code, className, renderCell, renderHead
     })
   }, [])
 
+  const sortableColumnKeys = React.useMemo(() => {
+    if (!parsed) return new Set<string>()
+    return new Set(parsed.columns
+      .filter(column => isDatatableColumnSortable(parsed.rows.map(row => row[column.key])))
+      .map(column => column.key))
+  }, [parsed])
+
   const processedRows = React.useMemo(() => {
     if (!parsed) return []
     let rows = [...parsed.rows]
     // Sort
-    if (sortKey && sortDir) {
+    if (sortKey && sortDir && sortableColumnKeys.has(sortKey)) {
       rows.sort((a, b) => {
         const av = a[sortKey]
         const bv = b[sortKey]
@@ -393,12 +401,12 @@ export function MarkdownDatatableBlock({ code, className, renderCell, renderHead
         if (bv === null || bv === undefined) return -1
         const cmp = typeof av === 'number' && typeof bv === 'number'
           ? av - bv
-          : String(av).localeCompare(String(bv))
+          : compareDatatableText(String(av), String(bv))
         return sortDir === 'asc' ? cmp : -cmp
       })
     }
     return rows
-  }, [parsed, sortKey, sortDir])
+  }, [parsed, sortKey, sortDir, sortableColumnKeys])
 
   const granularityOptions = React.useMemo(() => {
     if (!parsed) return new Map<string, GranularityOption[]>()
@@ -499,26 +507,29 @@ export function MarkdownDatatableBlock({ code, className, renderCell, renderHead
       <table className="w-max min-w-full text-[13px]">
         <thead>
           <tr className="border-b border-foreground/[0.06] bg-foreground/[0.02]">
-            {parsed.columns.map((col) => (
+            {parsed.columns.map((col) => {
+              const sortable = sortableColumnKeys.has(col.key)
+              return (
               <th
                 key={col.key}
-                className={cn('py-2 px-3 text-[12px] cursor-pointer select-none whitespace-nowrap', colAlign(col.type, col.align))}
-                onClick={() => handleSort(col.key)}
-                tabIndex={0}
-                aria-sort={sortKey === col.key && sortDir ? (sortDir === 'asc' ? 'ascending' : 'descending') : 'none'}
-                onKeyDown={event => {
+                className={cn('py-2 px-3 text-[12px] select-none whitespace-nowrap', sortable && 'cursor-pointer', colAlign(col.type, col.align))}
+                onClick={sortable ? () => handleSort(col.key) : undefined}
+                tabIndex={sortable ? 0 : undefined}
+                aria-sort={sortable && sortKey === col.key && sortDir ? (sortDir === 'asc' ? 'ascending' : 'descending') : undefined}
+                onKeyDown={sortable ? event => {
                   if (event.target === event.currentTarget && (event.key === 'Enter' || event.key === ' ')) {
                     event.preventDefault()
                     handleSort(col.key)
                   }
-                }}
+                } : undefined}
               >
-                <span className="inline-flex items-center gap-1 font-medium text-muted-foreground hover:text-foreground transition-colors">
+                <span className={cn('inline-flex items-center gap-1 font-medium text-muted-foreground', sortable && 'hover:text-foreground transition-colors')}>
                   {renderHeader ? renderHeader(col.key) : col.label}
-                  <SortIcon dir={sortKey === col.key ? sortDir : null} />
+                  {sortable && <SortIcon dir={sortKey === col.key ? sortDir : null} />}
                 </span>
               </th>
-            ))}
+              )
+            })}
           </tr>
         </thead>
         <tbody>
@@ -572,14 +583,14 @@ export function MarkdownDatatableBlock({ code, className, renderCell, renderHead
       </DropdownMenuTrigger>
       <StyledDropdownMenuContent sideOffset={6} align="end" className="min-w-36" style={{ zIndex: 'var(--z-floating-menu, 400)' }}>
         {/* Sort sub-menu */}
-        <DropdownMenuSub>
+        {sortableColumnKeys.size > 0 && <DropdownMenuSub>
           <StyledDropdownMenuSubTrigger>
             <ArrowUpDown />
             <span className="flex-1">{t('table.sortBy')}</span>
             {sortKey && sortDir && <Check className="w-3 h-3 text-accent" />}
           </StyledDropdownMenuSubTrigger>
           <StyledDropdownMenuSubContent style={{ zIndex: 'calc(var(--z-floating-menu, 400) + 1)' }}>
-            {parsed.columns.map((col) => {
+            {parsed.columns.filter(col => sortableColumnKeys.has(col.key)).map((col) => {
               const isActive = sortKey === col.key && sortDir !== null
               return (
                 <StyledDropdownMenuItem
@@ -592,7 +603,7 @@ export function MarkdownDatatableBlock({ code, className, renderCell, renderHead
               )
             })}
           </StyledDropdownMenuSubContent>
-        </DropdownMenuSub>
+        </DropdownMenuSub>}
         {/* Group sub-menu */}
         <DropdownMenuSub>
           <StyledDropdownMenuSubTrigger>

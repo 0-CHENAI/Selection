@@ -28,6 +28,7 @@ import { rendererPerf } from '@/lib/perf'
 import { generatedFileBaseDir, resolveOpenableGeneratedFile } from '@/lib/generated-file-path'
 import { resolveMarkdownLinkTarget } from '@craft-agent/ui'
 import { navigate, routes } from '@/lib/navigate'
+import { useAdvancedSettings } from '@/hooks/useAdvancedSettings'
 import { createDraftDisplaySession, createDraftSubmission, resolveDraftWorkingDirectory, DRAFT_SESSION_OPTIONS_ID } from '@/lib/draft-session'
 import { coerceInputText } from '@/lib/input-text'
 import type { Session } from '../../shared/types'
@@ -574,7 +575,8 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
     if (sessionId) onMarkSessionUnread(sessionId)
   }, [sessionId, onMarkSessionUnread])
 
-  const swarmEnabled = isDraft ? draftSwarmEnabled : (session?.swarmEnabled ?? sessionMeta?.swarmEnabled ?? false)
+  const { dagOrchestrationEnabled, swarmAgentsEnabled } = useAdvancedSettings()
+  const swarmEnabled = swarmAgentsEnabled && (isDraft ? draftSwarmEnabled : (session?.swarmEnabled ?? sessionMeta?.swarmEnabled ?? false))
   const orchestrationStatus = session?.orchestrationStatus ?? sessionMeta?.orchestrationStatus
   const swarmToggleDisabled = sessionMeta?.orchestrationRole === 'worker'
     || sessionMeta?.orchestrationRole === 'reviewer'
@@ -604,7 +606,7 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
   const isTaskOrchestrator = !!taskSlug && !(session?.parentSessionId || sessionMeta?.parentSessionId)
   const setKanbanEditorTarget = useSetAtom(kanbanEditorTargetAtom)
   const handleEditTask = React.useCallback(() => {
-    if (!taskSlug || !sessionId) return
+    if (!dagOrchestrationEnabled || !taskSlug || !sessionId) return
     setKanbanEditorTarget({
       mode: 'edit',
       sessionId,
@@ -612,14 +614,14 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
       initialTitle: sessionMeta ? getSessionTitle(sessionMeta) : undefined,
     })
     navigate(routes.view.board())
-  }, [taskSlug, sessionId, sessionMeta, setKanbanEditorTarget])
+  }, [dagOrchestrationEnabled, taskSlug, sessionId, sessionMeta, setKanbanEditorTarget])
 
   const handlePreviewOrchestrationNode = React.useCallback((childSessionId: string) => {
     if (!sessionId || !canPreviewOrchestrationChild(sessionId, sessionMetaMap.get(childSessionId))) return
     setPreviewChildSessionId(childSessionId)
   }, [sessionId, sessionMetaMap])
 
-  const orchestrationProgress = !isDraft && isTaskOrchestrator && activeWorkspaceId && taskSlug && sessionId ? (
+  const orchestrationProgress = dagOrchestrationEnabled && !isDraft && isTaskOrchestrator && activeWorkspaceId && taskSlug && sessionId ? (
     <OrchestrationRunProgress
       workspaceId={activeWorkspaceId}
       taskSlug={taskSlug}
@@ -666,14 +668,14 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
   // Topology action opens the definition editor for orchestrator sessions. Compact mode also
   // shows session info; desktop online-share control has been removed.
   const editTaskButton = React.useMemo(() => {
-    if (!isTaskOrchestrator) return undefined
+    if (!dagOrchestrationEnabled || !isTaskOrchestrator) return undefined
     return (
       <TaskOrchestrationEditButton
         compact={!!isCompactMode}
         onEdit={handleEditTask}
       />
     )
-  }, [isTaskOrchestrator, handleEditTask, isCompactMode])
+  }, [dagOrchestrationEnabled, isTaskOrchestrator, handleEditTask, isCompactMode])
 
   const primaryHeaderAction = isCompactMode ? compactInfoButton : undefined
   const headerActions = editTaskButton && primaryHeaderAction ? (
@@ -848,7 +850,7 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
                 sources={enabledSources}
                 skills={skills}
                 swarmEnabled={swarmEnabled}
-                onSwarmEnabledChange={handleSwarmEnabledChange}
+                onSwarmEnabledChange={swarmAgentsEnabled ? handleSwarmEnabledChange : undefined}
                 swarmToggleDisabled={swarmToggleDisabled}
                 swarmRunning={orchestrationStatus === 'running'}
                 workspaceId={activeWorkspaceId || undefined}
@@ -929,7 +931,7 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
             sources={enabledSources}
             skills={skills}
             swarmEnabled={swarmEnabled}
-            onSwarmEnabledChange={handleSwarmEnabledChange}
+            onSwarmEnabledChange={swarmAgentsEnabled ? handleSwarmEnabledChange : undefined}
             swarmToggleDisabled={swarmToggleDisabled}
             swarmRunning={orchestrationStatus === 'running'}
             workspaceId={activeWorkspaceId || undefined}

@@ -644,6 +644,8 @@ function convertParsedRouteToNavigationState(parsed: ParsedRoute): NavigationSta
       return { navigator: 'settings', subpage: 'app' }
     case 'workspace':
       return { navigator: 'settings', subpage: 'workspace' }
+    case 'advanced':
+      return { navigator: 'settings', subpage: 'advanced' }
     case 'permissions':
       return { navigator: 'settings', subpage: 'app' }
     case 'labels':

@@ -348,6 +348,28 @@ export class CredentialManager {
     return this.delete({ type: 'llm_api_key', connectionSlug });
   }
 
+  /** Get the optional AnySearch API key used by built-in web search. */
+  async getAnySearchApiKey(): Promise<string | null> {
+    const cred = await this.get({ type: 'anysearch_api_key' });
+    const value = cred?.value?.trim();
+    return value || null;
+  }
+
+  /** Store or clear the AnySearch API key. An empty value deletes it. */
+  async setAnySearchApiKey(apiKey: string): Promise<void> {
+    const value = apiKey.trim();
+    if (!value) {
+      await this.delete({ type: 'anysearch_api_key' });
+      return;
+    }
+    await this.set({ type: 'anysearch_api_key' }, { value });
+  }
+
+  /** Whether an AnySearch API key is stored, without returning the secret. */
+  async hasAnySearchApiKey(): Promise<boolean> {
+    return (await this.getAnySearchApiKey()) !== null;
+  }
+
   /**
    * Get OAuth token for an LLM connection.
    * @param connectionSlug - The connection slug

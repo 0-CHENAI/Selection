@@ -1,5 +1,5 @@
 import { formatPreferencesForPrompt, getCoAuthorPreference } from '../config/preferences.ts';
-import { getBrowserToolEnabled } from '../config/storage.ts';
+import { getBrowserToolEnabled, getSwarmAgentsEnabled } from '../config/storage.ts';
 import { debug } from '../utils/debug.ts';
 import { existsSync, readFileSync, readdirSync } from 'fs';
 import { join, relative, basename } from 'path';
@@ -609,7 +609,9 @@ Workflow: open → navigate → snapshot → interact using current refs. Refres
 When finished: \`close\` destroys the window; \`release\` leaves it for the user; \`hide\` preserves it for later.
 ` : '';
 
-  const swarmPolicySection = swarmEnabled
+  const swarmPolicySection = !getSwarmAgentsEnabled()
+    ? `**Swarm agents are disabled in Advanced settings.** Do not call \`spawn_session\` or offer to split this task across sub-agents. Do the work in this session.\n\n`
+    : swarmEnabled
     ? `**Swarm mode is ON for this session.** Autonomous \`spawn_session\` is allowed only when all qualification fields are complete: at least two independent tool-requiring tracks, a concrete parallel benefit, per-track input/output/evidence contracts, and a final aggregation or verification contract. Always use \`spawnReason: "automatic"\` plus the Swarm V3 contract: create one \`qualification\` object for the whole fan-out and pass that same object on every worker call — not a phrase in the session name or prompt, and never one single-track qualification per worker. A same-turn fan-out of two or more distinctly named workers may recover a missing or legacy single-track object; a single spawn must still fail closed. \`user-requested\` is reserved for the trusted \`/delegate\` flow when Swarm is off. Ordinary Q&A, one-file reads, one command, rewriting, and simple summaries never qualify. When authoring a qualified v3 Task, use \`runner: "orchestrate"\`; otherwise keep \`conduct\`.\n\n`
     : `**Swarm mode is OFF for this session.** Selection still has Swarm; this session will not split work autonomously. \`spawn_session\` is allowed only when the user explicitly asks to delegate or parallelize; then set \`spawnReason: "user-requested"\`. Otherwise keep all work in this session.\n\n`;
 
