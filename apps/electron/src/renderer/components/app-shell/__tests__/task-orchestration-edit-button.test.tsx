@@ -70,11 +70,11 @@ describe('task orchestration edit entry (#282)', () => {
   it('keeps the top-level spec-backed condition and original editor target/navigation', () => {
     expect(chatSource).toContain('const taskSlug = session?.taskSlug ?? sessionMeta?.taskSlug')
     expect(chatSource).toContain('const isTaskOrchestrator = !!taskSlug && !(session?.parentSessionId || sessionMeta?.parentSessionId)')
-    expect(chatSource).toContain('if (!isTaskOrchestrator) return undefined')
+    expect(chatSource).toContain('if (!dagOrchestrationEnabled || !isTaskOrchestrator) return undefined')
     expect(chatSource).toContain('compact={!!isCompactMode}')
     expect(chatSource).toContain('onEdit={handleEditTask}')
     const handler = chatSource.slice(chatSource.indexOf('const handleEditTask ='), chatSource.indexOf('const handlePreviewOrchestrationNode ='))
-    expect(handler).toContain('if (!taskSlug) return')
+    expect(handler).toContain('if (!dagOrchestrationEnabled || !taskSlug || !sessionId) return')
     expect(handler).toContain("mode: 'edit'")
     expect(handler).toContain('sessionId,')
     expect(handler).toContain('taskSlug,')

@@ -4,6 +4,7 @@ let validateOpenAiChatBody: typeof import('../unified-network-interceptor.ts').v
 let validateOpenAiResponsesBody: typeof import('../unified-network-interceptor.ts').validateOpenAiResponsesBody;
 let MalformedBodyError: typeof import('../unified-network-interceptor.ts').MalformedBodyError;
 let sanitizeOpenAiHistoryInPlace: typeof import('../unified-network-interceptor.ts').sanitizeOpenAiHistoryInPlace;
+let rewriteDeveloperRolesToSystem: typeof import('../unified-network-interceptor.ts').rewriteDeveloperRolesToSystem;
 
 describe('unified-network-interceptor validators (#613)', () => {
   beforeAll(async () => {
@@ -13,6 +14,25 @@ describe('unified-network-interceptor validators (#613)', () => {
     validateOpenAiResponsesBody = mod.validateOpenAiResponsesBody;
     MalformedBodyError = mod.MalformedBodyError;
     sanitizeOpenAiHistoryInPlace = mod.sanitizeOpenAiHistoryInPlace;
+    rewriteDeveloperRolesToSystem = mod.rewriteDeveloperRolesToSystem;
+  });
+
+  describe('developer role rewrite', () => {
+    it('rewrites chat and responses instruction roles to system', () => {
+      const body = {
+        messages: [
+          { role: 'developer', content: 'system prompt' },
+          { role: 'user', content: 'hi' },
+        ],
+        input: [
+          { role: 'developer', content: 'system prompt' },
+          { role: 'user', content: [{ type: 'input_text', text: 'hi' }] },
+        ],
+      };
+      rewriteDeveloperRolesToSystem(body);
+      expect(body.messages.map(message => message.role)).toEqual(['system', 'user']);
+      expect(body.input.map(message => message.role)).toEqual(['system', 'user']);
+    });
   });
 
   describe('OpenAI Chat Completions', () => {

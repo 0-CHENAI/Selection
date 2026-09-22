@@ -12,3 +12,29 @@ describe('HTML iframe interaction coordinates', () => {
     expect(after).toEqual(before)
   })
 })
+
+test('document reading scrolls the outer viewport and cleans up its iframe listener', async () => {
+  const { bindHtmlPreviewInteractions } = await import('./html-preview-interactions')
+  const doc = new EventTarget()
+  let top = 0
+  const viewport = { parentElement: null, clientHeight: 800, scrollBy: (options: ScrollToOptions) => { top += options.top || 0 } }
+  const container = { parentElement: viewport }
+  const previous = globalThis.getComputedStyle
+  globalThis.getComputedStyle = ((element: unknown) => ({ overflowY: element === viewport ? 'auto' : 'visible' })) as typeof getComputedStyle
+  try {
+    const cleanup = bindHtmlPreviewInteractions(
+      { contentDocument: doc } as unknown as HTMLIFrameElement,
+      container as unknown as HTMLDivElement, () => false, true,
+    )
+    const wheel = () => Object.assign(new Event('wheel', { cancelable: true }), { deltaY: 2, deltaX: 0, deltaMode: 1 })
+    const event = wheel()
+    doc.dispatchEvent(event)
+    expect(top).toBe(32)
+    expect(event.defaultPrevented).toBe(true)
+    cleanup()
+    doc.dispatchEvent(wheel())
+    expect(top).toBe(32)
+  } finally {
+    globalThis.getComputedStyle = previous
+  }
+})

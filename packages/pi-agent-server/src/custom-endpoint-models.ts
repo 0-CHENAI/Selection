@@ -19,6 +19,7 @@ export interface CustomEndpointModelDefaults {
 export interface CustomEndpointModelOverrides {
   contextWindow?: number
   maxTokens?: number
+  supportedThinkingLevels?: Array<'off' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'>;
   supportsImages?: boolean
 }
 
@@ -30,6 +31,7 @@ export type CustomEndpointModelConfig = string | {
   id: string
   contextWindow?: number
   maxTokens?: number
+  supportedThinkingLevels?: Array<'off' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'>;
   supportsImages?: boolean
 }
 
@@ -64,6 +66,7 @@ export function normalizeCustomEndpointModelEntry(model: CustomEndpointModelConf
 
   return {
     id: stripPiPrefix(model.id),
+    ...(model.supportedThinkingLevels !== undefined ? { supportedThinkingLevels: model.supportedThinkingLevels } : {}),
     ...(model.contextWindow !== undefined ? { contextWindow: model.contextWindow } : {}),
     ...(model.maxTokens !== undefined ? { maxTokens: model.maxTokens } : {}),
     ...(model.supportsImages !== undefined ? { supportsImages: model.supportsImages } : {}),
@@ -95,11 +98,20 @@ export function buildCustomEndpointModelDef(
   return {
     id,
     name: id,
-    reasoning: false,
+    reasoning: overrides?.supportedThinkingLevels?.some(level => level !== 'off') ?? false,
+    ...(overrides?.supportedThinkingLevels !== undefined ? {
+      thinkingLevelMap: Object.fromEntries(
+        (['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'] as const).map(level => [
+          level, level !== 'minimal' && overrides.supportedThinkingLevels!.includes(level) ? level : null,
+        ]),
+      ),
+    } : {}),
     input,
     cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
     contextWindow,
     maxTokens,
-    ...(api === 'openai-completions' ? { compat: { supportsStore: false } } : {}),
+    // `store` is an OpenAI-only field. `developer` is the reasoning-model
+    // alias for a system prompt; compatible gateways reject that role.
+    ...(api === 'openai-completions' ? { compat: { supportsStore: false, supportsDeveloperRole: false } } : {}),
   }
 }

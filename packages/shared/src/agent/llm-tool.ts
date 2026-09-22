@@ -35,6 +35,9 @@ import { getDefaultSummarizationModel, resolveKnownRegistryModelId } from '../co
  * The prompt includes serialized file content (attachments are pre-processed by the tool).
  */
 export interface LLMQueryRequest {
+  /** Internal isolated progress evaluation; no model fallback or business tools. */
+  purpose?: 'progress-evaluation';
+  timeoutMs?: number;
   /** Full prompt including serialized file content */
   prompt: string;
   /** Optional system prompt */
@@ -53,6 +56,8 @@ export interface LLMQueryRequest {
  * Result from an agent-native queryFn callback.
  */
 export interface LLMQueryResult {
+  stopReason?: string;
+  costUsd?: number;
   text: string;
   model?: string;
   inputTokens?: number;

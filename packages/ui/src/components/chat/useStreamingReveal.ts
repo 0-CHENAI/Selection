@@ -65,7 +65,9 @@ export function useStreamingReveal(
   }, [isStreaming, decision.shouldShow, decision.reason, decision.wordCount, effectiveStartTime, text, tick])
 
   return {
-    shouldShow: decision.shouldShow,
+    // Render the first received token, including submit_answer previews.
+    // Keep Markdown's render throttle, but do not wait for a word/time threshold.
+    shouldShow: Boolean(text?.trim()) || decision.shouldShow,
     reason: decision.reason,
     wordCount: decision.wordCount,
     effectiveStartTime,

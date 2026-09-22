@@ -10,7 +10,7 @@ export type DelegateCommandSubmission =
       allowed: false
       kind: 'delegate'
       message: string
-      reason: 'empty-task' | 'session-processing'
+      reason: 'empty-task' | 'session-processing' | 'swarm-disabled'
     }
 
 /**
@@ -31,9 +31,11 @@ export function parseDelegateCommand(input: string): DelegateCommandParseResult 
 export function assessDelegateCommandSubmission(
   input: string,
   sessionIsProcessing: boolean,
+  swarmAgentsEnabled = true,
 ): DelegateCommandSubmission {
   const parsed = parseDelegateCommand(input)
   if (parsed.kind === 'ordinary') return { ...parsed, allowed: true }
+  if (!swarmAgentsEnabled) return { ...parsed, allowed: false, reason: 'swarm-disabled' }
   if (!parsed.message) return { ...parsed, allowed: false, reason: 'empty-task' }
   if (sessionIsProcessing) {
     return { ...parsed, allowed: false, reason: 'session-processing' }

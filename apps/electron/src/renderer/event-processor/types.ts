@@ -15,6 +15,7 @@ export interface StreamingState {
   content: string
   /** Missing only for renderer state created by an older application build. */
   phase?: TextStreamPhase
+  presentationProtocol?: 'native' | 'marker-v1' | 'legacy'
   turnId?: string
   parentToolUseId?: string
 }
@@ -38,6 +39,7 @@ export interface TextDeltaEvent {
   delta: string
   /** Missing only for legacy senders; current backends classify every delta. */
   phase?: TextStreamPhase
+  presentationProtocol?: 'native' | 'marker-v1' | 'legacy'
   turnId?: string
 }
 
@@ -52,6 +54,7 @@ export interface TextCompleteEvent {
   answerCommitted?: boolean;
   /** Persisted on the originating user message before the single recovery call. */
   phase?: import('@craft-agent/core').TextStreamPhase;
+  presentationProtocol?: 'native' | 'marker-v1' | 'legacy';
 
   sessionId: string
   text: string
@@ -566,6 +569,7 @@ export interface MessagesRestoredEvent {
  * Union of all agent events
  */
 export type AgentEvent =
+  | { type: 'progress_supervision'; sessionId: string; state: import('@craft-agent/shared/protocol/dto').ProgressSupervisionView }
   | { type: 'answer_preview'; sessionId: string; answerRunId: string; userMessageId: string; text: string; toolCallId: string }
   | TextDeltaEvent
   | TextCompleteEvent

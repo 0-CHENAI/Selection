@@ -151,6 +151,17 @@ describe('markdownUrlTransform', () => {
   it('still sanitizes dangerous non-anchor URL attributes', () => {
     const imageNode = { tagName: 'img' }
     expect(markdownUrlTransform('javascript:alert(1)', 'src', imageNode as never)).toBe('')
+    expect(markdownUrlTransform('blob:https://example.com/abc', 'src', imageNode as never)).toBe('')
+  })
+
+  it('preserves local, file, and data image sources for the in-app loader (#358)', () => {
+    const imageNode = { tagName: 'img' }
+    expect(markdownUrlTransform('file:///C:/Users/x.png', 'src', imageNode as never)).toBe('file:///C:/Users/x.png')
+    expect(markdownUrlTransform('C:\\Users\\x.png', 'src', imageNode as never)).toBe('C:\\Users\\x.png')
+    expect(markdownUrlTransform('/Users/tester/shot.png', 'src', imageNode as never)).toBe('/Users/tester/shot.png')
+    expect(markdownUrlTransform('data:image/png;base64,aaa', 'src', imageNode as never)).toBe('data:image/png;base64,aaa')
+    expect(markdownUrlTransform('https://example.com/shot.png', 'src', imageNode as never)).toBe('https://example.com/shot.png')
+    expect(markdownUrlTransform('/Users/tester/shot.jpg', 'src', { tagName: '' } as never)).toBe('/Users/tester/shot.jpg')
   })
 
   it('keeps safe anchor hrefs unchanged', () => {

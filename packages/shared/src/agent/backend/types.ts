@@ -42,11 +42,10 @@ export interface BackendRuntimeUpdate {
     baseUrl?: string;
     piAuthProvider?: string;
     customEndpoint?: { api: string; supportsImages?: boolean };
-    customModels?: Array<string | { id: string; contextWindow?: number; maxTokens?: number; supportsImages?: boolean }>;
+    customModels?: Array<string | { id: string; contextWindow?: number; maxTokens?: number; supportedThinkingLevels?: Array<'off' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'>; supportsImages?: boolean }>;
     [key: string]: unknown;
   };
 }
-import type { AutomationSystem } from '../../automations/index.ts';
 
 /**
  * Provider identifier for AI backends.
@@ -182,6 +181,9 @@ export interface AnswerDeliveryControl {
 
 export interface CoreBackendConfig {
   explicitAnswerDelivery?: boolean;
+  presentationProtocol?: 'native' | 'marker-v1' | 'legacy';
+  /** Isolated utility backend: skip execution-session/tool initialization. */
+  queryOnly?: boolean;
   /** Workspace configuration */
   workspace: Workspace;
 
@@ -211,18 +213,6 @@ export interface CoreBackendConfig {
 
   /** System prompt preset ('default' | 'mini' | custom string) */
   systemPromptPreset?: 'default' | 'mini' | string;
-
-  /** Workspace-level automation system for user-defined automations (automations.json) */
-  automationSystem?: AutomationSystem;
-
-  /** Marks sessions created by Agent Event automations so they cannot recurse. */
-  automationContext?: {
-    triggeredByAutomation: boolean;
-    automationDepth: number;
-    sourceSessionId?: string;
-    sourceSessionName?: string;
-    rootSessionId?: string;
-  };
 
   /**
    * Per-session environment variable overrides for the SDK subprocess.
@@ -363,6 +353,9 @@ export type SdkMcpServerConfig =
  * 4. Allow capability-based UI adaptation
  */
 export interface AgentBackend {
+  queryLlm?(request: import('../llm-tool').LLMQueryRequest, signal?: AbortSignal): Promise<import('../llm-tool').LLMQueryResult>;
+  /** Interrupt only the current model request; resolves after SDK abort drains. */
+  interruptForProgress?(): Promise<void>;
   // ============================================================
   // Chat & Lifecycle
   // ============================================================
@@ -646,6 +639,7 @@ export interface AgentBackend {
   /** Called when agent submits a plan */
   onPlanSubmitted: PlanCallback | null;
   configureAnswerDelivery?: (control: AnswerDeliveryControl | undefined) => void;
+  configurePresentationProtocol?: (protocol: 'native' | 'marker-v1' | 'legacy') => void;
 
   /** Called when a source requires authentication */
   onAuthRequest: AuthCallback | null;
@@ -715,9 +709,6 @@ export interface BackendConfig extends CoreBackendConfig {
    * Used to read/write credentials under the correct key.
    */
   connectionSlug?: string;
-
-  /** Workspace-level automation system for user-defined SDK hooks (automations.json) */
-  automationSystem?: AutomationSystem;
 
   /**
    * Opaque runtime payload resolved by backend drivers.

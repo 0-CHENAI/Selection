@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test'
-import { hasRenderableAssistantText, preferRicherAssistantText } from '../assistant-text.ts'
+import { hasRenderableAssistantText, isAnswerDeliveryReceipt, preferRicherAssistantText } from '../assistant-text.ts'
 
 describe('preferRicherAssistantText (#81)', () => {
   it('keeps a renderable complete over a longer unrelated stream', () => {
@@ -42,5 +42,12 @@ describe('hasRenderableAssistantText (#81)', () => {
     expect(hasRenderableAssistantText('先读 skill 文件。')).toBe(true)
     expect(hasRenderableAssistantText('| name | value |\n| --- | --- |\n| a | 1 |')).toBe(true)
     expect(hasRenderableAssistantText('     1|---\n     2|name: officecli')).toBe(true)
+  })
+
+  it('detects the submit_answer tool receipt without treating it as empty text', () => {
+    expect(isAnswerDeliveryReceipt('Answer delivered. Stop here.')).toBe(true)
+    expect(isAnswerDeliveryReceipt('Answer delivered.')).toBe(true)
+    expect(isAnswerDeliveryReceipt('Answer delivered. Stop here.\n\n# DeepSeek V4.1 Flash')).toBe(false)
+    expect(hasRenderableAssistantText('Answer delivered. Stop here.')).toBe(true)
   })
 })

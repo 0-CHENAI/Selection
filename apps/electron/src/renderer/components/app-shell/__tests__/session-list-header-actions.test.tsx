@@ -75,7 +75,7 @@ describe('session list and orchestration view controls (#264, #283)', () => {
 
     expect(searchIdx).toBe(-1)
     expect(toggleIdx).toBeGreaterThan(-1)
-    expect(controls).toContain('afterWorkspace={isSessionsNavigation(navState)')
+    expect(controls).toContain('afterWorkspace={dagOrchestrationEnabled && isSessionsNavigation(navState)')
     expect(controls).toContain("value={isBoardView ? 'board' : 'list'}")
     expect(controls).toContain("view === 'list' && isBoardView")
     expect(controls).toContain("view === 'board' && !isBoardView")
@@ -142,7 +142,7 @@ describe('session list and orchestration view controls (#264, #283)', () => {
     expect(topBar).toContain('afterWorkspace')
     expect(topBar.lastIndexOf('<WorkspaceSwitcher')).toBeLessThan(topBar.indexOf('{afterWorkspace}'))
     expect((appShell.match(/<BoardListToggle/g) ?? []).length).toBe(1)
-    expect(topBarCall).toContain('afterWorkspace={isSessionsNavigation(navState)')
+    expect(topBarCall).toContain('afterWorkspace={dagOrchestrationEnabled && isSessionsNavigation(navState)')
     expect(topBarCall).toContain("value={isBoardView ? 'board' : 'list'}")
   })
 

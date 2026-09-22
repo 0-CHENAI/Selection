@@ -13,7 +13,7 @@ import {
 } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
-import { parseAutomationsConfig, APP_EVENTS } from '@/components/automations/types'
+import { parseAutomationsConfig } from '@/components/automations/types'
 import { resolveSkillTitle, resolveSourceTitle } from '@craft-agent/shared/display-titles'
 import type {
   ResourceBundle,
@@ -122,9 +122,7 @@ export function ResourceTransferDialog({
           name: automation.name,
           group: automation.event === 'SchedulerTick'
             ? t('resourceTransfer.groups.scheduled')
-            : APP_EVENTS.includes(automation.event as never)
-              ? t('resourceTransfer.groups.appEvents')
-              : t('resourceTransfer.groups.agentEvents'),
+            : t('resourceTransfer.groups.appEvents'),
         })),
       ]
       setItems(next)

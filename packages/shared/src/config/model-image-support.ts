@@ -86,7 +86,8 @@ export type CustomEndpointModelSource =
       name?: string
       contextWindow?: number
       maxTokens?: number
-      supportsImages?: boolean
+      supportedThinkingLevels?: Array<'off' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'>;
+  supportsImages?: boolean
     }
 
 export type CustomEndpointModelPayload =
@@ -95,7 +96,8 @@ export type CustomEndpointModelPayload =
       id: string
       contextWindow?: number
       maxTokens?: number
-      supportsImages?: boolean
+      supportedThinkingLevels?: Array<'off' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'>;
+  supportsImages?: boolean
     }
 
 /**
@@ -112,9 +114,11 @@ export function toCustomEndpointModelPayload(
   const explicit = typeof model === 'object' && typeof model.supportsImages === 'boolean'
     ? model.supportsImages
     : undefined
-  if (contextWindow || maxTokens || explicit !== undefined) {
+  const supportedThinkingLevels = typeof model === 'string' ? undefined : model.supportedThinkingLevels
+  if (contextWindow || maxTokens || explicit !== undefined || supportedThinkingLevels !== undefined) {
     return {
       id,
+      ...(supportedThinkingLevels !== undefined ? { supportedThinkingLevels } : {}),
       ...(contextWindow ? { contextWindow } : {}),
       ...(maxTokens ? { maxTokens } : {}),
       ...(explicit !== undefined ? { supportsImages: explicit } : {}),

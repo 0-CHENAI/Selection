@@ -1,3 +1,4 @@
+import { refreshSessionSnapshot, type SessionRefreshResult } from './lib/session-refresh'
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useTheme } from '@/hooks/useTheme'
@@ -30,6 +31,7 @@ import { navigate, routes } from './lib/navigate'
 import { attachmentFromContentRef, toDraftRef } from './lib/drafts'
 import { stripMarkdown } from './utils/text'
 import { coerceInputText, sessionHasLiveGeneration } from './lib/input-text'
+import { isDraftSessionOptionsId } from './lib/draft-session'
 import { getSessionsToRefreshAfterStaleReconnect } from './lib/reconnect-recovery'
 import { formatSessionLoadFailure, shouldTreatSessionLoadFailureAsTransportFallback } from './lib/session-load'
 import { createSessionWithConfirmedProject } from './lib/create-session-with-project'
@@ -84,10 +86,12 @@ import {
   shouldRemoveTaskForToolResult,
 } from '@/components/app-shell/background-task-chip-state'
 import { getFileManagerName } from '@/lib/platform'
+import { windowsCaptionInsetStyle } from '@/lib/windows-caption-inset'
 import { rendererLog } from '@/lib/logger'
 import { ActionRegistryProvider } from '@/actions'
 import { toast } from 'sonner'
 import { assessDelegateCommandSubmission } from '@/components/app-shell/input/delegate-command'
+import { useAdvancedSettings } from '@/hooks/useAdvancedSettings'
 
 type AppState = 'loading' | 'onboarding' | 'reauth' | 'workspace-picker' | 'ready'
 
@@ -290,6 +294,7 @@ function SessionLoadErrorScreen({
 
 export default function App() {
   const { t } = useTranslation()
+  const { swarmAgentsEnabled } = useAdvancedSettings()
 
   // Initialize renderer perf tracking early (debug mode = running from source)
   // Uses useEffect with empty deps to run once on mount before any session switches
@@ -507,22 +512,18 @@ export default function App() {
     })
   }, [])
 
-  const refreshSessionFromServer = useCallback(async (sessionId: string): Promise<'refreshed' | 'preserved_stale_messages' | 'failed'> => {
+  const refreshSessionFromServer = useCallback(async (sessionId: string): Promise<SessionRefreshResult> => {
     try {
-      const fresh = await window.electronAPI.getSessionMessages(sessionId)
-      if (!fresh) return 'failed'
-
-      const prevSession = store.get(sessionAtomFamily(sessionId))
-      const preservedStaleMessages = !!prevSession && prevSession.messages.length > 0 && (!fresh.messages || fresh.messages.length === 0)
-      const nextSession = preservedStaleMessages
-        ? { ...fresh, messages: prevSession.messages }
-        : fresh
-
-      clearStreamingState(sessionId)
-      replaceLoadedSession(nextSession)
-      syncSessionOptionsFromSession(nextSession)
-      void reconcilePermissionModeState(sessionId)
-      return preservedStaleMessages ? 'preserved_stale_messages' : 'refreshed'
+      return await refreshSessionSnapshot(
+        () => store.get(sessionAtomFamily(sessionId)),
+        () => window.electronAPI.getSessionMessages(sessionId),
+        nextSession => {
+          clearStreamingState(sessionId)
+          replaceLoadedSession(nextSession)
+          syncSessionOptionsFromSession(nextSession)
+          void reconcilePermissionModeState(sessionId)
+        },
+      )
     } catch (err) {
       console.error(`[App] Failed to refresh session ${sessionId}:`, err)
       return 'failed'
@@ -1299,7 +1300,7 @@ export default function App() {
       const sessionSnapshot = store.get(sessionAtomFamily(sessionId))
       const sendingMidStream = sessionHasLiveGeneration(sessionSnapshot)
       const optionSnapshot = sessionOptions.get(sessionId)
-      const delegateSubmission = assessDelegateCommandSubmission(message, sendingMidStream)
+      const delegateSubmission = assessDelegateCommandSubmission(message, sendingMidStream, swarmAgentsEnabled)
       if (!delegateSubmission.allowed) return false
       const outgoingMessage = delegateSubmission.message
 
@@ -1473,7 +1474,7 @@ export default function App() {
       }))
       return locallyCommitted
     }
-  }, [sessionOptions, updateSessionById, skills, sources, store, windowWorkspaceSlug])
+  }, [sessionOptions, updateSessionById, skills, sources, store, swarmAgentsEnabled, windowWorkspaceSlug])
 
   /**
    * Unified handler for all session option changes.
@@ -1487,6 +1488,9 @@ export default function App() {
       return next
     })
 
+    // Draft composer options live only in memory until the first send creates a session.
+    if (isDraftSessionOptionsId(sessionId)) return
+
     // Handle persistence/backend for specific options
     if (updates.permissionMode !== undefined) {
       // Sync permission mode change with backend
@@ -1496,7 +1500,7 @@ export default function App() {
       // Sync thinking level change with backend (session-level, persisted)
       window.electronAPI.sessionCommand(sessionId, { type: 'setThinkingLevel', level: updates.thinkingLevel })
     }
-  }, [sessionOptions])
+  }, [])
 
   // Handle input draft changes per session with debounced persistence
   const draftSaveTimeoutRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map())
@@ -2003,6 +2007,8 @@ export default function App() {
     onSetTrafficLightsVisible: (visible: boolean) => {
       window.electronAPI.setTrafficLightsVisible(visible)
     },
+    // Keep overlay headers (image preview, close, zoom) left of Windows caption buttons (#356)
+    windowsCaptionInsetPadding: windowsCaptionInsetStyle()?.paddingRight,
   }), [handleOpenFile, handleOpenUrl, linkInterceptor.openFileExternal])
 
   // Loading state - show splash screen

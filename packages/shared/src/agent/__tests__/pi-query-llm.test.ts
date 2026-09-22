@@ -54,6 +54,56 @@ async function flushMicrotasks(): Promise<void> {
 }
 
 describe('PiAgent.queryLlm — subprocess RPC round-trip', () => {
+  it('cancels the correlated subprocess request and discards a late result', async () => {
+    const agent = new PiAgent(createConfig()); const { sent } = installFakeSubprocess(agent);
+    const controller = new AbortController();
+    const result = agent.queryLlm({ prompt: 'evaluate', purpose: 'progress-evaluation' }, controller.signal);
+    await flushMicrotasks(); const id = sent[0]!.id;
+    controller.abort(); await expect(result).rejects.toThrow('cancelled');
+    expect(sent[1]).toEqual({ type: 'cancel_llm_query', id });
+    (agent as any).handleLine(JSON.stringify({ type: 'llm_query_result', id, result: { text: 'late' } }));
+    expect((agent as any).pendingLlmQueries.size).toBe(0); agent.destroy();
+  });
+
+  it('can cancel before the subprocess becomes ready', async () => {
+    const agent = new PiAgent(createConfig());
+    (agent as any).ensureSubprocess = () => new Promise(() => {});
+    const controller = new AbortController();
+    const result = agent.queryLlm({ prompt: 'evaluate' }, controller.signal);
+    controller.abort(); await expect(result).rejects.toThrow('startup'); agent.destroy();
+  });
+
+  it('rejects a failed interrupt acknowledgement instead of starting another stream', async () => {
+    const agent = new PiAgent(createConfig()); const { sent } = installFakeSubprocess(agent);
+    const result = agent.interruptForProgress();
+    (agent as any).handleLine(JSON.stringify({ type: 'progress_interrupt_result', id: sent[0]!.id, error: 'abort failed' }));
+    await expect(result).rejects.toThrow('abort failed'); agent.destroy();
+  });
+
+  it('rejects a pending progress interrupt immediately when its subprocess exits', async () => {
+    const agent = new PiAgent(createConfig()); installFakeSubprocess(agent);
+    const result = agent.interruptForProgress();
+    (agent as any).handleSubprocessExit(1, null);
+    await expect(result).rejects.toThrow('exited unexpectedly');
+    expect((agent as any).pendingProgressInterrupts.size).toBe(0);
+    agent.destroy();
+  });
+
+  it('does not spawn after disposal during credential loading', async () => {
+    const config = Object.assign(createConfig(), { runtime: { paths: { piServer: '/unused/server.js', node: process.execPath } } });
+    const agent = new PiAgent(config);
+    let credentialsReady!: (value: unknown) => void;
+    (agent as any).getPiAuth = () => new Promise(resolve => { credentialsReady = resolve; });
+    const startup = (agent as any).ensureSubprocess();
+    const settled = Promise.allSettled([startup]);
+    await flushMicrotasks(); agent.destroy();
+    credentialsReady({ provider: 'custom-endpoint', credential: { type: 'api_key', key: 'test-only' } });
+    const [result] = await settled;
+    expect(result?.status).toBe('rejected');
+    if (result?.status === 'rejected') expect(result.reason.message).toContain('startup cancelled');
+    expect((agent as any).subprocess).toBeNull();
+  });
+
   it('propagates the full LLMQueryRequest shape over the llm_query RPC unchanged', async () => {
     const agent = new PiAgent(createConfig());
     const { sent } = installFakeSubprocess(agent);

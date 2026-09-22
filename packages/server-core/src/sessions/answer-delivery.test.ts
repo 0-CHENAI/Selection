@@ -86,8 +86,122 @@ describe('explicit answer delivery lifecycle (#330)', () => {
     expect(loadStoredSession(root, managed.id)?.messages.find(m => m.type === 'user')?.answerRecoveryAttempted).toBe(true)
     expect(managed.messages.find(m => m.answerCommitted)?.content).toBe(markdown)
   })
-  it('ends with an explicit error when recovery also omits delivery', async () => {
+  it('promotes the latest draft when recovery also omits delivery (#403)', async () => {
     install(async function* () { yield { type: 'text_complete', text: '一句补充' }; yield { type: 'complete' } })
+    await manager.sendMessage(managed.id, '解释并验证')
+    expect(prompts).toHaveLength(2)
+    const committed = managed.messages.filter(m => m.answerCommitted)
+    expect(committed).toHaveLength(1)
+    expect(committed[0]?.content).toBe('一句补充')
+    expect(committed[0]?.answerSalvaged).toBe(true)
+    expect(managed.messages.some(m => m.role === 'error')).toBe(false)
+    expect(managed.isProcessing).toBe(false)
+    const stored = loadStoredSession(root, managed.id)!
+    const storedCommitted = stored.messages.filter(m => m.answerCommitted)
+    expect(storedCommitted).toHaveLength(1)
+    expect(storedCommitted[0]?.answerSalvaged).toBe(true)
+    expect(stored.messages.some(m => m.isIntermediate && m.content === '一句补充')).toBe(true)
+    expect(events.filter(e => e.answerCommitted)).toHaveLength(1)
+  })
+  it('recovers the screenshot sequence after four invalid searches without losing the answer', async () => {
+    install(async function* (index) {
+      if (index === 1) {
+        for (let n = 0; n < 4; n++) {
+          yield { type: 'tool_start', toolName: 'WebSearch', toolUseId: `search-${n}`, input: {} }
+          yield { type: 'tool_result', toolUseId: `search-${n}`, result: 'query is required', isError: true }
+        }
+        yield { type: 'text_complete', text: explanation, sdkMessageId: 'draft-sdk' }
+        yield { type: 'pi_turn_anchor', sdkMessageId: 'draft-sdk', sdkTurnAnchor: 'draft-anchor' }
+      } else {
+        yield { type: 'text_complete', text: markdown, sdkMessageId: 'recovery-sdk' }
+        yield { type: 'pi_turn_anchor', sdkMessageId: 'recovery-sdk', sdkTurnAnchor: 'recovery-anchor' }
+      }
+      yield { type: 'complete' }
+    })
+    await manager.sendMessage(managed.id, '解释并验证')
+    const answer = managed.messages.find(m => m.answerCommitted)!
+    expect(answer.content).toBe(markdown)
+    expect(answer.answerSalvaged).toBe(true)
+    expect(managed.messages.filter(m => m.role === 'tool' && m.isError)).toHaveLength(4)
+    expect(managed.messages.some(m => m.role === 'error')).toBe(false)
+    expect((await loadPiTurnAnchors(getSessionPath(root, managed.id))).anchors[answer.id]).toBe('recovery-anchor')
+    expect(loadStoredSession(root, managed.id)?.messages.find(m => m.id === answer.id)?.content).toBe(markdown)
+  })
+  it('durably recovers a regenerated draft with its SDK anchor before publication', async () => {
+    managed.messages = [
+      { id: 'user', role: 'user', content: '解释', timestamp: 1 },
+      { id: 'old', role: 'assistant', content: '旧答案', timestamp: 2 },
+    ]
+    managed.sdkSessionId = 'old-sdk'
+    managed.regenerateTransaction = { runId: 'regenerate', keepThroughMessageId: 'user', rendererTruncated: false,
+      originalMessages: structuredClone(managed.messages), originalSdkSessionId: 'old-sdk' }
+    manager.setEventSink((_channel, _target, event: any) => {
+      events.push(event)
+      if (event.answerCommitted) {
+        expect(managed.regenerateTransaction).toBeUndefined()
+        expect(loadStoredSession(root, managed.id)?.messages.find(m => m.id === event.messageId)?.content).toBe(markdown)
+      }
+    })
+    install(async function* (index) {
+      managed.sdkSessionId = 'new-sdk'
+      yield { type: 'text_complete', text: index === 1 ? explanation : markdown, sdkMessageId: `sdk-${index}` }
+      yield { type: 'pi_turn_anchor', sdkMessageId: `sdk-${index}`, sdkTurnAnchor: `anchor-${index}` }
+      yield { type: 'complete' }
+    })
+    await manager.sendMessage(managed.id, '解释', undefined, undefined, undefined, 'user')
+    const answer = managed.messages.find(m => m.answerCommitted)!
+    expect(answer.content).toBe(markdown)
+    expect(answer.answerSalvaged).toBe(true)
+    expect((await loadPiTurnAnchors(getSessionPath(root, managed.id))).anchors[answer.id]).toBe('anchor-2')
+    expect(managed.messages.some(m => m.id === 'old')).toBe(false)
+    expect(loadStoredSession(root, managed.id)?.sdkSessionId).toBe('new-sdk')
+    expect(events.filter(e => e.answerCommitted)).toHaveLength(1)
+  })
+  for (const waitingFor of ['tool', 'worker', 'aggregation'] as const) {
+    it(`does not salvage around an unfinished ${waitingFor} during recovery`, async () => {
+      install(async function* (index) {
+        yield { type: 'text_complete', text: markdown }
+        if (index === 2) {
+          if (waitingFor === 'tool') yield { type: 'tool_start', toolName: 'Bash', toolUseId: 'pending', input: {} }
+          else if (waitingFor === 'worker') (manager as any).pendingSwarmChildren.set(managed.id, 1)
+          else {
+            managed.orchestrationStatus = 'running'
+            managed.orchestrationId = 'swarm'
+            managed.orchestrationAggregation = { phase: 'waiting-workers', orchestrationId: 'swarm' } as any
+          }
+        }
+        yield { type: 'complete' }
+      })
+      await manager.sendMessage(managed.id, '解释')
+      expect(managed.messages.some(m => m.answerCommitted)).toBe(false)
+      expect(events.some(e => e.answerCommitted)).toBe(false)
+    })
+  }
+  for (const failure of ['cancel', 'storage'] as const) {
+    it(`does not publish a recovered answer after ${failure} during its flush`, async () => {
+      const flush = manager.flushSession.bind(manager)
+      install(async function* () {
+        yield { type: 'text_complete', text: markdown }
+        yield { type: 'complete' }
+      })
+      manager.flushSession = async id => {
+        if (managed.messages.some(m => m.answerSalvaged)) {
+          if (failure === 'cancel') managed.stopRequested = true
+          else throw new Error('disk unavailable')
+        }
+        await flush(id)
+      }
+      await manager.sendMessage(managed.id, '解释')
+      expect(managed.messages.some(m => m.answerCommitted)).toBe(false)
+      expect(events.some(e => e.answerCommitted)).toBe(false)
+      expect(loadStoredSession(root, managed.id)?.messages.some(m => m.answerCommitted)).toBe(false)
+      const errors = managed.messages.filter(m => m.role === 'error')
+      if (failure === 'storage') expect(errors.some(m => m.errorCode === 'answer_persistence_failed')).toBe(true)
+      else expect(errors.some(m => m.errorCode === 'answer_delivery_missing')).toBe(false)
+    })
+  }
+  it('ends with an explicit error when recovery omits delivery and no draft can be salvaged', async () => {
+    install(async function* () { yield { type: 'complete' } })
     await manager.sendMessage(managed.id, '解释并验证')
     expect(prompts).toHaveLength(2)
     expect(managed.messages.some(m => m.answerCommitted)).toBe(false)
@@ -191,6 +305,131 @@ describe('explicit answer delivery lifecycle (#330)', () => {
     await manager.sendMessage(managed.id, '解释')
     expect(events.some(e => e.answerCommitted)).toBe(false)
     expect(managed.messages.some(m => m.answerCommitted)).toBe(false)
+  })
+
+  for (const recovery of [false, true]) {
+    it(`commits a regenerated answer durably before publishing (recovery=${recovery})`, async () => {
+      managed.messages = [
+        { id: 'user', role: 'user', content: '解释', timestamp: 1 },
+        { id: 'old', role: 'assistant', content: '旧答案', timestamp: 2 },
+      ]
+      managed.sdkSessionId = 'old-sdk'
+      const originalMessages = structuredClone(managed.messages)
+      managed.regenerateTransaction = { runId: 'regenerate', keepThroughMessageId: 'user', rendererTruncated: false, originalMessages, originalSdkSessionId: 'old-sdk' }
+      let publishedSnapshot: ReturnType<typeof loadStoredSession> | undefined
+      let transactionAtPublication: typeof managed.regenerateTransaction | undefined = managed.regenerateTransaction
+      manager.setEventSink((_channel, _target, event: any) => {
+        events.push(event)
+        if (event.answerCommitted) {
+          publishedSnapshot = loadStoredSession(root, managed.id)
+          transactionAtPublication = managed.regenerateTransaction
+        }
+      })
+      install(async function* (index) {
+        managed.sdkSessionId = 'new-sdk'
+        if (recovery && index === 1) yield { type: 'text_complete', text: '草稿' }
+        else await control!.submit(submission)
+        yield { type: 'complete' }
+      })
+      await manager.sendMessage(managed.id, '解释', undefined, undefined, undefined, 'user')
+      expect(events.filter(e => e.answerCommitted)).toHaveLength(1)
+      const published = events.find(e => e.answerCommitted)
+      expect(publishedSnapshot?.messages.some(m => m.id === published.messageId && m.content === markdown)).toBe(true)
+      expect(publishedSnapshot?.messages.some(m => m.id === 'old')).toBe(false)
+      expect(publishedSnapshot?.sdkSessionId).toBe('new-sdk')
+      expect(transactionAtPublication).toBeUndefined()
+      expect(managed.messages.some(m => m.id === 'old')).toBe(false)
+      expect(managed.messages.filter(m => m.answerCommitted)).toHaveLength(1)
+      expect(originalMessages[0]?.answerRunId).toBeUndefined()
+      expect(prompts).toHaveLength(recovery ? 2 : 1)
+    })
+  }
+  it('reports a storage failure without asking the model to recover or retry submission', async () => {
+    install(async function* () {
+      const flush = manager.flushSession.bind(manager)
+      manager.flushSession = async () => { throw new Error('disk unavailable') }
+      try { await expect(control!.submit(submission)).rejects.toThrow('disk unavailable') }
+      finally { manager.flushSession = flush }
+      await expect(control!.submit(submission)).rejects.toThrow('persistence')
+      yield { type: 'complete' }
+    })
+    await manager.sendMessage(managed.id, '解释')
+    expect(prompts).toHaveLength(1)
+    expect(managed.messages.filter(m => m.role === 'error').map(m => m.content).join()).toContain('保存失败')
+    expect(managed.messages.some(m => m.content.includes('模型未提交完整正文'))).toBe(false)
+  })
+
+  for (const failure of ['cancel', 'readback'] as const) {
+    it(`restores the original transcript and SDK identity after regenerate ${failure}`, async () => {
+      managed.messages = [
+        { id: 'user', role: 'user', content: '解释', timestamp: 1, answerRunId: 'old-run' },
+        { id: 'old', role: 'assistant', content: '旧答案', timestamp: 2 },
+      ]
+      managed.sdkSessionId = 'old-sdk'
+      install(async function* () {
+        managed.sdkSessionId = 'new-sdk'
+        const flush = manager.flushSession.bind(manager)
+        let injected = false
+        manager.flushSession = async id => {
+          if (injected) return flush(id)
+          injected = true
+          if (failure === 'cancel') { await flush(id); managed.stopRequested = true }
+          // Skip the candidate write to exercise the actual durable readback gate.
+        }
+        try { await expect(control!.submit(submission)).rejects.toThrow(failure === 'cancel' ? 'interrupted' : 'persisted') }
+        finally { manager.flushSession = flush }
+        yield { type: 'complete' }
+      })
+      await manager.regenerateLastResponse(managed.id)
+      for (let i = 0; i < 200 && managed.isProcessing; i++) await new Promise(resolve => setTimeout(resolve, 5))
+      expect(managed.isProcessing).toBe(false)
+      await manager.flushSession(managed.id)
+      const stored = loadStoredSession(root, managed.id)!
+      expect(stored.sdkSessionId).toBe('old-sdk')
+      expect(stored.messages.find(m => m.id === 'old')?.content).toBe('旧答案')
+      expect(stored.messages.find(m => m.id === 'user')?.answerRunId).toBe('old-run')
+      expect(stored.messages.some(m => m.answerCommitted)).toBe(false)
+      expect(events.some(e => e.answerCommitted)).toBe(false)
+      expect(prompts).toHaveLength(1)
+    })
+  }
+  it('retains a durable answer when event publication fails', async () => {
+    manager.setEventSink((_channel, _target, event: any) => {
+      if (event.answerCommitted) throw new Error('window disconnected')
+    })
+    install(async function* () { await control!.submit(submission); yield { type: 'complete' } })
+    await manager.sendMessage(managed.id, '解释')
+    expect(loadStoredSession(root, managed.id)?.messages.filter(m => m.answerCommitted)).toHaveLength(1)
+    expect(managed.messages.some(m => m.role === 'error')).toBe(false)
+  })
+
+  it('supports consecutive real regenerate entry calls and keeps committed output after a late stop', async () => {
+    managed.messages = [
+      { id: 'user', role: 'user', content: '解释', timestamp: 1 },
+      { id: 'old', role: 'assistant', content: '旧答案', timestamp: 2 },
+    ]
+    const runIds: string[] = []
+    install(async function* (index) {
+      managed.sdkSessionId = `sdk-${index}`
+      runIds.push(control!.runId)
+      await control!.submit({ ...submission, markdown: `新答案 ${index}` })
+      if (index === 2) managed.stopRequested = true
+      yield { type: 'complete' }
+    })
+    for (let index = 1; index <= 2; index++) {
+      await manager.regenerateLastResponse(managed.id)
+      for (let i = 0; i < 200 && managed.isProcessing; i++) await new Promise(resolve => setTimeout(resolve, 5))
+      expect(managed.isProcessing).toBe(false)
+      await manager.flushSession(managed.id)
+      const stored = loadStoredSession(root, managed.id)!
+      expect(stored.messages.filter(m => m.answerCommitted).map(m => m.content)).toEqual([`新答案 ${index}`])
+      expect(stored.sdkSessionId).toBe(`sdk-${index}`)
+      const answer = managed.messages.find(m => m.answerCommitted)!
+      expect((await loadPiTurnAnchors(getSessionPath(root, managed.id))).anchors[answer.id]).toBe(submission.sdkTurnAnchor)
+    }
+    expect(new Set(runIds).size).toBe(2)
+    expect(events.filter(e => e.answerCommitted)).toHaveLength(2)
+    expect(events.some(e => e.type === 'messages_restored')).toBe(false)
   })
 
 })

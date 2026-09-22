@@ -10,7 +10,9 @@
     "sharedProjectMemoryEnabled": false,
     "richToolDescriptions": true,
     "browserToolEnabled": true,
-    "allowRemoteEvaluate": true
+    "allowRemoteEvaluate": true,
+    "dagOrchestrationEnabled": false,
+    "swarmAgentsEnabled": false
   },
   "workspaceDefaults": {
     "thinkingLevel": "think",

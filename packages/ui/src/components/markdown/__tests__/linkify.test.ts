@@ -258,7 +258,7 @@ describe('detectLinks', () => {
   it('does not treat prose before a filename as part of the path', () => {
     const links = detectLinks('see the file is config.json please')
     const file = links.find((l) => l.type === 'file')
-    expect(file?.url).toBe('config.json')
+    expect(file).toBeUndefined()
   })
 
   it('lets a full Windows path win over a fuzzy SKILL.md host', () => {

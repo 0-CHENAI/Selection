@@ -1,4 +1,5 @@
 import { cn } from "@/lib/utils"
+import { windowsCaptionEdgeStyle } from "@/lib/windows-caption-inset"
 import { WelcomeStep } from "./WelcomeStep"
 import type { ApiSetupMethod } from "./APISetupStep"
 import { ProviderSelectStep, type ProviderChoice } from "./ProviderSelectStep"
@@ -74,6 +75,7 @@ interface OnboardingWizardProps {
     activePreset?: string
     models?: string[]
     modelImageCaps?: Record<string, boolean>
+    modelThinkingLevels?: Record<string, Array<'off' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'>>
     modelContextWindows?: Record<string, number>
     modelMaxTokens?: Record<string, number>
     customApi?: CustomEndpointApi
@@ -200,8 +202,11 @@ export function OnboardingWizard({
         className
       )}
     >
-      {/* Draggable title bar region for transparent window (macOS) */}
-      <div className="titlebar-drag-region fixed top-0 left-0 right-0 h-[50px] z-titlebar" />
+      {/* Draggable title bar — keep it off the Windows overlay caption buttons. */}
+      <div
+        className="titlebar-drag-region fixed top-0 left-0 right-0 h-[50px] z-titlebar"
+        style={windowsCaptionEdgeStyle()}
+      />
 
       {/* Main content — min-h-full + flex center means: center when content fits,
           natural flow + scroll when content is taller than the viewport (mobile). */}

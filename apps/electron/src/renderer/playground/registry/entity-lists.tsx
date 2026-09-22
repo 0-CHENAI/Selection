@@ -189,7 +189,6 @@ function MockMenuItems() {
   const { MenuItem, Separator } = useMenuComponents()
   return (
     <>
-      <MenuItem onClick={() => console.log('[Playground] Open in New Window')}>Open in New Window</MenuItem>
       <MenuItem onClick={() => console.log('[Playground] Show in Finder')}>Show in Finder</MenuItem>
       <Separator />
       <MenuItem variant="destructive" onClick={() => console.log('[Playground] Delete')}>Delete</MenuItem>

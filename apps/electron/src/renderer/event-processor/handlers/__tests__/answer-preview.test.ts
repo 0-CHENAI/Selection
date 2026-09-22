@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'bun:test'
+import { messageToStored, storedToMessage } from '@craft-agent/core'
 import { processEvent } from '../../processor'
 import type { AgentEvent, SessionState } from '../../types'
 import { groupMessagesByTurn } from '@craft-agent/ui/chat/turn-utils'
@@ -48,4 +49,28 @@ describe('transient answer preview (#350)', () => {
     next.session.messages.push({ id: 'next-user', role: 'user', content: '新问题', timestamp: 20 })
     expect(send(next, preview)).toEqual(next)
   })
+})
+
+
+it('ignores a committed delivery receipt so it cannot close the run', () => {
+  const next = send(initial(), { type: 'text_complete', sessionId: 's', text: 'Answer delivered. Stop here.', answerProtocol: 'explicit-v1', answerRunId: 'run', answerCommitted: true, messageId: 'receipt', timestamp: 10 })
+  expect(next.session.messages.some(m => m.answerCommitted)).toBe(false)
+  expect(next).toEqual(initial())
+})
+
+it('admits live completion even without a painted preview, but never persisted history', () => {
+  const event = { type: 'text_complete', sessionId: 's', text: '```ts\nconst x = 1\n```', answerProtocol: 'explicit-v1', answerRunId: 'run', answerCommitted: true, messageId: 'accepted', timestamp: 10 } as const
+  for (const base of [initial(), send(initial(), preview)]) {
+    const before = Date.now()
+    const state = send(base, event)
+    const response = turns(state)[0]!.response!
+    expect(response.completedRevealStartTime).toBeGreaterThanOrEqual(before)
+    expect(response.isStreaming).toBe(false)
+    const restored = { ...state, session: { ...state.session, messages: state.session.messages.map(messageToStored).map(storedToMessage) } }
+    expect(turns(restored)[0]!.response!.completedRevealStartTime).toBeUndefined()
+    expect(send(state, event)).toEqual(state)
+  }
+  const idle = initial()
+  idle.session.isProcessing = false
+  expect(turns(send(idle, event))[0]!.response!.completedRevealStartTime).toBeUndefined()
 })

@@ -149,3 +149,16 @@ export function normalizeThinkingLevel(value: unknown): ThinkingLevel | undefine
   if (isValidThinkingLevel(value)) return value;
   return undefined;
 }
+
+/** User-declared capability list; undefined preserves the provider defaults. */
+export function modelThinkingLevels(model?: { supportedThinkingLevels?: ThinkingLevel[]; supportsThinking?: boolean }) {
+  if (model?.supportedThinkingLevels !== undefined) {
+    return THINKING_LEVELS.filter(level => model.supportedThinkingLevels!.includes(level.id));
+  }
+  return model?.supportsThinking === false ? [] : THINKING_LEVELS;
+}
+
+export function constrainThinkingLevel(requested: ThinkingLevel, supported?: ThinkingLevel[]): ThinkingLevel {
+  if (supported === undefined || supported.includes(requested)) return requested;
+  return THINKING_LEVEL_IDS.filter(level => supported.includes(level)).at(0) ?? 'off';
+}

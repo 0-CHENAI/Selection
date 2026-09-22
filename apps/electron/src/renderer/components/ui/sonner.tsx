@@ -1,5 +1,6 @@
 import { Toaster as Sonner, type ToasterProps } from "sonner"
 import { useTheme } from "@/context/ThemeContext"
+import { isWebUI, isWindows } from "@/lib/platform"
 
 // Empty fragment to hide all toast icons
 const NoIcon = () => <></>
@@ -33,6 +34,7 @@ const Toaster = ({ ...props }: ToasterProps) => {
         } as React.CSSProperties
       }
       {...props}
+      offset={props.offset ?? (isWindows && !isWebUI ? { top: '96px', right: '16px' } : undefined)}
     />
   )
 }

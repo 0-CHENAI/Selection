@@ -6,12 +6,11 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import type { ActivityItem } from '../TurnCard'
 import { TooltipProvider } from '../../tooltip'
 
-mock.module('../../markdown', () => ({
-  Markdown: () => null,
-}))
-mock.module('../../overlay', () => ({
-  DocumentFormattedMarkdownOverlay: () => null,
-}))
+// Match the Vite asset loader in the Bun test environment. Module mocks are
+// process-wide in Bun, so never null out shared UI modules (../../markdown)
+// — sibling test files need the real implementation.
+mock.module('pdfjs-dist/build/pdf.worker.min.mjs?url', () => ({ default: 'pdf.worker.mjs' }))
+mock.module('react-pdf', () => ({ pdfjs: { GlobalWorkerOptions: {} }, Document: () => null, Page: () => null }))
 
 let TurnCard: typeof import('../TurnCard').TurnCard
 

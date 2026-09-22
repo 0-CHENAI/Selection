@@ -79,10 +79,16 @@ export function parseAnySearchResults(value: unknown, query: string, count: numb
 export class AnySearchSearchProvider implements WebSearchProvider {
   readonly name = 'AnySearch';
 
-  constructor(private readonly apiKey?: string) {}
+  constructor(
+    private readonly apiKey?: string,
+    private readonly resolveApiKey?: () => Promise<string | null | undefined>,
+  ) {}
 
   async search(query: string, count: number): Promise<WebSearchResult[]> {
-    const key = this.apiKey || process.env.ANYSEARCH_API_KEY;
+    const configured = this.resolveApiKey ? (await this.resolveApiKey())?.trim() ?? '' : undefined;
+    const key = configured !== undefined
+      ? configured
+      : (this.apiKey?.trim() || process.env.ANYSEARCH_API_KEY?.trim());
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
       'X-Anysearch-Client': CLIENT_HEADER,

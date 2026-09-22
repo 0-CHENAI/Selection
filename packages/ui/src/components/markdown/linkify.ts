@@ -185,6 +185,7 @@ export function detectLinks(text: string): DetectedLink[] {
   // Note: _ and ~ are valid URL chars so we only strip *
   const trailingMarkdownRe = /\*+$/
   for (const match of urlMatches) {
+    if (!match.schema && KNOWN_EXT_RE.test(match.text) && !/[\/\\]/.test(match.text)) continue
     let matchText = match.text
     let matchUrl = match.url
     let matchEnd = match.lastIndex
@@ -212,7 +213,7 @@ export function detectLinks(text: string): DetectedLink[] {
   let fileMatch
   while ((fileMatch = FILE_PATH_REGEX.exec(text)) !== null) {
     const path = fileMatch[1]
-    if (!path) continue // Skip if no capture group
+    if (!path || !/[\/\\]/.test(path)) continue // A bare filename is not evidence of a local file.
 
     // Calculate actual start position (after any leading whitespace/punctuation)
     const fullMatch = fileMatch[0]

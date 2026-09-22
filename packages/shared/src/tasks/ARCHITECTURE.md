@@ -26,7 +26,7 @@ Saving or instantiating a template never starts a run.
   flag (or preview build) and a Swarm-enabled parent session.
 - `kind: orchestrator` migrates to a normal `session` in v2. Dynamic coordination
   is never a DAG node.
-- Automations / Agent Events are out of scope.
+- Automations are out of scope.
 
 ## 2. v1 / v2 dual runtime
 

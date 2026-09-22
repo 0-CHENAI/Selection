@@ -1,5 +1,17 @@
 # Data Tables Guide
 
+## Quick start
+
+Use the built-in `datatable` renderer by default for tables and structured comparisons, including small tables. Use `spreadsheet` for Excel-style display/export. Use Markdown tables only when the user explicitly requests Markdown/plain-text output or the target format cannot render these blocks. These are fenced reply formats, not tool names.
+
+````
+```datatable
+{"columns":[{"key":"name","label":"Name","type":"text"},{"key":"value","label":"Value","type":"number"}],"rows":[{"name":"Example","value":1}]}
+```
+````
+
+For 20+ rows, use `transform_data` to write JSON in session data, then reference its returned absolute path via `src` instead of inline `rows`. The file contains a rows array or `{"rows":[...]}`; inline columns/title override file metadata. Percent values are decimals (0.15 = 15%); currency values are raw numbers. Consult the relevant section below for transformations, spreadsheet export, and troubleshooting.
+
 This guide covers how to present structured data using datatable and spreadsheet blocks, and how to use the `transform_data` tool for large datasets.
 
 ## Overview
@@ -8,8 +20,8 @@ Selection supports three ways to display tabular data:
 
 | Format | Best For | Interactivity |
 |--------|----------|---------------|
-| **Markdown table** | Small, simple data (3-4 rows) | None |
-| **`datatable` block** | Query results, comparisons, any data users may sort/filter | Sort, filter, group-by, search |
+| **Markdown table** | Explicit Markdown/plain-text requests or targets without rich rendering | None |
+| **`datatable` block** | Default for tables, query results and comparisons, including small datasets | Sort, filter, group-by, search |
 | **`spreadsheet` block** | Financial reports, exports, data users may download as .xlsx | Sort, export to Excel/CSV |
 
 **Key principle:** For datasets with 20+ rows, use the `transform_data` tool to write data to a JSON file and reference it via `"src"` instead of inlining all rows. This dramatically reduces token usage and cost.

@@ -48,6 +48,7 @@ export {
   mapToolEventToActivity,
   SIZE_CONFIG,
   ActivityStatusIcon,
+  HeightPresence,
   type SessionViewerProps,
   type SessionViewerMode,
   type TurnCardProps,
@@ -306,3 +307,8 @@ export {
   Icon_Inbox,
   type IconProps,
 } from './components/icons'
+
+export { renderContentWithBadges } from './components/chat/UserMessageBubble'
+export { markdownToPlainText } from './components/chat/markdown-to-plain-text'
+
+export { PANEL_SPRING } from './lib/panel-motion'

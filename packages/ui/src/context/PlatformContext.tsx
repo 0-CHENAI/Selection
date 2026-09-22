@@ -113,6 +113,13 @@ export interface PlatformActions {
    * No-op on non-macOS platforms or in web viewer.
    */
   onSetTrafficLightsVisible?: (visible: boolean) => void
+
+  /**
+   * CSS padding-right that clears the Windows overlay caption buttons.
+   * Provided only on Windows desktop Electron. Preview headers that sit
+   * under the titlebar must apply this so zoom/close controls stay clickable.
+   */
+  windowsCaptionInsetPadding?: string
 }
 
 const PlatformContext = createContext<PlatformActions>({})

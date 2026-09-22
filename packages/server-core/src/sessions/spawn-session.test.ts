@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from 'bun:test'
+import { afterEach, beforeEach, describe, expect, it, spyOn } from 'bun:test'
 import { mkdtempSync, rmSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
@@ -13,6 +13,10 @@ import {
   FIXED_SWARM_TOKEN_BUDGET,
   type ManagedSwarmAggregationChild,
 } from './spawn-session-orchestration.ts'
+import * as configStorage from '@craft-agent/shared/config/storage'
+
+let swarmAgentsEnabled = true
+let dagOrchestrationEnabled = true
 
 type SpawnInternals = {
   sessions: Map<string, ReturnType<typeof createManagedSession>>
@@ -60,6 +64,8 @@ type SpawnInternals = {
     supplied?: string,
   ) => string | undefined
   spawnQualificationCredentials: Map<string, Map<string, unknown>>
+  runTaskFromTool: SessionManager['runTaskFromTool']
+  taskRunnerLookup?: () => { run: () => void }
 }
 
 function internals(sm: SessionManager): SpawnInternals {
@@ -73,6 +79,10 @@ describe('SessionManager spawn_session wait/background', () => {
   let workerResults: Map<string, string>
 
   beforeEach(() => {
+    swarmAgentsEnabled = true
+    dagOrchestrationEnabled = true
+    spyOn(configStorage, 'getSwarmAgentsEnabled').mockImplementation(() => swarmAgentsEnabled)
+    spyOn(configStorage, 'getDagOrchestrationEnabled').mockImplementation(() => dagOrchestrationEnabled)
     tmpRoot = mkdtempSync(join(tmpdir(), 'sm-spawn-'))
     sm = new SessionManager()
     sendCalls = []
@@ -307,6 +317,33 @@ describe('SessionManager spawn_session wait/background', () => {
       source: 'spawn_session',
       blocker: expect.stringContaining('application restart'),
     })
+  })
+
+  it('rejects every spawn while the app-level Swarm switch is off', async () => {
+    swarmAgentsEnabled = false
+    const parent = buildParent()
+    parent.swarmEnabled = true
+    stubCreateChild()
+    await expect(internals(sm).spawnSessionFromTool(parent, {
+      prompt: 'Split this task',
+      spawnReason: 'automatic',
+      qualification: completeQualification,
+    })).rejects.toThrow('Swarm agents are disabled in Advanced settings')
+    await expect(internals(sm).updateSessionSwarmEnabled(parent.id, true)).rejects.toThrow(
+      'Swarm agents are disabled in Advanced settings',
+    )
+    expect(internals(sm).sessions.has('child')).toBe(false)
+  })
+
+  it('rejects task runs while the app-level DAG switch is off', async () => {
+    dagOrchestrationEnabled = false
+    const api = internals(sm)
+    let ran = false
+    api.taskRunnerLookup = () => ({ run: () => { ran = true } })
+    await expect(api.runTaskFromTool('ws_test', { slug: 'task' })).rejects.toThrow(
+      'DAG orchestration is disabled in Advanced settings',
+    )
+    expect(ran).toBe(false)
   })
 
   it('blocks automatic spawning while disabled and fails closed on incomplete qualification', async () => {

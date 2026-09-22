@@ -1,3 +1,4 @@
+import type { SessionRefreshResult } from '../lib/session-refresh'
 /**
  * Stale Session Recovery Watchdog
  *
@@ -24,13 +25,13 @@ const CHECK_INTERVAL_MS = 30_000   // Check every 30s
 
 interface UseStaleSessionRecoveryOptions {
   store: JotaiStore
-  refreshSessionFromServer: (sessionId: string) => Promise<'refreshed' | 'preserved_stale_messages' | 'failed'>
+  refreshSessionFromServer: (sessionId: string) => Promise<SessionRefreshResult>
 }
 
 /**
  * Tracks the last time any event was received for each session.
  * If a session has isProcessing=true but no events for STALE_THRESHOLD_MS,
- * it is considered stuck and will be refreshed from the server.
+ * the server is queried for authoritative state; inactivity is not a failure verdict.
  */
 export function useStaleSessionRecovery({
   store,
@@ -74,7 +75,7 @@ export function useStaleSessionRecovery({
         }
 
         // Stale — refresh from server
-        console.warn(`[StaleRecovery] Session ${sessionId} stuck in processing for ${Math.round((now - lastEvent) / 1000)}s — refreshing`)
+        console.warn(`[StaleRecovery] Session ${sessionId} has no recent events for ${Math.round((now - lastEvent) / 1000)}s — refreshing`)
 
         refreshingSessionIds.current.add(sessionId)
         try {

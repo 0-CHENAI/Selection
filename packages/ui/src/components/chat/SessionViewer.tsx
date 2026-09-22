@@ -148,6 +148,7 @@ export function SessionViewer({
                       content={turn.message.content}
                       attachments={turn.message.attachments}
                       badges={turn.message.badges}
+                      timestamp={turn.message.timestamp ?? turn.timestamp}
                       onUrlClick={platformActions.onOpenUrl}
                       onFileClick={platformActions.onOpenFile}
                     />

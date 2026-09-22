@@ -64,8 +64,9 @@ export function PanelSlot({
     closePanel(entry.id)
   }, [closePanel, entry.id])
 
-  // Build close button for PanelHeader (via context override)
+  // Show close only when multiple panels are visible side by side.
   const closeButton = useMemo(() => {
+    if (isOnly || isCompact) return undefined
     return (
       <PanelHeaderCenterButton
         icon={<X className="h-4 w-4" />}
@@ -73,7 +74,7 @@ export function PanelSlot({
         tooltip={t("common.close")}
       />
     )
-  }, [handleClose])
+  }, [handleClose, isOnly, isCompact, t])
 
   // Build back button for compact mode — closes the panel to reveal the session list.
   // Same PanelHeaderCenterButton style as X and share, just on the left side.
@@ -86,7 +87,7 @@ export function PanelSlot({
         tooltip={t("common.backToList")}
       />
     )
-  }, [isCompact, handleClose])
+  }, [isCompact, handleClose, t])
 
   // Override AppShellContext so ChatPage/PanelHeader gets our per-panel close button,
   // back button (compact mode), and isFocusedPanel for input field appearance
@@ -113,7 +114,7 @@ export function PanelSlot({
         className={cn(
           'h-full overflow-hidden relative @container/panel',
           !isOnly && isFocusedPanel ? 'shadow-panel-focused z-[1]' : 'shadow-middle z-0',
-          'bg-foreground-2',
+          'bg-foreground-2 has-[[data-source-layout=open]]:bg-transparent has-[[data-source-layout=open]]:shadow-none',
         )}
         style={{
           // In multi-panel, unfocused panels override --background so all

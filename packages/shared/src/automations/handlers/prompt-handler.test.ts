@@ -171,74 +171,6 @@ describe('PromptHandler', () => {
     });
   });
 
-  describe('agent events on the bus are ignored', () => {
-    it('should not process prompts for PreToolUse (agent event)', async () => {
-      const onPromptsReady = jest.fn();
-      const configProvider = createMockConfigProvider({
-        PreToolUse: [{
-          actions: [{ type: 'prompt', prompt: 'Should not fire' }],
-        }],
-      });
-
-      const handler = new PromptHandler(createOptions({ onPromptsReady }), configProvider);
-      handler.subscribe(bus);
-
-      await bus.emit('PreToolUse', {
-        workspaceId: 'test-workspace',
-        timestamp: Date.now(),
-        data: { tool_name: 'Bash' },
-      });
-
-      expect(onPromptsReady).not.toHaveBeenCalled();
-
-      handler.dispose();
-    });
-
-    it('should not process prompts for SessionStart (agent event)', async () => {
-      const onPromptsReady = jest.fn();
-      const configProvider = createMockConfigProvider({
-        SessionStart: [{
-          actions: [{ type: 'prompt', prompt: 'Should not fire' }],
-        }],
-      });
-
-      const handler = new PromptHandler(createOptions({ onPromptsReady }), configProvider);
-      handler.subscribe(bus);
-
-      await bus.emit('SessionStart', {
-        workspaceId: 'test-workspace',
-        timestamp: Date.now(),
-        data: {},
-      });
-
-      expect(onPromptsReady).not.toHaveBeenCalled();
-
-      handler.dispose();
-    });
-
-    it('should not process prompts for PostToolUse (agent event)', async () => {
-      const onPromptsReady = jest.fn();
-      const configProvider = createMockConfigProvider({
-        PostToolUse: [{
-          actions: [{ type: 'prompt', prompt: 'Should not fire' }],
-        }],
-      });
-
-      const handler = new PromptHandler(createOptions({ onPromptsReady }), configProvider);
-      handler.subscribe(bus);
-
-      await bus.emit('PostToolUse', {
-        workspaceId: 'test-workspace',
-        timestamp: Date.now(),
-        data: {},
-      });
-
-      expect(onPromptsReady).not.toHaveBeenCalled();
-
-      handler.dispose();
-    });
-  });
-
   describe('environment variable expansion', () => {
     it('should expand $VAR syntax in prompt text', async () => {
       const onPromptsReady = jest.fn();
@@ -607,47 +539,6 @@ describe('PromptHandler', () => {
       const prompts: PendingPrompt[] = onPromptsReady.mock.calls[0]![0];
       expect(prompts[0]!.automationName).toBe('Review the code');
 
-      handler.dispose();
-    });
-  });
-
-  describe('Agent Event wait / reportBack passthrough', () => {
-    it('sets waitForCompletion when reportBack is true', async () => {
-      const onPromptsReady = jest.fn();
-      const handler = new PromptHandler(createOptions({ onPromptsReady }), createMockConfigProvider());
-      const pending = await handler.dispatchSdkEvent('Stop', {
-        hook_event_name: 'Stop',
-        source_session_id: 'src-1',
-        source_root_session_id: 'root-1',
-        automation_depth: 0,
-      }, [{
-        id: 'stop01',
-        name: 'Relay',
-        actions: [{ type: 'prompt', prompt: 'summarize', reportBack: true, timeoutMs: 12_000 }],
-      }]);
-
-      expect(pending[0]!.waitForCompletion).toBe(true);
-      expect(pending[0]!.reportBack).toBe(true);
-      expect(pending[0]!.timeoutMs).toBe(12_000);
-      expect(pending[0]!.rootSessionId).toBe('root-1');
-      expect(onPromptsReady).toHaveBeenCalledTimes(1);
-      handler.dispose();
-    });
-
-    it('keeps fire-and-forget when wait flags are omitted', async () => {
-      const handler = new PromptHandler(createOptions(), createMockConfigProvider());
-      const pending = await handler.dispatchSdkEvent('PreToolUse', {
-        hook_event_name: 'PreToolUse',
-        tool_name: 'Bash',
-        source_session_id: 'src-1',
-      }, [{
-        id: 'pt01',
-        actions: [{ type: 'prompt', prompt: 'check' }],
-      }]);
-
-      expect(pending[0]!.waitForCompletion).toBe(false);
-      expect(pending[0]!.reportBack).toBe(false);
-      expect(pending[0]!.rootSessionId).toBe('src-1');
       handler.dispose();
     });
   });

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test'
-import { getActiveTurnPreview, type ActivityItem } from '../turn-utils'
+import { getActiveTurnPreview, countWorkRecords, type ActivityItem } from '../turn-utils'
 
 function createActivity(overrides: Partial<ActivityItem>): ActivityItem {
   return {
@@ -12,6 +12,37 @@ function createActivity(overrides: Partial<ActivityItem>): ActivityItem {
 }
 
 describe('getActiveTurnPreview', () => {
+  it('没有意图的搜索调用在等待下一步时保留查询摘要', () => {
+    const activities = [createActivity({
+      toolName: 'WebSearch', displayName: '搜索网页',
+      toolInput: { query: 'AnySearch\n使用方法', count: 5 },
+    })]
+    for (const phase of ['tool_active', 'awaiting', 'streaming'] as const) {
+      expect(getActiveTurnPreview(activities, phase)).toBe('搜索网页 · AnySearch 使用方法')
+    }
+  })
+
+  it('新的无意图工具覆盖旧摘要，且不会展示原始结果或任意参数', () => {
+    const activities = [
+      createActivity({ intent: '旧步骤', timestamp: 1 }),
+      createActivity({ toolName: 'Read', displayName: '读取文件',
+        toolInput: { file_path: '/tmp/report.md' }, timestamp: 2 }),
+    ]
+    expect(getActiveTurnPreview(activities, 'awaiting')).toBe('读取文件 · /tmp/report.md')
+    activities.push(createActivity({ toolName: 'custom_tool', displayName: '检查状态',
+      toolInput: { token: 'secret' }, content: '原始结果', timestamp: 3 }))
+    expect(getActiveTurnPreview(activities, 'awaiting')).toBe('检查状态')
+  })
+
+  it('keeps the latest step title when native answer streaming begins', () => {
+    const activities = [
+      createActivity({ intent: '列出知识库', timestamp: 1 }),
+      createActivity({ intent: '查看设计规范文件夹', timestamp: 2 }),
+    ]
+    expect(getActiveTurnPreview(activities, 'streaming'))
+      .toBe(getActiveTurnPreview(activities, 'tool_active'))
+    expect(getActiveTurnPreview(activities, 'streaming')).toBe('查看设计规范文件夹')
+  })
   it('过程正文不会覆盖该轮已有的语义标题（#141）', () => {
     const activities = [
       createActivity({
@@ -37,6 +68,23 @@ describe('getActiveTurnPreview', () => {
 
     expect(getActiveTurnPreview(activities, 'tool_active'))
       .toBe('定位第五章和第六章')
+  })
+
+  it('submit_answer 不进入工作链标题，仍显示上一步真实工作', () => {
+    const activities = [
+      createActivity({ intent: '查找资料', timestamp: 1 }),
+      createActivity({
+        toolName: 'submit_answer',
+        intent: '提交完整回答',
+        displayName: 'Submit V4.1 Flash Research',
+        toolInput: { answer: '正文' },
+        timestamp: 2,
+      }),
+    ]
+
+    const preview = getActiveTurnPreview(activities, 'awaiting')
+    expect(preview).toBe('查找资料')
+    expect(countWorkRecords(activities)).toBe(1)
   })
 
   it('根据时间戳选择最新工具意图，不依赖活动数组的暂时顺序', () => {
@@ -84,7 +132,7 @@ describe('getActiveTurnPreview', () => {
       .toBe('正在压缩上下文')
   })
 
-  it('完成态和最终回复流式阶段不再使用活动进展标题', () => {
+  it('does not use raw commentary as the streaming step title', () => {
     const activities = [
       createActivity({
         type: 'intermediate',
@@ -106,4 +154,14 @@ describe('getActiveTurnPreview', () => {
 
     expect(getActiveTurnPreview(activities, 'awaiting')).toBeUndefined()
   })
+})
+
+
+it('记录总数包含过程说明，忽略空占位并对工具更新去重', () => {
+  const tools = Array.from({ length: 2 }, (_, i) => createActivity({ id: `tool-${i}`, toolUseId: `call-${i}` }))
+  const notes = Array.from({ length: 3 }, (_, i) => createActivity({ id: `note-${i}`, type: 'intermediate', content: `过程说明${i}` }))
+  expect(countWorkRecords([...tools, ...notes])).toBe(5)
+  expect(countWorkRecords([...tools, ...notes, createActivity({ id: 'empty', type: 'intermediate', content: '\n', status: 'running' })])).toBe(5)
+  expect(countWorkRecords([...tools, ...notes.map(note => ({ ...note, status: 'completed' as const }))])).toBe(5)
+  expect(countWorkRecords([...tools, ...notes, { ...tools[0]!, id: 'updated', status: 'completed' }])).toBe(5)
 })

@@ -28,7 +28,6 @@ describe('PiAgent source guide preparation', () => {
   let guidePath: string;
   let agent: PiAgent;
   let sent: Array<Record<string, unknown>>;
-  let automationCalls: string[];
 
   beforeEach(async () => {
     workspaceRootPath = mkdtempSync(join(tmpdir(), 'selection-source-guide-'));
@@ -40,14 +39,38 @@ describe('PiAgent source guide preparation', () => {
     await agent.setSourceServers({ anysearch: {} as any }, {}, ['anysearch']);
 
     sent = [];
-    automationCalls = [];
     (agent as any).send = (message: Record<string, unknown>) => sent.push(message);
-    (agent as any).emitAutomationEvent = async (event: string) => automationCalls.push(event);
   });
 
   afterEach(() => {
     agent.destroy();
     rmSync(workspaceRootPath, { recursive: true, force: true });
+  });
+
+  it.each(['read', 'bash'])('keeps skill prerequisites pending until %s succeeds', toolName => {
+    const skillPath = join(workspaceRootPath, 'skills', 'writing', 'SKILL.md');
+    const manager = (agent as any).prerequisiteManager;
+    manager.registerSkillPrerequisites([skillPath]);
+    const args = toolName === 'read' ? { path: skillPath } : { command: `cat "${skillPath}"` };
+    const start = (id: string) => (agent as any).handleSubprocessEvent({
+      type: 'tool_execution_start', toolCallId: id, toolName, args,
+    });
+    const end = (id: string, isError: boolean) => (agent as any).handleSubprocessEvent({
+      type: 'tool_execution_end', toolCallId: id, toolName, isError,
+      result: { content: [{ type: 'text', text: isError ? 'read failed' : 'Writing rules' }] },
+    });
+    start('failed-read');
+    expect(manager.hasRead(skillPath)).toBe(false);
+    expect(manager.pendingSkillPaths.has(skillPath)).toBe(true);
+    end('failed-read', true);
+    expect(manager.hasRead(skillPath)).toBe(false);
+    expect(manager.checkPrerequisites('Write').allowed).toBe(false);
+    start('successful-read');
+    end('successful-read', false);
+    expect(manager.hasRead(skillPath)).toBe(true);
+    expect(manager.checkPrerequisites('Write').allowed).toBe(true);
+    agent.resetPrerequisiteState();
+    expect(manager.hasRead(skillPath)).toBe(false);
   });
 
   it('executes source tools immediately when their guide is an empty skeleton', async () => {
@@ -68,7 +91,6 @@ describe('PiAgent source guide preparation', () => {
       requestId: 'source-empty-guide',
       action: 'allow',
     });
-    expect(automationCalls).toEqual(['PreToolUse']);
   });
 
   it('prepares meaningful guides internally and executes only after a new model decision', async () => {
@@ -90,7 +112,6 @@ describe('PiAgent source guide preparation', () => {
       assistantGeneration: 5,
       alreadyPreparedInGeneration: false,
     });
-    expect(automationCalls).toHaveLength(0);
     expect((agent as any).preToolMetadataByCallId.has('call-first')).toBe(false);
 
     const preparation = first.sourceGuide as Record<string, unknown>;
@@ -112,7 +133,6 @@ describe('PiAgent source guide preparation', () => {
     });
     expect(sent.at(-1)?.action).toBe('prepare_source_guide');
     expect((sent.at(-1)?.sourceGuide as Record<string, unknown>).alreadyPreparedInGeneration).toBe(true);
-    expect(automationCalls).toHaveLength(0);
 
     await (agent as any).handlePreToolUseRequest({
       requestId: 'source-real-call',
@@ -126,7 +146,6 @@ describe('PiAgent source guide preparation', () => {
       requestId: 'source-real-call',
       action: 'allow',
     });
-    expect(automationCalls).toEqual(['PreToolUse']);
   });
 
   it('uses the same lazy preparation protocol for API sources', async () => {
@@ -143,7 +162,6 @@ describe('PiAgent source guide preparation', () => {
     const first = sent.at(-1)!;
     expect(first.action).toBe('prepare_source_guide');
     expect((first.sourceGuide as Record<string, unknown>).guideContent).toContain('GET /v2/search');
-    expect(automationCalls).toHaveLength(0);
 
     const preparation = first.sourceGuide as Record<string, unknown>;
     (agent as any).handleLine(JSON.stringify({
@@ -164,7 +182,6 @@ describe('PiAgent source guide preparation', () => {
     });
 
     expect(sent.at(-1)?.action).toBe('allow');
-    expect(automationCalls).toEqual(['PreToolUse']);
   });
 
   it('reports unreadable existing guides as real failures without pretending to execute', async () => {
@@ -184,7 +201,6 @@ describe('PiAgent source guide preparation', () => {
       action: 'block',
     });
     expect(String(sent.at(-1)?.reason)).toContain('cannot be read');
-    expect(automationCalls).toEqual(['PreToolUse']);
   });
 
   it('fails safely if a source somehow reaches execution before guide preparation', async () => {
@@ -322,7 +338,6 @@ describe('PiAgent source guide preparation', () => {
       action: 'block',
     });
     expect(String(sent.at(-1)?.reason)).toContain('no identifier');
-    expect(automationCalls).toHaveLength(0);
   });
 
   it('still requires user approval for a mutation after its source is activated', async () => {
@@ -373,7 +388,6 @@ describe('PiAgent source guide preparation', () => {
       assistantGeneration: 5,
     });
     expect(requestedPermissions).toHaveLength(0);
-    expect(automationCalls).toHaveLength(0);
 
     const preparation = sent.at(-1)?.sourceGuide as Record<string, unknown>;
     (agent as any).handleLine(JSON.stringify({
@@ -394,7 +408,6 @@ describe('PiAgent source guide preparation', () => {
     });
 
     expect(requestedPermissions).toEqual(['mcp__anysearch__create_item']);
-    expect(automationCalls).toEqual(['PermissionRequest', 'PreToolUse']);
     expect(sent.at(-1)).toMatchObject({
       type: 'pre_tool_use_response',
       requestId: 'source-write-real',
@@ -422,7 +435,6 @@ describe('PiAgent source guide preparation', () => {
       action: 'block',
     });
     expect(String(sent.at(-1)?.reason)).toContain('not active');
-    expect(automationCalls).toHaveLength(0);
     expect(surfacedEvents).toEqual([]);
   });
 

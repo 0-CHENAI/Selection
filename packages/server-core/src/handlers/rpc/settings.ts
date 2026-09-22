@@ -40,6 +40,10 @@ export const HANDLED_CHANNELS = [
   RPC_CHANNELS.tools.GET_BROWSER_TOOL_ENABLED,
   RPC_CHANNELS.tools.SET_BROWSER_TOOL_ENABLED,
   RPC_CHANNELS.settings.GET_NETWORK_PROXY,
+  RPC_CHANNELS.settings.GET_ADVANCED,
+  RPC_CHANNELS.settings.SET_DAG_ORCHESTRATION_ENABLED,
+  RPC_CHANNELS.settings.SET_SWARM_AGENTS_ENABLED,
+  RPC_CHANNELS.settings.SET_ANYSEARCH_API_KEY,
   RPC_CHANNELS.dialog.OPEN_FOLDER,
 ] as const
 
@@ -330,5 +334,37 @@ export function registerSettingsHandlers(server: RpcServer, deps: HandlerDeps): 
   server.handle(RPC_CHANNELS.settings.GET_NETWORK_PROXY, async () => {
     const { getNetworkProxySettings } = await import('@craft-agent/shared/config/storage')
     return getNetworkProxySettings()
+  })
+
+  // Advanced capability switches. The API key itself is never returned.
+  server.handle(RPC_CHANNELS.settings.GET_ADVANCED, async () => {
+    const { getDagOrchestrationEnabled, getSwarmAgentsEnabled } = await import('@craft-agent/shared/config/storage')
+    const { getCredentialManager } = await import('@craft-agent/shared/credentials')
+    return {
+      dagOrchestrationEnabled: getDagOrchestrationEnabled(),
+      swarmAgentsEnabled: getSwarmAgentsEnabled(),
+      anySearchApiKeyConfigured: await getCredentialManager().hasAnySearchApiKey(),
+    }
+  })
+
+  server.handle(RPC_CHANNELS.settings.SET_DAG_ORCHESTRATION_ENABLED, async (_ctx, enabled: boolean) => {
+    if (typeof enabled !== 'boolean') throw new Error('DAG orchestration setting must be a boolean')
+    const { setDagOrchestrationEnabled } = await import('@craft-agent/shared/config/storage')
+    setDagOrchestrationEnabled(enabled)
+    return { success: true }
+  })
+
+  server.handle(RPC_CHANNELS.settings.SET_SWARM_AGENTS_ENABLED, async (_ctx, enabled: boolean) => {
+    if (typeof enabled !== 'boolean') throw new Error('Swarm agents setting must be a boolean')
+    const { setSwarmAgentsEnabled } = await import('@craft-agent/shared/config/storage')
+    setSwarmAgentsEnabled(enabled)
+    return { success: true }
+  })
+
+  server.handle(RPC_CHANNELS.settings.SET_ANYSEARCH_API_KEY, async (_ctx, apiKey: string) => {
+    if (typeof apiKey !== 'string') throw new Error('AnySearch API key must be a string')
+    const { getCredentialManager } = await import('@craft-agent/shared/credentials')
+    await getCredentialManager().setAnySearchApiKey(apiKey)
+    return { configured: apiKey.trim().length > 0 }
   })
 }

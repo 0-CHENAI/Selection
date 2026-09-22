@@ -17,9 +17,7 @@ import { getDefaultModelsForConnection } from '../config/llm-connections.ts';
 import type { ModelDefinition } from '../config/models.ts';
 import { Cron } from 'croner';
 import type { ValidationResult, ValidationIssue } from '../config/validators.ts';
-import type { AutomationsConfig, AutomationsValidationResult, DecisionAction, PromptAction } from './types.ts';
-import { AGENT_EVENTS } from './types.ts';
-import { MAX_PROMPT_WAIT_TIMEOUT_MS } from './constants.ts';
+import type { AutomationsConfig, AutomationsValidationResult } from './types.ts';
 import { MAX_CONDITION_DEPTH_EXCLUSIVE, CONDITION_DEPTH_WARNING_THRESHOLD } from './conditions-constants.ts';
 
 /**
@@ -160,47 +158,6 @@ function runMatcherSemanticValidations(
             });
           }
 
-          if (action && typeof action === 'object' && 'type' in action && action.type === 'prompt') {
-            const promptAction = action as PromptAction;
-            if (promptAction.timeoutMs !== undefined && (promptAction.timeoutMs < 1 || promptAction.timeoutMs > MAX_PROMPT_WAIT_TIMEOUT_MS)) {
-              errors.push({
-                file,
-                path: `automations.${event}[${i}].actions[${j}].timeoutMs`,
-                message: `timeoutMs must be between 1 and ${MAX_PROMPT_WAIT_TIMEOUT_MS}`,
-                severity: 'error',
-              });
-            }
-            if (promptAction.reportBack === true && !(AGENT_EVENTS as readonly string[]).includes(event)) {
-              warnings.push({
-                file,
-                path: `automations.${event}[${i}].actions[${j}].reportBack`,
-                message: 'reportBack only applies to agent events that carry a source session — it will be ignored here',
-                severity: 'warning',
-                suggestion: 'Use reportBack on Stop (most reliable) or another agent event with a source session',
-              });
-            }
-          }
-
-          if (action && typeof action === 'object' && 'type' in action && action.type === 'decision') {
-            const decisionAction = action as DecisionAction;
-            if (event !== 'PreToolUse') {
-              errors.push({
-                file,
-                path: `automations.${event}[${i}].actions[${j}]`,
-                message: 'decision actions are only valid on PreToolUse events',
-                severity: 'error',
-                suggestion: 'Move this matcher under automations.PreToolUse',
-              });
-            }
-            if (decisionAction.decision === 'modify' && (decisionAction.updatedInput === undefined || Object.keys(decisionAction.updatedInput).length === 0)) {
-              errors.push({
-                file,
-                path: `automations.${event}[${i}].actions[${j}].updatedInput`,
-                message: 'decision: "modify" requires a non-empty updatedInput',
-                severity: 'error',
-              });
-            }
-          }
         }
       }
 

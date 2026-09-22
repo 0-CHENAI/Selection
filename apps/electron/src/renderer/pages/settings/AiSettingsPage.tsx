@@ -14,8 +14,6 @@ import { useTranslation } from 'react-i18next'
 import { PanelHeader } from '@/components/app-shell/PanelHeader'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Button } from '@/components/ui/button'
-import { HeaderMenu } from '@/components/ui/HeaderMenu'
-import { routes } from '@/lib/navigate'
 import { X, MoreHorizontal, Pencil, Trash2, Star, ChevronDown, ChevronRight, CheckCircle2, XCircle, AlertTriangle, RefreshCcw, Settings2, MessageSquareMore, Zap, Clock, Check } from 'lucide-react'
 import type { CredentialHealthStatus, CredentialHealthIssue } from '../../../shared/types'
 import { Spinner, FullscreenOverlayBase, Tooltip, TooltipTrigger, TooltipContent } from '@craft-agent/ui'
@@ -23,7 +21,7 @@ import { useSetAtom } from 'jotai'
 import { fullscreenOverlayOpenAtom } from '@/atoms/overlay'
 import { motion, AnimatePresence } from 'motion/react'
 import type { LlmConnectionWithStatus, ThinkingLevel, WorkspaceSettings, Workspace } from '../../../shared/types'
-import { DEFAULT_THINKING_LEVEL, THINKING_LEVELS } from '@craft-agent/shared/agent/thinking-levels'
+import { DEFAULT_THINKING_LEVEL, THINKING_LEVELS, modelThinkingLevels, constrainThinkingLevel } from '@craft-agent/shared/agent/thinking-levels'
 import type { DetailsPageMeta } from '@/lib/navigation-registry'
 import {
   DropdownMenu,
@@ -38,6 +36,7 @@ import {
   StyledDropdownMenuSubContent,
 } from '@/components/ui/styled-dropdown'
 import { cn } from '@/lib/utils'
+import { windowsCaptionEdgeStyle } from '@/lib/windows-caption-inset'
 import { ConnectionIcon } from '@/components/icons/ConnectionIcon'
 
 import {
@@ -94,8 +93,8 @@ function getModelOptionsForConnection(
     }
     return {
       value: m.id,
-      label: m.name,
-      description: m.description,
+      label: m.name?.trim() || m.id,
+      description: m.description ?? '',
       descriptionKey: unavailable ? 'chat.modelPicker.unavailable' : m.descriptionKey,
       unavailable,
     }
@@ -107,6 +106,13 @@ function getModelOptionsForConnection(
   }
 
   return options
+}
+
+function connectionThinkingLevels(connection: LlmConnectionWithStatus | undefined, modelId: string) {
+  const model = connection?.models?.find(m => connectionModelIdsMatch(typeof m === 'string' ? m : m.id, modelId))
+  const levels = modelThinkingLevels(typeof model === 'object' ? model : undefined)
+  // A model without reasoning still has the effective "off" setting.
+  return levels.length ? levels : THINKING_LEVELS.filter(level => level.id === 'off')
 }
 
 export const meta: DetailsPageMeta = {
@@ -550,6 +556,11 @@ function WorkspaceOverrideCard({ workspace, llmConnections, onSettingsChange, li
     const connSlug = settings?.defaultLlmConnection
     return connSlug ? llmConnections.find(c => c.slug === connSlug) : llmConnections.find(c => c.isDefault)
   }, [settings?.defaultLlmConnection, llmConnections])
+  const workspaceThinkingLevels = connectionThinkingLevels(workspaceEffectiveConnection,
+    settings?.model || workspaceEffectiveConnection?.defaultModel || '')
+  const effectiveWorkspaceThinking = currentThinking === 'global' ? 'global'
+    : constrainThinkingLevel(currentThinking as ThinkingLevel, workspaceThinkingLevels.map(level => level.id))
+
 
   // Get summary text for collapsed state
   const getSummary = () => {
@@ -563,7 +574,7 @@ function WorkspaceOverrideCard({ workspace, llmConnections, onSettingsChange, li
       parts.push(getModelShortName(settings.model))
     }
     if (settings?.thinkingLevel) {
-      const level = THINKING_LEVELS.find(l => l.id === settings.thinkingLevel)
+      const level = THINKING_LEVELS.find(l => l.id === effectiveWorkspaceThinking)
       parts.push(level ? t(level.nameKey) : settings.thinkingLevel)
     }
     return parts.join(' · ')
@@ -647,11 +658,11 @@ function WorkspaceOverrideCard({ workspace, llmConnections, onSettingsChange, li
               <SettingsMenuSelectRow
                 label={t("settings.ai.thinking")}
                 description={t("settings.ai.thinkingDesc")}
-                value={currentThinking}
+                value={effectiveWorkspaceThinking}
                 onValueChange={handleThinkingChange}
                 options={[
                   { value: 'global', label: t("settings.ai.useDefault"), description: t("settings.ai.inheritFromApp") },
-                  ...THINKING_LEVELS.map(({ id, nameKey, descriptionKey }) => ({
+                  ...workspaceThinkingLevels.map(({ id, nameKey, descriptionKey }) => ({
                     value: id,
                     label: t(nameKey),
                     description: t(descriptionKey),
@@ -696,6 +707,7 @@ export default function AiSettingsPage() {
     activePreset?: string
     models?: string[]
     modelImageCaps?: Record<string, boolean>
+    modelThinkingLevels?: Record<string, Array<'off' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'>>
     modelContextWindows?: Record<string, number>
     modelMaxTokens?: Record<string, number>
     customApi?: CustomEndpointApi
@@ -931,6 +943,7 @@ export default function AiSettingsPage() {
       activePreset,
       models: modelIds,
       modelImageCaps,
+      modelThinkingLevels: Object.fromEntries((connection.models ?? []).flatMap(m => typeof m !== 'string' && (m.supportedThinkingLevels !== undefined || m.supportsThinking !== undefined) ? [[m.id, m.supportedThinkingLevels ?? (m.supportsThinking ? THINKING_LEVELS.map(level => level.id) : [])]] : [])),
       modelContextWindows,
       modelMaxTokens,
       customApi: connection.customEndpoint?.api,
@@ -1053,6 +1066,8 @@ export default function AiSettingsPage() {
   }, [llmConnections])
 
   const defaultModel = defaultConnection?.defaultModel ?? ''
+  const defaultThinkingLevels = connectionThinkingLevels(defaultConnection, defaultModel)
+  const effectiveDefaultThinking = constrainThinkingLevel(defaultThinking, defaultThinkingLevels.map(level => level.id))
 
   // App-level default handlers
   const handleDefaultModelChange = useCallback(async (model: string) => {
@@ -1091,7 +1106,7 @@ export default function AiSettingsPage() {
 
   return (
     <div className="h-full flex flex-col">
-      <PanelHeader title={t("settings.ai.title")} actions={<HeaderMenu route={routes.view.settings('ai')} />} />
+      <PanelHeader title={t("settings.ai.title")} />
       <div className="flex-1 min-h-0 mask-fade-y">
         <ScrollArea className="h-full">
           <div className="px-5 py-7 max-w-3xl mx-auto">
@@ -1135,9 +1150,9 @@ export default function AiSettingsPage() {
                   <SettingsMenuSelectRow
                     label={t("settings.ai.thinking")}
                     description={t("settings.ai.thinkingDesc")}
-                    value={defaultThinking}
+                    value={effectiveDefaultThinking}
                     onValueChange={(v) => handleDefaultThinkingChange(v as ThinkingLevel)}
-                    options={THINKING_LEVELS.map(({ id, nameKey, descriptionKey }) => ({
+                    options={defaultThinkingLevels.map(({ id, nameKey, descriptionKey }) => ({
                       value: id,
                       label: t(nameKey),
                       description: t(descriptionKey),
@@ -1233,7 +1248,7 @@ export default function AiSettingsPage() {
                 />
                 <div
                   className="fixed top-0 right-0 h-[50px] flex items-center pr-5 [-webkit-app-region:no-drag]"
-                  style={{ zIndex: 'var(--z-fullscreen, 350)' }}
+                  style={{ zIndex: 'var(--z-fullscreen, 350)', ...windowsCaptionEdgeStyle() }}
                 >
                   <button
                     onClick={handleCloseApiSetup}

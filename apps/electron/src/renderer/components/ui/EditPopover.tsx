@@ -38,6 +38,7 @@ import {
   creationJobsAtom,
   findActiveCreationJob,
   findLatestCreationJob,
+  findResumableCreationJob,
   getOrCreateCreationSession,
   patchCreationJobAtom,
   restartCreationJobAttemptAtom,
@@ -45,6 +46,7 @@ import {
   type CreationKind,
 } from '@/atoms/creation-jobs'
 import { readCreationIds } from '@/lib/creation-job-validation'
+import type { AutomationCreationKey } from '../automations/creation-context'
 import { ChatDisplay } from '../app-shell/ChatDisplay'
 import { HeaderIconButton } from './HeaderIconButton'
 import {
@@ -57,10 +59,18 @@ import {
   clampPopoverSize,
   clampPopoverSizeFromOrigin,
   clampVisualPopoverOffset,
+  EDIT_POPOVER_STATUS_I18N,
   getCompactInputMaxHeight,
   hasPopoverDragMoved,
   offsetToPinVisualOrigin,
   popoverBodyClassName,
+  POPOVER_RESIZE_EDGE_PX,
+  resolveEditPopoverJobStatus,
+  resolveEditPopoverOpenChange,
+  resolveEditPopoverPositioningSize,
+  shouldAvoidEditPopoverCollisions,
+  sizeFromResizeEdge,
+  type PopoverResizeEdge,
 } from './edit-popover-layout'
 
 /** Rotating placeholder keys for compact mode input - short, action-oriented */
@@ -127,7 +137,7 @@ export type EditContextKey =
   | 'add-label'
   | 'edit-views'
   | 'edit-tool-icons'
-  | 'add-automation'
+  | AutomationCreationKey
   | 'automation-config'
 
 /**
@@ -618,17 +628,21 @@ const EDIT_CONFIGS: Record<EditContextKey, (location: string) => Omit<EditConfig
     creationKind: 'automation',
   }),
 
+  'add-automation-scheduled': (location) => automationCreationConfig(location, 'scheduled'),
+  'add-automation-event': (location) => automationCreationConfig(location, 'event'),
+  'add-automation-agentic': (location) => automationCreationConfig(location, 'agentic'),
+
   'automation-config': (location) => ({
     context: {
       label: 'Automation Configuration',
       filePath: `${location}/automations.json`,
       context:
         'The user is editing automations.json which configures automations. ' +
-        'Structure: { version: 2, automations: { EventName: [{ name?, matcher?, cron?, timezone?, permissionMode?, labels?, conditions?, maxDepth?, actions: [...] }] } }. ' +
+        'Structure: { version: 2, automations: { EventName: [{ name?, matcher?, cron?, timezone?, permissionMode?, labels?, conditions?, actions: [...] }] } }. ' +
         'Each event maps to an array of matcher entries. Actions may be: ' +
-        '{ type: "prompt", prompt, waitForCompletion?, reportBack?, timeoutMs?, llmConnection?, model?, thinkingLevel? }, ' +
-        '{ type: "webhook", url, method?, headers?, body?, bodyFormat?, auth?, captureResponse? }, or ' +
-        '{ type: "decision", decision: "block"|"modify", reason?, updatedInput? } (PreToolUse only; tighten-only, no allow). ' +
+        '{ type: "prompt", prompt, llmConnection?, model?, thinkingLevel? }, ' +
+        '{ type: "webhook", url, method?, headers?, body?, bodyFormat?, auth?, captureResponse? }. ' +
+        'Supported events: SchedulerTick, LabelAdd, LabelRemove, LabelConfigChange, PermissionModeChange, FlagChange, SessionStatusChange. ' +
         'Read ~/.craft-agent/docs/automations.md for full format reference. ' +
         'After editing, confirm clearly what changed.',
     },
@@ -639,6 +653,38 @@ const EDIT_CONFIGS: Record<EditContextKey, (location: string) => Omit<EditConfig
     systemPromptPreset: 'mini',
     inlineExecution: true,
   }),
+}
+
+function automationCreationConfig(location: string, category: 'scheduled' | 'event' | 'agentic') {
+  const base = EDIT_CONFIGS['add-automation'](location)
+  const variants = {
+    scheduled: { label: 'Add Scheduled Automation', title: 'editPopover.label.addScheduledAutomation', example: 'editPopover.example.addScheduledAutomation',
+      instruction: 'Create a scheduled automation using SchedulerTick, cron and an explicit timezone.' },
+    event: { label: 'Add Event Automation', title: 'editPopover.label.addEventAutomation', example: 'editPopover.example.addEventAutomation',
+      instruction: 'Create an app-event automation (LabelAdd, LabelRemove, LabelConfigChange, PermissionModeChange, FlagChange or SessionStatusChange), not a scheduled or agent-event rule.' },
+    agentic: { label: 'Add Agent Event Automation', title: 'editPopover.label.addAgentAutomation', example: 'editPopover.example.addAgentAutomation',
+      instruction: 'Create an agent-runtime event automation, such as PreToolUse, PostToolUse, PostToolUseFailure or Stop, not a scheduled or app-event rule.' },
+  }
+  const variant = variants[category]
+  return {
+    ...base,
+    context: { ...base.context, label: variant.label,
+      context: `${base.context.context} ${variant.instruction} Preserve all existing automation IDs and configurations. This is a new rule, not an edit of a previous rule.` },
+    displayLabelKey: variant.title,
+    exampleKey: variant.example,
+  }
+}
+
+/** Scope detail edits to one stable rule while retaining the shared configuration file. */
+export function getAutomationEditConfig(location: string, automation: { id: string; name: string }) {
+  const config = getEditConfig('automation-config', location)
+  return {
+    ...config,
+    contextKey: `automation-config:${automation.id}`,
+    displayLabel: `${config.displayLabel}: ${automation.name}`,
+    context: { ...config.context,
+      context: `${config.context.context} Edit only the automation with ID ${JSON.stringify(automation.id)} and name ${JSON.stringify(automation.name)}. Preserve its ID and all other automation entries. If this ID is missing, report that rather than editing another rule.` },
+  }
 }
 
 /**
@@ -852,6 +898,29 @@ export function EditPopover({
       setInternalOpen(value)
     }
   }, [controlledOnOpenChange, isControlled])
+  const allowCloseRef = useRef(false)
+  const [focused, setFocused] = useState(true)
+  const closePopover = useCallback(() => {
+    allowCloseRef.current = true
+    setFocused(false)
+    setOpen(false)
+  }, [setOpen])
+  const handleOpenChange = useCallback((next: boolean) => {
+    const action = resolveEditPopoverOpenChange(next, allowCloseRef.current)
+    if (action === 'open') {
+      allowCloseRef.current = false
+      setFocused(true)
+      setOpen(true)
+      return
+    }
+    if (action === 'close') {
+      allowCloseRef.current = false
+      setFocused(false)
+      setOpen(false)
+      return
+    }
+    setFocused(false)
+  }, [setOpen])
   const previousFocusRef = useRef<HTMLElement | null>(null)
   const wasOpenRef = useRef(false)
   useLayoutEffect(() => {
@@ -872,6 +941,7 @@ export function EditPopover({
   const restartCreationAttempt = useSetAtom(restartCreationJobAttemptAtom)
   const resolvedContextKey = contextKey || `${context.label}:${context.filePath}`
   const creationSessionPromiseRef = useRef<Promise<string> | null>(null)
+  const restoredCreationScopeRef = useRef<string | null>(null)
 
   // Session ID for inline execution (created on first message)
   const [inlineSessionId, setInlineSessionId] = useState<string | null>(null)
@@ -932,16 +1002,29 @@ export function EditPopover({
   }, [creationKind, inlineSessionId, isProcessing])
 
   const handleEscapeKeyDown = useCallback((event: KeyboardEvent) => {
-    if (creationKind || !isProcessing) return
     event.preventDefault()
+    if (creationKind || !isProcessing) return
     if (handleEscapePress()) handleStopGeneration()
   }, [creationKind, handleEscapePress, handleStopGeneration, isProcessing])
 
+  const blurFloatingWindow = useCallback(() => {
+    setFocused(false)
+    const active = document.activeElement
+    if (active instanceof HTMLElement && popoverRef.current?.contains(active)) {
+      active.blur()
+    }
+  }, [])
+
   const handleInteractOutside = useCallback((event: Event) => {
-    if (creationKind || !isProcessing) return
     event.preventDefault()
+    blurFloatingWindow()
+    if (creationKind || !isProcessing) return
     handleEscapePress()
-  }, [creationKind, handleEscapePress, isProcessing])
+  }, [blurFloatingWindow, creationKind, handleEscapePress, isProcessing])
+
+  const preventDismiss = useCallback((event: Event) => {
+    event.preventDefault()
+  }, [])
 
   // Drag / resize / collapse for the floating create window (#8)
   const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 })
@@ -965,7 +1048,16 @@ export function EditPopover({
   )
   const expandedSizeRef = useRef(containerSize)
   const [isResizing, setIsResizing] = useState(false)
-  const resizeStartRef = useRef({ x: 0, y: 0, width: 0, height: 0, originX: 0, originY: 0 })
+  const radixBoxRef = useRef(containerSize)
+  const resizeStartRef = useRef({
+    x: 0,
+    y: 0,
+    width: 0,
+    height: 0,
+    originX: 0,
+    originY: 0,
+    edge: 'se' as PopoverResizeEdge,
+  })
 
   const readViewport = useCallback(() => ({
     width: window.innerWidth,
@@ -1000,6 +1092,8 @@ export function EditPopover({
       readViewport(),
     )
     expandedSizeRef.current = next
+    radixBoxRef.current = next
+    setFocused(true)
     setContainerSize(next)
   }, [open, width, readViewport])
 
@@ -1012,10 +1106,22 @@ export function EditPopover({
         if (!collapsed) expandedSizeRef.current = next
         return next
       })
+      const rect = popoverRef.current?.getBoundingClientRect()
+      if (!rect) return
+      const size = collapsed
+        ? clampPopoverSize(expandedSizeRef.current, viewport, true)
+        : clampPopoverSize(expandedSizeRef.current, viewport)
+      const next = clampVisualPopoverOffset(
+        dragOffsetRef.current,
+        { left: rect.left, top: rect.top },
+        size,
+        viewport,
+      )
+      if (next.x !== dragOffsetRef.current.x || next.y !== dragOffsetRef.current.y) applyOffset(next)
     }
     window.addEventListener('resize', onResize)
     return () => window.removeEventListener('resize', onResize)
-  }, [open, collapsed, readViewport])
+  }, [applyOffset, collapsed, open, readViewport])
 
   const handleDragStart = useCallback((e: React.MouseEvent) => {
     if ((e.target as HTMLElement).closest('button')) return
@@ -1027,6 +1133,7 @@ export function EditPopover({
       offsetX: dragOffset.x,
       offsetY: dragOffset.y,
     }
+    setFocused(true)
     setDragArmed(true)
   }, [dragOffset])
 
@@ -1067,12 +1174,13 @@ export function EditPopover({
     }
   }, [dragArmed, readViewport, applyOffset])
 
-  const handleResizeStart = useCallback((e: React.MouseEvent) => {
+  const handleResizeStart = useCallback((edge: PopoverResizeEdge, e: React.MouseEvent) => {
     e.preventDefault()
     e.stopPropagation()
     if (collapsed) return
-    setIsResizing(true)
+    setFocused(true)
     const origin = readPlacement()?.origin ?? { x: e.clientX, y: e.clientY }
+    pinOriginRef.current = { left: origin.x, top: origin.y }
     resizeStartRef.current = {
       x: e.clientX,
       y: e.clientY,
@@ -1080,7 +1188,9 @@ export function EditPopover({
       height: containerSize.height,
       originX: origin.x,
       originY: origin.y,
+      edge,
     }
+    setIsResizing(true)
   }, [containerSize, collapsed, readPlacement])
 
   useEffect(() => {
@@ -1088,10 +1198,17 @@ export function EditPopover({
 
     const handleMouseMove = (e: MouseEvent) => {
       const next = clampPopoverSizeFromOrigin(
-        {
-          width: resizeStartRef.current.width + e.clientX - resizeStartRef.current.x,
-          height: resizeStartRef.current.height + e.clientY - resizeStartRef.current.y,
-        },
+        sizeFromResizeEdge(
+          {
+            width: resizeStartRef.current.width,
+            height: resizeStartRef.current.height,
+          },
+          {
+            x: e.clientX - resizeStartRef.current.x,
+            y: e.clientY - resizeStartRef.current.y,
+          },
+          resizeStartRef.current.edge,
+        ),
         readViewport(),
         { x: resizeStartRef.current.originX, y: resizeStartRef.current.originY },
       )
@@ -1129,8 +1246,7 @@ export function EditPopover({
 
   // Only correct a user-dragged card after collapse/expand. Running on first
   // open would clamp an unpositioned portal (0,0) and jump the window (#123).
-  // Radix can flip sides after the size change, so keep the pinned origin
-  // through its positioning frame instead of clearing it synchronously.
+  // The Radix box is frozen after open so resize does not re-center (#385).
   useLayoutEffect(() => {
     if (!open || isDragging || dragArmed || isResizing) return
     const pin = pinOriginRef.current
@@ -1202,9 +1318,17 @@ export function EditPopover({
   // Reopening a creation context reattaches to its latest hidden session. Keep
   // listening while open so a concurrently-created session can attach here too.
   useEffect(() => {
-    if (!open || !creationKind || !workspace?.id) return
-    const latest = findLatestCreationJob(creationJobs, workspace.id, resolvedContextKey)
-    setInlineSessionId(latest?.sessionId || null)
+    if (!open || !creationKind || !workspace?.id) {
+      restoredCreationScopeRef.current = null
+      return
+    }
+    const scope = `${workspace.id}:${resolvedContextKey}`
+    const reopening = restoredCreationScopeRef.current !== scope
+    restoredCreationScopeRef.current = scope
+    const latest = findResumableCreationJob(creationJobs, workspace.id, resolvedContextKey)
+    // Keep the final response visible while this dialog is open. On the next
+    // opening (or next creation request), a completed automation starts fresh.
+    if (reopening || latest) setInlineSessionId(latest?.sessionId || null)
     if (latest?.status === 'failed' && latest.request) {
       setInputDraft((current) => current || latest.request || '')
     }
@@ -1277,6 +1401,9 @@ export function EditPopover({
         sessionId = acquired.sessionId || null
         setInlineSessionId(sessionId)
       } else {
+        // A new automation gets a fresh hidden session, even when the previous
+        // successful creation is still displayed until the restore effect runs.
+        if (creationKind === 'automation') sessionId = null
         let baseline: string[]
         try {
           baseline = await readCreationIds(creationKind, workspace.id)
@@ -1413,10 +1540,28 @@ export function EditPopover({
     const url = `craftagents://action/new-session?input=${encodedInput}&send=true&mode=${permissionMode}&badges=${encodedBadges}${workdirParam}${modelParam}${systemPromptParam}`
 
     window.electronAPI.openUrl(url)
-    setOpen(false)
-  }, [context, displayLabel, workingDirectory, model, systemPromptPreset, permissionMode, setOpen])
+    closePopover()
+  }, [closePopover, context, displayLabel, workingDirectory, model, systemPromptPreset, permissionMode])
 
-  const positioningSize = collapsed ? expandedSizeRef.current : containerSize
+  const jobStatus = resolveEditPopoverJobStatus({
+    isProcessing,
+    waitingInput: Boolean(pendingPermission || pendingCredential),
+    hasWork: Boolean(inlineSessionId),
+    lastMessageRole: inlineSession?.lastMessageRole,
+    creationStatus: creationKind
+      ? findLatestCreationJob(creationJobs, workspace?.id || '', resolvedContextKey)?.status
+      : undefined,
+  })
+
+  // Keep the Radix box at the size from last open so growing the painted card
+  // cannot re-center a `align=center` popover and flash the top-left (#385).
+  // Collapsed strips must collide as themselves, or a 480px box can leave the
+  // viewport when the host page reflows after MCP/skill setup finishes (#394).
+  const positioningSize = resolveEditPopoverPositioningSize(
+    collapsed,
+    containerSize,
+    radixBoxRef.current,
+  )
 
   return (
     <>
@@ -1431,7 +1576,7 @@ export function EditPopover({
           />
         )}
       </AnimatePresence>
-      <Popover open={open} onOpenChange={setOpen} modal={modal}>
+      <Popover open={open} onOpenChange={handleOpenChange} modal={modal}>
         <PopoverTrigger asChild className={triggerClassName}>
           {trigger}
         </PopoverTrigger>
@@ -1443,9 +1588,10 @@ export function EditPopover({
             // Keep Radix on one positioning coordinate system while dragging.
             // Flipping collision handling on the first move rebases the popover
             // before our translate is applied, which makes it jump to an edge.
-            avoidCollisions
-            className="pointer-events-none p-0"
+            avoidCollisions={shouldAvoidEditPopoverCollisions(collapsed)}
+            className="pointer-events-none overflow-visible p-0"
             data-testid="edit-popover"
+            data-focused={focused ? 'true' : 'false'}
             style={{
               width: `min(${positioningSize.width}px, calc(100vw - ${VIEWPORT_MARGIN * 2}px))`,
               height: `min(${positioningSize.height}px, calc(100vh - ${VIEWPORT_MARGIN_TOP + VIEWPORT_MARGIN}px))`,
@@ -1455,6 +1601,8 @@ export function EditPopover({
             }}
             aria-label={displayLabel || context.label}
             onInteractOutside={handleInteractOutside}
+            onPointerDownOutside={preventDismiss}
+            onFocusOutside={preventDismiss}
             onEscapeKeyDown={handleEscapeKeyDown}
             onCloseAutoFocus={(event) => {
               const target = previousFocusRef.current
@@ -1472,8 +1620,13 @@ export function EditPopover({
                 ease: [0.22, 1, 0.36, 1],
               }}
               onAnimationComplete={() => setIsTransitioning(false)}
-              className="pointer-events-auto relative flex flex-col overflow-hidden bg-foreground-2 shadow-modal-small"
+              onPointerDown={() => { if (!focused) setFocused(true) }}
+              className={cn(
+                "pointer-events-auto relative flex flex-col overflow-hidden bg-foreground-2 shadow-modal-small",
+                !focused && "opacity-80",
+              )}
               data-collapsed={collapsed ? 'true' : 'false'}
+              data-focused={focused ? 'true' : 'false'}
               style={{
                 transform: `translate(${dragOffset.x}px, ${dragOffset.y}px)`,
                 borderRadius: 16,
@@ -1492,6 +1645,21 @@ export function EditPopover({
                 <span className="min-w-0 flex-1 truncate px-1 text-xs text-foreground/70 select-none">
                   {displayLabel || context.label}
                 </span>
+                {collapsed && jobStatus !== 'idle' && (
+                  <span
+                    data-testid="edit-popover-status"
+                    data-job-status={jobStatus}
+                    className={cn(
+                      "shrink-0 px-1 text-[10px] font-medium select-none",
+                      jobStatus === 'completed' && "text-success",
+                      jobStatus === 'failed' && "text-destructive",
+                      jobStatus === 'waiting-input' && "text-warning",
+                      jobStatus === 'running' && "text-muted-foreground",
+                    )}
+                  >
+                    {t(EDIT_POPOVER_STATUS_I18N[jobStatus])}
+                  </span>
+                )}
                 {collapsed && isProcessing && (
                   <HeaderIconButton
                     icon={<Square className="size-3 fill-current" />}
@@ -1515,13 +1683,14 @@ export function EditPopover({
                   aria-label={t('common.close')}
                   disabled={isProcessing && !creationKind}
                   onMouseDown={event => event.stopPropagation()}
-                  onClick={() => setOpen(false)}
+                  onClick={closePopover}
                 />
               </div>
 
               <motion.div
                 hidden={bodyHidden}
                 aria-hidden={collapsed}
+                {...(bodyHidden ? { inert: '' } : {})}
                 initial={false}
                 animate={{ opacity: collapsed ? 0 : 1, y: collapsed ? -4 : 0 }}
                 transition={{
@@ -1546,6 +1715,7 @@ export function EditPopover({
                   pendingCredential={pendingCredential}
                   onRespondToCredential={onRespondToCredential}
                   compactMode={true}
+                  showRecordNavigation={false}
                   compactInputMaxHeight={getCompactInputMaxHeight(expandedSizeRef.current.height)}
                   placeholder={placeholder}
                   emptyStateLabel={displayLabel || context.label}
@@ -1557,17 +1727,34 @@ export function EditPopover({
               </motion.div>
 
               {!collapsed && (
-                <button
-                  type="button"
-                  onMouseDown={handleResizeStart}
-                  className="absolute bottom-0 right-0 z-50 flex size-4 cursor-nwse-resize items-end justify-end p-0.5 text-muted-foreground/40 hover:text-muted-foreground"
-                  aria-label={t('editPopover.resize')}
-                  title={t('editPopover.resize')}
-                >
-                  <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true">
-                    <path d="M9 1L1 9M9 5L5 9" stroke="currentColor" strokeWidth="1.4" fill="none" strokeLinecap="round" />
-                  </svg>
-                </button>
+                <>
+                  <div
+                    data-testid="edit-popover-resize-e"
+                    aria-label={t('editPopover.resize')}
+                    onMouseDown={(event) => handleResizeStart('e', event)}
+                    className="absolute top-10 bottom-2 z-40 cursor-ew-resize touch-none"
+                    style={{ right: 0, width: POPOVER_RESIZE_EDGE_PX }}
+                  />
+                  <div
+                    data-testid="edit-popover-resize-s"
+                    aria-label={t('editPopover.resize')}
+                    onMouseDown={(event) => handleResizeStart('s', event)}
+                    className="absolute left-2 z-40 cursor-ns-resize touch-none"
+                    style={{ bottom: 0, right: POPOVER_RESIZE_EDGE_PX, height: POPOVER_RESIZE_EDGE_PX }}
+                  />
+                  <div
+                    data-testid="edit-popover-resize-se"
+                    aria-label={t('editPopover.resize')}
+                    onMouseDown={(event) => handleResizeStart('se', event)}
+                    className="absolute z-40 cursor-nwse-resize touch-none"
+                    style={{
+                      right: 0,
+                      bottom: 0,
+                      width: POPOVER_RESIZE_EDGE_PX + 4,
+                      height: POPOVER_RESIZE_EDGE_PX + 4,
+                    }}
+                  />
+                </>
               )}
             </motion.div>
           </PopoverContent>

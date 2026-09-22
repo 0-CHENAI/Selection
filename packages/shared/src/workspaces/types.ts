@@ -31,6 +31,7 @@ export interface LocalMcpConfig {
  * Workspace configuration (stored in config.json)
  */
 export interface WorkspaceConfig {
+  progressSupervision?: { mode: 'off' | 'observe' | 'assist'; connectionSlug?: string };
   id: string;
   name: string;
   slug: string; // Folder name (URL-safe)

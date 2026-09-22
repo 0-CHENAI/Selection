@@ -1,3 +1,4 @@
+import { AnswerBoundary } from './answer-boundary.ts';
 /**
  * Pi SDK Event Adapter
  *
@@ -9,7 +10,7 @@
  * Claude / Codex / Copilot backends.
  */
 
-import type { AgentEvent as CraftAgentEvent } from '@craft-agent/core/types';
+import type { AgentEvent as CraftAgentEvent, AgentEventUsage } from '@craft-agent/core/types';
 import type {
   AgentEvent as PiAgentEvent,
 } from '@earendil-works/pi-agent-core';
@@ -24,7 +25,7 @@ import { PI_TOOL_NAME_MAP } from './constants.ts';
 import { toolMetadataStore } from '../../../interceptor-common.ts';
 import { parseError, createTypedError } from '../../errors.ts';
 import { normalizeToolResultContent } from '../../tool-matching.ts';
-import { ACTIONABLE_CONTEXT_OVERFLOW_MESSAGE } from './context-budget.ts';
+import { ACTIONABLE_CONTEXT_OVERFLOW_MESSAGE, readContextBreakdownFields } from './context-budget.ts';
 
 /**
  * Pi SDK auto-compaction race signature — the AbortController crash described
@@ -36,6 +37,40 @@ import { ACTIONABLE_CONTEXT_OVERFLOW_MESSAGE } from './context-budget.ts';
  * raw stack until the upstream fix lands. See plans/fix-pi-gpt-compaction.md.
  */
 const SDK_AUTOCOMPACT_RACE_SIGNATURE = /_autoCompactionAbortController\.signal/;
+
+type PiUsage = {
+  input: number;
+  output: number;
+  cacheRead?: number;
+  cacheWrite?: number;
+  cost: { total: number };
+};
+
+function cacheHitRateFromPiUsage(usage: PiUsage): number | undefined {
+  const cacheRead = usage.cacheRead || 0;
+  const totalInput = usage.input + cacheRead;
+  if (totalInput <= 0) return undefined;
+  return Math.min(1, cacheRead / totalInput);
+}
+
+function readContextBreakdown(event: object): AgentEventUsage['contextBreakdown'] | undefined {
+  return readContextBreakdownFields((event as { contextBreakdown?: unknown }).contextBreakdown);
+}
+
+function toAgentUsage(usage: PiUsage, contextWindow: number | undefined, contextBreakdown?: AgentEventUsage['contextBreakdown']): AgentEventUsage {
+  const cacheRead = usage.cacheRead || 0;
+  return {
+    inputTokens: usage.input,
+    outputTokens: usage.output,
+    cacheReadTokens: usage.cacheRead,
+    cacheCreationTokens: usage.cacheWrite,
+    costUsd: usage.cost.total,
+    contextTokens: usage.input + cacheRead,
+    contextWindow,
+    cacheHitRate: cacheHitRateFromPiUsage(usage),
+    ...(contextBreakdown ? { contextBreakdown } : {}),
+  };
+}
 
 /** How long to wait after a held overflow `agent_end` for a `compaction_start`
  *  before giving up and surfacing the original error. The SDK fires
@@ -98,6 +133,20 @@ function getStreamingTextPhase(message: AssistantMessage | undefined): TextPhase
  * - queue_update → ignored (no current UI consumer)
  */
 export class PiEventAdapter extends BaseEventAdapter {
+  private presentationProtocol: 'native' | 'marker-v1' | 'legacy' = 'legacy';
+  private boundary?: AnswerBoundary;
+  private boundaryStreamed = false;
+  private markerAnswerStarted = false;
+  setPresentationProtocol(protocol: 'native' | 'marker-v1' | 'legacy'): void {
+    this.presentationProtocol = protocol;
+    this.boundary = undefined;
+    this.boundaryStreamed = false;
+  }
+  private answerBoundary(): AnswerBoundary {
+    return this.boundary ??= new AnswerBoundary(() => this.nextSubTurnId('m'),
+      name => console.warn('[answer-boundary]', name));
+  }
+
   // Track tool names from execution_start for proper tool_result correlation
   private answerPreviewTimes = new Map<string, number>();
   private answerStreams = new Map<string, AnswerArgumentStream>();
@@ -114,6 +163,9 @@ export class PiEventAdapter extends BaseEventAdapter {
   private messageSubTurnId: string | null = null;
   private streamingTextPhase: TextPhase | 'unclassified' | undefined;
 
+  private activityAt = 0;
+  private reasoningBytes = 0;
+  private visibleBytes = 0;
   // Model context window for usage_update events
   private contextWindow: number | undefined;
 
@@ -125,6 +177,7 @@ export class PiEventAdapter extends BaseEventAdapter {
 
   // Track last usage for emitting with complete event
   private lastUsage: { input: number; output: number; cacheRead: number; cacheWrite: number; totalTokens: number; cost: { total: number } } | undefined;
+  private lastContextBreakdown: AgentEventUsage['contextBreakdown'];
 
   // ============================================================
   // Overflow-recovery state machine
@@ -244,6 +297,9 @@ export class PiEventAdapter extends BaseEventAdapter {
   }
 
   protected onTurnStart(): void {
+    this.boundary = undefined;
+    this.boundaryStreamed = false;
+    this.markerAnswerStarted = false;
     this.toolNames.clear();
     this.hasStreamedDeltas = false;
     this.hasEmittedFinalText = false;
@@ -306,18 +362,9 @@ export class PiEventAdapter extends BaseEventAdapter {
           this.overflowState = 'none';
         }
         if (this.lastUsage) {
-          const contextTokens = this.lastUsage.input + (this.lastUsage.cacheRead || 0);
           yield {
             type: 'complete',
-            usage: {
-              inputTokens: this.lastUsage.input,
-              outputTokens: this.lastUsage.output,
-              cacheReadTokens: this.lastUsage.cacheRead,
-              cacheCreationTokens: this.lastUsage.cacheWrite,
-              costUsd: this.lastUsage.cost.total,
-              contextTokens,
-              contextWindow: this.contextWindow,
-            },
+            usage: toAgentUsage(this.lastUsage, this.contextWindow, this.lastContextBreakdown),
           };
         } else {
           yield { type: 'complete' };
@@ -333,6 +380,7 @@ export class PiEventAdapter extends BaseEventAdapter {
         this.answerPreviewTimes.clear();
         // Pi SDK turn_start has no ID, so generate one for event correlation
         this.currentTurnId = `pi-turn-${this.turnIndex}`;
+        this.reasoningBytes = 0; this.visibleBytes = 0; this.activityAt = 0;
         yield { type: 'model_call_start' };
         break;
 
@@ -358,6 +406,12 @@ export class PiEventAdapter extends BaseEventAdapter {
       case 'message_update': {
         // Pi SDK emits message_update only for assistant messages (streaming deltas)
         const amEvent: AssistantMessageEvent = event.assistantMessageEvent;
+        if (amEvent.type === 'thinking_delta') this.reasoningBytes += new TextEncoder().encode(amEvent.delta).byteLength;
+        if (amEvent.type === 'text_delta') this.visibleBytes += new TextEncoder().encode(amEvent.delta).byteLength;
+        if (amEvent.type === 'thinking_delta' && amEvent.delta && Date.now() - this.activityAt >= 1000) {
+          this.activityAt = Date.now();
+          yield { type: 'model_activity', reasoningBytes: this.reasoningBytes, textBytes: this.visibleBytes };
+        }
         if (amEvent.type === 'toolcall_delta') {
           const part = amEvent.partial.content[amEvent.contentIndex];
           if (part?.type === 'toolCall' && /^(?:mcp__session__|session__)?submit_answer$/.test(part.name)) {
@@ -376,6 +430,14 @@ export class PiEventAdapter extends BaseEventAdapter {
           yield { type: 'answer_preview', toolCallId: amEvent.toolCall.id, text: typeof markdown === 'string' ? markdown : '' };
         }
         if (amEvent.type === 'text_delta' && amEvent.delta) {
+          if (this.presentationProtocol === 'marker-v1') {
+            this.boundaryStreamed = true;
+            const chunks = this.answerBoundary().push(amEvent.delta);
+            if (chunks.some(chunk => chunk.type === 'text_delta' && chunk.phase === 'final')) this.markerAnswerStarted = true;
+            yield* chunks;
+            break;
+          }
+
           // Codex attaches the phase only after the Responses output item
           // finishes. Hold only phase-less Codex deltas; other providers emit
           // an explicit unclassified stream that the UI keeps in the work chain
@@ -390,6 +452,7 @@ export class PiEventAdapter extends BaseEventAdapter {
           this.streamingTextPhase = textPhase ?? 'unclassified';
           yield {
             type: 'text_delta',
+            presentationProtocol: this.presentationProtocol,
             text: amEvent.delta,
             phase: textPhase === 'commentary'
               ? 'intermediate'
@@ -415,6 +478,11 @@ export class PiEventAdapter extends BaseEventAdapter {
           ? msg.craftTransportDiagnostics.filter(detail => typeof detail === 'string').slice(0, 8).map(detail => detail.slice(0, 4096))
           : undefined;
 
+        if (this.boundary && ['error', 'aborted', 'length', 'max_tokens'].includes(msg.stopReason ?? '')) {
+          yield* this.boundary.finish(false, sdkMessageId, true);
+          this.boundary = undefined;
+          this.boundaryStreamed = false;
+        }
         // Surface API errors — Pi SDK sets stopReason: 'error' and errorMessage on failures.
         if (msg.stopReason === 'error' && msg.errorMessage) {
           // Context overflow: hand recovery to the SDK's _runAutoCompaction
@@ -444,8 +512,11 @@ export class PiEventAdapter extends BaseEventAdapter {
 
         // A failed/truncated terminal message may carry no provider error text.
         // Preserve its terminal meaning instead of degrading to an empty reply.
-        if (msg.stopReason === 'error' || msg.stopReason === 'length' || msg.stopReason === 'max_tokens') {
-          yield { type: 'typed_error', error: createTypedError('stream_interrupted', {
+        // A user stop is abort-by-design, not an unexpected stream failure.
+        const userStopped = msg.stopReason === 'aborted'
+          && /aborted by the user/i.test(msg.errorMessage ?? '')
+        if (!userStopped && (msg.stopReason === 'error' || msg.stopReason === 'aborted' || msg.stopReason === 'length' || msg.stopReason === 'max_tokens')) {
+          yield { type: 'typed_error', error: createTypedError(msg.stopReason === 'error' || msg.stopReason === 'aborted' ? 'stream_interrupted' : 'output_limit', {
             details: transportDetails,
           }) };
           break;
@@ -473,6 +544,13 @@ export class PiEventAdapter extends BaseEventAdapter {
                 : segment.phase === this.streamingTextPhase
             ))
           : -1;
+        if (this.presentationProtocol === 'marker-v1') {
+          if (!this.boundaryStreamed) yield* this.answerBoundary().push(textSegments.map(segment => segment.text).join('\n'));
+          yield* this.answerBoundary().finish(!messageIsIntermediate, sdkMessageId);
+          if (messageIsIntermediate) this.markerAnswerStarted = false;
+          this.boundary = undefined;
+          this.boundaryStreamed = false;
+        } else {
         for (const [index, segment] of textSegments.entries()) {
           const isIntermediate = segment.phase === 'commentary'
             || (segment.phase !== 'final_answer' && messageIsIntermediate);
@@ -489,12 +567,14 @@ export class PiEventAdapter extends BaseEventAdapter {
 
           yield {
             type: 'text_complete',
+            presentationProtocol: this.presentationProtocol,
             text: segment.text,
             isIntermediate,
             phase: segment.phase === 'commentary' ? 'intermediate' : segment.phase === 'final_answer' ? 'final' : 'unclassified',
             turnId: mTurnId,
             sdkMessageId,
           };
+        }
         }
         this.hasStreamedDeltas = false;
         this.messageSubTurnId = null;
@@ -503,18 +583,10 @@ export class PiEventAdapter extends BaseEventAdapter {
         // Emit usage_update if the assistant message includes token usage
         if (msg.usage && typeof msg.usage.input === 'number') {
           this.lastUsage = msg.usage;
-          const contextTokens = msg.usage.input + (msg.usage.cacheRead || 0);
+          this.lastContextBreakdown = readContextBreakdown(event);
           yield {
             type: 'usage_update',
-            usage: {
-              inputTokens: msg.usage.input,
-              outputTokens: msg.usage.output,
-              cacheReadTokens: msg.usage.cacheRead,
-              cacheCreationTokens: msg.usage.cacheWrite,
-              costUsd: msg.usage.cost.total,
-              contextTokens,
-              contextWindow: this.contextWindow,
-            },
+            usage: toAgentUsage(msg.usage, this.contextWindow, this.lastContextBreakdown),
           };
         }
         break;
@@ -525,6 +597,10 @@ export class PiEventAdapter extends BaseEventAdapter {
       // ============================================================
 
       case 'tool_execution_start': {
+        if (this.markerAnswerStarted) {
+          console.warn('[answer-boundary]', 'tool_after_boundary');
+          this.markerAnswerStarted = false;
+        }
         const toolCallId = event.toolCallId;
         const toolName = this.resolveToolName(event.toolName);
         this.toolNames.set(toolCallId, toolName);
@@ -696,20 +772,13 @@ export class PiEventAdapter extends BaseEventAdapter {
           }
           const usage = compactionEvent.result.usage;
           if (usage && typeof usage.input === 'number') {
-            const contextTokens = usage.input + (usage.cacheRead || 0);
+            this.lastUsage = usage;
+            this.lastContextBreakdown = readContextBreakdown(event);
             // Summary generation is a real provider call. Forward its usage so
             // per-agent budgets include compaction instead of hiding that cost.
             yield {
               type: 'usage_update',
-              usage: {
-                inputTokens: usage.input,
-                outputTokens: usage.output,
-                cacheReadTokens: usage.cacheRead,
-                cacheCreationTokens: usage.cacheWrite,
-                costUsd: usage.cost.total,
-                contextTokens,
-                contextWindow: this.contextWindow,
-              },
+              usage: toAgentUsage(usage, this.contextWindow, this.lastContextBreakdown),
             };
           }
           // Use "Compacted" keyword so session handler detects statusType: 'compaction_complete'

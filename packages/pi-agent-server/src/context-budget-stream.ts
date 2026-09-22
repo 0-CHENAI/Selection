@@ -1,3 +1,5 @@
+import { modelVisibleTools } from '../../shared/src/agent/backend/pi/model-visible-tools.ts';
+import { boundedModelStream, MODEL_REQUEST_TIMEOUT_MS } from './bounded-model-stream.ts';
 import { createRequestDiagnosticScope, runWithRequestDiagnostics, requestDiagnosticDetails } from '../../shared/src/request-diagnostics.ts';
 import {
   createAssistantMessageEventStream,
@@ -96,6 +98,8 @@ export function createContextBudgetedStream(
   options?: ModelsSimpleStreamOptions,
   debug?: DebugLogger,
 ): AssistantMessageEventStream {
+  // Keep Agent.state.tools intact: old short-name tool calls must still execute.
+  context = { ...context, tools: context.tools ? modelVisibleTools(context.tools) : undefined };
   const diagnosticScope = createRequestDiagnosticScope();
   const withDiagnostic = (message: AssistantMessage): AssistantMessage & { craftTransportDiagnostics: string[] } => ({
     ...message, craftTransportDiagnostics: requestDiagnosticDetails(diagnosticScope),
@@ -127,13 +131,27 @@ export function createContextBudgetedStream(
       const buffered: AssistantMessageEvent[] = [];
       let emittedIrreversibleOutput = false;
       let retryMaxTokens: number | undefined;
+      let lastPartial: AssistantMessage | undefined;
+      const failureMessage = (error: unknown): AssistantMessage => ({
+        ...(lastPartial ? structuredClone(lastPartial) : createThrownErrorMessage(model, error)),
+        stopReason: attemptOptions.signal?.aborted ? 'aborted' : 'error',
+        errorMessage: errorText(error),
+      });
 
       try {
-        const stream = runWithRequestDiagnostics(diagnosticScope, () => streamSimple(model, context, attemptOptions));
+        const configuredTimeout = attemptOptions.timeoutMs;
+        const timeoutMs = typeof configuredTimeout === 'number' && Number.isFinite(configuredTimeout) && configuredTimeout > 0
+          ? Math.min(configuredTimeout, MODEL_REQUEST_TIMEOUT_MS) : MODEL_REQUEST_TIMEOUT_MS;
+        const stream = boundedModelStream(
+          signal => runWithRequestDiagnostics(diagnosticScope, () => streamSimple(model, context, { ...attemptOptions, signal })),
+          attemptOptions.signal, timeoutMs,
+        );
         for await (const rawEvent of stream) {
+          if ('partial' in rawEvent) lastPartial = rawEvent.partial;
           const event = rawEvent.type === 'error' ? { ...rawEvent, error: withDiagnostic(rawEvent.error) } : rawEvent;
           if (attempt > 0 || emittedIrreversibleOutput) {
             output.push(event);
+            if (event.type === 'done' || event.type === 'error') return;
             continue;
           }
 
@@ -166,7 +184,7 @@ export function createContextBudgetedStream(
           }
         }
       } catch (error) {
-        const message = withDiagnostic(createThrownErrorMessage(model, error));
+        const message = withDiagnostic(failureMessage(error));
         if (
           attempt === 0 &&
           !emittedIrreversibleOutput &&
@@ -181,7 +199,7 @@ export function createContextBudgetedStream(
         }
         if (retryMaxTokens === undefined || attempt > 0) {
           pushAll(output, buffered);
-          output.push({ type: 'error', reason: 'error', error: message });
+          output.push({ type: 'error', reason: message.stopReason === 'aborted' ? 'aborted' : 'error', error: message });
           return;
         }
       }
@@ -194,7 +212,7 @@ export function createContextBudgetedStream(
         output.push({
           type: 'error',
           reason: 'error',
-          error: withDiagnostic(createThrownErrorMessage(model, 'Provider stream ended without a terminal event')),
+          error: withDiagnostic(failureMessage('Provider stream ended without a terminal event')),
         });
         return;
       }

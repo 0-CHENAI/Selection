@@ -1,5 +1,5 @@
 /**
- * Build a Windows desktop icon: Mac-style white squircle + Selection mark.
+ * Build a Windows desktop icon from the flattened macOS 27 glass PNG.
  * Does not touch icon.icns / Assets.car (macOS Liquid Glass).
  *
  * Usage: bun generate-win-icon.ts
@@ -8,38 +8,18 @@ import sharp from 'sharp'
 import { writeFileSync } from 'fs'
 import { join } from 'path'
 
-const SIZE = 1024
-const CORNER = Math.round(SIZE * 0.2237)
-const PAD = Math.round(SIZE * 0.08)
-const MARK = SIZE - PAD * 2
 const ICO_SIZES = [16, 24, 32, 48, 64, 128, 256]
-
-const bg = Buffer.from(
-  `<svg xmlns="http://www.w3.org/2000/svg" width="${SIZE}" height="${SIZE}" viewBox="0 0 ${SIZE} ${SIZE}">
-    <rect width="${SIZE}" height="${SIZE}" rx="${CORNER}" ry="${CORNER}" fill="#FFFFFF"/>
-  </svg>`,
-)
-
 const root = import.meta.dir
-const markPng = join(root, 'source.png')
+const source = join(root, 'icon.png')
 const outPng = join(root, 'icon-win.png')
 const outIco = join(root, 'icon.ico')
 
-const mark = await sharp(markPng)
-  .resize(MARK, MARK, { fit: 'contain', background: { r: 0, g: 0, b: 0, alpha: 0 } })
-  .png()
-  .toBuffer()
-
-const composed = await sharp(bg)
-  .composite([{ input: mark, top: PAD, left: PAD }])
-  .png()
-  .toFile(outPng)
-
-console.log(`icon-win.png ${composed.width}x${composed.height}`)
+await sharp(source).png().toFile(outPng)
+console.log(`icon-win.png from ${source}`)
 
 const pngs: Buffer[] = []
 for (const size of ICO_SIZES) {
-  pngs.push(await sharp(outPng).resize(size, size).png().toBuffer())
+  pngs.push(await sharp(source).resize(size, size).png().toBuffer())
 }
 
 const ico = encodeIco(pngs, ICO_SIZES)

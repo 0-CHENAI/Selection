@@ -5,6 +5,7 @@ import {
   buildContextBudget,
   calculateContextBudget,
   calculateOverflowRetryMaxTokens,
+  estimateContextInputBreakdown,
   estimateContextInputTokens,
   estimateTextTokensConservatively,
   parseContextOverflow,
@@ -91,6 +92,58 @@ describe('context input estimation', () => {
 
     expect(estimateTextTokensConservatively('中文abcde')).toBe(4);
     expect(estimateContextInputTokens(context)).toBeGreaterThan(50_000);
+
+    const breakdown = estimateContextInputBreakdown(context);
+    expect(breakdown.systemPrompt).toBeGreaterThan(0);
+    expect(breakdown.tools).toBeGreaterThan(0);
+    expect(breakdown.messages).toBeGreaterThan(0);
+    expect(breakdown.systemPrompt + breakdown.tools + breakdown.messages)
+      .toBeLessThanOrEqual(estimateContextInputTokens(context));
+  });
+
+  it('splits Selection-owned prompt tags and tool names into optional rows', () => {
+    const context = {
+      systemPrompt: [
+        'You are a concise assistant.',
+        '## User Preferences - User has explicitly set these preferences, so adhere to them',
+        '',
+        '- Name: Ada',
+        '<project_context project="acme">',
+        'Keep replies short.',
+        '</project_context>',
+        '<available_skills>',
+        '- officecli (officecli): Read this skill first',
+        '  path: /tmp/SKILL.md',
+        '</available_skills>',
+      ].join('\n'),
+      tools: [
+        { name: 'bash', description: 'Run a shell command', parameters: { type: 'object' } },
+        { name: 'mcp__source__search', description: 'Search a connected source', parameters: { type: 'object' } },
+        { name: 'spawn_session', description: 'Start a child session', parameters: { type: 'object' } },
+      ],
+      messages: [
+        {
+          role: 'user',
+          content: '<session_transfer_summary>\nPrior workspace work.\n</session_transfer_summary>\nHello',
+          timestamp: 1,
+        },
+        {
+          role: 'user',
+          content: '<sources>\n知识库 (slug: cortex)\n</sources>\nWhat next?',
+          timestamp: 2,
+        },
+      ],
+    } as Context;
+
+    const breakdown = estimateContextInputBreakdown(context);
+    expect(breakdown.systemPrompt).toBeGreaterThan(0);
+    expect(breakdown.tools).toBeGreaterThan(0);
+    expect(breakdown.rules).toBeGreaterThan(0);
+    expect(breakdown.skills).toBeGreaterThan(0);
+    expect(breakdown.mcpTools).toBeGreaterThan(0);
+    expect(breakdown.subagents).toBeGreaterThan(0);
+    expect(breakdown.summarized).toBeGreaterThan(0);
+    expect(breakdown.messages).toBeGreaterThan(0);
   });
 });
 
@@ -119,4 +172,34 @@ describe('provider overflow parsing and retry cap', () => {
       'maximum context length is 10000 tokens; prompt contains at least 9900 input tokens';
     expect(calculateOverflowRetryMaxTokens(message, 10_000, 2_000)).toBeUndefined();
   });
+});
+
+describe('context envelope classification', () => {
+  it('ignores inline and fenced examples before the actual catalog', () => {
+    const catalog = '<available_skills>\n- officecli: /skills/officecli/SKILL.md\n</available_skills>';
+    for (const fence of ['```', '~~~~']) {
+      const examples = `Read \`<available_skills>\` when needed.\n${fence}xml\n<available_skills>\nexample\n</available_skills>\n${fence}\nSystem rules stay here.`;
+      const result = estimateContextInputBreakdown({ systemPrompt: examples + '\n' + catalog, messages: [] });
+      expect(result.skills).toBe(estimateTextTokensConservatively(catalog));
+      expect(result.systemPrompt).toBeGreaterThanOrEqual(estimateTextTokensConservatively(examples));
+      expect(estimateContextInputBreakdown({ systemPrompt: examples, messages: [] }).skills).toBeUndefined();
+    }
+  });
+
+  it('counts tags in tool output and assistant text as conversation content', () => {
+    const content = [{ type: 'text', text: '<available_skills>\nnot a catalog\n</available_skills>' }];
+    const result = estimateContextInputBreakdown({ messages: [
+      { role: 'toolResult', toolName: 'Read', toolCallId: 'read-1', content, isError: false, timestamp: 1 },
+      { role: 'assistant', content, timestamp: 2 },
+    ] } as Context);
+    expect(result.skills).toBeUndefined();
+    expect(result.messages).toBeGreaterThan(0);
+  });
+});
+
+it('leaves fenced preferences examples in the system bucket', () => {
+  const systemPrompt = '```md\n## User Preferences\nExample preference\n```\nNormal instructions';
+  const result = estimateContextInputBreakdown({ systemPrompt, messages: [] });
+  expect(result.rules).toBeUndefined();
+  expect(result.systemPrompt).toBe(estimateTextTokensConservatively(systemPrompt));
 });

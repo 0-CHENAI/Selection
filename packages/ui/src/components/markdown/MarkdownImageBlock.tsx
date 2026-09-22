@@ -28,6 +28,7 @@ import { CodeBlock } from './CodeBlock'
 import { ImagePreviewOverlay } from '../overlay/ImagePreviewOverlay'
 import { usePlatform } from '../../context/PlatformContext'
 import { ImageCardStack } from './ImageCardStack'
+import { MarkdownImage } from './MarkdownImage'
 import { useTranslation } from 'react-i18next'
 
 interface PreviewItem {
@@ -199,8 +200,18 @@ export function MarkdownImageBlock({ code, className, onCreateRegionAnnotation: 
     return dataUrl
   }, [contentCache, onReadFileDataUrl])
 
-  if (!spec || items.length === 0 || !onReadFileDataUrl) {
+  if (!spec || items.length === 0) {
     return <CodeBlock code={code} language="json" mode="full" className={className} />
+  }
+
+  if (!onReadFileDataUrl) {
+    return (
+      <div className={className}>
+        {items.map((item, index) => (
+          <MarkdownImage key={`${item.src}-${index}`} src={item.src} alt={item.label || spec.title} />
+        ))}
+      </div>
+    )
   }
 
   const stackItems = items.reduce<Array<{ src: string; label?: string; ratio?: number; alt: string }>>((acc, item, index) => {
