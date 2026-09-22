@@ -65,7 +65,7 @@ describe('Windows caption inset (#260, #356, #359)', () => {
 
   it('drops Windows toasts below the caption buttons', () => {
     const toaster = readFileSync(join(import.meta.dir, '../../components/ui/sonner.tsx'), 'utf8')
-    expect(toaster).toContain("offset={isWindows && !isWebUI ? { top: '58px', right: '16px' } : undefined}")
+    expect(toaster).toContain("offset={props.offset ?? (isWindows && !isWebUI ? { top: '96px', right: '16px' } : undefined)}")
   })
 })
 

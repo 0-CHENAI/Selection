@@ -12,7 +12,6 @@ const Toaster = ({ ...props }: ToasterProps) => {
     <Sonner
       theme={resolvedMode as ToasterProps["theme"]}
       position="top-right"
-      offset={isWindows && !isWebUI ? { top: '58px', right: '16px' } : undefined}
       closeButton
       richColors={false}
       swipeDirections={["right"]}
@@ -35,6 +34,7 @@ const Toaster = ({ ...props }: ToasterProps) => {
         } as React.CSSProperties
       }
       {...props}
+      offset={props.offset ?? (isWindows && !isWebUI ? { top: '96px', right: '16px' } : undefined)}
     />
   )
 }
