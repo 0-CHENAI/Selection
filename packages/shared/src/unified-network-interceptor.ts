@@ -1487,6 +1487,24 @@ const openAiResponsesAdapter: ApiAdapter = {
  * Mutates `body.messages` in place. Logs structured info if anything was
  * dropped. Exported for focused unit tests.
  */
+/**
+ * Pi sends reasoning-model system prompts as `role: "developer"`. Compatible
+ * gateways only accept `system` and reject the request with
+ * "Unexpected message role." Rewrite every outgoing instruction role before
+ * the body is validated or sent.
+ */
+export function rewriteDeveloperRolesToSystem(body: Record<string, unknown>): void {
+  for (const key of ['messages', 'input'] as const) {
+    const entries = body[key];
+    if (!Array.isArray(entries)) continue;
+    for (const entry of entries) {
+      if (entry && typeof entry === 'object' && (entry as { role?: unknown }).role === 'developer') {
+        (entry as { role: string }).role = 'system';
+      }
+    }
+  }
+}
+
 export function sanitizeOpenAiHistoryInPlace(body: Record<string, unknown>): {
   droppedToolCalls: number;
   droppedToolResults: number;
@@ -2147,6 +2165,7 @@ async function interceptedFetch(
       const { bodyStr, normalizedInit } = await resolveRequestContext(input, init);
       if (bodyStr) {
         let parsed = JSON.parse(bodyStr);
+        rewriteDeveloperRolesToSystem(parsed);
 
         // Add _intent and _displayName to all tool schemas
         parsed = adapter.addMetadataToTools(parsed);
