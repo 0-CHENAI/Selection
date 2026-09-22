@@ -394,6 +394,10 @@ export function registerTasksHandlers(server: RpcServer, deps: HandlerDeps): voi
 
   // tasks:run — start an existing run.
   server.handle(RPC_CHANNELS.tasks.RUN, async (_ctx, workspaceId: string, req: TaskRunRequest) => {
+    const { getDagOrchestrationEnabled } = await import('@craft-agent/shared/config/storage')
+    if (!getDagOrchestrationEnabled()) {
+      throw new Error('DAG orchestration is disabled in Advanced settings')
+    }
     const orchestrator = req.orchestratorSessionId
       ? await deps.sessionManager.getSession(req.orchestratorSessionId)
       : null

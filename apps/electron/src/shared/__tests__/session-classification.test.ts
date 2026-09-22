@@ -54,6 +54,14 @@ describe('normalizeRemovedSessionClassification', () => {
     })
   })
 
+  it('retires the input settings page and redirects its route to app settings', () => {
+    expect(SETTINGS_ITEMS.some(item => item.id === 'input')).toBe(false)
+    expect(parseRouteToNavigationState('settings/input')).toEqual({
+      navigator: 'settings',
+      subpage: 'app',
+    })
+  })
+
   it.each(['permissions', 'messaging'] as const)(
     'hides the %s settings page and redirects stale routes to app settings',
     (subpage) => {

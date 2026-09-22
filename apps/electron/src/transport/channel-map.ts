@@ -332,6 +332,12 @@ export const CHANNEL_MAP = {
   getBrowserToolEnabled: invoke(RPC_CHANNELS.tools.GET_BROWSER_TOOL_ENABLED),
   setBrowserToolEnabled: invoke(RPC_CHANNELS.tools.SET_BROWSER_TOOL_ENABLED),
 
+  // Advanced capability settings
+  getAdvancedSettings: invoke(RPC_CHANNELS.settings.GET_ADVANCED),
+  setDagOrchestrationEnabled: invoke(RPC_CHANNELS.settings.SET_DAG_ORCHESTRATION_ENABLED),
+  setSwarmAgentsEnabled: invoke(RPC_CHANNELS.settings.SET_SWARM_AGENTS_ENABLED),
+  setAnySearchApiKey: invoke(RPC_CHANNELS.settings.SET_ANYSEARCH_API_KEY),
+
   // Badge
   refreshBadge: invoke(RPC_CHANNELS.badge.REFRESH),
   setDockIconWithBadge: invoke(RPC_CHANNELS.badge.SET_ICON),

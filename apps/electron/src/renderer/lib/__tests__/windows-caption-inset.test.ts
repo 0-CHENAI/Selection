@@ -62,5 +62,10 @@ describe('Windows caption inset (#260, #356, #359)', () => {
     expect(picker).toContain('windowsCaptionEdgeStyle')
     expect(aiSettings).toContain('windowsCaptionEdgeStyle')
   })
+
+  it('drops Windows toasts below the caption buttons', () => {
+    const toaster = readFileSync(join(import.meta.dir, '../../components/ui/sonner.tsx'), 'utf8')
+    expect(toaster).toContain("offset={isWindows && !isWebUI ? { top: '58px', right: '16px' } : undefined}")
+  })
 })
 

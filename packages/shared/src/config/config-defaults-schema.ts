@@ -25,6 +25,10 @@ export interface ConfigDefaults {
      * When false, the local dispatcher rejects with `BROWSER_REMOTE_EVALUATE_BLOCKED`.
      */
     allowRemoteEvaluate: boolean;
+    /** Show the list / new-orchestration switch and allow the board route. */
+    dagOrchestrationEnabled: boolean;
+    /** Show Swarm controls and allow spawn_session. */
+    swarmAgentsEnabled: boolean;
   };
   workspaceDefaults: {
     thinkingLevel: ThinkingLevel;

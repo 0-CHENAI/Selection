@@ -67,7 +67,7 @@ function runEval(configDir: string, code: string): string {
   const run = Bun.spawnSync([
     process.execPath,
     '--eval',
-    `import { getDefaultThinkingLevel, setDefaultThinkingLevel, getSharedProjectMemoryEnabled, setSharedProjectMemoryEnabled } from '${STORAGE_MODULE_PATH}'; ${code}`,
+    `import { getDefaultThinkingLevel, setDefaultThinkingLevel, getSharedProjectMemoryEnabled, setSharedProjectMemoryEnabled, getDagOrchestrationEnabled, setDagOrchestrationEnabled, getSwarmAgentsEnabled, setSwarmAgentsEnabled } from '${STORAGE_MODULE_PATH}'; ${code}`,
   ], {
     env: { ...process.env, CRAFT_CONFIG_DIR: configDir },
     stdout: 'pipe',
@@ -149,5 +149,26 @@ describe('shared project memory storage', () => {
     writeFileSync(defaultsPath, JSON.stringify(defaults, null, 2), 'utf-8')
 
     expect(runEval(configDir, 'console.log(String(getSharedProjectMemoryEnabled()))')).toBe('false')
+  })
+})
+
+describe('advanced capability settings', () => {
+  it('stays off for configs written before the settings existed', () => {
+    const { configDir } = setupWorkspaceConfigDir()
+    const output = runEval(configDir, `
+      console.log([getDagOrchestrationEnabled(), getSwarmAgentsEnabled()].join(','))
+    `)
+    expect(output).toBe('false,false')
+  })
+
+  it('persists both switches independently', () => {
+    const { configDir, configPath } = setupWorkspaceConfigDir()
+    runEval(configDir, 'setDagOrchestrationEnabled(true); setSwarmAgentsEnabled(false)')
+    const persisted = JSON.parse(readFileSync(configPath, 'utf-8'))
+    expect(persisted.dagOrchestrationEnabled).toBe(true)
+    expect(persisted.swarmAgentsEnabled).toBe(false)
+    expect(runEval(configDir, `
+      console.log([getDagOrchestrationEnabled(), getSwarmAgentsEnabled()].join(','))
+    `)).toBe('true,false')
   })
 })

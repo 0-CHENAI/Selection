@@ -30,8 +30,7 @@ import { WorkspaceAvatar } from '@/components/ui/workspace-avatar'
 import { ColorPicker } from '@/components/ui/color-picker'
 import { workspaceAvatarColorsAtom } from '@/atoms/workspace-avatar-colors'
 import { showBackgroundFinishedChipAtom } from '@/atoms/background-finished'
-import { setProjectColorTreatment, useProjectColorTreatment } from '@/hooks/useProjectColorTreatment'
-import { PROJECT_COLOR_PALETTE, type ProjectColorTreatment } from '@/utils/project-colors'
+import { PROJECT_COLOR_PALETTE } from '@/utils/project-colors'
 import type { PresetTheme } from '@config/theme'
 
 export const meta: DetailsPageMeta = {
@@ -72,12 +71,6 @@ export default function AppearanceSettingsPage() {
   const handleConnectionIconsChange = useCallback((checked: boolean) => {
     setShowConnectionIcons(checked)
     storage.set(storage.KEYS.showConnectionIcons, checked)
-  }, [])
-
-  // Project color treatment in the SessionList
-  const projectColorTreatment = useProjectColorTreatment()
-  const handleProjectColorTreatmentChange = useCallback((value: string) => {
-    setProjectColorTreatment(value as ProjectColorTreatment)
   }, [])
 
   // Per-workspace avatar color overrides (persisted in localStorage)
@@ -310,8 +303,8 @@ export default function AppearanceSettingsPage() {
               <SettingsSection title={t("settings.appearance.interface")}>
                 <SettingsCard>
                   <SettingsToggle
-                    label={t("settings.appearance.connectionIcons")}
-                    description={t("settings.appearance.connectionIconsDesc")}
+                    label={t("settings.appearance.providerIcons")}
+                    description={t("settings.appearance.providerIconsDesc")}
                     checked={showConnectionIcons}
                     onCheckedChange={handleConnectionIconsChange}
                   />
@@ -327,19 +320,6 @@ export default function AppearanceSettingsPage() {
                     checked={showBackgroundFinishedChip}
                     onCheckedChange={setShowBackgroundFinishedChip}
                   />
-                  <SettingsRow
-                    label={t("settings.appearance.projectColorTreatment")}
-                    description={t("settings.appearance.projectColorTreatmentDesc")}
-                  >
-                    <SettingsMenuSelect
-                      value={projectColorTreatment}
-                      onValueChange={handleProjectColorTreatmentChange}
-                      options={[
-                        { value: 'stripe', label: t("settings.appearance.projectColorStripe") },
-                        { value: 'stripe-tint', label: t("settings.appearance.projectColorStripeTint") },
-                      ]}
-                    />
-                  </SettingsRow>
                 </SettingsCard>
               </SettingsSection>
 

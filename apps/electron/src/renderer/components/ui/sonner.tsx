@@ -1,5 +1,6 @@
 import { Toaster as Sonner, type ToasterProps } from "sonner"
 import { useTheme } from "@/context/ThemeContext"
+import { isWebUI, isWindows } from "@/lib/platform"
 
 // Empty fragment to hide all toast icons
 const NoIcon = () => <></>
@@ -11,6 +12,7 @@ const Toaster = ({ ...props }: ToasterProps) => {
     <Sonner
       theme={resolvedMode as ToasterProps["theme"]}
       position="top-right"
+      offset={isWindows && !isWebUI ? { top: '58px', right: '16px' } : undefined}
       closeButton
       richColors={false}
       swipeDirections={["right"]}

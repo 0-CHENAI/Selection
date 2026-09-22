@@ -1098,6 +1098,10 @@ export class PiAgent extends BaseAgent {
         this.handleSubprocessEvent(msg.event as Record<string, unknown>);
         break;
 
+      case 'anysearch_api_key_request':
+        this.observeBridgeRequest(this.handleAnySearchApiKeyRequest(msg as { id?: unknown }), this.subprocess);
+        break;
+
       case 'pre_tool_use_request':
         // Subprocess needs permission check + transforms before tool execution
         this.observeBridgeRequest(this.handlePreToolUseRequest(msg as {
@@ -2370,6 +2374,18 @@ export class PiAgent extends BaseAgent {
   /**
    * Ask subprocess to refresh runtime-affecting custom endpoint config in-place.
    */
+  private async handleAnySearchApiKeyRequest(msg: { id?: unknown }): Promise<void> {
+    const id = typeof msg.id === 'string' ? msg.id : '';
+    if (!id) return;
+    let apiKey = '';
+    try {
+      apiKey = (await getCredentialManager().getAnySearchApiKey()) ?? '';
+    } catch (error) {
+      this.debug(`Failed to read AnySearch API key: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    this.send({ type: 'anysearch_api_key_result', id, apiKey });
+  }
+
   private async requestRuntimeConfigUpdate(update: BackendRuntimeUpdate): Promise<boolean> {
     if (!this.subprocess) return true;
 

@@ -380,6 +380,7 @@ const SETTINGS_ICONS: Record<SettingsSubpage, string> = {
   appearance: 'Palette',
   input: 'Keyboard',
   workspace: 'Building2',
+  advanced: 'SlidersHorizontal',
   permissions: 'ShieldCheck',
   labels: 'Tag',
   messaging: 'MessageSquare',

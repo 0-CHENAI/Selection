@@ -601,6 +601,16 @@ export interface ElectronAPI {
   getNetworkProxySettings(): Promise<NetworkProxySettings | undefined>
   setNetworkProxySettings(settings: NetworkProxySettings): Promise<void>
 
+  // Advanced capability settings. The API key is write-only.
+  getAdvancedSettings(): Promise<{
+    dagOrchestrationEnabled: boolean
+    swarmAgentsEnabled: boolean
+    anySearchApiKeyConfigured: boolean
+  }>
+  setDagOrchestrationEnabled(enabled: boolean): Promise<void>
+  setSwarmAgentsEnabled(enabled: boolean): Promise<void>
+  setAnySearchApiKey(apiKey: string): Promise<{ configured: boolean }>
+
   refreshBadge(): Promise<void>
   setDockIconWithBadge(dataUrl: string): Promise<void>
   onBadgeDraw(callback: (data: { count: number; iconDataUrl: string }) => void): () => void

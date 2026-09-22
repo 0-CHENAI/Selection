@@ -13,6 +13,7 @@ mock.module('../../config/preferences.ts', () => ({
 // Keep the browser section at its default-on state without reading ~/.selection.
 mock.module('../../config/storage.ts', () => ({
   getBrowserToolEnabled: () => true,
+  getSwarmAgentsEnabled: () => true,
 }))
 
 import {

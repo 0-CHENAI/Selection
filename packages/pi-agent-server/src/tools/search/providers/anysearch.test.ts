@@ -87,6 +87,36 @@ describe('AnySearchSearchProvider', () => {
     ]);
   });
 
+  it('uses a configured key resolver ahead of the environment', async () => {
+    let calledHeaders: Record<string, string> = {};
+    process.env.ANYSEARCH_API_KEY = 'env-key';
+    globalThis.fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {
+      calledHeaders = (init?.headers as Record<string, string> | undefined) ?? {};
+      return okResponse({
+        code: 0,
+        data: { results: [{ title: 'Configured', url: 'https://configured.example' }] },
+      });
+    }) as typeof fetch;
+
+    await new AnySearchSearchProvider(undefined, async () => 'settings-key').search('craft', 1);
+    expect(calledHeaders.Authorization).toBe('Bearer settings-key');
+  });
+
+  it('stays anonymous when the configured key is empty', async () => {
+    let calledHeaders: Record<string, string> = {};
+    process.env.ANYSEARCH_API_KEY = 'env-key';
+    globalThis.fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {
+      calledHeaders = (init?.headers as Record<string, string> | undefined) ?? {};
+      return okResponse({
+        code: 0,
+        data: { results: [{ title: 'Anonymous', url: 'https://anonymous.example' }] },
+      });
+    }) as typeof fetch;
+
+    await new AnySearchSearchProvider(undefined, async () => '   ').search('craft', 1);
+    expect(calledHeaders.Authorization).toBeUndefined();
+  });
+
   it('only sends a dedicated AnySearch API key', async () => {
     let calledHeaders: Record<string, string> = {};
 
