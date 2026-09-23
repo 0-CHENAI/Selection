@@ -1,6 +1,10 @@
 import { expect, it } from 'bun:test'
-import { AnswerBoundary, FINAL_ANSWER_MARKER as marker } from './answer-boundary'
+import { AnswerBoundary, FINAL_ANSWER_MARKER as marker, MARKER_ANSWER_PROMPT } from './answer-boundary'
 function create(log: string[] = []) { let id = 0; return new AnswerBoundary(() => `m-${++id}`, n => log.push(n)) }
+it('keeps the final-answer protocol aligned with the separate source panel', () => {
+  expect(MARKER_ANSWER_PROMPT).toContain('put citations next to the claims they support')
+  expect(MARKER_ANSWER_PROMPT).toContain('do not append a Sources/数据来源 list')
+})
 it('splits at every transport boundary without leaking the marker or mixing bodies', () => {
   const text = `查询完毕。\n${marker}\r\n第一段。\n\n第二段。`
   for (let i = 0; i <= text.length; i++) {
@@ -34,4 +38,31 @@ it('does not produce a blank card and demotes an answer followed by tools', () =
   const q = create(logs); q.push(`${marker}\n未完成`)
   expect(q.finish(false)[0]).toMatchObject({ text: '未完成', isIntermediate: true })
   expect(logs).toContain('tool_after_boundary')
+})
+it('treats a terminal marker after the answer as a final reply', () => {
+  const logs: string[] = []
+  const body = '自检通过。Sankey 图已完成：\n\n```html-preview\n{"src":"/tmp/sankey.html"}\n```\n'
+  const p = create(logs)
+  const streamed = p.push(`${body}\n${marker}`)
+  expect(streamed.some(e => e.type === 'text_complete')).toBe(false)
+  const completed = p.finish(true, 'sdk')
+  expect(completed.filter(e => e.type === 'text_complete')).toEqual([
+    expect.objectContaining({ text: `${body}\n`, phase: 'final', isIntermediate: false, sdkMessageId: 'sdk' }),
+  ])
+  expect(logs).toContain('trailing_boundary')
+})
+it('holds whitespace after the marker until answer text arrives', () => {
+  const p = create()
+  expect(p.push(`进展\n${marker}\n \t`).some(e => e.type === 'text_complete')).toBe(false)
+  const events = [...p.push('答案'), ...p.finish(true)]
+  expect(events.filter(e => e.type === 'text_complete').map(e => [e.phase, e.text])).toEqual([
+    ['intermediate', '进展\n'],
+    ['final', ' \t答案'],
+  ])
+
+  const continued = create()
+  continued.push(`读取中\n${marker}\n \t`)
+  expect(continued.finish(false).filter(e => e.type === 'text_complete')).toEqual([
+    expect.objectContaining({ text: '读取中\n', isIntermediate: true }),
+  ])
 })

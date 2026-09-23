@@ -28,6 +28,14 @@ it('does not infer research from another turn or hide ordinary links', () => {
   expect(html).toContain('旧网站')
 })
 
+it('keeps the model reply intact when it contains an explicit source list', () => {
+  const text = '结论。\n\nSources: [官网](https://example.com) · [补充资料](https://other.com)'
+  const html = render(false, true, text)
+  expect(html).toContain('Sources:')
+  expect(html).toContain('补充资料')
+  expect(html).toContain('data-response-sources=""')
+})
+
 it('reserves the same source shelf before completion and keeps it non-interactive', () => {
   const streaming = render(false, true, '调查结论', true)
   expect(streaming).toContain('data-response-sources=""')

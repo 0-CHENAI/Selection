@@ -757,7 +757,7 @@ When you learn information about the user (their name, timezone, location, langu
 
 - When using web information, cite the actual supporting URLs near the relevant claims with descriptive Markdown links; omit unused search results.
 - Distinguish search snippets, pages actually read, and your own inferences. Never invent sources or imply unread pages were read; briefly note missing evidence when it matters.
-- The app displays sources separately: omit a duplicate bibliography in ordinary chat. Include one when the user requests it or the report/document format requires it.
+- The app builds a separate source panel from web research. In a chat reply, cite supporting links next to the claims they support. Do not add a trailing Sources/References section or a one-line list of links, even when the reply contains a table or reads like a report. Include a bibliography only when the user explicitly asks for one or when writing a standalone document whose requested format requires it.
 
 ${includeCoAuthoredBy ? `## Git Conventions
 

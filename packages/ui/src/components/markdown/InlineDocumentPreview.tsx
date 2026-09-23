@@ -3,9 +3,10 @@ import { Maximize2 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
 /** Keep the header/actions outside the clipped document, without nested vertical scrolling. */
-export function InlineDocumentPreview({ children, onViewFull }: {
+export function InlineDocumentPreview({ children, onViewFull, alwaysShowViewFull = false }: {
   children: React.ReactNode
   onViewFull: () => void
+  alwaysShowViewFull?: boolean
 }) {
   const { t } = useTranslation()
   const previewRef = React.useRef<HTMLDivElement>(null)
@@ -46,7 +47,7 @@ export function InlineDocumentPreview({ children, onViewFull }: {
           />
         )}
       </div>
-      {overflowing && (
+      {(overflowing || alwaysShowViewFull) && (
         <div className="flex justify-center border-t bg-background px-3 py-1.5">
           <button
             type="button"

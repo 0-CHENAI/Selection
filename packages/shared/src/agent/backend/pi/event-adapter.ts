@@ -25,6 +25,7 @@ import { PI_TOOL_NAME_MAP } from './constants.ts';
 import { toolMetadataStore } from '../../../interceptor-common.ts';
 import { parseError, createTypedError } from '../../errors.ts';
 import { normalizeToolResultContent } from '../../tool-matching.ts';
+import { cleanToolMetadataLabel } from '../../../utils/toolNames.ts';
 import { ACTIONABLE_CONTEXT_OVERFLOW_MESSAGE, readContextBreakdownFields } from './context-budget.ts';
 
 /**
@@ -530,13 +531,13 @@ export class PiEventAdapter extends BaseEventAdapter {
         // Pi SDK stopReason: 'toolUse' means the model will call tools next (intermediate commentary),
         // 'stop'/'end_turn' means final response. Same logic as Claude's stop_reason === 'tool_use'.
         // Some providers still attach toolCall parts with stopReason 'stop'; treat those
-        // as intermediate so the work chain is not flushed (#81).
+        // and user-aborted output as intermediate so the work chain is not flushed (#81).
         const rawContent = (event.message as { content?: unknown } | undefined)?.content;
         const hasToolCall = Array.isArray(rawContent) && rawContent.some((part) => {
           const type = (part as { type?: string } | undefined)?.type;
           return type === 'toolCall' || type === 'tool_use';
         });
-        const messageIsIntermediate = msg.stopReason === 'toolUse' || hasToolCall;
+        const messageIsIntermediate = msg.stopReason === 'toolUse' || hasToolCall || userStopped;
         const streamedSegmentIndex = this.messageSubTurnId
           ? textSegments.findIndex((segment) => (
               this.streamingTextPhase === 'unclassified'
@@ -546,14 +547,13 @@ export class PiEventAdapter extends BaseEventAdapter {
           : -1;
         if (this.presentationProtocol === 'marker-v1') {
           if (!this.boundaryStreamed) yield* this.answerBoundary().push(textSegments.map(segment => segment.text).join('\n'));
-          yield* this.answerBoundary().finish(!messageIsIntermediate, sdkMessageId);
+          yield* this.answerBoundary().finish(!messageIsIntermediate, sdkMessageId, userStopped);
           if (messageIsIntermediate) this.markerAnswerStarted = false;
           this.boundary = undefined;
           this.boundaryStreamed = false;
         } else {
         for (const [index, segment] of textSegments.entries()) {
-          const isIntermediate = segment.phase === 'commentary'
-            || (segment.phase !== 'final_answer' && messageIsIntermediate);
+          const isIntermediate = messageIsIntermediate || segment.phase === 'commentary';
           if (!isIntermediate && this.hasEmittedFinalText) continue;
           if (!isIntermediate) this.hasEmittedFinalText = true;
 
@@ -570,7 +570,7 @@ export class PiEventAdapter extends BaseEventAdapter {
             presentationProtocol: this.presentationProtocol,
             text: segment.text,
             isIntermediate,
-            phase: segment.phase === 'commentary' ? 'intermediate' : segment.phase === 'final_answer' ? 'final' : 'unclassified',
+            phase: isIntermediate ? 'intermediate' : segment.phase === 'final_answer' ? 'final' : 'unclassified',
             turnId: mTurnId,
             sdkMessageId,
           };
@@ -628,14 +628,14 @@ export class PiEventAdapter extends BaseEventAdapter {
         const argsIntent = typeof args._intent === 'string' ? args._intent : undefined;
         const argsDisplayName = typeof args._displayName === 'string' ? args._displayName : undefined;
 
-        const intent = eventMeta?.intent
-          || storedMeta?.intent
-          || argsIntent
-          || (typeof args.description === 'string' ? args.description : undefined);
+        const intent = cleanToolMetadataLabel(eventMeta?.intent)
+          || cleanToolMetadataLabel(storedMeta?.intent)
+          || cleanToolMetadataLabel(argsIntent)
+          || cleanToolMetadataLabel(typeof args.description === 'string' ? args.description : undefined);
 
-        const displayName = eventMeta?.displayName
-          || storedMeta?.displayName
-          || argsDisplayName
+        const displayName = cleanToolMetadataLabel(eventMeta?.displayName)
+          || cleanToolMetadataLabel(storedMeta?.displayName)
+          || cleanToolMetadataLabel(argsDisplayName)
           || this.getToolDisplayName(toolName);
 
         const metadataSource = eventMeta
