@@ -7,7 +7,7 @@
 
 import type { Message, StoredMessage, MessageRole } from '@craft-agent/core'
 import { storedToMessage, hasRenderableAssistantText, isAnswerDeliveryReceipt } from '@craft-agent/core'
-import { isParentTaskTool, getToolDisplayName } from '@craft-agent/shared/utils/toolNames'
+import { isParentTaskTool, getToolDisplayName, cleanToolMetadataLabel } from '@craft-agent/shared/utils/toolNames'
 
 import { isSubmitAnswerTool, localizedToolLabel } from './tool-labels'
 import { unified } from 'unified'
@@ -461,8 +461,8 @@ function messageToActivity(message: Message, existingActivities: ActivityItem[] 
     toolInput: message.toolInput,
     content: message.toolResult || message.content,
     toolResultContent: message.toolResultContent,
-    intent: message.toolIntent,
-    displayName: message.toolDisplayName,  // LLM-generated human-friendly name
+    intent: cleanToolMetadataLabel(message.toolIntent),
+    displayName: cleanToolMetadataLabel(message.toolDisplayName),  // LLM-generated human-friendly name
     toolDisplayMeta: message.toolDisplayMeta,  // Embedded metadata with base64 icon for viewer
     timestamp: message.timestamp,
     error: message.isError ? stripErrorTags(message.toolResult || message.content) : undefined,
@@ -988,7 +988,7 @@ export function groupMessagesByTurn(messages: Message[], options: GroupTurnsOpti
       const isDelivery = isSubmitAnswerTool(message.toolName ?? '')
       currentTurn = ensureOpenAssistantTurn(message, {
         isStreaming: !isToolComplete,
-        intent: isDelivery ? undefined : message.toolIntent,
+        intent: isDelivery ? undefined : cleanToolMetadataLabel(message.toolIntent),
       })
       if (
         currentTurn.response

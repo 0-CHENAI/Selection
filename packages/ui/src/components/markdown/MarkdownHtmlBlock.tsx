@@ -29,7 +29,7 @@
  */
 
 import * as React from 'react'
-import { Globe, Maximize2 } from 'lucide-react'
+import { Globe } from 'lucide-react'
 import { cn } from '../../lib/utils'
 import { CodeBlock } from './CodeBlock'
 import { HTMLPreviewOverlay } from '../overlay/HTMLPreviewOverlay'
@@ -162,27 +162,11 @@ export function MarkdownHtmlBlock({ code, className }: MarkdownHtmlBlockProps) {
             {activeItem?.src.split(/[\\/]/).pop() || spec.title || t('preview.htmlPreview')}
           </span>
           <span className="text-xs text-muted-foreground">HTML</span>
-          <div className="flex items-center gap-1">
-            <ItemNavigator items={items} activeIndex={selectedIndex} onSelect={setActiveIndex} />
-            <button
-              type="button"
-              aria-label={t('common.viewFullscreen')}
-              onClick={() => setIsFullscreen(true)}
-              className={cn(
-                "p-1 rounded-[6px] transition-all select-none",
-                "bg-background shadow-minimal",
-                "text-muted-foreground/50 hover:text-foreground",
-                "focus:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-              )}
-              title={t('common.viewFullscreen')}
-            >
-              <Maximize2 className="w-3.5 h-3.5" />
-            </button>
-          </div>
+          <ItemNavigator items={items} activeIndex={selectedIndex} onSelect={setActiveIndex} />
         </div>
 
         {/* Content area: hidden iframes for cached items + loading/error for uncached active */}
-        <InlineDocumentPreview onViewFull={() => setIsFullscreen(true)}>
+        <InlineDocumentPreview onViewFull={() => setIsFullscreen(true)} alwaysShowViewFull>
           {/* Render all cached items as hidden iframes — prevents flash on tab switch */}
           {items.map((item, i) => {
             const processed = processedCache[item.src]
@@ -223,4 +207,3 @@ export function MarkdownHtmlBlock({ code, className }: MarkdownHtmlBlockProps) {
     </HtmlBlockErrorBoundary>
   )
 }
-

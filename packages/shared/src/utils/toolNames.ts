@@ -37,6 +37,12 @@ export const PARENT_TASK_TOOLS: ReadonlySet<string> = new Set(['Task', 'Agent'])
 /** Check whether a tool name is a parent task tool (Task or Agent). */
 export const isParentTaskTool = (name: string): boolean => PARENT_TASK_TOOLS.has(name);
 
+/** Remove a provider parameter marker accidentally included in tool UI metadata. */
+export function cleanToolMetadataLabel(value: string | undefined): string | undefined {
+  if (!value?.startsWith('<parameter=intent>')) return value;
+  return value.slice('<parameter=intent>'.length).trim() || undefined;
+}
+
 /**
  * Tools that should be hidden from the UI (purely internal state changes)
  */

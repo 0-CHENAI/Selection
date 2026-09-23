@@ -29,6 +29,14 @@ const GIT_CONVENTIONS_HEADING = '## Git Conventions'
 const CO_AUTHOR_TRAILER = 'Co-Authored-By: Selection <agents-noreply@craft.do>'
 
 describe('system prompt guidance', () => {
+  it('keeps chat citations inline without requesting a duplicate bibliography', () => {
+    const prompt = getSystemPrompt(undefined, undefined, '/tmp/workspace', '/tmp/workspace')
+    expect(prompt).toContain('cite supporting links next to the claims they support')
+    expect(prompt).toContain('Do not add a trailing Sources/References section or a one-line list of links')
+    expect(prompt).toContain('even when the reply contains a table or reads like a report')
+    expect(prompt).toContain('only when the user explicitly asks for one')
+  })
+
   it('includes Swarm and Conductor DAG in first-party self-knowledge (#189)', () => {
     const off = getSystemPrompt(undefined, undefined, '/tmp/workspace', '/tmp/workspace')
     const on = getSystemPrompt(

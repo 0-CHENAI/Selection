@@ -596,6 +596,27 @@ describe('PiEventAdapter', () => {
       });
     });
 
+    it('does not commit a final-answer phase while the same message calls a tool', () => {
+      collect(adapter.adaptEvent({ type: 'turn_start' } as any));
+      const events = collect(adapter.adaptEvent({
+        type: 'message_end',
+        message: {
+          role: 'assistant',
+          stopReason: 'stop',
+          content: [
+            { type: 'text', text: '仍需读取文件', textSignature: '{"phase":"final_answer"}' },
+            { type: 'toolCall', id: 'tool1', name: 'read', arguments: { path: '/tmp/skill.md' } },
+          ],
+        },
+      } as any));
+
+      expect(events.find(event => event.type === 'text_complete')).toMatchObject({
+        text: '仍需读取文件',
+        isIntermediate: true,
+        phase: 'intermediate',
+      });
+    });
+
     it('should allow multiple intermediate messages in a turn', () => {
       collect(adapter.adaptEvent({ type: 'turn_start' } as any));
 
@@ -908,10 +929,36 @@ describe('PiEventAdapter', () => {
           role: 'assistant',
           stopReason: 'aborted',
           errorMessage: 'Request was aborted by the user',
+          content: [{ type: 'text', text: '尚未完成的内容' }],
         },
       } as any));
 
       expect(events.every(event => event.type !== 'error' && event.type !== 'typed_error')).toBe(true);
+      expect(events.find(event => event.type === 'text_complete')).toMatchObject({
+        isIntermediate: true,
+        text: '尚未完成的内容',
+      });
+    });
+
+    it('keeps a user-aborted Codex final-answer segment intermediate', () => {
+      collect(adapter.adaptEvent({ type: 'turn_start' } as any));
+      const events = collect(adapter.adaptEvent({
+        type: 'message_end',
+        message: {
+          role: 'assistant',
+          provider: 'openai-codex',
+          api: 'openai-codex-responses',
+          stopReason: 'aborted',
+          errorMessage: 'Request was aborted by the user',
+          content: [{ type: 'text', text: '未完成的正文', textSignature: '{"phase":"final_answer"}' }],
+        },
+      } as any));
+
+      expect(events.find(event => event.type === 'text_complete')).toMatchObject({
+        text: '未完成的正文',
+        isIntermediate: true,
+        phase: 'intermediate',
+      });
     });
 
     it('should not emit error for unrelated aborted turns', () => {
@@ -1053,6 +1100,29 @@ describe('PiEventAdapter', () => {
         intent: 'Stored intent',
         displayName: 'Stored name',
       });
+    });
+
+    it('removes a misplaced intent parameter marker from stored tool display metadata', () => {
+      collect(adapter.adaptEvent({ type: 'turn_start' } as any));
+      toolMetadataStore.set('call_bad_label', {
+        displayName: '<parameter=intent>读取 HTML 模板',
+        timestamp: Date.now(),
+      });
+
+      const events = collect(adapter.adaptEvent({
+        type: 'tool_execution_start',
+        toolCallId: 'call_bad_label',
+        toolName: 'read',
+        args: { path: '/tmp/template.html' },
+      } as any));
+
+      expect(events[0]).toMatchObject({
+        type: 'tool_start',
+        toolName: 'Read',
+        displayName: '读取 HTML 模板',
+        input: { file_path: '/tmp/template.html' },
+      });
+      expect(events[0].intent).toBeUndefined();
     });
 
     it('should use canonical metadata from event payload', () => {

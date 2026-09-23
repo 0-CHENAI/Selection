@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'bun:test'
-import { getActiveTurnPreview, countWorkRecords, type ActivityItem } from '../turn-utils'
+import { getActiveTurnPreview, countWorkRecords, groupMessagesByTurn, type ActivityItem } from '../turn-utils'
+import type { Message } from '@craft-agent/core'
 
 function createActivity(overrides: Partial<ActivityItem>): ActivityItem {
   return {
@@ -12,6 +13,19 @@ function createActivity(overrides: Partial<ActivityItem>): ActivityItem {
 }
 
 describe('getActiveTurnPreview', () => {
+  it('旧会话中的异常工具名称不会显示参数标记', () => {
+    const messages: Message[] = [
+      { id: 'user', role: 'user', content: '画图', timestamp: 1 },
+      { id: 'read', role: 'tool', content: 'Running Read...', timestamp: 2,
+        toolName: 'Read', toolUseId: 'call_bad_label', toolStatus: 'completed',
+        toolInput: { file_path: '/tmp/template.html' },
+        toolDisplayName: '<parameter=intent>读取 HTML 模板', toolResult: 'done' },
+    ]
+    const turn = groupMessagesByTurn(messages).find(item => item.type === 'assistant')!
+    expect(turn.activities[0]?.displayName).toBe('读取 HTML 模板')
+    expect(getActiveTurnPreview(turn.activities, 'awaiting')).toBe('读取 HTML 模板 · /tmp/template.html')
+  })
+
   it('没有意图的搜索调用在等待下一步时保留查询摘要', () => {
     const activities = [createActivity({
       toolName: 'WebSearch', displayName: '搜索网页',

@@ -1878,7 +1878,10 @@ export function ResponseCard({
     }
     return [...merged.values()]
   }, [turnSources, sourceSummary.sources])
-  const responseText = sourceSummary.content
+  // Keep the model's answer verbatim. Source-section detection may enrich the
+  // source panel, but it must never erase text from the visible reply.
+  const responseText = parsedSkillUsage.content
+  const startsWithHtmlPreview = /^\s*(?:```html-preview(?:\s|$)|html-preview[ \t]*\n[ \t]*\{)/.test(responseText)
   const artifacts = useMemo(
     () => showArtifacts ? extractResponseArtifacts(responseText) : [],
     [showArtifacts, responseText],
@@ -2624,7 +2627,7 @@ export function ResponseCard({
       <>
         <div className="rounded-[8px] overflow-hidden relative group transition-colors duration-200 bg-background ring-1 ring-inset ring-foreground/5">
           {/* Fullscreen button - desktop only; compact mode keeps message chrome minimal */}
-          {showCompletedChrome && !compactMode && (
+          {showCompletedChrome && !compactMode && !startsWithHtmlPreview && (
           <button
             onClick={() => setIsFullscreen(true)}
             className={cn(
