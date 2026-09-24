@@ -44,9 +44,10 @@ import {
 import { projectsAtom } from '@/atoms/projects'
 import { kanbanEditorTargetAtom } from '@/atoms/kanban'
 import { defaultSessionOptions } from '@/hooks/useSessionOptions'
+import { constrainThinkingLevel, modelThinkingLevels, type ThinkingLevel } from '@craft-agent/shared/agent/thinking-levels'
 import { getSessionTitle } from '@/utils/session'
 // Model resolution: connection.defaultModel (no hardcoded defaults)
-import { resolveEffectiveConnectionSlug, isSessionConnectionUnavailable } from '@config/llm-connections'
+import { resolveEffectiveConnectionSlug, isSessionConnectionUnavailable, connectionModelIdsMatch } from '@config/llm-connections'
 
 function SourcesResizeHandle(props: React.HTMLAttributes<HTMLDivElement>) {
   return <PanelResizeHandle {...props} standalone />
@@ -256,6 +257,8 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
     () => enabledSources?.map(source => source.config.slug) ?? [],
   )
   const [draftBusy, setDraftBusy] = React.useState(false)
+  // Keep an explicit picker choice when asynchronous defaults finish loading.
+  const draftThinkingSelection = React.useRef<ThinkingLevel | undefined>(undefined)
   const draftCreateRef = React.useRef({
     onCreateSession,
     activeWorkspaceId,
@@ -318,6 +321,7 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
     setWorkspaceWorkingDirectory(undefined)
     setDraftSourceSlugs(enabledSources?.map(source => source.config.slug) ?? [])
     setDraftBusy(false)
+    draftThinkingSelection.current = undefined
     setPermissionMode(defaultSessionOptions.permissionMode)
     setOption('thinkingLevel', defaultSessionOptions.thinkingLevel)
     settingsHydrated.current = null
@@ -328,18 +332,29 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
   React.useEffect(() => {
     if (!isDraft || !activeWorkspaceId || settingsHydrated.current === activeWorkspaceId) return
     let cancelled = false
-    void window.electronAPI.getWorkspaceSettings(activeWorkspaceId).then(settings => {
-      if (cancelled || !settings) return
+    void Promise.allSettled([
+      window.electronAPI.getDefaultThinkingLevel(),
+      window.electronAPI.getWorkspaceSettings(activeWorkspaceId),
+    ]).then(([defaultResult, workspaceResult]) => {
+      if (cancelled) return
+      if (defaultResult.status === 'rejected') console.error('[ChatPage] Failed to load default thinking level:', defaultResult.reason)
+      if (workspaceResult.status === 'rejected') console.error('[ChatPage] Failed to load workspace settings:', workspaceResult.reason)
+      const appDefault = defaultResult.status === 'fulfilled' ? defaultResult.value : defaultSessionOptions.thinkingLevel
+      const settings = workspaceResult.status === 'fulfilled' ? workspaceResult.value : null
       settingsHydrated.current = activeWorkspaceId
+      setOption('thinkingLevel', draftThinkingSelection.current ?? settings?.thinkingLevel ?? appDefault)
+      if (!settings) return
       if (settings.permissionMode) setPermissionMode(settings.permissionMode)
-      if (settings.thinkingLevel) setOption('thinkingLevel', settings.thinkingLevel)
       setWorkspaceWorkingDirectory(settings.workingDirectory)
       if (settings.enabledSourceSlugs) setDraftSourceSlugs(settings.enabledSourceSlugs)
-    }).catch(error => {
-      console.error('[ChatPage] Failed to load workspace settings:', error)
     })
     return () => { cancelled = true }
   }, [isDraft, activeWorkspaceId, orchestrationProjectId, setPermissionMode, setOption])
+
+  const handleThinkingLevelChange = React.useCallback((level: ThinkingLevel) => {
+    if (isDraft) draftThinkingSelection.current = level
+    setOption('thinkingLevel', level)
+  }, [isDraft, setOption])
 
   // Track draft value for this session
   const [inputValue, setInputValue] = React.useState(() => coerceInputText(sessionId ? getDraft(sessionId) : ''))
@@ -470,6 +485,15 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
 
     return connection?.defaultModel ?? ''
   }, [isDraft, draftModel, session?.model, session?.llmConnection, workspaceDefaultLlmConnection, llmConnections, connectionUnavailable])
+
+  // Use the same model capability constraint as AI Settings for a new chat.
+  // Submit that displayed level so the persisted session matches the picker.
+  const draftConnectionDetails = llmConnections.find(c => c.slug === draftConnection)
+  const draftThinkingModel = draftConnectionDetails?.models?.find(m =>
+    connectionModelIdsMatch(typeof m === 'string' ? m : m.id, draftModel))
+  const draftThinkingLevels = modelThinkingLevels(typeof draftThinkingModel === 'object' ? draftThinkingModel : undefined)
+  const draftThinkingLevel = constrainThinkingLevel(sessionOpts.thinkingLevel, draftThinkingLevels.map(level => level.id))
+  draftCreateRef.current.thinkingLevel = draftThinkingLevel
 
   // Working directory for this session
   const workingDirectory = isDraft ? draftWorkingDirectory : session?.workingDirectory
@@ -838,8 +862,8 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
                 onRespondToPermission={onRespondToPermission}
                 pendingCredential={undefined}
                 onRespondToCredential={onRespondToCredential}
-                thinkingLevel={sessionOpts.thinkingLevel}
-                onThinkingLevelChange={(level) => setOption('thinkingLevel', level)}
+                thinkingLevel={isDraft ? draftThinkingLevel : sessionOpts.thinkingLevel}
+                onThinkingLevelChange={handleThinkingLevelChange}
                 permissionMode={sessionOpts.permissionMode}
                 onPermissionModeChange={setPermissionMode}
                 enabledModes={enabledModes}
@@ -919,8 +943,8 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
             onRespondToPermission={onRespondToPermission}
             pendingCredential={pendingCredential}
             onRespondToCredential={onRespondToCredential}
-            thinkingLevel={sessionOpts.thinkingLevel}
-            onThinkingLevelChange={(level) => setOption('thinkingLevel', level)}
+            thinkingLevel={isDraft ? draftThinkingLevel : sessionOpts.thinkingLevel}
+            onThinkingLevelChange={handleThinkingLevelChange}
             permissionMode={sessionOpts.permissionMode}
             onPermissionModeChange={setPermissionMode}
             enabledModes={enabledModes}
