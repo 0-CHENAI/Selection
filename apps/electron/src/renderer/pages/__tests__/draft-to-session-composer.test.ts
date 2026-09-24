@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'bun:test'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { constrainThinkingLevel, modelThinkingLevels } from '@craft-agent/shared/agent/thinking-levels'
 
 function read(relative: string): string {
   return readFileSync(join(import.meta.dir, relative), 'utf8')
@@ -16,6 +17,24 @@ describe('draft to live session composer', () => {
     expect(chatPage).not.toContain('setDraftWorkingDirectory(settings.workingDirectory)')
     expect(chatPage).toContain('projects.find(project => project.config.id === orchestrationProjectId)?.config.workingDirectory')
     expect(chatPage).toContain('[isDraft, activeWorkspaceId, orchestrationProjectId, setPermissionMode, setOption]')
+  })
+
+  it('uses app and workspace thinking defaults and sends the displayed supported level', () => {
+    const chatPage = read('../ChatPage.tsx')
+    expect(chatPage).toContain('window.electronAPI.getDefaultThinkingLevel()')
+    expect(chatPage).toContain('draftThinkingSelection.current ?? settings?.thinkingLevel ?? appDefault')
+    expect(chatPage.match(/thinkingLevel: ctx\.thinkingLevel,/g)).toHaveLength(2)
+    expect(chatPage).toContain('if (isDraft) draftThinkingSelection.current = level')
+    expect(chatPage).toContain('constrainThinkingLevel(sessionOpts.thinkingLevel, draftThinkingLevels.map(level => level.id))')
+    expect(chatPage).toContain('draftCreateRef.current.thinkingLevel = draftThinkingLevel')
+    expect(chatPage.match(/thinkingLevel=\{isDraft \? draftThinkingLevel : sessionOpts\.thinkingLevel\}/g)).toHaveLength(2)
+  })
+
+  it('maps an unsupported saved default to the level shown for the selected model', () => {
+    const supported = modelThinkingLevels({ supportedThinkingLevels: ['low', 'high', 'max'] })
+      .map(level => level.id)
+    expect(constrainThinkingLevel('medium', supported)).toBe('low')
+    expect(constrainThinkingLevel('high', supported)).toBe('high')
   })
 
   it('keeps ChatPage mounted so the composer is not swapped on first send', () => {
