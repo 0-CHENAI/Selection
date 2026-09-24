@@ -144,7 +144,7 @@ import { ensureLabelsExist, ensureTaskItemLabel } from '@craft-agent/shared/labe
 import { loadStatusConfig } from '@craft-agent/shared/statuses/storage'
 import { AutomationSystem, createPromptHistoryEntry, appendAutomationHistoryEntry, type AutomationSystemMetadataSnapshot, type PendingPrompt } from '@craft-agent/shared/automations'
 import { createTypedError, parseError } from '@craft-agent/shared/agent/errors'
-import { buildBackendRuntimeSignature, buildRestartRequiredSignature, prepareModelImageAttachments } from './runtime-config'
+import { buildBackendRuntimeSignature, buildRestartRequiredSignature, prepareModelImageAttachments, usesStreamingAnswerDelivery } from './runtime-config'
 import { validateArchiveTarget } from './archive-guards'
 import {
   applyContextOccupancy,
@@ -4101,8 +4101,8 @@ export class SessionManager implements ISessionManager {
         // Claude-specific
         isHeadless: !AGENT_FLAGS.defaultModesEnabled,
         skipConfigWatcher: true, // Server owns workspace-level ConfigWatcher — don't duplicate in agents
-        presentationProtocol: connection?.answerDelivery === 'streaming' && !managed.parentSessionId && !managed.taskSlug && (!managed.systemPromptPreset || managed.systemPromptPreset === 'default') ? (connection.presentationProtocol ?? 'legacy') : 'legacy',
-        explicitAnswerDelivery: connection?.answerDelivery !== 'streaming' && !managed.parentSessionId && !managed.taskSlug && (!managed.systemPromptPreset || managed.systemPromptPreset === 'default'),
+        presentationProtocol: usesStreamingAnswerDelivery(connection) && !managed.parentSessionId && !managed.taskSlug && (!managed.systemPromptPreset || managed.systemPromptPreset === 'default') ? (connection?.presentationProtocol ?? 'legacy') : 'legacy',
+        explicitAnswerDelivery: !usesStreamingAnswerDelivery(connection) && !managed.parentSessionId && !managed.taskSlug && (!managed.systemPromptPreset || managed.systemPromptPreset === 'default'),
         systemPromptPreset: managed.systemPromptPreset,
         debugMode: _platform?.isDebugMode ? { enabled: true, logFilePath: _platform.getLogFilePath?.() } : undefined,
         // Image resize callback — prevents oversized images from entering conversation history
@@ -6980,12 +6980,11 @@ export class SessionManager implements ISessionManager {
       }
       return
     }
-    const nativeTextAnswers = managed.llmConnection
-      ? getLlmConnection(managed.llmConnection)?.answerDelivery === 'streaming'
-      : false
+    const answerConnection = managed.llmConnection ? getLlmConnection(managed.llmConnection) : null
+    const nativeTextAnswers = usesStreamingAnswerDelivery(answerConnection)
     agent.configurePresentationProtocol?.(nativeTextAnswers && !managed.parentSessionId && !managed.taskSlug
       && (!managed.systemPromptPreset || managed.systemPromptPreset === 'default')
-      ? (getLlmConnection(managed.llmConnection!)?.presentationProtocol ?? 'legacy') : 'legacy')
+      ? (answerConnection?.presentationProtocol ?? 'legacy') : 'legacy')
     if (!nativeTextAnswers && agent.configureAnswerDelivery && !managed.parentSessionId && !managed.taskSlug && (!managed.systemPromptPreset || managed.systemPromptPreset === 'default')) {
       const continuingAnswer = isUserTaskContinuation || (options?.hidden && managed.orchestrationStatus === 'running')
       const owner = continuingAnswer

@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { LlmConnection } from '@craft-agent/shared/config'
 import type { FileAttachment } from '@craft-agent/shared/protocol'
-import { buildBackendRuntimeSignature, filterAttachmentsForModelInput, prepareModelImageAttachments } from './runtime-config'
+import { buildBackendRuntimeSignature, buildRestartRequiredSignature, filterAttachmentsForModelInput, prepareModelImageAttachments, usesStreamingAnswerDelivery } from './runtime-config'
 
 const baseCompat: LlmConnection = {
   slug: 'local',
@@ -79,6 +79,25 @@ describe('buildBackendRuntimeSignature', () => {
 
   it('ignores non-runtime metadata such as lastUsedAt', () => {
     expect(sig({ ...baseCompat, lastUsedAt: 1 })).toBe(sig({ ...baseCompat, lastUsedAt: 2 }))
+  })
+})
+
+describe('answer delivery mode', () => {
+  it('uses structured delivery for marker-v1 connections and native streaming for other streaming connections', () => {
+    expect(usesStreamingAnswerDelivery({ answerDelivery: 'streaming', presentationProtocol: 'marker-v1' })).toBe(false)
+    expect(usesStreamingAnswerDelivery({ answerDelivery: 'streaming', presentationProtocol: 'native' })).toBe(true)
+    expect(usesStreamingAnswerDelivery({ answerDelivery: 'streaming', presentationProtocol: 'legacy' })).toBe(true)
+    expect(usesStreamingAnswerDelivery({ answerDelivery: 'tool' })).toBe(false)
+  })
+
+  it('restarts an existing agent when the effective delivery mode changes', () => {
+    const signature = (connection: LlmConnection) => buildRestartRequiredSignature({
+      connection, provider: 'pi', authType: 'api_key', resolvedModel: 'gemma',
+    })
+    expect(signature({ ...baseCompat, answerDelivery: 'streaming', presentationProtocol: 'marker-v1' }))
+      .toBe(signature({ ...baseCompat, answerDelivery: 'tool' }))
+    expect(signature({ ...baseCompat, answerDelivery: 'streaming', presentationProtocol: 'native' }))
+      .not.toBe(signature({ ...baseCompat, answerDelivery: 'tool' }))
   })
 })
 
