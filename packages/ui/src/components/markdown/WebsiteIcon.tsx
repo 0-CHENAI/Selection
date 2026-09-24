@@ -1,6 +1,13 @@
 import * as React from 'react'
 import { Globe } from 'lucide-react'
 
+/** Sites whose article host does not serve an icon at /favicon.ico. */
+const SITE_FAVICONS: Readonly<Record<string, string>> = {
+  'ap-docs.deepseek.com': 'https://www.deepseek.com/favicon.ico',
+  'm.36kr.com': 'https://www.36kr.com/favicon.ico',
+  'hk.finance.yahoo.com': 'https://s.yimg.com/rz/l/favicon.ico',
+}
+
 /** Only send public hostnames to the favicon service, never paths or credentials. */
 export function websiteIconUrl(href: string): string | null {
   try {
@@ -23,7 +30,7 @@ export function websiteIconCandidates(href: string): string[] {
   if (!serviceUrl) return []
   const hostname = new URL(href).hostname.toLowerCase()
   const host = hostname.endsWith('.') ? hostname.slice(0, -1) : hostname
-  return [`https://${host}/favicon.ico`, serviceUrl]
+  return [`https://${host}/favicon.ico`, ...(SITE_FAVICONS[host] ? [SITE_FAVICONS[host]] : []), serviceUrl]
 }
 
 /** Decorative, inline favicon; fixed geometry avoids moving link text on load. */
