@@ -23,4 +23,9 @@ describe('websiteIconUrl', () => {
     expect(candidates.join(' ')).not.toContain('secret')
     expect(candidates.join(' ')).not.toContain('token')
   })
+  it('uses a known site icon when the article host has none', () => {
+    expect(websiteIconCandidates('https://ap-docs.deepseek.com/docs/updates')[1]).toBe('https://www.deepseek.com/favicon.ico')
+    expect(websiteIconCandidates('https://m.36kr.com/p/123')[1]).toBe('https://www.36kr.com/favicon.ico')
+    expect(websiteIconCandidates('https://hk.finance.yahoo.com/news/123')[1]).toBe('https://s.yimg.com/rz/l/favicon.ico')
+  })
 })
