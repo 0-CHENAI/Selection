@@ -670,6 +670,9 @@ export function groupMessagesByTurn(messages: Message[], options: GroupTurnsOpti
     if (message.answerPreview && options.isSessionProcessing === false) return []
     if (message.hidden && message.role !== 'user') return []
     if (message.role === 'user' && !message.hidden && !message.isQueued) activeRunId = undefined
+    // A regenerated answer may use marker-v1 while the stored user message
+    // still carries an explicit-v1 run ID from its previous generation.
+    if (message.presentationProtocol === 'marker-v1') activeRunId = undefined
     if (message.answerRunId) activeRunId = message.answerRunId
     const runId = message.answerRunId ?? activeRunId
     if (runId && deliveredRuns.has(runId) && (message.role === 'assistant' || message.role === 'tool')) return []
@@ -714,6 +717,7 @@ export function groupMessagesByTurn(messages: Message[], options: GroupTurnsOpti
       && !message.answerCommitted
       && !message.answerPreview
       && !message.answerProtocol
+      && message.presentationProtocol !== 'marker-v1'
     ) {
       normalized = { ...message, answerProtocol: 'explicit-v1', answerRunId: runId }
     }

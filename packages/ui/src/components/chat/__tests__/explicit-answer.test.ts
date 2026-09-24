@@ -444,3 +444,23 @@ it('reserves only the active unclassified tail without mutating stored messages'
   expect(resumed.response).toBeUndefined()
   expect(resumed.activities.some(a => a.content === explanation)).toBe(true)
 })
+
+it('shows a marker-v1 final after regenerating a user message from an explicit-v1 run', () => {
+  const body = '是真的。\n\n## 官方说了什么\n\n正文与数据表。'
+  const messages: Message[] = [
+    { id: 'user', role: 'user', content: 'Grok 4.7 的反馈如何？', timestamp: 1, ...protocol },
+    { id: 'progress', role: 'assistant', content: '我去看官方说明。', timestamp: 2, isIntermediate: true, phase: 'intermediate', presentationProtocol: 'marker-v1' },
+    { id: 'search', role: 'tool', content: '', toolName: 'WebSearch', toolStatus: 'completed', toolResult: '找到来源', timestamp: 3 },
+    { id: 'final', role: 'assistant', content: body, timestamp: 4, isIntermediate: false, phase: 'final', presentationProtocol: 'marker-v1' },
+  ]
+  for (const transcript of [messages, messages.map(messageToStored).map(storedToMessage)]) {
+    for (const isSessionProcessing of [true, false]) {
+      const turn = groupMessagesByTurn(transcript, { isSessionProcessing }).find(t => t.type === 'assistant')!
+      expect(turn.response?.text).toBe(body)
+      expect(turn.response?.messageId).toBe('final')
+      expect(turn.answerRunId).toBeUndefined()
+      expect(turn.activities.some(activity => activity.content === body)).toBe(false)
+      expect(turn.activities.some(activity => activity.content === '我去看官方说明。')).toBe(true)
+    }
+  }
+})
