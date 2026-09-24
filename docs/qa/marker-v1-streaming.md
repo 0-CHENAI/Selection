@@ -1,5 +1,7 @@
 # marker-v1 正文分界验收（2026-09-17）
 
+> 2026-09-24 更新：模型在真实回答中输出过错误的起始标记和多余的结束标记。普通会话即使仍配置 `streaming + marker-v1`，现在也改用 `submit_answer` 结构化交付；已有记录仍按原协议读取。下文为 2026-09-17 的历史验收结果。
+
 ## 实现与启用
 
 普通会话可在 LLM connection 上设置 `answerDelivery: "streaming"`、`presentationProtocol: "marker-v1"`。未设置协议的连接维持 `legacy`；`native` 供已确认能提前提供 phase 的接口使用。不改变结构化任务、子会话和 explicit-v1 工具交付协议。

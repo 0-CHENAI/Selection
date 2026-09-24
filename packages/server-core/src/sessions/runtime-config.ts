@@ -27,6 +27,13 @@ export interface ModelAttachmentFilterResult {
   omittedImages: FileAttachment[]
 }
 
+/** Text sentinels are model output, so they cannot reliably delimit an answer. */
+export function usesStreamingAnswerDelivery(
+  connection: Pick<LlmConnection, 'answerDelivery' | 'presentationProtocol'> | null | undefined,
+): boolean {
+  return connection?.answerDelivery === 'streaming' && connection.presentationProtocol !== 'marker-v1'
+}
+
 function definedObject<T extends Record<string, unknown>>(obj: T): Record<string, unknown> {
   return Object.fromEntries(Object.entries(obj).filter(([, value]) => value !== undefined))
 }
@@ -67,6 +74,7 @@ export function buildRestartRequiredSignature(input: BackendRuntimeSignatureInpu
     slug: connection?.slug,
     providerType: connection?.providerType,
     piAuthProvider: connection?.piAuthProvider,
+    streamingAnswerDelivery: usesStreamingAnswerDelivery(connection),
   }))
 }
 
