@@ -21,6 +21,7 @@ import {
   sessionMetaMapAtom,
 } from '@/atoms/sessions'
 import { deriveSessionMessagesLoadState } from '@/lib/session-load'
+import { useGeneratedFileActions } from '@/hooks/useGeneratedFileActions'
 import { resolveBackgroundTaskChipLabel } from './background-task-chip'
 import type { Session } from '../../../shared/types'
 
@@ -41,6 +42,7 @@ export function ChildSessionPreviewDialog({
     onOpenUrl,
     onRespondToPermission,
     onRespondToCredential,
+    workspaces,
   } = useAppShellContext()
   const session = useSession(sessionId ?? '')
   const sessionMeta = useAtomValue(sessionMetaMapAtom).get(sessionId ?? '')
@@ -75,6 +77,13 @@ export function ChildSessionPreviewDialog({
     }
   }, [session, sessionId, sessionMeta])
 
+  const { openArtifact, openFile } = useGeneratedFileActions({
+    workingDirectory: displaySession?.workingDirectory,
+    sessionFolderPath: displaySession?.sessionFolderPath,
+    workspaceRootPath: workspaces.find((workspace) => workspace.id === displaySession?.workspaceId)?.rootPath,
+    onOpenFile,
+  })
+
   const loadState = deriveSessionMessagesLoadState({
     session: displaySession,
     sessionMeta,
@@ -101,7 +110,8 @@ export function ChildSessionPreviewDialog({
               key={displaySession.id}
               session={displaySession}
               onSendMessage={() => {}}
-              onOpenFile={onOpenFile}
+              onOpenFile={openFile}
+              onOpenArtifact={openArtifact}
               onOpenUrl={onOpenUrl}
               currentModel={displaySession.model ?? ''}
               onModelChange={() => {}}

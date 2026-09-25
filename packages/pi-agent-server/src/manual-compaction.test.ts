@@ -20,3 +20,17 @@ it('releases the reservation after failure and keeps separate sessions independe
   const next = { isCompacting: false, compact: async (instructions?: string) => instructions };
   expect(await runManualCompaction(next, 'Keep constraints')).toBe('Keep constraints');
 });
+it('restores settings after the prior compaction settles and before manual preparation', async () => {
+  const steps: string[] = [];
+  let compacting = true;
+  const session = {
+    get isCompacting() { return compacting; },
+    compact: async () => { steps.push('compact'); return 'summary'; },
+  };
+  const pending = runManualCompaction(session, undefined, () => { steps.push('restore settings'); });
+  await new Promise(resolve => setTimeout(resolve, 10));
+  expect(steps).toEqual([]);
+  compacting = false;
+  expect(await pending).toBe('summary');
+  expect(steps).toEqual(['restore settings', 'compact']);
+});
