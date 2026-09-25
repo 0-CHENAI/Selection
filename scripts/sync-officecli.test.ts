@@ -94,10 +94,17 @@ describe('OfficeCLI sync governance', () => {
     }
   });
 
-  it('records the reviewed Windows schema CRC without changing the default CRC', () => {
+  it('keeps the reviewed schema in sync and validates optional Windows overrides', () => {
     const reviewed = manifest();
-    expect(reviewed.schemaCrc).toBe('909df808');
-    expect(reviewed.assets['win32-x64']?.schemaCrc).toBe('69cd35d9');
+    const commandSchema = JSON.parse(readFileSync(
+      resolve(import.meta.dir, `../apps/electron/resources/officecli/${reviewed.version}/command-schema.json`),
+      'utf8',
+    )) as { schemaCrc: string };
+    expect(reviewed.schemaCrc).toBe(commandSchema.schemaCrc);
+
+    const withWindowsOverride = manifest();
+    withWindowsOverride.assets['win32-x64']!.schemaCrc = '69cd35d9';
+    expect(() => validateManifestFiles(withWindowsOverride)).not.toThrow();
 
     const invalid = manifest();
     invalid.assets['win32-x64']!.schemaCrc = 'not-a-crc';
