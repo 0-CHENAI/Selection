@@ -207,6 +207,20 @@ export function platformSchemaCrcReviewHint(
   return undefined;
 }
 
+export function compareOfficecliVersions(left: string, right: string): number {
+  const parse = (version: string): bigint[] => {
+    if (!/^\d+\.\d+\.\d+$/.test(version)) throw new Error(`Invalid OfficeCLI version: ${version}`);
+    return version.split('.').map(BigInt);
+  };
+  const leftParts = parse(left);
+  const rightParts = parse(right);
+  for (let index = 0; index < 3; index++) {
+    if (leftParts[index]! > rightParts[index]!) return 1;
+    if (leftParts[index]! < rightParts[index]!) return -1;
+  }
+  return 0;
+}
+
 function pruneStaleOfficecliVersions(currentVersion: string): void {
   for (const entry of unexpectedOfficecliRootEntries(readdirSync(officeRoot), currentVersion)) {
     rmSync(join(officeRoot, entry), { recursive: true, force: true });
@@ -758,7 +772,7 @@ ${JSON.stringify(dependencyChanges, null, 2)}
 ${JSON.stringify(manifest.compatibilityRecipes ?? {}, null, 2)}
 \`\`\`
 
-> 此报告只用于人工审查。运行时自更新保持禁用，draft PR 不会自动合并。
+> 此报告只用于人工审查。运行时自更新保持禁用，升级工作流不会自动合并 PR。
 `;
 }
 
@@ -896,6 +910,14 @@ async function update(allowUnclassified: boolean): Promise<void> {
     throw new Error(`Latest GitHub release is not a stable semver tag: ${release.tag_name}`);
   }
   const version = release.tag_name.slice(1);
+  const versionChange = compareOfficecliVersions(version, oldManifest.version);
+  if (versionChange < 0) {
+    throw new Error(`Latest OfficeCLI release ${version} is older than reviewed version ${oldManifest.version}`);
+  }
+  if (versionChange === 0) {
+    console.log(`OfficeCLI ${version} is already reviewed; no upgrade needed.`);
+    return;
+  }
   const temp = mkdtempSync(join(tmpdir(), 'selection-officecli-sync-'));
   try {
     const checksumAsset = release.assets.find(asset => asset.name === 'SHA256SUMS');
