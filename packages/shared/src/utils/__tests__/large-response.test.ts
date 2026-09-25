@@ -173,6 +173,18 @@ describe('handleLargeResponse contextWindow handling', () => {
     expect(written).toBe(eightKTokenText);
   });
 
+  test('spills Chinese tool output that chars/4 would leave in context', async () => {
+    const text = '汉'.repeat(13_000);
+    expect(estimateTokens(text)).toBeLessThan(TOKEN_LIMIT);
+    expect(estimateTokensDensityAware(text)).toBeGreaterThan(TOKEN_LIMIT);
+    const result = await handleLargeResponse({
+      text, sessionPath, context: { toolName: 'read' }, summarize: fakeSummarize,
+      contextWindow: 200_000,
+    });
+    expect(result?.wasSummarized).toBe(true);
+    expect(readFileSync(result!.filePath, 'utf-8')).toBe(text);
+  });
+
   test('contextWindow undefined matches pre-change behavior at 8k input', async () => {
     // 8k < TOKEN_LIMIT (12k) → null, identical to pre-change behavior.
     const result = await handleLargeResponse({

@@ -4,11 +4,16 @@ type CompactableSession<T> = { isCompacting: boolean; compact(instructions?: str
 const pendingSessions = new WeakSet<object>();
 
 /** Reserve synchronously: the SDK sets isCompacting only AFTER awaiting abort(). */
-export async function runManualCompaction<T>(session: CompactableSession<T>, instructions?: string): Promise<T> {
+export async function runManualCompaction<T>(
+  session: CompactableSession<T>,
+  instructions?: string,
+  beforeCompact?: () => void,
+): Promise<T> {
   if (pendingSessions.has(session)) throw new Error('A manual compaction request is already pending for this session.');
   pendingSessions.add(session);
   try {
     await waitForCompaction(session);
+    beforeCompact?.();
     return await session.compact(instructions);
   } finally {
     pendingSessions.delete(session);

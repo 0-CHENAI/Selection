@@ -16,9 +16,10 @@ function officeAppName(extension: string): string | undefined {
 }
 
 /** Compact delivery shelf, outside the annotated reply body and above message actions. */
-export function ResponseArtifacts({ artifacts, onOpenFile }: {
+export function ResponseArtifacts({ artifacts, onOpenFile, onOpenArtifact }: {
   artifacts: ResponseArtifact[]
   onOpenFile?: (path: string) => void
+  onOpenArtifact?: (path: string, action: 'preview' | 'external' | 'reveal') => void
 }) {
   const { t } = useTranslation()
   const { onOpenFileExternal, onRevealInFinder, fileManagerName } = usePlatform()
@@ -51,8 +52,10 @@ export function ResponseArtifacts({ artifacts, onOpenFile }: {
                   <TooltipTrigger asChild>
                     <button
                       type="button"
-                      disabled={!onOpenFile}
-                      onClick={() => onOpenFile?.(artifact.path)}
+                      disabled={!onOpenArtifact && !onOpenFile}
+                      onClick={() => onOpenArtifact
+                        ? onOpenArtifact(artifact.path, 'preview')
+                        : onOpenFile?.(artifact.path)}
                       aria-label={`${t('common.open')} ${artifact.name}`}
                       className="flex min-w-0 flex-1 items-center gap-2 rounded-xl px-3 py-2.5 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-default"
                     >
@@ -67,7 +70,7 @@ export function ResponseArtifacts({ artifacts, onOpenFile }: {
                     {artifact.name}
                   </TooltipContent>
                 </Tooltip>
-                {(onOpenFileExternal || onRevealInFinder) && (
+                {(onOpenArtifact || onOpenFileExternal || onRevealInFinder) && (
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>
                       <button type="button" aria-label={`${t('chat.artifactOpenWith')} ${artifact.name}`} className="mr-2 inline-flex shrink-0 items-center gap-1 border-0 bg-transparent px-1 py-2 text-xs text-muted-foreground shadow-none outline-none hover:text-foreground focus-visible:outline-none focus-visible:ring-0 focus-visible:text-foreground">
@@ -75,14 +78,18 @@ export function ResponseArtifacts({ artifacts, onOpenFile }: {
                       </button>
                     </DropdownMenuTrigger>
                     <StyledDropdownMenuContent align="end">
-                      {onOpenFileExternal && (
-                        <StyledDropdownMenuItem onSelect={() => onOpenFileExternal(artifact.path)}>
+                      {(onOpenArtifact || onOpenFileExternal) && (
+                        <StyledDropdownMenuItem onSelect={() => onOpenArtifact
+                          ? onOpenArtifact(artifact.path, 'external')
+                          : onOpenFileExternal?.(artifact.path)}>
                           <ExternalLink />
                           {officeAppName(artifact.extension) ? t('chat.artifactOfficeApp', { app: officeAppName(artifact.extension) }) : t('chat.artifactDefaultApp')}
                         </StyledDropdownMenuItem>
                       )}
-                      {onRevealInFinder && (
-                        <StyledDropdownMenuItem onSelect={() => onRevealInFinder(artifact.path)}>
+                      {(onOpenArtifact || onRevealInFinder) && (
+                        <StyledDropdownMenuItem onSelect={() => onOpenArtifact
+                          ? onOpenArtifact(artifact.path, 'reveal')
+                          : onRevealInFinder?.(artifact.path)}>
                           <FolderOpen />{t('chat.showInFileManager', { fileManager: fileManagerName || t('chat.artifactFileManager') })}
                         </StyledDropdownMenuItem>
                       )}

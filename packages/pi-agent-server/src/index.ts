@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { compactionSettings, installCompactionPolicy } from './compaction-policy.ts';
+import { applyCompactionSettings, installCompactionPolicy } from './compaction-policy.ts';
 import { installUnknownToolGuard } from './unknown-tool-guard.ts';
 import { runManualCompaction } from './manual-compaction.ts';
 import { waitForCompaction } from './wait-for-compaction.ts';
@@ -89,7 +89,7 @@ import { syncCredentialForPiSdk, type PiCredential } from './adapt-credential.ts
 import { registerMissingOpenRouterModels } from './openrouter-dynamic-models.ts';
 
 // Direct source imports from shared (bundled by bun build)
-import { handleLargeResponse, estimateTokens, tokenLimitFor } from '../../shared/src/utils/large-response.ts';
+import { handleLargeResponse, estimateTokensDensityAware, tokenLimitFor } from '../../shared/src/utils/large-response.ts';
 import { getSessionPlansPath, getSessionPath } from '../../shared/src/sessions/storage.ts';
 import { buildCallLlmRequest, withTimeout, LLM_QUERY_TIMEOUT_MS } from '../../shared/src/agent/llm-tool.ts';
 import type { LLMQueryRequest, LLMQueryResult } from '../../shared/src/agent/llm-tool.ts';
@@ -343,14 +343,11 @@ let unsubscribeEvents: (() => void) | null = null;
 // Init config (set on 'init' message)
 let initConfig: Extract<InboundMessage, { type: 'init' }> | null = null;
 
-function applyCompactionPolicy(model: { contextWindow?: number } | undefined): void {
+function applyCompactionPolicy(model: { contextWindow?: number } | undefined, enabled: boolean): void {
   if (!piSettingsManager) return;
   const contextWindow = model?.contextWindow ?? 0;
-  const settings = compactionSettings(contextWindow, initConfig?.swarmAgentTokenBudget);
+  const settings = applyCompactionSettings(piSettingsManager, contextWindow, enabled, initConfig?.swarmAgentTokenBudget);
   if (!settings) return;
-  piSettingsManager.applyOverrides({
-    compaction: settings,
-  });
   const triggerTokens = contextWindow - settings.reserveTokens + 1;
   debugLog(
     `Auto-compaction threshold configured at ${triggerTokens} tokens (80% policy, ${settings.keepRecentTokens} recent tokens retained)`,
@@ -842,13 +839,13 @@ async function ensureSession(): Promise<AgentSession> {
   piSettingsManager ??= PiSettingsManager.inMemory();
   sessionOptions.settingsManager = piSettingsManager;
   piSettingsManager.setCompactionEnabled(true);
-  applyCompactionPolicy(sessionOptions.model);
+  applyCompactionPolicy(sessionOptions.model, true);
 
   // Create the session — tools flow through customTools + allowlist (see comment above).
   const { session } = await createAgentSession(sessionOptions);
   installUnknownToolGuard(session);
-  installCompactionPolicy(session);
-  applyCompactionPolicy(session.model);
+  installCompactionPolicy(session, initConfig?.swarmAgentTokenBudget);
+  applyCompactionPolicy(session.model, true);
   piSession = session;
 
   toolsChanged = false;
@@ -1029,7 +1026,7 @@ function wrapSingleTool(
       const command = typeof inputObj.command === 'string' ? inputObj.command : '';
       const preserveBundledOfficecliGuide = /bash/i.test(sdkToolName)
         && isBundledOfficecliLoadSkillCommand(command);
-      if (!preserveBundledOfficecliGuide && estimateTokens(resultText) > tokenLimitFor(modelContextWindow) && initConfig) {
+      if (!preserveBundledOfficecliGuide && estimateTokensDensityAware(resultText) > tokenLimitFor(modelContextWindow) && initConfig) {
         try {
           const sessionPath = getSessionPath(
             initConfig.workspaceRootPath,
@@ -1719,7 +1716,6 @@ async function handlePrompt(msg: Extract<InboundMessage, { type: 'prompt' }>): P
       answerRecoveryToolNames = session.getActiveToolNames();
       session.setActiveToolsByName(answerRecoveryToolNames.filter(isAnswerTool));
     }
-
     // Force the Craft-built system prompt onto the Pi session. Direct assignment
     // to `state.systemPrompt` is wiped on every `session.prompt()` call by the Pi
     // SDK (see system-prompt-override.ts).
@@ -1735,6 +1731,9 @@ async function handlePrompt(msg: Extract<InboundMessage, { type: 'prompt' }>): P
 
     // Wait for any in-flight auto-compaction to avoid race (craft-agents-oss#464)
     await waitForCompaction(session);
+    // A settings reload can drop in-memory overrides without changing the
+    // session object. Restore the trigger before the SDK's pre-prompt check.
+    applyCompactionPolicy(session.model, session.autoCompactionEnabled);
 
     const promptImages = msg.images && msg.images.length > 0 ? msg.images : undefined
     if (promptImages) {
@@ -1899,7 +1898,8 @@ async function handleCompact(msg: Extract<InboundMessage, { type: 'compact' }>):
     // the SDK's race surface widens. Wait for the auto-compaction to drain
     // before starting a manual one. Reserve the request before the SDK awaits
     // abort(), and fail on timeout rather than overlap another compaction.
-    const result = await runManualCompaction(session, msg.customInstructions);
+    const result = await runManualCompaction(session, msg.customInstructions,
+      () => applyCompactionPolicy(session.model, session.autoCompactionEnabled));
     send({
       type: 'compact_result',
       id: msg.id,
@@ -1926,6 +1926,7 @@ async function handleSetAutoCompaction(msg: Extract<InboundMessage, { type: 'set
   try {
     const session = await ensureSession();
     session.setAutoCompactionEnabled(msg.enabled);
+    applyCompactionPolicy(session.model, msg.enabled);
     send({
       type: 'set_auto_compaction_result',
       id: msg.id,
@@ -1993,8 +1994,9 @@ async function handleUpdateRuntimeConfig(msg: RuntimeConfigUpdateMessage): Promi
         throw new Error(`Could not resolve model after runtime update: ${msg.model}`);
       }
 
+      const compactionEnabled = piSession.autoCompactionEnabled;
       await piSession.setModel(piModel);
-      applyCompactionPolicy(piModel);
+      applyCompactionPolicy(piModel, compactionEnabled);
       setInterceptorApiHints(piModel as { api?: string; provider?: string; baseUrl?: string });
       debugLog(`[runtime_config] Updated runtime config and active model: ${piModel.provider}/${piModel.id}`);
     } else {
@@ -2033,8 +2035,9 @@ async function handleSetModel(msg: Extract<InboundMessage, { type: 'set_model' }
     return;
   }
   try {
+    const compactionEnabled = piSession.autoCompactionEnabled;
     await piSession.setModel(piModel);
-    applyCompactionPolicy(piModel);
+    applyCompactionPolicy(piModel, compactionEnabled);
     setInterceptorApiHints(piModel as { api?: string; provider?: string; baseUrl?: string });
     if (initConfig) initConfig.model = msg.model;
     debugLog(`[set_model] Model changed to: ${msg.model} (resolved: ${piModel.provider}/${piModel.id})`);
@@ -2059,7 +2062,9 @@ async function handleSetThinkingLevel(msg: Extract<InboundMessage, { type: 'set_
   }
 
   try {
+    const compactionEnabled = piSession.autoCompactionEnabled;
     piSession.setThinkingLevel(piLevel);
+    applyCompactionPolicy(piSession.model, compactionEnabled);
     debugLog(`[set_thinking_level] Thinking level changed to: ${msg.level} (mapped: ${piLevel})`);
   } catch (error) {
     const errorMsg = error instanceof Error ? error.message : String(error);

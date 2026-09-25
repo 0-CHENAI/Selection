@@ -25,7 +25,7 @@ import { PanelHeaderCenterButton } from '@/components/ui/PanelHeaderCenterButton
 import { TaskOrchestrationEditButton } from '@/components/ui/TaskOrchestrationEditButton'
 import { useAppShellContext, usePendingPermission, usePendingCredential, useSessionOptionsFor, useSession as useSessionData } from '@/context/AppShellContext'
 import { rendererPerf } from '@/lib/perf'
-import { generatedFileBaseDir, resolveOpenableGeneratedFile } from '@/lib/generated-file-path'
+import { useGeneratedFileActions } from '@/hooks/useGeneratedFileActions'
 import { resolveMarkdownLinkTarget } from '@craft-agent/ui'
 import { navigate, routes } from '@/lib/navigate'
 import { useAdvancedSettings } from '@/hooks/useAdvancedSettings'
@@ -510,29 +510,12 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
     await window.electronAPI.sessionCommand(session.id, { type: 'updateWorkingDirectory', dir: path })
   }, [isDraft, session])
 
-  const handleOpenFile = React.useCallback(
-    async (path: string) => {
-      const baseDir = generatedFileBaseDir({
-        workingDirectory,
-        sessionFolderPath: session?.sessionFolderPath,
-        workspaceRootPath: activeWorkspace?.rootPath,
-      })
-      try {
-        const pick = await resolveOpenableGeneratedFile({
-          requestedPath: path,
-          baseDir,
-          searchFiles: (dir, query) => window.electronAPI.searchFiles(dir, query),
-        })
-        if (pick.closestMatchRelativePath) {
-          toast.info(t('chat.openedClosestMatch', { path: pick.closestMatchRelativePath }))
-        }
-        onOpenFile(pick.path)
-      } catch (error) {
-        toast.error(t('toast.failedToOpenFile'), { description: error instanceof Error ? error.message : String(error) })
-      }
-    },
-    [onOpenFile, workingDirectory, session?.sessionFolderPath, activeWorkspace?.rootPath, t]
-  )
+  const { openArtifact: handleOpenArtifact, openFile: handleOpenFile } = useGeneratedFileActions({
+    workingDirectory,
+    sessionFolderPath: session?.sessionFolderPath,
+    workspaceRootPath: activeWorkspace?.rootPath,
+    onOpenFile,
+  })
 
   const handleOpenUrl = React.useCallback(
     (url: string) => {
@@ -854,6 +837,7 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
                 session={skeletonSession}
                 onSendMessage={() => {}}
                 onOpenFile={handleOpenFile}
+                onOpenArtifact={handleOpenArtifact}
                 onOpenUrl={handleOpenUrl}
                 currentModel={effectiveModel}
                 onModelChange={handleModelChange}
@@ -934,6 +918,7 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
             session={displaySession ?? draftSession}
             onSendMessage={handleSendMessage}
             onOpenFile={handleOpenFile}
+            onOpenArtifact={handleOpenArtifact}
             onOpenUrl={handleOpenUrl}
             currentModel={effectiveModel}
             onModelChange={handleModelChange}

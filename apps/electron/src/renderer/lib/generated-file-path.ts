@@ -122,7 +122,6 @@ export type GeneratedFileSearchHit = {
 
 export type GeneratedFileOpenPick = {
   path: string
-  closestMatchRelativePath?: string
 }
 
 export type SearchGeneratedFiles = (
@@ -144,17 +143,6 @@ function splitParentAndName(resolved: string): { parentDir: string; fileName: st
 
 function fileNameOf(path: string): string {
   return path.split(/[/\\]/).pop() || ''
-}
-
-function pathEndsWithSuffix(absPath: string, suffix: string): boolean {
-  const left = absPath.replace(/\\/g, '/').replace(/\/+$/, '')
-  const right = suffix.replace(/\\/g, '/').replace(/^\/+/, '')
-  // A bare filename is too weak to pick among several same-named hits.
-  if (!right || !right.includes('/')) return false
-  if (pathsLikelySame(left, right)) return true
-  if (left.endsWith(`/${right}`)) return true
-  const looksWindows = /^[A-Za-z]:\//.test(left) || /^[A-Za-z]:\//.test(right)
-  return looksWindows && left.toLowerCase().endsWith(`/${right.toLowerCase()}`)
 }
 
 /**
@@ -180,40 +168,11 @@ export function asciiContainingDir(dir: string): string | null {
 
 function pickFromHits(
   hits: GeneratedFileSearchHit[],
-  requestedPath: string,
   candidates: string[],
 ): GeneratedFileOpenPick | null {
-  const files = hits.filter((m) => m.type === 'file')
-  if (files.length === 0) return null
-
-  const requestedName = fileNameOf(normalizeGeneratedFilePath(requestedPath))
-  const named = requestedName
-    ? files.filter((m) => m.name === requestedName || m.name.toLowerCase() === requestedName.toLowerCase())
-    : files
-  const pool = named
-  if (pool.length === 0) return null
-
-  const suffixes = [normalizeGeneratedFilePath(requestedPath), ...candidates]
-
-  for (const suffix of suffixes) {
-    const match = pool.find((m) => pathEndsWithSuffix(m.path, suffix))
-    if (match) {
-      const exactCandidate = candidates.some((c) => pathsLikelySame(c, match.path))
-      return exactCandidate
-        ? { path: match.path }
-        : { path: match.path, closestMatchRelativePath: match.relativePath }
-    }
-  }
-
-  if (pool.length === 1) {
-    const only = pool[0]!
-    const exact = candidates.some((c) => pathsLikelySame(c, only.path))
-    return exact
-      ? { path: only.path }
-      : { path: only.path, closestMatchRelativePath: only.relativePath }
-  }
-
-  return null
+  const exact = hits.find((m) => m.type === 'file'
+    && candidates.some((candidate) => pathsLikelySame(candidate, m.path)))
+  return exact ? { path: exact.path } : null
 }
 
 async function probeCandidate(
@@ -229,18 +188,15 @@ async function probeCandidate(
   ))
   const exact = files.find((m) => pathsLikelySame(m.path, resolved))
   if (exact) return { path: exact.path }
-  if (files.length === 1 && files[0]) {
-    return { path: files[0].path, closestMatchRelativePath: files[0].relativePath }
-  }
   return null
 }
 
 /**
  * Choose an on-disk path for a generated markdown file link.
  * Prefers a candidate that searchFiles can see; last resorts search the
- * workspace (and its ASCII ancestor) so a doubled Chinese folder name
- * or a failed parent-dir probe still opens the real file.
- * Reject missing/ambiguous targets; never send an unverified fallback to preview.
+ * workspace (and its ASCII ancestor) when a parent-dir probe fails.
+ * Only exact candidate paths are accepted: a same-named file on another
+ * Windows drive or in another folder must never replace a missing target.
  */
 export async function resolveOpenableGeneratedFile(opts: {
   requestedPath: string
@@ -271,7 +227,7 @@ export async function resolveOpenableGeneratedFile(opts: {
     for (const root of roots) {
       try {
         const hits = await opts.searchFiles(root, fileName)
-        const picked = pickFromHits(hits, opts.requestedPath, candidates)
+        const picked = pickFromHits(hits, candidates)
         if (picked) return picked
       } catch {
         // Try the next broader root.

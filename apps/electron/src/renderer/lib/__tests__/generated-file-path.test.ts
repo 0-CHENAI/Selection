@@ -211,8 +211,8 @@ describe('resolveOpenableGeneratedFile', () => {
     })).rejects.toThrow('File not found')
   })
 
-  test('opens the unique workspace match when parent probes fail', async () => {
-    const pick = await resolveOpenableGeneratedFile({
+  test('does not replace a missing target with a unique same-named file elsewhere', async () => {
+    await expect(resolveOpenableGeneratedFile({
       requestedPath: 'missing-folder/SKILL.md',
       baseDir: workspace,
       searchFiles: async (dir) => {
@@ -221,9 +221,34 @@ describe('resolveOpenableGeneratedFile', () => {
         }
         return []
       },
+    })).rejects.toThrow('File not found')
+  })
+
+  test('never redirects a missing D: artifact to a same-named file on C:', async () => {
+    const fileName = 'enterprise-data-platform-flow.html'
+    await expect(resolveOpenableGeneratedFile({
+      requestedPath: `file:///D:/成果/${fileName}`,
+      baseDir: 'C:\\Users\\fairy\\.selection',
+      searchFiles: async (dir) => dir.startsWith('C:')
+        ? [{ type: 'file', name: fileName, path: `C:\\Users\\fairy\\.selection\\${fileName}` }]
+        : [],
+    })).rejects.toThrow('File not found')
+  })
+
+  test('resolves a D: artifact from the session working directory despite a C: duplicate', async () => {
+    const fileName = 'enterprise-data-platform-flow.html'
+    const realPath = `D:\\成果\\${fileName}`
+    const pick = await resolveOpenableGeneratedFile({
+      requestedPath: fileName,
+      baseDir: 'D:\\成果',
+      searchFiles: async (dir) => dir === 'D:\\成果'
+        ? [
+            { type: 'file', name: fileName, path: `C:\\成果\\${fileName}` },
+            { type: 'file', name: fileName, path: realPath },
+          ]
+        : [],
     })
-    expect(pick.path).toBe(realPath)
-    expect(pick.closestMatchRelativePath).toBe('skills/SKILL.md')
+    expect(pick).toEqual({ path: realPath })
   })
 
   test('does not treat a POSIX case-variant as the same suffix', async () => {

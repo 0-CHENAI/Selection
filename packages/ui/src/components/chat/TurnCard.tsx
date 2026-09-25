@@ -361,6 +361,8 @@ export interface TurnCardProps {
   onExpandedActivityGroupsChange?: (groups: Set<string>) => void
   /** Callback when file path is clicked */
   onOpenFile?: (path: string) => void
+  /** Resolve and open a generated artifact with the requested action. */
+  onOpenArtifact?: (path: string, action: 'preview' | 'external' | 'reveal') => void
   /** Callback when URL is clicked */
   onOpenUrl?: (url: string) => void
   /** Callback to open response in Monaco editor */
@@ -1542,6 +1544,8 @@ export interface ResponseCardProps {
   completedRevealStartTime?: number
   /** Callback to open file in editor */
   onOpenFile?: (path: string) => void
+  /** Resolve and open a generated artifact with the requested action. */
+  onOpenArtifact?: (path: string, action: 'preview' | 'external' | 'reveal') => void
   /** Callback to open URL */
   onOpenUrl?: (url: string) => void
   /** Callback to open response in Monaco editor */
@@ -1832,6 +1836,7 @@ export function ResponseCard({
   isStreaming,
   isTurnComplete,
   onOpenFile,
+  onOpenArtifact,
   onOpenUrl,
   onPopOut,
   variant = 'response',
@@ -2685,7 +2690,7 @@ export function ResponseCard({
           </ResponseBodyGrowth>
 
           {showArtifacts && !presentationStreaming && (
-            <ResponseArtifacts key={messageId ?? revealIdentity} artifacts={artifacts} onOpenFile={onOpenFile} />
+            <ResponseArtifacts key={messageId ?? revealIdentity} artifacts={artifacts} onOpenFile={onOpenFile} onOpenArtifact={onOpenArtifact} />
           )}
 
           {/* Reserve known research sources while text streams. Completion only
@@ -2951,6 +2956,7 @@ export const TurnCard = React.memo(function TurnCard({
   expandedActivityGroups: externalExpandedActivityGroups,
   onExpandedActivityGroupsChange,
   onOpenFile,
+  onOpenArtifact,
   onOpenUrl,
   onPopOut,
   onOpenDetails,
@@ -3420,6 +3426,7 @@ export const TurnCard = React.memo(function TurnCard({
                 completedRevealStartTime={response.completedRevealStartTime}
                 sessionId={sessionId}
                 onOpenFile={onOpenFile}
+                onOpenArtifact={onOpenArtifact}
                 onOpenUrl={onOpenUrl}
                 onPopOut={onPopOut ? () => onPopOut(response.text) : undefined}
                 variant={response.isPlan ? 'plan' : 'response'}
@@ -3470,6 +3477,7 @@ export const TurnCard = React.memo(function TurnCard({
             completedRevealStartTime={response.completedRevealStartTime}
             sessionId={sessionId}
             onOpenFile={onOpenFile}
+            onOpenArtifact={onOpenArtifact}
             onOpenUrl={onOpenUrl}
             onPopOut={onPopOut ? () => onPopOut(response.text) : undefined}
             variant={response.isPlan ? 'plan' : 'response'}
