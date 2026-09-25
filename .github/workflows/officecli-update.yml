@@ -6,6 +6,7 @@ on:
   workflow_dispatch:
 
 permissions:
+  actions: write
   contents: write
   pull-requests: write
 
@@ -53,7 +54,7 @@ jobs:
         if: steps.changes.outputs.changed == 'true'
         run: bun scripts/sync-officecli.ts --check --download-runtime
 
-      - name: Publish or refresh draft upgrade PR
+      - name: Publish new draft upgrade PR
         if: steps.changes.outputs.changed == 'true'
         shell: bash
         env:
@@ -64,18 +65,24 @@ jobs:
           branch="codex/officecli-upgrade-v${OFFICECLI_VERSION}"
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git fetch origin "refs/heads/${branch}:refs/remotes/origin/${branch}" || true
-          git checkout -B "$branch"
-          git add apps/electron/resources/officecli
-          git commit -m "构建：同步 OfficeCLI v${OFFICECLI_VERSION}"
-          git push --force-with-lease origin "HEAD:${branch}"
-
           title="构建：升级 OfficeCLI 至 v${OFFICECLI_VERSION}"
           body_file="apps/electron/resources/officecli/officecli-upgrade-report.md"
           pr_number=$(gh pr list --state open --base "$OFFICECLI_BASE_BRANCH" --head "$branch" --json number --jq '.[0].number // empty')
           if [[ -n "$pr_number" ]]; then
-            gh pr edit "$pr_number" --base "$OFFICECLI_BASE_BRANCH" --title "$title" --body-file "$body_file"
-            gh pr ready "$pr_number" --undo || true
-          else
-            gh pr create --draft --base "$OFFICECLI_BASE_BRANCH" --head "$branch" --title "$title" --body-file "$body_file"
+            echo "OfficeCLI upgrade PR #${pr_number} already exists; preserving its reviewed branch and PR state."
+            exit 0
           fi
+          existing_branch=$(git ls-remote --heads origin "refs/heads/${branch}")
+          if [[ -n "$existing_branch" ]]; then
+            echo "::warning::OfficeCLI upgrade branch ${branch} already exists without an open PR; preserving it for manual review."
+            exit 0
+          fi
+
+          git checkout -b "$branch"
+          git add apps/electron/resources/officecli
+          git commit -m "构建：同步 OfficeCLI v${OFFICECLI_VERSION}"
+          git push origin "HEAD:refs/heads/${branch}"
+          gh pr create --draft --base "$OFFICECLI_BASE_BRANCH" --head "$branch" --title "$title" --body-file "$body_file"
+          # GITHUB_TOKEN-created PRs do not trigger pull_request workflows.
+          gh workflow run validate.yml --ref "$branch"
+          gh workflow run officecli-integration.yml --ref "$branch"
