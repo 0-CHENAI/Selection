@@ -11,6 +11,8 @@ import { existsSync, mkdirSync, writeFileSync } from 'fs';
 import { createHash } from 'crypto';
 import { join, relative } from 'path';
 import { debug } from './debug.ts';
+import { estimateTokensDensityAware } from './token-estimate.ts';
+export { estimateTokensDensityAware } from './token-estimate.ts';
 import {
   looksLikeBinary,
   extractBase64Binary,
@@ -67,57 +69,6 @@ const PER_RESULT_CONTEXT_FRACTION = 0.10;
  */
 export function estimateTokens(text: string): number {
   return Math.ceil(text.length / 4);
-}
-
-/**
- * Threshold above which base64-density correction kicks in. Below this size
- * the correction doesn't matter — the result fits anyway.
- */
-const DENSITY_AWARE_MIN_LENGTH = 20_000;
-
-/** Minimum run length for a base64-dense span to count. Set to 60 to catch
- *  the common wrapping styles for line-broken base64 in the wild — RFC 2045
- *  MIME wraps at 76, PEM at 64, custom encoders sometimes 60. Short
- *  alphanumeric runs (URLs without `:/?&`, UUIDs, identifiers) sit below
- *  this threshold so the false-positive rate stays low.
- *
- *  Hex digests (SHA-256 = 64 chars, SHA-512 = 128) and JWTs do match — both
- *  are token-dense in real tokenizers, so a tool result dominated by them
- *  should spill anyway. */
-const BASE64_RUN_MIN = 60;
-
-/** Fraction of total characters that must be inside long base64-style runs
- *  before the density correction applies. */
-const BASE64_DENSITY_THRESHOLD = 0.70;
-
-/** Effective chars-per-token for base64 in real tokenizers (Anthropic, GPT,
- *  Llama all land in the 1.3–1.7 range for base64-heavy content). */
-const BASE64_CHARS_PER_TOKEN = 1.5;
-
-/**
- * Density-aware token estimate. Mirrors {@link estimateTokens} for normal
- * text but corrects for base64-heavy content (email MIME bodies, JSON with
- * embedded binary, dumped certs, etc.) where the 4-chars/token heuristic
- * underestimates by ~2.5x.
- *
- * Trigger conditions (all must hold):
- *  - text length ≥ {@link DENSITY_AWARE_MIN_LENGTH}
- *  - ≥ {@link BASE64_DENSITY_THRESHOLD} of chars are inside unbroken
- *    base64-charset runs of length ≥ {@link BASE64_RUN_MIN}
- *
- * When triggered, returns `text.length / 1.5` instead of `text.length / 4`.
- */
-export function estimateTokensDensityAware(text: string): number {
-  if (text.length < DENSITY_AWARE_MIN_LENGTH) return estimateTokens(text);
-  const runRegex = new RegExp(`[A-Za-z0-9+/=]{${BASE64_RUN_MIN},}`, 'g');
-  let denseChars = 0;
-  for (const match of text.matchAll(runRegex)) {
-    denseChars += match[0].length;
-  }
-  if (denseChars / text.length >= BASE64_DENSITY_THRESHOLD) {
-    return Math.ceil(text.length / BASE64_CHARS_PER_TOKEN);
-  }
-  return estimateTokens(text);
 }
 
 /**

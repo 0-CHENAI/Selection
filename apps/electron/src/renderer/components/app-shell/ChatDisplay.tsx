@@ -155,6 +155,7 @@ interface ChatDisplayProps {
   session: Session | null
   onSendMessage: (message: string, attachments?: FileAttachment[], skillSlugs?: string[]) => void
   onOpenFile: (path: string) => void
+  onOpenArtifact?: (path: string, action: 'preview' | 'external' | 'reveal') => void
   onOpenUrl: (url: string) => void
   // Model selection
   currentModel: string
@@ -488,6 +489,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
   session,
   onSendMessage,
   onOpenFile,
+  onOpenArtifact,
   onOpenUrl,
   currentModel,
   onModelChange,
@@ -1987,6 +1989,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
                         onExpandedActivityGroupsChange={setExpandedActivityGroups}
                         todos={turn.todos}
                         onOpenFile={onOpenFile}
+                        onOpenArtifact={onOpenArtifact}
                         onOpenUrl={onOpenUrl}
                         isLastResponse={isLastResponse}
                         compactMode={compactMode}

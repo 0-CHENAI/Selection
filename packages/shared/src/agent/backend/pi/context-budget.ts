@@ -4,6 +4,7 @@ import type {
   Message,
   Tool,
 } from '@earendil-works/pi-ai';
+import { estimateTokensDensityAware } from '../../../utils/token-estimate.ts';
 
 /** Keep enough headroom for provider-side tokenization and request framing. */
 export const MIN_CONTEXT_RESERVE_TOKENS = 8_192;
@@ -66,18 +67,11 @@ function safeJson(value: unknown): string {
 }
 
 /**
- * Conservative mixed-language estimator. ASCII prose/code averages about four
- * characters per token; CJK and other non-ASCII characters can approach one
- * token each, so counting them separately avoids the SDK's CJK under-estimate.
+ * Shared estimator counts CJK separately and corrects dense base64 in prompts,
+ * tool schemas and messages. Tool-result spill uses the same estimate.
  */
 export function estimateTextTokensConservatively(text: string): number {
-  let ascii = 0;
-  let nonAscii = 0;
-  for (const char of text) {
-    if (char.codePointAt(0)! <= 0x7f) ascii += 1;
-    else nonAscii += 1;
-  }
-  return Math.ceil(ascii / 4) + nonAscii;
+  return estimateTokensDensityAware(text);
 }
 
 function estimateContent(content: Message['content']): number {
@@ -332,11 +326,15 @@ export function estimateContextInputTokens(context: Context): number {
   return Math.max(fullEstimate, estimateFromLatestUsage(context));
 }
 
-export function calculateContextReserve(estimatedInputTokens: number): number {
-  return Math.max(
+export function calculateContextReserve(estimatedInputTokens: number, contextWindow?: number): number {
+  const reserve = Math.max(
     MIN_CONTEXT_RESERVE_TOKENS,
     Math.ceil(Math.max(0, estimatedInputTokens) * CONTEXT_RESERVE_RATIO),
   );
+  // The 8k floor would leave a small-window model with no reply budget at all.
+  return typeof contextWindow === 'number' && Number.isFinite(contextWindow) && contextWindow > 0
+    ? Math.min(reserve, Math.max(256, Math.floor(contextWindow * 0.1)))
+    : reserve;
 }
 
 export function calculateContextBudget(
@@ -359,7 +357,7 @@ export function calculateContextBudget(
     };
   }
 
-  const reserveTokens = calculateContextReserve(estimatedInput);
+  const reserveTokens = calculateContextReserve(estimatedInput, contextWindow);
   const available = Math.max(1, Math.floor(contextWindow) - estimatedInput - reserveTokens);
   const maxOutputTokens = Math.min(requested, available);
   return {

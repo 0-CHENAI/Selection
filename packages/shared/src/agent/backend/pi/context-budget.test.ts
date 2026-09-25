@@ -46,6 +46,12 @@ describe('context output budget', () => {
     expect(budget.wasReduced).toBe(false);
   });
 
+  it('retains a usable reply budget at the 80% boundary of a small window', () => {
+    const budget = calculateContextBudget(8192, 4096, 6553);
+    expect(budget.reserveTokens).toBe(819);
+    expect(budget.maxOutputTokens).toBe(820);
+  });
+
   it('normalizes malformed numeric inputs instead of propagating NaN', () => {
     expect(calculateContextBudget(100_000, Number.NaN, Number.NaN)).toMatchObject({
       estimatedInputTokens: 0,
@@ -99,6 +105,13 @@ describe('context input estimation', () => {
     expect(breakdown.messages).toBeGreaterThan(0);
     expect(breakdown.systemPrompt + breakdown.tools + breakdown.messages)
       .toBeLessThanOrEqual(estimateContextInputTokens(context));
+  });
+
+  it('counts base64-heavy user input before the provider request', () => {
+    const encoded = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'.repeat(1875);
+    const context: Context = { messages: [{ role: 'user', content: encoded, timestamp: 1 }] };
+    expect(estimateTextTokensConservatively(encoded)).toBe(80_000);
+    expect(estimateContextInputTokens(context)).toBeGreaterThan(80_000);
   });
 
   it('splits Selection-owned prompt tags and tool names into optional rows', () => {
