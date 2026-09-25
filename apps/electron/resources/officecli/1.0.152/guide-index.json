@@ -1,5 +1,5 @@
 {
-  "version": "1.0.147",
+  "version": "1.0.152",
   "guides": {
     "word": {
       "directory": "officecli-docx",
@@ -209,8 +209,8 @@
       "files": [
         {
           "path": "SKILL.md",
-          "sha256": "1da56ed53a308222ab2516a2974ae98c6703b7d504fa5158348c39a18e85a4f1",
-          "sizeBytes": 42878
+          "sha256": "4dbeacba4bd107417fc31204ce22e91b37e5747d0541090d75ebb0ed14e02559",
+          "sizeBytes": 42947
         }
       ]
     },
@@ -366,8 +366,8 @@
       "files": [
         {
           "path": "SKILL.md",
-          "sha256": "5cd79d2c7398525acb9ffb431f5ff52f124a796f3b1a061f1f9f54f99bd367f3",
-          "sizeBytes": 35305
+          "sha256": "95ed125c9c06defda5a9abc9a9a1d7329e8b183c74a4a6b9b8eab2e1529ebb90",
+          "sizeBytes": 35502
         }
       ]
     },
@@ -1992,8 +1992,8 @@
       "files": [
         {
           "path": "SKILL.md",
-          "sha256": "428eef196cd5b9f6a6267a3f25f85919e6c560b10b53e31513f2a1e6fd7a396a",
-          "sizeBytes": 46899
+          "sha256": "c4cc673eccbf4b66e8d0051617d05761ddb005da030c3d1a2aeb7506b1f437d1",
+          "sizeBytes": 47000
         }
       ]
     },
