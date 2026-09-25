@@ -1,9 +1,9 @@
 {
-  "version": "1.0.147",
-  "schemaCrc": "909df808",
+  "version": "1.0.152",
+  "schemaCrc": "7a7d408f",
   "generatedFrom": "reviewed-release-binary",
-  "rootHelpSha256": "28165ddbd976e5f2aed3f8b1b7dfdb6c06c8340e52da56f9107a10f558087d00",
-  "helpAllSha256": "800a97893edd9426eb3bb3bebba6115564af5bfa38a2fd033551f5a2836540de",
+  "rootHelpSha256": "0bfb162149e592a8d00b02ee7b4e8caf3600028b2fd10e066ad08095ccb9ea65",
+  "helpAllSha256": "043f1ede834eb58d83360a1fcfbd5db5ba07724abfb8a807da3d32d5d3d7fe85",
   "helpAllEntries": 2466,
   "rootCommands": [
     "add",
@@ -108,7 +108,7 @@
       ]
     },
     "help": {
-      "helpSha256": "28165ddbd976e5f2aed3f8b1b7dfdb6c06c8340e52da56f9107a10f558087d00",
+      "helpSha256": "0bfb162149e592a8d00b02ee7b4e8caf3600028b2fd10e066ad08095ccb9ea65",
       "flags": [
         "--commands",
         "--force",
@@ -135,7 +135,7 @@
       ]
     },
     "install": {
-      "helpSha256": "3a93a10f891b04422baaebb814d9c83f0f732e1b8cab5bb9607f4dc9d3989c81",
+      "helpSha256": "8ac988135604a06d008fda4ffdf33b11a11bd04a0759937de7fcafa904a78194",
       "flags": []
     },
     "mcp": {
@@ -152,7 +152,7 @@
       ]
     },
     "move": {
-      "helpSha256": "118ed40fc5c3f5cf08e269de3ebd813c72b81664d15dd268d7c8b3e42bc94ba9",
+      "helpSha256": "0db03671a97b823e24812dfc98dc3d9f95ac9c7ff5de81b9ea78c36f11b33e86",
       "flags": [
         "--after",
         "--before",
@@ -243,7 +243,7 @@
       ]
     },
     "skills": {
-      "helpSha256": "61dbd575913ca7ab51e213df415bda0cee7bab29dfd9a93965d299ed067de530",
+      "helpSha256": "a2499a3660dd46fd95886e9f3640cc54de3a11547d54fd67f991a80a828cbe1b",
       "flags": []
     },
     "swap": {
@@ -267,7 +267,7 @@
       ]
     },
     "view": {
-      "helpSha256": "b6e1b9abc1eb851bc8344bc53453155d001f1f27e0176d31b3a7c6669cef967b",
+      "helpSha256": "213652e377fbc267e45b2e9c7ef58366f7515ff9bae1b973aab47c6c7e035852",
       "flags": [
         "--browser",
         "--cols",

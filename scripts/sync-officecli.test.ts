@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { describe, expect, it } from 'bun:test';
 import {
+  compareOfficecliVersions,
   commandSchemaContractsEqual,
   extractExternalDependencies,
   platformSchemaCrcReviewHint,
@@ -21,6 +22,15 @@ function manifest(): OfficecliManifest {
 }
 
 describe('OfficeCLI sync governance', () => {
+  it('upgrades only to a newer stable version', () => {
+    expect(compareOfficecliVersions('1.0.152', '1.0.152')).toBe(0);
+    expect(compareOfficecliVersions('1.0.153', '1.0.152')).toBeGreaterThan(0);
+    expect(compareOfficecliVersions('1.1.0', '1.0.152')).toBeGreaterThan(0);
+    expect(compareOfficecliVersions('1.0.151', '1.0.152')).toBeLessThan(0);
+    expect(compareOfficecliVersions('1.0.9', '1.0.10')).toBeLessThan(0);
+    expect(() => compareOfficecliVersions('1.0.153-rc', '1.0.152')).toThrow('Invalid OfficeCLI version');
+  });
+
   it('builds automated OfficeCLI upgrades from test and opens their PRs against test', () => {
     const workflow = readFileSync(
       resolve(import.meta.dir, '../.github/workflows/officecli-update.yml'),
@@ -30,11 +40,25 @@ describe('OfficeCLI sync governance', () => {
     expect(workflow).toContain('OFFICECLI_BASE_BRANCH: test');
     expect(workflow).toContain('ref: ${{ env.OFFICECLI_BASE_BRANCH }}');
     expect(workflow).toContain('gh pr list --state open --base "$OFFICECLI_BASE_BRANCH"');
-    expect(workflow).toContain('gh pr edit "$pr_number" --base "$OFFICECLI_BASE_BRANCH"');
     expect(workflow).toContain('gh pr create --draft --base "$OFFICECLI_BASE_BRANCH"');
+    expect(workflow).toContain('actions: write');
+    expect(workflow).toContain('gh workflow run validate.yml --ref "$branch"');
+    expect(workflow).toContain('gh workflow run officecli-integration.yml --ref "$branch"');
     expect(workflow.indexOf('Enforce reviewed command and resource policy')).toBeLessThan(
-      workflow.indexOf('Publish or refresh draft upgrade PR'),
+      workflow.indexOf('Publish new draft upgrade PR'),
     );
+  });
+
+  it('preserves an existing upgrade branch and its manual review state', () => {
+    const workflow = readFileSync(
+      resolve(import.meta.dir, '../.github/workflows/officecli-update.yml'),
+      'utf8',
+    );
+    expect(workflow).toMatch(/if \[\[ -n "\$pr_number" \]\]; then\s+[\s\S]*?exit 0\s+fi/);
+    expect(workflow).toMatch(/if \[\[ -n "\$existing_branch" \]\]; then\s+[\s\S]*?exit 0\s+fi/);
+    expect(workflow.indexOf('exit 0')).toBeLessThan(workflow.indexOf('git checkout -b "$branch"'));
+    expect(workflow).not.toContain('git push --force');
+    expect(workflow).not.toContain('gh pr ready "$pr_number" --undo');
   });
 
   it('accepts the complete reviewed manifest', () => {
@@ -94,10 +118,17 @@ describe('OfficeCLI sync governance', () => {
     }
   });
 
-  it('records the reviewed Windows schema CRC without changing the default CRC', () => {
+  it('keeps the reviewed schema in sync and validates optional Windows overrides', () => {
     const reviewed = manifest();
-    expect(reviewed.schemaCrc).toBe('909df808');
-    expect(reviewed.assets['win32-x64']?.schemaCrc).toBe('69cd35d9');
+    const commandSchema = JSON.parse(readFileSync(
+      resolve(import.meta.dir, `../apps/electron/resources/officecli/${reviewed.version}/command-schema.json`),
+      'utf8',
+    )) as { schemaCrc: string };
+    expect(reviewed.schemaCrc).toBe(commandSchema.schemaCrc);
+
+    const withWindowsOverride = manifest();
+    withWindowsOverride.assets['win32-x64']!.schemaCrc = 'a1b2c3d4';
+    expect(() => validateManifestFiles(withWindowsOverride)).not.toThrow();
 
     const invalid = manifest();
     invalid.assets['win32-x64']!.schemaCrc = 'not-a-crc';
