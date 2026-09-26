@@ -38,4 +38,19 @@ describe('generated artifact actions', () => {
     })).rejects.toThrow('File not found')
     expect(calls).toEqual([])
   })
+
+  test('a skill-directory preview opens the verified folder externally', async () => {
+    const directory = '/Users/chenai/.selection/workspaces/my-workspace/skills/lieflat-charts'
+    const calls: string[] = []
+    await openGeneratedFileAction({
+      requestedPath: `file://${directory}`,
+      action: 'preview',
+      baseDir: '/Users/chenai/.selection/workspaces/my-workspace',
+      searchFiles: async () => [{ type: 'directory', name: 'lieflat-charts', path: directory }],
+      openPreview: (path) => { calls.push(`preview:${path}`) },
+      openExternal: (path) => { calls.push(`external:${path}`) },
+      reveal: (path) => { calls.push(`reveal:${path}`) },
+    })
+    expect(calls).toEqual([`external:${directory}`])
+  })
 })

@@ -3,7 +3,7 @@ import { isAbsolute, join, resolve, dirname, parse as parsePath } from 'path'
 import { homedir } from 'os'
 import { validatePathFormat } from '../../utils/path-validation'
 import { randomUUID } from 'crypto'
-import { RPC_CHANNELS, type FileAttachment, type DirectoryListingResult } from '@craft-agent/shared/protocol'
+import { RPC_CHANNELS, type FileAttachment, type DirectoryListingResult, type FilePathStat } from '@craft-agent/shared/protocol'
 import type { StoredAttachment } from '@craft-agent/core/types'
 import { readFileAttachment, validateImageForClaudeAPI, IMAGE_LIMITS } from '@craft-agent/shared/utils'
 import { getSessionAttachmentsPath, validateSessionId } from '@craft-agent/shared/sessions'
@@ -25,10 +25,28 @@ export const HANDLED_CHANNELS = [
   RPC_CHANNELS.file.STORE_ATTACHMENT,
   RPC_CHANNELS.file.GENERATE_THUMBNAIL,
   RPC_CHANNELS.fs.SEARCH,
+  RPC_CHANNELS.fs.STAT_PATH,
   RPC_CHANNELS.fs.LIST_DIRECTORY,
 ] as const
 
 export function registerFilesHandlers(server: RpcServer, deps: HandlerDeps): void {
+  // Exact lookup for generated links. Search results are ranked and capped, so
+  // they cannot reliably prove that a particular file or directory exists.
+  server.handle(RPC_CHANNELS.fs.STAT_PATH, async (ctx, requestedPath: string): Promise<FilePathStat | null> => {
+    const workspaceId = resolveWorkspaceIdForFileAccess(ctx, deps.windowManager)
+    const safePath = await validateWorkspaceFilePath(requestedPath, workspaceId)
+    try {
+      const info = await stat(safePath)
+      const type = info.isFile() ? 'file' : info.isDirectory() ? 'directory' : null
+      return type ? { path: safePath, type } : null
+    } catch (error) {
+      if (error instanceof Error && 'code' in error
+        && ((error as NodeJS.ErrnoException).code === 'ENOENT'
+          || (error as NodeJS.ErrnoException).code === 'ENOTDIR')) return null
+      throw error
+    }
+  })
+
   // Read a file (with path validation to prevent traversal attacks)
   server.handle(RPC_CHANNELS.file.READ, async (ctx, path: string) => {
     try {

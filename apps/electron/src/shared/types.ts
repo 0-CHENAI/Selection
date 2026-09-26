@@ -205,6 +205,7 @@ import type {
   ShareResult,
   RefreshTitleResult,
   FileSearchResult,
+  FilePathStat,
   SessionSearchResult,
   LlmConnectionSetup,
   TestLlmConnectionParams,
@@ -360,6 +361,7 @@ export interface ElectronAPI {
 
   // Filesystem search (for @ mention file selection)
   searchFiles(basePath: string, query: string): Promise<FileSearchResult[]>
+  statPath(path: string): Promise<FilePathStat | null>
 
   // Server filesystem browsing (remote mode)
   listServerDirectory(dirPath: string): Promise<DirectoryListingResult>

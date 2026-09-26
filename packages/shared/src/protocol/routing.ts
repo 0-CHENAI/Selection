@@ -293,6 +293,7 @@ export const REMOTE_ELIGIBLE_CHANNELS = new Set<string>([
 
   // fs — workspace filesystem
   RPC_CHANNELS.fs.SEARCH,
+  RPC_CHANNELS.fs.STAT_PATH,
   RPC_CHANNELS.fs.LIST_DIRECTORY,
 
   // credentials — remote server's credential state

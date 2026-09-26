@@ -799,6 +799,12 @@ export interface FileSearchResult {
   relativePath: string
 }
 
+/** An exact, access-checked filesystem target for opening from a link. */
+export interface FilePathStat {
+  path: string
+  type: 'file' | 'directory'
+}
+
 // ---------------------------------------------------------------------------
 // LLM connection types
 // ---------------------------------------------------------------------------

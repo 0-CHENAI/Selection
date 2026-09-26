@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'bun:test'
 import { homedir, tmpdir } from 'os'
 import { join, sep } from 'path'
+import { mkdtempSync, rmSync, symlinkSync } from 'node:fs'
 import { validateFilePath } from '../utils'
 
 const home = homedir()
@@ -84,4 +85,17 @@ describe('validateFilePath', () => {
     const result = await validateFilePath(path, ['', undefined as unknown as string])
     expect(result).toContain('test.txt')
   })
+
+  if (process.platform !== 'win32') {
+    it('rejects a missing path below a symlink that escapes the temp directory', async () => {
+      const root = mkdtempSync(join(tmp, 'selection-path-'))
+      try {
+        symlinkSync('/', join(root, 'escape'))
+        await expect(validateFilePath(join(root, 'escape', 'outside-selection')))
+          .rejects.toThrow('Access denied')
+      } finally {
+        rmSync(root, { recursive: true, force: true })
+      }
+    })
+  }
 })

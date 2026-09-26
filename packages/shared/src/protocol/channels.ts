@@ -122,6 +122,7 @@ export const RPC_CHANNELS = {
   },
   fs: {
     SEARCH: 'fs:search',
+    STAT_PATH: 'fs:statPath',
     LIST_DIRECTORY: 'fs:listDirectory',
   },
   debug: {

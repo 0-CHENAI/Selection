@@ -26,9 +26,14 @@ export function normalizeGeneratedFilePath(path: string, windows = isWindowsRunt
 
   if (/^file:/i.test(p)) {
     p = p.replace(/\\/g, '/')
-    p = p.replace(/^file:\/\/+/i, '')
-    // file://localhost/C:/foo or leftover /C:/foo
-    p = p.replace(/^localhost\//i, '')
+    const host = p.match(/^file:\/\/([^/]+)(?:\/|$)/i)?.[1]
+    // Keep the third slash of file:///Users/...: it is the POSIX root.
+    p = p.replace(/^file:\/\//i, '')
+    // Keep the slash after localhost for POSIX paths; /C:/ is handled below.
+    p = p.replace(/^localhost(?=\/)/i, '')
+    if (host && host.toLowerCase() !== 'localhost' && !/^[A-Za-z]:$/.test(host)) {
+      p = `//${p}`
+    }
     if (/^\/[A-Za-z]:[\\/]/.test(p)) p = p.slice(1)
   }
 
@@ -40,6 +45,7 @@ export function normalizeGeneratedFilePath(path: string, windows = isWindowsRunt
   }
 
   p = p.replace(/^\/([A-Za-z]:[\\/])/, '$1')
+  if (p !== '/' && !/^[A-Za-z]:[\\/]$/.test(p)) p = p.replace(/[\\/]+$/, '')
   return p
 }
 
@@ -113,6 +119,16 @@ export function generatedFileBaseDir(opts: {
     || undefined
 }
 
+export function generatedFileBaseDirs(opts: {
+  workingDirectory?: string | null
+  sessionFolderPath?: string | null
+  workspaceRootPath?: string | null
+}): string[] {
+  const dirs = [opts.workingDirectory, opts.sessionFolderPath, opts.workspaceRootPath]
+  return dirs.filter((dir): dir is string => !!dir)
+    .filter((dir, index, all) => all.findIndex((other) => pathsLikelySame(other, dir)) === index)
+}
+
 export type GeneratedFileSearchHit = {
   type: string
   name: string
@@ -122,12 +138,23 @@ export type GeneratedFileSearchHit = {
 
 export type GeneratedFileOpenPick = {
   path: string
+  type: 'file' | 'directory'
 }
 
 export type SearchGeneratedFiles = (
   basePath: string,
   query: string,
 ) => Promise<GeneratedFileSearchHit[]>
+
+export type StatGeneratedPath = (
+  path: string,
+) => Promise<GeneratedFileOpenPick | null>
+
+function isOpenableHit(hit: GeneratedFileSearchHit): hit is GeneratedFileSearchHit & {
+  type: GeneratedFileOpenPick['type']
+} {
+  return hit.type === 'file' || hit.type === 'directory'
+}
 
 function splitParentAndName(resolved: string): { parentDir: string; fileName: string } | null {
   const lastSlash = Math.max(resolved.lastIndexOf('/'), resolved.lastIndexOf('\\'))
@@ -170,9 +197,9 @@ function pickFromHits(
   hits: GeneratedFileSearchHit[],
   candidates: string[],
 ): GeneratedFileOpenPick | null {
-  const exact = hits.find((m) => m.type === 'file'
-    && candidates.some((candidate) => pathsLikelySame(candidate, m.path)))
-  return exact ? { path: exact.path } : null
+  const exact = hits.filter(isOpenableHit).find((m) =>
+    candidates.some((candidate) => pathsLikelySame(candidate, m.path)))
+  return exact ? { path: exact.path, type: exact.type } : null
 }
 
 async function probeCandidate(
@@ -183,27 +210,47 @@ async function probeCandidate(
   const parts = splitParentAndName(resolved)
   if (!parts) return null
   const matches = await searchFiles(parts.parentDir, parts.fileName)
-  const files = matches.filter((m) => m.type === 'file' && (
-    m.name === parts.fileName || m.name.toLowerCase() === parts.fileName.toLowerCase()
-  ))
-  const exact = files.find((m) => pathsLikelySame(m.path, resolved))
-  if (exact) return { path: exact.path }
+  const entries = matches.filter(isOpenableHit).filter((m) =>
+    m.name === parts.fileName || m.name.toLowerCase() === parts.fileName.toLowerCase())
+  const exact = entries.find((m) => pathsLikelySame(m.path, resolved))
+  if (exact) return { path: exact.path, type: exact.type }
   return null
 }
 
 /**
- * Choose an on-disk path for a generated markdown file link.
+ * Choose an on-disk path for a generated markdown file or directory link.
  * Prefers a candidate that searchFiles can see; last resorts search the
  * workspace (and its ASCII ancestor) when a parent-dir probe fails.
  * Only exact candidate paths are accepted: a same-named file on another
  * Windows drive or in another folder must never replace a missing target.
  */
-export async function resolveOpenableGeneratedFile(opts: {
+export async function resolveOpenableGeneratedPath(opts: {
   requestedPath: string
   baseDir?: string | null
+  baseDirs?: string[]
+  statPath?: StatGeneratedPath
   searchFiles: SearchGeneratedFiles
 }): Promise<GeneratedFileOpenPick> {
-  const candidates = listGeneratedFilePathCandidates(opts.requestedPath, opts.baseDir)
+  const bases = [opts.baseDir, ...(opts.baseDirs ?? [])]
+  const candidates = bases.flatMap((base) => listGeneratedFilePathCandidates(opts.requestedPath, base))
+    .filter((candidate, index, all) => all.findIndex((other) => pathsLikelySame(other, candidate)) === index)
+
+  if (opts.statPath) {
+    try {
+      for (const candidate of candidates) {
+        // The server checks the exact path and applies the same access rules as
+        // shell:openFile. A denied or missing target must not trigger fuzzy search.
+        const hit = await opts.statPath(candidate)
+        if (hit) return hit
+      }
+      throw new Error('File not found: ' + opts.requestedPath)
+    } catch (error) {
+      // Older servers may not advertise their channels during handshake.
+      // Search remains a compatibility path only when this RPC is unavailable.
+      if (!(error instanceof Error && 'code' in error
+        && (error as Error & { code?: string }).code === 'CHANNEL_NOT_FOUND')) throw error
+    }
+  }
 
   for (const resolved of candidates) {
     try {
@@ -221,8 +268,10 @@ export async function resolveOpenableGeneratedFile(opts: {
       if (!dir) return
       if (!roots.some((r) => pathsLikelySame(r, dir))) roots.push(dir)
     }
-    addRoot(opts.baseDir)
-    if (opts.baseDir) addRoot(asciiContainingDir(opts.baseDir))
+    for (const base of bases) {
+      addRoot(base)
+      if (base) addRoot(asciiContainingDir(base))
+    }
 
     for (const root of roots) {
       try {

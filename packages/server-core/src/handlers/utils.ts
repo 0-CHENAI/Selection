@@ -1,5 +1,5 @@
 import { existsSync, readdirSync } from 'fs'
-import { normalize, isAbsolute } from 'path'
+import { normalize, isAbsolute, dirname, basename, join } from 'path'
 import { homedir, tmpdir } from 'os'
 import { realpath } from 'fs/promises'
 import { getWorkspaceByNameOrId, type Workspace } from '@craft-agent/shared/config'
@@ -241,14 +241,26 @@ export async function validateFilePath(
     throw new Error('Only absolute file paths are allowed')
   }
 
-  // Resolve symlinks to get the real path
-  let realFilePath: string
-  try {
-    realFilePath = await realpath(normalizedPath)
-  } catch {
-    // File doesn't exist or can't be resolved - use normalized path
-    realFilePath = normalizedPath
+  // Resolve the nearest existing ancestor too: a missing path may sit below
+  // a symlink such as macOS /var -> /private/var or a linked workspace root.
+  const canonicalPath = async (path: string): Promise<string> => {
+    let ancestor = path
+    const missing: string[] = []
+    for (;;) {
+      try {
+        return join(await realpath(ancestor), ...missing)
+      } catch (error) {
+        const code = error instanceof Error && 'code' in error
+          ? (error as NodeJS.ErrnoException).code : undefined
+        if (code !== 'ENOENT' && code !== 'ENOTDIR') throw error
+        const parent = dirname(ancestor)
+        if (parent === ancestor) return path
+        missing.unshift(basename(ancestor))
+        ancestor = parent
+      }
+    }
   }
+  const realFilePath = await canonicalPath(normalizedPath)
 
   // Define allowed base directories
   const allowedDirs = [
@@ -258,7 +270,13 @@ export async function validateFilePath(
   ].filter(Boolean)
 
   // Unicode-safe containment (handles Chinese paths + NFC/NFD differences on macOS)
-  const isAllowed = allowedDirs.some(dir => isPathInside(dir, realFilePath))
+  let isAllowed = allowedDirs.some(dir => isPathInside(dir, realFilePath))
+  if (!isAllowed) {
+    // Compare canonical paths on both sides only when needed. macOS maps /var
+    // to /private/var, and workspace roots may themselves be symlinks.
+    const realAllowedDirs = await Promise.all(allowedDirs.map(dir => canonicalPath(normalize(dir))))
+    isAllowed = realAllowedDirs.some(dir => isPathInside(dir, realFilePath))
+  }
 
   if (!isAllowed) {
     throw new Error(FILE_ACCESS_OUTSIDE_ALLOWED_MESSAGE)

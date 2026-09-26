@@ -237,6 +237,15 @@ describe('generated markdown file-link pipeline', () => {
     )
   }
 
+  it('routes an extensionless skill-directory link to the local path', () => {
+    const hrefs = rawHrefs('[查看技能目录](file:///Users/chenai/.selection/workspaces/my-workspace/skills/lieflat-charts)')
+    expect(hrefs).toEqual(['file:///Users/chenai/.selection/workspaces/my-workspace/skills/lieflat-charts'])
+    expect(resolveMarkdownLinkTarget(hrefs[0]!)).toEqual({
+      kind: 'file',
+      path: '/Users/chenai/.selection/workspaces/my-workspace/skills/lieflat-charts',
+    })
+  })
+
   it('opens an explicit Windows + Chinese workspace path as a file', () => {
     const hrefs = rawHrefs('[技能](D:\\selection\\巡察工作\\skills\\SKILL.md)')
     expect(hrefs).toHaveLength(1)
