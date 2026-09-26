@@ -16,7 +16,6 @@ const labels: Record<string, [string, string]> = {
   KillShell: ['killShell', 'Kill Shell'],
   TaskOutput: ['taskOutput', 'Task Output'],
   SearchCraftAgents: ['searchDocumentation', 'Search Documentation'],
-  submit_answer: ['submitAnswer', 'Sending the final reply'],
 }
 
 /** Resolve fixed native labels at render time, including stored English metadata. */
@@ -26,9 +25,8 @@ export function localizedToolLabel(toolName: string | undefined): string | undef
 }
 
 /**
- * submit_answer delivers the final reply itself — its generated intent
- * ("submit the complete answer") only restates that, so rows and previews
- * show the localized label alone.
+ * submit_answer delivers the final reply itself — delivery is not a work
+ * step, so work-chain rows, previews and titles filter it out entirely.
  */
 export function isSubmitAnswerTool(toolName: string | undefined): boolean {
   if (!toolName) return false
