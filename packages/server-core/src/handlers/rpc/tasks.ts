@@ -148,9 +148,25 @@ export function registerTasksHandlers(server: RpcServer, deps: HandlerDeps): voi
       })
       runners.set(workspaceId, runner)
       runner.scanUnfinished()
+      runner.revalidateKnownArtifacts()
+      runner.resumePreparedDeliveries()
     }
     return runner
   }
+
+  deps.sessionManager.onArtifactApplied?.(workspaceId => {
+    runnerFor(workspaceId).revalidateKnownArtifacts()
+  })
+
+  // Handler registration precedes session initialization in desktop and headless
+  // boot. Wait for restored sessions and permissions before claiming deliveries.
+  void Promise.resolve().then(async () => {
+    await deps.sessionManager.waitForInit()
+    for (const workspace of deps.sessionManager.getWorkspaces()) {
+      try { runnerFor(workspace.id) }
+      catch { tasksLog.warn('task-startup-recovery-blocked', { workspaceId: workspace.id }) }
+    }
+  }).catch(() => { tasksLog.warn('task-startup-recovery-init-failed') })
 
   function controlResult(
     runner: TaskRunner,

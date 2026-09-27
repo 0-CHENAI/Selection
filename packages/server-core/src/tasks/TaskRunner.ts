@@ -1,3 +1,5 @@
+import { artifactInputSnapshotError, invalidArtifactInput, captureArtifactInputs, invalidFrozenArtifactInput } from './artifact-input-validation';
+import { dependencyImpact, dependencyAncestors } from './dependency-impact';
 /**
  * The Conductor — an in-process DAG runner for Tasks.
  *
@@ -31,6 +33,7 @@ import {
   interpolateRefs,
   interpolateLocals,
   instanceId,
+  instanceIndex,
   definitionId,
   parseForEach,
   resolveArtifact,
@@ -43,6 +46,8 @@ import {
   readRunState,
   writeNodeOutput,
   writeNodeAttempt,
+  writeNodeSubmission,
+  readNodeSubmission,
   readNodeOutput,
   readRunLog,
   loadTaskDocument,
@@ -104,6 +109,10 @@ export interface ConductorSessionHost {
   /** Creates the child session. DAG workers are persisted but hidden from the
    * ordinary session list; run details address them by task/run/node metadata. */
   createSession(workspaceId: string, options: CreateSessionOptions): Promise<{ id: string }>;
+  prepareTaskWorkspace?(sessionId: string, sourceRoot: string, inputs: string[]): Promise<{ directory: string }>;
+  hasPreparedTaskDelivery?(sessionId: string): boolean;
+  canAutoResumeTaskDelivery?(sessionId: string): boolean;
+  finalizeTaskWorkspace?(sessionId: string, outputs: Record<string, string>, ensureCurrent: () => void, verifyInputs?: () => void): Promise<Record<string, unknown>>;
   sendMessage(sessionId: string, message: string): Promise<void>;
   continueProgress?(sessionId: string): Promise<void>;
   getProgressLiveTokens?(sessionId: string): number;
@@ -321,6 +330,8 @@ class ActiveRun {
   private readonly attemptHistory = new Map<string, { attempt: number; sessionId: string; state: string }[]>();
   private readonly attemptNumbers = new Map<string, number>();
   private readonly state = new Map<string, NodeStateEntry>();
+  private readonly controlArtifactInputs = new Map<string, Record<string, NodeOutput>>();
+  private readonly artifactInputs = new Map<string, Record<string, NodeOutput>>();
   private readonly sessionToNode = new Map<string, string>();
   private readonly outputs: Record<string, NodeOutput> = {};
   private edges: Map<string, Set<string>>;
@@ -349,6 +360,8 @@ class ActiveRun {
   private stopRequested = false;
   private originalFailed = false;
   private readonly submittedOutputs = new Map<string, NodeOutput>();
+  private readonly integratingSessions = new Set<string>();
+  private readonly integratedSessions = new Set<string>();
   private verdictLocked = false;
   private readonly instances = new Map<string, NodeStateEntry>();
   private readonly retiredInstanceAttempts = new Map<string, number>();
@@ -408,6 +421,8 @@ class ActiveRun {
 
   start(): void {
     this.assertSensitiveReady();
+    // Freeze the policy only for new runs; rehydrated revisions retain their original policy.
+    this.spec = { ...this.spec, execution: { ...this.spec.execution, artifact_delivery: 1 } };
     // The frozen run graph is a correctness prerequisite, not a presentation
     // convenience. Refuse to dispatch anything if revision 0 cannot be durably
     // written; otherwise a restart could only consult the mutable task.yaml.
@@ -483,6 +498,7 @@ class ActiveRun {
     for (const [, st] of this.instances) if (st.state === 'cancelled') st.state = 'pending';
     this.runStatus = 'running';
     this.log({ kind: 'run-resumed' });
+    this.restorePreparedDeliveries();
     if (reopenGate) {
       if (!this.enterCoordinatorGate(reopenReason)) this.scheduleReady();
     } else {
@@ -490,6 +506,14 @@ class ActiveRun {
     }
     this.emitChanged();
     return this.snapshot();
+  }
+
+  canResumePreparedDelivery(): boolean {
+    if (this.spec.execution?.artifact_delivery !== 1 || this.runStatus !== 'interrupted') return false;
+    const unfinished = [...this.state.values(), ...this.instances.values()].filter(st => !isTerminalNodeState(st.state));
+    const interrupted = unfinished.filter(st => st.state === 'interrupted');
+    return interrupted.length > 0 && interrupted.every(st => !!st.sessionId && this.deps.host.canAutoResumeTaskDelivery?.(st.sessionId))
+      && unfinished.every(st => ['pending', 'ready', 'interrupted'].includes(st.state));
   }
 
   continueAfterInterrupt(): RunSnapshot {
@@ -507,28 +531,39 @@ class ActiveRun {
     }
     this.runStatus = 'running';
     this.log({ kind: 'run-resumed' });
+    this.restorePreparedDeliveries();
     this.scheduleReady();
     this.emitChanged();
     return this.snapshot();
   }
 
+  private restorePreparedDeliveries(): void {
+    if (this.spec.execution?.artifact_delivery !== 1) return;
+    for (const [nodeId, st] of [...this.state, ...this.instances]) {
+      if (st.state !== 'pending' || !st.sessionId || !this.deps.host.hasPreparedTaskDelivery?.(st.sessionId)) continue;
+      let output: NodeOutput | null;
+      try {
+        output = readNodeSubmission(this.deps.workspaceRoot, this.slug, this.runId, nodeId, st.sessionId, st.attempt);
+        if (!output) throw new Error('Missing persisted submission');
+      } catch {
+        // Never route an uncertain prepared write through the automatic retry policy.
+        st.state = 'invalid';
+        st.lastFailure = 'Prepared delivery submission is missing or damaged; recover its record before continuing';
+        this.log({ kind: 'node-finished', nodeId, sessionId: st.sessionId, state: 'invalid', reason: st.lastFailure });
+        this.applyCard(st.sessionId, TODO_STATUS);
+        continue;
+      }
+      this.submittedOutputs.set(nodeId, output);
+      st.state = 'running';
+      this.inFlight += 1;
+      this.onSessionComplete({ sessionId: st.sessionId, workspaceId: this.deps.workspaceId, generation: 0, reason: 'complete' });
+    }
+  }
+
   /** Explicit recovery follows dependency edges; unrelated successful work remains intact. */
   private retryFailedNodes(): RunSnapshot {
     const roots = new Set([...this.state].filter(([, st]) => st.state === 'failed' || st.state === 'invalid').map(([id]) => id));
-    const affected = new Set(roots);
-    // all_done/cleanup nodes may already have produced outputs based on a failed predecessor.
-    // Those outputs must be invalidated too; retaining them would certify stale results.
-    let changed = true;
-    while (changed) {
-      changed = false;
-      for (const node of this.spec.nodes) {
-        if (affected.has(node.id)) continue;
-        const deps = this.edges.get(node.id) ?? new Set<string>();
-        if ([...deps].some(id => affected.has(id)) || (node.kind === 'finally' && deps.size === 0 && affected.size > 0)) {
-          affected.add(node.id); changed = true;
-        }
-      }
-    }
+    const affected = dependencyImpact(roots, this.spec.nodes, this.edges);
     const retryIds = [...affected];
     const discardIds: string[] = [];
     for (const [id, st] of this.instances) {
@@ -550,6 +585,7 @@ class ActiveRun {
     this.unsubscribe?.();
     this.unsubscribe = this.deps.host.onSessionComplete(evt => this.onSessionComplete(evt));
     this.runStatus = 'running';
+    this.restorePreparedDeliveries();
     // Recovery does not bypass a V3 coordinator checkpoint.
     if (!this.enterCoordinatorGate('node-failed')) this.scheduleReady();
     this.emitChanged();
@@ -634,7 +670,16 @@ class ActiveRun {
       const entrySeq = (e as RunLogEntry & { seq?: number }).seq;
       if (typeof entrySeq === 'number') this.nextSeq = Math.max(this.nextSeq, entrySeq + 1);
       if ('tokensUsed' in e && typeof e.tokensUsed === 'number') this.tokensUsed = e.tokensUsed;
-      if (e.kind === 'node-spawned') {
+      if (e.kind === 'artifact-results-invalidated') {
+        for (const id of e.nodeIds) {
+          const st = this.instances.get(id) ?? this.state.get(id);
+          if (st) { st.state = 'invalid'; st.lastFailure = e.reason; }
+          delete this.outputs[id]; this.instanceOutputs.delete(id);
+        }
+      } else if (e.kind === 'node-artifact-inputs') {
+        if (e.sessionId) this.artifactInputs.set(e.sessionId, e.inputs);
+        else this.controlArtifactInputs.set(e.nodeId, e.inputs);
+      } else if (e.kind === 'node-spawned') {
         const st = this.state.get(e.nodeId) ?? this.ensureInstanceState(e.nodeId);
         if (st) {
           st.sessionId = e.sessionId;
@@ -736,6 +781,16 @@ class ActiveRun {
     this.runStatus = deriveRunStatusFromLog(log);
     // History reads must never subscribe, start timers, change states or write logs.
     if (mode === 'view') {
+      for (const [nodeId, state] of this.state) {
+        if (state.state !== 'done') continue;
+        const output = loadOutput(nodeId);
+        if (output) this.outputs[nodeId] = output;
+      }
+      for (const [id, state] of this.instances) {
+        if (state.state !== 'done') continue;
+        const output = loadOutput(id);
+        if (output) this.instanceOutputs.set(id, output);
+      }
       const start = Date.parse(log[0]?.t ?? '');
       const end = Date.parse(log.at(-1)?.t ?? '');
       this.historicalMetrics = persistedMetrics ?? {
@@ -890,6 +945,92 @@ class ActiveRun {
     if (this.runStatus === 'running') this.scheduleReady();
   }
 
+  private revalidateRunningArtifactInputs(): void {
+    for (const [id, state] of [...this.state, ...this.instances]) {
+      if (state.state !== 'running' || !state.sessionId) continue;
+      const sessionId = state.sessionId;
+      const inputs = this.artifactInputs.get(sessionId);
+      if (!this.artifactInputs.has(sessionId) || this.integratedSessions.has(sessionId)) continue;
+      const reason = invalidFrozenArtifactInput(this.deps.workspaceRoot, inputs!);
+      if (!reason) continue;
+      // Fence completion and integration before awaiting cancellation.
+      this.failNode(id, reason, sessionId, 'invalid', false);
+      void (async () => {
+        try {
+          const stopped = this.deps.host.stopSwarm ? await this.deps.host.stopSwarm(sessionId) : undefined;
+          if (!stopped?.stoppedSessionIds.includes(sessionId)) await this.deps.host.cancelProcessing(sessionId, true);
+        } catch { conductorLog.warn('artifact-invalidated-cancel-failed', { runId: this.runId, sessionId }); }
+      })();
+    }
+  }
+
+  revalidateCompletedArtifacts(): RunSnapshot {
+    this.revalidateRunningArtifactInputs();
+    const roots = new Set<string>();
+    const completed = new Set([...this.state].filter(([, state]) => state.state === 'done').map(([id]) => id));
+    const outputNodes = this.spec.nodes.filter(node => node.kind !== 'map' && node.kind !== 'loop' && !this.replicaCounts.has(node.id) && !node.replicas);
+    const effectiveOutputs = captureArtifactInputs(completed, outputNodes, this.outputs, this.deps.workspaceRoot, this.edges);
+    for (const [id, state] of this.state) {
+      if (state.state !== 'done') continue;
+      const inputs = state.sessionId ? this.artifactInputs.get(state.sessionId) : this.controlArtifactInputs.get(id);
+      const hasInputs = state.sessionId ? this.artifactInputs.has(state.sessionId) : this.controlArtifactInputs.has(id);
+      if (!hasInputs) continue; // Historical runs retain their original contract.
+      if (artifactInputSnapshotError(inputs!)) { roots.add(id); continue; }
+      const own = effectiveOutputs[id];
+      const inputNodes = Object.entries(inputs!).map(([nodeId, output]) => ({ id: nodeId, kind: 'session' as const,
+        outputs: Object.keys(output.params ?? {}).map(name => ({ name, kind: 'artifact' as const })) }));
+      const node = this.spec.nodes.find(node => node.id === id);
+      if (node) inputNodes.push({ id, kind: 'session', outputs: Object.keys(own?.params ?? {}).map(name => ({ name, kind: 'artifact' as const })) });
+      const outputs = { ...inputs, [id]: own ?? { text: '' } };
+      const edges = new Map([[id, new Set(Object.keys(inputs!))]]);
+      if (invalidArtifactInput(this.deps.workspaceRoot, new Set(Object.keys(outputs)), inputNodes, outputs, edges)) roots.add(id);
+    }
+    const completedInstances = [...this.instances].filter(([, state]) => state.state === 'done').map(([id]) => id);
+    const instanceNodes = completedInstances.flatMap(id => {
+      const definition = this.spec.nodes.find(node => node.id === definitionId(id));
+      return definition ? [{ ...definition, id, kind: 'session' as const, replicas: undefined }] : [];
+    });
+    const iterationEdges = new Map<string, Set<string>>();
+    for (const id of completedInstances) {
+      if (this.spec.nodes.find(node => node.id === definitionId(id))?.kind !== 'loop') continue;
+      iterationEdges.set(id, new Set(completedInstances.filter(previous => definitionId(previous) === definitionId(id)
+        && (instanceIndex(previous) ?? -1) < (instanceIndex(id) ?? -1))));
+    }
+    const effectiveInstances = captureArtifactInputs(new Set(completedInstances), instanceNodes,
+      Object.fromEntries(this.instanceOutputs), this.deps.workspaceRoot, iterationEdges);
+    const invalidInstances = new Set<string>();
+    const instanceRootDefinitions = new Set<string>();
+    for (const [id, state] of this.instances) {
+      if (state.state !== 'done' || !state.sessionId) continue;
+      const inputs = this.artifactInputs.get(state.sessionId);
+      if (!this.artifactInputs.has(state.sessionId)) continue;
+      const own = effectiveInstances[id] ? { [id]: effectiveInstances[id]! } : {};
+      if (invalidFrozenArtifactInput(this.deps.workspaceRoot, inputs!) || invalidFrozenArtifactInput(this.deps.workspaceRoot, own)) {
+        invalidInstances.add(id); instanceRootDefinitions.add(definitionId(id)); roots.add(definitionId(id));
+      }
+    }
+    const affected = dependencyImpact(roots, this.spec.nodes, this.edges);
+    const nodeIds = [...affected].filter(id => this.state.get(id)?.state === 'done');
+    for (const [id, state] of this.instances) {
+      if (state.state === 'done' && (invalidInstances.has(id) || affected.has(definitionId(id)) && !instanceRootDefinitions.has(definitionId(id)))) nodeIds.push(id);
+    }
+    if (!nodeIds.length) return this.snapshot();
+    const reason = 'Artifact input or output changed; revalidation required';
+    // One durable event preserves the entire impact set before changing memory.
+    this.log({ kind: 'artifact-results-invalidated', nodeIds, reason, completedRun: this.runStatus === 'completed' });
+    for (const id of nodeIds) {
+      const state = this.instances.get(id) ?? this.state.get(id)!;
+      state.state = 'invalid'; state.lastFailure = reason;
+      delete this.outputs[id]; this.instanceOutputs.delete(id);
+    }
+    if (this.runStatus === 'completed') {
+      this.runStatus = 'failed'; this.originalFailed = true;
+      this.log({ kind: 'run-failed' });
+    }
+    this.emitChanged();
+    return this.snapshot();
+  }
+
   snapshot(): RunSnapshot {
     const blockers = [...this.state.entries()]
       .filter(([, st]) => st.state === 'waiting-approval' || st.state === 'interrupted' || st.state === 'failed' || st.state === 'invalid')
@@ -901,7 +1042,7 @@ class ActiveRun {
     const toNodeStatus = (id: string, st: NodeStateEntry, node?: TaskNode): NodeRunStatus => {
       const timing = this.nodeTimings.get(id);
       const recorded = this.nodeVerdicts.get(id) ?? this.nodeVerdicts.get(definitionId(id));
-      const verdict = recorded ?? timing?.verdict;
+      const verdict = st.state === 'invalid' ? undefined : recorded ?? timing?.verdict;
       return {
         id,
         title: node ? nodeTitle(node) : id,
@@ -1171,9 +1312,17 @@ class ActiveRun {
     this.log({ kind: 'node-finished', nodeId, sessionId: '', state: 'skipped', reason });
   }
 
-  private completeControlNode(nodeId: string, text: string, values?: Record<string, unknown>): void {
+  private completeControlNode(nodeId: string, text: string, values?: Record<string, unknown>, integratedArtifacts?: Record<string, unknown>): void {
     const st = this.state.get(nodeId)!;
-    const output: NodeOutput = { text, ...(values ? { params: values } : {}) };
+    const inputs = captureArtifactInputs(dependencyAncestors(nodeId, this.edges), this.spec.nodes, this.outputs, this.deps.workspaceRoot, this.edges);
+    const invalidInput = invalidFrozenArtifactInput(this.deps.workspaceRoot, inputs!);
+    if (invalidInput) {
+      this.failNode(nodeId, invalidInput, undefined, 'invalid', false);
+      return;
+    }
+    this.log({ kind: 'node-artifact-inputs', nodeId, sessionId: '', inputs });
+    this.controlArtifactInputs.set(nodeId, inputs);
+    const output: NodeOutput = { text, ...(values ? { params: values } : {}), ...(integratedArtifacts ? { integratedArtifacts } : {}) };
     this.outputs[nodeId] = output;
     writeNodeOutput(this.deps.workspaceRoot, this.slug, this.runId, nodeId, output);
     st.state = 'done';
@@ -1341,7 +1490,7 @@ class ActiveRun {
       // synthesize node can perform model-based synthesis when required.
       text = texts.join('\n');
     }
-    this.completeControlNode(node.id, text, params);
+    this.completeControlNode(node.id, text, params, Object.fromEntries(outputs.flatMap((output, index) => Object.entries(output.integratedArtifacts ?? {}).map(([name, value]) => [`${name}[${index}]`, value]))));
   }
 
   private finishMap(node: TaskNode): void {
@@ -1357,9 +1506,9 @@ class ActiveRun {
         return;
       }
       texts.push(out?.text ?? '');
-      ordered.push(out?.params?.item ?? out?.text ?? '');
+      ordered.push(node.outputs?.some(output => output.kind === 'artifact') ? out?.params ?? out?.text ?? '' : out?.params?.item ?? out?.text ?? '');
     }
-    this.completeControlNode(node.id, texts.join('\n'), { items: ordered });
+    this.completeControlNode(node.id, texts.join('\n'), { items: ordered }, Object.fromEntries(items.flatMap((_, index) => Object.entries(this.instanceOutputs.get(instanceId(node.id, index))?.integratedArtifacts ?? {}).map(([name, value]) => [`${name}[${index}]`, value]))));
   }
 
   private executeLoop(node: TaskNode): void {
@@ -1439,7 +1588,7 @@ class ActiveRun {
         },
       })
     ) {
-      this.completeControlNode(node.id, output.text, { iterations: (this.loopIndex.get(node.id) ?? 0) + 1 });
+      this.completeControlNode(node.id, output.text, { ...output.params, iterations: (this.loopIndex.get(node.id) ?? 0) + 1 }, output.integratedArtifacts);
       return;
     }
     this.loopIndex.set(node.id, (this.loopIndex.get(node.id) ?? 0) + 1);
@@ -1502,6 +1651,12 @@ class ActiveRun {
   private cachedOutput(node: TaskNode): NodeOutput | undefined {
     const mode = nodeCacheMode(node, this.sourceVersion);
     if (mode === 'none') return undefined;
+    if (invalidArtifactInput(this.deps.workspaceRoot, dependencyAncestors(node.id, this.edges), this.spec.nodes, this.outputs, this.edges)) {
+      this.markCache(node.id, 'bypass');
+      this.cacheBypasses += 1;
+      this.log({ kind: 'cache-bypass', nodeId: node.id, reason: 'artifact-input-changed' });
+      return undefined;
+    }
     if (!isWorkspaceCacheKindAllowed(node.kind)) {
       this.markCache(node.id, 'bypass');
       this.cacheBypasses += 1;
@@ -1509,7 +1664,8 @@ class ActiveRun {
       return undefined;
     }
     if (mode === 'run-pure') {
-      const hit = this.promptCache.get(this.cacheKey(node));
+      const candidate = this.promptCache.get(this.cacheKey(node));
+      const hit = candidate && !invalidArtifactInput(this.deps.workspaceRoot, new Set([node.id]), [node], { [node.id]: candidate }) ? candidate : undefined;
       if (hit) {
         this.markCache(node.id, 'hit');
         this.cacheHits += 1;
@@ -1527,7 +1683,8 @@ class ActiveRun {
       interpolateRefs(node.prompt ?? '', { nodeOutputs: this.outputs, params: this.opts.params }),
       locals ?? {},
     );
-    return createHash('sha256').update(`${node.id}\n${prompt}`).digest('hex');
+    const inputs = captureArtifactInputs(dependencyAncestors(node.id, this.edges), this.spec.nodes, this.outputs, this.deps.workspaceRoot, this.edges);
+    return createHash('sha256').update(`${node.id}\n${prompt}\n${JSON.stringify(inputs)}`).digest('hex');
   }
 
   private rememberCache(node: TaskNode, output: NodeOutput, locals?: { item?: unknown; index?: number; prev?: string }): void {
@@ -1636,6 +1793,9 @@ class ActiveRun {
     if (!active || active.state !== 'running' || active.sessionId !== sessionId) {
       return { ok: false, error: 'Session is not the active attempt for this node' };
     }
+    if (this.integratingSessions.has(sessionId) || this.integratedSessions.has(sessionId)) {
+      return { ok: false, error: 'Task output is already being integrated' };
+    }
     const declared = node.outputs ?? [];
     const values = { ...(payload.values ?? {}) };
     if (declared.length) {
@@ -1653,13 +1813,24 @@ class ActiveRun {
           if (typeError) return { ok: false, error: `Output "${decl.name}" ${typeError}` };
         }
         if (decl.kind === 'artifact' && values[decl.name] != null) {
-          const resolved = resolveArtifact(this.deps.workspaceRoot, this.spec.cwd, String(values[decl.name]));
+          const isolated = this.spec.execution?.artifact_delivery === 1
+            && (node.permissionMode ?? this.spec.defaults?.permissionMode ?? DEFAULT_TASK_PERMISSION_MODE) !== 'safe';
+          const root = isolated ? this.deps.host.getSessionWorkingDirectory(sessionId) : this.deps.workspaceRoot;
+          if (!root) return { ok: false, error: 'Missing artifact workspace' };
+          const resolved = resolveArtifact(root, isolated ? undefined : this.spec.cwd, String(values[decl.name]));
           if (!resolved.ok) return { ok: false, error: resolved.error };
           values[decl.name] = resolved.artifact;
+        } else if (decl.kind === 'artifact' && decl.required !== false) {
+          return { ok: false, error: `Missing required output "${decl.name}"` };
         }
       }
     }
-    this.submittedOutputs.set(nodeId, { text: payload.text ?? '', params: values });
+    const output = { text: payload.text ?? '', params: values };
+    if (this.spec.execution?.artifact_delivery === 1) {
+      try { writeNodeSubmission(this.deps.workspaceRoot, this.slug, this.runId, nodeId, sessionId, active.attempt, output); }
+      catch { return { ok: false, error: 'Could not persist task output; retry submission' }; }
+    }
+    this.submittedOutputs.set(nodeId, output);
     return { ok: true };
   }
 
@@ -1785,9 +1956,17 @@ class ActiveRun {
         this.failNode(instance?.id ?? node.id, 'permission ask requires user intervention');
         return;
       }
+      const promptOutputs = structuredClone(this.outputs);
+      const frozenInputs = state.lastFailure === 'progress-paused' && state.sessionId && this.artifactInputs.has(state.sessionId)
+        ? this.artifactInputs.get(state.sessionId)! : captureArtifactInputs(dependencyAncestors(node.id, this.edges), this.spec.nodes, promptOutputs, this.deps.workspaceRoot, this.edges);
+      const invalidInput = invalidFrozenArtifactInput(this.deps.workspaceRoot, frozenInputs);
+      if (invalidInput) {
+        this.failNode(key, invalidInput, undefined, 'invalid', false);
+        return;
+      }
       // Task-level skills ride as [skill:slug] mentions on every child prompt — the agent
       // pipeline resolves each SKILL.md and blocks tools until it is read (skills-as-context).
-      const prompt = skillsPreamble(this.spec.skills) + (await this.buildPrompt(node, instance));
+      const prompt = skillsPreamble(this.spec.skills) + (await this.buildPrompt(node, instance, promptOutputs));
       if (!canDispatch()) return;
       // Children run where the parent runs: inherit the orchestrator's resolved working directory,
       // falling back to the spec's declared `cwd`. Without this they default to the workspace cwd
@@ -1836,6 +2015,23 @@ class ActiveRun {
         this.emitChanged();
         return;
       }
+      let deliveryPrompt = prompt;
+      if (!resuming && this.spec.execution?.artifact_delivery === 1 && requested !== 'safe') {
+        if (!this.deps.host.prepareTaskWorkspace) throw new Error('Host does not support isolated artifact delivery');
+        const prepared = await this.deps.host.prepareTaskWorkspace(child.id, cwd ?? this.deps.workspaceRoot, node.workspace_inputs ?? []);
+        if (!canDispatch()) return;
+        deliveryPrompt += `\n\nWrite candidate outputs only inside ${JSON.stringify(prepared.directory)}. The runtime will validate and integrate declared outputs. Do not write the source project.`;
+      }
+      if (!resuming || !this.artifactInputs.has(child.id)) {
+        const inputs = frozenInputs;
+        this.log({ kind: 'node-artifact-inputs', nodeId: key, sessionId: child.id, inputs });
+        this.artifactInputs.set(child.id, inputs);
+      }
+      const changedInput = invalidFrozenArtifactInput(this.deps.workspaceRoot, this.artifactInputs.get(child.id)!);
+      if (changedInput) {
+        this.failNode(key, changedInput, child.id, 'invalid', false);
+        return;
+      }
       const timing = this.timing(key);
       timing.startedAtMs = this.nowMs();
       if (timing.scheduledAtMs !== undefined) timing.queueMs = Math.max(0, timing.startedAtMs - timing.scheduledAtMs);
@@ -1866,23 +2062,23 @@ class ActiveRun {
       if (resuming) {
         if (!this.deps.host.continueProgress) throw new Error('Host cannot resume the existing progress checkpoint');
         await this.deps.host.continueProgress(child.id);
-      } else await this.deps.host.sendMessage(child.id, prompt);
+      } else await this.deps.host.sendMessage(child.id, deliveryPrompt);
     } catch (err) {
       if (canDispatch()) this.failNode(key, `dispatch failed: ${(err as Error).message}`);
     }
   }
 
   /** Resolve a node's prompt: declared inputs (+ optional summarize) then ${…} interpolation. */
-  private async buildPrompt(node: TaskNode, instance?: { id: string; item?: unknown; index?: number; prev?: string }): Promise<string> {
+  private async buildPrompt(node: TaskNode, instance?: { id: string; item?: unknown; index?: number; prev?: string }, outputs: Record<string, NodeOutput> = this.outputs): Promise<string> {
     const inputValues: Record<string, unknown> = {};
     for (const [name, ref] of Object.entries(node.inputs ?? {})) {
       const fromExpr = typeof ref === 'string' ? ref : ref.from;
       const summarize = typeof ref === 'string' ? false : !!ref.summarize;
-      let resolved = interpolateRefs(fromExpr, { nodeOutputs: this.outputs, params: this.opts.params });
+      let resolved = interpolateRefs(fromExpr, { nodeOutputs: outputs, params: this.opts.params });
       if (summarize && this.deps.summarize) resolved = await this.deps.summarize(resolved);
       inputValues[name] = resolved;
     }
-    let text = interpolateRefs(node.prompt ?? '', { nodeOutputs: this.outputs, params: this.opts.params });
+    let text = interpolateRefs(node.prompt ?? '', { nodeOutputs: outputs, params: this.opts.params });
     text = interpolateLocals(text, instance ?? {});
     text = text.replace(INPUTS_REF_RE, (raw, name: string) => (name in inputValues ? String(inputValues[name]) : raw));
 
@@ -1893,7 +2089,7 @@ class ActiveRun {
       text = `${st.lastFailure}\n\n${text}`;
     }
     if (this.sourceVersion === 3 && node.kind === 'synthesize') {
-      text = `${text}\n\n${this.synthesizeDependencyInputs(node)}`;
+      text = `${text}\n\n${this.synthesizeDependencyInputs(node, outputs)}`;
     }
     if (this.sourceVersion === 3 && (node.kind === 'verify' || node.kind === 'judge')) {
       text = `${text}\n\nCall submit_task_node_verdict with result pass or fail, a reason, evidence, and any nodes to rework. Chat text is not a verdict.`;
@@ -1946,13 +2142,60 @@ class ActiveRun {
       this.applyCard(evt.sessionId, TODO_STATUS); this.emitChanged(); return;
     }
     if (evt.reason === 'complete') {
+      // Before integrating this consumer's own outputs, verify that the inputs
+      // it consumed have not changed while its model/tools were running.
+      // Re-entry after integration must not reject an intentional output update.
+      if (!this.integratedSessions.has(evt.sessionId)) {
+        const invalidInput = (this.artifactInputs.has(evt.sessionId) ? invalidFrozenArtifactInput(this.deps.workspaceRoot, this.artifactInputs.get(evt.sessionId)!) : invalidArtifactInput(this.deps.workspaceRoot, dependencyAncestors(defId, this.edges), this.spec.nodes, this.outputs, this.edges));
+        if (invalidInput) {
+          this.failNode(nodeId, invalidInput, evt.sessionId, 'invalid', false);
+          return;
+        }
+      }
       const text = evt.finalText ?? this.deps.host.getSessionFinalText(evt.sessionId) ?? '';
       const node = this.spec.nodes.find((n) => n.id === defId);
       const submitted = this.submittedOutputs.get(nodeId) ?? this.submittedOutputs.get(defId);
       const declared = node?.outputs?.length ?? 0;
-
       if (this.sourceVersion >= 2 && declared > 0 && !submitted && node && isSessionLikeKind(node.kind)) {
         this.failNode(nodeId, 'completed without submit_task_output', evt.sessionId, 'invalid');
+        return;
+      }
+      if (this.spec.execution?.artifact_delivery === 1
+        && (node?.permissionMode ?? this.spec.defaults?.permissionMode ?? DEFAULT_TASK_PERMISSION_MODE) !== 'safe'
+        && !this.integratedSessions.has(evt.sessionId)) {
+        if (this.integratingSessions.has(evt.sessionId)) return;
+        const submission = submitted ?? { text };
+        const files: Record<string, string> = {};
+        for (const declaration of node?.outputs ?? []) {
+          if (declaration.kind !== 'artifact') continue;
+          const artifact = submission?.params?.[declaration.name] as { path?: string } | undefined;
+          if (typeof artifact?.path === 'string' && artifact.path.length > 0) {
+            files[declaration.name] = artifact.path;
+          } else if (declaration.required !== false) {
+            this.failNode(nodeId, `Missing required candidate output "${declaration.name}"`, evt.sessionId, 'invalid'); return;
+          }
+        }
+        if (!this.deps.host.finalizeTaskWorkspace) {
+          this.failNode(nodeId, 'Missing runtime integration support', evt.sessionId, 'invalid'); return;
+        }
+        const attempt = st.attempt;
+        try { writeNodeSubmission(this.deps.workspaceRoot, this.slug, this.runId, nodeId, evt.sessionId, attempt, submission); }
+        catch { this.failNode(nodeId, 'Could not persist candidate submission before integration', evt.sessionId, 'invalid', false); return; }
+        const ensureCurrent = () => {
+          if (this.stopRequested || this.settled || st.state !== 'running' || st.sessionId !== evt.sessionId || st.attempt !== attempt) throw new Error('Task integration is no longer current');
+        };
+        this.integratingSessions.add(evt.sessionId);
+        void this.deps.host.finalizeTaskWorkspace(evt.sessionId, files, ensureCurrent, () => {
+          const invalidInput = (this.artifactInputs.has(evt.sessionId) ? invalidFrozenArtifactInput(this.deps.workspaceRoot, this.artifactInputs.get(evt.sessionId)!) : invalidArtifactInput(this.deps.workspaceRoot, dependencyAncestors(defId, this.edges), this.spec.nodes, this.outputs, this.edges));
+          if (invalidInput) throw new Error(invalidInput);
+        }).then(delivered => {
+          ensureCurrent();
+          this.submittedOutputs.set(nodeId, { ...submission, text: submission?.text ?? text, params: { ...submission?.params, ...delivered }, integratedArtifacts: delivered });
+          this.integratedSessions.add(evt.sessionId);
+          this.onSessionComplete(evt);
+        }).catch(error => {
+          if (st.state === 'running' && st.sessionId === evt.sessionId && st.attempt === attempt) this.failNode(nodeId, `integration failed: ${String(error)}`, evt.sessionId, 'invalid', false);
+        }).finally(() => { this.integratingSessions.delete(evt.sessionId); });
         return;
       }
       if (
@@ -1972,6 +2215,7 @@ class ActiveRun {
       if (this.requeueFailedNodeVerdict(nodeId, evt.sessionId, defId, st)) return;
       const output: NodeOutput = submitted ?? { text };
       for (const declaration of node?.outputs ?? []) {
+        if (this.integratedSessions.has(evt.sessionId)) break;
         if (declaration.kind !== 'artifact') continue;
         const artifact = output.params?.[declaration.name];
         if (artifact === undefined && declaration.required === false) continue;
@@ -2048,7 +2292,7 @@ class ActiveRun {
     }
   }
 
-  private failNode(nodeId: string, reason: string, sessionId?: string, failure: 'error' | 'empty' | 'invalid' = 'error'): void {
+  private failNode(nodeId: string, reason: string, sessionId?: string, failure: 'error' | 'empty' | 'invalid' = 'error', allowRetry = true): void {
     const defId = definitionId(nodeId);
     const st = this.state.get(defId);
     if (!st) return;
@@ -2060,7 +2304,7 @@ class ActiveRun {
     if (wasRunning) this.settleSessionSlot(nodeId, sessionId, false);
 
     const node = this.spec.nodes.find((n) => n.id === defId);
-    const retry = node?.retry;
+    const retry = allowRetry ? node?.retry : undefined;
     if (inst && expanding && retry && inst.attempt <= retry.limit && retryMatches(retry.when, failure)) {
       inst.lastFailure = `Previous attempt failed: ${reason}. Address the cause before retrying.`;
       const delay = retryBackoffMs(retry, inst.attempt, reason);
@@ -3012,7 +3256,7 @@ class ActiveRun {
     }
     const fingerprint = this.workspaceFingerprint(node);
     const lookup = readWorkspaceCache(this.deps.workspaceRoot, this.connectionKey(node), fingerprint, this.nowMs());
-    if (lookup.status === 'hit' && lookup.record) {
+    if (lookup.status === 'hit' && lookup.record && !invalidArtifactInput(this.deps.workspaceRoot, new Set([node.id]), [node], { [node.id]: lookup.record.output })) {
       this.markCache(node.id, 'hit', { createdAt: lookup.record.createdAt, sourceRunId: lookup.record.sourceRunId });
       this.cacheHits += 1;
       this.log({
@@ -3053,7 +3297,7 @@ class ActiveRun {
     );
     const dependencyOutputs: Record<string, { text: string; params?: Record<string, unknown> }> = {};
     const artifactHashes: string[] = [];
-    for (const dep of this.edges.get(node.id) ?? []) {
+    for (const dep of dependencyAncestors(node.id, this.edges)) {
       const out = this.outputs[dep];
       if (!out) continue;
       dependencyOutputs[dep] = { text: out.text, params: out.params };
@@ -3115,11 +3359,11 @@ class ActiveRun {
     return usedTools === true || usedTools === undefined;
   }
 
-  private synthesizeDependencyInputs(node: TaskNode): string {
+  private synthesizeDependencyInputs(node: TaskNode, outputs: Record<string, NodeOutput> = this.outputs): string {
     const deps = [...(this.edges.get(node.id) ?? [])];
     if (!deps.length) return '## Inputs by dependency\n(no dependency outputs)';
     const sections = deps.map((id) => {
-      const out = this.outputs[id];
+      const out = outputs[id];
       const depNode = this.spec.nodes.find((n) => n.id === id);
       const title = depNode ? nodeTitle(depNode) : id;
       return `### ${title} (${id})\n${out?.text ?? '(no output)'}`;
@@ -3480,6 +3724,15 @@ export class TaskRunner {
     return out;
   }
 
+  /** Called once by runtime initialization, separately from history scanning. */
+  resumePreparedDeliveries(): void {
+    for (const run of this.runs.values()) {
+      if (!run.canResumePreparedDelivery()) continue;
+      try { run.continueAfterInterrupt(); }
+      catch (error) { conductorLog.warn('prepared-delivery-resume-blocked', { error: error instanceof Error ? error.message : 'unknown' }); }
+    }
+  }
+
   /** Reconstruct an in-memory run from the run spec snapshot + run-log. Never reads live YAML for the graph. */
   private rehydrate(slug: string, runId: string, mode: 'scan' | 'hydrate' | 'view'): ActiveRun {
     const checkpoint = readRunState(this.deps.workspaceRoot, slug, runId);
@@ -3581,6 +3834,28 @@ export class TaskRunner {
 
   requestProgressReview(slug: string, runId: string, revision: number | undefined, summary: string): boolean {
     return this.requireRun(slug, runId).requestProgressReview(revision, summary);
+  }
+
+  revalidateKnownArtifacts(): void {
+    for (const run of this.runs.values()) {
+      try { run.revalidateCompletedArtifacts(); }
+      catch { conductorLog.warn('artifact-revalidation-blocked', { workspaceId: this.deps.workspaceId }); }
+    }
+    for (const slug of listTaskSlugs(this.deps.workspaceRoot)) {
+      for (const runId of listRunIds(this.deps.workspaceRoot, slug)) {
+        if (this.runs.has(this.key(slug, runId))) continue;
+        try {
+          const log = readRunLog(this.deps.workspaceRoot, slug, runId);
+          if (!isTerminalRunStatus(deriveRunStatusFromLog(log)) || !log.some(entry => entry.kind === 'node-artifact-inputs')) continue;
+          // Load a passive view: no worker, timers, recovery or task registration.
+          this.rehydrate(slug, runId, 'view').revalidateCompletedArtifacts();
+        } catch { conductorLog.warn('artifact-revalidation-blocked', { workspaceId: this.deps.workspaceId, slug, runId }); }
+      }
+    }
+  }
+
+  revalidateCompletedArtifacts(slug: string, runId: string): RunSnapshot {
+    return this.requireRun(slug, runId).revalidateCompletedArtifacts();
   }
 
   getRunState(slug: string, runId: string): RunSnapshot | null {

@@ -393,6 +393,8 @@ export interface TaskCreateFromTemplateRequest {
 
 export interface SwarmRunNodeDto {
   artifactDelivery?: {
+    candidateDirectory?: string
+    sourceDirectory?: string
     phase: 'executing' | 'validating' | 'integrating' | 'conflict' | 'validation-failed' | 'integrated' | 'needs-attention'
     outputs: Record<string, string>
     checks: string[]

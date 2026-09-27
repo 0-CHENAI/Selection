@@ -9,7 +9,7 @@ import { deliverySnapshot } from '../reliability/delivery-snapshot'
 import { validateProjectCandidate } from '../reliability/validate-project-candidate'
 import { ProjectIntegration } from '../reliability/project-integration'
 import { assertTaskDeliveryIdentity, replayTaskDelivery } from '../reliability/task-delivery-receipt'
-import { collectWorkspaceCandidates } from '../reliability/workspace-candidates'
+import { collectWorkspaceCandidates, discoverWorkspaceOutputs } from '../reliability/workspace-candidates'
 import { workspaceDeliveryContract } from '../reliability/workspace-delivery-contract'
 import { integrateCandidates } from '../reliability/integrate-candidates'
 import { validateCandidateFile } from '../reliability/validate-candidate'
@@ -2400,10 +2400,12 @@ export class SessionManager implements ISessionManager {
     if (saved.checkpoint.sessionId === managed.id) {
       managed.processingGeneration = Math.max(managed.processingGeneration, saved.checkpoint.generation)
     }
+    const preparedSwarm = this.canAutoResumeTaskDelivery(managed.id) && !!managed.parentSessionId && !!managed.orchestrationId && !managed.taskRunId
+      && managed.orchestrationStatus === 'need-to-check' && saved.checkpoint.status !== 'cancelled'
     const interrupted = saved.checkpoint.status === 'running' || saved.checkpoint.status === 'claimed'
     if (saved.checkpoint.status === 'claimed') this.startupRecoveryClaims.add(managed.id)
     this.publishRecovery(managed, saved.checkpoint.status === 'running' || saved.checkpoint.status === 'claimed' ? 'recovering' : saved.checkpoint.status)
-    if (interrupted) {
+    if (interrupted || preparedSwarm) {
       setImmediate(() => { void this.resumeExecution(managed.id).catch(() => sessionLog.warn('Execution recovery paused', { sessionId: managed.id })) })
     }
   }
@@ -7687,8 +7689,9 @@ export class SessionManager implements ISessionManager {
 
   canAutoResumeTaskDelivery(sessionId: string): boolean {
     const managed = this.sessions.get(sessionId)
-    return !!managed && !managed.isProcessing && !managed.stopRequested
-      && managed.permissionMode === 'allow-all' && managed.runtimeRecovery?.reason !== 'unsupported'
+    return !!managed && !managed.isProcessing && !managed.stopRequested && managed.orchestrationStatus !== 'stopped'
+      && !!managed.permissionMode && ['ask', 'allow-all'].includes(managed.permissionMode) && managed.runtimeRecovery?.reason !== 'unsupported'
+      && managed.executionCheckpoint?.status !== 'cancelled' && !Object.keys(managed.executionCheckpoint?.pendingTools ?? {}).length
       && !!(managed.isolatedWorkspace?.pendingDelivery || managed.isolatedWorkspace?.delivery)
   }
 
@@ -7701,14 +7704,16 @@ export class SessionManager implements ISessionManager {
       if (JSON.stringify(declared.outputs) !== JSON.stringify(state.deliveryContract.outputs)) throw new Error('Swarm delivery outputs changed')
       outputs = declared.outputs
     }
+    // Freeze discoveries before validation; retries use the durable receipt instead of rescanning.
+    if (!Object.keys(outputs).length) outputs = state.delivery?.outputs ?? state.pendingDelivery?.outputs ?? discoverWorkspaceOutputs(state)
     const generation = managed.processingGeneration
     const authorize = async () => {
       ensureCurrent()
-      if (managed.processingGeneration !== generation || managed.stopRequested || managed.permissionMode !== 'allow-all') throw new Error('Task integration requires current write authorization')
+      if (managed.processingGeneration !== generation || managed.stopRequested || (!managed.permissionMode || !['ask', 'allow-all'].includes(managed.permissionMode))) throw new Error('Task integration requires current write authorization')
       await validateWorkspaceFilePath(state.sourceRoot, managed.workspace.id)
       // Authorization lookup yields: cancellation or a new execution may win meanwhile.
       ensureCurrent()
-      if (managed.processingGeneration !== generation || managed.stopRequested || managed.permissionMode !== 'allow-all') throw new Error('Task integration requires current write authorization')
+      if (managed.processingGeneration !== generation || managed.stopRequested || (!managed.permissionMode || !['ask', 'allow-all'].includes(managed.permissionMode))) throw new Error('Task integration requires current write authorization')
     }
     await authorize()
     if (state.delivery) return replayTaskDelivery(state.sourceRoot, outputs, state.delivery)
@@ -7727,6 +7732,7 @@ export class SessionManager implements ISessionManager {
       const completedState: IsolatedWorkspace = { ...state, pendingDelivery: undefined, delivery: receipt, status: 'integrated' }
       atomicWrite(isolationPath, JSON.stringify(completedState))
       managed.isolatedWorkspace = completedState
+      setImmediate(() => this.notifyArtifactApplied(managed.workspace.id))
       return delivered
     }
     recordProgress({ phase: 'validating' })
@@ -7779,6 +7785,9 @@ export class SessionManager implements ISessionManager {
     const completedState: IsolatedWorkspace = { ...state, pendingDelivery: undefined, delivery: receipt, status: 'integrated' }
     atomicWrite(join(getSessionStoragePath(managed.workspace.rootPath, managed.id), 'data', 'isolated-workspace.json'), JSON.stringify(completedState))
     managed.isolatedWorkspace = completedState
+    // Publish after the caller has recorded this node's new receipts; otherwise
+    // its own expected update could invalidate the still-pending producer.
+    if (result.status === 'integrated') setImmediate(() => this.notifyArtifactApplied(managed.workspace.id))
     return delivered
   }
 
@@ -8059,7 +8068,20 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
 
   async resumeExecution(sessionId: string): Promise<void> {
     try {
-      await this.withSessionExecution(sessionId, () => this.executeRecovery(sessionId))
+      await this.withSessionExecution(sessionId, async () => {
+        const managed = this.sessions.get(sessionId)
+        if (managed?.orchestrationId && managed.parentSessionId && !managed.taskRunId && this.canAutoResumeTaskDelivery(sessionId)) {
+          const generation = managed.processingGeneration
+          await this.ensureMessagesLoaded(managed)
+          if (!this.canAutoResumeTaskDelivery(sessionId) || generation !== managed.processingGeneration || managed.messageQueue.length) throw new Error('Prepared Swarm delivery is no longer current')
+          this.updateOrchestrationMetadata(managed, { orchestrationStatus: 'running', orchestrationBlocker: undefined })
+          this.setProcessing(managed, true)
+          // Recover only a validated integration receipt, never rerun the child model/tools.
+          await this.onProcessingStopped(sessionId, 'complete', generation)
+          return
+        }
+        await this.executeRecovery(sessionId)
+      })
     } catch (error) {
       if (error instanceof Error && error.message === 'Session execution is active in another application instance') {
         const managed = this.sessions.get(sessionId)
@@ -9581,9 +9603,9 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
     }
 
     const deliveryContract = managed.isolatedWorkspace?.deliveryContract
-    if (completionReason === 'complete' && deliveryContract && managed.messageQueue.length === 0) {
+    if (completionReason === 'complete' && (deliveryContract || managed.isolatedWorkspace?.autoDelivery) && managed.messageQueue.length === 0) {
       try {
-        deliveredArtifacts = await this.finalizeTaskWorkspace(sessionId, deliveryContract.outputs, () => {
+        deliveredArtifacts = await this.finalizeTaskWorkspace(sessionId, deliveryContract?.outputs ?? {}, () => {
           if (!ownsCompletion() || managed.stopRequested) throw new Error('Swarm delivery was interrupted')
         })
       } catch (error) {
@@ -10661,11 +10683,13 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
     request: SpawnSessionRequest,
   ): Promise<SpawnSessionResult> {
     sessionLog.info(`Spawn session request from session ${managed.id}:`, request.name || '(unnamed)')
+    this.assertSpawnPermissionAndProject(managed, request)
     const delivery = request.artifactDelivery
       ? workspaceDeliveryContract(request.artifactDelivery.inputs, request.artifactDelivery.outputs)
       : undefined
     const deliveryRoot = request.workingDirectory ?? managed.workingDirectory
-    if (delivery && (!deliveryRoot || (request.permissionMode ?? managed.permissionMode) !== 'allow-all')) {
+    const isolateWrites = (request.permissionMode ?? managed.permissionMode ?? 'safe') !== 'safe'
+    if ((delivery || isolateWrites) && (!deliveryRoot || !['ask', 'allow-all'].includes(request.permissionMode ?? managed.permissionMode ?? 'safe'))) {
       throw new Error('Isolated file delivery requires a project directory and current write authorization')
     }
     const { getSwarmAgentsEnabled } = await import('@craft-agent/shared/config/storage')
@@ -10846,9 +10870,15 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
     }
     const childManaged = this.sessions.get(session.id)
 
-    if (delivery) {
+    if (delivery || isolateWrites) {
       try {
-        await this.prepareSwarmWorkspace(session.id, deliveryRoot!, delivery.inputs, delivery.outputs)
+        if (delivery) await this.prepareSwarmWorkspace(session.id, deliveryRoot!, delivery.inputs, delivery.outputs)
+        else {
+          await this.prepareTaskWorkspace(session.id, deliveryRoot!, [])
+          const state = { ...childManaged!.isolatedWorkspace!, autoDelivery: true as const }
+          atomicWrite(join(getSessionStoragePath(managed.workspace.rootPath, session.id), 'data', 'isolated-workspace.json'), JSON.stringify(state))
+          childManaged!.isolatedWorkspace = state
+        }
       } catch (error) {
         if (childManaged) {
           this.updateOrchestrationMetadata(childManaged, {
@@ -10862,7 +10892,7 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
 
     const childPrompt = delivery
       ? `${request.prompt}\n\nRuntime file delivery contract: work in the assigned isolated working directory. Produce these declared project-relative files: ${JSON.stringify(delivery.outputs)}. They are candidates until runtime validation and integration succeed. Do not claim that candidate paths are final project paths.`
-      : request.prompt
+      : isolateWrites ? `${request.prompt}\n\nWork only in the assigned isolated working directory. The runtime discovers actual file changes, validates and integrates them before completion. Candidate paths are not final project paths. For non-Git projects, declare required input files with artifactDelivery before spawning.` : request.prompt
 
     // Build FileAttachment[] from paths (if any)
     let fileAttachments: FileAttachment[] | undefined

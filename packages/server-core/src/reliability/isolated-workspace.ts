@@ -2,7 +2,7 @@ import type { TaskDeliveryReceipt } from './task-delivery-receipt'
 import type { WorkspaceDeliveryContract } from './workspace-delivery-contract'
 import { execFileSync } from 'node:child_process'
 import { randomUUID, createHash } from 'node:crypto'
-import { existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync, symlinkSync } from 'node:fs'
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 
 export interface IsolatedWorkspace {
@@ -10,6 +10,8 @@ export interface IsolatedWorkspace {
   baseCommit?: string; baseSnapshot?: string; inputs: Record<string, string>
   pendingDelivery?: TaskDeliveryReceipt
   delivery?: TaskDeliveryReceipt
+  /** Trusted runtime policy for new Swarm workers without explicit file declarations. */
+  autoDelivery?: true
   deliveryContract?: WorkspaceDeliveryContract
   deliveryProgress?: {
     phase: 'validating' | 'integrating' | 'conflict' | 'validation-failed'
@@ -58,6 +60,18 @@ export function prepareIsolatedWorkspace(sourceRoot: string, storage: string, de
     git(gitRoot, ['worktree', 'add', '--detach', checkout, snapshot])
     state.kind = 'git'; state.baseCommit = head; state.baseSnapshot = snapshot
     state.directory = join(checkout, relative(gitRoot, root))
+    // Reuse installed, ignored dependencies as read references; both file guards
+    // and native Shell confinement prohibit writes through these links.
+    const manifests = execFileSync('git', ['ls-files', '-z', '--', 'package.json', '**/package.json'], { cwd: root, encoding: 'utf8' }).split('\0').filter(Boolean)
+    for (const manifest of manifests) {
+      const source = join(root, dirname(manifest), 'node_modules')
+      const target = join(state.directory, dirname(manifest), 'node_modules')
+      if (!existsSync(source) || existsSync(target)) continue
+      try { execFileSync('git', ['check-ignore', '-q', '--', source], { cwd: root, stdio: 'ignore' }) }
+      catch { continue }
+      mkdirSync(dirname(target), { recursive: true })
+      symlinkSync(realpathSync(source), target, process.platform === 'win32' ? 'junction' : 'dir')
+    }
   } else {
     mkdirSync(directory, { recursive: true })
     state.baseDirectory = join(storage, id, 'base')
@@ -78,10 +92,11 @@ export function prepareIsolatedWorkspace(sourceRoot: string, storage: string, de
 }
 /** This is a file-tool guard, not a shell sandbox. Unknown tools cannot claim confinement. */
 export function assertIsolatedTool(state: IsolatedWorkspace, toolName: string, input: Record<string, unknown>, confinedShellDirectory?: string): void {
-  if (['Bash', 'bash'].includes(toolName) && confinedShellDirectory === realpathSync(state.directory)) return
   const readers = ['Read', 'read', 'Grep', 'grep', 'Glob', 'glob', 'find', 'ls']
   if (readers.includes(toolName)) return
   if (['submit_answer', 'session__submit_answer', 'mcp__session__submit_answer', 'submit_task_output', 'session__submit_task_output', 'mcp__session__submit_task_output'].includes(toolName)) return
+  if (state.delivery || state.pendingDelivery) throw new Error('This candidate is frozen for delivery; create a new worker for further changes')
+  if (['Bash', 'bash'].includes(toolName) && confinedShellDirectory === realpathSync(state.directory)) return
   if (!['Write', 'write', 'Edit', 'edit', 'MultiEdit'].includes(toolName)) throw new Error('This isolated task requires a sandbox for shell or external write tools; the tool has not run.')
   const path = input.file_path ?? input.path
   if (typeof path !== 'string') throw new Error('Missing output path')

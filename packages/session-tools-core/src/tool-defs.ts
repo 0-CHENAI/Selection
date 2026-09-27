@@ -219,6 +219,10 @@ export const SpawnSessionSchema = z.object({
     .describe('Reasoning level for the new session. Silently ignored on non-reasoning models (e.g. gpt-4o, gemini-2.5-flash). Omit to inherit the workspace default.'),
   labels: z.array(z.string()).optional().describe('Labels for the new session'),
   workingDirectory: z.string().optional().describe('Working directory for the new session'),
+  artifactDelivery: z.object({
+    inputs: z.array(z.string()).describe('Project-relative input files; required for non-Git projects.'),
+    outputs: z.record(z.string(), z.string()).describe('Named output files with project-relative paths.'),
+  }).optional().describe('Declare file work before spawning. The runtime isolates the worker and validates and integrates these outputs before reporting completion. Requires existing write authorization; shell tools require an available native confinement environment.'),
   mode: z.enum(['wait', 'background']).optional()
     .describe('wait: block until the child finishes and return finalText. background (default): return sessionId immediately and notify when done.'),
   timeoutMs: z.number().int().positive().optional()

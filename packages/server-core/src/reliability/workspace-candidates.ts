@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
 import { execFileSync, type ExecFileSyncOptionsWithBufferEncoding } from 'node:child_process'
-import { existsSync, lstatSync, readFileSync, realpathSync } from 'node:fs'
+import { existsSync, lstatSync, readFileSync, realpathSync, readdirSync } from 'node:fs'
 import { isAbsolute, relative, resolve, sep } from 'node:path'
 import { inside, type IsolatedWorkspace } from './isolated-workspace'
 import type { CandidateFile } from './integrate-candidates'
@@ -41,4 +41,35 @@ export function collectWorkspaceCandidates(state: IsolatedWorkspace, outputs: Re
     }
     return { path:normalized, base, candidate:readRegular(state.directory,output.path), binary:output.binary }
   })
+}
+
+/** Discover actual edits in the owned snapshot, never filenames in model prose. */
+export function discoverWorkspaceOutputs(state: IsolatedWorkspace): Record<string, string> {
+  const paths = new Set<string>()
+  if (state.kind === 'git') {
+    if (!state.baseSnapshot) throw new Error('Missing Git input snapshot')
+    const options = { cwd: state.directory, encoding: 'utf8' as const, maxBuffer: Infinity, stdio: ['ignore', 'pipe', 'pipe'] as ['ignore', 'pipe', 'pipe'] }
+    for (const args of [
+      ['diff', '--no-ext-diff', '--name-only', '-z', '--relative', state.baseSnapshot, '--', '.'],
+      ['ls-files', '--others', '--exclude-standard', '-z', '--', '.'],
+    ]) for (const path of execFileSync('git', args, options).split('\0').filter(Boolean)) paths.add(path)
+  } else {
+    const visit = (directory: string) => {
+      for (const entry of readdirSync(directory, { withFileTypes: true })) {
+        if (entry.name.toLowerCase() === '.git') continue
+        const target = resolve(directory, entry.name)
+        if (entry.isSymbolicLink()) throw new Error('Candidate outputs cannot be symbolic links')
+        if (entry.isDirectory()) visit(target)
+        else if (entry.isFile()) paths.add(relative(state.directory, target).split(sep).join('/'))
+        else throw new Error('Candidate output is not a regular file')
+      }
+    }
+    visit(state.directory)
+    for (const path of Object.keys(state.inputs)) paths.add(path.split(sep).join('/'))
+  }
+  const files = collectWorkspaceCandidates(state, [...paths].map(path => ({ path })))
+  const changed = files.filter(file => file.base === null ? file.candidate !== null : file.candidate === null || !file.base.equals(file.candidate))
+  // Deletion needs an explicit contract/UI; do not silently apply destructive discoveries.
+  if (changed.some(file => file.candidate === null)) throw new Error('Deleted candidate files require an explicit recovery or review; the source was preserved')
+  return Object.fromEntries(changed.map(file => [file.path, file.path]))
 }

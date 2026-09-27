@@ -1937,6 +1937,9 @@ function ResultsPanel({
           {node.failureReason && (
             <p className="mt-1.5 text-[11.5px] text-red-500/80">{t('tasks.failureReason')}: {node.failureReason}</p>
           )}
+          {node.state === 'invalid' && node.output && (
+            <p className="mt-2 text-xs text-muted-foreground">{t('tasks.historicalOutputNeedsValidation')}</p>
+          )}
           {node.output ? (
             <div className="mt-2 max-h-72 overflow-y-auto rounded-md border border-border/50 bg-background px-3 py-2 text-[12px] leading-relaxed">
               <Markdown>{node.output}</Markdown>

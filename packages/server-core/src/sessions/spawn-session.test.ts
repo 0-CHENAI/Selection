@@ -2366,4 +2366,30 @@ describe('SessionManager spawn_session wait/background', () => {
     expect(interrupted).toBeDefined()
     expect(interrupted?.runningChildCount).toBeUndefined()
   })
+  for (const failure of [false, true]) it(`declared file spawn prepares isolation before dispatch (${failure})`, async () => {
+    const parent = buildParent()
+    parent.permissionMode = 'allow-all'
+    parent.workingDirectory = tmpRoot
+    stubCreateChild()
+    const prepare = spyOn(sm, 'prepareSwarmWorkspace').mockImplementation(async (_id, root, inputs, outputs) => {
+      expect(sendCalls).toHaveLength(0)
+      expect(root).toBe(tmpRoot)
+      expect(inputs).toEqual(['input.txt'])
+      expect(outputs).toEqual({ result: 'result.txt' })
+      if (failure) throw new Error('isolation unavailable')
+      return { directory: join(tmpRoot, 'isolated') }
+    })
+    try {
+      const request: SpawnSessionRequest = { prompt: 'edit declared file', spawnReason: 'user-requested', artifactDelivery: { inputs: ['input.txt'], outputs: { result: 'result.txt' } } }
+      if (failure) {
+        await expect(internals(sm).spawnSessionFromTool(parent, request)).rejects.toThrow('isolation unavailable')
+        expect(sendCalls).toHaveLength(0)
+        expect(internals(sm).sessions.get('child')?.orchestrationStatus).toBe('need-to-check')
+      } else {
+        await internals(sm).spawnSessionFromTool(parent, request)
+        expect(sendCalls).toHaveLength(1)
+      }
+    } finally { prepare.mockRestore() }
+  })
+
 })

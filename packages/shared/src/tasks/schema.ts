@@ -234,6 +234,8 @@ export const VerificationExecutionSchema = z
 
 export const TaskExecutionSchema = z
   .object({
+    /** Frozen per run; absent on historical runs using shared work directories. */
+    artifact_delivery: z.literal(1).optional(),
     coordinator_gate: CoordinatorGateSchema.optional(),
     verification: VerificationExecutionSchema.optional(),
   })
@@ -263,6 +265,8 @@ const TaskNodeObject = z.object({
   depends_on: z.array(slug('depends_on entry')).optional(),
   inputs: z.record(z.string(), InputRefSchema).optional(),
   outputs: z.array(OutputDeclSchema).optional(),
+  /** Explicit files copied into non-Git isolated workspaces. */
+  workspace_inputs: z.array(z.string().min(1)).optional(),
 
   // Control-flow (parsed now, executed in P4).
   when: WhenSchema.optional(),
