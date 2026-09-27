@@ -74,6 +74,16 @@ export function handleComplete(
   // AND a taskId, so they're excluded — task_completed will finalize them.
   const TERMINAL_TOOL_STATUSES = new Set(['completed', 'error'])
   let updatedMessages = session.messages
+  if (event.answerRoutingVersion === 1 && event.answerRunId) {
+    const ownerIndex = session.messages.findLastIndex(m => m.role === 'user' && !m.hidden && !m.isQueued)
+    const owner = session.messages[ownerIndex]
+    const latestRun = session.messages.slice(ownerIndex).findLast(m => m.answerRunId)?.answerRunId
+    const belongsToEarlierTurn = session.messages.slice(0, ownerIndex).some(m => m.answerRunId === event.answerRunId)
+    if (owner && !belongsToEarlierTurn && (!latestRun || latestRun === event.answerRunId)) {
+      updatedMessages = updatedMessages.map(m => m.id === owner.id
+        ? { ...m, answerProtocol: 'explicit-v1' as const, answerRoutingVersion: 1 as const, answerRunId: event.answerRunId } : m)
+    }
+  }
   const hasRunningTools = session.messages.some(
     m => m.role === 'tool'
       && !TERMINAL_TOOL_STATUSES.has(m.toolStatus ?? '')
@@ -81,7 +91,7 @@ export function handleComplete(
   )
 
   if (hasRunningTools) {
-    updatedMessages = session.messages.map(m => {
+    updatedMessages = updatedMessages.map(m => {
       if (
         m.role === 'tool'
         && !TERMINAL_TOOL_STATUSES.has(m.toolStatus ?? '')

@@ -33,3 +33,24 @@ export function isSubmitAnswerTool(toolName: string | undefined): boolean {
   const normalized = toolName.replace(/^(mcp__session__|session__)/, '').toLowerCase()
   return normalized === 'submit_answer'
 }
+
+const missingPurposeDiagnostics = new Set<string>()
+
+/** Runtime metadata is authoritative for new runs; legacy matching stays unchanged. */
+export function isAnswerDeliveryTool(item: {
+  id?: string
+  toolName?: string
+  toolPurpose?: 'work' | 'answer-delivery'
+  answerRoutingVersion?: 1
+}): boolean {
+  if (item.answerRoutingVersion === 1 && item.toolPurpose) return item.toolPurpose === 'answer-delivery'
+  if (item.answerRoutingVersion === 1 && !item.toolPurpose && item.toolName) {
+    const key = item.id ?? item.toolName
+    if (!missingPurposeDiagnostics.has(key)) {
+      if (missingPurposeDiagnostics.size >= 256) missingPurposeDiagnostics.clear()
+      missingPurposeDiagnostics.add(key)
+      console.warn('Missing tool purpose; using legacy routing', { messageId: item.id })
+    }
+  }
+  return isSubmitAnswerTool(item.toolName)
+}

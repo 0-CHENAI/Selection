@@ -115,6 +115,7 @@ export function handleTextDelta(
       presentationProtocol: event.presentationProtocol ?? currentMsg.presentationProtocol,
       answerProtocol: event.answerProtocol ?? currentMsg.answerProtocol,
       answerRunId: event.answerRunId ?? currentMsg.answerRunId,
+      answerRoutingVersion: event.answerRoutingVersion ?? currentMsg.answerRoutingVersion,
     })
     return { session: updatedSession, streaming: newStreaming }
   }
@@ -127,6 +128,7 @@ export function handleTextDelta(
     content: event.delta,
     answerProtocol: event.answerProtocol,
     answerRunId: event.answerRunId,
+    answerRoutingVersion: event.answerRoutingVersion,
     timestamp: timestampAfterVisibleUser(session.messages),
     isStreaming: true,
     isPending: true,
@@ -166,7 +168,10 @@ export function handleTextComplete(
   }
 
   const committed = event.answerRunId && session.messages.find(m => m.answerCommitted && m.answerRunId === event.answerRunId)
-  if (committed) return state
+  if (committed) {
+    if (event.answerCommitted) console.info('Duplicate committed answer event', { answerRunId: event.answerRunId, messageId: event.messageId })
+    return state
+  }
   if (event.answerCommitted && (!hasRenderableAssistantText(event.text) || isAnswerDeliveryReceipt(event.text))) return state
 
   // Find message by turnId (try streaming first, then any assistant)
@@ -214,7 +219,9 @@ export function handleTextComplete(
       presentationProtocol: event.presentationProtocol,
       answerProtocol: event.answerProtocol,
       answerRunId: event.answerRunId,
+      answerRoutingVersion: event.answerRoutingVersion,
       answerCommitted: event.answerCommitted,
+      answerSalvaged: event.answerSalvaged,
       completedRevealStartTime: session.isProcessing && !event.isIntermediate ? Date.now() : undefined,
       turnId: event.turnId,
       parentToolUseId: event.parentToolUseId,
@@ -238,7 +245,9 @@ export function handleTextComplete(
     presentationProtocol: event.presentationProtocol,
     answerProtocol: event.answerProtocol,
     answerRunId: event.answerRunId,
+    answerRoutingVersion: event.answerRoutingVersion,
     answerCommitted: event.answerCommitted,
+    answerSalvaged: event.answerSalvaged,
     completedRevealStartTime: session.isProcessing && !event.isIntermediate ? Date.now() : undefined,
     turnId: event.turnId,
     parentToolUseId: event.parentToolUseId,
@@ -265,11 +274,14 @@ export function handleAnswerPreview(
     || session.messages.some(m => m.answerCommitted && m.answerRunId === event.answerRunId)) return state
   const previous = session.messages.find(m => m.answerPreview && m.answerRunId === event.answerRunId)
   if (!event.text && previous?.id !== `answer-preview-${event.answerRunId}-${event.toolCallId}`) return state
-  const messages = session.messages.filter(m => !m.answerPreview)
+  const messages = session.messages.filter(m => !m.answerPreview).map(m =>
+    m.id === owner.id && event.answerRoutingVersion === 1
+      ? { ...m, answerProtocol: 'explicit-v1' as const, answerRunId: event.answerRunId, answerRoutingVersion: 1 as const } : m)
   if (event.text) messages.push({
     id: `answer-preview-${event.answerRunId}-${event.toolCallId}`, role: 'assistant', content: event.text,
     timestamp: previous?.timestamp ?? timestampAfterVisibleUser(messages),
-    answerProtocol: 'explicit-v1', answerRunId: event.answerRunId, answerPreview: true,
+    answerProtocol: 'explicit-v1', answerRunId: event.answerRunId,
+    answerRoutingVersion: event.answerRoutingVersion, answerPreview: true,
     isStreaming: true, isPending: true, isIntermediate: false,
   })
   return { ...state, session: { ...session, messages } }

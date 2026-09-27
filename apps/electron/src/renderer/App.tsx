@@ -1,3 +1,4 @@
+import { missingCommittedAnswerRun, recoverCommittedAnswer } from './event-processor/answer-recovery'
 import { refreshSessionSnapshot, type SessionRefreshResult } from './lib/session-refresh'
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -933,6 +934,20 @@ export default function App() {
 
       // Clear pending permissions and credentials on complete
       if (eventType === 'complete') {
+        const completed = store.get(sessionAtomFamily(sessionId))
+        const runId = completed && missingCommittedAnswerRun(completed)
+        if (runId) {
+          void window.electronAPI.getSessionMessages(sessionId).then(loaded => {
+            if (!loaded) return
+            updateSessionDirect(sessionId, current => {
+              if (!current) return current
+              const recovered = recoverCommittedAnswer(current, loaded, runId)
+              if (recovered !== current) console.info('Recovered committed answer', { sessionId, answerRunId: runId })
+              return recovered
+            })
+          }).catch(() => console.warn('Answer refresh failed', { sessionId, answerRunId: runId }))
+        }
+
         setPendingPermissions(prevPerms => {
           if (prevPerms.has(sessionId)) {
             const next = new Map(prevPerms)

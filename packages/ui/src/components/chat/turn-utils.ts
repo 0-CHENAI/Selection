@@ -9,7 +9,7 @@ import type { Message, StoredMessage, MessageRole } from '@craft-agent/core'
 import { storedToMessage, hasRenderableAssistantText, isAnswerDeliveryReceipt } from '@craft-agent/core'
 import { isParentTaskTool, getToolDisplayName, cleanToolMetadataLabel } from '@craft-agent/shared/utils/toolNames'
 
-import { isSubmitAnswerTool, localizedToolLabel } from './tool-labels'
+import { isAnswerDeliveryTool, localizedToolLabel } from './tool-labels'
 import { unified } from 'unified'
 import remarkParse from 'remark-parse'
 
@@ -64,6 +64,7 @@ export interface AssistantTurn {
   type: 'assistant'
   presentationProtocol?: 'native' | 'marker-v1' | 'legacy'
   answerRunId?: string
+  answerRoutingVersion?: 1
   turnId: string
   activities: ActivityItem[]
   response?: ResponseContent
@@ -246,8 +247,8 @@ function replaceLiveDraft(turn: AssistantTurn, nextText: string): void {
   const previous = turn.response
   if (!previous || previous.isAnswerPreview) return
   const draft = previous.text.trim()
-  const absorbed = draft.length >= 2 && nextText.trim().startsWith(draft)
-  if (absorbed || previous.isStreaming) {
+  const absorbed = turn.answerRoutingVersion !== 1 && draft.length >= 2 && nextText.trim().startsWith(draft)
+  if (absorbed || (turn.answerRoutingVersion !== 1 && previous.isStreaming)) {
     turn.activities = turn.activities.filter(activity => activity.id !== previous.messageId)
     turn.response = undefined
     return
@@ -368,7 +369,7 @@ export function shouldShowStreamingFooter(input: {
 export function countWorkRecords(activities: ReadonlyArray<ActivityItem>): number {
   return new Set(activities
     // Delivery is the card body, not a numbered work step.
-    .filter(activity => !isSubmitAnswerTool(activity.toolName))
+    .filter(activity => !isAnswerDeliveryTool(activity))
     // Empty live placeholders are transient indicators, not work records.
     .filter(activity => !['intermediate', 'thinking'].includes(activity.type)
       || hasRenderableAssistantText(activity.content))
@@ -386,7 +387,7 @@ export function getActiveTurnPreview(
   let latest: { text: string; timestamp: number; index: number } | undefined
 
   activities.forEach((activity, index) => {
-    if (isSubmitAnswerTool(activity.toolName)) return
+    if (isAnswerDeliveryTool(activity)) return
     let toolIntent: string | undefined
     if (activity.type === 'tool') {
       toolIntent = activity.intent?.trim()
@@ -457,6 +458,8 @@ function messageToActivity(message: Message, existingActivities: ActivityItem[] 
     type: 'tool' as ActivityType,
     status: getToolStatus(message),
     toolName: message.toolName,
+    toolPurpose: message.toolPurpose,
+    answerRoutingVersion: message.answerRoutingVersion,
     toolUseId: message.toolUseId,  // For parent-child matching
     toolInput: message.toolInput,
     content: message.toolResult || message.content,
@@ -655,6 +658,7 @@ export function groupMessagesByTurn(messages: Message[], options: GroupTurnsOpti
   const deliveredRuns = new Set<string>()
   const submittedRuns = new Set<string>()
   let activeRunId: string | undefined
+  const structuredRuns = new Set(messages.filter(m => m.answerRoutingVersion === 1 && m.answerRunId).map(m => m.answerRunId))
   // Committed answer text per run, so commentary that turns out to be the
   // drafted opening of the final answer can be folded into the final card.
   const committedAnswerByRun = new Map<string, string>()
@@ -675,12 +679,14 @@ export function groupMessagesByTurn(messages: Message[], options: GroupTurnsOpti
     if (message.presentationProtocol === 'marker-v1') activeRunId = undefined
     if (message.answerRunId) activeRunId = message.answerRunId
     const runId = message.answerRunId ?? activeRunId
+    const structured = !!runId && structuredRuns.has(runId)
+    if (structured && message.answerRoutingVersion !== 1) message = { ...message, answerRoutingVersion: 1 }
     if (runId && deliveredRuns.has(runId) && (message.role === 'assistant' || message.role === 'tool')) return []
     // The model sometimes drafts its final answer as ordinary text before
     // formally submitting it. Once that run is committed, the draft's work
     // chain row would restate the answer's opening — keep one visible copy.
     const committedAnswer = runId ? committedAnswerByRun.get(runId) : undefined
-    if (committedAnswer && message.role === 'assistant' && !message.answerCommitted && !message.answerPreview) {
+    if (!structured && committedAnswer && message.role === 'assistant' && !message.answerCommitted && !message.answerPreview) {
       const draft = message.content.trim()
       if (draft.length >= 2 && committedAnswer.startsWith(draft)) return []
       // Commentary carrying the answer's own top-level heading is a superseded
@@ -690,7 +696,7 @@ export function groupMessagesByTurn(messages: Message[], options: GroupTurnsOpti
     }
     if (
       message.role === 'tool'
-      && isSubmitAnswerTool(message.toolName)
+      && isAnswerDeliveryTool(message)
       && !message.isError
       && (message.toolStatus === 'completed' || message.toolResult !== undefined)
       && runId
@@ -702,6 +708,7 @@ export function groupMessagesByTurn(messages: Message[], options: GroupTurnsOpti
     if (
       message.role === 'assistant'
       && runId
+      && !structured
       && submittedRuns.has(runId)
       && !message.answerCommitted
       && !message.answerPreview
@@ -766,6 +773,7 @@ export function groupMessagesByTurn(messages: Message[], options: GroupTurnsOpti
     const adopted = adoptFlushedAssistantTurn(message.answerRunId)
     if (adopted) {
       adopted.answerRunId ??= message.answerRunId
+      adopted.answerRoutingVersion ??= message.answerRoutingVersion
       adopted.presentationProtocol ??= message.presentationProtocol
       return adopted
     }
@@ -773,6 +781,7 @@ export function groupMessagesByTurn(messages: Message[], options: GroupTurnsOpti
       type: 'assistant',
       presentationProtocol: message.presentationProtocol,
       answerRunId: message.answerRunId,
+      answerRoutingVersion: message.answerRoutingVersion,
       turnId: message.answerRunId ? `answer-${message.answerRunId}` : message.turnId || message.id,
       activities: [],
       response: undefined,
@@ -830,7 +839,7 @@ export function groupMessagesByTurn(messages: Message[], options: GroupTurnsOpti
       // Native turns promote the last thought when nothing else landed.
       // explicit-v1 waits for a successful submit_answer — if that finished
       // and the committed body never arrived, keep the last real draft.
-      if (currentTurn.presentationProtocol !== 'marker-v1' && !interrupted && !hasPlan && !currentTurn.response && currentTurn.isComplete && currentTurn.activities.length > 0
+      if (currentTurn.answerRoutingVersion !== 1 && currentTurn.presentationProtocol !== 'marker-v1' && !interrupted && !hasPlan && !currentTurn.response && currentTurn.isComplete && currentTurn.activities.length > 0
         && (!currentTurn.answerRunId || currentTurn.answerDelivered)) {
         // Find the last intermediate text activity (reverse to get most recent)
         const lastTextActivity = [...currentTurn.activities]
@@ -989,7 +998,7 @@ export function groupMessagesByTurn(messages: Message[], options: GroupTurnsOpti
     if (message.role === 'tool') {
       // Tool is complete if toolStatus is 'completed' OR toolResult exists (but NOT if backgrounded)
       const isToolComplete = (message.toolStatus === 'completed' || message.toolResult !== undefined) && message.toolStatus !== 'backgrounded'
-      const isDelivery = isSubmitAnswerTool(message.toolName ?? '')
+      const isDelivery = isAnswerDeliveryTool(message)
       currentTurn = ensureOpenAssistantTurn(message, {
         isStreaming: !isToolComplete,
         intent: isDelivery ? undefined : cleanToolMetadataLabel(message.toolIntent),
@@ -1109,6 +1118,7 @@ export function groupMessagesByTurn(messages: Message[], options: GroupTurnsOpti
       currentTurn.response = {
         text: message.content,
         isAnswerPreview: message.answerPreview,
+        answerSalvaged: message.answerSalvaged,
         isStreaming: !!message.isStreaming,
         isCommentary: pendingCardStream,
         streamStartTime: message.isStreaming ? message.timestamp : undefined,
