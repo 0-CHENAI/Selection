@@ -49,6 +49,12 @@ for (const sourceCode of [false, true]) for (const pending of [false, true]) tes
     writeFileSync(join(restored.isolatedWorkspace!.directory, filename), 'late candidate')
     const restarted = new SessionManager()
     ;(restarted as any).sessions.set(restored.id, restored)
+    if (pending) {
+      await expect(restarted.finalizeTaskWorkspace(restored.id, { file: filename }, () => {}, () => {
+        throw new Error('Upstream input changed')
+      })).rejects.toThrow('Upstream input changed')
+      expect(restored.isolatedWorkspace!.delivery).toBeUndefined()
+    }
     if (pending && !sourceCode) {
       restored.parentSessionId = 'parent'; restored.orchestrationId = 'swarm'; restored.orchestrationStatus = 'need-to-check'
       restored.isolatedWorkspace!.autoDelivery = true

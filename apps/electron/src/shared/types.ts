@@ -662,6 +662,7 @@ export interface ElectronAPI {
 
   // Browser pane management
   browserPane: {
+    openHtmlFile(path: string): Promise<string>
     create(input?: string | BrowserPaneCreateOptions): Promise<string>
     destroy(id: string): Promise<void>
     list(): Promise<BrowserInstanceInfo[]>

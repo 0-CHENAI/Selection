@@ -347,6 +347,8 @@ export interface Message {
   answerCommitted?: boolean;
   /** Promoted from an unsubmitted draft after delivery recovery failed (#403). */
   answerSalvaged?: boolean;
+  /** Persisted snapshot identities for local files delivered by this answer. */
+  artifactVersions?: Array<{ path: string; versionId: string; ordinal: number }>;
   /** Persisted on the originating user message before the single recovery call. */
   answerRecoveryAttempted?: boolean;
   phase?: TextStreamPhase;
@@ -452,6 +454,8 @@ export interface StoredMessage {
   answerCommitted?: boolean;
   /** Promoted from an unsubmitted draft after delivery recovery failed (#403). */
   answerSalvaged?: boolean;
+  /** Persisted snapshot identities for local files delivered by this answer. */
+  artifactVersions?: Array<{ path: string; versionId: string; ordinal: number }>;
   /** Persisted on the originating user message before the single recovery call. */
   answerRecoveryAttempted?: boolean;
   phase?: TextStreamPhase;

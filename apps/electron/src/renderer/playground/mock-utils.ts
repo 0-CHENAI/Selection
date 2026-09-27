@@ -95,6 +95,7 @@ export const mockElectronAPI = {
   },
 
   browserPane: {
+    openHtmlFile: async () => 'mock-html-browser',
     focus: async (instanceId: string) => {
       console.log('[Playground] browserPane.focus called:', instanceId)
     },

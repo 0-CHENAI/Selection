@@ -1,5 +1,5 @@
 import * as React from 'react'
-import { AlertTriangle, ExternalLink, FolderOpen, ChevronDown, ChevronUp } from 'lucide-react'
+import { AlertTriangle, ExternalLink, FolderOpen, ChevronDown, ChevronUp, GitCommitHorizontal } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { FileTypeIcon } from './attachment-helpers'
 import type { ResponseArtifact } from './response-artifacts'
@@ -16,8 +16,9 @@ function officeAppName(extension: string): string | undefined {
 }
 
 /** Compact delivery shelf, outside the annotated reply body and above message actions. */
-export function ResponseArtifacts({ artifacts, onOpenFile, onOpenArtifact }: {
+export function ResponseArtifacts({ artifacts, versions, onOpenFile, onOpenArtifact }: {
   artifacts: ResponseArtifact[]
+  versions?: import('@craft-agent/core').Message['artifactVersions']
   onOpenFile?: (path: string) => void
   onOpenArtifact?: (path: string, action: 'preview' | 'external' | 'reveal' | 'versions') => void | boolean | Promise<void | boolean>
 }) {
@@ -60,7 +61,9 @@ export function ResponseArtifacts({ artifacts, onOpenFile, onOpenArtifact }: {
         <div className="mb-2 text-xs font-medium text-muted-foreground">{t('chat.artifacts')}</div>
         {/* Container queries keep the row limit in sync; flex growth fills incomplete rows. */}
         <ul id={listId} className="flex flex-wrap gap-2">
-          {artifacts.map((artifact, index) => (
+          {artifacts.map((artifact, index) => {
+            const version = versions?.find(item => item.path === artifact.path)
+            return (
             <li key={artifact.path} className={cn('min-w-0 grow basis-full @[400px]/artifacts:basis-[calc((100%-0.5rem)/2)] @[560px]/artifacts:basis-[calc((100%-1rem)/3)] @[720px]/artifacts:basis-[calc((100%-1.5rem)/4)]', !expanded && index > 0 && (
               index === 1 ? 'hidden @[400px]/artifacts:block'
                 : index === 2 ? 'hidden @[560px]/artifacts:block'
@@ -80,7 +83,10 @@ export function ResponseArtifacts({ artifacts, onOpenFile, onOpenArtifact }: {
                       <FileTypeIcon fileName={artifact.name} className="size-6" />
                       <span className="min-w-0 flex-1">
                         <span className="block truncate text-sm font-medium">{artifact.name}</span>
-                        <span className="mt-0.5 block text-xs text-muted-foreground">{artifact.extension.toUpperCase()}</span>
+                        <span className="mt-0.5 flex flex-wrap items-center gap-x-2 text-xs text-muted-foreground">
+                          <span>{artifact.extension.toUpperCase()}</span>
+                          {version && <span title={version.versionId} className="inline-flex items-center gap-1 font-mono"><GitCommitHorizontal aria-hidden="true" className="size-3" />v{version.ordinal} · {version.versionId.slice(0, 8)}</span>}
+                        </span>
                       </span>
                     </button>
                   </TooltipTrigger>
@@ -96,7 +102,7 @@ export function ResponseArtifacts({ artifacts, onOpenFile, onOpenArtifact }: {
                       </button>
                     </DropdownMenuTrigger>
                     <StyledDropdownMenuContent align="end">
-                      {onManageArtifact && onOpenArtifact && <StyledDropdownMenuItem onSelect={() => { void open(artifact.path, 'versions') }}>{t('chat.artifactVersions.title')}</StyledDropdownMenuItem>}
+                      {onManageArtifact && onOpenArtifact && <StyledDropdownMenuItem onSelect={() => { void open(artifact.path, 'versions') }}><GitCommitHorizontal />{t('chat.artifactVersions.title')}</StyledDropdownMenuItem>}
                       {(onOpenArtifact || onOpenFileExternal) && (
                         <StyledDropdownMenuItem onSelect={() => { void open(artifact.path, 'external') }}>
                           <ExternalLink />
@@ -118,7 +124,7 @@ export function ResponseArtifacts({ artifacts, onOpenFile, onOpenArtifact }: {
                 {onManageArtifact && onOpenArtifact && <button type="button" className="underline underline-offset-2 hover:text-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded-sm" onClick={() => { void open(artifact.path, 'versions') }}>{t('chat.artifactVersions.title')}</button>}
               </div>}
             </li>
-          ))}
+            )})}
         </ul>
         {artifacts.length > 1 && (
           <button

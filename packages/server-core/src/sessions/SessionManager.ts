@@ -14,6 +14,7 @@ import { workspaceDeliveryContract } from '../reliability/workspace-delivery-con
 import { integrateCandidates } from '../reliability/integrate-candidates'
 import { validateCandidateFile } from '../reliability/validate-candidate'
 import { ArtifactVersions, atomicWrite } from '../reliability/artifact-versions'
+import { ConversationArtifactVersions } from '../reliability/conversation-artifact-versions'
 import { FeedbackStore, assertFeedbackAnchor } from '../reliability/feedback-store'
 import { inside, assertIsolatedTool, prepareIsolatedWorkspace, type IsolatedWorkspace } from '../reliability/isolated-workspace'
 import { hostname as executionHostName } from 'node:os'
@@ -889,6 +890,7 @@ interface RunningBackgroundTask {
 }
 
 interface ManagedSession {
+  conversationArtifactVersions?: ConversationArtifactVersions
   progressAdvisories?: Array<{ id: string; text: string }>
   progressLiveEvaluationTokens?: number
   progressReviewer?: AgentInstance
@@ -7367,6 +7369,25 @@ export class SessionManager implements ISessionManager {
         this.checkpointExecution(managed)
       }
       sendSpan.mark('chat.starting')
+      // Snapshot known deliverables before tools run, including Office/Shell edits.
+      // Candidate child workspaces are versioned only after runtime integration.
+      managed.conversationArtifactVersions = undefined
+      if (!managed.isolatedWorkspace) {
+        const store = new ArtifactVersions(join(managed.workspace.rootPath, 'artifacts', 'versions'), executionHostName(), managed.workspace.id)
+        const tracker = new ConversationArtifactVersions(store,
+          [managed.workingDirectory, getSessionStoragePath(managed.workspace.rootPath, managed.id), managed.workspace.rootPath].filter((path): path is string => !!path),
+          path => validateWorkspaceFilePath(path, managed.workspace.id),
+          () => sessionLog.warn('Artifact version recording failed', { sessionId: managed.id }))
+        managed.conversationArtifactVersions = tracker
+        for (const prior of managed.messages) {
+          if (managed.processingGeneration !== myGeneration || managed.stopRequested) break
+          if (prior.role === 'assistant' && !prior.isIntermediate && !prior.hidden) await tracker.track(prior.content)
+        }
+      }
+      if (managed.processingGeneration !== myGeneration || managed.stopRequested) {
+        await this.onProcessingStopped(sessionId, 'interrupted', myGeneration)
+        return
+      }
       const chatOptions = { previousResponseInterrupted, continueUserTask: isUserTaskContinuation }
       const chatIterator = this.runAnswerDelivery(managed, agent, this.runProgressExecution(managed, agent, message, preparedImages.attachments, chatOptions), chatOptions)
       this.announceRegenerateReplacement(managed)
@@ -7391,6 +7412,12 @@ export class SessionManager implements ISessionManager {
         if (event.type === 'tool_start' && managed.executionCheckpoint) {
           managed.executionCheckpoint.pendingTools[event.toolUseId] ??= { name: event.toolName, recovery: toolRecoveryClass(event.toolName) }
           this.checkpointExecution(managed)
+        }
+        if (event.type === 'tool_start' && !event.parentToolUseId && /^(?:Write|Edit)$/.test(event.toolName)) {
+          const path = event.input.file_path ?? event.input.path
+          if (typeof path === 'string') await managed.conversationArtifactVersions?.trackPath(path)
+          if (managed.processingGeneration !== myGeneration) break
+          if (managed.stopRequested) continue
         }
         await this.processEvent(managed, event)
         if (event.type === 'tool_result' && managed.executionCheckpoint) {
@@ -7727,6 +7754,7 @@ export class SessionManager implements ISessionManager {
       const receipt = state.pendingDelivery
       assertTaskDeliveryIdentity(outputs, receipt)
       if (!receipt.transactionId) throw new Error('Pending task delivery identity changed')
+      verifyInputs?.()
       new ProjectIntegration(state.sourceRoot, integrationStorage).recover('complete', receipt.transactionId)
       const delivered = replayTaskDelivery(state.sourceRoot, outputs, receipt)
       const completedState: IsolatedWorkspace = { ...state, pendingDelivery: undefined, delivery: receipt, status: 'integrated' }
@@ -7981,6 +8009,11 @@ ${feedback.anchor ? `Selected text: ${JSON.stringify(feedback.anchor.text)}` : '
 Edit only the candidate file. Preserve unrelated content. Do not modify the original project.`, undefined, undefined)
         const revisionCancelled = () => feedbackCancelled() || managed.stopRequested || managed.executionCheckpoint?.status === 'cancelled'
           || managed.runtimeRecovery?.phase === 'cancelled'
+        const requireWriteAuthorization = () => {
+          if (revisionCancelled() || ![parent, managed].every(session => session.permissionMode && ['ask', 'allow-all'].includes(session.permissionMode))) {
+            throw new Error('Revision requires current write authorization')
+          }
+        }
         if (revisionCancelled() || managed.messages.some(m => m.role === 'error')) throw new Error('Revision execution did not complete successfully')
         feedback.status = 'validating'; store.save(feedback)
         const validation = await validateCandidateFile(candidate)
@@ -7989,9 +8022,9 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
         if (requiresProjectValidation(artifact.path)) {
           const sourceRoot = validationRoot
           const authorize = async () => {
-            if (revisionCancelled() || !managed.permissionMode || !['ask', 'allow-all'].includes(managed.permissionMode)) throw new Error('Project validation requires current write authorization')
+            requireWriteAuthorization()
             await validateWorkspaceFilePath(sourceRoot, parent.workspace.id)
-            if (revisionCancelled() || !managed.permissionMode || !['ask', 'allow-all'].includes(managed.permissionMode)) throw new Error('Revision was cancelled before validation')
+            requireWriteAuthorization()
           }
           const controller = new AbortController()
           this.projectValidationControllers.set(child.id, controller)
@@ -8009,7 +8042,7 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
         }
         await validateWorkspaceFilePath(artifact.path, parent.workspace.id)
         // Recheck after asynchronous validation: cancellation may have arrived while reading.
-        if (revisionCancelled()) throw new Error('Revision was cancelled before application')
+        requireWriteAuthorization()
         store.save(feedback, () => {
           const applied = versions.apply(artifact.id, feedback.baseVersion, candidate, child.id, undefined, validation.hash, `feedback-result:${feedback.id}`)
           feedback.appliedVersion = applied.currentVersion; feedback.status = 'applied'
@@ -8246,7 +8279,9 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
     managed.branchFromSdkSessionId = undefined
     managed.branchFromSessionPath = undefined
     managed.branchFromSdkTurnId = undefined
-    await this.sendMessage(sessionId, continuation.prompt, undefined, undefined, { hidden: true }, undefined, false, undefined, undefined, false, true)
+    // Resume the accepted user turn. Appending a new hidden user message would
+    // fail durable acceptance while regeneration preserves the old transcript.
+    await this.sendMessage(sessionId, continuation.prompt, undefined, undefined, { hidden: true }, continuation.userMessageId, false, undefined, undefined, false, true)
   }
 
   private createProgressReviewer(managed: ManagedSession, connectionSlug?: string): AgentInstance {
@@ -8526,6 +8561,7 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
         isIntermediate: false, phase: 'final', answerProtocol: answer.answerProtocol,
         answerRunId: answer.answerRunId, answerRoutingVersion: answer.answerRoutingVersion,
         answerCommitted: true, answerSalvaged: answer.answerSalvaged, turnId: answer.turnId,
+        artifactVersions: answer.artifactVersions,
         messageId: answer.id, timestamp: answer.timestamp }, managed.workspace.id)
     } catch (error) {
       sessionLog.error('Committed answer event delivery failed', { sessionId: managed.id, messageId: answer.id, error })
@@ -8571,6 +8607,9 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
       managed.streamingStartedAt = undefined
       rollbackFeedback = linkAnnotationFollowUpResults(managed.messages, state.userMessageId, answer,
         (content, hash) => saveBodyFeedbackVersion(getSessionStoragePath(managed.workspace.rootPath, managed.id), content, hash))
+      answer.artifactVersions = await managed.conversationArtifactVersions?.capture(answer.content, `${managed.id}/${state.userMessageId}`,
+        managed.messages.find(message => message.id === state.userMessageId)?.content ?? '')
+      if (managed.stopRequested || managed.processingGeneration !== state.generation || managed.answerDelivery !== state) throw new Error('Answer delivery was interrupted.')
       managed.messages.push(answer)
       state.committedMessageId = answer.id
       managed.piSdkMessageToCraftMessage ??= new Map()
@@ -8654,6 +8693,9 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
       this.assertAnswerReady(managed, state, draft.content)
       rollbackFeedback = linkAnnotationFollowUpResults(managed.messages, state.userMessageId, answer,
         (content, hash) => saveBodyFeedbackVersion(getSessionStoragePath(managed.workspace.rootPath, managed.id), content, hash))
+      answer.artifactVersions = await managed.conversationArtifactVersions?.capture(answer.content, `${managed.id}/${state.userMessageId}`,
+        managed.messages.find(message => message.id === state.userMessageId)?.content ?? '')
+      if (!isActive()) throw new Error('Answer delivery was interrupted.')
       managed.messages.push(answer)
       state.committedMessageId = answer.id
       managed.lastMessageRole = 'assistant'

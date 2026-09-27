@@ -45,7 +45,7 @@ const CODE_EXTENSIONS = new Set([
   'vue', 'svelte', 'astro', 'prisma',
 ])
 
-/** HTML pages — rendered as a webpage in HTMLPreviewOverlay, not as source */
+/** HTML pages — opened as a webpage in the built-in browser */
 const HTML_EXTENSIONS = new Set(['html', 'htm', 'xhtml'])
 
 /** Markdown files — rendered with the Markdown component */

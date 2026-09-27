@@ -307,6 +307,7 @@ export interface ActivityItem {
 }
 
 export interface ResponseContent {
+  artifactVersions?: import('@craft-agent/core').Message['artifactVersions']
   answerSalvaged?: boolean
   isAnswerPreview?: boolean
   text: string
@@ -1535,6 +1536,7 @@ function ActivityGroupRow({ group, expandedGroups: externalExpandedGroups, onExp
 // ============================================================================
 
 export interface ResponseCardProps {
+  artifactVersions?: ResponseContent['artifactVersions']
   researchActivities?: ActivityItem[]
   isAnswerPreview?: boolean
   /** The content to display (markdown) */
@@ -1836,6 +1838,7 @@ function applyTextHighlightRange(
  * Presentation updates are frame-paced; copy/export retain the authoritative source.
  */
 export function ResponseCard({
+  artifactVersions,
   researchActivities,
   text,
   isAnswerPreview = false,
@@ -2776,7 +2779,7 @@ export function ResponseCard({
           </ResponseBodyGrowth>
 
           {showArtifacts && !presentationStreaming && (
-            <ResponseArtifacts key={messageId ?? revealIdentity} artifacts={artifacts} onOpenFile={onOpenFile} onOpenArtifact={onOpenArtifact} />
+            <ResponseArtifacts key={messageId ?? revealIdentity} artifacts={artifacts} versions={artifactVersions} onOpenFile={onOpenFile} onOpenArtifact={onOpenArtifact} />
           )}
 
           {/* Reserve known research sources while text streams. Completion only
@@ -3506,6 +3509,7 @@ export const TurnCard = React.memo(function TurnCard({
             >
               <ResponseCard
                 text={response.text}
+            artifactVersions={response.artifactVersions}
                 researchActivities={activities}
                 isStreaming={response.isStreaming}
                 isAnswerPreview={response.isAnswerPreview}
@@ -3558,6 +3562,7 @@ export const TurnCard = React.memo(function TurnCard({
           <div className={cn((showWorkChrome || planActivities.length > 0) && "pt-3")}>
           <ResponseCard
             text={response.text}
+            artifactVersions={response.artifactVersions}
             researchActivities={activities}
             isStreaming={response.isStreaming}
                 isAnswerPreview={response.isAnswerPreview}

@@ -24,7 +24,7 @@ The `image-preview` block renders local image files inline in chat messages — 
 |--------|----------|-----------|
 | **`image-preview` block** | Screenshots, captures, visual diffs | Inline fit-to-container + fullscreen viewer |
 | **`pdf-preview` block** | PDF reports and documents | First page inline + full navigation |
-| **`html-preview` block** | Rich HTML content | Sandboxed iframe rendering |
+| **`html-preview` block** | Rich HTML content | Isolated built-in browser |
 
 **Key principle:** Images are already files on disk. Reference them directly with an absolute path in `src`.
 

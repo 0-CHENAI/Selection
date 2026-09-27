@@ -8,6 +8,36 @@ import { SessionManager, createManagedSession } from './SessionManager'
 import { ArtifactVersions } from '../reliability/artifact-versions'
 import { FeedbackStore } from '../reliability/feedback-store'
 
+for (const revoked of ['parent', 'child'] as const) test(`text feedback cannot apply after ${revoked} write authorization is revoked`, async () => {
+  const root = mkdtempSync(join(tmpdir(), 'feedback-permission-'))
+  const workspace = { id: 'feedback-workspace', name: 'Feedback', rootPath: join(root, 'workspace') }
+  mkdirSync(workspace.rootPath)
+  const file = join(workspace.rootPath, 'result.txt'); writeFileSync(file, 'original')
+  const lookup = spyOn(config, 'getWorkspaceByNameOrId').mockReturnValue(workspace as never)
+  try {
+    const manager = new SessionManager(), internal = manager as any
+    const parent = createManagedSession({ id: 'parent', permissionMode: 'allow-all', workingDirectory: workspace.rootPath }, workspace as never, { messagesLoaded: true })
+    const child = createManagedSession({ id: 'revision', permissionMode: 'allow-all' }, workspace as never, { messagesLoaded: true })
+    internal.sessions.set(parent.id, parent); internal.sessions.set(child.id, child)
+    internal.persistSession = () => {}; internal.flushSession = async () => {}
+    internal.createSession = async () => ({ id: child.id })
+    manager.sendMessage = async () => {
+      writeFileSync(join(child.workingDirectory!, 'result.txt'), 'approved')
+      ;(revoked === 'parent' ? parent : child).permissionMode = 'safe'
+    }
+    const versions = new ArtifactVersions(join(workspace.rootPath, 'artifacts', 'versions'), hostname(), workspace.id)
+    const initial = versions.register(file)
+    const feedback = await manager.artifactFeedback({ type: 'create', sessionId: parent.id, requestId: 'revision-request', artifactId: initial.id, baseVersion: initial.currentVersion, instruction: 'revise text' })
+    const store = new FeedbackStore(join(workspace.rootPath, 'artifacts', 'feedback'))
+    for (let i = 0; i < 500 && internal.activeArtifactFeedback.has(feedback.id); i++) await new Promise(resolve => setTimeout(resolve, 10))
+    expect(store.read(feedback.id).status).toBe('failed')
+    expect(store.read(feedback.id).error).toContain('write authorization')
+    expect(readFileSync(file, 'utf8')).toBe('original')
+    expect(versions.read(initial.id).versions).toHaveLength(1)
+    expect(readFileSync(join(child.workingDirectory!, 'result.txt'), 'utf8')).toBe('approved')
+  } finally { lookup.mockRestore(); rmSync(root, { recursive: true, force: true }) }
+})
+
 for (const gitProject of [true, false]) for (const mode of (gitProject ? ['pass', 'fail', 'external', 'cancel'] : ['pass', 'fail', 'external', 'cancel', 'missing', 'receipt-failure', 'remote-cancel', 'corrupt-state']) as readonly string[]) test(`code feedback validates and preserves versions (${mode}, git=${gitProject})`, async () => {
   const root = mkdtempSync(join(tmpdir(), 'feedback-code-'))
   const workspace = { id: 'feedback-workspace', name: 'Feedback', rootPath: join(root, 'workspace') }

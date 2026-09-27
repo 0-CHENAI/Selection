@@ -1119,6 +1119,7 @@ export function groupMessagesByTurn(messages: Message[], options: GroupTurnsOpti
         text: message.content,
         isAnswerPreview: message.answerPreview,
         answerSalvaged: message.answerSalvaged,
+        artifactVersions: message.artifactVersions,
         isStreaming: !!message.isStreaming,
         isCommentary: pendingCardStream,
         streamStartTime: message.isStreaming ? message.timestamp : undefined,

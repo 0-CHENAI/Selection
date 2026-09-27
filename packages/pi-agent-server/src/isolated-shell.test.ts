@@ -22,3 +22,19 @@ test.skipIf(process.platform !== 'darwin')('native Shell writes candidates but c
     expect(readFileSync(original, 'utf8')).toBe('original')
   } finally { shell?.dispose(); rmSync(root, { recursive: true, force: true }) }
 })
+
+test.skipIf(!['darwin', 'linux'].includes(process.platform))('native Shell respects nested cwd and reports output handler failures', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'selection-shell-cwd-'))
+  const nested = join(root, 'nested'); mkdirSync(nested)
+  const shell = createIsolatedShell(root)
+  try {
+    // Linux CI may lack the kernel permission needed by bwrap.
+    if (!shell && process.platform === 'linux') return
+    expect(shell).toBeDefined()
+    await shell!.operations.exec('printf nested > result.txt', nested, { onData: () => {} })
+    expect(readFileSync(join(nested, 'result.txt'), 'utf8')).toBe('nested')
+    const failure = new Error('output disk full')
+    await expect(shell!.operations.exec('printf output; sleep 30', nested, { onData: () => { throw failure } })).rejects.toBe(failure)
+    expect((await shell!.operations.exec('exit 0', nested, { onData: () => {} })).exitCode).toBe(0)
+  } finally { shell?.dispose(); rmSync(root, { recursive: true, force: true }) }
+})

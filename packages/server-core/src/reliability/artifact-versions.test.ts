@@ -1,9 +1,96 @@
 import { createHash } from 'node:crypto'
 import { expect, test } from 'bun:test'
-import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync, symlinkSync } from 'node:fs'
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync, symlinkSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { ArtifactVersions } from './artifact-versions'
+
+test('an existing primary file never borrows an alternative file identity, including a reused relocation path', () => {
+  const root = mkdtempSync(join(tmpdir(), 'artifact-primary-identity-'))
+  try {
+    const original = join(root, 'report.html'), other = join(root, 'other.html'), moved = join(root, 'moved.html')
+    writeFileSync(original, 'same'); writeFileSync(other, 'same'); writeFileSync(moved, 'same')
+    const store = new ArtifactVersions(join(root, 'store'), 'host', 'workspace')
+    const alternate = store.register(other)
+    const primary = store.register(original, undefined, [other])
+    expect(primary.id).not.toBe(alternate.id)
+    expect(primary.path).not.toBe(alternate.path)
+    expect(store.register(original, undefined, [other]).id).toBe(primary.id)
+    rmSync(original)
+    store.relocate(primary.id, moved, primary.currentVersion)
+    writeFileSync(original, 'new file at the old location')
+    const replacement = store.register(original, undefined, [moved])
+    expect(replacement.id).not.toBe(primary.id)
+    expect(store.versionBytes(replacement.id, replacement.currentVersion).toString()).toBe('new file at the old location')
+    expect(store.read(primary.id).versions).toHaveLength(1)
+  } finally { rmSync(root, { recursive: true, force: true }) }
+})
+
+test('same-name, same-type and mixed-type files keep independent histories and preview identities after reload', () => {
+  const root = mkdtempSync(join(tmpdir(), 'artifact-multiple-files-'))
+  try {
+    mkdirSync(join(root, 'a')); mkdirSync(join(root, 'b'))
+    const paths = [join(root, 'a', 'report.html'), join(root, 'b', 'report.html'), join(root, 'a', 'report.txt'), join(root, 'a', 'image.png')]
+    const originals = [Buffer.from('same'), Buffer.from('same'), Buffer.from('same'), Buffer.from([0x89, 0x50, 0x4e, 0x47, 0, 1])]
+    const changed = paths.map((_, index) => Buffer.from(`changed-${index}`))
+    const storage = join(root, 'store')
+    const store = new ArtifactVersions(storage, 'host', 'workspace')
+    const first = paths.map((path, index) => { writeFileSync(path, originals[index]!); return store.register(path) })
+    expect(new Set(first.map(record => record.id)).size).toBe(paths.length)
+    expect(new Set(first.map(record => record.currentVersion)).size).toBe(paths.length)
+    expect(new Set(first.slice(0, 3).map(record => record.versions[0]!.hash)).size).toBe(1)
+    const alias = join(root, 'alias.html')
+    symlinkSync(paths[0]!, alias)
+    expect(store.register(alias).id).toBe(first[0]!.id)
+    for (const index of [1, 3, 0, 2]) {
+      writeFileSync(paths[index]!, changed[index]!)
+      store.capture(first[index]!.id, `run-${index}`, `edit-${index}`)
+    }
+    writeFileSync(paths[0]!, 'third version for file 0')
+    store.capture(first[0]!.id)
+    const reloaded = new ArtifactVersions(storage, 'host', 'workspace')
+    expect(first.map(record => reloaded.read(record.id).versions.length)).toEqual([3, 2, 2, 2])
+    for (const [index, record] of first.entries()) {
+      expect(reloaded.register(paths[index]!).id).toBe(record.id)
+      expect(reloaded.versionBytes(record.id, record.currentVersion)).toEqual(originals[index]!)
+      expect(readFileSync(reloaded.preview(record.id, record.currentVersion))).toEqual(originals[index]!)
+      const updated = reloaded.read(record.id).versions[1]!
+      expect(updated).toMatchObject({ ordinal: 2, sourceRunId: `run-${index}`, summary: `edit-${index}` })
+      expect(reloaded.versionBytes(record.id, updated.id)).toEqual(changed[index]!)
+      expect(() => reloaded.preview(record.id, first[(index + 1) % first.length]!.currentVersion)).toThrow('not found')
+    }
+    expect(reloaded.preview(first[0]!.id, first[0]!.currentVersion)).not.toBe(reloaded.preview(first[1]!.id, first[1]!.currentVersion))
+    const beforeOtherFiles = paths.slice(1).map(path => readFileSync(path))
+    const beforeOtherHistories = first.slice(1).map(record => reloaded.read(record.id))
+    const restored = reloaded.restore(first[0]!.id, reloaded.read(first[0]!.id).currentVersion, first[0]!.currentVersion)
+    expect(restored.versions).toHaveLength(4)
+    expect(readFileSync(paths[0]!)).toEqual(originals[0]!)
+    expect(paths.slice(1).map(path => readFileSync(path))).toEqual(beforeOtherFiles)
+    expect(first.slice(1).map(record => reloaded.read(record.id))).toEqual(beforeOtherHistories)
+  } finally { rmSync(root, { recursive: true, force: true }) }
+})
+
+test('shared content cleanup cannot remove another file snapshot and workspace identities cannot be crossed', () => {
+  const root = mkdtempSync(join(tmpdir(), 'artifact-shared-content-'))
+  try {
+    const storage = join(root, 'store'), a = join(root, 'a.txt'), b = join(root, 'b.html')
+    writeFileSync(a, 'shared'); writeFileSync(b, 'shared')
+    const store = new ArtifactVersions(storage, 'host', 'workspace')
+    const firstA = store.register(a), firstB = store.register(b)
+    writeFileSync(a, 'changed a')
+    const secondA = store.capture(firstA.id)
+    store.removeVersions(firstA.id, secondA.currentVersion, [firstA.currentVersion])
+    expect(store.cleanUnreferencedBlobs()).toEqual({ removed: 0, bytes: 0 })
+    expect(store.versionBytes(firstB.id, firstB.currentVersion).toString()).toBe('shared')
+    expect(() => new ArtifactVersions(storage, 'host', 'other-workspace').read(firstA.id)).toThrow('invalid artifact record')
+    expect(() => new ArtifactVersions(storage, 'other-host', 'workspace').read(firstA.id)).toThrow('invalid artifact record')
+    const otherStore = new ArtifactVersions(join(root, 'other-store'), 'host', 'other-workspace')
+    const separate = otherStore.register(a)
+    expect(separate.id).not.toBe(firstA.id)
+    expect(() => otherStore.read(firstA.id)).toThrow()
+  } finally { rmSync(root, { recursive: true, force: true }) }
+})
+
 test('missing recovery candidates find only exact stored identities and reject ambiguous artifacts', () => {
   const root = mkdtempSync(join(tmpdir(), 'artifact-missing-candidates-'))
   try {

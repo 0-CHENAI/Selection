@@ -1,3 +1,6 @@
+import { homedir } from 'node:os'
+import { resolve } from 'node:path'
+import { assertLocalWorkspace, normalizeAccessibleFilePath, resolveWorkspaceIdForFileAccess, validateWorkspaceFilePath } from '@craft-agent/server-core/handlers'
 import { RPC_CHANNELS, type BrowserPaneCreateOptions, type BrowserEmptyStateLaunchPayload } from '../../shared/types'
 import type { BrowserScreenshotOptions } from '../browser-pane-manager'
 import { pushTyped, type RpcServer } from '@craft-agent/server-core/transport'
@@ -5,6 +8,7 @@ import type { HandlerDeps } from './handler-deps'
 
 export const HANDLED_CHANNELS = [
   RPC_CHANNELS.browserPane.CREATE,
+  RPC_CHANNELS.browserPane.OPEN_HTML_FILE,
   RPC_CHANNELS.browserPane.DESTROY,
   RPC_CHANNELS.browserPane.LIST,
   RPC_CHANNELS.browserPane.NAVIGATE,
@@ -26,6 +30,16 @@ export const HANDLED_CHANNELS = [
 export function registerBrowserHandlers(server: RpcServer, deps: HandlerDeps): void {
   const { browserPaneManager, platform } = deps
   if (!browserPaneManager) return
+
+  server.handle(RPC_CHANNELS.browserPane.OPEN_HTML_FILE, async (ctx, path: string) => {
+    const workspaceId = resolveWorkspaceIdForFileAccess(ctx, deps.windowManager)
+    assertLocalWorkspace({ workspaceId }, 'Open HTML file')
+    if (!workspaceId) throw new Error('HTML preview requires a workspace')
+    const normalized = normalizeAccessibleFilePath(path)
+    const absolute = resolve(normalized.startsWith('~') ? normalized.replace(/^~/, homedir()) : normalized)
+    const safePath = await validateWorkspaceFilePath(absolute, workspaceId)
+    return browserPaneManager.openHtmlFile(safePath, workspaceId)
+  })
 
   server.handle(RPC_CHANNELS.browserPane.CREATE, (ctx, input?: string | BrowserPaneCreateOptions) => {
     // Stamp the window with the requester's workspace so manual UI-opened

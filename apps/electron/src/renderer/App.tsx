@@ -1,5 +1,4 @@
 import * as draftStorage from './lib/local-storage'
-import { ChildSessionPreviewDialog } from './components/app-shell/ChildSessionPreviewDialog'
 import { ArtifactVersionsDialog } from './components/app-shell/ArtifactVersionsDialog'
 import { missingCommittedAnswerRun, recoverCommittedAnswer } from './event-processor/answer-recovery'
 import { refreshSessionSnapshot, type SessionRefreshResult } from './lib/session-refresh'
@@ -75,12 +74,12 @@ import {
   PlatformProvider,
   ImagePreviewOverlay,
   PDFPreviewOverlay,
-  HTMLPreviewOverlay,
   CodePreviewOverlay,
   DocumentFormattedMarkdownOverlay,
   JSONPreviewOverlay,
 } from '@craft-agent/ui'
 import { useLinkInterceptor, type FilePreviewState } from '@/hooks/useLinkInterceptor'
+import { openHtmlFileWithFallback } from '@/lib/open-html-file'
 import { useTransportConnectionState } from '@/hooks/useTransportConnectionState'
 import { useStaleSessionRecovery } from '@/hooks/useStaleSessionRecovery'
 import { TransportConnectionBanner, shouldShowTransportConnectionBanner } from '@/components/app-shell/TransportConnectionBanner'
@@ -1743,6 +1742,16 @@ export default function App() {
   // show an in-app preview overlay or open externally. Replaces the old
   // handleOpenFile/handleOpenUrl that always opened in external apps.
   const linkInterceptor = useLinkInterceptor({
+    openHtmlFile: async (path) => {
+      try {
+        const destination = await openHtmlFileWithFallback(path, window.electronAPI)
+        if (destination === 'external') toast.info(t('toast.htmlBrowserRestartRequired'))
+        return true
+      } catch (error) {
+        toast.error(t('toast.failedToOpenFile'), { description: error instanceof Error ? error.message : String(error) })
+        return false
+      }
+    },
     openFileExternal: async (path) => {
       try {
         await window.electronAPI.openFile(path)
@@ -2015,7 +2024,6 @@ export default function App() {
   // Platform actions for @craft-agent/ui components (overlays, etc.)
   // Memoized to prevent re-renders when these callbacks don't change
   // NOTE: Must be defined before early returns to maintain consistent hook order
-  const [feedbackChildSessionId, setFeedbackChildSessionId] = useState<string | null>(null)
   const [managedArtifactPath, setManagedArtifactPath] = useState<{ path: string; sessionId?: string; alternativePaths?: string[] } | null>(null)
   const platformActions = useMemo(() => ({
     onReadAnnotationDraft: (key: string) => draftStorage.getRaw(draftStorage.KEYS.annotationFeedbackDrafts, key) ?? undefined,
@@ -2023,7 +2031,7 @@ export default function App() {
       if (value === undefined) draftStorage.remove(draftStorage.KEYS.annotationFeedbackDrafts, key)
       else draftStorage.setRaw(draftStorage.KEYS.annotationFeedbackDrafts, value, key)
     },
-    onManageArtifact: window.electronAPI.isChannelAvailable('artifacts:manage') ? (path: string, sessionId?: string, alternativePaths?: string[]) => { setFeedbackChildSessionId(null); setManagedArtifactPath({ path, sessionId, alternativePaths }) } : undefined,
+    onManageArtifact: window.electronAPI.isChannelAvailable('artifacts:manage') ? (path: string, sessionId?: string, alternativePaths?: string[]) => { setManagedArtifactPath({ path, sessionId, alternativePaths }) } : undefined,
     onOpenFile: handleOpenFile,
     onOpenUrl: handleOpenUrl,
     // Bypass link interceptor — opens file directly in system editor.
@@ -2195,10 +2203,7 @@ export default function App() {
             />
           </div>
 
-          <ArtifactVersionsDialog path={managedArtifactPath?.path ?? null} alternativePaths={managedArtifactPath?.alternativePaths} sessionId={managedArtifactPath?.sessionId} onClose={() => setManagedArtifactPath(null)} onPreview={handleOpenFile} onOpenSession={sessionId => { setManagedArtifactPath(null); setFeedbackChildSessionId(sessionId) }} />
-          <AppShellProvider value={appShellContextValue}>
-            <ChildSessionPreviewDialog sessionId={feedbackChildSessionId} open={feedbackChildSessionId !== null} onOpenChange={open => { if (!open) setFeedbackChildSessionId(null) }} />
-          </AppShellProvider>
+          <ArtifactVersionsDialog path={managedArtifactPath?.path ?? null} alternativePaths={managedArtifactPath?.alternativePaths} onClose={() => setManagedArtifactPath(null)} onPreview={handleOpenFile} />
           {/* File preview overlay — rendered by the link interceptor when a previewable file is clicked */}
           {linkInterceptor.previewState && (
             <FilePreviewRenderer
@@ -2235,7 +2240,7 @@ function WindowCloseHandler() {
  * Handles all preview types from the link interceptor:
  * - image → ImagePreviewOverlay (binary, loaded via data URL)
  * - pdf → PDFPreviewOverlay (binary, embedded via Chromium viewer)
- * - html → HTMLPreviewOverlay (rendered webpage, not source)
+ * HTML is opened in the built-in browser before reaching this renderer.
  * - code/text → CodePreviewOverlay (syntax highlighted)
  * - markdown → DocumentFormattedMarkdownOverlay
  * - json → JSONPreviewOverlay
@@ -2277,19 +2282,6 @@ function FilePreviewRenderer({
           onClose={onClose}
           filePath={state.filePath}
           loadPdfData={loadPdfData}
-          theme={theme}
-        />
-      )
-
-    case 'html':
-      return (
-        <HTMLPreviewOverlay
-          isOpen
-          onClose={onClose}
-          filePath={state.filePath}
-          html={state.content ?? ''}
-          title={state.filePath.split(/[/\\]/).pop() || undefined}
-          error={state.error}
           theme={theme}
         />
       )

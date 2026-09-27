@@ -31,7 +31,8 @@ export function createIsolatedShell(directory: string): { directory: string; ope
     const bwrap = ['/usr/bin/bwrap', '/bin/bwrap'].find(path => existsSync(path))
     if (!bwrap) { dispose(); return undefined }
     executable = bwrap
-    prefix = ['--die-with-parent', '--new-session', '--unshare-all', '--ro-bind', '/', '/', '--bind', root, root, '--proc', '/proc', '--dev', '/dev', '--tmpfs', '/tmp', '--bind', temporary, temporary, '--chdir', root]
+    // Mount private /tmp first so it cannot hide candidate directories under /tmp.
+    prefix = ['--die-with-parent', '--new-session', '--unshare-all', '--ro-bind', '/', '/', '--proc', '/proc', '--dev', '/dev', '--tmpfs', '/tmp', '--bind', root, root, '--bind', temporary, temporary, '--chdir', root]
     if (existsSync(join(root, '.git'))) prefix.push('--ro-bind', join(root, '.git'), join(root, '.git'))
     prefix.push('/bin/bash', '--noprofile', '--norc', '-c')
   } else { dispose(); return undefined }
@@ -46,10 +47,13 @@ export function createIsolatedShell(directory: string): { directory: string; ope
     const target = realpathSync(cwd), path = relative(root, target)
     if (isAbsolute(path) || path === '..' || path.startsWith('../')) throw new Error('Shell directory escapes isolated workspace')
     return new Promise((resolve, reject) => {
-      const child = spawn(executable, [...prefix, command], { cwd: target, env: environment(env), detached: true, stdio: ['ignore', 'pipe', 'pipe'] })
+      const args = [...prefix, command]
+      if (process.platform === 'linux') args[args.indexOf('--chdir') + 1] = target
+      const child = spawn(executable, args, { cwd: target, env: environment(env), detached: true, stdio: ['ignore', 'pipe', 'pipe'] })
       if (child.pid) children.add(child.pid)
       let timedOut = false
       let terminationError: unknown
+      let outputError: unknown
       const stop = () => {
         if (!child.pid) return
         try { process.kill(-child.pid, 'SIGKILL') } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ESRCH') terminationError = error }
@@ -60,7 +64,11 @@ export function createIsolatedShell(directory: string): { directory: string; ope
         if (child.pid) children.delete(child.pid)
         if (disposed && !children.size) rmSync(temporary, { recursive: true, force: true })
       }
-      child.stdout.on('data', onData); child.stderr.on('data', onData)
+      const consume = (bytes: Buffer) => {
+        if (outputError !== undefined) return
+        try { onData(bytes) } catch (error) { outputError = error ?? new Error('Shell output handling failed'); stop() }
+      }
+      child.stdout.on('data', consume); child.stderr.on('data', consume)
       signal?.addEventListener('abort', stop, { once: true })
       if (signal?.aborted) stop()
       child.once('error', error => { cleanup(); reject(error) })
@@ -68,7 +76,8 @@ export function createIsolatedShell(directory: string): { directory: string; ope
       child.once('exit', stop)
       child.once('close', exitCode => {
         cleanup()
-        if (terminationError) reject(terminationError)
+        if (outputError !== undefined) reject(outputError)
+        else if (terminationError) reject(terminationError)
         else if (signal?.aborted) reject(new Error('aborted'))
         else if (timedOut) reject(new Error(`timeout:${timeout}`))
         else resolve({ exitCode })

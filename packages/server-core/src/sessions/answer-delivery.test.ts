@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test'
-import { mkdtempSync, rmSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { hostname, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { AgentEvent } from '@craft-agent/core'
 import { storedToMessage } from '@craft-agent/core'
@@ -8,6 +8,8 @@ import type { AnswerDeliveryControl } from '@craft-agent/shared/agent/backend/ty
 import { createTypedError } from '@craft-agent/shared/agent/errors'
 import { getSessionPath, loadSession as loadStoredSession } from '@craft-agent/shared/sessions'
 import { createManagedSession, loadPiTurnAnchors, SessionManager } from './SessionManager'
+import { ArtifactVersions } from '../reliability/artifact-versions'
+import { ConversationArtifactVersions } from '../reliability/conversation-artifact-versions'
 
 const explanation = '蒙提霍尔问题\n\n1. 三扇门，主持人知道奖品位置。\n2. 主持人打开一扇有羊的门。\n\n| 策略 | 胜率 |\n| --- | --- |\n| 换门 | 2/3 |\n| 不换 | 1/3 |'
 const markdown = `${explanation}\n\n模拟结果：换门胜率约为 2/3。`
@@ -49,6 +51,52 @@ describe('explicit answer delivery lifecycle (#330)', () => {
     }]
     return { annotationFollowUps: [{ messageId: 'original', annotationId: 'note', text: 'Revise this', updatedAt: 1 }] }
   }
+
+  it('records ordinary chat file edits and publishes the same snapshot identity as the saved answer', async () => {
+    const file = join(root, 'report.html')
+    writeFileSync(file, 'before')
+    managed.workingDirectory = root
+    managed.messages = [{ id: 'previous', role: 'assistant', content: '[报告](report.html)', timestamp: 1 }]
+    install(async function* () {
+      writeFileSync(file, 'after')
+      await control!.submit({ ...submission, markdown: '[已修改报告](report.html)' })
+      yield { type: 'complete' }
+    })
+    await manager.sendMessage(managed.id, '调整报告颜色')
+    const answer = loadStoredSession(root, managed.id)!.messages.find(message => message.answerCommitted)!
+    const event = events.find(event => event.type === 'text_complete' && event.answerCommitted)!
+    expect(event.artifactVersions).toEqual(answer.artifactVersions)
+    expect(answer.artifactVersions).toHaveLength(1)
+    expect(answer.artifactVersions![0]).toMatchObject({ path: 'report.html', ordinal: 2 })
+    const versions = new ArtifactVersions(join(root, 'artifacts', 'versions'), hostname(), managed.workspace.id)
+    const record = versions.findByPath(file)!
+    expect(record.versions).toHaveLength(2)
+    expect(record.versions[1]!.summary).toBe('调整报告颜色')
+    expect(versions.versionBytes(record.id, record.versions[0]!.id).toString()).toBe('before')
+    expect(prompts).toHaveLength(1)
+  })
+
+  it('persists the pending tool before awaiting artifact baseline recording', async () => {
+    const trackPath = ConversationArtifactVersions.prototype.trackPath
+    let checked = false
+    ConversationArtifactVersions.prototype.trackPath = async function (path) {
+      const checkpoint = JSON.parse(readFileSync(join(getSessionPath(root, managed.id), 'data', 'execution-checkpoint.json'), 'utf8'))
+      expect(checkpoint.pendingTools['write-1']).toMatchObject({ name: 'Write', recovery: 'unknown' })
+      checked = true
+      await trackPath.call(this, path)
+    }
+    managed.workingDirectory = root
+    install(async function* () {
+      yield { type: 'tool_start', toolName: 'Write', toolUseId: 'write-1', input: { file_path: join(root, 'report.txt') } }
+      yield { type: 'tool_result', toolUseId: 'write-1', toolName: 'Write', result: 'done', isError: false }
+      await control!.submit(submission)
+      yield { type: 'complete' }
+    })
+    try {
+      await manager.sendMessage(managed.id, 'Create report')
+      expect(checked).toBe(true)
+    } finally { ConversationArtifactVersions.prototype.trackPath = trackPath }
+  })
 
   it('context admission failure preserves input and preview without starting answer recovery or promoting a draft', async () => {
     install(async function* () {

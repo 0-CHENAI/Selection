@@ -3,7 +3,7 @@ import { ExternalLink, RefreshCw, CheckCircle2, AlertTriangle, Loader2 } from 'l
 import { useTranslation } from 'react-i18next'
 import type { SwarmRunDetailsDto, SwarmRunNodeDto } from '@craft-agent/shared/protocol'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
-import { usePlatform } from '@craft-agent/ui'
+import { usePlatform } from '@craft-agent/ui/context'
 import { cn } from '@/lib/utils'
 
 interface SwarmRunDetailsDialogProps {

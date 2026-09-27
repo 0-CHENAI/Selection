@@ -372,6 +372,7 @@ export const RPC_CHANNELS = {
   },
   browserPane: {
     CREATE: 'browser-pane:create',
+    OPEN_HTML_FILE: 'browser-pane:open-html-file',
     DESTROY: 'browser-pane:destroy',
     LIST: 'browser-pane:list',
     NAVIGATE: 'browser-pane:navigate',

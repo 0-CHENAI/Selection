@@ -1576,6 +1576,12 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
   const startIndex = Math.max(0, allTurns.length - visibleTurnCount)
   const turns = allTurns.slice(startIndex)
   const hasMoreAbove = startIndex > 0
+  // Bind recovery to the current user turn's latest error, never a historical error.
+  const latestUserIndex = allTurns.findLastIndex(turn => turn.type === 'user')
+  const recoveryErrorTurn = allTurns.slice(latestUserIndex + 1).findLast(turn => turn.type === 'system' && turn.message.role === 'error')
+  const recoveryErrorId = recoveryErrorTurn?.type === 'system' && turns.includes(recoveryErrorTurn) ? recoveryErrorTurn.message.id : undefined
+  const executionRecovery = session?.runtimeRecovery && ['recovering', 'blocked'].includes(session.runtimeRecovery.phase)
+    ? { state: session.runtimeRecovery, onResume: () => window.electronAPI.sessionCommand(session.id, { type: 'resumeExecution' }) } : undefined
 
   const navigationItems = useMemo(() => {
     if (!showRecordNavigation) return []
@@ -1924,6 +1930,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
                             onOpenFile={onOpenFile}
                             onOpenUrl={onOpenUrl}
                             sessionId={session?.id}
+                            executionRecovery={turn.message.id === recoveryErrorId ? executionRecovery : undefined}
                             contextRecovery={turn.message.errorCode === 'context_limit' && session && !hideComposer
                               && contextRecoverySource(session.messages, turn.message.id) ? {
                                 disabled: isInputDisabled || disableSend || connectionUnavailable || session.isProcessing,
@@ -2230,7 +2237,11 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
                     </AnimatePresence>
                   </motion.div>
                 </AnimatePresence>
-                <ExecutionRecoveryStatus state={session.runtimeRecovery} onResume={() => window.electronAPI.sessionCommand(session.id, { type: 'resumeExecution' })} />
+                {executionRecovery && !recoveryErrorId && <ErrorMessage
+                  message={{ id: 'runtime-recovery', role: 'error', timestamp: executionRecovery.state.updatedAt,
+                    errorTitle: t('chat.recovery.attention'), content: t(`chat.recovery.reasons.${executionRecovery.state.reason ?? 'checking'}`, { defaultValue: t('chat.recovery.reasons.unknown') }) }}
+                  executionRecovery={executionRecovery}
+                />}
                 {!session.isProcessing && session.progressSupervision?.phase === 'paused' && (
                   <div className="px-6 py-2">
                     <button
@@ -2538,21 +2549,32 @@ interface MessageBubbleProps {
   /** Callback to resend the user message that preceded an error */
   onRetry?: () => void
   contextRecovery?: ContextLimitRecoveryOptions
+  executionRecovery?: React.ComponentProps<typeof ExecutionRecoveryStatus>
 }
 
 /**
  * ErrorMessage - Separate component for error messages to allow useState hook
  */
-function ErrorMessage({ message, onOpenUrl, sessionId, onRetry, contextRecovery }: { message: Message; onOpenUrl?: (url: string) => void; sessionId?: string; onRetry?: () => void; contextRecovery?: ContextLimitRecoveryOptions }) {
+function ErrorMessage({ message, onOpenUrl, sessionId, onRetry, contextRecovery, executionRecovery }: { message: Message; onOpenUrl?: (url: string) => void; sessionId?: string; onRetry?: () => void; contextRecovery?: ContextLimitRecoveryOptions; executionRecovery?: React.ComponentProps<typeof ExecutionRecoveryStatus> }) {
   const { t } = useTranslation()
   const terminalCode = isTerminalResponseError(message.errorCode) ? message.errorCode : undefined
-  const hasDetails = (message.errorDetails && message.errorDetails.length > 0) || message.errorOriginal
+  const hasDetails = executionRecovery || (message.errorDetails && message.errorDetails.length > 0) || message.errorOriginal
   const [detailsOpen, setDetailsOpen] = React.useState(false)
+  const detailsId = React.useId()
+  const reduceMotion = useReducedMotion()
   const actions = message.errorActions?.filter(a => {
     if (a.action === 'retry' && (terminalCode || message.errorCanRetry === false)) return false
     if (a.action === 'open_url') return !!a.url && !!onOpenUrl
     return true
   })
+
+  const detailsContent = <div className="mt-2 pt-2 border-t border-destructive/20 space-y-3">
+    {executionRecovery && <ExecutionRecoveryStatus {...executionRecovery} />}
+    <div className="text-xs text-destructive/60 font-mono space-y-0.5">
+      {message.errorDetails?.map((detail, i) => <div key={i}>{detail}</div>)}
+      {message.errorOriginal && !message.errorDetails?.some(d => d.includes('Raw error:')) && <div className="mt-1">Raw: {message.errorOriginal.slice(0, 200)}{message.errorOriginal.length > 200 ? '...' : ''}</div>}
+    </div>
+  </div>
 
   return (
     <div className="flex justify-start mt-4">
@@ -2596,6 +2618,9 @@ function ErrorMessage({ message, onOpenUrl, sessionId, onRetry, contextRecovery 
         {hasDetails && (
           <div className="mt-2">
             <button
+              type="button"
+              aria-expanded={detailsOpen}
+              aria-controls={detailsId}
               onClick={() => setDetailsOpen(!detailsOpen)}
               className="flex items-center gap-1 text-xs text-destructive/70 hover:text-destructive transition-colors"
             >
@@ -2603,16 +2628,9 @@ function ErrorMessage({ message, onOpenUrl, sessionId, onRetry, contextRecovery 
               <span>{detailsOpen ? t('chat.hideTechnicalDetails') : t('chat.showTechnicalDetails')}</span>
             </button>
 
-            <AnimatedCollapsibleContent isOpen={detailsOpen} className="overflow-hidden">
-              <div className="mt-2 pt-2 border-t border-destructive/20 text-xs text-destructive/60 font-mono space-y-0.5">
-                {message.errorDetails?.map((detail, i) => (
-                  <div key={i}>{detail}</div>
-                ))}
-                {message.errorOriginal && !message.errorDetails?.some(d => d.includes('Raw error:')) && (
-                  <div className="mt-1">Raw: {message.errorOriginal.slice(0, 200)}{message.errorOriginal.length > 200 ? '...' : ''}</div>
-                )}
-              </div>
-            </AnimatedCollapsibleContent>
+            <div id={detailsId} aria-hidden={!detailsOpen}>
+              {reduceMotion ? detailsOpen && detailsContent : <AnimatedCollapsibleContent isOpen={detailsOpen} className="overflow-hidden">{detailsContent}</AnimatedCollapsibleContent>}
+            </div>
           </div>
         )}
       </div>
@@ -2630,6 +2648,7 @@ function MessageBubble({
   compactMode,
   onRetry,
   contextRecovery,
+  executionRecovery,
 }: MessageBubbleProps) {
   const { t } = useTranslation()
 
@@ -2677,7 +2696,7 @@ function MessageBubble({
 
   // === ERROR MESSAGE: Red bordered bubble with warning icon and collapsible details ===
   if (message.role === 'error') {
-    return <ErrorMessage message={message} onOpenUrl={onOpenUrl} sessionId={sessionId} onRetry={onRetry} contextRecovery={contextRecovery} />
+    return <ErrorMessage message={message} onOpenUrl={onOpenUrl} sessionId={sessionId} onRetry={onRetry} contextRecovery={contextRecovery} executionRecovery={executionRecovery} />
   }
 
   // === STATUS MESSAGE: Matches ProcessingIndicator layout for visual consistency ===
@@ -2763,6 +2782,7 @@ const MemoizedMessageBubble = React.memo(MessageBubble, (prev, next) => {
     prev.message.content === next.message.content &&
     prev.message.role === next.message.role &&
     prev.contextRecovery === next.contextRecovery &&
+    prev.executionRecovery === next.executionRecovery &&
     prev.sessionId === next.sessionId &&
     prev.compactMode === next.compactMode
   )

@@ -226,7 +226,6 @@ export {
   DocumentFormattedMarkdownOverlay,
   ImagePreviewOverlay,
   PDFPreviewOverlay,
-  HTMLPreviewOverlay,
   detectLanguage,
   detectLanguageFromPath,
   type CodePreviewOverlayProps,
@@ -240,7 +239,6 @@ export {
   type DocumentFormattedMarkdownOverlayProps,
   type ImagePreviewOverlayProps,
   type PDFPreviewOverlayProps,
-  type HTMLPreviewOverlayProps,
   ActivityCardsOverlay,
   type ActivityCardsOverlayProps,
 } from './components/overlay'

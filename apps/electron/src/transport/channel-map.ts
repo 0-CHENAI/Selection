@@ -381,6 +381,7 @@ export const CHANNEL_MAP = {
 
   // Browser pane management
   'browserPane.create': invoke(RPC_CHANNELS.browserPane.CREATE),
+  'browserPane.openHtmlFile': invoke(RPC_CHANNELS.browserPane.OPEN_HTML_FILE),
   'browserPane.destroy': invoke(RPC_CHANNELS.browserPane.DESTROY),
   'browserPane.list': invoke(RPC_CHANNELS.browserPane.LIST),
   'browserPane.navigate': invoke(RPC_CHANNELS.browserPane.NAVIGATE),

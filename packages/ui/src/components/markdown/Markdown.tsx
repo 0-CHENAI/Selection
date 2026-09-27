@@ -338,7 +338,7 @@ function createComponents(
           if (match?.[1] === 'spreadsheet') {
             return wrapBlock('spreadsheet', code, <MarkdownSpreadsheetBlock code={code} className="my-2" />, props.node?.position)
           }
-          // HTML preview blocks → sandboxed iframe
+          // HTML preview blocks → built-in browser entry
           if (match?.[1] === 'html-preview' && isPreviewEnabled('html-preview')) {
             return wrapBlock('html-preview', code, <MarkdownHtmlBlock code={code} className="my-2" />, props.node?.position)
           }
@@ -474,7 +474,7 @@ function createComponents(
         if (match?.[1] === 'spreadsheet') {
           return wrapBlock('spreadsheet', code, <MarkdownSpreadsheetBlock code={code} className="my-2" />, props.node?.position)
         }
-        // HTML preview blocks → sandboxed iframe
+        // HTML preview blocks → built-in browser entry
         if (match?.[1] === 'html-preview' && isPreviewEnabled('html-preview')) {
           return wrapBlock('html-preview', code, <MarkdownHtmlBlock code={code} className="my-2" />, props.node?.position)
         }

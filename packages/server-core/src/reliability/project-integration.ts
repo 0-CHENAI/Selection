@@ -52,9 +52,9 @@ export class ProjectIntegration {
     atomicWrite(join(dirname(this.journalPath), 'transactions', `${journal.id}.json`), serialized)
     atomicWrite(this.journalPath, serialized)
   }
-  private load(): Journal | undefined {
-    if (!existsSync(this.journalPath)) return undefined
-    const journal = JSON.parse(readFileSync(this.journalPath, 'utf8')) as Journal
+  private load(path = this.journalPath): Journal | undefined {
+    if (!existsSync(path)) return undefined
+    const journal = JSON.parse(readFileSync(path, 'utf8')) as Journal
     if (journal.version !== 1 || journal.root !== this.root || typeof journal.id !== 'string' || !/^[a-f0-9-]+$/.test(journal.id)
       || !['applying', 'applied', 'rolling-back', 'rolled-back'].includes(journal.status)
       || !Array.isArray(journal.entries) || new Set(journal.entries.map(e => e.path)).size !== journal.entries.length
@@ -95,7 +95,15 @@ export class ProjectIntegration {
   recover(action: 'complete' | 'rollback', expectedTransactionId?: string): void {
     this.locked(() => {
       const journal = this.load()
-      if (expectedTransactionId && journal?.id !== expectedTransactionId) throw new Error('Integration transaction identity changed')
+      if (expectedTransactionId && journal?.id !== expectedTransactionId) {
+        // A later integration may have advanced the pointer before delivery was acknowledged.
+        // Only acknowledge completed archives; never replay old writes over a newer transaction.
+        const archived = /^[a-f0-9-]+$/.test(expectedTransactionId)
+          ? this.load(join(dirname(this.journalPath), 'transactions', `${expectedTransactionId}.json`)) : undefined
+        if (action === 'complete' && archived?.id === expectedTransactionId && archived.status === 'applied'
+          && (!journal || ['applied', 'rolled-back'].includes(journal.status))) return
+        throw new Error('Integration transaction identity changed')
+      }
       if (!journal || journal.status === 'rolled-back' || journal.status === 'applied') return
       // Check ALL targets before writing any: external edits must survive recovery.
       for (const entry of journal.entries) {

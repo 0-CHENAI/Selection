@@ -10,6 +10,30 @@ function fixture() {
   mkdirSync(project); writeFileSync(join(project, 'a'), 'a'); writeFileSync(join(project, 'b'), 'b')
   return { root, project, storage, changes: [{ path: 'a', expectedHash: hash('a'), content: Buffer.from('A') }, { path: 'b', expectedHash: hash('b'), content: Buffer.from('B') }] }
 }
+test('a completed transaction can be acknowledged after the current pointer advances without replaying writes', () => {
+  const f = fixture()
+  try {
+    const store = new ProjectIntegration(f.project, f.storage)
+    const first = store.apply([f.changes[0]!])
+    const second = store.apply([f.changes[1]!])
+    // Delivery replay remains responsible for checking output hashes; recovery must not restore them.
+    writeFileSync(join(f.project, 'a'), 'external')
+    const journalPath = join(f.storage, hash(realpathSync(f.project)), 'integration.json')
+    const before = readFileSync(journalPath, 'utf8')
+    new ProjectIntegration(f.project, f.storage).recover('complete', first)
+    expect(readFileSync(join(f.project, 'a'), 'utf8')).toBe('external')
+    expect(readFileSync(join(f.project, 'b'), 'utf8')).toBe('B')
+    expect(readFileSync(journalPath, 'utf8')).toBe(before)
+    expect(JSON.parse(before).id).toBe(second)
+    expect(() => store.recover('rollback', first)).toThrow('identity changed')
+    expect(() => store.recover('complete', '../integration')).toThrow('identity changed')
+    expect(() => store.apply([{ path: 'b', expectedHash: hash('B'), content: Buffer.from('C') }], undefined, () => {
+      throw new Error('crash before writes')
+    })).toThrow('crash before writes')
+    expect(() => store.recover('complete', first)).toThrow('identity changed')
+    expect(readFileSync(join(f.project, 'b'), 'utf8')).toBe('B')
+  } finally { rmSync(f.root, { recursive: true, force: true }) }
+})
 for (const action of ['complete', 'rollback'] as const) test(`restart can ${action} a partially applied transaction`, () => {
   const f = fixture()
   try {

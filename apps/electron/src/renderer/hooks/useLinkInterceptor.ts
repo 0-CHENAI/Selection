@@ -7,6 +7,7 @@
  *
  * Architecture:
  *   Markdown click → PlatformContext → App.tsx → useLinkInterceptor
+ *     ├── HTML? → isolated built-in browser
  *     ├── canPreview? → set previewState (renders overlay in App.tsx)
  *     └── can't preview? → electronAPI.openFile (opens externally)
  *
@@ -62,13 +63,6 @@ interface TextPreview {
   error?: string
 }
 
-interface HtmlPreview {
-  type: 'html'
-  filePath: string
-  content: string | null
-  error?: string
-}
-
 export type FilePreviewState =
   | ImagePreview
   | PDFPreview
@@ -76,12 +70,13 @@ export type FilePreviewState =
   | MarkdownPreview
   | JSONPreview
   | TextPreview
-  | HtmlPreview
 
 // ── Hook options ───────────────────────────────────────────────────────────────
 // Callbacks injected by App.tsx so the hook doesn't depend on window.electronAPI directly.
 
 interface LinkInterceptorOptions {
+  /** Open HTML in the isolated built-in browser, with its document resources. */
+  openHtmlFile: (path: string) => Promise<boolean>
   /** Open file in default external application (e.g., VS Code) */
   openFileExternal: (path: string) => Promise<void | boolean>
   /** Open URL in default browser */
@@ -154,6 +149,7 @@ export function useLinkInterceptor(options: LinkInterceptorOptions): LinkInterce
     }
 
     const type = classification.type
+    if (type === 'html') return optionsRef.current.openHtmlFile(path)
 
     // For image/pdf: set state immediately — the overlay handles its own async loading
     if (type === 'image' || type === 'pdf') {
@@ -246,8 +242,6 @@ function buildInitialTextState(type: FilePreviewType, path: string): FilePreview
       return { type: 'json', filePath: path, content: null }
     case 'text':
       return { type: 'text', filePath: path, content: null }
-    case 'html':
-      return { type: 'html', filePath: path, content: null }
     default:
       // Should never happen — image/pdf are handled before this function is called
       return { type: 'text', filePath: path, content: null }

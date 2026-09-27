@@ -30,13 +30,12 @@ describe('empty response recovery (#182)', () => {
       { messagesLoaded: true },
     )
     ;(manager as any).sessions.set(managed.id, managed)
-    ;(manager as any).persistSession = () => {}
-    ;(manager as any).flushSession = async () => {}
     events = []
     manager.setEventSink((_channel, _target, event) => events.push(event))
   })
 
-  afterEach(() => {
+  afterEach(async () => {
+    await manager.flushSession(managed.id)
     rmSync(rootPath, { recursive: true, force: true })
   })
 

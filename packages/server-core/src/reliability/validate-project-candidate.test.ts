@@ -52,7 +52,8 @@ test('unavailable check executable returns a retained validation failure', async
     writeFileSync(join(source, 'a.ts'), 'base'); git('add', '.'); git('commit', '-m', 'base')
     const result = await validateProjectCandidate({ sourceRoot: source, storage: join(root, 'validation'), files: [{ path: 'a.ts', content: Buffer.from('merged') }], ensureAuthorized: () => {}, executable: { bun: join(root, 'missing-executable') } })
     expect(result.passed).toBe(false)
-    expect(result.checks[0]).toContain('could not complete')
+    // Native confinement launches Bash; a missing command exits 127 rather than throwing spawn ENOENT.
+    expect(result.checks[0]).toContain('failed (127)')
     expect(readFileSync(join(source, 'a.ts'), 'utf8')).toBe('base')
     expect(git('worktree', 'list', '--porcelain').toString().match(/^worktree /gm)).toHaveLength(3)
   } finally { rmSync(root, { recursive: true, force: true }) }
