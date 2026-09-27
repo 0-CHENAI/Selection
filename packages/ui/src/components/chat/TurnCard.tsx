@@ -4,7 +4,7 @@ import { extractResponseSources } from './response-sources'
 import * as React from 'react'
 import { useMemo, useEffect, useRef, useCallback, useState } from 'react'
 import i18n from 'i18next'
-import { isSubmitAnswerTool, localizedToolLabel } from './tool-labels'
+import { isAnswerDeliveryTool, localizedToolLabel } from './tool-labels'
 import { usePacedSource } from './usePacedSource'
 import { ResponseArtifacts } from './ResponseArtifacts'
 import { extractResponseArtifacts } from './response-artifacts'
@@ -275,6 +275,8 @@ export interface ActivityItem {
   type: ActivityType
   status: ActivityStatus
   toolName?: string
+  toolPurpose?: 'work' | 'answer-delivery'
+  answerRoutingVersion?: 1
   toolUseId?: string  // For matching parent-child relationships
   toolInput?: Record<string, unknown>
   content?: string
@@ -302,6 +304,7 @@ export interface ActivityItem {
 }
 
 export interface ResponseContent {
+  answerSalvaged?: boolean
   isAnswerPreview?: boolean
   text: string
   isStreaming: boolean
@@ -645,7 +648,7 @@ export function getPreviewText(
   if (intent) return intent
 
   // Find the most relevant activity intent
-  const activityWithIntent = activities.find(a => a.intent && !isSubmitAnswerTool(a.toolName))
+  const activityWithIntent = activities.find(a => a.intent && !isAnswerDeliveryTool(a))
   if (activityWithIntent?.intent) return activityWithIntent.intent
 
   // Find running Task tools and show their description
@@ -655,7 +658,7 @@ export function getPreviewText(
   }
 
   // Get running tools (not intermediate messages)
-  const runningTools = activities.filter(a => a.status === 'running' && a.toolName && !isSubmitAnswerTool(a.toolName))
+  const runningTools = activities.filter(a => a.status === 'running' && a.toolName && !isAnswerDeliveryTool(a))
 
   // Show running tool names
   if (runningTools.length > 0) {
@@ -3103,7 +3106,7 @@ export const TurnCard = React.memo(function TurnCard({
   // at all) until a tool or older commentary actually needs a row.
   const visibleActivities = useMemo(
     () => sortedActivities.filter(
-      activity => !isSubmitAnswerTool(activity.toolName)
+      activity => !isAnswerDeliveryTool(activity)
         // Empty SDK thinking messages are status placeholders, not work rows.
         // The stable header/footer status owns their presentation.
         && !((activity.type === 'intermediate' || activity.type === 'thinking')
@@ -3161,7 +3164,7 @@ export const TurnCard = React.memo(function TurnCard({
     && activities.length > 0
     && activities.every(a => {
       // Delivery is the card body, not a work record that should keep an empty turn.
-      if (isSubmitAnswerTool(a.toolName)) return true
+      if (isAnswerDeliveryTool(a)) return true
       // Tool activities must be errors (interrupted/failed)
       if (a.type === 'tool') return a.status === 'error'
       // Intermediate activities must have no meaningful content

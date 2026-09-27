@@ -38,8 +38,10 @@ export function handleToolStart(
       toolIntent: event.toolIntent,
       toolDisplayName: event.toolDisplayName,
       toolDisplayMeta: event.toolDisplayMeta,
-      answerProtocol: event.answerProtocol,
-      answerRunId: event.answerRunId,
+      answerProtocol: event.answerProtocol ?? session.messages[existingIndex]?.answerProtocol,
+      answerRunId: event.answerRunId ?? session.messages[existingIndex]?.answerRunId,
+      answerRoutingVersion: event.answerRoutingVersion ?? session.messages[existingIndex]?.answerRoutingVersion,
+      toolPurpose: event.toolPurpose ?? session.messages[existingIndex]?.toolPurpose,
       turnId: event.turnId,
       parentToolUseId: event.parentToolUseId,
     })
@@ -58,6 +60,8 @@ export function handleToolStart(
     toolStatus: 'executing',
     answerProtocol: event.answerProtocol,
     answerRunId: event.answerRunId,
+    answerRoutingVersion: event.answerRoutingVersion,
+    toolPurpose: event.toolPurpose,
     turnId: event.turnId,
     parentToolUseId: event.parentToolUseId,
     toolIntent: event.toolIntent,
@@ -104,6 +108,10 @@ export function handleToolResult(
 
     // Update existing tool message
     let updatedSession = updateMessageAt(session, toolIndex, {
+      answerRoutingVersion: event.answerRoutingVersion ?? existingMessage?.answerRoutingVersion,
+      toolPurpose: event.toolPurpose ?? existingMessage?.toolPurpose,
+      answerRunId: event.answerRunId ?? existingMessage?.answerRunId,
+      answerProtocol: event.answerProtocol ?? existingMessage?.answerProtocol,
       toolResult: event.result,
       // A tool_result is authoritative for this execution. Explicitly clear
       // live multimodal blocks when a replacement event has none, otherwise a
@@ -168,6 +176,8 @@ export function handleToolResult(
     errorCode: isPersistedOutput ? 'response_too_large' : undefined,
     answerProtocol: event.answerProtocol,
     answerRunId: event.answerRunId,
+    answerRoutingVersion: event.answerRoutingVersion,
+    toolPurpose: event.toolPurpose,
     turnId: event.turnId,
     parentToolUseId: event.parentToolUseId,
   }

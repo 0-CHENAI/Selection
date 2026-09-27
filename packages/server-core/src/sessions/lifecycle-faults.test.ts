@@ -121,3 +121,19 @@ it('a late cleanup does not clear a replacement runtime or complete its new gene
   expect(managed.isProcessing).toBe(true);
   expect(completed).toHaveLength(0);
 });
+
+it('authentication recovery reuses the user message and its delivery checkpoint', async () => {
+  const { managed, internal } = fixture();
+  managed.isProcessing = true;
+  managed.lastSentMessage = 'original';
+  const owner = { id: 'owner', role: 'user' as const, content: 'original', timestamp: 1,
+    answerProtocol: 'explicit-v1' as const, answerRunId: 'retained', answerRoutingVersion: 1 as const, answerRecoveryAttempted: true };
+  managed.messages = [owner];
+  internal.disposeManagedAgentRuntime = async () => {};
+  let retryId: string | undefined;
+  internal.sendMessage = async (_id: string, _text: string, _files: unknown, _stored: unknown, _options: unknown, existingId: string) => { retryId = existingId; };
+  expect(internal.attemptAuthRetry(managed.id, managed, 'ws')).toBe(true);
+  await new Promise(resolve => setImmediate(resolve));
+  expect(retryId).toBe(owner.id);
+  expect(managed.messages).toEqual([owner]);
+});

@@ -35,6 +35,8 @@ export interface TextDeltaEvent {
   type: 'text_delta'
   answerProtocol?: 'explicit-v1'
   answerRunId?: string
+  answerRoutingVersion?: 1
+  toolPurpose?: 'work' | 'answer-delivery'
   sessionId: string
   delta: string
   /** Missing only for legacy senders; current backends classify every delta. */
@@ -50,8 +52,9 @@ export interface TextCompleteEvent {
   type: 'text_complete'
   /** Explicit answer identity; absent on legacy turns. */
   answerProtocol?: 'explicit-v1';
-  answerRunId?: string;
+  answerRunId?: string; answerRoutingVersion?: 1; toolPurpose?: 'work' | 'answer-delivery';
   answerCommitted?: boolean;
+  answerSalvaged?: boolean;
   /** Persisted on the originating user message before the single recovery call. */
   phase?: import('@craft-agent/core').TextStreamPhase;
   presentationProtocol?: 'native' | 'marker-v1' | 'legacy';
@@ -75,6 +78,8 @@ export interface ToolStartEvent {
   type: 'tool_start'
   answerProtocol?: 'explicit-v1'
   answerRunId?: string
+  answerRoutingVersion?: 1
+  toolPurpose?: 'work' | 'answer-delivery'
   sessionId: string
   toolUseId: string
   toolName: string
@@ -96,6 +101,8 @@ export interface ToolResultEvent {
   type: 'tool_result'
   answerProtocol?: 'explicit-v1'
   answerRunId?: string
+  answerRoutingVersion?: 1
+  toolPurpose?: 'work' | 'answer-delivery'
   sessionId: string
   toolUseId: string
   toolName?: string
@@ -113,6 +120,8 @@ export interface ToolResultEvent {
  * Complete event - agent loop finished
  */
 export interface CompleteEvent {
+  answerRunId?: string
+  answerRoutingVersion?: 1
   type: 'complete'
   sessionId: string
   tokenUsage?: Session['tokenUsage']
@@ -570,7 +579,7 @@ export interface MessagesRestoredEvent {
  */
 export type AgentEvent =
   | { type: 'progress_supervision'; sessionId: string; state: import('@craft-agent/shared/protocol/dto').ProgressSupervisionView }
-  | { type: 'answer_preview'; sessionId: string; answerRunId: string; userMessageId: string; text: string; toolCallId: string }
+  | { type: 'answer_preview'; sessionId: string; answerRunId: string; answerRoutingVersion?: 1; userMessageId: string; text: string; toolCallId: string }
   | TextDeltaEvent
   | TextCompleteEvent
   | ToolStartEvent
