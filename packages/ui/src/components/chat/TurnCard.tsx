@@ -72,8 +72,10 @@ import {
 } from './turn-utils'
 import { extractAnnotationSelectedText } from './follow-up-helpers'
 import {
+  asRecord,
   formatAnnotationFollowUpTooltipText,
   getAnnotationNoteText,
+  getAnnotationFeedbackStatus,
 } from '../annotations/follow-up-state'
 import {
   ANNOTATION_PREFIX_SUFFIX_WINDOW,
@@ -82,6 +84,7 @@ import {
   hasExistingTextRangeAnnotation,
   createSelectionPreviewAnnotation,
   createTextSelectionAnnotation,
+  hashAnnotationSource,
   collectTextSegments,
   getCanonicalText,
   resolveNodeOffset,
@@ -418,6 +421,8 @@ export interface TurnCardProps {
   openAnnotationRequest?: OpenAnnotationRequest | null
   /** Annotation interaction mode (viewer uses tooltip-only to suppress the island) */
   annotationInteractionMode?: AnnotationInteractionMode
+  /** Resolve a persisted revision only when its delivered message is available. */
+  resolveAnnotationResult?: (messageId: string, sourceMessageId?: string, annotationId?: string) => (() => void) | undefined
 }
 
 // ============================================================================
@@ -1590,6 +1595,8 @@ export interface ResponseCardProps {
   openAnnotationRequest?: OpenAnnotationRequest | null
   /** Annotation interaction mode (viewer uses tooltip-only to suppress the island) */
   annotationInteractionMode?: AnnotationInteractionMode
+  /** Resolve a persisted revision only when its delivered message is available. */
+  resolveAnnotationResult?: (messageId: string, sourceMessageId?: string, annotationId?: string) => (() => void) | undefined
   /** Tool-bound commentary — keep the body readable, hide final-reply actions */
   isCommentary?: boolean
 }
@@ -1859,6 +1866,7 @@ export function ResponseCard({
   hasActiveFollowUpAnnotations = false,
   openAnnotationRequest,
   annotationInteractionMode = 'interactive',
+  resolveAnnotationResult,
   isCommentary = false,
 }: ResponseCardProps) {
   const { t } = useTranslation()
@@ -1898,7 +1906,7 @@ export function ResponseCard({
   // Fullscreen state
   const [isFullscreen, setIsFullscreen] = useState(false)
   // Pending text selection waiting for explicit follow-up action
-  const interaction = useAnnotationInteractionController()
+  const interaction = useAnnotationInteractionController(JSON.stringify([sessionId, messageId]))
   const {
     state: interactionState,
     setDraft: setFollowUpDraft,
@@ -1908,6 +1916,7 @@ export function ResponseCard({
     requestEdit,
     cancelFollowUp,
     closeAll,
+    discardDraft,
     markSubmitSuccess,
     markDeleteSuccess,
     consumeExternalOpenRequest,
@@ -1917,7 +1926,15 @@ export function ResponseCard({
   const selectionMenuView = interactionState.selectionMenuView
   const followUpDraft = interactionState.followUpDraft
   const followUpMode = interactionState.followUpMode
+  const [followUpError, setFollowUpError] = useState<string>()
+  const retainedFollowUpDraft = useRef<string | undefined>(undefined)
+  const retainedFollowUpAnnotationId = useRef<string | undefined>(undefined)
+  useEffect(() => { setFollowUpError(undefined) }, [interactionState.pendingSelection, interactionState.activeAnnotationDetail])
   const activeAnnotationDetail = interactionState.activeAnnotationDetail
+  useEffect(() => {
+    retainedFollowUpDraft.current = undefined
+    retainedFollowUpAnnotationId.current = undefined
+  }, [sessionId, messageId])
 
   const [selectionMenuShowNonce, setSelectionMenuShowNonce] = useState(0)
   const [selectionMenuTransitionConfig, setSelectionMenuTransitionConfig] = useState<IslandTransitionConfig>(
@@ -1941,6 +1958,17 @@ export function ResponseCard({
     isStreaming,
   })
   const allowAnnotationIsland = annotationInteractionMode === 'interactive'
+  const [hashedAnnotationSource, setHashedAnnotationSource] = useState<{ content: string; hash: string }>()
+  const shouldHashAnnotationSource = !isStreaming && !!onAddAnnotation
+  useEffect(() => {
+    if (!shouldHashAnnotationSource) return
+    let cancelled = false
+    void hashAnnotationSource(text).then(hash => {
+      if (!cancelled) setHashedAnnotationSource({ content: text, hash })
+    }).catch(() => { /* Saving reports the failure in the follow-up editor. */ })
+    return () => { cancelled = true }
+  }, [text, shouldHashAnnotationSource])
+  const annotationSourceHash = hashedAnnotationSource?.content === text ? hashedAnnotationSource.hash : undefined
 
   const closeSelectionMenu = useCallback(() => {
     closeAll()
@@ -1996,7 +2024,7 @@ export function ResponseCard({
       return persisted
     }
 
-    if (hasExistingTextRangeAnnotation(persisted, pendingSelection.start, pendingSelection.end)) {
+    if (hasExistingTextRangeAnnotation(persisted, pendingSelection.start, pendingSelection.end, annotationSourceHash)) {
       return persisted
     }
 
@@ -2004,12 +2032,16 @@ export function ResponseCard({
       ...persisted,
       createSelectionPreviewAnnotation(messageId, pendingSelection, sessionId ?? ''),
     ]
-  }, [annotations, pendingSelection, selectionMenuView, messageId])
+  }, [annotations, pendingSelection, selectionMenuView, messageId, annotationSourceHash])
 
   const activeAnnotation = useMemo(() => {
     if (!activeAnnotationDetail) return null
     return (annotations ?? []).find(annotation => annotation.id === activeAnnotationDetail.annotationId) ?? null
   }, [annotations, activeAnnotationDetail])
+
+  const activeFollowUp = asRecord(activeAnnotation?.meta?.followUp)
+  const activeResultMessageId = typeof activeFollowUp?.resultMessageId === 'string'
+    ? activeFollowUp.resultMessageId : undefined
 
   useEffect(() => {
     if (!activeAnnotationDetail) return
@@ -2158,17 +2190,24 @@ export function ResponseCard({
     requestEdit()
   }, [requestEdit])
 
+  const savingFollowUp = useRef(false)
   const saveFollowUp = useCallback(async (note: string): Promise<{
     messageId: string
     annotationId: string
     note: string
     selectedText: string
   } | null> => {
+    if (savingFollowUp.current) return null
+    savingFollowUp.current = true
+    try {
     const normalizedNote = note.trim()
+    setFollowUpError(undefined)
+    retainedFollowUpDraft.current = note
 
     if (!messageId) return null
 
     if (activeAnnotationDetail) {
+      retainedFollowUpAnnotationId.current = activeAnnotationDetail.annotationId
       if (!onUpdateAnnotation || !activeAnnotation) {
         closeSelectionMenu()
         return null
@@ -2199,10 +2238,14 @@ export function ResponseCard({
               }
             : (Object.keys(nextMeta).length > 0 ? nextMeta : undefined),
         }))
-      } catch {
+      } catch (error) {
+        setFollowUpError(t(error instanceof Error && error.message === 'Annotation source changed; select the text again'
+          ? 'chat.annotationSourceChanged' : 'chat.annotationSaveFailed'))
         return null
       }
 
+      retainedFollowUpDraft.current = undefined
+      retainedFollowUpAnnotationId.current = undefined
       markSubmitSuccess()
 
       if (normalizedNote.length === 0) return null
@@ -2217,19 +2260,40 @@ export function ResponseCard({
 
     if (!onAddAnnotation || !pendingSelection) return null
 
-    if (hasExistingTextRangeAnnotation(annotations, pendingSelection.start, pendingSelection.end)) {
+    if (hasExistingTextRangeAnnotation(annotations, pendingSelection.start, pendingSelection.end, annotationSourceHash)) {
       closeSelectionMenu()
       return null
     }
 
     const annotation = createTextSelectionAnnotation(messageId, pendingSelection, normalizedNote, sessionId ?? '')
+    const previousAnnotation = annotations?.find(item => item.id === retainedFollowUpAnnotationId.current)
 
     try {
-      await Promise.resolve(onAddAnnotation(messageId, annotation))
-    } catch {
+      if (pendingSelection.sourceContent !== undefined && pendingSelection.sourceContent !== text) {
+        setFollowUpError(t('chat.annotationSourceChanged'))
+        return null
+      }
+      const sourceContentHash = await hashAnnotationSource(pendingSelection.sourceContent ?? text)
+      annotation.meta = { ...annotation.meta, sourceContentHash }
+      if (previousAnnotation) {
+        if (!onUpdateAnnotation) throw new Error('Annotation update is unavailable')
+        const previousMeta = { ...previousAnnotation.meta }
+        delete previousMeta.followUp
+        await Promise.resolve(onUpdateAnnotation(messageId, previousAnnotation.id, {
+          target: annotation.target, body: annotation.body, intent: annotation.intent,
+          meta: { ...previousMeta, ...annotation.meta },
+        }))
+      } else {
+        await Promise.resolve(onAddAnnotation(messageId, annotation))
+      }
+    } catch (error) {
+      setFollowUpError(t(error instanceof Error && error.message === 'Annotation source changed; select the text again'
+        ? 'chat.annotationSourceChanged' : 'chat.annotationSaveFailed'))
       return null
     }
 
+    retainedFollowUpDraft.current = undefined
+    retainedFollowUpAnnotationId.current = undefined
     markSubmitSuccess()
     clearDomSelection()
 
@@ -2237,10 +2301,11 @@ export function ResponseCard({
 
     return {
       messageId,
-      annotationId: annotation.id,
+      annotationId: previousAnnotation?.id ?? annotation.id,
       note: normalizedNote,
       selectedText: pendingSelection.selectedText,
     }
+    } finally { savingFollowUp.current = false }
   }, [
     messageId,
     activeAnnotationDetail,
@@ -2249,10 +2314,13 @@ export function ResponseCard({
     onAddAnnotation,
     pendingSelection,
     annotations,
+    annotationSourceHash,
     closeSelectionMenu,
     sessionId,
     markSubmitSuccess,
     responseText,
+    text,
+    t,
   ])
 
   const handleSubmitFollowUp = useCallback((note: string) => {
@@ -2287,7 +2355,7 @@ export function ResponseCard({
 
     setSelectionMenuTransitionConfig(transition)
     triggerSelectionMenuEntryReplay()
-    openFromAnnotation({ annotationId, index, anchorX, anchorY }, noteText, mode)
+    openFromAnnotation({ annotationId, index, anchorX, anchorY }, noteText, mode, JSON.stringify([annotation?.meta?.sourceContentHash, annotation?.target.selectors]))
   }, [allowAnnotationIsland, annotations, triggerSelectionMenuEntryReplay, openFromAnnotation])
 
   useEffect(() => {
@@ -2368,7 +2436,7 @@ export function ResponseCard({
         return
       }
 
-      if (hasExistingTextRangeAnnotation(annotations, start, end)) {
+      if (hasExistingTextRangeAnnotation(annotations, start, end, annotationSourceHash)) {
         closeSelectionMenu()
         return
       }
@@ -2444,12 +2512,14 @@ export function ResponseCard({
         selectedText,
         prefix,
         suffix,
+        sourceContent: text,
         anchorX,
         anchorY,
       })
+      if (retainedFollowUpDraft.current !== undefined) setFollowUpDraft(retainedFollowUpDraft.current)
       dragStartPointerRef.current = null
     })
-  }, [annotations, closeSelectionMenu, triggerSelectionMenuEntryReplay, openFromSelection])
+  }, [annotations, annotationSourceHash, closeSelectionMenu, triggerSelectionMenuEntryReplay, openFromSelection, setFollowUpDraft, text])
 
   const handleTextSelection = useCallback((event: React.MouseEvent<HTMLDivElement>) => {
     if (!canAnnotate || !onAddAnnotation || !messageId) return
@@ -2583,14 +2653,30 @@ export function ResponseCard({
       activeView={selectionMenuView}
       mode={followUpMode}
       draft={followUpDraft}
-      onDraftChange={setFollowUpDraft}
+      draftSaveError={interaction.draftError}
+      error={followUpError}
+      onDraftChange={value => {
+        setFollowUpDraft(value)
+        if (retainedFollowUpDraft.current !== undefined) retainedFollowUpDraft.current = value
+      }}
       onOpenFollowUp={handleOpenFollowUpView}
       onCancel={handleCancelFollowUp}
+      onDiscardDraft={discardDraft}
       onRequestBack={handleSelectionMenuRequestBack}
       onRequestEdit={handleRequestFollowUpEdit}
       onSubmit={handleSubmitFollowUp}
       onSubmitAndSend={handleSubmitAndSendFollowUp}
       onDelete={activeAnnotationDetail ? handleDeleteActiveAnnotation : undefined}
+      onOpenResult={activeResultMessageId
+        ? resolveAnnotationResult?.(activeResultMessageId, messageId, activeAnnotation?.id)
+        : undefined}
+      resultSalvaged={activeFollowUp?.resultSalvaged === true}
+      feedbackStatus={getAnnotationFeedbackStatus(activeAnnotation)}
+      feedbackResolved={activeFollowUp?.userResolved === true}
+      onResolveFeedback={onUpdateAnnotation && messageId && activeAnnotation && activeFollowUp?.status === 'delivered'
+        ? () => Promise.resolve(onUpdateAnnotation(messageId, activeAnnotation.id, {
+            meta: { ...activeAnnotation.meta, followUp: { ...activeFollowUp, userResolved: true } },
+          })) : undefined}
       sendMessageKey={sendMessageKey}
       transitionConfig={selectionMenuTransitionConfig}
       onExitComplete={handleSelectionMenuExitComplete}
@@ -2982,6 +3068,7 @@ export const TurnCard = React.memo(function TurnCard({
   hasActiveFollowUpAnnotations = false,
   openAnnotationRequest,
   annotationInteractionMode = 'interactive',
+  resolveAnnotationResult,
 }: TurnCardProps) {
   const { t } = useTranslation()
   const reduceMotion = useReducedMotion()
@@ -3400,6 +3487,7 @@ export const TurnCard = React.memo(function TurnCard({
             hasActiveFollowUpAnnotations={hasActiveFollowUpAnnotations}
             openAnnotationRequest={openAnnotationRequest}
             annotationInteractionMode={annotationInteractionMode}
+            resolveAnnotationResult={resolveAnnotationResult}
           />
         </div>
       ))}
@@ -3448,6 +3536,7 @@ export const TurnCard = React.memo(function TurnCard({
                 hasActiveFollowUpAnnotations={hasActiveFollowUpAnnotations}
                 openAnnotationRequest={openAnnotationRequest}
                 annotationInteractionMode={annotationInteractionMode}
+                resolveAnnotationResult={resolveAnnotationResult}
               />
             </motion.div>
           )}
@@ -3499,6 +3588,7 @@ export const TurnCard = React.memo(function TurnCard({
             hasActiveFollowUpAnnotations={hasActiveFollowUpAnnotations}
             openAnnotationRequest={openAnnotationRequest}
             annotationInteractionMode={annotationInteractionMode}
+            resolveAnnotationResult={resolveAnnotationResult}
           />
           </div>
         </HeightPresence>
@@ -3533,6 +3623,7 @@ export const TurnCard = React.memo(function TurnCard({
 
   // Re-render if annotation interaction mode changed (interactive vs tooltip-only)
   if (prev.annotationInteractionMode !== next.annotationInteractionMode) return false
+  if (prev.resolveAnnotationResult !== next.resolveAnnotationResult) return false
 
   // Re-render if activities changed (important for playground/testing scenarios)
   if (prev.activities !== next.activities) return false

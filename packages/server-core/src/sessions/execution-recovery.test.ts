@@ -76,6 +76,125 @@ test('recovery is claimed durably once before dispatch and retains task identity
   } finally { rmSync(root, { recursive: true, force: true }) }
 })
 
+test('feedback retry returns the committed request even when the target is no longer accessible', async () => {
+  const { FeedbackStore } = await import('../reliability/feedback-store')
+  const { join } = await import('node:path')
+  const root = mkdtempSync(`${tmpdir()}/selection-feedback-retry-`)
+  try {
+    const manager = new SessionManager()
+    const managed = createManagedSession({ id: 'parent' }, { id: 'w', name: 'w', rootPath: root } as never, { messagesLoaded: true })
+    ;(manager as any).sessions.set(managed.id, managed)
+    const store = new FeedbackStore(join(root, 'artifacts', 'feedback'))
+    const input = { sessionId: managed.id, artifactId: 'artifact', baseVersion: 'old', instruction: 'revise' }
+    const { record } = store.create('retry', input)
+    record.status = 'applied'; record.appliedVersion = 'new'; store.save(record)
+    expect(await manager.artifactFeedback({ type: 'create', requestId: 'retry', ...input })).toEqual(record)
+    await expect(manager.artifactFeedback({ type: 'create', requestId: 'retry', ...input, instruction: 'other' })).rejects.toThrow('different feedback')
+  } finally { rmSync(root, { recursive: true, force: true }) }
+})
+
+test('feedback cancellation is durable before interrupting the child and cannot cancel an applied version', async () => {
+  const { FeedbackStore } = await import('../reliability/feedback-store')
+  const { join } = await import('node:path')
+  const root=mkdtempSync(`${tmpdir()}/feedback-cancel-`)
+  try {
+    const manager=new SessionManager()
+    const parent=createManagedSession({id:'parent'}, {id:'w',name:'w',rootPath:root} as never, {messagesLoaded:true})
+    ;(manager as any).sessions.set(parent.id,parent)
+    const store=new FeedbackStore(join(root,'artifacts','feedback'))
+    const { ArtifactVersions } = await import('../reliability/artifact-versions')
+    const { hostname } = await import('node:os')
+    const versions = new ArtifactVersions(join(root,'artifacts','versions'), hostname(), 'w')
+    const file = join(root, 'result.txt'); writeFileSync(file, 'original')
+    const artifact = versions.register(file)
+    const record=store.create('cancel',{sessionId:parent.id,artifactId:artifact.id,baseVersion:artifact.currentVersion,instruction:'revise'}).record
+    record.status='running';record.childSessionId='child';store.save(record)
+    let interrupts=0
+    manager.cancelProcessing=async id=>{expect(id).toBe('child');expect(store.read(record.id).status).toBe('cancelled');interrupts++}
+    expect((await manager.artifactFeedback({type:'cancel',sessionId:parent.id,feedbackId:record.id})).status).toBe('cancelled')
+    await manager.artifactFeedback({type:'cancel',sessionId:parent.id,feedbackId:record.id})
+    expect(interrupts).toBe(1)
+    await expect(manager.artifactFeedback({type:'resolve',sessionId:parent.id,feedbackId:record.id})).rejects.toThrow('Only an applied')
+    const applied = store.create('applied', {sessionId:parent.id,artifactId:'a',baseVersion:'v',instruction:'revise'}).record
+    applied.status='applied';store.save(applied)
+    await expect(manager.artifactFeedback({type:'cancel',sessionId:parent.id,feedbackId:applied.id})).rejects.toThrow('already been applied')
+  } finally {rmSync(root,{recursive:true,force:true})}
+})
+
+
+for (const operation of ['get', 'cancel'] as const) test(`feedback ${operation} recovers after its writer is killed before receipt publication`, async () => {
+  const { FeedbackStore } = await import('../reliability/feedback-store')
+  const { ArtifactVersions } = await import('../reliability/artifact-versions')
+  const { hostname } = await import('node:os')
+  const { join } = await import('node:path')
+  const root = mkdtempSync(`${tmpdir()}/feedback-lost-receipt-`)
+  try {
+    const versions = new ArtifactVersions(join(root, 'artifacts', 'versions'), hostname(), 'w')
+    const file = join(root, 'result.txt'); writeFileSync(file, 'original')
+    const initial = versions.register(file)
+    const store = new FeedbackStore(join(root, 'artifacts', 'feedback'))
+    const record = store.create('revision', { sessionId: 'parent', artifactId: initial.id, baseVersion: initial.currentVersion, instruction: 'revise' }).record
+    record.status = 'validating'; record.childSessionId = 'child'; store.save(record)
+    const candidate = join(root, 'candidate.txt'); writeFileSync(candidate, 'updated')
+    const artifactModule = new URL('../reliability/artifact-versions.ts', import.meta.url).pathname
+    const feedbackModule = new URL('../reliability/feedback-store.ts', import.meta.url).pathname
+    const script = `import { ArtifactVersions } from ${JSON.stringify(artifactModule)};
+      import { FeedbackStore } from ${JSON.stringify(feedbackModule)};
+      const versions = new ArtifactVersions(${JSON.stringify(join(root, 'artifacts', 'versions'))}, ${JSON.stringify(hostname())}, 'w');
+      const store = new FeedbackStore(${JSON.stringify(join(root, 'artifacts', 'feedback'))});
+      store.claimExecution(${JSON.stringify(record.id)});
+      store.save(store.read(${JSON.stringify(record.id)}), () => {
+        versions.apply(${JSON.stringify(initial.id)}, ${JSON.stringify(initial.currentVersion)}, ${JSON.stringify(candidate)}, 'child');
+        process.kill(process.pid, 'SIGKILL');
+      });`
+    const writer = Bun.spawn([process.execPath, '-e', script], { stdout: 'pipe', stderr: 'pipe' })
+    expect(await writer.exited).not.toBe(0)
+    const applied = versions.read(initial.id)
+    expect(applied.versions).toHaveLength(2)
+    expect(store.read(record.id).status).toBe('validating')
+    // Fresh manager has no in-memory feedback owner or completion callback.
+    const manager = new SessionManager()
+    const parent = createManagedSession({ id: 'parent' }, { id: 'w', name: 'w', rootPath: root } as never, { messagesLoaded: true })
+    ;(manager as any).sessions.set(parent.id, parent)
+    let interrupts = 0, notifications = 0
+    manager.cancelProcessing = async () => { interrupts++ }
+    manager.onArtifactApplied(() => { notifications++ })
+    const pending = manager.artifactFeedback({ type: operation, sessionId: parent.id, feedbackId: record.id })
+    if (operation === 'cancel') await expect(pending).rejects.toThrow('already been applied')
+    else expect((await pending).status).toBe('applied')
+    expect(store.read(record.id).appliedVersion).toBe(applied.currentVersion)
+    expect(store.read(record.id).status).toBe('applied')
+    expect(versions.read(initial.id).versions).toHaveLength(2)
+    expect(interrupts).toBe(0)
+    expect(notifications).toBe(1)
+    await manager.artifactFeedback({ type: 'get', sessionId: parent.id, feedbackId: record.id })
+    expect(notifications).toBe(1)
+  } finally { rmSync(root, { recursive: true, force: true }) }
+})
+
+test('another manager reading live feedback cannot declare it interrupted', async () => {
+  const { FeedbackStore } = await import('../reliability/feedback-store')
+  const { join } = await import('node:path')
+  const root = mkdtempSync(`${tmpdir()}/feedback-live-owner-`)
+  let release: (() => void) | undefined
+  try {
+    const store = new FeedbackStore(join(root, 'artifacts', 'feedback'))
+    const record = store.create('request', { sessionId: 'parent', artifactId: 'artifact', baseVersion: 'v', instruction: 'revise' }).record
+    record.status = 'running'; store.save(record)
+    release = store.claimExecution(record.id)
+    const manager = new SessionManager()
+    const parent = createManagedSession({ id: 'parent' }, { id: 'w', name: 'w', rootPath: root } as never, { messagesLoaded: true })
+    ;(manager as any).sessions.set(parent.id, parent)
+    expect(await manager.artifactFeedback({ type: 'get', sessionId: parent.id, feedbackId: record.id })).toEqual(record)
+    expect(store.read(record.id)).toEqual(record)
+    expect(store.tryClaimExecution(record.id)).toBeUndefined()
+    release(); release = undefined
+    const recovered = store.tryClaimExecution(record.id)
+    expect(recovered).toBeDefined()
+    recovered?.()
+  } finally { release?.(); rmSync(root, { recursive: true, force: true }) }
+})
+
 test('live execution ownership blocks another manager and process before accepting or claiming work', async () => {
   const root = mkdtempSync(`${tmpdir()}/selection-execution-owner-`)
   const sessionId = 'owned'

@@ -121,6 +121,8 @@ export interface SpawnSessionQualification {
 
 export interface SpawnSessionRequest {
   prompt: string;
+  /** Declared file work uses runtime-owned isolation and verified integration. */
+  artifactDelivery?: { inputs: string[]; outputs: Record<string, string> };
   name?: string;
   llmConnection?: string;
   model?: string;
@@ -152,6 +154,8 @@ export interface SpawnSessionRequest {
 }
 
 export interface SpawnSessionResult {
+  /** Runtime-verified references in the destination project, never candidate paths. */
+  artifacts?: Record<string, unknown>;
   sessionId: string;
   name: string;
   status: SpawnSessionResultStatus;
@@ -310,7 +314,7 @@ export abstract class BaseAgent implements AgentBackend {
   // ============================================================
   // Callbacks (public for facade wiring)
   // ============================================================
-  onBeforeToolExecution?: (toolName: string, input: Record<string, unknown>, toolCallId?: string, recoveryClass?: 'read-only' | 'idempotent' | 'file-verifiable' | 'unknown') => void;
+  onBeforeToolExecution?: (toolName: string, input: Record<string, unknown>, toolCallId?: string, recoveryClass?: 'read-only' | 'idempotent' | 'file-verifiable' | 'unknown', confinedShellDirectory?: string) => void;
   onPermissionRequest: PermissionCallback | null = null;
   onPlanSubmitted: PlanCallback | null = null;
   onAuthRequest: AuthCallback | null = null;
@@ -1308,6 +1312,7 @@ ${formattedMessages}
 
     const request: SpawnSessionRequest = {
       prompt,
+      artifactDelivery: input.artifactDelivery as SpawnSessionRequest['artifactDelivery'],
       name: input.name as string | undefined,
       llmConnection: input.llmConnection as string | undefined,
       model: input.model as string | undefined,

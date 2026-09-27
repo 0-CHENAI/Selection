@@ -712,6 +712,7 @@ export class PiAgent extends BaseAgent {
       branchFromSdkTurnId: this.config.session?.branchFromSdkTurnId,
       resumeSdkSessionId: this.config.session?.sdkSessionId,
       toolResultRecovery: this.config.toolResultRecovery,
+      isolatedShellDirectory: this.config.isolatedShellDirectory,
       forceFreshSession: this.config.session?.forceFreshSdkSession,
     });
 
@@ -1445,6 +1446,7 @@ export class PiAgent extends BaseAgent {
    * Runs the centralized permission pipeline and sends the decision back.
    */
   private async handlePreToolUseRequest(req: {
+    confinedShellDirectory?: string;
     recoveryClass?: 'read-only' | 'idempotent' | 'file-verifiable' | 'unknown';
     requestId: string;
     toolName: string;
@@ -1465,7 +1467,8 @@ export class PiAgent extends BaseAgent {
       // Bridge metadata is independent of model arguments. Missing/invalid contracts fail closed.
       const recoveryClass = req.recoveryClass && ['read-only', 'idempotent', 'file-verifiable', 'unknown'].includes(req.recoveryClass)
         ? req.recoveryClass : 'unknown';
-      this.onBeforeToolExecution?.(toolName, input, toolCallId, recoveryClass);
+      this.onBeforeToolExecution?.(toolName, input, toolCallId, recoveryClass,
+        typeof req.confinedShellDirectory === 'string' ? req.confinedShellDirectory : undefined);
     } catch (error) {
       reply({ type: 'pre_tool_use_response', requestId, action: 'block', reason: error instanceof Error ? error.message : 'Execution checkpoint failed' });
       return;

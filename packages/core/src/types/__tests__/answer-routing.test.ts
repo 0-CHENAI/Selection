@@ -12,3 +12,15 @@ test('answer routing survives persistence and JSON export/import without changin
     expect(storedToMessage(JSON.parse(JSON.stringify(messageToStored(message))))).toEqual(message)
   }
 })
+
+test('accepted feedback references survive reload and JSON transfer independently of annotations', () => {
+  const message: Message = {
+    id: 'request', role: 'user', timestamp: 2, content: 'Revise', clientMessageId: 'client',
+    annotationFollowUps: [{ messageId: 'original', annotationId: 'note', text: 'Revise this', updatedAt: 1,
+      sourceContentHash: 'hash', target: { source: { sessionId: 'session', messageId: 'original' }, selectors: [{ type: 'text-quote', exact: 'Selected text' }] },
+    }],
+  }
+  const reloaded = storedToMessage(JSON.parse(JSON.stringify(messageToStored(message))))
+  expect(reloaded).toEqual(message)
+  expect(reloaded.annotationFollowUps?.[0]?.annotationId).toBe('note')
+})

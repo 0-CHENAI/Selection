@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { createIsolatedShell } from '../../shared/src/utils/isolated-shell';
 import { registerRecoveryClass, registeredRecoveryClass } from './tool-recovery';
 import { nativeEditOperations, nativeWriteOperations, restoreToolResults, withToolFileOperation } from './tool-file-operations';
 import { applyCompactionSettings, installCompactionPolicy } from './compaction-policy.ts';
@@ -155,6 +156,7 @@ interface InitMessage {
   branchFromSessionPath?: string;
   branchFromSdkTurnId?: string;
   resumeSdkSessionId?: string;
+  isolatedShellDirectory?: string;
   toolResultRecovery?: import('../../shared/src/agent/backend/pi/file-operation-receipts').ToolResultRecoveryPlan;
   forceFreshSession?: boolean;
   /** Swarm sessions enable an earlier auto-compaction policy. */
@@ -246,6 +248,7 @@ type OutboundAgentEvent = (AgentSessionEvent | EnrichedToolExecutionStartEvent
 interface OutboundReady { type: 'ready'; sessionId: string | null; callbackPort: number }
 interface OutboundEvent { type: 'event'; event: OutboundAgentEvent }
 interface OutboundPreToolUseReq {
+  confinedShellDirectory?: string;
   recoveryClass?: 'read-only' | 'idempotent' | 'file-verifiable' | 'unknown';
   type: 'pre_tool_use_request';
   requestId: string;
@@ -751,15 +754,20 @@ async function ensureSession(): Promise<AgentSession> {
   //     our hooked versions take effect (permissions + large-response summarization).
   //   - Do NOT pass tool *objects* to `tools` — `allowedToolNames = new Set(options.tools)`
   //     then `.has(name)` returns false for every string lookup → zero tools active.
+  confinedShellCleanup?.(); confinedShellCleanup = undefined;
+  const isolatedShell = initConfig.isolatedShellDirectory ? createIsolatedShell(initConfig.isolatedShellDirectory) : undefined;
+  confinedShellCleanup = isolatedShell?.dispose;
   const builtinDefs = [
     registerRecoveryClass(createSelectionReadToolDefinition(cwd), 'read-only'),
-    registerRecoveryClass(createBashToolDefinition(cwd), 'unknown'),
+    registerRecoveryClass(createBashToolDefinition(cwd, isolatedShell ? { operations: isolatedShell.operations } : undefined), 'unknown'),
     registerRecoveryClass(createEditToolDefinition(cwd, { operations: nativeEditOperations }), 'file-verifiable'),
     registerRecoveryClass(createWriteToolDefinition(cwd, { operations: nativeWriteOperations }), 'file-verifiable'),
     registerRecoveryClass(createGrepToolDefinition(cwd), 'read-only'),
     registerRecoveryClass(createFindToolDefinition(cwd), 'read-only'),
     registerRecoveryClass(createLsToolDefinition(cwd), 'read-only'),
   ];
+  confinedBashTool = isolatedShell ? builtinDefs[1] : undefined;
+  confinedBashDirectory = isolatedShell?.directory;
   const proxyTools = buildProxyTools();
   // Pi sessions can switch models at runtime, while their registered tool schemas
   // are fixed for the lifetime of the session. Keep the schemas provider-neutral
@@ -881,11 +889,16 @@ async function ensureSession(): Promise<AgentSession> {
  * Returns the (potentially modified) input if approved, throws if blocked.
  * All permission checking, transforms, and source activation happen in the main process.
  */
+let confinedShellCleanup: (() => void) | undefined;
+let confinedBashTool: object | undefined;
+let confinedBashDirectory: string | undefined;
+
 async function requestPreToolUseApproval(
   sdkToolName: string,
   input: Record<string, unknown>,
   toolCallId?: string,
   recoveryClass: 'read-only' | 'idempotent' | 'file-verifiable' | 'unknown' = 'unknown',
+  confinedShellDirectory?: string,
 ): Promise<
   | { action: 'execute'; input: Record<string, unknown> }
   | { action: 'prepare_source_guide'; preparation: SourceGuidePreparation }
@@ -903,6 +916,7 @@ async function requestPreToolUseApproval(
 
   send({
     type: 'pre_tool_use_request',
+    confinedShellDirectory,
     recoveryClass,
     answerRunId,
     requestId,
@@ -1004,7 +1018,7 @@ function wrapSingleTool(
         throw new Error('Tool execution was interrupted.');
       }
       // Send to main process for permission checking + transforms
-      const approval = await requestPreToolUseApproval(sdkToolName, inputObj, toolCallId, registeredRecoveryClass(tool));
+      const approval = await requestPreToolUseApproval(sdkToolName, inputObj, toolCallId, registeredRecoveryClass(tool), tool === confinedBashTool ? confinedBashDirectory : undefined);
       if (approval.action === 'prepare_source_guide') {
         return {
           content: [{ type: 'text', text: formatSourceGuidePreparationResult(approval.preparation) }],
@@ -2120,6 +2134,7 @@ function handleShutdown(): void {
     piSession = null;
   }
 
+  confinedShellCleanup?.(); confinedShellCleanup = undefined;
   // Stop callback server
   stopCallbackServer();
 

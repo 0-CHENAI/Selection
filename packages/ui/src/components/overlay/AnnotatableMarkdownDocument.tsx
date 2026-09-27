@@ -1,9 +1,11 @@
 import * as React from 'react'
+import { useTranslation } from 'react-i18next'
 import { Markdown } from '../markdown'
 import type { AnnotationV1 } from '@craft-agent/core'
 import { type IslandTransitionConfig } from '../ui'
 import { AnnotationIslandMenu } from '../annotations/AnnotationIslandMenu'
 import {
+  hashAnnotationSource,
   ANNOTATION_PREFIX_SUFFIX_WINDOW,
   SELECTION_POINTER_MAX_AGE_MS,
   clamp,
@@ -75,12 +77,15 @@ export function AnnotatableMarkdownDocument({
   openAnnotationRequest,
   isStreaming = false,
 }: AnnotatableMarkdownDocumentProps) {
+  const { t } = useTranslation()
+  const [followUpError, setFollowUpError] = React.useState<string>()
+  const savingFollowUp = React.useRef(false)
   const canAnnotate = canAnnotateMessage({
     hasAddAnnotationHandler: !!onAddAnnotation,
     hasMessageId: !!messageId,
     isStreaming,
   })
-  const interaction = useAnnotationInteractionController()
+  const interaction = useAnnotationInteractionController(JSON.stringify([sessionId, messageId]))
   const {
     state: interactionState,
     setDraft: setFollowUpDraft,
@@ -90,6 +95,7 @@ export function AnnotatableMarkdownDocument({
     requestEdit,
     cancelFollowUp,
     closeAll,
+    discardDraft,
     markSubmitSuccess,
     markDeleteSuccess,
     consumeExternalOpenRequest,
@@ -242,7 +248,11 @@ export function AnnotatableMarkdownDocument({
     requestEdit()
   }, [requestEdit])
 
-  const handleSubmitFollowUp = React.useCallback((note: string) => {
+  const handleSubmitFollowUp = React.useCallback(async (note: string) => {
+    if (savingFollowUp.current) return
+    savingFollowUp.current = true
+    setFollowUpError(undefined)
+    try {
     const normalizedNote = note.trim()
 
     if (activeAnnotationDetail) {
@@ -261,7 +271,7 @@ export function AnnotatableMarkdownDocument({
       const nextMeta = { ...(activeAnnotation.meta ?? {}) }
       delete nextMeta.followUp
 
-      onUpdateAnnotation(messageId, activeAnnotationDetail.annotationId, {
+      await Promise.resolve(onUpdateAnnotation(messageId, activeAnnotationDetail.annotationId, {
         body: nextBody,
         intent: normalizedNote.length > 0 ? 'comment' : 'highlight',
         updatedAt: Date.now(),
@@ -274,7 +284,7 @@ export function AnnotatableMarkdownDocument({
               },
             }
           : (Object.keys(nextMeta).length > 0 ? nextMeta : undefined),
-      })
+      }))
 
       markSubmitSuccess()
       return
@@ -286,10 +296,14 @@ export function AnnotatableMarkdownDocument({
     }
 
     const annotation = createTextSelectionAnnotation(messageId, pendingSelection, normalizedNote, sessionId ?? '')
-    onAddAnnotation(messageId, annotation)
+    if (pendingSelection.sourceContent !== undefined && pendingSelection.sourceContent !== content) throw new Error('Annotation source changed; select the text again')
+    annotation.meta = { ...annotation.meta, sourceContentHash: await hashAnnotationSource(pendingSelection.sourceContent ?? content) }
+    await Promise.resolve(onAddAnnotation(messageId, annotation))
     markSubmitSuccess()
     clearDomSelection()
-  }, [activeAnnotationDetail, onUpdateAnnotation, activeAnnotation, closeSelectionMenu, pendingSelection, canAnnotate, onAddAnnotation, messageId, sessionId, markSubmitSuccess])
+    } catch (error) { setFollowUpError(t(error instanceof Error && error.message === 'Annotation source changed; select the text again' ? 'chat.annotationSourceChanged' : 'chat.annotationSaveFailed')) }
+    finally { savingFollowUp.current = false }
+  }, [content, t, activeAnnotationDetail, onUpdateAnnotation, activeAnnotation, closeSelectionMenu, pendingSelection, canAnnotate, onAddAnnotation, messageId, sessionId, markSubmitSuccess])
 
   const handleCancelFollowUp = useAnnotationCancelRestore({
     contentRootRef: contentLayerRef,
@@ -314,7 +328,7 @@ export function AnnotatableMarkdownDocument({
 
     setSelectionMenuTransitionConfig(buildAnnotationChipEntryTransition())
     triggerSelectionMenuEntryReplay()
-    openFromAnnotation({ annotationId, index, anchorX, anchorY }, noteText, mode)
+    openFromAnnotation({ annotationId, index, anchorX, anchorY }, noteText, mode, JSON.stringify([annotation?.meta?.sourceContentHash, annotation?.target.selectors]))
     selectionMenuOpenedAtRef.current = Date.now()
   }, [annotations, triggerSelectionMenuEntryReplay, openFromAnnotation])
 
@@ -444,6 +458,7 @@ export function AnnotatableMarkdownDocument({
         start,
         end,
         selectedText,
+        sourceContent: content,
         prefix,
         suffix,
         anchorX,
@@ -452,7 +467,7 @@ export function AnnotatableMarkdownDocument({
       selectionMenuOpenedAtRef.current = Date.now()
       dragStartPointerRef.current = null
     })
-  }, [annotations, canAnnotate, closeSelectionMenu, triggerSelectionMenuEntryReplay])
+  }, [content, annotations, canAnnotate, closeSelectionMenu, triggerSelectionMenuEntryReplay])
 
   const handleSelectionPointerDown = React.useCallback((event: React.MouseEvent<HTMLDivElement>) => {
     selectionStartedInContentRef.current = true
@@ -626,9 +641,12 @@ export function AnnotatableMarkdownDocument({
       activeView={selectionMenuView}
       mode={followUpMode}
       draft={followUpDraft}
+      draftSaveError={interaction.draftError}
+      error={followUpError}
       onDraftChange={setFollowUpDraft}
       onOpenFollowUp={handleOpenFollowUpView}
       onCancel={handleCancelFollowUp}
+      onDiscardDraft={discardDraft}
       onRequestBack={handleSelectionMenuRequestBack}
       onRequestEdit={handleRequestFollowUpEdit}
       onSubmit={handleSubmitFollowUp}

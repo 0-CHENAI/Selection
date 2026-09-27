@@ -363,6 +363,7 @@ export interface ElectronAPI {
   searchFiles(basePath: string, query: string): Promise<FileSearchResult[]>
   previewArtifactVersion(artifactId: string, versionId: string): Promise<string>
   cleanupArtifactVersions(sessionId: string, artifactId: string, expectedVersion: string, versionIds: string[], requestId: string): Promise<import('@craft-agent/shared/protocol').ManagedArtifact>
+  getBodyFeedbackDetails(sessionId: string, sourceMessageId: string, annotationId: string): Promise<import('@craft-agent/shared/protocol').BodyFeedbackRevision[]>
   getArtifactFeedbackContext(sessionId: string, artifactId: string): Promise<{ root: string; requiresProjectChecks: boolean }>
   listArtifactFeedback(sessionId: string, artifactId: string): Promise<import('@craft-agent/shared/protocol').ArtifactFeedback[]>
   artifactFeedback(operation: import('@craft-agent/shared/protocol').ArtifactFeedbackOperation): Promise<import('@craft-agent/shared/protocol').ArtifactFeedback>

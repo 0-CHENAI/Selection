@@ -17,6 +17,9 @@ import { createContext, useContext, type ReactNode } from 'react'
  * All actions are optional - platforms only implement what they support
  */
 export interface PlatformActions {
+  /** Optional device-local annotation drafts; keys contain only a content digest. */
+  onReadAnnotationDraft?: (key: string) => string | undefined
+  onWriteAnnotationDraft?: (key: string, value: string | undefined) => void
   onManageArtifact?: (path: string, sessionId?: string, alternativePaths?: string[]) => void
 
   /**

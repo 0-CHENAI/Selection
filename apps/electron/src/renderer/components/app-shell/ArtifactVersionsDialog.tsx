@@ -1,4 +1,5 @@
 import * as React from 'react'
+import * as storage from '@/lib/local-storage'
 import { useTranslation } from 'react-i18next'
 import type { ArtifactFeedback, ManagedArtifact } from '@craft-agent/shared/protocol'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
@@ -38,13 +39,20 @@ export function ArtifactVersionsDialog({ path, alternativePaths, sessionId, onCl
   const draftKey = JSON.stringify([sessionId, path])
   const requestId = React.useRef<string>(crypto.randomUUID())
   const sequence = React.useRef(0)
+  const deleteDraft = (key: string) => {
+    drafts.current.delete(key)
+    try { storage.remove(storage.KEYS.artifactFeedbackDrafts, key) } catch { setError(t('chat.artifactVersions.draftSaveFailed')) }
+  }
   const saveDraft = (changes: Partial<FeedbackDraft>) => {
     const draft = { instruction, validationInputs, validationRoot, requestId: requestId.current, source: selectionSource, anchor, ...changes }
     drafts.current.set(draftKey, draft)
+    try { storage.setRaw(storage.KEYS.artifactFeedbackDrafts, JSON.stringify(draft), draftKey) }
+    catch { setError(t('chat.artifactVersions.draftSaveFailed')) }
     requestId.current = draft.requestId
   }
   React.useEffect(() => {
-    const draft = path ? drafts.current.get(draftKey) : undefined
+    const draft = path ? drafts.current.get(draftKey) ?? storage.get<FeedbackDraft | undefined>(storage.KEYS.artifactFeedbackDrafts, undefined, draftKey) : undefined
+    if (draft) drafts.current.set(draftKey, draft)
     setValidationInputs(draft?.validationInputs ?? ''); setValidationRoot(draft?.validationRoot);
     setInstruction(draft?.instruction ?? ''); setSelectionSource(draft?.source); setAnchor(draft?.anchor)
     setCleanup(path ? cleanupDrafts.current.get(draftKey) : undefined); setFeedback(undefined); setHistory([]); requestId.current = draft?.requestId ?? crypto.randomUUID()
@@ -174,13 +182,13 @@ export function ArtifactVersionsDialog({ path, alternativePaths, sessionId, onCl
             const submittedId = requestId.current
             void window.electronAPI.artifactFeedback({ type: 'create', sessionId, artifactId: record.id, baseVersion: record.currentVersion, requestId: requestId.current, instruction, anchor, ...(validationContext?.requiresProjectChecks && validationInputs.trim() ? { validationRoot, validationInputs: validationInputs.split(/\r?\n/).map(line => line.trim()).filter(Boolean) } : {}) })
               .then(value => {
-                if (drafts.current.get(draftKey)?.requestId === submittedId) drafts.current.delete(draftKey)
+                if (drafts.current.get(draftKey)?.requestId === submittedId) deleteDraft(draftKey)
                 if (request === sequence.current && requestId.current === submittedId) { setFeedback(value); setHistory(items => mergeArtifactFeedbackHistory(items, [value])); setInstruction(''); setValidationInputs(''); setValidationRoot(undefined); setAnchor(undefined); setSelectionSource(undefined); requestId.current = crypto.randomUUID() }
               })
               .catch(e => { if (request === sequence.current) setError(String(e)) })
               .finally(() => { if (request === sequence.current) setPending(false) })
           }}>{t('chat.artifactVersions.sendFeedback')}</Button>
-          {(instruction || validationInputs || selectionSource) && <Button variant="ghost" disabled={pending} onClick={() => { drafts.current.delete(draftKey); setInstruction(''); setValidationInputs(''); setValidationRoot(undefined); setAnchor(undefined); setSelectionSource(undefined); requestId.current = crypto.randomUUID() }}>{t('chat.artifactVersions.discardDraft')}</Button>}
+          {(instruction || validationInputs || selectionSource) && <Button variant="ghost" disabled={pending} onClick={() => { deleteDraft(draftKey); setInstruction(''); setValidationInputs(''); setValidationRoot(undefined); setAnchor(undefined); setSelectionSource(undefined); requestId.current = crypto.randomUUID() }}>{t('chat.artifactVersions.discardDraft')}</Button>}
         </div>}
         {history.length > 0 && <div className="space-y-1" aria-label={t('chat.artifactVersions.history')}>
           <p className="text-sm font-medium">{t('chat.artifactVersions.history')}</p>

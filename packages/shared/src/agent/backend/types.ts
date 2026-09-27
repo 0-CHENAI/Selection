@@ -180,6 +180,8 @@ export interface AnswerDeliveryControl {
 }
 
 export interface CoreBackendConfig {
+  /** Trusted candidate root; native runtime must verify confinement before allowing Shell. */
+  isolatedShellDirectory?: string;
   /** Trusted runtime-only recovery data; never provided by model arguments. */
   toolResultRecovery?: import('./pi/file-operation-receipts').ToolResultRecoveryPlan;
   explicitAnswerDelivery?: boolean;
@@ -638,7 +640,7 @@ export interface AgentBackend {
   // ============================================================
 
   /** Called when a tool requires permission */
-  onBeforeToolExecution?: (toolName: string, input: Record<string, unknown>, toolCallId?: string, recoveryClass?: 'read-only' | 'idempotent' | 'file-verifiable' | 'unknown') => void;
+  onBeforeToolExecution?: (toolName: string, input: Record<string, unknown>, toolCallId?: string, recoveryClass?: 'read-only' | 'idempotent' | 'file-verifiable' | 'unknown', confinedShellDirectory?: string) => void;
   onPermissionRequest: PermissionCallback | null;
 
   /** Called when agent submits a plan */

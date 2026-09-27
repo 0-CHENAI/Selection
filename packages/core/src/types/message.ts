@@ -269,6 +269,11 @@ export type AnnotationFeedbackStatus = 'queued' | 'running' | 'waiting-user' | '
 export type AnnotationFeedbackSnapshot = AnnotationFeedbackReference & {
   sourceContentHash?: string;
   target?: AnnotationTarget;
+  resultMessageId?: string;
+  resultAnswerRunId?: string;
+  resultContentHash?: string;
+  resultSalvaged?: boolean;
+  userResolvedAt?: number;
 };
 
 /**

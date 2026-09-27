@@ -1,3 +1,4 @@
+import { BodyFeedbackDialog, type BodyFeedbackTarget } from './BodyFeedbackDialog'
 import { ExecutionRecoveryStatus } from './ExecutionRecoveryStatus'
 import { ContextLimitRecoveryActions, type ContextLimitRecoveryOptions } from './ContextLimitRecoveryActions'
 import { contextRecoverySource, prepareContextRecoveryDraft } from './context-recovery'
@@ -156,7 +157,7 @@ function getTurnKey(turn: Turn, index: number): string {
 
 interface ChatDisplayProps {
   session: Session | null
-  onSendMessage: (message: string, attachments?: FileAttachment[], skillSlugs?: string[]) => void
+  onSendMessage: (message: string, attachments?: FileAttachment[], skillSlugs?: string[], annotationFollowUps?: import('@craft-agent/shared/protocol').SendMessageOptions['annotationFollowUps']) => void
   onOpenFile: (path: string) => void
   onOpenArtifact?: (path: string, action: 'preview' | 'external' | 'reveal' | 'versions') => void
   onOpenUrl: (url: string) => void
@@ -1387,37 +1388,9 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
       forceStick: true,
       ignoreUnstickMs: programmaticScrollLockMs(reduceMotion ? 'instant' : 'smooth'),
     })
-    onSendMessage(normalizedMessage, attachments, skillSlugs)
-
-    // Persist sent marker on follow-up annotations so TurnCard can distinguish
-    // sent vs pending follow-ups. If user edits a follow-up later, TurnCard
-    // clears these markers and the annotation becomes pending again.
-    if (session && pendingFollowUpAnnotations.length > 0) {
-      const sentAt = Date.now()
-      void Promise.all(pendingFollowUpAnnotations.map((followUp) => {
-        const currentMeta = followUp.meta ?? {}
-        const currentFollowUpMeta = asRecord(currentMeta.followUp) ?? {}
-
-        return window.electronAPI.sessionCommand(session.id, {
-          type: 'updateAnnotation',
-          messageId: followUp.messageId,
-          annotationId: followUp.annotationId,
-          patch: {
-            meta: {
-              ...currentMeta,
-              followUp: {
-                ...currentFollowUpMeta,
-                text: followUp.note,
-                lastSentAt: sentAt,
-                lastSentText: followUp.note,
-              },
-            },
-          },
-        })
-      })).catch((error) => {
-        console.error('[ChatDisplay] Failed to mark follow-up annotations as sent:', error)
-      })
-    }
+    onSendMessage(normalizedMessage, attachments, skillSlugs, pendingFollowUpAnnotations.map(item => ({
+      messageId: item.messageId, annotationId: item.annotationId, text: item.note, updatedAt: item.createdAt,
+    })))
 
     requestAnimationFrame(() => {
       scrollToLatest('instant')
@@ -1663,7 +1636,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
 
   const scrollToFollowUpTurn = useCallback((item: {
     messageId: string
-    annotationId: string
+    annotationId?: string
   }) => {
     const targetTurnIndex = assistantTurnIndexByMessageId.get(item.messageId)
     if (targetTurnIndex == null) return
@@ -1702,6 +1675,22 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
       })
     }
   }, [assistantTurnIndexByMessageId, allTurns, visibleTurnCount])
+
+  const [bodyFeedbackTarget, setBodyFeedbackTarget] = useState<BodyFeedbackTarget | null>(null)
+  const bodyFeedbackFocus = React.useRef<HTMLElement | null>(null)
+  useEffect(() => { setBodyFeedbackTarget(null) }, [activeSessionId])
+  const resolveAnnotationResult = useCallback((messageId: string, sourceMessageId?: string, annotationId?: string) => {
+    const hasRevisionRecord = sessionMessages?.some(message => message.role === 'user' && message.annotationFollowUps?.some(reference => reference.messageId === sourceMessageId && reference.annotationId === annotationId))
+    if (session?.id && sourceMessageId && annotationId && hasRevisionRecord && window.electronAPI.isChannelAvailable('artifacts:bodyFeedback')) {
+      return () => {
+        bodyFeedbackFocus.current = Array.from(zoneRef.current?.querySelectorAll<HTMLElement>('button[data-ca-annotation-id]') ?? []).find(item => item.dataset.caAnnotationId === annotationId) ?? null
+        setBodyFeedbackTarget({ sessionId: session.id, sourceMessageId, annotationId, resultMessageId: messageId })
+      }
+    }
+    const message = sessionMessages?.find(item => item.id === messageId)
+    if (!message?.answerCommitted || !assistantTurnIndexByMessageId.has(messageId)) return undefined
+    return () => scrollToFollowUpTurn({ messageId })
+  }, [session?.id, sessionMessages, assistantTurnIndexByMessageId, scrollToFollowUpTurn, zoneRef])
 
   const handleFollowUpChipClick = useCallback((item: {
     messageId: string
@@ -1753,6 +1742,11 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
 
   return (
     <div ref={zoneRef} className="flex h-full flex-col min-w-0" data-focus-zone="chat">
+      <BodyFeedbackDialog target={bodyFeedbackTarget?.sessionId === session?.id ? bodyFeedbackTarget : null}
+        refreshKey={sessionMessages?.findLast(message => message.answerCommitted)?.id}
+        onClose={() => setBodyFeedbackTarget(null)}
+        onRestoreFocus={() => { if (bodyFeedbackFocus.current?.isConnected) bodyFeedbackFocus.current.focus(); else textareaRef.current?.focus() }}
+        onOpenFile={onOpenFile} onOpenUrl={onOpenUrl} />
       {session ? (
         <div className="flex flex-1 flex-col min-h-0 min-w-0 relative">
           {/* Content layer */}
@@ -1901,6 +1895,14 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
                             sessionId={session?.id}
                             compactMode={compactMode}
                           />
+                          {session && window.electronAPI.isChannelAvailable('artifacts:bodyFeedback') && turn.message.annotationFollowUps?.map(reference => (
+                            <div key={`${reference.messageId}:${reference.annotationId}`} className="mt-1 flex justify-end">
+                              <button type="button" className="rounded text-xs text-muted-foreground transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring" onClick={event => {
+                                bodyFeedbackFocus.current = event.currentTarget
+                                setBodyFeedbackTarget({ sessionId: session.id, sourceMessageId: reference.messageId, annotationId: reference.annotationId, resultMessageId: reference.resultMessageId, requestMessageId: turn.message.id })
+                              }}>{t('chat.bodyFeedback.title')}</button>
+                            </div>
+                          ))}
                         </div>
                       )
                     }
@@ -2026,6 +2028,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
                         compactMode={compactMode}
                         sendMessageKey={sendMessageKey}
                         openAnnotationRequest={openAnnotationRequest}
+                        resolveAnnotationResult={resolveAnnotationResult}
                         onRegenerate={isLastResponse && !turn.isStreaming && !sessionBusy
                           ? async () => {
                             if (!session) return

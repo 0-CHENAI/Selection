@@ -27,10 +27,13 @@
   "dependencies": {
     "@craft-agent/core": "workspace:*",
     "@craft-agent/shared": "workspace:*",
+    "@earendil-works/pi-ai": "0.81.1",
+    "fast-xml-parser": "5.2.5",
+    "fflate": "^0.8.2",
     "jose": "^6.0.0",
-    "ws": "^8.19.0",
+    "pdfjs-dist": "^5.4.0",
     "sharp": "0.34.5",
-    "@earendil-works/pi-ai": "0.81.1"
+    "ws": "^8.19.0"
   },
   "devDependencies": {
     "typescript": "^5.8.2",

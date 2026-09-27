@@ -1,4 +1,4 @@
-import type { AnnotationV1 } from '@craft-agent/core'
+import type { AnnotationFeedbackStatus, AnnotationV1 } from '@craft-agent/core'
 
 export type AnnotationFollowUpState = 'none' | 'pending' | 'sent'
 
@@ -54,4 +54,15 @@ export function formatAnnotationFollowUpTooltipText(annotation: AnnotationV1, ma
   return note.length > maxLength
     ? `${note.slice(0, maxLength - 1).trimEnd()}…`
     : note
+}
+
+/** Display only lifecycle facts supplied by the runtime; legacy annotations have no status. */
+export function getAnnotationFeedbackStatus(annotation: AnnotationV1 | null | undefined): AnnotationFeedbackStatus | undefined {
+  const followUp = asRecord(annotation?.meta?.followUp)
+  if (typeof followUp?.requestMessageId !== 'string' || !followUp.requestMessageId) return undefined
+  switch (followUp.status) {
+    case 'queued': case 'running': case 'waiting-user': case 'delivered': case 'failed': case 'interrupted':
+      return followUp.status
+    default: return undefined
+  }
 }

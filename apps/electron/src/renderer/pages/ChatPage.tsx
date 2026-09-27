@@ -764,13 +764,13 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
   ])
 
   const pendingCreatedSessionRef = React.useRef<Session | null>(null)
-  const handleSendMessage = React.useCallback((message: string, attachments?: import('../../shared/types').FileAttachment[], skillSlugs?: string[]) => {
+  const handleSendMessage = React.useCallback((message: string, attachments?: import('../../shared/types').FileAttachment[], skillSlugs?: string[], annotationFollowUps?: import('@craft-agent/shared/protocol').SendMessageOptions['annotationFollowUps']) => {
     if (isDraft) {
       if (!activeWorkspaceId || draftBusy) return
       setDraftBusy(true)
       void submitDraftRef.current(async (created) => {
         pendingCreatedSessionRef.current = created
-        onSendMessage(created.id, message, attachments, skillSlugs)
+        onSendMessage(created.id, message, attachments, skillSlugs, undefined, annotationFollowUps)
         navigate(routes.view.allSessions(created.id))
       }).catch((error: unknown) => {
         toast.error(error instanceof Error ? error.message : String(error))
@@ -779,7 +779,7 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
       })
       return
     }
-    if (session) onSendMessage(session.id, message, attachments, skillSlugs)
+    if (session) onSendMessage(session.id, message, attachments, skillSlugs, undefined, annotationFollowUps)
   }, [isDraft, activeWorkspaceId, draftBusy, onSendMessage, session])
 
   if (session && pendingCreatedSessionRef.current?.id === session.id) {

@@ -19,7 +19,12 @@ import type { HandlerDeps } from '../handler-deps'
 import { requestClientOpenFileDialog } from '@craft-agent/server-core/transport'
 
 export const HANDLED_CHANNELS = [
+  RPC_CHANNELS.artifacts.BODY_FEEDBACK,
   RPC_CHANNELS.artifacts.MANAGE,
+  RPC_CHANNELS.artifacts.FEEDBACK,
+  RPC_CHANNELS.artifacts.FEEDBACK_LIST,
+  RPC_CHANNELS.artifacts.FEEDBACK_CONTEXT,
+  RPC_CHANNELS.artifacts.CLEANUP,
   RPC_CHANNELS.artifacts.PREVIEW,
   RPC_CHANNELS.file.READ,
   RPC_CHANNELS.file.READ_DATA_URL,
@@ -36,6 +41,31 @@ export const HANDLED_CHANNELS = [
 ] as const
 
 export function registerFilesHandlers(server: RpcServer, deps: HandlerDeps): void {
+  server.handle(RPC_CHANNELS.artifacts.BODY_FEEDBACK, async (ctx, sessionId: string, sourceMessageId: string, annotationId: string) => {
+    const workspaceId = resolveWorkspaceIdForFileAccess(ctx, deps.windowManager)
+    const session = await deps.sessionManager.getSession(sessionId)
+    if (!workspaceId || !session || session.workspaceId !== workspaceId) throw new Error('Session does not belong to this workspace')
+    if (!deps.sessionManager.getBodyFeedbackDetails) throw new Error('Body feedback history is unavailable')
+    if (typeof sourceMessageId !== 'string' || typeof annotationId !== 'string') throw new Error('Invalid feedback identity')
+    return deps.sessionManager.getBodyFeedbackDetails(sessionId, sourceMessageId, annotationId)
+  })
+  server.handle(RPC_CHANNELS.artifacts.CLEANUP, async (ctx, sessionId: string, artifactId: string, expectedVersion: string, versionIds: string[], requestId: string) => {
+    if (typeof requestId !== 'string' || !requestId.trim() || !Array.isArray(versionIds)
+      || !versionIds.length || versionIds.some(id => typeof id !== 'string' || !id)) throw new Error('Invalid cleanup request')
+    const workspaceId = resolveWorkspaceIdForFileAccess(ctx, deps.windowManager)
+    if (!workspaceId) throw new Error('Workspace required')
+    const session = await deps.sessionManager.getSession(sessionId)
+    if (!session || session.workspaceId !== workspaceId) throw new Error('Session does not belong to this workspace')
+    if (!deps.sessionManager.cleanupArtifactVersions) throw new Error('Artifact cleanup is unavailable')
+    return deps.sessionManager.cleanupArtifactVersions(sessionId, artifactId, expectedVersion, versionIds, requestId)
+  })
+  server.handle(RPC_CHANNELS.artifacts.FEEDBACK_CONTEXT, async (ctx, sessionId: string, artifactId: string) => {
+    const workspaceId = resolveWorkspaceIdForFileAccess(ctx, deps.windowManager)
+    const session = await deps.sessionManager.getSession(sessionId)
+    if (!session || session.workspaceId !== workspaceId) throw new Error('Session does not belong to this workspace')
+    if (!deps.sessionManager.getArtifactFeedbackContext) throw new Error('Feedback input declarations are unavailable')
+    return deps.sessionManager.getArtifactFeedbackContext(sessionId, artifactId)
+  })
   server.handle(RPC_CHANNELS.artifacts.PREVIEW, async (ctx, artifactId: string, versionId: string) => {
     const workspaceId = resolveWorkspaceIdForFileAccess(ctx, deps.windowManager)
     if (!workspaceId) throw new Error('Workspace required')
@@ -45,6 +75,20 @@ export function registerFilesHandlers(server: RpcServer, deps: HandlerDeps): voi
     const record = store.read(artifactId)
     await validateWorkspaceFilePath(record.path, workspaceId)
     return store.preview(artifactId, versionId)
+  })
+  server.handle(RPC_CHANNELS.artifacts.FEEDBACK_LIST, async (ctx, sessionId: string, artifactId: string) => {
+    const workspaceId = resolveWorkspaceIdForFileAccess(ctx, deps.windowManager)
+    const session = await deps.sessionManager.getSession(sessionId)
+    if (!session || session.workspaceId !== workspaceId) throw new Error('Session does not belong to this workspace')
+    if (!deps.sessionManager.listArtifactFeedback) throw new Error('Artifact feedback history is unavailable')
+    return deps.sessionManager.listArtifactFeedback(sessionId, artifactId)
+  })
+  server.handle(RPC_CHANNELS.artifacts.FEEDBACK, async (ctx, operation: import('@craft-agent/shared/protocol').ArtifactFeedbackOperation) => {
+    const workspaceId = resolveWorkspaceIdForFileAccess(ctx, deps.windowManager)
+    const session = await deps.sessionManager.getSession(operation.sessionId)
+    if (!session || session.workspaceId !== workspaceId) throw new Error('Session does not belong to this workspace')
+    if (!deps.sessionManager.artifactFeedback) throw new Error('Artifact feedback is unavailable')
+    return deps.sessionManager.artifactFeedback(operation)
   })
   server.handle(RPC_CHANNELS.artifacts.MANAGE, async (ctx, operation: import('@craft-agent/shared/protocol').ArtifactOperation) => {
     const workspaceId = resolveWorkspaceIdForFileAccess(ctx, deps.windowManager)

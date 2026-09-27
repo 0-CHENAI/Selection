@@ -1,3 +1,5 @@
+import * as draftStorage from './lib/local-storage'
+import { ChildSessionPreviewDialog } from './components/app-shell/ChildSessionPreviewDialog'
 import { ArtifactVersionsDialog } from './components/app-shell/ArtifactVersionsDialog'
 import { missingCommittedAnswerRun, recoverCommittedAnswer } from './event-processor/answer-recovery'
 import { refreshSessionSnapshot, type SessionRefreshResult } from './lib/session-refresh'
@@ -14,7 +16,7 @@ import { generateMessageId } from '../shared/types'
 import { useEventProcessor } from './event-processor'
 import type { AgentEvent, Effect } from './event-processor'
 import { AppShell } from '@/components/app-shell/AppShell'
-import type { AppShellContextType } from '@/context/AppShellContext'
+import { AppShellProvider, type AppShellContextType } from '@/context/AppShellContext'
 import { OnboardingWizard, ReauthScreen } from '@/components/onboarding'
 import { WorkspacePicker } from '@/components/workspace'
 import { ResetConfirmationDialog } from '@/components/ResetConfirmationDialog'
@@ -1308,7 +1310,7 @@ export default function App() {
     window.electronAPI.sessionCommand(sessionId, { type: 'rename', name })
   }, [updateSessionById])
 
-  const handleSendMessage = useCallback(async (sessionId: string, message: string, attachments?: FileAttachment[], skillSlugs?: string[], externalBadges?: ContentBadge[]) => {
+  const handleSendMessage = useCallback(async (sessionId: string, message: string, attachments?: FileAttachment[], skillSlugs?: string[], externalBadges?: ContentBadge[], annotationFollowUps?: import('@craft-agent/shared/protocol').SendMessageOptions['annotationFollowUps']) => {
     let locallyCommitted = false
     try {
       // Capture live generation so composer submits stay in the queue
@@ -1464,6 +1466,7 @@ export default function App() {
         skillSlugs,
         badges: badges.length > 0 ? badges : undefined,
         optimisticMessageId: userMessage.id,
+        annotationFollowUps,
         ...(delegateSubmission.kind === 'delegate' ? { userAuthorizedSpawn: true } : {}),
         queueContext: sendingMidStream ? {
           sourceSlugs: [...(sessionSnapshot?.enabledSourceSlugs ?? [])],
@@ -2012,9 +2015,15 @@ export default function App() {
   // Platform actions for @craft-agent/ui components (overlays, etc.)
   // Memoized to prevent re-renders when these callbacks don't change
   // NOTE: Must be defined before early returns to maintain consistent hook order
+  const [feedbackChildSessionId, setFeedbackChildSessionId] = useState<string | null>(null)
   const [managedArtifactPath, setManagedArtifactPath] = useState<{ path: string; sessionId?: string; alternativePaths?: string[] } | null>(null)
   const platformActions = useMemo(() => ({
-    onManageArtifact: window.electronAPI.isChannelAvailable('artifacts:manage') ? (path: string, sessionId?: string, alternativePaths?: string[]) => { setManagedArtifactPath({ path, sessionId, alternativePaths }) } : undefined,
+    onReadAnnotationDraft: (key: string) => draftStorage.getRaw(draftStorage.KEYS.annotationFeedbackDrafts, key) ?? undefined,
+    onWriteAnnotationDraft: (key: string, value: string | undefined) => {
+      if (value === undefined) draftStorage.remove(draftStorage.KEYS.annotationFeedbackDrafts, key)
+      else draftStorage.setRaw(draftStorage.KEYS.annotationFeedbackDrafts, value, key)
+    },
+    onManageArtifact: window.electronAPI.isChannelAvailable('artifacts:manage') ? (path: string, sessionId?: string, alternativePaths?: string[]) => { setFeedbackChildSessionId(null); setManagedArtifactPath({ path, sessionId, alternativePaths }) } : undefined,
     onOpenFile: handleOpenFile,
     onOpenUrl: handleOpenUrl,
     // Bypass link interceptor — opens file directly in system editor.
@@ -2186,7 +2195,10 @@ export default function App() {
             />
           </div>
 
-          <ArtifactVersionsDialog path={managedArtifactPath?.path ?? null} alternativePaths={managedArtifactPath?.alternativePaths} sessionId={managedArtifactPath?.sessionId} onClose={() => setManagedArtifactPath(null)} onPreview={handleOpenFile} />
+          <ArtifactVersionsDialog path={managedArtifactPath?.path ?? null} alternativePaths={managedArtifactPath?.alternativePaths} sessionId={managedArtifactPath?.sessionId} onClose={() => setManagedArtifactPath(null)} onPreview={handleOpenFile} onOpenSession={sessionId => { setManagedArtifactPath(null); setFeedbackChildSessionId(sessionId) }} />
+          <AppShellProvider value={appShellContextValue}>
+            <ChildSessionPreviewDialog sessionId={feedbackChildSessionId} open={feedbackChildSessionId !== null} onOpenChange={open => { if (!open) setFeedbackChildSessionId(null) }} />
+          </AppShellProvider>
           {/* File preview overlay — rendered by the link interceptor when a previewable file is clicked */}
           {linkInterceptor.previewState && (
             <FilePreviewRenderer

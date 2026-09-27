@@ -1,6 +1,11 @@
 export interface ArtifactVersion {
   ordinal?: number; id: string; hash: string; size: number; createdAt: number; sourceRunId?: string; restoredFrom?: string
 }
+export interface BodyFeedbackRevision {
+  requestMessageId: string; createdAt: number; instruction: string; sourceContentHash?: string; original?: string
+  result?: { messageId: string; content: string; salvaged: boolean }
+  userResolvedAt?: number
+}
 export interface ManagedArtifact {
   version: 1; id: string; hostId: string; workspaceId: string; path: string; currentVersion: string; versions: ArtifactVersion[]
 }

@@ -1,5 +1,6 @@
+import type { AnnotationFeedbackStatus } from '@craft-agent/core'
 import * as React from 'react'
-import { ChevronDown, Send } from 'lucide-react'
+import { ChevronDown, Send, LoaderCircle, Clock3, AlertCircle, CheckCircle2, PauseCircle } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { IslandContentView, type IslandMorphTarget } from './Island'
 import {
@@ -14,11 +15,18 @@ export type IslandFollowUpMode = 'edit' | 'view'
 export interface IslandFollowUpContentViewProps {
   id: string
   value: string
+  error?: string
+  feedbackStatus?: AnnotationFeedbackStatus
+  feedbackStatusLabel?: string
   onValueChange: (next: string) => void
   onCancel: () => void
+  onDiscardDraft?: () => void
   onSubmit: (value: string) => void
   onSubmitAndSend?: (value: string) => void
   onDelete?: () => void
+  onOpenResult?: () => void
+  onResolveFeedback?: () => Promise<unknown>
+  resultLabel?: string
   title?: string
   placeholder?: string
   submitLabel?: string
@@ -44,11 +52,18 @@ export interface IslandFollowUpContentViewProps {
 export function IslandFollowUpContentView({
   id,
   value,
+  error,
+  feedbackStatus,
+  feedbackStatusLabel,
   onValueChange,
   onCancel,
+  onDiscardDraft,
   onSubmit,
   onSubmitAndSend,
   onDelete,
+  onOpenResult,
+  onResolveFeedback,
+  resultLabel,
   title: titleProp,
   placeholder: placeholderProp,
   submitLabel: submitLabelProp,
@@ -70,6 +85,9 @@ export function IslandFollowUpContentView({
   const submitAndSendLabel = submitAndSendLabelProp ?? t('chat.followUpSaveAndSend')
   const editLabel = editLabelProp ?? t('common.edit')
   const deleteLabel = deleteLabelProp ?? t('common.delete')
+  const resolving = React.useRef(false)
+  const [resolutionPending, setResolutionPending] = React.useState(false)
+  const [resolutionError, setResolutionError] = React.useState<string>()
   const textareaRef = React.useRef<HTMLTextAreaElement | null>(null)
   const measureTextareaRef = React.useRef<HTMLTextAreaElement | null>(null)
   const isViewMode = mode === 'view'
@@ -140,6 +158,17 @@ export function IslandFollowUpContentView({
           <div className="pl-[4px] text-sm font-medium">{title}</div>
         </div>
 
+        {isViewMode && feedbackStatus && feedbackStatusLabel && (
+          <div role="status" className={`flex items-center gap-1.5 pl-1 text-xs ${feedbackStatus === 'failed' ? 'text-destructive' : feedbackStatus === 'waiting-user' ? 'text-amber-500' : feedbackStatus === 'running' ? 'text-accent' : 'text-muted-foreground'}`}>
+            {feedbackStatus === 'running' ? <LoaderCircle aria-hidden="true" className="size-3 animate-spin motion-reduce:animate-none" />
+              : feedbackStatus === 'delivered' ? <CheckCircle2 aria-hidden="true" className="size-3" />
+              : feedbackStatus === 'queued' ? <Clock3 aria-hidden="true" className="size-3" />
+              : feedbackStatus === 'interrupted' ? <PauseCircle aria-hidden="true" className="size-3" />
+              : <AlertCircle aria-hidden="true" className="size-3" />}
+            {feedbackStatusLabel}
+          </div>
+        )}
+
         <div className="relative rounded-[8px] px-0 py-1">
           <textarea
             ref={measureTextareaRef}
@@ -200,6 +229,27 @@ export function IslandFollowUpContentView({
           />
         </div>
 
+        {(error || resolutionError) && <p role="alert" className="text-sm text-destructive px-1">{error || resolutionError}</p>}
+
+        {isViewMode && onOpenResult && (
+          <button
+            type="button"
+            onClick={onOpenResult}
+            className="w-full h-8 px-3 rounded-[8px] text-sm text-accent bg-background shadow-minimal cursor-pointer hover:bg-foreground/2 focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent"
+          >
+            {resultLabel ?? t('chat.followUpRevisionResult')}
+          </button>
+        )}
+
+        {isViewMode && onResolveFeedback && <button type="button" disabled={resolutionPending}
+          className="w-full h-8 px-3 rounded-[8px] text-sm text-foreground bg-background shadow-minimal hover:bg-foreground/5 disabled:opacity-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent"
+          onClick={() => {
+            if (resolving.current) return
+            resolving.current = true; setResolutionPending(true); setResolutionError(undefined)
+            void onResolveFeedback().catch(error => setResolutionError(error instanceof Error ? error.message : String(error)))
+              .finally(() => { resolving.current = false; setResolutionPending(false) })
+          }}>{t('chat.artifactVersions.resolve')}</button>}
+
         <div className="flex justify-between items-center pt-1 shrink-0">
           <div>
             {onDelete && (
@@ -214,6 +264,7 @@ export function IslandFollowUpContentView({
           </div>
 
           <div className="flex gap-2">
+            {onDiscardDraft && !isViewMode && value && <button type="button" onClick={onDiscardDraft} className="h-8 px-3 rounded-[8px] text-sm text-foreground/75 hover:bg-foreground/5">{t('chat.artifactVersions.discardDraft')}</button>}
             <button
               type="button"
               onClick={onCancel}

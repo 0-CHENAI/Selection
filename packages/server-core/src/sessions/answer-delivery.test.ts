@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import type { AgentEvent } from '@craft-agent/core'
 import { storedToMessage } from '@craft-agent/core'
 import type { AnswerDeliveryControl } from '@craft-agent/shared/agent/backend/types'
+import { createTypedError } from '@craft-agent/shared/agent/errors'
 import { getSessionPath, loadSession as loadStoredSession } from '@craft-agent/shared/sessions'
 import { createManagedSession, loadPiTurnAnchors, SessionManager } from './SessionManager'
 
@@ -39,6 +40,125 @@ describe('explicit answer delivery lifecycle (#330)', () => {
     ;(manager as any).getOrCreateAgent = async () => agent
     return agent
   }
+  function feedbackOptions() {
+    managed.messages = [{ id: 'original', role: 'assistant', content: 'Original answer', timestamp: 1,
+      annotations: [{ id: 'note', schemaVersion: 1, createdAt: 1,
+        body: [{ type: 'note', text: 'Revise this' }],
+        target: { source: { sessionId: managed.id, messageId: 'original' }, selectors: [{ type: 'text-quote', exact: 'Original' }] },
+      }],
+    }]
+    return { annotationFollowUps: [{ messageId: 'original', annotationId: 'note', text: 'Revise this', updatedAt: 1 }] }
+  }
+
+  it('context admission failure preserves input and preview without starting answer recovery or promoting a draft', async () => {
+    install(async function* () {
+      yield { type: 'text_complete', text: 'Incomplete work preview' }
+      yield { type: 'typed_error', error: createTypedError('context_limit') }
+      yield { type: 'complete' }
+    })
+    const input = '原始输入\r\n' + '文'.repeat(100_000)
+    await manager.sendMessage(managed.id, input)
+    await manager.flushSession(managed.id)
+    expect(prompts).toEqual([input])
+    const stored = loadStoredSession(root, managed.id)!
+    const user = stored.messages.find(message => message.type === 'user')!
+    expect(user.content).toBe(input)
+    expect(user.answerRecoveryAttempted).not.toBe(true)
+    expect(stored.messages.filter(message => message.errorCode === 'context_limit')).toHaveLength(1)
+    expect(stored.messages.find(message => message.errorCode === 'context_limit')!.errorCanRetry).toBe(false)
+    expect(stored.messages.some(message => message.answerCommitted)).toBe(false)
+    expect(stored.messages.some(message => message.content === 'Incomplete work preview')).toBe(true)
+    expect(events.some(event => event.type === 'text_complete' && event.answerCommitted)).toBe(false)
+    expect(managed.isProcessing).toBe(false)
+  })
+
+  for (const failure of ['error', 'cancel', 'missing'] as const) {
+    it(`persists a feedback terminal status without pretending it was delivered (${failure})`, async () => {
+      const options = feedbackOptions()
+      install(async function* () {
+        if (failure === 'error') yield { type: 'error', message: 'provider unavailable' }
+        if (failure === 'cancel') managed.stopRequested = true
+        yield { type: 'complete' }
+      })
+      await manager.sendMessage(managed.id, 'Revise', undefined, undefined, options)
+      const source = loadStoredSession(root, managed.id)!.messages.find(message => message.id === 'original')!
+      const followUp = source.annotations![0]!.meta!.followUp as Record<string, unknown>
+      expect(followUp.status).toBe(failure === 'cancel' ? 'interrupted' : 'failed')
+      expect(followUp.resultMessageId).toBeUndefined()
+      expect(source.annotations![0]!.status).not.toBe('resolved')
+      const statusEvents = events.filter(event => event.type === 'message_annotations_updated')
+        .map(event => event.annotations[0].meta.followUp.status)
+      expect(statusEvents).toContain('running')
+      expect(statusEvents.at(-1)).toBe(followUp.status)
+    })
+  }
+
+  it('cancellation during feedback terminal persistence retains cancellation ownership', async () => {
+    const options = feedbackOptions()
+    const flush = manager.flushSession.bind(manager)
+    let cancelledDuringFlush = false
+    manager.flushSession = async id => {
+      if ((managed.messages[0]?.annotations?.[0]?.meta?.followUp as any)?.status === 'failed') {
+        managed.stopRequested = true
+        cancelledDuringFlush = true
+      }
+      await flush(id)
+    }
+    install(async function* () { yield { type: 'error', message: 'provider unavailable' }; yield { type: 'complete' } })
+    const completed: any[] = []
+    manager.onSessionComplete(event => completed.push(event))
+    await manager.sendMessage(managed.id, 'Revise', undefined, undefined, options)
+    expect(cancelledDuringFlush).toBe(true)
+    expect(completed.at(-1)?.reason).toBe('interrupted')
+    const source = loadStoredSession(root, managed.id)!.messages.find(message => message.id === 'original')!
+    expect(source.annotations![0]!.meta?.followUp).toMatchObject({ status: 'interrupted' })
+    expect(managed.isProcessing).toBe(false)
+  })
+
+  for (const salvaged of [false, true]) {
+    it(`persists annotation feedback result before publication and reloads its source (salvaged=${salvaged})`, async () => {
+      const original = 'Original paragraph to revise'
+      managed.messages = [{
+        id: 'original', role: 'assistant', content: original, timestamp: 1,
+        annotations: [{ id: 'note', schemaVersion: 1, createdAt: 1,
+          body: [{ type: 'note', text: 'Explain more clearly' }],
+          target: { source: { sessionId: managed.id, messageId: 'original' }, selectors: [] },
+        }],
+      }]
+      let resultPersistedBeforeEvent = false
+      manager.setEventSink((_channel, _target, event: any) => {
+        events.push(event)
+        if (event.type === 'message_annotations_updated' && event.annotations[0]?.meta?.followUp?.resultMessageId) {
+          const stored = loadStoredSession(root, managed.id)!
+          const source = stored.messages.find(message => message.id === 'original')!
+          const resultId = event.annotations[0].meta.followUp.resultMessageId
+          resultPersistedBeforeEvent = (source.annotations![0]!.meta?.followUp as any).resultMessageId === resultId
+            && stored.messages.some(message => message.id === resultId && message.answerCommitted)
+        }
+      })
+      install(async function* () {
+        yield { type: 'text_complete', text: markdown }
+        if (!salvaged) await control!.submit(submission)
+        yield { type: 'complete' }
+      })
+      await manager.sendMessage(managed.id, 'Revise the paragraph', undefined, undefined, {
+        annotationFollowUps: [{ messageId: 'original', annotationId: 'note', text: 'Explain more clearly', updatedAt: 1 }],
+      })
+      const reloaded = loadStoredSession(root, managed.id)!.messages.map(storedToMessage)
+      const source = reloaded.find(message => message.id === 'original')!
+      const followUp = source.annotations![0]!.meta!.followUp as Record<string, unknown>
+      const result = reloaded.find(message => message.id === followUp.resultMessageId)!
+      expect(source.content).toBe(original)
+      expect(followUp.status).toBe('delivered')
+      expect(followUp.resultSalvaged).toBe(salvaged)
+      expect(followUp.resultAnswerRunId).toBe(result.answerRunId)
+      expect(result.answerCommitted).toBe(true)
+      expect(result.content).toBe(markdown)
+      expect(resultPersistedBeforeEvent).toBe(true)
+      expect(events.filter(event => event.type === 'text_complete' && event.answerCommitted)).toHaveLength(1)
+    })
+  }
+
   it('persists complete Markdown before publication and survives rehydration plus late events', async () => {
     let persistedBeforeEvent = false
     manager.setEventSink((_channel, _target, event: any) => {

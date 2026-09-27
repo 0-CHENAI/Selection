@@ -205,6 +205,7 @@ export const LOCAL_ONLY_CHANNELS = new Set<string>([
 // ---------------------------------------------------------------------------
 
 export const REMOTE_ELIGIBLE_CHANNELS = new Set<string>([
+  RPC_CHANNELS.artifacts.BODY_FEEDBACK,
   RPC_CHANNELS.artifacts.MANAGE,
   RPC_CHANNELS.artifacts.FEEDBACK,
   RPC_CHANNELS.artifacts.FEEDBACK_LIST,
