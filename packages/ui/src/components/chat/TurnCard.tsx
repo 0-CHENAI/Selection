@@ -365,7 +365,7 @@ export interface TurnCardProps {
   /** Callback when file path is clicked */
   onOpenFile?: (path: string) => void
   /** Resolve and open a generated artifact with the requested action. */
-  onOpenArtifact?: (path: string, action: 'preview' | 'external' | 'reveal') => void
+  onOpenArtifact?: (path: string, action: 'preview' | 'external' | 'reveal' | 'versions') => void
   /** Callback when URL is clicked */
   onOpenUrl?: (url: string) => void
   /** Callback to open response in Monaco editor */
@@ -1545,7 +1545,7 @@ export interface ResponseCardProps {
   /** Callback to open file in editor */
   onOpenFile?: (path: string) => void
   /** Resolve and open a generated artifact with the requested action. */
-  onOpenArtifact?: (path: string, action: 'preview' | 'external' | 'reveal') => void
+  onOpenArtifact?: (path: string, action: 'preview' | 'external' | 'reveal' | 'versions') => void
   /** Callback to open URL */
   onOpenUrl?: (url: string) => void
   /** Callback to open response in Monaco editor */

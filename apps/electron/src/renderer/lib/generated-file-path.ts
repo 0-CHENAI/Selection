@@ -150,6 +150,12 @@ export type StatGeneratedPath = (
   path: string,
 ) => Promise<GeneratedFileOpenPick | null>
 
+export class GeneratedFileUnavailableError extends Error {
+  constructor(requestedPath: string, readonly candidates: string[]) {
+    super('File not found: ' + requestedPath)
+  }
+}
+
 function isOpenableHit(hit: GeneratedFileSearchHit): hit is GeneratedFileSearchHit & {
   type: GeneratedFileOpenPick['type']
 } {
@@ -243,7 +249,7 @@ export async function resolveOpenableGeneratedPath(opts: {
         const hit = await opts.statPath(candidate)
         if (hit) return hit
       }
-      throw new Error('File not found: ' + opts.requestedPath)
+      throw new GeneratedFileUnavailableError(opts.requestedPath, candidates)
     } catch (error) {
       // Older servers may not advertise their channels during handshake.
       // Search remains a compatibility path only when this RPC is unavailable.
@@ -284,7 +290,7 @@ export async function resolveOpenableGeneratedPath(opts: {
     }
   }
 
-  throw new Error('File not found: ' + opts.requestedPath)
+  throw new GeneratedFileUnavailableError(opts.requestedPath, candidates)
 }
 
 export function pathsLikelySame(a: string, b: string): boolean {

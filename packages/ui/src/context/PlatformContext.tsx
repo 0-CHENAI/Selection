@@ -17,6 +17,8 @@ import { createContext, useContext, type ReactNode } from 'react'
  * All actions are optional - platforms only implement what they support
  */
 export interface PlatformActions {
+  onManageArtifact?: (path: string, sessionId?: string, alternativePaths?: string[]) => void
+
   /**
    * Open a file in the default application (Electron: shell.openPath)
    * Web: Could show file contents inline or provide download

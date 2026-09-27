@@ -1,5 +1,5 @@
 import * as React from 'react'
-import { ExternalLink, FolderOpen, ChevronDown, ChevronUp } from 'lucide-react'
+import { AlertTriangle, ExternalLink, FolderOpen, ChevronDown, ChevronUp } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { FileTypeIcon } from './attachment-helpers'
 import type { ResponseArtifact } from './response-artifacts'
@@ -19,14 +19,33 @@ function officeAppName(extension: string): string | undefined {
 export function ResponseArtifacts({ artifacts, onOpenFile, onOpenArtifact }: {
   artifacts: ResponseArtifact[]
   onOpenFile?: (path: string) => void
-  onOpenArtifact?: (path: string, action: 'preview' | 'external' | 'reveal') => void
+  onOpenArtifact?: (path: string, action: 'preview' | 'external' | 'reveal' | 'versions') => void | boolean | Promise<void | boolean>
 }) {
   const { t } = useTranslation()
-  const { onOpenFileExternal, onRevealInFinder, fileManagerName } = usePlatform()
+  const { onManageArtifact, onOpenFileExternal, onRevealInFinder, fileManagerName } = usePlatform()
   const [expanded, setExpanded] = React.useState(false)
+  const [unavailable, setUnavailable] = React.useState(new Set<string>())
+  const openRequests = React.useRef(new Map<string, number>())
   const listId = React.useId()
   const sectionRef = React.useRef<HTMLElement>(null)
   const wasExpanded = React.useRef(false)
+  const open = async (path: string, action: 'preview' | 'external' | 'reveal' | 'versions') => {
+    const request = (openRequests.current.get(path) ?? 0) + 1
+    if (action !== 'versions') openRequests.current.set(path, request)
+    let succeeded = false
+    try {
+      const result = onOpenArtifact ? await onOpenArtifact(path, action)
+        : action === 'external' ? await onOpenFileExternal?.(path)
+          : action === 'reveal' ? await onRevealInFinder?.(path) : await onOpenFile?.(path)
+      succeeded = result !== false
+    } catch { /* Keep the error on the artifact after transient notifications disappear. */ }
+    if (action === 'versions' || openRequests.current.get(path) !== request) return
+    setUnavailable(previous => {
+      const next = new Set(previous)
+      if (succeeded) next.delete(path); else next.add(path)
+      return next
+    })
+  }
   React.useLayoutEffect(() => {
     if (wasExpanded.current && !expanded && sectionRef.current
       && sectionRef.current.getBoundingClientRect().top < 0) {
@@ -53,9 +72,8 @@ export function ResponseArtifacts({ artifacts, onOpenFile, onOpenArtifact }: {
                     <button
                       type="button"
                       disabled={!onOpenArtifact && !onOpenFile}
-                      onClick={() => onOpenArtifact
-                        ? onOpenArtifact(artifact.path, 'preview')
-                        : onOpenFile?.(artifact.path)}
+                      onClick={() => { void open(artifact.path, 'preview') }}
+                      aria-describedby={unavailable.has(artifact.path) ? `${listId}-error-${index}` : undefined}
                       aria-label={`${t('common.open')} ${artifact.name}`}
                       className="flex min-w-0 flex-1 items-center gap-2 rounded-xl px-3 py-2.5 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-default"
                     >
@@ -78,18 +96,15 @@ export function ResponseArtifacts({ artifacts, onOpenFile, onOpenArtifact }: {
                       </button>
                     </DropdownMenuTrigger>
                     <StyledDropdownMenuContent align="end">
+                      {onManageArtifact && onOpenArtifact && <StyledDropdownMenuItem onSelect={() => { void open(artifact.path, 'versions') }}>{t('chat.artifactVersions.title')}</StyledDropdownMenuItem>}
                       {(onOpenArtifact || onOpenFileExternal) && (
-                        <StyledDropdownMenuItem onSelect={() => onOpenArtifact
-                          ? onOpenArtifact(artifact.path, 'external')
-                          : onOpenFileExternal?.(artifact.path)}>
+                        <StyledDropdownMenuItem onSelect={() => { void open(artifact.path, 'external') }}>
                           <ExternalLink />
                           {officeAppName(artifact.extension) ? t('chat.artifactOfficeApp', { app: officeAppName(artifact.extension) }) : t('chat.artifactDefaultApp')}
                         </StyledDropdownMenuItem>
                       )}
                       {(onOpenArtifact || onRevealInFinder) && (
-                        <StyledDropdownMenuItem onSelect={() => onOpenArtifact
-                          ? onOpenArtifact(artifact.path, 'reveal')
-                          : onRevealInFinder?.(artifact.path)}>
+                        <StyledDropdownMenuItem onSelect={() => { void open(artifact.path, 'reveal') }}>
                           <FolderOpen />{t('chat.showInFileManager', { fileManager: fileManagerName || t('chat.artifactFileManager') })}
                         </StyledDropdownMenuItem>
                       )}
@@ -97,6 +112,11 @@ export function ResponseArtifacts({ artifacts, onOpenFile, onOpenArtifact }: {
                   </DropdownMenu>
                 )}
               </div>
+              {unavailable.has(artifact.path) && <div id={`${listId}-error-${index}`} role="status" className="mt-1 flex flex-wrap items-center gap-1.5 px-2 text-xs text-foreground">
+                <AlertTriangle aria-hidden="true" className="size-3.5 shrink-0 text-info" />
+                <span>{t('toast.failedToOpenFile')}</span>
+                {onManageArtifact && onOpenArtifact && <button type="button" className="underline underline-offset-2 hover:text-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded-sm" onClick={() => { void open(artifact.path, 'versions') }}>{t('chat.artifactVersions.title')}</button>}
+              </div>}
             </li>
           ))}
         </ul>

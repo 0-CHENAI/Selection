@@ -1,3 +1,6 @@
+import { ExecutionRecoveryStatus } from './ExecutionRecoveryStatus'
+import { ContextLimitRecoveryActions, type ContextLimitRecoveryOptions } from './ContextLimitRecoveryActions'
+import { contextRecoverySource, prepareContextRecoveryDraft } from './context-recovery'
 import { isTerminalResponseError } from '@/utils/terminal-error'
 import * as React from "react"
 import { useSetAtom } from "jotai"
@@ -155,7 +158,7 @@ interface ChatDisplayProps {
   session: Session | null
   onSendMessage: (message: string, attachments?: FileAttachment[], skillSlugs?: string[]) => void
   onOpenFile: (path: string) => void
-  onOpenArtifact?: (path: string, action: 'preview' | 'external' | 'reveal') => void
+  onOpenArtifact?: (path: string, action: 'preview' | 'external' | 'reveal' | 'versions') => void
   onOpenUrl: (url: string) => void
   // Model selection
   currentModel: string
@@ -580,6 +583,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
   const activeSessionId = session?.id ?? null
   const sessionIdRef = React.useRef(activeSessionId)
   sessionIdRef.current = activeSessionId
+  const contextRecoveryDraftRef = React.useRef<{ errorId: string; session: Session } | null>(null)
   const [scrollToBottomUi, setScrollToBottomUi] = React.useState({ sessionId: activeSessionId, show: false })
   const showScrollToBottom = scrollToBottomUi.show && scrollToBottomUi.sessionId === activeSessionId
   const showScrollToBottomRef = React.useRef(false)
@@ -1918,6 +1922,33 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
                             onOpenFile={onOpenFile}
                             onOpenUrl={onOpenUrl}
                             sessionId={session?.id}
+                            contextRecovery={turn.message.errorCode === 'context_limit' && session && !hideComposer
+                              && contextRecoverySource(session.messages, turn.message.id) ? {
+                                disabled: isInputDisabled || disableSend || connectionUnavailable || session.isProcessing,
+                                onCompact: async () => {
+                                  const sent = await appShellContext.onSendMessage(session.id, '/compact')
+                                  if (sent === false) throw new Error('Compaction was not accepted')
+                                },
+                                onChooseModel: compactMode && !enableCompactModelPicker ? undefined : () => {
+                                  requestAnimationFrame(() => window.dispatchEvent(new CustomEvent('craft:open-model-picker', { detail: { sessionId: session.id } })))
+                                },
+                                onNewDraft: appShellContext.onPrepareSessionDraft ? async () => {
+                                  const source = contextRecoverySource(session.messages, turn.message.id)
+                                  if (!source) throw new Error('Recovery source changed')
+                                  const child = await prepareContextRecoveryDraft(session, source, {
+                                    statPath: path => window.electronAPI.statPath(path),
+                                    createSession: async (workspaceId, options) => {
+                                      if (contextRecoveryDraftRef.current?.errorId === turn.message.id) return contextRecoveryDraftRef.current.session
+                                      const created = await appShellContext.onCreateSession(workspaceId, options)
+                                      contextRecoveryDraftRef.current = { errorId: turn.message.id, session: created }
+                                      return created
+                                    },
+                                    saveDraft: appShellContext.onPrepareSessionDraft!,
+                                  })
+                                  contextRecoveryDraftRef.current = null
+                                  if (sessionIdRef.current === session.id) navigate(routes.view.allSessions(child.id))
+                                } : undefined,
+                              } : undefined}
                             onRetry={turn.message.role === 'error' ? () => {
                               const msgs = session?.messages
                               if (!msgs) return
@@ -2196,6 +2227,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
                     </AnimatePresence>
                   </motion.div>
                 </AnimatePresence>
+                <ExecutionRecoveryStatus state={session.runtimeRecovery} onResume={() => window.electronAPI.sessionCommand(session.id, { type: 'resumeExecution' })} />
                 {!session.isProcessing && session.progressSupervision?.phase === 'paused' && (
                   <div className="px-6 py-2">
                     <button
@@ -2502,12 +2534,13 @@ interface MessageBubbleProps {
   compactMode?: boolean
   /** Callback to resend the user message that preceded an error */
   onRetry?: () => void
+  contextRecovery?: ContextLimitRecoveryOptions
 }
 
 /**
  * ErrorMessage - Separate component for error messages to allow useState hook
  */
-function ErrorMessage({ message, onOpenUrl, sessionId, onRetry }: { message: Message; onOpenUrl?: (url: string) => void; sessionId?: string; onRetry?: () => void }) {
+function ErrorMessage({ message, onOpenUrl, sessionId, onRetry, contextRecovery }: { message: Message; onOpenUrl?: (url: string) => void; sessionId?: string; onRetry?: () => void; contextRecovery?: ContextLimitRecoveryOptions }) {
   const { t } = useTranslation()
   const terminalCode = isTerminalResponseError(message.errorCode) ? message.errorCode : undefined
   const hasDetails = (message.errorDetails && message.errorDetails.length > 0) || message.errorOriginal
@@ -2524,14 +2557,16 @@ function ErrorMessage({ message, onOpenUrl, sessionId, onRetry }: { message: Mes
       <div
         className="max-w-[80%] shadow-tinted rounded-[8px] pl-5 pr-4 pt-2 pb-2.5 break-words"
         style={{
-          backgroundColor: 'oklch(from var(--destructive) l c h / 0.03)',
-          '--shadow-color': 'var(--destructive-rgb)',
+          backgroundColor: terminalCode === 'context_limit' ? 'oklch(from var(--info) l c h / 0.03)' : 'oklch(from var(--destructive) l c h / 0.03)',
+          '--shadow-color': terminalCode === 'context_limit' ? 'var(--info-rgb)' : 'var(--destructive-rgb)',
         } as React.CSSProperties}
       >
-        <div className="text-xs text-destructive/50 mb-0.5 font-semibold">
+        <div className={cn('text-xs mb-0.5 font-semibold', terminalCode === 'context_limit' ? 'flex items-center gap-1.5 text-foreground' : 'text-destructive/50')}>
+          {terminalCode === 'context_limit' && <AlertTriangle aria-hidden="true" className="size-3.5 text-info" />}
           {terminalCode ? t(`chat.terminal.${terminalCode}.title`) : message.errorTitle || t('common.error')}
         </div>
-        <p className="text-sm text-destructive">{terminalCode ? t(`chat.terminal.${terminalCode}.message`) : message.content}</p>
+        <p className={cn('text-sm', terminalCode === 'context_limit' ? 'text-foreground/80' : 'text-destructive')}>{terminalCode ? t(`chat.terminal.${terminalCode}.message`) : message.content}</p>
+        {terminalCode === 'context_limit' && contextRecovery && <ContextLimitRecoveryActions {...contextRecovery} />}
 
         {/* Action buttons */}
         {actions && actions.length > 0 && (
@@ -2591,6 +2626,7 @@ function MessageBubble({
   onPopOut,
   compactMode,
   onRetry,
+  contextRecovery,
 }: MessageBubbleProps) {
   const { t } = useTranslation()
 
@@ -2638,7 +2674,7 @@ function MessageBubble({
 
   // === ERROR MESSAGE: Red bordered bubble with warning icon and collapsible details ===
   if (message.role === 'error') {
-    return <ErrorMessage message={message} onOpenUrl={onOpenUrl} sessionId={sessionId} onRetry={onRetry} />
+    return <ErrorMessage message={message} onOpenUrl={onOpenUrl} sessionId={sessionId} onRetry={onRetry} contextRecovery={contextRecovery} />
   }
 
   // === STATUS MESSAGE: Matches ProcessingIndicator layout for visual consistency ===
@@ -2723,6 +2759,7 @@ const MemoizedMessageBubble = React.memo(MessageBubble, (prev, next) => {
     prev.message.id === next.message.id &&
     prev.message.content === next.message.content &&
     prev.message.role === next.message.role &&
+    prev.contextRecovery === next.contextRecovery &&
     prev.sessionId === next.sessionId &&
     prev.compactMode === next.compactMode
   )

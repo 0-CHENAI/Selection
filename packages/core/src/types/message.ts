@@ -254,6 +254,23 @@ export interface StoredAttachment {
   resizedBase64?: string;        // Base64 of resized image (only when wasResized=true, for Claude API)
 }
 
+/** Immutable feedback references accepted with a user message. */
+export interface AnnotationFeedbackReference {
+  messageId: string;
+  annotationId: string;
+  text: string;
+  updatedAt: number;
+}
+
+/** Runtime-owned feedback lifecycle; delivery does not imply user confirmation. */
+export type AnnotationFeedbackStatus = 'queued' | 'running' | 'waiting-user' | 'delivered' | 'failed' | 'interrupted';
+
+/** Accepted selection identity, kept independently of later annotation edits. */
+export type AnnotationFeedbackSnapshot = AnnotationFeedbackReference & {
+  sourceContentHash?: string;
+  target?: AnnotationTarget;
+};
+
 /**
  * Runtime message type (includes transient fields like isStreaming)
  */
@@ -266,6 +283,8 @@ export interface Message {
    * message instead of appending a duplicate with a new backend ID.
    */
   clientMessageId?: string;
+  /** Feedback payload retained for replay validation, independent of later annotation edits. */
+  annotationFollowUps?: AnnotationFeedbackSnapshot[];
   role: MessageRole;
   content: string;
   timestamp: number;
@@ -388,6 +407,8 @@ export interface StoredMessage {
   id: string;
   /** Stable sender-generated ID used to make message submission idempotent. */
   clientMessageId?: string;
+  /** Feedback payload retained for replay validation, independent of later annotation edits. */
+  annotationFollowUps?: AnnotationFeedbackSnapshot[];
   type: MessageRole;
   content: string;
   timestamp?: number;

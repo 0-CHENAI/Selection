@@ -16,7 +16,7 @@ import { extractWorkspaceSlugFromPath } from '../utils/workspace-slug.ts';
 import { initializeDocs } from '../docs/index.ts';
 import { expandPath, toPortablePath, getBundledAssetsDir } from '../utils/paths.ts';
 import { debug } from '../utils/debug.ts';
-import { readJsonFileSync } from '../utils/files.ts';
+import { atomicWriteFileSync, readJsonFileSync } from '../utils/files.ts';
 import { CONFIG_DIR } from './paths.ts';
 import type { StoredAttachment, StoredMessage } from '@craft-agent/core/types';
 import type { Plan } from '../agent/plan-types.ts';
@@ -1089,6 +1089,7 @@ function isAbsoluteDraftPath(p: string): boolean {
   if (!p) return false;
   if (p.startsWith('/')) return true;
   if (/^[A-Za-z]:[\\/]/.test(p)) return true;
+  if (p.startsWith('\\\\')) return true;
   return false;
 }
 
@@ -1156,7 +1157,7 @@ function loadDraftsData(): DraftsData {
 function saveDraftsData(data: DraftsData): void {
   ensureConfigDir();
   data.updatedAt = Date.now();
-  writeFileSync(DRAFTS_FILE, JSON.stringify(data, null, 2), 'utf-8');
+  atomicWriteFileSync(DRAFTS_FILE, JSON.stringify(data, null, 2));
 }
 
 /**

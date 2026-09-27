@@ -8,13 +8,14 @@ import { openGeneratedFileAction, type GeneratedArtifactAction } from '@/lib/gen
 
 /** All generated-file actions resolve against the owning session before opening. */
 export function useGeneratedFileActions(opts: {
+  sessionId?: string
   workingDirectory?: string | null
   sessionFolderPath?: string | null
   workspaceRootPath?: string | null
   onOpenFile: (path: string) => void
 }) {
   const { t } = useTranslation()
-  const { onOpenFileExternal } = usePlatform()
+  const { onManageArtifact, onOpenFileExternal } = usePlatform()
   const { onOpenFile, workingDirectory, sessionFolderPath, workspaceRootPath } = opts
   const baseDirs = React.useMemo(() => generatedFileBaseDirs({
     workingDirectory, sessionFolderPath, workspaceRootPath,
@@ -22,7 +23,7 @@ export function useGeneratedFileActions(opts: {
   const baseDir = baseDirs[0]
   const openArtifact = React.useCallback(async (path: string, action: GeneratedArtifactAction) => {
     try {
-      await openGeneratedFileAction({
+      return await openGeneratedFileAction({
         requestedPath: path,
         action,
         baseDir,
@@ -32,13 +33,15 @@ export function useGeneratedFileActions(opts: {
           : undefined,
         searchFiles: (dir, query) => window.electronAPI.searchFiles(dir, query),
         openPreview: onOpenFile,
+        manageArtifact: onManageArtifact ? (path, alternativePaths) => onManageArtifact(path, opts.sessionId, alternativePaths) : undefined,
         openExternal: onOpenFileExternal,
         reveal: (resolvedPath) => window.electronAPI.showInFolder(resolvedPath),
       })
     } catch (error) {
       toast.error(t('toast.failedToOpenFile'), { description: error instanceof Error ? error.message : String(error) })
+      return false
     }
-  }, [baseDir, baseDirs, onOpenFile, onOpenFileExternal, t])
+  }, [baseDir, baseDirs, onOpenFile, onOpenFileExternal, onManageArtifact, opts.sessionId, t])
   const openFile = React.useCallback((path: string) => {
     void openArtifact(path, 'preview')
   }, [openArtifact])

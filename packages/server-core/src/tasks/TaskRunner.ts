@@ -34,6 +34,7 @@ import {
   definitionId,
   parseForEach,
   resolveArtifact,
+  verifyArtifact,
   sensitiveParamNames,
   missingSensitive,
   materializeDeps,
@@ -1970,6 +1971,16 @@ class ActiveRun {
       }
       if (this.requeueFailedNodeVerdict(nodeId, evt.sessionId, defId, st)) return;
       const output: NodeOutput = submitted ?? { text };
+      for (const declaration of node?.outputs ?? []) {
+        if (declaration.kind !== 'artifact') continue;
+        const artifact = output.params?.[declaration.name];
+        if (artifact === undefined && declaration.required === false) continue;
+        const verified = verifyArtifact(this.deps.workspaceRoot, artifact);
+        if (!verified.ok) {
+          this.failNode(nodeId, `Output "${declaration.name}": ${verified.error}`, evt.sessionId, 'invalid');
+          return;
+        }
+      }
       // Publish the completed output before marking the node done or releasing
       // its pool slot. Releasing can synchronously wake dependent schedulers.
       writeNodeAttempt(this.deps.workspaceRoot, this.slug, this.runId, nodeId, st.attempt || 1, output);

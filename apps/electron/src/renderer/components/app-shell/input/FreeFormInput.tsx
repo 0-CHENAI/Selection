@@ -711,6 +711,16 @@ export function FreeFormInput({
     if (!open) focusComposerAfterPicker()
   }, [focusComposerAfterPicker])
 
+  React.useEffect(() => {
+    const openPicker = (event: CustomEvent<{ sessionId?: string }>) => {
+      if (disabled || !isFocusedPanel || (compactMode && !enableCompactModelPicker)
+        || !shouldHandleScopedInputEvent({ sessionId, isFocusedPanel, targetSessionId: event.detail?.sessionId })) return
+      setModelDropdownOpen(true)
+    }
+    window.addEventListener('craft:open-model-picker', openPicker as EventListener)
+    return () => window.removeEventListener('craft:open-model-picker', openPicker as EventListener)
+  }, [sessionId, isFocusedPanel, disabled, compactMode, enableCompactModelPicker])
+
   // Track last caret position for focus restoration (e.g., after permission mode popover closes)
   const lastCaretPositionRef = React.useRef<number | null>(null)
 
@@ -1932,6 +1942,12 @@ export function FreeFormInput({
           )}
           {enableCompactModelPicker && (
             <CompactModelSelector
+              open={modelDropdownOpen}
+              onOpenChange={handleModelDropdownOpenChange}
+              onCloseAutoFocus={(event) => {
+                keepComposerFocusOnPickerClose(event)
+                focusComposerAfterPicker()
+              }}
               currentModel={currentModel}
               currentConnection={currentConnection}
               onModelChange={onModelChange}

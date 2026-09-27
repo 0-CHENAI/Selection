@@ -1,4 +1,5 @@
-import { describe, expect, it } from 'bun:test'
+import { describe, expect, it, spyOn } from 'bun:test'
+import * as config from '@craft-agent/shared/config'
 import { homedir } from 'os'
 import { join, sep } from 'path'
 import { RPC_CHANNELS } from '@craft-agent/shared/protocol'
@@ -77,6 +78,15 @@ const homeFile = join(homedir(), '报告.docx')
 const forbiddenFile = sep === '\\' ? 'Z:\\forbidden\\secret.docx' : '/forbidden/secret.docx'
 
 describe('registerSystemCoreHandlers OPEN_FILE / SHOW_IN_FOLDER', () => {
+  it('never forwards a remote host path to the local system shell', async () => {
+    const lookup = spyOn(config, 'getWorkspaceByNameOrId').mockReturnValue({ id: 'remote', remoteServer: {} } as never)
+    try {
+      const { openFile, showInFolder, ctx, invokeClientCalls } = createTestHarness({ workspaceId: 'remote' })
+      await expect(openFile(ctx, homeFile)).rejects.toThrow('remote workspaces')
+      await expect(showInFolder(ctx, homeFile)).rejects.toThrow('remote workspaces')
+      expect(invokeClientCalls).toEqual([])
+    } finally { lookup.mockRestore() }
+  })
   it('opens a file when workspaceId is present', async () => {
     const { openFile, ctx, invokeClientCalls } = createTestHarness({ workspaceId: 'ws-1' })
 

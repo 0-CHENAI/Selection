@@ -1,3 +1,4 @@
+import { ArtifactVersionsDialog } from './components/app-shell/ArtifactVersionsDialog'
 import { missingCommittedAnswerRun, recoverCommittedAnswer } from './event-processor/answer-recovery'
 import { refreshSessionSnapshot, type SessionRefreshResult } from './lib/session-refresh'
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react'
@@ -1631,6 +1632,13 @@ export default function App() {
     schedulePersistDraft(sessionId)
   }, [schedulePersistDraft])
 
+  const handlePrepareSessionDraft = useCallback(async (sessionId: string, draft: SessionDraft) => {
+    await window.electronAPI.setDraft(sessionId, draft)
+    const saved = await window.electronAPI.getDraft(sessionId)
+    if (JSON.stringify(saved) !== JSON.stringify(draft)) throw new Error('Recovery draft could not be persisted')
+    sessionDraftsRef.current.set(sessionId, draft)
+  }, [])
+
   // Open new chat - creates session and selects it
   // Used by components via AppShellContext and for programmatic navigation
   const openNewChat = useCallback(async (params: NewChatActionParams = {}) => {
@@ -1735,12 +1743,14 @@ export default function App() {
     openFileExternal: async (path) => {
       try {
         await window.electronAPI.openFile(path)
+        return true
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Unknown error'
         console.error('Failed to open file:', error)
         toast.error(t('toast.failedToOpenFile'), {
           description: message,
         })
+        return false
       }
     },
     openUrl: async (url) => {
@@ -1925,6 +1935,7 @@ export default function App() {
     sessionOptions,
     // Session callbacks
     onCreateSession: handleCreateSession,
+    onPrepareSessionDraft: handlePrepareSessionDraft,
     onSendMessage: handleSendMessage,
     onRenameSession: handleRenameSession,
     onFlagSession: handleFlagSession,
@@ -1970,6 +1981,7 @@ export default function App() {
     hydrateDraftAttachments,
     sessionOptions,
     handleCreateSession,
+    handlePrepareSessionDraft,
     handleSendMessage,
     handleRenameSession,
     handleFlagSession,
@@ -2000,7 +2012,9 @@ export default function App() {
   // Platform actions for @craft-agent/ui components (overlays, etc.)
   // Memoized to prevent re-renders when these callbacks don't change
   // NOTE: Must be defined before early returns to maintain consistent hook order
+  const [managedArtifactPath, setManagedArtifactPath] = useState<{ path: string; sessionId?: string; alternativePaths?: string[] } | null>(null)
   const platformActions = useMemo(() => ({
+    onManageArtifact: window.electronAPI.isChannelAvailable('artifacts:manage') ? (path: string, sessionId?: string, alternativePaths?: string[]) => { setManagedArtifactPath({ path, sessionId, alternativePaths }) } : undefined,
     onOpenFile: handleOpenFile,
     onOpenUrl: handleOpenUrl,
     // Bypass link interceptor — opens file directly in system editor.
@@ -2024,7 +2038,7 @@ export default function App() {
     },
     // Keep overlay headers (image preview, close, zoom) left of Windows caption buttons (#356)
     windowsCaptionInsetPadding: windowsCaptionInsetStyle()?.paddingRight,
-  }), [handleOpenFile, handleOpenUrl, linkInterceptor.openFileExternal])
+  }), [handleOpenFile, handleOpenUrl, linkInterceptor.openFileExternal, connectionState])
 
   // Loading state - show splash screen
   if (appState === 'loading') {
@@ -2172,6 +2186,7 @@ export default function App() {
             />
           </div>
 
+          <ArtifactVersionsDialog path={managedArtifactPath?.path ?? null} alternativePaths={managedArtifactPath?.alternativePaths} sessionId={managedArtifactPath?.sessionId} onClose={() => setManagedArtifactPath(null)} onPreview={handleOpenFile} />
           {/* File preview overlay — rendered by the link interceptor when a previewable file is clicked */}
           {linkInterceptor.previewState && (
             <FilePreviewRenderer

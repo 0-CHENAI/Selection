@@ -711,6 +711,7 @@ export class PiAgent extends BaseAgent {
       branchFromSessionPath: this.config.session?.branchFromSessionPath,
       branchFromSdkTurnId: this.config.session?.branchFromSdkTurnId,
       resumeSdkSessionId: this.config.session?.sdkSessionId,
+      toolResultRecovery: this.config.toolResultRecovery,
       forceFreshSession: this.config.session?.forceFreshSdkSession,
     });
 
@@ -1444,6 +1445,7 @@ export class PiAgent extends BaseAgent {
    * Runs the centralized permission pipeline and sends the decision back.
    */
   private async handlePreToolUseRequest(req: {
+    recoveryClass?: 'read-only' | 'idempotent' | 'file-verifiable' | 'unknown';
     requestId: string;
     toolName: string;
     toolCallId?: string;
@@ -1459,6 +1461,15 @@ export class PiAgent extends BaseAgent {
       return;
     }
     const input = recoverKnownToolInputFromIntent(toolName, req.input);
+    try {
+      // Bridge metadata is independent of model arguments. Missing/invalid contracts fail closed.
+      const recoveryClass = req.recoveryClass && ['read-only', 'idempotent', 'file-verifiable', 'unknown'].includes(req.recoveryClass)
+        ? req.recoveryClass : 'unknown';
+      this.onBeforeToolExecution?.(toolName, input, toolCallId, recoveryClass);
+    } catch (error) {
+      reply({ type: 'pre_tool_use_response', requestId, action: 'block', reason: error instanceof Error ? error.message : 'Execution checkpoint failed' });
+      return;
+    }
     const inputWasRecovered = input !== req.input;
     const debugSessionId = this.config.session?.id || this._sessionId;
     this.debug(`PreToolUse request from subprocess: ${toolName} (${requestId}, sessionId=${debugSessionId})`);
@@ -2428,6 +2439,13 @@ export class PiAgent extends BaseAgent {
    * Called by SessionManager during branch creation to avoid creating
    * transcript-only branches without real Pi session context.
    */
+  async prepareExecutionRecovery(): Promise<void> {
+    if (!this.config.toolResultRecovery) throw new Error('Tool recovery plan is unavailable');
+    const sessionId = await this.requestEnsureSessionReady();
+    if (sessionId !== this.config.toolResultRecovery.sdkSessionId) throw new Error('Tool recovery changed the SDK session identity');
+    this.config.toolResultRecovery = undefined;
+  }
+
   override async ensureBranchReady(): Promise<void> {
     const isBranchedSession = !!this.config.session?.branchFromMessageId;
     if (!isBranchedSession) return;

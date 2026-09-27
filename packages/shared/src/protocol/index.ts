@@ -3,3 +3,5 @@ export * from './channels'
 export * from './dto'
 export * from './events'
 export * from './routing'
+
+export * from './artifacts'

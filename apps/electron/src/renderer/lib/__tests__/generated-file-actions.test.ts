@@ -53,4 +53,23 @@ describe('generated artifact actions', () => {
     })
     expect(calls).toEqual([`external:${directory}`])
   })
+
+  test('missing version targets retain their exact candidates for recovery, while denied paths never bypass access checks', async () => {
+    const managed: Array<[string, string[] | undefined]> = []
+    const opened: string[] = []
+    const options = {
+      requestedPath: fileName, action: 'versions' as const, baseDir: 'D:\\成果', baseDirs: ['E:\\项目'],
+      statPath: async () => null,
+      searchFiles: async () => [{ type: 'file' as const, name: fileName, path: wrongPath }],
+      manageArtifact: (path: string, alternatives?: string[]) => { managed.push([path, alternatives]) },
+      openPreview: (path: string) => { opened.push(path) }, reveal: (path: string) => { opened.push(path) },
+    }
+    await openGeneratedFileAction(options)
+    expect(managed).toEqual([[realPath, [`E:\\项目\\${fileName}`]]])
+    expect(opened).toEqual([])
+    await expect(openGeneratedFileAction({ ...options, statPath: async () => { throw new Error('Access denied') } })).rejects.toThrow('Access denied')
+    expect(managed).toHaveLength(1)
+    expect(await openGeneratedFileAction({ ...options, action: 'external',
+      statPath: async () => ({ path: realPath, type: 'file' }), openExternal: async () => false })).toBe(false)
+  })
 })

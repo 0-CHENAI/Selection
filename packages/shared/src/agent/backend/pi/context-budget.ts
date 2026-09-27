@@ -14,7 +14,7 @@ const MESSAGE_OVERHEAD_TOKENS = 8;
 const MIN_RETRY_OUTPUT_TOKENS = 256;
 
 export const ACTIONABLE_CONTEXT_OVERFLOW_MESSAGE =
-  '当前会话已超出模型可用上下文。系统已尝试缩减输出预算并压缩上下文，但仍无法继续。请使用 /compact 后重试，减少附件或较大的工具结果，或新建会话并选择更大上下文的模型。';
+  '当前请求已达到模型上下文安全上限，无法安全发送。原始消息和附件仍然保留。请整理可压缩历史、选择更大上下文的模型，或在新会话中调整输入、分批读取附件。';
 
 export interface ContextBudget {
   estimatedInputTokens: number;

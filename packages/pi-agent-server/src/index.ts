@@ -1,4 +1,6 @@
 #!/usr/bin/env node
+import { registerRecoveryClass, registeredRecoveryClass } from './tool-recovery';
+import { nativeEditOperations, nativeWriteOperations, restoreToolResults, withToolFileOperation } from './tool-file-operations';
 import { applyCompactionSettings, installCompactionPolicy } from './compaction-policy.ts';
 import { installUnknownToolGuard } from './unknown-tool-guard.ts';
 import { runManualCompaction } from './manual-compaction.ts';
@@ -153,6 +155,7 @@ interface InitMessage {
   branchFromSessionPath?: string;
   branchFromSdkTurnId?: string;
   resumeSdkSessionId?: string;
+  toolResultRecovery?: import('../../shared/src/agent/backend/pi/file-operation-receipts').ToolResultRecoveryPlan;
   forceFreshSession?: boolean;
   /** Swarm sessions enable an earlier auto-compaction policy. */
   swarmEnabled?: boolean;
@@ -243,6 +246,7 @@ type OutboundAgentEvent = (AgentSessionEvent | EnrichedToolExecutionStartEvent
 interface OutboundReady { type: 'ready'; sessionId: string | null; callbackPort: number }
 interface OutboundEvent { type: 'event'; event: OutboundAgentEvent }
 interface OutboundPreToolUseReq {
+  recoveryClass?: 'read-only' | 'idempotent' | 'file-verifiable' | 'unknown';
   type: 'pre_tool_use_request';
   requestId: string;
   toolName: string;
@@ -748,13 +752,13 @@ async function ensureSession(): Promise<AgentSession> {
   //   - Do NOT pass tool *objects* to `tools` — `allowedToolNames = new Set(options.tools)`
   //     then `.has(name)` returns false for every string lookup → zero tools active.
   const builtinDefs = [
-    createSelectionReadToolDefinition(cwd),
-    createBashToolDefinition(cwd),
-    createEditToolDefinition(cwd),
-    createWriteToolDefinition(cwd),
-    createGrepToolDefinition(cwd),
-    createFindToolDefinition(cwd),
-    createLsToolDefinition(cwd),
+    registerRecoveryClass(createSelectionReadToolDefinition(cwd), 'read-only'),
+    registerRecoveryClass(createBashToolDefinition(cwd), 'unknown'),
+    registerRecoveryClass(createEditToolDefinition(cwd, { operations: nativeEditOperations }), 'file-verifiable'),
+    registerRecoveryClass(createWriteToolDefinition(cwd, { operations: nativeWriteOperations }), 'file-verifiable'),
+    registerRecoveryClass(createGrepToolDefinition(cwd), 'read-only'),
+    registerRecoveryClass(createFindToolDefinition(cwd), 'read-only'),
+    registerRecoveryClass(createLsToolDefinition(cwd), 'read-only'),
   ];
   const proxyTools = buildProxyTools();
   // Pi sessions can switch models at runtime, while their registered tool schemas
@@ -797,6 +801,11 @@ async function ensureSession(): Promise<AgentSession> {
       branchFromSdkTurnId: initConfig.branchFromSdkTurnId,
       forceFreshSession: initConfig.forceFreshSession,
     });
+    if (initConfig.toolResultRecovery) {
+      restoreToolResults(sessionOptions.sessionManager,
+        getSessionPath(initConfig.workspaceRootPath, initConfig.sessionId), initConfig.toolResultRecovery);
+      initConfig.toolResultRecovery = undefined;
+    }
 
   }
 
@@ -876,6 +885,7 @@ async function requestPreToolUseApproval(
   sdkToolName: string,
   input: Record<string, unknown>,
   toolCallId?: string,
+  recoveryClass: 'read-only' | 'idempotent' | 'file-verifiable' | 'unknown' = 'unknown',
 ): Promise<
   | { action: 'execute'; input: Record<string, unknown> }
   | { action: 'prepare_source_guide'; preparation: SourceGuidePreparation }
@@ -893,6 +903,7 @@ async function requestPreToolUseApproval(
 
   send({
     type: 'pre_tool_use_request',
+    recoveryClass,
     answerRunId,
     requestId,
     toolName: sdkToolName,
@@ -993,7 +1004,7 @@ function wrapSingleTool(
         throw new Error('Tool execution was interrupted.');
       }
       // Send to main process for permission checking + transforms
-      const approval = await requestPreToolUseApproval(sdkToolName, inputObj, toolCallId);
+      const approval = await requestPreToolUseApproval(sdkToolName, inputObj, toolCallId, registeredRecoveryClass(tool));
       if (approval.action === 'prepare_source_guide') {
         return {
           content: [{ type: 'text', text: formatSourceGuidePreparationResult(approval.preparation) }],
@@ -1010,7 +1021,16 @@ function wrapSingleTool(
       if (signal?.aborted || answerAccepted || executingRunId !== answerRunId) throw new Error('Tool execution was interrupted.');
       if (answerRecovery && !isAnswerTool(sdkToolName)) throw new Error('Only submit_answer is allowed during answer recovery.');
       // Execute original tool with (potentially modified) input
-      const result = await originalExecute(toolCallId, inputObj, signal, onUpdate, ctx);
+      const fileOperation = registeredRecoveryClass(tool) === 'file-verifiable'
+        && (sdkToolName === 'Write' || sdkToolName === 'Edit');
+      if (fileOperation && (!initConfig || !piSession?.sessionId)) throw new Error('Native file operation session identity is unavailable');
+      const execute = () => originalExecute(toolCallId, inputObj, signal, onUpdate, ctx);
+      const result = fileOperation
+        ? await withToolFileOperation(getSessionPath(initConfig!.workspaceRootPath, initConfig!.sessionId), {
+          sessionId: initConfig!.sessionId, sdkSessionId: piSession!.sessionId, answerRunId: executingRunId,
+          toolCallId, toolName: sdkToolName,
+        }, execute)
+        : await execute();
 
       // --- Post-execute: large response summarization ---
 
@@ -1682,7 +1702,11 @@ async function handleInit(msg: Extract<InboundMessage, { type: 'init' }>): Promi
  * take 60–120 s.
  */
 
+const pendingOperationControllers = new Set<AbortController>();
+
 async function handlePrompt(msg: Extract<InboundMessage, { type: 'prompt' }>): Promise<void> {
+  const promptController = new AbortController();
+  pendingOperationControllers.add(promptController);
   currentUserMessage = msg.message;
   answerRunId = msg.answerRunId;
   answerRecovery = !!msg.answerRecovery;
@@ -1730,7 +1754,7 @@ async function handlePrompt(msg: Extract<InboundMessage, { type: 'prompt' }>): P
     unsubscribeEvents = session.subscribe(handleSessionEvent);
 
     // Wait for any in-flight auto-compaction to avoid race (craft-agents-oss#464)
-    await waitForCompaction(session);
+    await waitForCompaction(session, 300_000, 200, false, promptController.signal);
     // A settings reload can drop in-memory overrides without changing the
     // session object. Restore the trigger before the SDK's pre-prompt check.
     applyCompactionPolicy(session.model, session.autoCompactionEnabled);
@@ -1771,6 +1795,8 @@ async function handlePrompt(msg: Extract<InboundMessage, { type: 'prompt' }>): P
     // Send synthetic agent_end so the main process event queue unblocks.
     // willRetry: false — this is the terminal error path, no retry follows.
     send({ type: 'event', event: { type: 'agent_end', messages: [], willRetry: false } });
+  } finally {
+    pendingOperationControllers.delete(promptController);
   }
 }
 
@@ -1817,6 +1843,7 @@ function handlePreToolUseResponse(msg: Extract<InboundMessage, { type: 'pre_tool
 }
 
 async function handleAbort(strict = false): Promise<void> {
+  for (const controller of pendingOperationControllers) controller.abort();
   // SDK abort waits for tools. Release bridge waits first to break the cycle
   // where the pending tool is itself waiting for the abort handler to finish.
   for (const pending of pendingPreToolUse.values()) {
@@ -1890,6 +1917,8 @@ async function handleEnsureSessionReady(msg: Extract<InboundMessage, { type: 'en
 }
 
 async function handleCompact(msg: Extract<InboundMessage, { type: 'compact' }>): Promise<void> {
+  const controller = new AbortController();
+  pendingOperationControllers.add(controller);
   try {
     const session = await ensureSession();
     // Serialize manual /compact behind any in-flight auto-compaction. Public
@@ -1899,7 +1928,7 @@ async function handleCompact(msg: Extract<InboundMessage, { type: 'compact' }>):
     // before starting a manual one. Reserve the request before the SDK awaits
     // abort(), and fail on timeout rather than overlap another compaction.
     const result = await runManualCompaction(session, msg.customInstructions,
-      () => applyCompactionPolicy(session.model, session.autoCompactionEnabled));
+      () => applyCompactionPolicy(session.model, session.autoCompactionEnabled), controller.signal);
     send({
       type: 'compact_result',
       id: msg.id,
@@ -1919,6 +1948,8 @@ async function handleCompact(msg: Extract<InboundMessage, { type: 'compact' }>):
       success: false,
       errorMessage: errorMsg,
     });
+  } finally {
+    pendingOperationControllers.delete(controller);
   }
 }
 

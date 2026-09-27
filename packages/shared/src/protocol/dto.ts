@@ -13,6 +13,7 @@ import type {
   ToolDisplayMeta,
   AgentToolResultContent,
   AnnotationV1,
+  AnnotationFeedbackReference,
   PermissionRequest as BasePermissionRequest,
   QueuedMessageContext,
   TextStreamPhase,
@@ -54,7 +55,18 @@ export interface ProgressSupervisionView {
   evidence?: Array<{ id: string; summary: string }>
 }
 
+export interface RuntimeRecoveryView {
+  version: 1
+  phase: 'running' | 'recovering' | 'blocked' | 'completed' | 'cancelled'
+  reason?: string
+  completedSteps: number
+  pendingTools: string[]
+  updatedAt: number
+  canResume: boolean
+}
+
 export interface Session {
+  runtimeRecovery?: RuntimeRecoveryView
   progressSupervision?: ProgressSupervisionView
   id: string
   workspaceId: string
@@ -380,6 +392,12 @@ export interface TaskCreateFromTemplateRequest {
 }
 
 export interface SwarmRunNodeDto {
+  artifactDelivery?: {
+    phase: 'executing' | 'validating' | 'integrating' | 'conflict' | 'validation-failed' | 'integrated' | 'needs-attention'
+    outputs: Record<string, string>
+    checks: string[]
+    conflicts: string[]
+  }
   sessionId: string
   parentSessionId?: string
   name: string
@@ -632,7 +650,7 @@ export type SessionEvent =
   | { type: 'name_changed'; sessionId: string; name?: string }
   | { type: 'session_model_changed'; sessionId: string; model: string | null }
   | { type: 'session_status_changed'; sessionId: string; sessionStatus: SessionStatus }
-  | { type: 'session_metadata_changed'; sessionId: string; changes: Partial<Pick<Session, 'taskNodeCount' | 'kanbanColumn' | 'taskDraft' | 'taskSlug' | 'projectId' | 'swarmEnabled' | 'orchestrationId' | 'orchestrationRootSessionId' | 'orchestrationDepth' | 'orchestrationRole' | 'orchestrationLifecycle' | 'orchestrationStatus' | 'orchestrationBlocker' | 'orchestrationTokensUsed' | 'orchestrationTokenBudget' | 'orchestrationAggregation'>> }
+  | { type: 'session_metadata_changed'; sessionId: string; changes: Partial<Pick<Session, 'runtimeRecovery' | 'taskNodeCount' | 'kanbanColumn' | 'taskDraft' | 'taskSlug' | 'projectId' | 'swarmEnabled' | 'orchestrationId' | 'orchestrationRootSessionId' | 'orchestrationDepth' | 'orchestrationRole' | 'orchestrationLifecycle' | 'orchestrationStatus' | 'orchestrationBlocker' | 'orchestrationTokensUsed' | 'orchestrationTokenBudget' | 'orchestrationAggregation'>> }
   | { type: 'session_deleted'; sessionId: string }
   | { type: 'session_created'; sessionId: string }
   | { type: 'session_shared'; sessionId: string; sharedUrl: string }
@@ -648,6 +666,7 @@ export type SessionEvent =
   | { type: 'messages_restored'; sessionId: string; messages: Message[]; runId: string }
 
 export interface SendMessageOptions {
+  annotationFollowUps?: AnnotationFeedbackReference[]
   skillSlugs?: string[]
   badges?: ContentBadge[]
   optimisticMessageId?: string
@@ -675,6 +694,7 @@ export interface SendMessageOptions {
 export type SessionCommand =
   | { type: 'setProgressSupervision'; enabled: boolean }
   | { type: 'continueProgress' }
+  | { type: 'resumeExecution' }
   | { type: 'flag' }
   | { type: 'unflag' }
   | { type: 'archive' }

@@ -1,7 +1,26 @@
-import { existsSync, readFileSync, statSync, writeFileSync, unlinkSync, mkdtempSync, renameSync } from 'fs';
+import { createHash } from 'node:crypto';
+import { existsSync, readFileSync, statSync, writeFileSync, unlinkSync, mkdtempSync, renameSync, closeSync, openSync, fstatSync, readSync } from 'fs';
 import { extname, basename, resolve, join, relative } from 'path';
 import { execSync } from 'child_process';
 import { tmpdir } from 'os';
+
+export interface FileFingerprint { hash: string; size: number }
+
+/** Hash a stable regular file without loading its complete contents into memory. */
+export function fileFingerprint(path: string): FileFingerprint | undefined {
+  let fd: number | undefined;
+  try {
+    if (!statSync(path).isFile()) throw new Error('File is not a regular file');
+    fd = openSync(path, 'r');
+    const before = fstatSync(fd), hash = createHash('sha256'), buffer = Buffer.allocUnsafe(1024 * 1024);
+    let size = 0, length: number;
+    while ((length = readSync(fd, buffer, 0, buffer.length, null)) > 0) { hash.update(buffer.subarray(0, length)); size += length; }
+    const after = fstatSync(fd);
+    if (before.size !== after.size || before.mtimeMs !== after.mtimeMs || before.ctimeMs !== after.ctimeMs || size !== after.size) throw new Error('File changed during verification');
+    return { hash: hash.digest('hex'), size };
+  } catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined; throw error; }
+  finally { if (fd !== undefined) closeSync(fd); }
+}
 
 /**
  * Strip UTF-8 BOM (Byte Order Mark) from a string.

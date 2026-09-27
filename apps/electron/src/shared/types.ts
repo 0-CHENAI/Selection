@@ -361,6 +361,12 @@ export interface ElectronAPI {
 
   // Filesystem search (for @ mention file selection)
   searchFiles(basePath: string, query: string): Promise<FileSearchResult[]>
+  previewArtifactVersion(artifactId: string, versionId: string): Promise<string>
+  cleanupArtifactVersions(sessionId: string, artifactId: string, expectedVersion: string, versionIds: string[], requestId: string): Promise<import('@craft-agent/shared/protocol').ManagedArtifact>
+  getArtifactFeedbackContext(sessionId: string, artifactId: string): Promise<{ root: string; requiresProjectChecks: boolean }>
+  listArtifactFeedback(sessionId: string, artifactId: string): Promise<import('@craft-agent/shared/protocol').ArtifactFeedback[]>
+  artifactFeedback(operation: import('@craft-agent/shared/protocol').ArtifactFeedbackOperation): Promise<import('@craft-agent/shared/protocol').ArtifactFeedback>
+  manageArtifact(operation: import('@craft-agent/shared/protocol').ArtifactOperation): Promise<import('@craft-agent/shared/protocol').ManagedArtifact>
   statPath(path: string): Promise<FilePathStat | null>
 
   // Server filesystem browsing (remote mode)

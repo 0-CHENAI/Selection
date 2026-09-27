@@ -210,6 +210,12 @@ export const CHANNEL_MAP = {
 
   // Filesystem search
   searchFiles: invoke(RPC_CHANNELS.fs.SEARCH),
+  artifactFeedback: invoke(RPC_CHANNELS.artifacts.FEEDBACK),
+  previewArtifactVersion: invoke(RPC_CHANNELS.artifacts.PREVIEW),
+  cleanupArtifactVersions: invoke(RPC_CHANNELS.artifacts.CLEANUP),
+  getArtifactFeedbackContext: invoke(RPC_CHANNELS.artifacts.FEEDBACK_CONTEXT),
+  listArtifactFeedback: invoke(RPC_CHANNELS.artifacts.FEEDBACK_LIST),
+  manageArtifact: invoke(RPC_CHANNELS.artifacts.MANAGE),
   statPath: invoke(RPC_CHANNELS.fs.STAT_PATH),
 
   // Server filesystem browsing (remote mode)

@@ -7,9 +7,10 @@
  * Callers orchestrate via their agent's runMiniCompletion() for summarization.
  */
 
-import { existsSync, mkdirSync, writeFileSync } from 'fs';
-import { createHash } from 'crypto';
+import { existsSync, mkdirSync, writeFileSync, lstatSync } from 'fs';
+import { createHash, randomUUID } from 'crypto';
 import { join, relative } from 'path';
+import { fileFingerprint } from './files.ts';
 import { debug } from './debug.ts';
 import { estimateTokensDensityAware } from './token-estimate.ts';
 export { estimateTokensDensityAware } from './token-estimate.ts';
@@ -121,10 +122,10 @@ export function saveLargeResponse(
 
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 23);
     const safeLabel = label.replace(/[^a-zA-Z0-9]/g, '_').slice(0, 30);
-    const filename = `${timestamp}_${toolName}_${safeLabel}.txt`;
+    const filename = `${timestamp}_${sanitizeFilename(toolName)}_${safeLabel}_${randomUUID()}.txt`;
     const absolutePath = join(responsesDir, filename);
 
-    writeFileSync(absolutePath, content, 'utf-8');
+    writeFileSync(absolutePath, content, { encoding: 'utf-8', flag: 'wx', mode: 0o600 });
 
     const relativePath = relative(sessionPath, absolutePath);
 
@@ -173,9 +174,9 @@ function saveJsonArtifact(
     mkdirSync(responsesDir, { recursive: true });
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 23);
     const safeTool = sanitizeFilename(toolName || 'tool_result');
-    const filename = `${timestamp}_${safeTool}_${suffix}.json`;
+    const filename = `${timestamp}_${safeTool}_${suffix}_${randomUUID()}.json`;
     const absolutePath = join(responsesDir, filename);
-    writeFileSync(absolutePath, content, 'utf-8');
+    writeFileSync(absolutePath, content, { encoding: 'utf-8', flag: 'wx', mode: 0o600 });
     return {
       absolutePath,
       relativePath: relative(sessionPath, absolutePath),
@@ -217,10 +218,16 @@ function saveExtractedAsset(
     const safeTool = sanitizeFilename(toolName || 'tool_result');
     const safeExt = ext.startsWith('.') ? ext : `.${ext || 'bin'}`;
     const filename = `${safeTool}_${sha256.slice(0, 16)}${safeExt}`;
-    const absolutePath = join(assetsDir, filename);
-
-    if (!existsSync(absolutePath)) {
-      writeFileSync(absolutePath, buffer, { flag: 'wx' });
+    let absolutePath = join(assetsDir, filename);
+    // Reuse only complete bytes; an interrupted save or external edit is not a cache hit.
+    const cached = existsSync(absolutePath) ? lstatSync(absolutePath) : undefined;
+    const fingerprint = cached?.isFile() && cached.size === buffer.length ? fileFingerprint(absolutePath) : undefined;
+    if (fingerprint?.hash !== sha256 || fingerprint.size !== buffer.length) {
+      const saved = saveBinaryResponse(sessionPath, join('assets', filename), buffer, mimeType);
+      if (saved.type !== 'file_download') return null;
+      absolutePath = saved.path;
+      const confirmed = fileFingerprint(absolutePath);
+      if (confirmed?.hash !== sha256 || confirmed.size !== buffer.length) return null;
     }
 
     return {
@@ -512,12 +519,12 @@ export async function guardLargeResult(
     const ext = detectExtensionFromMagic(buffer) || '.bin';
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
     const safeName = sanitizeFilename(opts.toolName);
-    const filename = `${safeName}_${timestamp}${ext}`;
+    const filename = `${safeName}_${timestamp}_${randomUUID()}${ext}`;
     const result = saveBinaryResponse(opts.sessionPath, filename, buffer, null);
     if (result.type === 'file_download') {
       return `[Binary content detected and saved]\n\nFile: ${result.path}\nSize: ${result.sizeHuman}\nType: ${ext.slice(1).toUpperCase() || 'unknown'}\n\nUse the Read tool or reference this path to work with the file.`;
     }
-    return `[Binary content detected but save failed: ${result.error}]`;
+    return null;
   }
 
   // 2. Convert to string (no-op if already string, toString if Buffer that passed binary check)
@@ -537,12 +544,12 @@ export async function guardLargeResult(
     debug('large-response', `${opts.toolName}: ${base64Result.source} binary detected (${base64Result.buffer.length} decoded bytes)`);
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
     const safeName = sanitizeFilename(opts.toolName);
-    const filename = `${safeName}_${timestamp}${base64Result.ext}`;
+    const filename = `${safeName}_${timestamp}_${randomUUID()}${base64Result.ext}`;
     const result = saveBinaryResponse(opts.sessionPath, filename, base64Result.buffer, base64Result.mimeType);
     if (result.type === 'file_download') {
       return `[Base64-encoded binary detected and saved]\n\nFile: ${result.path}\nSize: ${result.sizeHuman}\nType: ${base64Result.ext.slice(1).toUpperCase() || 'unknown'}\n\nThe tool result contained base64-encoded binary data which has been decoded and saved.`;
     }
-    return `[Base64-encoded binary detected but save failed: ${result.error}]`;
+    return null;
   }
 
   // 3. Existing size check + summarize flow (model-aware when contextWindow provided).
@@ -589,13 +596,9 @@ export async function handleLargeResponse(
   );
 
   if (!saveResult) {
-    // File save failed — return preview without file references
-    const preview = text.substring(0, 2000);
-    return {
-      message: `[Response too large (~${estimatedTokens} tokens)]\n\nPreview:\n${preview}...`,
-      filePath: '',
-      wasSummarized: false,
-    };
+    // Never discard the only copy. The caller retains the complete tool result;
+    // the request preflight can then pause if it cannot fit safely.
+    return null;
   }
 
   const { absolutePath, relativePath } = saveResult;

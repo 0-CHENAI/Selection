@@ -316,7 +316,7 @@ const ERROR_DEFINITIONS: Record<ErrorCode, Omit<AgentError, 'code' | 'originalEr
   },
   context_limit: {
     title: 'Context limit reached',
-    message: 'The conversation exceeded the model context limit. Compact the conversation or start a new session before continuing.',
+    message: 'This request reached the context safety limit. Original messages and attachments are retained. Compact available history, choose a larger-context model, or adjust the input and read attachments in batches in a new session.',
     actions: [],
     canRetry: false,
   },

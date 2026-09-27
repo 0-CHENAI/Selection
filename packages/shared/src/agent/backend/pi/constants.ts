@@ -47,3 +47,8 @@ export const PI_TOOL_NAME_MAP: Record<string, string> = {
   glob: 'Glob',
   task: 'Task',
 };
+
+/** Native identities only; callers must also require a registered read-only contract. */
+export function isNativeReadOnlyTool(name: string): boolean {
+  return ['Read', 'Grep', 'Glob', 'Find', 'Ls'].includes(PI_TOOL_NAME_MAP[name] ?? name);
+}

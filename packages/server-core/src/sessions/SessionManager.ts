@@ -1,3 +1,6 @@
+import { INTERRUPTED_READ_RESULT, recoveredFileOperationText, readToolFileOperation, verifyToolFileOperation } from '../../../shared/src/agent/backend/pi/file-operation-receipts'
+import { acquireProjectLock, ProjectLockBusyError } from '../reliability/project-lock'
+import { executionTaskIdentity, claimExecutionCheckpoint, readExecutionCheckpoint, writeExecutionCheckpoint, sdkStateHash, sdkStateSnapshot, recoverySdkSnapshot, recoveryTranscriptMatches, verifiedFileOperations, recoveryBlocker, toolRecoveryClass, type ExecutionCheckpoint } from '../reliability/execution-checkpoint'
 import { ProgressSupervisor, createProgressBudget, type ProgressBudget, type ProgressDecision, type ProgressSnapshot } from '../supervision/progress-supervisor'
 import { saveProgressCandidate, loadProgressCandidate, readProgressCheckpoint, writeProgressCheckpoint, type ProgressCheckpoint } from '../supervision/progress-store'
 import { waitForRuntimeCleanup } from './runtime-cleanup.ts'
@@ -870,6 +873,10 @@ interface ManagedSession {
   progressLiveEvaluationTokens?: number
   progressReviewer?: AgentInstance
   progressSupervisor?: ProgressSupervisor
+  executionCheckpoint?: ExecutionCheckpoint
+  toolResultRecovery?: import('../../../shared/src/agent/backend/pi/file-operation-receipts').ToolResultRecoveryPlan
+  runtimeRecovery?: import('@craft-agent/shared/protocol/dto').RuntimeRecoveryView
+  recoveryClaimed?: boolean
   progressSupervision?: import('@craft-agent/shared/protocol/dto').ProgressSupervisionView
   progressDisabled?: boolean
 
@@ -1379,6 +1386,7 @@ function managedToSession(m: ManagedSession, overrides?: Partial<Session>): Sess
     lastMessageRole: m.lastMessageRole,
     tokenUsage: m.tokenUsage,
     progressSupervision: m.progressSupervision,
+    runtimeRecovery: m.runtimeRecovery,
     messageCount: m.messageCount,
     lastFinalMessageId: m.lastFinalMessageId,
     // Runtime-only fields
@@ -1468,6 +1476,8 @@ export function resolveMidStreamDeliveryOutcome(
 
 export class SessionManager implements ISessionManager {
   private sessions: Map<string, ManagedSession> = new Map()
+  private executionOwners = new Map<string, { release: () => void; calls: number }>()
+  private startupRecoveryClaims = new Set<string>()
   // Delta batching for performance - reduces IPC events from 50+/sec to ~20/sec
   private pendingDeltas: Map<string, PendingDelta> = new Map()
   private deltaFlushTimers: Map<string, NodeJS.Timeout> = new Map()
@@ -2330,10 +2340,33 @@ export class SessionManager implements ISessionManager {
       }
 
       this.recoverPersistedSwarmSessions()
+      for (const managed of this.sessions.values()) {
+        this.restoreExecutionCheckpoint(managed)
+      }
 
       sessionLog.info(`Loaded ${totalSessions} sessions from disk (metadata only)`)
     } catch (error) {
       sessionLog.error('Failed to load sessions from disk:', error)
+    }
+  }
+
+  private restoreExecutionCheckpoint(managed: ManagedSession): void {
+    const saved = readExecutionCheckpoint(getSessionStoragePath(managed.workspace.rootPath, managed.id))
+    if (saved.kind === 'missing') return
+    if (saved.kind !== 'ok') {
+      managed.runtimeRecovery = { version: 1, phase: 'blocked', reason: saved.kind, completedSteps: 0, pendingTools: [], updatedAt: Date.now(), canResume: false }
+      return
+    }
+    managed.executionCheckpoint = saved.checkpoint
+    // Restore the epoch before scheduling recovery; subsequent executions must advance it.
+    if (saved.checkpoint.sessionId === managed.id) {
+      managed.processingGeneration = Math.max(managed.processingGeneration, saved.checkpoint.generation)
+    }
+    const interrupted = saved.checkpoint.status === 'running' || saved.checkpoint.status === 'claimed'
+    if (saved.checkpoint.status === 'claimed') this.startupRecoveryClaims.add(managed.id)
+    this.publishRecovery(managed, saved.checkpoint.status === 'running' || saved.checkpoint.status === 'claimed' ? 'recovering' : saved.checkpoint.status)
+    if (interrupted) {
+      setImmediate(() => { void this.resumeExecution(managed.id).catch(() => sessionLog.warn('Execution recovery paused', { sessionId: managed.id })) })
     }
   }
 
@@ -4087,6 +4120,7 @@ export class SessionManager implements ISessionManager {
         miniModel,
         thinkingLevel: managed.thinkingLevel,
         session: sessionConfig,
+        toolResultRecovery: managed.toolResultRecovery,
         onSdkSessionIdUpdate,
         onSdkSessionIdCleared,
         onBranchForkInvalidated,
@@ -4531,6 +4565,14 @@ export class SessionManager implements ISessionManager {
       managed.agentReadyResolve?.()
 
       // Set up permission handler to forward requests to renderer
+      managed.agent.onBeforeToolExecution = (toolName, input, toolCallId, recoveryClass) => {
+        if (!managed.isProcessing || managed.stopRequested) throw new Error('Execution is no longer active')
+        const checkpoint = managed.executionCheckpoint
+        if (checkpoint && toolCallId) {
+          checkpoint.pendingTools[toolCallId] = { name: toolName, recovery: recoveryClass ?? toolRecoveryClass(toolName) }
+          this.checkpointExecution(managed)
+        }
+      }
       managed.agent.onPermissionRequest = (request: {
         requestId: string;
         toolName: string;
@@ -4574,6 +4616,7 @@ export class SessionManager implements ISessionManager {
           type: request.type,
           commandHash: effectiveCommandHash,
         })
+        this.checkpointExecution(managed)
 
         if (request.type === 'admin_approval' && effectiveCommandHash && this.hasActiveAdminRememberApproval(managed.id, effectiveCommandHash)) {
           const brokerResult = this.privilegedExecutionBroker.resolveApproval(request.requestId, true, {
@@ -6433,7 +6476,37 @@ export class SessionManager implements ISessionManager {
     managed.pendingContinuationUsage = undefined
   }
 
-  async sendMessage(
+  /** Hold cross-process ownership through acceptance, execution and runtime cleanup.
+   * Internal retries and queued sends in this manager share the same owner.
+   */
+  private async withSessionExecution<T>(sessionId: string, execute: () => Promise<T>): Promise<T> {
+    const managed = this.sessions.get(sessionId)
+    if (!managed) throw new Error(`Session ${sessionId} not found`)
+    let owner = this.executionOwners.get(sessionId)
+    if (!owner) {
+      try {
+        owner = { release: acquireProjectLock(join(getSessionStoragePath(managed.workspace.rootPath, sessionId), 'data', 'execution-owner')), calls: 0 }
+      } catch (error) {
+        if (error instanceof ProjectLockBusyError) throw new Error('Session execution is active in another application instance')
+        throw error
+      }
+      this.executionOwners.set(sessionId, owner)
+    }
+    owner.calls++
+    try { return await execute() }
+    finally {
+      if (--owner.calls === 0) {
+        this.executionOwners.delete(sessionId)
+        owner.release()
+      }
+    }
+  }
+
+  async sendMessage(...args: Parameters<SessionManager['executeMessage']>): Promise<void> {
+    return this.withSessionExecution(args[0], () => this.executeMessage(...args))
+  }
+
+  private async executeMessage(
     sessionId: string,
     message: string,
     attachments?: FileAttachment[],
@@ -6465,6 +6538,9 @@ export class SessionManager implements ISessionManager {
       throw new Error(`Session ${sessionId} not found`)
     }
     if (managed.deleting) throw new Error(`Session ${sessionId} is being deleted`)
+    if (managed.runtimeRecovery?.reason === 'unsupported' || managed.runtimeRecovery?.reason === 'corrupt') {
+      throw new Error('Execution checkpoint requires repair or a compatible application version. Start a separate session to continue safely.')
+    }
     // Captured before any await so a Stop during regenerate dispose / agent
     // create can invalidate this call (cancel bumps processingGeneration).
     const generationAtEntry = managed.processingGeneration
@@ -7130,6 +7206,15 @@ export class SessionManager implements ISessionManager {
         return
       }
 
+      const checkpointOwner = managed.messages.findLast(m => m.role === 'user' && !m.hidden && !m.isQueued)
+      if (checkpointOwner) {
+        managed.executionCheckpoint = { version: 1, sessionId, userMessageId: checkpointOwner.id,
+          generation: myGeneration, answerRunId: managed.answerDelivery?.runId, sdkSessionId: managed.sdkSessionId,
+          taskIdentity: executionTaskIdentity(managed),
+          transcriptTailId: managed.messages.at(-1)?.id, status: 'running', pendingTools: {},
+          completedTools: managed.recoveryClaimed ? [...(managed.executionCheckpoint?.completedTools ?? [])] : [], updatedAt: Date.now() }
+        this.checkpointExecution(managed)
+      }
       sendSpan.mark('chat.starting')
       const chatOptions = { previousResponseInterrupted, continueUserTask: isUserTaskContinuation }
       const chatIterator = this.runAnswerDelivery(managed, agent, this.runProgressExecution(managed, agent, message, preparedImages.attachments, chatOptions), chatOptions)
@@ -7149,8 +7234,24 @@ export class SessionManager implements ISessionManager {
           }
         }
 
-        // Process the event first
+        if (managed.processingGeneration !== myGeneration) break
+        if (managed.stopRequested && event.type !== 'complete') continue
+        // Persist unknown in-flight effects before accepting further events.
+        if (event.type === 'tool_start' && managed.executionCheckpoint) {
+          managed.executionCheckpoint.pendingTools[event.toolUseId] ??= { name: event.toolName, recovery: toolRecoveryClass(event.toolName) }
+          this.checkpointExecution(managed)
+        }
         await this.processEvent(managed, event)
+        if (event.type === 'tool_result' && managed.executionCheckpoint) {
+          delete managed.executionCheckpoint.pendingTools[event.toolUseId]
+          if (!managed.executionCheckpoint.completedTools.includes(event.toolUseId)) managed.executionCheckpoint.completedTools.push(event.toolUseId)
+        }
+        if (event.type === 'tool_result' || event.type === 'text_complete' || event.type === 'pi_turn_anchor'
+          || (event.type === 'info' && event.message.startsWith('Compacted'))) {
+          this.persistSession(managed)
+          await this.flushSession(managed.id)
+          if (managed.processingGeneration === myGeneration) this.checkpointExecution(managed)
+        }
 
         // Fallback: Capture SDK session ID if the onSdkSessionIdUpdate callback didn't fire.
         // Primary capture happens in getOrCreateAgent() via onSdkSessionIdUpdate callback,
@@ -7383,6 +7484,152 @@ export class SessionManager implements ISessionManager {
       managed.progressSupervision.mode = mode
       this.sendEvent({ type: 'progress_supervision', sessionId, state: managed.progressSupervision }, managed.workspace.id)
     }
+  }
+
+  private publishRecovery(managed: ManagedSession, phase: import('@craft-agent/shared/protocol/dto').RuntimeRecoveryView['phase']): void {
+    const c = managed.executionCheckpoint
+    if (!c) return
+    managed.runtimeRecovery = { version: 1, phase, reason: c.reason, completedSteps: c.completedTools.length,
+      pendingTools: Object.values(c.pendingTools).map(t => t.name), updatedAt: c.updatedAt,
+      canResume: c.status === 'running' && !managed.isProcessing && (!c.reason || c.reason === 'authorization-review' || c.reason === 'execution-active-elsewhere') }
+    this.sendEvent({ type: 'session_metadata_changed', sessionId: managed.id, changes: { runtimeRecovery: managed.runtimeRecovery } }, managed.workspace.id)
+  }
+
+  private checkpointExecution(managed: ManagedSession): void {
+    const c = managed.executionCheckpoint
+    if (!c || c.generation !== managed.processingGeneration) return
+    if (c.sdkSessionId !== managed.sdkSessionId) c.sdkTurnAnchor = undefined
+    c.sdkSessionId = managed.sdkSessionId
+    c.compactionMessageId = managed.messages.findLast(m => m.statusType === 'compaction_complete')?.id
+    c.waitingFor = c.status === 'claimed' ? 'recovery'
+      : c.status === 'running' ? (managed.pendingAuthRequestId || [...this.pendingPermissionRequests.values()].some(request => request.sessionId === managed.id)
+        ? 'user' : Object.keys(c.pendingTools).length ? 'tool' : 'model') : undefined
+    const sdk = sdkStateSnapshot(getSessionStoragePath(managed.workspace.rootPath, managed.id), managed.sdkSessionId)
+    c.sdkStateHash = sdk?.hash
+    c.sdkStateSize = sdk?.size
+    c.transcriptTailId = managed.messages.at(-1)?.id
+    c.updatedAt = Date.now()
+    writeExecutionCheckpoint(getSessionStoragePath(managed.workspace.rootPath, managed.id), c)
+    this.publishRecovery(managed, c.status === 'claimed' ? 'recovering' : c.status)
+  }
+
+  async resumeExecution(sessionId: string): Promise<void> {
+    try {
+      await this.withSessionExecution(sessionId, () => this.executeRecovery(sessionId))
+    } catch (error) {
+      if (error instanceof Error && error.message === 'Session execution is active in another application instance') {
+        const managed = this.sessions.get(sessionId)
+        if (managed?.executionCheckpoint) {
+          managed.executionCheckpoint.reason = 'execution-active-elsewhere'
+          this.publishRecovery(managed, 'blocked')
+        }
+      }
+      throw error
+    }
+  }
+
+  private async executeRecovery(sessionId: string): Promise<void> {
+    const managed = this.sessions.get(sessionId)
+    if (!managed || managed.isProcessing || managed.recoveryClaimed) throw new Error('Session is already active')
+    managed.recoveryClaimed = true
+    const generation = managed.processingGeneration
+    try {
+      await this.ensureMessagesLoaded(managed)
+      if (managed.isProcessing || managed.processingGeneration !== generation || managed.messageQueue.length) throw new Error('Another execution owns this session')
+      const c = managed.executionCheckpoint
+      if (!c) throw new Error('No execution checkpoint')
+      const reclaimAfterRestart = c.status === 'claimed' && this.startupRecoveryClaims.has(sessionId)
+      const verifiedToolCalls = verifiedFileOperations(getSessionStoragePath(managed.workspace.rootPath, sessionId), c)
+      const recoveredSdk = recoverySdkSnapshot(getSessionStoragePath(managed.workspace.rootPath, sessionId), c)
+      const blocker = recoveryBlocker({ ...c, ...(reclaimAfterRestart ? { status: 'running' as const } : {}), sdkStateHash: recoveredSdk ? recoveredSdk.hash : c.sdkStateHash }, { sessionId, generation: managed.processingGeneration, userMessageId: managed.messages.findLast(m => m.role === 'user' && !m.hidden && !m.isQueued)?.id,
+        sdkSessionId: managed.sdkSessionId, sdkStateHash: recoveredSdk?.hash,
+        taskIdentity: executionTaskIdentity(managed), compactionMessageId: managed.messages.findLast(m => m.statusType === 'compaction_complete')?.id,
+        transcriptTailId: recoveryTranscriptMatches(getSessionStoragePath(managed.workspace.rootPath, sessionId), c, managed.messages) ? c.transcriptTailId : managed.messages.at(-1)?.id,
+        cancelled: !!managed.stopRequested, orchestrated: !!(managed.taskSlug || managed.parentSessionId || managed.orchestrationId), permissionMode: managed.permissionMode, verifiedToolCalls })
+      if (blocker) {
+        c.reason = blocker
+        this.publishRecovery(managed, 'blocked')
+        throw new Error(`Execution recovery requires attention: ${blocker}`)
+      }
+      managed.executionCheckpoint = claimExecutionCheckpoint(getSessionStoragePath(managed.workspace.rootPath, managed.id), c, reclaimAfterRestart)
+      this.startupRecoveryClaims.delete(sessionId)
+      this.publishRecovery(managed, 'recovering')
+      if (Object.keys(c.pendingTools).length) {
+        managed.toolResultRecovery = { sessionId, sdkSessionId: c.sdkSessionId!, sdkStateHash: recoveredSdk!.hash,
+          answerRunId: c.answerRunId, pendingTools: structuredClone(c.pendingTools) }
+        const agent = await this.getOrCreateAgent(managed)
+        if (!agent.prepareExecutionRecovery) throw new Error('Backend cannot safely pair interrupted tool results')
+        await agent.prepareExecutionRecovery()
+        if (managed.stopRequested || managed.processingGeneration !== generation) throw new Error('Recovery was interrupted')
+        const restored: Message[] = []
+        const previousMessages = managed.messages
+        const recoveryMessages = managed.messages.map(message => ({ ...message }))
+        for (const [toolCallId, tool] of Object.entries(c.pendingTools)) {
+          const written = verifiedToolCalls.includes(toolCallId)
+          const receipt = written ? readToolFileOperation(getSessionStoragePath(managed.workspace.rootPath, sessionId), {
+            sessionId, sdkSessionId: c.sdkSessionId!, answerRunId: c.answerRunId, toolCallId, toolName: tool.name as 'Write' | 'Edit',
+          }) : undefined
+          if (written && (!receipt || !verifyToolFileOperation(receipt, { sessionId, sdkSessionId: c.sdkSessionId!,
+            answerRunId: c.answerRunId, toolCallId, toolName: tool.name as 'Write' | 'Edit' }))) {
+            throw new Error('File operation changed before recovery publication')
+          }
+          const result = receipt ? recoveredFileOperationText(receipt) : INTERRUPTED_READ_RESULT
+          let message = recoveryMessages.findLast(item => item.role === 'tool' && item.toolUseId === toolCallId && (!item.answerRunId || item.answerRunId === c.answerRunId))
+          if (!message) {
+            const user = managed.messages.find(item => item.id === c.userMessageId)
+            message = { id: generateMessageId(), role: 'tool', content: '', timestamp: this.monotonic(),
+              toolUseId: toolCallId, toolName: tool.name, toolPurpose: 'work', answerRunId: c.answerRunId,
+              answerProtocol: user?.answerProtocol, answerRoutingVersion: user?.answerRoutingVersion }
+            recoveryMessages.push(message)
+          }
+          message.toolResult = result; message.toolStatus = written ? 'completed' : 'error'; message.isError = !written
+          restored.push(message)
+        }
+        managed.messages = recoveryMessages
+        try {
+          this.persistSession(managed)
+          await this.flushSession(managed.id)
+          const persisted = loadStoredSession(managed.workspace.rootPath, sessionId)
+          if (!restored.every(message => persisted?.messages.some(item => item.id === message.id && item.toolResult === message.toolResult && item.toolStatus === message.toolStatus))) {
+            throw new Error('Recovered tool results could not be persisted')
+          }
+        } catch (error) {
+          managed.messages = previousMessages
+          throw error
+        }
+        if (managed.stopRequested || managed.processingGeneration !== generation) throw new Error('Recovery was interrupted')
+        const checkpoint = managed.executionCheckpoint!
+        checkpoint.completedTools = [...new Set([...checkpoint.completedTools, ...Object.keys(c.pendingTools)])]
+        checkpoint.pendingTools = {}
+        this.checkpointExecution(managed)
+        for (const message of restored) {
+          try { this.sendEvent({ type: 'tool_result', sessionId, toolUseId: message.toolUseId!, toolName: message.toolName!,
+            result: message.toolResult!, isError: message.isError, toolPurpose: message.toolPurpose,
+            answerRunId: message.answerRunId, answerProtocol: message.answerProtocol,
+            answerRoutingVersion: message.answerRoutingVersion, timestamp: message.timestamp }, managed.workspace.id) }
+          catch { sessionLog.warn('Recovered tool result publication failed', { sessionId, toolCallId: message.toolUseId }) }
+        }
+      }
+      await this.sendMessage(sessionId, 'Continue the interrupted user task from the saved context. Preserve completed work; do not repeat completed side effects.',
+        undefined, undefined, { hidden: true }, undefined, false, undefined, undefined, false, true)
+    } catch (error) {
+      if (!managed.stopRequested && managed.processingGeneration === generation
+        && managed.executionCheckpoint && ['running', 'claimed'].includes(managed.executionCheckpoint.status)) {
+        // A failed checkpoint publication may have mutated the in-memory draft.
+        // Retain the durable pending outcomes and expose a stopped recovery.
+        const saved = readExecutionCheckpoint(getSessionStoragePath(managed.workspace.rootPath, sessionId))
+        const previousReason = managed.executionCheckpoint.reason
+        if (saved.kind === 'ok' && saved.checkpoint.generation === generation
+          && saved.checkpoint.userMessageId === managed.executionCheckpoint.userMessageId) {
+          managed.executionCheckpoint = saved.checkpoint
+        }
+        managed.executionCheckpoint.reason = previousReason ?? 'recovery-failed'
+        try { this.publishRecovery(managed, 'blocked') }
+        catch { sessionLog.warn('Recovery status publication failed', { sessionId }) }
+        sessionLog.warn('Execution recovery stopped before continuation', { sessionId, reason: managed.executionCheckpoint.reason })
+      }
+      throw error
+    } finally { managed.recoveryClaimed = false; managed.toolResultRecovery = undefined }
   }
 
   async continueProgress(sessionId: string): Promise<void> {
@@ -8232,6 +8479,17 @@ export class SessionManager implements ISessionManager {
 
     sessionLog.info('Cancelling processing for session:', sessionId, silent ? '(silent)' : '')
 
+    if (managed.executionCheckpoint) {
+      managed.executionCheckpoint.status = 'cancelled'
+      managed.executionCheckpoint.reason = 'cancelled'
+      try {
+        this.checkpointExecution(managed)
+      } catch (error) {
+        // Storage failure must not prevent the user's Stop from reaching the runtime.
+        sessionLog.error('Unable to persist execution cancellation', { sessionId, reason: error instanceof Error ? error.name : 'unknown' })
+        this.publishRecovery(managed, 'cancelled')
+      }
+    }
     managed.progressSupervisor?.stop()
     // Stop is authoritative over an automatic source continuation. Clear both
     // the not-yet-fired timer and any usage accumulator waiting to cross that
@@ -8669,9 +8927,11 @@ export class SessionManager implements ISessionManager {
     let completedTurnTokens: number | undefined
     let swarmTurnUsageRecorded = false
 
-    const regenerateOutcome = await this.settleRegenerateTransaction(managed, reason)
+    const cancellationRequested = () => managed.stopRequested
+      || (managed.executionCheckpoint?.generation === generation && managed.executionCheckpoint.status === 'cancelled')
+    const regenerateOutcome = await this.settleRegenerateTransaction(managed, cancellationRequested() ? 'interrupted' : reason)
     if (!ownsCompletion()) return
-    const completionReason = regenerateOutcome.reason
+    let completionReason = cancellationRequested() ? 'interrupted' as const : regenerateOutcome.reason
 
     sessionLog.info(`Processing stopped for session ${sessionId}: ${completionReason}`)
 
@@ -8742,12 +9002,25 @@ export class SessionManager implements ISessionManager {
     // runtime lets a late `agent_end` complete the next turn (#182). Keep the
     // session busy until the old runtime is fully gone; queued work can then
     // resume on a fresh runtime using the persisted SDK session anchor.
+    if (cancellationRequested()) completionReason = 'interrupted'
     const mustRestartRuntime = completionReason === 'interrupted' || completionReason === 'timeout'
     if (mustRestartRuntime) {
       await this.disposeManagedAgentRuntime(managed, `${completionReason} response`)
       if (!ownsCompletion()) return
     }
 
+    if (managed.executionCheckpoint?.generation === managed.processingGeneration) {
+      managed.executionCheckpoint.status = completionReason === 'complete' ? 'completed' : completionReason === 'interrupted' ? 'cancelled' : 'blocked'
+      managed.executionCheckpoint.reason = completionReason === 'complete' ? undefined : completionReason
+      try {
+        this.checkpointExecution(managed)
+      } catch (error) {
+        // Always release processing state, even when terminal persistence fails.
+        managed.executionCheckpoint.reason = 'checkpoint-save-failed'
+        this.publishRecovery(managed, 'blocked')
+        sessionLog.error('Unable to persist execution completion', { sessionId, reason: error instanceof Error ? error.name : 'unknown' })
+      }
+    }
     // 1. Cleanup state
     this.setProcessing(managed, false)
     managed.stopRequested = false  // Reset for next turn
@@ -11227,6 +11500,10 @@ export class SessionManager implements ISessionManager {
           break
         }
         const sessionPath = getSessionStoragePath(managed.workspace.rootPath, sessionId)
+        if (managed.executionCheckpoint?.generation === managed.processingGeneration) {
+          managed.executionCheckpoint.sdkSessionId = managed.sdkSessionId
+          managed.executionCheckpoint.sdkTurnAnchor = event.sdkTurnAnchor
+        }
         try {
           await savePiTurnAnchor(sessionPath, craftMessageId, event.sdkTurnAnchor)
         } catch (error) {

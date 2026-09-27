@@ -511,6 +511,7 @@ const ChatPage = React.memo(function ChatPage({ sessionId }: ChatPageProps) {
   }, [isDraft, session])
 
   const { openArtifact: handleOpenArtifact, openFile: handleOpenFile } = useGeneratedFileActions({
+    sessionId: session?.id,
     workingDirectory,
     sessionFolderPath: session?.sessionFolderPath,
     workspaceRootPath: activeWorkspace?.rootPath,
