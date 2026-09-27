@@ -874,6 +874,7 @@ interface ManagedSession {
   progressDisabled?: boolean
 
   answerDelivery?: {
+    answerRoutingVersion?: 1
     runId: string
     generation: number
     userMessageId: string
@@ -6992,11 +6993,15 @@ export class SessionManager implements ISessionManager {
         : userMessage
       // Retain identity across source/auth/Swarm continuation, not SDK subturn ids.
       const runId = continuingAnswer ? owner.answerRunId ?? owner.id : generateMessageId()
-      if (!continuingAnswer) owner.answerRecoveryAttempted = false
+      if (!continuingAnswer) {
+        owner.answerRecoveryAttempted = false
+        owner.answerRoutingVersion = 1
+      }
       owner.answerProtocol = 'explicit-v1'
       owner.answerRunId = runId
       managed.answerDelivery = {
         runId, generation: myGeneration, userMessageId: owner.id,
+        answerRoutingVersion: owner.answerRoutingVersion,
         recovery: !!owner.answerRecoveryAttempted,
         committedMessageId: managed.messages.find(m => m.answerRunId === runId && m.answerCommitted)?.id,
       }
@@ -7672,16 +7677,33 @@ export class SessionManager implements ISessionManager {
     }
   }
 
+  private publishCommittedAnswer(managed: ManagedSession, answer: Message): void {
+    sessionLog.info('Answer committed', { sessionId: managed.id, answerRunId: answer.answerRunId, messageId: answer.id, salvaged: !!answer.answerSalvaged })
+    try {
+      this.sendEvent({ type: 'text_complete', sessionId: managed.id, text: answer.content,
+        isIntermediate: false, phase: 'final', answerProtocol: answer.answerProtocol,
+        answerRunId: answer.answerRunId, answerRoutingVersion: answer.answerRoutingVersion,
+        answerCommitted: true, answerSalvaged: answer.answerSalvaged, turnId: answer.turnId,
+        messageId: answer.id, timestamp: answer.timestamp }, managed.workspace.id)
+    } catch (error) {
+      sessionLog.error('Committed answer event delivery failed', { sessionId: managed.id, messageId: answer.id, error })
+    }
+  }
+
   private async acceptAnswer(
     managed: ManagedSession,
     state: NonNullable<ManagedSession['answerDelivery']>,
     submission: AnswerSubmission,
   ): Promise<void> {
     if (managed.answerDelivery !== state || !managed.isProcessing || managed.stopRequested || managed.processingGeneration !== state.generation) {
+      sessionLog.warn('Rejected stale answer', { sessionId: managed.id, answerRunId: state.runId })
       throw new Error('This answer delivery turn is no longer active.')
     }
     if (state.persistenceFailed) throw new Error('Answer persistence failed. Do not retry submission in this turn.')
-    if (state.accepting || state.committedMessageId) throw new Error('An answer has already been submitted for this turn.')
+    if (state.accepting || state.committedMessageId) {
+      sessionLog.warn('Rejected duplicate answer', { sessionId: managed.id, answerRunId: state.runId })
+      throw new Error('An answer has already been submitted for this turn.')
+    }
     if (!hasRenderableAssistantText(submission.markdown) || isAnswerDeliveryReceipt(submission.markdown)) throw new Error('Submit a complete, non-empty Markdown answer.')
     if (!submission.toolCallId || !submission.sdkMessageId || !submission.sdkTurnAnchor) throw new Error('Missing SDK answer anchor.')
     this.assertAnswerReady(managed, state, submission.markdown, submission.toolCallId)
@@ -7692,7 +7714,7 @@ export class SessionManager implements ISessionManager {
     const answer: Message = {
       id: generateMessageId(), role: 'assistant', content: submission.markdown,
       timestamp: this.monotonic(), isIntermediate: false, phase: 'final',
-      answerProtocol: 'explicit-v1', answerRunId: state.runId, answerCommitted: true,
+      answerProtocol: 'explicit-v1', answerRunId: state.runId, answerRoutingVersion: state.answerRoutingVersion, answerCommitted: true,
       turnId: `answer-${state.runId}`,
     }
     try {
@@ -7741,15 +7763,7 @@ export class SessionManager implements ISessionManager {
     } finally {
       state.accepting = false
     }
-    // Publication cannot undo a durable commit (for example, a disconnected window).
-    try {
-      this.sendEvent({ type: 'text_complete', sessionId: managed.id, text: answer.content,
-        isIntermediate: false, phase: 'final', answerProtocol: answer.answerProtocol,
-        answerRunId: state.runId, answerCommitted: true, turnId: answer.turnId,
-        messageId: answer.id, timestamp: answer.timestamp }, managed.workspace.id)
-    } catch (error) {
-      sessionLog.error('Committed answer event delivery failed', { sessionId: managed.id, messageId: answer.id, error })
-    }
+    this.publishCommittedAnswer(managed, answer)
   }
 
   /**
@@ -7783,7 +7797,7 @@ export class SessionManager implements ISessionManager {
     const answer: Message = {
       id: generateMessageId(), role: 'assistant', content: draft.content,
       timestamp: this.monotonic(), isIntermediate: false, phase: 'final',
-      answerProtocol: 'explicit-v1', answerRunId: state.runId, answerCommitted: true,
+      answerProtocol: 'explicit-v1', answerRunId: state.runId, answerRoutingVersion: state.answerRoutingVersion, answerCommitted: true,
       answerSalvaged: true,
       turnId: `answer-${state.runId}`,
     }
@@ -7862,15 +7876,7 @@ export class SessionManager implements ISessionManager {
       && !managed.messages.slice(managed.messages.findIndex(m => m.id === state.userMessageId) + 1).some(m => m.role === 'error')) {
       const salvaged = state.persistenceFailed ? undefined : await this.salvageUndeliveredAnswer(managed, state)
       if (salvaged) {
-        // Publication cannot undo a durable commit (for example, a disconnected window).
-        try {
-          this.sendEvent({ type: 'text_complete', sessionId: managed.id, text: salvaged.content,
-            isIntermediate: false, phase: 'final', answerProtocol: salvaged.answerProtocol,
-            answerRunId: state.runId, answerCommitted: true, turnId: salvaged.turnId,
-            messageId: salvaged.id, timestamp: salvaged.timestamp }, managed.workspace.id)
-        } catch (error) {
-          sessionLog.error('Salvaged answer event delivery failed', { sessionId: managed.id, messageId: salvaged.id, error })
-        }
+        this.publishCommittedAnswer(managed, salvaged)
       } else if (managed.isProcessing && !managed.stopRequested && managed.answerDelivery === state
         && managed.processingGeneration === state.generation) {
         yield { type: 'typed_error', error: createTypedError(state.persistenceFailed ? 'answer_persistence_failed' : 'answer_delivery_missing', { message: state.persistenceFailed
@@ -8460,12 +8466,9 @@ export class SessionManager implements ISessionManager {
           sessionLog.info(`[auth-retry] Retrying message for session ${sessionId}`)
           this.setProcessing(managed, false)
 
-          // Remove the user message that was added for this failed attempt
-          // so we don't get duplicate messages when retrying
-          const lastUserMsgIndex = managed.messages.findLastIndex(m => m.role === 'user')
-          if (lastUserMsgIndex !== -1) {
-            managed.messages.splice(lastUserMsgIndex, 1)
-          }
+          // Reuse the failed attempt's user message so auth continuation keeps
+          // its delivery identity, routing version and recovery checkpoint.
+          const retryUserMessage = managed.messages.findLast(m => m.role === 'user' && !m.isQueued)
 
           managed.authRetryInProgress = false
 
@@ -8475,7 +8478,7 @@ export class SessionManager implements ISessionManager {
             retryAttachments,
             retryStoredAttachments,
             retryOptions,
-            undefined,  // existingMessageId
+            retryUserMessage?.id,
             true        // _isAuthRetry - prevents infinite retry loop
           )
           sessionLog.info(`[auth-retry] Retry completed for session ${sessionId}`)
@@ -11043,7 +11046,7 @@ export class SessionManager implements ISessionManager {
         id: generateMessageId(),
         role: 'assistant',
         content,
-        ...(managed.answerDelivery ? { answerProtocol: 'explicit-v1' as const, answerRunId: managed.answerDelivery.runId } : {}),
+        ...(managed.answerDelivery ? { answerProtocol: 'explicit-v1' as const, answerRunId: managed.answerDelivery.runId, answerRoutingVersion: managed.answerDelivery.answerRoutingVersion } : {}),
         timestamp: managed.streamingStartedAt ?? this.monotonic(),
         isIntermediate: true,
         phase: 'intermediate',
@@ -11155,7 +11158,7 @@ export class SessionManager implements ISessionManager {
           isIntermediate,
           phase: event.phase,
           presentationProtocol: event.presentationProtocol,
-          ...(managed.answerDelivery ? { answerProtocol: 'explicit-v1' as const, answerRunId: managed.answerDelivery.runId } : {}),
+          ...(managed.answerDelivery ? { answerProtocol: 'explicit-v1' as const, answerRunId: managed.answerDelivery.runId, answerRoutingVersion: managed.answerDelivery.answerRoutingVersion } : {}),
           turnId: event.turnId,
           parentToolUseId: event.parentToolUseId,
         }
@@ -11204,7 +11207,7 @@ export class SessionManager implements ISessionManager {
           }
         }
 
-        this.sendEvent({ type: 'text_complete', sessionId, text: content, isIntermediate, phase: event.phase, presentationProtocol: event.presentationProtocol, answerProtocol: assistantMessage.answerProtocol, answerRunId: assistantMessage.answerRunId, turnId: event.turnId, parentToolUseId: event.parentToolUseId, timestamp: assistantMessage.timestamp, messageId: assistantMessage.id }, workspaceId)
+        this.sendEvent({ type: 'text_complete', sessionId, text: content, isIntermediate, phase: event.phase, presentationProtocol: event.presentationProtocol, answerProtocol: assistantMessage.answerProtocol, answerRunId: assistantMessage.answerRunId, answerRoutingVersion: assistantMessage.answerRoutingVersion, turnId: event.turnId, parentToolUseId: event.parentToolUseId, timestamp: assistantMessage.timestamp, messageId: assistantMessage.id }, workspaceId)
 
         // Persist session after complete message to prevent data loss on quit
         this.persistSession(managed)
@@ -11238,7 +11241,9 @@ export class SessionManager implements ISessionManager {
           managed.usedExternalToolsThisTurn = true
         }
         // Format tool input paths to relative for better readability
-        const formattedToolInput = /^(?:mcp__session__|session__)?submit_answer$/.test(event.toolName) ? {} : formatToolInputPaths(event.input)
+        const previousTool = managed.messages.find(m => m.toolUseId === event.toolUseId)
+        const toolPurpose = previousTool?.toolPurpose ?? (/^(?:mcp__session__|session__)?submit_answer$/.test(event.toolName) ? 'answer-delivery' : 'work')
+        const formattedToolInput = toolPurpose === 'answer-delivery' ? {} : formatToolInputPaths(event.input)
 
         // Resolve call_llm model for TurnCard badge display.
         // Known registry ids only — do not rewrite ORDER aliases like "Opus".
@@ -11275,6 +11280,7 @@ export class SessionManager implements ISessionManager {
         let shouldSendEvent = !isDuplicateEvent
 
         if (existingStartMsg) {
+          existingStartMsg.toolPurpose = toolPurpose
           // Update existing message with complete input (second event has full input)
           if (formattedToolInput && Object.keys(formattedToolInput).length > 0) {
             const hadInputBefore = existingStartMsg.toolInput && Object.keys(existingStartMsg.toolInput).length > 0
@@ -11306,10 +11312,11 @@ export class SessionManager implements ISessionManager {
           const toolStartMessage: Message = {
             id: generateMessageId(),
             role: 'tool',
-            ...(managed.answerDelivery ? { answerProtocol: 'explicit-v1' as const, answerRunId: managed.answerDelivery.runId } : {}),
+            ...(managed.answerDelivery ? { answerProtocol: 'explicit-v1' as const, answerRunId: managed.answerDelivery.runId, answerRoutingVersion: managed.answerDelivery.answerRoutingVersion } : {}),
             content: `Running ${event.toolName}...`,
             timestamp: this.monotonic(),
             toolName: event.toolName,
+            toolPurpose,
             toolUseId: event.toolUseId,
             toolInput: formattedToolInput,
             toolStatus: 'executing',
@@ -11351,6 +11358,7 @@ export class SessionManager implements ISessionManager {
             type: 'tool_start',
             sessionId,
             toolName: event.toolName,
+            toolPurpose,
             toolUseId: event.toolUseId,
             toolInput: formattedToolInput ?? {},
             toolIntent: event.intent,
@@ -11365,9 +11373,11 @@ export class SessionManager implements ISessionManager {
       }
 
       case 'tool_result': {
-        const previewToolName = event.toolName ?? managed.messages.find(m => m.toolUseId === event.toolUseId)?.toolName ?? ''
+        const priorTool = managed.messages.find(m => m.toolUseId === event.toolUseId)
+        const previewToolName = event.toolName ?? priorTool?.toolName ?? ''
+        const toolPurpose = priorTool?.toolPurpose ?? (/^(?:mcp__session__|session__)?submit_answer$/.test(previewToolName) ? 'answer-delivery' : 'work')
         if (managed.answerDelivery && !managed.answerDelivery.committedMessageId
-          && /^(?:mcp__session__|session__)?submit_answer$/.test(previewToolName)) {
+          && toolPurpose === 'answer-delivery') {
           this.sendEvent({ type: 'answer_preview', sessionId, answerRunId: managed.answerDelivery.runId, userMessageId: managed.answerDelivery.userMessageId, toolCallId: event.toolUseId, text: '' }, workspaceId)
         }
         // toolName comes directly from CraftAgent (resolved via ToolIndex)
@@ -11398,6 +11408,7 @@ export class SessionManager implements ISessionManager {
 
         if (existingToolMsg) {
           // Keep lightweight status text in `content` and store full payload in `toolResult` only.
+          existingToolMsg.toolPurpose = toolPurpose
           existingToolMsg.toolResult = formattedResult
           existingToolMsg.toolStatus = inferredError ? 'error' : 'completed'
           existingToolMsg.isError = inferredError
@@ -11418,10 +11429,11 @@ export class SessionManager implements ISessionManager {
           const toolMessage: Message = {
             id: generateMessageId(),
             role: 'tool',
-            ...(managed.answerDelivery ? { answerProtocol: 'explicit-v1' as const, answerRunId: managed.answerDelivery.runId } : {}),
+            ...(managed.answerDelivery ? { answerProtocol: 'explicit-v1' as const, answerRunId: managed.answerDelivery.runId, answerRoutingVersion: managed.answerDelivery.answerRoutingVersion } : {}),
             content: '',
             timestamp: this.monotonic(),
             toolName: toolName,
+            toolPurpose,
             toolUseId: event.toolUseId,
             toolResult: formattedResult,
             toolStatus: inferredError ? 'error' : 'completed',
@@ -11443,6 +11455,7 @@ export class SessionManager implements ISessionManager {
             sessionId,
             toolUseId: event.toolUseId,
             toolName: toolName,
+            toolPurpose,
             result: formattedResult,
             ...(event.content && event.content.length > 0 ? { content: event.content } : {}),
             turnId: event.turnId,
@@ -11470,6 +11483,9 @@ export class SessionManager implements ISessionManager {
               sessionId,
               toolUseId: child.toolUseId!,
               toolName: child.toolName || 'unknown',
+              toolPurpose: child.toolPurpose,
+              answerRunId: child.answerRunId,
+              answerRoutingVersion: child.answerRoutingVersion,
               result: child.toolResult || '',
               turnId: child.turnId,
               parentToolUseId: event.toolUseId,
@@ -12050,9 +12066,12 @@ export class SessionManager implements ISessionManager {
   }
 
   private sendEvent(event: SessionEvent, workspaceId?: string): void {
-    if (event.type === 'text_delta' || event.type === 'tool_start' || event.type === 'tool_result') {
+    if (event.type === 'complete' || event.type === 'text_delta' || event.type === 'tool_start' || event.type === 'tool_result' || event.type === 'answer_preview' || event.type === 'text_complete') {
       const state = this.sessions.get(event.sessionId)?.answerDelivery
-      if (state) event = { ...event, answerProtocol: 'explicit-v1', answerRunId: state.runId }
+      if (state && (!event.answerRunId || event.answerRunId === state.runId)) {
+        event = { ...event, answerRunId: state.runId, answerRoutingVersion: state.answerRoutingVersion,
+          ...(event.type !== 'answer_preview' && event.type !== 'complete' ? { answerProtocol: 'explicit-v1' as const } : {}) }
+      }
     }
     if (!this.eventSink) {
       sessionLog.warn('Cannot send event - no event sink')

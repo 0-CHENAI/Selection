@@ -68,11 +68,46 @@ describe('explicit answer delivery lifecycle (#330)', () => {
     const delivered = stored.messages.map(storedToMessage).filter(m => m.answerCommitted)
     expect(delivered).toHaveLength(1)
     expect(delivered[0]?.content).toBe(markdown)
+    expect(delivered[0]?.answerRoutingVersion).toBe(1)
+    expect(stored.messages.find(m => m.type === 'user')?.answerRoutingVersion).toBe(1)
+    expect(stored.messages.find(m => m.toolUseId === submission.toolCallId)?.toolPurpose).toBe('answer-delivery')
+    expect(events.find(e => e.type === 'tool_result' && e.toolUseId === 'simulation')?.toolPurpose).toBe('work')
+    expect(events.find(e => e.answerCommitted)?.answerRoutingVersion).toBe(1)
     const answer = managed.messages.find(m => m.answerCommitted)!
     expect((await loadPiTurnAnchors(getSessionPath(root, managed.id))).anchors[answer.id]).toBe('sdk-tool-result-entry')
     expect(events.filter(e => e.answerCommitted)).toHaveLength(1)
     expect(managed.isProcessing).toBe(false)
   })
+  it('classifies existing aliases exactly and keeps purpose from the start event', async () => {
+    const names = ['submit_answer', 'session__submit_answer', 'mcp__session__submit_answer', 'SUBMIT_ANSWER', 'mcp__other__submit_answer', 'submit_answer_extra']
+    install(async function* () {
+      for (const [i, toolName] of names.entries()) {
+        yield { type: 'tool_start', toolName, toolUseId: `alias-${i}`, input: { toolPurpose: 'answer-delivery' } }
+        yield { type: 'tool_result', toolUseId: `alias-${i}`, result: 'done', isError: false }
+      }
+      await control!.submit(submission)
+      yield { type: 'complete' }
+    })
+    await manager.sendMessage(managed.id, '别名测试')
+    for (const [i] of names.entries()) {
+      const purpose = i < 3 ? 'answer-delivery' : 'work'
+      expect(managed.messages.find(m => m.toolUseId === `alias-${i}`)?.toolPurpose).toBe(purpose)
+      expect(events.find(e => e.type === 'tool_result' && e.toolUseId === `alias-${i}`)?.toolPurpose).toBe(purpose)
+    }
+    expect(events.find(e => e.type === 'complete')).toMatchObject({ answerRoutingVersion: 1 })
+  })
+  for (const version of [undefined, 1] as const) {
+    it(`inherits routing version on auth continuation (${version ?? 'legacy'})`, async () => {
+      managed.messages = [{ id: 'owner', role: 'user', content: '问题', timestamp: 1,
+        answerProtocol: 'explicit-v1', answerRunId: 'retained', answerRoutingVersion: version }]
+      install(async function* () { await control!.submit(submission); yield { type: 'complete' } })
+      await manager.sendMessage(managed.id, '继续', undefined, undefined, undefined, 'owner', true)
+      const answer = managed.messages.find(m => m.answerCommitted)
+      expect(answer?.answerRunId).toBe('retained')
+      expect(answer?.answerRoutingVersion).toBe(version)
+      expect(events.find(e => e.answerCommitted)?.answerRoutingVersion).toBe(version)
+    })
+  }
   it('recovers once in the retained task and persists the recovery attempt', async () => {
     install(async function* (index) {
       if (index === 1) yield { type: 'text_complete', text: explanation }
@@ -94,6 +129,7 @@ describe('explicit answer delivery lifecycle (#330)', () => {
     expect(committed).toHaveLength(1)
     expect(committed[0]?.content).toBe('一句补充')
     expect(committed[0]?.answerSalvaged).toBe(true)
+    expect(events.find(e => e.answerCommitted)).toMatchObject({ answerSalvaged: true, answerRoutingVersion: 1 })
     expect(managed.messages.some(m => m.role === 'error')).toBe(false)
     expect(managed.isProcessing).toBe(false)
     const stored = loadStoredSession(root, managed.id)!

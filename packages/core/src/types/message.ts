@@ -314,6 +314,8 @@ export interface Message {
   /** Explicit answer identity; absent on legacy turns. */
   answerProtocol?: 'explicit-v1';
   answerRunId?: string;
+  answerRoutingVersion?: 1;
+  toolPurpose?: 'work' | 'answer-delivery';
   /** Renderer-only, uncommitted answer preview; never persisted. */
   answerPreview?: boolean;
   /** Renderer-only live completion clock; never restored from persisted history. */
@@ -419,6 +421,8 @@ export interface StoredMessage {
   /** Explicit answer identity; absent on legacy turns. */
   answerProtocol?: 'explicit-v1';
   answerRunId?: string;
+  answerRoutingVersion?: 1;
+  toolPurpose?: 'work' | 'answer-delivery';
   answerCommitted?: boolean;
   /** Promoted from an unsubmitted draft after delivery recovery failed (#403). */
   answerSalvaged?: boolean;
@@ -659,7 +663,7 @@ export type AgentEvent =
   | { type: 'info'; message: string }
   | { type: 'answer_preview'; text: string; toolCallId: string }
   | { type: 'text_delta'; text: string; phase?: TextStreamPhase; presentationProtocol?: 'native' | 'marker-v1' | 'legacy'; turnId?: string; parentToolUseId?: string }
-  | { type: 'text_complete'; text: string; phase?: TextStreamPhase; presentationProtocol?: 'native' | 'marker-v1' | 'legacy'; answerProtocol?: 'explicit-v1'; answerRunId?: string; answerCommitted?: boolean; isIntermediate?: boolean; turnId?: string; parentToolUseId?: string; sdkMessageId?: string; relatedTurnIds?: string[] }
+  | { type: 'text_complete'; text: string; phase?: TextStreamPhase; presentationProtocol?: 'native' | 'marker-v1' | 'legacy'; answerProtocol?: 'explicit-v1'; answerRunId?: string; answerRoutingVersion?: 1; toolPurpose?: 'work' | 'answer-delivery'; answerCommitted?: boolean; answerSalvaged?: boolean; isIntermediate?: boolean; turnId?: string; parentToolUseId?: string; sdkMessageId?: string; relatedTurnIds?: string[] }
   | { type: 'pi_turn_anchor'; sdkMessageId: string; sdkTurnAnchor: string }
   | { type: 'tool_start'; toolName: string; toolUseId: string; input: Record<string, unknown>; intent?: string; displayName?: string; turnId?: string; parentToolUseId?: string; toolDisplayMeta?: ToolDisplayMeta }
   | { type: 'tool_result'; toolUseId: string; toolName?: string; result: string; content?: AgentToolResultContent[]; isError: boolean; input?: Record<string, unknown>; turnId?: string; parentToolUseId?: string }
