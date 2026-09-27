@@ -7,6 +7,7 @@ import { getGitBashPath, setGitBashPath, clearGitBashPath } from '@craft-agent/s
 import { classifyExternalUrl, formatBlockedUrlError } from '@craft-agent/shared/utils/url-safety'
 import { isUsableGitBashPath, validateGitBashPath } from '@craft-agent/server-core/services'
 import {
+  assertLocalWorkspace,
   normalizeAccessibleFilePath,
   resolveWorkspaceIdForFileAccess,
   validateWorkspaceFilePath,
@@ -244,6 +245,7 @@ export function registerSystemCoreHandlers(server: RpcServer, deps: HandlerDeps)
       const withHome = expanded.startsWith('~') ? expanded.replace(/^~/, homedir()) : expanded
       const absolutePath = resolve(withHome)
       const workspaceId = resolveWorkspaceIdForFileAccess(ctx, windowManager)
+      assertLocalWorkspace({ workspaceId }, 'Open file')
       const safePath = await validateWorkspaceFilePath(absolutePath, workspaceId)
       const result = await requestClientOpenPath(server, ctx.clientId, safePath)
       if (result.error) throw new Error(result.error)
@@ -260,6 +262,7 @@ export function registerSystemCoreHandlers(server: RpcServer, deps: HandlerDeps)
       const withHome = expanded.startsWith('~') ? expanded.replace(/^~/, homedir()) : expanded
       const absolutePath = resolve(withHome)
       const workspaceId = resolveWorkspaceIdForFileAccess(ctx, windowManager)
+      assertLocalWorkspace({ workspaceId }, 'Show in folder')
       const safePath = await validateWorkspaceFilePath(absolutePath, workspaceId)
       await requestClientShowInFolder(server, ctx.clientId, safePath)
     } catch (error) {

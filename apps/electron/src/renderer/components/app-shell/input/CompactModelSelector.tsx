@@ -149,6 +149,9 @@ function CompactSwitcherModels({
 }
 
 interface CompactModelSelectorProps {
+  open?: boolean
+  onOpenChange?: (open: boolean) => void
+  onCloseAutoFocus?: React.ComponentProps<typeof DrawerContent>['onCloseAutoFocus']
   currentModel: string
   currentConnection?: string
   onModelChange: (model: string, connection?: string) => void
@@ -160,6 +163,9 @@ interface CompactModelSelectorProps {
 }
 
 export function CompactModelSelector({
+  open: controlledOpen,
+  onOpenChange,
+  onCloseAutoFocus,
   currentModel,
   currentConnection,
   onModelChange,
@@ -169,7 +175,9 @@ export function CompactModelSelector({
   connectionUnavailable = false,
 }: CompactModelSelectorProps) {
   const { t } = useTranslation()
-  const [open, setOpen] = React.useState(false)
+  const [localOpen, setLocalOpen] = React.useState(false)
+  const open = controlledOpen ?? localOpen
+  const setOpen = onOpenChange ?? setLocalOpen
   const [expandedConnection, setExpandedConnection] = React.useState<string | null>(null)
 
   const appShellCtx = useOptionalAppShellContext()
@@ -310,7 +318,7 @@ export function CompactModelSelector({
         </button>
       </DrawerTrigger>
 
-      <DrawerContent>
+      <DrawerContent onCloseAutoFocus={onCloseAutoFocus}>
         <DrawerHeader>
           <DrawerTitle>{t('common.model')}</DrawerTitle>
         </DrawerHeader>

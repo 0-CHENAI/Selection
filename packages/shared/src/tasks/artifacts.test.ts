@@ -54,3 +54,18 @@ describe('resolveArtifact', () => {
     rmSync(outside, { recursive: true, force: true });
   });
 });
+it('delivery rechecks submitted artifacts instead of trusting a completed agent', async () => {
+  const { verifyArtifact } = await import('./artifacts.ts');
+  const root = mkdtempSync(join(tmpdir(), 'artifact-delivery-'));
+  try {
+    const file = join(root, 'result.txt'); writeFileSync(file, 'verified');
+    const initial = resolveArtifact(root, undefined, 'result.txt');
+    if (!initial.ok) throw new Error(initial.error);
+    expect(verifyArtifact(root, initial.artifact).ok).toBe(true);
+    writeFileSync(file, 'modified');
+    expect(verifyArtifact(root, initial.artifact)).toMatchObject({ ok: false });
+    rmSync(file);
+    expect(verifyArtifact(root, initial.artifact)).toMatchObject({ ok: false });
+    expect(verifyArtifact(root, { ...initial.artifact, path: '../outside' })).toMatchObject({ ok: false });
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});

@@ -106,7 +106,10 @@ function normalizeMatchPath(value: string): string {
 
 export function extractPathLikeTokens(message: string): string[] {
   const matcher = new RegExp(PATH_LIKE_RE.source, 'g');
-  return message.match(matcher) ?? [];
+  // Paths cannot cross whitespace. Skip chunks without the required extension
+  // before the existing matcher can repeatedly scan a long prose token.
+  return (message.match(/\S+/g) ?? []).flatMap(chunk => /\.[A-Za-z][A-Za-z0-9]{1,7}\b/.test(chunk)
+    ? chunk.match(matcher) ?? [] : []);
 }
 
 function mimeExtensions(mimeType: string | undefined): string[] {

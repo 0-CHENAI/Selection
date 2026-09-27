@@ -180,6 +180,10 @@ export interface AnswerDeliveryControl {
 }
 
 export interface CoreBackendConfig {
+  /** Trusted candidate root; native runtime must verify confinement before allowing Shell. */
+  isolatedShellDirectory?: string;
+  /** Trusted runtime-only recovery data; never provided by model arguments. */
+  toolResultRecovery?: import('./pi/file-operation-receipts').ToolResultRecoveryPlan;
   explicitAnswerDelivery?: boolean;
   presentationProtocol?: 'native' | 'marker-v1' | 'legacy';
   /** Isolated utility backend: skip execution-session/tool initialization. */
@@ -473,6 +477,8 @@ export interface AgentBackend {
    * Default behavior can be a no-op for providers that don't need preflight.
    */
   ensureBranchReady(): Promise<void>;
+  /** Reconcile saved tool results before starting another model request. */
+  prepareExecutionRecovery?(): Promise<void>;
 
   /**
    * Check if currently processing a query.
@@ -634,6 +640,7 @@ export interface AgentBackend {
   // ============================================================
 
   /** Called when a tool requires permission */
+  onBeforeToolExecution?: (toolName: string, input: Record<string, unknown>, toolCallId?: string, recoveryClass?: 'read-only' | 'idempotent' | 'file-verifiable' | 'unknown', confinedShellDirectory?: string) => void;
   onPermissionRequest: PermissionCallback | null;
 
   /** Called when agent submits a plan */

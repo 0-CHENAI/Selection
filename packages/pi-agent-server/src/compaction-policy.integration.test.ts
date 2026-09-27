@@ -4,7 +4,10 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createAgentSession, SessionManager, SettingsManager, type ModelRuntime } from '@earendil-works/pi-coding-agent';
 import { createAssistantMessageEventStream, type AssistantMessage, type Context, type Model } from '@earendil-works/pi-ai';
+import { Type } from '@sinclair/typebox';
+import { installContextBudgetGuard } from './context-budget-stream.ts';
 import { applyCompactionSettings, COMPACTION_FOCUS, installCompactionPolicy } from './compaction-policy.ts';
+import { PiEventAdapter } from '../../shared/src/agent/backend/pi/event-adapter.ts';
 
 const model: Model<'openai-responses'> = {
   id: 'offline-compaction-test', name: 'Offline compaction test', api: 'openai-responses',
@@ -16,6 +19,49 @@ const usage = { input: 100, output: 20, cacheRead: 0, cacheWrite: 0, totalTokens
 const tempDirs: string[] = [];
 afterEach(() => {
   for (const path of tempDirs.splice(0)) rmSync(path, { recursive: true, force: true });
+});
+
+it('an oversized first input stays intact and delivers one actionable error without provider or compaction requests', async () => {
+  const cwd = mkdtempSync(join(tmpdir(), 'selection-pi-input-limit-'));
+  tempDirs.push(cwd);
+  let providerCalls = 0;
+  const runtime = {
+    hasConfiguredAuth: () => true,
+    checkAuth: async () => ({ apiKey: 'offline-test' }),
+    getAuth: async () => ({ auth: { apiKey: 'offline-test' } }),
+    streamSimple: () => { providerCalls++; throw new Error('Oversized input must not reach the provider'); },
+  } as unknown as ModelRuntime;
+  installContextBudgetGuard(runtime);
+  const settingsManager = SettingsManager.inMemory();
+  const sessionManager = SessionManager.inMemory(cwd);
+  const { session } = await createAgentSession({
+    cwd, agentDir: join(cwd, 'agent'), model, thinkingLevel: 'off', noTools: 'all',
+    modelRuntime: runtime, settingsManager, sessionManager,
+  });
+  settingsManager.setCompactionEnabled(true);
+  applyCompactionSettings(settingsManager, model.contextWindow, true);
+  installCompactionPolicy(session);
+  const adapter = new PiEventAdapter();
+  adapter.setContextWindow(model.contextWindow);
+  adapter.startTurn();
+  const errors: string[] = [];
+  let compactions = 0;
+  session.subscribe(event => {
+    if (event.type === 'compaction_start') compactions++;
+    for (const adapted of adapter.adaptEvent(event as Parameters<typeof adapter.adaptEvent>[0])) {
+      if (adapted.type === 'typed_error') errors.push(adapted.error.code);
+      if (adapted.type === 'error') errors.push('untyped');
+    }
+  });
+  const input = '原始用户输入\r\n```text\n' + '文'.repeat(240_000) + '\n```\n[文件](E:/项目/文件.txt)';
+  await session.prompt(input);
+  expect(providerCalls).toBe(0);
+  expect(compactions).toBe(0);
+  expect(errors).toEqual(['context_limit']);
+  expect(adapter.shouldCompleteQueue(true)).toBe(true);
+  const users = sessionManager.buildSessionContext().messages.filter(message => message.role === 'user');
+  expect(users).toHaveLength(1);
+  expect(users[0]!.content).toEqual([{ type: 'text', text: input }]);
 });
 
 it('the real Pi session compacts at the request gate and resumes the same prompt', async () => {
@@ -72,4 +118,70 @@ it('the real Pi session compacts at the request gate and resumes the same prompt
   expect(providerCalls[1]!.context.messages.some(message => message.role === 'user'
     && JSON.stringify(message.content).includes('Continue the same request'))).toBe(true);
   expect(session.sessionManager.getBranch().some(entry => entry.type === 'compaction')).toBe(true);
+});
+
+
+it('the real SDK preserves tool pairs across mid-turn compaction and never re-executes completed work', async () => {
+  const cwd = mkdtempSync(join(tmpdir(), 'selection-pi-tool-compaction-'));
+  tempDirs.push(cwd);
+  let executed = 0, modelRequests = 0, summaries = 0;
+  const requests: Context[] = [];
+  const runtime = {
+    hasConfiguredAuth: () => true,
+    checkAuth: async () => ({ apiKey: 'offline-test' }),
+    getAuth: async () => ({ auth: { apiKey: 'offline-test' } }),
+    streamSimple: (_model: typeof model, context: Context) => {
+      const summary = (context.systemPrompt ?? '').includes(COMPACTION_FOCUS);
+      if (summary) summaries++; else { modelRequests++; requests.push({ systemPrompt: context.systemPrompt, messages: structuredClone(context.messages) }); }
+      const callTool = !summary && modelRequests === 1;
+      const message: AssistantMessage = {
+        role: 'assistant', api: model.api, provider: model.provider, model: model.id,
+        content: callTool
+          ? [{ type: 'thinking', thinking: 'Process reasoning. '.repeat(200) }, { type: 'toolCall', id: 'read-once', name: 'checkpoint_read', arguments: {} }]
+          : [{ type: 'text', text: summary ? 'Preserve the current task. The read tool completed; continue with its result.' : 'Final response' }],
+        usage: callTool ? { ...usage, input: 154900, output: 100, totalTokens: 155000 } : usage,
+        stopReason: callTool ? 'toolUse' : 'stop', timestamp: Date.now(),
+      };
+      const stream = createAssistantMessageEventStream();
+      stream.push({ type: 'done', reason: callTool ? 'toolUse' : 'stop', message });
+      return stream;
+    },
+  } as unknown as ModelRuntime;
+  installContextBudgetGuard(runtime);
+  const settingsManager = SettingsManager.inMemory();
+  const sessionManager = SessionManager.inMemory(cwd);
+  const { session } = await createAgentSession({
+    cwd, agentDir: join(cwd, 'agent'), model, thinkingLevel: 'off', modelRuntime: runtime,
+    settingsManager, sessionManager, tools: ['checkpoint_read'],
+    customTools: [{ name: 'checkpoint_read', label: 'Read', description: 'Read-only fixture', parameters: Type.Object({}),
+      execute: async () => { executed++; return { content: [{ type: 'text' as const, text: '文'.repeat(6000) }], details: {} }; } }],
+  });
+  settingsManager.setCompactionEnabled(true);
+  applyCompactionSettings(settingsManager, model.contextWindow, true);
+  installCompactionPolicy(session);
+  for (let index = 0; index < 3; index++) {
+    sessionManager.appendMessage({ role: 'user', content: '文'.repeat(40000), timestamp: index * 2 + 1 });
+    sessionManager.appendMessage({ role: 'assistant', content: [{ type: 'text', text: 'Earlier work' }],
+      api: model.api, provider: model.provider, model: model.id, usage, stopReason: 'stop', timestamp: index * 2 + 2 });
+  }
+  session.agent.state.messages = sessionManager.buildSessionContext().messages;
+  await session.prompt('Use the read tool, then answer the same user task');
+  expect(executed).toBe(1);
+  expect(modelRequests).toBe(2);
+  expect(summaries).toBeGreaterThan(0);
+  expect(session.sessionManager.getBranch().some(entry => entry.type === 'compaction')).toBe(true);
+  for (const request of requests) {
+    const pending = new Set<string>();
+    for (const message of request.messages) {
+      if (message.role === 'assistant') {
+        for (const block of message.content) if (block.type === 'toolCall') pending.add(block.id);
+      } else if (message.role === 'toolResult') {
+        expect(pending.has(message.toolCallId)).toBe(true);
+        pending.delete(message.toolCallId);
+      }
+    }
+    expect(pending.size).toBe(0);
+  }
+  expect(requests.at(-1)!.messages.some(message => message.role === 'user'
+    && JSON.stringify(message.content).includes('same user task'))).toBe(true);
 });

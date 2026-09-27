@@ -60,16 +60,25 @@ export function loadTaskResults(root: string, slug: string, runId?: string): Loa
     return e
   }
   const verdicts: NonNullable<LoadedTaskResults['verdicts']> = []
+  let currentVerdict: LoadedTaskResults['verdict']
   let tokensUsed: number | undefined
   for (const entry of log) {
     if (entry.kind === 'node-scheduled') {
       ensure(entry.nodeId).attempt += 1
     } else if (entry.kind === 'node-spawned') {
       ensure(entry.nodeId).sessionId = entry.sessionId
+    } else if (entry.kind === 'artifact-results-invalidated') {
+      for (const nodeId of entry.nodeIds) {
+        const node = ensure(nodeId)
+        node.state = 'invalid'
+        node.failureReason = entry.reason
+      }
+      currentVerdict = undefined
     } else if (entry.kind === 'node-finished') {
       const e = ensure(entry.nodeId)
       e.state = entry.state
       if (entry.sessionId) e.sessionId = entry.sessionId
+      if (entry.state === 'done') delete e.failureReason
       if (entry.reason && (entry.state === 'failed' || entry.state === 'invalid' || entry.state === 'interrupted')) {
         e.failureReason = entry.reason
       }
@@ -79,6 +88,7 @@ export function loadTaskResults(root: string, slug: string, runId?: string): Loa
         ...(entry.reason ? { reason: entry.reason } : {}),
         ...(entry.nodes?.length ? { nodes: entry.nodes } : {}),
       })
+      currentVerdict = verdicts.at(-1)
     } else if ('tokensUsed' in entry && typeof entry.tokensUsed === 'number') {
       tokensUsed = entry.tokensUsed
     }
@@ -109,7 +119,7 @@ export function loadTaskResults(root: string, slug: string, runId?: string): Loa
     slug,
     runId: chosen,
     runIds,
-    verdict: verdicts.at(-1),
+    verdict: currentVerdict,
     verdicts,
     repair: { used: repairUsed, max: repairMax },
     ...(runStatus ? { runStatus } : {}),

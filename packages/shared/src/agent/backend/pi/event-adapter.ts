@@ -26,7 +26,7 @@ import { toolMetadataStore } from '../../../interceptor-common.ts';
 import { parseError, createTypedError } from '../../errors.ts';
 import { normalizeToolResultContent } from '../../tool-matching.ts';
 import { cleanToolMetadataLabel } from '../../../utils/toolNames.ts';
-import { ACTIONABLE_CONTEXT_OVERFLOW_MESSAGE, readContextBreakdownFields } from './context-budget.ts';
+import { readContextBreakdownFields } from './context-budget.ts';
 
 /**
  * Pi SDK auto-compaction race signature — the AbortController crash described
@@ -267,7 +267,7 @@ export class PiEventAdapter extends BaseEventAdapter {
       this.log.warn('Overflow recovery fallback fired — SDK emitted no compaction events', {
         timeoutMs: OVERFLOW_FALLBACK_TIMEOUT_MS,
       });
-      this.onFallbackEvent?.({ type: 'error', message: ACTIONABLE_CONTEXT_OVERFLOW_MESSAGE });
+      this.onFallbackEvent?.({ type: 'typed_error', error: createTypedError('context_limit') });
       this.onFallbackComplete?.();
     }, OVERFLOW_FALLBACK_TIMEOUT_MS);
   }
@@ -469,7 +469,7 @@ export class PiEventAdapter extends BaseEventAdapter {
       case 'message_end': {
         // Pi SDK emits message_end for ALL messages (user, assistant, toolResult).
         // Only process assistant messages — skip user prompts and tool results.
-        const msg = event.message as { role?: string; stopReason?: string; errorMessage?: string; craftTransportDiagnostics?: string[]; usage?: { input: number; output: number; cacheRead: number; cacheWrite: number; totalTokens: number; cost: { total: number } }; id?: string } | undefined;
+        const msg = event.message as { role?: string; stopReason?: string; errorMessage?: string; craftContextLimit?: boolean; craftTransportDiagnostics?: string[]; usage?: { input: number; output: number; cacheRead: number; cacheWrite: number; totalTokens: number; cost: { total: number } }; id?: string } | undefined;
         // SDK message id, set by pi-agent-server when forwarding the event.
         // SessionManager uses this to correlate the follow-up `pi_turn_anchor`
         // event to the Craft assistant message created here (#782).
@@ -486,6 +486,12 @@ export class PiEventAdapter extends BaseEventAdapter {
         }
         // Surface API errors — Pi SDK sets stopReason: 'error' and errorMessage on failures.
         if (msg.stopReason === 'error' && msg.errorMessage) {
+          // Runtime admission failures are already final. Do not infer their
+          // purpose from translated text or wait for another SDK compaction.
+          if (msg.craftContextLimit === true) {
+            yield { type: 'typed_error', error: createTypedError('context_limit') };
+            break;
+          }
           // Context overflow: hand recovery to the SDK's _runAutoCompaction
           // and keep the UI quiet until we know the outcome (recovered turn
           // arrives, or compaction fails). Suppress the raw provider error.
@@ -797,7 +803,7 @@ export class PiEventAdapter extends BaseEventAdapter {
             this.log.warn('Context overflow recovery failed', {
               errorMessage: compactionEvent.errorMessage,
             });
-            yield { type: 'error', message: ACTIONABLE_CONTEXT_OVERFLOW_MESSAGE };
+            yield { type: 'typed_error', error: createTypedError('context_limit') };
           } else if (SDK_AUTOCOMPACT_RACE_SIGNATURE.test(compactionEvent.errorMessage)) {
             this.log.warn('Pi SDK auto-compaction race; recommend manual /compact', {
               errorMessage: compactionEvent.errorMessage,

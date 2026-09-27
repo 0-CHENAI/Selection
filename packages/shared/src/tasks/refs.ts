@@ -38,6 +38,8 @@ export type Ref = NodeRef | ParamRef;
  *    `${nodes.X.output.field}` resolves against it).
  */
 export interface NodeOutput {
+  /** Runtime-owned integration receipts; model submission cannot set this field. */
+  integratedArtifacts?: Record<string, unknown>;
   text: string;
   params?: Record<string, unknown>;
 }

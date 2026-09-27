@@ -77,6 +77,12 @@ export interface ISessionManager {
   // ---------------------------------------------------------------------------
 
   setProgressSupervision?(sessionId: string, enabled: boolean): void
+  cleanupArtifactVersions?(sessionId: string, artifactId: string, expectedVersion: string, versionIds: string[], requestId: string): Promise<import('@craft-agent/shared/protocol').ManagedArtifact>
+  getBodyFeedbackDetails?(sessionId: string, sourceMessageId: string, annotationId: string): Promise<import('@craft-agent/shared/protocol').BodyFeedbackRevision[]>
+  getArtifactFeedbackContext?(sessionId: string, artifactId: string): Promise<{ root: string; requiresProjectChecks: boolean }>
+  listArtifactFeedback?(sessionId: string, artifactId: string): Promise<import('@craft-agent/shared/protocol').ArtifactFeedback[]>
+  artifactFeedback?(operation: import('@craft-agent/shared/protocol').ArtifactFeedbackOperation): Promise<import('@craft-agent/shared/protocol').ArtifactFeedback>
+  resumeExecution?(sessionId: string): Promise<void>
   continueProgress?(sessionId: string): Promise<void>
   setSessionPermissionMode(sessionId: string, mode: PermissionMode): void
   setSessionThinkingLevel(sessionId: string, level: ThinkingLevel): void
@@ -142,6 +148,8 @@ export interface ISessionManager {
    * when the session's message queue drains (true completion), carrying the stop
    * reason. Returns an unsubscribe function.
    */
+  notifyArtifactApplied?(workspaceId: string): void
+  onArtifactApplied?(listener: (workspaceId: string) => void): () => void
   onSessionComplete(
     listener: (evt: import('../sessions/SessionManager').SessionCompletionEvent) => void,
   ): () => void

@@ -1,7 +1,10 @@
+import { createHash } from 'node:crypto'
 import { describe, expect, it } from 'bun:test'
 import {
   createSelectionPreviewAnnotation,
   createTextSelectionAnnotation,
+  hashAnnotationSource,
+  hasExistingTextRangeAnnotation,
 } from '../annotation-core'
 import { getAnnotationChipVisual } from '../annotation-style-tokens'
 
@@ -59,4 +62,21 @@ describe('annotation core helpers', () => {
     expect(String(pending.style.backgroundColor)).toContain('34%')
     expect(String(sent.style.backgroundColor)).toContain('14%')
   })
+  it('hashes the raw source consistently with the runtime without normalizing line endings', async () => {
+    const content = '# 标题\r\n**正文** 😀'
+    expect(await hashAnnotationSource(content)).toBe(createHash('sha256').update(content).digest('hex'))
+    expect(await hashAnnotationSource(content)).not.toBe(await hashAnnotationSource(content.replaceAll('\r\n', '\n')))
+  })
+
+  it('allows explicit reselection at the same rendered range when its source version changed', () => {
+    const annotation = createTextSelectionAnnotation('msg', {
+      start: 0, end: 4, selectedText: 'test', prefix: '', suffix: '',
+    }, 'Revise')
+    annotation.meta = { ...annotation.meta, sourceContentHash: 'old' }
+    expect(hasExistingTextRangeAnnotation([annotation], 0, 4, 'old')).toBe(true)
+    expect(hasExistingTextRangeAnnotation([annotation], 0, 4, 'new')).toBe(false)
+    const legacy = { ...annotation, meta: undefined }
+    expect(hasExistingTextRangeAnnotation([legacy], 0, 4, 'new')).toBe(true)
+  })
+
 })

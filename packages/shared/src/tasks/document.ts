@@ -65,6 +65,7 @@ const TASK_KEYS = new Set([
 ]);
 
 const NODE_KEYS = new Set([
+  'workspace_inputs',
   'id',
   'title',
   'prompt',
@@ -101,7 +102,7 @@ const LOOP_KEYS = new Set(['until', 'max', 'else', 'carry']);
 const ROUTE_KEYS = new Set(['cases', 'default']);
 const ROUTE_CASE_KEYS = new Set(['when', 'goto']);
 const CONDITION_KEYS = new Set(['ref', 'op', 'value', 'all', 'any', 'not']);
-const EXECUTION_KEYS = new Set(['coordinator_gate', 'verification']);
+const EXECUTION_KEYS = new Set(['coordinator_gate', 'verification', 'artifact_delivery']);
 const COORDINATOR_GATE_KEYS = new Set(['mode', 'timeout_seconds']);
 const VERIFICATION_KEYS = new Set(['required', 'reserve_ratio']);
 const UI_KEYS = new Set(['layout']);

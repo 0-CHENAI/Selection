@@ -49,6 +49,12 @@ describe('spawn_session thinkingLevel forwarding', () => {
     ({ agent, captured } = setup());
   });
 
+  it('forwards the file delivery declaration to the trusted runtime', async () => {
+    const artifactDelivery = { inputs: ['input.txt'], outputs: { result: 'result.txt' } };
+    await agent.invokeSpawn({ prompt: 'edit file', artifactDelivery });
+    expect(captured[0]?.artifactDelivery).toEqual(artifactDelivery);
+  });
+
   it('forwards an explicit thinkingLevel to onSpawnSession', async () => {
     await agent.invokeSpawn({ prompt: 'hi', thinkingLevel: 'high' });
     expect(captured).toHaveLength(1);

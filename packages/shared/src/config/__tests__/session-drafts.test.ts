@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test'
-import { mkdtempSync, readFileSync, writeFileSync } from 'fs'
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'
 import { pathToFileURL } from 'url'
@@ -29,6 +29,17 @@ function runEval(configDir: string, code: string): string {
 }
 
 describe('session draft storage', () => {
+  it('failed writes preserve all existing drafts instead of truncating their storage', () => {
+    const configDir = makeConfigDir()
+    runEval(configDir, "setSessionDraft('original', { text: '原草稿' })")
+    const draftsPath = join(configDir, 'drafts.json')
+    const original = readFileSync(draftsPath, 'utf8')
+    mkdirSync(draftsPath + '.tmp')
+    expect(() => runEval(configDir, "setSessionDraft('recovery', { text: '文'.repeat(100000) })")).toThrow('subprocess failed')
+    expect(readFileSync(draftsPath, 'utf8')).toBe(original)
+    expect(JSON.parse(runEval(configDir, "console.log(JSON.stringify(getAllSessionDrafts()))")))
+      .toEqual({ original: { text: '原草稿' } })
+  })
   it('returns null for an unknown session', () => {
     const configDir = makeConfigDir()
     const output = runEval(configDir, "console.log(JSON.stringify(getSessionDraft('missing')))")
@@ -189,4 +200,16 @@ describe('session draft storage', () => {
     const output = runEval(configDir, "console.log(JSON.stringify(getSessionDraft('s1')))")
     expect(output).toBe('null')
   })
+})
+
+it('preserves oversized recovery text and Windows cross-drive/UNC attachment refs across reload', () => {
+  const configDir = makeConfigDir()
+  const draft = { text: '# 原始输入\r\n' + '文'.repeat(100_000), attachments: [
+    { path: 'E:\\项目\\源 文件.txt', name: '源 文件.txt' }, { path: '\\\\host\\共享\\share.txt', name: 'share.txt' },
+  ] }
+  // Linux limits each command argument; exercise large draft storage via a file.
+  const input = join(configDir, 'large-draft.json')
+  writeFileSync(input, JSON.stringify(draft))
+  runEval(configDir, `setSessionDraft('recovery', await Bun.file(${JSON.stringify(input)}).json())`)
+  expect(JSON.parse(runEval(configDir, "console.log(JSON.stringify(getSessionDraft('recovery')))"))).toEqual(draft)
 })

@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
-import { mkdtempSync, rmSync } from 'fs';
+import { mkdtempSync, rmSync, writeFileSync, readdirSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import type { TokenUsage } from '@craft-agent/core/types';
@@ -743,4 +743,33 @@ describe('TaskRunner v3 quality/efficiency', () => {
     expect(after.status).toBe('waiting-coordinator');
     expect(after.blockers).toContain('approval');
   });
+  it('rejects workspace cache receipts after the referenced artifact changes', async () => {
+    writeFileSync(join(root, 'report.txt'), 'original');
+    const spec = (id: string) => v3Spec({ id, runner: 'conduct',
+      nodes: [{ id: 'pure', prompt: 'report existing file', cache: 'workspace-pure', outputs: [{ name: 'file', kind: 'artifact' }] }],
+    });
+    saveTaskSpec(root, spec('cache-file'));
+    const first = runner();
+    first.run('cache-file', { runId: 'r1', orchestratorSessionId: 'orch', orchestrateAllowed: true, verifyOnComplete: false }); await tick();
+    host.usedToolsById.set('sess-pure', false);
+    expect(first.submitNodeOutput('sess-pure', { values: { file: 'report.txt' } }).ok).toBe(true);
+    host.complete('pure', { finalText: 'report' }); await tick();
+    expect(readdirSync(join(root, 'tasks', '.cache', 'workspace-pure'), { recursive: true }).some(name => String(name).endsWith('.json'))).toBe(true);
+    saveTaskSpec(root, spec('cache-file-reused'));
+    const cachedHost = new MockHost();
+    const cachedRunner = new TaskRunner({ host: cachedHost, workspaceId: 'ws', workspaceRoot: root, now: () => '2026-06-07T00:00:00.000Z' });
+    cachedRunner.run('cache-file-reused', { runId: 'cached', orchestratorSessionId: 'orch', orchestrateAllowed: true, verifyOnComplete: false }); await tick();
+    expect(cachedHost.dispatchedNames()).toHaveLength(0);
+    expect(readRunLog(root, 'cache-file-reused', 'cached').some(event => event.kind === 'node-artifact-inputs' && event.nodeId === 'pure' && event.sessionId === '')).toBe(true);
+    writeFileSync(join(root, 'report.txt'), 'external replacement');
+    expect(cachedRunner.revalidateCompletedArtifacts('cache-file-reused', 'cached').nodes.find(node => node.id === 'pure')?.state).toBe('invalid');
+    saveTaskSpec(root, spec('cache-file-next'));
+    const nextHost = new MockHost();
+    const next = new TaskRunner({ host: nextHost, workspaceId: 'ws', workspaceRoot: root, now: () => '2026-06-07T00:00:00.000Z' });
+    next.run('cache-file-next', { runId: 'r2', orchestratorSessionId: 'orch', orchestrateAllowed: true, verifyOnComplete: false }); await tick();
+    expect(nextHost.dispatchedNames()).toContain('pure');
+    expect(next.getRunState('cache-file-next', 'r2')?.nodes.find(node => node.id === 'pure')?.cacheStatus).toBe('miss');
+    next.stop('cache-file-next', 'r2');
+  });
+
 });

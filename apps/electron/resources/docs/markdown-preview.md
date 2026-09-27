@@ -23,7 +23,7 @@ The `markdown-preview` block renders a markdown file inline in chat messages —
 | Format | Best For | Rendering |
 |--------|----------|-----------|
 | **`markdown-preview` block** | `.md` files on disk (specs, drafts, READMEs) | Inline rendered markdown via the shared renderer |
-| **`html-preview` block** | Emails, newsletters, styled HTML | Sandboxed iframe with full CSS |
+| **`html-preview` block** | Emails, newsletters, styled HTML | Built-in browser with CSS and JavaScript |
 | **`pdf-preview` block** | PDF documents, reports | First page inline, full navigation in fullscreen |
 | **`image-preview` block** | Screenshots, captures | Inline image + fullscreen viewer |
 | **`datatable`/`spreadsheet`** | Structured data | Interactive sortable/filterable tables |

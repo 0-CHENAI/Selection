@@ -254,6 +254,28 @@ export interface StoredAttachment {
   resizedBase64?: string;        // Base64 of resized image (only when wasResized=true, for Claude API)
 }
 
+/** Immutable feedback references accepted with a user message. */
+export interface AnnotationFeedbackReference {
+  messageId: string;
+  annotationId: string;
+  text: string;
+  updatedAt: number;
+}
+
+/** Runtime-owned feedback lifecycle; delivery does not imply user confirmation. */
+export type AnnotationFeedbackStatus = 'queued' | 'running' | 'waiting-user' | 'delivered' | 'failed' | 'interrupted';
+
+/** Accepted selection identity, kept independently of later annotation edits. */
+export type AnnotationFeedbackSnapshot = AnnotationFeedbackReference & {
+  sourceContentHash?: string;
+  target?: AnnotationTarget;
+  resultMessageId?: string;
+  resultAnswerRunId?: string;
+  resultContentHash?: string;
+  resultSalvaged?: boolean;
+  userResolvedAt?: number;
+};
+
 /**
  * Runtime message type (includes transient fields like isStreaming)
  */
@@ -266,6 +288,8 @@ export interface Message {
    * message instead of appending a duplicate with a new backend ID.
    */
   clientMessageId?: string;
+  /** Feedback payload retained for replay validation, independent of later annotation edits. */
+  annotationFollowUps?: AnnotationFeedbackSnapshot[];
   role: MessageRole;
   content: string;
   timestamp: number;
@@ -323,6 +347,8 @@ export interface Message {
   answerCommitted?: boolean;
   /** Promoted from an unsubmitted draft after delivery recovery failed (#403). */
   answerSalvaged?: boolean;
+  /** Persisted snapshot identities for local files delivered by this answer. */
+  artifactVersions?: Array<{ path: string; versionId: string; ordinal: number }>;
   /** Persisted on the originating user message before the single recovery call. */
   answerRecoveryAttempted?: boolean;
   phase?: TextStreamPhase;
@@ -388,6 +414,8 @@ export interface StoredMessage {
   id: string;
   /** Stable sender-generated ID used to make message submission idempotent. */
   clientMessageId?: string;
+  /** Feedback payload retained for replay validation, independent of later annotation edits. */
+  annotationFollowUps?: AnnotationFeedbackSnapshot[];
   type: MessageRole;
   content: string;
   timestamp?: number;
@@ -426,6 +454,8 @@ export interface StoredMessage {
   answerCommitted?: boolean;
   /** Promoted from an unsubmitted draft after delivery recovery failed (#403). */
   answerSalvaged?: boolean;
+  /** Persisted snapshot identities for local files delivered by this answer. */
+  artifactVersions?: Array<{ path: string; versionId: string; ordinal: number }>;
   /** Persisted on the originating user message before the single recovery call. */
   answerRecoveryAttempted?: boolean;
   phase?: TextStreamPhase;

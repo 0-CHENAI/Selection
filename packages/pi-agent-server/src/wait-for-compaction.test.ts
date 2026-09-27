@@ -15,3 +15,14 @@ it('resumes only after compaction is actually finished', async () => {
   session.isCompacting = false;
   await pending;
 });
+
+it('cancellation while waiting cannot launch a request after compaction settles', async () => {
+  const controller = new AbortController();
+  const session = { isCompacting: true };
+  let requests = 0;
+  const pending = (async () => { await waitForCompaction(session, 100, 1, false, controller.signal); requests++; })();
+  controller.abort(); session.isCompacting = false;
+  await expect(pending).rejects.toThrow();
+  expect(requests).toBe(0);
+  await expect(waitForCompaction(session, 100, 1, false, controller.signal)).rejects.toThrow();
+});

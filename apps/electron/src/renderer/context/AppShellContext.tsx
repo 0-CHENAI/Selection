@@ -82,7 +82,7 @@ export interface AppShellContextType {
 
   // Session callbacks
   onCreateSession: (workspaceId: string, options?: import('../../shared/types').CreateSessionOptions) => Promise<Session>
-  onSendMessage: (sessionId: string, message: string, attachments?: FileAttachment[], skillSlugs?: string[], badges?: import('@craft-agent/core').ContentBadge[]) => void
+  onSendMessage: (sessionId: string, message: string, attachments?: FileAttachment[], skillSlugs?: string[], badges?: import('@craft-agent/core').ContentBadge[], annotationFollowUps?: import('@craft-agent/shared/protocol').SendMessageOptions['annotationFollowUps']) => boolean | void | Promise<boolean | void>
   onRenameSession: (sessionId: string, name: string) => void
   onFlagSession: (sessionId: string) => void
   onUnflagSession: (sessionId: string) => void
@@ -131,6 +131,8 @@ export interface AppShellContextType {
 
   // Input draft callback
   onInputChange: (sessionId: string, value: string) => void
+  /** Save a complete draft before navigating to a newly created session. */
+  onPrepareSessionDraft?: (sessionId: string, draft: import('@craft-agent/shared/config').SessionDraft) => Promise<void>
 
   // Attachment draft callback — persists attachment refs per session
   onAttachmentsChange: (sessionId: string, attachments: FileAttachment[]) => void

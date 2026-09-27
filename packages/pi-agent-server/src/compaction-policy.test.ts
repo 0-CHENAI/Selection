@@ -136,7 +136,10 @@ describe('80% compaction policy', () => {
     expect(calls).toHaveLength(0);
     emitNewUser();
     const newTurnPreflight = await (await session.agent.streamFunction(model, midTurn)).result();
-    expect(isContextOverflow(newTurnPreflight, model.contextWindow)).toBe(true);
+    expect(isContextOverflow(newTurnPreflight, model.contextWindow)).toBe(false);
+    const changedInput: Context = { ...midTurn, systemPrompt: 'New user constraint' };
+    const changedPreflight = await (await session.agent.streamFunction(model, changedInput)).result();
+    expect(isContextOverflow(changedPreflight, model.contextWindow)).toBe(true);
     expect(calls).toHaveLength(0);
     const freshTurn: Context = { messages: [{ role: 'user', content: 'Do the task', timestamp: 4 }] };
     await (await session.agent.streamFunction(model, freshTurn)).result();

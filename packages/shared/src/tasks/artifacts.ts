@@ -77,3 +77,20 @@ export function resolveArtifact(
     },
   };
 }
+
+/** Revalidate the exact submitted identity at the delivery boundary. */
+export function verifyArtifact(workspaceRoot: string, value: unknown): ArtifactResolveResult {
+  if (!value || typeof value !== 'object') return { ok: false, error: 'invalid artifact receipt' };
+  const receipt = value as Partial<ArtifactMeta>;
+  if (typeof receipt.path !== 'string' || typeof receipt.hash !== 'string' || !Number.isSafeInteger(receipt.size)) {
+    return { ok: false, error: 'invalid artifact receipt' };
+  }
+  try {
+    const current = resolveArtifact(workspaceRoot, undefined, receipt.path);
+    if (!current.ok) return current;
+    if (current.artifact.hash !== receipt.hash || current.artifact.size !== receipt.size) {
+      return { ok: false, error: 'artifact changed after submission; submit the verified version again' };
+    }
+    return current;
+  } catch { return { ok: false, error: 'artifact is no longer accessible' }; }
+}

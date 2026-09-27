@@ -137,3 +137,72 @@ it('authentication recovery reuses the user message and its delivery checkpoint'
   expect(retryId).toBe(owner.id);
   expect(managed.messages).toEqual([owner]);
 });
+
+it('checkpoint storage failure cannot prevent Stop from aborting the runtime', async () => {
+  const { manager, managed, internal } = fixture();
+  managed.isProcessing = true;
+  managed.executionCheckpoint = { version: 1, sessionId: managed.id, userMessageId: 'u', generation: managed.processingGeneration,
+    status: 'running', pendingTools: {}, completedTools: [], updatedAt: 1 };
+  internal.checkpointExecution = () => { throw new Error('disk full'); };
+  let aborted = false;
+  managed.agent = { forceAbort: () => { aborted = true; }, disposeForRestart: async () => {} } as never;
+  await manager.cancelProcessing(managed.id, true);
+  expect(aborted).toBe(true);
+  expect(managed.stopRequested).toBe(true);
+  expect(managed.executionCheckpoint.status).toBe('cancelled');
+  await internal.onProcessingStopped(managed.id, 'interrupted', managed.processingGeneration);
+  expect(managed.isProcessing).toBe(false);
+  expect(managed.runtimeRecovery?.reason).toBe('checkpoint-save-failed');
+});
+
+for (const succeeds of [true, false]) it(`Swarm completion waits for integration and reports its result (${succeeds})`, async () => {
+  const { manager, managed, internal } = fixture();
+  managed.isProcessing = true;
+  managed.isolatedWorkspace = { version: 1, id: 'candidate', sourceRoot: '/tmp/source', directory: '/tmp/candidate', kind: 'files', inputs: {}, status: 'candidate', deliveryContract: { version: 1, inputs: [], outputs: { result: 'result.txt' } } };
+  let release!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  let calls = 0;
+  internal.finalizeTaskWorkspace = async (_id: string, outputs: Record<string, string>, current: () => void) => {
+    calls++;
+    expect(outputs).toEqual({ result: 'result.txt' });
+    await gate;
+    current();
+    if (!succeeds) throw new Error('candidate validation failed');
+    return { result: { path: '/project/result.txt', hash: 'verified' } };
+  };
+  const completed: Array<{ reason: string; artifacts?: Record<string, unknown> }> = [];
+  manager.onSessionComplete(event => completed.push(event));
+  const pending = internal.onProcessingStopped(managed.id, 'complete', managed.processingGeneration);
+  const repeated = internal.onProcessingStopped(managed.id, 'complete', managed.processingGeneration);
+  await new Promise(resolve => setImmediate(resolve));
+  expect(completed).toHaveLength(0);
+  expect(managed.isProcessing).toBe(true);
+  release();
+  await Promise.all([pending, repeated]);
+  expect(calls).toBe(1);
+  expect(completed.map(event => event.reason)).toEqual([succeeds ? 'complete' : 'error']);
+  expect(completed[0]?.artifacts).toEqual(succeeds ? { result: { path: '/project/result.txt', hash: 'verified' } } : undefined);
+  expect(managed.isProcessing).toBe(false);
+});
+
+
+it('cancellation during completion settlement wins over a late successful end', async () => {
+  const { manager, managed, internal } = fixture();
+  managed.isProcessing = true;
+  managed.executionCheckpoint = { version: 1, sessionId: managed.id, userMessageId: 'u', generation: managed.processingGeneration,
+    status: 'running', pendingTools: {}, completedTools: [], updatedAt: 1 };
+  let release!: () => void;
+  internal.settleRegenerateTransaction = () => new Promise(resolve => { release = () => resolve({ reason: 'complete', rolledBack: false }); });
+  internal.checkpointExecution = () => {};
+  internal.disposeManagedAgentRuntime = async () => {};
+  const completed: Array<{ reason: string }> = [];
+  manager.onSessionComplete(event => completed.push(event));
+  const pending = internal.onProcessingStopped(managed.id, 'complete', managed.processingGeneration);
+  managed.stopRequested = true;
+  managed.executionCheckpoint.status = 'cancelled';
+  release();
+  await pending;
+  expect(managed.executionCheckpoint.status).toBe('cancelled');
+  expect(completed.map(event => event.reason)).toEqual(['interrupted']);
+  expect(managed.isProcessing).toBe(false);
+});

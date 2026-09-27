@@ -158,6 +158,7 @@ export const LOCAL_ONLY_CHANNELS = new Set<string>([
 
   // browserPane — Electron BrowserView
   RPC_CHANNELS.browserPane.CREATE,
+  RPC_CHANNELS.browserPane.OPEN_HTML_FILE,
   RPC_CHANNELS.browserPane.DESTROY,
   RPC_CHANNELS.browserPane.LIST,
   RPC_CHANNELS.browserPane.NAVIGATE,
@@ -205,6 +206,13 @@ export const LOCAL_ONLY_CHANNELS = new Set<string>([
 // ---------------------------------------------------------------------------
 
 export const REMOTE_ELIGIBLE_CHANNELS = new Set<string>([
+  RPC_CHANNELS.artifacts.BODY_FEEDBACK,
+  RPC_CHANNELS.artifacts.MANAGE,
+  RPC_CHANNELS.artifacts.FEEDBACK,
+  RPC_CHANNELS.artifacts.FEEDBACK_LIST,
+  RPC_CHANNELS.artifacts.FEEDBACK_CONTEXT,
+  RPC_CHANNELS.artifacts.CLEANUP,
+  RPC_CHANNELS.artifacts.PREVIEW,
   // server — server-level operations (no workspace context needed)
   RPC_CHANNELS.server.GET_WORKSPACES,
   RPC_CHANNELS.server.CREATE_WORKSPACE,

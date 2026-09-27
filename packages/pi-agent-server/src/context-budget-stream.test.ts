@@ -2,6 +2,7 @@ import { isRetryableAssistantError } from '@earendil-works/pi-ai/compat';
 import { describe, expect, it } from 'bun:test';
 import {
   createAssistantMessageEventStream,
+  isContextOverflow,
   type AssistantMessage,
   type AssistantMessageEvent,
   type AssistantMessageEventStream,
@@ -66,6 +67,36 @@ const overflowText =
   'This model maximum context length is 262144 tokens. However, you requested 214575 output tokens and your prompt contains at least 47570 input tokens. (context_length_exceeded)';
 
 describe('createContextBudgetedStream', () => {
+  it('never sends an input that cannot fit with reserve and even one output token', async () => {
+    let calls = 0;
+    const smallModel = { ...model, contextWindow: 4096, maxTokens: 1024 };
+    const streamSimple = () => { calls++; return eventsStream([{ type: 'done', reason: 'stop', message: message('stop') }]); };
+    const content = '文'.repeat(4096);
+    const oversized = [
+      { systemPrompt: content, messages: [] },
+      { tools: [{ name: 'read', description: content, parameters: {} }], messages: [] },
+      { messages: [{ role: 'user', content, timestamp: 1 }] },
+      { messages: [{ role: 'toolResult', toolCallId: 'call', toolName: 'read', content: [{ type: 'text', text: content }], isError: false, timestamp: 1 }] },
+    ] as Context[];
+    for (const context of oversized) {
+      const original = structuredClone(context);
+      const result = await createContextBudgetedStream(streamSimple, smallModel, context).result();
+      expect(result.errorMessage).toContain('分批读取附件');
+      expect(result).toMatchObject({ craftContextLimit: true });
+      expect(result.stopReason).toBe('error');
+      expect(isContextOverflow(result, smallModel.contextWindow)).toBe(false);
+      expect(isRetryableAssistantError(result)).toBe(false);
+      expect(context).toEqual(original);
+    }
+    expect(calls).toBe(0);
+    const controller = new AbortController(); controller.abort();
+    const cancelled = await createContextBudgetedStream(streamSimple, smallModel, oversized[0]!, { signal: controller.signal }).result();
+    expect(cancelled.stopReason).toBe('aborted');
+    expect(calls).toBe(0);
+    await createContextBudgetedStream(streamSimple, smallModel, { messages: [{ role: 'user', content: 'Continue', timestamp: 2 }] }).result();
+    expect(calls).toBe(1);
+  });
+
   it('pre-caps output using system, tools, attachments, and history', async () => {
     const seen: number[] = [];
     const context = {

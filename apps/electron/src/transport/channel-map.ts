@@ -210,6 +210,13 @@ export const CHANNEL_MAP = {
 
   // Filesystem search
   searchFiles: invoke(RPC_CHANNELS.fs.SEARCH),
+  getBodyFeedbackDetails: invoke(RPC_CHANNELS.artifacts.BODY_FEEDBACK),
+  artifactFeedback: invoke(RPC_CHANNELS.artifacts.FEEDBACK),
+  previewArtifactVersion: invoke(RPC_CHANNELS.artifacts.PREVIEW),
+  cleanupArtifactVersions: invoke(RPC_CHANNELS.artifacts.CLEANUP),
+  getArtifactFeedbackContext: invoke(RPC_CHANNELS.artifacts.FEEDBACK_CONTEXT),
+  listArtifactFeedback: invoke(RPC_CHANNELS.artifacts.FEEDBACK_LIST),
+  manageArtifact: invoke(RPC_CHANNELS.artifacts.MANAGE),
   statPath: invoke(RPC_CHANNELS.fs.STAT_PATH),
 
   // Server filesystem browsing (remote mode)
@@ -374,6 +381,7 @@ export const CHANNEL_MAP = {
 
   // Browser pane management
   'browserPane.create': invoke(RPC_CHANNELS.browserPane.CREATE),
+  'browserPane.openHtmlFile': invoke(RPC_CHANNELS.browserPane.OPEN_HTML_FILE),
   'browserPane.destroy': invoke(RPC_CHANNELS.browserPane.DESTROY),
   'browserPane.list': invoke(RPC_CHANNELS.browserPane.LIST),
   'browserPane.navigate': invoke(RPC_CHANNELS.browserPane.NAVIGATE),

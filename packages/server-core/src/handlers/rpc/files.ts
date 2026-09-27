@@ -1,3 +1,7 @@
+import { ArtifactVersions } from '../../reliability/artifact-versions'
+import { fileFingerprint } from '../../../../shared/src/agent/backend/pi/file-operation-receipts'
+import { existsSync } from 'node:fs'
+import { hostname } from 'node:os'
 import { readFile, writeFile, unlink, mkdir, readdir, stat } from 'fs/promises'
 import { isAbsolute, join, resolve, dirname, parse as parsePath } from 'path'
 import { homedir } from 'os'
@@ -15,6 +19,13 @@ import type { HandlerDeps } from '../handler-deps'
 import { requestClientOpenFileDialog } from '@craft-agent/server-core/transport'
 
 export const HANDLED_CHANNELS = [
+  RPC_CHANNELS.artifacts.BODY_FEEDBACK,
+  RPC_CHANNELS.artifacts.MANAGE,
+  RPC_CHANNELS.artifacts.FEEDBACK,
+  RPC_CHANNELS.artifacts.FEEDBACK_LIST,
+  RPC_CHANNELS.artifacts.FEEDBACK_CONTEXT,
+  RPC_CHANNELS.artifacts.CLEANUP,
+  RPC_CHANNELS.artifacts.PREVIEW,
   RPC_CHANNELS.file.READ,
   RPC_CHANNELS.file.READ_DATA_URL,
   RPC_CHANNELS.file.READ_PREVIEW_DATA_URL,
@@ -30,6 +41,84 @@ export const HANDLED_CHANNELS = [
 ] as const
 
 export function registerFilesHandlers(server: RpcServer, deps: HandlerDeps): void {
+  server.handle(RPC_CHANNELS.artifacts.BODY_FEEDBACK, async (ctx, sessionId: string, sourceMessageId: string, annotationId: string) => {
+    const workspaceId = resolveWorkspaceIdForFileAccess(ctx, deps.windowManager)
+    const session = await deps.sessionManager.getSession(sessionId)
+    if (!workspaceId || !session || session.workspaceId !== workspaceId) throw new Error('Session does not belong to this workspace')
+    if (!deps.sessionManager.getBodyFeedbackDetails) throw new Error('Body feedback history is unavailable')
+    if (typeof sourceMessageId !== 'string' || typeof annotationId !== 'string') throw new Error('Invalid feedback identity')
+    return deps.sessionManager.getBodyFeedbackDetails(sessionId, sourceMessageId, annotationId)
+  })
+  server.handle(RPC_CHANNELS.artifacts.CLEANUP, async (ctx, sessionId: string, artifactId: string, expectedVersion: string, versionIds: string[], requestId: string) => {
+    if (typeof requestId !== 'string' || !requestId.trim() || !Array.isArray(versionIds)
+      || !versionIds.length || versionIds.some(id => typeof id !== 'string' || !id)) throw new Error('Invalid cleanup request')
+    const workspaceId = resolveWorkspaceIdForFileAccess(ctx, deps.windowManager)
+    if (!workspaceId) throw new Error('Workspace required')
+    const session = await deps.sessionManager.getSession(sessionId)
+    if (!session || session.workspaceId !== workspaceId) throw new Error('Session does not belong to this workspace')
+    if (!deps.sessionManager.cleanupArtifactVersions) throw new Error('Artifact cleanup is unavailable')
+    return deps.sessionManager.cleanupArtifactVersions(sessionId, artifactId, expectedVersion, versionIds, requestId)
+  })
+  server.handle(RPC_CHANNELS.artifacts.FEEDBACK_CONTEXT, async (ctx, sessionId: string, artifactId: string) => {
+    const workspaceId = resolveWorkspaceIdForFileAccess(ctx, deps.windowManager)
+    const session = await deps.sessionManager.getSession(sessionId)
+    if (!session || session.workspaceId !== workspaceId) throw new Error('Session does not belong to this workspace')
+    if (!deps.sessionManager.getArtifactFeedbackContext) throw new Error('Feedback input declarations are unavailable')
+    return deps.sessionManager.getArtifactFeedbackContext(sessionId, artifactId)
+  })
+  server.handle(RPC_CHANNELS.artifacts.PREVIEW, async (ctx, artifactId: string, versionId: string) => {
+    const workspaceId = resolveWorkspaceIdForFileAccess(ctx, deps.windowManager)
+    if (!workspaceId) throw new Error('Workspace required')
+    const workspace = getWorkspaceByNameOrId(workspaceId)
+    if (!workspace) throw new Error('Workspace not found')
+    const store = new ArtifactVersions(join(workspace.rootPath, 'artifacts', 'versions'), hostname(), workspaceId)
+    const record = store.read(artifactId)
+    await validateWorkspaceFilePath(record.path, workspaceId)
+    return store.preview(artifactId, versionId)
+  })
+  server.handle(RPC_CHANNELS.artifacts.FEEDBACK_LIST, async (ctx, sessionId: string, artifactId: string) => {
+    const workspaceId = resolveWorkspaceIdForFileAccess(ctx, deps.windowManager)
+    const session = await deps.sessionManager.getSession(sessionId)
+    if (!session || session.workspaceId !== workspaceId) throw new Error('Session does not belong to this workspace')
+    if (!deps.sessionManager.listArtifactFeedback) throw new Error('Artifact feedback history is unavailable')
+    return deps.sessionManager.listArtifactFeedback(sessionId, artifactId)
+  })
+  server.handle(RPC_CHANNELS.artifacts.FEEDBACK, async (ctx, operation: import('@craft-agent/shared/protocol').ArtifactFeedbackOperation) => {
+    const workspaceId = resolveWorkspaceIdForFileAccess(ctx, deps.windowManager)
+    const session = await deps.sessionManager.getSession(operation.sessionId)
+    if (!session || session.workspaceId !== workspaceId) throw new Error('Session does not belong to this workspace')
+    if (!deps.sessionManager.artifactFeedback) throw new Error('Artifact feedback is unavailable')
+    return deps.sessionManager.artifactFeedback(operation)
+  })
+  server.handle(RPC_CHANNELS.artifacts.MANAGE, async (ctx, operation: import('@craft-agent/shared/protocol').ArtifactOperation) => {
+    const workspaceId = resolveWorkspaceIdForFileAccess(ctx, deps.windowManager)
+    if (!workspaceId) throw new Error('Workspace required')
+    const workspace = getWorkspaceByNameOrId(workspaceId)
+    if (!workspace) throw new Error('Workspace not found')
+    const store = new ArtifactVersions(join(workspace.rootPath, 'artifacts', 'versions'), hostname(), workspaceId)
+    if (operation.type === 'register') {
+      if (operation.alternativePaths !== undefined && (!Array.isArray(operation.alternativePaths)
+        || operation.alternativePaths.some(path => typeof path !== 'string' || !path))) throw new Error('Invalid artifact paths')
+      const paths = []
+      for (const path of [operation.path, ...(operation.alternativePaths ?? [])]) paths.push(await validateWorkspaceFilePath(path, workspaceId))
+      return store.register(paths[0]!, undefined, paths.slice(1))
+    }
+    const record = store.read(operation.artifactId)
+    if (operation.type === 'relocate') {
+      const relocated = store.relocate(record.id, await validateWorkspaceFilePath(operation.path, workspaceId), operation.expectedVersion)
+      // A location change also invalidates consumers retaining the old path.
+      if (relocated.path !== record.path || relocated.currentVersion !== record.currentVersion) deps.sessionManager.notifyArtifactApplied?.(workspaceId)
+      return relocated
+    }
+    await validateWorkspaceFilePath(record.path, workspaceId)
+    if (operation.type === 'read') return store.reconcile(record.id)
+    if (operation.type === 'restore') {
+      const restored = store.restore(record.id, operation.expectedVersion, operation.versionId)
+      deps.sessionManager.notifyArtifactApplied?.(workspaceId)
+      return restored
+    }
+    throw new Error('Unknown artifact operation')
+  })
   // Exact lookup for generated links. Search results are ranked and capped, so
   // they cannot reliably prove that a particular file or directory exists.
   server.handle(RPC_CHANNELS.fs.STAT_PATH, async (ctx, requestedPath: string): Promise<FilePathStat | null> => {
@@ -42,7 +131,20 @@ export function registerFilesHandlers(server: RpcServer, deps: HandlerDeps): voi
     } catch (error) {
       if (error instanceof Error && 'code' in error
         && ((error as NodeJS.ErrnoException).code === 'ENOENT'
-          || (error as NodeJS.ErrnoException).code === 'ENOTDIR')) return null
+          || (error as NodeJS.ErrnoException).code === 'ENOTDIR')) {
+        const workspace = workspaceId ? getWorkspaceByNameOrId(workspaceId) : undefined
+        const storage = workspace && join(workspace.rootPath, 'artifacts', 'versions')
+        if (!workspace || !storage || !existsSync(storage)) return null
+        const record = new ArtifactVersions(storage, hostname(), workspace.id).findByPath(safePath)
+        if (!record || record.path === safePath) return null
+        const currentPath = await validateWorkspaceFilePath(record.path, workspaceId)
+        const currentVersion = record.versions.find(version => version.id === record.currentVersion)!
+        const fingerprint = fileFingerprint(currentPath)
+        if (!fingerprint || fingerprint.hash !== currentVersion.hash || fingerprint.size !== currentVersion.size) {
+          throw new Error('Artifact content changed; inspect its versions before opening the relocated file')
+        }
+        return { path: currentPath, type: 'file' }
+      }
       throw error
     }
   })

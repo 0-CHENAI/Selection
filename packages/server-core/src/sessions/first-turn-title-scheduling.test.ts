@@ -30,14 +30,15 @@ describe('first-turn title scheduling (#46)', () => {
     events = []
     rejectAgentCreate = undefined
     hungSend = undefined
-    ;(sm as unknown as { persistSession: (managed: Managed) => void }).persistSession = () => {}
-    ;(sm as unknown as { flushSession: (id: string) => Promise<void> }).flushSession = async () => {}
     sm.setEventSink((_channel, _target, event) => events.push(event as { type?: string; title?: string }))
   })
 
   afterEach(async () => {
     rejectAgentCreate?.(new Error('test teardown'))
     if (hungSend) await hungSend.catch(() => undefined)
+    for (const id of (sm as unknown as { sessions: Map<string, Managed> }).sessions.keys()) {
+      await sm.flushSession(id)
+    }
     rmSync(tmpRoot, { recursive: true, force: true })
   })
 
@@ -58,10 +59,12 @@ describe('first-turn title scheduling (#46)', () => {
   }
 
   function hangAgentCreate() {
+    const pending = Promise.withResolvers<unknown>()
+    rejectAgentCreate = pending.reject
+    // Teardown may run before durable submission reaches agent creation.
+    void pending.promise.catch(() => undefined)
     ;(sm as unknown as { getOrCreateAgent: (managed: Managed) => Promise<unknown> }).getOrCreateAgent = () =>
-      new Promise((_, reject) => {
-        rejectAgentCreate = reject
-      })
+      pending.promise
   }
 
   function stubGenerateTitle(onCall?: (pending: PendingFirstTurnAiTitle) => Promise<void> | void) {

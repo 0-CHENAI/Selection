@@ -11,6 +11,11 @@ export type TextAnnotationSelection = {
   suffix: string
 }
 
+export async function hashAnnotationSource(content: string): Promise<string> {
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(content))
+  return Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, '0')).join('')
+}
+
 export function clamp(value: number, min: number, max: number): number {
   return Math.min(Math.max(value, min), max)
 }
@@ -19,8 +24,11 @@ export function hasExistingTextRangeAnnotation(
   annotations: AnnotationV1[] | undefined,
   start: number,
   end: number,
+  sourceContentHash?: string,
 ): boolean {
   return (annotations ?? []).some(annotation => {
+    const boundHash = annotation.meta?.sourceContentHash
+    if (sourceContentHash && boundHash !== undefined && boundHash !== sourceContentHash) return false
     const pos = annotation.target.selectors.find(s => s.type === 'text-position') as Extract<
       AnnotationV1['target']['selectors'][number],
       { type: 'text-position' }

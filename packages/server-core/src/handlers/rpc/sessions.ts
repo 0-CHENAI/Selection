@@ -323,6 +323,9 @@ export function registerSessionsHandlers(server: RpcServer, deps: HandlerDeps): 
         return sessionManager.setActiveViewingSession(sessionId, command.workspaceId)
       case 'setProgressSupervision':
         return sessionManager.setProgressSupervision?.(sessionId, command.enabled)
+      case 'resumeExecution':
+        if (!sessionManager.resumeExecution) throw new Error('Execution recovery is not supported by this server')
+        return sessionManager.resumeExecution(sessionId)
       case 'continueProgress':
         return sessionManager.continueProgress?.(sessionId)
       case 'setPermissionMode':

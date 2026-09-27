@@ -1,12 +1,15 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test'
-import { mkdtempSync, rmSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { hostname, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { AgentEvent } from '@craft-agent/core'
 import { storedToMessage } from '@craft-agent/core'
 import type { AnswerDeliveryControl } from '@craft-agent/shared/agent/backend/types'
+import { createTypedError } from '@craft-agent/shared/agent/errors'
 import { getSessionPath, loadSession as loadStoredSession } from '@craft-agent/shared/sessions'
 import { createManagedSession, loadPiTurnAnchors, SessionManager } from './SessionManager'
+import { ArtifactVersions } from '../reliability/artifact-versions'
+import { ConversationArtifactVersions } from '../reliability/conversation-artifact-versions'
 
 const explanation = '蒙提霍尔问题\n\n1. 三扇门，主持人知道奖品位置。\n2. 主持人打开一扇有羊的门。\n\n| 策略 | 胜率 |\n| --- | --- |\n| 换门 | 2/3 |\n| 不换 | 1/3 |'
 const markdown = `${explanation}\n\n模拟结果：换门胜率约为 2/3。`
@@ -39,6 +42,171 @@ describe('explicit answer delivery lifecycle (#330)', () => {
     ;(manager as any).getOrCreateAgent = async () => agent
     return agent
   }
+  function feedbackOptions() {
+    managed.messages = [{ id: 'original', role: 'assistant', content: 'Original answer', timestamp: 1,
+      annotations: [{ id: 'note', schemaVersion: 1, createdAt: 1,
+        body: [{ type: 'note', text: 'Revise this' }],
+        target: { source: { sessionId: managed.id, messageId: 'original' }, selectors: [{ type: 'text-quote', exact: 'Original' }] },
+      }],
+    }]
+    return { annotationFollowUps: [{ messageId: 'original', annotationId: 'note', text: 'Revise this', updatedAt: 1 }] }
+  }
+
+  it('records ordinary chat file edits and publishes the same snapshot identity as the saved answer', async () => {
+    const file = join(root, 'report.html')
+    writeFileSync(file, 'before')
+    managed.workingDirectory = root
+    managed.messages = [{ id: 'previous', role: 'assistant', content: '[报告](report.html)', timestamp: 1 }]
+    install(async function* () {
+      writeFileSync(file, 'after')
+      await control!.submit({ ...submission, markdown: '[已修改报告](report.html)' })
+      yield { type: 'complete' }
+    })
+    await manager.sendMessage(managed.id, '调整报告颜色')
+    const answer = loadStoredSession(root, managed.id)!.messages.find(message => message.answerCommitted)!
+    const event = events.find(event => event.type === 'text_complete' && event.answerCommitted)!
+    expect(event.artifactVersions).toEqual(answer.artifactVersions)
+    expect(answer.artifactVersions).toHaveLength(1)
+    expect(answer.artifactVersions![0]).toMatchObject({ path: 'report.html', ordinal: 2 })
+    const versions = new ArtifactVersions(join(root, 'artifacts', 'versions'), hostname(), managed.workspace.id)
+    const record = versions.findByPath(file)!
+    expect(record.versions).toHaveLength(2)
+    expect(record.versions[1]!.summary).toBe('调整报告颜色')
+    expect(versions.versionBytes(record.id, record.versions[0]!.id).toString()).toBe('before')
+    expect(prompts).toHaveLength(1)
+  })
+
+  it('persists the pending tool before awaiting artifact baseline recording', async () => {
+    const trackPath = ConversationArtifactVersions.prototype.trackPath
+    let checked = false
+    ConversationArtifactVersions.prototype.trackPath = async function (path) {
+      const checkpoint = JSON.parse(readFileSync(join(getSessionPath(root, managed.id), 'data', 'execution-checkpoint.json'), 'utf8'))
+      expect(checkpoint.pendingTools['write-1']).toMatchObject({ name: 'Write', recovery: 'unknown' })
+      checked = true
+      await trackPath.call(this, path)
+    }
+    managed.workingDirectory = root
+    install(async function* () {
+      yield { type: 'tool_start', toolName: 'Write', toolUseId: 'write-1', input: { file_path: join(root, 'report.txt') } }
+      yield { type: 'tool_result', toolUseId: 'write-1', toolName: 'Write', result: 'done', isError: false }
+      await control!.submit(submission)
+      yield { type: 'complete' }
+    })
+    try {
+      await manager.sendMessage(managed.id, 'Create report')
+      expect(checked).toBe(true)
+    } finally { ConversationArtifactVersions.prototype.trackPath = trackPath }
+  })
+
+  it('context admission failure preserves input and preview without starting answer recovery or promoting a draft', async () => {
+    install(async function* () {
+      yield { type: 'text_complete', text: 'Incomplete work preview' }
+      yield { type: 'typed_error', error: createTypedError('context_limit') }
+      yield { type: 'complete' }
+    })
+    const input = '原始输入\r\n' + '文'.repeat(100_000)
+    await manager.sendMessage(managed.id, input)
+    await manager.flushSession(managed.id)
+    expect(prompts).toEqual([input])
+    const stored = loadStoredSession(root, managed.id)!
+    const user = stored.messages.find(message => message.type === 'user')!
+    expect(user.content).toBe(input)
+    expect(user.answerRecoveryAttempted).not.toBe(true)
+    expect(stored.messages.filter(message => message.errorCode === 'context_limit')).toHaveLength(1)
+    expect(stored.messages.find(message => message.errorCode === 'context_limit')!.errorCanRetry).toBe(false)
+    expect(stored.messages.some(message => message.answerCommitted)).toBe(false)
+    expect(stored.messages.some(message => message.content === 'Incomplete work preview')).toBe(true)
+    expect(events.some(event => event.type === 'text_complete' && event.answerCommitted)).toBe(false)
+    expect(managed.isProcessing).toBe(false)
+  })
+
+  for (const failure of ['error', 'cancel', 'missing'] as const) {
+    it(`persists a feedback terminal status without pretending it was delivered (${failure})`, async () => {
+      const options = feedbackOptions()
+      install(async function* () {
+        if (failure === 'error') yield { type: 'error', message: 'provider unavailable' }
+        if (failure === 'cancel') managed.stopRequested = true
+        yield { type: 'complete' }
+      })
+      await manager.sendMessage(managed.id, 'Revise', undefined, undefined, options)
+      const source = loadStoredSession(root, managed.id)!.messages.find(message => message.id === 'original')!
+      const followUp = source.annotations![0]!.meta!.followUp as Record<string, unknown>
+      expect(followUp.status).toBe(failure === 'cancel' ? 'interrupted' : 'failed')
+      expect(followUp.resultMessageId).toBeUndefined()
+      expect(source.annotations![0]!.status).not.toBe('resolved')
+      const statusEvents = events.filter(event => event.type === 'message_annotations_updated')
+        .map(event => event.annotations[0].meta.followUp.status)
+      expect(statusEvents).toContain('running')
+      expect(statusEvents.at(-1)).toBe(followUp.status)
+    })
+  }
+
+  it('cancellation during feedback terminal persistence retains cancellation ownership', async () => {
+    const options = feedbackOptions()
+    const flush = manager.flushSession.bind(manager)
+    let cancelledDuringFlush = false
+    manager.flushSession = async id => {
+      if ((managed.messages[0]?.annotations?.[0]?.meta?.followUp as any)?.status === 'failed') {
+        managed.stopRequested = true
+        cancelledDuringFlush = true
+      }
+      await flush(id)
+    }
+    install(async function* () { yield { type: 'error', message: 'provider unavailable' }; yield { type: 'complete' } })
+    const completed: any[] = []
+    manager.onSessionComplete(event => completed.push(event))
+    await manager.sendMessage(managed.id, 'Revise', undefined, undefined, options)
+    expect(cancelledDuringFlush).toBe(true)
+    expect(completed.at(-1)?.reason).toBe('interrupted')
+    const source = loadStoredSession(root, managed.id)!.messages.find(message => message.id === 'original')!
+    expect(source.annotations![0]!.meta?.followUp).toMatchObject({ status: 'interrupted' })
+    expect(managed.isProcessing).toBe(false)
+  })
+
+  for (const salvaged of [false, true]) {
+    it(`persists annotation feedback result before publication and reloads its source (salvaged=${salvaged})`, async () => {
+      const original = 'Original paragraph to revise'
+      managed.messages = [{
+        id: 'original', role: 'assistant', content: original, timestamp: 1,
+        annotations: [{ id: 'note', schemaVersion: 1, createdAt: 1,
+          body: [{ type: 'note', text: 'Explain more clearly' }],
+          target: { source: { sessionId: managed.id, messageId: 'original' }, selectors: [] },
+        }],
+      }]
+      let resultPersistedBeforeEvent = false
+      manager.setEventSink((_channel, _target, event: any) => {
+        events.push(event)
+        if (event.type === 'message_annotations_updated' && event.annotations[0]?.meta?.followUp?.resultMessageId) {
+          const stored = loadStoredSession(root, managed.id)!
+          const source = stored.messages.find(message => message.id === 'original')!
+          const resultId = event.annotations[0].meta.followUp.resultMessageId
+          resultPersistedBeforeEvent = (source.annotations![0]!.meta?.followUp as any).resultMessageId === resultId
+            && stored.messages.some(message => message.id === resultId && message.answerCommitted)
+        }
+      })
+      install(async function* () {
+        yield { type: 'text_complete', text: markdown }
+        if (!salvaged) await control!.submit(submission)
+        yield { type: 'complete' }
+      })
+      await manager.sendMessage(managed.id, 'Revise the paragraph', undefined, undefined, {
+        annotationFollowUps: [{ messageId: 'original', annotationId: 'note', text: 'Explain more clearly', updatedAt: 1 }],
+      })
+      const reloaded = loadStoredSession(root, managed.id)!.messages.map(storedToMessage)
+      const source = reloaded.find(message => message.id === 'original')!
+      const followUp = source.annotations![0]!.meta!.followUp as Record<string, unknown>
+      const result = reloaded.find(message => message.id === followUp.resultMessageId)!
+      expect(source.content).toBe(original)
+      expect(followUp.status).toBe('delivered')
+      expect(followUp.resultSalvaged).toBe(salvaged)
+      expect(followUp.resultAnswerRunId).toBe(result.answerRunId)
+      expect(result.answerCommitted).toBe(true)
+      expect(result.content).toBe(markdown)
+      expect(resultPersistedBeforeEvent).toBe(true)
+      expect(events.filter(event => event.type === 'text_complete' && event.answerCommitted)).toHaveLength(1)
+    })
+  }
+
   it('persists complete Markdown before publication and survives rehydration plus late events', async () => {
     let persistedBeforeEvent = false
     manager.setEventSink((_channel, _target, event: any) => {

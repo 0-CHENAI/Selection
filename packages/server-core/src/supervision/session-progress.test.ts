@@ -20,7 +20,7 @@ function setup(terminal?: 'output_limit' | 'stream_interrupted' | 'model_request
   const entered = deferred(); const interrupted = deferred(); let calls = 0; let control: any
   const prompts: string[] = []
   const agent = {
-    destroy() {}, getModel: () => 'Laufry', getSessionId: () => 'sdk-candidate', setAllSources() {},
+    destroy() {}, async dispose() {}, getModel: () => 'Laufry', getSessionId: () => 'sdk-candidate', setAllSources() {},
     configureAnswerDelivery(value: any) { control = value },
     async interruptForProgress() { interrupted.resolve() },
     forceAbort() { interrupted.resolve() },
@@ -95,9 +95,11 @@ describe('SessionManager progress integration', () => {
   it('continues a saved checkpoint once and keeps the answer identity', async () => {
     const f = setup('model_request_timeout'); const run = f.manager.sendMessage(f.managed.id, '画图'); await f.entered.promise;
     f.interrupted.resolve(); await run;
-    const runId = f.managed.messages.find(m => m.role === 'user')!.answerRunId;
+    const user = f.managed.messages.find(m => m.role === 'user')!;
+    const runId = user.answerRunId;
     await f.manager.continueProgress(f.managed.id);
     expect(f.prompts).toHaveLength(2);
+    expect(f.managed.messages.filter(m => m.role === 'user').map(m => m.id)).toEqual([user.id]);
     expect(f.managed.messages.find(m => m.answerCommitted)?.answerRunId).toBe(runId);
     await expect(f.manager.continueProgress(f.managed.id)).rejects.toThrow('No pending');
     await f.manager.flushSession(f.managed.id);
@@ -129,6 +131,7 @@ describe('SessionManager progress integration', () => {
     expect(f.managed.messages.some(m => m.id === 'old')).toBe(true);
     expect(f.managed.sdkSessionId).toBe('sdk-old');
     await f.manager.continueProgress(f.managed.id);
+    expect(f.managed.messages.filter(m => m.role === 'user').map(m => m.id)).toEqual(['user']);
     expect(f.managed.messages.filter(m => m.answerCommitted).map(m => m.content)).toEqual(['完整交付']);
     expect(f.managed.messages.find(m => m.answerCommitted)?.answerRunId).not.toBe('old-run');
     await f.manager.flushSession(f.managed.id);

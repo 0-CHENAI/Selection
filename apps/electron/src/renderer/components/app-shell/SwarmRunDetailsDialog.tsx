@@ -1,8 +1,9 @@
 import * as React from 'react'
-import { ExternalLink, RefreshCw } from 'lucide-react'
+import { ExternalLink, RefreshCw, CheckCircle2, AlertTriangle, Loader2 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import type { SwarmRunDetailsDto, SwarmRunNodeDto } from '@craft-agent/shared/protocol'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { usePlatform } from '@craft-agent/ui/context'
 import { cn } from '@/lib/utils'
 
 interface SwarmRunDetailsDialogProps {
@@ -44,17 +45,21 @@ export function SwarmRunDetailsDialog({
   refreshKey,
 }: SwarmRunDetailsDialogProps) {
   const { t } = useTranslation()
+  const { onOpenFile } = usePlatform()
   const [details, setDetails] = React.useState<SwarmRunDetailsDto | null>(null)
   const [loading, setLoading] = React.useState(false)
   const [error, setError] = React.useState<string | null>(null)
+  const [fileError, setFileError] = React.useState<string | null>(null)
   const [pending, setPending] = React.useState(false)
   const requestSequence = React.useRef(0)
+  const returnFocus = React.useRef<HTMLElement | null>(null)
+  const openingWorker = React.useRef(false)
 
-  const load = React.useCallback(async () => {
+  const load = React.useCallback(async (background = false) => {
     const sequence = ++requestSequence.current
     setLoading(true)
     setError(null)
-    setDetails(null)
+    if (!background) setDetails(null)
     try {
       const next = await window.electronAPI.getSessionSwarmRunDetails(sessionId, workspaceId)
       if (sequence !== requestSequence.current) return
@@ -73,11 +78,17 @@ export function SwarmRunDetailsDialog({
 
   React.useEffect(() => () => {
     requestSequence.current += 1
-  }, [sessionId, workspaceId])
+  }, [sessionId, workspaceId, open])
 
   React.useEffect(() => {
     if (open) void load()
   }, [open, load, refreshKey])
+
+  React.useEffect(() => {
+    if (!open || !details?.nodes.some(node => node.status === 'running')) return
+    const timer = window.setTimeout(() => { void load(true) }, 1500)
+    return () => window.clearTimeout(timer)
+  }, [open, details, load])
 
   const stop = React.useCallback(async () => {
     if (!onStop || pending) return
@@ -94,7 +105,15 @@ export function SwarmRunDetailsDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[80vh] max-w-2xl overflow-hidden">
+      <DialogContent className="max-h-[80vh] max-w-2xl overflow-hidden"
+        onOpenAutoFocus={() => {
+          openingWorker.current = false
+          returnFocus.current = document.activeElement instanceof HTMLElement ? document.activeElement : null
+        }}
+        onCloseAutoFocus={(event) => {
+          event.preventDefault()
+          if (!openingWorker.current && returnFocus.current?.isConnected) returnFocus.current.focus()
+        }}>
         <DialogHeader>
           <DialogTitle>{t('swarm.detailsTitle')}</DialogTitle>
           <DialogDescription>{t('swarm.detailsDescription')}</DialogDescription>
@@ -150,7 +169,11 @@ export function SwarmRunDetailsDialog({
                   <button
                     type="button"
                     className="inline-flex items-center gap-1 text-[10.5px] font-medium text-indigo-500 hover:underline"
-                    onClick={() => onOpenWorker(node.sessionId)}
+                    onClick={() => {
+                      openingWorker.current = true
+                      onOpenChange(false)
+                      onOpenWorker(node.sessionId)
+                    }}
                   >
                     <ExternalLink className="h-3 w-3" /> {t('swarm.openWorker')}
                   </button>
@@ -169,12 +192,53 @@ export function SwarmRunDetailsDialog({
               {node.lifecycle === 'detached' && (
                 <p className="mt-1 text-[10.5px] text-muted-foreground">{t('swarm.detachedHint')}</p>
               )}
+              {node.artifactDelivery && (() => {
+                const delivery = node.artifactDelivery
+                const attention = ['conflict', 'validation-failed', 'needs-attention'].includes(delivery.phase)
+                const complete = delivery.phase === 'integrated'
+                const Icon = complete ? CheckCircle2 : attention ? AlertTriangle : Loader2
+                return (
+                  <details className="mt-2 border-t border-border pt-2 text-[12px]" open={attention || undefined}>
+                    <summary className={cn('cursor-pointer rounded-sm focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring', attention ? 'text-amber-700 dark:text-amber-300' : complete ? 'text-emerald-700 dark:text-emerald-300' : 'text-accent')}>
+                      <span className="inline-flex items-center gap-1.5">
+                        <Icon aria-hidden="true" className={cn('h-3.5 w-3.5', !complete && !attention && 'animate-spin motion-reduce:animate-none')} />
+                        {t(`swarm.delivery.${delivery.phase}`)}
+                      </span>
+                    </summary>
+                    <div className="mt-2 space-y-2 text-foreground">
+                      <div>
+                        <p className="font-medium">{t('swarm.delivery.outputs')}</p>
+                        <ul className="mt-1 space-y-1">
+                          {Object.entries(delivery.outputs).map(([name, path]) => <li key={name} className="break-all font-mono text-[11px]">{path}</li>)}
+                        </ul>
+                      </div>
+                      {delivery.checks.length > 0 && <div>
+                        <p className="font-medium">{t('swarm.delivery.checks')}</p>
+                        <ul className="mt-1 list-inside list-disc break-words">{delivery.checks.map((check, index) => <li key={index}>{check}</li>)}</ul>
+                      </div>}
+                      {delivery.conflicts.length > 0 && <div>
+                        <p className="font-medium">{t('swarm.delivery.conflicts')}</p>
+                        <ul className="mt-1 space-y-2">{delivery.conflicts.map(path => <li key={path} className="break-all text-[11px]">
+                          <span className="font-mono">{path}</span>
+                          {onOpenFile && delivery.candidateDirectory && <button type="button" className="ml-2 text-accent underline underline-offset-2 focus-visible:outline focus-visible:outline-ring" onClick={() => {
+                            setFileError(null)
+                            const directory = delivery.candidateDirectory!
+                            Promise.resolve(onOpenFile(`${directory.replace(/[\\/]$/, '')}/${path}`)).catch(error => setFileError(error instanceof Error ? error.message : t('swarm.delivery.openFailed')))
+                          }}>{t('swarm.delivery.inspectCandidate')}</button>}
+                        </li>)}</ul>
+                        <p className="mt-2 text-muted-foreground">{t('swarm.delivery.repairHint')}</p>
+                      </div>}
+                    </div>
+                  </details>
+                )
+              })()}
               {node.blocker && <p className="mt-1 whitespace-pre-wrap text-[11px] text-amber-700 dark:text-amber-300">{node.blocker}</p>}
               {node.summary && <p className="mt-1 whitespace-pre-wrap text-[11px] text-foreground/70">{node.summary}</p>}
             </div>
           ))}
         </div>
 
+        {fileError && <p role="alert" className="text-sm text-destructive">{fileError}</p>}
         {details && (
           <div className="flex items-center gap-2 border-t border-border pt-3">
             {details.status === 'running' && onStop && (

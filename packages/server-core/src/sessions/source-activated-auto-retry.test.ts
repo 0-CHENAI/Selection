@@ -72,7 +72,10 @@ describe('source_activated auto-retry', () => {
     sm = new SessionManager()
   })
 
-  afterEach(() => {
+  afterEach(async () => {
+    for (const id of (sm as unknown as { sessions: Map<string, unknown> }).sessions.keys()) {
+      await sm.flushSession(id)
+    }
     rmSync(tmpRoot, { recursive: true, force: true })
   })
 
@@ -443,7 +446,9 @@ describe('source_activated auto-retry', () => {
     let releaseFlush!: () => void
     const flushEntered = new Promise<void>(resolve => { markFlushEntered = resolve })
     const flushReleased = new Promise<void>(resolve => { releaseFlush = resolve })
-    ;(sm as unknown as { flushSession: (_id: string) => Promise<void> }).flushSession = async () => {
+    const flushSession = sm.flushSession.bind(sm)
+    sm.flushSession = async id => {
+      await flushSession(id)
       markFlushEntered()
       await flushReleased
     }

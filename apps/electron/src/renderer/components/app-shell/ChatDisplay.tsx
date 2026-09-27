@@ -1,3 +1,7 @@
+import { BodyFeedbackDialog, type BodyFeedbackTarget } from './BodyFeedbackDialog'
+import { ExecutionRecoveryStatus } from './ExecutionRecoveryStatus'
+import { ContextLimitRecoveryActions, type ContextLimitRecoveryOptions } from './ContextLimitRecoveryActions'
+import { contextRecoverySource, prepareContextRecoveryDraft } from './context-recovery'
 import { isTerminalResponseError } from '@/utils/terminal-error'
 import * as React from "react"
 import { useSetAtom } from "jotai"
@@ -153,9 +157,9 @@ function getTurnKey(turn: Turn, index: number): string {
 
 interface ChatDisplayProps {
   session: Session | null
-  onSendMessage: (message: string, attachments?: FileAttachment[], skillSlugs?: string[]) => void
+  onSendMessage: (message: string, attachments?: FileAttachment[], skillSlugs?: string[], annotationFollowUps?: import('@craft-agent/shared/protocol').SendMessageOptions['annotationFollowUps']) => void
   onOpenFile: (path: string) => void
-  onOpenArtifact?: (path: string, action: 'preview' | 'external' | 'reveal') => void
+  onOpenArtifact?: (path: string, action: 'preview' | 'external' | 'reveal' | 'versions') => void
   onOpenUrl: (url: string) => void
   // Model selection
   currentModel: string
@@ -580,6 +584,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
   const activeSessionId = session?.id ?? null
   const sessionIdRef = React.useRef(activeSessionId)
   sessionIdRef.current = activeSessionId
+  const contextRecoveryDraftRef = React.useRef<{ errorId: string; session: Session } | null>(null)
   const [scrollToBottomUi, setScrollToBottomUi] = React.useState({ sessionId: activeSessionId, show: false })
   const showScrollToBottom = scrollToBottomUi.show && scrollToBottomUi.sessionId === activeSessionId
   const showScrollToBottomRef = React.useRef(false)
@@ -1383,37 +1388,9 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
       forceStick: true,
       ignoreUnstickMs: programmaticScrollLockMs(reduceMotion ? 'instant' : 'smooth'),
     })
-    onSendMessage(normalizedMessage, attachments, skillSlugs)
-
-    // Persist sent marker on follow-up annotations so TurnCard can distinguish
-    // sent vs pending follow-ups. If user edits a follow-up later, TurnCard
-    // clears these markers and the annotation becomes pending again.
-    if (session && pendingFollowUpAnnotations.length > 0) {
-      const sentAt = Date.now()
-      void Promise.all(pendingFollowUpAnnotations.map((followUp) => {
-        const currentMeta = followUp.meta ?? {}
-        const currentFollowUpMeta = asRecord(currentMeta.followUp) ?? {}
-
-        return window.electronAPI.sessionCommand(session.id, {
-          type: 'updateAnnotation',
-          messageId: followUp.messageId,
-          annotationId: followUp.annotationId,
-          patch: {
-            meta: {
-              ...currentMeta,
-              followUp: {
-                ...currentFollowUpMeta,
-                text: followUp.note,
-                lastSentAt: sentAt,
-                lastSentText: followUp.note,
-              },
-            },
-          },
-        })
-      })).catch((error) => {
-        console.error('[ChatDisplay] Failed to mark follow-up annotations as sent:', error)
-      })
-    }
+    onSendMessage(normalizedMessage, attachments, skillSlugs, pendingFollowUpAnnotations.map(item => ({
+      messageId: item.messageId, annotationId: item.annotationId, text: item.note, updatedAt: item.createdAt,
+    })))
 
     requestAnimationFrame(() => {
       scrollToLatest('instant')
@@ -1599,6 +1576,12 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
   const startIndex = Math.max(0, allTurns.length - visibleTurnCount)
   const turns = allTurns.slice(startIndex)
   const hasMoreAbove = startIndex > 0
+  // Bind recovery to the current user turn's latest error, never a historical error.
+  const latestUserIndex = allTurns.findLastIndex(turn => turn.type === 'user')
+  const recoveryErrorTurn = allTurns.slice(latestUserIndex + 1).findLast(turn => turn.type === 'system' && turn.message.role === 'error')
+  const recoveryErrorId = recoveryErrorTurn?.type === 'system' && turns.includes(recoveryErrorTurn) ? recoveryErrorTurn.message.id : undefined
+  const executionRecovery = session?.runtimeRecovery && ['recovering', 'blocked'].includes(session.runtimeRecovery.phase)
+    ? { state: session.runtimeRecovery, onResume: () => window.electronAPI.sessionCommand(session.id, { type: 'resumeExecution' }) } : undefined
 
   const navigationItems = useMemo(() => {
     if (!showRecordNavigation) return []
@@ -1659,7 +1642,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
 
   const scrollToFollowUpTurn = useCallback((item: {
     messageId: string
-    annotationId: string
+    annotationId?: string
   }) => {
     const targetTurnIndex = assistantTurnIndexByMessageId.get(item.messageId)
     if (targetTurnIndex == null) return
@@ -1698,6 +1681,22 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
       })
     }
   }, [assistantTurnIndexByMessageId, allTurns, visibleTurnCount])
+
+  const [bodyFeedbackTarget, setBodyFeedbackTarget] = useState<BodyFeedbackTarget | null>(null)
+  const bodyFeedbackFocus = React.useRef<HTMLElement | null>(null)
+  useEffect(() => { setBodyFeedbackTarget(null) }, [activeSessionId])
+  const resolveAnnotationResult = useCallback((messageId: string, sourceMessageId?: string, annotationId?: string) => {
+    const hasRevisionRecord = sessionMessages?.some(message => message.role === 'user' && message.annotationFollowUps?.some(reference => reference.messageId === sourceMessageId && reference.annotationId === annotationId))
+    if (session?.id && sourceMessageId && annotationId && hasRevisionRecord && window.electronAPI.isChannelAvailable('artifacts:bodyFeedback')) {
+      return () => {
+        bodyFeedbackFocus.current = Array.from(zoneRef.current?.querySelectorAll<HTMLElement>('button[data-ca-annotation-id]') ?? []).find(item => item.dataset.caAnnotationId === annotationId) ?? null
+        setBodyFeedbackTarget({ sessionId: session.id, sourceMessageId, annotationId, resultMessageId: messageId })
+      }
+    }
+    const message = sessionMessages?.find(item => item.id === messageId)
+    if (!message?.answerCommitted || !assistantTurnIndexByMessageId.has(messageId)) return undefined
+    return () => scrollToFollowUpTurn({ messageId })
+  }, [session?.id, sessionMessages, assistantTurnIndexByMessageId, scrollToFollowUpTurn, zoneRef])
 
   const handleFollowUpChipClick = useCallback((item: {
     messageId: string
@@ -1749,6 +1748,11 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
 
   return (
     <div ref={zoneRef} className="flex h-full flex-col min-w-0" data-focus-zone="chat">
+      <BodyFeedbackDialog target={bodyFeedbackTarget?.sessionId === session?.id ? bodyFeedbackTarget : null}
+        refreshKey={sessionMessages?.findLast(message => message.answerCommitted)?.id}
+        onClose={() => setBodyFeedbackTarget(null)}
+        onRestoreFocus={() => { if (bodyFeedbackFocus.current?.isConnected) bodyFeedbackFocus.current.focus(); else textareaRef.current?.focus() }}
+        onOpenFile={onOpenFile} onOpenUrl={onOpenUrl} />
       {session ? (
         <div className="flex flex-1 flex-col min-h-0 min-w-0 relative">
           {/* Content layer */}
@@ -1897,6 +1901,14 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
                             sessionId={session?.id}
                             compactMode={compactMode}
                           />
+                          {session && window.electronAPI.isChannelAvailable('artifacts:bodyFeedback') && turn.message.annotationFollowUps?.map(reference => (
+                            <div key={`${reference.messageId}:${reference.annotationId}`} className="mt-1 flex justify-end">
+                              <button type="button" className="rounded text-xs text-muted-foreground transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring" onClick={event => {
+                                bodyFeedbackFocus.current = event.currentTarget
+                                setBodyFeedbackTarget({ sessionId: session.id, sourceMessageId: reference.messageId, annotationId: reference.annotationId, resultMessageId: reference.resultMessageId, requestMessageId: turn.message.id })
+                              }}>{t('chat.bodyFeedback.title')}</button>
+                            </div>
+                          ))}
                         </div>
                       )
                     }
@@ -1918,6 +1930,34 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
                             onOpenFile={onOpenFile}
                             onOpenUrl={onOpenUrl}
                             sessionId={session?.id}
+                            executionRecovery={turn.message.id === recoveryErrorId ? executionRecovery : undefined}
+                            contextRecovery={turn.message.errorCode === 'context_limit' && session && !hideComposer
+                              && contextRecoverySource(session.messages, turn.message.id) ? {
+                                disabled: isInputDisabled || disableSend || connectionUnavailable || session.isProcessing,
+                                onCompact: async () => {
+                                  const sent = await appShellContext.onSendMessage(session.id, '/compact')
+                                  if (sent === false) throw new Error('Compaction was not accepted')
+                                },
+                                onChooseModel: compactMode && !enableCompactModelPicker ? undefined : () => {
+                                  requestAnimationFrame(() => window.dispatchEvent(new CustomEvent('craft:open-model-picker', { detail: { sessionId: session.id } })))
+                                },
+                                onNewDraft: appShellContext.onPrepareSessionDraft ? async () => {
+                                  const source = contextRecoverySource(session.messages, turn.message.id)
+                                  if (!source) throw new Error('Recovery source changed')
+                                  const child = await prepareContextRecoveryDraft(session, source, {
+                                    statPath: path => window.electronAPI.statPath(path),
+                                    createSession: async (workspaceId, options) => {
+                                      if (contextRecoveryDraftRef.current?.errorId === turn.message.id) return contextRecoveryDraftRef.current.session
+                                      const created = await appShellContext.onCreateSession(workspaceId, options)
+                                      contextRecoveryDraftRef.current = { errorId: turn.message.id, session: created }
+                                      return created
+                                    },
+                                    saveDraft: appShellContext.onPrepareSessionDraft!,
+                                  })
+                                  contextRecoveryDraftRef.current = null
+                                  if (sessionIdRef.current === session.id) navigate(routes.view.allSessions(child.id))
+                                } : undefined,
+                              } : undefined}
                             onRetry={turn.message.role === 'error' ? () => {
                               const msgs = session?.messages
                               if (!msgs) return
@@ -1995,6 +2035,7 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
                         compactMode={compactMode}
                         sendMessageKey={sendMessageKey}
                         openAnnotationRequest={openAnnotationRequest}
+                        resolveAnnotationResult={resolveAnnotationResult}
                         onRegenerate={isLastResponse && !turn.isStreaming && !sessionBusy
                           ? async () => {
                             if (!session) return
@@ -2196,6 +2237,11 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
                     </AnimatePresence>
                   </motion.div>
                 </AnimatePresence>
+                {executionRecovery && !recoveryErrorId && <ErrorMessage
+                  message={{ id: 'runtime-recovery', role: 'error', timestamp: executionRecovery.state.updatedAt,
+                    errorTitle: t('chat.recovery.attention'), content: t(`chat.recovery.reasons.${executionRecovery.state.reason ?? 'checking'}`, { defaultValue: t('chat.recovery.reasons.unknown') }) }}
+                  executionRecovery={executionRecovery}
+                />}
                 {!session.isProcessing && session.progressSupervision?.phase === 'paused' && (
                   <div className="px-6 py-2">
                     <button
@@ -2502,21 +2548,33 @@ interface MessageBubbleProps {
   compactMode?: boolean
   /** Callback to resend the user message that preceded an error */
   onRetry?: () => void
+  contextRecovery?: ContextLimitRecoveryOptions
+  executionRecovery?: React.ComponentProps<typeof ExecutionRecoveryStatus>
 }
 
 /**
  * ErrorMessage - Separate component for error messages to allow useState hook
  */
-function ErrorMessage({ message, onOpenUrl, sessionId, onRetry }: { message: Message; onOpenUrl?: (url: string) => void; sessionId?: string; onRetry?: () => void }) {
+function ErrorMessage({ message, onOpenUrl, sessionId, onRetry, contextRecovery, executionRecovery }: { message: Message; onOpenUrl?: (url: string) => void; sessionId?: string; onRetry?: () => void; contextRecovery?: ContextLimitRecoveryOptions; executionRecovery?: React.ComponentProps<typeof ExecutionRecoveryStatus> }) {
   const { t } = useTranslation()
   const terminalCode = isTerminalResponseError(message.errorCode) ? message.errorCode : undefined
-  const hasDetails = (message.errorDetails && message.errorDetails.length > 0) || message.errorOriginal
+  const hasDetails = executionRecovery || (message.errorDetails && message.errorDetails.length > 0) || message.errorOriginal
   const [detailsOpen, setDetailsOpen] = React.useState(false)
+  const detailsId = React.useId()
+  const reduceMotion = useReducedMotion()
   const actions = message.errorActions?.filter(a => {
     if (a.action === 'retry' && (terminalCode || message.errorCanRetry === false)) return false
     if (a.action === 'open_url') return !!a.url && !!onOpenUrl
     return true
   })
+
+  const detailsContent = <div className="mt-2 pt-2 border-t border-destructive/20 space-y-3">
+    {executionRecovery && <ExecutionRecoveryStatus {...executionRecovery} />}
+    <div className="text-xs text-destructive/60 font-mono space-y-0.5">
+      {message.errorDetails?.map((detail, i) => <div key={i}>{detail}</div>)}
+      {message.errorOriginal && !message.errorDetails?.some(d => d.includes('Raw error:')) && <div className="mt-1">Raw: {message.errorOriginal.slice(0, 200)}{message.errorOriginal.length > 200 ? '...' : ''}</div>}
+    </div>
+  </div>
 
   return (
     <div className="flex justify-start mt-4">
@@ -2524,14 +2582,16 @@ function ErrorMessage({ message, onOpenUrl, sessionId, onRetry }: { message: Mes
       <div
         className="max-w-[80%] shadow-tinted rounded-[8px] pl-5 pr-4 pt-2 pb-2.5 break-words"
         style={{
-          backgroundColor: 'oklch(from var(--destructive) l c h / 0.03)',
-          '--shadow-color': 'var(--destructive-rgb)',
+          backgroundColor: terminalCode === 'context_limit' ? 'oklch(from var(--info) l c h / 0.03)' : 'oklch(from var(--destructive) l c h / 0.03)',
+          '--shadow-color': terminalCode === 'context_limit' ? 'var(--info-rgb)' : 'var(--destructive-rgb)',
         } as React.CSSProperties}
       >
-        <div className="text-xs text-destructive/50 mb-0.5 font-semibold">
+        <div className={cn('text-xs mb-0.5 font-semibold', terminalCode === 'context_limit' ? 'flex items-center gap-1.5 text-foreground' : 'text-destructive/50')}>
+          {terminalCode === 'context_limit' && <AlertTriangle aria-hidden="true" className="size-3.5 text-info" />}
           {terminalCode ? t(`chat.terminal.${terminalCode}.title`) : message.errorTitle || t('common.error')}
         </div>
-        <p className="text-sm text-destructive">{terminalCode ? t(`chat.terminal.${terminalCode}.message`) : message.content}</p>
+        <p className={cn('text-sm', terminalCode === 'context_limit' ? 'text-foreground/80' : 'text-destructive')}>{terminalCode ? t(`chat.terminal.${terminalCode}.message`) : message.content}</p>
+        {terminalCode === 'context_limit' && contextRecovery && <ContextLimitRecoveryActions {...contextRecovery} />}
 
         {/* Action buttons */}
         {actions && actions.length > 0 && (
@@ -2558,6 +2618,9 @@ function ErrorMessage({ message, onOpenUrl, sessionId, onRetry }: { message: Mes
         {hasDetails && (
           <div className="mt-2">
             <button
+              type="button"
+              aria-expanded={detailsOpen}
+              aria-controls={detailsId}
               onClick={() => setDetailsOpen(!detailsOpen)}
               className="flex items-center gap-1 text-xs text-destructive/70 hover:text-destructive transition-colors"
             >
@@ -2565,16 +2628,9 @@ function ErrorMessage({ message, onOpenUrl, sessionId, onRetry }: { message: Mes
               <span>{detailsOpen ? t('chat.hideTechnicalDetails') : t('chat.showTechnicalDetails')}</span>
             </button>
 
-            <AnimatedCollapsibleContent isOpen={detailsOpen} className="overflow-hidden">
-              <div className="mt-2 pt-2 border-t border-destructive/20 text-xs text-destructive/60 font-mono space-y-0.5">
-                {message.errorDetails?.map((detail, i) => (
-                  <div key={i}>{detail}</div>
-                ))}
-                {message.errorOriginal && !message.errorDetails?.some(d => d.includes('Raw error:')) && (
-                  <div className="mt-1">Raw: {message.errorOriginal.slice(0, 200)}{message.errorOriginal.length > 200 ? '...' : ''}</div>
-                )}
-              </div>
-            </AnimatedCollapsibleContent>
+            <div id={detailsId} aria-hidden={!detailsOpen}>
+              {reduceMotion ? detailsOpen && detailsContent : <AnimatedCollapsibleContent isOpen={detailsOpen} className="overflow-hidden">{detailsContent}</AnimatedCollapsibleContent>}
+            </div>
           </div>
         )}
       </div>
@@ -2591,6 +2647,8 @@ function MessageBubble({
   onPopOut,
   compactMode,
   onRetry,
+  contextRecovery,
+  executionRecovery,
 }: MessageBubbleProps) {
   const { t } = useTranslation()
 
@@ -2638,7 +2696,7 @@ function MessageBubble({
 
   // === ERROR MESSAGE: Red bordered bubble with warning icon and collapsible details ===
   if (message.role === 'error') {
-    return <ErrorMessage message={message} onOpenUrl={onOpenUrl} sessionId={sessionId} onRetry={onRetry} />
+    return <ErrorMessage message={message} onOpenUrl={onOpenUrl} sessionId={sessionId} onRetry={onRetry} contextRecovery={contextRecovery} executionRecovery={executionRecovery} />
   }
 
   // === STATUS MESSAGE: Matches ProcessingIndicator layout for visual consistency ===
@@ -2723,6 +2781,8 @@ const MemoizedMessageBubble = React.memo(MessageBubble, (prev, next) => {
     prev.message.id === next.message.id &&
     prev.message.content === next.message.content &&
     prev.message.role === next.message.role &&
+    prev.contextRecovery === next.contextRecovery &&
+    prev.executionRecovery === next.executionRecovery &&
     prev.sessionId === next.sessionId &&
     prev.compactMode === next.compactMode
   )

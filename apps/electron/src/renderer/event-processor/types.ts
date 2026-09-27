@@ -55,6 +55,7 @@ export interface TextCompleteEvent {
   answerRunId?: string; answerRoutingVersion?: 1; toolPurpose?: 'work' | 'answer-delivery';
   answerCommitted?: boolean;
   answerSalvaged?: boolean;
+  artifactVersions?: import('@craft-agent/core').Message['artifactVersions'];
   /** Persisted on the originating user message before the single recovery call. */
   phase?: import('@craft-agent/core').TextStreamPhase;
   presentationProtocol?: 'native' | 'marker-v1' | 'legacy';
@@ -206,7 +207,7 @@ export interface SessionStatusChangedEvent {
 export interface SessionMetadataChangedEvent {
   type: 'session_metadata_changed'
   sessionId: string
-  changes: Partial<Pick<Session, 'taskNodeCount' | 'kanbanColumn' | 'taskDraft' | 'taskSlug' | 'projectId' | 'swarmEnabled' | 'orchestrationId' | 'orchestrationRootSessionId' | 'orchestrationDepth' | 'orchestrationRole' | 'orchestrationLifecycle' | 'orchestrationStatus' | 'orchestrationBlocker' | 'orchestrationTokensUsed' | 'orchestrationTokenBudget' | 'orchestrationAggregation'>>
+  changes: Partial<Pick<Session, 'runtimeRecovery' | 'taskNodeCount' | 'kanbanColumn' | 'taskDraft' | 'taskSlug' | 'projectId' | 'swarmEnabled' | 'orchestrationId' | 'orchestrationRootSessionId' | 'orchestrationDepth' | 'orchestrationRole' | 'orchestrationLifecycle' | 'orchestrationStatus' | 'orchestrationBlocker' | 'orchestrationTokensUsed' | 'orchestrationTokenBudget' | 'orchestrationAggregation'>>
 }
 
 /**

@@ -15,6 +15,7 @@ import {
 import type { ModelRuntime as PiModelRuntime } from '@earendil-works/pi-coding-agent';
 import {
   buildContextBudget,
+  ACTIONABLE_CONTEXT_OVERFLOW_MESSAGE,
   calculateOverflowRetryMaxTokens,
 } from '../../shared/src/agent/backend/pi/context-budget.ts';
 
@@ -111,6 +112,19 @@ export function createContextBudgetedStream(
     : Math.max(1, Math.floor(model.maxTokens));
   const budget = buildContextBudget(model.contextWindow, requestedMaxTokens, context);
   const initialOptions = { ...options, maxTokens: budget.maxOutputTokens };
+
+  // Utility and compaction requests share this guard, even without a task session.
+  // A one-token output cap cannot make an already-full input fit.
+  if (Number.isFinite(model.contextWindow) && model.contextWindow > 0
+    && budget.estimatedInputTokens + budget.reserveTokens + budget.maxOutputTokens > model.contextWindow) {
+    const error = { ...createThrownErrorMessage(model, ACTIONABLE_CONTEXT_OVERFLOW_MESSAGE), craftContextLimit: true };
+    if (options?.signal?.aborted) {
+      error.stopReason = 'aborted';
+      error.errorMessage = 'Request cancelled before context preflight completed.';
+    }
+    output.push({ type: 'error', reason: error.stopReason === 'aborted' ? 'aborted' : 'error', error: withDiagnostic(error) });
+    return output;
+  }
 
   if (budget.wasReduced) {
     debug?.({

@@ -7,8 +7,11 @@
  */
 
 import { join, parse as parsePath } from 'path'
+import { randomUUID } from 'node:crypto'
+import { pathToFileURL } from 'node:url'
+import { HTML_ARTIFACT_SCHEME, htmlArtifactLocation, resolveHtmlArtifactResource, isHtmlArtifactNavigationAllowed, isHtmlArtifactRequestAllowed } from './html-artifact'
 import { existsSync, mkdirSync } from 'fs'
-import { validateFilePath, getWorkspaceAllowedDirs } from '@craft-agent/server-core/handlers'
+import { validateFilePath, getWorkspaceAllowedDirs, validateWorkspaceFilePath } from '@craft-agent/server-core/handlers'
 import { BrowserView, BrowserWindow, app, ipcMain, nativeTheme, session, shell, type Session as ElectronSession } from 'electron'
 import { mainLog } from './logger'
 import type { WindowManager } from './window-manager'
@@ -181,9 +184,11 @@ interface BrowserInstance {
   networkLogs: BrowserNetworkEntry[]
   downloads: BrowserDownloadEntry[]
   lastLaunchToken: string | null
+  htmlArtifact: boolean
 }
 
 interface CreateBrowserInstanceOptions {
+  pageSession?: ElectronSession
   show?: boolean
   ownerType?: 'session' | 'manual'
   ownerSessionId?: string
@@ -408,10 +413,10 @@ export class BrowserPaneManager implements IBrowserPaneManager {
       },
     })
 
+    const pageSession = options?.pageSession ?? ses
     const pageView = new BrowserView({
       webPreferences: {
-        partition: SESSION_PARTITION,
-        session: ses,
+        session: pageSession,
         contextIsolation: true,
         nodeIntegration: false,
         sandbox: true,
@@ -484,6 +489,7 @@ export class BrowserPaneManager implements IBrowserPaneManager {
       networkLogs: [],
       downloads: [],
       lastLaunchToken: null,
+      htmlArtifact: Boolean(options?.pageSession),
     }
 
     const defaultUa = pageView.webContents.userAgent || ''
@@ -513,12 +519,61 @@ export class BrowserPaneManager implements IBrowserPaneManager {
           this.markToolbarReady(instance, 'toolbar-load-finalized')
         }
       })
-    void this.loadEmptyStatePage(instance).catch((error) => {
+    if (!options?.pageSession) void this.loadEmptyStatePage(instance).catch((error) => {
       mainLog.warn(`[browser-pane] empty-state load failed id=${instance.id}: ${error instanceof Error ? error.message : String(error)}`)
       void pageView.webContents.loadURL('about:blank')
     })
 
     return instanceId
+  }
+
+  async openHtmlFile(path: string, workspaceId: string): Promise<string> {
+    const { net } = await import('electron')
+    const host = randomUUID()
+    const location = await htmlArtifactLocation(path, host)
+    const pageSession = session.fromPartition(`html-artifact-${host}`)
+    pageSession.setPermissionCheckHandler(() => false)
+    pageSession.setPermissionRequestHandler((_contents, _permission, callback) => callback(false))
+    pageSession.protocol.handle(HTML_ARTIFACT_SCHEME, async request => {
+      try {
+        if (request.method !== 'GET' && request.method !== 'HEAD') return new Response(null, { status: 405 })
+        const origin = (request as Request & { initiatorOrigin?: string }).initiatorOrigin
+        if (origin && origin !== `${HTML_ARTIFACT_SCHEME}://${host}`) return new Response(null, { status: 403 })
+        if (request.referrer && !isHtmlArtifactRequestAllowed(host, { url: request.url, resourceType: 'other', referrer: request.referrer })) return new Response(null, { status: 403 })
+        const resource = await resolveHtmlArtifactResource(location.root, host, request.url, location.document)
+        await validateWorkspaceFilePath(resource, workspaceId)
+        const response = await net.fetch(pathToFileURL(resource).toString())
+        if (request.method !== 'HEAD') return response
+        await response.body?.cancel()
+        return new Response(null, { status: response.status, headers: response.headers })
+      } catch {
+        return new Response('HTML resource unavailable', { status: 404 })
+      }
+    })
+    // No file://, app deep links or privileged internal protocols from generated pages.
+    pageSession.webRequest.onBeforeRequest((details, callback) => {
+      callback({ cancel: !isHtmlArtifactRequestAllowed(host, details) })
+    })
+    let released = false
+    const release = () => {
+      if (released) return
+      released = true
+      pageSession.protocol.unhandle(HTML_ARTIFACT_SCHEME)
+      void pageSession.clearStorageData().catch(() => {})
+    }
+    let id: string | undefined
+    try {
+      id = this.createInstance(undefined, { show: true, workspaceId, pageSession })
+      const instance = this.instances.get(id)!
+      instance.keepAliveOnWindowClose = false
+      instance.pageView.webContents.once('destroyed', release)
+      await this.navigate(id, location.url)
+      return id
+    } catch (error) {
+      release()
+      if (id) this.destroyInstance(id)
+      throw error
+    }
   }
 
   destroyInstance(id: string): void {
@@ -748,6 +803,7 @@ export class BrowserPaneManager implements IBrowserPaneManager {
     let timeoutHandle: ReturnType<typeof setTimeout> | null = null
 
     try {
+      if (instance.htmlArtifact && !isHtmlArtifactNavigationAllowed(normalizedUrl)) throw new Error('Unsupported HTML artifact navigation')
       const loaded = instance.pageView.webContents.loadURL(normalizedUrl)
       const timeout = new Promise<never>((_, reject) => {
         timeoutHandle = setTimeout(() => reject(new Error(`Navigation to "${normalizedUrl}" timed out after ${timeoutMs / 1000}s`)), timeoutMs)
@@ -2115,6 +2171,9 @@ export class BrowserPaneManager implements IBrowserPaneManager {
     runCleanup('applyAgentControlLock', () => this.applyAgentControlLock(instance, false))
     runCleanup('updateNativeOverlayState', () => this.updateNativeOverlayState(instance))
     runCleanup('detachCdp', () => instance.cdp.detach())
+    if (instance.htmlArtifact) runCleanup('closeHtmlPage', () => {
+      if (!instance.pageView.webContents.isDestroyed()) instance.pageView.webContents.close({ waitForBeforeUnload: false })
+    })
     this.instances.delete(instance.id)
     this.removedCallback?.(instance.id)
     mainLog.info(`[browser-pane] Destroyed instance: ${instance.id} (${source})`)
@@ -3506,7 +3565,12 @@ export class BrowserPaneManager implements IBrowserPaneManager {
       }
     })
 
+    const guardHtmlNavigation = (event: Electron.Event, url: string) => {
+      if (instance.htmlArtifact && !isHtmlArtifactNavigationAllowed(url)) event.preventDefault()
+    }
+    pageWc.on('will-redirect', guardHtmlNavigation)
     pageWc.on('will-navigate', (event, url) => {
+      if (instance.htmlArtifact) { guardHtmlNavigation(event, url); return }
       if (url.startsWith(CRAFT_DEEPLINK_SCHEME_PREFIX)) {
         event.preventDefault()
         void this.handleDeepLinkUrl(url)
@@ -3519,6 +3583,10 @@ export class BrowserPaneManager implements IBrowserPaneManager {
     })
 
     pageWc.setWindowOpenHandler((details) => {
+      if (instance.htmlArtifact) {
+        if (isHtmlArtifactNavigationAllowed(details.url)) void this.navigate(instance.id, details.url).catch(error => mainLog.warn('[browser-pane] HTML link failed:', error))
+        return { action: 'deny' }
+      }
       mainLog.info(
         `[browser-pane] window-open requested id=${instance.id} url=${details.url} disposition=${details.disposition ?? 'unknown'} frameName=${details.frameName || 'none'}`,
       )

@@ -14,16 +14,16 @@ For tabs, replace `src` with `"items":[{"src":"/absolute/path/to/first.html","la
 
 Read the sections below only for additional options or troubleshooting.
 
-This guide covers how to render rich HTML content inline using `html-preview` code blocks, and how to use `transform_data` to prepare HTML files from various sources.
+This guide covers how to open rich HTML content in the built-in browser using `html-preview` code blocks, and how to use `transform_data` to prepare HTML files from various sources.
 
 ## Overview
 
-The `html-preview` block renders HTML files in sandboxed iframes — perfect for emails, newsletters, HTML reports, and any content where markdown conversion would lose formatting.
+The `html-preview` block opens HTML files in an isolated built-in browser window — perfect for emails, newsletters, HTML reports, and any content where markdown conversion would lose formatting.
 
 | Format | Best For | Rendering |
 |--------|----------|-----------|
 | **Markdown** | Text-heavy content, code, lists | Native markdown rendering |
-| **`html-preview` block** | Emails, newsletters, styled reports, rich HTML | Sandboxed iframe with full CSS |
+| **`html-preview` block** | Emails, newsletters, styled reports, rich HTML | Built-in browser with CSS and JavaScript |
 
 **Key principle:** HTML content is always **file-backed** (referenced via `src`) to avoid inlining large HTML payloads as tokens. A typical email HTML body is 50-150KB — never inline this directly.
 
@@ -57,7 +57,7 @@ Do NOT use `html-preview` when:
 
 ### Multiple Items (Tabs)
 
-When you have multiple related HTML files (e.g., an email thread, multiple reports), use the `items` array. A tab bar appears below the header for switching between items.
+When you have multiple related HTML files (e.g., an email thread, multiple reports), use the `items` array. The item navigator switches the file selected for opening.
 
 ````
 ```html-preview
@@ -72,7 +72,7 @@ When you have multiple related HTML files (e.g., an email thread, multiple repor
 ```
 ````
 
-Content loads lazily on tab switch and is cached once loaded.
+Choose an item, then click Open in browser to load that file.
 
 ### Config Fields
 
@@ -292,21 +292,12 @@ transform_data({
 
 ## Rendering Behavior
 
-### Inline Preview
-- Fixed **max-height of 400px** with bottom fade gradient indicating more content below
-- **Expand button** (top-right corner, visible on hover) opens fullscreen view
-- **Header bar** shows Globe icon and title
-
-### Fullscreen Overlay
-- Click expand button for **full-height rendering** with scrollable content
-- **Copy HTML** button copies the raw HTML source to clipboard
-- **"HTML" badge** in header identifies the content type
-
-### Visual Details
-- **White background** — iframes render with white background (standard for HTML emails/documents)
-- **External images** — load from their original URLs (`https://` supported by CSP)
-- **CSS styling** — all inline and embedded styles work (no external stylesheet restrictions)
-- **Responsive layouts** — if the HTML has responsive CSS, it adapts to the iframe width
+- The chat displays a compact file entry with an **Open in browser** action.
+- HTML artifact links and version previews use the same built-in browser.
+- CSS, JavaScript, modules, animation and interaction run as web content, without application APIs.
+- Relative resources resolve within the document directory, including subdirectories. Keep assets alongside the HTML; parent-directory and filesystem links are not granted.
+- HTTPS resources follow normal browser network and CORS rules. Offline CDN content may be unavailable.
+- Version snapshots preserve HTML bytes, not separate resource files. Prefer self-contained HTML for reproducible version previews. Missing historical assets never fall back to current assets.
 
 ## Email-Specific Tips
 
@@ -337,25 +328,15 @@ Gmail uses **URL-safe base64** (RFC 4648 §5):
 
 Some newsletter HTML bodies are 100KB+. This is fine:
 - `transform_data` writes to disk (no token cost)
-- The iframe loads the file directly
-- The 400px inline preview shows just the top portion
+- The browser loads the file on demand and displays the complete page
 
 ## Security
 
-HTML renders in a **sandboxed iframe** with these restrictions:
+The generated page runs in a sandboxed browser process with Node integration disabled, context isolation enabled and no application preload. Its temporary browser session does not share the normal browser's cookies or storage.
 
-| Feature | Status | Details |
-|---------|--------|---------|
-| JavaScript execution | **Blocked** | `sandbox` attr without `allow-scripts` |
-| Form submission | **Blocked** | No `allow-forms` |
-| Link navigation | **Blocked** | Sandbox prevents all navigation |
-| Popups / new windows | **Blocked** | No `allow-popups` |
-| CSS styling | **Allowed** | Inline, embedded, and `<style>` tags work |
-| Images (`https://`) | **Allowed** | External images load normally |
-| Images (`data:`) | **Allowed** | Base64-encoded images work |
-| Embedded fonts | **Allowed** | Google Fonts and other CDN fonts load |
+JavaScript and HTTP(S) requests are enabled: untrusted HTML may contact external services, including email tracking images. This is web isolation, not an offline or script-free email reader. Do not claim scripts or remote content are blocked.
 
-**No HTML sanitization is needed** — the `sandbox` attribute provides complete process-level isolation. Malicious scripts, forms, and navigation are all blocked at the browser engine level.
+Local reads are restricted to the opened document directory and existing workspace file authorization. Sensitive files, hidden files, directories, traversal and symlinks outside that directory are denied. App deep links and raw file URLs are denied. Permissions such as camera, microphone and geolocation are denied. New-window links navigate inside the same isolated browser.
 
 ## Best Practices
 
@@ -394,7 +375,7 @@ Does the user explicitly want to SEE the email/HTML?
 - Do not construct relative paths or guess the data folder location
 - Verify `transform_data` succeeded (check the tool result message)
 
-### Blank/white iframe
+### Blank page
 - The HTML file may be empty — check `transform_data` output for errors
 - The base64 decoding may have failed silently — verify the script handles the email structure correctly
 - Check if the email has an HTML part at all (some are text-only)

@@ -17,6 +17,7 @@ export const RPC_CHANNELS = {
     STATUS_CHANGED: 'server:statusChanged',
     HOME_DIR: 'server:homeDir',
   },
+  artifacts: { BODY_FEEDBACK: 'artifacts:bodyFeedback', CLEANUP: 'artifacts:cleanup', FEEDBACK_CONTEXT: 'artifacts:feedbackContext', MANAGE: 'artifacts:manage', FEEDBACK: 'artifacts:feedback', FEEDBACK_LIST: 'artifacts:feedbackList', PREVIEW: 'artifacts:preview' },
   sessions: {
     GET: 'sessions:get',
     GET_UNREAD_SUMMARY: 'sessions:getUnreadSummary',
@@ -371,6 +372,7 @@ export const RPC_CHANNELS = {
   },
   browserPane: {
     CREATE: 'browser-pane:create',
+    OPEN_HTML_FILE: 'browser-pane:open-html-file',
     DESTROY: 'browser-pane:destroy',
     LIST: 'browser-pane:list',
     NAVIGATE: 'browser-pane:navigate',

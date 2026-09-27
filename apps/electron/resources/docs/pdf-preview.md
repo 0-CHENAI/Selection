@@ -23,7 +23,7 @@ The `pdf-preview` block renders PDF files inline in chat messages — showing th
 | Format | Best For | Rendering |
 |--------|----------|-----------|
 | **`pdf-preview` block** | PDF documents, reports, invoices | First page inline, full navigation in fullscreen |
-| **`html-preview` block** | Emails, newsletters, styled HTML | Sandboxed iframe with full CSS |
+| **`html-preview` block** | Emails, newsletters, styled HTML | Built-in browser with CSS and JavaScript |
 | **`image-preview` block** | Screenshots, captures, visual diffs | Inline fit-to-container + fullscreen viewer |
 | **`datatable`/`spreadsheet`** | Structured data, tables | Interactive sortable/filterable tables |
 

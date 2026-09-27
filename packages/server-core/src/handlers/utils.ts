@@ -14,6 +14,13 @@ import { loadSourceConfig } from '@craft-agent/shared/sources'
 import { expandPath, isPathInside, normalizePathForComparison, resolveFsPath } from '@craft-agent/shared/utils'
 import type { PlatformServices } from '../runtime/platform'
 
+/** Local shell actions must never interpret a remote host's paths. */
+export function assertLocalWorkspace(ctx: { workspaceId: string | null }, action: string): void {
+  if (getWorkspaceByNameOrId(ctx.workspaceId ?? '')?.remoteServer) {
+    throw new Error(`${action} is not available for remote workspaces`)
+  }
+}
+
 /**
  * Get workspace by ID or name, throwing if not found.
  * Use this when a workspace must exist for the operation to proceed.

@@ -43,6 +43,19 @@ test('missing event refresh uses only a persisted answer and cannot overwrite a 
   expect(recoverCommittedAnswer(newer, loaded, 'r')).toBe(newer)
 })
 
+test('artifact snapshot badges retain their delivered identity through live events, duplicate delivery and reload', () => {
+  const artifactVersions = [{ path: 'report.html', versionId: 'abcdef01-1111-4444-8888-111111111111', ordinal: 2 }]
+  const event = { ...commit, text: '[报告](report.html)', artifactVersions }
+  let state = send(send(initial(), preview), event)
+  state = send(state, event)
+  const reloaded = JSON.parse(JSON.stringify(state.session.messages.map(messageToStored))).map(storedToMessage)
+  for (const messages of [state.session.messages, reloaded]) {
+    const turns = groupMessagesByTurn(messages, { isSessionProcessing: false }).filter(turn => turn.type === 'assistant')
+    expect(turns).toHaveLength(1)
+    expect(turns[0]!.response?.artifactVersions).toEqual(artifactVersions)
+  }
+})
+
 test('tool result inherits metadata when a compatibility sender omits it', () => {
   let state = send(initial(), { type: 'tool_start', sessionId: 's', toolUseId: 't', toolName: 'submit_answer', toolPurpose: 'work', answerRoutingVersion: 1, answerRunId: 'r' })
   state = send(state, { type: 'tool_result', sessionId: 's', toolUseId: 't', toolName: 'submit_answer', result: 'result' })

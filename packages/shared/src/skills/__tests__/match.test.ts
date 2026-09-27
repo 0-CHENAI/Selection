@@ -108,4 +108,11 @@ describe('skill glob matching', () => {
     expect(globToRegExp('*.{png,jpg}').test('x.png')).toBe(true);
     expect(globToRegExp('*.{png,jpg}').test('x.gif')).toBe(false);
   });
+
+  it('skips long prose while preserving adjacent path and extension matches', () => {
+    const prose = '文'.repeat(100_000) + '.';
+    expect(extractPathLikeTokens(prose)).toEqual([]);
+    expect(extractPathLikeTokens(`${prose}\nE:\\项目\\报告.docx /tmp/图表.pdf foo.tar.gz`))
+      .toEqual(['E:\\项目\\报告.docx', '/tmp/图表.pdf', 'foo.tar.gz']);
+  });
 });

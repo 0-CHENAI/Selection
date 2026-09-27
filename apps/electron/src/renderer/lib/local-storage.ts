@@ -43,6 +43,8 @@ export const KEYS = {
 
   // TurnCard expansion state (persisted across session switches)
   turnCardExpansion: 'turncard-expansion',
+  artifactFeedbackDrafts: 'artifact-feedback-drafts',
+  annotationFeedbackDrafts: 'annotation-feedback-drafts',
 
   // Last selected session (workspace-scoped via suffix)
   lastSelectedSessionId: 'last-selected-session-id',

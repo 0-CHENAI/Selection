@@ -1,16 +1,21 @@
-import { beforeEach, describe, expect, it, mock } from 'bun:test'
+import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test'
+import { mkdtempSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { SessionManager, createManagedSession } from './SessionManager.ts'
 
 describe('message queue management (#22)', () => {
   let manager: SessionManager
   let managed: ReturnType<typeof createManagedSession>
   let events: any[]
+  let root: string
 
   beforeEach(() => {
+    root = mkdtempSync(join(tmpdir(), 'selection-queue-'))
     manager = new SessionManager()
     managed = createManagedSession(
       { id: 'session-queue', name: 'Queue test' },
-      { id: 'workspace', name: 'Workspace', rootPath: '/tmp/queue-test' } as never,
+      { id: 'workspace', name: 'Workspace', rootPath: root } as never,
       { messagesLoaded: true },
     )
     managed.isProcessing = true
@@ -57,10 +62,13 @@ describe('message queue management (#22)', () => {
     ]
 
     ;(manager as any).sessions.set(managed.id, managed)
-    ;(manager as any).persistSession = () => {}
-    ;(manager as any).flushSession = async () => {}
     events = []
     manager.setEventSink((_channel, _target, event) => events.push(event))
+  })
+
+  afterEach(async () => {
+    await manager.flushSession(managed.id)
+    rmSync(root, { recursive: true, force: true })
   })
 
   it('edits content without dropping attachments, badges, or skills', async () => {

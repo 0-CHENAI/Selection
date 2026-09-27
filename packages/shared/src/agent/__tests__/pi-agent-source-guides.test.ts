@@ -47,6 +47,29 @@ describe('PiAgent source guide preparation', () => {
     rmSync(workspaceRootPath, { recursive: true, force: true });
   });
 
+  it.each([
+    ['read-only', 'read-only'],
+    ['file-verifiable', 'file-verifiable'],
+    [undefined, 'unknown'],
+    ['not-a-contract', 'unknown'],
+  ])('uses bridge recovery contract %s independently of model parameters', async (contract, expected) => {
+    const calls: unknown[][] = [];
+    agent.onBeforeToolExecution = (...args) => {
+      calls.push(args);
+      // Stop before execution: this test only exercises the actual checkpoint bridge.
+      throw new Error('checkpoint probe');
+    };
+    await (agent as any).handlePreToolUseRequest({
+      requestId: 'recovery-contract', toolCallId: 'recovery-call', toolName: 'read',
+      recoveryClass: contract,
+      input: { path: '/probe', recoveryClass: 'read-only' },
+    });
+    expect(calls).toHaveLength(1);
+    expect(calls[0]![2]).toBe('recovery-call');
+    expect(calls[0]![3]).toBe(expected);
+    expect(sent.at(-1)).toMatchObject({ action: 'block', reason: 'checkpoint probe' });
+  });
+
   it.each(['read', 'bash'])('keeps skill prerequisites pending until %s succeeds', toolName => {
     const skillPath = join(workspaceRootPath, 'skills', 'writing', 'SKILL.md');
     const manager = (agent as any).prerequisiteManager;

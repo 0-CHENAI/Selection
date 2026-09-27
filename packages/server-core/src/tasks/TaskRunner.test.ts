@@ -1,10 +1,11 @@
+import { createHash } from 'node:crypto';
 import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import type { TokenUsage } from '@craft-agent/core/types';
 import type { CreateSessionOptions } from '@craft-agent/shared/protocol';
-import { parseTaskSpec, saveTaskSpec, readRunLog, readNodeOutput, specRevisionPath, writeSpecRevision, type TaskSpec } from '@craft-agent/shared/tasks';
+import { appendRunLog, parseTaskSpec, saveTaskSpec, writeNodeOutput, readNodeSubmission, readRunLog, readNodeOutput, specRevisionPath, writeSpecRevision, type TaskSpec } from '@craft-agent/shared/tasks';
 import type { SessionCompletionEvent } from '../sessions/SessionManager';
 import { TaskRunner, TaskControlError, type ConductorSessionHost } from './TaskRunner';
 
@@ -33,6 +34,10 @@ class MockHost implements ConductorSessionHost {
   readonly nodeCounts: { sessionId: string; count: number }[] = [];
   readonly orchestrationStatuses: { sessionId: string; status: string; blocker?: string }[] = [];
   readonly cancelled: string[] = [];
+  canAutoResumeTaskDelivery?: ConductorSessionHost['canAutoResumeTaskDelivery'];
+  hasPreparedTaskDelivery?: ConductorSessionHost['hasPreparedTaskDelivery'];
+  prepareTaskWorkspace?: ConductorSessionHost['prepareTaskWorkspace'];
+  finalizeTaskWorkspace?: ConductorSessionHost['finalizeTaskWorkspace'];
   stopSwarm?: ConductorSessionHost['stopSwarm'];
   readonly finalTextById = new Map<string, string>();
   resolveKanbanColumn?: (sessionId: string, statusId: string) => Promise<string | null>;
@@ -2384,4 +2389,296 @@ describe('TaskRunner (Conductor)', () => {
     resumed.scanUnfinished(); resumed.continue('param-restore', 'r1'); await tick();
     expect(resumedHost.promptFor('a')).toContain('kept');
   });
+  for (const paused of [false, true]) for (const damaged of [false, true]) it(`restores prepared delivery without spawning workers (damaged=${damaged}, paused=${paused})`, async () => {
+    writeFileSync(join(root, 'candidate.txt'), 'candidate');
+    host.prepareTaskWorkspace = async id => { host.workingDirById.set(id, root); return { directory: root }; };
+    host.finalizeTaskWorkspace = async () => new Promise(() => {});
+    saveTaskSpec(root, specOf({ schema_version: 3, id: 'resume-delivery', title: 'Delivery', goal: 'g',
+      execution: { artifact_delivery: 1, coordinator_gate: { mode: 'off' }, verification: { required: false } },
+      defaults: { permissionMode: 'allow-all' }, nodes: [{ id: 'a', prompt: 'produce', outputs: [{ name: 'file', kind: 'artifact' }] }] }));
+    const original = makeRunner(); original.run('resume-delivery', { runId: 'r1', verifyOnComplete: false }); await tick();
+    expect(original.submitNodeOutput('sess-a', { values: { file: 'candidate.txt' } }).ok).toBe(true);
+    host.complete('a'); await tick();
+    if (paused) original.pause('resume-delivery', 'r1');
+    if (damaged) rmSync(join(root, 'tasks', 'resume-delivery', 'runs', 'r1', 'submissions'), { recursive: true });
+    const restartedHost = new MockHost();
+    restartedHost.hasPreparedTaskDelivery = id => id === 'sess-a';
+    restartedHost.canAutoResumeTaskDelivery = id => id === 'sess-a';
+    let calls = 0;
+    restartedHost.finalizeTaskWorkspace = async (id, outputs, current) => {
+      current(); calls++; expect(id).toBe('sess-a'); expect(outputs).toEqual({ file: 'candidate.txt' });
+      return { file: { path: '/official/candidate.txt', hash: 'verified', size: 9, artifactDeliveryVersion: 1 } };
+    };
+    const restarted = new TaskRunner({ host: restartedHost, workspaceId: 'ws', workspaceRoot: root });
+    restarted.scanUnfinished();
+    if (paused) {
+      restarted.resumePreparedDeliveries(); await tick();
+      expect(calls).toBe(0); expect(restartedHost.created).toHaveLength(0);
+      restarted.resume('resume-delivery', 'r1');
+    }
+    else restarted.resumePreparedDeliveries();
+    await tick();
+    expect(calls).toBe(damaged ? 0 : 1); expect(restartedHost.created).toHaveLength(0);
+    expect(restarted.getRunState('resume-delivery', 'r1')!.nodes[0]!.state).toBe(damaged ? 'invalid' : 'done');
+    original.stop('resume-delivery', 'r1');
+  });
+
+  it('does not turn an integration failure into a new worker even with automatic retry', async () => {
+    writeFileSync(join(root, 'candidate.txt'), 'candidate');
+    host.prepareTaskWorkspace = async id => { host.workingDirById.set(id, root); return { directory: root }; };
+    host.finalizeTaskWorkspace = async () => { throw new Error('authorization revoked'); };
+    saveTaskSpec(root, specOf({ schema_version: 3, id: 'delivery-retry', title: 'Delivery', goal: 'g',
+      execution: { artifact_delivery: 1, coordinator_gate: { mode: 'off' }, verification: { required: false } },
+      defaults: { permissionMode: 'allow-all' }, nodes: [{ id: 'a', prompt: 'produce', retry: { limit: 2, when: 'invalid' }, outputs: [{ name: 'file', kind: 'artifact' }] }] }));
+    const runner = makeRunner(); runner.run('delivery-retry', { runId: 'r1', verifyOnComplete: false }); await tick();
+    expect(runner.submitNodeOutput('sess-a', { values: { file: 'candidate.txt' } }).ok).toBe(true);
+    host.complete('a'); await tick(); await tick();
+    expect(host.created).toHaveLength(1);
+    expect(runner.getRunState('delivery-retry', 'r1')!.nodes[0]!.state).toBe('invalid');
+    runner.stop('delivery-retry', 'r1');
+  });
+
+  it('rejects null required artifacts before any isolated integration', async () => {
+    writeFileSync(join(root, 'candidate.txt'), 'candidate');
+    host.prepareTaskWorkspace = async id => { host.workingDirById.set(id, root); return { directory: root }; };
+    let integrateCalls = 0;
+    host.finalizeTaskWorkspace = async () => { integrateCalls++; return {}; };
+    saveTaskSpec(root, specOf({ schema_version: 3, id: 'incomplete-delivery', title: 'Delivery', goal: 'g',
+      execution: { artifact_delivery: 1, coordinator_gate: { mode: 'off' }, verification: { required: false } },
+      defaults: { permissionMode: 'allow-all' }, nodes: [
+        { id: 'a', prompt: 'produce files', outputs: [{ name: 'first', kind: 'artifact' }, { name: 'second', kind: 'artifact' }] },
+        { id: 'b', prompt: 'consume files', permissionMode: 'safe', depends_on: ['a'] },
+      ] }));
+    const runner = makeRunner();
+    runner.run('incomplete-delivery', { runId: 'r1', verifyOnComplete: false }); await tick();
+    expect(runner.submitNodeOutput('sess-a', { values: { first: 'candidate.txt', second: null } }).ok).toBe(false);
+    host.complete('a'); await tick();
+    expect(integrateCalls).toBe(0);
+    expect(host.dispatchedNames()).not.toContain('b');
+    expect(runner.getRunState('incomplete-delivery', 'r1')!.nodes.find(n => n.id === 'a')!.state).not.toBe('done');
+    runner.stop('incomplete-delivery', 'r1');
+  });
+
+  it('isolated delivery waits for one runtime integration receipt before releasing dependencies', async () => {
+    writeFileSync(join(root, 'candidate.txt'), 'candidate');
+    host.prepareTaskWorkspace = async id => { host.workingDirById.set(id, root); return { directory: root }; };
+    let integrateCalls = 0;
+    let release!: (value: Record<string, unknown>) => void;
+    host.finalizeTaskWorkspace = async (_id, _outputs, ensureCurrent) => {
+      integrateCalls++; ensureCurrent();
+      return new Promise(resolve => { release = resolve; });
+    };
+    saveTaskSpec(root, specOf({schema_version:3,id:'delivery',title:'Delivery',goal:'g',execution:{coordinator_gate:{mode:'off'},verification:{required:false}},defaults:{permissionMode:'allow-all'},nodes:[
+      {id:'a',prompt:'produce file',outputs:[{name:'file',kind:'artifact'}]},
+      {id:'b',prompt:'consume file',permissionMode:'safe',depends_on:['a']},
+    ]}));
+    const runner=makeRunner();runner.run('delivery',{runId:'r1',verifyOnComplete:false});await tick();
+    expect(runner.submitNodeOutput('sess-a',{values:{file:'candidate.txt'}}).ok).toBe(true);
+    expect(readNodeSubmission(root, 'delivery', 'r1', 'a', 'sess-a', 1)?.params?.file).toBeDefined();
+    expect(readNodeSubmission(root, 'delivery', 'r1', 'a', 'sess-a', 2)).toBeNull();
+    host.complete('a');host.complete('a');await tick();
+    expect(integrateCalls).toBe(1);expect(host.dispatchedNames()).not.toContain('b');
+    expect(runner.submitNodeOutput('sess-a', { values: { file: 'candidate.txt' } }).ok).toBe(false);
+    release({file:{path:join(root,'candidate.txt'),hash:createHash('sha256').update('candidate').digest('hex'),size:9,artifactDeliveryVersion:1}});await tick();
+    expect(host.dispatchedNames()).toContain('b');
+    expect(runner.getRunState('delivery','r1')!.nodes.find(n=>n.id==='a')!.state).toBe('done');
+    runner.stop('delivery','r1');
+  });
+
+  for (const changedDuring of ['b', 'c'] as const) it(`does not publish ${changedDuring} when an upstream artifact changes during execution`, async () => {
+    writeFileSync(join(root, 'input.txt'), 'original');
+    saveTaskSpec(root, specOf({ schema_version: 3, id: 'input-change', title: 'Input change', goal: 'g',
+      execution: { coordinator_gate: { mode: 'off' }, verification: { required: false } },
+      nodes: [
+        { id: 'a', prompt: 'produce', outputs: [{ name: 'file', kind: 'artifact' }] },
+        { id: 'b', prompt: 'consume', depends_on: ['a'] },
+        { id: 'c', prompt: 'follow', depends_on: ['b'] },
+      ],
+    }));
+    const runner = makeRunner(); runner.run('input-change', { runId: 'r1', verifyOnComplete: false }); await tick();
+    expect(runner.submitNodeOutput('sess-a', { values: { file: 'input.txt' } }).ok).toBe(true);
+    host.complete('a'); await tick();
+    expect(host.dispatchedNames()).toContain('b');
+    const inputsEvent = readRunLog(root, 'input-change', 'r1').find(event => event.kind === 'node-artifact-inputs' && event.sessionId === 'sess-b');
+    expect(inputsEvent?.kind).toBe('node-artifact-inputs');
+    if (inputsEvent?.kind === 'node-artifact-inputs') {
+      expect(inputsEvent.inputs.a?.text).toBe('');
+      expect((inputsEvent.inputs.a?.params?.file as { hash: string }).hash).toBe(createHash('sha256').update('original').digest('hex'));
+    }
+    if (changedDuring === 'c') { host.complete('b'); await tick(); expect(host.dispatchedNames()).toContain('c'); }
+    writeFileSync(join(root, 'input.txt'), 'external edit');
+    host.complete(changedDuring); await tick();
+    expect(runner.getRunState('input-change', 'r1')!.nodes.find(node => node.id === changedDuring)!.state).toBe('invalid');
+    if (changedDuring === 'b') expect(host.dispatchedNames()).not.toContain('c');
+    runner.stop('input-change', 'r1');
+  });
+
+  for (const changed of [false, true]) it(`rehydrates original artifact inputs before resuming a paused consumer (changed=${changed})`, async () => {
+    writeFileSync(join(root, 'input.txt'), 'original');
+    saveTaskSpec(root, specOf({ schema_version: 3, id: 'input-resume', title: 'Input resume', goal: 'g',
+      execution: { coordinator_gate: { mode: 'off' }, verification: { required: false } },
+      nodes: [{ id: 'a', prompt: 'produce', outputs: [{ name: 'file', kind: 'artifact' }] },
+        { id: 'b', prompt: 'consume', depends_on: ['a'] }],
+    }));
+    const first = makeRunner(); first.run('input-resume', { runId: 'r1', verifyOnComplete: false }); await tick();
+    expect(first.submitNodeOutput('sess-a', { values: { file: 'input.txt' } }).ok).toBe(true);
+    host.complete('a'); await tick();
+    host.complete('b', { reason: 'error', errorCode: 'call_time_limit' });
+    expect(first.getRunState('input-resume', 'r1')?.status).toBe('paused');
+    if (changed) {
+      const replacement = 'changed while stopped';
+      writeFileSync(join(root, 'input.txt'), replacement);
+      // A newer producer receipt must not silently replace the paused consumer's input.
+      writeNodeOutput(root, 'input-resume', 'r1', 'a', { text: '', params: { file: {
+        path: 'input.txt', hash: createHash('sha256').update(replacement).digest('hex'), size: Buffer.byteLength(replacement), mime: 'text/plain',
+      } } });
+    }
+    const nextHost = new MockHost();
+    const continued: string[] = [];
+    Object.assign(nextHost, { continueProgress: async (id: string) => { continued.push(id); } });
+    const restarted = new TaskRunner({ host: nextHost, workspaceId: 'ws', workspaceRoot: root });
+    restarted.resume('input-resume', 'r1'); await tick();
+    expect(nextHost.created).toHaveLength(0);
+    expect(continued).toEqual(changed ? [] : ['sess-b']);
+    expect(restarted.getRunState('input-resume', 'r1')!.nodes.find(node => node.id === 'b')!.state).toBe(changed ? 'invalid' : 'running');
+    if (!changed) { nextHost.complete('b'); await tick(); }
+  });
+
+  it('persists completed artifact invalidation without discarding unrelated results', async () => {
+    writeFileSync(join(root, 'input.txt'), 'original');
+    saveTaskSpec(root, specOf({ schema_version: 3, id: 'invalidate', title: 'Invalidate', goal: 'g',
+      execution: { coordinator_gate: { mode: 'off' }, verification: { required: false } },
+      nodes: [{ id: 'a', prompt: 'produce', outputs: [{ name: 'file', kind: 'artifact' }] },
+        { id: 'b', prompt: 'consume', depends_on: ['a'] }, { id: 'other', prompt: 'independent' }],
+    }));
+    const runner = makeRunner(); runner.run('invalidate', { runId: 'r1', verifyOnComplete: false }); await tick();
+    expect(runner.submitNodeOutput('sess-a', { values: { file: 'input.txt' } }).ok).toBe(true);
+    host.complete('a'); await tick(); host.complete('other'); host.complete('b'); await tick();
+    expect(runner.getRunState('invalidate', 'r1')?.status).toBe('completed');
+    writeFileSync(join(root, 'input.txt'), 'changed');
+    const freshHost = new MockHost();
+    const fresh = new TaskRunner({ host: freshHost, workspaceId: 'ws', workspaceRoot: root });
+    fresh.revalidateKnownArtifacts();
+    expect(freshHost.created).toHaveLength(0);
+    expect(fresh.getLatestRun('invalidate')?.status).toBe('failed');
+    const state = fresh.getLatestRun('invalidate')!;
+    expect(state.status).toBe('failed');
+    expect(state.nodes.find(node => node.id === 'a')?.state).toBe('invalid');
+    expect(state.nodes.find(node => node.id === 'b')?.state).toBe('invalid');
+    expect(state.nodes.find(node => node.id === 'other')?.state).toBe('done');
+    expect(readNodeOutput(root, 'invalidate', 'r1', 'b')).not.toBeNull();
+    expect(makeRunner().getLatestRun('invalidate')?.nodes.find(node => node.id === 'b')?.state).toBe('invalid');
+    fresh.revalidateKnownArtifacts();
+    expect(readRunLog(root, 'invalidate', 'r1').filter(event => event.kind === 'artifact-results-invalidated')).toHaveLength(1);
+  });
+  it('restores invalidated map instances while retaining unrelated results', async () => {
+    writeFileSync(join(root, 'input.txt'), 'original');
+    saveTaskSpec(root, specOf({ schema_version: 3, id: 'invalidate', title: 'Invalidate', goal: 'g',
+      execution: { coordinator_gate: { mode: 'off' }, verification: { required: false } },
+      nodes: [{ id: 'a', prompt: 'produce', outputs: [{ name: 'file', kind: 'artifact' }] },
+        { id: 'b', kind: 'map', for_each: '["one","two"]', prompt: 'consume ${item}', depends_on: ['a'] }, { id: 'other', prompt: 'independent' }],
+    }));
+    const runner = makeRunner(); runner.run('invalidate', { runId: 'r1', verifyOnComplete: false }); await tick();
+    expect(runner.submitNodeOutput('sess-a', { values: { file: 'input.txt' } }).ok).toBe(true);
+    host.complete('a'); await tick(); host.complete('other'); host.complete('b#0'); host.complete('b#1'); await tick();
+    expect(runner.getRunState('invalidate', 'r1')?.status).toBe('completed');
+    writeFileSync(join(root, 'input.txt'), 'changed');
+    const freshHost = new MockHost();
+    const fresh = new TaskRunner({ host: freshHost, workspaceId: 'ws', workspaceRoot: root });
+    fresh.revalidateKnownArtifacts();
+    expect(freshHost.created).toHaveLength(0);
+    expect(fresh.getLatestRun('invalidate')?.status).toBe('failed');
+    const state = fresh.getLatestRun('invalidate')!;
+    expect(state.status).toBe('failed');
+    expect(state.nodes.find(node => node.id === 'a')?.state).toBe('invalid');
+    expect(state.nodes.find(node => node.id === 'b')?.state).toBe('invalid');
+    expect(state.nodes.find(node => node.id === 'b#0')?.state).toBe('invalid');
+    expect(state.nodes.find(node => node.id === 'b#1')?.state).toBe('invalid');
+    expect(state.nodes.find(node => node.id === 'other')?.state).toBe('done');
+    expect(readNodeOutput(root, 'invalidate', 'r1', 'b')).not.toBeNull();
+    expect(makeRunner().getLatestRun('invalidate')?.nodes.find(node => node.id === 'b')?.state).toBe('invalid');
+    fresh.revalidateKnownArtifacts();
+    expect(readRunLog(root, 'invalidate', 'r1').filter(event => event.kind === 'artifact-results-invalidated')).toHaveLength(1);
+  });
+
+  it('stops a running stale consumer and ignores late success without cancelling independent work', async () => {
+    writeFileSync(join(root, 'input.txt'), 'original');
+    saveTaskSpec(root, specOf({ schema_version: 3, id: 'active-invalidate', title: 'Active', goal: 'g',
+      execution: { coordinator_gate: { mode: 'off' }, verification: { required: false } },
+      nodes: [{ id: 'a', prompt: 'produce', outputs: [{ name: 'file', kind: 'artifact' }] },
+        { id: 'b', prompt: 'consume', depends_on: ['a'] }, { id: 'other', prompt: 'independent' }],
+    }));
+    const runner = makeRunner(); runner.run('active-invalidate', { runId: 'r1', verifyOnComplete: false }); await tick();
+    expect(runner.submitNodeOutput('sess-a', { values: { file: 'input.txt' } }).ok).toBe(true);
+    host.complete('a'); await tick();
+    writeFileSync(join(root, 'input.txt'), 'changed');
+    runner.revalidateKnownArtifacts(); await tick();
+    expect(host.cancelled).toContain('sess-b');
+    expect(host.cancelled).not.toContain('sess-other');
+    host.complete('b', { finalText: 'late success' }); host.complete('other'); await tick();
+    const state = runner.getRunState('active-invalidate', 'r1')!;
+    expect(state.nodes.find(node => node.id === 'b')?.state).toBe('invalid');
+    expect(state.nodes.find(node => node.id === 'other')?.state).toBe('done');
+    expect(readNodeOutput(root, 'active-invalidate', 'r1', 'b')).toBeNull();
+  });
+
+  for (const replicas of [false, true]) it(`retains valid expanded siblings when one artifact requires repair (replicas=${replicas})`, async () => {
+    writeFileSync(join(root, 'zero.txt'), 'zero'); writeFileSync(join(root, 'one.txt'), 'one');
+    saveTaskSpec(root, specOf({ schema_version: 2, id: 'map-artifacts', title: 'Map', goal: 'g',
+      nodes: [replicas
+        ? { id: 'fan', replicas: 2, aggregate: 'concat', prompt: '${index}', outputs: [{ name: 'file', kind: 'artifact' }] }
+        : { id: 'fan', kind: 'map', for_each: '["zero","one"]', prompt: '${item}', outputs: [{ name: 'file', kind: 'artifact' }] }],
+    }));
+    const runner = makeRunner(); runner.run('map-artifacts', { runId: 'r1', verifyOnComplete: false }); await tick();
+    expect(runner.submitNodeOutput('sess-fan#0', { values: { file: 'zero.txt' } }).ok).toBe(true);
+    expect(runner.submitNodeOutput('sess-fan#1', { values: { file: 'one.txt' } }).ok).toBe(true);
+    host.complete('fan#0'); host.complete('fan#1'); await tick();
+    expect(runner.getRunState('map-artifacts', 'r1')?.status).toBe('completed');
+    expect(runner.revalidateCompletedArtifacts('map-artifacts', 'r1').status).toBe('completed');
+    writeFileSync(join(root, 'zero.txt'), 'changed');
+    const invalid = runner.revalidateCompletedArtifacts('map-artifacts', 'r1');
+    expect(invalid.nodes.find(node => node.id === 'fan#0')?.state).toBe('invalid');
+    expect(invalid.nodes.find(node => node.id === 'fan#1')?.state).toBe('done');
+    runner.continue('map-artifacts', 'r1'); await tick();
+    expect(host.dispatchedNames().filter(name => name === 'fan#0')).toHaveLength(2);
+    expect(host.dispatchedNames().filter(name => name === 'fan#1')).toHaveLength(1);
+    expect(runner.submitNodeOutput('sess-fan#0', { values: { file: 'zero.txt' } }).ok).toBe(true);
+    host.complete('fan#0'); await tick();
+    expect(runner.getRunState('map-artifacts', 'r1')?.status).toBe('completed');
+  });
+
+  it('accepts sequential loop artifact updates and exposes the final receipt to consumers', async () => {
+    writeFileSync(join(root, 'result.txt'), 'first');
+    saveTaskSpec(root, specOf({ schema_version: 2, id: 'loop-files', title: 'Loop', goal: 'g',
+      nodes: [{ id: 'iter', kind: 'loop', loop: { max: 3, until: { ref: 'nodes.iter.output', op: 'contains', value: 'STOP' } },
+        prompt: 'revise ${prev}', outputs: [{ name: 'file', kind: 'artifact' }] },
+        { id: 'consumer', prompt: 'read', depends_on: ['iter'] }],
+    }));
+    const runner = makeRunner(); runner.run('loop-files', { runId: 'r1', verifyOnComplete: false }); await tick();
+    expect(runner.submitNodeOutput('sess-iter#0', { text: 'continue', values: { file: 'result.txt' } }).ok).toBe(true);
+    host.complete('iter#0'); await tick();
+    writeFileSync(join(root, 'result.txt'), 'second');
+    expect(runner.submitNodeOutput('sess-iter#1', { text: 'STOP', values: { file: 'result.txt' } }).ok).toBe(true);
+    host.complete('iter#1'); await tick();
+    expect(host.dispatchedNames()).toContain('consumer');
+    host.complete('consumer'); await tick();
+    expect(runner.revalidateCompletedArtifacts('loop-files', 'r1').status).toBe('completed');
+    expect(readNodeOutput(root, 'loop-files', 'r1', 'iter')?.params?.file).toBeDefined();
+    const restored = makeRunner(); restored.revalidateKnownArtifacts();
+    expect(restored.getLatestRun('loop-files')?.status).toBe('completed');
+    writeFileSync(join(root, 'result.txt'), 'external');
+    restored.revalidateKnownArtifacts();
+    expect(restored.getLatestRun('loop-files')?.status).toBe('failed');
+  });
+
+  it('replay does not mistake a null input snapshot for a historical run without snapshots', async () => {
+    saveTaskSpec(root, specOf({ schema_version: 2, id: 'damaged-input', title: 'Task', goal: 'g', nodes: [{ id: 'a', prompt: 'work' }] }));
+    const runner = makeRunner(); runner.run('damaged-input', { runId: 'r1', verifyOnComplete: false }); await tick();
+    host.complete('a'); await tick();
+    expect(runner.getRunState('damaged-input', 'r1')?.status).toBe('completed');
+    appendRunLog(root, 'damaged-input', 'r1', { kind: 'node-artifact-inputs', nodeId: 'a', sessionId: 'sess-a', inputs: null, t: new Date().toISOString() } as never);
+    const restored = makeRunner(); restored.revalidateKnownArtifacts();
+    expect(restored.getLatestRun('damaged-input')?.status).toBe('failed');
+  });
+
 });

@@ -6,9 +6,13 @@
  */
 
 import { describe, it, expect, beforeEach, mock } from 'bun:test'
+import { mkdtempSync, writeFileSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 
 const createdWindows: any[] = []
 const createdBrowserViews: any[] = []
+const createdSessions: any[] = []
 let toolbarLoadFailuresRemaining = 0
 const mockShellOpenExternal = mock(async () => {})
 const mockIpcMainHandle = mock(() => {})
@@ -23,6 +27,11 @@ function createMockWebContents() {
     on: (event: string, cb: Function) => {
       if (!listeners[event]) listeners[event] = []
       listeners[event].push(cb)
+    },
+    once: (event: string, cb: Function) => {
+      const wrapped = (...args: any[]) => { listeners[event] = (listeners[event] || []).filter(fn => fn !== wrapped); cb(...args) }
+      if (!listeners[event]) listeners[event] = []
+      listeners[event].push(wrapped)
     },
     loadURL: mock(async (url: string) => {
       currentUrl = url
@@ -60,6 +69,7 @@ function createMockWebContents() {
     }),
     executeJavaScript: mock(async (expr: string) => eval(expr)),
     focus: mock(() => {}),
+    close: mock(() => {}),
     setWindowOpenHandler: mock((_handler: any) => {}),
     send: mock((_channel: string, _payload?: unknown) => {}),
     debugger: {
@@ -154,6 +164,8 @@ mock.module('electron', () => ({
     webContents: any
     constructor(_opts?: any) {
       const view = createMockBrowserView()
+      ;(view as any).options = _opts
+      view.webContents.session = _opts?.webPreferences?.session ?? {}
       this.webContents = view.webContents
       Object.assign(this, view)
     }
@@ -172,8 +184,12 @@ mock.module('electron', () => ({
   shell: {
     openExternal: mockShellOpenExternal,
   },
+  net: { fetch: mock(async () => new Response('resource')) },
   session: {
-    fromPartition: mock(() => ({
+    fromPartition: mock((partition: string) => { const value = {
+      partition,
+      protocol: { handle: mock(() => {}), unhandle: mock(() => {}) },
+      clearStorageData: mock(async () => {}),
       setPermissionCheckHandler: mock(() => {}),
       setPermissionRequestHandler: mock(() => {}),
       webRequest: {
@@ -182,7 +198,7 @@ mock.module('electron', () => ({
         onErrorOccurred: mock((_cb: any) => {}),
       },
       on: mock((_event: string, _cb: any) => {}),
-    })),
+    }; createdSessions.push(value); return value }),
   },
 }))
 
@@ -247,10 +263,54 @@ describe('BrowserPaneManager', () => {
   beforeEach(() => {
     createdWindows.length = 0
     createdBrowserViews.length = 0
+    createdSessions.length = 0
     toolbarLoadFailuresRemaining = 0
     mockShellOpenExternal.mockClear()
     mockIpcMainHandle.mockClear()
     manager = new BrowserPaneManager()
+  })
+
+  it('HTML opens in an isolated page session without the welcome-page navigation race', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'selection-html-manager-'))
+    const file = join(directory, '文档 空格.html'); writeFileSync(file, '<p>preview</p>')
+    try {
+      const id = await manager.openHtmlFile(file, 'workspace')
+      const page = createdBrowserViews[1]
+      const preferences = page.options.webPreferences
+      const isolated = preferences.session
+      expect(isolated.partition).toStartWith('html-artifact-')
+      expect(isolated).not.toBe(createdBrowserViews[0].webContents.session)
+      expect(preferences).toMatchObject({ nodeIntegration: false, contextIsolation: true, sandbox: true })
+      expect(preferences.preload).toBeUndefined()
+      expect(page.webContents.loadFile).not.toHaveBeenCalled()
+      expect(page.webContents.loadURL).toHaveBeenCalledTimes(1)
+      expect(page.webContents.getURL()).toStartWith('selection-html://')
+      expect(isolated.setPermissionCheckHandler.mock.calls[0][0]()).toBe(false)
+      const result = mock(() => {})
+      isolated.setPermissionRequestHandler.mock.calls[0][0](null, 'media', result)
+      expect(result).toHaveBeenCalledWith(false)
+      await expect(manager.navigate(id, 'file:///etc/passwd')).rejects.toThrow('Unsupported')
+      const preventDefault = mock(() => {})
+      page.webContents._listeners['will-navigate'][0]({ preventDefault }, 'craftagents://workspace/x')
+      expect(preventDefault).toHaveBeenCalled()
+      expect(page.webContents.setWindowOpenHandler.mock.calls[0][0]({ url: 'file:///etc/passwd' })).toEqual({ action: 'deny' })
+      page.webContents._emit('destroyed')
+      expect(isolated.protocol.unhandle).toHaveBeenCalledWith('selection-html')
+      expect(isolated.clearStorageData).toHaveBeenCalled()
+      manager.destroyInstance(id)
+    } finally { rmSync(directory, { recursive: true, force: true }) }
+  })
+
+  it('releases the HTML resource grant if window creation fails', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'selection-html-create-failure-'))
+    const file = join(directory, 'report.html'); writeFileSync(file, '<p>preview</p>')
+    try {
+      manager.createInstance = () => { throw new Error('window creation failed') }
+      await expect(manager.openHtmlFile(file, 'workspace')).rejects.toThrow('window creation failed')
+      const isolated = createdSessions.find(value => value.partition.startsWith('html-artifact-'))
+      expect(isolated.protocol.unhandle).toHaveBeenCalledTimes(1)
+      expect(isolated.clearStorageData).toHaveBeenCalledTimes(1)
+    } finally { rmSync(directory, { recursive: true, force: true }) }
   })
 
   it('creates and lists instances', () => {

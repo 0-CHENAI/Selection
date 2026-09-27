@@ -9,7 +9,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { PiEventAdapter } from '../backend/pi/event-adapter.ts';
-import { ACTIONABLE_CONTEXT_OVERFLOW_MESSAGE } from '../backend/pi/context-budget.ts';
+import { createTypedError } from '../errors.ts';
 import { toolMetadataStore } from '../../interceptor-common.ts';
 
 // Helper: collect all events from a generator
@@ -1767,8 +1767,8 @@ describe('PiEventAdapter', () => {
 
       expect(failureEvents).toEqual([
         {
-          type: 'error',
-          message: ACTIONABLE_CONTEXT_OVERFLOW_MESSAGE,
+          type: 'typed_error',
+          error: createTypedError('context_limit'),
         },
         { type: 'complete' },
       ]);
@@ -1796,8 +1796,8 @@ describe('PiEventAdapter', () => {
         jest.advanceTimersByTime(5_000);
 
         expect(enqueued).toEqual([{
-          type: 'error',
-          message: ACTIONABLE_CONTEXT_OVERFLOW_MESSAGE,
+          type: 'typed_error',
+          error: createTypedError('context_limit'),
         }]);
         expect(completed).toBe(true);
       } finally {
@@ -1842,8 +1842,8 @@ describe('PiEventAdapter', () => {
 
       expect(events).toEqual([
         {
-          type: 'error',
-          message: ACTIONABLE_CONTEXT_OVERFLOW_MESSAGE,
+          type: 'typed_error',
+          error: createTypedError('context_limit'),
         },
         { type: 'complete' },
       ]);

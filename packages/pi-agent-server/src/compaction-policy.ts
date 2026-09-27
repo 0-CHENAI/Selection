@@ -1,7 +1,8 @@
 import { createAssistantMessageEventStream, type AssistantMessage } from '@earendil-works/pi-ai';
+import { createHash } from 'node:crypto';
 import { estimateTokens, findCutPoint, sessionEntryToContextMessages, type AgentSession, type SettingsManager } from '@earendil-works/pi-coding-agent';
 import { swarmCompactionReserveTokens } from '../../shared/src/config/models.ts';
-import { calculateContextReserve, estimateContextInputTokens } from '../../shared/src/agent/backend/pi/context-budget.ts';
+import { ACTIONABLE_CONTEXT_OVERFLOW_MESSAGE, calculateContextReserve, estimateContextInputTokens } from '../../shared/src/agent/backend/pi/context-budget.ts';
 
 /** Trigger budget and summary output budget serve different purposes. */
 export const COMPACTION_SUMMARY_MAX_TOKENS = 8192;
@@ -84,12 +85,9 @@ export function installCompactionPolicy(session: AgentSession, agentTokenBudget?
   if (installedSessions.has(session)) return;
   installedSessions.add(session);
   const stream = session.agent.streamFunction;
-  let preflightAttempted = false;
+  let attemptedContext: string | undefined;
   let preflightModelKey = '';
   session.subscribe(event => {
-    // A failed recovery is bounded to the current user turn. A later prompt
-    // may have new compressible history and deserves one fresh attempt.
-    if (event.type === 'message_start' && event.message.role === 'user') preflightAttempted = false;
     // Extensions can save settings after the last provider request. Restore
     // the override before Pi checks the threshold after agent_end.
     if (event.type === 'agent_end' && session.model) {
@@ -107,7 +105,7 @@ export function installCompactionPolicy(session: AgentSession, agentTokenBudget?
       const modelKey = `${model.provider}/${model.id}/${model.contextWindow}/${settings.reserveTokens}/${settings.enabled}`;
       if (modelKey !== preflightModelKey) {
         preflightModelKey = modelKey;
-        preflightAttempted = false;
+        attemptedContext = undefined;
       }
       const estimatedInput = estimateContextInputTokens(context);
       const overThreshold = settings.enabled && shouldCompactBeforeRequest(
@@ -116,10 +114,17 @@ export function installCompactionPolicy(session: AgentSession, agentTokenBudget?
       const reserve = calculateContextReserve(estimatedInput, model.contextWindow);
       const physicallyFull = Number.isFinite(model.contextWindow) && model.contextWindow > 0
         && estimatedInput + reserve + 1 >= model.contextWindow;
-      if (!overThreshold) preflightAttempted = false;
-      if (overThreshold && !preflightAttempted && !options?.signal?.aborted
+      // Only actual request/history changes permit another automatic attempt.
+      // A repeated user lifecycle event or our synthetic error is not new input.
+      const contextKey = overThreshold ? createHash('sha256').update(JSON.stringify({
+        systemPrompt: context.systemPrompt, tools: context.tools,
+        messages: context.messages.filter(message => message.role !== 'assistant' || message.stopReason !== 'error'),
+        checkpoints: session.sessionManager.getBranch().filter(entry => entry.type === 'compaction'),
+      })).digest('hex') : undefined;
+      if (!overThreshold) attemptedContext = undefined;
+      if (overThreshold && attemptedContext !== contextKey && !options?.signal?.aborted
         && hasUsefulCompactionHistory(session, settings.keepRecentTokens)) {
-        preflightAttempted = true;
+        attemptedContext = contextKey;
         // Return a recognized overflow error before sending another provider
         // request. The SDK will finish this agent run, compact the saved turn,
         // and continue it through its bounded overflow recovery path.
@@ -135,12 +140,13 @@ export function installCompactionPolicy(session: AgentSession, agentTokenBudget?
         return response;
       }
       if ((overThreshold || physicallyFull) && !options?.signal?.aborted) {
-        const error: AssistantMessage = {
+        const error: AssistantMessage & { craftContextLimit: true } = {
           role: 'assistant', content: [], api: model.api, provider: model.provider, model: model.id,
           usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0,
             cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
           stopReason: 'error',
-          errorMessage: '当前请求已达到上下文安全上限，无法安全发送。请减少本次输入或附件、缩短工具结果，或使用更大上下文的模型；历史可压缩时也可尝试 /compact。',
+          errorMessage: ACTIONABLE_CONTEXT_OVERFLOW_MESSAGE,
+          craftContextLimit: true,
           timestamp: Date.now(),
         };
         const response = createAssistantMessageEventStream();

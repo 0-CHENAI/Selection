@@ -1,3 +1,27 @@
+import { saveBodyFeedbackVersion, readBodyFeedbackVersion } from '../reliability/body-feedback-versions'
+import { INTERRUPTED_READ_RESULT, recoveredFileOperationText, readToolFileOperation, verifyToolFileOperation } from '../../../shared/src/agent/backend/pi/file-operation-receipts'
+import { isDeepStrictEqual } from 'node:util'
+import { acquireProjectLock, ProjectLockBusyError } from '../reliability/project-lock'
+import { assertAnnotationSource, linkAnnotationFollowUpResults, prepareAnnotationFollowUps, setAnnotationFeedbackStatus } from '../reliability/annotation-follow-ups'
+import { runtimeProtectedVersions } from '../reliability/version-retention'
+import { requiresProjectValidation } from '../reliability/project-validation-scope'
+import { deliverySnapshot } from '../reliability/delivery-snapshot'
+import { validateProjectCandidate } from '../reliability/validate-project-candidate'
+import { ProjectIntegration } from '../reliability/project-integration'
+import { assertTaskDeliveryIdentity, replayTaskDelivery } from '../reliability/task-delivery-receipt'
+import { collectWorkspaceCandidates, discoverWorkspaceOutputs } from '../reliability/workspace-candidates'
+import { workspaceDeliveryContract } from '../reliability/workspace-delivery-contract'
+import { integrateCandidates } from '../reliability/integrate-candidates'
+import { validateCandidateFile } from '../reliability/validate-candidate'
+import { ArtifactVersions, atomicWrite } from '../reliability/artifact-versions'
+import { ConversationArtifactVersions } from '../reliability/conversation-artifact-versions'
+import { FeedbackStore, assertFeedbackAnchor } from '../reliability/feedback-store'
+import { inside, assertIsolatedTool, prepareIsolatedWorkspace, type IsolatedWorkspace } from '../reliability/isolated-workspace'
+import { hostname as executionHostName } from 'node:os'
+import { readFileSync as loadIsolationFile, mkdirSync as makeFeedbackDirectory, writeFileSync as saveFeedbackCandidate, realpathSync } from 'node:fs'
+import { basename as feedbackBasename, extname as feedbackExtension } from 'node:path'
+import { validateWorkspaceFilePath } from '../handlers/utils'
+import { executionTaskIdentity, claimExecutionCheckpoint, readExecutionCheckpoint, writeExecutionCheckpoint, sdkStateHash, sdkStateSnapshot, recoverySdkSnapshot, recoveryTranscriptMatches, verifiedFileOperations, recoveryBlocker, toolRecoveryClass, type ExecutionCheckpoint } from '../reliability/execution-checkpoint'
 import { ProgressSupervisor, createProgressBudget, type ProgressBudget, type ProgressDecision, type ProgressSnapshot } from '../supervision/progress-supervisor'
 import { saveProgressCandidate, loadProgressCandidate, readProgressCheckpoint, writeProgressCheckpoint, type ProgressCheckpoint } from '../supervision/progress-store'
 import { waitForRuntimeCleanup } from './runtime-cleanup.ts'
@@ -10,7 +34,7 @@ import type { ISessionManager, IBrowserPaneManager, ExecutePromptAutomationInput
 import { RemoteBrowserPaneManager } from './RemoteBrowserPaneManager'
 import { validateFilePath, getWorkspaceAllowedDirs } from '@craft-agent/server-core/handlers'
 import { createScopedLogger, CONSOLE_LOGGER, type PlatformServices, type Logger } from '@craft-agent/server-core/runtime'
-import { basename, dirname, join } from 'path'
+import { basename, dirname, join, relative, resolve } from 'path'
 import { existsSync } from 'fs'
 import { readFile, writeFile, mkdir } from 'fs/promises'
 import { randomUUID, createHash } from 'node:crypto'
@@ -94,7 +118,7 @@ import {
   isSpawnedSwarmAgent,
 } from '@craft-agent/shared/sessions'
 import { loadWorkspaceSources, loadAllSources, getSourcesBySlugs, isSourceUsable, type LoadedSource, type McpServerConfig, getSourcesNeedingAuth, getSourceCredentialManager, getSourceServerBuilder, type SourceWithCredential, isApiOAuthProvider, hasRenewEndpoint, SERVER_BUILD_ERRORS, TokenRefreshManager, createTokenGetter } from '@craft-agent/shared/sources'
-import { loadTaskResults } from '@craft-agent/shared/tasks'
+import { loadTaskResults, resolveArtifact } from '@craft-agent/shared/tasks'
 import { clearSubmittedDefinition, validateSubmittedDefinition, rememberSubmittedDefinition, type TaskRunner } from '../tasks'
 import {
   assessSpawnQualification,
@@ -866,10 +890,16 @@ interface RunningBackgroundTask {
 }
 
 interface ManagedSession {
+  conversationArtifactVersions?: ConversationArtifactVersions
   progressAdvisories?: Array<{ id: string; text: string }>
   progressLiveEvaluationTokens?: number
   progressReviewer?: AgentInstance
   progressSupervisor?: ProgressSupervisor
+  isolatedWorkspace?: IsolatedWorkspace
+  executionCheckpoint?: ExecutionCheckpoint
+  toolResultRecovery?: import('../../../shared/src/agent/backend/pi/file-operation-receipts').ToolResultRecoveryPlan
+  runtimeRecovery?: import('@craft-agent/shared/protocol/dto').RuntimeRecoveryView
+  recoveryClaimed?: boolean
   progressSupervision?: import('@craft-agent/shared/protocol/dto').ProgressSupervisionView
   progressDisabled?: boolean
 
@@ -1379,6 +1409,7 @@ function managedToSession(m: ManagedSession, overrides?: Partial<Session>): Sess
     lastMessageRole: m.lastMessageRole,
     tokenUsage: m.tokenUsage,
     progressSupervision: m.progressSupervision,
+    runtimeRecovery: m.runtimeRecovery,
     messageCount: m.messageCount,
     lastFinalMessageId: m.lastFinalMessageId,
     // Runtime-only fields
@@ -1412,6 +1443,7 @@ interface PendingDelta {
  * onto a node run-state: complete→done, error/timeout→failed, interrupted→cancelled.
  */
 export interface SessionCompletionEvent {
+  artifacts?: Record<string, unknown>
   sessionId: string
   workspaceId: string
   /** Monotonic in-memory turn identity used to bind ephemeral tool submissions. */
@@ -1468,6 +1500,9 @@ export function resolveMidStreamDeliveryOutcome(
 
 export class SessionManager implements ISessionManager {
   private sessions: Map<string, ManagedSession> = new Map()
+  private pendingUserSubmissions = new Map<string, Promise<void>>()
+  private executionOwners = new Map<string, { release: () => void; calls: number }>()
+  private startupRecoveryClaims = new Set<string>()
   // Delta batching for performance - reduces IPC events from 50+/sec to ~20/sec
   private pendingDeltas: Map<string, PendingDelta> = new Map()
   private deltaFlushTimers: Map<string, NodeJS.Timeout> = new Map()
@@ -1505,6 +1540,7 @@ export class SessionManager implements ISessionManager {
   private taskOutputIndex: Map<string, string> = new Map()
   /** Reservations close the await gap between limit checking and child persistence. */
   private pendingSwarmChildren: Map<string, number> = new Map()
+  private preparingSwarmWorkspaces = new Set<string>()
   private pendingSwarmNodes: Map<string, number> = new Map()
   /** Idempotency guard for duplicate/late completion notifications. */
   private processedSwarmCompletionEvents: Set<string> = new Set()
@@ -1588,6 +1624,8 @@ export class SessionManager implements ISessionManager {
   private remoteBpms = new Map<string, RemoteBrowserPaneManager>()
   /** Pinned desktop client per session for `client:browser:invoke` routing. */
   private browserHostByCanvas = new Map<string, string>()
+  private activeArtifactFeedback = new Set<string>()
+  private projectValidationControllers = new Map<string, AbortController>()
   private eventSink: EventSink | null = null
 
   setEventSink(sink: EventSink): void {
@@ -2311,6 +2349,16 @@ export class SessionManager implements ISessionManager {
             hydratePreviousPermissionMode(meta.id, managed.previousPermissionMode)
           }
 
+          const isolationPath = join(getSessionStoragePath(workspaceRootPath, meta.id), 'data', 'isolated-workspace.json')
+          if (existsSync(isolationPath)) {
+            try {
+              const isolation = JSON.parse(loadIsolationFile(isolationPath, 'utf8')) as IsolatedWorkspace
+              if (isolation.version !== 1 || typeof isolation.directory !== 'string' || typeof isolation.sourceRoot !== 'string') throw new Error('Unsupported isolation record')
+              managed.isolatedWorkspace = isolation
+            } catch {
+              managed.runtimeRecovery = { version: 1, phase: 'blocked', reason: 'unsupported', completedSteps: 0, pendingTools: [], updatedAt: Date.now(), canResume: false }
+            }
+          }
           this.sessions.set(meta.id, managed)
 
           // Initialize session metadata in AutomationSystem for diffing
@@ -2330,10 +2378,37 @@ export class SessionManager implements ISessionManager {
       }
 
       this.recoverPersistedSwarmSessions()
+      for (const managed of this.sessions.values()) {
+        // An invalid isolation contract must never be replaced by a runnable checkpoint.
+        if (managed.runtimeRecovery?.reason === 'unsupported') continue
+        this.restoreExecutionCheckpoint(managed)
+      }
 
       sessionLog.info(`Loaded ${totalSessions} sessions from disk (metadata only)`)
     } catch (error) {
       sessionLog.error('Failed to load sessions from disk:', error)
+    }
+  }
+
+  private restoreExecutionCheckpoint(managed: ManagedSession): void {
+    const saved = readExecutionCheckpoint(getSessionStoragePath(managed.workspace.rootPath, managed.id))
+    if (saved.kind === 'missing') return
+    if (saved.kind !== 'ok') {
+      managed.runtimeRecovery = { version: 1, phase: 'blocked', reason: saved.kind, completedSteps: 0, pendingTools: [], updatedAt: Date.now(), canResume: false }
+      return
+    }
+    managed.executionCheckpoint = saved.checkpoint
+    // Restore the epoch before scheduling recovery; subsequent executions must advance it.
+    if (saved.checkpoint.sessionId === managed.id) {
+      managed.processingGeneration = Math.max(managed.processingGeneration, saved.checkpoint.generation)
+    }
+    const preparedSwarm = this.canAutoResumeTaskDelivery(managed.id) && !!managed.parentSessionId && !!managed.orchestrationId && !managed.taskRunId
+      && managed.orchestrationStatus === 'need-to-check' && saved.checkpoint.status !== 'cancelled'
+    const interrupted = saved.checkpoint.status === 'running' || saved.checkpoint.status === 'claimed'
+    if (saved.checkpoint.status === 'claimed') this.startupRecoveryClaims.add(managed.id)
+    this.publishRecovery(managed, saved.checkpoint.status === 'running' || saved.checkpoint.status === 'claimed' ? 'recovering' : saved.checkpoint.status)
+    if (interrupted || preparedSwarm) {
+      setImmediate(() => { void this.resumeExecution(managed.id).catch(() => sessionLog.warn('Execution recovery paused', { sessionId: managed.id })) })
     }
   }
 
@@ -4087,6 +4162,8 @@ export class SessionManager implements ISessionManager {
         miniModel,
         thinkingLevel: managed.thinkingLevel,
         session: sessionConfig,
+        toolResultRecovery: managed.toolResultRecovery,
+        isolatedShellDirectory: managed.isolatedWorkspace?.directory,
         onSdkSessionIdUpdate,
         onSdkSessionIdCleared,
         onBranchForkInvalidated,
@@ -4531,6 +4608,15 @@ export class SessionManager implements ISessionManager {
       managed.agentReadyResolve?.()
 
       // Set up permission handler to forward requests to renderer
+      managed.agent.onBeforeToolExecution = (toolName, input, toolCallId, recoveryClass, confinedShellDirectory) => {
+        if (!managed.isProcessing || managed.stopRequested) throw new Error('Execution is no longer active')
+        if (managed.isolatedWorkspace) assertIsolatedTool(managed.isolatedWorkspace, toolName, input, confinedShellDirectory)
+        const checkpoint = managed.executionCheckpoint
+        if (checkpoint && toolCallId) {
+          checkpoint.pendingTools[toolCallId] = { name: toolName, recovery: recoveryClass ?? toolRecoveryClass(toolName) }
+          this.checkpointExecution(managed)
+        }
+      }
       managed.agent.onPermissionRequest = (request: {
         requestId: string;
         toolName: string;
@@ -4574,6 +4660,7 @@ export class SessionManager implements ISessionManager {
           type: request.type,
           commandHash: effectiveCommandHash,
         })
+        this.checkpointExecution(managed)
 
         if (request.type === 'admin_approval' && effectiveCommandHash && this.hasActiveAdminRememberApproval(managed.id, effectiveCommandHash)) {
           const brokerResult = this.privilegedExecutionBroker.resolveApproval(request.requestId, true, {
@@ -4687,6 +4774,8 @@ export class SessionManager implements ISessionManager {
             sessionLog.info(`Interrupting for plan submission in session ${managed.id}`)
             managed.agent.interruptForHandoff(AbortReason.PlanSubmitted)
             this.setProcessing(managed, false)
+            const feedbackOwner = managed.answerDelivery?.userMessageId
+            if (feedbackOwner) void this.transitionAnnotationFeedback(managed, feedbackOwner, 'waiting-user')
 
             // Release browser overlay + session binding because the agent is no longer running.
             // Plan submission pauses execution until user review, so browser ownership should not remain locked.
@@ -4746,6 +4835,8 @@ export class SessionManager implements ISessionManager {
           sessionLog.info(`Interrupting for auth request in session ${managed.id}`)
           managed.agent.interruptForHandoff(AbortReason.AuthRequest)
           this.setProcessing(managed, false)
+          const feedbackOwner = managed.answerDelivery?.userMessageId
+          if (feedbackOwner) void this.transitionAnnotationFeedback(managed, feedbackOwner, 'waiting-user')
 
           // Release browser overlay + session binding because the agent is paused awaiting user auth.
           void releaseBrowserOwnershipOnForcedStop(
@@ -6125,6 +6216,7 @@ export class SessionManager implements ISessionManager {
     const safeAnnotation: NonNullable<Message['annotations']>[number] = {
       ...annotation,
       schemaVersion: 1,
+      meta: { ...annotation.meta, sourceContentHash: assertAnnotationSource(message.content, annotation) },
       target: {
         ...annotation.target,
         source: {
@@ -6165,7 +6257,7 @@ export class SessionManager implements ISessionManager {
     messageId: string,
     annotationId: string,
     patch: Partial<NonNullable<Message['annotations']>[number]>
-  ): void {
+  ): void | Promise<void> {
     const managed = this.sessions.get(sessionId)
     if (!managed) {
       sessionLog.warn(`Cannot update annotation: session ${sessionId} not found`)
@@ -6196,9 +6288,29 @@ export class SessionManager implements ISessionManager {
     }
 
     const current = existing[idx]!
+    const resolution = (patch.meta?.followUp as Record<string, unknown> | undefined)?.userResolved === true
+    const followUp = current.meta?.followUp as Record<string, unknown> | undefined
+    const requestedFollowUp = patch.meta?.followUp as Record<string, unknown> | undefined
+    if (resolution) {
+      const result = managed.messages.find(item => item.id === followUp?.resultMessageId && item.answerCommitted)
+      if (!followUp || followUp.status !== 'delivered' || !result
+        || requestedFollowUp?.requestMessageId !== followUp.requestMessageId
+        || requestedFollowUp?.resultMessageId !== followUp.resultMessageId
+        || requestedFollowUp?.status !== followUp.status) throw new Error('Feedback changed; review the delivered revision before marking it resolved')
+    }
+    // Retargeting requires a newly selected range and its current source identity.
+    if (patch.target && typeof patch.meta?.sourceContentHash !== 'string') {
+      throw new Error('Annotation source changed; select the text again')
+    }
+    const sourceContentHash = assertAnnotationSource(message.content, patch.target
+      ? { ...current, meta: patch.meta } : current)
+    if (patch.meta?.sourceContentHash !== undefined && patch.meta.sourceContentHash !== sourceContentHash) {
+      throw new Error('Annotation source changed; select the text again')
+    }
     const updated = {
       ...current,
       ...patch,
+      meta: { ...(resolution ? { ...current.meta, followUp: { ...followUp, userResolved: true } } : patch.meta ?? current.meta), sourceContentHash },
       id: current.id,
       schemaVersion: current.schemaVersion,
       target: patch.target
@@ -6232,6 +6344,35 @@ export class SessionManager implements ISessionManager {
     const next = [...existing]
     next[idx] = updated
     message.annotations = next
+    if (resolution) {
+      const request = managed.messages.find(item => item.id === followUp!.requestMessageId && item.role === 'user')
+      const previousReferences = request?.annotationFollowUps
+      const resolvedReferences = previousReferences?.map(reference => reference.messageId === messageId && reference.annotationId === annotationId
+        ? { ...reference, userResolvedAt: reference.userResolvedAt ?? Date.now() } : reference)
+      if (request && resolvedReferences) request.annotationFollowUps = resolvedReferences
+      return (async () => {
+        try {
+          this.persistSession(managed)
+          await this.flushSession(sessionId)
+          const stored = loadStoredSession(managed.workspace.rootPath, sessionId)
+          const saved = stored?.messages.find(item => item.id === messageId)?.annotations?.find(item => item.id === annotationId)
+          const savedFollowUp = saved?.meta?.followUp as Record<string, unknown> | undefined
+          const savedReference = stored?.messages.find(item => item.id === request?.id)?.annotationFollowUps
+            ?.find(reference => reference.messageId === messageId && reference.annotationId === annotationId)
+          const historyConfirmed = savedReference?.userResolvedAt !== undefined && savedReference.resultMessageId === followUp!.resultMessageId
+          if (!historyConfirmed && (!savedFollowUp?.userResolved || savedFollowUp.requestMessageId !== followUp!.requestMessageId
+            || savedFollowUp.resultMessageId !== followUp!.resultMessageId)) throw new Error('Feedback confirmation could not be persisted')
+        } catch (error) {
+          let rolledBack = false
+          if (request && request.annotationFollowUps === resolvedReferences) { request.annotationFollowUps = previousReferences; rolledBack = true }
+          if (message.annotations?.[idx] === updated) { message.annotations = existing; rolledBack = true }
+          if (rolledBack) this.persistSession(managed)
+          throw error
+        }
+        try { this.sendEvent({ type: 'message_annotations_updated', sessionId, messageId, annotations: structuredClone(message.annotations ?? []) }, managed.workspace.id) }
+        catch { sessionLog.warn('Feedback confirmation event delivery failed', { sessionId, messageId, annotationId }) }
+      })()
+    }
     this.persistSession(managed)
     this.sendEvent({ type: 'message_annotations_updated', sessionId, messageId, annotations: message.annotations }, managed.workspace.id)
   }
@@ -6433,7 +6574,37 @@ export class SessionManager implements ISessionManager {
     managed.pendingContinuationUsage = undefined
   }
 
-  async sendMessage(
+  /** Hold cross-process ownership through acceptance, execution and runtime cleanup.
+   * Internal retries and queued sends in this manager share the same owner.
+   */
+  private async withSessionExecution<T>(sessionId: string, execute: () => Promise<T>): Promise<T> {
+    const managed = this.sessions.get(sessionId)
+    if (!managed) throw new Error(`Session ${sessionId} not found`)
+    let owner = this.executionOwners.get(sessionId)
+    if (!owner) {
+      try {
+        owner = { release: acquireProjectLock(join(getSessionStoragePath(managed.workspace.rootPath, sessionId), 'data', 'execution-owner')), calls: 0 }
+      } catch (error) {
+        if (error instanceof ProjectLockBusyError) throw new Error('Session execution is active in another application instance')
+        throw error
+      }
+      this.executionOwners.set(sessionId, owner)
+    }
+    owner.calls++
+    try { return await execute() }
+    finally {
+      if (--owner.calls === 0) {
+        this.executionOwners.delete(sessionId)
+        owner.release()
+      }
+    }
+  }
+
+  async sendMessage(...args: Parameters<SessionManager['executeMessage']>): Promise<void> {
+    return this.withSessionExecution(args[0], () => this.executeMessage(...args))
+  }
+
+  private async executeMessage(
     sessionId: string,
     message: string,
     attachments?: FileAttachment[],
@@ -6465,6 +6636,9 @@ export class SessionManager implements ISessionManager {
       throw new Error(`Session ${sessionId} not found`)
     }
     if (managed.deleting) throw new Error(`Session ${sessionId} is being deleted`)
+    if (managed.runtimeRecovery?.reason === 'unsupported' || managed.runtimeRecovery?.reason === 'corrupt') {
+      throw new Error('Execution checkpoint requires repair or a compatible application version. Start a separate session to continue safely.')
+    }
     // Captured before any await so a Stop during regenerate dispose / agent
     // create can invalidate this call (cancel bumps processingGeneration).
     const generationAtEntry = managed.processingGeneration
@@ -6572,28 +6746,35 @@ export class SessionManager implements ISessionManager {
     // the first call has already been persisted. The key is stored on the
     // message, so this also survives a server restart between attempts.
     const clientMessageId = options?.optimisticMessageId
-    const acknowledgeExistingClientMessage = (): boolean => {
-      if (existingMessageId || !clientMessageId) return false
+    const acknowledgeExistingClientMessage = (): Promise<void> | undefined => {
+      if (existingMessageId || !clientMessageId) return undefined
       const existingClientMessage = managed.messages.find(candidate =>
         candidate.role === 'user' && candidate.clientMessageId === clientMessageId
       )
       if (existingClientMessage) {
         // Reusing an idempotency key for a different payload is a client bug.
         // Reject it explicitly instead of silently losing the newer message.
-        if (existingClientMessage.content !== message) {
+        if (existingClientMessage.content !== message
+          || !isDeepStrictEqual((existingClientMessage.annotationFollowUps ?? []).map(({ messageId, annotationId, text, updatedAt }) => ({ messageId, annotationId, text, updatedAt })), options?.annotationFollowUps ?? [])) {
           throw new Error(`Client message ID ${clientMessageId} was reused with different content`)
         }
-        sessionLog.info('sendMessage: acknowledged duplicate client submission', {
-          sessionId,
-          clientMessageId,
-          messageId: existingClientMessage.id,
-        })
-        onAck?.(existingClientMessage.id)
-        return true
+        return (async () => {
+          await this.pendingUserSubmissions.get(existingClientMessage.id)
+          const stored = loadStoredSession(managed.workspace.rootPath, sessionId)
+          if (!stored?.messages.some(item => item.id === existingClientMessage.id && item.content === message)) {
+            throw new Error('User message persistence could not be verified; retry sending')
+          }
+          sessionLog.info('sendMessage: acknowledged duplicate client submission', {
+            sessionId, clientMessageId, messageId: existingClientMessage.id,
+          })
+          onAck?.(existingClientMessage.id)
+        })()
       }
-      return false
+      return undefined
     }
-    if (acknowledgeExistingClientMessage()) return
+    const existingSubmission = acknowledgeExistingClientMessage()
+    if (existingSubmission) { await existingSubmission; return }
+
 
     // Explicit delegation is a current-turn capability. Never queue it behind
     // a live generation where the trusted user action and model turn diverge.
@@ -6610,7 +6791,54 @@ export class SessionManager implements ISessionManager {
     // first lookup before either has appended its message. Re-check immediately
     // before the synchronous append to make the idempotency gate atomic within
     // this process. One call appends; every later continuation observes it.
-    if (acknowledgeExistingClientMessage()) return
+    const concurrentSubmission = acknowledgeExistingClientMessage()
+    if (concurrentSubmission) { await concurrentSubmission; return }
+
+    const applyAnnotationFollowUps = prepareAnnotationFollowUps(managed.messages, options?.annotationFollowUps,
+      (content, hash) => saveBodyFeedbackVersion(getSessionStoragePath(managed.workspace.rootPath, sessionId), content, hash))
+    const publishAnnotationFollowUps = () => {
+      for (const sourceId of new Set(options?.annotationFollowUps?.map(item => item.messageId))) {
+        const source = managed.messages.find(item => item.id === sourceId)
+        if (!source?.annotations) continue
+        try {
+          this.sendEvent({ type: 'message_annotations_updated', sessionId, messageId: sourceId, annotations: source.annotations }, managed.workspace.id)
+        } catch {
+          sessionLog.warn('Annotation feedback update publication failed', { sessionId, messageId: sourceId })
+        }
+      }
+    }
+    const persistUserSubmission = async (userMessage: Message, rollback: () => void, previousLastRole: ManagedSession['lastMessageRole']) => {
+      const persistence = (async () => {
+        try {
+          this.persistSession(managed)
+          await this.flushSession(managed.id)
+          // The persistence queue logs write failures. Verify acceptance against disk.
+          const stored = loadStoredSession(managed.workspace.rootPath, managed.id)
+          if (!stored?.messages.some(item => item.id === userMessage.id && item.content === userMessage.content)) {
+            throw new Error('User message persistence could not be verified; retry sending')
+          }
+        } catch (error) {
+          const index = managed.messages.findIndex(item => item.id === userMessage.id)
+          const wasLast = index === managed.messages.length - 1
+          if (index >= 0) managed.messages.splice(index, 1)
+          rollback()
+          if (wasLast) managed.lastMessageRole = previousLastRole
+          // Replace any queued snapshot of the failed acceptance before a later flush.
+          this.persistSession(managed)
+          await this.flushSession(managed.id).catch(() => {
+            sessionLog.warn('User submission rollback persistence failed', { sessionId, messageId: userMessage.id })
+          })
+          throw error
+        }
+      })()
+      this.pendingUserSubmissions.set(userMessage.id, persistence)
+      try {
+        await persistence
+        publishAnnotationFollowUps()
+      } finally {
+        this.pendingUserSubmissions.delete(userMessage.id)
+      }
+    }
 
     // Composer submits while a turn is running always enqueue (#22, #23).
     // Changing direction is sendQueuedMessageNow, not Enter.
@@ -6632,6 +6860,7 @@ export class SessionManager implements ISessionManager {
       const userMessage: Message = {
         id: generateMessageId(),
         clientMessageId,
+        annotationFollowUps: options?.annotationFollowUps?.map(reference => ({ ...reference })),
         role: 'user',
         content: message,
         timestamp: this.monotonic(),
@@ -6644,16 +6873,11 @@ export class SessionManager implements ISessionManager {
         // transcript bubble (e.g. background-task-completion nudge).
         ...(options?.hidden ? { hidden: true } : {}),
       }
+      const rollbackAnnotationFollowUps = applyAnnotationFollowUps(userMessage.id, userMessage)
+      const previousLastRole = managed.lastMessageRole
       managed.messages.push(userMessage)
 
-      this.sendEvent({
-        type: 'user_message',
-        sessionId,
-        message: userMessage,
-        status: 'queued',
-        optimisticMessageId: options?.optimisticMessageId
-      }, managed.workspace.id)
-
+      await persistUserSubmission(userMessage, rollbackAnnotationFollowUps, previousLastRole)
       managed.messageQueue.push({
         message,
         attachments,
@@ -6663,13 +6887,18 @@ export class SessionManager implements ISessionManager {
         optimisticMessageId: options?.optimisticMessageId,
       })
 
-      this.persistSession(managed)
-      // Force a synchronous flush so the queued item is genuinely on disk
-      // before we ack the renderer — `persistSession` only enqueues with a
-      // 500ms debounce. (#616 reliability fix.)
-      await this.flushSession(managed.id)
+      this.sendEvent({
+        type: 'user_message',
+        sessionId,
+        message: userMessage,
+        status: 'queued',
+        optimisticMessageId: options?.optimisticMessageId
+      }, managed.workspace.id)
       this.emitQueueChanged(managed)
       onAck?.(userMessage.id)
+      if (!managed.isProcessing) {
+        setImmediate(() => { void this.processNextQueuedMessage(managed.id) })
+      }
       return
     }
 
@@ -6687,6 +6916,7 @@ export class SessionManager implements ISessionManager {
       userMessage = {
         id: generateMessageId(),
         clientMessageId,
+        annotationFollowUps: options?.annotationFollowUps?.map(reference => ({ ...reference })),
         role: 'user',
         content: message,
         timestamp: this.monotonic(),
@@ -6696,6 +6926,8 @@ export class SessionManager implements ISessionManager {
         // transcript bubble (e.g. background-task-completion nudge).
         ...(options?.hidden ? { hidden: true } : {}),
       }
+      const rollbackAnnotationFollowUps = applyAnnotationFollowUps(userMessage.id, userMessage)
+      const previousLastRole = managed.lastMessageRole
       managed.messages.push(userMessage)
 
       // Update lastMessageRole for badge display. Skip for hidden messages so the
@@ -6704,11 +6936,7 @@ export class SessionManager implements ISessionManager {
         managed.lastMessageRole = 'user'
       }
 
-      // Persist + flush before announcing — the user message must be
-      // genuinely on disk before we tell the renderer "accepted", and
-      // `persistSession` is debounced (500ms). #616.
-      this.persistSession(managed)
-      await this.flushSession(managed.id)
+      await persistUserSubmission(userMessage, rollbackAnnotationFollowUps, previousLastRole)
       onAck?.(userMessage.id)
 
       // Emit user_message event so UI can confirm the optimistic message
@@ -6854,6 +7082,7 @@ export class SessionManager implements ISessionManager {
     // Capture the generation to detect if a new request supersedes this one.
     // This prevents the finally block from clobbering state when a follow-up message arrives.
     const myGeneration = managed.processingGeneration
+    await this.transitionAnnotationFeedback(managed, userMessage.id, 'running')
 
     // Pre-enable sources required by invoked, hard-loaded, or glob-matched skills (#249, #117).
     try {
@@ -7130,7 +7359,35 @@ export class SessionManager implements ISessionManager {
         return
       }
 
+      const checkpointOwner = managed.messages.findLast(m => m.role === 'user' && !m.hidden && !m.isQueued)
+      if (checkpointOwner) {
+        managed.executionCheckpoint = { version: 1, sessionId, userMessageId: checkpointOwner.id,
+          generation: myGeneration, answerRunId: managed.answerDelivery?.runId, sdkSessionId: managed.sdkSessionId,
+          taskIdentity: executionTaskIdentity(managed),
+          transcriptTailId: managed.messages.at(-1)?.id, status: 'running', pendingTools: {},
+          completedTools: managed.recoveryClaimed ? [...(managed.executionCheckpoint?.completedTools ?? [])] : [], updatedAt: Date.now() }
+        this.checkpointExecution(managed)
+      }
       sendSpan.mark('chat.starting')
+      // Snapshot known deliverables before tools run, including Office/Shell edits.
+      // Candidate child workspaces are versioned only after runtime integration.
+      managed.conversationArtifactVersions = undefined
+      if (!managed.isolatedWorkspace) {
+        const store = new ArtifactVersions(join(managed.workspace.rootPath, 'artifacts', 'versions'), executionHostName(), managed.workspace.id)
+        const tracker = new ConversationArtifactVersions(store,
+          [managed.workingDirectory, getSessionStoragePath(managed.workspace.rootPath, managed.id), managed.workspace.rootPath].filter((path): path is string => !!path),
+          path => validateWorkspaceFilePath(path, managed.workspace.id),
+          () => sessionLog.warn('Artifact version recording failed', { sessionId: managed.id }))
+        managed.conversationArtifactVersions = tracker
+        for (const prior of managed.messages) {
+          if (managed.processingGeneration !== myGeneration || managed.stopRequested) break
+          if (prior.role === 'assistant' && !prior.isIntermediate && !prior.hidden) await tracker.track(prior.content)
+        }
+      }
+      if (managed.processingGeneration !== myGeneration || managed.stopRequested) {
+        await this.onProcessingStopped(sessionId, 'interrupted', myGeneration)
+        return
+      }
       const chatOptions = { previousResponseInterrupted, continueUserTask: isUserTaskContinuation }
       const chatIterator = this.runAnswerDelivery(managed, agent, this.runProgressExecution(managed, agent, message, preparedImages.attachments, chatOptions), chatOptions)
       this.announceRegenerateReplacement(managed)
@@ -7149,8 +7406,30 @@ export class SessionManager implements ISessionManager {
           }
         }
 
-        // Process the event first
+        if (managed.processingGeneration !== myGeneration) break
+        if (managed.stopRequested && event.type !== 'complete') continue
+        // Persist unknown in-flight effects before accepting further events.
+        if (event.type === 'tool_start' && managed.executionCheckpoint) {
+          managed.executionCheckpoint.pendingTools[event.toolUseId] ??= { name: event.toolName, recovery: toolRecoveryClass(event.toolName) }
+          this.checkpointExecution(managed)
+        }
+        if (event.type === 'tool_start' && !event.parentToolUseId && /^(?:Write|Edit)$/.test(event.toolName)) {
+          const path = event.input.file_path ?? event.input.path
+          if (typeof path === 'string') await managed.conversationArtifactVersions?.trackPath(path)
+          if (managed.processingGeneration !== myGeneration) break
+          if (managed.stopRequested) continue
+        }
         await this.processEvent(managed, event)
+        if (event.type === 'tool_result' && managed.executionCheckpoint) {
+          delete managed.executionCheckpoint.pendingTools[event.toolUseId]
+          if (!managed.executionCheckpoint.completedTools.includes(event.toolUseId)) managed.executionCheckpoint.completedTools.push(event.toolUseId)
+        }
+        if (event.type === 'tool_result' || event.type === 'text_complete' || event.type === 'pi_turn_anchor'
+          || (event.type === 'info' && event.message.startsWith('Compacted'))) {
+          this.persistSession(managed)
+          await this.flushSession(managed.id)
+          if (managed.processingGeneration === myGeneration) this.checkpointExecution(managed)
+        }
 
         // Fallback: Capture SDK session ID if the onSdkSessionIdUpdate callback didn't fire.
         // Primary capture happens in getOrCreateAgent() via onSdkSessionIdUpdate callback,
@@ -7385,6 +7664,573 @@ export class SessionManager implements ISessionManager {
     }
   }
 
+  async prepareTaskWorkspace(sessionId: string, sourceRoot: string, inputs: string[]): Promise<{ directory: string }> {
+    const managed = this.sessions.get(sessionId)
+    if (!managed || managed.isProcessing || managed.agent) throw new Error('Task workspace must be prepared before execution')
+    if ((!managed.taskRunId || !managed.taskNodeId) && (!managed.orchestrationId || !managed.parentSessionId)) throw new Error('Session is not a task worker')
+    const generation = managed.processingGeneration
+    await validateWorkspaceFilePath(sourceRoot, managed.workspace.id)
+    if (this.sessions.get(sessionId) !== managed || managed.processingGeneration !== generation || managed.stopRequested || managed.isProcessing || managed.agent) {
+      throw new Error('Task workspace preparation is no longer current')
+    }
+    if (managed.isolatedWorkspace && managed.isolatedWorkspace.sourceRoot !== realpathSync(sourceRoot)) {
+      throw new Error('Task workspace source changed; create a new execution instead')
+    }
+    const state = managed.isolatedWorkspace ?? prepareIsolatedWorkspace(sourceRoot, join(dirname(managed.workspace.rootPath), '.isolated-tasks'), inputs)
+    // A failed flush can leave an in-memory workspace. Every retry must publish
+    // its sidecar and session metadata before allowing the worker to execute.
+    atomicWrite(join(getSessionStoragePath(managed.workspace.rootPath, managed.id), 'data', 'isolated-workspace.json'), JSON.stringify(state))
+    managed.isolatedWorkspace = state
+    managed.workingDirectory = state.directory
+    this.persistSession(managed)
+    await this.flushSession(managed.id)
+    if (this.sessions.get(sessionId) !== managed || managed.processingGeneration !== generation || managed.stopRequested) {
+      throw new Error('Task workspace preparation is no longer current')
+    }
+    return { directory: state.directory }
+  }
+
+  hasPreparedTaskDelivery(sessionId: string): boolean {
+    const state = this.sessions.get(sessionId)?.isolatedWorkspace
+    return !!(state?.pendingDelivery || state?.delivery)
+  }
+
+  async prepareSwarmWorkspace(sessionId: string, sourceRoot: string, inputs: string[], outputs: Record<string, string>): Promise<{ directory: string }> {
+    const managed = this.sessions.get(sessionId)
+    if (!managed?.orchestrationId || !managed.parentSessionId || managed.taskNodeId) throw new Error('Session is not a Swarm worker')
+    if (this.preparingSwarmWorkspaces.has(sessionId)) throw new Error('Swarm workspace preparation is already running')
+    this.preparingSwarmWorkspaces.add(sessionId)
+    try {
+      const contract = workspaceDeliveryContract(inputs, outputs)
+      const existing = managed.isolatedWorkspace?.deliveryContract
+      if (existing && JSON.stringify(existing) !== JSON.stringify(contract)) throw new Error('Swarm delivery contract changed')
+      const prepared = await this.prepareTaskWorkspace(sessionId, sourceRoot, contract.inputs)
+      const claimed = managed.isolatedWorkspace?.deliveryContract
+      if (claimed && JSON.stringify(claimed) !== JSON.stringify(contract)) throw new Error('Swarm delivery contract changed')
+      const state = { ...managed.isolatedWorkspace!, deliveryContract: contract }
+      atomicWrite(join(getSessionStoragePath(managed.workspace.rootPath, managed.id), 'data', 'isolated-workspace.json'), JSON.stringify(state))
+      managed.isolatedWorkspace = state
+      return prepared
+    } finally { this.preparingSwarmWorkspaces.delete(sessionId) }
+  }
+
+  canAutoResumeTaskDelivery(sessionId: string): boolean {
+    const managed = this.sessions.get(sessionId)
+    return !!managed && !managed.isProcessing && !managed.stopRequested && managed.orchestrationStatus !== 'stopped'
+      && !!managed.permissionMode && ['ask', 'allow-all'].includes(managed.permissionMode) && managed.runtimeRecovery?.reason !== 'unsupported'
+      && managed.executionCheckpoint?.status !== 'cancelled' && !Object.keys(managed.executionCheckpoint?.pendingTools ?? {}).length
+      && !!(managed.isolatedWorkspace?.pendingDelivery || managed.isolatedWorkspace?.delivery)
+  }
+
+  async finalizeTaskWorkspace(sessionId: string, outputs: Record<string, string>, ensureCurrent: () => void, verifyInputs?: () => void): Promise<Record<string, unknown>> {
+    const managed = this.sessions.get(sessionId)
+    const state = managed?.isolatedWorkspace
+    if (!managed || !state) throw new Error('Missing isolated task workspace')
+    if (state.deliveryContract) {
+      const declared = workspaceDeliveryContract(state.deliveryContract.inputs, outputs)
+      if (JSON.stringify(declared.outputs) !== JSON.stringify(state.deliveryContract.outputs)) throw new Error('Swarm delivery outputs changed')
+      outputs = declared.outputs
+    }
+    // Freeze discoveries before validation; retries use the durable receipt instead of rescanning.
+    if (!Object.keys(outputs).length) outputs = state.delivery?.outputs ?? state.pendingDelivery?.outputs ?? discoverWorkspaceOutputs(state)
+    const generation = managed.processingGeneration
+    const authorize = async () => {
+      ensureCurrent()
+      if (managed.processingGeneration !== generation || managed.stopRequested || (!managed.permissionMode || !['ask', 'allow-all'].includes(managed.permissionMode))) throw new Error('Task integration requires current write authorization')
+      await validateWorkspaceFilePath(state.sourceRoot, managed.workspace.id)
+      // Authorization lookup yields: cancellation or a new execution may win meanwhile.
+      ensureCurrent()
+      if (managed.processingGeneration !== generation || managed.stopRequested || (!managed.permissionMode || !['ask', 'allow-all'].includes(managed.permissionMode))) throw new Error('Task integration requires current write authorization')
+    }
+    await authorize()
+    if (state.delivery) return replayTaskDelivery(state.sourceRoot, outputs, state.delivery)
+    const isolationPath = join(getSessionStoragePath(managed.workspace.rootPath, managed.id), 'data', 'isolated-workspace.json')
+    const recordProgress = (progress: NonNullable<IsolatedWorkspace['deliveryProgress']>) => {
+      atomicWrite(isolationPath, JSON.stringify({ ...state, deliveryProgress: progress }))
+      state.deliveryProgress = progress
+    }
+    const integrationStorage = join(dirname(managed.workspace.rootPath), '.task-integrations')
+    if (state.pendingDelivery) {
+      const receipt = state.pendingDelivery
+      assertTaskDeliveryIdentity(outputs, receipt)
+      if (!receipt.transactionId) throw new Error('Pending task delivery identity changed')
+      verifyInputs?.()
+      new ProjectIntegration(state.sourceRoot, integrationStorage).recover('complete', receipt.transactionId)
+      const delivered = replayTaskDelivery(state.sourceRoot, outputs, receipt)
+      const completedState: IsolatedWorkspace = { ...state, pendingDelivery: undefined, delivery: receipt, status: 'integrated' }
+      atomicWrite(isolationPath, JSON.stringify(completedState))
+      managed.isolatedWorkspace = completedState
+      setImmediate(() => this.notifyArtifactApplied(managed.workspace.id))
+      return delivered
+    }
+    recordProgress({ phase: 'validating' })
+    const files = collectWorkspaceCandidates(state, Object.values(outputs).map(path => ({ path,
+      binary: /\.(?:docx|xlsx|pptx|pdf|png|jpe?g|gif|webp|tiff?|avif)$/i.test(path) })))
+    const result = await integrateCandidates({ root: state.sourceRoot,
+      storage: integrationStorage, files, ensureAuthorized: authorize, verifyInputs,
+      onPrepared: prepared => {
+        const pendingDelivery = { version: 1 as const, outputs: { ...outputs }, ...prepared }
+        const deliveryProgress = { phase: 'integrating' as const, checks: prepared.checks }
+        atomicWrite(isolationPath, JSON.stringify({ ...state, pendingDelivery, deliveryProgress }))
+        state.pendingDelivery = pendingDelivery
+        state.deliveryProgress = deliveryProgress
+      },
+      validate: async merged => {
+        const checks: string[] = []
+        for (const file of merged) {
+          if (file.content === null) return { passed: false, checks: ['Declared output is missing'] }
+          const candidate = join(getSessionStoragePath(managed.workspace.rootPath, managed.id), 'validation', randomUUID(), feedbackBasename(file.path))
+          atomicWrite(candidate, file.content)
+          const validation = await validateCandidateFile(candidate)
+          checks.push(...validation.checks)
+
+        }
+        if (merged.some(file => requiresProjectValidation(file.path))) {
+          if (this.projectValidationControllers.has(sessionId)) throw new Error('Project validation is already running')
+          const controller = new AbortController()
+          this.projectValidationControllers.set(sessionId, controller)
+          try {
+            const project = await validateProjectCandidate({ sourceRoot: state.sourceRoot,
+              declaredInputs: state.kind === 'files' ? Object.keys(state.inputs) : undefined,
+              storage: join(dirname(managed.workspace.rootPath), '.project-validation'), files: merged,
+              ensureAuthorized: authorize, signal: controller.signal })
+            return { passed: project.passed, checks: [...checks, ...project.checks] }
+          } finally { this.projectValidationControllers.delete(sessionId) }
+        }
+        return { passed: true, checks }
+      } })
+    if (result.status === 'conflict') {
+      recordProgress({ phase: 'conflict', conflicts: result.files.map(file => file.path) })
+      throw new Error(`Candidate conflicts: ${result.files.map(file => file.path).join(', ')}`)
+    }
+    if (result.status === 'validation-failed') {
+      recordProgress({ phase: 'validation-failed', checks: result.checks })
+      throw new Error(result.checks.join('; '))
+    }
+    const receipt = { version: 1 as const, outputs: { ...outputs }, hashes: result.hashes, checks: result.checks,
+      transactionId: result.status === 'integrated' ? result.transactionId : undefined }
+    const delivered = replayTaskDelivery(state.sourceRoot, outputs, receipt)
+    const completedState: IsolatedWorkspace = { ...state, pendingDelivery: undefined, delivery: receipt, status: 'integrated' }
+    atomicWrite(join(getSessionStoragePath(managed.workspace.rootPath, managed.id), 'data', 'isolated-workspace.json'), JSON.stringify(completedState))
+    managed.isolatedWorkspace = completedState
+    // Publish after the caller has recorded this node's new receipts; otherwise
+    // its own expected update could invalidate the still-pending producer.
+    if (result.status === 'integrated') setImmediate(() => this.notifyArtifactApplied(managed.workspace.id))
+    return delivered
+  }
+
+  async cleanupArtifactVersions(sessionId: string, artifactId: string, expectedVersion: string, versionIds: string[], requestId?: string): Promise<import('@craft-agent/shared/protocol').ManagedArtifact> {
+    const parent = this.sessions.get(sessionId)
+    if (!parent) throw new Error('Session not found')
+    const versions = new ArtifactVersions(join(parent.workspace.rootPath, 'artifacts', 'versions'), executionHostName(), parent.workspace.id)
+    const artifact = versions.read(artifactId)
+    await validateWorkspaceFilePath(artifact.path, parent.workspace.id)
+    const current = versions.read(artifactId)
+    const feedback = new FeedbackStore(join(parent.workspace.rootPath, 'artifacts', 'feedback'))
+    const protectedIds = runtimeProtectedVersions(current, feedback, runId => {
+      const run = this.sessions.get(runId)
+      return !!run && !run.isProcessing && !run.recoveryClaimed && !run.autoRetryPending && !run.messageQueue.length
+        && run.orchestrationStatus !== 'running' && !run.taskRunId
+        && run.executionCheckpoint?.status !== 'running' && run.executionCheckpoint?.status !== 'claimed'
+    })
+    const cleaned = versions.removeVersions(artifactId, expectedVersion, versionIds, protectedIds, requestId)
+    // Reuse the durable deletion receipt on retries if storage collection fails.
+    // Collection independently rechecks all surviving records under its lock.
+    versions.cleanRemovedPreviews(artifactId, versionIds)
+    versions.cleanUnreferencedBlobs()
+    return cleaned
+  }
+
+  async getBodyFeedbackDetails(sessionId: string, sourceMessageId: string, annotationId: string): Promise<import('@craft-agent/shared/protocol').BodyFeedbackRevision[]> {
+    const managed = this.sessions.get(sessionId)
+    if (!managed) throw new Error('Session not found')
+    await this.ensureMessagesLoaded(managed)
+    const sessionPath = getSessionStoragePath(managed.workspace.rootPath, sessionId)
+    const revisions: import('@craft-agent/shared/protocol').BodyFeedbackRevision[] = []
+    const source = managed.messages.find(message => message.id === sourceMessageId)
+    for (const request of managed.messages) {
+      if (request.role !== 'user') continue
+      const reference = request.annotationFollowUps?.find(item => item.messageId === sourceMessageId && item.annotationId === annotationId)
+      if (!reference) continue
+      const current = source?.annotations?.find(item => item.id === annotationId)?.meta?.followUp as Record<string, unknown> | undefined
+      const resultId = reference.resultMessageId ?? (current?.requestMessageId === request.id ? current.resultMessageId : undefined)
+      const result = managed.messages.find(message => message.id === resultId && message.answerCommitted)
+      const resultContent = reference.resultContentHash ? readBodyFeedbackVersion(sessionPath, reference.resultContentHash) : result?.content
+      let original = reference.sourceContentHash ? readBodyFeedbackVersion(sessionPath, reference.sourceContentHash) : undefined
+      if (original === undefined && source && reference.sourceContentHash
+        && createHash('sha256').update(source.content).digest('hex') === reference.sourceContentHash) original = source.content
+      revisions.push({ requestMessageId: request.id, createdAt: request.timestamp, instruction: reference.text,
+        sourceContentHash: reference.sourceContentHash, original, userResolvedAt: reference.userResolvedAt,
+        result: typeof resultId === 'string' && resultContent !== undefined
+          ? { messageId: resultId, content: resultContent, salvaged: reference.resultSalvaged ?? !!result?.answerSalvaged } : undefined })
+    }
+    return revisions
+  }
+
+  async getArtifactFeedbackContext(sessionId: string, artifactId: string): Promise<{ root: string; requiresProjectChecks: boolean }> {
+    const parent = this.sessions.get(sessionId)
+    if (!parent) throw new Error('Session not found')
+    const versions = new ArtifactVersions(join(parent.workspace.rootPath, 'artifacts', 'versions'), executionHostName(), parent.workspace.id)
+    const artifact = versions.read(artifactId)
+    await validateWorkspaceFilePath(artifact.path, parent.workspace.id)
+    const root = parent.workingDirectory && inside(realpathSync(parent.workingDirectory), realpathSync(artifact.path))
+      ? realpathSync(parent.workingDirectory) : dirname(artifact.path)
+    await validateWorkspaceFilePath(root, parent.workspace.id)
+    return { root, requiresProjectChecks: requiresProjectValidation(artifact.path) }
+  }
+
+  async listArtifactFeedback(sessionId: string, artifactId: string): Promise<import('@craft-agent/shared/protocol').ArtifactFeedback[]> {
+    const parent = this.sessions.get(sessionId)
+    if (!parent) throw new Error('Session not found')
+    const store = new FeedbackStore(join(parent.workspace.rootPath, 'artifacts', 'feedback'))
+    // Reconcile interrupted requests through the same authoritative read path.
+    return Promise.all(store.list(sessionId, artifactId).map(record => this.artifactFeedback({ type: 'get', sessionId, feedbackId: record.id })))
+  }
+
+  async artifactFeedback(operation: import('@craft-agent/shared/protocol').ArtifactFeedbackOperation): Promise<import('@craft-agent/shared/protocol').ArtifactFeedback> {
+    const parent = this.sessions.get(operation.sessionId)
+    if (!parent) throw new Error('Session not found')
+    const store = new FeedbackStore(join(parent.workspace.rootPath, 'artifacts', 'feedback'))
+    if (operation.type !== 'create') {
+      const record = store.read(operation.feedbackId)
+      if (record.sessionId !== parent.id) throw new Error('Feedback belongs to another session')
+      if (operation.type === 'cancel') {
+        if (record.status === 'applied') throw new Error('The revision has already been applied; restore a version instead')
+        if (record.status === 'cancelled') return record
+        let applicationRecovered = false
+        store.save(record, () => {
+          if (record.childSessionId) {
+            const versions = new ArtifactVersions(join(parent.workspace.rootPath, 'artifacts', 'versions'), executionHostName(), parent.workspace.id)
+            const applied = versions.reconcile(record.artifactId).versions.find(version => version.sourceRunId === record.childSessionId)
+            if (applied) {
+              record.status = 'applied'; record.appliedVersion = applied.id; record.error = undefined
+              applicationRecovered = true
+              return
+            }
+          }
+          record.status = 'cancelled'
+        })
+        if (applicationRecovered) {
+          this.notifyArtifactApplied(parent.workspace.id)
+          throw new Error('The revision has already been applied; restore a version instead')
+        }
+        if (record.childSessionId) await this.cancelProcessing(record.childSessionId, true)
+        return record
+      }
+      if (['queued', 'running', 'validating'].includes(record.status) && !this.activeArtifactFeedback.has(record.id)) {
+        const releaseRecovery = store.tryClaimExecution(record.id)
+        if (!releaseRecovery) return record
+        try {
+          const versions = new ArtifactVersions(join(parent.workspace.rootPath, 'artifacts', 'versions'), executionHostName(), parent.workspace.id)
+          const artifact = versions.reconcile(record.artifactId)
+          const applied = artifact.versions.find(v => record.childSessionId && v.sourceRunId === record.childSessionId)
+          if (applied) { record.status = 'applied'; record.appliedVersion = applied.id }
+          else { record.status = 'failed'; record.error = 'Revision was interrupted. The candidate and original versions are preserved; review before retrying.' }
+          store.save(record)
+          if (applied) this.notifyArtifactApplied(parent.workspace.id)
+        } finally { releaseRecovery() }
+      }
+      if (operation.type === 'resolve') {
+        if (record.status !== 'applied') throw new Error('Only an applied revision can be marked resolved')
+        record.userResolved = true; store.save(record)
+        const versions = new ArtifactVersions(join(parent.workspace.rootPath, 'artifacts', 'versions'), executionHostName(), parent.workspace.id)
+        versions.releaseVersions(record.artifactId, `feedback:${record.id}`)
+        versions.releaseVersions(record.artifactId, `feedback-result:${record.id}`)
+      }
+      return record
+    }
+    if (operation.validationInputs !== undefined) {
+      if (!Array.isArray(operation.validationInputs)) throw new Error('Validation inputs must be project-relative file paths')
+      operation = { ...operation, validationInputs: workspaceDeliveryContract(operation.validationInputs, { artifact: 'artifact' }).inputs }
+    }
+    const existing = store.findRequest(operation.requestId, { sessionId: parent.id, artifactId: operation.artifactId,
+      baseVersion: operation.baseVersion, instruction: operation.instruction, anchor: operation.anchor, validationInputs: operation.validationInputs })
+    if (existing) return existing
+    const versions = new ArtifactVersions(join(parent.workspace.rootPath, 'artifacts', 'versions'), executionHostName(), parent.workspace.id)
+    const artifact = versions.read(operation.artifactId)
+    await validateWorkspaceFilePath(artifact.path, parent.workspace.id)
+    if (artifact.currentVersion !== operation.baseVersion) throw new Error('Artifact version changed; select the target again')
+    const bytes = versions.versionBytes(artifact.id, operation.baseVersion)
+    if (operation.anchor) assertFeedbackAnchor(bytes, operation.anchor)
+    // Bind relative validation inputs before the asynchronous revision starts.
+    // A later session-directory change must not select a different project.
+    const validationRoot = parent.workingDirectory && inside(realpathSync(parent.workingDirectory), realpathSync(artifact.path))
+      ? realpathSync(parent.workingDirectory) : dirname(artifact.path)
+    if (operation.validationRoot !== undefined && operation.validationRoot !== validationRoot) throw new Error('Validation project changed; reopen feedback before submitting')
+    const feedbackReferenceId = createHash('sha256').update(`${parent.id}\0${operation.requestId}`).digest('hex')
+    versions.pinVersions(artifact.id, `feedback:${feedbackReferenceId}`, [operation.baseVersion])
+    const releaseFeedbackRun = store.claimExecution(feedbackReferenceId)
+    let result: ReturnType<FeedbackStore['create']>
+    try {
+      result = store.create(operation.requestId, { sessionId: parent.id, artifactId: artifact.id,
+        baseVersion: operation.baseVersion, instruction: operation.instruction, anchor: operation.anchor, validationInputs: operation.validationInputs })
+    } catch (error) { releaseFeedbackRun(); throw error }
+    if (!result.created) { releaseFeedbackRun(); return result.record }
+    const feedback = result.record
+    this.activeArtifactFeedback.add(feedback.id)
+    // Run through the existing session host. No new scheduler or quality-model call.
+    void (async () => {
+      let cancellationWatch: ReturnType<typeof setInterval> | undefined
+      try {
+        const feedbackCancelled = () => store.read(feedback.id).status === 'cancelled'
+        if (feedbackCancelled()) return
+        const child = await this.createSession(parent.workspace.id, { parentSessionId: parent.id, hidden: true,
+          name: feedbackBasename(artifact.path), permissionMode: parent.permissionMode ?? 'ask',
+          model: parent.model, llmConnection: parent.llmConnection })
+        const managed = this.sessions.get(child.id)!
+        if (feedbackCancelled()) return
+        const directory = join(getSessionStoragePath(parent.workspace.rootPath, child.id), 'candidate')
+        makeFeedbackDirectory(directory, { recursive: true })
+        const candidate = join(directory, feedbackBasename(artifact.path))
+        saveFeedbackCandidate(candidate, bytes)
+        managed.workingDirectory = directory
+        managed.isolatedWorkspace = { version: 1, id: feedback.id, sourceRoot: dirname(artifact.path), directory,
+          kind: 'files', inputs: { [feedbackBasename(artifact.path)]: artifact.versions.find(v => v.id === artifact.currentVersion)!.hash }, status: 'ready' }
+        atomicWrite(join(getSessionStoragePath(parent.workspace.rootPath, child.id), 'data', 'isolated-workspace.json'), JSON.stringify(managed.isolatedWorkspace))
+        feedback.childSessionId = child.id; feedback.status = 'running'; store.save(feedback)
+        this.persistSession(managed); await this.flushSession(child.id)
+        // Another process can persist cancellation without owning this runtime.
+        cancellationWatch = setInterval(() => {
+          try {
+            if (!feedbackCancelled()) return
+          } catch (error) {
+            // Unknown cancellation state cannot authorize continued writes.
+            sessionLog.warn('Feedback cancellation state unavailable', { feedbackId: feedback.id, reason: error instanceof Error ? error.name : 'unknown' })
+          }
+          clearInterval(cancellationWatch); cancellationWatch = undefined
+          this.projectValidationControllers.get(child.id)?.abort()
+          void this.cancelProcessing(child.id, true).catch(error => sessionLog.warn('Feedback cancellation dispatch failed', { feedbackId: feedback.id, reason: error instanceof Error ? error.name : 'unknown' }))
+        }, 500)
+        cancellationWatch.unref?.()
+        if (feedbackCancelled()) return
+        await this.sendMessage(child.id, `Revise the file ${JSON.stringify(candidate)} according to this user feedback:
+${feedback.instruction}
+${feedback.anchor ? `Selected text: ${JSON.stringify(feedback.anchor.text)}` : ''}
+Edit only the candidate file. Preserve unrelated content. Do not modify the original project.`, undefined, undefined)
+        const revisionCancelled = () => feedbackCancelled() || managed.stopRequested || managed.executionCheckpoint?.status === 'cancelled'
+          || managed.runtimeRecovery?.phase === 'cancelled'
+        const requireWriteAuthorization = () => {
+          if (revisionCancelled() || ![parent, managed].every(session => session.permissionMode && ['ask', 'allow-all'].includes(session.permissionMode))) {
+            throw new Error('Revision requires current write authorization')
+          }
+        }
+        if (revisionCancelled() || managed.messages.some(m => m.role === 'error')) throw new Error('Revision execution did not complete successfully')
+        feedback.status = 'validating'; store.save(feedback)
+        const validation = await validateCandidateFile(candidate)
+        if (validation.hash === createHash('sha256').update(bytes).digest('hex')) throw new Error('No file changes were produced; the original and candidate are preserved')
+        feedback.validation = [...validation.checks, 'File/format checks only; semantic correctness has not been verified']
+        if (requiresProjectValidation(artifact.path)) {
+          const sourceRoot = validationRoot
+          const authorize = async () => {
+            requireWriteAuthorization()
+            await validateWorkspaceFilePath(sourceRoot, parent.workspace.id)
+            requireWriteAuthorization()
+          }
+          const controller = new AbortController()
+          this.projectValidationControllers.set(child.id, controller)
+          try {
+            const result = await validateProjectCandidate({ sourceRoot,
+              declaredInputs: feedback.validationInputs,
+              storage: join(dirname(parent.workspace.rootPath), '.project-validation'),
+              files: [{ path: relative(sourceRoot, artifact.path), content: loadIsolationFile(candidate) }],
+              ensureAuthorized: authorize, signal: controller.signal })
+            if (revisionCancelled()) throw new Error('Revision was cancelled during project validation')
+            feedback.validation = [...validation.checks, ...result.checks]
+            store.save(feedback)
+            if (!result.passed) throw new Error('Project checks failed; candidate retained')
+          } finally { this.projectValidationControllers.delete(child.id) }
+        }
+        await validateWorkspaceFilePath(artifact.path, parent.workspace.id)
+        // Recheck after asynchronous validation: cancellation may have arrived while reading.
+        requireWriteAuthorization()
+        store.save(feedback, () => {
+          const applied = versions.apply(artifact.id, feedback.baseVersion, candidate, child.id, undefined, validation.hash, `feedback-result:${feedback.id}`)
+          feedback.appliedVersion = applied.currentVersion; feedback.status = 'applied'
+        })
+        this.notifyArtifactApplied(parent.workspace.id)
+      } catch (error) {
+        const current = store.read(feedback.id)
+        // Artifact publication may have succeeded before feedback persistence failed.
+        // Reconcile its journal before deciding whether this revision failed.
+        const reconciled = versions.reconcile(artifact.id)
+        const applied = reconciled.versions.find(version => current.childSessionId && version.sourceRunId === current.childSessionId)
+        if (applied) {
+          current.status = 'applied'; current.appliedVersion = applied.id; current.error = undefined
+          current.validation = feedback.validation ?? current.validation
+          store.save(current)
+          this.notifyArtifactApplied(parent.workspace.id)
+          return
+        }
+        if (current.status === 'cancelled') return
+        // Do not overwrite a state concurrently published by another owner.
+        if ((current.revision ?? 0) !== (feedback.revision ?? 0)) return
+        feedback.status = error instanceof Error && error.name === 'ArtifactConflict' ? 'conflict' : 'failed'
+        feedback.error = error instanceof Error ? error.message : 'Revision failed'
+        store.save(feedback)
+      } finally { clearInterval(cancellationWatch); this.activeArtifactFeedback.delete(feedback.id); releaseFeedbackRun() }
+    })().catch(error => sessionLog.error('Feedback persistence failed', { feedbackId: feedback.id, reason: error instanceof Error ? error.name : 'unknown' }))
+    return feedback
+  }
+
+  private publishRecovery(managed: ManagedSession, phase: import('@craft-agent/shared/protocol/dto').RuntimeRecoveryView['phase']): void {
+    const c = managed.executionCheckpoint
+    if (!c) return
+    managed.runtimeRecovery = { version: 1, phase, reason: c.reason, completedSteps: c.completedTools.length,
+      pendingTools: Object.values(c.pendingTools).map(t => t.name), updatedAt: c.updatedAt,
+      canResume: c.status === 'running' && !managed.isProcessing && (!c.reason || c.reason === 'authorization-review' || c.reason === 'execution-active-elsewhere') }
+    this.sendEvent({ type: 'session_metadata_changed', sessionId: managed.id, changes: { runtimeRecovery: managed.runtimeRecovery } }, managed.workspace.id)
+  }
+
+  private checkpointExecution(managed: ManagedSession): void {
+    const c = managed.executionCheckpoint
+    if (!c || c.generation !== managed.processingGeneration) return
+    if (c.sdkSessionId !== managed.sdkSessionId) c.sdkTurnAnchor = undefined
+    c.sdkSessionId = managed.sdkSessionId
+    c.compactionMessageId = managed.messages.findLast(m => m.statusType === 'compaction_complete')?.id
+    c.waitingFor = c.status === 'claimed' ? 'recovery'
+      : c.status === 'running' ? (managed.pendingAuthRequestId || [...this.pendingPermissionRequests.values()].some(request => request.sessionId === managed.id)
+        ? 'user' : Object.keys(c.pendingTools).length ? 'tool' : 'model') : undefined
+    const sdk = sdkStateSnapshot(getSessionStoragePath(managed.workspace.rootPath, managed.id), managed.sdkSessionId)
+    c.sdkStateHash = sdk?.hash
+    c.sdkStateSize = sdk?.size
+    c.transcriptTailId = managed.messages.at(-1)?.id
+    c.updatedAt = Date.now()
+    writeExecutionCheckpoint(getSessionStoragePath(managed.workspace.rootPath, managed.id), c)
+    this.publishRecovery(managed, c.status === 'claimed' ? 'recovering' : c.status)
+  }
+
+  async resumeExecution(sessionId: string): Promise<void> {
+    try {
+      await this.withSessionExecution(sessionId, async () => {
+        const managed = this.sessions.get(sessionId)
+        if (managed?.orchestrationId && managed.parentSessionId && !managed.taskRunId && this.canAutoResumeTaskDelivery(sessionId)) {
+          const generation = managed.processingGeneration
+          await this.ensureMessagesLoaded(managed)
+          if (!this.canAutoResumeTaskDelivery(sessionId) || generation !== managed.processingGeneration || managed.messageQueue.length) throw new Error('Prepared Swarm delivery is no longer current')
+          this.updateOrchestrationMetadata(managed, { orchestrationStatus: 'running', orchestrationBlocker: undefined })
+          this.setProcessing(managed, true)
+          // Recover only a validated integration receipt, never rerun the child model/tools.
+          await this.onProcessingStopped(sessionId, 'complete', generation)
+          return
+        }
+        await this.executeRecovery(sessionId)
+      })
+    } catch (error) {
+      if (error instanceof Error && error.message === 'Session execution is active in another application instance') {
+        const managed = this.sessions.get(sessionId)
+        if (managed?.executionCheckpoint) {
+          managed.executionCheckpoint.reason = 'execution-active-elsewhere'
+          this.publishRecovery(managed, 'blocked')
+        }
+      }
+      throw error
+    }
+  }
+
+  private async executeRecovery(sessionId: string): Promise<void> {
+    const managed = this.sessions.get(sessionId)
+    if (!managed || managed.isProcessing || managed.recoveryClaimed) throw new Error('Session is already active')
+    managed.recoveryClaimed = true
+    const generation = managed.processingGeneration
+    try {
+      await this.ensureMessagesLoaded(managed)
+      if (managed.isProcessing || managed.processingGeneration !== generation || managed.messageQueue.length) throw new Error('Another execution owns this session')
+      const c = managed.executionCheckpoint
+      if (!c) throw new Error('No execution checkpoint')
+      const reclaimAfterRestart = c.status === 'claimed' && this.startupRecoveryClaims.has(sessionId)
+      const verifiedToolCalls = verifiedFileOperations(getSessionStoragePath(managed.workspace.rootPath, sessionId), c)
+      const recoveredSdk = recoverySdkSnapshot(getSessionStoragePath(managed.workspace.rootPath, sessionId), c)
+      const blocker = recoveryBlocker({ ...c, ...(reclaimAfterRestart ? { status: 'running' as const } : {}), sdkStateHash: recoveredSdk ? recoveredSdk.hash : c.sdkStateHash }, { sessionId, generation: managed.processingGeneration, userMessageId: managed.messages.findLast(m => m.role === 'user' && !m.hidden && !m.isQueued)?.id,
+        sdkSessionId: managed.sdkSessionId, sdkStateHash: recoveredSdk?.hash,
+        taskIdentity: executionTaskIdentity(managed), compactionMessageId: managed.messages.findLast(m => m.statusType === 'compaction_complete')?.id,
+        transcriptTailId: recoveryTranscriptMatches(getSessionStoragePath(managed.workspace.rootPath, sessionId), c, managed.messages) ? c.transcriptTailId : managed.messages.at(-1)?.id,
+        cancelled: !!managed.stopRequested, orchestrated: !!(managed.taskSlug || managed.parentSessionId || managed.orchestrationId), permissionMode: managed.permissionMode, verifiedToolCalls })
+      if (blocker) {
+        c.reason = blocker
+        this.publishRecovery(managed, 'blocked')
+        throw new Error(`Execution recovery requires attention: ${blocker}`)
+      }
+      managed.executionCheckpoint = claimExecutionCheckpoint(getSessionStoragePath(managed.workspace.rootPath, managed.id), c, reclaimAfterRestart)
+      this.startupRecoveryClaims.delete(sessionId)
+      this.publishRecovery(managed, 'recovering')
+      if (Object.keys(c.pendingTools).length) {
+        managed.toolResultRecovery = { sessionId, sdkSessionId: c.sdkSessionId!, sdkStateHash: recoveredSdk!.hash,
+          answerRunId: c.answerRunId, pendingTools: structuredClone(c.pendingTools) }
+        const agent = await this.getOrCreateAgent(managed)
+        if (!agent.prepareExecutionRecovery) throw new Error('Backend cannot safely pair interrupted tool results')
+        await agent.prepareExecutionRecovery()
+        if (managed.stopRequested || managed.processingGeneration !== generation) throw new Error('Recovery was interrupted')
+        const restored: Message[] = []
+        const previousMessages = managed.messages
+        const recoveryMessages = managed.messages.map(message => ({ ...message }))
+        for (const [toolCallId, tool] of Object.entries(c.pendingTools)) {
+          const written = verifiedToolCalls.includes(toolCallId)
+          const receipt = written ? readToolFileOperation(getSessionStoragePath(managed.workspace.rootPath, sessionId), {
+            sessionId, sdkSessionId: c.sdkSessionId!, answerRunId: c.answerRunId, toolCallId, toolName: tool.name as 'Write' | 'Edit',
+          }) : undefined
+          if (written && (!receipt || !verifyToolFileOperation(receipt, { sessionId, sdkSessionId: c.sdkSessionId!,
+            answerRunId: c.answerRunId, toolCallId, toolName: tool.name as 'Write' | 'Edit' }))) {
+            throw new Error('File operation changed before recovery publication')
+          }
+          const result = receipt ? recoveredFileOperationText(receipt) : INTERRUPTED_READ_RESULT
+          let message = recoveryMessages.findLast(item => item.role === 'tool' && item.toolUseId === toolCallId && (!item.answerRunId || item.answerRunId === c.answerRunId))
+          if (!message) {
+            const user = managed.messages.find(item => item.id === c.userMessageId)
+            message = { id: generateMessageId(), role: 'tool', content: '', timestamp: this.monotonic(),
+              toolUseId: toolCallId, toolName: tool.name, toolPurpose: 'work', answerRunId: c.answerRunId,
+              answerProtocol: user?.answerProtocol, answerRoutingVersion: user?.answerRoutingVersion }
+            recoveryMessages.push(message)
+          }
+          message.toolResult = result; message.toolStatus = written ? 'completed' : 'error'; message.isError = !written
+          restored.push(message)
+        }
+        managed.messages = recoveryMessages
+        try {
+          this.persistSession(managed)
+          await this.flushSession(managed.id)
+          const persisted = loadStoredSession(managed.workspace.rootPath, sessionId)
+          if (!restored.every(message => persisted?.messages.some(item => item.id === message.id && item.toolResult === message.toolResult && item.toolStatus === message.toolStatus))) {
+            throw new Error('Recovered tool results could not be persisted')
+          }
+        } catch (error) {
+          managed.messages = previousMessages
+          throw error
+        }
+        if (managed.stopRequested || managed.processingGeneration !== generation) throw new Error('Recovery was interrupted')
+        const checkpoint = managed.executionCheckpoint!
+        checkpoint.completedTools = [...new Set([...checkpoint.completedTools, ...Object.keys(c.pendingTools)])]
+        checkpoint.pendingTools = {}
+        this.checkpointExecution(managed)
+        for (const message of restored) {
+          try { this.sendEvent({ type: 'tool_result', sessionId, toolUseId: message.toolUseId!, toolName: message.toolName!,
+            result: message.toolResult!, isError: message.isError, toolPurpose: message.toolPurpose,
+            answerRunId: message.answerRunId, answerProtocol: message.answerProtocol,
+            answerRoutingVersion: message.answerRoutingVersion, timestamp: message.timestamp }, managed.workspace.id) }
+          catch { sessionLog.warn('Recovered tool result publication failed', { sessionId, toolCallId: message.toolUseId }) }
+        }
+      }
+      await this.sendMessage(sessionId, 'Continue the interrupted user task from the saved context. Preserve completed work; do not repeat completed side effects.',
+        undefined, undefined, { hidden: true }, undefined, false, undefined, undefined, false, true)
+    } catch (error) {
+      if (!managed.stopRequested && managed.processingGeneration === generation
+        && managed.executionCheckpoint && ['running', 'claimed'].includes(managed.executionCheckpoint.status)) {
+        // A failed checkpoint publication may have mutated the in-memory draft.
+        // Retain the durable pending outcomes and expose a stopped recovery.
+        const saved = readExecutionCheckpoint(getSessionStoragePath(managed.workspace.rootPath, sessionId))
+        const previousReason = managed.executionCheckpoint.reason
+        if (saved.kind === 'ok' && saved.checkpoint.generation === generation
+          && saved.checkpoint.userMessageId === managed.executionCheckpoint.userMessageId) {
+          managed.executionCheckpoint = saved.checkpoint
+        }
+        managed.executionCheckpoint.reason = previousReason ?? 'recovery-failed'
+        try { this.publishRecovery(managed, 'blocked') }
+        catch { sessionLog.warn('Recovery status publication failed', { sessionId }) }
+        sessionLog.warn('Execution recovery stopped before continuation', { sessionId, reason: managed.executionCheckpoint.reason })
+      }
+      throw error
+    } finally { managed.recoveryClaimed = false; managed.toolResultRecovery = undefined }
+  }
+
   async continueProgress(sessionId: string): Promise<void> {
     const managed = this.sessions.get(sessionId)
     if (!managed || managed.isProcessing) throw new Error('Session must be idle to continue')
@@ -7433,7 +8279,9 @@ export class SessionManager implements ISessionManager {
     managed.branchFromSdkSessionId = undefined
     managed.branchFromSessionPath = undefined
     managed.branchFromSdkTurnId = undefined
-    await this.sendMessage(sessionId, continuation.prompt, undefined, undefined, { hidden: true }, undefined, false, undefined, undefined, false, true)
+    // Resume the accepted user turn. Appending a new hidden user message would
+    // fail durable acceptance while regeneration preserves the old transcript.
+    await this.sendMessage(sessionId, continuation.prompt, undefined, undefined, { hidden: true }, continuation.userMessageId, false, undefined, undefined, false, true)
   }
 
   private createProgressReviewer(managed: ManagedSession, connectionSlug?: string): AgentInstance {
@@ -7677,13 +8525,43 @@ export class SessionManager implements ISessionManager {
     }
   }
 
+  private async transitionAnnotationFeedback(managed: ManagedSession, requestMessageId: string, status: Parameters<typeof setAnnotationFeedbackStatus>[2]): Promise<void> {
+    const sources = setAnnotationFeedbackStatus(managed.messages, requestMessageId, status)
+    if (!sources.length) return
+    try {
+      this.persistSession(managed)
+      await this.flushSession(managed.id)
+      const stored = loadStoredSession(managed.workspace.rootPath, managed.id)
+      if (!stored) throw new Error('Feedback state persistence could not be verified')
+      for (const source of sources) {
+        const persisted = stored?.messages.find(message => message.id === source.id)
+        const confirmed = persisted?.annotations?.some(annotation => {
+          const followUp = annotation.meta?.followUp as Record<string, unknown> | undefined
+          return followUp?.requestMessageId === requestMessageId && followUp.status === status
+        })
+        if (!confirmed) continue
+        this.sendEvent({ type: 'message_annotations_updated', sessionId: managed.id, messageId: source.id, annotations: structuredClone(source.annotations!) }, managed.workspace.id)
+      }
+    } catch {
+      sessionLog.warn('Annotation feedback state persistence or publication failed', { sessionId: managed.id, requestMessageId, status })
+    }
+  }
+
   private publishCommittedAnswer(managed: ManagedSession, answer: Message): void {
+    for (const source of managed.messages) {
+      if (source.annotations?.some(annotation => (annotation.meta?.followUp as Record<string, unknown> | undefined)?.resultMessageId === answer.id)) {
+        try {
+          this.sendEvent({ type: 'message_annotations_updated', sessionId: managed.id, messageId: source.id, annotations: source.annotations }, managed.workspace.id)
+        } catch { sessionLog.warn('Annotation result event delivery failed', { sessionId: managed.id, messageId: source.id }) }
+      }
+    }
     sessionLog.info('Answer committed', { sessionId: managed.id, answerRunId: answer.answerRunId, messageId: answer.id, salvaged: !!answer.answerSalvaged })
     try {
       this.sendEvent({ type: 'text_complete', sessionId: managed.id, text: answer.content,
         isIntermediate: false, phase: 'final', answerProtocol: answer.answerProtocol,
         answerRunId: answer.answerRunId, answerRoutingVersion: answer.answerRoutingVersion,
         answerCommitted: true, answerSalvaged: answer.answerSalvaged, turnId: answer.turnId,
+        artifactVersions: answer.artifactVersions,
         messageId: answer.id, timestamp: answer.timestamp }, managed.workspace.id)
     } catch (error) {
       sessionLog.error('Committed answer event delivery failed', { sessionId: managed.id, messageId: answer.id, error })
@@ -7717,6 +8595,7 @@ export class SessionManager implements ISessionManager {
       answerProtocol: 'explicit-v1', answerRunId: state.runId, answerRoutingVersion: state.answerRoutingVersion, answerCommitted: true,
       turnId: `answer-${state.runId}`,
     }
+    let rollbackFeedback: (() => void) | undefined
     try {
       // Save the provider anchor before publishing. The SDK has already appended
       // the assistant tool-call message; its arguments contain this exact answer.
@@ -7726,6 +8605,11 @@ export class SessionManager implements ISessionManager {
       managed.streamingText = ''
       managed.streamingTurnId = undefined
       managed.streamingStartedAt = undefined
+      rollbackFeedback = linkAnnotationFollowUpResults(managed.messages, state.userMessageId, answer,
+        (content, hash) => saveBodyFeedbackVersion(getSessionStoragePath(managed.workspace.rootPath, managed.id), content, hash))
+      answer.artifactVersions = await managed.conversationArtifactVersions?.capture(answer.content, `${managed.id}/${state.userMessageId}`,
+        managed.messages.find(message => message.id === state.userMessageId)?.content ?? '')
+      if (managed.stopRequested || managed.processingGeneration !== state.generation || managed.answerDelivery !== state) throw new Error('Answer delivery was interrupted.')
       managed.messages.push(answer)
       state.committedMessageId = answer.id
       managed.piSdkMessageToCraftMessage ??= new Map()
@@ -7740,6 +8624,7 @@ export class SessionManager implements ISessionManager {
       if (!storedAnswer?.answerCommitted || storedAnswer.answerRunId !== state.runId || !hasRenderableAssistantText(storedAnswer.content)) throw new Error('Answer could not be persisted. No answer was published.')
       if (regenerateTransaction && managed.regenerateTransaction === regenerateTransaction) this.commitRegenerateTransaction(managed)
     } catch (error) {
+      rollbackFeedback?.()
       if (regenerateTransaction?.pendingAnswerId === answer.id) regenerateTransaction.pendingAnswerId = undefined
       const stillActive = managed.answerDelivery === state && managed.isProcessing
         && !managed.stopRequested && managed.processingGeneration === state.generation
@@ -7801,10 +8686,16 @@ export class SessionManager implements ISessionManager {
       answerSalvaged: true,
       turnId: `answer-${state.runId}`,
     }
+    let rollbackFeedback: (() => void) | undefined
     try {
       if (draftAnchor) await savePiTurnAnchor(sessionPath, answer.id, draftAnchor)
       if (!isActive()) return undefined
       this.assertAnswerReady(managed, state, draft.content)
+      rollbackFeedback = linkAnnotationFollowUpResults(managed.messages, state.userMessageId, answer,
+        (content, hash) => saveBodyFeedbackVersion(getSessionStoragePath(managed.workspace.rootPath, managed.id), content, hash))
+      answer.artifactVersions = await managed.conversationArtifactVersions?.capture(answer.content, `${managed.id}/${state.userMessageId}`,
+        managed.messages.find(message => message.id === state.userMessageId)?.content ?? '')
+      if (!isActive()) throw new Error('Answer delivery was interrupted.')
       managed.messages.push(answer)
       state.committedMessageId = answer.id
       managed.lastMessageRole = 'assistant'
@@ -7819,6 +8710,7 @@ export class SessionManager implements ISessionManager {
       }
       if (regenerateTransaction && managed.regenerateTransaction === regenerateTransaction) this.commitRegenerateTransaction(managed)
     } catch (error) {
+      rollbackFeedback?.()
       if (regenerateTransaction?.pendingAnswerId === answer.id) regenerateTransaction.pendingAnswerId = undefined
       if (isActive()) state.persistenceFailed = true
       sessionLog.warn('Answer salvage failed', { sessionId: managed.id, answerRunId: state.runId, error: error instanceof Error ? error.message : String(error) })
@@ -8151,6 +9043,7 @@ export class SessionManager implements ISessionManager {
 
     managed.messageQueue.splice(queueIndex, 1)
     managed.messages = managed.messages.filter(candidate => candidate.id !== messageId)
+    await this.transitionAnnotationFeedback(managed, messageId, 'interrupted')
     await this.persistQueueState(managed)
   }
 
@@ -8225,6 +9118,7 @@ export class SessionManager implements ISessionManager {
   }
 
   async cancelProcessing(sessionId: string, silent = false): Promise<void> {
+    this.projectValidationControllers.get(sessionId)?.abort()
     const managed = this.sessions.get(sessionId)
     if (!managed?.isProcessing) {
       return // Not processing, nothing to cancel
@@ -8232,6 +9126,17 @@ export class SessionManager implements ISessionManager {
 
     sessionLog.info('Cancelling processing for session:', sessionId, silent ? '(silent)' : '')
 
+    if (managed.executionCheckpoint) {
+      managed.executionCheckpoint.status = 'cancelled'
+      managed.executionCheckpoint.reason = 'cancelled'
+      try {
+        this.checkpointExecution(managed)
+      } catch (error) {
+        // Storage failure must not prevent the user's Stop from reaching the runtime.
+        sessionLog.error('Unable to persist execution cancellation', { sessionId, reason: error instanceof Error ? error.name : 'unknown' })
+        this.publishRecovery(managed, 'cancelled')
+      }
+    }
     managed.progressSupervisor?.stop()
     // Stop is authoritative over an automatic source continuation. Clear both
     // the not-yet-fired timer and any usage accumulator waiting to cross that
@@ -8515,6 +9420,20 @@ export class SessionManager implements ISessionManager {
    * Listeners for the in-process session-completion seam (see SessionCompletionEvent).
    * Used by the Tasks Conductor; empty until something subscribes, so zero overhead otherwise.
    */
+  private artifactAppliedListeners = new Set<(workspaceId: string) => void>()
+
+  onArtifactApplied(listener: (workspaceId: string) => void): () => void {
+    this.artifactAppliedListeners.add(listener)
+    return () => { this.artifactAppliedListeners.delete(listener) }
+  }
+
+  notifyArtifactApplied(workspaceId: string): void {
+    for (const listener of this.artifactAppliedListeners) {
+      try { listener(workspaceId) }
+      catch { sessionLog.warn('artifact-dependent-revalidation-failed', { workspaceId }) }
+    }
+  }
+
   private sessionCompletionListeners = new Set<(evt: SessionCompletionEvent) => void>()
 
   /**
@@ -8667,11 +9586,14 @@ export class SessionManager implements ISessionManager {
     const generation = managed.processingGeneration
     const ownsCompletion = () => managed.processingGeneration === generation && this.sessions.get(sessionId) === managed
     let completedTurnTokens: number | undefined
+    let deliveredArtifacts: Record<string, unknown> | undefined
     let swarmTurnUsageRecorded = false
 
-    const regenerateOutcome = await this.settleRegenerateTransaction(managed, reason)
+    const cancellationRequested = () => managed.stopRequested
+      || (managed.executionCheckpoint?.generation === generation && managed.executionCheckpoint.status === 'cancelled')
+    const regenerateOutcome = await this.settleRegenerateTransaction(managed, cancellationRequested() ? 'interrupted' : reason)
     if (!ownsCompletion()) return
-    const completionReason = regenerateOutcome.reason
+    let completionReason = cancellationRequested() ? 'interrupted' as const : regenerateOutcome.reason
 
     sessionLog.info(`Processing stopped for session ${sessionId}: ${completionReason}`)
 
@@ -8722,6 +9644,22 @@ export class SessionManager implements ISessionManager {
       managed.activeTurnSawModelCallStart = undefined
     }
 
+    const deliveryContract = managed.isolatedWorkspace?.deliveryContract
+    if (completionReason === 'complete' && (deliveryContract || managed.isolatedWorkspace?.autoDelivery) && managed.messageQueue.length === 0) {
+      try {
+        deliveredArtifacts = await this.finalizeTaskWorkspace(sessionId, deliveryContract?.outputs ?? {}, () => {
+          if (!ownsCompletion() || managed.stopRequested) throw new Error('Swarm delivery was interrupted')
+        })
+      } catch (error) {
+        if (!ownsCompletion()) return
+        completionReason = managed.stopRequested ? 'interrupted' : 'error'
+        const detail = error instanceof Error ? error.message : 'Swarm artifact integration failed'
+        managed.orchestrationBlocker = detail
+        this.sendEvent({ type: 'error', sessionId, error: detail }, managed.workspace.id)
+      }
+      if (!ownsCompletion()) return
+    }
+
     if (isSpawnedSwarmAgent(managed) && managed.orchestrationStatus === 'need-to-check') {
       // A live usage update may have stopped this agent at the model-call
       // boundary. Persist the just-finished turn even though terminal Swarm
@@ -8737,17 +9675,49 @@ export class SessionManager implements ISessionManager {
       this.reportManagedChildTerminal(managed)
     }
 
+    const feedbackOwner = managed.answerDelivery?.generation === generation
+      ? managed.answerDelivery.userMessageId
+      : managed.messages.findLast(message => message.role === 'user' && !message.hidden && !message.isQueued)?.id
+    const continuingFeedback = managed.authRetryInProgress || managed.messageQueue.some(entry => entry.isSourceContinuation)
+    if (feedbackOwner && !continuingFeedback) {
+      const feedbackCompletionReason = cancellationRequested() ? 'interrupted' : completionReason
+      const waitingForUser = !!managed.pendingAuthRequest || managed.messages.slice(
+        managed.messages.findIndex(message => message.id === feedbackOwner) + 1,
+      ).some(message => message.role === 'plan' || (message.role === 'auth-request' && message.authStatus === 'pending'))
+      await this.transitionAnnotationFeedback(managed, feedbackOwner,
+        feedbackCompletionReason === 'interrupted' || feedbackCompletionReason === 'timeout' ? 'interrupted'
+          : feedbackCompletionReason === 'complete' && waitingForUser ? 'waiting-user' : 'failed')
+      if (!ownsCompletion()) return
+      if (cancellationRequested() && feedbackCompletionReason !== 'interrupted') {
+        await this.transitionAnnotationFeedback(managed, feedbackOwner, 'interrupted')
+        if (!ownsCompletion()) return
+      }
+    }
+
     // A stopped Pi turn can still have parallel tool/LLM work resolving in its
     // subprocess. Its events do not carry a turn identifier, so reusing that
     // runtime lets a late `agent_end` complete the next turn (#182). Keep the
     // session busy until the old runtime is fully gone; queued work can then
     // resume on a fresh runtime using the persisted SDK session anchor.
+    if (cancellationRequested()) completionReason = 'interrupted'
     const mustRestartRuntime = completionReason === 'interrupted' || completionReason === 'timeout'
     if (mustRestartRuntime) {
       await this.disposeManagedAgentRuntime(managed, `${completionReason} response`)
       if (!ownsCompletion()) return
     }
 
+    if (managed.executionCheckpoint?.generation === managed.processingGeneration) {
+      managed.executionCheckpoint.status = completionReason === 'complete' ? 'completed' : completionReason === 'interrupted' ? 'cancelled' : 'blocked'
+      managed.executionCheckpoint.reason = completionReason === 'complete' ? undefined : completionReason
+      try {
+        this.checkpointExecution(managed)
+      } catch (error) {
+        // Always release processing state, even when terminal persistence fails.
+        managed.executionCheckpoint.reason = 'checkpoint-save-failed'
+        this.publishRecovery(managed, 'blocked')
+        sessionLog.error('Unable to persist execution completion', { sessionId, reason: error instanceof Error ? error.name : 'unknown' })
+      }
+    }
     // 1. Cleanup state
     this.setProcessing(managed, false)
     managed.stopRequested = false  // Reset for next turn
@@ -8916,6 +9886,7 @@ export class SessionManager implements ISessionManager {
       // reason + this turn's final assistant message, so the Conductor can advance
       // the corresponding node. In-process only; never sent to the renderer/agents.
       this.emitSessionComplete({
+        artifacts: deliveredArtifacts,
         sessionId,
         workspaceId: managed.workspace.id,
         generation: managed.processingGeneration,
@@ -9317,8 +10288,10 @@ export class SessionManager implements ISessionManager {
       // A budget stop marks the node need-to-check before the interrupted turn
       // is durably settled. Keep showing that in-flight usage during the gap.
       const budgetState = getSwarmAgentBudgetState(child)
+      const isolated = child.isolatedWorkspace
       return {
         sessionId: child.id,
+        artifactDelivery: deliverySnapshot(isolated, child.isProcessing && !child.stopRequested && status === 'running'),
         parentSessionId: child.parentSessionId,
         name: child.name ?? child.id,
         role: child.orchestrationRole === 'reviewer' ? 'reviewer' : 'worker',
@@ -9752,6 +10725,15 @@ export class SessionManager implements ISessionManager {
     request: SpawnSessionRequest,
   ): Promise<SpawnSessionResult> {
     sessionLog.info(`Spawn session request from session ${managed.id}:`, request.name || '(unnamed)')
+    this.assertSpawnPermissionAndProject(managed, request)
+    const delivery = request.artifactDelivery
+      ? workspaceDeliveryContract(request.artifactDelivery.inputs, request.artifactDelivery.outputs)
+      : undefined
+    const deliveryRoot = request.workingDirectory ?? managed.workingDirectory
+    const isolateWrites = (request.permissionMode ?? managed.permissionMode ?? 'safe') !== 'safe'
+    if ((delivery || isolateWrites) && (!deliveryRoot || !['ask', 'allow-all'].includes(request.permissionMode ?? managed.permissionMode ?? 'safe'))) {
+      throw new Error('Isolated file delivery requires a project directory and current write authorization')
+    }
     const { getSwarmAgentsEnabled } = await import('@craft-agent/shared/config/storage')
     if (!getSwarmAgentsEnabled()) {
       throw new Error('Swarm agents are disabled in Advanced settings')
@@ -9930,6 +10912,30 @@ export class SessionManager implements ISessionManager {
     }
     const childManaged = this.sessions.get(session.id)
 
+    if (delivery || isolateWrites) {
+      try {
+        if (delivery) await this.prepareSwarmWorkspace(session.id, deliveryRoot!, delivery.inputs, delivery.outputs)
+        else {
+          await this.prepareTaskWorkspace(session.id, deliveryRoot!, [])
+          const state = { ...childManaged!.isolatedWorkspace!, autoDelivery: true as const }
+          atomicWrite(join(getSessionStoragePath(managed.workspace.rootPath, session.id), 'data', 'isolated-workspace.json'), JSON.stringify(state))
+          childManaged!.isolatedWorkspace = state
+        }
+      } catch (error) {
+        if (childManaged) {
+          this.updateOrchestrationMetadata(childManaged, {
+            orchestrationStatus: 'need-to-check',
+            orchestrationBlocker: error instanceof Error ? error.message : 'Workspace preparation failed',
+          })
+        }
+        throw error
+      }
+    }
+
+    const childPrompt = delivery
+      ? `${request.prompt}\n\nRuntime file delivery contract: work in the assigned isolated working directory. Produce these declared project-relative files: ${JSON.stringify(delivery.outputs)}. They are candidates until runtime validation and integration succeed. Do not claim that candidate paths are final project paths.`
+      : isolateWrites ? `${request.prompt}\n\nWork only in the assigned isolated working directory. The runtime discovers actual file changes, validates and integrates them before completion. Candidate paths are not final project paths. For non-Git projects, declare required input files with artifactDelivery before spawning.` : request.prompt
+
     // Build FileAttachment[] from paths (if any)
     let fileAttachments: FileAttachment[] | undefined
     if (request.attachments?.length) {
@@ -10019,7 +11025,7 @@ export class SessionManager implements ISessionManager {
         },
         onAttach: (settle) => { settleWait = settle },
       })
-      this.sendMessage(session.id, request.prompt, fileAttachments).catch(err => {
+      this.sendMessage(session.id, childPrompt, fileAttachments).catch(err => {
         sessionLog.error(`Failed to send message to spawned session ${session.id}:`, err)
         if (childManaged) {
           this.surfaceSpawnedSessionCompletion({
@@ -10039,11 +11045,13 @@ export class SessionManager implements ISessionManager {
       return {
         ...baseResult,
         status: outcome.status,
+        ...(outcome.status === 'completed' && this.swarmTurnCompletions.get(session.id)?.artifacts
+          ? { artifacts: this.swarmTurnCompletions.get(session.id)!.artifacts } : {}),
         ...(outcome.finalText ? { finalText: outcome.finalText } : {}),
       }
     }
 
-    this.sendMessage(session.id, request.prompt, fileAttachments).catch(err => {
+    this.sendMessage(session.id, childPrompt, fileAttachments).catch(err => {
       sessionLog.error(`Failed to send message to spawned session ${session.id}:`, err)
       if (childManaged) {
         this.surfaceSpawnedSessionCompletion({
@@ -10186,7 +11194,9 @@ export class SessionManager implements ISessionManager {
         ? 'stopped'
         : 'failed'
     const summary = status === 'completed'
-      ? finalText
+      ? completion?.artifacts
+        ? `${finalText ?? ''}\n\nRuntime-verified integrated artifacts:\n${JSON.stringify(completion.artifacts)}`
+        : finalText
       : child.orchestrationBlocker
         ?? finalText
         ?? `Spawned session subtree ended with ${child.orchestrationStatus}`
@@ -11227,6 +12237,10 @@ export class SessionManager implements ISessionManager {
           break
         }
         const sessionPath = getSessionStoragePath(managed.workspace.rootPath, sessionId)
+        if (managed.executionCheckpoint?.generation === managed.processingGeneration) {
+          managed.executionCheckpoint.sdkSessionId = managed.sdkSessionId
+          managed.executionCheckpoint.sdkTurnAnchor = event.sdkTurnAnchor
+        }
         try {
           await savePiTurnAnchor(sessionPath, craftMessageId, event.sdkTurnAnchor)
         } catch (error) {
@@ -12719,6 +13733,7 @@ export class SessionManager implements ISessionManager {
    * Should be called on app shutdown to prevent resource leaks.
    */
   cleanup(): void {
+    for (const controller of this.projectValidationControllers.values()) controller.abort()
     this.progressShuttingDown = true
     for (const managed of this.sessions.values()) {
       managed.progressSupervisor?.stop()

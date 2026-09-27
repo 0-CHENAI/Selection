@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 /**
  * Task + run-state persistence.
  *
@@ -105,6 +106,8 @@ export function isTerminalRunStatus(status: RunStatus): boolean {
 type RunLogPayload =
   | { t: string; kind: 'run-started'; taskId: string; runId: string; orchestratorSessionId?: string }
   | { t: string; kind: 'node-scheduled'; nodeId: string }
+  | { t: string; kind: 'artifact-results-invalidated'; completedRun?: boolean; nodeIds: string[]; reason: string }
+  | { t: string; kind: 'node-artifact-inputs'; nodeId: string; sessionId: string; inputs: Record<string, import('./refs').NodeOutput> }
   | { t: string; kind: 'node-spawned'; nodeId: string; sessionId: string }
   | { t: string; kind: 'node-finished'; nodeId: string; sessionId: string; state: NodeRunState; reason?: string }
   | { t: string; kind: 'node-waiting-approval'; nodeId: string; deadline?: string }
@@ -313,6 +316,7 @@ export function deriveRunStatusFromLog(log: readonly RunLogEntry[]): RunStatus {
   for (const entry of log) {
     const next = RUN_STATUS_EVENTS[entry.kind];
     if (next) status = next;
+    if (entry.kind === 'artifact-results-invalidated' && entry.completedRun) status = 'failed';
   }
   return status;
 }
@@ -409,4 +413,22 @@ export function readNodeOutput(
     .sort((a, b) => Number(a.replace(/\D/g, '')) - Number(b.replace(/\D/g, '')));
   const last = attempts.at(-1);
   return last ? readJsonOutput(join(instDir, last)) : null;
+}
+
+/** Candidate submissions are separate from completed outputs and scoped to one execution. */
+export function writeNodeSubmission(workspaceRoot: string, slug: string, runId: string, nodeId: string, sessionId: string, attempt: number, output: NodeOutput): void {
+  const dir = join(runDir(workspaceRoot, slug, runId), 'submissions');
+  ensureDir(dir);
+  const key = createHash('sha256').update(JSON.stringify([nodeId, sessionId, attempt])).digest('hex');
+  atomicWriteFileSync(join(dir, `${key}.json`), JSON.stringify({ version: 1, nodeId, sessionId, attempt, output }));
+}
+
+export function readNodeSubmission(workspaceRoot: string, slug: string, runId: string, nodeId: string, sessionId: string, attempt: number): NodeOutput | null {
+  const key = createHash('sha256').update(JSON.stringify([nodeId, sessionId, attempt])).digest('hex');
+  const path = join(runDir(workspaceRoot, slug, runId), 'submissions', `${key}.json`);
+  if (!existsSync(path)) return null;
+  const record = JSON.parse(readFileSync(path, 'utf8'));
+  if (record.version !== 1 || record.nodeId !== nodeId || record.sessionId !== sessionId || record.attempt !== attempt
+    || !record.output || typeof record.output.text !== 'string') throw new Error('Invalid task submission record');
+  return record.output as NodeOutput;
 }

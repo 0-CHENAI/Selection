@@ -78,6 +78,7 @@ export function ChildSessionPreviewDialog({
   }, [session, sessionId, sessionMeta])
 
   const { openArtifact, openFile } = useGeneratedFileActions({
+    sessionId: sessionId ?? undefined,
     workingDirectory: displaySession?.workingDirectory,
     sessionFolderPath: displaySession?.sessionFolderPath,
     workspaceRootPath: workspaces.find((workspace) => workspace.id === displaySession?.workspaceId)?.rootPath,

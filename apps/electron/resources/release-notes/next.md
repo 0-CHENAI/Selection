@@ -4,7 +4,15 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 
 ## Features
 
+- **Reliable task recovery** — Context admission checks cover subsequent tool-loop requests, and execution checkpoints retain confirmed progress. Restart recovery verifies execution ownership, permissions and tool receipts before continuing; uncertain writes pause with details in the existing error panel.
+
+- **Traceable revisions and collaboration** — Body feedback keeps its source, result and history. New writing tasks use isolated candidates, validation and runtime integration, preserving project edits and surfacing conflicts in the existing collaboration details.
+
 ## Improvements
+
+- **Compact artifact history** — File changes requested in chat are recorded automatically. Version history shows version numbers, short identifiers, summaries and previews, without a separate edit form or explanatory paragraphs. Existing primary files retain their own history when alternative recovery paths refer to another file.
+
+- **Interactive HTML artifacts** — HTML files and `html-preview` entries now open in the built-in browser with working scripts, animation and relative assets. Generated pages use temporary isolated browser sessions. The previous HTML iframe preview and its custom zoom controls are removed. Version previews open the selected document snapshot; separate resource files are not archived.
 
 - **Safer Office document edits** — Bundled OfficeCLI is updated to v1.0.152. After a warned or failed write, the agent checks for partial changes before retrying so it does not duplicate document content. PR #417.
 

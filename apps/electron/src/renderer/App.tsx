@@ -1,3 +1,5 @@
+import * as draftStorage from './lib/local-storage'
+import { ArtifactVersionsDialog } from './components/app-shell/ArtifactVersionsDialog'
 import { missingCommittedAnswerRun, recoverCommittedAnswer } from './event-processor/answer-recovery'
 import { refreshSessionSnapshot, type SessionRefreshResult } from './lib/session-refresh'
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react'
@@ -13,7 +15,7 @@ import { generateMessageId } from '../shared/types'
 import { useEventProcessor } from './event-processor'
 import type { AgentEvent, Effect } from './event-processor'
 import { AppShell } from '@/components/app-shell/AppShell'
-import type { AppShellContextType } from '@/context/AppShellContext'
+import { AppShellProvider, type AppShellContextType } from '@/context/AppShellContext'
 import { OnboardingWizard, ReauthScreen } from '@/components/onboarding'
 import { WorkspacePicker } from '@/components/workspace'
 import { ResetConfirmationDialog } from '@/components/ResetConfirmationDialog'
@@ -72,12 +74,12 @@ import {
   PlatformProvider,
   ImagePreviewOverlay,
   PDFPreviewOverlay,
-  HTMLPreviewOverlay,
   CodePreviewOverlay,
   DocumentFormattedMarkdownOverlay,
   JSONPreviewOverlay,
 } from '@craft-agent/ui'
 import { useLinkInterceptor, type FilePreviewState } from '@/hooks/useLinkInterceptor'
+import { openHtmlFileWithFallback } from '@/lib/open-html-file'
 import { useTransportConnectionState } from '@/hooks/useTransportConnectionState'
 import { useStaleSessionRecovery } from '@/hooks/useStaleSessionRecovery'
 import { TransportConnectionBanner, shouldShowTransportConnectionBanner } from '@/components/app-shell/TransportConnectionBanner'
@@ -1307,7 +1309,7 @@ export default function App() {
     window.electronAPI.sessionCommand(sessionId, { type: 'rename', name })
   }, [updateSessionById])
 
-  const handleSendMessage = useCallback(async (sessionId: string, message: string, attachments?: FileAttachment[], skillSlugs?: string[], externalBadges?: ContentBadge[]) => {
+  const handleSendMessage = useCallback(async (sessionId: string, message: string, attachments?: FileAttachment[], skillSlugs?: string[], externalBadges?: ContentBadge[], annotationFollowUps?: import('@craft-agent/shared/protocol').SendMessageOptions['annotationFollowUps']) => {
     let locallyCommitted = false
     try {
       // Capture live generation so composer submits stay in the queue
@@ -1463,6 +1465,7 @@ export default function App() {
         skillSlugs,
         badges: badges.length > 0 ? badges : undefined,
         optimisticMessageId: userMessage.id,
+        annotationFollowUps,
         ...(delegateSubmission.kind === 'delegate' ? { userAuthorizedSpawn: true } : {}),
         queueContext: sendingMidStream ? {
           sourceSlugs: [...(sessionSnapshot?.enabledSourceSlugs ?? [])],
@@ -1631,6 +1634,13 @@ export default function App() {
     schedulePersistDraft(sessionId)
   }, [schedulePersistDraft])
 
+  const handlePrepareSessionDraft = useCallback(async (sessionId: string, draft: SessionDraft) => {
+    await window.electronAPI.setDraft(sessionId, draft)
+    const saved = await window.electronAPI.getDraft(sessionId)
+    if (JSON.stringify(saved) !== JSON.stringify(draft)) throw new Error('Recovery draft could not be persisted')
+    sessionDraftsRef.current.set(sessionId, draft)
+  }, [])
+
   // Open new chat - creates session and selects it
   // Used by components via AppShellContext and for programmatic navigation
   const openNewChat = useCallback(async (params: NewChatActionParams = {}) => {
@@ -1732,15 +1742,27 @@ export default function App() {
   // show an in-app preview overlay or open externally. Replaces the old
   // handleOpenFile/handleOpenUrl that always opened in external apps.
   const linkInterceptor = useLinkInterceptor({
+    openHtmlFile: async (path) => {
+      try {
+        const destination = await openHtmlFileWithFallback(path, window.electronAPI)
+        if (destination === 'external') toast.info(t('toast.htmlBrowserRestartRequired'))
+        return true
+      } catch (error) {
+        toast.error(t('toast.failedToOpenFile'), { description: error instanceof Error ? error.message : String(error) })
+        return false
+      }
+    },
     openFileExternal: async (path) => {
       try {
         await window.electronAPI.openFile(path)
+        return true
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Unknown error'
         console.error('Failed to open file:', error)
         toast.error(t('toast.failedToOpenFile'), {
           description: message,
         })
+        return false
       }
     },
     openUrl: async (url) => {
@@ -1925,6 +1947,7 @@ export default function App() {
     sessionOptions,
     // Session callbacks
     onCreateSession: handleCreateSession,
+    onPrepareSessionDraft: handlePrepareSessionDraft,
     onSendMessage: handleSendMessage,
     onRenameSession: handleRenameSession,
     onFlagSession: handleFlagSession,
@@ -1970,6 +1993,7 @@ export default function App() {
     hydrateDraftAttachments,
     sessionOptions,
     handleCreateSession,
+    handlePrepareSessionDraft,
     handleSendMessage,
     handleRenameSession,
     handleFlagSession,
@@ -2000,7 +2024,14 @@ export default function App() {
   // Platform actions for @craft-agent/ui components (overlays, etc.)
   // Memoized to prevent re-renders when these callbacks don't change
   // NOTE: Must be defined before early returns to maintain consistent hook order
+  const [managedArtifactPath, setManagedArtifactPath] = useState<{ path: string; sessionId?: string; alternativePaths?: string[] } | null>(null)
   const platformActions = useMemo(() => ({
+    onReadAnnotationDraft: (key: string) => draftStorage.getRaw(draftStorage.KEYS.annotationFeedbackDrafts, key) ?? undefined,
+    onWriteAnnotationDraft: (key: string, value: string | undefined) => {
+      if (value === undefined) draftStorage.remove(draftStorage.KEYS.annotationFeedbackDrafts, key)
+      else draftStorage.setRaw(draftStorage.KEYS.annotationFeedbackDrafts, value, key)
+    },
+    onManageArtifact: window.electronAPI.isChannelAvailable('artifacts:manage') ? (path: string, sessionId?: string, alternativePaths?: string[]) => { setManagedArtifactPath({ path, sessionId, alternativePaths }) } : undefined,
     onOpenFile: handleOpenFile,
     onOpenUrl: handleOpenUrl,
     // Bypass link interceptor — opens file directly in system editor.
@@ -2024,7 +2055,7 @@ export default function App() {
     },
     // Keep overlay headers (image preview, close, zoom) left of Windows caption buttons (#356)
     windowsCaptionInsetPadding: windowsCaptionInsetStyle()?.paddingRight,
-  }), [handleOpenFile, handleOpenUrl, linkInterceptor.openFileExternal])
+  }), [handleOpenFile, handleOpenUrl, linkInterceptor.openFileExternal, connectionState])
 
   // Loading state - show splash screen
   if (appState === 'loading') {
@@ -2172,6 +2203,7 @@ export default function App() {
             />
           </div>
 
+          <ArtifactVersionsDialog path={managedArtifactPath?.path ?? null} alternativePaths={managedArtifactPath?.alternativePaths} onClose={() => setManagedArtifactPath(null)} onPreview={handleOpenFile} />
           {/* File preview overlay — rendered by the link interceptor when a previewable file is clicked */}
           {linkInterceptor.previewState && (
             <FilePreviewRenderer
@@ -2208,7 +2240,7 @@ function WindowCloseHandler() {
  * Handles all preview types from the link interceptor:
  * - image → ImagePreviewOverlay (binary, loaded via data URL)
  * - pdf → PDFPreviewOverlay (binary, embedded via Chromium viewer)
- * - html → HTMLPreviewOverlay (rendered webpage, not source)
+ * HTML is opened in the built-in browser before reaching this renderer.
  * - code/text → CodePreviewOverlay (syntax highlighted)
  * - markdown → DocumentFormattedMarkdownOverlay
  * - json → JSONPreviewOverlay
@@ -2250,19 +2282,6 @@ function FilePreviewRenderer({
           onClose={onClose}
           filePath={state.filePath}
           loadPdfData={loadPdfData}
-          theme={theme}
-        />
-      )
-
-    case 'html':
-      return (
-        <HTMLPreviewOverlay
-          isOpen
-          onClose={onClose}
-          filePath={state.filePath}
-          html={state.content ?? ''}
-          title={state.filePath.split(/[/\\]/).pop() || undefined}
-          error={state.error}
           theme={theme}
         />
       )
