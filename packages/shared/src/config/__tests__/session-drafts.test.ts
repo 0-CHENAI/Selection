@@ -207,6 +207,9 @@ it('preserves oversized recovery text and Windows cross-drive/UNC attachment ref
   const draft = { text: '# 原始输入\r\n' + '文'.repeat(100_000), attachments: [
     { path: 'E:\\项目\\源 文件.txt', name: '源 文件.txt' }, { path: '\\\\host\\共享\\share.txt', name: 'share.txt' },
   ] }
-  runEval(configDir, `setSessionDraft('recovery', ${JSON.stringify(draft)})`)
+  // Linux limits each command argument; exercise large draft storage via a file.
+  const input = join(configDir, 'large-draft.json')
+  writeFileSync(input, JSON.stringify(draft))
+  runEval(configDir, `setSessionDraft('recovery', await Bun.file(${JSON.stringify(input)}).json())`)
   expect(JSON.parse(runEval(configDir, "console.log(JSON.stringify(getSessionDraft('recovery')))"))).toEqual(draft)
 })
