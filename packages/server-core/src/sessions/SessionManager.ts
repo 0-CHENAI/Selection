@@ -13,7 +13,7 @@ import { collectWorkspaceCandidates, discoverWorkspaceOutputs } from '../reliabi
 import { workspaceDeliveryContract } from '../reliability/workspace-delivery-contract'
 import { integrateCandidates } from '../reliability/integrate-candidates'
 import { validateCandidateFile } from '../reliability/validate-candidate'
-import { ArtifactVersions, atomicWrite, canonicalLocation } from '../reliability/artifact-versions'
+import { ArtifactVersions, atomicWrite, sameArtifactLocation } from '../reliability/artifact-versions'
 import { ConversationArtifactVersions, withDeliveredArtifactReferences } from '../reliability/conversation-artifact-versions'
 import { FeedbackStore, assertFeedbackAnchor } from '../reliability/feedback-store'
 import { inside, assertIsolatedTool, prepareIsolatedWorkspace, type IsolatedWorkspace } from '../reliability/isolated-workspace'
@@ -7939,7 +7939,7 @@ export class SessionManager implements ISessionManager {
       ? store.read(request.artifactId)
       : request.path ? store.findByPath(await validateWorkspaceFilePath(request.path, managed.workspace.id)) : undefined
     if (!record) throw new Error('Managed file not found; provide its exact path or artifact ID')
-    if (request.path && canonicalLocation(await validateWorkspaceFilePath(request.path, managed.workspace.id)) !== record.path) {
+    if (request.path && !sameArtifactLocation(await validateWorkspaceFilePath(request.path, managed.workspace.id), record.path)) {
       throw new Error('Artifact path changed; inspect its versions again')
     }
     await validateWorkspaceFilePath(record.path, managed.workspace.id)

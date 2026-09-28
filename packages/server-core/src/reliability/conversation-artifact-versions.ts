@@ -2,7 +2,7 @@ import { existsSync, lstatSync, statSync } from 'node:fs'
 import { isAbsolute, join, resolve } from 'node:path'
 import { isSessionScratchPath, localArtifactLinks, localArtifactPath } from '@craft-agent/shared/utils'
 import type { ArtifactDeliveryRef, Message } from '@craft-agent/core'
-import { ArtifactVersions, canonicalLocation, type ArtifactRecord } from './artifact-versions'
+import { ArtifactVersions, sameArtifactLocation, type ArtifactRecord } from './artifact-versions'
 
 /** Use the agent's delivered prose as the version title, never the user's request. */
 export function artifactVersionTitle(markdown: string): string | undefined {
@@ -77,7 +77,7 @@ export class ConversationArtifactVersions {
   }
   /** Resolve the model's display choices on the host before they reach the UI. */
   async featured(paths: readonly string[]): Promise<string[]> {
-    const selected = new Set<string>()
+    const selected: string[] = []
     for (const rawPath of paths) {
       const path = localArtifactPath(rawPath)
       if (!path) throw new Error(`Featured artifact is not a local path: ${rawPath}`)
@@ -85,13 +85,13 @@ export class ConversationArtifactVersions {
       for (const candidate of isAbsolute(path) ? [path] : this.bases.map(base => resolve(base, path))) {
         try {
           const safe = await this.authorize(candidate)
-          if (existsSync(safe) && lstatSync(safe).isFile() && !isSessionScratchPath(safe)) { resolved = canonicalLocation(safe); break }
+          if (existsSync(safe) && lstatSync(safe).isFile() && !isSessionScratchPath(safe)) { resolved = safe; break }
         } catch { /* Another base may contain this relative path. */ }
       }
       if (!resolved) throw new Error(`Featured artifact is missing or unavailable: ${path}`)
-      selected.add(resolved)
+      if (!selected.some(path => sameArtifactLocation(path, resolved))) selected.push(resolved)
     }
-    return [...selected]
+    return selected
   }
   async trackPath(path: string): Promise<void> {
     for (const candidate of isAbsolute(path) ? [path] : this.bases.map(base => resolve(base, path))) {
@@ -123,10 +123,11 @@ export class ConversationArtifactVersions {
           const safe = await this.authorize(candidate)
           if (!existsSync(safe) || !lstatSync(safe).isFile()) continue
           const existing = this.store.findByPath(safe)
-          if (!existing && !featured.includes(canonicalLocation(safe)) && !this.writtenThisTurn(safe)) break
+          const featuredPath = featured.find(path => sameArtifactLocation(path, safe))
+          if (!existing && !featuredPath && !this.writtenThisTurn(safe)) break
           const record = existing ?? this.store.register(safe, sourceRunId, [], title, title ? 'assistant' : undefined)
           this.paths.add(record.path)
-          deliveries.set(record.path, featured.includes(record.path) ? record.path : path)
+          deliveries.set(record.path, featuredPath ?? path)
           break
         } catch { this.onFailure() }
       }

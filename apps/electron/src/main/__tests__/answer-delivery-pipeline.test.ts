@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test'
-import { mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { storedToMessage, type AgentEvent, type Message } from '@craft-agent/core'
@@ -119,7 +119,8 @@ describe('#330 service → renderer → durable reload → turn grouping', () =>
           expect(loadedTurns[0]!.response).toEqual({ ...liveTurns[0]!.response!, completedRevealStartTime: undefined })
           expect(loadedTurns[0]!.response?.text).toBe(answer)
           if (delivery !== 'salvaged') {
-            expect(liveTurns[0]!.response?.featuredArtifacts).toEqual(featured.map(path => realpathSync(path)))
+            expect(liveTurns[0]!.response?.featuredArtifacts).toHaveLength(featured.length)
+            if (featured.length) expect(readFileSync(liveTurns[0]!.response!.featuredArtifacts![0]!, 'utf8')).toBe('<h1>Simulation</h1>')
             expect(loadedTurns[0]!.response?.featuredArtifacts).toEqual(liveTurns[0]!.response?.featuredArtifacts)
           }
           // Drafts folded by the UI must still survive in the durable execution record.
