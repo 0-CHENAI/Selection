@@ -1,6 +1,11 @@
 import type { AgentEvent } from '@craft-agent/core/types'
 
 export const FINAL_ANSWER_MARKER = '<<<FINAL_ANSWER>>>'
+const END_ANSWER_MARKER = '<<<END_ANSWER>>>'
+function couldBeMarker(pending: string, marker: string) {
+  return marker.startsWith(pending)
+    || (pending.startsWith(marker) && /^[ \t\r]*$/.test(pending.slice(marker.length)))
+}
 export const MARKER_ANSWER_PROMPT = `Use marker-v1 for this reply. Before the marker, write only brief progress notes when actually using tools, never an answer draft. If no tools are needed, start immediately with the marker. After all tools finish, emit <<<FINAL_ANSWER>>> alone on a line, then only the standalone user-facing answer. The marker is a one-way boundary, not an opening tag: there is no closing marker or end delimiter. Stop generating immediately after the last sentence of the answer. Do not include progress recaps or introductory delivery announcements after the marker. For ordinary web-researched chat answers, put citations next to the claims they support; the app has a separate source panel, so do not append a Sources/数据来源 list after the answer unless the user explicitly requests a bibliography. Do not call tools after the marker. Short answers and clarification questions also require the marker. Never put the marker in a code block.`
 
 /** Incremental line-aware boundary decoder. Only a possible marker is withheld. */
@@ -13,6 +18,7 @@ export class AnswerBoundary {
   private prelude = ''
   private answer = ''
   private answerPrefix = ''
+  private trailingEnd = ''
   private preludeClosed = false
   private preludeId: string
   private answerId: string
@@ -53,6 +59,10 @@ export class AnswerBoundary {
     if (this.candidate && this.pending.trimEnd() === FINAL_ANSWER_MARKER && !this.fence) {
       if (this.final) this.diagnostic('duplicate_boundary')
       else this.final = true
+    } else if (this.final && this.candidate && this.pending.trimEnd() === END_ANSWER_MARKER && !this.fence) {
+      // Some models emit a closing tag despite the one-way protocol. Withhold
+      // it until we know whether it is truly the last line of the message.
+      this.trailingEnd += this.pending + newline
     } else this.emit(this.pending + newline)
     const fence = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(this.prefix.trimEnd())
     if (fence) {
@@ -65,12 +75,17 @@ export class AnswerBoundary {
   push(delta: string): AgentEvent[] {
     this.events = []
     for (const ch of delta) {
+      if (this.trailingEnd) {
+        if (/\s/.test(ch)) { this.trailingEnd += ch; continue }
+        this.emit(this.trailingEnd)
+        this.trailingEnd = ''
+      }
       if (ch === '\n') { this.endLine('\n'); continue }
       if (this.prefix.length < 256) this.prefix += ch
       if (!this.candidate) { this.emit(ch); continue }
       this.pending += ch
-      const possible = FINAL_ANSWER_MARKER.startsWith(this.pending)
-        || (this.pending.startsWith(FINAL_ANSWER_MARKER) && /^[ \t\r]*$/.test(this.pending.slice(FINAL_ANSWER_MARKER.length)))
+      const possible = couldBeMarker(this.pending, FINAL_ANSWER_MARKER)
+        || (this.final && couldBeMarker(this.pending, END_ANSWER_MARKER))
       if (!possible || this.pending.length > 256) {
         this.emit(this.pending); this.pending = ''; this.candidate = false
       }
@@ -80,6 +95,11 @@ export class AnswerBoundary {
   finish(terminal: boolean, sdkMessageId?: string, interrupted = false): AgentEvent[] {
     this.events = []
     this.endLine('')
+    if (this.trailingEnd) {
+      if (terminal) this.diagnostic('unexpected_end_marker')
+      else this.emit(this.trailingEnd)
+      this.trailingEnd = ''
+    }
     if (this.final) {
       if (!terminal && !interrupted) this.diagnostic('tool_after_boundary')
       if (terminal && !this.answer.trim() && this.prelude.trim()) {

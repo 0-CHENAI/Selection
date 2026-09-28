@@ -111,6 +111,35 @@ describe('unified-network-interceptor SSE processors', () => {
     expect(JSON.parse(toolChunks[0].choices[0].delta.tool_calls[0].function.arguments)).toEqual({ markdown: '# Early answer' });
   });
 
+  it('previews OpenAI Responses submit_answer arguments before the function call is done', async () => {
+    const previews: Array<{ toolCallId: string; text: string }> = [];
+    const processor = answerPreviewContext.run(p => previews.push(p), createOpenAiResponsesSseStrippingStream);
+    const writer = processor.writable.getWriter();
+    const drained = (async () => {
+      const reader = processor.readable.getReader();
+      let output = '';
+      while (true) {
+        const item = await reader.read();
+        if (item.done) break;
+        output += decoder.decode(item.value);
+      }
+      return output;
+    })();
+    const event = (value: Record<string, unknown>) => encoder.encode(`data: ${JSON.stringify(value)}\n\n`);
+    await writer.write(event({ type: 'response.output_item.added', output_index: 0,
+      item: { type: 'function_call', call_id: 'answer', name: 'submit_answer' } }));
+    await writer.write(event({ type: 'response.function_call_arguments.delta', output_index: 0,
+      delta: '{"markdown":"正在生成' }));
+    expect(previews).toEqual([{ toolCallId: 'answer', text: '正在生成' }]);
+    await writer.write(event({ type: 'response.function_call_arguments.done', output_index: 0,
+      call_id: 'answer', arguments: '{"markdown":"正在生成正文"}' }));
+    expect(previews.at(-1)).toEqual({ toolCallId: 'answer', text: '正在生成正文' });
+    await writer.close();
+    const output = await drained;
+    expect(output).toContain('response.function_call_arguments.delta');
+    expect(output).toContain('response.function_call_arguments.done');
+  });
+
   it('OpenAI: does not drop the terminal chunk when delta.tool_calls is an empty array (#995)', async () => {
     // Some OpenAI-compatible relays send `tool_calls: []` on ordinary content and
     // even on the terminal finish_reason chunk. Treating that as a tool-call delta

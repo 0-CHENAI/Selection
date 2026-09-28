@@ -52,6 +52,90 @@ describe('explicit answer delivery lifecycle (#330)', () => {
     return { annotationFollowUps: [{ messageId: 'original', annotationId: 'note', text: 'Revise this', updatedAt: 1 }] }
   }
 
+  it('keeps marker-mode model prose private until the durable answer is committed', async () => {
+    const body = '润色与重构已完成。\n\n交付结果：[新报告](report.docx)'
+    install(async function* () {
+      yield { type: 'tool_start', toolUseId: 'read', toolName: 'Read', input: {} }
+      yield { type: 'tool_result', toolUseId: 'read', toolName: 'Read', result: 'checked', isError: false }
+      yield { type: 'text_delta', text: body, phase: 'intermediate', presentationProtocol: 'marker-v1', turnId: 'draft' }
+      yield { type: 'text_complete', text: body, phase: 'intermediate', presentationProtocol: 'marker-v1', turnId: 'draft', sdkMessageId: 'draft-sdk' }
+      expect(events.some(event => event.type === 'text_delta' || event.type === 'text_complete')).toBe(false)
+      await control!.submit({ ...submission, markdown: body })
+      yield { type: 'complete' }
+    })
+    await manager.sendMessage(managed.id, '更新报告')
+    expect(events.some(event => event.type === 'tool_start' && event.toolUseId === 'read')).toBe(true)
+    expect(events.filter(event => event.type === 'text_complete')).toEqual([
+      expect.objectContaining({ text: body, answerCommitted: true }),
+    ])
+    expect(events.some(event => event.type === 'text_delta')).toBe(false)
+    expect(managed.messages.find(message => message.content === body && message.isIntermediate)?.hidden).toBe(true)
+    expect(loadStoredSession(root, managed.id)?.messages.map(storedToMessage).find(message => message.content === body && message.isIntermediate)?.hidden).toBe(true)
+  })
+
+  it('keeps an unmarked final draft out of the work chain before submit_answer', async () => {
+    const body = '交付完成：[新报告](report.docx)'
+    install(async function* () {
+      yield { type: 'text_delta', text: body.slice(0, 4), turnId: 'draft' }
+      ;(manager as any).flushDelta(managed.id, managed.workspace.id)
+      yield { type: 'text_delta', text: body.slice(4), turnId: 'draft' }
+      yield { type: 'text_complete', text: body, turnId: 'draft', sdkMessageId: 'draft-sdk' }
+      expect(events.some(event => event.type === 'text_delta' || event.type === 'text_complete')).toBe(false)
+      await control!.submit({ ...submission, markdown: body })
+      yield { type: 'complete' }
+    })
+    await manager.sendMessage(managed.id, '更新报告')
+    expect(events.filter(event => event.type === 'text_complete')).toEqual([
+      expect.objectContaining({ text: body, answerCommitted: true }),
+    ])
+    expect(managed.messages.find(message => message.isIntermediate && message.content === body)?.hidden).toBe(true)
+  })
+
+  it('streams provider-classified commentary while keeping the submitted answer separate', async () => {
+    install(async function* () {
+      yield { type: 'text_delta', text: '正在', phase: 'intermediate', presentationProtocol: 'legacy', turnId: 'progress' }
+      ;(manager as any).flushDelta(managed.id, managed.workspace.id)
+      expect(events.filter(event => event.type === 'text_delta')).toEqual([
+        expect.objectContaining({ delta: '正在', phase: 'intermediate', turnId: 'progress' }),
+      ])
+      yield { type: 'text_delta', text: '检查。', phase: 'intermediate', presentationProtocol: 'legacy', turnId: 'progress' }
+      yield { type: 'text_complete', text: '正在检查。', phase: 'intermediate', presentationProtocol: 'legacy', turnId: 'progress' }
+      await control!.submit({ ...submission, markdown: '检查完成。' })
+      yield { type: 'complete' }
+    })
+    await manager.sendMessage(managed.id, '检查报告')
+    expect(events.filter(event => event.type === 'text_delta').map(event => event.delta)).toEqual(['正在', '检查。'])
+    expect(events.filter(event => event.type === 'text_complete').map(event => [event.text, event.isIntermediate])).toEqual([
+      ['正在检查。', true], ['检查完成。', false],
+    ])
+    expect(managed.messages.find(message => message.content === '正在检查。')?.hidden).toBeFalsy()
+  })
+
+  it('materializes a streamed commentary fragment if the provider omits text_complete', async () => {
+    install(async function* () {
+      yield { type: 'text_delta', text: '检查中', phase: 'intermediate', presentationProtocol: 'legacy', turnId: 'progress' }
+      ;(manager as any).flushDelta(managed.id, managed.workspace.id)
+      ;(manager as any).finalizeDanglingTextStream(managed)
+      yield { type: 'complete' }
+    })
+    await manager.sendMessage(managed.id, '检查报告')
+    expect(events).toContainEqual(expect.objectContaining({ type: 'text_delta', delta: '检查中', turnId: 'progress' }))
+    expect(events).toContainEqual(expect.objectContaining({ type: 'text_complete', text: '检查中', isIntermediate: true, turnId: 'progress' }))
+  })
+
+  it('can salvage a private draft if both formal delivery attempts fail', async () => {
+    install(async function* () {
+      yield { type: 'text_complete', text: '可交付正文', phase: 'intermediate', presentationProtocol: 'marker-v1', turnId: 'draft' }
+      yield { type: 'complete' }
+    })
+    await manager.sendMessage(managed.id, '解释结果')
+    expect(prompts).toHaveLength(2)
+    expect(events.filter(event => event.type === 'text_complete')).toEqual([
+      expect.objectContaining({ text: '可交付正文', answerCommitted: true, answerSalvaged: true }),
+    ])
+    expect(managed.messages.find(message => message.isIntermediate)?.hidden).toBe(true)
+  })
+
   it('records ordinary chat file edits and publishes the same snapshot identity as the saved answer', async () => {
     const file = join(root, 'report.html')
     writeFileSync(file, 'before')

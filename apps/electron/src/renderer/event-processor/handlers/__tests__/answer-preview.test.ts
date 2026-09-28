@@ -20,6 +20,7 @@ describe('transient answer preview (#350)', () => {
     expect(turns(state)[0]).toMatchObject({ isComplete: false, response: { isStreaming: true, isAnswerPreview: true, text: preview.text } })
     state = send(state, { ...preview, text: `${preview.text}，第二段` })
     expect(state.session.messages.filter(m => m.answerPreview)).toHaveLength(1)
+    expect(send(state, preview)).toEqual(state)
     state = send(state, { type: 'tool_start', sessionId: 's', toolUseId: 'tool', toolName: 'submit_answer', toolInput: {}, answerRunId: 'run', answerProtocol: 'explicit-v1' })
     expect(state.session.messages.find(m => m.answerPreview)?.content).toBe(`${preview.text}，第二段`)
     expect(state.session.messages.find(m => m.toolUseId === 'tool')?.role).toBe('tool')
@@ -27,6 +28,7 @@ describe('transient answer preview (#350)', () => {
     expect(state.session.messages.some(m => m.answerPreview)).toBe(false)
     expect(turns(state)).toHaveLength(1)
     expect(turns(state)[0]).toMatchObject({ turnId, isComplete: true, response: { text: '服务端接受的最终正文', messageId: 'accepted' } })
+    expect(turns(state)[0]!.response?.completedRevealStartTime).toBeUndefined()
     expect(send(state, preview)).toEqual(state)
   })
   it('drops previews on errors, cancellation and undelivered completion', () => {
@@ -60,11 +62,12 @@ it('ignores a committed delivery receipt so it cannot close the run', () => {
 
 it('admits live completion even without a painted preview, but never persisted history', () => {
   const event = { type: 'text_complete', sessionId: 's', text: '```ts\nconst x = 1\n```', answerProtocol: 'explicit-v1', answerRunId: 'run', answerCommitted: true, messageId: 'accepted', timestamp: 10 } as const
-  for (const base of [initial(), send(initial(), preview)]) {
+  for (const [hadPreview, base] of [[false, initial()], [true, send(initial(), preview)]] as const) {
     const before = Date.now()
     const state = send(base, event)
     const response = turns(state)[0]!.response!
-    expect(response.completedRevealStartTime).toBeGreaterThanOrEqual(before)
+    if (hadPreview) expect(response.completedRevealStartTime).toBeUndefined()
+    else expect(response.completedRevealStartTime).toBeGreaterThanOrEqual(before)
     expect(response.isStreaming).toBe(false)
     const restored = { ...state, session: { ...state.session, messages: state.session.messages.map(messageToStored).map(storedToMessage) } }
     expect(turns(restored)[0]!.response!.completedRevealStartTime).toBeUndefined()

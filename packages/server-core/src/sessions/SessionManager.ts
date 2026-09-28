@@ -929,6 +929,7 @@ interface ManagedSession {
   streamingText: string
   /** Runtime identity for materializing a stream that ends without text_complete. */
   streamingTurnId?: string
+  streamingPhase?: TextStreamPhase
   streamingPresentationProtocol?: 'native' | 'marker-v1' | 'legacy'
   /** Timestamp of the first delta, preserved if the stream is materialized after an error. */
   streamingStartedAt?: number
@@ -1282,6 +1283,7 @@ export function createManagedSession(
     lastMessageAt: (s.lastMessageAt ?? s.lastUsedAt ?? Date.now()) as number,
     streamingText: '',
     streamingTurnId: undefined,
+    streamingPhase: undefined,
     streamingStartedAt: undefined,
     processingGeneration: 0,
     isFlagged: (s.isFlagged ?? false) as boolean,
@@ -7066,6 +7068,7 @@ export class SessionManager implements ISessionManager {
     this.setProcessing(managed, true)
     managed.streamingText = ''
     managed.streamingTurnId = undefined
+    managed.streamingPhase = undefined
     managed.streamingStartedAt = undefined
     managed.processingGeneration++
     this.prepareSpawnQualificationCredentials(
@@ -9539,6 +9542,7 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
     managed.messages = [...transaction.originalMessages, ...diagnostics]
     managed.streamingText = ''
     managed.streamingTurnId = undefined
+    managed.streamingPhase = undefined
     managed.streamingStartedAt = undefined
     managed.sdkSessionId = transaction.originalSdkSessionId
     managed.branchContextStrategy = transaction.originalBranchContextStrategy
@@ -12077,6 +12081,10 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
 
     const content = managed.streamingText
     const presentationProtocol = managed.streamingPresentationProtocol
+    // Keep only unclassified prose private. Provider-classified commentary
+    // already streamed into the work chain and must be closed on interruption.
+    const hideDraft = !!managed.answerDelivery
+      && !(managed.streamingPhase === 'intermediate' && presentationProtocol !== 'marker-v1' && !managed.answerDelivery.recovery)
     const turnId = managed.streamingTurnId
       ?? this.pendingDeltas.get(managed.id)?.turnId
     this.flushDelta(managed.id, managed.workspace.id)
@@ -12091,6 +12099,7 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
         ...(managed.answerDelivery ? { answerProtocol: 'explicit-v1' as const, answerRunId: managed.answerDelivery.runId, answerRoutingVersion: managed.answerDelivery.answerRoutingVersion } : {}),
         timestamp: managed.streamingStartedAt ?? this.monotonic(),
         isIntermediate: true,
+        ...(hideDraft ? { hidden: true } : {}),
         phase: 'intermediate',
         presentationProtocol,
         turnId,
@@ -12102,7 +12111,9 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
 
     managed.streamingText = ''
     managed.streamingTurnId = undefined
+    managed.streamingPhase = undefined
     managed.streamingStartedAt = undefined
+    if (hideDraft) return
     this.sendEvent({
       type: 'text_complete',
       sessionId: managed.id,
@@ -12150,6 +12161,7 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
         }
         managed.streamingText += event.text
         managed.streamingTurnId = event.turnId ?? managed.streamingTurnId
+        managed.streamingPhase = event.phase ?? 'unclassified'
         managed.streamingPresentationProtocol = event.presentationProtocol
         // Queue delta for batched sending (performance: reduces IPC from 50+/sec to ~20/sec)
         this.queueDelta(
@@ -12173,6 +12185,11 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
           && aggregation.orchestrationId === managed.orchestrationId
           && aggregation.phase === 'waiting-workers'
         const isIntermediate = !!managed.answerDelivery || event.isIntermediate || isManagedSwarmDispatch
+        // Provider-classified commentary is safe to show as it streams. An
+        // unclassified body may be a final draft, so keep that private until
+        // submit_answer commits it.
+        const hideDraft = !!managed.answerDelivery
+          && !(event.phase === 'intermediate' && event.presentationProtocol !== 'marker-v1' && !managed.answerDelivery.recovery)
         const completesActiveStream = !event.turnId
           || !managed.streamingTurnId
           || event.turnId === managed.streamingTurnId
@@ -12180,8 +12197,8 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
           event.text,
           completesActiveStream ? managed.streamingText : undefined,
         )
-        // Some providers emit only text_complete; keep that body on the same
-        // transient preview path until the durable delivery decision is made.
+        // Recovery previews are reserved for visible native text. Structured
+        // drafts stay private until the durable delivery decision is made.
         this.previewRecoveryAnswer(managed, content)
         // A boundary can close commentary before the SDK id arrives. Attach
         // the original message identity once, without re-emitting its text.
@@ -12198,6 +12215,7 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
           sourceSdkMessageId: event.sdkMessageId,
           timestamp: this.monotonic(),
           isIntermediate,
+          ...(hideDraft ? { hidden: true } : {}),
           phase: event.phase,
           presentationProtocol: event.presentationProtocol,
           ...(managed.answerDelivery ? { answerProtocol: 'explicit-v1' as const, answerRunId: managed.answerDelivery.runId, answerRoutingVersion: managed.answerDelivery.answerRoutingVersion } : {}),
@@ -12208,6 +12226,7 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
         if (completesActiveStream) {
           managed.streamingText = ''
           managed.streamingTurnId = undefined
+          managed.streamingPhase = undefined
           managed.streamingStartedAt = undefined
         }
 
@@ -12249,7 +12268,7 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
           }
         }
 
-        this.sendEvent({ type: 'text_complete', sessionId, text: content, isIntermediate, phase: event.phase, presentationProtocol: event.presentationProtocol, answerProtocol: assistantMessage.answerProtocol, answerRunId: assistantMessage.answerRunId, answerRoutingVersion: assistantMessage.answerRoutingVersion, turnId: event.turnId, parentToolUseId: event.parentToolUseId, timestamp: assistantMessage.timestamp, messageId: assistantMessage.id }, workspaceId)
+        if (!hideDraft) this.sendEvent({ type: 'text_complete', sessionId, text: content, isIntermediate, phase: event.phase, presentationProtocol: event.presentationProtocol, answerProtocol: assistantMessage.answerProtocol, answerRunId: assistantMessage.answerRunId, answerRoutingVersion: assistantMessage.answerRoutingVersion, turnId: event.turnId, parentToolUseId: event.parentToolUseId, timestamp: assistantMessage.timestamp, messageId: assistantMessage.id }, workspaceId)
 
         // Persist session after complete message to prevent data loss on quit
         this.persistSession(managed)
@@ -12289,6 +12308,20 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
         // Format tool input paths to relative for better readability
         const previousTool = managed.messages.find(m => m.toolUseId === event.toolUseId)
         const toolPurpose = previousTool?.toolPurpose ?? (/^(?:mcp__session__|session__)?submit_answer$/.test(event.toolName) ? 'answer-delivery' : 'work')
+        if (managed.answerDelivery && toolPurpose === 'work' && !event.parentToolUseId) {
+          // A following business tool proves earlier prose was process commentary.
+          // Reveal it now; prose followed by submit_answer stays a private draft.
+          for (const draft of managed.messages) {
+            if (draft.role !== 'assistant' || !draft.hidden || !draft.isIntermediate
+              || draft.answerRunId !== managed.answerDelivery.runId) continue
+            draft.hidden = false
+            this.sendEvent({ type: 'text_complete', sessionId, text: draft.content,
+              isIntermediate: true, phase: 'intermediate', presentationProtocol: draft.presentationProtocol,
+              answerProtocol: draft.answerProtocol, answerRunId: draft.answerRunId,
+              answerRoutingVersion: draft.answerRoutingVersion, turnId: draft.turnId,
+              timestamp: draft.timestamp, messageId: draft.id }, workspaceId)
+          }
+        }
         const formattedToolInput = toolPurpose === 'answer-delivery' ? {} : formatToolInputPaths(event.input)
 
         // Resolve call_llm model for TurnCard badge display.
@@ -13197,6 +13230,12 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
     // Send batched delta if any
     const pending = this.pendingDeltas.get(sessionId)
     if (pending && pending.delta) {
+      this.pendingDeltas.delete(sessionId)
+      const managed = this.sessions.get(sessionId)
+      if (managed?.answerDelivery && !(pending.phase === 'intermediate' && pending.presentationProtocol !== 'marker-v1' && !managed.answerDelivery.recovery)) {
+        this.previewRecoveryAnswer(managed, managed.streamingText)
+        return
+      }
       this.sendEvent({
         type: 'text_delta',
         sessionId,
@@ -13205,8 +13244,6 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
         presentationProtocol: pending.presentationProtocol,
         turnId: pending.turnId
       }, workspaceId)
-      this.pendingDeltas.delete(sessionId)
-      const managed = this.sessions.get(sessionId)
       if (managed) this.previewRecoveryAnswer(managed, managed.streamingText)
     }
   }

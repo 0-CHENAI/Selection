@@ -13,6 +13,20 @@ const send = (state: SessionState, event: AgentEvent) => processEvent(state, eve
 const preview = { type: 'answer_preview', sessionId: 's', userMessageId: 'u', answerRunId: 'r', answerRoutingVersion: 1, toolCallId: 't', text: '预览' } as const
 const commit = { type: 'text_complete', sessionId: 's', answerProtocol: 'explicit-v1', answerRunId: 'r', answerRoutingVersion: 1, answerCommitted: true, answerSalvaged: true, messageId: 'answer', timestamp: 10, text: '完整正文' } as const
 
+test('classified commentary streams in the work chain before the answer preview', () => {
+  let state = send(initial(), { type: 'text_delta', sessionId: 's', answerProtocol: 'explicit-v1',
+    answerRunId: 'r', phase: 'intermediate', presentationProtocol: 'legacy', turnId: 'progress', delta: '正在检查' })
+  expect(state.session.messages.find(m => m.turnId === 'progress')).toMatchObject({
+    content: '正在检查', isStreaming: true, isIntermediate: true,
+  })
+  state = send(state, { type: 'text_complete', sessionId: 's', answerProtocol: 'explicit-v1',
+    answerRunId: 'r', phase: 'intermediate', presentationProtocol: 'legacy', turnId: 'progress',
+    text: '正在检查', isIntermediate: true })
+  state = send(state, preview)
+  expect(state.session.messages.find(m => m.turnId === 'progress')?.isIntermediate).toBe(true)
+  expect(state.session.messages.find(m => m.answerPreview)?.content).toBe('预览')
+})
+
 test('live, replay and exported answers preserve body and salvage provenance', () => {
   for (const text of ['好', '请提供文件。', '无法完成：工具失败。', '# 解释\n提交答案不会改变正文。', '```ts\nconst a = 1\n```', '| A | B |\n|---|---|\n| 1 | 2 |', '> 引用\n\n[文件](D:/成果/报告.html)', '长文段落\n\n'.repeat(1000)]) {
     const event = { ...commit, text }

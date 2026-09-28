@@ -66,3 +66,24 @@ it('holds whitespace after the marker until answer text arrives', () => {
     expect.objectContaining({ text: '读取中\n', isIntermediate: true }),
   ])
 })
+
+it('removes a terminal closing tag without streaming it, regardless of transport split', () => {
+  for (const ending of ['<<<END_ANSWER>>>', '<<<END_ANSWER>>>\r\n \t']) {
+    const raw = `读取中\n${marker}\n正文。\n${ending}`
+    for (let i = 0; i <= raw.length; i++) {
+      const logs: string[] = []
+      const p = create(logs)
+      const events = [...p.push(raw.slice(0, i)), ...p.push(raw.slice(i)), ...p.finish(true)]
+      expect(events.filter(e => e.type === 'text_complete').map(e => e.text)).toEqual(['读取中\n', '正文。\n'])
+      expect(events.flatMap(e => e.type === 'text_delta' && e.phase === 'final' ? [e.text] : []).join('')).toBe('正文。\n')
+      expect(logs).toContain('unexpected_end_marker')
+    }
+  }
+})
+
+it('keeps a closing tag when it is quoted, fenced, or followed by more answer text', () => {
+  const body = '> <<<END_ANSWER>>>\n```txt\n<<<END_ANSWER>>>\n```\n<<<END_ANSWER>>>\n继续。'
+  const p = create()
+  const events = [...p.push(`${marker}\n${body}`), ...p.finish(true)]
+  expect(events.filter(e => e.type === 'text_complete').map(e => e.text)).toEqual([body])
+})
