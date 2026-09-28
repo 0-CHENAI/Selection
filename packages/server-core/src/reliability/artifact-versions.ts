@@ -8,7 +8,7 @@ export interface ArtifactRecord { version: 1; id: string; hostId: string; worksp
 export class ArtifactConflict extends Error { constructor() { super('Artifact changed outside this operation; candidate retained.'); this.name = 'ArtifactConflict' } }
 const hash = (data: Buffer) => createHash('sha256').update(data).digest('hex')
 const validId = (id: string) => { if (!/^[a-f0-9-]+$/.test(id)) throw new Error('Invalid artifact identifier'); return id }
-function canonicalLocation(path: string): string {
+export function canonicalLocation(path: string): string {
   try { return realpathSync(path) } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
     let ancestor = resolve(path)
@@ -20,6 +20,15 @@ function canonicalLocation(path: string): string {
     }
     return join(realpathSync(ancestor), ...missing)
   }
+}
+/** Windows short and long names can refer to the same file while realpath keeps different spellings. */
+export function sameArtifactLocation(left: string, right: string): boolean {
+  if (left === right) return true
+  try {
+    const a = statSync(left, { bigint: true }), b = statSync(right, { bigint: true })
+    if (a.ino !== 0n && a.ino === b.ino && a.dev === b.dev) return true
+  } catch { /* Missing files still need path comparison for deletion history. */ }
+  return canonicalLocation(left) === canonicalLocation(right)
 }
 export function atomicWrite(path: string, data: string | Buffer, mode = 0o600): void {
   mkdirSync(dirname(path), { recursive: true })
@@ -71,7 +80,7 @@ export class ArtifactVersions {
     for (const entry of readdirSync(this.root)) {
       if (!/^[a-f0-9-]+\.json$/.test(entry)) continue
       const existing = this.read(entry.slice(0, -5))
-      if (candidates.some(canonical => existing.path === canonical
+      if (candidates.some(canonical => sameArtifactLocation(existing.path, canonical)
         || !existsSync(canonical) && existing.previousPaths?.includes(canonical))) matches.push(existing)
     }
     if (matches.length > 1) throw new Error('Artifact path is ambiguous; choose its exact original location')

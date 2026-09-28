@@ -211,6 +211,8 @@
   "chat.artifactFileManager": "File Manager",
   "chat.artifactOfficeApp": "{{app}} / default app",
   "chat.artifactOpenWith": "Open with",
+  "chat.artifactReview.failed": "Result files could not be verified. The answer is saved.",
+  "chat.artifactReview.pending": "Preparing result cards…",
   "chat.artifactVersions.cancelFeedback": "Stop revision",
   "chat.artifactVersions.changes": "View changes",
   "chat.artifactVersions.cleanup": "Delete version",

@@ -1,8 +1,8 @@
 import { existsSync, lstatSync, statSync } from 'node:fs'
 import { isAbsolute, join, resolve } from 'node:path'
-import { isSessionScratchPath, localArtifactLinks } from '@craft-agent/shared/utils'
+import { isSessionScratchPath, localArtifactLinks, localArtifactPath } from '@craft-agent/shared/utils'
 import type { ArtifactDeliveryRef, Message } from '@craft-agent/core'
-import { ArtifactVersions, type ArtifactRecord } from './artifact-versions'
+import { ArtifactVersions, sameArtifactLocation, type ArtifactRecord } from './artifact-versions'
 
 /** Use the agent's delivered prose as the version title, never the user's request. */
 export function artifactVersionTitle(markdown: string): string | undefined {
@@ -75,6 +75,24 @@ export class ConversationArtifactVersions {
   async track(markdown: string): Promise<void> {
     for (const path of localArtifactLinks(markdown)) await this.trackPath(path)
   }
+  /** Resolve the model's display choices on the host before they reach the UI. */
+  async featured(paths: readonly string[]): Promise<string[]> {
+    const selected: string[] = []
+    for (const rawPath of paths) {
+      const path = localArtifactPath(rawPath)
+      if (!path) throw new Error(`Featured artifact is not a local path: ${rawPath}`)
+      let resolved: string | undefined
+      for (const candidate of isAbsolute(path) ? [path] : this.bases.map(base => resolve(base, path))) {
+        try {
+          const safe = await this.authorize(candidate)
+          if (existsSync(safe) && lstatSync(safe).isFile() && !isSessionScratchPath(safe)) { resolved = safe; break }
+        } catch { /* Another base may contain this relative path. */ }
+      }
+      if (!resolved) throw new Error(`Featured artifact is missing or unavailable: ${path}`)
+      if (!selected.some(path => sameArtifactLocation(path, resolved))) selected.push(resolved)
+    }
+    return selected
+  }
   async trackPath(path: string): Promise<void> {
     for (const candidate of isAbsolute(path) ? [path] : this.bases.map(base => resolve(base, path))) {
       try {
@@ -93,22 +111,23 @@ export class ConversationArtifactVersions {
       } catch { this.onFailure() }
     }
   }
-  async capture(markdown: string, sourceRunId: string, aiTitle?: string): Promise<ArtifactDeliveryRef[]> {
+  async capture(markdown: string, sourceRunId: string, aiTitle?: string, featured: readonly string[] = []): Promise<ArtifactDeliveryRef[]> {
     const title = suppliedVersionTitle(aiTitle) ?? artifactVersionTitle(markdown)
     const deliveries = new Map<string, string>()
     // A link can cite an unchanged source file. Only add untracked files that
     // appeared during this turn; known files are compared against their baseline.
-    for (const path of localArtifactLinks(markdown)) {
+    for (const path of [...localArtifactLinks(markdown), ...featured]) {
       const candidates = isAbsolute(path) ? [path] : this.bases.map(base => join(base, path))
       for (const candidate of candidates) {
         try {
           const safe = await this.authorize(candidate)
           if (!existsSync(safe) || !lstatSync(safe).isFile()) continue
           const existing = this.store.findByPath(safe)
-          if (!existing && !this.writtenThisTurn(safe)) break
+          const featuredPath = featured.find(path => sameArtifactLocation(path, safe))
+          if (!existing && !featuredPath && !this.writtenThisTurn(safe)) break
           const record = existing ?? this.store.register(safe, sourceRunId, [], title, title ? 'assistant' : undefined)
           this.paths.add(record.path)
-          deliveries.set(record.path, path)
+          deliveries.set(record.path, featuredPath ?? path)
           break
         } catch { this.onFailure() }
       }

@@ -120,14 +120,15 @@ test('Windows backslash links into .selection capture created and modified docum
   try {
     const sessionDir = join(root, '.selection', 'workspaces', 'my-workspace', 'sessions', 'test-session')
     mkdirSync(sessionDir, { recursive: true })
-    const file = join(sessionDir, 'hello.docx')
-    const answer = `[hello.docx](${file})`
+    const file = join(sessionDir, '中文 报告 (1).docx')
+    const answer = `[中文 报告](<${file}>)`
     expect(localArtifactLinks(answer)).toEqual([file.replace(/\\/g, '/')])
     const store = new ArtifactVersions(join(root, 'versions'), hostname(), 'workspace')
     const tracker = () => new ConversationArtifactVersions(store, [sessionDir], async path => realpathSync(path),
       () => { throw new Error('Artifact recording failed') }, Date.now() - 1000)
 
     writeFileSync(file, 'hello')
+    expect(await tracker().featured([file, `file:///${file.replace(/\\/g, '/').replaceAll(' ', '%20')}`])).toEqual([realpathSync(file)])
     const created = await tracker().capture(answer, 'session/user-1')
     expect(created).toMatchObject([{ path: file.replace(/\\/g, '/'), ordinal: 1, change: 'created' }])
 

@@ -211,6 +211,8 @@
   "chat.artifactFileManager": "Explorador de archivos",
   "chat.artifactOfficeApp": "{{app}} / aplicación predeterminada",
   "chat.artifactOpenWith": "Abrir con",
+  "chat.artifactReview.failed": "No se pudieron verificar los archivos. La respuesta se guardó.",
+  "chat.artifactReview.pending": "Preparando tarjetas de resultados…",
   "chat.artifactVersions.cancelFeedback": "Detener revisión",
   "chat.artifactVersions.changes": "Ver cambios",
   "chat.artifactVersions.cleanup": "Eliminar versión",

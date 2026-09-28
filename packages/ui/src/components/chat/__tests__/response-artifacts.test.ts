@@ -118,3 +118,37 @@ it('matches version references without confusing equal filenames in different di
   expect(extractChangedResponseArtifacts(answer, [{ path: 'new.docx', ordinal: 2, change: 'modified' }]).map(file => file.path))
     .toEqual(['./new.docx'])
 })
+
+it('uses the explicit result selection instead of every linked or changed file', () => {
+  const answer = '[打开报告](/reports/final.html) [原始数据](/data/data.json) [检查图](/tmp/check.png)'
+  const versions = [
+    { path: '/reports/final.html', ordinal: 1, change: 'created' as const },
+    { path: '/tmp/check.png', ordinal: 1, change: 'created' as const },
+  ]
+  expect(extractDeliveredResponseArtifacts(answer, versions, ['/reports/final.html'])).toEqual([
+    { path: '/reports/final.html', name: 'final.html', extension: 'html', change: 'created' },
+  ])
+  expect(extractDeliveredResponseArtifacts(answer, versions, [])).toEqual([])
+  expect(extractDeliveredResponseArtifacts('报告已完成。', [], ['/reports/final.html'])).toEqual([
+    { path: '/reports/final.html', name: 'final.html', extension: 'html' },
+  ])
+  expect(extractDeliveredResponseArtifacts('旧稿已删除。', [{ path: '/reports/old.docx', ordinal: 2, change: 'deleted' }], []))
+    .toEqual([{ path: '/reports/old.docx', name: 'old.docx', extension: 'docx', change: 'deleted' }])
+})
+
+it('waits for the reviewed selection instead of guessing from links', () => {
+  expect(extractDeliveredResponseArtifacts('[报告](/out/report.html)', [
+    { path: '/out/report.html', ordinal: 1, change: 'created' },
+  ], [])).toEqual([])
+  expect(extractDeliveredResponseArtifacts('[原始数据](/data/data.json)', [], [])).toEqual([])
+  expect(extractDeliveredResponseArtifacts('[报告](/out/report.html) [图](/out/chart.png)', [
+    { path: '/out/report.html', ordinal: 1, change: 'created' },
+    { path: '/out/chart.png', ordinal: 1, change: 'created' },
+  ], [])).toEqual([])
+})
+
+it('does not treat a preview as the reviewed result selection', () => {
+  const answer = '```html-preview\n{"src":"C:/Users/me/中文 报告 (1).html"}\n```\n\n已生成：[打开网页](C:/Users/me/中文%20报告%20(1).html)'
+  expect(extractDeliveredResponseArtifacts(answer, [], [])).toEqual([])
+  expect(extractDeliveredResponseArtifacts('html-preview\n{"src":"/tmp/hello.html"}', [], [])).toEqual([])
+})

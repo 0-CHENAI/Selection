@@ -36,6 +36,7 @@ import {
   GitBranch,
   RefreshCw,
   Sparkles,
+  LoaderCircle,
 } from 'lucide-react'
 import { cn } from '../../lib/utils'
 import { Markdown } from '../markdown'
@@ -310,6 +311,8 @@ export interface ActivityItem {
 
 export interface ResponseContent {
   artifactVersions?: import('@craft-agent/core').Message['artifactVersions']
+  featuredArtifacts?: string[]
+  artifactReviewStatus?: import('@craft-agent/core').Message['artifactReviewStatus']
   answerSalvaged?: boolean
   isAnswerPreview?: boolean
   text: string
@@ -1554,6 +1557,8 @@ function ActivityGroupRow({ group, expandedGroups: externalExpandedGroups, onExp
 
 export interface ResponseCardProps {
   artifactVersions?: ResponseContent['artifactVersions']
+  featuredArtifacts?: ResponseContent['featuredArtifacts']
+  artifactReviewStatus?: ResponseContent['artifactReviewStatus']
   researchActivities?: ActivityItem[]
   isAnswerPreview?: boolean
   /** The content to display (markdown) */
@@ -1856,6 +1861,8 @@ function applyTextHighlightRange(
  */
 export function ResponseCard({
   artifactVersions,
+  featuredArtifacts,
+  artifactReviewStatus,
   researchActivities,
   text,
   isAnswerPreview = false,
@@ -1890,6 +1897,7 @@ export function ResponseCard({
   isCommentary = false,
 }: ResponseCardProps) {
   const { t } = useTranslation()
+  const reduceArtifactMotion = useReducedMotion()
   const parsedSkillUsage = useMemo(
     () => parseSkillUsedMarkers(text, isStreaming),
     [text, isStreaming],
@@ -1916,8 +1924,8 @@ export function ResponseCard({
   const responseText = parsedSkillUsage.content
   const startsWithHtmlPreview = /^\s*(?:```html-preview(?:\s|$)|html-preview[ \t]*\n[ \t]*\{)/.test(responseText)
   const artifacts = useMemo(
-    () => showArtifacts ? extractDeliveredResponseArtifacts(responseText, artifactVersions) : [],
-    [showArtifacts, responseText, artifactVersions],
+    () => showArtifacts ? extractDeliveredResponseArtifacts(responseText, artifactVersions, featuredArtifacts) : [],
+    [showArtifacts, responseText, artifactVersions, featuredArtifacts],
   )
   const paced = usePacedSource(responseText, isStreaming, completedRevealStartTime, revealIdentity ?? messageId)
   const presentationStreaming = isStreaming || paced.revealing
@@ -2795,9 +2803,34 @@ export function ResponseCard({
 
           </ResponseBodyGrowth>
 
-          {showArtifacts && !presentationStreaming && (
-            <ResponseArtifacts key={messageId ?? revealIdentity} artifacts={artifacts} versions={artifactVersions} onOpenFile={onOpenFile} onOpenArtifact={onOpenArtifact} />
-          )}
+          <AnimatePresence mode="wait" initial={false}>
+            {canCollectSources && !isStreaming && artifactReviewStatus === 'pending' ? (
+              <motion.section key="artifact-review-pending" aria-label={t('chat.artifacts')} role="status"
+                className="px-4 pb-3 pt-1" initial={reduceArtifactMotion ? false : { opacity: 0, y: 4 }}
+                animate={{ opacity: 1, y: 0 }} exit={reduceArtifactMotion ? { opacity: 1 } : { opacity: 0, y: -4 }}
+                transition={{ duration: reduceArtifactMotion ? 0 : 0.15, ease: 'easeOut' }}>
+                <div className="mb-2 text-xs font-medium text-muted-foreground">{t('chat.artifacts')}</div>
+                <div className="flex min-h-14 items-center gap-3 rounded-xl bg-foreground/[0.04] px-3 py-2.5">
+                  <div aria-hidden="true" className="flex size-6 shrink-0 items-center justify-center rounded-md bg-foreground/[0.06]">
+                    <LoaderCircle className="size-4 animate-spin text-muted-foreground motion-reduce:animate-none" />
+                  </div>
+                  <span className="text-sm text-muted-foreground">{t('chat.artifactReview.pending')}</span>
+                </div>
+              </motion.section>
+            ) : showArtifacts && !presentationStreaming && artifactReviewStatus === 'failed' ? (
+              <motion.div key="artifact-review-failed" role="status" className="flex items-center gap-2 px-4 pb-3 pt-1 text-xs text-muted-foreground"
+                initial={reduceArtifactMotion ? false : { opacity: 0 }} animate={{ opacity: 1 }}
+                transition={{ duration: reduceArtifactMotion ? 0 : 0.18 }}>
+                <XCircle aria-hidden="true" className="size-3.5 text-destructive" />
+                {t('chat.artifactReview.failed')}
+              </motion.div>
+            ) : showArtifacts && !presentationStreaming && artifacts.length > 0 ? (
+              <motion.div key="artifact-review-complete" initial={reduceArtifactMotion ? false : { opacity: 0, y: 4 }}
+                animate={{ opacity: 1, y: 0 }} transition={{ duration: reduceArtifactMotion ? 0 : 0.18, ease: 'easeOut' }}>
+                <ResponseArtifacts key={messageId ?? revealIdentity} artifacts={artifacts} versions={artifactVersions} onOpenFile={onOpenFile} onOpenArtifact={onOpenArtifact} />
+              </motion.div>
+            ) : null}
+          </AnimatePresence>
 
           {/* Reserve known research sources while text streams. Completion only
               reveals the shelf, rather than growing the card under sticky scroll. */}
@@ -3536,6 +3569,8 @@ export const TurnCard = React.memo(function TurnCard({
               <ResponseCard
                 text={response.text}
             artifactVersions={response.artifactVersions}
+            featuredArtifacts={response.featuredArtifacts}
+            artifactReviewStatus={response.artifactReviewStatus}
                 researchActivities={activities}
                 isStreaming={response.isStreaming}
                 isAnswerPreview={response.isAnswerPreview}
@@ -3589,6 +3624,8 @@ export const TurnCard = React.memo(function TurnCard({
           <ResponseCard
             text={response.text}
             artifactVersions={response.artifactVersions}
+            featuredArtifacts={response.featuredArtifacts}
+            artifactReviewStatus={response.artifactReviewStatus}
             researchActivities={activities}
             isStreaming={response.isStreaming}
                 isAnswerPreview={response.isAnswerPreview}

@@ -211,6 +211,8 @@
   "chat.artifactFileManager": "Fájlkezelő",
   "chat.artifactOfficeApp": "{{app}} / alapértelmezett alkalmazás",
   "chat.artifactOpenWith": "Megnyitás ezzel",
+  "chat.artifactReview.failed": "Az eredményfájlok ellenőrzése sikertelen. A válasz mentve van.",
+  "chat.artifactReview.pending": "Eredménykártyák előkészítése…",
   "chat.artifactVersions.cancelFeedback": "Módosítás leállítása",
   "chat.artifactVersions.changes": "Változások megtekintése",
   "chat.artifactVersions.cleanup": "Verzió törlése",

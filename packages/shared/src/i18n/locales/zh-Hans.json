@@ -211,6 +211,8 @@
   "chat.artifactFileManager": "文件管理器",
   "chat.artifactOfficeApp": "{{app}} / 默认应用",
   "chat.artifactOpenWith": "打开方式",
+  "chat.artifactReview.failed": "成果文件核定失败，正文已保存。",
+  "chat.artifactReview.pending": "正在生成成果卡片…",
   "chat.artifactVersions.cancelFeedback": "停止修改",
   "chat.artifactVersions.changes": "查看变化",
   "chat.artifactVersions.cleanup": "删除版本",

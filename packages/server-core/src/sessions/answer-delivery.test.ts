@@ -52,6 +52,63 @@ describe('explicit answer delivery lifecycle (#330)', () => {
     return { annotationFollowUps: [{ messageId: 'original', annotationId: 'note', text: 'Revise this', updatedAt: 1 }] }
   }
 
+  it('publishes text before an independent file review adds only the report card', async () => {
+    const report = join(getSessionPath(root, managed.id), '中文 报告.html')
+    const helper = join(getSessionPath(root, managed.id), 'build.js')
+    let releaseReview!: () => void
+    const reviewGate = new Promise<void>(resolve => { releaseReview = resolve })
+    const agent = install(async function* () {
+      writeFileSync(report, '<html><body>hello</body></html>')
+      writeFileSync(helper, 'console.log("build")')
+      await control!.submit({ ...submission, markdown: '报告完成。', featuredArtifacts: [report, helper] })
+      yield { type: 'complete' }
+    })
+    ;(agent as any).queryLlm = async (request: { prompt: string }) => {
+      await reviewGate
+      const files = (JSON.parse(request.prompt) as { files: Array<{ id: number; path: string }> }).files
+      expect(files.some(file => file.path.endsWith('中文 报告.html'))).toBe(true)
+      return { text: JSON.stringify({ decisions: files.map(file => ({ id: file.id,
+        role: file.path.endsWith('中文 报告.html') ? 'primary' : 'supporting', reason: file.path.endsWith('中文 报告.html') ? 'Finished report' : 'Build helper',
+      })) }) }
+    }
+    managed.agent = agent as never
+    await manager.sendMessage(managed.id, '生成一份 HTML 报告')
+    expect(events.some(event => event.type === 'text_complete' && event.answerCommitted)).toBe(true)
+    expect(events.find(event => event.type === 'text_complete' && event.answerCommitted)?.featuredArtifacts).toEqual([])
+    for (let i = 0; i < 100 && !events.some(event => event.type === 'artifact_selection_updated' && event.artifactReviewStatus === 'pending'); i++) await Bun.sleep(10)
+    expect(events.some(event => event.type === 'artifact_selection_updated' && event.artifactReviewStatus === 'pending')).toBe(true)
+    expect(events.some(event => event.type === 'artifact_selection_updated' && event.artifactReviewStatus === 'complete')).toBe(false)
+    releaseReview()
+    for (let i = 0; i < 100 && !events.some(event => event.type === 'artifact_selection_updated' && event.artifactReviewStatus === 'complete'); i++) await Bun.sleep(10)
+    const update = events.find(event => event.type === 'artifact_selection_updated' && event.artifactReviewStatus === 'complete')
+    expect(update?.featuredArtifacts?.[0]?.endsWith('中文 报告.html')).toBe(true)
+    expect(loadStoredSession(root, managed.id)?.messages.map(storedToMessage).at(-1)?.featuredArtifacts?.[0]?.endsWith('中文 报告.html')).toBe(true)
+  })
+
+  it('confirms one matching new file without a second model call', async () => {
+    const report = join(getSessionPath(root, managed.id), '中文 报告.html')
+    const agent = install(async function* () {
+      writeFileSync(report, '<html>hello</html>')
+      await control!.submit({ ...submission, markdown: '报告完成。', featuredArtifacts: [report] })
+      yield { type: 'complete' }
+    })
+    ;(agent as any).queryLlm = () => { throw new Error('The fast path should not query a model') }
+    managed.agent = agent as never
+    await manager.sendMessage(managed.id, '生成一份 HTML 报告')
+    for (let i = 0; i < 100 && !events.some(event => event.type === 'artifact_selection_updated' && event.artifactReviewStatus === 'complete'); i++) await Bun.sleep(10)
+    expect(events.find(event => event.type === 'artifact_selection_updated' && event.artifactReviewStatus === 'complete')?.featuredArtifacts?.map((path: string) => path.endsWith('中文 报告.html'))).toEqual([true])
+  })
+
+  it('does not show artifact progress for a reply that produced no files', async () => {
+    install(async function* () {
+      await control!.submit({ ...submission, markdown: '你好。', featuredArtifacts: [] })
+      yield { type: 'complete' }
+    })
+    await manager.sendMessage(managed.id, '打个招呼')
+    expect(events.some(event => event.type === 'text_complete' && event.answerCommitted)).toBe(true)
+    expect(events.some(event => event.type === 'artifact_selection_updated')).toBe(false)
+  })
+
   it('keeps marker-mode model prose private until the durable answer is committed', async () => {
     const body = '润色与重构已完成。\n\n交付结果：[新报告](report.docx)'
     install(async function* () {

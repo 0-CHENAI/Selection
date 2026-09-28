@@ -211,6 +211,8 @@
   "chat.artifactFileManager": "ファイルマネージャー",
   "chat.artifactOfficeApp": "{{app}} / 既定のアプリ",
   "chat.artifactOpenWith": "開く方法",
+  "chat.artifactReview.failed": "成果ファイルを確認できませんでした。回答は保存されています。",
+  "chat.artifactReview.pending": "成果カードを準備中…",
   "chat.artifactVersions.cancelFeedback": "修正を停止",
   "chat.artifactVersions.changes": "変更を表示",
   "chat.artifactVersions.cleanup": "バージョンを削除",

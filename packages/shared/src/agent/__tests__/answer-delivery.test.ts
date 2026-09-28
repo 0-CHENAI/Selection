@@ -6,7 +6,7 @@ import { PiAgent } from '../pi-agent'
 import type { AnswerDeliveryControl } from '../backend/types'
 import { answerToolBlock } from '../answer-delivery'
 
-const request = { requestId: 'req', toolName: 'mcp__session__submit_answer', args: { markdown: '完整答案。' }, toolCallId: 'call', sdkMessageId: 'sdk-message', sdkTurnAnchor: 'sdk-entry', answerRunId: 'run' }
+const request = { requestId: 'req', toolName: 'mcp__session__submit_answer', args: { markdown: '完整答案。', featuredArtifacts: [] }, toolCallId: 'call', sdkMessageId: 'sdk-message', sdkTurnAnchor: 'sdk-entry', answerRunId: 'run' }
 describe('answer delivery execution bridge', () => {
   let root: string
   let agent: PiAgent
@@ -26,7 +26,7 @@ describe('answer delivery execution bridge', () => {
   afterEach(() => { agent.destroy(); rmSync(root, { recursive: true, force: true }) })
   it('awaits host acceptance before returning a compact receipt', async () => {
     await (agent as any).handleToolExecuteRequest(request)
-    expect(submitted).toEqual([{ markdown: request.args.markdown, toolCallId: 'call', sdkMessageId: 'sdk-message', sdkTurnAnchor: 'sdk-entry' }])
+    expect(submitted).toEqual([{ markdown: request.args.markdown, featuredArtifacts: [], toolCallId: 'call', sdkMessageId: 'sdk-message', sdkTurnAnchor: 'sdk-entry' }])
     expect(sent.at(-1).result.isError).toBe(false)
     expect(JSON.stringify(sent.at(-1))).not.toContain(request.args.markdown)
     await (agent as any).handleToolExecuteRequest({ ...request, requestId: 'late', toolName: 'Bash', args: { command: 'echo forbidden' } })
