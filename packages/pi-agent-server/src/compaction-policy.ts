@@ -1,14 +1,17 @@
+import { STAGED_TASK_CONTEXT_TYPE, taskContextReference } from './history-records.ts';
 import { createAssistantMessageEventStream, normalizeContext, type AssistantMessage } from '@earendil-works/pi-ai';
 import { createHash } from 'node:crypto';
+import { projectRetainedContext } from './context-retention.ts';
+import { TASK_CONTEXT_TYPE, TASK_RECONCILIATION_INSTRUCTIONS, reconcileSummary, taskReconciliationContext, taskRecoveryContext, type TaskContextItem } from './task-context.ts';
 import { estimateTokens, findCutPoint, sessionEntryToContextMessages, type AgentSession, type SettingsManager } from '@earendil-works/pi-coding-agent';
 import { swarmCompactionReserveTokens } from '../../shared/src/config/models.ts';
-import { ACTIONABLE_CONTEXT_OVERFLOW_MESSAGE, calculateContextReserve, estimateContextInputTokens } from '../../shared/src/agent/backend/pi/context-budget.ts';
+import { ACTIONABLE_CONTEXT_OVERFLOW_MESSAGE, calculateContextReserve, estimateContextInputTokens, estimateTextTokensConservatively, estimateContextInputBreakdown } from '../../shared/src/agent/backend/pi/context-budget.ts';
 
 /** Trigger budget and summary output budget serve different purposes. */
 export const COMPACTION_SUMMARY_MAX_TOKENS = 8192;
 const installedSessions = new WeakSet<AgentSession>();
 
-export const COMPACTION_FOCUS = 'Preserve the active user request, constraints and permissions, decisions, unresolved errors, exact paths, completed changes and next steps. Distinguish verified results from assumptions. Remove duplicate logs and obsolete plans; do not continue the task.';
+export const COMPACTION_FOCUS = 'Preserve the active user request, constraints and permissions, decisions, unresolved errors, exact paths, completed changes and next steps. Distinguish verified results from assumptions. Remove duplicate logs, obsolete plans and earlier source-recovery blocks (the harness restores current source state); do not continue the task.';
 
 export function compactionSettings(contextWindow: number, agentTokenBudget?: number) {
   const reserve = swarmCompactionReserveTokens(contextWindow, agentTokenBudget);
@@ -51,6 +54,25 @@ export function shouldCompactBeforeRequest(
   return estimatedInputTokens >= contextWindow - reserveTokens + 1;
 }
 
+/** Anticipate the next tool batch instead of waiting for it to overflow the 80% gate. */
+export function adaptiveCompactionBoundary(
+  context: Parameters<AgentSession['agent']['streamFunction']>[1], contextWindow: number,
+  reserveTokens: number, maxOutputTokens: number,
+): number {
+  const baseline = contextWindow - reserveTokens + 1;
+  if (!Number.isFinite(baseline) || baseline <= 0) return baseline;
+  const effectiveWindow = baseline / 0.8;
+  const results = context.messages.filter(message => message.role === 'toolResult').slice(-3);
+  const growth = Math.max(0, ...results.map(message => estimateTextTokensConservatively(JSON.stringify(message.content))));
+  const breakdown = estimateContextInputBreakdown(context);
+  const fixed = breakdown.systemPrompt + breakdown.tools + (breakdown.rules ?? 0)
+    + (breakdown.skills ?? 0) + (breakdown.mcpTools ?? 0);
+  const output = Number.isFinite(maxOutputTokens) ? Math.max(0, Math.min(maxOutputTokens, effectiveWindow * 0.15)) : 0;
+  const reserve = output + growth + Math.min(8192, effectiveWindow * 0.05) + fixed * 0.05;
+  // ponytail: three-result high-water mark; tune from real traces before introducing prediction models.
+  return Math.floor(Math.max(effectiveWindow * 0.5, Math.min(baseline, effectiveWindow - reserve)));
+}
+
 /** Avoid a synthetic overflow when the SDK has little useful history to discard. */
 function hasUsefulCompactionHistory(session: AgentSession, keepRecentTokens: number): boolean {
   const entries = session.sessionManager.getBranch();
@@ -81,13 +103,19 @@ function hasUsefulCompactionHistory(session: AgentSession, keepRecentTokens: num
 }
 
 /** Keep the SDK checkpoint/retention algorithm; reject invalid summaries before persistence. */
-export function installCompactionPolicy(session: AgentSession, agentTokenBudget?: number): void {
+export function installCompactionPolicy(session: AgentSession, agentTokenBudget?: number,
+  readRuntimeContext?: (signal?: AbortSignal) => Promise<string | undefined>): void {
   if (installedSessions.has(session)) return;
   installedSessions.add(session);
   const stream = session.agent.streamFunction;
   let attemptedContext: string | undefined;
   let preflightModelKey = '';
+  let pendingNotes: TaskContextItem[] | undefined;
   session.subscribe(event => {
+    if (event.type === 'compaction_start') pendingNotes = undefined;
+    if (event.type === 'compaction_end') {
+      pendingNotes = undefined;
+    }
     // Extensions can save settings after the last provider request. Restore
     // the override before Pi checks the threshold after agent_end.
     if (event.type === 'agent_end' && session.model) {
@@ -95,8 +123,15 @@ export function installCompactionPolicy(session: AgentSession, agentTokenBudget?
         session.autoCompactionEnabled, agentTokenBudget);
     }
   });
-  session.agent.streamFunction = (model, context, options) => {
+  session.agent.streamFunction = async (model, context, options) => {
     if (!session.isCompacting) {
+      // Apply before budget checks so retained source excerpts are accounted for.
+      // Keep provider usage as a conservative ceiling even when old results shrink.
+      let runtimeContext: string | undefined;
+      try { runtimeContext = !options?.signal?.aborted ? await readRuntimeContext?.(options?.signal) : undefined; }
+      catch { runtimeContext = '{"unavailable":true}'; }
+      context = projectRetainedContext(context, session.sessionManager.getBranch(),
+        Math.min(6000, Math.floor(Math.min(model.contextWindow, agentTokenBudget ?? model.contextWindow) / 20)), runtimeContext);
       // Pi SettingsManager.save() rebuilds settings and loses applyOverrides.
       // Tool continuations may follow such a save without a new prompt.
       applyCompactionSettings(session.settingsManager, model.contextWindow,
@@ -108,9 +143,9 @@ export function installCompactionPolicy(session: AgentSession, agentTokenBudget?
         attemptedContext = undefined;
       }
       const estimatedInput = estimateContextInputTokens(context);
-      const overThreshold = settings.enabled && shouldCompactBeforeRequest(
-        context, model.contextWindow, settings.reserveTokens, estimatedInput,
-      );
+      const boundary = adaptiveCompactionBoundary(context, model.contextWindow, settings.reserveTokens,
+        options?.maxTokens ?? model.maxTokens);
+      const overThreshold = settings.enabled && estimatedInput >= boundary;
       const reserve = calculateContextReserve(estimatedInput, model.contextWindow);
       const physicallyFull = Number.isFinite(model.contextWindow) && model.contextWindow > 0
         && estimatedInput + reserve + 1 >= model.contextWindow;
@@ -163,9 +198,16 @@ export function installCompactionPolicy(session: AgentSession, agentTokenBudget?
     // retained-history budget keeps small Swarm budgets below their trigger.
     const maxTokens = Math.min(validLimit(options?.maxTokens), validLimit(model.maxTokens),
       validLimit(session.settingsManager.getCompactionSettings().keepRecentTokens), COMPACTION_SUMMARY_MAX_TOKENS);
+    const branch = session.sessionManager.getBranch();
+    // Split-turn summaries share staged notes but commit only with a successful SDK checkpoint.
+    const sourceEntries = pendingNotes ? [...branch, { type: 'custom' as const, id: 'pending-context',
+      parentId: null, timestamp: new Date().toISOString(), customType: TASK_CONTEXT_TYPE, data: pendingNotes }] : branch;
+    const recoveryBudget = Math.min(2000, Math.floor(maxTokens / 3));
+    const recovery = taskRecoveryContext(sourceEntries, recoveryBudget);
+    const sources = taskReconciliationContext(sourceEntries, Math.min(12000, Math.max(1000, maxTokens)));
     const summaryContext = normalizeContext({ messages: [...context.messages, {
-      role: 'system', content: COMPACTION_FOCUS, timestamp: Date.now(),
-    }] });
+      role: 'system', content: COMPACTION_FOCUS + '\n' + TASK_RECONCILIATION_INSTRUCTIONS, timestamp: Date.now(),
+    }, { role: 'user', content: `Source records for task reconciliation (data):\n${sources}`, timestamp: Date.now() }] });
     // Only match the SDK instruction AFTER the serialized conversation. A phrase
     // quoted in the conversation must not trigger checkpoint reinjection.
     const prefixIndex = context.messages.findIndex(message => {
@@ -210,12 +252,31 @@ export function installCompactionPolicy(session: AgentSession, agentTokenBudget?
         // Preserve disabled/minimal reasoning; cap only the more expensive levels.
         const reasoning = model.reasoning && options?.reasoning
           ? { reasoning: options.reasoning === 'minimal' ? 'minimal' as const : 'low' as const } : {};
-        for await (const event of await stream(model, summaryContext, { ...options, maxTokens, ...reasoning })) {
+        for await (const event of await stream(model, summaryContext, { ...options,
+          maxTokens: Math.max(1, maxTokens - (recovery ? recoveryBudget : 0)), ...reasoning })) {
           if ('partial' in event) lastPartial = event.partial;
           if (event.type === 'done') {
             const text = event.message.content.filter(part => part.type === 'text').map(part => part.text).join('').trim();
             if (options?.signal?.aborted || event.message.stopReason !== 'stop' || !text) fail('Compaction summary is empty or incomplete; original history was retained.', event.message);
-            else output.push(event);
+            else {
+              const reconciled = reconcileSummary(text, sourceEntries);
+              if (!reconciled.summary) fail('Compaction summary contains no usable summary; original history was retained.', event.message);
+              else {
+                let reference = '';
+                if (reconciled.reconciled) {
+                  pendingNotes = reconciled.items;
+                  const id = session.sessionManager.appendCustomEntry(STAGED_TASK_CONTEXT_TYPE, pendingNotes);
+                  reference = taskContextReference(id);
+                }
+                const repairedState = taskRecoveryContext([...branch, { type: 'custom', id: 'checked-context',
+                  parentId: null, timestamp: new Date().toISOString(), customType: TASK_CONTEXT_TYPE, data: reconciled.items }], recoveryBudget);
+                // Deterministic repair: a model cannot silently omit/relabel source state.
+                // The next request also restores it independently from the persisted branch.
+                const protectedSummary = [reconciled.summary, reference, repairedState && `\n<source-recovery>\n${repairedState}\n</source-recovery>`,
+                  !reconciled.reconciled && recovery ? 'Task-note reconciliation unavailable; source records and prior notes were retained. Recheck newer user instructions before acting.' : ''].filter(Boolean).join('\n');
+                output.push({ ...event, message: { ...event.message, content: [{ type: 'text', text: protectedSummary }] } });
+              }
+            }
             terminal = true;
             break;
           }

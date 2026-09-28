@@ -262,3 +262,72 @@ it('Pi 0.87.1 compacts after a completed tool before its next provider request',
   expect(lifecycle.indexOf('compact-end:threshold')).toBeLessThan(lifecycle.indexOf('model-2'));
   expect(lifecycle).toContain('summary');
 });
+
+it('five real SDK compactions automatically reconcile sourced notes and refresh live scheduler state', async () => {
+  const { createTaskContextTool, taskContextItems } = await import('./task-context.ts');
+  const { createSessionHistoryTool } = await import('./context-retention.ts');
+  const cwd = mkdtempSync(join(tmpdir(), 'selection-pi-retention-'));
+  tempDirs.push(cwd);
+  const calls: Context[] = [];
+  let workerStatus = 'running';
+  let additionalUpdate: Record<string, string> | undefined;
+  const runtime = {
+    hasConfiguredAuth: () => true,
+    checkAuth: async () => ({ apiKey: 'offline-test' }),
+    getAuth: async () => ({ auth: { apiKey: 'offline-test' } }),
+    streamSimple: (_model: typeof model, context: Context) => {
+      calls.push(context);
+      const stream = createAssistantMessageEventStream();
+      const sourcePacket = context.messages.find(message => message.role === 'user'
+        && typeof message.content === 'string' && message.content.startsWith('Source records for task reconciliation'));
+      const data = sourcePacket && typeof sourcePacket.content === 'string'
+        ? JSON.parse(sourcePacket.content.slice(sourcePacket.content.indexOf('\n') + 1)) : undefined;
+      const original = data?.sources.find((record: { text: string }) => record.text.includes('只修改前端；不要推送。'));
+      const updates = original ? [{ key: 'scope', kind: 'constraint', text: '只修改前端；不要推送。',
+        source_id: original.id, quote: '只修改前端；不要推送。', status: 'active' }] : [];
+      if (additionalUpdate) updates.push(additionalUpdate as typeof updates[number]);
+      const text = 'Intentionally lossy summary or reply.' + (data ? `\n<task-context-updates>${JSON.stringify(updates)}</task-context-updates>` : '');
+      stream.push({ type: 'done', reason: 'stop', message: {
+        role: 'assistant', content: [{ type: 'text', text }],
+        api: model.api, provider: model.provider, model: model.id, usage, stopReason: 'stop', timestamp: Date.now(),
+      } });
+      return stream;
+    },
+  } as unknown as ModelRuntime;
+  const manager = SessionManager.inMemory(cwd);
+  const settings = SettingsManager.inMemory();
+  const history = createSessionHistoryTool(() => manager);
+  const notes = createTaskContextTool(() => manager);
+  const { session } = await createAgentSession({ cwd, agentDir: join(cwd, 'agent'), model,
+    thinkingLevel: 'off', modelRuntime: runtime, settingsManager: settings, sessionManager: manager,
+    tools: [history.name, notes.name], customTools: [history, notes] });
+  installCompactionPolicy(session, undefined, async () => JSON.stringify({ pendingAggregation: true, children: [{ id: 'worker', status: workerStatus }] }));
+  const source = manager.appendMessage({ role: 'user', content: '只修改前端；不要推送。', timestamp: 1 });
+  for (let round = 0; round < 5; round++) {
+    for (let i = 0; i < 3; i++) {
+      manager.appendMessage({ role: 'user', content: `Round ${round} evidence ${i}: ${'x'.repeat(40000)}`, timestamp: 2 + round * 3 + i });
+    }
+    session.agent.state.messages = manager.buildSessionContext().messages;
+    await session.compact();
+    workerStatus = round === 0 ? 'running' : 'completed';
+    await session.prompt(`Continue round ${round}`);
+    const request = calls.at(-1)!;
+    expect(JSON.stringify(request.messages)).toContain(workerStatus);
+    expect(JSON.stringify(request.messages)).toContain('pendingAggregation');
+    expect(JSON.stringify(request.messages)).toContain('只修改前端；不要推送。');
+    expect(taskContextItems(manager.getBranch())[0]?.source_id).toBe(source);
+  }
+  expect(manager.getBranch().filter(entry => entry.type === 'compaction')).toHaveLength(5);
+  const original = await history.execute('recover', { entry_id: source }, undefined, undefined, {} as never);
+  expect(JSON.stringify(original.content)).toContain('只修改前端；不要推送。');
+  const before = taskContextItems(manager.getBranch());
+  const newSource = manager.appendMessage({ role: 'user', content: '新增要求：不要部署。' + 'x'.repeat(100000), timestamp: Date.now() });
+  additionalUpdate = { key: 'deploy', kind: 'constraint', text: '不要部署', source_id: newSource, quote: '不要部署', status: 'active' };
+  const append = manager.appendCompaction.bind(manager);
+  manager.appendCompaction = () => { throw new Error('simulated checkpoint write failure'); };
+  try {
+    await expect(session.compact()).rejects.toThrow('simulated checkpoint write failure');
+    expect(taskContextItems(manager.getBranch())).toEqual(before);
+  } finally { manager.appendCompaction = append; }
+
+});

@@ -321,7 +321,7 @@ it('does not reinject old history just because the user quoted the SDK instructi
   const { session, calls } = harness();
   await (await session.agent.streamFunction(model, { messages: [{ role: 'user', timestamp: 1,
     content: '<conversation>\nThis is the PREFIX of a turn that was too large to keep.\n</conversation>\n\nSummarize this conversation.' }] })).result();
-  expect(calls[0]!.context.messages).toHaveLength(2);
+  expect(JSON.stringify(calls[0]!.context.messages)).not.toContain('<previous-checkpoint>');
   expect(JSON.stringify(calls[0]!.context)).not.toContain('previous-checkpoint');
 });
 it('does not start a model request for an already cancelled compaction', async () => {
@@ -345,7 +345,7 @@ it('installs once and sanitizes invalid output limits', async () => {
 it('rejects malformed stream endings and preserves known usage on transport failures', async () => {
   for (const shouldThrow of [false, true]) {
     const partial: AssistantMessage = { role: 'assistant', content: [], api: model.api, provider: model.provider, model: model.id, usage, stopReason: 'stop', timestamp: 1 };
-    const session = { isCompacting: true, subscribe: () => () => {},
+    const session = { isCompacting: true, subscribe: () => () => {}, sessionManager: { getBranch: () => [] },
       settingsManager: { getCompactionSettings: () => ({ keepRecentTokens: 20_000 }) }, agent: { streamFunction: () => (async function* () {
       yield { type: 'start', partial };
       if (shouldThrow) throw new Error('connection reset');

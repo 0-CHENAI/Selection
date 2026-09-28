@@ -2649,6 +2649,7 @@ export class PiAgent extends BaseAgent {
         answerRecovery: this.answerDelivery?.recovery,
         id: turnId,
         message: userMessage,
+        userTextOffset: userMessage.length - message.length,
         systemPrompt: fullSystemPrompt,
         images: images.length > 0 ? images : undefined,
       });

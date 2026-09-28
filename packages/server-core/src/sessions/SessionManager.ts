@@ -5030,6 +5030,10 @@ export class SessionManager implements ISessionManager {
           const targetId = sessionId ?? managed.id
           const session = this.sessions.get(targetId)
           if (!session) return null
+          const children = this.getManagedSwarmChildren(session.id)
+            .filter(child => child.orchestrationId === session.orchestrationId)
+          const aggregation = session.orchestrationAggregation?.orchestrationId === session.orchestrationId
+            ? session.orchestrationAggregation : undefined
           return {
             id: session.id,
             name: session.name ?? session.id,
@@ -5042,6 +5046,20 @@ export class SessionManager implements ISessionManager {
             llmConnection: session.llmConnection,
             model: session.model,
             isActive: session.agent != null,
+            ...(session.orchestrationId || children.length ? { orchestration: {
+              id: session.orchestrationId,
+              status: session.orchestrationStatus,
+              pendingAggregation: !!aggregation,
+              finalAggregation: aggregation?.finalAggregation.slice(0, 800),
+              finalAggregationTruncated: !!aggregation && aggregation.finalAggregation.length > 800,
+              children: children.slice(-12).map(child => ({ id: child.id, status: child.orchestrationStatus,
+                isProcessing: child.isProcessing,
+                finalMessageId: this.swarmTurnCompletions.get(child.id)?.finalMessageId
+                  ?? this.getLastFinalAssistantMessageId(child.messages),
+                blocker: child.orchestrationBlocker?.slice(0, 200),
+              })),
+              omittedChildren: Math.max(0, children.length - 12),
+            } } : {}),
           }
         },
         listSessionsFn: (options) => {

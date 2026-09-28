@@ -649,6 +649,16 @@ export interface SessionInfo {
   llmConnection?: string;
   model?: string;
   isActive: boolean;
+  /** Live scheduler state. Worker completion never implies parent acceptance. */
+  orchestration?: {
+    id?: string;
+    status?: string;
+    pendingAggregation: boolean;
+    finalAggregation?: string;
+    finalAggregationTruncated?: boolean;
+    children: Array<{ id: string; status?: string; isProcessing: boolean; finalMessageId?: string; blocker?: string }>;
+    omittedChildren: number;
+  };
 }
 
 /** Compact session summary (returned by list_sessions). */
