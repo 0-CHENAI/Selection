@@ -15,6 +15,9 @@ import { integrateCandidates } from '../reliability/integrate-candidates'
 import { validateCandidateFile } from '../reliability/validate-candidate'
 import { ArtifactVersions, atomicWrite, sameArtifactLocation } from '../reliability/artifact-versions'
 import { ConversationArtifactVersions, withDeliveredArtifactReferences } from '../reliability/conversation-artifact-versions'
+import { ArtifactCandidateInventory } from '../reliability/artifact-candidate-inventory'
+import { reviewArtifactDelivery } from '../reliability/artifact-delivery-review'
+import { localArtifactLinks } from '@craft-agent/shared/utils'
 import { FeedbackStore, assertFeedbackAnchor } from '../reliability/feedback-store'
 import { inside, assertIsolatedTool, prepareIsolatedWorkspace, type IsolatedWorkspace } from '../reliability/isolated-workspace'
 import { hostname as executionHostName } from 'node:os'
@@ -35,7 +38,7 @@ import { RemoteBrowserPaneManager } from './RemoteBrowserPaneManager'
 import { validateFilePath, getWorkspaceAllowedDirs } from '@craft-agent/server-core/handlers'
 import { createScopedLogger, CONSOLE_LOGGER, type PlatformServices, type Logger } from '@craft-agent/server-core/runtime'
 import { basename, dirname, join, relative, resolve } from 'path'
-import { existsSync } from 'fs'
+import { existsSync, statSync } from 'fs'
 import { readFile, writeFile, mkdir } from 'fs/promises'
 import { randomUUID, createHash } from 'node:crypto'
 import { type AgentEvent, setPermissionMode, hydratePreviousPermissionMode, getPermissionModeDiagnostics, type PermissionMode, unregisterSessionScopedToolCallbacks, mergeSessionScopedToolCallbacks, AbortReason, type AuthRequest, type AuthResult, type CredentialAuthRequest, type BrowserPaneFns, generateConversationSummary, resolveKeepBackgroundTasksAlive, sanitizeUserMessageForRetry, resolveSpawnWaitTimeoutMs, type SpawnSessionLifecycle, type SpawnSessionRequest, type SpawnSessionResult, type SpawnSessionRole, type SpawnSessionReason } from '@craft-agent/shared/agent'
@@ -891,6 +894,7 @@ interface RunningBackgroundTask {
 
 interface ManagedSession {
   conversationArtifactVersions?: ConversationArtifactVersions
+  artifactCandidateInventory?: ArtifactCandidateInventory
   progressAdvisories?: Array<{ id: string; text: string }>
   progressLiveEvaluationTokens?: number
   progressReviewer?: AgentInstance
@@ -7439,6 +7443,7 @@ export class SessionManager implements ISessionManager {
       // Snapshot known deliverables before tools run, including Office/Shell edits.
       // Candidate child workspaces are versioned only after runtime integration.
       managed.conversationArtifactVersions = undefined
+      managed.artifactCandidateInventory = undefined
       if (!managed.isolatedWorkspace) {
         const store = new ArtifactVersions(join(managed.workspace.rootPath, 'artifacts', 'versions'), executionHostName(), managed.workspace.id)
         const tracker = new ConversationArtifactVersions(store,
@@ -7447,6 +7452,14 @@ export class SessionManager implements ISessionManager {
           () => sessionLog.warn('Artifact version recording failed', { sessionId: managed.id }),
           Math.min(managed.messages.findLast(m => m.role === 'user' && !m.hidden && !m.isQueued)?.timestamp ?? Date.now(), Date.now()))
         managed.conversationArtifactVersions = tracker
+        try {
+          managed.artifactCandidateInventory = new ArtifactCandidateInventory(
+            [managed.workingDirectory ?? managed.workspace.rootPath, getSessionStoragePath(managed.workspace.rootPath, managed.id)],
+            !managed.workingDirectory || resolve(managed.workingDirectory) === resolve(managed.workspace.rootPath)
+              ? managed.workspace.rootPath : undefined)
+        } catch (error) {
+          sessionLog.warn('Artifact candidate baseline failed', { sessionId: managed.id, error })
+        }
         for (const prior of managed.messages) {
           if (managed.processingGeneration !== myGeneration || managed.stopRequested) break
           if (prior.role === 'assistant' && !prior.isIntermediate && !prior.hidden) await tracker.track(prior.content)
@@ -8697,9 +8710,6 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
     if (!hasRenderableAssistantText(submission.markdown) || isAnswerDeliveryReceipt(submission.markdown)) throw new Error('Submit a complete, non-empty Markdown answer.')
     if (!submission.toolCallId || !submission.sdkMessageId || !submission.sdkTurnAnchor) throw new Error('Missing SDK answer anchor.')
     this.assertAnswerReady(managed, state, submission.markdown, submission.toolCallId)
-    if (submission.featuredArtifacts?.length && !managed.conversationArtifactVersions) throw new Error('Featured files are unavailable in this session.')
-    const featuredArtifacts = submission.featuredArtifacts
-      ? await managed.conversationArtifactVersions?.featured(submission.featuredArtifacts) ?? [] : undefined
     state.accepting = true
     const regenerateTransaction = managed.regenerateTransaction
     const previousLastRole = managed.lastMessageRole
@@ -8723,8 +8733,8 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
       managed.streamingStartedAt = undefined
       rollbackFeedback = linkAnnotationFollowUpResults(managed.messages, state.userMessageId, answer,
         (content, hash) => saveBodyFeedbackVersion(getSessionStoragePath(managed.workspace.rootPath, managed.id), content, hash))
-      answer.featuredArtifacts = featuredArtifacts
-      answer.artifactVersions = await managed.conversationArtifactVersions?.capture(answer.content, `${managed.id}/${state.userMessageId}`, submission.artifactVersionTitle, featuredArtifacts)
+      answer.featuredArtifacts = []
+      answer.artifactVersions = await managed.conversationArtifactVersions?.capture(answer.content, `${managed.id}/${state.userMessageId}`, submission.artifactVersionTitle)
       if (managed.stopRequested || managed.processingGeneration !== state.generation || managed.answerDelivery !== state) throw new Error('Answer delivery was interrupted.')
       managed.messages.push(answer)
       state.committedMessageId = answer.id
@@ -8765,6 +8775,67 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
       state.accepting = false
     }
     this.publishCommittedAnswer(managed, answer)
+    void this.reviewCommittedArtifacts(managed, answer, state.userMessageId, submission.featuredArtifacts ?? [], submission.artifactVersionTitle)
+  }
+
+  /** Runs after answer publication, so model review can never hold up text delivery. */
+  private async reviewCommittedArtifacts(managed: ManagedSession, answer: Message, userMessageId: string, proposed: readonly string[], title?: string): Promise<void> {
+    const inventory = managed.artifactCandidateInventory
+    const tracker = managed.conversationArtifactVersions
+    const query = managed.agent?.queryLlm?.bind(managed.agent)
+    if (!tracker) return
+    try {
+      const candidates: string[] = []
+      for (const path of inventory?.changed() ?? []) {
+        try {
+          const safe = await validateWorkspaceFilePath(path, managed.workspace.id)
+          if (!candidates.some(candidate => sameArtifactLocation(candidate, safe))) candidates.push(safe)
+        } catch { /* Inaccessible files are never offered to the reviewer. */ }
+      }
+      // An answer can link a fresh output outside the scanned working directories.
+      for (const raw of [...localArtifactLinks(answer.content), ...proposed]) {
+        try {
+          const [safe] = await tracker.featured([raw])
+          if (safe && !candidates.some(candidate => sameArtifactLocation(candidate, safe))) {
+            const file = statSync(safe)
+            const startedAt = inventory?.startedAt ?? managed.messages.find(message => message.id === userMessageId)?.timestamp ?? Date.now()
+            if (Math.max(file.birthtimeMs, file.mtimeMs) >= startedAt - 2) candidates.push(safe)
+          }
+        } catch { /* A citation or unavailable link is not a candidate. */ }
+      }
+      if (!candidates.length) return
+      try { this.sendEvent({ type: 'artifact_selection_updated', sessionId: managed.id, messageId: answer.id,
+        artifactReviewStatus: 'pending' }, managed.workspace.id) }
+      catch { /* A disconnected renderer will read the durable result later. */ }
+      const request = managed.messages.find(message => message.id === userMessageId)?.content ?? ''
+      let proposedFile: string | undefined
+      if (proposed.length === 1) {
+        try { [proposedFile] = await tracker.featured(proposed) }
+        catch { /* An invalid proposal cannot bypass the independent review. */ }
+      }
+      const unambiguous = candidates.length === 1 && proposedFile && sameArtifactLocation(candidates[0]!, proposedFile)
+      if (!unambiguous && !query) throw new Error('Artifact review model is unavailable')
+      const selected = unambiguous ? candidates : await reviewArtifactDelivery({ request, answer: answer.content, candidates, proposed }, query!)
+      const featured = await tracker.featured(selected)
+      if (!managed.messages.some(message => message.id === answer.id)) return
+      answer.featuredArtifacts = featured
+      answer.artifactVersions = await tracker.capture(answer.content, `${managed.id}/${userMessageId}`, title, featured)
+      answer.artifactReviewStatus = 'complete'
+      this.persistSession(managed)
+      await this.flushSession(managed.id)
+      try { this.sendEvent({ type: 'artifact_selection_updated', sessionId: managed.id, messageId: answer.id,
+        artifactReviewStatus: 'complete', featuredArtifacts: featured, artifactVersions: answer.artifactVersions }, managed.workspace.id) }
+      catch { /* The saved answer remains authoritative. */ }
+    } catch (error) {
+      sessionLog.warn('Artifact delivery review failed', { sessionId: managed.id, messageId: answer.id, error })
+      if (!managed.messages.some(message => message.id === answer.id)) return
+      answer.artifactReviewStatus = 'failed'
+      try { this.persistSession(managed); await this.flushSession(managed.id) }
+      catch (persistError) { sessionLog.warn('Artifact review failure state could not be saved', { sessionId: managed.id, error: persistError }) }
+      try { this.sendEvent({ type: 'artifact_selection_updated', sessionId: managed.id, messageId: answer.id,
+        artifactReviewStatus: 'failed' }, managed.workspace.id) }
+      catch { /* Persisted status is available on reload. */ }
+    }
   }
 
   /**
@@ -8810,6 +8881,7 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
       rollbackFeedback = linkAnnotationFollowUpResults(managed.messages, state.userMessageId, answer,
         (content, hash) => saveBodyFeedbackVersion(getSessionStoragePath(managed.workspace.rootPath, managed.id), content, hash))
       answer.artifactVersions = await managed.conversationArtifactVersions?.capture(answer.content, `${managed.id}/${state.userMessageId}`)
+      answer.featuredArtifacts = []
       if (!isActive()) throw new Error('Answer delivery was interrupted.')
       managed.messages.push(answer)
       state.committedMessageId = answer.id
@@ -8884,6 +8956,7 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
       const salvaged = state.persistenceFailed ? undefined : await this.salvageUndeliveredAnswer(managed, state)
       if (salvaged) {
         this.publishCommittedAnswer(managed, salvaged)
+        void this.reviewCommittedArtifacts(managed, salvaged, state.userMessageId, [])
       } else if (managed.isProcessing && !managed.stopRequested && managed.answerDelivery === state
         && managed.processingGeneration === state.generation) {
         yield { type: 'typed_error', error: createTypedError(state.persistenceFailed ? 'answer_persistence_failed' : 'answer_delivery_missing', { message: state.persistenceFailed

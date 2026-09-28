@@ -211,6 +211,8 @@
   "chat.artifactFileManager": "Menedżer plików",
   "chat.artifactOfficeApp": "{{app}} / domyślna aplikacja",
   "chat.artifactOpenWith": "Otwórz za pomocą",
+  "chat.artifactReview.failed": "Nie udało się sprawdzić plików. Odpowiedź została zapisana.",
+  "chat.artifactReview.pending": "Przygotowywanie kart wyników…",
   "chat.artifactVersions.cancelFeedback": "Zatrzymaj poprawki",
   "chat.artifactVersions.changes": "Zobacz zmiany",
   "chat.artifactVersions.cleanup": "Usuń wersję",

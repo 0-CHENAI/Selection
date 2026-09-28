@@ -362,6 +362,8 @@ export interface Message {
   artifactVersions?: ArtifactDeliveryRef[];
   /** Host-validated primary result files selected for this answer's card. */
   featuredArtifacts?: string[];
+  /** Delivery review state; pending is transient, complete/failed are durable. */
+  artifactReviewStatus?: 'pending' | 'complete' | 'failed';
   /** Persisted on the originating user message before the single recovery call. */
   answerRecoveryAttempted?: boolean;
   phase?: TextStreamPhase;
@@ -471,6 +473,7 @@ export interface StoredMessage {
   artifactVersions?: ArtifactDeliveryRef[];
   /** Host-validated primary result files selected for this answer's card. */
   featuredArtifacts?: string[];
+  artifactReviewStatus?: 'pending' | 'complete' | 'failed';
   /** Persisted on the originating user message before the single recovery call. */
   answerRecoveryAttempted?: boolean;
   phase?: TextStreamPhase;

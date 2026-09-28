@@ -68,17 +68,14 @@ export function extractDeliveredResponseArtifacts(
   featured?: readonly string[],
 ): ResponseArtifact[] {
   if (featured) {
-    const preview = featured.length ? [] : extractPreviewResponseArtifacts(text)
-    const changed = featured.length || preview.length ? [] : extractChangedResponseArtifacts(text, versions)
-      .filter(artifact => artifact.change === 'created' || artifact.change === 'modified' || artifact.change === 'restored')
-    const selected = featured.length ? featured.flatMap(path => {
+    const selected = featured.flatMap(path => {
       const name = path.replace(/\\/g, '/').split('/').pop() ?? ''
       const dot = name.lastIndexOf('.')
       const extension = dot > 0 ? name.slice(dot + 1).toLowerCase() : ''
       if (isSessionScratchPath(path)) return []
       const version = versions?.find(ref => artifactPathKey(ref.path) === artifactPathKey(path))
       return [{ path, name, extension, ...(version ? { change: publishedChange(version) } : {}) }]
-    }) : preview.length ? preview : changed.length === 1 ? changed : []
+    })
     const deleted = extractChangedResponseArtifacts(text, versions?.filter(ref => ref.change === 'deleted'))
     const seen = new Set(selected.map(artifact => artifactPathKey(artifact.path)))
     return [...selected, ...deleted.filter(artifact => !seen.has(artifactPathKey(artifact.path)))]
@@ -143,8 +140,4 @@ export function extractResponseArtifacts(text: string, previewOnly = false): Res
     }
   })
   return artifacts
-}
-
-function extractPreviewResponseArtifacts(text: string): ResponseArtifact[] {
-  return extractResponseArtifacts(text, true).filter(artifact => !isSessionScratchPath(artifact.path))
 }

@@ -31,7 +31,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Verify Windows artifact delivery
-        run: bun test packages/server-core/src/reliability/artifact-versions.test.ts packages/server-core/src/reliability/conversation-artifact-versions.test.ts packages/server-core/src/sessions/session-artifact-display.test.ts packages/server-core/src/sessions/artifact-restore-agent.test.ts packages/ui/src/components/chat/__tests__/response-artifacts.test.ts apps/electron/src/main/__tests__/answer-delivery-pipeline.test.ts
+        run: bun test packages/server-core/src/reliability/artifact-versions.test.ts packages/server-core/src/reliability/conversation-artifact-versions.test.ts packages/server-core/src/reliability/artifact-delivery-review.test.ts packages/server-core/src/sessions/session-artifact-display.test.ts packages/server-core/src/sessions/artifact-restore-agent.test.ts packages/server-core/src/sessions/answer-delivery.test.ts packages/ui/src/components/chat/__tests__/response-artifacts.test.ts apps/electron/src/renderer/event-processor/handlers/__tests__/artifact-selection-updated.test.ts apps/electron/src/main/__tests__/answer-delivery-pipeline.test.ts
 
   validate:
     runs-on: ubuntu-latest

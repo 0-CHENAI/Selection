@@ -57,6 +57,7 @@ export interface TextCompleteEvent {
   answerSalvaged?: boolean;
   artifactVersions?: import('@craft-agent/core').Message['artifactVersions'];
   featuredArtifacts?: string[];
+  artifactReviewStatus?: import('@craft-agent/core').Message['artifactReviewStatus'];
   /** Persisted on the originating user message before the single recovery call. */
   phase?: import('@craft-agent/core').TextStreamPhase;
   presentationProtocol?: 'native' | 'marker-v1' | 'legacy';
@@ -494,6 +495,15 @@ export interface MessageAnnotationsUpdatedEvent {
   annotations: NonNullable<Message['annotations']>
 }
 
+export interface ArtifactSelectionUpdatedEvent {
+  type: 'artifact_selection_updated'
+  sessionId: string
+  messageId: string
+  artifactReviewStatus: 'pending' | 'complete' | 'failed'
+  featuredArtifacts?: string[]
+  artifactVersions?: Message['artifactVersions']
+}
+
 /**
  * Session shared event - session was shared to viewer
  */
@@ -621,6 +631,7 @@ export type AgentEvent =
   | UserMessageEvent
   | QueueChangedEvent
   | MessageAnnotationsUpdatedEvent
+  | ArtifactSelectionUpdatedEvent
   | SessionSharedEvent
   | SessionUnsharedEvent
   | AuthRequestEvent

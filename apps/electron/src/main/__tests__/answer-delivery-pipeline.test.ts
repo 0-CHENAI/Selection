@@ -32,6 +32,7 @@ describe('#330 service → renderer → durable reload → turn grouping', () =>
         const agent = {
           configureAnswerDelivery(value: AnswerDeliveryControl | undefined) { control = value },
           setAllSources() {}, getModel() { return 'fixture' }, getSessionId() { return 'sdk-session' },
+          async generateTitle() { return null },
           async *chat(_message: string, _attachments?: unknown, options?: { continueUserTask?: boolean; userTaskMessage?: string }): AsyncGenerator<AgentEvent> {
             calls++
             chatOptions.push(options)
@@ -60,15 +61,17 @@ describe('#330 service → renderer → durable reload → turn grouping', () =>
               expect(loadSession(root, managed.id)?.messages.some(m => m.content === answer.slice(0, 30))).toBe(false)
               yield { type: 'answer_preview', toolCallId: 'delivery', text: answer }
               yield { type: 'tool_start', toolName: 'submit_answer', toolUseId: 'delivery', input: { markdown: answer } }
-              if (featured.length) {
-                await expect(control!.submit({ markdown: answer, featuredArtifacts: [join(root, 'missing.html')], toolCallId: 'delivery', sdkMessageId: 'sdk-answer', sdkTurnAnchor: 'sdk-entry' }))
-                  .rejects.toThrow('missing or unavailable')
-              }
               await control!.submit({ markdown: answer, featuredArtifacts: featured, toolCallId: 'delivery', sdkMessageId: 'sdk-answer', sdkTurnAnchor: 'sdk-entry' })
               yield { type: 'tool_result', toolName: 'submit_answer', toolUseId: 'delivery', result: 'Answer delivered.', isError: false }
               yield { type: 'text_complete', text: '迟到短句不能覆盖正文。', phase, turnId: 'provider-3' }
             }
             yield { type: 'complete' }
+          },
+          async queryLlm(query: { prompt: string }) {
+            const files = (JSON.parse(query.prompt) as { files: Array<{ id: number; path: string }> }).files
+            return { text: JSON.stringify({ decisions: files.map(file => ({ id: file.id,
+              role: file.path.endsWith('simulation.html') ? 'primary' : 'supporting', reason: 'Fixture review',
+            })) }) }
           },
         }
         // Inject only the model boundary; persistence and event processing are real.
@@ -78,9 +81,14 @@ describe('#330 service → renderer → durable reload → turn grouping', () =>
         }
         internals.sessions.set(managed.id, managed)
         internals.getOrCreateAgent = async () => agent
+        managed.agent = agent as never
         manager.setEventSink((_channel, _target, event) => events.push(event as RendererEvent))
         try {
           await manager.sendMessage(managed.id, request)
+          if (featured.length) {
+            for (let i = 0; i < 100 && !events.some(event => event.type === 'artifact_selection_updated' && event.artifactReviewStatus === 'complete'); i++) await Bun.sleep(10)
+            expect(events.some(event => event.type === 'artifact_selection_updated' && event.artifactReviewStatus === 'complete')).toBe(true)
+          }
           await manager.flushSession(managed.id)
           let state: SessionState = {
             session: { id: managed.id, workspaceId: 'workspace', workspaceName: 'Test', messages: [], isProcessing: true, lastMessageAt: 0 },

@@ -662,6 +662,7 @@ export type SessionEvent =
   | { type: 'source_activated'; sessionId: string; sourceSlug: string; originalMessage: string }
   | { type: 'usage_update'; sessionId: string; tokenUsage: SessionTokenUsage }
   | { type: 'message_annotations_updated'; sessionId: string; messageId: string; annotations: AnnotationV1[] }
+  | { type: 'artifact_selection_updated'; sessionId: string; messageId: string; artifactReviewStatus: 'pending' | 'complete' | 'failed'; featuredArtifacts?: string[]; artifactVersions?: Message['artifactVersions'] }
   | { type: 'working_directory_error'; sessionId: string; error: string }
   | { type: 'regenerate_started'; sessionId: string; runId: string }
   | { type: 'messages_truncated'; sessionId: string; keepThroughMessageId: string; runId?: string }

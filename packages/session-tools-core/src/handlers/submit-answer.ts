@@ -7,7 +7,7 @@ import { successResponse, errorResponse } from '../response.ts';
 export const SubmitAnswerSchema = z.object({
   markdown: z.string().refine(value => /[^\s|]/u.test(value), 'Answer must contain renderable text'),
   featuredArtifacts: z.array(z.string().trim().min(1))
-    .describe('Only the primary local files delivered to the user in this answer, in display order. Use [] when there is no new or updated deliverable. Exclude source data, citations, scripts, drafts and validation files.'),
+    .describe('Proposed primary local result files, in display order. The host reviews actual file changes independently after answer publication. Use [] when there is no deliverable. Exclude source data, citations, scripts, drafts and validation files.'),
   artifactVersionTitle: z.string().trim().min(4).max(60).optional()
     .describe('When this turn creates or changes a delivered file, write a specific, short change title for its saved version. Describe the result, not the user request. Omit for answers without file changes.'),
 }).strict();

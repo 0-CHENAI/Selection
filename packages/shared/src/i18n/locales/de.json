@@ -211,6 +211,8 @@
   "chat.artifactFileManager": "Dateimanager",
   "chat.artifactOfficeApp": "{{app}} / Standard-App",
   "chat.artifactOpenWith": "Öffnen mit",
+  "chat.artifactReview.failed": "Ergebnisdateien konnten nicht geprüft werden. Die Antwort wurde gespeichert.",
+  "chat.artifactReview.pending": "Ergebniskarten werden vorbereitet…",
   "chat.artifactVersions.cancelFeedback": "Überarbeitung stoppen",
   "chat.artifactVersions.changes": "Änderungen anzeigen",
   "chat.artifactVersions.cleanup": "Version löschen",
