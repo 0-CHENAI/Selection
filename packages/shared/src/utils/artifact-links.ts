@@ -1,5 +1,42 @@
 import { marked } from 'marked'
 
+/** Keep Windows separators intact before Markdown treats `\.` as an escape. */
+export function normalizeWindowsMarkdownLinkDestinations(markdown: string): string {
+  let result = ''
+  let cursor = 0
+  while (cursor < markdown.length) {
+    const start = markdown.indexOf('](', cursor)
+    if (start < 0) break
+    const destinationStart = start + 2
+    let depth = 0
+    let angled = false
+    let end = destinationStart
+    for (; end < markdown.length; end++) {
+      const char = markdown[end]
+      if (char === '\n' || char === '\r') break
+      if (char === '<') angled = true
+      else if (char === '>') angled = false
+      else if (!angled && char === '(') depth++
+      else if (!angled && char === ')') {
+        if (depth === 0) break
+        depth--
+      }
+    }
+    if (markdown[end] !== ')') { cursor = destinationStart; continue }
+    const raw = markdown.slice(destinationStart, end).trim()
+    const path = raw.startsWith('<') && raw.endsWith('>') ? raw.slice(1, -1) : raw
+    const windowsPath = /^[a-z]:\\/i.test(path) || /^file:\/\/\/[a-z]:\\/i.test(path) || /^\\\\[^\\]+\\/i.test(path)
+    if (windowsPath && !/[<>\r\n]/.test(path) && (raw.startsWith('<') || !/\s/.test(path))) {
+      result += markdown.slice(cursor, destinationStart) + `<${path.replace(/\\/g, '/')}>`
+      cursor = end
+    } else {
+      result += markdown.slice(cursor, end)
+      cursor = end
+    }
+  }
+  return cursor === 0 ? markdown : result + markdown.slice(cursor)
+}
+
 /** Local links only. References and escaped Markdown are parsed, never guessed from prose. */
 export function localArtifactLinks(markdown: string): string[] {
   const paths = new Set<string>()
@@ -15,7 +52,7 @@ export function localArtifactLinks(markdown: string): string[] {
     try { path = decodeURIComponent(path) } catch { /* Preserve malformed literal percent names. */ }
     if (path && !/[\x00-\x1f]/.test(path)) paths.add(path)
   }
-  marked.walkTokens(marked.lexer(markdown), token => {
+  marked.walkTokens(marked.lexer(normalizeWindowsMarkdownLinkDestinations(markdown)), token => {
     if (token.type === 'link' || token.type === 'image') add(token.href)
     if (token.type === 'code' && /^(?:markdown|html|image|pdf)-preview$/.test(token.lang ?? '')) {
       try {

@@ -1,10 +1,11 @@
 import { expect, test } from 'bun:test'
-import { mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir, hostname } from 'node:os'
 import { join } from 'node:path'
 import { loadSession as loadStoredSession } from '@craft-agent/shared/sessions'
 import { ArtifactVersions } from '../reliability/artifact-versions'
 import { ConversationArtifactVersions } from '../reliability/conversation-artifact-versions'
+import { localArtifactLinks } from '@craft-agent/shared/utils/artifact-links'
 import { createManagedSession, SessionManager } from './SessionManager'
 
 test('loading an older answer shows only files versioned by that answer', async () => {
@@ -110,5 +111,30 @@ test('streamed file versions retain bytes and can be restored through the versio
     expect(restoreAnswer.artifactVersions).toMatchObject([{ versionId: restored.currentVersion, ordinal: 3, change: 'restored' }])
     await manager.flushSession(managed.id)
     expect(loadStoredSession(root, managed.id)?.messages.at(-1)?.artifactVersions).toEqual(restoreAnswer.artifactVersions)
+  } finally { rmSync(root, { recursive: true, force: true }) }
+})
+
+test('Windows backslash links into .selection capture created and modified document versions', async () => {
+  if (process.platform !== 'win32') return
+  const root = mkdtempSync(join(tmpdir(), 'windows-artifact-link-'))
+  try {
+    const sessionDir = join(root, '.selection', 'workspaces', 'my-workspace', 'sessions', 'test-session')
+    mkdirSync(sessionDir, { recursive: true })
+    const file = join(sessionDir, 'hello.docx')
+    const answer = `[hello.docx](${file})`
+    expect(localArtifactLinks(answer)).toEqual([file.replace(/\\/g, '/')])
+    const store = new ArtifactVersions(join(root, 'versions'), hostname(), 'workspace')
+    const tracker = () => new ConversationArtifactVersions(store, [sessionDir], async path => realpathSync(path),
+      () => { throw new Error('Artifact recording failed') }, Date.now() - 1000)
+
+    writeFileSync(file, 'hello')
+    const created = await tracker().capture(answer, 'session/user-1')
+    expect(created).toMatchObject([{ path: file.replace(/\\/g, '/'), ordinal: 1, change: 'created' }])
+
+    const next = tracker()
+    await next.track(answer)
+    writeFileSync(file, 'hi')
+    const modified = await next.capture(answer, 'session/user-2')
+    expect(modified).toMatchObject([{ path: file.replace(/\\/g, '/'), ordinal: 2, change: 'modified' }])
   } finally { rmSync(root, { recursive: true, force: true }) }
 })

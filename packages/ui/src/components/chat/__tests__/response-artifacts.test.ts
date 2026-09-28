@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test'
-import { extractChangedResponseArtifacts, extractResponseArtifacts, extractUnversionedResponseArtifacts } from '../response-artifacts'
+import { extractChangedResponseArtifacts, extractDeliveredResponseArtifacts, extractResponseArtifacts, extractUnversionedResponseArtifacts } from '../response-artifacts'
 
 describe('final response artifacts', () => {
   it('collects delivered documents, images and reference links in response order', () => {
@@ -76,6 +76,17 @@ it('keeps the linked result shelf for answers saved before version metadata exis
     { path: 'report.docx', name: 'report.docx', extension: 'docx' },
   ])
   expect(extractChangedResponseArtifacts(answer, [])).toEqual([])
+})
+
+it('shows the bottom result card for a Windows link even when the saved version list is empty', () => {
+  const answer = String.raw`文档已生成完成。[hello.docx](C:\Users\Administrator\.selection\workspaces\my-workspace\sessions\260928-steady-palm\hello.docx)`
+  const path = 'C:/Users/Administrator/.selection/workspaces/my-workspace/sessions/260928-steady-palm/hello.docx'
+  expect(extractDeliveredResponseArtifacts(answer, [])).toEqual([
+    { path, name: 'hello.docx', extension: 'docx' },
+  ])
+  expect(extractDeliveredResponseArtifacts(answer, [{ path, ordinal: 1, change: 'created' }])).toEqual([
+    { path, name: 'hello.docx', extension: 'docx', change: 'created' },
+  ])
 })
 
 it('shows a deletion even when the answer does not link the file, and keeps a citation off the shelf', () => {

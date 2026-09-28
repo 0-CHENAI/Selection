@@ -1,4 +1,4 @@
-import { isSessionScratchPath } from '@craft-agent/shared/utils/artifact-links'
+import { isSessionScratchPath, normalizeWindowsMarkdownLinkDestinations } from '@craft-agent/shared/utils/artifact-links'
 import { unified } from 'unified'
 import remarkParse from 'remark-parse'
 import { visit } from 'unist-util-visit'
@@ -61,6 +61,16 @@ export function extractUnversionedResponseArtifacts(text: string): ResponseArtif
   return extractResponseArtifacts(text).filter(artifact => !isSessionScratchPath(artifact.path))
 }
 
+/** A linked local result still belongs on the shelf when recording produced no version refs. */
+export function extractDeliveredResponseArtifacts(
+  text: string,
+  versions?: readonly { path: string; ordinal?: number; change?: ArtifactChange }[],
+): ResponseArtifact[] {
+  return versions?.length
+    ? extractChangedResponseArtifacts(text, versions)
+    : extractUnversionedResponseArtifacts(text)
+}
+
 const DOCUMENT_EXTENSIONS = new Set([
   'doc', 'docx', 'docm', 'odt', 'rtf', 'ppt', 'pptx', 'pptm', 'odp',
   'xls', 'xlsx', 'xlsm', 'xlsb', 'ods', 'csv', 'tsv', 'pdf',
@@ -73,7 +83,7 @@ const parser = unified().use(remarkParse)
 
 /** Only files explicitly linked in the final reply; never infer outputs from tool logs or disk. */
 export function extractResponseArtifacts(text: string): ResponseArtifact[] {
-  const tree = parser.parse(promoteBarePreviewBlocks(text))
+  const tree = parser.parse(promoteBarePreviewBlocks(normalizeWindowsMarkdownLinkDestinations(text)))
   const definitions = new Map<string, string>()
   visit(tree, 'definition', node => {
     const identifier = node.identifier.toLowerCase()
