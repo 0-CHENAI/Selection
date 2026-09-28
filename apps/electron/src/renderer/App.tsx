@@ -1,5 +1,6 @@
 import * as draftStorage from './lib/local-storage'
 import { ArtifactVersionsDialog } from './components/app-shell/ArtifactVersionsDialog'
+import { buildArtifactRestoreRequest } from './lib/artifact-restore-request'
 import { missingCommittedAnswerRun, recoverCommittedAnswer } from './event-processor/answer-recovery'
 import { refreshSessionSnapshot, type SessionRefreshResult } from './lib/session-refresh'
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react'
@@ -9,6 +10,7 @@ import type { ThemeOverrides } from '@config/theme'
 import { useSetAtom, useStore, useAtomValue, useAtom } from 'jotai'
 import type { Session, Workspace, SessionEvent, Message, FileAttachment, StoredAttachment, PermissionRequest, CredentialRequest, CredentialResponse, SetupNeeds, SessionStatus, NewChatActionParams, ContentBadge, LlmConnectionWithStatus, PermissionModeState } from '../shared/types'
 import type { SessionDraft, DraftAttachmentRef } from '@craft-agent/shared/config'
+import type { ManagedArtifact } from '@craft-agent/shared/protocol'
 import type { SessionOptions, SessionOptionUpdates } from './hooks/useSessionOptions'
 import { defaultSessionOptions, mergeSessionOptions } from './hooks/useSessionOptions'
 import { generateMessageId } from '../shared/types'
@@ -2024,14 +2026,35 @@ export default function App() {
   // Platform actions for @craft-agent/ui components (overlays, etc.)
   // Memoized to prevent re-renders when these callbacks don't change
   // NOTE: Must be defined before early returns to maintain consistent hook order
-  const [managedArtifactPath, setManagedArtifactPath] = useState<{ path: string; sessionId?: string; alternativePaths?: string[] } | null>(null)
+  const [managedArtifact, setManagedArtifact] = useState<{ path: string; alternativePaths?: string[]; sessionId?: string; record?: ManagedArtifact; error?: string } | null>(null)
+  const [managedArtifactOpen, setManagedArtifactOpen] = useState(false)
+  const managedArtifactRequest = useRef(0)
+  const loadManagedArtifact = useCallback(async (path: string, alternativePaths?: string[], sessionId?: string) => {
+    const request = ++managedArtifactRequest.current
+    try {
+      const record = await window.electronAPI.manageArtifact({ type: 'register', path, alternativePaths })
+      if (request === managedArtifactRequest.current) {
+        setManagedArtifact({ path, alternativePaths, sessionId, record })
+        setManagedArtifactOpen(true)
+      }
+    } catch (error) {
+      if (request === managedArtifactRequest.current) {
+        setManagedArtifact({ path, alternativePaths, sessionId, error: String(error) })
+        setManagedArtifactOpen(true)
+      }
+    }
+  }, [])
+  const closeManagedArtifact = useCallback(() => {
+    managedArtifactRequest.current++
+    setManagedArtifactOpen(false)
+  }, [])
   const platformActions = useMemo(() => ({
     onReadAnnotationDraft: (key: string) => draftStorage.getRaw(draftStorage.KEYS.annotationFeedbackDrafts, key) ?? undefined,
     onWriteAnnotationDraft: (key: string, value: string | undefined) => {
       if (value === undefined) draftStorage.remove(draftStorage.KEYS.annotationFeedbackDrafts, key)
       else draftStorage.setRaw(draftStorage.KEYS.annotationFeedbackDrafts, value, key)
     },
-    onManageArtifact: window.electronAPI.isChannelAvailable('artifacts:manage') ? (path: string, sessionId?: string, alternativePaths?: string[]) => { setManagedArtifactPath({ path, sessionId, alternativePaths }) } : undefined,
+    onManageArtifact: window.electronAPI.isChannelAvailable('artifacts:manage') ? (path: string, sessionId?: string, alternativePaths?: string[]) => loadManagedArtifact(path, alternativePaths, sessionId) : undefined,
     onOpenFile: handleOpenFile,
     onOpenUrl: handleOpenUrl,
     // Bypass link interceptor — opens file directly in system editor.
@@ -2055,7 +2078,7 @@ export default function App() {
     },
     // Keep overlay headers (image preview, close, zoom) left of Windows caption buttons (#356)
     windowsCaptionInsetPadding: windowsCaptionInsetStyle()?.paddingRight,
-  }), [handleOpenFile, handleOpenUrl, linkInterceptor.openFileExternal, connectionState])
+  }), [handleOpenFile, handleOpenUrl, linkInterceptor.openFileExternal, connectionState, loadManagedArtifact])
 
   // Loading state - show splash screen
   if (appState === 'loading') {
@@ -2203,7 +2226,13 @@ export default function App() {
             />
           </div>
 
-          <ArtifactVersionsDialog path={managedArtifactPath?.path ?? null} alternativePaths={managedArtifactPath?.alternativePaths} onClose={() => setManagedArtifactPath(null)} onPreview={handleOpenFile} />
+          {managedArtifact && <ArtifactVersionsDialog open={managedArtifactOpen} path={managedArtifact.path} record={managedArtifact.record} error={managedArtifact.error}
+            onRetry={() => loadManagedArtifact(managedArtifact.path, managedArtifact.alternativePaths, managedArtifact.sessionId)} onClose={closeManagedArtifact} onPreview={handleOpenFile}
+            onRestore={managedArtifact.sessionId ? async (record, versionId) => {
+              const message = buildArtifactRestoreRequest(record, versionId)
+              if (!await handleSendMessage(managedArtifact.sessionId!, message)) throw new Error('Failed to send restore request')
+              closeManagedArtifact()
+            } : undefined} />}
           {/* File preview overlay — rendered by the link interceptor when a previewable file is clicked */}
           {linkInterceptor.previewState && (
             <FilePreviewRenderer

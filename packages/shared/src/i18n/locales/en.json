@@ -217,7 +217,7 @@
   "chat.artifactVersions.discardDraft": "Discard draft",
   "chat.artifactVersions.draftSaveFailed": "The draft could not be saved on this device. Keep the window open and retry.",
   "chat.artifactVersions.feedback": "Request a revision",
-  "chat.artifactVersions.fileUpdated": "File updated",
+  "chat.artifactVersions.fileUpdated": "No change summary available",
   "chat.artifactVersions.history": "Modification history",
   "chat.artifactVersions.initialVersion": "Initial version",
   "chat.artifactVersions.loading": "Loading versions…",

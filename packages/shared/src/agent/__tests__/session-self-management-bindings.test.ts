@@ -289,4 +289,20 @@ describe('Claude/Pi session self-management parity', () => {
     expect(listResult.isError).toBe(true);
     expect(listResult.content[0]!.text).toContain('not available in this context');
   });
+
+  it('resolves artifact version callbacks registered after the agent context exists', async () => {
+    const ctx = createBaseContext(sessionId);
+    attachSessionSelfManagementBindings(ctx, sessionId);
+    expect(ctx.artifactVersions).toBeUndefined();
+    const calls: unknown[] = [];
+    mergeSessionScopedToolCallbacks(sessionId, { artifactVersionsFn: async request => {
+      calls.push(request);
+      return { currentVersion: 'new' };
+    } });
+    const result = await SESSION_TOOL_REGISTRY.get('artifact_versions')!.handler!(ctx, {
+      action: 'restore', artifactId: 'artifact', versionId: 'old', expectedVersion: 'current',
+    });
+    expect(result.isError).toBeFalsy();
+    expect(calls).toHaveLength(1);
+  });
 });

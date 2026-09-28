@@ -20,7 +20,7 @@ export interface PlatformActions {
   /** Optional device-local annotation drafts; keys contain only a content digest. */
   onReadAnnotationDraft?: (key: string) => string | undefined
   onWriteAnnotationDraft?: (key: string, value: string | undefined) => void
-  onManageArtifact?: (path: string, sessionId?: string, alternativePaths?: string[]) => void
+  onManageArtifact?: (path: string, sessionId?: string, alternativePaths?: string[]) => void | Promise<void>
 
   /**
    * Open a file in the default application (Electron: shell.openPath)

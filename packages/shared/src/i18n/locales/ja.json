@@ -217,7 +217,7 @@
   "chat.artifactVersions.discardDraft": "下書きを破棄",
   "chat.artifactVersions.draftSaveFailed": "The draft could not be saved on this device. Keep the window open and retry.",
   "chat.artifactVersions.feedback": "Request a revision",
-  "chat.artifactVersions.fileUpdated": "ファイル更新",
+  "chat.artifactVersions.fileUpdated": "変更内容の説明なし",
   "chat.artifactVersions.history": "変更履歴",
   "chat.artifactVersions.initialVersion": "初期バージョン",
   "chat.artifactVersions.loading": "Loading versions…",

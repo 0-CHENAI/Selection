@@ -20,6 +20,10 @@ import { debug } from '../utils/debug.ts';
  * Callbacks that can be registered per-session
  */
 export interface SessionScopedToolCallbacks {
+  artifactVersionsFn?: (request: {
+    action: 'list' | 'restore'; path?: string; artifactId?: string;
+    versionId?: string; expectedVersion?: string;
+  }) => Promise<unknown>;
   /**
    * Called when a plan is submitted via SubmitPlan tool.
    * Receives the path to the plan markdown file.

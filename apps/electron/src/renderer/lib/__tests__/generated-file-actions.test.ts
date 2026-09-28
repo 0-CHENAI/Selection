@@ -72,4 +72,27 @@ describe('generated artifact actions', () => {
     expect(await openGeneratedFileAction({ ...options, action: 'external',
       statPath: async () => ({ path: realPath, type: 'file' }), openExternal: async () => false })).toBe(false)
   })
+
+  test('opening versions waits for the artifact registration to finish', async () => {
+    let registrationStarted!: () => void
+    let finishRegistration!: () => void
+    const started = new Promise<void>(resolve => { registrationStarted = resolve })
+    const registration = new Promise<void>(resolve => { finishRegistration = resolve })
+    const opening = openGeneratedFileAction({
+      requestedPath: realPath,
+      action: 'versions',
+      statPath: async () => ({ path: realPath, type: 'file' }),
+      searchFiles: async () => [],
+      manageArtifact: () => { registrationStarted(); return registration },
+      openPreview: () => {},
+      reveal: () => {},
+    })
+    await started
+    let settled = false
+    void opening.then(() => { settled = true })
+    expect(settled).toBe(false)
+    finishRegistration()
+    expect(await opening).toBe(true)
+    expect(settled).toBe(true)
+  })
 })

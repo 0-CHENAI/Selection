@@ -914,6 +914,67 @@ html.dark[data-scenic] .fullscreen-overlay-background {
   animation: none !important;
 }
 
+/* The artifact history dialog keeps its content mounted through the exit animation. */
+@keyframes artifact-versions-overlay-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes artifact-versions-overlay-out {
+  from { opacity: 1; }
+  to { opacity: 0; }
+}
+
+@keyframes artifact-versions-dialog-in {
+  from { opacity: 0; scale: 0.98; }
+  to { opacity: 1; scale: 1; }
+}
+
+@keyframes artifact-versions-dialog-out {
+  from { opacity: 1; scale: 1; }
+  to { opacity: 0; scale: 0.98; }
+}
+
+.artifact-versions-overlay[data-state="open"] {
+  animation: artifact-versions-overlay-in 200ms ease-out both !important;
+}
+
+.artifact-versions-overlay[data-state="closed"] {
+  animation: artifact-versions-overlay-out 180ms ease-in both !important;
+}
+
+.artifact-versions-dialog[data-state="open"] {
+  animation: artifact-versions-dialog-in 210ms cubic-bezier(0.2, 0, 0, 1) both !important;
+}
+
+.artifact-versions-dialog[data-state="closed"] {
+  animation: artifact-versions-dialog-out 180ms ease-in both !important;
+}
+
+/* Pointer clicks should not leave a selected-looking box; keyboard focus stays visible. */
+.artifact-versions-dialog [data-slot="dialog-close"][data-state="open"],
+.artifact-versions-dialog [data-slot="dialog-close"]:focus:not(:focus-visible) {
+  background: transparent;
+}
+
+.artifact-versions-dialog button:focus:not(:focus-visible) {
+  outline: none;
+  box-shadow: none;
+}
+
+.artifact-versions-dialog button:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+  box-shadow: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .artifact-versions-overlay[data-state],
+  .artifact-versions-dialog[data-state] {
+    animation: none !important;
+  }
+}
+
 /* Fix ScrollArea internal div preventing content shrink
    Radix injects a div with min-width: 100%; display: table; which prevents shrinking */
 [data-radix-scroll-area-viewport] > div {

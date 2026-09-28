@@ -4913,6 +4913,7 @@ export class SessionManager implements ISessionManager {
 
       // Wire up session self-management tools (set_session_labels, set_session_status, etc.)
       mergeSessionScopedToolCallbacks(managed.id, {
+        artifactVersionsFn: request => this.manageArtifactVersionFromAgent(managed, request),
         setSessionLabelsFn: async (sessionId: string | undefined, labels: string[]) => {
           await this.setSessionLabels(sessionId ?? managed.id, labels)
         },
@@ -7874,6 +7875,45 @@ export class SessionManager implements ISessionManager {
     versions.cleanRemovedPreviews(artifactId, versionIds)
     versions.cleanUnreferencedBlobs()
     return cleaned
+  }
+
+  private async manageArtifactVersionFromAgent(managed: ManagedSession, request: {
+    action: 'list' | 'restore'; path?: string; artifactId?: string;
+    versionId?: string; expectedVersion?: string;
+  }): Promise<import('@craft-agent/shared/protocol').ManagedArtifact> {
+    if (this.sessions.get(managed.id) !== managed) throw new Error('Session is no longer active')
+    if (managed.isolatedWorkspace) throw new Error('Managed file restoration is unavailable from an isolated child workspace')
+    if (request.action !== 'list' && request.action !== 'restore') throw new Error('Unknown artifact version action')
+    const userMessage = request.action === 'restore'
+      ? managed.messages.findLast(message => message.role === 'user' && !message.hidden && !message.isQueued)
+      : undefined
+    if (request.action === 'restore') {
+      const pinned = /<artifact_restore_request>\s*(\{[^\n]+\})\s*<\/artifact_restore_request>/.exec(userMessage?.content ?? '')
+      if (pinned) {
+        let selected: Record<string, unknown>
+        try { selected = JSON.parse(pinned[1]!) as Record<string, unknown> }
+        catch { throw new Error('Invalid version request in the user message') }
+        if (selected.action !== 'restore' || selected.artifactId !== request.artifactId
+          || selected.versionId !== request.versionId || selected.expectedVersion !== request.expectedVersion
+          || selected.path !== request.path) throw new Error('Restore request changed; ask the user to select the version again')
+      }
+    }
+    const store = new ArtifactVersions(join(managed.workspace.rootPath, 'artifacts', 'versions'), executionHostName(), managed.workspace.id)
+    const record = request.artifactId
+      ? store.read(request.artifactId)
+      : request.path ? store.findByPath(await validateWorkspaceFilePath(request.path, managed.workspace.id)) : undefined
+    if (!record) throw new Error('Managed file not found; provide its exact path or artifact ID')
+    if (request.path && await validateWorkspaceFilePath(request.path, managed.workspace.id) !== record.path) {
+      throw new Error('Artifact path changed; inspect its versions again')
+    }
+    await validateWorkspaceFilePath(record.path, managed.workspace.id)
+    if (request.action === 'list') return store.reconcile(record.id)
+    if (!request.versionId || !request.expectedVersion) throw new Error('Restore requires a target and current version ID')
+    if (request.versionId === record.currentVersion) throw new Error('Select a previous version to restore')
+    const restored = store.restore(record.id, request.expectedVersion, request.versionId,
+      userMessage ? `${managed.id}/${userMessage.id}` : managed.id)
+    this.notifyArtifactApplied(managed.workspace.id)
+    return restored
   }
 
   async getBodyFeedbackDetails(sessionId: string, sourceMessageId: string, annotationId: string): Promise<import('@craft-agent/shared/protocol').BodyFeedbackRevision[]> {

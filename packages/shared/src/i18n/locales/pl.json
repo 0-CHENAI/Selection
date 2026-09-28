@@ -217,7 +217,7 @@
   "chat.artifactVersions.discardDraft": "Odrzuć szkic",
   "chat.artifactVersions.draftSaveFailed": "The draft could not be saved on this device. Keep the window open and retry.",
   "chat.artifactVersions.feedback": "Request a revision",
-  "chat.artifactVersions.fileUpdated": "Plik zaktualizowany",
+  "chat.artifactVersions.fileUpdated": "Brak opisu zmian",
   "chat.artifactVersions.history": "Historia zmian",
   "chat.artifactVersions.initialVersion": "Wersja początkowa",
   "chat.artifactVersions.loading": "Loading versions…",
