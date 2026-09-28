@@ -2,7 +2,7 @@ import { test, expect } from 'bun:test'
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, unlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { localArtifactLinks } from '@craft-agent/shared/utils'
+import { localArtifactLinks, localArtifactPath } from '@craft-agent/shared/utils'
 import { messageToStored, storedToMessage, type Message } from '@craft-agent/core'
 import { ArtifactVersions } from './artifact-versions'
 import { artifactVersionTitle, ConversationArtifactVersions, withDeliveredArtifactReferences, withHistoricalAnswerTitles } from './conversation-artifact-versions'
@@ -260,4 +260,40 @@ test('Markdown links preserve exact file identity across encodings, references a
   expect(localArtifactLinks('[报告][r]\n\n[r]: <file:///D:/中文%20目录/report.html>\n\n`[fake](secret.txt)`\n\n[远程](https://example.com/a.html)')).toEqual(['D:/中文 目录/report.html'])
   expect(localArtifactLinks(String.raw`[报告](file:///C:\Users\me\Desktop\report.docx)`)).toEqual(['C:/Users/me/Desktop/report.docx'])
   expect(localArtifactLinks('[a](a.txt) [b](a.txt)\n\n```image-preview\n{"src":"data/a.png"}\n```')).toEqual(['a.txt', 'data/a.png'])
+})
+
+test('explicit result paths normalize Windows drives, backslashes and file URLs', () => {
+  expect(localArtifactPath('C:\\Users\\me\\报告.html')).toBe('C:\\Users\\me\\报告.html')
+  expect(localArtifactPath('file:///C:\\Users\\me\\报告%20终版.html')).toBe('C:/Users/me/报告 终版.html')
+  expect(localArtifactPath('file://D:/selection/报告.html')).toBe('D:/selection/报告.html')
+  expect(localArtifactPath('file:///C:/Users/me/%E4%B8%AD%E6%96%87%20%E6%8A%A5%E5%91%8A%20(1).docx'))
+    .toBe('C:/Users/me/中文 报告 (1).docx')
+  expect(localArtifactPath('\\\\server\\share\\报告.html')).toBe('\\\\server\\share\\报告.html')
+  expect(localArtifactPath('https://example.com/report.html')).toBeUndefined()
+})
+
+test('featured results resolve only existing authorized files and deduplicate them', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'conversation-featured-'))
+  try {
+    const file = join(root, 'report.html')
+    writeFileSync(file, '<h1>Report</h1>')
+    const turn = new ConversationArtifactVersions(new ArtifactVersions(join(root, 'versions'), 'host', 'workspace'),
+      [root], async path => realpathSync(path), () => {})
+    expect(await turn.featured(['report.html', file])).toEqual([realpathSync(file)])
+    await expect(turn.featured(['missing.html'])).rejects.toThrow('missing or unavailable')
+    await expect(turn.featured(['https://example.com/report.html'])).rejects.toThrow('not a local path')
+  } finally { rmSync(root, { recursive: true, force: true }) }
+})
+
+test('a selected Chinese result is versioned even without a Markdown file link', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'conversation-featured-version-'))
+  try {
+    const file = join(root, '中文 报告 (1).html')
+    const turn = new ConversationArtifactVersions(new ArtifactVersions(join(root, 'versions'), 'host', 'workspace'),
+      [root], async path => realpathSync(path), () => {}, Date.now() - 1000)
+    writeFileSync(file, '<h1>Report</h1>')
+    const featured = await turn.featured(['中文 报告 (1).html'])
+    expect((await turn.capture('报告已完成。', 'session/user-1', undefined, featured)))
+      .toMatchObject([{ path: realpathSync(file), ordinal: 1, change: 'created' }])
+  } finally { rmSync(root, { recursive: true, force: true }) }
 })

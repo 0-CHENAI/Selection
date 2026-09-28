@@ -56,6 +56,7 @@ export interface TextCompleteEvent {
   answerCommitted?: boolean;
   answerSalvaged?: boolean;
   artifactVersions?: import('@craft-agent/core').Message['artifactVersions'];
+  featuredArtifacts?: string[];
   /** Persisted on the originating user message before the single recovery call. */
   phase?: import('@craft-agent/core').TextStreamPhase;
   presentationProtocol?: 'native' | 'marker-v1' | 'legacy';

@@ -118,3 +118,20 @@ it('matches version references without confusing equal filenames in different di
   expect(extractChangedResponseArtifacts(answer, [{ path: 'new.docx', ordinal: 2, change: 'modified' }]).map(file => file.path))
     .toEqual(['./new.docx'])
 })
+
+it('uses the explicit result selection instead of every linked or changed file', () => {
+  const answer = '[打开报告](/reports/final.html) [原始数据](/data/data.json) [检查图](/tmp/check.png)'
+  const versions = [
+    { path: '/reports/final.html', ordinal: 1, change: 'created' as const },
+    { path: '/tmp/check.png', ordinal: 1, change: 'created' as const },
+  ]
+  expect(extractDeliveredResponseArtifacts(answer, versions, ['/reports/final.html'])).toEqual([
+    { path: '/reports/final.html', name: 'final.html', extension: 'html', change: 'created' },
+  ])
+  expect(extractDeliveredResponseArtifacts(answer, versions, [])).toEqual([])
+  expect(extractDeliveredResponseArtifacts('报告已完成。', [], ['/reports/final.html'])).toEqual([
+    { path: '/reports/final.html', name: 'final.html', extension: 'html' },
+  ])
+  expect(extractDeliveredResponseArtifacts('旧稿已删除。', [{ path: '/reports/old.docx', ordinal: 2, change: 'deleted' }], []))
+    .toEqual([{ path: '/reports/old.docx', name: 'old.docx', extension: 'docx', change: 'deleted' }])
+})

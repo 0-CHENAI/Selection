@@ -8673,6 +8673,7 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
         answerRunId: answer.answerRunId, answerRoutingVersion: answer.answerRoutingVersion,
         answerCommitted: true, answerSalvaged: answer.answerSalvaged, turnId: answer.turnId,
         artifactVersions: answer.artifactVersions,
+        featuredArtifacts: answer.featuredArtifacts,
         messageId: answer.id, timestamp: answer.timestamp }, managed.workspace.id)
     } catch (error) {
       sessionLog.error('Committed answer event delivery failed', { sessionId: managed.id, messageId: answer.id, error })
@@ -8696,6 +8697,9 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
     if (!hasRenderableAssistantText(submission.markdown) || isAnswerDeliveryReceipt(submission.markdown)) throw new Error('Submit a complete, non-empty Markdown answer.')
     if (!submission.toolCallId || !submission.sdkMessageId || !submission.sdkTurnAnchor) throw new Error('Missing SDK answer anchor.')
     this.assertAnswerReady(managed, state, submission.markdown, submission.toolCallId)
+    if (submission.featuredArtifacts?.length && !managed.conversationArtifactVersions) throw new Error('Featured files are unavailable in this session.')
+    const featuredArtifacts = submission.featuredArtifacts
+      ? await managed.conversationArtifactVersions?.featured(submission.featuredArtifacts) ?? [] : undefined
     state.accepting = true
     const regenerateTransaction = managed.regenerateTransaction
     const previousLastRole = managed.lastMessageRole
@@ -8719,7 +8723,8 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
       managed.streamingStartedAt = undefined
       rollbackFeedback = linkAnnotationFollowUpResults(managed.messages, state.userMessageId, answer,
         (content, hash) => saveBodyFeedbackVersion(getSessionStoragePath(managed.workspace.rootPath, managed.id), content, hash))
-      answer.artifactVersions = await managed.conversationArtifactVersions?.capture(answer.content, `${managed.id}/${state.userMessageId}`, submission.artifactVersionTitle)
+      answer.featuredArtifacts = featuredArtifacts
+      answer.artifactVersions = await managed.conversationArtifactVersions?.capture(answer.content, `${managed.id}/${state.userMessageId}`, submission.artifactVersionTitle, featuredArtifacts)
       if (managed.stopRequested || managed.processingGeneration !== state.generation || managed.answerDelivery !== state) throw new Error('Answer delivery was interrupted.')
       managed.messages.push(answer)
       state.committedMessageId = answer.id

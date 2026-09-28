@@ -61,11 +61,25 @@ export function extractUnversionedResponseArtifacts(text: string): ResponseArtif
   return extractResponseArtifacts(text).filter(artifact => !isSessionScratchPath(artifact.path))
 }
 
-/** A linked local result still belongs on the shelf when recording produced no version refs. */
+/** Current answers use the validated selection; older answers retain their linked-file behavior. */
 export function extractDeliveredResponseArtifacts(
   text: string,
   versions?: readonly { path: string; ordinal?: number; change?: ArtifactChange }[],
+  featured?: readonly string[],
 ): ResponseArtifact[] {
+  if (featured) {
+    const selected = featured.flatMap(path => {
+      const name = path.replace(/\\/g, '/').split('/').pop() ?? ''
+      const dot = name.lastIndexOf('.')
+      const extension = dot > 0 ? name.slice(dot + 1).toLowerCase() : ''
+      if (isSessionScratchPath(path)) return []
+      const version = versions?.find(ref => artifactPathKey(ref.path) === artifactPathKey(path))
+      return [{ path, name, extension, ...(version ? { change: publishedChange(version) } : {}) }]
+    })
+    const deleted = extractChangedResponseArtifacts(text, versions?.filter(ref => ref.change === 'deleted'))
+    const seen = new Set(selected.map(artifact => artifactPathKey(artifact.path)))
+    return [...selected, ...deleted.filter(artifact => !seen.has(artifactPathKey(artifact.path)))]
+  }
   return versions?.length
     ? extractChangedResponseArtifacts(text, versions)
     : extractUnversionedResponseArtifacts(text)

@@ -150,7 +150,7 @@ export interface ValidatorInterface {
  */
 export interface SessionToolContext {
   /** Host-validated terminal answer delivery; never trust a subprocess-only callback. */
-  submitAnswer?: (markdown: string, artifactVersionTitle?: string) => Promise<void>;
+  submitAnswer?: (markdown: string, artifactVersionTitle?: string, featuredArtifacts?: string[]) => Promise<void>;
   /** Inspect or restore a managed file version in this session's workspace. */
   artifactVersions?: (request: {
     action: 'list' | 'restore'; path?: string; artifactId?: string;

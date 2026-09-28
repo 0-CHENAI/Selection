@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test'
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { storedToMessage, type AgentEvent, type Message } from '@craft-agent/core'
@@ -24,6 +24,7 @@ describe('#330 service → renderer → durable reload → turn grouping', () =>
         const manager = new SessionManager()
         const managed = createManagedSession({ id: 'pipeline' },
           { id: 'workspace', slug: 'workspace', name: 'Test', rootPath: root, createdAt: Date.now() }, { messagesLoaded: true })
+        const featured = phase === 'final' && delivery === 'direct' ? [join(root, 'simulation.html')] : []
         let control: AnswerDeliveryControl | undefined
         let calls = 0
         const chatOptions: Array<{ continueUserTask?: boolean; userTaskMessage?: string } | undefined> = []
@@ -53,12 +54,17 @@ describe('#330 service → renderer → durable reload → turn grouping', () =>
               yield { type: 'text_complete', text: answer, phase, turnId: 'provider-recovery', sdkMessageId: 'sdk-recovery' }
               yield { type: 'pi_turn_anchor', sdkMessageId: 'sdk-recovery', sdkTurnAnchor: 'recovery-entry' }
             } else if (delivery !== 'salvaged' && (!recover || calls === 2)) {
+              if (featured.length) writeFileSync(featured[0]!, '<h1>Simulation</h1>')
               yield { type: 'answer_preview', toolCallId: 'delivery', text: answer.slice(0, 30) }
               await manager.flushSession(managed.id)
               expect(loadSession(root, managed.id)?.messages.some(m => m.content === answer.slice(0, 30))).toBe(false)
               yield { type: 'answer_preview', toolCallId: 'delivery', text: answer }
               yield { type: 'tool_start', toolName: 'submit_answer', toolUseId: 'delivery', input: { markdown: answer } }
-              await control!.submit({ markdown: answer, toolCallId: 'delivery', sdkMessageId: 'sdk-answer', sdkTurnAnchor: 'sdk-entry' })
+              if (featured.length) {
+                await expect(control!.submit({ markdown: answer, featuredArtifacts: [join(root, 'missing.html')], toolCallId: 'delivery', sdkMessageId: 'sdk-answer', sdkTurnAnchor: 'sdk-entry' }))
+                  .rejects.toThrow('missing or unavailable')
+              }
+              await control!.submit({ markdown: answer, featuredArtifacts: featured, toolCallId: 'delivery', sdkMessageId: 'sdk-answer', sdkTurnAnchor: 'sdk-entry' })
               yield { type: 'tool_result', toolName: 'submit_answer', toolUseId: 'delivery', result: 'Answer delivered.', isError: false }
               yield { type: 'text_complete', text: '迟到短句不能覆盖正文。', phase, turnId: 'provider-3' }
             }
@@ -112,6 +118,10 @@ describe('#330 service → renderer → durable reload → turn grouping', () =>
           expect(liveTurns[0]!.response?.completedRevealStartTime).toBeUndefined()
           expect(loadedTurns[0]!.response).toEqual({ ...liveTurns[0]!.response!, completedRevealStartTime: undefined })
           expect(loadedTurns[0]!.response?.text).toBe(answer)
+          if (delivery !== 'salvaged') {
+            expect(liveTurns[0]!.response?.featuredArtifacts).toEqual(featured.map(path => realpathSync(path)))
+            expect(loadedTurns[0]!.response?.featuredArtifacts).toEqual(liveTurns[0]!.response?.featuredArtifacts)
+          }
           // Drafts folded by the UI must still survive in the durable execution record.
           expect(reloaded.some(m => m.isIntermediate && m.content === explanation)).toBe(true)
           expect(liveTurns[0]!.activities.some(a => a.type === 'intermediate' && a.content === explanation)).toBe(true)

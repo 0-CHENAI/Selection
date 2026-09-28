@@ -360,6 +360,8 @@ export interface Message {
   answerSalvaged?: boolean;
   /** Persisted snapshot identities for local files delivered by this answer. */
   artifactVersions?: ArtifactDeliveryRef[];
+  /** Host-validated primary result files selected for this answer's card. */
+  featuredArtifacts?: string[];
   /** Persisted on the originating user message before the single recovery call. */
   answerRecoveryAttempted?: boolean;
   phase?: TextStreamPhase;
@@ -467,6 +469,8 @@ export interface StoredMessage {
   answerSalvaged?: boolean;
   /** Persisted snapshot identities for local files delivered by this answer. */
   artifactVersions?: ArtifactDeliveryRef[];
+  /** Host-validated primary result files selected for this answer's card. */
+  featuredArtifacts?: string[];
   /** Persisted on the originating user message before the single recovery call. */
   answerRecoveryAttempted?: boolean;
   phase?: TextStreamPhase;

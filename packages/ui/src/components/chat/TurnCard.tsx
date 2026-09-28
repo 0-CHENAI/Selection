@@ -310,6 +310,7 @@ export interface ActivityItem {
 
 export interface ResponseContent {
   artifactVersions?: import('@craft-agent/core').Message['artifactVersions']
+  featuredArtifacts?: string[]
   answerSalvaged?: boolean
   isAnswerPreview?: boolean
   text: string
@@ -1554,6 +1555,7 @@ function ActivityGroupRow({ group, expandedGroups: externalExpandedGroups, onExp
 
 export interface ResponseCardProps {
   artifactVersions?: ResponseContent['artifactVersions']
+  featuredArtifacts?: ResponseContent['featuredArtifacts']
   researchActivities?: ActivityItem[]
   isAnswerPreview?: boolean
   /** The content to display (markdown) */
@@ -1856,6 +1858,7 @@ function applyTextHighlightRange(
  */
 export function ResponseCard({
   artifactVersions,
+  featuredArtifacts,
   researchActivities,
   text,
   isAnswerPreview = false,
@@ -1916,8 +1919,8 @@ export function ResponseCard({
   const responseText = parsedSkillUsage.content
   const startsWithHtmlPreview = /^\s*(?:```html-preview(?:\s|$)|html-preview[ \t]*\n[ \t]*\{)/.test(responseText)
   const artifacts = useMemo(
-    () => showArtifacts ? extractDeliveredResponseArtifacts(responseText, artifactVersions) : [],
-    [showArtifacts, responseText, artifactVersions],
+    () => showArtifacts ? extractDeliveredResponseArtifacts(responseText, artifactVersions, featuredArtifacts) : [],
+    [showArtifacts, responseText, artifactVersions, featuredArtifacts],
   )
   const paced = usePacedSource(responseText, isStreaming, completedRevealStartTime, revealIdentity ?? messageId)
   const presentationStreaming = isStreaming || paced.revealing
@@ -3536,6 +3539,7 @@ export const TurnCard = React.memo(function TurnCard({
               <ResponseCard
                 text={response.text}
             artifactVersions={response.artifactVersions}
+            featuredArtifacts={response.featuredArtifacts}
                 researchActivities={activities}
                 isStreaming={response.isStreaming}
                 isAnswerPreview={response.isAnswerPreview}
@@ -3589,6 +3593,7 @@ export const TurnCard = React.memo(function TurnCard({
           <ResponseCard
             text={response.text}
             artifactVersions={response.artifactVersions}
+            featuredArtifacts={response.featuredArtifacts}
             researchActivities={activities}
             isStreaming={response.isStreaming}
                 isAnswerPreview={response.isAnswerPreview}

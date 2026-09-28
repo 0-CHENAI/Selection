@@ -37,20 +37,31 @@ export function normalizeWindowsMarkdownLinkDestinations(markdown: string): stri
   return cursor === 0 ? markdown : result + markdown.slice(cursor)
 }
 
+/** Normalize local paths shared by Markdown links and explicit result selection. */
+export function localArtifactPath(target: string): string | undefined {
+  let path = target.trim()
+  if (/^file:/i.test(path)) {
+    try {
+      const url = new URL(path.replace(/\\/g, '/'))
+      if (url.protocol !== 'file:') return undefined
+      const host = url.hostname
+      path = /^[a-z]$/i.test(host) ? `${host.toUpperCase()}:${url.pathname}`
+        : host && host.toLowerCase() !== 'localhost' ? `//${host}${url.pathname}` : url.pathname
+    } catch { return undefined }
+  }
+  try { path = decodeURIComponent(path) } catch { /* Preserve malformed literal percent names. */ }
+  path = path.replace(/^\/([a-z]:[\\/])/i, '$1')
+  if (!path || /[\x00-\x1f]/.test(path)
+    || /^[a-z][a-z\d+.-]*:/i.test(path) && !/^[a-z]:[\\/]/i.test(path)) return undefined
+  return path
+}
+
 /** Local links only. References and escaped Markdown are parsed, never guessed from prose. */
 export function localArtifactLinks(markdown: string): string[] {
   const paths = new Set<string>()
   const add = (target: string) => {
-    let path = target
-    if (/^file:/i.test(path)) {
-      try {
-        const url = new URL(path.replace(/\\/g, '/'))
-        path = url.hostname && url.hostname !== 'localhost' ? `//${url.hostname}${url.pathname}` : url.pathname
-        path = path.replace(/^\/([a-z]:\/)/i, '$1')
-      } catch { return }
-    } else if (/^[a-z][a-z\d+.-]*:/i.test(path) && !/^[a-z]:[\\/]/i.test(path)) return
-    try { path = decodeURIComponent(path) } catch { /* Preserve malformed literal percent names. */ }
-    if (path && !/[\x00-\x1f]/.test(path)) paths.add(path)
+    const path = localArtifactPath(target)
+    if (path) paths.add(path)
   }
   marked.walkTokens(marked.lexer(normalizeWindowsMarkdownLinkDestinations(markdown)), token => {
     if (token.type === 'link' || token.type === 'image') add(token.href)
