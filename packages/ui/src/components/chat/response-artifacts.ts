@@ -40,8 +40,8 @@ export function extractChangedResponseArtifacts(
     const key = artifactPathKey(version.path)
     if (seen.has(key)) continue
     const match = linked.find(artifact => artifactPathKey(artifact.path) === key)
-    // A deleted result has nothing left to link. Other files must be the ones the answer delivers.
-    if (!match && version.change !== 'deleted') continue
+    // Deleted and restored results may be reported without a Markdown link.
+    if (!match && version.change !== 'deleted' && version.change !== 'restored') continue
     seen.add(key)
     const path = match?.path ?? version.path
     const name = path.replace(/\\/g, '/').split('/').pop() || version.path
@@ -54,6 +54,11 @@ export function extractChangedResponseArtifacts(
     })
   }
   return artifacts
+}
+
+/** Older answers have no version metadata; retain their linked result shelf without inventing version history. */
+export function extractUnversionedResponseArtifacts(text: string): ResponseArtifact[] {
+  return extractResponseArtifacts(text).filter(artifact => !isSessionScratchPath(artifact.path))
 }
 
 const DOCUMENT_EXTENSIONS = new Set([

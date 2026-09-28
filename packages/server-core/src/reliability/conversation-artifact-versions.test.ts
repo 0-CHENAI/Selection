@@ -258,5 +258,6 @@ test('deleting a tracked file publishes a restorable deletion, and restoring pub
 
 test('Markdown links preserve exact file identity across encodings, references and Windows paths', () => {
   expect(localArtifactLinks('[报告][r]\n\n[r]: <file:///D:/中文%20目录/report.html>\n\n`[fake](secret.txt)`\n\n[远程](https://example.com/a.html)')).toEqual(['D:/中文 目录/report.html'])
+  expect(localArtifactLinks(String.raw`[报告](file:///C:\Users\me\Desktop\report.docx)`)).toEqual(['C:/Users/me/Desktop/report.docx'])
   expect(localArtifactLinks('[a](a.txt) [b](a.txt)\n\n```image-preview\n{"src":"data/a.png"}\n```')).toEqual(['a.txt', 'data/a.png'])
 })

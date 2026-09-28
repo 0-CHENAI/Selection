@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test'
-import { extractChangedResponseArtifacts, extractResponseArtifacts } from '../response-artifacts'
+import { extractChangedResponseArtifacts, extractResponseArtifacts, extractUnversionedResponseArtifacts } from '../response-artifacts'
 
 describe('final response artifacts', () => {
   it('collects delivered documents, images and reference links in response order', () => {
@@ -15,6 +15,8 @@ describe('final response artifacts', () => {
   it('deduplicates Windows file URLs and paths without changing the open target', () => {
     const files = extractResponseArtifacts('[报告](file:///C:/Reports/Final.docx)\n[重复](C:/reports/final.docx)')
     expect(files).toEqual([{ path: 'C:/Reports/Final.docx', name: 'Final.docx', extension: 'docx' }])
+    expect(extractUnversionedResponseArtifacts(String.raw`[报告](file:///C:\Users\me\Desktop\Final.docx)`))
+      .toEqual([{ path: 'C:/Users/me/Desktop/Final.docx', name: 'Final.docx', extension: 'docx' }])
   })
 
   it('collects preview specs and deduplicates links to the same delivered file', () => {
@@ -68,10 +70,24 @@ it('shows only newly created or changed files on the delivery shelf', () => {
   expect(extractChangedResponseArtifacts(answer)).toEqual([])
 })
 
+it('keeps the linked result shelf for answers saved before version metadata existed', () => {
+  const answer = '[报告](report.docx) [草稿]({{SESSION_PATH}}/data/draft.docx)'
+  expect(extractUnversionedResponseArtifacts(answer)).toEqual([
+    { path: 'report.docx', name: 'report.docx', extension: 'docx' },
+  ])
+  expect(extractChangedResponseArtifacts(answer, [])).toEqual([])
+})
+
 it('shows a deletion even when the answer does not link the file, and keeps a citation off the shelf', () => {
   expect(extractChangedResponseArtifacts('旧稿已删除。', [{ path: '/reports/old.docx', ordinal: 2, change: 'deleted' }]))
     .toEqual([{ path: '/reports/old.docx', name: 'old.docx', extension: 'docx', change: 'deleted' }])
   expect(extractChangedResponseArtifacts('[上一份报告](/reports/old.docx)')).toEqual([])
+})
+
+it('shows a restored version even when the answer does not repeat its file link', () => {
+  expect(extractChangedResponseArtifacts('已恢复第 1 版。', [
+    { path: 'C:/Reports/report.docx', ordinal: 3, change: 'restored' },
+  ])).toEqual([{ path: 'C:/Reports/report.docx', name: 'report.docx', extension: 'docx', change: 'restored' }])
 })
 
 it('keeps helper scripts and other session scratch off the result shelf', () => {

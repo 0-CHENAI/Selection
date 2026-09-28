@@ -12293,6 +12293,16 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
           turnId: event.turnId,
           parentToolUseId: event.parentToolUseId,
         }
+        if (!isIntermediate && hasRenderableAssistantText(content)) {
+          const owner = managed.messages.findLast(message => message.role === 'user' && !message.hidden && !message.isQueued)
+          if (owner) {
+            try {
+              assistantMessage.artifactVersions = await managed.conversationArtifactVersions?.capture(content, `${managed.id}/${owner.id}`)
+            } catch (error) {
+              sessionLog.warn('Artifact version recording failed for streamed answer', { sessionId, messageId: assistantMessage.id, error })
+            }
+          }
+        }
         managed.messages.push(assistantMessage)
         if (completesActiveStream) {
           managed.streamingText = ''
@@ -12339,7 +12349,7 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
           }
         }
 
-        if (!hideDraft) this.sendEvent({ type: 'text_complete', sessionId, text: content, isIntermediate, phase: event.phase, presentationProtocol: event.presentationProtocol, answerProtocol: assistantMessage.answerProtocol, answerRunId: assistantMessage.answerRunId, answerRoutingVersion: assistantMessage.answerRoutingVersion, turnId: event.turnId, parentToolUseId: event.parentToolUseId, timestamp: assistantMessage.timestamp, messageId: assistantMessage.id }, workspaceId)
+        if (!hideDraft) this.sendEvent({ type: 'text_complete', sessionId, text: content, isIntermediate, phase: event.phase, presentationProtocol: event.presentationProtocol, answerProtocol: assistantMessage.answerProtocol, answerRunId: assistantMessage.answerRunId, answerRoutingVersion: assistantMessage.answerRoutingVersion, artifactVersions: assistantMessage.artifactVersions, turnId: event.turnId, parentToolUseId: event.parentToolUseId, timestamp: assistantMessage.timestamp, messageId: assistantMessage.id }, workspaceId)
 
         // Persist session after complete message to prevent data loss on quit
         this.persistSession(managed)

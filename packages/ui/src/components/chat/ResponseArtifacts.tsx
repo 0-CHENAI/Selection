@@ -120,7 +120,7 @@ export function ResponseArtifacts({ artifacts, versions, onOpenFile, onOpenArtif
                       </button>
                     </DropdownMenuTrigger>
                     <StyledDropdownMenuContent align="end">
-                      {onManageArtifact && onOpenArtifact && <StyledDropdownMenuItem onSelect={() => { void open(artifact.path, 'versions') }}><Layers3 />{t('chat.artifactVersions.title')}</StyledDropdownMenuItem>}
+                      {version && onManageArtifact && onOpenArtifact && <StyledDropdownMenuItem onSelect={() => { void open(artifact.path, 'versions') }}><Layers3 />{t('chat.artifactVersions.title')}</StyledDropdownMenuItem>}
                       {(onOpenArtifact || onOpenFileExternal) && (
                         <StyledDropdownMenuItem onSelect={() => { void open(artifact.path, 'external') }}>
                           <ExternalLink />
@@ -139,7 +139,7 @@ export function ResponseArtifacts({ artifacts, versions, onOpenFile, onOpenArtif
               {unavailable.has(artifact.path) && <div id={`${listId}-error-${index}`} role="status" className="mt-1 flex flex-wrap items-center gap-1.5 px-2 text-xs text-foreground">
                 <AlertTriangle aria-hidden="true" className="size-3.5 shrink-0 text-info" />
                 <span>{t('toast.failedToOpenFile')}</span>
-                {onManageArtifact && onOpenArtifact && <button type="button" className="underline underline-offset-2 hover:text-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded-sm" onClick={() => { void open(artifact.path, 'versions') }}>{t('chat.artifactVersions.title')}</button>}
+                {version && onManageArtifact && onOpenArtifact && <button type="button" className="underline underline-offset-2 hover:text-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded-sm" onClick={() => { void open(artifact.path, 'versions') }}>{t('chat.artifactVersions.title')}</button>}
               </div>}
             </li>
             )})}

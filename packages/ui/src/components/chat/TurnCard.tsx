@@ -8,7 +8,7 @@ import { formatUserMessageTime } from './UserMessageBubble'
 import { isAnswerDeliveryTool, localizedToolLabel } from './tool-labels'
 import { usePacedSource } from './usePacedSource'
 import { ResponseArtifacts } from './ResponseArtifacts'
-import { extractChangedResponseArtifacts } from './response-artifacts'
+import { extractChangedResponseArtifacts, extractUnversionedResponseArtifacts } from './response-artifacts'
 import { ResponseBodyGrowth } from './ResponseBodyGrowth'
 import { useCompletionActions } from './useCompletionActions'
 import { useTranslation } from 'react-i18next'
@@ -1916,7 +1916,9 @@ export function ResponseCard({
   const responseText = parsedSkillUsage.content
   const startsWithHtmlPreview = /^\s*(?:```html-preview(?:\s|$)|html-preview[ \t]*\n[ \t]*\{)/.test(responseText)
   const artifacts = useMemo(
-    () => showArtifacts ? extractChangedResponseArtifacts(responseText, artifactVersions) : [],
+    () => !showArtifacts ? [] : artifactVersions === undefined
+      ? extractUnversionedResponseArtifacts(responseText)
+      : extractChangedResponseArtifacts(responseText, artifactVersions),
     [showArtifacts, responseText, artifactVersions],
   )
   const paced = usePacedSource(responseText, isStreaming, completedRevealStartTime, revealIdentity ?? messageId)
