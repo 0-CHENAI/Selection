@@ -1,5 +1,5 @@
 import { test, expect } from 'bun:test'
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, unlinkSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { localArtifactLinks, localArtifactPath } from '@craft-agent/shared/utils'
@@ -55,8 +55,10 @@ test('a file created at the turn boundary survives small filesystem timestamp sk
   try {
     const file = join(root, 'report.txt')
     const store = new ArtifactVersions(join(root, 'versions'), 'host', 'workspace')
-    const turn = new ConversationArtifactVersions(store, [root], async path => realpathSync(path), () => {}, Date.now() + 1)
     writeFileSync(file, 'new')
+    // Use the filesystem's reported timestamp so this checks the 1 ms boundary
+    // even when the Windows runner clock and file metadata have different precision.
+    const turn = new ConversationArtifactVersions(store, [root], async path => realpathSync(path), () => {}, statSync(file).birthtimeMs + 1)
     expect((await turn.capture('[报告](report.txt)', 'session/user-1')).map(ref => ref.change)).toEqual(['created'])
   } finally { rmSync(root, { recursive: true, force: true }) }
 })
