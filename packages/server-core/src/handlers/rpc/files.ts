@@ -1,4 +1,5 @@
 import { ArtifactVersions } from '../../reliability/artifact-versions'
+import { withHistoricalAnswerTitles } from '../../reliability/conversation-artifact-versions'
 import { fileFingerprint } from '../../../../shared/src/agent/backend/pi/file-operation-receipts'
 import { existsSync } from 'node:fs'
 import { hostname } from 'node:os'
@@ -10,7 +11,7 @@ import { randomUUID } from 'crypto'
 import { RPC_CHANNELS, type FileAttachment, type DirectoryListingResult, type FilePathStat } from '@craft-agent/shared/protocol'
 import type { StoredAttachment } from '@craft-agent/core/types'
 import { readFileAttachment, validateImageForClaudeAPI, IMAGE_LIMITS } from '@craft-agent/shared/utils'
-import { getSessionAttachmentsPath, validateSessionId } from '@craft-agent/shared/sessions'
+import { getSessionAttachmentsPath, loadSession as loadStoredSession, validateSessionId } from '@craft-agent/shared/sessions'
 import { getWorkspaceByNameOrId } from '@craft-agent/shared/config'
 import { resizeImageForAPI, inspectImageBuffer } from '@craft-agent/server-core/services'
 import { sanitizeFilename, resolveWorkspaceIdForFileAccess, validateWorkspaceFilePath } from '@craft-agent/server-core/handlers'
@@ -96,12 +97,27 @@ export function registerFilesHandlers(server: RpcServer, deps: HandlerDeps): voi
     const workspace = getWorkspaceByNameOrId(workspaceId)
     if (!workspace) throw new Error('Workspace not found')
     const store = new ArtifactVersions(join(workspace.rootPath, 'artifacts', 'versions'), hostname(), workspaceId)
+    const titled = (record: import('../../reliability/artifact-versions').ArtifactRecord) => {
+      const sessions = new Map<string, ReturnType<typeof loadStoredSession>>()
+      return withHistoricalAnswerTitles(record, (sourceRunId, versionId) => {
+        const separator = sourceRunId.lastIndexOf('/')
+        if (separator < 1) return undefined
+        const sessionId = sourceRunId.slice(0, separator)
+        try { validateSessionId(sessionId) } catch { return undefined }
+        if (!sessions.has(sessionId)) {
+          try { sessions.set(sessionId, loadStoredSession(workspace.rootPath, sessionId)) }
+          catch { sessions.set(sessionId, null) }
+        }
+        return sessions.get(sessionId)?.messages.find(message => message.type === 'assistant'
+          && message.artifactVersions?.some(ref => ref.versionId === versionId))?.content
+      })
+    }
     if (operation.type === 'register') {
       if (operation.alternativePaths !== undefined && (!Array.isArray(operation.alternativePaths)
         || operation.alternativePaths.some(path => typeof path !== 'string' || !path))) throw new Error('Invalid artifact paths')
       const paths = []
       for (const path of [operation.path, ...(operation.alternativePaths ?? [])]) paths.push(await validateWorkspaceFilePath(path, workspaceId))
-      return store.register(paths[0]!, undefined, paths.slice(1))
+      return titled(store.register(paths[0]!, undefined, paths.slice(1)))
     }
     const record = store.read(operation.artifactId)
     if (operation.type === 'relocate') {
@@ -111,7 +127,7 @@ export function registerFilesHandlers(server: RpcServer, deps: HandlerDeps): voi
       return relocated
     }
     await validateWorkspaceFilePath(record.path, workspaceId)
-    if (operation.type === 'read') return store.reconcile(record.id)
+    if (operation.type === 'read') return titled(store.reconcile(record.id))
     if (operation.type === 'restore') {
       const restored = store.restore(record.id, operation.expectedVersion, operation.versionId)
       deps.sessionManager.notifyArtifactApplied?.(workspaceId)

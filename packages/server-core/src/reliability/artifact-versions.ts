@@ -3,7 +3,7 @@ import { createHash, randomUUID } from 'node:crypto'
 import { closeSync, existsSync, fsyncSync, lstatSync, mkdirSync, openSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
 import { basename, dirname, join, resolve } from 'node:path'
 
-export interface ArtifactVersion { ordinal?: number; id: string; hash: string; size: number; createdAt: number; sourceRunId?: string; restoredFrom?: string; summary?: string }
+export interface ArtifactVersion { ordinal?: number; id: string; hash: string; size: number; createdAt: number; sourceRunId?: string; restoredFrom?: string; summary?: string; summaryOrigin?: 'assistant' }
 export interface ArtifactRecord { version: 1; id: string; hostId: string; workspaceId: string; path: string; currentVersion: string; versions: ArtifactVersion[]; previousPaths?: string[]; cleanupRequests?: Record<string, { expectedVersion: string; versionIds: string[] }> }
 export class ArtifactConflict extends Error { constructor() { super('Artifact changed outside this operation; candidate retained.'); this.name = 'ArtifactConflict' } }
 const hash = (data: Buffer) => createHash('sha256').update(data).digest('hex')
@@ -43,11 +43,11 @@ export class ArtifactVersions {
     else if (!lstatSync(path).isFile() || lstatSync(path).isSymbolicLink() || hash(readFileSync(path)) !== digest) throw new Error('Artifact version blob is damaged')
     return digest
   }
-  register(path: string, sourceRunId?: string, alternativePaths: string[] = [], summary?: string): ArtifactRecord {
+  register(path: string, sourceRunId?: string, alternativePaths: string[] = [], summary?: string, summaryOrigin?: 'assistant'): ArtifactRecord {
     const release = acquireProjectLock(join(this.root, 'locks', 'registry'))
-    try { return this.registerUnlocked(path, sourceRunId, alternativePaths, summary) } finally { release() }
+    try { return this.registerUnlocked(path, sourceRunId, alternativePaths, summary, summaryOrigin) } finally { release() }
   }
-  private registerUnlocked(path: string, sourceRunId?: string, alternativePaths: string[] = [], summary?: string): ArtifactRecord {
+  private registerUnlocked(path: string, sourceRunId?: string, alternativePaths: string[] = [], summary?: string, summaryOrigin?: 'assistant'): ArtifactRecord {
     const canonical = canonicalLocation(path)
     // A live primary path is authoritative. Alternatives only recover missing links.
     const candidates = existsSync(canonical) ? [canonical] : [canonical, ...alternativePaths.map(canonicalLocation)]
@@ -55,7 +55,8 @@ export class ArtifactVersions {
     if (existing) return this.reconcileLocked(existing.id, true)
     const id = randomUUID()
     const { bytes } = this.snapshot(canonical)
-    const first: ArtifactVersion = { ordinal: 1, id: randomUUID(), hash: this.put(bytes), size: bytes.length, createdAt: Date.now(), sourceRunId, summary }
+    const first: ArtifactVersion = { ordinal: 1, id: randomUUID(), hash: this.put(bytes), size: bytes.length, createdAt: Date.now(), sourceRunId, summary,
+      ...(summaryOrigin ? { summaryOrigin } : {}) }
     const record: ArtifactRecord = { version: 1, id, hostId: this.hostId, workspaceId: this.workspaceId, path: canonical, currentVersion: first.id, versions: [first] }
     atomicWrite(this.recordPath(id), JSON.stringify(record)); return record
   }
@@ -83,6 +84,7 @@ export class ArtifactVersions {
       || new Set(record.versions.map(v => v.id)).size !== record.versions.length
       || record.versions.some(v => !v || typeof v.id !== 'string' || !/^[a-f0-9]{64}$/.test(v.hash)
         || v.summary !== undefined && typeof v.summary !== 'string'
+        || v.summaryOrigin !== undefined && v.summaryOrigin !== 'assistant'
         || !Number.isSafeInteger(v.size) || v.size < 0 || !Number.isFinite(v.createdAt))) throw new Error('Unsupported or invalid artifact record')
     let ordinal = 0
     for (const version of record.versions) {
@@ -110,15 +112,30 @@ export class ArtifactVersions {
     })
     return record
   }
+  /** Resolve historical message references without trusting the link text or current path. */
+  versionSourceRunIds(versionIds: readonly string[]): Map<string, string | undefined> {
+    const wanted = new Set(versionIds)
+    const found = new Map<string, string | undefined>()
+    if (!wanted.size) return found
+    for (const entry of readdirSync(this.root)) {
+      if (!/^[a-f0-9-]+\.json$/.test(entry)) continue
+      for (const version of this.read(entry.slice(0, -5)).versions) {
+        if (wanted.has(version.id)) found.set(version.id, version.sourceRunId)
+      }
+      if (found.size === wanted.size) break
+    }
+    return found
+  }
   /** Record settled file bytes without modifying the file or creating duplicate versions. */
-  capture(id: string, sourceRunId?: string, summary?: string): ArtifactRecord {
+  capture(id: string, sourceRunId?: string, summary?: string, summaryOrigin?: 'assistant'): ArtifactRecord {
     return this.locked(id, () => {
       if (existsSync(`${this.recordPath(id)}.pending`)) throw new Error('Reconcile interrupted applications before recording versions')
       const record = this.read(id)
       const snapshot = this.snapshot(record.path)
       if (snapshot.digest === record.versions.find(version => version.id === record.currentVersion)!.hash) return record
       const next: ArtifactVersion = { ordinal: record.versions.at(-1)!.ordinal! + 1, id: randomUUID(),
-        hash: this.put(snapshot.bytes), size: snapshot.bytes.length, createdAt: Date.now(), sourceRunId, summary }
+        hash: this.put(snapshot.bytes), size: snapshot.bytes.length, createdAt: Date.now(), sourceRunId, summary,
+        ...(summaryOrigin ? { summaryOrigin } : {}) }
       const after = { ...record, currentVersion: next.id, versions: [...record.versions, next] }
       atomicWrite(this.recordPath(id), JSON.stringify(after))
       return after
@@ -315,9 +332,9 @@ export class ArtifactVersions {
     return recovered
     }, registryHeld)
   }
-  restore(id: string, expectedVersion: string, versionId: string): ArtifactRecord {
+  restore(id: string, expectedVersion: string, versionId: string, sourceRunId?: string): ArtifactRecord {
     const temp = join(this.root, `${randomUUID()}.restore`)
-    try { atomicWrite(temp, this.versionBytes(id, versionId)); return this.apply(id, expectedVersion, temp, undefined, versionId) }
+    try { atomicWrite(temp, this.versionBytes(id, versionId)); return this.apply(id, expectedVersion, temp, sourceRunId, versionId) }
     finally { if (existsSync(temp)) unlinkSync(temp) }
   }
   relocate(id: string, path: string, expectedVersion: string): ArtifactRecord {

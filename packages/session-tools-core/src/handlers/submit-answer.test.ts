@@ -8,6 +8,13 @@ it('delivers the complete body when a provider echoes UI metadata', async () => 
   expect(result.isError).not.toBe(true)
   expect(body).toBe('## 完成\n\n[交付文件](/tmp/result.html)')
 })
+it('passes the AI-written artifact version title separately from the visible answer', async () => {
+  let delivered: [string, string | undefined] | undefined
+  const result = await handleSubmitAnswer({ submitAnswer: async (markdown, title) => { delivered = [markdown, title] } } as SessionToolContext,
+    { markdown: '[报告](/tmp/report.docx)', artifactVersionTitle: '修复目录分页并统一表格格式' })
+  expect(result.isError).not.toBe(true)
+  expect(delivered).toEqual(['[报告](/tmp/report.docx)', '修复目录分页并统一表格格式'])
+})
 it('rejects the delivery receipt so it cannot become the published answer', async () => {
   let calls = 0
   const ctx = { submitAnswer: async () => { calls++ } } as unknown as SessionToolContext

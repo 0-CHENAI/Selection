@@ -143,7 +143,7 @@ describe('explicit answer delivery lifecycle (#330)', () => {
     managed.messages = [{ id: 'previous', role: 'assistant', content: '[报告](report.html)', timestamp: 1 }]
     install(async function* () {
       writeFileSync(file, 'after')
-      await control!.submit({ ...submission, markdown: '[已修改报告](report.html)' })
+      await control!.submit({ ...submission, markdown: '已调整报告颜色。\n\n[已修改报告](report.html)', artifactVersionTitle: '统一报告配色与重点标注' })
       yield { type: 'complete' }
     })
     await manager.sendMessage(managed.id, '调整报告颜色')
@@ -151,11 +151,11 @@ describe('explicit answer delivery lifecycle (#330)', () => {
     const event = events.find(event => event.type === 'text_complete' && event.answerCommitted)!
     expect(event.artifactVersions).toEqual(answer.artifactVersions)
     expect(answer.artifactVersions).toHaveLength(1)
-    expect(answer.artifactVersions![0]).toMatchObject({ path: 'report.html', ordinal: 2 })
+    expect(answer.artifactVersions![0]).toMatchObject({ path: 'report.html', ordinal: 2, change: 'modified' })
     const versions = new ArtifactVersions(join(root, 'artifacts', 'versions'), hostname(), managed.workspace.id)
     const record = versions.findByPath(file)!
     expect(record.versions).toHaveLength(2)
-    expect(record.versions[1]!.summary).toBe('调整报告颜色')
+    expect(record.versions[1]).toMatchObject({ summary: '统一报告配色与重点标注', summaryOrigin: 'assistant' })
     expect(versions.versionBytes(record.id, record.versions[0]!.id).toString()).toBe('before')
     expect(prompts).toHaveLength(1)
   })

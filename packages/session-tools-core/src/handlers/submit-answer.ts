@@ -6,6 +6,8 @@ import { successResponse, errorResponse } from '../response.ts';
 // discard only those known display fields. Routing and unknown business fields remain invalid.
 export const SubmitAnswerSchema = z.object({
   markdown: z.string().refine(value => /[^\s|]/u.test(value), 'Answer must contain renderable text'),
+  artifactVersionTitle: z.string().trim().min(4).max(60).optional()
+    .describe('When this turn creates or changes a delivered file, write a specific, short change title for its saved version. Describe the result, not the user request. Omit for answers without file changes.'),
 }).strict();
 
 const DELIVERY_RECEIPT = 'Answer delivered. Stop here.'
@@ -30,7 +32,7 @@ export async function handleSubmitAnswer(ctx: SessionToolContext, args: unknown)
   }
   if (!ctx.submitAnswer) return errorResponse('Answer delivery is unavailable in this session.');
   try {
-    await ctx.submitAnswer(parsed.data.markdown);
+    await ctx.submitAnswer(parsed.data.markdown, parsed.data.artifactVersionTitle);
     return successResponse(DELIVERY_RECEIPT);
   } catch (error) {
     return errorResponse(error instanceof Error ? error.message : 'Answer delivery failed.');

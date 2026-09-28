@@ -1,3 +1,4 @@
+import { isSessionScratchPath } from '@craft-agent/shared/utils/artifact-links'
 import { unified } from 'unified'
 import remarkParse from 'remark-parse'
 import { visit } from 'unist-util-visit'
@@ -5,10 +6,54 @@ import { decodeFilePath, resolveMarkdownLinkTarget } from '../markdown/link-targ
 import { normalizePreviewItems, parseMarkdownPreviewSpec } from '../markdown/markdown-preview-helpers'
 import { promoteBarePreviewBlocks } from '../markdown/promote-preview-blocks'
 
+export type ArtifactChange = 'created' | 'modified' | 'deleted' | 'restored'
+
 export interface ResponseArtifact {
   path: string
   name: string
   extension: string
+  /** Present for files this answer actually created, edited, deleted, or restored. */
+  change?: ArtifactChange
+}
+
+export function artifactPathKey(path: string): string {
+  const normalized = path.replace(/\\/g, '/').replace(/^(\.\/)+/, '')
+  return /^[a-z]:\//i.test(normalized) || normalized.startsWith('//') ? normalized.toLowerCase() : normalized
+}
+
+function publishedChange(version: { change?: ArtifactChange; ordinal?: number }): ArtifactChange {
+  if (version.change) return version.change
+  return version.ordinal === 1 ? 'created' : 'modified'
+}
+
+/** The shelf lists result files this answer hands over, not helper scripts or other scratch. */
+export function extractChangedResponseArtifacts(
+  text: string,
+  versions?: readonly { path: string; ordinal?: number; change?: ArtifactChange }[],
+): ResponseArtifact[] {
+  if (!versions?.length) return []
+  const linked = extractResponseArtifacts(text)
+  const artifacts: ResponseArtifact[] = []
+  const seen = new Set<string>()
+  for (const version of versions) {
+    if (isSessionScratchPath(version.path)) continue
+    const key = artifactPathKey(version.path)
+    if (seen.has(key)) continue
+    const match = linked.find(artifact => artifactPathKey(artifact.path) === key)
+    // A deleted result has nothing left to link. Other files must be the ones the answer delivers.
+    if (!match && version.change !== 'deleted') continue
+    seen.add(key)
+    const path = match?.path ?? version.path
+    const name = path.replace(/\\/g, '/').split('/').pop() || version.path
+    const dot = name.lastIndexOf('.')
+    artifacts.push({
+      path,
+      name,
+      extension: dot > 0 ? name.slice(dot + 1).toLowerCase() : '',
+      change: publishedChange(version),
+    })
+  }
+  return artifacts
 }
 
 const DOCUMENT_EXTENSIONS = new Set([
@@ -47,7 +92,7 @@ export function extractResponseArtifacts(text: string): ResponseArtifact[] {
     const dot = name.lastIndexOf('.')
     const extension = dot > 0 ? name.slice(dot + 1).toLowerCase() : ''
     if (!DOCUMENT_EXTENSIONS.has(extension)) return
-    const identity = /^[a-z]:\//i.test(normalized) || normalized.startsWith('//') ? normalized.toLowerCase() : normalized
+    const identity = artifactPathKey(normalized)
     if (seen.has(identity)) return
     seen.add(identity)
     artifacts.push({ path, name, extension })

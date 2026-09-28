@@ -1,5 +1,5 @@
 export interface ArtifactVersion {
-  ordinal?: number; id: string; hash: string; size: number; createdAt: number; sourceRunId?: string; restoredFrom?: string; summary?: string
+  ordinal?: number; id: string; hash: string; size: number; createdAt: number; sourceRunId?: string; restoredFrom?: string; summary?: string; summaryOrigin?: 'assistant'
 }
 export interface BodyFeedbackRevision {
   requestMessageId: string; createdAt: number; instruction: string; sourceContentHash?: string; original?: string

@@ -14,11 +14,11 @@ import { workspaceDeliveryContract } from '../reliability/workspace-delivery-con
 import { integrateCandidates } from '../reliability/integrate-candidates'
 import { validateCandidateFile } from '../reliability/validate-candidate'
 import { ArtifactVersions, atomicWrite } from '../reliability/artifact-versions'
-import { ConversationArtifactVersions } from '../reliability/conversation-artifact-versions'
+import { ConversationArtifactVersions, withDeliveredArtifactReferences } from '../reliability/conversation-artifact-versions'
 import { FeedbackStore, assertFeedbackAnchor } from '../reliability/feedback-store'
 import { inside, assertIsolatedTool, prepareIsolatedWorkspace, type IsolatedWorkspace } from '../reliability/isolated-workspace'
 import { hostname as executionHostName } from 'node:os'
-import { readFileSync as loadIsolationFile, mkdirSync as makeFeedbackDirectory, writeFileSync as saveFeedbackCandidate, realpathSync } from 'node:fs'
+import { readFileSync as loadIsolationFile, mkdirSync as makeFeedbackDirectory, writeFileSync as saveFeedbackCandidate, realpathSync, unlinkSync } from 'node:fs'
 import { basename as feedbackBasename, extname as feedbackExtension } from 'node:path'
 import { validateWorkspaceFilePath } from '../handlers/utils'
 import { executionTaskIdentity, claimExecutionCheckpoint, readExecutionCheckpoint, writeExecutionCheckpoint, sdkStateHash, sdkStateSnapshot, recoverySdkSnapshot, recoveryTranscriptMatches, verifiedFileOperations, recoveryBlocker, toolRecoveryClass, type ExecutionCheckpoint } from '../reliability/execution-checkpoint'
@@ -3010,7 +3010,20 @@ export class SessionManager implements ISessionManager {
         nextStep: checkpoint.state.lastDecision?.assessment.nextStep, evidenceIds: checkpoint.state.lastDecision?.assessment.evidenceIds }
     }
 
-    return managedToSession(m, { messages: m.messages })
+    return managedToSession(m, { messages: this.deliveredArtifactMessages(m) })
+  }
+
+  private deliveredArtifactMessages(managed: ManagedSession): Message[] {
+    const versionIds = managed.messages.flatMap(message => message.artifactVersions?.map(ref => ref.versionId) ?? [])
+    if (!versionIds.length) return managed.messages
+    try {
+      const store = new ArtifactVersions(join(managed.workspace.rootPath, 'artifacts', 'versions'), executionHostName(), managed.workspace.id)
+      return withDeliveredArtifactReferences(managed.messages, store.versionSourceRunIds(versionIds))
+    } catch (error) {
+      sessionLog.warn('Could not verify historical artifact references', { sessionId: managed.id, error })
+      return managed.messages.map(message => message.artifactVersions?.length
+        ? { ...message, artifactVersions: [] } : message)
+    }
   }
 
   /**
@@ -3680,7 +3693,7 @@ export class SessionManager implements ISessionManager {
       this.notifySessionCreated(workspaceId, storedSession.id)
     }
 
-    return managedToSession(managed, isBranch ? { messages: managed.messages } : undefined)
+    return managedToSession(managed, isBranch ? { messages: this.deliveredArtifactMessages(managed) } : undefined)
   }
 
   /**
@@ -7413,7 +7426,8 @@ export class SessionManager implements ISessionManager {
         const tracker = new ConversationArtifactVersions(store,
           [managed.workingDirectory, getSessionStoragePath(managed.workspace.rootPath, managed.id), managed.workspace.rootPath].filter((path): path is string => !!path),
           path => validateWorkspaceFilePath(path, managed.workspace.id),
-          () => sessionLog.warn('Artifact version recording failed', { sessionId: managed.id }))
+          () => sessionLog.warn('Artifact version recording failed', { sessionId: managed.id }),
+          Math.min(managed.messages.findLast(m => m.role === 'user' && !m.hidden && !m.isQueued)?.timestamp ?? Date.now(), Date.now()))
         managed.conversationArtifactVersions = tracker
         for (const prior of managed.messages) {
           if (managed.processingGeneration !== myGeneration || managed.stopRequested) break
@@ -8679,11 +8693,11 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
       this.flushDelta(managed.id, managed.workspace.id)
       managed.streamingText = ''
       managed.streamingTurnId = undefined
+      managed.streamingPhase = undefined
       managed.streamingStartedAt = undefined
       rollbackFeedback = linkAnnotationFollowUpResults(managed.messages, state.userMessageId, answer,
         (content, hash) => saveBodyFeedbackVersion(getSessionStoragePath(managed.workspace.rootPath, managed.id), content, hash))
-      answer.artifactVersions = await managed.conversationArtifactVersions?.capture(answer.content, `${managed.id}/${state.userMessageId}`,
-        managed.messages.find(message => message.id === state.userMessageId)?.content ?? '')
+      answer.artifactVersions = await managed.conversationArtifactVersions?.capture(answer.content, `${managed.id}/${state.userMessageId}`, submission.artifactVersionTitle)
       if (managed.stopRequested || managed.processingGeneration !== state.generation || managed.answerDelivery !== state) throw new Error('Answer delivery was interrupted.')
       managed.messages.push(answer)
       state.committedMessageId = answer.id
@@ -8739,7 +8753,7 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
     const userIndex = managed.messages.findIndex(m => m.id === state.userMessageId)
     if (userIndex < 0) return undefined
     const draft = [...managed.messages.slice(userIndex + 1)].reverse().find(m =>
-      m.role === 'assistant' && !m.hidden && m.isIntermediate
+      m.role === 'assistant' && m.isIntermediate
       && m.answerRunId === state.runId && hasRenderableAssistantText(m.content))
     if (!draft) return undefined
     try { this.assertAnswerReady(managed, state, draft.content) }
@@ -8768,8 +8782,7 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
       this.assertAnswerReady(managed, state, draft.content)
       rollbackFeedback = linkAnnotationFollowUpResults(managed.messages, state.userMessageId, answer,
         (content, hash) => saveBodyFeedbackVersion(getSessionStoragePath(managed.workspace.rootPath, managed.id), content, hash))
-      answer.artifactVersions = await managed.conversationArtifactVersions?.capture(answer.content, `${managed.id}/${state.userMessageId}`,
-        managed.messages.find(message => message.id === state.userMessageId)?.content ?? '')
+      answer.artifactVersions = await managed.conversationArtifactVersions?.capture(answer.content, `${managed.id}/${state.userMessageId}`)
       if (!isActive()) throw new Error('Answer delivery was interrupted.')
       managed.messages.push(answer)
       state.committedMessageId = answer.id
