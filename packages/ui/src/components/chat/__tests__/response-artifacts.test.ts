@@ -135,3 +135,13 @@ it('uses the explicit result selection instead of every linked or changed file',
   expect(extractDeliveredResponseArtifacts('旧稿已删除。', [{ path: '/reports/old.docx', ordinal: 2, change: 'deleted' }], []))
     .toEqual([{ path: '/reports/old.docx', name: 'old.docx', extension: 'docx', change: 'deleted' }])
 })
+
+it('shows a previewed HTML result even when the model submits an empty selection', () => {
+  const answer = '```html-preview\n{"src":"C:/Users/me/中文 报告 (1).html"}\n```\n\n已生成：[打开网页](C:/Users/me/中文%20报告%20(1).html)'
+  expect(extractDeliveredResponseArtifacts(answer, [], [])).toEqual([
+    { path: 'C:/Users/me/中文 报告 (1).html', name: '中文 报告 (1).html', extension: 'html' },
+  ])
+  expect(extractDeliveredResponseArtifacts('html-preview\n{"src":"/tmp/hello.html"}', [], [])).toEqual([
+    { path: '/tmp/hello.html', name: 'hello.html', extension: 'html' },
+  ])
+})

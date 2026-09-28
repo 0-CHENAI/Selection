@@ -2,7 +2,7 @@ import { existsSync, lstatSync, statSync } from 'node:fs'
 import { isAbsolute, join, resolve } from 'node:path'
 import { isSessionScratchPath, localArtifactLinks, localArtifactPath } from '@craft-agent/shared/utils'
 import type { ArtifactDeliveryRef, Message } from '@craft-agent/core'
-import { ArtifactVersions, type ArtifactRecord } from './artifact-versions'
+import { ArtifactVersions, canonicalLocation, type ArtifactRecord } from './artifact-versions'
 
 /** Use the agent's delivered prose as the version title, never the user's request. */
 export function artifactVersionTitle(markdown: string): string | undefined {
@@ -85,7 +85,7 @@ export class ConversationArtifactVersions {
       for (const candidate of isAbsolute(path) ? [path] : this.bases.map(base => resolve(base, path))) {
         try {
           const safe = await this.authorize(candidate)
-          if (existsSync(safe) && lstatSync(safe).isFile() && !isSessionScratchPath(safe)) { resolved = safe; break }
+          if (existsSync(safe) && lstatSync(safe).isFile() && !isSessionScratchPath(safe)) { resolved = canonicalLocation(safe); break }
         } catch { /* Another base may contain this relative path. */ }
       }
       if (!resolved) throw new Error(`Featured artifact is missing or unavailable: ${path}`)
@@ -123,7 +123,7 @@ export class ConversationArtifactVersions {
           const safe = await this.authorize(candidate)
           if (!existsSync(safe) || !lstatSync(safe).isFile()) continue
           const existing = this.store.findByPath(safe)
-          if (!existing && !featured.includes(safe) && !this.writtenThisTurn(safe)) break
+          if (!existing && !featured.includes(canonicalLocation(safe)) && !this.writtenThisTurn(safe)) break
           const record = existing ?? this.store.register(safe, sourceRunId, [], title, title ? 'assistant' : undefined)
           this.paths.add(record.path)
           deliveries.set(record.path, featured.includes(record.path) ? record.path : path)

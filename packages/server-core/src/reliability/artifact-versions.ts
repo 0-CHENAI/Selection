@@ -8,7 +8,7 @@ export interface ArtifactRecord { version: 1; id: string; hostId: string; worksp
 export class ArtifactConflict extends Error { constructor() { super('Artifact changed outside this operation; candidate retained.'); this.name = 'ArtifactConflict' } }
 const hash = (data: Buffer) => createHash('sha256').update(data).digest('hex')
 const validId = (id: string) => { if (!/^[a-f0-9-]+$/.test(id)) throw new Error('Invalid artifact identifier'); return id }
-function canonicalLocation(path: string): string {
+export function canonicalLocation(path: string): string {
   try { return realpathSync(path) } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
     let ancestor = resolve(path)

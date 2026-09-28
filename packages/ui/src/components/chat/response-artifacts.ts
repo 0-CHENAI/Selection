@@ -68,14 +68,14 @@ export function extractDeliveredResponseArtifacts(
   featured?: readonly string[],
 ): ResponseArtifact[] {
   if (featured) {
-    const selected = featured.flatMap(path => {
+    const selected = featured.length ? featured.flatMap(path => {
       const name = path.replace(/\\/g, '/').split('/').pop() ?? ''
       const dot = name.lastIndexOf('.')
       const extension = dot > 0 ? name.slice(dot + 1).toLowerCase() : ''
       if (isSessionScratchPath(path)) return []
       const version = versions?.find(ref => artifactPathKey(ref.path) === artifactPathKey(path))
       return [{ path, name, extension, ...(version ? { change: publishedChange(version) } : {}) }]
-    })
+    }) : extractPreviewResponseArtifacts(text)
     const deleted = extractChangedResponseArtifacts(text, versions?.filter(ref => ref.change === 'deleted'))
     const seen = new Set(selected.map(artifact => artifactPathKey(artifact.path)))
     return [...selected, ...deleted.filter(artifact => !seen.has(artifactPathKey(artifact.path)))]
@@ -96,7 +96,7 @@ const PREVIEW_BLOCKS = new Set(['markdown-preview', 'html-preview', 'image-previ
 const parser = unified().use(remarkParse)
 
 /** Only files explicitly linked in the final reply; never infer outputs from tool logs or disk. */
-export function extractResponseArtifacts(text: string): ResponseArtifact[] {
+export function extractResponseArtifacts(text: string, previewOnly = false): ResponseArtifact[] {
   const tree = parser.parse(promoteBarePreviewBlocks(normalizeWindowsMarkdownLinkDestinations(text)))
   const definitions = new Map<string, string>()
   visit(tree, 'definition', node => {
@@ -130,8 +130,8 @@ export function extractResponseArtifacts(text: string): ResponseArtifact[] {
     // A linked thumbnail represents its target, not a second deliverable.
     if ((node.type === 'image' || node.type === 'imageReference')
       && (parent?.type === 'link' || parent?.type === 'linkReference')) return
-    if (node.type === 'link' || node.type === 'image') add(node.url)
-    if (node.type === 'linkReference' || node.type === 'imageReference') {
+    if (!previewOnly && (node.type === 'link' || node.type === 'image')) add(node.url)
+    if (!previewOnly && (node.type === 'linkReference' || node.type === 'imageReference')) {
       const target = definitions.get(node.identifier.toLowerCase())
       if (target) add(target)
     }
@@ -140,4 +140,8 @@ export function extractResponseArtifacts(text: string): ResponseArtifact[] {
     }
   })
   return artifacts
+}
+
+function extractPreviewResponseArtifacts(text: string): ResponseArtifact[] {
+  return extractResponseArtifacts(text, true).filter(artifact => !isSessionScratchPath(artifact.path))
 }
