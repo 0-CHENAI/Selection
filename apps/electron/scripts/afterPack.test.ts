@@ -15,7 +15,32 @@ const { pruneForeignPlatformRuntimes, resolvePackagedResourcesRoot } = require('
   }) => string
 }
 
+const { copySharpRuntime } = require('./afterPack.cjs') as {
+  copySharpRuntime: (context: { arch: string; electronPlatformName: string; packager: { projectDir: string } }, resourcesRoot: string) => void
+}
+
 describe('afterPack OfficeCLI runtime pruning', () => {
+  it('copies the target sharp binding into the packaged app and rejects missing bindings', () => {
+    const root = mkdtempSync(join(tmpdir(), 'selection-sharp-package-'))
+    try {
+      const projectDir = join(root, 'apps', 'electron')
+      const resourcesRoot = join(root, 'packed', 'resources')
+      const source = join(root, 'node_modules', '@img')
+      mkdirSync(join(root, 'node_modules', 'sharp'), { recursive: true })
+      writeFileSync(join(root, 'node_modules', 'sharp', 'package.json'), JSON.stringify({ optionalDependencies: {
+        '@img/sharp-win32-x64': '0.34.5',
+      } }))
+      mkdirSync(join(source, 'sharp-win32-x64', 'lib'), { recursive: true })
+      writeFileSync(join(source, 'sharp-win32-x64', 'package.json'), '{}')
+      const context = { arch: 'x64', electronPlatformName: 'win32', packager: { projectDir } }
+      expect(() => copySharpRuntime(context, resourcesRoot)).toThrow('binding is missing')
+      writeFileSync(join(source, 'sharp-win32-x64', 'lib', 'sharp-win32-x64.node'), 'native binding')
+      expect(() => copySharpRuntime(context, resourcesRoot)).toThrow('libvips DLL is missing')
+      writeFileSync(join(source, 'sharp-win32-x64', 'lib', 'libvips-42.dll'), 'native dependency')
+      copySharpRuntime(context, resourcesRoot)
+      expect(existsSync(join(resourcesRoot, 'app', 'node_modules', '@img', 'sharp-win32-x64', 'lib', 'sharp-win32-x64.node'))).toBe(true)
+    } finally { rmSync(root, { recursive: true, force: true }) }
+  })
   it('never recursively packages prior desktop release directories', () => {
     const config = readFileSync(join(import.meta.dir, '../electron-builder.yml'), 'utf8')
     expect(config).toContain('- "!release/**"')

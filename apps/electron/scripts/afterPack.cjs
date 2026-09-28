@@ -17,6 +17,56 @@
 
 const path = require('path');
 const fs = require('fs');
+const os = require('os');
+const { execFileSync } = require('child_process');
+const { createRequire } = require('module');
+
+function copySharpRuntime(context, resourcesRoot) {
+  const archName = ({ 1: 'x64', 3: 'arm64' })[context.arch] || String(context.arch);
+  const target = `${context.electronPlatformName}-${archName}`;
+  const rootDir = path.resolve(context.packager.projectDir, '..', '..');
+  const sharpPackage = JSON.parse(fs.readFileSync(path.join(rootDir, 'node_modules', 'sharp', 'package.json'), 'utf8'));
+  // Windows prebuilt sharp already contains its libvips DLLs.
+  const packages = context.electronPlatformName === 'win32'
+    ? [`@img/sharp-${target}`]
+    : [`@img/sharp-${target}`, `@img/sharp-libvips-${target}`];
+
+  for (const name of packages) {
+    const source = path.join(rootDir, 'node_modules', name);
+    const destination = path.join(resourcesRoot, 'app', 'node_modules', name);
+    const version = sharpPackage.optionalDependencies?.[name];
+    if (!version) throw new Error(`Sharp does not support packaged target ${target}: ${name}`);
+
+    fs.rmSync(destination, { recursive: true, force: true });
+    fs.mkdirSync(path.dirname(destination), { recursive: true });
+    if (fs.existsSync(source)) {
+      fs.cpSync(source, destination, { recursive: true, dereference: true });
+    } else {
+      // Cross-platform builds do not install the target's optional dependency.
+      const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'selection-sharp-'));
+      try {
+        const archive = execFileSync('npm', ['pack', `${name}@${version}`, '--pack-destination', temporary, '--silent'],
+          { encoding: 'utf8' }).trim().split(/\r?\n/).at(-1);
+        if (!archive) throw new Error(`Could not download ${name}@${version}`);
+        fs.mkdirSync(destination, { recursive: true });
+        execFileSync('tar', ['-xzf', path.join(temporary, archive), '-C', destination, '--strip-components=1']);
+      } finally {
+        fs.rmSync(temporary, { recursive: true, force: true });
+      }
+    }
+  }
+
+  const binding = path.join(resourcesRoot, 'app', 'node_modules', `@img/sharp-${target}`, 'lib', `sharp-${target}.node`);
+  if (!fs.existsSync(binding)) throw new Error(`Packaged sharp binding is missing: ${binding}`);
+  if (context.electronPlatformName === 'win32' && !fs.existsSync(path.join(path.dirname(binding), 'libvips-42.dll'))) {
+    throw new Error(`Packaged sharp libvips DLL is missing for ${target}`);
+  }
+  if (target === `${process.platform}-${process.arch}`) {
+    const fromMain = createRequire(path.join(resourcesRoot, 'app', 'dist', 'main.cjs'));
+    fromMain(`@img/sharp-${target}/sharp.node`);
+  }
+  console.log(`Packaged sharp native runtime for ${target}`);
+}
 
 function pruneForeignPlatformRuntimes(context, resourcesRoot) {
   const archName = ({ 1: 'x64', 3: 'arm64' })[context.arch] || String(context.arch);
@@ -56,6 +106,7 @@ function resolvePackagedResourcesRoot(context) {
 module.exports = async function afterPack(context) {
   const resourcesRoot = resolvePackagedResourcesRoot(context);
   pruneForeignPlatformRuntimes(context, resourcesRoot);
+  copySharpRuntime(context, resourcesRoot);
 
   // Only process macOS builds
   if (context.electronPlatformName !== 'darwin') {
@@ -91,3 +142,4 @@ module.exports = async function afterPack(context) {
 
 module.exports.pruneForeignPlatformRuntimes = pruneForeignPlatformRuntimes;
 module.exports.resolvePackagedResourcesRoot = resolvePackagedResourcesRoot;
+module.exports.copySharpRuntime = copySharpRuntime;
