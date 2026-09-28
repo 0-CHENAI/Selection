@@ -1046,7 +1046,7 @@ function AppShellContent({
   // NavigationContext cannot see that local filter when it auto-selects a chat.
   // Select a project-bound session explicitly, or suppress auto-selection when
   // the project is empty so an unrelated global chat cannot remain on the right.
-  const handleJumpToProjectSessions = useCallback((projectId: string) => {
+  const handleJumpToProjectSessions = useCallback((projectId: string, sessionId?: string, newPanel?: boolean) => {
     setViewFiltersMap(prev => ({
       ...prev,
       allSessions: {
@@ -1058,14 +1058,14 @@ function AppShellContent({
     }))
 
     const hasOtherSecondaryFilters = false
-    const firstProjectSessionId = resolveProjectNavigationSessionId(
+    const targetProjectSessionId = sessionId ?? resolveProjectNavigationSessionId(
       activeSessionMetas,
       projectId,
       hasOtherSecondaryFilters,
     )
     navigate(
-      routes.view.allSessions(firstProjectSessionId ?? undefined),
-      firstProjectSessionId ? undefined : { skipAutoSelect: true },
+      routes.view.allSessions(targetProjectSessionId ?? undefined),
+      targetProjectSessionId ? (newPanel === undefined ? undefined : { newPanel }) : { skipAutoSelect: true },
     )
   }, [activeSessionMetas])
 
@@ -1211,6 +1211,7 @@ function AppShellContent({
     sessionStatuses: effectiveSessionStatuses,
     onSessionSourcesChange: handleSessionSourcesChange,
     onJumpToTaskSessions: handleJumpToTaskSessions,
+    onJumpToProjectSessions: handleJumpToProjectSessions,
     orchestrationProjectId: resolveNewSessionParams(listFilter, labelFilter, projectFilter, selectedProjectId)?.project ?? null,
     rightSidebarButton: null,
     isCompactMode: isAutoCompact,
@@ -1227,7 +1228,7 @@ function AppShellContent({
     automationTestResults,
     getAutomationHistory,
     onReplayAutomation: handleReplayAutomation,
-  }), [contextValue, handleDeleteSession, sources, skills, activeSessionWorkingDirectory, displayLabelConfigs, handleSessionLabelsChange, enabledModes, effectiveSessionStatuses, handleSessionSourcesChange, handleJumpToTaskSessions, listFilter, labelFilter, projectFilter, selectedProjectId, isAutoCompact, searchActive, searchQuery, handleChatMatchInfoChange, handleTestAutomation, handleSimulateMatch, handleToggleAutomation, handleDuplicateAutomation, handleDeleteAutomation, automationTestResults, getAutomationHistory, handleReplayAutomation])
+  }), [contextValue, handleDeleteSession, sources, skills, activeSessionWorkingDirectory, displayLabelConfigs, handleSessionLabelsChange, enabledModes, effectiveSessionStatuses, handleSessionSourcesChange, handleJumpToTaskSessions, handleJumpToProjectSessions, listFilter, labelFilter, projectFilter, selectedProjectId, isAutoCompact, searchActive, searchQuery, handleChatMatchInfoChange, handleTestAutomation, handleSimulateMatch, handleToggleAutomation, handleDuplicateAutomation, handleDeleteAutomation, automationTestResults, getAutomationHistory, handleReplayAutomation])
 
   // Persist expanded folders to localStorage (workspace-scoped)
   React.useEffect(() => {

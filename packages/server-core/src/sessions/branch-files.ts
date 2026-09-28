@@ -1,5 +1,5 @@
 import { cp, mkdir, readdir, readFile, writeFile } from 'node:fs/promises'
-import { join, resolve } from 'node:path'
+import { join, relative, resolve } from 'node:path'
 
 /** Keep the fork input and user artifacts inside the new session, never in its parent. */
 export async function copyBranchFiles(sourceDir: string, branchDir: string): Promise<string> {
@@ -13,6 +13,14 @@ export async function copyBranchFiles(sourceDir: string, branchDir: string): Pro
     const destination = entry.name === '.pi-sessions' ? snapshotDir : branchDir
     await cp(join(sourceDir, entry.name), join(destination, entry.name), {
       recursive: true, dereference: true, force: false, errorOnExist: false,
+      // Execution ownership belongs to one session. Keep user files under
+      // data/, but never inherit a parent's checkpoint or its lock directories.
+      filter: path => {
+        const within = relative(sourceDir, path).split(/[\\/]/)
+        return !(within[0] === 'data' && [
+          'execution-checkpoint.json', 'execution-checkpoint-lock', 'execution-owner',
+        ].includes(within[1] ?? ''))
+      },
     })
   }
   // SDK messages can reference attachments and generated files by absolute path.

@@ -32,6 +32,9 @@ describe('resolveSessionToolProxyName', () => {
 });
 
 describe('getSessionToolProxyDefs', () => {
+  it('exposes the managed artifact version tool to the model', () => {
+    expect(getSessionToolProxyDefs().map(def => def.name)).toContain('mcp__session__artifact_versions');
+  });
   it('does not expose disabled task authoring tools through any proxy name', () => {
     const names = getSessionToolProxyDefs().map(def => def.name);
     for (const name of ['create_task']) {

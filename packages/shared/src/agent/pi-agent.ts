@@ -1816,11 +1816,11 @@ export class PiAgent extends BaseAgent {
       return;
     }
     if (isSubmitAnswer(request.toolName)) {
-      const ctx = { ...this.getSessionToolContext(), submitAnswer: async (markdown: string) => {
+      const ctx = { ...this.getSessionToolContext(), submitAnswer: async (markdown: string, artifactVersionTitle?: string) => {
         if (!control || !request.toolCallId || !request.sdkMessageId || !request.sdkTurnAnchor) {
           throw new Error('Answer delivery requires an active SDK message and branch anchor.');
         }
-        await control.submit({ markdown, toolCallId: request.toolCallId, sdkMessageId: request.sdkMessageId, sdkTurnAnchor: request.sdkTurnAnchor });
+        await control.submit({ markdown, artifactVersionTitle, toolCallId: request.toolCallId, sdkMessageId: request.sdkMessageId, sdkTurnAnchor: request.sdkTurnAnchor });
         this.answerAccepted = true;
         this.abortReason = AbortReason.AnswerSubmitted;
       } };
@@ -2649,6 +2649,7 @@ export class PiAgent extends BaseAgent {
         answerRecovery: this.answerDelivery?.recovery,
         id: turnId,
         message: userMessage,
+        userTextOffset: userMessage.length - message.length,
         systemPrompt: fullSystemPrompt,
         images: images.length > 0 ? images : undefined,
       });

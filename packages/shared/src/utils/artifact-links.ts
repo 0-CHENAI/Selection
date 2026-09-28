@@ -26,3 +26,10 @@ export function localArtifactLinks(markdown: string): string[] {
   })
   return [...paths]
 }
+
+/** Helper scripts, drafts, and QA dumps live in the session data or plans folder, not in the result. */
+export function isSessionScratchPath(path: string): boolean {
+  const normalized = path.replace(/\\/g, '/')
+  return /(?:^|\/)\{\{SESSION_PATH\}\}\/(?:data|plans)(?:\/|$)/.test(normalized)
+    || /(?:^|\/)sessions\/[^/]+\/(?:data|plans)(?:\/|$)/.test(normalized)
+}

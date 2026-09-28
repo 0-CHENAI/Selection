@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="glass-powerpoint" x1="18%" y1="0%" x2="86%" y2="100%">
+      <stop offset="0%" stop-color="#ebac9d"/>
+      <stop offset="46%" stop-color="#dc6f56"/>
+      <stop offset="100%" stop-color="#9b3a27"/>
+    </linearGradient>
+    <linearGradient id="sheen-powerpoint" x1="20%" y1="0%" x2="70%" y2="80%">
+      <stop offset="0%" stop-color="#fff" stop-opacity="0.72"/>
+      <stop offset="38%" stop-color="#fff" stop-opacity="0.18"/>
+      <stop offset="100%" stop-color="#fff" stop-opacity="0"/>
+    </linearGradient>
+    <linearGradient id="fold-powerpoint" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#fff" stop-opacity="0.92"/>
+      <stop offset="100%" stop-color="#ebac9d" stop-opacity="0.55"/>
+    </linearGradient>
+    <filter id="shadow-powerpoint" x="-20%" y="-10%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="22" stdDeviation="22" flood-color="#D24726" flood-opacity="0.22"/>
+      <feDropShadow dx="0" dy="8" stdDeviation="6" flood-color="#0f172a" flood-opacity="0.16"/>
+    </filter>
+    <clipPath id="page-powerpoint">
+      <path d="M292 168h348l148 148v512c0 36-28 64-64 64H292c-36 0-64-28-64-64V232c0-36 28-64 64-64z"/>
+    </clipPath>
+  </defs>
+  <path filter="url(#shadow-powerpoint)" fill="url(#glass-powerpoint)"
+    d="M292 168h348l148 148v512c0 36-28 64-64 64H292c-36 0-64-28-64-64V232c0-36 28-64 64-64z"/>
+  <g clip-path="url(#page-powerpoint)">
+    <rect width="1024" height="1024" fill="url(#sheen-powerpoint)"/>
+    <path d="M220 150h520l-180 240H180z" fill="#fff" opacity="0.22"/>
+    <ellipse cx="390" cy="250" rx="210" ry="70" fill="#fff" opacity="0.28"/>
+  </g>
+  <path d="M640 168v148h148z" fill="url(#fold-powerpoint)" stroke="#ebac9d" stroke-width="2"/>
+  <path d="M292 168h348l148 148v512c0 36-28 64-64 64H292c-36 0-64-28-64-64V232c0-36 28-64 64-64z"
+    fill="none" stroke="#fff" stroke-opacity="0.45" stroke-width="3"/>
+  <text x="512" y="690" text-anchor="middle" fill="#af3e27" fill-opacity="0.92"
+    font-family="SF Pro Display, SF NS, Helvetica Neue, Helvetica, sans-serif"
+    font-weight="700" font-size="168" letter-spacing="0">P</text>
+</svg>

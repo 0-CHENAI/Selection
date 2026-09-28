@@ -989,3 +989,36 @@ describe('queued messages', () => {
     expect(assistantTurns.map(turn => turn.activities.length)).toEqual([1, 1])
   })
 })
+
+describe('context compaction marker', () => {
+  it('keeps a finished compaction inside the same work chain, at the step where it happened', () => {
+    resetCounters()
+    const user = createUserMessage('继续')
+    const before = createToolMessage('completed', 'Read')
+    const marker: Message = {
+      id: 'compacted',
+      role: 'info',
+      content: 'Compacted context to fit within limits',
+      timestamp: before.timestamp + 5,
+      statusType: 'compaction_complete',
+    }
+    const after = createToolMessage('completed', 'Bash')
+    after.timestamp = marker.timestamp + 5
+    const answer: Message = {
+      id: 'answer',
+      role: 'assistant',
+      content: '完成',
+      timestamp: after.timestamp + 5,
+      isIntermediate: false,
+    }
+
+    const turns = groupMessagesByTurn([user, before, marker, after, answer])
+    expect(turns.map(turn => turn.type)).toEqual(['user', 'assistant'])
+    const assistant = turns[1]
+    expect(assistant?.type).toBe('assistant')
+    if (assistant?.type === 'assistant') {
+      expect(assistant.activities.map(activity => activity.statusType ?? activity.toolName)).toEqual(['Read', 'compaction_complete', 'Bash'])
+      expect(assistant.response?.text).toBe('完成')
+    }
+  })
+})

@@ -34,6 +34,7 @@ export {
   TurnCardActionsMenu,
   ResponseCard,
   UserMessageBubble,
+  formatUserMessageTime,
   SystemMessage,
   FileTypeIcon,
   getFileTypeLabel,

@@ -1780,6 +1780,8 @@ const ALWAYS_ALLOWED_TOOLS = new Set([
   'Task', 'TaskOutput',             // Agent orchestration
   'WebFetch', 'WebSearch',          // Web research
   'TodoWrite',                      // Task tracking
+  'session_history',               // Read active-session source messages
+  'task_context',                  // Session-local task notes, like TodoWrite
   'SubmitPlan',                     // Plan submission
   'LSP',                            // Language server (read-only)
   // Browser automation tool (canonical wrapper)

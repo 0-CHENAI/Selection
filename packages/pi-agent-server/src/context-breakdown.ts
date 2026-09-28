@@ -1,6 +1,6 @@
 import { modelVisibleTools } from '../../shared/src/agent/backend/pi/model-visible-tools.ts';
-import type { AgentSession } from '@earendil-works/pi-coding-agent';
-import type { Context } from '@earendil-works/pi-ai';
+import { convertToLlm, type AgentSession } from '@earendil-works/pi-coding-agent';
+import { getCurrentTools, type Context } from '@earendil-works/pi-ai';
 import {
   contextBreakdownTotal,
   estimateContextInputBreakdown,
@@ -11,13 +11,19 @@ function asContext(session: AgentSession): Context | undefined {
   const state = session.agent.state as {
     systemPrompt?: string;
     tools?: Context['tools'];
-    messages?: Context['messages'];
+    messages?: Parameters<typeof convertToLlm>[0];
   };
-  if (!state.systemPrompt && !state.tools?.length && !state.messages?.length) return undefined;
+  const messages = convertToLlm(state.messages ?? []);
+  const prompt = session.systemPrompt ?? state.systemPrompt;
+  const declaredTools = getCurrentTools(messages);
+  const tools = declaredTools.length > 0 ? declaredTools : state.tools;
+  if (!prompt && !tools?.length && !messages.length) return undefined;
   return {
-    systemPrompt: state.systemPrompt,
-    tools: state.tools ? modelVisibleTools(state.tools) : undefined,
-    messages: state.messages ?? [],
+    systemPrompt: prompt,
+    tools: tools ? modelVisibleTools(tools) : undefined,
+    // The current Pi prompt is projected onto the request and may differ from
+    // older system messages kept in the saved transcript.
+    messages: messages.filter(message => message.role !== 'system'),
   };
 }
 

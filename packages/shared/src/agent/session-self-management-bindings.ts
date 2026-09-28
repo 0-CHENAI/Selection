@@ -34,6 +34,13 @@ export function attachSessionSelfManagementBindings(
   context: SessionToolContext,
   sessionId: string,
 ): void {
+  Object.defineProperty(context, 'artifactVersions', {
+    get() {
+      return getSessionScopedToolCallbacks(sessionId)?.artifactVersionsFn;
+    },
+    configurable: true,
+    enumerable: true,
+  });
   // Direct pass-through bindings — signatures match, no wrapping needed.
   // Each getter resolves fresh from the registry on every access.
 

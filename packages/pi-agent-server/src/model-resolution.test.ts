@@ -78,6 +78,13 @@ describe('resolvePiModel', () => {
   });
 
   describe('exact provider lookup', () => {
+    it('resolves saved DeepSeek V4 Flash selections to the current catalog ID', () => {
+      const registry = createMockRegistry({
+        deepseek: [{ id: 'deepseek-flash', name: 'DeepSeek V4.1 Flash' }],
+      });
+      expect(resolvePiModel(registry, 'pi/deepseek-v4-flash', 'deepseek')?.id).toBe('deepseek-flash');
+    });
+
     it('returns exact match for piAuthProvider', () => {
       const registry = createMockRegistry({
         openai: [{ id: 'gpt-5.2', name: 'GPT 5.2', provider: 'openai' }],

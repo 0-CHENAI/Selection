@@ -2,6 +2,7 @@ import { isRetryableAssistantError } from '@earendil-works/pi-ai/compat';
 import { describe, expect, it } from 'bun:test';
 import {
   createAssistantMessageEventStream,
+  getCurrentTools,
   isContextOverflow,
   type AssistantMessage,
   type AssistantMessageEvent,
@@ -262,6 +263,24 @@ describe('request lifecycle bounds (#360)', () => {
 });
 
 describe('model-visible tool schemas', () => {
+  it('hides an alias when its canonical tool is declared by a later system patch', async () => {
+    const alias = { name: 'call_llm', description: 'Legacy', parameters: { type: 'object' as const } };
+    const canonical = { name: 'mcp__session__call_llm', description: 'Current', parameters: { type: 'object' as const } };
+    const context: Context = { messages: [
+      { role: 'system', content: 'Initial', toolsAdded: [alias], timestamp: 1 },
+      { role: 'user', content: 'Continue', timestamp: 2 },
+      { role: 'system', content: '', toolsAdded: [canonical], timestamp: 3 },
+    ] };
+    const original = structuredClone(context);
+    let sent: Context | undefined;
+    await createContextBudgetedStream((_model, request) => {
+      sent = request;
+      return eventsStream([{ type: 'done', reason: 'stop', message: message('stop') }]);
+    }, model, context).result();
+    expect(getCurrentTools(sent!.messages).map(tool => tool.name)).toEqual(['mcp__session__call_llm']);
+    expect(context).toEqual(original);
+  });
+
   it('deduplicates the actual provider request on first call and overflow retry', async () => {
     const tools = [
       { name: 'mcp__session__call_llm', description: 'Delegate', parameters: { type: 'object' as const } },
@@ -304,7 +323,7 @@ it('executes legacy aliases through the real Agent registry after hiding their s
   const agent = new Agent({
     initialState: { model, tools, systemPrompt: 'Test' },
     streamFn: (_model, context) => createContextBudgetedStream((_model, request) => {
-      expect(request.tools?.map(tool => tool.name)).toEqual(['mcp__session__call_llm']);
+      expect(getCurrentTools(request.messages).map(tool => tool.name)).toEqual(['mcp__session__call_llm']);
       const output = createAssistantMessageEventStream();
       const result = message(requests++ === 0 ? 'toolUse' : 'stop');
       if (result.stopReason === 'toolUse') result.content = [{ type: 'toolCall', id: 'legacy-call', name: 'call_llm', arguments: {} }];

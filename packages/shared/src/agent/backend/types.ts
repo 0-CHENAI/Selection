@@ -168,6 +168,7 @@ export interface BackendHostRuntimeContext {
  */
 export interface AnswerSubmission {
   markdown: string;
+  artifactVersionTitle?: string;
   toolCallId: string;
   sdkMessageId: string;
   sdkTurnAnchor: string;

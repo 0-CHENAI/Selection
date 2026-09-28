@@ -18,6 +18,7 @@ import type { ToolResult } from './types.ts';
 
 // Handlers
 import { SubmitAnswerSchema, handleSubmitAnswer } from './handlers/submit-answer.ts';
+import { handleArtifactVersions } from './handlers/artifact-versions.ts';
 import { handleSubmitPlan } from './handlers/submit-plan.ts';
 import { handleConfigValidate } from './handlers/config-validate.ts';
 import { handleSkillInstall, handleSkillInspect } from './handlers/skill-install.ts';
@@ -60,6 +61,14 @@ import { handleListMessagingChannels, handleUnbindMessagingChannel } from './han
 
 export const SubmitPlanSchema = z.object({
   planPath: z.string().describe('Absolute path to the plan markdown file you wrote'),
+});
+
+export const ArtifactVersionsSchema = z.object({
+  action: z.enum(['list', 'restore']).describe('List versions or restore one immutable snapshot'),
+  path: z.string().optional().describe('Exact file path for list'),
+  artifactId: z.string().optional().describe('Managed artifact ID; required for restore'),
+  versionId: z.string().optional().describe('Version ID to restore'),
+  expectedVersion: z.string().optional().describe('Current version ID from the latest listing; restore fails if it changed'),
 });
 
 export const ConfigValidateSchema = z.object({
@@ -749,7 +758,8 @@ export type SessionToolDef = RegistrySessionToolDef | BackendSessionToolDef;
 // ============================================================
 
 export const SESSION_TOOL_DEFS: SessionToolDef[] = [
-  { name: 'submit_answer', description: 'Deliver the complete final Markdown answer to the user. Include all explanation and verification results; correct superseded claims. Short answers and clarification questions are valid. Call alone, after all work, and stop after success. For a large HTML/SVG file already written to disk, submit a short Markdown link and checks instead of inlining the whole file. Never just refer to an earlier explanation.', inputSchema: SubmitAnswerSchema, executionMode: 'registry', safeMode: 'allow', readOnly: false, handler: handleSubmitAnswer },
+  { name: 'artifact_versions', description: 'List complete saved versions of a managed file, or restore a selected version as a new current version. For restore, first inspect the versions and pass artifactId, versionId and expectedVersion. Never copy snapshot files by shell command; this tool checks concurrent edits and preserves version history.', inputSchema: ArtifactVersionsSchema, executionMode: 'registry', safeMode: 'allow', readOnly: false, handler: handleArtifactVersions },
+  { name: 'submit_answer', description: 'Deliver the complete final Markdown answer to the user. Include all explanation and verification results; correct superseded claims. Short answers and clarification questions are valid. When this turn creates or changes a delivered file, include artifactVersionTitle: a short, specific AI-written description of the change, like a commit title. Call alone, after all work, and stop after success. For a large HTML/SVG file already written to disk, submit a short Markdown link and checks instead of inlining the whole file. Never just refer to an earlier explanation.', inputSchema: SubmitAnswerSchema, executionMode: 'registry', safeMode: 'allow', readOnly: false, handler: handleSubmitAnswer },
   { name: 'submit_task_definition', description: TOOL_DESCRIPTIONS.submit_task_definition, inputSchema: SubmitTaskDefinitionSchema, executionMode: 'registry', safeMode: 'allow', handler: handleSubmitTaskDefinition },
   { name: 'SubmitPlan', description: TOOL_DESCRIPTIONS.SubmitPlan, inputSchema: SubmitPlanSchema, executionMode: 'registry', safeMode: 'allow', handler: handleSubmitPlan },
   { name: 'config_validate', description: TOOL_DESCRIPTIONS.config_validate, inputSchema: ConfigValidateSchema, executionMode: 'registry', safeMode: 'allow', readOnly: true, handler: handleConfigValidate },

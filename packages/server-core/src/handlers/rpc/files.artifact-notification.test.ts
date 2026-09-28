@@ -3,6 +3,7 @@ import { mkdtempSync, writeFileSync, rmSync, renameSync, realpathSync } from 'no
 import { tmpdir, hostname } from 'node:os'
 import { join } from 'node:path'
 import * as config from '@craft-agent/shared/config'
+import { createSession, loadSession, saveSession } from '@craft-agent/shared/sessions'
 import { RPC_CHANNELS } from '@craft-agent/shared/protocol'
 import { ArtifactVersions } from '../../reliability/artifact-versions'
 import { registerFilesHandlers } from './files'
@@ -56,5 +57,29 @@ test('a relocated artifact opens through its exact saved alias, with content and
     writeFileSync(moved, 'external modification')
     await expect(statPath(context, originalPath)).rejects.toThrow('Artifact content changed')
     expect(store.read(original.id).currentVersion).toBe(original.currentVersion)
+  } finally { lookup.mockRestore(); rmSync(root, { recursive: true, force: true }) }
+})
+
+test('opening an older artifact shows the AI answer title without changing its saved version record', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'artifact-old-title-'))
+  const workspace = { id: 'workspace', rootPath: root, name: 'Workspace' }
+  const lookup = spyOn(config, 'getWorkspaceByNameOrId').mockReturnValue(workspace as never)
+  try {
+    const file = join(root, 'report.docx')
+    writeFileSync(file, 'document bytes')
+    const session = await createSession(root)
+    const store = new ArtifactVersions(join(root, 'artifacts', 'versions'), hostname(), workspace.id)
+    const record = store.register(file, `${session.id}/user-1`, [], '请帮我调整报告')
+    const saved = loadSession(root, session.id)!
+    saved.messages = [{ id: 'answer-1', type: 'assistant', content: '已修复目录分页并统一表格格式。\n\n[报告](report.docx)',
+      artifactVersions: [{ path: file, versionId: record.currentVersion, ordinal: 1 }] }]
+    await saveSession(saved)
+    const handlers = new Map<string, HandlerFn>()
+    registerFilesHandlers({ handle(channel, handler) { handlers.set(channel, handler) } } as RpcServer, {} as HandlerDeps)
+    const manage = handlers.get(RPC_CHANNELS.artifacts.MANAGE)!
+    const context = { clientId: 'client', workspaceId: workspace.id } as RequestContext
+    const shown = await manage(context, { type: 'register', path: file }) as typeof record
+    expect(shown.versions[0]).toMatchObject({ summary: '已修复目录分页并统一表格格式。', summaryOrigin: 'assistant' })
+    expect(store.read(record.id).versions[0]?.summary).toBe('请帮我调整报告')
   } finally { lookup.mockRestore(); rmSync(root, { recursive: true, force: true }) }
 })

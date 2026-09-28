@@ -1,28 +1,29 @@
 import type { AgentSession } from '@earendil-works/pi-coding-agent';
 
-/**
- * Force a system prompt onto a Pi AgentSession.
- *
- * Pi SDK 0.72.1 has no public per-turn system-prompt API. Setting
- * `state.systemPrompt` directly is wiped on every `session.prompt()` call
- * (agent-session.js ~L796: `state.systemPrompt = _baseSystemPrompt`), and
- * `_baseSystemPrompt` itself can be regenerated from the SDK's resource loader
- * when tools change (`setActiveToolsByName`) or extensions reload.
- *
- * This stamps all three internals — `state.systemPrompt`, `_baseSystemPrompt`,
- * and `_rebuildSystemPrompt` — so our prompt survives every reset path.
- *
- * Pattern matches OpenClaw's `applySystemPromptOverrideToSession` (same SDK,
- * same constraint): https://github.com/openclaw/openclaw/blob/main/src/agents/pi-embedded-runner/system-prompt.ts
- *
- * Remove once the SDK exposes a public per-turn system-prompt API.
- */
+type PromptOptions = { forceSystemPrompt?: string };
+type MutablePromptSession = {
+  _baseSystemPromptOptions: PromptOptions;
+  _runSystemPromptOptions?: PromptOptions;
+  _rebuildSystemPrompt: (toolNames: string[]) => void;
+};
+
+const overrides = new WeakMap<AgentSession, { prompt: string }>();
+
+/** Keep Selection's exact prompt across Pi's tool/resource prompt rebuilds. */
 export function applySystemPromptOverride(session: AgentSession, prompt: string): void {
-  session.agent.state.systemPrompt = prompt;
-  const mutable = session as unknown as {
-    _baseSystemPrompt?: string;
-    _rebuildSystemPrompt?: (toolNames: string[]) => string;
-  };
-  mutable._baseSystemPrompt = prompt;
-  mutable._rebuildSystemPrompt = () => prompt;
+  const mutable = session as unknown as MutablePromptSession;
+  let override = overrides.get(session);
+  if (!override) {
+    override = { prompt };
+    overrides.set(session, override);
+    const originalRebuild = mutable._rebuildSystemPrompt.bind(session);
+    mutable._rebuildSystemPrompt = (toolNames) => {
+      originalRebuild(toolNames);
+      mutable._baseSystemPromptOptions.forceSystemPrompt = override!.prompt;
+      if (mutable._runSystemPromptOptions) mutable._runSystemPromptOptions.forceSystemPrompt = override!.prompt;
+    };
+  }
+  override.prompt = prompt;
+  mutable._baseSystemPromptOptions.forceSystemPrompt = prompt;
+  if (mutable._runSystemPromptOptions) mutable._runSystemPromptOptions.forceSystemPrompt = prompt;
 }

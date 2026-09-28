@@ -49,7 +49,7 @@ function isLiveDeltaIntermediate(
   event: Pick<TextDeltaEvent, 'answerProtocol' | 'presentationProtocol'>,
   phase: TextStreamPhase,
 ): boolean {
-  if (event.answerProtocol === 'explicit-v1') return false
+  if (event.answerProtocol === 'explicit-v1') return phase === 'intermediate'
   if (event.presentationProtocol === 'marker-v1') return phase !== 'final'
   return phase === 'intermediate'
 }
@@ -154,7 +154,8 @@ export function handleTextDelta(
  */
 export function handleTextComplete(
   state: SessionState,
-  event: TextCompleteEvent
+  event: TextCompleteEvent,
+  hadAnswerPreview = false,
 ): SessionState {
   const { session, streaming } = state
   const completesActiveStream = !streaming
@@ -223,7 +224,7 @@ export function handleTextComplete(
       answerCommitted: event.answerCommitted,
       answerSalvaged: event.answerSalvaged,
       artifactVersions: event.artifactVersions,
-      completedRevealStartTime: session.isProcessing && !event.isIntermediate ? Date.now() : undefined,
+      completedRevealStartTime: session.isProcessing && !event.isIntermediate && !hadAnswerPreview ? Date.now() : undefined,
       turnId: event.turnId,
       parentToolUseId: event.parentToolUseId,
       timestamp: nextTimestamp,
@@ -250,7 +251,7 @@ export function handleTextComplete(
     answerCommitted: event.answerCommitted,
     answerSalvaged: event.answerSalvaged,
     artifactVersions: event.artifactVersions,
-    completedRevealStartTime: session.isProcessing && !event.isIntermediate ? Date.now() : undefined,
+    completedRevealStartTime: session.isProcessing && !event.isIntermediate && !hadAnswerPreview ? Date.now() : undefined,
     turnId: event.turnId,
     parentToolUseId: event.parentToolUseId,
   }
@@ -276,6 +277,8 @@ export function handleAnswerPreview(
     || session.messages.some(m => m.answerCommitted && m.answerRunId === event.answerRunId)) return state
   const previous = session.messages.find(m => m.answerPreview && m.answerRunId === event.answerRunId)
   if (!event.text && previous?.id !== `answer-preview-${event.answerRunId}-${event.toolCallId}`) return state
+  if (event.text && previous?.id === `answer-preview-${event.answerRunId}-${event.toolCallId}`
+    && previous.content.length > event.text.length && previous.content.startsWith(event.text)) return state
   const messages = session.messages.filter(m => !m.answerPreview).map(m =>
     m.id === owner.id && event.answerRoutingVersion === 1
       ? { ...m, answerProtocol: 'explicit-v1' as const, answerRunId: event.answerRunId, answerRoutingVersion: 1 as const } : m)

@@ -23,6 +23,9 @@ import { snapshotContextBreakdown } from './context-breakdown.ts';
  */
 
 import { answerPreviewContext } from '../../shared/src/answer-preview-context.ts';
+import { createSessionHistoryTool } from './context-retention.ts';
+import { createTaskContextTool } from './task-context.ts';
+import { userSourceMetadata } from './history-records.ts';
 import { AnswerBatchGate, collectAnswerBatchParts } from './answer-batch-gate.ts';
 import { answerExecutionError, isAnswerTool } from './answer-delivery-guard.ts';
 import http from 'node:http';
@@ -195,7 +198,7 @@ function normalizeProxyToolContent(content: ProxyToolExecutionResult['content'])
 /** Messages from main process (stdin) */
 type InboundMessage =
   | InitMessage
-  | { type: 'prompt'; presentationProtocol?: 'native' | 'marker-v1' | 'legacy'; answerRunId?: string; answerRecovery?: boolean; id: string; message: string; systemPrompt: string; images?: Array<{ type: 'image'; data: string; mimeType: string }> }
+  | { type: 'prompt'; presentationProtocol?: 'native' | 'marker-v1' | 'legacy'; answerRunId?: string; answerRecovery?: boolean; id: string; message: string; userTextOffset?: number; systemPrompt: string; images?: Array<{ type: 'image'; data: string; mimeType: string }> }
   | { type: 'register_tools'; tools: ProxyToolDef[] }
   | { type: 'tool_execute_response'; requestId: string; result: ProxyToolExecutionResult }
   | {
@@ -765,6 +768,8 @@ async function ensureSession(): Promise<AgentSession> {
     registerRecoveryClass(createGrepToolDefinition(cwd), 'read-only'),
     registerRecoveryClass(createFindToolDefinition(cwd), 'read-only'),
     registerRecoveryClass(createLsToolDefinition(cwd), 'read-only'),
+    registerRecoveryClass(createSessionHistoryTool(() => piSession?.sessionManager), 'read-only'),
+    registerRecoveryClass(createTaskContextTool(() => piSession?.sessionManager), 'idempotent'),
   ];
   confinedBashTool = isolatedShell ? builtinDefs[1] : undefined;
   confinedBashDirectory = isolatedShell?.directory;
@@ -819,30 +824,20 @@ async function ensureSession(): Promise<AgentSession> {
 
   // Set model if specified
   if (initConfig.model) {
+    let piModel: ReturnType<typeof resolveSessionPiModel>;
     try {
-      const piModel = resolveSessionPiModel(modelRegistry, initConfig.model);
-      if (piModel) {
-        // Verify resolved model's provider is compatible with the authenticated provider.
-        // Without this, a model that resolves to a different provider (e.g. azure-openai-responses
-        // when authed as github-copilot) would cause "No API key found" at runtime.
-        const resolvedProvider = (piModel as any)?.provider;
-        const isCompatible = !initConfig.piAuth ||
-          resolvedProvider === initConfig.piAuth.provider ||
-          resolvedProvider === 'custom-endpoint';
-        if (isCompatible) {
-          sessionOptions.model = piModel;
-          setInterceptorApiHints(piModel as { api?: string; provider?: string; baseUrl?: string });
-        } else {
-          debugLog(`Model ${initConfig.model} resolved to incompatible provider ${resolvedProvider} (expected ${initConfig.piAuth!.provider}), skipping`);
-          setInterceptorApiHints(undefined);
-        }
-      } else {
-        setInterceptorApiHints(undefined);
-      }
-    } catch {
-      debugLog(`Could not resolve Pi model: ${initConfig.model}`);
-      setInterceptorApiHints(undefined);
+      piModel = resolveSessionPiModel(modelRegistry, initConfig.model);
+    } catch (error) {
+      throw new Error(`无法解析 Pi 模型 ${initConfig.model}：${error instanceof Error ? error.message : String(error)}`);
     }
+    if (!piModel) throw new Error(`模型 ${initConfig.model} 不在当前 Pi SDK 目录中，请重新选择可用模型。`);
+    // Never let an incompatible or retired ID fall through to Pi's default.
+    const resolvedProvider = piModel.provider;
+    if (initConfig.piAuth && resolvedProvider !== initConfig.piAuth.provider && resolvedProvider !== 'custom-endpoint') {
+      throw new Error(`模型 ${initConfig.model} 属于 ${resolvedProvider}，与当前认证提供方 ${initConfig.piAuth.provider} 不匹配。`);
+    }
+    sessionOptions.model = piModel;
+    setInterceptorApiHints(piModel);
   } else {
     setInterceptorApiHints(undefined);
   }
@@ -861,7 +856,7 @@ async function ensureSession(): Promise<AgentSession> {
   // Create the session — tools flow through customTools + allowlist (see comment above).
   const { session } = await createAgentSession(sessionOptions);
   installUnknownToolGuard(session);
-  installCompactionPolicy(session, initConfig?.swarmAgentTokenBudget);
+  installCompactionPolicy(session, initConfig?.swarmAgentTokenBudget, readRuntimeContext);
   applyCompactionPolicy(session.model, true);
   piSession = session;
 
@@ -1060,7 +1055,8 @@ function wrapSingleTool(
       const command = typeof inputObj.command === 'string' ? inputObj.command : '';
       const preserveBundledOfficecliGuide = /bash/i.test(sdkToolName)
         && isBundledOfficecliLoadSkillCommand(command);
-      if (!preserveBundledOfficecliGuide && estimateTokensDensityAware(resultText) > tokenLimitFor(modelContextWindow) && initConfig) {
+      const preserveContextSource = tool.name === 'session_history' || tool.name === 'task_context';
+      if (!preserveContextSource && !preserveBundledOfficecliGuide && estimateTokensDensityAware(resultText) > tokenLimitFor(modelContextWindow) && initConfig) {
         try {
           const sessionPath = getSessionPath(
             initConfig.workspaceRootPath,
@@ -1110,6 +1106,32 @@ function wrapSingleTool(
 // ============================================================
 // Proxy Tools (tools executed in main process)
 // ============================================================
+
+/** Reuse the existing read-only session-info bridge; do not cache live worker state in summaries. */
+async function readRuntimeContext(signal?: AbortSignal): Promise<string | undefined> {
+  if (signal?.aborted || !proxyToolDefs.some(tool => resolveSessionToolProxyName(tool.name) === 'mcp__session__get_session_info')) return undefined;
+  const requestId = `context-${randomUUID()}`;
+  const result = await new Promise<ProxyToolExecutionResult>(resolve => {
+    const finish = (value: ProxyToolExecutionResult) => {
+      clearTimeout(timer);
+      signal?.removeEventListener('abort', cancel);
+      pendingToolExecutions.delete(requestId);
+      resolve(value);
+    };
+    const cancel = () => finish({ content: '', isError: true });
+    const timer = setTimeout(cancel, 2000);
+    signal?.addEventListener('abort', cancel, { once: true });
+    pendingToolExecutions.set(requestId, { resolve: finish });
+    send({ type: 'tool_execute_request', requestId, answerRunId, toolName: 'mcp__session__get_session_info', args: {} });
+  });
+  if (result.isError) return JSON.stringify({ unavailable: true, instruction: 'Live scheduler state unavailable. Do not infer completion from an old summary.' });
+  try {
+    const info = JSON.parse(normalizeProxyToolContent(result.content).filter(part => part.type === 'text').map(part => part.text).join(''));
+    return info.orchestration ? JSON.stringify(info.orchestration) : undefined;
+  } catch {
+    return JSON.stringify({ unavailable: true });
+  }
+}
 
 function buildProxyTools(): ToolDefinition<any, any>[] {
   debugLog(`Building proxy tools from ${proxyToolDefs.length} definitions: ${proxyToolDefs.map(t => t.name).join(', ')}`);
@@ -1257,7 +1279,9 @@ async function queryLlm(request: LLMQueryRequest, signal?: AbortSignal): Promise
       getThemes: () => ({ themes: [], diagnostics: [] }),
       getAgentsFiles: () => ({ agentsFiles: [] }),
       getSystemPrompt: () => request.systemPrompt,
-      getAppendSystemPrompt: () => [], extendResources: () => {}, reload: async () => {},
+      getSystemPromptSource: () => undefined,
+      getAppendSystemPrompt: () => [], getAppendSystemPromptSources: () => [],
+      extendResources: () => {}, reload: async () => {},
     };
     const ephemeralOptions: CreateAgentSessionOptions = {
       cwd: resolvedCwd(),
@@ -1785,6 +1809,8 @@ async function handlePrompt(msg: Extract<InboundMessage, { type: 'prompt' }>): P
     // Fire prompt — use followUp when session is already streaming so the
     // message is queued instead of throwing "Agent is already processing".
     const previewRunId = msg.answerRunId;
+    const sourceMetadata = userSourceMetadata(msg.message, msg.userTextOffset);
+    if (sourceMetadata) session.sessionManager.appendCustomEntry('selection-user-source-v1', sourceMetadata);
     await answerPreviewContext.run(({ toolCallId, text }) => {
       if (!previewRunId || previewRunId !== answerRunId || answerAccepted) return;
       send({ type: 'event', event: { type: 'answer_preview', answerRunId: previewRunId, toolCallId, text } });

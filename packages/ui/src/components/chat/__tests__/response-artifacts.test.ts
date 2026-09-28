@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test'
-import { extractResponseArtifacts } from '../response-artifacts'
+import { extractChangedResponseArtifacts, extractResponseArtifacts } from '../response-artifacts'
 
 describe('final response artifacts', () => {
   it('collects delivered documents, images and reference links in response order', () => {
@@ -58,4 +58,36 @@ describe('artifact extraction review regressions', () => {
 
 it('does not list a linked cover thumbnail as a second deliverable', () => {
   expect(extractResponseArtifacts('[![封面](/tmp/cover.png)](/report.docx)').map(file => file.path)).toEqual(['/report.docx'])
+})
+
+it('shows only newly created or changed files on the delivery shelf', () => {
+  const answer = '[新版](/reports/new.docx) [原版](/reports/original.docx)'
+  expect(extractChangedResponseArtifacts(answer, [{ path: '/reports/new.docx', ordinal: 1, change: 'created' }]).map(file => file.name))
+    .toEqual(['new.docx'])
+  expect(extractChangedResponseArtifacts(answer, [])).toEqual([])
+  expect(extractChangedResponseArtifacts(answer)).toEqual([])
+})
+
+it('shows a deletion even when the answer does not link the file, and keeps a citation off the shelf', () => {
+  expect(extractChangedResponseArtifacts('旧稿已删除。', [{ path: '/reports/old.docx', ordinal: 2, change: 'deleted' }]))
+    .toEqual([{ path: '/reports/old.docx', name: 'old.docx', extension: 'docx', change: 'deleted' }])
+  expect(extractChangedResponseArtifacts('[上一份报告](/reports/old.docx)')).toEqual([])
+})
+
+it('keeps helper scripts and other session scratch off the result shelf', () => {
+  const answer = '[领导版](/reports/领导版.docx)（原文件 [原版](/reports/原版.docx) 未做任何修改）'
+  const shown = extractChangedResponseArtifacts(answer, [
+    { path: '{{SESSION_PATH}}/data/build_content.py', ordinal: 2, change: 'modified' },
+    { path: '/Users/me/.selection/workspaces/my-workspace/sessions/260928-young-geyser/data/notes.json', ordinal: 1, change: 'created' },
+    { path: '/reports/领导版.docx', ordinal: 1, change: 'created' },
+    { path: '/reports/原版.docx', ordinal: 1, change: 'created' },
+  ])
+  expect(shown.map(file => file.name)).toEqual(['领导版.docx', '原版.docx'])
+  expect(extractChangedResponseArtifacts('草稿已删除。', [{ path: '{{SESSION_PATH}}/data/draft.docx', ordinal: 1, change: 'deleted' }])).toEqual([])
+})
+
+it('matches version references without confusing equal filenames in different directories', () => {
+  const answer = '[新版](./new.docx) [同名旧版](/archive/new.docx)'
+  expect(extractChangedResponseArtifacts(answer, [{ path: 'new.docx', ordinal: 2, change: 'modified' }]).map(file => file.path))
+    .toEqual(['./new.docx'])
 })

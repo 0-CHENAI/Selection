@@ -91,6 +91,11 @@ function estimateContent(content: Message['content']): number {
 }
 
 function estimateMessage(message: Message): number {
+  if (message.role === 'system') {
+    return MESSAGE_OVERHEAD_TOKENS + estimateContent(message.content)
+      + estimateTextTokensConservatively(safeJson(message.sections ?? {}))
+      + estimateTools(message.toolsAdded);
+  }
   return MESSAGE_OVERHEAD_TOKENS + estimateContent(message.content);
 }
 
@@ -271,15 +276,10 @@ function estimateFromLatestUsage(context: Context): number {
   if (lastUsageIndex < 0) return 0;
 
   let trailing = 0;
-  const addedToolNames = new Set<string>();
   for (const message of context.messages.slice(lastUsageIndex + 1)) {
     trailing += estimateMessage(message);
-    if (message.role === 'toolResult') {
-      for (const name of message.addedToolNames ?? []) addedToolNames.add(name);
-    }
   }
-  const addedTools = context.tools?.filter(tool => addedToolNames.has(tool.name));
-  return latestUsage + trailing + estimateTools(addedTools);
+  return latestUsage + trailing;
 }
 
 export function estimateContextInputBreakdown(context: Context): ContextInputBreakdown {
@@ -299,6 +299,21 @@ export function estimateContextInputBreakdown(context: Context): ContextInputBre
   }
 
   for (const message of context.messages) {
+    if (message.role === 'system') {
+      breakdown.messages += MESSAGE_OVERHEAD_TOKENS;
+      if (typeof message.content === 'string') estimatePromptCategories(message.content, breakdown, 'system');
+      else for (const part of message.content) estimatePromptCategories(part.text, breakdown, 'system');
+      for (const section of Object.values(message.sections ?? {})) {
+        if (section) estimatePromptCategories(section, breakdown, 'system');
+      }
+      for (const tool of message.toolsAdded ?? []) {
+        const tokens = estimateTextTokensConservatively(safeJson(tool));
+        const bucket = classifyToolName(tool.name);
+        if (bucket === 'tools') breakdown.tools += tokens;
+        else addOptional(breakdown, bucket, tokens);
+      }
+      continue;
+    }
     // Tool output is data, not a trusted context envelope. Skill bodies read
     // through tools remain here; the skills bucket measures the catalog only.
     if (message.role === 'toolResult' || message.role === 'assistant') {

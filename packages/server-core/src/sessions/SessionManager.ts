@@ -14,11 +14,11 @@ import { workspaceDeliveryContract } from '../reliability/workspace-delivery-con
 import { integrateCandidates } from '../reliability/integrate-candidates'
 import { validateCandidateFile } from '../reliability/validate-candidate'
 import { ArtifactVersions, atomicWrite } from '../reliability/artifact-versions'
-import { ConversationArtifactVersions } from '../reliability/conversation-artifact-versions'
+import { ConversationArtifactVersions, withDeliveredArtifactReferences } from '../reliability/conversation-artifact-versions'
 import { FeedbackStore, assertFeedbackAnchor } from '../reliability/feedback-store'
 import { inside, assertIsolatedTool, prepareIsolatedWorkspace, type IsolatedWorkspace } from '../reliability/isolated-workspace'
 import { hostname as executionHostName } from 'node:os'
-import { readFileSync as loadIsolationFile, mkdirSync as makeFeedbackDirectory, writeFileSync as saveFeedbackCandidate, realpathSync } from 'node:fs'
+import { readFileSync as loadIsolationFile, mkdirSync as makeFeedbackDirectory, writeFileSync as saveFeedbackCandidate, realpathSync, unlinkSync } from 'node:fs'
 import { basename as feedbackBasename, extname as feedbackExtension } from 'node:path'
 import { validateWorkspaceFilePath } from '../handlers/utils'
 import { executionTaskIdentity, claimExecutionCheckpoint, readExecutionCheckpoint, writeExecutionCheckpoint, sdkStateHash, sdkStateSnapshot, recoverySdkSnapshot, recoveryTranscriptMatches, verifiedFileOperations, recoveryBlocker, toolRecoveryClass, type ExecutionCheckpoint } from '../reliability/execution-checkpoint'
@@ -929,6 +929,7 @@ interface ManagedSession {
   streamingText: string
   /** Runtime identity for materializing a stream that ends without text_complete. */
   streamingTurnId?: string
+  streamingPhase?: TextStreamPhase
   streamingPresentationProtocol?: 'native' | 'marker-v1' | 'legacy'
   /** Timestamp of the first delta, preserved if the stream is materialized after an error. */
   streamingStartedAt?: number
@@ -1282,6 +1283,7 @@ export function createManagedSession(
     lastMessageAt: (s.lastMessageAt ?? s.lastUsedAt ?? Date.now()) as number,
     streamingText: '',
     streamingTurnId: undefined,
+    streamingPhase: undefined,
     streamingStartedAt: undefined,
     processingGeneration: 0,
     isFlagged: (s.isFlagged ?? false) as boolean,
@@ -1350,6 +1352,18 @@ export function buildAgentSessionConfig(managed: ManagedSession): SessionConfig 
     orchestrationTokenBudget: managed.orchestrationTokenBudget,
     orchestrationAggregation: managed.orchestrationAggregation,
   }
+}
+
+export function resolveSessionProjectId(input: {
+  requestedProjectId?: string
+  parentProjectId?: string
+  branchSourceProjectId?: string
+}): string | undefined {
+  const { requestedProjectId, parentProjectId, branchSourceProjectId } = input
+  if (branchSourceProjectId && requestedProjectId && requestedProjectId !== branchSourceProjectId) {
+    throw new Error('A branch must stay in its source session project')
+  }
+  return branchSourceProjectId ?? requestedProjectId ?? parentProjectId
 }
 
 /** Select recovery context from exactly one Craft Session transcript. */
@@ -2391,6 +2405,7 @@ export class SessionManager implements ISessionManager {
   }
 
   private restoreExecutionCheckpoint(managed: ManagedSession): void {
+    this.discardInheritedBranchCheckpoint(managed)
     const saved = readExecutionCheckpoint(getSessionStoragePath(managed.workspace.rootPath, managed.id))
     if (saved.kind === 'missing') return
     if (saved.kind !== 'ok') {
@@ -2410,6 +2425,20 @@ export class SessionManager implements ISessionManager {
     if (interrupted || preparedSwarm) {
       setImmediate(() => { void this.resumeExecution(managed.id).catch(() => sessionLog.warn('Execution recovery paused', { sessionId: managed.id })) })
     }
+  }
+
+  /** Older branches copied the parent's data/ checkpoint along with deliverables. */
+  private discardInheritedBranchCheckpoint(managed: ManagedSession): void {
+    if (!managed.branchFromMessageId) return
+    const sessionPath = getSessionStoragePath(managed.workspace.rootPath, managed.id)
+    const saved = readExecutionCheckpoint(sessionPath)
+    if (saved.kind !== 'ok' || saved.checkpoint.sessionId === managed.id) return
+    unlinkSync(join(sessionPath, 'data', 'execution-checkpoint.json'))
+    managed.executionCheckpoint = undefined
+    managed.runtimeRecovery = undefined
+    sessionLog.warn('Removed inherited parent execution checkpoint from branch', {
+      branchSessionId: managed.id, checkpointSessionId: saved.checkpoint.sessionId,
+    })
   }
 
   private recoverPersistedSwarmSessions(): void {
@@ -2981,7 +3010,20 @@ export class SessionManager implements ISessionManager {
         nextStep: checkpoint.state.lastDecision?.assessment.nextStep, evidenceIds: checkpoint.state.lastDecision?.assessment.evidenceIds }
     }
 
-    return managedToSession(m, { messages: m.messages })
+    return managedToSession(m, { messages: this.deliveredArtifactMessages(m) })
+  }
+
+  private deliveredArtifactMessages(managed: ManagedSession): Message[] {
+    const versionIds = managed.messages.flatMap(message => message.artifactVersions?.map(ref => ref.versionId) ?? [])
+    if (!versionIds.length) return managed.messages
+    try {
+      const store = new ArtifactVersions(join(managed.workspace.rootPath, 'artifacts', 'versions'), executionHostName(), managed.workspace.id)
+      return withDeliveredArtifactReferences(managed.messages, store.versionSourceRunIds(versionIds))
+    } catch (error) {
+      sessionLog.warn('Could not verify historical artifact references', { sessionId: managed.id, error })
+      return managed.messages.map(message => message.artifactVersions?.length
+        ? { ...message, artifactVersions: [] } : message)
+    }
   }
 
   /**
@@ -3159,9 +3201,8 @@ export class SessionManager implements ISessionManager {
     // workingDirectory configured, inherit it (only when the caller didn't pass an
     // explicit override). This lets "+ New session in {project}" reuse the project's
     // bound directory without duplicating logic on the renderer side.
-    // Subtasks inherit the parent's project when the caller didn't bind one explicitly —
-    // a child of a project-bound task belongs to that project (board quick-add passes none),
-    // so project-scoped filtering sees the whole task family.
+    // Subtasks inherit the parent's project when the caller didn't bind one explicitly.
+    // A branch inherits its source project after the source is validated below.
     const inheritedProjectId = options?.parentSessionId
       ? this.sessions.get(options.parentSessionId)?.projectId
       : undefined
@@ -3184,28 +3225,6 @@ export class SessionManager implements ISessionManager {
       parent: parentForInheritance?.swarmEnabled,
       branchSource: branchSourceForSwarm?.swarmEnabled,
     })
-    const requestedProjectId = options?.projectId ?? inheritedProjectId
-    let resolvedProjectId: string | undefined
-    if (requestedProjectId) {
-      const { loadProjectById } = await import('@craft-agent/shared/projects')
-      const project = loadProjectById(workspaceRootPath, requestedProjectId)
-      if (!project) {
-        // An EXPLICIT binding to a missing project is a caller bug; an inherited one
-        // (parent's project deleted since) just no-ops rather than failing the child.
-        if (options?.projectId) {
-          throw new Error(`Project ${options.projectId} not found in workspace ${workspaceId}`)
-        }
-      } else {
-        resolvedProjectId = project.config.id
-        if (
-          (options?.workingDirectory === undefined || options?.workingDirectory === 'user_default') &&
-          project.config.workingDirectory
-        ) {
-          resolvedWorkingDir = project.config.workingDirectory
-        }
-      }
-    }
-
     // Validate branch request up-front so branch metadata is only set for valid branches.
     // This prevents creating sessions that claim to be branched but don't have copied history.
     let validatedBranch: {
@@ -3394,6 +3413,33 @@ export class SessionManager implements ISessionManager {
         branchFromSdkSessionId: !!validatedBranch.branchFromSdkSessionId,
         copiedMessageCount: validatedBranch.branchIdx + 1,
       })
+    }
+
+    const sourceProjectId = validatedBranch?.sourceSession.projectId
+    const requestedProjectId = resolveSessionProjectId({
+      requestedProjectId: options?.projectId,
+      parentProjectId: inheritedProjectId,
+      branchSourceProjectId: sourceProjectId,
+    })
+    let resolvedProjectId: string | undefined
+    if (requestedProjectId) {
+      const { loadProjectById } = await import('@craft-agent/shared/projects')
+      const project = loadProjectById(workspaceRootPath, requestedProjectId)
+      if (!project) {
+        // An explicit binding to a missing project is a caller bug; a deleted
+        // inherited project no longer owns new children or branches.
+        if (options?.projectId) {
+          throw new Error(`Project ${options.projectId} not found in workspace ${workspaceId}`)
+        }
+      } else {
+        resolvedProjectId = project.config.id
+        if (
+          (options?.workingDirectory === undefined || options?.workingDirectory === 'user_default') &&
+          project.config.workingDirectory
+        ) {
+          resolvedWorkingDir = project.config.workingDirectory
+        }
+      }
     }
 
     // Use storage layer to create and persist the session
@@ -3647,7 +3693,7 @@ export class SessionManager implements ISessionManager {
       this.notifySessionCreated(workspaceId, storedSession.id)
     }
 
-    return managedToSession(managed, isBranch ? { messages: managed.messages } : undefined)
+    return managedToSession(managed, isBranch ? { messages: this.deliveredArtifactMessages(managed) } : undefined)
   }
 
   /**
@@ -4880,6 +4926,7 @@ export class SessionManager implements ISessionManager {
 
       // Wire up session self-management tools (set_session_labels, set_session_status, etc.)
       mergeSessionScopedToolCallbacks(managed.id, {
+        artifactVersionsFn: request => this.manageArtifactVersionFromAgent(managed, request),
         setSessionLabelsFn: async (sessionId: string | undefined, labels: string[]) => {
           await this.setSessionLabels(sessionId ?? managed.id, labels)
         },
@@ -4983,6 +5030,10 @@ export class SessionManager implements ISessionManager {
           const targetId = sessionId ?? managed.id
           const session = this.sessions.get(targetId)
           if (!session) return null
+          const children = this.getManagedSwarmChildren(session.id)
+            .filter(child => child.orchestrationId === session.orchestrationId)
+          const aggregation = session.orchestrationAggregation?.orchestrationId === session.orchestrationId
+            ? session.orchestrationAggregation : undefined
           return {
             id: session.id,
             name: session.name ?? session.id,
@@ -4995,6 +5046,20 @@ export class SessionManager implements ISessionManager {
             llmConnection: session.llmConnection,
             model: session.model,
             isActive: session.agent != null,
+            ...(session.orchestrationId || children.length ? { orchestration: {
+              id: session.orchestrationId,
+              status: session.orchestrationStatus,
+              pendingAggregation: !!aggregation,
+              finalAggregation: aggregation?.finalAggregation.slice(0, 800),
+              finalAggregationTruncated: !!aggregation && aggregation.finalAggregation.length > 800,
+              children: children.slice(-12).map(child => ({ id: child.id, status: child.orchestrationStatus,
+                isProcessing: child.isProcessing,
+                finalMessageId: this.swarmTurnCompletions.get(child.id)?.finalMessageId
+                  ?? this.getLastFinalAssistantMessageId(child.messages),
+                blocker: child.orchestrationBlocker?.slice(0, 200),
+              })),
+              omittedChildren: Math.max(0, children.length - 12),
+            } } : {}),
           }
         },
         listSessionsFn: (options) => {
@@ -7035,6 +7100,7 @@ export class SessionManager implements ISessionManager {
     this.setProcessing(managed, true)
     managed.streamingText = ''
     managed.streamingTurnId = undefined
+    managed.streamingPhase = undefined
     managed.streamingStartedAt = undefined
     managed.processingGeneration++
     this.prepareSpawnQualificationCredentials(
@@ -7361,6 +7427,7 @@ export class SessionManager implements ISessionManager {
 
       const checkpointOwner = managed.messages.findLast(m => m.role === 'user' && !m.hidden && !m.isQueued)
       if (checkpointOwner) {
+        this.discardInheritedBranchCheckpoint(managed)
         managed.executionCheckpoint = { version: 1, sessionId, userMessageId: checkpointOwner.id,
           generation: myGeneration, answerRunId: managed.answerDelivery?.runId, sdkSessionId: managed.sdkSessionId,
           taskIdentity: executionTaskIdentity(managed),
@@ -7377,7 +7444,8 @@ export class SessionManager implements ISessionManager {
         const tracker = new ConversationArtifactVersions(store,
           [managed.workingDirectory, getSessionStoragePath(managed.workspace.rootPath, managed.id), managed.workspace.rootPath].filter((path): path is string => !!path),
           path => validateWorkspaceFilePath(path, managed.workspace.id),
-          () => sessionLog.warn('Artifact version recording failed', { sessionId: managed.id }))
+          () => sessionLog.warn('Artifact version recording failed', { sessionId: managed.id }),
+          Math.min(managed.messages.findLast(m => m.role === 'user' && !m.hidden && !m.isQueued)?.timestamp ?? Date.now(), Date.now()))
         managed.conversationArtifactVersions = tracker
         for (const prior of managed.messages) {
           if (managed.processingGeneration !== myGeneration || managed.stopRequested) break
@@ -7839,6 +7907,45 @@ export class SessionManager implements ISessionManager {
     versions.cleanRemovedPreviews(artifactId, versionIds)
     versions.cleanUnreferencedBlobs()
     return cleaned
+  }
+
+  private async manageArtifactVersionFromAgent(managed: ManagedSession, request: {
+    action: 'list' | 'restore'; path?: string; artifactId?: string;
+    versionId?: string; expectedVersion?: string;
+  }): Promise<import('@craft-agent/shared/protocol').ManagedArtifact> {
+    if (this.sessions.get(managed.id) !== managed) throw new Error('Session is no longer active')
+    if (managed.isolatedWorkspace) throw new Error('Managed file restoration is unavailable from an isolated child workspace')
+    if (request.action !== 'list' && request.action !== 'restore') throw new Error('Unknown artifact version action')
+    const userMessage = request.action === 'restore'
+      ? managed.messages.findLast(message => message.role === 'user' && !message.hidden && !message.isQueued)
+      : undefined
+    if (request.action === 'restore') {
+      const pinned = /<artifact_restore_request>\s*(\{[^\n]+\})\s*<\/artifact_restore_request>/.exec(userMessage?.content ?? '')
+      if (pinned) {
+        let selected: Record<string, unknown>
+        try { selected = JSON.parse(pinned[1]!) as Record<string, unknown> }
+        catch { throw new Error('Invalid version request in the user message') }
+        if (selected.action !== 'restore' || selected.artifactId !== request.artifactId
+          || selected.versionId !== request.versionId || selected.expectedVersion !== request.expectedVersion
+          || selected.path !== request.path) throw new Error('Restore request changed; ask the user to select the version again')
+      }
+    }
+    const store = new ArtifactVersions(join(managed.workspace.rootPath, 'artifacts', 'versions'), executionHostName(), managed.workspace.id)
+    const record = request.artifactId
+      ? store.read(request.artifactId)
+      : request.path ? store.findByPath(await validateWorkspaceFilePath(request.path, managed.workspace.id)) : undefined
+    if (!record) throw new Error('Managed file not found; provide its exact path or artifact ID')
+    if (request.path && await validateWorkspaceFilePath(request.path, managed.workspace.id) !== record.path) {
+      throw new Error('Artifact path changed; inspect its versions again')
+    }
+    await validateWorkspaceFilePath(record.path, managed.workspace.id)
+    if (request.action === 'list') return store.reconcile(record.id)
+    if (!request.versionId || !request.expectedVersion) throw new Error('Restore requires a target and current version ID')
+    if (request.versionId === record.currentVersion) throw new Error('Select a previous version to restore')
+    const restored = store.restore(record.id, request.expectedVersion, request.versionId,
+      userMessage ? `${managed.id}/${userMessage.id}` : managed.id)
+    this.notifyArtifactApplied(managed.workspace.id)
+    return restored
   }
 
   async getBodyFeedbackDetails(sessionId: string, sourceMessageId: string, annotationId: string): Promise<import('@craft-agent/shared/protocol').BodyFeedbackRevision[]> {
@@ -8604,11 +8711,11 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
       this.flushDelta(managed.id, managed.workspace.id)
       managed.streamingText = ''
       managed.streamingTurnId = undefined
+      managed.streamingPhase = undefined
       managed.streamingStartedAt = undefined
       rollbackFeedback = linkAnnotationFollowUpResults(managed.messages, state.userMessageId, answer,
         (content, hash) => saveBodyFeedbackVersion(getSessionStoragePath(managed.workspace.rootPath, managed.id), content, hash))
-      answer.artifactVersions = await managed.conversationArtifactVersions?.capture(answer.content, `${managed.id}/${state.userMessageId}`,
-        managed.messages.find(message => message.id === state.userMessageId)?.content ?? '')
+      answer.artifactVersions = await managed.conversationArtifactVersions?.capture(answer.content, `${managed.id}/${state.userMessageId}`, submission.artifactVersionTitle)
       if (managed.stopRequested || managed.processingGeneration !== state.generation || managed.answerDelivery !== state) throw new Error('Answer delivery was interrupted.')
       managed.messages.push(answer)
       state.committedMessageId = answer.id
@@ -8664,7 +8771,7 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
     const userIndex = managed.messages.findIndex(m => m.id === state.userMessageId)
     if (userIndex < 0) return undefined
     const draft = [...managed.messages.slice(userIndex + 1)].reverse().find(m =>
-      m.role === 'assistant' && !m.hidden && m.isIntermediate
+      m.role === 'assistant' && m.isIntermediate
       && m.answerRunId === state.runId && hasRenderableAssistantText(m.content))
     if (!draft) return undefined
     try { this.assertAnswerReady(managed, state, draft.content) }
@@ -8693,8 +8800,7 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
       this.assertAnswerReady(managed, state, draft.content)
       rollbackFeedback = linkAnnotationFollowUpResults(managed.messages, state.userMessageId, answer,
         (content, hash) => saveBodyFeedbackVersion(getSessionStoragePath(managed.workspace.rootPath, managed.id), content, hash))
-      answer.artifactVersions = await managed.conversationArtifactVersions?.capture(answer.content, `${managed.id}/${state.userMessageId}`,
-        managed.messages.find(message => message.id === state.userMessageId)?.content ?? '')
+      answer.artifactVersions = await managed.conversationArtifactVersions?.capture(answer.content, `${managed.id}/${state.userMessageId}`)
       if (!isActive()) throw new Error('Answer delivery was interrupted.')
       managed.messages.push(answer)
       state.committedMessageId = answer.id
@@ -9507,6 +9613,7 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
     managed.messages = [...transaction.originalMessages, ...diagnostics]
     managed.streamingText = ''
     managed.streamingTurnId = undefined
+    managed.streamingPhase = undefined
     managed.streamingStartedAt = undefined
     managed.sdkSessionId = transaction.originalSdkSessionId
     managed.branchContextStrategy = transaction.originalBranchContextStrategy
@@ -12045,6 +12152,10 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
 
     const content = managed.streamingText
     const presentationProtocol = managed.streamingPresentationProtocol
+    // Keep only unclassified prose private. Provider-classified commentary
+    // already streamed into the work chain and must be closed on interruption.
+    const hideDraft = !!managed.answerDelivery
+      && !(managed.streamingPhase === 'intermediate' && presentationProtocol !== 'marker-v1' && !managed.answerDelivery.recovery)
     const turnId = managed.streamingTurnId
       ?? this.pendingDeltas.get(managed.id)?.turnId
     this.flushDelta(managed.id, managed.workspace.id)
@@ -12059,6 +12170,7 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
         ...(managed.answerDelivery ? { answerProtocol: 'explicit-v1' as const, answerRunId: managed.answerDelivery.runId, answerRoutingVersion: managed.answerDelivery.answerRoutingVersion } : {}),
         timestamp: managed.streamingStartedAt ?? this.monotonic(),
         isIntermediate: true,
+        ...(hideDraft ? { hidden: true } : {}),
         phase: 'intermediate',
         presentationProtocol,
         turnId,
@@ -12070,7 +12182,9 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
 
     managed.streamingText = ''
     managed.streamingTurnId = undefined
+    managed.streamingPhase = undefined
     managed.streamingStartedAt = undefined
+    if (hideDraft) return
     this.sendEvent({
       type: 'text_complete',
       sessionId: managed.id,
@@ -12118,6 +12232,7 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
         }
         managed.streamingText += event.text
         managed.streamingTurnId = event.turnId ?? managed.streamingTurnId
+        managed.streamingPhase = event.phase ?? 'unclassified'
         managed.streamingPresentationProtocol = event.presentationProtocol
         // Queue delta for batched sending (performance: reduces IPC from 50+/sec to ~20/sec)
         this.queueDelta(
@@ -12141,6 +12256,11 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
           && aggregation.orchestrationId === managed.orchestrationId
           && aggregation.phase === 'waiting-workers'
         const isIntermediate = !!managed.answerDelivery || event.isIntermediate || isManagedSwarmDispatch
+        // Provider-classified commentary is safe to show as it streams. An
+        // unclassified body may be a final draft, so keep that private until
+        // submit_answer commits it.
+        const hideDraft = !!managed.answerDelivery
+          && !(event.phase === 'intermediate' && event.presentationProtocol !== 'marker-v1' && !managed.answerDelivery.recovery)
         const completesActiveStream = !event.turnId
           || !managed.streamingTurnId
           || event.turnId === managed.streamingTurnId
@@ -12148,8 +12268,8 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
           event.text,
           completesActiveStream ? managed.streamingText : undefined,
         )
-        // Some providers emit only text_complete; keep that body on the same
-        // transient preview path until the durable delivery decision is made.
+        // Recovery previews are reserved for visible native text. Structured
+        // drafts stay private until the durable delivery decision is made.
         this.previewRecoveryAnswer(managed, content)
         // A boundary can close commentary before the SDK id arrives. Attach
         // the original message identity once, without re-emitting its text.
@@ -12166,6 +12286,7 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
           sourceSdkMessageId: event.sdkMessageId,
           timestamp: this.monotonic(),
           isIntermediate,
+          ...(hideDraft ? { hidden: true } : {}),
           phase: event.phase,
           presentationProtocol: event.presentationProtocol,
           ...(managed.answerDelivery ? { answerProtocol: 'explicit-v1' as const, answerRunId: managed.answerDelivery.runId, answerRoutingVersion: managed.answerDelivery.answerRoutingVersion } : {}),
@@ -12176,6 +12297,7 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
         if (completesActiveStream) {
           managed.streamingText = ''
           managed.streamingTurnId = undefined
+          managed.streamingPhase = undefined
           managed.streamingStartedAt = undefined
         }
 
@@ -12217,7 +12339,7 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
           }
         }
 
-        this.sendEvent({ type: 'text_complete', sessionId, text: content, isIntermediate, phase: event.phase, presentationProtocol: event.presentationProtocol, answerProtocol: assistantMessage.answerProtocol, answerRunId: assistantMessage.answerRunId, answerRoutingVersion: assistantMessage.answerRoutingVersion, turnId: event.turnId, parentToolUseId: event.parentToolUseId, timestamp: assistantMessage.timestamp, messageId: assistantMessage.id }, workspaceId)
+        if (!hideDraft) this.sendEvent({ type: 'text_complete', sessionId, text: content, isIntermediate, phase: event.phase, presentationProtocol: event.presentationProtocol, answerProtocol: assistantMessage.answerProtocol, answerRunId: assistantMessage.answerRunId, answerRoutingVersion: assistantMessage.answerRoutingVersion, turnId: event.turnId, parentToolUseId: event.parentToolUseId, timestamp: assistantMessage.timestamp, messageId: assistantMessage.id }, workspaceId)
 
         // Persist session after complete message to prevent data loss on quit
         this.persistSession(managed)
@@ -12257,6 +12379,20 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
         // Format tool input paths to relative for better readability
         const previousTool = managed.messages.find(m => m.toolUseId === event.toolUseId)
         const toolPurpose = previousTool?.toolPurpose ?? (/^(?:mcp__session__|session__)?submit_answer$/.test(event.toolName) ? 'answer-delivery' : 'work')
+        if (managed.answerDelivery && toolPurpose === 'work' && !event.parentToolUseId) {
+          // A following business tool proves earlier prose was process commentary.
+          // Reveal it now; prose followed by submit_answer stays a private draft.
+          for (const draft of managed.messages) {
+            if (draft.role !== 'assistant' || !draft.hidden || !draft.isIntermediate
+              || draft.answerRunId !== managed.answerDelivery.runId) continue
+            draft.hidden = false
+            this.sendEvent({ type: 'text_complete', sessionId, text: draft.content,
+              isIntermediate: true, phase: 'intermediate', presentationProtocol: draft.presentationProtocol,
+              answerProtocol: draft.answerProtocol, answerRunId: draft.answerRunId,
+              answerRoutingVersion: draft.answerRoutingVersion, turnId: draft.turnId,
+              timestamp: draft.timestamp, messageId: draft.id }, workspaceId)
+          }
+        }
         const formattedToolInput = toolPurpose === 'answer-delivery' ? {} : formatToolInputPaths(event.input)
 
         // Resolve call_llm model for TurnCard badge display.
@@ -13165,6 +13301,12 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
     // Send batched delta if any
     const pending = this.pendingDeltas.get(sessionId)
     if (pending && pending.delta) {
+      this.pendingDeltas.delete(sessionId)
+      const managed = this.sessions.get(sessionId)
+      if (managed?.answerDelivery && !(pending.phase === 'intermediate' && pending.presentationProtocol !== 'marker-v1' && !managed.answerDelivery.recovery)) {
+        this.previewRecoveryAnswer(managed, managed.streamingText)
+        return
+      }
       this.sendEvent({
         type: 'text_delta',
         sessionId,
@@ -13173,8 +13315,6 @@ Edit only the candidate file. Preserve unrelated content. Do not modify the orig
         presentationProtocol: pending.presentationProtocol,
         turnId: pending.turnId
       }, workspaceId)
-      this.pendingDeltas.delete(sessionId)
-      const managed = this.sessions.get(sessionId)
       if (managed) this.previewRecoveryAnswer(managed, managed.streamingText)
     }
   }

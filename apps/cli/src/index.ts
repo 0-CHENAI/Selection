@@ -1948,7 +1948,7 @@ Examples:
   craft-cli run --provider openai --model gpt-4o "Summarize this repo"
   OPENAI_API_KEY=sk-... craft-cli run --provider openai "Hello"
   GOOGLE_API_KEY=... craft-cli run --provider google --model gemini-2.0-flash "Hello"
-  DEEPSEEK_API_KEY=sk-... craft-cli run --provider deepseek --model deepseek-v4-flash "Hello"
+  DEEPSEEK_API_KEY=sk-... craft-cli run --provider deepseek --model deepseek-flash "Hello"
   echo "Analyze this code" | craft-cli run
   craft-cli ping
   craft-cli sessions

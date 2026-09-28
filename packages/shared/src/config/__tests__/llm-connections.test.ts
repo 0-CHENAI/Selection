@@ -108,6 +108,10 @@ describe('getDefaultModelForConnection', () => {
     expect(modelIds).toContain(defaultModel)
   })
 
+  it('Pi GitHub Copilot default matches the current SDK catalog', () => {
+    expect(getDefaultModelForConnection('pi', 'github-copilot')).toBe('pi/claude-sonnet-4.6')
+  })
+
   it('Pi Moonshot defaults to Kimi K3 in both API regions', () => {
     for (const provider of ['moonshotai', 'moonshotai-cn'] as const) {
       const defaultModel = getDefaultModelForConnection('pi', provider)

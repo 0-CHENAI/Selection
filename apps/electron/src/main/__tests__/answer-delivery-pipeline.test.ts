@@ -104,11 +104,12 @@ describe('#330 service → renderer → durable reload → turn grouping', () =>
           expect(stored.messages.find(m => m.type === 'user')?.answerRecoveryAttempted).toBe(recover)
           expect(liveTurns).toHaveLength(1)
           expect(loadedTurns).toHaveLength(1)
-          expect(liveTurns[0]!.response?.completedRevealStartTime).toBeNumber()
+          expect(liveTurns[0]!.response?.completedRevealStartTime).toBeUndefined()
           expect(loadedTurns[0]!.response).toEqual({ ...liveTurns[0]!.response!, completedRevealStartTime: undefined })
           expect(loadedTurns[0]!.response?.text).toBe(answer)
           // Drafts folded by the UI must still survive in the durable execution record.
           expect(reloaded.some(m => m.isIntermediate && m.content === explanation)).toBe(true)
+          expect(liveTurns[0]!.activities.some(a => a.type === 'intermediate' && a.content === explanation)).toBe(true)
           expect(loadedTurns[0]!.activities.some(a => a.type === 'tool')).toBe(true)
           expect(reloaded.filter(m => m.answerCommitted)).toHaveLength(1)
           // Replayed completion/receipt events must not duplicate or demote it.

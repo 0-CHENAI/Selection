@@ -428,7 +428,7 @@ const SSE_DATA_RE = /^data:\s*(.+)$/;
 function createAnswerPreviewEmitter() {
   const previewObserver = answerPreviewContext.getStore();
   const previews = new Map<string, { decoder: AnswerArgumentStream; offset: number; text: string; sentAt: number }>();
-  function previewCall(tc: { id: string; name: string; arguments: string }): void {
+  function previewCall(tc: { id: string; name: string; arguments: string }, force = false): void {
     if (!previewObserver || !/^(?:mcp__session__|session__)?submit_answer$/.test(tc.name)) return;
     let state = previews.get(tc.id);
     if (!state) {
@@ -437,7 +437,7 @@ function createAnswerPreviewEmitter() {
     }
     const text = state.decoder.push(tc.arguments.slice(state.offset));
     state.offset = tc.arguments.length;
-    if (text !== state.text && (!text || Date.now() - state.sentAt >= 50)) {
+    if (text !== state.text && (force || !text || Date.now() - state.sentAt >= 50)) {
       state.text = text;
       state.sentAt = Date.now();
       // Preview failures must never affect SDK parsing or tool execution.
@@ -1256,9 +1256,11 @@ const openAiAdapter: ApiAdapter = {
  * - response.output_item.done (item.type === 'function_call')
  */
 export function createOpenAiResponsesSseStrippingStream(): TransformStream<Uint8Array, Uint8Array> {
+  const previewCall = createAnswerPreviewEmitter();
   const encoder = new TextEncoder();
   const decoder = new TextDecoder();
   let lineBuffer = '';
+  const previewCalls = new Map<number, { id: string; name: string; arguments: string }>();
 
   function emitSseLine(dataStr: string, controller: TransformStreamDefaultController<Uint8Array>): void {
     if (DEBUG_SSE_RAW) debugLog(`[SSE RAW OUT openai-responses] ${dataStr.slice(0, 4000)}`);
@@ -1281,9 +1283,28 @@ export function createOpenAiResponsesSseStrippingStream(): TransformStream<Uint8
     }
 
     const eventType = data.type;
+    if (eventType === 'response.output_item.added') {
+      const item = data.item as { type?: string; call_id?: string; name?: string } | undefined;
+      const index = data.output_index;
+      if (typeof index === 'number' && item?.type === 'function_call'
+        && typeof item.call_id === 'string' && typeof item.name === 'string') {
+        previewCalls.set(index, { id: item.call_id, name: item.name, arguments: '' });
+      }
+    } else if (eventType === 'response.function_call_arguments.delta') {
+      const call = previewCalls.get(data.output_index as number);
+      if (call && typeof data.delta === 'string') {
+        call.arguments += data.delta;
+        previewCall(call);
+      }
+    }
     if (eventType === 'response.function_call_arguments.done') {
       const callId = typeof data.call_id === 'string' ? data.call_id : undefined;
       const argsStr = typeof data.arguments === 'string' ? data.arguments : undefined;
+      const call = previewCalls.get(data.output_index as number);
+      if (call && call.id === callId && argsStr?.startsWith(call.arguments)) {
+        call.arguments = argsStr;
+        previewCall(call, true);
+      }
       if (callId && argsStr) {
         try {
           const parsed = JSON.parse(argsStr) as Record<string, unknown>;
@@ -1308,6 +1329,7 @@ export function createOpenAiResponsesSseStrippingStream(): TransformStream<Uint8
       } | undefined;
 
       if (item?.type === 'function_call' && typeof item.arguments === 'string') {
+        previewCalls.delete(data.output_index as number);
         const toolId = typeof item.call_id === 'string' ? item.call_id : undefined;
         const toolName = typeof item.name === 'string' ? item.name : 'response:function_call';
         if (toolId) {

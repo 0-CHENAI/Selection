@@ -34,3 +34,14 @@ it('keeps a trailing-marker body intermediate when the user stops the Pi turn', 
   expect.objectContaining({text:'尚未完成。\n',isIntermediate:true,phase:'intermediate'}),
  ])
 })
+
+it('does not pass a terminal closing tag into the stored final answer', () => {
+ const adapter = new PiEventAdapter(); adapter.startTurn(); adapter.setPresentationProtocol('marker-v1')
+ const raw = '进展\n<<<FINAL_ANSWER>>>\n正文。\n<<<END_ANSWER>>>'
+ const streamed = [...adapter.adaptEvent({type:'message_update',assistantMessageEvent:{type:'text_delta',delta:raw,partial:{role:'assistant',content:[{type:'text',text:raw}]}}} as never)]
+ expect(streamed.flatMap(e => e.type === 'text_delta' && e.phase === 'final' ? [e.text] : []).join('')).toBe('正文。\n')
+ const ended = [...adapter.adaptEvent({type:'message_end',message:{role:'assistant',id:'sdk',content:[{type:'text',text:raw}],stopReason:'stop'}} as never)]
+ expect(ended.filter(e => e.type === 'text_complete')).toEqual([
+  expect.objectContaining({text:'正文。\n',phase:'final',presentationProtocol:'marker-v1',sdkMessageId:'sdk'}),
+ ])
+})

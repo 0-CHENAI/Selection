@@ -6,6 +6,8 @@
  */
 
 // SubmitPlan
+export { handleArtifactVersions } from './artifact-versions.ts';
+export type { ArtifactVersionsArgs } from './artifact-versions.ts';
 export { handleSubmitPlan } from './submit-plan.ts';
 export type { SubmitPlanArgs } from './submit-plan.ts';
 

@@ -26,7 +26,7 @@ export async function loginGitHubCopilotWithSdk(
   callbacks: GitHubCopilotLoginCallbacks = {},
 ): Promise<OAuthCredential> {
   return getGitHubCopilotOAuth().login({
-    signal: callbacks.signal,
+    signal: callbacks.signal ?? new AbortController().signal,
     prompt: prompt => callbacks.onPrompt?.(prompt) ?? Promise.resolve(''),
     notify: (event: AuthEvent) => {
       if (event.type === 'device_code') {
@@ -50,5 +50,5 @@ export async function refreshGitHubCopilotTokenWithSdk(
     access: '',
     refresh: refreshToken,
     expires: 0,
-  }, signal);
+  }, signal ?? new AbortController().signal);
 }

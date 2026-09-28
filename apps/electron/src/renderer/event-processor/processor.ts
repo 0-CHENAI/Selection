@@ -69,6 +69,8 @@ export function processEvent(
   state: SessionState,
   event: AgentEvent
 ): ProcessResult {
+  const hadAnswerPreview = event.type === 'text_complete' && event.answerCommitted
+    && state.session.messages.some(message => message.answerPreview && message.answerRunId === event.answerRunId)
   if (['complete', 'error', 'typed_error', 'interrupted', 'plan_submitted', 'auth_request', 'regenerate_started', 'messages_restored', 'messages_truncated'].includes(event.type)
     || (event.type === 'text_complete' && event.answerCommitted)) {
     state = { ...state, session: { ...state.session, messages: state.session.messages.filter(m => !m.answerPreview) } }
@@ -82,7 +84,7 @@ export function processEvent(
     }
 
     case 'text_complete': {
-      const newState = handleTextComplete(state, event)
+      const newState = handleTextComplete(state, event, hadAnswerPreview)
       return { state: newState, effects: [] }
     }
 

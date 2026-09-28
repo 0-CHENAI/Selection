@@ -276,6 +276,17 @@ export type AnnotationFeedbackSnapshot = AnnotationFeedbackReference & {
   userResolvedAt?: number;
 };
 
+/** Why an answer published a local file. Opening or citing a file is not a change. */
+export type ArtifactDeliveryChange = 'created' | 'modified' | 'deleted' | 'restored';
+
+export interface ArtifactDeliveryRef {
+  path: string;
+  versionId: string;
+  ordinal: number;
+  /** Absent on references saved before change kinds were recorded. */
+  change?: ArtifactDeliveryChange;
+}
+
 /**
  * Runtime message type (includes transient fields like isStreaming)
  */
@@ -348,7 +359,7 @@ export interface Message {
   /** Promoted from an unsubmitted draft after delivery recovery failed (#403). */
   answerSalvaged?: boolean;
   /** Persisted snapshot identities for local files delivered by this answer. */
-  artifactVersions?: Array<{ path: string; versionId: string; ordinal: number }>;
+  artifactVersions?: ArtifactDeliveryRef[];
   /** Persisted on the originating user message before the single recovery call. */
   answerRecoveryAttempted?: boolean;
   phase?: TextStreamPhase;
@@ -455,7 +466,7 @@ export interface StoredMessage {
   /** Promoted from an unsubmitted draft after delivery recovery failed (#403). */
   answerSalvaged?: boolean;
   /** Persisted snapshot identities for local files delivered by this answer. */
-  artifactVersions?: Array<{ path: string; versionId: string; ordinal: number }>;
+  artifactVersions?: ArtifactDeliveryRef[];
   /** Persisted on the originating user message before the single recovery call. */
   answerRecoveryAttempted?: boolean;
   phase?: TextStreamPhase;
