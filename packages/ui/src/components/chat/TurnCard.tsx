@@ -4,10 +4,11 @@ import { extractResponseSources } from './response-sources'
 import * as React from 'react'
 import { useMemo, useEffect, useRef, useCallback, useState } from 'react'
 import i18n from 'i18next'
+import { formatUserMessageTime } from './UserMessageBubble'
 import { isAnswerDeliveryTool, localizedToolLabel } from './tool-labels'
 import { usePacedSource } from './usePacedSource'
 import { ResponseArtifacts } from './ResponseArtifacts'
-import { extractResponseArtifacts } from './response-artifacts'
+import { extractChangedResponseArtifacts } from './response-artifacts'
 import { ResponseBodyGrowth } from './ResponseBodyGrowth'
 import { useCompletionActions } from './useCompletionActions'
 import { useTranslation } from 'react-i18next'
@@ -1114,6 +1115,21 @@ function ActivityRow({ activity, onOpenDetails, isLastChild, sessionFolderPath, 
     )
   }
 
+  // Compaction stays in the chain as a quiet time note, not another completed step.
+  if (activity.type === 'status' && activity.statusType === 'compaction_complete') {
+    return (
+      <div className="flex items-stretch">
+        <TreeViewConnector depth={depth} isLastChild={isLastChild} />
+        <div className={cn("flex items-center gap-2 py-0.5 text-muted-foreground/70 flex-1 min-w-0", SIZE_CONFIG.fontSize)}>
+          <div className={cn(SIZE_CONFIG.iconSize, "flex items-center justify-center shrink-0")}>
+            <span className="size-1 rounded-full bg-muted-foreground/40" />
+          </div>
+          <span className="truncate">{i18n.t('chat.contextCompactedAt', { time: formatUserMessageTime(activity.timestamp, i18n.language) })}</span>
+        </div>
+      </div>
+    )
+  }
+
   // Status activities (e.g., compacting) - system-level with distinct styling
   if (activity.type === 'status') {
     const isRunning = activity.status === 'running'
@@ -1133,7 +1149,7 @@ function ActivityRow({ activity, onOpenDetails, isLastChild, sessionFolderPath, 
               <CheckCircle2 className={cn(SIZE_CONFIG.iconSize, "text-success")} />
             )}
           </div>
-          <span className="truncate">{activity.content}</span>
+          <span className="truncate">{activity.statusType === 'compacting' && isRunning ? i18n.t('chat.contextCompacting') : activity.content}</span>
         </div>
       </div>
     )
@@ -1899,8 +1915,8 @@ export function ResponseCard({
   const responseText = parsedSkillUsage.content
   const startsWithHtmlPreview = /^\s*(?:```html-preview(?:\s|$)|html-preview[ \t]*\n[ \t]*\{)/.test(responseText)
   const artifacts = useMemo(
-    () => showArtifacts ? extractResponseArtifacts(responseText) : [],
-    [showArtifacts, responseText],
+    () => showArtifacts ? extractChangedResponseArtifacts(responseText, artifactVersions) : [],
+    [showArtifacts, responseText, artifactVersions],
   )
   const paced = usePacedSource(responseText, isStreaming, completedRevealStartTime, revealIdentity ?? messageId)
   const presentationStreaming = isStreaming || paced.revealing
@@ -3271,6 +3287,9 @@ export const TurnCard = React.memo(function TurnCard({
 
   // Only count rows the user will actually see in the collapsible section
   const stepCount = countWorkRecords(visibleActivities)
+  const compactionTimes = visibleActivities
+    .filter(activity => activity.statusType === 'compaction_complete')
+    .map(activity => activity.timestamp)
   const hasWorkRecords = stepCount > 0
 
   // Determine if thinking indicator should show using the phase-based state machine.
@@ -3352,6 +3371,12 @@ export const TurnCard = React.memo(function TurnCard({
                 </motion.span>
               </AnimatePresence>
             </span>
+
+            {!isExpanded && compactionTimes.length > 0 && (
+              <span className="shrink-0 text-[11px] tabular-nums text-muted-foreground/70">
+                {compactionTimes.map(time => i18n.t('chat.contextCompactedAt', { time: formatUserMessageTime(time, i18n.language) })).join(' · ')}
+              </span>
+            )}
 
             {hasWorkRecords && (renderActionsMenu ? renderActionsMenu() : (
               <TurnCardActionsMenu

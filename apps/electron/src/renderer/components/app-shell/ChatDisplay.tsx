@@ -54,6 +54,7 @@ import type { PermissionMode } from "@craft-agent/shared/agent/modes"
 import type { ThinkingLevel } from "@craft-agent/shared/agent/thinking-levels"
 import {
   TurnCard,
+  formatUserMessageTime,
   HeightPresence,
   UserMessageBubble,
   groupMessagesByTurn,
@@ -2088,7 +2089,12 @@ export const ChatDisplay = React.forwardRef<ChatDisplayHandle, ChatDisplayProps>
                                 enabledSourceSlugs: session.enabledSourceSlugs,
                               }
                             )
-                            navigate(routes.view.allSessions(child.id), { newPanel: resolveBranchNewPanelOption(options) })
+                            const newPanel = resolveBranchNewPanelOption(options)
+                            if (child.projectId && appShellContext.onJumpToProjectSessions) {
+                              appShellContext.onJumpToProjectSessions(child.projectId, child.id, newPanel)
+                            } else {
+                              navigate(routes.view.allSessions(child.id), { newPanel })
+                            }
                           } catch (error) {
                             const rawMessage = error instanceof Error ? error.message : 'Failed to create branch'
                             const message = rawMessage.includes('source and target providers must match')
@@ -2650,7 +2656,7 @@ function MessageBubble({
   contextRecovery,
   executionRecovery,
 }: MessageBubbleProps) {
-  const { t } = useTranslation()
+  const { t, i18n } = useTranslation()
 
   // === USER MESSAGE: Right-aligned bubble with attachments above ===
   if (message.role === 'user') {
@@ -2707,7 +2713,7 @@ function MessageBubble({
         <div className="w-3 h-3 flex items-center justify-center shrink-0">
           <Spinner className="text-[10px]" />
         </div>
-        <span>{message.content}</span>
+        <span>{message.statusType === 'compacting' ? t('chat.contextCompacting') : message.content}</span>
       </div>
     )
   }
@@ -2718,12 +2724,9 @@ function MessageBubble({
     // This persists after reload to show where context was compacted
     if (message.statusType === 'compaction_complete') {
       return (
-        <div className="flex items-center gap-3 my-12 px-3">
-          <div className="flex-1 h-px bg-border" />
-          <span className="text-sm text-muted-foreground/70 select-none">
-            {t('chat.conversationCompacted')}
-          </span>
-          <div className="flex-1 h-px bg-border" />
+        <div className="flex items-center gap-2 px-2.5 py-1 text-[13px] text-muted-foreground/70 select-none">
+          <span className="size-1 shrink-0 rounded-full bg-muted-foreground/40" />
+          <span>{t('chat.contextCompactedAt', { time: formatUserMessageTime(message.timestamp, i18n.resolvedLanguage) })}</span>
         </div>
       )
     }

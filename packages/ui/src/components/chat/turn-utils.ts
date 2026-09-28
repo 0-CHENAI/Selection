@@ -370,6 +370,7 @@ export function countWorkRecords(activities: ReadonlyArray<ActivityItem>): numbe
   return new Set(activities
     // Delivery is the card body, not a numbered work step.
     .filter(activity => !isAnswerDeliveryTool(activity))
+    .filter(activity => activity.statusType !== 'compaction_complete')
     // Empty live placeholders are transient indicators, not work records.
     .filter(activity => !['intermediate', 'thinking'].includes(activity.type)
       || hasRenderableAssistantText(activity.content))
@@ -928,22 +929,31 @@ export function groupMessagesByTurn(messages: Message[], options: GroupTurnsOpti
       continue
     }
 
-    // Info messages with compaction_complete update the matching status activity
+    // Keep compaction inside the same work chain. A separate divider splits one
+    // job into two step groups.
     if (message.role === 'info' && message.statusType === 'compaction_complete') {
-      if (currentTurn) {
-        const statusIdx = currentTurn.activities.findIndex(
-          a => a.type === 'status' && a.statusType === 'compacting'
-        )
-        const existingActivity = currentTurn.activities[statusIdx]
-        if (statusIdx !== -1 && existingActivity) {
-          currentTurn.activities[statusIdx] = {
-            ...existingActivity,
-            status: 'completed',
-            content: message.content,
-          }
+      if (!currentTurn) {
+        currentTurn = {
+          type: 'assistant',
+          turnId: message.turnId || message.id,
+          activities: [],
+          response: undefined,
+          intent: undefined,
+          isStreaming: false,
+          isComplete: false,
+          timestamp: message.timestamp,
         }
       }
-      continue  // Don't create a separate system turn
+      currentTurn.activities.push({
+        id: message.id,
+        type: 'status',
+        status: 'completed',
+        content: message.content,
+        timestamp: message.timestamp,
+        statusType: 'compaction_complete',
+        depth: 0,
+      })
+      continue
     }
 
     // Error/info/warning messages are standalone
