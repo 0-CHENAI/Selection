@@ -50,6 +50,17 @@ test('new linked files start at v1; denied files and remote citations never beco
   } finally { rmSync(root, { recursive: true, force: true }) }
 })
 
+test('a file created at the turn boundary survives small filesystem timestamp skew', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'conversation-clock-skew-'))
+  try {
+    const file = join(root, 'report.txt')
+    const store = new ArtifactVersions(join(root, 'versions'), 'host', 'workspace')
+    const turn = new ConversationArtifactVersions(store, [root], async path => realpathSync(path), () => {}, Date.now() + 1)
+    writeFileSync(file, 'new')
+    expect((await turn.capture('[报告](report.txt)', 'session/user-1')).map(ref => ref.change)).toEqual(['created'])
+  } finally { rmSync(root, { recursive: true, force: true }) }
+})
+
 test('only changed or new files receive answer artifact references', async () => {
   const root = mkdtempSync(join(tmpdir(), 'conversation-delivered-only-'))
   try {

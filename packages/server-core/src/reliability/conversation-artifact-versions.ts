@@ -67,7 +67,9 @@ export class ConversationArtifactVersions {
   private writtenThisTurn(path: string): boolean {
     const file = statSync(path)
     // ctime also moves when a file is opened or its metadata is touched.
-    return Math.max(file.birthtimeMs, file.mtimeMs) >= this.turnStartedAt
+    // Some filesystems report a write a few milliseconds behind the process
+    // clock. Keep the allowance narrow so an older linked file stays a citation.
+    return Math.max(file.birthtimeMs, file.mtimeMs) >= this.turnStartedAt - 2
   }
 
   async track(markdown: string): Promise<void> {
