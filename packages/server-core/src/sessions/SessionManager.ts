@@ -1352,6 +1352,18 @@ export function buildAgentSessionConfig(managed: ManagedSession): SessionConfig 
   }
 }
 
+export function resolveSessionProjectId(input: {
+  requestedProjectId?: string
+  parentProjectId?: string
+  branchSourceProjectId?: string
+}): string | undefined {
+  const { requestedProjectId, parentProjectId, branchSourceProjectId } = input
+  if (branchSourceProjectId && requestedProjectId && requestedProjectId !== branchSourceProjectId) {
+    throw new Error('A branch must stay in its source session project')
+  }
+  return branchSourceProjectId ?? requestedProjectId ?? parentProjectId
+}
+
 /** Select recovery context from exactly one Craft Session transcript. */
 export function selectSessionRecoveryMessages(messages: Message[]): Array<{ type: 'user' | 'assistant'; content: string }> {
   return messages
@@ -2391,6 +2403,7 @@ export class SessionManager implements ISessionManager {
   }
 
   private restoreExecutionCheckpoint(managed: ManagedSession): void {
+    this.discardInheritedBranchCheckpoint(managed)
     const saved = readExecutionCheckpoint(getSessionStoragePath(managed.workspace.rootPath, managed.id))
     if (saved.kind === 'missing') return
     if (saved.kind !== 'ok') {
@@ -2410,6 +2423,20 @@ export class SessionManager implements ISessionManager {
     if (interrupted || preparedSwarm) {
       setImmediate(() => { void this.resumeExecution(managed.id).catch(() => sessionLog.warn('Execution recovery paused', { sessionId: managed.id })) })
     }
+  }
+
+  /** Older branches copied the parent's data/ checkpoint along with deliverables. */
+  private discardInheritedBranchCheckpoint(managed: ManagedSession): void {
+    if (!managed.branchFromMessageId) return
+    const sessionPath = getSessionStoragePath(managed.workspace.rootPath, managed.id)
+    const saved = readExecutionCheckpoint(sessionPath)
+    if (saved.kind !== 'ok' || saved.checkpoint.sessionId === managed.id) return
+    unlinkSync(join(sessionPath, 'data', 'execution-checkpoint.json'))
+    managed.executionCheckpoint = undefined
+    managed.runtimeRecovery = undefined
+    sessionLog.warn('Removed inherited parent execution checkpoint from branch', {
+      branchSessionId: managed.id, checkpointSessionId: saved.checkpoint.sessionId,
+    })
   }
 
   private recoverPersistedSwarmSessions(): void {
@@ -3159,9 +3186,8 @@ export class SessionManager implements ISessionManager {
     // workingDirectory configured, inherit it (only when the caller didn't pass an
     // explicit override). This lets "+ New session in {project}" reuse the project's
     // bound directory without duplicating logic on the renderer side.
-    // Subtasks inherit the parent's project when the caller didn't bind one explicitly —
-    // a child of a project-bound task belongs to that project (board quick-add passes none),
-    // so project-scoped filtering sees the whole task family.
+    // Subtasks inherit the parent's project when the caller didn't bind one explicitly.
+    // A branch inherits its source project after the source is validated below.
     const inheritedProjectId = options?.parentSessionId
       ? this.sessions.get(options.parentSessionId)?.projectId
       : undefined
@@ -3184,28 +3210,6 @@ export class SessionManager implements ISessionManager {
       parent: parentForInheritance?.swarmEnabled,
       branchSource: branchSourceForSwarm?.swarmEnabled,
     })
-    const requestedProjectId = options?.projectId ?? inheritedProjectId
-    let resolvedProjectId: string | undefined
-    if (requestedProjectId) {
-      const { loadProjectById } = await import('@craft-agent/shared/projects')
-      const project = loadProjectById(workspaceRootPath, requestedProjectId)
-      if (!project) {
-        // An EXPLICIT binding to a missing project is a caller bug; an inherited one
-        // (parent's project deleted since) just no-ops rather than failing the child.
-        if (options?.projectId) {
-          throw new Error(`Project ${options.projectId} not found in workspace ${workspaceId}`)
-        }
-      } else {
-        resolvedProjectId = project.config.id
-        if (
-          (options?.workingDirectory === undefined || options?.workingDirectory === 'user_default') &&
-          project.config.workingDirectory
-        ) {
-          resolvedWorkingDir = project.config.workingDirectory
-        }
-      }
-    }
-
     // Validate branch request up-front so branch metadata is only set for valid branches.
     // This prevents creating sessions that claim to be branched but don't have copied history.
     let validatedBranch: {
@@ -3394,6 +3398,33 @@ export class SessionManager implements ISessionManager {
         branchFromSdkSessionId: !!validatedBranch.branchFromSdkSessionId,
         copiedMessageCount: validatedBranch.branchIdx + 1,
       })
+    }
+
+    const sourceProjectId = validatedBranch?.sourceSession.projectId
+    const requestedProjectId = resolveSessionProjectId({
+      requestedProjectId: options?.projectId,
+      parentProjectId: inheritedProjectId,
+      branchSourceProjectId: sourceProjectId,
+    })
+    let resolvedProjectId: string | undefined
+    if (requestedProjectId) {
+      const { loadProjectById } = await import('@craft-agent/shared/projects')
+      const project = loadProjectById(workspaceRootPath, requestedProjectId)
+      if (!project) {
+        // An explicit binding to a missing project is a caller bug; a deleted
+        // inherited project no longer owns new children or branches.
+        if (options?.projectId) {
+          throw new Error(`Project ${options.projectId} not found in workspace ${workspaceId}`)
+        }
+      } else {
+        resolvedProjectId = project.config.id
+        if (
+          (options?.workingDirectory === undefined || options?.workingDirectory === 'user_default') &&
+          project.config.workingDirectory
+        ) {
+          resolvedWorkingDir = project.config.workingDirectory
+        }
+      }
     }
 
     // Use storage layer to create and persist the session
@@ -7361,6 +7392,7 @@ export class SessionManager implements ISessionManager {
 
       const checkpointOwner = managed.messages.findLast(m => m.role === 'user' && !m.hidden && !m.isQueued)
       if (checkpointOwner) {
+        this.discardInheritedBranchCheckpoint(managed)
         managed.executionCheckpoint = { version: 1, sessionId, userMessageId: checkpointOwner.id,
           generation: myGeneration, answerRunId: managed.answerDelivery?.runId, sdkSessionId: managed.sdkSessionId,
           taskIdentity: executionTaskIdentity(managed),

@@ -69,6 +69,8 @@ export interface AppShellContextType {
    * filters — and selects the session. Used by kanban tile/subtask clicks + post-create.
    */
   onJumpToTaskSessions?: (sessionId: string, scope: { labelId: string; projectId?: string }) => void
+  /** Show a project-bound session in its project list, including newly created branches. */
+  onJumpToProjectSessions?: (projectId: string, sessionId?: string, newPanel?: boolean) => void
   /** Sidebar/project-navigator include used to bind a new orchestration (#261). */
   orchestrationProjectId?: string | null
   /** Enabled permission modes for Shift+Tab cycling */
