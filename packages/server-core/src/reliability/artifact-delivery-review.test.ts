@@ -31,7 +31,7 @@ test('the reviewer classifies every candidate and keeps only primary results', a
     writeFileSync(helper, 'console.log(1)')
     const input = { request: '生成一份报告', answer: '报告完成', candidates: [report, helper], proposed: [] }
     const result = await reviewArtifactDelivery(input, async request => {
-      expect(request.prompt).toContain(report)
+      expect((JSON.parse(request.prompt) as { files: Array<{ path: string }> }).files[0]?.path).toBe(report)
       return { text: JSON.stringify({ decisions: [
         { id: 1, role: 'primary', reason: 'Final report' },
         { id: 2, role: 'supporting', reason: 'Build helper' },
