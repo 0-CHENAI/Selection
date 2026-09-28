@@ -32,6 +32,7 @@ import {
   ListTodo,
   Pencil,
   FilePenLine,
+  FoldVertical,
   GitBranch,
   RefreshCw,
   Sparkles,
@@ -1122,7 +1123,7 @@ function ActivityRow({ activity, onOpenDetails, isLastChild, sessionFolderPath, 
         <TreeViewConnector depth={depth} isLastChild={isLastChild} />
         <div className={cn("flex items-center gap-2 py-0.5 text-muted-foreground/70 flex-1 min-w-0", SIZE_CONFIG.fontSize)}>
           <div className={cn(SIZE_CONFIG.iconSize, "flex items-center justify-center shrink-0")}>
-            <span className="size-1 rounded-full bg-muted-foreground/40" />
+            <FoldVertical className={cn(SIZE_CONFIG.iconSize, "shrink-0")} aria-hidden="true" />
           </div>
           <span className="truncate">{i18n.t('chat.contextCompactedAt', { time: formatUserMessageTime(activity.timestamp, i18n.language) })}</span>
         </div>

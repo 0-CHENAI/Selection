@@ -13,6 +13,7 @@ import {
   ChevronDown,
   ChevronRight,
   ChevronUp,
+  FoldVertical,
   CircleAlert,
   Info,
   X,
@@ -2725,7 +2726,7 @@ function MessageBubble({
     if (message.statusType === 'compaction_complete') {
       return (
         <div className="flex items-center gap-2 px-2.5 py-1 text-[13px] text-muted-foreground/70 select-none">
-          <span className="size-1 shrink-0 rounded-full bg-muted-foreground/40" />
+          <FoldVertical className="size-3 shrink-0" aria-hidden="true" />
           <span>{t('chat.contextCompactedAt', { time: formatUserMessageTime(message.timestamp, i18n.resolvedLanguage) })}</span>
         </div>
       )
