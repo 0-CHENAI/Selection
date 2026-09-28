@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import type { Context } from '@earendil-works/pi-ai';
+import { normalizeContext, type Context } from '@earendil-works/pi-ai';
 import {
   MIN_CONTEXT_RESERVE_TOKENS,
   buildContextBudget,
@@ -62,6 +62,18 @@ describe('context output budget', () => {
 });
 
 describe('context input estimation', () => {
+  it('counts prompt and tool declarations carried in the new Pi transcript', () => {
+    const transcript = normalizeContext({
+      systemPrompt: '中文系统提示。'.repeat(100),
+      tools: [{ name: 'read', description: 'Read a file', parameters: { type: 'object' } }],
+      messages: [{ role: 'user', content: '继续', timestamp: 1 }],
+    });
+    const breakdown = estimateContextInputBreakdown(transcript);
+    expect(breakdown.systemPrompt).toBeGreaterThan(100);
+    expect(breakdown.tools).toBeGreaterThan(0);
+    expect(estimateContextInputTokens(transcript)).toBeGreaterThan(breakdown.systemPrompt + breakdown.tools);
+  });
+
   it('counts system prompts, tool schemas, attachments, CJK, and long history', () => {
     const context = {
       systemPrompt: 'System '.repeat(400),

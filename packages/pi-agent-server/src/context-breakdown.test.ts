@@ -43,6 +43,36 @@ describe('snapshotContextBreakdown', () => {
 
     expect(snapshotContextBreakdown(session)).toBeUndefined();
   });
+
+  it('counts a saved compaction summary without crashing after compaction_end', () => {
+    const session = {
+      agent: {
+        state: {
+          systemPrompt: '',
+          tools: [],
+          messages: [
+            { role: 'compactionSummary', summary: '保留用户目标和后续步骤。', tokensBefore: 221820, timestamp: 1 },
+            { role: 'user', content: '继续调研。', timestamp: 2 },
+          ],
+        },
+      },
+    } as unknown as AgentSession;
+
+    expect(snapshotContextBreakdown(session)?.messages).toBeGreaterThan(0);
+  });
+
+  it('uses the prompt projected for the current request instead of the saved SDK prompt', () => {
+    const session = {
+      systemPrompt: '当前指令。'.repeat(200),
+      agent: { state: { systemPrompt: 'Old SDK prompt', tools: [], messages: [
+        { role: 'system', content: 'Old SDK prompt', timestamp: 0 },
+        { role: 'user', content: '继续', timestamp: 1 },
+      ] } },
+    } as unknown as AgentSession;
+    const breakdown = snapshotContextBreakdown(session);
+    expect(breakdown?.systemPrompt).toBeGreaterThan(200);
+    expect(breakdown?.messages).toBeGreaterThan(0);
+  });
 });
 
 it('counts only model-visible schemas while leaving runtime aliases registered', () => {

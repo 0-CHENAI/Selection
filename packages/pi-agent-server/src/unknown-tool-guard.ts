@@ -1,13 +1,14 @@
-import { createAssistantMessageEventStream, type Context, type AssistantMessage } from '@earendil-works/pi-ai';
+import { createAssistantMessageEventStream, getCurrentTools, normalizeContext, type Context, type TranscriptContext, type AssistantMessage } from '@earendil-works/pi-ai';
 import type { AgentSession } from '@earendil-works/pi-coding-agent';
 import { classifyPreviewFenceToolName } from '../../shared/src/agent/core/tool-input-recovery';
 
 /** Inspect only the current turn's trailing unknown-tool failures. Never retry or alias execution. */
-export function unknownToolRecovery(context: Context): { context: Context; stop?: string } {
-  const available = new Set((context.tools ?? []).map(tool => tool.name));
+export function unknownToolRecovery(context: Context | TranscriptContext): { context: TranscriptContext; stop?: string } {
+  const transcript = normalizeContext(context);
+  const available = new Set(getCurrentTools(transcript.messages).map(tool => tool.name));
   const failures: string[] = [];
-  for (let index = context.messages.length - 1; index >= 0; index--) {
-    const message = context.messages[index]!;
+  for (let index = transcript.messages.length - 1; index >= 0; index--) {
+    const message = transcript.messages[index]!;
     if (message.role === 'user') break;
     if (message.role !== 'toolResult') continue;
     const text = message.content.filter(part => part.type === 'text').map(part => part.text).join('\n');
@@ -15,13 +16,15 @@ export function unknownToolRecovery(context: Context): { context: Context; stop?
     failures.push(message.toolName);
   }
   const latest = failures[0];
-  if (!latest) return { context };
+  if (!latest) return { context: transcript };
   const repeated = failures.filter(name => name === latest).length;
-  if (repeated >= 3 || failures.length >= 6) return { context, stop: `工具 ${latest} 不存在，本轮已连续出现 ${failures.length} 次无效工具调用，已停止重复调用。请使用当前注册的工具继续。` };
+  if (repeated >= 3 || failures.length >= 6) return { context: transcript, stop: `工具 ${latest} 不存在，本轮已连续出现 ${failures.length} 次无效工具调用，已停止重复调用。请使用当前注册的工具继续。` };
   const preview = classifyPreviewFenceToolName(latest)
     ? `${latest} is a Markdown fenced-code rendering format, NOT a callable tool. To inspect an image, use the registered read tool if available. To display it, emit the preview fence in assistant text after the file exists. Do not claim the image was inspected merely by displaying it.`
     : 'Do not retry this unavailable name or invent aliases. Choose a registered tool that can perform the task, or explain the capability limitation.';
-  return { context: { ...context, systemPrompt: `${context.systemPrompt ?? ''}\n\nTool-call correction: ${latest} is unavailable. ${preview}\nCurrently registered tools: ${[...available].join(', ') || '(none)'}.` } };
+  return { context: normalizeContext({ messages: [...transcript.messages, {
+    role: 'system', content: `Tool-call correction: ${latest} is unavailable. ${preview}\nCurrently registered tools: ${[...available].join(', ') || '(none)'}.`, timestamp: Date.now(),
+  }] }) };
 }
 
 export function installUnknownToolGuard(session: AgentSession): void {

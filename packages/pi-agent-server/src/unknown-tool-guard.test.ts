@@ -1,6 +1,6 @@
 import { expect, it } from 'bun:test';
 import { Type } from '@sinclair/typebox';
-import type { Context, ToolResultMessage } from '@earendil-works/pi-ai';
+import { getCurrentSystemPrompt, type Context, type ToolResultMessage } from '@earendil-works/pi-ai';
 import { unknownToolRecovery } from './unknown-tool-guard';
 
 const failure = (name = 'image-preview'): ToolResultMessage => ({
@@ -11,9 +11,9 @@ const base: Context = { systemPrompt: 'original', messages: [], tools: [{ name: 
 it('explains preview/tool confusion using the real active registry without rewriting tool results', () => {
   const context = { ...base, messages: [failure()] };
   const result = unknownToolRecovery(context);
-  expect(result.context.systemPrompt).toContain('NOT a callable tool');
-  expect(result.context.systemPrompt).toContain('Currently registered tools: read');
-  expect(result.context.messages).toBe(context.messages);
+  expect(getCurrentSystemPrompt(result.context.messages)).toContain('NOT a callable tool');
+  expect(getCurrentSystemPrompt(result.context.messages)).toContain('Currently registered tools: read');
+  expect(result.context.messages.at(-2)).toBe(context.messages[0]);
   expect(context.systemPrompt).toBe('original');
 });
 it('stops three repeated unknown calls, including alternating invented names', () => {
@@ -21,11 +21,11 @@ it('stops three repeated unknown calls, including alternating invented names', (
 });
 it('does not stop on past turns or after successful recovery', () => {
   expect(unknownToolRecovery({ ...base, messages: [failure(), failure(), { role:'user',content:'继续',timestamp:Date.now() }, failure()] }).stop).toBeUndefined();
-  expect(unknownToolRecovery({ ...base, messages: [failure(), failure(), {...failure('read'), isError:false}] }).context.systemPrompt).toBe('original');
+  expect(getCurrentSystemPrompt(unknownToolRecovery({ ...base, messages: [failure(), failure(), {...failure('read'), isError:false}] }).context.messages)).toBe('original');
 });
 it('leaves valid tool errors and newly registered tools alone', () => {
-  expect(unknownToolRecovery({ ...base, messages: [failure('read')] }).context.systemPrompt).toBe('original');
-  expect(unknownToolRecovery({ ...base, messages: [{...failure(),content:[{type:'text',text:'Permission denied'}]}] }).context.systemPrompt).toBe('original');
+  expect(getCurrentSystemPrompt(unknownToolRecovery({ ...base, messages: [failure('read')] }).context.messages)).toBe('original');
+  expect(getCurrentSystemPrompt(unknownToolRecovery({ ...base, messages: [{...failure(),content:[{type:'text',text:'Permission denied'}]}] }).context.messages)).toBe('original');
 });
 it('also bounds a loop that keeps inventing different tool names', () => {
   expect(unknownToolRecovery({...base,messages:Array.from({length:6},(_,i)=>failure(`invented_${i}`))}).stop).toContain('已停止');

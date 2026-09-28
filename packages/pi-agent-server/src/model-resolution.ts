@@ -38,15 +38,20 @@ export function resolvePiModel(
   preferCustomEndpoint?: boolean,
 ): PiModel | undefined {
   // Strip Craft's pi/ prefix — Pi SDK uses bare model IDs (e.g. "claude-sonnet-4-6")
-  const bareId = modelId.startsWith('pi/') ? modelId.slice(3) : modelId;
+  const requestedBareId = modelId.startsWith('pi/') ? modelId.slice(3) : modelId;
 
   // Custom-endpoint takes precedence when configured.
   // Case-insensitive: ORDER ids like DeepSeek-V4-Flash must not miss the
   // registered custom model and fall through to Pi's official DeepSeek catalog.
   if (preferCustomEndpoint) {
-    const custom = findCustomEndpointModel(modelRegistry, bareId);
+    const custom = findCustomEndpointModel(modelRegistry, requestedBareId);
     if (custom) return custom;
   }
+
+  // DeepSeek temporarily routes its retired V4 Flash ID to V4.1 Flash, but
+  // Pi's current catalog only exposes the canonical deepseek-flash ID.
+  const bareId = piAuthProvider === 'deepseek' && requestedBareId === 'deepseek-v4-flash'
+    ? 'deepseek-flash' : requestedBareId;
 
   // If we know the auth provider, do an exact provider+model lookup first.
   // This avoids the getAll() ambiguity where the same model ID exists under

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 import { compact, SettingsManager, shouldCompact, type AgentSession, type SessionEntry } from '@earendil-works/pi-coding-agent';
 import { isContextOverflow } from '@earendil-works/pi-ai/compat';
-import { createAssistantMessageEventStream, type Model, type AssistantMessage, type Context, type SimpleStreamOptions } from '@earendil-works/pi-ai';
+import { createAssistantMessageEventStream, getCurrentSystemPrompt, normalizeContext, type Model, type AssistantMessage, type Context, type SimpleStreamOptions } from '@earendil-works/pi-ai';
 import { applyCompactionSettings, compactionSettings, installCompactionPolicy, shouldCompactBeforeRequest, COMPACTION_SUMMARY_MAX_TOKENS } from './compaction-policy';
 
 const model: Model<'openai-responses'> = { id: 'test-model', name: 'Test', api: 'openai-responses', provider: 'openai', baseUrl: 'https://example.test', reasoning: true, input: ['text'], cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, contextWindow: 1_000_000, maxTokens: 32768 };
@@ -128,35 +128,34 @@ describe('80% compaction policy', () => {
     expect(isContextOverflow(preflight, model.contextWindow)).toBe(true);
     expect(calls).toHaveLength(0);
 
-    // A failed compaction must not send the same oversized request to the provider.
-    const failedRecovery = await (await session.agent.streamFunction(model, midTurn)).result();
-    expect(failedRecovery.stopReason).toBe('error');
-    expect(failedRecovery.errorMessage).toContain('上下文安全上限');
-    expect(isContextOverflow(failedRecovery, model.contextWindow)).toBe(false);
-    expect(calls).toHaveLength(0);
+    // The 80% threshold is soft after one compaction attempt for this context.
+    const afterAttempt = await (await session.agent.streamFunction(model, midTurn)).result();
+    expect(afterAttempt.stopReason).toBe('stop');
+    expect(calls).toHaveLength(1);
     emitNewUser();
     const newTurnPreflight = await (await session.agent.streamFunction(model, midTurn)).result();
-    expect(isContextOverflow(newTurnPreflight, model.contextWindow)).toBe(false);
+    expect(newTurnPreflight.stopReason).toBe('stop');
+    expect(calls).toHaveLength(2);
     const changedInput: Context = { ...midTurn, systemPrompt: 'New user constraint' };
-    const changedPreflight = await (await session.agent.streamFunction(model, changedInput)).result();
+    const changedPreflight = await (await session.agent.streamFunction(model, normalizeContext(changedInput))).result();
     expect(isContextOverflow(changedPreflight, model.contextWindow)).toBe(true);
-    expect(calls).toHaveLength(0);
+    expect(calls).toHaveLength(2);
     const freshTurn: Context = { messages: [{ role: 'user', content: 'Do the task', timestamp: 4 }] };
     await (await session.agent.streamFunction(model, freshTurn)).result();
     expect(shouldCompactBeforeRequest(freshTurn, model.contextWindow, state.reserveTokens)).toBe(false);
-    expect(calls).toHaveLength(1);
+    expect(calls).toHaveLength(3);
     const nextPreflight = await (await session.agent.streamFunction(model, midTurn)).result();
     expect(nextPreflight.stopReason).toBe('error');
-    expect(calls).toHaveLength(1);
+    expect(calls).toHaveLength(3);
 
     await (await session.agent.streamFunction(model, freshTurn)).result();
     state.enabled = false;
     await (await session.agent.streamFunction(model, midTurn)).result();
-    expect(calls).toHaveLength(3);
+    expect(calls).toHaveLength(5);
     state.enabled = true;
     const reenabledPreflight = await (await session.agent.streamFunction(model, midTurn)).result();
     expect(isContextOverflow(reenabledPreflight, model.contextWindow)).toBe(true);
-    expect(calls).toHaveLength(3);
+    expect(calls).toHaveLength(5);
 
     const fixedPromptDominates: Context = {
       systemPrompt: 's'.repeat(360_000),
@@ -165,7 +164,7 @@ describe('80% compaction policy', () => {
     };
     expect(shouldCompactBeforeRequest(fixedPromptDominates, 100_000, 20_001)).toBe(true);
   });
-  it('does not manufacture an overflow when the saved branch has no useful history to fold', async () => {
+  it('allows a safe request above 80% when the saved branch has no useful history to fold', async () => {
     const { session, state, calls } = harness();
     state.compacting = false;
     const context: Context = { messages: [
@@ -179,14 +178,14 @@ describe('80% compaction policy', () => {
     expect(shouldCompactBeforeRequest(context, model.contextWindow, state.reserveTokens)).toBe(true);
     state.branch = branchMessages(context.messages);
     const result = await (await session.agent.streamFunction(model, context)).result();
-    expect(result.stopReason).toBe('error');
-    expect(calls).toHaveLength(0);
+    expect(result.stopReason).toBe('stop');
+    expect(calls).toHaveLength(1);
 
     state.branch = [];
     await (await session.agent.streamFunction(model, context)).result();
-    expect(calls).toHaveLength(0);
+    expect(calls).toHaveLength(2);
   });
-  it('skips the SDK cut point when one indivisible tool result exceeds the retention budget', async () => {
+  it('uses the SDK cut point before an oversized tool pair while preserving the pair', async () => {
     const { session, state, calls } = harness();
     state.compacting = false;
     const context: Context = { messages: [
@@ -203,7 +202,7 @@ describe('80% compaction policy', () => {
     state.branch = branchMessages(context.messages);
     expect(shouldCompactBeforeRequest(context, model.contextWindow, state.reserveTokens)).toBe(true);
     const response = await (await session.agent.streamFunction(model, context)).result();
-    expect(response.stopReason).toBe('error');
+    expect(isContextOverflow(response, model.contextWindow)).toBe(true);
     expect(calls).toHaveLength(0);
   });
   it('restores the trigger after SDK settings saves and reloads while preserving the enabled state', async () => {
@@ -280,7 +279,7 @@ describe('80% compaction policy', () => {
     expect(result.usage).toEqual(usage);
     expect(calls[0]!.options?.maxTokens).toBe(COMPACTION_SUMMARY_MAX_TOKENS);
     expect(calls[0]!.options.reasoning).toBe('low');
-    expect(calls[0]!.context.systemPrompt).toContain('constraints and permissions');
+    expect(getCurrentSystemPrompt(calls[0]!.context.messages)).toContain('constraints and permissions');
   });
   it('prevents SDK acceptance of empty, truncated or aborted summaries', async () => {
     for (const [text, reason] of [['', 'stop'], ['partial', 'length'], ['', 'aborted']] as const) {
@@ -292,7 +291,9 @@ describe('80% compaction policy', () => {
     const { session, calls } = harness();
     await compact({ ...preparation(), messagesToSummarize: [], isSplitTurn: true, turnPrefixMessages: [{ role: 'user', content: 'Continue the implementation', timestamp: 2 }] }, model, undefined, undefined, undefined, undefined, 'high', session.agent.streamFunction);
     expect(calls).toHaveLength(1);
-    expect(calls[0]!.context.systemPrompt).not.toContain('pending verification of /src/task.ts');
+    const summaryPrompt = getCurrentSystemPrompt(calls[0]!.context.messages);
+    expect(summaryPrompt).toContain('constraints and permissions');
+    expect(summaryPrompt).not.toContain('pending verification of /src/task.ts');
     expect(JSON.stringify(calls[0]!.context.messages)).toContain('pending verification of /src/task.ts');
   });
   it('does not alter ordinary model calls, even if a user discusses summarization', async () => {
@@ -320,7 +321,7 @@ it('does not reinject old history just because the user quoted the SDK instructi
   const { session, calls } = harness();
   await (await session.agent.streamFunction(model, { messages: [{ role: 'user', timestamp: 1,
     content: '<conversation>\nThis is the PREFIX of a turn that was too large to keep.\n</conversation>\n\nSummarize this conversation.' }] })).result();
-  expect(calls[0]!.context.messages).toHaveLength(1);
+  expect(calls[0]!.context.messages).toHaveLength(2);
   expect(JSON.stringify(calls[0]!.context)).not.toContain('previous-checkpoint');
 });
 it('does not start a model request for an already cancelled compaction', async () => {

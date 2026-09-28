@@ -819,30 +819,20 @@ async function ensureSession(): Promise<AgentSession> {
 
   // Set model if specified
   if (initConfig.model) {
+    let piModel: ReturnType<typeof resolveSessionPiModel>;
     try {
-      const piModel = resolveSessionPiModel(modelRegistry, initConfig.model);
-      if (piModel) {
-        // Verify resolved model's provider is compatible with the authenticated provider.
-        // Without this, a model that resolves to a different provider (e.g. azure-openai-responses
-        // when authed as github-copilot) would cause "No API key found" at runtime.
-        const resolvedProvider = (piModel as any)?.provider;
-        const isCompatible = !initConfig.piAuth ||
-          resolvedProvider === initConfig.piAuth.provider ||
-          resolvedProvider === 'custom-endpoint';
-        if (isCompatible) {
-          sessionOptions.model = piModel;
-          setInterceptorApiHints(piModel as { api?: string; provider?: string; baseUrl?: string });
-        } else {
-          debugLog(`Model ${initConfig.model} resolved to incompatible provider ${resolvedProvider} (expected ${initConfig.piAuth!.provider}), skipping`);
-          setInterceptorApiHints(undefined);
-        }
-      } else {
-        setInterceptorApiHints(undefined);
-      }
-    } catch {
-      debugLog(`Could not resolve Pi model: ${initConfig.model}`);
-      setInterceptorApiHints(undefined);
+      piModel = resolveSessionPiModel(modelRegistry, initConfig.model);
+    } catch (error) {
+      throw new Error(`无法解析 Pi 模型 ${initConfig.model}：${error instanceof Error ? error.message : String(error)}`);
     }
+    if (!piModel) throw new Error(`模型 ${initConfig.model} 不在当前 Pi SDK 目录中，请重新选择可用模型。`);
+    // Never let an incompatible or retired ID fall through to Pi's default.
+    const resolvedProvider = piModel.provider;
+    if (initConfig.piAuth && resolvedProvider !== initConfig.piAuth.provider && resolvedProvider !== 'custom-endpoint') {
+      throw new Error(`模型 ${initConfig.model} 属于 ${resolvedProvider}，与当前认证提供方 ${initConfig.piAuth.provider} 不匹配。`);
+    }
+    sessionOptions.model = piModel;
+    setInterceptorApiHints(piModel);
   } else {
     setInterceptorApiHints(undefined);
   }
@@ -1257,7 +1247,9 @@ async function queryLlm(request: LLMQueryRequest, signal?: AbortSignal): Promise
       getThemes: () => ({ themes: [], diagnostics: [] }),
       getAgentsFiles: () => ({ agentsFiles: [] }),
       getSystemPrompt: () => request.systemPrompt,
-      getAppendSystemPrompt: () => [], extendResources: () => {}, reload: async () => {},
+      getSystemPromptSource: () => undefined,
+      getAppendSystemPrompt: () => [], getAppendSystemPromptSources: () => [],
+      extendResources: () => {}, reload: async () => {},
     };
     const ephemeralOptions: CreateAgentSessionOptions = {
       cwd: resolvedCwd(),

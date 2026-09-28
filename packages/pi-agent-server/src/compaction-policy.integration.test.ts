@@ -3,10 +3,11 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createAgentSession, SessionManager, SettingsManager, type ModelRuntime } from '@earendil-works/pi-coding-agent';
-import { createAssistantMessageEventStream, type AssistantMessage, type Context, type Model } from '@earendil-works/pi-ai';
+import { createAssistantMessageEventStream, getCurrentSystemPrompt, type AssistantMessage, type Context, type Model } from '@earendil-works/pi-ai';
 import { Type } from '@sinclair/typebox';
 import { installContextBudgetGuard } from './context-budget-stream.ts';
 import { applyCompactionSettings, COMPACTION_FOCUS, installCompactionPolicy } from './compaction-policy.ts';
+import { snapshotContextBreakdown } from './context-breakdown.ts';
 import { PiEventAdapter } from '../../shared/src/agent/backend/pi/event-adapter.ts';
 
 const model: Model<'openai-responses'> = {
@@ -73,7 +74,7 @@ it('the real Pi session compacts at the request gate and resumes the same prompt
     checkAuth: async () => ({ apiKey: 'offline-test' }),
     getAuth: async () => ({ auth: { apiKey: 'offline-test' } }),
     streamSimple: (_model: typeof model, context: Context) => {
-      const summary = (context.systemPrompt ?? '').includes(COMPACTION_FOCUS);
+      const summary = getCurrentSystemPrompt(context.messages).includes(COMPACTION_FOCUS);
       providerCalls.push({ summary, context });
       const stream = createAssistantMessageEventStream();
       const message: AssistantMessage = {
@@ -105,15 +106,20 @@ it('the real Pi session compacts at the request gate and resumes the same prompt
   }
   session.agent.state.messages = sessionManager.buildSessionContext().messages;
   const events: string[] = [];
+  let postCompactionMessages = 0;
   session.subscribe(event => {
     if (event.type === 'compaction_start') events.push(`start:${event.reason}`);
-    if (event.type === 'compaction_end') events.push(`end:${event.reason}:${!!event.result}`);
+    if (event.type === 'compaction_end') {
+      events.push(`end:${event.reason}:${!!event.result}`);
+      if (event.result) postCompactionMessages = snapshotContextBreakdown(session)?.messages ?? 0;
+    }
   });
 
   await session.prompt('Continue the same request');
 
   expect(events).toContain('start:overflow');
   expect(events).toContain('end:overflow:true');
+  expect(postCompactionMessages).toBeGreaterThan(0);
   expect(providerCalls.map(call => call.summary)).toEqual([true, false]);
   expect(providerCalls[1]!.context.messages.some(message => message.role === 'user'
     && JSON.stringify(message.content).includes('Continue the same request'))).toBe(true);
@@ -125,14 +131,16 @@ it('the real SDK preserves tool pairs across mid-turn compaction and never re-ex
   const cwd = mkdtempSync(join(tmpdir(), 'selection-pi-tool-compaction-'));
   tempDirs.push(cwd);
   let executed = 0, modelRequests = 0, summaries = 0;
+  const lifecycle: string[] = [];
   const requests: Context[] = [];
   const runtime = {
     hasConfiguredAuth: () => true,
     checkAuth: async () => ({ apiKey: 'offline-test' }),
     getAuth: async () => ({ auth: { apiKey: 'offline-test' } }),
     streamSimple: (_model: typeof model, context: Context) => {
-      const summary = (context.systemPrompt ?? '').includes(COMPACTION_FOCUS);
-      if (summary) summaries++; else { modelRequests++; requests.push({ systemPrompt: context.systemPrompt, messages: structuredClone(context.messages) }); }
+      const summary = getCurrentSystemPrompt(context.messages).includes(COMPACTION_FOCUS);
+      if (summary) { summaries++; lifecycle.push('summary'); }
+      else { modelRequests++; lifecycle.push(`model-${modelRequests}`); requests.push({ systemPrompt: context.systemPrompt, messages: structuredClone(context.messages) }); }
       const callTool = !summary && modelRequests === 1;
       const message: AssistantMessage = {
         role: 'assistant', api: model.api, provider: model.provider, model: model.id,
@@ -154,11 +162,15 @@ it('the real SDK preserves tool pairs across mid-turn compaction and never re-ex
     cwd, agentDir: join(cwd, 'agent'), model, thinkingLevel: 'off', modelRuntime: runtime,
     settingsManager, sessionManager, tools: ['checkpoint_read'],
     customTools: [{ name: 'checkpoint_read', label: 'Read', description: 'Read-only fixture', parameters: Type.Object({}),
-      execute: async () => { executed++; return { content: [{ type: 'text' as const, text: '文'.repeat(6000) }], details: {} }; } }],
+      execute: async () => { executed++; lifecycle.push('tool-complete'); return { content: [{ type: 'text' as const, text: '文'.repeat(6000) }], details: {} }; } }],
   });
   settingsManager.setCompactionEnabled(true);
   applyCompactionSettings(settingsManager, model.contextWindow, true);
   installCompactionPolicy(session);
+  session.subscribe(event => {
+    if (event.type === 'compaction_start') lifecycle.push('compaction-start');
+    if (event.type === 'compaction_end' && event.result) lifecycle.push('compaction-end');
+  });
   for (let index = 0; index < 3; index++) {
     sessionManager.appendMessage({ role: 'user', content: '文'.repeat(40000), timestamp: index * 2 + 1 });
     sessionManager.appendMessage({ role: 'assistant', content: [{ type: 'text', text: 'Earlier work' }],
@@ -169,6 +181,12 @@ it('the real SDK preserves tool pairs across mid-turn compaction and never re-ex
   expect(executed).toBe(1);
   expect(modelRequests).toBe(2);
   expect(summaries).toBeGreaterThan(0);
+  expect(lifecycle).toContain('compaction-start');
+  expect(lifecycle).toContain('compaction-end');
+  expect(lifecycle.indexOf('model-1')).toBeLessThan(lifecycle.indexOf('tool-complete'));
+  expect(lifecycle.indexOf('tool-complete')).toBeLessThan(lifecycle.indexOf('compaction-start'));
+  expect(lifecycle.indexOf('compaction-start')).toBeLessThan(lifecycle.indexOf('summary'));
+  expect(lifecycle.indexOf('compaction-end')).toBeLessThan(lifecycle.indexOf('model-2'));
   expect(session.sessionManager.getBranch().some(entry => entry.type === 'compaction')).toBe(true);
   for (const request of requests) {
     const pending = new Set<string>();
@@ -184,4 +202,63 @@ it('the real SDK preserves tool pairs across mid-turn compaction and never re-ex
   }
   expect(requests.at(-1)!.messages.some(message => message.role === 'user'
     && JSON.stringify(message.content).includes('same user task'))).toBe(true);
+});
+
+it('Pi 0.87.1 compacts after a completed tool before its next provider request', async () => {
+  const cwd = mkdtempSync(join(tmpdir(), 'selection-pi-native-compaction-'));
+  tempDirs.push(cwd);
+  const lifecycle: string[] = [];
+  let modelRequests = 0;
+  let toolExecutions = 0;
+  const runtime = {
+    hasConfiguredAuth: () => true,
+    checkAuth: async () => ({ apiKey: 'offline-test' }),
+    getAuth: async () => ({ auth: { apiKey: 'offline-test' } }),
+    streamSimple: (_model: typeof model, context: Context) => {
+      const summary = getCurrentSystemPrompt(context.messages).includes('You are a context summarization assistant');
+      lifecycle.push(summary ? 'summary' : `model-${++modelRequests}`);
+      const callTool = !summary && modelRequests === 1;
+      const message: AssistantMessage = {
+        role: 'assistant', api: model.api, provider: model.provider, model: model.id,
+        content: callTool
+          ? [{ type: 'toolCall', id: 'native-read', name: 'checkpoint_read', arguments: {} }]
+          : [{ type: 'text', text: summary ? '## Goal\nContinue the current user task.\n## Progress\nTool completed.' : 'Final response' }],
+        usage: callTool ? { ...usage, input: 154900, output: 100, totalTokens: 155000 } : usage,
+        stopReason: callTool ? 'toolUse' : 'stop', timestamp: Date.now(),
+      };
+      const stream = createAssistantMessageEventStream();
+      stream.push({ type: 'done', reason: callTool ? 'toolUse' : 'stop', message });
+      return stream;
+    },
+  } as unknown as ModelRuntime;
+  const sessionManager = SessionManager.inMemory(cwd);
+  const settingsManager = SettingsManager.inMemory();
+  const { session } = await createAgentSession({
+    cwd, agentDir: join(cwd, 'agent'), model, thinkingLevel: 'off', modelRuntime: runtime,
+    settingsManager, sessionManager, tools: ['checkpoint_read'],
+    customTools: [{ name: 'checkpoint_read', label: 'Read', description: 'Read-only fixture', parameters: Type.Object({}),
+      execute: async () => {
+        toolExecutions++;
+        lifecycle.push('tool-complete');
+        return { content: [{ type: 'text' as const, text: '文'.repeat(30_000) }], details: {} };
+      } }],
+  });
+  settingsManager.setCompactionEnabled(true);
+  applyCompactionSettings(settingsManager, model.contextWindow, true);
+  session.subscribe(event => {
+    if (event.type === 'compaction_start') lifecycle.push(`compact-start:${event.reason}`);
+    if (event.type === 'compaction_end' && event.result) lifecycle.push(`compact-end:${event.reason}`);
+  });
+  for (let index = 0; index < 3; index++) {
+    sessionManager.appendMessage({ role: 'user', content: '文'.repeat(40_000), timestamp: index * 2 + 1 });
+    sessionManager.appendMessage({ role: 'assistant', content: [{ type: 'text', text: 'Earlier work' }],
+      api: model.api, provider: model.provider, model: model.id, usage, stopReason: 'stop', timestamp: index * 2 + 2 });
+  }
+  session.agent.state.messages = sessionManager.buildSessionContext().messages;
+  await session.prompt('Use the read tool, then answer');
+  expect(toolExecutions).toBe(1);
+  expect(modelRequests).toBe(2);
+  expect(lifecycle.indexOf('tool-complete')).toBeLessThan(lifecycle.indexOf('compact-start:threshold'));
+  expect(lifecycle.indexOf('compact-end:threshold')).toBeLessThan(lifecycle.indexOf('model-2'));
+  expect(lifecycle).toContain('summary');
 });

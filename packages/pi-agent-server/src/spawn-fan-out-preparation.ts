@@ -1,4 +1,5 @@
 import { validateToolArguments } from '@earendil-works/pi-ai/compat'
+import type { JsonObject } from '@earendil-works/pi-ai'
 import type { ToolDefinition } from '@earendil-works/pi-coding-agent'
 import type { SpawnSessionQualification } from '../../shared/src/agent/base-agent.ts'
 import { resolveSessionToolProxyName } from '../../shared/src/agent/backend/pi/session-tool-defs.ts'
@@ -13,6 +14,10 @@ interface AssistantContentBlock {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function asJsonObject(value: Record<string, unknown>): JsonObject {
+  return JSON.parse(JSON.stringify(value)) as JsonObject
 }
 
 function isNonEmptyString(value: unknown): value is string {
@@ -87,7 +92,7 @@ export function prepareSpawnFanOutQualifications(
         type: 'toolCall',
         id: block.id,
         name: tool.name,
-        arguments: argumentsToValidate,
+        arguments: asJsonObject(argumentsToValidate),
       })
     } catch {
       if (!argumentsToValidate
@@ -103,7 +108,7 @@ export function prepareSpawnFanOutQualifications(
           type: 'toolCall',
           id: block.id,
           name: tool.name,
-          arguments: withoutLegacyQualification,
+          arguments: asJsonObject(withoutLegacyQualification),
         })
         upgradeLegacyQualification = true
       } catch {

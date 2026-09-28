@@ -27,7 +27,7 @@
   "dependencies": {
     "@craft-agent/core": "workspace:*",
     "@craft-agent/shared": "workspace:*",
-    "@earendil-works/pi-ai": "0.81.1",
+    "@earendil-works/pi-ai": "0.87.1",
     "fast-xml-parser": "5.2.5",
     "fflate": "^0.8.2",
     "jose": "^6.0.0",

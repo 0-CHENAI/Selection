@@ -89,6 +89,32 @@ describe('pi-agent-server bundle', () => {
     } finally { child.kill(); server.stop(true); }
   }, 10_000);
 
+  it('runs an isolated utility query with its exact prompt through the bundled SDK', async () => {
+    let sentPrompt = '';
+    const server = Bun.serve({ port: 0, async fetch(request) {
+      const body = await request.json() as { messages?: Array<{ role: string; content: string }> };
+      sentPrompt = body.messages?.find(message => message.role === 'system')?.content ?? '';
+      const chunks = [
+        { id: 'utility', object: 'chat.completion.chunk', choices: [{ index: 0, delta: { role: 'assistant', content: 'Utility OK' }, finish_reason: null }] },
+        { id: 'utility', object: 'chat.completion.chunk', choices: [{ index: 0, delta: {}, finish_reason: 'stop' }] },
+      ];
+      return new Response(chunks.map(chunk => `data: ${JSON.stringify(chunk)}\n\n`).join('') + 'data: [DONE]\n\n',
+        { headers: { 'content-type': 'text/event-stream' } });
+    } });
+    try {
+      const output = await driveBundle([
+        { type: 'init', apiKey: 'test-only', model: 'Laufry', cwd: scratchDir,
+          workspaceRootPath: scratchDir, sessionId: 'utility', sessionPath: scratchDir,
+          providerType: 'pi_compat', authType: 'api_key', baseUrl: `http://127.0.0.1:${server.port}/v1`,
+          customEndpoint: { api: 'openai-completions' }, customModels: [{ id: 'Laufry', contextWindow: 8192, maxTokens: 2048 }] },
+        { type: 'llm_query', id: 'utility-1', request: { purpose: 'progress-evaluation', model: 'Laufry',
+          systemPrompt: 'Exact utility prompt', prompt: 'Evaluate.', maxTokens: 128, timeoutMs: 5000 } },
+      ], output => output.includes('"type":"llm_query_result"'));
+      expect(output).toContain('Utility OK');
+      expect(sentPrompt).toBe('Exact utility prompt');
+    } finally { server.stop(true); }
+  }, RUN_TIMEOUT_MS + 1000);
+
   it('carries request diagnostics from the preload through bundled SDK message_end', async () => {
     const server = Bun.serve({ port: 0, fetch() {
       return new Response('data: {"error":{"message":"The model service is taking too long to respond."}}\n\n',
@@ -117,7 +143,7 @@ describe('pi-agent-server bundle', () => {
       {
         type: 'init',
         apiKey: '',
-        model: 'pi/gpt-5.2-codex',
+        model: 'pi/gpt-5.5',
         cwd: scratchDir,
         thinkingLevel: 'off',
         workspaceRootPath: scratchDir,
@@ -144,6 +170,22 @@ describe('pi-agent-server bundle', () => {
     expect(output).not.toContain('Cannot find module');
     expect(output).toContain('Failed to extract accountId from token');
   }, RUN_TIMEOUT_MS + 130_000);
+
+  it('rejects a retired model before the SDK can fall back to another provider', async () => {
+    const output = await driveBundle([
+      {
+        type: 'init', apiKey: '', model: 'pi/gpt-5.2-codex', cwd: scratchDir,
+        workspaceRootPath: scratchDir, sessionId: 'retired-model', sessionPath: scratchDir,
+        workingDirectory: scratchDir, plansFolderPath: join(scratchDir, 'plans'),
+        providerType: 'pi', authType: 'oauth', piAuth: {
+          provider: 'openai-codex', credential: { type: 'api_key', key: 'fake-not-a-jwt' },
+        },
+      },
+      { type: 'prompt', id: 'retired-model', message: 'hi', systemPrompt: 'Smoke test.' },
+    ], output => output.includes('不在当前 Pi SDK 目录中'));
+    expect(output).toContain('模型 pi/gpt-5.2-codex 不在当前 Pi SDK 目录中');
+    expect(output).not.toContain('anthropic-messages');
+  }, RUN_TIMEOUT_MS + 1000);
 });
 
 

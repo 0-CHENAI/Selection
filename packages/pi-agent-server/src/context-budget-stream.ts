@@ -1,9 +1,11 @@
-import { modelVisibleTools } from '../../shared/src/agent/backend/pi/model-visible-tools.ts';
+import { PI_SESSION_TOOL_SHORT_NAME_ALIASES } from '../../shared/src/agent/backend/pi/model-visible-tools.ts';
 import { boundedModelStream, MODEL_REQUEST_TIMEOUT_MS } from './bounded-model-stream.ts';
 import { createRequestDiagnosticScope, runWithRequestDiagnostics, requestDiagnosticDetails } from '../../shared/src/request-diagnostics.ts';
 import {
   createAssistantMessageEventStream,
+  getCurrentTools,
   isContextOverflow,
+  normalizeContext,
   type Api,
   type AssistantMessage,
   type AssistantMessageEvent,
@@ -100,7 +102,18 @@ export function createContextBudgetedStream(
   debug?: DebugLogger,
 ): AssistantMessageEventStream {
   // Keep Agent.state.tools intact: old short-name tool calls must still execute.
-  context = { ...context, tools: context.tools ? modelVisibleTools(context.tools) : undefined };
+  const activeToolNames = new Set(getCurrentTools(normalizeContext(context).messages).map(tool => tool.name));
+  const hiddenAliases = new Set<string>(PI_SESSION_TOOL_SHORT_NAME_ALIASES.filter(
+    alias => activeToolNames.has(`mcp__session__${alias}`),
+  ));
+  const visible = <T extends { name: string }>(tools: T[]) => tools.filter(tool => !hiddenAliases.has(tool.name));
+  const hasTranscriptTools = hiddenAliases.size > 0 && context.messages.some(message => message.role === 'system' && !!message.toolsAdded?.length);
+  context = {
+    ...context,
+    tools: context.tools ? visible(context.tools) : undefined,
+    messages: hasTranscriptTools ? context.messages.map(message => message.role === 'system' && message.toolsAdded
+      ? { ...message, toolsAdded: visible(message.toolsAdded) } : message) : context.messages,
+  };
   const diagnosticScope = createRequestDiagnosticScope();
   const withDiagnostic = (message: AssistantMessage): AssistantMessage & { craftTransportDiagnostics: string[] } => ({
     ...message, craftTransportDiagnostics: requestDiagnosticDetails(diagnosticScope),
