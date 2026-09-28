@@ -47,10 +47,16 @@ export class PromptBuilder {
   private config: PromptBuilderConfig;
   private workspaceRootPath: string;
   private pinnedPreferencesPrompt: string | null = null;
+  private turnSkillInstructions: string | null = null;
 
   constructor(config: PromptBuilderConfig) {
     this.config = config;
     this.workspaceRootPath = config.workspace?.rootPath ?? '';
+  }
+
+  /** Explicitly selected short skills stay in the system prefix for this turn, including compaction. */
+  setTurnSkillInstructions(instructions: string | null): void {
+    this.turnSkillInstructions = instructions;
   }
 
   // ============================================================
@@ -135,13 +141,15 @@ export class PromptBuilder {
   }
 
   /**
-   * Stable context blocks — content that is invariant across a session, so it
-   * can safely live in the cached system prefix (issue #862).
+   * Stable context blocks — content kept across the tool loop and compaction.
+   * Usually invariant across a session; an explicitly selected writing skill
+   * changes the prefix for that turn only (issue #862).
    *
    * Blocks (in order):
    *  1. workspace capabilities
    *  2. available skills handbook (default preset only)
-   *  3. working directory, when available
+   *  3. explicitly selected writing instructions, when present
+   *  4. working directory, when available
    *
    * Pure and idempotent: holds no one-shot state, so it is safe to call any
    * number of times per turn.
@@ -155,6 +163,9 @@ export class PromptBuilder {
     const skillCatalog = this.formatSkillCatalog();
     if (skillCatalog) {
       parts.push(skillCatalog);
+    }
+    if (this.turnSkillInstructions) {
+      parts.push(this.turnSkillInstructions);
     }
 
     // Working directory context

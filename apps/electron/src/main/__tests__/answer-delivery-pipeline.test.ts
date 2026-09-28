@@ -12,6 +12,7 @@ import type { AgentEvent as RendererEvent, SessionState } from '../../renderer/e
 
 const explanation = '蒙提霍尔问题\n\n1. 主持人知道车的位置。\n2. 必须打开未选中的羊门并提供换门。\n\n| 策略 | 胜率 |\n| --- | --- |\n| 换门 | 2/3 |\n| 不换门 | 1/3 |'
 const answer = `${explanation}\n\n模拟结果：换门约为 66.67%，不换门约为 33.33%。`
+const request = '[skill:natural-writing] 完整讲解后验证蒙提霍尔问题'
 const assistantTurns = (messages: Message[]) => groupMessagesByTurn(messages).filter(t => t.type === 'assistant')
 
 describe('#330 service → renderer → durable reload → turn grouping', () => {
@@ -25,12 +26,14 @@ describe('#330 service → renderer → durable reload → turn grouping', () =>
           { id: 'workspace', slug: 'workspace', name: 'Test', rootPath: root, createdAt: Date.now() }, { messagesLoaded: true })
         let control: AnswerDeliveryControl | undefined
         let calls = 0
+        const chatOptions: Array<{ continueUserTask?: boolean; userTaskMessage?: string } | undefined> = []
         const events: RendererEvent[] = []
         const agent = {
           configureAnswerDelivery(value: AnswerDeliveryControl | undefined) { control = value },
           setAllSources() {}, getModel() { return 'fixture' }, getSessionId() { return 'sdk-session' },
-          async *chat(): AsyncGenerator<AgentEvent> {
+          async *chat(_message: string, _attachments?: unknown, options?: { continueUserTask?: boolean; userTaskMessage?: string }): AsyncGenerator<AgentEvent> {
             calls++
+            chatOptions.push(options)
             if (calls === 1) {
               yield { type: 'text_complete', text: explanation, phase, turnId: 'provider-1' }
               yield { type: 'tool_start', toolName: 'Bash', toolUseId: 'simulation', input: {} }
@@ -71,7 +74,7 @@ describe('#330 service → renderer → durable reload → turn grouping', () =>
         internals.getOrCreateAgent = async () => agent
         manager.setEventSink((_channel, _target, event) => events.push(event as RendererEvent))
         try {
-          await manager.sendMessage(managed.id, '完整讲解后验证蒙提霍尔问题')
+          await manager.sendMessage(managed.id, request)
           await manager.flushSession(managed.id)
           let state: SessionState = {
             session: { id: managed.id, workspaceId: 'workspace', workspaceName: 'Test', messages: [], isProcessing: true, lastMessageAt: 0 },
@@ -101,6 +104,8 @@ describe('#330 service → renderer → durable reload → turn grouping', () =>
           const liveTurns = assistantTurns(state.session.messages)
           const loadedTurns = assistantTurns(reloaded)
           expect(calls).toBe(recover ? 2 : 1)
+          expect(chatOptions[0]?.userTaskMessage).toBe(request)
+          if (recover) expect(chatOptions[1]).toMatchObject({ continueUserTask: true, userTaskMessage: request })
           expect(stored.messages.find(m => m.type === 'user')?.answerRecoveryAttempted).toBe(recover)
           expect(liveTurns).toHaveLength(1)
           expect(loadedTurns).toHaveLength(1)

@@ -2620,9 +2620,9 @@ export class PiAgent extends BaseAgent {
         }
       }
 
-      // System prompt carries only stable context (issue #862): the system block
-      // is pi-ai's cache prefix before all history, so anything volatile here
-      // re-stamps the prefix every turn and drops cacheRead to 0. Volatile blocks
+      // System prompt carries tool-loop-stable context (issue #862): the system
+      // block is pi-ai's cache prefix before all history. An explicitly selected
+      // writing skill changes that prefix for one turn; volatile blocks still
       // ride the user-message tail instead — exactly as the Claude path already
       // does (buildTextPrompt / buildSDKUserMessage append context to the tail).
       const fullSystemPrompt = [

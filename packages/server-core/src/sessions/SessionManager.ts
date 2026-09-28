@@ -7456,7 +7456,11 @@ export class SessionManager implements ISessionManager {
         await this.onProcessingStopped(sessionId, 'interrupted', myGeneration)
         return
       }
-      const chatOptions = { previousResponseInterrupted, continueUserTask: isUserTaskContinuation }
+      const chatOptions = {
+        previousResponseInterrupted,
+        continueUserTask: isUserTaskContinuation,
+        userTaskMessage: checkpointOwner?.content ?? message,
+      }
       const chatIterator = this.runAnswerDelivery(managed, agent, this.runProgressExecution(managed, agent, message, preparedImages.attachments, chatOptions), chatOptions)
       this.announceRegenerateReplacement(managed)
       sessionLog.info('Got chat iterator, starting iteration...')

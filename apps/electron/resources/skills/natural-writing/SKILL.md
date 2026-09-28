@@ -1,6 +1,6 @@
 ---
 name: 自然文档写作
-description: 用户要交付或修改报告、文章、方案、邮件、演讲稿等正文时主动读取，含调研后的成稿和已有草稿的后续修订（如“把第二段改自然些”）。仅讨论写作、普通问答、代码、检索阅读或纯排版转换不使用。Use for prose drafting and revision, not routine answers or code.
+description: 用户要交付或修改报告、文章、方案、邮件、演讲稿等正文，或要求“去 AI 味儿”“改得自然些”时，先读取本技能再写作，不只替换套话；调研后成稿、局部返工和压缩后续写也适用。仅讨论写作、普通问答、代码、检索阅读、逐字引用或纯排版转换不使用。Use for prose drafting and revision, not routine answers or code.
 ---
 
 # 自然文档写作

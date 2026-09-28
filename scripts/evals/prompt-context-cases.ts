@@ -27,18 +27,24 @@ export const promptContextCases = [
   ['llm-model', 'An isolated call_llm task should use the current model.', 'Omit the model parameter', 'Always force the smallest model'],
   ['llm-tools', 'A proposed call_llm subtask must run shell commands.', 'Do it here or use qualified Swarm delegation', 'call_llm can execute shell tools'],
   ['writing-load', 'Research is complete; the user now wants a prose report. natural-writing is available but not read.', 'Read natural-writing before drafting', 'Never load it unless the user names it'],
+  ['writing-draft', 'The user asks for a polished project proposal in prose, with no document extension mentioned.', 'Read natural-writing before drafting the proposal', 'Skip it because there is no file extension'],
+  ['writing-deai', 'The user says 去 AI 味儿 and asks you to revise an existing article paragraph.', 'Read natural-writing before revising the prose', 'Apply a keyword blacklist without reading the skill'],
+  ['writing-followup', 'You wrote an email. After context compaction, the user asks to make its second paragraph sound more natural; the writing guide is no longer in context.', 'Read natural-writing again before editing', 'Assume the lost guide remains available'],
   ['writing-skip', 'The user asks to fix a compiler error with no prose-writing task.', 'Do not load natural-writing solely for this task', 'Load natural-writing on every turn'],
+  ['writing-discuss', 'The user asks whether a report structure makes sense, but does not ask you to draft or revise its prose.', 'Answer the question without loading natural-writing', 'Read natural-writing because the word report appears'],
+  ['writing-layout', 'The user asks only to convert an existing document to PDF without changing its text.', 'Preserve the text and skip natural-writing', 'Rewrite the text to sound more natural'],
+  ['writing-quote', 'The user asks to reproduce a supplied quotation exactly in a report.', 'Keep the quotation verbatim', 'Paraphrase it to remove AI-like wording'],
   ['writing-verbatim', 'The user requires quoted text to remain verbatim.', 'Preserve it even when applying writing guidance', 'Rewrite it to remove AI-like phrasing'],
   ['source-ack', 'send_agent_message returned queued.', 'It has not been read yet; wait for a reply or check status', 'Treat it as acknowledged and completed'],
 ] as const;
 
-export function scorePolicyResponse(text: string, expected: string[]) {
+export function scorePolicyResponse(text: string, expected: string[], cases: readonly (typeof promptContextCases)[number][] = promptContextCases) {
   let parsed: unknown;
   const trimmed = text.trim();
   try { parsed = JSON.parse(trimmed.replace(/^```(?:json)?\s*|\s*```$/g, '')); } catch { /* Kept in rawText by the caller. */ }
   const answers: unknown[] = Array.isArray(parsed) ? parsed : [];
   const exactFormat = trimmed.startsWith('[') && answers.length === expected.length && answers.every(a => a === 'A' || a === 'B');
   const choices = answers.map(a => typeof a === 'string' ? a : (a as { choice?: unknown } | null)?.choice);
-  const failures = promptContextCases.filter((_, i) => choices[i] !== expected[i]).map(c => c[0]);
-  return { passed: promptContextCases.length - failures.length, exactFormat, failures, answers };
+  const failures = cases.filter((_, i) => choices[i] !== expected[i]).map(c => c[0]);
+  return { passed: cases.length - failures.length, exactFormat, failures, answers };
 }

@@ -315,6 +315,8 @@ export interface ChatOptions {
   isRetry?: boolean;
   /** Internal continuation of the same user-authored task (source/auth retry). */
   continueUserTask?: boolean;
+  /** Original user request for restoring explicitly selected skills during a continuation. */
+  userTaskMessage?: string;
   /** Override thinking level for this message only */
   thinkingOverride?: ThinkingLevel;
   /**

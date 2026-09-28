@@ -26,7 +26,7 @@ This file accumulates release notes for the next unreleased version. PRs that ad
 
 - **Leaner agent context** — Rendering guides load on demand, duplicate Pi tool aliases are omitted from model requests while remaining executable, and context usage distinguishes estimated skill catalogs from loaded content. Swarm delegation follows one session policy.
 
-- **Natural document writing** — Prose drafting and revision can load a compact built-in writing skill to reduce formulaic language while preserving facts, citations, and the requested voice. Ordinary chat, code, and formatting-only tasks do not automatically load its body.
+- **Natural document writing** — Prose drafting and revision can load a compact built-in writing skill to reduce formulaic language while preserving facts, citations, and the requested voice. Explicitly selecting the bundled `natural-writing` now supplies its instructions for the whole turn, including context compaction; the skill catalog also recognizes requests to remove an “AI” tone. Ordinary chat, code, and formatting-only tasks do not automatically load its body.
 
 - **App icon** — Windows and macOS now use the macOS 27 Liquid Glass conversion of the Selection swan (live `.icon` on recent macOS, flattened PNG/ICO/ICNS elsewhere).
 

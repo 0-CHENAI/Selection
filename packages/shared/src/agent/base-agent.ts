@@ -13,8 +13,8 @@
  * Provider-specific behavior (chat, abort, capabilities) is implemented in subclasses.
  */
 
-import { existsSync } from 'node:fs';
-import { join } from 'node:path';
+import { existsSync, readFileSync } from 'node:fs';
+import { join, resolve } from 'node:path';
 
 import type { AgentEvent } from '@craft-agent/core/types';
 import type { FileAttachment } from '../utils/files.ts';
@@ -278,6 +278,7 @@ export abstract class BaseAgent implements AgentBackend {
   // ============================================================
   protected _pendingSourceActivationRestart: { sourceSlug: string; userMessage: string } | null = null;
   protected _currentTurnUserMessage: string | null = null;
+  private skillContextGeneration = 0;
 
   setPendingSourceActivationRestart(pending: { sourceSlug: string; userMessage: string }): void {
     // First-writer-wins under parallel `mcp__session__source_test` calls. The
@@ -1123,6 +1124,29 @@ ${formattedMessages}
       return;
     }
 
+    // Only the app-owned skill may enter the system prefix. Workspace/project
+    // overrides keep their existing model-Read path and trust level.
+    // Recovery/progress prompts are new chat() calls but still belong to the
+    // original request. Resolve its selection again so a recreated agent can
+    // restore the skill without carrying it into a later user turn.
+    const explicitWritingPath = skillPaths.get('natural-writing')
+      ?? (options?.continueUserTask && options.userTaskMessage
+        ? this.extractSkillPaths(options.userTaskMessage).skillPaths.get('natural-writing')
+        : undefined);
+    if (explicitWritingPath) skillPaths.set('natural-writing', explicitWritingPath);
+    const bundledWritingPath = resolveBundledSkillMdPath('natural-writing');
+    let explicitWritingInstructions: string | null = null;
+    if (explicitWritingPath && bundledWritingPath && resolve(explicitWritingPath) === resolve(bundledWritingPath)) {
+      try {
+        explicitWritingInstructions = readFileSync(explicitWritingPath, 'utf8');
+      } catch {
+        yield { type: 'error', message: 'Could not read the selected natural-writing skill.' };
+        yield { type: 'complete' };
+        return;
+      }
+      skillPaths.delete('natural-writing');
+    }
+
     const workspaceRoot = this.config.workspace?.rootPath ?? this.workingDirectory;
     const projectRoot = this.config.session?.workingDirectory;
     const catalogEntries = toSkillCatalogEntries(loadAllSkills(workspaceRoot, projectRoot));
@@ -1169,11 +1193,18 @@ ${formattedMessages}
 
     // Capture the raw user message for source-activation auto-retry. This is the
     // user-facing text only (no system-reminder, no prior activation suffix).
+    const skillContextGeneration = ++this.skillContextGeneration;
+    this.promptBuilder.setTurnSkillInstructions(explicitWritingInstructions
+      ? `The user explicitly selected natural-writing for this turn. Its full SKILL.md is already loaded below; do not Read it again this turn. Follow its instructions for the requested prose:\n\n${explicitWritingInstructions}`
+      : null);
     this.setCurrentTurnUserMessage(userFacingMessage);
     try {
       yield* this.chatImpl(effectiveMessage, attachments, options);
     } finally {
-      this.setCurrentTurnUserMessage(null);
+      if (skillContextGeneration === this.skillContextGeneration) {
+        this.setCurrentTurnUserMessage(null);
+        this.promptBuilder.setTurnSkillInstructions(null);
+      }
     }
   }
 
