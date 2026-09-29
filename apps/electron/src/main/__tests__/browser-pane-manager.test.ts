@@ -6,9 +6,10 @@
  */
 
 import { describe, it, expect, beforeEach, mock } from 'bun:test'
-import { mkdtempSync, writeFileSync, rmSync } from 'node:fs'
+import { mkdtempSync, writeFileSync, rmSync, realpathSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { pathToFileURL } from 'node:url'
 
 const createdWindows: any[] = []
 const createdBrowserViews: any[] = []
@@ -311,6 +312,33 @@ describe('BrowserPaneManager', () => {
       expect(isolated.protocol.unhandle).toHaveBeenCalledTimes(1)
       expect(isolated.clearStorageData).toHaveBeenCalledTimes(1)
     } finally { rmSync(directory, { recursive: true, force: true }) }
+  })
+
+  it('opens an HTML artifact in the default browser using its validated file URL', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'selection-html-external-'))
+    const file = join(directory, '文档 空格.html'); writeFileSync(file, '<p>preview</p>')
+    try {
+      const id = await manager.openHtmlFile(file, 'workspace')
+      const instance = (manager as any).instances.get(id)
+      instance.currentUrl = instance.pageView.webContents.getURL()
+
+      await manager.openInDefaultBrowser(id)
+
+      expect(mockShellOpenExternal).toHaveBeenCalledWith(pathToFileURL(realpathSync(file)).toString())
+      manager.destroyInstance(id)
+    } finally { rmSync(directory, { recursive: true, force: true }) }
+  })
+
+  it('opens a web page externally and rejects unsupported browser URLs', async () => {
+    manager.createInstance('external-url')
+    const instance = (manager as any).instances.get('external-url')
+    instance.currentUrl = 'https://example.com/report?q=1'
+    await manager.openInDefaultBrowser('external-url')
+    expect(mockShellOpenExternal).toHaveBeenCalledWith('https://example.com/report?q=1')
+
+    instance.currentUrl = 'about:blank'
+    await expect(manager.openInDefaultBrowser('external-url')).rejects.toThrow('cannot be opened externally')
+    expect(mockShellOpenExternal).toHaveBeenCalledTimes(1)
   })
 
   it('creates and lists instances', () => {
@@ -681,30 +709,37 @@ describe('BrowserPaneManager', () => {
     expect(instance.window.focus.mock.calls.length).toBe(focusCallsBeforeReady)
   })
 
-  it('user close hides window and keeps instance alive', () => {
+  it('user close removes the browser instance instead of hiding it', () => {
     manager.createInstance('h1')
     const instance = (manager as any).instances.get('h1')
 
     const closeEvent = { preventDefault: mock(() => {}) }
     instance.window._emit('close', closeEvent)
-
-    expect(closeEvent.preventDefault).toHaveBeenCalled()
-    expect(instance.window.hide).toHaveBeenCalled()
-    expect(manager.listInstances()).toHaveLength(1)
-    expect(manager.listInstances()[0].isVisible).toBe(false)
-  })
-
-  it('does not intercept close when destroy is explicit', () => {
-    manager.createInstance('h-explicit-destroy')
-    const instance = (manager as any).instances.get('h-explicit-destroy')
-
-    ;(manager as any).destroyingIds.add('h-explicit-destroy')
-
-    const closeEvent = { preventDefault: mock(() => {}) }
-    instance.window._emit('close', closeEvent)
+    instance.window._emit('closed')
 
     expect(closeEvent.preventDefault).not.toHaveBeenCalled()
     expect(instance.window.hide).not.toHaveBeenCalled()
+    expect(manager.listInstances()).toHaveLength(0)
+  })
+
+  it('toolbar hide keeps the browser instance available', async () => {
+    manager.createInstance('h-ipc-hide')
+    manager.registerToolbarIpc()
+    const hideRegistration = (
+      mockIpcMainHandle.mock.calls as unknown as Array<[
+        string,
+        (_event: unknown, instanceId: string) => Promise<void>,
+      ]>
+    ).find(([channel]) => channel === 'browser-toolbar:hide')
+    expect(hideRegistration).toBeTruthy()
+    if (!hideRegistration) throw new Error('Expected browser-toolbar:hide IPC registration')
+
+    const instance = (manager as any).instances.get('h-ipc-hide')
+    await hideRegistration[1]({}, 'h-ipc-hide')
+
+    expect(instance.window.hide).toHaveBeenCalledTimes(1)
+    expect(manager.listInstances()).toHaveLength(1)
+    expect(manager.listInstances()[0].isVisible).toBe(false)
   })
 
   it('still destroys instance when cleanup throws', () => {

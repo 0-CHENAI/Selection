@@ -61,6 +61,7 @@ const EXPECTED_CHANNELS: string[] = [
   'browser-pane:list',
   'browser-pane:navigate',
   'browser-pane:open-html-file',
+  'browser-pane:open-in-default-browser',
   'browser-pane:reload',
   'browser-pane:removed',
   'browser-pane:screenshot',

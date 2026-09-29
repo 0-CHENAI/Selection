@@ -7,6 +7,7 @@
 
 import { useCallback, useEffect, useMemo, useRef } from 'react'
 import { useAtom, useAtomValue, useSetAtom } from 'jotai'
+import { useTranslation } from 'react-i18next'
 import * as Icons from 'lucide-react'
 import { Spinner } from '@craft-agent/ui'
 import {
@@ -31,7 +32,6 @@ import { useAppShellContext } from '@/context/AppShellContext'
 import { BrowserTabBadge } from './BrowserTabBadge'
 import type { BrowserInstanceInfo } from '../../../shared/types'
 import { getHostname } from './utils'
-import { navigate, routes } from '@/lib/navigate'
 
 const DEFAULT_MAX_VISIBLE_BADGES = 3
 
@@ -46,6 +46,7 @@ export function BrowserTabStrip({
   instancesOverride,
   maxVisibleBadges = DEFAULT_MAX_VISIBLE_BADGES,
 }: BrowserTabStripProps) {
+  const { t } = useTranslation()
   // Filter the badge strip to the workspace currently in focus. Remote-connected
   // workspaces have a different `remoteWorkspaceId` (what the remote agent
   // stamps onto its tabs) than the local `activeWorkspaceId` (what locally-
@@ -193,11 +194,12 @@ export function BrowserTabStrip({
     })
   }, [instancesOverride, setActiveInstanceId])
 
-  const openSessionUsingWindow = useCallback((instance: BrowserInstanceInfo) => {
-    const sessionId = instance.boundSessionId ?? instance.ownerSessionId
-    if (!sessionId) return
-    navigate(routes.view.allSessions(sessionId))
-  }, [])
+  const openInDefaultBrowser = useCallback((instance: BrowserInstanceInfo) => {
+    if (instancesOverride) return
+    void window.electronAPI.browserPane.openInDefaultBrowser(instance.id).catch((error) => {
+      console.warn(`[BrowserTabStrip] Failed to open browser page externally ${instance.id}:`, error)
+    })
+  }, [instancesOverride])
 
   const terminateBrowserWindow = useCallback((instance: BrowserInstanceInfo) => {
     if (!instancesOverride) {
@@ -221,11 +223,7 @@ export function BrowserTabStrip({
 
   const renderBrowserActions = useCallback((instance: BrowserInstanceInfo) => {
     const canUseLiveWindowActions = !instancesOverride
-    const targetSessionId = instance.boundSessionId ?? instance.ownerSessionId
-    const canOpenSession = !!targetSessionId
-    const openSessionLabel = instance.agentControlActive
-      ? 'Open Session Using this Window'
-      : 'Open Session Which Used this Window'
+    const canOpenExternally = canUseLiveWindowActions && /^(https?:|selection-html:)/i.test(instance.url)
 
     return (
       <>
@@ -234,15 +232,15 @@ export function BrowserTabStrip({
           onSelect={() => focusBrowserWindow(instance)}
         >
           <Icons.Monitor className="h-3.5 w-3.5" />
-          Show Browser Window
+          {t('browser.showWindow')}
         </StyledDropdownMenuItem>
 
         <StyledDropdownMenuItem
-          disabled={!canOpenSession}
-          onSelect={() => openSessionUsingWindow(instance)}
+          disabled={!canOpenExternally}
+          onSelect={() => openInDefaultBrowser(instance)}
         >
-          <Icons.PanelRightOpen className="h-3.5 w-3.5" />
-          {openSessionLabel}
+          <Icons.ExternalLink className="h-3.5 w-3.5" />
+          {t('browser.openInDefaultBrowser')}
         </StyledDropdownMenuItem>
 
         <StyledDropdownMenuSeparator />
@@ -253,11 +251,11 @@ export function BrowserTabStrip({
           onSelect={() => terminateBrowserWindow(instance)}
         >
           <Icons.XCircle className="h-3.5 w-3.5" />
-          Terminate Browser
+          {t('browser.closeWindowEntirely')}
         </StyledDropdownMenuItem>
       </>
     )
-  }, [instancesOverride, focusBrowserWindow, openSessionUsingWindow, terminateBrowserWindow])
+  }, [instancesOverride, focusBrowserWindow, openInDefaultBrowser, terminateBrowserWindow, t])
 
   if (orderedInstances.length === 0) return null
 
@@ -294,7 +292,7 @@ export function BrowserTabStrip({
           <StyledDropdownMenuContent align="end" minWidth="min-w-64">
             {overflow.map((instance) => {
               const hostname = getHostname(instance.url)
-              const displayLabel = instance.title.trim() || hostname || 'Local File'
+              const displayLabel = instance.title.trim() || hostname || t('browser.localFile')
               return (
                 <DropdownMenuSub key={instance.id}>
                   <StyledDropdownMenuSubTrigger>

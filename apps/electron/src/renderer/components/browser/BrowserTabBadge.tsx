@@ -8,6 +8,7 @@
 import { forwardRef, useEffect, useState, type ButtonHTMLAttributes } from 'react'
 import * as Icons from 'lucide-react'
 import { Spinner } from '@craft-agent/ui'
+import { useTranslation } from 'react-i18next'
 import type { BrowserInstanceInfo } from '../../../shared/types'
 import { getHostname, getThemeLuminance } from './utils'
 
@@ -20,8 +21,9 @@ export const BrowserTabBadge = forwardRef<HTMLButtonElement, BrowserTabBadgeProp
   { instance, isActive: _isActive, className, style, ...buttonProps },
   ref
 ) {
+  const { t } = useTranslation()
   const hostname = getHostname(instance.url)
-  const displayLabel = instance.title.trim() || hostname || 'Local File'
+  const displayLabel = instance.title.trim() || hostname || t('browser.localFile')
   const themedBackground = instance.themeColor || undefined
 
   const themeLuminance = instance.themeColor ? getThemeLuminance(instance.themeColor) : null
@@ -56,7 +58,7 @@ export const BrowserTabBadge = forwardRef<HTMLButtonElement, BrowserTabBadgeProp
         transition: 'background-color 200ms ease, border-color 200ms ease',
         ...style,
       }}
-      aria-label={`${displayLabel} actions`}
+      aria-label={t('browser.windowActions', { name: displayLabel })}
       {...buttonProps}
     >
       <span className={`shrink-0 flex items-center justify-center ${isDarkThemeColor ? 'h-3.5 w-3.5' : 'h-3 w-3'}`}>
