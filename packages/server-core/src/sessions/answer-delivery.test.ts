@@ -1,14 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test'
-import { mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { hostname, tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { basename, join } from 'node:path'
 import type { AgentEvent } from '@craft-agent/core'
 import { storedToMessage } from '@craft-agent/core'
 import type { AnswerDeliveryControl } from '@craft-agent/shared/agent/backend/types'
 import { createTypedError } from '@craft-agent/shared/agent/errors'
 import { getSessionPath, loadSession as loadStoredSession } from '@craft-agent/shared/sessions'
 import { createManagedSession, loadPiTurnAnchors, SessionManager } from './SessionManager'
-import { ArtifactVersions } from '../reliability/artifact-versions'
+import { ArtifactVersions, sameArtifactLocation } from '../reliability/artifact-versions'
 import { ConversationArtifactVersions } from '../reliability/conversation-artifact-versions'
 
 const explanation = '蒙提霍尔问题\n\n1. 三扇门，主持人知道奖品位置。\n2. 主持人打开一扇有羊的门。\n\n| 策略 | 胜率 |\n| --- | --- |\n| 换门 | 2/3 |\n| 不换 | 1/3 |'
@@ -66,7 +66,7 @@ describe('explicit answer delivery lifecycle (#330)', () => {
     managed.agent = agent as never
     await manager.sendMessage(managed.id, '更新文件')
     const update = events.find(event => event.type === 'text_complete' && event.answerCommitted)
-    expect(update?.artifactVersions?.map((ref: { path: string }) => ref.path.split('/').pop()).sort()).toEqual(names.sort())
+    expect(update?.artifactVersions?.map((ref: { path: string }) => basename(ref.path)).sort()).toEqual(names.sort())
     expect(update?.artifactVersions).toHaveLength(names.length)
     expect(modelCalls).toBe(0)
     expect(loadStoredSession(root, managed.id)?.messages.map(storedToMessage).at(-1)?.artifactVersions).toEqual(update.artifactVersions)
@@ -85,7 +85,8 @@ describe('explicit answer delivery lifecycle (#330)', () => {
     })
     await manager.sendMessage(managed.id, '修改文档')
     const update = events.find(event => event.type === 'text_complete' && event.answerCommitted)
-    expect(update?.artifactVersions?.map((ref: { path: string }) => ref.path)).toEqual([realpathSync(file)])
+    expect(update?.artifactVersions).toHaveLength(1)
+    expect(sameArtifactLocation(update!.artifactVersions![0]!.path, file)).toBe(true)
     expect(update?.artifactVersions?.[0]?.change).toBe('modified')
   })
 
@@ -102,7 +103,8 @@ describe('explicit answer delivery lifecycle (#330)', () => {
       })
       await manager.sendMessage(managed.id, '将文档保存到指定目录')
       const answer = events.find(event => event.type === 'text_complete' && event.answerCommitted)
-      expect(answer?.artifactVersions).toMatchObject([{ path: realpathSync(file), change: 'created' }])
+      expect(answer?.artifactVersions).toMatchObject([{ change: 'created' }])
+      expect(sameArtifactLocation(answer!.artifactVersions![0]!.path, file)).toBe(true)
     } finally { rmSync(destination, { recursive: true, force: true }) }
   })
 
@@ -124,8 +126,9 @@ describe('explicit answer delivery lifecycle (#330)', () => {
       })
       await manager.sendMessage(managed.id, '生成并修改指定目录中的文件')
       const refs = events.find(event => event.type === 'text_complete' && event.answerCommitted)?.artifactVersions
-      expect(refs?.map((ref: { path: string; change: string }) => [ref.path, ref.change]))
-        .toEqual([[realpathSync(created), 'created'], [realpathSync(edited), 'modified']])
+      expect(refs?.map((ref: { change: string }) => ref.change)).toEqual(['created', 'modified'])
+      expect(sameArtifactLocation(refs![0]!.path, created)).toBe(true)
+      expect(sameArtifactLocation(refs![1]!.path, edited)).toBe(true)
     } finally { rmSync(destination, { recursive: true, force: true }) }
   })
 
@@ -251,7 +254,8 @@ describe('explicit answer delivery lifecycle (#330)', () => {
     const event = events.find(event => event.type === 'text_complete' && event.answerCommitted)!
     expect(event.artifactVersions).toEqual(answer.artifactVersions)
     expect(answer.artifactVersions).toHaveLength(1)
-    expect(answer.artifactVersions![0]).toMatchObject({ path: realpathSync(file), ordinal: 2, change: 'modified' })
+    expect(answer.artifactVersions![0]).toMatchObject({ ordinal: 2, change: 'modified' })
+    expect(sameArtifactLocation(answer.artifactVersions![0]!.path, file)).toBe(true)
     const versions = new ArtifactVersions(join(root, 'artifacts', 'versions'), hostname(), managed.workspace.id)
     const record = versions.findByPath(file)!
     expect(record.versions).toHaveLength(2)
